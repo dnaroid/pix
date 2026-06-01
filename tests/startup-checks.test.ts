@@ -49,20 +49,20 @@ describe("startup availability checks", () => {
 			errors: [{ path: "/Users/test/.pi/agent/extensions/pi-tools-suite/index.ts", error: "boom" }],
 		}));
 
-		assert.deepEqual(issues, [{
-			kind: "error",
-			message: "pi-tools-suite extension failed to load: boom",
-		}]);
-	});
+	assert.deepEqual(issues, [{
+		kind: "error",
+		message: "Pix bundled pi-tools-suite failed to load: boom. Check write access to ~/.pi/agent/extensions and the bundled external/pi-tools-suite payload.",
+	}]);
+});
 
 	it("reports a missing pi-tools-suite extension", () => {
 		const issues = checkPiToolsSuiteExtensionAvailability(extensionResult());
 
-		assert.deepEqual(issues, [{
-			kind: "error",
-			message: "pi-tools-suite extension is not loaded from ~/.pi/agent/extensions/pi-tools-suite. Check that Pix can install or link the bundled suite there.",
-		}]);
-	});
+	assert.deepEqual(issues, [{
+		kind: "error",
+		message: "Pix bundled pi-tools-suite is not loaded from ~/.pi/agent/extensions/pi-tools-suite. Check write access to ~/.pi/agent/extensions and the bundled external/pi-tools-suite payload.",
+	}]);
+});
 });
 
 function extensionResult(overrides: Partial<Pick<LoadExtensionsResult, "extensions" | "errors">> = {}): LoadExtensionsResult {

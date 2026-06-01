@@ -35,13 +35,13 @@ export function checkPiToolsSuiteExtensionAvailability(extensionsResult: LoadExt
 	if (matchingErrors.length > 0) {
 		return matchingErrors.map((error) => ({
 			kind: "error" as const,
-			message: `pi-tools-suite extension failed to load: ${error.error}`,
+			message: `Pix bundled pi-tools-suite failed to load: ${error.error}. Check write access to ~/.pi/agent/extensions and the bundled external/pi-tools-suite payload.`,
 		}));
 	}
 
 	return [{
 		kind: "error",
-		message: "pi-tools-suite extension is not loaded from ~/.pi/agent/extensions/pi-tools-suite. Check that Pix can install or link the bundled suite there.",
+		message: "Pix bundled pi-tools-suite is not loaded from ~/.pi/agent/extensions/pi-tools-suite. Check write access to ~/.pi/agent/extensions and the bundled external/pi-tools-suite payload.",
 	}];
 }
 
