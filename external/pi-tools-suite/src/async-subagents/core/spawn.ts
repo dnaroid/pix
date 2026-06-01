@@ -282,7 +282,7 @@ export function spawnAgent(
 		},
 	});
 
-	proc.once("exit", (code, signal) => {
+	proc.once("close", (code, signal) => {
 		writeSuppressedRpcEventSummary(transcriptStream, suppressedRpcEventCounts);
 		const exitCode = resolveAgentExitCode({
 			timedOut,
