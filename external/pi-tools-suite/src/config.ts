@@ -3,6 +3,8 @@ import { homedir } from "node:os";
 import { dirname, join, parse, resolve } from "node:path";
 import { parse as parseJsonc } from "jsonc-parser";
 
+import { DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC } from "./default-pi-tools-suite-config.js";
+
 export interface PiToolsSuiteConfig {
 	enabled: boolean;
 	disabledModules: string[];
@@ -26,62 +28,20 @@ export function getPiToolsSuiteUserConfigPath(homeDir = homedir()): string {
 	return join(homeDir, ".config", "pi", "pi-tools-suite.jsonc");
 }
 
-function defaultUserConfigContent(moduleNames: readonly string[]): string {
-	const disabledModuleLines = moduleNames.map((name) => `    // "${name}",`).join("\n");
-	return `{
-  // Disable individual pi-tools-suite modules by uncommenting entries below.
-  // Later project config in .pi/pi-tools-suite.jsonc can re-enable modules.
-  "disabledModules": [
-${disabledModuleLines}
-  ],
-
-  // Dynamic Context Pruning (compress module) config lives under dcp.
-  // Legacy dcp.jsonc files are still read, but this section wins at the
-  // same global/env/project layer.
-  // "dcp": {
-  //   "compress": {
-  //     "minContextPercent": 0.25,
-  //     "nudgeFrequency": 1,
-  //     "iterationNudgeThreshold": 8
-  //   }
-  // },
-
-  // Async-subagents config also lives in this file under asyncSubagents.
-  // Run /subagent-preset init to insert the bundled full sample, or uncomment
-  // this minimal example when only vision masks need an override.
-  // "asyncSubagents": {
-  //   "vision": {
-  //     "blindModelPatterns": ["zai/glm*", "glm*", "*/glm*"]
-  //   }
-  // },
-
-  // User slash commands backed by saved prompt templates. Edit through
-  // /prompt-commands, then run entries as normal slash commands.
-  "promptCommands": {
-    "commands": {
-      // "review": {
-      //   "description": "Run a focused code review prompt",
-      //   "prompt": "Review the current change. Focus on correctness and risks."
-      // }
-    }
-  }
-}
-`;
-}
-
-function ensureUserConfig(filePath: string, moduleNames: readonly string[]): void {
+function ensureUserConfig(filePath: string): void {
 	if (existsSync(filePath)) return;
 	try {
 		mkdirSync(dirname(filePath), { recursive: true });
-		writeFileSync(filePath, defaultUserConfigContent(moduleNames));
-	} catch {
+		writeFileSync(filePath, DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC, { encoding: "utf8", flag: "wx" });
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "EEXIST") return;
 		// Config creation is best-effort; loading should still work in read-only homes.
 	}
 }
 
-export function ensurePiToolsSuiteUserConfig(moduleNames: readonly string[] = [], options: { homeDir?: string } = {}): string {
+export function ensurePiToolsSuiteUserConfig(_moduleNames: readonly string[] = [], options: { homeDir?: string } = {}): string {
 	const filePath = getPiToolsSuiteUserConfigPath(options.homeDir);
-	ensureUserConfig(filePath, moduleNames);
+	ensureUserConfig(filePath);
 	return filePath;
 }
 
@@ -198,7 +158,7 @@ export function loadPiToolsSuiteConfig(moduleNames: readonly string[], options: 
 	const config: MutableConfig = { enabled: true, disabledModules: new Set() };
 	const userConfigPath = getPiToolsSuiteUserConfigPath(options.homeDir);
 
-	ensureUserConfig(userConfigPath, moduleNames);
+	ensureUserConfig(userConfigPath);
 	mergeConfigLayer(config, readJsonc(userConfigPath), knownModules);
 
 	const piConfigDir = env.PI_CONFIG_DIR;

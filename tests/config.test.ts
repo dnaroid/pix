@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -16,6 +16,7 @@ const {
 	applyOutputFilters,
 	compileOutputFilterPatterns,
 	stripDcpDisplayMetadata,
+	getPixConfigPath,
 	loadPixConfig,
 	outputFiltersRemoveDcpIdMetadataLine,
 	resolveColor,
@@ -28,26 +29,35 @@ const {
 type ToolRendererConfig = import("../src/config.js").ToolRendererConfig;
 
 describe("config helpers", () => {
-	it("loads default config when no file exists", () => {
+	it("resolves the user config path from a supplied home directory", () => {
+		assert.equal(getPixConfigPath(testHome), join(testHome, ".config", "pi", "pix.jsonc"));
+	});
+
+	it("creates and loads default config when no file exists", () => {
 		rmSync(testConfigDir, { recursive: true, force: true });
 		const config = loadPixConfig();
+		assert.equal(existsSync(testConfigPath), true);
+		const created = readFileSync(testConfigPath, "utf8");
+		assert.match(created, /pix renderer configuration/u);
+		assert.match(created, /"sessionTitle"/u);
 		assert.deepEqual([
 			resolveToolRule("ls", config.toolRenderer),
 			resolveToolRule("grep", config.toolRenderer),
 			resolveToolRule("ast_scan", config.toolRenderer),
 			resolveToolRule("apply_patch", config.toolRenderer),
 		], [
-			{ previewLines: 3, direction: "head", color: "success" },
-			{ previewLines: 3, direction: "head", color: "toolSearch" },
-			{ previewLines: 3, direction: "head", color: "toolSearch" },
-			{ previewLines: 1, direction: "head", color: "toolMutation", defaultExpanded: true, compactHidden: true },
+			{ previewLines: 0, direction: "head", color: "success" },
+			{ previewLines: 0, direction: "head", color: "toolSearch" },
+			{ previewLines: 0, direction: "head", color: "toolSearch" },
+			{ previewLines: 9999, direction: "head", color: "toolMutation", defaultExpanded: true },
 		]);
-		assert.equal(config.promptEnhancer.modelRef, "zai/gpt-5-turbo");
-		assert.deepEqual(config.modelColors.rules, {});
+		assert.equal(config.promptEnhancer.modelRef, "zai/glm-5-turbo");
+		assert.equal(config.modelColors.rules["zai/*"], "success");
 		assert.equal(config.iconTheme.name, "nerdFont");
-		assert.deepEqual(Object.keys(config.dictation.languages), ["en"]);
+		assert.deepEqual(Object.keys(config.dictation.languages), ["en", "ru"]);
 		assert.equal(config.dictation.language, "en");
 		assert.equal(config.dictation.languages.en?.label, "English");
+		assert.equal(config.dictation.languages.ru?.label, "Russian");
 	});
 
 	it("loads jsonc config from HOME, partial config, and invalid fallback", () => {
@@ -88,17 +98,17 @@ describe("config helpers", () => {
 			"outputFilters": { "patterns": ["x"] }
 		}`);
 		const partial = loadPixConfig();
-		assert.deepEqual(resolveToolRule("valid", partial.toolRenderer), { previewLines: 3, direction: "tail", color: "muted" });
-		assert.deepEqual(resolveToolRule("empty", partial.toolRenderer), { previewLines: 3, direction: "head", color: "muted" });
+		assert.deepEqual(resolveToolRule("valid", partial.toolRenderer), { previewLines: 0, direction: "tail", color: "toolTitle" });
+		assert.deepEqual(resolveToolRule("empty", partial.toolRenderer), { previewLines: 0, direction: "head", color: "toolTitle" });
 		assert.deepEqual(partial.outputFilters.patterns, ["x"]);
-		assert.equal(partial.promptEnhancer.modelRef, "zai/gpt-5-turbo");
-		assert.deepEqual(partial.modelColors.rules, {});
+		assert.equal(partial.promptEnhancer.modelRef, "zai/glm-5-turbo");
+		assert.equal(partial.modelColors.rules["zai/*"], "success");
 		assert.equal(partial.iconTheme.name, "nerdFont");
-		assert.deepEqual(Object.keys(partial.dictation.languages), ["en"]);
+		assert.deepEqual(Object.keys(partial.dictation.languages), ["en", "ru"]);
 
 		writeFileSync(testConfigPath, "{");
-		assert.equal(loadPixConfig().toolRenderer.default.previewLines, 3);
-		assert.equal(loadPixConfig().promptEnhancer.modelRef, "zai/gpt-5-turbo");
+		assert.equal(loadPixConfig().toolRenderer.default.previewLines, 0);
+		assert.equal(loadPixConfig().promptEnhancer.modelRef, "zai/glm-5-turbo");
 	});
 
 	it("persists selected dictation language in JSONC config", () => {

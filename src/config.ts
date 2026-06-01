@@ -9,6 +9,7 @@ import {
 	resolveAppIconThemeNameFromEnv,
 	type AppIconThemeName,
 } from "./app/icons.js";
+import { DEFAULT_PIX_CONFIG_JSONC } from "./default-pix-config.js";
 
 export type ToolRendererRule = {
 	previewLines?: number;
@@ -69,36 +70,39 @@ export type PixConfig = {
 	dictation: DictationConfig;
 };
 
-const PIX_CONFIG_PATH = join(homedir(), ".config", "pi", "pix.jsonc");
+export function getPixConfigPath(homeDir = homedir()): string {
+	return join(homeDir, ".config", "pi", "pix.jsonc");
+}
+
+const PIX_CONFIG_PATH = getPixConfigPath();
 
 const DEFAULT_TOOL_RENDERER: ToolRendererConfig = {
 	default: {
-		previewLines: 3,
+		previewLines: 0,
 		direction: "head",
-		color: "muted",
+		color: "toolTitle",
 	},
 	tools: {
 		bash: { previewLines: 6, direction: "tail", color: "warning" },
 		Bash: { previewLines: 6, direction: "tail", color: "warning" },
 		shell: { previewLines: 6, direction: "tail", color: "warning" },
 		shell_command: { previewLines: 6, direction: "tail", color: "warning" },
-		"repo_*": { previewLines: 6, direction: "tail", color: "warning" },
-		apply_patch: { previewLines: 1, direction: "head", color: "toolMutation", defaultExpanded: true, compactHidden: true },
-		edit: { previewLines: 1, direction: "head", color: "toolMutation", defaultExpanded: true, compactHidden: true },
-		Edit: { previewLines: 1, direction: "head", color: "toolMutation", defaultExpanded: true, compactHidden: true },
-		write: { previewLines: 1, direction: "head", color: "toolMutation", defaultExpanded: true, compactHidden: true },
-		Write: { previewLines: 1, direction: "head", color: "toolMutation", defaultExpanded: true, compactHidden: true },
-		ast_apply: { previewLines: 1, direction: "head", color: "toolMutation", defaultExpanded: true, compactHidden: true },
+		"repo_*": { previewLines: 6, direction: "head", color: "warning" },
+		apply_patch: { previewLines: 9999, direction: "head", color: "toolMutation", defaultExpanded: true },
+		edit: { previewLines: 9999, direction: "head", color: "toolMutation", defaultExpanded: true },
+		Edit: { previewLines: 9999, direction: "head", color: "toolMutation", defaultExpanded: true },
+		write: { previewLines: 9999, direction: "head", color: "toolMutation", defaultExpanded: true },
+		Write: { previewLines: 9999, direction: "head", color: "toolMutation", defaultExpanded: true },
+		ast_apply: { previewLines: 9999, direction: "head", color: "toolMutation", defaultExpanded: true },
 		Read: { previewLines: 0, direction: "head", color: "success" },
 		read: { previewLines: 0, direction: "head", color: "success" },
-		ast_grep: { previewLines: 12, direction: "head", color: "toolSearch" },
-		compress: { previewLines: 6, direction: "head", color: "muted" },
+		ast_grep: { previewLines: 6, direction: "head", color: "toolSearch" },
+		compress: { previewLines: 0, direction: "head", color: "info" },
 		web_search: { previewLines: 6, direction: "tail", color: "toolSearch" },
 		web_fetch: { previewLines: 12, direction: "tail", color: "toolSearch" },
 		question: { previewLines: 6, direction: "tail", color: "accent" },
-		subagents: { previewLines: 12, direction: "tail", color: "muted" },
-		todo: { compactHidden: true, color: "accent" },
-		thinking: { previewLines: 0, direction: "head", color: "accent" },
+		subagents: { previewLines: 0, direction: "tail", color: "muted" },
+		todo: { hidden: true, color: "accent" },
 		ls: { color: "success" },
 		LS: { color: "success" },
 		grep: { color: "toolSearch" },
@@ -106,7 +110,7 @@ const DEFAULT_TOOL_RENDERER: ToolRendererConfig = {
 		find: { color: "toolSearch" },
 		Glob: { color: "toolSearch" },
 		"ast_*": { color: "toolSearch" },
-		skill: { color: "toolMutation" },
+		skill: { previewLines: 0, color: "toolSearch" },
 	},
 };
 
@@ -115,11 +119,16 @@ const DEFAULT_OUTPUT_FILTERS: OutputFiltersConfig = {
 };
 
 const DEFAULT_PROMPT_ENHANCER: PromptEnhancerConfig = {
-	modelRef: "zai/gpt-5-turbo",
+	modelRef: "zai/glm-5-turbo",
 };
 
 const DEFAULT_MODEL_COLORS: ModelColorsConfig = {
-	rules: {},
+	rules: {
+		"zai/*": "success",
+		"openai-codex/*": "modelOpenAI",
+		"antigravity/*": "warning",
+		"antigravity/antigravity-claude-*": "error",
+	},
 };
 
 const DEFAULT_ICON_THEME: IconThemeConfig = {
@@ -133,6 +142,11 @@ const DEFAULT_DICTATION: DictationConfig = {
 			dirName: "vosk-model-small-en-us-0.15",
 			url: "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip",
 			label: "English",
+		},
+		ru: {
+			dirName: "vosk-model-small-ru-0.22",
+			url: "https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip",
+			label: "Russian",
 		},
 	},
 };
@@ -304,10 +318,30 @@ function extractToolRendererRule(value: unknown): ToolRendererRule | undefined {
 	return Object.keys(rule).length > 0 ? rule : undefined;
 }
 
+function isFileExistsError(error: unknown): boolean {
+	return typeof error === "object" && error !== null && "code" in error
+		&& (error as { code?: unknown }).code === "EEXIST";
+}
+
+function ensurePixConfigExists(configPath: string): void {
+	if (existsSync(configPath)) return;
+
+	mkdirSync(dirname(configPath), { recursive: true });
+	try {
+		writeFileSync(configPath, DEFAULT_PIX_CONFIG_JSONC, { encoding: "utf8", flag: "wx" });
+	} catch (error) {
+		if (isFileExistsError(error)) return;
+		throw error;
+	}
+}
+
 export function loadPixConfig(): PixConfig {
 	const configPath = PIX_CONFIG_PATH;
 
-	if (!existsSync(configPath)) {
+	try {
+		ensurePixConfigExists(configPath);
+	} catch (error) {
+		process.stderr.write(`[pix] Failed to create ${configPath}: ${error instanceof Error ? error.message : String(error)}\n`);
 		return defaultPixConfig();
 	}
 

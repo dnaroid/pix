@@ -107,6 +107,6 @@ function renderAssistantLines(text: string, width: number, options: Conversation
 }
 
 function displayAssistantText(text: string, outputFilters: readonly RegExp[], suppressPendingDcpIdMetadata: boolean): string {
-	const filtered = stripDcpDisplayMetadata(applyOutputFilters(text, outputFilters));
+	const filtered = stripDcpDisplayMetadata(applyOutputFilters(text, outputFilters)).trimEnd();
 	return suppressPendingDcpIdMetadata ? suppressPendingDcpIdMetadataLine(filtered) : filtered;
 }

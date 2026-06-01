@@ -69,7 +69,6 @@ export function getSlashCommandMatches(commands: readonly SlashCommand[], query:
 	const items: FuzzySearchItem<SlashCommand>[] = commands.map((command) => ({
 		value: command,
 		label: command.name,
-		...(command.keywords === undefined ? {} : { keywords: command.keywords }),
 	}));
 	return fuzzySearch(items, query, limit === undefined ? {} : { limit });
 }

@@ -483,6 +483,7 @@ describe.serial("extension entrypoint", () => {
 		const pi = new FakePi();
 		registerExtension(pi as any);
 		const cwd = tempDir();
+		isolateSubagentConfig(cwd);
 		const piScript = path.join(tempDir(), "pi.js");
 		writeFile(piScript, `
 process.stdin.on("data", () => {

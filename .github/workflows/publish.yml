@@ -30,9 +30,11 @@ jobs:
         with:
           node-version-file: .node-version
           cache: npm
+      - uses: oven-sh/setup-bun@v2
       - uses: jdx/mise-action@v2
       - run: npm ci --ignore-scripts
       - run: npm run check
+      - run: npm run test:tools-suite
       - run: npm run build:pix
 
   package-smoke-test:

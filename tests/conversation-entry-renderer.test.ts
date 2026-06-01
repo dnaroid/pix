@@ -62,6 +62,19 @@ describe("renderConversationEntry", () => {
 		assert.doesNotMatch(rendered, /dcp-id|dcp-block-id|m064|b4/u);
 	});
 
+	it("keeps assistant height stable while a trailing DCP marker line streams", () => {
+		const texts = [
+			"answer\n",
+			"answer\n[dcp-id]: # (m064",
+			"answer\n[dcp-id]: # (m064)",
+		];
+
+		for (const [index, text] of texts.entries()) {
+			const lines = renderConversationEntry({ id: `assistant-dcp-stream-${index}`, kind: "assistant", text }, 80, renderOptions);
+			assert.deepEqual(lines.map((line) => line.text), ["answer"]);
+		}
+	});
+
 	it("formats assistant markdown tables before wrapping", () => {
 		const lines = renderConversationEntry({
 			id: "assistant-table",

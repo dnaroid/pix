@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 
-import { loadPiToolsSuiteConfig } from "../src/config.js";
+import { getPiToolsSuiteUserConfigPath, loadPiToolsSuiteConfig } from "../src/config.js";
+import { DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC } from "../src/default-pi-tools-suite-config.js";
 
 const MODULES = ["terminal-bell", "usage", "compress"];
 
@@ -12,6 +13,11 @@ function tempDir(): string {
 }
 
 describe("pi-tools-suite config", () => {
+	test("resolves the user config path from a supplied home directory", () => {
+		const homeDir = tempDir();
+		expect(getPiToolsSuiteUserConfigPath(homeDir)).toBe(join(homeDir, ".config", "pi", "pi-tools-suite.jsonc"));
+	});
+
 	test("disables modules from config lists and maps", () => {
 		const homeDir = tempDir();
 		const cwd = tempDir();
@@ -72,10 +78,11 @@ describe("pi-tools-suite config", () => {
 
 		expect(existsSync(configPath)).toBe(true);
 		const content = readFileSync(configPath, "utf8");
+		expect(content).toBe(DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC);
 		expect(content).toContain('"disabledModules"');
 		expect(content).toContain('// "terminal-bell",');
-		expect(content).not.toContain('"modules"');
-		expect(content).not.toContain('"extensions"');
+		expect(content).toContain('"asyncSubagents"');
+		expect(content).toContain('"promptCommands"');
 	});
 
 });

@@ -86,6 +86,14 @@ describe("command registry", () => {
 
 		assert.equal(match?.value.name, "new");
 	});
+
+	it("matches slash command fuzzy queries against command names only", () => {
+		const commands = createSlashCommands(noopActions(), host());
+
+		assert.equal(commands.find((command) => command.name === "hotkeys")?.keywords?.includes("help"), true);
+		assert.equal(getSlashCommandMatches(commands, "help").some((match) => match.value.name === "hotkeys"), false);
+		assert.equal(getSlashCommandMatches(commands, "hot")[0]?.value.name, "hotkeys");
+	});
 });
 
 function host(): CommandControllerHost {
