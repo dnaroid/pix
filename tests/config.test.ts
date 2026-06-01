@@ -175,6 +175,13 @@ describe("config helpers", () => {
 		assert.equal(stripDcpDisplayMetadata("answer\n[dcp-id]: # (m064"), "answer");
 	});
 
+	it("removes whole DCP metadata lines without leaving blank gaps", () => {
+		assert.equal(stripDcpDisplayMetadata("before\n[dcp-id]: # (m064)\nafter"), "before\nafter");
+		assert.equal(stripDcpDisplayMetadata("[dcp-id]: # (m064)\nafter"), "after");
+		assert.equal(stripDcpDisplayMetadata("before\n  [dcp-id]: # (m064)\nafter"), "before\nafter");
+		assert.equal(stripDcpDisplayMetadata("before\n<dcp-id>m064</dcp-id>\nafter"), "before\nafter");
+	});
+
 	it("resolves exact, wildcard, default, hidden, and color rules", () => {
 		const config: ToolRendererConfig = {
 			default: { previewLines: 2, direction: "head", color: "muted", defaultExpanded: true, hidden: true },

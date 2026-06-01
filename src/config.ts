@@ -145,8 +145,9 @@ const DCP_XML_PAIRED_TAG_RE = /<dcp[^>]*>[\s\S]*?<\/dcp[^>]*>/gi;
 const DCP_XML_OPEN_TAG_TO_END_RE = /<dcp[^>]*>[\s\S]*$/gi;
 const DCP_XML_UNPAIRED_TAG_RE = /<\/?dcp[^>]*>/gi;
 const DCP_MARKDOWN_REFERENCE_RE = /[ \t]*\[dcp(?:-[a-z0-9-]+)?\]:[ \t]*#(?:[ \t]+\([^\n]*\))?[ \t]*/gi;
-const DCP_MARKDOWN_REFERENCE_LINE_RE = /^\[dcp(?:-[a-z0-9-]+)?\]:[ \t]*#(?:[ \t]+\([^\n]*\))?[ \t]*$/i;
+const DCP_MARKDOWN_REFERENCE_LINE_RE = /^[ \t]*\[dcp(?:-[a-z0-9-]+)?\]:[ \t]*#(?:[ \t]+\([^\n]*\))?[ \t]*$/i;
 const DCP_MARKDOWN_REFERENCE_PENDING_RE = /^\[d(?:c(?:p(?:-[a-z0-9-]*)?)?)?(?:\]?(?::[ \t]*#?(?:[ \t]*\([^\)\n]*)?)?)?$/i;
+const DCP_XML_METADATA_LINE_RE = /^[ \t]*<dcp[^>]*>(?:[\s\S]*?<\/dcp[^>]*>)?[ \t]*$/i;
 const DCP_DISPLAY_QUICK_CHECK_RE = /<\/?d(?:c(?:p)?)?|\[d(?:c(?:p)?)?/i;
 
 function parseJsonc(text: string): unknown {
@@ -377,10 +378,12 @@ export function compileOutputFilterPatterns(patterns: readonly string[]): RegExp
 export function stripDcpDisplayMetadata(text: string): string {
 	if (text.length === 0 || !DCP_DISPLAY_QUICK_CHECK_RE.test(text)) return text;
 
+	let cleaned = stripDcpDisplayMetadataLines(text);
+
 	// Strip fully paired XML-style DCP tags first. During streaming, strip an
 	// unterminated opening XML tag and everything after it before removing
 	// orphan tags, otherwise `<dcp-id>m123` would leave `m123` behind.
-	let cleaned = text
+	cleaned = cleaned
 		.replace(DCP_XML_PAIRED_TAG_RE, "")
 		.replace(DCP_XML_OPEN_TAG_TO_END_RE, "")
 		.replace(DCP_XML_UNPAIRED_TAG_RE, "");
@@ -389,7 +392,22 @@ export function stripDcpDisplayMetadata(text: string): string {
 	// regex can strip the prefix and strand the `(m123` payload.
 	cleaned = suppressPendingDcpIdMetadataLine(cleaned).replace(DCP_MARKDOWN_REFERENCE_RE, "");
 	cleaned = suppressPendingDcpIdMetadataLine(cleaned);
+	cleaned = stripDcpDisplayMetadataLines(cleaned);
 	return cleaned.replace(/\n{3,}/g, "\n\n").trimEnd();
+}
+
+function stripDcpDisplayMetadataLines(text: string): string {
+	if (text.length === 0) return text;
+
+	let removed = false;
+	const keptLines = text.split("\n").filter((line) => {
+		const normalizedLine = line.replace(/\r$/u, "");
+		const isMetadataLine = DCP_MARKDOWN_REFERENCE_LINE_RE.test(normalizedLine) || DCP_XML_METADATA_LINE_RE.test(normalizedLine);
+		if (isMetadataLine) removed = true;
+		return !isMetadataLine;
+	});
+
+	return removed ? keptLines.join("\n") : text;
 }
 
 export function applyOutputFilters(text: string, filters: readonly RegExp[]): string {

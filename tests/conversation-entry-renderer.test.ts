@@ -306,6 +306,18 @@ describe("renderConversationEntry", () => {
 		assert.doesNotMatch(rendered, /dcp-id|m064/u);
 	});
 
+	it("does not leave blank thinking rows where DCP metadata lines were removed", () => {
+		const lines = renderConversationEntry({
+			id: "thinking-dcp-gap",
+			kind: "thinking",
+			text: "Plan\n[dcp-id]: # (m064)\n- detail",
+			expanded: true,
+			status: "done",
+		}, 80, renderOptions);
+
+		assert.deepEqual(lines.slice(1).map((line) => line.text), ["  Plan", "  - detail"]);
+	});
+
 	it("uses fenced code languages inside expanded thinking text", () => {
 		const lines = renderConversationEntry({
 			id: "thinking-code",
