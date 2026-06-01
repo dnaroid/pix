@@ -51,7 +51,7 @@ describe("renderToolBlock", () => {
 
 		assert.match(lines[0]?.text ?? "", /apply_patch/u);
 		assert.deepEqual(lines.slice(1).map((line) => line.text), ["  one", "… two"]);
-		assert.deepEqual(lines[2]?.segments, [{ start: 0, end: 1, foreground: colors.muted }]);
+		assert.deepEqual(lines[2]?.segments, [{ start: 0, end: 1, foreground: colors.statusDotBase }]);
 	});
 
 	it("does not mark collapsed previews that fit within previewLines", () => {
@@ -68,7 +68,7 @@ describe("renderToolBlock", () => {
 		const lines = renderToolBlock(toolEntry({ expanded: false, output, collapsedBody: output }), { ...rule, direction: "tail", previewLines: 2 }, 100, colors);
 
 		assert.deepEqual(lines.slice(1).map((line) => line.text), ["… two", "  three"]);
-		assert.deepEqual(lines[1]?.segments, [{ start: 0, end: 1, foreground: colors.muted }]);
+		assert.deepEqual(lines[1]?.segments, [{ start: 0, end: 1, foreground: colors.statusDotBase }]);
 	});
 
 	it("renders collapsed previews inline only in super-compact mode", () => {
@@ -81,7 +81,7 @@ describe("renderToolBlock", () => {
 		assert.doesNotMatch(lines[0]?.text ?? "", /three/u);
 		const markerStart = lines[0]?.text.indexOf("…") ?? -1;
 		assert.ok(markerStart >= 0);
-		assert.ok(lines[0]?.segments?.some((segment) => segment.start === markerStart && segment.end === markerStart + 1 && segment.foreground === colors.muted));
+		assert.ok(lines[0]?.segments?.some((segment) => segment.start === markerStart && segment.end === markerStart + 1 && segment.foreground === colors.statusDotBase));
 	});
 
 	it("forces expanded tools into one header line in super-compact mode", () => {

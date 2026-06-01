@@ -86,9 +86,9 @@ export function renderToolBlock(entry: ToolBlockEntry, rule: ResolvedToolRule, w
 	headerLine.text = `${header}${separator}${clippedPreview}`;
 	const previewStart = header.length + separator.length;
 	const previewTextStart = previewStart + (preview.overflow ? TRUNCATED_PREVIEW_MARKER.length : 0);
-	headerLine.segments = [
+		headerLine.segments = [
 		...(headerLine.segments ?? []),
-		...(preview.overflow ? [{ start: previewStart, end: previewStart + 1, foreground: colors.muted }] : []),
+		...(preview.overflow ? [{ start: previewStart, end: previewStart + 1, foreground: colors.statusDotBase }] : []),
 		{ start: previewTextStart, end: headerLine.text.length, foreground: toolOutputColor },
 	];
 	return headerLines;
@@ -107,7 +107,7 @@ function renderCollapsedPreviewLines(
 	const allLines = renderToolBodyLines(body, width, target, color, entry.bodyStyle, colors, undefined, entry.bodyWrap, hasLspDiagnostics, entry.bodyLineStyles, entry.preserveAnsi);
 	if (rule.previewLines >= allLines.length) return allLines;
 	const previewLines = rule.direction === "tail" ? allLines.slice(-rule.previewLines) : allLines.slice(0, rule.previewLines);
-	return markTruncatedPreviewLine(previewLines, rule.direction, colors.muted);
+	return markTruncatedPreviewLine(previewLines, rule.direction, colors.statusDotBase);
 }
 
 function collapsedInlinePreview(text: string, rule: ResolvedToolRule, preserveAnsi = false): { text: string; overflow: boolean } {
