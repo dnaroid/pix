@@ -245,7 +245,6 @@ export function spawnAgent(
 				const result = extractAgentEndResult(event);
 				if (result.trim())
 					fs.writeFileSync(path.join(agentDir, "result.md"), result, "utf-8");
-				notifyComplete(0);
 				proc.kill("SIGTERM");
 			}
 		} catch (error) {
