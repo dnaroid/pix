@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -216,7 +216,7 @@ export function spawnAgent(
 		agentEndKillTimer = setTimeout(() => {
 			agentEndKillTimer = undefined;
 			try {
-				proc.kill("SIGTERM");
+				terminateChildProcess(proc, "SIGTERM");
 			} catch {
 				/* process may have exited before the graceful termination timer fired */
 			}
@@ -225,7 +225,7 @@ export function spawnAgent(
 		agentEndCompletionFallbackTimer = setTimeout(() => {
 			if (completionNotified) return;
 			try {
-				proc.kill("SIGKILL");
+				terminateChildProcess(proc, "SIGKILL");
 			} catch {
 				/* process may already be gone */
 			}
@@ -252,14 +252,14 @@ export function spawnAgent(
 				stderrStream.write(`${timeoutMessage}\n`);
 			}
 			try {
-				proc.kill("SIGTERM");
+				terminateChildProcess(proc, "SIGTERM");
 			} catch {
 				/* process may have exited between the timer and signal */
 			}
 			timeoutKillTimer = setTimeout(() => {
 				if (completionNotified) return;
 				try {
-					proc.kill("SIGKILL");
+					terminateChildProcess(proc, "SIGKILL");
 				} catch {
 					/* process may have exited after SIGTERM */
 				}
@@ -291,7 +291,7 @@ export function spawnAgent(
 				const errorText = typeof event.error === "string" ? event.error : "RPC prompt failed";
 				fs.writeFileSync(path.join(agentDir, "result.md"), errorText, "utf-8");
 				notifyComplete(1);
-				proc.kill("SIGTERM");
+				terminateChildProcess(proc, "SIGTERM");
 				return;
 			}
 			if (event.type === "agent_end") {
@@ -381,6 +381,17 @@ export function spawnAgent(
 
 function getModelToolsExtensionPath(): string {
 	return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "model-tools", "index.ts");
+}
+
+function terminateChildProcess(proc: ChildProcess, signal: NodeJS.Signals): void {
+	if (process.platform === "win32" && proc.pid) {
+		const result = spawnSync("taskkill", ["/pid", String(proc.pid), "/T", "/F"], {
+			stdio: "ignore",
+			windowsHide: true,
+		});
+		if (!result.error && result.status === 0) return;
+	}
+	proc.kill(signal);
 }
 
 function getSubagentToolGuardExtensionPath(): string {
