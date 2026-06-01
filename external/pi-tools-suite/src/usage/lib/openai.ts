@@ -25,13 +25,23 @@ interface RateLimitWindow {
   reset_after_seconds: number;
 }
 
+interface OpenAIRateLimit {
+  allowed?: boolean;
+  limit_reached: boolean;
+  primary_window: RateLimitWindow;
+  secondary_window: RateLimitWindow | null;
+}
+
+interface OpenAIAdditionalRateLimit {
+  limit_name: string;
+  metered_feature?: string;
+  rate_limit: OpenAIRateLimit | null;
+}
+
 interface OpenAIUsageResponse {
   plan_type: string;
-  rate_limit: {
-    limit_reached: boolean;
-    primary_window: RateLimitWindow;
-    secondary_window: RateLimitWindow | null;
-  } | null;
+  rate_limit: OpenAIRateLimit | null;
+  additional_rate_limits?: OpenAIAdditionalRateLimit[];
 }
 
 // ============================================================================
@@ -119,6 +129,29 @@ function formatWindow(window: RateLimitWindow): string[] {
   ];
 }
 
+/**
+ * 格式化一个完整的速率限制（主窗口 + 次窗口 + 状态）
+ */
+function formatRateLimit(rateLimit: OpenAIRateLimit): string[] {
+  const lines: string[] = [];
+
+  if (rateLimit.primary_window) {
+    lines.push(...formatWindow(rateLimit.primary_window));
+  }
+
+  if (rateLimit.secondary_window) {
+    lines.push("");
+    lines.push(...formatWindow(rateLimit.secondary_window));
+  }
+
+  if (rateLimit.limit_reached) {
+    lines.push("");
+    lines.push("⚠️ Rate limit reached!");
+  }
+
+  return lines;
+}
+
 // ============================================================================
 // API 调用
 // ============================================================================
@@ -164,7 +197,7 @@ function formatOpenAIUsage(
   data: OpenAIUsageResponse,
   email: string | null,
 ): string {
-  const { plan_type, rate_limit } = data;
+  const { plan_type, rate_limit, additional_rate_limits } = data;
   const lines: string[] = [];
 
   // 标题行：Account: email (plan)
@@ -172,21 +205,21 @@ function formatOpenAIUsage(
   lines.push(`Account:        ${accountDisplay} (${plan_type})`);
   lines.push("");
 
-  // 主窗口
-  if (rate_limit?.primary_window) {
-    lines.push(...formatWindow(rate_limit.primary_window));
+  // 默认账号窗口
+  if (rate_limit) {
+    lines.push(...formatRateLimit(rate_limit));
   }
 
-  // 次窗口（如果存在）
-  if (rate_limit?.secondary_window) {
+  // 额外的独立模型/功能限制（例如 GPT-5.3-Codex-Spark）
+  const additionalLimits = additional_rate_limits?.filter((item) => item.rate_limit) ?? [];
+  for (const limit of additionalLimits) {
     lines.push("");
-    lines.push(...formatWindow(rate_limit.secondary_window));
-  }
-
-  // 限额状态提示
-  if (rate_limit?.limit_reached) {
+    lines.push(`Additional limit: ${limit.limit_name}`);
+    if (limit.metered_feature) {
+      lines.push(`Metered feature:  ${limit.metered_feature}`);
+    }
     lines.push("");
-    lines.push("⚠️ Rate limit reached!");
+    lines.push(...formatRateLimit(limit.rate_limit!));
   }
 
   return lines.join("\n");

@@ -83,6 +83,19 @@ type RateLimitWindow = {
 	reset_after_seconds: number;
 };
 
+type OpenAIRateLimit = {
+	allowed?: boolean;
+	limit_reached: boolean;
+	primary_window: RateLimitWindow;
+	secondary_window: RateLimitWindow | null;
+};
+
+type OpenAIAdditionalRateLimit = {
+	limit_name: string;
+	metered_feature?: string;
+	rate_limit: OpenAIRateLimit | null;
+};
+
 export type AccountUsageLimitWindow = {
 	readonly label: string;
 	readonly remainingPercent: number;
@@ -98,6 +111,12 @@ export type AccountUsageReport = {
 		readonly planType?: string;
 		readonly windows: readonly AccountUsageLimitWindow[];
 		readonly limitReached: boolean;
+		readonly additionalLimits?: readonly {
+			readonly name: string;
+			readonly meteredFeature?: string;
+			readonly windows: readonly AccountUsageLimitWindow[];
+			readonly limitReached: boolean;
+		}[];
 		readonly error?: string;
 	};
 	readonly zai?: {
@@ -117,11 +136,8 @@ export type AccountUsageReport = {
 
 export type OpenAIUsageResponse = {
 	plan_type: string;
-	rate_limit: {
-		limit_reached: boolean;
-		primary_window: RateLimitWindow;
-		secondary_window: RateLimitWindow | null;
-	} | null;
+	rate_limit: OpenAIRateLimit | null;
+	additional_rate_limits?: OpenAIAdditionalRateLimit[];
 };
 
 type JwtPayload = {
@@ -221,6 +237,13 @@ export function formatAccountUsageReport(report: AccountUsageReport, now = repor
 		else {
 			for (const window of report.openai.windows) lines.push(...formatProviderWindow(window, now, 30));
 			if (report.openai.limitReached) lines.push("", "⚠️ Rate limit reached!");
+			for (const limit of report.openai.additionalLimits ?? []) {
+				lines.push(`Additional limit: ${limit.name}`);
+				if (limit.meteredFeature) lines.push(`Metered feature:  ${limit.meteredFeature}`);
+				lines.push("");
+				for (const window of limit.windows) lines.push(...formatProviderWindow(window, now, 30));
+				if (limit.limitReached) lines.push("", "⚠️ Rate limit reached!");
+			}
 		}
 		lines.push("");
 	}
@@ -283,7 +306,7 @@ export function openAIUsageStatusFromResponse(
 	modelKey: string,
 	now = Date.now(),
 ): ModelUsageStatus | undefined {
-	const rateLimit = data.rate_limit;
+	const rateLimit = selectOpenAIRateLimitForModel(data, modelKey);
 	if (!rateLimit) return undefined;
 
 	const windows = [rateLimit.primary_window, rateLimit.secondary_window].filter(isRateLimitWindow);
@@ -324,12 +347,23 @@ async function queryOpenAIAccountUsage(now: number): Promise<AccountUsageReport[
 		const windows = [usage.rate_limit?.primary_window, usage.rate_limit?.secondary_window]
 			.filter(isRateLimitWindow)
 			.map((window) => accountWindowFromRateLimit(window, now));
+		const additionalLimits = (usage.additional_rate_limits ?? [])
+			.filter((limit): limit is OpenAIAdditionalRateLimit & { rate_limit: OpenAIRateLimit } => !!limit.rate_limit)
+			.map((limit) => ({
+				name: limit.limit_name,
+				...(limit.metered_feature ? { meteredFeature: limit.metered_feature } : {}),
+				windows: [limit.rate_limit.primary_window, limit.rate_limit.secondary_window]
+					.filter(isRateLimitWindow)
+					.map((window) => accountWindowFromRateLimit(window, now)),
+				limitReached: limit.rate_limit.limit_reached === true,
+			}));
 
 		return {
 			account: accountLabelFromOpenAIAuth(authData),
 			...(usage.plan_type ? { planType: usage.plan_type } : {}),
 			windows,
 			limitReached: usage.rate_limit?.limit_reached === true,
+			...(additionalLimits.length > 0 ? { additionalLimits } : {}),
 		};
 	} catch (error) {
 		return {
@@ -817,6 +851,28 @@ function isRateLimitWindow(value: RateLimitWindow | null | undefined): value is 
 		&& Number.isFinite(value.used_percent)
 		&& Number.isFinite(value.limit_window_seconds)
 		&& Number.isFinite(value.reset_after_seconds);
+}
+
+function selectOpenAIRateLimitForModel(data: OpenAIUsageResponse, modelKey: string): OpenAIRateLimit | null {
+	const additionalLimit = (data.additional_rate_limits ?? []).find((limit) => {
+		if (!limit.rate_limit) return false;
+		return openAIModelMatchesAdditionalLimit(modelKey, limit);
+	});
+
+	return additionalLimit?.rate_limit ?? data.rate_limit;
+}
+
+function openAIModelMatchesAdditionalLimit(modelKey: string, limit: OpenAIAdditionalRateLimit): boolean {
+	const normalizedModel = normalizeOpenAILimitName(modelKey.split("/").at(-1) ?? modelKey);
+	const normalizedLimitName = normalizeOpenAILimitName(limit.limit_name);
+	const normalizedMeteredFeature = limit.metered_feature ? normalizeOpenAILimitName(limit.metered_feature) : "";
+
+	return (!!normalizedLimitName && (normalizedModel.includes(normalizedLimitName) || normalizedLimitName.includes(normalizedModel)))
+		|| (!!normalizedMeteredFeature && (normalizedModel.includes(normalizedMeteredFeature) || normalizedMeteredFeature.includes(normalizedModel)));
+}
+
+function normalizeOpenAILimitName(value: string): string {
+	return value.toLowerCase().replace(/[^a-z0-9]+/gu, "");
 }
 
 function selectWeeklyWindow(windows: readonly RateLimitWindow[]): RateLimitWindow | undefined {

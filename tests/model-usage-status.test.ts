@@ -98,6 +98,33 @@ describe("model usage status", () => {
 		assert.equal(formatModelUsageStatusLabel(status, now), "45% ██▎   31m • 88% ████▍ 5d0h");
 	});
 
+	it("uses matching OpenAI additional model limits for the status bar", () => {
+		const now = Date.UTC(2026, 0, 1, 0, 0, 0);
+		const response: OpenAIUsageResponse = {
+			plan_type: "prolite",
+			rate_limit: {
+				limit_reached: false,
+				primary_window: { used_percent: 25, limit_window_seconds: 5 * 60 * 60, reset_after_seconds: 2 * 60 * 60 },
+				secondary_window: { used_percent: 20, limit_window_seconds: 7 * 24 * 60 * 60, reset_after_seconds: 5 * 24 * 60 * 60 },
+			},
+			additional_rate_limits: [{
+				limit_name: "GPT-5.3-Codex-Spark",
+				metered_feature: "codex_bengalfox",
+				rate_limit: {
+					limit_reached: false,
+					primary_window: { used_percent: 1, limit_window_seconds: 5 * 60 * 60, reset_after_seconds: 42 * 60 },
+					secondary_window: { used_percent: 0, limit_window_seconds: 7 * 24 * 60 * 60, reset_after_seconds: 5 * 24 * 60 * 60 },
+				},
+			}],
+		};
+
+		const status = openAIUsageStatusFromResponse(response, "openai-codex/gpt-5.3-codex-spark", now);
+
+		assert.equal(status?.hourly?.remainingPercent, 99);
+		assert.equal(status?.weekly?.remainingPercent, 100);
+		assert.equal(formatModelUsageStatusLabel(status, now), "99% ████▉ 42m • 100% █████ 5d0h");
+	});
+
 	it("extracts Zhipu 5-hour token window as hourly equivalent", () => {
 		const now = Date.UTC(2026, 0, 1, 0, 0, 0);
 		const resetAt = now + 3 * 60 * 60 * 1000;
@@ -166,6 +193,15 @@ describe("model usage status", () => {
 					{ label: "5-hour limit", remainingPercent: 92, resetAt: now + (3 * 60 + 59) * 60 * 1000, windowSeconds: 5 * 60 * 60 },
 					{ label: "7-day limit", remainingPercent: 94, resetAt: now + (6 * 24 + 11) * 60 * 60 * 1000, windowSeconds: 7 * 24 * 60 * 60 },
 				],
+				additionalLimits: [{
+					name: "GPT-5.3-Codex-Spark",
+					meteredFeature: "codex_bengalfox",
+					limitReached: false,
+					windows: [
+						{ label: "5-hour limit", remainingPercent: 99, resetAt: now + 42 * 60 * 1000, windowSeconds: 5 * 60 * 60 },
+						{ label: "7-day limit", remainingPercent: 100, resetAt: now + 5 * 24 * 60 * 60 * 1000, windowSeconds: 7 * 24 * 60 * 60 },
+					],
+				}],
 			},
 			zai: {
 				account: "660b****PFdj",
@@ -187,6 +223,8 @@ describe("model usage status", () => {
 		assert.match(output, /OpenAI Account Quota/u);
 		assert.match(output, /Account:\s+user@example\.com \(prolite\)/u);
 		assert.match(output, /5-hour limit\n█{28}░{2} 92% remaining\nResets in: 3h 59m/u);
+		assert.match(output, /Additional limit: GPT-5\.3-Codex-Spark\nMetered feature:\s+codex_bengalfox/u);
+		assert.match(output, /5-hour limit\n█{30} 99% remaining\nResets in: 42m/u);
 		assert.match(output, /MCP monthly quota\n█{30} 100% remaining\nUsed: 0 \/ 1,000/u);
 		assert.match(output, /limited@example\.com/u);
 		assert.match(output, /Claude Opus\s+6d 13h\s+░{20} 0%/u);
