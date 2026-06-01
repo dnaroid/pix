@@ -23,10 +23,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The package smoke script is Bash-based and validates the published
-        # tarball on Unix-style installers. Windows is still covered by the
-        # build-and-test matrix above.
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -46,7 +43,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # The package smoke script is Bash-based and validates the published
+        # tarball on Unix-style installers. Windows is covered by build-and-test.
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
