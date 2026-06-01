@@ -1,7 +1,7 @@
 import path from "node:path";
 import type { Diagnostic, DiagnosticRelatedInformation } from "vscode-languageserver-protocol";
 import type { CommandRunResult } from "./types";
-import { uriToFilePath } from "./paths";
+import { normalizeRelativePath, uriToFilePath } from "./paths";
 
 const DEFAULT_OUTPUT_LIMIT = 4000;
 
@@ -74,7 +74,7 @@ function relatedInformationSuffix(relatedInformation: DiagnosticRelatedInformati
 }
 
 export function formatDiagnostic(file: string, diagnostic: Diagnostic, root?: string): string {
-  const displayPath = root ? path.relative(root, file) || path.basename(file) : file;
+  const displayPath = root ? normalizeRelativePath(path.relative(root, file) || path.basename(file)) : file;
   const line = diagnostic.range.start.line + 1;
   const character = diagnostic.range.start.character + 1;
   const source = diagnostic.source ? `${diagnostic.source}: ` : "";
