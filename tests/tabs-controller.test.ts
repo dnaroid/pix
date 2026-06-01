@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { describe, it } from "node:test";
 
 import { AppTabsController } from "../src/app/tabs-controller.js";
@@ -515,7 +515,7 @@ describe("AppTabsController", () => {
 
 		await controller.openNewTab();
 
-		const newTab = tabs.tabItems.find((tab) => tab.sessionPath === "/tmp/two.jsonl");
+		const newTab = tabs.tabItems.find((tab) => tab.sessionPath === resolve("/tmp/two.jsonl"));
 		assert.equal(newTab?.title, "session 019e7d3f");
 		assert.equal(newTab?.titlePlaceholder, "new");
 	});
@@ -596,10 +596,10 @@ describe("AppTabsController", () => {
 
 		await controller.openNewTab();
 
-		assert.deepEqual(renderedTabPaths, ["/tmp/one.jsonl", "/tmp/two.jsonl"]);
+		assert.deepEqual(renderedTabPaths, [resolve("/tmp/one.jsonl"), resolve("/tmp/two.jsonl")]);
 		assert.equal(tabs.tabItems.length, 2);
-		assert.equal(tabs.tabItems[0]?.sessionPath, "/tmp/one.jsonl");
-		assert.equal(tabs.tabItems[1]?.sessionPath, "/tmp/two.jsonl");
+		assert.equal(tabs.tabItems[0]?.sessionPath, resolve("/tmp/one.jsonl"));
+		assert.equal(tabs.tabItems[1]?.sessionPath, resolve("/tmp/two.jsonl"));
 		assert.equal(tabs.activeTabId, tabs.tabItems[1]?.id);
 	});
 
@@ -739,7 +739,7 @@ describe("AppTabsController", () => {
 
 		assert.equal(tabs.tabItems.length, 1);
 		assert.equal(tabs.activeTabId, "tab-1");
-		assert.equal(tabs.tabItems[0]?.sessionPath, "/tmp/new.jsonl");
+		assert.equal(tabs.tabItems[0]?.sessionPath, resolve("/tmp/new.jsonl"));
 		assert.equal(tabs.tabItems[0]?.title, "new session");
 		assert.equal(resetCount, 1);
 		assert.deepEqual(restoredInputs[restoredInputs.length - 1], { text: "", cursor: 0 });

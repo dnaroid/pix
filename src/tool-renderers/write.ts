@@ -45,5 +45,5 @@ function pathForDisplay(filePath: string, cwd: string | undefined): string {
 
 	const relativePath = relative(cwd, filePath);
 	if (!relativePath) return ".";
-	return relativePath === ".." || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath) ? filePath : relativePath;
+	return relativePath === ".." || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath) ? filePath : relativePath.replace(/\\/gu, "/");
 }

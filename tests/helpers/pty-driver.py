@@ -9,6 +9,25 @@ import sys
 import termios
 
 
+def terminate_child(child: subprocess.Popen) -> int:
+    if child.poll() is not None:
+        return child.wait()
+
+    try:
+        os.killpg(child.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return child.wait()
+
+    try:
+        return child.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(child.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        return child.wait(timeout=2)
+
+
 def main() -> int:
     if len(sys.argv) < 4:
         print("usage: pty-driver.py <rows> <cols> <command> [args...]", file=sys.stderr)
@@ -58,11 +77,8 @@ def main() -> int:
             os.close(master_fd)
         except OSError:
             pass
-        if child.poll() is None:
-            try:
-                os.killpg(child.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
+
+        terminate_child(child)
 
     return child.wait()
 

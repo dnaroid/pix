@@ -1,4 +1,4 @@
-import { basename, join, resolve } from "node:path";
+import { basename, isAbsolute, join, resolve } from "node:path";
 import {
 	SUBAGENT_ACTIVE_STATUSES,
 	SUBAGENT_RENDER_MODES,
@@ -204,5 +204,5 @@ export function subagentRunName(runDir: string): string {
 }
 
 export function resolveSubagentRunDir(cwd: string, runDir: string): string {
-	return resolve(runDir.startsWith("/") ? runDir : join(cwd, runDir));
+	return resolve(isAbsolute(runDir) ? runDir : join(cwd, runDir));
 }

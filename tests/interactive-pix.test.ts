@@ -13,7 +13,7 @@ const PTY_DRIVER = join(PROJECT_ROOT, "tests", "helpers", "pty-driver.py");
 const DEFAULT_ROWS = 24;
 const DEFAULT_COLS = 100;
 
-describe("pix interactive PTY", { skip: !hasPython3() }, () => {
+describe("pix interactive PTY", { skip: process.platform !== "linux" || !hasPython3() }, () => {
 	it("handles mouse click and drag-selection in the real terminal UI", async () => {
 		const mockModel = await MockOpenAIModel.start(["short mocked reply"]);
 		const pix = await PixPty.start(mockModel);
@@ -180,6 +180,15 @@ class PixPty {
 			new Promise<void>((resolveStop) => setTimeout(resolveStop, 1_000)),
 		]);
 		if (this.child.exitCode === null && this.child.signalCode === null) this.child.kill("SIGTERM");
+		await Promise.race([
+			once(this.child, "exit"),
+			new Promise<void>((resolveStop) => setTimeout(resolveStop, 1_000)),
+		]);
+		if (this.child.exitCode === null && this.child.signalCode === null) this.child.kill("SIGKILL");
+		await Promise.race([
+			once(this.child, "exit"),
+			new Promise<void>((resolveStop) => setTimeout(resolveStop, 1_000)),
+		]);
 		rmSync(this.tempDir, { recursive: true, force: true });
 	}
 
