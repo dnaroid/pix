@@ -10,6 +10,8 @@ const EXTENSION_ENTRYPOINT = path.resolve(path.dirname(fileURLToPath(import.meta
 const E2E_TIMEOUT_MS = Number(process.env.TODO_PERSISTENCE_E2E_TIMEOUT_MS ?? 45_000);
 const KEEP_E2E_DIRS = /^(1|true|yes)$/i.test(process.env.TODO_PERSISTENCE_E2E_KEEP ?? "");
 const STREAM_IO = /^(1|true|yes)$/i.test(process.env.TODO_PERSISTENCE_E2E_STREAM_IO ?? "");
+const RUN_IN_CI = /^(1|true|yes)$/i.test(process.env.TODO_PERSISTENCE_E2E_CI ?? "");
+const TODO_PERSISTENCE_TEST = process.env.CI && !RUN_IN_CI ? test.skip : test;
 
 type PiRun = {
 	stdout: string;
@@ -122,7 +124,7 @@ async function runPi(projectDir: string, prompt: string, label: string): Promise
 }
 
 describe("todo persistence real pi e2e", () => {
-	test("loads a project plan, scopes it, and waits out the duplicate auto-nudge window", async () => {
+	TODO_PERSISTENCE_TEST("loads a project plan, scopes it, and waits out the duplicate auto-nudge window", async () => {
 		await withTempProject(async (projectDir) => {
 			const planPath = writePlan(projectDir);
 
