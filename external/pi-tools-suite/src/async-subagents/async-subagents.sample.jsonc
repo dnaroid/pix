@@ -1,0 +1,222 @@
+{
+  // Global async-subagents routing.
+  // Rule of thumb:
+  // - GLM: cheap/fast discovery, grep-style scanning, docs/test inventory.
+  // - Gemini: frontend/UI/UX, visual/product polish, and multimodal-heavy analysis.
+  // - GPT/Claude: review/audit, deep reasoning, tests, and implementation/refactoring.
+  // Override exact model IDs here if your pi provider uses different names.
+  "defaultType": "quick",
+
+  // Maximum concurrent sub-agent processes for this project/session.
+  // 0 means unlimited. Excess agents stay queued as planned until a slot opens.
+  "maxConcurrent": 5,
+
+  // Optional global retry defaults. Per-type `retry` overrides these values.
+  // `retryableExitCodes` omitted = retry any non-zero exit; [] = disable retry by exit-code filter.
+  // "retry": { "maxRetries": 1, "backoffMs": 2000, "retryableExitCodes": [1, 124] },
+
+  // Maximum bytes copied from raw result.md into result.json's `resultText`.
+  // result.md itself remains the full raw sub-agent output.
+  "maxResultBytes": 100000,
+
+  // Optional wall-clock timeout for each spawned agent in milliseconds.
+  // The built-in default is 30 minutes when this is omitted. You can also set
+  // `timeoutMs` per type/preset, or pass `timeoutSeconds` to a spawn call/task
+  // for short synthetic tests.
+  // "timeoutMs": 1800000,
+
+  // Parent-model vision overrides. Pi provider metadata can be missing or stale
+  // after switching models, so async-subagents treats these glob-like model refs
+  // as text-only even if dynamic capability detection is inconclusive. Matching
+  // is case-insensitive and supports `*` wildcards. Set [] to disable built-ins.
+  "vision": {
+    "blindModelPatterns": ["zai/glm*", "glm*", "*/glm*"]
+  },
+
+  // Optional per-type prompt customization (leave commented until needed):
+  // - promptAppend: append extra instructions after the generated prompt.
+  // - promptOverride: replace the generated prompt entirely.
+  // Supports placeholders: {id}, {task}, {scope}, {parentObjective}, {subagentType}, {model}, {thinking}.
+  // Example inside any type profile:
+  // "promptAppend": [
+  //   "Use this role-specific checklist.",
+  //   "Return file paths before conclusions."
+  // ],
+  // "promptOverride": "You are a specialized {subagentType} sub-agent.\nParent: {parentObjective}\nTask: {task}\nScope: {scope}",
+
+  // Role auto-selection when subagentType is omitted is handled by a small LLM
+  // router request. The router receives each task plus the configured type
+  // descriptions, then returns one allowed subagentType per task. Explicit
+  // task subagentType still wins. If the router model is unavailable or returns
+  // invalid JSON, async-subagents falls back to defaultType.
+  "routing": {
+    "enabled": true,
+    "model": "zai/glm-4.5-air",
+    "maxTaskChars": 1200,
+    "maxTokens": 512,
+    "maxRetries": 1,
+    "temperature": 0,
+    "timeoutMs": 12000,
+    "debug": false
+  },
+
+  // Presets are named agent/model configurations selected with /subagent-preset.
+  // They do not replace role routing below: `types` still defines what each role means.
+  // A preset overrides the models/thinking used by roles.
+  // Set AGENTS_PRESET=<name> before launching Pi to override the saved
+  // /subagent-preset selection for only the current process/session without
+  // modifying the saved selection file. If Pi is already running, use
+  // /subagent-preset session <name> and /subagent-preset session-clear instead.
+  // Shape:
+  // "presets": {
+  //   "name": {
+  //     "description": "shown in the selector",
+  //     "model": "optional fallback model for roles not listed in types",
+  //     "fallbackModels": ["optional/session fallback when model quota is exhausted"],
+  //     "thinking": "optional fallback thinking level",
+  //     "extraArgs": ["optional", "global", "pi", "args"],
+  //     "timeoutMs": 1800000,
+  //     "types": {
+  //       "roleName": { "model": "provider/model", "fallbackModels": ["provider/backup"], "thinking": "off|low|medium|high|xhigh", "timeoutMs": 1800000 }
+  //     }
+  //   }
+  // }
+  // Fallbacks are intended to cross provider boundaries: zai/* roles usually omit
+  // fallbackModels when that provider is effectively unlimited. If GPT/openai-codex
+  // is exhausted, use the matching zai/* role model. If Antigravity is exhausted,
+  // use the matching GPT/openai-codex role model, then matching zai/*. Exhausted
+  // providers are skipped for the current Pi process/session.
+  // Explicit task model/thinking and FORCE_CURRENT_MODEL still take precedence.
+
+  "presets": {
+    "cheap": {
+      "description": "Use cheap GLM/Gemini Flash models for text/code roles; keep vision on the enabled GPT vision model.",
+      "types": {
+        "quick": { "model": "zai/glm-4.5-air", "thinking": "off" },
+        "scan": { "model": "zai/glm-4.5-air", "thinking": "off" },
+        "research": { "model": "zai/glm-5-turbo", "thinking": "low" },
+        "docs": { "model": "zai/glm-4.5-air", "thinking": "low" },
+        "frontend": { "model": "antigravity/gemini-3-flash-preview", "fallbackModels": ["zai/glm-5.1"], "thinking": "medium" },
+        "tests": { "model": "zai/glm-5-turbo", "thinking": "medium" },
+        "review": { "model": "zai/glm-5.1", "thinking": "high" },
+        "implement": { "model": "zai/glm-5.1", "thinking": "high" },
+        "deep": { "model": "zai/glm-5.1", "thinking": "high" },
+        "vision": { "model": "openai-codex/gpt-5.4-mini", "thinking": "off" }
+      }
+    },
+
+    "gpt": {
+      "description": "Prefer enabled GPT-family models: spark/mini for cheap roles, gpt-5.5 for heavy roles; fallback cross-provider on quota.",
+      "types": {
+        "quick": { "model": "openai-codex/gpt-5.3-codex-spark", "fallbackModels": ["zai/glm-4.5-air"], "thinking": "off" },
+        "scan": { "model": "openai-codex/gpt-5.3-codex-spark", "fallbackModels": ["zai/glm-4.5-air"], "thinking": "off" },
+        "research": { "model": "openai-codex/gpt-5.4-mini", "fallbackModels": ["zai/glm-5-turbo"], "thinking": "low" },
+        "docs": { "model": "openai-codex/gpt-5.3-codex-spark", "fallbackModels": ["zai/glm-4.5-air"], "thinking": "low" },
+        "frontend": { "model": "openai-codex/gpt-5.4-mini", "fallbackModels": ["antigravity/gemini-3-flash-preview", "zai/glm-5.1"], "thinking": "medium" },
+        "tests": { "model": "openai-codex/gpt-5.4-mini", "fallbackModels": ["zai/glm-5-turbo"], "thinking": "medium" },
+        "review": { "model": "openai-codex/gpt-5.5", "fallbackModels": ["zai/glm-5.1"], "thinking": "high" },
+        "implement": { "model": "openai-codex/gpt-5.5", "fallbackModels": ["zai/glm-5.1"], "thinking": "high" },
+        "deep": { "model": "openai-codex/gpt-5.5", "fallbackModels": ["zai/glm-5.1"], "thinking": "high" },
+        "vision": { "model": "openai-codex/gpt-5.4-mini", "thinking": "off" }
+      }
+    },
+
+    "deep": {
+      "description": "Use only enabled strong models, mixing GPT, Claude, and Gemini by role.",
+      "types": {
+        "quick": { "model": "openai-codex/gpt-5.4-mini", "fallbackModels": ["zai/glm-4.5-air"], "thinking": "low" },
+        "scan": { "model": "antigravity/gemini-3-flash-preview", "fallbackModels": ["openai-codex/gpt-5.3-codex-spark", "zai/glm-4.5-air"], "thinking": "off" },
+        "research": { "model": "antigravity/gemini-3.1-pro-preview", "fallbackModels": ["openai-codex/gpt-5.4-mini", "zai/glm-5-turbo"], "thinking": "medium" },
+        "docs": { "model": "antigravity/gemini-2.5-flash", "fallbackModels": ["openai-codex/gpt-5.3-codex-spark", "zai/glm-4.5-air"], "thinking": "medium" },
+        "frontend": { "model": "antigravity/gemini-3.1-pro-preview-customtools", "fallbackModels": ["openai-codex/gpt-5.4-mini", "zai/glm-5.1"], "thinking": "low" },
+        "tests": { "model": "antigravity/antigravity-claude-sonnet-4-6", "fallbackModels": ["openai-codex/gpt-5.4-mini", "zai/glm-5-turbo"], "thinking": "high" },
+        "review": { "model": "antigravity/antigravity-claude-sonnet-4-6", "fallbackModels": ["openai-codex/gpt-5.5", "zai/glm-5.1"], "thinking": "high" },
+        "implement": { "model": "openai-codex/gpt-5.5", "fallbackModels": ["zai/glm-5.1"], "thinking": "high" },
+        "deep": { "model": "antigravity/antigravity-claude-opus-4-6-thinking", "fallbackModels": ["openai-codex/gpt-5.5", "zai/glm-5.1"], "thinking": "high" },
+        "vision": { "model": "openai-codex/gpt-5.4-mini", "thinking": "off" }
+      }
+    }
+  },
+
+  "types": {
+    "quick": {
+      "description": "Use for tiny cheap tasks: answer a simple question, inspect one known file, or verify one fact. Not for broad repo search.",
+      "model": "zai/glm-5-turbo",
+      "thinking": "off"
+    },
+
+    "scan": {
+      "description": "Use for finding files, symbols, text, or inventory across a repo. Return paths/facts; do not judge code quality.",
+      "model": "zai/glm-5-turbo",
+      "thinking": "off",
+      "tools": ["read", "grep"]
+    },
+
+    "research": {
+      "description": "Use for multi-file codebase research: read several files and explain how something works. No edits.",
+      "model": "zai/glm-5-turbo",
+      "thinking": "low",
+      "tools": ["read", "grep"]
+    },
+
+    "docs": {
+      "description": "Use for documentation work: README/API docs review, docs gaps, changelog, migration notes, examples.",
+      "model": "zai/glm-5-turbo",
+      "thinking": "low"
+    },
+
+    "frontend": {
+      "description": "Use for frontend UI/UX visual work: styling, layout, typography, animation, responsive states, component polish, accessibility. Avoid backend/business logic unless needed for UI behavior.",
+      "model": "antigravity/gemini-3-flash-preview",
+      "fallbackModels": ["openai-codex/gpt-5.4-mini", "zai/glm-5.1"],
+      "thinking": "medium",
+      "promptAppend": [
+        "Act as a frontend UI/UX engineer for visual and product-facing work.",
+        "Prioritize layout, typography, spacing, color, motion, responsive states, accessibility, and consistency with the existing design system.",
+        "Before editing, inspect nearby components/styles and infer the project's design language. Avoid backend/business-logic changes unless required for UI behavior.",
+        "When no mockup exists, choose a clear aesthetic direction and explain it briefly. Verify with targeted build/lint/tests or screenshot-relevant checks when possible."
+      ]
+    },
+
+    "tests": {
+      "description": "Use for tests: locate coverage, find gaps, run/check targeted test commands, diagnose failing tests.",
+      "model": "zai/glm-5-turbo",
+      "thinking": "medium",
+      "tools": ["read", "grep", "bash"]
+    },
+
+    "review": {
+      "description": "Use for review/audit of existing code or changes: correctness, security, performance, maintainability, API risks, quality. Do not implement new code.",
+      "model": "openai-codex/gpt-5.5",
+      "fallbackModels": ["zai/glm-5.1"],
+      "thinking": "high",
+      "tools": ["read", "grep"]
+    },
+
+    "implement": {
+      "description": "Use when the sub-agent should make or plan code changes for a feature, bug fix, or refactor.",
+      "model": "openai-codex/gpt-5.5",
+      "fallbackModels": ["zai/glm-5.1"],
+      "thinking": "high"
+    },
+
+    "deep": {
+      "description": "Use for broad hard reasoning: architecture, system design, cross-module impact, complex tradeoffs.",
+      "model": "openai-codex/gpt-5.5",
+      "fallbackModels": ["zai/glm-5.1"],
+      "thinking": "high"
+    },
+
+    "vision": {
+      "description": "Use only when task has imagePaths, screenshots, or asks to inspect visible UI/image content for a text-only parent.",
+      "model": "openai-codex/gpt-5.4-mini",
+      "thinking": "off",
+      "promptAppend": [
+        "You are a vision helper for a parent model that may not be able to see images.",
+        "Inspect any attached images and any image paths mentioned in the task/scope. Describe concrete visible details, UI state, text, layout, errors, and uncertainties.",
+        "If focus instructions are provided, prioritize them, but still mention other important visible findings.",
+        "Do not make code changes. Return a compact visual description that the parent agent can rely on."
+      ]
+    }
+  }
+}

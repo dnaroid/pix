@@ -1,0 +1,209 @@
+import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, it } from "node:test";
+
+import {
+	formatAccountUsageReport,
+	formatModelUsageStatusLabel,
+	googleAntigravityUsageStatusFromResponse,
+	modelUsageDescriptor,
+	modelUsageRemainingPercent,
+	openAIUsageStatusFromResponse,
+	resolveAntigravityQuotaModelKey,
+	type AccountUsageReport,
+	zhipuUsageStatusFromResponse,
+	type ModelUsageDescriptor,
+	type OpenAIUsageResponse,
+} from "../src/app/model-usage-status.js";
+import type { SessionModel } from "../src/app/types.js";
+
+describe("model usage status", () => {
+	it("builds descriptors for OpenAI quota-backed models only", () => {
+		assert.deepEqual(modelUsageDescriptor({ provider: "openai-codex", id: "gpt-5.5" } as SessionModel), {
+			kind: "openai",
+			modelKey: "openai-codex/gpt-5.5",
+		});
+		assert.equal(modelUsageDescriptor({ provider: "anthropic", id: "claude" } as SessionModel), undefined);
+	});
+
+	it("builds descriptors for Zhipu/Z.ai quota-backed models", () => {
+		assert.deepEqual(modelUsageDescriptor({ provider: "zai", id: "glm-5.1" } as SessionModel), {
+			kind: "zhipu",
+			modelKey: "zai/glm-5.1",
+		});
+		assert.deepEqual(modelUsageDescriptor({ provider: "zhipuai-coding-plan", id: "glm-4" } as SessionModel), {
+			kind: "zhipu",
+			modelKey: "zhipuai-coding-plan/glm-4",
+		});
+	});
+
+	it("builds Antigravity descriptors from the currently rotated account", () => {
+		withPiAuth({
+			antigravity: {
+				type: "oauth",
+				email: "fallback@example.com",
+				accounts: [
+					{ email: "first@example.com", refreshToken: "refresh-1", projectId: "project-1", enabled: true },
+					{ email: "second@example.com", refreshToken: "refresh-2", projectId: "project-2", enabled: true },
+				],
+				activeIndex: 1,
+			},
+		}, () => {
+			const descriptor = modelUsageDescriptor({ provider: "antigravity", id: "G3" } as SessionModel);
+
+			assert.equal(descriptor?.kind, "google-antigravity");
+			assert.equal(descriptor?.modelKey, "antigravity/G3@second@example.com");
+			if (descriptor?.kind !== "google-antigravity") throw new Error("Expected Google Antigravity descriptor");
+			assert.equal(descriptor.quotaModelKey, "gemini-3.1-pro-low");
+			assert.equal(descriptor.account.email, "second@example.com");
+			assert.equal(descriptor.account.projectId, "project-2");
+			assert.equal(descriptor.account.accountIndex, 1);
+			assert.equal(descriptor.account.accountCount, 2);
+		});
+	});
+
+	it("maps Antigravity model aliases to Google quota buckets", () => {
+		assert.equal(resolveAntigravityQuotaModelKey({ provider: "antigravity", id: "G3" } as SessionModel), "gemini-3.1-pro-low");
+		assert.equal(resolveAntigravityQuotaModelKey({ provider: "antigravity", id: "G3 Flash" } as SessionModel), "gemini-3-flash");
+		assert.equal(resolveAntigravityQuotaModelKey({ provider: "antigravity", id: "gemini-2.5-flash" } as SessionModel), "gemini-2.5-flash");
+		assert.equal(resolveAntigravityQuotaModelKey({ provider: "antigravity", id: "antigravity-claude-opus-4-6-thinking" } as SessionModel), "claude-opus-4-6-thinking");
+	});
+
+	it("extracts weekly and hourly OpenAI windows for the status bar", () => {
+		const now = Date.UTC(2026, 0, 1, 0, 0, 0);
+		const response: OpenAIUsageResponse = {
+			plan_type: "plus",
+			rate_limit: {
+				limit_reached: false,
+				primary_window: {
+					used_percent: 12.4,
+					limit_window_seconds: 7 * 24 * 60 * 60,
+					reset_after_seconds: 5 * 24 * 60 * 60,
+				},
+				secondary_window: {
+					used_percent: 55,
+					limit_window_seconds: 60 * 60,
+					reset_after_seconds: 31 * 60,
+				},
+			},
+		};
+
+		const status = openAIUsageStatusFromResponse(response, "openai-codex/gpt-5.5", now);
+
+		assert.equal(status?.weekly?.remainingPercent, 88);
+		assert.equal(status?.hourly?.remainingPercent, 45);
+		assert.equal(modelUsageRemainingPercent(status), 45);
+		assert.equal(formatModelUsageStatusLabel(status, now), "45% ██▎   31m • 88% ████▍ 5d0h");
+	});
+
+	it("extracts Zhipu 5-hour token window as hourly equivalent", () => {
+		const now = Date.UTC(2026, 0, 1, 0, 0, 0);
+		const resetAt = now + 3 * 60 * 60 * 1000;
+		const response = {
+			code: 200,
+			msg: "ok",
+			data: {
+				limits: [
+					{ type: "TOKENS_LIMIT" as const, usage: 1000000, currentValue: 350000, percentage: 35, nextResetTime: resetAt },
+				],
+			},
+			success: true,
+		};
+
+		const status = zhipuUsageStatusFromResponse(response, "zai/glm-5.1", now);
+
+		assert.equal(status?.provider, "zhipu");
+		assert.equal(status?.hourly?.remainingPercent, 65);
+		assert.equal(status?.weekly, undefined);
+		assert.equal(modelUsageRemainingPercent(status), 65);
+		assert.match(formatModelUsageStatusLabel(status, now), /^65% ███▎  3h0m$/u);
+	});
+
+	it("extracts Google Antigravity quota for the active account and model bucket", () => {
+		const now = Date.UTC(2026, 0, 1, 0, 0, 0);
+		const descriptor = {
+			kind: "google-antigravity",
+			modelKey: "antigravity/G3@user@example.com",
+			quotaModelKey: "gemini-3.1-pro-low",
+			account: {
+				email: "user@example.com",
+				refreshToken: "refresh-token",
+				projectId: "project-id",
+				cacheKey: "user@example.com",
+			},
+		} as const satisfies Extract<ModelUsageDescriptor, { kind: "google-antigravity" }>;
+		const response = {
+			models: {
+				"gemini-3.1-pro-low": {
+					quotaInfo: {
+						remainingFraction: 0.99,
+						resetTime: new Date(now + (6 * 24 + 22) * 60 * 60 * 1000).toISOString(),
+					},
+				},
+			},
+		};
+
+		const status = googleAntigravityUsageStatusFromResponse(response, descriptor, now);
+
+		assert.equal(status?.provider, "google-antigravity");
+		assert.equal(status?.accountEmail, "user@example.com");
+		assert.equal(status?.weekly?.remainingPercent, 99);
+		assert.equal(status?.hourly, undefined);
+		assert.equal(formatModelUsageStatusLabel(status, now), "user@example.com 99% ████▉ 6d22h");
+	});
+
+	it("formats the local account quota report", () => {
+		const now = Date.UTC(2026, 0, 1, 0, 0, 0);
+		const report: AccountUsageReport = {
+			generatedAt: now,
+			openai: {
+				account: "user@example.com",
+				planType: "prolite",
+				limitReached: false,
+				windows: [
+					{ label: "5-hour limit", remainingPercent: 92, resetAt: now + (3 * 60 + 59) * 60 * 1000, windowSeconds: 5 * 60 * 60 },
+					{ label: "7-day limit", remainingPercent: 94, resetAt: now + (6 * 24 + 11) * 60 * 60 * 1000, windowSeconds: 7 * 24 * 60 * 60 },
+				],
+			},
+			zai: {
+				account: "660b****PFdj",
+				windows: [{ label: "5-hour token limit", remainingPercent: 99, resetAt: now + (3 * 60 + 49) * 60 * 1000, windowSeconds: 5 * 60 * 60 }],
+				mcp: { label: "MCP monthly quota", remainingPercent: 100, resetAt: now, windowSeconds: 30 * 24 * 60 * 60, used: 0, limit: 1000 },
+			},
+			googleAccounts: [{
+				account: "limited@example.com",
+				limitReached: true,
+				windows: [
+					{ label: "Claude Opus", remainingPercent: 0, resetAt: now + (6 * 24 + 13) * 60 * 60 * 1000, windowSeconds: (6 * 24 + 13) * 60 * 60 },
+					{ label: "G3 Pro", remainingPercent: 100, resetAt: now + 7 * 24 * 60 * 60 * 1000, windowSeconds: 7 * 24 * 60 * 60 },
+				],
+			}],
+		};
+
+		const output = formatAccountUsageReport(report, now);
+
+		assert.match(output, /OpenAI Account Quota/u);
+		assert.match(output, /Account:\s+user@example\.com \(prolite\)/u);
+		assert.match(output, /5-hour limit\n█{28}░{2} 92% remaining\nResets in: 3h 59m/u);
+		assert.match(output, /MCP monthly quota\n█{30} 100% remaining\nUsed: 0 \/ 1,000/u);
+		assert.match(output, /limited@example\.com/u);
+		assert.match(output, /Claude Opus\s+6d 13h\s+░{20} 0%/u);
+		assert.match(output, /⚠️ Rate limit reached!/u);
+	});
+});
+
+function withPiAuth(auth: unknown, run: () => void): void {
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	const agentDir = mkdtempSync(join(tmpdir(), "pix-agent-"));
+	writeFileSync(join(agentDir, "auth.json"), JSON.stringify(auth), "utf8");
+	process.env.PI_CODING_AGENT_DIR = agentDir;
+	try {
+		run();
+	} finally {
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+		rmSync(agentDir, { recursive: true, force: true });
+	}
+}

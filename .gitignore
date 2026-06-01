@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.env
+.DS_Store
+.indexer-cli/
+.claude/
+.pi/
+.omo/
+models/vosk/
+pi-tools-suite.zip
+external/*/node_modules/
+external/*/.pi/
+external/*/reports/
+external/*/dist/

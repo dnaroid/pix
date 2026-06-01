@@ -1,0 +1,8 @@
+{
+  "name": "hard-to-find-code-location-fixture",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "bench:locate": "node benchmark/run-locate-benchmark.mjs"
+  }
+}

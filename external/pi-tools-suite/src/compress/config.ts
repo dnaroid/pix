@@ -1,0 +1,310 @@
+import * as fs from "node:fs"
+import * as path from "node:path"
+import * as os from "node:os"
+import { parse as parseJsonc, type ParseError } from "jsonc-parser"
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export interface DcpConfig {
+  enabled: boolean
+  debug: boolean
+  manualMode: {
+    enabled: boolean
+    automaticStrategies: boolean // run dedup/purge even in manual mode
+  }
+  compress: {
+    maxContextPercent: number | string // legacy: 0-1 percent; also accepts absolute tokens or "80%"
+    minContextPercent: number | string // legacy: 0-1 percent; also accepts absolute tokens or "40%"
+    modelMaxContextPercent: Record<string, number>
+    modelMinContextPercent: Record<string, number>
+    maxContextLimit?: number | string
+    minContextLimit?: number | string
+    modelMaxContextLimits?: Record<string, number | string>
+    modelMinContextLimits?: Record<string, number | string>
+    summaryBuffer: boolean
+    nudgeFrequency: number // inject nudge every N context events (default: 5)
+    iterationNudgeThreshold: number // nudge after N tool calls since last user msg (default: 15)
+    nudgeForce: "strong" | "soft"
+    protectedTools: string[] // these tool outputs always protected from pruning
+    protectTags: boolean
+    protectUserMessages: boolean
+    autoCandidates: {
+      enabled: boolean
+      minContextPercent: number
+      keepRecentTurns: number
+      minMessages: number
+      minTokens: number
+    }
+    messageMode: {
+      enabled: boolean
+      minContextPercent: number
+      keepRecentTurns: number
+      mediumTokens: number
+      highTokens: number
+      maxSuggestions: number
+    }
+  }
+  strategies: {
+    deduplication: {
+      enabled: boolean
+      protectedTools: string[]
+    }
+    purgeErrors: {
+      enabled: boolean
+      turns: number // prune error inputs after N user turns (default: 4)
+      protectedTools: string[]
+    }
+    autoToolPruning: {
+      enabled: boolean
+      maxOutputTokens: number
+      keepRecentTurns: number
+      readLikeTools: string[]
+      readLikeTurns: number
+      protectedTools: string[]
+    }
+  }
+  protectedFilePatterns: string[]
+  pruneNotification: "off" | "minimal" | "detailed"
+}
+
+// ---------------------------------------------------------------------------
+// Defaults
+// ---------------------------------------------------------------------------
+
+const DEFAULT_CONFIG: DcpConfig = {
+  enabled: true,
+  debug: false,
+  manualMode: {
+    enabled: false,
+    automaticStrategies: true,
+  },
+  compress: {
+    maxContextPercent: 0.8,
+    minContextPercent: 0.4,
+    modelMaxContextPercent: {},
+    modelMinContextPercent: {},
+    summaryBuffer: true,
+    nudgeFrequency: 5,
+    iterationNudgeThreshold: 15,
+    nudgeForce: "soft",
+    protectedTools: ["compress", "write", "edit"],
+    protectTags: false,
+    protectUserMessages: false,
+    autoCandidates: {
+      enabled: true,
+      minContextPercent: 0.4,
+      keepRecentTurns: 2,
+      minMessages: 6,
+      minTokens: 1500,
+    },
+    messageMode: {
+      enabled: true,
+      minContextPercent: 0.4,
+      keepRecentTurns: 2,
+      mediumTokens: 500,
+      highTokens: 5000,
+      maxSuggestions: 5,
+    },
+  },
+  strategies: {
+    deduplication: {
+      enabled: true,
+      protectedTools: [],
+    },
+    purgeErrors: {
+      enabled: true,
+      turns: 4,
+      protectedTools: [],
+    },
+    autoToolPruning: {
+      enabled: true,
+      maxOutputTokens: 2000,
+      keepRecentTurns: 2,
+      readLikeTools: [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "repo_architecture",
+        "repo_structure",
+        "repo_ast",
+        "repo_search",
+        "repo_explain",
+        "repo_deps",
+        "ast_grep",
+      ],
+      readLikeTurns: 3,
+      protectedTools: [],
+    },
+  },
+  protectedFilePatterns: [],
+  pruneNotification: "detailed",
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Recursively merge `override` into `base`. Arrays are union-merged (deduped).
+ * Returns a new object; does not mutate inputs.
+ */
+function deepMerge<T>(base: T, override: Partial<T>): T {
+  if (override === null || override === undefined) return base
+  if (typeof base !== "object" || typeof override !== "object") {
+    return override as T
+  }
+
+  const result: Record<string, unknown> = { ...(base as Record<string, unknown>) }
+
+  for (const key of Object.keys(override as Record<string, unknown>)) {
+    const baseVal = (base as Record<string, unknown>)[key]
+    const overVal = (override as Record<string, unknown>)[key]
+
+    if (Array.isArray(baseVal) && Array.isArray(overVal)) {
+      // Union merge: combine and deduplicate by value
+      const combined = [...baseVal, ...overVal]
+      result[key] = [...new Set(combined)]
+    } else if (
+      overVal !== null &&
+      typeof overVal === "object" &&
+      !Array.isArray(overVal) &&
+      baseVal !== null &&
+      typeof baseVal === "object" &&
+      !Array.isArray(baseVal)
+    ) {
+      result[key] = deepMerge(
+        baseVal as Record<string, unknown>,
+        overVal as Record<string, unknown>,
+      )
+    } else if (overVal !== undefined) {
+      result[key] = overVal
+    }
+  }
+
+  return result as T
+}
+
+/**
+ * Parse a JSONC file and return a plain object.
+ * Returns `{}` on any error (missing file, parse error).
+ */
+function readJsoncFile(filePath: string): Record<string, unknown> {
+  let raw: string
+  try {
+    raw = fs.readFileSync(filePath, "utf8")
+  } catch {
+    return {}
+  }
+
+  const errors: ParseError[] = []
+  const parsed = parseJsonc(raw, errors)
+  if (errors.length > 0) {
+    // Non-fatal: return whatever was parsed (jsonc-parser is lenient)
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return {}
+  }
+  return parsed as Record<string, unknown>
+}
+
+/**
+ * Return the nested DCP config from a shared pi-tools-suite config file.
+ */
+function readDcpFromSuiteConfig(filePath: string): Record<string, unknown> {
+  const raw = readJsoncFile(filePath)
+  const dcp = raw["dcp"]
+  if (dcp === null || typeof dcp !== "object" || Array.isArray(dcp)) return {}
+  return dcp as Record<string, unknown>
+}
+
+/**
+ * Walk up from `startDir` looking for `.pi/dcp.jsonc`.
+ * Returns the path if found, otherwise null.
+ */
+function findProjectConfig(startDir: string): string | null {
+  let dir = path.resolve(startDir)
+  const root = path.parse(dir).root
+
+  while (true) {
+    const candidate = path.join(dir, ".pi", "dcp.jsonc")
+    if (fs.existsSync(candidate)) return candidate
+    if (dir === root) return null
+    const parent = path.dirname(dir)
+    if (parent === dir) return null
+    dir = parent
+  }
+}
+
+/**
+ * Walk up from `startDir` looking for `.pi/pi-tools-suite.jsonc`.
+ * Returns the path if found, otherwise null.
+ */
+function findProjectSuiteConfig(startDir: string): string | null {
+  let dir = path.resolve(startDir)
+  const root = path.parse(dir).root
+
+  while (true) {
+    const candidate = path.join(dir, ".pi", "pi-tools-suite.jsonc")
+    if (fs.existsSync(candidate)) return candidate
+    if (dir === root) return null
+    const parent = path.dirname(dir)
+    if (parent === dir) return null
+    dir = parent
+  }
+}
+
+function mergeConfigFile(config: DcpConfig, filePath: string): DcpConfig {
+  const raw = readJsoncFile(filePath)
+  if (Object.keys(raw).length === 0) return config
+  return deepMerge(config, raw as Partial<DcpConfig>)
+}
+
+function mergeSuiteDcpConfig(config: DcpConfig, filePath: string): DcpConfig {
+  const raw = readDcpFromSuiteConfig(filePath)
+  if (Object.keys(raw).length === 0) return config
+  return deepMerge(config, raw as Partial<DcpConfig>)
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/**
+ * Load the DCP configuration by merging (in order):
+ *  1. Built-in defaults
+ *  2. legacy ~/.config/pi/dcp.jsonc, then dcp in ~/.config/pi/pi-tools-suite.jsonc
+ *  3. legacy $PI_CONFIG_DIR/dcp.jsonc, then dcp in $PI_CONFIG_DIR/pi-tools-suite.jsonc
+ *  4. legacy <project>/.pi/dcp.jsonc, then dcp in nearest <project>/.pi/pi-tools-suite.jsonc
+ *
+ * The shared pi-tools-suite config wins over legacy dcp.jsonc at each layer so
+ * DCP settings can live beside the rest of the suite config while preserving
+ * backwards compatibility with existing standalone files.
+ */
+export function loadConfig(projectDir: string): DcpConfig {
+  // Layer 1: defaults (deep clone so we never mutate the constant)
+  let config: DcpConfig = deepMerge(DEFAULT_CONFIG, {})
+
+  // Layer 2: global config
+  const globalConfigPath = path.join(os.homedir(), ".config", "pi", "dcp.jsonc")
+  config = mergeConfigFile(config, globalConfigPath)
+  config = mergeSuiteDcpConfig(config, path.join(os.homedir(), ".config", "pi", "pi-tools-suite.jsonc"))
+
+  // Layer 3: $PI_CONFIG_DIR/dcp.jsonc
+  const piConfigDir = process.env["PI_CONFIG_DIR"]
+  if (piConfigDir) {
+    config = mergeConfigFile(config, path.join(piConfigDir, "dcp.jsonc"))
+    config = mergeSuiteDcpConfig(config, path.join(piConfigDir, "pi-tools-suite.jsonc"))
+  }
+
+  // Layer 4: project-local config (walk up from projectDir)
+  const projectConfigPath = findProjectConfig(projectDir)
+  if (projectConfigPath) config = mergeConfigFile(config, projectConfigPath)
+
+  const projectSuiteConfigPath = findProjectSuiteConfig(projectDir)
+  if (projectSuiteConfigPath) config = mergeSuiteDcpConfig(config, projectSuiteConfigPath)
+
+  return config
+}

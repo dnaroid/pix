@@ -1,0 +1,88 @@
+{
+  "name": "pi-ui-extend",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "bin": {
+    "pix": "./bin/pix.mjs"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/sdk.d.ts",
+      "import": "./dist/sdk.js"
+    },
+    "./sdk": {
+      "types": "./dist/sdk.d.ts",
+      "import": "./dist/sdk.js"
+    }
+  },
+  "files": [
+    "bin",
+    "docs",
+    "dist",
+    "extensions",
+    "external/pi-tools-suite/index.ts",
+    "external/pi-tools-suite/package.json",
+    "external/pi-tools-suite/README.md",
+    "external/pi-tools-suite/src",
+    "external/pi-tools-suite/docs",
+    "external/pi-tools-suite/licenses",
+    "README.md"
+  ],
+  "scripts": {
+    "predev": "npm run link:pix --silent",
+    "dev": "mise exec node@24.16.0 -- tsx src/main.ts",
+    "start": "mise exec node@24.16.0 -- tsx src/main.ts",
+    "build:pix": "mise exec node@24.16.0 -- tsc -p tsconfig.json",
+    "prelink:pix": "npm run build:pix --silent",
+    "link:pix": "mise exec node@24.16.0 -- npm link --silent",
+    "watch:pix": "npm run link:pix --silent && mise exec node@24.16.0 -- tsc -p tsconfig.json --watch --preserveWatchOutput --noEmitOnError",
+    "check": "mise exec node@24.16.0 -- npm run check:inner",
+    "check:inner": "tsc --noEmit && npm run test:inner",
+    "test": "mise exec node@24.16.0 -- npm run test:inner",
+    "test:inner": "node --import tsx --test \"tests/**/*.test.ts\"",
+    "test:coverage": "mise exec node@24.16.0 -- node --import tsx --test --experimental-test-coverage --test-coverage-include=src/**/*.ts --test-coverage-exclude=src/main.ts --test-coverage-lines=95 --test-coverage-branches=80 --test-coverage-functions=95 \"tests/**/*.test.ts\"",
+    "update-sdk-references": "mise exec node@24.16.0 -- node .pi/skills/pi-sdk/scripts/update-references.mjs",
+    "pack:dry-run": "npm pack --dry-run",
+    "smoke-test": "mise exec node@24.16.0 -- bash scripts/smoke-test-package.sh",
+    "release:check": "npm run check && npm run build:pix && npm run pack:dry-run",
+    "publish-npm": "bash scripts/publish.sh",
+    "prepublishOnly": "npm run check && npm run build:pix"
+  },
+  "dependencies": {
+    "@earendil-works/pi-tui": "0.77.0",
+    "@earendil-works/pi-ai": "0.77.0",
+    "@earendil-works/pi-coding-agent": "0.77.0",
+    "@juicesharp/rpiv-config": "^1.8.3",
+    "@mariozechner/pi-ai": "npm:@earendil-works/pi-ai@0.77.0",
+    "@mariozechner/pi-coding-agent": "npm:@earendil-works/pi-coding-agent@0.77.0",
+    "@mariozechner/pi-tui": "npm:@earendil-works/pi-tui@0.77.0",
+    "@mariozechner/clipboard": "^0.3.9",
+    "jsonc-parser": "3.3.1",
+    "typebox": "1.1.38",
+    "vscode-jsonrpc": "^8.2.1",
+    "vscode-languageserver-protocol": "^3.17.5"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.4",
+    "tsx": "4.22.1",
+    "typescript": "5.9.3"
+  },
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "overrides": {
+    "get-uv-event-loop-napi-h": "1.0.6",
+    "node-addon-api": "8.8.0"
+  },
+  "optionalDependencies": {
+    "vosk": "0.3.39"
+  },
+  "keywords": [
+    "pi",
+    "pix",
+    "coding-agent",
+    "terminal",
+    "renderer"
+  ]
+}

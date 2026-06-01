@@ -1,0 +1,54 @@
+{
+  "name": "pi-tools-suite-local",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local all-in-one Pi extension package for ast-grep, async subagents, LSP, model tools, and todos.",
+  "keywords": [
+    "pi-package",
+    "pi-extension"
+  ],
+  "module": "./src/index.ts",
+  "files": [
+    "index.ts",
+    "src",
+    "docs",
+    "licenses",
+    "README.md"
+  ],
+  "scripts": {
+    "smoke:explicit": "PI_OFFLINE=1 pi --extension ./index.ts --no-session --no-tools -p \"ping\"",
+    "smoke:auto": "PI_OFFLINE=1 pi --no-session --no-tools -p \"ping\"",
+    "smoke:tools": "PI_OFFLINE=1 pi --no-session -p \"ping\"",
+    "smoke": "npm run smoke:explicit && npm run smoke:auto && npm run smoke:tools",
+    "test": "bun test test",
+    "test:async-subagents-e2e": "ASYNC_SUBAGENTS_E2E=1 ASYNC_SUBAGENTS_MODEL=zai/glm-5-turbo bun test --concurrent --max-concurrency=30 test/async-subagents",
+    "test:async-subagents-selection-e2e": "ASYNC_SUBAGENTS_SELECTION_E2E=1 ASYNC_SUBAGENTS_MODEL=zai/glm-5-turbo bun test --concurrent --max-concurrency=30 test/async-subagents/selection-e2e.test.ts",
+    "bench:locate": "PI_LOCATE_BENCH_ITERATIONS=5 PI_LOCATE_BENCH_FAKE_IDX=0 PI_LOCATE_BENCH_MODEL=zai/glm-5-turbo PI_LOCATE_BENCH_MODES=direct-read-grep,ast-structural,repo-search-hybrid,repo-discovery,subagent-search,unrestricted-suite node test/fixtures/hard-to-find-project/benchmark/run-locate-benchmark.mjs",
+    "bench:locate:analyze": "node test/fixtures/hard-to-find-project/benchmark/analyze-locate-benchmark.mjs",
+    "test:locate-benchmark-e2e": "PI_LOCATE_BENCH_E2E=1 PI_LOCATE_BENCH_MODEL=zai/glm-5-turbo bun test test/locate-benchmark-e2e.test.ts",
+    "test:tool-selection-e2e": "TOOL_SELECTION_E2E=1 TOOL_SELECTION_E2E_MODEL=zai/glm-5-turbo bun test --concurrent --max-concurrency=30 test/tool-selection-e2e.test.ts",
+    "test:e2e": "TOOL_SELECTION_E2E=1 TOOL_SELECTION_E2E_MODEL=zai/glm-5-turbo ASYNC_SUBAGENTS_E2E=1 ASYNC_SUBAGENTS_MODEL=zai/glm-5-turbo bun test --concurrent --max-concurrency=5 test/tool-selection-e2e.test.ts test/async-subagents/e2e.test.ts test/async-subagents/selection-e2e.test.ts test/todo-persistence-e2e.test.ts",
+    "typecheck:async-subagents": "bash scripts/typecheck-source.sh",
+    "check": "npm run smoke"
+  },
+  "dependencies": {
+    "@juicesharp/rpiv-config": "^1.8.3",
+    "jsonc-parser": "^3.3.1",
+    "vscode-jsonrpc": "^8.2.1",
+    "vscode-languageserver-protocol": "^3.17.5"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5"
+  }
+}

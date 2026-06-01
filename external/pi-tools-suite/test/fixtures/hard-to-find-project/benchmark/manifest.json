@@ -1,0 +1,22 @@
+{
+  "name": "renewal-preview-contact-marker",
+  "prompt": "Support says opening the renewal-reminder preview page can make tomorrow's real reminder disappear. Find the exact code that marks the account as contacted during preview/dry-run, and explain the condition that causes it.",
+  "expected": {
+    "file": "src/platform/transit/packet-fold.ts",
+    "symbol": "foldPacketEdges",
+    "evidence": "lastPulseAt is overwritten from clock.iso() when the packet is not a commit and the edge disposition is observe.",
+    "lineContains": "lastPulseAt: shouldAdvancePulse ? input.clock.iso() : current.markers.lastPulseAt"
+  },
+  "successCriteria": [
+    "Answer cites src/platform/transit/packet-fold.ts",
+    "Answer names foldPacketEdges or the lastPulseAt assignment",
+    "Answer explains that a shadow/rehearsal preview path with observe disposition advances the pulse/contact marker"
+  ],
+  "decoyHints": [
+    "src/features/retention/reminder-policy.ts contains real reminder eligibility policy but not the mutation",
+    "src/features/retention/dry-run-ledger.ts explicitly says dry runs are not persisted",
+    "src/platform/audit/contact-log.ts records audit-only contact history",
+    "src/legacy/preview-reminder.ts is a dead compatibility adapter"
+  ],
+  "tokenMetric": "totalEstimatedTokens = burnedTokens + sub-agent session tokens; each estimate is ceil(serialized chars / 4). burnedTokens remains parent tool_call/tool_result I/O only."
+}

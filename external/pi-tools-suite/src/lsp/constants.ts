@@ -1,0 +1,9 @@
+export const DEFAULT_STARTUP_TIMEOUT_MS = 45_000;
+export const DEFAULT_DIAGNOSTICS_WAIT_MS = 10_000;
+export const DEFAULT_MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024;
+export const REQUEST_TIMEOUT_MS = 30_000;
+export const SHUTDOWN_WRITE_TIMEOUT_MS = 100;
+export const SHUTDOWN_TERM_TIMEOUT_MS = 2_000;
+export const SHUTDOWN_KILL_TIMEOUT_MS = 500;
+
+export const LSP_MANAGER_GLOBAL_KEY = "__piToolsSuiteLspManager";
