@@ -124,6 +124,46 @@ describe("loadSessionHistoryEntriesAsync", () => {
 		assert.deepEqual(entries.map((entry) => entry.kind), ["tool", "user"]);
 	});
 
+	it("marks historical subagent tool results as non-visual observations", async () => {
+		const entries: Entry[] = [];
+		const observedOptions: Array<{ showSnapshot?: boolean } | undefined> = [];
+
+		await loadSessionHistoryEntriesAsync({
+			messages: [
+				{ role: "assistant", content: [{ type: "toolCall", id: "subagents-old", name: "subagents", arguments: { action: "status" } }] },
+				{
+					role: "toolResult",
+					toolCallId: "subagents-old",
+					toolName: "subagents",
+					content: [{ text: "old active snapshot" }],
+					details: {
+						runDir: "/repo/.pi/subagents/old-run",
+						agents: [{ id: "agent-1", status: "running" }],
+						mode: "status",
+					},
+					isError: false,
+				},
+				{ role: "user", content: "newer message" },
+			],
+			addEntry: (entry) => entries.push(entry),
+			prependEntries: (newEntries) => entries.unshift(...newEntries),
+			setToolEntryId: () => {},
+			toolDefaultExpanded: () => false,
+			observeSubagentsToolResult: (_toolName, _details, options) => {
+				observedOptions.push(options);
+			},
+			observeTodoToolResult: () => {},
+			isCancelled: () => false,
+			render: () => {},
+			chunkSize: 1,
+			tailMessageCount: 1,
+		});
+
+		assert.deepEqual(entries.map((entry) => entry.kind), ["tool", "user"]);
+		assert.ok(observedOptions.length > 0);
+		assert.ok(observedOptions.every((options) => options?.showSnapshot === false));
+	});
+
 	it("stops prepending history when cancelled", async () => {
 		const entries: Entry[] = [];
 		let cancelled = false;

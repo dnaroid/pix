@@ -10,14 +10,19 @@ type ToolResultRecord = {
 	toolName?: string;
 };
 
+type SubagentsToolResultObserveOptions = {
+	showSnapshot?: boolean;
+};
+
 const SYSTEM_CUSTOM_MESSAGE_TYPE = "pix-system";
+const HISTORICAL_SUBAGENTS_OBSERVATION: SubagentsToolResultObserveOptions = { showSnapshot: false };
 
 export type LoadSessionHistoryOptions = {
 	messages: readonly unknown[] | undefined;
 	addEntry: (entry: Entry) => void;
 	setToolEntryId: (toolCallId: string, entryId: string) => void;
 	toolDefaultExpanded: (toolName: string) => boolean;
-	observeSubagentsToolResult: (toolName: string, details: unknown) => void;
+	observeSubagentsToolResult: (toolName: string, details: unknown, options?: SubagentsToolResultObserveOptions) => void;
 	observeTodoToolResult: (toolName: string, details: unknown, isError: boolean) => void;
 };
 
@@ -90,7 +95,7 @@ function buildToolResults(
 	for (let index = start; index < end; index += 1) {
 		const message = messages[index];
 		if (isRecord(message) && message.role === "toolResult") {
-			if (typeof message.toolName === "string") observers.observeSubagentsToolResult(message.toolName, message.details);
+			if (typeof message.toolName === "string") observers.observeSubagentsToolResult(message.toolName, message.details, HISTORICAL_SUBAGENTS_OBSERVATION);
 			toolResults.set(String(message.toolCallId), {
 				content: Array.isArray(message.content) ? message.content : [],
 				...(message.details === undefined ? {} : { details: message.details }),
@@ -177,7 +182,7 @@ function renderAssistantHistoryMessage(
 			const argsText = stringifyUnknown(block.arguments);
 			const output = result ? renderContent(result.content) : "";
 			const images = result ? extractImageContents(result.content) : [];
-			if (result?.details !== undefined) options.observeSubagentsToolResult(toolName, result.details);
+			if (result?.details !== undefined) options.observeSubagentsToolResult(toolName, result.details, HISTORICAL_SUBAGENTS_OBSERVATION);
 
 			const entryId = createId("tool");
 			options.addEntry({

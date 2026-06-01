@@ -500,23 +500,34 @@ describe("DCP pruning effectiveness", () => {
     expect(state.totalPruneCount).toBe(0);
   });
 
-  test("nudge throttling uses nudgeFrequency and lastNudgeTurn for every nudge type", () => {
+  test("nudge cadence honors frequency and can repeat during long user turns", () => {
     const state = createState();
     const cfg = config({ compress: { nudgeFrequency: 2, iterationNudgeThreshold: 4 } as any });
     state.currentTurn = 3;
-    state.nudgeCounter = 1;
+    state.nudgeCounter = 0;
 
     expect(getNudgeType(0.5, state, cfg, 0)).toBe(null);
 
-    state.nudgeCounter = 2;
+    state.nudgeCounter = 1;
     expect(getNudgeType(0.5, state, cfg, 0)).toBe("turn");
 
     state.lastNudgeTurn = 3;
-    expect(getNudgeType(0.9, state, cfg, 10)).toBe(null);
-
-    state.lastNudgeTurn = 2;
+    expect(getNudgeType(0.5, state, cfg, 0)).toBe("turn");
     expect(getNudgeType(0.9, state, cfg, 10)).toBe("context-soft");
     expect(getNudgeType(0.5, state, cfg, 10)).toBe("iteration");
+
+    const immediate = createState();
+    const immediateCfg = config({ compress: { nudgeFrequency: 1 } as any });
+    expect(getNudgeType(0.5, immediate, immediateCfg, 0)).toBe("turn");
+  });
+
+  test("nudge thresholds accept percent strings when called without pre-resolved thresholds", () => {
+    const state = createState();
+    const cfg = config({ compress: { minContextPercent: "25%", maxContextPercent: "80%", nudgeFrequency: 1 } as any });
+
+    expect(getNudgeType(0.24, state, cfg, 0)).toBe(null);
+    expect(getNudgeType(0.30, state, cfg, 0)).toBe("turn");
+    expect(getNudgeType(0.90, state, cfg, 0)).toBe("context-soft");
   });
 
   test("detects actionable compression candidates outside the active recent turns", () => {

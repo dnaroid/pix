@@ -41,7 +41,7 @@ export type AppSessionEventControllerHost = {
 	}): WorkspaceMutation | undefined;
 	scheduleUserSessionEntryMetadataSync(): void;
 	toolDefaultExpanded(toolName: string): boolean;
-	observeSubagentsToolResult(toolName: string, details: unknown): void;
+	observeSubagentsToolResult(toolName: string, details: unknown, options?: { showSnapshot?: boolean }): void;
 	observeTodoToolResult(toolName: string, details: unknown, isError?: boolean): void;
 	showToast(message: string, kind: "success" | "error" | "warning" | "info"): void;
 };
@@ -75,7 +75,7 @@ export class AppSessionEventController {
 			addEntry: (entry) => this.addEntry(entry),
 			setToolEntryId: (toolCallId, entryId) => this.toolEntryIdsByCallId.set(toolCallId, entryId),
 			toolDefaultExpanded: (toolName) => this.host.toolDefaultExpanded(toolName),
-			observeSubagentsToolResult: (toolName, details) => this.host.observeSubagentsToolResult(toolName, details),
+			observeSubagentsToolResult: (toolName, details, options) => this.host.observeSubagentsToolResult(toolName, details, options),
 			observeTodoToolResult: (toolName, details, isError) => this.host.observeTodoToolResult(toolName, details, isError),
 		});
 	}
@@ -90,7 +90,7 @@ export class AppSessionEventController {
 			prependEntries: (entries) => this.prependEntries(entries),
 			setToolEntryId: (toolCallId, entryId) => this.toolEntryIdsByCallId.set(toolCallId, entryId),
 			toolDefaultExpanded: (toolName) => this.host.toolDefaultExpanded(toolName),
-			observeSubagentsToolResult: (toolName, details) => this.host.observeSubagentsToolResult(toolName, details),
+			observeSubagentsToolResult: (toolName, details, options) => this.host.observeSubagentsToolResult(toolName, details, options),
 			observeTodoToolResult: (toolName, details, isError) => this.host.observeTodoToolResult(toolName, details, isError),
 			isCancelled: options.isCancelled,
 			render: options.render,

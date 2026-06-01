@@ -34,7 +34,7 @@ import {
 } from "./pruner.js"
 import { registerCompressTool } from "./compress-tool.js"
 import { registerCommands } from "./commands.js"
-import { DcpUiController } from "./ui.js"
+import { DcpUiController, normalizeDcpContextUsage } from "./ui.js"
 import { registerTuiFilter } from "./dcp-tui-filter.js"
 import { ignoreStaleExtensionContextError, safeGetContextUsage } from "../context-usage.js"
 
@@ -233,9 +233,20 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 		// In manual mode we still apply pruning strategies (if
 		// automaticStrategies is on) but skip routine autonomous nudges. Emergency
 		// max-context nudges are still allowed, matching the manual-mode prompt.
-		const usage = safeGetContextUsage(ctx)
-		if (usage && typeof usage.tokens === "number" && typeof usage.contextWindow === "number") {
-			const contextPercent = usage.tokens / usage.contextWindow
+		const usage = normalizeDcpContextUsage(safeGetContextUsage(ctx))
+		if (usage) {
+			const contextPercent = typeof usage.percent === "number" && Number.isFinite(usage.percent)
+				? usage.percent / 100
+				: typeof usage.tokens === "number"
+					? usage.tokens / usage.contextWindow
+					: undefined
+
+			if (contextPercent === undefined) {
+				updateUi(ctx)
+				emitContextUsage(ctx)
+				return { messages: prunedMessages }
+			}
+
 			const ctxModel = (ctx as any).model
 			const provider = ctxModel?.provider ?? ctxModel?.providerId ?? ctxModel?.providerID
 			const model = ctxModel?.id ?? ctxModel?.model ?? ctxModel?.modelId ?? ctxModel?.modelID

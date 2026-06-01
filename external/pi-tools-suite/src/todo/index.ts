@@ -1,11 +1,3 @@
-/**
- * rpiv-todo — Pi extension. Registers the `todo` tool and `/todos` slash
- * command.
- *
- * Extracted from rpiv-pi@7525a5d. Tool name "todo" preserved verbatim so
- * existing session history replays correctly after upgrade.
- */
-
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { autoClearCompletedTodos } from "./state/auto-clear.js";
 import { loadPersistedPlan, syncPersistedPlan } from "./state/persistence.js";

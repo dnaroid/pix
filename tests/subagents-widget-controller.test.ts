@@ -69,6 +69,19 @@ describe("subagents widget controller", () => {
 		controller.stopPolling();
 	});
 
+	it("does not show historical subagent snapshots synchronously", () => {
+		const controller = newController("/tmp/project", "/tmp/project/current.jsonl", false);
+
+		controller.observeToolResult("subagents", {
+			runDir: "/tmp/project/.pi/subagents/old-run",
+			agents: [{ id: "agent-1", status: "running" }],
+			mode: "status",
+		}, { showSnapshot: false });
+
+		assert.equal(controller.widgetState, undefined);
+		controller.stopPolling();
+	});
+
 	it("clears active snapshot when its run directory disappears", async () => {
 		const cwd = await mkdtemp(join(tmpdir(), "pix-subagents-"));
 		try {

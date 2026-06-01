@@ -4,12 +4,6 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createPiAiMock } from "./support/pi-ai-mock.js";
 
-mock.module("@juicesharp/rpiv-config", () => ({
-	configPath: (name: string) => `/tmp/${name}.json`,
-	loadJsonConfig: () => ({}),
-	validateGuidanceFields: (guidance: unknown) => guidance ?? {},
-}));
-
 mock.module("typebox", () => ({
 	Type: {
 		Object: (properties: any, options?: any) => ({ kind: "object", properties, options }),

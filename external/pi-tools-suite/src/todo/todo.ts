@@ -14,7 +14,6 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { TODO_TOOL_DESCRIPTION } from "../tool-descriptions.js";
-import { loadConfig, validateGuidanceFields } from "./config.js";
 import {
 	disablePersistence,
 	getTodoPlanPath,
@@ -368,13 +367,12 @@ export const DEFAULT_PROMPT_SNIPPET = TODO_TOOL_DESCRIPTION.promptSnippet ?? "";
 export const DEFAULT_PROMPT_GUIDELINES: string[] = TODO_TOOL_DESCRIPTION.promptGuidelines ?? [];
 
 export function registerTodoTool(pi: ExtensionAPI, hooks: TodoToolHooks = {}): void {
-	const guidance = validateGuidanceFields(loadConfig().guidance);
 	pi.registerTool({
 		...TODO_TOOL_DESCRIPTION,
 		name: TOOL_NAME,
 		label: TOOL_LABEL,
-		promptSnippet: guidance.promptSnippet ?? DEFAULT_PROMPT_SNIPPET,
-		promptGuidelines: guidance.promptGuidelines ?? DEFAULT_PROMPT_GUIDELINES,
+		promptSnippet: DEFAULT_PROMPT_SNIPPET,
+		promptGuidelines: DEFAULT_PROMPT_GUIDELINES,
 		parameters: TodoParamsSchema,
 
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {

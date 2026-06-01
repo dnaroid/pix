@@ -351,7 +351,7 @@ export class PiUiExtendApp {
 			recordWorkspaceMutationForUserEntry: (entryId, mutation) => this.workspaceActions.recordWorkspaceMutationForUserEntry(entryId, mutation),
 			scheduleUserSessionEntryMetadataSync: () => this.workspaceActions.scheduleUserSessionEntryMetadataSync(),
 			toolDefaultExpanded: (toolName) => this.toolDefaultExpanded(toolName),
-			observeSubagentsToolResult: (toolName, details) => this.subagentsWidgetController.observeToolResult(toolName, details),
+			observeSubagentsToolResult: (toolName, details, options) => this.subagentsWidgetController.observeToolResult(toolName, details, options),
 			observeTodoToolResult: (toolName, details, isError) => this.todoWidgetController.observeToolResult(toolName, details, isError),
 			showToast: (message, kind) => this.showToast(message, kind),
 		});

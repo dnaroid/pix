@@ -16,6 +16,10 @@ import type { SubagentRegistry } from "./types.js";
 
 const SUBAGENTS_FILE_WATCH_DEBOUNCE_MS = 75;
 
+export type SubagentsToolResultObserveOptions = {
+	showSnapshot?: boolean;
+};
+
 export type SubagentsWidgetControllerHost = {
 	readonly cwd: string;
 	sessionFile(): string | undefined;
@@ -61,15 +65,23 @@ export class AppSubagentsWidgetController {
 		this.updateState(undefined);
 	}
 
-	observeToolResult(toolName: string, details: unknown): void {
+	observeToolResult(toolName: string, details: unknown, options: SubagentsToolResultObserveOptions = {}): void {
 		if (!isSubagentsToolName(toolName)) return;
 		if (!isSubagentRunRenderDetails(details)) return;
 
 		const runDir = resolveSubagentRunDir(this.host.cwd, details.runDir);
 		const normalizedDetails: SubagentRunRenderDetails = { ...details, runDir };
+		if (normalizedDetails.tasks) this.taskPreviewsByRunDir.set(runDir, normalizedDetails.tasks);
+
+		if (options.showSnapshot === false) {
+			void this.refreshFromFiles(this.refreshGeneration);
+			this.schedulePoll(0);
+			this.startFileWatcher();
+			return;
+		}
+
 		this.currentRunDir = runDir;
 		this.snapshotByRunDir.set(runDir, normalizedDetails);
-		if (normalizedDetails.tasks) this.taskPreviewsByRunDir.set(runDir, normalizedDetails.tasks);
 
 		if (activeSubagentStates(normalizedDetails.agents).length > 0) {
 			this.state = {

@@ -55,7 +55,6 @@
     "@earendil-works/pi-tui": "0.77.0",
     "@earendil-works/pi-ai": "0.77.0",
     "@earendil-works/pi-coding-agent": "0.77.0",
-    "@juicesharp/rpiv-config": "^1.8.3",
     "@mariozechner/pi-ai": "npm:@earendil-works/pi-ai@0.77.0",
     "@mariozechner/pi-coding-agent": "npm:@earendil-works/pi-coding-agent@0.77.0",
     "@mariozechner/pi-tui": "npm:@earendil-works/pi-tui@0.77.0",
