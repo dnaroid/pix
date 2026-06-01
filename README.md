@@ -1,135 +1,205 @@
-# pi-ui-extend
+# Pix
 
-SDK-first prototype for a custom pi terminal renderer.
+Pix is a custom terminal UI for the Pi coding agent. It is built on the `@earendil-works/pi-coding-agent` SDK and provides its own renderer, input loop, session tabs, tool output controls, extension UI surface, and local voice input.
 
-This project intentionally does not use pi's built-in `InteractiveMode`. It creates an `AgentSessionRuntime` through the SDK, subscribes to agent events, and renders its own terminal UI with independent scroll and tool expansion state.
+The npm package is currently named `pi-ui-extend` and installs the `pix` CLI.
 
-## Install
+## Highlights
 
-This project is pinned to Node 24.16.0. `mise` users get this from `.mise.toml`; `.node-version` and `.nvmrc` are also present for other version managers. The npm scripts and `pix` launcher re-exec through Node 24 so native Vosk bindings are not built under newer Node releases.
+- SDK-first Pi runtime integration; Pix does not use Pi's built-in `InteractiveMode`.
+- Custom terminal renderer with streaming assistant output, thinking streams, tool rows, scrollback, and clickable tool expand/collapse state.
+- Workspace-scoped session tabs and persistent Pi sessions.
+- Local shell helpers through `!command` and raw TTY commands through `!!command`.
+- Optional local Vosk voice dictation with Russian and English models.
+- Pix extension UI helpers for toasts, menus, and rows above the input editor.
+- Bundled `pi-tools-suite` payload. On startup, Pix links it into Pi's standard user extension directory.
 
-```bash
-npm install --ignore-scripts
-```
+## Requirements
 
-After publication, users can install the CLI globally:
+- Node.js `24.x` (`24.16.0` is pinned for development).
+- A terminal with good Unicode support. JetBrainsMono Nerd Font is recommended for the default icon theme.
+- Optional for voice input: SoX (`rec`/`sox`), `ffmpeg`, or Linux `arecord`.
+
+Development uses `mise` when available. `.node-version` and `.nvmrc` are also provided for other Node version managers.
+
+## Installation
+
+After publication, install Pix globally from npm:
 
 ```bash
 npm install -g pi-ui-extend --ignore-scripts
 ```
 
-The published package ships the built Pix renderer and a `pi-tools-suite` extension payload. On startup Pix links that suite into the standard user extension location (`~/.pi/agent/extensions/pi-tools-suite` on macOS/Linux), so users do not need to clone this repo or build from TypeScript.
+The published package contains built JavaScript, the `pix` launcher, renderer extensions, documentation, and the bundled `pi-tools-suite` extension payload. Users do not need to clone the repository or build TypeScript locally.
 
-## Run
+On startup, Pix ensures the bundled suite is available at:
 
-```bash
-npm run link:pix
-pix --cwd /path/to/project
+```text
+~/.pi/agent/extensions/pi-tools-suite
 ```
 
-During local development, run the watcher in another terminal so the global `pix` command is rebuilt after source changes:
+If that path already contains a real directory, Pix leaves it untouched. If it is a Pix-managed symlink, Pix refreshes it as needed.
+
+## Quick start
 
 ```bash
-npm run watch:pix
+pix --cwd /path/to/workspace
 ```
 
-For multiple live `pix` instances, enable per-instance reload. Each running instance will restart itself after `watch:pix` emits a successful build:
-
-```bash
-PIX_RELOAD_ON_BUILD=1 pix --cwd /path/to/project
-# or:
-pix --reload-on-build --cwd /path/to/project
-```
-
-Or run directly in dev mode; this also rebuilds and refreshes the global `pix` link once before starting:
-
-```bash
-npm run dev -- --cwd /path/to/project
-```
-
-If `--cwd` is omitted, the current working directory is used as the agent workspace.
+If `--cwd` is omitted, Pix uses the current directory as the agent workspace.
 
 Useful flags:
 
-- `--cwd <path>`: workspace used by pi tools, resources, settings, and sessions
-- `--no-session`: keep the SDK session in memory
-- `--model <provider/model[:thinking]>`: request a specific model, e.g. `anthropic/claude-sonnet-4-20250514:medium`
+- `--cwd <path>`: workspace used for Pi tools, settings, resources, and sessions.
+- `--no-session`: run with an in-memory SDK session.
+- `--model <provider/model[:thinking]>`: request a specific model, for example `anthropic/claude-sonnet-4-20250514:medium`.
+- `--reload-on-build`: restart the running Pix process after a successful watcher build.
 
-Useful environment variables:
+## Updating Pix
 
-- `PIX_DISABLE_TERMINAL_OUTPUT_BUFFER=1`: disable Pix terminal output region buffering. `PIX_TERMINAL_OUTPUT_BUFFER=0` is also accepted.
-- `PIX_USE_FALLBACK_ICONS=1` or `PIX_ICON_THEME=fallback`: use plain fallback icons when the Nerd Font icon glyphs are not available. `PIX_ICON_THEME=nerdFont` restores the icon-font theme.
+Inside Pix, run:
 
-## Updates
+```text
+/update
+```
 
-Use `/update` inside Pix to check the currently installed package version without mutating the running process. It reports the current Pix version, the latest npm version when reachable, and whether the installed package can self-update.
+This checks the currently installed package version without mutating the running process.
 
 From a shell:
 
 ```bash
 pix update --check  # check only
 pix update          # update a package-manager install
-pix update --force  # reinstall even if the check cannot prove an update is needed
+pix update --force  # reinstall even when the check cannot prove an update is needed
 ```
 
-`pix update` updates the Pix npm package, its pinned Pi SDK dependencies, renderer-owned extensions, and the `pi-tools-suite` payload. The next Pix startup refreshes the standard user extension link at `~/.pi/agent/extensions/pi-tools-suite`. Source checkouts should be updated with:
+`pix update` updates the Pix npm package, pinned Pi SDK dependencies, renderer-owned extensions, and the bundled `pi-tools-suite` payload. The next Pix startup refreshes the extension link in `~/.pi/agent/extensions/pi-tools-suite`.
+
+Update checks respect:
+
+- `PI_OFFLINE=1`
+- `PI_SKIP_VERSION_CHECK=1`
+- `PIX_SKIP_VERSION_CHECK=1`
+
+Pi packages managed separately by Pi still use Pi's package manager:
 
 ```bash
-git pull && npm install --ignore-scripts && npm run build:pix && npm run link:pix
+pi update --extensions
+# or
+pi update
 ```
 
-Pix respects `PI_OFFLINE=1`, `PI_SKIP_VERSION_CHECK=1`, and `PIX_SKIP_VERSION_CHECK=1` for update checks. Pi packages installed separately through Pi settings still use Pi's own package manager: run `pi update --extensions` or `pi update` when you need to update those resources.
+## Local development
 
-For release verification, see [docs/release.md](docs/release.md).
-
-Maintainers publish a new npm version with:
+Install dependencies:
 
 ```bash
-npm run publish-npm          # patch release
-npm run publish-npm -- minor # minor release
+npm install --ignore-scripts
 ```
 
-The command requires a clean `master`, bumps the root package version, smoke-tests the packed tarball, then pushes the release tag for GitHub Actions to publish.
+Link the local `pix` command:
+
+```bash
+npm run link:pix
+```
+
+Run Pix against a workspace:
+
+```bash
+pix --cwd /path/to/workspace
+```
+
+During UI development, run the watcher in another terminal:
+
+```bash
+npm run watch:pix
+```
+
+Each running instance can reload after successful builds:
+
+```bash
+PIX_RELOAD_ON_BUILD=1 pix --cwd /path/to/workspace
+# or
+pix --reload-on-build --cwd /path/to/workspace
+```
+
+For a one-shot dev launch that rebuilds and refreshes the global link first:
+
+```bash
+npm run dev -- --cwd /path/to/workspace
+```
+
+Before committing code changes, run:
+
+```bash
+npm run check
+```
+
+## Configuration
+
+Useful environment variables:
+
+- `PIX_DISABLE_TERMINAL_OUTPUT_BUFFER=1` or `PIX_TERMINAL_OUTPUT_BUFFER=0`: disable Pix terminal output region buffering.
+- `PIX_USE_FALLBACK_ICONS=1` or `PIX_ICON_THEME=fallback`: use plain fallback icons when Nerd Font glyphs are unavailable.
+- `PIX_ICON_THEME=nerdFont`: force the Nerd Font icon theme.
+- `PIX_ANTIGRAVITY_GOOGLE_CLIENT_ID` / `ANTIGRAVITY_GOOGLE_CLIENT_ID`: Google OAuth client ID used for Antigravity quota/login integrations.
+- `PIX_ANTIGRAVITY_GOOGLE_CLIENT_SECRET` / `ANTIGRAVITY_GOOGLE_CLIENT_SECRET`: Google OAuth client secret used for Antigravity quota/login integrations.
+
+Pix user configuration is read from:
+
+```text
+~/.config/pi/pix.jsonc
+```
+
+Example fallback icon configuration:
+
+```jsonc
+{
+  "iconTheme": "fallback"
+}
+```
 
 ## Controls
 
-- `Enter`: submit prompt
-- `!command`: run a local shell command in an in-chat ephemeral block; output is visible only in the local UI and is not saved to the SDK session
-- while a `!command` shell is running: `Enter` sends the editor text to the shell stdin; `Ctrl+C` interrupts the shell process
-- `!!command`: run a shell command in the raw interactive terminal for full-screen/TTY programs
-- `Ctrl+C`: exit, or abort the running agent first
-- `Ctrl+D`: exit when the input line is empty
-- `Ctrl+L`: redraw
-- `Ctrl+G`: start/stop local Vosk voice input
-- `PageUp` / `PageDown`: scroll conversation
-- mouse wheel: scroll conversation
-- click a tool row: expand/collapse that tool result
-- click the right-aligned `󰍬 RU` / `󰍬 EN` status widget: the Nerd Font microphone icon (`U+F036C`) toggles voice input, the language label switches Russian/English
+- `Enter`: submit the prompt.
+- `!command`: run a local shell command in an in-chat ephemeral block. Output is visible only in the local UI and is not saved to the SDK session.
+- While a `!command` shell is running: `Enter` sends editor text to shell stdin; `Ctrl+C` interrupts the shell process.
+- `!!command`: run a shell command in the raw interactive terminal for full-screen or TTY programs.
+- `Ctrl+C`: exit Pix, or abort the running agent first.
+- `Ctrl+D`: exit when the input line is empty.
+- `Ctrl+L`: redraw.
+- `Ctrl+G`: start or stop local Vosk voice input.
+- `PageUp` / `PageDown`: scroll the conversation.
+- Mouse wheel: scroll the conversation.
+- Click a tool row: expand or collapse that tool result.
+- Click the right-aligned microphone/language status widget: toggle voice input and switch Russian/English dictation.
 
 ## Voice input
 
-Pix can dictate into the prompt through local Vosk. The first start for each language downloads the small Vosk model into `models/vosk/` inside this project (gitignored):
+Pix can dictate into the prompt through local Vosk. The first start for each language downloads the small model into the gitignored `models/vosk/` directory inside this project:
 
 - Russian: `vosk-model-small-ru-0.22`
 - English: `vosk-model-small-en-us-0.15`
 
 Runtime requirements:
 
-- optional npm package `vosk` (Pix installs/rebuilds it automatically with scripts enabled on first voice start if the native binding is missing; install progress is printed into the chat as `system:` messages)
-- a local recorder: SoX (`rec`/`sox`) preferred, or `ffmpeg`; Linux also supports `arecord`
-- JetBrainsMono Nerd Font for app icons. On macOS Pix checks this at startup and installs the Homebrew cask `font-jetbrains-mono-nerd-font` when it is missing. If the terminal still renders missing glyphs, start Pix with `PIX_USE_FALLBACK_ICONS=1` or set `{ "iconTheme": "fallback" }` in `~/.config/pi/pix.jsonc`.
+- Optional npm package `vosk`. Pix installs or rebuilds it automatically with scripts enabled on first voice start if the native binding is missing.
+- A local recorder: SoX (`rec`/`sox`) preferred, or `ffmpeg`; Linux also supports `arecord`.
+- JetBrainsMono Nerd Font for default app icons. On macOS, Pix checks this at startup and can install the Homebrew cask `font-jetbrains-mono-nerd-font` when it is missing.
 
-## Pix SDK
+If your terminal renders missing glyphs, start Pix with `PIX_USE_FALLBACK_ICONS=1` or set `iconTheme` to `fallback` in `~/.config/pi/pix.jsonc`.
 
-Pix exposes a small SDK surface for extensions that want to use renderer-specific UI features. Import types and helpers from `pi-ui-extend/sdk`:
+## Pix extension SDK
+
+Pix exposes a small SDK surface for extensions that need renderer-specific UI features. Import types and helpers from `pi-ui-extend/sdk`:
 
 ```ts
 import type {
-	ExtensionWidgetFactory,
-	PixExtensionUIContext,
-	PixMenuItem,
-	ToastKind,
-	ToastNotifier,
+  ExtensionWidgetFactory,
+  PixExtensionUIContext,
+  PixMenuItem,
+  ToastKind,
+  ToastNotifier,
 } from "pi-ui-extend/sdk";
 import { TOAST_KINDS, isToastKind } from "pi-ui-extend/sdk";
 ```
@@ -151,12 +221,12 @@ Use `ctx.ui.toast` from a Pix extension UI context:
 
 ```ts
 export async function activate(ctx: { ui: PixExtensionUIContext }) {
-	ctx.ui.toast.success("Saved");
-	ctx.ui.toast.error("Build failed");
-	ctx.ui.toast.warning("Using fallback model");
-	ctx.ui.toast.info("Index refreshed");
+  ctx.ui.toast.success("Saved");
+  ctx.ui.toast.error("Build failed");
+  ctx.ui.toast.warning("Using fallback model");
+  ctx.ui.toast.info("Index refreshed");
 
-	ctx.ui.toast.show("Custom message", "success");
+  ctx.ui.toast.show("Custom message", "success");
 }
 ```
 
@@ -169,12 +239,12 @@ ctx.ui.notify("Check config", "warning");
 
 ### Rendering above the input
 
-Use `ctx.ui.aboveInput` to render extension-controlled rows above the prompt editor, in the same area where Pix shows the built-in todo and subagents panels.
+Use `ctx.ui.aboveInput` to render extension-controlled rows above the prompt editor, in the same area where Pix shows built-in todo and subagents panels.
 
 ```ts
 ctx.ui.aboveInput.set("my-extension/status", [
-	"My extension is watching files",
-	"Press /my-command for details",
+  "My extension is watching files",
+  "Press /my-command for details",
 ]);
 
 ctx.ui.aboveInput.clear("my-extension/status");
@@ -184,14 +254,14 @@ For dynamic content, pass a widget factory. It receives a `WidgetTuiHandle` with
 
 ```ts
 const widget: ExtensionWidgetFactory = (tui) => ({
-	render: () => ["Dynamic extension row"],
-	invalidate: () => tui.requestRender(),
+  render: () => ["Dynamic extension row"],
+  invalidate: () => tui.requestRender(),
 });
 
 ctx.ui.renderAboveInput("my-extension/dynamic", widget);
 ```
 
-The lower-level `ctx.ui.setWidget(key, content, { placement })` API is still available; `aboveInput` is the preferred Pix SDK wrapper for rows above the input. Use `placement: "belowEditor"` only when you explicitly need rows below the prompt editor.
+The lower-level `ctx.ui.setWidget(key, content, { placement })` API is still available. `aboveInput` is the preferred Pix SDK wrapper for rows above the input. Use `placement: "belowEditor"` only when you explicitly need rows below the prompt editor.
 
 ### Menus
 
@@ -199,12 +269,12 @@ Use `ctx.ui.menu.show()` or `ctx.ui.showMenu()` to open a Pix popup menu. The pr
 
 ```ts
 const choice = await ctx.ui.menu.show<string>([
-	{ value: "copy", label: "Copy", description: "Copy result" },
-	{ value: "open", label: "Open", description: "Open in editor" },
-	{ value: "delete", label: "Delete", description: "Remove item", variant: "error" },
+  { value: "copy", label: "Copy", description: "Copy result" },
+  { value: "open", label: "Open", description: "Open in editor" },
+  { value: "delete", label: "Delete", description: "Remove item", variant: "error" },
 ], {
-	title: "Choose an action",
-	placeholder: "Filter actions",
+  title: "Choose an action",
+  placeholder: "Filter actions",
 });
 
 if (choice === "copy") ctx.ui.toast.success("Copied");
@@ -212,23 +282,26 @@ if (choice === "copy") ctx.ui.toast.success("Copied");
 
 Menu items are searchable by label and `keywords` by default. Pass `searchable: false` to disable filtering. `ctx.ui.select(title, options)` is implemented on top of the same Pix menu renderer for simple string choices.
 
-## Current scope
+## Release process
 
-Implemented:
+Maintainers publish a new npm version with:
 
-- SDK runtime bootstrap
-- custom terminal event loop
-- streaming assistant text
-- thinking stream capture
-- tool start/update/end rows
-- independent scroll state
-- clickable tool expand/collapse
-- basic SGR mouse parsing
+```bash
+npm run publish-npm          # patch release
+npm run publish-npm -- minor # minor release
+npm run publish-npm -- major # major release
+```
 
-Not implemented yet:
+The publish command requires a clean `master`, runs release checks, bumps the root package version, smoke-tests the packed tarball, and pushes the release tag. GitHub Actions publishes tagged releases to npm using the `NPM_TOKEN` repository secret.
 
-- text selection/copy
-- full prompt editor behavior
-- session picker/fork UI
-- model picker UI
-- extension dialog rendering beyond SDK defaults
+For the full release checklist, see [docs/release.md](docs/release.md).
+
+## Current limitations
+
+Pix is actively evolving. Known gaps include:
+
+- Text selection/copy support in the custom renderer.
+- Full prompt editor parity with mature terminal editors.
+- Dedicated session picker/fork UI.
+- Dedicated model picker UI.
+- Extension dialog rendering beyond SDK defaults.
