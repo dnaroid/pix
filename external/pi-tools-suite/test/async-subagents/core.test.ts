@@ -809,6 +809,32 @@ setTimeout(() => {}, 1000);
 		expect(fs.existsSync(path.join(agentDir, "stderr.log"))).toBe(false);
 	});
 
+	test.serial("notifies completion when the pi process cannot be spawned", async () => {
+		const cwd = tempDir();
+		const runDir = createRunDir(cwd, "spawn-error");
+		const originalPath = process.env.PATH;
+		process.argv[1] = path.join(tempDir(), "not-present.js");
+		process.env.PATH = tempDir();
+
+		try {
+			const completed = await Promise.race([
+				new Promise<any>((resolve) => {
+					spawnAgent(runDir, { id: "agent-1", task: "Do work" }, cwd, [], undefined, resolve);
+				}),
+				new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Timed out waiting for spawn error completion")), 1000)),
+			]);
+
+			expect(completed).toMatchObject({ runDir, agentId: "agent-1", exitCode: 1, state: { status: "failed" } });
+			const agentDir = path.join(runDir, "agent-1");
+			expect(fs.readFileSync(path.join(agentDir, "result.md"), "utf-8")).toContain("pi");
+			expect(fs.readFileSync(path.join(agentDir, "exit_code"), "utf-8")).toBe("1");
+			expect(fs.readFileSync(path.join(agentDir, "stderr.log"), "utf-8")).toContain("pi");
+		} finally {
+			if (originalPath === undefined) delete process.env.PATH;
+			else process.env.PATH = originalPath;
+		}
+	});
+
 	test.serial("writes session metadata when sub-agent sessions are enabled", async () => {
 		const cwd = tempDir();
 		const runDir = createRunDir(cwd, "spawn-session");

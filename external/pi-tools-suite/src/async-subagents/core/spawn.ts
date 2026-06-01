@@ -306,7 +306,15 @@ export function spawnAgent(
 	});
 
 	proc.once("error", (error) => {
-		stderrStream.write(`${String(error)}\n`);
+		const message = String(error);
+		stderrStream.write(`${message}\n`);
+		shouldKeepStderr = true;
+		if (fs.existsSync(agentDir) && !fs.existsSync(path.join(agentDir, "result.md"))) {
+			fs.writeFileSync(path.join(agentDir, "result.md"), message, "utf-8");
+		}
+		stderrStream.flush();
+		transcriptStream.end();
+		notifyComplete(1);
 	});
 
 	proc.stdin.write(
