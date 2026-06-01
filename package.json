@@ -21,6 +21,7 @@
     "docs",
     "dist",
     "extensions",
+    "skills",
     "external/pi-tools-suite/index.ts",
     "external/pi-tools-suite/package.json",
     "external/pi-tools-suite/README.md",

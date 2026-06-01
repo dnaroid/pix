@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { lstat, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -7,8 +7,11 @@ import { describe, it } from "node:test";
 import { createAgentSessionServices, discoverAndLoadExtensions, type LoadExtensionsResult } from "@earendil-works/pi-coding-agent";
 import {
 	bundledQuestionExtensionPath,
+	bundledSkillsInstallPath,
+	bundledSkillsSourcePath,
 	bundledSessionTitleExtensionPath,
 	bundledTerminalBellExtensionPath,
+	ensureBundledSkillsInstalled,
 	ensurePiToolsSuiteExtensionInstalled,
 	getBundledExtensionPaths,
 	prioritizeBundledQuestionExtension,
@@ -97,6 +100,30 @@ describe("bundled extensions", () => {
 		} finally {
 			await rm(root, { recursive: true, force: true });
 		}
+	});
+
+	it("copies bundled skills into the global Agent Skills directory", async () => {
+		const root = await mkdtemp(join(tmpdir(), "pix-skills-install-"));
+		try {
+			const sourcePath = join(root, "package", "skills");
+			const targetPath = join(root, "home", ".agents", "skills");
+			await mkdir(join(sourcePath, "demo", "references"), { recursive: true });
+			await writeFile(join(sourcePath, "demo", "SKILL.md"), "---\nname: demo\ndescription: demo\n---\n", "utf8");
+			await writeFile(join(sourcePath, "demo", "references", "guide.md"), "guide\n", "utf8");
+
+			const result = await ensureBundledSkillsInstalled({ sourcePath, targetPath });
+
+			assert.equal(result.action, "installed");
+			assert.equal(await readFile(join(targetPath, "demo", "SKILL.md"), "utf8"), "---\nname: demo\ndescription: demo\n---\n");
+			assert.equal(await readFile(join(targetPath, "demo", "references", "guide.md"), "utf8"), "guide\n");
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
+	it("resolves bundled skills source and target paths", () => {
+		assert.match(bundledSkillsSourcePath(), /skills$/u);
+		assert.equal(bundledSkillsInstallPath(join("/tmp", "home")), join("/tmp", "home", ".agents", "skills"));
 	});
 
 	it("keeps an existing real pi-tools-suite extension directory", async () => {

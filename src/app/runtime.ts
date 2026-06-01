@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
-import { lstat, mkdir, readlink, realpath, rm, symlink } from "node:fs/promises";
+import { cp, lstat, mkdir, readlink, realpath, rm, symlink } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -37,6 +38,11 @@ const PI_TOOLS_SUITE_SOURCE_DIR = resolve(
 	"external",
 	PI_TOOLS_SUITE_EXTENSION_NAME,
 );
+const BUNDLED_SKILLS_SOURCE_DIR = resolve(
+	dirname(fileURLToPath(import.meta.url)),
+	"../..",
+	"skills",
+);
 
 export type PiToolsSuiteInstallAction = "installed" | "already-installed" | "existing-kept" | "missing-source";
 
@@ -48,6 +54,20 @@ export type PiToolsSuiteInstallResult = {
 
 export type PiToolsSuiteInstallOptions = {
 	agentDir?: string;
+	sourcePath?: string;
+	targetPath?: string;
+};
+
+export type BundledSkillsInstallAction = "installed" | "already-installed" | "missing-source";
+
+export type BundledSkillsInstallResult = {
+	action: BundledSkillsInstallAction;
+	sourcePath: string;
+	targetPath: string;
+};
+
+export type BundledSkillsInstallOptions = {
+	homeDir?: string;
 	sourcePath?: string;
 	targetPath?: string;
 };
@@ -70,6 +90,14 @@ export function piToolsSuiteExtensionSourcePath(): string {
 
 export function piToolsSuiteExtensionInstallPath(agentDir = getAgentDir()): string {
 	return join(agentDir, "extensions", PI_TOOLS_SUITE_EXTENSION_NAME);
+}
+
+export function bundledSkillsSourcePath(): string {
+	return BUNDLED_SKILLS_SOURCE_DIR;
+}
+
+export function bundledSkillsInstallPath(homeDir = homedir()): string {
+	return join(homeDir, ".agents", "skills");
 }
 
 export async function ensurePiToolsSuiteExtensionInstalled(options: PiToolsSuiteInstallOptions = {}): Promise<PiToolsSuiteInstallResult> {
@@ -103,6 +131,23 @@ export async function ensurePiToolsSuiteExtensionInstalled(options: PiToolsSuite
 	}
 
 	return { action: "existing-kept", sourcePath, targetPath };
+}
+
+export async function ensureBundledSkillsInstalled(options: BundledSkillsInstallOptions = {}): Promise<BundledSkillsInstallResult> {
+	const sourcePath = resolve(options.sourcePath ?? bundledSkillsSourcePath());
+	const targetPath = resolve(options.targetPath ?? bundledSkillsInstallPath(options.homeDir));
+	const sourceStat = await lstat(sourcePath).catch(() => undefined);
+	if (!sourceStat?.isDirectory()) {
+		return { action: "missing-source", sourcePath, targetPath };
+	}
+
+	if (await pathsReferToSameEntry(sourcePath, targetPath)) {
+		return { action: "already-installed", sourcePath, targetPath };
+	}
+
+	await mkdir(dirname(targetPath), { recursive: true });
+	await cp(sourcePath, targetPath, { recursive: true, force: true });
+	return { action: "installed", sourcePath, targetPath };
 }
 
 export function getBundledExtensionPaths(): string[] {
@@ -175,6 +220,7 @@ export async function createPixRuntime(options: AppOptions, runtimeOptions: Crea
 	const parsedModel = options.modelRef ? parseModelRef(options.modelRef) : undefined;
 	const agentDir = getAgentDir();
 	const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, sessionManager, sessionStartEvent }) => {
+		await ensureBundledSkillsInstalled();
 		await ensurePiToolsSuiteExtensionInstalled({ agentDir });
 		const bundledExtensionPaths = getBundledExtensionPaths();
 		const services = await createAgentSessionServices({

@@ -55,6 +55,7 @@ Options:
   -h, --help Show this help
 
 Inside the TUI, /update performs the same non-mutating check.
+The bundled skills payload under skills/ is copied into ~/.agents/skills on startup.
 The pi-tools-suite payload under external/pi-tools-suite is updated with Pix and linked into ~/.pi/agent/extensions on startup.`;
 }
 
@@ -155,7 +156,7 @@ export function formatPixUpdateCheck(result: PixUpdateCheckResult): string {
 			break;
 	}
 
-	lines.push("scope: Pix package, renderer extensions, and the pi-tools-suite payload linked into ~/.pi/agent/extensions");
+	lines.push("scope: Pix package, renderer extensions, bundled skills copied into ~/.agents/skills, and the pi-tools-suite payload linked into ~/.pi/agent/extensions");
 	return lines.join("\n");
 }
 
