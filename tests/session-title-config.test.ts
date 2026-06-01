@@ -9,6 +9,7 @@ const testConfigDir = join(testHome, ".config", "pi");
 const testConfigPath = join(testConfigDir, "pix.jsonc");
 const dedicatedConfigPath = join(testConfigDir, "session-title.jsonc");
 process.env.HOME = testHome;
+process.env.USERPROFILE = testHome;
 delete process.env.PI_CONFIG_DIR;
 delete process.env.PI_OFFLINE;
 delete process.env.PI_SESSION_TITLE_ENABLED;

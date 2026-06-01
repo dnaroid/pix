@@ -8,6 +8,7 @@ const testHome = mkdtempSync(join(tmpdir(), "pix-config-home-"));
 const testConfigDir = join(testHome, ".config", "pi");
 const testConfigPath = join(testConfigDir, "pix.jsonc");
 process.env.HOME = testHome;
+process.env.USERPROFILE = testHome;
 delete process.env.PIX_ICON_THEME;
 delete process.env.PIX_USE_FALLBACK_ICONS;
 

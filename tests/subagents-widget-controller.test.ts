@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { describe, it } from "node:test";
 
 import { AppSubagentsWidgetController } from "../src/app/subagents-widget-controller.js";
@@ -61,7 +61,7 @@ describe("subagents widget controller", () => {
 			agents: [{ id: "agent-1", status: "running" }],
 			mode: "spawn",
 		});
-		assert.equal(controller.widgetState?.runDir, "/tmp/project/.pi/subagents/owned-run");
+		assert.equal(controller.widgetState?.runDir, resolve("/tmp/project/.pi/subagents/owned-run"));
 
 		controller.reset();
 

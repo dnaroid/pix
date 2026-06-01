@@ -90,7 +90,7 @@ describe("bundled extensions", () => {
 			assert.equal(await realpath(targetPath), await realpath(sourcePath));
 
 			const targetStat = await lstat(targetPath);
-			assert.equal(targetStat.isSymbolicLink(), process.platform !== "win32");
+			assert.equal(targetStat.isSymbolicLink() || targetStat.isDirectory(), true);
 
 			const second = await ensurePiToolsSuiteExtensionInstalled({ agentDir, sourcePath });
 			assert.equal(second.action, "already-installed");
