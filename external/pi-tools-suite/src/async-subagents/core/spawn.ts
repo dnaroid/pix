@@ -23,6 +23,9 @@ export interface SpawnAgentOptions {
 export const DEFAULT_AGENT_TIMEOUT_MS = 30 * 60 * 1000;
 const AGENT_TIMEOUT_EXIT_CODE = 124;
 const AGENT_TIMEOUT_KILL_GRACE_MS = 5_000;
+const AGENT_END_TERMINATE_GRACE_MS = 50;
+const AGENT_END_COMPLETION_FALLBACK_MS = 1_000;
+const EXIT_STDIO_FLUSH_GRACE_MS = 10;
 
 export function shouldPersistSubagentSessions(env: NodeJS.ProcessEnv = process.env): boolean {
 	return isTruthyEnv(env.ASYNC_SUBAGENTS_ENABLE_SESSIONS);
@@ -134,6 +137,9 @@ export function spawnAgent(
 	let shouldKeepStderr = false;
 	let timeoutTimer: NodeJS.Timeout | undefined;
 	let timeoutKillTimer: NodeJS.Timeout | undefined;
+	let agentEndKillTimer: NodeJS.Timeout | undefined;
+	let agentEndCompletionFallbackTimer: NodeJS.Timeout | undefined;
+	let exitFinalizationTimer: NodeJS.Timeout | undefined;
 	const suppressedRpcEventCounts = new Map<string, number>();
 
 	const notifyComplete = (exitCode: number) => {
@@ -142,6 +148,9 @@ export function spawnAgent(
 		completionNotified = true;
 		if (timeoutTimer) clearTimeout(timeoutTimer);
 		if (timeoutKillTimer) clearTimeout(timeoutKillTimer);
+		if (agentEndKillTimer) clearTimeout(agentEndKillTimer);
+		if (agentEndCompletionFallbackTimer) clearTimeout(agentEndCompletionFallbackTimer);
+		if (exitFinalizationTimer) clearTimeout(exitFinalizationTimer);
 		if (!fs.existsSync(agentDir)) {
 			onComplete?.({
 				runDir,
@@ -177,6 +186,56 @@ export function spawnAgent(
 			/* non-critical: do not block completion */
 		}
 		onComplete?.({ runDir, agentId: task.id, agentDir, exitCode, state });
+	};
+
+	const finalizeCompletion = (code: number | null, signal: NodeJS.Signals | null) => {
+		if (completionNotified) return;
+		writeSuppressedRpcEventSummary(transcriptStream, suppressedRpcEventCounts);
+		const exitCode = resolveAgentExitCode({
+			timedOut,
+			completedFromAgentEnd,
+			lastAgentEndError,
+			code,
+			signal,
+		});
+		if (fs.existsSync(agentDir)) {
+			if (exitCode === 0 && !fs.existsSync(path.join(agentDir, "result.md")) && lastAssistantResult.trim()) {
+				fs.writeFileSync(path.join(agentDir, "result.md"), lastAssistantResult.trim(), "utf-8");
+			} else if (exitCode !== 0 && !fs.existsSync(path.join(agentDir, "result.md")) && lastAgentEndError) {
+				fs.writeFileSync(path.join(agentDir, "result.md"), lastAgentEndError, "utf-8");
+			}
+		}
+		if (shouldKeepStderr || exitCode !== 0 || logLimits.debugLogs) stderrStream.flush();
+		else stderrStream.discard();
+		transcriptStream.end();
+		notifyComplete(exitCode);
+	};
+
+	const scheduleAgentEndTermination = () => {
+		if (agentEndKillTimer) return;
+		agentEndKillTimer = setTimeout(() => {
+			agentEndKillTimer = undefined;
+			try {
+				proc.kill("SIGTERM");
+			} catch {
+				/* process may have exited before the graceful termination timer fired */
+			}
+		}, AGENT_END_TERMINATE_GRACE_MS);
+		agentEndKillTimer.unref?.();
+		agentEndCompletionFallbackTimer = setTimeout(() => {
+			if (completionNotified) return;
+			try {
+				proc.kill("SIGKILL");
+			} catch {
+				/* process may already be gone */
+			}
+			proc.stdin.destroy();
+			proc.stdout?.destroy();
+			proc.stderr?.destroy();
+			proc.unref();
+			finalizeCompletion(0, null);
+		}, AGENT_END_COMPLETION_FALLBACK_MS);
+		agentEndCompletionFallbackTimer.unref?.();
 	};
 
 	const timeoutMs = options.timeoutMs ?? DEFAULT_AGENT_TIMEOUT_MS;
@@ -245,7 +304,7 @@ export function spawnAgent(
 				const result = extractAgentEndResult(event);
 				if (result.trim())
 					fs.writeFileSync(path.join(agentDir, "result.md"), result, "utf-8");
-				proc.kill("SIGTERM");
+				scheduleAgentEndTermination();
 			}
 		} catch (error) {
 			stderrStream.write(`Invalid RPC JSON line: ${String(error)}\n${previewLine(line)}\n`);
@@ -270,7 +329,7 @@ export function spawnAgent(
 					lastAgentEndError = "Sub-agent produced an oversized agent_end RPC event before a final result could be captured.";
 					fs.writeFileSync(path.join(agentDir, "result.md"), lastAgentEndError, "utf-8");
 				}
-				proc.kill("SIGTERM");
+				scheduleAgentEndTermination();
 				return true;
 			}
 			return false;
@@ -282,26 +341,9 @@ export function spawnAgent(
 		},
 	});
 
-	proc.once("close", (code, signal) => {
-		writeSuppressedRpcEventSummary(transcriptStream, suppressedRpcEventCounts);
-		const exitCode = resolveAgentExitCode({
-			timedOut,
-			completedFromAgentEnd,
-			lastAgentEndError,
-			code,
-			signal,
-		});
-		if (fs.existsSync(agentDir)) {
-			if (exitCode === 0 && !fs.existsSync(path.join(agentDir, "result.md")) && lastAssistantResult.trim()) {
-				fs.writeFileSync(path.join(agentDir, "result.md"), lastAssistantResult.trim(), "utf-8");
-			} else if (exitCode !== 0 && !fs.existsSync(path.join(agentDir, "result.md")) && lastAgentEndError) {
-				fs.writeFileSync(path.join(agentDir, "result.md"), lastAgentEndError, "utf-8");
-			}
-		}
-		if (shouldKeepStderr || exitCode !== 0 || logLimits.debugLogs) stderrStream.flush();
-		else stderrStream.discard();
-		transcriptStream.end();
-		notifyComplete(exitCode);
+	proc.once("exit", (code, signal) => {
+		exitFinalizationTimer = setTimeout(() => finalizeCompletion(code, signal), EXIT_STDIO_FLUSH_GRACE_MS);
+		exitFinalizationTimer.unref?.();
 	});
 
 	proc.once("error", (error) => {
