@@ -41,6 +41,7 @@
     "check:inner": "tsc --noEmit && npm run test:inner",
     "test": "mise exec node@24.16.0 -- npm run test:inner",
     "test:inner": "node --import tsx --test \"tests/**/*.test.ts\"",
+    "test:tools-suite": "npm --prefix external/pi-tools-suite test",
     "test:coverage": "mise exec node@24.16.0 -- node --import tsx --test --experimental-test-coverage --test-coverage-include=src/**/*.ts --test-coverage-exclude=src/main.ts --test-coverage-lines=95 --test-coverage-branches=80 --test-coverage-functions=95 \"tests/**/*.test.ts\"",
     "update-sdk-references": "mise exec node@24.16.0 -- node .pi/skills/pi-sdk/scripts/update-references.mjs",
     "pack:dry-run": "npm pack --dry-run",

@@ -175,6 +175,33 @@ describe("renderToolDisplay", () => {
 
 		const bareSkill = renderToolDisplay(input({ toolName: "shell", argsText: "{\"command\":\"cat SKILL.md\",\"cwd\":\"/repo/current\"}" }));
 		assert.equal(bareSkill.headerArgs, "current");
+
+		const pythonEditCommand = [
+			"python3 - <<'PY'",
+			"from pathlib import Path",
+			"Path('/repo/.pi/skills/demo/SKILL.md').write_text('updated')",
+			"PY",
+		].join("\n");
+		const pythonEdit = renderToolDisplay(input({
+			toolName: "shell",
+			argsText: JSON.stringify({ command: pythonEditCommand }),
+			output: "done",
+		}));
+		assert.equal(pythonEdit.toolName, undefined);
+		assert.match(pythonEdit.headerArgs ?? "", /^python3 - <<'PY'/);
+		const redirectedWrite = renderToolDisplay(input({
+			toolName: "bash",
+			argsText: JSON.stringify({ command: "cat > /repo/.pi/skills/demo/SKILL.md" }),
+			output: "",
+		}));
+		assert.equal(redirectedWrite.toolName, undefined);
+		assert.equal(redirectedWrite.headerArgs, "cat > /repo/.pi/skills/demo/SKILL.md");
+		const sedEdit = renderToolDisplay(input({
+			toolName: "bash",
+			argsText: JSON.stringify({ command: "sed -i '' 's/a/b/' /repo/.pi/skills/demo/SKILL.md" }),
+			output: "",
+		}));
+		assert.equal(sedEdit.toolName, undefined);
 	});
 
 	it("renders apply-patch, ast, repo, web, todo, question, subagents, and fallback tools", () => {
@@ -206,6 +233,22 @@ describe("renderToolDisplay", () => {
 		assert.doesNotMatch(edit.expandedText, /diff\n  -1 old/);
 		assert.doesNotMatch(edit.expandedText, /--- src\/a\.ts/);
 		assert.doesNotMatch(edit.expandedText, /patch\n  \(empty\)/);
+		const skillWrite = renderToolDisplay(input({
+			toolName: "Write",
+			argsText: JSON.stringify({ path: "/repo/.pi/skills/demo/SKILL.md", content: "---\nname: demo\n---\n" }),
+			output: "Successfully wrote 22 bytes to /repo/.pi/skills/demo/SKILL.md",
+			cwd: "/repo",
+		}));
+		assert.equal(skillWrite.toolName, undefined);
+		assert.equal(skillWrite.headerArgs, ".pi/skills/demo/SKILL.md");
+		const skillEdit = renderToolDisplay(input({
+			toolName: "Edit",
+			argsText: JSON.stringify({ path: "/repo/.pi/skills/demo/SKILL.md", edits: [{ oldText: "old", newText: "new" }] }),
+			output: "Successfully replaced 1 block(s) in .pi/skills/demo/SKILL.md.",
+			cwd: "/repo",
+		}));
+		assert.equal(skillEdit.toolName, undefined);
+		assert.equal(skillEdit.headerArgs, ".pi/skills/demo/SKILL.md");
 		assert.equal(renderToolDisplay(input({ toolName: "apply_patch", argsText: "{}", output: "done" })).headerArgs, "patch");
 		assert.equal(renderToolDisplay(input({ toolName: "read", argsText: "{}" })).expandedText, "(empty)");
 		assert.equal(renderToolDisplay(input({ toolName: "read", argsText: "{\"paths\":[{\"nested\":\"SKILL.md\"}]}", output: "skill" })).headerArgs, "skill");

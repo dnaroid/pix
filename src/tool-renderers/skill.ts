@@ -6,7 +6,8 @@ const SKILL_TOOL_NAME = "skill";
 const SKILL_FILE_RE = /(?:^|[\\/])SKILL\.md$/i;
 const SHELL_SKILL_FILE_RE = /(?:^|[\s'"`=:[\\/])SKILL\.md(?:$|[\s'"`;|&)>),:])/i;
 const SHELL_SKILL_PATH_RE = /(?:^|[\s'"`=:[(])([^\s'"`;|&)>),]+SKILL\.md)(?=$|[\s'"`;|&)>),:])/i;
-const READ_COMMAND_RE = /(?:^|[;&|()\s])(?:cat|bat|batcat|less|more|head|tail|sed|awk|grep|rg|ripgrep|nl|wc|file|python|python3|node|perl|ruby)\b/i;
+const READ_COMMAND_RE = /(?:^|[;&|()\s])(?:cat|bat|batcat|less|more|head|tail|sed|awk|grep|rg|ripgrep|nl|wc|file)\b/i;
+const MUTATING_SKILL_COMMAND_RE = /(?:>\s*|>>\s*|tee\b[^\n;&|]*|sed\b[^\n;&|]*\s-i(?:\b|[A-Za-z]))[^\n;&|]*SKILL\.md/i;
 
 type SkillReadInfo = {
 	path?: string;
@@ -60,7 +61,12 @@ function yamlFrontmatterLineCount(output: string): number {
 }
 
 function skillReadInfo(input: ToolRenderInput): SkillReadInfo | undefined {
-	const path = isShellTool(input.toolName) ? shellSkillPath(input) : skillPathArgument(input);
+	let path: string | undefined;
+	if (isShellTool(input.toolName)) {
+		path = shellSkillPath(input);
+	} else if (isReadTool(input.toolName)) {
+		path = skillPathArgument(input);
+	}
 	if (!path) return undefined;
 
 	return {
@@ -74,9 +80,15 @@ function isShellTool(toolName: string): boolean {
 	return ["bash", "Bash", "shell", "shell_command"].includes(normalized);
 }
 
+function isReadTool(toolName: string): boolean {
+	const normalized = toolName.split(/[.:/]/).filter(Boolean).at(-1) ?? toolName;
+	return normalized.toLowerCase() === "read";
+}
+
 function shellSkillPath(input: ToolRenderInput): string | undefined {
 	const command = compactCommand(stringArg(input, ["command", "cmd", "script"]));
 	if (!command || !SHELL_SKILL_FILE_RE.test(command) || !READ_COMMAND_RE.test(command)) return undefined;
+	if (MUTATING_SKILL_COMMAND_RE.test(command)) return undefined;
 	return SHELL_SKILL_PATH_RE.exec(command)?.[1] ?? "SKILL.md";
 }
 
