@@ -926,6 +926,7 @@ process.on("SIGTERM", () => {});
 process.stdin.on("data", () => {
   console.log(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "done despite stubborn child" }] }] }));
 });
+setTimeout(() => process.exit(0), 2500);
 setInterval(() => {}, 1000);
 `);
 		process.argv[1] = piScript;

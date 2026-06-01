@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { getAgentState, getRunState } from "./state.js";
+import { terminateProcess } from "./process.js";
 import { writeStructuredResult } from "./structured-result.js";
 import type { AgentState } from "./types.js";
 import { isoNow } from "./utils.js";
@@ -69,7 +70,7 @@ function stopAgent(runDir: string, agent: AgentState, signal: StopSignal): StopA
 	}
 
 	try {
-		process.kill(agent.pid, signal);
+		terminateProcess(agent.pid, signal);
 		markStopped(runDir, agent.id, signal);
 		return {
 			...result,

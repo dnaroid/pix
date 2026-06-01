@@ -1,4 +1,4 @@
-import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -6,6 +6,7 @@ import { selectSuitableToolsForModel } from "../../lib/tool-args.js";
 import { validateBasename } from "./paths.js";
 import { getPiInvocation } from "./pi-invocation.js";
 import { writePromptFile } from "./prompt.js";
+import { terminateProcess } from "./process.js";
 import { getAgentSessionDir, SUBAGENT_PARENT_SESSION_FILE, SUBAGENT_RETURN_SESSION_FILE, SUBAGENT_SESSION_FILE, writeParentSessionLink, writeSessionFileLink } from "./sessions.js";
 import { getAgentState } from "./state.js";
 import { writeStructuredResult } from "./structured-result.js";
@@ -384,12 +385,9 @@ function getModelToolsExtensionPath(): string {
 }
 
 function terminateChildProcess(proc: ChildProcess, signal: NodeJS.Signals): void {
-	if (process.platform === "win32" && proc.pid) {
-		const result = spawnSync("taskkill", ["/pid", String(proc.pid), "/T", "/F"], {
-			stdio: "ignore",
-			windowsHide: true,
-		});
-		if (!result.error && result.status === 0) return;
+	if (proc.pid) {
+		terminateProcess(proc.pid, signal as "SIGTERM" | "SIGINT" | "SIGKILL");
+		return;
 	}
 	proc.kill(signal);
 }
