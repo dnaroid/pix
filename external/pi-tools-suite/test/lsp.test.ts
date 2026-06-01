@@ -67,6 +67,7 @@ function writeFakeLspServer(dir: string): string {
 		'',
 		'let buffer = Buffer.alloc(0);',
 		'const keepAlive = setInterval(() => {}, 1000);',
+		'if (mode === "stubborn") setTimeout(() => process.exit(0), 5000);',
 		'process.on("SIGTERM", () => { if (mode !== "stubborn") process.exit(0); });',
 		'',
 		'function send(message) {',

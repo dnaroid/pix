@@ -1,4 +1,4 @@
-import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { SHUTDOWN_KILL_TIMEOUT_MS, SHUTDOWN_TERM_TIMEOUT_MS, SHUTDOWN_WRITE_TIMEOUT_MS } from "./constants";
 
 export function isChildRunning(child: ChildProcessWithoutNullStreams): boolean {
@@ -11,6 +11,14 @@ function canWriteToChild(child: ChildProcessWithoutNullStreams): boolean {
 
 export function killChild(child: ChildProcessWithoutNullStreams, signal: NodeJS.Signals): boolean {
   try {
+    if (process.platform === "win32" && child.pid) {
+      const result = spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+        stdio: "ignore",
+        timeout: 1_000,
+        windowsHide: true,
+      });
+      if (!result.error && result.status === 0) return true;
+    }
     return child.kill(signal);
   } catch {
     return false;
