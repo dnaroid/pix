@@ -800,7 +800,7 @@ setTimeout(() => {}, 1000);
 		expect(fs.readFileSync(path.join(agentDir, "pi_args"), "utf-8")).not.toContain("--session-dir");
 		expect(fs.existsSync(path.join(agentDir, "session_dir"))).toBe(false);
 		expect(fs.readFileSync(path.join(agentDir, "pi_args"), "utf-8")).toContain("--extension\n");
-		expect(fs.readFileSync(path.join(agentDir, "pi_args"), "utf-8")).toContain("model-tools/index.ts");
+		expect(fs.readFileSync(path.join(agentDir, "pi_args"), "utf-8")).toContain(path.join("model-tools", "index.ts"));
 		expect(fs.readFileSync(path.join(agentDir, "pi_args"), "utf-8")).toContain("--model\nzai/glm-5-turbo");
 		expect(fs.readFileSync(path.join(agentDir, "pi_args"), "utf-8")).toContain("--tools\nRead,Grep");
 		expect(fs.readFileSync(path.join(agentDir, "result.md"), "utf-8")).toBe("done result");
