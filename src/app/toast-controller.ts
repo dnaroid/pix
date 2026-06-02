@@ -12,18 +12,21 @@ export class AppToastController {
 
 	constructor(private readonly host: AppToastControllerHost) {}
 
-	showToast(message: string, kind: ToastKind = "info"): void {
+	showToast(message: string, kind: ToastKind = "info", options: { durationMs?: number } = {}): void {
 		const toastId = this.toast.show(message, kind);
 		if (kind === "error") {
 			this.host.render();
 			return;
 		}
+		const durationMs = typeof options.durationMs === "number" && Number.isFinite(options.durationMs) && options.durationMs > 0
+			? Math.floor(options.durationMs)
+			: TOAST_DURATION_MS;
 
 		const timer = setTimeout(() => {
 			this.toast.hide(toastId);
 			this.timers.delete(toastId);
 			this.host.render();
-		}, TOAST_DURATION_MS);
+		}, durationMs);
 		this.timers.set(toastId, timer);
 		timer.unref();
 		this.host.render();

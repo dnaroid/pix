@@ -10,12 +10,14 @@ export type ResumeCommandOptions = {
 export function usage(): string {
 	return `Usage: pix [--cwd <path>] [--no-session] [--session <path>] [--theme dark|light] [--model <provider/model[:thinking]>]
 	       pix update [--check] [--force]
+	       pix install [--check]
 	       npm run dev -- [--cwd <path>] [--no-session] [--session <path>] [--theme dark|light] [--model <provider/model[:thinking]>]
 
 Examples:
 	  pix --cwd ../pi-mono
 	  pix --cwd ../pi-mono --theme light --model anthropic/claude-sonnet-4-20250514:medium
-	  pix update --check`;
+	  pix update --check
+	  pix install --check`;
 }
 
 export function parseArgs(argv: string[]): AppOptions {

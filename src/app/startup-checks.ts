@@ -24,7 +24,7 @@ export async function checkPiCliAvailability(pathValue = process.env.PATH ?? "")
 
 	return [{
 		kind: "error",
-		message: "pi CLI is not available on PATH. Install pi or add it to PATH before starting pix.",
+		message: "pi CLI is not available on PATH. Run `pix install` or add pi to PATH before starting pix.",
 	}];
 }
 
@@ -47,12 +47,15 @@ export function checkPiToolsSuiteExtensionAvailability(extensionsResult: LoadExt
 
 async function executableExistsOnPath(command: string, pathValue: string): Promise<boolean> {
 	const dirs = pathValue.split(delimiter).filter((part) => part.length > 0);
+	const names = process.platform === "win32" ? [command, `${command}.cmd`, `${command}.exe`, `${command}.bat`] : [command];
 	for (const dir of dirs) {
-		try {
-			await access(join(dir, command), fsConstants.X_OK);
-			return true;
-		} catch {
-			// Keep scanning PATH entries.
+		for (const name of names) {
+			try {
+				await access(join(dir, name), fsConstants.X_OK);
+				return true;
+			} catch {
+				// Keep scanning PATH entries.
+			}
 		}
 	}
 	return false;

@@ -1,13 +1,16 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const minimumNodeVersion = [22, 19, 0];
 const minimumNodeVersionLabel = "22.19.0";
+const launcherPath = fileURLToPath(import.meta.url);
+const packageRoot = dirname(dirname(launcherPath));
 const mainPath = fileURLToPath(new URL("../dist/main.js", import.meta.url));
 const updatePath = fileURLToPath(new URL("../dist/app/update.js", import.meta.url));
+const installPath = fileURLToPath(new URL("../dist/app/install.js", import.meta.url));
 const distPath = dirname(mainPath);
 const rawArgs = process.argv.slice(2);
 const childArgs = [];
@@ -38,6 +41,15 @@ if (childArgs[0] === "update") {
 	}
 	const { runPixUpdateCli } = await import(new URL("../dist/app/update.js", import.meta.url));
 	process.exit(await runPixUpdateCli(childArgs.slice(1)));
+}
+
+if (childArgs[0] === "install" || childArgs[0] === "setup") {
+	if (!existsSync(installPath)) {
+		console.error("pix install is not built yet. Run `npm run build:pix` or update from a published package.");
+		process.exit(1);
+	}
+	const { runPixInstallCli } = await import(new URL("../dist/app/install.js", import.meta.url));
+	process.exit(await runPixInstallCli(childArgs.slice(1), { env: pixChildEnv() }));
 }
 
 if (!existsSync(mainPath)) {
@@ -82,6 +94,7 @@ function isCurrentNodeSupported() {
 function startChild() {
 	child = spawn(process.execPath, [mainPath, ...childArgs], {
 		stdio: "inherit",
+		env: pixChildEnv(),
 	});
 
 	child.on("error", (error) => {
@@ -101,6 +114,16 @@ function startChild() {
 		}
 		process.exitCode = code ?? 1;
 	});
+}
+
+function pixChildEnv() {
+	const env = { ...process.env };
+	const bundledBinPath = join(packageRoot, "node_modules", ".bin");
+	if (existsSync(bundledBinPath)) {
+		env.PATH = [bundledBinPath, env.PATH ?? ""].filter(Boolean).join(delimiter);
+		env.PIX_BUNDLED_PI_BIN = bundledBinPath;
+	}
+	return env;
 }
 
 function startDistPolling() {

@@ -278,10 +278,10 @@ export class AppRenderController {
 
 		for (const toastOverlay of renderToastOverlays(this.deps.toastController.toast.visibleStates, columns, Math.max(0, statusRow - topReservedRows - 1), this.deps.theme)) {
 			const row = topReservedRows + toastOverlay.row;
+			const rowText = this.deps.mouseController.renderedRowTexts.get(row) ?? "";
 			this.deps.mouseController.renderedTargets.set(row, { kind: "toast", id: toastOverlay.id });
-			this.deps.mouseController.renderedRowTexts.set(row, toastOverlay.text);
-			setRenderedBackground(row, this.deps.theme.colors.toastBackground);
-			appendFrameOutput(regionForOverlayRow(row), row, this.renderFrameRow(row, toastOverlay.output));
+			this.deps.mouseController.renderedRowTexts.set(row, overlayText(rowText, toastOverlay.column, toastOverlay.text));
+			appendFrameOutput(regionForOverlayRow(row), row, `\x1b[${row};${toastOverlay.column}H${toastOverlay.output}`);
 		}
 		if (topReservedRows === 0) {
 			const newTabTarget = tabLayout.targets.find((target) => target.kind === "new-tab");

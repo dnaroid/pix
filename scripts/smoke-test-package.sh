@@ -113,6 +113,7 @@ smoke() {
 
 smoke "pix --help" node "$ENTRY_JS" --help
 smoke "pix update --help" node "$ENTRY_JS" update --help
+smoke "pix install --help" node "$ENTRY_JS" install --help
 smoke "pix update --check (offline)" env PI_OFFLINE=1 node "$ENTRY_JS" update --check
 
 echo ""

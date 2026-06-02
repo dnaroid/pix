@@ -16,8 +16,9 @@ The npm package is currently named `pi-ui-extend` and installs the `pix` CLI.
 
 ## Requirements
 
-- Node.js `24.x` (`24.16.0` is pinned for development).
-- A terminal with good Unicode support. JetBrainsMono Nerd Font is recommended for the default icon theme.
+- Node.js `>=22.19.0 <25` (`24.16.0` is pinned for development).
+- A terminal with good Unicode support. JetBrainsMono Nerd Font is recommended for the default icon theme; Pix can install it for the current user on macOS, Linux, and Windows.
+- Linux clipboard support: Pix first tries `wl-copy`, `xclip`, `xsel`, or `termux-clipboard-set`, then falls back to its bundled native clipboard package.
 - Optional for voice input: SoX (`rec`/`sox`), `ffmpeg`, or Linux `arecord`.
 
 Development uses `mise` when available. `.node-version` and `.nvmrc` are also provided for other Node version managers.
@@ -31,6 +32,16 @@ npm install -g pi-ui-extend --ignore-scripts
 ```
 
 The published package contains built JavaScript, the `pix` launcher, renderer extensions, documentation, and the bundled `pi-tools-suite` extension payload. Users do not need to clone the repository or build TypeScript locally.
+
+After installation, run the setup check when installing on a new machine:
+
+```bash
+pix install
+# or report only:
+pix install --check
+```
+
+`pix install` checks the icon font, `pi` CLI availability, and clipboard helpers. The `pix` launcher also prepends Pix's bundled dependency bin directory to `PATH`, so a package-manager install can use the bundled Pi CLI even when a separate global `pi` command is not present.
 
 On startup, Pix ensures the bundled suite is available at:
 
@@ -185,7 +196,7 @@ Runtime requirements:
 
 - Optional npm package `vosk`. Pix installs or rebuilds it automatically with scripts enabled on first voice start if the native binding is missing.
 - A local recorder: SoX (`rec`/`sox`) preferred, or `ffmpeg`; Linux also supports `arecord`.
-- JetBrainsMono Nerd Font for default app icons. On macOS, Pix checks this at startup and can install the Homebrew cask `font-jetbrains-mono-nerd-font` when it is missing.
+- JetBrainsMono Nerd Font for default app icons. Pix checks this at startup and can install the font for the current user on macOS, Linux, and Windows when it is missing.
 
 If your terminal renders missing glyphs, start Pix with `PIX_USE_FALLBACK_ICONS=1` or set `iconTheme` to `fallback` in `~/.config/pi/pix.jsonc`.
 

@@ -923,8 +923,8 @@ export class PiUiExtendApp {
 		});
 	}
 
-	private showToast(message: string, kind: ToastKind = "info"): void {
-		this.toastController.showToast(message, kind);
+	private showToast(message: string, kind: ToastKind = "info", options?: { durationMs?: number }): void {
+		this.toastController.showToast(message, kind, options);
 	}
 
 	private clearToastTimers(): void {

@@ -17,7 +17,7 @@ describe("startup availability checks", () => {
 
 		assert.deepEqual(issues, [{
 			kind: "error",
-			message: "pi CLI is not available on PATH. Install pi or add it to PATH before starting pix.",
+			message: "pi CLI is not available on PATH. Run `pix install` or add pi to PATH before starting pix.",
 		}]);
 	});
 

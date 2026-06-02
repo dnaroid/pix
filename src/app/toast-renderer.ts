@@ -4,7 +4,7 @@ import type { ToastEntry, ToastKind } from "../ui.js";
 import { APP_ICONS } from "./icons.js";
 import { padOrTrimPlain, sanitizeText } from "./render-text.js";
 
-export type ToastOverlay = { id: number; row: number; text: string; output: string };
+export type ToastOverlay = { id: number; row: number; column: number; text: string; output: string };
 
 export function renderToastOverlays(
 	states: readonly ToastEntry[],
@@ -26,21 +26,17 @@ export function renderToastOverlays(
 		const contentWidth = Math.max(...visibleLines.map((line) => stringDisplayWidth(line)));
 		const toastWidth = Math.min(Math.max(12, contentWidth + 2), Math.max(1, width - 4));
 		const leftWidth = Math.max(0, width - toastWidth - 2);
-		const rightWidth = Math.max(0, width - leftWidth - toastWidth);
+		const column = leftWidth + 1;
 
 		for (const line of visibleLines) {
 			const message = ` ${padOrTrimPlain(line, Math.max(0, toastWidth - 2))} `;
-			const text = `${" ".repeat(leftWidth)}${padOrTrimPlain(message, toastWidth)}${" ".repeat(rightWidth)}`;
-			const output = [
-				colorLine("", leftWidth, { background: theme.colors.background }),
-				colorLine(message, toastWidth, {
-					...toastKindStyle(state.kind, theme),
-					bold: true,
-				}),
-				colorLine("", rightWidth, { background: theme.colors.background }),
-			].join("");
+			const text = padOrTrimPlain(message, toastWidth);
+			const output = colorLine(message, toastWidth, {
+				...toastKindStyle(state.kind, theme),
+				bold: true,
+			});
 
-			overlays.push({ id: state.id, row: overlays.length + 1, text, output });
+			overlays.push({ id: state.id, row: overlays.length + 1, column, text, output });
 		}
 	}
 

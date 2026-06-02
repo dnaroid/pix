@@ -39,6 +39,20 @@ import { openFileLink as openDetectedFileLink } from "./file-link-opener.js";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 
 const CLICK_FLASH_MS = 100;
+const CONTEXT_TOAST_MIN_DURATION_MS = 5_000;
+const CONTEXT_TOAST_LINE_DURATION_MS = 900;
+const CONTEXT_TOAST_MAX_DURATION_MS = 30_000;
+
+export function contextToastDurationMs(message: string): number {
+	const lineCount = Math.max(1, message.split("\n").length);
+	return Math.max(
+		CONTEXT_TOAST_MIN_DURATION_MS,
+		Math.min(
+			CONTEXT_TOAST_MAX_DURATION_MS,
+			lineCount * CONTEXT_TOAST_LINE_DURATION_MS,
+		),
+	);
+}
 
 type ClickFlash = {
 	y: number;
@@ -85,7 +99,7 @@ export type AppMouseControllerHost = {
 	switchToTab(tabId: string): void;
 	closeTab(tabId: string): void;
 	toastEntry(toastId: number): ToastEntry | undefined;
-	showToast(message: string, kind: "success" | "error" | "warning" | "info"): void;
+	showToast(message: string, kind: "success" | "error" | "warning" | "info", options?: { durationMs?: number }): void;
 	dismissToast(toastId: number): void;
 	refreshModelUsageStatus(): void | Promise<void>;
 	toggleAllThinkingExpanded?(): void;
@@ -569,7 +583,8 @@ export class AppMouseController {
 
 		const session = this.host.runtimeSession();
 		if (!session) return false;
-		this.host.showToast(formatDcpStatsToast(session), "info");
+		const message = formatDcpStatsToast(session);
+		this.host.showToast(message, "info", { durationMs: contextToastDurationMs(message) });
 		return true;
 	}
 

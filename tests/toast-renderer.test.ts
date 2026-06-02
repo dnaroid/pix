@@ -8,7 +8,7 @@ import { THEMES } from "../src/theme.js";
 import type { ToastEntry } from "../src/ui.js";
 
 describe("renderToastOverlays", () => {
-	it("renders multiline toasts as separate full-width overlay rows", () => {
+	it("renders multiline toasts as compact overlay rows", () => {
 		const overlays = renderToastOverlays([
 			toast("DCP — Dynamic Context Pruning\nCommands:\n  /dcp context — Show context window usage breakdown"),
 		], 80, 5, THEMES.dark);
@@ -19,7 +19,9 @@ describe("renderToastOverlays", () => {
 		assert.ok(overlays[1]?.text.includes("Commands:"));
 		assert.ok(overlays[2]?.text.includes("/dcp context"));
 		assert.equal(overlays.every((overlay) => !overlay.output.includes("\n")), true);
-		assert.deepEqual(overlays.map((overlay) => stringDisplayWidth(overlay.text)), [80, 80, 80]);
+		assert.equal(overlays.every((overlay) => overlay.column > 1), true);
+		assert.equal(overlays.every((overlay) => stringDisplayWidth(overlay.text) < 80), true);
+		assert.equal(overlays.every((overlay) => overlay.column + stringDisplayWidth(overlay.text) <= 80), true);
 	});
 
 	it("limits multiline toasts by available overlay rows", () => {
