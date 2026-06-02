@@ -28,6 +28,8 @@ Summaries should be proportional to future usefulness, not proportional to the a
 
 Use \`compress\` as steady housekeeping while you work. After any completed implementation + verification slice, compress that closed slice before replying or starting a new task unless the next step needs exact raw logs/diffs. Do not carry large stale tool outputs across task boundaries.
 
+Before compressing while work is unfinished, ensure one \`todo in_progress\` captures the active objective and next step.
+
 When a \`<dcp-system-reminder>\` appears, treat it as an active instruction for the next safe action, not as background advice. Before making another exploratory tool call or starting a new subtask, check whether any earlier slice is closed; if yes, call \`compress\` first. Do not merely acknowledge the reminder or postpone it across multiple tool calls.
 
 CADENCE, SIGNALS, AND LATENCY
@@ -82,6 +84,8 @@ If a \`<dcp-system-reminder>\` is present in context, treat it as a direct instr
 
 THE SUMMARY
 Your summary must be COMPLETE FOR CONTINUATION, not a transcript rewrite. Preserve only information that will plausibly matter later: user intent, accepted constraints, decisions, files/symbols changed or inspected, exact errors that are still actionable, verification status, and next steps.
+
+If active unfinished work exists, start with \`Active objective\` and \`Next step\`.
 
 Default to a compact structured summary (roughly 5-15 bullets for a normal completed work slice). Grow beyond that only when the compressed range contains multiple independent decisions, unresolved blockers, or precise state that is genuinely required to continue.
 

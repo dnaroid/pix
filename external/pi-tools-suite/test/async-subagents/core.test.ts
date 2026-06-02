@@ -888,6 +888,34 @@ process.stdin.on("data", () => {
 		expect(fs.readFileSync(path.join(runDir, "agent-1", "result.md"), "utf-8")).toBe("final assistant result");
 	});
 
+	test.serial("keeps RPC stdin open until async prompt emits a result", async () => {
+		const cwd = tempDir();
+		const runDir = createRunDir(cwd, "spawn-rpc-stdin-open");
+		const piScript = path.join(tempDir(), "pi.js");
+		writeFile(piScript, `
+let scheduled = false;
+process.stdin.on("data", () => {
+  if (scheduled) return;
+  scheduled = true;
+  setTimeout(() => {
+    console.log(JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "delayed rpc result" }] } }));
+    console.log(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "delayed rpc result" }] }] }));
+    setTimeout(() => process.exit(0), 0);
+  }, 100);
+});
+process.stdin.on("end", () => process.exit(0));
+setTimeout(() => {}, 1000);
+`);
+		process.argv[1] = piScript;
+
+		const completed = await withTimeout(new Promise<any>((resolve) => {
+			spawnAgent(runDir, { id: "agent-1", task: "Do work" }, cwd, [], undefined, resolve);
+		}), "Timed out waiting for delayed RPC spawn completion");
+
+		expect(completed).toMatchObject({ exitCode: 0, state: { status: "done" } });
+		expect(fs.readFileSync(path.join(runDir, "agent-1", "result.md"), "utf-8")).toBe("delayed rpc result");
+	});
+
 	test.serial("keeps opted-in runtime logs compact and bounded", async () => {
 		const cwd = tempDir();
 		const runDir = createRunDir(cwd, "spawn-compact-logs");

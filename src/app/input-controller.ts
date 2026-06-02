@@ -71,7 +71,7 @@ export class AppInputController {
 
 	private drainInputBuffer(): void {
 		while (this.inputBuffer.length > 0) {
-			const mouseMatch = /^\x1b\[<(\d+);(\d+);(\d+)([mM])/.exec(this.inputBuffer);
+			const mouseMatch = /^\x1b\[<(\d+);(-?\d+);(-?\d+)([mM])/.exec(this.inputBuffer);
 			if (mouseMatch) {
 				this.inputBuffer = this.inputBuffer.slice(mouseMatch[0].length);
 				this.host.handleMouse({

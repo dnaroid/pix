@@ -5,7 +5,7 @@ import { APP_ICONS } from "./icons.js";
 import type { ToolStatusEntry } from "./types.js";
 
 export function sanitizeText(text: string): string {
-	return expandTabs(text.replace(/\x1b/g, "␛").replace(/\r/g, ""));
+	return expandTabs(text.replace(/⚠️?/gu, APP_ICONS.alert).replace(/\x1b/g, "␛").replace(/\r/g, ""));
 }
 
 export function normalizePastedTextForDuplicateKey(text: string): string {

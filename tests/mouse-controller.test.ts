@@ -315,6 +315,42 @@ describe("AppMouseController", () => {
 		assert.equal(copiedText, "line 0\nline 1");
 	});
 
+	it("copies mouse selections that release on the scrollbar column", () => {
+		let copiedText: string | undefined;
+		const controller = new AppMouseController(
+			fakeHost({ copyTextToClipboard: (text) => { copiedText = text; } }),
+			fakePopupMenus(),
+			fakePopupActions(),
+			fakeScrollController(),
+			fakeCommandController(),
+		);
+
+		controller.handleMouse({ button: 0, x: 1, y: 1, released: false });
+		controller.handleMouse({ button: 32, x: 10, y: 2, released: false });
+		controller.handleMouse({ button: 0, x: 10, y: 2, released: true });
+
+		assert.equal(copiedText, "line 0\nline 1");
+		assert.equal(controller.mouseSelection, undefined);
+	});
+
+	it("copies left-edge selections when the terminal drops the release event", async () => {
+		let copiedText: string | undefined;
+		const controller = new AppMouseController(
+			fakeHost({ copyTextToClipboard: (text) => { copiedText = text; } }),
+			fakePopupMenus(),
+			fakePopupActions(),
+			fakeScrollController(),
+			fakeCommandController(),
+		);
+
+		controller.handleMouse({ button: 0, x: 7, y: 2, released: false });
+		controller.handleMouse({ button: 32, x: 0, y: 1, released: false });
+		await delay(220);
+
+		assert.equal(copiedText, "line 0\nline 1");
+		assert.equal(controller.mouseSelection, undefined);
+	});
+
 	it("scrolls the input editor with the mouse wheel when the pointer is over it", () => {
 		const deltas: number[] = [];
 		let renderCount = 0;

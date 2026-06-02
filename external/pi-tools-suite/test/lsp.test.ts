@@ -347,6 +347,7 @@ describe.serial("LSP library post-edit diagnostics", () => {
 			"async-subagents",
 			"repo-discovery",
 			"antigravity-auth",
+			"opencode-import",
 			"todo",
 			"model-tools",
 			"usage",

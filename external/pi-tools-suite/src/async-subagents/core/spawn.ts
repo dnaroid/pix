@@ -375,7 +375,12 @@ export function spawnAgent(
 			...(promptImages ? { images: promptImages } : {}),
 		}),
 	].join(""));
-	proc.stdin.end();
+	// Keep stdin open while the RPC prompt is running. pi RPC mode treats stdin
+	// EOF as a shutdown request, while the prompt command itself is handled
+	// asynchronously after preflight. Closing stdin here can therefore terminate
+	// the child before message_end/agent_end events are emitted, producing exit 0
+	// with no result.md. The child is terminated explicitly after agent_end,
+	// timeout, stop, or process error.
 
 	const pid = proc.pid!;
 	fs.writeFileSync(path.join(agentDir, "pid"), String(pid), "utf-8");

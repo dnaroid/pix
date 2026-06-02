@@ -185,6 +185,40 @@ Example fallback icon configuration:
 - Click a tool row: expand or collapse that tool result.
 - Click the right-aligned microphone/language status widget: toggle voice input and switch Russian/English dictation.
 
+## Slash commands
+
+Type `/` in the prompt to open the command picker. Commands that accept arguments can also be called directly with inline arguments.
+
+| Command | Arguments | Description |
+|---|---|---|
+| `/settings` | — | Show current session, model, theme, and key settings. |
+| `/model` | `[provider/model[:thinking]]` | Select the active model. Without arguments, opens the model picker. With a reference like `anthropic/claude-sonnet-4-20250514:medium`, sets the model and optional thinking level directly. |
+| `/scoped-models` | `[refs…\|reset]` | Show or set the models used by the model selector and cycling. Pass one or more `provider/model[:thinking]` references separated by spaces or commas. Use `reset` to restore the default favorites. |
+| `/thinking` | `[level]` | Select the thinking level. Without arguments, opens the thinking picker. Accepts an explicit level (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`). |
+| `/enhance` | — | Improve the current prompt draft using the prompt enhancer model. |
+| `/export` | `[path]` | Export the session. Defaults to HTML. Pass a `.jsonl` path to export as JSONL. |
+| `/import` | `<path.jsonl>` | Import and resume a session from a JSONL file. |
+| `/share` | — | Share the session as a private GitHub gist (requires `gh` CLI). |
+| `/copy` | — | Copy the last agent message to the clipboard. |
+| `/name` | `[name]` | Show or set the session display name. |
+| `/session` | — | Show session info: message counts, token usage, and cost. |
+| `/usage` | — | Show local account quota usage and context window utilization. |
+| `/changelog` | — | Show the Pi package changelog. |
+| `/update` | `[--force\|--help]` | Check for Pix package updates. `/update` is check-only; run `pix update` in a shell to install. |
+| `/hotkeys` | — | Show keyboard shortcuts. |
+| `/fork` | `[entry-id]` | Fork the session from the latest or specified user-message entry. |
+| `/clone` | — | Duplicate the current session at the current position. |
+| `/jump` | `[query]` | Jump to a previous user message. Opens the message picker, optionally filtered by query. |
+| `/search` | `<text>` | Search sessions for matching text and open a result in a new tab. |
+| `/reload` | — | Reload keybindings, extensions, skills, prompts, and themes from disk. |
+| `/resume` | `[path\|query]` | Resume a different session. Without arguments, opens the session picker. |
+| `/new` | — | Start a fresh session in the current tab. |
+| `/new_tab` | — | Open a fresh session in a new tab. |
+| `/compact` | `[instructions]` | Manually compact the session context, optionally with custom instructions for the compaction. |
+| `/quit`, `/exit` | — | Quit the renderer. |
+
+Extensions, prompt templates, and skills may register additional slash commands that appear in the command picker alongside the built-in ones.
+
 ## Voice input
 
 Pix can dictate into the prompt through local Vosk. The first start for each language downloads the small model into the gitignored `models/vosk/` directory inside this project:

@@ -40,6 +40,7 @@ import { openFileLink as openDetectedFileLink } from "./file-link-opener.js";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 
 const CLICK_FLASH_MS = 100;
+const LOST_MOUSE_RELEASE_SETTLE_MS = 180;
 
 type ClickFlash = {
 	y: number;
@@ -125,6 +126,7 @@ export class AppMouseController {
 	private autoScrollAccumulator = 0;
 	private autoScrollLastTick = 0;
 	private autoScrollCursorX = 1;
+	private leftEdgeReleaseFallbackTimer: ReturnType<typeof setTimeout> | undefined;
 	private clickFlash: ClickFlash | undefined;
 	private clickFlashTimer: ReturnType<typeof setTimeout> | undefined;
 	private clickFlashDirty = false;
@@ -442,7 +444,7 @@ export class AppMouseController {
 		const draggingLeftButton = (event.button & 32) !== 0 && baseButton === 0;
 
 		if (event.released) {
-			if (!this.scrollBarDragActive && !onScrollBar) return false;
+			if (!this.scrollBarDragActive) return false;
 			this.scrollBarDragActive = false;
 			return true;
 		}
@@ -473,7 +475,7 @@ export class AppMouseController {
 		const baseButton = event.button & 3;
 		const draggingLeftButton = (event.button & 32) !== 0 && baseButton === 0;
 
-		if (event.released) return this.finishInputScrollBarDrag(event, onScrollBar);
+		if (event.released) return this.finishInputScrollBarDrag(event);
 
 		if (event.button === 0 && onScrollBar) {
 			this.inputScrollBarDragActive = true;
@@ -487,9 +489,9 @@ export class AppMouseController {
 		return true;
 	}
 
-	private finishInputScrollBarDrag(event: MouseEvent, onScrollBar = false): boolean {
+	private finishInputScrollBarDrag(event: MouseEvent): boolean {
 		if (!event.released) return false;
-		if (!this.inputScrollBarDragActive && !onScrollBar) return false;
+		if (!this.inputScrollBarDragActive) return false;
 		this.inputScrollBarDragActive = false;
 		return true;
 	}
@@ -736,44 +738,28 @@ export class AppMouseController {
 	}
 
 	private handleMouseSelection(event: MouseEvent): boolean {
-		const point = { x: event.x, y: event.y };
 		const baseButton = event.button & 3;
 		const draggingLeftButton = (event.button & 32) !== 0 && baseButton === 0;
 
 		if (event.released) {
 			if (!this.mouseSelection) return false;
-			this.stopAutoScroll();
+			this.cancelLeftEdgeReleaseFallback();
 			this.updateSelectionCurrentFromMouse(event, { autoScroll: false });
-			const selection = this.mouseSelection;
-			this.mouseSelection = undefined;
-
-			if (!selection.moved && samePoint(selection.anchor, point)) {
-				this.host.render();
-				return false;
-			}
-
-			const selectedText = this.getSelectedText(selection);
-			this.host.render();
-			if (selectedText.trim().length === 0) return true;
-
-			try {
-				this.copyTextToClipboard(selectedText);
-				this.host.showToast("Copied to clipboard", "success");
-			} catch (error) {
-				this.host.showToast(`Copy failed: ${stringifyUnknown(error)}`, "error");
-			}
-			return true;
+			return this.finishMouseSelection();
 		}
 
 		if (draggingLeftButton) {
 			if (!this.mouseSelection) return false;
 			this.updateSelectionCurrentFromMouse(event);
+			this.updateLeftEdgeReleaseFallback(event);
 			this.host.render();
 			return true;
 		}
 
 		if (event.button === 0) {
+			this.cancelLeftEdgeReleaseFallback();
 			this.stopAutoScroll();
+			const point = { x: event.x, y: event.y };
 			const conversationPoint = this.conversationPointFromMouse(event, false);
 			this.mouseSelection = conversationPoint
 				? {
@@ -789,6 +775,51 @@ export class AppMouseController {
 		}
 
 		return false;
+	}
+
+	private finishMouseSelection(): boolean {
+		const selection = this.mouseSelection;
+		if (!selection) return false;
+
+		this.cancelLeftEdgeReleaseFallback();
+		this.stopAutoScroll();
+		this.mouseSelection = undefined;
+
+		if (!selection.moved && samePoint(selection.anchor, selection.current)) {
+			this.host.render();
+			return false;
+		}
+
+		const selectedText = this.getSelectedText(selection);
+		this.host.render();
+		if (selectedText.trim().length === 0) return true;
+
+		try {
+			this.copyTextToClipboard(selectedText);
+			this.host.showToast("Copied to clipboard", "success");
+		} catch (error) {
+			this.host.showToast(`Copy failed: ${stringifyUnknown(error)}`, "error");
+		}
+		return true;
+	}
+
+	private updateLeftEdgeReleaseFallback(event: MouseEvent): void {
+		if (!this.mouseSelection?.moved || event.x > 1) {
+			this.cancelLeftEdgeReleaseFallback();
+			return;
+		}
+
+		this.cancelLeftEdgeReleaseFallback();
+		this.leftEdgeReleaseFallbackTimer = setTimeout(() => {
+			this.leftEdgeReleaseFallbackTimer = undefined;
+			this.finishMouseSelection();
+		}, LOST_MOUSE_RELEASE_SETTLE_MS);
+	}
+
+	private cancelLeftEdgeReleaseFallback(): void {
+		if (!this.leftEdgeReleaseFallbackTimer) return;
+		clearTimeout(this.leftEdgeReleaseFallbackTimer);
+		this.leftEdgeReleaseFallbackTimer = undefined;
 	}
 
 	syncConversationSelectionForRender(startLine: number, bodyHeight: number, topReservedRows: number, width: number): void {

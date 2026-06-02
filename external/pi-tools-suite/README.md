@@ -73,6 +73,84 @@ DCP settings are stored only under `dcp` in the user shared config file `~/.conf
 
 `minContextPercent` / `maxContextPercent` accept legacy fractions (`0.25`), percent strings (`"25%"`), or absolute token counts when Pi knows the current model context window. `minContextLimit` / `maxContextLimit` and `modelMinContextLimits` / `modelMaxContextLimits` are explicit absolute-or-percent aliases. If `compress.protectUserMessages` is enabled, range compression appends selected user messages verbatim instead of rejecting the range; individual message compression still skips protected raw user messages. Protected tool outputs are copied into summaries for tools protected by name or `protectedFilePatterns`; protected `subagents` result reads also try to include the saved `result.md` artifact when available.
 
+## LSP setup
+
+The LSP module reads language-server definitions from `lsp.servers` in the shared config file:
+
+```text
+~/.config/pi/pi-tools-suite.jsonc
+```
+
+Install the language servers used by the bundled example config. The commands below are written for macOS/Linux with a POSIX shell; most npm, `dotnet`, `pip`, and `rustup` commands also work on Windows, but paths and the GDScript wrapper differ.
+
+```bash
+# TypeScript / JavaScript
+npm install -g typescript typescript-language-server
+
+# Python
+python3 -m pip install --user python-lsp-server
+
+# C# / Unity
+dotnet tool install -g Microsoft.CodeAnalysis.LanguageServer
+
+# GDScript / Godot
+# Install Godot 4.x and make sure the `godot` command is on PATH.
+# macOS Homebrew example. On other OSes, use the official Godot installer/package.
+brew install --cask godot
+
+# Ruby
+brew install ruby-lsp
+# or, if using RubyGems directly:
+gem install ruby-lsp
+
+# Rust
+rustup component add rust-analyzer
+
+# Markdown
+npm install -g vscode-langservers-extracted
+```
+
+Extra runtime requirements:
+
+- The GDScript wrapper also needs `nc` and `python3`; both are available by default on most macOS/Linux setups. The wrapper starts Godot headless on a free localhost port and the LSP manager kills the whole process group on shutdown/abort.
+- C# expects `~/.dotnet/tools` on `PATH`, or an explicit `bin` path such as `~/.dotnet/tools/roslyn-language-server` in the config.
+- Rust diagnostics require a Rust project root such as `Cargo.toml`.
+- C#/Unity diagnostics require a project root such as `*.csproj`, `*.sln`, or Unity `ProjectSettings/ProjectVersion.txt`.
+- Markdown link diagnostics are provided by `vscode-markdown-language-server` when validation is enabled; Mermaid fence checks are supplemented locally by pi-tools-suite, so no separate Mermaid LSP is required for the default diagnostics.
+
+OS notes:
+
+- macOS/Linux: the sample commands and default GDScript wrapper are intended to work as-is once the binaries are on `PATH`.
+- Windows: npm, Python, .NET, Ruby, Rust, and Markdown servers can be installed natively, but adjust executable paths, for example `%USERPROFILE%\.dotnet\tools\roslyn-language-server.exe`. The bundled GDScript wrapper uses `bash`, `nc`, POSIX signals, and process groups, so use WSL/Git Bash or replace that server command with a Windows-specific wrapper.
+- Package-manager commands vary by distro. Replace `brew install ...` with your OS package manager or the official installer where appropriate.
+
+Minimal shared config shape:
+
+```jsonc
+{
+  "lsp": {
+    "servers": [
+      {
+        "id": "typescript",
+        "include": ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx", "**/*.mjs"],
+        "rootMarkers": ["tsconfig.json", "package.json"],
+        "bin": "typescript-language-server",
+        "args": ["--stdio"],
+        "languageIdByExtension": {
+          ".ts": "typescript",
+          ".tsx": "typescriptreact",
+          ".js": "javascript",
+          ".jsx": "javascriptreact",
+          ".mjs": "javascript"
+        }
+      }
+    ]
+  }
+}
+```
+
+Project-local overrides can be added in `.pi/pi-tools-suite.jsonc`; pi-tools-suite asks for trust before using project-local LSP binaries.
+
 ## Async sub-agents
 
 Sub-agent model routing normally follows task overrides, subagent type config, then `ASYNC_SUBAGENTS_MODEL` / `PI_SUBAGENTS_MODEL` fallbacks. Set `ASYNC_SUBAGENTS_FORCE_CURRENT_MODEL=1` (or `PI_SUBAGENTS_FORCE_CURRENT_MODEL=1`) to ignore task/config/env model choices and launch every sub-agent with the current parent session model. When this flag is enabled, any `--model` entries in sub-agent extra args are stripped so they cannot override the current model.

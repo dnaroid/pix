@@ -16,6 +16,8 @@ This is an orchestration hint for Pi, not a replacement for the user's instructi
 
 Default posture: orchestration-first for non-GPT models. For broad, multi-file, ambiguous, review/audit, frontend, test-strategy, architecture, or root-cause work, prefer ultrawork mode: split independent tracks and spawn focused async subagents with the configured roles. Keep the parent context lean, collect compact results only when needed, synthesize the findings, then verify before finishing.
 
+Before DCP/compress while work is unfinished, keep one in_progress todo with objective + next step; compression summaries must preserve Active objective and Next step.
+
 Do not over-delegate trivial work. For a simple question, one known file, exact lookup, typo, or narrow edit, solve directly with the cheapest suitable tool.
 </agent_strategy>`;
 
@@ -23,6 +25,8 @@ const DEEP_WORK_STRATEGY_PROMPT = `<agent_strategy name="deep-work">
 This is a GPT-compatible execution hint for Pi, not a replacement for the user's instructions.
 
 Default posture: autonomous deep worker. Build context directly, make concrete progress, edit and verify end-to-end. Use async subagents and ultrawork mode when the user asks for parallel/delegated work or when independent tracks will clearly reduce risk, but do not force orchestration onto narrow tasks.
+
+Before DCP/compress while work is unfinished, keep one in_progress todo with objective + next step; compression summaries must preserve Active objective and Next step.
 
 For broad work, keep delegation explicit and bounded: spawn focused review/research/tests/frontend/deep tracks, read compact results, make the final decisions in the parent session, and report only what matters.
 </agent_strategy>`;

@@ -2,6 +2,7 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
+import { parse } from "jsonc-parser";
 
 import { getPiToolsSuiteUserConfigPath, loadPiToolsSuiteConfig } from "../src/config.js";
 import { DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC } from "../src/default-pi-tools-suite-config.js";
@@ -84,6 +85,10 @@ describe("pi-tools-suite config", () => {
 		expect(content).toContain('// "dcp"');
 		expect(content).toContain('"asyncSubagents"');
 		expect(content).toContain('"promptCommands"');
+		const parsed = parse(content) as { lsp?: { servers?: Array<{ id?: string }> } };
+		expect(parsed.lsp?.servers?.map((server) => server.id)).toEqual(["typescript"]);
+		expect(content).toContain('//   "id": "python"');
+		expect(content).toContain('//   "id": "markdown"');
 	});
 
 	test("unknown removed modules are ignored", () => {

@@ -15,6 +15,7 @@ const MODULES: Array<{ name: string; load: () => Promise<ExtensionModule> }> = [
 	{ name: "lsp", load: () => import("./lsp/index") },
 	{ name: "repo-discovery", load: () => import("./repo-discovery/index") },
 	{ name: "antigravity-auth", load: () => import("./antigravity-auth/index") },
+	{ name: "opencode-import", load: () => import("./opencode-import/index") },
 	{ name: "todo", load: () => import("./todo/index") },
 	{ name: "model-tools", load: () => import("./model-tools/index") },
 	{ name: "usage", load: () => import("./usage/index") },

@@ -36,15 +36,23 @@ describe("AppInputController terminal input", () => {
 		assert.equal(editor.text, "");
 		assert.equal(calls.interrupt, 1);
 	});
+
+	it("parses offscreen SGR mouse coordinates", () => {
+		const { controller, calls } = createController({ extensionInputUsesEditor: false, shiftPressed: false, consumeExtensionInput: false });
+
+		controller.handleChunk(Buffer.from("\x1b[<0;-1;2m"));
+
+		assert.deepEqual(calls.mouseEvents, [{ button: 0, x: -1, y: 2, released: true }]);
+	});
 });
 
 function createController(options: { extensionInputUsesEditor: boolean; shiftPressed: boolean; consumeExtensionInput?: boolean }): {
 	controller: AppInputController;
 	editor: InputEditor;
-	calls: { extensionInput: number; enter: number; interrupt: number; render: number };
+	calls: { extensionInput: number; enter: number; interrupt: number; mouseEvents: unknown[]; render: number };
 } {
 	const editor = new InputEditor();
-	const calls = { extensionInput: 0, enter: 0, interrupt: 0, render: 0 };
+	const calls = { extensionInput: 0, enter: 0, interrupt: 0, mouseEvents: [] as unknown[], render: 0 };
 	const host: InputControllerHost = {
 		inputEditor: editor,
 		cwd: process.cwd(),
@@ -65,7 +73,7 @@ function createController(options: { extensionInputUsesEditor: boolean; shiftPre
 		navigateRequestHistory: () => false,
 		scrollByLines: () => undefined,
 		scrollByPage: () => undefined,
-		handleMouse: () => undefined,
+		handleMouse: (event) => { calls.mouseEvents.push(event); },
 		handleEnter: () => {
 			calls.enter += 1;
 		},
