@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { formatMarkdownTables, renderMarkdownLine, renderMarkdownTextLines } from "../src/markdown-format.js";
+import { formatMarkdownTables, isOnlyHiddenMetadata, renderMarkdownLine, renderMarkdownTextLines } from "../src/markdown-format.js";
 import { stringDisplayWidth } from "../src/terminal-width.js";
 
 describe("formatMarkdownTables", () => {
@@ -198,5 +198,55 @@ describe("renderMarkdownTextLines", () => {
 		const lines = renderMarkdownTextLines("[dcp-id]: # (m159)\n\nanswer\n[dcp-block-id]: # (b5)", 80);
 
 		assert.deepEqual(lines.map((line) => line.text), ["answer"]);
+	});
+
+	it("does not render partial streaming dcp metadata references", () => {
+		const cases = [
+			"[d",
+			"[dcp-id]",
+			"[dcp-id]: # (m",
+			"[dcp-id]: # (m159",
+			"[dcp-block-id]: # (b",
+			"[dcp-block-id]: # (b5",
+		];
+
+		for (const text of cases) {
+			assert.deepEqual(renderMarkdownTextLines(text, 80), [], text);
+		}
+	});
+
+	it("keeps non-dcp bracketed text while hiding partial trailing dcp metadata", () => {
+		const lines = renderMarkdownTextLines("[details]\nanswer\n[dcp-id]: # (m159", 80);
+
+		assert.deepEqual(lines.map((line) => line.text), ["[details]", "answer"]);
+	});
+});
+
+describe("isOnlyHiddenMetadata", () => {
+	it("returns true for dcp-id markers", () => {
+		assert.equal(isOnlyHiddenMetadata("\n[dcp-id]: # (m008)"), true);
+		assert.equal(isOnlyHiddenMetadata("[dcp-id]: # (m123)"), true);
+	});
+
+	it("returns true for multiple hidden lines", () => {
+		assert.equal(isOnlyHiddenMetadata("[dcp-id]: # (m1)\n[dcp-block-id]: # (b2)"), true);
+	});
+
+	it("returns true for empty string", () => {
+		assert.equal(isOnlyHiddenMetadata(""), false);
+	});
+
+	it("returns false for text with visible content", () => {
+		assert.equal(isOnlyHiddenMetadata("Hello\n[dcp-id]: # (m1)"), false);
+		assert.equal(isOnlyHiddenMetadata("Some answer"), false);
+	});
+
+	it("returns true for whitespace-only lines with dcp markers", () => {
+		assert.equal(isOnlyHiddenMetadata("\n\n[dcp-id]: # (m008)\n"), true);
+	});
+
+	it("returns true for partial streaming dcp prefixes", () => {
+		assert.equal(isOnlyHiddenMetadata("[dcp-id]: # (m159"), true);
+		assert.equal(isOnlyHiddenMetadata("[d"), true);
 	});
 });

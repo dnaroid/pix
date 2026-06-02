@@ -1,6 +1,7 @@
 import type { Entry } from "../types.js";
 import { isRecord } from "../guards.js";
 import { createId } from "../id.js";
+import { isOnlyHiddenMetadata } from "../../markdown-format.js";
 import { extractImageContents, renderContent, renderUserMessageContent, stringifyUnknown } from "../rendering/message-content.js";
 
 type ToolResultRecord = {
@@ -171,10 +172,10 @@ function renderAssistantHistoryMessage(
 				options.addEntry({ id: createId("thinking"), kind: "thinking", text: thinkingText, expanded: false, status: "done" });
 				thinkingText = "";
 			}
-			if (assistantText) {
+			if (assistantText && !isOnlyHiddenMetadata(assistantText)) {
 				options.addEntry({ id: createId("assistant"), kind: "assistant", text: assistantText });
-				assistantText = "";
 			}
+			assistantText = "";
 
 			const toolCallId = String(block.id ?? createId("tool"));
 			const result = toolResults.get(toolCallId);
@@ -210,7 +211,7 @@ function renderAssistantHistoryMessage(
 	if (thinkingText) {
 		options.addEntry({ id: createId("thinking"), kind: "thinking", text: thinkingText, expanded: false, status: "done" });
 	}
-	if (assistantText) {
+	if (assistantText && !isOnlyHiddenMetadata(assistantText)) {
 		options.addEntry({ id: createId("assistant"), kind: "assistant", text: assistantText });
 	}
 }

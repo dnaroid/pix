@@ -6,7 +6,7 @@ import { LspClient } from "./client";
 import { loadLspConfig } from "./_shared/config";
 import { isPathIncluded } from "./_shared/glob";
 import { filePathToUri, findProjectRoot, normalizeRelativePath, resolveCommand, toAbsolutePath } from "./_shared/paths";
-import { formatLspDiagnostics, formatWarnings, joinSections } from "./_shared/output";
+import { formatLspDiagnostics, formatWarnings, joinSections, LSP_DIAGNOSTIC_ICON } from "./_shared/output";
 import type { LspServerConfig, StoredDiagnostics } from "./_shared/types";
 import { clientKey, couldMatchBeforeRoot, fileSizeAllowed, languageIdForFile, readTextFile } from "./lsp-utils";
 import { localMarkdownDiagnostics } from "./markdown-diagnostics";
@@ -112,7 +112,7 @@ export class LspManager {
       try {
         const maxFileSizeBytes = match.server.maxFileSizeBytes ?? DEFAULT_MAX_FILE_SIZE_BYTES;
         if (!(await fileSizeAllowed(file, maxFileSizeBytes))) {
-          lines.push(`⚠️ ${match.server.id}: skipped ${match.relFile}; file exceeds maxFileSizeBytes (${maxFileSizeBytes})`);
+          lines.push(`${LSP_DIAGNOSTIC_ICON} ${match.server.id}: skipped ${match.relFile}; file exceeds maxFileSizeBytes (${maxFileSizeBytes})`);
           continue;
         }
 
@@ -173,14 +173,14 @@ export class LspManager {
         if (!isFreshDiagnosticsEntry(entry, startedAt, doc.version)) {
           const fallbackSuffix = tsserverFallbackError ? `; tsserver fallback failed: ${tsserverFallbackError}` : "";
           const pullSuffix = pullDiagnosticsError ? `; pull diagnostics failed: ${pullDiagnosticsError}` : "";
-          lines.push(`⚠️ ${match.server.id}: timed out after ${diagnosticsWaitMs}ms waiting for fresh diagnostics for ${match.relFile}${fallbackSuffix}${pullSuffix}`);
+          lines.push(`${LSP_DIAGNOSTIC_ICON} ${match.server.id}: timed out after ${diagnosticsWaitMs}ms waiting for fresh diagnostics for ${match.relFile}${fallbackSuffix}${pullSuffix}`);
           continue;
         }
         const diagnostics = diagnosticsWithLocalFallback(match.server.id, file, text, entry.diagnostics);
         if (diagnostics !== entry.diagnostics) this.diagnostics.set(match.server.id, match.root, filePathToUri(file), diagnostics, doc.version);
         lines.push(formatLspDiagnostics(match.server.id, file, diagnostics, match.root));
       } catch (error) {
-        lines.push(`⚠️ ${match.server.id}: ${(error as Error).message}`);
+        lines.push(`${LSP_DIAGNOSTIC_ICON} ${match.server.id}: ${(error as Error).message}`);
       }
     }
 

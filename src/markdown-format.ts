@@ -58,7 +58,7 @@ export function formatMarkdownTables(text: string, maxWidth?: number): string {
 			continue;
 		}
 
-		if (!fence && isMarkdownReferenceDefinition(line)) {
+		if (!fence && isHiddenMarkdownMetadataLine(line)) {
 			skipBlankAfterHiddenReference = formatted.length === 0 || (formatted.at(-1) ?? "").trim().length === 0;
 			index += 1;
 			continue;
@@ -680,9 +680,35 @@ function sanitizeMarkdownText(text: string): string {
 	return expandTabs(text.replace(/\x1b/g, "␛").replace(/\r/g, ""));
 }
 
+function isHiddenMarkdownMetadataLine(line: string): boolean {
+	return isMarkdownReferenceDefinition(line) || isStreamingDcpMetadataPrefix(line);
+}
+
+export function isOnlyHiddenMetadata(text: string): boolean {
+	if (!text) return false;
+	for (const line of text.split("\n")) {
+		if (line.length === 0) continue;
+		if (!isHiddenMarkdownMetadataLine(line)) return false;
+	}
+	return true;
+}
+
 function isMarkdownReferenceDefinition(line: string): boolean {
 	return /^ {0,3}\[[^\]\n]+\]:[ \t]*\S.*$/u.test(line);
 }
+
+function isStreamingDcpMetadataPrefix(line: string): boolean {
+	const content = line.replace(/^ {0,3}/u, "");
+	if (content.length === 0) return false;
+	return isDcpReferencePrefix(content, DCP_MESSAGE_REFERENCE_PREFIX) || isDcpReferencePrefix(content, DCP_BLOCK_REFERENCE_PREFIX);
+}
+
+function isDcpReferencePrefix(content: string, markerPrefix: string): boolean {
+	return markerPrefix.startsWith(content) || (content.startsWith(markerPrefix) && /^\d*$/u.test(content.slice(markerPrefix.length)));
+}
+
+const DCP_MESSAGE_REFERENCE_PREFIX = "[dcp-id]: # (m";
+const DCP_BLOCK_REFERENCE_PREFIX = "[dcp-block-id]: # (b";
 
 function markdownFence(line: string): MarkdownFence | undefined {
 	const match = /^\s{0,3}(`{3,}|~{3,})(.*)$/.exec(line);

@@ -1,5 +1,6 @@
 import type { AgentSessionEvent, AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 import type { ImageContent } from "../../input-editor.js";
+import { isOnlyHiddenMetadata } from "../../markdown-format.js";
 import type { ConversationViewport } from "../rendering/conversation-viewport.js";
 import { createId } from "../id.js";
 import { extractImageContents, renderContent, renderUserMessageContent, stringifyUnknown } from "../rendering/message-content.js";
@@ -343,6 +344,17 @@ export class AppSessionEventController {
 			this.currentAssistantEntryId = entry.id;
 		}
 		entry.text += delta;
+
+		if (isOnlyHiddenMetadata(entry.text)) {
+			// Entire text is DCP markers or other hidden metadata — remove the entry to avoid layout flicker.
+			const idx = this.host.entries.indexOf(entry);
+			if (idx !== -1) this.host.entries.splice(idx, 1);
+			this.entryRenderVersions.delete(entry.id);
+			this.host.conversationViewport().deleteEntry(entry.id);
+			this.currentAssistantEntryId = undefined;
+			return;
+		}
+
 		this.touchEntry(entry);
 	}
 

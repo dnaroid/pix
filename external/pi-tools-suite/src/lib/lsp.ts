@@ -1,6 +1,7 @@
 import type { AgentToolResult, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { existsSync } from "node:fs";
 import { toAbsolutePath } from "../lsp/_shared/paths.js";
+import { LSP_DIAGNOSTIC_ICON } from "../lsp/_shared/output.js";
 import { getGlobalLspManager } from "../lsp/manager.js";
 import { getEventPaths, isMutationToolResult } from "../lsp/mutation-events.js";
 
@@ -52,7 +53,7 @@ export async function appendLspDiagnosticsToMutationResult<T extends LspEnrichab
     if (isMissingFileError(error)) return options.result;
     return {
       ...options.result,
-      content: [...options.result.content, textContent(`LSP diagnostics:\n\n⚠️ lsp: ${(error as Error).message}`)],
+      content: [...options.result.content, textContent(`LSP diagnostics:\n\n${LSP_DIAGNOSTIC_ICON} lsp: ${(error as Error).message}`)],
     };
   }
 }

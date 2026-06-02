@@ -3,6 +3,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
+const LSP_DIAGNOSTIC_ICON = "\u{f0026}";
+
 mock.module("typebox", () => ({
 	Type: {
 		Object: (properties: any, options?: any) => ({ kind: "object", properties, options }),
@@ -256,6 +258,8 @@ describe.serial("LSP shared helpers", () => {
 			message: "Broken",
 			range: { start: { line: 1, character: 2 }, end: { line: 1, character: 3 } },
 		} as any], cwd);
+		expect(rendered).toStartWith(`${output.LSP_DIAGNOSTIC_ICON} ts:\n`);
+		expect(rendered).not.toContain("⚠");
 		expect(rendered).toContain("src/a.ts:2:3 - error: ts: Broken [123]");
 		expect(output.hasIssueOutput(rendered)).toBe(true);
 		expect(output.joinSections("LSP diagnostics", [rendered])).toStartWith("LSP diagnostics:");
@@ -480,7 +484,7 @@ describe.serial("LSP library post-edit diagnostics", () => {
 		const result = await appendMutationDiagnostics("ast_apply", {}, { details: { changedFiles: ["a.ts", " a.ts ", ""] }, content: [{ type: "text", text: "ok" }] }, ctx);
 
 		const summary = result.content.at(-1).text;
-		expect(summary.match(/⚠️ fake:/g)).toHaveLength(1);
+		expect(summary.match(new RegExp(`${LSP_DIAGNOSTIC_ICON} fake:`, "g"))).toHaveLength(1);
 		expect(summary).toContain("a.ts:1:1 - error: fake: Fake issue [F1]");
 		expect(readPids(pidLog)).toHaveLength(1);
 	});

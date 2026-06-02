@@ -2,7 +2,7 @@ import { resolveColor, type ResolvedToolRule } from "../../config.js";
 import type { ToolBodySyntaxHighlight, ToolBodySyntaxHighlights } from "../../syntax-highlight.js";
 import { expandTabs, sliceByDisplayWidth, stringDisplayWidth, wrapDisplayLineByWords } from "../../terminal-width.js";
 import type { Theme } from "../../theme.js";
-import { hasToolLspDiagnosticsAfterMutation, sanitizeText, toolStatusIcon, toolStatusIconColor, wrapLine } from "./render-text.js";
+import { alertIconPrefixLength, hasToolLspDiagnosticsAfterMutation, sanitizeText, toolStatusIcon, toolStatusIconColor, wrapLine } from "./render-text.js";
 import type { RenderedLine, StyledSegment } from "../types.js";
 import type { ToolBodyLineStyle, ToolHeaderSegment } from "../../tool-renderers/types.js";
 
@@ -165,7 +165,9 @@ function renderToolBodyLines(
 				const segment: StyledSegment = { start: 2, end: line.text.length, foreground: diffStyle.foreground };
 				if (diffStyle.bold != null) segment.bold = diffStyle.bold;
 				line.segments = [segment];
-			} else if (lspDiagnosticStyle) {
+			} else if (lspDiagnosticStyle?.kind === "alert" && wrapIndex === 0) {
+				line.segments = [{ start: 2, end: 2 + lspDiagnosticStyle.length, foreground: colors.warning, bold: true }];
+			} else if (lspDiagnosticStyle?.kind === "severity") {
 				line.segments = [{ start: 2, end: line.text.length, foreground: lspDiagnosticStyle.foreground }];
 			} else if (bodyLineStyle && line.text.length > 2) {
 				line.segments = [{ start: 2, end: line.text.length, ...bodyLineStyle }];
@@ -399,11 +401,14 @@ function bodyLineStyleForLine(styles: readonly ToolBodyLineStyle[] | undefined, 
 	return resolvedForeground ? { ...segment, foreground: resolvedForeground } : segment;
 }
 
-function lspDiagnosticLineStyle(line: string, colors: Theme["colors"]): { foreground: string } | undefined {
+function lspDiagnosticLineStyle(line: string, colors: Theme["colors"]): { kind: "alert"; length: number } | { kind: "severity"; foreground: string } | undefined {
+	const alertLength = alertIconPrefixLength(line);
+	if (alertLength != null) return { kind: "alert", length: alertLength };
+
 	const severity = lspDiagnosticSeverityForLine(line);
-	if (severity === "error") return { foreground: colors.error };
-	if (severity === "warning") return { foreground: colors.warning };
-	if (severity === "hint") return { foreground: colors.muted };
+	if (severity === "error") return { kind: "severity", foreground: colors.error };
+	if (severity === "warning") return { kind: "severity", foreground: colors.warning };
+	if (severity === "hint") return { kind: "severity", foreground: colors.muted };
 	return undefined;
 }
 

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import type { ResolvedToolRule } from "../src/config.js";
+import { APP_ICONS, setAppIconTheme } from "../src/app/icons.js";
 import { renderToolBlock, type ToolBlockEntry } from "../src/app/rendering/tool-block-renderer.js";
 import { THEMES } from "../src/theme.js";
 
@@ -29,8 +30,10 @@ function toolEntry(overrides: Partial<ToolBlockEntry> = {}): ToolBlockEntry {
 
 describe("renderToolBlock", () => {
 	it("colors LSP diagnostic severities", () => {
+		setAppIconTheme("nerdFont");
 		const output = [
 			"LSP diagnostics after mutation:",
+			`${APP_ICONS.alert} tsserver:`,
 			"src/a.ts:1:2 - error TS2322: bad assignment",
 			"src/a.ts:2:2 - warning TS6133: unused variable",
 			"src/a.ts:3:2 - hint: remove unreachable code",
@@ -39,9 +42,10 @@ describe("renderToolBlock", () => {
 		const lines = renderToolBlock(toolEntry({ output, expandedText: output }), rule, 100, colors);
 
 		assert.equal(lines[1]?.segments, undefined);
-		assert.deepEqual(lines[2]?.segments, [{ start: 2, end: lines[2]?.text.length, foreground: colors.error }]);
-		assert.deepEqual(lines[3]?.segments, [{ start: 2, end: lines[3]?.text.length, foreground: colors.warning }]);
-		assert.deepEqual(lines[4]?.segments, [{ start: 2, end: lines[4]?.text.length, foreground: colors.muted }]);
+		assert.deepEqual(lines[2]?.segments, [{ start: 2, end: 2 + APP_ICONS.alert.length, foreground: colors.warning, bold: true }]);
+		assert.deepEqual(lines[3]?.segments, [{ start: 2, end: lines[3]?.text.length, foreground: colors.error }]);
+		assert.deepEqual(lines[4]?.segments, [{ start: 2, end: lines[4]?.text.length, foreground: colors.warning }]);
+		assert.deepEqual(lines[5]?.segments, [{ start: 2, end: lines[5]?.text.length, foreground: colors.muted }]);
 	});
 
 	it("marks truncated collapsed previews with an ellipsis in normal mode", () => {

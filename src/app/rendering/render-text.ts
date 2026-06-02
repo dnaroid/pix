@@ -4,8 +4,16 @@ import type { Theme } from "../../theme.js";
 import { APP_ICONS } from "../icons.js";
 import type { ToolStatusEntry } from "../types.js";
 
+const LSP_DIAGNOSTIC_ICON = "\u{f0026}";
+
 export function sanitizeText(text: string): string {
-	return expandTabs(text.replace(/⚠️?/gu, APP_ICONS.alert).replace(/\x1b/g, "␛").replace(/\r/g, ""));
+	return expandTabs(text.replace(/⚠️?|\u{f0026}/gu, APP_ICONS.alert).replace(/\x1b/g, "␛").replace(/\r/g, ""));
+}
+
+export function alertIconPrefixLength(text: string): number | undefined {
+	if (text.startsWith(APP_ICONS.alert)) return APP_ICONS.alert.length;
+	if (text.startsWith(LSP_DIAGNOSTIC_ICON)) return LSP_DIAGNOSTIC_ICON.length;
+	return /^⚠️?/u.exec(text)?.[0].length;
 }
 
 export function normalizePastedTextForDuplicateKey(text: string): string {

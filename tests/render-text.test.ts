@@ -14,4 +14,11 @@ describe("render text sanitization", () => {
 
 		setAppIconTheme("nerdFont");
 	});
+
+	it("renders the source LSP diagnostic icon through the active icon theme", () => {
+		setAppIconTheme("fallback");
+		assert.equal(sanitizeText("\u{f0026} typescript:"), "! typescript:");
+
+		setAppIconTheme("nerdFont");
+	});
 });

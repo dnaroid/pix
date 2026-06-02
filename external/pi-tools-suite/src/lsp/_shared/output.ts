@@ -4,6 +4,7 @@ import type { CommandRunResult } from "./types";
 import { normalizeRelativePath, uriToFilePath } from "./paths";
 
 const DEFAULT_OUTPUT_LIMIT = 4000;
+export const LSP_DIAGNOSTIC_ICON = "\u{f0026}";
 
 export function textFromContent(content: Array<{ type: string; text?: string }>): string {
   return content
@@ -29,20 +30,20 @@ export function commandOutput(result: Pick<CommandRunResult, "stdout" | "stderr"
 
 export function formatWarnings(title: string, warnings: string[]): string {
   if (warnings.length === 0) return "";
-  return `${title}:\n\n${warnings.map((warning) => `⚠️ ${warning}`).join("\n")}`;
+  return `${title}:\n\n${warnings.map((warning) => `${LSP_DIAGNOSTIC_ICON} ${warning}`).join("\n")}`;
 }
 
 export function formatCommandIssue(toolId: string, action: string, result: CommandRunResult): string {
   const output = commandOutput(result);
   const suffix = result.killed ? " (killed/timeout)" : "";
-  if (!output) return `⚠️ ${toolId} ${action} failed with exit code ${result.code}${suffix}`;
-  return `⚠️ ${toolId} ${action} failed with exit code ${result.code}${suffix}:\n${output}`;
+  if (!output) return `${LSP_DIAGNOSTIC_ICON} ${toolId} ${action} failed with exit code ${result.code}${suffix}`;
+  return `${LSP_DIAGNOSTIC_ICON} ${toolId} ${action} failed with exit code ${result.code}${suffix}:\n${output}`;
 }
 
 export function formatDiagnosticOutput(toolId: string, output: string): string {
   const compact = truncateOutput(output);
-  if (!compact) return `⚠️ ${toolId} found issues`;
-  return `⚠️ ${toolId} found issues:\n${compact}`;
+  if (!compact) return `${LSP_DIAGNOSTIC_ICON} ${toolId} found issues`;
+  return `${LSP_DIAGNOSTIC_ICON} ${toolId} found issues:\n${compact}`;
 }
 
 function severityLabel(severity: number | undefined): string {
@@ -88,11 +89,11 @@ export function formatLspDiagnostics(serverId: string, file: string, diagnostics
   if (diagnostics.length === 0) return "";
   const rendered = diagnostics.slice(0, 20).map((diagnostic) => formatDiagnostic(file, diagnostic, root));
   if (diagnostics.length > 20) rendered.push(`… ${diagnostics.length - 20} more diagnostics`);
-  return `⚠️ ${serverId}:\n${rendered.join("\n")}`;
+  return `${LSP_DIAGNOSTIC_ICON} ${serverId}:\n${rendered.join("\n")}`;
 }
 
 export function hasIssueOutput(output: string): boolean {
-  return output.includes("⚠️");
+  return output.includes(LSP_DIAGNOSTIC_ICON) || output.includes("⚠️") || output.includes("⚠");
 }
 
 export function joinSections(title: string, lines: string[]): string {
