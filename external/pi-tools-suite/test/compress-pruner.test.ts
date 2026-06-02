@@ -2,12 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AssistantMessageComponent, initTheme, UserMessageComponent } from "@mariozechner/pi-coding-agent";
-import type { DcpConfig } from "../src/compress/config.js";
-import dcpModule from "../src/compress/index.js";
-import { registerCompressTool } from "../src/compress/compress-tool.js";
-import { registerTuiFilter, stripDcpRenderedLines, stripDcpTags } from "../src/compress/dcp-tui-filter.js";
-import { registerCommands } from "../src/compress/commands.js";
+import type { DcpConfig } from "../src/dcp/config.js";
+import dcpModule from "../src/dcp/index.js";
+import { registerCompressTool } from "../src/dcp/compress-tool.js";
+import { registerCommands } from "../src/dcp/commands.js";
 import {
   applyPruning,
   appendConcreteNudgeGuidance,
@@ -20,14 +18,14 @@ import {
   getNudgeType,
   resolveContextThresholds,
   upsertNudgeAnchor,
-} from "../src/compress/pruner.js";
+} from "../src/dcp/pruner.js";
 import {
   createState,
   restoreState,
   serializeState,
   type CompressionBlock,
   type ToolRecord,
-} from "../src/compress/state.js";
+} from "../src/dcp/state.js";
 
 function config(overrides: Partial<DcpConfig> = {}): DcpConfig {
   const base: DcpConfig = {
@@ -179,214 +177,6 @@ function block(id: number, startTimestamp: number, endTimestamp: number): Compre
     createdAt: Date.now(),
   };
 }
-
-describe("DCP TUI filtering", () => {
-  test("strips finalized DCP metadata tags from assistant text", () => {
-    expect(stripDcpTags("done\n\n<dcp-id>m156</dcp-id>")).toBe("done");
-    expect(stripDcpTags("see <dcp-block-id>b3</dcp-block-id> now")).toBe("see  now");
-    expect(stripDcpTags("text <dcp-system-reminder>hidden nudge</dcp-system-reminder> end")).toBe("text  end");
-  });
-
-  test("strips markdown reference DCP metadata lines", () => {
-    expect(stripDcpTags("done\n\n[dcp-id]: # (m156)")).toBe("done");
-    expect(stripDcpTags("done\n\n[dcp-id]: # (m156 priority=high)")).toBe("done");
-    expect(stripDcpTags("done\n\n[dcp-id]: # (m156) priority=high")).toBe("done");
-    expect(stripDcpTags("done\n\n[dcp-block-id]: # (b3)")).toBe("done");
-    expect(stripDcpTags("done\n\n[dcp-id]: # (m156) priority=")).toBe("done");
-    expect(stripDcpTags("done\n\n[dcp-id]:")).toBe("done");
-  });
-
-  test("strips any dcp-prefixed tag, not just known names", () => {
-    // Broad regex catches any <dcp-*> tag variant
-    expect(stripDcpTags("a <dcp-foo>bar</dcp-foo> b")).toBe("a  b");
-    expect(stripDcpTags("a <dcp-new-tag>content</dcp-new-tag> b")).toBe("a  b");
-    expect(stripDcpTags("a <dcp>bare</dcp> b")).toBe("a  b");
-  });
-
-  test("strips orphan unpaired DCP tag fragments", () => {
-    // Unpaired closing tag: strips </dcp-id>, leaves plain text "m156"
-    expect(stripDcpTags("done\n\nm156</dcp-id>")).toBe("done\n\nm156");
-    // Unpaired opening tag: strips <dcp-id>, leaves plain text "orphan"
-    expect(stripDcpTags("done\n\n<dcp-id>orphan")).toBe("done\n\norphan");
-    // Malformed <dcp-id=m156</dcp-id> — broad regex strips both tag parts
-    expect(stripDcpTags("done\n\n<dcp-id=m156</dcp-id>")).toBe("done");
-  });
-
-  test("hides in-flight open DCP tags during streaming", () => {
-    // Streaming: open tag + content to end is stripped as a unit
-    expect(stripDcpTags("done\n\n<dcp-id>m156", { streaming: true })).toBe("done");
-    // Incomplete tag prefixes at end of text
-    expect(stripDcpTags("done\n\n<dcp-id", { streaming: true })).toBe("done");
-    expect(stripDcpTags("done\n\n<dcp", { streaming: true })).toBe("done");
-    expect(stripDcpTags("done\n\n<dc", { streaming: true })).toBe("done");
-    expect(stripDcpTags("done\n\n<d", { streaming: true })).toBe("done");
-  });
-
-  test("hides in-flight markdown DCP marker lines during streaming", () => {
-    expect(stripDcpTags("done\n\n[dcp-id]:", { streaming: true })).toBe("done");
-    expect(stripDcpTags("done\n\n[dcp-id]: # (m156", { streaming: true })).toBe("done");
-    expect(stripDcpTags("done\n\n[dcp-id]: # (m156 priority=", { streaming: true })).toBe("done");
-    expect(stripDcpTags("done\n\n[dcp-id]: # (m156) priority=", { streaming: true })).toBe("done");
-    expect(stripDcpTags("done\n\n[dcp-block-id]: # (b3", { streaming: true })).toBe("done");
-  });
-
-  test("non-streaming mode strips unpaired open tags but keeps trailing content", () => {
-    // Non-streaming: <dcp-id> is stripped as unpaired, but "m156" stays
-    // (it's just plain text, not part of a tag)
-    expect(stripDcpTags("done\n\n<dcp-id>m156")).toBe("done\n\nm156");
-  });
-
-  test("sanitizes streaming event messages before TUI listeners", async () => {
-    const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
-    registerTuiFilter({
-      on(event: string, handler: (event: any, ctx: any) => unknown) {
-        handlers.set(event, [...(handlers.get(event) ?? []), handler]);
-      },
-    } as any);
-
-    const rawContent = [{ type: "text", text: "done\n\n<dcp-id>m156" }];
-    const message = { role: "assistant", content: rawContent };
-
-    await handlers.get("message_update")?.[0]?.({ message }, {});
-
-    // message_update runs in streaming mode — open tag + content stripped
-    expect(message.content).not.toBe(rawContent);
-    expect(message.content[0].text).toBe("done");
-    expect(rawContent[0].text).toBe("done\n\n<dcp-id>m156");
-  });
-
-  test("sanitizes low-level assistant stream partials and split deltas", async () => {
-    const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
-    registerTuiFilter({
-      on(event: string, handler: (event: any, ctx: any) => unknown) {
-        handlers.set(event, [...(handlers.get(event) ?? []), handler]);
-      },
-    } as any);
-
-    await handlers.get("message_start")?.[0]?.({ message: { role: "assistant", content: [] } }, {});
-
-    const firstRawContent = [{ type: "text", text: "done" }];
-    const firstEvent = {
-      message: { role: "assistant", content: firstRawContent },
-      assistantMessageEvent: {
-        type: "text_delta",
-        contentIndex: 0,
-        delta: "done",
-        partial: { role: "assistant", content: firstRawContent },
-      },
-    };
-
-    await handlers.get("message_update")?.[0]?.(firstEvent, {});
-    expect(firstEvent.assistantMessageEvent.delta).toBe("done");
-
-    const secondRawContent = [{ type: "text", text: "done\n\n<dcp-id>m156" }];
-    const secondEvent = {
-      message: { role: "assistant", content: secondRawContent },
-      assistantMessageEvent: {
-        type: "text_delta",
-        contentIndex: 0,
-        delta: "\n\n<dcp-id>m156",
-        partial: { role: "assistant", content: secondRawContent },
-      },
-    };
-    const secondAssistantEvent = secondEvent.assistantMessageEvent;
-
-    await handlers.get("message_update")?.[0]?.(secondEvent, {});
-    expect(secondEvent.assistantMessageEvent).toBe(secondAssistantEvent);
-    expect(secondEvent.message.content[0].text).toBe("done");
-    expect(secondEvent.assistantMessageEvent.delta).toBe("");
-    expect(secondEvent.assistantMessageEvent.partial.content[0].text).toBe("done");
-    expect(secondRawContent[0].text).toBe("done\n\n<dcp-id>m156");
-
-    const thirdRawContent = [{ type: "text", text: "done\n\n<dcp-id>m156</dcp-id> ok" }];
-    const thirdEvent = {
-      message: { role: "assistant", content: thirdRawContent },
-      assistantMessageEvent: {
-        type: "text_delta",
-        contentIndex: 0,
-        delta: "</dcp-id> ok",
-        partial: { role: "assistant", content: thirdRawContent },
-      },
-    };
-
-    await handlers.get("message_update")?.[0]?.(thirdEvent, {});
-    expect(thirdEvent.message.content[0].text).toBe("done\n\n ok");
-    expect(thirdEvent.assistantMessageEvent.delta).toBe("\n\n ok");
-    expect(thirdRawContent[0].text).toBe("done\n\n<dcp-id>m156</dcp-id> ok");
-  });
-
-  test("patches assistant renderer to strip markdown DCP markers at display time", () => {
-    registerTuiFilter({ on() {} } as any);
-
-    const component = new AssistantMessageComponent(undefined as any);
-    component.updateContent({
-      role: "assistant",
-      content: [{ type: "text", text: "answer\n\n[dcp-id]: # (m064)" }],
-      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
-      stopReason: "stop",
-      timestamp: 1,
-      api: "test",
-      provider: "test",
-      model: "test",
-    } as any);
-
-    const rendered = component.render(80).join("\n");
-    expect(rendered).toContain("answer");
-    expect(rendered).not.toContain("dcp-id");
-    expect(rendered).not.toContain("m064");
-  });
-
-  test("filters rendered DCP metadata lines from non-assistant display components", () => {
-    expect(stripDcpRenderedLines([
-      " hello",
-      " [dcp-id]: # (m064)",
-      " [dcp-id]: # (m065)",
-      " done",
-    ])).toEqual([" hello", " done"]);
-
-    expect(stripDcpRenderedLines([
-      " hello",
-      " [dcp-id]: #",
-      " (m064)",
-      " done",
-    ])).toEqual([" hello", " done"]);
-  });
-
-  test("patches user renderer to hide injected DCP marker lines", () => {
-    initTheme(undefined, false);
-    registerTuiFilter({ on() {} } as any);
-
-    const component = new UserMessageComponent("hello\n[dcp-id]: # (m064)");
-    const rendered = component.render(80).join("\n");
-    expect(rendered).toContain("hello");
-    expect(rendered).not.toContain("dcp-id");
-    expect(rendered).not.toContain("m064");
-  });
-
-  test("scrubs stale persisted assistant messages on session start without touching user messages", async () => {
-    const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
-    registerTuiFilter({
-      on(event: string, handler: (event: any, ctx: any) => unknown) {
-        handlers.set(event, [...(handlers.get(event) ?? []), handler]);
-      },
-    } as any);
-
-    const assistantMessage = textMessage("assistant", "done\n\n<dcp-id>m156</dcp-id>", 1);
-    const userMessage = textMessage("user", "literal <dcp-id>m156</dcp-id>", 2);
-    const entries = [
-      { type: "message", message: assistantMessage },
-      { type: "message", message: userMessage },
-    ];
-
-    await handlers.get("session_start")?.[0]?.(
-      { type: "session_start", reason: "startup" },
-      { sessionManager: { getEntries: () => entries } },
-    );
-
-    expect(assistantMessage.content[0].text).toBe("done");
-    expect(userMessage.content[0].text).toBe("literal <dcp-id>m156</dcp-id>");
-  });
-});
 
 describe("DCP pruning effectiveness", () => {
   test("deduplication and stats are idempotent across repeated pruning passes", () => {
@@ -1422,6 +1212,26 @@ describe("DCP pruning effectiveness", () => {
       .join("\n") ?? "";
     expect(rendered).toContain("keep me");
     expect(rendered).not.toContain("DCP Session Statistics");
+  });
+
+  test("DCP module stays headless and does not register TUI/display hooks", async () => {
+    const events: string[] = [];
+    const pi = {
+      on(event: string) {
+        events.push(event);
+      },
+      registerTool() {},
+      registerCommand() {},
+      appendEntry() {},
+      sendMessage() {},
+    } as any;
+
+    await dcpModule(pi);
+
+    expect(events).not.toContain("message_start");
+    expect(events).not.toContain("message_update");
+    expect(events).not.toContain("message_end");
+    expect(events).not.toContain("turn_end");
   });
 
   test("serialized state preserves tool fingerprints and accounting across reload", () => {

@@ -13,10 +13,11 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = `{
     // "model-tools",
     // "usage",
     // "web-search",
-    // "compress"
+    // "dcp"
   ],
 
-  // Dynamic Context Pruning (DCP) / compress module config.
+  // Dynamic Context Pruning (DCP) module config.
+  // The DCP module owns the compress tool and /dcp commands.
   "dcp": {
     "enabled": true,
     "manualMode": {

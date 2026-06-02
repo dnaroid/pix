@@ -1,4 +1,4 @@
-import { applyOutputFilters, stripDcpDisplayMetadata, suppressPendingDcpIdMetadataLine, type PixConfig } from "../config.js";
+import { applyOutputFilters, type PixConfig } from "../config.js";
 import { renderMarkdownTextLines } from "../markdown-format.js";
 import type { Theme } from "../theme.js";
 import { attachImageClickTargets } from "./image-click-targets.js";
@@ -18,7 +18,6 @@ export type ConversationEntryRenderOptions = {
 	colors: Theme["colors"];
 	pixConfig: PixConfig;
 	outputFilters: readonly RegExp[];
-	suppressPendingDcpIdMetadata: boolean;
 	superCompactTools?: boolean;
 	allThinkingExpanded?: boolean;
 	renderInlineUserMessageMenu: (entry: Extract<Entry, { kind: "user" }>, context: InlineUserMessageMenuContext) => RenderedLine[];
@@ -96,7 +95,7 @@ function renderCustomEntry(entry: Extract<Entry, { kind: "custom" }>, width: num
 }
 
 function renderAssistantLines(text: string, width: number, options: ConversationEntryRenderOptions): RenderedLine[] {
-	const displayText = displayAssistantText(text, options.outputFilters, options.suppressPendingDcpIdMetadata);
+	const displayText = applyOutputFilters(text, options.outputFilters).trimEnd();
 	if (!displayText) return [];
 	return renderMarkdownTextLines(displayText, width).map((line) => ({
 		text: line.text,
@@ -104,9 +103,4 @@ function renderAssistantLines(text: string, width: number, options: Conversation
 		...(line.segments && line.segments.length > 0 ? { segments: line.segments } : {}),
 		...(line.syntaxHighlight ? { syntaxHighlight: line.syntaxHighlight } : {}),
 	}));
-}
-
-function displayAssistantText(text: string, outputFilters: readonly RegExp[], suppressPendingDcpIdMetadata: boolean): string {
-	const filtered = stripDcpDisplayMetadata(applyOutputFilters(text, outputFilters)).trimEnd();
-	return suppressPendingDcpIdMetadata ? suppressPendingDcpIdMetadataLine(filtered) : filtered;
 }

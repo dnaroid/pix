@@ -15,15 +15,12 @@ delete process.env.PIX_USE_FALLBACK_ICONS;
 const {
 	applyOutputFilters,
 	compileOutputFilterPatterns,
-	stripDcpDisplayMetadata,
 	getPixConfigPath,
 	loadPixConfig,
-	outputFiltersRemoveDcpIdMetadataLine,
 	resolveColor,
 	resolveModelColor,
 	resolveToolRule,
 	savePixDictationLanguage,
-	suppressPendingDcpIdMetadataLine,
 	upsertPixDictationLanguageInJsonc,
 } = await import("../src/config.js");
 type ToolRendererConfig = import("../src/config.js").ToolRendererConfig;
@@ -164,33 +161,10 @@ describe("config helpers", () => {
 		assert.equal(applyOutputFilters("keep\nsecret-value\na token=abc z\n", filters), "keep\na  z\n");
 	});
 
-	it("ignores invalid filter patterns and detects dcp id line removal", () => {
+	it("ignores invalid filter patterns", () => {
 		const filters = compileOutputFilterPatterns(["/<dcp-id>m\\d+<\\/dcp-id>/", "/[/"]);
-		assert.equal(outputFiltersRemoveDcpIdMetadataLine(filters), true);
 		assert.equal(applyOutputFilters("x", []), "x");
 		assert.equal(applyOutputFilters("", filters), "");
-	});
-
-	it("suppresses only partially streamed dcp metadata lines", () => {
-		assert.equal(suppressPendingDcpIdMetadataLine("hello\n<dcp-id>m0"), "hello");
-		assert.equal(suppressPendingDcpIdMetadataLine("<dcp-id>m001</dcp-id>"), "<dcp-id>m001</dcp-id>");
-		assert.equal(suppressPendingDcpIdMetadataLine("hello\nnot metadata"), "hello\nnot metadata");
-		assert.equal(suppressPendingDcpIdMetadataLine(""), "");
-	});
-
-	it("strips DCP display metadata without requiring user output filters", () => {
-		assert.equal(stripDcpDisplayMetadata("answer\n[dcp-id]: # (m064)"), "answer");
-		assert.equal(stripDcpDisplayMetadata("answer\n[dcp-block-id]: # (b4)"), "answer");
-		assert.equal(stripDcpDisplayMetadata("answer\n<dcp-id>m064</dcp-id>"), "answer");
-		assert.equal(stripDcpDisplayMetadata("answer\n<dcp-id>m064"), "answer");
-		assert.equal(stripDcpDisplayMetadata("answer\n[dcp-id]: # (m064"), "answer");
-	});
-
-	it("removes whole DCP metadata lines without leaving blank gaps", () => {
-		assert.equal(stripDcpDisplayMetadata("before\n[dcp-id]: # (m064)\nafter"), "before\nafter");
-		assert.equal(stripDcpDisplayMetadata("[dcp-id]: # (m064)\nafter"), "after");
-		assert.equal(stripDcpDisplayMetadata("before\n  [dcp-id]: # (m064)\nafter"), "before\nafter");
-		assert.equal(stripDcpDisplayMetadata("before\n<dcp-id>m064</dcp-id>\nafter"), "before\nafter");
 	});
 
 	it("resolves exact, wildcard, default, hidden, and color rules", () => {

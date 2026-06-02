@@ -20,7 +20,7 @@ const MODULES: Array<{ name: string; load: () => Promise<ExtensionModule> }> = [
 	{ name: "model-tools", load: () => import("./model-tools/index") },
 	{ name: "usage", load: () => import("./usage/index") },
 	{ name: "web-search", load: () => import("./web-search/index") },
-	{ name: "compress", load: () => import("./compress/index") },
+	{ name: "dcp", load: () => import("./dcp/index") },
 	{ name: "prompt-commands", load: () => import("./prompt-commands/index") },
 ];
 

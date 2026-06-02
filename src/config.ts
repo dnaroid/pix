@@ -151,19 +151,6 @@ const DEFAULT_DICTATION: DictationConfig = {
 	},
 };
 
-const DCP_ID_METADATA_SAMPLE = "<dcp-id>m001</dcp-id>";
-const DCP_ID_METADATA_PREFIX = "<dcp-id>m";
-const DCP_ID_METADATA_SUFFIX = "</dcp-id>";
-
-const DCP_XML_PAIRED_TAG_RE = /<dcp[^>]*>[\s\S]*?<\/dcp[^>]*>/gi;
-const DCP_XML_OPEN_TAG_TO_END_RE = /<dcp[^>]*>[\s\S]*$/gi;
-const DCP_XML_UNPAIRED_TAG_RE = /<\/?dcp[^>]*>/gi;
-const DCP_MARKDOWN_REFERENCE_RE = /[ \t]*\[dcp(?:-[a-z0-9-]+)?\]:[ \t]*#(?:[ \t]+\([^\n]*\))?[ \t]*/gi;
-const DCP_MARKDOWN_REFERENCE_LINE_RE = /^[ \t]*\[dcp(?:-[a-z0-9-]+)?\]:[ \t]*#(?:[ \t]+\([^\n]*\))?[ \t]*$/i;
-const DCP_MARKDOWN_REFERENCE_PENDING_RE = /^\[d(?:c(?:p(?:-[a-z0-9-]*)?)?)?(?:\]?(?::[ \t]*#?(?:[ \t]*\([^\)\n]*)?)?)?$/i;
-const DCP_XML_METADATA_LINE_RE = /^[ \t]*<dcp[^>]*>(?:[\s\S]*?<\/dcp[^>]*>)?[ \t]*$/i;
-const DCP_DISPLAY_QUICK_CHECK_RE = /<\/?d(?:c(?:p)?)?|\[d(?:c(?:p)?)?/i;
-
 function parseJsonc(text: string): unknown {
 	return parse(text, undefined, { allowTrailingComma: true });
 }
@@ -409,41 +396,6 @@ export function compileOutputFilterPatterns(patterns: readonly string[]): RegExp
 	return patterns.flatMap((pattern) => compileOutputFilterPattern(pattern));
 }
 
-export function stripDcpDisplayMetadata(text: string): string {
-	if (text.length === 0 || !DCP_DISPLAY_QUICK_CHECK_RE.test(text)) return text;
-
-	let cleaned = stripDcpDisplayMetadataLines(text);
-
-	// Strip fully paired XML-style DCP tags first. During streaming, strip an
-	// unterminated opening XML tag and everything after it before removing
-	// orphan tags, otherwise `<dcp-id>m123` would leave `m123` behind.
-	cleaned = cleaned
-		.replace(DCP_XML_PAIRED_TAG_RE, "")
-		.replace(DCP_XML_OPEN_TAG_TO_END_RE, "")
-		.replace(DCP_XML_UNPAIRED_TAG_RE, "");
-
-	// Hide a partially streamed markdown reference line before the complete-line
-	// regex can strip the prefix and strand the `(m123` payload.
-	cleaned = suppressPendingDcpIdMetadataLine(cleaned).replace(DCP_MARKDOWN_REFERENCE_RE, "");
-	cleaned = suppressPendingDcpIdMetadataLine(cleaned);
-	cleaned = stripDcpDisplayMetadataLines(cleaned);
-	return cleaned.replace(/\n{3,}/g, "\n\n").trimEnd();
-}
-
-function stripDcpDisplayMetadataLines(text: string): string {
-	if (text.length === 0) return text;
-
-	let removed = false;
-	const keptLines = text.split("\n").filter((line) => {
-		const normalizedLine = line.replace(/\r$/u, "");
-		const isMetadataLine = DCP_MARKDOWN_REFERENCE_LINE_RE.test(normalizedLine) || DCP_XML_METADATA_LINE_RE.test(normalizedLine);
-		if (isMetadataLine) removed = true;
-		return !isMetadataLine;
-	});
-
-	return removed ? keptLines.join("\n") : text;
-}
-
 export function applyOutputFilters(text: string, filters: readonly RegExp[]): string {
 	if (filters.length === 0 || text.length === 0) return text;
 
@@ -466,44 +418,6 @@ export function applyOutputFilters(text: string, filters: readonly RegExp[]): st
 	}
 
 	return filteredLines.join("\n");
-}
-
-export function outputFiltersRemoveDcpIdMetadataLine(filters: readonly RegExp[]): boolean {
-	return filters.length > 0 && applyOutputFilters(DCP_ID_METADATA_SAMPLE, filters).length === 0;
-}
-
-export function suppressPendingDcpIdMetadataLine(text: string): string {
-	if (text.length === 0) return text;
-
-	const lineStart = text.lastIndexOf("\n") + 1;
-	const line = text.slice(lineStart);
-	if (!isPendingDcpIdMetadataLine(line)) return text;
-
-	// Hide the still-streaming metadata line and its line break until it either
-	// becomes a complete filtered line or diverges from the metadata prefix.
-	return lineStart > 0 ? text.slice(0, lineStart - 1) : "";
-}
-
-function isPendingDcpIdMetadataLine(line: string): boolean {
-	const candidate = line.trimStart();
-	if (candidate.length === 0) return false;
-	return isPendingXmlDcpIdMetadataLine(candidate) || isPendingMarkdownDcpMetadataLine(candidate);
-}
-
-function isPendingXmlDcpIdMetadataLine(candidate: string): boolean {
-	if (DCP_ID_METADATA_PREFIX.startsWith(candidate)) return true;
-	if (!candidate.startsWith(DCP_ID_METADATA_PREFIX)) return false;
-
-	const afterPrefix = candidate.slice(DCP_ID_METADATA_PREFIX.length);
-	const digits = afterPrefix.match(/^\d*/)?.[0] ?? "";
-	const afterDigits = afterPrefix.slice(digits.length);
-	if (afterDigits.length === 0) return true;
-	return DCP_ID_METADATA_SUFFIX.startsWith(afterDigits) && afterDigits.length < DCP_ID_METADATA_SUFFIX.length;
-}
-
-function isPendingMarkdownDcpMetadataLine(candidate: string): boolean {
-	if (DCP_MARKDOWN_REFERENCE_LINE_RE.test(candidate)) return false;
-	return DCP_MARKDOWN_REFERENCE_PENDING_RE.test(candidate);
 }
 
 function applyOutputFiltersToLine(line: string, filters: readonly RegExp[]): string {

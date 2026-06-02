@@ -25,7 +25,6 @@ const renderOptions: ConversationEntryRenderOptions = {
 	colors: THEMES.dark.colors,
 	pixConfig,
 	outputFilters: [],
-	suppressPendingDcpIdMetadata: false,
 	renderInlineUserMessageMenu: () => [],
 };
 describe("renderConversationEntry", () => {
@@ -50,30 +49,16 @@ describe("renderConversationEntry", () => {
 		assert.deepEqual(lines.map((line) => line.text), ["alpha beta", "gamma"]);
 	});
 
-	it("hides DCP metadata markers from assistant rendering", () => {
+	it("hides assistant markdown reference metadata", () => {
 		const lines = renderConversationEntry({
-			id: "assistant-dcp",
+			id: "assistant-ref-metadata",
 			kind: "assistant",
-			text: "answer\n[dcp-id]: # (m064)\n<dcp-block-id>b4</dcp-block-id>",
+			text: "[dcp-id]: # (m159)\n\n[dcp-id]: # (m161)",
 		}, 80, renderOptions);
 
-		const rendered = lines.map((line) => line.text).join("\n");
-		assert.match(rendered, /answer/u);
-		assert.doesNotMatch(rendered, /dcp-id|dcp-block-id|m064|b4/u);
+		assert.deepEqual(lines, []);
 	});
 
-	it("keeps assistant height stable while a trailing DCP marker line streams", () => {
-		const texts = [
-			"answer\n",
-			"answer\n[dcp-id]: # (m064",
-			"answer\n[dcp-id]: # (m064)",
-		];
-
-		for (const [index, text] of texts.entries()) {
-			const lines = renderConversationEntry({ id: `assistant-dcp-stream-${index}`, kind: "assistant", text }, 80, renderOptions);
-			assert.deepEqual(lines.map((line) => line.text), ["answer"]);
-		}
-	});
 
 	it("formats assistant markdown tables before wrapping", () => {
 		const lines = renderConversationEntry({
@@ -305,31 +290,6 @@ describe("renderConversationEntry", () => {
 		assert.deepEqual(lines.slice(1).map((line) => line.text), ["  alpha"]);
 	});
 
-	it("hides DCP metadata markers from expanded thinking rendering", () => {
-		const lines = renderConversationEntry({
-			id: "thinking-dcp",
-			kind: "thinking",
-			text: "internal note\n[dcp-id]: # (m064)",
-			expanded: true,
-			status: "done",
-		}, 80, renderOptions);
-
-		const rendered = lines.map((line) => line.text).join("\n");
-		assert.match(rendered, /internal note/u);
-		assert.doesNotMatch(rendered, /dcp-id|m064/u);
-	});
-
-	it("does not leave blank thinking rows where DCP metadata lines were removed", () => {
-		const lines = renderConversationEntry({
-			id: "thinking-dcp-gap",
-			kind: "thinking",
-			text: "Plan\n[dcp-id]: # (m064)\n- detail",
-			expanded: true,
-			status: "done",
-		}, 80, renderOptions);
-
-		assert.deepEqual(lines.slice(1).map((line) => line.text), ["  Plan", "  - detail"]);
-	});
 
 	it("uses fenced code languages inside expanded thinking text", () => {
 		const lines = renderConversationEntry({
@@ -408,7 +368,6 @@ describe("ConversationViewport super-compact tools", () => {
 			colors: THEMES.dark.colors,
 			pixConfig,
 			outputFilters: [],
-			suppressPendingDcpIdMetadata: false,
 			superCompactTools: true,
 			isDynamicConversationBlock: () => false,
 			renderInlineUserMessageMenu: () => [],
@@ -438,7 +397,6 @@ describe("ConversationViewport super-compact tools", () => {
 			colors: THEMES.dark.colors,
 			pixConfig,
 			outputFilters: [],
-			suppressPendingDcpIdMetadata: false,
 			superCompactTools: true,
 			isDynamicConversationBlock: () => false,
 			renderInlineUserMessageMenu: () => [],
@@ -468,7 +426,6 @@ describe("ConversationViewport super-compact tools", () => {
 			colors: THEMES.dark.colors,
 			pixConfig,
 			outputFilters: [],
-			suppressPendingDcpIdMetadata: false,
 			superCompactTools: true,
 			allThinkingExpanded: true,
 			isDynamicConversationBlock: () => false,

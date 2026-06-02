@@ -4,7 +4,6 @@ import { InputEditor } from "../input-editor.js";
 import {
 	compileOutputFilterPatterns,
 	loadPixConfig,
-	outputFiltersRemoveDcpIdMetadataLine,
 	resolveToolRule,
 	type PixConfig,
 } from "../config.js";
@@ -86,7 +85,6 @@ export class PiUiExtendApp {
 	private readonly extensionActions: AppExtensionActionsController;
 	private readonly pixConfig: PixConfig;
 	private readonly outputFilters: readonly RegExp[];
-	private readonly suppressPendingDcpIdMetadata: boolean;
 	private readonly commandController: AppCommandController;
 	private readonly inputActions: AppInputActionController;
 	private readonly inputController: AppInputController;
@@ -390,7 +388,6 @@ export class PiUiExtendApp {
 			suppressExtensionWidget: (key) => this.extensionUiController.suppressWidget(key),
 		});
 		this.outputFilters = compileOutputFilterPatterns(this.pixConfig.outputFilters.patterns);
-		this.suppressPendingDcpIdMetadata = outputFiltersRemoveDcpIdMetadataLine(this.outputFilters);
 		this.conversationViewport = new ConversationViewport({
 			get entries() { return app.entries; },
 			get session() { return app.runtime?.session; },
@@ -402,7 +399,6 @@ export class PiUiExtendApp {
 			colors: this.theme.colors,
 			pixConfig: this.pixConfig,
 			outputFilters: this.outputFilters,
-			suppressPendingDcpIdMetadata: this.suppressPendingDcpIdMetadata,
 			hasDynamicConversationBlock: () => this.popupMenus.hasDynamicConversationBlock(),
 			isDynamicConversationBlock: (entry) => this.popupMenus.isDynamicConversationBlock(entry),
 			renderInlineUserMessageMenu: (entry, context) => this.popupMenus.renderInlineUserMessageMenu(entry, context),

@@ -37,11 +37,8 @@ import {
 import type { DcpNudgeType } from "./pruner-types.js"
 import { registerCompressTool } from "./compress-tool.js"
 import { DCP_STATS_MESSAGE_TYPE, registerCommands } from "./commands.js"
-import { DcpUiController, normalizeDcpContextUsage } from "./ui.js"
-import { registerTuiFilter } from "./dcp-tui-filter.js"
-import { ignoreStaleExtensionContextError, safeGetContextUsage } from "../context-usage.js"
-
-const DCP_CONTEXT_USAGE_EVENT = "pi-tools-suite:dcp-context-usage"
+import { normalizeDcpContextUsage } from "./ui.js"
+import { safeGetContextUsage } from "../context-usage.js"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -101,31 +98,12 @@ function isUserVisibleOnlyMessage(message: any): boolean {
 
 export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 	// ── 1. Load config ────────────────────────────────────────────────────────
-	const config = loadConfig(process.cwd())
+	const config = loadConfig()
 
 	if (!config.enabled) return
 
 	// ── 2. Create state ───────────────────────────────────────────────────────
 	const state = createState()
-	const ui = new DcpUiController(state)
-	const updateUi = (ctx: ExtensionContext): void => {
-		try {
-			if (!ctx?.hasUI) return
-			ui.setUICtx(ctx.ui)
-			ui.update(ctx)
-		} catch (error) {
-			ignoreStaleExtensionContextError(error)
-		}
-	}
-	const emitContextUsage = (ctx: ExtensionContext): void => {
-		const usage = safeGetContextUsage(ctx)
-		if (!usage) return
-		try {
-			;(pi as { events?: { emit?: (name: string, data: unknown) => void } }).events?.emit?.(DCP_CONTEXT_USAGE_EVENT, usage)
-		} catch (error) {
-			ignoreStaleExtensionContextError(error)
-		}
-	}
 	const appendNudgeTelemetry = (
 		event: "emitted" | "upgraded",
 		type: DcpNudgeType,
@@ -158,20 +136,13 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 		state.manualMode = true
 	}
 
-	// ── 3. Register TUI filter (strip DCP tags from displayed messages) ───────
-	registerTuiFilter(pi)
-
-	// ── 4. Register compress tool ─────────────────────────────────────────────
+	// ── 3. Register compress tool ─────────────────────────────────────────────
 	registerCompressTool(pi, state, config)
 
-	// ── 5. Register /dcp commands ─────────────────────────────────────────────
-	registerCommands(pi, state, config, {
-		onStateChanged(ctx) {
-			updateUi(ctx)
-		},
-	})
+	// ── 4. Register /dcp commands ─────────────────────────────────────────────
+	registerCommands(pi, state, config)
 
-	// ── 6. session_start: restore state from session entries ──────────────────
+	// ── 5. session_start: restore state from session entries ──────────────────
 	pi.on("session_start", async (_event, ctx) => {
 		// Reset to a clean slate first.
 		resetState(state)
@@ -191,17 +162,15 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 
 		restoreState(state, latestDcpState)
 
-		// Show a rich status indicator + floating cleaned-context widget in the pi TUI.
-		updateUi(ctx)
+		// Headless by design: no extension status/footer/widgets are rendered.
 	})
 
-	// ── 7. session_shutdown: save state ───────────────────────────────────────
+	// ── 6. session_shutdown: save state ───────────────────────────────────────
 	pi.on("session_shutdown", async (_event, _ctx) => {
 		saveState(pi, state)
-		ui.dispose()
 	})
 
-	// ── 8. before_agent_start: inject system prompt ───────────────────────────
+	// ── 7. before_agent_start: inject system prompt ───────────────────────────
 	pi.on("before_agent_start", async (event, _ctx) => {
 		const promptAddition = state.manualMode
 			? MANUAL_MODE_SYSTEM_PROMPT
@@ -212,7 +181,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 		}
 	})
 
-	// ── 9. tool_call: record input args for dedup / purge fingerprinting ───────
+	// ── 8. tool_call: record input args for dedup / purge fingerprinting ───────
 	pi.on("tool_call", async (event, _ctx) => {
 		if (!state.toolCalls.has(event.toolCallId)) {
 			state.toolCalls.set(event.toolCallId, {
@@ -231,8 +200,8 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 		}
 	})
 
-	// ── 10. tool_result: finalise tool record with result info ─────────────────
-	pi.on("tool_result", async (event, ctx) => {
+	// ── 9. tool_result: finalise tool record with result info ─────────────────
+	pi.on("tool_result", async (event, _ctx) => {
 		const record = state.toolCalls.get(event.toolCallId)
 
 		const outputText = event.content
@@ -261,13 +230,9 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 			})
 		}
 
-		if (event.toolName === "compress" && ctx.hasUI) {
-			updateUi(ctx)
-			emitContextUsage(ctx)
-		}
 	})
 
-	// ── 11. context: apply pruning and inject nudges ──────────────────────────
+	// ── 10. context: apply pruning and inject nudges ──────────────────────────
 	pi.on("context", async (event, ctx) => {
 		const contextMessages = event.messages.filter((message: any) => !isUserVisibleOnlyMessage(message))
 		annotateMessagesWithBranchEntryIds(contextMessages, ctx)
@@ -295,8 +260,6 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 				applyAnchoredNudges(prunedMessages, state, (anchor) =>
 					appendConcreteNudgeGuidance(baseNudgeText(anchor.type), candidate, messageCandidates, state),
 				)
-				updateUi(ctx)
-				emitContextUsage(ctx)
 				return { messages: prunedMessages }
 			}
 
@@ -388,24 +351,11 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 			appendConcreteNudgeGuidance(baseNudgeText(anchor.type), candidate, messageCandidates, state),
 		)
 
-
-		// Update footer status and floating widget after each context event.
-		updateUi(ctx)
-		emitContextUsage(ctx)
-
 		return { messages: prunedMessages }
 	})
 
-	// ── 12. turn_end: refresh DCP status from Pi's final context percentage ───
-	pi.on("turn_end", async (_event, ctx) => {
-		updateUi(ctx)
-		emitContextUsage(ctx)
-	})
-
-	// ── 13. agent_end: persist state after each agent run ────────────────────
-	pi.on("agent_end", async (_event, ctx) => {
-		updateUi(ctx)
-		emitContextUsage(ctx)
+	// ── 11. agent_end: persist state after each agent run ────────────────────
+	pi.on("agent_end", async (_event, _ctx) => {
 		saveState(pi, state)
 	})
 }

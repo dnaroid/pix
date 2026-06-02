@@ -91,6 +91,26 @@ describe("formatMarkdownTables", () => {
 		assert.equal(formatMarkdownTables(input), input);
 	});
 
+	it("hides markdown reference definitions outside fenced code blocks", () => {
+		const input = [
+			"visible before",
+			"[dcp-id]: # (m159)",
+			"  [doc]: https://example.test/docs",
+			"```md",
+			"[literal]: # (kept)",
+			"```",
+			"visible after",
+		].join("\n");
+
+		assert.equal(formatMarkdownTables(input), [
+			"visible before",
+			"```md",
+			"[literal]: # (kept)",
+			"```",
+			"visible after",
+		].join("\n"));
+	});
+
 	it("wraps wide table cells while keeping columns aligned", () => {
 		const input = [
 			"| A | B |",
@@ -172,5 +192,11 @@ describe("renderMarkdownTextLines", () => {
 		const [line] = renderMarkdownTextLines("```ts", 80, 2);
 
 		assert.equal(line?.syntaxHighlight?.start, 2);
+	});
+
+	it("does not render injected markdown reference metadata", () => {
+		const lines = renderMarkdownTextLines("[dcp-id]: # (m159)\n\nanswer\n[dcp-block-id]: # (b5)", 80);
+
+		assert.deepEqual(lines.map((line) => line.text), ["answer"]);
 	});
 });

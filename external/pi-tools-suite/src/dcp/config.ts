@@ -220,48 +220,6 @@ function readDcpFromSuiteConfig(filePath: string): Record<string, unknown> {
   return dcp as Record<string, unknown>
 }
 
-/**
- * Walk up from `startDir` looking for `.pi/dcp.jsonc`.
- * Returns the path if found, otherwise null.
- */
-function findProjectConfig(startDir: string): string | null {
-  let dir = path.resolve(startDir)
-  const root = path.parse(dir).root
-
-  while (true) {
-    const candidate = path.join(dir, ".pi", "dcp.jsonc")
-    if (fs.existsSync(candidate)) return candidate
-    if (dir === root) return null
-    const parent = path.dirname(dir)
-    if (parent === dir) return null
-    dir = parent
-  }
-}
-
-/**
- * Walk up from `startDir` looking for `.pi/pi-tools-suite.jsonc`.
- * Returns the path if found, otherwise null.
- */
-function findProjectSuiteConfig(startDir: string): string | null {
-  let dir = path.resolve(startDir)
-  const root = path.parse(dir).root
-
-  while (true) {
-    const candidate = path.join(dir, ".pi", "pi-tools-suite.jsonc")
-    if (fs.existsSync(candidate)) return candidate
-    if (dir === root) return null
-    const parent = path.dirname(dir)
-    if (parent === dir) return null
-    dir = parent
-  }
-}
-
-function mergeConfigFile(config: DcpConfig, filePath: string): DcpConfig {
-  const raw = readJsoncFile(filePath)
-  if (Object.keys(raw).length === 0) return config
-  return deepMerge(config, raw as Partial<DcpConfig>)
-}
-
 function mergeSuiteDcpConfig(config: DcpConfig, filePath: string): DcpConfig {
   const raw = readDcpFromSuiteConfig(filePath)
   if (Object.keys(raw).length === 0) return config
@@ -272,39 +230,21 @@ function mergeSuiteDcpConfig(config: DcpConfig, filePath: string): DcpConfig {
 // Public API
 // ---------------------------------------------------------------------------
 
+export interface LoadConfigOptions {
+  homeDir?: string
+}
+
 /**
- * Load the DCP configuration by merging (in order):
- *  1. Built-in defaults
- *  2. legacy ~/.config/pi/dcp.jsonc, then dcp in ~/.config/pi/pi-tools-suite.jsonc
- *  3. legacy $PI_CONFIG_DIR/dcp.jsonc, then dcp in $PI_CONFIG_DIR/pi-tools-suite.jsonc
- *  4. legacy <project>/.pi/dcp.jsonc, then dcp in nearest <project>/.pi/pi-tools-suite.jsonc
- *
- * The shared pi-tools-suite config wins over legacy dcp.jsonc at each layer so
- * DCP settings can live beside the rest of the suite config while preserving
- * backwards compatibility with existing standalone files.
+ * Load the DCP configuration by merging built-in defaults with the `dcp` section
+ * from the user-level shared pi-tools-suite config only:
+ * `~/.config/pi/pi-tools-suite.jsonc`.
  */
-export function loadConfig(projectDir: string): DcpConfig {
+export function loadConfig(options: LoadConfigOptions = {}): DcpConfig {
   // Layer 1: defaults (deep clone so we never mutate the constant)
   let config: DcpConfig = deepMerge(DEFAULT_CONFIG, {})
 
-  // Layer 2: global config
-  const globalConfigPath = path.join(os.homedir(), ".config", "pi", "dcp.jsonc")
-  config = mergeConfigFile(config, globalConfigPath)
-  config = mergeSuiteDcpConfig(config, path.join(os.homedir(), ".config", "pi", "pi-tools-suite.jsonc"))
-
-  // Layer 3: $PI_CONFIG_DIR/dcp.jsonc
-  const piConfigDir = process.env["PI_CONFIG_DIR"]
-  if (piConfigDir) {
-    config = mergeConfigFile(config, path.join(piConfigDir, "dcp.jsonc"))
-    config = mergeSuiteDcpConfig(config, path.join(piConfigDir, "pi-tools-suite.jsonc"))
-  }
-
-  // Layer 4: project-local config (walk up from projectDir)
-  const projectConfigPath = findProjectConfig(projectDir)
-  if (projectConfigPath) config = mergeConfigFile(config, projectConfigPath)
-
-  const projectSuiteConfigPath = findProjectSuiteConfig(projectDir)
-  if (projectSuiteConfigPath) config = mergeSuiteDcpConfig(config, projectSuiteConfigPath)
+  const homeDir = options.homeDir ?? os.homedir()
+  config = mergeSuiteDcpConfig(config, path.join(homeDir, ".config", "pi", "pi-tools-suite.jsonc"))
 
   return config
 }

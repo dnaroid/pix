@@ -1,4 +1,4 @@
-import { COMPRESS_RANGE_DESCRIPTION } from "./compress/prompts.js";
+import { COMPRESS_RANGE_DESCRIPTION } from "./dcp/prompts.js";
 
 export type ToolDescription = {
 	name: string;

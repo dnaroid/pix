@@ -14,7 +14,6 @@ export type ConversationViewportHost = {
 	readonly colors: Theme["colors"];
 	readonly pixConfig: PixConfig;
 	readonly outputFilters: readonly RegExp[];
-	readonly suppressPendingDcpIdMetadata: boolean;
 	readonly superCompactTools?: boolean;
 	readonly allThinkingExpanded?: boolean;
 	hasDynamicConversationBlock?(): boolean;
@@ -111,7 +110,6 @@ export class ConversationViewport {
 			colors: this.host.colors,
 			pixConfig: this.host.pixConfig,
 			outputFilters: this.host.outputFilters,
-			suppressPendingDcpIdMetadata: this.host.suppressPendingDcpIdMetadata,
 			superCompactTools: Boolean(this.host.superCompactTools),
 			allThinkingExpanded: Boolean(this.host.allThinkingExpanded),
 			renderInlineUserMessageMenu: (userEntry, context) => this.host.renderInlineUserMessageMenu(userEntry, context),

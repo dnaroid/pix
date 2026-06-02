@@ -169,10 +169,10 @@ export const DEFAULT_PIX_CONFIG_JSONC = String.raw`{
   },
 
   // Output filters applied to assistant text in the renderer.
-  // Supports glob-style * wildcards, or regex literals like "/<dcp-id>m\\d+<\\/dcp-id>/".
+  // Supports glob-style * wildcards, or regex literals like "/token=\\w+/".
   // "outputFilters": {
   //   "patterns": [
-  //     "<dcp-id>m*</dcp-id>"
+  //     "secret-*"
   //   ]
   // },
 

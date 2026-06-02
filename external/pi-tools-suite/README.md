@@ -14,12 +14,12 @@ This package keeps the former standalone extensions as ordinary source folders u
 - `src/model-tools` — model-specific tool aliases such as Claude/GLM-style `Read` / `Edit` / `Write` / `Bash` / `Grep` / `Glob` / `LS`, GPT/Codex-style `shell`, and model-gated `apply_patch`
 - `src/usage` — `/usage` command and startup hint for read-only AI quota checks across OpenAI, Zhipu AI, Z.ai, and Google Antigravity, including Antigravity quota by model
 - `src/web-search` — `web_search` and `web_fetch` tools migrated from `@ollama/pi-web-search`; calls the local Ollama experimental web search/fetch APIs, honors `OLLAMA_HOST`, supports request timeouts via `timeout_ms` / `PI_WEB_SEARCH_TIMEOUT_MS`, and reports targeted `ollama signin`, unsupported-endpoint, invalid-response, timeout, DNS, and Ollama-not-running errors
-- `src/compress` — Dynamic Context Pruning: explicit `compress` tool with range and message modes, `/dcp` commands (context, stats, sweep, manual, decompress, recompress, compress), same-call overlap validation, recoverable compressed-block rollups, grouped message-mode skip diagnostics, stable raw-message anchors when available, protected user/tool preservation, deduplication, error purging, context nudges, and footer status visualization
+- `src/dcp` — headless Dynamic Context Pruning ported from `opencode-dynamic-context-pruning` for the Pi SDK: explicit `compress` tool with range and message modes, `/dcp` commands (context, stats, sweep, manual, decompress, recompress, compress), same-call overlap validation, recoverable compressed-block rollups, grouped message-mode skip diagnostics, stable raw-message anchors when available, protected user/tool preservation, deduplication, error purging, and context nudges; visualization is left to `compress` tool responses and the renderer-owned context-percent click dialog
 - `src/prompt-commands` — user slash-command builder: `/prompt-commands` opens a CRUD menu for saved prompt-backed slash commands, stores them under `promptCommands` in `~/.config/pi/pi-tools-suite.jsonc`, reloads after edits, and runs each saved prompt as a normal user message
 
 `index.ts` is intentionally only a thin auto-discovery shim that re-exports `src/index.ts`. There is no `pi.extensions` manifest here, so local Pi auto-discovery loads the suite once via `~/.pi/agent/extensions/pi-tools-suite/index.ts` and does not double-register tools.
 
-Registration order is preserved in `src/index.ts`: ast-grep, async-subagents, terminal-bell, lsp, repo-discovery command/tool gate, antigravity-auth provider, todo, model-tools, usage, web-search, compress, then prompt-commands. Tool metadata and active model-specific tool sets have two modes: standard and repo-aware. When `.indexer-cli` enables `repo_*`, those tools stay active ahead of overlapping lower-level aliases so the indexed discovery surface has priority.
+Registration order is preserved in `src/index.ts`: ast-grep, async-subagents, terminal-bell, lsp, repo-discovery command/tool gate, antigravity-auth provider, todo, model-tools, usage, web-search, dcp, then prompt-commands. Tool metadata and active model-specific tool sets have two modes: standard and repo-aware. When `.indexer-cli` enables `repo_*`, those tools stay active ahead of overlapping lower-level aliases so the indexed discovery surface has priority.
 
 ## Disabling modules
 
@@ -55,7 +55,7 @@ Saved prompt slash commands are stored under `promptCommands`. Use `/prompt-comm
 }
 ```
 
-DCP/compress settings are stored under `dcp` in the same shared config files. Legacy standalone `dcp.jsonc` files are still read for compatibility, but the `dcp` section in `pi-tools-suite.jsonc` wins at the same global/env/project layer.
+DCP settings are stored only under `dcp` in the user shared config file `~/.config/pi/pi-tools-suite.jsonc`. Legacy standalone `dcp.jsonc`, `$PI_CONFIG_DIR`, and project-local `.pi/pi-tools-suite.jsonc` DCP settings are intentionally ignored by the ported headless DCP module.
 
 ```jsonc
 {
@@ -214,7 +214,7 @@ pi-tools-suite/
     model-tools/
     usage/
     web-search/
-    compress/
+    dcp/
     prompt-commands/
   docs/
   licenses/

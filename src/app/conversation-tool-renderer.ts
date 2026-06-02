@@ -1,4 +1,4 @@
-import { resolveColor, resolveToolRule, stripDcpDisplayMetadata, type PixConfig, type ResolvedToolRule } from "../config.js";
+import { resolveColor, resolveToolRule, type PixConfig, type ResolvedToolRule } from "../config.js";
 import { formatMarkdownTables, markdownSyntaxHighlightsForText } from "../markdown-format.js";
 import { renderToolDisplay } from "../tool-renderers/index.js";
 import { DEFAULT_THINKING_TOOL_RULE, SUBAGENT_STATUSES, THINKING_TOOL_NAME, TODO_TOOL_NAME } from "./constants.js";
@@ -82,8 +82,7 @@ export function renderThinkingEntry(
 	options: ConversationToolRenderOptions,
 ): RenderedLine[] {
 	const rule = resolveThinkingToolRule(options.pixConfig);
-	const displayText = stripDcpDisplayMetadata(entry.text);
-	const markdownText = displayText ? formatMarkdownTables(displayText, Math.max(1, width - 2)) : "";
+	const markdownText = entry.text ? formatMarkdownTables(entry.text, Math.max(1, width - 2)) : "";
 	const expandedText = trimTrailingBlankLines(markdownText);
 	const compactExpandedText = options.superCompactTools ? removeBlankLines(expandedText) : expandedText;
 	const forceExpanded = Boolean(options.allThinkingExpanded);

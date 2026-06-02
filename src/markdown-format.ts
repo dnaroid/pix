@@ -45,6 +45,7 @@ export function formatMarkdownTables(text: string, maxWidth?: number): string {
 	const lines = text.split("\n");
 	const formatted: string[] = [];
 	let fence: MarkdownFence | undefined;
+	let skipBlankAfterHiddenReference = false;
 
 	for (let index = 0; index < lines.length;) {
 		const line = lines[index] ?? "";
@@ -56,6 +57,18 @@ export function formatMarkdownTables(text: string, maxWidth?: number): string {
 			index += 1;
 			continue;
 		}
+
+		if (!fence && isMarkdownReferenceDefinition(line)) {
+			skipBlankAfterHiddenReference = formatted.length === 0 || (formatted.at(-1) ?? "").trim().length === 0;
+			index += 1;
+			continue;
+		}
+
+		if (!fence && skipBlankAfterHiddenReference && line.trim().length === 0) {
+			index += 1;
+			continue;
+		}
+		skipBlankAfterHiddenReference = false;
 
 		if (!fence) {
 			const table = parseMarkdownTableBlock(lines, index);
@@ -111,8 +124,10 @@ export function renderMarkdownLine(text: string, start = 0): RenderedMarkdownLin
 export function renderMarkdownTextLines(text: string, width: number, start = 0): RenderedMarkdownTextLine[] {
 	const lines: RenderedMarkdownTextLine[] = [];
 	let fence: ActiveMarkdownFence | undefined;
+	const formattedText = formatMarkdownTables(sanitizeMarkdownText(text), width);
+	if (formattedText.length === 0) return [];
 
-	for (const rawLine of formatMarkdownTables(sanitizeMarkdownText(text), width).split("\n")) {
+	for (const rawLine of formattedText.split("\n")) {
 		const nextFence = markdownFence(rawLine);
 		const closesFence = Boolean(fence && nextFence && fence.marker === nextFence.marker && nextFence.length >= fence.length);
 		const opensFence = !fence && nextFence !== undefined;
@@ -663,6 +678,10 @@ function markdownLineSyntaxHighlight(fence: ActiveMarkdownFence | undefined, fen
 
 function sanitizeMarkdownText(text: string): string {
 	return expandTabs(text.replace(/\x1b/g, "␛").replace(/\r/g, ""));
+}
+
+function isMarkdownReferenceDefinition(line: string): boolean {
+	return /^ {0,3}\[[^\]\n]+\]:[ \t]*\S.*$/u.test(line);
 }
 
 function markdownFence(line: string): MarkdownFence | undefined {

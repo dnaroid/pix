@@ -301,7 +301,7 @@ describe.serial("LSP library post-edit diagnostics", () => {
 			"model-tools",
 			"usage",
 			"web-search",
-			"compress",
+			"dcp",
 			"prompt-commands",
 		].join(",");
 		const pi = new FakePi();

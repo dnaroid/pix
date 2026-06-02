@@ -17,7 +17,7 @@
     "README.md"
   ],
   "scripts": {
-    "smoke:explicit": "PI_OFFLINE=1 pi --extension ./index.ts --no-session --no-tools -p \"ping\"",
+    "smoke:explicit": "PI_OFFLINE=1 pi --no-extensions --extension ./index.ts --no-session --no-tools -p \"ping\"",
     "smoke:auto": "PI_OFFLINE=1 pi --no-session --no-tools -p \"ping\"",
     "smoke:tools": "PI_OFFLINE=1 pi --no-session -p \"ping\"",
     "smoke": "npm run smoke:explicit && npm run smoke:auto && npm run smoke:tools",

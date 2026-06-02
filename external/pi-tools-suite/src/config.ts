@@ -23,6 +23,7 @@ const FALSE_VALUES = new Set(["0", "false", "off", "no"]);
 const DISABLED_LIST_KEYS = ["disabledModules", "disabledExtensions"];
 const ENABLED_LIST_KEYS = ["enabledModules", "enabledExtensions"];
 const MODULE_MAP_KEYS = ["modules", "extensions"];
+const DEFAULT_DISABLED_MODULES = new Set<string>();
 
 export function getPiToolsSuiteUserConfigPath(homeDir = homedir()): string {
 	return join(homeDir, ".config", "pi", "pi-tools-suite.jsonc");
@@ -155,7 +156,10 @@ function applyEnv(config: MutableConfig, env: Env, knownModules: ReadonlySet<str
 export function loadPiToolsSuiteConfig(moduleNames: readonly string[], options: { cwd?: string; env?: Env; homeDir?: string } = {}): PiToolsSuiteConfig {
 	const env = options.env ?? process.env;
 	const knownModules = new Set(moduleNames.map((name) => name.toLowerCase()));
-	const config: MutableConfig = { enabled: true, disabledModules: new Set() };
+	const config: MutableConfig = {
+		enabled: true,
+		disabledModules: new Set([...DEFAULT_DISABLED_MODULES].filter((name) => knownModules.has(name))),
+	};
 	const userConfigPath = getPiToolsSuiteUserConfigPath(options.homeDir);
 
 	ensureUserConfig(userConfigPath);
