@@ -109,6 +109,13 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 1000): Promise<vo
 	}
 }
 
+async function withTimeout<T>(promise: Promise<T>, message: string, timeoutMs = 3000): Promise<T> {
+	return await Promise.race([
+		promise,
+		new Promise<never>((_, reject) => setTimeout(() => reject(new Error(message)), timeoutMs)),
+	]);
+}
+
 afterEach(() => {
 	process.argv[1] = originalArgv1;
 	if (originalAsyncSubagentsModel === undefined) delete process.env.ASYNC_SUBAGENTS_MODEL;
@@ -792,7 +799,7 @@ setTimeout(() => {}, 1000);
 			expect(fs.existsSync(spawned.agentDir)).toBe(true);
 		});
 
-		const completed = await completion;
+		const completed = await withTimeout(completion, "Timed out waiting for spawn completion");
 		expect(completed).toMatchObject({ runDir, agentId: "agent-1", exitCode: 0, state: { status: "done" } });
 		expect(seenEvent).toMatchObject({ type: "agent_end" });
 		const agentDir = path.join(runDir, "agent-1");
@@ -850,9 +857,9 @@ setTimeout(() => {}, 1000);
 		process.argv[1] = piScript;
 		process.env.ASYNC_SUBAGENTS_ENABLE_SESSIONS = "1";
 
-		await new Promise<any>((resolve) => {
+		await withTimeout(new Promise<any>((resolve) => {
 			spawnAgent(runDir, { id: "agent-1", task: "Do work" }, cwd, [], undefined, resolve);
-		});
+		}), "Timed out waiting for session spawn completion");
 
 		const agentDir = path.join(runDir, "agent-1");
 		const piArgs = fs.readFileSync(path.join(agentDir, "pi_args"), "utf-8");
@@ -873,9 +880,9 @@ process.stdin.on("data", () => {
 `);
 		process.argv[1] = piScript;
 
-		const completed = await new Promise<any>((resolve) => {
+		const completed = await withTimeout(new Promise<any>((resolve) => {
 			spawnAgent(runDir, { id: "agent-1", task: "Do work" }, cwd, [], undefined, resolve);
-		});
+		}), "Timed out waiting for message-end spawn completion");
 
 		expect(completed).toMatchObject({ exitCode: 0, state: { status: "done" } });
 		expect(fs.readFileSync(path.join(runDir, "agent-1", "result.md"), "utf-8")).toBe("final assistant result");
@@ -903,9 +910,9 @@ setTimeout(() => {}, 1000);
 		process.env.ASYNC_SUBAGENTS_MAX_RPC_LINE_CHARS = "4096";
 		process.env.ASYNC_SUBAGENTS_DEBUG_LOGS = "1";
 
-		const completed = await new Promise<any>((resolve) => {
+		const completed = await withTimeout(new Promise<any>((resolve) => {
 			spawnAgent(runDir, { id: "agent-1", task: "Do work" }, cwd, [], undefined, resolve);
-		});
+		}), "Timed out waiting for compact-log spawn completion");
 
 		const agentDir = path.join(runDir, "agent-1");
 		expect(completed).toMatchObject({ exitCode: 0, state: { status: "done" } });
@@ -978,7 +985,7 @@ setTimeout(() => {}, 1000);
 `);
 		process.argv[1] = piScript;
 
-		const completed = await new Promise<any>((resolve) => {
+		const completed = await withTimeout(new Promise<any>((resolve) => {
 			spawnAgent(runDir, {
 				id: "agent-vision",
 				task: "Describe screenshot",
@@ -986,7 +993,7 @@ setTimeout(() => {}, 1000);
 				imagePaths: ["@screen.png"],
 				focus: "Check the top banner",
 			}, cwd, [], undefined, resolve);
-		});
+		}), "Timed out waiting for image spawn completion");
 
 		expect(completed).toMatchObject({ exitCode: 0, state: { status: "done" } });
 		const captured = JSON.parse(fs.readFileSync(promptCapturePath, "utf-8"));
@@ -1008,9 +1015,9 @@ setTimeout(() => {}, 1000);
 `);
 		process.argv[1] = piScript;
 
-		const completed = await new Promise<any>((resolve) => {
+		const completed = await withTimeout(new Promise<any>((resolve) => {
 			spawnAgent(runDir, { id: "agent-1", task: "Do work" }, cwd, [], undefined, resolve);
-		});
+		}), "Timed out waiting for prompt-failure spawn completion");
 
 		expect(completed.exitCode).toBe(1);
 		expect(completed.state.status).toBe("failed");
@@ -1207,9 +1214,9 @@ setTimeout(() => {}, 10000);
 `);
 		process.argv[1] = piScript;
 
-		const completed = await new Promise<any>((resolve) => {
+		const completed = await withTimeout(new Promise<any>((resolve) => {
 			spawnAgent(runDir, { id: "agent-1", task: "Hang" }, cwd, [], undefined, resolve, { timeoutMs: 30 });
-		});
+		}), "Timed out waiting for timeout spawn completion");
 
 		const agentDir = path.join(runDir, "agent-1");
 		expect(completed.exitCode).toBe(124);
@@ -1231,9 +1238,9 @@ process.stdin.on("data", () => {
 `);
 		process.argv[1] = piScript;
 
-		const completed = await new Promise<any>((resolve) => {
+		const completed = await withTimeout(new Promise<any>((resolve) => {
 			spawnAgent(runDir, { id: "agent-1", task: "Do work" }, cwd, [], undefined, resolve);
-		});
+		}), "Timed out waiting for invalid-json spawn completion");
 
 		expect(completed.exitCode).toBe(7);
 		expect(completed.state.status).toBe("failed");
@@ -1260,7 +1267,7 @@ setTimeout(() => {}, 1000);
 			spawnedAgentDir = spawnAgent(runDir, { id: "agent-1", task: "Do work" }, cwd, [], undefined, resolve).agentDir;
 		});
 		fs.unlinkSync(path.join(spawnedAgentDir, "prompt.md"));
-		const completed = await completedPromise;
+		const completed = await withTimeout(completedPromise, "Timed out waiting for fallback-state spawn completion");
 
 		expect(completed).toMatchObject({ exitCode: 0, state: { id: "agent-1", status: "done", exitCode: 0 } });
 	});

@@ -373,6 +373,7 @@ export function spawnAgent(
 			...(promptImages ? { images: promptImages } : {}),
 		}),
 	);
+	proc.stdin.end();
 
 	const pid = proc.pid!;
 	fs.writeFileSync(path.join(agentDir, "pid"), String(pid), "utf-8");
