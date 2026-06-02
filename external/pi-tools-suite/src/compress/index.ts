@@ -36,7 +36,7 @@ import {
 } from "./pruner.js"
 import type { DcpNudgeType } from "./pruner-types.js"
 import { registerCompressTool } from "./compress-tool.js"
-import { registerCommands } from "./commands.js"
+import { DCP_STATS_MESSAGE_TYPE, registerCommands } from "./commands.js"
 import { DcpUiController, normalizeDcpContextUsage } from "./ui.js"
 import { registerTuiFilter } from "./dcp-tui-filter.js"
 import { ignoreStaleExtensionContextError, safeGetContextUsage } from "../context-usage.js"
@@ -89,6 +89,12 @@ function baseNudgeText(type: DcpNudgeType): string {
 	return TURN_NUDGE
 }
 
+function isUserVisibleOnlyMessage(message: any): boolean {
+	if (message?.role !== "custom") return false
+	if (message.customType !== DCP_STATS_MESSAGE_TYPE) return false
+	return message.details?.userVisibleOnly === true
+}
+
 // ---------------------------------------------------------------------------
 // Module export
 // ---------------------------------------------------------------------------
@@ -121,6 +127,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 		}
 	}
 	const appendNudgeTelemetry = (
+		event: "emitted" | "upgraded",
 		type: DcpNudgeType,
 		anchor: { id: number; anchorTimestamp: number; anchorStableId?: string; anchorRole: string },
 		usage: ReturnType<typeof normalizeDcpContextUsage>,
@@ -128,7 +135,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 	): void => {
 		try {
 			pi.appendEntry("dcp-nudge", {
-				event: "emitted",
+				event,
 				type,
 				label: nudgeTypeLabel(type),
 				anchorId: anchor.id,
@@ -262,8 +269,9 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 
 	// ── 11. context: apply pruning and inject nudges ──────────────────────────
 	pi.on("context", async (event, ctx) => {
-		annotateMessagesWithBranchEntryIds(event.messages, ctx)
-		let prunedMessages = applyPruning(event.messages, state, config)
+		const contextMessages = event.messages.filter((message: any) => !isUserVisibleOnlyMessage(message))
+		annotateMessagesWithBranchEntryIds(contextMessages, ctx)
+		let prunedMessages = applyPruning(contextMessages, state, config)
 		let candidate = null as ReturnType<typeof detectCompressionCandidate>
 		let messageCandidates = [] as ReturnType<typeof detectMessageCompressionCandidates>
 
@@ -350,7 +358,13 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 				)
 				if (anchorResult.anchor) {
 					if (anchorResult.updated) {
-						appendNudgeTelemetry(nudgeType, anchorResult.anchor, usage, toolCallsSinceLastUser)
+						appendNudgeTelemetry(
+							anchorResult.created ? "emitted" : "upgraded",
+							nudgeType,
+							anchorResult.anchor,
+							usage,
+							toolCallsSinceLastUser,
+						)
 						saveState(pi, state)
 					}
 				} else {

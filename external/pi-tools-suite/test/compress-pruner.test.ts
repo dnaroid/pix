@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AssistantMessageComponent, initTheme, UserMessageComponent } from "@mariozechner/pi-coding-agent";
 import type { DcpConfig } from "../src/compress/config.js";
+import dcpModule from "../src/compress/index.js";
 import { registerCompressTool } from "../src/compress/compress-tool.js";
 import { registerTuiFilter, stripDcpRenderedLines, stripDcpTags } from "../src/compress/dcp-tui-filter.js";
 import { registerCommands } from "../src/compress/commands.js";
@@ -1289,6 +1290,138 @@ describe("DCP pruning effectiveness", () => {
     expect(state.compressionBlocks[0]?.active).toBe(true);
     expect(state.compressionBlocks[0]?.deactivatedByUser).toBe(false);
     expect(notifications.join("\n")).toContain("Recompressed block b1");
+  });
+
+  test("/dcp stats reports nudge telemetry from session entries and active anchors", async () => {
+    const state = createState();
+    state.tokensSaved = 1234;
+    state.totalPruneCount = 2;
+    state.nudgeAnchors = [
+      {
+        id: 1,
+        type: "iteration",
+        anchorTimestamp: 10,
+        anchorStableId: "id:user-10",
+        anchorRole: "user",
+        turnIndex: 3,
+        contextPercent: 0.66,
+        createdAt: 1000,
+        updatedAt: 1000,
+      },
+    ];
+
+    let command: any;
+    const sentMessages: any[] = [];
+    const pi = {
+      registerCommand(_name: string, registered: any) {
+        command = registered;
+      },
+      sendMessage(message: any) { sentMessages.push(message) },
+    } as any;
+    const notifications: string[] = [];
+    const ctx = {
+      ui: { notify(message: string) { notifications.push(message) } },
+      waitForIdle: async () => {},
+      sessionManager: {
+        getBranch: () => [
+          {
+            type: "custom",
+            customType: "dcp-nudge",
+            data: {
+              event: "emitted",
+              type: "turn",
+              contextPercent: 31.5,
+              createdAt: 1000,
+            },
+          },
+          {
+            type: "custom",
+            customType: "dcp-nudge",
+            data: {
+              event: "upgraded",
+              type: "iteration",
+              contextPercent: 66.1,
+              createdAt: 2000,
+            },
+          },
+          {
+            type: "custom",
+            customType: "dcp-nudge",
+            data: {
+              event: "cleared",
+              clearedAnchors: 2,
+              createdAt: 3000,
+            },
+          },
+        ],
+      },
+    } as any;
+
+    registerCommands(pi, state, config());
+
+    await command.handler("stats", ctx);
+    expect(notifications).toHaveLength(0);
+    expect(sentMessages).toHaveLength(1);
+    expect(sentMessages[0]?.customType).toBe("pix-system");
+    expect(sentMessages[0]?.display).toBe(true);
+    expect(sentMessages[0]?.details?.kind).toBe("dcp-stats");
+    expect(sentMessages[0]?.details?.userVisibleOnly).toBe(true);
+    const output = sentMessages[0]?.content ?? "";
+    expect(output).toContain("Nudge telemetry:");
+    expect(output).toContain("Sent: 1 emitted, 1 upgraded");
+    expect(output).toContain("turn=1");
+    expect(output).toContain("iteration=1");
+    expect(output).toContain("Active anchors: 1");
+    expect(output).toContain("Cleared after compress: 1 time (2 anchors)");
+    expect(output).toContain("Compliance proxy: 1 compress-after-nudge / 2 nudge events (50.0%)");
+    expect(output).toContain("Last nudge: iteration upgraded");
+  });
+
+  test("DCP context transform hides /dcp stats custom messages from the model", async () => {
+    const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
+    const pi = {
+      on(event: string, handler: (event: any, ctx: any) => unknown) {
+        handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+      },
+      registerTool() {},
+      registerCommand() {},
+      appendEntry() {},
+      sendMessage() {},
+    } as any;
+
+    await dcpModule(pi);
+    const contextHandler = handlers.get("context")?.[0];
+    expect(contextHandler).toBeDefined();
+
+    const result = await contextHandler?.(
+      {
+        type: "context",
+        messages: [
+          textMessage("user", "keep me", 1),
+          {
+            role: "custom",
+            customType: "pix-system",
+            content: "DCP Session Statistics: user-visible stats",
+            display: true,
+            details: { userVisibleOnly: true },
+            timestamp: 2,
+          },
+        ],
+      },
+      {
+        hasUI: false,
+        sessionManager: { getBranch: () => [] },
+        getContextUsage: () => ({ tokens: 10, contextWindow: 10_000, percent: 0.1 }),
+      },
+    ) as { messages: any[] } | undefined;
+
+    const rendered = result?.messages
+      .map((message) => Array.isArray(message.content)
+        ? message.content.map((part: any) => part?.text ?? "").join("")
+        : String(message.content ?? ""))
+      .join("\n") ?? "";
+    expect(rendered).toContain("keep me");
+    expect(rendered).not.toContain("DCP Session Statistics");
   });
 
   test("serialized state preserves tool fingerprints and accounting across reload", () => {

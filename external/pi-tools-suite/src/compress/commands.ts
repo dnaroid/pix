@@ -2,6 +2,7 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-cod
 import type { AutocompleteItem } from "@mariozechner/pi-tui"
 import type { DcpState } from "./state.js"
 import type { DcpConfig } from "./config.js"
+import type { DcpNudgeType } from "./pruner-types.js"
 import { isToolRecordProtected, markToolPruned } from "./pruner.js"
 import { safeGetContextUsage } from "../context-usage.js"
 
@@ -11,6 +12,8 @@ import { safeGetContextUsage } from "../context-usage.js"
 
 /** Tools whose outputs are always protected from sweep regardless of config. */
 const ALWAYS_PROTECTED_TOOLS = ["compress", "write", "edit"] as const
+export const DCP_STATS_MESSAGE_TYPE = "pix-system"
+const DCP_STATS_DETAILS_KIND = "dcp-stats"
 
 export interface DcpCommandHooks {
   onStateChanged?: (ctx: ExtensionCommandContext) => void
@@ -22,6 +25,130 @@ export interface DcpCommandHooks {
 
 function fmt(n: number): string {
   return n.toLocaleString()
+}
+
+const NUDGE_TYPES: DcpNudgeType[] = ["turn", "iteration", "context-soft", "context-strong"]
+
+function pct(numerator: number, denominator: number): string {
+  if (denominator <= 0) return "n/a"
+  return `${((numerator / denominator) * 100).toFixed(1)}%`
+}
+
+function nudgeLabel(type: DcpNudgeType): string {
+  switch (type) {
+    case "context-strong": return "context-strong"
+    case "context-soft": return "context-soft"
+    case "iteration": return "iteration"
+    case "turn": return "turn"
+  }
+}
+
+function isNudgeType(value: unknown): value is DcpNudgeType {
+  return typeof value === "string" && (NUDGE_TYPES as string[]).includes(value)
+}
+
+function customEntryData(entry: unknown, customType: string): Record<string, unknown> | undefined {
+  const record = entry as { type?: unknown; customType?: unknown; data?: unknown }
+  if (record?.type !== "custom" || record.customType !== customType) return undefined
+  if (!record.data || typeof record.data !== "object" || Array.isArray(record.data)) return undefined
+  return record.data as Record<string, unknown>
+}
+
+function branchEntries(ctx: ExtensionCommandContext): unknown[] {
+  try {
+    const branch = ctx.sessionManager?.getBranch?.()
+    return Array.isArray(branch) ? branch : []
+  } catch {
+    return []
+  }
+}
+
+interface DcpNudgeStats {
+  emitted: number
+  upgraded: number
+  clearedEvents: number
+  clearedAnchors: number
+  byType: Record<DcpNudgeType, number>
+  activeByType: Record<DcpNudgeType, number>
+  last?: {
+    type: DcpNudgeType
+    event: "emitted" | "upgraded"
+    createdAt?: number
+    contextPercent?: number | null
+  }
+}
+
+function collectNudgeStats(ctx: ExtensionCommandContext, state: DcpState): DcpNudgeStats {
+  const stats: DcpNudgeStats = {
+    emitted: 0,
+    upgraded: 0,
+    clearedEvents: 0,
+    clearedAnchors: 0,
+    byType: { "turn": 0, "iteration": 0, "context-soft": 0, "context-strong": 0 },
+    activeByType: { "turn": 0, "iteration": 0, "context-soft": 0, "context-strong": 0 },
+  }
+
+  for (const anchor of state.nudgeAnchors) {
+    if (isNudgeType(anchor.type)) stats.activeByType[anchor.type]++
+  }
+
+  for (const entry of branchEntries(ctx)) {
+    const data = customEntryData(entry, "dcp-nudge")
+    if (!data) continue
+    const event = data.event
+    if ((event === "emitted" || event === "upgraded") && isNudgeType(data.type)) {
+      if (event === "emitted") stats.emitted++
+      else stats.upgraded++
+      stats.byType[data.type]++
+      const createdAt = typeof data.createdAt === "number" ? data.createdAt : undefined
+      const contextPercent = typeof data.contextPercent === "number" || data.contextPercent === null
+        ? data.contextPercent
+        : undefined
+      if (!stats.last || (createdAt ?? 0) >= (stats.last.createdAt ?? 0)) {
+        stats.last = { type: data.type, event, createdAt, contextPercent }
+      }
+    } else if (event === "cleared") {
+      stats.clearedEvents++
+      stats.clearedAnchors += typeof data.clearedAnchors === "number" ? Math.max(0, data.clearedAnchors) : 0
+    }
+  }
+
+  if (!stats.last && state.lastNudge && isNudgeType(state.lastNudge.type)) {
+    stats.last = {
+      type: state.lastNudge.type,
+      event: "emitted",
+      createdAt: state.lastNudge.createdAt,
+      contextPercent: typeof state.lastNudge.contextPercent === "number"
+        ? state.lastNudge.contextPercent * 100
+        : undefined,
+    }
+  }
+
+  return stats
+}
+
+function formatDate(ts: number | undefined): string {
+  if (typeof ts !== "number" || !Number.isFinite(ts) || ts <= 0) return "unknown time"
+  return new Date(ts).toLocaleString()
+}
+
+function formatContextPercent(value: number | null | undefined): string {
+  if (value === null) return "unknown context"
+  if (typeof value !== "number" || !Number.isFinite(value)) return "unknown context"
+  return `${value.toFixed(1)}% context`
+}
+
+function sendChatSystemMessage(pi: ExtensionAPI, customType: string, content: string, details?: Record<string, unknown>): void {
+	pi.sendMessage({
+		customType,
+		content,
+		display: true,
+		details: {
+			kind: DCP_STATS_DETAILS_KIND,
+			userVisibleOnly: true,
+			...(details ?? {}),
+		},
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -83,17 +210,44 @@ function handleContext(ctx: ExtensionCommandContext, state: DcpState): void {
 // Stats
 // ---------------------------------------------------------------------------
 
-function handleStats(ctx: ExtensionCommandContext, state: DcpState): void {
+function handleStats(pi: ExtensionAPI, ctx: ExtensionCommandContext, state: DcpState): void {
   const activeBlocks = state.compressionBlocks.filter((b) => b.active).length
   const totalBlocks = state.compressionBlocks.length
+  const nudgeStats = collectNudgeStats(ctx, state)
+  const totalNudgeEvents = nudgeStats.emitted + nudgeStats.upgraded
+  const activeAnchors = state.nudgeAnchors.length
   const lines: string[] = []
   lines.push("DCP Session Statistics:")
   lines.push(`  Tokens saved (estimated): ${fmt(state.tokensSaved)}`)
   lines.push(`  Total pruning operations: ${fmt(state.totalPruneCount)}`)
   lines.push(`  Compression blocks active: ${activeBlocks} / ${totalBlocks} total`)
   lines.push(`  Manual mode: ${state.manualMode ? "on" : "off"}`)
+  lines.push("")
+  lines.push("Nudge telemetry:")
+  lines.push(`  Sent: ${fmt(nudgeStats.emitted)} emitted, ${fmt(nudgeStats.upgraded)} upgraded`)
+  lines.push(
+    `  By type: ${NUDGE_TYPES.map((type) => `${nudgeLabel(type)}=${fmt(nudgeStats.byType[type])}`).join(", ")}`,
+  )
+  lines.push(
+    `  Active anchors: ${fmt(activeAnchors)}${activeAnchors > 0
+      ? ` (${NUDGE_TYPES.map((type) => `${nudgeLabel(type)}=${fmt(nudgeStats.activeByType[type])}`).join(", ")})`
+      : ""}`,
+  )
+  lines.push(`  Cleared after compress: ${fmt(nudgeStats.clearedEvents)} time${nudgeStats.clearedEvents === 1 ? "" : "s"} (${fmt(nudgeStats.clearedAnchors)} anchor${nudgeStats.clearedAnchors === 1 ? "" : "s"})`)
+  lines.push(`  Compliance proxy: ${fmt(nudgeStats.clearedEvents)} compress-after-nudge / ${fmt(totalNudgeEvents)} nudge event${totalNudgeEvents === 1 ? "" : "s"} (${pct(nudgeStats.clearedEvents, totalNudgeEvents)})`)
+  if (nudgeStats.last) {
+    lines.push(
+      `  Last nudge: ${nudgeLabel(nudgeStats.last.type)} ${nudgeStats.last.event} at ${formatDate(nudgeStats.last.createdAt)} (${formatContextPercent(nudgeStats.last.contextPercent)})`,
+    )
+  } else {
+    lines.push("  Last nudge: none recorded")
+  }
 
-  ctx.ui.notify(lines.join("\n"), "info")
+  sendChatSystemMessage(pi, DCP_STATS_MESSAGE_TYPE, lines.join("\n"), {
+    generatedAt: new Date().toISOString(),
+    activeAnchors,
+    nudgeEvents: totalNudgeEvents,
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -399,7 +553,7 @@ export function registerCommands(
             break
 
           case "stats":
-            handleStats(ctx, state)
+            handleStats(pi, ctx, state)
             break
 
           case "sweep": {

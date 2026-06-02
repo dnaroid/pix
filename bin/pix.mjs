@@ -4,8 +4,8 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const requiredNodeMajor = 24;
-const launcherPath = fileURLToPath(import.meta.url);
+const minimumNodeVersion = [22, 19, 0];
+const minimumNodeVersionLabel = "22.19.0";
 const mainPath = fileURLToPath(new URL("../dist/main.js", import.meta.url));
 const updatePath = fileURLToPath(new URL("../dist/app/update.js", import.meta.url));
 const distPath = dirname(mainPath);
@@ -13,8 +13,10 @@ const rawArgs = process.argv.slice(2);
 const childArgs = [];
 let reloadOnBuild = truthyEnv(process.env.PIX_RELOAD_ON_BUILD);
 
-if (currentNodeMajor() !== requiredNodeMajor && process.env.PIX_NODE24_REEXEC !== "1") {
-	await reexecWithNode24(rawArgs);
+if (!isCurrentNodeSupported()) {
+	console.error(`[pix] Node ${minimumNodeVersionLabel}+ is required; current Node is ${process.versions.node}.`);
+	console.error("[pix] Install/use a newer Node, for example `mise install node@22.19.0` or `nvm install 22`.");
+	process.exit(1);
 }
 
 for (const arg of rawArgs) {
@@ -66,52 +68,15 @@ function truthyEnv(value) {
 	return !["0", "false", "no", "off"].includes(value.toLowerCase());
 }
 
-function currentNodeMajor() {
-	return Number.parseInt(process.versions.node.split(".")[0] ?? "", 10);
-}
-
-async function reexecWithNode24(args) {
-	console.error(`[pix] switching from Node ${process.versions.node} to Node 24.16.0`);
-	const candidates = node24Candidates(args);
-
-	for (const candidate of candidates) {
-		const result = await runNode24Candidate(candidate.command, candidate.args);
-		if (!result.launched) continue;
-		if (result.signal) process.exitCode = result.signal === "SIGINT" ? 130 : result.signal === "SIGTERM" ? 143 : 1;
-		else process.exitCode = result.code ?? 1;
-		process.exit();
+function isCurrentNodeSupported() {
+	const parts = process.versions.node.split(".").map((part) => Number.parseInt(part, 10));
+	for (let index = 0; index < minimumNodeVersion.length; index += 1) {
+		const current = parts[index] ?? 0;
+		const minimum = minimumNodeVersion[index];
+		if (current > minimum) return true;
+		if (current < minimum) return false;
 	}
-
-	console.error("[pix] Node 24 is required. Install/use it with `mise install node@24.16.0` or set PIX_NODE24=/path/to/node24.");
-	process.exit(1);
-}
-
-function node24Candidates(args) {
-	const envNode = process.env.PIX_NODE24;
-	return [
-		...(envNode ? [{ command: envNode, args: [launcherPath, ...args] }] : []),
-		{ command: "mise", args: ["exec", "node@24.16.0", "--", "node", launcherPath, ...args] },
-		{ command: "node24", args: [launcherPath, ...args] },
-		{ command: "node-24", args: [launcherPath, ...args] },
-	];
-}
-
-async function runNode24Candidate(command, args) {
-	return await new Promise((resolve) => {
-		const child = spawn(command, args, {
-			stdio: "inherit",
-			env: { ...process.env, PIX_NODE24_REEXEC: "1" },
-		});
-
-		child.once("error", (error) => {
-			if (error && error.code === "ENOENT") resolve({ launched: false });
-			else {
-				console.error(error?.message ?? String(error));
-				resolve({ launched: true, code: 1 });
-			}
-		});
-		child.once("exit", (code, signal) => resolve({ launched: true, code, signal }));
-	});
+	return true;
 }
 
 function startChild() {
