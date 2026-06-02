@@ -18,12 +18,17 @@ export function delay(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
-export async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+export async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string, signal?: AbortSignal): Promise<T> {
+  if (signal?.aborted) throw new Error("aborted");
   let timeout: NodeJS.Timeout | undefined;
+  let abort: (() => void) | undefined;
   const timeoutPromise = new Promise<never>((_resolve, reject) => {
     timeout = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+    abort = () => reject(new Error("aborted"));
+    signal?.addEventListener("abort", abort, { once: true });
   });
   return Promise.race([promise, timeoutPromise]).finally(() => {
     if (timeout) clearTimeout(timeout);
+    if (abort) signal?.removeEventListener("abort", abort);
   });
 }

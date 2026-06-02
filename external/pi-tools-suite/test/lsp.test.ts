@@ -59,11 +59,16 @@ function writeFakeLspServer(dir: string): string {
 	const script = path.join(dir, "fake-lsp.cjs");
 	fs.writeFileSync(script, [
 		'const fs = require("node:fs");',
+		'const { spawn } = require("node:child_process");',
 		'',
 		'const pidLog = process.argv[2];',
 		'const mode = process.argv[3] || "basic";',
 		'fs.appendFileSync(pidLog, process.pid + "\\n");',
 		'if (mode === "crash") process.exit(42);',
+		'if (mode === "childStubborn") {',
+		'  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });',
+		'  fs.appendFileSync(pidLog, child.pid + "\\n");',
+		'}',
 		'',
 		'let buffer = Buffer.alloc(0);',
 		'const keepAlive = setInterval(() => {}, 1000);',
@@ -80,7 +85,7 @@ function writeFakeLspServer(dir: string): string {
 		'}',
 		'',
 		'function diagnosticsForMode() {',
-		'  if (mode !== "diagnostic") return [];',
+		'  if (mode !== "diagnostic" && mode !== "pullDiagnostic" && mode !== "dynamicPullDiagnostic") return [];',
 		'  return [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }, severity: 1, source: "fake", message: "Fake issue", code: "F1" }];',
 		'}',
 		'',
@@ -92,7 +97,9 @@ function writeFakeLspServer(dir: string): string {
 		'}',
 		'',
 		'function handle(message) {',
+		'  if (message.result !== undefined || message.error !== undefined) return;',
 		'  if (message.method === "initialize") {',
+		'    if (mode === "hangInitialize") return;',
 		'    const capabilities = {',
 		'      textDocumentSync: { openClose: true, change: 1, save: {} },',
 		'      documentSymbolProvider: true,',
@@ -101,9 +108,11 @@ function writeFakeLspServer(dir: string): string {
 		'      referencesProvider: true,',
 		'    };',
 		'    if (mode === "tsserver") capabilities.executeCommandProvider = { commands: ["typescript.tsserverRequest"] };',
+		'    if (mode === "pullDiagnostic") capabilities.diagnosticProvider = { identifier: "fake", interFileDependencies: false, workspaceDiagnostics: false };',
 		'    response(message.id, {',
 		'      capabilities,',
 		'    });',
+		'    if (mode === "dynamicPullDiagnostic") send({ jsonrpc: "2.0", id: "register-diagnostics", method: "client/registerCapability", params: { registrations: [{ id: "fake-dynamic", method: "textDocument/diagnostic", registerOptions: { identifier: "dynamicFake", interFileDependencies: false, workspaceDiagnostics: false } }] } });',
 		'    return;',
 		'  }',
 		'',
@@ -117,13 +126,18 @@ function writeFakeLspServer(dir: string): string {
 		'    return;',
 		'  }',
 		'',
+		'  if (message.method === "textDocument/diagnostic" && (mode === "pullDiagnostic" || mode === "dynamicPullDiagnostic")) {',
+		'    response(message.id, { kind: "full", items: diagnosticsForMode() });',
+		'    return;',
+		'  }',
+		'',
 		'  if (message.method === "shutdown") {',
 		'    response(message.id, null);',
 		'    return;',
 		'  }',
 		'',
 		'  if (message.method === "exit") {',
-		'    if (mode === "stubborn") return;',
+		'    if (mode === "stubborn" || mode === "childStubborn") return;',
 		'    clearInterval(keepAlive);',
 		'    process.exit(0);',
 		'  }',
@@ -179,7 +193,8 @@ function writeGlobalLspConfig(options: {
 	cwd: string;
 	serverScript: string;
 	pidLog: string;
-	mode?: "basic" | "crash" | "diagnostic" | "stubborn" | "tsserver";
+	mode?: "basic" | "crash" | "diagnostic" | "pullDiagnostic" | "dynamicPullDiagnostic" | "stubborn" | "tsserver" | "childStubborn" | "hangInitialize";
+	id?: string;
 	include?: string[];
 	rootMarkers?: string[];
 	diagnosticsWaitMs?: number;
@@ -190,13 +205,13 @@ function writeGlobalLspConfig(options: {
 	fs.writeFileSync(path.join(configDir, "pi-tools-suite.jsonc"), JSON.stringify({
 		lsp: {
 			servers: [{
-				id: "fake",
+				id: options.id ?? "fake",
 				bin: process.execPath,
 				args: [options.serverScript, options.pidLog, options.mode ?? "basic"],
 				cwd: options.cwd,
 				include: options.include ?? ["*.ts", "**/*.ts"],
 				rootMarkers: options.rootMarkers ?? [],
-				languageIdByExtension: { ".ts": "typescript" },
+				languageIdByExtension: { ".ts": "typescript", ".md": "markdown" },
 				startupTimeoutMs: 5_000,
 				diagnosticsWaitMs: options.diagnosticsWaitMs ?? 500,
 			}],
@@ -519,6 +534,71 @@ describe.serial("LSP library post-edit diagnostics", () => {
 		expect(summary).not.toContain("timed out");
 	});
 
+	test.serial("uses pull diagnostics when advertised", async () => {
+		const cwd = tempDir();
+		const agentDir = tempDir();
+		const pidLog = path.join(cwd, "pull-diagnostic-pids.txt");
+		const serverScript = writeFakeLspServer(cwd);
+		process.env.PI_AGENT_DIR = agentDir;
+		fs.writeFileSync(path.join(cwd, "a.ts"), "const x: string = 1;\n");
+		writeGlobalLspConfig({ agentDir, cwd, serverScript, pidLog, mode: "pullDiagnostic" });
+
+		const ctx = { cwd, signal: undefined };
+		const result = await appendMutationDiagnostics("apply_patch", "*** Begin Patch\n*** Update File: a.ts\n@@\n-const x = 1;\n+const x = 2;\n*** End Patch", { content: [{ type: "text", text: "ok" }] }, ctx);
+
+		const summary = result.content.at(-1).text;
+		expect(summary).toContain("a.ts:1:1 - error: fake: Fake issue [F1]");
+		expect(summary).not.toContain("timed out");
+	});
+
+	test.serial("uses dynamically registered pull diagnostics", async () => {
+		const cwd = tempDir();
+		const agentDir = tempDir();
+		const pidLog = path.join(cwd, "dynamic-pull-diagnostic-pids.txt");
+		const serverScript = writeFakeLspServer(cwd);
+		process.env.PI_AGENT_DIR = agentDir;
+		fs.writeFileSync(path.join(cwd, "a.ts"), "const x: string = 1;\n");
+		writeGlobalLspConfig({ agentDir, cwd, serverScript, pidLog, mode: "dynamicPullDiagnostic" });
+
+		const ctx = { cwd, signal: undefined };
+		const result = await appendMutationDiagnostics("apply_patch", "*** Begin Patch\n*** Update File: a.ts\n@@\n-const x = 1;\n+const x = 2;\n*** End Patch", { content: [{ type: "text", text: "ok" }] }, ctx);
+
+		const summary = result.content.at(-1).text;
+		expect(summary).toContain("a.ts:1:1 - error: fake: Fake issue [F1]");
+		expect(summary).not.toContain("timed out");
+	});
+
+	test.serial("adds local Markdown and Mermaid diagnostics", async () => {
+		const cwd = tempDir();
+		const agentDir = tempDir();
+		const pidLog = path.join(cwd, "markdown-diagnostic-pids.txt");
+		const serverScript = writeFakeLspServer(cwd);
+		process.env.PI_AGENT_DIR = agentDir;
+		fs.writeFileSync(path.join(cwd, "README.md"), [
+			"# Demo",
+			"",
+			"[missing](./missing.md)",
+			"[bad ref][nope]",
+			"[dup]: ./a.md",
+			"[dup]: ./b.md",
+			"",
+			"```mermaid",
+			"flowchart TD",
+			"  A -> B",
+			"```",
+			"",
+		].join("\n"));
+		writeGlobalLspConfig({ agentDir, cwd, serverScript, pidLog, id: "markdown", mode: "pullDiagnostic", include: ["*.md", "**/*.md"], diagnosticsWaitMs: 500 });
+
+		const ctx = { cwd, signal: undefined };
+		const result = await runMutationDiagnostics(ctx, ["README.md"]);
+		const summary = result.content.at(-1).text;
+		expect(summary).toContain("link.no-such-file");
+		expect(summary).toContain("link.no-such-reference");
+		expect(summary).toContain("link.duplicate-definition");
+		expect(summary).toContain("mermaid.invalid-arrow");
+	});
+
 	test.serial("kills stubborn LSP processes that ignore shutdown and SIGTERM", async () => {
 		const cwd = tempDir();
 		const agentDir = tempDir();
@@ -535,6 +615,47 @@ describe.serial("LSP library post-edit diagnostics", () => {
 
 		const { shutdownGlobalLspManager } = await import("../src/lsp/index.js");
 		await shutdownGlobalLspManager();
+		expect(await waitFor(() => !processExists(pid), 3_000)).toBe(true);
+	});
+
+	test.serial("kills child process groups created by LSP wrapper scripts", async () => {
+		const cwd = tempDir();
+		const agentDir = tempDir();
+		const pidLog = path.join(cwd, "child-stubborn-pids.txt");
+		const serverScript = writeFakeLspServer(cwd);
+		process.env.PI_AGENT_DIR = agentDir;
+		fs.writeFileSync(path.join(cwd, "a.ts"), "const x = 1;\n");
+		writeGlobalLspConfig({ agentDir, cwd, serverScript, pidLog, mode: "childStubborn" });
+
+		const ctx = { cwd, signal: undefined };
+		expect((await runMutationDiagnostics(ctx, ["a.ts"])).content).toEqual([{ type: "text", text: "ok" }]);
+		const pids = readPids(pidLog);
+		expect(pids).toHaveLength(2);
+		expect(pids.every(processExists)).toBe(true);
+
+		const { shutdownGlobalLspManager } = await import("../src/lsp/index.js");
+		await shutdownGlobalLspManager();
+		expect(await waitFor(() => pids.every((pid) => !processExists(pid)), 3_000)).toBe(true);
+	});
+
+	test.serial("aborts startup waits and kills the LSP process", async () => {
+		const cwd = tempDir();
+		const agentDir = tempDir();
+		const pidLog = path.join(cwd, "abort-pids.txt");
+		const serverScript = writeFakeLspServer(cwd);
+		process.env.PI_AGENT_DIR = agentDir;
+		fs.writeFileSync(path.join(cwd, "a.ts"), "const x = 1;\n");
+		writeGlobalLspConfig({ agentDir, cwd, serverScript, pidLog, mode: "hangInitialize", diagnosticsWaitMs: 5_000 });
+
+		const controller = new AbortController();
+		const ctx = { cwd, signal: controller.signal };
+		const resultPromise = runMutationDiagnostics(ctx, ["a.ts"]);
+		await waitFor(() => readPids(pidLog).length === 1, 1_000);
+		controller.abort();
+
+		const result = await resultPromise;
+		const [pid] = readPids(pidLog);
+		expect(result.content.at(-1).text).toContain("aborted");
 		expect(await waitFor(() => !processExists(pid), 3_000)).toBe(true);
 	});
 });

@@ -9,12 +9,34 @@ import { filePathToUri, findProjectRoot, normalizeRelativePath, resolveCommand, 
 import { formatLspDiagnostics, formatWarnings, joinSections } from "./_shared/output";
 import type { LspServerConfig, StoredDiagnostics } from "./_shared/types";
 import { clientKey, couldMatchBeforeRoot, fileSizeAllowed, languageIdForFile, readTextFile } from "./lsp-utils";
+import { localMarkdownDiagnostics } from "./markdown-diagnostics";
 import type { MatchedServer } from "./types";
 
 function isFreshDiagnosticsEntry(entry: StoredDiagnostics | undefined, since: number, version: number | undefined): entry is StoredDiagnostics {
   return !!entry
     && entry.updatedAt >= since
     && (entry.version === undefined || version === undefined || entry.version >= version);
+}
+
+function diagnosticsWithLocalFallback(serverId: string, file: string, text: string, diagnostics: StoredDiagnostics["diagnostics"]): StoredDiagnostics["diagnostics"] {
+  if (serverId !== "markdown") return diagnostics;
+  const hasLanguageServerLinkDiagnostics = diagnostics.some((diagnostic) => typeof diagnostic.code === "string" && diagnostic.code.startsWith("link."));
+  const localDiagnostics = localMarkdownDiagnostics(file, text).filter((diagnostic) => {
+    if (!hasLanguageServerLinkDiagnostics) return true;
+    return !(typeof diagnostic.code === "string" && diagnostic.code.startsWith("link."));
+  });
+  if (localDiagnostics.length === 0) return diagnostics;
+
+  const seen = new Set(diagnostics.map((diagnostic) => JSON.stringify([diagnostic.range, diagnostic.severity, diagnostic.source, diagnostic.code, diagnostic.message])));
+  return [
+    ...diagnostics,
+    ...localDiagnostics.filter((diagnostic) => {
+      const key = JSON.stringify([diagnostic.range, diagnostic.severity, diagnostic.source, diagnostic.code, diagnostic.message]);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }),
+  ];
 }
 
 export class LspManager {
@@ -115,14 +137,28 @@ export class LspManager {
         // diagnostics don't degrade into a misleading publishDiagnostics timeout.
         let tsserverFallbackError: string | undefined;
         try {
-          const tsserverDiagnostics = await client.tsserverDiagnostics(file, text, diagnosticsWaitMs);
+          const tsserverDiagnostics = await client.tsserverDiagnostics(file, text, diagnosticsWaitMs, ctx.signal);
           if (tsserverDiagnostics !== undefined) {
-            this.diagnostics.set(match.server.id, match.root, filePathToUri(file), tsserverDiagnostics, doc.version);
-            lines.push(formatLspDiagnostics(match.server.id, file, tsserverDiagnostics, match.root));
+            const diagnostics = diagnosticsWithLocalFallback(match.server.id, file, text, tsserverDiagnostics);
+            this.diagnostics.set(match.server.id, match.root, filePathToUri(file), diagnostics, doc.version);
+            lines.push(formatLspDiagnostics(match.server.id, file, diagnostics, match.root));
             continue;
           }
         } catch (error) {
           tsserverFallbackError = (error as Error).message;
+        }
+
+        let pullDiagnosticsError: string | undefined;
+        try {
+          const pulledDiagnostics = await client.pullDiagnostics(file, diagnosticsWaitMs, ctx.signal);
+          if (pulledDiagnostics !== undefined) {
+            const diagnostics = diagnosticsWithLocalFallback(match.server.id, file, text, pulledDiagnostics);
+            this.diagnostics.set(match.server.id, match.root, filePathToUri(file), diagnostics, doc.version);
+            lines.push(formatLspDiagnostics(match.server.id, file, diagnostics, match.root));
+            continue;
+          }
+        } catch (error) {
+          pullDiagnosticsError = (error as Error).message;
         }
 
         const entry = await this.diagnostics.waitForFile(
@@ -136,10 +172,13 @@ export class LspManager {
         );
         if (!isFreshDiagnosticsEntry(entry, startedAt, doc.version)) {
           const fallbackSuffix = tsserverFallbackError ? `; tsserver fallback failed: ${tsserverFallbackError}` : "";
-          lines.push(`⚠️ ${match.server.id}: timed out after ${diagnosticsWaitMs}ms waiting for fresh diagnostics for ${match.relFile}${fallbackSuffix}`);
+          const pullSuffix = pullDiagnosticsError ? `; pull diagnostics failed: ${pullDiagnosticsError}` : "";
+          lines.push(`⚠️ ${match.server.id}: timed out after ${diagnosticsWaitMs}ms waiting for fresh diagnostics for ${match.relFile}${fallbackSuffix}${pullSuffix}`);
           continue;
         }
-        lines.push(formatLspDiagnostics(match.server.id, file, entry.diagnostics, match.root));
+        const diagnostics = diagnosticsWithLocalFallback(match.server.id, file, text, entry.diagnostics);
+        if (diagnostics !== entry.diagnostics) this.diagnostics.set(match.server.id, match.root, filePathToUri(file), diagnostics, doc.version);
+        lines.push(formatLspDiagnostics(match.server.id, file, diagnostics, match.root));
       } catch (error) {
         lines.push(`⚠️ ${match.server.id}: ${(error as Error).message}`);
       }

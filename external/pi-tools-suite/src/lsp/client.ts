@@ -5,10 +5,12 @@ import type { MessageConnection } from "vscode-jsonrpc";
 import { createMessageConnection, StreamMessageReader, StreamMessageWriter } from "vscode-jsonrpc/node";
 import {
   DefinitionRequest,
+  DiagnosticRefreshRequest,
   DidChangeConfigurationNotification,
   DidChangeTextDocumentNotification,
   DidOpenTextDocumentNotification,
   DidSaveTextDocumentNotification,
+  DocumentDiagnosticRequest,
   DocumentSymbolRequest,
   ExecuteCommandRequest,
   HoverRequest,
@@ -17,6 +19,7 @@ import {
   PublishDiagnosticsNotification,
   ReferencesRequest,
   type Diagnostic,
+  type DocumentDiagnosticReport,
   type InitializeResult,
   type ServerCapabilities,
 } from "vscode-languageserver-protocol";
@@ -68,6 +71,8 @@ export class LspClient {
   private initialized = false;
   private unavailableReason: string | undefined;
   private stderrTail = "";
+  private readonly dynamicDiagnosticProviders = new Map<string, string | undefined>();
+  private diagnosticProviderWaiters: Array<() => void> = [];
 
   constructor(
     private readonly server: LspServerConfig,
@@ -104,6 +109,7 @@ export class LspClient {
     const child = spawn(this.command.bin, this.command.args, {
       cwd: this.command.cwd,
       env: this.command.env ? { ...process.env, ...this.command.env } : process.env,
+      detached: process.platform !== "win32",
       shell: false,
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -141,6 +147,7 @@ export class LspClient {
       Promise.race([connection.sendRequest(InitializeRequest.method, this.initializeParams()), startupFailure]),
       this.server.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS,
       `${this.server.id} initialize`,
+      signal,
     )) as InitializeResult;
     this.capabilities = initializeResult.capabilities;
     failStartup = undefined;
@@ -164,10 +171,12 @@ export class LspClient {
         window: { workDoneProgress: true },
         workspace: {
           configuration: true,
+          diagnostics: { refreshSupport: true },
           workspaceFolders: true,
           didChangeWatchedFiles: { dynamicRegistration: true },
         },
         textDocument: {
+          diagnostic: { dynamicRegistration: true, relatedDocumentSupport: true },
           synchronization: {
             didOpen: true,
             didChange: true,
@@ -243,8 +252,30 @@ export class LspClient {
     anyConnection.onRequest("markdown/fs/watcher/create", () => null);
     anyConnection.onRequest("markdown/fs/watcher/delete", () => null);
     anyConnection.onRequest("markdown/findMarkdownFilesInWorkspace", () => []);
-    anyConnection.onRequest("client/registerCapability", () => null);
-    anyConnection.onRequest("client/unregisterCapability", () => null);
+    anyConnection.onRequest("client/registerCapability", (params: unknown) => {
+      const registrations = (params as { registrations?: unknown[] } | undefined)?.registrations;
+      if (!Array.isArray(registrations)) return null;
+
+      for (const registration of registrations) {
+        const item = registration as { id?: unknown; method?: unknown; registerOptions?: unknown };
+        if (typeof item.id !== "string" || item.method !== DocumentDiagnosticRequest.method) continue;
+        const options = item.registerOptions as { identifier?: unknown } | undefined;
+        this.dynamicDiagnosticProviders.set(item.id, typeof options?.identifier === "string" ? options.identifier : undefined);
+      }
+      this.resolveDiagnosticProviderWaiters();
+      return null;
+    });
+    anyConnection.onRequest("client/unregisterCapability", (params: unknown) => {
+      const unregisterations = (params as { unregisterations?: unknown[] } | undefined)?.unregisterations;
+      if (!Array.isArray(unregisterations)) return null;
+
+      for (const registration of unregisterations) {
+        const item = registration as { id?: unknown; method?: unknown };
+        if (typeof item.id === "string" && item.method === DocumentDiagnosticRequest.method) this.dynamicDiagnosticProviders.delete(item.id);
+      }
+      return null;
+    });
+    anyConnection.onRequest(DiagnosticRefreshRequest.method, () => null);
     anyConnection.onRequest("window/workDoneProgress/create", () => null);
     anyConnection.onNotification("window/logMessage", () => undefined);
     anyConnection.onNotification("telemetry/event", () => undefined);
@@ -291,7 +322,50 @@ export class LspClient {
     return Array.isArray(commands) && commands.includes("typescript.tsserverRequest");
   }
 
-  async tsserverDiagnostics(file: string, text: string, timeoutMs: number): Promise<Diagnostic[] | undefined> {
+  private supportsPullDiagnostics(): boolean {
+    return !!this.capabilities?.diagnosticProvider || this.dynamicDiagnosticProviders.size > 0;
+  }
+
+  private resolveDiagnosticProviderWaiters(): void {
+    const waiters = this.diagnosticProviderWaiters;
+    this.diagnosticProviderWaiters = [];
+    for (const waiter of waiters) waiter();
+  }
+
+  private async waitForPullDiagnosticsSupport(timeoutMs: number, signal?: AbortSignal): Promise<void> {
+    if (this.supportsPullDiagnostics() || timeoutMs <= 0) return;
+    await withTimeout(new Promise<void>((resolve) => {
+      this.diagnosticProviderWaiters.push(resolve);
+    }), timeoutMs, `${this.server.id} diagnostic registration`, signal).catch(() => undefined);
+  }
+
+  private diagnosticProviderIdentifiers(): Array<string | undefined> {
+    const identifiers: Array<string | undefined> = [];
+    const provider = this.capabilities?.diagnosticProvider;
+    if (provider) {
+      identifiers.push(
+        typeof provider === "object" && "identifier" in provider && typeof provider.identifier === "string"
+          ? provider.identifier
+          : undefined,
+      );
+    }
+    for (const identifier of this.dynamicDiagnosticProviders.values()) identifiers.push(identifier);
+
+    const seen = new Set<string>();
+    return identifiers.filter((identifier) => {
+      const key = identifier ?? "";
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  private diagnosticsFromReport(report: DocumentDiagnosticReport | null | undefined): Diagnostic[] | undefined {
+    if (!report || report.kind !== "full") return undefined;
+    return report.items;
+  }
+
+  async tsserverDiagnostics(file: string, text: string, timeoutMs: number, signal?: AbortSignal): Promise<Diagnostic[] | undefined> {
     const connection = this.connection;
     if (!connection || !this.supportsTsserverDiagnostics()) return undefined;
 
@@ -317,9 +391,49 @@ export class LspClient {
       }),
       timeoutMs,
       `${this.server.id} ${request.command}`,
+      signal,
     )));
 
     return responses.flatMap((response) => tsserverDiagnosticsFromResponse(response).map((diagnostic) => tsserverDiagnosticToLsp(diagnostic, text)));
+  }
+
+  async pullDiagnostics(file: string, timeoutMs: number, signal?: AbortSignal): Promise<Diagnostic[] | undefined> {
+    const connection = this.connection;
+    if (!connection) return undefined;
+    if (!this.supportsPullDiagnostics()) {
+      await this.waitForPullDiagnosticsSupport(this.server.id === "csharp" ? Math.min(timeoutMs, 5_000) : 250, signal);
+    }
+    if (!this.supportsPullDiagnostics()) return undefined;
+    const identifiers = this.diagnosticProviderIdentifiers();
+    if (identifiers.length === 0) return undefined;
+
+    const uri = filePathToUri(file);
+    const settled = await Promise.allSettled(identifiers.map(async (identifier) => {
+      const report = (await withTimeout(
+        connection.sendRequest(DocumentDiagnosticRequest.method, {
+          textDocument: { uri },
+          identifier,
+        }),
+        timeoutMs,
+        `${this.server.id} textDocument/diagnostic${identifier ? ` (${identifier})` : ""}`,
+        signal,
+      )) as DocumentDiagnosticReport | null;
+      return this.diagnosticsFromReport(report) ?? [];
+    }));
+
+    const fulfilled = settled.filter((result): result is PromiseFulfilledResult<Diagnostic[]> => result.status === "fulfilled");
+    if (fulfilled.length === 0) {
+      const firstError = settled.find((result): result is PromiseRejectedResult => result.status === "rejected")?.reason;
+      throw firstError instanceof Error ? firstError : new Error(String(firstError ?? "pull diagnostics failed"));
+    }
+
+    const seen = new Set<string>();
+    return fulfilled.flatMap((result) => result.value).filter((diagnostic) => {
+      const key = JSON.stringify([diagnostic.range, diagnostic.severity, diagnostic.source, diagnostic.code, diagnostic.message]);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }
 
   async hover(file: string, line: number, character: number): Promise<unknown> {

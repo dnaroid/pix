@@ -10,6 +10,7 @@ function canWriteToChild(child: ChildProcessWithoutNullStreams): boolean {
 }
 
 export function killChild(child: ChildProcessWithoutNullStreams, signal: NodeJS.Signals): boolean {
+  let signaled = false;
   try {
     if (process.platform === "win32" && child.pid) {
       const result = spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
@@ -19,9 +20,22 @@ export function killChild(child: ChildProcessWithoutNullStreams, signal: NodeJS.
       });
       if (!result.error && result.status === 0) return true;
     }
-    return child.kill(signal);
+
+    if (child.pid) {
+      try {
+        // LSP clients are spawned in their own process group on POSIX. Kill the
+        // whole group so wrapper scripts also lose children such as Godot and nc.
+        process.kill(-child.pid, signal);
+        signaled = true;
+      } catch {
+        // Fall back to the direct child below. The process may not be detached
+        // or may have already exited.
+      }
+    }
+
+    return child.kill(signal) || signaled;
   } catch {
-    return false;
+    return signaled;
   }
 }
 
