@@ -167,7 +167,7 @@ export class AppPopupActionController {
 
 		try {
 			if (selected.value === "copy") {
-				this.workspaceActions.copyUserMessage(selected.entryId);
+				await this.workspaceActions.copyUserMessage(selected.entryId);
 				return true;
 			}
 			if (selected.value === "fork") {

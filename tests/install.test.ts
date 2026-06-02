@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { describe, it } from "node:test";
 
-import { parsePixInstallArgs, pixInstallUsage, runPixInstallCli } from "../src/app/cli/install.js";
+import { formatPixInstallNextSteps, parsePixInstallArgs, pixInstallUsage, runPixInstallCli } from "../src/app/cli/install.js";
 
 describe("pix install", () => {
 	it("parses install CLI options", () => {
@@ -12,6 +12,16 @@ describe("pix install", () => {
 		assert.deepEqual(parsePixInstallArgs(["-h"]), { checkOnly: false, help: true });
 		assert.throws(() => parsePixInstallArgs(["--bad"]), /Unknown pix install argument/u);
 		assert.match(pixInstallUsage(), /pi CLI availability/u);
+	});
+
+	it("prints post-install configuration guidance", () => {
+		const output = formatPixInstallNextSteps("/tmp/pix-home");
+		assert.match(output, /\/tmp\/pix-home\/\.config\/pi\/pix\.jsonc/u);
+		assert.match(output, /dictation\.language/u);
+		assert.match(output, /\.config\/pi\/pi-tools-suite\.jsonc/u);
+		assert.match(output, /lsp\.servers/u);
+		assert.match(output, /\/opencode-import/u);
+		assert.match(output, /\/antigravity-import/u);
 	});
 
 	it("accepts Pix's bundled pi bin during setup checks", async () => {

@@ -17,10 +17,17 @@ const {
 	compileOutputFilterPatterns,
 	getPixConfigPath,
 	loadPixConfig,
+	resolveDefaultModelRef,
 	resolveColor,
 	resolveModelColor,
 	resolveToolRule,
+	savePixAutocompleteModel,
+	savePixDefaultModel,
+	savePixDefaultThinking,
 	savePixDictationLanguage,
+	upsertPixDefaultModelInJsonc,
+	upsertPixDefaultThinkingInJsonc,
+	upsertPixAutocompleteModelInJsonc,
 	upsertPixDictationLanguageInJsonc,
 } = await import("../src/config.js");
 type ToolRendererConfig = import("../src/config.js").ToolRendererConfig;
@@ -49,6 +56,8 @@ describe("config helpers", () => {
 			{ previewLines: 9999, direction: "head", color: "toolMutation", defaultExpanded: true },
 		]);
 		assert.equal(config.promptEnhancer.modelRef, "zai/glm-5-turbo");
+		assert.equal(config.autocomplete.modelRef, "zai/glm-5-turbo");
+		assert.equal(resolveDefaultModelRef(config), "openai-codex/gpt-5.5:medium");
 		assert.equal(config.modelColors.rules["zai/*"], "success");
 		assert.equal(config.iconTheme.name, "nerdFont");
 		assert.deepEqual(Object.keys(config.dictation.languages), ["en", "ru"]);
@@ -63,9 +72,11 @@ describe("config helpers", () => {
 			// comment
 			"toolRenderer": { "default": { "previewLines": 9, "defaultExpanded": true }, "tools": { "x": { "hidden": true }, "y": { "defaultExpanded": false } } },
 			"outputFilters": { "samples": ["drop*"] },
+			"defaultModel": { "modelRef": "openai-codex/gpt-5.5", "thinking": "medium" },
 			"modelColors": { "zai/*": "#22c55e", "antigravity/*": "#f97316", "antigravity/antigravity-claude-*": "#ef4444" },
 			"iconTheme": "fallback",
 			"promptEnhancer": { "modelRef": "zai/custom-enhancer" },
+			"autocomplete": { "modelRef": "zai/custom-autocomplete" },
 			"dictation": {
 				"language": "ru",
 				"languages": {
@@ -80,7 +91,10 @@ describe("config helpers", () => {
 		assert.deepEqual(resolveToolRule("x", loaded.toolRenderer), { previewLines: 9, direction: "head", color: "muted", defaultExpanded: true, hidden: true });
 		assert.deepEqual(resolveToolRule("y", loaded.toolRenderer), { previewLines: 9, direction: "head", color: "muted", defaultExpanded: false });
 		assert.deepEqual(loaded.outputFilters.patterns, ["drop*"]);
+		assert.deepEqual(loaded.defaultModel, { modelRef: "openai-codex/gpt-5.5", thinking: "medium" });
+		assert.equal(resolveDefaultModelRef(loaded), "openai-codex/gpt-5.5:medium");
 		assert.equal(loaded.promptEnhancer.modelRef, "zai/custom-enhancer");
+		assert.equal(loaded.autocomplete.modelRef, "zai/custom-autocomplete");
 		assert.equal(resolveModelColor("zai/glm-5-turbo", loaded.modelColors), "#22c55e");
 		assert.equal(resolveModelColor("antigravity/antigravity-claude-sonnet-4", loaded.modelColors), "#ef4444");
 		assert.equal(resolveModelColor("antigravity/gemini-3-pro", loaded.modelColors), "#f97316");
@@ -98,7 +112,9 @@ describe("config helpers", () => {
 		assert.deepEqual(resolveToolRule("valid", partial.toolRenderer), { previewLines: 0, direction: "tail", color: "toolTitle" });
 		assert.deepEqual(resolveToolRule("empty", partial.toolRenderer), { previewLines: 0, direction: "head", color: "toolTitle" });
 		assert.deepEqual(partial.outputFilters.patterns, ["x"]);
+		assert.equal(resolveDefaultModelRef(partial), undefined);
 		assert.equal(partial.promptEnhancer.modelRef, "zai/glm-5-turbo");
+		assert.equal(partial.autocomplete.modelRef, "zai/glm-5-turbo");
 		assert.equal(partial.modelColors.rules["zai/*"], "success");
 		assert.equal(partial.iconTheme.name, "nerdFont");
 		assert.deepEqual(Object.keys(partial.dictation.languages), ["en", "ru"]);
@@ -106,6 +122,61 @@ describe("config helpers", () => {
 		writeFileSync(testConfigPath, "{");
 		assert.equal(loadPixConfig().toolRenderer.default.previewLines, 0);
 		assert.equal(loadPixConfig().promptEnhancer.modelRef, "zai/glm-5-turbo");
+		assert.equal(loadPixConfig().autocomplete.modelRef, "zai/glm-5-turbo");
+	});
+
+	it("persists autocomplete model and allows an empty disabled value", () => {
+		mkdirSync(testConfigDir, { recursive: true });
+		writeFileSync(testConfigPath, `{
+			// keep comments
+			"autocomplete": { "modelRef": "zai/glm-5-turbo" }
+		}`);
+
+		assert.deepEqual(savePixAutocompleteModel("zai/custom-complete"), { modelRef: "zai/custom-complete" });
+		assert.match(readFileSync(testConfigPath, "utf8"), /keep comments/u);
+		assert.equal(loadPixConfig().autocomplete.modelRef, "zai/custom-complete");
+
+		assert.deepEqual(savePixAutocompleteModel(""), { modelRef: "" });
+		assert.equal(loadPixConfig().autocomplete.modelRef, "");
+		assert.match(upsertPixAutocompleteModelInJsonc(`{}`, "zai/glm-5-turbo"), /"autocomplete"/u);
+	});
+
+	it("normalizes default model references with thinking", () => {
+		mkdirSync(testConfigDir, { recursive: true });
+		writeFileSync(testConfigPath, `{ "defaultModel": { "modelRef": "openai-codex/gpt-5.5:high", "thinking": "medium" } }`);
+		assert.equal(resolveDefaultModelRef(loadPixConfig()), "openai-codex/gpt-5.5:medium");
+
+		writeFileSync(testConfigPath, `{ "defaultModel": "zai/glm-5-turbo:low" }`);
+		assert.equal(resolveDefaultModelRef(loadPixConfig()), "zai/glm-5-turbo:low");
+	});
+
+	it("persists default model and thinking in JSONC config", () => {
+		mkdirSync(testConfigDir, { recursive: true });
+		writeFileSync(testConfigPath, `{
+			// keep comments
+			"defaultModel": { "modelRef": "openai-codex/gpt-5.5", "thinking": "medium" }
+		}`);
+
+		assert.deepEqual(savePixDefaultModel("zai/glm-5-turbo"), { modelRef: "zai/glm-5-turbo", thinking: "medium" });
+		assert.match(readFileSync(testConfigPath, "utf8"), /keep comments/u);
+		assert.equal(resolveDefaultModelRef(loadPixConfig()), "zai/glm-5-turbo:medium");
+
+		assert.deepEqual(savePixDefaultModel("openai-codex/gpt-5.5:high"), { modelRef: "openai-codex/gpt-5.5", thinking: "high" });
+		assert.equal(resolveDefaultModelRef(loadPixConfig()), "openai-codex/gpt-5.5:high");
+
+		assert.deepEqual(savePixDefaultThinking("low"), { modelRef: "openai-codex/gpt-5.5", thinking: "low" });
+		assert.equal(resolveDefaultModelRef(loadPixConfig()), "openai-codex/gpt-5.5:low");
+	});
+
+	it("upserts default model settings from empty or string config", () => {
+		assert.match(upsertPixDefaultModelInJsonc(`{}`, "zai/glm-5-turbo:low"), /"defaultModel"/u);
+		const replaced = upsertPixDefaultThinkingInJsonc(`{ "defaultModel": "zai/glm-5-turbo" }`, "high");
+		assert.match(replaced, /"modelRef": "zai\/glm-5-turbo"/u);
+		assert.match(replaced, /"thinking": "high"/u);
+
+		const inserted = upsertPixDefaultThinkingInJsonc(`{}`, "medium", "openai-codex/gpt-5.5:low");
+		assert.match(inserted, /"modelRef": "openai-codex\/gpt-5.5"/u);
+		assert.match(inserted, /"thinking": "medium"/u);
 	});
 
 	it("persists selected dictation language in JSONC config", () => {

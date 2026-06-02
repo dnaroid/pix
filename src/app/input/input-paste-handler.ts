@@ -12,6 +12,8 @@ export type InputPasteHost = {
 	render(): void;
 };
 
+const PASTE_FINGERPRINT_PREFIX_CHARS = 64 * 1024;
+
 export class InputPasteHandler {
 	private pasteBuffer = "";
 	private readonly recentPasteFingerprints = new Map<string, number>();
@@ -31,13 +33,7 @@ export class InputPasteHandler {
 		}
 
 		if (!this.host.inputEditor.isInBracketedPaste && this.isPlainMultilinePasteChunk(data)) {
-			if (this.isDuplicatePaste("text", data)) {
-				this.host.render();
-				return true;
-			}
-			this.host.resetRequestHistoryNavigation();
-			this.host.inputEditor.attachPastedText(data);
-			this.host.render();
+			this.schedulePastedText(data);
 			return true;
 		}
 
@@ -55,7 +51,9 @@ export class InputPasteHandler {
 
 	endBracketedPaste(): void {
 		this.host.inputEditor.endBracketedPaste();
-		this.handlePasteEnd();
+		const text = this.pasteBuffer;
+		this.pasteBuffer = "";
+		this.handlePasteEnd(text);
 	}
 
 	async handleClipboardImagePaste(): Promise<void> {
@@ -93,7 +91,10 @@ export class InputPasteHandler {
 		}
 
 		const normalizedPayload = kind === "text" ? normalizePastedTextForDuplicateKey(payload) : payload;
-		const fingerprint = `${kind}:${createHash("sha256").update(normalizedPayload).digest("hex")}`;
+		const fingerprintPayload = normalizedPayload.length > PASTE_FINGERPRINT_PREFIX_CHARS
+			? `${normalizedPayload.length}:${normalizedPayload.slice(0, PASTE_FINGERPRINT_PREFIX_CHARS)}`
+			: normalizedPayload;
+		const fingerprint = `${kind}:${createHash("sha256").update(fingerprintPayload).digest("hex")}`;
 		const previousTimestamp = this.recentPasteFingerprints.get(fingerprint);
 		if (previousTimestamp !== undefined && now - previousTimestamp <= PASTE_DUPLICATE_WINDOW_MS) return true;
 
@@ -101,9 +102,7 @@ export class InputPasteHandler {
 		return false;
 	}
 
-	private handlePasteEnd(): void {
-		const text = this.pasteBuffer;
-		this.pasteBuffer = "";
+	private handlePasteEnd(text: string): void {
 		if (!text) return;
 
 		const filePath = this.plainPasteFilePath(text);
@@ -116,13 +115,20 @@ export class InputPasteHandler {
 			return;
 		}
 
-		if (this.isDuplicatePaste("text", text)) {
+		this.schedulePastedText(text);
+	}
+
+	private schedulePastedText(text: string): void {
+		const timer = setTimeout(() => {
+			if (this.isDuplicatePaste("text", text)) {
+				this.host.render();
+				return;
+			}
+			this.host.resetRequestHistoryNavigation();
+			this.host.inputEditor.attachPastedText(text);
 			this.host.render();
-			return;
-		}
-		this.host.resetRequestHistoryNavigation();
-		this.host.inputEditor.attachPastedText(text);
-		this.host.render();
+		}, 0);
+		timer.unref?.();
 	}
 
 	private async handleFilePaste(filePath: string): Promise<void> {

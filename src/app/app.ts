@@ -29,6 +29,7 @@ import { NerdFontController } from "./terminal/nerd-font-controller.js";
 import { AppPopupActionController } from "./popup/popup-action-controller.js";
 import { AppPopupMenuController } from "./popup/popup-menu-controller.js";
 import { AppPromptEnhancerController } from "./input/prompt-enhancer-controller.js";
+import { AppAutocompleteController } from "./input/autocomplete-controller.js";
 import { AppQueuedMessageController } from "./session/queued-message-controller.js";
 import { AppRequestHistory } from "./session/request-history.js";
 import { AppRenderController } from "./rendering/render-controller.js";
@@ -66,6 +67,7 @@ import {
 const TERMINAL_BELL_ATTENTION_EVENT = "pix:terminal-bell:attention";
 const SUBAGENTS_LIVE_STATE_EVENT = "pi-tools-suite:async-subagents:live-state";
 const TODO_STATE_EVENT = "pi-tools-suite:todo:state";
+const COALESCED_RENDER_DELAY_MS = 16;
 
 export class PiUiExtendApp {
 	private readonly entries: Entry[] = [];
@@ -99,6 +101,7 @@ export class PiUiExtendApp {
 	private readonly nerdFontController: NerdFontController;
 	private readonly popupActions: AppPopupActionController;
 	private readonly promptEnhancer: AppPromptEnhancerController;
+	private readonly autocompleteController: AppAutocompleteController;
 	private readonly mouseController: AppMouseController;
 	private readonly popupMenus: AppPopupMenuController;
 	private readonly voiceController: AppVoiceController;
@@ -132,6 +135,7 @@ export class PiUiExtendApp {
 	private get input(): string { return this.inputEditor.text; }
 	private set input(value: string) { this.inputEditor.setText(value); }
 	private running = false;
+	private scheduledRenderTimer: ReturnType<typeof setTimeout> | undefined;
 	private todoPanelExpanded = true;
 	private subagentsPanelExpanded = true;
 	private allThinkingExpanded = false;
@@ -165,6 +169,7 @@ export class PiUiExtendApp {
 			theme: this.theme,
 			blinkController: this.blinkController,
 			runtimeSession: () => this.runtime?.session,
+			render: () => this.scheduleRender(),
 		});
 		this.modelUsageController = new AppModelUsageController({
 			runtimeSession: () => this.runtime?.session,
@@ -211,6 +216,13 @@ export class PiUiExtendApp {
 			setSessionStatus: (session) => this.setSessionStatus(session),
 			setSessionActivity: (activity) => this.setSessionActivity(activity),
 			toast: this.toastNotifier,
+			render: () => this.render(),
+		});
+		this.autocompleteController = new AppAutocompleteController({
+			runtime: () => this.runtime,
+			inputEditor: () => this.inputEditor,
+			autocompleteConfig: () => this.pixConfig.autocomplete,
+			isRunning: () => this.running,
 			render: () => this.render(),
 		});
 		this.voiceController = new AppVoiceController({
@@ -313,12 +325,12 @@ export class PiUiExtendApp {
 			cwd: this.options.cwd,
 			sessionFile: () => this.runtime?.session.sessionFile,
 			isRunning: () => this.running,
-			render: () => this.render(),
+			render: () => this.scheduleRender(),
 		});
 		this.todoWidgetController = new AppTodoWidgetController({
 			sessionFile: () => this.runtime?.session.sessionFile,
 			isRunning: () => this.running,
-			render: () => this.render(),
+			render: () => this.scheduleRender(),
 		});
 		this.workspaceActions = new AppWorkspaceActionsController({
 			entries: this.entries,
@@ -342,6 +354,7 @@ export class PiUiExtendApp {
 			conversationViewport: () => this.conversationViewport,
 			isRunning: () => this.running,
 			render: () => this.render(),
+			scheduleRender: () => this.scheduleRender(),
 			setStatus: (status) => this.setStatus(status),
 			restoreSessionStatus: () => this.restoreSessionStatus(),
 			setSessionStatus: (session) => this.setSessionStatus(session),
@@ -387,6 +400,7 @@ export class PiUiExtendApp {
 			get subagentsPanelExpanded() { return app.subagentsPanelExpanded; },
 			get subagentsWidgetState() { return app.subagentsWidgetController.widgetState; },
 			get voicePartialText() { return app.voicePartialText; },
+			get autocompleteSuggestion() { return app.autocompleteController.suggestionText(); },
 			renderExtensionInputComponent: (width) => this.extensionUiController.renderActiveCustomUi(width),
 			extensionInputUsesEditor: () => this.extensionUiController.activeCustomUiUsesEditor(),
 			widgetTuiHandle: () => this.extensionUiController.widgetTuiHandle(),
@@ -423,6 +437,11 @@ export class PiUiExtendApp {
 			getInput: () => this.input,
 			setInput: (value) => this.setInput(value),
 			promptEnhancerModelRef: () => this.pixConfig.promptEnhancer.modelRef,
+			autocompleteModelRef: () => this.pixConfig.autocomplete.modelRef,
+			setAutocompleteModelRef: (modelRef) => {
+				this.pixConfig.autocomplete.modelRef = modelRef;
+				this.autocompleteController.dispose();
+			},
 			enhancePrompt: () => this.promptEnhancer.enhancePrompt(),
 			isRunning: () => this.running,
 			stop: () => this.stop(),
@@ -581,6 +600,7 @@ export class PiUiExtendApp {
 			setSessionActivity: (activity) => this.setSessionActivity(activity),
 			restoreSessionStatus: () => this.restoreSessionStatus(),
 			render: () => this.render(),
+			scheduleRender: () => this.scheduleRender(),
 		});
 		this.inputActions = new AppInputActionController(
 			{
@@ -632,6 +652,7 @@ export class PiUiExtendApp {
 			handleDirectPopupInput: (char) => this.popupMenus.handleDirectPopupInput(char),
 			autocompleteModel: () => this.popupMenus.autocompleteModel(),
 			autocompleteThinking: () => this.popupMenus.autocompleteThinking(),
+			acceptAutocompleteSuggestion: () => this.autocompleteController.acceptSuggestion(),
 			autocompleteSlashCommand: () => this.popupMenus.autocompleteSlashCommand(),
 			toggleVoiceRecording: () => {
 				void this.voiceController.toggleRecording();
@@ -656,6 +677,7 @@ export class PiUiExtendApp {
 			stopSubagentsPolling: () => this.subagentsWidgetController.stopPolling(),
 			stopModelUsagePolling: () => this.modelUsageController.stopPolling(),
 			stopVoiceInput: () => this.voiceController.dispose(),
+			stopAutocomplete: () => this.autocompleteController.dispose(),
 			stopShellCommand: () => this.shellController.dispose(),
 			unsubscribeSession: () => {
 				this.sessionLifecycle.unsubscribeSession();
@@ -719,6 +741,7 @@ export class PiUiExtendApp {
 			},
 			scrollReset: () => this.scrollController.reset(),
 			loadSessionHistoryEntries: () => this.sessionEvents.loadSessionHistory(),
+			loadSessionHistoryEntriesAsync: (options) => this.sessionEvents.loadSessionHistoryAsync(options),
 			syncUserSessionEntryMetadata: () => this.workspaceActions.syncUserSessionEntryMetadata(),
 			restoreTabsAfterStartup: () => this.tabsController.restoreAfterStartup(),
 			render: () => this.render(),
@@ -786,17 +809,20 @@ export class PiUiExtendApp {
 			this.popupMenus.resetInputMenuDismissals();
 		}
 		this.input = value;
+		this.autocompleteController.dispose();
 	}
 
 	private resetInputAfterProgrammaticEdit(): void {
 		this.requestHistory.resetNavigation();
 		this.popupMenus.resetInputMenuDismissals();
+		this.autocompleteController.dispose();
 	}
 
 	private restoreTabInputState(text: string, cursor: number): void {
 		this.requestHistory.resetNavigation();
 		this.popupMenus.resetInputMenuDismissals();
 		this.inputEditor.setText(text, cursor);
+		this.autocompleteController.dispose();
 	}
 
 	private async clearPersistedInputDraft(): Promise<void> {
@@ -824,7 +850,7 @@ export class PiUiExtendApp {
 	private setVoicePartialTranscript(text: string | undefined): void {
 		if (this.voicePartialText === text) return;
 		this.voicePartialText = text;
-		this.render();
+		this.scheduleRender();
 	}
 
 	private addVoiceSystemMessage(message: string): void {
@@ -958,7 +984,21 @@ export class PiUiExtendApp {
 	}
 
 	private render(): void {
+		if (this.scheduledRenderTimer) {
+			clearTimeout(this.scheduledRenderTimer);
+			this.scheduledRenderTimer = undefined;
+		}
+		this.autocompleteController.observeInput();
 		this.renderController.render();
+	}
+
+	private scheduleRender(): void {
+		if (!this.running || this.scheduledRenderTimer) return;
+		this.scheduledRenderTimer = setTimeout(() => {
+			this.scheduledRenderTimer = undefined;
+			this.renderController.render();
+		}, COALESCED_RENDER_DELAY_MS);
+		this.scheduledRenderTimer.unref?.();
 	}
 
 	private renderStatusLine(): void {

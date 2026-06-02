@@ -1,6 +1,13 @@
 import type { ImageContent } from "../../input-editor.js";
 import { isRecord } from "../guards.js";
 
+const MAX_FORMAT_STRING_CHARS = 256 * 1024;
+const MAX_RENDERED_CONTENT_CHARS = 512 * 1024;
+const MAX_STRUCTURED_DEPTH = 8;
+const MAX_STRUCTURED_ARRAY_ITEMS = 200;
+const MAX_STRUCTURED_OBJECT_KEYS = 200;
+const TRUNCATED_MARKER = "\n[… truncated …]";
+
 export function stringifyUnknown(value: unknown): string {
 	if (typeof value === "string") return value;
 	if (value instanceof Error) return value.message || value.name;
@@ -11,7 +18,7 @@ export function stringifyUnknown(value: unknown): string {
 		if (name) return name;
 	}
 	try {
-		return JSON.stringify(value, null, 2);
+		return JSON.stringify(normalizeStructuredValue(value), null, 2);
 	} catch {
 		return String(value);
 	}
@@ -21,8 +28,9 @@ export function formatStructuredText(value: unknown): string {
 	if (typeof value === "string") {
 		const trimmed = value.trim();
 		if (!trimmed) return "(empty)";
+		if (trimmed.length > MAX_FORMAT_STRING_CHARS) return truncateText(value, MAX_FORMAT_STRING_CHARS);
 		try {
-			return JSON.stringify(JSON.parse(trimmed), null, 2);
+			return JSON.stringify(normalizeStructuredValue(JSON.parse(trimmed)), null, 2);
 		} catch {
 			return value;
 		}
@@ -34,27 +42,36 @@ export function formatStructuredText(value: unknown): string {
 export function renderContent(content: readonly unknown[]): string {
 	const parts: string[] = [];
 	let imageCount = 0;
+	let renderedChars = 0;
+	const pushPart = (part: string): boolean => {
+		const remaining = MAX_RENDERED_CONTENT_CHARS - renderedChars;
+		if (remaining <= 0) return false;
+		const next = part.length > remaining ? truncateText(part, remaining) : part;
+		parts.push(next);
+		renderedChars += next.length;
+		return part.length <= remaining;
+	};
 	for (const item of content) {
 		if (!isRecord(item)) {
-			parts.push(stringifyUnknown(item));
+			if (!pushPart(stringifyUnknown(item))) break;
 			continue;
 		}
 
 		if (isImageContent(item)) {
 			imageCount += 1;
-			parts.push(imageContentLabel(item, imageCount));
+			if (!pushPart(imageContentLabel(item, imageCount))) break;
 			continue;
 		}
 
 		if (typeof item.text === "string") {
-			parts.push(item.text);
+			if (!pushPart(item.text)) break;
 			continue;
 		}
 		if (typeof item.thinking === "string") {
-			parts.push(item.thinking);
+			if (!pushPart(item.thinking)) break;
 			continue;
 		}
-		parts.push(stringifyUnknown(item));
+		if (!pushPart(stringifyUnknown(item))) break;
 	}
 	return parts.join("\n");
 }
@@ -114,4 +131,35 @@ export function submittedUserDisplayText(displayText: string, promptText: string
 	if (trimmedDisplay) return trimmedDisplay;
 	if (images.length > 0) return userImageLabels(images.length);
 	return promptText.trimEnd();
+}
+
+function truncateText(text: string, maxChars: number): string {
+	if (text.length <= maxChars) return text;
+	return `${text.slice(0, Math.max(0, maxChars))}${TRUNCATED_MARKER}`;
+}
+
+function normalizeStructuredValue(value: unknown, depth = 0, seen = new WeakSet<object>()): unknown {
+	if (typeof value === "string") return truncateText(value, MAX_FORMAT_STRING_CHARS);
+	if (!value || typeof value !== "object") return value;
+	if (depth >= MAX_STRUCTURED_DEPTH) return "[… truncated: depth limit …]";
+	if (seen.has(value)) return "[… circular …]";
+	seen.add(value);
+	if (Array.isArray(value)) {
+		const items = value.slice(0, MAX_STRUCTURED_ARRAY_ITEMS).map((item) => normalizeStructuredValue(item, depth + 1, seen));
+		if (value.length > MAX_STRUCTURED_ARRAY_ITEMS) items.push(`[… ${value.length - MAX_STRUCTURED_ARRAY_ITEMS} more items …]`);
+		return items;
+	}
+	if (value instanceof Error) return value.message || value.name;
+
+	const output: Record<string, unknown> = {};
+	let count = 0;
+	for (const [key, child] of Object.entries(value)) {
+		if (count >= MAX_STRUCTURED_OBJECT_KEYS) {
+			output["…"] = "truncated: object key limit";
+			break;
+		}
+		output[key] = normalizeStructuredValue(child, depth + 1, seen);
+		count += 1;
+	}
+	return output;
 }

@@ -18,6 +18,7 @@ describe("AppStatusController", () => {
 			theme: THEMES.dark,
 			blinkController: fakeBlinkController(),
 			runtimeSession: () => undefined,
+			render: () => {},
 		});
 
 		assert.equal(controller.formatContextUsagePercent(sessionWithContextPercent(7)), " 7%");

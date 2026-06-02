@@ -43,6 +43,12 @@ pix install --check
 
 `pix install` checks the icon font, `pi` CLI availability, and clipboard helpers. The `pix` launcher also prepends Pix's bundled dependency bin directory to `PATH`, so a package-manager install can use the bundled Pi CLI even when a separate global `pi` command is not present.
 
+After the setup check, review the user config files:
+
+- `~/.config/pi/pix.jsonc`: choose the voice-input language with `dictation.language` and keep only the `dictation.languages` models you want enabled.
+- `~/.config/pi/pi-tools-suite.jsonc`: enable/configure your LSP servers under `lsp.servers` and adjust pi-tools-suite modules or sub-agent presets if needed.
+- In Pix, run `/opencode-import` to import opencode accounts. For Antigravity OAuth accounts, run `/antigravity-import` or add another account with `/antigravity-add-account`.
+
 On startup, Pix ensures the bundled suite is available at:
 
 ```text

@@ -199,11 +199,12 @@ export class AppRenderController {
 		for (let index = 0; index < renderedInput.lines.length; index += 1) {
 			const inputLine = renderedInput.lines[index] ?? "";
 			const tagSpans = renderedInput.tagSpans[index];
+			const suggestionSpans = renderedInput.suggestionSpans?.[index] ?? [];
 			const row = toScreenRow(inputStartRow + index);
 			this.deps.mouseController.renderedRowTexts.set(row, inputLine);
 
 			const tagColor = this.deps.theme.colors.accent;
-			const styledLine = this.deps.screenStyler.styleInputLine(row, inputLine, tagSpans, columns, tagColor, this.deps.theme.colors.inputBorder);
+			const styledLine = this.deps.screenStyler.styleInputLine(row, inputLine, tagSpans, suggestionSpans, columns, tagColor, this.deps.theme.colors.muted, this.deps.theme.colors.inputBorder);
 			appendFrameOutput("inputStatus", row, this.renderFrameRow(row, styledLine));
 		}
 		if (renderedInput.scrollBar && columns > 0) {

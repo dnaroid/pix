@@ -1,8 +1,8 @@
-import { spawnSync } from "node:child_process";
 import { basename } from "node:path";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { Theme } from "../../theme.js";
 import { GIT_BRANCH_CACHE_MS } from "../constants.js";
+import { runProcess } from "../process.js";
 import type { AppBlinkController } from "./blink-controller.js";
 import type { SessionActivity } from "../types.js";
 
@@ -13,12 +13,14 @@ export type AppStatusControllerHost = {
 	readonly theme: Theme;
 	readonly blinkController: AppBlinkController;
 	runtimeSession(): AgentSession | undefined;
+	render(): void;
 };
 
 export class AppStatusController {
 	private status = "starting";
 	private statusFollowsSession = false;
 	private gitBranchCache: { checkedAt: number; branch: string | undefined } | undefined;
+	private gitBranchLookupInFlight = false;
 
 	sessionActivity: SessionActivity = "idle";
 
@@ -116,13 +118,27 @@ export class AppStatusController {
 			return this.gitBranchCache.branch;
 		}
 
-		const result = spawnSync("git", ["-C", this.host.cwd, "branch", "--show-current"], {
-			encoding: "utf8",
-			timeout: 150,
-		});
-		const branch = result.status === 0 ? result.stdout.trim() || undefined : undefined;
-		this.gitBranchCache = { checkedAt: now, branch };
-		return branch;
+		if (!this.gitBranchLookupInFlight) {
+			this.gitBranchLookupInFlight = true;
+			void this.refreshGitBranchName();
+		}
+
+		return this.gitBranchCache?.branch;
+	}
+
+	private async refreshGitBranchName(): Promise<void> {
+		const previous = this.gitBranchCache?.branch;
+		try {
+			const result = await runProcess("git", ["-C", this.host.cwd, "branch", "--show-current"], {
+				timeoutMs: 150,
+				maxBufferBytes: 1024,
+			});
+			const branch = result.status === 0 ? result.stdout.trim() || undefined : undefined;
+			this.gitBranchCache = { checkedAt: Date.now(), branch };
+			if (branch !== previous) this.host.render();
+		} finally {
+			this.gitBranchLookupInFlight = false;
+		}
 	}
 
 	private startStatusBlink(): void {

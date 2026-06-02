@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 import {
@@ -8,6 +9,7 @@ import {
 	isJetBrainsNerdFontInstalled,
 } from "../terminal/nerd-font-controller.js";
 import { clipboardInstallHint, clipboardSupportAvailable } from "../screen/clipboard.js";
+import { getPixConfigPath } from "../../config.js";
 
 export type PixInstallCliOptions = {
 	checkOnly: boolean;
@@ -16,7 +18,21 @@ export type PixInstallCliOptions = {
 
 export type PixInstallCliContext = {
 	env?: NodeJS.ProcessEnv;
+	homeDir?: string;
 };
+
+export function formatPixInstallNextSteps(homeDir = homedir()): string {
+	const pixConfigPath = getPixConfigPath(homeDir);
+	const toolsConfigPath = join(homeDir, ".config", "pi", "pi-tools-suite.jsonc");
+	return [
+		"",
+		"Next steps:",
+		`  1. Edit ${pixConfigPath} and set dictation.language / dictation.languages for voice input.`,
+		`  2. Edit ${toolsConfigPath} and enable the LSP servers you use under lsp.servers.`,
+		"  3. Start pix, then run /opencode-import to import opencode accounts.",
+		"     For Antigravity accounts, run /antigravity-import or /antigravity-add-account.",
+	].join("\n");
+}
 
 export function pixInstallUsage(): string {
 	return `Usage: pix install [--check]
@@ -104,12 +120,14 @@ export async function runPixInstallCli(argv: readonly string[] = process.argv.sl
 		}
 	}
 
-	if (clipboardSupportAvailable(env)) {
+	if (await clipboardSupportAvailable(env)) {
 		console.log("✓ Clipboard support is available");
 	} else {
 		console.log(`! Clipboard support is missing. ${clipboardInstallHint()}`);
 		if (process.platform === "linux") failures += 1;
 	}
+
+	console.log(formatPixInstallNextSteps(context.homeDir));
 
 	return failures === 0 ? 0 : 1;
 }

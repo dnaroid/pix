@@ -41,11 +41,26 @@ describe("renderToolBlock", () => {
 
 		const lines = renderToolBlock(toolEntry({ output, expandedText: output }), rule, 100, colors);
 
+		assert.deepEqual(lines[0]?.segments?.[0], { start: 0, end: APP_ICONS.alert.length, foreground: colors.error, bold: true });
 		assert.equal(lines[1]?.segments, undefined);
 		assert.deepEqual(lines[2]?.segments, [{ start: 2, end: 2 + APP_ICONS.alert.length, foreground: colors.warning, bold: true }]);
 		assert.deepEqual(lines[3]?.segments, [{ start: 2, end: lines[3]?.text.length, foreground: colors.error }]);
 		assert.deepEqual(lines[4]?.segments, [{ start: 2, end: lines[4]?.text.length, foreground: colors.warning }]);
 		assert.deepEqual(lines[5]?.segments, [{ start: 2, end: lines[5]?.text.length, foreground: colors.muted }]);
+	});
+
+	it("colors edit tool LSP status icon yellow for warning-only reports", () => {
+		setAppIconTheme("nerdFont");
+		const output = [
+			"LSP diagnostics after mutation:",
+			`${APP_ICONS.alert} tsserver:`,
+			"src/a.ts:2:2 - warning TS6133: unused variable",
+			"0 errors, 1 warning",
+		].join("\n");
+
+		const lines = renderToolBlock(toolEntry({ output, expandedText: output }), rule, 100, colors);
+
+		assert.deepEqual(lines[0]?.segments?.[0], { start: 0, end: APP_ICONS.alert.length, foreground: colors.warning, bold: true });
 	});
 
 	it("marks truncated collapsed previews with an ellipsis in normal mode", () => {

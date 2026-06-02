@@ -1,12 +1,13 @@
-import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { copyToClipboard, getAgentDir, type ContextUsage } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, type ContextUsage } from "@earendil-works/pi-coding-agent";
 import type { CommandControllerHost } from "./command-host.js";
 import { getIdleRuntime, getRuntime, parsePathArgument } from "./command-runtime.js";
 import { createId } from "../id.js";
+import { runProcess } from "../process.js";
+import { copyTextToClipboard } from "../screen/clipboard.js";
 import { formatAccountUsageReport, queryAccountUsageReport } from "../model/model-usage-status.js";
 import type { SessionModel } from "../types.js";
 import { checkPixUpdate, formatPixUpdateCheck, parsePixUpdateArgs, pixUpdateUsage } from "../cli/update.js";
@@ -56,7 +57,7 @@ export class SessionCommandActions {
 		const runtime = getIdleRuntime(this.host, "share");
 		if (!runtime) return;
 
-		const authResult = spawnSync("gh", ["auth", "status"], { encoding: "utf8" });
+		const authResult = await runProcess("gh", ["auth", "status"], { maxBufferBytes: 32 * 1024 });
 		if (authResult.status !== 0) throw new Error("GitHub CLI is not installed or is not logged in. Run `gh auth login` first.");
 
 		const shareDir = join(getAgentDir(), "pix");
@@ -66,7 +67,7 @@ export class SessionCommandActions {
 			this.host.setStatus("creating share gist");
 			this.host.render();
 			await runtime.session.exportToHtml(tmpFile);
-			const gistResult = spawnSync("gh", ["gist", "create", "--public=false", tmpFile], { encoding: "utf8" });
+			const gistResult = await runProcess("gh", ["gist", "create", "--public=false", tmpFile], { maxBufferBytes: 64 * 1024 });
 			if (gistResult.status !== 0) throw new Error(gistResult.stderr?.trim() || "Failed to create gist");
 
 			const gistUrl = gistResult.stdout.trim();
@@ -85,7 +86,7 @@ export class SessionCommandActions {
 		const text = runtime.session.getLastAssistantText();
 		if (!text) throw new Error("No agent messages to copy yet");
 
-		await copyToClipboard(text);
+		await copyTextToClipboard(text);
 		this.host.addEntry({ id: createId("system"), kind: "system", text: "Copied last agent message to clipboard." });
 		this.host.setSessionStatus(runtime.session);
 		this.host.toast.success("Copied last agent message");

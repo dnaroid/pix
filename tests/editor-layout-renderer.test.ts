@@ -12,7 +12,7 @@ describe("EditorLayoutRenderer voice partials", () => {
 		const renderer = editorLayoutRenderer("hello from vosk");
 
 		const layout = renderer.computeLayout(40, 10);
-		const line = layout.aboveEditorLines.at(-1);
+		const line = layout.aboveEditorLines[layout.aboveEditorLines.length - 1];
 
 		assert.ok(line);
 		assert.equal(line.variant, "muted");
@@ -42,6 +42,21 @@ describe("EditorLayoutRenderer extension input UI", () => {
 		assert.equal(layout.renderedInput.totalLineCount, 5);
 		assert.equal(layout.renderedInput.visibleRowCount, 3);
 		assert.deepEqual(layout.renderedInput.scrollBar, { top: 1, height: 2, trackHeight: 3 });
+	});
+
+	it("renders inline autocomplete suggestion as ghost text", () => {
+		const inputEditor = new InputEditor();
+		inputEditor.setText("hello");
+		const renderer = editorLayoutRenderer(undefined, { inputEditor, autocompleteSuggestion: " world" });
+
+		const layout = renderer.computeLayout(40, 8);
+		const lastInputLineIndex = layout.renderedInput.lines.length - 1;
+		const inputLine = layout.renderedInput.lines[lastInputLineIndex] ?? "";
+		const suggestionSpan = layout.renderedInput.suggestionSpans[lastInputLineIndex]?.[0];
+
+		assert.ok(inputLine.includes("hello world"));
+		assert.ok(suggestionSpan);
+		assert.equal(inputLine.slice(suggestionSpan.start, suggestionSpan.end), " world");
 	});
 
 	it("reserves above-editor widget rows with a spacer inside the input frame", () => {
@@ -168,7 +183,7 @@ describe("EditorLayoutRenderer extension input UI", () => {
 		const layout = renderer.computeLayout(40, 20);
 
 		assert.equal(layout.renderedInput.lines.length, 12);
-		assert.ok(layout.renderedInput.lines.at(-1)?.includes("Question row 12"));
+		assert.ok(layout.renderedInput.lines[layout.renderedInput.lines.length - 1]?.includes("Question row 12"));
 	});
 });
 
@@ -189,6 +204,7 @@ function createRendererHost(overrides: Partial<ConstructorParameters<typeof Edit
 		subagentsPanelExpanded: false,
 		subagentsWidgetState: undefined,
 		voicePartialText: overrides.voicePartialText,
+		autocompleteSuggestion: overrides.autocompleteSuggestion,
 		renderExtensionInputComponent: overrides.renderExtensionInputComponent ?? (() => undefined),
 		extensionInputUsesEditor: overrides.extensionInputUsesEditor ?? (() => false),
 		widgetTuiHandle: () => ({}) as never,

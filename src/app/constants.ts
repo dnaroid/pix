@@ -77,7 +77,7 @@ export const DEFAULT_THINKING_TOOL_RULE: ResolvedToolRule = {
 	color: "accent",
 };
 export const TERMINAL_COMMAND_MODIFIER_FLAG = 8;
-export const GIT_BRANCH_CACHE_MS = 2_000;
+export const GIT_BRANCH_CACHE_MS = 30_000;
 export const TODO_TOOL_NAME = "todo";
 
 export const TODO_ACTIONS = [

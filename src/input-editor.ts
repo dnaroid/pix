@@ -35,6 +35,8 @@ export interface VisualLine {
 	wrapped: boolean;
 	/** Attachment tag spans within this visual line, for distinct styling. */
 	tagSpans: Array<{ start: number; end: number }>;
+	/** Inline autocomplete suggestion spans within this visual line. */
+	suggestionSpans?: Array<{ start: number; end: number }>;
 }
 
 /** Full render-ready snapshot of the editor state. */
@@ -484,15 +486,20 @@ export class InputEditor {
 
 	// ── rendering ───────────────────────────────────────────────────
 
-	render(width: number, maxRows: number, firstPrefix: string, continuationPrefix: string): RenderedEditor {
+	render(width: number, maxRows: number, firstPrefix: string, continuationPrefix: string, suggestionSuffix = ""): RenderedEditor {
 		const allVisual: VisualLine[] = [];
-		const logicalLines = this.logicalLines();
+		const canRenderSuggestion = suggestionSuffix.length > 0 && !this.hasSelection && this._cursor === this._text.length;
+		const renderedText = canRenderSuggestion ? `${this._text}${suggestionSuffix}` : this._text;
+		const logicalLines = renderedText.split("\n");
 		const tagPatterns = this.getTagPatterns();
+		const suggestionStart = canRenderSuggestion ? this._text.length : undefined;
+		let lineOffset = 0;
 
 		for (let i = 0; i < logicalLines.length; i++) {
 			const line = logicalLines[i]!;
 			const prefix = i === 0 && allVisual.length === 0 ? firstPrefix : continuationPrefix;
-			this.pushVisualLines(allVisual, line, prefix, continuationPrefix, width, i === 0 && allVisual.length === 0, tagPatterns);
+			this.pushVisualLines(allVisual, line, prefix, continuationPrefix, width, i === 0 && allVisual.length === 0, tagPatterns, lineOffset, suggestionStart, renderedText.length);
+			lineOffset += line.length + (i < logicalLines.length - 1 ? 1 : 0);
 		}
 
 		if (allVisual.length === 0) {
@@ -500,6 +507,18 @@ export class InputEditor {
 		}
 
 		const cursorVisualRow = this.computeCursorVisualRow(allVisual, width, firstPrefix, continuationPrefix);
+
+		// When the cursor is at the exact end of a logical line that fills the width,
+		// render an empty wrapped line for the cursor. If another logical line follows,
+		// insert the cursor line before it instead of letting the cursor cover its first cell.
+		if (!canRenderSuggestion && this.cursorAtExactWrapBoundary(width, firstPrefix, continuationPrefix)) {
+			const cursorLine: VisualLine = { text: continuationPrefix, wrapped: true, tagSpans: [] };
+			if (cursorVisualRow >= allVisual.length) {
+				allVisual.push(cursorLine);
+			} else {
+				allVisual.splice(cursorVisualRow, 0, cursorLine);
+			}
+		}
 
 		const safeMaxRows = Math.max(1, maxRows);
 		let autoScrollOffset = 0;
@@ -865,9 +884,13 @@ export class InputEditor {
 		width: number,
 		isFirst: boolean,
 		tagPatterns: Array<{ tag: string; regex: RegExp }>,
+		lineOffset: number,
+		suggestionStart: number | undefined,
+		suggestionEnd: number,
 	): void {
 		let currentPrefix = firstPrefix;
 		let remaining = logicalLine;
+		let chunkGlobalStart = lineOffset;
 
 		if (remaining.length === 0) {
 			output.push({ text: currentPrefix, wrapped: !isFirst || output.length > 0, tagSpans: [] });
@@ -879,13 +902,22 @@ export class InputEditor {
 			const available = Math.max(1, width - currentPrefix.length);
 			const chunk = remaining.slice(0, available);
 			const fullText = `${currentPrefix}${chunk}`;
+			const chunkGlobalEnd = chunkGlobalStart + chunk.length;
 			// Compute tag spans adjusted for prefix offset
 			const spans = this.findTagSpans(chunk, tagPatterns).map((s) => ({
 				start: s.start + currentPrefix.length,
 				end: s.end + currentPrefix.length,
 			}));
-			output.push({ text: fullText, wrapped: !first, tagSpans: spans });
+			const suggestionSpans = suggestionStart === undefined ? undefined : suggestionSpansForChunk(
+				chunkGlobalStart,
+				chunkGlobalEnd,
+				suggestionStart,
+				suggestionEnd,
+				currentPrefix.length,
+			);
+			output.push({ text: fullText, wrapped: !first, tagSpans: spans, ...(suggestionSpans && suggestionSpans.length > 0 ? { suggestionSpans } : {}) });
 			remaining = remaining.slice(chunk.length);
+			chunkGlobalStart = chunkGlobalEnd;
 			currentPrefix = continuationPrefix;
 			first = false;
 		}
@@ -914,13 +946,17 @@ export class InputEditor {
 			}
 
 			const wrappedCount = Math.ceil(line.length / available);
+			const atExactBoundary = pos.col === line.length && line.length > 0 && line.length % available === 0;
 			for (let w = 0; w < wrappedCount; w++) {
 				const chunkStart = w * available;
-				if (logRow === pos.row && pos.col >= chunkStart && (w === wrappedCount - 1 || pos.col < chunkStart + available)) {
+				if (logRow === pos.row && pos.col >= chunkStart && !atExactBoundary && (w === wrappedCount - 1 || pos.col < chunkStart + available)) {
 					return visualRow;
 				}
 				visualRow += 1;
 			}
+			// When the cursor is at the exact end of a line that fills the width,
+			// it belongs on a new empty visual line past the last chunk.
+			if (logRow === pos.row && atExactBoundary) return visualRow;
 		}
 
 		return Math.max(0, allVisual.length - 1);
@@ -932,6 +968,15 @@ export class InputEditor {
 		const available = Math.max(1, width - prefixLen);
 		const colInChunk = available > 0 ? pos.col % available : pos.col;
 		return prefixLen + colInChunk + 1;
+	}
+
+	private cursorAtExactWrapBoundary(width: number, firstPrefix: string, continuationPrefix: string): boolean {
+		const pos = this.offsetToRowCol(this._cursor);
+		const logicalLines = this.logicalLines();
+		const line = logicalLines[pos.row] ?? "";
+		const prefixLen = pos.row === 0 ? firstPrefix.length : continuationPrefix.length;
+		const available = Math.max(1, width - prefixLen);
+		return pos.col === line.length && line.length > 0 && line.length % available === 0;
 	}
 }
 
@@ -945,4 +990,17 @@ function removeVirtualAttachmentTag(text: string, tag: string): string {
 	const withTrailingSpace = `${tag} `;
 	if (text.includes(withTrailingSpace)) return text.replace(withTrailingSpace, "");
 	return text.replace(tag, "");
+}
+
+function suggestionSpansForChunk(
+	chunkStart: number,
+	chunkEnd: number,
+	suggestionStart: number,
+	suggestionEnd: number,
+	prefixLength: number,
+): Array<{ start: number; end: number }> | undefined {
+	const start = Math.max(chunkStart, suggestionStart);
+	const end = Math.min(chunkEnd, suggestionEnd);
+	if (end <= start) return undefined;
+	return [{ start: prefixLength + start - chunkStart, end: prefixLength + end - chunkStart }];
 }

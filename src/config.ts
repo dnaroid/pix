@@ -42,6 +42,16 @@ export type PromptEnhancerConfig = {
 	modelRef: string;
 };
 
+export type AutocompleteConfig = {
+	/** Empty string disables inline LLM autocomplete. */
+	modelRef: string;
+};
+
+export type DefaultModelConfig = {
+	modelRef: string;
+	thinking?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+};
+
 export type ModelColorsConfig = {
 	rules: Record<string, string>;
 };
@@ -64,7 +74,9 @@ export type DictationConfig = {
 export type PixConfig = {
 	toolRenderer: ToolRendererConfig;
 	outputFilters: OutputFiltersConfig;
+	defaultModel?: DefaultModelConfig;
 	promptEnhancer: PromptEnhancerConfig;
+	autocomplete: AutocompleteConfig;
 	modelColors: ModelColorsConfig;
 	iconTheme: IconThemeConfig;
 	dictation: DictationConfig;
@@ -118,7 +130,14 @@ const DEFAULT_OUTPUT_FILTERS: OutputFiltersConfig = {
 	patterns: [],
 };
 
+const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+type ConfigThinkingLevel = (typeof THINKING_LEVELS)[number];
+
 const DEFAULT_PROMPT_ENHANCER: PromptEnhancerConfig = {
+	modelRef: "zai/glm-5-turbo",
+};
+
+const DEFAULT_AUTOCOMPLETE: AutocompleteConfig = {
 	modelRef: "zai/glm-5-turbo",
 };
 
@@ -203,6 +222,40 @@ function extractPromptEnhancerConfig(raw: unknown): PromptEnhancerConfig | undef
 	return modelRef ? { modelRef } : undefined;
 }
 
+function extractAutocompleteConfig(raw: unknown): AutocompleteConfig | undefined {
+	if (!isPlainObject(raw)) return undefined;
+	const autocomplete = raw.autocomplete ?? raw.autoComplete;
+	if (typeof autocomplete === "string") return { modelRef: autocomplete.trim() };
+	if (!isPlainObject(autocomplete)) return undefined;
+
+	const modelRef = typeof autocomplete.modelRef === "string"
+		? autocomplete.modelRef.trim()
+		: typeof autocomplete.model === "string"
+			? autocomplete.model.trim()
+			: undefined;
+	return modelRef === undefined ? undefined : { modelRef };
+}
+
+function extractDefaultModelConfig(raw: unknown): DefaultModelConfig | undefined {
+	if (!isPlainObject(raw)) return undefined;
+	const configured = raw.defaultModel ?? raw.modelDefault;
+
+	if (typeof configured === "string") {
+		const modelRef = configured.trim();
+		return modelRef ? { modelRef } : undefined;
+	}
+
+	if (!isPlainObject(configured)) return undefined;
+	const modelRef = nonEmptyString(configured.modelRef) ?? nonEmptyString(configured.model);
+	if (!modelRef) return undefined;
+
+	const thinking = normalizeThinkingLevel(configured.thinking) ?? normalizeThinkingLevel(configured.thinkingLevel);
+	return {
+		modelRef,
+		...(thinking === undefined ? {} : { thinking }),
+	};
+}
+
 function extractModelColorsConfig(raw: unknown): ModelColorsConfig | undefined {
 	if (!isPlainObject(raw)) return undefined;
 	const modelColors = raw.modelColors;
@@ -274,6 +327,12 @@ function normalizeDictationLanguage(value: unknown): string | undefined {
 	return normalized.length > 0 ? normalized : undefined;
 }
 
+function normalizeThinkingLevel(value: unknown): ConfigThinkingLevel | undefined {
+	if (typeof value !== "string") return undefined;
+	const normalized = value.trim().toLowerCase();
+	return THINKING_LEVELS.includes(normalized as ConfigThinkingLevel) ? normalized as ConfigThinkingLevel : undefined;
+}
+
 function nonEmptyString(value: unknown): string | undefined {
 	if (typeof value !== "string") return undefined;
 	const trimmed = value.trim();
@@ -285,10 +344,126 @@ function defaultPixConfig(): PixConfig {
 		toolRenderer: DEFAULT_TOOL_RENDERER,
 		outputFilters: DEFAULT_OUTPUT_FILTERS,
 		promptEnhancer: DEFAULT_PROMPT_ENHANCER,
+		autocomplete: DEFAULT_AUTOCOMPLETE,
 		modelColors: DEFAULT_MODEL_COLORS,
 		iconTheme: { name: resolveAppIconThemeNameFromEnv() },
 		dictation: DEFAULT_DICTATION,
 	};
+}
+
+export function resolveDefaultModelRef(config: PixConfig): string | undefined {
+	const modelRef = config.defaultModel?.modelRef.trim();
+	if (!modelRef) return undefined;
+
+	const thinking = config.defaultModel?.thinking;
+	if (!thinking) return modelRef;
+
+	return `${stripThinkingSuffix(modelRef)}:${thinking}`;
+}
+
+export function savePixDefaultModel(modelRef: string): DefaultModelConfig | undefined {
+	const normalized = normalizeDefaultModelRef(modelRef);
+	if (!normalized) return undefined;
+
+	const configPath = PIX_CONFIG_PATH;
+	const source = existsSync(configPath) ? readFileSync(configPath, "utf8") : "{\n}\n";
+	const updated = upsertPixDefaultModelInJsonc(source, modelRef);
+	mkdirSync(dirname(configPath), { recursive: true });
+	writeFileSync(configPath, updated);
+	return extractDefaultModelConfig(parseJsonc(updated));
+}
+
+export function savePixDefaultThinking(thinking: string, fallbackModelRef?: string): DefaultModelConfig | undefined {
+	const normalizedThinking = normalizeThinkingLevel(thinking);
+	if (!normalizedThinking) return undefined;
+
+	const configPath = PIX_CONFIG_PATH;
+	const source = existsSync(configPath) ? readFileSync(configPath, "utf8") : "{\n}\n";
+	const updated = upsertPixDefaultThinkingInJsonc(source, normalizedThinking, fallbackModelRef);
+	const defaultModel = extractDefaultModelConfig(parseJsonc(updated));
+	if (!defaultModel) return undefined;
+
+	mkdirSync(dirname(configPath), { recursive: true });
+	writeFileSync(configPath, updated);
+	return defaultModel;
+}
+
+export function savePixAutocompleteModel(modelRef: string): AutocompleteConfig {
+	const configPath = PIX_CONFIG_PATH;
+	const source = existsSync(configPath) ? readFileSync(configPath, "utf8") : "{\n}\n";
+	const updated = upsertPixAutocompleteModelInJsonc(source, modelRef);
+	mkdirSync(dirname(configPath), { recursive: true });
+	writeFileSync(configPath, updated);
+	return extractAutocompleteConfig(parseJsonc(updated)) ?? { modelRef: modelRef.trim() };
+}
+
+export function upsertPixDefaultModelInJsonc(source: string, modelRef: string): string {
+	const normalized = normalizeDefaultModelRef(modelRef);
+	if (!normalized) return source;
+
+	const parsed = parseJsonc(source);
+	const current = extractDefaultModelConfig(parsed);
+	const thinking = normalized.thinking ?? current?.thinking;
+	const next: DefaultModelConfig = {
+		modelRef: normalized.modelRef,
+		...(thinking === undefined ? {} : { thinking }),
+	};
+	return upsertPixDefaultModelObjectInJsonc(source, parsed, next);
+}
+
+export function upsertPixDefaultThinkingInJsonc(source: string, thinking: string, fallbackModelRef?: string): string {
+	const normalizedThinking = normalizeThinkingLevel(thinking);
+	if (!normalizedThinking) return source;
+
+	const parsed = parseJsonc(source);
+	const current = extractDefaultModelConfig(parsed);
+	const fallback = fallbackModelRef ? normalizeDefaultModelRef(fallbackModelRef) : undefined;
+	const modelRef = current?.modelRef ?? fallback?.modelRef;
+	if (!modelRef) return source;
+
+	const next: DefaultModelConfig = {
+		modelRef: stripThinkingSuffix(modelRef),
+		thinking: normalizedThinking,
+	};
+	return upsertPixDefaultModelObjectInJsonc(source, parsed, next);
+}
+
+function upsertPixDefaultModelObjectInJsonc(source: string, parsed: unknown, config: DefaultModelConfig): string {
+	const formattingOptions = { insertSpaces: true, tabSize: 2 };
+	if (!isPlainObject(parsed) || !isPlainObject(parsed.defaultModel)) {
+		return applyEdits(source, modify(source, ["defaultModel"], config, { formattingOptions, getInsertionIndex: () => 0 }));
+	}
+
+	let updated = applyEdits(source, modify(source, ["defaultModel", "modelRef"], config.modelRef, { formattingOptions }));
+	if (config.thinking !== undefined) {
+		updated = applyEdits(updated, modify(updated, ["defaultModel", "thinking"], config.thinking, { formattingOptions }));
+	}
+	return updated;
+}
+
+export function upsertPixAutocompleteModelInJsonc(source: string, modelRef: string): string {
+	const formattingOptions = { insertSpaces: true, tabSize: 2 };
+	return applyEdits(source, modify(source, ["autocomplete", "modelRef"], modelRef.trim(), { formattingOptions }));
+}
+
+function normalizeDefaultModelRef(modelRef: string): DefaultModelConfig | undefined {
+	const trimmed = modelRef.trim();
+	if (!trimmed) return undefined;
+
+	const colonIndex = trimmed.lastIndexOf(":");
+	if (colonIndex <= 0) return { modelRef: trimmed };
+
+	const suffix = trimmed.slice(colonIndex + 1);
+	const thinking = normalizeThinkingLevel(suffix);
+	return thinking ? { modelRef: trimmed.slice(0, colonIndex), thinking } : { modelRef: trimmed };
+}
+
+function stripThinkingSuffix(modelRef: string): string {
+	const colonIndex = modelRef.lastIndexOf(":");
+	if (colonIndex <= 0) return modelRef;
+
+	const suffix = modelRef.slice(colonIndex + 1);
+	return normalizeThinkingLevel(suffix) ? modelRef.slice(0, colonIndex) : modelRef;
 }
 
 function extractToolRendererRule(value: unknown): ToolRendererRule | undefined {
@@ -337,12 +512,14 @@ export function loadPixConfig(): PixConfig {
 		const parsed = parseJsonc(raw);
 		const toolRenderer = extractToolRendererConfig(parsed) ?? DEFAULT_TOOL_RENDERER;
 		const outputFilters = extractOutputFiltersConfig(parsed) ?? DEFAULT_OUTPUT_FILTERS;
+		const defaultModel = extractDefaultModelConfig(parsed);
 		const promptEnhancer = extractPromptEnhancerConfig(parsed) ?? DEFAULT_PROMPT_ENHANCER;
+		const autocomplete = extractAutocompleteConfig(parsed) ?? DEFAULT_AUTOCOMPLETE;
 		const modelColors = extractModelColorsConfig(parsed) ?? DEFAULT_MODEL_COLORS;
 		const configuredIconTheme = extractIconThemeConfig(parsed) ?? DEFAULT_ICON_THEME;
 		const iconTheme = { name: appIconThemeOverrideFromEnv() ?? configuredIconTheme.name } satisfies IconThemeConfig;
 		const dictation = extractDictationConfig(parsed) ?? DEFAULT_DICTATION;
-		return { toolRenderer, outputFilters, promptEnhancer, modelColors, iconTheme, dictation };
+		return { toolRenderer, outputFilters, ...(defaultModel === undefined ? {} : { defaultModel }), promptEnhancer, autocomplete, modelColors, iconTheme, dictation };
 	} catch (error) {
 		process.stderr.write(`[pix] Failed to load ${configPath}: ${error instanceof Error ? error.message : String(error)}\n`);
 		return defaultPixConfig();

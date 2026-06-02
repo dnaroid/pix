@@ -112,9 +112,56 @@ async function initializeIndexedProject(pi: ExtensionAPI, cwd: string, signal: A
 	const indexerDir = path.join(projectRoot, ".indexer-cli");
 	if (directoryExists(indexerDir)) return { projectRoot, initialized: false, alreadyIndexed: true, output: "Project is already indexed." };
 
+	const idxCli = await ensureIdxCliAvailable(pi, projectRoot, signal);
+	if (!idxCli.available) {
+		return {
+			projectRoot,
+			initialized: false,
+			alreadyIndexed: false,
+			output: idxCli.output,
+			exitCode: idxCli.exitCode,
+			installedIdx: idxCli.installed,
+		};
+	}
+
 	const init = await pi.exec("idx", ["init"], { cwd: projectRoot, signal, timeout: 600_000 });
-	const output = [init.stdout, init.stderr].filter(Boolean).join(init.stdout && init.stderr ? "\n" : "").trim() || "No output";
-	return { projectRoot, initialized: (init.code ?? 0) === 0, alreadyIndexed: false, output, exitCode: init.code ?? 0 };
+	const initOutput = [init.stdout, init.stderr].filter(Boolean).join(init.stdout && init.stderr ? "\n" : "").trim() || "No output";
+	const output = idxCli.installed
+		? [`idx was not available; installed with npm install -g indexer-cli@latest:`, idxCli.output, `idx init output:`, initOutput].join("\n\n")
+		: initOutput;
+	return { projectRoot, initialized: (init.code ?? 0) === 0, alreadyIndexed: false, output, exitCode: init.code ?? 0, installedIdx: idxCli.installed };
+}
+
+async function ensureIdxCliAvailable(pi: ExtensionAPI, cwd: string, signal: AbortSignal | undefined) {
+	const check = await runCommandSafely(pi, "sh", ["-lc", "command -v idx"], { cwd, signal, timeout: 30_000 });
+	if ((check.code ?? 0) === 0) return { available: true, installed: false, output: "idx is available.", exitCode: 0 };
+
+	const install = await runCommandSafely(pi, "npm", ["install", "-g", "indexer-cli@latest"], { cwd, signal, timeout: 600_000 });
+	const installOutput = [install.stdout, install.stderr].filter(Boolean).join(install.stdout && install.stderr ? "\n" : "").trim() || "No output";
+	const exitCode = install.code ?? 0;
+	if (exitCode !== 0) {
+		return {
+			available: false,
+			installed: false,
+			output: [`idx is not available and npm install -g indexer-cli@latest failed:`, installOutput].join("\n\n"),
+			exitCode,
+		};
+	}
+
+	return { available: true, installed: true, output: installOutput, exitCode };
+}
+
+async function runCommandSafely(
+	pi: ExtensionAPI,
+	command: string,
+	args: string[],
+	options: { cwd?: string; signal?: AbortSignal; timeout?: number },
+): Promise<ExecResult> {
+	try {
+		return await pi.exec(command, args, options);
+	} catch (error) {
+		return { stdout: "", stderr: error instanceof Error ? error.message : String(error), code: 1 };
+	}
 }
 
 async function updateIndexerCli(pi: ExtensionAPI, cwd: string, signal: AbortSignal | undefined) {

@@ -55,6 +55,7 @@ describe("InputPasteHandler file paths", () => {
 		handler.beginBracketedPaste();
 		handler.appendBracketedPasteText("/tmp/example\nsecond line");
 		handler.endBracketedPaste();
+		await new Promise((resolve) => setTimeout(resolve, 0));
 
 		assert.equal(editor.text, "[Pasted ~2 lines] ");
 		assert.equal(editor.attachments.length, 1);

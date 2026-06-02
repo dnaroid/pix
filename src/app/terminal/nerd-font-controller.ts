@@ -1,8 +1,9 @@
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, readdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { commandExists, runProcess } from "../process.js";
 
 export type NerdFontInstallHost = {
 	showToast(message: string, kind: "success" | "error" | "warning" | "info"): void;
@@ -47,9 +48,12 @@ export class NerdFontController {
 }
 
 export async function isJetBrainsNerdFontInstalled(): Promise<boolean> {
-	if (commandExists("brew") && spawnSync("brew", ["list", "--cask", CASK_NAME], { stdio: "ignore" }).status === 0) return true;
-	if (process.platform === "linux" && commandExists("fc-match")) {
-		const result = spawnSync("fc-match", ["-f", "%{family}", FONT_FAMILY_NAME], { encoding: "utf8" });
+	if (await commandExists("brew")) {
+		const result = await runProcess("brew", ["list", "--cask", CASK_NAME], { maxBufferBytes: 1024 });
+		if (result.status === 0) return true;
+	}
+	if (process.platform === "linux" && await commandExists("fc-match")) {
+		const result = await runProcess("fc-match", ["-f", "%{family}", FONT_FAMILY_NAME], { maxBufferBytes: 1024 });
 		if (result.status === 0 && /JetBrains.*Nerd/iu.test(result.stdout)) return true;
 	}
 
@@ -62,7 +66,7 @@ export async function isJetBrainsNerdFontInstalled(): Promise<boolean> {
 }
 
 export async function installJetBrainsNerdFont(): Promise<string> {
-	if (process.platform === "darwin" && commandExists("brew")) {
+	if (process.platform === "darwin" && await commandExists("brew")) {
 		await runBrewInstall();
 		return CASK_NAME;
 	}
@@ -78,8 +82,8 @@ export async function installJetBrainsNerdFont(): Promise<string> {
 	if (bytes.length < 100_000) throw new Error("downloaded font is unexpectedly small");
 	await writeFile(targetPath, bytes);
 
-	if (process.platform === "linux") runOptionalCommand("fc-cache", ["-f", dirname(targetPath)]);
-	if (process.platform === "win32") registerWindowsUserFont(targetPath);
+	if (process.platform === "linux") await runOptionalCommand("fc-cache", ["-f", dirname(targetPath)]);
+	if (process.platform === "win32") await registerWindowsUserFont(targetPath);
 
 	return targetPath;
 }
@@ -149,10 +153,10 @@ async function runBrewInstall(): Promise<void> {
 	});
 }
 
-function registerWindowsUserFont(fontPath: string): void {
+async function registerWindowsUserFont(fontPath: string): Promise<void> {
 	const escapedPath = fontPath.replaceAll("'", "''");
 	const escapedName = `${FONT_FAMILY_NAME} (TrueType)`.replaceAll("'", "''");
-	runOptionalCommand("powershell.exe", [
+	await runOptionalCommand("powershell.exe", [
 		"-NoProfile",
 		"-ExecutionPolicy",
 		"Bypass",
@@ -161,13 +165,8 @@ function registerWindowsUserFont(fontPath: string): void {
 	]);
 }
 
-function runOptionalCommand(command: string, args: string[]): void {
-	spawnSync(command, args, { stdio: "ignore" });
-}
-
-function commandExists(command: string): boolean {
-	if (process.platform === "win32") return spawnSync("where", [command], { stdio: "ignore" }).status === 0;
-	return spawnSync("sh", ["-lc", `command -v ${command}`], { stdio: "ignore" }).status === 0;
+async function runOptionalCommand(command: string, args: string[]): Promise<void> {
+	await runProcess(command, args, { maxBufferBytes: 1024 });
 }
 
 function errorMessage(error: unknown): string {

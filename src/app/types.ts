@@ -367,6 +367,7 @@ export type RenderedInput = {
 	scrollBar?: ScrollBarMetrics | undefined;
 	editorStartRowOffset: number;
 	tagSpans: readonly (readonly { start: number; end: number }[])[];
+	suggestionSpans: readonly (readonly { start: number; end: number }[])[];
 };
 
 export type ScrollBarMetrics = {

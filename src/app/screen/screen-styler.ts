@@ -94,8 +94,10 @@ export class ScreenStyler {
 		row: number,
 		text: string,
 		tagSpans: readonly { start: number; end: number }[] | undefined,
+		suggestionSpans: readonly { start: number; end: number }[] | undefined,
 		width: number,
 		tagColor: string,
+		suggestionColor: string,
 		frameColor?: string,
 	): string {
 		const colors = this.host.theme.colors;
@@ -104,7 +106,7 @@ export class ScreenStyler {
 
 		const plain = padOrTrimPlain(text, width);
 		const frameSpans = inputFrameSpans(plain, width, frameColor);
-		if ((!tagSpans || tagSpans.length === 0) && frameSpans.length === 0) {
+		if ((!tagSpans || tagSpans.length === 0) && (!suggestionSpans || suggestionSpans.length === 0) && frameSpans.length === 0) {
 			return hasAnsi(plain) ? this.styleAnsiLine(plain, baseOptions) : colorize(plain, baseOptions);
 		}
 
@@ -114,6 +116,7 @@ export class ScreenStyler {
 		const spans = [
 			...frameSpans,
 			...(tagSpans ?? []).map((span) => ({ ...span, foreground: tagColor, bold: true })),
+			...(suggestionSpans ?? []).map((span) => ({ ...span, foreground: suggestionColor })),
 		].sort((a, b) => a.start - b.start || a.end - b.end);
 		for (const span of spans) {
 			const start = Math.max(offset, Math.min(endOffset, span.start));

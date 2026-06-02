@@ -1,6 +1,7 @@
-import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { runProcess } from "../process.js";
 
 export type WorkspaceUndoIndex = {
 	version: 1;
@@ -111,14 +112,14 @@ export function workspaceMutationFromToolExecution(input: WorkspaceMutationFromT
 	return undefined;
 }
 
-export function revertWorkspaceMutations(cwd: string, mutations: readonly WorkspaceMutation[]): WorkspaceRevertResult {
+export async function revertWorkspaceMutations(cwd: string, mutations: readonly WorkspaceMutation[]): Promise<WorkspaceRevertResult> {
 	const changedFiles = new Set<string>();
 	const applied: WorkspaceMutation[] = [];
 
 	for (const mutation of [...mutations].reverse()) {
-		const result = applyMutation(cwd, mutation, "undo");
+		const result = await applyMutation(cwd, mutation, "undo");
 		if (!result.ok) {
-			const rollback = rollbackMutations(cwd, applied);
+			const rollback = await rollbackMutations(cwd, applied);
 			const rollbackText = rollback.ok ? "Rolled back already-applied undo steps." : `Rollback failed: ${rollback.error}`;
 			return { ok: false, error: `${result.error}\n${rollbackText}` };
 		}
@@ -130,43 +131,43 @@ export function revertWorkspaceMutations(cwd: string, mutations: readonly Worksp
 	return { ok: true, changedFiles: changedFiles.size, revertedChanges: applied.length };
 }
 
-function rollbackMutations(cwd: string, appliedUndoMutations: readonly WorkspaceMutation[]): WorkspaceRevertResult {
+async function rollbackMutations(cwd: string, appliedUndoMutations: readonly WorkspaceMutation[]): Promise<WorkspaceRevertResult> {
 	for (const mutation of [...appliedUndoMutations].reverse()) {
-		const result = applyMutation(cwd, mutation, "redo");
+		const result = await applyMutation(cwd, mutation, "redo");
 		if (!result.ok) return { ok: false, error: result.error };
 	}
 	return { ok: true, changedFiles: 0, revertedChanges: appliedUndoMutations.length };
 }
 
-function applyMutation(
+async function applyMutation(
 	cwd: string,
 	mutation: WorkspaceMutation,
 	direction: "undo" | "redo",
-): { ok: true; changedFiles: string[] } | { ok: false; error: string } {
+): Promise<{ ok: true; changedFiles: string[] } | { ok: false; error: string }> {
 	if (mutation.type === "patch") return applyPatchMutation(cwd, mutation, direction);
 	return applyWriteMutation(cwd, mutation, direction);
 }
 
-function applyPatchMutation(
+async function applyPatchMutation(
 	cwd: string,
 	mutation: WorkspacePatchMutation,
 	direction: "undo" | "redo",
-): { ok: true; changedFiles: string[] } | { ok: false; error: string } {
+): Promise<{ ok: true; changedFiles: string[] } | { ok: false; error: string }> {
 	const args = ["apply", ...(direction === "undo" ? ["--reverse"] : []), "--whitespace=nowarn"];
-	const check = runGitApply(cwd, [...args, "--check"], mutation.patch);
+	const check = await runGitApply(cwd, [...args, "--check"], mutation.patch);
 	if (check.status !== 0) return { ok: false, error: commandError(`git ${args.join(" ")} --check`, check) };
 
-	const apply = runGitApply(cwd, args, mutation.patch);
+	const apply = await runGitApply(cwd, args, mutation.patch);
 	if (apply.status !== 0) return { ok: false, error: commandError(`git ${args.join(" ")}`, apply) };
 
 	return { ok: true, changedFiles: filesFromPatch(mutation.patch) };
 }
 
-function applyWriteMutation(
+async function applyWriteMutation(
 	cwd: string,
 	mutation: WorkspaceWriteMutation,
 	direction: "undo" | "redo",
-): { ok: true; changedFiles: string[] } | { ok: false; error: string } {
+): Promise<{ ok: true; changedFiles: string[] } | { ok: false; error: string }> {
 	const safePath = safeRelativePath(cwd, mutation.path);
 	if (!safePath) return { ok: false, error: `Refusing to modify path outside workspace: ${mutation.path}` };
 
@@ -175,16 +176,16 @@ function applyWriteMutation(
 	const nextContent = direction === "undo" ? mutation.beforeContent : mutation.afterContent;
 
 	const currentExists = existsSync(absolutePath);
-	const currentContent = currentExists ? readFileSync(absolutePath, "utf8") : undefined;
+	const currentContent = currentExists ? await readFile(absolutePath, "utf8") : undefined;
 	if (currentContent !== expectedContent) {
 		return { ok: false, error: `Refusing to ${direction} write for ${safePath}: file content changed since the recorded command.` };
 	}
 
 	if (nextContent === undefined) {
-		if (currentExists) rmSync(absolutePath, { force: true });
+		if (currentExists) await rm(absolutePath, { force: true });
 	} else {
-		mkdirSync(dirname(absolutePath), { recursive: true });
-		writeFileSync(absolutePath, nextContent, "utf8");
+		await mkdir(dirname(absolutePath), { recursive: true });
+		await writeFile(absolutePath, nextContent, "utf8");
 	}
 
 	return { ok: true, changedFiles: [safePath] };
@@ -205,17 +206,17 @@ function workspaceUndoIndexPath(agentDir: string): string {
 	return join(agentDir, "pix", "workspace-undo", "index.json");
 }
 
-function runGitApply(cwd: string, args: string[], input: string) {
-	return spawnSync("git", ["-c", "core.autocrlf=false", ...args], {
+async function runGitApply(cwd: string, args: string[], input: string) {
+	return runProcess("git", ["-c", "core.autocrlf=false", ...args], {
 		cwd,
 		input,
-		encoding: "utf8",
-		maxBuffer: 20 * 1024 * 1024,
+		maxBufferBytes: 20 * 1024 * 1024,
 	});
 }
 
-function commandError(command: string, result: { error?: Error; status: number | null; stderr?: string; stdout?: string }): string {
+function commandError(command: string, result: { error?: Error; status: number | null; stderr?: string; stdout?: string; timedOut?: boolean }): string {
 	if (result.error) return `${command} failed: ${result.error.message}`;
+	if (result.timedOut) return `${command} timed out`;
 	const message = result.stderr?.trim() || result.stdout?.trim() || `exit code ${result.status ?? "unknown"}`;
 	return `${command} failed: ${message}`;
 }

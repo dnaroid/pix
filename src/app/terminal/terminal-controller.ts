@@ -27,6 +27,7 @@ export type AppTerminalControllerHost = {
 	stopSubagentsPolling(): void;
 	stopModelUsagePolling(): void;
 	stopVoiceInput(): Promise<void>;
+	stopAutocomplete(): void;
 	stopShellCommand(): void;
 	unsubscribeSession(): void;
 	clearExtensionWidgets(): void;
@@ -140,6 +141,7 @@ export class AppTerminalController {
 		this.host.stopSubagentsPolling();
 		this.host.stopModelUsagePolling();
 		await this.host.stopVoiceInput();
+		this.host.stopAutocomplete();
 		this.host.stopShellCommand();
 		process.stdin.off("data", this.onInputData);
 		process.stdin.pause();

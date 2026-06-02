@@ -2,7 +2,7 @@ import { resolveColor, type ResolvedToolRule } from "../../config.js";
 import type { ToolBodySyntaxHighlight, ToolBodySyntaxHighlights } from "../../syntax-highlight.js";
 import { expandTabs, sliceByDisplayWidth, stringDisplayWidth, wrapDisplayLineByWords } from "../../terminal-width.js";
 import type { Theme } from "../../theme.js";
-import { alertIconPrefixLength, hasToolLspDiagnosticsAfterMutation, sanitizeText, toolStatusIcon, toolStatusIconColor, wrapLine } from "./render-text.js";
+import { alertIconPrefixLength, hasToolLspDiagnosticsAfterMutation, lspDiagnosticSeverityForLine, sanitizeText, toolStatusIcon, toolStatusIconColor, wrapLine } from "./render-text.js";
 import type { RenderedLine, StyledSegment } from "../types.js";
 import type { ToolBodyLineStyle, ToolHeaderSegment } from "../../tool-renderers/types.js";
 
@@ -409,28 +409,6 @@ function lspDiagnosticLineStyle(line: string, colors: Theme["colors"]): { kind: 
 	if (severity === "error") return { kind: "severity", foreground: colors.error };
 	if (severity === "warning") return { kind: "severity", foreground: colors.warning };
 	if (severity === "hint") return { kind: "severity", foreground: colors.muted };
-	return undefined;
-}
-
-function lspDiagnosticSeverityForLine(line: string): "error" | "warning" | "hint" | undefined {
-	const countSeverity = lspDiagnosticCountSeverity(line);
-	if (countSeverity) return countSeverity;
-
-	const severityMatch = /(?:^|[^\p{L}\p{N}_])(?:diagnosticseverity\.)?(errors?|warnings?|warn|hints?)(?=$|[^\p{L}\p{N}_])/iu.exec(line);
-	const severity = severityMatch?.[1]?.toLowerCase();
-	if (!severity) return undefined;
-	if (severity.startsWith("error")) return "error";
-	if (severity.startsWith("warn")) return "warning";
-	return "hint";
-}
-
-function lspDiagnosticCountSeverity(line: string): "error" | "warning" | "hint" | undefined {
-	const counts = [...line.matchAll(/\b(\d+)\s+(errors?|warnings?|hints?)\b/giu)];
-	if (counts.length === 0) return undefined;
-
-	for (const severity of ["error", "warning", "hint"] as const) {
-		if (counts.some((match) => Number(match[1]) > 0 && match[2]?.toLowerCase().startsWith(severity))) return severity;
-	}
 	return undefined;
 }
 

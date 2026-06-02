@@ -1,5 +1,6 @@
 import { getIdleRuntime, getRuntime } from "./command-runtime.js";
 import type { CommandControllerHost } from "./command-host.js";
+import { savePixAutocompleteModel, savePixDefaultModel, savePixDefaultThinking } from "../../config.js";
 import { createId } from "../id.js";
 import { isThinkingLevel, parseScopedModelRef } from "../model/model-ref.js";
 import type { ScopedSessionModel, SessionModel, ThinkingLevel } from "../types.js";
@@ -23,6 +24,7 @@ export class ModelCommandActions {
 			`session: ${runtime.session.sessionFile ?? "in-memory"}`,
 			`model: ${currentModel}`,
 			`prompt enhancer model: ${this.host.promptEnhancerModelRef()}`,
+			`autocomplete model: ${this.host.autocompleteModelRef() || "disabled"}`,
 			`thinking: ${runtime.session.thinkingLevel}`,
 			`theme: ${settings.getTheme() ?? this.host.options.themeName}`,
 			`skill commands: ${settings.getEnableSkillCommands() ? "enabled" : "disabled"}`,
@@ -73,6 +75,64 @@ export class ModelCommandActions {
 			this.host.addEntry({ id: createId("system"), kind: "system", text: `Selected thinking level ${runtime.session.thinkingLevel}` });
 			this.host.setSessionStatus(runtime.session);
 		}
+	}
+
+	async runDefaultModelSlashCommand(argumentsText: string): Promise<void> {
+		const modelRef = argumentsText.trim();
+		if (!modelRef) {
+			const selected = await this.host.showMenu(this.host.getModelMenuItems(""), {
+				title: "Select default model",
+				placeholder: "Search models",
+				emptyText: "No matching models",
+			});
+			if (!selected) {
+				this.host.setSessionStatus(this.host.runtime()?.session);
+				this.host.render();
+				return;
+			}
+
+			this.saveDefaultModel(this.host.modelRef(selected.model));
+			this.host.render();
+			return;
+		}
+
+		const runtime = getRuntime(this.host, "default-model");
+		if (!runtime) return;
+
+		const parsed = parseScopedModelRef(modelRef);
+		if (!parsed) throw new Error("Model must use provider/model[:thinking] format");
+
+		runtime.services.modelRegistry.refresh();
+		const model = runtime.services.modelRegistry.find(parsed.provider, parsed.modelId) as SessionModel | undefined;
+		if (!model) throw new Error(`Model not found: ${parsed.provider}/${parsed.modelId}`);
+
+		this.saveDefaultModel(modelRef);
+		this.host.setSessionStatus(runtime.session);
+	}
+
+	async runAutocompleteSlashCommand(argumentsText: string): Promise<void> {
+		const modelRef = argumentsText.trim();
+		if (!modelRef) {
+			const saved = savePixAutocompleteModel("");
+			this.host.setAutocompleteModelRef(saved.modelRef);
+			this.host.addEntry({ id: createId("system"), kind: "system", text: saved.modelRef ? `Autocomplete model set to ${saved.modelRef}` : "Inline autocomplete disabled." });
+			return;
+		}
+
+		const runtime = getRuntime(this.host, "autocomplete");
+		if (!runtime) return;
+
+		const parsed = parseScopedModelRef(modelRef);
+		if (!parsed) throw new Error("Model must use provider/model[:thinking] format, or run /autocomplete with no arguments to disable");
+
+		runtime.services.modelRegistry.refresh();
+		const model = runtime.services.modelRegistry.find(parsed.provider, parsed.modelId) as SessionModel | undefined;
+		if (!model) throw new Error(`Model not found: ${parsed.provider}/${parsed.modelId}`);
+
+		const saved = savePixAutocompleteModel(modelRef);
+		this.host.setAutocompleteModelRef(saved.modelRef);
+		this.host.addEntry({ id: createId("system"), kind: "system", text: `Autocomplete model set to ${saved.modelRef}.` });
+		this.host.setSessionStatus(runtime.session);
 	}
 
 	async runScopedModelsCommand(argumentsText: string): Promise<void> {
@@ -159,6 +219,29 @@ export class ModelCommandActions {
 		await this.runThinkingCommand(level);
 	}
 
+	async runDefaultThinkingSlashCommand(argumentsText: string): Promise<void> {
+		const level = argumentsText.trim();
+		if (!level) {
+			const selected = await this.host.showMenu(this.host.getThinkingMenuItems(""), {
+				title: "Select default thinking level",
+				placeholder: "Search thinking levels",
+				emptyText: "No matching thinking levels",
+			});
+			if (!selected) {
+				this.host.setSessionStatus(this.host.runtime()?.session);
+				this.host.render();
+				return;
+			}
+
+			this.saveDefaultThinking(selected.level);
+			this.host.render();
+			return;
+		}
+
+		if (!isThinkingLevel(level)) throw new Error(`Unknown thinking level: ${level}`);
+		this.saveDefaultThinking(level);
+	}
+
 	async runModelCommand(model: SessionModel): Promise<void> {
 		const runtime = getRuntime(this.host, "model");
 		if (!runtime) return;
@@ -181,4 +264,35 @@ export class ModelCommandActions {
 		this.host.addEntry({ id: createId("system"), kind: "system", text: `Selected thinking level ${runtime.session.thinkingLevel}` });
 		this.host.setSessionStatus(runtime.session);
 	}
+
+	private saveDefaultModel(modelRef: string): void {
+		const saved = savePixDefaultModel(modelRef);
+		if (!saved) throw new Error("Model must use provider/model[:thinking] format");
+
+		this.host.addEntry({
+			id: createId("system"),
+			kind: "system",
+			text: `Default model set to ${formatDefaultModelRef(saved)}. New sessions will use it unless --model is provided.`,
+		});
+	}
+
+	private saveDefaultThinking(level: ThinkingLevel): void {
+		const runtime = getRuntime(this.host, "default-thinking");
+		if (!runtime) return;
+
+		const fallbackModelRef = runtime.session.model ? this.host.modelRef(runtime.session.model as SessionModel) : undefined;
+		const saved = savePixDefaultThinking(level, fallbackModelRef);
+		if (!saved) throw new Error("Set /default-model first or select a session model before setting default thinking");
+
+		this.host.addEntry({
+			id: createId("system"),
+			kind: "system",
+			text: `Default thinking level set to ${saved.thinking ?? level} for ${saved.modelRef}. New sessions will use it unless --model is provided.`,
+		});
+		this.host.setSessionStatus(runtime.session);
+	}
+}
+
+function formatDefaultModelRef(defaultModel: { modelRef: string; thinking?: ThinkingLevel }): string {
+	return defaultModel.thinking ? `${defaultModel.modelRef}:${defaultModel.thinking}` : defaultModel.modelRef;
 }

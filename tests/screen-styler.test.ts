@@ -79,7 +79,7 @@ describe("ScreenStyler", () => {
 			},
 		});
 
-		const output = styler.styleInputLine(4, "abcdef", undefined, 8, theme.colors.accent);
+		const output = styler.styleInputLine(4, "abcdef", undefined, undefined, 8, theme.colors.accent, theme.colors.muted);
 
 		assert.ok(output.includes(colorize("cde", {
 			foreground: theme.colors.selectionForeground,
@@ -92,7 +92,7 @@ describe("ScreenStyler", () => {
 		const theme = THEMES.dark;
 		const styler = new ScreenStyler({ theme, mouseSelection: undefined });
 
-		const output = styler.styleInputLine(4, "│hello│", undefined, 8, theme.colors.accent, theme.colors.inputBorder);
+		const output = styler.styleInputLine(4, "│hello│", undefined, undefined, 8, theme.colors.accent, theme.colors.muted, theme.colors.inputBorder);
 
 		assert.ok(output.includes(colorize("│", { foreground: theme.colors.inputBorder })));
 		assert.doesNotMatch(output, /\x1b\[[0-9;]*48;2;9;13;19m/);

@@ -25,6 +25,7 @@ export type AppSessionEventControllerHost = {
 	conversationViewport(): ConversationViewport;
 	isRunning(): boolean;
 	render(): void;
+	scheduleRender(): void;
 	setStatus(status: string): void;
 	restoreSessionStatus(): void;
 	setSessionStatus(session: AgentSessionRuntime["session"] | undefined): void;
@@ -200,7 +201,7 @@ export class AppSessionEventController {
 			default:
 				break;
 		}
-		this.host.render();
+		this.host.scheduleRender();
 	}
 
 	addCustomMessageEntry(message: Record<string, unknown>): void {

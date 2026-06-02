@@ -5,8 +5,11 @@ import type { SlashCommand } from "../types.js";
 export type CommandRegistryActions = {
 	runSettingsCommand(): Promise<void>;
 	runModelSlashCommand(argumentsText: string): Promise<void>;
+	runDefaultModelSlashCommand(argumentsText: string): Promise<void>;
+	runAutocompleteSlashCommand(argumentsText: string): Promise<void>;
 	runScopedModelsCommand(argumentsText: string): Promise<void>;
 	runThinkingSlashCommand(argumentsText: string): Promise<void>;
+	runDefaultThinkingSlashCommand(argumentsText: string): Promise<void>;
 	runEnhanceCommand(): Promise<void>;
 	runExportCommand(argumentsText: string): Promise<void>;
 	runImportCommand(argumentsText: string): Promise<void>;
@@ -50,6 +53,22 @@ export function createSlashCommands(actions: CommandRegistryActions, host: Comma
 			run: (argumentsText) => actions.runModelSlashCommand(argumentsText),
 		},
 		{
+			name: "default-model",
+			description: "Set the default model for new sessions",
+			kind: "builtin",
+			keywords: ["model", "provider", "startup", "config"],
+			allowArguments: true,
+			run: (argumentsText) => actions.runDefaultModelSlashCommand(argumentsText),
+		},
+		{
+			name: "autocomplete",
+			description: "Set inline autocomplete model, or empty to disable",
+			kind: "builtin",
+			keywords: ["complete", "ghost", "suggest", "llm", "model"],
+			allowArguments: true,
+			run: (argumentsText) => actions.runAutocompleteSlashCommand(argumentsText),
+		},
+		{
 			name: "scoped-models",
 			description: "Show or set models used by the model selector/cycling",
 			kind: "builtin",
@@ -64,6 +83,14 @@ export function createSlashCommands(actions: CommandRegistryActions, host: Comma
 			keywords: ["reasoning", "effort", "level", "minimal", "medium", "high"],
 			allowArguments: true,
 			run: (argumentsText) => actions.runThinkingSlashCommand(argumentsText),
+		},
+		{
+			name: "default-thinking",
+			description: "Set the default thinking level for new sessions",
+			kind: "builtin",
+			keywords: ["thinking", "reasoning", "startup", "config"],
+			allowArguments: true,
+			run: (argumentsText) => actions.runDefaultThinkingSlashCommand(argumentsText),
 		},
 		{
 			name: "enhance",

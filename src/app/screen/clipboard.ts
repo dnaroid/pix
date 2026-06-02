@@ -1,22 +1,24 @@
-import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
+import { commandExists, runProcess } from "../process.js";
 
 const require = createRequire(import.meta.url);
 
-export function copyTextToClipboard(text: string): void {
+export async function copyTextToClipboard(text: string): Promise<void> {
 	const commands = clipboardCommands();
 	for (const [command, args] of commands) {
-		const result = spawnSync(command, args, { input: text, stdio: ["pipe", "ignore", "ignore"] });
+		const result = await runProcess(command, args, { input: text, maxBufferBytes: 1024 });
 		if (!result.error && result.status === 0) return;
 	}
-	if (copyWithNativeClipboard(text)) return;
+	if (await copyWithNativeClipboard(text)) return;
 	if (copyWithOsc52(text)) return;
 	throw new Error(`No clipboard command found. ${clipboardInstallHint()}`);
 }
 
 
-export function clipboardSupportAvailable(env: NodeJS.ProcessEnv = process.env): boolean {
-	if (clipboardCommands().some(([command]) => commandExists(command, env))) return true;
+export async function clipboardSupportAvailable(env: NodeJS.ProcessEnv = process.env): Promise<boolean> {
+	for (const [command] of clipboardCommands()) {
+		if (await commandExists(command, env)) return true;
+	}
 	return resolveNativeClipboardEntrypoint() !== undefined;
 }
 
@@ -46,7 +48,7 @@ function clipboardCommands(): Array<[string, string[]]> {
 	}
 }
 
-function copyWithNativeClipboard(text: string): boolean {
+async function copyWithNativeClipboard(text: string): Promise<boolean> {
 	const entrypoint = resolveNativeClipboardEntrypoint();
 	if (!entrypoint) return false;
 
@@ -57,10 +59,10 @@ function copyWithNativeClipboard(text: string): boolean {
 		const clipboard = require(${JSON.stringify(entrypoint)});
 		await clipboard.setText(readFileSync(0, "utf8"));
 	`;
-	const result = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
+	const result = await runProcess(process.execPath, ["--input-type=module", "-e", script], {
 		input: text,
-		stdio: ["pipe", "ignore", "ignore"],
-		timeout: 3_000,
+		timeoutMs: 3_000,
+		maxBufferBytes: 1024,
 	});
 	return !result.error && result.status === 0;
 }
@@ -85,13 +87,4 @@ function resolveNativeClipboardEntrypoint(): string | undefined {
 	} catch {
 		return undefined;
 	}
-}
-
-function commandExists(command: string, env: NodeJS.ProcessEnv): boolean {
-	const names = process.platform === "win32" ? [command, command.replace(/\.exe$/iu, ".cmd"), command.replace(/\.exe$/iu, ".bat")] : [command];
-	return names.some((name) => spawnSync(process.platform === "win32" ? "where" : "sh", process.platform === "win32" ? [name] : ["-lc", `command -v ${shellQuote(name)}`], { env, stdio: "ignore" }).status === 0);
-}
-
-function shellQuote(value: string): string {
-	return `'${value.replaceAll("'", `'\\''`)}'`;
 }

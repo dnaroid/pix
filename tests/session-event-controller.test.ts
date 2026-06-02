@@ -13,6 +13,7 @@ describe("AppSessionEventController", () => {
 			conversationViewport: () => ({ deleteEntry: () => {} }) as never,
 			isRunning: () => false,
 			render: () => {},
+			scheduleRender: () => {},
 			setStatus: () => {},
 			restoreSessionStatus: () => {},
 			setSessionStatus: () => {},
@@ -36,14 +37,15 @@ describe("AppSessionEventController", () => {
 		} as AgentSession;
 		const runtime = { session } as AgentSessionRuntime;
 		let statusSession: AgentSession | undefined;
-		let renderCount = 0;
+		let scheduledRenderCount = 0;
 		const controller = new AppSessionEventController({
 			entries: [] satisfies Entry[],
 			runtime: () => runtime,
 			conversationViewport: () => ({ deleteEntry: () => {} }) as never,
 			isRunning: () => false,
-			render: () => {
-				renderCount += 1;
+			render: () => {},
+			scheduleRender: () => {
+				scheduledRenderCount += 1;
 			},
 			setStatus: () => {},
 			restoreSessionStatus: () => {},
@@ -66,7 +68,7 @@ describe("AppSessionEventController", () => {
 		controller.handleSessionEvent({ type: "session_info_changed", name: "Renamed session" } satisfies AgentSessionEvent);
 
 		assert.equal(statusSession, session);
-		assert.equal(renderCount, 1);
+		assert.equal(scheduledRenderCount, 1);
 	});
 
 	it("observes successful todo tool results for the todo widget controller", () => {
@@ -77,6 +79,7 @@ describe("AppSessionEventController", () => {
 			conversationViewport: () => ({ deleteEntry: () => {} }) as never,
 			isRunning: () => false,
 			render: () => {},
+			scheduleRender: () => {},
 			setStatus: () => {},
 			restoreSessionStatus: () => {},
 			setSessionStatus: () => {},

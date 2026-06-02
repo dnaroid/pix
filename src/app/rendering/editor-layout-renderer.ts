@@ -33,6 +33,7 @@ export type EditorLayoutRendererHost = {
 	readonly subagentsPanelExpanded: boolean;
 	readonly subagentsWidgetState: SubagentsWidgetState | undefined;
 	readonly voicePartialText: string | undefined;
+	readonly autocompleteSuggestion: string | undefined;
 	renderExtensionInputComponent(width: number): string[] | undefined;
 	extensionInputUsesEditor(): boolean;
 	widgetTuiHandle(): WidgetTuiHandle;
@@ -189,7 +190,7 @@ export class EditorLayoutRenderer {
 			? this.limitExtensionInputLines(extensionLines, Math.max(0, maxRows - (usesEditor ? 1 : 0)))
 			: [];
 		const editorMaxRows = usesEditor ? Math.max(1, maxRows - customLines.length) : 1;
-		const rendered = this.host.inputEditor.render(contentWidth, editorMaxRows, "", "");
+		const rendered = this.host.inputEditor.render(contentWidth, editorMaxRows, "", "", usesEditor ? this.host.autocompleteSuggestion ?? "" : "");
 		const visibleLines = rendered.visualLines.slice(rendered.scrollOffset, rendered.scrollOffset + editorMaxRows);
 		const scrollBar = usesEditor
 			? inputScrollBarMetrics(rendered.visualLines.length, visibleLines.length, rendered.scrollOffset)
@@ -197,6 +198,12 @@ export class EditorLayoutRenderer {
 		const editorLines = usesEditor ? visibleLines.map((vl) => frameInputLine(padHorizontalText(vl.text, width))) : [];
 		const editorTagSpans = usesEditor
 			? visibleLines.map((vl) => vl.tagSpans.map((span) => ({
+				start: span.start + left,
+				end: span.end + left,
+			})))
+			: [];
+		const editorSuggestionSpans = usesEditor
+			? visibleLines.map((vl) => (vl.suggestionSpans ?? []).map((span) => ({
 				start: span.start + left,
 				end: span.end + left,
 			})))
@@ -215,6 +222,10 @@ export class EditorLayoutRenderer {
 			tagSpans: [
 				...paddedCustomLines.map(() => []),
 				...editorTagSpans,
+			],
+			suggestionSpans: [
+				...paddedCustomLines.map(() => []),
+				...editorSuggestionSpans,
 			],
 		};
 	}

@@ -217,6 +217,23 @@ describe("InputEditor rendering and helpers", () => {
 		assert.deepEqual(editor.render(10, 3, "> ", ". ").visualLines, [{ text: "> ", wrapped: false, tagSpans: [] }]);
 	});
 
+	it("renders an empty cursor line at exact wrap boundaries", () => {
+		const editor = new InputEditor();
+		editor.setText("abcde");
+
+		let rendered = editor.render(5, 3, "", "");
+		assert.deepEqual(rendered.visualLines.map((line) => line.text), ["abcde", ""]);
+		assert.equal(rendered.cursorVisualRow, 1);
+		assert.equal(rendered.cursorScreenCol, 1);
+		assert.equal(rendered.cursorVisible, true);
+
+		editor.setText("abcde\nx", 5);
+		rendered = editor.render(5, 4, "", "");
+		assert.deepEqual(rendered.visualLines.map((line) => line.text), ["abcde", "", "x"]);
+		assert.equal(rendered.cursorVisualRow, 1);
+		assert.equal(rendered.cursorScreenCol, 1);
+	});
+
 	it("maps rendered click positions back to cursor offsets", () => {
 		const editor = new InputEditor();
 		editor.setText("abcdef\nghi");

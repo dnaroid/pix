@@ -93,7 +93,7 @@ export type AppMouseControllerHost = {
 	toggleAllThinkingExpanded?(): void;
 	toggleSuperCompactTools?(): void;
 	toggleTerminalBellSound?(): void;
-	copyTextToClipboard?(text: string): void;
+	copyTextToClipboard?(text: string): void | Promise<void>;
 	handleExtensionInputMouse(event: MouseEvent & { localRow: number; localColumn: number; width: number }): boolean;
 	render(): void;
 };
@@ -883,7 +883,9 @@ export class AppMouseController {
 	}
 
 	private copyTextToClipboard(text: string): void {
-		(this.host.copyTextToClipboard ?? copyTextToClipboard)(text);
+		void Promise.resolve((this.host.copyTextToClipboard ?? copyTextToClipboard)(text)).catch((error) => {
+			this.host.showToast(error instanceof Error ? error.message : String(error), "error");
+		});
 	}
 
 	private getSelectedScreenText(anchor: ScreenPoint, current: ScreenPoint): string {

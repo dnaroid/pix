@@ -11,6 +11,8 @@ export type CommandControllerHost = {
 	getInput(): string;
 	setInput(value: string): void;
 	promptEnhancerModelRef(): string;
+	autocompleteModelRef(): string;
+	setAutocompleteModelRef(modelRef: string): void;
 	enhancePrompt(): Promise<void>;
 	isRunning(): boolean;
 	stop(): void | Promise<void>;

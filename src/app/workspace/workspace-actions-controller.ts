@@ -106,11 +106,11 @@ export class AppWorkspaceActionsController {
 		}
 	}
 
-	copyUserMessage(entryId: string): void {
+	async copyUserMessage(entryId: string): Promise<void> {
 		const entry = this.host.findUserEntry(entryId);
 		if (!entry) throw new Error("User message is no longer available");
 
-		copyTextToClipboard(entry.text);
+		await copyTextToClipboard(entry.text);
 		this.host.showToast("Message copied", "success");
 		this.host.setSessionStatus(this.host.runtime()?.session);
 	}
@@ -160,7 +160,7 @@ export class AppWorkspaceActionsController {
 			this.host.setStatus("reverting recorded commands");
 			this.host.render();
 		}
-		const reverted = mutations.length === 0 ? { ok: true as const, changedFiles: 0, revertedChanges: 0 } : revertWorkspaceMutations(runtime.cwd, mutations);
+		const reverted = mutations.length === 0 ? { ok: true as const, changedFiles: 0, revertedChanges: 0 } : await revertWorkspaceMutations(runtime.cwd, mutations);
 		if (!reverted.ok) throw new Error(reverted.error);
 
 		this.host.setStatus("truncating session");

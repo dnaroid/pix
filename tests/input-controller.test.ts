@@ -84,6 +84,7 @@ function createController(options: { extensionInputUsesEditor: boolean; shiftPre
 		handleDirectPopupInput: () => false,
 		autocompleteModel: () => false,
 		autocompleteThinking: () => false,
+		acceptAutocompleteSuggestion: () => false,
 		autocompleteSlashCommand: () => undefined,
 		toggleVoiceRecording: () => undefined,
 		stop: async () => undefined,

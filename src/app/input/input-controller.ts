@@ -29,6 +29,7 @@ export type InputControllerHost = {
 	handleDirectPopupInput(char: string): boolean;
 	autocompleteModel(): boolean;
 	autocompleteThinking(): boolean;
+	acceptAutocompleteSuggestion(): boolean;
 	autocompleteSlashCommand(): void;
 	toggleVoiceRecording(): void;
 	stop(): Promise<void>;
@@ -382,6 +383,7 @@ export class AppInputController {
 		}
 		if (char === "\t") {
 			if (this.host.getDirectPopupMenu() === "sdk-menu") return;
+			if (this.host.acceptAutocompleteSuggestion()) return;
 			if (this.host.autocompleteModel()) return;
 			if (this.host.autocompleteThinking()) return;
 			this.host.autocompleteSlashCommand();

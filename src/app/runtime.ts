@@ -15,6 +15,7 @@ import {
 	type CreateAgentSessionRuntimeFactory,
 	type LoadExtensionsResult,
 } from "@earendil-works/pi-coding-agent";
+import { loadPixConfig, resolveDefaultModelRef } from "../config.js";
 import { PI_FAVORITE_MODEL_REFS } from "./constants.js";
 import { parseModelRef, parseScopedModelRef } from "./model/model-ref.js";
 import type { AppOptions, ScopedSessionModel, SessionModel } from "./types.js";
@@ -217,7 +218,8 @@ export type CreatePixRuntimeOptions = {
 };
 
 export async function createPixRuntime(options: AppOptions, runtimeOptions: CreatePixRuntimeOptions = {}): Promise<AgentSessionRuntime> {
-	const parsedModel = options.modelRef ? parseModelRef(options.modelRef) : undefined;
+	const effectiveModelRef = options.modelRef ?? resolveDefaultModelRef(loadPixConfig());
+	const parsedModel = effectiveModelRef ? parseModelRef(effectiveModelRef) : undefined;
 	const agentDir = getAgentDir();
 	const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, sessionManager, sessionStartEvent }) => {
 		await ensureBundledSkillsInstalled();

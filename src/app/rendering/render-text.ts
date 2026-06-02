@@ -34,17 +34,53 @@ export function hasToolLspDiagnosticsAfterMutation(entry: ToolStatusEntry): bool
 	return LSP_DIAGNOSTIC_MUTATION_TOOLS.has(entry.toolName.toLowerCase()) && hasLspDiagnosticsAfterMutation(entry.output);
 }
 
+export function lspDiagnosticSeverityForLine(line: string): "error" | "warning" | "hint" | undefined {
+	const counts = lspDiagnosticCounts(line);
+	const countSeverity = lspDiagnosticCountSeverity(counts);
+	if (countSeverity) return countSeverity;
+	if (counts.length > 0) return undefined;
+
+	const severityMatch = /(?:^|[^\p{L}\p{N}_])(?:diagnosticseverity\.)?(errors?|warnings?|warn|hints?)(?=$|[^\p{L}\p{N}_])/iu.exec(line);
+	const severity = severityMatch?.[1]?.toLowerCase();
+	if (!severity) return undefined;
+	if (severity.startsWith("error")) return "error";
+	if (severity.startsWith("warn")) return "warning";
+	return "hint";
+}
+
+function lspDiagnosticCounts(line: string): RegExpMatchArray[] {
+	return [...line.matchAll(/\b(\d+)\s+(errors?|warnings?|hints?)\b/giu)];
+}
+
+function lspDiagnosticCountSeverity(counts: RegExpMatchArray[]): "error" | "warning" | "hint" | undefined {
+	for (const severity of ["error", "warning", "hint"] as const) {
+		if (counts.some((match) => Number(match[1]) > 0 && match[2]?.toLowerCase().startsWith(severity))) return severity;
+	}
+	return undefined;
+}
+
+export function toolLspDiagnosticsAfterMutationSeverity(entry: ToolStatusEntry): "error" | "warning" | undefined {
+	if (!hasToolLspDiagnosticsAfterMutation(entry)) return undefined;
+	if (/\blsp\s+errors?\s+after\s+mutation\b/i.test(entry.output)) return "error";
+
+	const diagnosticLines = entry.output.split("\n").map((line) => line.trim());
+	if (diagnosticLines.some((line) => lspDiagnosticSeverityForLine(line) === "error")) return "error";
+	return "warning";
+}
+
 export function toolStatusIcon(entry: ToolStatusEntry): string {
 	if (entry.status === "running") return APP_ICONS.timerSand;
 	if (entry.isError) return APP_ICONS.closeCircle;
-	if (hasToolLspDiagnosticsAfterMutation(entry)) return APP_ICONS.alert;
+	if (toolLspDiagnosticsAfterMutationSeverity(entry)) return APP_ICONS.alert;
 	return APP_ICONS.checkCircle;
 }
 
 export function toolStatusIconColor(entry: ToolStatusEntry, colors: Theme["colors"]): string {
 	if (entry.status === "running") return colors.muted;
 	if (entry.isError) return colors.error;
-	if (hasToolLspDiagnosticsAfterMutation(entry)) return colors.warning;
+	const lspSeverity = toolLspDiagnosticsAfterMutationSeverity(entry);
+	if (lspSeverity === "error") return colors.error;
+	if (lspSeverity === "warning") return colors.warning;
 	return colors.success;
 }
 

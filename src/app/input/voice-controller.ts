@@ -1,4 +1,4 @@
-import { spawn, spawnSync, type ChildProcessByStdio } from "node:child_process";
+import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import { access, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
@@ -9,6 +9,7 @@ import type { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { savePixDictationLanguage, type DictationConfig, type DictationLanguageModelConfig } from "../../config.js";
 import { APP_ICONS } from "../icons.js";
+import { commandExists } from "../process.js";
 
 export type VoiceLanguage = string;
 export type VoiceInputState = "idle" | "installing" | "downloading" | "loading" | "listening";
@@ -61,6 +62,7 @@ const projectRoot = fileURLToPath(new URL("../..", import.meta.url));
 const modelsRoot = join(projectRoot, "models", "vosk");
 const VOSK_PACKAGE_SPEC = "vosk@0.3.39";
 const VOICE_SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
+const VOICE_PARTIAL_TRANSCRIPT_THROTTLE_MS = 100;
 
 let voskInstallPromise: Promise<string> | undefined;
 
@@ -77,6 +79,7 @@ export class AppVoiceController {
 	private progressTimer: ReturnType<typeof setInterval> | undefined;
 	private lastSystemProgressMessage: string | undefined;
 	private partialTranscript: string | undefined;
+	private partialTranscriptTimer: ReturnType<typeof setTimeout> | undefined;
 	private startGeneration = 0;
 
 	constructor(private readonly host: AppVoiceControllerHost, dictationConfig: DictationConfig) {
@@ -186,7 +189,7 @@ export class AppVoiceController {
 			this.state = "loading";
 			this.host.render();
 			const model = this.cachedModel(language, modelPath, vosk);
-			const recorder = selectRecorderCommand();
+			const recorder = await selectRecorderCommand();
 			const recognizer = new vosk.Recognizer({ model, sampleRate: SAMPLE_RATE });
 			const audioProcess = spawn(recorder.command, recorder.args, { stdio: ["ignore", "pipe", "pipe"] });
 			this.recognizer = recognizer;
@@ -343,13 +346,26 @@ export class AppVoiceController {
 		const text = partialTranscriptText(result);
 		if (text === this.partialTranscript) return;
 		this.partialTranscript = text;
-		this.host.setPartialTranscript(text);
+		this.schedulePartialTranscriptEmit();
 	}
 
 	private clearPartialTranscript(): void {
 		if (!this.partialTranscript) return;
 		this.partialTranscript = undefined;
+		if (this.partialTranscriptTimer) {
+			clearTimeout(this.partialTranscriptTimer);
+			this.partialTranscriptTimer = undefined;
+		}
 		this.host.setPartialTranscript(undefined);
+	}
+
+	private schedulePartialTranscriptEmit(): void {
+		if (this.partialTranscriptTimer) return;
+		this.partialTranscriptTimer = setTimeout(() => {
+			this.partialTranscriptTimer = undefined;
+			this.host.setPartialTranscript(this.partialTranscript);
+		}, VOICE_PARTIAL_TRANSCRIPT_THROTTLE_MS);
+		this.partialTranscriptTimer.unref?.();
 	}
 
 	private isCurrentStart(generation: number): boolean {
@@ -437,12 +453,12 @@ async function downloadFile(url: string, destination: string, redirects = 3): Pr
 }
 
 async function extractZip(zipPath: string, destination: string): Promise<void> {
-	if (commandExists("unzip")) {
+	if (await commandExists("unzip")) {
 		await runCommand("unzip", ["-q", zipPath, "-d", destination]);
 		return;
 	}
 
-	if (process.platform === "darwin" && commandExists("ditto")) {
+	if (process.platform === "darwin" && await commandExists("ditto")) {
 		await runCommand("ditto", ["-x", "-k", zipPath, destination]);
 		return;
 	}
@@ -621,7 +637,7 @@ function isVoskModule(value: unknown): value is VoskModule {
 	return typeof record.Model === "function" && typeof record.Recognizer === "function";
 }
 
-function selectRecorderCommand(): RecorderCommand {
+async function selectRecorderCommand(): Promise<RecorderCommand> {
 	const commands: RecorderCommand[] = [
 		{
 			command: "rec",
@@ -658,14 +674,10 @@ function selectRecorderCommand(): RecorderCommand {
 		);
 	}
 
-	const command = commands.find((candidate) => commandExists(candidate.command));
-	if (!command) throw new Error("audio recorder not found: install SoX (`rec`/`sox`), ffmpeg, or arecord");
-	return command;
-}
-
-function commandExists(command: string): boolean {
-	if (process.platform === "win32") return spawnSync("where", [command], { stdio: "ignore" }).status === 0;
-	return spawnSync("sh", ["-lc", `command -v ${command}`], { stdio: "ignore" }).status === 0;
+	for (const candidate of commands) {
+		if (await commandExists(candidate.command)) return candidate;
+	}
+	throw new Error("audio recorder not found: install SoX (`rec`/`sox`), ffmpeg, or arecord");
 }
 
 function transcriptText(result: VoskRecognitionResult): string | undefined {

@@ -80,6 +80,61 @@ describe("command registry", () => {
 		assert.equal(argumentsSeen, "--check");
 	});
 
+	it("registers default model commands as argument-taking local commands", async () => {
+		const calls: string[] = [];
+		const commands = createSlashCommands({
+			...noopActions(),
+			runDefaultModelSlashCommand: async (argumentsText) => {
+				calls.push(`model:${argumentsText}`);
+			},
+			runDefaultThinkingSlashCommand: async (argumentsText) => {
+				calls.push(`thinking:${argumentsText}`);
+			},
+		}, host());
+
+		const defaultModel = commands.find((command) => command.name === "default-model");
+		const defaultThinking = commands.find((command) => command.name === "default-thinking");
+		assert.equal(defaultModel?.kind, "builtin");
+		assert.equal(defaultModel.allowArguments, true);
+		assert.equal(defaultThinking?.kind, "builtin");
+		assert.equal(defaultThinking.allowArguments, true);
+
+		await defaultModel.run?.("zai/glm-5-turbo");
+		await defaultThinking.run?.("high");
+		assert.deepEqual(calls, ["model:zai/glm-5-turbo", "thinking:high"]);
+	});
+
+	it("registers autocomplete as an argument-taking local command", async () => {
+		let argumentsSeen = "not-called";
+		const commands = createSlashCommands({
+			...noopActions(),
+			runAutocompleteSlashCommand: async (argumentsText) => {
+				argumentsSeen = argumentsText;
+			},
+		}, host());
+
+		const autocomplete = commands.find((command) => command.name === "autocomplete");
+		assert.equal(autocomplete?.kind, "builtin");
+		assert.equal(autocomplete.allowArguments, true);
+
+		await autocomplete.run?.("zai/glm-5-turbo");
+		assert.equal(argumentsSeen, "zai/glm-5-turbo");
+	});
+
+	it("allows /autocomplete with an empty argument to disable", async () => {
+		let argumentsSeen = "not-called";
+		const commands = createSlashCommands({
+			...noopActions(),
+			runAutocompleteSlashCommand: async (argumentsText) => {
+				argumentsSeen = argumentsText;
+			},
+		}, host());
+
+		await commands.find((command) => command.name === "autocomplete")?.run?.("");
+
+		assert.equal(argumentsSeen, "");
+	});
+
 	it("matches slash commands typed with the Russian keyboard layout selected", () => {
 		const commands = createSlashCommands(noopActions(), host());
 		const [match] = getSlashCommandMatches(commands, "туц", 1);
@@ -105,8 +160,11 @@ function noopActions(): CommandRegistryActions {
 	return {
 		runSettingsCommand: noop,
 		runModelSlashCommand: noop,
+		runDefaultModelSlashCommand: noop,
+		runAutocompleteSlashCommand: noop,
 		runScopedModelsCommand: noop,
 		runThinkingSlashCommand: noop,
+		runDefaultThinkingSlashCommand: noop,
 		runEnhanceCommand: noop,
 		runExportCommand: noop,
 		runImportCommand: noop,

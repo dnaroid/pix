@@ -10,14 +10,14 @@ import {
 	type WorkspaceMutation,
 } from "../src/app/workspace/workspace-undo.js";
 
-test("revertWorkspaceMutations applies recorded patches bottom-up and preserves unrelated files", () => {
+test("revertWorkspaceMutations applies recorded patches bottom-up and preserves unrelated files", async () => {
 	const { cwd, cleanup } = createTempWorkspace();
 	try {
 		writeFileSync(join(cwd, "notes.txt"), numberedLines({ 5: "before" }), "utf8");
 		writeFileSync(join(cwd, "notes.txt"), numberedLines({ 5: "agent" }), "utf8");
 		writeFileSync(join(cwd, "parallel.txt"), "keep me\n", "utf8");
 
-		const reverted = revertWorkspaceMutations(cwd, [
+		const reverted = await revertWorkspaceMutations(cwd, [
 			{
 				type: "patch",
 				patch: unifiedPatch("notes.txt", numberedLines({ 5: "before" }), numberedLines({ 5: "agent" })),
@@ -33,7 +33,7 @@ test("revertWorkspaceMutations applies recorded patches bottom-up and preserves 
 	}
 });
 
-test("revertWorkspaceMutations rolls back earlier undo steps when a later command conflicts", () => {
+test("revertWorkspaceMutations rolls back earlier undo steps when a later command conflicts", async () => {
 	const { cwd, cleanup } = createTempWorkspace();
 	try {
 		const baseA = numberedLines({ 5: "before-a" });
@@ -50,7 +50,7 @@ test("revertWorkspaceMutations rolls back earlier undo steps when a later comman
 		];
 
 		writeFileSync(join(cwd, "b.txt"), numberedLines({ 5: "parallel-b" }), "utf8");
-		const reverted = revertWorkspaceMutations(cwd, mutations);
+		const reverted = await revertWorkspaceMutations(cwd, mutations);
 
 		assert.equal(reverted.ok, false);
 		assert.equal(readFileSync(join(cwd, "a.txt"), "utf8"), agentA);
@@ -60,7 +60,7 @@ test("revertWorkspaceMutations rolls back earlier undo steps when a later comman
 	}
 });
 
-test("write tool mutations restore the previous file content or remove created files", () => {
+test("write tool mutations restore the previous file content or remove created files", async () => {
 	const { cwd, cleanup } = createTempWorkspace();
 	try {
 		writeFileSync(join(cwd, "existing.txt"), "before\n", "utf8");
@@ -89,7 +89,7 @@ test("write tool mutations restore the previous file content or remove created f
 
 		assert.ok(existingMutation);
 		assert.ok(createdMutation);
-		const reverted = revertWorkspaceMutations(cwd, [existingMutation, createdMutation]);
+		const reverted = await revertWorkspaceMutations(cwd, [existingMutation, createdMutation]);
 
 		assert.equal(reverted.ok, true);
 		assert.equal(readFileSync(join(cwd, "existing.txt"), "utf8"), "before\n");

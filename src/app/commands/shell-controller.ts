@@ -15,6 +15,7 @@ export type AppShellControllerHost = {
 	setSessionActivity(activity: SessionActivity): void;
 	restoreSessionStatus(): void;
 	render(): void;
+	scheduleRender(): void;
 };
 
 export class AppShellController {
@@ -108,7 +109,7 @@ export class AppShellController {
 
 		this.renderTimer = setTimeout(() => {
 			this.renderTimer = undefined;
-			if (this.host.isRunning()) this.host.render();
+			if (this.host.isRunning()) this.host.scheduleRender();
 		}, SHELL_RENDER_THROTTLE_MS);
 		this.renderTimer.unref?.();
 	}
