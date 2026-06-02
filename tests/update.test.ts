@@ -7,6 +7,7 @@ import { describe, it } from "node:test";
 import {
 	checkPixUpdate,
 	formatPixUpdateCheck,
+	formatPixStartupUpdateDialog,
 	getPixSelfUpdateCommand,
 	parsePixUpdateArgs,
 } from "../src/app/update.js";
@@ -37,6 +38,22 @@ describe("pix update", () => {
 			assert.equal(result.latestVersion, "0.2.0");
 			assert.match(formatPixUpdateCheck(result), /run: pix update/u);
 		});
+	});
+
+	it("formats startup update dialog instructions", () => {
+		const message = formatPixStartupUpdateDialog({
+			status: "newer",
+			packageName: "pi-ui-extend",
+			currentVersion: "0.1.0",
+			latestVersion: "0.2.0",
+			packageRoot: "/tmp/pi-ui-extend",
+		});
+
+		assert.match(message, /A new Pix version is available/u);
+		assert.match(message, /latest: 0\.2\.0/u);
+		assert.match(message, /Exit Pix/u);
+		assert.match(message, /pix update/u);
+		assert.match(message, /Start Pix again/u);
 	});
 
 	it("does not offer npm updates for private source packages", async () => {

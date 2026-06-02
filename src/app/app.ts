@@ -50,6 +50,7 @@ import { AppTabsController } from "./tabs-controller.js";
 import { TabLineRenderer } from "./tab-line-renderer.js";
 import { AppTerminalController } from "./terminal-controller.js";
 import { AppToastController } from "./toast-controller.js";
+import { checkPixUpdate, formatPixStartupUpdateDialog } from "./update.js";
 import { AppVoiceController } from "./voice-controller.js";
 import { createIsolatedExtensionEventBus } from "./extension-event-bus.js";
 import { setAppIconTheme } from "./icons.js";
@@ -722,6 +723,17 @@ export class PiUiExtendApp {
 		await this.sessionLifecycle.start();
 		this.modelUsageController.startPolling();
 		this.nerdFontController.ensureInstalledOnStartup();
+		void this.checkPixUpdateOnStartup();
+	}
+
+	private async checkPixUpdateOnStartup(): Promise<void> {
+		try {
+			const result = await checkPixUpdate();
+			if (result.status !== "newer") return;
+			this.showToast(formatPixStartupUpdateDialog(result), "warning", { variant: "dialog" });
+		} catch {
+			// Startup update checks should never interrupt the TUI.
+		}
 	}
 
 	private async bindCurrentSession(): Promise<void> {

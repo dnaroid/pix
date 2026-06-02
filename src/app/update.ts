@@ -160,6 +160,20 @@ export function formatPixUpdateCheck(result: PixUpdateCheckResult): string {
 	return lines.join("\n");
 }
 
+export function formatPixStartupUpdateDialog(result: PixUpdateCheckResult): string {
+	const lines = [
+		"A new Pix version is available.",
+		`current: ${result.packageName} v${result.currentVersion}`,
+		...(result.latestVersion ? [`latest: ${result.latestVersion}`] : []),
+		"",
+		"To update:",
+		"1. Exit Pix.",
+		"2. Run `pix update` in your shell.",
+		"3. Start Pix again after the update completes.",
+	];
+	return lines.join("\n");
+}
+
 export function getPixSelfUpdateCommand(packageName: string, latestVersion?: string, packageRoot = readPixPackageInfo().packageRoot): PixSelfUpdateCommand | undefined {
 	if (!packageRootLooksPackageManaged(packageRoot)) return undefined;
 
