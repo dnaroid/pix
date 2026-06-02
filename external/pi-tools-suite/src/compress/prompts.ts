@@ -28,6 +28,8 @@ Summaries should be proportional to future usefulness, not proportional to the a
 
 Use \`compress\` as steady housekeeping while you work. After any completed implementation + verification slice, compress that closed slice before replying or starting a new task unless the next step needs exact raw logs/diffs. Do not carry large stale tool outputs across task boundaries.
 
+When a \`<dcp-system-reminder>\` appears, treat it as an active instruction for the next safe action, not as background advice. Before making another exploratory tool call or starting a new subtask, check whether any earlier slice is closed; if yes, call \`compress\` first. Do not merely acknowledge the reminder or postpone it across multiple tool calls.
+
 CADENCE, SIGNALS, AND LATENCY
 
 - No fixed threshold mandates compression
@@ -74,6 +76,9 @@ export const COMPRESS_RANGE_DESCRIPTION = `Collapse one or more ranges of the co
 
 AUTONOMOUS HOUSEKEEPING
 Do not wait for context emergencies. After a completed implementation + verification slice, compress that closed slice before replying or starting a new task unless the next step needs exact raw logs/diffs. Do not carry large stale tool outputs across task boundaries.
+
+DCP REMINDERS
+If a \`<dcp-system-reminder>\` is present in context, treat it as a direct instruction to evaluate compression immediately. If a safe closed range exists, call this tool before further exploration. Skipping compression is acceptable only when the newest raw context is still needed for the next concrete edit, test, or answer.
 
 THE SUMMARY
 Your summary must be COMPLETE FOR CONTINUATION, not a transcript rewrite. Preserve only information that will plausibly matter later: user intent, accepted constraints, decisions, files/symbols changed or inspected, exact errors that are still actionable, verification status, and next steps.
@@ -186,9 +191,11 @@ If the compressed range includes user messages, preserve user intent exactly. Pr
  * nudgeForce = "soft" — steady housekeeping tone.
  */
 export const CONTEXT_LIMIT_NUDGE_SOFT = `<dcp-system-reminder>
-NOTICE: Context usage is high.
+ACTION REQUIRED: Context usage is high.
 
-Look for a closed, self-contained range that no longer needs to stay raw and compress it now.
+Before doing more exploration, look for a closed, self-contained range that no longer needs to stay raw and compress it now.
+
+Do not treat this as optional housekeeping. If any completed research, implementation, verification, CI-log inspection, or dead-end debugging slice is present, call the \`compress\` tool before continuing normal work.
 
 RANGE SELECTION
 Prefer older, resolved history. Avoid the newest active working slice unless it is clearly done.
@@ -196,7 +203,7 @@ Use injected boundary IDs (\`mNNN\` for messages, \`bN\` for compressed blocks) 
 For a single large stale message, use message-mode compression via the \`messages\` array.
 
 If multiple independent ranges are ready, batch them in a single \`compress\` call.
-If nothing is cleanly closed yet, continue — but compress at the earliest opportunity.
+If nothing is cleanly closed yet, continue only with the next atomic step and re-check immediately afterward.
 </dcp-system-reminder>`
 
 /**
@@ -204,10 +211,12 @@ If nothing is cleanly closed yet, continue — but compress at the earliest oppo
  * at the configured nudgeFrequency cadence.
  */
 export const TURN_NUDGE = `<dcp-system-reminder>
-Evaluate the conversation for compressible ranges.
+ACTION REQUIRED: Evaluate the conversation for compressible ranges before continuing.
 
-If any range is cleanly closed and unlikely to be needed again, use the compress tool on it.
+If any range is cleanly closed and unlikely to be needed again, use the \`compress\` tool now.
 If direction has shifted, compress earlier ranges that are now less relevant.
+
+Do not defer this across another batch of searches, reads, CI log fetches, or tests. The next safe action should be compression whenever a closed slice exists.
 
 Prefer small, closed-range compressions over one broad compression.
 Use message-mode compression for isolated large stale messages.
@@ -219,9 +228,11 @@ Keep active context uncompressed.
  * Injected after iterationNudgeThreshold tool calls since the last user message.
  */
 export const ITERATION_NUDGE = `<dcp-system-reminder>
-You've been iterating for a while after the last user message.
+ACTION REQUIRED: You've been iterating for a while after the last user message.
 
-If there is a closed portion that is unlikely to be referenced immediately (for example, finished research before implementation), use the compress tool on it now.
+Pause before the next non-atomic tool call. If there is a closed portion that is unlikely to be referenced immediately (for example, finished research before implementation, completed CI-log triage, a verified fix, or a dead-end investigation), use the \`compress\` tool on it now.
+
+Do not keep accumulating tool outputs while a completed slice remains raw. If a range is closed, compression is the next safe action.
 
 Prefer multiple short, closed ranges over one large range when several independent slices are ready.
 Use message-mode compression for isolated large stale messages.
