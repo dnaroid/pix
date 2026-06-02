@@ -1,5 +1,5 @@
 import { THEMES, type Theme } from "../theme.js";
-import type { ToastKind, ToastNotifier } from "../ui.js";
+import type { ToastKind, ToastNotifier, ToastVariant } from "../ui.js";
 import { InputEditor } from "../input-editor.js";
 import {
 	compileOutputFilterPatterns,
@@ -524,7 +524,7 @@ export class PiUiExtendApp {
 					void this.tabsController.closeTab(tabId);
 				},
 				toastEntry: (toastId) => this.toastController.toast.entry(toastId),
-				showToast: (message, kind) => this.showToast(message, kind),
+				showToast: (message, kind, options) => this.showToast(message, kind, options),
 				dismissToast: (toastId) => this.toastController.dismissToast(toastId),
 				refreshModelUsageStatus: () => this.refreshModelUsageStatusFromClick(),
 				toggleAllThinkingExpanded: () => {
@@ -923,7 +923,7 @@ export class PiUiExtendApp {
 		});
 	}
 
-	private showToast(message: string, kind: ToastKind = "info", options?: { durationMs?: number }): void {
+	private showToast(message: string, kind: ToastKind = "info", options?: { durationMs?: number; variant?: ToastVariant }): void {
 		this.toastController.showToast(message, kind, options);
 	}
 

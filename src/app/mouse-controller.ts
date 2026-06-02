@@ -3,7 +3,7 @@ import type { AppCommandController } from "./command-controller.js";
 import type { ConversationViewport } from "./conversation-viewport.js";
 import type { EditorLayoutRenderer } from "./editor-layout-renderer.js";
 import type { ImageContent, InputEditor } from "../input-editor.js";
-import type { ToastEntry } from "../ui.js";
+import type { ToastEntry, ToastVariant } from "../ui.js";
 import { stringifyUnknown } from "./message-content.js";
 import type { AppPopupActionController } from "./popup-action-controller.js";
 import type { AppPopupMenuController } from "./popup-menu-controller.js";
@@ -39,20 +39,6 @@ import { openFileLink as openDetectedFileLink } from "./file-link-opener.js";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 
 const CLICK_FLASH_MS = 100;
-const CONTEXT_TOAST_MIN_DURATION_MS = 5_000;
-const CONTEXT_TOAST_LINE_DURATION_MS = 900;
-const CONTEXT_TOAST_MAX_DURATION_MS = 30_000;
-
-export function contextToastDurationMs(message: string): number {
-	const lineCount = Math.max(1, message.split("\n").length);
-	return Math.max(
-		CONTEXT_TOAST_MIN_DURATION_MS,
-		Math.min(
-			CONTEXT_TOAST_MAX_DURATION_MS,
-			lineCount * CONTEXT_TOAST_LINE_DURATION_MS,
-		),
-	);
-}
 
 type ClickFlash = {
 	y: number;
@@ -99,7 +85,7 @@ export type AppMouseControllerHost = {
 	switchToTab(tabId: string): void;
 	closeTab(tabId: string): void;
 	toastEntry(toastId: number): ToastEntry | undefined;
-	showToast(message: string, kind: "success" | "error" | "warning" | "info", options?: { durationMs?: number }): void;
+	showToast(message: string, kind: "success" | "error" | "warning" | "info", options?: { durationMs?: number; variant?: ToastVariant }): void;
 	dismissToast(toastId: number): void;
 	refreshModelUsageStatus(): void | Promise<void>;
 	toggleAllThinkingExpanded?(): void;
@@ -197,6 +183,8 @@ export class AppMouseController {
 		if (event.button !== 0) return;
 
 		if (target?.kind === "toast") {
+			if (!toastTargetContainsEvent(target, event)) return;
+			if (target.action === "body") return;
 			if (this.copyErrorToast(target.id)) {
 				this.showClickFlashForEvent(event);
 				return;
@@ -333,6 +321,15 @@ export class AppMouseController {
 
 		const statusTarget = this.statusTargetAt(event);
 		if (statusTarget) return statusTarget;
+
+		const toastTarget = this.renderedTargets.get(event.y);
+		if (toastTarget?.kind === "toast" && toastTargetContainsEvent(toastTarget, event)) {
+			return {
+				y: event.y,
+				startColumn: toastTarget.startColumn ?? event.x,
+				endColumn: toastTarget.endColumn ?? event.x + 1,
+			};
+		}
 
 		if (this.renderedTargets.has(event.y)) {
 			const bounds = nonBlankLineBounds(this.renderedRowTexts.get(event.y) ?? "", event.x);
@@ -584,7 +581,7 @@ export class AppMouseController {
 		const session = this.host.runtimeSession();
 		if (!session) return false;
 		const message = formatDcpStatsToast(session);
-		this.host.showToast(message, "info", { durationMs: contextToastDurationMs(message) });
+		this.host.showToast(message, "info", { variant: "dialog" });
 		return true;
 	}
 
@@ -1064,6 +1061,11 @@ export function screenSelectionLineText(
 
 function sameConversationPoint(left: ConversationSelectionPoint | undefined, right: ConversationSelectionPoint): boolean {
 	return !!left && left.line === right.line && left.x === right.x;
+}
+
+function toastTargetContainsEvent(target: Extract<NonNullable<RenderedLine["target"]>, { kind: "toast" }>, event: MouseEvent): boolean {
+	if (target.startColumn === undefined || target.endColumn === undefined) return true;
+	return event.x >= target.startColumn && event.x < target.endColumn;
 }
 
 function displayCellsInColumnRange(text: string, startColumn: number, endColumn: number): string {

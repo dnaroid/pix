@@ -7,7 +7,6 @@ import { describe, it } from "node:test";
 
 import {
 	AppMouseController,
-	contextToastDurationMs,
 	screenSelectionLineText,
 	type AppMouseControllerHost,
 	type InputFrameCopyRows,
@@ -19,15 +18,15 @@ import type { AppPopupMenuController } from "../src/app/popup-menu-controller.js
 import type { AppScrollController } from "../src/app/scroll-controller.js";
 
 describe("AppMouseController", () => {
-	it("shows detailed DCP stats toast with duration based on line count when context status is clicked", () => {
-		let toast: { message: string; kind: string; durationMs?: number } | undefined;
+	it("shows detailed DCP stats as a dialog toast when context status is clicked", () => {
+		let toast: { message: string; kind: string; variant?: string; durationMs?: number } | undefined;
 		const controller = new AppMouseController(
 			fakeHost({
 				runtimeSession: () => ({
 					getContextUsage: () => ({ tokens: 100, contextWindow: 1000, percent: 10 }),
 					sessionManager: { getBranch: () => [] },
 				}) as never,
-				showToast: (message, kind, options) => { toast = { message, kind, durationMs: options?.durationMs }; },
+				showToast: (message, kind, options) => { toast = { message, kind, variant: options?.variant, durationMs: options?.durationMs }; },
 			}),
 			fakePopupMenus(),
 			fakePopupActions(),
@@ -41,11 +40,27 @@ describe("AppMouseController", () => {
 		assert.equal(toast?.kind, "info");
 		assert.match(toast?.message ?? "", /DCP Session Statistics:/);
 		assert.match(toast?.message ?? "", /Nudge telemetry:/);
-		assert.equal(toast?.durationMs, contextToastDurationMs(toast?.message ?? ""));
-		assert.ok((toast?.durationMs ?? 0) >= 5000);
-		assert.ok((toast?.durationMs ?? 0) <= 30000);
-		assert.equal(contextToastDurationMs("one line"), 5000);
-		assert.equal(contextToastDurationMs(Array.from({ length: 40 }, (_, i) => `line ${i}`).join("\n")), 30000);
+		assert.equal(toast?.variant, "dialog");
+		assert.equal(toast?.durationMs, undefined);
+	});
+
+	it("dismisses dialog toasts only from their close target", () => {
+		const dismissed: number[] = [];
+		const controller = new AppMouseController(
+			fakeHost({ dismissToast: (toastId) => { dismissed.push(toastId); } }),
+			fakePopupMenus(),
+			fakePopupActions(),
+			fakeScrollController(),
+			fakeCommandController(),
+		);
+		controller.renderedTargets.set(2, { kind: "toast", id: 7, action: "body", startColumn: 20, endColumn: 50 });
+		controller.renderedTargets.set(3, { kind: "toast", id: 7, action: "close", startColumn: 45, endColumn: 48 });
+
+		controller.handleMouse({ button: 0, x: 24, y: 2, released: true });
+		controller.handleMouse({ button: 0, x: 44, y: 3, released: true });
+		controller.handleMouse({ button: 0, x: 46, y: 3, released: true });
+
+		assert.deepEqual(dismissed, [7]);
 	});
 
 	it("opens the session menu when clicking the active tab", () => {

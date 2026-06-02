@@ -222,7 +222,15 @@ export type RenderedLine = {
 	links?: readonly RenderedLink[];
 	imageTargets?: readonly ImageClickTarget[];
 	syntaxHighlight?: SyntaxLineHighlight | undefined;
-	target?: { kind: "tool"; id: string } | { kind: "popup-menu"; index: number } | { kind: "popup-menu-close" } | { kind: "todo-panel" } | { kind: "subagents-panel" } | { kind: "user-message"; id: string } | { kind: "queue-message"; id: string } | { kind: "toast"; id: number };
+	target?: { kind: "tool"; id: string } | { kind: "popup-menu"; index: number } | { kind: "popup-menu-close" } | { kind: "todo-panel" } | { kind: "subagents-panel" } | { kind: "user-message"; id: string } | { kind: "queue-message"; id: string } | ToastLineTarget;
+};
+
+export type ToastLineTarget = {
+	kind: "toast";
+	id: number;
+	action?: "toast" | "body" | "close";
+	startColumn?: number;
+	endColumn?: number;
 };
 
 export type ImageClickTarget = {

@@ -1,4 +1,4 @@
-import { Toast, type ToastKind } from "../ui.js";
+import { Toast, type ToastKind, type ToastVariant } from "../ui.js";
 import { TOAST_DURATION_MS } from "./constants.js";
 
 export type AppToastControllerHost = {
@@ -12,9 +12,9 @@ export class AppToastController {
 
 	constructor(private readonly host: AppToastControllerHost) {}
 
-	showToast(message: string, kind: ToastKind = "info", options: { durationMs?: number } = {}): void {
-		const toastId = this.toast.show(message, kind);
-		if (kind === "error") {
+	showToast(message: string, kind: ToastKind = "info", options: { durationMs?: number; variant?: ToastVariant } = {}): void {
+		const toastId = this.toast.show(message, kind, options.variant ? { variant: options.variant } : {});
+		if (kind === "error" || options.variant === "dialog") {
 			this.host.render();
 			return;
 		}

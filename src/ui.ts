@@ -83,10 +83,12 @@ export class PopupMenu<T> {
 export const TOAST_KINDS = ["success", "error", "warning", "info"] as const;
 
 export type ToastKind = (typeof TOAST_KINDS)[number];
+export type ToastVariant = "compact" | "dialog";
 
 export type ToastState = {
 	message: string;
 	kind: ToastKind;
+	variant?: ToastVariant;
 };
 
 export type ToastEntry = ToastState & {
@@ -110,10 +112,10 @@ export class Toast {
 	private readonly entries: ToastEntry[] = [];
 	private nextId = 1;
 
-	show(message: string, kind: ToastKind = "info"): number {
+	show(message: string, kind: ToastKind = "info", options: { variant?: ToastVariant } = {}): number {
 		const id = this.nextId;
 		this.nextId += 1;
-		this.entries.push({ id, message, kind, createdAt: Date.now() });
+		this.entries.push({ id, message, kind, createdAt: Date.now(), ...(options.variant ? { variant: options.variant } : {}) });
 		return id;
 	}
 

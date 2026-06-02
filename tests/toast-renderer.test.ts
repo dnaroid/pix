@@ -34,8 +34,26 @@ describe("renderToastOverlays", () => {
 			"two",
 		]);
 	});
+
+	it("renders dialog toasts with a close target", () => {
+		const overlays = renderToastOverlays([
+			toast("Context usage\nTokens: 100 / 1000", "dialog"),
+		], 80, 5, THEMES.dark);
+
+		assert.equal(overlays.length, 4);
+		assert.ok(overlays[0]?.text.includes("Dialog"));
+		assert.ok(overlays[0]?.text.includes(APP_ICONS.close));
+		assert.ok(overlays[1]?.text.includes("Context usage"));
+		assert.ok(overlays[2]?.text.includes("Tokens: 100 / 1000"));
+		assert.equal(overlays[0]?.target?.action, "close");
+		assert.equal(overlays[1]?.target?.action, "body");
+		assert.ok((overlays[0]?.target?.startColumn ?? 0) > overlays[0]!.column);
+		assert.ok((overlays[0]?.target?.endColumn ?? 0) <= overlays[0]!.column + stringDisplayWidth(overlays[0]!.text));
+		assert.equal(overlays.every((overlay) => overlay.column > 1), true);
+		assert.equal(overlays.every((overlay) => overlay.column + stringDisplayWidth(overlay.text) <= 80), true);
+	});
 });
 
-function toast(message: string): ToastEntry {
-	return { id: 1, message, kind: "info", createdAt: 0 };
+function toast(message: string, variant?: ToastEntry["variant"]): ToastEntry {
+	return { id: 1, message, kind: "info", createdAt: 0, ...(variant ? { variant } : {}) };
 }

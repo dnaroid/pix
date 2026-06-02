@@ -3,8 +3,9 @@ import { stringDisplayWidth, wrapDisplayLine } from "../terminal-width.js";
 import type { ToastEntry, ToastKind } from "../ui.js";
 import { APP_ICONS } from "./icons.js";
 import { padOrTrimPlain, sanitizeText } from "./render-text.js";
+import type { ToastLineTarget } from "./types.js";
 
-export type ToastOverlay = { id: number; row: number; column: number; text: string; output: string };
+export type ToastOverlay = { id: number; row: number; column: number; text: string; output: string; target?: ToastLineTarget };
 
 export function renderToastOverlays(
 	states: readonly ToastEntry[],
@@ -17,6 +18,10 @@ export function renderToastOverlays(
 	const overlays: ToastOverlay[] = [];
 	for (const state of [...states].reverse()) {
 		if (overlays.length >= maxRows) break;
+		if (state.variant === "dialog") {
+			overlays.push(...renderDialogToastOverlay(state, width, Math.max(0, maxRows - overlays.length), theme, overlays.length));
+			continue;
+		}
 
 		const icon = toastKindIcon(state.kind);
 		const lines = toastMessageLines(state.message, icon, Math.max(1, width - 6));
@@ -36,7 +41,14 @@ export function renderToastOverlays(
 				bold: true,
 			});
 
-			overlays.push({ id: state.id, row: overlays.length + 1, column, text, output });
+			overlays.push({
+				id: state.id,
+				row: overlays.length + 1,
+				column,
+				text,
+				output,
+				target: { kind: "toast", id: state.id, action: "toast", startColumn: column, endColumn: column + toastWidth },
+			});
 		}
 	}
 
@@ -64,6 +76,75 @@ function toastMessageLines(message: string, icon: string, maxWidth: number): str
 	}
 
 	return lines.length > 0 ? lines : [firstPrefix.trimEnd()];
+}
+
+function renderDialogToastOverlay(
+	state: ToastEntry,
+	width: number,
+	maxRows: number,
+	theme: Theme,
+	rowOffset: number,
+): ToastOverlay[] {
+	if (maxRows <= 0 || width <= 0) return [];
+
+	const maxDialogWidth = Math.max(1, Math.min(width - 4, 72));
+	const icon = toastKindIcon(state.kind);
+	const closeLabel = `[${APP_ICONS.close}]`;
+	const wrappedLines = dialogMessageLines(state.message, Math.max(1, maxDialogWidth - 4));
+	const title = `${icon} Dialog`;
+	const requiredWidth = Math.max(
+		16,
+		stringDisplayWidth(` ${title} ${closeLabel} `) + 2,
+		...wrappedLines.map((line) => stringDisplayWidth(line) + 4),
+	);
+	const dialogWidth = Math.min(maxDialogWidth, Math.max(16, requiredWidth));
+	const bodyWidth = Math.max(1, dialogWidth - 4);
+	const bodyLines = dialogMessageLines(state.message, bodyWidth);
+	const bodyRows = Math.max(0, maxRows - 2);
+	const visibleBodyLines = bodyLines.slice(0, bodyRows);
+	const includeBottom = maxRows > 1;
+	const dialogRows = [
+		dialogTopLine(title, closeLabel, dialogWidth),
+		...visibleBodyLines.map((line) => `│ ${padOrTrimPlain(line, bodyWidth)} │`),
+		...(includeBottom ? [`╰${"─".repeat(Math.max(0, dialogWidth - 2))}╯`] : []),
+	].slice(0, maxRows);
+	const leftWidth = Math.max(0, width - dialogWidth - 2);
+	const column = leftWidth + 1;
+	const style = toastKindStyle(state.kind, theme);
+	const closeStartColumn = column + 1 + dialogTopCloseOffset(title, closeLabel, dialogWidth);
+	const closeEndColumn = closeStartColumn + stringDisplayWidth(closeLabel);
+
+	return dialogRows.map((text, index) => ({
+		id: state.id,
+		row: rowOffset + index + 1,
+		column,
+		text,
+		output: colorLine(text, dialogWidth, { ...style, bold: true }),
+		target: index === 0
+			? { kind: "toast", id: state.id, action: "close", startColumn: closeStartColumn, endColumn: closeEndColumn }
+			: { kind: "toast", id: state.id, action: "body", startColumn: column, endColumn: column + dialogWidth },
+	}));
+}
+
+function dialogMessageLines(message: string, maxWidth: number): string[] {
+	const safeMaxWidth = Math.max(1, maxWidth);
+	const lines = sanitizeText(message).split("\n").flatMap((line) => wrapDisplayLine(line, safeMaxWidth));
+	return lines.length > 0 ? lines : [""];
+}
+
+function dialogTopLine(title: string, closeLabel: string, width: number): string {
+	const innerWidth = Math.max(0, width - 2);
+	const closeOffset = dialogTopCloseOffset(title, closeLabel, width);
+	const leftLabel = ` ${title} `;
+	const spacer = " ".repeat(Math.max(0, closeOffset - stringDisplayWidth(leftLabel)));
+	return `╭${padOrTrimPlain(`${leftLabel}${spacer}${closeLabel} `, innerWidth)}╮`;
+}
+
+function dialogTopCloseOffset(title: string, closeLabel: string, width: number): number {
+	const innerWidth = Math.max(0, width - 2);
+	const leftLabel = ` ${title} `;
+	const closeWidth = stringDisplayWidth(closeLabel);
+	return Math.max(stringDisplayWidth(leftLabel), innerWidth - closeWidth - 1);
 }
 
 function toastKindIcon(kind: ToastKind): string {
