@@ -431,6 +431,7 @@ describe.serial("extension entrypoint", () => {
 		let piArgs = fs.readFileSync(path.join(result.details.runDir, "agent-1", "pi_args"), "utf-8");
 		expect(piArgs).toContain("--model\npreset/deep");
 		expect(piArgs).toContain("--thinking\nhigh");
+		await waitUntil(() => fs.existsSync(path.join(result.details.runDir, "agent-1", "exit_code")));
 
 		await pi.commands.get("subagent-preset").handler("session-clear", ctx);
 		expect(notifications[1]).toContain("Runtime session sub-agent preset override cleared");
@@ -443,6 +444,7 @@ describe.serial("extension entrypoint", () => {
 		piArgs = fs.readFileSync(path.join(result.details.runDir, "agent-1", "pi_args"), "utf-8");
 		expect(piArgs).toContain("--model\npreset/fast");
 		expect(piArgs).toContain("--thinking\nminimal");
+		await waitUntil(() => fs.existsSync(path.join(result.details.runDir, "agent-1", "exit_code")));
 	});
 
 	test.serial("sub-agent preset command copies bundled sample when config is missing", async () => {
