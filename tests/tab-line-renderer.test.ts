@@ -8,8 +8,11 @@ import type { SessionTab } from "../src/app/types.js";
 import { stringDisplayWidth } from "../src/terminal-width.js";
 import { colorize, THEMES } from "../src/theme.js";
 
+const TAB_PANEL_BACKGROUND = "#f3f4f6";
+const INACTIVE_TAB_FOREGROUND = "#000000";
+
 describe("TabLineRenderer", () => {
-	it("renders compact tabs with status icons, vertical-bar gap, and close targets", () => {
+	it("renders compact tabs with status icons, inactive separators, and close targets", () => {
 		const renderer = tabLineRenderer([
 			{ id: "tab-1", status: "active", title: "Main session", sessionPath: "/tmp/one.jsonl" },
 			{ id: "tab-2", status: "waiting", title: "Follow-up", sessionPath: "/tmp/two.jsonl" },
@@ -20,22 +23,24 @@ describe("TabLineRenderer", () => {
 		assert.doesNotMatch(layout.text, /active|waiting/u);
 		assert.ok(layout.text.includes(APP_ICONS.checkCircle));
 		assert.equal(layout.text.startsWith(" "), false);
-		assert.ok(layout.text.includes("│"));
-		assert.ok(layout.text.includes(`${APP_ICONS.close} │ ${APP_ICONS.checkCircle}`));
+		assert.equal(layout.text.includes("│"), true);
+		assert.ok(layout.text.includes(`${APP_ICONS.close}▐${APP_ICONS.checkCircle}`));
 		assert.ok(layout.text.includes("Main session"));
 		assert.ok(layout.text.includes("Follow-up"));
-		assert.ok(layout.text.slice(0, layout.text.lastIndexOf(APP_ICONS.plus)).trimEnd().endsWith("│"));
+		assert.ok(layout.text.slice(0, layout.text.lastIndexOf(APP_ICONS.plus)).endsWith("│"));
 		assert.equal(layout.targets.filter((target) => target.kind === "tab").length, 2);
 		assert.equal(layout.targets.filter((target) => target.kind === "close").length, 2);
 		assert.equal(layout.targets.filter((target) => target.kind === "new-tab").length, 1);
 		assert.equal(layout.targets[0]?.kind, "close");
 		assert.ok(layout.text.includes(APP_ICONS.close));
 		assert.ok(layout.text.endsWith(APP_ICONS.plus));
-		assert.ok(layout.text.endsWith(`${APP_ICONS.close} │ ${APP_ICONS.plus}`));
+		assert.ok(layout.text.endsWith(`${APP_ICONS.close}│${APP_ICONS.plus}`));
+		assert.equal(layout.segments.some((segment) => layout.text.slice(segment.start, segment.end) === "   " && segment.background === THEMES.dark.colors.background), false);
+		assert.equal(layout.segments.some((segment) => layout.text.slice(segment.start, segment.end) === "▐" && segment.foreground === TAB_PANEL_BACKGROUND && segment.background === THEMES.dark.colors.background), true);
 		assert.deepEqual(layout.targets.find((target) => target.kind === "new-tab"), {
 			kind: "new-tab",
-			startColumn: 36,
-			endColumn: 37,
+			startColumn: 32,
+			endColumn: 33,
 		});
 	});
 
@@ -65,7 +70,7 @@ describe("TabLineRenderer", () => {
 		assert.doesNotMatch(layout.text, /session 019e7d3f/iu);
 	});
 
-	it("renders the active tab without a panel background", () => {
+	it("renders the tab row with an almost-white panel background and leaves the active tab unfilled", () => {
 		const renderer = tabLineRenderer([
 			{ id: "tab-1", status: "active", title: "Main session", sessionPath: "/tmp/one.jsonl" },
 			{ id: "tab-2", status: "waiting", title: "Follow-up", sessionPath: "/tmp/two.jsonl" },
@@ -75,14 +80,29 @@ describe("TabLineRenderer", () => {
 		const activeTitleStart = layout.text.indexOf("Main session");
 		const activeTitleEnd = activeTitleStart + "Main session".length;
 
-		assert.equal(layout.segments.some((segment) => segment.background), false);
-		assert.ok(layout.segments.some((segment) => segment.start === 0 && segment.end === APP_ICONS.checkCircle.length && segment.foreground === THEMES.dark.colors.statusDotBase));
-		assert.ok(layout.segments.some((segment) => segment.start <= activeTitleStart && segment.end >= activeTitleEnd && segment.foreground === THEMES.dark.colors.selectionForeground));
+		assert.ok(layout.segments.some((segment) => segment.start === 0 && segment.end === APP_ICONS.checkCircle.length && segment.foreground === THEMES.dark.colors.statusDotBase && segment.background === THEMES.dark.colors.background));
+		assert.ok(layout.segments.some((segment) => segment.start <= activeTitleStart && segment.end >= activeTitleEnd && segment.foreground === THEMES.dark.colors.selectionForeground && segment.background === THEMES.dark.colors.background));
+		assert.equal(layout.segments.some((segment) => layout.text.slice(segment.start, segment.end) === "   " && segment.background === THEMES.dark.colors.background), false);
+		assert.equal(layout.segments.some((segment) => layout.text.slice(segment.start, segment.end) === "▐" && segment.foreground === TAB_PANEL_BACKGROUND && segment.background === THEMES.dark.colors.background), true);
+		assert.ok(layout.segments.some((segment) => layout.text.slice(segment.start, segment.end) === "│" && segment.foreground === THEMES.dark.colors.background));
 		const rendered = renderer.render(1, layout, 80);
+		assert.ok(rendered.includes(colorize("▐", {
+			foreground: TAB_PANEL_BACKGROUND,
+			background: THEMES.dark.colors.background,
+		})));
+		assert.ok(rendered.includes(colorize("│", {
+			foreground: THEMES.dark.colors.background,
+			background: TAB_PANEL_BACKGROUND,
+		})));
 		assert.ok(rendered.includes(colorize(" Main session ", {
 			foreground: THEMES.dark.colors.selectionForeground,
+			background: THEMES.dark.colors.background,
 		})));
-		assert.doesNotMatch(rendered, /\x1b\[[^m]*48;2/u);
+		assert.match(rendered, /48;2/u);
+		assert.ok(rendered.includes(colorize(" Follow-up ", {
+			foreground: INACTIVE_TAB_FOREGROUND,
+			background: TAB_PANEL_BACKGROUND,
+		})));
 	});
 
 	it("renders the full visible tab row without underlining it", () => {
@@ -100,26 +120,17 @@ describe("TabLineRenderer", () => {
 		assert.equal(sgrCodes.some((codes) => codes?.split(";").includes("4")), false);
 	});
 
-	it("leaves a gap in the bottom rule under the active tab", () => {
+	it("reserves one panel row instead of drawing a bottom rule row", () => {
 		const renderer = tabLineRenderer([
 			{ id: "tab-1", status: "active", title: "Main", sessionPath: "/tmp/one.jsonl" },
 			{ id: "tab-2", status: "waiting", title: "Follow-up", sessionPath: "/tmp/two.jsonl" },
 		]);
 
-		const layout = renderer.layout(40);
-		const bottomText = renderer.bottomText(layout, 40);
-		const activeTarget = layout.targets.find((target) => target.kind === "tab" && target.active);
-
-		assert.ok(activeTarget);
-		const leftSeparator = Math.max(0, ...layout.separatorColumns.filter((column) => column < activeTarget.startColumn));
-		const rightSeparator = Math.min(41, ...layout.separatorColumns.filter((column) => column >= activeTarget.endColumn));
-		assert.equal(stringDisplayWidth(bottomText), 40);
-		assert.equal(bottomText.slice(leftSeparator, rightSeparator - 1), " ".repeat(rightSeparator - leftSeparator - 1));
-		assert.equal(bottomText[rightSeparator - 1], "└");
-		assert.ok(bottomText.slice(rightSeparator).includes("─"));
+		assert.equal(renderer.panelRows(40), 1);
+		assert.equal(renderer.panelRows(2), 1);
 	});
 
-	it("colors the new-tab button blue and places it after the last tab", () => {
+	it("colors the new-tab button blue and renders a tight half-edge after an active tab", () => {
 		const renderer = tabLineRenderer([
 			{ id: "tab-1", status: "active", title: "Main", sessionPath: "/tmp/one.jsonl" },
 		]);
@@ -127,11 +138,13 @@ describe("TabLineRenderer", () => {
 		const layout = renderer.layout(20);
 		const newTabTarget = layout.targets.find((target) => target.kind === "new-tab");
 		const plusStart = layout.text.indexOf(APP_ICONS.plus);
-		const dividerColumn = 10;
 
-		assert.deepEqual(newTabTarget, { kind: "new-tab", startColumn: 12, endColumn: 13 });
-		assert.equal([...layout.text][dividerColumn - 1], "│");
-		assert.equal(renderer.bottomText(layout, 20)[dividerColumn - 1], "└");
+		assert.deepEqual(newTabTarget, { kind: "new-tab", startColumn: 10, endColumn: 11 });
+		assert.ok(layout.text.endsWith(`${APP_ICONS.close}▐${APP_ICONS.plus}`));
+		assert.equal(layout.text.includes("│"), false);
+		assert.equal(layout.segments.some((segment) => layout.text.slice(segment.start, segment.end) === "│"), false);
+		assert.equal(layout.segments.some((segment) => layout.text.slice(segment.start, segment.end) === "   " && segment.background === THEMES.dark.colors.background), false);
+		assert.equal(layout.segments.some((segment) => layout.text.slice(segment.start, segment.end) === "▐" && segment.foreground === TAB_PANEL_BACKGROUND && segment.background === THEMES.dark.colors.background), true);
 		assert.ok(layout.segments.some((segment) => (
 			segment.start === plusStart
 			&& segment.end === plusStart + APP_ICONS.plus.length
@@ -140,7 +153,48 @@ describe("TabLineRenderer", () => {
 		)));
 	});
 
-	it("uses the muted close color for active and inactive tabs", () => {
+	it("keeps dividers between inactive tabs and before new-tab when the last tab is inactive", () => {
+		const renderer = tabLineRenderer([
+			{ id: "tab-1", status: "waiting", title: "Main", sessionPath: "/tmp/one.jsonl" },
+			{ id: "tab-2", status: "waiting", title: "Follow-up", sessionPath: "/tmp/two.jsonl" },
+		]);
+
+		const layout = renderer.layout(80);
+
+		assert.ok(layout.text.includes(`${APP_ICONS.close}│${APP_ICONS.checkCircle}`));
+		assert.ok(layout.text.endsWith(`${APP_ICONS.close}│${APP_ICONS.plus}`));
+		assert.equal(layout.segments.filter((segment) => layout.text.slice(segment.start, segment.end) === "│" && segment.foreground === THEMES.dark.colors.background).length, 2);
+	});
+
+	it("renders tight edge glyphs around the active tab", () => {
+		const renderer = tabLineRenderer([
+			{ id: "tab-1", status: "waiting", title: "Follow-up", sessionPath: "/tmp/two.jsonl" },
+			{ id: "tab-2", status: "active", title: "Main session", sessionPath: "/tmp/one.jsonl" },
+		]);
+
+		const layout = renderer.layout(80);
+
+		assert.ok(layout.text.includes(`${APP_ICONS.close}▌${APP_ICONS.checkCircle}`));
+		assert.ok(layout.text.endsWith(`${APP_ICONS.close}▐${APP_ICONS.plus}`));
+		assert.equal(layout.text.includes(`${APP_ICONS.close}   ${APP_ICONS.checkCircle}`), false);
+		assert.equal(layout.text.includes(`${APP_ICONS.close}   ${APP_ICONS.plus}`), false);
+		assert.equal(layout.text.includes("│"), false);
+		assert.equal(layout.segments.some((segment) => layout.text.slice(segment.start, segment.end) === "▌" && segment.foreground === TAB_PANEL_BACKGROUND && segment.background === THEMES.dark.colors.background), true);
+		assert.equal(layout.segments.some((segment) => layout.text.slice(segment.start, segment.end) === "▐" && segment.foreground === TAB_PANEL_BACKGROUND && segment.background === THEMES.dark.colors.background), true);
+	});
+
+	it("falls back to black separators when the terminal background color is unavailable", () => {
+		const renderer = tabLineRenderer([
+			{ id: "tab-1", status: "active", title: "Main", sessionPath: "/tmp/one.jsonl" },
+			{ id: "tab-2", status: "waiting", title: "Follow-up", sessionPath: "/tmp/two.jsonl" },
+		], { ...THEMES.dark, colors: { ...THEMES.dark.colors, background: "" } });
+
+		const layout = renderer.layout(80);
+
+		assert.ok(layout.segments.some((segment) => layout.text.slice(segment.start, segment.end) === "│" && segment.foreground === "#000000"));
+	});
+
+	it("uses muted close color for active tabs and black close color for inactive tabs", () => {
 		const renderer = tabLineRenderer([
 			{ id: "tab-1", status: "active", title: "Main", sessionPath: "/tmp/one.jsonl" },
 			{ id: "tab-2", status: "waiting", title: "Follow-up", sessionPath: "/tmp/two.jsonl" },
@@ -148,7 +202,7 @@ describe("TabLineRenderer", () => {
 
 		const layout = renderer.layout(80);
 
-		assert.deepEqual(closeSegmentForegrounds(layout), [THEMES.dark.colors.muted, THEMES.dark.colors.muted]);
+		assert.deepEqual(closeSegmentForegrounds(layout), [THEMES.dark.colors.muted, INACTIVE_TAB_FOREGROUND]);
 	});
 
 	it("renders stopped, running, and bell attention status icons", () => {
@@ -197,14 +251,14 @@ describe("TabLineRenderer", () => {
 		assert.equal(layout.targets.filter((target) => target.kind === "new-tab").length, 1);
 	});
 
-	it("reserves panel rows even when there is only one tab", () => {
+	it("reserves the panel row even when there is only one tab", () => {
 		assert.equal(tabLineRenderer([
 			{ id: "tab-1", status: "active", title: "Main", sessionPath: "/tmp/one.jsonl" },
-		]).panelRows(10), 2);
+		]).panelRows(10), 1);
 		assert.equal(tabLineRenderer([
 			{ id: "tab-1", status: "active", title: "Main", sessionPath: "/tmp/one.jsonl" },
 			{ id: "tab-2", status: "waiting", title: "Follow-up", sessionPath: "/tmp/two.jsonl" },
-		]).panelRows(10), 2);
+		]).panelRows(10), 1);
 		assert.equal(tabLineRenderer([
 			{ id: "tab-1", status: "active", title: "Main", sessionPath: "/tmp/one.jsonl" },
 		]).panelRows(2), 1);
@@ -215,7 +269,7 @@ describe("TabLineRenderer", () => {
 
 		const layout = renderer.layout(80);
 
-		assert.equal(layout.text.trim(), `│ ${APP_ICONS.plus}`);
+		assert.equal(layout.text.trim(), APP_ICONS.plus);
 		assert.deepEqual(layout.targets, [{ kind: "new-tab", startColumn: 3, endColumn: 4 }]);
 	});
 
@@ -249,10 +303,10 @@ function closeSegmentForegrounds(layout: ReturnType<TabLineRenderer["layout"]>):
 		.map((segment) => segment.foreground);
 }
 
-function tabLineRenderer(tabs: readonly SessionTab[]): TabLineRenderer {
+function tabLineRenderer(tabs: readonly SessionTab[], theme = THEMES.dark): TabLineRenderer {
 	return new TabLineRenderer({
-		theme: THEMES.dark,
-		screenStyler: new ScreenStyler({ theme: THEMES.dark, mouseSelection: undefined }),
+		theme,
+		screenStyler: new ScreenStyler({ theme, mouseSelection: undefined }),
 		tabs,
 	});
 }

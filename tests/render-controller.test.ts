@@ -114,11 +114,9 @@ describe("AppRenderController", () => {
 				voiceLanguageTarget: () => undefined,
 			} as unknown as StatusLineRenderer,
 			tabLineRenderer: {
-				panelRows: () => 2,
+				panelRows: () => 1,
 				layout: () => ({ text: "TABS", segments: [], targets: [{ kind: "tab", tabId: "tab-1", active: true, startColumn: 1, endColumn: 5 }], separatorColumns: [3] }),
 				render: () => "TABS",
-				bottomText: () => "──┴─",
-				renderBottom: () => "──┴─",
 			} as unknown as TabLineRenderer,
 			toastController: { toast: { visibleStates: [{ id: 1, kind: "info", message: "toast" }] } } as unknown as AppToastController,
 			voiceProgressOverlayText: () => undefined,
@@ -126,16 +124,15 @@ describe("AppRenderController", () => {
 
 		const output = captureStdout(() => controller.render());
 
-		assert.equal(layoutRows, 4);
+		assert.equal(layoutRows, 5);
 		assert.equal(rowForRenderedText(output, "TABS"), 1);
-		assert.equal(rowForRenderedText(output, "──┴─"), 2);
-		assert.equal(rowForRenderedText(output, "BODY"), 3);
-		assert.equal(rowForRenderedText(output, "INPUT"), 5);
+		assert.equal(rowForRenderedText(output, "BODY"), 2);
+		assert.equal(rowForRenderedText(output, "INPUT"), 4);
 		assert.equal(rowForRenderedText(output, "STATUS"), 6);
-		assert.equal(rowForRenderedText(output, "toast"), 3);
-		assert.match(output, /\x1b\[5;7H/);
+		assert.equal(rowForRenderedText(output, "toast"), 2);
+		assert.match(output, /\x1b\[4;7H/);
 		assert.equal(mouseController.tabLineTargets[0]?.row, 1);
-		assert.equal(mouseController.tabLineTargets.some((target) => target.kind === "tab" && target.row === 2), false);
+		assert.equal(mouseController.tabLineTargets.some((target) => target.kind === "tab" && target.row !== 1), false);
 	});
 
 	it("buffers unchanged full-render regions independently", () => {
@@ -175,11 +172,9 @@ describe("AppRenderController", () => {
 			mouseController,
 			statusLineRenderer: fakeStatusLineRenderer(),
 			tabLineRenderer: {
-				panelRows: () => 2,
+				panelRows: () => 1,
 				layout: () => ({ text: "TABS", segments: [], targets: [], separatorColumns: [] }),
 				render: () => "TABS",
-				bottomText: () => "────",
-				renderBottom: () => "────",
 			} as unknown as TabLineRenderer,
 			toastController: { toast: { visibleStates: [] } } as unknown as AppToastController,
 			outputBuffer: new TerminalOutputBuffer({ enabled: true }),
@@ -192,8 +187,8 @@ describe("AppRenderController", () => {
 		const third = captureStdout(() => controller.render());
 
 		assert.equal(rowForRenderedText(first, "TABS"), 1);
-		assert.equal(rowForRenderedText(first, "INPUT"), 5);
-		assert.equal(rowForRenderedText(second, "BODY2"), 3);
+		assert.equal(rowForRenderedText(first, "INPUT"), 4);
+		assert.equal(rowForRenderedText(second, "BODY2"), 2);
 		assert.equal(rowForRenderedText(second, "TABS"), undefined);
 		assert.equal(rowForRenderedText(second, "INPUT"), undefined);
 		assert.equal(rowForRenderedText(second, "STATUS"), undefined);
@@ -295,11 +290,9 @@ describe("AppRenderController", () => {
 			mouseController,
 			statusLineRenderer: fakeStatusLineRenderer(),
 			tabLineRenderer: {
-				panelRows: () => 2,
+				panelRows: () => 1,
 				layout: () => ({ text: "TABS", segments: [], targets: [], separatorColumns: [] }),
 				render: () => "TABS",
-				bottomText: () => "────",
-				renderBottom: () => "────",
 			} as unknown as TabLineRenderer,
 			toastController: { toast: { visibleStates: [] } } as unknown as AppToastController,
 			voiceProgressOverlayText: () => undefined,
@@ -308,10 +301,9 @@ describe("AppRenderController", () => {
 		const output = captureStdout(() => controller.render());
 
 		assert.equal(rowForRenderedText(output, "TABS"), 1);
-		assert.equal(rowForRenderedText(output, "────"), 2);
-		assert.equal(rowForRenderedText(output, "Sessions"), 3);
-		assert.equal(rowForRenderedText(output, "› new"), 4);
-		assert.deepEqual(mouseController.renderedTargets.get(4), { kind: "popup-menu", index: 0 });
+		assert.equal(rowForRenderedText(output, "Sessions"), 2);
+		assert.equal(rowForRenderedText(output, "› new"), 3);
+		assert.deepEqual(mouseController.renderedTargets.get(3), { kind: "popup-menu", index: 0 });
 	});
 
 	it("overlays the new-tab button without reserving the top row when the tab panel is collapsed", () => {

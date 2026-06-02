@@ -19,12 +19,16 @@ type TabButtonLayout = {
 	closeEnd: number;
 };
 
-const TAB_SEPARATOR = " │ ";
-const EMPTY_NEW_TAB_PREFIX = "│ ";
+const TAB_SEPARATOR = "│";
+const ACTIVE_TAB_LEFT_EDGE = "▌";
+const ACTIVE_TAB_RIGHT_EDGE = "▐";
+const TAB_PANEL_BACKGROUND = "#f3f4f6";
+const INACTIVE_TAB_FOREGROUND = "#000000";
+const EMPTY_NEW_TAB_PREFIX = "  ";
 const DEFAULT_SESSION_TITLE_PATTERN = /^session [0-9a-f]{8}$/iu;
-export const TAB_PANEL_ROWS = 2;
+export const TAB_PANEL_ROWS = 1;
 
-export function tabPanelRows(tabLineVisible: boolean, terminalRows: number, tabCount = TAB_PANEL_ROWS): number {
+export function tabPanelRows(tabLineVisible: boolean, terminalRows: number, _tabCount = TAB_PANEL_ROWS): number {
 	if (!tabLineVisible) return 0;
 	const desiredRows = TAB_PANEL_ROWS;
 	return Math.min(desiredRows, Math.max(0, terminalRows - 1));
@@ -41,19 +45,18 @@ export class TabLineRenderer {
 		if (width <= 0) return { text: "", segments: [], targets: [], separatorColumns: [] };
 
 		const tabs = this.host.tabs;
-		const separator = TAB_SEPARATOR;
-		const separatorWidth = stringDisplayWidth(separator);
-		const separatorCount = Math.max(0, tabs.length - 1);
+		const tabSeparators = tabs.slice(1).map((tab, index) => this.tabSeparatorText(tabs[index]?.status === "active", tab.status === "active"));
+		const tabSeparatorsWidth = tabSeparators.reduce((sum, separator) => sum + stringDisplayWidth(separator), 0);
 		const newTabWidth = stringDisplayWidth(APP_ICONS.plus);
-		const newTabPrefix = tabs.length > 0 ? separator : EMPTY_NEW_TAB_PREFIX;
+		const newTabPrefix = this.newTabPrefixText();
 		const newTabPrefixWidth = stringDisplayWidth(newTabPrefix);
 		const tabsWidth = Math.max(0, width - newTabWidth - newTabPrefixWidth);
 		const naturalButtons = tabs.map((tab) => this.buttonLayout(tab));
 		const naturalWidth = naturalButtons.reduce((sum, button) => sum + stringDisplayWidth(button.text), 0)
-			+ separatorCount * separatorWidth;
+			+ tabSeparatorsWidth;
 		const buttonMaxWidth = naturalWidth <= tabsWidth
 			? undefined
-			: Math.max(7, Math.floor(Math.max(1, tabsWidth - separatorCount * separatorWidth) / tabs.length));
+			: Math.max(7, Math.floor(Math.max(1, tabsWidth - tabSeparatorsWidth) / tabs.length));
 		const buttons = buttonMaxWidth === undefined ? naturalButtons : tabs.map((tab) => this.buttonLayout(tab, buttonMaxWidth));
 		const segments: StyledSegment[] = [];
 		const targets: TabLineTarget[] = [];
@@ -63,14 +66,26 @@ export class TabLineRenderer {
 
 		for (let index = 0; index < tabs.length; index += 1) {
 			if (index > 0) {
+				const tabSeparator = tabSeparators[index - 1] ?? TAB_SEPARATOR;
+				const separatorVisible = tabSeparator === TAB_SEPARATOR;
+				const separatorWidth = stringDisplayWidth(tabSeparator);
 				const separatorOffset = text.length;
-				separatorColumns.push(displayColumn + 1);
-				text += separator;
-				segments.push({
-					start: separatorOffset + 1,
-					end: separatorOffset + 2,
-					foreground: this.host.theme.colors.inputBorder,
-				});
+				if (separatorVisible) separatorColumns.push(displayColumn);
+				text += tabSeparator;
+				if (separatorVisible) {
+					segments.push({
+						start: separatorOffset,
+						end: separatorOffset + tabSeparator.length,
+						foreground: this.terminalBackgroundColor(),
+					});
+				} else {
+					segments.push({
+						start: separatorOffset,
+						end: separatorOffset + tabSeparator.length,
+						foreground: TAB_PANEL_BACKGROUND,
+						background: this.terminalBackgroundColor(),
+					});
+				}
 				displayColumn += separatorWidth;
 			}
 
@@ -105,15 +120,26 @@ export class TabLineRenderer {
 		}
 		const tabsText = ellipsizeDisplay(text, tabsWidth);
 		const renderedTabsWidth = stringDisplayWidth(tabsText);
-		const lineText = `${tabsText}${newTabPrefix}${APP_ICONS.plus}`;
-		const newTabDividerColumn = renderedTabsWidth + (tabs.length > 0 ? 2 : 1);
+		const showNewTabDivider = tabs.length > 0 && tabs.at(-1)?.status !== "active";
+		const renderedNewTabPrefix = newTabPrefix;
+		const lineText = `${tabsText}${renderedNewTabPrefix}${APP_ICONS.plus}`;
+		const newTabDividerColumn = renderedTabsWidth + 1;
 		const plusStartColumn = renderedTabsWidth + newTabPrefixWidth + 1;
-		const newTabDividerOffset = tabsText.length + (tabs.length > 0 ? 1 : 0);
-		segments.push({
-			start: newTabDividerOffset,
-			end: newTabDividerOffset + 1,
-			foreground: this.host.theme.colors.inputBorder,
-		});
+		const newTabDividerOffset = tabsText.length;
+		if (showNewTabDivider) {
+			segments.push({
+				start: newTabDividerOffset,
+				end: newTabDividerOffset + 1,
+				foreground: this.terminalBackgroundColor(),
+			});
+		} else if (tabs.length > 0) {
+			segments.push({
+				start: tabsText.length,
+				end: tabsText.length + renderedNewTabPrefix.length,
+				foreground: TAB_PANEL_BACKGROUND,
+				background: this.terminalBackgroundColor(),
+			});
+		}
 		segments.push({
 			start: lineText.length - APP_ICONS.plus.length,
 			end: lineText.length,
@@ -132,14 +158,15 @@ export class TabLineRenderer {
 			targets: targets.filter((target) => target.startColumn <= width),
 			separatorColumns: [
 				...separatorColumns.filter((column) => column <= Math.min(width, renderedTabsWidth)),
-				...(newTabDividerColumn <= width ? [newTabDividerColumn] : []),
+				...(showNewTabDivider && newTabDividerColumn <= width ? [newTabDividerColumn] : []),
 			],
 		};
 	}
 
 	render(row: number, layout: TabLineLayout, width: number): string {
 		return this.host.screenStyler.styleLineSegments(row, layout.text, width, {
-			foreground: this.host.theme.colors.statusForeground,
+			foreground: INACTIVE_TAB_FOREGROUND,
+			background: TAB_PANEL_BACKGROUND,
 		}, layout.segments);
 	}
 
@@ -205,28 +232,43 @@ export class TabLineRenderer {
 
 	private addButtonSegments(tab: SessionTab, button: TabButtonLayout, textOffset: number, segments: StyledSegment[]): void {
 		const statusStyle = this.statusIndicatorStyle(tab);
-		if (tab.status !== "active") {
-			this.pushSegment(segments, textOffset + button.statusStart, textOffset + button.statusEnd, {
-				...statusStyle,
-			});
-			this.pushSegment(segments, textOffset + button.closeStart, textOffset + button.closeEnd, {
-				foreground: this.host.theme.colors.muted,
-			});
-			return;
-		}
-
 		const statusStart = textOffset + button.statusStart;
 		const statusEnd = textOffset + button.statusEnd;
 		const closeStart = textOffset + button.closeStart;
 		const closeEnd = textOffset + button.closeEnd;
 		const end = textOffset + button.text.length;
+		if (tab.status !== "active") {
+			this.pushSegment(segments, statusStart, statusEnd, {
+				...statusStyle,
+			});
+			this.pushSegment(segments, statusEnd, closeStart, {
+				foreground: INACTIVE_TAB_FOREGROUND,
+			});
+			this.pushSegment(segments, closeStart, closeEnd, {
+				foreground: INACTIVE_TAB_FOREGROUND,
+			});
+			this.pushSegment(segments, closeEnd, end, {
+				foreground: INACTIVE_TAB_FOREGROUND,
+			});
+			return;
+		}
 
 		this.pushSegment(segments, statusStart, statusEnd, {
 			...statusStyle,
+			background: this.host.theme.colors.background,
 		});
-		this.pushSegment(segments, statusEnd, closeStart, { foreground: this.host.theme.colors.selectionForeground });
-		this.pushSegment(segments, closeStart, closeEnd, { foreground: this.host.theme.colors.muted });
-		this.pushSegment(segments, closeEnd, end, { foreground: this.host.theme.colors.selectionForeground });
+		this.pushSegment(segments, statusEnd, closeStart, {
+			foreground: this.host.theme.colors.selectionForeground,
+			background: this.host.theme.colors.background,
+		});
+		this.pushSegment(segments, closeStart, closeEnd, {
+			foreground: this.host.theme.colors.muted,
+			background: this.host.theme.colors.background,
+		});
+		this.pushSegment(segments, closeEnd, end, {
+			foreground: this.host.theme.colors.selectionForeground,
+			background: this.host.theme.colors.background,
+		});
 	}
 
 	private statusIndicatorStyle(tab: SessionTab): Omit<StyledSegment, "start" | "end"> {
@@ -251,6 +293,21 @@ export class TabLineRenderer {
 		}
 
 		return APP_ICONS.checkCircle;
+	}
+
+	private terminalBackgroundColor(): string {
+		return this.host.theme.colors.background || "#000000";
+	}
+
+	private tabSeparatorText(previousTabActive: boolean, currentTabActive: boolean): string {
+		if (currentTabActive) return ACTIVE_TAB_LEFT_EDGE;
+		if (previousTabActive) return ACTIVE_TAB_RIGHT_EDGE;
+		return TAB_SEPARATOR;
+	}
+
+	private newTabPrefixText(): string {
+		if (this.host.tabs.length === 0) return EMPTY_NEW_TAB_PREFIX;
+		return this.host.tabs.at(-1)?.status === "active" ? ACTIVE_TAB_RIGHT_EDGE : TAB_SEPARATOR;
 	}
 
 	private pushSegment(
