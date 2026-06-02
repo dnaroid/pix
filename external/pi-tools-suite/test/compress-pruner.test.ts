@@ -767,6 +767,26 @@ describe("DCP pruning effectiveness", () => {
     expect(state.compressionBlocks).toHaveLength(0);
   });
 
+  test("compress tool explains stale or unknown range IDs with current ID diagnostics", async () => {
+    const state = createState();
+    state.messageIdSnapshot.set("m001", 1);
+    state.messageMetaSnapshot.set("m001", { timestamp: 1, role: "assistant" });
+    state.compressionBlocks = [block(7, 10, 20)];
+
+    let registeredTool: any;
+    registerCompressTool({ registerTool: (tool: any) => { registeredTool = tool } } as any, state, config());
+
+    await expect(registeredTool.execute(
+      "tool-call",
+      { topic: "Stale", ranges: [{ startId: "m015", endId: "m001", summary: "old" }] },
+      undefined,
+      undefined,
+      { ui: { notify() {} } },
+    )).rejects.toThrow(/Unknown message ID: m015[\s\S]*Current raw message IDs: m001[\s\S]*Current active block IDs: b7 "Block 7"[\s\S]*use the corresponding bN block ID/i);
+
+    expect(state.compressionBlocks).toHaveLength(1);
+  });
+
   test("compress tool reports per-operation savings and Pi context usage", async () => {
     const state = createState();
     state.tokensSaved = 10_000;
@@ -955,6 +975,7 @@ describe("DCP pruning effectiveness", () => {
     expect(result.details.skippedMessages).toBe(4);
     expect(result.details.skippedMessageIssues.join("\n")).toContain("selected more than once");
     expect(result.details.skippedMessageIssues.join("\n")).toContain("protected by compress.protectUserMessages");
+    expect(result.details.skippedMessageIssues.join("\n")).toContain("Current raw message IDs: m001, m002.");
 
     const allSkippedState = createState();
     allSkippedState.messageMetaSnapshot.set("m001", { timestamp: 1, role: "user" });

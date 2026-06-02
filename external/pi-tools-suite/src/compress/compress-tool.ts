@@ -13,6 +13,7 @@ import { safeGetContextUsage } from "../context-usage.js"
 import {
   createRangeCompressionBlock,
   findCoveredAndPartialBlocks,
+  formatCompressionIdDiagnostics,
   getMessageMeta,
   resolveAnchorBoundary,
   resolveIdToBoundary,
@@ -80,9 +81,18 @@ function formatSkippedMessages(issues: MessageSkipIssue[]): string[] {
     "already-compressed": "already belongs to an active compression block",
   }
 
-  return Array.from(grouped.entries()).map(([kind, ids]) =>
-    `${ids.join(", ")} ${descriptions[kind]}.`,
-  )
+  return Array.from(grouped.entries()).map(([kind, ids]) => {
+    const details = [
+      ...new Set(
+        issues
+          .filter((issue) => issue.kind === kind)
+          .map((issue) => issue.detail)
+          .filter((detail): detail is string => typeof detail === "string" && detail.trim().length > 0),
+      ),
+    ]
+    const suffix = details.length > 0 ? `\n${details.join("\n")}` : ""
+    return `${ids.join(", ")} ${descriptions[kind]}.${suffix}`
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -232,7 +242,13 @@ export function registerCompressTool(
 
         const meta = getMessageMeta(messageId, state)
         if (!meta) {
-          skippedMessageIssues.push({ kind: "unknown", messageId })
+          skippedMessageIssues.push({
+            kind: "unknown",
+            messageId,
+            detail:
+              "The ID is not present in the current DCP snapshot; it may be stale after compression, pruning, reload, or session switching.\n" +
+              formatCompressionIdDiagnostics(state),
+          })
           continue
         }
         if (meta.blockId !== undefined) {

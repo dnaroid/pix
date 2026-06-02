@@ -38,6 +38,65 @@ export interface ResolvedCompressionBoundary {
 export interface ResolvedCompressionAnchor extends ResolvedCompressionBoundary {}
 
 const BLOCK_PLACEHOLDER_RE = /\(b(\d+)\)|\{block_(\d+)\}/gi
+const MAX_DIAGNOSTIC_IDS = 24
+
+function idSortKey(id: string): [number, string] {
+  const match = id.match(/^(\D+)(\d+)$/)
+  if (!match) return [Number.MAX_SAFE_INTEGER, id]
+  return [Number.parseInt(match[2]!, 10), match[1]!.toLowerCase()]
+}
+
+function sortIds(ids: string[]): string[] {
+  return [...ids].sort((a, b) => {
+    const [aNumber, aPrefix] = idSortKey(a)
+    const [bNumber, bPrefix] = idSortKey(b)
+    return aNumber - bNumber || aPrefix.localeCompare(bPrefix) || a.localeCompare(b)
+  })
+}
+
+function compactList(items: string[], maxItems = MAX_DIAGNOSTIC_IDS): string {
+  if (items.length === 0) return "none"
+  if (items.length <= maxItems) return items.join(", ")
+
+  const headCount = Math.max(1, Math.floor(maxItems * 0.65))
+  const tailCount = Math.max(1, maxItems - headCount)
+  return `${items.slice(0, headCount).join(", ")}, …, ${items.slice(-tailCount).join(", ")} (${items.length} total)`
+}
+
+function quoteTopic(topic: string): string {
+  const singleLine = topic.replace(/\s+/g, " ").trim()
+  if (!singleLine) return ""
+  const truncated = singleLine.length > 48 ? `${singleLine.slice(0, 47)}…` : singleLine
+  return ` "${truncated.replace(/"/g, "'")}"`
+}
+
+export function formatCompressionIdDiagnostics(state: DcpState): string {
+  const rawIds = sortIds([
+    ...new Set([
+      ...state.messageIdSnapshot.keys(),
+      ...state.messageMetaSnapshot.keys(),
+    ]),
+  ])
+  const blockIds = state.compressionBlocks
+    .filter((block) => block.active)
+    .sort((a, b) => a.id - b.id)
+    .map((block) => `b${block.id}${quoteTopic(block.topic)}`)
+
+  return [
+    `Current raw message IDs: ${compactList(rawIds)}.`,
+    `Current active block IDs: ${compactList(blockIds)}.`,
+    "Use only IDs from the latest visible context. If a raw range was already compressed, use the corresponding bN block ID instead of stale mNNN IDs.",
+  ].join("\n")
+}
+
+export function unknownCompressionIdError(rawId: string, state: DcpState): Error {
+  const id = rawId.trim()
+  return new Error(
+    `Unknown message ID: ${id}.\n` +
+    "The ID is not present in the current DCP snapshot; it may be stale after compression, pruning, reload, or session switching.\n" +
+    formatCompressionIdDiagnostics(state),
+  )
+}
 
 function formatRestoredBlock(block: CompressionBlock): string {
   return `[Previously compressed: ${block.topic}]\n${block.summary}`
@@ -315,7 +374,7 @@ export function resolveIdToBoundary(
   if (blockMatch) {
     const blockId = parseInt(blockMatch[1]!, 10)
     const block = state.compressionBlocks.find((b) => b.id === blockId && b.active)
-    if (!block) throw new Error(`Unknown message ID: ${id}`)
+    if (!block) throw unknownCompressionIdError(id, state)
     return {
       timestamp: block[field],
       stableId: field === "startTimestamp" ? block.startMessageId : block.endMessageId,
@@ -326,7 +385,7 @@ export function resolveIdToBoundary(
   if (meta) return { timestamp: meta.timestamp, stableId: meta.stableId }
 
   const ts = state.messageIdSnapshot.get(id)
-  if (ts === undefined) throw new Error(`Unknown message ID: ${id}`)
+  if (ts === undefined) throw unknownCompressionIdError(id, state)
   return { timestamp: ts }
 }
 
