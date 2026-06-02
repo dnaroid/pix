@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { CommandConfig, PathPlaceholders, ResolvedCommand } from "./types";
 import { applyTemplate, applyTemplateArray, applyTemplateRecord } from "./template";
+import { matchesGlob } from "./glob";
 
 export function expandHome(input: string): string {
   if (input === "~") return process.env.HOME ?? input;
@@ -26,7 +27,16 @@ export function isSubPathOrSame(parent: string, child: string): boolean {
 }
 
 export function markerExists(candidateDir: string, marker: string): boolean {
-  return fs.existsSync(path.resolve(candidateDir, marker));
+  if (!/[?*[]/.test(marker)) return fs.existsSync(path.resolve(candidateDir, marker));
+
+  const markerDir = path.dirname(marker);
+  const markerPattern = path.basename(marker);
+  const absoluteMarkerDir = path.resolve(candidateDir, markerDir === "." ? "" : markerDir);
+  try {
+    return fs.readdirSync(absoluteMarkerDir).some((entry) => matchesGlob(markerPattern, entry));
+  } catch {
+    return false;
+  }
 }
 
 export function findProjectRoot(filePath: string, rootMarkers: string[] | undefined, fallbackRoot: string): string | undefined {

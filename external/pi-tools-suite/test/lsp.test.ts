@@ -184,18 +184,23 @@ function writeGlobalLspConfig(options: {
 	rootMarkers?: string[];
 	diagnosticsWaitMs?: number;
 }) {
-	fs.writeFileSync(path.join(options.agentDir, "lsp.json"), JSON.stringify({
-		servers: [{
-			id: "fake",
-			bin: process.execPath,
-			args: [options.serverScript, options.pidLog, options.mode ?? "basic"],
-			cwd: options.cwd,
-			include: options.include ?? ["*.ts", "**/*.ts"],
-			rootMarkers: options.rootMarkers ?? [],
-			languageIdByExtension: { ".ts": "typescript" },
-			startupTimeoutMs: 5_000,
-			diagnosticsWaitMs: options.diagnosticsWaitMs ?? 500,
-		}],
+	process.env.HOME = options.agentDir;
+	const configDir = path.join(options.agentDir, ".config", "pi");
+	fs.mkdirSync(configDir, { recursive: true });
+	fs.writeFileSync(path.join(configDir, "pi-tools-suite.jsonc"), JSON.stringify({
+		lsp: {
+			servers: [{
+				id: "fake",
+				bin: process.execPath,
+				args: [options.serverScript, options.pidLog, options.mode ?? "basic"],
+				cwd: options.cwd,
+				include: options.include ?? ["*.ts", "**/*.ts"],
+				rootMarkers: options.rootMarkers ?? [],
+				languageIdByExtension: { ".ts": "typescript" },
+				startupTimeoutMs: 5_000,
+				diagnosticsWaitMs: options.diagnosticsWaitMs ?? 500,
+			}],
+		},
 	}), "utf8");
 }
 
@@ -220,6 +225,9 @@ describe.serial("LSP shared helpers", () => {
 		expect(paths.normalizeRelativePath(`src${path.sep}a.ts`)).toBe("src/a.ts");
 		expect(paths.filePathToUri(file)).toStartWith("file://");
 		expect(paths.uriToFilePath(paths.filePathToUri(file))).toBe(file);
+		fs.mkdirSync(path.join(cwd, "nested"), { recursive: true });
+		fs.writeFileSync(path.join(cwd, "demo.csproj"), "<Project />");
+		expect(paths.findProjectRoot(path.join(cwd, "nested", "Program.cs"), ["*.csproj"], cwd)).toBe(cwd);
 
 		const command = paths.resolveCommand("ts", { id: "ts", bin: "node_modules/.bin/tsserver", args: ["--stdio", "{relFile}"], cwd: "{root}", env: { FILE: "{file}" }, config: ".pi/lsp.json" } as any, { workspace: cwd, root: cwd, file });
 		expect(command.bin).toBe(path.join(cwd, "node_modules/.bin/tsserver"));
@@ -285,6 +293,34 @@ describe.serial("LSP shared helpers", () => {
 		expect(await askProjectConfigTrust(rejectedOptions)).toEqual({ trusted: false, persist: false, reason: "project-local config rejected by user" });
 		expect(await askProjectConfigTrust(rejectedOptions)).toEqual({ trusted: false, persist: false, reason: "project-local config rejected by user" });
 		expect(prompts).toBe(3);
+	});
+
+	test.serial("loads LSP servers from shared pi-tools-suite config instead of agent lsp.json", async () => {
+		const home = tempDir();
+		const agentDir = tempDir();
+		process.env.HOME = home;
+		process.env.PI_AGENT_DIR = agentDir;
+		fs.mkdirSync(path.join(agentDir), { recursive: true });
+		fs.writeFileSync(path.join(agentDir, "lsp.json"), JSON.stringify({ servers: [{ id: "old-pix-lsp", bin: "old" }] }), "utf8");
+		fs.mkdirSync(path.join(home, ".config", "pi"), { recursive: true });
+		fs.writeFileSync(path.join(home, ".config", "pi", "pi-tools-suite.jsonc"), `{
+			// LSP config lives in the shared pi-tools-suite config.
+			"lsp": {
+				"servers": [{
+					"id": "shared-lsp",
+					"bin": "node",
+					"include": ["**/*.ts"],
+					"rootMarkers": ["package.json"]
+				}]
+			}
+		}\n`, "utf8");
+
+		const { loadLspConfig } = await import("../src/lsp/_shared/config.js");
+		const loaded = await loadLspConfig({ cwd: home } as any);
+
+		expect(loaded.items.map((item) => item.id)).toEqual(["shared-lsp"]);
+		expect(loaded.layers.map((layer) => layer.path)).toEqual([path.join(home, ".config", "pi", "pi-tools-suite.jsonc")]);
+		expect(loaded.warnings).toEqual([]);
 	});
 });
 

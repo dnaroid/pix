@@ -1,12 +1,19 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { parse as parseJsonc } from "jsonc-parser";
+import { getPiToolsSuiteUserConfigPath } from "../../config";
 import { findUp } from "./paths";
 import { askProjectConfigTrust, sha256 } from "./trust";
 import type { ConfigLayer, LoadedConfig, LspConfigFile, LspServerConfig, MatchableConfig } from "./types";
 
-function defaultAgentDir(): string {
-  return process.env.PI_AGENT_DIR ?? path.join(process.env.HOME ?? "", ".pi", "agent");
+function getPiConfigDir(): string | undefined {
+  const configured = process.env.PI_CONFIG_DIR;
+  return configured && configured.trim() !== "" ? configured : undefined;
+}
+
+function findProjectSuiteConfig(startDir: string): string | undefined {
+  return findUp(startDir, path.join(".pi", "pi-tools-suite.jsonc"));
 }
 
 function asObject(value: unknown): Record<string, unknown> | undefined {
@@ -78,9 +85,16 @@ function parseLspItems(parsed: unknown): LspServerConfig[] {
   return out;
 }
 
-async function readJsonLayer<TItem extends MatchableConfig>(options: {
+function extractLspConfig(parsed: unknown): unknown {
+  const root = asObject(parsed);
+  if (!root) return undefined;
+  return root.lsp;
+}
+
+async function readJsoncLayer<TItem extends MatchableConfig>(options: {
   scope: "global" | "project";
   filePath: string;
+  selectConfig?: (parsed: unknown) => unknown;
   parseItems: (parsed: unknown) => TItem[];
 }): Promise<ConfigLayer<TItem> | undefined> {
   let raw: string;
@@ -91,14 +105,19 @@ async function readJsonLayer<TItem extends MatchableConfig>(options: {
     throw error;
   }
 
-  const parsed = JSON.parse(raw) as unknown;
+  const parsed = parseJsonc(raw) as unknown;
+  const selected = options.selectConfig ? options.selectConfig(parsed) : parsed;
+  if (selected === undefined) return undefined;
+  const items = options.parseItems(selected);
+  if (items.length === 0) return undefined;
+
   return {
     scope: options.scope,
     path: options.filePath,
     dir: path.dirname(options.filePath),
     raw,
     hash: sha256(raw),
-    items: options.parseItems(parsed),
+    items,
   };
 }
 
@@ -123,19 +142,25 @@ function binariesForLsp(items: LspServerConfig[]): string[] {
 export async function loadLspConfig(ctx: ExtensionContext): Promise<LoadedConfig<LspServerConfig>> {
   const warnings: string[] = [];
   const layers: ConfigLayer<LspServerConfig>[] = [];
-  const globalPath = path.join(defaultAgentDir(), "lsp.json");
+  const piConfigDir = getPiConfigDir();
+  const globalPaths = [
+    getPiToolsSuiteUserConfigPath(process.env.HOME),
+    piConfigDir ? path.join(piConfigDir, "pi-tools-suite.jsonc") : undefined,
+  ].filter((item): item is string => typeof item === "string");
 
-  try {
-    const globalLayer = await readJsonLayer({ scope: "global", filePath: globalPath, parseItems: parseLspItems });
-    if (globalLayer) layers.push(globalLayer);
-  } catch (error) {
-    warnings.push(`Failed to load global lsp config: ${(error as Error).message}`);
+  for (const globalPath of globalPaths) {
+    try {
+      const globalLayer = await readJsoncLayer({ scope: "global", filePath: globalPath, selectConfig: extractLspConfig, parseItems: parseLspItems });
+      if (globalLayer) layers.push(globalLayer);
+    } catch (error) {
+      warnings.push(`Failed to load global lsp config ${globalPath}: ${(error as Error).message}`);
+    }
   }
 
-  const projectPath = findUp(ctx.cwd, path.join(".pi", "lsp.json"));
+  const projectPath = findProjectSuiteConfig(ctx.cwd);
   if (projectPath) {
     try {
-      const projectLayer = await readJsonLayer({ scope: "project", filePath: projectPath, parseItems: parseLspItems });
+      const projectLayer = await readJsoncLayer({ scope: "project", filePath: projectPath, selectConfig: extractLspConfig, parseItems: parseLspItems });
       if (projectLayer) {
         const decision = await askProjectConfigTrust({
           ctx,

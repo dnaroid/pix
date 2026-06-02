@@ -24,6 +24,16 @@ describe("ExtensionUiController custom UI", () => {
 		assert.equal(statuses.restored, 4);
 	});
 
+	it("renders after extensions update the terminal title", () => {
+		const { controller, renders } = createController();
+		const ctx = controller.createExtensionUIContext();
+
+		ctx.setTitle("pi — generated session title");
+
+		assert.equal(process.title, "pi — generated session title");
+		assert.equal(renders.count, 1);
+	});
+
 	it("renders focused custom UI in the editor area and routes terminal input to it", async () => {
 		const { controller, renders } = createController();
 		const ctx = controller.createExtensionUIContext();

@@ -267,6 +267,7 @@ export class ExtensionUiController {
 			setHeader: () => undefined,
 			setTitle: (title) => {
 				process.title = title;
+				renderIfRunning();
 			},
 			custom: (async <T,>(factory: CustomUiFactory<T>) => await this.showCustomUi(factory)) as PixExtensionUIContext["custom"],
 			pasteToEditor: (text) => {

@@ -121,6 +121,9 @@ export class AppSessionLifecycleController {
 	async bindCurrentSession(): Promise<void> {
 		const runtime = this.requireRuntime();
 		this.unsubscribe?.();
+		this.unsubscribe = runtime.session.subscribe((event) => {
+			this.host.handleSessionEvent(event);
+		});
 		this.host.closeSdkMenuForBind();
 		this.host.clearExtensionWidgets();
 		await runtime.session.bindExtensions({
@@ -128,9 +131,6 @@ export class AppSessionLifecycleController {
 			commandContextActions: this.host.createExtensionCommandContextActions(runtime),
 			shutdownHandler: this.host.extensionShutdownHandler(),
 			onError: (error) => this.host.handleExtensionError(error),
-		});
-		this.unsubscribe = runtime.session.subscribe((event) => {
-			this.host.handleSessionEvent(event);
 		});
 	}
 
