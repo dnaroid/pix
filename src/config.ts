@@ -45,6 +45,16 @@ export type PromptEnhancerConfig = {
 export type AutocompleteConfig = {
 	/** Empty string disables inline LLM autocomplete. */
 	modelRef: string;
+	/** Delay after typing before asking the model. */
+	debounceMs: number;
+	/** Hard timeout for a best-effort completion request. */
+	timeoutMs: number;
+	/** Maximum output tokens requested from the provider. */
+	maxTokens: number;
+	/** Approximate maximum input prompt tokens, including system prompt and optional history. */
+	maxPromptTokens: number;
+	/** Number of recent active-session user/assistant messages to include as context. */
+	includeRecentMessages: number;
 };
 
 export type DefaultModelConfig = {
@@ -139,6 +149,11 @@ const DEFAULT_PROMPT_ENHANCER: PromptEnhancerConfig = {
 
 const DEFAULT_AUTOCOMPLETE: AutocompleteConfig = {
 	modelRef: "zai/glm-5-turbo",
+	debounceMs: 350,
+	timeoutMs: 3000,
+	maxTokens: 48,
+	maxPromptTokens: 1200,
+	includeRecentMessages: 0,
 };
 
 const DEFAULT_MODEL_COLORS: ModelColorsConfig = {
@@ -225,15 +240,30 @@ function extractPromptEnhancerConfig(raw: unknown): PromptEnhancerConfig | undef
 function extractAutocompleteConfig(raw: unknown): AutocompleteConfig | undefined {
 	if (!isPlainObject(raw)) return undefined;
 	const autocomplete = raw.autocomplete ?? raw.autoComplete;
-	if (typeof autocomplete === "string") return { modelRef: autocomplete.trim() };
+	if (typeof autocomplete === "string") return { ...DEFAULT_AUTOCOMPLETE, modelRef: autocomplete.trim() };
 	if (!isPlainObject(autocomplete)) return undefined;
 
-	const modelRef = typeof autocomplete.modelRef === "string"
-		? autocomplete.modelRef.trim()
-		: typeof autocomplete.model === "string"
-			? autocomplete.model.trim()
-			: undefined;
-	return modelRef === undefined ? undefined : { modelRef };
+	const modelRef = autocompleteModelRef(autocomplete);
+	return {
+		...DEFAULT_AUTOCOMPLETE,
+		...(modelRef === undefined ? {} : { modelRef }),
+		debounceMs: numberInRange(autocomplete.debounceMs, DEFAULT_AUTOCOMPLETE.debounceMs, 100, 2_000),
+		timeoutMs: numberInRange(autocomplete.timeoutMs, DEFAULT_AUTOCOMPLETE.timeoutMs, 250, 10_000),
+		maxTokens: numberInRange(autocomplete.maxTokens, DEFAULT_AUTOCOMPLETE.maxTokens, 8, 256),
+		maxPromptTokens: numberInRange(autocomplete.maxPromptTokens, DEFAULT_AUTOCOMPLETE.maxPromptTokens, 256, 16_000),
+		includeRecentMessages: numberInRange(
+			autocomplete.includeRecentMessages ?? autocomplete.recentMessages,
+			DEFAULT_AUTOCOMPLETE.includeRecentMessages,
+			0,
+			20,
+		),
+	};
+}
+
+function autocompleteModelRef(autocomplete: Record<string, unknown>): string | undefined {
+	if (typeof autocomplete.modelRef === "string") return autocomplete.modelRef.trim();
+	if (typeof autocomplete.model === "string") return autocomplete.model.trim();
+	return undefined;
 }
 
 function extractDefaultModelConfig(raw: unknown): DefaultModelConfig | undefined {
@@ -339,6 +369,12 @@ function nonEmptyString(value: unknown): string | undefined {
 	return trimmed.length > 0 ? trimmed : undefined;
 }
 
+function numberInRange(value: unknown, fallback: number, min: number, max: number): number {
+	if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+	const rounded = Math.round(value);
+	return Math.min(max, Math.max(min, rounded));
+}
+
 function defaultPixConfig(): PixConfig {
 	return {
 		toolRenderer: DEFAULT_TOOL_RENDERER,
@@ -394,7 +430,7 @@ export function savePixAutocompleteModel(modelRef: string): AutocompleteConfig {
 	const updated = upsertPixAutocompleteModelInJsonc(source, modelRef);
 	mkdirSync(dirname(configPath), { recursive: true });
 	writeFileSync(configPath, updated);
-	return extractAutocompleteConfig(parseJsonc(updated)) ?? { modelRef: modelRef.trim() };
+	return extractAutocompleteConfig(parseJsonc(updated)) ?? { ...DEFAULT_AUTOCOMPLETE, modelRef: modelRef.trim() };
 }
 
 export function upsertPixDefaultModelInJsonc(source: string, modelRef: string): string {

@@ -57,6 +57,11 @@ describe("config helpers", () => {
 		]);
 		assert.equal(config.promptEnhancer.modelRef, "zai/glm-5-turbo");
 		assert.equal(config.autocomplete.modelRef, "zai/glm-5-turbo");
+		assert.equal(config.autocomplete.debounceMs, 350);
+		assert.equal(config.autocomplete.timeoutMs, 3000);
+		assert.equal(config.autocomplete.maxTokens, 48);
+		assert.equal(config.autocomplete.maxPromptTokens, 1200);
+		assert.equal(config.autocomplete.includeRecentMessages, 0);
 		assert.equal(resolveDefaultModelRef(config), "openai-codex/gpt-5.5:medium");
 		assert.equal(config.modelColors.rules["zai/*"], "success");
 		assert.equal(config.iconTheme.name, "nerdFont");
@@ -76,7 +81,7 @@ describe("config helpers", () => {
 			"modelColors": { "zai/*": "#22c55e", "antigravity/*": "#f97316", "antigravity/antigravity-claude-*": "#ef4444" },
 			"iconTheme": "fallback",
 			"promptEnhancer": { "modelRef": "zai/custom-enhancer" },
-			"autocomplete": { "modelRef": "zai/custom-autocomplete" },
+			"autocomplete": { "modelRef": "zai/custom-autocomplete", "debounceMs": 125, "timeoutMs": 2600, "maxTokens": 64, "maxPromptTokens": 1800, "includeRecentMessages": 9 },
 			"dictation": {
 				"language": "ru",
 				"languages": {
@@ -95,6 +100,11 @@ describe("config helpers", () => {
 		assert.equal(resolveDefaultModelRef(loaded), "openai-codex/gpt-5.5:medium");
 		assert.equal(loaded.promptEnhancer.modelRef, "zai/custom-enhancer");
 		assert.equal(loaded.autocomplete.modelRef, "zai/custom-autocomplete");
+		assert.equal(loaded.autocomplete.debounceMs, 125);
+		assert.equal(loaded.autocomplete.timeoutMs, 2600);
+		assert.equal(loaded.autocomplete.maxTokens, 64);
+		assert.equal(loaded.autocomplete.maxPromptTokens, 1800);
+		assert.equal(loaded.autocomplete.includeRecentMessages, 9);
 		assert.equal(resolveModelColor("zai/glm-5-turbo", loaded.modelColors), "#22c55e");
 		assert.equal(resolveModelColor("antigravity/antigravity-claude-sonnet-4", loaded.modelColors), "#ef4444");
 		assert.equal(resolveModelColor("antigravity/gemini-3-pro", loaded.modelColors), "#f97316");
@@ -115,6 +125,8 @@ describe("config helpers", () => {
 		assert.equal(resolveDefaultModelRef(partial), undefined);
 		assert.equal(partial.promptEnhancer.modelRef, "zai/glm-5-turbo");
 		assert.equal(partial.autocomplete.modelRef, "zai/glm-5-turbo");
+		assert.equal(partial.autocomplete.maxPromptTokens, 1200);
+		assert.equal(partial.autocomplete.includeRecentMessages, 0);
 		assert.equal(partial.modelColors.rules["zai/*"], "success");
 		assert.equal(partial.iconTheme.name, "nerdFont");
 		assert.deepEqual(Object.keys(partial.dictation.languages), ["en", "ru"]);
@@ -132,11 +144,18 @@ describe("config helpers", () => {
 			"autocomplete": { "modelRef": "zai/glm-5-turbo" }
 		}`);
 
-		assert.deepEqual(savePixAutocompleteModel("zai/custom-complete"), { modelRef: "zai/custom-complete" });
+		assert.deepEqual(savePixAutocompleteModel("zai/custom-complete"), {
+			modelRef: "zai/custom-complete",
+			debounceMs: 350,
+			timeoutMs: 3000,
+			maxTokens: 48,
+			maxPromptTokens: 1200,
+			includeRecentMessages: 0,
+		});
 		assert.match(readFileSync(testConfigPath, "utf8"), /keep comments/u);
 		assert.equal(loadPixConfig().autocomplete.modelRef, "zai/custom-complete");
 
-		assert.deepEqual(savePixAutocompleteModel(""), { modelRef: "" });
+		assert.equal(savePixAutocompleteModel("").modelRef, "");
 		assert.equal(loadPixConfig().autocomplete.modelRef, "");
 		assert.match(upsertPixAutocompleteModelInJsonc(`{}`, "zai/glm-5-turbo"), /"autocomplete"/u);
 	});

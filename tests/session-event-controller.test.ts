@@ -145,4 +145,50 @@ describe("AppSessionEventController", () => {
 		assert.equal(entries[0]?.kind === "assistant" ? entries[0].text : undefined, "Before tool");
 		assert.equal(entries[2]?.kind === "assistant" ? entries[2].text : undefined, "After tool");
 	});
+
+	it("buffers split dcp metadata markers so suffix chunks do not leak", () => {
+		const entries: Entry[] = [];
+		const controller = createController(entries);
+
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "text_delta", delta: "[d" },
+		} as unknown as AgentSessionEvent);
+		assert.equal(entries.length, 0);
+
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "text_delta", delta: "cp-id]: # (m051)\n" },
+		} as unknown as AgentSessionEvent);
+		assert.equal(entries.length, 0);
+
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "text_delta", delta: "answer" },
+		} as unknown as AgentSessionEvent);
+
+		assert.equal(entries.length, 1);
+		assert.equal(entries[0]?.kind === "assistant" ? entries[0].text : undefined, "answer");
+	});
+
+	it("holds trailing partial dcp marker lines while continuing visible text", () => {
+		const entries: Entry[] = [];
+		const controller = createController(entries);
+
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "text_delta", delta: "answer\n[dcp-block" },
+		} as unknown as AgentSessionEvent);
+
+		assert.equal(entries.length, 1);
+		assert.equal(entries[0]?.kind === "assistant" ? entries[0].text : undefined, "answer\n");
+
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "text_delta", delta: "-id]: # (b4)\nnext" },
+		} as unknown as AgentSessionEvent);
+
+		assert.equal(entries.length, 1);
+		assert.equal(entries[0]?.kind === "assistant" ? entries[0].text : undefined, "answer\nnext");
+	});
 });

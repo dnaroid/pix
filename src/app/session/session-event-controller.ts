@@ -1,6 +1,5 @@
 import type { AgentSessionEvent, AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 import type { ImageContent } from "../../input-editor.js";
-import { isOnlyHiddenMetadata } from "../../markdown-format.js";
 import type { ConversationViewport } from "../rendering/conversation-viewport.js";
 import { createId } from "../id.js";
 import { extractImageContents, renderContent, renderUserMessageContent, stringifyUnknown } from "../rendering/message-content.js";
@@ -18,6 +17,9 @@ type ToolEntryUpdate = {
 	isError?: boolean;
 	status?: "running" | "done";
 };
+
+const DCP_MESSAGE_REFERENCE_PREFIX = "[dcp-id]: # (m";
+const DCP_BLOCK_REFERENCE_PREFIX = "[dcp-block-id]: # (b";
 
 export type AppSessionEventControllerHost = {
 	readonly entries: Entry[];
@@ -56,6 +58,7 @@ export class AppSessionEventController {
 	private currentUserEntryId: string | undefined;
 	private currentAssistantEntryId: string | undefined;
 	private currentThinkingEntryId: string | undefined;
+	private assistantTextBuffer = "";
 
 	constructor(private readonly host: AppSessionEventControllerHost) {}
 
@@ -66,6 +69,7 @@ export class AppSessionEventController {
 		this.entryRenderVersions.clear();
 		this.currentAssistantEntryId = undefined;
 		this.currentThinkingEntryId = undefined;
+		this.assistantTextBuffer = "";
 	}
 
 	loadSessionHistory(): void {
@@ -134,6 +138,7 @@ export class AppSessionEventController {
 				break;
 			case "tool_execution_start":
 				this.finishCurrentThinkingEntry();
+				this.flushAssistantTextBuffer(true);
 				this.currentAssistantEntryId = undefined;
 				this.host.setSessionActivity("running");
 				this.prepareToolWorkspaceMutation(event.toolCallId, event.toolName, event.args);
@@ -275,6 +280,7 @@ export class AppSessionEventController {
 		}
 		if (isRecord(message) && message.role === "assistant") {
 			this.finishCurrentThinkingEntry();
+			this.flushAssistantTextBuffer(true);
 			this.clearCurrentAssistantState();
 			this.currentUserEntryId = undefined;
 		}
@@ -324,11 +330,13 @@ export class AppSessionEventController {
 				break;
 			case "done":
 				this.finishCurrentThinkingEntry();
+				this.flushAssistantTextBuffer(true);
 				this.clearCurrentAssistantState();
 				this.host.setSessionActivity(this.host.runtime()?.session.isStreaming ? "running" : "idle");
 				break;
 			case "error":
 				this.finishCurrentThinkingEntry();
+				this.flushAssistantTextBuffer(true);
 				this.host.setSessionActivity(this.host.runtime()?.session.isStreaming ? "running" : "idle");
 				this.addEntry({ id: createId("error"), kind: "error", text: assistantEvent.error.errorMessage ?? assistantEvent.reason });
 				break;
@@ -338,25 +346,54 @@ export class AppSessionEventController {
 	}
 
 	private appendAssistantText(delta: string): void {
+		this.assistantTextBuffer += delta;
+		this.flushAssistantTextBuffer(false);
+	}
+
+	private flushAssistantTextBuffer(final: boolean): void {
+		const visibleText = this.drainAssistantTextBuffer(final);
+		if (!visibleText) return;
+
 		let entry = this.currentAssistantEntryId ? this.findEntry(this.currentAssistantEntryId) : undefined;
 		if (!entry || entry.kind !== "assistant") {
 			entry = { id: createId("assistant"), kind: "assistant", text: "" };
 			this.addEntry(entry);
 			this.currentAssistantEntryId = entry.id;
 		}
-		entry.text += delta;
-
-		if (isOnlyHiddenMetadata(entry.text)) {
-			// Entire text is DCP markers or other hidden metadata — remove the entry to avoid layout flicker.
-			const idx = this.host.entries.indexOf(entry);
-			if (idx !== -1) this.host.entries.splice(idx, 1);
-			this.entryRenderVersions.delete(entry.id);
-			this.host.conversationViewport().deleteEntry(entry.id);
-			this.currentAssistantEntryId = undefined;
-			return;
-		}
+		entry.text += visibleText;
 
 		this.touchEntry(entry);
+	}
+
+	private drainAssistantTextBuffer(final: boolean): string {
+		let visibleText = "";
+
+		for (;;) {
+			const newlineIndex = this.assistantTextBuffer.indexOf("\n");
+			if (newlineIndex === -1) break;
+
+			const line = this.assistantTextBuffer.slice(0, newlineIndex);
+			this.assistantTextBuffer = this.assistantTextBuffer.slice(newlineIndex + 1);
+			if (shouldDropAssistantStreamLine(line, this.hasVisibleAssistantText(visibleText))) continue;
+			visibleText += `${line}\n`;
+		}
+
+		if (!this.assistantTextBuffer) return visibleText;
+
+		if (shouldHoldAssistantStreamTail(this.assistantTextBuffer)) {
+			if (final) this.assistantTextBuffer = "";
+			return visibleText;
+		}
+
+		visibleText += this.assistantTextBuffer;
+		this.assistantTextBuffer = "";
+		return visibleText;
+	}
+
+	private hasVisibleAssistantText(pendingVisibleText: string): boolean {
+		if (pendingVisibleText.length > 0) return true;
+		const entry = this.currentAssistantEntryId ? this.findEntry(this.currentAssistantEntryId) : undefined;
+		return entry?.kind === "assistant" && entry.text.length > 0;
 	}
 
 	private appendThinkingText(delta: string): void {
@@ -415,5 +452,34 @@ export class AppSessionEventController {
 	private clearCurrentAssistantState(): void {
 		this.currentAssistantEntryId = undefined;
 		this.currentThinkingEntryId = undefined;
+		this.assistantTextBuffer = "";
 	}
+}
+
+function shouldDropAssistantStreamLine(line: string, hasVisibleText: boolean): boolean {
+	if (line.trim().length === 0 && !hasVisibleText) return true;
+	return isHiddenMarkdownMetadataLine(line);
+}
+
+function shouldHoldAssistantStreamTail(text: string): boolean {
+	if (text.trim().length === 0) return true;
+	return isPotentialDcpMetadataLine(text);
+}
+
+function isHiddenMarkdownMetadataLine(line: string): boolean {
+	return isMarkdownReferenceDefinition(line) || isPotentialDcpMetadataLine(line);
+}
+
+function isMarkdownReferenceDefinition(line: string): boolean {
+	return /^ {0,3}\[[^\]\n]+\]:[ \t]*\S.*$/u.test(line);
+}
+
+function isPotentialDcpMetadataLine(line: string): boolean {
+	const content = line.replace(/^ {0,3}/u, "");
+	if (content.length === 0) return false;
+	return isPotentialDcpReference(content, DCP_MESSAGE_REFERENCE_PREFIX) || isPotentialDcpReference(content, DCP_BLOCK_REFERENCE_PREFIX);
+}
+
+function isPotentialDcpReference(content: string, markerPrefix: string): boolean {
+	return markerPrefix.startsWith(content) || (content.startsWith(markerPrefix) && /^\d*\)?$/u.test(content.slice(markerPrefix.length)));
 }

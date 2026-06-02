@@ -14,10 +14,11 @@ import {
 	type AgentSessionRuntime,
 	type CreateAgentSessionRuntimeFactory,
 	type LoadExtensionsResult,
+	type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
-import { loadPixConfig, resolveDefaultModelRef } from "../config.js";
+import { loadPixConfig, resolveDefaultModelRef, type PixConfig } from "../config.js";
 import { PI_FAVORITE_MODEL_REFS } from "./constants.js";
-import { parseModelRef, parseScopedModelRef } from "./model/model-ref.js";
+import { isThinkingLevel, parseModelRef, parseScopedModelRef } from "./model/model-ref.js";
 import type { AppOptions, ScopedSessionModel, SessionModel } from "./types.js";
 
 const BUNDLED_QUESTION_EXTENSION_NAME = "question";
@@ -217,11 +218,44 @@ export type CreatePixRuntimeOptions = {
 	eventBus?: EventBus;
 };
 
+type RuntimeSessionManagerModelState = Pick<SessionManager, "getEntries" | "getBranch">;
+
+export function resolvePixRuntimeModelRef(
+	options: Pick<AppOptions, "modelRef">,
+	sessionManager: RuntimeSessionManagerModelState,
+	config: PixConfig = loadPixConfig(),
+): string | undefined {
+	if (options.modelRef) return options.modelRef;
+	const existingEntryCount = sessionManager.getEntries().length;
+	if (existingEntryCount > 0) return resolveSessionModelRefFromTail(sessionManager.getBranch());
+	return resolveDefaultModelRef(config);
+}
+
+export function resolveSessionModelRefFromTail(entries: readonly SessionEntry[]): string | undefined {
+	let modelRef: string | undefined;
+	let thinkingLevel: string | undefined;
+	for (let index = entries.length - 1; index >= 0 && (modelRef === undefined || thinkingLevel === undefined); index--) {
+		const entry = entries[index];
+		if (!entry) continue;
+		if (thinkingLevel === undefined && entry.type === "thinking_level_change" && isThinkingLevel(entry.thinkingLevel)) {
+			thinkingLevel = entry.thinkingLevel;
+		}
+		if (modelRef !== undefined) continue;
+		if (entry.type === "model_change") {
+			modelRef = `${entry.provider}/${entry.modelId}`;
+		} else if (entry.type === "message" && entry.message.role === "assistant") {
+			modelRef = `${entry.message.provider}/${entry.message.model}`;
+		}
+	}
+	if (!modelRef) return undefined;
+	return thinkingLevel ? `${modelRef}:${thinkingLevel}` : modelRef;
+}
+
 export async function createPixRuntime(options: AppOptions, runtimeOptions: CreatePixRuntimeOptions = {}): Promise<AgentSessionRuntime> {
-	const effectiveModelRef = options.modelRef ?? resolveDefaultModelRef(loadPixConfig());
-	const parsedModel = effectiveModelRef ? parseModelRef(effectiveModelRef) : undefined;
 	const agentDir = getAgentDir();
 	const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, sessionManager, sessionStartEvent }) => {
+		const effectiveModelRef = resolvePixRuntimeModelRef(options, sessionManager);
+		const parsedModel = effectiveModelRef ? parseModelRef(effectiveModelRef) : undefined;
 		await ensureBundledSkillsInstalled();
 		await ensurePiToolsSuiteExtensionInstalled({ agentDir });
 		const bundledExtensionPaths = getBundledExtensionPaths();
