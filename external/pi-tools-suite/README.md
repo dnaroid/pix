@@ -2,11 +2,10 @@
 
 Local all-in-one Pi extension package.
 
-This package keeps the former standalone extensions as ordinary source folders under `src/` and registers them through one entrypoint.
+This package keeps shared Pi tools as ordinary source folders under `src/` and registers them through one entrypoint.
 
 - `src/ast-grep` — `ast_grep` / `ast_apply`
 - `src/async-subagents` — `subagents` tool and sub-agent slash commands, including oh-my-openagent-style `/ultrawork` (`/ulw`) and `/hyperplan` orchestration prompts, plus config-defined sub-agent model/thinking/args presets selected via `/subagent-preset` from `asyncSubagents` in `~/.config/pi/pi-tools-suite.jsonc`; includes the `frontend` profile for Gemini-friendly UI/UX and visual frontend work plus the `vision` profile for screenshot/image description via `openai-codex/gpt-5.4-mini`; enforces a 30-minute per-agent execution timeout, project-wide `maxConcurrent` queueing, optional retry/backoff, and `result.json` structured metadata/chaining fields next to raw `result.md`; stores project-local run files and a registry under `.pi/subagents/` so result/status collection can recover after compaction or reload while the main session remains alive
-- `src/terminal-bell` — terminal bell, macOS attention sound, and best-effort OS notification when the main agent session returns to idle; defers the alert while sub-agents are still running or the main agent is waiting for sub-agent results
 - `src/lsp` — shared LSP diagnostics hook/library that enriches mutating tool results with diagnostics and shuts down language servers on session shutdown
 - `src/repo-discovery` — `/idx-init`, `/idx-update`, and indexed-only `repo_architecture` / `repo_structure` / `repo_ast` / `repo_search` / `repo_explain` / `repo_deps`; tools register only when the launch project has `.indexer-cli`
 - `src/antigravity-auth` — `antigravity` custom provider with Google Antigravity OAuth login, startup account list, `/antigravity-import` credential migration from opencode, `/antigravity-add-account` OAuth append into rotation, `/antigravity-account` status display, account rotation/failover, Antigravity plus Gemini CLI model registration, and streaming through the Cloud Code Assist unified gateway
@@ -19,7 +18,7 @@ This package keeps the former standalone extensions as ordinary source folders u
 
 `index.ts` is intentionally only a thin auto-discovery shim that re-exports `src/index.ts`. There is no `pi.extensions` manifest here, so local Pi auto-discovery loads the suite once via `~/.pi/agent/extensions/pi-tools-suite/index.ts` and does not double-register tools.
 
-Registration order is preserved in `src/index.ts`: ast-grep, async-subagents, terminal-bell, lsp, repo-discovery command/tool gate, antigravity-auth provider, todo, model-tools, usage, web-search, dcp, then prompt-commands. Tool metadata and active model-specific tool sets have two modes: standard and repo-aware. When `.indexer-cli` enables `repo_*`, those tools stay active ahead of overlapping lower-level aliases so the indexed discovery surface has priority.
+Registration order is preserved in `src/index.ts`: ast-grep, async-subagents, lsp, repo-discovery command/tool gate, antigravity-auth provider, todo, model-tools, usage, web-search, dcp, then prompt-commands. Tool metadata and active model-specific tool sets have two modes: standard and repo-aware. When `.indexer-cli` enables `repo_*`, those tools stay active ahead of overlapping lower-level aliases so the indexed discovery surface has priority.
 
 ## Disabling modules
 
@@ -27,14 +26,14 @@ Disable suite modules without editing `src/index.ts` via config or environment v
 
 ```jsonc
 {
-  "disabledModules": ["terminal-bell", "web-search"]
+  "disabledModules": ["web-search"]
 }
 ```
 
 Environment overrides are applied last:
 
 ```bash
-PI_TOOLS_SUITE_DISABLED_MODULES=terminal-bell,web-search pi ...
+PI_TOOLS_SUITE_DISABLED_MODULES=web-search pi ...
 PI_TOOLS_SUITE_DISABLED=1 pi ...   # disables all pi-tools-suite modules
 ```
 
@@ -152,50 +151,6 @@ Troubleshooting:
 
 Do not send secrets, tokens, private repository text, or credential-bearing URLs through these tools; Ollama may query external web services to satisfy the request.
 
-## Terminal bell / idle alert
-
-`src/terminal-bell` alerts the user when the main Pi agent returns to idle. It does not alert while sub-agents are still running or while the main agent is waiting for sub-agent results.
-
-Disable it entirely for headless runs:
-
-```bash
-HEADLESS=1 pi ...
-# or
-PI_TERMINAL_BELL_DISABLED=1 pi ...
-```
-
-Common environment options:
-
-| Variable | Effect |
-| --- | --- |
-| `PI_TERMINAL_BELL=0` | Disable terminal `\x07` bell only |
-| `PI_TERMINAL_BELL_FORCE=1` | Emit terminal bell even without TTY |
-| `PI_TERMINAL_BELL_DELAY_MS=250` | Delay before alerting after idle |
-| `PI_TERMINAL_BELL_SOUND=0` | Disable macOS `afplay` attention sound |
-| `PI_TERMINAL_BELL_SOUND=Glass` | macOS sound name or absolute `.aiff` path |
-| `PI_TERMINAL_BELL_NOTIFY=0` | Disable OS notification only |
-| `PI_TERMINAL_BELL_NOTIFY=1` | Force OS notification even outside UI mode |
-| `PI_TERMINAL_BELL_NOTIFY_TITLE=Pi` | Notification title |
-| `PI_TERMINAL_BELL_NOTIFY_MESSAGE="Session stopped"` | Notification body |
-
-macOS clickable notifications require `terminal-notifier`:
-
-```bash
-brew install terminal-notifier
-```
-
-At extension startup, the module resolves the app to activate on click from `PI_TERMINAL_BELL_NOTIFY_ACTIVATE`, `__CFBundleIdentifier`, or `TERM_PROGRAM` (Zed, iTerm2, Terminal, WezTerm, Warp, Ghostty, Kitty, Alacritty, VS Code). The resolved bundle id is passed to `terminal-notifier -activate` and to an explicit `open -b <bundleId>` click action.
-
-macOS-specific notification options:
-
-| Variable | Effect |
-| --- | --- |
-| `PI_TERMINAL_BELL_NOTIFY_ACTIVATE=dev.zed.Zed` | Override click activation bundle id |
-| `PI_TERMINAL_BELL_NOTIFY_ACTIVATE=0` | Disable click activation |
-| `PI_TERMINAL_BELL_NOTIFIER=/path/to/terminal-notifier` | Use a custom notifier binary |
-| `PI_TERMINAL_BELL_NOTIFY_SENDER=1` | Also pass `-sender <bundleId>` (can break click handling on some macOS versions) |
-| `PI_TERMINAL_BELL_NOTIFY_OSASCRIPT=1` | Use the `osascript` fallback when `terminal-notifier` is missing; clicking these notifications can open Script Editor |
-
 ## Layout
 
 ```text
@@ -206,7 +161,6 @@ pi-tools-suite/
     index.ts
     ast-grep/
     async-subagents/
-    terminal-bell/
     lsp/
     repo-discovery/
     antigravity-auth/

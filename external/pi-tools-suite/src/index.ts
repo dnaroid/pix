@@ -12,7 +12,6 @@ type ExtensionModule = {
 const MODULES: Array<{ name: string; load: () => Promise<ExtensionModule> }> = [
 	{ name: "ast-grep", load: () => import("./ast-grep/index") },
 	{ name: "async-subagents", load: () => import("./async-subagents/index") },
-	{ name: "terminal-bell", load: () => import("./terminal-bell/index") },
 	{ name: "lsp", load: () => import("./lsp/index") },
 	{ name: "repo-discovery", load: () => import("./repo-discovery/index") },
 	{ name: "antigravity-auth", load: () => import("./antigravity-auth/index") },

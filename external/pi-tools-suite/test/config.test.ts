@@ -6,7 +6,7 @@ import { describe, expect, test } from "bun:test";
 import { getPiToolsSuiteUserConfigPath, loadPiToolsSuiteConfig } from "../src/config.js";
 import { DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC } from "../src/default-pi-tools-suite-config.js";
 
-const MODULES = ["terminal-bell", "usage", "dcp", "prompt-commands"];
+const MODULES = ["ast-grep", "usage", "dcp", "prompt-commands"];
 
 function tempDir(): string {
 	return mkdtempSync(join(tmpdir(), "pi-tools-suite-config-"));
@@ -26,7 +26,7 @@ describe("pi-tools-suite config", () => {
 			join(homeDir, ".config", "pi", "pi-tools-suite.jsonc"),
 			`{
 				// array and map syntaxes are both accepted
-				"disabledModules": ["terminal-bell"],
+				"disabledModules": ["ast-grep"],
 				"modules": { "usage": false, "prompt-commands": true }
 			}`,
 		);
@@ -34,7 +34,7 @@ describe("pi-tools-suite config", () => {
 		const config = loadPiToolsSuiteConfig(MODULES, { cwd, homeDir, env: {} });
 
 		expect(config.enabled).toBe(true);
-		expect(config.disabledModules).toEqual(["terminal-bell", "usage"]);
+		expect(config.disabledModules).toEqual(["ast-grep", "usage"]);
 	});
 
 	test("project config can re-enable a globally disabled module", () => {
@@ -54,10 +54,10 @@ describe("pi-tools-suite config", () => {
 		const config = loadPiToolsSuiteConfig(MODULES, {
 			cwd: tempDir(),
 			homeDir: tempDir(),
-			env: { PI_TOOLS_SUITE_DISABLED_MODULES: "terminal-bell, dcp" },
+			env: { PI_TOOLS_SUITE_DISABLED_MODULES: "ast-grep, dcp" },
 		});
 
-		expect(config.disabledModules).toEqual(["dcp", "terminal-bell"]);
+		expect(config.disabledModules).toEqual(["ast-grep", "dcp"]);
 	});
 
 	test("environment variable can disable the whole suite", () => {
@@ -80,7 +80,7 @@ describe("pi-tools-suite config", () => {
 		const content = readFileSync(configPath, "utf8");
 		expect(content).toBe(DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC);
 		expect(content).toContain('"disabledModules"');
-		expect(content).toContain('// "terminal-bell",');
+		expect(content).toContain('// "ast-grep",');
 		expect(content).toContain('// "dcp"');
 		expect(content).toContain('"asyncSubagents"');
 		expect(content).toContain('"promptCommands"');

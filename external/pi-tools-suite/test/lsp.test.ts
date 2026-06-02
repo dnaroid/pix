@@ -294,7 +294,6 @@ describe.serial("LSP library post-edit diagnostics", () => {
 		process.env.PI_TOOLS_SUITE_DISABLED_MODULES = [
 			"ast-grep",
 			"async-subagents",
-			"terminal-bell",
 			"repo-discovery",
 			"antigravity-auth",
 			"todo",

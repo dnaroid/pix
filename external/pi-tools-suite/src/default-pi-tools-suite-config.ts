@@ -5,7 +5,6 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = `{
   "disabledModules": [
     // "ast-grep",
     // "async-subagents",
-    // "terminal-bell",
     // "lsp",
     // "repo-discovery",
     // "antigravity-auth",
@@ -16,7 +15,7 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = `{
     // "dcp"
   ],
 
-  // Terminal bell notification settings.
+  // Renderer bundled terminal-bell notification settings.
   "terminalBell": {
     // Toggle terminal-bell attention signals across supported OSes:
     // terminal BEL, macOS notification sound, and system notifications
