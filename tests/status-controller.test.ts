@@ -405,9 +405,27 @@ describe("StatusLineRenderer", () => {
 			foreground: THEMES.dark.colors.info,
 		})));
 	});
+
+	it("renders a terminal bell notification toggle before all-thinking-expanded", () => {
+		const renderer = statusLineRenderer({ widgetText: "", voiceActive: false, terminalBellWidgetText: APP_ICONS.volumeOff, terminalBellSoundEnabled: false });
+		const layout = renderer.layout(40);
+		const rendered = renderer.render(1, layout, 40);
+		const target = renderer.terminalBellSoundTarget(layout, 1);
+
+		assert.ok(layout.text.endsWith(`${APP_ICONS.user} ${APP_ICONS.volumeOff} ${APP_ICONS.thinkingExpanded} ${APP_ICONS.compactTools}`));
+		assert.equal((layout.terminalBellSoundWidget?.endColumn ?? 0) + 1, layout.thinkingExpandWidget?.startColumn);
+		assert.deepEqual(target, {
+			row: 1,
+			startColumn: layout.terminalBellSoundWidget?.startColumn,
+			endColumn: layout.terminalBellSoundWidget?.endColumn,
+		});
+		assert.ok(rendered.includes(colorize(APP_ICONS.volumeOff, {
+			foreground: THEMES.dark.colors.muted,
+		})));
+	});
 });
 
-function statusLineRenderer(options: { widgetText: string; voiceActive: boolean; promptWidgetText?: string; promptActive?: boolean; promptEnabled?: boolean; sessionActivity?: "idle" | "running" | "thinking"; statusDotBright?: boolean; workspaceLabel?: string; workspaceGitBranchLabel?: string; modelUsageLabel?: string; session?: AgentSession; currentStatus?: string; thinkingLabel?: string; modelLabel?: string; modelColors?: ModelColorsConfig; userMessageJumpMenuActive?: boolean; allThinkingExpandedActive?: boolean; superCompactToolsActive?: boolean }): StatusLineRenderer {
+function statusLineRenderer(options: { widgetText: string; voiceActive: boolean; promptWidgetText?: string; promptActive?: boolean; promptEnabled?: boolean; terminalBellWidgetText?: string; terminalBellSoundEnabled?: boolean; sessionActivity?: "idle" | "running" | "thinking"; statusDotBright?: boolean; workspaceLabel?: string; workspaceGitBranchLabel?: string; modelUsageLabel?: string; session?: AgentSession; currentStatus?: string; thinkingLabel?: string; modelLabel?: string; modelColors?: ModelColorsConfig; userMessageJumpMenuActive?: boolean; allThinkingExpandedActive?: boolean; superCompactToolsActive?: boolean }): StatusLineRenderer {
 	return new StatusLineRenderer({
 		theme: THEMES.dark,
 		screenStyler: new ScreenStyler({ theme: THEMES.dark, mouseSelection: undefined }),
@@ -427,6 +445,8 @@ function statusLineRenderer(options: { widgetText: string; voiceActive: boolean;
 		promptEnhancerStatusWidgetText: () => options.promptWidgetText ?? "",
 		promptEnhancerStatusWidgetActive: () => options.promptActive ?? false,
 		promptEnhancerStatusWidgetEnabled: () => options.promptEnabled ?? true,
+		terminalBellSoundStatusWidgetText: () => options.terminalBellWidgetText ?? "",
+		terminalBellSoundStatusWidgetEnabled: () => options.terminalBellSoundEnabled ?? true,
 		voiceStatusWidgetText: () => options.widgetText,
 		voiceStatusWidgetActive: () => options.voiceActive,
 		userMessageJumpMenuActive: () => Boolean(options.userMessageJumpMenuActive),

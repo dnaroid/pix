@@ -26,6 +26,7 @@ import type {
 	StatusModelUsageTarget,
 	StatusPromptEnhancerTarget,
 	StatusSessionTarget,
+	StatusTerminalBellSoundTarget,
 	TabLineMouseTarget,
 	StatusThinkingExpandTarget,
 	StatusThinkingTarget,
@@ -90,6 +91,7 @@ export type AppMouseControllerHost = {
 	refreshModelUsageStatus(): void | Promise<void>;
 	toggleAllThinkingExpanded?(): void;
 	toggleSuperCompactTools?(): void;
+	toggleTerminalBellSound?(): void;
 	copyTextToClipboard?(text: string): void;
 	handleExtensionInputMouse(event: MouseEvent & { localRow: number; localColumn: number; width: number }): boolean;
 	render(): void;
@@ -108,6 +110,7 @@ export class AppMouseController {
 	statusUserJumpTarget: StatusUserJumpTarget | undefined;
 	statusThinkingExpandTarget: StatusThinkingExpandTarget | undefined;
 	statusCompactToolsTarget: StatusCompactToolsTarget | undefined;
+	statusTerminalBellSoundTarget: StatusTerminalBellSoundTarget | undefined;
 	statusSessionTarget: StatusSessionTarget | undefined;
 	statusPromptEnhancerTarget: StatusPromptEnhancerTarget | undefined;
 	statusVoiceMicTarget: StatusVoiceMicTarget | undefined;
@@ -154,6 +157,7 @@ export class AppMouseController {
 		if (event.button === 0 && this.withClickFlash(event, () => this.handleStatusUserJumpClick(event))) return;
 		if (event.button === 0 && this.withClickFlash(event, () => this.handleStatusThinkingExpandClick(event))) return;
 		if (event.button === 0 && this.withClickFlash(event, () => this.handleStatusCompactToolsClick(event))) return;
+		if (event.button === 0 && this.withClickFlash(event, () => this.handleStatusTerminalBellSoundClick(event))) return;
 		if (event.button === 0 && this.withClickFlash(event, () => this.handleStatusSessionClick(event))) return;
 		if (event.button === 0 && this.withClickFlash(event, () => this.handleStatusPromptEnhancerClick(event))) return;
 		if (event.button === 0 && this.withClickFlash(event, () => this.handleStatusVoiceMicClick(event))) return;
@@ -619,6 +623,15 @@ export class AppMouseController {
 		if (event.y !== target.row || event.x < target.startColumn || event.x >= target.endColumn) return false;
 
 		this.host.toggleSuperCompactTools?.();
+		return true;
+	}
+
+	private handleStatusTerminalBellSoundClick(event: MouseEvent): boolean {
+		const target = this.statusTerminalBellSoundTarget;
+		if (!target) return false;
+		if (event.y !== target.row || event.x < target.startColumn || event.x >= target.endColumn) return false;
+
+		this.host.toggleTerminalBellSound?.();
 		return true;
 	}
 

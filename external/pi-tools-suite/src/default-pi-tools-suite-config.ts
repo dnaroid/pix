@@ -16,6 +16,14 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = `{
     // "dcp"
   ],
 
+  // Terminal bell notification settings.
+  "terminalBell": {
+    // Toggle terminal-bell attention signals across supported OSes:
+    // terminal BEL, macOS notification sound, and system notifications
+    // (macOS terminal-notifier/osascript or Linux notify-send when available).
+    "sound": true
+  },
+
   // Dynamic Context Pruning (DCP) module config.
   // The DCP module owns the compress tool and /dcp commands.
   "dcp": {

@@ -266,6 +266,7 @@ export type StatusLineLayout = {
 	userJumpWidget?: StatusUserJumpWidgetLayout;
 	thinkingExpandWidget?: StatusThinkingExpandWidgetLayout;
 	compactToolsWidget?: StatusCompactToolsWidgetLayout;
+	terminalBellSoundWidget?: StatusTerminalBellSoundWidgetLayout;
 	promptEnhancerWidget?: StatusPromptEnhancerWidgetLayout;
 	voiceWidget?: StatusVoiceWidgetLayout;
 };
@@ -285,7 +286,18 @@ export type StatusCompactToolsWidgetLayout = {
 	endColumn: number;
 };
 
+export type StatusTerminalBellSoundWidgetLayout = {
+	startColumn: number;
+	endColumn: number;
+};
+
 export type StatusPromptEnhancerWidgetLayout = {
+	startColumn: number;
+	endColumn: number;
+};
+
+export type StatusTerminalBellSoundTarget = {
+	row: number;
 	startColumn: number;
 	endColumn: number;
 };

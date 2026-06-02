@@ -11,6 +11,7 @@ import type {
 	StatusModelUsageTarget,
 	StatusPromptEnhancerTarget,
 	StatusSessionTarget,
+	StatusTerminalBellSoundTarget,
 	StatusThinkingExpandTarget,
 	StatusThinkingTarget,
 	StatusUserJumpTarget,
@@ -44,6 +45,8 @@ export type StatusLineRendererHost = {
 	promptEnhancerStatusWidgetText(): string;
 	promptEnhancerStatusWidgetActive(): boolean;
 	promptEnhancerStatusWidgetEnabled(): boolean;
+	terminalBellSoundStatusWidgetText(): string;
+	terminalBellSoundStatusWidgetEnabled(): boolean;
 	voiceStatusWidgetText(): string;
 	voiceStatusWidgetActive(): boolean;
 	userMessageJumpMenuActive?(): boolean;
@@ -61,9 +64,10 @@ export class StatusLineRenderer {
 		const userJumpButton = APP_ICONS.user;
 		const thinkingExpandButton = APP_ICONS.thinkingExpanded;
 		const compactToolsButton = APP_ICONS.compactTools;
+		const terminalBellSoundWidgetText = this.host.terminalBellSoundStatusWidgetText();
 		const promptEnhancerWidgetText = this.host.promptEnhancerStatusWidgetText();
 		const voiceWidgetText = this.host.voiceStatusWidgetText();
-		const rightWidgetText = [userJumpButton, thinkingExpandButton, compactToolsButton, promptEnhancerWidgetText, voiceWidgetText].filter((text) => text.length > 0).join(" ");
+		const rightWidgetText = [userJumpButton, terminalBellSoundWidgetText, thinkingExpandButton, compactToolsButton, promptEnhancerWidgetText, voiceWidgetText].filter((text) => text.length > 0).join(" ");
 		const rightWidgetWidth = stringDisplayWidth(rightWidgetText);
 		const leftWidth = rightWidgetWidth > 0 && contentWidth > rightWidgetWidth + 1 ? contentWidth - rightWidgetWidth - 1 : contentWidth;
 		const baseStatus = this.host.currentStatus();
@@ -82,6 +86,10 @@ export class StatusLineRenderer {
 			? this.widgetLayout(nextWidgetStartColumn, userJumpButton)
 			: undefined;
 		if (userJumpWidget) nextWidgetStartColumn = userJumpWidget.endColumn + 1;
+		const terminalBellSoundWidget = leftWidth < contentWidth && terminalBellSoundWidgetText.length > 0
+			? this.widgetLayout(nextWidgetStartColumn, terminalBellSoundWidgetText)
+			: undefined;
+		if (terminalBellSoundWidget) nextWidgetStartColumn = terminalBellSoundWidget.endColumn + 1;
 		const thinkingExpandWidget = leftWidth < contentWidth
 			? this.widgetLayout(nextWidgetStartColumn, thinkingExpandButton)
 			: undefined;
@@ -104,6 +112,7 @@ export class StatusLineRenderer {
 			...(userJumpWidget ? { userJumpWidget } : {}),
 			...(thinkingExpandWidget ? { thinkingExpandWidget } : {}),
 			...(compactToolsWidget ? { compactToolsWidget } : {}),
+			...(terminalBellSoundWidget ? { terminalBellSoundWidget } : {}),
 			...(modelUsageLabel ? { modelUsageLabel } : {}),
 			...(contextBarLabel ? { contextBarLabel } : {}),
 			...(promptEnhancerWidget ? { promptEnhancerWidget } : {}),
@@ -207,6 +216,12 @@ export class StatusLineRenderer {
 		return { row, startColumn: widget.startColumn, endColumn: widget.endColumn };
 	}
 
+	terminalBellSoundTarget(layout: StatusLineLayout, row: number): StatusTerminalBellSoundTarget | undefined {
+		const widget = layout.terminalBellSoundWidget;
+		if (!widget) return undefined;
+		return { row, startColumn: widget.startColumn, endColumn: widget.endColumn };
+	}
+
 	sessionTarget(statusText: string, row: number, label: string, workspaceLabel: string): StatusSessionTarget | undefined {
 		if (!this.host.session || !label) return undefined;
 
@@ -231,6 +246,7 @@ export class StatusLineRenderer {
 		this.pushUserJumpWidgetSegment(segments, statusText);
 		this.pushThinkingExpandWidgetSegment(segments, statusText);
 		this.pushCompactToolsWidgetSegment(segments, statusText);
+		this.pushTerminalBellSoundWidgetSegment(segments, statusText);
 		this.pushWorkspaceSegments(segments, statusText, layout.workspaceLabel);
 		if (layout.modelUsageLabel) this.pushModelUsageSegments(segments, statusText, layout.modelUsageLabel);
 		this.pushPromptEnhancerWidgetSegment(segments, statusText);
@@ -301,6 +317,13 @@ export class StatusLineRenderer {
 		this.pushSegment(segments, start, buttonText.length, this.host.superCompactToolsActive?.() ? this.host.theme.colors.info : this.host.theme.colors.muted);
 	}
 
+	private pushTerminalBellSoundWidgetSegment(segments: StyledSegment[], statusText: string): void {
+		const widgetText = this.host.terminalBellSoundStatusWidgetText();
+		const start = statusText.lastIndexOf(widgetText);
+		if (start < 0 || widgetText.length <= 0) return;
+		this.pushSegment(segments, start, widgetText.length, this.host.terminalBellSoundStatusWidgetEnabled() ? this.host.theme.colors.info : this.host.theme.colors.muted);
+	}
+
 	private pushVoiceWidgetSegment(segments: StyledSegment[], statusText: string): void {
 		const widgetText = this.host.voiceStatusWidgetText();
 		const start = statusText.lastIndexOf(widgetText);
@@ -315,7 +338,7 @@ export class StatusLineRenderer {
 
 		const separatorIndex = widgetText.indexOf(" ");
 		const micLength = separatorIndex >= 0 ? separatorIndex : widgetText.length;
-		this.pushSegment(segments, start, micLength, this.host.theme.colors.info);
+		this.pushSegment(segments, start, micLength, this.host.theme.colors.muted);
 	}
 
 	private pushWorkspaceSegments(segments: StyledSegment[], statusText: string, workspaceLabel: string): void {

@@ -1,7 +1,9 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { delimiter, isAbsolute, join } from "node:path";
+import { parse as parseJsonc } from "jsonc-parser";
 
 const BELL = "\x07";
 const DEFAULT_IDLE_DELAY_MS = 250;
@@ -12,6 +14,8 @@ const DEFAULT_NOTIFICATION_TITLE = "Pi";
 const DEFAULT_NOTIFICATION_MESSAGE = "Session stopped";
 const DEFAULT_ASK_USER_NOTIFICATION_MESSAGE = "Waiting for your answer";
 const DEFAULT_MAC_SOUND = "Glass";
+const TERMINAL_BELL_CONFIG_KEY = "terminalBell";
+const SOUND_CONFIG_KEY = "sound";
 
 const TERM_PROGRAM_BUNDLE_IDS: Record<string, string> = {
 	Apple_Terminal: "com.apple.Terminal",
@@ -49,7 +53,45 @@ function extensionDisabled(): boolean {
 	return isTruthyEnv(process.env.HEADLESS) || isTruthyEnv(process.env.PI_TERMINAL_BELL_DISABLED);
 }
 
-function canRingTerminal(): boolean {
+function getPiToolsSuiteUserConfigPath(homeDir = homedir()): string {
+	return join(homeDir, ".config", "pi", "pi-tools-suite.jsonc");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+export function readTerminalBellSoundConfig(configPath = getPiToolsSuiteUserConfigPath()): boolean | undefined {
+	if (!existsSync(configPath)) return undefined;
+	try {
+		const parsed = parseJsonc(readFileSync(configPath, "utf-8")) as unknown;
+		if (!isRecord(parsed)) return undefined;
+		const terminalBell = parsed[TERMINAL_BELL_CONFIG_KEY];
+		if (!isRecord(terminalBell)) return undefined;
+		const sound = terminalBell[SOUND_CONFIG_KEY];
+		return typeof sound === "boolean" ? sound : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+export function terminalBellSoundEnabled(ctx: Pick<ExtensionContext, "hasUI">, configPath = getPiToolsSuiteUserConfigPath()): boolean {
+	if (process.env.PI_TERMINAL_BELL_SOUND === "0") return false;
+	if (process.env.PI_TERMINAL_BELL_SOUND === "1") return true;
+	const configured = readTerminalBellSoundConfig(configPath);
+	if (configured !== undefined) return configured;
+	return ctx.hasUI === true;
+}
+
+export function terminalBellNotificationsEnabled(ctx: Pick<ExtensionContext, "hasUI">, configPath = getPiToolsSuiteUserConfigPath()): boolean {
+	if (!terminalBellSoundEnabled(ctx, configPath)) return false;
+	if (process.env.PI_TERMINAL_BELL_NOTIFY === "0") return false;
+	if (process.env.PI_TERMINAL_BELL_NOTIFY === "1") return true;
+	return ctx.hasUI === true;
+}
+
+export function canRingTerminal(ctx: Pick<ExtensionContext, "hasUI">, configPath = getPiToolsSuiteUserConfigPath()): boolean {
+	if (!terminalBellSoundEnabled(ctx, configPath)) return false;
 	if (process.env.PI_TERMINAL_BELL === "0") return false;
 	if (process.env.PI_TERMINAL_BELL_FORCE === "1") return true;
 	return Boolean(process.stdout.isTTY || process.stderr.isTTY);
@@ -58,18 +100,6 @@ function canRingTerminal(): boolean {
 function writeBell(): void {
 	const stream = process.stdout.isTTY || !process.stderr.isTTY ? process.stdout : process.stderr;
 	stream.write(BELL);
-}
-
-function soundEnabled(ctx: ExtensionContext): boolean {
-	if (process.env.PI_TERMINAL_BELL_SOUND === "0") return false;
-	if (process.env.PI_TERMINAL_BELL_SOUND === "1") return true;
-	return ctx.hasUI === true;
-}
-
-function notificationsEnabled(ctx: ExtensionContext): boolean {
-	if (process.env.PI_TERMINAL_BELL_NOTIFY === "0") return false;
-	if (process.env.PI_TERMINAL_BELL_NOTIFY === "1") return true;
-	return ctx.hasUI === true;
 }
 
 function appleScriptString(value: string): string {
@@ -123,7 +153,7 @@ function detectMacActivationBundleId(): string | undefined {
 }
 
 function playAttentionSound(ctx: ExtensionContext): void {
-	if (!soundEnabled(ctx)) return;
+	if (!terminalBellSoundEnabled(ctx)) return;
 	if (process.platform !== "darwin") return;
 	const sound = process.env.PI_TERMINAL_BELL_SOUND && process.env.PI_TERMINAL_BELL_SOUND !== "1"
 		? process.env.PI_TERMINAL_BELL_SOUND
@@ -138,7 +168,7 @@ function notifySessionStopped(
 	macActivationBundleId: string | undefined,
 	message = process.env.PI_TERMINAL_BELL_NOTIFY_MESSAGE ?? DEFAULT_NOTIFICATION_MESSAGE,
 ): void {
-	if (!notificationsEnabled(ctx)) return;
+	if (!terminalBellNotificationsEnabled(ctx)) return;
 	const title = process.env.PI_TERMINAL_BELL_NOTIFY_TITLE ?? DEFAULT_NOTIFICATION_TITLE;
 
 	if (process.platform === "darwin") {
@@ -220,7 +250,7 @@ export default function terminalBell(pi: ExtensionAPI) {
 	}
 
 	function notifyAttention(ctx: ExtensionContext, message?: string): void {
-		if (canRingTerminal()) writeBell();
+		if (canRingTerminal(ctx)) writeBell();
 		playAttentionSound(ctx);
 		notifySessionStopped(ctx, macActivationBundleId, message);
 	}

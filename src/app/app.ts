@@ -49,6 +49,7 @@ import { AppTodoWidgetController } from "./todo-widget-controller.js";
 import { AppTabsController } from "./tabs-controller.js";
 import { TabLineRenderer } from "./tab-line-renderer.js";
 import { AppTerminalController } from "./terminal-controller.js";
+import { TerminalBellSoundController } from "./terminal-bell-sound-controller.js";
 import { AppToastController } from "./toast-controller.js";
 import { checkPixUpdate, formatPixStartupUpdateDialog } from "./update.js";
 import { AppVoiceController } from "./voice-controller.js";
@@ -93,6 +94,7 @@ export class PiUiExtendApp {
 	private readonly subagentsWidgetController: AppSubagentsWidgetController;
 	private readonly todoWidgetController: AppTodoWidgetController;
 	private readonly terminalController: AppTerminalController;
+	private readonly terminalBellSoundController: TerminalBellSoundController;
 	private readonly toastController: AppToastController;
 	private readonly nerdFontController: NerdFontController;
 	private readonly popupActions: AppPopupActionController;
@@ -196,6 +198,7 @@ export class PiUiExtendApp {
 		});
 		this.pixConfig = loadPixConfig();
 		setAppIconTheme(this.pixConfig.iconTheme.name);
+		this.terminalBellSoundController = new TerminalBellSoundController();
 		this.promptEnhancer = new AppPromptEnhancerController({
 			runtime: () => this.runtime,
 			inputEditor: () => this.inputEditor,
@@ -266,6 +269,8 @@ export class PiUiExtendApp {
 			promptEnhancerStatusWidgetText: () => this.promptEnhancer.statusWidgetText(),
 			promptEnhancerStatusWidgetActive: () => this.promptEnhancer.statusWidgetActive(),
 			promptEnhancerStatusWidgetEnabled: () => this.promptEnhancer.statusWidgetEnabled(),
+			terminalBellSoundStatusWidgetText: () => this.terminalBellSoundController.statusWidgetText(),
+			terminalBellSoundStatusWidgetEnabled: () => this.terminalBellSoundController.isEnabled(),
 			voiceStatusWidgetText: () => this.voiceController.statusWidgetText(),
 			voiceStatusWidgetActive: () => this.voiceController.statusWidgetActive(),
 			userMessageJumpMenuActive: () => this.popupMenus.directMenu === "user-message-jump",
@@ -532,6 +537,7 @@ export class PiUiExtendApp {
 					this.superCompactTools = !this.superCompactTools;
 					this.render();
 				},
+				toggleTerminalBellSound: () => this.toggleTerminalBellSound(),
 				handleExtensionInputMouse: (event) => this.extensionUiController.handleCustomUiMouse(event),
 				render: () => this.render(),
 			},
@@ -704,6 +710,7 @@ export class PiUiExtendApp {
 				this.mouseController.statusUserJumpTarget = undefined;
 				this.mouseController.statusThinkingExpandTarget = undefined;
 				this.mouseController.statusCompactToolsTarget = undefined;
+				this.mouseController.statusTerminalBellSoundTarget = undefined;
 				this.mouseController.statusSessionTarget = undefined;
 				this.mouseController.statusPromptEnhancerTarget = undefined;
 				this.mouseController.statusVoiceMicTarget = undefined;
@@ -901,6 +908,17 @@ export class PiUiExtendApp {
 
 	private async stop(): Promise<void> {
 		await this.terminalController.stop();
+	}
+
+	private toggleTerminalBellSound(): void {
+		try {
+			const enabled = this.terminalBellSoundController.toggle();
+			this.showToast(enabled ? "Terminal bell notifications enabled" : "Terminal bell notifications muted", "info");
+			this.render();
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			this.showToast(`Could not update terminal bell notifications: ${message}`, "error");
+		}
 	}
 
 	private refreshModelUsageStatusFromClick(): void {

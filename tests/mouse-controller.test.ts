@@ -176,6 +176,23 @@ describe("AppMouseController", () => {
 		assert.equal(toggleCount, 1);
 	});
 
+	it("toggles terminal bell notifications when clicking its status target", () => {
+		let toggleCount = 0;
+		const controller = new AppMouseController(
+			fakeHost({ toggleTerminalBellSound: () => { toggleCount += 1; } }),
+			fakePopupMenus(),
+			fakePopupActions(),
+			fakeScrollController(),
+			fakeCommandController(),
+		);
+		controller.statusTerminalBellSoundTarget = { row: 5, startColumn: 1, endColumn: 2 };
+
+		controller.handleMouse({ button: 0, x: 1, y: 5, released: false });
+		controller.handleMouse({ button: 0, x: 1, y: 5, released: true });
+
+		assert.equal(toggleCount, 1);
+	});
+
 	it("toggles all thinking expansion when clicking its status target", () => {
 		let toggleCount = 0;
 		const controller = new AppMouseController(
