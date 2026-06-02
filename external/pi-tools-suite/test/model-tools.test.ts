@@ -195,6 +195,6 @@ describe.serial("model tools", () => {
 
 		expect(result.changedFiles).toEqual(["unified.txt"]);
 		expect(result.summary).toContain("M unified.txt");
-		expect(fs.readFileSync(path.join(cwd, "unified.txt"), "utf8")).toBe("before\nnew\nafter\n");
+		expect(fs.readFileSync(path.join(cwd, "unified.txt"), "utf8").replace(/\r\n/g, "\n")).toBe("before\nnew\nafter\n");
 	});
 });

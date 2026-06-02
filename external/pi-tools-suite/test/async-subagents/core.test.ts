@@ -776,6 +776,7 @@ describe.serial("spawning agents", () => {
 process.stdin.on("data", () => {
   process.stderr.write("diagnostic noise\\n");
   console.log(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "done result" }] }] }));
+  setTimeout(() => process.exit(0), 0);
 });
 setTimeout(() => {}, 1000);
 `);
@@ -842,6 +843,7 @@ setTimeout(() => {}, 1000);
 		writeFile(piScript, `
 process.stdin.on("data", () => {
   console.log(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "done" }] }] }));
+  setTimeout(() => process.exit(0), 0);
 });
 setTimeout(() => {}, 1000);
 `);
@@ -891,6 +893,7 @@ process.stdin.on("data", () => {
   console.log(JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "compact final" }] } }));
   console.log(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "compact final" }] }, { role: "tool", content: huge }] }));
   process.stderr.write("e".repeat(10000));
+  setTimeout(() => process.exit(0), 0);
 });
 setTimeout(() => {}, 1000);
 `);
@@ -967,6 +970,7 @@ process.stdin.on("data", (chunk) => {
     if (event.id === "sub_prompt") {
       fs.writeFileSync(capturePath, JSON.stringify(event));
       console.log(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "saw image" }] }] }));
+      setTimeout(() => process.exit(0), 0);
     }
   }
 });
@@ -998,6 +1002,7 @@ setTimeout(() => {}, 1000);
 		writeFile(piScript, `
 process.stdin.on("data", () => {
   console.log(JSON.stringify({ type: "response", command: "prompt", success: false, error: "bad prompt" }));
+  setTimeout(() => process.exit(0), 0);
 });
 setTimeout(() => {}, 1000);
 `);
@@ -1028,6 +1033,7 @@ process.stdin.on("data", () => {
   } else {
     console.log(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "retry ok" }] }] }));
   }
+  setTimeout(() => process.exit(0), 0);
 });
 setTimeout(() => {}, 1000);
 `);
@@ -1066,6 +1072,7 @@ process.stdin.on("data", () => {
   } else {
     console.log(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "fallback ok on " + model }] }] }));
   }
+  setTimeout(() => process.exit(0), 0);
 });
 setTimeout(() => {}, 1000);
 `);
@@ -1146,6 +1153,7 @@ process.stdin.on("data", () => {
   const attempt = fs.existsSync(attemptFile) ? Number(fs.readFileSync(attemptFile, "utf8")) + 1 : 1;
   fs.writeFileSync(attemptFile, String(attempt));
   console.log(JSON.stringify({ type: "response", command: "prompt", success: false, error: "stop before retry" }));
+  setTimeout(() => process.exit(0), 0);
 });
 setTimeout(() => {}, 1000);
 `);
@@ -1173,6 +1181,7 @@ process.stdin.on("data", () => {
   const attempt = fs.existsSync(attemptFile) ? Number(fs.readFileSync(attemptFile, "utf8")) + 1 : 1;
   fs.writeFileSync(attemptFile, String(attempt));
   console.log(JSON.stringify({ type: "response", command: "prompt", success: false, error: "permanent" }));
+  setTimeout(() => process.exit(0), 0);
 });
 setTimeout(() => {}, 1000);
 `);
@@ -1239,6 +1248,7 @@ process.stdin.on("data", () => {
 process.stdin.on("data", () => {
   setTimeout(() => {
     console.log(JSON.stringify({ type: "agent_end", messages: [] }));
+    setTimeout(() => process.exit(0), 0);
   }, 30);
 });
 setTimeout(() => {}, 1000);
