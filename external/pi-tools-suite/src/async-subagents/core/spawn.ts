@@ -130,6 +130,10 @@ export function spawnAgent(
 		env: subagentEnvironment(process.env),
 		stdio: ["pipe", "pipe", "pipe"],
 	});
+	proc.stdin.on("error", (error: NodeJS.ErrnoException) => {
+		if (error.code === "EPIPE") return;
+		stderrStream.write(`${String(error)}\n`);
+	});
 	let completedFromAgentEnd = false;
 	let completionNotified = false;
 	let lastAssistantResult = "";
@@ -359,20 +363,18 @@ export function spawnAgent(
 		notifyComplete(1);
 	});
 
-	proc.stdin.write(
+	proc.stdin.write([
 		serializeJsonLine({
 			id: "sub_get_state",
 			type: "get_state",
 		}),
-	);
-	proc.stdin.write(
 		serializeJsonLine({
 			id: "sub_prompt",
 			type: "prompt",
 			message: promptContent,
 			...(promptImages ? { images: promptImages } : {}),
 		}),
-	);
+	].join(""));
 	proc.stdin.end();
 
 	const pid = proc.pid!;

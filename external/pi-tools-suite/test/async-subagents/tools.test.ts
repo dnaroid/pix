@@ -633,7 +633,7 @@ describe.serial("result tool", () => {
 		expect(compact.content[0].text).toContain("Status: done");
 		expect(compact.content[0].text).toContain("Exit code: 0");
 		expect(compact.content[0].text).toContain("summary unavailable");
-		expect(compact.content[0].text).toContain("Full result: run/agent-1/result.md");
+		expect(compact.content[0].text).toContain(`Full result: ${path.join("run", "agent-1", "result.md")}`);
 		expect(compact.details).toMatchObject({ runDir, agentId: "agent-1", exitCode: 0 });
 
 		const full = await tool.execute("call", { runDir: "run", agentId: "agent-1", compact: false }, undefined, undefined, { cwd });
@@ -906,16 +906,16 @@ setTimeout(() => {}, 1000);
 		expect(compactText).toContain("Referenced files:\n- src/foo.ts:12");
 		expect(compactText).toContain("Risks:\n- [medium] Risk detail");
 		expect(compactText).toContain("Next actions:\n- Add regression test");
-		expect(compactText).toContain("Full result: .pi/subagents/run-1/agent-1/result.md");
-		expect(compactText).toContain("Structured result: .pi/subagents/run-1/agent-1/result.json");
-		expect(compactText).toContain("Full stderr: .pi/subagents/run-1/agent-1/stderr.log");
+		expect(compactText).toContain(`Full result: ${path.join(".pi", "subagents", "run-1", "agent-1", "result.md")}`);
+		expect(compactText).toContain(`Structured result: ${path.join(".pi", "subagents", "run-1", "agent-1", "result.json")}`);
+		expect(compactText).toContain(`Full stderr: ${path.join(".pi", "subagents", "run-1", "agent-1", "stderr.log")}`);
 		expect(compactText).toContain("compact: false");
 		expect(compactText).not.toContain("--- Result ---");
 		expect(compactText).not.toContain("RAW-DETAIL-SHOULD-NOT-APPEAR");
 		expect(compact.details.artifacts).toEqual({
-			resultMd: ".pi/subagents/run-1/agent-1/result.md",
-			resultJson: ".pi/subagents/run-1/agent-1/result.json",
-			stderrLog: ".pi/subagents/run-1/agent-1/stderr.log",
+			resultMd: path.join(".pi", "subagents", "run-1", "agent-1", "result.md"),
+			resultJson: path.join(".pi", "subagents", "run-1", "agent-1", "result.json"),
+			stderrLog: path.join(".pi", "subagents", "run-1", "agent-1", "stderr.log"),
 		});
 
 		const full = await tool.execute("call", { runDir, agentId: "agent-1", compact: false }, undefined, undefined, { cwd });
