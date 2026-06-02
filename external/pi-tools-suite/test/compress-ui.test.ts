@@ -115,7 +115,7 @@ describe("DCP UI", () => {
 		expect(ui.widgets).toEqual([]);
 	});
 
-	test("DCP UI controller surfaces active nudge telemetry in status", async () => {
+	test("DCP UI controller does not render active nudge telemetry", async () => {
 		const { createState } = await import("../src/compress/state.js");
 		const { DcpUiController } = await import("../src/compress/ui.js");
 		const state = createState();
@@ -150,7 +150,7 @@ describe("DCP UI", () => {
 		controller.setUICtx(ui);
 		controller.update({ getContextUsage: () => ({ tokens: 39_400, contextWindow: 272_000, percent: 14.5 }) } as any);
 
-		expect(ui.statuses.get("dcp")).toContain("nudge iteration");
+		expect(ui.statuses.get("dcp")).toBeUndefined();
 	});
 
 	test("DCP UI controller ignores stale session contexts during session replacement", async () => {

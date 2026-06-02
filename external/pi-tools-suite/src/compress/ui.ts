@@ -1,6 +1,5 @@
 import type { ExtensionContext, ExtensionUIContext, Theme } from "@mariozechner/pi-coding-agent"
 import type { DcpState } from "./state.js"
-import { ignoreStaleExtensionContextError, safeGetContextUsage } from "../context-usage.js"
 
 export interface DcpCompressionVisualDetails {
 	topic: string
@@ -289,36 +288,19 @@ export function normalizeDcpCompressionDetails(content: unknown, details: unknow
 }
 
 export class DcpUiController {
-	private uiCtx: ExtensionUIContext | undefined
+	constructor(_state: DcpState) {}
 
-	constructor(private state: DcpState) {}
-
-	setUICtx(ctx: ExtensionUIContext): void {
-		if (ctx === this.uiCtx) return
-		this.uiCtx = ctx
+	setUICtx(_ctx: ExtensionUIContext): void {
+		// DCP intentionally does not render extension UI/status/toasts. The only
+		// user-visible DCP output should be the `compress` tool result itself.
 	}
 
-	update(ctx?: ExtensionContext): void {
-		if (!this.uiCtx) return
-		try {
-			if (this.state.nudgeAnchors.length === 0) {
-				this.uiCtx.setStatus("dcp", undefined)
-				return
-			}
-			const usage = normalizeDcpContextUsage(safeGetContextUsage(ctx))
-			this.uiCtx.setStatus("dcp", renderDcpStatusLabel(this.state, this.uiCtx.theme, usage))
-		} catch (error) {
-			ignoreStaleExtensionContextError(error)
-		}
+	update(_ctx?: ExtensionContext): void {
+		// No-op by design; reminders are injected into model context, not rendered.
 	}
 
 	dispose(): void {
-		try {
-			this.uiCtx?.setStatus("dcp", undefined)
-		} catch (error) {
-			ignoreStaleExtensionContextError(error)
-		}
-		this.uiCtx = undefined
+		// No-op by design.
 	}
 }
 
