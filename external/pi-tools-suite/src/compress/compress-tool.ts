@@ -6,6 +6,7 @@ import { Type } from "typebox"
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent"
 import type { DcpState } from "./state.js"
 import type { DcpConfig } from "./config.js"
+import { clearDcpNudgeAnchors } from "./pruner.js"
 import type { DcpCompressionVisualDetails } from "./ui.js"
 import { normalizeDcpContextUsage } from "./ui.js"
 import { COMPRESS_TOOL_DESCRIPTION } from "../tool-descriptions.js"
@@ -306,6 +307,21 @@ export function registerCompressTool(
           `Unable to compress any requested messages. Skipped ${skippedMessageIssues.length}:\n` +
           formatSkippedMessages(skippedMessageIssues).map((issue) => `- ${issue}`).join("\n"),
         )
+      }
+
+      const clearedNudgeAnchors = newBlockIds.length > 0 ? clearDcpNudgeAnchors(state) : 0
+      if (clearedNudgeAnchors > 0) {
+        try {
+          pi.appendEntry("dcp-nudge", {
+            event: "cleared",
+            reason: "compress",
+            clearedAnchors: clearedNudgeAnchors,
+            blockIds: newBlockIds,
+            createdAt: Date.now(),
+          })
+        } catch {
+          // Diagnostic telemetry should never affect a successful compression.
+        }
       }
 
       const usage = normalizeDcpContextUsage(safeGetContextUsage(ctx))

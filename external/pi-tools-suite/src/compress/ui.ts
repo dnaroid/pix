@@ -1,5 +1,6 @@
 import type { ExtensionContext, ExtensionUIContext, Theme } from "@mariozechner/pi-coding-agent"
 import type { DcpState } from "./state.js"
+import { ignoreStaleExtensionContextError, safeGetContextUsage } from "../context-usage.js"
 
 export interface DcpCompressionVisualDetails {
 	topic: string
@@ -36,6 +37,8 @@ interface DcpVisualSnapshot {
 	tokensSaved: number
 	prunedTools: number
 	activeBlocks: number
+	activeNudges: number
+	lastNudgeType?: string
 }
 
 function fg(theme: Theme | undefined, color: string, text: string): string {
@@ -79,7 +82,16 @@ function snapshotFromState(state: DcpState): DcpVisualSnapshot {
 		tokensSaved: state.tokensSaved,
 		prunedTools: state.prunedToolIds.size,
 		activeBlocks: activeBlocks.length,
+		activeNudges: state.nudgeAnchors.length,
+		lastNudgeType: state.lastNudge?.type,
 	}
+}
+
+function formatNudgeType(type: string | undefined): string | undefined {
+	if (!type) return undefined
+	if (type === "context-strong") return "context!"
+	if (type === "context-soft") return "context"
+	return type
 }
 
 export function normalizeDcpContextUsage(usage: RawDcpContextUsage): DcpContextUsage | undefined {
@@ -144,6 +156,11 @@ export function renderDcpStatusLabel(state: DcpState, theme?: Theme, usage?: Dcp
 
 	if (snapshot.activeBlocks > 0) {
 		parts.push(`${fg(theme, "accent", String(snapshot.activeBlocks))} ${fg(theme, "dim", snapshot.activeBlocks === 1 ? "block" : "blocks")}`)
+	}
+
+	const nudgeLabel = formatNudgeType(snapshot.lastNudgeType)
+	if (snapshot.activeNudges > 0 && nudgeLabel) {
+		parts.push(`${fg(theme, "warning", `nudge ${nudgeLabel}`)} ${fg(theme, "dim", `(${snapshot.activeNudges})`)}`)
 	}
 
 	return parts.join(fg(theme, "dim", " │ "))
@@ -274,19 +291,33 @@ export function normalizeDcpCompressionDetails(content: unknown, details: unknow
 export class DcpUiController {
 	private uiCtx: ExtensionUIContext | undefined
 
-	constructor(_state: DcpState) {}
+	constructor(private state: DcpState) {}
 
 	setUICtx(ctx: ExtensionUIContext): void {
 		if (ctx === this.uiCtx) return
 		this.uiCtx = ctx
 	}
 
-	update(_ctx?: ExtensionContext): void {
-		// DCP should not render a footer/status-line label. Compression result
-		// messages are still rendered by formatDcpCompressionMessageText().
+	update(ctx?: ExtensionContext): void {
+		if (!this.uiCtx) return
+		try {
+			if (this.state.nudgeAnchors.length === 0) {
+				this.uiCtx.setStatus("dcp", undefined)
+				return
+			}
+			const usage = normalizeDcpContextUsage(safeGetContextUsage(ctx))
+			this.uiCtx.setStatus("dcp", renderDcpStatusLabel(this.state, this.uiCtx.theme, usage))
+		} catch (error) {
+			ignoreStaleExtensionContextError(error)
+		}
 	}
 
 	dispose(): void {
+		try {
+			this.uiCtx?.setStatus("dcp", undefined)
+		} catch (error) {
+			ignoreStaleExtensionContextError(error)
+		}
 		this.uiCtx = undefined
 	}
 }

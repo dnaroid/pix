@@ -31,7 +31,15 @@ export {
   formatCompressionCandidateHint,
   formatMessageCompressionCandidateHint,
 } from "./pruner-candidates.js";
-export { getNudgeType, injectNudge } from "./pruner-nudge.js";
+export {
+  appendConcreteNudgeGuidance,
+  applyAnchoredNudges,
+  clearDcpNudgeAnchors,
+  getNudgeType,
+  injectNudge,
+  nudgeTypeLabel,
+  upsertNudgeAnchor,
+} from "./pruner-nudge.js";
 
 export function applyPruning(
   messages: any[],

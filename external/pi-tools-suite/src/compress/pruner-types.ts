@@ -17,6 +17,8 @@ export interface MessageCompressionCandidate {
   reason: string;
 }
 
+export type DcpNudgeType = "context-strong" | "context-soft" | "turn" | "iteration";
+
 export interface NudgeThresholds {
   minContextPercent?: number;
   maxContextPercent?: number;

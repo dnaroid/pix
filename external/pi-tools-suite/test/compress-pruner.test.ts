@@ -9,12 +9,16 @@ import { registerTuiFilter, stripDcpRenderedLines, stripDcpTags } from "../src/c
 import { registerCommands } from "../src/compress/commands.js";
 import {
   applyPruning,
+  appendConcreteNudgeGuidance,
+  applyAnchoredNudges,
+  clearDcpNudgeAnchors,
   detectCompressionCandidate,
   detectMessageCompressionCandidates,
   estimateTokens,
   getActiveSummaryTokenEstimate,
   getNudgeType,
   resolveContextThresholds,
+  upsertNudgeAnchor,
 } from "../src/compress/pruner.js";
 import {
   createState,
@@ -153,6 +157,12 @@ function toolRecord(
     timestamp: Date.now(),
     tokenEstimate,
   };
+}
+
+function contentText(msg: any): string {
+  if (typeof msg.content === "string") return msg.content;
+  if (!Array.isArray(msg.content)) return "";
+  return msg.content.map((block: any) => typeof block?.text === "string" ? block.text : "").join("");
 }
 
 function block(id: number, startTimestamp: number, endTimestamp: number): CompressionBlock {
@@ -528,6 +538,72 @@ describe("DCP pruning effectiveness", () => {
     expect(getNudgeType(0.24, state, cfg, 0)).toBe(null);
     expect(getNudgeType(0.30, state, cfg, 0)).toBe("turn");
     expect(getNudgeType(0.90, state, cfg, 0)).toBe("context-soft");
+  });
+
+  test("anchored nudges persist on existing messages and clear after compression", () => {
+    const state = createState();
+    const cfg = config({
+      strategies: {
+        deduplication: { enabled: false, protectedTools: [] },
+        purgeErrors: { enabled: false, turns: 4, protectedTools: [] },
+        autoToolPruning: { enabled: false, maxOutputTokens: 2000, keepRecentTurns: 2, readLikeTools: [], readLikeTurns: 3, protectedTools: [] },
+      },
+    });
+    const pruned = applyPruning([
+      textMessage("user", "older request", 1),
+      textMessage("assistant", "completed research", 2),
+      textMessage("user", "current request", 3),
+    ], state, cfg);
+
+    const anchor = upsertNudgeAnchor(pruned, state, "iteration", { contextPercent: 0.52 });
+    expect(anchor.created).toBe(true);
+    expect(state.nudgeAnchors).toHaveLength(1);
+    expect(state.lastNudge?.type).toBe("iteration");
+
+    const duplicate = upsertNudgeAnchor(pruned, state, "turn", { contextPercent: 0.53 });
+    expect(duplicate.created).toBe(false);
+    expect(state.nudgeAnchors).toHaveLength(1);
+    expect(state.nudgeAnchors[0]!.type).toBe("iteration");
+
+    applyAnchoredNudges(pruned, state, () => "<dcp-system-reminder>compress now</dcp-system-reminder>");
+
+    expect(pruned).toHaveLength(3);
+    expect(contentText(pruned[2])).toContain("current request");
+    expect(contentText(pruned[2])).toContain("compress now");
+    expect(contentText(pruned[2])).toContain("[dcp-id]: # (m003)");
+
+    expect(clearDcpNudgeAnchors(state)).toBe(1);
+    expect(state.nudgeAnchors).toHaveLength(0);
+    expect(state.lastNudge).toBeUndefined();
+  });
+
+  test("nudge guidance includes concrete ranges, priority messages, and active blocks", () => {
+    const state = createState();
+    state.compressionBlocks.push(block(7, 10, 20));
+
+    const text = appendConcreteNudgeGuidance(
+      "<dcp-system-reminder>base reminder</dcp-system-reminder>",
+      {
+        startId: "m001",
+        endId: "m009",
+        messageCount: 9,
+        estimatedTokens: 12_000,
+        includedBlockIds: [7],
+        reason: "older than recent turns",
+      },
+      [
+        { messageId: "m004", role: "toolResult", estimatedTokens: 8_000, priority: "high", reason: "old" },
+        { messageId: "m005", role: "assistant", estimatedTokens: 700, priority: "medium", reason: "old" },
+      ],
+      state,
+    );
+
+    expect(text).toContain("Recommended range candidate: m001..m009");
+    expect(text).toContain("m004 (high, toolResult");
+    expect(text).not.toContain("m005 (medium");
+    expect(text).toContain("b7 \"Block 7\"");
+    expect(text).toContain("</dcp-system-reminder>");
+    expect(text.indexOf("CONCRETE NEXT ACTION")).toBeLessThan(text.indexOf("</dcp-system-reminder>"));
   });
 
   test("detects actionable compression candidates outside the active recent turns", () => {
@@ -1223,6 +1299,26 @@ describe("DCP pruning effectiveness", () => {
     state.accountedPrunedToolIds.add("call-1");
     state.tokensSaved = 100;
     state.totalPruneCount = 1;
+    state.nudgeAnchors.push({
+      id: 3,
+      type: "iteration",
+      anchorTimestamp: 42,
+      anchorStableId: "id:entry-42",
+      anchorRole: "user",
+      turnIndex: 7,
+      contextPercent: 0.61,
+      createdAt: 123,
+      updatedAt: 456,
+    });
+    state.nextNudgeAnchorId = 4;
+    state.lastNudge = {
+      type: "iteration",
+      anchorId: 3,
+      anchorTimestamp: 42,
+      anchorStableId: "id:entry-42",
+      contextPercent: 0.61,
+      createdAt: 456,
+    };
 
     const restored = createState();
     restoreState(restored, serializeState(state));
@@ -1233,5 +1329,9 @@ describe("DCP pruning effectiveness", () => {
     expect(restored.accountedPrunedToolIds.has("call-1")).toBe(true);
     expect(restored.tokensSaved).toBe(100);
     expect(restored.totalPruneCount).toBe(1);
+    expect(restored.nudgeAnchors).toHaveLength(1);
+    expect(restored.nudgeAnchors[0]?.anchorStableId).toBe("id:entry-42");
+    expect(restored.nextNudgeAnchorId).toBe(4);
+    expect(restored.lastNudge?.type).toBe("iteration");
   });
 });

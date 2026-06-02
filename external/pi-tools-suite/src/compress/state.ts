@@ -2,6 +2,8 @@
 // Types
 // ---------------------------------------------------------------------------
 
+import type { DcpNudgeType } from "./pruner-types.js"
+
 /**
  * A record of a single tool call, keyed by toolCallId in DcpState.toolCalls.
  */
@@ -100,6 +102,36 @@ export interface CompressionBlock {
   deactivatedReason?: string
 }
 
+export interface DcpNudgeAnchor {
+  /** Monotonic local identifier for persisted reminder anchors. */
+  id: number
+  /** Kind of reminder that should be re-injected at this anchor. */
+  type: DcpNudgeType
+  /** Timestamp of the message that owns the reminder. */
+  anchorTimestamp: number
+  /** Stable raw message key for the anchor when available. */
+  anchorStableId?: string
+  /** Role of the anchored message at creation time. */
+  anchorRole: string
+  /** User turn index at creation time. */
+  turnIndex: number
+  /** Approximate context usage that triggered the reminder, as a 0-1 fraction. */
+  contextPercent?: number
+  /** Wall-clock creation time. */
+  createdAt: number
+  /** Wall-clock time of the latest re-application/update. */
+  updatedAt: number
+}
+
+export interface DcpLastNudge {
+  type: DcpNudgeType
+  anchorId: number
+  anchorTimestamp: number
+  anchorStableId?: string
+  contextPercent?: number
+  createdAt: number
+}
+
 /**
  * Full runtime state for the DCP extension.
  */
@@ -172,6 +204,12 @@ export interface DcpState {
    * to emit repeated reminders inside the same turn.
    */
   lastNudgeTurn: number
+  /** Persisted anchors where active reminders are injected until compression happens. */
+  nudgeAnchors: DcpNudgeAnchor[]
+  /** Next monotonic anchor ID. */
+  nextNudgeAnchorId: number
+  /** Diagnostic/telemetry snapshot for the latest emitted reminder. */
+  lastNudge?: DcpLastNudge
 }
 
 // ---------------------------------------------------------------------------
@@ -197,6 +235,9 @@ export function createState(): DcpState {
     manualMode: false,
     nudgeCounter: 0,
     lastNudgeTurn: -1,
+    nudgeAnchors: [],
+    nextNudgeAnchorId: 1,
+    lastNudge: undefined,
   }
 }
 
@@ -222,6 +263,9 @@ export function resetState(state: DcpState): void {
   state.manualMode = false
   state.nudgeCounter = 0
   state.lastNudgeTurn = -1
+  state.nudgeAnchors = []
+  state.nextNudgeAnchorId = 1
+  state.lastNudge = undefined
 }
 
 export interface SerializedDcpState {
@@ -236,6 +280,9 @@ export interface SerializedDcpState {
   compressionTokenSavings: Array<[number, number]>
   accountedPrunedToolIds: string[]
   manualMode: boolean
+  nudgeAnchors?: DcpNudgeAnchor[]
+  nextNudgeAnchorId?: number
+  lastNudge?: DcpLastNudge
 }
 
 function isToolRecord(value: unknown): value is ToolRecord {
@@ -245,6 +292,31 @@ function isToolRecord(value: unknown): value is ToolRecord {
     typeof record.toolCallId === "string" &&
     typeof record.toolName === "string" &&
     typeof record.inputFingerprint === "string"
+  )
+}
+
+function isNudgeAnchor(value: unknown): value is DcpNudgeAnchor {
+  if (!value || typeof value !== "object") return false
+  const anchor = value as Partial<DcpNudgeAnchor>
+  return (
+    typeof anchor.id === "number" &&
+    typeof anchor.type === "string" &&
+    Number.isFinite(anchor.anchorTimestamp) &&
+    typeof anchor.anchorRole === "string" &&
+    typeof anchor.turnIndex === "number" &&
+    typeof anchor.createdAt === "number" &&
+    typeof anchor.updatedAt === "number"
+  )
+}
+
+function isLastNudge(value: unknown): value is DcpLastNudge {
+  if (!value || typeof value !== "object") return false
+  const nudge = value as Partial<DcpLastNudge>
+  return (
+    typeof nudge.type === "string" &&
+    typeof nudge.anchorId === "number" &&
+    Number.isFinite(nudge.anchorTimestamp) &&
+    typeof nudge.createdAt === "number"
   )
 }
 
@@ -262,6 +334,9 @@ export function serializeState(state: DcpState): SerializedDcpState {
     compressionTokenSavings: Array.from(state.compressionTokenSavings.entries()),
     accountedPrunedToolIds: Array.from(state.accountedPrunedToolIds),
     manualMode: state.manualMode,
+    nudgeAnchors: state.nudgeAnchors,
+    nextNudgeAnchorId: state.nextNudgeAnchorId,
+    lastNudge: state.lastNudge,
   }
 }
 
@@ -346,6 +421,28 @@ export function restoreState(state: DcpState, data: unknown): void {
 
   if (typeof saved.manualMode === "boolean") {
     state.manualMode = saved.manualMode
+  }
+
+  if (Array.isArray(saved.nudgeAnchors)) {
+    const seen = new Set<string>()
+    state.nudgeAnchors = saved.nudgeAnchors
+      .filter(isNudgeAnchor)
+      .filter((anchor) => {
+        const key = `${anchor.anchorStableId ?? ""}|${anchor.anchorTimestamp}`
+        if (seen.has(key)) return false
+        seen.add(key)
+        return true
+      })
+  }
+
+  if (typeof saved.nextNudgeAnchorId === "number" && saved.nextNudgeAnchorId > 0) {
+    state.nextNudgeAnchorId = Math.floor(saved.nextNudgeAnchorId)
+  } else if (state.nudgeAnchors.length > 0) {
+    state.nextNudgeAnchorId = Math.max(...state.nudgeAnchors.map((anchor) => anchor.id)) + 1
+  }
+
+  if (isLastNudge(saved.lastNudge)) {
+    state.lastNudge = saved.lastNudge
   }
 }
 

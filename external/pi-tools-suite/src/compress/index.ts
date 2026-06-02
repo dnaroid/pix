@@ -25,13 +25,16 @@ import {
 	injectNudge,
 	getNudgeType,
 	detectCompressionCandidate,
-	formatCompressionCandidateHint,
 	detectMessageCompressionCandidates,
-	formatMessageCompressionCandidateHint,
+	appendConcreteNudgeGuidance,
+	applyAnchoredNudges,
+	nudgeTypeLabel,
+	upsertNudgeAnchor,
 	getActiveSummaryTokenEstimate,
 	resolveContextThresholds,
 	estimateTokens,
 } from "./pruner.js"
+import type { DcpNudgeType } from "./pruner-types.js"
 import { registerCompressTool } from "./compress-tool.js"
 import { registerCommands } from "./commands.js"
 import { DcpUiController, normalizeDcpContextUsage } from "./ui.js"
@@ -79,6 +82,13 @@ function annotateMessagesWithBranchEntryIds(messages: any[], ctx: ExtensionConte
 	}
 }
 
+function baseNudgeText(type: DcpNudgeType): string {
+	if (type === "context-strong") return CONTEXT_LIMIT_NUDGE_STRONG
+	if (type === "context-soft") return CONTEXT_LIMIT_NUDGE_SOFT
+	if (type === "iteration") return ITERATION_NUDGE
+	return TURN_NUDGE
+}
+
 // ---------------------------------------------------------------------------
 // Module export
 // ---------------------------------------------------------------------------
@@ -108,6 +118,31 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 			;(pi as { events?: { emit?: (name: string, data: unknown) => void } }).events?.emit?.(DCP_CONTEXT_USAGE_EVENT, usage)
 		} catch (error) {
 			ignoreStaleExtensionContextError(error)
+		}
+	}
+	const appendNudgeTelemetry = (
+		type: DcpNudgeType,
+		anchor: { id: number; anchorTimestamp: number; anchorStableId?: string; anchorRole: string },
+		usage: ReturnType<typeof normalizeDcpContextUsage>,
+		toolCallsSinceLastUser: number,
+	): void => {
+		try {
+			pi.appendEntry("dcp-nudge", {
+				event: "emitted",
+				type,
+				label: nudgeTypeLabel(type),
+				anchorId: anchor.id,
+				anchorTimestamp: anchor.anchorTimestamp,
+				anchorStableId: anchor.anchorStableId,
+				anchorRole: anchor.anchorRole,
+				contextTokens: usage?.tokens,
+				contextWindow: usage?.contextWindow,
+				contextPercent: usage?.percent,
+				toolCallsSinceLastUser,
+				createdAt: Date.now(),
+			})
+		} catch {
+			// Telemetry is diagnostic only; never block context construction.
 		}
 	}
 
@@ -229,6 +264,8 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 	pi.on("context", async (event, ctx) => {
 		annotateMessagesWithBranchEntryIds(event.messages, ctx)
 		let prunedMessages = applyPruning(event.messages, state, config)
+		let candidate = null as ReturnType<typeof detectCompressionCandidate>
+		let messageCandidates = [] as ReturnType<typeof detectMessageCompressionCandidates>
 
 		// In manual mode we still apply pruning strategies (if
 		// automaticStrategies is on) but skip routine autonomous nudges. Emergency
@@ -242,6 +279,14 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 					: undefined
 
 			if (contextPercent === undefined) {
+				if (state.manualMode) {
+					state.nudgeAnchors = state.nudgeAnchors.filter((anchor) =>
+						anchor.type === "context-strong" || anchor.type === "context-soft",
+					)
+				}
+				applyAnchoredNudges(prunedMessages, state, (anchor) =>
+					appendConcreteNudgeGuidance(baseNudgeText(anchor.type), candidate, messageCandidates, state),
+				)
 				updateUi(ctx)
 				emitContextUsage(ctx)
 				return { messages: prunedMessages }
@@ -277,43 +322,57 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 				state.manualMode &&
 				(nudgeType !== "context-strong" && nudgeType !== "context-soft")
 
+			candidate = detectCompressionCandidate(
+				prunedMessages,
+				state,
+				config,
+				contextPercent,
+			)
+			messageCandidates = detectMessageCompressionCandidates(
+				prunedMessages,
+				config,
+				contextPercent,
+			)
+
 			if (nudgeType && !manualEmergencyOnly) {
-				let nudgeText: string
+				const nudgeText = appendConcreteNudgeGuidance(
+					baseNudgeText(nudgeType),
+					candidate,
+					messageCandidates,
+					state,
+				)
 
-				if (nudgeType === "context-strong") {
-					nudgeText = CONTEXT_LIMIT_NUDGE_STRONG
-				} else if (nudgeType === "context-soft") {
-					nudgeText = CONTEXT_LIMIT_NUDGE_SOFT
-				} else if (nudgeType === "iteration") {
-					nudgeText = ITERATION_NUDGE
-				} else {
-					nudgeText = TURN_NUDGE
-				}
-
-				const candidate = detectCompressionCandidate(
+				const anchorResult = upsertNudgeAnchor(
 					prunedMessages,
 					state,
-					config,
-					contextPercent,
+					nudgeType,
+					{ contextPercent },
 				)
-				if (candidate) {
-					nudgeText += formatCompressionCandidateHint(candidate)
+				if (anchorResult.anchor) {
+					if (anchorResult.updated) {
+						appendNudgeTelemetry(nudgeType, anchorResult.anchor, usage, toolCallsSinceLastUser)
+						saveState(pi, state)
+					}
+				} else {
+					// No safe existing message could be anchored (rare); keep the older
+					// synthetic reminder fallback so DCP never silently drops a nudge.
+					injectNudge(prunedMessages, nudgeText)
 				}
-
-				const messageCandidates = detectMessageCompressionCandidates(
-					prunedMessages,
-					config,
-					contextPercent,
-				)
-				nudgeText += formatMessageCompressionCandidateHint(messageCandidates)
-
-				injectNudge(prunedMessages, nudgeText)
 				state.nudgeCounter = 0
 				state.lastNudgeTurn = state.currentTurn
 			} else {
 				state.nudgeCounter++
 			}
 		}
+
+		if (state.manualMode) {
+			state.nudgeAnchors = state.nudgeAnchors.filter((anchor) =>
+				anchor.type === "context-strong" || anchor.type === "context-soft",
+			)
+		}
+		applyAnchoredNudges(prunedMessages, state, (anchor) =>
+			appendConcreteNudgeGuidance(baseNudgeText(anchor.type), candidate, messageCandidates, state),
+		)
 
 
 		// Update footer status and floating widget after each context event.

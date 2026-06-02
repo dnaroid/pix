@@ -115,6 +115,44 @@ describe("DCP UI", () => {
 		expect(ui.widgets).toEqual([]);
 	});
 
+	test("DCP UI controller surfaces active nudge telemetry in status", async () => {
+		const { createState } = await import("../src/compress/state.js");
+		const { DcpUiController } = await import("../src/compress/ui.js");
+		const state = createState();
+		state.nudgeAnchors.push({
+			id: 1,
+			type: "iteration",
+			anchorTimestamp: 10,
+			anchorRole: "user",
+			turnIndex: 2,
+			contextPercent: 0.52,
+			createdAt: Date.now(),
+			updatedAt: Date.now(),
+		});
+		state.lastNudge = {
+			type: "iteration",
+			anchorId: 1,
+			anchorTimestamp: 10,
+			createdAt: Date.now(),
+		};
+
+		const ui = {
+			theme: {
+				fg: (_color: string, text: string) => text,
+				bg: (_color: string, text: string) => text,
+				bold: (text: string) => text,
+			},
+			statuses: new Map<string, string | undefined>(),
+			setStatus(key: string, value: string | undefined) { this.statuses.set(key, value); },
+		} as any;
+
+		const controller = new DcpUiController(state);
+		controller.setUICtx(ui);
+		controller.update({ getContextUsage: () => ({ tokens: 39_400, contextWindow: 272_000, percent: 14.5 }) } as any);
+
+		expect(ui.statuses.get("dcp")).toContain("nudge iteration");
+	});
+
 	test("DCP UI controller ignores stale session contexts during session replacement", async () => {
 		const { createState } = await import("../src/compress/state.js");
 		const { DcpUiController } = await import("../src/compress/ui.js");
