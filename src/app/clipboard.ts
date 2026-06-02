@@ -10,6 +10,7 @@ export function copyTextToClipboard(text: string): void {
 		if (!result.error && result.status === 0) return;
 	}
 	if (copyWithNativeClipboard(text)) return;
+	if (copyWithOsc52(text)) return;
 	throw new Error(`No clipboard command found. ${clipboardInstallHint()}`);
 }
 
@@ -62,6 +63,20 @@ function copyWithNativeClipboard(text: string): boolean {
 		timeout: 3_000,
 	});
 	return !result.error && result.status === 0;
+}
+
+function copyWithOsc52(text: string): boolean {
+	if (process.stdout.destroyed || (!process.stdout.isTTY && !process.env.TMUX && !process.env.STY)) return false;
+
+	process.stdout.write(osc52ClipboardSequence(text));
+	return true;
+}
+
+export function osc52ClipboardSequence(text: string, env: NodeJS.ProcessEnv = process.env): string {
+	const sequence = `\x1b]52;c;${Buffer.from(text, "utf8").toString("base64")}\x07`;
+	if (env.TMUX) return `\x1bPtmux;${sequence.replaceAll("\x1b", "\x1b\x1b")}\x1b\\`;
+	if (env.STY) return `\x1bP${sequence}\x1b\\`;
+	return sequence;
 }
 
 function resolveNativeClipboardEntrypoint(): string | undefined {

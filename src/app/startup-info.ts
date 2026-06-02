@@ -1,7 +1,9 @@
 import { homedir } from "node:os";
 import { basename, isAbsolute, relative, sep } from "node:path";
 
-import { VERSION, type AgentSessionRuntime, type ResourceDiagnostic, type SourceInfo } from "@earendil-works/pi-coding-agent";
+import type { AgentSessionRuntime, ResourceDiagnostic, SourceInfo } from "@earendil-works/pi-coding-agent";
+
+import { getPixPackageVersion } from "./update.js";
 
 type StartupSection = {
 	title: string;
@@ -12,7 +14,8 @@ export function createStartupInfoMessage(runtime: AgentSessionRuntime): string {
 	const sections = startupSections(runtime);
 	return [
 		formatModelLine(runtime),
-		`pix · pi-sdk v${VERSION}`,
+		"",
+		`pix v${getPixPackageVersion()}`,
 		"escape interrupt · ctrl+c/ctrl+d clear/exit · / commands",
 		"",
 		...sections.flatMap(formatSection),

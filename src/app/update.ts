@@ -83,6 +83,10 @@ export function parsePixUpdateArgs(argv: readonly string[]): PixUpdateCliOptions
 	return { checkOnly, force, help };
 }
 
+export function getPixPackageVersion(packageRoot?: string): string {
+	return readPixPackageInfo(packageRoot).version;
+}
+
 export async function checkPixUpdate(options: PixUpdateCheckOptions = {}): Promise<PixUpdateCheckResult> {
 	const packageInfo = readPixPackageInfo(options.packageRoot);
 	const base = {

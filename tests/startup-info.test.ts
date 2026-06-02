@@ -6,6 +6,13 @@ import type { AgentSessionRuntime, LoadExtensionsResult, SourceInfo } from "@ear
 import { createStartupInfoMessage } from "../src/app/startup-info.js";
 
 describe("startup info", () => {
+	it("shows the Pix package version instead of the pi sdk version", () => {
+		const message = createStartupInfoMessage(runtimeWithExtensions([]));
+
+		assert.match(message, /^Model: unavailable\n\npix v\d+\.\d+\.\d+/u);
+		assert.doesNotMatch(message, /pi-sdk/u);
+	});
+
 	it("uses compact extension paths instead of repeated source labels", () => {
 		const message = createStartupInfoMessage(runtimeWithExtensions([
 			extensionAt("/tmp/pix-a/cli/index.ts", { source: "cli" }),
