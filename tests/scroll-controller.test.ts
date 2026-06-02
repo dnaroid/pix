@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import type { ConversationViewport } from "../src/app/conversation-viewport.js";
-import type { EditorLayoutRenderer } from "../src/app/editor-layout-renderer.js";
-import { AppScrollController } from "../src/app/scroll-controller.js";
+import type { ConversationViewport } from "../src/app/rendering/conversation-viewport.js";
+import type { EditorLayoutRenderer } from "../src/app/rendering/editor-layout-renderer.js";
+import { AppScrollController } from "../src/app/screen/scroll-controller.js";
 
 describe("AppScrollController", () => {
 	it("uses one less conversation column when a scrollbar is needed", () => {

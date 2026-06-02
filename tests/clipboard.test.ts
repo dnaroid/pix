@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { osc52ClipboardSequence } from "../src/app/clipboard.js";
+import { osc52ClipboardSequence } from "../src/app/screen/clipboard.js";
 
 describe("clipboard OSC52 fallback", () => {
 	it("formats a plain OSC52 clipboard sequence", () => {

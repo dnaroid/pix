@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { createIsolatedExtensionEventBus } from "../src/app/extension-event-bus.js";
+import { createIsolatedExtensionEventBus } from "../src/app/extensions/extension-event-bus.js";
 
 describe("createIsolatedExtensionEventBus", () => {
 	it("keeps extension listeners scoped to one runtime bus", () => {

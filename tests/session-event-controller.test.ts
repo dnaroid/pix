@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { AppSessionEventController } from "../src/app/session-event-controller.js";
+import { AppSessionEventController } from "../src/app/session/session-event-controller.js";
 import type { Entry } from "../src/app/types.js";
 import type { AgentSession, AgentSessionEvent, AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 

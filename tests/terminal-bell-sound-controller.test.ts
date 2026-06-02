@@ -8,7 +8,7 @@ import {
 	readTerminalBellSoundEnabled,
 	TerminalBellSoundController,
 	writeTerminalBellSoundEnabled,
-} from "../src/app/terminal-bell-sound-controller.js";
+} from "../src/app/terminal/terminal-bell-sound-controller.js";
 import { APP_ICONS } from "../src/app/icons.js";
 
 describe("TerminalBellSoundController", () => {

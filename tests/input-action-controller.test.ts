@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { InputEditor } from "../src/input-editor.js";
-import { AppInputActionController } from "../src/app/input-action-controller.js";
-import type { AppPopupActionController } from "../src/app/popup-action-controller.js";
-import type { AppPopupMenuController } from "../src/app/popup-menu-controller.js";
-import type { AppQueuedMessageController } from "../src/app/queued-message-controller.js";
-import type { AppRequestHistory } from "../src/app/request-history.js";
+import { AppInputActionController } from "../src/app/input/input-action-controller.js";
+import type { AppPopupActionController } from "../src/app/popup/popup-action-controller.js";
+import type { AppPopupMenuController } from "../src/app/popup/popup-menu-controller.js";
+import type { AppQueuedMessageController } from "../src/app/session/queued-message-controller.js";
+import type { AppRequestHistory } from "../src/app/session/request-history.js";
 import type { SubmittedUserMessage } from "../src/app/types.js";
 
 describe("AppInputActionController", () => {

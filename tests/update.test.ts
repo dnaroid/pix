@@ -10,7 +10,7 @@ import {
 	formatPixStartupUpdateDialog,
 	getPixSelfUpdateCommand,
 	parsePixUpdateArgs,
-} from "../src/app/update.js";
+} from "../src/app/cli/update.js";
 
 describe("pix update", () => {
 	it("parses update CLI options", () => {

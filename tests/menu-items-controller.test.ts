@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { AppMenuItemsController } from "../src/app/menu-items-controller.js";
+import { AppMenuItemsController } from "../src/app/popup/menu-items-controller.js";
 
 describe("AppMenuItemsController queue menu", () => {
 	it("uses one universal cancellation item for queued messages", () => {

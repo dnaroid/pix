@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { TabLineRenderer } from "../src/app/tab-line-renderer.js";
+import { TabLineRenderer } from "../src/app/rendering/tab-line-renderer.js";
 import { APP_ICONS } from "../src/app/icons.js";
-import { ScreenStyler } from "../src/app/screen-styler.js";
+import { ScreenStyler } from "../src/app/screen/screen-styler.js";
 import type { SessionTab } from "../src/app/types.js";
 import { stringDisplayWidth } from "../src/terminal-width.js";
 import { colorize, THEMES } from "../src/theme.js";

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { AppTodoWidgetController } from "../src/app/todo-widget-controller.js";
+import { AppTodoWidgetController } from "../src/app/todo/todo-widget-controller.js";
 import type { TodoDetails } from "../src/app/types.js";
 
 describe("todo widget controller", () => {

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import type { ResolvedToolRule } from "../src/config.js";
-import { renderToolBlock, type ToolBlockEntry } from "../src/app/tool-block-renderer.js";
+import { renderToolBlock, type ToolBlockEntry } from "../src/app/rendering/tool-block-renderer.js";
 import { THEMES } from "../src/theme.js";
 
 const colors = THEMES.dark.colors;

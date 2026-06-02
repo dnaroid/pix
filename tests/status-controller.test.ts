@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 
-import { AppStatusController } from "../src/app/status-controller.js";
-import type { AppBlinkController } from "../src/app/blink-controller.js";
-import { modelProviderThemeColor, StatusLineRenderer } from "../src/app/status-line-renderer.js";
-import { ScreenStyler } from "../src/app/screen-styler.js";
+import { AppStatusController } from "../src/app/screen/status-controller.js";
+import type { AppBlinkController } from "../src/app/screen/blink-controller.js";
+import { modelProviderThemeColor, StatusLineRenderer } from "../src/app/rendering/status-line-renderer.js";
+import { ScreenStyler } from "../src/app/screen/screen-styler.js";
 import { APP_ICONS } from "../src/app/icons.js";
 import { stringDisplayWidth } from "../src/terminal-width.js";
 import { colorize, THEMES } from "../src/theme.js";

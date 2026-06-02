@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 
 import { InputEditor } from "../src/input-editor.js";
 import { THEMES } from "../src/theme.js";
-import { EditorLayoutRenderer } from "../src/app/editor-layout-renderer.js";
+import { EditorLayoutRenderer } from "../src/app/rendering/editor-layout-renderer.js";
 import { APP_ICONS } from "../src/app/icons.js";
 import type { ExtensionWidgetRegistration, TodoDetails } from "../src/app/types.js";
 

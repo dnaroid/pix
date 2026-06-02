@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import type { AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
-import type { CommandControllerHost } from "../src/app/command-controller.js";
-import { createSlashCommands, type CommandRegistryActions } from "../src/app/command-registry.js";
-import { getResourceSlashCommands, getSlashCommandMatches } from "../src/app/slash-commands.js";
+import type { CommandControllerHost } from "../src/app/commands/command-controller.js";
+import { createSlashCommands, type CommandRegistryActions } from "../src/app/commands/command-registry.js";
+import { getResourceSlashCommands, getSlashCommandMatches } from "../src/app/commands/slash-commands.js";
 
 describe("command registry", () => {
 	it("handles /usage locally", async () => {

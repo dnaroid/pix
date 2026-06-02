@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { AgentSession, AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 
-import { AppQueuedMessageController, type AppQueuedMessageControllerHost } from "../src/app/queued-message-controller.js";
+import { AppQueuedMessageController, type AppQueuedMessageControllerHost } from "../src/app/session/queued-message-controller.js";
 
 describe("AppQueuedMessageController", () => {
 	it("restores and clears queued messages before aborting", () => {

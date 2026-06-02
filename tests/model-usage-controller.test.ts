@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 
-import { AppModelUsageController, type AppModelUsageQuery } from "../src/app/model-usage-controller.js";
-import type { ModelUsageDescriptor, ModelUsageStatus } from "../src/app/model-usage-status.js";
+import { AppModelUsageController, type AppModelUsageQuery } from "../src/app/model/model-usage-controller.js";
+import type { ModelUsageDescriptor, ModelUsageStatus } from "../src/app/model/model-usage-status.js";
 import type { SessionModel } from "../src/app/types.js";
 
 describe("model usage controller", () => {

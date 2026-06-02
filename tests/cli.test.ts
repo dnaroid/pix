@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { formatResumeCommand } from "../src/app/cli.js";
+import { formatResumeCommand } from "../src/app/cli/cli.js";
 
 describe("CLI helpers", () => {
 	it("formats a pix resume command", () => {

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { APP_ICONS } from "../src/app/icons.js";
-import { AppVoiceController, type AppVoiceControllerHost, type VoiceInputState } from "../src/app/voice-controller.js";
+import { AppVoiceController, type AppVoiceControllerHost, type VoiceInputState } from "../src/app/input/voice-controller.js";
 import type { DictationConfig } from "../src/config.js";
 
 describe("AppVoiceController", () => {

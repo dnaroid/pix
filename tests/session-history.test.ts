@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { loadSessionHistoryEntriesAsync } from "../src/app/session-history.js";
+import { loadSessionHistoryEntriesAsync } from "../src/app/session/session-history.js";
 import type { Entry } from "../src/app/types.js";
 
 describe("loadSessionHistoryEntriesAsync", () => {

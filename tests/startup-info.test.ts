@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 
 import type { AgentSessionRuntime, LoadExtensionsResult, SourceInfo } from "@earendil-works/pi-coding-agent";
 
-import { createStartupInfoMessage } from "../src/app/startup-info.js";
+import { createStartupInfoMessage } from "../src/app/cli/startup-info.js";
 
 describe("startup info", () => {
 	it("shows the Pix package version instead of the pi sdk version", () => {

@@ -9,8 +9,8 @@ const minimumNodeVersionLabel = "22.19.0";
 const launcherPath = fileURLToPath(import.meta.url);
 const packageRoot = dirname(dirname(launcherPath));
 const mainPath = fileURLToPath(new URL("../dist/main.js", import.meta.url));
-const updatePath = fileURLToPath(new URL("../dist/app/update.js", import.meta.url));
-const installPath = fileURLToPath(new URL("../dist/app/install.js", import.meta.url));
+const updatePath = fileURLToPath(new URL("../dist/app/cli/update.js", import.meta.url));
+const installPath = fileURLToPath(new URL("../dist/app/cli/install.js", import.meta.url));
 const distPath = dirname(mainPath);
 const rawArgs = process.argv.slice(2);
 const childArgs = [];
@@ -39,7 +39,7 @@ if (childArgs[0] === "update") {
 		console.error("pix update is not built yet. Run `npm run build:pix` or update from a published package.");
 		process.exit(1);
 	}
-	const { runPixUpdateCli } = await import(new URL("../dist/app/update.js", import.meta.url));
+	const { runPixUpdateCli } = await import(new URL("../dist/app/cli/update.js", import.meta.url));
 	process.exit(await runPixUpdateCli(childArgs.slice(1)));
 }
 
@@ -48,7 +48,7 @@ if (childArgs[0] === "install" || childArgs[0] === "setup") {
 		console.error("pix install is not built yet. Run `npm run build:pix` or update from a published package.");
 		process.exit(1);
 	}
-	const { runPixInstallCli } = await import(new URL("../dist/app/install.js", import.meta.url));
+	const { runPixInstallCli } = await import(new URL("../dist/app/cli/install.js", import.meta.url));
 	process.exit(await runPixInstallCli(childArgs.slice(1), { env: pixChildEnv() }));
 }
 

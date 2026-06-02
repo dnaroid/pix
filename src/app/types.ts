@@ -10,8 +10,8 @@ import type { ImageContent } from "../input-editor.js";
 import type { SyntaxLineHighlight } from "../syntax-highlight.js";
 import type { ThemeName } from "../theme.js";
 import type { ToastKind, ToastNotifier } from "../ui.js";
-import type { RenderedLink } from "./file-links.js";
-import type { WorkspaceMutation } from "./workspace-undo.js";
+import type { RenderedLink } from "./screen/file-links.js";
+import type { WorkspaceMutation } from "./workspace/workspace-undo.js";
 import type {
 	SUBAGENT_ACTIVE_STATUSES,
 	SUBAGENT_RENDER_MODES,

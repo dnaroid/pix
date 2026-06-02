@@ -1,18 +1,18 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { AppRenderController } from "../src/app/render-controller.js";
+import { AppRenderController } from "../src/app/rendering/render-controller.js";
 import { APP_ICONS } from "../src/app/icons.js";
 import { DISABLE_TERMINAL_WRAP, HIDE_CURSOR } from "../src/app/constants.js";
-import { TerminalOutputBuffer } from "../src/app/terminal-output-buffer.js";
-import type { EditorLayoutRenderer } from "../src/app/editor-layout-renderer.js";
-import type { AppMouseController } from "../src/app/mouse-controller.js";
-import type { AppPopupMenuController } from "../src/app/popup-menu-controller.js";
-import type { AppScrollController } from "../src/app/scroll-controller.js";
-import type { ScreenStyler } from "../src/app/screen-styler.js";
-import type { StatusLineRenderer } from "../src/app/status-line-renderer.js";
-import type { TabLineRenderer } from "../src/app/tab-line-renderer.js";
-import type { AppToastController } from "../src/app/toast-controller.js";
+import { TerminalOutputBuffer } from "../src/app/terminal/terminal-output-buffer.js";
+import type { EditorLayoutRenderer } from "../src/app/rendering/editor-layout-renderer.js";
+import type { AppMouseController } from "../src/app/screen/mouse-controller.js";
+import type { AppPopupMenuController } from "../src/app/popup/popup-menu-controller.js";
+import type { AppScrollController } from "../src/app/screen/scroll-controller.js";
+import type { ScreenStyler } from "../src/app/screen/screen-styler.js";
+import type { StatusLineRenderer } from "../src/app/rendering/status-line-renderer.js";
+import type { TabLineRenderer } from "../src/app/rendering/tab-line-renderer.js";
+import type { AppToastController } from "../src/app/rendering/toast-controller.js";
 import { THEMES } from "../src/theme.js";
 
 describe("AppRenderController", () => {

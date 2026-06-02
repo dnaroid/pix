@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import type { SessionInfo } from "@earendil-works/pi-coding-agent";
-import { createSessionSearchMenuItems, searchResultScrollNeedles, searchResultTargetEntry, type SessionSearchResult } from "../src/app/session-search.js";
+import { createSessionSearchMenuItems, searchResultScrollNeedles, searchResultTargetEntry, type SessionSearchResult } from "../src/app/session/session-search.js";
 import type { Entry } from "../src/app/types.js";
 
 describe("session search helpers", () => {

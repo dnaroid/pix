@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import type { PixConfig } from "../src/config.js";
-import { ConversationViewport } from "../src/app/conversation-viewport.js";
-import { renderConversationEntry, type ConversationEntryRenderOptions } from "../src/app/conversation-entry-renderer.js";
+import { ConversationViewport } from "../src/app/rendering/conversation-viewport.js";
+import { renderConversationEntry, type ConversationEntryRenderOptions } from "../src/app/rendering/conversation-entry-renderer.js";
 import type { Entry } from "../src/app/types.js";
 import { stringDisplayWidth } from "../src/terminal-width.js";
 import { THEMES } from "../src/theme.js";

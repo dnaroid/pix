@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { parseTerminalEditShortcutSequence, parseTerminalInterruptSequence, terminalEditShortcutForControlChar } from "../src/app/terminal-edit-shortcuts.js";
+import { parseTerminalEditShortcutSequence, parseTerminalInterruptSequence, terminalEditShortcutForControlChar } from "../src/app/input/terminal-edit-shortcuts.js";
 
 describe("terminal edit shortcut parsing", () => {
 	it("parses Cmd+Z from Kitty CSI-u with and without event types", () => {

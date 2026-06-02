@@ -1,6 +1,6 @@
-import { parseArgs } from "./app/cli.js";
+import { parseArgs } from "./app/cli/cli.js";
 import { PiUiExtendApp } from "./app/app.js";
-import { stringifyUnknown } from "./app/message-content.js";
+import { stringifyUnknown } from "./app/rendering/message-content.js";
 
 async function main(): Promise<void> {
 	const options = parseArgs(process.argv.slice(2));

@@ -16,7 +16,7 @@ import {
 	type LoadExtensionsResult,
 } from "@earendil-works/pi-coding-agent";
 import { PI_FAVORITE_MODEL_REFS } from "./constants.js";
-import { parseModelRef, parseScopedModelRef } from "./model-ref.js";
+import { parseModelRef, parseScopedModelRef } from "./model/model-ref.js";
 import type { AppOptions, ScopedSessionModel, SessionModel } from "./types.js";
 
 const BUNDLED_QUESTION_EXTENSION_NAME = "question";

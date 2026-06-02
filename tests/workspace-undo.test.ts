@@ -8,7 +8,7 @@ import {
 	revertWorkspaceMutations,
 	workspaceMutationFromToolExecution,
 	type WorkspaceMutation,
-} from "../src/app/workspace-undo.js";
+} from "../src/app/workspace/workspace-undo.js";
 
 test("revertWorkspaceMutations applies recorded patches bottom-up and preserves unrelated files", () => {
 	const { cwd, cleanup } = createTempWorkspace();

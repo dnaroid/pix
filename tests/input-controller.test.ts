@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { AppInputController, type InputControllerHost } from "../src/app/input-controller.js";
+import { AppInputController, type InputControllerHost } from "../src/app/input/input-controller.js";
 import { InputEditor } from "../src/input-editor.js";
 
 describe("AppInputController extension editor input", () => {

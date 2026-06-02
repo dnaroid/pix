@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 
-import { ScreenStyler } from "../src/app/screen-styler.js";
+import { ScreenStyler } from "../src/app/screen/screen-styler.js";
 import { APP_ICONS } from "../src/app/icons.js";
 import { colorize, THEMES } from "../src/theme.js";
 import { stringDisplayWidth } from "../src/terminal-width.js";

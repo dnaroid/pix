@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { APP_ICONS } from "../src/app/icons.js";
-import { AppPromptEnhancerController, type AppPromptEnhancerControllerHost } from "../src/app/prompt-enhancer-controller.js";
+import { AppPromptEnhancerController, type AppPromptEnhancerControllerHost } from "../src/app/input/prompt-enhancer-controller.js";
 import { InputEditor } from "../src/input-editor.js";
 
 describe("AppPromptEnhancerController", () => {

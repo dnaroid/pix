@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { ExtensionUiController } from "../src/app/extension-ui-controller.js";
+import { ExtensionUiController } from "../src/app/extensions/extension-ui-controller.js";
 import type { Entry, PixMenuController } from "../src/app/types.js";
 import { THEMES } from "../src/theme.js";
 import type { ToastNotifier } from "../src/ui.js";

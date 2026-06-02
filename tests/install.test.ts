@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { describe, it } from "node:test";
 
-import { parsePixInstallArgs, pixInstallUsage, runPixInstallCli } from "../src/app/install.js";
+import { parsePixInstallArgs, pixInstallUsage, runPixInstallCli } from "../src/app/cli/install.js";
 
 describe("pix install", () => {
 	it("parses install CLI options", () => {

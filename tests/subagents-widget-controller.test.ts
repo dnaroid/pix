@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, it } from "node:test";
 
-import { AppSubagentsWidgetController } from "../src/app/subagents-widget-controller.js";
+import { AppSubagentsWidgetController } from "../src/app/subagents/subagents-widget-controller.js";
 import type { SubagentRegistry } from "../src/app/types.js";
 
 type RefreshableController = {

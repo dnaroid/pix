@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { renderSubagentsPanel, renderTodoPanel } from "../src/app/editor-panels.js";
+import { renderSubagentsPanel, renderTodoPanel } from "../src/app/rendering/editor-panels.js";
 import { APP_ICONS } from "../src/app/icons.js";
 import type { SubagentsWidgetState, TodoDetails } from "../src/app/types.js";
 import { stringDisplayWidth } from "../src/terminal-width.js";

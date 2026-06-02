@@ -6,7 +6,7 @@ import {
 	TerminalOutputBuffer,
 	TERMINAL_OUTPUT_BUFFER_ENV,
 	terminalOutputBufferDisabled,
-} from "../src/app/terminal-output-buffer.js";
+} from "../src/app/terminal/terminal-output-buffer.js";
 
 describe("TerminalOutputBuffer", () => {
 	it("diffs frame regions independently", () => {

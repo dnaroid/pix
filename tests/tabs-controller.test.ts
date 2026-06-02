@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, it } from "node:test";
 
-import { AppTabsController } from "../src/app/tabs-controller.js";
-import type { AppBlinkController } from "../src/app/blink-controller.js";
+import { AppTabsController } from "../src/app/session/tabs-controller.js";
+import type { AppBlinkController } from "../src/app/screen/blink-controller.js";
 import type { AppOptions, SessionTab } from "../src/app/types.js";
 import type { AgentSessionEvent, AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 

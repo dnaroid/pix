@@ -9,7 +9,7 @@ import type { LoadExtensionsResult } from "@earendil-works/pi-coding-agent";
 import {
 	checkPiCliAvailability,
 	checkPiToolsSuiteExtensionAvailability,
-} from "../src/app/startup-checks.js";
+} from "../src/app/cli/startup-checks.js";
 
 describe("startup availability checks", () => {
 	it("reports a missing pi CLI", async () => {

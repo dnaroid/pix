@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { AppBlinkController } from "../src/app/blink-controller.js";
+import { AppBlinkController } from "../src/app/screen/blink-controller.js";
 
 describe("AppBlinkController", () => {
 	it("uses status-line renders for status-only blinking", () => {

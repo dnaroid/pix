@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { join, resolve } from "node:path";
 import { describe, it } from "node:test";
 
-import { renderToolBlock } from "../src/app/tool-block-renderer.js";
+import { renderToolBlock } from "../src/app/rendering/tool-block-renderer.js";
 import { THEMES } from "../src/theme.js";
 import { renderToolDisplay, type ToolRenderInput } from "../src/tool-renderers/index.js";
 import { renderExecTool, renderShellTool } from "../src/tool-renderers/shell.js";

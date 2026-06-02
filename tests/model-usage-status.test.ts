@@ -16,7 +16,7 @@ import {
 	zhipuUsageStatusFromResponse,
 	type ModelUsageDescriptor,
 	type OpenAIUsageResponse,
-} from "../src/app/model-usage-status.js";
+} from "../src/app/model/model-usage-status.js";
 import type { SessionModel } from "../src/app/types.js";
 
 describe("model usage status", () => {

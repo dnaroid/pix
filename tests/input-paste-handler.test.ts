@@ -3,7 +3,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { InputPasteHandler } from "../src/app/input-paste-handler.js";
+import { InputPasteHandler } from "../src/app/input/input-paste-handler.js";
 import { InputEditor } from "../src/input-editor.js";
 
 type TestPasteHandler = {

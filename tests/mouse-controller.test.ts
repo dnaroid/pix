@@ -10,12 +10,12 @@ import {
 	screenSelectionLineText,
 	type AppMouseControllerHost,
 	type InputFrameCopyRows,
-} from "../src/app/mouse-controller.js";
-import type { AppCommandController } from "../src/app/command-controller.js";
-import type { EditorLayoutRenderer } from "../src/app/editor-layout-renderer.js";
-import type { AppPopupActionController } from "../src/app/popup-action-controller.js";
-import type { AppPopupMenuController } from "../src/app/popup-menu-controller.js";
-import type { AppScrollController } from "../src/app/scroll-controller.js";
+} from "../src/app/screen/mouse-controller.js";
+import type { AppCommandController } from "../src/app/commands/command-controller.js";
+import type { EditorLayoutRenderer } from "../src/app/rendering/editor-layout-renderer.js";
+import type { AppPopupActionController } from "../src/app/popup/popup-action-controller.js";
+import type { AppPopupMenuController } from "../src/app/popup/popup-menu-controller.js";
+import type { AppScrollController } from "../src/app/screen/scroll-controller.js";
 
 describe("AppMouseController", () => {
 	it("shows detailed DCP stats as a dialog toast when context status is clicked", () => {

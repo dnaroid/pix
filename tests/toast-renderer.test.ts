@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { APP_ICONS } from "../src/app/icons.js";
-import { renderToastOverlays } from "../src/app/toast-renderer.js";
+import { renderToastOverlays } from "../src/app/rendering/toast-renderer.js";
 import { stringDisplayWidth } from "../src/terminal-width.js";
 import { THEMES } from "../src/theme.js";
 import type { ToastEntry } from "../src/ui.js";
