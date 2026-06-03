@@ -28,6 +28,7 @@ import { createId } from "./id.js";
 import { NerdFontController } from "./terminal/nerd-font-controller.js";
 import { AppPopupActionController } from "./popup/popup-action-controller.js";
 import { AppPopupMenuController } from "./popup/popup-menu-controller.js";
+import { PopupMenuRenderer } from "./rendering/popup-menu-renderer.js";
 import { AppPromptEnhancerController } from "./input/prompt-enhancer-controller.js";
 import { AppAutocompleteController } from "./input/autocomplete-controller.js";
 import { AppQueuedMessageController } from "./session/queued-message-controller.js";
@@ -240,9 +241,15 @@ export class PiUiExtendApp {
 			getEntries: () => this.entries,
 			getResumeSessions: () => this.resumeSessions,
 		});
-		this.popupMenus = new AppPopupMenuController({
+		const popupMenuRenderer = new PopupMenuRenderer({
 			theme: this.theme,
 			screenStyler: this.screenStyler,
+			get entries() { return app.entries; },
+			get session() { return app.runtime?.session; },
+			get resumeLoading() { return app.resumeLoading; },
+			get resumeSessionCount() { return app.resumeSessions.length; },
+		});
+		this.popupMenus = new AppPopupMenuController({
 			get entries() { return app.entries; },
 			get session() { return app.runtime?.session; },
 			get resumeLoading() { return app.resumeLoading; },
@@ -263,7 +270,7 @@ export class PiUiExtendApp {
 			setStatus: (status) => this.setStatus(status),
 			restoreSessionStatus: () => this.restoreSessionStatus(),
 			render: () => this.render(),
-		});
+		}, popupMenuRenderer);
 		this.statusLineRenderer = new StatusLineRenderer({
 			theme: this.theme,
 			screenStyler: this.screenStyler,

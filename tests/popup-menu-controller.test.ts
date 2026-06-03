@@ -5,10 +5,13 @@ import { stringDisplayWidth } from "../src/terminal-width.js";
 import { THEMES } from "../src/theme.js";
 import { ScreenStyler } from "../src/app/screen/screen-styler.js";
 import { RESUME_MENU_INITIAL_SESSION_ROWS, RESUME_MENU_LOAD_BATCH_ROWS, RESUME_MENU_LOAD_THRESHOLD_ROWS } from "../src/app/constants.js";
-import { AppPopupMenuController, buildUserMessageJumpItems, formatPopupMenuHeader, formatSessionInfoMenuItems, type AppPopupMenuControllerHost } from "../src/app/popup/popup-menu-controller.js";
+import { AppPopupMenuController, buildUserMessageJumpItems, formatSessionInfoMenuItems, type AppPopupMenuControllerHost } from "../src/app/popup/popup-menu-controller.js";
+import { PopupMenuRenderer, formatPopupMenuHeader, type PopupMenuRendererHost } from "../src/app/rendering/popup-menu-renderer.js";
 import type { Entry, RenderedLine } from "../src/app/types.js";
 import type { PopupMenuItem } from "../src/ui.js";
 import type { SessionInfo } from "@earendil-works/pi-coding-agent";
+
+type TestPopupMenuHost = AppPopupMenuControllerHost & PopupMenuRendererHost;
 
 describe("popup menu header", () => {
 	it("renders a title with an Esc button inside the menu width", () => {
@@ -37,7 +40,7 @@ describe("popup menu header", () => {
 
 	it("styles headers with a lighter popup header background", () => {
 		const theme = THEMES.dark;
-		const controller = new AppPopupMenuController(createPopupMenuHost([], theme));
+		const controller = createPopupMenuController(createPopupMenuHost([], theme));
 		const output = controller.styleOverlayLine(1, {
 			text: formatPopupMenuHeader("Commands", 32),
 			variant: "accent",
@@ -51,7 +54,7 @@ describe("popup menu header", () => {
 
 	it("styles the inverse popup cursor with the input cursor background", () => {
 		const theme = THEMES.dark;
-		const controller = new AppPopupMenuController(createPopupMenuHost([], theme));
+		const controller = createPopupMenuController(createPopupMenuHost([], theme));
 		const output = controller.styleOverlayLine(1, {
 			text: "Copy",
 			target: { kind: "popup-menu", index: 0 },
@@ -62,7 +65,7 @@ describe("popup menu header", () => {
 	});
 
 	it("keeps the popup menu inset from both screen edges", () => {
-		const controller = new AppPopupMenuController(createPopupMenuHost([]));
+		const controller = createPopupMenuController(createPopupMenuHost([]));
 		const output = controller.overlayPlainText({ text: "Commands" }, 80);
 
 		assert.equal(controller.effectivePopupMenuWidth(80), 76);
@@ -73,7 +76,7 @@ describe("popup menu header", () => {
 
 	it("renders a header for the inline user-message action menu", () => {
 		const entry: Extract<Entry, { kind: "user" }> = { id: "user-1", kind: "user", text: "hello" };
-		const controller = new AppPopupMenuController(createPopupMenuHost([entry]));
+		const controller = createPopupMenuController(createPopupMenuHost([entry]));
 
 		assert.equal(controller.openUserMessageMenu(entry.id), true);
 
@@ -93,7 +96,7 @@ describe("popup menu header", () => {
 	});
 
 	it("filters close-style Cancel rows from SDK menus", () => {
-		const controller = new AppPopupMenuController(createPopupMenuHost([]));
+		const controller = createPopupMenuController(createPopupMenuHost([]));
 		void controller.showSdkMenu([
 			{ value: "keep", label: "Keep" },
 			{ value: "cancel", label: "Cancel", description: "Close this menu" },
@@ -186,7 +189,7 @@ describe("popup menu header", () => {
 			...item,
 			value: { kind: "session", session: item.value } as const,
 		}));
-		const controller = new AppPopupMenuController(createPopupMenuHost([], theme, resumeItems));
+		const controller = createPopupMenuController(createPopupMenuHost([], theme, resumeItems));
 
 		controller.setDirectMenu("resume");
 		const forkLine = controller.renderActivePopupMenu(80).find((line) => line.text.includes("Forked work"));
@@ -199,7 +202,7 @@ describe("popup menu header", () => {
 	});
 
 	it("shows resume loading in the header without adding a loader row", () => {
-		const controller = new AppPopupMenuController({
+		const controller = createPopupMenuController({
 			...createPopupMenuHost([], THEMES.dark, [
 				{ value: { kind: "new" }, label: "new", description: "Create a new session" },
 			]),
@@ -223,7 +226,7 @@ describe("popup menu header", () => {
 
 	it("renders user message jump rows across the full popup width", () => {
 		const label = "1. " + "wide preview text ".repeat(4);
-		const controller = new AppPopupMenuController({
+		const controller = createPopupMenuController({
 			...createPopupMenuHost([]),
 			getUserMessageJumpMenuItems: () => [{ value: { entryId: "user-1" }, label }],
 		});
@@ -235,7 +238,7 @@ describe("popup menu header", () => {
 		assert.doesNotMatch(lines[1]?.text ?? "", /Enter to scroll/);
 	});
 	it("updates and clears direct popup queries as text is typed", () => {
-		const controller = new AppPopupMenuController(createPopupMenuHost([]));
+		const controller = createPopupMenuController(createPopupMenuHost([]));
 
 		controller.openDirectPopupMenu("model");
 		assert.equal(controller.handleDirectPopupInput("a"), true);
@@ -249,7 +252,7 @@ describe("popup menu header", () => {
 
 	it("dismisses model menus and restores session status for direct popups", () => {
 		const statusChanges: string[] = [];
-		const controller = new AppPopupMenuController({
+		const controller = createPopupMenuController({
 			...createPopupMenuHost([], THEMES.dark, [
 				{ value: { kind: "new" }, label: "new", description: "Create a new session" },
 			]),
@@ -269,7 +272,7 @@ describe("popup menu header", () => {
 
 	it("does not open SDK menus when the host is not running", async () => {
 		let rendered = 0;
-		const controller = new AppPopupMenuController({
+		const controller = createPopupMenuController({
 			...createPopupMenuHost([]),
 			isRunning: () => false,
 			render: () => {
@@ -285,7 +288,7 @@ describe("popup menu header", () => {
 	it("resolves SDK selections and restores session status when the menu closes", async () => {
 		const statusChanges: string[] = [];
 		let renders = 0;
-		const controller = new AppPopupMenuController({
+		const controller = createPopupMenuController({
 			...createPopupMenuHost([]),
 			setStatus: (status) => statusChanges.push(status),
 			restoreSessionStatus: () => statusChanges.push("restore"),
@@ -309,7 +312,7 @@ describe("popup menu header", () => {
 	});
 
 	it("allows direct user-message popups to accept plain input without mutating the query", () => {
-		const controller = new AppPopupMenuController(createPopupMenuHost([]));
+		const controller = createPopupMenuController(createPopupMenuHost([]));
 
 		controller.openDirectPopupMenu("user-message");
 
@@ -321,7 +324,7 @@ describe("popup menu header", () => {
 
 	it("cancels preserved direct popups without restoring session status", () => {
 		const actions: string[] = [];
-		const controller = new AppPopupMenuController({
+		const controller = createPopupMenuController({
 			...createPopupMenuHost([]),
 			restoreSessionStatus: () => actions.push("restore"),
 			render: () => actions.push("render"),
@@ -344,11 +347,11 @@ describe("popup menu header", () => {
 			queueSource: "deferred",
 			queueIndex: 0,
 		};
-		const controller = new AppPopupMenuController({
+		const controller = createPopupMenuController({
 			...createPopupMenuHost([userEntry, queuedEntry]),
 			hasQueuedEntry: (entryId) => entryId === queuedEntry.id,
 			getUserMessageMenuItems: () => [{ value: "copy", label: "Copy", description: "Copy message" }],
-			getQueueMessageMenuItems: () => [{ value: "reply", label: "Reply", description: "Reply to queue" }],
+			getQueueMessageMenuItems: () => [{ value: "edit", label: "Edit", description: "Edit queued message" }],
 		});
 
 		assert.equal(controller.openUserMessageMenu(userEntry.id), true);
@@ -362,8 +365,8 @@ describe("popup menu header", () => {
 
 		assert.equal(controller.openQueueMessageMenu(queuedEntry.id), true);
 		assert.deepEqual(controller.selectedQueueMessageAction(), {
-			value: "reply",
-			label: "Reply",
+			value: "edit",
+			label: "Edit",
 			entryId: queuedEntry.id,
 		});
 		controller.closeQueueMessageMenu();
@@ -391,7 +394,7 @@ function createLazyResumeMenuController(): { controller: AppPopupMenuController;
 		return sessionInfo(`session-${index}`, `/sessions/${index}.jsonl`, `Session ${index}`, new Date(2024, 0, index + 1));
 	});
 	const requestedLimits: (number | undefined)[] = [];
-	const controller = new AppPopupMenuController({
+	const controller = createPopupMenuController({
 		...createPopupMenuHost([]),
 		resumeSessionCount: sessions.length,
 		getResumeMenuItems: (_query, limit) => {
@@ -410,11 +413,15 @@ function createLazyResumeMenuController(): { controller: AppPopupMenuController;
 	return { controller, requestedLimits };
 }
 
+function createPopupMenuController(host: TestPopupMenuHost): AppPopupMenuController {
+	return new AppPopupMenuController(host, new PopupMenuRenderer(host));
+}
+
 function createPopupMenuHost(
 	entries: readonly Entry[],
 	theme = THEMES.dark,
 	resumeMenuItems: readonly PopupMenuItem<{ kind: "new" } | { kind: "session"; session: SessionInfo }>[] = [],
-): AppPopupMenuControllerHost {
+): TestPopupMenuHost {
 	return {
 		theme,
 		screenStyler: new ScreenStyler({ theme, mouseSelection: undefined }),

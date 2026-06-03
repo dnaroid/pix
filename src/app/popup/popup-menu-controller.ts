@@ -1,20 +1,15 @@
 import { resolve } from "node:path";
 import { fuzzySearch, type FuzzySearchItem } from "../../fuzzy.js";
-import { colorLine, type Theme } from "../../theme.js";
 import { PopupMenu, type PopupMenuItem } from "../../ui.js";
-import { padOrTrimPlain, ellipsizeDisplay, sanitizeText } from "../rendering/render-text.js";
-import { stringDisplayWidth } from "../../terminal-width.js";
+import { sanitizeText } from "../rendering/render-text.js";
 import {
 	RESUME_MENU_INITIAL_SESSION_ROWS,
 	RESUME_MENU_LOAD_BATCH_ROWS,
 	RESUME_MENU_LOAD_THRESHOLD_ROWS,
 	RESUME_MENU_MAX_ROWS,
-	SLASH_COMMAND_DESCRIPTION_COLUMN,
 	SLASH_COMMAND_MENU_MAX_ROWS,
 	THINKING_MENU_MAX_ROWS,
 } from "../constants.js";
-import { APP_ICONS } from "../icons.js";
-import type { ScreenStyler } from "../screen/screen-styler.js";
 import type {
 	ActivePopupMenu,
 	Entry,
@@ -28,9 +23,7 @@ import type {
 	QueueMessageMenuValue,
 	RenderedLine,
 	ResumeMenuValue,
-	SessionModel,
 	SlashCommand,
-	StyledSegment,
 	ThinkingMenuValue,
 	UserMessageJumpMenuValue,
 	UserMessageMenuValue,
@@ -51,15 +44,42 @@ type SdkMenuRequest = {
 	options: PixMenuOptions;
 	resolve: (value: unknown | undefined) => void;
 };
-type PopupLineVariant = NonNullable<RenderedLine["variant"]>;
 
-const POPUP_MENU_ESCAPE_BUTTON = "Esc";
+type PopupMenuRendererPort = {
+	popupMenuWidth(columns: number): number;
+	popupMenuMargin(columns: number): number;
+	effectivePopupMenuWidth(columns: number): number;
+	styleOverlayLine(row: number, line: RenderedLine, width: number, activeMenu: PopupMenu<unknown>): string;
+	overlayPlainText(line: RenderedLine, width: number): string;
+	renderInlineUserMessageMenu(
+		options: {
+			userContentWidth: number;
+			userContentLeft: number;
+			userLine: (text: string, entryId?: string, syntaxHighlight?: RenderedLine["syntaxHighlight"]) => RenderedLine;
+		},
+		menu: PopupMenu<UserMessagePopupMenuValue>,
+	): RenderedLine[];
+	renderSlashCommandMenu(width: number, menu: PopupMenu<SlashCommandMenuValue>): RenderedLine[];
+	renderModelMenu(width: number, menu: PopupMenu<ModelPopupMenuValue>): RenderedLine[];
+	renderThinkingMenu(width: number, menu: PopupMenu<ThinkingPopupMenuValue>): RenderedLine[];
+	renderResumeMenu(
+		width: number,
+		menu: PopupMenu<ResumePopupMenuValue>,
+		state: { directQuery: string; allSessionsLoaded: boolean; loadedSessionCount: number },
+	): RenderedLine[];
+	renderUserMessageJumpMenu(width: number, menu: PopupMenu<UserMessageJumpPopupMenuValue>, directQuery: string): RenderedLine[];
+	renderQueueMessageMenu(width: number, menu: PopupMenu<QueueMessagePopupMenuValue>): RenderedLine[];
+	renderSdkMenu(
+		width: number,
+		menu: PopupMenu<SdkPopupMenuValue>,
+		request: { options: PixMenuOptions } | undefined,
+		directQuery: string,
+	): RenderedLine[];
+};
 
 export type DirectPopupMenu = Exclude<ActivePopupMenu, "slash">;
 
 export type AppPopupMenuControllerHost = {
-	readonly theme: Theme;
-	readonly screenStyler: ScreenStyler;
 	readonly entries: readonly Entry[];
 	readonly session: AgentSession | undefined;
 	readonly resumeLoading: boolean;
@@ -117,7 +137,7 @@ export class AppPopupMenuController {
 	private activeUserMessageEntryId: string | undefined;
 	private activeQueuedMessageEntryId: string | undefined;
 
-	constructor(private readonly host: AppPopupMenuControllerHost) {}
+	constructor(private readonly host: AppPopupMenuControllerHost, private readonly renderer: PopupMenuRendererPort) {}
 
 	get directMenu(): DirectPopupMenu | undefined {
 		return this.directPopupMenu;
@@ -209,7 +229,6 @@ export class AppPopupMenuController {
 			case "slash":
 				return this.slashCommandMenu;
 		}
-		throw new Error(`Unknown popup menu: ${active}`);
 	}
 
 	moveActivePopupMenuSelection(delta: number): boolean {
@@ -502,61 +521,44 @@ export class AppPopupMenuController {
 	}
 
 	renderActivePopupMenu(width: number): RenderedLine[] {
-		if (this.syncQueueMessageMenu()) return this.renderQueueMessageMenu(width);
+		if (this.syncQueueMessageMenu()) return this.renderer.renderQueueMessageMenu(width, this.queueMessageMenu);
 		// User-message actions are rendered inline inside the selected message block.
 		// They must never also appear as the global popup above the input editor.
 		if (this.syncUserMessageMenu()) return [];
-		if (this.syncUserMessageJumpMenu()) return this.renderUserMessageJumpMenu(width);
-		if (this.syncResumeMenu()) return this.renderResumeMenu(width);
-		if (this.syncSdkMenu()) return this.renderSdkMenu(width);
-		if (this.syncModelMenu()) return this.renderModelMenu(width);
-		if (this.syncThinkingMenu()) return this.renderThinkingMenu(width);
-		return this.renderSlashCommandMenu(width);
+		if (this.syncUserMessageJumpMenu()) return this.renderer.renderUserMessageJumpMenu(width, this.userMessageJumpMenu, this.directPopupMenuQuery);
+		if (this.syncResumeMenu()) {
+			return this.renderer.renderResumeMenu(width, this.resumeMenu, {
+				directQuery: this.directPopupMenuQuery,
+				allSessionsLoaded: this.resumeMenuAllSessionsLoaded,
+				loadedSessionCount: this.resumeMenuLoadedSessionCount(),
+			});
+		}
+		if (this.syncSdkMenu()) return this.renderer.renderSdkMenu(width, this.sdkMenu, this.sdkMenuRequest, this.directPopupMenuQuery);
+		if (this.syncModelMenu()) return this.renderer.renderModelMenu(width, this.modelMenu);
+		if (this.syncThinkingMenu()) return this.renderer.renderThinkingMenu(width, this.thinkingMenu);
+		return this.syncSlashCommandMenu() ? this.renderer.renderSlashCommandMenu(width, this.slashCommandMenu) : [];
 	}
 
 	popupMenuWidth(columns: number): number {
-		return columns;
+		return this.renderer.popupMenuWidth(columns);
 	}
 
 	popupMenuMargin(columns: number): number {
-		return columns > 44 ? 2 : 0;
+		return this.renderer.popupMenuMargin(columns);
 	}
 
 	effectivePopupMenuWidth(columns: number): number {
-		const sideMargin = this.popupMenuMargin(columns);
-		return Math.min(this.popupMenuWidth(columns), Math.max(1, columns - sideMargin * 2));
+		return this.renderer.effectivePopupMenuWidth(columns);
 	}
 
 	styleOverlayLine(row: number, line: RenderedLine, width: number): string {
-		const colors = this.host.theme.colors;
-		const margin = this.popupMenuMargin(width);
-		const menuWidth = this.effectivePopupMenuWidth(width);
-		const rightMargin = Math.max(0, width - margin - menuWidth);
 		const activeMenuName = this.syncActivePopupMenu() ?? "slash";
 		const activeMenu = this.getActivePopupMenu(activeMenuName);
-		const selected = line.target?.kind === "popup-menu" && activeMenu.selectedIndex === line.target.index;
-		const foreground = this.popupLineForeground(line, selected);
-		const background = this.popupLineBackground(line, selected);
-		const plain = `${" ".repeat(margin)}${padOrTrimPlain(line.text, menuWidth)}${" ".repeat(rightMargin)}`;
-
-		if (this.host.screenStyler.selectionRangeForRow(row, width)) {
-			return this.host.screenStyler.styleLine(row, plain, width, { foreground, background });
-		}
-
-		return [
-			colorLine("", margin, { background: colors.background }),
-			line.segments && line.segments.length > 0
-				? this.host.screenStyler.styleLineSegments(row, line.text, menuWidth, { foreground, background, bold: selected }, line.segments)
-				: colorLine(line.text, menuWidth, { foreground, background, bold: selected }),
-			colorLine("", rightMargin, { background: colors.background }),
-		].join("");
+		return this.renderer.styleOverlayLine(row, line, width, activeMenu);
 	}
 
 	overlayPlainText(line: RenderedLine, width: number): string {
-		const margin = this.popupMenuMargin(width);
-		const menuWidth = this.effectivePopupMenuWidth(width);
-		const rightMargin = Math.max(0, width - margin - menuWidth);
-		return `${" ".repeat(margin)}${padOrTrimPlain(line.text, menuWidth)}${" ".repeat(rightMargin)}`;
+		return this.renderer.overlayPlainText(line, width);
 	}
 
 	isDynamicConversationBlock(entry: Entry): boolean {
@@ -576,49 +578,7 @@ export class AppPopupMenuController {
 		},
 	): RenderedLine[] {
 		if (!(this.directPopupMenu === "user-message" && this.activeUserMessageEntryId === entry.id && this.syncUserMessageMenu())) return [];
-		const headerLine = options.userLine(formatPopupMenuHeader("Message actions", options.userContentWidth));
-		headerLine.target = { kind: "popup-menu-close" };
-		headerLine.segments = [{
-			start: options.userContentLeft,
-			end: options.userContentLeft + options.userContentWidth,
-			foreground: this.host.theme.colors.accent,
-			background: this.host.theme.colors.popupHeaderBackground,
-			bold: true,
-		}];
-
-		const lines: RenderedLine[] = [headerLine];
-		for (const item of this.userMessageMenu.visibleItems()) {
-			const label = item.label.padEnd(18, " ");
-			const description = item.description ?? "";
-			const marker = item.selected ? "›" : " ";
-			const rawText = `${marker} ${label}${description}`;
-			const text = ellipsizeDisplay(rawText, options.userContentWidth);
-			const line = options.userLine(text);
-			line.target = { kind: "popup-menu", index: item.index };
-
-			const contentStart = options.userContentLeft;
-			const labelStart = contentStart + 2;
-			const labelEnd = Math.min(contentStart + text.length, labelStart + item.label.length);
-			const descriptionStart = contentStart + 2 + label.length;
-			line.segments = [
-				...(item.selected ? [{ start: contentStart, end: contentStart + 1, foreground: this.host.theme.colors.accent, bold: true }] : []),
-				{
-					start: labelStart,
-					end: labelEnd,
-					foreground: this.userMessageActionForeground(item.selected, item.value),
-					bold: item.selected,
-				},
-				...(descriptionStart < contentStart + text.length
-					? [{ start: descriptionStart, end: contentStart + text.length, foreground: this.host.theme.colors.muted }]
-					: []),
-			];
-			lines.push(line);
-		}
-		return lines;
-	}
-
-	private hasPopupActionItems<T>(items: readonly PopupMenuItem<T>[]): boolean {
-		return items.length > 0;
+		return this.renderer.renderInlineUserMessageMenu(options, this.userMessageMenu);
 	}
 
 	private withoutCloseMenuItems<T>(items: readonly PopupMenuItem<T>[]): PopupMenuItem<T>[] {
@@ -657,50 +617,6 @@ export class AppPopupMenuController {
 
 	private resumeMenuLoadedSessionCount(): number {
 		return this.resumeMenu.items.filter((item) => item.value.kind === "session").length;
-	}
-
-	private userMessageActionForeground(selected: boolean, value: UserMessagePopupMenuValue): string {
-		if (selected) return this.host.theme.colors.accent;
-		if (value === "undo") return this.host.theme.colors.error;
-		return this.host.theme.colors.inputForeground;
-	}
-
-	private selectableItemVariant(selected: boolean, value: ModelPopupMenuValue | ThinkingPopupMenuValue): PopupLineVariant {
-		if (selected) return "accent";
-		return value.current ? "muted" : "normal";
-	}
-
-	private queueMessageItemVariant(selected: boolean, value: QueueMessagePopupMenuValue): PopupLineVariant {
-		if (selected) return "accent";
-		return value === "cancel" ? "error" : "normal";
-	}
-
-	private sdkItemVariant(selected: boolean, value: SdkPopupMenuValue): PopupLineVariant {
-		if (selected) return "accent";
-		return value.variant ?? "normal";
-	}
-
-	private resumeMenuItemSegments(value: ResumePopupMenuValue, label: string, description: string, text: string): StyledSegment[] | undefined {
-		if (value.kind !== "session") return undefined;
-
-		const sessionLabel = value.session.name ?? value.session.firstMessage.slice(0, 50);
-		const sessionLabelStart = Math.max(0, label.length - sessionLabel.length);
-		const muted = this.host.theme.colors.popupMuted;
-		const segments: StyledSegment[] = [];
-
-		if (sessionLabelStart > 0) segments.push({ start: 0, end: sessionLabelStart, foreground: muted });
-		if (description.length > 0) segments.push({ start: label.length, end: text.length, foreground: muted });
-
-		return segments.length > 0 ? segments : undefined;
-	}
-
-	private popupMenuHeader(title: string, width: number): RenderedLine {
-		return {
-			text: formatPopupMenuHeader(title, width),
-			variant: "accent",
-			backgroundOverride: this.host.theme.colors.popupHeaderBackground,
-			target: { kind: "popup-menu-close" },
-		};
 	}
 
 	private syncModelMenu(): boolean {
@@ -879,215 +795,6 @@ export class AppPopupMenuController {
 		})));
 	}
 
-	private renderSlashCommandMenu(_width: number): RenderedLine[] {
-		if (!this.syncSlashCommandMenu()) return [];
-
-		const lines: RenderedLine[] = [this.popupMenuHeader("Commands", _width)];
-		const visibleItems = this.slashCommandMenu.visibleItems();
-		if (!this.hasPopupActionItems(this.slashCommandMenu.items)) {
-			lines.push({ text: "  No matching slash commands", variant: "muted" });
-		}
-
-		for (const item of visibleItems) {
-			const command = item.label.padEnd(SLASH_COMMAND_DESCRIPTION_COLUMN, " ");
-			const description = item.description ?? "";
-			lines.push({
-				text: `${command}${description}`,
-				variant: item.selected ? "accent" : "normal",
-				target: { kind: "popup-menu", index: item.index },
-			});
-		}
-		return lines;
-	}
-
-	private renderModelMenu(_width: number): RenderedLine[] {
-		if (!this.syncModelMenu()) return [];
-
-		const lines: RenderedLine[] = [this.popupMenuHeader("Select model", _width)];
-		const visibleItems = this.modelMenu.visibleItems();
-		if (!this.hasPopupActionItems(this.modelMenu.items)) {
-			lines.push({
-				text: this.host.session ? "  No matching favorite models" : "  Model menu unavailable",
-				variant: "muted",
-			});
-		}
-
-		for (const item of visibleItems) {
-			const model = item.label.padEnd(SLASH_COMMAND_DESCRIPTION_COLUMN, " ");
-			const description = item.description ?? "";
-			lines.push({
-				text: `${model}${description}`,
-				variant: this.selectableItemVariant(item.selected, item.value),
-				target: { kind: "popup-menu", index: item.index },
-			});
-		}
-		return lines;
-	}
-
-	private renderThinkingMenu(_width: number): RenderedLine[] {
-		if (!this.syncThinkingMenu()) return [];
-
-		const lines: RenderedLine[] = [this.popupMenuHeader("Thinking level", _width)];
-		const visibleItems = this.thinkingMenu.visibleItems();
-		if (!this.hasPopupActionItems(this.thinkingMenu.items)) {
-			lines.push({ text: "  No matching thinking levels", variant: "muted" });
-		}
-
-		for (const item of visibleItems) {
-			const level = item.label.padEnd(SLASH_COMMAND_DESCRIPTION_COLUMN, " ");
-			const description = item.description ?? "";
-			lines.push({
-				text: `${level}${description}`,
-				variant: this.selectableItemVariant(item.selected, item.value),
-				target: { kind: "popup-menu", index: item.index },
-			});
-		}
-		return lines;
-	}
-
-	private renderResumeMenu(_width: number): RenderedLine[] {
-		if (!this.syncResumeMenu()) return [];
-
-		const title = this.host.resumeLoading ? `Resume session ${APP_ICONS.timerSand}` : "Resume session";
-		const lines: RenderedLine[] = [this.popupMenuHeader(title, _width)];
-		const visibleItems = this.resumeMenu.visibleItems();
-		if (!this.host.resumeLoading && !this.hasPopupActionItems(this.resumeMenu.items)) {
-			lines.push({
-				text: this.host.resumeSessionCount === 0 ? "  No sessions found" : "  No matching sessions",
-				variant: "muted",
-			});
-		}
-
-		for (const item of visibleItems) {
-			const label = item.label;
-			const description = item.description ?? "";
-			const text = `${label}  ${description}`;
-			const segments = this.resumeMenuItemSegments(item.value, label, description, text);
-			lines.push({
-				text,
-				variant: item.selected ? "accent" : "normal",
-				...(segments ? { segments } : {}),
-				target: { kind: "popup-menu", index: item.index },
-			});
-		}
-
-		if (!this.resumeMenuAllSessionsLoaded && this.resumeMenuLoadedSessionCount() > 0) {
-			lines.push({ text: `  Loaded ${this.resumeMenuLoadedSessionCount()} sessions · scroll for more`, variant: "muted" });
-		}
-
-		if (this.directPopupMenuQuery) {
-			lines.push({ text: `  Search: ${this.directPopupMenuQuery}`, variant: "muted" });
-		}
-
-		return lines;
-	}
-
-	private renderUserMessageJumpMenu(width: number): RenderedLine[] {
-		if (!this.syncUserMessageJumpMenu()) return [];
-
-		const lines: RenderedLine[] = [this.popupMenuHeader("Jump to user message", width)];
-		if (!this.hasPopupActionItems(this.userMessageJumpMenu.items)) {
-			lines.push({
-				text: this.host.entries.some((entry) => entry.kind === "user") ? "  No matching user messages" : "  No user messages yet",
-				variant: "muted",
-			});
-		}
-
-		const labelWidth = Math.max(1, width);
-		for (const item of this.userMessageJumpMenu.visibleItems()) {
-			const label = ellipsizeDisplay(item.label, labelWidth);
-			lines.push({
-				text: label,
-				variant: item.selected ? "accent" : "normal",
-				target: { kind: "popup-menu", index: item.index },
-			});
-		}
-
-		if (this.directPopupMenuQuery) {
-			lines.push({ text: `  Search: ${this.directPopupMenuQuery}`, variant: "muted" });
-		}
-		return lines;
-	}
-
-	private renderQueueMessageMenu(_width: number): RenderedLine[] {
-		if (!this.syncQueueMessageMenu()) return [];
-
-		const lines: RenderedLine[] = [this.popupMenuHeader("Queued message", _width)];
-		for (const item of this.queueMessageMenu.visibleItems()) {
-			const label = item.label.padEnd(18, " ");
-			const description = item.description ?? "";
-			lines.push({
-				text: `${label}${description}`,
-				variant: this.queueMessageItemVariant(item.selected, item.value),
-				target: { kind: "popup-menu", index: item.index },
-			});
-		}
-		return lines;
-	}
-
-	private renderSdkMenu(_width: number): RenderedLine[] {
-		if (!this.syncSdkMenu()) return [];
-
-		const request = this.sdkMenuRequest;
-		const lines: RenderedLine[] = [this.popupMenuHeader(request?.options.title ?? "Menu", _width)];
-		if (!this.hasPopupActionItems(this.sdkMenu.items)) {
-			lines.push({ text: `  ${request?.options.emptyText ?? "No matching items"}`, variant: "muted" });
-		}
-
-		for (const item of this.sdkMenu.visibleItems()) {
-			const label = item.label.padEnd(SLASH_COMMAND_DESCRIPTION_COLUMN, " ");
-			const description = item.description ?? "";
-			lines.push({
-				text: `${label}${description}`,
-				variant: this.sdkItemVariant(item.selected, item.value),
-				target: { kind: "popup-menu", index: item.index },
-			});
-		}
-
-		if (request?.options.searchable !== false && this.directPopupMenuQuery) {
-			lines.push({ text: `  ${request?.options.placeholder ?? "Search"}: ${this.directPopupMenuQuery}`, variant: "muted" });
-		}
-
-		return lines;
-	}
-
-	private popupLineForeground(line: RenderedLine, selected: boolean): string {
-		const colors = this.host.theme.colors;
-		if (selected) return colors.popupSelectedForeground;
-		if (line.colorOverride) return line.colorOverride;
-
-		switch (line.variant) {
-			case "accent":
-				return colors.accent;
-			case "muted":
-				return colors.popupMuted;
-			case "error":
-				return colors.error;
-			case "normal":
-			case undefined:
-				return colors.popupForeground;
-		}
-		return colors.popupForeground;
-	}
-
-	private popupLineBackground(line: RenderedLine, selected: boolean): string {
-		const colors = this.host.theme.colors;
-		if (selected) return colors.popupSelectedBackground;
-		return line.backgroundOverride ?? colors.popupBackground;
-	}
-}
-
-export function formatPopupMenuHeader(title: string, width: number): string {
-	const safeWidth = Math.max(1, width);
-	const sanitizedTitle = sanitizeText(title).replace(/\s+/g, " ").trim() || "Menu";
-	const buttonWidth = stringDisplayWidth(POPUP_MENU_ESCAPE_BUTTON);
-
-	if (safeWidth <= buttonWidth + 1) return padOrTrimPlain(POPUP_MENU_ESCAPE_BUTTON, safeWidth);
-
-	const titleWidth = safeWidth - buttonWidth - 1;
-	const titleText = ellipsizeDisplay(sanitizedTitle, titleWidth);
-	const gapWidth = Math.max(1, safeWidth - stringDisplayWidth(titleText) - buttonWidth);
-	return `${titleText}${" ".repeat(gapWidth)}${POPUP_MENU_ESCAPE_BUTTON}`;
 }
 
 type SessionInfoTreeNode = {
