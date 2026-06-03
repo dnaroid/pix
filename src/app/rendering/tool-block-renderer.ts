@@ -34,7 +34,7 @@ export function renderToolBlock(entry: ToolBlockEntry, rule: ResolvedToolRule, w
 	if (rule.hidden) return [];
 
 	const hasLspDiagnostics = hasToolLspDiagnosticsAfterMutation(entry);
-	const expanded = entry.expanded && !options.superCompact;
+	const expanded = entry.expanded;
 	const stateIcon = toolStatusIcon(entry);
 	const toolColor = resolveColor(rule.color, colors);
 	const toolOutputColor = colors.statusForeground;
@@ -62,7 +62,7 @@ export function renderToolBlock(entry: ToolBlockEntry, rule: ResolvedToolRule, w
 		return headerLines;
 	}
 
-	if (rule.compactHidden || rule.defaultExpanded === true) return headerLines;
+	if (rule.compactHidden || (rule.defaultExpanded === true && !options.superCompact)) return headerLines;
 
 	const body = entry.collapsedBody.trimEnd();
 	if (!body || rule.previewLines === 0) return headerLines;

@@ -103,11 +103,30 @@ describe("renderToolBlock", () => {
 		assert.ok(lines[0]?.segments?.some((segment) => segment.start === markerStart && segment.end === markerStart + 1 && segment.foreground === colors.statusDotBase));
 	});
 
-	it("forces expanded tools into one header line in super-compact mode", () => {
-		const lines = renderToolBlock(toolEntry({ expanded: true, expandedText: "body\nline", collapsedBody: "preview" }), rule, 100, colors, { superCompact: true });
+	it("renders collapsed default-expanded tools as one inline row in super-compact mode", () => {
+		const output = "patch line\nresult line";
+
+		const lines = renderToolBlock(
+			toolEntry({ expanded: false, output, collapsedBody: output }),
+			{ ...rule, defaultExpanded: true },
+			100,
+			colors,
+			{ superCompact: true },
+		);
 
 		assert.equal(lines.length, 1);
-		assert.match(lines[0]?.text ?? "", /apply_patch .*preview/u);
+		assert.match(lines[0]?.text ?? "", /apply_patch .*patch line result line/u);
+	});
+
+	it("renders expanded tools with full body in super-compact mode", () => {
+		const lines = renderToolBlock(toolEntry({ expanded: true, expandedText: "body\nline", collapsedBody: "preview" }), rule, 100, colors, { superCompact: true });
+
+		assert.deepEqual(lines.map((line) => line.text), [
+			`${APP_ICONS.checkCircle} apply_patch`,
+			"  body",
+			"  line",
+		]);
+		assert.doesNotMatch(lines[0]?.text ?? "", /preview/u);
 	});
 
 	it("does not mark read output as LSP diagnostics after mutation", () => {

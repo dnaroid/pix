@@ -157,6 +157,7 @@ Rules:
 - IDs must exist in the current conversation context.
 - \`startId\` must appear before \`endId\`.
 - Do not invent IDs. Use only IDs that are present in context.
+- If \`compress\` fails with \`Unknown message ID\`, treat those IDs as stale; retry at most once using only the error's listed current raw IDs or eligible \`bN\` blocks, or skip if no closed range is safe.
 
 BATCHING
 When multiple independent ranges or individual messages are ready, include all of them in one \`compress\` call. Range entries must not overlap. Message entries should each summarize exactly one raw message.`

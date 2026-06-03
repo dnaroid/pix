@@ -566,7 +566,7 @@ export class PiUiExtendApp {
 					this.render();
 				},
 				toggleSuperCompactTools: () => {
-					this.superCompactTools = !this.superCompactTools;
+					this.toggleSuperCompactTools();
 					this.render();
 				},
 				toggleTerminalBellSound: () => this.toggleTerminalBellSound(),
@@ -939,7 +939,19 @@ export class PiUiExtendApp {
 	}
 
 	private toolDefaultExpanded(toolName: string): boolean {
+		if (this.superCompactTools) return false;
 		return resolveToolRule(toolName, this.pixConfig.toolRenderer).defaultExpanded === true;
+	}
+
+	private toggleSuperCompactTools(): void {
+		this.superCompactTools = !this.superCompactTools;
+		if (!this.superCompactTools) return;
+
+		for (const entry of this.entries) {
+			if (entry.kind !== "tool" || !entry.expanded) continue;
+			entry.expanded = false;
+			this.touchEntry(entry);
+		}
 	}
 
 	private stopBlinking(): void {

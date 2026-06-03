@@ -86,6 +86,7 @@ export function formatCompressionIdDiagnostics(state: DcpState): string {
     `Current raw message IDs: ${compactList(rawIds)}.`,
     `Current active block IDs: ${compactList(blockIds)}.`,
     "Use only IDs from the latest visible context. If a raw range was already compressed, use the corresponding bN block ID instead of stale mNNN IDs.",
+    "Retry at most once with a safe closed range from those IDs, or skip compression if none is safe.",
   ].join("\n")
 }
 

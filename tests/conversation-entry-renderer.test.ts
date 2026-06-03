@@ -16,6 +16,7 @@ const pixConfig: PixConfig = {
 	},
 	outputFilters: { patterns: [] },
 	promptEnhancer: { modelRef: "test/model" },
+	autocomplete: { modelRef: "test/model", debounceMs: 350, timeoutMs: 3000, maxTokens: 48, maxPromptTokens: 1200, includeRecentMessages: 0 },
 	modelColors: { rules: {} },
 	iconTheme: { name: "nerdFont" },
 	dictation: { languages: { en: { dirName: "vosk-model-small-en-us-0.15", url: "https://example.test/en.zip", label: "English" } } },
@@ -126,14 +127,10 @@ describe("renderConversationEntry", () => {
 
 		assert.deepEqual(lines.map((line) => line.backgroundOverride), [
 			THEMES.dark.colors.userMessageBackground,
-			THEMES.dark.colors.userMessageBackground,
-			THEMES.dark.colors.userMessageBackground,
 		]);
-		assert.match(lines[1]?.text ?? "", new RegExp(`${APP_ICONS.timerSand} steer: hello`, "u"));
-		assert.deepEqual(lines.map((line) => line.segments), [undefined, [{ start: 1, end: 1 + APP_ICONS.timerSand.length, foreground: THEMES.dark.colors.info }], undefined]);
+		assert.match(lines[0]?.text ?? "", new RegExp(`${APP_ICONS.timerSand} steer: hello`, "u"));
+		assert.deepEqual(lines.map((line) => line.segments), [[{ start: 1, end: 1 + APP_ICONS.timerSand.length, foreground: THEMES.dark.colors.info }]]);
 		assert.deepEqual(lines.map((line) => line.target), [
-			{ kind: "queue-message", id: "queue-bg" },
-			{ kind: "queue-message", id: "queue-bg" },
 			{ kind: "queue-message", id: "queue-bg" },
 		]);
 	});
@@ -156,10 +153,10 @@ describe("renderConversationEntry", () => {
 			queueIndex: 0,
 		}, 40, renderOptions);
 
-		assert.match(deferred[1]?.text ?? "", new RegExp(`${APP_ICONS.timerSand} queued: send later`, "u"));
-		assert.match(followUp[1]?.text ?? "", new RegExp(`${APP_ICONS.timerSand} follow: next step`, "u"));
-		assert.deepEqual(deferred[1]?.segments, [{ start: 1, end: 1 + APP_ICONS.timerSand.length, foreground: THEMES.dark.colors.info }]);
-		assert.deepEqual(followUp[1]?.segments, [{ start: 1, end: 1 + APP_ICONS.timerSand.length, foreground: THEMES.dark.colors.info }]);
+		assert.match(deferred[0]?.text ?? "", new RegExp(`${APP_ICONS.timerSand} queued: send later`, "u"));
+		assert.match(followUp[0]?.text ?? "", new RegExp(`${APP_ICONS.timerSand} follow: next step`, "u"));
+		assert.deepEqual(deferred[0]?.segments, [{ start: 1, end: 1 + APP_ICONS.timerSand.length, foreground: THEMES.dark.colors.info }]);
+		assert.deepEqual(followUp[0]?.segments, [{ start: 1, end: 1 + APP_ICONS.timerSand.length, foreground: THEMES.dark.colors.info }]);
 	});
 
 	it("wraps user messages at word boundaries inside the padded bubble", () => {
@@ -191,7 +188,7 @@ describe("renderConversationEntry", () => {
 		assert.match(lines[5]?.text ?? "", /└──────┴──────┘/u);
 	});
 
-	it("forces tools to one line in super-compact mode", () => {
+	it("renders expanded tool content in super-compact mode", () => {
 		const lines = renderConversationEntry({
 			id: "tool-compact",
 			kind: "tool",
@@ -204,7 +201,8 @@ describe("renderConversationEntry", () => {
 			status: "done",
 		}, 80, { ...renderOptions, superCompactTools: true });
 
-		assert.equal(lines.length, 1);
+		assert.ok(lines.length > 1);
+		assert.ok(lines.some((line) => line.text.includes("expanded body")));
 	});
 
 	it("keeps all thinking expanded without blank body rows in super-compact mode", () => {
@@ -479,7 +477,7 @@ function toolEntry(id: string, toolName: string): Entry {
 		toolName,
 		argsText: "{}",
 		output: "body",
-		expanded: true,
+		expanded: false,
 		isError: false,
 		status: "done",
 	};

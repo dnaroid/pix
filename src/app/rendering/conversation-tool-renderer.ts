@@ -84,12 +84,13 @@ export function renderThinkingEntry(
 	const rule = resolveThinkingToolRule(options.pixConfig);
 	const markdownText = entry.text ? formatMarkdownTables(entry.text, Math.max(1, width - 2)) : "";
 	const expandedText = trimTrailingBlankLines(markdownText);
-	const compactExpandedText = options.superCompactTools ? removeBlankLines(expandedText) : expandedText;
 	const forceExpanded = Boolean(options.allThinkingExpanded);
+	const compactExpandedText = options.superCompactTools && forceExpanded ? removeBlankLines(expandedText) : expandedText;
+	const expanded = forceExpanded || (entry.expanded && expandedText.trim().length > 0);
 	return renderToolBlock({
 		id: entry.id,
 		toolName: THINKING_TOOL_NAME,
-		expanded: entry.expanded || forceExpanded,
+		expanded,
 		status: entry.status,
 		isError: false,
 		output: markdownText,

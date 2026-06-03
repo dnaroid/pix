@@ -70,11 +70,7 @@ export function renderConversationEntry(entry: Entry, width: number, options: Co
 		const icon = APP_ICONS.timerSand;
 		const prefix = queuedMessagePrefix(queuedEntry);
 		const contentLines = wrapText(`${prefix} ${queuedEntry.text}`, userContentWidth);
-		return [
-			queuedLine("", queuedEntry.id),
-			...contentLines.map((text, index) => queuedLine(text, queuedEntry.id, index === 0 ? [{ start: 0, end: icon.length, foreground: options.colors.info }] : undefined)),
-			queuedLine("", queuedEntry.id),
-		];
+		return contentLines.map((text, index) => queuedLine(text, queuedEntry.id, index === 0 ? [{ start: 0, end: icon.length, foreground: options.colors.info }] : undefined));
 	};
 
 	switch (entry.kind) {
