@@ -56,6 +56,28 @@ export class AppInputActionController {
 		void this.submitInput();
 	}
 
+	async queueInputFromEditor(): Promise<void> {
+		await this.host.stopVoiceInput();
+
+		if (this.popupMenus.syncActivePopupMenu()) this.popupMenus.cancelActivePopupMenu();
+
+		const inputEditor = this.host.inputEditor();
+		const rawPromptText = inputEditor.promptText;
+		const rawDisplayText = inputEditor.expandedText;
+		const promptText = rawPromptText.trimEnd();
+		const displayText = rawDisplayText.trimEnd();
+		const images = [...inputEditor.images];
+		if (!promptText && images.length === 0) return;
+
+		const message = this.queuedMessages.createSubmittedUserMessage(promptText, displayText, images);
+		this.host.requestHistory().add(message.displayText);
+		inputEditor.clear();
+		await this.host.clearPersistedInputDraft();
+		this.host.render();
+		this.queuedMessages.deferUserMessage(message);
+		if (this.host.isRunning()) this.host.render();
+	}
+
 	async handleInterrupt(): Promise<void> {
 		if (this.host.interruptShellCommand()) {
 			this.host.inputEditor().clear();

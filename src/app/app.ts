@@ -285,6 +285,7 @@ export class PiUiExtendApp {
 			terminalBellSoundStatusWidgetEnabled: () => this.terminalBellSoundController.isEnabled(),
 			voiceStatusWidgetText: () => this.voiceController.statusWidgetText(),
 			voiceStatusWidgetActive: () => this.voiceController.statusWidgetActive(),
+			queueableInputActive: () => this.inputEditor.promptText.trimEnd().length > 0 || this.inputEditor.images.length > 0,
 			userMessageJumpMenuActive: () => this.popupMenus.directMenu === "user-message-jump",
 			allThinkingExpandedActive: () => this.allThinkingExpanded,
 			superCompactToolsActive: () => this.superCompactTools,
@@ -549,6 +550,14 @@ export class PiUiExtendApp {
 				showToast: (message, kind, options) => this.showToast(message, kind, options),
 				dismissToast: (toastId) => this.toastController.dismissToast(toastId),
 				refreshModelUsageStatus: () => this.refreshModelUsageStatusFromClick(),
+				queueInputFromStatus: () => {
+					void this.inputActions.queueInputFromEditor().catch((error) => {
+						this.addEntry({ id: createId("error"), kind: "error", text: `Queue input failed: ${error instanceof Error ? error.message : String(error)}` });
+						this.showToast("Queue input failed", "error");
+						this.setSessionStatus(this.runtime?.session);
+						this.render();
+					});
+				},
 				toggleAllThinkingExpanded: () => {
 					this.allThinkingExpanded = !this.allThinkingExpanded;
 					this.render();
@@ -730,6 +739,7 @@ export class PiUiExtendApp {
 				this.mouseController.statusThinkingTarget = undefined;
 				this.mouseController.statusContextTarget = undefined;
 				this.mouseController.statusModelUsageTarget = undefined;
+				this.mouseController.statusDraftQueueTarget = undefined;
 				this.mouseController.statusUserJumpTarget = undefined;
 				this.mouseController.statusThinkingExpandTarget = undefined;
 				this.mouseController.statusCompactToolsTarget = undefined;

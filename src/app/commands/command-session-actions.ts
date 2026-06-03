@@ -226,7 +226,7 @@ export class SessionCommandActions {
 				"Enter: send message / run selected command",
 				"!command: run a local shell command in chat (not saved to the session)",
 				"while shell is running: Enter sends editor text to stdin; Ctrl-C interrupts; !!command uses the raw terminal",
-				"/queue <message>: save a delayed message; send it later from the queued-message menu",
+				"/queue <message>: save a delayed message; send it later from the queued-message menu or status button",
 				"Tab: autocomplete selected popup item",
 				"Esc: close popup; abort running work when input is empty",
 				"Up/Down: history or popup navigation",

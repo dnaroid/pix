@@ -513,6 +513,7 @@ function fakeMouseController(): AppMouseController {
 		statusThinkingTarget: undefined,
 		statusContextTarget: undefined,
 		statusModelUsageTarget: undefined,
+		statusDraftQueueTarget: undefined,
 		statusUserJumpTarget: undefined,
 		statusThinkingExpandTarget: undefined,
 		statusCompactToolsTarget: undefined,

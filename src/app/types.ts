@@ -264,6 +264,7 @@ export type StatusLineLayout = {
 	modelUsageLabel?: string;
 	contextBarLabel?: string;
 	userJumpWidget?: StatusUserJumpWidgetLayout;
+	draftQueueWidget?: StatusDraftQueueWidgetLayout;
 	thinkingExpandWidget?: StatusThinkingExpandWidgetLayout;
 	compactToolsWidget?: StatusCompactToolsWidgetLayout;
 	terminalBellSoundWidget?: StatusTerminalBellSoundWidgetLayout;
@@ -272,6 +273,11 @@ export type StatusLineLayout = {
 };
 
 export type StatusUserJumpWidgetLayout = {
+	startColumn: number;
+	endColumn: number;
+};
+
+export type StatusDraftQueueWidgetLayout = {
 	startColumn: number;
 	endColumn: number;
 };
@@ -585,6 +591,12 @@ export type StatusPromptEnhancerTarget = {
 };
 
 export type StatusUserJumpTarget = {
+	row: number;
+	startColumn: number;
+	endColumn: number;
+};
+
+export type StatusDraftQueueTarget = {
 	row: number;
 	startColumn: number;
 	endColumn: number;

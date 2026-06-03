@@ -11,13 +11,10 @@ const OPENAI_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
 const ZAI_QUOTA_URL = "https://api.z.ai/api/monitor/usage/quota/limit";
 const ZHIPU_QUOTA_URL = "https://bigmodel.cn/api/monitor/usage/quota/limit";
 const GOOGLE_QUOTA_API_URL = "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels";
-const GOOGLE_TOKEN_REFRESH_URL = "https://oauth2.googleapis.com/token";
 const REQUEST_TIMEOUT_MS = 10_000;
 const DAY_SECONDS = 86_400;
 const HOUR_SECONDS = 3_600;
 const DEFAULT_ANTIGRAVITY_PROJECT_ID = "rising-fact-p41fc";
-const GOOGLE_CLIENT_ID = process.env.PIX_ANTIGRAVITY_GOOGLE_CLIENT_ID ?? process.env.ANTIGRAVITY_GOOGLE_CLIENT_ID ?? "";
-const GOOGLE_CLIENT_SECRET = process.env.PIX_ANTIGRAVITY_GOOGLE_CLIENT_SECRET ?? process.env.ANTIGRAVITY_GOOGLE_CLIENT_SECRET ?? "";
 
 const OPENAI_QUOTA_PROVIDERS = new Set(["openai", "openai-codex"]);
 const ZHIPU_QUOTA_PROVIDERS = new Set(["zai", "zhipuai-coding-plan"]);
@@ -154,11 +151,24 @@ type AntigravityStoredAccount = {
 	projectId?: string;
 	managedProjectId?: string;
 	enabled?: boolean;
+	cachedQuota?: AntigravityCachedQuota;
+	cachedQuotaUpdatedAt?: number;
 };
+
+type AntigravityCachedQuotaBucket = {
+	remainingFraction?: number;
+	resetTime?: string;
+	modelCount?: number;
+};
+
+type AntigravityCachedQuota = Record<string, AntigravityCachedQuotaBucket | undefined>;
 
 type AntigravityQuotaAccount = {
 	readonly email?: string;
 	readonly refreshToken: string;
+	readonly accessToken?: string;
+	readonly cachedQuota?: AntigravityCachedQuota;
+	readonly cachedQuotaUpdatedAt?: number;
 	readonly projectId: string;
 	readonly accountIndex?: number;
 	readonly accountCount?: number;
@@ -603,8 +613,12 @@ export function googleAntigravityUsageStatusFromResponse(
 async function queryGoogleAntigravityModelUsage(
 	descriptor: Extract<ModelUsageDescriptor, { kind: "google-antigravity" }>,
 ): Promise<ModelUsageStatus | undefined> {
-	const { access_token } = await refreshGoogleAccessToken(descriptor.account.refreshToken);
-	const response = await fetchGoogleAntigravityQuota(access_token, descriptor.account.projectId);
+	const now = Date.now();
+	const cachedResponse = googleQuotaResponseFromCachedQuota(descriptor.account.cachedQuota, descriptor.account.cachedQuotaUpdatedAt, now);
+	if (cachedResponse) return googleAntigravityUsageStatusFromResponse(cachedResponse, descriptor, now);
+
+	if (!descriptor.account.accessToken) return undefined;
+	const response = await fetchGoogleAntigravityQuota(descriptor.account.accessToken, descriptor.account.projectId);
 	return googleAntigravityUsageStatusFromResponse(response, descriptor);
 }
 
@@ -621,10 +635,14 @@ async function queryGoogleAntigravityAccountUsage(now: number): Promise<AccountU
 	const results = await Promise.all(accounts.map(async (account) => {
 		const accountLabel = account.email ?? maskCredential(account.refreshToken);
 		try {
-			const { access_token } = await refreshGoogleAccessToken(account.refreshToken);
-			const response = await fetchGoogleAntigravityQuota(access_token, account.projectId);
-			const windows = GOOGLE_ACCOUNT_QUOTA_WINDOWS.map((window) => googleAccountWindowFromResponse(response, window.label, window.quotaModelKey, now))
-				.filter((window): window is AccountUsageLimitWindow => window !== undefined);
+			const response = account.cachedQuota ? googleQuotaResponseFromCachedQuota(account.cachedQuota, account.cachedQuotaUpdatedAt, now) : undefined;
+			const windows = response ? googleAccountWindowsFromResponse(response, now) : [];
+
+			if (windows.length === 0 && account.accessToken) {
+				const liveResponse = await fetchGoogleAntigravityQuota(account.accessToken, account.projectId);
+				windows.push(...googleAccountWindowsFromResponse(liveResponse, now));
+			}
+
 			return {
 				account: accountLabel,
 				windows,
@@ -655,16 +673,21 @@ function readAllAntigravityQuotaAccounts(): AntigravityQuotaAccount[] {
 
 	const accounts = storedAntigravityAccounts(credential);
 	if (accounts.length > 0) {
+		const activeIndex = clampAccountIndex(credential.activeIndex, accounts.length);
+		const activeAccess = antigravityAccessFromCredential(credential);
 		return accounts.map((account, accountIndex) => antigravityQuotaAccount(account, {
 			...(credential.email ? { fallbackEmail: credential.email } : {}),
+			...(accountIndex === activeIndex && activeAccess ? { accessToken: activeAccess.accessToken } : {}),
 			accountIndex,
 			accountCount: accounts.length,
 		})).filter((account): account is AntigravityQuotaAccount => account !== undefined);
 	}
 
 	const fallbackAccount = antigravityAccountFromCredential(credential);
+	const fallbackAccess = antigravityAccessFromCredential(credential);
 	const account = fallbackAccount ? antigravityQuotaAccount(fallbackAccount, {
 		...(credential.email ? { fallbackEmail: credential.email } : {}),
+		...(fallbackAccess ? { accessToken: fallbackAccess.accessToken } : {}),
 	}) : undefined;
 	return account ? [account] : [];
 }
@@ -687,18 +710,21 @@ function antigravityAccountFromCredential(credential: PiAuthCredential): Antigra
 	if (credential.type !== "oauth" || !credential.refresh) return undefined;
 	const refresh = splitAntigravityRefresh(credential.refresh);
 	if (!refresh.refreshToken) return undefined;
+	const activeStoredAccount = credential.accounts?.[clampAccountIndex(credential.activeIndex, credential.accounts.length)];
 	return {
 		refreshToken: refresh.refreshToken,
 		projectId: refresh.projectId || refresh.managedProjectId || DEFAULT_ANTIGRAVITY_PROJECT_ID,
 		enabled: true,
 		...(credential.email ? { email: credential.email } : {}),
 		...(refresh.managedProjectId ? { managedProjectId: refresh.managedProjectId } : {}),
+		...(activeStoredAccount?.cachedQuota ? { cachedQuota: activeStoredAccount.cachedQuota } : {}),
+		...(typeof activeStoredAccount?.cachedQuotaUpdatedAt === "number" ? { cachedQuotaUpdatedAt: activeStoredAccount.cachedQuotaUpdatedAt } : {}),
 	};
 }
 
 function antigravityQuotaAccount(
 	account: AntigravityStoredAccount,
-	options: { fallbackEmail?: string; accountIndex?: number; accountCount?: number } = {},
+	options: { fallbackEmail?: string; accessToken?: string; accountIndex?: number; accountCount?: number } = {},
 ): AntigravityQuotaAccount | undefined {
 	const refreshToken = account.refreshToken;
 	if (!refreshToken) return undefined;
@@ -708,9 +734,72 @@ function antigravityQuotaAccount(
 		refreshToken,
 		projectId,
 		cacheKey: email ? email.toLowerCase() : shortHash(refreshToken),
+		...(options.accessToken ? { accessToken: options.accessToken } : {}),
+		...(account.cachedQuota ? { cachedQuota: account.cachedQuota } : {}),
+		...(typeof account.cachedQuotaUpdatedAt === "number" ? { cachedQuotaUpdatedAt: account.cachedQuotaUpdatedAt } : {}),
 		...(email ? { email } : {}),
 		...(typeof options.accountIndex === "number" ? { accountIndex: options.accountIndex } : {}),
 		...(typeof options.accountCount === "number" ? { accountCount: options.accountCount } : {}),
+	};
+}
+
+function googleQuotaResponseFromCachedQuota(
+	cachedQuota: AntigravityCachedQuota | undefined,
+	cachedQuotaUpdatedAt?: number,
+	now = Date.now(),
+): GoogleQuotaResponse | undefined {
+	if (!cachedQuota) return undefined;
+	const models: GoogleQuotaResponse["models"] = {};
+	addCachedQuotaModels(models, cachedQuota.claude, ["claude-opus-4-6-thinking", "claude-sonnet-4-6"], cachedQuotaUpdatedAt, now);
+	addCachedQuotaModels(models, cachedQuota["gemini-flash"], ["gemini-2.5-flash", "gemini-3-flash"], cachedQuotaUpdatedAt, now);
+	addCachedQuotaModels(models, cachedQuota["gemini-pro"], ["gemini-3.1-pro-low"], cachedQuotaUpdatedAt, now);
+	return Object.keys(models).length > 0 ? { models } : undefined;
+}
+
+function addCachedQuotaModels(
+	models: GoogleQuotaResponse["models"],
+	quota: AntigravityCachedQuotaBucket | undefined,
+	quotaModelKeys: readonly string[],
+	cachedQuotaUpdatedAt: number | undefined,
+	now: number,
+): void {
+	if (!quota || !Number.isFinite(quota.remainingFraction)) return;
+	const remainingFraction = quota.remainingFraction as number;
+	const resetTime = cachedQuotaResetTimeForDisplay(quota.resetTime, cachedQuotaUpdatedAt, now);
+	for (const quotaModelKey of quotaModelKeys) {
+		models[quotaModelKey] = {
+			quotaInfo: {
+				remainingFraction,
+				...(resetTime ? { resetTime } : {}),
+			},
+		};
+	}
+}
+
+function cachedQuotaResetTimeForDisplay(resetTime: string | undefined, cachedQuotaUpdatedAt: number | undefined, now: number): string | undefined {
+	if (!resetTime) return undefined;
+	const resetAt = Date.parse(resetTime);
+	if (!Number.isFinite(resetAt) || resetAt > now) return resetTime;
+
+	const cachedAt = normalizeTimestampMillis(cachedQuotaUpdatedAt);
+	if (!Number.isFinite(cachedAt) || resetAt <= cachedAt) return resetTime;
+
+	return new Date(now + (resetAt - cachedAt)).toISOString();
+}
+
+function normalizeTimestampMillis(value: number | undefined): number {
+	if (!Number.isFinite(value)) return Number.NaN;
+	const timestamp = value as number;
+	return timestamp < 1_000_000_000_000 ? timestamp * 1000 : timestamp;
+}
+
+function antigravityAccessFromCredential(credential: PiAuthCredential): { accessToken: string; projectId?: string } | undefined {
+	if (credential.type !== "oauth" || !credential.access || isExpired(credential)) return undefined;
+	const [accessToken = "", projectId = ""] = credential.access.split("|");
+	if (!accessToken) return undefined;
+	return {
+		accessToken,
+		...(projectId ? { projectId } : {}),
 	};
 }
 
@@ -730,30 +819,6 @@ function clampAccountIndex(index: unknown, accountCount: number): number {
 
 function shortHash(value: string): string {
 	return createHash("sha256").update(value).digest("hex").slice(0, 12);
-}
-
-async function refreshGoogleAccessToken(refreshToken: string): Promise<{ access_token: string; expires_in: number }> {
-	if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
-		throw new Error("Antigravity Google OAuth credentials are not configured; set PIX_ANTIGRAVITY_GOOGLE_CLIENT_ID and PIX_ANTIGRAVITY_GOOGLE_CLIENT_SECRET.");
-	}
-
-	const response = await fetchWithTimeout(GOOGLE_TOKEN_REFRESH_URL, {
-		method: "POST",
-		headers: { "Content-Type": "application/x-www-form-urlencoded" },
-		body: new URLSearchParams({
-			client_id: GOOGLE_CLIENT_ID,
-			client_secret: GOOGLE_CLIENT_SECRET,
-			refresh_token: refreshToken,
-			grant_type: "refresh_token",
-		}),
-	});
-
-	if (!response.ok) {
-		const errorText = await response.text();
-		throw new Error(`Google token refresh failed (${response.status}): ${errorText}`);
-	}
-
-	return response.json() as Promise<{ access_token: string; expires_in: number }>;
 }
 
 async function fetchGoogleAntigravityQuota(accessToken: string, projectId: string): Promise<GoogleQuotaResponse> {
@@ -859,20 +924,52 @@ function selectOpenAIRateLimitForModel(data: OpenAIUsageResponse, modelKey: stri
 		return openAIModelMatchesAdditionalLimit(modelKey, limit);
 	});
 
+	// Prefer exact named per-model buckets when the API exposes them, but keep the
+	// top-level bucket as a fallback. Some Codex responses currently expose a
+	// usable selected-model/account bucket only at the top level while also
+	// listing unrelated named additional buckets; hiding the fallback makes the
+	// status bar disappear completely for those models.
 	return additionalLimit?.rate_limit ?? data.rate_limit;
 }
 
 function openAIModelMatchesAdditionalLimit(modelKey: string, limit: OpenAIAdditionalRateLimit): boolean {
-	const normalizedModel = normalizeOpenAILimitName(modelKey.split("/").at(-1) ?? modelKey);
-	const normalizedLimitName = normalizeOpenAILimitName(limit.limit_name);
-	const normalizedMeteredFeature = limit.metered_feature ? normalizeOpenAILimitName(limit.metered_feature) : "";
+	const modelId = modelKey.split("/").at(-1) ?? modelKey;
+	return openAIModelIdMatchesLimitCandidate(modelId, limit.limit_name)
+		|| (limit.metered_feature ? openAIModelIdMatchesLimitCandidate(modelId, limit.metered_feature) : false);
+}
 
-	return (!!normalizedLimitName && (normalizedModel.includes(normalizedLimitName) || normalizedLimitName.includes(normalizedModel)))
-		|| (!!normalizedMeteredFeature && (normalizedModel.includes(normalizedMeteredFeature) || normalizedMeteredFeature.includes(normalizedModel)));
+function openAIModelIdMatchesLimitCandidate(modelId: string, candidate: string): boolean {
+	const modelTokens = openAILimitTokens(modelId);
+	const candidateTokens = openAILimitTokens(candidate);
+	if (modelTokens.length === 0 || candidateTokens.length === 0) return false;
+	if (containsTokenSequence(candidateTokens, modelTokens)) return true;
+
+	// Support compact names such as o4mini while avoiding prefix matches such as
+	// gpt-5 accidentally matching gpt-5.5.
+	return normalizeOpenAILimitName(candidate) === normalizeOpenAILimitName(modelId);
 }
 
 function normalizeOpenAILimitName(value: string): string {
 	return value.toLowerCase().replace(/[^a-z0-9]+/gu, "");
+}
+
+function openAILimitTokens(value: string): string[] {
+	return value.toLowerCase().split(/[^a-z0-9]+/u).filter((token) => token.length > 0);
+}
+
+function containsTokenSequence(tokens: readonly string[], sequence: readonly string[]): boolean {
+	if (sequence.length > tokens.length) return false;
+	for (let start = 0; start <= tokens.length - sequence.length; start += 1) {
+		let matches = true;
+		for (let offset = 0; offset < sequence.length; offset += 1) {
+			if (tokens[start + offset] !== sequence[offset]) {
+				matches = false;
+				break;
+			}
+		}
+		if (matches) return true;
+	}
+	return false;
 }
 
 function selectWeeklyWindow(windows: readonly RateLimitWindow[]): RateLimitWindow | undefined {
@@ -922,6 +1019,12 @@ function googleAccountWindowFromResponse(
 	};
 }
 
+function googleAccountWindowsFromResponse(data: GoogleQuotaResponse, now: number): AccountUsageLimitWindow[] {
+	return GOOGLE_ACCOUNT_QUOTA_WINDOWS
+		.map((window) => googleAccountWindowFromResponse(data, window.label, window.quotaModelKey, now))
+		.filter((window): window is AccountUsageLimitWindow => window !== undefined);
+}
+
 function clampPercent(percent: number): number {
 	return Math.max(0, Math.min(100, percent));
 }
@@ -947,6 +1050,7 @@ function formatQuotaBar(percent: number, width: number): string {
 }
 
 function formatDurationLong(resetAt: number, now: number): string {
+	if (resetAt <= now) return "reset";
 	const totalMinutes = Math.max(0, Math.ceil((resetAt - now) / 60_000));
 	const days = Math.floor(totalMinutes / 1440);
 	const hours = Math.floor((totalMinutes % 1440) / 60);
@@ -957,6 +1061,7 @@ function formatDurationLong(resetAt: number, now: number): string {
 }
 
 function formatDurationShort(resetAt: number, now: number): string {
+	if (resetAt <= now) return "reset";
 	const totalMinutes = Math.max(0, Math.ceil((resetAt - now) / 60_000));
 	const days = Math.floor(totalMinutes / 1440);
 	const hours = Math.floor((totalMinutes % 1440) / 60);
@@ -977,6 +1082,7 @@ function formatUsageWindow(_prefix: "W" | "H", window: ModelUsageLimitWindow, no
 }
 
 function formatResetCountdown(resetAt: number, now: number): string {
+	if (resetAt <= now) return "reset";
 	const totalMinutes = Math.max(0, Math.ceil((resetAt - now) / 60_000));
 	const days = Math.floor(totalMinutes / 1440);
 	const hours = Math.floor((totalMinutes % 1440) / 60);

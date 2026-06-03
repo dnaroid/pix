@@ -1,6 +1,9 @@
 // Default user config written when pi-tools-suite.jsonc is missing.
 export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
-  "disabledModules": [],
+  "disabledModules": [
+    // "ast-grep",
+    // "dcp"
+  ],
   "terminalBell": { "sound": true },
   "dcp": {
     "enabled": true,
@@ -208,17 +211,273 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
       "commit": { "prompt": "Commit all changes" }
     }
   },
+  // LSP language servers. TypeScript/JavaScript is enabled by default;
+  // uncomment additional server blocks after installing their binaries.
   "lsp": {
     "servers": [
       {
         "id": "typescript",
-        "include": ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx", "**/*.mjs"],
-        "exclude": ["**/node_modules/**", "**/.next/**"],
-        "rootMarkers": ["tsconfig.json", "package.json"],
+        "include": [
+          "**/*.ts",
+          "**/*.tsx",
+          "**/*.js",
+          "**/*.jsx",
+          "**/*.mjs"
+        ],
+        "exclude": [
+          "**/node_modules/**",
+          "**/.next/**"
+        ],
+        "rootMarkers": [
+          "tsconfig.json",
+          "package.json"
+        ],
         "bin": "typescript-language-server",
-        "args": ["--stdio"],
-        "languageIdByExtension": { ".ts": "typescript", ".tsx": "typescriptreact", ".js": "javascript", ".jsx": "javascriptreact", ".mjs": "javascript" }
+        "args": [
+          "--stdio"
+        ],
+        "languageIdByExtension": {
+          ".ts": "typescript",
+          ".tsx": "typescriptreact",
+          ".js": "javascript",
+          ".jsx": "javascriptreact",
+          ".mjs": "javascript"
+        }
       }
+      // ,
+      // {
+      //   "id": "python",
+      //   "include": [
+      //     "**/*.py",
+      //     "**/*.pyi"
+      //   ],
+      //   "exclude": [
+      //     "**/.git/**",
+      //     "**/node_modules/**",
+      //     "**/__pycache__/**",
+      //     "**/.venv/**",
+      //     "**/venv/**",
+      //     "**/.tox/**",
+      //     "**/.mypy_cache/**",
+      //     "**/.ruff_cache/**"
+      //   ],
+      //   "rootMarkers": [
+      //     "pyproject.toml",
+      //     "setup.py",
+      //     "setup.cfg",
+      //     "requirements.txt",
+      //     "Pipfile",
+      //     "poetry.lock",
+      //     ".git"
+      //   ],
+      //   "bin": "pylsp",
+      //   "args": [],
+      //   "languageIdByExtension": {
+      //     ".py": "python",
+      //     ".pyi": "python"
+      //   }
+      // }
+      // ,
+      // {
+      //   "id": "csharp",
+      //   "include": [
+      //     "**/*.cs",
+      //     "**/*.csx"
+      //   ],
+      //   "exclude": [
+      //     "**/.git/**",
+      //     "**/node_modules/**",
+      //     "**/bin/**",
+      //     "**/obj/**",
+      //     "**/.vs/**",
+      //     "**/Library/**",
+      //     "**/Temp/**",
+      //     "**/Logs/**"
+      //   ],
+      //   "rootMarkers": [
+      //     "*.sln",
+      //     "*.csproj",
+      //     "global.json",
+      //     "Directory.Build.props",
+      //     "Directory.Packages.props",
+      //     "Packages/manifest.json",
+      //     "ProjectSettings/ProjectVersion.txt",
+      //     ".git"
+      //   ],
+      //   "bin": "~/.dotnet/tools/roslyn-language-server",
+      //   "args": [
+      //     "--stdio",
+      //     "--autoLoadProjects",
+      //     "--logLevel",
+      //     "Error"
+      //   ],
+      //   "startupTimeoutMs": 30000,
+      //   "diagnosticsWaitMs": 15000,
+      //   "languageIdByExtension": {
+      //     ".cs": "csharp",
+      //     ".csx": "csharp"
+      //   }
+      // }
+      // ,
+      // {
+      //   "id": "gdscript",
+      //   "include": [
+      //     "**/*.gd",
+      //     "**/*.gdshader",
+      //     "**/*.gdshaderinc"
+      //   ],
+      //   "exclude": [
+      //     "**/.git/**",
+      //     "**/node_modules/**",
+      //     "**/.godot/**",
+      //     "**/imported/**"
+      //   ],
+      //   "rootMarkers": [
+      //     "project.godot"
+      //   ],
+      //   "bin": "bash",
+      //   "args": [
+      //     "-lc",
+      //     "port=$(python3 -c 'import socket; s=socket.socket(); s.bind((\\"127.0.0.1\\", 0)); print(s.getsockname()[1]); s.close()'); log=\\"\${TMPDIR:-/tmp}/pi-godot-lsp-\${1##*/}-\${port}.log\\"; godot --headless --editor --path \\"$1\\" --lsp-port \\"$port\\" >\\"$log\\" 2>&1 & pid=$!; cleanup(){ kill \\"$pid\\" 2>/dev/null || true; wait \\"$pid\\" 2>/dev/null || true; }; trap 'cleanup; exit 143' TERM INT HUP; trap cleanup EXIT; for i in $(seq 1 80); do nc -z 127.0.0.1 \\"$port\\" 2>/dev/null && break; if ! kill -0 \\"$pid\\" 2>/dev/null; then cat \\"$log\\" >&2; exit 1; fi; sleep 0.25; done; if ! nc -z 127.0.0.1 \\"$port\\" 2>/dev/null; then echo \\"Godot LSP did not open 127.0.0.1:$port; see $log\\" >&2; exit 1; fi; nc 127.0.0.1 \\"$port\\"; status=$?; exit $status",
+      //     "pi-godot-lsp",
+      //     "{root}"
+      //   ],
+      //   "startupTimeoutMs": 30000,
+      //   "diagnosticsWaitMs": 6000,
+      //   "languageIdByExtension": {
+      //     ".gd": "gdscript",
+      //     ".gdshader": "gdshader",
+      //     ".gdshaderinc": "gdshader"
+      //   }
+      // }
+      // ,
+      // {
+      //   "id": "ruby",
+      //   "include": [
+      //     "**/*.rb",
+      //     "**/*.rake",
+      //     "**/Gemfile",
+      //     "**/Rakefile",
+      //     "**/*.gemspec"
+      //   ],
+      //   "exclude": [
+      //     "**/.git/**",
+      //     "**/node_modules/**",
+      //     "**/vendor/bundle/**",
+      //     "**/.bundle/**",
+      //     "**/tmp/**",
+      //     "**/log/**"
+      //   ],
+      //   "rootMarkers": [
+      //     "Gemfile.lock",
+      //     "*.gemspec",
+      //     "Rakefile",
+      //     ".ruby-version",
+      //     ".git"
+      //   ],
+      //   "bin": "ruby-lsp",
+      //   "args": [],
+      //   "startupTimeoutMs": 60000,
+      //   "diagnosticsWaitMs": 10000,
+      //   "languageIdByExtension": {
+      //     ".rb": "ruby",
+      //     ".rake": "ruby",
+      //     ".gemspec": "ruby"
+      //   }
+      // }
+      // ,
+      // {
+      //   "id": "rust",
+      //   "include": [
+      //     "**/*.rs"
+      //   ],
+      //   "exclude": [
+      //     "**/.git/**",
+      //     "**/node_modules/**",
+      //     "**/target/**"
+      //   ],
+      //   "rootMarkers": [
+      //     "Cargo.toml",
+      //     "rust-project.json",
+      //     ".git"
+      //   ],
+      //   "bin": "rust-analyzer",
+      //   "args": [],
+      //   "startupTimeoutMs": 20000,
+      //   "diagnosticsWaitMs": 8000,
+      //   "languageIdByExtension": {
+      //     ".rs": "rust"
+      //   }
+      // }
+      // ,
+      // {
+      //   "id": "markdown",
+      //   "include": [
+      //     "**/*.md",
+      //     "**/*.markdown",
+      //     "**/*.mdown",
+      //     "**/*.mkd",
+      //     "**/*.mmd",
+      //     "**/*.mermaid"
+      //   ],
+      //   "exclude": [
+      //     "**/.git/**",
+      //     "**/node_modules/**"
+      //   ],
+      //   "rootMarkers": [
+      //     ".git",
+      //     "package.json",
+      //     "README.md"
+      //   ],
+      //   "bin": "vscode-markdown-language-server",
+      //   "args": [
+      //     "--stdio"
+      //   ],
+      //   "startupTimeoutMs": 15000,
+      //   "diagnosticsWaitMs": 5000,
+      //   "languageIdByExtension": {
+      //     ".md": "markdown",
+      //     ".markdown": "markdown",
+      //     ".mdown": "markdown",
+      //     ".mkd": "markdown",
+      //     ".mmd": "markdown",
+      //     ".mermaid": "markdown"
+      //   },
+      //   "initializationOptions": {
+      //     "markdownFileExtensions": [
+      //       "md",
+      //       "markdown",
+      //       "mdown",
+      //       "mkd",
+      //       "mmd",
+      //       "mermaid"
+      //     ]
+      //   },
+      //   "settings": {
+      //     "markdown": {
+      //       "validate": {
+      //         "enabled": true,
+      //         "referenceLinks": {
+      //           "enabled": "error"
+      //         },
+      //         "fragmentLinks": {
+      //           "enabled": "error"
+      //         },
+      //         "fileLinks": {
+      //           "enabled": "error",
+      //           "markdownFragmentLinks": "inherit"
+      //         },
+      //         "unusedLinkDefinitions": {
+      //           "enabled": "hint"
+      //         },
+      //         "duplicateLinkDefinitions": {
+      //           "enabled": "warning"
+      //         },
+      //         "ignoredLinks": []
+      //       }
+      //     }
+      //   }
+      // }
     ]
   }
 }

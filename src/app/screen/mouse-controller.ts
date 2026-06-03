@@ -22,6 +22,7 @@ import type {
 	ScreenPoint,
 	StatusContextTarget,
 	StatusCompactToolsTarget,
+	StatusDraftQueueTarget,
 	StatusModelTarget,
 	StatusModelUsageTarget,
 	StatusPromptEnhancerTarget,
@@ -90,6 +91,7 @@ export type AppMouseControllerHost = {
 	showToast(message: string, kind: "success" | "error" | "warning" | "info", options?: { durationMs?: number; variant?: ToastVariant }): void;
 	dismissToast(toastId: number): void;
 	refreshModelUsageStatus(): void | Promise<void>;
+	queueInputFromStatus?(): void | Promise<void>;
 	toggleAllThinkingExpanded?(): void;
 	toggleSuperCompactTools?(): void;
 	toggleTerminalBellSound?(): void;
@@ -109,6 +111,7 @@ export class AppMouseController {
 	statusContextTarget: StatusContextTarget | undefined;
 	statusModelUsageTarget: StatusModelUsageTarget | undefined;
 	statusUserJumpTarget: StatusUserJumpTarget | undefined;
+	statusDraftQueueTarget: StatusDraftQueueTarget | undefined;
 	statusThinkingExpandTarget: StatusThinkingExpandTarget | undefined;
 	statusCompactToolsTarget: StatusCompactToolsTarget | undefined;
 	statusTerminalBellSoundTarget: StatusTerminalBellSoundTarget | undefined;
@@ -156,6 +159,7 @@ export class AppMouseController {
 		if (event.button === 0 && this.withClickFlash(event, () => this.handleStatusThinkingClick(event))) return;
 		if (event.button === 0 && this.withClickFlash(event, () => this.handleStatusContextClick(event))) return;
 		if (event.button === 0 && this.withClickFlash(event, () => this.handleStatusModelUsageClick(event))) return;
+		if (event.button === 0 && this.withClickFlash(event, () => this.handleStatusDraftQueueClick(event))) return;
 		if (event.button === 0 && this.withClickFlash(event, () => this.handleStatusUserJumpClick(event))) return;
 		if (event.button === 0 && this.withClickFlash(event, () => this.handleStatusThinkingExpandClick(event))) return;
 		if (event.button === 0 && this.withClickFlash(event, () => this.handleStatusCompactToolsClick(event))) return;
@@ -375,6 +379,7 @@ export class AppMouseController {
 			this.statusThinkingTarget,
 			this.statusContextTarget,
 			this.statusModelUsageTarget,
+			this.statusDraftQueueTarget,
 			this.statusUserJumpTarget,
 			this.statusThinkingExpandTarget,
 			this.statusCompactToolsTarget,
@@ -607,6 +612,15 @@ export class AppMouseController {
 
 		this.popupMenus.openDirectPopupMenu("user-message-jump", { preserveStatus: true });
 		this.host.render();
+		return true;
+	}
+
+	private handleStatusDraftQueueClick(event: MouseEvent): boolean {
+		const target = this.statusDraftQueueTarget;
+		if (!target) return false;
+		if (event.y !== target.row || event.x < target.startColumn || event.x >= target.endColumn) return false;
+
+		void this.host.queueInputFromStatus?.();
 		return true;
 	}
 

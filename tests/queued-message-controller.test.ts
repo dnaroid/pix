@@ -69,7 +69,7 @@ describe("AppQueuedMessageController", () => {
 
 		assert.deepEqual(calls, []);
 		assert.equal(controller.deferredUserMessages.length, 1);
-		assert.deepEqual(state.toasts, ["info:Message queued; send it from the queue menu"]);
+		assert.deepEqual(state.toasts, ["info:Message queued; send it from the queue menu or status button"]);
 	});
 
 	it("does not auto-flush deferred messages after an immediate send", async () => {
@@ -96,17 +96,20 @@ describe("AppQueuedMessageController", () => {
 		assert.equal(controller.deferredUserMessages.length, 1);
 	});
 
-	it("flushes deferred messages only when explicitly requested", async () => {
+	it("flushes all deferred messages only when explicitly requested", async () => {
 		const sdkQueue = { steering: [], followUp: [] };
 		const calls: string[] = [];
 		const session = fakeSession(sdkQueue, { calls });
 		const state = createHostState("");
 		const controller = new AppQueuedMessageController(createHost(session, state));
-		controller.deferredUserMessages.push({ id: "deferred-1", promptText: "send later", displayText: "send later", images: [] });
+		controller.deferredUserMessages.push(
+			{ id: "deferred-1", promptText: "send first", displayText: "send first", images: [] },
+			{ id: "deferred-2", promptText: "send second", displayText: "send second", images: [] },
+		);
 
 		await controller.flushDeferredUserMessages();
 
-		assert.deepEqual(calls, ["prompt:send later"]);
+		assert.deepEqual(calls, ["prompt:send first", "prompt:send second"]);
 		assert.equal(controller.deferredUserMessages.length, 0);
 	});
 

@@ -70,6 +70,68 @@ describe("AppInputActionController", () => {
 		assert.equal(stopVoiceInputCalls, 1);
 	});
 
+	it("queues the current editor input without submitting it to the session", async () => {
+		const inputEditor = new InputEditor();
+		inputEditor.setText("send later");
+		const history: string[] = [];
+		let clearDraftCalls = 0;
+		let cancelMenuCalls = 0;
+		let deferred: SubmittedUserMessage | undefined;
+		let submitted = false;
+
+		const controller = new AppInputActionController(
+			{
+				runtime: () => undefined,
+				isRunning: () => true,
+				isSessionSwitching: () => false,
+				inputEditor: () => inputEditor,
+				requestHistory: () => ({ add: (value: string) => history.push(value) }) as unknown as AppRequestHistory,
+				clearPersistedInputDraft: async () => {
+					clearDraftCalls += 1;
+				},
+				setStatus: () => {},
+				setSessionStatus: () => {},
+				setSessionActivity: () => {},
+				addEntry: () => {},
+				addSessionAbortedEntry: () => {},
+				showToast: () => {},
+				stopVoiceInput: async () => {},
+				isShellCommandRunning: () => false,
+				runChatShellCommand: async () => ({ exitCode: 0, signal: null }),
+				sendShellInput: () => false,
+				interruptShellCommand: () => false,
+				runInteractiveShellCommand: async () => ({ exitCode: 0, signal: null }),
+				stop: async () => {},
+				render: () => {},
+			},
+			{ syncActivePopupMenu: () => "slash", cancelActivePopupMenu: () => { cancelMenuCalls += 1; } } as unknown as AppPopupMenuController,
+			{} as AppPopupActionController,
+			{
+				createSubmittedUserMessage: (promptText: string, displayText: string, images: SubmittedUserMessage["images"]) => ({
+					id: "queued-user-test",
+					promptText,
+					displayText,
+					images,
+				}),
+				deferUserMessage: (message: SubmittedUserMessage) => {
+					deferred = message;
+				},
+				submitUserMessage: async () => {
+					submitted = true;
+				},
+			} as unknown as AppQueuedMessageController,
+		);
+
+		await controller.queueInputFromEditor();
+
+		assert.equal(deferred?.promptText, "send later");
+		assert.deepEqual(history, ["send later"]);
+		assert.equal(inputEditor.text, "");
+		assert.equal(clearDraftCalls, 1);
+		assert.equal(cancelMenuCalls, 1);
+		assert.equal(submitted, false);
+	});
+
 	it("stops voice input before reading submitted text", async () => {
 		const inputEditor = new InputEditor();
 		inputEditor.setText("hello");

@@ -6,6 +6,7 @@ import type {
 	SessionActivity,
 	StatusCompactToolsTarget,
 	StatusContextTarget,
+	StatusDraftQueueTarget,
 	StatusLineLayout,
 	StatusModelTarget,
 	StatusModelUsageTarget,
@@ -49,6 +50,7 @@ export type StatusLineRendererHost = {
 	terminalBellSoundStatusWidgetEnabled(): boolean;
 	voiceStatusWidgetText(): string;
 	voiceStatusWidgetActive(): boolean;
+	queueableInputActive?(): boolean;
 	userMessageJumpMenuActive?(): boolean;
 	allThinkingExpandedActive?(): boolean;
 	superCompactToolsActive?(): boolean;
@@ -61,6 +63,7 @@ export class StatusLineRenderer {
 		const contentWidth = Math.max(1, width);
 		const left = 0;
 		const statusDot = APP_ICONS.record;
+		const draftQueueButton = this.draftQueueWidgetText();
 		const userJumpButton = APP_ICONS.user;
 		const thinkingExpandButton = APP_ICONS.thinkingExpanded;
 		const compactToolsButton = APP_ICONS.compactTools;
@@ -78,9 +81,13 @@ export class StatusLineRenderer {
 		const status = contextBarLabel ? `${baseStatus} ${contextBarLabel}` : baseStatus;
 		const sessionLabel = "";
 		const details = `${status} ${workspaceDetailsLabel}`;
-		const leftText = padOrTrimPlain(`${statusDot} ${details}`, leftWidth);
+		const leftPrefix = draftQueueButton.length > 0 ? `${draftQueueButton} ` : "";
+		const leftText = padOrTrimPlain(`${leftPrefix}${statusDot} ${details}`, leftWidth);
 		const innerText = leftWidth < contentWidth ? `${leftText} ${rightWidgetText}` : padOrTrimPlain(leftText, contentWidth);
 		const text = padOrTrimPlain(innerText, width);
+		const draftQueueWidget = draftQueueButton.length > 0
+			? this.widgetLayout(1, draftQueueButton)
+			: undefined;
 		let nextWidgetStartColumn = left + leftWidth + 2;
 		const userJumpWidget = leftWidth < contentWidth
 			? this.widgetLayout(nextWidgetStartColumn, userJumpButton)
@@ -109,6 +116,7 @@ export class StatusLineRenderer {
 			text,
 			sessionLabel,
 			workspaceLabel,
+			...(draftQueueWidget ? { draftQueueWidget } : {}),
 			...(userJumpWidget ? { userJumpWidget } : {}),
 			...(thinkingExpandWidget ? { thinkingExpandWidget } : {}),
 			...(compactToolsWidget ? { compactToolsWidget } : {}),
@@ -204,6 +212,12 @@ export class StatusLineRenderer {
 		return { row, startColumn: widget.startColumn, endColumn: widget.endColumn };
 	}
 
+	draftQueueTarget(layout: StatusLineLayout, row: number): StatusDraftQueueTarget | undefined {
+		const widget = layout.draftQueueWidget;
+		if (!widget) return undefined;
+		return { row, startColumn: widget.startColumn, endColumn: widget.endColumn };
+	}
+
 	thinkingExpandTarget(layout: StatusLineLayout, row: number): StatusThinkingExpandTarget | undefined {
 		const widget = layout.thinkingExpandWidget;
 		if (!widget) return undefined;
@@ -243,6 +257,7 @@ export class StatusLineRenderer {
 			end: statusDotStart + APP_ICONS.record.length,
 			foreground: this.statusDotColor(),
 		}] : [];
+		this.pushDraftQueueWidgetSegment(segments, statusText);
 		this.pushUserJumpWidgetSegment(segments, statusText);
 		this.pushThinkingExpandWidgetSegment(segments, statusText);
 		this.pushCompactToolsWidgetSegment(segments, statusText);
@@ -301,6 +316,17 @@ export class StatusLineRenderer {
 			? this.host.theme.colors.info
 			: this.host.theme.colors.muted;
 		this.pushSegment(segments, start, buttonText.length, foreground);
+	}
+
+	private pushDraftQueueWidgetSegment(segments: StyledSegment[], statusText: string): void {
+		const buttonText = this.draftQueueWidgetText();
+		const start = statusText.indexOf(buttonText);
+		if (start < 0 || buttonText.length <= 0) return;
+		this.pushSegment(segments, start, buttonText.length, this.host.theme.colors.info);
+	}
+
+	private draftQueueWidgetText(): string {
+		return this.host.queueableInputActive?.() ? APP_ICONS.timerSand : "";
 	}
 
 	private pushThinkingExpandWidgetSegment(segments: StyledSegment[], statusText: string): void {

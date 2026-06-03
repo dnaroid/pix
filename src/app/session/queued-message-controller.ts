@@ -105,16 +105,6 @@ export class AppQueuedMessageController {
 				if (!message) break;
 				this.updateQueuedMessageStatus();
 
-				if (!activeSession.isStreaming && this.deferredUserMessages.length > 0) {
-					void this.sendUserMessageToSession(message).catch((error) => {
-						this.deferredUserMessages.unshift(message);
-						this.updateQueuedMessageStatus();
-						this.host.addEntry({ id: createId("error"), kind: "error", text: `Queued message failed: ${stringifyUnknown(error)}` });
-						if (this.host.isRunning()) this.host.render();
-					});
-					break;
-				}
-
 				try {
 					await this.sendUserMessageToSession(message);
 				} catch (error) {
@@ -125,16 +115,9 @@ export class AppQueuedMessageController {
 				}
 			}
 		} finally {
-			const shouldRetryFlush =
-				this.deferredUserMessages.length > 0 && Boolean(this.host.runtime()?.session) && !this.host.runtime()?.session.isCompacting;
 			this.flushingDeferredUserMessages = false;
 			if (this.totalQueuedMessageCount() > 0) this.updateQueuedMessageStatus();
 			if (this.host.isRunning()) this.host.render();
-			if (shouldRetryFlush) {
-				queueMicrotask(() => {
-					void this.flushDeferredUserMessages();
-				});
-			}
 		}
 	}
 
@@ -212,6 +195,10 @@ export class AppQueuedMessageController {
 	async sendQueuedMessageImmediately(entryId: string): Promise<void> {
 		const entry = this.findQueuedEntry(entryId);
 		if (!entry) throw new Error("Queued message is no longer available");
+		await this.sendQueuedEntryImmediately(entry);
+	}
+
+	private async sendQueuedEntryImmediately(entry: Extract<Entry, { kind: "queued" }>): Promise<void> {
 		const session = this.host.requireRuntime().session;
 		const shouldInterrupt = session.isStreaming || session.isCompacting;
 		const taken = shouldInterrupt
@@ -261,7 +248,7 @@ export class AppQueuedMessageController {
 	deferUserMessage(message: SubmittedUserMessage): void {
 		this.deferredUserMessages.push(message);
 		this.updateQueuedMessageStatus();
-		this.host.showToast("Message queued; send it from the queue menu", "info");
+		this.host.showToast("Message queued; send it from the queue menu or status button", "info");
 		this.host.render();
 	}
 

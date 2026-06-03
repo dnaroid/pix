@@ -60,7 +60,7 @@ const FALLBACK_ICONS: AppIconMap = {
 	compactTools: "≡",
 	thinkingExpanded: ">",
 	stopCircle: "■",
-	timerSand: "…",
+	timerSand: "⏳",
 	down: "v",
 };
 

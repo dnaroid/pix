@@ -111,8 +111,11 @@ export class AppRenderController {
 		this.deps.mouseController.statusThinkingTarget = undefined;
 		this.deps.mouseController.statusContextTarget = undefined;
 		this.deps.mouseController.statusModelUsageTarget = undefined;
+		this.deps.mouseController.statusDraftQueueTarget = undefined;
+		this.deps.mouseController.statusUserJumpTarget = undefined;
 		this.deps.mouseController.statusThinkingExpandTarget = undefined;
 		this.deps.mouseController.statusCompactToolsTarget = undefined;
+		this.deps.mouseController.statusTerminalBellSoundTarget = undefined;
 		this.deps.mouseController.statusSessionTarget = undefined;
 		this.deps.mouseController.statusPromptEnhancerTarget = undefined;
 		this.deps.mouseController.statusVoiceMicTarget = undefined;
@@ -328,6 +331,7 @@ export class AppRenderController {
 		this.deps.mouseController.statusThinkingTarget = this.deps.statusLineRenderer.thinkingTarget(statusLayout.text, statusRow);
 		this.deps.mouseController.statusContextTarget = this.deps.statusLineRenderer.contextTarget(statusLayout.text, statusRow, statusLayout);
 		this.deps.mouseController.statusModelUsageTarget = this.deps.statusLineRenderer.modelUsageTarget(statusLayout.text, statusRow, statusLayout);
+		this.deps.mouseController.statusDraftQueueTarget = this.deps.statusLineRenderer.draftQueueTarget?.(statusLayout, statusRow);
 		this.deps.mouseController.statusUserJumpTarget = this.deps.statusLineRenderer.userJumpTarget?.(statusLayout, statusRow);
 		this.deps.mouseController.statusThinkingExpandTarget = this.deps.statusLineRenderer.thinkingExpandTarget?.(statusLayout, statusRow);
 		this.deps.mouseController.statusCompactToolsTarget = this.deps.statusLineRenderer.compactToolsTarget?.(statusLayout, statusRow);

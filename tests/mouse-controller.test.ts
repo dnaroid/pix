@@ -159,6 +159,40 @@ describe("AppMouseController", () => {
 		assert.equal(refreshCount, 1);
 	});
 
+	it("queues the editor input when clicking the draft queue status button", () => {
+		let queueCount = 0;
+		const controller = new AppMouseController(
+			fakeHost({ queueInputFromStatus: () => { queueCount += 1; } }),
+			fakePopupMenus(),
+			fakePopupActions(),
+			fakeScrollController(),
+			fakeCommandController(),
+		);
+		controller.statusDraftQueueTarget = { row: 5, startColumn: 1, endColumn: 3 };
+
+		controller.handleMouse({ button: 0, x: 2, y: 5, released: false });
+		controller.handleMouse({ button: 0, x: 2, y: 5, released: true });
+
+		assert.equal(queueCount, 1);
+	});
+
+	it("does not queue editor input when clicking outside the draft queue status button", () => {
+		let queueCount = 0;
+		const controller = new AppMouseController(
+			fakeHost({ queueInputFromStatus: () => { queueCount += 1; } }),
+			fakePopupMenus(),
+			fakePopupActions(),
+			fakeScrollController(),
+			fakeCommandController(),
+		);
+		controller.statusDraftQueueTarget = { row: 5, startColumn: 1, endColumn: 3 };
+
+		controller.handleMouse({ button: 0, x: 4, y: 5, released: false });
+		controller.handleMouse({ button: 0, x: 4, y: 5, released: true });
+
+		assert.equal(queueCount, 0);
+	});
+
 	it("toggles super-compact tools when clicking its status target", () => {
 		let toggleCount = 0;
 		const controller = new AppMouseController(

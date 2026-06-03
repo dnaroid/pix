@@ -390,6 +390,35 @@ describe("StatusLineRenderer", () => {
 		})));
 	});
 
+	it("renders the draft queue button as the leftmost status icon when editor text is waiting", () => {
+		const renderer = statusLineRenderer({ widgetText: "", voiceActive: false, queueableInputActive: true });
+		const layout = renderer.layout(40);
+		const rendered = renderer.render(1, layout, 40);
+		const buttonText = APP_ICONS.timerSand;
+		const target = renderer.draftQueueTarget(layout, 1);
+
+		assert.ok(layout.text.startsWith(`${buttonText} ${APP_ICONS.record}`));
+		assert.ok(layout.text.endsWith(`${APP_ICONS.user} ${APP_ICONS.thinkingExpanded} ${APP_ICONS.compactTools}`));
+		assert.deepEqual(target, {
+			row: 1,
+			startColumn: 1,
+			endColumn: 1 + stringDisplayWidth(buttonText),
+		});
+		assert.ok(rendered.includes(colorize(buttonText, {
+			foreground: THEMES.dark.colors.info,
+		})));
+	});
+
+	it("hides the draft queue button when the editor has no queueable input", () => {
+		const renderer = statusLineRenderer({ widgetText: "", voiceActive: false, queueableInputActive: false });
+		const layout = renderer.layout(40);
+
+		assert.equal(layout.draftQueueWidget, undefined);
+		assert.equal(renderer.draftQueueTarget(layout, 1), undefined);
+		assert.ok(layout.text.startsWith(APP_ICONS.record));
+		assert.ok(layout.text.endsWith(`${APP_ICONS.user} ${APP_ICONS.thinkingExpanded} ${APP_ICONS.compactTools}`));
+	});
+
 	it("renders the all-thinking-expanded target before super-compact tools", () => {
 		const renderer = statusLineRenderer({ widgetText: "", voiceActive: false, allThinkingExpandedActive: true });
 		const layout = renderer.layout(40);
@@ -426,7 +455,7 @@ describe("StatusLineRenderer", () => {
 	});
 });
 
-function statusLineRenderer(options: { widgetText: string; voiceActive: boolean; promptWidgetText?: string; promptActive?: boolean; promptEnabled?: boolean; terminalBellWidgetText?: string; terminalBellSoundEnabled?: boolean; sessionActivity?: "idle" | "running" | "thinking"; statusDotBright?: boolean; workspaceLabel?: string; workspaceGitBranchLabel?: string; modelUsageLabel?: string; session?: AgentSession; currentStatus?: string; thinkingLabel?: string; modelLabel?: string; modelColors?: ModelColorsConfig; userMessageJumpMenuActive?: boolean; allThinkingExpandedActive?: boolean; superCompactToolsActive?: boolean }): StatusLineRenderer {
+function statusLineRenderer(options: { widgetText: string; voiceActive: boolean; promptWidgetText?: string; promptActive?: boolean; promptEnabled?: boolean; terminalBellWidgetText?: string; terminalBellSoundEnabled?: boolean; sessionActivity?: "idle" | "running" | "thinking"; statusDotBright?: boolean; workspaceLabel?: string; workspaceGitBranchLabel?: string; modelUsageLabel?: string; session?: AgentSession; currentStatus?: string; thinkingLabel?: string; modelLabel?: string; modelColors?: ModelColorsConfig; userMessageJumpMenuActive?: boolean; queueableInputActive?: boolean; allThinkingExpandedActive?: boolean; superCompactToolsActive?: boolean }): StatusLineRenderer {
 	return new StatusLineRenderer({
 		theme: THEMES.dark,
 		screenStyler: new ScreenStyler({ theme: THEMES.dark, mouseSelection: undefined }),
@@ -450,6 +479,7 @@ function statusLineRenderer(options: { widgetText: string; voiceActive: boolean;
 		terminalBellSoundStatusWidgetEnabled: () => options.terminalBellSoundEnabled ?? true,
 		voiceStatusWidgetText: () => options.widgetText,
 		voiceStatusWidgetActive: () => options.voiceActive,
+		queueableInputActive: () => Boolean(options.queueableInputActive),
 		userMessageJumpMenuActive: () => Boolean(options.userMessageJumpMenuActive),
 		allThinkingExpandedActive: () => Boolean(options.allThinkingExpandedActive),
 		superCompactToolsActive: () => Boolean(options.superCompactToolsActive),

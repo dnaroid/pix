@@ -11,6 +11,7 @@ import {
 	modelUsageDescriptor,
 	modelUsageRemainingPercent,
 	openAIUsageStatusFromResponse,
+	queryAccountUsageReport,
 	resolveAntigravityQuotaModelKey,
 	type AccountUsageReport,
 	zhipuUsageStatusFromResponse,
@@ -125,6 +126,59 @@ describe("model usage status", () => {
 		assert.equal(formatModelUsageStatusLabel(status, now), "99% ████▉ 42m • 100% █████ 5d0h");
 	});
 
+	it("falls back to top-level Codex limits when no named bucket matches the selected model", () => {
+		const now = Date.UTC(2026, 0, 1, 0, 0, 0);
+		const response: OpenAIUsageResponse = {
+			plan_type: "prolite",
+			rate_limit: {
+				limit_reached: false,
+				primary_window: { used_percent: 25, limit_window_seconds: 5 * 60 * 60, reset_after_seconds: 2 * 60 * 60 },
+				secondary_window: { used_percent: 20, limit_window_seconds: 7 * 24 * 60 * 60, reset_after_seconds: 5 * 24 * 60 * 60 },
+			},
+			additional_rate_limits: [{
+				limit_name: "GPT-5.3-Codex-Spark",
+				metered_feature: "codex_bengalfox",
+				rate_limit: {
+					limit_reached: false,
+					primary_window: { used_percent: 1, limit_window_seconds: 5 * 60 * 60, reset_after_seconds: 42 * 60 },
+					secondary_window: { used_percent: 0, limit_window_seconds: 7 * 24 * 60 * 60, reset_after_seconds: 5 * 24 * 60 * 60 },
+				},
+			}],
+		};
+
+		const status = openAIUsageStatusFromResponse(response, "openai-codex/gpt-5.5", now);
+
+		assert.equal(status?.hourly?.remainingPercent, 75);
+		assert.equal(status?.weekly?.remainingPercent, 80);
+	});
+
+	it("matches OpenAI additional model limits by full token sequence", () => {
+		const now = Date.UTC(2026, 0, 1, 0, 0, 0);
+		const response: OpenAIUsageResponse = {
+			plan_type: "prolite",
+			rate_limit: null,
+			additional_rate_limits: [{
+				limit_name: "GPT-5.5 Codex",
+				rate_limit: {
+					limit_reached: false,
+					primary_window: { used_percent: 30, limit_window_seconds: 5 * 60 * 60, reset_after_seconds: 60 * 60 },
+					secondary_window: null,
+				},
+			}, {
+				limit_name: "GPT-5.3-Codex-Spark",
+				rate_limit: {
+					limit_reached: false,
+					primary_window: { used_percent: 1, limit_window_seconds: 5 * 60 * 60, reset_after_seconds: 42 * 60 },
+					secondary_window: null,
+				},
+			}],
+		};
+
+		const status = openAIUsageStatusFromResponse(response, "openai-codex/gpt-5.5", now);
+
+		assert.equal(status?.hourly?.remainingPercent, 70);
+	});
+
 	it("extracts Zhipu 5-hour token window as hourly equivalent", () => {
 		const now = Date.UTC(2026, 0, 1, 0, 0, 0);
 		const resetAt = now + 3 * 60 * 60 * 1000;
@@ -230,6 +284,49 @@ describe("model usage status", () => {
 		assert.match(output, /Claude Opus\s+6d 13h\s+░{20} 0%/u);
 		assert.match(output, /⚠️ Rate limit reached!/u);
 	});
+
+	it("reads Antigravity account quotas from Pi auth.json cached quota", async () => {
+		const now = Date.UTC(2026, 0, 1, 0, 0, 0);
+		const cachedAt = now - 30 * 24 * 60 * 60 * 1000;
+		await withPiAuthAsync({
+			antigravity: {
+				type: "oauth",
+				email: "fallback@example.com",
+				accounts: [{
+					email: "cached@example.com",
+					refreshToken: "refresh-token",
+					projectId: "project-id",
+					enabled: true,
+					cachedQuotaUpdatedAt: cachedAt,
+					cachedQuota: {
+						claude: { remainingFraction: 0.5, resetTime: new Date(cachedAt + 7 * 24 * 60 * 60 * 1000).toISOString() },
+						"gemini-flash": { remainingFraction: 1, resetTime: new Date(cachedAt + 60 * 60 * 1000).toISOString() },
+						"gemini-pro": { remainingFraction: 0.25, resetTime: new Date(cachedAt + 2 * 60 * 60 * 1000).toISOString() },
+					},
+				}],
+				activeIndex: 0,
+			},
+		}, async () => {
+			const report = await queryAccountUsageReport(now);
+
+			assert.equal(report.googleAccounts.length, 1);
+			assert.equal(report.googleAccounts[0]?.account, "cached@example.com");
+			assert.deepEqual(report.googleAccounts[0]?.windows.map((window) => [window.label, window.remainingPercent]), [
+				["Claude Opus", 50],
+				["Claude Sonnet", 50],
+				["G2.5 Flash", 100],
+				["G3 Flash", 100],
+				["G3 Pro", 25],
+			]);
+			assert.deepEqual(report.googleAccounts[0]?.windows.map((window) => [window.label, window.resetAt - now]), [
+				["Claude Opus", 7 * 24 * 60 * 60 * 1000],
+				["Claude Sonnet", 7 * 24 * 60 * 60 * 1000],
+				["G2.5 Flash", 60 * 60 * 1000],
+				["G3 Flash", 60 * 60 * 1000],
+				["G3 Pro", 2 * 60 * 60 * 1000],
+			]);
+		});
+	});
 });
 
 function withPiAuth(auth: unknown, run: () => void): void {
@@ -239,6 +336,20 @@ function withPiAuth(auth: unknown, run: () => void): void {
 	process.env.PI_CODING_AGENT_DIR = agentDir;
 	try {
 		run();
+	} finally {
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+		rmSync(agentDir, { recursive: true, force: true });
+	}
+}
+
+async function withPiAuthAsync(auth: unknown, run: () => Promise<void>): Promise<void> {
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	const agentDir = mkdtempSync(join(tmpdir(), "pix-agent-"));
+	writeFileSync(join(agentDir, "auth.json"), JSON.stringify(auth), "utf8");
+	process.env.PI_CODING_AGENT_DIR = agentDir;
+	try {
+		await run();
 	} finally {
 		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
 		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
