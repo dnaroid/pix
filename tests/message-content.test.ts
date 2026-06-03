@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { extractImageContents, renderContent, renderUserMessageContent, submittedUserDisplayText } from "../src/app/rendering/message-content.js";
+import { extractImageContents, renderContent, renderUserMessageContent, submittedUserDisplayText } from "../src/app/message-content.js";
 import type { ImageContent } from "../src/input-editor.js";
 
 describe("message-content", () => {

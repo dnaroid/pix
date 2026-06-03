@@ -4,7 +4,6 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import {
 	getAgentDir,
-	SessionManager,
 	type AgentSession,
 	type AgentSessionEvent,
 	type AgentSessionRuntime,
@@ -13,7 +12,7 @@ import { isRecord } from "../guards.js";
 import { createId } from "../id.js";
 import { createStartupInfoMessage, isEmptyStartupSession } from "../cli/startup-info.js";
 import type { AppBlinkController } from "../screen/blink-controller.js";
-import { tabPanelRows } from "../rendering/tab-line-renderer.js";
+import { tabPanelRows } from "./tab-panel-layout.js";
 import type { AppOptions, Entry, SessionActivity, SessionTab, SubmittedUserMessage } from "../types.js";
 
 const TAB_STATE_VERSION = 3;
@@ -68,7 +67,7 @@ export type AppTabsControllerHost = {
 	restoreDeferredUserMessages?(messages: readonly SubmittedUserMessage[]): void;
 	addEntry(entry: Entry): void;
 	showToast(message: string, kind: "success" | "error" | "warning" | "info"): void;
-	render(): void;
+	requestRender(reason: string): void;
 };
 
 export class AppTabsController {
@@ -107,7 +106,7 @@ export class AppTabsController {
 
 		tab.attention = "terminal-bell";
 		this.startAttentionBlink();
-		this.host.render();
+		this.host.requestRender("session:tabs-controller");
 	}
 
 	tabPanelRows(terminalRows: number): number {
@@ -225,8 +224,7 @@ export class AppTabsController {
 			return;
 		}
 
-		const sessionTitles = await this.loadSessionTitles();
-		const restoredTabs = this.restoredTabs(saved, sessionTitles);
+		const restoredTabs = this.restoredTabs(saved, new Map());
 		if (restoredTabs.length === 0) {
 			await this.saveTabs();
 			return;
@@ -253,7 +251,7 @@ export class AppTabsController {
 
 		if (currentPath !== desiredPath) {
 			this.host.setStatus("restoring tabs");
-			this.host.render();
+			this.host.requestRender("session:tabs-controller");
 			try {
 				const result = await runtime.switchSession(desiredPath);
 				if (result.cancelled) throw new Error("restore cancelled");
@@ -267,12 +265,8 @@ export class AppTabsController {
 		}
 
 		this.syncActiveTabFromRuntime({ save: false });
-		this.host.resetSessionView();
-		if (this.activeTabId) this.restoreDeferredUserMessages(this.activeTabId);
-		this.host.loadSessionHistory();
-		this.host.setSessionStatus(runtime.session);
-		this.host.setSessionActivity(this.sessionActivity(runtime.session));
 		if (this.activeTabId) this.restoreInputState(this.activeTabId);
+		await this.loadActiveSessionHistory(runtime);
 		await this.saveTabs();
 	}
 
@@ -291,7 +285,7 @@ export class AppTabsController {
 		this.storeActiveInputState();
 		this.storeActiveDeferredUserMessages();
 		this.host.setStatus("starting new tab");
-		this.host.render();
+		this.host.requestRender("session:tabs-controller");
 
 		const newRuntime = await this.host.createRuntimeForNewSession();
 		const existingTab = this.findTabForSession(newRuntime.session);
@@ -323,7 +317,7 @@ export class AppTabsController {
 		}
 		this.host.setSessionStatus(newRuntime.session);
 		this.host.setSessionActivity(this.sessionActivity(newRuntime.session));
-		this.host.render();
+		this.host.requestRender("session:tabs-controller");
 	}
 
 	async openSessionInNewTab(sessionPath: string): Promise<boolean> {
@@ -353,7 +347,7 @@ export class AppTabsController {
 		const previousTabId = this.activeTabId;
 		const previousRuntime = runtime;
 		this.host.setStatus("opening session tab");
-		this.host.render();
+		this.host.requestRender("session:tabs-controller");
 
 		let newRuntime: AgentSessionRuntime;
 		try {
@@ -361,7 +355,7 @@ export class AppTabsController {
 		} catch {
 			this.host.showToast("Could not open session tab", "warning");
 			this.host.setSessionStatus(previousRuntime.session);
-			this.host.render();
+			this.host.requestRender("session:tabs-controller");
 			return false;
 		}
 
@@ -395,7 +389,7 @@ export class AppTabsController {
 			this.host.loadSessionHistory();
 			this.host.setSessionStatus(this.host.runtime()?.session);
 			this.host.setSessionActivity(this.sessionActivity(this.host.runtime()?.session));
-			this.host.render();
+			this.host.requestRender("session:tabs-controller");
 			return false;
 		}
 
@@ -446,7 +440,7 @@ export class AppTabsController {
 		this.restoreDeferredUserMessages(target.id);
 		this.host.setStatus("switching tab");
 		this.host.setSessionActivity("thinking");
-		this.host.render();
+		this.host.requestRender("session:tabs-controller");
 
 		let targetRuntime: AgentSessionRuntime | undefined;
 		try {
@@ -473,7 +467,7 @@ export class AppTabsController {
 			const activeSession = this.host.runtime()?.session;
 			this.host.setSessionStatus(activeSession);
 			this.host.setSessionActivity(this.sessionActivity(activeSession));
-			this.host.render();
+			this.host.requestRender("session:tabs-controller");
 			return;
 		}
 
@@ -518,7 +512,7 @@ export class AppTabsController {
 			this.stopAttentionBlinkIfIdle();
 			if (tabRuntime) void this.host.disposeRuntime(tabRuntime);
 			void this.saveTabs();
-			this.host.render();
+			this.host.requestRender("session:tabs-controller");
 			return;
 		}
 
@@ -532,7 +526,7 @@ export class AppTabsController {
 		}
 
 		this.host.setStatus("closing tab");
-		this.host.render();
+		this.host.requestRender("session:tabs-controller");
 		const nextRuntime = await this.runtimeForTab(nextTab);
 		if (!nextRuntime) return;
 		await this.host.activateRuntime(nextRuntime);
@@ -561,14 +555,14 @@ export class AppTabsController {
 
 		this.activeTabId = tab.id;
 		this.host.setStatus("starting new session");
-		this.host.render();
+		this.host.requestRender("session:tabs-controller");
 
 		const result = await runtime.newSession();
 		if (result.cancelled) {
 			this.host.addEntry({ id: createId("system"), kind: "system", text: "New session cancelled." });
 			this.host.setSessionStatus(runtime.session);
 			this.host.setSessionActivity(this.sessionActivity(runtime.session));
-			this.host.render();
+			this.host.requestRender("session:tabs-controller");
 			return;
 		}
 
@@ -591,7 +585,7 @@ export class AppTabsController {
 		this.host.setSessionStatus(runtime.session);
 		this.host.setSessionActivity(this.sessionActivity(runtime.session));
 		void this.saveTabs();
-		this.host.render();
+		this.host.requestRender("session:tabs-controller");
 	}
 
 	private async loadActiveSessionHistory(runtime: AgentSessionRuntime): Promise<void> {
@@ -601,12 +595,12 @@ export class AppTabsController {
 		if (this.activeTabId) this.restoreDeferredUserMessages(this.activeTabId);
 		this.host.setStatus("loading session history");
 		this.host.setSessionActivity("thinking");
-		this.host.render();
+		this.host.requestRender("session:tabs-controller");
 
 		const completed = await this.host.loadSessionHistoryAsync({
 			isCancelled,
 			render: () => {
-				if (!isCancelled()) this.host.render();
+				if (!isCancelled()) this.host.requestRender("session:tabs-controller");
 			},
 		});
 		if (!completed || isCancelled()) return;
@@ -614,7 +608,7 @@ export class AppTabsController {
 		this.host.setSessionStatus(runtime.session);
 		this.host.syncUserSessionEntryMetadata();
 		this.host.setSessionActivity(this.sessionActivity(runtime.session));
-		this.host.render();
+		this.host.requestRender("session:tabs-controller");
 	}
 
 	private cancelHistoryLoad(): void {
@@ -720,7 +714,7 @@ export class AppTabsController {
 
 		if (tab.title === previousTitle && tab.activity === previousActivity && tab.sessionPath === previousSessionPath) return;
 		if (tab.title !== previousTitle || tab.sessionPath !== previousSessionPath) void this.saveTabs();
-		this.host.render();
+		this.host.requestRender("session:tabs-controller");
 	}
 
 	private storeActiveInputState(): void {
@@ -929,18 +923,6 @@ export class AppTabsController {
 			scope: "full",
 			initialVisible: true,
 		});
-	}
-
-	private async loadSessionTitles(): Promise<ReadonlyMap<string, string>> {
-		try {
-			const sessions = await SessionManager.list(this.host.options.cwd);
-			return new Map(sessions.map((session) => [
-				resolve(session.path),
-				(session.name?.trim() || `session ${session.id.slice(0, 8)}`),
-			]));
-		} catch {
-			return new Map();
-		}
 	}
 
 	private restoredTabs(saved: PersistedTabState, titles: ReadonlyMap<string, string>): SessionTab[] {

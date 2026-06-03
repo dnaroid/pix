@@ -1,7 +1,7 @@
 import { ANSI_RESET, colorize, type Theme } from "../../theme.js";
 import { renderMarkdownLine } from "../../markdown-format.js";
 import { syntaxHighlightSegmentsForLine } from "../../syntax-highlight.js";
-import { padOrTrimPlain } from "../rendering/render-text.js";
+import { padOrTrimPlain } from "../text-format.js";
 import { orderedSelection } from "./screen-selection.js";
 import type { MouseSelection, RenderedLine, StyledSegment } from "../types.js";
 

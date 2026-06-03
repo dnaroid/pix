@@ -2,7 +2,7 @@ import { Toast, type ToastKind, type ToastVariant } from "../../ui.js";
 import { TOAST_DURATION_MS } from "../constants.js";
 
 export type AppToastControllerHost = {
-	render(): void;
+	requestRender(reason: string): void;
 };
 
 export class AppToastController {
@@ -15,7 +15,7 @@ export class AppToastController {
 	showToast(message: string, kind: ToastKind = "info", options: { durationMs?: number; variant?: ToastVariant } = {}): void {
 		const toastId = this.toast.show(message, kind, options.variant ? { variant: options.variant } : {});
 		if (kind === "error" || options.variant === "dialog") {
-			this.host.render();
+			this.host.requestRender("rendering:toast-controller");
 			return;
 		}
 		const durationMs = typeof options.durationMs === "number" && Number.isFinite(options.durationMs) && options.durationMs > 0
@@ -25,11 +25,11 @@ export class AppToastController {
 		const timer = setTimeout(() => {
 			this.toast.hide(toastId);
 			this.timers.delete(toastId);
-			this.host.render();
+			this.host.requestRender("rendering:toast-controller");
 		}, durationMs);
 		this.timers.set(toastId, timer);
 		timer.unref();
-		this.host.render();
+		this.host.requestRender("rendering:toast-controller");
 	}
 
 	dismissToast(toastId: number): void {
@@ -39,7 +39,7 @@ export class AppToastController {
 			this.timers.delete(toastId);
 		}
 		this.toast.hide(toastId);
-		this.host.render();
+		this.host.requestRender("rendering:toast-controller");
 	}
 
 	clearToastTimers(): void {

@@ -3,7 +3,7 @@ import { STATUS_BLINK_INTERVAL_MS } from "../constants.js";
 export type AppBlinkRenderScope = "status-line" | "full";
 
 export type AppBlinkControllerHost = {
-	render(): void;
+	requestRender(reason: string): void;
 	renderStatusLine?(): void;
 };
 
@@ -88,7 +88,7 @@ export class AppBlinkController {
 		}
 
 		if (renderScope === "full") {
-			this.host.render();
+			this.host.requestRender("screen:blink-controller");
 			return;
 		}
 
@@ -98,7 +98,7 @@ export class AppBlinkController {
 				return;
 			}
 
-			this.host.render();
+			this.host.requestRender("screen:blink-controller");
 		}
 	}
 }

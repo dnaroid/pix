@@ -248,7 +248,7 @@ describe("AppMouseController", () => {
 		let opened: { menu: string; options?: unknown } | undefined;
 		let renderCount = 0;
 		const controller = new AppMouseController(
-			fakeHost({ render: () => { renderCount += 1; } }),
+			fakeHost({ requestRender: () => { renderCount += 1; } }),
 			fakePopupMenus({ openDirectPopupMenu: (menu, options) => { opened = { menu, options }; } }),
 			fakePopupActions(),
 			fakeScrollController(),
@@ -406,7 +406,7 @@ describe("AppMouseController", () => {
 					}),
 				}) as unknown as EditorLayoutRenderer,
 				inputEditor: () => ({ scrollByVisualLines: (delta: number) => { deltas.push(delta); return true; } }) as never,
-				render: () => { renderCount += 1; },
+				requestRender: () => { renderCount += 1; },
 			}),
 			fakePopupMenus(),
 			fakePopupActions(),
@@ -442,7 +442,7 @@ describe("AppMouseController", () => {
 					}),
 				}) as unknown as EditorLayoutRenderer,
 				inputEditor: () => ({ setVisualScrollOffset: (offset: number) => { scrollOffset = offset; return true; } }) as never,
-				render: () => { renderCount += 1; },
+				requestRender: () => { renderCount += 1; },
 			}),
 			fakePopupMenus(),
 			fakePopupActions(),
@@ -579,7 +579,7 @@ function fakeHost(overrides: Partial<AppMouseControllerHost> = {}): AppMouseCont
 		refreshModelUsageStatus: () => {},
 		copyTextToClipboard: () => {},
 		handleExtensionInputMouse: () => false,
-		render: () => {},
+		requestRender: () => {},
 		...overrides,
 	};
 }

@@ -140,7 +140,7 @@ function newController(cwd: string, currentSession: string, running = true): App
 		cwd,
 		sessionFile: () => currentSession,
 		isRunning: () => running,
-		render: () => {},
+		requestRender: () => {},
 	});
 }
 

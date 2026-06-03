@@ -1,23 +1,18 @@
 import { createHash } from "node:crypto";
-import { expandTabs, padOrTrimDisplay, sliceByDisplayWidth, stringDisplayWidth, wrapDisplayLine } from "../../terminal-width.js";
+import { wrapDisplayLine } from "../../terminal-width.js";
 import type { Theme } from "../../theme.js";
 import { APP_ICONS } from "../icons.js";
+import { horizontalPaddingLayout, padOrTrimPlain, sanitizeText } from "../text-format.js";
 import type { ToolStatusEntry } from "../types.js";
 
-const LSP_DIAGNOSTIC_ICON = "\u{f0026}";
+export { ellipsizeDisplay, horizontalPaddingLayout, normalizePastedTextForDuplicateKey, padOrTrimPlain, sanitizeText } from "../text-format.js";
 
-export function sanitizeText(text: string): string {
-	return expandTabs(text.replace(/⚠️?|\u{f0026}/gu, APP_ICONS.alert).replace(/\x1b/g, "␛").replace(/\r/g, ""));
-}
+const LSP_DIAGNOSTIC_ICON = "\u{f0026}";
 
 export function alertIconPrefixLength(text: string): number | undefined {
 	if (text.startsWith(APP_ICONS.alert)) return APP_ICONS.alert.length;
 	if (text.startsWith(LSP_DIAGNOSTIC_ICON)) return LSP_DIAGNOSTIC_ICON.length;
 	return /^⚠️?/u.exec(text)?.[0].length;
-}
-
-export function normalizePastedTextForDuplicateKey(text: string): string {
-	return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 }
 
 export function shortHash(text: string): string {
@@ -93,27 +88,7 @@ export function wrapText(text: string, width: number): string[] {
 	return lines.flatMap((line) => wrapLine(line, width));
 }
 
-export function padOrTrimPlain(text: string, width: number): string {
-	return padOrTrimDisplay(text, width);
-}
-
-export function horizontalPaddingLayout(width: number): { left: number; right: number; contentWidth: number } {
-	const safeWidth = Math.max(1, width);
-	const left = safeWidth > 1 ? 1 : 0;
-	const right = safeWidth > 2 ? 1 : 0;
-	return { left, right, contentWidth: Math.max(1, safeWidth - left - right) };
-}
-
 export function padHorizontalText(text: string, width: number): string {
 	const { left, right, contentWidth } = horizontalPaddingLayout(width);
 	return `${" ".repeat(left)}${padOrTrimPlain(text, contentWidth)}${" ".repeat(right)}`;
-}
-
-export function ellipsizeDisplay(text: string, width: number): string {
-	const safeWidth = Math.max(0, width);
-	if (safeWidth === 0) return "";
-	if (stringDisplayWidth(text) <= safeWidth) return text;
-	if (safeWidth === 1) return "…";
-
-	return `${sliceByDisplayWidth(text, safeWidth - 1)}…`;
 }

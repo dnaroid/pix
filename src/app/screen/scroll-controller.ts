@@ -1,7 +1,5 @@
-import type { ConversationViewport } from "../rendering/conversation-viewport.js";
-import type { EditorLayoutRenderer } from "../rendering/editor-layout-renderer.js";
-import { sanitizeText } from "../rendering/render-text.js";
-import type { RenderedLine } from "../types.js";
+import { sanitizeText } from "../text-format.js";
+import type { ConversationBlockCache, EditorLayout, Entry, RenderedLine } from "../types.js";
 
 export type AppScrollMetrics = {
 	bodyHeight: number;
@@ -21,13 +19,31 @@ export type ConversationTextScrollTarget = {
 	needles: readonly string[];
 };
 
+export type ScrollConversationEntryBlockPosition = {
+	entry: Entry;
+	offset: number;
+	lineCount: number;
+	block: ConversationBlockCache;
+};
+
+export type ScrollConversationViewport = {
+	lineCount(width: number): number;
+	slice(width: number, start: number, count: number): RenderedLine[];
+	entryBlockPositions(width: number): readonly ScrollConversationEntryBlockPosition[];
+};
+
+export type ScrollEditorLayout = {
+	computeLayout(width: number, rows: number): Pick<EditorLayout, "bodyHeight">;
+};
+
 export type AppScrollControllerHost = {
-	conversationViewport(): ConversationViewport;
-	editorLayoutRenderer(): EditorLayoutRenderer;
+	conversationViewport(): ScrollConversationViewport;
+	editorLayoutRenderer(): ScrollEditorLayout;
 	terminalColumns(): number;
 	terminalRows(): number;
 	tabPanelRows(terminalRows: number): number;
-	render(): void;
+	loadOlderSessionHistory(): Promise<void>;
+	requestRender(reason: string): void;
 };
 
 export class AppScrollController {
@@ -103,9 +119,10 @@ export class AppScrollController {
 		if (nextScrollFromBottom === this.scrollFromBottom) {
 			if (nextScrollFromBottom === 0 && this.detachedScrollStart !== undefined && delta > 0) {
 				this.detachedScrollStart = undefined;
-				if (shouldRender) this.host.render();
+				if (shouldRender) this.host.requestRender("screen:scroll-controller");
 				return true;
 			}
+			if (metrics.start === 0 && delta < 0) void this.host.loadOlderSessionHistory();
 			return false;
 		}
 
@@ -113,7 +130,8 @@ export class AppScrollController {
 		this.detachedScrollStart = nextScrollFromBottom === 0
 			? undefined
 			: Math.max(0, conversationLineCount - bodyHeight - nextScrollFromBottom);
-		if (shouldRender) this.host.render();
+		if (this.detachedScrollStart === 0 && delta < 0) void this.host.loadOlderSessionHistory();
+		if (shouldRender) this.host.requestRender("screen:scroll-controller");
 		return true;
 	}
 
@@ -142,7 +160,7 @@ export class AppScrollController {
 		if (!position) return false;
 
 		this.setScrollStart(position.offset, metrics);
-		this.host.render();
+		this.host.requestRender("screen:scroll-controller");
 		return true;
 	}
 
@@ -164,13 +182,13 @@ export class AppScrollController {
 		const targetMatch = targetPosition ? lineMatchInPosition(targetPosition, needles) : undefined;
 		if (targetMatch) {
 			this.setScrollStart(targetMatch.start, metrics);
-			this.host.render();
+			this.host.requestRender("screen:scroll-controller");
 			return true;
 		}
 
 		if (targetPosition) {
 			this.setScrollStart(targetPosition.offset, metrics);
-			this.host.render();
+			this.host.requestRender("screen:scroll-controller");
 			return true;
 		}
 
@@ -179,7 +197,7 @@ export class AppScrollController {
 			.find((match) => match !== undefined);
 		if (anyMatch) {
 			this.setScrollStart(anyMatch.start, metrics);
-			this.host.render();
+			this.host.requestRender("screen:scroll-controller");
 			return true;
 		}
 
@@ -188,7 +206,7 @@ export class AppScrollController {
 
 	private scrollToStart(start: number, metrics: AppScrollMetrics): boolean {
 		if (!this.setScrollStart(start, metrics)) return false;
-		this.host.render();
+		this.host.requestRender("screen:scroll-controller");
 		return true;
 	}
 
@@ -232,7 +250,7 @@ function normalizeLineSearchText(text: string): string {
 }
 
 function lineMatchInPosition(
-	position: ReturnType<ConversationViewport["entryBlockPositions"]>[number],
+	position: ScrollConversationEntryBlockPosition,
 	needles: readonly string[],
 ): { start: number } | undefined {
 	const lineIndex = lineIndexForNeedles(position.block.lines, needles);

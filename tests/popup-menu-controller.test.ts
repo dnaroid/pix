@@ -275,7 +275,7 @@ describe("popup menu header", () => {
 		const controller = createPopupMenuController({
 			...createPopupMenuHost([]),
 			isRunning: () => false,
-			render: () => {
+			requestRender: () => {
 				rendered += 1;
 			},
 		});
@@ -292,7 +292,7 @@ describe("popup menu header", () => {
 			...createPopupMenuHost([]),
 			setStatus: (status) => statusChanges.push(status),
 			restoreSessionStatus: () => statusChanges.push("restore"),
-			render: () => {
+			requestRender: () => {
 				renders += 1;
 			},
 		});
@@ -327,7 +327,7 @@ describe("popup menu header", () => {
 		const controller = createPopupMenuController({
 			...createPopupMenuHost([]),
 			restoreSessionStatus: () => actions.push("restore"),
-			render: () => actions.push("render"),
+			requestRender: () => actions.push("render"),
 		});
 
 		controller.openDirectPopupMenu("queue-message", { preserveStatus: true });
@@ -444,7 +444,7 @@ function createPopupMenuHost(
 		hasQueuedEntry: () => false,
 		setStatus: () => undefined,
 		restoreSessionStatus: () => undefined,
-		render: () => undefined,
+		requestRender: () => undefined,
 	};
 }
 

@@ -9,7 +9,7 @@ describe("todo widget controller", () => {
 		let renders = 0;
 		const controller = new AppTodoWidgetController({
 			isRunning: () => true,
-			render: () => {
+			requestRender: () => {
 				renders += 1;
 			},
 		});
@@ -31,7 +31,7 @@ describe("todo widget controller", () => {
 		const controller = new AppTodoWidgetController({
 			sessionFile: () => "/tmp/project/session.jsonl",
 			isRunning: () => true,
-			render: () => {
+			requestRender: () => {
 				renders += 1;
 			},
 		});
@@ -57,7 +57,7 @@ describe("todo widget controller", () => {
 		let renders = 0;
 		const controller = new AppTodoWidgetController({
 			isRunning: () => true,
-			render: () => {
+			requestRender: () => {
 				renders += 1;
 			},
 		});
@@ -85,7 +85,7 @@ describe("todo widget controller", () => {
 		const controller = new AppTodoWidgetController({
 			sessionFile: () => currentSessionFile,
 			isRunning: () => true,
-			render: () => {
+			requestRender: () => {
 				renders += 1;
 			},
 		});
@@ -116,7 +116,7 @@ describe("todo widget controller", () => {
 		const controller = new AppTodoWidgetController({
 			sessionFile: () => currentSessionFile,
 			isRunning: () => true,
-			render: () => {},
+			requestRender: () => {},
 		});
 		const details: TodoDetails = {
 			action: "list",
@@ -142,7 +142,7 @@ describe("todo widget controller", () => {
 	});
 
 	it("ignores non-todo, invalid, and error results", () => {
-		const controller = new AppTodoWidgetController({ isRunning: () => true, render: () => {} });
+		const controller = new AppTodoWidgetController({ isRunning: () => true, requestRender: () => {} });
 		const details: TodoDetails = {
 			action: "list",
 			params: {},
@@ -159,7 +159,7 @@ describe("todo widget controller", () => {
 	});
 
 	it("clears cached details on reset", () => {
-		const controller = new AppTodoWidgetController({ isRunning: () => false, render: () => {} });
+		const controller = new AppTodoWidgetController({ isRunning: () => false, requestRender: () => {} });
 		controller.observeToolResult("todo", {
 			action: "list",
 			params: {},

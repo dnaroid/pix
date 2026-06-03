@@ -93,13 +93,26 @@ describe("AppScrollController", () => {
 		assert.equal(slicedStart, 15);
 	});
 
+	it("requests older history when scrolling above the loaded top", () => {
+		let olderHistoryRequests = 0;
+		const controller = createController({
+			lineCount: () => 5,
+			slice: () => [{ text: "visible" }],
+		}, 5, async () => {
+			olderHistoryRequests += 1;
+		});
+
+		assert.equal(controller.scrollByLines(-1), false);
+		assert.equal(olderHistoryRequests, 1);
+	});
+
 });
 
 function createController(viewport: {
 	lineCount(width: number): number;
 	slice(width: number, start: number, count: number): { text: string }[];
 	entryBlockPositions?: (width: number) => unknown[];
-}, bodyHeight = 1): AppScrollController {
+}, bodyHeight = 1, loadOlderSessionHistory: () => Promise<void> = async () => undefined): AppScrollController {
 	return new AppScrollController({
 		conversationViewport: () => viewport as unknown as ConversationViewport,
 		editorLayoutRenderer: () => ({
@@ -108,7 +121,8 @@ function createController(viewport: {
 		terminalColumns: () => 10,
 		terminalRows: () => 4,
 		tabPanelRows: () => 0,
-		render: () => undefined,
+		loadOlderSessionHistory,
+		requestRender: () => undefined,
 	});
 }
 

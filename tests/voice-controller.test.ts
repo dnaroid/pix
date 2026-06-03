@@ -351,6 +351,6 @@ function fakeHost(): AppVoiceControllerHost & { transcripts: string[]; partials:
 		setPartialTranscript: (text) => { partials.push(text); },
 		addSystemMessage: (message) => { systemMessages.push(message); },
 		showToast: (message, kind) => { toasts.push(`${kind}:${message}`); },
-		render: () => {},
+		requestRender: () => {},
 	};
 }

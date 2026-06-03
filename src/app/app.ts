@@ -32,8 +32,17 @@ import { PopupMenuRenderer } from "./rendering/popup-menu-renderer.js";
 import { AppPromptEnhancerController } from "./input/prompt-enhancer-controller.js";
 import { AppAutocompleteController } from "./input/autocomplete-controller.js";
 import { AppQueuedMessageController } from "./session/queued-message-controller.js";
+import { ConversationEntryStore } from "./session/conversation-entry-store.js";
 import { AppRequestHistory } from "./session/request-history.js";
-import { AppRenderController } from "./rendering/render-controller.js";
+import {
+	createConversationViewport,
+	createEditorLayoutRenderer,
+	createRenderController,
+	createScrollController,
+	createStatusLineRenderer,
+	createTabLineRenderer,
+} from "./app-rendering-factories.js";
+import { AppRenderController, type AppRenderResult } from "./rendering/render-controller.js";
 import { createPixRuntime } from "./runtime.js";
 import { ScreenStyler } from "./screen/screen-styler.js";
 import { AppScrollController } from "./screen/scroll-controller.js";
@@ -71,7 +80,9 @@ const TODO_STATE_EVENT = "pi-tools-suite:todo:state";
 const COALESCED_RENDER_DELAY_MS = 16;
 
 export class PiUiExtendApp {
-	private readonly entries: Entry[] = [];
+	private readonly conversationEntries = new ConversationEntryStore({
+		deleteConversationEntry: (entryId) => this.deleteConversationEntryFromViewport(entryId),
+	});
 	private readonly options: AppOptions;
 	private readonly theme: Theme;
 	private readonly blinkController: AppBlinkController;
@@ -135,8 +146,10 @@ export class PiUiExtendApp {
 	/** Shortcut: get/set the editor text as a plain string. */
 	private get input(): string { return this.inputEditor.text; }
 	private set input(value: string) { this.inputEditor.setText(value); }
+	private get entries(): readonly Entry[] { return this.conversationEntries.entries; }
 	private running = false;
 	private scheduledRenderTimer: ReturnType<typeof setTimeout> | undefined;
+	private readonly pendingRenderReasons = new Set<string>();
 	private todoPanelExpanded = true;
 	private subagentsPanelExpanded = true;
 	private allThinkingExpanded = false;
@@ -150,7 +163,7 @@ export class PiUiExtendApp {
 		this.theme = THEMES[options.themeName];
 		const app = this;
 		this.blinkController = new AppBlinkController({
-			render: () => this.render(),
+			requestRender: (reason) => this.requestRender(reason),
 			renderStatusLine: () => this.renderStatusLine(),
 		});
 		this.screenStyler = new ScreenStyler({
@@ -159,22 +172,22 @@ export class PiUiExtendApp {
 			get mouseSelection() { return app.mouseController.mouseSelection; },
 		});
 		this.toastController = new AppToastController({
-			render: () => this.render(),
+			requestRender: (reason) => this.requestRender(reason),
 		});
 		this.nerdFontController = new NerdFontController({
 			showToast: (message, kind) => this.showToast(message, kind),
-			render: () => this.render(),
+			requestRender: (reason) => this.requestRender(reason),
 		});
 		this.statusController = new AppStatusController({
 			cwd: this.options.cwd,
 			theme: this.theme,
 			blinkController: this.blinkController,
 			runtimeSession: () => this.runtime?.session,
-			render: () => this.scheduleRender(),
+			requestRender: (reason) => this.requestRender(reason),
 		});
 		this.modelUsageController = new AppModelUsageController({
 			runtimeSession: () => this.runtime?.session,
-			render: () => this.render(),
+			requestRender: (reason) => this.requestRender(reason),
 		});
 		this.tabsController = new AppTabsController({
 			options: this.options,
@@ -202,7 +215,7 @@ export class PiUiExtendApp {
 			restoreDeferredUserMessages: (messages) => this.queuedMessages.restoreDeferredUserMessages(messages),
 			addEntry: (entry) => this.addEntry(entry),
 			showToast: (message, kind) => this.showToast(message, kind),
-			render: () => this.render(),
+			requestRender: (reason) => this.requestRender(reason),
 		});
 		this.pixConfig = loadPixConfig();
 		setAppIconTheme(this.pixConfig.iconTheme.name);
@@ -219,21 +232,21 @@ export class PiUiExtendApp {
 			setSessionStatus: (session) => this.setSessionStatus(session),
 			setSessionActivity: (activity) => this.setSessionActivity(activity),
 			toast: this.toastNotifier,
-			render: () => this.render(),
+			requestRender: (reason) => this.requestRender(reason),
 		});
 		this.autocompleteController = new AppAutocompleteController({
 			runtime: () => this.runtime,
 			inputEditor: () => this.inputEditor,
 			autocompleteConfig: () => this.pixConfig.autocomplete,
 			isRunning: () => this.running,
-			render: () => this.render(),
+			requestRender: (reason) => this.requestRender(reason),
 		});
 		this.voiceController = new AppVoiceController({
 			insertTranscript: (text) => this.insertVoiceTranscript(text),
 			setPartialTranscript: (text) => this.setVoicePartialTranscript(text),
 			addSystemMessage: (message) => this.addVoiceSystemMessage(message),
 			showToast: (message, kind) => this.showToast(message, kind),
-			render: () => this.render(),
+			requestRender: (reason) => this.requestRender(reason),
 		}, this.pixConfig.dictation);
 		this.menuItems = new AppMenuItemsController({
 			runtime: () => this.runtime,
@@ -269,45 +282,32 @@ export class PiUiExtendApp {
 			hasQueuedEntry: (entryId) => Boolean(this.queuedMessages.findQueuedEntry(entryId)),
 			setStatus: (status) => this.setStatus(status),
 			restoreSessionStatus: () => this.restoreSessionStatus(),
-			render: () => this.render(),
+			requestRender: (reason) => this.requestRender(reason),
 		}, popupMenuRenderer);
-		this.statusLineRenderer = new StatusLineRenderer({
+		this.statusLineRenderer = createStatusLineRenderer({
 			theme: this.theme,
 			screenStyler: this.screenStyler,
-			get session() { return app.runtime?.session; },
 			modelColors: this.pixConfig.modelColors,
-			get sessionActivity() { return app.statusController.sessionActivity; },
-			get statusDotBright() { return app.statusController.statusDotBright; },
-			currentStatus: () => this.statusController.currentStatus(),
-			statusWorkspaceLabel: () => this.statusController.statusWorkspaceLabel(),
-			statusWorkspaceGitBranchLabel: () => this.statusController.statusWorkspaceGitBranchLabel(),
-			statusModelLabel: (session) => this.statusController.statusModelLabel(session),
-			statusThinkingLabel: (session) => this.statusController.statusThinkingLabel(session),
-			formatContextUsagePercent: (session) => this.statusController.formatContextUsagePercent(session),
-			roundedContextUsagePercent: (session) => this.statusController.roundedContextUsagePercent(session),
-			contextUsagePercentColor: (percent) => this.statusController.contextUsagePercentColor(percent),
-			modelUsageStatusLabel: () => this.modelUsageController.statusLabel(),
-			promptEnhancerStatusWidgetText: () => this.promptEnhancer.statusWidgetText(),
-			promptEnhancerStatusWidgetActive: () => this.promptEnhancer.statusWidgetActive(),
-			promptEnhancerStatusWidgetEnabled: () => this.promptEnhancer.statusWidgetEnabled(),
-			terminalBellSoundStatusWidgetText: () => this.terminalBellSoundController.statusWidgetText(),
-			terminalBellSoundStatusWidgetEnabled: () => this.terminalBellSoundController.isEnabled(),
-			voiceStatusWidgetText: () => this.voiceController.statusWidgetText(),
-			voiceStatusWidgetActive: () => this.voiceController.statusWidgetActive(),
-			queueableInputActive: () => this.inputEditor.promptText.trimEnd().length > 0 || this.inputEditor.images.length > 0,
-			userMessageJumpMenuActive: () => this.popupMenus.directMenu === "user-message-jump",
-			allThinkingExpandedActive: () => this.allThinkingExpanded,
-			superCompactToolsActive: () => this.superCompactTools,
+			runtimeSession: () => this.runtime?.session,
+			statusController: this.statusController,
+			modelUsageController: this.modelUsageController,
+			promptEnhancer: this.promptEnhancer,
+			terminalBellSoundController: this.terminalBellSoundController,
+			voiceController: this.voiceController,
+			inputEditor: this.inputEditor,
+			popupMenus: this.popupMenus,
+			allThinkingExpanded: () => this.allThinkingExpanded,
+			superCompactTools: () => this.superCompactTools,
 		});
-		this.tabLineRenderer = new TabLineRenderer({
+		this.tabLineRenderer = createTabLineRenderer({
 			theme: this.theme,
 			screenStyler: this.screenStyler,
-			get tabs() { return app.tabsController.tabs(); },
+			tabsController: this.tabsController,
 		});
 		this.extensionUiController = new ExtensionUiController({
 			theme: this.theme,
 			isRunning: () => this.running,
-			render: () => this.render(),
+			requestRender: (reason) => this.requestRender(reason),
 			showToast: (message, kind) => this.showToast(message, kind),
 			toastNotifier: this.toastNotifier,
 			menuController: this.popupMenus.menuController,
@@ -316,7 +316,7 @@ export class PiUiExtendApp {
 			setInput: (value) => this.setInput(value),
 			getInput: () => this.input,
 			get entries() { return app.entries; },
-			deleteConversationEntry: (entryId) => this.conversationViewport.deleteEntry(entryId),
+			touchConversationEntry: (entry) => this.touchEntry(entry),
 		});
 		this.extensionActions = new AppExtensionActionsController({
 			isRunning: () => this.running,
@@ -329,21 +329,21 @@ export class PiUiExtendApp {
 			setStatus: (status) => this.setStatus(status),
 			setSessionStatus: (session) => this.setSessionStatus(session),
 			showToast: (message, kind) => this.showToast(message, kind),
-			render: () => this.render(),
+			requestRender: (reason) => this.requestRender(reason),
 		});
 		this.subagentsWidgetController = new AppSubagentsWidgetController({
 			cwd: this.options.cwd,
 			sessionFile: () => this.runtime?.session.sessionFile,
 			isRunning: () => this.running,
-			render: () => this.scheduleRender(),
+			requestRender: (reason) => this.requestRender(reason),
 		});
 		this.todoWidgetController = new AppTodoWidgetController({
 			sessionFile: () => this.runtime?.session.sessionFile,
 			isRunning: () => this.running,
-			render: () => this.scheduleRender(),
+			requestRender: (reason) => this.requestRender(reason),
 		});
 		this.workspaceActions = new AppWorkspaceActionsController({
-			entries: this.entries,
+			get entries() { return app.entries; },
 			runtime: () => this.runtime,
 			findUserEntry: (entryId) => this.findUserEntry(entryId),
 			touchEntry: (entry) => this.touchEntry(entry),
@@ -355,16 +355,17 @@ export class PiUiExtendApp {
 			setStatus: (status) => this.setStatus(status),
 			setSessionStatus: (session) => this.setSessionStatus(session),
 			showToast: (message, kind) => this.showToast(message, kind),
-			render: () => this.render(),
+			requestRender: (reason) => this.requestRender(reason),
 			isRunning: () => this.running,
 		});
 		this.sessionEvents = new AppSessionEventController({
-			entries: this.entries,
+			get entries() { return app.entries; },
 			runtime: () => this.runtime,
-			conversationViewport: () => this.conversationViewport,
 			isRunning: () => this.running,
-			render: () => this.render(),
-			scheduleRender: () => this.scheduleRender(),
+			addConversationEntry: (entry) => this.conversationEntries.addEntry(entry),
+			prependConversationEntries: (entries) => this.conversationEntries.prependEntries(entries),
+			touchConversationEntry: (entry) => this.conversationEntries.touchEntry(entry),
+			requestRender: (reason) => this.requestRender(reason),
 			setStatus: (status) => this.setStatus(status),
 			restoreSessionStatus: () => this.restoreSessionStatus(),
 			setSessionStatus: (session) => this.setSessionStatus(session),
@@ -384,7 +385,7 @@ export class PiUiExtendApp {
 			requireRuntime: () => this.requireRuntime(),
 			visibleEntries: () => this.conversationViewport.entries(),
 			isRunning: () => this.running,
-			render: () => this.render(),
+			requestRender: (reason) => this.requestRender(reason),
 			addEntry: (entry) => this.addEntry(entry),
 			addSessionAbortedEntry: () => this.sessionEvents.addSessionAbortedEntry(),
 			setStatus: (status) => this.setStatus(status),
@@ -399,45 +400,39 @@ export class PiUiExtendApp {
 			attachImage: (data, mimeType) => this.inputEditor.attachImage(data, mimeType),
 			onDeferredUserMessagesChanged: () => this.tabsController.persistActiveDeferredUserMessages(),
 		});
-		this.editorLayoutRenderer = new EditorLayoutRenderer({
+		this.editorLayoutRenderer = createEditorLayoutRenderer({
 			theme: this.theme,
 			inputEditor: this.inputEditor,
-			get extensionWidgets() { return app.extensionUiController.widgets; },
-			get todoDetails() { return app.todoWidgetController.widgetDetails; },
-			get todoPanelExpanded() { return app.todoPanelExpanded; },
-			get subagentsPanelExpanded() { return app.subagentsPanelExpanded; },
-			get subagentsWidgetState() { return app.subagentsWidgetController.widgetState; },
-			get voicePartialText() { return app.voicePartialText; },
-			get autocompleteSuggestion() { return app.autocompleteController.suggestionText(); },
-			renderExtensionInputComponent: (width) => this.extensionUiController.renderActiveCustomUi(width),
-			extensionInputUsesEditor: () => this.extensionUiController.activeCustomUiUsesEditor(),
-			widgetTuiHandle: () => this.extensionUiController.widgetTuiHandle(),
-			createExtensionTheme: () => this.extensionUiController.createExtensionTheme(),
-			suppressExtensionWidget: (key) => this.extensionUiController.suppressWidget(key),
+			extensionUiController: this.extensionUiController,
+			todoWidgetController: this.todoWidgetController,
+			subagentsWidgetController: this.subagentsWidgetController,
+			todoPanelExpanded: () => this.todoPanelExpanded,
+			subagentsPanelExpanded: () => this.subagentsPanelExpanded,
+			voicePartialText: () => this.voicePartialText,
+			autocompleteController: this.autocompleteController,
 		});
 		this.outputFilters = compileOutputFilterPatterns(this.pixConfig.outputFilters.patterns);
-		this.conversationViewport = new ConversationViewport({
-			get entries() { return app.entries; },
-			get session() { return app.runtime?.session; },
-			get deferredUserMessages() { return app.queuedMessages.deferredUserMessages; },
-			get entryRenderVersions() { return app.sessionEvents.entryRenderVersions; },
-			get superCompactTools() { return app.superCompactTools; },
-			get allThinkingExpanded() { return app.allThinkingExpanded; },
+		this.conversationViewport = createConversationViewport({
+			entries: () => this.entries,
+			runtimeSession: () => this.runtime?.session,
+			queuedMessages: this.queuedMessages,
+			entryRenderVersions: () => this.conversationEntries.entryRenderVersions,
+			superCompactTools: () => this.superCompactTools,
+			allThinkingExpanded: () => this.allThinkingExpanded,
 			cwd: this.options.cwd,
-			colors: this.theme.colors,
+			theme: this.theme,
 			pixConfig: this.pixConfig,
 			outputFilters: this.outputFilters,
-			hasDynamicConversationBlock: () => this.popupMenus.hasDynamicConversationBlock(),
-			isDynamicConversationBlock: (entry) => this.popupMenus.isDynamicConversationBlock(entry),
-			renderInlineUserMessageMenu: (entry, context) => this.popupMenus.renderInlineUserMessageMenu(entry, context),
+			popupMenus: this.popupMenus,
 		});
-		this.scrollController = new AppScrollController({
-			conversationViewport: () => this.conversationViewport,
-			editorLayoutRenderer: () => this.editorLayoutRenderer,
+		this.scrollController = createScrollController({
+			conversationViewport: this.conversationViewport,
+			editorLayoutRenderer: this.editorLayoutRenderer,
 			terminalColumns: () => this.terminalColumns(),
 			terminalRows: () => this.terminalRows(),
-			tabPanelRows: (terminalRows) => this.tabsController.tabPanelRows(terminalRows),
-			render: () => this.render(),
+			tabsController: this.tabsController,
+			loadOlderSessionHistory: () => this.loadOlderSessionHistory(),
+			requestRender: (reason) => this.requestRender(reason),
 		});
 		this.commandController = new AppCommandController({
 			options: this.options,
@@ -456,7 +451,7 @@ export class PiUiExtendApp {
 			addEntry: (entry) => this.addEntry(entry),
 			setStatus: (status) => this.setStatus(status),
 			toast: this.toastNotifier,
-			render: () => this.render(),
+			requestRender: (reason) => this.requestRender(reason),
 			showMenu: (items, options) => this.popupMenus.menuController.show(items, options),
 			getModelMenuItems: (query) => this.menuItems.getModelMenuItems(query),
 			getThinkingMenuItems: (query) => this.menuItems.getThinkingMenuItems(query),
@@ -506,7 +501,7 @@ export class PiUiExtendApp {
 				setStatus: (status) => this.setStatus(status),
 				setSessionStatus: (session) => this.setSessionStatus(session),
 				showToast: (message, kind) => this.showToast(message, kind),
-				render: () => this.render(),
+				requestRender: (reason) => this.requestRender(reason),
 				resetSessionView: () => this.resetSessionView(),
 				bindCurrentSession: () => this.bindCurrentSession(),
 				loadSessionHistory: () => this.loadSessionHistory(),
@@ -578,38 +573,34 @@ export class PiUiExtendApp {
 				},
 				toggleTerminalBellSound: () => this.toggleTerminalBellSound(),
 				handleExtensionInputMouse: (event) => this.extensionUiController.handleCustomUiMouse(event),
-				render: () => this.render(),
+				requestRender: (reason) => this.requestRender(reason),
 			},
 			this.popupMenus,
 			this.popupActions,
 			this.scrollController,
 			this.commandController,
 		);
-		this.renderController = new AppRenderController(
-			{
-				isRunning: () => this.running && !this.terminalController.isSuspended(),
-				terminalColumns: () => this.terminalColumns(),
-				terminalRows: () => this.terminalRows(),
-			},
-			{
-				theme: this.theme,
-				screenStyler: this.screenStyler,
-				editorLayoutRenderer: this.editorLayoutRenderer,
-				scrollController: this.scrollController,
-				popupMenus: this.popupMenus,
-				mouseController: this.mouseController,
-				statusLineRenderer: this.statusLineRenderer,
-				tabLineRenderer: this.tabLineRenderer,
-				toastController: this.toastController,
-				voiceProgressOverlayText: () => this.voiceController.progressOverlayText(),
-			},
-		);
+		this.renderController = createRenderController({
+			theme: this.theme,
+			screenStyler: this.screenStyler,
+			editorLayoutRenderer: this.editorLayoutRenderer,
+			scrollController: this.scrollController,
+			popupMenus: this.popupMenus,
+			mouseController: this.mouseController,
+			statusLineRenderer: this.statusLineRenderer,
+			tabLineRenderer: this.tabLineRenderer,
+			toastController: this.toastController,
+			voiceProgressOverlayText: () => this.voiceController.progressOverlayText(),
+			isRunning: () => this.running && !this.terminalController.isSuspended(),
+			terminalColumns: () => this.terminalColumns(),
+			terminalRows: () => this.terminalRows(),
+		});
 		this.requestHistory = new AppRequestHistory({
 			noSession: this.options.noSession,
 			getInput: () => this.inputEditor.text,
 			setInput: (value) => this.inputEditor.setText(value),
 			resetInputMenuDismissals: () => this.popupMenus.resetInputMenuDismissals(),
-			render: () => this.render(),
+			requestRender: (reason) => this.requestRender(reason),
 		});
 		this.shellController = new AppShellController({
 			cwd: this.options.cwd,
@@ -619,8 +610,7 @@ export class PiUiExtendApp {
 			setStatus: (status) => this.setStatus(status),
 			setSessionActivity: (activity) => this.setSessionActivity(activity),
 			restoreSessionStatus: () => this.restoreSessionStatus(),
-			render: () => this.render(),
-			scheduleRender: () => this.scheduleRender(),
+			requestRender: (reason) => this.requestRender(reason),
 		});
 		this.inputActions = new AppInputActionController(
 			{
@@ -645,7 +635,7 @@ export class PiUiExtendApp {
 					() => runInteractiveShellCommand(command, this.options.cwd),
 				),
 				stop: () => this.stop(),
-				render: () => this.render(),
+				requestRender: (reason) => this.requestRender(reason),
 			},
 			this.popupMenus,
 			this.popupActions,
@@ -660,7 +650,7 @@ export class PiUiExtendApp {
 			getDirectPopupMenu: () => this.popupMenus.directMenu,
 			resetRequestHistoryNavigation: () => this.requestHistory.resetNavigation(),
 			resetInputMenuDismissals: () => this.popupMenus.resetInputMenuDismissals(),
-			render: () => this.render(),
+			requestRender: (reason) => this.requestRender(reason),
 			moveActivePopupMenuSelection: (delta) => this.popupMenus.moveActivePopupMenuSelection(delta as -1 | 1),
 			navigateRequestHistory: (delta) => this.requestHistory.navigate(delta as -1 | 1),
 			scrollByLines: (delta) => this.scrollController.scrollByLines(delta),
@@ -689,7 +679,7 @@ export class PiUiExtendApp {
 			disposeInactiveRuntimesForQuit: () => this.tabsController.disposeInactiveRuntimes(
 				(runtime) => this.terminalController.disposeRuntimeForQuit(runtime),
 			),
-			render: () => this.render(),
+			requestRender: (reason) => this.requestRender(reason),
 			handleInputChunk: (chunk) => this.inputController.handleChunk(chunk),
 			closeSdkMenuForStop: () => this.popupMenus.closeSdkMenu(undefined, { render: false, restoreStatus: false }),
 			clearToastTimers: () => this.clearToastTimers(),
@@ -708,7 +698,6 @@ export class PiUiExtendApp {
 		this.sessionLifecycle = new AppSessionLifecycleController({
 			options: this.options,
 			createRuntime: () => createPixRuntime(this.options, { eventBus: this.createExtensionEventBus() }),
-			entries: this.entries,
 			runtime: () => this.runtime,
 			setRuntime: (runtime) => {
 				this.runtime = runtime;
@@ -737,35 +726,20 @@ export class PiUiExtendApp {
 			setSessionStatus: (session) => this.setSessionStatus(session),
 			setSessionActivity: (activity) => this.setSessionActivity(activity),
 			sessionEventsReset: () => this.sessionEvents.reset(),
+			clearEntries: () => this.conversationEntries.clear(),
 			resetSubagentsWidget: () => this.subagentsWidgetController.reset(),
 			resetTodoWidget: () => this.todoWidgetController.reset(),
 			conversationViewportClear: () => this.conversationViewport.clear(),
 			queuedMessagesReset: () => this.queuedMessages.reset(),
 			resetConversationMenuState: () => this.popupMenus.resetConversationMenuState(),
-			clearMouseRenderState: () => {
-				this.mouseController.renderedTargets.clear();
-				this.mouseController.renderedRowTexts.clear();
-				this.mouseController.statusModelTarget = undefined;
-				this.mouseController.statusThinkingTarget = undefined;
-				this.mouseController.statusContextTarget = undefined;
-				this.mouseController.statusModelUsageTarget = undefined;
-				this.mouseController.statusDraftQueueTarget = undefined;
-				this.mouseController.statusUserJumpTarget = undefined;
-				this.mouseController.statusThinkingExpandTarget = undefined;
-				this.mouseController.statusCompactToolsTarget = undefined;
-				this.mouseController.statusTerminalBellSoundTarget = undefined;
-				this.mouseController.statusSessionTarget = undefined;
-				this.mouseController.statusPromptEnhancerTarget = undefined;
-				this.mouseController.statusVoiceMicTarget = undefined;
-				this.mouseController.statusVoiceLanguageTarget = undefined;
-				this.mouseController.tabLineTargets.length = 0;
-			},
+			clearMouseRenderState: () => this.mouseController.clearRenderHitMap(),
 			scrollReset: () => this.scrollController.reset(),
 			loadSessionHistoryEntries: () => this.sessionEvents.loadSessionHistory(),
 			loadSessionHistoryEntriesAsync: (options) => this.sessionEvents.loadSessionHistoryAsync(options),
 			syncUserSessionEntryMetadata: () => this.workspaceActions.syncUserSessionEntryMetadata(),
 			restoreTabsAfterStartup: () => this.tabsController.restoreAfterStartup(),
-			render: () => this.render(),
+			requestRender: (reason) => this.requestRender(reason),
+			renderImmediately: () => this.render(),
 		});
 		this.slashCommands = this.commandController.slashCommands;
 	}
@@ -810,6 +784,10 @@ export class PiUiExtendApp {
 	private handleTerminalBellAttention(data: unknown): void {
 		const sessionFile = isRecord(data) && typeof data.sessionFile === "string" ? data.sessionFile : undefined;
 		this.tabsController.markTerminalBellAttention(sessionFile);
+	}
+
+	private deleteConversationEntryFromViewport(entryId: string): void {
+		this.conversationViewport?.deleteEntry(entryId);
 	}
 
 	private afterSessionReplacement(message?: string): void {
@@ -909,6 +887,14 @@ export class PiUiExtendApp {
 
 	private async loadSessionHistoryAsync(options: { isCancelled: () => boolean; render: () => void }): Promise<boolean> {
 		return this.sessionEvents.loadSessionHistoryAsync(options);
+	}
+
+	private async loadOlderSessionHistory(): Promise<void> {
+		if (!this.sessionEvents.hasOlderSessionHistory()) return;
+		await this.sessionEvents.loadOlderSessionHistory({
+			isCancelled: () => !this.running,
+			render: () => this.requestRender("session:older-history"),
+		});
 	}
 
 	private handleSessionEvent(event: AgentSessionEvent): void {
@@ -1019,26 +1005,45 @@ export class PiUiExtendApp {
 		this.toastController.clearToastTimers();
 	}
 
+	private requestRender(reason: string): void {
+		this.pendingRenderReasons.add(reason);
+		this.scheduleRender();
+	}
+
 	private render(): void {
 		if (this.scheduledRenderTimer) {
 			clearTimeout(this.scheduledRenderTimer);
 			this.scheduledRenderTimer = undefined;
 		}
+		this.renderNow();
+	}
+
+	private renderNow(): void {
+		this.pendingRenderReasons.clear();
 		this.autocompleteController.observeInput();
-		this.renderController.render();
+		this.applyRenderResult(this.renderController.render());
 	}
 
 	private scheduleRender(): void {
 		if (!this.running || this.scheduledRenderTimer) return;
 		this.scheduledRenderTimer = setTimeout(() => {
 			this.scheduledRenderTimer = undefined;
-			this.renderController.render();
+			this.renderNow();
 		}, COALESCED_RENDER_DELAY_MS);
 		this.scheduledRenderTimer.unref?.();
 	}
 
 	private renderStatusLine(): void {
-		this.renderController.renderStatusLine();
+		this.applyRenderResult(this.renderController.renderStatusLine());
+	}
+
+	private applyRenderResult(result: AppRenderResult | undefined): void {
+		if (!result) return;
+		if (result.kind === "full") {
+			this.mouseController.applyRenderHitMap(result.hitMap);
+			return;
+		}
+		this.mouseController.applyStatusRenderHitMap(result.hitMap);
 	}
 
 	private terminalColumns(): number {

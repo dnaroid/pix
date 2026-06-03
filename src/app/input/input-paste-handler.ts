@@ -3,13 +3,13 @@ import { stat } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 import { InputEditor, isImagePath, looksLikeFilePath, quoteFilePathForInput, readClipboardImage } from "../../input-editor.js";
 import { PASTE_DUPLICATE_WINDOW_MS } from "../constants.js";
-import { normalizePastedTextForDuplicateKey } from "../rendering/render-text.js";
+import { normalizePastedTextForDuplicateKey } from "../text-format.js";
 
 export type InputPasteHost = {
 	readonly inputEditor: InputEditor;
 	readonly cwd: string;
 	resetRequestHistoryNavigation(): void;
-	render(): void;
+	requestRender(reason: string): void;
 };
 
 const PASTE_FINGERPRINT_PREFIX_CHARS = 64 * 1024;
@@ -25,7 +25,7 @@ export class InputPasteHandler {
 		const plainFilePath = !this.host.inputEditor.isInBracketedPaste && this.plainPasteFilePath(data);
 		if (plainFilePath) {
 			if (isImagePath(plainFilePath) && Date.now() < this.suppressImagePathPasteUntil) {
-				this.host.render();
+				this.host.requestRender("input:input-paste-handler");
 				return true;
 			}
 			void this.handleFilePaste(plainFilePath);
@@ -60,14 +60,14 @@ export class InputPasteHandler {
 		const image = await readClipboardImage();
 		if (!image) return;
 		if (this.isDuplicatePaste(`image:${image.mimeType}`, image.data)) {
-			this.host.render();
+			this.host.requestRender("input:input-paste-handler");
 			return;
 		}
 
 		this.host.resetRequestHistoryNavigation();
 		this.host.inputEditor.attachImage(image.data, image.mimeType);
 		this.suppressImagePathPasteUntil = Date.now() + 1000;
-		this.host.render();
+		this.host.requestRender("input:input-paste-handler");
 	}
 
 	private isPlainMultilinePasteChunk(data: string): boolean {
@@ -108,7 +108,7 @@ export class InputPasteHandler {
 		const filePath = this.plainPasteFilePath(text);
 		if (filePath) {
 			if (isImagePath(filePath) && Date.now() < this.suppressImagePathPasteUntil) {
-				this.host.render();
+				this.host.requestRender("input:input-paste-handler");
 				return;
 			}
 			void this.handleFilePaste(filePath);
@@ -121,12 +121,12 @@ export class InputPasteHandler {
 	private schedulePastedText(text: string): void {
 		const timer = setTimeout(() => {
 			if (this.isDuplicatePaste("text", text)) {
-				this.host.render();
+				this.host.requestRender("input:input-paste-handler");
 				return;
 			}
 			this.host.resetRequestHistoryNavigation();
 			this.host.inputEditor.attachPastedText(text);
-			this.host.render();
+			this.host.requestRender("input:input-paste-handler");
 		}, 0);
 		timer.unref?.();
 	}
@@ -134,7 +134,7 @@ export class InputPasteHandler {
 	private async handleFilePaste(filePath: string): Promise<void> {
 		const inputPath = await this.filePathForInput(filePath);
 		this.insertPastedPathText(inputPath);
-		this.host.render();
+		this.host.requestRender("input:input-paste-handler");
 	}
 
 	private async filePathForInput(filePath: string): Promise<string> {

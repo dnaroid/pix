@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { fuzzySearch, type FuzzySearchItem } from "../../fuzzy.js";
 import { PopupMenu, type PopupMenuItem } from "../../ui.js";
-import { sanitizeText } from "../rendering/render-text.js";
+import { sanitizeText } from "../text-format.js";
 import {
 	RESUME_MENU_INITIAL_SESSION_ROWS,
 	RESUME_MENU_LOAD_BATCH_ROWS,
@@ -99,7 +99,7 @@ export type AppPopupMenuControllerHost = {
 	hasQueuedEntry(entryId: string): boolean;
 	setStatus(status: string): void;
 	restoreSessionStatus(): void;
-	render(): void;
+	requestRender(reason: string): void;
 };
 
 export class AppPopupMenuController {
@@ -185,7 +185,7 @@ export class AppPopupMenuController {
 				"sdk-menu",
 				options.preserveStatus === undefined ? {} : { preserveStatus: options.preserveStatus },
 			);
-			this.host.render();
+			this.host.requestRender("popup:popup-menu-controller");
 		});
 	}
 
@@ -207,7 +207,7 @@ export class AppPopupMenuController {
 		}
 		if (request && options.restoreStatus !== false && request.options.preserveStatus !== true) this.host.restoreSessionStatus();
 		request?.resolve(value);
-		if (options.render !== false && this.host.isRunning()) this.host.render();
+		if (options.render !== false && this.host.isRunning()) this.host.requestRender("popup:popup-menu-controller");
 	}
 
 	getActivePopupMenu(active: ActivePopupMenu): PopupMenu<unknown> {
@@ -236,7 +236,7 @@ export class AppPopupMenuController {
 		if (!active) return false;
 
 		this.getActivePopupMenu(active).moveSelection(delta);
-		this.host.render();
+		this.host.requestRender("popup:popup-menu-controller");
 		return true;
 	}
 
@@ -245,7 +245,7 @@ export class AppPopupMenuController {
 		if (!active) return false;
 
 		this.getActivePopupMenu(active).scroll(delta);
-		this.host.render();
+		this.host.requestRender("popup:popup-menu-controller");
 		return true;
 	}
 
@@ -257,14 +257,14 @@ export class AppPopupMenuController {
 		if (char === "\u007f" || char === "\b") {
 			this.directPopupMenuQuery = this.directPopupMenuQuery.slice(0, -1);
 			this.resetPopupMenuSelection(this.getActivePopupMenu(active));
-			this.host.render();
+			this.host.requestRender("popup:popup-menu-controller");
 			return true;
 		}
 
 		if (char >= " ") {
 			this.directPopupMenuQuery += char;
 			this.resetPopupMenuSelection(this.getActivePopupMenu(active));
-			this.host.render();
+			this.host.requestRender("popup:popup-menu-controller");
 			return true;
 		}
 
@@ -409,7 +409,7 @@ export class AppPopupMenuController {
 			const preserveStatus = this.directPopupMenuPreserveStatus;
 			this.directPopupMenuPreserveStatus = false;
 			if (!preserveStatus) this.host.restoreSessionStatus();
-			this.host.render();
+			this.host.requestRender("popup:popup-menu-controller");
 			return;
 		}
 
@@ -423,7 +423,7 @@ export class AppPopupMenuController {
 			this.dismissedSlashCommandMenuInput = this.host.getInput();
 			this.slashCommandMenu.close();
 		}
-		this.host.render();
+		this.host.requestRender("popup:popup-menu-controller");
 	}
 
 	autocompleteSlashCommand(): void {
@@ -432,7 +432,7 @@ export class AppPopupMenuController {
 		if (!selected) return;
 
 		this.host.setInput(`/${selected.name}`);
-		this.host.render();
+		this.host.requestRender("popup:popup-menu-controller");
 	}
 
 	autocompleteModel(): boolean {
@@ -442,7 +442,7 @@ export class AppPopupMenuController {
 
 		if (selected.direct) return true;
 		this.host.setInput(`/model ${selected.value.ref}`);
-		this.host.render();
+		this.host.requestRender("popup:popup-menu-controller");
 		return true;
 	}
 
@@ -453,7 +453,7 @@ export class AppPopupMenuController {
 
 		if (selected.direct) return true;
 		this.host.setInput(`/thinking ${selected.value.level}`);
-		this.host.render();
+		this.host.requestRender("popup:popup-menu-controller");
 		return true;
 	}
 

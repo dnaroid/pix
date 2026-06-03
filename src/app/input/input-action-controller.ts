@@ -1,7 +1,7 @@
 import type { InputEditor } from "../../input-editor.js";
 import type { AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 import { createId } from "../id.js";
-import { stringifyUnknown } from "../rendering/message-content.js";
+import { stringifyUnknown } from "../message-content.js";
 import type { AppPopupActionController } from "../popup/popup-action-controller.js";
 import type { AppPopupMenuController } from "../popup/popup-menu-controller.js";
 import type { AppQueuedMessageController } from "../session/queued-message-controller.js";
@@ -35,7 +35,7 @@ export type AppInputActionControllerHost = {
 	interruptShellCommand(): boolean;
 	runInteractiveShellCommand(command: string): Promise<InteractiveShellCommandResult>;
 	stop(): Promise<void>;
-	render(): void;
+	requestRender(reason: string): void;
 };
 
 export class AppInputActionController {
@@ -73,23 +73,23 @@ export class AppInputActionController {
 		this.host.requestHistory().add(message.displayText);
 		inputEditor.clear();
 		await this.host.clearPersistedInputDraft();
-		this.host.render();
+		this.host.requestRender("input:input-action-controller");
 		this.queuedMessages.deferUserMessage(message);
-		if (this.host.isRunning()) this.host.render();
+		if (this.host.isRunning()) this.host.requestRender("input:input-action-controller");
 	}
 
 	async handleInterrupt(): Promise<void> {
 		if (this.host.interruptShellCommand()) {
 			this.host.inputEditor().clear();
 			await this.host.clearPersistedInputDraft();
-			this.host.render();
+			this.host.requestRender("input:input-action-controller");
 			return;
 		}
 
 		const runtime = this.host.runtime();
 		if (runtime?.session.isCompacting) {
 			this.host.setStatus("aborting compaction");
-			this.host.render();
+			this.host.requestRender("input:input-action-controller");
 			runtime.session.abortCompaction();
 			return;
 		}
@@ -105,7 +105,7 @@ export class AppInputActionController {
 		const session = this.host.runtime()?.session;
 		if (session?.isCompacting) {
 			this.host.setStatus("aborting compaction");
-			this.host.render();
+			this.host.requestRender("input:input-action-controller");
 			session.abortCompaction();
 			return;
 		}
@@ -127,7 +127,7 @@ export class AppInputActionController {
 		if (this.abortInFlight) {
 			session.agent.abort();
 			if (options.stopIfAlreadyAborting) await this.host.stop();
-			else this.host.render();
+			else this.host.requestRender("input:input-action-controller");
 			return;
 		}
 
@@ -135,12 +135,12 @@ export class AppInputActionController {
 		this.queuedMessages.restoreQueuedMessagesToEditorForAbort();
 		this.host.setStatus("aborting");
 		this.host.addSessionAbortedEntry();
-		this.host.render();
+		this.host.requestRender("input:input-action-controller");
 
 		let restoreTimer: ReturnType<typeof setTimeout> | undefined = setTimeout(() => {
 			if (!this.abortInFlight || this.host.runtime()?.session !== session || !this.host.isRunning()) return;
 			this.restoreSessionState(session);
-			this.host.render();
+			this.host.requestRender("input:input-action-controller");
 		}, ABORT_STATUS_RESTORE_MS);
 		restoreTimer.unref?.();
 
@@ -154,7 +154,7 @@ export class AppInputActionController {
 			restoreTimer = undefined;
 			this.abortInFlight = false;
 			this.restoreSessionState(this.host.runtime()?.session);
-			if (this.host.isRunning()) this.host.render();
+			if (this.host.isRunning()) this.host.requestRender("input:input-action-controller");
 		}
 	}
 
@@ -188,7 +188,7 @@ export class AppInputActionController {
 		}
 		if (this.host.isSessionSwitching()) {
 			this.host.showToast("Wait for the tab to finish loading", "info");
-			this.host.render();
+			this.host.requestRender("input:input-action-controller");
 			return;
 		}
 		if (promptText.startsWith("/")) {
@@ -200,7 +200,7 @@ export class AppInputActionController {
 		this.host.requestHistory().add(message.displayText);
 		inputEditor.clear();
 		await this.host.clearPersistedInputDraft();
-		this.host.render();
+		this.host.requestRender("input:input-action-controller");
 
 		try {
 			await this.queuedMessages.submitUserMessage(message);
@@ -208,13 +208,13 @@ export class AppInputActionController {
 			this.host.addEntry({ id: createId("error"), kind: "error", text: stringifyUnknown(error) });
 		}
 
-		if (this.host.isRunning()) this.host.render();
+		if (this.host.isRunning()) this.host.requestRender("input:input-action-controller");
 	}
 
 	private async submitShellInput(text: string, imageCount: number): Promise<void> {
 		if (imageCount > 0) {
 			this.host.showToast("Shell stdin cannot include pasted images", "warning");
-			this.host.render();
+			this.host.requestRender("input:input-action-controller");
 			return;
 		}
 
@@ -222,30 +222,30 @@ export class AppInputActionController {
 		inputEditor.clear();
 		await this.host.clearPersistedInputDraft();
 		if (!this.host.sendShellInput(text)) this.host.showToast("No shell command is waiting for input", "info");
-		this.host.render();
+		this.host.requestRender("input:input-action-controller");
 	}
 
 	private async submitShellCommand(command: string, displayText: string, imageCount: number, mode: "chat" | "interactive"): Promise<void> {
 		if (!command) {
 			this.host.showToast(`Enter a shell command after ${mode === "interactive" ? "!!" : "!"}`, "info");
-			this.host.render();
+			this.host.requestRender("input:input-action-controller");
 			return;
 		}
 		if (imageCount > 0) {
 			this.host.showToast("Shell commands cannot include pasted images", "warning");
-			this.host.render();
+			this.host.requestRender("input:input-action-controller");
 			return;
 		}
 		if (this.host.isSessionSwitching()) {
 			this.host.showToast("Wait for the tab to finish loading", "info");
-			this.host.render();
+			this.host.requestRender("input:input-action-controller");
 			return;
 		}
 
 		const session = this.host.runtime()?.session;
 		if (session?.isStreaming || session?.isCompacting) {
 			this.host.showToast("Wait for the current session turn to finish before running shell commands", "info");
-			this.host.render();
+			this.host.requestRender("input:input-action-controller");
 			return;
 		}
 
@@ -254,7 +254,7 @@ export class AppInputActionController {
 		inputEditor.clear();
 		await this.host.clearPersistedInputDraft();
 		this.host.setStatus(`shell: ${command}`);
-		this.host.render();
+		this.host.requestRender("input:input-action-controller");
 
 		try {
 			if (mode === "chat") {
@@ -270,6 +270,6 @@ export class AppInputActionController {
 			this.restoreSessionState(this.host.runtime()?.session);
 		}
 
-		if (this.host.isRunning()) this.host.render();
+		if (this.host.isRunning()) this.host.requestRender("input:input-action-controller");
 	}
 }

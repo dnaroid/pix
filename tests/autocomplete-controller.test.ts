@@ -91,7 +91,7 @@ describe("autocomplete controller helpers", () => {
 				inputEditor: () => inputEditor,
 				autocompleteConfig: () => ({ modelRef: "provider/model", debounceMs: 0 }),
 				isRunning: () => true,
-				render: () => {
+				requestRender: () => {
 					renders += 1;
 				},
 			},
@@ -124,7 +124,7 @@ describe("autocomplete controller helpers", () => {
 				inputEditor: () => inputEditor,
 				autocompleteConfig: () => ({ modelRef: "provider/model", debounceMs: 0 }),
 				isRunning: () => true,
-				render: () => {},
+				requestRender: () => {},
 			},
 			{
 				debounceMs: 0,
@@ -164,7 +164,7 @@ describe("autocomplete controller helpers", () => {
 				inputEditor: () => inputEditor,
 				autocompleteConfig: () => ({ modelRef: "provider/model", debounceMs: 0 }),
 				isRunning: () => true,
-				render: () => {},
+				requestRender: () => {},
 			},
 			{
 				debounceMs: 0,
@@ -209,7 +209,7 @@ describe("autocomplete controller helpers", () => {
 				inputEditor: () => inputEditor,
 				autocompleteConfig: () => ({ modelRef: "provider/model", debounceMs: 0 }),
 				isRunning: () => true,
-				render: () => {
+				requestRender: () => {
 					called += 1;
 				},
 			},
@@ -238,7 +238,7 @@ describe("autocomplete controller helpers", () => {
 				inputEditor: () => inputEditor,
 				autocompleteConfig: () => ({ modelRef: "provider/model", debounceMs: 0 }),
 				isRunning: () => true,
-				render: () => {
+				requestRender: () => {
 					renders += 1;
 				},
 			},
@@ -270,7 +270,7 @@ describe("autocomplete controller helpers", () => {
 				inputEditor: () => inputEditor,
 				autocompleteConfig: () => ({ modelRef: "provider/model", debounceMs: 0 }),
 				isRunning: () => true,
-				render: () => {},
+				requestRender: () => {},
 			},
 			{
 				debounceMs: 0,

@@ -43,7 +43,7 @@ describe("AppTabsController", () => {
 			showToast: (message) => {
 				toasts.push(message);
 			},
-			render: () => {},
+			requestRender: () => {},
 		});
 		const tabs = controller as unknown as {
 			tabItems: SessionTab[];
@@ -94,7 +94,7 @@ describe("AppTabsController", () => {
 			restoreInputState: () => {},
 			addEntry: () => {},
 			showToast: () => {},
-			render: () => {},
+			requestRender: () => {},
 		});
 		const tabs = controller as unknown as {
 			tabItems: SessionTab[];
@@ -152,7 +152,7 @@ describe("AppTabsController", () => {
 			},
 			addEntry: () => {},
 			showToast: () => {},
-			render: () => {},
+			requestRender: () => {},
 		});
 		const tabs = controller as unknown as {
 			tabItems: SessionTab[];
@@ -208,7 +208,7 @@ describe("AppTabsController", () => {
 			},
 			addEntry: () => {},
 			showToast: () => {},
-			render: () => {},
+			requestRender: () => {},
 		});
 		const tabs = controller as unknown as {
 			tabItems: SessionTab[];
@@ -268,7 +268,7 @@ describe("AppTabsController", () => {
 			},
 			addEntry: () => {},
 			showToast: () => {},
-			render: () => {},
+			requestRender: () => {},
 		});
 		const tabs = controller as unknown as {
 			filePath: () => string;
@@ -293,6 +293,8 @@ describe("AppTabsController", () => {
 		assert.deepEqual(saved.tabs[0]?.input, { text: "draft one", cursor: 7 });
 
 		currentInput = { text: "", cursor: 0 };
+		let syncHistoryLoads = 0;
+		let asyncHistoryLoads = 0;
 		const restoredController = new AppTabsController({
 			options: { cwd: dir, themeName: "dark", noSession: false } satisfies AppOptions,
 			blinkController: fakeBlinkController(),
@@ -308,8 +310,13 @@ describe("AppTabsController", () => {
 			setSessionStatus: () => {},
 			setSessionActivity: () => {},
 			resetSessionView: () => {},
-			loadSessionHistory: () => {},
-			loadSessionHistoryAsync: async () => true,
+			loadSessionHistory: () => {
+				syncHistoryLoads += 1;
+			},
+			loadSessionHistoryAsync: async () => {
+				asyncHistoryLoads += 1;
+				return true;
+			},
 			syncUserSessionEntryMetadata: () => {},
 			captureInputState: () => currentInput,
 			restoreInputState: (state) => {
@@ -317,7 +324,7 @@ describe("AppTabsController", () => {
 			},
 			addEntry: () => {},
 			showToast: () => {},
-			render: () => {},
+			requestRender: () => {},
 		});
 		const restoredTabs = restoredController as unknown as {
 			filePath: () => string;
@@ -329,6 +336,8 @@ describe("AppTabsController", () => {
 		await restoredController.restoreAfterStartup();
 
 		assert.deepEqual(currentInput, { text: "draft one", cursor: 7 });
+		assert.equal(syncHistoryLoads, 0);
+		assert.equal(asyncHistoryLoads, 1);
 	});
 
 	it("persists and restores deferred queued messages after startup", async () => {
@@ -367,7 +376,7 @@ describe("AppTabsController", () => {
 			},
 			addEntry: () => {},
 			showToast: () => {},
-			render: () => {},
+			requestRender: () => {},
 		});
 		const tabs = controller as unknown as {
 			filePath: () => string;
@@ -421,7 +430,7 @@ describe("AppTabsController", () => {
 			},
 			addEntry: () => {},
 			showToast: () => {},
-			render: () => {},
+			requestRender: () => {},
 		});
 		const restoredTabs = restoredController as unknown as {
 			filePath: () => string;
@@ -478,7 +487,7 @@ describe("AppTabsController", () => {
 			},
 			addEntry: () => {},
 			showToast: () => {},
-			render: () => {},
+			requestRender: () => {},
 		});
 		const tabs = controller as unknown as {
 			filePath: () => string;
@@ -520,7 +529,7 @@ describe("AppTabsController", () => {
 			restoreInputState: () => {},
 			addEntry: () => {},
 			showToast: () => {},
-			render: () => {},
+			requestRender: () => {},
 		});
 		const tabs = controller as unknown as {
 			filePath: () => string;
@@ -564,7 +573,7 @@ describe("AppTabsController", () => {
 			},
 			addEntry: () => {},
 			showToast: () => {},
-			render: () => {},
+			requestRender: () => {},
 		});
 		const tabs = controller as unknown as {
 			filePath: () => string;
@@ -617,7 +626,7 @@ describe("AppTabsController", () => {
 			showToast: (message) => {
 				toasts.push(message);
 			},
-			render: () => {},
+			requestRender: () => {},
 		});
 		const tabs = controller as unknown as {
 			tabItems: SessionTab[];
@@ -666,7 +675,7 @@ describe("AppTabsController", () => {
 			restoreInputState: () => {},
 			addEntry: () => {},
 			showToast: () => {},
-			render: () => {},
+			requestRender: () => {},
 		});
 		const tabs = controller as unknown as {
 			tabItems: SessionTab[];
@@ -708,7 +717,7 @@ describe("AppTabsController", () => {
 			restoreInputState: () => {},
 			addEntry: () => {},
 			showToast: () => {},
-			render: () => {},
+			requestRender: () => {},
 		});
 
 		controller.syncActiveTabFromRuntime({ save: false });
@@ -747,7 +756,7 @@ describe("AppTabsController", () => {
 			restoreInputState: () => {},
 			addEntry: () => {},
 			showToast: () => {},
-			render: () => {},
+			requestRender: () => {},
 		});
 		const tabs = controller as unknown as {
 			tabItems: SessionTab[];
@@ -791,7 +800,7 @@ describe("AppTabsController", () => {
 			restoreInputState: () => {},
 			addEntry: () => {},
 			showToast: () => {},
-			render: () => {},
+			requestRender: () => {},
 		});
 		const tabs = controller as unknown as {
 			tabItems: SessionTab[];
@@ -836,7 +845,7 @@ describe("AppTabsController", () => {
 			restoreInputState: () => {},
 			addEntry: () => {},
 			showToast: () => {},
-			render: () => {},
+			requestRender: () => {},
 		});
 		const tabs = controller as unknown as {
 			tabItems: SessionTab[];
@@ -887,7 +896,7 @@ describe("AppTabsController", () => {
 			showToast: (message) => {
 				toasts.push(message);
 			},
-			render: () => {},
+			requestRender: () => {},
 		});
 		const tabs = controller as unknown as {
 			tabItems: SessionTab[];
@@ -945,7 +954,7 @@ describe("AppTabsController", () => {
 			restoreInputState: () => {},
 			addEntry: () => {},
 			showToast: () => {},
-			render: () => {
+			requestRender: () => {
 				renderCount += 1;
 			},
 		});
@@ -998,7 +1007,7 @@ describe("AppTabsController", () => {
 			restoreInputState: () => {},
 			addEntry: () => {},
 			showToast: () => {},
-			render: () => {
+			requestRender: () => {
 				renderCount += 1;
 			},
 		});
@@ -1071,7 +1080,7 @@ describe("AppTabsController", () => {
 			restoreInputState: () => {},
 			addEntry: () => {},
 			showToast: () => {},
-			render: () => {},
+			requestRender: () => {},
 		});
 		const tabs = controller as unknown as {
 			filePath: () => string;
@@ -1129,7 +1138,7 @@ describe("AppTabsController", () => {
 			showToast: (message) => {
 				toasts.push(message);
 			},
-			render: () => {},
+			requestRender: () => {},
 		});
 		const tabs = controller as unknown as {
 			tabItems: SessionTab[];
@@ -1182,7 +1191,7 @@ describe("AppTabsController", () => {
 			showToast: (message) => {
 				toasts.push(message);
 			},
-			render: () => {},
+			requestRender: () => {},
 		});
 		const tabs = controller as unknown as {
 			tabItems: SessionTab[];

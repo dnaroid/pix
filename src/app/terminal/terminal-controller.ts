@@ -19,7 +19,7 @@ export type AppTerminalControllerHost = {
 	runtime(): AgentSessionRuntime | undefined;
 	saveInputStateForQuit(): Promise<void>;
 	disposeInactiveRuntimesForQuit(): Promise<void>;
-	render(): void;
+	requestRender(reason: string): void;
 	handleInputChunk(chunk: Buffer): void;
 	closeSdkMenuForStop(): void;
 	clearToastTimers(): void;
@@ -129,7 +129,7 @@ export class AppTerminalController {
 		process.stdout.on("resize", this.onResize);
 		this.host.resetRenderOutputBuffer();
 		process.stdout.write(`${ANSI_RESET}${CLEAR_TERMINAL}\x1b[?1049h${CLEAR_TERMINAL}${ENABLE_TERMINAL_KEY_REPORTING}${ENABLE_BRACKETED_PASTE}${DISABLE_TERMINAL_WRAP}\x1b[?1002h\x1b[?1006h${HIDE_CURSOR}`);
-		this.host.render();
+		this.host.requestRender("terminal:terminal-controller");
 	}
 
 	private async stopInternal(): Promise<void> {
@@ -166,7 +166,7 @@ export class AppTerminalController {
 	}
 
 	private readonly onResize = (): void => {
-		this.host.render();
+		this.host.requestRender("terminal:terminal-controller");
 	};
 
 	private readonly onInputData = (chunk: Buffer): void => {

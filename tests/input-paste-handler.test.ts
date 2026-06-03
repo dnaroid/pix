@@ -16,7 +16,7 @@ function createHandler(cwd: string): { editor: InputEditor; handler: InputPasteH
 		inputEditor: editor,
 		cwd,
 		resetRequestHistoryNavigation() {},
-		render() {},
+		requestRender() {},
 	});
 	const testHandler = handler as unknown as TestPasteHandler;
 	return { editor, handler, pasteFile: (filePath) => testHandler.handleFilePaste(filePath) };

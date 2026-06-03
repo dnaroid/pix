@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { loadSessionHistoryEntriesAsync } from "../src/app/session/session-history.js";
+import { loadOlderSessionHistoryEntries, loadSessionHistoryEntriesAsync } from "../src/app/session/session-history.js";
 import type { Entry } from "../src/app/types.js";
 
 describe("loadSessionHistoryEntriesAsync", () => {
@@ -27,11 +27,11 @@ describe("loadSessionHistoryEntriesAsync", () => {
 		]);
 	});
 
-	it("renders the tail first and prepends older entries in order", async () => {
+	it("renders the tail first and leaves older entries for lazy backfill", async () => {
 		const entries: Entry[] = [];
 		const snapshots: string[][] = [];
 
-		const completed = await loadSessionHistoryEntriesAsync({
+		const result = await loadSessionHistoryEntriesAsync({
 			messages: [
 				{ role: "user", content: "old" },
 				{ role: "assistant", content: [{ text: "middle" }] },
@@ -51,8 +51,25 @@ describe("loadSessionHistoryEntriesAsync", () => {
 			tailMessageCount: 1,
 		});
 
-		assert.equal(completed, true);
+		assert.equal(result.completed, true);
+		assert.ok(result.backfill);
 		assert.deepEqual(snapshots[0], ["tail"]);
+		assert.deepEqual(snapshots, [["tail"]]);
+		assert.deepEqual(entries.map(entryText), ["tail"]);
+
+		while (result.backfill.nextEnd > 0) {
+			await loadOlderSessionHistoryEntries({
+				messages: result.backfill.messages,
+				state: result.backfill,
+				addEntry: (entry) => entries.push(entry),
+				prependEntries: (newEntries) => entries.unshift(...newEntries),
+				setToolEntryId: () => {},
+				toolDefaultExpanded: () => false,
+				observeSubagentsToolResult: () => {},
+				observeTodoToolResult: () => {},
+				isCancelled: () => false,
+			});
+		}
 		assert.deepEqual(entries.map(entryText), ["old", "middle", "tail"]);
 	});
 
@@ -81,7 +98,7 @@ describe("loadSessionHistoryEntriesAsync", () => {
 		});
 
 		assert.deepEqual(snapshots[0], [{ kind: "tool", output: "hi" }]);
-		assert.deepEqual(entries.map((entry) => entry.kind), ["user", "tool"]);
+		assert.deepEqual(entries.map((entry) => entry.kind), ["tool"]);
 	});
 
 	it("does not hydrate the current todo widget from historical todo tool results", async () => {
@@ -121,14 +138,14 @@ describe("loadSessionHistoryEntriesAsync", () => {
 		});
 
 		assert.equal(observedTodoResults, 0);
-		assert.deepEqual(entries.map((entry) => entry.kind), ["tool", "user"]);
+		assert.deepEqual(entries.map((entry) => entry.kind), ["user"]);
 	});
 
 	it("marks historical subagent tool results as non-visual observations", async () => {
 		const entries: Entry[] = [];
 		const observedOptions: Array<{ showSnapshot?: boolean } | undefined> = [];
 
-		await loadSessionHistoryEntriesAsync({
+		const result = await loadSessionHistoryEntriesAsync({
 			messages: [
 				{ role: "assistant", content: [{ type: "toolCall", id: "subagents-old", name: "subagents", arguments: { action: "status" } }] },
 				{
@@ -159,7 +176,21 @@ describe("loadSessionHistoryEntriesAsync", () => {
 			tailMessageCount: 1,
 		});
 
-		assert.deepEqual(entries.map((entry) => entry.kind), ["tool", "user"]);
+		assert.deepEqual(entries.map((entry) => entry.kind), ["user"]);
+		assert.ok(result.backfill);
+		await loadOlderSessionHistoryEntries({
+			messages: result.backfill.messages,
+			state: result.backfill,
+			addEntry: (entry) => entries.push(entry),
+			prependEntries: (newEntries) => entries.unshift(...newEntries),
+			setToolEntryId: () => {},
+			toolDefaultExpanded: () => false,
+			observeSubagentsToolResult: (_toolName, _details, options) => {
+				observedOptions.push(options);
+			},
+			observeTodoToolResult: () => {},
+			isCancelled: () => false,
+		});
 		assert.ok(observedOptions.length > 0);
 		assert.ok(observedOptions.every((options) => options?.showSnapshot === false));
 	});
@@ -168,7 +199,7 @@ describe("loadSessionHistoryEntriesAsync", () => {
 		const entries: Entry[] = [];
 		let cancelled = false;
 
-		const completed = await loadSessionHistoryEntriesAsync({
+		const result = await loadSessionHistoryEntriesAsync({
 			messages: [
 				{ role: "user", content: "old" },
 				{ role: "user", content: "new" },
@@ -187,7 +218,7 @@ describe("loadSessionHistoryEntriesAsync", () => {
 			tailMessageCount: 1,
 		});
 
-		assert.equal(completed, false);
+		assert.equal(result.completed, false);
 		assert.deepEqual(entries.map(entryText), ["new"]);
 	});
 });

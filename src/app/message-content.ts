@@ -1,5 +1,5 @@
-import type { ImageContent } from "../../input-editor.js";
-import { isRecord } from "../guards.js";
+import type { ImageContent } from "../input-editor.js";
+import { isRecord } from "./guards.js";
 
 const MAX_FORMAT_STRING_CHARS = 256 * 1024;
 const MAX_RENDERED_CONTENT_CHARS = 512 * 1024;

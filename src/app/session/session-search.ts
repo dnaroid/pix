@@ -1,7 +1,7 @@
 import { SessionManager, type SessionEntry, type SessionInfo } from "@earendil-works/pi-coding-agent";
 import { isRecord } from "../guards.js";
-import { renderContent, renderUserMessageContent } from "../rendering/message-content.js";
-import { sanitizeText } from "../rendering/render-text.js";
+import { renderContent, renderUserMessageContent } from "../message-content.js";
+import { sanitizeText } from "../text-format.js";
 import type { Entry, PixMenuItem } from "../types.js";
 
 const DEFAULT_MAX_SEARCH_RESULTS = 50;

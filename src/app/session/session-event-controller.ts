@@ -1,9 +1,8 @@
 import type { AgentSessionEvent, AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 import type { ImageContent } from "../../input-editor.js";
-import type { ConversationViewport } from "../rendering/conversation-viewport.js";
 import { createId } from "../id.js";
-import { extractImageContents, renderContent, renderUserMessageContent, stringifyUnknown } from "../rendering/message-content.js";
-import { customMessageEntry, loadSessionHistoryEntries, loadSessionHistoryEntriesAsync } from "./session-history.js";
+import { extractImageContents, renderContent, renderUserMessageContent, stringifyUnknown } from "../message-content.js";
+import { customMessageEntry, loadOlderSessionHistoryEntries, loadSessionHistoryEntries, loadSessionHistoryEntriesAsync, type SessionHistoryBackfillState } from "./session-history.js";
 import type { Entry, SessionActivity } from "../types.js";
 import { isRecord } from "../guards.js";
 import type { WorkspaceMutation, WorkspaceMutationPreparation } from "../workspace/workspace-undo.js";
@@ -22,12 +21,13 @@ const DCP_MESSAGE_REFERENCE_PREFIX = "[dcp-id]: # (m";
 const DCP_BLOCK_REFERENCE_PREFIX = "[dcp-block-id]: # (b";
 
 export type AppSessionEventControllerHost = {
-	readonly entries: Entry[];
+	readonly entries: readonly Entry[];
 	runtime(): AgentSessionRuntime | undefined;
-	conversationViewport(): ConversationViewport;
 	isRunning(): boolean;
-	render(): void;
-	scheduleRender(): void;
+	addConversationEntry(entry: Entry): void;
+	prependConversationEntries(entries: readonly Entry[]): void;
+	touchConversationEntry(entry: Entry): void;
+	requestRender(reason: string): void;
 	setStatus(status: string): void;
 	restoreSessionStatus(): void;
 	setSessionStatus(session: AgentSessionRuntime["session"] | undefined): void;
@@ -50,14 +50,14 @@ export type AppSessionEventControllerHost = {
 };
 
 export class AppSessionEventController {
-	readonly entryRenderVersions = new Map<string, number>();
-
 	private readonly toolEntryIdsByCallId = new Map<string, string>();
 	private readonly toolMutationPreparationsByCallId = new Map<string, { userEntryId: string; args: unknown; preparation?: WorkspaceMutationPreparation }>();
 	private currentUserEntryId: string | undefined;
 	private currentAssistantEntryId: string | undefined;
 	private currentThinkingEntryId: string | undefined;
 	private assistantTextBuffer = "";
+	private historyBackfill: SessionHistoryBackfillState | undefined;
+	private historyBackfillLoading = false;
 
 	constructor(private readonly host: AppSessionEventControllerHost) {}
 
@@ -65,10 +65,11 @@ export class AppSessionEventController {
 		this.toolEntryIdsByCallId.clear();
 		this.toolMutationPreparationsByCallId.clear();
 		this.currentUserEntryId = undefined;
-		this.entryRenderVersions.clear();
 		this.currentAssistantEntryId = undefined;
 		this.currentThinkingEntryId = undefined;
 		this.assistantTextBuffer = "";
+		this.historyBackfill = undefined;
+		this.historyBackfillLoading = false;
 	}
 
 	loadSessionHistory(): void {
@@ -89,7 +90,7 @@ export class AppSessionEventController {
 		const runtime = this.host.runtime();
 		if (!runtime) return !options.isCancelled();
 
-		return loadSessionHistoryEntriesAsync({
+		const result = await loadSessionHistoryEntriesAsync({
 			messages: runtime.session.messages,
 			addEntry: (entry) => this.addEntry(entry),
 			prependEntries: (entries) => this.prependEntries(entries),
@@ -100,6 +101,35 @@ export class AppSessionEventController {
 			isCancelled: options.isCancelled,
 			render: options.render,
 		});
+		this.historyBackfill = result.completed ? result.backfill : undefined;
+		return result.completed;
+	}
+
+	hasOlderSessionHistory(): boolean {
+		return Boolean(this.historyBackfill && this.historyBackfill.nextEnd > 0);
+	}
+
+	async loadOlderSessionHistory(options: { isCancelled: () => boolean; render: () => void }): Promise<boolean> {
+		if (!this.historyBackfill || this.historyBackfillLoading) return !options.isCancelled();
+		this.historyBackfillLoading = true;
+		try {
+			const completed = await loadOlderSessionHistoryEntries({
+				messages: this.historyBackfill.messages,
+				state: this.historyBackfill,
+				addEntry: (entry) => this.addEntry(entry),
+				prependEntries: (entries) => this.prependEntries(entries),
+				setToolEntryId: (toolCallId, entryId) => this.toolEntryIdsByCallId.set(toolCallId, entryId),
+				toolDefaultExpanded: (toolName) => this.host.toolDefaultExpanded(toolName),
+				observeSubagentsToolResult: (toolName, details, options) => this.host.observeSubagentsToolResult(toolName, details, options),
+				observeTodoToolResult: (toolName, details, isError) => this.host.observeTodoToolResult(toolName, details, isError),
+				isCancelled: options.isCancelled,
+			});
+			if (completed && this.historyBackfill.nextEnd <= 0) this.historyBackfill = undefined;
+			if (completed) options.render();
+			return completed;
+		} finally {
+			this.historyBackfillLoading = false;
+		}
 	}
 
 	handleSessionEvent(event: AgentSessionEvent): void {
@@ -202,7 +232,7 @@ export class AppSessionEventController {
 			default:
 				break;
 		}
-		this.host.scheduleRender();
+		this.host.requestRender("session:session-event-controller:coalesced");
 	}
 
 	addCustomMessageEntry(message: Record<string, unknown>): void {
@@ -220,22 +250,15 @@ export class AppSessionEventController {
 	}
 
 	touchEntry(entry: Entry): void {
-		this.entryRenderVersions.set(entry.id, (this.entryRenderVersions.get(entry.id) ?? 0) + 1);
-		this.host.conversationViewport().deleteEntry(entry.id);
+		this.host.touchConversationEntry(entry);
 	}
 
 	addEntry(entry: Entry): void {
-		this.host.entries.push(entry);
-		this.entryRenderVersions.set(entry.id, 1);
-		this.host.conversationViewport().deleteEntry(entry.id);
+		this.host.addConversationEntry(entry);
 	}
 
 	private prependEntries(entries: readonly Entry[]): void {
-		this.host.entries.unshift(...entries);
-		for (const entry of entries) {
-			this.entryRenderVersions.set(entry.id, 1);
-			this.host.conversationViewport().deleteEntry(entry.id);
-		}
+		this.host.prependConversationEntries(entries);
 	}
 
 	addSessionAbortedEntry(): void {

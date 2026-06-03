@@ -8,7 +8,7 @@ describe("AppBlinkController", () => {
 		let fullRenderCount = 0;
 		let statusLineRenderCount = 0;
 		const controller = new AppBlinkController({
-			render: () => {
+			requestRender: () => {
 				fullRenderCount += 1;
 			},
 			renderStatusLine: () => {
@@ -30,7 +30,7 @@ describe("AppBlinkController", () => {
 		let fullRenderCount = 0;
 		let statusLineRenderCount = 0;
 		const controller = new AppBlinkController({
-			render: () => {
+			requestRender: () => {
 				fullRenderCount += 1;
 			},
 			renderStatusLine: () => {

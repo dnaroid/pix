@@ -16,7 +16,7 @@ import {
 } from "./workspace-undo.js";
 
 export type AppWorkspaceActionsControllerHost = {
-	readonly entries: Entry[];
+	readonly entries: readonly Entry[];
 	runtime(): AgentSessionRuntime | undefined;
 	findUserEntry(entryId: string): Extract<Entry, { kind: "user" }> | undefined;
 	touchEntry(entry: Entry): void;
@@ -28,7 +28,7 @@ export type AppWorkspaceActionsControllerHost = {
 	setStatus(status: string): void;
 	setSessionStatus(session: AgentSessionRuntime["session"] | undefined): void;
 	showToast(message: string, kind: "success" | "error" | "warning" | "info"): void;
-	render(): void;
+	requestRender(reason: string): void;
 	isRunning(): boolean;
 };
 
@@ -62,7 +62,7 @@ export class AppWorkspaceActionsController {
 	scheduleUserSessionEntryMetadataSync(): void {
 		const timer = setTimeout(() => {
 			this.syncUserSessionEntryMetadata();
-			if (this.host.isRunning()) this.host.render();
+			if (this.host.isRunning()) this.host.requestRender("workspace:workspace-actions-controller");
 		}, 0);
 		timer.unref?.();
 	}
@@ -125,7 +125,7 @@ export class AppWorkspaceActionsController {
 		if (!sessionEntryId) throw new Error("Session entry for this message is not available yet");
 
 		this.host.setStatus("forking session");
-		this.host.render();
+		this.host.requestRender("workspace:workspace-actions-controller");
 		const result = await runtime.fork(sessionEntryId);
 		if (result.cancelled) {
 			this.host.addEntry({ id: createId("system"), kind: "system", text: "Fork cancelled." });
@@ -158,13 +158,13 @@ export class AppWorkspaceActionsController {
 
 		if (mutations.length > 0) {
 			this.host.setStatus("reverting recorded commands");
-			this.host.render();
+			this.host.requestRender("workspace:workspace-actions-controller");
 		}
 		const reverted = mutations.length === 0 ? { ok: true as const, changedFiles: 0, revertedChanges: 0 } : await revertWorkspaceMutations(runtime.cwd, mutations);
 		if (!reverted.ok) throw new Error(reverted.error);
 
 		this.host.setStatus("truncating session");
-		this.host.render();
+		this.host.requestRender("workspace:workspace-actions-controller");
 		const result = await runtime.session.navigateTree(sessionEntryId);
 		if (result.aborted) {
 			this.host.showToast("Undo cancelled", "info");
@@ -199,18 +199,18 @@ export class AppWorkspaceActionsController {
 		if (!runtime) {
 			this.host.addEntry({ id: createId("error"), kind: "error", text: "Runtime is not initialized" });
 			this.host.showToast(`${actionName} unavailable`, "error");
-			this.host.render();
+			this.host.requestRender("workspace:workspace-actions-controller");
 			return undefined;
 		}
 
 		if (runtime.session.isStreaming) {
 			this.host.showToast(`${actionName} is unavailable while the agent is running`, "warning");
-			this.host.render();
+			this.host.requestRender("workspace:workspace-actions-controller");
 			return undefined;
 		}
 		if (runtime.session.isCompacting) {
 			this.host.showToast(`${actionName} is unavailable while compacting`, "warning");
-			this.host.render();
+			this.host.requestRender("workspace:workspace-actions-controller");
 			return undefined;
 		}
 

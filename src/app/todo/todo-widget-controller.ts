@@ -1,13 +1,13 @@
 import { resolve } from "node:path";
 import { TODO_TOOL_NAME } from "../constants.js";
-import { stringifyUnknown } from "../rendering/message-content.js";
+import { stringifyUnknown } from "../message-content.js";
 import { hasOpenTodoTasks, isTodoDetails, isTodoLiveStateEvent } from "./todo-model.js";
 import type { TodoDetails } from "../types.js";
 
 export type TodoWidgetControllerHost = {
 	sessionFile?(): string | undefined;
 	isRunning(): boolean;
-	render(): void;
+	requestRender(reason: string): void;
 };
 
 export class AppTodoWidgetController {
@@ -56,7 +56,7 @@ export class AppTodoWidgetController {
 		}
 
 		const visibleNext = stringifyUnknown(this.currentSessionDetails());
-		if (previous !== visibleNext && this.host.isRunning()) this.host.render();
+		if (previous !== visibleNext && this.host.isRunning()) this.host.requestRender("todo:todo-widget-controller");
 	}
 
 	private currentSessionDetails(): TodoDetails | undefined {

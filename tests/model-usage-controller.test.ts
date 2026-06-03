@@ -17,7 +17,7 @@ describe("model usage controller", () => {
 		};
 		const controller = new AppModelUsageController({
 			runtimeSession: () => activeSession,
-			render: () => {
+			requestRender: () => {
 				renderCount++;
 			},
 		}, query);
@@ -45,7 +45,7 @@ describe("model usage controller", () => {
 		let queryCount = 0;
 		const controller = new AppModelUsageController({
 			runtimeSession: () => activeSession,
-			render: () => {},
+			requestRender: () => {},
 		}, async (descriptor) => {
 			queryCount++;
 			return usageStatus(descriptor, remainingPercent);
@@ -70,7 +70,7 @@ describe("model usage controller", () => {
 		let queryCount = 0;
 		const controller = new AppModelUsageController({
 			runtimeSession: () => activeSession,
-			render: () => {},
+			requestRender: () => {},
 		}, async (descriptor) => {
 			queryCount++;
 			return await new Promise<ModelUsageStatus>((resolve) => {
@@ -90,7 +90,7 @@ describe("model usage controller", () => {
 		let queryCount = 0;
 		const controller = new AppModelUsageController({
 			runtimeSession: () => sessionWithModel("local", "llama"),
-			render: () => {},
+			requestRender: () => {},
 		}, async (descriptor) => {
 			queryCount++;
 			return usageStatus(descriptor, 10);
@@ -106,7 +106,7 @@ describe("model usage controller", () => {
 		let available = true;
 		const controller = new AppModelUsageController({
 			runtimeSession: () => activeSession,
-			render: () => {},
+			requestRender: () => {},
 		}, async (descriptor) => available ? usageStatus(descriptor, 80) : undefined);
 
 		const first = controller.refreshNow();
@@ -128,7 +128,7 @@ describe("model usage controller", () => {
 		let shouldFail = false;
 		const controller = new AppModelUsageController({
 			runtimeSession: () => activeSession,
-			render: () => {},
+			requestRender: () => {},
 		}, async (descriptor) => {
 			if (shouldFail) throw new Error("network");
 			return usageStatus(descriptor, 64);
@@ -152,7 +152,7 @@ describe("model usage controller", () => {
 		let queryCount = 0;
 		const controller = new AppModelUsageController({
 			runtimeSession: () => activeSession,
-			render: () => {},
+			requestRender: () => {},
 		}, async (descriptor) => {
 			queryCount++;
 			return usageStatus(descriptor, 55);

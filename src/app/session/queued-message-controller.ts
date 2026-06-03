@@ -1,7 +1,7 @@
 import type { AgentSession, AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 import type { ImageContent } from "../../input-editor.js";
 import { createId } from "../id.js";
-import { stringifyUnknown, submittedUserDisplayText } from "../rendering/message-content.js";
+import { stringifyUnknown, submittedUserDisplayText } from "../message-content.js";
 import type { Entry, SessionActivity, SubmittedUserMessage } from "../types.js";
 
 export type AppQueuedMessageControllerHost = {
@@ -9,7 +9,7 @@ export type AppQueuedMessageControllerHost = {
 	requireRuntime(): AgentSessionRuntime;
 	visibleEntries(): readonly Entry[];
 	isRunning(): boolean;
-	render(): void;
+	requestRender(reason: string): void;
 	addEntry(entry: Entry): void;
 	addSessionAbortedEntry(): void;
 	setStatus(status: string): void;
@@ -135,7 +135,7 @@ export class AppQueuedMessageController {
 		} finally {
 			this.flushingDeferredUserMessages = false;
 			if (this.totalQueuedMessageCount() > 0) this.updateQueuedMessageStatus();
-			if (this.host.isRunning()) this.host.render();
+			if (this.host.isRunning()) this.host.requestRender("session:queued-message-controller");
 		}
 	}
 
@@ -226,7 +226,7 @@ export class AppQueuedMessageController {
 
 		this.updateQueuedMessageStatus();
 		this.host.setStatus("sending queued message");
-		this.host.render();
+		this.host.requestRender("session:queued-message-controller");
 
 		this.immediateSendInProgress = true;
 		try {
@@ -269,7 +269,7 @@ export class AppQueuedMessageController {
 		this.notifyDeferredUserMessagesChanged();
 		this.updateQueuedMessageStatus();
 		this.host.showToast("Message queued; send it from the queue menu or status button", "info");
-		this.host.render();
+		this.host.requestRender("session:queued-message-controller");
 	}
 
 	private async rewriteSdkQueuedMessages<T>(update: (steering: string[], followUp: string[]) => T): Promise<T> {
@@ -331,13 +331,13 @@ export class AppQueuedMessageController {
 		if (session.isCompacting) {
 			this.host.setStatus("aborting compaction");
 			session.abortCompaction();
-			this.host.render();
+			this.host.requestRender("session:queued-message-controller");
 		}
 
 		if (session.isStreaming) {
 			this.host.setStatus("aborting current response");
 			this.host.addSessionAbortedEntry();
-			this.host.render();
+			this.host.requestRender("session:queued-message-controller");
 			await session.abort();
 		}
 

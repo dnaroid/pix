@@ -19,7 +19,7 @@ export type ModelUsageRefreshStart =
 
 export type AppModelUsageControllerHost = {
 	runtimeSession(): AgentSession | undefined;
-	render(): void;
+	requestRender(reason: string): void;
 };
 
 export class AppModelUsageController {
@@ -81,7 +81,7 @@ export class AppModelUsageController {
 			return;
 		}
 
-		if (this.activeStatus()) this.host.render();
+		if (this.activeStatus()) this.host.requestRender("model:model-usage-controller");
 	}
 
 	private refresh(force = false, activeDescriptor?: ModelUsageDescriptor): Promise<ModelUsageRefreshResult> | undefined {
@@ -113,7 +113,7 @@ export class AppModelUsageController {
 			},
 		).finally(() => {
 			this.inFlightModelKeys.delete(modelKey);
-			if (this.activeModelKey === modelKey) this.host.render();
+			if (this.activeModelKey === modelKey) this.host.requestRender("model:model-usage-controller");
 		});
 	}
 
@@ -122,7 +122,7 @@ export class AppModelUsageController {
 		if (nextModelKey === this.activeModelKey) return false;
 
 		this.activeModelKey = nextModelKey;
-		this.host.render();
+		this.host.requestRender("model:model-usage-controller");
 		return true;
 	}
 

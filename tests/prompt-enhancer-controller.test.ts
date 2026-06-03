@@ -303,7 +303,7 @@ function createHost(
 			error: (message) => messages.errors?.push(message),
 			info: () => {},
 		},
-		render: () => {},
+		requestRender: () => {},
 	};
 }
 

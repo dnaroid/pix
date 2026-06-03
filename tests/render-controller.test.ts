@@ -47,11 +47,12 @@ describe("AppRenderController", () => {
 			voiceProgressOverlayText: () => undefined,
 		});
 
-		const output = captureStdout(() => controller.renderStatusLine());
+		const { output, result } = captureStdoutWithResult(() => controller.renderStatusLine());
 
 		assert.equal(output, `\x1b7${DISABLE_TERMINAL_WRAP}\x1b[6;1H\x1b[0m\x1b[2KSTATUS\x1b8`);
-		assert.equal(mouseController.renderedRowTexts.get(6), "STATUS");
-		assert.deepEqual(mouseController.statusModelTarget, { row: 6, startColumn: 1, endColumn: 7 });
+		assert.equal(result?.kind, "status");
+		assert.equal(result?.hitMap.text, "STATUS");
+		assert.deepEqual(result?.hitMap.modelTarget, { row: 6, startColumn: 1, endColumn: 7 });
 	});
 
 	it("renders the visible tab row at the top and starts toasts below it", () => {
@@ -124,7 +125,7 @@ describe("AppRenderController", () => {
 			voiceProgressOverlayText: () => undefined,
 		});
 
-		const output = captureStdout(() => controller.render());
+		const { output, result } = captureStdoutWithResult(() => controller.render());
 
 		assert.equal(layoutRows, 4);
 		assert.equal(rowForRenderedText(output, "TABS"), 1);
@@ -134,8 +135,9 @@ describe("AppRenderController", () => {
 		assert.equal(rowForRenderedText(output, "STATUS"), 6);
 		assert.equal(rowForRenderedText(output, "toast"), 3);
 		assert.match(output, /\x1b\[5;7H/);
-		assert.equal(mouseController.tabLineTargets[0]?.row, 1);
-		assert.equal(mouseController.tabLineTargets.some((target) => target.kind === "tab" && target.row === 2), false);
+		const hitMap = result?.kind === "full" ? result.hitMap : undefined;
+		assert.equal(hitMap?.tabLineTargets[0]?.row, 1);
+		assert.equal(hitMap?.tabLineTargets.some((target) => target.kind === "tab" && target.row === 2), false);
 	});
 
 	it("buffers unchanged full-render regions independently", () => {
@@ -305,13 +307,13 @@ describe("AppRenderController", () => {
 			voiceProgressOverlayText: () => undefined,
 		});
 
-		const output = captureStdout(() => controller.render());
+		const { output, result } = captureStdoutWithResult(() => controller.render());
 
 		assert.equal(rowForRenderedText(output, "TABS"), 1);
 		assert.equal(rowForRenderedText(output, "────"), 2);
 		assert.equal(rowForRenderedText(output, "Sessions"), 3);
 		assert.equal(rowForRenderedText(output, "› new"), 4);
-		assert.deepEqual(mouseController.renderedTargets.get(4), { kind: "popup-menu", index: 0 });
+		assert.deepEqual(result?.kind === "full" ? result.hitMap.targets.get(4) : undefined, { kind: "popup-menu", index: 0 });
 	});
 
 	it("overlays the new-tab button without reserving the top row when the tab panel is collapsed", () => {
@@ -364,15 +366,16 @@ describe("AppRenderController", () => {
 			voiceProgressOverlayText: () => undefined,
 		});
 
-		const output = captureStdout(() => controller.render());
+		const { output, result } = captureStdoutWithResult(() => controller.render());
 
 		assert.equal(layoutRows, 5);
 		assert.equal(rowForRenderedText(output, "BODY"), 1);
 		assert.equal(rowForRenderedText(output, "STATUS"), 5);
 		assert.match(output, /\x1b\[1;40H/);
-		assert.equal(mouseController.renderedRowTexts.get(1)?.startsWith("BODY"), true);
-		assert.equal(mouseController.renderedRowTexts.get(1)?.endsWith(APP_ICONS.plus), true);
-		assert.deepEqual(mouseController.tabLineTargets, [{ kind: "new-tab", startColumn: 40, endColumn: 41, row: 1 }]);
+		const hitMap = result?.kind === "full" ? result.hitMap : undefined;
+		assert.equal(hitMap?.rowTexts.get(1)?.startsWith("BODY"), true);
+		assert.equal(hitMap?.rowTexts.get(1)?.endsWith(APP_ICONS.plus), true);
+		assert.deepEqual(hitMap?.tabLineTargets, [{ kind: "new-tab", startColumn: 40, endColumn: 41, row: 1 }]);
 	});
 
 	it("reserves the last column for the conversation scrollbar", () => {
@@ -495,11 +498,11 @@ describe("AppRenderController", () => {
 			voiceProgressOverlayText: () => undefined,
 		});
 
-		const output = captureStdout(() => controller.render());
+		const { output, result } = captureStdoutWithResult(() => controller.render());
 
 		assert.match(output, /\x1b\[3;1H\x1b\[0m\x1b\[2K\x1b\[[^m]+m│\x1b\[0mwidget {4}\x1b\[[^m]+m│\x1b\[0m/);
-		assert.equal(mouseController.renderedRowTexts.get(3), "│widget    │");
-		assert.deepEqual(mouseController.renderedTargets.get(3), { kind: "todo-panel" });
+		assert.equal(result?.kind === "full" ? result.hitMap.rowTexts.get(3) : undefined, "│widget    │");
+		assert.deepEqual(result?.kind === "full" ? result.hitMap.targets.get(3) : undefined, { kind: "todo-panel" });
 	});
 
 	it("renders default popup overlays above the input frame", () => {
@@ -545,10 +548,10 @@ describe("AppRenderController", () => {
 			voiceProgressOverlayText: () => undefined,
 		});
 
-		const output = captureStdout(() => controller.render());
+		const { output, result } = captureStdoutWithResult(() => controller.render());
 
 		assert.equal(rowForRenderedText(output, "help"), 2);
-		assert.deepEqual(mouseController.renderedTargets.get(2), { kind: "popup-menu", index: 0 });
+		assert.deepEqual(result?.kind === "full" ? result.hitMap.targets.get(2) : undefined, { kind: "popup-menu", index: 0 });
 	});
 
 	it("renders the voice progress overlay centered on the second row", () => {
@@ -591,11 +594,11 @@ describe("AppRenderController", () => {
 			voiceProgressOverlayText: () => "Listening",
 		});
 
-		const output = captureStdout(() => controller.render());
+		const { output, result } = captureStdoutWithResult(() => controller.render());
 
 		assert.equal(rowForRenderedText(output, "Listening"), 2);
-		assert.equal(mouseController.renderedRowTexts.get(2)?.includes("Listening"), true);
-		assert.equal(mouseController.renderedRowBackgrounds.get(2), THEMES.dark.colors.info);
+		assert.equal(result?.kind === "full" ? result.hitMap.rowTexts.get(2)?.includes("Listening") : undefined, true);
+		assert.equal(result?.kind === "full" ? result.hitMap.rowBackgrounds.get(2) : undefined, THEMES.dark.colors.info);
 	});
 });
 
@@ -678,6 +681,14 @@ function captureStdout(fn: () => void): string {
 	}
 
 	return writes.join("");
+}
+
+function captureStdoutWithResult<T>(fn: () => T): { output: string; result: T } {
+	let result: T;
+	const output = captureStdout(() => {
+		result = fn();
+	});
+	return { output, result: result! };
 }
 
 function rowForRenderedText(output: string, text: string): number | undefined {

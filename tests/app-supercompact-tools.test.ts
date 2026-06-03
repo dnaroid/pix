@@ -5,7 +5,7 @@ import { PiUiExtendApp } from "../src/app/app.js";
 import type { Entry } from "../src/app/types.js";
 
 type TestApp = {
-	entries: Entry[];
+	addEntry(entry: Entry): void;
 	superCompactTools: boolean;
 	toggleSuperCompactTools(): void;
 };
@@ -33,7 +33,8 @@ describe("PiUiExtendApp super-compact tool toggle", () => {
 		const app = createApp();
 		const mutationTool = toolEntry("apply_patch", true);
 		const regularTool = toolEntry("read", true);
-		app.entries.push(mutationTool, regularTool);
+		app.addEntry(mutationTool);
+		app.addEntry(regularTool);
 
 		app.toggleSuperCompactTools();
 

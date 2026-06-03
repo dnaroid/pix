@@ -4,8 +4,8 @@ import type { CommandControllerHost } from "./command-host.js";
 import { getIdleRuntime, getRuntime } from "./command-runtime.js";
 import { createId } from "../id.js";
 import { isRecord } from "../guards.js";
-import { renderContent } from "../rendering/message-content.js";
-import { sanitizeText } from "../rendering/render-text.js";
+import { renderContent } from "../message-content.js";
+import { sanitizeText } from "../text-format.js";
 import { createSessionSearchMenuItems, searchSessions } from "../session/session-search.js";
 import { loadResumeSessionsInChunks, type ResumeSessionLoaderOptions } from "../session/resume-session-loader.js";
 import type { PopupMenuPlacement, SessionTreeNode } from "../types.js";
@@ -36,7 +36,7 @@ export class NavigationCommandActions {
 		if (!entryId) throw new Error("No user messages to fork from");
 
 		this.host.setStatus("forking session");
-		this.host.render();
+		this.host.requestRender("commands:command-navigation-actions");
 		const result = await runtime.fork(entryId);
 		if (result.cancelled) {
 			this.host.addEntry({ id: createId("system"), kind: "system", text: "Fork cancelled." });
@@ -62,7 +62,7 @@ export class NavigationCommandActions {
 		}
 
 		this.host.setStatus("cloning session");
-		this.host.render();
+		this.host.requestRender("commands:command-navigation-actions");
 		const result = await runtime.fork(leafId, { position: "at" });
 		if (result.cancelled) {
 			this.host.addEntry({ id: createId("system"), kind: "system", text: "Clone cancelled." });
@@ -85,7 +85,7 @@ export class NavigationCommandActions {
 		}
 
 		this.host.setStatus("navigating tree");
-		this.host.render();
+		this.host.requestRender("commands:command-navigation-actions");
 		const result = await runtime.session.navigateTree(targetId);
 		if (result.aborted) {
 			this.host.toast.info("Tree navigation cancelled");
@@ -111,7 +111,7 @@ export class NavigationCommandActions {
 
 		this.host.openDirectPopupMenu("user-message-jump", { preserveStatus: true });
 		this.host.setDirectPopupMenuQuery(argumentsText.trim());
-		this.host.render();
+		this.host.requestRender("commands:command-navigation-actions");
 	}
 
 	async runSearchCommand(argumentsText: string): Promise<void> {
@@ -128,7 +128,7 @@ export class NavigationCommandActions {
 
 		let lastProgressText = "";
 		this.host.setStatus("searching sessions…");
-		this.host.render();
+		this.host.requestRender("commands:command-navigation-actions");
 
 		try {
 			const results = await searchSessions(query, {
@@ -138,7 +138,7 @@ export class NavigationCommandActions {
 					if (progressText === lastProgressText) return;
 					lastProgressText = progressText;
 					this.host.setStatus(progressText);
-					this.host.render();
+					this.host.requestRender("commands:command-navigation-actions");
 				},
 			});
 
@@ -146,7 +146,7 @@ export class NavigationCommandActions {
 				this.host.addEntry({ id: createId("system"), kind: "system", text: `No sessions found for: ${query}` });
 				this.host.toast.info("No matching sessions");
 				this.host.setSessionStatus(runtime.session);
-				this.host.render();
+				this.host.requestRender("commands:command-navigation-actions");
 				return;
 			}
 
@@ -166,7 +166,7 @@ export class NavigationCommandActions {
 			this.host.addEntry({ id: createId("error"), kind: "error", text: `Session search failed: ${error instanceof Error ? error.message : String(error)}` });
 			this.host.toast.error("Session search failed");
 			this.host.setSessionStatus(runtime.session);
-			this.host.render();
+			this.host.requestRender("commands:command-navigation-actions");
 		}
 	}
 
@@ -182,7 +182,7 @@ export class NavigationCommandActions {
 
 		const resolvedSessionPath = resolve(runtime.cwd, sessionPath);
 		this.host.setStatus("switching session");
-		this.host.render();
+		this.host.requestRender("commands:command-navigation-actions");
 		const result = await runtime.switchSession(resolvedSessionPath);
 		if (result.cancelled) {
 			this.host.addEntry({ id: createId("system"), kind: "system", text: "Resume cancelled." });
@@ -202,21 +202,21 @@ export class NavigationCommandActions {
 		const initialQuery = typeof queryOrOptions === "string" ? queryOrOptions : "";
 		const runtime = preserveStatus ? this.host.runtime() : getIdleRuntime(this.host, "resume");
 		if (!runtime) {
-			if (!preserveStatus) this.host.render();
+			if (!preserveStatus) this.host.requestRender("commands:command-navigation-actions");
 			return;
 		}
 
 		if (runtime.session.isStreaming) {
 			if (!preserveStatus) {
 				this.host.toast.warning("/resume is unavailable while the agent is running");
-				this.host.render();
+				this.host.requestRender("commands:command-navigation-actions");
 			}
 			return;
 		}
 
 		if (this.host.getResumeLoading()) {
 			if (!preserveStatus) this.host.setStatus("loading sessions…");
-			this.host.render();
+			this.host.requestRender("commands:command-navigation-actions");
 			return;
 		}
 
@@ -227,7 +227,7 @@ export class NavigationCommandActions {
 		if (this.host.getResumeSessions().length > 0) {
 			this.host.openResumeMenuWithQuery(initialQuery);
 		}
-		this.host.render();
+		this.host.requestRender("commands:command-navigation-actions");
 
 		const loadId = ++this.resumeLoadId;
 		void this.loadResumeSessionsInBackground({ loadId, preserveStatus, session: runtime.session });
@@ -245,7 +245,7 @@ export class NavigationCommandActions {
 						this.host.setResumeLoading(false);
 						if (!options.preserveStatus) this.host.setSessionStatus(options.session);
 					}
-					this.host.render();
+					this.host.requestRender("commands:command-navigation-actions");
 				},
 			});
 		} catch (error) {
@@ -258,7 +258,7 @@ export class NavigationCommandActions {
 			this.host.addEntry({ id: createId("error"), kind: "error", text: `Session list failed: ${error instanceof Error ? error.message : String(error)}` });
 			if (!options.preserveStatus) this.host.toast.error("Failed to load sessions");
 			if (!options.preserveStatus) this.host.setSessionStatus(options.session);
-			this.host.render();
+			this.host.requestRender("commands:command-navigation-actions");
 		}
 	}
 

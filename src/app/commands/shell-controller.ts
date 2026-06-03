@@ -14,8 +14,7 @@ export type AppShellControllerHost = {
 	setStatus(status: string): void;
 	setSessionActivity(activity: SessionActivity): void;
 	restoreSessionStatus(): void;
-	render(): void;
-	scheduleRender(): void;
+	requestRender(reason: string): void;
 };
 
 export class AppShellController {
@@ -42,7 +41,7 @@ export class AppShellController {
 		this.host.addEntry(entry);
 		this.host.setStatus(`shell: ${command}`);
 		this.host.setSessionActivity("running");
-		this.host.render();
+		this.host.requestRender("commands:shell-controller");
 
 		const runningCommand = runChatShellCommand(command, this.host.cwd, {
 			onOutput: (chunk) => this.appendOutput(entry, chunk),
@@ -56,7 +55,7 @@ export class AppShellController {
 			if (this.activeRun?.entry === entry) this.activeRun = undefined;
 			this.flushRender();
 			this.host.restoreSessionStatus();
-			if (this.host.isRunning()) this.host.render();
+			if (this.host.isRunning()) this.host.requestRender("commands:shell-controller");
 		}
 	}
 
@@ -109,7 +108,7 @@ export class AppShellController {
 
 		this.renderTimer = setTimeout(() => {
 			this.renderTimer = undefined;
-			if (this.host.isRunning()) this.host.scheduleRender();
+			if (this.host.isRunning()) this.host.requestRender("commands:shell-controller:coalesced");
 		}, SHELL_RENDER_THROTTLE_MS);
 		this.renderTimer.unref?.();
 	}

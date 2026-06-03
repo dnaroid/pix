@@ -3,7 +3,7 @@ import { formatMarkdownTables, markdownSyntaxHighlightsForText } from "../../mar
 import { renderToolDisplay } from "../../tool-renderers/index.js";
 import { DEFAULT_THINKING_TOOL_RULE, SUBAGENT_STATUSES, THINKING_TOOL_NAME, TODO_TOOL_NAME } from "../constants.js";
 import { attachImageClickTargets } from "../screen/image-click-targets.js";
-import { formatStructuredText } from "./message-content.js";
+import { formatStructuredText } from "../message-content.js";
 import {
 	formatSubagentTimestamp,
 	isSubagentRunRenderDetails,

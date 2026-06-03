@@ -2,7 +2,7 @@ import type { AgentSession, AgentSessionRuntime } from "@earendil-works/pi-codin
 import type { AppCommandController } from "../commands/command-controller.js";
 import { createId } from "../id.js";
 import type { AppMenuItemsController } from "./menu-items-controller.js";
-import { stringifyUnknown } from "../rendering/message-content.js";
+import { stringifyUnknown } from "../message-content.js";
 import type { AppPopupMenuController } from "./popup-menu-controller.js";
 import type { AppQueuedMessageController } from "../session/queued-message-controller.js";
 import type { Entry, SlashCommand } from "../types.js";
@@ -17,7 +17,7 @@ export type AppPopupActionControllerHost = {
 	setStatus(status: string): void;
 	setSessionStatus(session: AgentSession | undefined): void;
 	showToast(message: string, kind: "success" | "error" | "warning" | "info"): void;
-	render(): void;
+	requestRender(reason: string): void;
 	resetSessionView(): void;
 	bindCurrentSession(): Promise<void>;
 	loadSessionHistory(): void;
@@ -55,7 +55,7 @@ export class AppPopupActionController {
 
 		if (parsed.commandName.length === 0) {
 			this.host.setStatus("type a slash command");
-			this.host.render();
+			this.host.requestRender("popup:popup-action-controller");
 			return;
 		}
 
@@ -65,13 +65,13 @@ export class AppPopupActionController {
 		if (!command) {
 			const suggestions = this.menuItems.getSlashCommandMatches(parsed.commandName, 3).map((match) => `/${match.value.name}`);
 			this.host.showToast(suggestions.length > 0 ? `Unknown command /${parsed.commandName}; try ${suggestions.join(", ")}` : "Unknown command", "warning");
-			this.host.render();
+			this.host.requestRender("popup:popup-action-controller");
 			return;
 		}
 
 		if (parsed.hasArguments && !command.allowArguments) {
 			this.host.showToast(`/${command.name} does not take arguments`, "warning");
-			this.host.render();
+			this.host.requestRender("popup:popup-action-controller");
 			return;
 		}
 
@@ -79,7 +79,7 @@ export class AppPopupActionController {
 		if (!command.suppressCommandEcho) {
 			this.host.addEntry({ id: createId("system"), kind: "system", text: `command: ${this.formatSlashCommandLine(command.name, parsed.arguments)}` });
 		}
-		this.host.render();
+		this.host.requestRender("popup:popup-action-controller");
 
 		try {
 			if (command.kind === "resource") {
@@ -94,7 +94,7 @@ export class AppPopupActionController {
 			this.host.setSessionStatus(this.host.runtime()?.session);
 		}
 
-		if (this.host.isRunning()) this.host.render();
+		if (this.host.isRunning()) this.host.requestRender("popup:popup-action-controller");
 	}
 
 	private async submitSelectedSlashCommand(): Promise<boolean> {
@@ -121,7 +121,7 @@ export class AppPopupActionController {
 			this.host.setInput("");
 			this.host.addEntry({ id: createId("system"), kind: "system", text: `command: /model ${selected.value.ref}` });
 		}
-		this.host.render();
+		this.host.requestRender("popup:popup-action-controller");
 
 		try {
 			await this.commandController.runModelCommand(selected.value.model);
@@ -131,7 +131,7 @@ export class AppPopupActionController {
 			this.host.setSessionStatus(this.host.runtime()?.session);
 		}
 
-		if (this.host.isRunning()) this.host.render();
+		if (this.host.isRunning()) this.host.requestRender("popup:popup-action-controller");
 		return true;
 	}
 
@@ -144,7 +144,7 @@ export class AppPopupActionController {
 			this.host.setInput("");
 			this.host.addEntry({ id: createId("system"), kind: "system", text: `command: /thinking ${selected.value.level}` });
 		}
-		this.host.render();
+		this.host.requestRender("popup:popup-action-controller");
 
 		try {
 			await this.commandController.runThinkingCommand(selected.value.level);
@@ -154,7 +154,7 @@ export class AppPopupActionController {
 			this.host.setSessionStatus(this.host.runtime()?.session);
 		}
 
-		if (this.host.isRunning()) this.host.render();
+		if (this.host.isRunning()) this.host.requestRender("popup:popup-action-controller");
 		return true;
 	}
 
@@ -163,7 +163,7 @@ export class AppPopupActionController {
 		if (!selected) return false;
 
 		this.popupMenus.closeUserMessageMenu();
-		this.host.render();
+		this.host.requestRender("popup:popup-action-controller");
 
 		try {
 			if (selected.value === "copy") {
@@ -206,7 +206,7 @@ export class AppPopupActionController {
 		if (!selected) return false;
 
 		this.popupMenus.closeQueueMessageMenu();
-		this.host.render();
+		this.host.requestRender("popup:popup-action-controller");
 
 		try {
 			if (selected.value === "cancel") {
@@ -247,14 +247,14 @@ export class AppPopupActionController {
 
 		this.host.addEntry({ id: createId("system"), kind: "system", text: `Resuming session ${session.id.slice(0, 8)}…` });
 		this.host.setStatus("switching session");
-		this.host.render();
+		this.host.requestRender("popup:popup-action-controller");
 
 		try {
 			const result = await runtime.switchSession(session.path);
 			if (result.cancelled) {
 				this.host.addEntry({ id: createId("system"), kind: "system", text: "Resume cancelled." });
 				this.host.setSessionStatus(runtime.session);
-				this.host.render();
+				this.host.requestRender("popup:popup-action-controller");
 				return true;
 			}
 
@@ -270,7 +270,7 @@ export class AppPopupActionController {
 		this.host.setSessionStatus(runtime.session);
 	}
 
-		if (this.host.isRunning()) this.host.render();
+		if (this.host.isRunning()) this.host.requestRender("popup:popup-action-controller");
 		return true;
 	}
 

@@ -22,7 +22,7 @@ export class SessionCommandActions {
 		const outputPath = parsePathArgument(argumentsText);
 		const resolvedOutputPath = outputPath ? resolve(runtime.cwd, outputPath) : undefined;
 		this.host.setStatus("exporting session");
-		this.host.render();
+		this.host.requestRender("commands:command-session-actions");
 
 		const filePath = resolvedOutputPath?.endsWith(".jsonl")
 			? runtime.session.exportToJsonl(resolvedOutputPath)
@@ -41,7 +41,7 @@ export class SessionCommandActions {
 
 		const resolvedInputPath = resolve(runtime.cwd, inputPath);
 		this.host.setStatus("importing session");
-		this.host.render();
+		this.host.requestRender("commands:command-session-actions");
 
 		const result = await runtime.importFromJsonl(resolvedInputPath);
 		if (result.cancelled) {
@@ -65,7 +65,7 @@ export class SessionCommandActions {
 		const tmpFile = join(shareDir, `session-share-${randomUUID()}.html`);
 		try {
 			this.host.setStatus("creating share gist");
-			this.host.render();
+			this.host.requestRender("commands:command-session-actions");
 			await runtime.session.exportToHtml(tmpFile);
 			const gistResult = await runProcess("gh", ["gist", "create", "--public=false", tmpFile], { maxBufferBytes: 64 * 1024 });
 			if (gistResult.status !== 0) throw new Error(gistResult.stderr?.trim() || "Failed to create gist");
@@ -115,7 +115,7 @@ export class SessionCommandActions {
 		runtime.session.setSessionName(name);
 		this.host.addEntry({ id: createId("system"), kind: "system", text: `Session name set: ${name}` });
 		this.host.setSessionStatus(runtime.session);
-		this.host.render();
+		this.host.requestRender("commands:command-session-actions");
 	}
 
 	async runSessionInfoCommand(): Promise<void> {
@@ -153,7 +153,7 @@ export class SessionCommandActions {
 		if (!runtime) return;
 
 		this.host.setStatus("loading usage");
-		this.host.render();
+		this.host.requestRender("commands:command-session-actions");
 
 		const accountReport = await queryAccountUsageReport();
 		const accountUsage = formatAccountUsageReport(accountReport);
@@ -206,7 +206,7 @@ export class SessionCommandActions {
 		}
 
 		this.host.setStatus("checking updates");
-		this.host.render();
+		this.host.requestRender("commands:command-session-actions");
 
 		const result = await checkPixUpdate();
 		const forceHint = options.force ? "\n\n/update is check-only. To force a reinstall, run `pix update --force` in your shell and restart Pix." : "";
@@ -244,7 +244,7 @@ export class SessionCommandActions {
 		if (!runtime) return;
 
 		this.host.setStatus("reloading");
-		this.host.render();
+		this.host.requestRender("commands:command-session-actions");
 		try {
 			await runtime.session.reload();
 			this.host.setSessionStatus(runtime.session);
@@ -262,7 +262,7 @@ export class SessionCommandActions {
 		if (!runtime) return;
 
 		this.host.setStatus("starting new session");
-		this.host.render();
+		this.host.requestRender("commands:command-session-actions");
 		const result = await runtime.newSession();
 		if (result.cancelled) {
 			this.host.addEntry({ id: createId("system"), kind: "system", text: "New session cancelled." });
@@ -290,7 +290,7 @@ export class SessionCommandActions {
 		}
 
 		this.host.setStatus(customInstructions ? "compacting with instructions" : "compacting");
-		this.host.render();
+		this.host.requestRender("commands:command-session-actions");
 
 		const result = await runtime.session.compact(customInstructions);
 		this.host.addEntry({

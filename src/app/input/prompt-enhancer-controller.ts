@@ -9,7 +9,7 @@ import type { PromptEnhancerConfig } from "../../config.js";
 import type { InputEditor } from "../../input-editor.js";
 import type { ToastNotifier } from "../../ui.js";
 import { APP_ICONS } from "../icons.js";
-import { stringifyUnknown } from "../rendering/message-content.js";
+import { stringifyUnknown } from "../message-content.js";
 import { parseModelRef } from "../model/model-ref.js";
 import type { TabInputState } from "../session/tabs-controller.js";
 import type { SessionActivity, SessionModel } from "../types.js";
@@ -37,7 +37,7 @@ export type AppPromptEnhancerControllerHost = {
 	setSessionStatus(session: AgentSessionRuntime["session"] | undefined): void;
 	setSessionActivity(activity: SessionActivity): void;
 	toast: ToastNotifier;
-	render(): void;
+	requestRender(reason: string): void;
 };
 
 type PromptEnhanceTarget = {
@@ -117,7 +117,7 @@ export class AppPromptEnhancerController {
 		this.enhancing = true;
 		this.host.setStatus("enhancing prompt");
 		this.host.setSessionActivity("thinking");
-		this.host.render();
+		this.host.requestRender("input:prompt-enhancer-controller");
 
 		try {
 			const enhanced = await this.enhancePromptWithPi(runtime, target.text, this.host.promptEnhancerConfig());
@@ -135,7 +135,7 @@ export class AppPromptEnhancerController {
 		} finally {
 			this.enhancing = false;
 			this.restoreSessionState();
-			this.host.render();
+			this.host.requestRender("input:prompt-enhancer-controller");
 		}
 	}
 

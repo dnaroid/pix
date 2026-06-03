@@ -2,7 +2,7 @@ import type { Entry } from "../types.js";
 import { isRecord } from "../guards.js";
 import { createId } from "../id.js";
 import { isOnlyHiddenMetadata } from "../../markdown-format.js";
-import { extractImageContents, renderContent, renderUserMessageContent, stringifyUnknown } from "../rendering/message-content.js";
+import { extractImageContents, renderContent, renderUserMessageContent, stringifyUnknown } from "../message-content.js";
 
 type ToolResultRecord = {
 	content: readonly unknown[];
@@ -35,6 +35,24 @@ export type LoadSessionHistoryAsyncOptions = LoadSessionHistoryOptions & {
 	tailMessageCount?: number;
 };
 
+export type SessionHistoryBackfillState = {
+	readonly messages: readonly unknown[];
+	nextEnd: number;
+	readonly chunkSize: number;
+	readonly toolResults: Map<string, ToolResultRecord>;
+};
+
+export type LoadSessionHistoryAsyncResult = {
+	completed: boolean;
+	backfill: SessionHistoryBackfillState | undefined;
+};
+
+export type LoadOlderSessionHistoryOptions = LoadSessionHistoryOptions & {
+	state: SessionHistoryBackfillState;
+	prependEntries: (entries: readonly Entry[]) => void;
+	isCancelled: () => boolean;
+};
+
 const DEFAULT_HISTORY_CHUNK_SIZE = 50;
 const DEFAULT_HISTORY_TAIL_MESSAGE_COUNT = 80;
 
@@ -46,31 +64,41 @@ export function loadSessionHistoryEntries(options: LoadSessionHistoryOptions): v
 	addSessionHistoryRangeEntries(messages, 0, messages.length, toolResults, options.addEntry, options);
 }
 
-export async function loadSessionHistoryEntriesAsync(options: LoadSessionHistoryAsyncOptions): Promise<boolean> {
+export async function loadSessionHistoryEntriesAsync(options: LoadSessionHistoryAsyncOptions): Promise<LoadSessionHistoryAsyncResult> {
 	const { messages } = options;
-	if (!messages || messages.length === 0) return !options.isCancelled();
+	if (!messages || messages.length === 0) return { completed: !options.isCancelled(), backfill: undefined };
 
 	const chunkSize = Math.max(1, options.chunkSize ?? DEFAULT_HISTORY_CHUNK_SIZE);
 	const tailMessageCount = Math.max(1, options.tailMessageCount ?? DEFAULT_HISTORY_TAIL_MESSAGE_COUNT);
 	const toolResults = new Map<string, ToolResultRecord>();
 
-	if (options.isCancelled()) return false;
+	if (options.isCancelled()) return { completed: false, backfill: undefined };
 	const tailStart = expandedTailStart(messages, Math.max(0, messages.length - tailMessageCount));
 	buildToolResults(messages, options, tailStart, messages.length, toolResults);
 	addSessionHistoryRangeEntries(messages, tailStart, messages.length, toolResults, options.addEntry, options);
 	options.render();
 	await yieldToEventLoop();
 
-	for (let end = tailStart; end > 0; end -= chunkSize) {
-		if (options.isCancelled()) return false;
-		const start = Math.max(0, end - chunkSize);
-		buildToolResults(messages, options, start, end, toolResults);
-		const entries: Entry[] = [];
-		addSessionHistoryRangeEntries(messages, start, end, toolResults, (entry) => entries.push(entry), options);
-		if (entries.length > 0) options.prependEntries(entries);
-		options.render();
-		await yieldToEventLoop();
-	}
+	if (options.isCancelled()) return { completed: false, backfill: undefined };
+	return {
+		completed: true,
+		backfill: tailStart > 0 ? { messages, nextEnd: tailStart, chunkSize, toolResults } : undefined,
+	};
+}
+
+export async function loadOlderSessionHistoryEntries(options: LoadOlderSessionHistoryOptions): Promise<boolean> {
+	const { state } = options;
+	if (state.nextEnd <= 0) return !options.isCancelled();
+	if (options.isCancelled()) return false;
+
+	const end = state.nextEnd;
+	const start = Math.max(0, end - state.chunkSize);
+	buildToolResults(state.messages, options, start, end, state.toolResults);
+	const entries: Entry[] = [];
+	addSessionHistoryRangeEntries(state.messages, start, end, state.toolResults, (entry) => entries.push(entry), options);
+	state.nextEnd = start;
+	if (entries.length > 0) options.prependEntries(entries);
+	await yieldToEventLoop();
 
 	return !options.isCancelled();
 }

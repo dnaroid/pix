@@ -19,7 +19,7 @@ export type CommandControllerHost = {
 	addEntry(entry: Entry): void;
 	setStatus(status: string): void;
 	toast: ToastNotifier;
-	render(): void;
+	requestRender(reason: string): void;
 	showMenu<T>(items: readonly PixMenuItem<T>[], options: PixMenuOptions): Promise<T | undefined>;
 	getModelMenuItems(query: string): readonly PixMenuItem<ModelMenuValue>[];
 	getThinkingMenuItems(query: string): readonly PixMenuItem<ThinkingMenuValue>[];

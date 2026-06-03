@@ -28,7 +28,7 @@ export function setNerdFontControllerTestDeps(overrides: Partial<NerdFontControl
 
 export type NerdFontInstallHost = {
 	showToast(message: string, kind: "success" | "error" | "warning" | "info"): void;
-	render(): void;
+	requestRender(reason: string): void;
 };
 
 const CASK_NAME = "font-jetbrains-mono-nerd-font";
@@ -63,7 +63,7 @@ export class NerdFontController {
 		} catch (error) {
 			this.host.showToast(`Nerd Font install failed: ${errorMessage(error)}`, "error");
 		} finally {
-			this.host.render();
+			this.host.requestRender("terminal:nerd-font-controller");
 		}
 	}
 }

@@ -7,7 +7,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { InputEditor } from "../../input-editor.js";
 import { createId } from "../id.js";
-import { stringifyUnknown } from "../rendering/message-content.js";
+import { stringifyUnknown } from "../message-content.js";
 import { collectStartupAvailabilityIssues } from "../cli/startup-checks.js";
 import { createStartupInfoMessage, isEmptyStartupSession } from "../cli/startup-info.js";
 import type { AppOptions, Entry, PixExtensionUIContext, SessionActivity } from "../types.js";
@@ -15,7 +15,6 @@ import type { AppOptions, Entry, PixExtensionUIContext, SessionActivity } from "
 export type AppSessionLifecycleHost = {
 	options: AppOptions;
 	createRuntime(): Promise<AgentSessionRuntime>;
-	entries: Entry[];
 	runtime(): AgentSessionRuntime | undefined;
 	setRuntime(runtime: AgentSessionRuntime | undefined): void;
 	isRunning(): boolean;
@@ -40,6 +39,7 @@ export type AppSessionLifecycleHost = {
 	setSessionStatus(session: AgentSession | undefined): void;
 	setSessionActivity(activity: SessionActivity): void;
 	sessionEventsReset(): void;
+	clearEntries(): void;
 	resetSubagentsWidget(): void;
 	resetTodoWidget(): void;
 	conversationViewportClear(): void;
@@ -51,7 +51,8 @@ export type AppSessionLifecycleHost = {
 	loadSessionHistoryEntriesAsync(options: { isCancelled: () => boolean; render: () => void }): Promise<boolean>;
 	syncUserSessionEntryMetadata(): void;
 	restoreTabsAfterStartup(): Promise<void>;
-	render(): void;
+	requestRender(reason: string): void;
+	renderImmediately(): void;
 };
 
 export class AppSessionLifecycleController {
@@ -68,7 +69,8 @@ export class AppSessionLifecycleController {
 		await this.host.loadRequestHistory();
 		this.host.setRunning(true);
 		this.host.startSubagentsPolling();
-		this.host.render();
+		this.host.requestRender("session:session-lifecycle-controller");
+		this.host.renderImmediately();
 
 		try {
 			const runtime = await this.host.createRuntime();
@@ -110,12 +112,12 @@ export class AppSessionLifecycleController {
 			}
 			this.host.setSessionStatus(runtime.session);
 			this.host.setSessionActivity(runtime.session.isStreaming ? "running" : "idle");
-			this.host.render();
+			this.host.requestRender("session:session-lifecycle-controller");
 	} catch (error) {
 		this.host.addEntry({ id: createId("error"), kind: "error", text: stringifyUnknown(error) });
 		this.host.showToast("Session startup failed", "error");
 		this.host.setSessionStatus(undefined);
-		this.host.render();
+		this.host.requestRender("session:session-lifecycle-controller");
 	}
 }
 
@@ -142,24 +144,24 @@ export class AppSessionLifecycleController {
 	afterSessionReplacement(message?: string): void {
 		this.resetSessionView();
 		void this.loadReplacementHistory(message);
-		this.host.render();
+		this.host.requestRender("session:session-lifecycle-controller");
 	}
 
 	private async loadReplacementHistory(message?: string): Promise<void> {
 		await this.host.loadSessionHistoryEntriesAsync({
 			isCancelled: () => !this.host.isRunning(),
-			render: () => this.host.render(),
+			render: () => this.host.requestRender("session:session-lifecycle-controller"),
 		});
 		this.host.syncUserSessionEntryMetadata();
 		if (message) this.host.addEntry({ id: createId("system"), kind: "system", text: message });
 		const session = this.host.runtime()?.session;
 		this.host.setSessionStatus(session);
 		this.host.setSessionActivity(session?.isStreaming ? "running" : "idle");
-		this.host.render();
+		this.host.requestRender("session:session-lifecycle-controller");
 	}
 
 	resetSessionView(): void {
-		this.host.entries.length = 0;
+		this.host.clearEntries();
 		this.host.sessionEventsReset();
 		this.host.resetSubagentsWidget();
 		this.host.resetTodoWidget();

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { formatDcpStatsToast } from "../src/app/rendering/dcp-stats.js";
+import { formatDcpStatsToast } from "../src/app/screen/dcp-stats-toast.js";
 
 describe("formatDcpStatsToast", () => {
 	it("formats detailed DCP session and nudge telemetry for context clicks", () => {

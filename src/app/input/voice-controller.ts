@@ -19,7 +19,7 @@ export type AppVoiceControllerHost = {
 	setPartialTranscript(text: string | undefined): void;
 	addSystemMessage(message: string): void;
 	showToast(message: string, kind: "success" | "error" | "warning" | "info"): void;
-	render(): void;
+	requestRender(reason: string): void;
 };
 
 type VoskRecognitionResult = string | { text?: unknown; partial?: unknown };
@@ -158,7 +158,7 @@ export class AppVoiceController {
 		this.language = this.nextLanguage();
 		this.saveLanguageSelection(this.language);
 		this.host.showToast(`Voice language: ${this.modelDefinition(this.language).label}`, "info");
-		this.host.render();
+		this.host.requestRender("input:voice-controller");
 
 		if (wasActive) void this.startRecording();
 	}
@@ -180,7 +180,7 @@ export class AppVoiceController {
 		if (this.state !== "idle") {
 			this.clearProgressMessage();
 			this.state = "idle";
-			this.host.render();
+			this.host.requestRender("input:voice-controller");
 		}
 	}
 
@@ -204,12 +204,12 @@ export class AppVoiceController {
 			vosk.setLogLevel?.(-1);
 
 			this.state = "downloading";
-			this.host.render();
+			this.host.requestRender("input:voice-controller");
 			const modelPath = await voiceControllerDeps.ensureModel(language, this.modelDefinition(language));
 			if (!this.isCurrentStart(generation)) return;
 
 			this.state = "loading";
-			this.host.render();
+			this.host.requestRender("input:voice-controller");
 			const model = this.cachedModel(language, modelPath, vosk);
 			const recorder = await voiceControllerDeps.selectRecorderCommand();
 			const recognizer = new vosk.Recognizer({ model, sampleRate: SAMPLE_RATE });
@@ -217,7 +217,7 @@ export class AppVoiceController {
 			this.recognizer = recognizer;
 			this.audioProcess = audioProcess;
 			this.state = "listening";
-			this.host.render();
+			this.host.requestRender("input:voice-controller");
 			this.host.showToast(`Voice input on (${this.modelDefinition(language).label}, ${recorder.description})`, "info");
 
 			this.bindAudioProcess(audioProcess, recognizer, generation);
@@ -228,7 +228,7 @@ export class AppVoiceController {
 			this.state = "idle";
 			this.addProgressSystemMessage(`Unavailable: ${errorMessage(error)}`);
 			this.host.showToast(`Voice input unavailable: ${errorMessage(error)}`, "error");
-			this.host.render();
+			this.host.requestRender("input:voice-controller");
 		}
 	}
 
@@ -306,7 +306,7 @@ export class AppVoiceController {
 			this.audioProcess = undefined;
 			this.state = "idle";
 			this.host.showToast(`Voice recorder failed: ${errorMessage(error)}`, "error");
-			this.host.render();
+			this.host.requestRender("input:voice-controller");
 		});
 
 		audioProcess.once("close", (code, signal) => {
@@ -320,7 +320,7 @@ export class AppVoiceController {
 				const details = stderr.trim() || signal || `exit code ${code}`;
 				this.host.showToast(`Voice recorder stopped: ${details}`, "warning");
 			}
-			this.host.render();
+			this.host.requestRender("input:voice-controller");
 		});
 	}
 
@@ -335,11 +335,11 @@ export class AppVoiceController {
 		if (!this.progressTimer) {
 			this.progressTimer = setInterval(() => {
 				this.progressFrame += 1;
-				this.host.render();
+				this.host.requestRender("input:voice-controller");
 			}, 120);
 			this.progressTimer.unref();
 		}
-		this.host.render();
+		this.host.requestRender("input:voice-controller");
 	}
 
 	private clearProgressMessage(): void {

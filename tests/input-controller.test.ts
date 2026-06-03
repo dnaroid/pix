@@ -159,7 +159,7 @@ function createController(options: { extensionInputUsesEditor: boolean; shiftPre
 		getDirectPopupMenu: () => undefined,
 		resetRequestHistoryNavigation: () => undefined,
 		resetInputMenuDismissals: () => undefined,
-		render: () => {
+		requestRender: () => {
 			calls.render += 1;
 		},
 		moveActivePopupMenuSelection: (delta) => { calls.menuDeltas.push(delta); return calls.moveMenuResult; },

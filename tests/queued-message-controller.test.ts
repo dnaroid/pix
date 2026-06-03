@@ -308,7 +308,7 @@ function createHost(session: AgentSession, state: HostState): AppQueuedMessageCo
 		requireRuntime: () => runtime,
 		visibleEntries: () => state.visibleEntries,
 		isRunning: () => true,
-		render: () => undefined,
+		requestRender: () => undefined,
 		addEntry: () => undefined,
 		addSessionAbortedEntry: () => {
 			state.abortedEntries += 1;

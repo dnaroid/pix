@@ -1,6 +1,7 @@
 import { stringDisplayWidth } from "../../terminal-width.js";
 import type { Theme } from "../../theme.js";
 import { APP_ICONS } from "../icons.js";
+import { tabPanelRows } from "../session/tab-panel-layout.js";
 import { ellipsizeDisplay } from "./render-text.js";
 import type { ScreenStyler } from "../screen/screen-styler.js";
 import type { SessionTab, StyledSegment, TabLineLayout, TabLineTarget } from "../types.js";
@@ -22,13 +23,7 @@ type TabButtonLayout = {
 const TAB_SEPARATOR = " │ ";
 const EMPTY_NEW_TAB_PREFIX = "│ ";
 const DEFAULT_SESSION_TITLE_PATTERN = /^session [0-9a-f]{8}$/iu;
-export const TAB_PANEL_ROWS = 2;
-
-export function tabPanelRows(tabLineVisible: boolean, terminalRows: number, tabCount = TAB_PANEL_ROWS): number {
-	if (!tabLineVisible) return 0;
-	const desiredRows = TAB_PANEL_ROWS;
-	return Math.min(desiredRows, Math.max(0, terminalRows - 1));
-}
+export { TAB_PANEL_ROWS, tabPanelRows } from "../session/tab-panel-layout.js";
 
 export class TabLineRenderer {
 	constructor(private readonly host: TabLineRendererHost) {}

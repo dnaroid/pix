@@ -13,7 +13,7 @@ export type AppExtensionActionsHost = {
 	setStatus(status: string): void;
 	setSessionStatus(runtime: AgentSessionRuntime["session"]): void;
 	showToast(message: string, kind: "success" | "error" | "warning" | "info"): void;
-	render(): void;
+	requestRender(reason: string): void;
 };
 
 export class AppExtensionActionsController {
@@ -39,7 +39,7 @@ export class AppExtensionActionsController {
 					this.host.loadSessionHistory();
 					if (result.editorText && !this.host.getInput().trim()) this.host.setInput(result.editorText);
 					this.host.setSessionStatus(runtime.session);
-					this.host.render();
+					this.host.requestRender("extensions:extension-actions-controller");
 				}
 				return result;
 			},
@@ -52,7 +52,7 @@ export class AppExtensionActionsController {
 				await runtime.session.reload();
 				this.host.setSessionStatus(runtime.session);
 				this.host.showToast("Reloaded resources", "success");
-				this.host.render();
+				this.host.requestRender("extensions:extension-actions-controller");
 			},
 		};
 	}
@@ -67,6 +67,6 @@ export class AppExtensionActionsController {
 	const pathText = error.extensionPath ? ` (${error.extensionPath})` : "";
 	this.host.addEntry({ id: createId("error"), kind: "error", text: `Extension ${error.event} failed${pathText}: ${error.error}` });
 	this.host.showToast(`Extension ${error.event} failed`, "error");
-	if (this.host.isRunning()) this.host.render();
+	if (this.host.isRunning()) this.host.requestRender("extensions:extension-actions-controller");
 }
 }

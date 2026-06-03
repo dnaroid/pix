@@ -30,7 +30,7 @@ export type AppAutocompleteControllerHost = {
 	inputEditor(): InputEditor;
 	autocompleteConfig(): AutocompleteConfig;
 	isRunning(): boolean;
-	render(): void;
+	requestRender(reason: string): void;
 };
 
 type AutocompleteTarget = {
@@ -99,7 +99,7 @@ export class AppAutocompleteController {
 		this.suggestion = undefined;
 		this.lastObservedKey = "";
 		this.clearTimer();
-		this.host.render();
+		this.host.requestRender("input:autocomplete-controller");
 		return true;
 	}
 
@@ -127,7 +127,7 @@ export class AppAutocompleteController {
 			const suggestion = cleanupCompletion(completion, target.text, config);
 			if (!suggestion) return;
 			this.suggestion = { target, text: suggestion };
-			if (this.host.isRunning()) this.host.render();
+			if (this.host.isRunning()) this.host.requestRender("input:autocomplete-controller");
 		} catch {
 			// Inline autocomplete is best-effort; avoid surfacing transient model/auth errors while typing.
 		} finally {

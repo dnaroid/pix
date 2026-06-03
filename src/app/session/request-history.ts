@@ -14,7 +14,7 @@ export type RequestHistoryHost = {
 	getInput(): string;
 	setInput(value: string): void;
 	resetInputMenuDismissals(): void;
-	render(): void;
+	requestRender(reason: string): void;
 };
 
 export class AppRequestHistory {
@@ -114,7 +114,7 @@ export class AppRequestHistory {
 			this.host.resetInputMenuDismissals();
 		}
 		this.host.setInput(value);
-		this.host.render();
+		this.host.requestRender("session:request-history");
 	}
 
 	private filePath(): string {

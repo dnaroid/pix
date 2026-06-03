@@ -1,19 +1,18 @@
 import { copyTextToClipboard } from "./clipboard.js";
 import type { AppCommandController } from "../commands/command-controller.js";
-import type { ConversationViewport } from "../rendering/conversation-viewport.js";
-import type { EditorLayoutRenderer } from "../rendering/editor-layout-renderer.js";
 import type { ImageContent, InputEditor } from "../../input-editor.js";
 import type { ToastEntry, ToastVariant } from "../../ui.js";
-import { stringifyUnknown } from "../rendering/message-content.js";
+import { stringifyUnknown } from "../message-content.js";
 import type { AppPopupActionController } from "../popup/popup-action-controller.js";
 import type { AppPopupMenuController } from "../popup/popup-menu-controller.js";
-import { horizontalPaddingLayout } from "../rendering/render-text.js";
+import { horizontalPaddingLayout } from "../text-format.js";
 import type { AppScrollController } from "./scroll-controller.js";
 import { orderedSelection, samePoint } from "./screen-selection.js";
 import { openImageContent as openSystemImageContent } from "./image-opener.js";
 import { stringDisplayWidth } from "../../terminal-width.js";
 import type {
 	ConversationSelectionPoint,
+	EditorLayout,
 	Entry,
 	ImageClickTarget,
 	MouseEvent,
@@ -35,13 +34,24 @@ import type {
 	StatusVoiceLanguageTarget,
 	StatusVoiceMicTarget,
 } from "../types.js";
-import { formatDcpStatsToast } from "../rendering/dcp-stats.js";
+import { formatDcpStatsToast } from "./dcp-stats-toast.js";
+import type { RenderHitMap, StatusRenderHitMap } from "./render-hit-map.js";
 import { detectFileLinks, type RenderedLink } from "./file-links.js";
 import { openFileLink as openDetectedFileLink } from "./file-link-opener.js";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 
 const CLICK_FLASH_MS = 100;
 const LOST_MOUSE_RELEASE_SETTLE_MS = 180;
+
+type MouseConversationViewport = {
+	slice(width: number, start: number, count: number): RenderedLine[];
+};
+
+type MouseEditorLayout = Pick<EditorLayout, "bodyHeight" | "inputBottomSeparatorRow" | "inputSeparatorRow" | "inputStartRow" | "renderedInput">;
+
+type MouseEditorLayoutRenderer = {
+	computeLayout(width: number, rows: number): MouseEditorLayout;
+};
 
 type ClickFlash = {
 	y: number;
@@ -66,8 +76,8 @@ export type AppMouseControllerHost = {
 	terminalColumns(): number;
 	terminalRows(): number;
 	tabPanelRows(terminalRows: number): number;
-	conversationViewport(): ConversationViewport;
-	editorLayoutRenderer(): EditorLayoutRenderer;
+	conversationViewport(): MouseConversationViewport;
+	editorLayoutRenderer(): MouseEditorLayoutRenderer;
 	inputEditor(): InputEditor;
 	resetRequestHistoryNavigation(): void;
 	findEntry(entryId: string): Entry | undefined;
@@ -97,7 +107,7 @@ export type AppMouseControllerHost = {
 	toggleTerminalBellSound?(): void;
 	copyTextToClipboard?(text: string): void | Promise<void>;
 	handleExtensionInputMouse(event: MouseEvent & { localRow: number; localColumn: number; width: number }): boolean;
-	render(): void;
+	requestRender(reason: string): void;
 };
 
 export class AppMouseController {
@@ -146,6 +156,58 @@ export class AppMouseController {
 		private readonly scrollController: AppScrollController,
 		private readonly commandController: AppCommandController,
 	) {}
+
+	clearRenderHitMap(): void {
+		this.renderedTargets.clear();
+		this.renderedRowTexts.clear();
+		this.renderedRowBackgrounds.clear();
+		this.renderedImageTargets.clear();
+		this.clearStatusRenderHitMap();
+		this.tabLineTargets.length = 0;
+	}
+
+	applyRenderHitMap(hitMap: RenderHitMap): void {
+		this.clearRenderHitMap();
+		copyMap(hitMap.targets, this.renderedTargets);
+		copyMap(hitMap.rowTexts, this.renderedRowTexts);
+		copyMap(hitMap.rowBackgrounds, this.renderedRowBackgrounds);
+		copyMap(hitMap.imageTargets, this.renderedImageTargets);
+		this.tabLineTargets.push(...hitMap.tabLineTargets);
+		if (hitMap.status) this.applyStatusRenderHitMap(hitMap.status);
+	}
+
+	applyStatusRenderHitMap(status: StatusRenderHitMap): void {
+		this.statusModelTarget = status.modelTarget;
+		this.statusThinkingTarget = status.thinkingTarget;
+		this.statusContextTarget = status.contextTarget;
+		this.statusModelUsageTarget = status.modelUsageTarget;
+		this.statusDraftQueueTarget = status.draftQueueTarget;
+		this.statusUserJumpTarget = status.userJumpTarget;
+		this.statusThinkingExpandTarget = status.thinkingExpandTarget;
+		this.statusCompactToolsTarget = status.compactToolsTarget;
+		this.statusTerminalBellSoundTarget = status.terminalBellSoundTarget;
+		this.statusSessionTarget = status.sessionTarget;
+		this.statusPromptEnhancerTarget = status.promptEnhancerTarget;
+		this.statusVoiceMicTarget = status.voiceMicTarget;
+		this.statusVoiceLanguageTarget = status.voiceLanguageTarget;
+		this.renderedRowTexts.set(status.row, status.text);
+	}
+
+	private clearStatusRenderHitMap(): void {
+		this.statusModelTarget = undefined;
+		this.statusThinkingTarget = undefined;
+		this.statusContextTarget = undefined;
+		this.statusModelUsageTarget = undefined;
+		this.statusDraftQueueTarget = undefined;
+		this.statusUserJumpTarget = undefined;
+		this.statusThinkingExpandTarget = undefined;
+		this.statusCompactToolsTarget = undefined;
+		this.statusTerminalBellSoundTarget = undefined;
+		this.statusSessionTarget = undefined;
+		this.statusPromptEnhancerTarget = undefined;
+		this.statusVoiceMicTarget = undefined;
+		this.statusVoiceLanguageTarget = undefined;
+	}
 
 	handleMouse(event: MouseEvent): void {
 		if (this.handleInputScrollBar(event)) return;
@@ -286,13 +348,13 @@ export class AppMouseController {
 		if (this.clickFlashTimer) clearTimeout(this.clickFlashTimer);
 		this.clickFlash = flash;
 		this.clickFlashDirty = true;
-		this.host.render();
+		this.host.requestRender("screen:mouse-controller");
 
 		this.clickFlashTimer = setTimeout(() => {
 			this.clickFlash = undefined;
 			this.clickFlashTimer = undefined;
 			this.clickFlashDirty = true;
-			this.host.render();
+			this.host.requestRender("screen:mouse-controller");
 		}, CLICK_FLASH_MS);
 	}
 
@@ -511,7 +573,7 @@ export class AppMouseController {
 		if (localY < editorStartRow || localY >= inputEndRow) return false;
 
 		if (this.host.inputEditor().scrollByVisualLines(delta, contentWidth, renderedInput.visibleRowCount, "", "")) {
-			this.host.render();
+			this.host.requestRender("screen:mouse-controller");
 		}
 		return true;
 	}
@@ -522,12 +584,12 @@ export class AppMouseController {
 		const scrollOffset = Math.round(maxScroll * ratio);
 		const { contentWidth } = horizontalPaddingLayout(this.host.terminalColumns());
 		if (this.host.inputEditor().setVisualScrollOffset(scrollOffset, contentWidth, visibleRowCount, "", "")) {
-			this.host.render();
+			this.host.requestRender("screen:mouse-controller");
 		}
 	}
 
 	private inputGeometry(event: MouseEvent): {
-		renderedInput: ReturnType<EditorLayoutRenderer["computeLayout"]>["renderedInput"];
+		renderedInput: MouseEditorLayout["renderedInput"];
 		inputStartRow: number;
 		localY: number;
 		contentWidth: number;
@@ -570,7 +632,7 @@ export class AppMouseController {
 		if (event.y !== target.row || event.x < target.startColumn || event.x >= target.endColumn) return false;
 
 		this.popupMenus.openDirectPopupMenu("model");
-		this.host.render();
+		this.host.requestRender("screen:mouse-controller");
 		return true;
 	}
 
@@ -580,7 +642,7 @@ export class AppMouseController {
 		if (event.y !== target.row || event.x < target.startColumn || event.x >= target.endColumn) return false;
 
 		this.popupMenus.openDirectPopupMenu("thinking");
-		this.host.render();
+		this.host.requestRender("screen:mouse-controller");
 		return true;
 	}
 
@@ -611,7 +673,7 @@ export class AppMouseController {
 		if (event.y !== target.row || event.x < target.startColumn || event.x >= target.endColumn) return false;
 
 		this.popupMenus.openDirectPopupMenu("user-message-jump", { preserveStatus: true });
-		this.host.render();
+		this.host.requestRender("screen:mouse-controller");
 		return true;
 	}
 
@@ -704,7 +766,7 @@ export class AppMouseController {
 		const cursor = this.host.inputEditor().offsetAtVisualPosition(visualRow, event.x - left, contentWidth, "", "");
 		this.host.resetRequestHistoryNavigation();
 		this.host.inputEditor().setCursor(cursor, { preserveScroll: true });
-		this.host.render();
+		this.host.requestRender("screen:mouse-controller");
 		return true;
 	}
 
@@ -729,12 +791,12 @@ export class AppMouseController {
 
 	private openUserMessageMenu(entryId: string): void {
 		if (!this.popupMenus.openUserMessageMenu(entryId)) return;
-		this.host.render();
+		this.host.requestRender("screen:mouse-controller");
 	}
 
 	private openQueueMessageMenu(entryId: string): void {
 		if (!this.popupMenus.openQueueMessageMenu(entryId)) return;
-		this.host.render();
+		this.host.requestRender("screen:mouse-controller");
 	}
 
 	private copyErrorToast(toastId: number): boolean {
@@ -766,7 +828,7 @@ export class AppMouseController {
 			if (!this.mouseSelection) return false;
 			this.updateSelectionCurrentFromMouse(event);
 			this.updateLeftEdgeReleaseFallback(event);
-			this.host.render();
+			this.host.requestRender("screen:mouse-controller");
 			return true;
 		}
 
@@ -800,12 +862,12 @@ export class AppMouseController {
 		this.mouseSelection = undefined;
 
 		if (!selection.moved && samePoint(selection.anchor, selection.current)) {
-			this.host.render();
+			this.host.requestRender("screen:mouse-controller");
 			return false;
 		}
 
 		const selectedText = this.getSelectedText(selection);
-		this.host.render();
+		this.host.requestRender("screen:mouse-controller");
 		if (selectedText.trim().length === 0) return true;
 
 		try {
@@ -1070,7 +1132,7 @@ export class AppMouseController {
 		this.autoScrollAccumulator -= delta;
 		const scrolled = this.scrollController.scrollByLines(delta, { render: false });
 		this.updateConversationSelectionAtAutoScrollEdge();
-		if (scrolled) this.host.render();
+		if (scrolled) this.host.requestRender("screen:mouse-controller");
 	}
 
 	private updateConversationSelectionAtAutoScrollEdge(): void {
@@ -1190,4 +1252,8 @@ function editorLayoutRows(terminalRows: number, tabPanelRows: number): number {
 
 function editorLayoutTopOffset(tabPanelRows: number): number {
 	return tabPanelRows;
+}
+
+function copyMap<K, V>(source: ReadonlyMap<K, V>, target: Map<K, V>): void {
+	for (const [key, value] of source) target.set(key, value);
 }

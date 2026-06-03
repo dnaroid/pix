@@ -1,7 +1,7 @@
 import { watch, type FSWatcher } from "node:fs";
 import { join, resolve } from "node:path";
 import { SUBAGENTS_POLL_INTERVAL_MS, SUBAGENTS_RUN_ROOT } from "../constants.js";
-import { stringifyUnknown } from "../rendering/message-content.js";
+import { stringifyUnknown } from "../message-content.js";
 import { readSubagentRegistry, readSubagentRunStateFromFiles, subagentRunHasParentSession } from "./subagents-files.js";
 import {
 	activeSubagentStates,
@@ -24,7 +24,7 @@ export type SubagentsWidgetControllerHost = {
 	readonly cwd: string;
 	sessionFile(): string | undefined;
 	isRunning(): boolean;
-	render(): void;
+	requestRender(reason: string): void;
 };
 
 export class AppSubagentsWidgetController {
@@ -96,7 +96,7 @@ export class AppSubagentsWidgetController {
 
 		void this.refreshFromFiles(this.refreshGeneration);
 		this.schedulePoll(0);
-		if (this.host.isRunning()) this.host.render();
+		if (this.host.isRunning()) this.host.requestRender("subagents:subagents-widget-controller");
 		this.startFileWatcher();
 	}
 
@@ -318,7 +318,7 @@ export class AppSubagentsWidgetController {
 		const previous = stringifyUnknown(this.state);
 		const serializedNext = stringifyUnknown(next);
 		this.state = next;
-		if (previous !== serializedNext && this.host.isRunning()) this.host.render();
+		if (previous !== serializedNext && this.host.isRunning()) this.host.requestRender("subagents:subagents-widget-controller");
 	}
 
 	private isCurrentGeneration(generation: number): boolean {

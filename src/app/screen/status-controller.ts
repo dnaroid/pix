@@ -13,7 +13,7 @@ export type AppStatusControllerHost = {
 	readonly theme: Theme;
 	readonly blinkController: AppBlinkController;
 	runtimeSession(): AgentSession | undefined;
-	render(): void;
+	requestRender(reason: string): void;
 };
 
 export class AppStatusController {
@@ -135,7 +135,7 @@ export class AppStatusController {
 			});
 			const branch = result.status === 0 ? result.stdout.trim() || undefined : undefined;
 			this.gitBranchCache = { checkedAt: Date.now(), branch };
-			if (branch !== previous) this.host.render();
+			if (branch !== previous) this.host.requestRender("screen:status-controller");
 		} finally {
 			this.gitBranchLookupInFlight = false;
 		}

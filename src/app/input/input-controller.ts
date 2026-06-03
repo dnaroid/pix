@@ -17,7 +17,7 @@ export type InputControllerHost = {
 	getDirectPopupMenu(): DirectPopupMenu | undefined;
 	resetRequestHistoryNavigation(): void;
 	resetInputMenuDismissals(): void;
-	render(): void;
+	requestRender(reason: string): void;
 	moveActivePopupMenuSelection(delta: number): boolean;
 	navigateRequestHistory(delta: number): boolean;
 	scrollByLines(delta: number): void;
@@ -121,26 +121,26 @@ export class AppInputController {
 			["\x1b[B", () => this.handleArrowDown()],
 			["\x1b[C", () => this.handleArrowRight()],
 			["\x1b[D", () => this.handleArrowLeft()],
-			["\x1b[1;2A", () => { this.host.inputEditor.moveUpExtend(); this.host.render(); }],
-			["\x1b[1;2B", () => { this.host.inputEditor.moveDownExtend(); this.host.render(); }],
-			["\x1b[1;2C", () => { this.host.inputEditor.moveRightExtend(); this.host.render(); }],
-			["\x1b[1;2D", () => { this.host.inputEditor.moveLeftExtend(); this.host.render(); }],
-			["\x1b[H", () => { this.host.inputEditor.moveToLineStart(); this.host.render(); }],
-			["\x1b[F", () => { this.host.inputEditor.moveToLineEnd(); this.host.render(); }],
-			["\x1b[1~", () => { this.host.inputEditor.moveToLineStart(); this.host.render(); }],
-			["\x1b[4~", () => { this.host.inputEditor.moveToLineEnd(); this.host.render(); }],
-			["\x1b[1;5H", () => { this.host.inputEditor.moveToStart(); this.host.render(); }],
-			["\x1b[1;5F", () => { this.host.inputEditor.moveToEnd(); this.host.render(); }],
-			["\x1b[3~", () => { this.host.resetRequestHistoryNavigation(); this.host.inputEditor.deleteForward(); this.host.render(); }],
-			["\x1b[1;3D", () => { this.host.inputEditor.moveWordLeft(); this.host.render(); }],
-			["\x1b[1;3C", () => { this.host.inputEditor.moveWordRight(); this.host.render(); }],
-			["\x1bb", () => { this.host.inputEditor.moveWordLeft(); this.host.render(); }],
-			["\x1bf", () => { this.host.inputEditor.moveWordRight(); this.host.render(); }],
-			["\x1b[3;3~", () => { this.host.resetRequestHistoryNavigation(); this.host.inputEditor.deleteWordForward(); this.host.render(); }],
+			["\x1b[1;2A", () => { this.host.inputEditor.moveUpExtend(); this.host.requestRender("input:input-controller"); }],
+			["\x1b[1;2B", () => { this.host.inputEditor.moveDownExtend(); this.host.requestRender("input:input-controller"); }],
+			["\x1b[1;2C", () => { this.host.inputEditor.moveRightExtend(); this.host.requestRender("input:input-controller"); }],
+			["\x1b[1;2D", () => { this.host.inputEditor.moveLeftExtend(); this.host.requestRender("input:input-controller"); }],
+			["\x1b[H", () => { this.host.inputEditor.moveToLineStart(); this.host.requestRender("input:input-controller"); }],
+			["\x1b[F", () => { this.host.inputEditor.moveToLineEnd(); this.host.requestRender("input:input-controller"); }],
+			["\x1b[1~", () => { this.host.inputEditor.moveToLineStart(); this.host.requestRender("input:input-controller"); }],
+			["\x1b[4~", () => { this.host.inputEditor.moveToLineEnd(); this.host.requestRender("input:input-controller"); }],
+			["\x1b[1;5H", () => { this.host.inputEditor.moveToStart(); this.host.requestRender("input:input-controller"); }],
+			["\x1b[1;5F", () => { this.host.inputEditor.moveToEnd(); this.host.requestRender("input:input-controller"); }],
+			["\x1b[3~", () => { this.host.resetRequestHistoryNavigation(); this.host.inputEditor.deleteForward(); this.host.requestRender("input:input-controller"); }],
+			["\x1b[1;3D", () => { this.host.inputEditor.moveWordLeft(); this.host.requestRender("input:input-controller"); }],
+			["\x1b[1;3C", () => { this.host.inputEditor.moveWordRight(); this.host.requestRender("input:input-controller"); }],
+			["\x1bb", () => { this.host.inputEditor.moveWordLeft(); this.host.requestRender("input:input-controller"); }],
+			["\x1bf", () => { this.host.inputEditor.moveWordRight(); this.host.requestRender("input:input-controller"); }],
+			["\x1b[3;3~", () => { this.host.resetRequestHistoryNavigation(); this.host.inputEditor.deleteWordForward(); this.host.requestRender("input:input-controller"); }],
 			["\x1b[200~", () => this.pasteHandler.beginBracketedPaste()],
 			["\x1b[201~", () => this.pasteHandler.endBracketedPaste()],
-			["\x1b[1;2H", () => { this.host.inputEditor.moveToLineStartExtend(); this.host.render(); }],
-			["\x1b[1;2F", () => { this.host.inputEditor.moveToLineEndExtend(); this.host.render(); }],
+			["\x1b[1;2H", () => { this.host.inputEditor.moveToLineStartExtend(); this.host.requestRender("input:input-controller"); }],
+			["\x1b[1;2F", () => { this.host.inputEditor.moveToLineEndExtend(); this.host.requestRender("input:input-controller"); }],
 			["\x1b[118;5u", () => { void this.pasteHandler.handleClipboardImagePaste(); }],
 			["\x1b[27;5;118~", () => { void this.pasteHandler.handleClipboardImagePaste(); }],
 			["\x1b[122;9u", () => this.undoInput()],
@@ -151,7 +151,7 @@ export class AppInputController {
 			["\x1b[27;10;122~", () => this.redoInput()],
 			["\x1b[121;9u", () => this.redoInput()],
 			["\x1b[27;9;121~", () => this.redoInput()],
-			["\x1b[97;5u", () => { this.host.inputEditor.selectAll(); this.host.render(); }],
+			["\x1b[97;5u", () => { this.host.inputEditor.selectAll(); this.host.requestRender("input:input-controller"); }],
 			["\x1b[107;5u", () => this.deleteCurrentInputLine()],
 		];
 	}
@@ -190,7 +190,7 @@ export class AppInputController {
 			if (!hasTerminalCommandModifier(modifierValue)) {
 				this.host.resetRequestHistoryNavigation();
 				this.host.inputEditor.deleteBackward();
-				this.host.render();
+				this.host.requestRender("input:input-controller");
 				return "consumed";
 			}
 
@@ -260,7 +260,7 @@ export class AppInputController {
 			const lineIndex = beforeCursor.split("\n").length - 1;
 			if (lineIndex > 0) {
 				this.host.inputEditor.moveUp();
-				this.host.render();
+				this.host.requestRender("input:input-controller");
 				return;
 			}
 		}
@@ -281,7 +281,7 @@ export class AppInputController {
 			const totalLines = this.host.getInput().split("\n").length;
 			if (lineIndex < totalLines - 1) {
 				this.host.inputEditor.moveDown();
-				this.host.render();
+				this.host.requestRender("input:input-controller");
 				return;
 			}
 		}
@@ -294,12 +294,12 @@ export class AppInputController {
 			const [start] = this.orderedEditorSelection();
 			this.host.inputEditor.clearSelection();
 			this.host.inputEditor.setText(this.host.inputEditor.text, start);
-			this.host.render();
+			this.host.requestRender("input:input-controller");
 			return;
 		}
 		if (this.host.inputEditor.cursor > 0) {
 			this.host.inputEditor.moveLeft();
-			this.host.render();
+			this.host.requestRender("input:input-controller");
 		}
 	}
 
@@ -308,12 +308,12 @@ export class AppInputController {
 			const [, end] = this.orderedEditorSelection();
 			this.host.inputEditor.clearSelection();
 			this.host.inputEditor.setText(this.host.inputEditor.text, end);
-			this.host.render();
+			this.host.requestRender("input:input-controller");
 			return;
 		}
 		if (this.host.inputEditor.cursor < this.host.inputEditor.text.length) {
 			this.host.inputEditor.moveRight();
-			this.host.render();
+			this.host.requestRender("input:input-controller");
 		}
 	}
 
@@ -326,19 +326,19 @@ export class AppInputController {
 	private insertInputNewline(): void {
 		this.host.resetRequestHistoryNavigation();
 		this.host.inputEditor.insert("\n");
-		this.host.render();
+		this.host.requestRender("input:input-controller");
 	}
 
 	private undoInput(): void {
 		this.host.resetRequestHistoryNavigation();
 		if (this.host.inputEditor.undo()) this.host.resetInputMenuDismissals();
-		this.host.render();
+		this.host.requestRender("input:input-controller");
 	}
 
 	private redoInput(): void {
 		this.host.resetRequestHistoryNavigation();
 		if (this.host.inputEditor.redo()) this.host.resetInputMenuDismissals();
-		this.host.render();
+		this.host.requestRender("input:input-controller");
 	}
 
 	private handleEditShortcutChar(char: string): boolean {
@@ -369,7 +369,7 @@ export class AppInputController {
 	private deleteCurrentInputLine(): void {
 		this.host.resetRequestHistoryNavigation();
 		this.host.inputEditor.deleteToLineStartOrPreviousLineEnd();
-		this.host.render();
+		this.host.requestRender("input:input-controller");
 	}
 
 	private handleChar(char: string): void {
@@ -396,7 +396,7 @@ export class AppInputController {
 			return;
 		}
 		if (char === "\u000c") {
-			this.host.render();
+			this.host.requestRender("input:input-controller");
 			return;
 		}
 		if (char === "\u0007") {
@@ -427,7 +427,7 @@ export class AppInputController {
 			if (this.host.inputEditor.isInBracketedPaste) return;
 			this.host.resetRequestHistoryNavigation();
 			this.host.inputEditor.deleteBackward();
-			this.host.render();
+			this.host.requestRender("input:input-controller");
 			return;
 		}
 		if (char >= " ") {
@@ -437,7 +437,7 @@ export class AppInputController {
 				this.host.resetRequestHistoryNavigation();
 				this.host.inputEditor.insert(char);
 			}
-			this.host.render();
+			this.host.requestRender("input:input-controller");
 		}
 	}
 

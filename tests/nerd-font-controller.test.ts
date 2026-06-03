@@ -162,7 +162,7 @@ function fakeHost() {
 		showToast(message: string, kind: "success" | "error" | "warning" | "info") {
 			this.toasts.push({ message, kind });
 		},
-		render() {
+		requestRender() {
 			this.renders += 1;
 		},
 	};

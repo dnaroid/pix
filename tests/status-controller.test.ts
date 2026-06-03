@@ -19,7 +19,7 @@ describe("AppStatusController", () => {
 			theme: THEMES.dark,
 			blinkController: fakeBlinkController(),
 			runtimeSession: () => session,
-			render: () => {},
+			requestRender: () => {},
 		});
 
 		controller.setStatus("ready");
@@ -39,7 +39,7 @@ describe("AppStatusController", () => {
 			theme: THEMES.dark,
 			blinkController: blink,
 			runtimeSession: () => undefined,
-			render: () => { renders += 1; },
+			requestRender: () => { renders += 1; },
 		});
 		const named = { ...sessionWithContextPercent(7), sessionName: "  Feature work  " } as AgentSession;
 		const unnamed = { ...sessionWithContextPercent(7), sessionName: " ", sessionId: "abcdef123456" } as AgentSession;
@@ -67,7 +67,7 @@ describe("AppStatusController", () => {
 			theme: THEMES.dark,
 			blinkController: fakeBlinkController(),
 			runtimeSession: () => undefined,
-			render: () => {},
+			requestRender: () => {},
 		});
 
 		assert.equal(controller.formatContextUsagePercent(sessionWithContextPercent(7)), " 7%");

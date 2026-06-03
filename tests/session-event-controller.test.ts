@@ -6,14 +6,26 @@ import type { Entry } from "../src/app/types.js";
 import type { AgentSession, AgentSessionEvent, AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 
 describe("AppSessionEventController", () => {
+	function entryStoreHost(entries: Entry[]): {
+		readonly entries: Entry[];
+		addConversationEntry(entry: Entry): void;
+		prependConversationEntries(newEntries: readonly Entry[]): void;
+		touchConversationEntry(entry: Entry): void;
+	} {
+		return {
+			entries,
+			addConversationEntry: (entry) => entries.push(entry),
+			prependConversationEntries: (newEntries) => entries.unshift(...newEntries),
+			touchConversationEntry: () => undefined,
+		};
+	}
+
 	function createController(entries: Entry[] = []): AppSessionEventController {
 		return new AppSessionEventController({
-			entries,
+			...entryStoreHost(entries),
 			runtime: () => ({ session: { isStreaming: false } }) as AgentSessionRuntime,
-			conversationViewport: () => ({ deleteEntry: () => {} }) as never,
 			isRunning: () => false,
-			render: () => {},
-			scheduleRender: () => {},
+			requestRender: () => {},
 			setStatus: () => {},
 			restoreSessionStatus: () => {},
 			setSessionStatus: () => {},
@@ -36,15 +48,13 @@ describe("AppSessionEventController", () => {
 		} as AgentSession;
 		const runtime = { session } as AgentSessionRuntime;
 		let statusSession: AgentSession | undefined;
-		let scheduledRenderCount = 0;
+		let renderRequestCount = 0;
 		const controller = new AppSessionEventController({
-			entries: [] satisfies Entry[],
+			...entryStoreHost([]),
 			runtime: () => runtime,
-			conversationViewport: () => ({ deleteEntry: () => {} }) as never,
 			isRunning: () => false,
-			render: () => {},
-			scheduleRender: () => {
-				scheduledRenderCount += 1;
+			requestRender: () => {
+				renderRequestCount += 1;
 			},
 			setStatus: () => {},
 			restoreSessionStatus: () => {},
@@ -66,18 +76,16 @@ describe("AppSessionEventController", () => {
 		controller.handleSessionEvent({ type: "session_info_changed", name: "Renamed session" } satisfies AgentSessionEvent);
 
 		assert.equal(statusSession, session);
-		assert.equal(scheduledRenderCount, 1);
+		assert.equal(renderRequestCount, 1);
 	});
 
 	it("observes successful todo tool results for the todo widget controller", () => {
 		const observed: unknown[] = [];
 		const controller = new AppSessionEventController({
-			entries: [] satisfies Entry[],
+			...entryStoreHost([]),
 			runtime: () => ({ session: { isStreaming: false } }) as AgentSessionRuntime,
-			conversationViewport: () => ({ deleteEntry: () => {} }) as never,
 			isRunning: () => false,
-			render: () => {},
-			scheduleRender: () => {},
+			requestRender: () => {},
 			setStatus: () => {},
 			restoreSessionStatus: () => {},
 			setSessionStatus: () => {},
@@ -117,12 +125,10 @@ describe("AppSessionEventController", () => {
 		const observedSubagents: Array<{ toolName: string; details: unknown }> = [];
 		const observedTodo: Array<{ toolName: string; details: unknown; isError?: boolean }> = [];
 		const controller = new AppSessionEventController({
-			entries,
+			...entryStoreHost(entries),
 			runtime: () => ({ session: { isStreaming: false } }) as AgentSessionRuntime,
-			conversationViewport: () => ({ deleteEntry: () => {} }) as never,
 			isRunning: () => false,
-			render: () => {},
-			scheduleRender: () => {},
+			requestRender: () => {},
 			setStatus: () => {},
 			restoreSessionStatus: () => {},
 			setSessionStatus: () => {},
@@ -261,12 +267,10 @@ describe("AppSessionEventController", () => {
 		let metadataSyncCalls = 0;
 		let currentRuntime: AgentSessionRuntime = { session: { isStreaming: false } } as AgentSessionRuntime;
 		const controller = new AppSessionEventController({
-			entries,
+			...entryStoreHost(entries),
 			runtime: () => currentRuntime,
-			conversationViewport: () => ({ deleteEntry: () => {} }) as never,
 			isRunning: () => false,
-			render: () => {},
-			scheduleRender: () => {},
+			requestRender: () => {},
 			setStatus: () => {},
 			restoreSessionStatus: () => {},
 			setSessionStatus: () => {},
@@ -352,12 +356,10 @@ describe("AppSessionEventController", () => {
 		const toasts: string[] = [];
 		let queuedStatusUpdates = 0;
 		const controller = new AppSessionEventController({
-			entries,
+			...entryStoreHost(entries),
 			runtime: () => ({ session: { isStreaming: false, isCompacting: false } }) as AgentSessionRuntime,
-			conversationViewport: () => ({ deleteEntry: () => {} }) as never,
 			isRunning: () => false,
-			render: () => {},
-			scheduleRender: () => {},
+			requestRender: () => {},
 			setStatus: (status) => {
 				statuses.push(status);
 			},

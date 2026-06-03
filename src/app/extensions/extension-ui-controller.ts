@@ -15,7 +15,7 @@ import type {
 	WidgetPlacement,
 	WidgetTuiHandle,
 } from "../types.js";
-import { ellipsizeDisplay, sanitizeText } from "../rendering/render-text.js";
+import { ellipsizeDisplay, sanitizeText } from "../text-format.js";
 
 type TerminalInputHandler = (data: string) => { consume?: boolean; data?: string } | undefined;
 
@@ -52,7 +52,7 @@ const CUSTOM_UI_WIDGET_KEY = "pix-custom-ui";
 export type ExtensionUiControllerHost = {
 	readonly theme: Theme;
 	isRunning(): boolean;
-	render(): void;
+	requestRender(reason: string): void;
 	showToast(message: string, kind?: ToastKind): void;
 	readonly toastNotifier: ToastNotifier;
 	readonly menuController: PixMenuController;
@@ -61,7 +61,7 @@ export type ExtensionUiControllerHost = {
 	setInput(value: string): void;
 	getInput(): string;
 	readonly entries: readonly Entry[];
-	deleteConversationEntry(entryId: string): void;
+	touchConversationEntry(entry: Entry): void;
 };
 
 export class ExtensionUiController {
@@ -118,7 +118,7 @@ export class ExtensionUiController {
 
 		if (content === undefined) {
 			this.extensionWidgets.delete(key);
-			if (this.host.isRunning()) this.host.render();
+			if (this.host.isRunning()) this.host.requestRender("extensions:extension-ui-controller");
 			return;
 		}
 
@@ -129,7 +129,7 @@ export class ExtensionUiController {
 			placement: options?.placement === "belowEditor" ? "belowEditor" : "aboveEditor",
 			content: content as readonly string[] | ExtensionWidgetFactory,
 		});
-		if (this.host.isRunning()) this.host.render();
+		if (this.host.isRunning()) this.host.requestRender("extensions:extension-ui-controller");
 	}
 
 	clearWidgets(): void {
@@ -205,7 +205,7 @@ export class ExtensionUiController {
 	widgetTuiHandle(): WidgetTuiHandle {
 		return {
 			requestRender: () => {
-				if (this.host.isRunning()) this.host.render();
+				if (this.host.isRunning()) this.host.requestRender("extensions:extension-ui-controller");
 			},
 			showToast: this.host.toastNotifier.show,
 			toast: this.host.toastNotifier,
@@ -225,7 +225,7 @@ export class ExtensionUiController {
 
 		const extensionTheme = this.createExtensionTheme();
 		const renderIfRunning = (): void => {
-			if (this.host.isRunning()) this.host.render();
+			if (this.host.isRunning()) this.host.requestRender("extensions:extension-ui-controller");
 		};
 
 		return {
@@ -294,7 +294,7 @@ export class ExtensionUiController {
 				for (const entry of this.host.entries) {
 					if (entry.kind === "tool") {
 						entry.expanded = expanded;
-						this.host.deleteConversationEntry(entry.id);
+						this.host.touchConversationEntry(entry);
 					}
 				}
 				renderIfRunning();
@@ -489,7 +489,7 @@ export class ExtensionUiController {
 							reject(error);
 						},
 					};
-					if (this.host.isRunning()) this.host.render();
+					if (this.host.isRunning()) this.host.requestRender("extensions:extension-ui-controller");
 				} catch (error) {
 					if (settled) return;
 					settled = true;
@@ -524,7 +524,7 @@ export class ExtensionUiController {
 		}
 		if (options.resolve) active.resolve(value);
 		else active.reject(value);
-		if (this.host.isRunning()) this.host.render();
+		if (this.host.isRunning()) this.host.requestRender("extensions:extension-ui-controller");
 	}
 
 	private invalidateWidget(widget: ExtensionWidgetRegistration): void {

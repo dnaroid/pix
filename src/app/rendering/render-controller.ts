@@ -8,6 +8,7 @@ import type { ScreenStyler } from "../screen/screen-styler.js";
 import type { StatusLineRenderer } from "./status-line-renderer.js";
 import type { TabLineRenderer } from "./tab-line-renderer.js";
 import type { RenderedLine } from "../types.js";
+import { createRenderHitMap, type RenderHitMap, type StatusRenderHitMap } from "../screen/render-hit-map.js";
 import { renderToastOverlays } from "./toast-renderer.js";
 import type { AppToastController } from "./toast-controller.js";
 import { TerminalOutputBuffer, type TerminalOutputFrameRegion } from "../terminal/terminal-output-buffer.js";
@@ -43,6 +44,10 @@ export type AppRenderControllerDeps = {
 	voiceProgressOverlayText(): string | undefined;
 };
 
+export type AppRenderResult =
+	| { kind: "full"; hitMap: RenderHitMap }
+	| { kind: "status"; hitMap: StatusRenderHitMap };
+
 export class AppRenderController {
 	private readonly outputBuffer: TerminalOutputBuffer;
 
@@ -57,21 +62,22 @@ export class AppRenderController {
 		this.outputBuffer.reset();
 	}
 
-	renderStatusLine(): void {
-		if (!this.host.isRunning()) return;
+	renderStatusLine(): AppRenderResult | undefined {
+		if (!this.host.isRunning()) return undefined;
 
 		const columns = this.host.terminalColumns();
 		const rows = this.host.terminalRows();
 		const statusRow = Math.max(1, rows);
 		const statusLayout = this.deps.statusLineRenderer.layout(columns);
 
-		this.updateStatusMouseState(statusLayout, statusRow);
+		const hitMap = this.statusRenderHitMap(statusLayout, statusRow);
 		const output = this.outputBuffer.diff("statusLine", `\x1b7${DISABLE_TERMINAL_WRAP}${this.renderFrameRow(statusRow, this.deps.statusLineRenderer.render(statusRow, statusLayout, columns))}\x1b8`);
 		if (output.length > 0) process.stdout.write(output);
+		return { kind: "status", hitMap };
 	}
 
-	render(): void {
-		if (!this.host.isRunning()) return;
+	render(): AppRenderResult | undefined {
+		if (!this.host.isRunning()) return undefined;
 
 		const columns = this.host.terminalColumns();
 		const rows = this.host.terminalRows();
@@ -102,25 +108,8 @@ export class AppRenderController {
 		const scrollBar = this.deps.scrollController.scrollBarForMetrics(scrollMetrics);
 		const conversationColumns = Math.max(1, Math.min(columns, scrollMetrics.viewportColumns));
 		this.deps.mouseController.syncConversationSelectionForRender(scrollMetrics.start, bodyHeight, topReservedRows, conversationColumns);
+		const hitMap = createRenderHitMap();
 
-		this.deps.mouseController.renderedTargets.clear();
-		this.deps.mouseController.renderedRowTexts.clear();
-		this.deps.mouseController.renderedRowBackgrounds.clear();
-		this.deps.mouseController.renderedImageTargets.clear();
-		this.deps.mouseController.statusModelTarget = undefined;
-		this.deps.mouseController.statusThinkingTarget = undefined;
-		this.deps.mouseController.statusContextTarget = undefined;
-		this.deps.mouseController.statusModelUsageTarget = undefined;
-		this.deps.mouseController.statusDraftQueueTarget = undefined;
-		this.deps.mouseController.statusUserJumpTarget = undefined;
-		this.deps.mouseController.statusThinkingExpandTarget = undefined;
-		this.deps.mouseController.statusCompactToolsTarget = undefined;
-		this.deps.mouseController.statusTerminalBellSoundTarget = undefined;
-		this.deps.mouseController.statusSessionTarget = undefined;
-		this.deps.mouseController.statusPromptEnhancerTarget = undefined;
-		this.deps.mouseController.statusVoiceMicTarget = undefined;
-		this.deps.mouseController.statusVoiceLanguageTarget = undefined;
-		this.deps.mouseController.tabLineTargets.length = 0;
 		const frameLines: Record<TerminalOutputFrameRegion, string[]> = {
 			tabs: [],
 			conversation: [],
@@ -137,31 +126,31 @@ export class AppRenderController {
 			if (row >= 1 && row <= rows) frameLines[region].push(output);
 		};
 		const setRenderedBackground = (row: number, background: string | undefined): void => {
-			if (background !== undefined) this.deps.mouseController.renderedRowBackgrounds.set(row, background);
+			if (background !== undefined) hitMap.rowBackgrounds.set(row, background);
 		};
 		if (topReservedRows > 0) {
-			this.deps.mouseController.tabLineTargets.push(...tabLayout.targets.map((target) => ({ ...target, row: tabRow })));
-			this.deps.mouseController.renderedRowTexts.set(tabRow, tabLayout.text);
+			hitMap.tabLineTargets.push(...tabLayout.targets.map((target) => ({ ...target, row: tabRow })));
+			hitMap.rowTexts.set(tabRow, tabLayout.text);
 			appendFrameOutput("tabs", tabRow, this.renderFrameRow(tabRow, this.deps.tabLineRenderer.render(tabRow, tabLayout, columns)));
 			if (topReservedRows > 1) {
-				this.deps.mouseController.tabLineTargets.push(...tabLayout.targets
+				hitMap.tabLineTargets.push(...tabLayout.targets
 					.filter((target) => target.kind === "new-tab")
 					.map((target) => ({ ...target, row: tabBottomRow })));
 				const bottomText = this.deps.tabLineRenderer.bottomText(tabLayout, columns);
-				this.deps.mouseController.renderedRowTexts.set(tabBottomRow, bottomText);
+				hitMap.rowTexts.set(tabBottomRow, bottomText);
 				appendFrameOutput("tabs", tabBottomRow, this.renderFrameRow(tabBottomRow, this.deps.tabLineRenderer.renderBottom(tabBottomRow, tabLayout, columns)));
 			}
 		} else {
-			this.deps.mouseController.tabLineTargets.push(...tabLayout.targets
+			hitMap.tabLineTargets.push(...tabLayout.targets
 				.filter((target) => target.kind === "new-tab")
 				.map((target) => ({ ...target, row: tabRow })));
 		}
 		for (let index = 0; index < bodyHeight; index += 1) {
 			const rendered = visible[index];
 			const row = toScreenRow(index + 1);
-			if (rendered?.target) this.deps.mouseController.renderedTargets.set(row, rendered.target);
-			if (rendered?.imageTargets?.length) this.deps.mouseController.renderedImageTargets.set(row, rendered.imageTargets);
-			this.deps.mouseController.renderedRowTexts.set(row, rendered?.text ?? "");
+			if (rendered?.target) hitMap.targets.set(row, rendered.target);
+			if (rendered?.imageTargets?.length) hitMap.imageTargets.set(row, rendered.imageTargets);
+			hitMap.rowTexts.set(row, rendered?.text ?? "");
 			setRenderedBackground(row, rendered?.backgroundOverride);
 			appendFrameOutput("conversation", row, this.renderFrameRow(row, this.deps.screenStyler.styleBaseLine(row, rendered, conversationColumns)));
 		}
@@ -182,9 +171,9 @@ export class AppRenderController {
 			const rendered = frameRenderedLine(aboveEditorLines[index], columns, this.deps.theme, this.deps.screenStyler);
 			const row = toScreenRow(aboveEditorStartRow + index);
 			if (row < 1 || row >= statusRow) continue;
-			if (rendered.line?.target) this.deps.mouseController.renderedTargets.set(row, rendered.line.target);
-			if (rendered.line?.imageTargets?.length) this.deps.mouseController.renderedImageTargets.set(row, rendered.line.imageTargets);
-			this.deps.mouseController.renderedRowTexts.set(row, rendered.text);
+			if (rendered.line?.target) hitMap.targets.set(row, rendered.line.target);
+			if (rendered.line?.imageTargets?.length) hitMap.imageTargets.set(row, rendered.line.imageTargets);
+			hitMap.rowTexts.set(row, rendered.text);
 			setRenderedBackground(row, rendered.line?.backgroundOverride);
 			appendFrameOutput("inputStatus", row, this.renderFrameRow(row, rendered.output(row)));
 		}
@@ -193,7 +182,7 @@ export class AppRenderController {
 			const separatorText = inputFrameLine(columns, "top");
 			const row = toScreenRow(inputSeparatorRow);
 			if (row < statusRow) {
-				this.deps.mouseController.renderedRowTexts.set(row, separatorText);
+				hitMap.rowTexts.set(row, separatorText);
 				appendFrameOutput("inputStatus", row, this.renderFrameRow(row, this.deps.screenStyler.styleLine(row, separatorText, columns, {
 					foreground: this.deps.theme.colors.inputBorder,
 				})));
@@ -204,7 +193,7 @@ export class AppRenderController {
 			const tagSpans = renderedInput.tagSpans[index];
 			const suggestionSpans = renderedInput.suggestionSpans?.[index] ?? [];
 			const row = toScreenRow(inputStartRow + index);
-			this.deps.mouseController.renderedRowTexts.set(row, inputLine);
+			hitMap.rowTexts.set(row, inputLine);
 
 			const tagColor = this.deps.theme.colors.accent;
 			const styledLine = this.deps.screenStyler.styleInputLine(row, inputLine, tagSpans, suggestionSpans, columns, tagColor, this.deps.theme.colors.muted, this.deps.theme.colors.inputBorder);
@@ -227,9 +216,9 @@ export class AppRenderController {
 			const rendered = frameRenderedLine(belowEditorLines[index], columns, this.deps.theme, this.deps.screenStyler);
 			const row = toScreenRow(belowEditorStartRow + index);
 			if (row < 1 || row >= statusRow) continue;
-			if (rendered.line?.target) this.deps.mouseController.renderedTargets.set(row, rendered.line.target);
-			if (rendered.line?.imageTargets?.length) this.deps.mouseController.renderedImageTargets.set(row, rendered.line.imageTargets);
-			this.deps.mouseController.renderedRowTexts.set(row, rendered.text);
+			if (rendered.line?.target) hitMap.targets.set(row, rendered.line.target);
+			if (rendered.line?.imageTargets?.length) hitMap.imageTargets.set(row, rendered.line.imageTargets);
+			hitMap.rowTexts.set(row, rendered.text);
 			setRenderedBackground(row, rendered.line?.backgroundOverride);
 			appendFrameOutput("inputStatus", row, this.renderFrameRow(row, rendered.output(row)));
 		}
@@ -237,19 +226,20 @@ export class AppRenderController {
 			const separatorText = inputFrameLine(columns, "bottom");
 			const row = toScreenRow(inputBottomSeparatorRow);
 			if (row < statusRow) {
-				this.deps.mouseController.renderedRowTexts.set(row, separatorText);
+				hitMap.rowTexts.set(row, separatorText);
 				appendFrameOutput("inputStatus", row, this.renderFrameRow(row, this.deps.screenStyler.styleLine(row, separatorText, columns, {
 					foreground: this.deps.theme.colors.inputBorder,
 				})));
 			}
 		}
 		const statusLayout = this.deps.statusLineRenderer.layout(columns);
-		this.updateStatusMouseState(statusLayout, statusRow);
+		hitMap.status = this.statusRenderHitMap(statusLayout, statusRow);
+		hitMap.rowTexts.set(statusRow, hitMap.status.text);
 		appendFrameOutput("inputStatus", statusRow, this.renderFrameRow(statusRow, this.deps.statusLineRenderer.render(statusRow, statusLayout, columns)));
 
 		const voiceProgressOverlay = this.renderVoiceProgressOverlay(this.deps.voiceProgressOverlayText(), columns, statusRow);
 		if (voiceProgressOverlay) {
-			this.deps.mouseController.renderedRowTexts.set(voiceProgressOverlay.row, voiceProgressOverlay.text);
+			hitMap.rowTexts.set(voiceProgressOverlay.row, voiceProgressOverlay.text);
 			setRenderedBackground(voiceProgressOverlay.row, this.deps.theme.colors.info);
 			appendFrameOutput(regionForOverlayRow(voiceProgressOverlay.row), voiceProgressOverlay.row, this.renderFrameRow(voiceProgressOverlay.row, voiceProgressOverlay.output));
 		}
@@ -261,8 +251,8 @@ export class AppRenderController {
 				const line = defaultOverlayLines[index];
 				const row = toScreenRow(overlayStartRow + index);
 				const fallbackTarget = { kind: "popup-menu" as const, index: activeMenu.selectedIndex };
-				this.deps.mouseController.renderedTargets.set(row, line?.target ?? fallbackTarget);
-				this.deps.mouseController.renderedRowTexts.set(row, this.deps.popupMenus.overlayPlainText(line ?? { text: "" }, columns));
+				hitMap.targets.set(row, line?.target ?? fallbackTarget);
+				hitMap.rowTexts.set(row, this.deps.popupMenus.overlayPlainText(line ?? { text: "" }, columns));
 				setRenderedBackground(row, line?.backgroundOverride);
 				appendFrameOutput(regionForOverlayRow(row), row, this.renderFrameRow(row, this.deps.popupMenus.styleOverlayLine(row, line ?? { text: "" }, columns)));
 			}
@@ -273,8 +263,8 @@ export class AppRenderController {
 				const line = underTabsOverlayLines[index];
 				const row = underTabsOverlayStartRow + index;
 				const fallbackTarget = { kind: "popup-menu" as const, index: activeMenu.selectedIndex };
-				this.deps.mouseController.renderedTargets.set(row, line?.target ?? fallbackTarget);
-				this.deps.mouseController.renderedRowTexts.set(row, this.deps.popupMenus.overlayPlainText(line ?? { text: "" }, columns));
+				hitMap.targets.set(row, line?.target ?? fallbackTarget);
+				hitMap.rowTexts.set(row, this.deps.popupMenus.overlayPlainText(line ?? { text: "" }, columns));
 				setRenderedBackground(row, line?.backgroundOverride);
 				appendFrameOutput(regionForOverlayRow(row), row, this.renderFrameRow(row, this.deps.popupMenus.styleOverlayLine(row, line ?? { text: "" }, columns)));
 			}
@@ -282,17 +272,17 @@ export class AppRenderController {
 
 		for (const toastOverlay of renderToastOverlays(this.deps.toastController.toast.visibleStates, columns, Math.max(0, statusRow - topReservedRows - 1), this.deps.theme)) {
 			const row = topReservedRows + toastOverlay.row;
-			const rowText = this.deps.mouseController.renderedRowTexts.get(row) ?? "";
-			if (toastOverlay.target) this.deps.mouseController.renderedTargets.set(row, toastOverlay.target);
-			this.deps.mouseController.renderedRowTexts.set(row, overlayText(rowText, toastOverlay.column, toastOverlay.text));
+			const rowText = hitMap.rowTexts.get(row) ?? "";
+			if (toastOverlay.target) hitMap.targets.set(row, toastOverlay.target);
+			hitMap.rowTexts.set(row, overlayText(rowText, toastOverlay.column, toastOverlay.text));
 			appendFrameOutput(regionForOverlayRow(row), row, `\x1b[${row};${toastOverlay.column}H${toastOverlay.output}`);
 		}
 		if (topReservedRows === 0) {
 			const newTabTarget = tabLayout.targets.find((target) => target.kind === "new-tab");
 			if (newTabTarget) {
 				const plusColumn = newTabTarget.endColumn - stringDisplayWidth(APP_ICONS.plus);
-				const rowText = this.deps.mouseController.renderedRowTexts.get(tabRow) ?? "";
-				this.deps.mouseController.renderedRowTexts.set(tabRow, overlayText(rowText, plusColumn, APP_ICONS.plus));
+				const rowText = hitMap.rowTexts.get(tabRow) ?? "";
+				hitMap.rowTexts.set(tabRow, overlayText(rowText, plusColumn, APP_ICONS.plus));
 				appendFrameOutput(regionForOverlayRow(tabRow), tabRow, `\x1b[${tabRow};${plusColumn}H${colorize(APP_ICONS.plus, {
 					foreground: this.deps.theme.colors.info,
 					bold: true,
@@ -309,6 +299,7 @@ export class AppRenderController {
 			inputStatus: frameLines.inputStatus.join(""),
 		});
 		process.stdout.write(`${DISABLE_TERMINAL_WRAP}${HIDE_CURSOR}${output}${this.renderClickFlashOverlay(columns, rows)}${cursor}`);
+		return { kind: "full", hitMap };
 	}
 
 	private renderFrameRow(row: number, output: string): string {
@@ -326,21 +317,24 @@ export class AppRenderController {
 		return `\x1b[${flash.y};${flash.startColumn}H\x1b[7m${text}${ANSI_RESET}`;
 	}
 
-	private updateStatusMouseState(statusLayout: ReturnType<StatusLineRenderer["layout"]>, statusRow: number): void {
-		this.deps.mouseController.statusModelTarget = this.deps.statusLineRenderer.modelTarget(statusLayout.text, statusRow);
-		this.deps.mouseController.statusThinkingTarget = this.deps.statusLineRenderer.thinkingTarget(statusLayout.text, statusRow);
-		this.deps.mouseController.statusContextTarget = this.deps.statusLineRenderer.contextTarget(statusLayout.text, statusRow, statusLayout);
-		this.deps.mouseController.statusModelUsageTarget = this.deps.statusLineRenderer.modelUsageTarget(statusLayout.text, statusRow, statusLayout);
-		this.deps.mouseController.statusDraftQueueTarget = this.deps.statusLineRenderer.draftQueueTarget?.(statusLayout, statusRow);
-		this.deps.mouseController.statusUserJumpTarget = this.deps.statusLineRenderer.userJumpTarget?.(statusLayout, statusRow);
-		this.deps.mouseController.statusThinkingExpandTarget = this.deps.statusLineRenderer.thinkingExpandTarget?.(statusLayout, statusRow);
-		this.deps.mouseController.statusCompactToolsTarget = this.deps.statusLineRenderer.compactToolsTarget?.(statusLayout, statusRow);
-		this.deps.mouseController.statusTerminalBellSoundTarget = this.deps.statusLineRenderer.terminalBellSoundTarget?.(statusLayout, statusRow);
-		this.deps.mouseController.statusSessionTarget = this.deps.statusLineRenderer.sessionTarget(statusLayout.text, statusRow, statusLayout.sessionLabel, statusLayout.workspaceLabel);
-		this.deps.mouseController.statusPromptEnhancerTarget = this.deps.statusLineRenderer.promptEnhancerTarget(statusLayout, statusRow);
-		this.deps.mouseController.statusVoiceMicTarget = this.deps.statusLineRenderer.voiceMicTarget(statusLayout, statusRow);
-		this.deps.mouseController.statusVoiceLanguageTarget = this.deps.statusLineRenderer.voiceLanguageTarget(statusLayout, statusRow);
-		this.deps.mouseController.renderedRowTexts.set(statusRow, statusLayout.text);
+	private statusRenderHitMap(statusLayout: ReturnType<StatusLineRenderer["layout"]>, statusRow: number): StatusRenderHitMap {
+		return {
+			row: statusRow,
+			text: statusLayout.text,
+			modelTarget: this.deps.statusLineRenderer.modelTarget(statusLayout.text, statusRow),
+			thinkingTarget: this.deps.statusLineRenderer.thinkingTarget(statusLayout.text, statusRow),
+			contextTarget: this.deps.statusLineRenderer.contextTarget(statusLayout.text, statusRow, statusLayout),
+			modelUsageTarget: this.deps.statusLineRenderer.modelUsageTarget(statusLayout.text, statusRow, statusLayout),
+			draftQueueTarget: this.deps.statusLineRenderer.draftQueueTarget?.(statusLayout, statusRow),
+			userJumpTarget: this.deps.statusLineRenderer.userJumpTarget?.(statusLayout, statusRow),
+			thinkingExpandTarget: this.deps.statusLineRenderer.thinkingExpandTarget?.(statusLayout, statusRow),
+			compactToolsTarget: this.deps.statusLineRenderer.compactToolsTarget?.(statusLayout, statusRow),
+			terminalBellSoundTarget: this.deps.statusLineRenderer.terminalBellSoundTarget?.(statusLayout, statusRow),
+			sessionTarget: this.deps.statusLineRenderer.sessionTarget(statusLayout.text, statusRow, statusLayout.sessionLabel, statusLayout.workspaceLabel),
+			promptEnhancerTarget: this.deps.statusLineRenderer.promptEnhancerTarget(statusLayout, statusRow),
+			voiceMicTarget: this.deps.statusLineRenderer.voiceMicTarget(statusLayout, statusRow),
+			voiceLanguageTarget: this.deps.statusLineRenderer.voiceLanguageTarget(statusLayout, statusRow),
+		};
 	}
 
 	private renderVoiceProgressOverlay(message: string | undefined, width: number, rows: number): { row: number; text: string; output: string } | undefined {

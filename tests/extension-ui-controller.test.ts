@@ -275,7 +275,7 @@ describe("ExtensionUiController custom UI", () => {
 	});
 
 	it("updates editor text, above-input widgets, tools expansion, and context metadata", () => {
-		const { controller, input, deleted, entries, renders } = createController("draft");
+		const { controller, input, touched, entries, renders } = createController("draft");
 		entries.push({ id: "tool-1", kind: "tool", toolName: "read", args: {}, status: "done", expanded: false, result: "ok" } as never);
 		entries.push({ id: "message-1", kind: "assistant", text: "hello" } as never);
 		const ctx = controller.createExtensionUIContext();
@@ -294,7 +294,7 @@ describe("ExtensionUiController custom UI", () => {
 		assert.equal(ctx.getToolsExpanded(), false);
 		ctx.setToolsExpanded(true);
 		assert.equal((entries[0] as { expanded: boolean }).expanded, true);
-		assert.deepEqual(deleted, ["tool-1"]);
+		assert.deepEqual(touched, ["tool-1"]);
 		assert.ok(ctx.getAllThemes().some((theme) => theme.name === "dark"));
 		assert.equal(ctx.getTheme("dark"), undefined);
 		assert.equal(ctx.setTheme("dark").success, false);
@@ -313,10 +313,10 @@ function createController(initialInput = ""): {
 	toasts: { message: string; kind: string | undefined }[];
 	menu: PixMenuController & { nextShow?: unknown; nextSelect?: string; showCalls: Array<{ items: unknown[]; options: { title?: string } }>; selectCalls: Array<{ title: string; options: string[] }> };
 	entries: Entry[];
-	deleted: string[];
+	touched: string[];
 } {
 	const entries: Entry[] = [];
-	const deleted: string[] = [];
+	const touched: string[] = [];
 	const renders = { count: 0 };
 	const input = { value: initialInput };
 	const statuses = { set: [] as string[], restored: 0 };
@@ -349,11 +349,11 @@ function createController(initialInput = ""): {
 		toasts,
 		menu: menuController,
 		entries,
-		deleted,
+		touched,
 		controller: new ExtensionUiController({
 			theme: THEMES.dark,
 			isRunning: () => true,
-			render: () => {
+			requestRender: () => {
 				renders.count += 1;
 			},
 			showToast: (message, kind) => {
@@ -372,8 +372,8 @@ function createController(initialInput = ""): {
 			},
 			getInput: () => input.value,
 			get entries() { return entries; },
-			deleteConversationEntry: (entryId) => {
-				deleted.push(entryId);
+			touchConversationEntry: (entry) => {
+				touched.push(entry.id);
 			},
 		}),
 	};

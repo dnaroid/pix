@@ -50,12 +50,12 @@ export class ModelCommandActions {
 			});
 			if (!selected) {
 				this.host.setSessionStatus(this.host.runtime()?.session);
-				this.host.render();
+				this.host.requestRender("commands:command-model-actions");
 				return;
 			}
 
 			await this.runModelCommand(selected.model);
-			this.host.render();
+			this.host.requestRender("commands:command-model-actions");
 			return;
 		}
 
@@ -87,12 +87,12 @@ export class ModelCommandActions {
 			});
 			if (!selected) {
 				this.host.setSessionStatus(this.host.runtime()?.session);
-				this.host.render();
+				this.host.requestRender("commands:command-model-actions");
 				return;
 			}
 
 			this.saveDefaultModel(this.host.modelRef(selected.model));
-			this.host.render();
+			this.host.requestRender("commands:command-model-actions");
 			return;
 		}
 
@@ -206,12 +206,12 @@ export class ModelCommandActions {
 			});
 			if (!selected) {
 				this.host.setSessionStatus(this.host.runtime()?.session);
-				this.host.render();
+				this.host.requestRender("commands:command-model-actions");
 				return;
 			}
 
 			await this.runThinkingCommand(selected.level);
-			this.host.render();
+			this.host.requestRender("commands:command-model-actions");
 			return;
 		}
 
@@ -229,12 +229,12 @@ export class ModelCommandActions {
 			});
 			if (!selected) {
 				this.host.setSessionStatus(this.host.runtime()?.session);
-				this.host.render();
+				this.host.requestRender("commands:command-model-actions");
 				return;
 			}
 
 			this.saveDefaultThinking(selected.level);
-			this.host.render();
+			this.host.requestRender("commands:command-model-actions");
 			return;
 		}
 
@@ -248,7 +248,7 @@ export class ModelCommandActions {
 
 		const ref = this.host.modelRef(model);
 		this.host.setStatus(`selecting model ${ref}`);
-		this.host.render();
+		this.host.requestRender("commands:command-model-actions");
 		await runtime.session.setModel(model);
 		this.host.addEntry({ id: createId("system"), kind: "system", text: `Selected model ${ref}` });
 		this.host.setSessionStatus(runtime.session);
@@ -259,7 +259,7 @@ export class ModelCommandActions {
 		if (!runtime) return;
 
 		this.host.setStatus(`selecting thinking ${level}`);
-		this.host.render();
+		this.host.requestRender("commands:command-model-actions");
 		runtime.session.setThinkingLevel(level);
 		this.host.addEntry({ id: createId("system"), kind: "system", text: `Selected thinking level ${runtime.session.thinkingLevel}` });
 		this.host.setSessionStatus(runtime.session);
