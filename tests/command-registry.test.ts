@@ -63,6 +63,23 @@ describe("command registry", () => {
 		assert.equal(query, "needle");
 	});
 
+	it("registers /queue as an argument-taking local command", async () => {
+		let queued = "";
+		const commands = createSlashCommands({
+			...noopActions(),
+			runQueueCommand: async (argumentsText) => {
+				queued = argumentsText;
+			},
+		}, host());
+
+		const queue = commands.find((command) => command.name === "queue");
+		assert.equal(queue?.kind, "builtin");
+		assert.equal(queue.allowArguments, true);
+
+		await queue.run?.("send later");
+		assert.equal(queued, "send later");
+	});
+
 	it("registers /update as an argument-taking local command", async () => {
 		let argumentsSeen = "";
 		const commands = createSlashCommands({
@@ -170,6 +187,7 @@ function noopActions(): CommandRegistryActions {
 		runImportCommand: noop,
 		runShareCommand: noop,
 		runCopyCommand: noop,
+		runQueueCommand: noop,
 		runNameCommand: noop,
 		runSessionInfoCommand: noop,
 		runUsageCommand: noop,

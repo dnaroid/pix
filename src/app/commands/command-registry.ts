@@ -15,6 +15,7 @@ export type CommandRegistryActions = {
 	runImportCommand(argumentsText: string): Promise<void>;
 	runShareCommand(): Promise<void>;
 	runCopyCommand(): Promise<void>;
+	runQueueCommand(argumentsText: string): Promise<void>;
 	runNameCommand(argumentsText: string): Promise<void>;
 	runSessionInfoCommand(): Promise<void>;
 	runUsageCommand(): Promise<void>;
@@ -128,6 +129,14 @@ export function createSlashCommands(actions: CommandRegistryActions, host: Comma
 			kind: "builtin",
 			keywords: ["clipboard", "assistant", "message"],
 			run: () => actions.runCopyCommand(),
+		},
+		{
+			name: "queue",
+			description: "Queue a message for manual sending later",
+			kind: "builtin",
+			keywords: ["defer", "delayed", "message", "send later"],
+			allowArguments: true,
+			run: (argumentsText) => actions.runQueueCommand(argumentsText),
 		},
 		{
 			name: "name",

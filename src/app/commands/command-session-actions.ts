@@ -92,6 +92,15 @@ export class SessionCommandActions {
 		this.host.toast.success("Copied last agent message");
 	}
 
+	async runQueueCommand(argumentsText: string): Promise<void> {
+		const text = argumentsText.trim();
+		if (!text) throw new Error("Usage: /queue <message to send later>");
+
+		this.host.queueUserMessage(text);
+		this.host.addEntry({ id: createId("system"), kind: "system", text: "Queued message for manual sending." });
+		this.host.setSessionStatus(this.host.runtime()?.session);
+	}
+
 	async runNameCommand(argumentsText: string): Promise<void> {
 		const runtime = getRuntime(this.host, "name");
 		if (!runtime) return;
@@ -217,6 +226,7 @@ export class SessionCommandActions {
 				"Enter: send message / run selected command",
 				"!command: run a local shell command in chat (not saved to the session)",
 				"while shell is running: Enter sends editor text to stdin; Ctrl-C interrupts; !!command uses the raw terminal",
+				"/queue <message>: save a delayed message; send it later from the queued-message menu",
 				"Tab: autocomplete selected popup item",
 				"Esc: close popup; abort running work when input is empty",
 				"Up/Down: history or popup navigation",

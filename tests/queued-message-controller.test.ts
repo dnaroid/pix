@@ -58,7 +58,21 @@ describe("AppQueuedMessageController", () => {
 		assert.equal(state.abortedEntries, 1);
 	});
 
-	it("does not flush deferred messages while aborting for an immediate send", async () => {
+	it("queues submitted messages during streaming for manual send", async () => {
+		const sdkQueue = { steering: [], followUp: [] };
+		const calls: string[] = [];
+		const session = fakeSession(sdkQueue, { calls, isStreaming: true });
+		const state = createHostState("");
+		const controller = new AppQueuedMessageController(createHost(session, state));
+
+		await controller.submitUserMessage(controller.createSubmittedUserMessage("send later", "send later", []));
+
+		assert.deepEqual(calls, []);
+		assert.equal(controller.deferredUserMessages.length, 1);
+		assert.deepEqual(state.toasts, ["info:Message queued; send it from the queue menu"]);
+	});
+
+	it("does not auto-flush deferred messages after an immediate send", async () => {
 		const sdkQueue = { steering: ["send now"], followUp: [] };
 		const calls: string[] = [];
 		let controller: AppQueuedMessageController | undefined;
@@ -78,7 +92,22 @@ describe("AppQueuedMessageController", () => {
 
 		await controller.sendQueuedMessageImmediately("queued-selected");
 
-		assert.deepEqual(calls, ["clearQueue", "abort", "prompt:send now", "prompt:deferred later"]);
+		assert.deepEqual(calls, ["clearQueue", "abort", "prompt:send now"]);
+		assert.equal(controller.deferredUserMessages.length, 1);
+	});
+
+	it("flushes deferred messages only when explicitly requested", async () => {
+		const sdkQueue = { steering: [], followUp: [] };
+		const calls: string[] = [];
+		const session = fakeSession(sdkQueue, { calls });
+		const state = createHostState("");
+		const controller = new AppQueuedMessageController(createHost(session, state));
+		controller.deferredUserMessages.push({ id: "deferred-1", promptText: "send later", displayText: "send later", images: [] });
+
+		await controller.flushDeferredUserMessages();
+
+		assert.deepEqual(calls, ["prompt:send later"]);
+		assert.equal(controller.deferredUserMessages.length, 0);
 	});
 
 	it("cancels a deferred queued message without touching SDK queues", async () => {

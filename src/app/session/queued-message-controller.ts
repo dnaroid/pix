@@ -82,7 +82,6 @@ export class AppQueuedMessageController {
 				this.host.setSessionActivity(activeSession.isStreaming || activeSession.isCompacting ? "running" : "idle");
 			}
 			if (this.totalQueuedMessageCount() > 0) this.updateQueuedMessageStatus();
-			if (!this.flushingDeferredUserMessages) void this.flushDeferredUserMessages();
 		}
 	}
 
@@ -247,7 +246,6 @@ export class AppQueuedMessageController {
 		} finally {
 			this.immediateSendInProgress = false;
 			if (this.totalQueuedMessageCount() > 0) this.updateQueuedMessageStatus();
-			if (!this.flushingDeferredUserMessages) void this.flushDeferredUserMessages();
 		}
 	}
 
@@ -257,12 +255,13 @@ export class AppQueuedMessageController {
 	}
 
 	private shouldDeferUserMessage(session: AgentSession): boolean {
-		return session.isCompacting || (!session.isStreaming && this.promptSubmissionInFlight);
+		return session.isStreaming || session.isCompacting || this.promptSubmissionInFlight;
 	}
 
-	private deferUserMessage(message: SubmittedUserMessage): void {
+	deferUserMessage(message: SubmittedUserMessage): void {
 		this.deferredUserMessages.push(message);
 		this.updateQueuedMessageStatus();
+		this.host.showToast("Message queued; send it from the queue menu", "info");
 		this.host.render();
 	}
 

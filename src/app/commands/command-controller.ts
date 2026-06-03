@@ -45,6 +45,7 @@ export class AppCommandController {
 			runImportCommand: (argumentsText) => this.sessionActions.runImportCommand(argumentsText),
 			runShareCommand: () => this.sessionActions.runShareCommand(),
 			runCopyCommand: () => this.sessionActions.runCopyCommand(),
+			runQueueCommand: (argumentsText) => this.sessionActions.runQueueCommand(argumentsText),
 			runNameCommand: (argumentsText) => this.sessionActions.runNameCommand(argumentsText),
 			runSessionInfoCommand: () => this.sessionActions.runSessionInfoCommand(),
 			runUsageCommand: () => this.sessionActions.runUsageCommand(),

@@ -72,6 +72,7 @@ describe.serial("todo tool", () => {
 
 		const created = await tool.execute("call", { action: "create", subject: "Write tests", description: "cover tools" }, undefined, undefined, {});
 		expect(created.content[0].text).toContain("Created #1");
+		expect(created.content[0].text).toContain("none is in_progress");
 		expect(getTodos()).toMatchObject([{ id: 1, subject: "Write tests", status: "pending" }]);
 
 		const listed = await tool.execute("call", { action: "list" }, undefined, undefined, {});
@@ -79,6 +80,7 @@ describe.serial("todo tool", () => {
 
 		const updated = await tool.execute("call", { action: "update", id: 1, status: "in_progress", activeForm: "writing tests" }, undefined, undefined, {});
 		expect(updated.content[0].text).toContain("pending → in_progress");
+		expect(updated.content[0].text).not.toContain("none is in_progress");
 
 		const got = await tool.execute("call", { action: "get", id: 1 }, undefined, undefined, {});
 		expect(got.content[0].text).toContain("writing tests");

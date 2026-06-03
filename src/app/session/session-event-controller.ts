@@ -32,7 +32,6 @@ export type AppSessionEventControllerHost = {
 	restoreSessionStatus(): void;
 	setSessionStatus(session: AgentSessionRuntime["session"] | undefined): void;
 	setSessionActivity(activity: SessionActivity): void;
-	flushDeferredUserMessages(): void;
 	updateQueuedMessageStatus(): void;
 	prepareWorkspaceMutation(toolName: string, args: unknown): WorkspaceMutationPreparation | undefined;
 	recordWorkspaceMutationForUserEntry(entryId: string, mutation: WorkspaceMutation): void;
@@ -117,7 +116,6 @@ export class AppSessionEventController {
 			case "agent_start":
 				this.host.setSessionActivity("running");
 				this.host.setSessionStatus(this.host.runtime()?.session);
-				this.host.flushDeferredUserMessages();
 				break;
 			case "thinking_level_changed":
 				this.host.setSessionStatus(this.host.runtime()?.session);
@@ -128,7 +126,6 @@ export class AppSessionEventController {
 				this.currentUserEntryId = undefined;
 				this.host.setSessionActivity("idle");
 				this.host.setSessionStatus(this.host.runtime()?.session);
-				this.host.flushDeferredUserMessages();
 				break;
 			case "queue_update":
 				this.host.updateQueuedMessageStatus();
@@ -188,7 +185,6 @@ export class AppSessionEventController {
 						? "Compaction cancelled"
 						: event.errorMessage ?? "Compaction failed";
 				this.host.showToast(message, event.result ? "success" : event.aborted ? "info" : "error");
-				this.host.flushDeferredUserMessages();
 				break;
 			}
 			case "auto_retry_start":

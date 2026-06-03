@@ -359,9 +359,6 @@ export class PiUiExtendApp {
 			restoreSessionStatus: () => this.restoreSessionStatus(),
 			setSessionStatus: (session) => this.setSessionStatus(session),
 			setSessionActivity: (activity) => this.setSessionActivity(activity),
-			flushDeferredUserMessages: () => {
-				void this.queuedMessages.flushDeferredUserMessages();
-			},
 			updateQueuedMessageStatus: () => this.queuedMessages.updateQueuedMessageStatus(),
 			prepareWorkspaceMutation: (toolName, args) => this.workspaceActions.prepareWorkspaceMutation(toolName, args),
 			workspaceMutationFromToolExecution: (input) => this.workspaceActions.workspaceMutationFromToolExecution(input),
@@ -455,6 +452,9 @@ export class PiUiExtendApp {
 			modelRef: (model) => this.menuItems.modelRef(model),
 			getFavoriteScopedModels: () => this.menuItems.getFavoriteScopedModels(),
 			setSessionStatus: (session) => this.setSessionStatus(session),
+			queueUserMessage: (text) => {
+				this.queuedMessages.deferUserMessage(this.queuedMessages.createSubmittedUserMessage(text, text, []));
+			},
 			resetSessionView: () => this.resetSessionView(),
 			loadSessionHistory: () => this.loadSessionHistory(),
 			afterSessionReplacement: (message) => this.afterSessionReplacement(message),
@@ -471,6 +471,7 @@ export class PiUiExtendApp {
 				this.popupMenus.setDirectQuery(query);
 			},
 			getResumeLoading: () => this.resumeLoading,
+			getResumeSessions: () => this.resumeSessions,
 			setResumeLoading: (loading) => {
 				this.resumeLoading = loading;
 			},

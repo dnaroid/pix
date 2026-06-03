@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import { SessionManager, type AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
+import type { AgentSessionRuntime, SessionInfo } from "@earendil-works/pi-coding-agent";
 import type { CommandControllerHost } from "./command-host.js";
 import { getIdleRuntime, getRuntime } from "./command-runtime.js";
 import { createId } from "../id.js";
@@ -7,10 +7,22 @@ import { isRecord } from "../guards.js";
 import { renderContent } from "../rendering/message-content.js";
 import { sanitizeText } from "../rendering/render-text.js";
 import { createSessionSearchMenuItems, searchSessions } from "../session/session-search.js";
+import { loadResumeSessionsInChunks, type ResumeSessionLoaderOptions } from "../session/resume-session-loader.js";
 import type { PopupMenuPlacement, SessionTreeNode } from "../types.js";
 
+function nextTick(): Promise<void> {
+	return new Promise((resolve) => {
+		setImmediate(resolve);
+	});
+}
+
 export class NavigationCommandActions {
-	constructor(private readonly host: CommandControllerHost) {}
+	private resumeLoadId = 0;
+
+	constructor(
+		private readonly host: CommandControllerHost,
+		private readonly resumeSessionLoader: (options: ResumeSessionLoaderOptions) => Promise<readonly SessionInfo[]> = loadResumeSessionsInChunks,
+	) {}
 
 	async runForkCommand(argumentsText: string): Promise<void> {
 		const runtime = getIdleRuntime(this.host, "fork");
@@ -212,27 +224,40 @@ export class NavigationCommandActions {
 		if (!preserveStatus) this.host.setStatus("loading sessions…");
 		this.host.openDirectPopupMenu("resume", { preserveStatus, ...(placement === undefined ? {} : { placement }) });
 		this.host.setDirectPopupMenuQuery(initialQuery);
+		if (this.host.getResumeSessions().length > 0) {
+			this.host.openResumeMenuWithQuery(initialQuery);
+		}
 		this.host.render();
 
+		const loadId = ++this.resumeLoadId;
+		void this.loadResumeSessionsInBackground({ loadId, preserveStatus, session: runtime.session });
+	}
+
+	private async loadResumeSessionsInBackground(options: { loadId: number; preserveStatus: boolean; session: AgentSessionRuntime["session"] }): Promise<void> {
 		try {
-			const sessions = await SessionManager.list(this.host.options.cwd);
-			this.host.setResumeSessions(sessions);
-			this.host.setResumeLoading(false);
-
-			if (this.host.getDirectPopupMenu() !== "resume") return;
-
-			this.host.openResumeMenuWithQuery(this.host.getDirectPopupMenuQuery());
-			if (!preserveStatus) this.host.setSessionStatus(runtime.session);
-			this.host.render();
+			await nextTick();
+			await this.resumeSessionLoader({
+				cwd: this.host.options.cwd,
+				onChunk: (sessions, progress) => {
+					if (options.loadId !== this.resumeLoadId) return;
+					this.host.setResumeSessions([...sessions]);
+					if (progress.done) {
+						this.host.setResumeLoading(false);
+						if (!options.preserveStatus) this.host.setSessionStatus(options.session);
+					}
+					this.host.render();
+				},
+			});
 		} catch (error) {
+			if (options.loadId !== this.resumeLoadId) return;
 			this.host.setResumeLoading(false);
 			this.host.setDirectPopupMenu(undefined);
 			this.host.setDirectPopupMenuPreserveStatus(false);
 			this.host.setDirectPopupMenuQuery("");
 			this.host.closeResumeMenu();
 			this.host.addEntry({ id: createId("error"), kind: "error", text: `Session list failed: ${error instanceof Error ? error.message : String(error)}` });
-			if (!preserveStatus) this.host.toast.error("Failed to load sessions");
-			if (!preserveStatus) this.host.setSessionStatus(runtime.session);
+			if (!options.preserveStatus) this.host.toast.error("Failed to load sessions");
+			if (!options.preserveStatus) this.host.setSessionStatus(options.session);
 			this.host.render();
 		}
 	}

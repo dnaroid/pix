@@ -26,6 +26,7 @@ export type CommandControllerHost = {
 	modelRef(model: SessionModel): string;
 	getFavoriteScopedModels(): ScopedSessionModel[];
 	setSessionStatus(session: AgentSession | undefined): void;
+	queueUserMessage(text: string): void;
 	resetSessionView(): void;
 	loadSessionHistory(): void;
 	afterSessionReplacement(message?: string): void;
@@ -36,6 +37,7 @@ export type CommandControllerHost = {
 	getDirectPopupMenuQuery(): string;
 	setDirectPopupMenuQuery(query: string): void;
 	getResumeLoading(): boolean;
+	getResumeSessions(): readonly SessionInfo[];
 	setResumeLoading(loading: boolean): void;
 	setResumeSessions(sessions: SessionInfo[]): void;
 	openResumeMenuWithQuery(query: string): void;

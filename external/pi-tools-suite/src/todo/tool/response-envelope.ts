@@ -131,7 +131,7 @@ export function buildToolResult(
 	state: TaskState,
 	op: Op,
 ): { content: Array<{ type: "text"; text: string }>; details: TaskDetails } {
-	const text = formatContent(op, state);
+	const text = appendWorkflowReminder(formatContent(op, state), op, state);
 	const details: TaskDetails = {
 		action,
 		params: params as Record<string, unknown>,
@@ -140,4 +140,12 @@ export function buildToolResult(
 		...(op.kind === "error" ? { error: op.message } : {}),
 	};
 	return { content: [{ type: "text", text }], details };
+}
+
+function appendWorkflowReminder(text: string, op: Op, state: TaskState): string {
+	if (op.kind === "error" || op.kind === "export") return text;
+	const hasPending = state.tasks.some((task) => task.status === "pending");
+	const hasInProgress = state.tasks.some((task) => task.status === "in_progress");
+	if (!hasPending || hasInProgress) return text;
+	return `${text}\n\nReminder: pending todos exist but none is in_progress. Before starting work, call todo update on exactly one task with status in_progress and activeForm.`;
 }
