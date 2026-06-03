@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 
-import type { SessionInfo } from "@earendil-works/pi-coding-agent";
-import { createSessionSearchMenuItems, searchResultScrollNeedles, searchResultTargetEntry, type SessionSearchResult } from "../src/app/session/session-search.js";
+import { SessionManager, type SessionInfo } from "@earendil-works/pi-coding-agent";
+import { createSessionSearchMenuItems, searchResultScrollNeedles, searchResultTargetEntry, searchSessions, type SessionSearchResult } from "../src/app/session/session-search.js";
 import type { Entry } from "../src/app/types.js";
 
 describe("session search helpers", () => {
@@ -14,6 +17,16 @@ describe("session search helpers", () => {
 		];
 
 		assert.equal(searchResultTargetEntry(entries, result)?.id, "user-2");
+	});
+
+	it("falls back from a non-user session entry id to the visible match text", () => {
+		const result = fakeResult({ sessionEntryId: "assistant-session-entry", text: "needle from session history" });
+		const entries: Entry[] = [
+			{ id: "assistant-1", kind: "assistant", text: "no match here" },
+			{ id: "assistant-2", kind: "assistant", text: "needle from session history" },
+		];
+
+		assert.equal(searchResultTargetEntry(entries, result)?.id, "assistant-2");
 	});
 
 	it("falls back to matching visible entry text case-insensitively", () => {
@@ -45,6 +58,100 @@ describe("session search helpers", () => {
 		assert.ok(needles.some((needle) => needle === "needle"));
 		assert.ok(needles.every((needle) => !needle.startsWith("…") && !needle.endsWith("…")));
 	});
+
+	it("searches persisted sessions and reports progress", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "pix-session-search-"));
+		const agentDir = join(dir, "agent");
+		const sessionDir = join(agentDir, "sessions");
+		const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+		const previousSessionDir = process.env.PI_CODING_AGENT_SESSION_DIR;
+		process.env.PI_CODING_AGENT_DIR = agentDir;
+		process.env.PI_CODING_AGENT_SESSION_DIR = sessionDir;
+		try {
+			const matchingSession = SessionManager.create(dir, undefined, { id: "session-match" });
+			matchingSession.appendMessage({ role: "user", content: "A very visible needle in a haystack" } as never);
+			matchingSession.appendMessage({ role: "assistant", content: "reply" } as never);
+			const otherSession = SessionManager.create(dir, undefined, { id: "session-other" });
+			otherSession.appendMessage({ role: "user", content: "Something unrelated" } as never);
+
+			const progress: Array<[number, number]> = [];
+			const results = await searchSessions("needle", {
+				cwd: dir,
+				maxResults: 5,
+				snippetLength: 40,
+				onProgress: (loaded, total) => {
+					progress.push([loaded, total]);
+				},
+			});
+
+			assert.equal(results.length, 1);
+			assert.equal(results[0]?.session.id, "session-match");
+			assert.match(results[0]?.snippet ?? "", /needle/i);
+			assert.equal(results[0]?.match.role, "user");
+			assert.equal(progress.length > 0, true);
+		} finally {
+			if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+			else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+			if (previousSessionDir === undefined) delete process.env.PI_CODING_AGENT_SESSION_DIR;
+			else process.env.PI_CODING_AGENT_SESSION_DIR = previousSessionDir;
+		}
+	});
+	it("limits search results to the requested maximum", async () => {
+		const originalList = SessionManager.list;
+		const originalOpen = SessionManager.open;
+		const sessions: SessionInfo[] = [
+			{
+				path: "/tmp/session-a.jsonl",
+				id: "session-a",
+				cwd: "/tmp",
+				name: "Alpha",
+				created: new Date("2026-01-01T00:00:00Z"),
+				modified: new Date("2026-01-02T00:00:00Z"),
+				messageCount: 1,
+				firstMessage: "needle one",
+				allMessagesText: "needle one",
+			},
+			{
+				path: "/tmp/session-b.jsonl",
+				id: "session-b",
+				cwd: "/tmp",
+				name: "Beta",
+				created: new Date("2026-01-03T00:00:00Z"),
+				modified: new Date("2026-01-04T00:00:00Z"),
+				messageCount: 1,
+				firstMessage: "needle two",
+				allMessagesText: "needle two",
+			},
+		];
+		try {
+			SessionManager.list = async () => sessions as never;
+			SessionManager.open = ((path: string) => ({
+				getBranch: () => [{ id: path.endsWith("a.jsonl") ? "entry-a" : "entry-b", type: "message", message: { role: "user", content: path.endsWith("a.jsonl") ? "needle one" : "needle two" } }],
+			})) as never;
+
+			const results = await searchSessions("needle", {
+				cwd: "/tmp",
+				maxResults: 1,
+				snippetLength: 32,
+			});
+
+			assert.equal(results.length, 1);
+			assert.equal(results[0]?.session.id, "session-a");
+		} finally {
+			SessionManager.list = originalList;
+			SessionManager.open = originalOpen;
+		}
+	});
+
+	it("matches visible tool text when a session search result has no persisted entry id", () => {
+		const result = fakeResult({ text: "tool output with Needle inside" });
+		const entries: Entry[] = [
+			{ id: "tool-1", kind: "tool", toolName: "shell", argsText: "{}", output: "tool output with needle inside", expanded: false, isError: false, status: "done" },
+		];
+
+		assert.equal(searchResultTargetEntry(entries, result)?.id, "tool-1");
+	});
+
 });
 
 function fakeResult(overrides: Partial<SessionSearchResult["match"]> & { snippet?: string } = {}): SessionSearchResult {

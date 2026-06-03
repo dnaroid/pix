@@ -3,9 +3,9 @@ import { describe, it } from "node:test";
 
 import type { PixConfig } from "../src/config.js";
 import { APP_ICONS } from "../src/app/icons.js";
-import { ConversationViewport } from "../src/app/rendering/conversation-viewport.js";
+import { ConversationViewport, type ConversationViewportHost } from "../src/app/rendering/conversation-viewport.js";
 import { renderConversationEntry, type ConversationEntryRenderOptions } from "../src/app/rendering/conversation-entry-renderer.js";
-import type { Entry } from "../src/app/types.js";
+import type { Entry, SubmittedUserMessage } from "../src/app/types.js";
 import { stringDisplayWidth } from "../src/terminal-width.js";
 import { THEMES } from "../src/theme.js";
 
@@ -128,14 +128,15 @@ describe("renderConversationEntry", () => {
 		assert.deepEqual(lines.map((line) => line.backgroundOverride), [
 			THEMES.dark.colors.userMessageBackground,
 		]);
-		assert.match(lines[0]?.text ?? "", new RegExp(`${APP_ICONS.timerSand} steer: hello`, "u"));
+		assert.match(lines[0]?.text ?? "", new RegExp(`${APP_ICONS.timerSand} hello`, "u"));
+		assert.doesNotMatch(lines[0]?.text ?? "", /\b(?:steer|follow|queued):/u);
 		assert.deepEqual(lines.map((line) => line.segments), [[{ start: 1, end: 1 + APP_ICONS.timerSand.length, foreground: THEMES.dark.colors.info }]]);
 		assert.deepEqual(lines.map((line) => line.target), [
 			{ kind: "queue-message", id: "queue-bg" },
 		]);
 	});
 
-	it("uses concise queued labels with a blue icon", () => {
+	it("uses pause for deferred queue and hourglass for SDK queue messages", () => {
 		const deferred = renderConversationEntry({
 			id: "queue-deferred",
 			kind: "queued",
@@ -153,9 +154,10 @@ describe("renderConversationEntry", () => {
 			queueIndex: 0,
 		}, 40, renderOptions);
 
-		assert.match(deferred[0]?.text ?? "", new RegExp(`${APP_ICONS.timerSand} queued: send later`, "u"));
-		assert.match(followUp[0]?.text ?? "", new RegExp(`${APP_ICONS.timerSand} follow: next step`, "u"));
-		assert.deepEqual(deferred[0]?.segments, [{ start: 1, end: 1 + APP_ICONS.timerSand.length, foreground: THEMES.dark.colors.info }]);
+		assert.match(deferred[0]?.text ?? "", new RegExp(`${APP_ICONS.pause} send later`, "u"));
+		assert.match(followUp[0]?.text ?? "", new RegExp(`${APP_ICONS.timerSand} next step`, "u"));
+		assert.doesNotMatch(`${deferred[0]?.text ?? ""}\n${followUp[0]?.text ?? ""}`, /\b(?:steer|follow|queued):/u);
+		assert.deepEqual(deferred[0]?.segments, [{ start: 1, end: 1 + APP_ICONS.pause.length, foreground: THEMES.dark.colors.info }]);
 		assert.deepEqual(followUp[0]?.segments, [{ start: 1, end: 1 + APP_ICONS.timerSand.length, foreground: THEMES.dark.colors.info }]);
 	});
 
@@ -215,8 +217,18 @@ describe("renderConversationEntry", () => {
 		}, 80, { ...renderOptions, superCompactTools: true, allThinkingExpanded: true });
 
 		assert.ok(lines.length > 1);
+		assert.equal(lines[0]?.text, `${APP_ICONS.checkCircle} thinking`);
 		assert.ok(lines.some((line) => line.text.includes("detail")));
 		assert.ok(lines.every((line) => line.text.trim().length > 0));
+	});
+
+	it("shows the thinking label when thinking is collapsed in super-compact mode", () => {
+		const lines = renderConversationEntry({ id: "thinking-compact", kind: "thinking", text: "Plan", expanded: false, status: "done" }, 80, {
+			...renderOptions,
+			superCompactTools: true,
+		});
+
+		assert.deepEqual(lines.map((line) => line.text), [`${APP_ICONS.checkCircle} thinking`]);
 	});
 
 	it("marks tool image labels as clickable image targets", () => {
@@ -298,6 +310,7 @@ describe("renderConversationEntry", () => {
 	it("marks expanded thinking text as markdown for syntax highlighting", () => {
 		const lines = renderConversationEntry({ id: "thinking-1", kind: "thinking", text: "- Use `code`", expanded: true, status: "done" }, 80, renderOptions);
 
+		assert.equal(lines[0]?.text, `${APP_ICONS.checkCircle} thinking`);
 		assert.equal(lines[0]?.syntaxHighlight, undefined);
 		assert.deepEqual(lines[1]?.syntaxHighlight, { language: "markdown", start: 2 });
 	});
@@ -430,7 +443,7 @@ describe("ConversationViewport super-compact tools", () => {
 
 		assert.equal(viewport.lineCount(80), 3);
 		assert.match(lines[0] ?? "", /read/u);
-		assert.match(lines[1] ?? "", /thinking/u);
+		assert.equal(lines[1], `${APP_ICONS.checkCircle} thinking`);
 		assert.match(lines[2] ?? "", /read/u);
 		assert.equal(lines[3], undefined);
 	});
@@ -461,11 +474,93 @@ describe("ConversationViewport super-compact tools", () => {
 		assert.equal(viewport.lineCount(80), 5);
 		assert.equal(lines.length, 5);
 		assert.match(lines[0] ?? "", /read/u);
-		assert.match(lines[1] ?? "", /thinking/u);
+		assert.equal(lines[1], `${APP_ICONS.checkCircle} thinking`);
 		assert.equal(lines[2], "  Plan");
 		assert.equal(lines[3], "  - detail");
 		assert.match(lines[4] ?? "", /read/u);
 		assert.ok(lines.every((line) => line.trim().length > 0));
+	});
+});
+
+
+describe("ConversationViewport cache behavior", () => {
+	it("includes queued session and deferred messages in entries()", () => {
+		const session = {
+			getSteeringMessages: () => ["alpha"],
+			getFollowUpMessages: () => ["beta"],
+		} as unknown as ConversationViewportHost["session"];
+		const viewport = new ConversationViewport({
+			entries: [{ id: "assistant-1", kind: "assistant", text: "hello" }],
+			session,
+			deferredUserMessages: [{ id: "draft-1", displayText: "later" }] as unknown as readonly SubmittedUserMessage[],
+			entryRenderVersions: new Map(),
+			cwd: "/repo",
+			colors: THEMES.dark.colors,
+			pixConfig,
+			get outputFilters() { return []; },
+			superCompactTools: false,
+			isDynamicConversationBlock: () => false,
+			renderInlineUserMessageMenu: () => [],
+		} as ConversationViewportHost);
+
+		const entries = viewport.entries();
+
+		assert.equal(entries[0]?.id, "assistant-1");
+		assert.equal(entries[1]?.kind, "queued");
+		assert.ok(entries[1]?.id.startsWith("queued-sdk-steering-0-"));
+		assert.equal(entries[1]?.text, "alpha");
+		assert.equal(entries[2]?.kind, "queued");
+		assert.ok(entries[2]?.id.startsWith("queued-sdk-follow-up-0-"));
+		assert.equal(entries[3]?.id, "draft-1-0");
+		assert.equal(entries[3]?.queueSource, "deferred");
+	});
+
+	it("refreshes dirty cached blocks after deleteEntry", () => {
+		let filters: RegExp[] = [];
+		const viewport = new ConversationViewport({
+			entries: [{ id: "assistant-dirty", kind: "assistant", text: "alpha" }],
+			session: undefined,
+			deferredUserMessages: [],
+			entryRenderVersions: new Map(),
+			cwd: "/repo",
+			colors: THEMES.dark.colors,
+			pixConfig,
+			get outputFilters() { return filters; },
+			superCompactTools: false,
+			isDynamicConversationBlock: () => false,
+			renderInlineUserMessageMenu: () => [],
+		} as ConversationViewportHost);
+
+		assert.equal(viewport.lineCount(80), 2);
+		filters = [/alpha/u];
+		viewport.deleteEntry("assistant-dirty");
+
+		assert.equal(viewport.lineCount(80), 0);
+		assert.deepEqual(viewport.slice(80, 0, 1), []);
+	});
+
+	it("refreshes dynamic blocks when their rendered width changes", () => {
+		let filters: RegExp[] = [];
+		const viewport = new ConversationViewport({
+			entries: [{ id: "assistant-dynamic", kind: "assistant", text: "alpha" }],
+			session: undefined,
+			deferredUserMessages: [],
+			entryRenderVersions: new Map(),
+			cwd: "/repo",
+			colors: THEMES.dark.colors,
+			pixConfig,
+			get outputFilters() { return filters; },
+			superCompactTools: false,
+			hasDynamicConversationBlock: () => true,
+			isDynamicConversationBlock: (entry) => entry.id === "assistant-dynamic",
+			renderInlineUserMessageMenu: () => [],
+		} as ConversationViewportHost);
+
+		assert.equal(viewport.lineCount(80), 2);
+		filters = [/alpha/u];
+
+		assert.equal(viewport.lineCount(80), 0);
+		assert.deepEqual(viewport.slice(80, 0, 1), []);
 	});
 });
 

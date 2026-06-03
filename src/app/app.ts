@@ -945,11 +945,14 @@ export class PiUiExtendApp {
 
 	private toggleSuperCompactTools(): void {
 		this.superCompactTools = !this.superCompactTools;
-		if (!this.superCompactTools) return;
-
 		for (const entry of this.entries) {
-			if (entry.kind !== "tool" || !entry.expanded) continue;
-			entry.expanded = false;
+			if (entry.kind !== "tool") continue;
+
+			const defaultExpanded = resolveToolRule(entry.toolName, this.pixConfig.toolRenderer).defaultExpanded === true;
+			const nextExpanded = this.superCompactTools ? false : defaultExpanded;
+			if (entry.expanded === nextExpanded) continue;
+
+			entry.expanded = nextExpanded;
 			this.touchEntry(entry);
 		}
 	}

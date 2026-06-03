@@ -4,6 +4,21 @@ import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { RenderedLink } from "./file-links.js";
 
+type FileLinkOpenerDeps = {
+	existsSync: typeof existsSync;
+	spawn: typeof spawn;
+};
+
+let deps: FileLinkOpenerDeps = { existsSync, spawn };
+
+export function setFileLinkOpenerTestDeps(overrides: Partial<FileLinkOpenerDeps>): () => void {
+	const previous = deps;
+	deps = { ...deps, ...overrides };
+	return () => {
+		deps = previous;
+	};
+}
+
 export function openFileLink(link: RenderedLink): boolean {
 	const filePath = link.filePath ?? filePathFromUrl(link.url);
 	if (!filePath) return false;
@@ -38,7 +53,7 @@ function zedCommandCandidates(): string[] {
 
 function trySpawnCandidates(candidates: readonly string[], args: readonly string[]): boolean {
 	for (const command of candidates) {
-		if (command.includes("/") && !existsSync(command)) continue;
+		if (command.includes("/") && !deps.existsSync(command)) continue;
 		if (!command.includes("/") && !commandOnPath(command)) continue;
 		if (spawnDetached(command, args)) return true;
 	}
@@ -50,12 +65,12 @@ function commandOnPath(command: string): boolean {
 	const extensions = process.platform === "win32"
 		? (process.env.PATHEXT?.split(";") ?? [".EXE", ".CMD", ".BAT", ".COM"])
 		: [""];
-	return pathEntries.some((entry) => extensions.some((extension) => existsSync(join(entry, `${command}${extension}`))));
+	return pathEntries.some((entry) => extensions.some((extension) => deps.existsSync(join(entry, `${command}${extension}`))));
 }
 
 function spawnDetached(command: string, args: readonly string[]): boolean {
 	try {
-		const child = spawn(command, args, { detached: true, stdio: "ignore" });
+		const child = deps.spawn(command, args, { detached: true, stdio: "ignore" });
 		child.on("error", () => {});
 		child.unref();
 		return true;

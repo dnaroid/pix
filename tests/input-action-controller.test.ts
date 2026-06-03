@@ -356,4 +356,278 @@ describe("AppInputActionController", () => {
 		assert.equal(clearDraftCalls, 1);
 		assert.equal(submitCalls, 0);
 	});
+	it("interrupts shell stdin and clears the editor before stopping", async () => {
+		const inputEditor = new InputEditor();
+		inputEditor.setText("stdin payload");
+		let clearDraftCalls = 0;
+		let stopCalls = 0;
+		const controller = new AppInputActionController(
+			{
+				runtime: () => undefined,
+				isRunning: () => true,
+				isSessionSwitching: () => false,
+				inputEditor: () => inputEditor,
+				requestHistory: () => ({ add: () => {} }) as unknown as AppRequestHistory,
+				clearPersistedInputDraft: async () => { clearDraftCalls += 1; },
+				setStatus: () => {},
+				setSessionStatus: () => {},
+				setSessionActivity: () => {},
+				addEntry: () => {},
+				addSessionAbortedEntry: () => {},
+				showToast: () => {},
+				stopVoiceInput: async () => {},
+				isShellCommandRunning: () => false,
+				runChatShellCommand: async () => ({ exitCode: 0, signal: null }),
+				sendShellInput: () => false,
+				interruptShellCommand: () => true,
+				runInteractiveShellCommand: async () => ({ exitCode: 0, signal: null }),
+				stop: async () => { stopCalls += 1; },
+				render: () => {},
+			},
+			{ syncActivePopupMenu: () => false } as unknown as AppPopupMenuController,
+			{} as AppPopupActionController,
+			{ createSubmittedUserMessage: () => ({ id: "queued", promptText: "", displayText: "", images: [] }), submitUserMessage: async () => {} } as unknown as AppQueuedMessageController,
+		);
+
+		await controller.handleInterrupt();
+
+		assert.equal(inputEditor.text, "");
+		assert.equal(clearDraftCalls, 1);
+		assert.equal(stopCalls, 0);
+	});
+
+	it("aborts compaction from Escape and restores session state afterward", async () => {
+		let abortCompactionCalls = 0;
+		const session = { isStreaming: false, isCompacting: true, abortCompaction: () => { abortCompactionCalls += 1; } };
+		const controller = new AppInputActionController(
+			{
+				runtime: () => ({ session } as any),
+				isRunning: () => true,
+				isSessionSwitching: () => false,
+				inputEditor: () => new InputEditor(),
+				requestHistory: () => ({ add: () => {} }) as unknown as AppRequestHistory,
+				clearPersistedInputDraft: async () => {},
+				setStatus: () => {},
+				setSessionStatus: () => {},
+				setSessionActivity: () => {},
+				addEntry: () => {},
+				addSessionAbortedEntry: () => {},
+				showToast: () => {},
+				stopVoiceInput: async () => {},
+				isShellCommandRunning: () => false,
+				runChatShellCommand: async () => ({ exitCode: 0, signal: null }),
+				sendShellInput: () => false,
+				interruptShellCommand: () => false,
+				runInteractiveShellCommand: async () => ({ exitCode: 0, signal: null }),
+				stop: async () => {},
+				render: () => {},
+			},
+			{ syncActivePopupMenu: () => false } as unknown as AppPopupMenuController,
+			{} as AppPopupActionController,
+			{ createSubmittedUserMessage: () => ({ id: "queued", promptText: "", displayText: "", images: [] }), submitUserMessage: async () => {} } as unknown as AppQueuedMessageController,
+		);
+
+		await controller.handleEscape();
+
+		assert.equal(abortCompactionCalls, 1);
+	});
+
+	it("warns when submitting while a tab is still switching", async () => {
+		const inputEditor = new InputEditor();
+		inputEditor.setText("hello tab");
+		const toasts: string[] = [];
+		const controller = new AppInputActionController(
+			{
+				runtime: () => undefined,
+				isRunning: () => true,
+				isSessionSwitching: () => true,
+				inputEditor: () => inputEditor,
+				requestHistory: () => ({ add: () => { throw new Error("should not record history"); } }) as unknown as AppRequestHistory,
+				clearPersistedInputDraft: async () => {},
+				setStatus: () => {},
+				setSessionStatus: () => {},
+				setSessionActivity: () => {},
+				addEntry: () => {},
+				addSessionAbortedEntry: () => {},
+				showToast: (message, kind) => { toasts.push(`${kind}:${message}`); },
+				stopVoiceInput: async () => {},
+				isShellCommandRunning: () => false,
+				runChatShellCommand: async () => ({ exitCode: 0, signal: null }),
+				sendShellInput: () => false,
+				interruptShellCommand: () => false,
+				runInteractiveShellCommand: async () => ({ exitCode: 0, signal: null }),
+				stop: async () => {},
+				render: () => {},
+			},
+			{ syncActivePopupMenu: () => false } as unknown as AppPopupMenuController,
+			{} as AppPopupActionController,
+			{ createSubmittedUserMessage: () => ({ id: "queued", promptText: "", displayText: "", images: [] }), submitUserMessage: async () => {} } as unknown as AppQueuedMessageController,
+		);
+
+		await (controller as unknown as { submitInput(): Promise<void> }).submitInput();
+
+		assert.deepEqual(toasts, ["info:Wait for the tab to finish loading"]);
+		assert.equal(inputEditor.text, "hello tab");
+	});
+
+	it("cancels the active popup menu on Escape", async () => {
+		let cancelCalls = 0;
+		const controller = new AppInputActionController(
+			{
+				runtime: () => undefined,
+				isRunning: () => true,
+				isSessionSwitching: () => false,
+				inputEditor: () => new InputEditor(),
+				requestHistory: () => ({ add: () => {} }) as unknown as AppRequestHistory,
+				clearPersistedInputDraft: async () => {},
+				setStatus: () => {},
+				setSessionStatus: () => {},
+				setSessionActivity: () => {},
+				addEntry: () => {},
+				addSessionAbortedEntry: () => {},
+				showToast: () => {},
+				stopVoiceInput: async () => {},
+				isShellCommandRunning: () => false,
+				runChatShellCommand: async () => ({ exitCode: 0, signal: null }),
+				sendShellInput: () => false,
+				interruptShellCommand: () => false,
+				runInteractiveShellCommand: async () => ({ exitCode: 0, signal: null }),
+				stop: async () => {},
+				render: () => {},
+			},
+			{ syncActivePopupMenu: () => "slash", cancelActivePopupMenu: () => { cancelCalls += 1; } } as unknown as AppPopupMenuController,
+			{} as AppPopupActionController,
+			{
+				createSubmittedUserMessage: () => ({ id: "queued", promptText: "", displayText: "", images: [] }),
+				submitUserMessage: async () => {},
+			} as unknown as AppQueuedMessageController,
+		);
+
+		await controller.handleEscape();
+
+		assert.equal(cancelCalls, 1);
+	});
+
+	it("delegates Enter to the active popup menu", async () => {
+		let submitCalls = 0;
+		let submitInputCalls = 0;
+		const controller = new AppInputActionController(
+			{
+				runtime: () => undefined,
+				isRunning: () => true,
+				isSessionSwitching: () => false,
+				inputEditor: () => new InputEditor(),
+				requestHistory: () => ({ add: () => {} }) as unknown as AppRequestHistory,
+				clearPersistedInputDraft: async () => {},
+				setStatus: () => {},
+				setSessionStatus: () => {},
+				setSessionActivity: () => {},
+				addEntry: () => {},
+				addSessionAbortedEntry: () => {},
+				showToast: () => {},
+				stopVoiceInput: async () => {},
+				isShellCommandRunning: () => false,
+				runChatShellCommand: async () => ({ exitCode: 0, signal: null }),
+				sendShellInput: () => false,
+				interruptShellCommand: () => false,
+				runInteractiveShellCommand: async () => ({ exitCode: 0, signal: null }),
+				stop: async () => {},
+				render: () => {},
+			},
+			{ syncActivePopupMenu: () => "slash" } as unknown as AppPopupMenuController,
+			{ submitActivePopupMenu: async () => { submitCalls += 1; } } as unknown as AppPopupActionController,
+			{ createSubmittedUserMessage: () => ({ id: "queued", promptText: "", displayText: "", images: [] }), submitUserMessage: async () => { submitInputCalls += 1; } } as unknown as AppQueuedMessageController,
+		);
+
+		controller.handleEnter();
+		await new Promise((resolve) => setTimeout(resolve, 5));
+
+		assert.equal(submitCalls, 1);
+		assert.equal(submitInputCalls, 0);
+	});
+
+	it("shows a warning when shell stdin includes pasted images", async () => {
+		const inputEditor = new InputEditor();
+		inputEditor.attachImage("data", "image/png");
+		inputEditor.insert("stdin payload");
+		const toasts: string[] = [];
+		let sentInput: string | undefined;
+		const controller = new AppInputActionController(
+			{
+				runtime: () => undefined,
+				isRunning: () => true,
+				isSessionSwitching: () => false,
+				inputEditor: () => inputEditor,
+				requestHistory: () => ({ add: () => {} }) as unknown as AppRequestHistory,
+				clearPersistedInputDraft: async () => {},
+				setStatus: () => {},
+				setSessionStatus: () => {},
+				setSessionActivity: () => {},
+				addEntry: () => {},
+				addSessionAbortedEntry: () => {},
+				showToast: (message, kind) => toasts.push(`${kind}:${message}`),
+				stopVoiceInput: async () => {},
+				isShellCommandRunning: () => true,
+				runChatShellCommand: async () => ({ exitCode: 0, signal: null }),
+				sendShellInput: (text: string) => {
+					sentInput = text;
+					return true;
+				},
+				interruptShellCommand: () => false,
+				runInteractiveShellCommand: async () => ({ exitCode: 0, signal: null }),
+				stop: async () => {},
+				render: () => {},
+			},
+			{ syncActivePopupMenu: () => false } as unknown as AppPopupMenuController,
+			{} as AppPopupActionController,
+			{ createSubmittedUserMessage: () => ({ id: "queued", promptText: "", displayText: "", images: [] }), submitUserMessage: async () => {} } as unknown as AppQueuedMessageController,
+		);
+
+		await (controller as unknown as { submitInput(): Promise<void> }).submitInput();
+
+		assert.equal(sentInput, undefined);
+		assert.deepEqual(toasts, ["warning:Shell stdin cannot include pasted images"]);
+		assert.notEqual(inputEditor.text, "");
+	});
+
+	it("records interactive shell failures as error entries", async () => {
+		const inputEditor = new InputEditor();
+		inputEditor.setText("!!vim");
+		const history: string[] = [];
+		const entries: Array<{ kind: string; text: string }> = [];
+		const controller = new AppInputActionController(
+			{
+				runtime: () => undefined,
+				isRunning: () => true,
+				isSessionSwitching: () => false,
+				inputEditor: () => inputEditor,
+				requestHistory: () => ({ add: (value: string) => history.push(value) }) as unknown as AppRequestHistory,
+				clearPersistedInputDraft: async () => {},
+				setStatus: () => {},
+				setSessionStatus: () => {},
+				setSessionActivity: () => {},
+				addEntry: (entry) => entries.push({ kind: entry.kind, text: "text" in entry ? entry.text : entry.output }),
+				addSessionAbortedEntry: () => {},
+				showToast: () => {},
+				stopVoiceInput: async () => {},
+				isShellCommandRunning: () => false,
+				runChatShellCommand: async () => ({ exitCode: 0, signal: null }),
+				sendShellInput: () => false,
+				interruptShellCommand: () => false,
+				runInteractiveShellCommand: async () => ({ exitCode: null, signal: null, error: "no shell" }),
+				stop: async () => {},
+				render: () => {},
+			},
+			{ syncActivePopupMenu: () => false } as unknown as AppPopupMenuController,
+			{} as AppPopupActionController,
+			{ createSubmittedUserMessage: () => ({ id: "queued", promptText: "", displayText: "", images: [] }), submitUserMessage: async () => {} } as unknown as AppQueuedMessageController,
+		);
+
+		await (controller as unknown as { submitInput(): Promise<void> }).submitInput();
+
+		assert.deepEqual(history, ["!!vim"]);
+		assert.equal(entries[0]?.kind, "error");
+		assert.match(entries[0]?.text ?? "", /Shell command failed to start: !!vim/u);
+	});
+
 });

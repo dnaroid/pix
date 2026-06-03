@@ -85,6 +85,86 @@ describe("model usage controller", () => {
 		assert.equal(second.kind, "in-flight");
 		assert.equal(queryCount, 1);
 	});
+
+	it("reports unsupported models without querying", () => {
+		let queryCount = 0;
+		const controller = new AppModelUsageController({
+			runtimeSession: () => sessionWithModel("local", "llama"),
+			render: () => {},
+		}, async (descriptor) => {
+			queryCount++;
+			return usageStatus(descriptor, 10);
+		});
+
+		assert.deepEqual(controller.refreshNow(), { kind: "unsupported" });
+		assert.equal(controller.statusLabel(), "");
+		assert.equal(queryCount, 0);
+	});
+
+	it("clears active status when quota becomes unavailable", async () => {
+		const activeSession = sessionWithModel("openai-codex", "gpt-5.5");
+		let available = true;
+		const controller = new AppModelUsageController({
+			runtimeSession: () => activeSession,
+			render: () => {},
+		}, async (descriptor) => available ? usageStatus(descriptor, 80) : undefined);
+
+		const first = controller.refreshNow();
+		assert.equal(first.kind, "started");
+		if (first.kind !== "started") throw new Error("Expected started refresh");
+		assert.equal(await first.promise, "refreshed");
+		assert.match(controller.statusLabel(), /^80%/u);
+
+		available = false;
+		const second = controller.refreshNow();
+		assert.equal(second.kind, "started");
+		if (second.kind !== "started") throw new Error("Expected started refresh");
+		assert.equal(await second.promise, "unavailable");
+		assert.equal(controller.statusLabel(), "");
+	});
+
+	it("keeps the previous status on transient query failures", async () => {
+		const activeSession = sessionWithModel("openai-codex", "gpt-5.5");
+		let shouldFail = false;
+		const controller = new AppModelUsageController({
+			runtimeSession: () => activeSession,
+			render: () => {},
+		}, async (descriptor) => {
+			if (shouldFail) throw new Error("network");
+			return usageStatus(descriptor, 64);
+		});
+
+		const first = controller.refreshNow();
+		assert.equal(first.kind, "started");
+		if (first.kind !== "started") throw new Error("Expected started refresh");
+		await first.promise;
+
+		shouldFail = true;
+		const second = controller.refreshNow();
+		assert.equal(second.kind, "started");
+		if (second.kind !== "started") throw new Error("Expected started refresh");
+		assert.equal(await second.promise, "failed");
+		assert.match(controller.statusLabel(), /^64%/u);
+	});
+
+	it("starts polling only once and can stop it", () => {
+		const activeSession = sessionWithModel("openai-codex", "gpt-5.5");
+		let queryCount = 0;
+		const controller = new AppModelUsageController({
+			runtimeSession: () => activeSession,
+			render: () => {},
+		}, async (descriptor) => {
+			queryCount++;
+			return usageStatus(descriptor, 55);
+		});
+
+		controller.startPolling();
+		controller.startPolling();
+		controller.stopPolling();
+		controller.stopPolling();
+
+		assert.equal(queryCount, 1);
+	});
 });
 
 function sessionWithModel(provider: string, id: string): AgentSession {

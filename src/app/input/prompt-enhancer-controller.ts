@@ -51,6 +51,24 @@ type PromptEnhanceTarget = {
 
 type PromptEnhanceRunner = typeof enhancePromptWithPi;
 
+type PromptEnhancerPiDeps = {
+	createAgentSessionServices: typeof createAgentSessionServices;
+	createAgentSessionFromServices: typeof createAgentSessionFromServices;
+	sessionManagerInMemory: typeof SessionManager.inMemory;
+};
+
+const defaultPromptEnhancerPiDeps: PromptEnhancerPiDeps = {
+	createAgentSessionServices,
+	createAgentSessionFromServices,
+	sessionManagerInMemory: SessionManager.inMemory,
+};
+
+let promptEnhancerPiDeps = defaultPromptEnhancerPiDeps;
+
+export function setPromptEnhancerPiTestDeps(overrides?: Partial<PromptEnhancerPiDeps>): void {
+	promptEnhancerPiDeps = overrides ? { ...defaultPromptEnhancerPiDeps, ...overrides } : defaultPromptEnhancerPiDeps;
+}
+
 type AppPromptEnhancerControllerOptions = {
 	enhancePromptWithPi?: PromptEnhanceRunner;
 };
@@ -177,7 +195,7 @@ async function enhancePromptWithPi(
 	config: PromptEnhancerConfig,
 ): Promise<string> {
 	const parsedModel = parseModelRef(config.modelRef);
-	const services = await createAgentSessionServices({
+	const services = await promptEnhancerPiDeps.createAgentSessionServices({
 		cwd: runtime.cwd,
 		agentDir: runtime.services.agentDir,
 		authStorage: runtime.services.authStorage,
@@ -203,9 +221,9 @@ async function enhancePromptWithPi(
 		));
 	}
 
-	const { session } = await createAgentSessionFromServices({
+	const { session } = await promptEnhancerPiDeps.createAgentSessionFromServices({
 		services,
-		sessionManager: SessionManager.inMemory(runtime.cwd),
+		sessionManager: promptEnhancerPiDeps.sessionManagerInMemory(runtime.cwd),
 		model,
 		thinkingLevel: parsedModel.thinkingLevel ?? "minimal",
 		noTools: "all",

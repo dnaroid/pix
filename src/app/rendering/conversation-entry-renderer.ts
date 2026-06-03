@@ -58,18 +58,9 @@ export function renderConversationEntry(entry: Entry, width: number, options: Co
 		lines.push(userLine("", userEntry.id));
 		return attachImageClickTargets(lines, userEntry.id, userEntry.images, { foreground: options.colors.info, underline: true });
 	};
-	const queuedMessagePrefix = (queuedEntry: Extract<Entry, { kind: "queued" }>): string => {
-		const label = queuedEntry.queueSource === "sdk-steering"
-			? "steer"
-			: queuedEntry.queueSource === "sdk-follow-up"
-				? "follow"
-				: "queued";
-		return `${APP_ICONS.timerSand} ${label}:`;
-	};
 	const queuedMessageLines = (queuedEntry: Extract<Entry, { kind: "queued" }>): RenderedLine[] => {
-		const icon = APP_ICONS.timerSand;
-		const prefix = queuedMessagePrefix(queuedEntry);
-		const contentLines = wrapText(`${prefix} ${queuedEntry.text}`, userContentWidth);
+		const icon = queuedEntry.queueSource === "deferred" ? APP_ICONS.pause : APP_ICONS.timerSand;
+		const contentLines = wrapText(`${icon} ${queuedEntry.text}`, userContentWidth);
 		return contentLines.map((text, index) => queuedLine(text, queuedEntry.id, index === 0 ? [{ start: 0, end: icon.length, foreground: options.colors.info }] : undefined));
 	};
 

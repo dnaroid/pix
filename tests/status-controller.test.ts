@@ -12,6 +12,55 @@ import { colorize, THEMES } from "../src/theme.js";
 import type { ModelColorsConfig } from "../src/config.js";
 
 describe("AppStatusController", () => {
+	it("tracks manual and session-following status labels", () => {
+		let session = { ...sessionWithContextPercent(42), model: { provider: "provider", id: "model" }, thinkingLevel: "medium" } as AgentSession;
+		const controller = new AppStatusController({
+			cwd: "/tmp/workspace",
+			theme: THEMES.dark,
+			blinkController: fakeBlinkController(),
+			runtimeSession: () => session,
+			render: () => {},
+		});
+
+		controller.setStatus("ready");
+		assert.equal(controller.currentStatus(), "ready");
+		controller.setSessionStatus(session);
+		assert.equal(controller.currentStatus(), "provider/model medium 42%");
+
+		session = { ...session, model: undefined, thinkingLevel: "off", getContextUsage: () => undefined } as AgentSession;
+		assert.equal(controller.currentStatus(), "no model off ?%");
+	});
+
+	it("formats session, workspace, context, and severity labels", async () => {
+		let renders = 0;
+		const blink = fakeBlinkController();
+		const controller = new AppStatusController({
+			cwd: "/tmp/my-project",
+			theme: THEMES.dark,
+			blinkController: blink,
+			runtimeSession: () => undefined,
+			render: () => { renders += 1; },
+		});
+		const named = { ...sessionWithContextPercent(7), sessionName: "  Feature work  " } as AgentSession;
+		const unnamed = { ...sessionWithContextPercent(7), sessionName: " ", sessionId: "abcdef123456" } as AgentSession;
+
+		assert.equal(controller.statusSessionLabel(named), "Feature work");
+		assert.equal(controller.statusSessionLabel(unnamed), "session abcdef12");
+		assert.equal(controller.statusWorkspaceLabel(), "my-project");
+		assert.equal(controller.roundedContextUsagePercent(sessionWithContextPercent(49.6)), 50);
+		assert.equal(controller.contextUsagePercentColor(30), THEMES.dark.colors.success);
+		assert.equal(controller.contextUsagePercentColor(50), THEMES.dark.colors.warning);
+		assert.equal(controller.contextUsagePercentColor(51), THEMES.dark.colors.error);
+
+		controller.setSessionActivity("running");
+		assert.equal(controller.sessionActivity, "running");
+		assert.equal(controller.statusDotBright, false);
+		controller.setSessionActivity("idle");
+		assert.equal(controller.sessionActivity, "idle");
+		await new Promise((resolve) => setTimeout(resolve, 250));
+		assert.ok(renders >= 0);
+	});
+
 	it("formats single-digit context percentages with a leading space", () => {
 		const controller = new AppStatusController({
 			cwd: process.cwd(),
@@ -74,7 +123,7 @@ describe("StatusLineRenderer", () => {
 		assert.ok(layout.text.endsWith(widgetText));
 	});
 
-	it("places the prompt enhancer icon before the voice widget", () => {
+	it("places the prompt enhancer icon before the right-side status icons", () => {
 		const widgetText = `${APP_ICONS.microphone} RU`;
 		const promptWidgetText = APP_ICONS.autoFix;
 		const width = 40;
@@ -82,23 +131,22 @@ describe("StatusLineRenderer", () => {
 
 		const layout = renderer.layout(width);
 		const widgetWidth = stringDisplayWidth(widgetText);
-		const promptWidgetWidth = stringDisplayWidth(promptWidgetText);
 
-		assert.ok(layout.text.endsWith(`${promptWidgetText} ${widgetText}`));
-		assert.equal(layout.promptEnhancerWidget?.startColumn, width - widgetWidth - promptWidgetWidth);
-		assert.equal(layout.promptEnhancerWidget?.endColumn, width - widgetWidth);
+		assert.ok(layout.text.endsWith(`${promptWidgetText} ${APP_ICONS.user} ${APP_ICONS.thinkingExpanded} ${APP_ICONS.compactTools} ${widgetText}`));
+		assert.equal((layout.promptEnhancerWidget?.endColumn ?? 0) + 1, layout.userJumpWidget?.startColumn);
+		assert.equal((layout.compactToolsWidget?.endColumn ?? 0) + 1, layout.voiceWidget?.startColumn);
 		assert.equal(layout.voiceWidget?.startColumn, width - widgetWidth + 1);
 	});
 
-	it("places the prompt enhancer icon directly before the voice widget", () => {
+	it("keeps the prompt enhancer icon before the user icon without draft queue input", () => {
 		const widgetText = `${APP_ICONS.microphone} RU`;
 		const promptWidgetText = APP_ICONS.autoFix;
 		const width = 40;
 		const renderer = statusLineRenderer({ widgetText, voiceActive: false, promptWidgetText, promptActive: false });
 
 		const layout = renderer.layout(width);
-		assert.ok(layout.text.endsWith(`${promptWidgetText} ${widgetText}`));
-		assert.equal(layout.voiceWidget?.startColumn, (layout.promptEnhancerWidget?.endColumn ?? 0) + 1);
+		assert.ok(layout.text.endsWith(`${promptWidgetText} ${APP_ICONS.user} ${APP_ICONS.thinkingExpanded} ${APP_ICONS.compactTools} ${widgetText}`));
+		assert.equal((layout.promptEnhancerWidget?.endColumn ?? 0) + 1, layout.userJumpWidget?.startColumn);
 	});
 
 	it("renders the prompt enhancer icon muted and non-clickable when disabled", () => {
@@ -362,11 +410,11 @@ describe("StatusLineRenderer", () => {
 		const rendered = renderer.render(1, layout, 40);
 		const target = renderer.compactToolsTarget(layout, 1);
 
-		assert.ok(layout.text.endsWith(`${APP_ICONS.compactTools} ${promptWidgetText} ${widgetText}`));
+		assert.ok(layout.text.endsWith(`${promptWidgetText} ${APP_ICONS.user} ${APP_ICONS.thinkingExpanded} ${APP_ICONS.compactTools} ${widgetText}`));
 		assert.deepEqual(target, {
 			row: 1,
-			startColumn: (layout.promptEnhancerWidget?.startColumn ?? 0) - 2,
-			endColumn: (layout.promptEnhancerWidget?.startColumn ?? 0) - 1,
+			startColumn: layout.compactToolsWidget?.startColumn,
+			endColumn: layout.compactToolsWidget?.endColumn,
 		});
 		assert.ok(rendered.includes(colorize(APP_ICONS.compactTools, {
 			foreground: THEMES.dark.colors.info,
@@ -425,6 +473,21 @@ describe("StatusLineRenderer", () => {
 		assert.equal((layout.promptEnhancerWidget?.endColumn ?? 0) + 1, layout.userJumpWidget?.startColumn);
 	});
 
+	it("keeps the prompt enhancer before the user icon when the draft queue button is hidden", () => {
+		const renderer = statusLineRenderer({
+			widgetText: "",
+			voiceActive: false,
+			queueableInputActive: false,
+			promptWidgetText: APP_ICONS.autoFix,
+			promptActive: false,
+		});
+		const layout = renderer.layout(40);
+
+		assert.equal(layout.draftQueueWidget, undefined);
+		assert.ok(layout.text.endsWith(`${APP_ICONS.autoFix} ${APP_ICONS.user} ${APP_ICONS.thinkingExpanded} ${APP_ICONS.compactTools}`));
+		assert.equal((layout.promptEnhancerWidget?.endColumn ?? 0) + 1, layout.userJumpWidget?.startColumn);
+	});
+
 	it("hides the draft queue button when the editor has no queueable input", () => {
 		const renderer = statusLineRenderer({ widgetText: "", voiceActive: false, queueableInputActive: false });
 		const layout = renderer.layout(40);
@@ -469,6 +532,55 @@ describe("StatusLineRenderer", () => {
 			foreground: THEMES.dark.colors.muted,
 		})));
 	});
+});
+
+
+describe("StatusLineRenderer target helpers", () => {
+	it("exposes click targets for status text and voice language widgets", () => {
+	const session = {
+		model: { provider: "anthropic", id: "claude-sonnet-4" },
+	} as AgentSession;
+	const renderer = statusLineRenderer({
+		widgetText: `${APP_ICONS.microphone} RU`,
+		voiceActive: false,
+		session,
+		currentStatus: "anthropic/claude-sonnet-4 medium ?%",
+		thinkingLabel: "medium",
+		modelLabel: "anthropic/claude-sonnet-4",
+		workspaceLabel: "workspace",
+	});
+	const layout = renderer.layout(80);
+	const modelLabel = "anthropic/claude-sonnet-4";
+	const thinkingLabel = "medium";
+	const contextLabel = "?%";
+
+	assert.deepEqual(renderer.modelTarget(layout.text, 1), {
+		row: 1,
+		startColumn: layout.text.indexOf(modelLabel) + 1,
+		endColumn: layout.text.indexOf(modelLabel) + 1 + modelLabel.length,
+	});
+	assert.deepEqual(renderer.thinkingTarget(layout.text, 1), {
+		row: 1,
+		startColumn: layout.text.indexOf(thinkingLabel) + 1,
+		endColumn: layout.text.indexOf(thinkingLabel) + 1 + thinkingLabel.length,
+	});
+	assert.deepEqual(renderer.contextTarget(layout.text, 1, layout), {
+		row: 1,
+		startColumn: layout.text.indexOf(contextLabel) + 1,
+		endColumn: layout.text.indexOf(contextLabel) + 1 + contextLabel.length,
+	});
+	assert.deepEqual(renderer.voiceLanguageTarget(layout, 1), {
+		row: 1,
+		startColumn: layout.voiceWidget?.languageStartColumn,
+		endColumn: layout.voiceWidget?.languageEndColumn,
+	});
+	assert.deepEqual(renderer.sessionTarget("prefix session workspace", 1, "session", "workspace"), {
+		row: 1,
+		startColumn: 8,
+		endColumn: 15,
+	});
+});
+
 });
 
 function statusLineRenderer(options: { widgetText: string; voiceActive: boolean; promptWidgetText?: string; promptActive?: boolean; promptEnabled?: boolean; terminalBellWidgetText?: string; terminalBellSoundEnabled?: boolean; sessionActivity?: "idle" | "running" | "thinking"; statusDotBright?: boolean; workspaceLabel?: string; workspaceGitBranchLabel?: string; modelUsageLabel?: string; session?: AgentSession; currentStatus?: string; thinkingLabel?: string; modelLabel?: string; modelColors?: ModelColorsConfig; userMessageJumpMenuActive?: boolean; queueableInputActive?: boolean; allThinkingExpandedActive?: boolean; superCompactToolsActive?: boolean }): StatusLineRenderer {

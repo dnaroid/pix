@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { autoClearCompletedTodos } from "./state/auto-clear.js";
 import { loadPersistedPlan, syncPersistedPlan } from "./state/persistence.js";
 import { replayFromBranch } from "./state/replay.js";
-import { ACTIVE_STATUSES, selectVisibleTasks } from "./state/selectors.js";
+import { ACTIVE_STATUSES, isTaskBlocked, selectVisibleTasks } from "./state/selectors.js";
 import { getState, replaceState } from "./state/store.js";
 import { publishTodoState, registerTodosCommand, registerTodoTool } from "./todo.js";
 
@@ -17,7 +17,9 @@ function isAskUserToolName(toolName: string): boolean {
 }
 
 function getUnfinishedTodoNudge(): { signature: string; message: string } | undefined {
-	const unfinished = selectVisibleTasks(getState()).filter((task) => ACTIVE_STATUSES.has(task.status));
+	const visible = selectVisibleTasks(getState());
+	const byId = new Map(visible.map((task) => [task.id, task]));
+	const unfinished = visible.filter((task) => ACTIVE_STATUSES.has(task.status) && !isTaskBlocked(task, byId));
 	if (unfinished.length === 0) return undefined;
 
 	const signature = JSON.stringify(

@@ -10,6 +10,8 @@ import {
 	formatPixStartupUpdateDialog,
 	getPixSelfUpdateCommand,
 	parsePixUpdateArgs,
+	runPixUpdateCli,
+	setPixUpdateTestDeps,
 } from "../src/app/cli/update.js";
 
 describe("pix update", () => {
@@ -27,16 +29,34 @@ describe("pix update", () => {
 		assert.throws(() => parsePixUpdateArgs(["--bad"]), /Unknown pix update argument/u);
 	});
 
-	it("reports an available npm update", async () => {
+	it("reports current, skipped, and unknown update states deterministically", async () => {
 		await withPackageJson({ name: "pi-ui-extend", version: "0.1.0" }, async (packageRoot) => {
-			const result = await checkPixUpdate({
+			const current = await checkPixUpdate({
 				packageRoot,
-				fetchLatestVersion: async () => "0.2.0",
+				fetchLatestVersion: async () => "0.1.0",
 			});
+			assert.equal(current.status, "current");
+			assert.equal(current.latestVersion, "0.1.0");
+			assert.match(formatPixUpdateCheck(current), /status: up to date/u);
 
-			assert.equal(result.status, "newer");
-			assert.equal(result.latestVersion, "0.2.0");
-			assert.match(formatPixUpdateCheck(result), /run: pix update/u);
+			const unknown = await checkPixUpdate({
+				packageRoot,
+				fetchLatestVersion: async () => { throw new Error("registry down"); },
+			});
+			assert.equal(unknown.status, "unknown");
+			assert.match(formatPixUpdateCheck(unknown), /unable to check \(registry down\)/u);
+		});
+
+		await withEnv({ PIX_SKIP_VERSION_CHECK: "1" }, async () => {
+			await withPackageJson({ name: "pi-ui-extend", version: "0.1.0" }, async (packageRoot) => {
+				const skipped = await checkPixUpdate({
+					packageRoot,
+					fetchLatestVersion: async () => "0.2.0",
+				});
+
+				assert.equal(skipped.status, "skipped");
+				assert.match(formatPixUpdateCheck(skipped), /check skipped \(PIX_SKIP_VERSION_CHECK is set\)/u);
+			});
 		});
 	});
 
@@ -68,15 +88,95 @@ describe("pix update", () => {
 		});
 	});
 
-	it("builds a package-manager self-update command for managed installs", () => {
-		const command = getPixSelfUpdateCommand("pi-ui-extend", "0.2.0", "/tmp/prefix/lib/node_modules/pi-ui-extend");
-
-		assert.equal(command?.command, "npm");
-		assert.deepEqual(command?.args.slice(-2), ["--min-release-age=0", "pi-ui-extend@0.2.0"]);
+	it("builds package-manager self-update commands for managed installs", () => {
+		assert.equal(getPixSelfUpdateCommand("pi-ui-extend", "0.2.0", "/tmp/prefix/lib/node_modules/pi-ui-extend")?.command, "npm");
+		assert.equal(getPixSelfUpdateCommand("pi-ui-extend", "0.2.0", "/tmp/prefix/lib/node_modules/.pnpm/pi-ui-extend")?.command, "pnpm");
+		assert.equal(getPixSelfUpdateCommand("pi-ui-extend", "0.2.0", "/tmp/prefix/lib/node_modules/.yarn/pi-ui-extend")?.command, "yarn");
+		assert.equal(getPixSelfUpdateCommand("pi-ui-extend", "0.2.0", "/tmp/prefix/lib/node_modules/.bun/pi-ui-extend")?.command, "bun");
+		assert.equal(getPixSelfUpdateCommand("pi-ui-extend", "0.2.0", "/tmp/pi-ui-extend"), undefined);
 	});
 
 	it("does not self-update source checkouts", () => {
 		assert.equal(getPixSelfUpdateCommand("pi-ui-extend", "0.2.0", "/tmp/pi-ui-extend"), undefined);
+	});
+
+	it("runs check-only, help, and unavailable CLI paths without spawning updates", async () => {
+		const restoreConsole = captureConsole();
+		let runCalls = 0;
+		try {
+			setPixUpdateTestDeps({
+				checkPixUpdate: async () => ({
+					status: "unavailable",
+					packageName: "pi-ui-extend",
+					currentVersion: "0.1.0",
+					packageRoot: "/tmp/source/pi-ui-extend",
+					reason: "source checkout",
+				}),
+				runCommand: async () => { runCalls += 1; },
+			});
+
+			assert.equal(await runPixUpdateCli(["--help"]), 0);
+			assert.equal(await runPixUpdateCli(["--bad"]), 1);
+			assert.equal(await runPixUpdateCli(["--check"]), 1);
+			assert.equal(await runPixUpdateCli([]), 1);
+			assert.equal(runCalls, 0);
+			const { stdout, stderr } = restoreConsole.output();
+			assert.match(stdout, /Usage: pix update/u);
+			assert.match(stdout, /update unavailable/u);
+			assert.match(stderr, /Unknown pix update argument/u);
+		} finally {
+			setPixUpdateTestDeps();
+			restoreConsole.restore();
+		}
+	});
+
+	it("runs forced self-update through a mocked package-manager command", async () => {
+		const restoreConsole = captureConsole();
+		const commands: string[] = [];
+		try {
+			setPixUpdateTestDeps({
+				checkPixUpdate: async () => ({
+					status: "current",
+					packageName: "pi-ui-extend",
+					currentVersion: "0.1.0",
+					latestVersion: "0.1.0",
+					packageRoot: "/tmp/prefix/lib/node_modules/pi-ui-extend",
+				}),
+				runCommand: async (command) => { commands.push(command.display); },
+			});
+
+			assert.equal(await runPixUpdateCli([]), 0);
+			assert.deepEqual(commands, []);
+			assert.equal(await runPixUpdateCli(["--force"]), 0);
+			assert.equal(commands.length, 1);
+			assert.match(commands[0] ?? "", /npm install -g/u);
+			assert.match(restoreConsole.output().stdout, /Updated Pix/u);
+		} finally {
+			setPixUpdateTestDeps();
+			restoreConsole.restore();
+		}
+	});
+
+	it("reports mocked self-update command failures", async () => {
+		const restoreConsole = captureConsole();
+		try {
+			setPixUpdateTestDeps({
+				checkPixUpdate: async () => ({
+					status: "newer",
+					packageName: "pi-ui-extend",
+					currentVersion: "0.1.0",
+					latestVersion: "0.2.0",
+					packageRoot: "/tmp/prefix/lib/node_modules/pi-ui-extend",
+				}),
+				runCommand: async () => { throw new Error("install failed"); },
+			});
+
+			assert.equal(await runPixUpdateCli([]), 1);
+			assert.match(restoreConsole.output().stderr, /Pix update failed: install failed/u);
+		} finally {
+			setPixUpdateTestDeps();
+			restoreConsole.restore();
+		}
 	});
 });
 
@@ -88,4 +188,36 @@ async function withPackageJson(packageJson: Record<string, unknown>, callback: (
 	} finally {
 		await rm(packageRoot, { recursive: true, force: true });
 	}
+}
+
+async function withEnv(env: Record<string, string | undefined>, callback: () => Promise<void>): Promise<void> {
+	const previous = new Map(Object.entries(env).map(([key]) => [key, process.env[key]]));
+	for (const [key, value] of Object.entries(env)) {
+		if (value === undefined) delete process.env[key];
+		else process.env[key] = value;
+	}
+	try {
+		await callback();
+	} finally {
+		for (const [key, value] of previous) {
+			if (value === undefined) delete process.env[key];
+			else process.env[key] = value;
+		}
+	}
+}
+
+function captureConsole(): { output(): { stdout: string; stderr: string }; restore(): void } {
+	const originalLog = console.log;
+	const originalError = console.error;
+	const stdout: string[] = [];
+	const stderr: string[] = [];
+	console.log = (...args: unknown[]) => { stdout.push(args.map(String).join(" ")); };
+	console.error = (...args: unknown[]) => { stderr.push(args.map(String).join(" ")); };
+	return {
+		output: () => ({ stdout: stdout.join("\n"), stderr: stderr.join("\n") }),
+		restore: () => {
+			console.log = originalLog;
+			console.error = originalError;
+		},
+	};
 }

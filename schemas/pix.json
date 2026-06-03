@@ -1,0 +1,271 @@
+{
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema URL used by editors for validation and autocomplete."
+    },
+    "defaultModel": {
+      "type": "object",
+      "properties": {
+        "modelRef": {
+          "type": "string",
+          "description": "Provider/model identifier, e.g. 'openai-codex/gpt-5.4'."
+        },
+        "thinking": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "off"
+            },
+            {
+              "type": "string",
+              "const": "minimal"
+            },
+            {
+              "type": "string",
+              "const": "low"
+            },
+            {
+              "type": "string",
+              "const": "medium"
+            },
+            {
+              "type": "string",
+              "const": "high"
+            },
+            {
+              "type": "string",
+              "const": "xhigh"
+            }
+          ],
+          "description": "Model thinking budget level."
+        }
+      },
+      "description": "Default model selection for new sessions."
+    },
+    "toolRenderer": {
+      "type": "object",
+      "properties": {
+        "default": {
+          "type": "object",
+          "properties": {
+            "previewLines": {
+              "type": "number",
+              "description": "Lines to show in the tool preview.",
+              "minimum": 0
+            },
+            "direction": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "head"
+                },
+                {
+                  "type": "string",
+                  "const": "tail"
+                }
+              ],
+              "description": "Show preview from head or tail of output."
+            },
+            "color": {
+              "type": "string",
+              "description": "Theme color name (e.g. 'warning', 'success', 'muted') or hex color."
+            },
+            "defaultExpanded": {
+              "type": "boolean",
+              "description": "Whether the tool output is expanded by default."
+            },
+            "compactHidden": {
+              "type": "boolean",
+              "description": "Hide tool output but keep a compact one-line placeholder."
+            },
+            "hidden": {
+              "type": "boolean",
+              "description": "Completely hide the tool output."
+            }
+          },
+          "description": "Rendering rule for a specific tool or glob pattern."
+        },
+        "tools": {
+          "type": "object",
+          "patternProperties": {
+            "^.*$": {
+              "type": "object",
+              "properties": {
+                "previewLines": {
+                  "type": "number",
+                  "description": "Lines to show in the tool preview.",
+                  "minimum": 0
+                },
+                "direction": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "head"
+                    },
+                    {
+                      "type": "string",
+                      "const": "tail"
+                    }
+                  ],
+                  "description": "Show preview from head or tail of output."
+                },
+                "color": {
+                  "type": "string",
+                  "description": "Theme color name (e.g. 'warning', 'success', 'muted') or hex color."
+                },
+                "defaultExpanded": {
+                  "type": "boolean",
+                  "description": "Whether the tool output is expanded by default."
+                },
+                "compactHidden": {
+                  "type": "boolean",
+                  "description": "Hide tool output but keep a compact one-line placeholder."
+                },
+                "hidden": {
+                  "type": "boolean",
+                  "description": "Completely hide the tool output."
+                }
+              },
+              "description": "Rendering rule for a specific tool or glob pattern."
+            }
+          }
+        }
+      },
+      "description": "Per-tool rendering configuration. Keys in 'tools' support glob patterns like 'repo_*'."
+    },
+    "outputFilters": {
+      "type": "object",
+      "properties": {
+        "patterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Glob or /regex/ patterns to strip from tool output."
+        }
+      },
+      "description": "Output filter patterns."
+    },
+    "promptEnhancer": {
+      "type": "object",
+      "properties": {
+        "modelRef": {
+          "type": "string",
+          "description": "Model used for prompt enhancement."
+        }
+      },
+      "description": "Prompt enhancer configuration."
+    },
+    "autocomplete": {
+      "type": "object",
+      "properties": {
+        "modelRef": {
+          "type": "string",
+          "description": "Model for inline autocomplete. Empty string disables LLM autocomplete."
+        },
+        "debounceMs": {
+          "type": "number",
+          "description": "Delay after typing before requesting completion.",
+          "minimum": 100,
+          "maximum": 2000
+        },
+        "timeoutMs": {
+          "type": "number",
+          "description": "Hard timeout for completion request.",
+          "minimum": 250,
+          "maximum": 10000
+        },
+        "maxTokens": {
+          "type": "number",
+          "description": "Maximum output tokens.",
+          "minimum": 8,
+          "maximum": 256
+        },
+        "maxPromptTokens": {
+          "type": "number",
+          "description": "Maximum input prompt tokens.",
+          "minimum": 256,
+          "maximum": 16000
+        },
+        "includeRecentMessages": {
+          "type": "number",
+          "description": "Recent messages to include as context.",
+          "minimum": 0,
+          "maximum": 20
+        }
+      },
+      "description": "Inline autocomplete configuration."
+    },
+    "modelColors": {
+      "type": "object",
+      "properties": {
+        "rules": {
+          "type": "object",
+          "patternProperties": {
+            "^.*$": {
+              "type": "string"
+            }
+          },
+          "description": "Glob pattern → theme color name mapping."
+        }
+      },
+      "description": "Model color rules. Keys are glob patterns matching model refs."
+    },
+    "iconTheme": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Icon theme name, e.g. 'nerdFont' or 'fallback'."
+        }
+      },
+      "description": "Icon theme configuration."
+    },
+    "dictation": {
+      "type": "object",
+      "properties": {
+        "language": {
+          "type": "string",
+          "description": "Selected language code, e.g. 'en' or 'ru'."
+        },
+        "languages": {
+          "type": "object",
+          "patternProperties": {
+            "^.*$": {
+              "type": "object",
+              "required": [
+                "dirName",
+                "url",
+                "label"
+              ],
+              "properties": {
+                "dirName": {
+                  "type": "string",
+                  "description": "Vosk model directory name."
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Download URL for the Vosk model zip."
+                },
+                "label": {
+                  "type": "string",
+                  "description": "Human-readable language label."
+                }
+              },
+              "description": "Vosk voice dictation model definition."
+            }
+          },
+          "description": "Available language models keyed by language code."
+        }
+      },
+      "description": "Voice dictation (Vosk) configuration."
+    }
+  },
+  "$id": "https://unpkg.com/pi-ui-extend/schemas/pix.json",
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "Pix Configuration",
+  "description": "Configuration for the pix terminal renderer (~/.config/pi/pix.jsonc).",
+  "additionalProperties": true
+}

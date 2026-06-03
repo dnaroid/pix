@@ -23,7 +23,7 @@ import {
 } from "./state/persistence.js";
 import { AUTO_CLEAR_COMPLETED_MESSAGE, autoClearCompletedTodos } from "./state/auto-clear.js";
 import { replayFromBranch } from "./state/replay.js";
-import { selectTasksByStatus, selectTodoCounts } from "./state/selectors.js";
+import { isTaskBlocked, selectTasksByStatus, selectTodoCounts } from "./state/selectors.js";
 import { applyTaskMutation } from "./state/state-reducer.js";
 import { commitState, getState, replaceState } from "./state/store.js";
 import { buildToolResult, formatContent } from "./tool/response-envelope.js";
@@ -287,11 +287,7 @@ function filterCommandTasks(tasks: readonly Task[], options: TodosCommandOptions
 	if (!options.includeDeleted) view = view.filter((task) => task.status !== "deleted");
 	if (options.activeOnly) view = view.filter((task) => task.status === "pending" || task.status === "in_progress");
 	if (options.readyOnly) {
-		view = view.filter(
-			(task) =>
-				task.status === "pending" &&
-				(task.blockedBy ?? []).every((id) => byId.get(id)?.status === "completed"),
-		);
+		view = view.filter((task) => task.status === "pending" && !isTaskBlocked(task, byId));
 	}
 	if (options.status) view = view.filter((task) => task.status === options.status);
 	if (options.priority) view = view.filter((task) => task.priority === options.priority);

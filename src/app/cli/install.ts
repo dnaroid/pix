@@ -11,6 +11,30 @@ import {
 import { clipboardInstallHint, clipboardSupportAvailable } from "../screen/clipboard.js";
 import { getPixConfigPath } from "../../config.js";
 
+type PixInstallTestDeps = {
+	existsSync: typeof existsSync;
+	spawn: typeof spawn;
+	isJetBrainsNerdFontInstalled: typeof isJetBrainsNerdFontInstalled;
+	installJetBrainsNerdFont: typeof installJetBrainsNerdFont;
+	clipboardSupportAvailable: typeof clipboardSupportAvailable;
+	clipboardInstallHint: typeof clipboardInstallHint;
+};
+
+const defaultPixInstallDeps: PixInstallTestDeps = {
+	existsSync,
+	spawn,
+	isJetBrainsNerdFontInstalled,
+	installJetBrainsNerdFont,
+	clipboardSupportAvailable,
+	clipboardInstallHint,
+};
+
+let pixInstallDeps = defaultPixInstallDeps;
+
+export function setPixInstallTestDeps(overrides?: Partial<PixInstallTestDeps>): void {
+	pixInstallDeps = overrides ? { ...defaultPixInstallDeps, ...overrides } : defaultPixInstallDeps;
+}
+
 export type PixInstallCliOptions = {
 	checkOnly: boolean;
 	help: boolean;
@@ -88,14 +112,14 @@ export async function runPixInstallCli(argv: readonly string[] = process.argv.sl
 
 	console.log("Pix install checks");
 
-	if (await isJetBrainsNerdFontInstalled()) {
+	if (await pixInstallDeps.isJetBrainsNerdFontInstalled()) {
 		console.log(`✓ ${FONT_FAMILY_NAME} is installed`);
 	} else if (options.checkOnly) {
 		console.log(`! ${FONT_FAMILY_NAME} is missing`);
 		failures += 1;
 	} else {
 		try {
-			await installJetBrainsNerdFont();
+			await pixInstallDeps.installJetBrainsNerdFont();
 			console.log(`✓ Installed ${FONT_FAMILY_NAME}`);
 		} catch (error) {
 			console.error(`✗ Failed to install ${FONT_FAMILY_NAME}: ${errorMessage(error)}`);
@@ -120,10 +144,10 @@ export async function runPixInstallCli(argv: readonly string[] = process.argv.sl
 		}
 	}
 
-	if (await clipboardSupportAvailable(env)) {
+	if (await pixInstallDeps.clipboardSupportAvailable(env)) {
 		console.log("✓ Clipboard support is available");
 	} else {
-		console.log(`! Clipboard support is missing. ${clipboardInstallHint()}`);
+		console.log(`! Clipboard support is missing. ${pixInstallDeps.clipboardInstallHint()}`);
 		if (process.platform === "linux") failures += 1;
 	}
 
@@ -133,7 +157,7 @@ export async function runPixInstallCli(argv: readonly string[] = process.argv.sl
 }
 async function resolvePiCliStatus(env: NodeJS.ProcessEnv): Promise<{ available: boolean; detail?: string }> {
 	const bundledBin = env.PIX_BUNDLED_PI_BIN;
-	if (bundledBin && (existsSync(join(bundledBin, process.platform === "win32" ? "pi.cmd" : "pi")) || existsSync(join(bundledBin, "pi")))) {
+	if (bundledBin && (pixInstallDeps.existsSync(join(bundledBin, process.platform === "win32" ? "pi.cmd" : "pi")) || pixInstallDeps.existsSync(join(bundledBin, "pi")))) {
 		return { available: true, detail: "bundled with Pix" };
 	}
 	if (commandExists("pi", env)) return { available: true, detail: "PATH" };
@@ -148,12 +172,12 @@ function commandExists(command: string, env: NodeJS.ProcessEnv = process.env): b
 	const pathValue = env.PATH ?? "";
 	const dirs = pathValue.split(process.platform === "win32" ? ";" : ":").filter(Boolean);
 	const names = process.platform === "win32" ? [command, `${command}.cmd`, `${command}.exe`, `${command}.bat`] : [command];
-	return dirs.some((dir) => names.some((name) => existsSync(join(dir, name))));
+	return dirs.some((dir) => names.some((name) => pixInstallDeps.existsSync(join(dir, name))));
 }
 
 async function runRequired(command: string, args: string[]): Promise<void> {
 	await new Promise<void>((resolve, reject) => {
-		const child = spawn(command, args, { stdio: ["ignore", "ignore", "pipe"] });
+		const child = pixInstallDeps.spawn(command, args, { stdio: ["ignore", "ignore", "pipe"] });
 		let stderr = "";
 		child.stderr.on("data", (chunk: Buffer) => {
 			stderr = `${stderr}${chunk.toString("utf8")}`.slice(-800);

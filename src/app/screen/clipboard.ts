@@ -3,10 +3,32 @@ import { commandExists, runProcess } from "../process.js";
 
 const require = createRequire(import.meta.url);
 
+type ClipboardDeps = {
+	commandExists: typeof commandExists;
+	requireResolve(specifier: string): string;
+	runProcess: typeof runProcess;
+	stdout: Pick<NodeJS.WriteStream, "destroyed" | "isTTY" | "write">;
+};
+
+let deps: ClipboardDeps = {
+	commandExists,
+	requireResolve: (specifier) => require.resolve(specifier),
+	runProcess,
+	stdout: process.stdout,
+};
+
+export function setClipboardTestDeps(overrides: Partial<ClipboardDeps>): () => void {
+	const previous = deps;
+	deps = { ...deps, ...overrides };
+	return () => {
+		deps = previous;
+	};
+}
+
 export async function copyTextToClipboard(text: string): Promise<void> {
 	const commands = clipboardCommands();
 	for (const [command, args] of commands) {
-		const result = await runProcess(command, args, { input: text, maxBufferBytes: 1024 });
+		const result = await deps.runProcess(command, args, { input: text, maxBufferBytes: 1024 });
 		if (!result.error && result.status === 0) return;
 	}
 	if (await copyWithNativeClipboard(text)) return;
@@ -17,7 +39,7 @@ export async function copyTextToClipboard(text: string): Promise<void> {
 
 export async function clipboardSupportAvailable(env: NodeJS.ProcessEnv = process.env): Promise<boolean> {
 	for (const [command] of clipboardCommands()) {
-		if (await commandExists(command, env)) return true;
+		if (await deps.commandExists(command, env)) return true;
 	}
 	return resolveNativeClipboardEntrypoint() !== undefined;
 }
@@ -59,7 +81,7 @@ async function copyWithNativeClipboard(text: string): Promise<boolean> {
 		const clipboard = require(${JSON.stringify(entrypoint)});
 		await clipboard.setText(readFileSync(0, "utf8"));
 	`;
-	const result = await runProcess(process.execPath, ["--input-type=module", "-e", script], {
+	const result = await deps.runProcess(process.execPath, ["--input-type=module", "-e", script], {
 		input: text,
 		timeoutMs: 3_000,
 		maxBufferBytes: 1024,
@@ -68,9 +90,9 @@ async function copyWithNativeClipboard(text: string): Promise<boolean> {
 }
 
 function copyWithOsc52(text: string): boolean {
-	if (process.stdout.destroyed || (!process.stdout.isTTY && !process.env.TMUX && !process.env.STY)) return false;
+	if (deps.stdout.destroyed || (!deps.stdout.isTTY && !process.env.TMUX && !process.env.STY)) return false;
 
-	process.stdout.write(osc52ClipboardSequence(text));
+	deps.stdout.write(osc52ClipboardSequence(text));
 	return true;
 }
 
@@ -83,7 +105,7 @@ export function osc52ClipboardSequence(text: string, env: NodeJS.ProcessEnv = pr
 
 function resolveNativeClipboardEntrypoint(): string | undefined {
 	try {
-		return require.resolve("@mariozechner/clipboard");
+		return deps.requireResolve("@mariozechner/clipboard");
 	} catch {
 		return undefined;
 	}

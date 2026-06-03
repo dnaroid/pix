@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 import type { AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 import type { CommandControllerHost } from "../src/app/commands/command-controller.js";
 import { createSlashCommands, type CommandRegistryActions } from "../src/app/commands/command-registry.js";
-import { getResourceSlashCommands, getSlashCommandMatches } from "../src/app/commands/slash-commands.js";
+import { getResourceSlashCommands, getSlashCommandMatches, parseSlashInput } from "../src/app/commands/slash-commands.js";
 
 describe("command registry", () => {
 	it("handles /usage locally", async () => {
@@ -166,6 +166,88 @@ describe("command registry", () => {
 		assert.equal(getSlashCommandMatches(commands, "help").some((match) => match.value.name === "hotkeys"), false);
 		assert.equal(getSlashCommandMatches(commands, "hot")[0]?.value.name, "hotkeys");
 	});
+
+	it("parses slash input boundaries and arguments", () => {
+		assert.equal(parseSlashInput("plain text"), undefined);
+		assert.deepEqual(parseSlashInput("/"), { commandName: "", hasArguments: false, arguments: "" });
+		assert.deepEqual(parseSlashInput("/model"), { commandName: "model", hasArguments: false, arguments: "" });
+		assert.deepEqual(parseSlashInput("/model   zai/glm high"), { commandName: "model", hasArguments: true, arguments: "zai/glm high" });
+	});
+
+	it("collects extension, prompt, and skill slash commands with source tags and duplicate filtering", () => {
+		const builtIns = [{ name: "known", description: "known", kind: "builtin" }] as ReturnType<typeof createSlashCommands>;
+		const runtime = {
+			session: {
+				extensionRunner: {
+					getRegisteredCommands: () => [
+						{ name: "internal", invocationName: "known", description: "duplicate", sourceInfo: { scope: "project" } },
+						{ name: "ext-internal", invocationName: "ext", description: undefined, sourceInfo: { scope: "user" } },
+					],
+				},
+				promptTemplates: [
+					{ name: "ask", description: "ask prompt", argumentHint: "topic", sourceInfo: { scope: "project" } },
+					{ name: "", description: "ignored" },
+				],
+				resourceLoader: {
+					getSkills: () => ({ skills: [{ name: "debug", description: "debug skill", sourceInfo: { scope: "user" } }] }),
+				},
+			},
+			services: { settingsManager: { getEnableSkillCommands: () => true } },
+		} as unknown as AgentSessionRuntime;
+
+		const commands = getResourceSlashCommands(runtime, builtIns);
+
+		assert.deepEqual(commands.map((command) => command.name), ["ext", "ask", "skill:debug"]);
+		assert.equal(commands.every((command) => command.kind === "resource" && command.allowArguments), true);
+		assert.equal(commands[0]?.description, "[extension:user]");
+		assert.equal(commands[1]?.description, "[prompt:project] ask prompt");
+		assert.deepEqual(commands[1]?.keywords, ["prompt", "template", "topic"]);
+		assert.equal(commands[2]?.description, "[skill:user] debug skill");
+	});
+
+	it("wires every builtin slash command to the expected action", async () => {
+		const calls: string[] = [];
+		let stopped = false;
+		const actions = recordingActions(calls);
+		const commands = createSlashCommands(actions, { stop: async () => { stopped = true; } } as CommandControllerHost);
+
+		for (const command of commands) {
+			await command.run?.(command.name === "resume" ? "'/tmp/session.jsonl' --ignored" : " args ");
+		}
+
+		assert.equal(stopped, true);
+		assert.ok(calls.includes("runSettingsCommand"));
+		assert.ok(calls.includes("runModelSlashCommand: args "));
+		assert.ok(calls.includes("runDefaultModelSlashCommand: args "));
+		assert.ok(calls.includes("runAutocompleteSlashCommand: args "));
+		assert.ok(calls.includes("runScopedModelsCommand: args "));
+		assert.ok(calls.includes("runThinkingSlashCommand: args "));
+		assert.ok(calls.includes("runDefaultThinkingSlashCommand: args "));
+		assert.ok(calls.includes("runEnhanceCommand"));
+		assert.ok(calls.includes("runExportCommand: args "));
+		assert.ok(calls.includes("runImportCommand: args "));
+		assert.ok(calls.includes("runShareCommand"));
+		assert.ok(calls.includes("runCopyCommand"));
+		assert.ok(calls.includes("runQueueCommand: args "));
+		assert.ok(calls.includes("runNameCommand: args "));
+		assert.ok(calls.includes("runSessionInfoCommand"));
+		assert.ok(calls.includes("runUsageCommand"));
+		assert.ok(calls.includes("runChangelogCommand"));
+		assert.ok(calls.includes("runUpdateCommand: args "));
+		assert.ok(calls.includes("runHotkeysCommand"));
+		assert.ok(calls.includes("runForkCommand: args "));
+		assert.ok(calls.includes("runCloneCommand"));
+		assert.ok(calls.includes("runTreeCommand: args "));
+		assert.ok(calls.includes("runJumpCommand: args "));
+		assert.ok(calls.includes("runSearchCommand: args "));
+		assert.ok(calls.some((call) => call.startsWith("runUnsupportedBuiltinCommand:login:")));
+		assert.ok(calls.some((call) => call.startsWith("runUnsupportedBuiltinCommand:logout:")));
+		assert.ok(calls.includes("runReloadCommand"));
+		assert.ok(calls.includes("runResumePathCommand:/tmp/session.jsonl"));
+		assert.ok(calls.includes("runNewSessionCommand"));
+		assert.ok(calls.includes("runNewTabCommand"));
+		assert.ok(calls.includes("runCompactCommand:args"));
+	});
 });
 
 function host(): CommandControllerHost {
@@ -206,5 +288,44 @@ function noopActions(): CommandRegistryActions {
 		runNewSessionCommand: noop,
 		runNewTabCommand: noop,
 		runCompactCommand: noop,
+	};
+}
+
+function recordingActions(calls: string[]): CommandRegistryActions {
+	const record = (name: string) => async (...args: unknown[]) => {
+		calls.push([name, ...args].join(":"));
+	};
+	return {
+		runSettingsCommand: record("runSettingsCommand"),
+		runModelSlashCommand: record("runModelSlashCommand"),
+		runDefaultModelSlashCommand: record("runDefaultModelSlashCommand"),
+		runAutocompleteSlashCommand: record("runAutocompleteSlashCommand"),
+		runScopedModelsCommand: record("runScopedModelsCommand"),
+		runThinkingSlashCommand: record("runThinkingSlashCommand"),
+		runDefaultThinkingSlashCommand: record("runDefaultThinkingSlashCommand"),
+		runEnhanceCommand: record("runEnhanceCommand"),
+		runExportCommand: record("runExportCommand"),
+		runImportCommand: record("runImportCommand"),
+		runShareCommand: record("runShareCommand"),
+		runCopyCommand: record("runCopyCommand"),
+		runQueueCommand: record("runQueueCommand"),
+		runNameCommand: record("runNameCommand"),
+		runSessionInfoCommand: record("runSessionInfoCommand"),
+		runUsageCommand: record("runUsageCommand"),
+		runChangelogCommand: record("runChangelogCommand"),
+		runUpdateCommand: record("runUpdateCommand"),
+		runHotkeysCommand: record("runHotkeysCommand"),
+		runForkCommand: record("runForkCommand"),
+		runCloneCommand: record("runCloneCommand"),
+		runTreeCommand: record("runTreeCommand"),
+		runJumpCommand: record("runJumpCommand"),
+		runSearchCommand: record("runSearchCommand"),
+		runUnsupportedBuiltinCommand: record("runUnsupportedBuiltinCommand"),
+		runReloadCommand: record("runReloadCommand"),
+		runResumePathCommand: record("runResumePathCommand"),
+		runResumeCommand: record("runResumeCommand"),
+		runNewSessionCommand: record("runNewSessionCommand"),
+		runNewTabCommand: record("runNewTabCommand"),
+		runCompactCommand: record("runCompactCommand"),
 	};
 }

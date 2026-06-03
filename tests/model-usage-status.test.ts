@@ -327,6 +327,14 @@ describe("model usage status", () => {
 			]);
 		});
 	});
+	it("returns empty labels and no descriptor when quota data is unavailable", () => {
+		assert.equal(formatModelUsageStatusLabel(undefined), "");
+		assert.equal(modelUsageRemainingPercent(undefined), undefined);
+		withPiAuth({}, () => {
+			assert.equal(modelUsageDescriptor({ provider: "antigravity", id: "G3" } as SessionModel), undefined);
+		});
+	});
+
 });
 
 function withPiAuth(auth: unknown, run: () => void): void {

@@ -1,5 +1,20 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 
+type ShellCommandDeps = {
+	spawn: typeof spawn;
+	waitForReturnToPix: () => Promise<void>;
+};
+
+let deps: ShellCommandDeps = { spawn, waitForReturnToPix: waitForReturnToPixImpl };
+
+export function setShellCommandTestDeps(overrides: Partial<ShellCommandDeps>): () => void {
+	const previous = deps;
+	deps = { ...deps, ...overrides };
+	return () => {
+		deps = previous;
+	};
+}
+
 export type InteractiveShellCommandResult = {
 	exitCode: number | null;
 	signal: NodeJS.Signals | null;
@@ -45,7 +60,7 @@ export function runChatShellCommand(
 ): RunningChatShellCommand {
 	let child: ChildProcessWithoutNullStreams;
 	try {
-		child = spawn(command, {
+		child = deps.spawn(command, {
 			cwd,
 			env: process.env,
 			shell: shellOption(),
@@ -111,7 +126,7 @@ export async function runInteractiveShellCommand(command: string, cwd: string): 
 	try {
 		const result = await spawnShellCommand(command, cwd);
 		process.stdout.write(`\n[pix] ${formatInteractiveShellResult(result)}\n`);
-		await waitForReturnToPix();
+		await deps.waitForReturnToPix();
 		return result;
 	} finally {
 		process.off("SIGINT", ignoreSigint);
@@ -125,7 +140,7 @@ export function formatShellCommandEntry(command: string, result: InteractiveShel
 
 async function spawnShellCommand(command: string, cwd: string): Promise<InteractiveShellCommandResult> {
 	try {
-		const child = spawn(command, {
+		const child = deps.spawn(command, {
 			cwd,
 			env: process.env,
 			shell: shellOption(),
@@ -192,7 +207,7 @@ function formatInteractiveShellResult(result: InteractiveShellCommandResult): st
 	return `exit ${result.exitCode ?? 0}`;
 }
 
-async function waitForReturnToPix(): Promise<void> {
+async function waitForReturnToPixImpl(): Promise<void> {
 	if (!process.stdin.isTTY || !process.stdin.readable) return;
 	process.stdout.write("[pix] Press Enter to return to pix…");
 	await new Promise<void>((resolve) => {

@@ -63,6 +63,23 @@ describe("startup availability checks", () => {
 		message: "Pix bundled pi-tools-suite is not loaded from ~/.pi/agent/extensions/pi-tools-suite. Check write access to ~/.pi/agent/extensions and the bundled external/pi-tools-suite payload.",
 	}]);
 });
+	it("accepts a pi-tools-suite extension when the path only appears in source metadata", () => {
+		const result = extensionResult({
+			extensions: [extensionAt("/workspace/custom-extension/index.ts", {
+				path: "/workspace/custom-extension/index.ts",
+				resolvedPath: "/workspace/custom-extension/index.ts",
+				sourceInfo: {
+					path: "/workspace/custom-extension/index.ts",
+					source: "git:https://github.com/acme/pi-tools-suite.git",
+					scope: "user",
+					origin: "top-level",
+				},
+			})],
+		});
+
+		assert.deepEqual(checkPiToolsSuiteExtensionAvailability(result), []);
+	});
+
 });
 
 function extensionResult(overrides: Partial<Pick<LoadExtensionsResult, "extensions" | "errors">> = {}): LoadExtensionsResult {
@@ -73,7 +90,7 @@ function extensionResult(overrides: Partial<Pick<LoadExtensionsResult, "extensio
 	};
 }
 
-function extensionAt(path: string): LoadExtensionsResult["extensions"][number] {
+function extensionAt(path: string, overrides: Partial<LoadExtensionsResult["extensions"][number]> = {}): LoadExtensionsResult["extensions"][number] {
 	return {
 		path,
 		resolvedPath: path,
@@ -82,6 +99,7 @@ function extensionAt(path: string): LoadExtensionsResult["extensions"][number] {
 			source: path,
 			scope: "user",
 			origin: "top-level",
+			...overrides.sourceInfo,
 		},
 		handlers: new Map(),
 		tools: new Map(),
@@ -89,5 +107,6 @@ function extensionAt(path: string): LoadExtensionsResult["extensions"][number] {
 		commands: new Map(),
 		flags: new Map(),
 		shortcuts: new Map(),
+		...overrides,
 	};
 }

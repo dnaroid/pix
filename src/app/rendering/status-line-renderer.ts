@@ -70,9 +70,7 @@ export class StatusLineRenderer {
 		const terminalBellSoundWidgetText = this.host.terminalBellSoundStatusWidgetText();
 		const promptEnhancerWidgetText = this.host.promptEnhancerStatusWidgetText();
 		const voiceWidgetText = this.host.voiceStatusWidgetText();
-		const rightWidgetParts = draftQueueButton.length > 0
-			? [draftQueueButton, promptEnhancerWidgetText, userJumpButton, terminalBellSoundWidgetText, thinkingExpandButton, compactToolsButton, voiceWidgetText]
-			: [userJumpButton, terminalBellSoundWidgetText, thinkingExpandButton, compactToolsButton, promptEnhancerWidgetText, voiceWidgetText];
+		const rightWidgetParts = [draftQueueButton, promptEnhancerWidgetText, userJumpButton, terminalBellSoundWidgetText, thinkingExpandButton, compactToolsButton, voiceWidgetText];
 		const rightWidgetText = rightWidgetParts.filter((text) => text.length > 0).join(" ");
 		const rightWidgetWidth = stringDisplayWidth(rightWidgetText);
 		const leftWidth = rightWidgetWidth > 0 && contentWidth > rightWidgetWidth + 1 ? contentWidth - rightWidgetWidth - 1 : contentWidth;
@@ -123,13 +121,8 @@ export class StatusLineRenderer {
 			if (compactToolsWidget) nextWidgetStartColumn = compactToolsWidget.endColumn + 1;
 		};
 
-		if (draftQueueWidget) {
-			appendPromptEnhancerWidget();
-			appendCoreStatusWidgets();
-		} else {
-			appendCoreStatusWidgets();
-			appendPromptEnhancerWidget();
-		}
+		appendPromptEnhancerWidget();
+		appendCoreStatusWidgets();
 		const voiceWidget = leftWidth < contentWidth && voiceWidgetText.length > 0 ? this.voiceWidgetLayout(nextWidgetStartColumn, voiceWidgetText) : undefined;
 
 		return {

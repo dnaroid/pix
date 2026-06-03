@@ -1,0 +1,880 @@
+{
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema URL used by editors for validation and autocomplete."
+    },
+    "enabled": {
+      "type": "boolean",
+      "description": "Enable or disable the entire pi-tools-suite extension."
+    },
+    "disabledModules": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "List of disabled module names (e.g. ['lsp', 'prompt-commands'])."
+    },
+    "terminalBell": {
+      "type": "object",
+      "properties": {
+        "sound": {
+          "type": "boolean",
+          "description": "Play terminal bell sound on completion/error."
+        }
+      },
+      "description": "Terminal bell configuration."
+    },
+    "dcp": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable DCP (Dynamic Context Pruning)."
+        },
+        "debug": {
+          "type": "boolean",
+          "description": "Enable DCP debug logging."
+        },
+        "manualMode": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Enable manual DCP mode."
+            },
+            "automaticStrategies": {
+              "type": "boolean",
+              "description": "Run dedup/purge even in manual mode."
+            }
+          },
+          "description": "Manual mode configuration."
+        },
+        "compress": {
+          "type": "object",
+          "properties": {
+            "maxContextPercent": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "description": "Maximum context percent (0–1 or '80%') before compression triggers."
+            },
+            "minContextPercent": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "description": "Target context percent after compression."
+            },
+            "modelMaxContextPercent": {
+              "type": "object",
+              "patternProperties": {
+                "^.*$": {
+                  "type": "number"
+                }
+              },
+              "description": "Per-model max context percent overrides."
+            },
+            "modelMinContextPercent": {
+              "type": "object",
+              "patternProperties": {
+                "^.*$": {
+                  "type": "number"
+                }
+              },
+              "description": "Per-model min context percent overrides."
+            },
+            "maxContextLimit": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "description": "Absolute max context tokens or '200k'."
+            },
+            "minContextLimit": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "description": "Absolute min context tokens."
+            },
+            "modelMaxContextLimits": {
+              "type": "object",
+              "patternProperties": {
+                "^.*$": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "description": "Per-model max context limit overrides."
+            },
+            "modelMinContextLimits": {
+              "type": "object",
+              "patternProperties": {
+                "^.*$": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "description": "Per-model min context limit overrides."
+            },
+            "summaryBuffer": {
+              "type": "boolean",
+              "description": "Buffer summary output."
+            },
+            "nudgeFrequency": {
+              "type": "number",
+              "description": "Inject nudge every N context events.",
+              "minimum": 1
+            },
+            "iterationNudgeThreshold": {
+              "type": "number",
+              "description": "Nudge after N tool calls since last user message.",
+              "minimum": 1
+            },
+            "nudgeForce": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "strong"
+                },
+                {
+                  "type": "string",
+                  "const": "soft"
+                }
+              ],
+              "description": "Nudge intensity."
+            },
+            "protectedTools": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Tool outputs protected from pruning."
+            },
+            "protectTags": {
+              "type": "boolean",
+              "description": "Protect XML-like tags from pruning."
+            },
+            "protectUserMessages": {
+              "type": "boolean",
+              "description": "Protect user messages from pruning."
+            },
+            "autoCandidates": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "description": "Enable auto candidate selection for compression."
+                },
+                "minContextPercent": {
+                  "type": "number",
+                  "description": "Minimum context usage to trigger auto-candidates.",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "keepRecentTurns": {
+                  "type": "number",
+                  "description": "Number of recent turns to keep.",
+                  "minimum": 0
+                },
+                "minMessages": {
+                  "type": "number",
+                  "description": "Minimum messages before auto-candidate selection.",
+                  "minimum": 0
+                },
+                "minTokens": {
+                  "type": "number",
+                  "description": "Minimum tokens for auto-candidate selection.",
+                  "minimum": 0
+                }
+              },
+              "description": "Auto-candidate selection for compression."
+            },
+            "messageMode": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "description": "Enable message-mode compression suggestions."
+                },
+                "minContextPercent": {
+                  "type": "number",
+                  "description": "Minimum context usage to trigger message mode.",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "keepRecentTurns": {
+                  "type": "number",
+                  "description": "Recent turns to keep.",
+                  "minimum": 0
+                },
+                "mediumTokens": {
+                  "type": "number",
+                  "description": "Token threshold for medium-quality summary.",
+                  "minimum": 0
+                },
+                "highTokens": {
+                  "type": "number",
+                  "description": "Token threshold for high-quality summary.",
+                  "minimum": 0
+                },
+                "maxSuggestions": {
+                  "type": "number",
+                  "description": "Maximum compression suggestions.",
+                  "minimum": 0
+                }
+              },
+              "description": "Message-mode compression configuration."
+            }
+          },
+          "description": "Compression trigger and behavior configuration."
+        },
+        "strategies": {
+          "type": "object",
+          "properties": {
+            "deduplication": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "description": "Enable duplicate content deduplication."
+                },
+                "protectedTools": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Tool outputs protected from dedup."
+                }
+              },
+              "description": "Deduplication strategy configuration."
+            },
+            "purgeErrors": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "description": "Enable error input purging."
+                },
+                "turns": {
+                  "type": "number",
+                  "description": "Prune error inputs after N user turns.",
+                  "minimum": 1
+                },
+                "protectedTools": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Tool outputs protected from error purge."
+                }
+              },
+              "description": "Error purging strategy configuration."
+            },
+            "autoToolPruning": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "description": "Enable automatic tool output pruning."
+                },
+                "maxOutputTokens": {
+                  "type": "number",
+                  "description": "Maximum output tokens before truncation.",
+                  "minimum": 0
+                },
+                "keepRecentTurns": {
+                  "type": "number",
+                  "description": "Recent turns to keep.",
+                  "minimum": 0
+                },
+                "readLikeTools": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Tools treated as read-like (aggressively pruned)."
+                },
+                "readLikeTurns": {
+                  "type": "number",
+                  "description": "Turns threshold for read-like tool pruning.",
+                  "minimum": 0
+                },
+                "protectedTools": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Tool outputs protected from auto-pruning."
+                }
+              },
+              "description": "Auto tool pruning strategy configuration."
+            }
+          },
+          "description": "DCP pruning strategies."
+        },
+        "protectedFilePatterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "File path glob patterns whose content is protected from pruning."
+        },
+        "pruneNotification": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "off"
+            },
+            {
+              "type": "string",
+              "const": "minimal"
+            },
+            {
+              "type": "string",
+              "const": "detailed"
+            }
+          ],
+          "description": "Notification level when pruning occurs."
+        }
+      },
+      "description": "DCP (Dynamic Context Pruning) configuration."
+    },
+    "asyncSubagents": {
+      "type": "object",
+      "properties": {
+        "defaultType": {
+          "type": "string",
+          "description": "Default sub-agent type when not specified."
+        },
+        "routing": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Enable LLM-based automatic role routing."
+            },
+            "model": {
+              "type": "string",
+              "description": "Router model in provider/model form."
+            },
+            "maxTaskChars": {
+              "type": "number",
+              "description": "Max task/scope characters sent to router.",
+              "minimum": 100
+            },
+            "maxTokens": {
+              "type": "number",
+              "description": "Max router response tokens.",
+              "minimum": 8
+            },
+            "maxRetries": {
+              "type": "number",
+              "description": "Router request retries.",
+              "minimum": 0
+            },
+            "temperature": {
+              "type": "number",
+              "description": "Router sampling temperature.",
+              "minimum": 0,
+              "maximum": 2
+            },
+            "timeoutMs": {
+              "type": "number",
+              "description": "Router request timeout in ms.",
+              "minimum": 1000
+            },
+            "debug": {
+              "type": "boolean",
+              "description": "Show routing debug warnings."
+            }
+          },
+          "description": "LLM-based role routing configuration."
+        },
+        "vision": {
+          "type": "object",
+          "properties": {
+            "blindModelPatterns": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Glob-like model refs treated as unable to inspect images."
+            }
+          },
+          "description": "Vision capability overrides."
+        },
+        "presets": {
+          "type": "object",
+          "patternProperties": {
+            "^.*$": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string",
+                  "description": "Preset description."
+                },
+                "model": {
+                  "type": "string",
+                  "description": "Default model for this preset."
+                },
+                "fallbackModels": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Global fallback models for this preset."
+                },
+                "thinking": {
+                  "type": "string",
+                  "description": "Default thinking level."
+                },
+                "extraArgs": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Extra CLI arguments."
+                },
+                "timeoutMs": {
+                  "type": "number",
+                  "description": "Per-agent wall-clock timeout in ms.",
+                  "minimum": 1
+                },
+                "types": {
+                  "type": "object",
+                  "patternProperties": {
+                    "^.*$": {
+                      "type": "object",
+                      "properties": {
+                        "model": {
+                          "type": "string",
+                          "description": "Model override for this type within the preset."
+                        },
+                        "fallbackModels": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Per-role fallback models."
+                        },
+                        "thinking": {
+                          "type": "string",
+                          "description": "Thinking level override."
+                        },
+                        "extraArgs": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Extra CLI arguments."
+                        },
+                        "timeoutMs": {
+                          "type": "number",
+                          "description": "Per-agent wall-clock timeout in ms.",
+                          "minimum": 1
+                        }
+                      },
+                      "description": "Per-type override within a preset."
+                    }
+                  },
+                  "description": "Per-type overrides."
+                }
+              },
+              "description": "Named spawn preset."
+            }
+          },
+          "description": "Named spawn presets."
+        },
+        "types": {
+          "type": "object",
+          "patternProperties": {
+            "^.*$": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string",
+                  "description": "Role description for routing."
+                },
+                "model": {
+                  "type": "string",
+                  "description": "Model for this sub-agent type."
+                },
+                "fallbackModels": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Ordered model fallbacks."
+                },
+                "thinking": {
+                  "type": "string",
+                  "description": "Thinking level."
+                },
+                "tools": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Enabled tools for this type."
+                },
+                "extraArgs": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Extra CLI arguments."
+                },
+                "promptAppend": {
+                  "type": "string",
+                  "description": "Extra prompt text appended after generated prompt."
+                },
+                "promptOverride": {
+                  "type": "string",
+                  "description": "Full prompt replacement."
+                },
+                "retry": {
+                  "type": "object",
+                  "properties": {
+                    "maxRetries": {
+                      "type": "number",
+                      "description": "Maximum retry attempts.",
+                      "minimum": 0
+                    },
+                    "backoffMs": {
+                      "type": "number",
+                      "description": "Base delay in ms before first retry.",
+                      "minimum": 0
+                    },
+                    "retryableExitCodes": {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      },
+                      "description": "Exit codes eligible for retry. Empty array disables retry."
+                    }
+                  },
+                  "description": "Retry configuration for sub-agents."
+                },
+                "maxResultBytes": {
+                  "type": "number",
+                  "description": "Max bytes in result summary.",
+                  "minimum": 0
+                },
+                "timeoutMs": {
+                  "type": "number",
+                  "description": "Per-agent wall-clock timeout in ms.",
+                  "minimum": 1
+                }
+              },
+              "description": "Configuration for a sub-agent type/role."
+            }
+          },
+          "description": "Sub-agent type definitions."
+        },
+        "maxConcurrent": {
+          "type": "number",
+          "description": "Max concurrent agents per spawn batch (0 = unlimited).",
+          "minimum": 0
+        },
+        "retry": {
+          "type": "object",
+          "properties": {
+            "maxRetries": {
+              "type": "number",
+              "description": "Maximum retry attempts.",
+              "minimum": 0
+            },
+            "backoffMs": {
+              "type": "number",
+              "description": "Base delay in ms before first retry.",
+              "minimum": 0
+            },
+            "retryableExitCodes": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              },
+              "description": "Exit codes eligible for retry. Empty array disables retry."
+            }
+          },
+          "description": "Retry configuration for sub-agents."
+        },
+        "maxResultBytes": {
+          "type": "number",
+          "description": "Global max bytes in result summary.",
+          "minimum": 0
+        },
+        "timeoutMs": {
+          "type": "number",
+          "description": "Global per-agent wall-clock timeout in ms.",
+          "minimum": 1
+        }
+      },
+      "description": "Async sub-agent configuration."
+    },
+    "toolRenderer": {
+      "type": "object",
+      "properties": {
+        "default": {
+          "type": "object",
+          "properties": {
+            "previewLines": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Lines to show in the tool preview."
+            },
+            "direction": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "head"
+                },
+                {
+                  "type": "string",
+                  "const": "tail"
+                }
+              ],
+              "description": "Preview direction."
+            },
+            "color": {
+              "type": "string",
+              "description": "Theme color name or hex color."
+            },
+            "defaultExpanded": {
+              "type": "boolean",
+              "description": "Expand tool output by default."
+            },
+            "compactHidden": {
+              "type": "boolean",
+              "description": "Compact hidden placeholder."
+            },
+            "hidden": {
+              "type": "boolean",
+              "description": "Hide tool output completely."
+            }
+          },
+          "description": "Per-tool rendering rule."
+        },
+        "tools": {
+          "type": "object",
+          "patternProperties": {
+            "^.*$": {
+              "type": "object",
+              "properties": {
+                "previewLines": {
+                  "type": "number",
+                  "minimum": 0,
+                  "description": "Lines to show in the tool preview."
+                },
+                "direction": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "head"
+                    },
+                    {
+                      "type": "string",
+                      "const": "tail"
+                    }
+                  ],
+                  "description": "Preview direction."
+                },
+                "color": {
+                  "type": "string",
+                  "description": "Theme color name or hex color."
+                },
+                "defaultExpanded": {
+                  "type": "boolean",
+                  "description": "Expand tool output by default."
+                },
+                "compactHidden": {
+                  "type": "boolean",
+                  "description": "Compact hidden placeholder."
+                },
+                "hidden": {
+                  "type": "boolean",
+                  "description": "Hide tool output completely."
+                }
+              },
+              "description": "Per-tool rendering rule."
+            }
+          }
+        }
+      },
+      "description": "Per-tool rendering configuration."
+    },
+    "promptCommands": {
+      "type": "object",
+      "properties": {
+        "commands": {
+          "type": "object",
+          "patternProperties": {
+            "^.*$": {
+              "type": "object",
+              "required": [
+                "prompt"
+              ],
+              "properties": {
+                "description": {
+                  "type": "string",
+                  "description": "Short description shown in command menu."
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "The prompt text to send. Supports {cwd} template variable."
+                }
+              },
+              "description": "A saved slash command."
+            }
+          },
+          "description": "Command definitions keyed by slash command name."
+        }
+      },
+      "description": "User-defined slash commands."
+    },
+    "lsp": {
+      "type": "object",
+      "properties": {
+        "servers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "bin"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Unique server identifier."
+              },
+              "enabled": {
+                "type": "boolean",
+                "description": "Enable/disable this server."
+              },
+              "include": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "File glob patterns to include."
+              },
+              "exclude": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "File glob patterns to exclude."
+              },
+              "rootMarkers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Files that indicate a project root (e.g. ['package.json', '.git'])."
+              },
+              "maxFileSizeBytes": {
+                "type": "number",
+                "description": "Max file size to send to the server.",
+                "minimum": 0
+              },
+              "bin": {
+                "type": "string",
+                "description": "Path to the language server binary."
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Command-line arguments."
+              },
+              "cwd": {
+                "type": "string",
+                "description": "Working directory for the server process."
+              },
+              "env": {
+                "type": "object",
+                "patternProperties": {
+                  "^.*$": {
+                    "type": "string"
+                  }
+                },
+                "description": "Environment variables."
+              },
+              "config": {
+                "type": "string",
+                "description": "Path to server configuration file."
+              },
+              "languageIdByExtension": {
+                "type": "object",
+                "patternProperties": {
+                  "^.*$": {
+                    "type": "string"
+                  }
+                },
+                "description": "File extension → language ID mapping, e.g. {'.ts': 'typescript'}."
+              },
+              "startupTimeoutMs": {
+                "type": "number",
+                "description": "Server startup timeout in ms.",
+                "minimum": 1000
+              },
+              "diagnosticsWaitMs": {
+                "type": "number",
+                "description": "Wait time for diagnostics after file change.",
+                "minimum": 0
+              },
+              "initializationOptions": {
+                "description": "LSP initialization options passed to the server."
+              },
+              "settings": {
+                "description": "LSP workspace/settings passed to the server."
+              }
+            },
+            "description": "LSP server configuration."
+          },
+          "description": "LSP server definitions."
+        }
+      },
+      "description": "Language Server Protocol configuration."
+    }
+  },
+  "$id": "https://unpkg.com/pi-ui-extend/schemas/pi-tools-suite.json",
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "Pi Tools Suite Configuration",
+  "description": "Configuration for the pi-tools-suite extension (~/.config/pi/pi-tools-suite.jsonc).",
+  "additionalProperties": true
+}

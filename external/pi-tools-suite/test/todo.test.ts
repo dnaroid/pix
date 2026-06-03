@@ -571,6 +571,58 @@ describe.serial("todo extension lifecycle", () => {
 		}
 	});
 
+	test.serial("auto-nudge ignores active tasks whose blockers are incomplete", async () => {
+		const extension = (await import("../src/todo/index.js")).default;
+		const pi = new FakePi();
+		let snapshot = {
+			action: "create",
+			params: {},
+			tasks: [
+				{ id: 1, subject: "Finish prerequisite", status: "pending" },
+				{ id: 2, subject: "Blocked follow-up", status: "pending", blockedBy: [1] },
+			],
+			nextId: 3,
+		};
+		const ctx = {
+			hasUI: false,
+			sessionManager: { getBranch: () => [{ type: "message", message: { role: "toolResult", toolName: "todo", details: snapshot } }] },
+			isIdle: () => true,
+			hasPendingMessages: () => false,
+		};
+		const originalSetTimeout = globalThis.setTimeout;
+		const originalClearTimeout = globalThis.clearTimeout;
+		globalThis.setTimeout = ((callback: TimerHandler) => {
+			if (typeof callback === "function") callback();
+			return 1 as any;
+		}) as any;
+		globalThis.clearTimeout = (() => {}) as any;
+		try {
+			extension(pi as any);
+			await pi.emit("session_start", {}, ctx);
+			await pi.emit("agent_end", {}, ctx);
+			expect(pi.sentMessages).toHaveLength(1);
+			expect(pi.sentMessages[0]).toContain("#1 [pending] Finish prerequisite");
+			expect(pi.sentMessages[0]).not.toContain("Blocked follow-up");
+
+			snapshot = {
+				action: "update",
+				params: {},
+				tasks: [
+					{ id: 1, subject: "Finish prerequisite", status: "completed" },
+					{ id: 2, subject: "Blocked follow-up", status: "pending", blockedBy: [1] },
+				],
+				nextId: 3,
+			};
+			await pi.emit("session_start", {}, ctx);
+			await pi.emit("agent_end", {}, ctx);
+			expect(pi.sentMessages).toHaveLength(2);
+			expect(pi.sentMessages[1]).toContain("#2 [pending] Blocked follow-up");
+		} finally {
+			globalThis.setTimeout = originalSetTimeout;
+			globalThis.clearTimeout = originalClearTimeout;
+		}
+	});
+
 	test.serial("defers auto-nudge while ask_user is pending", async () => {
 		const extension = (await import("../src/todo/index.js")).default;
 		const pi = new FakePi();

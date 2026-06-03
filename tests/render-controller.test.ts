@@ -501,6 +501,102 @@ describe("AppRenderController", () => {
 		assert.equal(mouseController.renderedRowTexts.get(3), "│widget    │");
 		assert.deepEqual(mouseController.renderedTargets.get(3), { kind: "todo-panel" });
 	});
+
+	it("renders default popup overlays above the input frame", () => {
+		const mouseController = fakeMouseController();
+		const controller = new AppRenderController({
+			isRunning: () => true,
+			terminalColumns: () => 40,
+			terminalRows: () => 7,
+		}, {
+			theme: THEMES.dark,
+			screenStyler: fakeScreenStyler(),
+			editorLayoutRenderer: {
+				computeLayout: () => ({
+					renderedInput: {
+						lines: ["INPUT"],
+						cursorRowOffset: 0,
+						cursorColumn: 1,
+						cursorVisible: false,
+						scrollOffset: 0,
+						editorStartRowOffset: 0,
+						tagSpans: [[]],
+					},
+					aboveEditorLines: [],
+					belowEditorLines: [],
+					inputStartRow: 4,
+					inputSeparatorRow: 3,
+					inputBottomSeparatorRow: 5,
+					bodyHeight: 1,
+				}),
+			} as unknown as EditorLayoutRenderer,
+			scrollController: {
+				conversationView: () => ({ lines: [{ text: "BODY" }], metrics: { bodyHeight: 1, viewportColumns: 40, conversationLineCount: 1, maxScroll: 0, start: 0 } }),
+				scrollBarForMetrics: () => undefined,
+			} as unknown as AppScrollController,
+			popupMenus: fakePopupMenus({
+				placement: "default",
+				lines: [{ text: "help", target: { kind: "popup-menu", index: 0 } }],
+			}),
+			mouseController,
+			statusLineRenderer: fakeStatusLineRenderer(),
+			tabLineRenderer: { panelRows: () => 0, layout: () => ({ text: "", segments: [], targets: [] }), render: () => "" } as unknown as TabLineRenderer,
+			toastController: { toast: { visibleStates: [] } } as unknown as AppToastController,
+			voiceProgressOverlayText: () => undefined,
+		});
+
+		const output = captureStdout(() => controller.render());
+
+		assert.equal(rowForRenderedText(output, "help"), 2);
+		assert.deepEqual(mouseController.renderedTargets.get(2), { kind: "popup-menu", index: 0 });
+	});
+
+	it("renders the voice progress overlay centered on the second row", () => {
+		const mouseController = fakeMouseController();
+		const controller = new AppRenderController({
+			isRunning: () => true,
+			terminalColumns: () => 40,
+			terminalRows: () => 7,
+		}, {
+			theme: THEMES.dark,
+			screenStyler: fakeScreenStyler(),
+			editorLayoutRenderer: {
+				computeLayout: () => ({
+					renderedInput: {
+						lines: ["INPUT"],
+						cursorRowOffset: 0,
+						cursorColumn: 1,
+						cursorVisible: false,
+						scrollOffset: 0,
+						editorStartRowOffset: 0,
+						tagSpans: [[]],
+					},
+					aboveEditorLines: [],
+					belowEditorLines: [],
+					inputStartRow: 4,
+					inputSeparatorRow: 3,
+					inputBottomSeparatorRow: 5,
+					bodyHeight: 1,
+				}),
+			} as unknown as EditorLayoutRenderer,
+			scrollController: {
+				conversationView: () => ({ lines: [{ text: "BODY" }], metrics: { bodyHeight: 1, viewportColumns: 40, conversationLineCount: 1, maxScroll: 0, start: 0 } }),
+				scrollBarForMetrics: () => undefined,
+			} as unknown as AppScrollController,
+			popupMenus: fakePopupMenus(),
+			mouseController,
+			statusLineRenderer: fakeStatusLineRenderer(),
+			tabLineRenderer: { panelRows: () => 0, layout: () => ({ text: "", segments: [], targets: [] }), render: () => "" } as unknown as TabLineRenderer,
+			toastController: { toast: { visibleStates: [] } } as unknown as AppToastController,
+			voiceProgressOverlayText: () => "Listening",
+		});
+
+		const output = captureStdout(() => controller.render());
+
+		assert.equal(rowForRenderedText(output, "Listening"), 2);
+		assert.equal(mouseController.renderedRowTexts.get(2)?.includes("Listening"), true);
+		assert.equal(mouseController.renderedRowBackgrounds.get(2), THEMES.dark.colors.info);
+	});
 });
 
 function fakeMouseController(): AppMouseController {

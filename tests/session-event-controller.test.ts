@@ -112,6 +112,71 @@ describe("AppSessionEventController", () => {
 		assert.deepEqual(observed, [{ details, isError: false }]);
 	});
 
+	it("updates an existing tool entry when update and end events arrive", () => {
+		const entries: Entry[] = [];
+		const observedSubagents: Array<{ toolName: string; details: unknown }> = [];
+		const observedTodo: Array<{ toolName: string; details: unknown; isError?: boolean }> = [];
+		const controller = new AppSessionEventController({
+			entries,
+			runtime: () => ({ session: { isStreaming: false } }) as AgentSessionRuntime,
+			conversationViewport: () => ({ deleteEntry: () => {} }) as never,
+			isRunning: () => false,
+			render: () => {},
+			scheduleRender: () => {},
+			setStatus: () => {},
+			restoreSessionStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			updateQueuedMessageStatus: () => {},
+			prepareWorkspaceMutation: () => undefined,
+			workspaceMutationFromToolExecution: () => undefined,
+			recordWorkspaceMutationForUserEntry: () => {},
+			scheduleUserSessionEntryMetadataSync: () => {},
+			toolDefaultExpanded: () => false,
+			observeSubagentsToolResult: (toolName, details) => {
+				observedSubagents.push({ toolName, details });
+			},
+			observeTodoToolResult: (toolName, details, isError) => {
+				observedTodo.push({ toolName, details, isError });
+			},
+			showToast: () => {},
+		});
+
+		controller.handleSessionEvent({
+			type: "tool_execution_start",
+			toolCallId: "call-1",
+			toolName: "shell",
+			args: { command: "echo hello" },
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "tool_execution_update",
+			toolCallId: "call-1",
+			toolName: "shell",
+			args: { command: "echo hello" },
+			partialResult: { content: [{ type: "text", text: "partial" }], details: { progress: 50 } },
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "tool_execution_end",
+			toolCallId: "call-1",
+			toolName: "shell",
+			result: { content: [{ type: "text", text: "done" }], details: { finished: true } },
+			isError: false,
+		} as unknown as AgentSessionEvent);
+
+		assert.equal(entries.filter((entry) => entry.kind === "tool").length, 1);
+		assert.equal(entries[0]?.kind === "tool" ? entries[0].status : undefined, "done");
+		assert.equal(entries[0]?.kind === "tool" ? entries[0].output : undefined, "done");
+		assert.deepEqual(entries[0]?.kind === "tool" ? entries[0].details : undefined, { finished: true });
+		assert.deepEqual(observedSubagents, [
+			{ toolName: "shell", details: { progress: 50 } },
+			{ toolName: "shell", details: { finished: true } },
+		]);
+		assert.deepEqual(observedTodo, [
+			{ toolName: "shell", details: { progress: 50 }, isError: undefined },
+			{ toolName: "shell", details: { finished: true }, isError: false },
+		]);
+	});
+
 	it("starts a new assistant entry for text streamed after a tool call", () => {
 		const entries: Entry[] = [];
 		const controller = createController(entries);
@@ -188,4 +253,176 @@ describe("AppSessionEventController", () => {
 		assert.equal(entries.length, 1);
 		assert.equal(entries[0]?.kind === "assistant" ? entries[0].text : undefined, "answer\nnext");
 	});
+
+	it("records workspace mutations and user metadata from session events", () => {
+		const entries: Entry[] = [];
+		const preparedCalls: Array<{ toolName: string; args: unknown }> = [];
+		const recordedMutations: Array<{ entryId: string; mutation: unknown }> = [];
+		let metadataSyncCalls = 0;
+		let currentRuntime: AgentSessionRuntime = { session: { isStreaming: false } } as AgentSessionRuntime;
+		const controller = new AppSessionEventController({
+			entries,
+			runtime: () => currentRuntime,
+			conversationViewport: () => ({ deleteEntry: () => {} }) as never,
+			isRunning: () => false,
+			render: () => {},
+			scheduleRender: () => {},
+			setStatus: () => {},
+			restoreSessionStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			updateQueuedMessageStatus: () => {},
+			prepareWorkspaceMutation: (toolName, args) => {
+				preparedCalls.push({ toolName, args });
+				return { toolName, args } as never;
+			},
+			workspaceMutationFromToolExecution: ({ toolName, args, details, isError, preparation }) => ({
+				toolName,
+				args,
+				details,
+				isError,
+				preparation,
+			}) as never,
+			recordWorkspaceMutationForUserEntry: (entryId, mutation) => {
+				recordedMutations.push({ entryId, mutation });
+			},
+			scheduleUserSessionEntryMetadataSync: () => {
+				metadataSyncCalls += 1;
+			},
+			toolDefaultExpanded: () => false,
+			observeSubagentsToolResult: () => {},
+			observeTodoToolResult: () => {},
+			showToast: () => {},
+		});
+
+		controller.handleSessionEvent({
+			type: "message_start",
+			message: { role: "user", content: "hello" },
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "tool_execution_start",
+			toolCallId: "call-1",
+			toolName: "shell",
+			args: { command: "echo hello" },
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "tool_execution_end",
+			toolCallId: "call-1",
+			toolName: "shell",
+			result: { content: [{ type: "text", text: "done" }], details: { changed: true } },
+			isError: false,
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "message_end",
+			message: { role: "user", content: "hello" },
+		} as unknown as AgentSessionEvent);
+
+		assert.equal(entries[0]?.kind, "user");
+		assert.deepEqual(preparedCalls, [{ toolName: "shell", args: { command: "echo hello" } }]);
+		assert.equal(recordedMutations.length, 1);
+		assert.equal(recordedMutations[0]?.entryId, entries[0]?.id);
+		assert.deepEqual(recordedMutations[0]?.mutation, {
+			toolName: "shell",
+			args: { command: "echo hello" },
+			details: { changed: true },
+			isError: false,
+			preparation: { toolName: "shell", args: { command: "echo hello" } },
+		});
+		assert.equal(metadataSyncCalls, 1);
+	});
+
+	it("adds a session aborted entry after clearing assistant state", () => {
+		const entries: Entry[] = [];
+		const controller = createController(entries);
+
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "text_delta", delta: "partial assistant text" },
+		} as unknown as AgentSessionEvent);
+		controller.addSessionAbortedEntry();
+
+		assert.deepEqual(entries.map((entry) => entry.kind), ["assistant", "session-aborted"]);
+		assert.equal(entries[1]?.kind === "session-aborted" ? entries[1].text : undefined, "Session aborted.");
+	});
+
+	it("handles custom messages, assistant thinking, and compaction or retry outcomes", () => {
+		const entries: Entry[] = [];
+		const statuses: string[] = [];
+		const activities: Array<"running" | "thinking" | "idle"> = [];
+		const toasts: string[] = [];
+		let queuedStatusUpdates = 0;
+		const controller = new AppSessionEventController({
+			entries,
+			runtime: () => ({ session: { isStreaming: false, isCompacting: false } }) as AgentSessionRuntime,
+			conversationViewport: () => ({ deleteEntry: () => {} }) as never,
+			isRunning: () => false,
+			render: () => {},
+			scheduleRender: () => {},
+			setStatus: (status) => {
+				statuses.push(status);
+			},
+			restoreSessionStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: (activity) => {
+				activities.push(activity);
+			},
+			updateQueuedMessageStatus: () => {
+				queuedStatusUpdates += 1;
+			},
+			prepareWorkspaceMutation: () => undefined,
+			workspaceMutationFromToolExecution: () => undefined,
+			recordWorkspaceMutationForUserEntry: () => {},
+			scheduleUserSessionEntryMetadataSync: () => {},
+			toolDefaultExpanded: () => false,
+			observeSubagentsToolResult: () => {},
+			observeTodoToolResult: () => {},
+			showToast: (message, kind) => {
+				toasts.push(`${kind}:${message}`);
+			},
+		});
+
+		controller.handleSessionEvent({
+			type: "message_start",
+			message: { role: "custom", display: true, customType: "note", content: "custom note" },
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "thinking_delta", delta: "thinking" },
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "text_delta", delta: "answer" },
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "error", error: { errorMessage: "boom" }, reason: "fallback" },
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({ type: "queue_update" } as AgentSessionEvent);
+		controller.handleSessionEvent({ type: "compaction_start", reason: "trim tree" } as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "compaction_end",
+			result: { tokensBefore: 100, tokensAfter: 50 },
+		} as AgentSessionEvent);
+		controller.handleSessionEvent({ type: "compaction_end", aborted: true } as AgentSessionEvent);
+		controller.handleSessionEvent({ type: "compaction_end", errorMessage: "failed" } as AgentSessionEvent);
+		controller.handleSessionEvent({ type: "auto_retry_start", attempt: 2, maxAttempts: 3 } as AgentSessionEvent);
+		controller.handleSessionEvent({ type: "auto_retry_end", success: true } as AgentSessionEvent);
+		controller.handleSessionEvent({ type: "auto_retry_end", success: false, finalError: "nope" } as AgentSessionEvent);
+
+		assert.deepEqual(entries.map((entry) => entry.kind), ["custom", "thinking", "assistant", "error"]);
+		assert.equal(entries[1]?.kind === "thinking" ? entries[1].status : undefined, "done");
+		assert.equal(entries[2]?.kind === "assistant" ? entries[2].text : undefined, "answer");
+		assert.equal(entries[3]?.kind === "error" ? entries[3].text : undefined, "boom");
+		assert.equal(queuedStatusUpdates, 1);
+		assert.deepEqual(statuses, ["compacting (trim tree)", "retry 2/3"]);
+		assert.deepEqual(activities, ["thinking", "running", "idle", "running", "idle", "idle", "idle", "running", "idle", "idle"]);
+		assert.deepEqual(toasts, [
+			"success:Compacted 100 tokens",
+			"info:Compaction cancelled",
+			"error:failed",
+			"success:Retry succeeded",
+			"error:Retry failed: nope",
+		]);
+	});
+
 });

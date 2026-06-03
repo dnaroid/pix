@@ -88,13 +88,11 @@ function renderDialogToastOverlay(
 	if (maxRows <= 0 || width <= 0) return [];
 
 	const maxDialogWidth = Math.max(1, Math.min(width - 4, 72));
-	const icon = toastKindIcon(state.kind);
 	const closeLabel = `[${APP_ICONS.close}]`;
 	const wrappedLines = dialogMessageLines(state.message, Math.max(1, maxDialogWidth - 4));
-	const title = `${icon} Dialog`;
 	const requiredWidth = Math.max(
 		16,
-		stringDisplayWidth(` ${title} ${closeLabel} `) + 2,
+		stringDisplayWidth(closeLabel) + 4,
 		...wrappedLines.map((line) => stringDisplayWidth(line) + 4),
 	);
 	const dialogWidth = Math.min(maxDialogWidth, Math.max(16, requiredWidth));
@@ -104,14 +102,14 @@ function renderDialogToastOverlay(
 	const visibleBodyLines = bodyLines.slice(0, bodyRows);
 	const includeBottom = maxRows > 1;
 	const dialogRows = [
-		dialogTopLine(title, closeLabel, dialogWidth),
+		dialogTopLine(closeLabel, dialogWidth),
 		...visibleBodyLines.map((line) => `│ ${padOrTrimPlain(line, bodyWidth)} │`),
 		...(includeBottom ? [`╰${"─".repeat(Math.max(0, dialogWidth - 2))}╯`] : []),
 	].slice(0, maxRows);
 	const leftWidth = Math.max(0, width - dialogWidth - 2);
 	const column = leftWidth + 1;
 	const style = toastKindStyle(state.kind, theme);
-	const closeStartColumn = column + 1 + dialogTopCloseOffset(title, closeLabel, dialogWidth);
+	const closeStartColumn = column + 1 + dialogTopCloseOffset(closeLabel, dialogWidth);
 	const closeEndColumn = closeStartColumn + stringDisplayWidth(closeLabel);
 
 	return dialogRows.map((text, index) => ({
@@ -132,19 +130,18 @@ function dialogMessageLines(message: string, maxWidth: number): string[] {
 	return lines.length > 0 ? lines : [""];
 }
 
-function dialogTopLine(title: string, closeLabel: string, width: number): string {
+function dialogTopLine(closeLabel: string, width: number): string {
 	const innerWidth = Math.max(0, width - 2);
-	const closeOffset = dialogTopCloseOffset(title, closeLabel, width);
-	const leftLabel = ` ${title} `;
-	const spacer = " ".repeat(Math.max(0, closeOffset - stringDisplayWidth(leftLabel)));
-	return `╭${padOrTrimPlain(`${leftLabel}${spacer}${closeLabel} `, innerWidth)}╮`;
+	const closeOffset = dialogTopCloseOffset(closeLabel, width);
+	const closeWidth = stringDisplayWidth(closeLabel);
+	const rightWidth = Math.max(0, innerWidth - closeOffset - closeWidth);
+	return `╭${"─".repeat(closeOffset)}${padOrTrimPlain(closeLabel, Math.min(closeWidth, innerWidth - closeOffset))}${"─".repeat(rightWidth)}╮`;
 }
 
-function dialogTopCloseOffset(title: string, closeLabel: string, width: number): number {
+function dialogTopCloseOffset(closeLabel: string, width: number): number {
 	const innerWidth = Math.max(0, width - 2);
-	const leftLabel = ` ${title} `;
 	const closeWidth = stringDisplayWidth(closeLabel);
-	return Math.max(stringDisplayWidth(leftLabel), innerWidth - closeWidth - 1);
+	return Math.max(0, innerWidth - closeWidth - 1);
 }
 
 function toastKindIcon(kind: ToastKind): string {

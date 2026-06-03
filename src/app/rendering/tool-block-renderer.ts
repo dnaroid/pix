@@ -6,11 +6,12 @@ import { alertIconPrefixLength, hasToolLspDiagnosticsAfterMutation, lspDiagnosti
 import type { RenderedLine, StyledSegment } from "../types.js";
 import type { ToolBodyLineStyle, ToolHeaderSegment } from "../../tool-renderers/types.js";
 
-const TRUNCATED_PREVIEW_MARKER = "… ";
+const TRUNCATED_PREVIEW_MARKER = "▶ ";
 
 export type ToolBlockEntry = {
 	id: string;
 	toolName: string;
+	headerLabel?: string | undefined;
 	headerArgs?: string | undefined;
 	headerArgsSegments?: readonly ToolHeaderSegment[] | undefined;
 	bodyLineStyles?: readonly ToolBodyLineStyle[] | undefined;
@@ -38,7 +39,8 @@ export function renderToolBlock(entry: ToolBlockEntry, rule: ResolvedToolRule, w
 	const stateIcon = toolStatusIcon(entry);
 	const toolColor = resolveColor(rule.color, colors);
 	const toolOutputColor = colors.statusForeground;
-	const headerPrefix = `${stateIcon} ${entry.toolName}`;
+	const headerLabel = entry.headerLabel ?? entry.toolName;
+	const headerPrefix = headerLabel ? `${stateIcon} ${headerLabel}` : stateIcon;
 	const headerArgs = formatToolHeaderArgs(entry.headerArgs);
 	const headerArgsWidth = width - stringDisplayWidth(headerPrefix) - 1;
 	const clippedHeaderArgs = headerArgsWidth > 0 ? sliceByDisplayWidth(headerArgs, headerArgsWidth) : "";

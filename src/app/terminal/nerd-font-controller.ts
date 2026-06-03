@@ -5,6 +5,27 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { commandExists, runProcess } from "../process.js";
 
+type NerdFontControllerDeps = {
+	commandExists: typeof commandExists;
+	existsSync: typeof existsSync;
+	fetch: typeof fetch;
+	mkdir: typeof mkdir;
+	readdir: typeof readdir;
+	runProcess: typeof runProcess;
+	spawn: typeof spawn;
+	writeFile: typeof writeFile;
+};
+
+let deps: NerdFontControllerDeps = { commandExists, existsSync, fetch, mkdir, readdir, runProcess, spawn, writeFile };
+
+export function setNerdFontControllerTestDeps(overrides: Partial<NerdFontControllerDeps>): () => void {
+	const previous = deps;
+	deps = { ...deps, ...overrides };
+	return () => {
+		deps = previous;
+	};
+}
+
 export type NerdFontInstallHost = {
 	showToast(message: string, kind: "success" | "error" | "warning" | "info"): void;
 	render(): void;
@@ -48,12 +69,12 @@ export class NerdFontController {
 }
 
 export async function isJetBrainsNerdFontInstalled(): Promise<boolean> {
-	if (await commandExists("brew")) {
-		const result = await runProcess("brew", ["list", "--cask", CASK_NAME], { maxBufferBytes: 1024 });
+	if (await deps.commandExists("brew")) {
+		const result = await deps.runProcess("brew", ["list", "--cask", CASK_NAME], { maxBufferBytes: 1024 });
 		if (result.status === 0) return true;
 	}
-	if (process.platform === "linux" && await commandExists("fc-match")) {
-		const result = await runProcess("fc-match", ["-f", "%{family}", FONT_FAMILY_NAME], { maxBufferBytes: 1024 });
+	if (process.platform === "linux" && await deps.commandExists("fc-match")) {
+		const result = await deps.runProcess("fc-match", ["-f", "%{family}", FONT_FAMILY_NAME], { maxBufferBytes: 1024 });
 		if (result.status === 0 && /JetBrains.*Nerd/iu.test(result.stdout)) return true;
 	}
 
@@ -66,21 +87,21 @@ export async function isJetBrainsNerdFontInstalled(): Promise<boolean> {
 }
 
 export async function installJetBrainsNerdFont(): Promise<string> {
-	if (process.platform === "darwin" && await commandExists("brew")) {
+	if (process.platform === "darwin" && await deps.commandExists("brew")) {
 		await runBrewInstall();
 		return CASK_NAME;
 	}
 
 	const targetPath = userFontInstallPath();
-	await mkdir(dirname(targetPath), { recursive: true });
-	const response = await fetch(FONT_DOWNLOAD_URL, {
+	await deps.mkdir(dirname(targetPath), { recursive: true });
+	const response = await deps.fetch(FONT_DOWNLOAD_URL, {
 		headers: { "User-Agent": "pix-font-installer" },
 		signal: AbortSignal.timeout(30_000),
 	});
 	if (!response.ok) throw new Error(`download failed with HTTP ${response.status}`);
 	const bytes = new Uint8Array(await response.arrayBuffer());
 	if (bytes.length < 100_000) throw new Error("downloaded font is unexpectedly small");
-	await writeFile(targetPath, bytes);
+	await deps.writeFile(targetPath, bytes);
 
 	if (process.platform === "linux") await runOptionalCommand("fc-cache", ["-f", dirname(targetPath)]);
 	if (process.platform === "win32") await registerWindowsUserFont(targetPath);
@@ -114,7 +135,7 @@ function platformFontDirs(): string[] {
 }
 
 async function directoryContainsFont(root: string): Promise<boolean> {
-	if (!existsSync(root)) return false;
+	if (!deps.existsSync(root)) return false;
 	const pending = [{ dir: root, depth: 0 }];
 	let scanned = 0;
 	while (pending.length > 0 && scanned < 5_000) {
@@ -122,7 +143,7 @@ async function directoryContainsFont(root: string): Promise<boolean> {
 		if (!current) continue;
 		let entries;
 		try {
-			entries = await readdir(current.dir, { withFileTypes: true });
+			entries = await deps.readdir(current.dir, { withFileTypes: true });
 		} catch {
 			continue;
 		}
@@ -137,7 +158,7 @@ async function directoryContainsFont(root: string): Promise<boolean> {
 
 async function runBrewInstall(): Promise<void> {
 	await new Promise<void>((resolve, reject) => {
-		const child = spawn("brew", ["install", "--cask", CASK_NAME], {
+		const child = deps.spawn("brew", ["install", "--cask", CASK_NAME], {
 			env: { ...process.env, HOMEBREW_NO_AUTO_UPDATE: "1" },
 			stdio: ["ignore", "ignore", "pipe"],
 		});
@@ -166,7 +187,7 @@ async function registerWindowsUserFont(fontPath: string): Promise<void> {
 }
 
 async function runOptionalCommand(command: string, args: string[]): Promise<void> {
-	await runProcess(command, args, { maxBufferBytes: 1024 });
+	await deps.runProcess(command, args, { maxBufferBytes: 1024 });
 }
 
 function errorMessage(error: unknown): string {

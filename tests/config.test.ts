@@ -3,6 +3,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
+import { parse } from "jsonc-parser";
+
+const PIX_SCHEMA_URL = "https://unpkg.com/pi-ui-extend/schemas/pix.json";
 
 const testHome = mkdtempSync(join(tmpdir(), "pix-config-home-"));
 const testConfigDir = join(testHome, ".config", "pi");
@@ -42,6 +45,9 @@ describe("config helpers", () => {
 		const config = loadPixConfig();
 		assert.equal(existsSync(testConfigPath), true);
 		const created = readFileSync(testConfigPath, "utf8");
+		const parsedCreated = parse(created) as { $schema?: string };
+		assert.equal(parsedCreated.$schema, PIX_SCHEMA_URL);
+		assert.match(created, /^\{\n  "\$schema":/u);
 		assert.match(created, /pix renderer configuration/u);
 		assert.match(created, /"sessionTitle"/u);
 		assert.deepEqual([

@@ -74,17 +74,36 @@ describe("AppScrollController", () => {
 
 		assert.equal(slicedStart, 3);
 	});
+	it("maps scrollbar clicks to conversation starts", () => {
+		let slicedStart: number | undefined;
+		const controller = createController({
+			lineCount: () => 20,
+			slice: (_width, start) => {
+				slicedStart = start;
+				return [{ text: "visible" }];
+			},
+		}, 5);
+
+		assert.equal(controller.scrollToScrollbarPosition(0), true);
+		controller.conversationView(10, 5);
+		assert.equal(slicedStart, 0);
+
+		assert.equal(controller.scrollToScrollbarPosition(4), true);
+		controller.conversationView(10, 5);
+		assert.equal(slicedStart, 15);
+	});
+
 });
 
 function createController(viewport: {
 	lineCount(width: number): number;
 	slice(width: number, start: number, count: number): { text: string }[];
 	entryBlockPositions?: (width: number) => unknown[];
-}): AppScrollController {
+}, bodyHeight = 1): AppScrollController {
 	return new AppScrollController({
 		conversationViewport: () => viewport as unknown as ConversationViewport,
 		editorLayoutRenderer: () => ({
-			computeLayout: () => ({ bodyHeight: 1 }),
+			computeLayout: () => ({ bodyHeight }),
 		}) as unknown as EditorLayoutRenderer,
 		terminalColumns: () => 10,
 		terminalRows: () => 4,

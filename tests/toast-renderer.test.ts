@@ -41,7 +41,8 @@ describe("renderToastOverlays", () => {
 		], 80, 5, THEMES.dark);
 
 		assert.equal(overlays.length, 4);
-		assert.ok(overlays[0]?.text.includes("Dialog"));
+		assert.equal(overlays[0]?.text.includes("Dialog"), false);
+		assert.match(overlays[0]?.text ?? "", /^╭─+/);
 		assert.ok(overlays[0]?.text.includes(APP_ICONS.close));
 		assert.ok(overlays[1]?.text.includes("Context usage"));
 		assert.ok(overlays[2]?.text.includes("Tokens: 100 / 1000"));

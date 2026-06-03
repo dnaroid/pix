@@ -14,13 +14,16 @@
     "./sdk": {
       "types": "./dist/sdk.d.ts",
       "import": "./dist/sdk.js"
-    }
+    },
+    "./schemas/pix.json": "./schemas/pix.json",
+    "./schemas/pi-tools-suite.json": "./schemas/pi-tools-suite.json"
   },
   "files": [
     "bin",
     "docs",
     "dist",
     "extensions",
+    "schemas",
     "skills",
     "external/pi-tools-suite/index.ts",
     "external/pi-tools-suite/package.json",
@@ -34,22 +37,28 @@
     "predev": "npm run link:pix --silent",
     "dev": "mise exec node@24.16.0 -- tsx src/main.ts",
     "start": "mise exec node@24.16.0 -- tsx src/main.ts",
+    "prebuild:pix": "npm run generate-schemas --silent",
     "build:pix": "mise exec node@24.16.0 -- tsc -p tsconfig.json",
     "prelink:pix": "npm run build:pix --silent",
     "link:pix": "mise exec node@24.16.0 -- npm link --silent",
     "watch:pix": "npm run link:pix --silent && mise exec node@24.16.0 -- tsc -p tsconfig.json --watch --preserveWatchOutput --noEmitOnError",
     "check": "mise exec node@24.16.0 -- npm run check:inner",
+    "precheck:inner": "npm run generate-schemas --silent",
     "check:inner": "tsc --noEmit && npm run test:inner",
     "test": "mise exec node@24.16.0 -- npm run test:inner",
     "test:inner": "node --import tsx --test \"tests/**/*.test.ts\"",
     "test:tools-suite": "npm --prefix external/pi-tools-suite test",
     "test:coverage": "mise exec node@24.16.0 -- node --import tsx --test --experimental-test-coverage --test-coverage-include=src/**/*.ts --test-coverage-exclude=src/main.ts --test-coverage-lines=95 --test-coverage-branches=80 --test-coverage-functions=95 \"tests/**/*.test.ts\"",
     "update-sdk-references": "mise exec node@24.16.0 -- node .pi/skills/pi-sdk/scripts/update-references.mjs",
+    "prepack": "npm run generate-schemas --silent",
     "pack:dry-run": "npm pack --dry-run",
     "smoke-test": "mise exec node@24.16.0 -- bash scripts/smoke-test-package.sh",
     "release:check": "npm run check && npm run build:pix && npm run pack:dry-run",
     "publish-npm": "bash scripts/publish.sh",
-    "prepublishOnly": "npm run check && npm run build:pix"
+    "generate-schemas": "tsx scripts/generate-schemas.ts",
+    "generate-schemas:check": "tsx scripts/generate-schemas.ts --check",
+    "generate-schemas:watch": "tsx watch scripts/generate-schemas.ts",
+    "prepublishOnly": "npm run check && npm run build:pix && npm run generate-schemas"
   },
   "dependencies": {
     "@earendil-works/pi-tui": "0.77.0",

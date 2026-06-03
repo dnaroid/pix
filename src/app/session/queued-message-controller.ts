@@ -61,6 +61,11 @@ export class AppQueuedMessageController {
 
 	async submitUserMessage(message: SubmittedUserMessage): Promise<void> {
 		const session = this.host.requireRuntime().session;
+		if (session.isStreaming) {
+			await this.sendUserMessageToSession(message, { streamingBehavior: "steer" });
+			return;
+		}
+
 		if (this.shouldDeferUserMessage(session)) {
 			this.deferUserMessage(message);
 			return;
@@ -256,7 +261,7 @@ export class AppQueuedMessageController {
 	}
 
 	private shouldDeferUserMessage(session: AgentSession): boolean {
-		return session.isStreaming || session.isCompacting || this.promptSubmissionInFlight;
+		return session.isCompacting || this.promptSubmissionInFlight;
 	}
 
 	deferUserMessage(message: SubmittedUserMessage): void {

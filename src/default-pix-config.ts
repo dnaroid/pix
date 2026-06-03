@@ -1,4 +1,5 @@
 export const DEFAULT_PIX_CONFIG_JSONC = String.raw`{
+  "$schema": "https://unpkg.com/pi-ui-extend/schemas/pix.json",
   // pix renderer configuration
   "defaultModel": { "modelRef": "openai-codex/gpt-5.5", "thinking": "medium" },
 

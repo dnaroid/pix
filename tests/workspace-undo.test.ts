@@ -4,9 +4,12 @@ import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+	loadWorkspaceUndoIndex,
 	prepareWorkspaceMutation,
 	revertWorkspaceMutations,
+	saveWorkspaceUndoIndex,
 	workspaceMutationFromToolExecution,
+	workspaceUndoIndexKey,
 	type WorkspaceMutation,
 } from "../src/app/workspace/workspace-undo.js";
 
@@ -94,6 +97,66 @@ test("write tool mutations restore the previous file content or remove created f
 		assert.equal(reverted.ok, true);
 		assert.equal(readFileSync(join(cwd, "existing.txt"), "utf8"), "before\n");
 		assert.throws(() => readFileSync(join(cwd, "created.txt"), "utf8"));
+	} finally {
+		cleanup();
+	}
+});
+
+test("workspace undo index load/save is resilient to missing and invalid files", () => {
+	const { cwd, cleanup } = createTempWorkspace();
+	try {
+		assert.equal(workspaceUndoIndexKey(undefined, "session", "entry-1"), "entry-1");
+		assert.deepEqual(loadWorkspaceUndoIndex(cwd), { version: 1, entries: {} });
+
+		saveWorkspaceUndoIndex(cwd, { version: 1, entries: { "entry-1": [{ type: "write", path: "a.txt", afterContent: "next" }] } });
+		assert.deepEqual(loadWorkspaceUndoIndex(cwd).entries["entry-1"], [{ type: "write", path: "a.txt", afterContent: "next" }]);
+
+		writeFileSync(join(cwd, "pix", "workspace-undo", "index.json"), "{bad json", "utf8");
+		assert.deepEqual(loadWorkspaceUndoIndex(cwd), { version: 1, entries: {} });
+
+		writeFileSync(join(cwd, "pix", "workspace-undo", "index.json"), JSON.stringify({ version: 999, entries: {} }), "utf8");
+		assert.deepEqual(loadWorkspaceUndoIndex(cwd), { version: 1, entries: {} });
+	} finally {
+		cleanup();
+	}
+});
+
+test("mutation parsing rejects unsafe or no-op tool executions and accepts patch details", () => {
+	const { cwd, cleanup } = createTempWorkspace();
+	try {
+		writeFileSync(join(cwd, "same.txt"), "same", "utf8");
+
+		assert.equal(prepareWorkspaceMutation(cwd, "read", { path: "same.txt", content: "next" }), undefined);
+		assert.equal(prepareWorkspaceMutation(cwd, "write", { path: "../outside.txt", content: "next" }), undefined);
+		assert.equal(prepareWorkspaceMutation(cwd, "write", { path: "same.txt" }), undefined);
+
+		const samePreparation = prepareWorkspaceMutation(cwd, "functions.write", { path: "same.txt", content: "same" });
+		assert.equal(workspaceMutationFromToolExecution({ cwd, toolName: "functions.write", args: { path: "same.txt", content: "same" }, details: undefined, isError: false, preparation: samePreparation }), undefined);
+		assert.equal(workspaceMutationFromToolExecution({ cwd, toolName: "write", args: { path: "same.txt", content: "changed" }, details: undefined, isError: true, preparation: samePreparation }), undefined);
+
+		const patch = unifiedPatch("notes.txt", numberedLines({ 5: "before" }), numberedLines({ 5: "after" }));
+		assert.deepEqual(workspaceMutationFromToolExecution({ cwd, toolName: "functions.apply_patch", args: {}, details: { diff: patch }, isError: false }), {
+			type: "patch",
+			patch,
+			toolName: "functions.apply_patch",
+		});
+		assert.equal(workspaceMutationFromToolExecution({ cwd, toolName: "apply_patch", args: { input: "not a patch" }, details: undefined, isError: false }), undefined);
+	} finally {
+		cleanup();
+	}
+});
+
+test("write reverts refuse outside paths and changed content", async () => {
+	const { cwd, cleanup } = createTempWorkspace();
+	try {
+		writeFileSync(join(cwd, "changed.txt"), "parallel", "utf8");
+		const changed = await revertWorkspaceMutations(cwd, [{ type: "write", path: "changed.txt", beforeContent: "before", afterContent: "after" }]);
+		assert.equal(changed.ok, false);
+		assert.match(changed.ok ? "" : changed.error, /file content changed/u);
+
+		const unsafe = await revertWorkspaceMutations(cwd, [{ type: "write", path: "../outside.txt", afterContent: "after" }]);
+		assert.equal(unsafe.ok, false);
+		assert.match(unsafe.ok ? "" : unsafe.error, /outside workspace/u);
 	} finally {
 		cleanup();
 	}

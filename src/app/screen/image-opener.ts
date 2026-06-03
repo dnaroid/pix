@@ -5,6 +5,24 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { ImageContent } from "../../input-editor.js";
 
+type ImageOpenerDeps = {
+	existsSync: typeof existsSync;
+	mkdirSync: typeof mkdirSync;
+	spawn: typeof spawn;
+	tmpdir: typeof tmpdir;
+	writeFileSync: typeof writeFileSync;
+};
+
+let deps: ImageOpenerDeps = { existsSync, mkdirSync, spawn, tmpdir, writeFileSync };
+
+export function setImageOpenerTestDeps(overrides: Partial<ImageOpenerDeps>): () => void {
+	const previous = deps;
+	deps = { ...deps, ...overrides };
+	return () => {
+		deps = previous;
+	};
+}
+
 export function openImageContent(image: ImageContent): boolean {
 	const filePath = writeImageTempFile(image);
 	if (!filePath) return false;
@@ -16,11 +34,11 @@ function writeImageTempFile(image: ImageContent): string | undefined {
 		const data = Buffer.from(image.data, "base64");
 		if (data.length === 0) return undefined;
 
-		const dir = join(tmpdir(), "pix-image-open");
-		mkdirSync(dir, { recursive: true });
+		const dir = join(deps.tmpdir(), "pix-image-open");
+		deps.mkdirSync(dir, { recursive: true });
 		const hash = createHash("sha256").update(image.mimeType).update("\0").update(data).digest("hex").slice(0, 24);
 		const filePath = join(dir, `${hash}${imageExtension(image.mimeType)}`);
-		if (!existsSync(filePath)) writeFileSync(filePath, data, { flag: "wx" });
+		if (!deps.existsSync(filePath)) deps.writeFileSync(filePath, data, { flag: "wx" });
 		return filePath;
 	} catch {
 		return undefined;
@@ -54,7 +72,7 @@ function openPathWithSystemViewer(filePath: string): boolean {
 
 function spawnDetached(command: string, args: readonly string[]): boolean {
 	try {
-		const child = spawn(command, args, { detached: true, stdio: "ignore" });
+		const child = deps.spawn(command, args, { detached: true, stdio: "ignore" });
 		child.on("error", () => {});
 		child.unref();
 		return true;

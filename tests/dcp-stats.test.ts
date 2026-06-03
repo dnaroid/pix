@@ -39,6 +39,40 @@ describe("formatDcpStatsToast", () => {
 		assert.match(output, /Compliance proxy: 1 compress-after-nudge \/ 2 nudge events \(50\.0%\)/);
 		assert.match(output, /Context: 75\.8% \(206\.1K\/272K\)/);
 	});
+	it("uses latest dcp-state telemetry and ignores older compress tool results", () => {
+		const session = fakeSession({
+			usage: { tokens: 10_000, contextWindow: 40_000, percent: 25 },
+			branch: [
+				{
+					type: "message",
+					message: { role: "toolResult", toolName: "compress", content: "tokensSaved: 99\nitemCount: 3", isError: false },
+				},
+				{
+					type: "custom",
+					customType: "dcp-state",
+					data: {
+						tokensSaved: 123,
+						totalPruneCount: 7,
+						compressionBlocks: [{ active: false }, { active: true }],
+						prunedToolIds: ["tool-a"],
+						nudgeAnchors: [{ type: "iteration" }],
+						lastNudge: { type: "context-strong", createdAt: 1_700_000_123, contextPercent: 0.4 },
+					},
+				},
+			],
+		});
+
+		const output = formatDcpStatsToast(session as never);
+
+		assert.match(output, /Tokens saved \(estimated\): 123/u);
+		assert.match(output, /Total pruning operations: 7/u);
+		assert.match(output, /Compression blocks active: 1 \/ 2 total/u);
+		assert.match(output, /Active anchors: 1 \(turn=0, iteration=1, context-soft=0, context-strong=0\)/u);
+		assert.match(output, /Last nudge: context-strong emitted/u);
+		assert.match(output, /40\.0% context/u);
+		assert.match(output, /Context: 25% \(10K\/40K\)/u);
+	});
+
 });
 
 function fakeSession(options: { usage: unknown; branch: unknown[] }) {

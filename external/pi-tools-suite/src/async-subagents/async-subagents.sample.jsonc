@@ -1,4 +1,7 @@
 {
+  // This sample is the value for `asyncSubagents` in ~/.config/pi/pi-tools-suite.jsonc.
+  // Full config schema: https://unpkg.com/pi-ui-extend/schemas/pi-tools-suite.json
+
   // Global async-subagents routing.
   // Rule of thumb:
   // - GLM: cheap/fast discovery, grep-style scanning, docs/test inventory.

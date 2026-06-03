@@ -8,6 +8,22 @@ import { getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
 const DEFAULT_UPDATE_TIMEOUT_MS = 10_000;
 const NPM_REGISTRY_URL = "https://registry.npmjs.org";
 
+type PixUpdateTestDeps = {
+	checkPixUpdate: typeof checkPixUpdate;
+	runCommand: typeof runCommand;
+};
+
+const defaultPixUpdateDeps: PixUpdateTestDeps = {
+	checkPixUpdate,
+	runCommand,
+};
+
+let pixUpdateDeps = defaultPixUpdateDeps;
+
+export function setPixUpdateTestDeps(overrides?: Partial<PixUpdateTestDeps>): void {
+	pixUpdateDeps = overrides ? { ...defaultPixUpdateDeps, ...overrides } : defaultPixUpdateDeps;
+}
+
 export type PixUpdateCliOptions = {
 	checkOnly: boolean;
 	force: boolean;
@@ -215,14 +231,14 @@ export async function runPixUpdateCli(argv: readonly string[] = process.argv.sli
 		return 0;
 	}
 
-	const check = await checkPixUpdate();
+	const check = await pixUpdateDeps.checkPixUpdate();
 	console.log(formatPixUpdateCheck(check));
 
 	if (options.checkOnly) return check.status === "unavailable" ? 1 : 0;
 	if (check.status === "current" && !options.force) return 0;
 	if ((check.status === "skipped" || check.status === "unavailable") && !options.force) return 1;
 
-	const command = getPixSelfUpdateCommand(check.packageName, check.latestVersion);
+	const command = getPixSelfUpdateCommand(check.packageName, check.latestVersion, check.packageRoot);
 	if (!command) {
 		console.error(`pix cannot self-update this installation. ${sourceCheckoutUpdateHint()}`);
 		return 1;
@@ -230,7 +246,7 @@ export async function runPixUpdateCli(argv: readonly string[] = process.argv.sli
 
 	console.log(`Updating Pix with ${command.display}...`);
 	try {
-		await runCommand(command);
+		await pixUpdateDeps.runCommand(command);
 		console.log("Updated Pix. Restart any running pix sessions.");
 		return 0;
 	} catch (error) {

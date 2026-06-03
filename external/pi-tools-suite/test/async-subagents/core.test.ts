@@ -367,6 +367,7 @@ describe.serial("subagent type config", () => {
 		const copied = copySubagentConfigSample(cwd, env);
 		expect(copied).toMatchObject({ copied: true, targetPath, existingFiles: [] });
 		expect(fs.existsSync(targetPath)).toBe(true);
+		expect(fs.readFileSync(targetPath, "utf-8")).toContain("Full config schema: https://unpkg.com/pi-ui-extend/schemas/pi-tools-suite.json");
 		const config = loadSubagentConfig(cwd, env);
 		expect(Object.keys(config.presets ?? {}).sort()).toEqual(["cheap", "deep", "gpt"]);
 		expect(Object.keys(config.types).sort()).toEqual(["deep", "docs", "frontend", "implement", "quick", "research", "review", "scan", "tests", "vision"]);

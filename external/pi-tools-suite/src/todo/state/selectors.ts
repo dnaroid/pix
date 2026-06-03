@@ -47,3 +47,7 @@ export function selectTodoCounts(state: TaskState): TodoCounts {
 }
 
 export const ACTIVE_STATUSES: ReadonlySet<TaskStatus> = new Set(["pending", "in_progress"]);
+
+export function isTaskBlocked(task: Task, byId: ReadonlyMap<number, Task>): boolean {
+	return (task.blockedBy ?? []).some((id) => byId.get(id)?.status !== "completed");
+}

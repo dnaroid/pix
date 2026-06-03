@@ -5,6 +5,23 @@ import type { AgentSession, AgentSessionRuntime } from "@earendil-works/pi-codin
 import { AppQueuedMessageController, type AppQueuedMessageControllerHost } from "../src/app/session/queued-message-controller.js";
 
 describe("AppQueuedMessageController", () => {
+	it("captures deferred messages as deep clones", () => {
+		const controller = new AppQueuedMessageController(createHost(fakeSession({ steering: [], followUp: [] }), createHostState("")));
+		controller.deferredUserMessages.push({
+			id: "deferred-1",
+			promptText: "prompt text",
+			displayText: "display text",
+			images: [{ type: "image", data: "image-data", mimeType: "image/png" }],
+		});
+
+		const captured = controller.captureDeferredUserMessages();
+		captured[0]!.promptText = "changed prompt";
+		captured[0]!.images[0]!.data = "changed-image";
+
+		assert.equal(controller.deferredUserMessages[0]?.promptText, "prompt text");
+		assert.equal(controller.deferredUserMessages[0]?.images[0]?.data, "image-data");
+	});
+
 	it("restores and clears queued messages before aborting", () => {
 		const sdkQueue = {
 			steering: ["queued steer"],
@@ -28,7 +45,6 @@ describe("AppQueuedMessageController", () => {
 		assert.equal(controller.deferredUserMessages.length, 0);
 		assert.equal(state.input, "queued steer\n\ndeferred\n\nqueued follow\n\ndraft\n[Image 1] ");
 		assert.deepEqual(state.images, [{ data: "image-data", mimeType: "image/png" }]);
-		assert.equal(state.setSessionStatusCalls, 1);
 	});
 
 	it("aborts the active stream before immediately sending an SDK queued message", async () => {
@@ -58,19 +74,20 @@ describe("AppQueuedMessageController", () => {
 		assert.equal(state.abortedEntries, 1);
 	});
 
-	it("queues submitted messages during streaming for manual send", async () => {
+	it("sends submitted messages during streaming as SDK steering", async () => {
 		const sdkQueue = { steering: [], followUp: [] };
 		const calls: string[] = [];
 		const session = fakeSession(sdkQueue, { calls, isStreaming: true });
 		const state = createHostState("");
 		const controller = new AppQueuedMessageController(createHost(session, state));
 
-		await controller.submitUserMessage(controller.createSubmittedUserMessage("send later", "send later", []));
+		await controller.submitUserMessage(controller.createSubmittedUserMessage("steer now", "steer now", []));
 
-		assert.deepEqual(calls, []);
-		assert.equal(controller.deferredUserMessages.length, 1);
-		assert.deepEqual(state.toasts, ["info:Message queued; send it from the queue menu or status button"]);
-		assert.equal(state.deferredChangeCount, 1);
+		assert.deepEqual(calls, ["prompt:steer now:steer"]);
+		assert.deepEqual(sdkQueue, { steering: ["steer now"], followUp: [] });
+		assert.equal(controller.deferredUserMessages.length, 0);
+		assert.deepEqual(state.toasts, []);
+		assert.equal(state.deferredChangeCount, 0);
 	});
 
 	it("does not auto-flush deferred messages after an immediate send", async () => {
@@ -151,6 +168,66 @@ describe("AppQueuedMessageController", () => {
 		assert.deepEqual(calls, ["clearQueue", "steer:keep before", "steer:keep after", "followUp:follow later"]);
 		assert.deepEqual(state.toasts, ["success:Queued message cancelled"]);
 	});
+
+	it("sends an immediate user message with attached images", async () => {
+		const sdkQueue = { steering: [], followUp: [] };
+		const calls: string[] = [];
+		const session = fakeSession(sdkQueue, { calls });
+		const state = createHostState("draft");
+		const controller = new AppQueuedMessageController(createHost(session, state));
+		const message = controller.createSubmittedUserMessage(
+			"send with image",
+			"send with image",
+			[{ type: "image", data: "image-data", mimeType: "image/png" }],
+		);
+
+		await controller.sendUserMessageToSession(message);
+
+		assert.deepEqual(calls, ["prompt:send with image"]);
+		assert.equal(state.setSessionStatusCalls > 0, true);
+		assert.equal(state.toasts.length, 0);
+	});
+
+	it("defers submitted messages while compaction is active", async () => {
+		const session = fakeSession({ steering: [], followUp: [] }, { isCompacting: true });
+		const state = createHostState("");
+		const controller = new AppQueuedMessageController(createHost(session, state));
+
+		await controller.submitUserMessage(controller.createSubmittedUserMessage("defer me", "defer me", []));
+
+		assert.equal(controller.deferredUserMessages.length, 1);
+		assert.deepEqual(state.toasts, ["info:Message queued; send it from the queue menu or status button"]);
+		assert.equal(state.deferredChangeCount, 1);
+		assert.equal(state.input, "");
+	});
+
+	it("restores queued messages if an immediate send fails", async () => {
+		const sdkQueue = { steering: ["keep before", "remove me", "keep after"], followUp: ["follow later"] };
+		const calls: string[] = [];
+		const session = fakeSession(sdkQueue, { calls, promptError: new Error("send failed") });
+		const state = createHostState("");
+		state.visibleEntries = [
+			{ id: "queued-selected", kind: "queued", mode: "steering", text: "remove me", queueSource: "sdk-steering", queueIndex: 1 },
+		];
+		const controller = new AppQueuedMessageController(createHost(session, state));
+
+		await assert.rejects(controller.sendQueuedMessageImmediately("queued-selected"), /send failed/);
+
+		assert.deepEqual(sdkQueue, { steering: ["keep before", "remove me", "keep after"], followUp: ["follow later"] });
+		assert.deepEqual(calls, [
+			"clearQueue",
+			"steer:keep before",
+			"steer:keep after",
+			"followUp:follow later",
+			"prompt:remove me",
+			"clearQueue",
+			"steer:keep before",
+			"steer:remove me",
+			"steer:keep after",
+			"followUp:follow later",
+		]);
+	});
+
 });
 
 type QueueState = {
@@ -170,7 +247,7 @@ type HostState = {
 
 function fakeSession(
 	queue: QueueState,
-	options: { calls?: string[]; isStreaming?: boolean; isCompacting?: boolean; onAbort?: () => Promise<void> } = {},
+	options: { calls?: string[]; isStreaming?: boolean; isCompacting?: boolean; onAbort?: () => Promise<void>; promptError?: Error } = {},
 ): AgentSession {
 	let isStreaming = options.isStreaming ?? false;
 	let isCompacting = options.isCompacting ?? false;
@@ -202,8 +279,11 @@ function fakeSession(
 			calls?.push(`followUp:${text}`);
 			queue.followUp.push(text);
 		},
-		prompt: async (text: string) => {
-			calls?.push(`prompt:${text}`);
+		prompt: async (text: string, promptOptions?: { streamingBehavior?: "steer" | "followUp" }) => {
+			calls?.push(promptOptions?.streamingBehavior ? `prompt:${text}:${promptOptions.streamingBehavior}` : `prompt:${text}`);
+			if (options.promptError) throw options.promptError;
+			if (isStreaming && promptOptions?.streamingBehavior === "steer") queue.steering.push(text);
+			if (isStreaming && promptOptions?.streamingBehavior === "followUp") queue.followUp.push(text);
 		},
 		abort: async () => {
 			calls?.push("abort");

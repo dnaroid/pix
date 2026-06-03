@@ -44,15 +44,108 @@ describe("AppInputController terminal input", () => {
 
 		assert.deepEqual(calls.mouseEvents, [{ button: 0, x: -1, y: 2, released: true }]);
 	});
+
+	it("handles common editing, navigation, autocomplete, voice, and stop shortcuts", () => {
+		const { controller, editor, calls } = createController({ extensionInputUsesEditor: false, shiftPressed: false, consumeExtensionInput: false });
+
+		controller.handleChunk(Buffer.from("abc"));
+		assert.equal(editor.text, "abc");
+		controller.handleChunk(Buffer.from("\x1b[D"));
+		controller.handleChunk(Buffer.from("\x1b[C"));
+		controller.handleChunk(Buffer.from("\x1b[H"));
+		controller.handleChunk(Buffer.from("\x1b[F"));
+		controller.handleChunk(Buffer.from("\u007f"));
+		assert.equal(editor.text, "ab");
+
+		controller.handleChunk(Buffer.from("\t"));
+		assert.equal(calls.autocompleteSlash, 1);
+		controller.handleChunk(Buffer.from("\u0007"));
+		assert.equal(calls.voice, 1);
+		controller.handleChunk(Buffer.from("\u000c"));
+		controller.handleChunk(Buffer.from("\r"));
+		assert.equal(calls.enter, 1);
+
+		editor.setText("");
+		controller.handleChunk(Buffer.from("\u0004"));
+		assert.equal(calls.stop, 1);
+	});
+
+	it("routes arrows through menus, history, multiline editors, and scroll fallback", () => {
+		const { controller, editor, calls } = createController({ extensionInputUsesEditor: false, shiftPressed: false, consumeExtensionInput: false });
+
+		calls.moveMenuResult = true;
+		controller.handleChunk(Buffer.from("\x1b[A\x1b[B"));
+		assert.deepEqual(calls.menuDeltas, [-1, 1]);
+
+		calls.moveMenuResult = false;
+		calls.navigateHistoryResult = true;
+		controller.handleChunk(Buffer.from("\x1b[A\x1b[B"));
+		assert.deepEqual(calls.historyDeltas, [-1, 1]);
+
+		calls.navigateHistoryResult = false;
+		editor.setText("one\ntwo", 5);
+		controller.handleChunk(Buffer.from("\x1b[A"));
+		assert.equal(editor.cursor, 1);
+		controller.handleChunk(Buffer.from("\x1b[B"));
+		assert.equal(editor.cursor, 5);
+
+		editor.setText("one", 0);
+		controller.handleChunk(Buffer.from("\x1b[A\x1b[B"));
+		assert.deepEqual(calls.scrollLines.slice(-2), [-1, 1]);
+	});
+
+	it("handles modified key sequences and pending partial sequences", () => {
+		const { controller, editor, calls } = createController({ extensionInputUsesEditor: false, shiftPressed: false, consumeExtensionInput: false });
+
+		editor.setText("hello world", "hello world".length);
+		controller.handleChunk(Buffer.from("\x1b[8;9u"));
+		assert.equal(editor.text, "");
+		controller.handleChunk(Buffer.from("abc"));
+		controller.handleChunk(Buffer.from("\x1b[8;1u"));
+		assert.equal(editor.text, "ab");
+
+		controller.handleChunk(Buffer.from("\x1b[1;9"));
+		assert.equal(calls.scrollPages.length, 0);
+		controller.handleChunk(Buffer.from("A"));
+		assert.deepEqual(calls.scrollPages, [-1]);
+		controller.handleChunk(Buffer.from("\x1b[27;9;66~"));
+		assert.deepEqual(calls.scrollPages, [-1, 1]);
+
+		controller.handleChunk(Buffer.from("\x1b[13;2u"));
+		assert.match(editor.text, /\n/u);
+		controller.handleChunk(Buffer.from("\x1b[5~\x1b[6~"));
+		assert.deepEqual(calls.scrollPages.slice(-2), [-1, 1]);
+	});
+
+	it("executes every registered escape-sequence handler without relying on terminal side effects", () => {
+		const { controller, editor, calls } = createController({ extensionInputUsesEditor: false, shiftPressed: false, consumeExtensionInput: false });
+		editor.setText("alpha beta\ngamma", 8);
+		const sequences = (controller as never as { getEscapeSequences(): Array<[string, () => void]> }).getEscapeSequences();
+
+		for (const [, handler] of sequences) handler();
+
+		assert.equal(sequences.length > 35, true);
+		assert.equal(calls.enter >= 2, true);
+		assert.deepEqual(calls.scrollPages.slice(0, 2), [-1, 1]);
+		assert.equal(calls.render > 10, true);
+	});
 });
 
 function createController(options: { extensionInputUsesEditor: boolean; shiftPressed: boolean; consumeExtensionInput?: boolean }): {
 	controller: AppInputController;
 	editor: InputEditor;
-	calls: { extensionInput: number; enter: number; interrupt: number; mouseEvents: unknown[]; render: number };
+	calls: {
+		extensionInput: number; enter: number; interrupt: number; mouseEvents: unknown[]; render: number;
+		autocompleteSlash: number; voice: number; stop: number; scrollLines: number[]; scrollPages: number[];
+		menuDeltas: number[]; historyDeltas: number[]; moveMenuResult: boolean; navigateHistoryResult: boolean;
+	};
 } {
 	const editor = new InputEditor();
-	const calls = { extensionInput: 0, enter: 0, interrupt: 0, mouseEvents: [] as unknown[], render: 0 };
+	const calls = {
+		extensionInput: 0, enter: 0, interrupt: 0, mouseEvents: [] as unknown[], render: 0,
+		autocompleteSlash: 0, voice: 0, stop: 0, scrollLines: [] as number[], scrollPages: [] as number[],
+		menuDeltas: [] as number[], historyDeltas: [] as number[], moveMenuResult: false, navigateHistoryResult: false,
+	};
 	const host: InputControllerHost = {
 		inputEditor: editor,
 		cwd: process.cwd(),
@@ -69,10 +162,10 @@ function createController(options: { extensionInputUsesEditor: boolean; shiftPre
 		render: () => {
 			calls.render += 1;
 		},
-		moveActivePopupMenuSelection: () => false,
-		navigateRequestHistory: () => false,
-		scrollByLines: () => undefined,
-		scrollByPage: () => undefined,
+		moveActivePopupMenuSelection: (delta) => { calls.menuDeltas.push(delta); return calls.moveMenuResult; },
+		navigateRequestHistory: (delta) => { calls.historyDeltas.push(delta); return calls.navigateHistoryResult; },
+		scrollByLines: (delta) => { calls.scrollLines.push(delta); },
+		scrollByPage: (delta) => { calls.scrollPages.push(delta); },
 		handleMouse: (event) => { calls.mouseEvents.push(event); },
 		handleEnter: () => {
 			calls.enter += 1;
@@ -85,9 +178,9 @@ function createController(options: { extensionInputUsesEditor: boolean; shiftPre
 		autocompleteModel: () => false,
 		autocompleteThinking: () => false,
 		acceptAutocompleteSuggestion: () => false,
-		autocompleteSlashCommand: () => undefined,
-		toggleVoiceRecording: () => undefined,
-		stop: async () => undefined,
+		autocompleteSlashCommand: () => { calls.autocompleteSlash += 1; },
+		toggleVoiceRecording: () => { calls.voice += 1; },
+		stop: async () => { calls.stop += 1; },
 	};
 
 	return { controller: new AppInputController(host), editor, calls };

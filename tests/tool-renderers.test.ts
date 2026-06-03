@@ -263,6 +263,26 @@ describe("renderToolDisplay", () => {
 		assert.equal(question.headerArgs, "2 questions");
 		assert.doesNotMatch(question.expandedText, /questions\n|result\n/);
 		assert.deepEqual(question.bodyLineStyles, [{ startLine: 0, endLine: 7, color: "muted" }]);
+		const answeredQuestion = renderToolDisplay(input({
+			toolName: "question",
+			argsText: JSON.stringify({ questions: [
+				{ id: "scope", label: "Scope", prompt: "What should be tested?", choices: [{ value: "unit", label: "Unit", description: "fast" }] },
+				{ id: "priority", prompt: "Priority?", choices: [{ value: "high" }] },
+			] }),
+			details: { answers: [{ id: "scope", label: "Unit", index: 1 }, { id: "priority", label: "Custom", wasCustom: true }] },
+		}));
+		assert.equal(answeredQuestion.headerArgs, "2 questions · Scope, priority");
+		assert.match(answeredQuestion.expandedText, /What should be tested\?/u);
+		assert.match(answeredQuestion.expandedText, /Something else/u);
+		assert.match(answeredQuestion.collapsedBody, /✓ Scope: Unit \(choice 1\)/u);
+		assert.match(answeredQuestion.collapsedBody, /custom answer/u);
+		assert.equal(renderToolDisplay(input({
+			toolName: "question",
+			argsText: JSON.stringify({ questions: [{ id: "q1", prompt: "Continue?", choices: [] }] }),
+			details: { canceled: true, reason: "timeout", fallbackPrompt: "Use defaults" },
+		})).collapsedBody, "⚠ canceled: timeout\n\nUse defaults");
+		assert.equal(renderToolDisplay(input({ toolName: "question", argsText: JSON.stringify({ questions: [] }), details: { answers: [] } })).collapsedBody, "question returned no answers");
+		assert.equal(renderToolDisplay(input({ toolName: "question", argsText: "{}", status: "running" })).expandedText, "running…");
 		assert.equal(renderToolDisplay(input({ toolName: "subagents", argsText: "{\"action\":\"spawn\",\"tasks\":[{}]}", status: "running" })).collapsedBody, "starting 1 subagent");
 		// non-spawn actions produce a single-line collapsed body
 		assert.doesNotMatch(renderToolDisplay(input({ toolName: "subagents", argsText: "{\"action\":\"status\"}", output: "agent-1: running\nagent-2: completed" })).collapsedBody, /\n/);

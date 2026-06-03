@@ -234,6 +234,142 @@ describe("popup menu header", () => {
 		assert.equal(lines[1]?.text, label);
 		assert.doesNotMatch(lines[1]?.text ?? "", /Enter to scroll/);
 	});
+	it("updates and clears direct popup queries as text is typed", () => {
+		const controller = new AppPopupMenuController(createPopupMenuHost([]));
+
+		controller.openDirectPopupMenu("model");
+		assert.equal(controller.handleDirectPopupInput("a"), true);
+		assert.equal(controller.directQuery, "a");
+		assert.equal(controller.handleDirectPopupInput("b"), true);
+		assert.equal(controller.directQuery, "ab");
+		assert.equal(controller.handleDirectPopupInput("\b"), true);
+		assert.equal(controller.directQuery, "a");
+	});
+
+
+	it("dismisses model menus and restores session status for direct popups", () => {
+		const statusChanges: string[] = [];
+		const controller = new AppPopupMenuController({
+			...createPopupMenuHost([], THEMES.dark, [
+				{ value: { kind: "new" }, label: "new", description: "Create a new session" },
+			]),
+			getInput: () => "/model gpt-5.5",
+			parseSlashInput: (text) => text.startsWith("/model") ? { commandName: "model", hasArguments: true, arguments: "gpt-5.5" } : undefined,
+			setStatus: (status) => statusChanges.push(status),
+			restoreSessionStatus: () => statusChanges.push("restore"),
+		});
+
+		controller.setDirectMenu("model");
+		controller.cancelActivePopupMenu();
+
+		assert.equal(controller.directMenu, undefined);
+		assert.equal(controller.selectedModel(), undefined);
+		assert.deepEqual(statusChanges, ["restore"]);
+	});
+
+	it("does not open SDK menus when the host is not running", async () => {
+		let rendered = 0;
+		const controller = new AppPopupMenuController({
+			...createPopupMenuHost([]),
+			isRunning: () => false,
+			render: () => {
+				rendered += 1;
+			},
+		});
+
+		const result = await controller.showSdkMenu([{ value: "one", label: "One" }], { title: "SDK" });
+		assert.equal(result, undefined);
+		assert.equal(rendered, 0);
+	});
+
+	it("resolves SDK selections and restores session status when the menu closes", async () => {
+		const statusChanges: string[] = [];
+		let renders = 0;
+		const controller = new AppPopupMenuController({
+			...createPopupMenuHost([]),
+			setStatus: (status) => statusChanges.push(status),
+			restoreSessionStatus: () => statusChanges.push("restore"),
+			render: () => {
+				renders += 1;
+			},
+		});
+
+		const selection = controller.showSdkMenu([
+			{ value: "one", label: "One" },
+			{ value: "two", label: "Two", description: "Second" },
+		], { title: "SDK menu" });
+
+		const lines = controller.renderActivePopupMenu(40);
+		assert.match(lines[0]?.text ?? "", /SDK menu/u);
+		assert.equal(controller.submitSelectedSdkMenu(), true);
+		assert.equal(await selection, "one");
+		assert.equal(controller.directMenu, undefined);
+		assert.deepEqual(statusChanges, ["restore"]);
+		assert.ok(renders >= 2);
+	});
+
+	it("allows direct user-message popups to accept plain input without mutating the query", () => {
+		const controller = new AppPopupMenuController(createPopupMenuHost([]));
+
+		controller.openDirectPopupMenu("user-message");
+
+		assert.equal(controller.handleDirectPopupInput("a"), true);
+		assert.equal(controller.handleDirectPopupInput("\b"), true);
+		assert.equal(controller.directQuery, "");
+		assert.equal(controller.handleDirectPopupInput("\u001b"), false);
+	});
+
+	it("cancels preserved direct popups without restoring session status", () => {
+		const actions: string[] = [];
+		const controller = new AppPopupMenuController({
+			...createPopupMenuHost([]),
+			restoreSessionStatus: () => actions.push("restore"),
+			render: () => actions.push("render"),
+		});
+
+		controller.openDirectPopupMenu("queue-message", { preserveStatus: true });
+		controller.cancelActivePopupMenu();
+
+		assert.equal(controller.directMenu, undefined);
+		assert.deepEqual(actions, ["render"]);
+	});
+
+	it("opens user and queued message popups for live entries", () => {
+		const userEntry: Extract<Entry, { kind: "user" }> = { id: "user-1", kind: "user", text: "hello" };
+		const queuedEntry: Extract<Entry, { kind: "queued" }> = {
+			id: "queued-1",
+			kind: "queued",
+			mode: "follow-up",
+			text: "queued",
+			queueSource: "deferred",
+			queueIndex: 0,
+		};
+		const controller = new AppPopupMenuController({
+			...createPopupMenuHost([userEntry, queuedEntry]),
+			hasQueuedEntry: (entryId) => entryId === queuedEntry.id,
+			getUserMessageMenuItems: () => [{ value: "copy", label: "Copy", description: "Copy message" }],
+			getQueueMessageMenuItems: () => [{ value: "reply", label: "Reply", description: "Reply to queue" }],
+		});
+
+		assert.equal(controller.openUserMessageMenu(userEntry.id), true);
+		assert.deepEqual(controller.selectedUserMessageAction(), {
+			value: "copy",
+			label: "Copy",
+			entryId: userEntry.id,
+		});
+		controller.closeUserMessageMenu();
+		assert.equal(controller.directMenu, undefined);
+
+		assert.equal(controller.openQueueMessageMenu(queuedEntry.id), true);
+		assert.deepEqual(controller.selectedQueueMessageAction(), {
+			value: "reply",
+			label: "Reply",
+			entryId: queuedEntry.id,
+		});
+		controller.closeQueueMessageMenu();
+		assert.equal(controller.directMenu, undefined);
+	});
+
 });
 
 function sessionInfo(id: string, path: string, firstMessage: string, modified: Date, parentSessionPath?: string): SessionInfo {

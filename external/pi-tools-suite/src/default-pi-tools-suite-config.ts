@@ -1,5 +1,6 @@
 // Default user config written when pi-tools-suite.jsonc is missing.
 export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
+  "$schema": "https://unpkg.com/pi-ui-extend/schemas/pi-tools-suite.json",
   "disabledModules": [
     // "ast-grep",
     // "dcp"

@@ -63,13 +63,13 @@ describe("renderToolBlock", () => {
 		assert.deepEqual(lines[0]?.segments?.[0], { start: 0, end: APP_ICONS.alert.length, foreground: colors.warning, bold: true });
 	});
 
-	it("marks truncated collapsed previews with an ellipsis in normal mode", () => {
+	it("marks truncated collapsed previews with a chevron in normal mode", () => {
 		const output = "one\ntwo\nthree";
 
 		const lines = renderToolBlock(toolEntry({ expanded: false, output, collapsedBody: output }), { ...rule, previewLines: 2 }, 100, colors);
 
 		assert.match(lines[0]?.text ?? "", /apply_patch/u);
-		assert.deepEqual(lines.slice(1).map((line) => line.text), ["  one", "… two"]);
+		assert.deepEqual(lines.slice(1).map((line) => line.text), ["  one", "▶ two"]);
 		assert.deepEqual(lines[2]?.segments, [{ start: 0, end: 1, foreground: colors.statusDotBase }]);
 	});
 
@@ -86,7 +86,7 @@ describe("renderToolBlock", () => {
 
 		const lines = renderToolBlock(toolEntry({ expanded: false, output, collapsedBody: output }), { ...rule, direction: "tail", previewLines: 2 }, 100, colors);
 
-		assert.deepEqual(lines.slice(1).map((line) => line.text), ["… two", "  three"]);
+		assert.deepEqual(lines.slice(1).map((line) => line.text), ["▶ two", "  three"]);
 		assert.deepEqual(lines[1]?.segments, [{ start: 0, end: 1, foreground: colors.statusDotBase }]);
 	});
 
@@ -98,7 +98,7 @@ describe("renderToolBlock", () => {
 		assert.equal(lines.length, 1);
 		assert.match(lines[0]?.text ?? "", /apply_patch .*one two/u);
 		assert.doesNotMatch(lines[0]?.text ?? "", /three/u);
-		const markerStart = lines[0]?.text.indexOf("…") ?? -1;
+		const markerStart = lines[0]?.text.indexOf("▶") ?? -1;
 		assert.ok(markerStart >= 0);
 		assert.ok(lines[0]?.segments?.some((segment) => segment.start === markerStart && segment.end === markerStart + 1 && segment.foreground === colors.statusDotBase));
 	});
@@ -166,5 +166,37 @@ describe("renderToolBlock", () => {
 
 		assert.deepEqual(updateLine?.segments, [{ start: 2, end: updateLine.text.length, foreground: colors.statusForeground, bold: true }]);
 		assert.notEqual(updateLine?.segments?.[0]?.foreground, colors.warning);
+	});
+
+	it("returns no lines for hidden tool rules", () => {
+		assert.deepEqual(renderToolBlock(toolEntry(), { ...rule, hidden: true }, 80, colors), []);
+	});
+
+	it("clips header args and keeps custom header segments", () => {
+		const lines = renderToolBlock(toolEntry({
+			expanded: false,
+			toolName: "ls",
+			headerArgs: "--very-long-flag value",
+			headerArgsSegments: [{ start: 0, end: 14, foreground: colors.info, bold: true }],
+		}), rule, 14, colors);
+
+		assert.equal(lines.length, 1);
+		assert.match(lines[0]?.text ?? "", /ls/u);
+		assert.doesNotMatch(lines[0]?.text ?? "", /very-long-flag value/u);
+		assert.ok((lines[0]?.segments ?? []).some((segment) => segment.foreground === colors.info));
+	});
+
+	it("preserves ANSI styling in expanded body output", () => {
+		const lines = renderToolBlock(toolEntry({
+			toolName: "shell",
+			output: "\x1b[31mred\x1b[0m\tok",
+			expandedText: "\x1b[31mred\x1b[0m\tok",
+			preserveAnsi: true,
+		}), rule, 20, colors);
+
+		const bodyLine = lines.find((line) => line.text.includes("red"));
+		assert.ok(bodyLine);
+		assert.ok(bodyLine?.segments?.some((segment) => segment.foreground === "#cd3131"));
+		assert.doesNotMatch(lines.map((line) => line.text).join("\n"), /\x1b/u);
 	});
 });

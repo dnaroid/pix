@@ -66,6 +66,28 @@ const VOICE_PARTIAL_TRANSCRIPT_THROTTLE_MS = 100;
 
 let voskInstallPromise: Promise<string> | undefined;
 
+type VoiceControllerTestDeps = {
+	tryLoadVosk: typeof tryLoadVosk;
+	ensureModel: typeof ensureModel;
+	selectRecorderCommand: typeof selectRecorderCommand;
+	spawn: typeof spawn;
+	savePixDictationLanguage: typeof savePixDictationLanguage;
+};
+
+const defaultVoiceControllerDeps: VoiceControllerTestDeps = {
+	tryLoadVosk,
+	ensureModel,
+	selectRecorderCommand,
+	spawn,
+	savePixDictationLanguage,
+};
+
+let voiceControllerDeps = defaultVoiceControllerDeps;
+
+export function setVoiceControllerTestDeps(overrides?: Partial<VoiceControllerTestDeps>): void {
+	voiceControllerDeps = overrides ? { ...defaultVoiceControllerDeps, ...overrides } : defaultVoiceControllerDeps;
+}
+
 export class AppVoiceController {
 	private readonly modelDefinitions: Record<VoiceLanguage, VoiceModelDefinition>;
 	private readonly languages: VoiceLanguage[];
@@ -174,7 +196,7 @@ export class AppVoiceController {
 		this.startGeneration = generation;
 
 		try {
-			const initialVosk = tryLoadVosk();
+			const initialVosk = voiceControllerDeps.tryLoadVosk();
 			const vosk = initialVosk.ok
 				? initialVosk.module
 				: await this.installAndLoadVosk(initialVosk.error, generation);
@@ -183,15 +205,15 @@ export class AppVoiceController {
 
 			this.state = "downloading";
 			this.host.render();
-			const modelPath = await ensureModel(language, this.modelDefinition(language));
+			const modelPath = await voiceControllerDeps.ensureModel(language, this.modelDefinition(language));
 			if (!this.isCurrentStart(generation)) return;
 
 			this.state = "loading";
 			this.host.render();
 			const model = this.cachedModel(language, modelPath, vosk);
-			const recorder = await selectRecorderCommand();
+			const recorder = await voiceControllerDeps.selectRecorderCommand();
 			const recognizer = new vosk.Recognizer({ model, sampleRate: SAMPLE_RATE });
-			const audioProcess = spawn(recorder.command, recorder.args, { stdio: ["ignore", "pipe", "pipe"] });
+			const audioProcess = voiceControllerDeps.spawn(recorder.command, recorder.args, { stdio: ["ignore", "pipe", "pipe"] });
 			this.recognizer = recognizer;
 			this.audioProcess = audioProcess;
 			this.state = "listening";
@@ -232,7 +254,7 @@ export class AppVoiceController {
 
 	private saveLanguageSelection(language: VoiceLanguage): void {
 		try {
-			savePixDictationLanguage(language);
+			voiceControllerDeps.savePixDictationLanguage(language);
 		} catch (error) {
 			this.host.showToast(`Could not save voice language: ${errorMessage(error)}`, "warning");
 		}
