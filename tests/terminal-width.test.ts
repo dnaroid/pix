@@ -21,12 +21,16 @@ describe("terminal width helpers", () => {
 		assert.equal(stringDisplayWidth("a\u0000\u0007b"), 2);
 		assert.equal(stringDisplayWidth("e\u0301"), 1);
 		assert.equal(stringDisplayWidth("表🙂"), 4);
+		assert.equal(stringDisplayWidth("❌"), 2);
+		assert.equal(stringDisplayWidth("✔️"), 2);
+		assert.equal(stringDisplayWidth("👨‍👩‍👧‍👦"), 2);
 		assert.equal(stringDisplayWidth("\x1b[31mred\x1b[0m"), 3);
 	});
 
 	it("slices and pads by display width without splitting wide characters", () => {
 		assert.equal(sliceByDisplayWidth("ab表c", 3), "ab");
 		assert.equal(sliceByDisplayWidth("ab表c", 4), "ab表");
+		assert.equal(sliceByDisplayWidth("a✔️b", 3), "a✔️");
 		assert.equal(sliceByDisplayWidth("abc", -1), "");
 		assert.equal(padOrTrimDisplay("表x", 4), "表x ");
 		assert.equal(padOrTrimDisplay("表x", 2), "表");

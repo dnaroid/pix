@@ -1,29 +1,32 @@
 const TAB_WIDTH = 4;
 const ANSI_RESET = "\x1b[0m";
+const EMOJI_PRESENTATION_REGEX = /\p{Emoji_Presentation}/u;
+const EMOJI_REGEX = /\p{Emoji}/u;
+const GRAPHEME_SEGMENTER = typeof Intl.Segmenter === "function" ? new Intl.Segmenter(undefined, { granularity: "grapheme" }) : undefined;
+
+type DisplayCluster = {
+	text: string;
+	width: number;
+	ansi: boolean;
+};
 
 export function expandTabs(text: string, tabWidth = TAB_WIDTH): string {
 	let result = "";
 	let column = 0;
 
-	for (let index = 0; index < text.length;) {
-		const ansiLength = ansiSequenceLength(text, index);
-		if (ansiLength > 0) {
-			result += text.slice(index, index + ansiLength);
-			index += ansiLength;
+	for (const cluster of displayClusters(text)) {
+		if (cluster.ansi) {
+			result += cluster.text;
 			continue;
 		}
 
-		const codePoint = text.codePointAt(index) ?? 0;
-		const char = String.fromCodePoint(codePoint);
-		index += codePointLength(codePoint);
-
-		if (char === "\n") {
-			result += char;
+		if (cluster.text === "\n") {
+			result += cluster.text;
 			column = 0;
 			continue;
 		}
 
-		if (char === "\t") {
+		if (cluster.text === "\t") {
 			const spaces = tabWidth - (column % tabWidth || tabWidth);
 			const count = spaces === 0 ? tabWidth : spaces;
 			result += " ".repeat(count);
@@ -31,8 +34,8 @@ export function expandTabs(text: string, tabWidth = TAB_WIDTH): string {
 			continue;
 		}
 
-		result += char;
-		column += charDisplayWidth(char.codePointAt(0) ?? 0);
+		result += cluster.text;
+		column += cluster.width;
 	}
 
 	return result;
@@ -40,16 +43,8 @@ export function expandTabs(text: string, tabWidth = TAB_WIDTH): string {
 
 export function stringDisplayWidth(text: string): number {
 	let width = 0;
-	for (let index = 0; index < text.length;) {
-		const ansiLength = ansiSequenceLength(text, index);
-		if (ansiLength > 0) {
-			index += ansiLength;
-			continue;
-		}
-
-		const codePoint = text.codePointAt(index) ?? 0;
-		width += charDisplayWidth(codePoint);
-		index += codePointLength(codePoint);
+	for (const cluster of displayClusters(text)) {
+		width += cluster.width;
 	}
 	return width;
 }
@@ -61,25 +56,19 @@ export function sliceByDisplayWidth(text: string, width: number): string {
 	let sawAnsi = false;
 	let clipped = false;
 
-	for (let index = 0; index < text.length;) {
-		const ansiLength = ansiSequenceLength(text, index);
-		if (ansiLength > 0) {
-			result += text.slice(index, index + ansiLength);
+	for (const cluster of displayClusters(text)) {
+		if (cluster.ansi) {
+			result += cluster.text;
 			sawAnsi = true;
-			index += ansiLength;
 			continue;
 		}
 
-		const codePoint = text.codePointAt(index) ?? 0;
-		const char = String.fromCodePoint(codePoint);
-		const charWidth = charDisplayWidth(codePoint);
-		if (used + charWidth > safeWidth) {
+		if (used + cluster.width > safeWidth) {
 			clipped = true;
 			break;
 		}
-		result += char;
-		used += charWidth;
-		index += codePointLength(codePoint);
+		result += cluster.text;
+		used += cluster.width;
 	}
 
 	if (sawAnsi && clipped && !result.endsWith(ANSI_RESET)) return `${result}${ANSI_RESET}`;
@@ -98,26 +87,20 @@ export function wrapDisplayLine(text: string, width: number): string[] {
 	let chunk = "";
 	let chunkWidth = 0;
 
-	for (let index = 0; index < text.length;) {
-		const ansiLength = ansiSequenceLength(text, index);
-		if (ansiLength > 0) {
-			chunk += text.slice(index, index + ansiLength);
-			index += ansiLength;
+	for (const cluster of displayClusters(text)) {
+		if (cluster.ansi) {
+			chunk += cluster.text;
 			continue;
 		}
 
-		const codePoint = text.codePointAt(index) ?? 0;
-		const char = String.fromCodePoint(codePoint);
-		const charWidth = charDisplayWidth(codePoint);
-		if (chunk && chunkWidth + charWidth > safeWidth) {
+		if (chunk && chunkWidth + cluster.width > safeWidth) {
 			chunks.push(chunk);
 			chunk = "";
 			chunkWidth = 0;
 		}
 
-		chunk += char;
-		chunkWidth += charWidth;
-		index += codePointLength(codePoint);
+		chunk += cluster.text;
+		chunkWidth += cluster.width;
 	}
 
 	chunks.push(chunk);
@@ -172,25 +155,20 @@ function displayTokens(text: string): { text: string; whitespace: boolean }[] {
 	let current = "";
 	let currentWhitespace: boolean | undefined;
 
-	for (let index = 0; index < text.length;) {
-		const ansiLength = ansiSequenceLength(text, index);
-		if (ansiLength > 0) {
-			current += text.slice(index, index + ansiLength);
-			index += ansiLength;
+	for (const cluster of displayClusters(text)) {
+		if (cluster.ansi) {
+			current += cluster.text;
 			continue;
 		}
 
-		const codePoint = text.codePointAt(index) ?? 0;
-		const char = String.fromCodePoint(codePoint);
-		const whitespace = /\s/u.test(char);
+		const whitespace = /^\s+$/u.test(cluster.text);
 		if (current && currentWhitespace !== whitespace) {
 			tokens.push({ text: current, whitespace: currentWhitespace ?? false });
 			current = "";
 		}
 
-		current += char;
+		current += cluster.text;
 		currentWhitespace = whitespace;
-		index += codePointLength(codePoint);
 	}
 
 	if (current) tokens.push({ text: current, whitespace: currentWhitespace ?? false });
@@ -231,6 +209,53 @@ function ansiSequenceLength(text: string, index: number): number {
 	}
 
 	return 2;
+}
+
+function* displayClusters(text: string): Generator<DisplayCluster> {
+	for (let index = 0; index < text.length;) {
+		const ansiLength = ansiSequenceLength(text, index);
+		if (ansiLength > 0) {
+			const cluster = text.slice(index, index + ansiLength);
+			yield { text: cluster, width: 0, ansi: true };
+			index += ansiLength;
+			continue;
+		}
+
+		const nextAnsiIndex = text.indexOf("\x1b", index + 1);
+		const textEnd = nextAnsiIndex === -1 ? text.length : nextAnsiIndex;
+		const segment = text.slice(index, textEnd);
+		if (GRAPHEME_SEGMENTER) {
+			for (const { segment: cluster } of GRAPHEME_SEGMENTER.segment(segment)) {
+				yield { text: cluster, width: graphemeDisplayWidth(cluster), ansi: false };
+			}
+			index = textEnd;
+			continue;
+		}
+
+		while (index < textEnd) {
+			const codePoint = text.codePointAt(index) ?? 0;
+			const cluster = String.fromCodePoint(codePoint);
+			yield { text: cluster, width: graphemeDisplayWidth(cluster), ansi: false };
+			index += codePointLength(codePoint);
+		}
+	}
+}
+
+function graphemeDisplayWidth(text: string): number {
+	if (!text) return 0;
+	if (isEmojiGrapheme(text)) return 2;
+
+	let width = 0;
+	for (let index = 0; index < text.length;) {
+		const codePoint = text.codePointAt(index) ?? 0;
+		width += charDisplayWidth(codePoint);
+		index += codePointLength(codePoint);
+	}
+	return width;
+}
+
+function isEmojiGrapheme(text: string): boolean {
+	return EMOJI_PRESENTATION_REGEX.test(text) || (EMOJI_REGEX.test(text) && (text.includes("\ufe0f") || text.includes("\u20e3")));
 }
 
 function codePointLength(codePoint: number): number {

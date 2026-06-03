@@ -26,12 +26,12 @@ export const DEFAULT_PIX_CONFIG_JSONC = String.raw`{
       "question": { "previewLines": 6, "direction": "tail", "color": "accent" },
       "subagents": { "previewLines": 0, "direction": "tail", "color": "muted" },
       "todo": { "hidden": true, "color": "accent" },
-      "ls": { "color": "success" },
-      "LS": { "color": "success" },
-      "grep": { "color": "toolSearch" },
-      "Grep": { "color": "toolSearch" },
-      "find": { "color": "toolSearch" },
-      "Glob": { "color": "toolSearch" },
+      "ls": { "previewLines": 6, "direction": "head", "color": "success" },
+      "LS": { "previewLines": 6, "direction": "head", "color": "success" },
+      "grep": { "previewLines": 6, "direction": "head", "color": "toolSearch" },
+      "Grep": { "previewLines": 6, "direction": "head", "color": "toolSearch" },
+      "find": { "previewLines": 6, "direction": "head", "color": "toolSearch" },
+      "Glob": { "previewLines": 6, "direction": "head", "color": "toolSearch" },
       "skill": { "previewLines": 0, "color": "toolSearch" }
     }
   },

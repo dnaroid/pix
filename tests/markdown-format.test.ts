@@ -65,6 +65,19 @@ describe("formatMarkdownTables", () => {
 		]);
 	});
 
+	it("keeps table borders aligned around emoji-status cells", () => {
+		const formatted = formatMarkdownTables([
+			"| Metric | Current | Threshold | Status |",
+			"|---|---:|---:|---|",
+			"| Lines | 80.65% | 95% | ❌ -14.35% |",
+			"| Branches | 71.41% | 80% | ✅ +1.41% |",
+		].join("\n"));
+
+		const widths = formatted.split("\n").map((line) => stringDisplayWidth(renderMarkdownLine(line).text));
+		assert.deepEqual([...new Set(widths)], [widths[0]]);
+		assert(formatted.includes("❌ -14.35%"));
+	});
+
 	it("renders strong markdown without marker characters", () => {
 		assert.deepEqual(renderMarkdownLine("before **bold** after"), {
 			text: "before bold after",

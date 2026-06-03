@@ -50,8 +50,8 @@ describe("config helpers", () => {
 			resolveToolRule("ast_scan", config.toolRenderer),
 			resolveToolRule("apply_patch", config.toolRenderer),
 		], [
-			{ previewLines: 0, direction: "head", color: "success" },
-			{ previewLines: 0, direction: "head", color: "toolSearch" },
+			{ previewLines: 6, direction: "head", color: "success" },
+			{ previewLines: 6, direction: "head", color: "toolSearch" },
 			{ previewLines: 0, direction: "head", color: "toolSearch" },
 			{ previewLines: 9999, direction: "head", color: "toolMutation", defaultExpanded: true },
 		]);
