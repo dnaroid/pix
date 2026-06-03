@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { resolve } from "node:path";
 import { describe, it } from "node:test";
 import { formatResumeCommand, parseArgs, usage } from "../src/app/cli/cli.js";
 
@@ -15,7 +16,7 @@ describe("CLI helpers", () => {
 			cwd: process.cwd(),
 			themeName: "dark",
 			noSession: false,
-			sessionPath: `${process.cwd()}/.pi/sessions/run.jsonl`,
+			sessionPath: resolve(".pi/sessions/run.jsonl"),
 		});
 	});
 

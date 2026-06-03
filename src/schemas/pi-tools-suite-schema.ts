@@ -29,7 +29,7 @@ const ToolRendererRule = Type.Object(
 const ToolRendererConfig = Type.Object(
 	{
 		default: Type.Optional(ToolRendererRule),
-		tools: Type.Optional(Type.Record(Type.String(), ToolRendererRule)),
+		tools: Type.Optional(Type.Record(Type.String(), ToolRendererRule, { description: "Tool-specific rendering rules keyed by tool name or glob pattern, e.g. 'bash' or 'repo_*'." })),
 	},
 	{ description: "Per-tool rendering configuration." },
 );

@@ -730,7 +730,8 @@
               },
               "description": "Per-tool rendering rule."
             }
-          }
+          },
+          "description": "Tool-specific rendering rules keyed by tool name or glob pattern, e.g. 'bash' or 'repo_*'."
         }
       },
       "description": "Per-tool rendering configuration."

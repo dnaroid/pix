@@ -190,10 +190,14 @@ function displayPath(pathValue: string, cwd: string): string {
 }
 
 function formatPath(pathValue: string, cwd: string): string {
-	if (!isAbsolute(pathValue)) return pathValue;
+	if (!isAbsolute(pathValue)) return displayPathSeparators(pathValue);
 
 	const rel = relative(cwd, pathValue);
-	return rel && !rel.startsWith("..") && !isAbsolute(rel) ? rel : basename(pathValue);
+	return displayPathSeparators(rel && !rel.startsWith("..") && !isAbsolute(rel) ? rel : basename(pathValue));
+}
+
+function displayPathSeparators(pathValue: string): string {
+	return pathValue.replace(/\\/g, "/");
 }
 
 function unique(...groups: string[][]): string[] {

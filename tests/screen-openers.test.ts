@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import { clipboardInstallHint, osc52ClipboardSequence } from "../src/app/screen/clipboard.js";
@@ -72,7 +73,10 @@ describe("screen openers and platform fallbacks", () => {
 		try {
 			assert.equal(openImageContent({ type: "image", mimeType: "image/gif", data: Buffer.from("GIF89a").toString("base64") }), true);
 			assert.equal(openImageContent({ type: "image", mimeType: "image/svg+xml", data: Buffer.from("<svg/>").toString("base64") }), true);
-			assert.deepEqual(calls, ["mkdir:/mock/tmp/pix-image-open", "mkdir:/mock/tmp/pix-image-open"]);
+			assert.deepEqual(calls, [
+				`mkdir:${join("/mock/tmp", "pix-image-open")}`,
+				`mkdir:${join("/mock/tmp", "pix-image-open")}`,
+			]);
 			assert.equal(writes.length, 2);
 			assert.equal(writes[0]?.filePath.endsWith(".gif"), true);
 			assert.equal(writes[1]?.filePath.endsWith(".svg"), true);

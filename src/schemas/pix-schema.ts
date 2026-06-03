@@ -35,7 +35,7 @@ const ToolRendererRule = Type.Object(
 const ToolRendererConfig = Type.Object(
 	{
 		default: Type.Optional(ToolRendererRule),
-		tools: Type.Optional(Type.Record(Type.String(), ToolRendererRule)),
+		tools: Type.Optional(Type.Record(Type.String(), ToolRendererRule, { description: "Tool-specific rendering rules keyed by tool name or glob pattern, e.g. 'bash' or 'repo_*'." })),
 	},
 	{ description: "Per-tool rendering configuration. Keys in 'tools' support glob patterns like 'repo_*'." },
 );
@@ -66,6 +66,13 @@ const PromptEnhancerConfig = Type.Object(
 	{ description: "Prompt enhancer configuration." },
 );
 
+const SessionTitleConfig = Type.Object(
+	{
+		modelRef: Type.Optional(Type.String({ description: "Model used to generate compact session titles." })),
+	},
+	{ description: "Automatic session title generation configuration." },
+);
+
 const AutocompleteConfig = Type.Object(
 	{
 		modelRef: Type.Optional(Type.String({ description: "Model for inline autocomplete. Empty string disables LLM autocomplete." })),
@@ -78,11 +85,23 @@ const AutocompleteConfig = Type.Object(
 	{ description: "Inline autocomplete configuration." },
 );
 
-const ModelColorsConfig = Type.Object(
-	{
-		rules: Type.Optional(Type.Record(Type.String(), Type.String(), { description: "Glob pattern → theme color name mapping." })),
-	},
-	{ description: "Model color rules. Keys are glob patterns matching model refs." },
+const ModelColorRulesConfig = Type.Record(
+	Type.String(),
+	Type.String({ description: "Theme color name for matching model references, e.g. 'success', 'warning', or 'modelOpenAI'." }),
+	{ description: "Model reference glob pattern → theme color name mapping, e.g. 'zai/*': 'success'." },
+);
+
+const ModelColorsConfig = Type.Union(
+	[
+		ModelColorRulesConfig,
+		Type.Object(
+			{
+				rules: Type.Optional(ModelColorRulesConfig),
+			},
+			{ description: "Alternative nested form for model color rules." },
+		),
+	],
+	{ description: "Model color rules. Keys are glob patterns matching model refs; values are pix theme color names." },
 );
 
 const IconThemeConfig = Type.Object(
@@ -121,6 +140,7 @@ export const PixConfigSchema = Type.Object(
 		outputFilters: Type.Optional(OutputFiltersConfig),
 		promptEnhancer: Type.Optional(PromptEnhancerConfig),
 		autocomplete: Type.Optional(AutocompleteConfig),
+		sessionTitle: Type.Optional(SessionTitleConfig),
 		modelColors: Type.Optional(ModelColorsConfig),
 		iconTheme: Type.Optional(IconThemeConfig),
 		dictation: Type.Optional(DictationConfig),

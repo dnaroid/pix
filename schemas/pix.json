@@ -130,7 +130,8 @@
               },
               "description": "Rendering rule for a specific tool or glob pattern."
             }
-          }
+          },
+          "description": "Tool-specific rendering rules keyed by tool name or glob pattern, e.g. 'bash' or 'repo_*'."
         }
       },
       "description": "Per-tool rendering configuration. Keys in 'tools' support glob patterns like 'repo_*'."
@@ -198,20 +199,46 @@
       },
       "description": "Inline autocomplete configuration."
     },
-    "modelColors": {
+    "sessionTitle": {
       "type": "object",
       "properties": {
-        "rules": {
+        "modelRef": {
+          "type": "string",
+          "description": "Model used to generate compact session titles."
+        }
+      },
+      "description": "Automatic session title generation configuration."
+    },
+    "modelColors": {
+      "anyOf": [
+        {
           "type": "object",
           "patternProperties": {
             "^.*$": {
-              "type": "string"
+              "type": "string",
+              "description": "Theme color name for matching model references, e.g. 'success', 'warning', or 'modelOpenAI'."
             }
           },
-          "description": "Glob pattern → theme color name mapping."
+          "description": "Model reference glob pattern → theme color name mapping, e.g. 'zai/*': 'success'."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "rules": {
+              "type": "object",
+              "patternProperties": {
+                "^.*$": {
+                  "type": "string",
+                  "description": "Theme color name for matching model references, e.g. 'success', 'warning', or 'modelOpenAI'."
+                }
+              },
+              "description": "Model reference glob pattern → theme color name mapping, e.g. 'zai/*': 'success'."
+            }
+          },
+          "description": "Alternative nested form for model color rules."
         }
-      },
-      "description": "Model color rules. Keys are glob patterns matching model refs."
+      ],
+      "description": "Model color rules. Keys are glob patterns matching model refs; values are pix theme color names."
     },
     "iconTheme": {
       "type": "object",

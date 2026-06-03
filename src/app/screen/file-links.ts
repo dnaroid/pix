@@ -12,12 +12,12 @@ export type RenderedLink = {
 	column?: number | undefined;
 };
 
-const FILE_PATH_CANDIDATE = /(?<![\p{L}\p{N}_:])((?:file:\/\/\/|~\/|\.{1,2}\/|\/|[A-Za-z0-9_.@-]+\/)[^\s"'`<>]*)/gu;
+const FILE_PATH_CANDIDATE = /(?<![\p{L}\p{N}_:])((?:file:\/\/\/|~[\\/]|\.{1,2}[\\/]|[A-Za-z]:[\\/]|[\\/]|[A-Za-z0-9_.@-]+[\\/])[^\s"'`<>]*)/gu;
 const TRAILING_PUNCTUATION = new Set([".", ",", ";", ")", "]", "}"]);
 
 export function detectFileLinks(text: string, cwd: string | undefined): RenderedLink[] {
 	const links: RenderedLink[] = [];
-	if (!text.includes("/")) return links;
+	if (!text.includes("/") && !text.includes("\\")) return links;
 
 	for (const match of text.matchAll(FILE_PATH_CANDIDATE)) {
 		const raw = match[1];
@@ -105,7 +105,7 @@ function resolveLocalPath(pathText: string, cwd: string | undefined): string | u
 		}
 	}
 
-	if (pathText.startsWith("~/")) return resolve(homedir(), pathText.slice(2));
+	if (pathText.startsWith("~/") || pathText.startsWith("~\\")) return resolve(homedir(), pathText.slice(2));
 	if (isAbsolute(pathText)) return pathText;
 	if (!cwd) return undefined;
 	return resolve(cwd, pathText);
