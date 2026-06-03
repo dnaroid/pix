@@ -14,9 +14,9 @@ import { createId } from "../id.js";
 import { createStartupInfoMessage, isEmptyStartupSession } from "../cli/startup-info.js";
 import type { AppBlinkController } from "../screen/blink-controller.js";
 import { tabPanelRows } from "../rendering/tab-line-renderer.js";
-import type { AppOptions, Entry, SessionActivity, SessionTab } from "../types.js";
+import type { AppOptions, Entry, SessionActivity, SessionTab, SubmittedUserMessage } from "../types.js";
 
-const TAB_STATE_VERSION = 2;
+const TAB_STATE_VERSION = 3;
 const MAX_RESTORED_TABS = 8;
 const TAB_ATTENTION_BLINK_KEY = "tab-attention";
 
@@ -24,13 +24,21 @@ type PersistedTab = {
 	path: string;
 	title?: string;
 	input?: TabInputState;
+	deferredUserMessages?: PersistedSubmittedUserMessage[];
 };
 
 type PersistedTabState = {
-	version: 1 | 2;
+	version: 1 | 2 | 3;
 	cwd: string;
 	tabs: PersistedTab[];
 	activePath?: string;
+};
+
+type PersistedSubmittedUserMessage = {
+	id: string;
+	promptText: string;
+	displayText: string;
+	images: Array<{ type: "image"; data: string; mimeType: string }>;
 };
 
 export type TabInputState = {
@@ -56,6 +64,8 @@ export type AppTabsControllerHost = {
 	syncUserSessionEntryMetadata(): void;
 	captureInputState(): TabInputState;
 	restoreInputState(state: TabInputState): void;
+	captureDeferredUserMessages?(): readonly SubmittedUserMessage[];
+	restoreDeferredUserMessages?(messages: readonly SubmittedUserMessage[]): void;
 	addEntry(entry: Entry): void;
 	showToast(message: string, kind: "success" | "error" | "warning" | "info"): void;
 	render(): void;
@@ -66,6 +76,7 @@ export class AppTabsController {
 	private readonly runtimesByTabId = new Map<string, AgentSessionRuntime>();
 	private readonly runtimeSubscriptionsByTabId = new Map<string, { runtime: AgentSessionRuntime; session: AgentSession; unsubscribe: () => void }>();
 	private readonly inputStatesByTabId = new Map<string, TabInputState>();
+	private readonly deferredUserMessagesByTabId = new Map<string, SubmittedUserMessage[]>();
 	private activeTabId: string | undefined;
 	private pendingActiveTabId: string | undefined;
 	private historyLoadGeneration = 0;
@@ -149,7 +160,13 @@ export class AppTabsController {
 	async saveInputStateForQuit(): Promise<void> {
 		this.syncActiveTabFromRuntime({ save: false });
 		this.storeActiveInputState();
+		this.storeActiveDeferredUserMessages();
 		await this.saveTabs();
+	}
+
+	persistActiveDeferredUserMessages(): void {
+		this.storeActiveDeferredUserMessages();
+		void this.saveTabs();
 	}
 
 	syncActiveTabFromRuntime(options: { save?: boolean; force?: boolean } = {}): void {
@@ -162,12 +179,16 @@ export class AppTabsController {
 		const active = this.activeTab();
 		const existing = sessionPath ? this.findTabBySessionPath(sessionPath, active ? { excludeTabId: active.id } : {}) : undefined;
 		if (existing) {
-			if (active) this.storeActiveInputState();
+			if (active) {
+				this.storeActiveInputState();
+				this.storeActiveDeferredUserMessages();
+			}
 			this.activeTabId = existing.id;
 			this.clearTabAttention(existing);
 			this.updateTabFromSession(existing, session);
 			if (active) this.deleteRuntimeForTab(active.id);
 			this.storeActiveRuntime();
+			this.restoreDeferredUserMessages(existing.id);
 			if (options.save !== false) void this.saveTabs();
 			return;
 		}
@@ -222,6 +243,7 @@ export class AppTabsController {
 
 		this.replaceTabs(restoredTabs, desiredPath);
 		this.restorePersistedInputStates(saved);
+		this.restorePersistedDeferredUserMessages(saved);
 		if (explicitSessionPath && currentPath) this.ensureCurrentSessionTab(runtime.session);
 
 		if (!desiredPath) {
@@ -246,6 +268,7 @@ export class AppTabsController {
 
 		this.syncActiveTabFromRuntime({ save: false });
 		this.host.resetSessionView();
+		if (this.activeTabId) this.restoreDeferredUserMessages(this.activeTabId);
 		this.host.loadSessionHistory();
 		this.host.setSessionStatus(runtime.session);
 		this.host.setSessionActivity(this.sessionActivity(runtime.session));
@@ -266,6 +289,7 @@ export class AppTabsController {
 		this.cancelHistoryLoad();
 		this.syncActiveTabFromRuntime();
 		this.storeActiveInputState();
+		this.storeActiveDeferredUserMessages();
 		this.host.setStatus("starting new tab");
 		this.host.render();
 
@@ -286,6 +310,7 @@ export class AppTabsController {
 		}
 		void this.saveTabs();
 		this.host.resetSessionView();
+		this.restoreDeferredUserMessages(tab.id);
 		if (isEmptyStartupSession(newRuntime)) {
 			this.host.addEntry({ id: createId("system"), kind: "system", text: createStartupInfoMessage(newRuntime) });
 		} else {
@@ -324,6 +349,7 @@ export class AppTabsController {
 
 		this.cancelHistoryLoad();
 		this.storeActiveInputState();
+		this.storeActiveDeferredUserMessages();
 		const previousTabId = this.activeTabId;
 		const previousRuntime = runtime;
 		this.host.setStatus("opening session tab");
@@ -365,6 +391,7 @@ export class AppTabsController {
 			void this.host.disposeRuntime(newRuntime);
 			this.host.showToast("Could not open session tab", "warning");
 			this.host.resetSessionView();
+			if (previousTabId) this.restoreDeferredUserMessages(previousTabId);
 			this.host.loadSessionHistory();
 			this.host.setSessionStatus(this.host.runtime()?.session);
 			this.host.setSessionActivity(this.sessionActivity(this.host.runtime()?.session));
@@ -409,12 +436,14 @@ export class AppTabsController {
 
 		this.storeActiveRuntime(runtime);
 		this.storeActiveInputState();
+		this.storeActiveDeferredUserMessages();
 		this.activeTabId = target.id;
 		this.pendingActiveTabId = target.id;
 		target.activity = "thinking";
 		this.clearTabAttention(target);
 		this.restoreInputState(target.id);
 		this.host.resetSessionView();
+		this.restoreDeferredUserMessages(target.id);
 		this.host.setStatus("switching tab");
 		this.host.setSessionActivity("thinking");
 		this.host.render();
@@ -439,6 +468,7 @@ export class AppTabsController {
 			}
 			this.host.showToast("Could not switch tab", "warning");
 			this.host.resetSessionView();
+			if (previousTabId) this.restoreDeferredUserMessages(previousTabId);
 			this.host.loadSessionHistory();
 			const activeSession = this.host.runtime()?.session;
 			this.host.setSessionStatus(activeSession);
@@ -482,7 +512,9 @@ export class AppTabsController {
 			this.tabItems.splice(index, 1);
 			this.deleteRuntimeForTab(tabId);
 			this.inputStatesByTabId.delete(tabId);
+			this.deferredUserMessagesByTabId.delete(tabId);
 			this.storeActiveInputState();
+			this.storeActiveDeferredUserMessages();
 			this.stopAttentionBlinkIfIdle();
 			if (tabRuntime) void this.host.disposeRuntime(tabRuntime);
 			void this.saveTabs();
@@ -508,6 +540,7 @@ export class AppTabsController {
 		this.tabItems.splice(index, 1);
 		this.deleteRuntimeForTab(tabId);
 		this.inputStatesByTabId.delete(tabId);
+		this.deferredUserMessagesByTabId.delete(tabId);
 		this.stopAttentionBlinkIfIdle();
 		this.activeTabId = nextTab.id;
 		this.clearTabAttention(nextTab);
@@ -543,10 +576,12 @@ export class AppTabsController {
 		this.updateTabFromSession(tab, runtime.session);
 		this.setRuntimeForTab(tab.id, runtime);
 		this.inputStatesByTabId.delete(tab.id);
+		this.deferredUserMessagesByTabId.delete(tab.id);
 		this.restoreInputState(tab.id);
 		this.stopAttentionBlinkIfIdle();
 
 		this.host.resetSessionView();
+		this.restoreDeferredUserMessages(tab.id);
 		this.host.addEntry({ id: createId("system"), kind: "system", text: `Started a new session. cwd=${runtime.cwd}` });
 		if (runtime.modelFallbackMessage) this.host.addEntry({ id: createId("system"), kind: "system", text: runtime.modelFallbackMessage });
 		for (const diag of runtime.diagnostics ?? []) {
@@ -563,6 +598,7 @@ export class AppTabsController {
 		const generation = ++this.historyLoadGeneration;
 		const isCancelled = (): boolean => generation !== this.historyLoadGeneration || this.host.runtime() !== runtime;
 		this.host.resetSessionView();
+		if (this.activeTabId) this.restoreDeferredUserMessages(this.activeTabId);
 		this.host.setStatus("loading session history");
 		this.host.setSessionActivity("thinking");
 		this.host.render();
@@ -696,8 +732,31 @@ export class AppTabsController {
 		});
 	}
 
+	private storeActiveDeferredUserMessages(): void {
+		if (!this.activeTabId || !this.host.captureDeferredUserMessages) return;
+		const messages = this.host.captureDeferredUserMessages();
+		if (messages.length > 0) {
+			this.deferredUserMessagesByTabId.set(this.activeTabId, messages.map((message) => this.cloneSubmittedUserMessage(message)));
+		} else {
+			this.deferredUserMessagesByTabId.delete(this.activeTabId);
+		}
+	}
+
 	private restoreInputState(tabId: string): void {
 		this.host.restoreInputState(this.inputStatesByTabId.get(tabId) ?? { text: "", cursor: 0 });
+	}
+
+	private restoreDeferredUserMessages(tabId: string): void {
+		this.host.restoreDeferredUserMessages?.(this.deferredUserMessagesByTabId.get(tabId) ?? []);
+	}
+
+	private cloneSubmittedUserMessage(message: SubmittedUserMessage): SubmittedUserMessage {
+		return {
+			id: message.id,
+			promptText: message.promptText,
+			displayText: message.displayText,
+			images: message.images.map((image) => ({ ...image })),
+		};
 	}
 
 	private async runtimeForTab(tab: SessionTab): Promise<AgentSessionRuntime | undefined> {
@@ -732,6 +791,7 @@ export class AppTabsController {
 		this.runtimesByTabId.clear();
 		this.clearRuntimeSubscriptions();
 		this.inputStatesByTabId.clear();
+		this.deferredUserMessagesByTabId.clear();
 		const seen = new Set<string>();
 		for (const tab of tabs) {
 			const sessionPath = tab.sessionPath ? resolve(tab.sessionPath) : undefined;
@@ -761,6 +821,7 @@ export class AppTabsController {
 		if (index >= 0) this.tabItems.splice(index, 1);
 		this.deleteRuntimeForTab(tabId);
 		this.inputStatesByTabId.delete(tabId);
+		this.deferredUserMessagesByTabId.delete(tabId);
 	}
 
 	private restorePersistedInputStates(saved: PersistedTabState): void {
@@ -775,6 +836,21 @@ export class AppTabsController {
 			const input = inputsByPath.get(resolve(tab.sessionPath));
 			if (!input) continue;
 			this.inputStatesByTabId.set(tab.id, input);
+		}
+	}
+
+	private restorePersistedDeferredUserMessages(saved: PersistedTabState): void {
+		const messagesByPath = new Map<string, SubmittedUserMessage[]>();
+		for (const tab of saved.tabs) {
+			if (!tab.deferredUserMessages || tab.deferredUserMessages.length === 0) continue;
+			messagesByPath.set(resolve(tab.path), tab.deferredUserMessages.map((message) => this.cloneSubmittedUserMessage(message)));
+		}
+
+		for (const tab of this.tabItems) {
+			if (!tab.sessionPath) continue;
+			const messages = messagesByPath.get(resolve(tab.sessionPath));
+			if (!messages || messages.length === 0) continue;
+			this.deferredUserMessagesByTabId.set(tab.id, messages);
 		}
 	}
 
@@ -873,7 +949,8 @@ export class AppTabsController {
 		for (const tab of saved.tabs) {
 			const sessionPath = resolve(tab.path);
 			const hasDraftInput = (tab.input?.text.length ?? 0) > 0;
-			if (seen.has(sessionPath) || (!existsSync(sessionPath) && !hasDraftInput)) continue;
+			const hasDeferredQueue = (tab.deferredUserMessages?.length ?? 0) > 0;
+			if (seen.has(sessionPath) || (!existsSync(sessionPath) && !hasDraftInput && !hasDeferredQueue)) continue;
 			seen.add(sessionPath);
 			const title = titles.get(sessionPath) ?? tab.title?.trim();
 			tabs.push({
@@ -891,21 +968,23 @@ export class AppTabsController {
 		try {
 			const raw = await readFile(this.filePath(), "utf8");
 			const parsed: unknown = JSON.parse(raw);
-			if (!isRecord(parsed) || (parsed.version !== 1 && parsed.version !== TAB_STATE_VERSION) || !Array.isArray(parsed.tabs)) return undefined;
+			if (!isRecord(parsed) || (parsed.version !== 1 && parsed.version !== 2 && parsed.version !== TAB_STATE_VERSION) || !Array.isArray(parsed.tabs)) return undefined;
 
 			const tabs: PersistedTab[] = [];
 			for (const value of parsed.tabs) {
 				if (!isRecord(value) || typeof value.path !== "string") continue;
 				const input = this.parsePersistedInputState(value.input);
+				const deferredUserMessages = this.parsePersistedSubmittedUserMessages(value.deferredUserMessages);
 				tabs.push({
 					path: value.path,
 					...(typeof value.title === "string" ? { title: value.title } : {}),
 					...(input ? { input } : {}),
+					...(deferredUserMessages.length > 0 ? { deferredUserMessages } : {}),
 				});
 			}
 
 			return {
-				version: parsed.version === 1 ? 1 : TAB_STATE_VERSION,
+				version: parsed.version === 1 ? 1 : parsed.version === 2 ? 2 : TAB_STATE_VERSION,
 				cwd: typeof parsed.cwd === "string" ? parsed.cwd : this.host.options.cwd,
 				tabs,
 				...(typeof parsed.activePath === "string" ? { activePath: parsed.activePath } : {}),
@@ -922,6 +1001,28 @@ export class AppTabsController {
 			? Math.max(0, Math.min(value.text.length, Math.trunc(value.cursor)))
 			: value.text.length;
 		return { text: value.text, cursor };
+	}
+
+	private parsePersistedSubmittedUserMessages(value: unknown): PersistedSubmittedUserMessage[] {
+		if (!Array.isArray(value)) return [];
+		const messages: PersistedSubmittedUserMessage[] = [];
+		for (const item of value) {
+			if (!isRecord(item) || typeof item.promptText !== "string" || typeof item.displayText !== "string") continue;
+			const images = Array.isArray(item.images)
+				? item.images.flatMap((image): Array<{ type: "image"; data: string; mimeType: string }> => (
+					isRecord(image) && typeof image.data === "string" && typeof image.mimeType === "string"
+						? [{ type: "image", data: image.data, mimeType: image.mimeType }]
+						: []
+				))
+				: [];
+			messages.push({
+				id: typeof item.id === "string" ? item.id : createId("queued-user"),
+				promptText: item.promptText,
+				displayText: item.displayText,
+				images,
+			});
+		}
+		return messages;
 	}
 
 	private async saveTabs(): Promise<void> {
@@ -942,6 +1043,10 @@ export class AppTabsController {
 						text: input.text,
 						cursor: Math.max(0, Math.min(input.text.length, Math.trunc(input.cursor))),
 					};
+				}
+				const deferredUserMessages = this.deferredUserMessagesByTabId.get(tab.id);
+				if (deferredUserMessages && deferredUserMessages.length > 0) {
+					persistedTab.deferredUserMessages = deferredUserMessages.map((message) => this.cloneSubmittedUserMessage(message));
 				}
 				tabs.push(persistedTab);
 			}

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import type { PixConfig } from "../src/config.js";
+import { APP_ICONS } from "../src/app/icons.js";
 import { ConversationViewport } from "../src/app/rendering/conversation-viewport.js";
 import { renderConversationEntry, type ConversationEntryRenderOptions } from "../src/app/rendering/conversation-entry-renderer.js";
 import type { Entry } from "../src/app/types.js";
@@ -128,12 +129,37 @@ describe("renderConversationEntry", () => {
 			THEMES.dark.colors.userMessageBackground,
 			THEMES.dark.colors.userMessageBackground,
 		]);
-		assert.deepEqual(lines.map((line) => line.segments), [undefined, undefined, undefined]);
+		assert.match(lines[1]?.text ?? "", new RegExp(`${APP_ICONS.timerSand} steer: hello`, "u"));
+		assert.deepEqual(lines.map((line) => line.segments), [undefined, [{ start: 1, end: 1 + APP_ICONS.timerSand.length, foreground: THEMES.dark.colors.info }], undefined]);
 		assert.deepEqual(lines.map((line) => line.target), [
 			{ kind: "queue-message", id: "queue-bg" },
 			{ kind: "queue-message", id: "queue-bg" },
 			{ kind: "queue-message", id: "queue-bg" },
 		]);
+	});
+
+	it("uses concise queued labels with a blue icon", () => {
+		const deferred = renderConversationEntry({
+			id: "queue-deferred",
+			kind: "queued",
+			mode: "steering",
+			text: "send later",
+			queueSource: "deferred",
+			queueIndex: 0,
+		}, 40, renderOptions);
+		const followUp = renderConversationEntry({
+			id: "queue-follow",
+			kind: "queued",
+			mode: "follow-up",
+			text: "next step",
+			queueSource: "sdk-follow-up",
+			queueIndex: 0,
+		}, 40, renderOptions);
+
+		assert.match(deferred[1]?.text ?? "", new RegExp(`${APP_ICONS.timerSand} queued: send later`, "u"));
+		assert.match(followUp[1]?.text ?? "", new RegExp(`${APP_ICONS.timerSand} follow: next step`, "u"));
+		assert.deepEqual(deferred[1]?.segments, [{ start: 1, end: 1 + APP_ICONS.timerSand.length, foreground: THEMES.dark.colors.info }]);
+		assert.deepEqual(followUp[1]?.segments, [{ start: 1, end: 1 + APP_ICONS.timerSand.length, foreground: THEMES.dark.colors.info }]);
 	});
 
 	it("wraps user messages at word boundaries inside the padded bubble", () => {

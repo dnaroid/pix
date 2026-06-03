@@ -390,23 +390,39 @@ describe("StatusLineRenderer", () => {
 		})));
 	});
 
-	it("renders the draft queue button as the leftmost status icon when editor text is waiting", () => {
+	it("renders the draft queue button before the right-side status icons when editor text is waiting", () => {
 		const renderer = statusLineRenderer({ widgetText: "", voiceActive: false, queueableInputActive: true });
 		const layout = renderer.layout(40);
 		const rendered = renderer.render(1, layout, 40);
 		const buttonText = APP_ICONS.timerSand;
 		const target = renderer.draftQueueTarget(layout, 1);
 
-		assert.ok(layout.text.startsWith(`${buttonText} ${APP_ICONS.record}`));
-		assert.ok(layout.text.endsWith(`${APP_ICONS.user} ${APP_ICONS.thinkingExpanded} ${APP_ICONS.compactTools}`));
+		assert.ok(layout.text.startsWith(APP_ICONS.record));
+		assert.ok(layout.text.endsWith(`${buttonText} ${APP_ICONS.user} ${APP_ICONS.thinkingExpanded} ${APP_ICONS.compactTools}`));
 		assert.deepEqual(target, {
 			row: 1,
-			startColumn: 1,
-			endColumn: 1 + stringDisplayWidth(buttonText),
+			startColumn: layout.draftQueueWidget?.startColumn,
+			endColumn: layout.draftQueueWidget?.endColumn,
 		});
+		assert.equal((layout.draftQueueWidget?.endColumn ?? 0) + 1, layout.userJumpWidget?.startColumn);
 		assert.ok(rendered.includes(colorize(buttonText, {
 			foreground: THEMES.dark.colors.info,
 		})));
+	});
+
+	it("places the prompt enhancer immediately after the draft queue button", () => {
+		const renderer = statusLineRenderer({
+			widgetText: "",
+			voiceActive: false,
+			queueableInputActive: true,
+			promptWidgetText: APP_ICONS.autoFix,
+			promptActive: false,
+		});
+		const layout = renderer.layout(40);
+
+		assert.ok(layout.text.endsWith(`${APP_ICONS.timerSand} ${APP_ICONS.autoFix} ${APP_ICONS.user} ${APP_ICONS.thinkingExpanded} ${APP_ICONS.compactTools}`));
+		assert.equal((layout.draftQueueWidget?.endColumn ?? 0) + 1, layout.promptEnhancerWidget?.startColumn);
+		assert.equal((layout.promptEnhancerWidget?.endColumn ?? 0) + 1, layout.userJumpWidget?.startColumn);
 	});
 
 	it("hides the draft queue button when the editor has no queueable input", () => {

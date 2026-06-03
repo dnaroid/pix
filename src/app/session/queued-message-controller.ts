@@ -22,6 +22,7 @@ export type AppQueuedMessageControllerHost = {
 	setInput(value: string): void;
 	insertInput(value: string): void;
 	attachImage(data: string, mimeType: string): void;
+	onDeferredUserMessagesChanged?(): void;
 };
 
 export class AppQueuedMessageController {
@@ -37,6 +38,16 @@ export class AppQueuedMessageController {
 		this.deferredUserMessages.length = 0;
 		this.promptSubmissionInFlight = false;
 		this.flushingDeferredUserMessages = false;
+	}
+
+	captureDeferredUserMessages(): SubmittedUserMessage[] {
+		return this.deferredUserMessages.map((message) => this.cloneSubmittedUserMessage(message));
+	}
+
+	restoreDeferredUserMessages(messages: readonly SubmittedUserMessage[]): void {
+		this.deferredUserMessages.length = 0;
+		this.deferredUserMessages.push(...messages.map((message) => this.cloneSubmittedUserMessage(message)));
+		this.updateQueuedMessageStatus();
 	}
 
 	createSubmittedUserMessage(promptText: string, displayText: string, images: ImageContent[]): SubmittedUserMessage {
@@ -103,12 +114,14 @@ export class AppQueuedMessageController {
 
 				const message = this.deferredUserMessages.shift();
 				if (!message) break;
+				this.notifyDeferredUserMessagesChanged();
 				this.updateQueuedMessageStatus();
 
 				try {
 					await this.sendUserMessageToSession(message);
 				} catch (error) {
 					this.deferredUserMessages.unshift(message);
+					this.notifyDeferredUserMessagesChanged();
 					this.updateQueuedMessageStatus();
 					this.host.addEntry({ id: createId("error"), kind: "error", text: `Queued message failed: ${stringifyUnknown(error)}` });
 					break;
@@ -142,6 +155,7 @@ export class AppQueuedMessageController {
 		const session = this.host.runtime()?.session;
 		const sdkQueued = session?.clearQueue() ?? { steering: [], followUp: [] };
 		const deferred = this.deferredUserMessages.splice(0);
+		if (deferred.length > 0) this.notifyDeferredUserMessagesChanged();
 		const restoredTexts = [
 			...sdkQueued.steering,
 			...deferred.map((message) => this.restorableSubmittedMessageText(message)),
@@ -247,6 +261,7 @@ export class AppQueuedMessageController {
 
 	deferUserMessage(message: SubmittedUserMessage): void {
 		this.deferredUserMessages.push(message);
+		this.notifyDeferredUserMessagesChanged();
 		this.updateQueuedMessageStatus();
 		this.host.showToast("Message queued; send it from the queue menu or status button", "info");
 		this.host.render();
@@ -290,6 +305,7 @@ export class AppQueuedMessageController {
 			const [message] = this.deferredUserMessages.splice(entry.queueIndex, 1);
 			if (!message) throw new Error("Queued message is no longer available");
 			session.clearQueue();
+			this.notifyDeferredUserMessagesChanged();
 			return { removed: message, sdkMessagesToRestore: sdkMessages };
 		}
 
@@ -344,6 +360,7 @@ export class AppQueuedMessageController {
 		if (entry.queueSource === "deferred") {
 			const [message] = this.deferredUserMessages.splice(entry.queueIndex, 1);
 			if (!message) throw new Error("Queued message is no longer available");
+			this.notifyDeferredUserMessagesChanged();
 			return message;
 		}
 
@@ -360,6 +377,7 @@ export class AppQueuedMessageController {
 		if (entry.queueSource === "deferred") {
 			if (typeof removed === "string") return;
 			this.deferredUserMessages.splice(Math.min(entry.queueIndex, this.deferredUserMessages.length), 0, removed);
+			this.notifyDeferredUserMessagesChanged();
 			return;
 		}
 
@@ -383,5 +401,18 @@ export class AppQueuedMessageController {
 		return message.images.length > 0
 			? message.promptText.replace(/\[Image \d+(?:: [^\]]+)?\]\s*/g, "").trimEnd()
 			: message.promptText.trimEnd();
+	}
+
+	private cloneSubmittedUserMessage(message: SubmittedUserMessage): SubmittedUserMessage {
+		return {
+			id: message.id,
+			promptText: message.promptText,
+			displayText: message.displayText,
+			images: message.images.map((image) => ({ ...image })),
+		};
+	}
+
+	private notifyDeferredUserMessagesChanged(): void {
+		this.host.onDeferredUserMessagesChanged?.();
 	}
 }

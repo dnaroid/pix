@@ -16,9 +16,9 @@ describe("pix install", () => {
 
 	it("prints post-install configuration guidance", () => {
 		const output = formatPixInstallNextSteps("/tmp/pix-home");
-		assert.match(output, /\/tmp\/pix-home\/\.config\/pi\/pix\.jsonc/u);
+		assert.match(output, /[\\/]tmp[\\/]pix-home[\\/]\.config[\\/]pi[\\/]pix\.jsonc/u);
 		assert.match(output, /dictation\.language/u);
-		assert.match(output, /\.config\/pi\/pi-tools-suite\.jsonc/u);
+		assert.match(output, /\.config[\\/]pi[\\/]pi-tools-suite\.jsonc/u);
 		assert.match(output, /lsp\.servers/u);
 		assert.match(output, /\/opencode-import/u);
 		assert.match(output, /\/antigravity-import/u);

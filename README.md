@@ -14,6 +14,23 @@ The npm package is currently named `pi-ui-extend` and installs the `pix` CLI.
 - Pix extension UI helpers for toasts, menus, and rows above the input editor.
 - Bundled `pi-tools-suite` payload. On startup, Pix links it into Pi's standard user extension directory.
 
+## Why use Pix instead of bare Pi?
+
+Pix keeps the same Pi agent engine and SDK, but replaces the default terminal experience with a faster, more interactive coding cockpit:
+
+- **Tabs for real work.** Keep several workspace-scoped Pi sessions open in one terminal, switch between tasks instantly, and restore tab state after restart.
+- **A readable tool-call UI.** Tool output is grouped into clickable rows, so long reads, patches, shell logs, and errors can be collapsed or expanded instead of flooding the conversation.
+- **Local shell without leaving the chat.** Prefix a command with `!` to run it in an ephemeral in-chat shell block, or use `!!` for raw TTY programs.
+- **Voice prompts.** Dictate prompts locally in Russian or English with Vosk; no cloud speech service is required.
+- **Prompt drafting assistance.** Inline AI autocomplete suggests the next words while you type, and `/enhance` rewrites a rough draft into a clearer agent prompt.
+- **Workspace safety net.** Pix tracks supported file mutations and lets you roll back the latest workspace change with `/undo`.
+- **Clickable files and images.** File paths in the conversation become clickable links that open in Zed, including line and column when available; image labels can be opened in the system viewer.
+- **Session power tools.** Search across saved sessions, fork from an earlier message, clone the current branch, rename sessions, export/import JSONL, or share a private gist.
+- **Queued follow-ups.** Add the next prompt while the agent is still running; Pix sends it automatically when the current turn finishes.
+- **Live status panels.** Built-in panels surface todo state, async sub-agent activity, model/context usage, and compression stats above the editor.
+- **Renderer-aware extensions.** Pix extensions can draw rows above/below the input, show stackable toasts, open searchable popup menus, and react through an isolated event bus.
+- **Nicer terminal ergonomics.** Mouse scrolling, PageUp/PageDown scrollback, tab attention, status lines, terminal-output buffering, Nerd Font icons, and fallback icon mode are handled by the Pix renderer.
+
 ## Requirements
 
 - Node.js `>=22.19.0 <25` (`24.16.0` is pinned for development).
@@ -159,8 +176,6 @@ Useful environment variables:
 - `PIX_DISABLE_TERMINAL_OUTPUT_BUFFER=1` or `PIX_TERMINAL_OUTPUT_BUFFER=0`: disable Pix terminal output region buffering.
 - `PIX_USE_FALLBACK_ICONS=1` or `PIX_ICON_THEME=fallback`: use plain fallback icons when Nerd Font glyphs are unavailable.
 - `PIX_ICON_THEME=nerdFont`: force the Nerd Font icon theme.
-- `PIX_ANTIGRAVITY_GOOGLE_CLIENT_ID` / `ANTIGRAVITY_GOOGLE_CLIENT_ID`: Google OAuth client ID used for Antigravity quota/login integrations.
-- `PIX_ANTIGRAVITY_GOOGLE_CLIENT_SECRET` / `ANTIGRAVITY_GOOGLE_CLIENT_SECRET`: Google OAuth client secret used for Antigravity quota/login integrations.
 
 Pix user configuration is read from:
 

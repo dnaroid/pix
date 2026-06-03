@@ -197,6 +197,8 @@ export class PiUiExtendApp {
 			syncUserSessionEntryMetadata: () => this.workspaceActions.syncUserSessionEntryMetadata(),
 			captureInputState: () => ({ text: this.inputEditor.text, cursor: this.inputEditor.cursor }),
 			restoreInputState: (state) => this.restoreTabInputState(state.text, state.cursor),
+			captureDeferredUserMessages: () => this.queuedMessages.captureDeferredUserMessages(),
+			restoreDeferredUserMessages: (messages) => this.queuedMessages.restoreDeferredUserMessages(messages),
 			addEntry: (entry) => this.addEntry(entry),
 			showToast: (message, kind) => this.showToast(message, kind),
 			render: () => this.render(),
@@ -388,6 +390,7 @@ export class PiUiExtendApp {
 			setInput: (value) => this.inputEditor.setText(value),
 			insertInput: (value) => this.inputEditor.insert(value),
 			attachImage: (data, mimeType) => this.inputEditor.attachImage(data, mimeType),
+			onDeferredUserMessagesChanged: () => this.tabsController.persistActiveDeferredUserMessages(),
 		});
 		this.editorLayoutRenderer = new EditorLayoutRenderer({
 			theme: this.theme,

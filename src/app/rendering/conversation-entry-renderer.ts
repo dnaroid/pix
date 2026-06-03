@@ -2,10 +2,11 @@ import { applyOutputFilters, type PixConfig } from "../../config.js";
 import { renderMarkdownTextLines } from "../../markdown-format.js";
 import type { Theme } from "../../theme.js";
 import { attachImageClickTargets } from "../screen/image-click-targets.js";
+import { APP_ICONS } from "../icons.js";
 import { horizontalPaddingLayout, padHorizontalText, wrapText } from "./render-text.js";
 import { renderConversationShellEntry } from "./conversation-shell-renderer.js";
 import { renderConversationToolEntry, renderThinkingEntry } from "./conversation-tool-renderer.js";
-import type { Entry, RenderedLine } from "../types.js";
+import type { Entry, RenderedLine, StyledSegment } from "../types.js";
 
 export type InlineUserMessageMenuContext = {
 	userContentWidth: number;
@@ -38,10 +39,11 @@ export function renderConversationEntry(entry: Entry, width: number, options: Co
 		...(syntaxHighlight === undefined ? {} : { syntaxHighlight }),
 		...(entryId === undefined ? {} : { target: { kind: "user-message" as const, id: entryId } }),
 	});
-	const queuedLine = (text: string, entryId: string): RenderedLine => ({
+	const queuedLine = (text: string, entryId: string, segments?: readonly StyledSegment[]): RenderedLine => ({
 		text: padHorizontalText(text, width),
 		variant: "muted" as const,
 		backgroundOverride: options.colors.userMessageBackground,
+		...(segments && segments.length > 0 ? { segments: segments.map((segment) => ({ ...segment, start: segment.start + userContentLeft, end: segment.end + userContentLeft })) } : {}),
 		target: { kind: "queue-message" as const, id: entryId },
 	});
 	const userMessageLines = (userEntry: Extract<Entry, { kind: "user" }>): RenderedLine[] => {
@@ -56,11 +58,24 @@ export function renderConversationEntry(entry: Entry, width: number, options: Co
 		lines.push(userLine("", userEntry.id));
 		return attachImageClickTargets(lines, userEntry.id, userEntry.images, { foreground: options.colors.info, underline: true });
 	};
-	const queuedMessageLines = (queuedEntry: Extract<Entry, { kind: "queued" }>): RenderedLine[] => [
-		queuedLine("", queuedEntry.id),
-		...wrapText(`↳ queued ${queuedEntry.mode}: ${queuedEntry.text}`, userContentWidth).map((text) => queuedLine(text, queuedEntry.id)),
-		queuedLine("", queuedEntry.id),
-	];
+	const queuedMessagePrefix = (queuedEntry: Extract<Entry, { kind: "queued" }>): string => {
+		const label = queuedEntry.queueSource === "sdk-steering"
+			? "steer"
+			: queuedEntry.queueSource === "sdk-follow-up"
+				? "follow"
+				: "queued";
+		return `${APP_ICONS.timerSand} ${label}:`;
+	};
+	const queuedMessageLines = (queuedEntry: Extract<Entry, { kind: "queued" }>): RenderedLine[] => {
+		const icon = APP_ICONS.timerSand;
+		const prefix = queuedMessagePrefix(queuedEntry);
+		const contentLines = wrapText(`${prefix} ${queuedEntry.text}`, userContentWidth);
+		return [
+			queuedLine("", queuedEntry.id),
+			...contentLines.map((text, index) => queuedLine(text, queuedEntry.id, index === 0 ? [{ start: 0, end: icon.length, foreground: options.colors.info }] : undefined)),
+			queuedLine("", queuedEntry.id),
+		];
+	};
 
 	switch (entry.kind) {
 		case "system":

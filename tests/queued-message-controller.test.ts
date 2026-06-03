@@ -70,6 +70,7 @@ describe("AppQueuedMessageController", () => {
 		assert.deepEqual(calls, []);
 		assert.equal(controller.deferredUserMessages.length, 1);
 		assert.deepEqual(state.toasts, ["info:Message queued; send it from the queue menu or status button"]);
+		assert.equal(state.deferredChangeCount, 1);
 	});
 
 	it("does not auto-flush deferred messages after an immediate send", async () => {
@@ -111,6 +112,7 @@ describe("AppQueuedMessageController", () => {
 
 		assert.deepEqual(calls, ["prompt:send first", "prompt:send second"]);
 		assert.equal(controller.deferredUserMessages.length, 0);
+		assert.equal(state.deferredChangeCount, 2);
 	});
 
 	it("cancels a deferred queued message without touching SDK queues", async () => {
@@ -130,6 +132,7 @@ describe("AppQueuedMessageController", () => {
 		assert.deepEqual(sdkQueue, { steering: ["keep steer"], followUp: ["keep follow"] });
 		assert.deepEqual(calls, []);
 		assert.deepEqual(state.toasts, ["success:Queued message cancelled"]);
+		assert.equal(state.deferredChangeCount, 1);
 	});
 
 	it("cancels an SDK queued message without removing the rest of the queue", async () => {
@@ -162,6 +165,7 @@ type HostState = {
 	abortedEntries: number;
 	toasts: string[];
 	visibleEntries: AppQueuedMessageControllerHost["visibleEntries"] extends () => infer T ? T : never;
+	deferredChangeCount: number;
 };
 
 function fakeSession(
@@ -214,7 +218,7 @@ function fakeSession(
 }
 
 function createHostState(input: string): HostState {
-	return { input, images: [], setSessionStatusCalls: 0, abortedEntries: 0, toasts: [], visibleEntries: [] };
+	return { input, images: [], setSessionStatusCalls: 0, abortedEntries: 0, toasts: [], visibleEntries: [], deferredChangeCount: 0 };
 }
 
 function createHost(session: AgentSession, state: HostState): AppQueuedMessageControllerHost {
@@ -252,6 +256,9 @@ function createHost(session: AgentSession, state: HostState): AppQueuedMessageCo
 		attachImage: (data, mimeType) => {
 			state.images.push({ data, mimeType });
 			state.input += `[Image ${state.images.length}] `;
+		},
+		onDeferredUserMessagesChanged: () => {
+			state.deferredChangeCount += 1;
 		},
 	};
 }

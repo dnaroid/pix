@@ -6,7 +6,7 @@ import { describe, it } from "node:test";
 
 import { AppTabsController } from "../src/app/session/tabs-controller.js";
 import type { AppBlinkController } from "../src/app/screen/blink-controller.js";
-import type { AppOptions, SessionTab } from "../src/app/types.js";
+import type { AppOptions, SessionTab, SubmittedUserMessage } from "../src/app/types.js";
 import type { AgentSessionEvent, AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 
 type FakeAgentSessionRuntime = AgentSessionRuntime & {
@@ -175,6 +175,67 @@ describe("AppTabsController", () => {
 		assert.equal(tabs.activeTabId, "tab-2");
 	});
 
+	it("preserves deferred queued messages per tab", async () => {
+		const activeRuntime = fakeRuntime("one", "/tmp/one.jsonl");
+		const targetRuntime = fakeRuntime("two", "/tmp/two.jsonl");
+		let currentRuntime = activeRuntime;
+		let currentDeferred: SubmittedUserMessage[] = [submittedMessage("queued one")];
+		const controller = new AppTabsController({
+			options: { cwd: "/tmp", themeName: "dark", noSession: true } satisfies AppOptions,
+			blinkController: fakeBlinkController(),
+			runtime: () => currentRuntime,
+			createRuntimeForNewSession: async () => fakeRuntime("new", "/tmp/new.jsonl"),
+			createRuntimeForSession: async (path) => path.endsWith("two.jsonl") ? targetRuntime : activeRuntime,
+			activateRuntime: async (runtime) => {
+				currentRuntime = runtime;
+			},
+			disposeRuntime: async () => {},
+			isRunning: () => true,
+			setStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			resetSessionView: () => {
+				currentDeferred = [];
+			},
+			loadSessionHistory: () => {},
+			loadSessionHistoryAsync: async () => true,
+			syncUserSessionEntryMetadata: () => {},
+			captureInputState: () => ({ text: "", cursor: 0 }),
+			restoreInputState: () => {},
+			captureDeferredUserMessages: () => currentDeferred,
+			restoreDeferredUserMessages: (messages) => {
+				currentDeferred = messages.map((message) => ({ ...message, images: [...message.images] }));
+			},
+			addEntry: () => {},
+			showToast: () => {},
+			render: () => {},
+		});
+		const tabs = controller as unknown as {
+			tabItems: SessionTab[];
+			activeTabId: string | undefined;
+			runtimesByTabId: Map<string, AgentSessionRuntime>;
+		};
+		tabs.tabItems.push(
+			{ id: "tab-1", title: "one", status: "active", sessionPath: "/tmp/one.jsonl" },
+			{ id: "tab-2", title: "two", status: "waiting", sessionPath: "/tmp/two.jsonl" },
+		);
+		tabs.activeTabId = "tab-1";
+		tabs.runtimesByTabId.set("tab-1", activeRuntime);
+
+		await controller.switchToTab("tab-2");
+
+		assert.deepEqual(currentDeferred, []);
+		currentDeferred = [submittedMessage("queued two")];
+
+		await controller.switchToTab("tab-1");
+
+		assert.deepEqual(currentDeferred.map((message) => message.displayText), ["queued one"]);
+
+		await controller.switchToTab("tab-2");
+
+		assert.deepEqual(currentDeferred.map((message) => message.displayText), ["queued two"]);
+	});
+
 	it("persists and restores draft input text after startup", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "pix-tabs-"));
 		const sessionPath = join(dir, "one.jsonl");
@@ -228,7 +289,7 @@ describe("AppTabsController", () => {
 			version: number;
 			tabs: Array<{ input?: { text: string; cursor: number } }>;
 		};
-		assert.equal(saved.version, 2);
+		assert.equal(saved.version, 3);
 		assert.deepEqual(saved.tabs[0]?.input, { text: "draft one", cursor: 7 });
 
 		currentInput = { text: "", cursor: 0 };
@@ -268,6 +329,111 @@ describe("AppTabsController", () => {
 		await restoredController.restoreAfterStartup();
 
 		assert.deepEqual(currentInput, { text: "draft one", cursor: 7 });
+	});
+
+	it("persists and restores deferred queued messages after startup", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "pix-tabs-"));
+		const sessionPath = join(dir, "one.jsonl");
+		const tabsPath = join(dir, "tabs.json");
+		await writeFile(sessionPath, "", "utf8");
+
+		const queued = submittedMessage("queued one");
+		queued.images.push({ type: "image", data: "base64-image", mimeType: "image/png" });
+		let currentRuntime = fakeRuntime("one", sessionPath);
+		let currentDeferred: SubmittedUserMessage[] = [queued];
+		const controller = new AppTabsController({
+			options: { cwd: dir, themeName: "dark", noSession: false } satisfies AppOptions,
+			blinkController: fakeBlinkController(),
+			runtime: () => currentRuntime,
+			createRuntimeForNewSession: async () => fakeRuntime("new", join(dir, "new.jsonl")),
+			createRuntimeForSession: async (path) => fakeRuntime("one", path),
+			activateRuntime: async (runtime) => {
+				currentRuntime = runtime;
+			},
+			disposeRuntime: async () => {},
+			isRunning: () => true,
+			setStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			resetSessionView: () => {},
+			loadSessionHistory: () => {},
+			loadSessionHistoryAsync: async () => true,
+			syncUserSessionEntryMetadata: () => {},
+			captureInputState: () => ({ text: "", cursor: 0 }),
+			restoreInputState: () => {},
+			captureDeferredUserMessages: () => currentDeferred,
+			restoreDeferredUserMessages: (messages) => {
+				currentDeferred = messages.map((message) => ({ ...message, images: message.images.map((image) => ({ ...image })) }));
+			},
+			addEntry: () => {},
+			showToast: () => {},
+			render: () => {},
+		});
+		const tabs = controller as unknown as {
+			filePath: () => string;
+			loadSessionTitles: () => Promise<ReadonlyMap<string, string>>;
+			tabItems: SessionTab[];
+			activeTabId: string | undefined;
+			runtimesByTabId: Map<string, AgentSessionRuntime>;
+		};
+		tabs.filePath = () => tabsPath;
+		tabs.loadSessionTitles = async () => new Map([[sessionPath, "one"]]);
+		tabs.tabItems.push({ id: "tab-1", title: "one", status: "active", sessionPath });
+		tabs.activeTabId = "tab-1";
+		tabs.runtimesByTabId.set("tab-1", currentRuntime);
+
+		await controller.disposeInactiveRuntimes();
+
+		const saved = JSON.parse(await readFile(tabsPath, "utf8")) as {
+			version: number;
+			tabs: Array<{ deferredUserMessages?: SubmittedUserMessage[] }>;
+		};
+		assert.equal(saved.version, 3);
+		assert.deepEqual(saved.tabs[0]?.deferredUserMessages?.map((message) => message.displayText), ["queued one"]);
+		assert.deepEqual(saved.tabs[0]?.deferredUserMessages?.[0]?.images, [{ type: "image", data: "base64-image", mimeType: "image/png" }]);
+
+		currentDeferred = [];
+		const restoredController = new AppTabsController({
+			options: { cwd: dir, themeName: "dark", noSession: false } satisfies AppOptions,
+			blinkController: fakeBlinkController(),
+			runtime: () => currentRuntime,
+			createRuntimeForNewSession: async () => fakeRuntime("new", join(dir, "new.jsonl")),
+			createRuntimeForSession: async (path) => fakeRuntime("one", path),
+			activateRuntime: async (runtime) => {
+				currentRuntime = runtime;
+			},
+			disposeRuntime: async () => {},
+			isRunning: () => true,
+			setStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			resetSessionView: () => {
+				currentDeferred = [];
+			},
+			loadSessionHistory: () => {},
+			loadSessionHistoryAsync: async () => true,
+			syncUserSessionEntryMetadata: () => {},
+			captureInputState: () => ({ text: "", cursor: 0 }),
+			restoreInputState: () => {},
+			captureDeferredUserMessages: () => currentDeferred,
+			restoreDeferredUserMessages: (messages) => {
+				currentDeferred = messages.map((message) => ({ ...message, images: message.images.map((image) => ({ ...image })) }));
+			},
+			addEntry: () => {},
+			showToast: () => {},
+			render: () => {},
+		});
+		const restoredTabs = restoredController as unknown as {
+			filePath: () => string;
+			loadSessionTitles: () => Promise<ReadonlyMap<string, string>>;
+		};
+		restoredTabs.filePath = () => tabsPath;
+		restoredTabs.loadSessionTitles = async () => new Map([[sessionPath, "one"]]);
+
+		await restoredController.restoreAfterStartup();
+
+		assert.deepEqual(currentDeferred.map((message) => message.displayText), ["queued one"]);
+		assert.deepEqual(currentDeferred[0]?.images, [{ type: "image", data: "base64-image", mimeType: "image/png" }]);
 	});
 
 	it("restores a draft-only tab even when its session file has not been flushed yet", async () => {
@@ -923,4 +1089,13 @@ function fakeBlinkController(): AppBlinkController {
 		visible: () => visible,
 		dispose: () => {},
 	} as unknown as AppBlinkController;
+}
+
+function submittedMessage(text: string): SubmittedUserMessage {
+	return {
+		id: `queued-${text}`,
+		promptText: text,
+		displayText: text,
+		images: [],
+	};
 }

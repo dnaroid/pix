@@ -70,7 +70,10 @@ export class StatusLineRenderer {
 		const terminalBellSoundWidgetText = this.host.terminalBellSoundStatusWidgetText();
 		const promptEnhancerWidgetText = this.host.promptEnhancerStatusWidgetText();
 		const voiceWidgetText = this.host.voiceStatusWidgetText();
-		const rightWidgetText = [userJumpButton, terminalBellSoundWidgetText, thinkingExpandButton, compactToolsButton, promptEnhancerWidgetText, voiceWidgetText].filter((text) => text.length > 0).join(" ");
+		const rightWidgetParts = draftQueueButton.length > 0
+			? [draftQueueButton, promptEnhancerWidgetText, userJumpButton, terminalBellSoundWidgetText, thinkingExpandButton, compactToolsButton, voiceWidgetText]
+			: [userJumpButton, terminalBellSoundWidgetText, thinkingExpandButton, compactToolsButton, promptEnhancerWidgetText, voiceWidgetText];
+		const rightWidgetText = rightWidgetParts.filter((text) => text.length > 0).join(" ");
 		const rightWidgetWidth = stringDisplayWidth(rightWidgetText);
 		const leftWidth = rightWidgetWidth > 0 && contentWidth > rightWidgetWidth + 1 ? contentWidth - rightWidgetWidth - 1 : contentWidth;
 		const baseStatus = this.host.currentStatus();
@@ -81,34 +84,52 @@ export class StatusLineRenderer {
 		const status = contextBarLabel ? `${baseStatus} ${contextBarLabel}` : baseStatus;
 		const sessionLabel = "";
 		const details = `${status} ${workspaceDetailsLabel}`;
-		const leftPrefix = draftQueueButton.length > 0 ? `${draftQueueButton} ` : "";
-		const leftText = padOrTrimPlain(`${leftPrefix}${statusDot} ${details}`, leftWidth);
+		const leftText = padOrTrimPlain(`${statusDot} ${details}`, leftWidth);
 		const innerText = leftWidth < contentWidth ? `${leftText} ${rightWidgetText}` : padOrTrimPlain(leftText, contentWidth);
 		const text = padOrTrimPlain(innerText, width);
-		const draftQueueWidget = draftQueueButton.length > 0
-			? this.widgetLayout(1, draftQueueButton)
-			: undefined;
 		let nextWidgetStartColumn = left + leftWidth + 2;
-		const userJumpWidget = leftWidth < contentWidth
-			? this.widgetLayout(nextWidgetStartColumn, userJumpButton)
+		let draftQueueWidget = leftWidth < contentWidth && draftQueueButton.length > 0
+			? this.widgetLayout(nextWidgetStartColumn, draftQueueButton)
 			: undefined;
-		if (userJumpWidget) nextWidgetStartColumn = userJumpWidget.endColumn + 1;
-		const terminalBellSoundWidget = leftWidth < contentWidth && terminalBellSoundWidgetText.length > 0
-			? this.widgetLayout(nextWidgetStartColumn, terminalBellSoundWidgetText)
-			: undefined;
-		if (terminalBellSoundWidget) nextWidgetStartColumn = terminalBellSoundWidget.endColumn + 1;
-		const thinkingExpandWidget = leftWidth < contentWidth
-			? this.widgetLayout(nextWidgetStartColumn, thinkingExpandButton)
-			: undefined;
-		if (thinkingExpandWidget) nextWidgetStartColumn = thinkingExpandWidget.endColumn + 1;
-		const compactToolsWidget = leftWidth < contentWidth
-			? this.widgetLayout(nextWidgetStartColumn, compactToolsButton)
-			: undefined;
-		if (compactToolsWidget) nextWidgetStartColumn = compactToolsWidget.endColumn + 1;
-		const promptEnhancerWidget = leftWidth < contentWidth && promptEnhancerWidgetText.length > 0
-			? this.widgetLayout(nextWidgetStartColumn, promptEnhancerWidgetText)
-			: undefined;
-		if (promptEnhancerWidget) nextWidgetStartColumn = promptEnhancerWidget.endColumn + 1;
+		if (draftQueueWidget) nextWidgetStartColumn = draftQueueWidget.endColumn + 1;
+		let promptEnhancerWidget: StatusLineLayout["promptEnhancerWidget"];
+		let userJumpWidget: StatusLineLayout["userJumpWidget"];
+		let terminalBellSoundWidget: StatusLineLayout["terminalBellSoundWidget"];
+		let thinkingExpandWidget: StatusLineLayout["thinkingExpandWidget"];
+		let compactToolsWidget: StatusLineLayout["compactToolsWidget"];
+
+		const appendPromptEnhancerWidget = () => {
+			promptEnhancerWidget = leftWidth < contentWidth && promptEnhancerWidgetText.length > 0
+				? this.widgetLayout(nextWidgetStartColumn, promptEnhancerWidgetText)
+				: undefined;
+			if (promptEnhancerWidget) nextWidgetStartColumn = promptEnhancerWidget.endColumn + 1;
+		};
+		const appendCoreStatusWidgets = () => {
+			userJumpWidget = leftWidth < contentWidth
+				? this.widgetLayout(nextWidgetStartColumn, userJumpButton)
+				: undefined;
+			if (userJumpWidget) nextWidgetStartColumn = userJumpWidget.endColumn + 1;
+			terminalBellSoundWidget = leftWidth < contentWidth && terminalBellSoundWidgetText.length > 0
+				? this.widgetLayout(nextWidgetStartColumn, terminalBellSoundWidgetText)
+				: undefined;
+			if (terminalBellSoundWidget) nextWidgetStartColumn = terminalBellSoundWidget.endColumn + 1;
+			thinkingExpandWidget = leftWidth < contentWidth
+				? this.widgetLayout(nextWidgetStartColumn, thinkingExpandButton)
+				: undefined;
+			if (thinkingExpandWidget) nextWidgetStartColumn = thinkingExpandWidget.endColumn + 1;
+			compactToolsWidget = leftWidth < contentWidth
+				? this.widgetLayout(nextWidgetStartColumn, compactToolsButton)
+				: undefined;
+			if (compactToolsWidget) nextWidgetStartColumn = compactToolsWidget.endColumn + 1;
+		};
+
+		if (draftQueueWidget) {
+			appendPromptEnhancerWidget();
+			appendCoreStatusWidgets();
+		} else {
+			appendCoreStatusWidgets();
+			appendPromptEnhancerWidget();
+		}
 		const voiceWidget = leftWidth < contentWidth && voiceWidgetText.length > 0 ? this.voiceWidgetLayout(nextWidgetStartColumn, voiceWidgetText) : undefined;
 
 		return {
