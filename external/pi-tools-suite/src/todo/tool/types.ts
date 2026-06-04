@@ -190,7 +190,7 @@ export const TodoParamsSchema = Type.Object({
 		}),
 	),
 	content: Type.Optional(Type.String({ description: "Import content for action=import" })),
-	replace: Type.Optional(Type.Boolean({ description: "For import, replace existing tasks instead of appending. Default: false." })),
+	replace: Type.Optional(Type.Boolean({ description: "For import/create/batch_create, replace existing tasks instead of appending. Use batch_create with replace:true when starting a new plan that supersedes old unfinished todos. Default: false." })),
 });
 
 export type TodoParams = Static<typeof TodoParamsSchema>;

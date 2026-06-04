@@ -83,6 +83,7 @@ describe.serial("todo tool", () => {
 
 		const created = await tool.execute("call", { action: "create", subject: "Write tests", description: "cover tools" }, undefined, undefined, {});
 		expect(created.content[0].text).toContain("Created #1");
+		expect(created.content[0].text).toContain("include a final todo item for the user-facing final report");
 		expect(created.content[0].text).toContain("none is in_progress");
 		expect(getTodos()).toMatchObject([{ id: 1, subject: "Write tests", status: "pending" }]);
 
@@ -91,6 +92,7 @@ describe.serial("todo tool", () => {
 
 		const updated = await tool.execute("call", { action: "update", id: 1, status: "in_progress", activeForm: "writing tests" }, undefined, undefined, {});
 		expect(updated.content[0].text).toContain("pending → in_progress");
+		expect(updated.content[0].text).not.toContain("user-facing final report");
 		expect(updated.content[0].text).not.toContain("none is in_progress");
 
 		const got = await tool.execute("call", { action: "get", id: 1 }, undefined, undefined, {});
@@ -120,6 +122,40 @@ describe.serial("todo tool", () => {
 
 		const got = await tool.execute("call", { action: "get", id: 1 }, undefined, undefined, {});
 		expect(got.content[0].text).toContain("thinking: high");
+	});
+
+	test.serial("warns before appending to unfinished todos and supports replace for new plans", async () => {
+		const { registerTodoTool, getTodos } = await loadTodoModule();
+		const pi = new FakePi();
+		registerTodoTool(pi as any);
+		const tool = pi.tools.get("todo");
+
+		await tool.execute("call", { action: "create", subject: "Old stale task" }, undefined, undefined, {});
+		const appended = await tool.execute("call", { action: "create", subject: "New task without replace" }, undefined, undefined, {});
+		expect(appended.content[0].text).toContain("existing unfinished todos are still present");
+		expect(appended.content[0].text).toContain("batch_create with replace:true");
+		expect(getTodos()).toMatchObject([
+			{ id: 1, subject: "Old stale task", status: "pending" },
+			{ id: 2, subject: "New task without replace", status: "pending" },
+		]);
+
+		const replaced = await tool.execute(
+			"call",
+			{
+				action: "batch_create",
+				replace: true,
+				items: [{ subject: "Fresh plan" }, { subject: "Сформулировать финальный отчет пользователю", thinking: "off" }],
+			},
+			undefined,
+			undefined,
+			{},
+		);
+		expect(replaced.content[0].text).toContain("Replaced 2 existing todo items; Created 2 tasks: #1, #2");
+		expect(replaced.content[0].text).not.toContain("existing unfinished todos are still present");
+		expect(getTodos()).toMatchObject([
+			{ id: 1, subject: "Fresh plan", status: "pending" },
+			{ id: 2, subject: "Сформулировать финальный отчет пользователю", status: "pending", thinking: "off" },
+		]);
 	});
 
 	test.serial("publishes live todo state events after commits", async () => {
@@ -242,6 +278,7 @@ describe.serial("todo tool", () => {
 			{},
 		);
 		expect(batch.content[0].text).toContain("Created 2 tasks: #1, #2");
+		expect(batch.content[0].text).toContain("include a final todo item for the user-facing final report");
 		expect(getTodos()).toMatchObject([
 			{ id: 1, priority: "urgent", tags: ["release", "v1"] },
 			{ id: 2, parentId: 1, blockedBy: [1], priority: "high", tags: ["release"] },
@@ -545,6 +582,50 @@ describe.serial("todo extension lifecycle", () => {
 			expect(pi.thinkingLevel).toBe("off");
 			expect(pi.setThinkingLevelCalls).toEqual(["high", "off"]);
 		} finally {
+			if (previousEnv === undefined) delete process.env.PI_TOOLS_SUITE_TODO_THINKING;
+			else process.env.PI_TOOLS_SUITE_TODO_THINKING = previousEnv;
+			rmSync(ctx.cwd, { recursive: true, force: true });
+		}
+	});
+
+	test.serial("suppresses the agent_end auto-nudge caused by an internal todo thinking switch", async () => {
+		const previousEnv = process.env.PI_TOOLS_SUITE_TODO_THINKING;
+		process.env.PI_TOOLS_SUITE_TODO_THINKING = "1";
+		const extension = (await import("../src/todo/index.js")).default;
+		const pi = new FakePi();
+		const ctx = {
+			cwd: mkdtempSync(join(tmpdir(), "todo-thinking-nudge-")),
+			hasUI: false,
+			model: { reasoning: true, thinkingLevelMap: {} },
+			sessionManager: { getBranch: () => [] },
+			isIdle: () => true,
+			hasPendingMessages: () => false,
+		};
+		const originalSetTimeout = globalThis.setTimeout;
+		const originalClearTimeout = globalThis.clearTimeout;
+		globalThis.setTimeout = ((callback: TimerHandler) => {
+			if (typeof callback === "function") callback();
+			return 1 as any;
+		}) as any;
+		globalThis.clearTimeout = (() => {}) as any;
+		try {
+			extension(pi as any);
+			await pi.emit("session_start", {}, ctx);
+			const tool = pi.tools.get("todo");
+
+			await tool.execute("todo-1", { action: "create", subject: "Investigate", thinking: "high" }, undefined, undefined, ctx);
+			await tool.execute("todo-2", { action: "update", id: 1, status: "in_progress", activeForm: "investigating" }, undefined, undefined, ctx);
+
+			expect(pi.setThinkingLevelCalls).toEqual(["high"]);
+			await pi.emit("agent_end", {}, ctx);
+			expect(pi.sentMessages).toHaveLength(0);
+
+			await pi.emit("agent_end", {}, ctx);
+			expect(pi.sentMessages).toHaveLength(1);
+			expect(pi.sentMessages[0]).toContain("#1 [in_progress] Investigate — investigating");
+		} finally {
+			globalThis.setTimeout = originalSetTimeout;
+			globalThis.clearTimeout = originalClearTimeout;
 			if (previousEnv === undefined) delete process.env.PI_TOOLS_SUITE_TODO_THINKING;
 			else process.env.PI_TOOLS_SUITE_TODO_THINKING = previousEnv;
 			rmSync(ctx.cwd, { recursive: true, force: true });

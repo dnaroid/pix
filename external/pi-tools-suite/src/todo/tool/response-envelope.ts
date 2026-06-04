@@ -51,6 +51,11 @@ function filterTasks(op: Extract<Op, { kind: "list" | "export" }>, state: TaskSt
 	return view;
 }
 
+function formatReplacePrefix(replacedCount: number | undefined): string {
+	if (!replacedCount) return "";
+	return `Replaced ${replacedCount} existing todo item${replacedCount === 1 ? "" : "s"}; `;
+}
+
 function formatMarkdownExport(tasks: readonly Task[]): string {
 	const byParent = new Map<number | undefined, Task[]>();
 	for (const task of tasks) {
@@ -87,15 +92,15 @@ export function formatContent(op: Op, state: TaskState): string {
 		case "create": {
 			const t = state.tasks.find((x) => x.id === op.taskId);
 			// Defensive — `op.taskId` always resolves on success path.
-			if (!t) return `Created #${op.taskId}`;
-			return `Created #${t.id}: ${t.subject} (pending)`;
+			if (!t) return `${formatReplacePrefix(op.replacedCount)}Created #${op.taskId}`;
+			return `${formatReplacePrefix(op.replacedCount)}Created #${t.id}: ${t.subject} (pending)`;
 		}
 		case "update": {
 			const transition = op.fromStatus !== op.toStatus ? ` (${op.fromStatus} → ${op.toStatus})` : "";
 			return `Updated #${op.id}${transition}`;
 		}
 		case "batch_create":
-			return `Created ${op.ids.length} tasks: ${op.ids.map((id) => `#${id}`).join(", ")}`;
+			return `${formatReplacePrefix(op.replacedCount)}Created ${op.ids.length} tasks: ${op.ids.map((id) => `#${id}`).join(", ")}`;
 		case "batch_update":
 			return `Updated ${op.ids.length} tasks: ${op.ids.map((id) => `#${id}`).join(", ")}`;
 		case "delete":
@@ -146,8 +151,28 @@ export function buildToolResult(
 
 function appendWorkflowReminder(text: string, op: Op, state: TaskState): string {
 	if (op.kind === "error" || op.kind === "export") return text;
+	const lines = [text];
+	if (op.kind === "create" || op.kind === "batch_create") {
+		lines.push(
+			"Reminder: if this is a multi-step task, include a final todo item for the user-facing final report before completion.",
+		);
+		const createdIds = new Set(op.kind === "create" ? [op.taskId] : op.ids);
+		const hasOlderUnfinished = !op.replacedCount && state.tasks.some((task) => {
+			if (createdIds.has(task.id)) return false;
+			return task.status !== "completed" && task.status !== "deleted";
+		});
+		if (hasOlderUnfinished) {
+			lines.push(
+				"Reminder: existing unfinished todos are still present. If this is a new plan that supersedes them, use batch_create with replace:true or explicitly update/defer/delete obsolete tasks.",
+			);
+		}
+	}
 	const hasPending = state.tasks.some((task) => task.status === "pending");
 	const hasInProgress = state.tasks.some((task) => task.status === "in_progress");
-	if (!hasPending || hasInProgress) return text;
-	return `${text}\n\nReminder: pending todos exist but none is in_progress. Before starting work, call todo update on exactly one task with status in_progress and activeForm.`;
+	if (hasPending && !hasInProgress) {
+		lines.push(
+			"Reminder: pending todos exist but none is in_progress. Before starting work, call todo update on exactly one task with status in_progress and activeForm.",
+		);
+	}
+	return lines.join("\n\n");
 }

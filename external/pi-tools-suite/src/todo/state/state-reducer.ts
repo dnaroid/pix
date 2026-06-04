@@ -4,9 +4,9 @@ import type { TaskState } from "./state.js";
 import { detectCycle } from "./task-graph.js";
 
 export type Op =
-	| { kind: "create"; taskId: number }
+	| { kind: "create"; taskId: number; replacedCount?: number }
 	| { kind: "update"; id: number; fromStatus: TaskStatus; toStatus: TaskStatus }
-	| { kind: "batch_create"; ids: number[] }
+	| { kind: "batch_create"; ids: number[]; replacedCount?: number }
 	| { kind: "batch_update"; ids: number[] }
 	| { kind: "delete"; id: number; subject: string }
 	| { kind: "list"; statusFilter?: TaskStatus; priorityFilter?: TaskPriority; tagFilter?: string; blockedOnly: boolean; includeDeleted: boolean }
@@ -170,15 +170,17 @@ export function applyTaskMutation(state: TaskState, action: TaskAction, params: 
 	switch (action) {
 		case "create": {
 			if (!params.subject?.trim()) return errorResult(state, "subject required for create");
+			const replacedCount = params.replace === true ? state.tasks.length : 0;
+			const baseState = params.replace === true ? { tasks: [], nextId: 1 } : state;
 			if (params.parentId !== undefined && params.parentId !== null) {
-				const err = validateLiveReference(state, "parentId", params.parentId);
+				const err = validateLiveReference(baseState, "parentId", params.parentId);
 				if (err) return errorResult(state, err);
 			}
 			for (const dep of uniqueNumbers(params.blockedBy)) {
-				const err = validateLiveReference(state, "blockedBy", dep);
+				const err = validateLiveReference(baseState, "blockedBy", dep);
 				if (err) return errorResult(state, err);
 			}
-			const newTask: Task = { id: state.nextId, subject: params.subject.trim(), status: "pending" };
+			const newTask: Task = { id: baseState.nextId, subject: params.subject.trim(), status: "pending" };
 			if (params.description) newTask.description = params.description;
 			if (params.activeForm) newTask.activeForm = params.activeForm;
 			if (params.priority) newTask.priority = params.priority;
@@ -190,7 +192,10 @@ export function applyTaskMutation(state: TaskState, action: TaskAction, params: 
 			if (tags) newTask.tags = tags;
 			if (params.owner) newTask.owner = params.owner;
 			if (params.metadata) newTask.metadata = { ...params.metadata };
-			return { state: { tasks: [...state.tasks, newTask], nextId: state.nextId + 1 }, op: { kind: "create", taskId: newTask.id } };
+			return {
+				state: { tasks: [...baseState.tasks, newTask], nextId: baseState.nextId + 1 },
+				op: { kind: "create", taskId: newTask.id, ...(replacedCount > 0 ? { replacedCount } : {}) },
+			};
 		}
 
 		case "update": {
@@ -273,7 +278,8 @@ export function applyTaskMutation(state: TaskState, action: TaskAction, params: 
 
 		case "batch_create": {
 			if (!params.items?.length) return errorResult(state, "items required for batch_create");
-			let working = state;
+			const replacedCount = params.replace === true ? state.tasks.length : 0;
+			let working = params.replace === true ? { tasks: [], nextId: 1 } : state;
 			const ids: number[] = [];
 			for (let i = 0; i < params.items.length; i++) {
 				const result = applyTaskMutation(working, "create", { ...params.items[i], action: "create" });
@@ -281,7 +287,7 @@ export function applyTaskMutation(state: TaskState, action: TaskAction, params: 
 				if (result.op.kind === "create") ids.push(result.op.taskId);
 				working = result.state;
 			}
-			return { state: working, op: { kind: "batch_create", ids } };
+			return { state: working, op: { kind: "batch_create", ids, ...(replacedCount > 0 ? { replacedCount } : {}) } };
 		}
 
 		case "batch_update": {

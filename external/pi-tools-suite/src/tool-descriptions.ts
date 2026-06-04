@@ -249,7 +249,7 @@ export const REPO_DISCOVERY_TOOL_NAMES = REPO_DISCOVERY_TOOLS.map((tool) => tool
 export const TODO_TOOL_DESCRIPTION: ToolDescription = {
 	name: "todo",
 	label: "Todo",
-	description: "Track and keep in sync non-trivial multi-step work as todos. Actions: create, update, batch_create, batch_update, list, get, delete, clear, export, import. Supports priorities, tags, parent/subtask hierarchy, blockers, deferred out-of-scope items, and dependencies; skip trivial or chat-only requests. Resynchronize the plan when requirements are added, canceled, or become obsolete, whether from user input or discovered facts. Keep exactly one task in_progress and complete it only after verification.",
+	description: "Track and keep in sync non-trivial multi-step work as todos. Actions: create, update, batch_create, batch_update, list, get, delete, clear, export, import. Supports priorities, tags, parent/subtask hierarchy, blockers, deferred out-of-scope items, dependencies, and replace:true on create/batch_create/import for intentionally replacing an obsolete plan; skip trivial or chat-only requests. Resynchronize the plan when requirements are added, canceled, or become obsolete, whether from user input or discovered facts. Keep exactly one task in_progress and complete it only after verification.",
 	promptSnippet: "Track/sync non-trivial multi-step work; resync when requirements or discoveries change the plan; keep one task in_progress",
 	promptGuidelines: [
 		"Use `todo` for complex work with 3+ steps, explicit user task lists, or new non-trivial requirements. Skip single trivial tasks and purely conversational requests.",
@@ -262,6 +262,7 @@ export const TODO_TOOL_DESCRIPTION: ToolDescription = {
 		"Before giving a final response for work that used todos, ensure every visible todo is completed, deferred, or intentionally still in_progress with a blocker/explanation.",
 		"Keep subjects short and imperative; put details in description only when needed. Use priority, tags, and parentId for large plans; use blockedBy on create and addBlockedBy/removeBlockedBy on update for dependencies.",
 		"Use batch_create/batch_update for large explicit plans, but still keep exactly one visible task in_progress unless the user asks otherwise.",
+		"When starting a new plan that supersedes existing unfinished todos, use batch_create with replace:true instead of appending; only omit replace when intentionally extending the current plan.",
 		"list hides deleted tombstones unless includeDeleted:true; pass status, priority, tag, or blockedOnly only when you need a filtered list.",
 		"Use export/import for handoff or plan migration; import with replace:true only when the user explicitly wants to overwrite the current todo state.",
 		"When every visible todo is completed, todo state clears automatically; do not call clear afterward just to remove completed tasks.",

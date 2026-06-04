@@ -155,6 +155,7 @@ export default function (pi: ExtensionAPI) {
 	let todoDirtySinceReconcile = false;
 	let nudgeTimer: ReturnType<typeof setTimeout> | undefined;
 	const pendingAskUserToolCallIds = new Set<string>();
+	let suppressNextNudgeForThinkingSwitch = false;
 
 	function registerTodoToolWithCurrentPrompt(): void {
 		const thinkingPrompt = todoThinkingEnabled ? buildThinkingPromptParts(currentModel) : {};
@@ -211,14 +212,21 @@ export default function (pi: ExtensionAPI) {
 		const current = getCurrentThinkingLevel();
 		if (!current) return;
 		if (!rememberedThinkingByTaskId.has(taskId)) rememberedThinkingByTaskId.set(taskId, current);
-		if (current !== level) (pi as { setThinkingLevel?: (level: TodoThinkingLevel) => void }).setThinkingLevel?.(level);
+		if (current !== level) setTodoThinkingLevel(level);
 	}
 
 	function restoreTaskThinking(taskId: number): void {
 		const previous = rememberedThinkingByTaskId.get(taskId);
 		if (!previous) return;
 		rememberedThinkingByTaskId.delete(taskId);
-		if (getCurrentThinkingLevel() !== previous) (pi as { setThinkingLevel?: (level: TodoThinkingLevel) => void }).setThinkingLevel?.(previous);
+		if (getCurrentThinkingLevel() !== previous) setTodoThinkingLevel(previous);
+	}
+
+	function setTodoThinkingLevel(level: TodoThinkingLevel): void {
+		const setter = (pi as { setThinkingLevel?: (level: TodoThinkingLevel) => void }).setThinkingLevel;
+		if (!setter) return;
+		suppressNextNudgeForThinkingSwitch = true;
+		setter.call(pi, level);
 	}
 
 	function clearNudgeTimer(): void {
@@ -336,6 +344,12 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("agent_end", async (_event, ctx) => {
+		if (suppressNextNudgeForThinkingSwitch) {
+			suppressNextNudgeForThinkingSwitch = false;
+			clearNudgeTimer();
+			return;
+		}
+
 		if (pendingAskUserToolCallIds.size > 0) {
 			clearNudgeTimer();
 			return;
