@@ -38,9 +38,13 @@ export function decodeApiKey(apiKey: string): { access: string; projectId?: stri
 	return { access, projectId: projectId || undefined };
 }
 
-function getDefaultOpencodeAccountsPath(): string {
+export function getDefaultOpencodeAccountsPath(): string {
 	const configDir = process.env.OPENCODE_CONFIG_DIR ?? join(process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "opencode");
 	return join(configDir, "antigravity-accounts.json");
+}
+
+export async function importDefaultOpencodeAntigravityAccount(options: { overwrite?: boolean } = {}): Promise<OpencodeAntigravityImportResult> {
+	return importOpencodeAntigravityAccount({ sourcePath: getDefaultOpencodeAccountsPath(), authPath: getPiAuthPath(), overwrite: options.overwrite });
 }
 
 export function getPiAuthPath(): string {

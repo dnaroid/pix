@@ -152,6 +152,23 @@ describe("command registry", () => {
 		assert.equal(argumentsSeen, "");
 	});
 
+	it("registers no-context-files as an argument-taking local command", async () => {
+		let argumentsSeen = "not-called";
+		const commands = createSlashCommands({
+			...noopActions(),
+			runNoContextFilesSlashCommand: async (argumentsText) => {
+				argumentsSeen = argumentsText;
+			},
+		}, host());
+
+		const noContextFiles = commands.find((command) => command.name === "no-context-files");
+		assert.equal(noContextFiles?.kind, "builtin");
+		assert.equal(noContextFiles.allowArguments, true);
+
+		await noContextFiles.run?.("on");
+		assert.equal(argumentsSeen, "on");
+	});
+
 	it("matches slash commands typed with the Russian keyboard layout selected", () => {
 		const commands = createSlashCommands(noopActions(), host());
 		const [match] = getSlashCommandMatches(commands, "туц", 1);
@@ -220,6 +237,7 @@ describe("command registry", () => {
 		assert.ok(calls.includes("runModelSlashCommand: args "));
 		assert.ok(calls.includes("runDefaultModelSlashCommand: args "));
 		assert.ok(calls.includes("runAutocompleteSlashCommand: args "));
+		assert.ok(calls.includes("runNoContextFilesSlashCommand: args "));
 		assert.ok(calls.includes("runScopedModelsCommand: args "));
 		assert.ok(calls.includes("runThinkingSlashCommand: args "));
 		assert.ok(calls.includes("runDefaultThinkingSlashCommand: args "));
@@ -261,6 +279,7 @@ function noopActions(): CommandRegistryActions {
 		runModelSlashCommand: noop,
 		runDefaultModelSlashCommand: noop,
 		runAutocompleteSlashCommand: noop,
+		runNoContextFilesSlashCommand: noop,
 		runScopedModelsCommand: noop,
 		runThinkingSlashCommand: noop,
 		runDefaultThinkingSlashCommand: noop,
@@ -300,6 +319,7 @@ function recordingActions(calls: string[]): CommandRegistryActions {
 		runModelSlashCommand: record("runModelSlashCommand"),
 		runDefaultModelSlashCommand: record("runDefaultModelSlashCommand"),
 		runAutocompleteSlashCommand: record("runAutocompleteSlashCommand"),
+		runNoContextFilesSlashCommand: record("runNoContextFilesSlashCommand"),
 		runScopedModelsCommand: record("runScopedModelsCommand"),
 		runThinkingSlashCommand: record("runThinkingSlashCommand"),
 		runDefaultThinkingSlashCommand: record("runDefaultThinkingSlashCommand"),

@@ -20,6 +20,7 @@ const pixConfig: PixConfig = {
 	modelColors: { rules: {} },
 	iconTheme: { name: "nerdFont" },
 	dictation: { languages: { en: { dirName: "vosk-model-small-en-us-0.15", url: "https://example.test/en.zip", label: "English" } } },
+	ignoreContextFiles: false,
 };
 
 const renderOptions: ConversationEntryRenderOptions = {

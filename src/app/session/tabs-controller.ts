@@ -60,7 +60,7 @@ export type AppTabsControllerHost = {
 	setSessionActivity(activity: SessionActivity): void;
 	resetSessionView(): void;
 	loadSessionHistory(): void;
-	loadSessionHistoryAsync(options: { isCancelled: () => boolean; render: () => void }): Promise<boolean>;
+	loadSessionHistoryAsync(options: { isCancelled: () => boolean; render: () => void; lazyOlderHistory?: boolean }): Promise<boolean>;
 	syncUserSessionEntryMetadata(): void;
 	captureInputState(): TabInputState;
 	restoreInputState(state: TabInputState): void;
@@ -251,12 +251,13 @@ export class AppTabsController {
 			return;
 		}
 
+		let restoredRuntime = runtime;
 		if (currentPath !== desiredPath) {
 			this.host.setStatus("restoring tabs");
 			this.host.render();
 			try {
-				const result = await runtime.switchSession(desiredPath);
-				if (result.cancelled) throw new Error("restore cancelled");
+				restoredRuntime = await this.host.createRuntimeForSession(desiredPath);
+				await this.host.activateRuntime(restoredRuntime);
 			} catch {
 				this.host.showToast("Could not restore the previous active tab", "warning");
 				this.replaceTabs([this.tabFromSession(runtime.session), ...restoredTabs], currentPath);
@@ -270,8 +271,8 @@ export class AppTabsController {
 		this.host.resetSessionView();
 		if (this.activeTabId) this.restoreDeferredUserMessages(this.activeTabId);
 		this.host.loadSessionHistory();
-		this.host.setSessionStatus(runtime.session);
-		this.host.setSessionActivity(this.sessionActivity(runtime.session));
+		this.host.setSessionStatus(restoredRuntime.session);
+		this.host.setSessionActivity(this.sessionActivity(restoredRuntime.session));
 		if (this.activeTabId) this.restoreInputState(this.activeTabId);
 		await this.saveTabs();
 	}
@@ -608,6 +609,7 @@ export class AppTabsController {
 			render: () => {
 				if (!isCancelled()) this.host.render();
 			},
+			lazyOlderHistory: true,
 		});
 		if (!completed || isCancelled()) return;
 

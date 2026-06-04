@@ -19,6 +19,7 @@ const {
 	applyOutputFilters,
 	compileOutputFilterPatterns,
 	getPixConfigPath,
+	getProjectPixConfigPath,
 	loadPixConfig,
 	resolveDefaultModelRef,
 	resolveColor,
@@ -27,11 +28,13 @@ const {
 	savePixAutocompleteModel,
 	savePixDefaultModel,
 	savePixDefaultThinking,
+	saveProjectPixIgnoreContextFiles,
 	savePixDictationLanguage,
 	upsertPixDefaultModelInJsonc,
 	upsertPixDefaultThinkingInJsonc,
 	upsertPixAutocompleteModelInJsonc,
 	upsertPixDictationLanguageInJsonc,
+	upsertPixIgnoreContextFilesInJsonc,
 } = await import("../src/config.js");
 type ToolRendererConfig = import("../src/config.js").ToolRendererConfig;
 
@@ -73,6 +76,7 @@ describe("config helpers", () => {
 		assert.equal(config.iconTheme.name, "nerdFont");
 		assert.deepEqual(Object.keys(config.dictation.languages), ["en", "ru"]);
 		assert.equal(config.dictation.language, "en");
+		assert.equal(config.ignoreContextFiles, false);
 		assert.equal(config.dictation.languages.en?.label, "English");
 		assert.equal(config.dictation.languages.ru?.label, "Russian");
 	});
@@ -117,6 +121,7 @@ describe("config helpers", () => {
 		assert.equal(resolveModelColor("unknown/model", loaded.modelColors), undefined);
 		assert.equal(loaded.iconTheme.name, "fallback");
 		assert.equal(loaded.dictation.language, "ru");
+		assert.equal(loaded.ignoreContextFiles, false);
 		assert.deepEqual(Object.keys(loaded.dictation.languages), ["en", "ru"]);
 		assert.equal(loaded.dictation.languages.ru?.dirName, "vosk-model-small-ru-0.22");
 
@@ -136,11 +141,54 @@ describe("config helpers", () => {
 		assert.equal(partial.modelColors.rules["zai/*"], "success");
 		assert.equal(partial.iconTheme.name, "nerdFont");
 		assert.deepEqual(Object.keys(partial.dictation.languages), ["en", "ru"]);
+		assert.equal(partial.ignoreContextFiles, false);
 
 		writeFileSync(testConfigPath, "{");
 		assert.equal(loadPixConfig().toolRenderer.default.previewLines, 0);
 		assert.equal(loadPixConfig().promptEnhancer.modelRef, "zai/glm-5-turbo");
 		assert.equal(loadPixConfig().autocomplete.modelRef, "zai/glm-5-turbo");
+	});
+
+	it("loads project pix config from cwd .pi/pix.jsonc over the user config", () => {
+		mkdirSync(testConfigDir, { recursive: true });
+		writeFileSync(testConfigPath, `{
+			"defaultModel": { "modelRef": "openai-codex/gpt-5.5", "thinking": "medium" },
+			"autocomplete": { "modelRef": "zai/global-complete" },
+			"ignoreContextFiles": false
+		}`);
+		const projectDir = mkdtempSync(join(tmpdir(), "pix-project-"));
+		mkdirSync(join(projectDir, ".pi"), { recursive: true });
+		writeFileSync(getProjectPixConfigPath(projectDir), `{
+			"ignoreContextFiles": true,
+			"autocomplete": { "modelRef": "zai/project-complete" }
+		}`);
+
+		const loaded = loadPixConfig(projectDir);
+
+		assert.equal(getProjectPixConfigPath(projectDir), join(projectDir, ".pi", "pix.jsonc"));
+		assert.equal(resolveDefaultModelRef(loaded), "openai-codex/gpt-5.5:medium");
+		assert.equal(loaded.autocomplete.modelRef, "zai/project-complete");
+		assert.equal(loaded.ignoreContextFiles, true);
+	});
+
+	it("persists project ignoreContextFiles in JSONC config", () => {
+		const projectDir = mkdtempSync(join(tmpdir(), "pix-project-"));
+		const projectConfigPath = getProjectPixConfigPath(projectDir);
+
+		assert.equal(saveProjectPixIgnoreContextFiles(projectDir, true), true);
+		assert.equal(loadPixConfig(projectDir).ignoreContextFiles, true);
+		assert.match(readFileSync(projectConfigPath, "utf8"), /"\$schema"/u);
+		assert.match(readFileSync(projectConfigPath, "utf8"), /"ignoreContextFiles": true/u);
+
+		writeFileSync(projectConfigPath, `{
+			// keep comments
+			"ignoreContextFiles": true
+		}`);
+		assert.equal(saveProjectPixIgnoreContextFiles(projectDir, false), false);
+		const saved = readFileSync(projectConfigPath, "utf8");
+		assert.match(saved, /keep comments/u);
+		assert.match(saved, /"ignoreContextFiles": false/u);
+		assert.match(upsertPixIgnoreContextFilesInJsonc(`{}`, true), /"ignoreContextFiles": true/u);
 	});
 
 	it("persists autocomplete model and allows an empty disabled value", () => {

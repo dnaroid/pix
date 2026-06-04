@@ -8,6 +8,8 @@ import type { AntigravityStatusDetails, OpencodeAntigravityAccount, PiAuthData, 
 let extensionUi: ExtensionUIContext | undefined;
 let extensionApi: ExtensionAPI | undefined;
 const notifiedLoginFailures = new WeakSet<object>();
+const PROVIDER_FAILURE_DEDUPE_MS = 60_000;
+const notifiedProviderFailures = new Map<string, number>();
 
 export function rememberAntigravityApi(api: ExtensionAPI): void {
 	extensionApi = api;
@@ -29,18 +31,33 @@ export function formatAntigravityProviderFailure(error: unknown): string {
 	return `Antigravity request failed: ${errorMessage(error)}. Auth file: ${getPiAuthPath()}`;
 }
 
-function notifyAntigravityFailure(message: string, details: Record<string, unknown>, ui?: ExtensionUIContext): void {
+function notifyAntigravityFailure(message: string, details: Record<string, unknown>, options: { ui?: ExtensionUIContext; sendSessionMessage?: boolean } = {}): void {
+	const { ui, sendSessionMessage = true } = options;
 	const targetUi = ui ?? extensionUi;
 	if (typeof targetUi?.notify === "function") {
 		targetUi.notify(message, "error");
 	} else if (typeof (targetUi as any)?.toast?.error === "function") {
 		(targetUi as any).toast.error(message);
 	}
+	if (!sendSessionMessage) return;
 	(extensionApi as any)?.sendMessage?.({
-		role: "system",
+		customType: "antigravity-auth-status",
 		content: message,
+		display: true,
 		details,
-	});
+	}, { triggerTurn: false });
+}
+
+function shouldNotifyProviderFailure(message: string, model?: string): boolean {
+	const now = Date.now();
+	const key = `${model ?? ""}\0${message}`;
+	for (const [existingKey, timestamp] of notifiedProviderFailures) {
+		if (now - timestamp > PROVIDER_FAILURE_DEDUPE_MS) notifiedProviderFailures.delete(existingKey);
+	}
+	const previous = notifiedProviderFailures.get(key);
+	if (previous !== undefined && now - previous <= PROVIDER_FAILURE_DEDUPE_MS) return false;
+	notifiedProviderFailures.set(key, now);
+	return true;
 }
 
 export function notifyAntigravityLoginFailure(error: unknown): boolean {
@@ -51,21 +68,28 @@ export function notifyAntigravityLoginFailure(error: unknown): boolean {
 
 	const message = formatAntigravityLoginFailure(error);
 	notifyAntigravityFailure(message, {
-			kind: "login-failure",
-			authPath: getPiAuthPath(),
-			error: errorMessage(error),
+		kind: "login-failure",
+		authPath: getPiAuthPath(),
+		error: errorMessage(error),
 	});
 	return true;
 }
 
 export function notifyAntigravityProviderFailure(error: unknown, options: { ui?: ExtensionUIContext; model?: string } = {}): boolean {
 	const message = formatAntigravityProviderFailure(error);
+	if (!shouldNotifyProviderFailure(message, options.model)) return false;
 	notifyAntigravityFailure(message, {
 		kind: "provider-failure",
 		authPath: getPiAuthPath(),
 		error: errorMessage(error),
 		model: options.model,
-	}, options.ui);
+	}, {
+		ui: options.ui,
+		// Provider failures are raised while the agent is still streaming. pi.sendMessage()
+		// would be delivered as a steering message in that state, which can trigger
+		// another Antigravity request and create an endless toast/request loop.
+		sendSessionMessage: false,
+	});
 	return true;
 }
 

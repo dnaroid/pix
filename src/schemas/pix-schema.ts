@@ -1,5 +1,5 @@
 /**
- * TypeBox JSON Schema definitions for pix.jsonc (~/.config/pi/pix.jsonc).
+ * TypeBox JSON Schema definitions for pix.jsonc (~/.config/pi/pix.jsonc or <cwd>/.pi/pix.jsonc).
  *
  * These schemas describe the _user-facing_ config shape — all fields are optional
  * because the runtime applies generous defaults.  The generated JSON Schema files
@@ -135,6 +135,7 @@ const DictationConfig = Type.Object(
 export const PixConfigSchema = Type.Object(
 	{
 		$schema: Type.Optional(Type.String({ description: "JSON Schema URL used by editors for validation and autocomplete." })),
+		ignoreContextFiles: Type.Optional(Type.Boolean({ description: "Disable AGENTS.md / CLAUDE.md discovery for sessions started in this project, equivalent to pi --no-context-files." })),
 		defaultModel: Type.Optional(DefaultModelConfig),
 		toolRenderer: Type.Optional(ToolRendererConfig),
 		outputFilters: Type.Optional(OutputFiltersConfig),
@@ -149,7 +150,7 @@ export const PixConfigSchema = Type.Object(
 		$id: "https://unpkg.com/pi-ui-extend/schemas/pix.json",
 		$schema: "https://json-schema.org/draft-07/schema#",
 		title: "Pix Configuration",
-		description: "Configuration for the pix terminal renderer (~/.config/pi/pix.jsonc).",
+		description: "Configuration for the pix terminal renderer (~/.config/pi/pix.jsonc, with project overrides in <cwd>/.pi/pix.jsonc).",
 		additionalProperties: true,
 	},
 );

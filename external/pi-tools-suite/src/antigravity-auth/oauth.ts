@@ -266,6 +266,54 @@ export async function refreshAntigravityToken(credentials: OAuthCredentials): Pr
 	};
 }
 
+export async function refreshStoredAntigravityCredential(authPath = getPiAuthPath()): Promise<AntigravityFailoverCredential | undefined> {
+	const auth = await readJsonFile<PiAuthData>(authPath, {});
+	const current = auth[PROVIDER_ID];
+	if (current?.type !== "oauth") return undefined;
+
+	const accounts = getStoredAccounts(current);
+	const activeIndex = accounts.length > 0 ? clampAccountIndex(current.activeIndex, accounts.length) : 0;
+	const fallback = splitRefresh(current.refresh ?? "");
+	const account = accounts[activeIndex] ?? {
+		refreshToken: fallback.refreshToken,
+		projectId: fallback.projectId || fallback.managedProjectId,
+		managedProjectId: fallback.managedProjectId,
+		email: current.email,
+	};
+	if (!account.refreshToken) return undefined;
+
+	const refreshed = await refreshAccountToken({ ...account, refreshToken: account.refreshToken });
+	const refreshedParts = splitRefresh(refreshed.credentials.refresh);
+	const nextAccounts = accounts.length > 0
+		? accounts.map((stored, index) => index === activeIndex
+			? {
+				...stored,
+				refreshToken: refreshedParts.refreshToken || stored.refreshToken,
+				projectId: refreshed.projectId,
+				managedProjectId: account.managedProjectId,
+				email: account.email ?? stored.email,
+				enabled: stored.enabled !== false,
+			}
+			: stored)
+		: [];
+	const nextCredential: PiAuthCredential = {
+		...current,
+		type: "oauth",
+		...refreshed.credentials,
+		...(nextAccounts.length > 0 ? { accounts: nextAccounts, activeIndex, email: account.email ?? current.email } : {}),
+	};
+	auth[PROVIDER_ID] = nextCredential;
+	await writeJsonFileSecure(authPath, auth);
+
+	return {
+		apiKey: nextCredential.access ?? "",
+		projectId: refreshed.projectId,
+		email: account.email,
+		accountIndex: activeIndex,
+		accountCount: accounts.length || 1,
+	};
+}
+
 export async function refreshNextFailoverCredential(attemptedAccountIndices: Set<number>): Promise<AntigravityFailoverCredential | undefined> {
 	const authPath = getPiAuthPath();
 	const auth = await readJsonFile<PiAuthData>(authPath, {});

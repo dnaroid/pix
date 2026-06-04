@@ -204,7 +204,7 @@ export class PiUiExtendApp {
 			showToast: (message, kind) => this.showToast(message, kind),
 			render: () => this.render(),
 		});
-		this.pixConfig = loadPixConfig();
+		this.pixConfig = loadPixConfig(this.options.cwd);
 		setAppIconTheme(this.pixConfig.iconTheme.name);
 		this.terminalBellSoundController = new TerminalBellSoundController();
 		this.promptEnhancer = new AppPromptEnhancerController({
@@ -452,6 +452,10 @@ export class PiUiExtendApp {
 			setAutocompleteModelRef: (modelRef) => {
 				this.pixConfig.autocomplete.modelRef = modelRef;
 				this.autocompleteController.dispose();
+			},
+			ignoreContextFiles: () => this.pixConfig.ignoreContextFiles,
+			setIgnoreContextFiles: (ignoreContextFiles) => {
+				this.pixConfig.ignoreContextFiles = ignoreContextFiles;
 			},
 			enhancePrompt: () => this.promptEnhancer.enhancePrompt(),
 			isRunning: () => this.running,

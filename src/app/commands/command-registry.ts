@@ -7,6 +7,7 @@ export type CommandRegistryActions = {
 	runModelSlashCommand(argumentsText: string): Promise<void>;
 	runDefaultModelSlashCommand(argumentsText: string): Promise<void>;
 	runAutocompleteSlashCommand(argumentsText: string): Promise<void>;
+	runNoContextFilesSlashCommand(argumentsText: string): Promise<void>;
 	runScopedModelsCommand(argumentsText: string): Promise<void>;
 	runThinkingSlashCommand(argumentsText: string): Promise<void>;
 	runDefaultThinkingSlashCommand(argumentsText: string): Promise<void>;
@@ -68,6 +69,14 @@ export function createSlashCommands(actions: CommandRegistryActions, host: Comma
 			keywords: ["complete", "ghost", "suggest", "llm", "model"],
 			allowArguments: true,
 			run: (argumentsText) => actions.runAutocompleteSlashCommand(argumentsText),
+		},
+		{
+			name: "no-context-files",
+			description: "Set project AGENTS.md/CLAUDE.md loading off or on",
+			kind: "builtin",
+			keywords: ["context", "agents", "claude", "project", "config"],
+			allowArguments: true,
+			run: (argumentsText) => actions.runNoContextFilesSlashCommand(argumentsText),
 		},
 		{
 			name: "scoped-models",

@@ -6,6 +6,7 @@ import * as path from "node:path";
 const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
 const originalNodeEnv = process.env.NODE_ENV;
 const originalTestAuthPath = process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH;
+const originalOpencodeConfigDir = process.env.OPENCODE_CONFIG_DIR;
 const originalFetch = globalThis.fetch;
 const tempDirs: string[] = [];
 
@@ -54,10 +55,15 @@ function antigravityCredential(overrides: Record<string, unknown> = {}) {
 	};
 }
 
+function writeOpencodeAccounts(configDir: string, accounts: Array<Record<string, unknown>>, activeIndex = 0): void {
+	writeJson(path.join(configDir, "antigravity-accounts.json"), { version: 4, accounts, activeIndex });
+}
+
 async function loadProvider(agentDir: string) {
 	process.env.PI_CODING_AGENT_DIR = agentDir;
 	process.env.NODE_ENV = "test";
 	process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH = path.join(agentDir, "auth.json");
+	process.env.OPENCODE_CONFIG_DIR = path.join(agentDir, "opencode");
 	const { default: antigravityAuth } = await import("../src/antigravity-auth/index.js");
 	const pi = new FakePi();
 	await antigravityAuth(pi as any);
@@ -81,6 +87,8 @@ afterEach(() => {
 	else process.env.NODE_ENV = originalNodeEnv;
 	if (originalTestAuthPath === undefined) delete process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH;
 	else process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH = originalTestAuthPath;
+	if (originalOpencodeConfigDir === undefined) delete process.env.OPENCODE_CONFIG_DIR;
+	else process.env.OPENCODE_CONFIG_DIR = originalOpencodeConfigDir;
 	globalThis.fetch = originalFetch;
 	for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -95,14 +103,49 @@ describe.serial("Antigravity account rotation", () => {
 
 		const result = await runSimpleStream(provider, model);
 		await pi.emit("message_end", { message: result }, { ui });
+		await pi.emit("message_end", { message: result }, { ui });
 
 		expect(result.stopReason).toBe("error");
-		expect(result.errorMessage).toContain("Not authenticated with Antigravity");
+		expect(result.errorMessage).toContain("No Antigravity OAuth account found");
 		expect(notifications).toHaveLength(1);
 		expect(notifications[0]?.type).toBe("error");
-		expect(notifications[0]?.message).toContain("Antigravity request failed: Not authenticated with Antigravity");
+		expect(notifications[0]?.message).toContain("Antigravity request failed: No Antigravity OAuth account found");
 		expect(notifications[0]?.message).toContain(path.join(agentDir, "auth.json"));
-		expect(pi.messages.filter((message) => message.details?.kind === "provider-failure")).toHaveLength(1);
+		expect(pi.messages.filter((message) => message.details?.kind === "provider-failure")).toHaveLength(0);
+	});
+
+	test.serial("uses opencode Antigravity accounts without requiring Pi login", async () => {
+		const agentDir = tempDir();
+		writeJson(path.join(agentDir, "auth.json"), {});
+		writeOpencodeAccounts(path.join(agentDir, "opencode"), [
+			{ email: "opencode@example.com", refreshToken: "opencode-refresh", projectId: "opencode-project", enabled: true },
+		]);
+		const streamAuthorizations: string[] = [];
+		(globalThis as any).fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = String(input);
+			if (url === "https://oauth2.googleapis.com/token") {
+				const body = init?.body instanceof URLSearchParams ? init.body : new URLSearchParams(String(init?.body ?? ""));
+				expect(body.get("refresh_token")).toBe("opencode-refresh");
+				return new Response(JSON.stringify({ access_token: "opencode-access", expires_in: 3600 }), { status: 200, headers: { "content-type": "application/json" } });
+			}
+			if (url.includes("/v1internal:streamGenerateContent")) {
+				streamAuthorizations.push(new Headers(init?.headers as HeadersInit).get("authorization") ?? "");
+				return new Response('data: {"response":{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1,"totalTokenCount":2}}}\n\n', {
+					status: 200,
+					headers: { "content-type": "text/event-stream" },
+				});
+			}
+			throw new Error(`Unexpected fetch ${url}`);
+		};
+
+		const { provider, model } = await loadProvider(agentDir);
+		const result = await runSimpleStream(provider, model);
+
+		expect(result.stopReason).toBe("stop");
+		expect(streamAuthorizations).toEqual(["Bearer opencode-access"]);
+		const auth = JSON.parse(fs.readFileSync(path.join(agentDir, "auth.json"), "utf-8"));
+		expect(auth.antigravity.email).toBe("opencode@example.com");
+		expect(auth.antigravity.access).toBe("opencode-access|opencode-project");
 	});
 
 	test.serial("emits all-accounts-exhausted marker only after trying every account for the model", async () => {

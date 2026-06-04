@@ -19,6 +19,7 @@ import {
 import { loadPixConfig, resolveDefaultModelRef, type PixConfig } from "../config.js";
 import { PI_FAVORITE_MODEL_REFS } from "./constants.js";
 import { isThinkingLevel, parseModelRef, parseScopedModelRef } from "./model/model-ref.js";
+import { openLazySessionManager } from "./session/lazy-session-manager.js";
 import type { AppOptions, ScopedSessionModel, SessionModel } from "./types.js";
 
 const BUNDLED_QUESTION_EXTENSION_NAME = "question";
@@ -254,7 +255,8 @@ export function resolveSessionModelRefFromTail(entries: readonly SessionEntry[])
 export async function createPixRuntime(options: AppOptions, runtimeOptions: CreatePixRuntimeOptions = {}): Promise<AgentSessionRuntime> {
 	const agentDir = getAgentDir();
 	const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, sessionManager, sessionStartEvent }) => {
-		const effectiveModelRef = resolvePixRuntimeModelRef(options, sessionManager);
+		const config = loadPixConfig(cwd);
+		const effectiveModelRef = resolvePixRuntimeModelRef(options, sessionManager, config);
 		const parsedModel = effectiveModelRef ? parseModelRef(effectiveModelRef) : undefined;
 		await ensureBundledSkillsInstalled();
 		await ensurePiToolsSuiteExtensionInstalled({ agentDir });
@@ -263,6 +265,7 @@ export async function createPixRuntime(options: AppOptions, runtimeOptions: Crea
 			cwd,
 			agentDir,
 			resourceLoaderOptions: {
+				...(config.ignoreContextFiles ? { noContextFiles: true } : {}),
 				...(runtimeOptions.eventBus === undefined ? {} : { eventBus: runtimeOptions.eventBus }),
 				...(bundledExtensionPaths.length === 0 ? {} : {
 					additionalExtensionPaths: bundledExtensionPaths,
@@ -312,7 +315,7 @@ export async function createPixRuntime(options: AppOptions, runtimeOptions: Crea
 		sessionManager: options.noSession
 			? SessionManager.inMemory(options.cwd)
 			: options.sessionPath
-				? SessionManager.open(options.sessionPath, undefined, options.cwd)
+				? openLazySessionManager(options.sessionPath, { cwdOverride: options.cwd })
 			: SessionManager.create(options.cwd),
 	});
 }

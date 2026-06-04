@@ -1,6 +1,6 @@
 import { getIdleRuntime, getRuntime } from "./command-runtime.js";
 import type { CommandControllerHost } from "./command-host.js";
-import { savePixAutocompleteModel, savePixDefaultModel, savePixDefaultThinking } from "../../config.js";
+import { getProjectPixConfigPath, savePixAutocompleteModel, savePixDefaultModel, savePixDefaultThinking, saveProjectPixIgnoreContextFiles } from "../../config.js";
 import { createId } from "../id.js";
 import { isThinkingLevel, parseScopedModelRef } from "../model/model-ref.js";
 import type { ScopedSessionModel, SessionModel, ThinkingLevel } from "../types.js";
@@ -25,6 +25,7 @@ export class ModelCommandActions {
 			`model: ${currentModel}`,
 			`prompt enhancer model: ${this.host.promptEnhancerModelRef()}`,
 			`autocomplete model: ${this.host.autocompleteModelRef() || "disabled"}`,
+			`context files: ${this.host.ignoreContextFiles() ? "disabled" : "enabled"}`,
 			`thinking: ${runtime.session.thinkingLevel}`,
 			`theme: ${settings.getTheme() ?? this.host.options.themeName}`,
 			`skill commands: ${settings.getEnableSkillCommands() ? "enabled" : "disabled"}`,
@@ -34,7 +35,7 @@ export class ModelCommandActions {
 			"scoped models:",
 			scopedModelText,
 			"",
-			"Use /model, /thinking, /scoped-models, /export, /import, /reload for editable settings in pix.",
+			"Use /model, /thinking, /no-context-files, /scoped-models, /export, /import, /reload for editable settings in pix.",
 		].join("\n");
 		this.host.addEntry({ id: createId("system"), kind: "system", text });
 		this.host.setSessionStatus(runtime.session);
@@ -133,6 +134,38 @@ export class ModelCommandActions {
 		this.host.setAutocompleteModelRef(saved.modelRef);
 		this.host.addEntry({ id: createId("system"), kind: "system", text: `Autocomplete model set to ${saved.modelRef}.` });
 		this.host.setSessionStatus(runtime.session);
+	}
+
+	async runNoContextFilesSlashCommand(argumentsText: string): Promise<void> {
+		const value = argumentsText.trim().toLowerCase();
+		if (!value) {
+			this.host.addEntry({
+				id: createId("system"),
+				kind: "system",
+				text: [
+					`Context file loading is currently ${this.host.ignoreContextFiles() ? "disabled" : "enabled"} for this project.`,
+					"Usage: /no-context-files <on|off>",
+				].join("\n"),
+			});
+			this.host.setSessionStatus(this.host.runtime()?.session);
+			return;
+		}
+
+		if (value !== "on" && value !== "off") throw new Error("Usage: /no-context-files <on|off>");
+
+		const ignoreContextFiles = value === "on";
+		const saved = saveProjectPixIgnoreContextFiles(this.host.options.cwd, ignoreContextFiles);
+		this.host.setIgnoreContextFiles(saved);
+		this.host.addEntry({
+			id: createId("system"),
+			kind: "system",
+			text: [
+				`Context file loading ${saved ? "disabled" : "enabled"} for this project.`,
+				`Saved ignoreContextFiles=${saved ? "true" : "false"} to ${getProjectPixConfigPath(this.host.options.cwd)}.`,
+				"Start a new session or restart Pix for the change to affect loaded AGENTS.md/CLAUDE.md context.",
+			].join("\n"),
+		});
+		this.host.setSessionStatus(this.host.runtime()?.session);
 	}
 
 	async runScopedModelsCommand(argumentsText: string): Promise<void> {

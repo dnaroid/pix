@@ -37,6 +37,7 @@ export class AppCommandController {
 			runModelSlashCommand: (argumentsText) => this.modelActions.runModelSlashCommand(argumentsText),
 			runDefaultModelSlashCommand: (argumentsText) => this.modelActions.runDefaultModelSlashCommand(argumentsText),
 			runAutocompleteSlashCommand: (argumentsText) => this.modelActions.runAutocompleteSlashCommand(argumentsText),
+			runNoContextFilesSlashCommand: (argumentsText) => this.modelActions.runNoContextFilesSlashCommand(argumentsText),
 			runScopedModelsCommand: (argumentsText) => this.modelActions.runScopedModelsCommand(argumentsText),
 			runThinkingSlashCommand: (argumentsText) => this.modelActions.runThinkingSlashCommand(argumentsText),
 			runDefaultThinkingSlashCommand: (argumentsText) => this.modelActions.runDefaultThinkingSlashCommand(argumentsText),

@@ -13,6 +13,8 @@ export type CommandControllerHost = {
 	promptEnhancerModelRef(): string;
 	autocompleteModelRef(): string;
 	setAutocompleteModelRef(modelRef: string): void;
+	ignoreContextFiles(): boolean;
+	setIgnoreContextFiles(ignoreContextFiles: boolean): void;
 	enhancePrompt(): Promise<void>;
 	isRunning(): boolean;
 	stop(): void | Promise<void>;

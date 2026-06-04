@@ -2,6 +2,8 @@ export const DEFAULT_PIX_CONFIG_JSONC = String.raw`{
   "$schema": "https://unpkg.com/pi-ui-extend/schemas/pix.json",
   // pix renderer configuration
   "defaultModel": { "modelRef": "openai-codex/gpt-5.5", "thinking": "medium" },
+  // Disable AGENTS.md / CLAUDE.md discovery for this project when set in <cwd>/.pi/pix.jsonc.
+  "ignoreContextFiles": false,
 
   "toolRenderer": {
     "default": { "previewLines": 0, "direction": "head", "color": "toolTitle" },

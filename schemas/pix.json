@@ -5,6 +5,10 @@
       "type": "string",
       "description": "JSON Schema URL used by editors for validation and autocomplete."
     },
+    "ignoreContextFiles": {
+      "type": "boolean",
+      "description": "Disable AGENTS.md / CLAUDE.md discovery for sessions started in this project, equivalent to pi --no-context-files."
+    },
     "defaultModel": {
       "type": "object",
       "properties": {
@@ -293,6 +297,6 @@
   "$id": "https://unpkg.com/pi-ui-extend/schemas/pix.json",
   "$schema": "https://json-schema.org/draft-07/schema#",
   "title": "Pix Configuration",
-  "description": "Configuration for the pix terminal renderer (~/.config/pi/pix.jsonc).",
+  "description": "Configuration for the pix terminal renderer (~/.config/pi/pix.jsonc, with project overrides in <cwd>/.pi/pix.jsonc).",
   "additionalProperties": true
 }

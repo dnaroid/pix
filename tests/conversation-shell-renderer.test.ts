@@ -46,5 +46,6 @@ function minimalPixConfig(): PixConfig {
 		modelColors: { rules: {} },
 		iconTheme: { name: "fallback" },
 		dictation: { languages: {} },
+		ignoreContextFiles: false,
 	};
 }

@@ -90,10 +90,17 @@ export type PixConfig = {
 	modelColors: ModelColorsConfig;
 	iconTheme: IconThemeConfig;
 	dictation: DictationConfig;
+	ignoreContextFiles: boolean;
 };
+
+const PIX_SCHEMA_URL = "https://unpkg.com/pi-ui-extend/schemas/pix.json";
 
 export function getPixConfigPath(homeDir = homedir()): string {
 	return join(homeDir, ".config", "pi", "pix.jsonc");
+}
+
+export function getProjectPixConfigPath(cwd: string): string {
+	return join(cwd, ".pi", "pix.jsonc");
 }
 
 const PIX_CONFIG_PATH = getPixConfigPath();
@@ -163,10 +170,6 @@ const DEFAULT_MODEL_COLORS: ModelColorsConfig = {
 		"antigravity/*": "warning",
 		"antigravity/antigravity-claude-*": "error",
 	},
-};
-
-const DEFAULT_ICON_THEME: IconThemeConfig = {
-	name: "nerdFont",
 };
 
 const DEFAULT_DICTATION: DictationConfig = {
@@ -351,6 +354,11 @@ function extractDictationConfig(raw: unknown): DictationConfig | undefined {
 	} : undefined;
 }
 
+function extractIgnoreContextFiles(raw: unknown): boolean | undefined {
+	if (!isPlainObject(raw)) return undefined;
+	return typeof raw.ignoreContextFiles === "boolean" ? raw.ignoreContextFiles : undefined;
+}
+
 function normalizeDictationLanguage(value: unknown): string | undefined {
 	if (typeof value !== "string") return undefined;
 	const normalized = value.trim().toLowerCase();
@@ -384,7 +392,22 @@ function defaultPixConfig(): PixConfig {
 		modelColors: DEFAULT_MODEL_COLORS,
 		iconTheme: { name: resolveAppIconThemeNameFromEnv() },
 		dictation: DEFAULT_DICTATION,
+		ignoreContextFiles: false,
 	};
+}
+
+function pixConfigFromParsed(parsed: unknown, fallback: PixConfig = defaultPixConfig()): PixConfig {
+	const toolRenderer = extractToolRendererConfig(parsed) ?? fallback.toolRenderer;
+	const outputFilters = extractOutputFiltersConfig(parsed) ?? fallback.outputFilters;
+	const defaultModel = extractDefaultModelConfig(parsed) ?? fallback.defaultModel;
+	const promptEnhancer = extractPromptEnhancerConfig(parsed) ?? fallback.promptEnhancer;
+	const autocomplete = extractAutocompleteConfig(parsed) ?? fallback.autocomplete;
+	const modelColors = extractModelColorsConfig(parsed) ?? fallback.modelColors;
+	const configuredIconTheme = extractIconThemeConfig(parsed) ?? fallback.iconTheme;
+	const iconTheme = { name: appIconThemeOverrideFromEnv() ?? configuredIconTheme.name } satisfies IconThemeConfig;
+	const dictation = extractDictationConfig(parsed) ?? fallback.dictation;
+	const ignoreContextFiles = extractIgnoreContextFiles(parsed) ?? fallback.ignoreContextFiles;
+	return { toolRenderer, outputFilters, ...(defaultModel === undefined ? {} : { defaultModel }), promptEnhancer, autocomplete, modelColors, iconTheme, dictation, ignoreContextFiles };
 }
 
 export function resolveDefaultModelRef(config: PixConfig): string | undefined {
@@ -431,6 +454,23 @@ export function savePixAutocompleteModel(modelRef: string): AutocompleteConfig {
 	mkdirSync(dirname(configPath), { recursive: true });
 	writeFileSync(configPath, updated);
 	return extractAutocompleteConfig(parseJsonc(updated)) ?? { ...DEFAULT_AUTOCOMPLETE, modelRef: modelRef.trim() };
+}
+
+export function saveProjectPixIgnoreContextFiles(cwd: string, ignoreContextFiles: boolean): boolean {
+	const configPath = getProjectPixConfigPath(cwd);
+	const source = existsSync(configPath) ? readFileSync(configPath, "utf8") : `{
+  "$schema": "${PIX_SCHEMA_URL}"
+}
+`;
+	const updated = upsertPixIgnoreContextFilesInJsonc(source, ignoreContextFiles);
+	mkdirSync(dirname(configPath), { recursive: true });
+	writeFileSync(configPath, updated);
+	return extractIgnoreContextFiles(parseJsonc(updated)) ?? ignoreContextFiles;
+}
+
+export function upsertPixIgnoreContextFilesInJsonc(source: string, ignoreContextFiles: boolean): string {
+	const formattingOptions = { insertSpaces: true, tabSize: 2 };
+	return applyEdits(source, modify(source, ["ignoreContextFiles"], ignoreContextFiles, { formattingOptions }));
 }
 
 export function upsertPixDefaultModelInJsonc(source: string, modelRef: string): string {
@@ -533,32 +573,38 @@ function ensurePixConfigExists(configPath: string): void {
 	}
 }
 
-export function loadPixConfig(): PixConfig {
+export function loadPixConfig(cwd?: string): PixConfig {
 	const configPath = PIX_CONFIG_PATH;
 
 	try {
 		ensurePixConfigExists(configPath);
 	} catch (error) {
 		process.stderr.write(`[pix] Failed to create ${configPath}: ${error instanceof Error ? error.message : String(error)}\n`);
-		return defaultPixConfig();
+		return loadProjectPixConfig(cwd, defaultPixConfig());
 	}
 
 	try {
 		const raw = readFileSync(configPath, "utf8");
 		const parsed = parseJsonc(raw);
-		const toolRenderer = extractToolRendererConfig(parsed) ?? DEFAULT_TOOL_RENDERER;
-		const outputFilters = extractOutputFiltersConfig(parsed) ?? DEFAULT_OUTPUT_FILTERS;
-		const defaultModel = extractDefaultModelConfig(parsed);
-		const promptEnhancer = extractPromptEnhancerConfig(parsed) ?? DEFAULT_PROMPT_ENHANCER;
-		const autocomplete = extractAutocompleteConfig(parsed) ?? DEFAULT_AUTOCOMPLETE;
-		const modelColors = extractModelColorsConfig(parsed) ?? DEFAULT_MODEL_COLORS;
-		const configuredIconTheme = extractIconThemeConfig(parsed) ?? DEFAULT_ICON_THEME;
-		const iconTheme = { name: appIconThemeOverrideFromEnv() ?? configuredIconTheme.name } satisfies IconThemeConfig;
-		const dictation = extractDictationConfig(parsed) ?? DEFAULT_DICTATION;
-		return { toolRenderer, outputFilters, ...(defaultModel === undefined ? {} : { defaultModel }), promptEnhancer, autocomplete, modelColors, iconTheme, dictation };
+		return loadProjectPixConfig(cwd, pixConfigFromParsed(parsed));
 	} catch (error) {
 		process.stderr.write(`[pix] Failed to load ${configPath}: ${error instanceof Error ? error.message : String(error)}\n`);
-		return defaultPixConfig();
+		return loadProjectPixConfig(cwd, defaultPixConfig());
+	}
+}
+
+function loadProjectPixConfig(cwd: string | undefined, fallback: PixConfig): PixConfig {
+	if (!cwd) return fallback;
+
+	const configPath = getProjectPixConfigPath(cwd);
+	if (!existsSync(configPath)) return fallback;
+
+	try {
+		const raw = readFileSync(configPath, "utf8");
+		return pixConfigFromParsed(parseJsonc(raw), fallback);
+	} catch (error) {
+		process.stderr.write(`[pix] Failed to load ${configPath}: ${error instanceof Error ? error.message : String(error)}\n`);
+		return fallback;
 	}
 }
 
