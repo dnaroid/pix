@@ -12,6 +12,7 @@ import type {
 	Entry,
 	SessionActivity,
 	SlashCommand,
+	SubmittedUserMessage,
 } from "./types.js";
 import { AppCommandController } from "./commands/command-controller.js";
 import { ConversationViewport } from "./rendering/conversation-viewport.js";
@@ -57,6 +58,7 @@ import { checkPixUpdate, formatPixStartupUpdateDialog } from "./cli/update.js";
 import { AppVoiceController } from "./input/voice-controller.js";
 import { createIsolatedExtensionEventBus } from "./extensions/extension-event-bus.js";
 import { setAppIconTheme } from "./icons.js";
+import { AutoThinkingController } from "./thinking/auto-thinking.js";
 import {
 	type AgentSession,
 	type AgentSessionEvent,
@@ -77,6 +79,7 @@ export class PiUiExtendApp {
 	private readonly blinkController: AppBlinkController;
 	private readonly screenStyler: ScreenStyler;
 	private readonly statusController: AppStatusController;
+	private readonly autoThinkingController: AutoThinkingController;
 	private readonly statusLineRenderer: StatusLineRenderer;
 	private readonly modelUsageController: AppModelUsageController;
 	private readonly tabsController: AppTabsController;
@@ -158,6 +161,7 @@ export class PiUiExtendApp {
 			cwd: this.options.cwd,
 			get mouseSelection() { return app.mouseController.mouseSelection; },
 		});
+		this.autoThinkingController = new AutoThinkingController();
 		this.toastController = new AppToastController({
 			render: () => this.render(),
 		});
@@ -170,6 +174,7 @@ export class PiUiExtendApp {
 			theme: this.theme,
 			blinkController: this.blinkController,
 			runtimeSession: () => this.runtime?.session,
+			autoThinkingLabel: (session) => this.autoThinkingController.label(session),
 			render: () => this.scheduleRender(),
 		});
 		this.modelUsageController = new AppModelUsageController({
@@ -240,6 +245,7 @@ export class PiUiExtendApp {
 			getBuiltinSlashCommands: () => this.slashCommands,
 			getEntries: () => this.entries,
 			getResumeSessions: () => this.resumeSessions,
+			isAutoThinkingEnabled: (session) => this.autoThinkingController.isEnabled(session),
 		});
 		const popupMenuRenderer = new PopupMenuRenderer({
 			theme: this.theme,
@@ -397,6 +403,7 @@ export class PiUiExtendApp {
 			setInput: (value) => this.inputEditor.setText(value),
 			insertInput: (value) => this.inputEditor.insert(value),
 			attachImage: (data, mimeType) => this.inputEditor.attachImage(data, mimeType),
+			prepareAutoThinkingForPrompt: (message) => this.prepareAutoThinkingForPrompt(message),
 			onDeferredUserMessagesChanged: () => this.tabsController.persistActiveDeferredUserMessages(),
 		});
 		this.editorLayoutRenderer = new EditorLayoutRenderer({
@@ -466,9 +473,15 @@ export class PiUiExtendApp {
 			render: () => this.render(),
 			showMenu: (items, options) => this.popupMenus.menuController.show(items, options),
 			getModelMenuItems: (query) => this.menuItems.getModelMenuItems(query),
-			getThinkingMenuItems: (query) => this.menuItems.getThinkingMenuItems(query),
+			getThinkingMenuItems: (query, options) => this.menuItems.getThinkingMenuItems(query, options),
 			modelRef: (model) => this.menuItems.modelRef(model),
 			getFavoriteScopedModels: () => this.menuItems.getFavoriteScopedModels(),
+			isAutoThinkingEnabled: (session) => this.autoThinkingController.isEnabled(session),
+			setAutoThinkingEnabled: (session, enabled) => {
+				if (enabled) this.autoThinkingController.enable(session);
+				else this.autoThinkingController.disable(session);
+			},
+			autoThinkingLabel: (session) => this.autoThinkingController.label(session),
 			setSessionStatus: (session) => this.setSessionStatus(session),
 			queueUserMessage: (text) => {
 				this.queuedMessages.deferUserMessage(this.queuedMessages.createSubmittedUserMessage(text, text, []));
@@ -829,6 +842,12 @@ export class PiUiExtendApp {
 
 	private restoreSessionStatus(): void {
 		if (this.runtime) this.setSessionStatus(this.runtime.session);
+	}
+
+	private prepareAutoThinkingForPrompt(message: SubmittedUserMessage): { restore(): void } | undefined {
+		const session = this.runtime?.session;
+		if (!session) return undefined;
+		return this.autoThinkingController.prepareForPrompt(session, message);
 	}
 
 	private setInput(value: string): void {

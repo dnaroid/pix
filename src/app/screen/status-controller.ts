@@ -13,6 +13,7 @@ export type AppStatusControllerHost = {
 	readonly theme: Theme;
 	readonly blinkController: AppBlinkController;
 	runtimeSession(): AgentSession | undefined;
+	autoThinkingLabel?(session: AgentSession): string | undefined;
 	render(): void;
 };
 
@@ -77,7 +78,7 @@ export class AppStatusController {
 	}
 
 	statusThinkingLabel(session: AgentSession): string {
-		return session.thinkingLevel;
+		return this.host.autoThinkingLabel?.(session) ?? session.thinkingLevel;
 	}
 
 	statusSessionLabel(session: AgentSession): string {

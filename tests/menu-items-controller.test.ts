@@ -51,9 +51,25 @@ describe("AppMenuItemsController queue menu", () => {
 		const controller = new AppMenuItemsController(host(runtime));
 
 		assert.deepEqual(controller.getModelMenuItems("").map((item) => item.label), ["openai-codex/gpt-5.5"]);
-		assert.deepEqual(controller.getThinkingMenuItems("").map((item) => item.label), ["off", `low ${APP_ICONS.check}`, "high"]);
+		assert.deepEqual(controller.getThinkingMenuItems("").map((item) => item.label), ["auto", `low ${APP_ICONS.check}`, "high"]);
+		assert.deepEqual(controller.getThinkingMenuItems("", { includeAuto: false }).map((item) => item.label), [`low ${APP_ICONS.check}`, "high"]);
 		assert.equal(controller.getFavoriteScopedModels()[0]?.thinkingLevel, "low");
 		assert.ok(refreshes >= 2);
+	});
+
+	it("marks auto thinking as current without forcing unavailable native levels", () => {
+		const runtime = {
+			session: {
+				model: model("zai", "glm-5-turbo", "GLM"),
+				thinkingLevel: "low",
+				scopedModels: [],
+				getAvailableThinkingLevels: () => ["high", "xhigh"],
+			},
+			services: { settingsManager: { getEnabledModels: () => undefined } },
+		} as unknown as AgentSessionRuntime;
+		const controller = new AppMenuItemsController({ ...host(runtime), isAutoThinkingEnabled: () => true });
+
+		assert.deepEqual(controller.getThinkingMenuItems("").map((item) => item.label), [`auto ${APP_ICONS.check}`, "high", "xhigh"]);
 	});
 
 	it("uses one universal cancellation item for queued messages", () => {

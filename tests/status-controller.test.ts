@@ -347,7 +347,7 @@ describe("StatusLineRenderer", () => {
 	});
 
 	it("places model usage limits after the workspace label", () => {
-		const usageLabel = "48% ██▍   31m • 92% ████▋ 5d0h";
+		const usageLabel = "48% ██▍   12:31 • 92% ████▋ 06.01";
 		const renderer = statusLineRenderer({ widgetText: "", voiceActive: false, modelUsageLabel: usageLabel });
 
 		const layout = renderer.layout(80);
@@ -357,7 +357,7 @@ describe("StatusLineRenderer", () => {
 	});
 
 	it("colors model usage bars by remaining quota thresholds", () => {
-		const usageLabel = "50% ██▌   5d0h • 20% █     31m";
+		const usageLabel = "50% ██▌   06.01 • 20% █     12:31";
 		const renderer = statusLineRenderer({ widgetText: "", voiceActive: false, modelUsageLabel: usageLabel });
 		const layout = renderer.layout(100);
 		const rendered = renderer.render(1, layout, 100);
@@ -369,7 +369,7 @@ describe("StatusLineRenderer", () => {
 			foreground: THEMES.dark.colors.warning,
 		})));
 
-		const lowRenderer = statusLineRenderer({ widgetText: "", voiceActive: false, modelUsageLabel: "19% ▉     1m" });
+		const lowRenderer = statusLineRenderer({ widgetText: "", voiceActive: false, modelUsageLabel: "19% ▉     12:01" });
 		const lowLayout = lowRenderer.layout(100);
 		const lowRendered = lowRenderer.render(1, lowLayout, 100);
 		assert.ok(lowRendered.includes(colorize("19%", {
@@ -378,7 +378,7 @@ describe("StatusLineRenderer", () => {
 	});
 
 	it("renders Antigravity usage email in white", () => {
-		const usageLabel = "user@example.com 99% ████▉ 6d22h";
+		const usageLabel = "user@example.com 99% ████▉ 06.01";
 		const renderer = statusLineRenderer({ widgetText: "", voiceActive: false, modelUsageLabel: usageLabel });
 		const layout = renderer.layout(100);
 		const rendered = renderer.render(1, layout, 100);
@@ -389,7 +389,7 @@ describe("StatusLineRenderer", () => {
 	});
 
 	it("returns a click target for the model usage label", () => {
-		const usageLabel = "user@example.com 99% ████▉ 6d22h";
+		const usageLabel = "user@example.com 99% ████▉ 06.01";
 		const renderer = statusLineRenderer({ widgetText: "", voiceActive: false, modelUsageLabel: usageLabel });
 		const layout = renderer.layout(100);
 		const target = renderer.modelUsageTarget(layout.text, 1, layout);

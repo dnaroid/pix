@@ -215,7 +215,7 @@ Type `/` in the prompt to open the command picker. Commands that accept argument
 | `/settings` | — | Show current session, model, theme, and key settings. |
 | `/model` | `[provider/model[:thinking]]` | Select the active model. Without arguments, opens the model picker. With a reference like `anthropic/claude-sonnet-4-20250514:medium`, sets the model and optional thinking level directly. |
 | `/scoped-models` | `[refs…\|reset]` | Show or set the models used by the model selector and cycling. Pass one or more `provider/model[:thinking]` references separated by spaces or commas. Use `reset` to restore the default favorites. |
-| `/thinking` | `[level]` | Select the thinking level. Without arguments, opens the thinking picker. Accepts an explicit level (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`). |
+| `/thinking` | `[level\|auto]` | Select the thinking level. Without arguments, opens the thinking picker. Accepts an explicit level (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`) or `auto`, which chooses a supported level per prompt. |
 | `/enhance` | — | Improve the current prompt draft using the prompt enhancer model. |
 | `/export` | `[path]` | Export the session. Defaults to HTML. Pass a `.jsonl` path to export as JSONL. |
 | `/import` | `<path.jsonl>` | Import and resume a session from a JSONL file. |

@@ -2,7 +2,7 @@ import { join } from "node:path";
 import type { ResolvedToolRule } from "../config.js";
 
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
-export const THINKING_MENU_MAX_ROWS = THINKING_LEVELS.length + 1;
+export const THINKING_MENU_MAX_ROWS = THINKING_LEVELS.length + 2;
 export const PI_FAVORITE_MODEL_REFS = [
 	"amazon-bedrock/us.anthropic.claude-opus-4-6-v1",
 	"anthropic/claude-opus-4-8",

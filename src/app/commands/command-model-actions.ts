@@ -3,7 +3,8 @@ import type { CommandControllerHost } from "./command-host.js";
 import { getProjectPixConfigPath, savePixAutocompleteModel, savePixDefaultModel, savePixDefaultThinking, saveProjectPixIgnoreContextFiles } from "../../config.js";
 import { createId } from "../id.js";
 import { isThinkingLevel, parseScopedModelRef } from "../model/model-ref.js";
-import type { ScopedSessionModel, SessionModel, ThinkingLevel } from "../types.js";
+import { AUTO_THINKING_LEVEL, isThinkingSelection } from "../thinking/auto-thinking.js";
+import type { ScopedSessionModel, SessionModel, ThinkingLevel, ThinkingSelection } from "../types.js";
 
 export class ModelCommandActions {
 	constructor(private readonly host: CommandControllerHost) {}
@@ -26,7 +27,7 @@ export class ModelCommandActions {
 			`prompt enhancer model: ${this.host.promptEnhancerModelRef()}`,
 			`autocomplete model: ${this.host.autocompleteModelRef() || "disabled"}`,
 			`context files: ${this.host.ignoreContextFiles() ? "disabled" : "enabled"}`,
-			`thinking: ${runtime.session.thinkingLevel}`,
+			`thinking: ${this.host.autoThinkingLabel(runtime.session) ?? runtime.session.thinkingLevel}`,
 			`theme: ${settings.getTheme() ?? this.host.options.themeName}`,
 			`skill commands: ${settings.getEnableSkillCommands() ? "enabled" : "disabled"}`,
 			`auto compaction: ${runtime.session.autoCompactionEnabled ? "enabled" : "disabled"}`,
@@ -248,14 +249,14 @@ export class ModelCommandActions {
 			return;
 		}
 
-		if (!isThinkingLevel(level)) throw new Error(`Unknown thinking level: ${level}`);
+		if (!isThinkingSelection(level)) throw new Error(`Unknown thinking level: ${level}`);
 		await this.runThinkingCommand(level);
 	}
 
 	async runDefaultThinkingSlashCommand(argumentsText: string): Promise<void> {
 		const level = argumentsText.trim();
 		if (!level) {
-			const selected = await this.host.showMenu(this.host.getThinkingMenuItems(""), {
+			const selected = await this.host.showMenu(this.host.getThinkingMenuItems("", { includeAuto: false }), {
 				title: "Select default thinking level",
 				placeholder: "Search thinking levels",
 				emptyText: "No matching thinking levels",
@@ -266,6 +267,7 @@ export class ModelCommandActions {
 				return;
 			}
 
+			if (!isThinkingLevel(selected.level)) throw new Error(`Unknown thinking level: ${selected.level}`);
 			this.saveDefaultThinking(selected.level);
 			this.host.render();
 			return;
@@ -287,12 +289,20 @@ export class ModelCommandActions {
 		this.host.setSessionStatus(runtime.session);
 	}
 
-	async runThinkingCommand(level: ThinkingLevel): Promise<void> {
+	async runThinkingCommand(level: ThinkingSelection): Promise<void> {
 		const runtime = getRuntime(this.host, "thinking");
 		if (!runtime) return;
 
 		this.host.setStatus(`selecting thinking ${level}`);
 		this.host.render();
+		if (level === AUTO_THINKING_LEVEL) {
+			this.host.setAutoThinkingEnabled(runtime.session, true);
+			this.host.addEntry({ id: createId("system"), kind: "system", text: "Auto thinking enabled. Pix will choose a supported thinking level for each new prompt." });
+			this.host.setSessionStatus(runtime.session);
+			return;
+		}
+
+		if (this.host.isAutoThinkingEnabled(runtime.session)) this.host.setAutoThinkingEnabled(runtime.session, false);
 		runtime.session.setThinkingLevel(level);
 		this.host.addEntry({ id: createId("system"), kind: "system", text: `Selected thinking level ${runtime.session.thinkingLevel}` });
 		this.host.setSessionStatus(runtime.session);

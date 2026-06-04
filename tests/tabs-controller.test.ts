@@ -718,6 +718,145 @@ describe("AppTabsController", () => {
 		assert.equal(tab?.titlePlaceholder, "loading");
 	});
 
+	it("settles the only startup tab to New when there are no tabs to restore", async () => {
+		const runtime = fakeRuntime("019e7d3fabc", "/tmp/one.jsonl", { sessionName: undefined });
+		const controller = new AppTabsController({
+			options: { cwd: "/tmp", themeName: "dark", noSession: false } satisfies AppOptions,
+			blinkController: fakeBlinkController(),
+			runtime: () => runtime,
+			createRuntimeForNewSession: async () => fakeRuntime("new", "/tmp/new.jsonl"),
+			createRuntimeForSession: async () => runtime,
+			activateRuntime: async () => {},
+			disposeRuntime: async () => {},
+			isRunning: () => true,
+			setStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			resetSessionView: () => {},
+			loadSessionHistory: () => {},
+			loadSessionHistoryAsync: async () => true,
+			syncUserSessionEntryMetadata: () => {},
+			captureInputState: () => ({ text: "", cursor: 0 }),
+			restoreInputState: () => {},
+			addEntry: () => {},
+			showToast: () => {},
+			render: () => {},
+		});
+		const tabs = controller as unknown as {
+			loadTabs: () => Promise<undefined>;
+			saveTabs: () => Promise<void>;
+		};
+		tabs.loadTabs = async () => undefined;
+		tabs.saveTabs = async () => {};
+
+		controller.syncActiveTabFromRuntime({ save: false });
+		assert.equal(controller.tabs()[0]?.titlePlaceholder, "loading");
+
+		await controller.restoreAfterStartup();
+
+		const tab = controller.tabs()[0];
+		assert.equal(tab?.title, "session 019e7d3f");
+		assert.equal(tab?.titlePlaceholder, "new");
+	});
+
+	it("restores a previously empty startup tab as New instead of a persisted Loading title", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "pix-tabs-loading-"));
+		const sessionPath = join(dir, "019e7d3fabc.jsonl");
+		const tabsPath = join(dir, "tabs.json");
+		await writeFile(sessionPath, "", "utf8");
+		await writeFile(tabsPath, JSON.stringify({
+			version: 3,
+			cwd: dir,
+			activePath: sessionPath,
+			tabs: [{ path: sessionPath, title: "Loading…" }],
+		}), "utf8");
+
+		const runtime = fakeRuntime("019e7d3fabc", sessionPath, { sessionName: undefined });
+		const controller = new AppTabsController({
+			options: { cwd: dir, themeName: "dark", noSession: false } satisfies AppOptions,
+			blinkController: fakeBlinkController(),
+			runtime: () => runtime,
+			createRuntimeForNewSession: async () => fakeRuntime("new", join(dir, "new.jsonl")),
+			createRuntimeForSession: async () => runtime,
+			activateRuntime: async () => {},
+			disposeRuntime: async () => {},
+			isRunning: () => true,
+			setStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			resetSessionView: () => {},
+			loadSessionHistory: () => {},
+			loadSessionHistoryAsync: async () => true,
+			syncUserSessionEntryMetadata: () => {},
+			captureInputState: () => ({ text: "", cursor: 0 }),
+			restoreInputState: () => {},
+			addEntry: () => {},
+			showToast: () => {},
+			render: () => {},
+		});
+		const tabs = controller as unknown as {
+			filePath: () => string;
+			loadSessionTitles: () => Promise<ReadonlyMap<string, string>>;
+		};
+		tabs.filePath = () => tabsPath;
+		tabs.loadSessionTitles = async () => new Map();
+
+		await controller.restoreAfterStartup();
+
+		const tab = controller.tabs()[0];
+		assert.equal(tab?.title, "session 019e7d3f");
+		assert.equal(tab?.titlePlaceholder, "new");
+	});
+
+	it("restores a startup tab as New when the session list and runtime still report Loading", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "pix-tabs-runtime-loading-"));
+		const sessionPath = join(dir, "019e7d3fabc.jsonl");
+		const tabsPath = join(dir, "tabs.json");
+		await writeFile(sessionPath, "", "utf8");
+		await writeFile(tabsPath, JSON.stringify({
+			version: 3,
+			cwd: dir,
+			activePath: sessionPath,
+			tabs: [{ path: sessionPath, title: "Loading…" }],
+		}), "utf8");
+
+		const runtime = fakeRuntime("019e7d3fabc", sessionPath, { sessionName: "Loading..." });
+		const controller = new AppTabsController({
+			options: { cwd: dir, themeName: "dark", noSession: false } satisfies AppOptions,
+			blinkController: fakeBlinkController(),
+			runtime: () => runtime,
+			createRuntimeForNewSession: async () => fakeRuntime("new", join(dir, "new.jsonl")),
+			createRuntimeForSession: async () => runtime,
+			activateRuntime: async () => {},
+			disposeRuntime: async () => {},
+			isRunning: () => true,
+			setStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			resetSessionView: () => {},
+			loadSessionHistory: () => {},
+			loadSessionHistoryAsync: async () => true,
+			syncUserSessionEntryMetadata: () => {},
+			captureInputState: () => ({ text: "", cursor: 0 }),
+			restoreInputState: () => {},
+			addEntry: () => {},
+			showToast: () => {},
+			render: () => {},
+		});
+		const tabs = controller as unknown as {
+			filePath: () => string;
+			loadSessionTitles: () => Promise<ReadonlyMap<string, string>>;
+		};
+		tabs.filePath = () => tabsPath;
+		tabs.loadSessionTitles = async () => new Map([[resolve(sessionPath), "Loading…"]]);
+
+		await controller.restoreAfterStartup();
+
+		const tab = controller.tabs()[0];
+		assert.equal(tab?.title, "session 019e7d3f");
+		assert.equal(tab?.titlePlaceholder, "new");
+	});
+
 	it("keeps the previous tab when activation renders during new tab creation", async () => {
 		const activeRuntime = fakeRuntime("one", "/tmp/one.jsonl");
 		const newRuntime = fakeRuntime("two", "/tmp/two.jsonl");

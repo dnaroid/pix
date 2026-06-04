@@ -90,7 +90,7 @@ export type AppPopupMenuControllerHost = {
 	parseSlashInput(text: string): ParsedSlashInput | undefined;
 	getSlashCommandMenuItems(query: string): PopupMenuItem<SlashCommand>[];
 	getModelMenuItems(query: string): PopupMenuItem<ModelMenuValue>[];
-	getThinkingMenuItems(query: string): PopupMenuItem<ThinkingMenuValue>[];
+	getThinkingMenuItems(query: string, options?: { includeAuto?: boolean }): PopupMenuItem<ThinkingMenuValue>[];
 	getResumeMenuItems(query: string, limit?: number): PopupMenuItem<ResumeMenuValue>[];
 	getUserMessageMenuItems(): PopupMenuItem<UserMessageMenuValue>[];
 	getUserMessageJumpMenuItems(query: string): PopupMenuItem<UserMessageJumpMenuValue>[];

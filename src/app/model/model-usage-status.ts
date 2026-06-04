@@ -1083,18 +1083,29 @@ function maskCredential(value: string): string {
 	return `${visible.slice(0, 4)}****${visible.slice(-4)}`;
 }
 
-function formatUsageWindow(_prefix: "W" | "H", window: ModelUsageLimitWindow, now: number): string {
-	return `${window.remainingPercent}% ${formatCompactProgressBar(window.remainingPercent)} ${formatResetCountdown(window.resetAt, now)}`;
+function formatUsageWindow(prefix: "W" | "H", window: ModelUsageLimitWindow, now: number): string {
+	const resetLabel = prefix === "H" ? formatResetTime(window.resetAt, now) : formatGlobalResetLabel(window.resetAt, now);
+	return `${window.remainingPercent}% ${formatCompactProgressBar(window.remainingPercent)} ${resetLabel}`;
 }
 
-function formatResetCountdown(resetAt: number, now: number): string {
+function formatGlobalResetLabel(resetAt: number, now: number): string {
 	if (resetAt <= now) return "reset";
-	const totalMinutes = Math.max(0, Math.ceil((resetAt - now) / 60_000));
-	const days = Math.floor(totalMinutes / 1440);
-	const hours = Math.floor((totalMinutes % 1440) / 60);
-	const minutes = totalMinutes % 60;
+	return resetAt - now <= DAY_SECONDS * 1000 ? formatResetTime(resetAt, now) : formatResetDate(resetAt, now);
+}
 
-	if (days > 0) return `${days}d${hours}h`;
-	if (hours > 0) return `${hours}h${minutes}m`;
-	return `${minutes}m`;
+function formatResetTime(resetAt: number, now: number): string {
+	if (resetAt <= now) return "reset";
+	return new Date(resetAt).toLocaleTimeString("ru-RU", {
+		hour: "2-digit",
+		minute: "2-digit",
+		hourCycle: "h23",
+	});
+}
+
+function formatResetDate(resetAt: number, now: number): string {
+	if (resetAt <= now) return "reset";
+	return new Date(resetAt).toLocaleDateString("ru-RU", {
+		day: "2-digit",
+		month: "2-digit",
+	});
 }

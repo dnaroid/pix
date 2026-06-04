@@ -24,9 +24,12 @@ export type CommandControllerHost = {
 	render(): void;
 	showMenu<T>(items: readonly PixMenuItem<T>[], options: PixMenuOptions): Promise<T | undefined>;
 	getModelMenuItems(query: string): readonly PixMenuItem<ModelMenuValue>[];
-	getThinkingMenuItems(query: string): readonly PixMenuItem<ThinkingMenuValue>[];
+	getThinkingMenuItems(query: string, options?: { includeAuto?: boolean }): readonly PixMenuItem<ThinkingMenuValue>[];
 	modelRef(model: SessionModel): string;
 	getFavoriteScopedModels(): ScopedSessionModel[];
+	isAutoThinkingEnabled(session: AgentSession | undefined): boolean;
+	setAutoThinkingEnabled(session: AgentSession, enabled: boolean): void;
+	autoThinkingLabel(session: AgentSession): string | undefined;
 	setSessionStatus(session: AgentSession | undefined): void;
 	queueUserMessage(text: string): void;
 	resetSessionView(): void;

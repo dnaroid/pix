@@ -5,6 +5,7 @@ import type { PopupMenuItem } from "../../ui.js";
 import { PI_FAVORITE_MODEL_REFS, THINKING_LEVELS } from "../constants.js";
 import { APP_ICONS } from "../icons.js";
 import { parseScopedModelRef } from "../model/model-ref.js";
+import { AUTO_THINKING_LEVEL, normalizeAvailableThinkingLevels } from "../thinking/auto-thinking.js";
 import { buildUserMessageJumpItems, createSessionInfoMenuItemsLoader, type SessionInfoMenuItemsLoader } from "./popup-menu-controller.js";
 import { getResourceSlashCommands, getSlashCommandMatches, parseSlashInput } from "../commands/slash-commands.js";
 import type {
@@ -16,6 +17,7 @@ import type {
 	SessionModel,
 	SlashCommand,
 	ThinkingLevel,
+	ThinkingSelection,
 	ThinkingMenuValue,
 	UserMessageJumpMenuValue,
 	UserMessageMenuValue,
@@ -26,6 +28,7 @@ export type AppMenuItemsControllerHost = {
 	getBuiltinSlashCommands(): readonly SlashCommand[];
 	getEntries(): readonly Entry[];
 	getResumeSessions(): readonly SessionInfo[];
+	isAutoThinkingEnabled?(session: AgentSessionRuntime["session"] | undefined): boolean;
 };
 
 export class AppMenuItemsController {
@@ -97,25 +100,33 @@ export class AppMenuItemsController {
 		}));
 	}
 
-	getThinkingMenuItems(query: string): PopupMenuItem<ThinkingMenuValue>[] {
+	getThinkingMenuItems(query: string, options: { includeAuto?: boolean } = {}): PopupMenuItem<ThinkingMenuValue>[] {
 		const session = this.host.runtime()?.session;
 		const currentLevel = session?.thinkingLevel ?? "off";
-		const availableLevels: ThinkingLevel[] = session ? (session.getAvailableThinkingLevels() as ThinkingLevel[]) : [...THINKING_LEVELS];
-		const levels: ThinkingLevel[] = availableLevels.includes("off") ? availableLevels : ["off", ...availableLevels];
-		const items: FuzzySearchItem<ThinkingMenuValue>[] = levels.map((level) => ({
-			value: { level, current: level === currentLevel },
-			label: level,
-			keywords: [
-				level === "off" ? "disabled none no reasoning" : "reasoning thinking effort",
-				level === "minimal" ? "fast small" : "",
-				level === "xhigh" ? "extra highest maximum" : "",
-			].filter(Boolean),
-		}));
+		const autoEnabled = this.host.isAutoThinkingEnabled?.(session) === true;
+		const levels = session ? normalizeAvailableThinkingLevels(session.getAvailableThinkingLevels()) : [...THINKING_LEVELS];
+		const includeAuto = options.includeAuto !== false;
+		const items: FuzzySearchItem<ThinkingMenuValue>[] = [
+			...(includeAuto ? [{
+				value: { level: AUTO_THINKING_LEVEL, current: autoEnabled },
+				label: AUTO_THINKING_LEVEL,
+				keywords: ["automatic adaptive dynamic choose reasoning thinking effort"],
+			} satisfies FuzzySearchItem<ThinkingMenuValue>] : []),
+			...levels.map((level) => ({
+				value: { level, current: !autoEnabled && level === currentLevel },
+				label: level,
+				keywords: [
+					level === "off" ? "disabled none no reasoning" : "reasoning thinking effort",
+					level === "minimal" ? "fast small" : "",
+					level === "xhigh" ? "extra highest maximum" : "",
+				].filter(Boolean),
+			})),
+		];
 
 		return fuzzySearch(items, query).map((match) => ({
 			value: match.value,
 			label: `${match.value.level}${match.value.current ? ` ${APP_ICONS.check}` : ""}`,
-			description: this.thinkingLevelDescription(match.value.level),
+			description: this.thinkingLevelDescription(match.value.level, levels),
 		}));
 	}
 
@@ -211,8 +222,10 @@ export class AppMenuItemsController {
 		});
 	}
 
-	private thinkingLevelDescription(level: ThinkingLevel): string {
+	private thinkingLevelDescription(level: ThinkingSelection, availableLevels: readonly ThinkingLevel[]): string {
 		switch (level) {
+			case "auto":
+				return `Automatic per prompt (${availableLevels.join(", ")})`;
 			case "off":
 				return "No reasoning/thinking";
 			case "minimal":
