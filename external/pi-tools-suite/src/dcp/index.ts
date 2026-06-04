@@ -105,7 +105,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 	// ── 2. Create state ───────────────────────────────────────────────────────
 	const state = createState()
 	const appendNudgeTelemetry = (
-		event: "emitted" | "upgraded",
+		event: "emitted" | "upgraded" | "reapplied",
 		type: DcpNudgeType,
 		anchor: { id: number; anchorTimestamp: number; anchorStableId?: string; anchorRole: string },
 		usage: ReturnType<typeof normalizeDcpContextUsage>,
@@ -329,6 +329,21 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 							toolCallsSinceLastUser,
 						)
 						saveState(pi, state)
+					} else {
+						// Anchor already exists at >= priority; the reminder text is
+						// re-applied below via applyAnchoredNudges on every context
+						// event. Emit 'reapplied' so telemetry reflects every active
+						// reminder delivery, not just creates/upgrades. Without this
+						// branch the user/developer sees a single "emitted" entry even
+						// when the LLM was reminded many times across a long autonomous
+						// loop, which made auto-nudge look silent when it actually ran.
+						appendNudgeTelemetry(
+							"reapplied",
+							anchorResult.anchor.type,
+							anchorResult.anchor,
+							usage,
+							toolCallsSinceLastUser,
+						)
 					}
 				} else {
 					// No safe existing message could be anchored (rare); keep the older

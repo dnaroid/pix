@@ -267,7 +267,7 @@ export class AppRenderController {
 			}
 		}
 
-		for (const toastOverlay of renderToastOverlays(this.deps.toastController.toast.visibleStates, columns, Math.max(0, statusRow - topReservedRows - 1), this.deps.theme)) {
+		for (const toastOverlay of renderToastOverlays(visibleToastStates(this.deps.toastController), columns, Math.max(0, statusRow - topReservedRows - 1), this.deps.theme)) {
 			const row = topReservedRows + toastOverlay.row;
 			const rowText = this.deps.mouseController.renderedRowTexts.get(row) ?? "";
 			if (toastOverlay.target) this.deps.mouseController.renderedTargets.set(row, toastOverlay.target);
@@ -350,6 +350,11 @@ export class AppRenderController {
 
 		return { row: Math.min(2, rows - 1), text, output };
 	}
+}
+
+function visibleToastStates(toastController: AppToastController): ReturnType<AppToastController["visibleStates"]> {
+	const candidate = toastController as AppToastController & { toast?: { visibleStates?: ReturnType<AppToastController["visibleStates"]> } };
+	return typeof candidate.visibleStates === "function" ? candidate.visibleStates() : candidate.toast?.visibleStates ?? [];
 }
 
 function inputFrameLine(width: number, edge: "top" | "bottom"): string {

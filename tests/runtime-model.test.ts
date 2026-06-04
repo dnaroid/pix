@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 
-import { resolvePixRuntimeModelRef, resolveSessionModelRefFromTail } from "../src/app/runtime.js";
+import { resolvePixRuntimeInitialThinkingLevel, resolvePixRuntimeModelRef, resolveSessionModelRefFromTail } from "../src/app/runtime.js";
 import type { PixConfig } from "../src/config.js";
 
 const configWithDefault = {
@@ -18,6 +18,12 @@ describe("runtime model defaults", () => {
 
 	it("keeps an explicit runtime model override even when resuming a session", () => {
 		assert.equal(resolvePixRuntimeModelRef({ modelRef: "zai/glm-5-turbo:low" }, fakeSessionManager(1), configWithDefault), "zai/glm-5-turbo:low");
+	});
+
+	it("resolves initial thinking only from explicit or resumed model refs", () => {
+		assert.equal(resolvePixRuntimeInitialThinkingLevel({}, fakeSessionManager(0), configWithDefault), "medium");
+		assert.equal(resolvePixRuntimeInitialThinkingLevel({ modelRef: "zai/glm-5-turbo:low" }, fakeSessionManager(0), configWithDefault), "low");
+		assert.equal(resolvePixRuntimeInitialThinkingLevel({}, fakeSessionManager(1), configWithDefault), "low");
 	});
 
 	it("scans resumed session state from the tail so later model and thinking changes win", () => {

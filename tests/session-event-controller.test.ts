@@ -303,25 +303,6 @@ describe("AppSessionEventController", () => {
 		assert.equal(entries[0]?.kind === "assistant" ? entries[0].text : undefined, "answer\nnext");
 	});
 
-	it("hides split adaptive thinking control frames before visible assistant text", () => {
-		const entries: Entry[] = [];
-		const controller = createController(entries);
-
-		controller.handleSessionEvent({
-			type: "message_update",
-			assistantMessageEvent: { type: "text_delta", delta: "<pix" },
-		} as unknown as AgentSessionEvent);
-		assert.equal(entries.length, 0);
-
-		controller.handleSessionEvent({
-			type: "message_update",
-			assistantMessageEvent: { type: "text_delta", delta: 'ctl>{"thinking":"high","apply":"next_call","reasonCode":"tests"}</pixctl>\nVisible' },
-		} as unknown as AgentSessionEvent);
-
-		assert.equal(entries.length, 1);
-		assert.equal(entries[0]?.kind === "assistant" ? entries[0].text : undefined, "Visible");
-	});
-
 	it("records workspace mutations and user metadata from session events", () => {
 		const entries: Entry[] = [];
 		const preparedCalls: Array<{ toolName: string; args: unknown }> = [];

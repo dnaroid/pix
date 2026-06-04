@@ -24,8 +24,6 @@ import type {
 } from "./constants.js";
 
 export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
-export type AutoThinkingLevel = "auto";
-export type ThinkingSelection = ThinkingLevel | AutoThinkingLevel;
 export type NativeModifierKey = "shift" | "command" | "control" | "option";
 export type SessionActivity = "idle" | "running" | "thinking";
 export type SessionTabStatus = "active" | "waiting";
@@ -532,7 +530,7 @@ export type ScopedSessionModel = {
 };
 
 export type ThinkingMenuValue = {
-	level: ThinkingSelection;
+	level: ThinkingLevel;
 	current: boolean;
 };
 

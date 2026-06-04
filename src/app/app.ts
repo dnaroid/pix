@@ -12,7 +12,6 @@ import type {
 	Entry,
 	SessionActivity,
 	SlashCommand,
-	SubmittedUserMessage,
 	UserMessageJumpMenuValue,
 } from "./types.js";
 import { AppCommandController } from "./commands/command-controller.js";
@@ -59,17 +58,6 @@ import { checkPixUpdate, formatPixStartupUpdateDialog } from "./cli/update.js";
 import { AppVoiceController } from "./input/voice-controller.js";
 import { createIsolatedExtensionEventBus } from "./extensions/extension-event-bus.js";
 import { setAppIconTheme } from "./icons.js";
-import { logPixEvent } from "./logger.js";
-import {
-	appendAutoThinkingSessionState,
-	AutoThinkingController,
-	formatAutoThinkingDecision,
-	resolveAutoThinkingSessionState,
-	type AutoThinkingDecision,
-	type AutoThinkingAdaptiveRequest,
-} from "./thinking/auto-thinking.js";
-import { formatAutoThinkingControlFrameLine } from "./thinking/adaptive-thinking.js";
-import { appendPixSystemDisplayEntry } from "./session/pix-system-message.js";
 import {
 	type AgentSession,
 	type AgentSessionEvent,
@@ -90,7 +78,6 @@ export class PiUiExtendApp {
 	private readonly blinkController: AppBlinkController;
 	private readonly screenStyler: ScreenStyler;
 	private readonly statusController: AppStatusController;
-	private readonly autoThinkingController: AutoThinkingController;
 	private readonly statusLineRenderer: StatusLineRenderer;
 	private readonly modelUsageController: AppModelUsageController;
 	private readonly tabsController: AppTabsController;
@@ -172,8 +159,8 @@ export class PiUiExtendApp {
 			cwd: this.options.cwd,
 			get mouseSelection() { return app.mouseController.mouseSelection; },
 		});
-		this.autoThinkingController = new AutoThinkingController();
 		this.toastController = new AppToastController({
+			activeScope: () => this.activeExtensionUiScope(),
 			render: () => this.render(),
 		});
 		this.nerdFontController = new NerdFontController({
@@ -185,7 +172,6 @@ export class PiUiExtendApp {
 			theme: this.theme,
 			blinkController: this.blinkController,
 			runtimeSession: () => this.runtime?.session,
-			autoThinkingLabel: (session) => this.autoThinkingController.label(session),
 			render: () => this.scheduleRender(),
 		});
 		this.modelUsageController = new AppModelUsageController({
@@ -257,7 +243,6 @@ export class PiUiExtendApp {
 			getBuiltinSlashCommands: () => this.slashCommands,
 			getEntries: () => this.entries,
 			getResumeSessions: () => this.resumeSessions,
-			isAutoThinkingEnabled: (session) => this.autoThinkingController.isEnabled(session),
 		});
 		const popupMenuRenderer = new PopupMenuRenderer({
 			theme: this.theme,
@@ -327,8 +312,9 @@ export class PiUiExtendApp {
 			activeExtensionUiScope: () => this.activeExtensionUiScope(),
 			isRunning: () => this.running,
 			render: () => this.render(),
-			showToast: (message, kind) => this.showToast(message, kind),
+			showToast: (message: string, kind?: ToastKind, options?: { scopeKey?: string }) => this.showToast(message, kind, options),
 			toastNotifier: this.toastNotifier,
+			toastNotifierForScope: (scopeKey: string | undefined) => this.toastNotifierForScope(scopeKey),
 			menuController: this.popupMenus.menuController,
 			setStatus: (status) => this.setStatus(status),
 			restoreSessionStatus: () => this.restoreSessionStatus(),
@@ -419,7 +405,6 @@ export class PiUiExtendApp {
 			setInput: (value) => this.inputEditor.setText(value),
 			insertInput: (value) => this.inputEditor.insert(value),
 			attachImage: (data, mimeType) => this.inputEditor.attachImage(data, mimeType),
-			prepareAutoThinkingForPrompt: (message) => this.prepareAutoThinkingForPrompt(message),
 			onDeferredUserMessagesChanged: () => this.tabsController.persistActiveDeferredUserMessages(),
 		});
 		this.editorLayoutRenderer = new EditorLayoutRenderer({
@@ -489,14 +474,9 @@ export class PiUiExtendApp {
 			render: () => this.render(),
 			showMenu: (items, options) => this.popupMenus.menuController.show(items, options),
 			getModelMenuItems: (query) => this.menuItems.getModelMenuItems(query),
-			getThinkingMenuItems: (query, options) => this.menuItems.getThinkingMenuItems(query, options),
+			getThinkingMenuItems: (query) => this.menuItems.getThinkingMenuItems(query),
 			modelRef: (model) => this.menuItems.modelRef(model),
 			getFavoriteScopedModels: () => this.menuItems.getFavoriteScopedModels(),
-			isAutoThinkingEnabled: (session) => this.autoThinkingController.isEnabled(session),
-			setAutoThinkingEnabled: (session, enabled) => {
-				this.setAutoThinkingEnabled(session, enabled);
-			},
-			autoThinkingLabel: (session) => this.autoThinkingController.label(session),
 			setSessionStatus: (session) => this.setSessionStatus(session),
 			queueUserMessage: (text) => {
 				this.queuedMessages.deferUserMessage(this.queuedMessages.createSubmittedUserMessage(text, text, []));
@@ -593,7 +573,7 @@ export class PiUiExtendApp {
 				closeTab: (tabId) => {
 					void this.tabsController.closeTab(tabId);
 				},
-				toastEntry: (toastId) => this.toastController.toast.entry(toastId),
+				toastEntry: (toastId) => this.toastController.entry(toastId),
 				showToast: (message, kind, options) => this.showToast(message, kind, options),
 				dismissToast: (toastId) => this.toastController.dismissToast(toastId),
 				refreshModelUsageStatus: () => this.refreshModelUsageStatusFromClick(),
@@ -811,12 +791,6 @@ export class PiUiExtendApp {
 	private createRuntime(options: AppOptions): Promise<AgentSessionRuntime> {
 		return createPixRuntime(options, {
 			eventBus: this.createExtensionEventBus(),
-			autoThinking: {
-				isEnabled: (session) => this.autoThinkingController.isEnabled(session),
-				enableDefault: (session) => this.setAutoThinkingEnabled(session, true),
-				applyControl: (session, control) => this.autoThinkingController.applyAdaptiveRequest(session, control),
-				onDecision: (session, decision, control) => this.recordAutoThinkingDecision(session, decision, control),
-			},
 		});
 	}
 
@@ -839,21 +813,6 @@ export class PiUiExtendApp {
 
 	private async bindCurrentSession(): Promise<void> {
 		await this.sessionLifecycle.bindCurrentSession();
-		this.restoreAutoThinkingSessionState();
-	}
-
-	private setAutoThinkingEnabled(session: AgentSession, enabled: boolean): void {
-		if (enabled) this.autoThinkingController.enable(session);
-		else this.autoThinkingController.disable(session);
-		appendAutoThinkingSessionState(session, enabled);
-	}
-
-	private restoreAutoThinkingSessionState(): void {
-		const session = this.runtime?.session;
-		if (!session) return;
-		const enabled = resolveAutoThinkingSessionState(session.sessionManager.getBranch());
-		if (enabled === true) this.autoThinkingController.enable(session);
-		else if (enabled === false) this.autoThinkingController.disable(session, { restoreBaseline: false });
 	}
 
 	private async activateRuntime(runtime: AgentSessionRuntime): Promise<void> {
@@ -893,36 +852,6 @@ export class PiUiExtendApp {
 		const session = this.runtime?.session;
 		if (!session) return undefined;
 		return session.sessionFile ?? session.sessionId;
-	}
-
-	private async prepareAutoThinkingForPrompt(message: SubmittedUserMessage): Promise<void> {
-		const runtime = this.runtime;
-		const session = runtime?.session;
-		if (!session) return;
-		await this.autoThinkingController.prepareForPrompt(session, message);
-	}
-
-	private recordAutoThinkingDecision(session: AgentSession, decision: AutoThinkingDecision, control?: AutoThinkingAdaptiveRequest): void {
-		logPixEvent("info", "auto_thinking.adaptive_decision", {
-			sessionId: session.sessionId,
-			sessionFile: session.sessionFile,
-			level: decision.level,
-			desiredLevel: decision.desiredLevel,
-			reason: decision.reason,
-			availableLevels: decision.availableLevels,
-			...(control === undefined ? {} : {
-				controlFrame: formatAutoThinkingControlFrameLine(control),
-				controlThinking: control.thinking,
-				controlApply: control.apply,
-				controlReasonCode: control.reasonCode,
-			}),
-		});
-		const text = formatAutoThinkingDecision(decision);
-		appendPixSystemDisplayEntry(session, text);
-		if (this.runtime?.session !== session) return;
-		this.addEntry({ id: createId("system"), kind: "system", text });
-		this.setSessionStatus(session);
-		this.scheduleRender();
 	}
 
 	private setInput(value: string): void {
@@ -1134,8 +1063,22 @@ export class PiUiExtendApp {
 		});
 	}
 
-	private showToast(message: string, kind: ToastKind = "info", options?: { durationMs?: number; variant?: ToastVariant }): void {
+	private showToast(message: string, kind: ToastKind = "info", options?: { durationMs?: number; variant?: ToastVariant; scopeKey?: string }): void {
 		this.toastController.showToast(message, kind, options);
+	}
+
+	private toastNotifierForScope(scopeKey: string | undefined): ToastNotifier {
+		const options = (): { scopeKey?: string } => {
+			if (scopeKey === undefined) return {};
+			return { scopeKey };
+		};
+		return {
+			show: (message, kind = "info") => this.showToast(message, kind, options()),
+			success: (message) => this.showToast(message, "success", options()),
+			error: (message) => this.showToast(message, "error", options()),
+			warning: (message) => this.showToast(message, "warning", options()),
+			info: (message) => this.showToast(message, "info", options()),
+		};
 	}
 
 	private clearToastTimers(): void {

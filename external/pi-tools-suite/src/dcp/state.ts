@@ -283,6 +283,20 @@ export interface SerializedDcpState {
   nudgeAnchors?: DcpNudgeAnchor[]
   nextNudgeAnchorId?: number
   lastNudge?: DcpLastNudge
+  /**
+   * Persisted since v??. `context` events re-seed currentTurn from raw
+   * messages, but keeping it across session restarts gives diagnostics and
+   * telemetry a contiguous turn counter instead of resetting to 0.
+   */
+  currentTurn?: number
+  /**
+   * Persisted since v?.?. Without persistence a pi process restart silently
+   * reset the nudge cadence counter to 0, which could suppress the next
+   * reminder on a session that was already near a context threshold.
+   */
+  nudgeCounter?: number
+  /** Persisted since v?.?. Diagnostic turn of the last emitted nudge. */
+  lastNudgeTurn?: number
 }
 
 function isToolRecord(value: unknown): value is ToolRecord {
@@ -337,6 +351,9 @@ export function serializeState(state: DcpState): SerializedDcpState {
     nudgeAnchors: state.nudgeAnchors,
     nextNudgeAnchorId: state.nextNudgeAnchorId,
     lastNudge: state.lastNudge,
+    currentTurn: state.currentTurn,
+    nudgeCounter: state.nudgeCounter,
+    lastNudgeTurn: state.lastNudgeTurn,
   }
 }
 
@@ -443,6 +460,24 @@ export function restoreState(state: DcpState, data: unknown): void {
 
   if (isLastNudge(saved.lastNudge)) {
     state.lastNudge = saved.lastNudge
+  }
+
+  // nudgeCounter: clamp to a non-negative integer so a corrupted payload
+  // cannot stall reminders by going negative. Default 0 keeps older sessions
+  // behaving like a fresh cadence on first post-restart context event.
+  if (typeof saved.nudgeCounter === "number" && Number.isFinite(saved.nudgeCounter) && saved.nudgeCounter >= 0) {
+    state.nudgeCounter = Math.floor(saved.nudgeCounter)
+  }
+
+  // lastNudgeTurn and currentTurn default to createState() values when absent
+  // (lastNudgeTurn = -1, currentTurn = 0). currentTurn is re-derived from
+  // raw messages on every `context` event, so persistence here is best-effort
+  // for telemetry continuity rather than authoritative.
+  if (typeof saved.lastNudgeTurn === "number" && Number.isFinite(saved.lastNudgeTurn)) {
+    state.lastNudgeTurn = Math.floor(saved.lastNudgeTurn)
+  }
+  if (typeof saved.currentTurn === "number" && Number.isFinite(saved.currentTurn) && saved.currentTurn >= 0) {
+    state.currentTurn = Math.floor(saved.currentTurn)
   }
 }
 

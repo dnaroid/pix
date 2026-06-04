@@ -8,7 +8,6 @@ import { sessionHistoryDisplayMessages, sessionHistoryOlderMessagesReader } from
 import type { Entry, SessionActivity } from "../types.js";
 import { isRecord } from "../guards.js";
 import type { WorkspaceMutation, WorkspaceMutationPreparation } from "../workspace/workspace-undo.js";
-import { isAutoThinkingControlFrameLine, isPotentialAutoThinkingControlFrame } from "../thinking/adaptive-thinking.js";
 
 type ToolEntryUpdate = {
 	toolName?: string;
@@ -436,7 +435,7 @@ export class AppSessionEventController {
 
 		if (!this.assistantTextBuffer) return visibleText;
 
-		if (shouldHoldAssistantStreamTail(this.assistantTextBuffer, this.hasVisibleAssistantText(visibleText))) {
+		if (shouldHoldAssistantStreamTail(this.assistantTextBuffer)) {
 			if (final) this.assistantTextBuffer = "";
 			return visibleText;
 		}
@@ -514,13 +513,11 @@ export class AppSessionEventController {
 
 function shouldDropAssistantStreamLine(line: string, hasVisibleText: boolean): boolean {
 	if (line.trim().length === 0 && !hasVisibleText) return true;
-	if (!hasVisibleText && isAutoThinkingControlFrameLine(line)) return true;
 	return isHiddenMarkdownMetadataLine(line);
 }
 
-function shouldHoldAssistantStreamTail(text: string, hasVisibleText: boolean): boolean {
+function shouldHoldAssistantStreamTail(text: string): boolean {
 	if (text.trim().length === 0) return true;
-	if (!hasVisibleText && isPotentialAutoThinkingControlFrame(text)) return true;
 	return isPotentialDcpMetadataLine(text);
 }
 

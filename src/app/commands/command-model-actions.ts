@@ -3,10 +3,9 @@ import { getIdleRuntime, getRuntime } from "./command-runtime.js";
 import type { CommandControllerHost } from "./command-host.js";
 import { getProjectPixConfigPath, savePixAutocompleteModel, savePixDefaultModel, savePixDefaultThinking, saveProjectPixIgnoreContextFiles } from "../../config.js";
 import { createId } from "../id.js";
-import { parseScopedModelRef } from "../model/model-ref.js";
-import { AUTO_THINKING_LEVEL, isThinkingSelection } from "../thinking/auto-thinking.js";
+import { isThinkingLevel, parseScopedModelRef } from "../model/model-ref.js";
 import { appendPixSystemDisplayEntry } from "../session/pix-system-message.js";
-import type { ScopedSessionModel, SessionModel, ThinkingSelection } from "../types.js";
+import type { ScopedSessionModel, SessionModel, ThinkingLevel } from "../types.js";
 
 export class ModelCommandActions {
 	constructor(private readonly host: CommandControllerHost) {}
@@ -29,7 +28,7 @@ export class ModelCommandActions {
 			`prompt enhancer model: ${this.host.promptEnhancerModelRef()}`,
 			`autocomplete model: ${this.host.autocompleteModelRef() || "disabled"}`,
 			`context files: ${this.host.ignoreContextFiles() ? "disabled" : "enabled"}`,
-			`thinking: ${this.host.autoThinkingLabel(runtime.session) ?? runtime.session.thinkingLevel}`,
+			`thinking: ${runtime.session.thinkingLevel}`,
 			`theme: ${settings.getTheme() ?? this.host.options.themeName}`,
 			`skill commands: ${settings.getEnableSkillCommands() ? "enabled" : "disabled"}`,
 			`auto compaction: ${runtime.session.autoCompactionEnabled ? "enabled" : "disabled"}`,
@@ -251,7 +250,7 @@ export class ModelCommandActions {
 			return;
 		}
 
-		if (!isThinkingSelection(level)) throw new Error(`Unknown thinking level: ${level}`);
+		if (!isThinkingLevel(level)) throw new Error(`Unknown thinking level: ${level}`);
 		await this.runThinkingCommand(level);
 	}
 
@@ -269,13 +268,12 @@ export class ModelCommandActions {
 				return;
 			}
 
-			if (!isThinkingSelection(selected.level)) throw new Error(`Unknown thinking level: ${selected.level}`);
 			this.saveDefaultThinking(selected.level);
 			this.host.render();
 			return;
 		}
 
-		if (!isThinkingSelection(level)) throw new Error(`Unknown thinking level: ${level}`);
+		if (!isThinkingLevel(level)) throw new Error(`Unknown thinking level: ${level}`);
 		this.saveDefaultThinking(level);
 	}
 
@@ -291,20 +289,12 @@ export class ModelCommandActions {
 		this.host.setSessionStatus(runtime.session);
 	}
 
-	async runThinkingCommand(level: ThinkingSelection): Promise<void> {
+	async runThinkingCommand(level: ThinkingLevel): Promise<void> {
 		const runtime = getRuntime(this.host, "thinking");
 		if (!runtime) return;
 
 		this.host.setStatus(`selecting thinking ${level}`);
 		this.host.render();
-		if (level === AUTO_THINKING_LEVEL) {
-			this.host.setAutoThinkingEnabled(runtime.session, true);
-			this.addPersistentSystemEntry(runtime.session, "Auto thinking enabled. Default thinking is medium; the model can request persistent mode changes with Pix control frames.");
-			this.host.setSessionStatus(runtime.session);
-			return;
-		}
-
-		if (this.host.isAutoThinkingEnabled(runtime.session)) this.host.setAutoThinkingEnabled(runtime.session, false);
 		runtime.session.setThinkingLevel(level);
 		this.addPersistentSystemEntry(runtime.session, `Selected thinking level ${runtime.session.thinkingLevel}`);
 		this.host.setSessionStatus(runtime.session);
@@ -326,7 +316,7 @@ export class ModelCommandActions {
 		});
 	}
 
-	private saveDefaultThinking(level: ThinkingSelection): void {
+	private saveDefaultThinking(level: ThinkingLevel): void {
 		const runtime = getRuntime(this.host, "default-thinking");
 		if (!runtime) return;
 
@@ -343,6 +333,6 @@ export class ModelCommandActions {
 	}
 }
 
-function formatDefaultModelRef(defaultModel: { modelRef: string; thinking?: ThinkingSelection }): string {
+function formatDefaultModelRef(defaultModel: { modelRef: string; thinking?: ThinkingLevel }): string {
 	return defaultModel.thinking ? `${defaultModel.modelRef}:${defaultModel.thinking}` : defaultModel.modelRef;
 }

@@ -3,7 +3,6 @@ import { renderMarkdownTextLines } from "../../markdown-format.js";
 import type { Theme } from "../../theme.js";
 import { attachImageClickTargets } from "../screen/image-click-targets.js";
 import { APP_ICONS } from "../icons.js";
-import { AUTO_THINKING_DECISION_PREFIX, isAutoThinkingDecisionText } from "../thinking/auto-thinking.js";
 import { horizontalPaddingLayout, padHorizontalText, wrapText } from "./render-text.js";
 import { renderConversationShellEntry } from "./conversation-shell-renderer.js";
 import { renderConversationToolEntry, renderThinkingEntry } from "./conversation-tool-renderer.js";
@@ -67,7 +66,6 @@ export function renderConversationEntry(entry: Entry, width: number, options: Co
 
 	switch (entry.kind) {
 		case "system":
-			if (isAutoThinkingDecisionText(entry.text)) return renderAutoThinkingSystemEntry(entry, width, options);
 			return wrapText(`system: ${entry.text}`, width).map((text) => ({ text, variant: "muted" as const }));
 		case "user":
 			return userMessageLines(entry);
@@ -88,44 +86,6 @@ export function renderConversationEntry(entry: Entry, width: number, options: Co
 		case "tool":
 			return renderConversationToolEntry(entry, width, options);
 	}
-}
-
-function renderAutoThinkingSystemEntry(entry: Extract<Entry, { kind: "system" }>, width: number, options: ConversationEntryRenderOptions): RenderedLine[] {
-	const icon = APP_ICONS.autoFix;
-	const text = `${icon} ${entry.text}`;
-	const levelStart = icon.length + 1 + AUTO_THINKING_DECISION_PREFIX.length;
-	const levelEnd = text.indexOf(" · ", levelStart);
-	const highlightEnd = levelEnd === -1 ? text.length : levelEnd;
-
-	return wrapText(text, width).map((lineText, index) => {
-		const segments: StyledSegment[] = [];
-		if (index === 0) {
-			segments.push({ start: 0, end: Math.min(icon.length, lineText.length), foreground: options.colors.info });
-			if (levelStart < lineText.length) {
-				segments.push({
-					start: levelStart,
-					end: Math.min(highlightEnd, lineText.length),
-					foreground: autoThinkingLevelColor(entry.text, options),
-					bold: true,
-				});
-			}
-		}
-
-		return {
-			text: lineText,
-			variant: "muted" as const,
-			...(segments.length > 0 ? { segments } : {}),
-		};
-	});
-}
-
-function autoThinkingLevelColor(text: string, options: ConversationEntryRenderOptions): string {
-	const level = text.slice(AUTO_THINKING_DECISION_PREFIX.length).split(" ", 1)[0];
-	if (level === "xhigh") return options.colors.thinkingXHigh;
-	if (level === "high") return options.colors.warning;
-	if (level === "medium") return options.colors.accent;
-	if (level === "low" || level === "minimal") return options.colors.info;
-	return options.colors.muted;
 }
 
 function renderCustomEntry(entry: Extract<Entry, { kind: "custom" }>, width: number): RenderedLine[] {

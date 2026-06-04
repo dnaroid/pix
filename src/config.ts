@@ -59,7 +59,7 @@ export type AutocompleteConfig = {
 
 export type DefaultModelConfig = {
 	modelRef: string;
-	thinking?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "auto";
+	thinking?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 };
 
 export type ModelColorsConfig = {
@@ -149,8 +149,6 @@ const DEFAULT_OUTPUT_FILTERS: OutputFiltersConfig = {
 
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 type ConfigThinkingLevel = (typeof THINKING_LEVELS)[number];
-const DEFAULT_THINKING_SELECTIONS = [...THINKING_LEVELS, "auto"] as const;
-type ConfigThinkingSelection = (typeof DEFAULT_THINKING_SELECTIONS)[number];
 
 const DEFAULT_PROMPT_ENHANCER: PromptEnhancerConfig = {
 	modelRef: "zai/glm-5-turbo",
@@ -377,12 +375,8 @@ function normalizeThinkingLevel(value: unknown): ConfigThinkingLevel | undefined
 	return THINKING_LEVELS.includes(normalized as ConfigThinkingLevel) ? normalized as ConfigThinkingLevel : undefined;
 }
 
-function normalizeDefaultThinking(value: unknown): ConfigThinkingSelection | undefined {
-	const level = normalizeThinkingLevel(value);
-	if (level) return level;
-	if (typeof value !== "string") return undefined;
-	const normalized = value.trim().toLowerCase();
-	return normalized === "auto" ? "auto" : undefined;
+function normalizeDefaultThinking(value: unknown): ConfigThinkingLevel | undefined {
+	return normalizeThinkingLevel(value);
 }
 
 function nonEmptyString(value: unknown): string | undefined {
@@ -429,7 +423,7 @@ export function resolveDefaultModelRef(config: PixConfig): string | undefined {
 	if (!modelRef) return undefined;
 
 	const thinking = config.defaultModel?.thinking;
-	if (!thinking || thinking === "auto") return stripThinkingSuffix(modelRef);
+	if (!thinking) return stripThinkingSuffix(modelRef);
 
 	return `${stripThinkingSuffix(modelRef)}:${thinking}`;
 }

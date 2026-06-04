@@ -11,7 +11,6 @@ import {
 	getAgentDir,
 	SessionManager,
 	type EventBus,
-	type AgentSession,
 	type AgentSessionRuntime,
 	type CreateAgentSessionRuntimeFactory,
 	type LoadExtensionsResult,
@@ -21,9 +20,7 @@ import { loadPixConfig, resolveDefaultModelRef, type PixConfig } from "../config
 import { PI_FAVORITE_MODEL_REFS } from "./constants.js";
 import { isThinkingLevel, parseModelRef, parseScopedModelRef } from "./model/model-ref.js";
 import { openLazySessionManager } from "./session/lazy-session-manager.js";
-import { createAutoThinkingAdaptiveExtensionFactory, type AutoThinkingControlFrame } from "./thinking/adaptive-thinking.js";
-import type { AutoThinkingDecision } from "./thinking/auto-thinking.js";
-import type { AppOptions, ScopedSessionModel, SessionModel } from "./types.js";
+import type { AppOptions, ScopedSessionModel, SessionModel, ThinkingLevel } from "./types.js";
 
 const BUNDLED_QUESTION_EXTENSION_NAME = "question";
 const PI_TOOLS_SUITE_EXTENSION_NAME = "pi-tools-suite";
@@ -220,12 +217,6 @@ function isBundledQuestionConflict(error: LoadExtensionsResult["errors"][number]
 
 export type CreatePixRuntimeOptions = {
 	eventBus?: EventBus;
-	autoThinking?: {
-		isEnabled(session: AgentSession): boolean;
-		enableDefault?(session: AgentSession): void;
-		applyControl(session: AgentSession, control: AutoThinkingControlFrame): AutoThinkingDecision | undefined;
-		onDecision?(session: AgentSession, decision: AutoThinkingDecision, control: AutoThinkingControlFrame): void;
-	};
 };
 
 type RuntimeSessionManagerModelState = Pick<SessionManager, "getEntries" | "getBranch">;
@@ -241,14 +232,14 @@ export function resolvePixRuntimeModelRef(
 	return resolveDefaultModelRef(config);
 }
 
-export function shouldEnableDefaultAutoThinking(
+export function resolvePixRuntimeInitialThinkingLevel(
 	options: Pick<AppOptions, "modelRef">,
-	sessionManager: Pick<SessionManager, "getEntries">,
+	sessionManager: RuntimeSessionManagerModelState,
 	config: PixConfig,
-): boolean {
-	return !options.modelRef
-		&& sessionManager.getEntries().length === 0
-		&& config.defaultModel?.thinking === "auto";
+): ThinkingLevel | undefined {
+	const effectiveModelRef = resolvePixRuntimeModelRef(options, sessionManager, config);
+	const parsedModel = effectiveModelRef ? parseModelRef(effectiveModelRef) : undefined;
+	return parsedModel?.thinkingLevel;
 }
 
 export function resolveSessionModelRefFromTail(entries: readonly SessionEntry[]): string | undefined {
@@ -273,20 +264,11 @@ export function resolveSessionModelRefFromTail(entries: readonly SessionEntry[])
 
 export async function createPixRuntime(options: AppOptions, runtimeOptions: CreatePixRuntimeOptions = {}): Promise<AgentSessionRuntime> {
 	const agentDir = getAgentDir();
-	const sessionRef: { current?: AgentSession } = {};
-	const adaptiveThinkingFactory = runtimeOptions.autoThinking
-		? createAutoThinkingAdaptiveExtensionFactory({
-			getSession: () => sessionRef.current,
-			isEnabled: runtimeOptions.autoThinking.isEnabled,
-			applyControl: runtimeOptions.autoThinking.applyControl,
-			...(runtimeOptions.autoThinking.onDecision === undefined ? {} : { onDecision: runtimeOptions.autoThinking.onDecision }),
-		})
-		: undefined;
 	const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, sessionManager, sessionStartEvent }) => {
 		const config = loadPixConfig(cwd);
-		const enableDefaultAutoThinking = shouldEnableDefaultAutoThinking(options, sessionManager, config);
 		const effectiveModelRef = resolvePixRuntimeModelRef(options, sessionManager, config);
 		const parsedModel = effectiveModelRef ? parseModelRef(effectiveModelRef) : undefined;
+		const initialThinkingLevel = resolvePixRuntimeInitialThinkingLevel(options, sessionManager, config);
 		await ensureBundledSkillsInstalled();
 		await ensurePiToolsSuiteExtensionInstalled({ agentDir });
 		const bundledExtensionPaths = getBundledExtensionPaths();
@@ -296,7 +278,6 @@ export async function createPixRuntime(options: AppOptions, runtimeOptions: Crea
 			resourceLoaderOptions: {
 				...(config.ignoreContextFiles ? { noContextFiles: true } : {}),
 				...(runtimeOptions.eventBus === undefined ? {} : { eventBus: runtimeOptions.eventBus }),
-				...(adaptiveThinkingFactory === undefined ? {} : { extensionFactories: [adaptiveThinkingFactory] }),
 				...(bundledExtensionPaths.length === 0 ? {} : {
 					additionalExtensionPaths: bundledExtensionPaths,
 					extensionsOverride: prioritizeBundledQuestionExtension,
@@ -330,11 +311,9 @@ export async function createPixRuntime(options: AppOptions, runtimeOptions: Crea
 				sessionManager,
 				...(sessionStartEvent === undefined ? {} : { sessionStartEvent }),
 				...(model === undefined ? {} : { model }),
-				...(parsedModel?.thinkingLevel === undefined ? {} : { thinkingLevel: parsedModel.thinkingLevel }),
+				...(initialThinkingLevel === undefined ? {} : { thinkingLevel: initialThinkingLevel }),
 				...(scopedModels.length === 0 ? {} : { scopedModels }),
-			});
-		sessionRef.current = created.session;
-		if (enableDefaultAutoThinking) runtimeOptions.autoThinking?.enableDefault?.(created.session);
+		});
 		return {
 			...created,
 			services,

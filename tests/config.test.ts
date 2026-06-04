@@ -37,7 +37,6 @@ const {
 	upsertPixIgnoreContextFilesInJsonc,
 } = await import("../src/config.js");
 type ToolRendererConfig = import("../src/config.js").ToolRendererConfig;
-const { shouldEnableDefaultAutoThinking } = await import("../src/app/runtime.js");
 
 describe("config helpers", () => {
 	it("resolves the user config path from a supplied home directory", () => {
@@ -54,7 +53,6 @@ describe("config helpers", () => {
 		assert.match(created, /^\{\n  "\$schema":/u);
 		assert.match(created, /pix renderer configuration/u);
 		assert.match(created, /"sessionTitle"/u);
-		assert.doesNotMatch(created, /"autoThinking"/u);
 		assert.deepEqual([
 			resolveToolRule("ls", config.toolRenderer),
 			resolveToolRule("grep", config.toolRenderer),
@@ -93,7 +91,6 @@ describe("config helpers", () => {
 			"modelColors": { "zai/*": "#22c55e", "antigravity/*": "#f97316", "antigravity/antigravity-claude-*": "#ef4444" },
 			"iconTheme": "fallback",
 			"promptEnhancer": { "modelRef": "zai/custom-enhancer" },
-			"autoThinking": { "modelRef": "zai/custom-auto-thinking", "timeoutMs": 4200, "maxTokens": 48, "temperature": 0.2 },
 			"autocomplete": { "modelRef": "zai/custom-autocomplete", "debounceMs": 125, "timeoutMs": 2600, "maxTokens": 64, "maxPromptTokens": 1800, "includeRecentMessages": 9 },
 			"dictation": {
 				"language": "ru",
@@ -225,10 +222,10 @@ describe("config helpers", () => {
 		writeFileSync(testConfigPath, `{ "defaultModel": "zai/glm-5-turbo:low" }`);
 		assert.equal(resolveDefaultModelRef(loadPixConfig()), "zai/glm-5-turbo:low");
 
-		writeFileSync(testConfigPath, `{ "defaultModel": "zai/glm-5-turbo:auto" }`);
-		const autoConfig = loadPixConfig();
-		assert.deepEqual(autoConfig.defaultModel, { modelRef: "zai/glm-5-turbo", thinking: "auto" });
-		assert.equal(resolveDefaultModelRef(autoConfig), "zai/glm-5-turbo");
+		writeFileSync(testConfigPath, `{ "defaultModel": { "modelRef": "zai/glm-5-turbo", "thinking": "invalid" } }`);
+		const invalidThinkingConfig = loadPixConfig();
+		assert.deepEqual(invalidThinkingConfig.defaultModel, { modelRef: "zai/glm-5-turbo" });
+		assert.equal(resolveDefaultModelRef(invalidThinkingConfig), "zai/glm-5-turbo");
 	});
 
 	it("persists default model and thinking in JSONC config", () => {
@@ -248,9 +245,8 @@ describe("config helpers", () => {
 		assert.deepEqual(savePixDefaultThinking("low"), { modelRef: "openai-codex/gpt-5.5", thinking: "low" });
 		assert.equal(resolveDefaultModelRef(loadPixConfig()), "openai-codex/gpt-5.5:low");
 
-		assert.deepEqual(savePixDefaultThinking("auto"), { modelRef: "openai-codex/gpt-5.5", thinking: "auto" });
-		assert.equal(resolveDefaultModelRef(loadPixConfig()), "openai-codex/gpt-5.5");
-		assert.match(readFileSync(testConfigPath, "utf8"), /"thinking": "auto"/u);
+		assert.equal(savePixDefaultThinking("invalid"), undefined);
+		assert.equal(resolveDefaultModelRef(loadPixConfig()), "openai-codex/gpt-5.5:low");
 	});
 
 	it("upserts default model settings from empty or string config", () => {
@@ -263,20 +259,7 @@ describe("config helpers", () => {
 		assert.match(inserted, /"modelRef": "openai-codex\/gpt-5.5"/u);
 		assert.match(inserted, /"thinking": "medium"/u);
 
-		const insertedAuto = upsertPixDefaultThinkingInJsonc(`{}`, "auto", "openai-codex/gpt-5.5:low");
-		assert.match(insertedAuto, /"modelRef": "openai-codex\/gpt-5.5"/u);
-		assert.match(insertedAuto, /"thinking": "auto"/u);
-	});
-
-	it("enables default auto thinking only for new sessions that use the default model", () => {
-		const newSession = { getEntries: () => [] };
-		const existingSession = { getEntries: () => [{ type: "message" }] };
-		const config = { ...loadPixConfig(), defaultModel: { modelRef: "openai-codex/gpt-5.5", thinking: "auto" as const } };
-
-		assert.equal(shouldEnableDefaultAutoThinking({}, newSession, config), true);
-		assert.equal(shouldEnableDefaultAutoThinking({ modelRef: "zai/glm-5-turbo" }, newSession, config), false);
-		assert.equal(shouldEnableDefaultAutoThinking({}, existingSession, config), false);
-		assert.equal(shouldEnableDefaultAutoThinking({}, newSession, { ...config, defaultModel: { modelRef: "openai-codex/gpt-5.5", thinking: "medium" } }), false);
+		assert.equal(upsertPixDefaultThinkingInJsonc(`{}`, "invalid", "openai-codex/gpt-5.5:low"), `{}`);
 	});
 
 	it("persists selected dictation language in JSONC config", () => {

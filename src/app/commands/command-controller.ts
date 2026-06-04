@@ -3,7 +3,7 @@ import { ModelCommandActions } from "./command-model-actions.js";
 import { NavigationCommandActions } from "./command-navigation-actions.js";
 import { createSlashCommands, type CommandRegistryActions } from "./command-registry.js";
 import { SessionCommandActions } from "./command-session-actions.js";
-import type { PopupMenuPlacement, SessionModel, SlashCommand, ThinkingSelection } from "../types.js";
+import type { PopupMenuPlacement, SessionModel, SlashCommand, ThinkingLevel } from "../types.js";
 
 export class AppCommandController {
 	readonly slashCommands: readonly SlashCommand[];
@@ -27,7 +27,7 @@ export class AppCommandController {
 		await this.modelActions.runModelCommand(model);
 	}
 
-	async runThinkingCommand(level: ThinkingSelection): Promise<void> {
+	async runThinkingCommand(level: ThinkingLevel): Promise<void> {
 		await this.modelActions.runThinkingCommand(level);
 	}
 

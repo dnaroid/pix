@@ -12,8 +12,8 @@ import { Type, Static } from "typebox";
 // ---------------------------------------------------------------------------
 
 const DefaultThinkingSelection = Type.Union(
-	["off", "minimal", "low", "medium", "high", "xhigh", "auto"].map((v) => Type.Literal(v)),
-	{ description: "Default model thinking budget level, or 'auto' to let pix choose/adapt per prompt." },
+	["off", "minimal", "low", "medium", "high", "xhigh"].map((v) => Type.Literal(v)),
+	{ description: "Default model thinking budget level." },
 );
 
 // ---------------------------------------------------------------------------

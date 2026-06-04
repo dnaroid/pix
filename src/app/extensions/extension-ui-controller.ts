@@ -63,8 +63,9 @@ export type ExtensionUiControllerHost = {
 	activeExtensionUiScope?(): string | undefined;
 	isRunning(): boolean;
 	render(): void;
-	showToast(message: string, kind?: ToastKind): void;
+	showToast(message: string, kind?: ToastKind, options?: { scopeKey?: string }): void;
 	readonly toastNotifier: ToastNotifier;
+	toastNotifierForScope?(scopeKey: string | undefined): ToastNotifier;
 	readonly menuController: PixMenuController;
 	setStatus(status: string): void;
 	restoreSessionStatus(): void;
@@ -220,12 +221,13 @@ export class ExtensionUiController {
 	}
 
 	widgetTuiHandle(): WidgetTuiHandle {
+		const activeScopeToastNotifier = this.host.toastNotifierForScope?.(this.activeScopeKey()) ?? this.host.toastNotifier;
 		return {
 			requestRender: () => {
 				if (this.host.isRunning()) this.host.render();
 			},
-			showToast: this.host.toastNotifier.show,
-			toast: this.host.toastNotifier,
+			showToast: activeScopeToastNotifier.show,
+			toast: activeScopeToastNotifier,
 			showMenu: this.host.menuController.show,
 			menu: this.host.menuController,
 			pix: {
@@ -237,8 +239,9 @@ export class ExtensionUiController {
 
 	createExtensionUIContext(scopeKey?: string): PixExtensionUIContext {
 		const contextScopeKey = this.normalizeScopeKey(scopeKey);
+		const scopedToastNotifier = this.host.toastNotifierForScope?.(contextScopeKey) ?? this.host.toastNotifier;
 		const notify = (message: string, type?: ToastKind | string): void => {
-			this.host.showToast(message, isToastKind(type) ? type : "info");
+			this.host.showToast(message, isToastKind(type) ? type : "info", { scopeKey: contextScopeKey });
 		};
 
 		const extensionTheme = this.createExtensionTheme();
@@ -251,7 +254,7 @@ export class ExtensionUiController {
 			confirm: async (title, message, opts) => await this.confirmDialog(title, message, opts),
 			input: async (title, placeholder, opts) => await this.inputDialog(title, placeholder, opts, contextScopeKey),
 			notify,
-			toast: this.host.toastNotifier,
+			toast: scopedToastNotifier,
 			aboveInput: {
 				set: (key, content) => {
 					this.setAboveInputWidget(key, content, contextScopeKey);
@@ -273,12 +276,12 @@ export class ExtensionUiController {
 				};
 			},
 			setStatus: (_key, text) => {
-				if (text) this.host.showToast(text, "info");
+				if (text) this.host.showToast(text, "info", { scopeKey: contextScopeKey });
 				this.host.restoreSessionStatus();
 				renderIfRunning();
 			},
 			setWorkingMessage: (message) => {
-				if (message) this.host.showToast(message, "info");
+				if (message) this.host.showToast(message, "info", { scopeKey: contextScopeKey });
 				this.host.restoreSessionStatus();
 				renderIfRunning();
 			},

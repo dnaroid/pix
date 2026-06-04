@@ -41,13 +41,9 @@
             {
               "type": "string",
               "const": "xhigh"
-            },
-            {
-              "type": "string",
-              "const": "auto"
             }
           ],
-          "description": "Default model thinking budget level, or 'auto' to let pix choose/adapt per prompt."
+          "description": "Default model thinking budget level."
         }
       },
       "description": "Default model selection for new sessions."
