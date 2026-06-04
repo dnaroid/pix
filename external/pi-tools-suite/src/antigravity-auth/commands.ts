@@ -40,17 +40,15 @@ export function formatImportResult(result: OpencodeAntigravityImportResult): str
 	return `Could not import Antigravity auth from ${result.sourcePath}: ${result.reason ?? "unknown error"}.`;
 }
 
-export function parseAddAccountCommandArgs(args: string): { activate?: boolean; email?: string; authPath?: string } {
+export function parseAddAccountCommandArgs(args: string): { activate?: boolean; email?: string } {
 	const tokens = tokenizeArgs(args);
-	const parsed: { activate?: boolean; email?: string; authPath?: string } = {};
+	const parsed: { activate?: boolean; email?: string } = {};
 	for (let i = 0; i < tokens.length; i += 1) {
 		const token = tokens[i];
 		if (token === "--activate" || token === "-a") {
 			parsed.activate = true;
 		} else if (token === "--email" && tokens[i + 1]) {
 			parsed.email = tokens[++i];
-		} else if (token === "--auth-path" && tokens[i + 1]) {
-			parsed.authPath = tokens[++i];
 		}
 	}
 	return parsed;

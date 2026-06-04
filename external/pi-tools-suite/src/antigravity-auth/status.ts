@@ -7,6 +7,7 @@ import type { AntigravityStatusDetails, OpencodeAntigravityAccount, PiAuthData, 
 
 let extensionUi: ExtensionUIContext | undefined;
 let extensionApi: ExtensionAPI | undefined;
+const notifiedLoginFailures = new WeakSet<object>();
 
 export function rememberAntigravityApi(api: ExtensionAPI): void {
 	extensionApi = api;
@@ -14,6 +15,58 @@ export function rememberAntigravityApi(api: ExtensionAPI): void {
 
 export function rememberAntigravityUi(ui: ExtensionUIContext | undefined): void {
 	if (ui) extensionUi = ui;
+}
+
+function errorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+export function formatAntigravityLoginFailure(error: unknown): string {
+	return `Antigravity login failed: ${errorMessage(error)}. Auth file: ${getPiAuthPath()}`;
+}
+
+export function formatAntigravityProviderFailure(error: unknown): string {
+	return `Antigravity request failed: ${errorMessage(error)}. Auth file: ${getPiAuthPath()}`;
+}
+
+function notifyAntigravityFailure(message: string, details: Record<string, unknown>, ui?: ExtensionUIContext): void {
+	const targetUi = ui ?? extensionUi;
+	if (typeof targetUi?.notify === "function") {
+		targetUi.notify(message, "error");
+	} else if (typeof (targetUi as any)?.toast?.error === "function") {
+		(targetUi as any).toast.error(message);
+	}
+	(extensionApi as any)?.sendMessage?.({
+		role: "system",
+		content: message,
+		details,
+	});
+}
+
+export function notifyAntigravityLoginFailure(error: unknown): boolean {
+	if (typeof error === "object" && error !== null) {
+		if (notifiedLoginFailures.has(error)) return false;
+		notifiedLoginFailures.add(error);
+	}
+
+	const message = formatAntigravityLoginFailure(error);
+	notifyAntigravityFailure(message, {
+			kind: "login-failure",
+			authPath: getPiAuthPath(),
+			error: errorMessage(error),
+	});
+	return true;
+}
+
+export function notifyAntigravityProviderFailure(error: unknown, options: { ui?: ExtensionUIContext; model?: string } = {}): boolean {
+	const message = formatAntigravityProviderFailure(error);
+	notifyAntigravityFailure(message, {
+		kind: "provider-failure",
+		authPath: getPiAuthPath(),
+		error: errorMessage(error),
+		model: options.model,
+	}, options.ui);
+	return true;
 }
 
 export async function getCurrentAntigravityStatus(): Promise<AntigravityStatusDetails> {
@@ -68,8 +121,10 @@ export async function publishAntigravityAuthStartupSection(): Promise<void> {
 }
 
 export function emitAntigravityStatus(details: AntigravityStatusDetails): void {
-	extensionUi?.setStatus(LEGACY_STATUS_KEY, undefined);
-	extensionUi?.setStatus(STATUS_KEY, formatAntigravityStatus(details));
+	if (typeof extensionUi?.setStatus === "function") {
+		extensionUi.setStatus(LEGACY_STATUS_KEY, undefined);
+		extensionUi.setStatus(STATUS_KEY, formatAntigravityStatus(details));
+	}
 	(extensionApi as any)?.sendMessage?.({
 		role: "system",
 		content: formatAntigravityStatus(details),

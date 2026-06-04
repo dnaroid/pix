@@ -4,15 +4,26 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
+const originalNodeEnv = process.env.NODE_ENV;
+const originalTestAuthPath = process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH;
 const originalFetch = globalThis.fetch;
 const tempDirs: string[] = [];
 
 class FakePi {
 	providers = new Map<string, any>();
 	messages: any[] = [];
+	handlers = new Map<string, any[]>();
 	registerMessageRenderer() {}
 	registerCommand() {}
 	registerProvider(name: string, provider: any) { this.providers.set(name, provider); }
+	on(event: string, handler: any) {
+		const handlers = this.handlers.get(event) ?? [];
+		handlers.push(handler);
+		this.handlers.set(event, handlers);
+	}
+	async emit(event: string, payload: any, ctx: any) {
+		for (const handler of this.handlers.get(event) ?? []) await handler(payload, ctx);
+	}
 	sendMessage(message: any) { this.messages.push(message); }
 }
 
@@ -45,6 +56,8 @@ function antigravityCredential(overrides: Record<string, unknown> = {}) {
 
 async function loadProvider(agentDir: string) {
 	process.env.PI_CODING_AGENT_DIR = agentDir;
+	process.env.NODE_ENV = "test";
+	process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH = path.join(agentDir, "auth.json");
 	const { default: antigravityAuth } = await import("../src/antigravity-auth/index.js");
 	const pi = new FakePi();
 	await antigravityAuth(pi as any);
@@ -64,11 +77,34 @@ async function runSimpleStream(provider: any, model: any) {
 afterEach(() => {
 	if (originalAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
 	else process.env.PI_CODING_AGENT_DIR = originalAgentDir;
+	if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+	else process.env.NODE_ENV = originalNodeEnv;
+	if (originalTestAuthPath === undefined) delete process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH;
+	else process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH = originalTestAuthPath;
 	globalThis.fetch = originalFetch;
 	for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
 describe.serial("Antigravity account rotation", () => {
+	test.serial("notifies the UI when an Antigravity model turn fails without auth", async () => {
+		const agentDir = tempDir();
+		writeJson(path.join(agentDir, "auth.json"), {});
+		const notifications: Array<{ message: string; type: string | undefined }> = [];
+		const ui = { notify: (message: string, type?: string) => notifications.push({ message, type }) };
+		const { pi, provider, model } = await loadProvider(agentDir);
+
+		const result = await runSimpleStream(provider, model);
+		await pi.emit("message_end", { message: result }, { ui });
+
+		expect(result.stopReason).toBe("error");
+		expect(result.errorMessage).toContain("Not authenticated with Antigravity");
+		expect(notifications).toHaveLength(1);
+		expect(notifications[0]?.type).toBe("error");
+		expect(notifications[0]?.message).toContain("Antigravity request failed: Not authenticated with Antigravity");
+		expect(notifications[0]?.message).toContain(path.join(agentDir, "auth.json"));
+		expect(pi.messages.filter((message) => message.details?.kind === "provider-failure")).toHaveLength(1);
+	});
+
 	test.serial("emits all-accounts-exhausted marker only after trying every account for the model", async () => {
 		const agentDir = tempDir();
 		writeJson(path.join(agentDir, "auth.json"), { antigravity: antigravityCredential() });

@@ -1,4 +1,4 @@
-import { getAgentDir, type ExtensionAPI, type ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -37,7 +37,10 @@ async function readOpenCodeAuth(): Promise<{ authData: AuthData; error?: string 
 
 async function readPiAuth(): Promise<PiAuthData> {
 	try {
-		const content = await readFile(join(getAgentDir(), "auth.json"), "utf-8");
+		const authPath = process.env.NODE_ENV === "test" && process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH
+			? process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH
+			: join(homedir(), ".pi", "agent", "auth.json");
+		const content = await readFile(authPath, "utf-8");
 		return JSON.parse(content) as PiAuthData;
 	} catch {
 		return {};

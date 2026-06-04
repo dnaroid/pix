@@ -1,9 +1,14 @@
 import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { DEFAULT_PROJECT_ID, PROVIDER_ID } from "./constants";
 import type { OpencodeAntigravityAccount, OpencodeAntigravityImportResult, OpencodeAntigravityStorage, PiAuthCredential, PiAuthData } from "./types";
+
+export const PI_AUTH_PATH = join(homedir(), ".pi", "agent", "auth.json");
+
+function testPiAuthPath(): string | undefined {
+	return process.env.NODE_ENV === "test" ? process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH : undefined;
+}
 
 export function splitRefresh(refresh: string): { refreshToken: string; projectId?: string; managedProjectId?: string } {
 	const [refreshToken = "", projectId = "", managedProjectId = ""] = refresh.split("|");
@@ -39,7 +44,7 @@ function getDefaultOpencodeAccountsPath(): string {
 }
 
 export function getPiAuthPath(): string {
-	return join(getAgentDir(), "auth.json");
+	return testPiAuthPath() ?? PI_AUTH_PATH;
 }
 
 export async function readJsonFile<T>(path: string, fallback: T): Promise<T> {

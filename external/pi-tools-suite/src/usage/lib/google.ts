@@ -7,7 +7,6 @@
  * [同步]: usage.ts, types.ts, utils.ts
  */
 
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -97,7 +96,9 @@ function getAntigravityAccountsPath(): string {
 }
 
 function getPiAuthPath(): string {
-  return join(getAgentDir(), "auth.json");
+  return process.env.NODE_ENV === "test" && process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH
+    ? process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH
+    : join(homedir(), ".pi", "agent", "auth.json");
 }
 
 function splitPiRefresh(refresh: string): AntigravityAccount | null {

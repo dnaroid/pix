@@ -1,8 +1,9 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { OAuthCredentials } from "@earendil-works/pi-ai";
 import { CLIENT_ID, CLIENT_SECRET, DEFAULT_PROJECT_ID, LOAD_ENDPOINTS, REDIRECT_URI, SCOPES, TOKEN_EXPIRY_SKEW_MS, PROVIDER_ID } from "./constants";
-import { accountFromCredential, clampAccountIndex, decodeApiKey, encodeApiKey, findMatchingAccountIndex, getAccountProjectId, getPiAuthPath, getStoredAccounts, joinRefresh, readJsonFile, splitRefresh, writeJsonFileSecure } from "./auth-store";
+import { accountFromCredential, clampAccountIndex, encodeApiKey, findMatchingAccountIndex, getAccountProjectId, getPiAuthPath, getStoredAccounts, joinRefresh, readJsonFile, splitRefresh, writeJsonFileSecure } from "./auth-store";
 import { getAntigravityHeaders } from "./headers";
+import { notifyAntigravityLoginFailure } from "./status";
 import type { AntigravityAddAccountResult, AntigravityFailoverCredential, AntigravityLoginCallbacks, OpencodeAntigravityAccount, PiAuthCredential, PiAuthData, RefreshedAntigravityAccount } from "./types";
 
 function base64Url(input: Buffer): string {
@@ -91,59 +92,64 @@ function extractOAuthParams(input: string): { code: string; state: string } {
 }
 
 export async function loginAntigravity(callbacks: AntigravityLoginCallbacks): Promise<OAuthCredentials> {
-	if (!CLIENT_ID || !CLIENT_SECRET) {
-		throw new Error("Antigravity Google OAuth credentials are not configured; set PIX_ANTIGRAVITY_GOOGLE_CLIENT_ID and PIX_ANTIGRAVITY_GOOGLE_CLIENT_SECRET.");
+	try {
+		if (!CLIENT_ID || !CLIENT_SECRET) {
+			throw new Error("Antigravity Google OAuth credentials are not configured; set PIX_ANTIGRAVITY_GOOGLE_CLIENT_ID and PIX_ANTIGRAVITY_GOOGLE_CLIENT_SECRET.");
+		}
+
+		const { verifier, challenge } = generatePkce();
+		const state = encodeState({ verifier });
+		const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+		url.searchParams.set("client_id", CLIENT_ID);
+		url.searchParams.set("response_type", "code");
+		url.searchParams.set("redirect_uri", REDIRECT_URI);
+		url.searchParams.set("scope", SCOPES.join(" "));
+		url.searchParams.set("code_challenge", challenge);
+		url.searchParams.set("code_challenge_method", "S256");
+		url.searchParams.set("state", state);
+		url.searchParams.set("access_type", "offline");
+		url.searchParams.set("prompt", "consent");
+
+		callbacks.onAuth({ url: url.toString() });
+		const pasted = await callbacks.onPrompt({
+			message: "Paste the full http://localhost:51121/oauth-callback URL after Google login (or code#state):",
+		});
+		const params = extractOAuthParams(pasted);
+		const decodedState = decodeState(params.state);
+		if (decodedState.verifier !== verifier) throw new Error("OAuth state verifier mismatch");
+
+		const start = Date.now();
+		const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+				Accept: "*/*",
+				"User-Agent": getAntigravityHeaders("gemini-cli")["User-Agent"],
+			},
+			body: new URLSearchParams({
+				client_id: CLIENT_ID,
+				client_secret: CLIENT_SECRET,
+				code: params.code,
+				grant_type: "authorization_code",
+				redirect_uri: REDIRECT_URI,
+				code_verifier: verifier,
+			}),
+		});
+		if (!tokenResponse.ok) throw new Error(`Token exchange failed: ${await tokenResponse.text()}`);
+		const tokenPayload = (await tokenResponse.json()) as { access_token: string; refresh_token?: string; expires_in: number };
+		if (!tokenPayload.refresh_token) throw new Error("Missing refresh token in Google response");
+
+		const [projectId, email] = await Promise.all([fetchProjectId(tokenPayload.access_token), fetchGoogleUserEmail(tokenPayload.access_token)]);
+		return {
+			refresh: joinRefresh(tokenPayload.refresh_token, projectId ?? DEFAULT_PROJECT_ID),
+			access: encodeApiKey(tokenPayload.access_token, projectId ?? DEFAULT_PROJECT_ID),
+			expires: start + tokenPayload.expires_in * 1000 - TOKEN_EXPIRY_SKEW_MS,
+			...(email ? { email } : {}),
+		};
+	} catch (error) {
+		notifyAntigravityLoginFailure(error);
+		throw error;
 	}
-
-	const { verifier, challenge } = generatePkce();
-	const state = encodeState({ verifier });
-	const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
-	url.searchParams.set("client_id", CLIENT_ID);
-	url.searchParams.set("response_type", "code");
-	url.searchParams.set("redirect_uri", REDIRECT_URI);
-	url.searchParams.set("scope", SCOPES.join(" "));
-	url.searchParams.set("code_challenge", challenge);
-	url.searchParams.set("code_challenge_method", "S256");
-	url.searchParams.set("state", state);
-	url.searchParams.set("access_type", "offline");
-	url.searchParams.set("prompt", "consent");
-
-	callbacks.onAuth({ url: url.toString() });
-	const pasted = await callbacks.onPrompt({
-		message: "Paste the full http://localhost:51121/oauth-callback URL after Google login (or code#state):",
-	});
-	const params = extractOAuthParams(pasted);
-	const decodedState = decodeState(params.state);
-	if (decodedState.verifier !== verifier) throw new Error("OAuth state verifier mismatch");
-
-	const start = Date.now();
-	const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
-		method: "POST",
-		headers: {
-			"Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-			Accept: "*/*",
-			"User-Agent": getAntigravityHeaders("gemini-cli")["User-Agent"],
-		},
-		body: new URLSearchParams({
-			client_id: CLIENT_ID,
-			client_secret: CLIENT_SECRET,
-			code: params.code,
-			grant_type: "authorization_code",
-			redirect_uri: REDIRECT_URI,
-			code_verifier: verifier,
-		}),
-	});
-	if (!tokenResponse.ok) throw new Error(`Token exchange failed: ${await tokenResponse.text()}`);
-	const tokenPayload = (await tokenResponse.json()) as { access_token: string; refresh_token?: string; expires_in: number };
-	if (!tokenPayload.refresh_token) throw new Error("Missing refresh token in Google response");
-
-	const [projectId, email] = await Promise.all([fetchProjectId(tokenPayload.access_token), fetchGoogleUserEmail(tokenPayload.access_token)]);
-	return {
-		refresh: joinRefresh(tokenPayload.refresh_token, projectId ?? DEFAULT_PROJECT_ID),
-		access: encodeApiKey(tokenPayload.access_token, projectId ?? DEFAULT_PROJECT_ID),
-		expires: start + tokenPayload.expires_in * 1000 - TOKEN_EXPIRY_SKEW_MS,
-		...(email ? { email } : {}),
-	};
 }
 
 export async function addAntigravityAccount(

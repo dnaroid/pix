@@ -4,7 +4,7 @@ import { formatAddAccountResult, formatImportResult, parseAddAccountCommandArgs,
 import { API_ID, DEFAULT_PROJECT_ID, ENDPOINT_DAILY, PROVIDER_ID } from "./constants";
 import { modelDefinitions } from "./models";
 import { addAntigravityAccount, loginAntigravity, refreshAntigravityToken } from "./oauth";
-import { emitAntigravityStatus, getCurrentAntigravityStatus, publishAntigravityAuthStartupSection, rememberAntigravityApi, rememberAntigravityUi } from "./status";
+import { emitAntigravityStatus, getCurrentAntigravityStatus, notifyAntigravityLoginFailure, notifyAntigravityProviderFailure, publishAntigravityAuthStartupSection, rememberAntigravityApi, rememberAntigravityUi } from "./status";
 import { streamAntigravity } from "./stream";
 
 export { importOpencodeAntigravityAccount } from "./auth-store";
@@ -21,6 +21,12 @@ export default async function antigravityAuth(pi: ExtensionAPI): Promise<void> {
 		});
 		pi.on("before_provider_request", (_event, ctx) => {
 			rememberAntigravityUi(ctx.ui);
+		});
+		pi.on("message_end", (event, ctx) => {
+			rememberAntigravityUi(ctx.ui);
+			const message = event.message;
+			if (message.role !== "assistant" || message.provider !== PROVIDER_ID || message.stopReason !== "error" || !message.errorMessage) return;
+			notifyAntigravityProviderFailure(message.errorMessage, { ui: ctx.ui, model: message.model });
 		});
 	}
 
@@ -63,7 +69,7 @@ export default async function antigravityAuth(pi: ExtensionAPI): Promise<void> {
 				ctx.ui?.notify?.(formatAddAccountResult(result), "info");
 				emitAntigravityStatus(await getCurrentAntigravityStatus());
 			} catch (error) {
-				ctx.ui?.notify?.(error instanceof Error ? error.message : String(error), "error");
+				notifyAntigravityLoginFailure(error);
 			}
 		},
 	});

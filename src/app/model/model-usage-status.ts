@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { formatCompactProgressBar } from "../../context-progress-bar.js";
 import type { SessionModel } from "../types.js";
 
@@ -14,7 +13,14 @@ const GOOGLE_QUOTA_API_URL = "https://cloudcode-pa.googleapis.com/v1internal:fet
 const REQUEST_TIMEOUT_MS = 10_000;
 const DAY_SECONDS = 86_400;
 const HOUR_SECONDS = 3_600;
+const PI_AUTH_PATH = join(homedir(), ".pi", "agent", "auth.json");
 const DEFAULT_ANTIGRAVITY_PROJECT_ID = "rising-fact-p41fc";
+
+function getPiAuthPath(): string {
+	return process.env.NODE_ENV === "test" && process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH
+		? process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH
+		: PI_AUTH_PATH;
+}
 
 const OPENAI_QUOTA_PROVIDERS = new Set(["openai", "openai-codex"]);
 const ZHIPU_QUOTA_PROVIDERS = new Set(["zai", "zhipuai-coding-plan"]);
@@ -419,7 +425,7 @@ async function readOpenCodeAuth(): Promise<AuthData> {
 
 async function readPiAuth(): Promise<PiAuthData> {
 	try {
-		const content = await readFile(join(getAgentDir(), "auth.json"), "utf8");
+		const content = await readFile(getPiAuthPath(), "utf8");
 		return JSON.parse(content) as PiAuthData;
 	} catch {
 		return {};
@@ -694,7 +700,7 @@ function readAllAntigravityQuotaAccounts(): AntigravityQuotaAccount[] {
 
 function readPiAuthSync(): PiAuthData {
 	try {
-		return JSON.parse(readFileSync(join(getAgentDir(), "auth.json"), "utf8")) as PiAuthData;
+		return JSON.parse(readFileSync(getPiAuthPath(), "utf8")) as PiAuthData;
 	} catch {
 		return {};
 	}

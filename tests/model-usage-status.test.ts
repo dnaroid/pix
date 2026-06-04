@@ -338,29 +338,39 @@ describe("model usage status", () => {
 });
 
 function withPiAuth(auth: unknown, run: () => void): void {
-	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	const previousNodeEnv = process.env.NODE_ENV;
+	const previousAuthPath = process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH;
 	const agentDir = mkdtempSync(join(tmpdir(), "pix-agent-"));
-	writeFileSync(join(agentDir, "auth.json"), JSON.stringify(auth), "utf8");
-	process.env.PI_CODING_AGENT_DIR = agentDir;
+	const authPath = join(agentDir, "auth.json");
+	writeFileSync(authPath, JSON.stringify(auth), "utf8");
+	process.env.NODE_ENV = "test";
+	process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH = authPath;
 	try {
 		run();
 	} finally {
-		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
-		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+		if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+		else process.env.NODE_ENV = previousNodeEnv;
+		if (previousAuthPath === undefined) delete process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH;
+		else process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH = previousAuthPath;
 		rmSync(agentDir, { recursive: true, force: true });
 	}
 }
 
 async function withPiAuthAsync(auth: unknown, run: () => Promise<void>): Promise<void> {
-	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	const previousNodeEnv = process.env.NODE_ENV;
+	const previousAuthPath = process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH;
 	const agentDir = mkdtempSync(join(tmpdir(), "pix-agent-"));
-	writeFileSync(join(agentDir, "auth.json"), JSON.stringify(auth), "utf8");
-	process.env.PI_CODING_AGENT_DIR = agentDir;
+	const authPath = join(agentDir, "auth.json");
+	writeFileSync(authPath, JSON.stringify(auth), "utf8");
+	process.env.NODE_ENV = "test";
+	process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH = authPath;
 	try {
 		await run();
 	} finally {
-		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
-		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+		if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+		else process.env.NODE_ENV = previousNodeEnv;
+		if (previousAuthPath === undefined) delete process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH;
+		else process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH = previousAuthPath;
 		rmSync(agentDir, { recursive: true, force: true });
 	}
 }
