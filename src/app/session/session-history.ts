@@ -33,6 +33,20 @@ export type LoadSessionHistoryAsyncOptions = LoadSessionHistoryOptions & {
 	isCancelled: () => boolean;
 	chunkSize?: number;
 	tailMessageCount?: number;
+	lazyOlderHistory?: boolean;
+	onOlderLoaderReady?: (loader: SessionHistoryOlderLoader | undefined) => void;
+};
+
+export type LoadOlderSessionHistoryOptions = {
+	render?: boolean;
+};
+
+export type SessionHistoryOlderLoader = {
+	hasOlder(): boolean;
+	isLoading(): boolean;
+	loadedMessageCount(): number;
+	totalMessageCount(): number;
+	loadOlder(options?: LoadOlderSessionHistoryOptions): Promise<boolean>;
 };
 
 const DEFAULT_HISTORY_CHUNK_SIZE = 50;
@@ -61,6 +75,12 @@ export async function loadSessionHistoryEntriesAsync(options: LoadSessionHistory
 	options.render();
 	await yieldToEventLoop();
 
+	if (options.lazyOlderHistory) {
+		const loader = createOlderHistoryLoader(messages, options, chunkSize, toolResults, tailStart);
+		options.onOlderLoaderReady?.(loader.hasOlder() ? loader : undefined);
+		return !options.isCancelled();
+	}
+
 	for (let end = tailStart; end > 0; end -= chunkSize) {
 		if (options.isCancelled()) return false;
 		const start = Math.max(0, end - chunkSize);
@@ -73,6 +93,54 @@ export async function loadSessionHistoryEntriesAsync(options: LoadSessionHistory
 	}
 
 	return !options.isCancelled();
+}
+
+function createOlderHistoryLoader(
+	messages: readonly unknown[],
+	options: LoadSessionHistoryAsyncOptions,
+	chunkSize: number,
+	toolResults: Map<string, ToolResultRecord>,
+	initialEnd: number,
+): SessionHistoryOlderLoader {
+	let nextEnd = initialEnd;
+	let loading = false;
+
+	return {
+		hasOlder: () => nextEnd > 0,
+		isLoading: () => loading,
+		loadedMessageCount: () => Math.max(0, messages.length - nextEnd),
+		totalMessageCount: () => messages.length,
+		async loadOlder(loadOptions: LoadOlderSessionHistoryOptions = {}): Promise<boolean> {
+			if (loading) return !options.isCancelled();
+			if (nextEnd <= 0) return !options.isCancelled();
+
+			loading = true;
+			let didPrependEntries = false;
+			try {
+				while (nextEnd > 0 && !options.isCancelled()) {
+					const end = nextEnd;
+					const start = Math.max(0, end - chunkSize);
+					buildToolResults(messages, options, start, end, toolResults);
+					const entries: Entry[] = [];
+					addSessionHistoryRangeEntries(messages, start, end, toolResults, (entry) => entries.push(entry), options);
+					nextEnd = start;
+					if (entries.length > 0) {
+						options.prependEntries(entries);
+						didPrependEntries = true;
+						break;
+					}
+					await yieldToEventLoop();
+				}
+
+				if (options.isCancelled()) return false;
+				if (didPrependEntries && loadOptions.render !== false) options.render();
+				return true;
+			} finally {
+				loading = false;
+				if (nextEnd <= 0) options.onOlderLoaderReady?.(undefined);
+			}
+		},
+	};
 }
 
 function expandedTailStart(messages: readonly unknown[], initialStart: number): number {

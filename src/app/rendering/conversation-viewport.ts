@@ -1,8 +1,9 @@
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
-import type { PixConfig } from "../../config.js";
+import { resolveToolRule, type PixConfig } from "../../config.js";
+import { stringDisplayWidth } from "../../terminal-width.js";
 import type { Theme } from "../../theme.js";
 import { renderConversationEntry as renderConversationEntryLines, type InlineUserMessageMenuContext } from "./conversation-entry-renderer.js";
-import { shortHash } from "./render-text.js";
+import { horizontalPaddingLayout, shortHash } from "./render-text.js";
 import type { ConversationBlockCache, Entry, RenderedLine, SubmittedUserMessage } from "../types.js";
 
 export type ConversationViewportHost = {
@@ -25,6 +26,7 @@ type ViewportLayoutCache = {
 	entries: readonly Entry[];
 	entryIds: string[];
 	lineCounts: number[];
+	measuredLineCounts: boolean[];
 	offsets: number[];
 	positions: Map<string, number>;
 	dirtyEntryIds: Set<string>;
@@ -63,7 +65,25 @@ export class ConversationViewport {
 
 	slice(width: number, start: number, count: number): RenderedLine[] {
 		if (count <= 0) return [];
+
+		for (let attempt = 0; attempt < 4; attempt += 1) {
+			const layout = this.layoutForWidth(width);
+			const visible = this.sliceMeasured(layout, width, start, count);
+			if (!visible.changed) return visible.lines;
+		}
+
 		const layout = this.layoutForWidth(width);
+		return this.sliceMeasured(layout, width, start, count, { allowLayoutChanges: false }).lines;
+	}
+
+	private sliceMeasured(
+		layout: ViewportLayoutCache,
+		width: number,
+		start: number,
+		count: number,
+		options: { allowLayoutChanges?: boolean } = {},
+	): { lines: RenderedLine[]; changed: boolean } {
+		const allowLayoutChanges = options.allowLayoutChanges !== false;
 
 		const visible: RenderedLine[] = [];
 		const end = start + count;
@@ -71,6 +91,8 @@ export class ConversationViewport {
 
 		for (; entryIndex < layout.entries.length; entryIndex += 1) {
 			const entry = layout.entries[entryIndex]!;
+			if (allowLayoutChanges && this.ensureEntryMeasured(layout, width, entryIndex)) return { lines: [], changed: true };
+
 			const block = this.blockForEntry(entry, width);
 			const blockLineCount = layout.lineCounts[entryIndex] ?? 0;
 			if (blockLineCount === 0) continue;
@@ -88,7 +110,7 @@ export class ConversationViewport {
 			if (visible.length >= count) break;
 		}
 
-		return visible;
+		return { lines: visible, changed: false };
 	}
 
 	entries(): Entry[] {
@@ -125,6 +147,7 @@ export class ConversationViewport {
 
 	entryBlockPositions(width: number): ConversationEntryBlockPosition[] {
 		const layout = this.layoutForWidth(width);
+		for (let index = 0; index < layout.entries.length; index += 1) this.ensureEntryMeasured(layout, width, index);
 		return layout.entries.map((entry, index) => ({
 			entry,
 			offset: layout.offsets[index] ?? 0,
@@ -198,21 +221,24 @@ export class ConversationViewport {
 	private buildLayout(entries: readonly Entry[], width: number, queuedSignature: string, superCompactTools: boolean, allThinkingExpanded: boolean): ViewportLayoutCache {
 		const entryIds: string[] = [];
 		const lineCounts: number[] = [];
+		const measuredLineCounts: boolean[] = [];
 		const offsets: number[] = [];
 		const positions = new Map<string, number>();
 		let totalLineCount = 0;
+		const estimatedBlockLineCounts = entries.map((entry) => this.estimatedBlockLineCountForEntry(entry, width));
 
 		for (const [index, entry] of entries.entries()) {
 			entryIds.push(entry.id);
 			positions.set(entry.id, index);
 			offsets.push(totalLineCount);
-			const lineCount = this.lineCountForEntry(entry, entries, index, width);
+			const lineCount = this.lineCountWithGap(entry, estimatedBlockLineCounts[index] ?? 0, this.nextEstimatedVisibleEntry(entries, estimatedBlockLineCounts, index));
 			lineCounts.push(lineCount);
+			measuredLineCounts.push(false);
 			totalLineCount += lineCount;
 		}
 
 		offsets.push(totalLineCount);
-		return { entries, entryIds, lineCounts, offsets, positions, dirtyEntryIds: new Set(), totalLineCount, queuedSignature, superCompactTools, allThinkingExpanded };
+		return { entries, entryIds, lineCounts, measuredLineCounts, offsets, positions, dirtyEntryIds: new Set(), totalLineCount, queuedSignature, superCompactTools, allThinkingExpanded };
 	}
 
 	private layoutStructureChanged(layout: ViewportLayoutCache, entries: readonly Entry[], queuedSignature: string, superCompactTools: boolean, allThinkingExpanded: boolean): boolean {
@@ -225,11 +251,14 @@ export class ConversationViewport {
 	private refreshDirtyLayoutEntries(layout: ViewportLayoutCache, width: number): void {
 		if (layout.dirtyEntryIds.size === 0) return;
 
+		const indexes = new Set<number>();
 		for (const entryId of layout.dirtyEntryIds) {
 			const position = layout.positions.get(entryId);
 			if (position === undefined) continue;
-			this.refreshLayoutEntry(layout, width, position);
+			indexes.add(position);
+			if (position > 0) indexes.add(position - 1);
 		}
+		for (const position of [...indexes].sort((left, right) => left - right)) this.refreshLayoutEntry(layout, width, position, true);
 		layout.dirtyEntryIds.clear();
 	}
 
@@ -244,17 +273,27 @@ export class ConversationViewport {
 
 	private refreshDynamicLayoutEntries(layout: ViewportLayoutCache, width: number): void {
 		for (let index = 0; index < layout.entries.length; index += 1) {
-			if (this.host.isDynamicConversationBlock(layout.entries[index]!)) this.refreshLayoutEntry(layout, width, index);
+			if (this.host.isDynamicConversationBlock(layout.entries[index]!)) this.refreshLayoutEntry(layout, width, index, true);
 		}
 	}
 
-	private refreshLayoutEntry(layout: ViewportLayoutCache, width: number, index: number): void {
+	private ensureEntryMeasured(layout: ViewportLayoutCache, width: number, index: number): boolean {
 		const entry = layout.entries[index];
-		if (!entry) return;
+		if (!entry) return false;
+		if (layout.measuredLineCounts[index] === true && !this.host.isDynamicConversationBlock(entry)) return false;
+		return this.refreshLayoutEntry(layout, width, index, true);
+	}
+
+	private refreshLayoutEntry(layout: ViewportLayoutCache, width: number, index: number, measure: boolean): boolean {
+		const entry = layout.entries[index];
+		if (!entry) return false;
 
 		const previousLineCount = layout.lineCounts[index] ?? 0;
-		const nextLineCount = this.lineCountForEntry(entry, layout.entries, index, width);
-		if (previousLineCount === nextLineCount) return;
+		const nextLineCount = measure
+			? this.measuredLineCountForEntry(entry, layout.entries, index, width)
+			: this.estimatedLineCountForEntry(entry, layout.entries, index, width);
+		layout.measuredLineCounts[index] = measure;
+		if (previousLineCount === nextLineCount) return false;
 
 		const delta = nextLineCount - previousLineCount;
 		layout.lineCounts[index] = nextLineCount;
@@ -262,13 +301,54 @@ export class ConversationViewport {
 		for (let offsetIndex = index + 1; offsetIndex < layout.offsets.length; offsetIndex += 1) {
 			layout.offsets[offsetIndex] = (layout.offsets[offsetIndex] ?? 0) + delta;
 		}
+		return true;
 	}
 
-	private lineCountForEntry(entry: Entry, entries: readonly Entry[], index: number, width: number): number {
+	private measuredLineCountForEntry(entry: Entry, entries: readonly Entry[], index: number, width: number): number {
 		const block = this.blockForEntry(entry, width);
-		if (block.lineCount === 0) return 0;
-		const nextEntry = this.nextVisibleEntry(entries, index, width);
-		return block.lineCount + (this.gapAfterEntry(entry, nextEntry) ? 1 : 0);
+		return this.lineCountWithGap(entry, block.lineCount, this.nextVisibleEntry(entries, index, width));
+	}
+
+	private estimatedLineCountForEntry(entry: Entry, entries: readonly Entry[], index: number, width: number): number {
+		const blockLineCount = this.estimatedBlockLineCountForEntry(entry, width);
+		const blockLineCounts = entries.map((candidate) => this.estimatedBlockLineCountForEntry(candidate, width));
+		return this.lineCountWithGap(entry, blockLineCount, this.nextEstimatedVisibleEntry(entries, blockLineCounts, index));
+	}
+
+	private lineCountWithGap(entry: Entry, blockLineCount: number, nextEntry: Entry | undefined): number {
+		if (blockLineCount === 0) return 0;
+		return blockLineCount + (this.gapAfterEntry(entry, nextEntry) ? 1 : 0);
+	}
+
+	private estimatedBlockLineCountForEntry(entry: Entry, width: number): number {
+		if (width <= 0) return 0;
+		switch (entry.kind) {
+			case "assistant":
+				return estimateWrappedLineCount(entry.text, width);
+			case "system":
+			case "error":
+			case "custom":
+			case "session-aborted":
+				return estimateWrappedLineCount(entry.text, width);
+			case "user": {
+				const { contentWidth } = horizontalPaddingLayout(width);
+				return 2 + estimateWrappedLineCount(entry.text, contentWidth);
+			}
+			case "queued": {
+				const { contentWidth } = horizontalPaddingLayout(width);
+				return estimateWrappedLineCount(entry.text, contentWidth);
+			}
+			case "thinking": {
+				const expanded = entry.expanded || this.host.allThinkingExpanded === true;
+				return expanded ? 1 + estimateWrappedLineCount(entry.text, Math.max(1, width - 2)) : 1;
+			}
+			case "shell":
+				return estimateToolLikeLineCount("shell", entry.expanded, `${entry.output}\n${entry.status}`, width, this.host.pixConfig, this.host.superCompactTools === true, true);
+			case "tool":
+				return estimateToolLikeLineCount(entry.toolName, entry.expanded, entry.output, width, this.host.pixConfig, this.host.superCompactTools === true, false);
+			default:
+				return 1;
+		}
 	}
 
 	private nextVisibleEntry(entries: readonly Entry[], index: number, width: number): Entry | undefined {
@@ -276,6 +356,15 @@ export class ConversationViewport {
 			const nextEntry = entries[nextIndex];
 			if (!nextEntry) continue;
 			if (this.blockForEntry(nextEntry, width).lineCount > 0) return nextEntry;
+		}
+		return undefined;
+	}
+
+	private nextEstimatedVisibleEntry(entries: readonly Entry[], lineCounts: readonly number[], index: number): Entry | undefined {
+		for (let nextIndex = index + 1; nextIndex < entries.length; nextIndex += 1) {
+			const nextEntry = entries[nextIndex];
+			if (!nextEntry) continue;
+			if ((lineCounts[nextIndex] ?? 0) > 0) return nextEntry;
 		}
 		return undefined;
 	}
@@ -307,4 +396,34 @@ export class ConversationViewport {
 
 		return result;
 	}
+}
+
+function estimateWrappedLineCount(text: string, width: number): number {
+	const safeWidth = Math.max(1, width);
+	if (!text) return 0;
+	let count = 0;
+	for (const line of text.split("\n")) {
+		const displayWidth = stringDisplayWidth(line);
+		count += Math.max(1, Math.ceil(displayWidth / safeWidth));
+	}
+	return count;
+}
+
+function estimateToolLikeLineCount(
+	toolName: string,
+	expanded: boolean,
+	output: string,
+	width: number,
+	pixConfig: PixConfig,
+	superCompactTools: boolean,
+	includeStatusLine: boolean,
+): number {
+	const rule = resolveToolRule(toolName, pixConfig.toolRenderer);
+	if (rule.hidden) return 0;
+	if (expanded) return 1 + estimateWrappedLineCount(output, Math.max(1, width - 2));
+	if (rule.compactHidden || (rule.defaultExpanded === true && !superCompactTools)) return 1;
+	const bodyLineCount = estimateWrappedLineCount(output, Math.max(1, width - 2));
+	const previewLineCount = Math.min(rule.previewLines, bodyLineCount);
+	const extraStatusLine = includeStatusLine && output.trimEnd().length === 0 ? 1 : 0;
+	return superCompactTools ? 1 : 1 + Math.max(extraStatusLine, previewLineCount);
 }

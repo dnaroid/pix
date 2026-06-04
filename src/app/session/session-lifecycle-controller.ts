@@ -48,7 +48,7 @@ export type AppSessionLifecycleHost = {
 	clearMouseRenderState(): void;
 	scrollReset(): void;
 	loadSessionHistoryEntries(): void;
-	loadSessionHistoryEntriesAsync(options: { isCancelled: () => boolean; render: () => void }): Promise<boolean>;
+	loadSessionHistoryEntriesAsync(options: { isCancelled: () => boolean; render: () => void; lazyOlderHistory?: boolean }): Promise<boolean>;
 	syncUserSessionEntryMetadata(): void;
 	restoreTabsAfterStartup(): Promise<void>;
 	render(): void;
@@ -149,6 +149,7 @@ export class AppSessionLifecycleController {
 		await this.host.loadSessionHistoryEntriesAsync({
 			isCancelled: () => !this.host.isRunning(),
 			render: () => this.host.render(),
+			lazyOlderHistory: true,
 		});
 		this.host.syncUserSessionEntryMetadata();
 		if (message) this.host.addEntry({ id: createId("system"), kind: "system", text: message });

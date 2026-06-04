@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { loadSessionHistoryEntriesAsync } from "../src/app/session/session-history.js";
+import { loadSessionHistoryEntriesAsync, type SessionHistoryOlderLoader } from "../src/app/session/session-history.js";
 import type { Entry } from "../src/app/types.js";
 
 describe("loadSessionHistoryEntriesAsync", () => {
@@ -54,6 +54,48 @@ describe("loadSessionHistoryEntriesAsync", () => {
 		assert.equal(completed, true);
 		assert.deepEqual(snapshots[0], ["tail"]);
 		assert.deepEqual(entries.map(entryText), ["old", "middle", "tail"]);
+	});
+
+	it("can keep older history lazy until the caller requests it", async () => {
+		const entries: Entry[] = [];
+		const snapshots: string[][] = [];
+		let olderLoader: SessionHistoryOlderLoader | undefined;
+
+		const completed = await loadSessionHistoryEntriesAsync({
+			messages: [
+				{ role: "user", content: "old" },
+				{ role: "assistant", content: [{ text: "middle" }] },
+				{ role: "user", content: "tail" },
+			],
+			addEntry: (entry) => entries.push(entry),
+			prependEntries: (newEntries) => entries.unshift(...newEntries),
+			setToolEntryId: () => {},
+			toolDefaultExpanded: () => false,
+			observeSubagentsToolResult: () => {},
+			observeTodoToolResult: () => {},
+			isCancelled: () => false,
+			render: () => {
+				snapshots.push(entries.map(entryText));
+			},
+			chunkSize: 1,
+			tailMessageCount: 1,
+			lazyOlderHistory: true,
+			onOlderLoaderReady: (loader) => {
+				olderLoader = loader;
+			},
+		});
+
+		assert.equal(completed, true);
+		assert.deepEqual(snapshots, [["tail"]]);
+		assert.deepEqual(entries.map(entryText), ["tail"]);
+		assert.equal(olderLoader?.hasOlder(), true);
+
+		assert.equal(await olderLoader?.loadOlder(), true);
+		assert.deepEqual(entries.map(entryText), ["middle", "tail"]);
+
+		assert.equal(await olderLoader?.loadOlder(), true);
+		assert.deepEqual(entries.map(entryText), ["old", "middle", "tail"]);
+		assert.equal(olderLoader, undefined);
 	});
 
 	it("does not split a trailing tool result from its assistant tool call", async () => {

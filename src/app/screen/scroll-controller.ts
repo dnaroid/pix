@@ -27,12 +27,16 @@ export type AppScrollControllerHost = {
 	terminalColumns(): number;
 	terminalRows(): number;
 	tabPanelRows(terminalRows: number): number;
+	hasOlderSessionHistory?(): boolean;
+	isLoadingOlderSessionHistory?(): boolean;
+	loadOlderSessionHistory?(options?: { render?: boolean }): Promise<boolean>;
 	render(): void;
 };
 
 export class AppScrollController {
 	private scrollFromBottom = 0;
 	private detachedScrollStart: number | undefined;
+	private readonly olderHistoryThresholdLines = 8;
 
 	constructor(private readonly host: AppScrollControllerHost) {}
 
@@ -98,6 +102,7 @@ export class AppScrollController {
 		const rows = editorLayoutRows(terminalRows, this.host.tabPanelRows(terminalRows));
 		const { bodyHeight } = this.host.editorLayoutRenderer().computeLayout(columns, rows);
 		const metrics = this.scrollMetrics(columns, bodyHeight);
+		this.maybeLoadOlderHistory(delta, metrics, { render: shouldRender });
 		const { conversationLineCount, maxScroll } = metrics;
 		const nextScrollFromBottom = Math.max(0, Math.min(maxScroll, this.scrollFromBottom + -delta));
 		if (nextScrollFromBottom === this.scrollFromBottom) {
@@ -115,6 +120,14 @@ export class AppScrollController {
 			: Math.max(0, conversationLineCount - bodyHeight - nextScrollFromBottom);
 		if (shouldRender) this.host.render();
 		return true;
+	}
+
+	private maybeLoadOlderHistory(delta: number, metrics: AppScrollMetrics, options: { render: boolean }): void {
+		if (delta >= 0) return;
+		if (metrics.start > this.olderHistoryThresholdLines) return;
+		if (this.host.hasOlderSessionHistory?.() !== true) return;
+		if (this.host.isLoadingOlderSessionHistory?.() === true) return;
+		void this.host.loadOlderSessionHistory?.({ render: options.render });
 	}
 
 	scrollToScrollbarPosition(bodyRow: number): boolean {

@@ -3,7 +3,7 @@ import type { ImageContent } from "../../input-editor.js";
 import type { ConversationViewport } from "../rendering/conversation-viewport.js";
 import { createId } from "../id.js";
 import { extractImageContents, renderContent, renderUserMessageContent, stringifyUnknown } from "../rendering/message-content.js";
-import { customMessageEntry, loadSessionHistoryEntries, loadSessionHistoryEntriesAsync } from "./session-history.js";
+import { customMessageEntry, loadSessionHistoryEntries, loadSessionHistoryEntriesAsync, type SessionHistoryOlderLoader } from "./session-history.js";
 import type { Entry, SessionActivity } from "../types.js";
 import { isRecord } from "../guards.js";
 import type { WorkspaceMutation, WorkspaceMutationPreparation } from "../workspace/workspace-undo.js";
@@ -54,6 +54,7 @@ export class AppSessionEventController {
 
 	private readonly toolEntryIdsByCallId = new Map<string, string>();
 	private readonly toolMutationPreparationsByCallId = new Map<string, { userEntryId: string; args: unknown; preparation?: WorkspaceMutationPreparation }>();
+	private olderHistoryLoader: SessionHistoryOlderLoader | undefined;
 	private currentUserEntryId: string | undefined;
 	private currentAssistantEntryId: string | undefined;
 	private currentThinkingEntryId: string | undefined;
@@ -69,6 +70,7 @@ export class AppSessionEventController {
 		this.currentAssistantEntryId = undefined;
 		this.currentThinkingEntryId = undefined;
 		this.assistantTextBuffer = "";
+		this.olderHistoryLoader = undefined;
 	}
 
 	loadSessionHistory(): void {
@@ -85,9 +87,10 @@ export class AppSessionEventController {
 		});
 	}
 
-	async loadSessionHistoryAsync(options: { isCancelled: () => boolean; render: () => void }): Promise<boolean> {
+	async loadSessionHistoryAsync(options: { isCancelled: () => boolean; render: () => void; lazyOlderHistory?: boolean }): Promise<boolean> {
 		const runtime = this.host.runtime();
 		if (!runtime) return !options.isCancelled();
+		this.olderHistoryLoader = undefined;
 
 		return loadSessionHistoryEntriesAsync({
 			messages: runtime.session.messages,
@@ -99,7 +102,23 @@ export class AppSessionEventController {
 			observeTodoToolResult: (toolName, details, isError) => this.host.observeTodoToolResult(toolName, details, isError),
 			isCancelled: options.isCancelled,
 			render: options.render,
+			lazyOlderHistory: options.lazyOlderHistory === true,
+			onOlderLoaderReady: (loader) => {
+				this.olderHistoryLoader = loader;
+			},
 		});
+	}
+
+	hasOlderSessionHistory(): boolean {
+		return this.olderHistoryLoader?.hasOlder() === true;
+	}
+
+	isLoadingOlderSessionHistory(): boolean {
+		return this.olderHistoryLoader?.isLoading() === true;
+	}
+
+	async loadOlderSessionHistory(options: { render?: boolean } = {}): Promise<boolean> {
+		return this.olderHistoryLoader?.loadOlder(options) ?? false;
 	}
 
 	handleSessionEvent(event: AgentSessionEvent): void {

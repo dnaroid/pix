@@ -437,6 +437,9 @@ export class PiUiExtendApp {
 			terminalColumns: () => this.terminalColumns(),
 			terminalRows: () => this.terminalRows(),
 			tabPanelRows: (terminalRows) => this.tabsController.tabPanelRows(terminalRows),
+			hasOlderSessionHistory: () => this.sessionEvents.hasOlderSessionHistory(),
+			isLoadingOlderSessionHistory: () => this.sessionEvents.isLoadingOlderSessionHistory(),
+			loadOlderSessionHistory: (options) => this.sessionEvents.loadOlderSessionHistory(options),
 			render: () => this.render(),
 		});
 		this.commandController = new AppCommandController({
@@ -884,7 +887,11 @@ export class PiUiExtendApp {
 	}
 
 	private loadSessionHistory(): void {
-		this.sessionLifecycle.loadSessionHistory();
+		void this.sessionEvents.loadSessionHistoryAsync({
+			isCancelled: () => !this.running,
+			render: () => this.render(),
+			lazyOlderHistory: true,
+		});
 	}
 
 	private async openSearchResultInNewTab(result: SessionSearchResult): Promise<void> {
@@ -907,7 +914,7 @@ export class PiUiExtendApp {
 		this.setSessionStatus(this.runtime?.session);
 	}
 
-	private async loadSessionHistoryAsync(options: { isCancelled: () => boolean; render: () => void }): Promise<boolean> {
+	private async loadSessionHistoryAsync(options: { isCancelled: () => boolean; render: () => void; lazyOlderHistory?: boolean }): Promise<boolean> {
 		return this.sessionEvents.loadSessionHistoryAsync(options);
 	}
 
