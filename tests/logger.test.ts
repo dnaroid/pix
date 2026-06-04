@@ -8,7 +8,7 @@ import { getPixLogPath, PixFileLogger, trimLogFile } from "../src/app/logger.js"
 
 describe("pix file logger", () => {
 	it("writes to ~/.config/pi/pix.log by default", () => {
-		assert.equal(getPixLogPath("/home/test"), "/home/test/.config/pi/pix.log");
+		assert.equal(getPixLogPath("/home/test"), join("/home/test", ".config", "pi", "pix.log"));
 	});
 
 	it("appends log lines and trims to the configured line limit", async () => {
