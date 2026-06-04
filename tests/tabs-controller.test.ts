@@ -754,7 +754,7 @@ describe("AppTabsController", () => {
 		const opened = await controller.forkSessionEntryInNewTab("entry-1");
 
 		assert.equal(opened, true);
-		assert.deepEqual(createdFrom, ["/tmp/one.jsonl"]);
+		assert.deepEqual(createdFrom, [resolve("/tmp/one.jsonl")]);
 		assert.equal(currentRuntime, forkRuntime);
 		assert.equal(forkRuntime.session.sessionFile, "/tmp/fork.jsonl");
 		assert.equal(tabs.tabItems.length, 2);
