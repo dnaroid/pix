@@ -1,10 +1,9 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import {
 	getAgentDir,
-	SessionManager,
 	type AgentSession,
 	type AgentSessionEvent,
 	type AgentSessionRuntime,
@@ -18,6 +17,7 @@ import type { AppOptions, Entry, SessionActivity, SessionTab, SubmittedUserMessa
 
 const TAB_STATE_VERSION = 3;
 const MAX_RESTORED_TABS = 8;
+const MAX_PROJECT_SESSIONS = 20;
 const TAB_ATTENTION_BLINK_KEY = "tab-attention";
 const LOADING_TAB_TITLE_PATTERN = /^loading(?:…|\.\.\.)?$/iu;
 
@@ -82,6 +82,8 @@ export class AppTabsController {
 	private pendingActiveTabId: string | undefined;
 	private historyLoadGeneration = 0;
 	private restored = false;
+	private retentionCleanupRunning = false;
+	private retentionCleanupScheduled = false;
 
 	constructor(private readonly host: AppTabsControllerHost) {}
 
@@ -230,11 +232,11 @@ export class AppTabsController {
 			return;
 		}
 
-		const sessionTitles = await this.loadSessionTitles();
-		const restoredTabs = this.restoredTabs(saved, sessionTitles);
+		const restoredTabs = this.restoredTabs(saved);
 		if (restoredTabs.length === 0) {
 			this.settleStartupTabPlaceholders();
 			await this.saveTabs();
+			this.scheduleProjectSessionRetention();
 			return;
 		}
 
@@ -255,6 +257,7 @@ export class AppTabsController {
 		if (!desiredPath) {
 			this.settleStartupTabPlaceholders();
 			await this.saveTabs();
+			this.scheduleProjectSessionRetention();
 			return;
 		}
 
@@ -271,6 +274,7 @@ export class AppTabsController {
 				this.storeActiveRuntime(runtime);
 				this.settleStartupTabPlaceholders();
 				await this.saveTabs();
+				this.scheduleProjectSessionRetention();
 				return;
 			}
 		}
@@ -284,6 +288,7 @@ export class AppTabsController {
 		this.host.setSessionActivity(this.sessionActivity(restoredRuntime.session));
 		if (this.activeTabId) this.restoreInputState(this.activeTabId);
 		await this.saveTabs();
+		this.scheduleProjectSessionRetention();
 	}
 
 	async openNewTab(): Promise<void> {
@@ -319,6 +324,7 @@ export class AppTabsController {
 			if (this.pendingActiveTabId === tab.id) this.pendingActiveTabId = undefined;
 		}
 		void this.saveTabs();
+		this.scheduleProjectSessionRetention();
 		this.host.resetSessionView();
 		this.restoreDeferredUserMessages(tab.id);
 		if (isEmptyStartupSession(newRuntime)) {
@@ -601,6 +607,7 @@ export class AppTabsController {
 		this.host.setSessionStatus(runtime.session);
 		this.host.setSessionActivity(this.sessionActivity(runtime.session));
 		void this.saveTabs();
+		this.scheduleProjectSessionRetention();
 		this.host.render();
 	}
 
@@ -953,19 +960,7 @@ export class AppTabsController {
 		});
 	}
 
-	private async loadSessionTitles(): Promise<ReadonlyMap<string, string>> {
-		try {
-			const sessions = await SessionManager.list(this.host.options.cwd);
-			return new Map(sessions.map((session) => [
-				resolve(session.path),
-				this.sessionTitleFromParts(session.id, session.name),
-			]));
-		} catch {
-			return new Map();
-		}
-	}
-
-	private restoredTabs(saved: PersistedTabState, titles: ReadonlyMap<string, string>): SessionTab[] {
+	private restoredTabs(saved: PersistedTabState): SessionTab[] {
 		const tabs: SessionTab[] = [];
 		const seen = new Set<string>();
 		for (const tab of saved.tabs) {
@@ -975,11 +970,8 @@ export class AppTabsController {
 			if (seen.has(sessionPath) || (!existsSync(sessionPath) && !hasDraftInput && !hasDeferredQueue)) continue;
 			seen.add(sessionPath);
 			const savedTitle = tab.title?.trim();
-			const sessionTitle = titles.get(sessionPath)?.trim();
-			const restoredLoadingTitle = sessionTitle !== undefined
-				? LOADING_TAB_TITLE_PATTERN.test(sessionTitle)
-				: savedTitle !== undefined && LOADING_TAB_TITLE_PATTERN.test(savedTitle);
-			const title = restoredLoadingTitle ? this.defaultSessionTitleFromPath(sessionPath) : sessionTitle ?? savedTitle;
+			const restoredLoadingTitle = savedTitle !== undefined && LOADING_TAB_TITLE_PATTERN.test(savedTitle);
+			const title = restoredLoadingTitle ? this.defaultSessionTitleFromPath(sessionPath) : savedTitle;
 			tabs.push({
 				id: createId("tab"),
 				title: title || "session",
@@ -1107,5 +1099,73 @@ export class AppTabsController {
 	private filePath(): string {
 		const key = createHash("sha256").update(resolve(this.host.options.cwd)).digest("hex").slice(0, 24);
 		return join(getAgentDir(), "pix", "tabs", `${key}.json`);
+	}
+
+	private sessionDir(): string {
+		const safePath = `--${resolve(this.host.options.cwd).replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
+		return join(getAgentDir(), "sessions", safePath);
+	}
+
+	private scheduleProjectSessionRetention(): void {
+		if (this.host.options.noSession || this.retentionCleanupScheduled || this.retentionCleanupRunning) return;
+		this.retentionCleanupScheduled = true;
+		setTimeout(() => {
+			this.retentionCleanupScheduled = false;
+			void this.cleanupOldProjectSessions();
+		}, 0);
+	}
+
+	private async cleanupOldProjectSessions(): Promise<void> {
+		if (this.retentionCleanupRunning) return;
+		this.retentionCleanupRunning = true;
+		try {
+			const sessionDir = this.sessionDir();
+			const preserved = this.preservedSessionPaths();
+			const entries = await readdir(sessionDir, { withFileTypes: true });
+			const sessions: Array<{ path: string; modifiedMs: number }> = [];
+			for (const entry of entries) {
+				if (!entry.isFile() || extname(entry.name) !== ".jsonl") continue;
+				const path = resolve(sessionDir, entry.name);
+				try {
+					const info = await stat(path);
+					sessions.push({ path, modifiedMs: info.mtimeMs });
+				} catch {
+					// Ignore files that disappear while cleanup is scanning.
+				}
+			}
+
+			if (sessions.length <= MAX_PROJECT_SESSIONS) return;
+			sessions.sort((a, b) => b.modifiedMs - a.modifiedMs);
+			const keep = new Set(preserved);
+			for (const session of sessions) {
+				if (keep.size >= MAX_PROJECT_SESSIONS) break;
+				keep.add(session.path);
+			}
+
+			for (const session of sessions) {
+				if (keep.has(session.path)) continue;
+				try {
+					await unlink(session.path);
+				} catch {
+					// Session retention must never interrupt the terminal UI.
+				}
+			}
+		} catch {
+			// Session retention must never interrupt the terminal UI.
+		} finally {
+			this.retentionCleanupRunning = false;
+		}
+	}
+
+	private preservedSessionPaths(): Set<string> {
+		const preserved = new Set<string>();
+		const add = (sessionPath: string | undefined): void => {
+			if (sessionPath) preserved.add(resolve(sessionPath));
+		};
+
+		add(this.host.options.sessionPath);
+		add(this.host.runtime()?.session.sessionFile);
+		for (const tab of this.tabItems) add(tab.sessionPath);
+		return preserved;
 	}
 }

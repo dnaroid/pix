@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, it } from "node:test";
@@ -1339,6 +1339,61 @@ describe("AppTabsController", () => {
 		assert.equal(tabs.activeTabId, "tab-1");
 		assert.equal(currentRuntime, activeRuntime);
 		assert.deepEqual(toasts, ["Could not open session tab"]);
+	});
+
+	it("retains only twenty project sessions while preserving open tabs", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "pix-tabs-retention-"));
+		const sessionDir = join(dir, "sessions");
+		const sessionPaths = Array.from({ length: 25 }, (_, index) => join(sessionDir, `${String(index + 1).padStart(2, "0")}.jsonl`));
+		await mkdir(sessionDir, { recursive: true });
+		for (const [index, sessionPath] of sessionPaths.entries()) {
+			await writeFile(sessionPath, "", "utf8");
+			const time = new Date(1_700_000_000_000 + index * 1_000);
+			await utimes(sessionPath, time, time);
+		}
+
+		const preservedOldSession = sessionPaths[0] ?? "";
+		const activeRuntime = fakeRuntime("one", preservedOldSession);
+		const controller = new AppTabsController({
+			options: { cwd: dir, themeName: "dark", noSession: false } satisfies AppOptions,
+			blinkController: fakeBlinkController(),
+			runtime: () => activeRuntime,
+			createRuntimeForNewSession: async () => fakeRuntime("new", join(dir, "new.jsonl")),
+			createRuntimeForSession: async (path) => fakeRuntime("session", path),
+			activateRuntime: async () => {},
+			disposeRuntime: async () => {},
+			isRunning: () => true,
+			setStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			resetSessionView: () => {},
+			loadSessionHistory: () => {},
+			loadSessionHistoryAsync: async () => true,
+			syncUserSessionEntryMetadata: () => {},
+			captureInputState: () => ({ text: "", cursor: 0 }),
+			restoreInputState: () => {},
+			addEntry: () => {},
+			showToast: () => {},
+			render: () => {},
+		});
+		const tabs = controller as unknown as {
+			sessionDir: () => string;
+			cleanupOldProjectSessions: () => Promise<void>;
+			tabItems: SessionTab[];
+			activeTabId: string | undefined;
+		};
+		tabs.sessionDir = () => sessionDir;
+		tabs.tabItems.push({ id: "tab-1", title: "old", status: "active", sessionPath: preservedOldSession });
+		tabs.activeTabId = "tab-1";
+
+		await tabs.cleanupOldProjectSessions();
+
+		const remaining = (await readdir(sessionDir)).filter((name) => name.endsWith(".jsonl")).sort();
+		assert.equal(remaining.length, 20);
+		assert.equal(remaining.includes("01.jsonl"), true);
+		assert.equal(remaining.includes("02.jsonl"), false);
+		assert.equal(remaining.includes("25.jsonl"), true);
+		assert.equal((await stat(preservedOldSession)).isFile(), true);
 	});
 
 });

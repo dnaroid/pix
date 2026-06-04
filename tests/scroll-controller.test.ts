@@ -102,6 +102,27 @@ describe("AppScrollController", () => {
 		assert.equal(controller.conversationView(10, 5).metrics.start, 5);
 		assert.ok(rendered > 0);
 	});
+
+	it("preserves a detached visible anchor when appended messages prune the oldest lines", () => {
+		let lineCount = 100;
+		let slicedStart: number | undefined;
+		const controller = createController({
+			lineCount: () => lineCount,
+			slice: (_width, start, count) => {
+				slicedStart = start;
+				return Array.from({ length: count }, (_, index) => ({ text: `line ${start + index}` }));
+			},
+		}, 5);
+
+		assert.equal(controller.scrollByLines(-20, { render: false }), true);
+		assert.equal(controller.conversationView(10, 5).metrics.start, 75);
+
+		lineCount -= 10;
+		controller.adjustForHistoryWindowPrune("top", 10);
+
+		assert.equal(controller.conversationView(10, 5).metrics.start, 65);
+		assert.equal(slicedStart, 65);
+	});
 });
 
 function createController(viewport: {

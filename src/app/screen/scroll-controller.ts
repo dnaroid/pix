@@ -125,6 +125,14 @@ export class AppScrollController {
 		});
 	}
 
+	adjustForHistoryWindowPrune(edge: "top" | "bottom", lineCount: number): void {
+		if (lineCount <= 0) return;
+		if (edge !== "top") return;
+		if (this.detachedScrollStart === undefined) return;
+
+		this.detachedScrollStart = Math.max(0, this.detachedScrollStart - lineCount);
+	}
+
 	scrollToConversationEntry(entryId: string): boolean {
 		const columns = this.host.terminalColumns();
 		const terminalRows = this.host.terminalRows();

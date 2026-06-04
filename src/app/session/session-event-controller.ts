@@ -29,6 +29,8 @@ export type AppSessionEventControllerHost = {
 	readonly entries: Entry[];
 	runtime(): AgentSessionRuntime | undefined;
 	conversationViewport(): ConversationViewport;
+	conversationViewportColumns?(): number;
+	onHistoryWindowPruned?(edge: "top" | "bottom", lineCount: number): void;
 	isRunning(): boolean;
 	render(): void;
 	scheduleRender(): void;
@@ -269,10 +271,22 @@ export class AppSessionEventController {
 		if (removeCount <= 0) return;
 
 		const targetRemoveCount = Math.max(removeCount, this.host.entries.length - HISTORY_WINDOW_TARGET_ENTRIES);
+		const removedEntryIds = edge === "top"
+			? this.host.entries.slice(0, targetRemoveCount).map((entry) => entry.id)
+			: this.host.entries.slice(Math.max(0, this.host.entries.length - targetRemoveCount)).map((entry) => entry.id);
+		const removedLineCount = this.measuredLineCountForEntries(removedEntryIds);
 		const removed = edge === "top"
 			? this.host.entries.splice(0, targetRemoveCount)
 			: this.host.entries.splice(Math.max(0, this.host.entries.length - targetRemoveCount), targetRemoveCount);
 		for (const entry of removed) this.forgetEntry(entry);
+		this.host.onHistoryWindowPruned?.(edge, removedLineCount);
+	}
+
+	private measuredLineCountForEntries(entryIds: readonly string[]): number {
+		if (entryIds.length === 0) return 0;
+		const viewport = this.host.conversationViewport();
+		if (typeof viewport.measuredLineCountForEntries !== "function") return 0;
+		return viewport.measuredLineCountForEntries(this.host.conversationViewportColumns?.() ?? 80, entryIds);
 	}
 
 	private forgetEntry(entry: Entry): void {

@@ -222,7 +222,10 @@ export class ConversationViewport {
 
 		let layout = this.layoutCachesByWidth.get(width);
 		if (!layout || this.layoutStructureChanged(layout, entries, queuedSignature, superCompactTools, allThinkingExpanded)) {
-			layout = this.buildLayout(entries, width, queuedSignature, superCompactTools, allThinkingExpanded);
+			const previousLayout = layout && layout.queuedSignature === queuedSignature && layout.superCompactTools === superCompactTools && layout.allThinkingExpanded === allThinkingExpanded
+				? layout
+				: undefined;
+			layout = this.buildLayout(entries, width, queuedSignature, superCompactTools, allThinkingExpanded, previousLayout);
 			this.layoutCachesByWidth.set(width, layout);
 		} else {
 			this.refreshDirtyLayoutEntries(layout, width);
@@ -235,7 +238,14 @@ export class ConversationViewport {
 		return layout;
 	}
 
-	private buildLayout(entries: readonly Entry[], width: number, queuedSignature: string, superCompactTools: boolean, allThinkingExpanded: boolean): ViewportLayoutCache {
+	private buildLayout(
+		entries: readonly Entry[],
+		width: number,
+		queuedSignature: string,
+		superCompactTools: boolean,
+		allThinkingExpanded: boolean,
+		previousLayout?: ViewportLayoutCache,
+	): ViewportLayoutCache {
 		const entryIds: string[] = [];
 		const lineCounts: number[] = [];
 		const measuredLineCounts: boolean[] = [];
@@ -248,14 +258,28 @@ export class ConversationViewport {
 			entryIds.push(entry.id);
 			positions.set(entry.id, index);
 			offsets.push(totalLineCount);
-			const lineCount = this.lineCountWithGap(entry, estimatedBlockLineCounts[index] ?? 0, this.nextEstimatedVisibleEntry(entries, estimatedBlockLineCounts, index));
+			const previousLineCount = this.previousMeasuredLineCount(previousLayout, entries, index, entry);
+			const lineCount = previousLineCount ?? this.lineCountWithGap(entry, estimatedBlockLineCounts[index] ?? 0, this.nextEstimatedVisibleEntry(entries, estimatedBlockLineCounts, index));
 			lineCounts.push(lineCount);
-			measuredLineCounts.push(false);
+			measuredLineCounts.push(previousLineCount !== undefined);
 			totalLineCount += lineCount;
 		}
 
 		offsets.push(totalLineCount);
 		return { entries, entryIds, lineCounts, measuredLineCounts, offsets, positions, dirtyEntryIds: new Set(), totalLineCount, queuedSignature, superCompactTools, allThinkingExpanded };
+	}
+
+	private previousMeasuredLineCount(previousLayout: ViewportLayoutCache | undefined, entries: readonly Entry[], index: number, entry: Entry): number | undefined {
+		const previousIndex = previousLayout?.positions.get(entry.id);
+		if (previousLayout === undefined || previousIndex === undefined) return undefined;
+		if (previousLayout.measuredLineCounts[previousIndex] !== true) return undefined;
+		if (previousLayout.dirtyEntryIds.has(entry.id)) return undefined;
+
+		const previousNextEntryId = previousLayout.entryIds[previousIndex + 1];
+		const nextEntryId = entries[index + 1]?.id;
+		if (previousNextEntryId !== nextEntryId) return undefined;
+
+		return previousLayout.lineCounts[previousIndex];
 	}
 
 	private layoutStructureChanged(layout: ViewportLayoutCache, entries: readonly Entry[], queuedSignature: string, superCompactTools: boolean, allThinkingExpanded: boolean): boolean {

@@ -59,12 +59,14 @@ import { checkPixUpdate, formatPixStartupUpdateDialog } from "./cli/update.js";
 import { AppVoiceController } from "./input/voice-controller.js";
 import { createIsolatedExtensionEventBus } from "./extensions/extension-event-bus.js";
 import { setAppIconTheme } from "./icons.js";
+import { logPixEvent } from "./logger.js";
 import {
 	appendAutoThinkingSessionState,
 	AutoThinkingController,
 	formatAutoThinkingDecision,
 	resolveAutoThinkingSessionState,
 	type AutoThinkingDecision,
+	type AutoThinkingAdaptiveRequest,
 } from "./thinking/auto-thinking.js";
 import { appendPixSystemDisplayEntry } from "./session/pix-system-message.js";
 import {
@@ -377,6 +379,8 @@ export class PiUiExtendApp {
 			entries: this.entries,
 			runtime: () => this.runtime,
 			conversationViewport: () => this.conversationViewport,
+			conversationViewportColumns: () => this.terminalColumns(),
+			onHistoryWindowPruned: (edge, lineCount) => this.scrollController.adjustForHistoryWindowPrune(edge, lineCount),
 			isRunning: () => this.running,
 			render: () => this.render(),
 			scheduleRender: () => this.scheduleRender(),
@@ -808,7 +812,7 @@ export class PiUiExtendApp {
 				isEnabled: (session) => this.autoThinkingController.isEnabled(session),
 				enableDefault: (session) => this.setAutoThinkingEnabled(session, true),
 				applyControl: (session, control) => this.autoThinkingController.applyAdaptiveRequest(session, control),
-				onDecision: (session, decision) => this.recordAutoThinkingDecision(session, decision),
+				onDecision: (session, decision, control) => this.recordAutoThinkingDecision(session, decision, control),
 			},
 		});
 	}
@@ -901,7 +905,20 @@ export class PiUiExtendApp {
 		return preparation;
 	}
 
-	private recordAutoThinkingDecision(session: AgentSession, decision: AutoThinkingDecision): void {
+	private recordAutoThinkingDecision(session: AgentSession, decision: AutoThinkingDecision, control?: AutoThinkingAdaptiveRequest): void {
+		logPixEvent("info", "auto_thinking.adaptive_decision", {
+			sessionId: session.sessionId,
+			sessionFile: session.sessionFile,
+			level: decision.level,
+			desiredLevel: decision.desiredLevel,
+			reason: decision.reason,
+			availableLevels: decision.availableLevels,
+			...(control === undefined ? {} : {
+				controlThinking: control.thinking,
+				controlApply: control.apply,
+				controlReasonCode: control.reasonCode,
+			}),
+		});
 		const text = formatAutoThinkingDecision(decision);
 		appendPixSystemDisplayEntry(session, text);
 		if (this.runtime?.session !== session) return;

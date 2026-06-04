@@ -599,6 +599,36 @@ describe("ConversationViewport cache behavior", () => {
 		assert.equal(viewport.lineCount(80), 0);
 		assert.deepEqual(viewport.slice(80, 0, 1), []);
 	});
+
+	it("preserves measured expanded tool heights when entries are appended", () => {
+		const entries: Entry[] = [
+			{
+				...toolEntry("tool-ansi", "shell"),
+				output: "\x1b[31mabcdefghi\x1b[0m",
+				expanded: true,
+			},
+			{ id: "assistant-tail", kind: "assistant", text: "tail" },
+		];
+		const viewport = new ConversationViewport({
+			entries,
+			session: undefined,
+			deferredUserMessages: [],
+			entryRenderVersions: new Map(),
+			cwd: "/repo",
+			colors: THEMES.dark.colors,
+			pixConfig,
+			outputFilters: [],
+			superCompactTools: false,
+			isDynamicConversationBlock: () => false,
+			renderInlineUserMessageMenu: () => [],
+		} as ConversationViewportHost);
+
+		viewport.slice(8, 0, 100);
+		const measuredBeforeAppend = viewport.lineCount(8);
+		entries.push({ id: "assistant-new", kind: "assistant", text: "new" });
+
+		assert.equal(viewport.lineCount(8), measuredBeforeAppend + 2);
+	});
 });
 
 function toolEntry(id: string, toolName: string): Extract<Entry, { kind: "tool" }> {
