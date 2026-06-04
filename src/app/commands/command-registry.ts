@@ -98,7 +98,7 @@ export function createSlashCommands(actions: CommandRegistryActions, host: Comma
 			name: "default-thinking",
 			description: "Set the default thinking level for new sessions",
 			kind: "builtin",
-			keywords: ["thinking", "reasoning", "startup", "config"],
+			keywords: ["thinking", "reasoning", "startup", "config", "auto"],
 			allowArguments: true,
 			run: (argumentsText) => actions.runDefaultThinkingSlashCommand(argumentsText),
 		},

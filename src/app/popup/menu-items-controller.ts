@@ -6,8 +6,11 @@ import { PI_FAVORITE_MODEL_REFS, THINKING_LEVELS } from "../constants.js";
 import { APP_ICONS } from "../icons.js";
 import { parseScopedModelRef } from "../model/model-ref.js";
 import { AUTO_THINKING_LEVEL, normalizeAvailableThinkingLevels } from "../thinking/auto-thinking.js";
-import { buildUserMessageJumpItems, createSessionInfoMenuItemsLoader, type SessionInfoMenuItemsLoader } from "./popup-menu-controller.js";
+import { buildUserMessageJumpItems, createSessionInfoMenuItemsLoader, filterUserMessageJumpItems, type SessionInfoMenuItemsLoader } from "./popup-menu-controller.js";
 import { getResourceSlashCommands, getSlashCommandMatches, parseSlashInput } from "../commands/slash-commands.js";
+import { isRecord } from "../guards.js";
+import { renderUserMessageContent } from "../rendering/message-content.js";
+import { sessionHistoryFullBranchEntries } from "../session/pix-system-message.js";
 import type {
 	Entry,
 	ModelMenuValue,
@@ -38,6 +41,7 @@ export class AppMenuItemsController {
 		query: string;
 		loader: SessionInfoMenuItemsLoader;
 	} | undefined;
+	private userMessageJumpItems: PopupMenuItem<UserMessageJumpMenuValue>[] | undefined;
 
 	constructor(private readonly host: AppMenuItemsControllerHost) {}
 
@@ -139,7 +143,30 @@ export class AppMenuItemsController {
 	}
 
 	getUserMessageJumpMenuItems(query: string): PopupMenuItem<UserMessageJumpMenuValue>[] {
-		return buildUserMessageJumpItems(this.host.getEntries(), query);
+		return filterUserMessageJumpItems(this.userMessageJumpItems ?? buildUserMessageJumpItems(this.host.getEntries()), query);
+	}
+
+	async refreshUserMessageJumpMenuItems(): Promise<void> {
+		const runtime = this.host.runtime();
+		if (!runtime) {
+			this.userMessageJumpItems = undefined;
+			return;
+		}
+
+		const entries = await sessionHistoryFullBranchEntries(runtime.session);
+		const loadedBySessionEntryId = new Map(
+			this.host.getEntries()
+				.filter((entry): entry is Extract<Entry, { kind: "user" }> => entry.kind === "user" && typeof entry.sessionEntryId === "string")
+				.map((entry) => [entry.sessionEntryId, entry]),
+		);
+		const sources = entries.flatMap((entry) => {
+			if (entry.type !== "message" || !isRecord(entry.message) || entry.message.role !== "user") return [];
+			const text = renderUserMessageContent(entry.message.content);
+			if (!text) return [];
+			const loaded = loadedBySessionEntryId.get(entry.id);
+			return [{ text, ...(loaded ? { entryId: loaded.id } : {}), sessionEntryId: entry.id }];
+		});
+		this.userMessageJumpItems = buildUserMessageJumpItems(sources);
 	}
 
 	getQueueMessageMenuItems(): PopupMenuItem<QueueMessageMenuValue>[] {

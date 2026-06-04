@@ -5,7 +5,7 @@ import type { AppMenuItemsController } from "./menu-items-controller.js";
 import { stringifyUnknown } from "../rendering/message-content.js";
 import type { AppPopupMenuController } from "./popup-menu-controller.js";
 import type { AppQueuedMessageController } from "../session/queued-message-controller.js";
-import type { Entry, SlashCommand } from "../types.js";
+import type { Entry, SlashCommand, UserMessageJumpMenuValue } from "../types.js";
 import type { AppWorkspaceActionsController } from "../workspace/workspace-actions-controller.js";
 
 export type AppPopupActionControllerHost = {
@@ -22,6 +22,7 @@ export type AppPopupActionControllerHost = {
 	bindCurrentSession(): Promise<void>;
 	loadSessionHistory(): void;
 	scrollToConversationEntry(entryId: string): boolean;
+	scrollToUserMessageJumpTarget(target: UserMessageJumpMenuValue): Promise<boolean>;
 };
 
 export class AppPopupActionController {
@@ -40,7 +41,7 @@ export class AppPopupActionController {
 
 		if (active === "queue-message") return await this.submitSelectedQueueMessageAction();
 		if (active === "user-message") return await this.submitSelectedUserMessageAction();
-		if (active === "user-message-jump") return this.submitSelectedUserMessageJump();
+		if (active === "user-message-jump") return await this.submitSelectedUserMessageJump();
 		if (active === "resume") return await this.submitSelectedResume();
 		if (active === "model") return await this.submitSelectedModel();
 		if (active === "thinking") return await this.submitSelectedThinking();
@@ -184,22 +185,21 @@ export class AppPopupActionController {
 		}
 	}
 
-	private submitSelectedUserMessageJump(): boolean {
+	private async submitSelectedUserMessageJump(): Promise<boolean> {
 		const selected = this.popupMenus.selectedUserMessageJump();
 		if (!selected) return false;
 
-		const entryId = selected.entryId;
-	this.popupMenus.closeUserMessageJumpMenu();
-	if (!this.host.scrollToConversationEntry(entryId)) {
-		this.host.showToast("User message not found", "error");
+		this.popupMenus.closeUserMessageJumpMenu();
+		if (!await this.host.scrollToUserMessageJumpTarget(selected)) {
+			this.host.showToast("User message not found", "error");
+			this.host.setSessionStatus(this.host.runtime()?.session);
+			return true;
+		}
+
+		this.host.showToast("Jumped to user message", "success");
 		this.host.setSessionStatus(this.host.runtime()?.session);
 		return true;
 	}
-
-	this.host.showToast("Jumped to user message", "success");
-	this.host.setSessionStatus(this.host.runtime()?.session);
-	return true;
-}
 
 	private async submitSelectedQueueMessageAction(): Promise<boolean> {
 		const selected = this.popupMenus.selectedQueueMessageAction();

@@ -3,10 +3,10 @@ import { describe, it } from "node:test";
 
 import type { ConversationViewport } from "../src/app/rendering/conversation-viewport.js";
 import type { EditorLayoutRenderer } from "../src/app/rendering/editor-layout-renderer.js";
-import { AppScrollController } from "../src/app/screen/scroll-controller.js";
+import { AppScrollController, type AppScrollControllerHost } from "../src/app/screen/scroll-controller.js";
 
 describe("AppScrollController", () => {
-	it("uses one less conversation column when a scrollbar is needed", () => {
+	it("uses the full conversation width even when content is scrollable", () => {
 		let slicedWidth: number | undefined;
 		const controller = createController({
 			lineCount: (width) => width === 10 ? 2 : 3,
@@ -18,12 +18,12 @@ describe("AppScrollController", () => {
 
 		const view = controller.conversationView(10, 1);
 
-		assert.equal(view.metrics.viewportColumns, 9);
-		assert.equal(view.metrics.conversationLineCount, 3);
-		assert.equal(slicedWidth, 9);
+		assert.equal(view.metrics.viewportColumns, 10);
+		assert.equal(view.metrics.conversationLineCount, 2);
+		assert.equal(slicedWidth, 10);
 	});
 
-	it("does not create a scrollbar only because the gutter would wrap content", () => {
+	it("does not reserve a scrollbar gutter that would wrap content", () => {
 		const controller = createController({
 			lineCount: (width) => width === 10 ? 1 : 2,
 			slice: () => [{ text: "visible" }],
@@ -32,7 +32,7 @@ describe("AppScrollController", () => {
 		const view = controller.conversationView(10, 1);
 
 		assert.equal(view.metrics.viewportColumns, 10);
-		assert.equal(controller.scrollBarForMetrics(view.metrics), undefined);
+		assert.equal(view.metrics.conversationLineCount, 1);
 	});
 
 	it("scrolls to the rendered line containing a text sample", () => {
@@ -74,32 +74,42 @@ describe("AppScrollController", () => {
 
 		assert.equal(slicedStart, 3);
 	});
-	it("maps scrollbar clicks to conversation starts", () => {
-		let slicedStart: number | undefined;
+
+	it("preserves the visible anchor when older history is prepended", async () => {
+		let lineCount = 20;
+		let rendered = 0;
 		const controller = createController({
-			lineCount: () => 20,
-			slice: (_width, start) => {
-				slicedStart = start;
-				return [{ text: "visible" }];
+			lineCount: () => lineCount,
+			slice: (_width, start, count) => Array.from({ length: count }, (_, index) => ({ text: `line ${start + index}` })),
+			measuredLineCountForEntries: () => 5,
+		}, 5, {
+			hasOlderSessionHistory: () => true,
+			isLoadingOlderSessionHistory: () => false,
+			loadOlderSessionHistory: (options) => {
+				lineCount += 5;
+				options?.onPrependedEntries?.([{ id: "older", kind: "assistant", text: "older" }]);
+				return Promise.resolve(true);
 			},
-		}, 5);
+			render: () => { rendered += 1; },
+		});
 
-		assert.equal(controller.scrollToScrollbarPosition(0), true);
-		controller.conversationView(10, 5);
-		assert.equal(slicedStart, 0);
+		assert.equal(controller.scrollByLines(-20, { render: false }), true);
+		assert.equal(controller.conversationView(10, 5).metrics.start, 0);
 
-		assert.equal(controller.scrollToScrollbarPosition(4), true);
-		controller.conversationView(10, 5);
-		assert.equal(slicedStart, 15);
+		assert.equal(controller.scrollByLines(-1), true);
+		await Promise.resolve();
+
+		assert.equal(controller.conversationView(10, 5).metrics.start, 5);
+		assert.ok(rendered > 0);
 	});
-
 });
 
 function createController(viewport: {
 	lineCount(width: number): number;
 	slice(width: number, start: number, count: number): { text: string }[];
 	entryBlockPositions?: (width: number) => unknown[];
-}, bodyHeight = 1): AppScrollController {
+	measuredLineCountForEntries?: (width: number, entryIds: readonly string[]) => number;
+}, bodyHeight = 1, hostOverrides: Partial<AppScrollControllerHost> = {}): AppScrollController {
 	return new AppScrollController({
 		conversationViewport: () => viewport as unknown as ConversationViewport,
 		editorLayoutRenderer: () => ({
@@ -109,6 +119,7 @@ function createController(viewport: {
 		terminalRows: () => 4,
 		tabPanelRows: () => 0,
 		render: () => undefined,
+		...hostOverrides,
 	});
 }
 

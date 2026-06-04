@@ -75,6 +75,29 @@ export function sliceByDisplayWidth(text: string, width: number): string {
 	return result;
 }
 
+export function displayIndexForColumn(text: string, column: number): number {
+	const targetColumn = Math.max(1, column);
+	let displayColumn = 1;
+
+	for (const cluster of indexedDisplayClusters(text)) {
+		if (targetColumn <= displayColumn) return cluster.start;
+		if (cluster.ansi || cluster.width <= 0) continue;
+
+		const nextColumn = displayColumn + cluster.width;
+		if (targetColumn < nextColumn) return cluster.start;
+		if (targetColumn === nextColumn) return cluster.end;
+		displayColumn = nextColumn;
+	}
+
+	return text.length;
+}
+
+export function sliceByDisplayColumns(text: string, startColumn: number, endColumn: number): string {
+	const startIndex = displayIndexForColumn(text, startColumn);
+	const endIndex = Math.max(startIndex, displayIndexForColumn(text, endColumn));
+	return text.slice(startIndex, endIndex);
+}
+
 export function padOrTrimDisplay(text: string, width: number): string {
 	const safeWidth = Math.max(0, width);
 	const trimmed = sliceByDisplayWidth(text, safeWidth);
@@ -212,12 +235,19 @@ function ansiSequenceLength(text: string, index: number): number {
 }
 
 function* displayClusters(text: string): Generator<DisplayCluster> {
+	for (const cluster of indexedDisplayClusters(text)) {
+		yield { text: cluster.text, width: cluster.width, ansi: cluster.ansi };
+	}
+}
+
+function* indexedDisplayClusters(text: string): Generator<DisplayCluster & { start: number; end: number }> {
 	for (let index = 0; index < text.length;) {
 		const ansiLength = ansiSequenceLength(text, index);
 		if (ansiLength > 0) {
+			const start = index;
 			const cluster = text.slice(index, index + ansiLength);
-			yield { text: cluster, width: 0, ansi: true };
 			index += ansiLength;
+			yield { text: cluster, width: 0, ansi: true, start, end: index };
 			continue;
 		}
 
@@ -225,18 +255,22 @@ function* displayClusters(text: string): Generator<DisplayCluster> {
 		const textEnd = nextAnsiIndex === -1 ? text.length : nextAnsiIndex;
 		const segment = text.slice(index, textEnd);
 		if (GRAPHEME_SEGMENTER) {
+			let segmentOffset = index;
 			for (const { segment: cluster } of GRAPHEME_SEGMENTER.segment(segment)) {
-				yield { text: cluster, width: graphemeDisplayWidth(cluster), ansi: false };
+				const start = segmentOffset;
+				segmentOffset += cluster.length;
+				yield { text: cluster, width: graphemeDisplayWidth(cluster), ansi: false, start, end: segmentOffset };
 			}
 			index = textEnd;
 			continue;
 		}
 
 		while (index < textEnd) {
+			const start = index;
 			const codePoint = text.codePointAt(index) ?? 0;
 			const cluster = String.fromCodePoint(codePoint);
-			yield { text: cluster, width: graphemeDisplayWidth(cluster), ansi: false };
 			index += codePointLength(codePoint);
+			yield { text: cluster, width: graphemeDisplayWidth(cluster), ansi: false, start, end: index };
 		}
 	}
 }

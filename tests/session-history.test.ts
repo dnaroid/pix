@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
+import { writeFileSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import { loadSessionHistoryEntriesAsync, type SessionHistoryOlderLoader } from "../src/app/session/session-history.js";
+import { openLazySessionManager } from "../src/app/session/lazy-session-manager.js";
+import { PIX_SYSTEM_DISPLAY_ENTRY_CUSTOM_TYPE, sessionHistoryDisplayMessages, sessionHistoryOlderMessagesReader } from "../src/app/session/pix-system-message.js";
 import type { Entry } from "../src/app/types.js";
 
 describe("loadSessionHistoryEntriesAsync", () => {
@@ -25,6 +30,91 @@ describe("loadSessionHistoryEntriesAsync", () => {
 		assert.deepEqual(entries.map((entry) => ({ kind: entry.kind, text: entryText(entry) })), [
 			{ kind: "system", text: "idx update completed" },
 		]);
+	});
+
+	it("renders pix system display entries from the session branch without using custom messages", async () => {
+		const messages = sessionHistoryDisplayMessages({
+			messages: [{ role: "user", content: "fallback" }],
+			sessionManager: {
+				getBranch: () => [
+					{ type: "message", id: "u1", parentId: null, timestamp: "2026-01-01T00:00:00.000Z", message: { role: "user", content: "hello" } },
+					{ type: "custom", id: "s1", parentId: "u1", timestamp: "2026-01-01T00:00:01.000Z", customType: PIX_SYSTEM_DISPLAY_ENTRY_CUSTOM_TYPE, data: { text: "Selected thinking level high" } },
+					{ type: "message", id: "a1", parentId: "s1", timestamp: "2026-01-01T00:00:02.000Z", message: { role: "assistant", content: [{ text: "done" }] } },
+				],
+			},
+		} as never);
+		const entries: Entry[] = [];
+
+		await loadSessionHistoryEntriesAsync({
+			messages,
+			addEntry: (entry) => entries.push(entry),
+			prependEntries: (newEntries) => entries.unshift(...newEntries),
+			setToolEntryId: () => {},
+			toolDefaultExpanded: () => false,
+			observeSubagentsToolResult: () => {},
+			observeTodoToolResult: () => {},
+			isCancelled: () => false,
+			render: () => {},
+		});
+
+		assert.deepEqual(entries.map((entry) => ({ kind: entry.kind, text: entryText(entry) })), [
+			{ kind: "user", text: "hello" },
+			{ kind: "system", text: "Selected thinking level high" },
+			{ kind: "assistant", text: "done" },
+		]);
+		assert.equal(entries[0]?.kind === "user" ? entries[0].sessionEntryId : undefined, "u1");
+	});
+
+	it("uses the lazy persisted tail for initial display", () => {
+		const { sessionDir, sessionPath } = writeLinearUserSession(6);
+
+		const sessionManager = openLazySessionManager(sessionPath, { cwdOverride: sessionDir, tailEntryCount: 2 });
+		const messages = sessionHistoryDisplayMessages({
+			messages: [{ role: "user", content: "tail fallback" }],
+			sessionManager,
+		} as never);
+
+		assert.deepEqual(messages.map((message) => (message as { content?: unknown }).content), [
+			"message 4",
+			"message 5",
+		]);
+	});
+
+	it("loads persisted messages before the lazy tail through the older history loader", async () => {
+		const { sessionDir, sessionPath } = writeLinearUserSession(6);
+
+		const session = {
+			messages: [{ role: "user", content: "tail fallback" }],
+			sessionManager: openLazySessionManager(sessionPath, { cwdOverride: sessionDir, tailEntryCount: 2 }),
+		} as never;
+		const entries: Entry[] = [];
+		let olderLoader: SessionHistoryOlderLoader | undefined;
+
+		await loadSessionHistoryEntriesAsync({
+			messages: sessionHistoryDisplayMessages(session),
+			olderMessagesReader: sessionHistoryOlderMessagesReader(session),
+			addEntry: (entry) => entries.push(entry),
+			prependEntries: (newEntries) => entries.unshift(...newEntries),
+			setToolEntryId: () => {},
+			toolDefaultExpanded: () => false,
+			observeSubagentsToolResult: () => {},
+			observeTodoToolResult: () => {},
+			isCancelled: () => false,
+			render: () => {},
+			chunkSize: 2,
+			tailMessageCount: 2,
+			lazyOlderHistory: true,
+			onOlderLoaderReady: (loader) => {
+				olderLoader = loader;
+			},
+		});
+
+		assert.deepEqual(entries.map(entryText), ["message 4", "message 5"]);
+		assert.equal(await olderLoader?.loadOlder(), true);
+		assert.deepEqual(entries.map(entryText), ["message 2", "message 3", "message 4", "message 5"]);
+		assert.equal(await olderLoader?.loadOlder(), true);
+		assert.deepEqual(entries.map(entryText), ["message 0", "message 1", "message 2", "message 3", "message 4", "message 5"]);
+		assert.equal(olderLoader, undefined);
 	});
 
 	it("renders the tail first and prepends older entries in order", async () => {
@@ -233,6 +323,24 @@ describe("loadSessionHistoryEntriesAsync", () => {
 		assert.deepEqual(entries.map(entryText), ["new"]);
 	});
 });
+
+function writeLinearUserSession(messageCount: number): { sessionDir: string; sessionPath: string } {
+	const sessionDir = mkdtempSync(join(tmpdir(), "pix-session-history-"));
+	const sessionPath = join(sessionDir, "session.jsonl");
+	const entries = Array.from({ length: messageCount }, (_value, index) => ({
+		type: "message",
+		id: `m${index}`,
+		parentId: index === 0 ? null : `m${index - 1}`,
+		timestamp: `2026-01-01T00:00:0${index}.000Z`,
+		message: { role: "user", content: `message ${index}` },
+	}));
+	writeFileSync(sessionPath, [
+		JSON.stringify({ type: "session", version: 3, id: "s1", timestamp: "2026-01-01T00:00:00.000Z", cwd: sessionDir }),
+		...entries.map((entry) => JSON.stringify(entry)),
+		"",
+	].join("\n"), "utf8");
+	return { sessionDir, sessionPath };
+}
 
 function entryText(entry: Entry): string {
 	return "text" in entry ? entry.text : "";

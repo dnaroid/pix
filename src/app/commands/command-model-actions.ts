@@ -1,10 +1,12 @@
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import { getIdleRuntime, getRuntime } from "./command-runtime.js";
 import type { CommandControllerHost } from "./command-host.js";
 import { getProjectPixConfigPath, savePixAutocompleteModel, savePixDefaultModel, savePixDefaultThinking, saveProjectPixIgnoreContextFiles } from "../../config.js";
 import { createId } from "../id.js";
-import { isThinkingLevel, parseScopedModelRef } from "../model/model-ref.js";
+import { parseScopedModelRef } from "../model/model-ref.js";
 import { AUTO_THINKING_LEVEL, isThinkingSelection } from "../thinking/auto-thinking.js";
-import type { ScopedSessionModel, SessionModel, ThinkingLevel, ThinkingSelection } from "../types.js";
+import { appendPixSystemDisplayEntry } from "../session/pix-system-message.js";
+import type { ScopedSessionModel, SessionModel, ThinkingSelection } from "../types.js";
 
 export class ModelCommandActions {
 	constructor(private readonly host: CommandControllerHost) {}
@@ -74,7 +76,7 @@ export class ModelCommandActions {
 		await this.runModelCommand(model);
 		if (parsed.thinkingLevel !== undefined) {
 			runtime.session.setThinkingLevel(parsed.thinkingLevel);
-			this.host.addEntry({ id: createId("system"), kind: "system", text: `Selected thinking level ${runtime.session.thinkingLevel}` });
+			this.addPersistentSystemEntry(runtime.session, `Selected thinking level ${runtime.session.thinkingLevel}`);
 			this.host.setSessionStatus(runtime.session);
 		}
 	}
@@ -256,7 +258,7 @@ export class ModelCommandActions {
 	async runDefaultThinkingSlashCommand(argumentsText: string): Promise<void> {
 		const level = argumentsText.trim();
 		if (!level) {
-			const selected = await this.host.showMenu(this.host.getThinkingMenuItems("", { includeAuto: false }), {
+			const selected = await this.host.showMenu(this.host.getThinkingMenuItems(""), {
 				title: "Select default thinking level",
 				placeholder: "Search thinking levels",
 				emptyText: "No matching thinking levels",
@@ -267,13 +269,13 @@ export class ModelCommandActions {
 				return;
 			}
 
-			if (!isThinkingLevel(selected.level)) throw new Error(`Unknown thinking level: ${selected.level}`);
+			if (!isThinkingSelection(selected.level)) throw new Error(`Unknown thinking level: ${selected.level}`);
 			this.saveDefaultThinking(selected.level);
 			this.host.render();
 			return;
 		}
 
-		if (!isThinkingLevel(level)) throw new Error(`Unknown thinking level: ${level}`);
+		if (!isThinkingSelection(level)) throw new Error(`Unknown thinking level: ${level}`);
 		this.saveDefaultThinking(level);
 	}
 
@@ -297,15 +299,20 @@ export class ModelCommandActions {
 		this.host.render();
 		if (level === AUTO_THINKING_LEVEL) {
 			this.host.setAutoThinkingEnabled(runtime.session, true);
-			this.host.addEntry({ id: createId("system"), kind: "system", text: "Auto thinking enabled. Pix will choose a supported thinking level for each new prompt." });
+			this.addPersistentSystemEntry(runtime.session, "Auto thinking enabled. Pix will choose a supported thinking level for each new prompt.");
 			this.host.setSessionStatus(runtime.session);
 			return;
 		}
 
 		if (this.host.isAutoThinkingEnabled(runtime.session)) this.host.setAutoThinkingEnabled(runtime.session, false);
 		runtime.session.setThinkingLevel(level);
-		this.host.addEntry({ id: createId("system"), kind: "system", text: `Selected thinking level ${runtime.session.thinkingLevel}` });
+		this.addPersistentSystemEntry(runtime.session, `Selected thinking level ${runtime.session.thinkingLevel}`);
 		this.host.setSessionStatus(runtime.session);
+	}
+
+	private addPersistentSystemEntry(session: AgentSession, text: string): void {
+		appendPixSystemDisplayEntry(session, text);
+		this.host.addEntry({ id: createId("system"), kind: "system", text });
 	}
 
 	private saveDefaultModel(modelRef: string): void {
@@ -319,7 +326,7 @@ export class ModelCommandActions {
 		});
 	}
 
-	private saveDefaultThinking(level: ThinkingLevel): void {
+	private saveDefaultThinking(level: ThinkingSelection): void {
 		const runtime = getRuntime(this.host, "default-thinking");
 		if (!runtime) return;
 
@@ -336,6 +343,6 @@ export class ModelCommandActions {
 	}
 }
 
-function formatDefaultModelRef(defaultModel: { modelRef: string; thinking?: ThinkingLevel }): string {
+function formatDefaultModelRef(defaultModel: { modelRef: string; thinking?: ThinkingSelection }): string {
 	return defaultModel.thinking ? `${defaultModel.modelRef}:${defaultModel.thinking}` : defaultModel.modelRef;
 }

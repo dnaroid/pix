@@ -3,10 +3,12 @@ import type { ImageContent } from "../../input-editor.js";
 import type { ConversationViewport } from "../rendering/conversation-viewport.js";
 import { createId } from "../id.js";
 import { extractImageContents, renderContent, renderUserMessageContent, stringifyUnknown } from "../rendering/message-content.js";
-import { customMessageEntry, loadSessionHistoryEntries, loadSessionHistoryEntriesAsync, type SessionHistoryOlderLoader } from "./session-history.js";
+import { customMessageEntry, loadSessionHistoryEntries, loadSessionHistoryEntriesAsync, type LoadOlderSessionHistoryOptions, type SessionHistoryOlderLoader } from "./session-history.js";
+import { sessionHistoryDisplayMessages, sessionHistoryOlderMessagesReader } from "./pix-system-message.js";
 import type { Entry, SessionActivity } from "../types.js";
 import { isRecord } from "../guards.js";
 import type { WorkspaceMutation, WorkspaceMutationPreparation } from "../workspace/workspace-undo.js";
+import { isAutoThinkingControlFrameLine, isPotentialAutoThinkingControlFrame } from "../thinking/adaptive-thinking.js";
 
 type ToolEntryUpdate = {
 	toolName?: string;
@@ -20,6 +22,8 @@ type ToolEntryUpdate = {
 
 const DCP_MESSAGE_REFERENCE_PREFIX = "[dcp-id]: # (m";
 const DCP_BLOCK_REFERENCE_PREFIX = "[dcp-block-id]: # (b";
+const MAX_HISTORY_WINDOW_ENTRIES = 360;
+const HISTORY_WINDOW_TARGET_ENTRIES = 300;
 
 export type AppSessionEventControllerHost = {
 	readonly entries: Entry[];
@@ -78,7 +82,7 @@ export class AppSessionEventController {
 		if (!runtime) return;
 
 		loadSessionHistoryEntries({
-			messages: runtime.session.messages,
+			messages: sessionHistoryDisplayMessages(runtime.session),
 			addEntry: (entry) => this.addEntry(entry),
 			setToolEntryId: (toolCallId, entryId) => this.toolEntryIdsByCallId.set(toolCallId, entryId),
 			toolDefaultExpanded: (toolName) => this.host.toolDefaultExpanded(toolName),
@@ -93,7 +97,8 @@ export class AppSessionEventController {
 		this.olderHistoryLoader = undefined;
 
 		return loadSessionHistoryEntriesAsync({
-			messages: runtime.session.messages,
+			messages: sessionHistoryDisplayMessages(runtime.session),
+			olderMessagesReader: sessionHistoryOlderMessagesReader(runtime.session),
 			addEntry: (entry) => this.addEntry(entry),
 			prependEntries: (entries) => this.prependEntries(entries),
 			setToolEntryId: (toolCallId, entryId) => this.toolEntryIdsByCallId.set(toolCallId, entryId),
@@ -117,7 +122,7 @@ export class AppSessionEventController {
 		return this.olderHistoryLoader?.isLoading() === true;
 	}
 
-	async loadOlderSessionHistory(options: { render?: boolean } = {}): Promise<boolean> {
+	async loadOlderSessionHistory(options: LoadOlderSessionHistoryOptions = {}): Promise<boolean> {
 		return this.olderHistoryLoader?.loadOlder(options) ?? false;
 	}
 
@@ -247,6 +252,7 @@ export class AppSessionEventController {
 		this.host.entries.push(entry);
 		this.entryRenderVersions.set(entry.id, 1);
 		this.host.conversationViewport().deleteEntry(entry.id);
+		this.pruneHistoryWindow("top");
 	}
 
 	private prependEntries(entries: readonly Entry[]): void {
@@ -254,6 +260,27 @@ export class AppSessionEventController {
 		for (const entry of entries) {
 			this.entryRenderVersions.set(entry.id, 1);
 			this.host.conversationViewport().deleteEntry(entry.id);
+		}
+		this.pruneHistoryWindow("bottom");
+	}
+
+	private pruneHistoryWindow(edge: "top" | "bottom"): void {
+		const removeCount = this.host.entries.length - MAX_HISTORY_WINDOW_ENTRIES;
+		if (removeCount <= 0) return;
+
+		const targetRemoveCount = Math.max(removeCount, this.host.entries.length - HISTORY_WINDOW_TARGET_ENTRIES);
+		const removed = edge === "top"
+			? this.host.entries.splice(0, targetRemoveCount)
+			: this.host.entries.splice(Math.max(0, this.host.entries.length - targetRemoveCount), targetRemoveCount);
+		for (const entry of removed) this.forgetEntry(entry);
+	}
+
+	private forgetEntry(entry: Entry): void {
+		this.entryRenderVersions.delete(entry.id);
+		this.host.conversationViewport().deleteEntry(entry.id);
+		if (entry.kind !== "tool") return;
+		for (const [toolCallId, entryId] of this.toolEntryIdsByCallId) {
+			if (entryId === entry.id) this.toolEntryIdsByCallId.delete(toolCallId);
 		}
 	}
 
@@ -395,7 +422,7 @@ export class AppSessionEventController {
 
 		if (!this.assistantTextBuffer) return visibleText;
 
-		if (shouldHoldAssistantStreamTail(this.assistantTextBuffer)) {
+		if (shouldHoldAssistantStreamTail(this.assistantTextBuffer, this.hasVisibleAssistantText(visibleText))) {
 			if (final) this.assistantTextBuffer = "";
 			return visibleText;
 		}
@@ -473,11 +500,13 @@ export class AppSessionEventController {
 
 function shouldDropAssistantStreamLine(line: string, hasVisibleText: boolean): boolean {
 	if (line.trim().length === 0 && !hasVisibleText) return true;
+	if (!hasVisibleText && isAutoThinkingControlFrameLine(line)) return true;
 	return isHiddenMarkdownMetadataLine(line);
 }
 
-function shouldHoldAssistantStreamTail(text: string): boolean {
+function shouldHoldAssistantStreamTail(text: string, hasVisibleText: boolean): boolean {
 	if (text.trim().length === 0) return true;
+	if (!hasVisibleText && isPotentialAutoThinkingControlFrame(text)) return true;
 	return isPotentialDcpMetadataLine(text);
 }
 

@@ -1,8 +1,10 @@
-import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import type { AgentSession, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { THINKING_LEVELS } from "../constants.js";
 import type { SubmittedUserMessage, ThinkingLevel, ThinkingSelection } from "../types.js";
 
 export const AUTO_THINKING_LEVEL = "auto" as const;
+export const AUTO_THINKING_DECISION_PREFIX = "auto thinking: ";
+export const AUTO_THINKING_SESSION_CUSTOM_TYPE = "pix:auto_thinking";
 
 const THINKING_LEVEL_RANK: Record<ThinkingLevel, number> = {
 	off: 0,
@@ -18,6 +20,14 @@ export type AutoThinkingDecision = {
 	desiredLevel: ThinkingLevel;
 	reason: string;
 	availableLevels: ThinkingLevel[];
+};
+
+export type AutoThinkingAdaptiveApply = "next_call" | "restart_current";
+
+export type AutoThinkingAdaptiveRequest = {
+	thinking: ThinkingLevel;
+	apply: AutoThinkingAdaptiveApply;
+	reasonCode: string;
 };
 
 export type AutoThinkingPromptInput = {
@@ -69,31 +79,49 @@ export class AutoThinkingController {
 		return state.effectiveLevel ? `${AUTO_THINKING_LEVEL}:${state.effectiveLevel}` : AUTO_THINKING_LEVEL;
 	}
 
-	prepareForPrompt(session: AgentSession, message: SubmittedUserMessage): AutoThinkingPreparation | undefined {
+	async prepareForPrompt(
+		session: AgentSession,
+		message: SubmittedUserMessage,
+	): Promise<AutoThinkingPreparation | undefined> {
 		const state = this.states.get(session);
 		if (!state || session.isStreaming) return undefined;
 
 		const baselineLevel = normalizeThinkingLevel(session.thinkingLevel) ?? state.baselineLevel;
 		state.baselineLevel = baselineLevel;
 		const generation = state.generation;
-		const decision = chooseAutoThinkingLevel({
+		const input = {
 			promptText: message.promptText,
 			imageCount: message.images.length,
 			availableLevels: session.getAvailableThinkingLevels(),
-		});
-		state.effectiveLevel = decision.level;
+		} satisfies AutoThinkingPromptInput;
+		const current = this.states.get(session);
+		if (!current || current.generation !== generation || session.isStreaming) return undefined;
+
+		const decision = chooseAutoThinkingLevel(input);
+		current.effectiveLevel = decision.level;
 		setTransientSessionThinkingLevel(session, decision.level);
 
 		return {
 			decision,
 			restore: () => {
-				const current = this.states.get(session);
-				if (!current || current.generation !== generation) return;
-				if (normalizeThinkingLevel(session.thinkingLevel) === decision.level) {
-					setTransientSessionThinkingLevel(session, current.baselineLevel);
-				}
+				const restoreState = this.states.get(session);
+				if (!restoreState || restoreState.generation !== generation) return;
+				setTransientSessionThinkingLevel(session, restoreState.baselineLevel);
 			},
 		};
+	}
+
+	applyAdaptiveRequest(session: AgentSession, request: AutoThinkingAdaptiveRequest): AutoThinkingDecision | undefined {
+		const state = this.states.get(session);
+		if (!state) return undefined;
+
+		const decision = autoThinkingDecisionForDesiredLevel({
+			promptText: "",
+			availableLevels: session.getAvailableThinkingLevels(),
+		}, request.thinking, autoThinkingAdaptiveReason(request));
+		state.effectiveLevel = decision.level;
+		setTransientSessionThinkingLevel(session, decision.level);
+		return decision;
 	}
 }
 
@@ -120,6 +148,14 @@ export function normalizeAvailableThinkingLevels(levels: readonly string[] | und
 }
 
 export function chooseAutoThinkingLevel(input: AutoThinkingPromptInput): AutoThinkingDecision {
+	return autoThinkingDecisionForDesiredLevel(input, "medium");
+}
+
+export function autoThinkingDecisionForDesiredLevel(
+	input: AutoThinkingPromptInput,
+	desiredLevel: ThinkingLevel,
+	reason?: string,
+): AutoThinkingDecision {
 	const availableLevels = normalizeAvailableThinkingLevels(input.availableLevels);
 	if (availableLevels.length === 1 && availableLevels[0] === "off") {
 		return {
@@ -130,14 +166,34 @@ export function chooseAutoThinkingLevel(input: AutoThinkingPromptInput): AutoThi
 		};
 	}
 
-	const desiredLevel = desiredAutoThinkingLevel(input);
 	const level = closestSupportedThinkingLevel(desiredLevel, availableLevels);
 	return {
 		level,
 		desiredLevel,
-		reason: autoThinkingReason(input, desiredLevel, level),
+		reason: reason ? withNearestAvailableSuffix(reason, desiredLevel, level) : autoThinkingReason(desiredLevel, level),
 		availableLevels,
 	};
+}
+
+export function formatAutoThinkingDecision(decision: AutoThinkingDecision): string {
+	return `${AUTO_THINKING_DECISION_PREFIX}${decision.level} · ${decision.reason}`;
+}
+
+export function isAutoThinkingDecisionText(text: string): boolean {
+	return text.startsWith(AUTO_THINKING_DECISION_PREFIX);
+}
+
+export function appendAutoThinkingSessionState(session: AgentSession, enabled: boolean): void {
+	session.sessionManager.appendCustomEntry(AUTO_THINKING_SESSION_CUSTOM_TYPE, { enabled });
+}
+
+export function resolveAutoThinkingSessionState(entries: readonly SessionEntry[]): boolean | undefined {
+	for (let index = entries.length - 1; index >= 0; index -= 1) {
+		const entry = entries[index];
+		if (!entry || entry.type !== "custom" || entry.customType !== AUTO_THINKING_SESSION_CUSTOM_TYPE) continue;
+		return isAutoThinkingSessionData(entry.data) ? entry.data.enabled : undefined;
+	}
+	return undefined;
 }
 
 export function closestSupportedThinkingLevel(desiredLevel: ThinkingLevel, availableLevels: readonly ThinkingLevel[]): ThinkingLevel {
@@ -158,41 +214,33 @@ export function closestSupportedThinkingLevel(desiredLevel: ThinkingLevel, avail
 	return availableLevels.includes("off") ? "off" : availableLevels[0] ?? "off";
 }
 
-function desiredAutoThinkingLevel(input: AutoThinkingPromptInput): ThinkingLevel {
-	const text = input.promptText.trim();
-	const lower = text.toLowerCase();
-	const imageCount = input.imageCount ?? 0;
-	if (isAcknowledgement(lower) && imageCount === 0) return "off";
-	if (imageCount > 0 || isHighComplexityPrompt(lower, text)) return "high";
-	if (isLowComplexityPrompt(lower, text)) return "low";
-	return "medium";
+function autoThinkingReason(desiredLevel: ThinkingLevel, level: ThinkingLevel): string {
+	const suffix = nearestAvailableSuffix(desiredLevel, level);
+	return `default medium baseline${suffix}`;
 }
 
-function isAcknowledgement(lower: string): boolean {
-	return /^(ok|okay|yes|no|thanks|thank you|спасибо|ок|да|нет|понял|поняла|ясно)[.!?\s]*$/u.test(lower);
+function autoThinkingAdaptiveReason(request: AutoThinkingAdaptiveRequest): string {
+	const reasonCode = request.reasonCode
+		.replace(/[\t\r\n]+/gu, " ")
+		.replace(/\s+/gu, " ")
+		.trim()
+		.slice(0, 80);
+	const prefix = request.apply === "restart_current"
+		? "adaptive restart requested; applying to next call"
+		: "adaptive next call";
+	return reasonCode ? `${prefix}: ${reasonCode}` : prefix;
 }
 
-function isLowComplexityPrompt(lower: string, original: string): boolean {
-	if (original.length > 220 || /```/u.test(original)) return false;
-	return /\b(explain|what is|how do i|list|show|find)\b/u.test(lower)
-		|| /\b(объясни|что такое|как|покажи|найди|список)\b/u.test(lower);
+function withNearestAvailableSuffix(reason: string, desiredLevel: ThinkingLevel, level: ThinkingLevel): string {
+	return `${reason}${nearestAvailableSuffix(desiredLevel, level)}`;
 }
 
-function isHighComplexityPrompt(lower: string, original: string): boolean {
-	if (original.length > 800 || /```|stack trace|traceback|\berror\b|exception|failed|failing/u.test(lower)) return true;
-	const complexMatches = lower.match(/\b(implement|add|fix|debug|refactor|architecture|design|investigate|migrate|test|coverage|release|risk|parallel|mvp)\b/gu)?.length ?? 0;
-	const ruComplexMatches = lower.match(/\b(добав|исправ|почин|рефактор|архитект|дизайн|исслед|мигр|тест|покрыт|релиз|риск|паралл|mvp)\w*/gu)?.length ?? 0;
-	const totalComplexMatches = complexMatches + ruComplexMatches;
-	return totalComplexMatches >= 2 || (totalComplexMatches >= 1 && original.length > 80);
+function nearestAvailableSuffix(desiredLevel: ThinkingLevel, level: ThinkingLevel): string {
+	return desiredLevel === level ? "" : `; nearest available to ${desiredLevel}`;
 }
 
-function autoThinkingReason(input: AutoThinkingPromptInput, desiredLevel: ThinkingLevel, level: ThinkingLevel): string {
-	const suffix = desiredLevel === level ? "" : `; using nearest available ${level}`;
-	if ((input.imageCount ?? 0) > 0) return `image prompt -> ${desiredLevel}${suffix}`;
-	if (desiredLevel === "off") return `trivial acknowledgement -> ${desiredLevel}${suffix}`;
-	if (desiredLevel === "low") return `short/simple prompt -> ${desiredLevel}${suffix}`;
-	if (desiredLevel === "high") return `complex coding/debug prompt -> ${desiredLevel}${suffix}`;
-	return `default coding baseline -> ${desiredLevel}${suffix}`;
+function isAutoThinkingSessionData(value: unknown): value is { enabled: boolean } {
+	return typeof value === "object" && value !== null && "enabled" in value && typeof (value as { enabled?: unknown }).enabled === "boolean";
 }
 
 function setTransientSessionThinkingLevel(session: AgentSession, level: ThinkingLevel): void {

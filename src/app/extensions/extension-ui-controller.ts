@@ -2,7 +2,6 @@ import { ANSI_RESET, colorize, THEMES, type Theme, type ThemeName } from "../../
 import { isToastKind, type ToastKind, type ToastNotifier } from "../../ui.js";
 import type { ExtensionUIDialogOptions } from "@earendil-works/pi-coding-agent";
 import type {
-	AboveInputRenderer,
 	Entry,
 	ExtensionInputMouseEvent,
 	ExtensionWidgetComponent,
@@ -36,10 +35,20 @@ type CustomUiFactory<T> = (
 
 type ActiveCustomUi = {
 	key: string;
+	scopeKey: string;
 	component: FocusedCustomComponent;
 	savedInput: string;
 	resolve(value: unknown): void;
 	reject(error: unknown): void;
+};
+
+type ScopedWidgetRegistration = ExtensionWidgetRegistration & {
+	scopeKey: string;
+};
+
+type ScopedTerminalInputHandler = {
+	scopeKey: string;
+	handler: TerminalInputHandler;
 };
 
 export type ExtensionTerminalInputResult = {
@@ -51,6 +60,7 @@ const CUSTOM_UI_WIDGET_KEY = "pix-custom-ui";
 
 export type ExtensionUiControllerHost = {
 	readonly theme: Theme;
+	activeExtensionUiScope?(): string | undefined;
 	isRunning(): boolean;
 	render(): void;
 	showToast(message: string, kind?: ToastKind): void;
@@ -65,22 +75,18 @@ export type ExtensionUiControllerHost = {
 };
 
 export class ExtensionUiController {
-	private readonly extensionWidgets = new Map<string, ExtensionWidgetRegistration>();
-	private readonly terminalInputHandlers = new Set<TerminalInputHandler>();
-	private activeCustomUi: ActiveCustomUi | undefined;
-	private readonly aboveInputRenderer: AboveInputRenderer = {
-		set: (key, content) => {
-			this.setAboveInputWidget(key, content);
-		},
-		clear: (key) => {
-			this.clearAboveInputWidget(key);
-		},
-	};
-
+	private readonly extensionWidgets = new Map<string, ScopedWidgetRegistration>();
+	private readonly terminalInputHandlers = new Set<ScopedTerminalInputHandler>();
+	private readonly activeCustomUis = new Map<string, ActiveCustomUi>();
 	constructor(private readonly host: ExtensionUiControllerHost) {}
 
 	get widgets(): ReadonlyMap<string, ExtensionWidgetRegistration> {
-		return this.extensionWidgets;
+		const activeScopeKey = this.activeScopeKey();
+		return new Map(
+			[...this.extensionWidgets.entries()]
+				.filter(([, widget]) => widget.scopeKey === activeScopeKey)
+				.map(([scopedKey, widget]) => [this.unscopedWidgetKey(scopedKey, widget.scopeKey), widget]),
+		);
 	}
 
 	createExtensionTheme(): ExtensionWidgetTheme {
@@ -112,44 +118,53 @@ export class ExtensionUiController {
 		} as unknown as ExtensionWidgetTheme;
 	}
 
-	setWidget(key: string, content: unknown, options?: { placement?: WidgetPlacement }): void {
-		const existing = this.extensionWidgets.get(key);
+	setWidget(key: string, content: unknown, options?: { placement?: WidgetPlacement; scopeKey?: string }): void {
+		const scopeKey = this.normalizeScopeKey(options?.scopeKey);
+		const scopedKey = this.scopedWidgetKey(scopeKey, key);
+		const existing = this.extensionWidgets.get(scopedKey);
 		if (existing) this.invalidateWidget(existing);
 
 		if (content === undefined) {
-			this.extensionWidgets.delete(key);
+			this.extensionWidgets.delete(scopedKey);
 			if (this.host.isRunning()) this.host.render();
 			return;
 		}
 
 		if (!Array.isArray(content) && typeof content !== "function") return;
 
-		this.extensionWidgets.set(key, {
+		this.extensionWidgets.set(scopedKey, {
 			key,
+			scopeKey,
 			placement: options?.placement === "belowEditor" ? "belowEditor" : "aboveEditor",
 			content: content as readonly string[] | ExtensionWidgetFactory,
 		});
 		if (this.host.isRunning()) this.host.render();
 	}
 
-	clearWidgets(): void {
-		this.cancelActiveCustomUi();
-		for (const widget of this.extensionWidgets.values()) this.invalidateWidget(widget);
-		this.extensionWidgets.clear();
+	clearWidgets(scopeKey?: string, options: { cancelCustomUi?: boolean } = {}): void {
+		const normalizedScopeKey = this.normalizeScopeKey(scopeKey);
+		if (options.cancelCustomUi !== false) this.cancelActiveCustomUi(normalizedScopeKey);
+		for (const [key, widget] of this.extensionWidgets.entries()) {
+			if (widget.scopeKey !== normalizedScopeKey) continue;
+			this.invalidateWidget(widget);
+			this.extensionWidgets.delete(key);
+		}
 	}
 
 	suppressWidget(key: string): void {
-		const widget = this.extensionWidgets.get(key);
+		const scopedKey = this.scopedWidgetKey(this.activeScopeKey(), key);
+		const widget = this.extensionWidgets.get(scopedKey);
 		if (!widget) return;
 		this.invalidateWidget(widget);
-		this.extensionWidgets.delete(key);
+		this.extensionWidgets.delete(scopedKey);
 	}
 
 	handleTerminalInput(data: string): ExtensionTerminalInputResult {
-		if (this.activeCustomUi) {
+		const active = this.activeCustomUiForActiveScope();
+		if (active) {
 			if (data === "\u0003") return { consume: false };
 			try {
-				const result = this.activeCustomUi.component.handleInput?.(data);
+				const result = active.component.handleInput?.(data);
 				if (result && typeof result === "object") {
 					return {
 						consume: result.consume !== false,
@@ -163,7 +178,9 @@ export class ExtensionUiController {
 		}
 
 		let current = data;
-		for (const handler of [...this.terminalInputHandlers]) {
+		const activeScopeKey = this.activeScopeKey();
+		for (const { scopeKey, handler } of [...this.terminalInputHandlers]) {
+			if (scopeKey !== activeScopeKey) continue;
 			const result = handler(current);
 			if (result?.data !== undefined) current = result.data;
 			if (result?.consume === true) return { consume: true };
@@ -172,7 +189,7 @@ export class ExtensionUiController {
 	}
 
 	renderActiveCustomUi(width: number): string[] | undefined {
-		const active = this.activeCustomUi;
+		const active = this.activeCustomUiForActiveScope();
 		if (!active) return undefined;
 		try {
 			return active.component.render(width);
@@ -182,7 +199,7 @@ export class ExtensionUiController {
 	}
 
 	activeCustomUiUsesEditor(): boolean {
-		const active = this.activeCustomUi;
+		const active = this.activeCustomUiForActiveScope();
 		if (!active) return false;
 		try {
 			return active.component.usesEditor?.() === true;
@@ -192,7 +209,7 @@ export class ExtensionUiController {
 	}
 
 	handleCustomUiMouse(event: ExtensionInputMouseEvent): boolean {
-		const active = this.activeCustomUi;
+		const active = this.activeCustomUiForActiveScope();
 		if (!active) return false;
 		try {
 			return active.component.handleMouse?.(event) === true;
@@ -218,7 +235,8 @@ export class ExtensionUiController {
 		};
 	}
 
-	createExtensionUIContext(): PixExtensionUIContext {
+	createExtensionUIContext(scopeKey?: string): PixExtensionUIContext {
+		const contextScopeKey = this.normalizeScopeKey(scopeKey);
 		const notify = (message: string, type?: ToastKind | string): void => {
 			this.host.showToast(message, isToastKind(type) ? type : "info");
 		};
@@ -231,17 +249,24 @@ export class ExtensionUiController {
 		return {
 			select: async (title, options, opts) => await this.selectDialog(title, options, opts),
 			confirm: async (title, message, opts) => await this.confirmDialog(title, message, opts),
-			input: async (title, placeholder, opts) => await this.inputDialog(title, placeholder, opts),
+			input: async (title, placeholder, opts) => await this.inputDialog(title, placeholder, opts, contextScopeKey),
 			notify,
 			toast: this.host.toastNotifier,
-			aboveInput: this.aboveInputRenderer,
+			aboveInput: {
+				set: (key, content) => {
+					this.setAboveInputWidget(key, content, contextScopeKey);
+				},
+				clear: (key) => {
+					this.clearAboveInputWidget(key, contextScopeKey);
+				},
+			},
 			renderAboveInput: (key, content) => {
-				this.setAboveInputWidget(key, content);
+				this.setAboveInputWidget(key, content, contextScopeKey);
 			},
 			showMenu: this.host.menuController.show,
 			menu: this.host.menuController,
 			onTerminalInput: (handler) => {
-				const terminalInputHandler = handler as TerminalInputHandler;
+				const terminalInputHandler = { scopeKey: contextScopeKey, handler: handler as TerminalInputHandler };
 				this.terminalInputHandlers.add(terminalInputHandler);
 				return () => {
 					this.terminalInputHandlers.delete(terminalInputHandler);
@@ -261,7 +286,7 @@ export class ExtensionUiController {
 			setWorkingIndicator: () => undefined,
 			setHiddenThinkingLabel: () => undefined,
 			setWidget: ((key: string, content: unknown, options?: { placement?: WidgetPlacement }) => {
-				this.setWidget(key, content, options);
+				this.setWidget(key, content, { ...options, scopeKey: contextScopeKey });
 			}) as PixExtensionUIContext["setWidget"],
 			setFooter: () => undefined,
 			setHeader: () => undefined,
@@ -269,7 +294,7 @@ export class ExtensionUiController {
 				process.title = title;
 				renderIfRunning();
 			},
-			custom: (async <T,>(factory: CustomUiFactory<T>) => await this.showCustomUi(factory)) as PixExtensionUIContext["custom"],
+			custom: (async <T,>(factory: CustomUiFactory<T>) => await this.showCustomUi(factory, { scopeKey: contextScopeKey })) as PixExtensionUIContext["custom"],
 			pasteToEditor: (text) => {
 				this.host.setInput(text);
 				renderIfRunning();
@@ -279,7 +304,7 @@ export class ExtensionUiController {
 				renderIfRunning();
 			},
 			getEditorText: () => this.host.getInput(),
-			editor: async (title, prefill) => await this.editorDialog(title, prefill),
+			editor: async (title, prefill) => await this.editorDialog(title, prefill, contextScopeKey),
 			addAutocompleteProvider: () => undefined,
 			setEditorComponent: () => undefined,
 			getEditorComponent: () => undefined,
@@ -302,12 +327,12 @@ export class ExtensionUiController {
 		};
 	}
 
-	private setAboveInputWidget(key: string, content: ExtensionWidgetContent): void {
-		this.setWidget(key, content, { placement: "aboveEditor" });
+	private setAboveInputWidget(key: string, content: ExtensionWidgetContent, scopeKey = this.activeScopeKey()): void {
+		this.setWidget(key, content, { placement: "aboveEditor", scopeKey });
 	}
 
-	private clearAboveInputWidget(key: string): void {
-		this.setWidget(key, undefined, { placement: "aboveEditor" });
+	private clearAboveInputWidget(key: string, scopeKey = this.activeScopeKey()): void {
+		this.setWidget(key, undefined, { placement: "aboveEditor", scopeKey });
 	}
 
 	private async selectDialog(title: string, options: string[], opts?: ExtensionUIDialogOptions): Promise<string | undefined> {
@@ -339,7 +364,7 @@ export class ExtensionUiController {
 		return selected === true;
 	}
 
-	private async inputDialog(title: string, placeholder?: string, opts?: ExtensionUIDialogOptions): Promise<string | undefined> {
+	private async inputDialog(title: string, placeholder?: string, opts?: ExtensionUIDialogOptions, scopeKey = this.activeScopeKey()): Promise<string | undefined> {
 		if (opts?.signal?.aborted) return undefined;
 		return await this.editorBackedDialog({
 			title,
@@ -347,15 +372,15 @@ export class ExtensionUiController {
 			mode: "input",
 			...(placeholder === undefined ? {} : { placeholder }),
 			...(opts === undefined ? {} : { opts }),
-		});
+		}, scopeKey);
 	}
 
-	private async editorDialog(title: string, prefill = ""): Promise<string | undefined> {
+	private async editorDialog(title: string, prefill = "", scopeKey = this.activeScopeKey()): Promise<string | undefined> {
 		return await this.editorBackedDialog({
 			title,
 			initialValue: prefill,
 			mode: "editor",
-		});
+		}, scopeKey);
 	}
 
 	private async editorBackedDialog(options: {
@@ -364,10 +389,10 @@ export class ExtensionUiController {
 		initialValue: string;
 		mode: "input" | "editor";
 		opts?: ExtensionUIDialogOptions;
-	}): Promise<string | undefined> {
+	}, scopeKey = this.activeScopeKey()): Promise<string | undefined> {
 		if (options.opts?.signal?.aborted) return undefined;
 		if (!this.host.isRunning()) return undefined;
-		if (this.activeCustomUi) throw new Error("Another extension custom UI is already active.");
+		if (this.activeCustomUis.has(scopeKey)) throw new Error("Another extension custom UI is already active.");
 		const savedInput = this.host.getInput();
 		this.host.setInput(options.initialValue);
 		const promise = this.showCustomUi<string | undefined>((_tui, _theme, _keybindings, done) => {
@@ -393,13 +418,13 @@ export class ExtensionUiController {
 					return { consume: false, data };
 				},
 			};
-		}, { savedInput });
+		}, { savedInput, scopeKey });
 
 		return await this.withDialogAutoDismiss(
 			promise,
 			options.opts,
 			() => {
-				this.cancelActiveCustomUi();
+				this.cancelActiveCustomUi(scopeKey);
 			},
 		);
 	}
@@ -445,10 +470,11 @@ export class ExtensionUiController {
 
 	private async showCustomUi<T>(
 		factory: CustomUiFactory<T>,
-		options: { savedInput?: string } = {},
+		options: { savedInput?: string; scopeKey?: string } = {},
 	): Promise<T> {
 		if (!this.host.isRunning()) return undefined as T;
-		if (this.activeCustomUi) throw new Error("Another extension custom UI is already active.");
+		const scopeKey = this.normalizeScopeKey(options.scopeKey);
+		if (this.activeCustomUis.has(scopeKey)) throw new Error("Another extension custom UI is already active.");
 		const savedInput = options.savedInput ?? this.host.getInput();
 
 		return await new Promise<T>((resolve, reject) => {
@@ -456,7 +482,7 @@ export class ExtensionUiController {
 			const done = (value: T): void => {
 				if (settled) return;
 				settled = true;
-				this.finishActiveCustomUi(value, { resolve: true });
+				this.finishActiveCustomUi(scopeKey, value, { resolve: true });
 				resolve(value);
 			};
 
@@ -474,8 +500,9 @@ export class ExtensionUiController {
 						return;
 					}
 
-					this.activeCustomUi = {
+					this.activeCustomUis.set(scopeKey, {
 						key: CUSTOM_UI_WIDGET_KEY,
+						scopeKey,
 						component,
 						savedInput,
 						resolve: (value) => {
@@ -488,7 +515,7 @@ export class ExtensionUiController {
 							settled = true;
 							reject(error);
 						},
-					};
+					});
 					if (this.host.isRunning()) this.host.render();
 				} catch (error) {
 					if (settled) return;
@@ -499,18 +526,20 @@ export class ExtensionUiController {
 		});
 	}
 
-	private cancelActiveCustomUi(): void {
-		this.finishActiveCustomUi(undefined, { resolve: true });
+	private cancelActiveCustomUi(scopeKey = this.activeScopeKey()): void {
+		this.finishActiveCustomUi(scopeKey, undefined, { resolve: true });
 	}
 
 	private rejectActiveCustomUi(error: unknown): void {
-		this.finishActiveCustomUi(error, { resolve: false });
+		const active = this.activeCustomUiForActiveScope();
+		if (!active) return;
+		this.finishActiveCustomUi(active.scopeKey, error, { resolve: false });
 	}
 
-	private finishActiveCustomUi(value: unknown, options: { resolve: boolean }): void {
-		const active = this.activeCustomUi;
+	private finishActiveCustomUi(scopeKey: string, value: unknown, options: { resolve: boolean }): void {
+		const active = this.activeCustomUis.get(scopeKey);
 		if (!active) return;
-		this.activeCustomUi = undefined;
+		this.activeCustomUis.delete(scopeKey);
 		if (this.host.getInput() !== active.savedInput) this.host.setInput(active.savedInput);
 		try {
 			active.component.dispose?.();
@@ -525,6 +554,26 @@ export class ExtensionUiController {
 		if (options.resolve) active.resolve(value);
 		else active.reject(value);
 		if (this.host.isRunning()) this.host.render();
+	}
+
+	private activeCustomUiForActiveScope(): ActiveCustomUi | undefined {
+		return this.activeCustomUis.get(this.activeScopeKey());
+	}
+
+	private activeScopeKey(): string {
+		return this.normalizeScopeKey(this.host.activeExtensionUiScope?.());
+	}
+
+	private normalizeScopeKey(scopeKey: string | undefined): string {
+		return scopeKey ?? "";
+	}
+
+	private scopedWidgetKey(scopeKey: string, key: string): string {
+		return `${scopeKey.length}:${scopeKey}:${key}`;
+	}
+
+	private unscopedWidgetKey(scopedKey: string, scopeKey: string): string {
+		return scopedKey.slice(`${scopeKey.length}:${scopeKey}:`.length);
 	}
 
 	private invalidateWidget(widget: ExtensionWidgetRegistration): void {

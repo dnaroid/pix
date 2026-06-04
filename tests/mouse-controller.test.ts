@@ -16,6 +16,7 @@ import type { EditorLayoutRenderer } from "../src/app/rendering/editor-layout-re
 import type { AppPopupActionController } from "../src/app/popup/popup-action-controller.js";
 import type { AppPopupMenuController } from "../src/app/popup/popup-menu-controller.js";
 import type { AppScrollController } from "../src/app/screen/scroll-controller.js";
+import { APP_ICONS } from "../src/app/icons.js";
 
 describe("AppMouseController", () => {
 	it("shows detailed DCP stats as a dialog toast when context status is clicked", () => {
@@ -123,14 +124,13 @@ describe("AppMouseController", () => {
 		assert.equal(resumeCount, 0);
 	});
 
-	it("lets the collapsed new-tab button win over the scrollbar column", () => {
+	it("opens the collapsed new-tab button in the last column", () => {
 		let newTabCount = 0;
-		let scrollCount = 0;
 		const controller = new AppMouseController(
 			fakeHost({ openNewTab: () => { newTabCount += 1; } }),
 			fakePopupMenus(),
 			fakePopupActions(),
-			fakeScrollController({ scrollToScrollbarPosition: () => { scrollCount += 1; return true; } }),
+			fakeScrollController(),
 			fakeCommandController(),
 		);
 		controller.tabLineTargets.push({ kind: "new-tab", row: 1, startColumn: 10, endColumn: 11 });
@@ -139,7 +139,6 @@ describe("AppMouseController", () => {
 		controller.handleMouse({ button: 0, x: 10, y: 1, released: true });
 
 		assert.equal(newTabCount, 1);
-		assert.equal(scrollCount, 0);
 	});
 
 	it("refreshes model usage when clicking its status target", () => {
@@ -244,11 +243,15 @@ describe("AppMouseController", () => {
 		assert.equal(toggleCount, 1);
 	});
 
-	it("opens the user-message jump menu when clicking its status target", () => {
+	it("opens the user-message jump menu when clicking its status target", async () => {
 		let opened: { menu: string; options?: unknown } | undefined;
 		let renderCount = 0;
+		let refreshCount = 0;
 		const controller = new AppMouseController(
-			fakeHost({ render: () => { renderCount += 1; } }),
+			fakeHost({
+				render: () => { renderCount += 1; },
+				refreshUserMessageJumpMenuItems: async () => { refreshCount += 1; },
+			}),
 			fakePopupMenus({ openDirectPopupMenu: (menu, options) => { opened = { menu, options }; } }),
 			fakePopupActions(),
 			fakeScrollController(),
@@ -258,7 +261,9 @@ describe("AppMouseController", () => {
 
 		controller.handleMouse({ button: 0, x: 1, y: 5, released: false });
 		controller.handleMouse({ button: 0, x: 1, y: 5, released: true });
+		await delay(0);
 
+		assert.equal(refreshCount, 1);
 		assert.deepEqual(opened, { menu: "user-message-jump", options: { preserveStatus: true } });
 		assert.ok(renderCount >= 1);
 	});
@@ -349,7 +354,7 @@ describe("AppMouseController", () => {
 		assert.equal(copiedText, "line 0\nline 1");
 	});
 
-	it("copies mouse selections that release on the scrollbar column", () => {
+	it("copies mouse selections that release in the last column", () => {
 		let copiedText: string | undefined;
 		const controller = new AppMouseController(
 			fakeHost({ copyTextToClipboard: (text) => { copiedText = text; } }),
@@ -365,6 +370,53 @@ describe("AppMouseController", () => {
 
 		assert.equal(copiedText, "line 0\nline 1");
 		assert.equal(controller.mouseSelection, undefined);
+	});
+
+	it("includes the final viewport column when selection reaches the right edge", () => {
+		let copiedText: string | undefined;
+		const controller = new AppMouseController(
+			fakeHost({
+				conversationViewport: () => ({
+					slice: (_width: number, start: number, count: number) => Array.from({ length: count }, (_, index) => ({
+						text: start + index === 0 ? "1234567890" : "abcdefghij",
+					})),
+				}) as never,
+				copyTextToClipboard: (text) => { copiedText = text; },
+			}),
+			fakePopupMenus(),
+			fakePopupActions(),
+			fakeScrollController(),
+			fakeCommandController(),
+		);
+
+		controller.handleMouse({ button: 0, x: 1, y: 1, released: false });
+		controller.handleMouse({ button: 32, x: 10, y: 1, released: false });
+		controller.handleMouse({ button: 0, x: 10, y: 1, released: true });
+
+		assert.equal(copiedText, "1234567890");
+	});
+
+	it("includes the final viewport column after a non-BMP icon", () => {
+		let copiedText: string | undefined;
+		const iconLine = `${APP_ICONS.checkCircle} 12345678`;
+		const controller = new AppMouseController(
+			fakeHost({
+				conversationViewport: () => ({
+					slice: () => [{ text: iconLine }],
+				}) as never,
+				copyTextToClipboard: (text) => { copiedText = text; },
+			}),
+			fakePopupMenus(),
+			fakePopupActions(),
+			fakeScrollController(),
+			fakeCommandController(),
+		);
+
+		controller.handleMouse({ button: 0, x: 1, y: 1, released: false });
+		controller.handleMouse({ button: 32, x: 10, y: 1, released: false });
+		controller.handleMouse({ button: 0, x: 10, y: 1, released: true });
+
+		assert.equal(copiedText, iconLine);
 	});
 
 	it("copies left-edge selections when the terminal drops the release event", async () => {
@@ -587,8 +639,6 @@ function fakeHost(overrides: Partial<AppMouseControllerHost> = {}): AppMouseCont
 function fakeScrollController(overrides: Partial<AppScrollController> = {}): AppScrollController {
 	return {
 		scrollMetrics: () => ({ bodyHeight: 2, viewportColumns: 10, conversationLineCount: 20, maxScroll: 18, start: 0 }),
-		scrollBarMetrics: () => ({ thumbStartRow: 1, thumbEndRow: 1 }),
-		scrollToScrollbarPosition: () => {},
 		scrollByLines: () => {},
 		...overrides,
 	} as unknown as AppScrollController;

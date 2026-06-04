@@ -156,6 +156,23 @@ export class ConversationViewport {
 		}));
 	}
 
+	measuredLineCountForEntries(width: number, entryIds: readonly string[]): number {
+		if (entryIds.length === 0) return 0;
+
+		const layout = this.layoutForWidth(width);
+		const indexes = [...new Set(entryIds
+			.map((entryId) => layout.positions.get(entryId))
+			.filter((index): index is number => index !== undefined))]
+			.sort((left, right) => left - right);
+
+		let lineCount = 0;
+		for (const index of indexes) {
+			this.ensureEntryMeasured(layout, width, index);
+			lineCount += layout.lineCounts[index] ?? 0;
+		}
+		return lineCount;
+	}
+
 	private queuedEntries(): Entry[] {
 		const session = this.host.session;
 		const entries: Entry[] = [];

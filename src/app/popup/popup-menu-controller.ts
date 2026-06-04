@@ -946,23 +946,40 @@ export function formatSessionInfoMenuItems(
 	return createSessionInfoMenuItemsLoader(sessions, currentSessionFile, query).items(options.limit);
 }
 
-export function buildUserMessageJumpItems(entries: readonly Entry[], query: string): PopupMenuItem<UserMessageJumpMenuValue>[] {
-	const userEntries = entries.filter((entry): entry is Extract<Entry, { kind: "user" }> => entry.kind === "user");
-	const items: FuzzySearchItem<UserMessageJumpMenuValue>[] = userEntries.map((entry, index) => {
+export type UserMessageJumpSourceItem = { text: string; entryId?: string; sessionEntryId?: string };
+type SearchableUserMessageJumpMenuItem = PopupMenuItem<UserMessageJumpMenuValue> & { aliases?: string[]; keywords?: string[] };
+
+export function buildUserMessageJumpItems(entries: readonly Entry[] | readonly UserMessageJumpSourceItem[]): PopupMenuItem<UserMessageJumpMenuValue>[] {
+	const userEntries = entries.flatMap((entry): UserMessageJumpSourceItem[] => {
+		if ("kind" in entry) {
+			return entry.kind === "user"
+				? [{ text: entry.text, entryId: entry.id, ...(entry.sessionEntryId === undefined ? {} : { sessionEntryId: entry.sessionEntryId }) }]
+				: [];
+		}
+		return [entry];
+	});
+	return userEntries.map((entry, index): SearchableUserMessageJumpMenuItem => {
 		const preview = sanitizeText(entry.text).replace(/\s+/g, " ").trim();
 		const label = `${index + 1}. ${preview || "(empty message)"}`;
 		return {
-			value: { entryId: entry.id },
+			value: { ...(entry.entryId === undefined ? {} : { entryId: entry.entryId }), ...(entry.sessionEntryId === undefined ? {} : { sessionEntryId: entry.sessionEntryId }) },
 			label,
-			aliases: [entry.sessionEntryId ?? "", entry.id],
+			...(entry.entryId ? {} : { description: "load older history and jump" }),
+			aliases: [entry.sessionEntryId ?? "", entry.entryId ?? ""],
 			keywords: [entry.text],
 		};
 	});
+}
 
-	return fuzzySearch(items, query).map((match) => ({
-		value: match.value,
-		label: match.label,
+export function filterUserMessageJumpItems(items: readonly PopupMenuItem<UserMessageJumpMenuValue>[], query: string): PopupMenuItem<UserMessageJumpMenuValue>[] {
+	const searchableItems: FuzzySearchItem<SearchableUserMessageJumpMenuItem>[] = (items as readonly SearchableUserMessageJumpMenuItem[]).map((item) => ({
+		value: item,
+		label: item.label,
+		...(item.aliases === undefined ? {} : { aliases: item.aliases }),
+		...(item.keywords === undefined ? {} : { keywords: item.keywords }),
 	}));
+
+	return fuzzySearch(searchableItems, query).map((match) => match.value);
 }
 
 export type {

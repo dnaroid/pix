@@ -11,9 +11,9 @@ import { Type, Static } from "typebox";
 // Shared primitives
 // ---------------------------------------------------------------------------
 
-const ThinkingLevel = Type.Union(
-	["off", "minimal", "low", "medium", "high", "xhigh"].map((v) => Type.Literal(v)),
-	{ description: "Model thinking budget level." },
+const DefaultThinkingSelection = Type.Union(
+	["off", "minimal", "low", "medium", "high", "xhigh", "auto"].map((v) => Type.Literal(v)),
+	{ description: "Default model thinking budget level, or 'auto' to let pix choose/adapt per prompt." },
 );
 
 // ---------------------------------------------------------------------------
@@ -54,7 +54,7 @@ const OutputFiltersConfig = Type.Object(
 const DefaultModelConfig = Type.Object(
 	{
 		modelRef: Type.Optional(Type.String({ description: "Provider/model identifier, e.g. 'openai-codex/gpt-5.4'." })),
-		thinking: Type.Optional(ThinkingLevel),
+		thinking: Type.Optional(DefaultThinkingSelection),
 	},
 	{ description: "Default model selection for new sessions." },
 );

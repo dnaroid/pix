@@ -3,6 +3,7 @@ import { isRecord } from "../guards.js";
 import { createId } from "../id.js";
 import { isOnlyHiddenMetadata } from "../../markdown-format.js";
 import { extractImageContents, renderContent, renderUserMessageContent, stringifyUnknown } from "../rendering/message-content.js";
+import { PIX_SESSION_ENTRY_ID_FIELD, PIX_SYSTEM_MESSAGE_CUSTOM_TYPE } from "./pix-system-message.js";
 
 type ToolResultRecord = {
 	content: readonly unknown[];
@@ -15,7 +16,6 @@ type SubagentsToolResultObserveOptions = {
 	showSnapshot?: boolean;
 };
 
-const SYSTEM_CUSTOM_MESSAGE_TYPE = "pix-system";
 const HISTORICAL_SUBAGENTS_OBSERVATION: SubagentsToolResultObserveOptions = { showSnapshot: false };
 
 export type LoadSessionHistoryOptions = {
@@ -34,11 +34,13 @@ export type LoadSessionHistoryAsyncOptions = LoadSessionHistoryOptions & {
 	chunkSize?: number;
 	tailMessageCount?: number;
 	lazyOlderHistory?: boolean;
+	olderMessagesReader?: OlderSessionHistoryMessagesReader | undefined;
 	onOlderLoaderReady?: (loader: SessionHistoryOlderLoader | undefined) => void;
 };
 
 export type LoadOlderSessionHistoryOptions = {
 	render?: boolean;
+	onPrependedEntries?: (entries: readonly Entry[]) => void;
 };
 
 export type SessionHistoryOlderLoader = {
@@ -47,6 +49,11 @@ export type SessionHistoryOlderLoader = {
 	loadedMessageCount(): number;
 	totalMessageCount(): number;
 	loadOlder(options?: LoadOlderSessionHistoryOptions): Promise<boolean>;
+};
+
+export type OlderSessionHistoryMessagesReader = {
+	hasOlder(): boolean;
+	readOlder(limit: number): Promise<readonly unknown[]>;
 };
 
 const DEFAULT_HISTORY_CHUNK_SIZE = 50;
@@ -76,7 +83,7 @@ export async function loadSessionHistoryEntriesAsync(options: LoadSessionHistory
 	await yieldToEventLoop();
 
 	if (options.lazyOlderHistory) {
-		const loader = createOlderHistoryLoader(messages, options, chunkSize, toolResults, tailStart);
+		const loader = createOlderHistoryLoader(messages, options, chunkSize, toolResults, tailStart, options.olderMessagesReader);
 		options.onOlderLoaderReady?.(loader.hasOlder() ? loader : undefined);
 		return !options.isCancelled();
 	}
@@ -101,31 +108,39 @@ function createOlderHistoryLoader(
 	chunkSize: number,
 	toolResults: Map<string, ToolResultRecord>,
 	initialEnd: number,
+	olderMessagesReader: OlderSessionHistoryMessagesReader | undefined,
 ): SessionHistoryOlderLoader {
 	let nextEnd = initialEnd;
 	let loading = false;
+	let externallyLoadedMessageCount = 0;
 
 	return {
-		hasOlder: () => nextEnd > 0,
+		hasOlder: () => nextEnd > 0 || olderMessagesReader?.hasOlder() === true,
 		isLoading: () => loading,
-		loadedMessageCount: () => Math.max(0, messages.length - nextEnd),
-		totalMessageCount: () => messages.length,
+		loadedMessageCount: () => Math.max(0, messages.length - nextEnd) + externallyLoadedMessageCount,
+		totalMessageCount: () => messages.length + externallyLoadedMessageCount,
 		async loadOlder(loadOptions: LoadOlderSessionHistoryOptions = {}): Promise<boolean> {
 			if (loading) return !options.isCancelled();
-			if (nextEnd <= 0) return !options.isCancelled();
+			if (nextEnd <= 0 && olderMessagesReader?.hasOlder() !== true) return !options.isCancelled();
 
 			loading = true;
 			let didPrependEntries = false;
 			try {
-				while (nextEnd > 0 && !options.isCancelled()) {
-					const end = nextEnd;
-					const start = Math.max(0, end - chunkSize);
-					buildToolResults(messages, options, start, end, toolResults);
+				while (!options.isCancelled() && (nextEnd > 0 || olderMessagesReader?.hasOlder() === true)) {
+					const batch = nextEnd > 0
+						? inMemoryOlderMessagesBatch(messages, chunkSize, nextEnd)
+						: await externalOlderMessagesBatch(olderMessagesReader, chunkSize);
+					if (!batch) break;
+
+					const { batchMessages } = batch;
+					if (batch.external) externallyLoadedMessageCount += batchMessages.length;
+					buildToolResults(batchMessages, options, 0, batchMessages.length, toolResults);
 					const entries: Entry[] = [];
-					addSessionHistoryRangeEntries(messages, start, end, toolResults, (entry) => entries.push(entry), options);
-					nextEnd = start;
+					addSessionHistoryRangeEntries(batchMessages, 0, batchMessages.length, toolResults, (entry) => entries.push(entry), options);
+					nextEnd = batch.nextEnd;
 					if (entries.length > 0) {
 						options.prependEntries(entries);
+						loadOptions.onPrependedEntries?.(entries);
 						didPrependEntries = true;
 						break;
 					}
@@ -137,10 +152,25 @@ function createOlderHistoryLoader(
 				return true;
 			} finally {
 				loading = false;
-				if (nextEnd <= 0) options.onOlderLoaderReady?.(undefined);
+				if (nextEnd <= 0 && olderMessagesReader?.hasOlder() !== true) options.onOlderLoaderReady?.(undefined);
 			}
 		},
 	};
+}
+
+function inMemoryOlderMessagesBatch(messages: readonly unknown[], chunkSize: number, nextEnd: number): { batchMessages: readonly unknown[]; nextEnd: number; external: false } {
+	const end = nextEnd;
+	const start = Math.max(0, end - chunkSize);
+	return { batchMessages: messages.slice(start, end), nextEnd: start, external: false };
+}
+
+async function externalOlderMessagesBatch(
+	olderMessagesReader: OlderSessionHistoryMessagesReader | undefined,
+	chunkSize: number,
+): Promise<{ batchMessages: readonly unknown[]; nextEnd: number; external: true } | undefined> {
+	if (!olderMessagesReader?.hasOlder()) return undefined;
+	const batchMessages = await olderMessagesReader.readOlder(chunkSize);
+	return batchMessages.length === 0 ? undefined : { batchMessages, nextEnd: 0, external: true };
 }
 
 function expandedTailStart(messages: readonly unknown[], initialStart: number): number {
@@ -196,7 +226,8 @@ function addSessionHistoryRangeEntries(
 			const text = renderUserMessageContent(message.content);
 			if (text) {
 				const images = extractImageContents(message.content);
-				addEntry({ id: createId("user"), kind: "user", text, ...(images.length === 0 ? {} : { images }) });
+				const sessionEntryId = typeof message[PIX_SESSION_ENTRY_ID_FIELD] === "string" ? message[PIX_SESSION_ENTRY_ID_FIELD] : undefined;
+				addEntry({ id: createId("user"), kind: "user", text, ...(sessionEntryId === undefined ? {} : { sessionEntryId }), ...(images.length === 0 ? {} : { images }) });
 			}
 		} else if (message.role === "assistant") {
 			renderAssistantHistoryMessage(message, toolResults, { ...options, addEntry });
@@ -215,7 +246,7 @@ export function customMessageEntry(message: Record<string, unknown>): Entry | un
 	const customType = typeof message.customType === "string" ? message.customType : "custom";
 	const text = renderUserMessageContent(message.content);
 	if (!text) return undefined;
-	if (customType === SYSTEM_CUSTOM_MESSAGE_TYPE) return { id: createId("system"), kind: "system", text };
+	if (customType === PIX_SYSTEM_MESSAGE_CUSTOM_TYPE) return { id: createId("system"), kind: "system", text };
 
 	return { id: createId("custom"), kind: "custom", customType, text };
 }

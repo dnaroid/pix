@@ -13,6 +13,7 @@ import type {
 	SessionActivity,
 	SlashCommand,
 	SubmittedUserMessage,
+	UserMessageJumpMenuValue,
 } from "./types.js";
 import { AppCommandController } from "./commands/command-controller.js";
 import { ConversationViewport } from "./rendering/conversation-viewport.js";
@@ -58,7 +59,14 @@ import { checkPixUpdate, formatPixStartupUpdateDialog } from "./cli/update.js";
 import { AppVoiceController } from "./input/voice-controller.js";
 import { createIsolatedExtensionEventBus } from "./extensions/extension-event-bus.js";
 import { setAppIconTheme } from "./icons.js";
-import { AutoThinkingController } from "./thinking/auto-thinking.js";
+import {
+	appendAutoThinkingSessionState,
+	AutoThinkingController,
+	formatAutoThinkingDecision,
+	resolveAutoThinkingSessionState,
+	type AutoThinkingDecision,
+} from "./thinking/auto-thinking.js";
+import { appendPixSystemDisplayEntry } from "./session/pix-system-message.js";
 import {
 	type AgentSession,
 	type AgentSessionEvent,
@@ -185,12 +193,12 @@ export class PiUiExtendApp {
 			options: this.options,
 			blinkController: this.blinkController,
 			runtime: () => this.runtime,
-			createRuntimeForNewSession: () => createPixRuntime(newTabRuntimeOptions(this.options), { eventBus: this.createExtensionEventBus() }),
-			createRuntimeForSession: (sessionPath) => createPixRuntime({
+			createRuntimeForNewSession: () => this.createRuntime(newTabRuntimeOptions(this.options)),
+			createRuntimeForSession: (sessionPath) => this.createRuntime({
 				...this.options,
 				noSession: false,
 				sessionPath,
-			}, { eventBus: this.createExtensionEventBus() }),
+			}),
 			activateRuntime: (runtime) => this.activateRuntime(runtime),
 			disposeRuntime: (runtime) => this.terminalController.disposeRuntime(runtime),
 			isRunning: () => this.running,
@@ -312,6 +320,7 @@ export class PiUiExtendApp {
 		});
 		this.extensionUiController = new ExtensionUiController({
 			theme: this.theme,
+			activeExtensionUiScope: () => this.activeExtensionUiScope(),
 			isRunning: () => this.running,
 			render: () => this.render(),
 			showToast: (message, kind) => this.showToast(message, kind),
@@ -478,8 +487,7 @@ export class PiUiExtendApp {
 			getFavoriteScopedModels: () => this.menuItems.getFavoriteScopedModels(),
 			isAutoThinkingEnabled: (session) => this.autoThinkingController.isEnabled(session),
 			setAutoThinkingEnabled: (session, enabled) => {
-				if (enabled) this.autoThinkingController.enable(session);
-				else this.autoThinkingController.disable(session);
+				this.setAutoThinkingEnabled(session, enabled);
 			},
 			autoThinkingLabel: (session) => this.autoThinkingController.label(session),
 			setSessionStatus: (session) => this.setSessionStatus(session),
@@ -501,6 +509,7 @@ export class PiUiExtendApp {
 			setDirectPopupMenuQuery: (query) => {
 				this.popupMenus.setDirectQuery(query);
 			},
+			refreshUserMessageJumpMenuItems: () => this.menuItems.refreshUserMessageJumpMenuItems(),
 			getResumeLoading: () => this.resumeLoading,
 			getResumeSessions: () => this.resumeSessions,
 			setResumeLoading: (loading) => {
@@ -531,6 +540,7 @@ export class PiUiExtendApp {
 				bindCurrentSession: () => this.bindCurrentSession(),
 				loadSessionHistory: () => this.loadSessionHistory(),
 				scrollToConversationEntry: (entryId) => this.scrollController.scrollToConversationEntry(entryId),
+				scrollToUserMessageJumpTarget: (target) => this.scrollToUserMessageJumpTarget(target),
 			},
 			this.popupMenus,
 			this.commandController,
@@ -580,6 +590,7 @@ export class PiUiExtendApp {
 				showToast: (message, kind, options) => this.showToast(message, kind, options),
 				dismissToast: (toastId) => this.toastController.dismissToast(toastId),
 				refreshModelUsageStatus: () => this.refreshModelUsageStatusFromClick(),
+				refreshUserMessageJumpMenuItems: () => this.menuItems.refreshUserMessageJumpMenuItems(),
 				queueInputFromStatus: () => {
 					void this.inputActions.queueInputFromEditor().catch((error) => {
 						this.addEntry({ id: createId("error"), kind: "error", text: `Queue input failed: ${error instanceof Error ? error.message : String(error)}` });
@@ -727,7 +738,7 @@ export class PiUiExtendApp {
 		});
 		this.sessionLifecycle = new AppSessionLifecycleController({
 			options: this.options,
-			createRuntime: () => createPixRuntime(this.options, { eventBus: this.createExtensionEventBus() }),
+			createRuntime: () => this.createRuntime(this.options),
 			entries: this.entries,
 			runtime: () => this.runtime,
 			setRuntime: (runtime) => {
@@ -745,8 +756,8 @@ export class PiUiExtendApp {
 			loadRequestHistory: () => this.requestHistory.load(),
 			startSubagentsPolling: () => this.subagentsWidgetController.startPolling(),
 			closeSdkMenuForBind: () => this.popupMenus.closeSdkMenu(undefined, { render: false, restoreStatus: false }),
-			clearExtensionWidgets: () => this.extensionUiController.clearWidgets(),
-			createExtensionUIContext: () => this.extensionUiController.createExtensionUIContext(),
+			clearExtensionWidgets: (scopeKey, options) => this.extensionUiController.clearWidgets(scopeKey, options),
+			createExtensionUIContext: (scopeKey) => this.extensionUiController.createExtensionUIContext(scopeKey),
 			extensionShutdownHandler: () => this.extensionShutdownHandler,
 			createExtensionCommandContextActions: (runtime) => this.extensionActions.createCommandContextActions(runtime),
 			handleExtensionError: (error) => this.extensionActions.handleExtensionError(error),
@@ -790,6 +801,18 @@ export class PiUiExtendApp {
 		this.slashCommands = this.commandController.slashCommands;
 	}
 
+	private createRuntime(options: AppOptions): Promise<AgentSessionRuntime> {
+		return createPixRuntime(options, {
+			eventBus: this.createExtensionEventBus(),
+			autoThinking: {
+				isEnabled: (session) => this.autoThinkingController.isEnabled(session),
+				enableDefault: (session) => this.setAutoThinkingEnabled(session, true),
+				applyControl: (session, control) => this.autoThinkingController.applyAdaptiveRequest(session, control),
+				onDecision: (session, decision) => this.recordAutoThinkingDecision(session, decision),
+			},
+		});
+	}
+
 	async start(): Promise<void> {
 		await this.sessionLifecycle.start();
 		this.modelUsageController.startPolling();
@@ -809,6 +832,21 @@ export class PiUiExtendApp {
 
 	private async bindCurrentSession(): Promise<void> {
 		await this.sessionLifecycle.bindCurrentSession();
+		this.restoreAutoThinkingSessionState();
+	}
+
+	private setAutoThinkingEnabled(session: AgentSession, enabled: boolean): void {
+		if (enabled) this.autoThinkingController.enable(session);
+		else this.autoThinkingController.disable(session);
+		appendAutoThinkingSessionState(session, enabled);
+	}
+
+	private restoreAutoThinkingSessionState(): void {
+		const session = this.runtime?.session;
+		if (!session) return;
+		const enabled = resolveAutoThinkingSessionState(session.sessionManager.getBranch());
+		if (enabled === true) this.autoThinkingController.enable(session);
+		else if (enabled === false) this.autoThinkingController.disable(session, { restoreBaseline: false });
 	}
 
 	private async activateRuntime(runtime: AgentSessionRuntime): Promise<void> {
@@ -844,10 +882,32 @@ export class PiUiExtendApp {
 		if (this.runtime) this.setSessionStatus(this.runtime.session);
 	}
 
-	private prepareAutoThinkingForPrompt(message: SubmittedUserMessage): { restore(): void } | undefined {
+	private activeExtensionUiScope(): string | undefined {
 		const session = this.runtime?.session;
 		if (!session) return undefined;
-		return this.autoThinkingController.prepareForPrompt(session, message);
+		return session.sessionFile ?? session.sessionId;
+	}
+
+	private async prepareAutoThinkingForPrompt(message: SubmittedUserMessage): Promise<{ restore(): void } | undefined> {
+		const runtime = this.runtime;
+		const session = runtime?.session;
+		if (!session) return undefined;
+		const preparation = await this.autoThinkingController.prepareForPrompt(session, message);
+		if (preparation) {
+			const text = formatAutoThinkingDecision(preparation.decision);
+			appendPixSystemDisplayEntry(session, text);
+			this.addEntry({ id: createId("system"), kind: "system", text });
+		}
+		return preparation;
+	}
+
+	private recordAutoThinkingDecision(session: AgentSession, decision: AutoThinkingDecision): void {
+		const text = formatAutoThinkingDecision(decision);
+		appendPixSystemDisplayEntry(session, text);
+		if (this.runtime?.session !== session) return;
+		this.addEntry({ id: createId("system"), kind: "system", text });
+		this.setSessionStatus(session);
+		this.scheduleRender();
 	}
 
 	private setInput(value: string): void {
@@ -935,6 +995,24 @@ export class PiUiExtendApp {
 
 		this.showToast("Opened search result", "success");
 		this.setSessionStatus(this.runtime?.session);
+	}
+
+	private async scrollToUserMessageJumpTarget(target: UserMessageJumpMenuValue): Promise<boolean> {
+		if (target.entryId && this.scrollController.scrollToConversationEntry(target.entryId)) return true;
+		if (!target.sessionEntryId) return false;
+
+		let entry = this.findUserEntryBySessionEntryId(target.sessionEntryId);
+		while (!entry && this.sessionEvents.hasOlderSessionHistory() && !this.sessionEvents.isLoadingOlderSessionHistory()) {
+			const loaded = await this.sessionEvents.loadOlderSessionHistory({ render: false });
+			if (!loaded) break;
+			entry = this.findUserEntryBySessionEntryId(target.sessionEntryId);
+		}
+
+		return entry ? this.scrollController.scrollToConversationEntry(entry.id) : false;
+	}
+
+	private findUserEntryBySessionEntryId(sessionEntryId: string): Extract<Entry, { kind: "user" }> | undefined {
+		return this.entries.find((entry): entry is Extract<Entry, { kind: "user" }> => entry.kind === "user" && entry.sessionEntryId === sessionEntryId);
 	}
 
 	private async loadSessionHistoryAsync(options: { isCancelled: () => boolean; render: () => void; lazyOlderHistory?: boolean }): Promise<boolean> {

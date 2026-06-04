@@ -62,6 +62,17 @@ describe("renderConversationEntry", () => {
 		assert.deepEqual(lines, []);
 	});
 
+	it("renders auto thinking system entries as a compact renderer hint", () => {
+		const lines = renderConversationEntry({ id: "system-auto-thinking", kind: "system", text: "auto thinking: high · complex coding/debug prompt" }, 80, renderOptions);
+
+		assert.deepEqual(lines.map((line) => line.text), [`${APP_ICONS.autoFix} auto thinking: high · complex coding/debug prompt`]);
+		assert.equal(lines[0]?.variant, "muted");
+		assert.deepEqual(lines[0]?.segments, [
+			{ start: 0, end: APP_ICONS.autoFix.length, foreground: THEMES.dark.colors.info },
+			{ start: APP_ICONS.autoFix.length + 1 + "auto thinking: ".length, end: APP_ICONS.autoFix.length + 1 + "auto thinking: high".length, foreground: THEMES.dark.colors.warning, bold: true },
+		]);
+	});
+
 
 	it("formats assistant markdown tables before wrapping", () => {
 		const lines = renderConversationEntry({
@@ -481,6 +492,31 @@ describe("ConversationViewport super-compact tools", () => {
 		assert.match(lines[4] ?? "", /read/u);
 		assert.ok(lines.every((line) => line.trim().length > 0));
 	});
+
+	it("measures prepended expanded and super-compact tool rows", () => {
+		const entries: Entry[] = [
+			{ ...toolEntry("expanded-tool", "read"), output: "one\ntwo", expanded: true },
+			{ ...toolEntry("collapsed-tool", "shell"), output: "alpha\nbeta\ngamma", expanded: false },
+		];
+		const viewport = new ConversationViewport({
+			entries,
+			session: undefined,
+			deferredUserMessages: [],
+			entryRenderVersions: new Map(),
+			cwd: "/repo",
+			colors: THEMES.dark.colors,
+			pixConfig,
+			outputFilters: [],
+			superCompactTools: true,
+			isDynamicConversationBlock: () => false,
+			renderInlineUserMessageMenu: () => [],
+		});
+
+		const measured = viewport.measuredLineCountForEntries(80, entries.map((entry) => entry.id));
+
+		assert.equal(measured, 4);
+		assert.equal(measured, viewport.slice(80, 0, 10).length);
+	});
 });
 
 
@@ -565,7 +601,7 @@ describe("ConversationViewport cache behavior", () => {
 	});
 });
 
-function toolEntry(id: string, toolName: string): Entry {
+function toolEntry(id: string, toolName: string): Extract<Entry, { kind: "tool" }> {
 	return {
 		id,
 		kind: "tool",

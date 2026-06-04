@@ -99,7 +99,6 @@ export class AppRenderController {
 		const underTabsOverlayStartRow = Math.min(rows, topReservedRows + 1);
 		const underTabsOverlayLines = menuLines.slice(0, Math.max(0, statusRow - underTabsOverlayStartRow));
 		const { lines: visible, metrics: scrollMetrics } = this.deps.scrollController.conversationView(columns, bodyHeight);
-		const scrollBar = this.deps.scrollController.scrollBarForMetrics(scrollMetrics);
 		const conversationColumns = Math.max(1, Math.min(columns, scrollMetrics.viewportColumns));
 		this.deps.mouseController.syncConversationSelectionForRender(scrollMetrics.start, bodyHeight, topReservedRows, conversationColumns);
 
@@ -165,18 +164,6 @@ export class AppRenderController {
 			setRenderedBackground(row, rendered?.backgroundOverride);
 			appendFrameOutput("conversation", row, this.renderFrameRow(row, this.deps.screenStyler.styleBaseLine(row, rendered, conversationColumns)));
 		}
-		if (scrollBar && columns > 0) {
-			for (let layoutRow = 1; layoutRow <= bodyHeight; layoutRow += 1) {
-				const row = toScreenRow(layoutRow);
-				const isThumb = layoutRow >= scrollBar.thumbStartRow && layoutRow <= scrollBar.thumbEndRow;
-				const marker = isThumb ? " " : "│";
-				appendFrameOutput("conversation", row, `\x1b[${row};${columns}H${colorize(marker, {
-					foreground: this.deps.theme.colors.inputBorder,
-					...(isThumb ? { background: this.deps.theme.colors.inputBorder } : {}),
-				})}`);
-			}
-		}
-
 		const aboveEditorStartRow = inputSeparatorRow + 1;
 		for (let index = 0; index < aboveEditorLines.length; index += 1) {
 			const rendered = frameRenderedLine(aboveEditorLines[index], columns, this.deps.theme, this.deps.screenStyler);

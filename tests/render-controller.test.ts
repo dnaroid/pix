@@ -88,7 +88,6 @@ describe("AppRenderController", () => {
 			} as unknown as EditorLayoutRenderer,
 			scrollController: {
 				conversationView: () => ({ lines: [{ text: "BODY" }], metrics: { bodyHeight: 1, viewportColumns: 40, conversationLineCount: 1, maxScroll: 0, start: 0 } }),
-				scrollBarForMetrics: () => undefined,
 			} as unknown as AppScrollController,
 			popupMenus: {
 				syncActivePopupMenu: () => undefined,
@@ -169,7 +168,6 @@ describe("AppRenderController", () => {
 			} as unknown as EditorLayoutRenderer,
 			scrollController: {
 				conversationView: () => ({ lines: [{ text: bodyText }], metrics: { bodyHeight: 1, viewportColumns: 40, conversationLineCount: 1, maxScroll: 0, start: 0 } }),
-				scrollBarForMetrics: () => undefined,
 			} as unknown as AppScrollController,
 			popupMenus: fakePopupMenus(),
 			mouseController,
@@ -234,7 +232,6 @@ describe("AppRenderController", () => {
 			} as unknown as EditorLayoutRenderer,
 			scrollController: {
 				conversationView: () => ({ lines: [{ text: "BODY" }], metrics: { bodyHeight: 1, viewportColumns: 40, conversationLineCount: 1, maxScroll: 0, start: 0 } }),
-				scrollBarForMetrics: () => undefined,
 			} as unknown as AppScrollController,
 			popupMenus: fakePopupMenus(),
 			mouseController,
@@ -283,7 +280,6 @@ describe("AppRenderController", () => {
 			} as unknown as EditorLayoutRenderer,
 			scrollController: {
 				conversationView: () => ({ lines: [{ text: "BODY1" }, { text: "BODY2" }, { text: "BODY3" }], metrics: { bodyHeight: 3, viewportColumns: 40, conversationLineCount: 3, maxScroll: 0, start: 0 } }),
-				scrollBarForMetrics: () => undefined,
 			} as unknown as AppScrollController,
 			popupMenus: fakePopupMenus({
 				placement: "under-tabs",
@@ -348,7 +344,6 @@ describe("AppRenderController", () => {
 			} as unknown as EditorLayoutRenderer,
 			scrollController: {
 				conversationView: () => ({ lines: [{ text: "BODY" }], metrics: { bodyHeight: 1, viewportColumns: 40, conversationLineCount: 1, maxScroll: 0, start: 0 } }),
-				scrollBarForMetrics: () => undefined,
 			} as unknown as AppScrollController,
 			popupMenus: fakePopupMenus(),
 			mouseController,
@@ -375,7 +370,7 @@ describe("AppRenderController", () => {
 		assert.deepEqual(mouseController.tabLineTargets, [{ kind: "new-tab", startColumn: 40, endColumn: 41, row: 1 }]);
 	});
 
-	it("reserves the last column for the conversation scrollbar", () => {
+	it("renders conversation content through the last column", () => {
 		const bodyWidths: number[] = [];
 		const controller = new AppRenderController({
 			isRunning: () => true,
@@ -410,8 +405,7 @@ describe("AppRenderController", () => {
 				}),
 			} as unknown as EditorLayoutRenderer,
 			scrollController: {
-				conversationView: () => ({ lines: [{ text: "1234567890" }], metrics: { bodyHeight: 1, viewportColumns: 9, conversationLineCount: 2, maxScroll: 1, start: 0 } }),
-				scrollBarForMetrics: () => ({ thumbStartRow: 1, thumbEndRow: 1 }),
+				conversationView: () => ({ lines: [{ text: "1234567890" }], metrics: { bodyHeight: 1, viewportColumns: 10, conversationLineCount: 2, maxScroll: 1, start: 0 } }),
 			} as unknown as AppScrollController,
 			popupMenus: {
 				syncActivePopupMenu: () => undefined,
@@ -446,9 +440,8 @@ describe("AppRenderController", () => {
 
 		const output = captureStdout(() => controller.render());
 
-		assert.equal(bodyWidths[0], 9);
-		assert.match(output, /\x1b\[1;1H\x1b\[0m\x1b\[2K123456789\x1b\[1;10H/);
-		assert.doesNotMatch(output, /1234567890\x1b\[1;10H/);
+		assert.equal(bodyWidths[0], 10);
+		assert.match(output, /1234567890/);
 	});
 
 	it("keeps framed widget rows closed at the right edge", () => {
@@ -481,7 +474,6 @@ describe("AppRenderController", () => {
 			} as unknown as EditorLayoutRenderer,
 			scrollController: {
 				conversationView: () => ({ lines: [{ text: "BODY" }], metrics: { bodyHeight: 1, viewportColumns: 12, conversationLineCount: 1, maxScroll: 0, start: 0 } }),
-				scrollBarForMetrics: () => undefined,
 			} as unknown as AppScrollController,
 			popupMenus: fakePopupMenus(),
 			mouseController,
@@ -532,7 +524,6 @@ describe("AppRenderController", () => {
 			} as unknown as EditorLayoutRenderer,
 			scrollController: {
 				conversationView: () => ({ lines: [{ text: "BODY" }], metrics: { bodyHeight: 1, viewportColumns: 40, conversationLineCount: 1, maxScroll: 0, start: 0 } }),
-				scrollBarForMetrics: () => undefined,
 			} as unknown as AppScrollController,
 			popupMenus: fakePopupMenus({
 				placement: "default",
@@ -581,7 +572,6 @@ describe("AppRenderController", () => {
 			} as unknown as EditorLayoutRenderer,
 			scrollController: {
 				conversationView: () => ({ lines: [{ text: "BODY" }], metrics: { bodyHeight: 1, viewportColumns: 40, conversationLineCount: 1, maxScroll: 0, start: 0 } }),
-				scrollBarForMetrics: () => undefined,
 			} as unknown as AppScrollController,
 			popupMenus: fakePopupMenus(),
 			mouseController,

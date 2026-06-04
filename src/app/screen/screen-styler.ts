@@ -1,6 +1,7 @@
 import { ANSI_RESET, colorize, type Theme } from "../../theme.js";
 import { renderMarkdownLine } from "../../markdown-format.js";
 import { syntaxHighlightSegmentsForLine } from "../../syntax-highlight.js";
+import { displayIndexForColumn } from "../../terminal-width.js";
 import { padOrTrimPlain } from "../rendering/render-text.js";
 import { orderedSelection } from "./screen-selection.js";
 import type { MouseSelection, RenderedLine, StyledSegment } from "../types.js";
@@ -25,7 +26,7 @@ export class ScreenStyler {
 			? renderMarkdownDisplayLine(line.text, width, line.syntaxHighlight.start)
 			: undefined;
 		const text = markdownLine?.text ?? line?.text ?? "";
-		if (line?.syntaxHighlight && !this.selectionRangeForRow(row, width)) {
+		if (line?.syntaxHighlight && !this.selectionRangeForRow(row, width, text)) {
 			const syntaxHighlight = markdownLine ? { ...line.syntaxHighlight, start: Math.min(line.syntaxHighlight.start, markdownLine.text.length) } : line.syntaxHighlight;
 			const segments = [
 				...syntaxHighlightSegmentsForLine(text, syntaxHighlight, colors),
@@ -47,7 +48,7 @@ export class ScreenStyler {
 		baseOptions: { foreground?: string; background?: string; bold?: boolean; underline?: boolean },
 		segments: readonly StyledSegment[],
 	): string {
-		if (this.selectionRangeForRow(row, width)) return this.styleLine(row, text, width, baseOptions);
+		if (this.selectionRangeForRow(row, width, text)) return this.styleLine(row, text, width, baseOptions);
 
 		const plain = padOrTrimPlain(text, width);
 		const chunks: string[] = [];
@@ -73,7 +74,7 @@ export class ScreenStyler {
 		options: { foreground?: string; background?: string; bold?: boolean; underline?: boolean },
 	): string {
 		const plain = padOrTrimPlain(text, width);
-		const range = this.selectionRangeForRow(row, width);
+		const range = this.selectionRangeForRow(row, width, plain);
 		if (!range) return colorize(plain, options);
 
 		const before = plain.slice(0, range.startIndex);
@@ -102,7 +103,7 @@ export class ScreenStyler {
 	): string {
 		const colors = this.host.theme.colors;
 		const baseOptions = { foreground: colors.inputForeground };
-		if (this.selectionRangeForRow(row, width)) return this.styleLine(row, text, width, baseOptions);
+		if (this.selectionRangeForRow(row, width, text)) return this.styleLine(row, text, width, baseOptions);
 
 		const plain = padOrTrimPlain(text, width);
 		const frameSpans = inputFrameSpans(plain, width, frameColor);
@@ -135,7 +136,7 @@ export class ScreenStyler {
 		return `${prefix}${text.replaceAll(ANSI_RESET, `${ANSI_RESET}${prefix}`)}${ANSI_RESET}`;
 	}
 
-	selectionRangeForRow(row: number, width: number): { startIndex: number; endIndex: number } | undefined {
+	selectionRangeForRow(row: number, width: number, text?: string): { startIndex: number; endIndex: number } | undefined {
 		if (!this.host.mouseSelection) return undefined;
 
 		const anchor = this.host.mouseSelection.screenAnchor ?? this.host.mouseSelection.anchor;
@@ -145,8 +146,9 @@ export class ScreenStyler {
 
 		const startColumn = row === start.y ? start.x : 1;
 		const endColumn = row === end.y ? end.x : width + 1;
-		const startIndex = Math.max(0, Math.min(width, startColumn - 1));
-		const endIndex = Math.max(startIndex, Math.min(width, endColumn - 1));
+		const plain = text ?? " ".repeat(Math.max(0, width));
+		const startIndex = Math.max(0, Math.min(plain.length, displayIndexForColumn(plain, startColumn)));
+		const endIndex = Math.max(startIndex, Math.min(plain.length, displayIndexForColumn(plain, endColumn)));
 		return endIndex > startIndex ? { startIndex, endIndex } : undefined;
 	}
 

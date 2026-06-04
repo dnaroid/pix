@@ -80,6 +80,38 @@ describe("AppMenuItemsController queue menu", () => {
 		assert.equal(items[0]?.label, "Cancel send");
 		assert.equal(items[0]?.description, "Remove this message from the queue");
 	});
+
+	it("refreshes jump items from the full session branch", async () => {
+		const runtime = {
+			session: {
+				sessionFile: "/tmp/current.jsonl",
+				sessionManager: {
+					readFullBranchEntries: async () => [
+						{ type: "message", id: "old-session-entry", message: { role: "user", content: "Older prompt" } },
+						{ type: "message", id: "loaded-session-entry", message: { role: "user", content: "Loaded prompt" } },
+					],
+				},
+				extensionRunner: { getRegisteredCommands: () => [] },
+				promptTemplates: [],
+				resourceLoader: { getSkills: () => ({ skills: [] }) },
+			},
+			services: { settingsManager: { getEnableSkillCommands: () => false } },
+		} as unknown as AgentSessionRuntime;
+		const controller = new AppMenuItemsController({
+			...host(runtime),
+			getEntries: () => [{ id: "visible-user", kind: "user", text: "Loaded prompt", sessionEntryId: "loaded-session-entry" }],
+		});
+
+		await controller.refreshUserMessageJumpMenuItems();
+
+		const older = controller.getUserMessageJumpMenuItems("older")[0];
+		assert.equal(older?.value.sessionEntryId, "old-session-entry");
+		assert.equal(older?.value.entryId, undefined);
+
+		const loaded = controller.getUserMessageJumpMenuItems("loaded")[0];
+		assert.equal(loaded?.value.sessionEntryId, "loaded-session-entry");
+		assert.equal(loaded?.value.entryId, "visible-user");
+	});
 });
 
 function host(runtime: AgentSessionRuntime | undefined) {

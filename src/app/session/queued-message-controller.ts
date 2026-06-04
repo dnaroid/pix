@@ -22,7 +22,7 @@ export type AppQueuedMessageControllerHost = {
 	setInput(value: string): void;
 	insertInput(value: string): void;
 	attachImage(data: string, mimeType: string): void;
-	prepareAutoThinkingForPrompt?(message: SubmittedUserMessage): { restore(): void } | undefined;
+	prepareAutoThinkingForPrompt?(message: SubmittedUserMessage): Promise<{ restore(): void } | undefined>;
 	onDeferredUserMessagesChanged?(): void;
 };
 
@@ -84,7 +84,7 @@ export class AppQueuedMessageController {
 		if (markInFlight) this.promptSubmissionInFlight = true;
 		this.host.setSessionActivity("running");
 
-		const autoThinking = this.host.prepareAutoThinkingForPrompt?.(message);
+		const autoThinking = await this.host.prepareAutoThinkingForPrompt?.(message);
 		try {
 			const opts: { streamingBehavior?: "steer" | "followUp"; images?: ImageContent[] } = {};
 			if (session.isStreaming) opts.streamingBehavior = options.streamingBehavior ?? "steer";

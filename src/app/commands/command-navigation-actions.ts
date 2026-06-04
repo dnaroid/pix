@@ -109,6 +109,9 @@ export class NavigationCommandActions {
 		const runtime = getRuntime(this.host, "jump");
 		if (!runtime) return;
 
+		this.host.setStatus("scanning session messages…");
+		this.host.render();
+		await this.host.refreshUserMessageJumpMenuItems();
 		this.host.openDirectPopupMenu("user-message-jump", { preserveStatus: true });
 		this.host.setDirectPopupMenuQuery(argumentsText.trim());
 		this.host.render();

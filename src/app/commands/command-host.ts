@@ -41,6 +41,7 @@ export type CommandControllerHost = {
 	setDirectPopupMenuPreserveStatus(preserveStatus: boolean): void;
 	getDirectPopupMenuQuery(): string;
 	setDirectPopupMenuQuery(query: string): void;
+	refreshUserMessageJumpMenuItems(): Promise<void>;
 	getResumeLoading(): boolean;
 	getResumeSessions(): readonly SessionInfo[];
 	setResumeLoading(loading: boolean): void;

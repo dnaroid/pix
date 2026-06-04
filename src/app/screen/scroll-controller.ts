@@ -1,7 +1,7 @@
 import type { ConversationViewport } from "../rendering/conversation-viewport.js";
 import type { EditorLayoutRenderer } from "../rendering/editor-layout-renderer.js";
 import { sanitizeText } from "../rendering/render-text.js";
-import type { RenderedLine } from "../types.js";
+import type { Entry, RenderedLine } from "../types.js";
 
 export type AppScrollMetrics = {
 	bodyHeight: number;
@@ -9,11 +9,6 @@ export type AppScrollMetrics = {
 	conversationLineCount: number;
 	maxScroll: number;
 	start: number;
-};
-
-export type AppScrollBarMetrics = {
-	thumbStartRow: number;
-	thumbEndRow: number;
 };
 
 export type ConversationTextScrollTarget = {
@@ -29,7 +24,7 @@ export type AppScrollControllerHost = {
 	tabPanelRows(terminalRows: number): number;
 	hasOlderSessionHistory?(): boolean;
 	isLoadingOlderSessionHistory?(): boolean;
-	loadOlderSessionHistory?(options?: { render?: boolean }): Promise<boolean>;
+	loadOlderSessionHistory?(options?: { render?: boolean; onPrependedEntries?: (entries: readonly Entry[]) => void }): Promise<boolean>;
 	render(): void;
 };
 
@@ -74,22 +69,6 @@ export class AppScrollController {
 		return { bodyHeight, viewportColumns, conversationLineCount, maxScroll, start };
 	}
 
-	scrollBarForMetrics(metrics: AppScrollMetrics): AppScrollBarMetrics | undefined {
-		if (metrics.bodyHeight <= 0 || metrics.maxScroll <= 0 || metrics.conversationLineCount <= metrics.bodyHeight) return undefined;
-
-		const thumbSize = Math.max(1, Math.min(metrics.bodyHeight, Math.round((metrics.bodyHeight * metrics.bodyHeight) / metrics.conversationLineCount)));
-		const travel = Math.max(0, metrics.bodyHeight - thumbSize);
-		const thumbOffset = travel === 0 ? 0 : Math.round((metrics.start / metrics.maxScroll) * travel);
-		return {
-			thumbStartRow: thumbOffset + 1,
-			thumbEndRow: thumbOffset + thumbSize,
-		};
-	}
-
-	scrollBarMetrics(columns: number, bodyHeight: number): AppScrollBarMetrics | undefined {
-		return this.scrollBarForMetrics(this.scrollMetrics(columns, bodyHeight));
-	}
-
 	scrollByPage(direction: -1 | 1): void {
 		const rows = this.host.terminalRows();
 		this.scrollByLines(direction * Math.max(1, editorLayoutRows(rows, this.host.tabPanelRows(rows)) - 4));
@@ -102,46 +81,48 @@ export class AppScrollController {
 		const rows = editorLayoutRows(terminalRows, this.host.tabPanelRows(terminalRows));
 		const { bodyHeight } = this.host.editorLayoutRenderer().computeLayout(columns, rows);
 		const metrics = this.scrollMetrics(columns, bodyHeight);
-		this.maybeLoadOlderHistory(delta, metrics, { render: shouldRender });
+		const shouldLoadOlderHistory = this.shouldLoadOlderHistory(delta, metrics);
 		const { conversationLineCount, maxScroll } = metrics;
 		const nextScrollFromBottom = Math.max(0, Math.min(maxScroll, this.scrollFromBottom + -delta));
+		let changed = false;
 		if (nextScrollFromBottom === this.scrollFromBottom) {
 			if (nextScrollFromBottom === 0 && this.detachedScrollStart !== undefined && delta > 0) {
 				this.detachedScrollStart = undefined;
-				if (shouldRender) this.host.render();
-				return true;
+				changed = true;
+			} else if (!shouldLoadOlderHistory) {
+				return false;
 			}
-			return false;
+		} else {
+			this.scrollFromBottom = nextScrollFromBottom;
+			this.detachedScrollStart = nextScrollFromBottom === 0
+				? undefined
+				: Math.max(0, conversationLineCount - bodyHeight - nextScrollFromBottom);
+			changed = true;
 		}
 
-		this.scrollFromBottom = nextScrollFromBottom;
-		this.detachedScrollStart = nextScrollFromBottom === 0
-			? undefined
-			: Math.max(0, conversationLineCount - bodyHeight - nextScrollFromBottom);
+		if (shouldLoadOlderHistory) this.loadOlderHistoryAnchored(metrics, { render: shouldRender });
 		if (shouldRender) this.host.render();
+		return changed || shouldLoadOlderHistory;
+	}
+
+	private shouldLoadOlderHistory(delta: number, metrics: AppScrollMetrics): boolean {
+		if (delta >= 0) return false;
+		if (metrics.start > this.olderHistoryThresholdLines) return false;
+		if (this.host.hasOlderSessionHistory?.() !== true) return false;
+		if (this.host.isLoadingOlderSessionHistory?.() === true) return false;
 		return true;
 	}
 
-	private maybeLoadOlderHistory(delta: number, metrics: AppScrollMetrics, options: { render: boolean }): void {
-		if (delta >= 0) return;
-		if (metrics.start > this.olderHistoryThresholdLines) return;
-		if (this.host.hasOlderSessionHistory?.() !== true) return;
-		if (this.host.isLoadingOlderSessionHistory?.() === true) return;
-		void this.host.loadOlderSessionHistory?.({ render: options.render });
-	}
-
-	scrollToScrollbarPosition(bodyRow: number): boolean {
-		const columns = this.host.terminalColumns();
-		const terminalRows = this.host.terminalRows();
-		const rows = editorLayoutRows(terminalRows, this.host.tabPanelRows(terminalRows));
-		const { bodyHeight } = this.host.editorLayoutRenderer().computeLayout(columns, rows);
-		const metrics = this.scrollMetrics(columns, bodyHeight);
-		if (!this.scrollBarForMetrics(metrics)) return false;
-
-		const clampedRow = Math.max(0, Math.min(Math.max(0, bodyHeight - 1), bodyRow));
-		const ratio = bodyHeight <= 1 ? 0 : clampedRow / (bodyHeight - 1);
-		const start = Math.round(metrics.maxScroll * ratio);
-		return this.scrollToStart(start, metrics);
+	private loadOlderHistoryAnchored(metrics: AppScrollMetrics, options: { render: boolean }): void {
+		void this.host.loadOlderSessionHistory?.({
+			render: false,
+			onPrependedEntries: (entries) => {
+				const prependedLineCount = this.host.conversationViewport().measuredLineCountForEntries(metrics.viewportColumns, entries.map((entry) => entry.id));
+				if (prependedLineCount > 0 && this.detachedScrollStart !== undefined) this.detachedScrollStart += prependedLineCount;
+			},
+		}).then((loaded) => {
+			if (loaded && options.render) this.host.render();
+		});
 	}
 
 	scrollToConversationEntry(entryId: string): boolean {
@@ -199,12 +180,6 @@ export class AppScrollController {
 		return false;
 	}
 
-	private scrollToStart(start: number, metrics: AppScrollMetrics): boolean {
-		if (!this.setScrollStart(start, metrics)) return false;
-		this.host.render();
-		return true;
-	}
-
 	private setScrollStart(start: number, metrics: AppScrollMetrics): boolean {
 		const nextStart = Math.max(0, Math.min(metrics.maxScroll, start));
 		const nextScrollFromBottom = Math.max(0, metrics.conversationLineCount - metrics.bodyHeight - nextStart);
@@ -215,12 +190,9 @@ export class AppScrollController {
 		return changed;
 	}
 
-	private viewportColumns(columns: number, bodyHeight: number): number {
+	private viewportColumns(columns: number, _bodyHeight: number): number {
 		const safeColumns = Math.max(1, columns);
-		if (safeColumns <= 1 || bodyHeight <= 0) return safeColumns;
-
-		const lineCountWithoutScrollbar = this.host.conversationViewport().lineCount(safeColumns);
-		return lineCountWithoutScrollbar > bodyHeight ? safeColumns - 1 : safeColumns;
+		return safeColumns;
 	}
 }
 

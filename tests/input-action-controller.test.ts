@@ -508,6 +508,55 @@ describe("AppInputActionController", () => {
 		assert.equal(cancelCalls, 1);
 	});
 
+	it("closes the active popup before aborting running session work on Escape", async () => {
+		let cancelCalls = 0;
+		let abortCalls = 0;
+		let sessionAbortCalls = 0;
+		const session = {
+			isStreaming: true,
+			isCompacting: false,
+			agent: { abort: () => { abortCalls += 1; } },
+			abort: async () => { sessionAbortCalls += 1; },
+		};
+		const controller = new AppInputActionController(
+			{
+				runtime: () => ({ session } as any),
+				isRunning: () => true,
+				isSessionSwitching: () => false,
+				inputEditor: () => new InputEditor(),
+				requestHistory: () => ({ add: () => {} }) as unknown as AppRequestHistory,
+				clearPersistedInputDraft: async () => {},
+				setStatus: () => {},
+				setSessionStatus: () => {},
+				setSessionActivity: () => {},
+				addEntry: () => {},
+				addSessionAbortedEntry: () => {},
+				showToast: () => {},
+				stopVoiceInput: async () => {},
+				isShellCommandRunning: () => false,
+				runChatShellCommand: async () => ({ exitCode: 0, signal: null }),
+				sendShellInput: () => false,
+				interruptShellCommand: () => false,
+				runInteractiveShellCommand: async () => ({ exitCode: 0, signal: null }),
+				stop: async () => {},
+				render: () => {},
+			},
+			{ syncActivePopupMenu: () => "slash", cancelActivePopupMenu: () => { cancelCalls += 1; } } as unknown as AppPopupMenuController,
+			{} as AppPopupActionController,
+			{
+				createSubmittedUserMessage: () => ({ id: "queued", promptText: "", displayText: "", images: [] }),
+				submitUserMessage: async () => {},
+				restoreQueuedMessagesToEditorForAbort: () => {},
+			} as unknown as AppQueuedMessageController,
+		);
+
+		await controller.handleEscape();
+
+		assert.equal(cancelCalls, 1);
+		assert.equal(abortCalls, 0);
+		assert.equal(sessionAbortCalls, 0);
+	});
+
 	it("delegates Enter to the active popup menu", async () => {
 		let submitCalls = 0;
 		let submitInputCalls = 0;

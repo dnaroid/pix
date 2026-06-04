@@ -114,6 +114,47 @@ describe("ExtensionUiController custom UI", () => {
 		assert.ok(renders.count >= 2);
 	});
 
+	it("renders focused custom UI only for the tab scope that created it", async () => {
+		const { controller, activeScope } = createController();
+		activeScope.value = "tab-b";
+		const ctxA = controller.createExtensionUIContext("tab-a");
+
+		const resultPromise = ctxA.custom<string>(((_tui, _theme, _keybindings, done) => ({
+			handleInput(data: string) {
+				if (data === "1") done("one");
+			},
+			render: () => ["question panel"],
+		}) as never));
+
+		await Promise.resolve();
+		assert.equal(controller.renderActiveCustomUi(80), undefined);
+		assert.deepEqual(controller.handleTerminalInput("1"), { consume: false });
+
+		controller.clearWidgets("tab-a", { cancelCustomUi: false });
+		activeScope.value = "tab-a";
+		assert.deepEqual(controller.renderActiveCustomUi(80), ["question panel"]);
+		assert.equal(controller.handleTerminalInput("1").consume, true);
+		assert.equal(await resultPromise, "one");
+	});
+
+	it("shows extension widgets only in their tab scope", () => {
+		const { controller, activeScope } = createController();
+		const ctxA = controller.createExtensionUIContext("tab-a");
+		const ctxB = controller.createExtensionUIContext("tab-b");
+
+		ctxA.setWidget("question", ["tab a question"]);
+		ctxB.setWidget("question", ["tab b question"], { placement: "belowEditor" });
+
+		activeScope.value = "tab-a";
+		assert.equal(controller.widgets.get("question")?.placement, "aboveEditor");
+		activeScope.value = "tab-b";
+		assert.equal(controller.widgets.get("question")?.placement, "belowEditor");
+		controller.clearWidgets("tab-b");
+		assert.equal(controller.widgets.size, 0);
+		activeScope.value = "tab-a";
+		assert.equal(controller.widgets.has("question"), true);
+	});
+
 	it("handles custom UI render, input, mouse, and cleanup failures defensively", async () => {
 		const { controller, input } = createController("saved");
 		const ctx = controller.createExtensionUIContext();
@@ -314,12 +355,14 @@ function createController(initialInput = ""): {
 	menu: PixMenuController & { nextShow?: unknown; nextSelect?: string; showCalls: Array<{ items: unknown[]; options: { title?: string } }>; selectCalls: Array<{ title: string; options: string[] }> };
 	entries: Entry[];
 	deleted: string[];
+	activeScope: { value: string | undefined };
 } {
 	const entries: Entry[] = [];
 	const deleted: string[] = [];
 	const renders = { count: 0 };
 	const input = { value: initialInput };
 	const statuses = { set: [] as string[], restored: 0 };
+	const activeScope = { value: undefined as string | undefined };
 	const toasts: { message: string; kind: string | undefined }[] = [];
 	const menuController = {
 		showCalls: [] as Array<{ items: unknown[]; options: { title?: string } }>,
@@ -350,8 +393,10 @@ function createController(initialInput = ""): {
 		menu: menuController,
 		entries,
 		deleted,
+		activeScope,
 		controller: new ExtensionUiController({
 			theme: THEMES.dark,
+			activeExtensionUiScope: () => activeScope.value,
 			isRunning: () => true,
 			render: () => {
 				renders.count += 1;

@@ -102,6 +102,8 @@ export class AppInputActionController {
 	}
 
 	async handleEscape(): Promise<void> {
+		if (this.closeActiveGlobalUi()) return;
+
 		const session = this.host.runtime()?.session;
 		if (session?.isCompacting) {
 			this.host.setStatus("aborting compaction");
@@ -116,7 +118,12 @@ export class AppInputActionController {
 			return;
 		}
 
-		if (this.popupMenus.syncActivePopupMenu()) this.popupMenus.cancelActivePopupMenu();
+	}
+
+	private closeActiveGlobalUi(): boolean {
+		if (!this.popupMenus.syncActivePopupMenu()) return false;
+		this.popupMenus.cancelActivePopupMenu();
+		return true;
 	}
 
 	private async abortStreamingSession(

@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, createReadStream, existsSync, mkdirSync, openSync, readSync, statSync, writeFileSync } from "node:fs";
+import { open as openFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { createInterface } from "node:readline";
 
 import {
 	buildSessionContext,
@@ -24,6 +26,11 @@ export type LazySessionManagerOptions = {
 	tailEntryCount?: number;
 };
 
+export type LazySessionHistoryReader = {
+	hasOlder(): boolean;
+	readOlder(limit: number): Promise<SessionEntry[]>;
+};
+
 export function openLazySessionManager(sessionPath: string, options: LazySessionManagerOptions = {}): SessionManager {
 	return new LazySessionManager(sessionPath, options) as unknown as SessionManager;
 }
@@ -40,6 +47,7 @@ class LazySessionManager {
 	private leafId: string | null = null;
 	private hydrated: SessionManager | undefined;
 	private readonly tailEntryCount: number;
+	private tailStartOffset = 0;
 
 	constructor(sessionPath: string, options: LazySessionManagerOptions = {}) {
 		this.sessionFilePath = resolve(sessionPath);
@@ -124,8 +132,33 @@ class LazySessionManager {
 
 	getBranch(fromId?: string): SessionEntry[] {
 		if (this.hydrated) return this.hydrated.getBranch(fromId);
+		if (fromId === undefined) return [...this.entries];
 		if (fromId !== undefined && !this.byId.has(fromId)) return this.hydrate().getBranch(fromId);
 		return [...this.entries];
+	}
+
+	createHistoryReader(): LazySessionHistoryReader | undefined {
+		if (this.hydrated || this.tailStartOffset <= 0) return undefined;
+
+		let cursorOffset = this.tailStartOffset;
+		const firstEntryOffset = readFirstSessionEntryOffset(this.sessionFilePath);
+		return {
+			hasOlder: () => cursorOffset > firstEntryOffset,
+			readOlder: async (limit: number) => {
+				if (cursorOffset <= firstEntryOffset) return [];
+				const result = await readSessionEntriesBeforeOffset(this.sessionFilePath, cursorOffset, Math.max(1, Math.floor(limit)));
+				cursorOffset = result.startOffset;
+				if (result.entries.length === 0) cursorOffset = firstEntryOffset;
+				return result.entries;
+			},
+		};
+	}
+
+	async readFullBranchEntries(): Promise<SessionEntry[]> {
+		if (this.hydrated) return this.hydrated.getBranch();
+
+		const entries = await readAllSessionEntries(this.sessionFilePath);
+		return branchEntries(entries, this.leafId ?? entries.at(-1)?.id);
 	}
 
 	buildSessionContext(): SessionContext {
@@ -273,7 +306,9 @@ class LazySessionManager {
 	}
 
 	private loadTailEntries(): void {
-		this.entries = readTailSessionEntries(this.sessionFilePath, this.tailEntryCount);
+		const result = readTailSessionEntries(this.sessionFilePath, this.tailEntryCount);
+		this.entries = result.entries;
+		this.tailStartOffset = result.startOffset;
 		this.rebuildIndexes();
 	}
 
@@ -377,23 +412,43 @@ function readFirstLine(filePath: string, maxBytes: number): string | undefined {
 	}
 }
 
-function readTailSessionEntries(filePath: string, limit: number): SessionEntry[] {
-	if (!existsSync(filePath)) return [];
+function readFirstSessionEntryOffset(filePath: string): number {
+	let fd: number | undefined;
+	try {
+		fd = openSync(filePath, "r");
+		const buffer = Buffer.alloc(64 * 1024);
+		const bytesRead = readSync(fd, buffer, 0, buffer.length, 0);
+		const entries = parseSessionEntryBufferLines(buffer.subarray(0, bytesRead), 0);
+		return entries[0]?.offset ?? 0;
+	} catch {
+		return 0;
+	} finally {
+		if (fd !== undefined) closeSync(fd);
+	}
+}
+
+type SessionEntriesReadResult = {
+	entries: SessionEntry[];
+	startOffset: number;
+};
+
+function readTailSessionEntries(filePath: string, limit: number): SessionEntriesReadResult {
+	if (!existsSync(filePath)) return { entries: [], startOffset: 0 };
 	const size = statSync(filePath).size;
-	if (size <= 0) return [];
+	if (size <= 0) return { entries: [], startOffset: 0 };
 
 	let byteCount = Math.min(size, INITIAL_TAIL_BYTES);
 	const maxBytes = Math.min(size, MAX_TAIL_BYTES);
 	while (byteCount <= maxBytes) {
-		const entries = readTailSessionEntriesWithByteCount(filePath, byteCount, limit);
-		if (entries.length >= limit || byteCount >= maxBytes || byteCount >= size) return entries.slice(-limit);
+		const result = readTailSessionEntriesWithByteCount(filePath, byteCount, limit);
+		if (result.entries.length >= limit || byteCount >= maxBytes || byteCount >= size) return result;
 		byteCount = Math.min(size, Math.max(byteCount + 1, byteCount * 2));
 	}
 
-	return [];
+	return { entries: [], startOffset: 0 };
 }
 
-function readTailSessionEntriesWithByteCount(filePath: string, byteCount: number, limit: number): SessionEntry[] {
+function readTailSessionEntriesWithByteCount(filePath: string, byteCount: number, limit: number): SessionEntriesReadResult {
 	let fd: number | undefined;
 	try {
 		const size = statSync(filePath).size;
@@ -402,23 +457,75 @@ function readTailSessionEntriesWithByteCount(filePath: string, byteCount: number
 		fd = openSync(filePath, "r");
 		readSync(fd, buffer, 0, buffer.length, start);
 
-		let text = buffer.toString("utf8");
+		let parseStart = 0;
 		if (start > 0) {
-			const firstNewline = text.indexOf("\n");
-			text = firstNewline >= 0 ? text.slice(firstNewline + 1) : "";
+			const firstNewline = buffer.indexOf(10);
+			parseStart = firstNewline >= 0 ? firstNewline + 1 : buffer.length;
 		}
 
-		const entries: SessionEntry[] = [];
-		for (const line of text.split("\n")) {
-			const entry = parseSessionEntryLine(line);
-			if (entry) entries.push(entry);
-		}
-		return entries.slice(-limit);
+		return selectLastSessionEntries(parseSessionEntryBufferLines(buffer.subarray(parseStart), start + parseStart), limit, size);
 	} catch {
-		return [];
+		return { entries: [], startOffset: 0 };
 	} finally {
 		if (fd !== undefined) closeSync(fd);
 	}
+}
+
+async function readSessionEntriesBeforeOffset(filePath: string, endOffset: number, limit: number): Promise<SessionEntriesReadResult> {
+	if (!existsSync(filePath) || endOffset <= 0) return { entries: [], startOffset: 0 };
+
+	let byteCount = Math.min(endOffset, INITIAL_TAIL_BYTES);
+	const maxBytes = Math.min(endOffset, MAX_TAIL_BYTES);
+	while (byteCount <= maxBytes) {
+		const result = await readSessionEntriesBeforeOffsetWithByteCount(filePath, endOffset, byteCount, limit);
+		if (result.entries.length >= limit || byteCount >= maxBytes || byteCount >= endOffset) return result;
+		byteCount = Math.min(endOffset, Math.max(byteCount + 1, byteCount * 2));
+	}
+
+	return { entries: [], startOffset: 0 };
+}
+
+async function readSessionEntriesBeforeOffsetWithByteCount(filePath: string, endOffset: number, byteCount: number, limit: number): Promise<SessionEntriesReadResult> {
+	let file: Awaited<ReturnType<typeof openFile>> | undefined;
+	try {
+		const start = Math.max(0, endOffset - byteCount);
+		const buffer = Buffer.alloc(endOffset - start);
+		file = await openFile(filePath, "r");
+		await file.read(buffer, 0, buffer.length, start);
+
+		let parseStart = 0;
+		if (start > 0) {
+			const firstNewline = buffer.indexOf(10);
+			parseStart = firstNewline >= 0 ? firstNewline + 1 : buffer.length;
+		}
+
+		return selectLastSessionEntries(parseSessionEntryBufferLines(buffer.subarray(parseStart), start + parseStart), limit, start);
+	} catch {
+		return { entries: [], startOffset: 0 };
+	} finally {
+		await file?.close();
+	}
+}
+
+function selectLastSessionEntries(parsedEntries: Array<{ entry: SessionEntry; offset: number }>, limit: number, emptyStartOffset: number): SessionEntriesReadResult {
+	const selected = parsedEntries.slice(-limit);
+	return {
+		entries: selected.map((item) => item.entry),
+		startOffset: selected[0]?.offset ?? emptyStartOffset,
+	};
+}
+
+function parseSessionEntryBufferLines(buffer: Buffer, baseOffset: number): Array<{ entry: SessionEntry; offset: number }> {
+	const entries: Array<{ entry: SessionEntry; offset: number }> = [];
+	let lineStart = 0;
+	for (let index = 0; index <= buffer.length; index += 1) {
+		if (index < buffer.length && buffer[index] !== 10) continue;
+		const lineEnd = index > lineStart && buffer[index - 1] === 13 ? index - 1 : index;
+		const entry = parseSessionEntryLine(buffer.toString("utf8", lineStart, lineEnd));
+		if (entry) entries.push({ entry, offset: baseOffset + lineStart });
+		lineStart = index + 1;
+	}
+	return entries;
 }
 
 function parseSessionEntryLine(line: string): SessionEntry | undefined {
@@ -433,6 +540,35 @@ function parseSessionEntryLine(line: string): SessionEntry | undefined {
 	}
 }
 
+async function readAllSessionEntries(filePath: string): Promise<SessionEntry[]> {
+	if (!existsSync(filePath)) return [];
+
+	const entries: SessionEntry[] = [];
+	const lines = createInterface({ input: createReadStream(filePath, { encoding: "utf8" }), crlfDelay: Infinity });
+	for await (const line of lines) {
+		const entry = parseSessionEntryLine(line);
+		if (entry) entries.push(entry);
+	}
+	return entries;
+}
+
+function branchEntries(entries: readonly SessionEntry[], leafId: string | undefined): SessionEntry[] {
+	if (!leafId) return [...entries];
+
+	const byId = new Map(entries.map((entry) => [entry.id, entry]));
+	const branch: SessionEntry[] = [];
+	const seen = new Set<string>();
+	let cursor: string | null | undefined = leafId;
+	while (cursor && !seen.has(cursor)) {
+		seen.add(cursor);
+		const entry = byId.get(cursor);
+		if (!entry) break;
+		branch.push(entry);
+		cursor = entry.parentId;
+	}
+	return branch.reverse();
+}
+
 function contextStartIndex(entries: readonly SessionEntry[]): number {
 	const userIndex = entries.findIndex((entry) => entry.type === "message" && entry.message.role === "user");
 	if (userIndex < 0) return 0;
@@ -440,7 +576,7 @@ function contextStartIndex(entries: readonly SessionEntry[]): number {
 	let start = userIndex;
 	while (start > 0) {
 		const previous = entries[start - 1];
-		if (!previous || (previous.type !== "model_change" && previous.type !== "thinking_level_change" && previous.type !== "compaction" && previous.type !== "branch_summary")) break;
+		if (!previous || (previous.type !== "model_change" && previous.type !== "thinking_level_change" && previous.type !== "compaction" && previous.type !== "branch_summary" && previous.type !== "custom")) break;
 		start -= 1;
 	}
 	return start;

@@ -537,7 +537,7 @@ export type ThinkingMenuValue = {
 };
 
 export type UserMessageMenuValue = "copy" | "fork" | "undo";
-export type UserMessageJumpMenuValue = { entryId: string };
+export type UserMessageJumpMenuValue = { entryId?: string; sessionEntryId?: string };
 export type QueueMessageMenuValue = "cancel" | "edit" | "send-now";
 export type ResumeMenuValue = { kind: "new" } | { kind: "session"; session: SessionInfo };
 

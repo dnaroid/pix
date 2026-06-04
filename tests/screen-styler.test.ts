@@ -88,6 +88,27 @@ describe("ScreenStyler", () => {
 		})));
 	});
 
+	it("highlights the final cell after non-BMP icons", () => {
+		const theme = THEMES.dark;
+		const text = `${APP_ICONS.checkCircle} 12345678`;
+		const styler = new ScreenStyler({
+			theme,
+			mouseSelection: {
+				anchor: { x: 1, y: 4 },
+				current: { x: 11, y: 4 },
+				moved: true,
+			},
+		});
+
+		const output = styler.styleLine(4, text, 10, { foreground: theme.colors.foreground });
+
+		assert.ok(output.includes(colorize(text, {
+			foreground: theme.colors.selectionForeground,
+			background: theme.colors.selectionBackground,
+			bold: true,
+		})));
+	});
+
 	it("leaves unselected input lines on the terminal default background", () => {
 		const theme = THEMES.dark;
 		const styler = new ScreenStyler({ theme, mouseSelection: undefined });

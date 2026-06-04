@@ -11,7 +11,7 @@ import { horizontalPaddingLayout } from "../rendering/render-text.js";
 import type { AppScrollController } from "./scroll-controller.js";
 import { orderedSelection, samePoint } from "./screen-selection.js";
 import { openImageContent as openSystemImageContent } from "./image-opener.js";
-import { stringDisplayWidth } from "../../terminal-width.js";
+import { sliceByDisplayColumns, stringDisplayWidth } from "../../terminal-width.js";
 import type {
 	ConversationSelectionPoint,
 	Entry,
@@ -91,6 +91,7 @@ export type AppMouseControllerHost = {
 	showToast(message: string, kind: "success" | "error" | "warning" | "info", options?: { durationMs?: number; variant?: ToastVariant }): void;
 	dismissToast(toastId: number): void;
 	refreshModelUsageStatus(): void | Promise<void>;
+	refreshUserMessageJumpMenuItems?(): Promise<void>;
 	queueInputFromStatus?(): void | Promise<void>;
 	toggleAllThinkingExpanded?(): void;
 	toggleSuperCompactTools?(): void;
@@ -121,7 +122,6 @@ export class AppMouseController {
 	statusVoiceLanguageTarget: StatusVoiceLanguageTarget | undefined;
 	readonly tabLineTargets: TabLineMouseTarget[] = [];
 	mouseSelection: MouseSelection | undefined;
-	private scrollBarDragActive = false;
 	private inputScrollBarDragActive = false;
 	private autoScrollTimer: ReturnType<typeof setInterval> | undefined;
 	private autoScrollDirection: -1 | 1 | undefined;
@@ -149,7 +149,6 @@ export class AppMouseController {
 
 	handleMouse(event: MouseEvent): void {
 		if (this.handleInputScrollBar(event)) return;
-		if (this.handleConversationScrollBar(event)) return;
 		this.showClickFlashOnPress(event);
 		if (this.handleMouseSelection(event)) return;
 		if (this.withClickFlash(event, () => this.handleImageClick(event))) return;
@@ -431,41 +430,6 @@ export class AppMouseController {
 		return true;
 	}
 
-	private handleConversationScrollBar(event: MouseEvent): boolean {
-		if (!this.scrollBarDragActive && this.tabLineTargetAt(event)) return false;
-
-		const columns = this.host.terminalColumns();
-		const terminalRows = this.host.terminalRows();
-		const tabPanelRows = this.host.tabPanelRows(terminalRows);
-		const rows = editorLayoutRows(terminalRows, tabPanelRows);
-		const topOffset = editorLayoutTopOffset(tabPanelRows);
-		if (columns <= 0 || rows <= 0) return false;
-
-		const { bodyHeight } = this.host.editorLayoutRenderer().computeLayout(columns, rows);
-		const localY = event.y - topOffset;
-		const insideBody = localY >= 1 && localY <= bodyHeight;
-		const onScrollBar = insideBody && event.x === columns && !!this.scrollController.scrollBarMetrics(columns, bodyHeight);
-		const baseButton = event.button & 3;
-		const draggingLeftButton = (event.button & 32) !== 0 && baseButton === 0;
-
-		if (event.released) {
-			if (!this.scrollBarDragActive) return false;
-			this.scrollBarDragActive = false;
-			return true;
-		}
-
-		if (event.button === 0 && onScrollBar) {
-			this.scrollBarDragActive = true;
-			this.scrollController.scrollToScrollbarPosition(localY - 1);
-			return true;
-		}
-
-		if (!draggingLeftButton || !this.scrollBarDragActive) return false;
-		const bodyRow = Math.max(0, Math.min(Math.max(0, bodyHeight - 1), localY - 1));
-		this.scrollController.scrollToScrollbarPosition(bodyRow);
-		return true;
-	}
-
 	private handleInputScrollBar(event: MouseEvent): boolean {
 		if (!this.inputScrollBarDragActive && this.tabLineTargetAt(event)) return false;
 
@@ -610,9 +574,23 @@ export class AppMouseController {
 		if (!target) return false;
 		if (event.y !== target.row || event.x < target.startColumn || event.x >= target.endColumn) return false;
 
-		this.popupMenus.openDirectPopupMenu("user-message-jump", { preserveStatus: true });
-		this.host.render();
+		void this.openStatusUserJumpMenu();
 		return true;
+	}
+
+	private async openStatusUserJumpMenu(): Promise<void> {
+		try {
+			if (this.host.refreshUserMessageJumpMenuItems) {
+				this.host.setStatus("scanning session messages…");
+				this.host.render();
+				await this.host.refreshUserMessageJumpMenuItems();
+			}
+			this.popupMenus.openDirectPopupMenu("user-message-jump", { preserveStatus: true });
+			this.host.render();
+		} catch (error) {
+			this.host.showToast(`Could not load jump messages: ${error instanceof Error ? error.message : stringifyUnknown(error)}`, "error");
+			this.host.render();
+		}
 	}
 
 	private handleStatusDraftQueueClick(event: MouseEvent): boolean {
@@ -950,9 +928,7 @@ export class AppMouseController {
 			const line = range.start.line + index;
 			const startColumn = line === range.start.line ? range.start.x : 1;
 			const endColumn = line === range.end.line ? range.end.x : text.length + 1;
-			const startIndex = Math.max(0, Math.min(text.length, startColumn - 1));
-			const endIndex = Math.max(startIndex, Math.min(text.length, endColumn - 1));
-			lines.push(text.slice(startIndex, endIndex).trimEnd());
+			lines.push(sliceByDisplayColumns(text, startColumn, endColumn).trimEnd());
 		}
 
 		return lines.join("\n").replace(/\s+$/u, "");
@@ -961,10 +937,10 @@ export class AppMouseController {
 	private conversationPointFromMouse(event: MouseEvent, clampToViewport: boolean): { conversation: ConversationSelectionPoint; screen: ScreenPoint } | undefined {
 		const area = this.conversationArea();
 		if (!area || area.bodyHeight <= 0) return undefined;
-		if (!clampToViewport && (event.y < area.topRow || event.y > area.bottomRow || event.x === this.host.terminalColumns())) return undefined;
+		if (!clampToViewport && (event.y < area.topRow || event.y > area.bottomRow)) return undefined;
 
 		const screenY = Math.max(area.topRow, Math.min(area.bottomRow, event.y));
-		const screenX = Math.max(1, Math.min(area.viewportColumns + 1, event.x));
+		const screenX = viewportSelectionColumn(event.x, area.viewportColumns);
 		return {
 			conversation: {
 				line: area.metrics.start + (screenY - area.topRow),
@@ -1080,7 +1056,7 @@ export class AppMouseController {
 		if (!area) return;
 
 		const screenY = this.autoScrollDirection < 0 ? area.topRow : area.bottomRow;
-		const screenX = Math.max(1, Math.min(area.viewportColumns + 1, this.autoScrollCursorX));
+		const screenX = viewportSelectionColumn(this.autoScrollCursorX, area.viewportColumns);
 		selection.current = { x: screenX, y: screenY };
 		selection.conversationCurrent = {
 			line: area.metrics.start + (screenY - area.topRow),
@@ -1114,13 +1090,16 @@ export function screenSelectionLineText(
 		copyEndColumn = Math.min(copyEndColumn, inputFrame.contentEndColumn);
 	}
 
-	const startIndex = Math.max(0, Math.min(text.length, copyStartColumn - 1));
-	const endIndex = Math.max(startIndex, Math.min(text.length, copyEndColumn - 1));
-	return text.slice(startIndex, endIndex);
+	return sliceByDisplayColumns(text, copyStartColumn, copyEndColumn);
 }
 
 function sameConversationPoint(left: ConversationSelectionPoint | undefined, right: ConversationSelectionPoint): boolean {
 	return !!left && left.line === right.line && left.x === right.x;
+}
+
+function viewportSelectionColumn(mouseX: number, viewportColumns: number): number {
+	if (mouseX >= viewportColumns) return viewportColumns + 1;
+	return Math.max(1, Math.min(viewportColumns + 1, mouseX));
 }
 
 function toastTargetContainsEvent(target: Extract<NonNullable<RenderedLine["target"]>, { kind: "toast" }>, event: MouseEvent): boolean {

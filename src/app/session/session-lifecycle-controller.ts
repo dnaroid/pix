@@ -28,8 +28,8 @@ export type AppSessionLifecycleHost = {
 	loadRequestHistory(): Promise<void>;
 	startSubagentsPolling(): void;
 	closeSdkMenuForBind(): void;
-	clearExtensionWidgets(): void;
-	createExtensionUIContext(): PixExtensionUIContext;
+	clearExtensionWidgets(scopeKey?: string, options?: { cancelCustomUi?: boolean }): void;
+	createExtensionUIContext(scopeKey?: string): PixExtensionUIContext;
 	extensionShutdownHandler(): () => void;
 	createExtensionCommandContextActions(runtime: AgentSessionRuntime): ExtensionCommandContextActions;
 	handleExtensionError(error: ExtensionError): void;
@@ -126,9 +126,10 @@ export class AppSessionLifecycleController {
 			this.host.handleSessionEvent(event);
 		});
 		this.host.closeSdkMenuForBind();
-		this.host.clearExtensionWidgets();
+		const extensionUiScope = this.extensionUiScope(runtime.session);
+		this.host.clearExtensionWidgets(extensionUiScope, { cancelCustomUi: false });
 		await runtime.session.bindExtensions({
-			uiContext: this.host.createExtensionUIContext(),
+			uiContext: this.host.createExtensionUIContext(extensionUiScope),
 			commandContextActions: this.host.createExtensionCommandContextActions(runtime),
 			shutdownHandler: this.host.extensionShutdownHandler(),
 			onError: (error) => this.host.handleExtensionError(error),
@@ -180,5 +181,9 @@ export class AppSessionLifecycleController {
 		const runtime = this.host.runtime();
 		if (!runtime) throw new Error("Runtime is not initialized");
 		return runtime;
+	}
+
+	private extensionUiScope(session: AgentSession): string {
+		return session.sessionFile ?? session.sessionId;
 	}
 }

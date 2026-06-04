@@ -11,6 +11,7 @@ import {
 	getAgentDir,
 	SessionManager,
 	type EventBus,
+	type AgentSession,
 	type AgentSessionRuntime,
 	type CreateAgentSessionRuntimeFactory,
 	type LoadExtensionsResult,
@@ -20,6 +21,8 @@ import { loadPixConfig, resolveDefaultModelRef, type PixConfig } from "../config
 import { PI_FAVORITE_MODEL_REFS } from "./constants.js";
 import { isThinkingLevel, parseModelRef, parseScopedModelRef } from "./model/model-ref.js";
 import { openLazySessionManager } from "./session/lazy-session-manager.js";
+import { createAutoThinkingAdaptiveExtensionFactory, type AutoThinkingControlFrame } from "./thinking/adaptive-thinking.js";
+import type { AutoThinkingDecision } from "./thinking/auto-thinking.js";
 import type { AppOptions, ScopedSessionModel, SessionModel } from "./types.js";
 
 const BUNDLED_QUESTION_EXTENSION_NAME = "question";
@@ -217,6 +220,12 @@ function isBundledQuestionConflict(error: LoadExtensionsResult["errors"][number]
 
 export type CreatePixRuntimeOptions = {
 	eventBus?: EventBus;
+	autoThinking?: {
+		isEnabled(session: AgentSession): boolean;
+		enableDefault?(session: AgentSession): void;
+		applyControl(session: AgentSession, control: AutoThinkingControlFrame): AutoThinkingDecision | undefined;
+		onDecision?(session: AgentSession, decision: AutoThinkingDecision, control: AutoThinkingControlFrame): void;
+	};
 };
 
 type RuntimeSessionManagerModelState = Pick<SessionManager, "getEntries" | "getBranch">;
@@ -230,6 +239,16 @@ export function resolvePixRuntimeModelRef(
 	const existingEntryCount = sessionManager.getEntries().length;
 	if (existingEntryCount > 0) return resolveSessionModelRefFromTail(sessionManager.getBranch());
 	return resolveDefaultModelRef(config);
+}
+
+export function shouldEnableDefaultAutoThinking(
+	options: Pick<AppOptions, "modelRef">,
+	sessionManager: Pick<SessionManager, "getEntries">,
+	config: PixConfig,
+): boolean {
+	return !options.modelRef
+		&& sessionManager.getEntries().length === 0
+		&& config.defaultModel?.thinking === "auto";
 }
 
 export function resolveSessionModelRefFromTail(entries: readonly SessionEntry[]): string | undefined {
@@ -254,8 +273,18 @@ export function resolveSessionModelRefFromTail(entries: readonly SessionEntry[])
 
 export async function createPixRuntime(options: AppOptions, runtimeOptions: CreatePixRuntimeOptions = {}): Promise<AgentSessionRuntime> {
 	const agentDir = getAgentDir();
+	const sessionRef: { current?: AgentSession } = {};
+	const adaptiveThinkingFactory = runtimeOptions.autoThinking
+		? createAutoThinkingAdaptiveExtensionFactory({
+			getSession: () => sessionRef.current,
+			isEnabled: runtimeOptions.autoThinking.isEnabled,
+			applyControl: runtimeOptions.autoThinking.applyControl,
+			...(runtimeOptions.autoThinking.onDecision === undefined ? {} : { onDecision: runtimeOptions.autoThinking.onDecision }),
+		})
+		: undefined;
 	const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, sessionManager, sessionStartEvent }) => {
 		const config = loadPixConfig(cwd);
+		const enableDefaultAutoThinking = shouldEnableDefaultAutoThinking(options, sessionManager, config);
 		const effectiveModelRef = resolvePixRuntimeModelRef(options, sessionManager, config);
 		const parsedModel = effectiveModelRef ? parseModelRef(effectiveModelRef) : undefined;
 		await ensureBundledSkillsInstalled();
@@ -267,6 +296,7 @@ export async function createPixRuntime(options: AppOptions, runtimeOptions: Crea
 			resourceLoaderOptions: {
 				...(config.ignoreContextFiles ? { noContextFiles: true } : {}),
 				...(runtimeOptions.eventBus === undefined ? {} : { eventBus: runtimeOptions.eventBus }),
+				...(adaptiveThinkingFactory === undefined ? {} : { extensionFactories: [adaptiveThinkingFactory] }),
 				...(bundledExtensionPaths.length === 0 ? {} : {
 					additionalExtensionPaths: bundledExtensionPaths,
 					extensionsOverride: prioritizeBundledQuestionExtension,
@@ -295,15 +325,18 @@ export async function createPixRuntime(options: AppOptions, runtimeOptions: Crea
 			];
 		});
 
-		return {
-			...(await createAgentSessionFromServices({
+		const created = await createAgentSessionFromServices({
 				services,
 				sessionManager,
 				...(sessionStartEvent === undefined ? {} : { sessionStartEvent }),
 				...(model === undefined ? {} : { model }),
 				...(parsedModel?.thinkingLevel === undefined ? {} : { thinkingLevel: parsedModel.thinkingLevel }),
 				...(scopedModels.length === 0 ? {} : { scopedModels }),
-			})),
+			});
+		sessionRef.current = created.session;
+		if (enableDefaultAutoThinking) runtimeOptions.autoThinking?.enableDefault?.(created.session);
+		return {
+			...created,
 			services,
 			diagnostics: services.diagnostics,
 		};

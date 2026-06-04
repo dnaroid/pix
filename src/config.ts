@@ -59,7 +59,7 @@ export type AutocompleteConfig = {
 
 export type DefaultModelConfig = {
 	modelRef: string;
-	thinking?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+	thinking?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "auto";
 };
 
 export type ModelColorsConfig = {
@@ -149,6 +149,8 @@ const DEFAULT_OUTPUT_FILTERS: OutputFiltersConfig = {
 
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 type ConfigThinkingLevel = (typeof THINKING_LEVELS)[number];
+const DEFAULT_THINKING_SELECTIONS = [...THINKING_LEVELS, "auto"] as const;
+type ConfigThinkingSelection = (typeof DEFAULT_THINKING_SELECTIONS)[number];
 
 const DEFAULT_PROMPT_ENHANCER: PromptEnhancerConfig = {
 	modelRef: "zai/glm-5-turbo",
@@ -274,17 +276,21 @@ function extractDefaultModelConfig(raw: unknown): DefaultModelConfig | undefined
 	const configured = raw.defaultModel ?? raw.modelDefault;
 
 	if (typeof configured === "string") {
-		const modelRef = configured.trim();
-		return modelRef ? { modelRef } : undefined;
+		return normalizeDefaultModelRef(configured);
 	}
 
 	if (!isPlainObject(configured)) return undefined;
 	const modelRef = nonEmptyString(configured.modelRef) ?? nonEmptyString(configured.model);
 	if (!modelRef) return undefined;
 
-	const thinking = normalizeThinkingLevel(configured.thinking) ?? normalizeThinkingLevel(configured.thinkingLevel);
+	const normalizedModel = normalizeDefaultModelRef(modelRef);
+	if (!normalizedModel) return undefined;
+
+	const thinking = normalizeDefaultThinking(configured.thinking)
+		?? normalizeDefaultThinking(configured.thinkingLevel)
+		?? normalizedModel.thinking;
 	return {
-		modelRef,
+		modelRef: normalizedModel.modelRef,
 		...(thinking === undefined ? {} : { thinking }),
 	};
 }
@@ -371,6 +377,14 @@ function normalizeThinkingLevel(value: unknown): ConfigThinkingLevel | undefined
 	return THINKING_LEVELS.includes(normalized as ConfigThinkingLevel) ? normalized as ConfigThinkingLevel : undefined;
 }
 
+function normalizeDefaultThinking(value: unknown): ConfigThinkingSelection | undefined {
+	const level = normalizeThinkingLevel(value);
+	if (level) return level;
+	if (typeof value !== "string") return undefined;
+	const normalized = value.trim().toLowerCase();
+	return normalized === "auto" ? "auto" : undefined;
+}
+
 function nonEmptyString(value: unknown): string | undefined {
 	if (typeof value !== "string") return undefined;
 	const trimmed = value.trim();
@@ -415,7 +429,7 @@ export function resolveDefaultModelRef(config: PixConfig): string | undefined {
 	if (!modelRef) return undefined;
 
 	const thinking = config.defaultModel?.thinking;
-	if (!thinking) return modelRef;
+	if (!thinking || thinking === "auto") return stripThinkingSuffix(modelRef);
 
 	return `${stripThinkingSuffix(modelRef)}:${thinking}`;
 }
@@ -433,7 +447,7 @@ export function savePixDefaultModel(modelRef: string): DefaultModelConfig | unde
 }
 
 export function savePixDefaultThinking(thinking: string, fallbackModelRef?: string): DefaultModelConfig | undefined {
-	const normalizedThinking = normalizeThinkingLevel(thinking);
+	const normalizedThinking = normalizeDefaultThinking(thinking);
 	if (!normalizedThinking) return undefined;
 
 	const configPath = PIX_CONFIG_PATH;
@@ -488,7 +502,7 @@ export function upsertPixDefaultModelInJsonc(source: string, modelRef: string): 
 }
 
 export function upsertPixDefaultThinkingInJsonc(source: string, thinking: string, fallbackModelRef?: string): string {
-	const normalizedThinking = normalizeThinkingLevel(thinking);
+	const normalizedThinking = normalizeDefaultThinking(thinking);
 	if (!normalizedThinking) return source;
 
 	const parsed = parseJsonc(source);
@@ -530,7 +544,7 @@ function normalizeDefaultModelRef(modelRef: string): DefaultModelConfig | undefi
 	if (colonIndex <= 0) return { modelRef: trimmed };
 
 	const suffix = trimmed.slice(colonIndex + 1);
-	const thinking = normalizeThinkingLevel(suffix);
+	const thinking = normalizeDefaultThinking(suffix);
 	return thinking ? { modelRef: trimmed.slice(0, colonIndex), thinking } : { modelRef: trimmed };
 }
 
@@ -539,7 +553,7 @@ function stripThinkingSuffix(modelRef: string): string {
 	if (colonIndex <= 0) return modelRef;
 
 	const suffix = modelRef.slice(colonIndex + 1);
-	return normalizeThinkingLevel(suffix) ? modelRef.slice(0, colonIndex) : modelRef;
+	return normalizeDefaultThinking(suffix) ? modelRef.slice(0, colonIndex) : modelRef;
 }
 
 function extractToolRendererRule(value: unknown): ToolRendererRule | undefined {

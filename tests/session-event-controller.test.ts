@@ -208,6 +208,55 @@ describe("AppSessionEventController", () => {
 		assert.equal(entries[2]?.kind === "assistant" ? entries[2].text : undefined, "After tool");
 	});
 
+	it("bounds appended conversation entries by pruning the oldest edge", () => {
+		const entries: Entry[] = [];
+		const deletedEntryIds: string[] = [];
+		const controller = new AppSessionEventController({
+			entries,
+			runtime: () => ({ session: { isStreaming: false } }) as AgentSessionRuntime,
+			conversationViewport: () => ({ deleteEntry: (entryId: string) => { deletedEntryIds.push(entryId); } }) as never,
+			isRunning: () => false,
+			render: () => {},
+			scheduleRender: () => {},
+			setStatus: () => {},
+			restoreSessionStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			updateQueuedMessageStatus: () => {},
+			prepareWorkspaceMutation: () => undefined,
+			workspaceMutationFromToolExecution: () => undefined,
+			recordWorkspaceMutationForUserEntry: () => {},
+			scheduleUserSessionEntryMetadataSync: () => {},
+			toolDefaultExpanded: () => false,
+			observeSubagentsToolResult: () => {},
+			observeTodoToolResult: () => {},
+			showToast: () => {},
+		});
+
+		for (let index = 0; index < 361; index += 1) {
+			controller.addEntry({ id: `entry-${index}`, kind: "assistant", text: `entry ${index}` });
+		}
+
+		assert.equal(entries.length, 300);
+		assert.equal(entries[0]?.id, "entry-61");
+		assert.equal(entries[entries.length - 1]?.id, "entry-360");
+		assert.ok(deletedEntryIds.includes("entry-0"));
+	});
+
+	it("bounds prepended older history by pruning the newest edge", () => {
+		const entries: Entry[] = Array.from({ length: 300 }, (_, index) => ({ id: `entry-${index}`, kind: "assistant", text: `entry ${index}` }));
+		const controller = createController(entries);
+
+		(controller as unknown as { prependEntries(entries: readonly Entry[]): void }).prependEntries(
+			Array.from({ length: 61 }, (_, index) => ({ id: `older-${index}`, kind: "assistant", text: `older ${index}` })),
+		);
+
+		assert.equal(entries.length, 300);
+		assert.equal(entries[0]?.id, "older-0");
+		assert.equal(entries[60]?.id, "older-60");
+		assert.equal(entries[entries.length - 1]?.id, "entry-238");
+	});
+
 	it("buffers split dcp metadata markers so suffix chunks do not leak", () => {
 		const entries: Entry[] = [];
 		const controller = createController(entries);
@@ -252,6 +301,25 @@ describe("AppSessionEventController", () => {
 
 		assert.equal(entries.length, 1);
 		assert.equal(entries[0]?.kind === "assistant" ? entries[0].text : undefined, "answer\nnext");
+	});
+
+	it("hides split adaptive thinking control frames before visible assistant text", () => {
+		const entries: Entry[] = [];
+		const controller = createController(entries);
+
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "text_delta", delta: "<pix" },
+		} as unknown as AgentSessionEvent);
+		assert.equal(entries.length, 0);
+
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "text_delta", delta: 'ctl>{"thinking":"high","apply":"next_call","reasonCode":"tests"}</pixctl>\nVisible' },
+		} as unknown as AgentSessionEvent);
+
+		assert.equal(entries.length, 1);
+		assert.equal(entries[0]?.kind === "assistant" ? entries[0].text : undefined, "Visible");
 	});
 
 	it("records workspace mutations and user metadata from session events", () => {
