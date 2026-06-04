@@ -24,6 +24,7 @@ class FakePi {
 	commands = new Map<string, any>();
 	events = new Map<string, Array<(event: unknown, ctx: any) => unknown>>();
 	sentMessages: string[] = [];
+	sentMessageOptions: unknown[] = [];
 
 	registerTool(tool: any) { this.tools.set(tool.name, tool); }
 	registerCommand(name: string, command: any) { this.commands.set(name, command); }
@@ -32,7 +33,10 @@ class FakePi {
 		handlers.push(handler);
 		this.events.set(name, handlers);
 	}
-	sendUserMessage(message: string) { this.sentMessages.push(message); }
+	sendUserMessage(message: string, options?: unknown) {
+		this.sentMessages.push(message);
+		this.sentMessageOptions.push(options);
+	}
 	async emit(name: string, event: unknown, ctx: any = {}) {
 		for (const handler of this.events.get(name) ?? []) await handler(event, ctx);
 	}
@@ -568,6 +572,60 @@ describe.serial("todo extension lifecycle", () => {
 		} finally {
 			globalThis.setTimeout = originalSetTimeout;
 			globalThis.clearTimeout = originalClearTimeout;
+		}
+	});
+
+	test.serial("queues a pre-final todo reconciliation follow-up after dirty todo mutations", async () => {
+		const extension = (await import("../src/todo/index.js")).default;
+		const pi = new FakePi();
+		const ctx = { cwd: mkdtempSync(join(tmpdir(), "todo-final-guard-")) };
+		try {
+			extension(pi as any);
+			await pi.emit("agent_start", {}, ctx);
+			await pi.tools.get("todo").execute("todo-1", { action: "create", subject: "Finish guard" }, undefined, undefined, ctx);
+			await pi.emit("message_end", { message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "Done" }] } }, ctx);
+
+			expect(pi.sentMessages).toHaveLength(1);
+			expect(pi.sentMessages[0]).toContain("Todo final reconciliation required before answering the user.");
+			expect(pi.sentMessages[0]).toContain("Run `todo list` first");
+			expect(pi.sentMessages[0]).toContain("#1 [pending] Finish guard");
+			expect(pi.sentMessageOptions[0]).toEqual({ deliverAs: "followUp" });
+		} finally {
+			rmSync(ctx.cwd, { recursive: true, force: true });
+		}
+	});
+
+	test.serial("does not queue the pre-final guard after todo list reconciliation", async () => {
+		const extension = (await import("../src/todo/index.js")).default;
+		const pi = new FakePi();
+		const ctx = { cwd: mkdtempSync(join(tmpdir(), "todo-final-guard-")) };
+		try {
+			extension(pi as any);
+			await pi.emit("agent_start", {}, ctx);
+			const tool = pi.tools.get("todo");
+			await tool.execute("todo-1", { action: "create", subject: "Finish guard" }, undefined, undefined, ctx);
+			await tool.execute("todo-2", { action: "list" }, undefined, undefined, ctx);
+			await pi.emit("message_end", { message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "Done" }] } }, ctx);
+
+			expect(pi.sentMessages).toHaveLength(0);
+		} finally {
+			rmSync(ctx.cwd, { recursive: true, force: true });
+		}
+	});
+
+	test.serial("does not queue the pre-final guard for tool-use assistant messages", async () => {
+		const extension = (await import("../src/todo/index.js")).default;
+		const pi = new FakePi();
+		const ctx = { cwd: mkdtempSync(join(tmpdir(), "todo-final-guard-")) };
+		try {
+			extension(pi as any);
+			await pi.emit("agent_start", {}, ctx);
+			await pi.tools.get("todo").execute("todo-1", { action: "create", subject: "Finish guard" }, undefined, undefined, ctx);
+			await pi.emit("message_end", { message: { role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", id: "call-1", name: "todo", arguments: { action: "list" } }] } }, ctx);
+
+			expect(pi.sentMessages).toHaveLength(0);
+		} finally {
+			rmSync(ctx.cwd, { recursive: true, force: true });
 		}
 	});
 

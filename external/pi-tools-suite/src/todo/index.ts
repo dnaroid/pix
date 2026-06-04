@@ -11,6 +11,7 @@ const TODO_NUDGE_INITIAL_DELAY_MS = 5_000;
 const TODO_NUDGE_IDLE_RETRY_DELAY_MS = 100;
 const TODO_NUDGE_MAX_IDLE_ATTEMPTS = 40;
 const ASK_USER_TOOL_NAMES = new Set(["ask_user", "ask_user_question", "question"]);
+const TODO_RECONCILE_ACTIONS = new Set(["list"]);
 
 function isAskUserToolName(toolName: string): boolean {
 	return ASK_USER_TOOL_NAMES.has(toolName);
@@ -54,6 +55,39 @@ function getUnfinishedTodoNudge(): { signature: string; message: string } | unde
 	};
 }
 
+function getTodoFinalGuardPrompt(): { signature: string; message: string } | undefined {
+	const nudge = getUnfinishedTodoNudge();
+	if (!nudge) return undefined;
+	return {
+		signature: nudge.signature,
+		message: nudge.message.replace(
+			"Todo auto-nudge: unfinished todo items remain after your last response.",
+			"Todo final reconciliation required before answering the user.",
+		).replace(
+			"Continue working on them now. Pick exactly one pending/in_progress item, mark it in_progress if needed, make concrete progress, and update or complete todos immediately as work changes.",
+			"Run `todo list` first, reconcile the visible plan, then answer only after completed work is not left pending/in_progress/deferred by accident.",
+		),
+	};
+}
+
+function isFinalAssistantMessage(message: unknown): boolean {
+	if (!message || typeof message !== "object") return false;
+	const record = message as Record<string, unknown>;
+	if (record.role !== "assistant" || record.stopReason !== "stop") return false;
+	const content = record.content;
+	if (typeof content === "string") return content.trim().length > 0;
+	if (!Array.isArray(content)) return false;
+
+	let hasText = false;
+	for (const block of content) {
+		if (!block || typeof block !== "object") continue;
+		const part = block as Record<string, unknown>;
+		if (part.type === "toolCall" || part.type === "tool-call") return false;
+		if (typeof part.text === "string" && part.text.trim().length > 0) hasText = true;
+	}
+	return hasText;
+}
+
 function getPersistedPlanPrompt(path: string): string | undefined {
 	const unfinished = selectVisibleTasks(getState()).filter((task) => task.status !== "completed");
 	if (unfinished.length === 0) return undefined;
@@ -85,6 +119,8 @@ function emitPersistedPlanPrompt(pi: ExtensionAPI, ctx: ExtensionContext, prompt
 
 export default function (pi: ExtensionAPI) {
 	let lastNudgedSignature: string | undefined;
+	let lastFinalGuardSignature: string | undefined;
+	let todoDirtySinceReconcile = false;
 	let nudgeTimer: ReturnType<typeof setTimeout> | undefined;
 	const pendingAskUserToolCallIds = new Set<string>();
 
@@ -128,7 +164,13 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	registerTodoTool(pi, {
-		afterCommit: (state, ctx) => {
+		afterCommit: (state, ctx, info) => {
+			if (TODO_RECONCILE_ACTIONS.has(info.action)) {
+				todoDirtySinceReconcile = false;
+				lastFinalGuardSignature = undefined;
+			} else if (info.action !== "get" && info.action !== "export") {
+				todoDirtySinceReconcile = true;
+			}
 			try {
 				const sync = syncPersistedPlan(ctx.cwd, state);
 				if (sync?.completed) console.log(`rpiv-todo: completed persisted plan and removed ${sync.path}`);
@@ -185,6 +227,23 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("agent_start", async () => {
 		pendingAskUserToolCallIds.clear();
+		todoDirtySinceReconcile = false;
+		lastFinalGuardSignature = undefined;
+	});
+
+	pi.on("message_end", async (event) => {
+		if (!todoDirtySinceReconcile) return;
+		if (pendingAskUserToolCallIds.size > 0) return;
+		if (!isFinalAssistantMessage(event.message)) return;
+
+		const guard = getTodoFinalGuardPrompt();
+		if (!guard) return;
+		if (guard.signature === lastFinalGuardSignature) return;
+
+		lastFinalGuardSignature = guard.signature;
+		lastNudgedSignature = guard.signature;
+		clearNudgeTimer();
+		pi.sendUserMessage(guard.message, { deliverAs: "followUp" });
 	});
 
 	pi.on("agent_end", async (_event, ctx) => {

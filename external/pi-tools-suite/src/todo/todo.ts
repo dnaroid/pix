@@ -78,7 +78,7 @@ const PERSIST_ARGUMENT_COMPLETIONS: CommandCompletion[] = [
 ];
 
 interface TodoToolHooks {
-	afterCommit?: (state: ReturnType<typeof getState>, ctx: ExtensionContext) => void | Promise<void>;
+	afterCommit?: (state: ReturnType<typeof getState>, ctx: ExtensionContext, info: { action: TaskAction; params: TaskMutationParams }) => void | Promise<void>;
 }
 
 type TodoStateEventContext = { sessionManager?: { getSessionFile?: () => unknown } };
@@ -379,7 +379,7 @@ export function registerTodoTool(pi: ExtensionAPI, hooks: TodoToolHooks = {}): v
 			const autoClear = autoClearCompletedTodos(result.state);
 			commitState(autoClear.state);
 			publishTodoState(pi as TodoStateEventEmitter, _ctx, params.action, params as Record<string, unknown>);
-			await hooks.afterCommit?.(autoClear.state, _ctx as ExtensionContext);
+			await hooks.afterCommit?.(autoClear.state, _ctx as ExtensionContext, { action: params.action, params: params as TaskMutationParams });
 			const toolResult = buildToolResult(params.action, params as TaskMutationParams, autoClear.state, result.op);
 			if (!autoClear.cleared) return toolResult;
 			return {
