@@ -175,6 +175,10 @@ export class AppPopupActionController {
 				await this.workspaceActions.forkFromUserMessage(selected.entryId);
 				return true;
 			}
+			if (selected.value === "fork-new-tab") {
+				await this.workspaceActions.forkFromUserMessageInNewTab(selected.entryId);
+				return true;
+			}
 			await this.workspaceActions.undoChangesFromUserMessage(selected.entryId);
 			return true;
 		} catch (error) {

@@ -536,7 +536,7 @@ export type ThinkingMenuValue = {
 	current: boolean;
 };
 
-export type UserMessageMenuValue = "copy" | "fork" | "undo";
+export type UserMessageMenuValue = "copy" | "fork" | "fork-new-tab" | "undo";
 export type UserMessageJumpMenuValue = { entryId?: string; sessionEntryId?: string };
 export type QueueMessageMenuValue = "cancel" | "edit" | "send-now";
 export type ResumeMenuValue = { kind: "new" } | { kind: "session"; session: SessionInfo };

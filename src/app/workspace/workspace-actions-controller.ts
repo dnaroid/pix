@@ -30,6 +30,7 @@ export type AppWorkspaceActionsControllerHost = {
 	showToast(message: string, kind: "success" | "error" | "warning" | "info"): void;
 	render(): void;
 	isRunning(): boolean;
+	forkSessionEntryInNewTab(sessionEntryId: string): Promise<boolean>;
 };
 
 export class AppWorkspaceActionsController {
@@ -139,6 +140,18 @@ export class AppWorkspaceActionsController {
 		this.host.addEntry({ id: createId("system"), kind: "system", text: `Forked from entry ${sessionEntryId}.` });
 		this.host.setSessionStatus(runtime.session);
 		this.host.showToast("Session forked", "success");
+	}
+
+	async forkFromUserMessageInNewTab(entryId: string): Promise<void> {
+		const runtime = this.getIdleRuntimeForAction("fork in new tab");
+		if (!runtime) return;
+
+		const entry = this.host.findUserEntry(entryId);
+		if (!entry) throw new Error("User message is no longer available");
+		const sessionEntryId = this.resolveUserSessionEntryId(entry);
+		if (!sessionEntryId) throw new Error("Session entry for this message is not available yet");
+
+		await this.host.forkSessionEntryInNewTab(sessionEntryId);
 	}
 
 	async undoChangesFromUserMessage(entryId: string): Promise<void> {

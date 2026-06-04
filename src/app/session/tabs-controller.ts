@@ -65,6 +65,7 @@ export type AppTabsControllerHost = {
 	syncUserSessionEntryMetadata(): void;
 	captureInputState(): TabInputState;
 	restoreInputState(state: TabInputState): void;
+	closeMenusForTabSwitch?(): void;
 	captureDeferredUserMessages?(): readonly SubmittedUserMessage[];
 	restoreDeferredUserMessages?(messages: readonly SubmittedUserMessage[]): void;
 	addEntry(entry: Entry): void;
@@ -318,6 +319,7 @@ export class AppTabsController {
 		this.updateTabFromSession(tab, newRuntime.session);
 		this.setRuntimeForTab(tab.id, newRuntime);
 		this.restoreInputState(tab.id);
+		this.host.closeMenusForTabSwitch?.();
 		try {
 			await this.host.activateRuntime(newRuntime);
 		} finally {
@@ -389,6 +391,7 @@ export class AppTabsController {
 		this.updateTabFromSession(tab, newRuntime.session);
 		this.setRuntimeForTab(tab.id, newRuntime);
 		this.restoreInputState(tab.id);
+		this.host.closeMenusForTabSwitch?.();
 
 		try {
 			await this.host.activateRuntime(newRuntime);
@@ -397,6 +400,7 @@ export class AppTabsController {
 			this.removeTab(tab.id);
 			this.activeTabId = previousTabId;
 			if (previousTabId) this.restoreInputState(previousTabId);
+			this.host.closeMenusForTabSwitch?.();
 			if (this.host.runtime() !== previousRuntime) {
 				try {
 					await this.host.activateRuntime(previousRuntime);
@@ -423,6 +427,121 @@ export class AppTabsController {
 		this.restoreInputState(tab.id);
 		void this.saveTabs();
 		await this.loadActiveSessionHistory(newRuntime);
+		return true;
+	}
+
+	async forkSessionEntryInNewTab(entryId: string): Promise<boolean> {
+		if (this.pendingActiveTabId) {
+			this.host.showToast("Wait for the tab to finish loading", "info");
+			return false;
+		}
+
+		const runtime = this.idleRuntime("fork");
+		if (!runtime) return false;
+		if (this.host.options.noSession) {
+			this.host.showToast("Fork in new tab is unavailable with --no-session", "warning");
+			return false;
+		}
+
+		const currentSessionPath = runtime.session.sessionFile ? resolve(runtime.session.sessionFile) : undefined;
+		if (!currentSessionPath) {
+			this.host.showToast("Fork in new tab requires a persisted session", "warning");
+			return false;
+		}
+
+		this.cancelHistoryLoad();
+		this.syncActiveTabFromRuntime({ save: false });
+		this.storeActiveInputState();
+		this.storeActiveDeferredUserMessages();
+		const previousTabId = this.activeTabId;
+		const previousRuntime = runtime;
+		this.host.setStatus("forking session tab");
+		this.host.render();
+
+		let forkRuntime: AgentSessionRuntime;
+		try {
+			forkRuntime = await this.host.createRuntimeForSession(currentSessionPath);
+		} catch {
+			this.host.showToast("Could not fork in new tab", "warning");
+			this.host.setSessionStatus(previousRuntime.session);
+			this.host.render();
+			return false;
+		}
+
+		let result: Awaited<ReturnType<AgentSessionRuntime["fork"]>>;
+		try {
+			result = await forkRuntime.fork(entryId);
+		} catch (error) {
+			void this.host.disposeRuntime(forkRuntime);
+			throw error;
+		}
+		if (result.cancelled) {
+			void this.host.disposeRuntime(forkRuntime);
+			this.host.addEntry({ id: createId("system"), kind: "system", text: "Fork cancelled." });
+			this.host.setSessionStatus(previousRuntime.session);
+			this.host.render();
+			return false;
+		}
+
+		const existingTab = this.findTabForSession(forkRuntime.session);
+		if (existingTab) {
+			if (result.selectedText) this.inputStatesByTabId.set(existingTab.id, this.inputStateFromText(result.selectedText));
+			void this.host.disposeRuntime(forkRuntime);
+			await this.switchToTab(existingTab.id);
+			this.host.showToast("Fork opened in existing tab", "success");
+			return true;
+		}
+
+		const tab = this.tabFromSession(forkRuntime.session, { titlePlaceholder: "new" });
+		this.tabItems.push(tab);
+		this.activeTabId = tab.id;
+		this.pendingActiveTabId = tab.id;
+		this.clearTabAttention(tab);
+		this.updateTabFromSession(tab, forkRuntime.session);
+		this.setRuntimeForTab(tab.id, forkRuntime);
+		if (result.selectedText) this.inputStatesByTabId.set(tab.id, this.inputStateFromText(result.selectedText));
+		this.restoreInputState(tab.id);
+		this.host.closeMenusForTabSwitch?.();
+
+		try {
+			await this.host.activateRuntime(forkRuntime);
+		} catch {
+			this.pendingActiveTabId = undefined;
+			this.removeTab(tab.id);
+			this.activeTabId = previousTabId;
+			if (previousTabId) this.restoreInputState(previousTabId);
+			this.host.closeMenusForTabSwitch?.();
+			if (this.host.runtime() !== previousRuntime) {
+				try {
+					await this.host.activateRuntime(previousRuntime);
+				} catch {
+					// Keep the best available runtime below and surface the switch failure.
+				}
+			}
+			void this.host.disposeRuntime(forkRuntime);
+			this.host.showToast("Could not open fork tab", "warning");
+			this.host.resetSessionView();
+			if (previousTabId) this.restoreDeferredUserMessages(previousTabId);
+			this.host.loadSessionHistory();
+			this.host.setSessionStatus(this.host.runtime()?.session);
+			this.host.setSessionActivity(this.sessionActivity(this.host.runtime()?.session));
+			this.host.render();
+			return false;
+		}
+
+		this.pendingActiveTabId = undefined;
+		this.activeTabId = tab.id;
+		this.clearTabAttention(tab);
+		this.updateTabFromSession(tab, forkRuntime.session);
+		this.setRuntimeForTab(tab.id, forkRuntime);
+		this.restoreInputState(tab.id);
+		void this.saveTabs();
+		this.scheduleProjectSessionRetention();
+		await this.loadActiveSessionHistory(forkRuntime);
+		this.host.addEntry({ id: createId("system"), kind: "system", text: `Forked from entry ${entryId} in a new tab.` });
+		this.host.setSessionStatus(forkRuntime.session);
+		this.host.showToast("Fork opened in new tab", "success");
+		this.host.render();
 		return true;
 	}
 
@@ -458,6 +577,7 @@ export class AppTabsController {
 		target.activity = "thinking";
 		this.clearTabAttention(target);
 		this.restoreInputState(target.id);
+		this.host.closeMenusForTabSwitch?.();
 		this.host.resetSessionView();
 		this.restoreDeferredUserMessages(target.id);
 		this.host.setStatus("switching tab");
@@ -475,6 +595,7 @@ export class AppTabsController {
 			else target.activity = previousTargetActivity;
 			this.activeTabId = previousTabId;
 			if (previousTabId) this.restoreInputState(previousTabId);
+			this.host.closeMenusForTabSwitch?.();
 			if (this.host.runtime() !== previousRuntime) {
 				try {
 					await this.host.activateRuntime(previousRuntime);
@@ -563,6 +684,7 @@ export class AppTabsController {
 		this.updateTabFromSession(nextTab, nextRuntime.session);
 		this.setRuntimeForTab(nextTab.id, nextRuntime);
 		this.restoreInputState(nextTab.id);
+		this.host.closeMenusForTabSwitch?.();
 		void this.host.disposeRuntime(runtime);
 		void this.saveTabs();
 		await this.loadActiveSessionHistory(nextRuntime);
@@ -594,6 +716,7 @@ export class AppTabsController {
 		this.inputStatesByTabId.delete(tab.id);
 		this.deferredUserMessagesByTabId.delete(tab.id);
 		this.restoreInputState(tab.id);
+		this.host.closeMenusForTabSwitch?.();
 		this.stopAttentionBlinkIfIdle();
 
 		this.host.resetSessionView();
@@ -768,6 +891,10 @@ export class AppTabsController {
 
 	private restoreInputState(tabId: string): void {
 		this.host.restoreInputState(this.inputStatesByTabId.get(tabId) ?? { text: "", cursor: 0 });
+	}
+
+	private inputStateFromText(text: string): TabInputState {
+		return { text, cursor: text.length };
 	}
 
 	private restoreDeferredUserMessages(tabId: string): void {

@@ -25,7 +25,7 @@ describe("AppMenuItemsController queue menu", () => {
 
 		assert.deepEqual(controller.parseSlashInput("/search term"), { commandName: "search", hasArguments: true, arguments: "term" });
 		assert.deepEqual(controller.getSlashCommandMenuItems("sea").map((item) => item.label), ["/search"]);
-		assert.equal(controller.getUserMessageMenuItems().length, 3);
+		assert.deepEqual(controller.getUserMessageMenuItems().map((item) => item.value), ["copy", "fork", "fork-new-tab", "undo"]);
 		assert.equal(controller.getUserMessageJumpMenuItems("find")[0]?.value.entryId, "u1");
 		assert.deepEqual(controller.getResumeMenuItems("", 5).map((item) => item.label), ["new", "First"]);
 	});

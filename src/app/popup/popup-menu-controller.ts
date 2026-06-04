@@ -388,6 +388,32 @@ export class AppPopupMenuController {
 		this.dismissedSlashCommandMenuInput = undefined;
 	}
 
+	closeMenusForTabSwitch(): void {
+		if (this.directPopupMenu === "sdk-menu") {
+			this.closeSdkMenu(undefined, { render: false, restoreStatus: false });
+		}
+
+		this.directPopupMenu = undefined;
+		this.directPopupMenuQuery = "";
+		this.directPopupMenuPreserveStatus = false;
+		this.directPopupMenuPlacement = "default";
+		this.activeUserMessageEntryId = undefined;
+		this.activeQueuedMessageEntryId = undefined;
+		this.slashCommandMenu.close();
+		this.modelMenu.close();
+		this.thinkingMenu.close();
+		this.resumeMenu.close();
+		this.userMessageMenu.close();
+		this.userMessageJumpMenu.close();
+		this.queueMessageMenu.close();
+		this.sdkMenu.close();
+
+		const input = this.host.getInput();
+		this.dismissedSlashCommandMenuInput = input;
+		this.dismissedModelMenuInput = input;
+		this.dismissedThinkingMenuInput = input;
+	}
+
 	cancelActivePopupMenu(): void {
 		const active = this.syncActivePopupMenu();
 		if (this.directPopupMenu === "sdk-menu") {

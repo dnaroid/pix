@@ -3,6 +3,7 @@ import { THINKING_LEVELS } from "../constants.js";
 import type { SubmittedUserMessage, ThinkingLevel, ThinkingSelection } from "../types.js";
 
 export const AUTO_THINKING_LEVEL = "auto" as const;
+export const DEFAULT_AUTO_THINKING_BASELINE_LEVEL = "medium" as const satisfies ThinkingLevel;
 export const AUTO_THINKING_DECISION_PREFIX = "auto thinking: ";
 export const AUTO_THINKING_SESSION_CUSTOM_TYPE = "pix:auto_thinking";
 
@@ -30,21 +31,13 @@ export type AutoThinkingAdaptiveRequest = {
 	reasonCode: string;
 };
 
-export type AutoThinkingPromptInput = {
-	promptText: string;
-	imageCount?: number;
+export type AutoThinkingDecisionInput = {
 	availableLevels?: readonly string[];
-};
-
-export type AutoThinkingPreparation = {
-	decision: AutoThinkingDecision;
-	restore(): void;
 };
 
 type AutoThinkingSessionState = {
 	baselineLevel: ThinkingLevel;
 	effectiveLevel?: ThinkingLevel;
-	generation: number;
 };
 
 export class AutoThinkingController {
@@ -56,11 +49,16 @@ export class AutoThinkingController {
 
 	enable(session: AgentSession): void {
 		const current = this.states.get(session);
+		const currentLevel = normalizeThinkingLevel(session.thinkingLevel);
+		const baselineLevel = current?.baselineLevel
+			?? currentLevel
+			?? defaultAutoThinkingLevelForSession(session);
+		const effectiveLevel = current?.effectiveLevel;
 		this.states.set(session, {
-			baselineLevel: current?.baselineLevel ?? normalizeThinkingLevel(session.thinkingLevel) ?? "off",
-			...(current?.effectiveLevel === undefined ? {} : { effectiveLevel: current.effectiveLevel }),
-			generation: (current?.generation ?? 0) + 1,
+			baselineLevel,
+			...(effectiveLevel === undefined ? {} : { effectiveLevel }),
 		});
+		setTransientSessionThinkingLevel(session, effectiveLevel ?? currentLevel ?? baselineLevel);
 	}
 
 	disable(session: AgentSession, options: { restoreBaseline?: boolean } = {}): void {
@@ -81,44 +79,33 @@ export class AutoThinkingController {
 
 	async prepareForPrompt(
 		session: AgentSession,
-		message: SubmittedUserMessage,
-	): Promise<AutoThinkingPreparation | undefined> {
+		_message: SubmittedUserMessage,
+	): Promise<void> {
 		const state = this.states.get(session);
-		if (!state || session.isStreaming) return undefined;
+		if (!state || session.isStreaming) return;
 
-		const baselineLevel = normalizeThinkingLevel(session.thinkingLevel) ?? state.baselineLevel;
-		state.baselineLevel = baselineLevel;
-		const generation = state.generation;
-		const input = {
-			promptText: message.promptText,
-			imageCount: message.images.length,
-			availableLevels: session.getAvailableThinkingLevels(),
-		} satisfies AutoThinkingPromptInput;
-		const current = this.states.get(session);
-		if (!current || current.generation !== generation || session.isStreaming) return undefined;
+		const currentLevel = normalizeThinkingLevel(session.thinkingLevel);
+		if (state.effectiveLevel) {
+			if (currentLevel !== state.effectiveLevel) setTransientSessionThinkingLevel(session, state.effectiveLevel);
+			return;
+		}
 
-		const decision = chooseAutoThinkingLevel(input);
-		current.effectiveLevel = decision.level;
-		setTransientSessionThinkingLevel(session, decision.level);
-
-		return {
-			decision,
-			restore: () => {
-				const restoreState = this.states.get(session);
-				if (!restoreState || restoreState.generation !== generation) return;
-				setTransientSessionThinkingLevel(session, restoreState.baselineLevel);
-			},
-		};
+		if (currentLevel) state.baselineLevel = currentLevel;
+		else setTransientSessionThinkingLevel(session, state.baselineLevel);
 	}
 
 	applyAdaptiveRequest(session: AgentSession, request: AutoThinkingAdaptiveRequest): AutoThinkingDecision | undefined {
 		const state = this.states.get(session);
 		if (!state) return undefined;
 
-		const decision = autoThinkingDecisionForDesiredLevel({
-			promptText: "",
-			availableLevels: session.getAvailableThinkingLevels(),
-		}, request.thinking, autoThinkingAdaptiveReason(request));
+		const decision = autoThinkingDecisionForDesiredLevel(
+			{ availableLevels: session.getAvailableThinkingLevels() },
+			request.thinking,
+			autoThinkingAdaptiveReason(request),
+		);
+		const currentModeLevel = state.effectiveLevel ?? normalizeThinkingLevel(session.thinkingLevel) ?? state.baselineLevel;
+		if (decision.level === currentModeLevel) return undefined;
+
 		state.effectiveLevel = decision.level;
 		setTransientSessionThinkingLevel(session, decision.level);
 		return decision;
@@ -147,12 +134,8 @@ export function normalizeAvailableThinkingLevels(levels: readonly string[] | und
 	return normalized.length > 0 ? normalized : ["off"];
 }
 
-export function chooseAutoThinkingLevel(input: AutoThinkingPromptInput): AutoThinkingDecision {
-	return autoThinkingDecisionForDesiredLevel(input, "medium");
-}
-
 export function autoThinkingDecisionForDesiredLevel(
-	input: AutoThinkingPromptInput,
+	input: AutoThinkingDecisionInput,
 	desiredLevel: ThinkingLevel,
 	reason?: string,
 ): AutoThinkingDecision {
@@ -216,7 +199,7 @@ export function closestSupportedThinkingLevel(desiredLevel: ThinkingLevel, avail
 
 function autoThinkingReason(desiredLevel: ThinkingLevel, level: ThinkingLevel): string {
 	const suffix = nearestAvailableSuffix(desiredLevel, level);
-	return `default medium baseline${suffix}`;
+	return `model-requested thinking level${suffix}`;
 }
 
 function autoThinkingAdaptiveReason(request: AutoThinkingAdaptiveRequest): string {
@@ -226,9 +209,16 @@ function autoThinkingAdaptiveReason(request: AutoThinkingAdaptiveRequest): strin
 		.trim()
 		.slice(0, 80);
 	const prefix = request.apply === "restart_current"
-		? "adaptive restart requested; applying to next call"
-		: "adaptive next call";
+		? "adaptive restart requested; switching mode from next call"
+		: "adaptive mode switch";
 	return reasonCode ? `${prefix}: ${reasonCode}` : prefix;
+}
+
+function defaultAutoThinkingLevelForSession(session: AgentSession): ThinkingLevel {
+	return closestSupportedThinkingLevel(
+		DEFAULT_AUTO_THINKING_BASELINE_LEVEL,
+		normalizeAvailableThinkingLevels(session.getAvailableThinkingLevels()),
+	);
 }
 
 function withNearestAvailableSuffix(reason: string, desiredLevel: ThinkingLevel, level: ThinkingLevel): string {

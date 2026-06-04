@@ -138,6 +138,7 @@ export class AppMenuItemsController {
 		return [
 			{ value: "copy", label: "Copy message", description: "Copy the full user message" },
 			{ value: "fork", label: "Fork", description: "Create a new session before this message" },
+			{ value: "fork-new-tab", label: "Fork in new tab", description: "Create a fork in a new tab" },
 			{ value: "undo", label: "Undo changes", description: "Revert recorded commands and cut session here" },
 		];
 	}

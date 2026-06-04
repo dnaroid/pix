@@ -11,6 +11,8 @@ type DisplayCluster = {
 };
 
 export function expandTabs(text: string, tabWidth = TAB_WIDTH): string {
+	if (!text.includes("\t")) return text;
+
 	let result = "";
 	let column = 0;
 
@@ -42,6 +44,8 @@ export function expandTabs(text: string, tabWidth = TAB_WIDTH): string {
 }
 
 export function stringDisplayWidth(text: string): number {
+	if (isPrintableAscii(text)) return text.length;
+
 	let width = 0;
 	for (const cluster of displayClusters(text)) {
 		width += cluster.width;
@@ -51,6 +55,8 @@ export function stringDisplayWidth(text: string): number {
 
 export function sliceByDisplayWidth(text: string, width: number): string {
 	const safeWidth = Math.max(0, width);
+	if (isPrintableAscii(text)) return text.slice(0, safeWidth);
+
 	let result = "";
 	let used = 0;
 	let sawAnsi = false;
@@ -100,12 +106,19 @@ export function sliceByDisplayColumns(text: string, startColumn: number, endColu
 
 export function padOrTrimDisplay(text: string, width: number): string {
 	const safeWidth = Math.max(0, width);
+	if (isPrintableAscii(text)) {
+		const trimmed = text.slice(0, safeWidth);
+		return `${trimmed}${" ".repeat(Math.max(0, safeWidth - trimmed.length))}`;
+	}
+
 	const trimmed = sliceByDisplayWidth(text, safeWidth);
 	return `${trimmed}${" ".repeat(Math.max(0, safeWidth - stringDisplayWidth(trimmed)))}`;
 }
 
 export function wrapDisplayLine(text: string, width: number): string[] {
 	const safeWidth = Math.max(1, width);
+	if (isPrintableAscii(text)) return wrapPrintableAsciiLine(text, safeWidth);
+
 	const chunks: string[] = [];
 	let chunk = "";
 	let chunkWidth = 0;
@@ -207,6 +220,24 @@ function appendTokenToEmptyChunk(token: string, width: number, chunks: string[])
 
 function trimTrailingWhitespace(text: string): string {
 	return text.replace(/\s+$/u, "");
+}
+
+function isPrintableAscii(text: string): boolean {
+	for (let index = 0; index < text.length; index += 1) {
+		const code = text.charCodeAt(index);
+		if (code < 0x20 || code > 0x7e) return false;
+	}
+	return true;
+}
+
+function wrapPrintableAsciiLine(text: string, width: number): string[] {
+	if (text.length <= width) return [text];
+
+	const chunks: string[] = [];
+	for (let start = 0; start < text.length; start += width) {
+		chunks.push(text.slice(start, start + width));
+	}
+	return chunks;
 }
 
 function ansiSequenceLength(text: string, index: number): number {

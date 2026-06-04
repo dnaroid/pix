@@ -68,6 +68,7 @@ import {
 	type AutoThinkingDecision,
 	type AutoThinkingAdaptiveRequest,
 } from "./thinking/auto-thinking.js";
+import { formatAutoThinkingControlFrameLine } from "./thinking/adaptive-thinking.js";
 import { appendPixSystemDisplayEntry } from "./session/pix-system-message.js";
 import {
 	type AgentSession,
@@ -213,6 +214,7 @@ export class PiUiExtendApp {
 			syncUserSessionEntryMetadata: () => this.workspaceActions.syncUserSessionEntryMetadata(),
 			captureInputState: () => ({ text: this.inputEditor.text, cursor: this.inputEditor.cursor }),
 			restoreInputState: (state) => this.restoreTabInputState(state.text, state.cursor),
+			closeMenusForTabSwitch: () => this.popupMenus.closeMenusForTabSwitch(),
 			captureDeferredUserMessages: () => this.queuedMessages.captureDeferredUserMessages(),
 			restoreDeferredUserMessages: (messages) => this.queuedMessages.restoreDeferredUserMessages(messages),
 			addEntry: (entry) => this.addEntry(entry),
@@ -374,6 +376,7 @@ export class PiUiExtendApp {
 			showToast: (message, kind) => this.showToast(message, kind),
 			render: () => this.render(),
 			isRunning: () => this.running,
+			forkSessionEntryInNewTab: (sessionEntryId) => this.tabsController.forkSessionEntryInNewTab(sessionEntryId),
 		});
 		this.sessionEvents = new AppSessionEventController({
 			entries: this.entries,
@@ -892,17 +895,11 @@ export class PiUiExtendApp {
 		return session.sessionFile ?? session.sessionId;
 	}
 
-	private async prepareAutoThinkingForPrompt(message: SubmittedUserMessage): Promise<{ restore(): void } | undefined> {
+	private async prepareAutoThinkingForPrompt(message: SubmittedUserMessage): Promise<void> {
 		const runtime = this.runtime;
 		const session = runtime?.session;
-		if (!session) return undefined;
-		const preparation = await this.autoThinkingController.prepareForPrompt(session, message);
-		if (preparation) {
-			const text = formatAutoThinkingDecision(preparation.decision);
-			appendPixSystemDisplayEntry(session, text);
-			this.addEntry({ id: createId("system"), kind: "system", text });
-		}
-		return preparation;
+		if (!session) return;
+		await this.autoThinkingController.prepareForPrompt(session, message);
 	}
 
 	private recordAutoThinkingDecision(session: AgentSession, decision: AutoThinkingDecision, control?: AutoThinkingAdaptiveRequest): void {
@@ -914,6 +911,7 @@ export class PiUiExtendApp {
 			reason: decision.reason,
 			availableLevels: decision.availableLevels,
 			...(control === undefined ? {} : {
+				controlFrame: formatAutoThinkingControlFrameLine(control),
 				controlThinking: control.thinking,
 				controlApply: control.apply,
 				controlReasonCode: control.reasonCode,

@@ -175,6 +175,61 @@ describe("AppTabsController", () => {
 		assert.equal(tabs.activeTabId, "tab-2");
 	});
 
+	it("closes menus after restoring the target tab input", async () => {
+		const activeRuntime = fakeRuntime("one", "/tmp/one.jsonl");
+		const targetRuntime = fakeRuntime("two", "/tmp/two.jsonl");
+		let currentRuntime = activeRuntime;
+		let currentInput = { text: "/model old", cursor: 10 };
+		const menuCloseInputs: string[] = [];
+		const controller = new AppTabsController({
+			options: { cwd: "/tmp", themeName: "dark", noSession: true } satisfies AppOptions,
+			blinkController: fakeBlinkController(),
+			runtime: () => currentRuntime,
+			createRuntimeForNewSession: async () => fakeRuntime("new", "/tmp/new.jsonl"),
+			createRuntimeForSession: async () => targetRuntime,
+			activateRuntime: async (runtime) => {
+				currentRuntime = runtime;
+			},
+			disposeRuntime: async () => {},
+			isRunning: () => true,
+			setStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			resetSessionView: () => {},
+			loadSessionHistory: () => {},
+			loadSessionHistoryAsync: async () => true,
+			syncUserSessionEntryMetadata: () => {},
+			captureInputState: () => currentInput,
+			restoreInputState: (state) => {
+				currentInput = state;
+			},
+			closeMenusForTabSwitch: () => {
+				menuCloseInputs.push(currentInput.text);
+			},
+			addEntry: () => {},
+			showToast: () => {},
+			render: () => {},
+		});
+		const tabs = controller as unknown as {
+			tabItems: SessionTab[];
+			activeTabId: string | undefined;
+			runtimesByTabId: Map<string, AgentSessionRuntime>;
+			inputStatesByTabId: Map<string, { text: string; cursor: number }>;
+		};
+		tabs.tabItems.push(
+			{ id: "tab-1", title: "one", status: "active", sessionPath: "/tmp/one.jsonl" },
+			{ id: "tab-2", title: "two", status: "waiting", sessionPath: "/tmp/two.jsonl" },
+		);
+		tabs.activeTabId = "tab-1";
+		tabs.runtimesByTabId.set("tab-1", activeRuntime);
+		tabs.inputStatesByTabId.set("tab-2", { text: "/thinking target", cursor: 16 });
+
+		await controller.switchToTab("tab-2");
+
+		assert.deepEqual(menuCloseInputs, ["/thinking target"]);
+		assert.equal(tabs.activeTabId, "tab-2");
+	});
+
 	it("preserves deferred queued messages per tab", async () => {
 		const activeRuntime = fakeRuntime("one", "/tmp/one.jsonl");
 		const targetRuntime = fakeRuntime("two", "/tmp/two.jsonl");
@@ -638,6 +693,77 @@ describe("AppTabsController", () => {
 		assert.equal(tabs.runtimesByTabId.get("tab-1"), activeRuntime);
 		assert.equal(tabs.runtimesByTabId.get(tabs.activeTabId ?? ""), newRuntime);
 		assert.deepEqual(toasts, []);
+	});
+
+	it("forks the active session into a new tab without replacing the old tab runtime", async () => {
+		const activeRuntime = fakeRuntime("one", "/tmp/one.jsonl");
+		const forkRuntime = fakeRuntime("one-copy", "/tmp/one.jsonl", {
+			forkSessionFile: "/tmp/fork.jsonl",
+			forkSessionName: "forked",
+			forkSelectedText: "retry prompt",
+		});
+		let currentRuntime: AgentSessionRuntime = activeRuntime;
+		let currentInput = { text: "draft one", cursor: 5 };
+		const createdFrom: string[] = [];
+		const entries: string[] = [];
+		const toasts: string[] = [];
+		const controller = new AppTabsController({
+			options: { cwd: "/tmp", themeName: "dark", noSession: false } satisfies AppOptions,
+			blinkController: fakeBlinkController(),
+			runtime: () => currentRuntime,
+			createRuntimeForNewSession: async () => fakeRuntime("new", "/tmp/new.jsonl"),
+			createRuntimeForSession: async (path) => {
+				createdFrom.push(path);
+				return forkRuntime;
+			},
+			activateRuntime: async (runtime) => {
+				currentRuntime = runtime;
+			},
+			disposeRuntime: async () => {},
+			isRunning: () => true,
+			setStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			resetSessionView: () => {},
+			loadSessionHistory: () => {},
+			loadSessionHistoryAsync: async () => true,
+			syncUserSessionEntryMetadata: () => {},
+			captureInputState: () => currentInput,
+			restoreInputState: (state) => {
+				currentInput = state;
+			},
+			addEntry: (entry) => {
+				if ("text" in entry) entries.push(entry.text);
+			},
+			showToast: (message) => {
+				toasts.push(message);
+			},
+			render: () => {},
+		});
+		const tabs = controller as unknown as {
+			tabItems: SessionTab[];
+			activeTabId: string | undefined;
+			runtimesByTabId: Map<string, AgentSessionRuntime>;
+			saveTabs: () => Promise<void>;
+		};
+		tabs.saveTabs = async () => {};
+		tabs.tabItems.push({ id: "tab-1", title: "one", status: "active", sessionPath: "/tmp/one.jsonl" });
+		tabs.activeTabId = "tab-1";
+		tabs.runtimesByTabId.set("tab-1", activeRuntime);
+
+		const opened = await controller.forkSessionEntryInNewTab("entry-1");
+
+		assert.equal(opened, true);
+		assert.deepEqual(createdFrom, ["/tmp/one.jsonl"]);
+		assert.equal(currentRuntime, forkRuntime);
+		assert.equal(forkRuntime.session.sessionFile, "/tmp/fork.jsonl");
+		assert.equal(tabs.tabItems.length, 2);
+		assert.equal(tabs.activeTabId, tabs.tabItems[1]?.id);
+		assert.equal(tabs.runtimesByTabId.get("tab-1"), activeRuntime);
+		assert.equal(tabs.runtimesByTabId.get(tabs.activeTabId ?? ""), forkRuntime);
+		assert.deepEqual(currentInput, { text: "retry prompt", cursor: "retry prompt".length });
+		assert.deepEqual(entries, ["Forked from entry entry-1 in a new tab."]);
+		assert.deepEqual(toasts, ["Fork opened in new tab"]);
 	});
 
 	it("marks explicit new tabs with the New title placeholder", async () => {
@@ -1401,7 +1527,16 @@ describe("AppTabsController", () => {
 function fakeRuntime(
 	sessionId: string,
 	sessionFile: string,
-	options: { isStreaming?: boolean; sessionName?: string; newSessionFile?: string; newSessionName?: string } = {},
+	options: {
+		isStreaming?: boolean;
+		sessionName?: string;
+		newSessionFile?: string;
+		newSessionName?: string;
+		forkSessionFile?: string;
+		forkSessionName?: string;
+		forkSelectedText?: string;
+		forkCancelled?: boolean;
+	} = {},
 ): AgentSessionRuntime {
 	const createSession = (id: string, file: string, name: string | undefined) => {
 		const listeners: Array<(event: AgentSessionEvent) => void> = [];
@@ -1429,6 +1564,7 @@ function fakeRuntime(
 		session: ReturnType<typeof createSession>;
 		switchSession(path: string): Promise<{ cancelled: false }>;
 		newSession(): Promise<{ cancelled: false }>;
+		fork(entryId: string): Promise<{ cancelled: boolean; selectedText?: string }>;
 		emitSessionEvent(event: AgentSessionEvent): void;
 	} = {
 		cwd: "/tmp",
@@ -1445,6 +1581,18 @@ function fakeRuntime(
 				Object.prototype.hasOwnProperty.call(options, "newSessionName") ? options.newSessionName : "new",
 			);
 			return { cancelled: false };
+		},
+		fork: async (_entryId: string) => {
+			if (options.forkCancelled) return { cancelled: true };
+			runtime.session = createSession(
+				"fork",
+				options.forkSessionFile ?? "/tmp/fork.jsonl",
+				Object.prototype.hasOwnProperty.call(options, "forkSessionName") ? options.forkSessionName : "fork",
+			);
+			return {
+				cancelled: false,
+				...(options.forkSelectedText === undefined ? {} : { selectedText: options.forkSelectedText }),
+			};
 		},
 		emitSessionEvent: (event: AgentSessionEvent) => {
 			runtime.session.emit(event);

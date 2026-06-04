@@ -218,7 +218,7 @@ describe("popup menu header", () => {
 
 	it("formats user message jump items without repeated action hints", () => {
 		const text = "\u0434\u043e\u0431\u0430\u0432\u044c \u0432 \u0441\u0442\u0430\u0442\u0443\u0441-\u0431\u0430\u0440 \u0438\u043a\u043e\u043d\u043a\u0443 \u043f\u043e\u043a\u0430\u0437\u0430 \u043c\u0435\u043d\u044e \u043f\u0435\u0440\u0435\u0445\u043e\u0434\u0430 \u043a \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044c\u0441\u043a\u0438\u043c \u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u044f\u043c";
-		const [item] = buildUserMessageJumpItems([{ id: "user-1", kind: "user", text }], "");
+		const [item] = buildUserMessageJumpItems([{ id: "user-1", kind: "user", text }]);
 
 		assert.equal(item?.label, `1. ${text}`);
 		assert.equal(item?.description, undefined);
@@ -371,6 +371,30 @@ describe("popup menu header", () => {
 		});
 		controller.closeQueueMessageMenu();
 		assert.equal(controller.directMenu, undefined);
+	});
+
+	it("closes and dismisses input menus for the restored tab input", () => {
+		let input = "/model opus";
+		const controller = createPopupMenuController({
+			...createPopupMenuHost([]),
+			getInput: () => input,
+			parseSlashInput: (text) => {
+				const match = /^\/(\S+)(?:\s+(.*))?$/u.exec(text);
+				return match ? {
+					commandName: match[1] ?? "",
+					hasArguments: match[2] !== undefined,
+					arguments: match[2] ?? "",
+				} : undefined;
+			},
+			getModelMenuItems: () => [{ value: { model: { provider: "test", model: "opus" } as never, ref: "test/opus", current: false }, label: "opus" }],
+		});
+
+		assert.equal(controller.syncActivePopupMenu(), "model");
+		controller.closeMenusForTabSwitch();
+
+		assert.equal(controller.syncActivePopupMenu(), undefined);
+		input = "/model sonnet";
+		assert.equal(controller.syncActivePopupMenu(), "model");
 	});
 
 });

@@ -299,7 +299,7 @@ export class ModelCommandActions {
 		this.host.render();
 		if (level === AUTO_THINKING_LEVEL) {
 			this.host.setAutoThinkingEnabled(runtime.session, true);
-			this.addPersistentSystemEntry(runtime.session, "Auto thinking enabled. Pix will choose a supported thinking level for each new prompt.");
+			this.addPersistentSystemEntry(runtime.session, "Auto thinking enabled. Default thinking is medium; the model can request persistent mode changes with Pix control frames.");
 			this.host.setSessionStatus(runtime.session);
 			return;
 		}
