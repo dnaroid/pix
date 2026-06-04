@@ -4,8 +4,8 @@ export const STATUS_KEY = "dcp:antigravity";
 export const LEGACY_STATUS_KEY = "antigravity";
 export const ALL_ACCOUNTS_EXHAUSTED_MARKER = "ANTIGRAVITY_ALL_ACCOUNTS_EXHAUSTED";
 
-export const CLIENT_ID = process.env.PIX_ANTIGRAVITY_GOOGLE_CLIENT_ID ?? process.env.ANTIGRAVITY_GOOGLE_CLIENT_ID ?? "";
-export const CLIENT_SECRET = process.env.PIX_ANTIGRAVITY_GOOGLE_CLIENT_SECRET ?? process.env.ANTIGRAVITY_GOOGLE_CLIENT_SECRET ?? "";
+export const CLIENT_ID = "";
+export const CLIENT_SECRET = "";
 export const REDIRECT_URI = "http://localhost:51121/oauth-callback";
 export const SCOPES = [
 	"https://www.googleapis.com/auth/cloud-platform",

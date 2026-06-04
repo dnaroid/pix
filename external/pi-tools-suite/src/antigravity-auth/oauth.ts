@@ -93,9 +93,7 @@ function extractOAuthParams(input: string): { code: string; state: string } {
 
 export async function loginAntigravity(callbacks: AntigravityLoginCallbacks): Promise<OAuthCredentials> {
 	try {
-		if (!CLIENT_ID || !CLIENT_SECRET) {
-			throw new Error("Antigravity Google OAuth credentials are not configured; set PIX_ANTIGRAVITY_GOOGLE_CLIENT_ID and PIX_ANTIGRAVITY_GOOGLE_CLIENT_SECRET.");
-		}
+		if (!CLIENT_ID || !CLIENT_SECRET) throw new Error("Antigravity Google OAuth credentials are not bundled.");
 
 		const { verifier, challenge } = generatePkce();
 		const state = encodeState({ verifier });

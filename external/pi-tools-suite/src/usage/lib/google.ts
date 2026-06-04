@@ -157,14 +157,8 @@ async function readAntigravityAccounts(): Promise<AntigravityAccount[]> {
 
 const GOOGLE_TOKEN_REFRESH_URL = "https://oauth2.googleapis.com/token";
 
-const GOOGLE_CLIENT_ID =
-  process.env.PIX_ANTIGRAVITY_GOOGLE_CLIENT_ID ??
-  process.env.ANTIGRAVITY_GOOGLE_CLIENT_ID ??
-  "";
-const GOOGLE_CLIENT_SECRET =
-  process.env.PIX_ANTIGRAVITY_GOOGLE_CLIENT_SECRET ??
-  process.env.ANTIGRAVITY_GOOGLE_CLIENT_SECRET ??
-  "";
+const GOOGLE_CLIENT_ID = "";
+const GOOGLE_CLIENT_SECRET = "";
 
 // ============================================================================
 // 工具函数
@@ -259,9 +253,7 @@ async function refreshAccessToken(
   refreshToken: string,
 ): Promise<{ access_token: string; expires_in: number }> {
   if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
-    throw new Error(
-      "Antigravity Google OAuth credentials are not configured; set PIX_ANTIGRAVITY_GOOGLE_CLIENT_ID and PIX_ANTIGRAVITY_GOOGLE_CLIENT_SECRET.",
-    );
+    throw new Error("Antigravity Google OAuth credentials are not bundled.");
   }
 
   const params = new URLSearchParams({
