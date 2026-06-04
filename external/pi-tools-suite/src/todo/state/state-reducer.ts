@@ -1,4 +1,4 @@
-import type { Task, TaskAction, TaskMutationParams, TaskPriority, TaskStatus } from "../tool/types.js";
+import type { Task, TaskAction, TaskMutationParams, TaskPriority, TaskStatus, TodoThinkingLevel } from "../tool/types.js";
 import { isTransitionValid } from "./invariants.js";
 import type { TaskState } from "./state.js";
 import { detectCycle } from "./task-graph.js";
@@ -32,6 +32,10 @@ function uniqueNumbers(values: number[] | undefined): number[] {
 function normalizeTags(tags: string[] | undefined): string[] | undefined {
 	const normalized = [...new Set((tags ?? []).map((tag) => tag.trim()).filter(Boolean))];
 	return normalized.length ? normalized : undefined;
+}
+
+function isTodoThinkingLevel(value: unknown): value is TodoThinkingLevel {
+	return value === "off" || value === "minimal" || value === "low" || value === "medium" || value === "high" || value === "xhigh";
 }
 
 function findTask(state: TaskState, id: number): Task | undefined {
@@ -88,6 +92,7 @@ function coerceTask(value: unknown, fallbackId: number): Task | undefined {
 	if (typeof v.description === "string" && v.description) task.description = v.description;
 	if (typeof v.activeForm === "string" && v.activeForm) task.activeForm = v.activeForm;
 	if (v.priority === "low" || v.priority === "medium" || v.priority === "high" || v.priority === "urgent") task.priority = v.priority;
+	if (isTodoThinkingLevel(v.thinking)) task.thinking = v.thinking;
 	if (typeof v.parentId === "number" && Number.isFinite(v.parentId)) task.parentId = v.parentId;
 	const blockedBy = Array.isArray(v.blockedBy) ? uniqueNumbers(v.blockedBy as number[]) : undefined;
 	if (blockedBy?.length) task.blockedBy = blockedBy;
@@ -177,6 +182,7 @@ export function applyTaskMutation(state: TaskState, action: TaskAction, params: 
 			if (params.description) newTask.description = params.description;
 			if (params.activeForm) newTask.activeForm = params.activeForm;
 			if (params.priority) newTask.priority = params.priority;
+			if (params.thinking) newTask.thinking = params.thinking;
 			if (params.parentId !== undefined && params.parentId !== null) newTask.parentId = params.parentId;
 			const blockedBy = uniqueNumbers(params.blockedBy);
 			if (blockedBy.length) newTask.blockedBy = blockedBy;
@@ -194,7 +200,7 @@ export function applyTaskMutation(state: TaskState, action: TaskAction, params: 
 			const current = state.tasks[idx];
 			const hasMutation =
 				params.subject !== undefined || params.description !== undefined || params.activeForm !== undefined || params.status !== undefined ||
-				params.priority !== undefined || params.parentId !== undefined || params.clearParent === true || params.owner !== undefined ||
+				params.priority !== undefined || params.thinking !== undefined || params.parentId !== undefined || params.clearParent === true || params.owner !== undefined ||
 				params.metadata !== undefined || params.tags !== undefined || (params.addTags?.length ?? 0) > 0 || (params.removeTags?.length ?? 0) > 0 ||
 				(params.addBlockedBy?.length ?? 0) > 0 || (params.removeBlockedBy?.length ?? 0) > 0;
 			if (!hasMutation) return errorResult(state, "update requires at least one mutable field");
@@ -249,6 +255,7 @@ export function applyTaskMutation(state: TaskState, action: TaskAction, params: 
 			if (params.description !== undefined) updated.description = params.description;
 			if (params.activeForm !== undefined) updated.activeForm = params.activeForm;
 			if (params.priority !== undefined) updated.priority = params.priority;
+			if (params.thinking !== undefined) updated.thinking = params.thinking;
 			if (params.owner !== undefined) updated.owner = params.owner;
 			if (newParentId === undefined) delete updated.parentId;
 			else updated.parentId = newParentId;

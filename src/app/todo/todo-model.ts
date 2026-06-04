@@ -1,5 +1,5 @@
-import { TODO_ACTIONS, TODO_PRIORITIES, TODO_STATUSES } from "../constants.js";
-import type { StyledSegment, TodoAction, TodoDetails, TodoLiveStateEvent, TodoPriority, TodoStatus, TodoTask, TodoTaskLinePart, TodoTaskRow } from "../types.js";
+import { THINKING_LEVELS, TODO_ACTIONS, TODO_PRIORITIES, TODO_STATUSES } from "../constants.js";
+import type { StyledSegment, ThinkingLevel, TodoAction, TodoDetails, TodoLiveStateEvent, TodoPriority, TodoStatus, TodoTask, TodoTaskLinePart, TodoTaskRow } from "../types.js";
 import { isNumberArray, isRecord, isStringArray } from "../guards.js";
 import { APP_ICONS } from "../icons.js";
 
@@ -15,6 +15,10 @@ export function isTodoPriority(value: unknown): value is TodoPriority {
 	return typeof value === "string" && TODO_PRIORITIES.includes(value as TodoPriority);
 }
 
+export function isTodoThinkingLevel(value: unknown): value is ThinkingLevel {
+	return typeof value === "string" && THINKING_LEVELS.includes(value as ThinkingLevel);
+}
+
 export function isTodoTask(value: unknown): value is TodoTask {
 	if (!isRecord(value)) return false;
 	if (typeof value.id !== "number") return false;
@@ -23,6 +27,7 @@ export function isTodoTask(value: unknown): value is TodoTask {
 	if (value.description !== undefined && typeof value.description !== "string") return false;
 	if (value.activeForm !== undefined && typeof value.activeForm !== "string") return false;
 	if (value.priority !== undefined && !isTodoPriority(value.priority)) return false;
+	if (value.thinking !== undefined && !isTodoThinkingLevel(value.thinking)) return false;
 	if (value.parentId !== undefined && typeof value.parentId !== "number") return false;
 	if (value.blockedBy !== undefined && !isNumberArray(value.blockedBy)) return false;
 	if (value.tags !== undefined && !isStringArray(value.tags)) return false;
@@ -108,6 +113,7 @@ export function todoTaskLineParts(task: TodoTask, options: { depth?: number } = 
 	const parts: TodoTaskLinePart[] = [{ text: `${treePrefix}${todoStatusIcon(task.status)}` }, { text: `#${task.id}`, muted: true }, { text: task.subject }];
 	if (task.status === "in_progress" && task.activeForm) parts.push({ text: `— ${task.activeForm}` });
 	if (task.priority) parts.push({ text: `(${task.priority})`, muted: true });
+	if (task.thinking) parts.push({ text: `[${task.thinking}]`, thinking: task.thinking });
 	if (task.parentId !== undefined) parts.push({ text: `parent:#${task.parentId}` });
 	if (task.blockedBy && task.blockedBy.length > 0) parts.push({ text: `blocked:${task.blockedBy.map((id) => `#${id}`).join(",")}` });
 	if (task.tags && task.tags.length > 0) parts.push({ text: task.tags.map((tag) => `#${tag}`).join(" "), muted: true });
@@ -118,7 +124,7 @@ export function formatTodoTaskLine(task: TodoTask, options: { depth?: number } =
 	return todoTaskLineParts(task, options).map((part) => part.text).join(" ");
 }
 
-export function todoTaskLineSegments(task: TodoTask, mutedColor: string, options: { depth?: number } = {}): StyledSegment[] {
+export function todoTaskLineSegments(task: TodoTask, mutedColor: string, options: { depth?: number; thinkingColor?: (level: ThinkingLevel) => string } = {}): StyledSegment[] {
 	const segments: StyledSegment[] = [];
 	let offset = 0;
 	for (const [index, part] of todoTaskLineParts(task, options).entries()) {
@@ -126,7 +132,11 @@ export function todoTaskLineSegments(task: TodoTask, mutedColor: string, options
 		const start = offset;
 		const end = start + part.text.length;
 		const segment: StyledSegment = { start, end };
-		if (part.muted) segment.foreground = mutedColor;
+		if (part.thinking) {
+			const foreground = options.thinkingColor?.(part.thinking);
+			if (foreground) segment.foreground = foreground;
+		}
+		else if (part.muted) segment.foreground = mutedColor;
 		if (task.status === "completed" && index > 0) segment.strikethrough = true;
 		if ((segment.foreground || segment.strikethrough) && end > start) segments.push(segment);
 		offset = end;

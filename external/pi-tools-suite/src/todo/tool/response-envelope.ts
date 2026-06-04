@@ -11,9 +11,10 @@ function formatListLine(t: Task): string {
 	const block = t.blockedBy?.length ? ` ⛓ ${t.blockedBy.map((id) => `#${id}`).join(",")}` : "";
 	const parent = t.parentId !== undefined ? ` ↳ #${t.parentId}` : "";
 	const priority = t.priority ? ` (${t.priority})` : "";
+	const thinking = t.thinking ? ` {thinking:${t.thinking}}` : "";
 	const tags = t.tags?.length ? ` ${t.tags.map((tag) => `#${tag}`).join(" ")}` : "";
 	const form = t.status === "in_progress" && t.activeForm ? ` (${t.activeForm})` : "";
-	return `[${t.status}] #${t.id} ${t.subject}${priority}${form}${parent}${block}${tags}`;
+	return `[${t.status}] #${t.id} ${t.subject}${priority}${thinking}${form}${parent}${block}${tags}`;
 }
 
 /**
@@ -26,6 +27,7 @@ function formatGetLines(task: Task, state: TaskState): string {
 	if (task.description) lines.push(`  description: ${task.description}`);
 	if (task.activeForm) lines.push(`  activeForm: ${task.activeForm}`);
 	if (task.priority) lines.push(`  priority: ${task.priority}`);
+	if (task.thinking) lines.push(`  thinking: ${task.thinking}`);
 	if (task.parentId !== undefined) lines.push(`  parentId: #${task.parentId}`);
 	if (task.blockedBy?.length) {
 		lines.push(`  blockedBy: ${task.blockedBy.map((id) => `#${id}`).join(", ")}`);

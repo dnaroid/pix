@@ -5,6 +5,9 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
     // "ast-grep",
     // "dcp"
   ],
+  // When true, todo items may carry a per-task thinking level and the todo
+  // module will switch/restore Pi's thinking level as in-progress tasks change.
+  "todoThinking": false,
   "terminalBell": { "sound": true },
   "dcp": {
     "enabled": true,

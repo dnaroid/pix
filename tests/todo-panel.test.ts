@@ -66,6 +66,28 @@ describe("todo panel", () => {
 		assert.ok(lines[2]?.text.startsWith(`${APP_ICONS.deferred} #3 Sibling`));
 	});
 
+	it("shows per-task thinking using the thinking palette color", () => {
+		const details: TodoDetails = {
+			action: "list",
+			params: {},
+			nextId: 3,
+			tasks: [
+				{ id: 1, subject: "Deep fix", status: "in_progress", thinking: "high" },
+				{ id: 2, subject: "Report", status: "pending", thinking: "off" },
+			],
+		};
+
+		const expanded = renderTodoPanel(details, true, 80, THEMES.dark.colors);
+		const collapsed = renderTodoPanel(details, false, 80, THEMES.dark.colors);
+
+		assert.ok(expanded[0]?.text.includes("[high]"));
+		assert.ok(expanded[1]?.text.includes("[off]"));
+		assertThinkingSegmentColor(expanded[0]!, "[high]", THEMES.dark.colors.error);
+		assertThinkingSegmentColor(expanded[1]!, "[off]", THEMES.dark.colors.muted);
+		assert.ok(collapsed[0]?.text.includes("[high]"));
+		assertThinkingSegmentColor(collapsed[0]!, "[high]", THEMES.dark.colors.error);
+	});
+
 	it("leaves subagents panel rows on the terminal default background", () => {
 		const state: SubagentsWidgetState = {
 			runDir: "/tmp/subagents/run-1",
@@ -86,3 +108,9 @@ describe("todo panel", () => {
 		assert.equal(lines[0]?.backgroundOverride, undefined);
 	});
 });
+
+function assertThinkingSegmentColor(line: { text: string; segments?: readonly { start: number; end: number; foreground?: string }[] }, label: string, color: string): void {
+	const start = line.text.indexOf(label);
+	assert.ok(start >= 0, `expected ${label} in ${line.text}`);
+	assert.ok(line.segments?.some((segment) => segment.start === start && segment.end === start + label.length && segment.foreground === color));
+}

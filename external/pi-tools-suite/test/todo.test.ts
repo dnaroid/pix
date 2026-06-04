@@ -25,6 +25,8 @@ class FakePi {
 	events = new Map<string, Array<(event: unknown, ctx: any) => unknown>>();
 	sentMessages: string[] = [];
 	sentMessageOptions: unknown[] = [];
+	thinkingLevel = "off";
+	setThinkingLevelCalls: string[] = [];
 
 	registerTool(tool: any) { this.tools.set(tool.name, tool); }
 	registerCommand(name: string, command: any) { this.commands.set(name, command); }
@@ -36,6 +38,11 @@ class FakePi {
 	sendUserMessage(message: string, options?: unknown) {
 		this.sentMessages.push(message);
 		this.sentMessageOptions.push(options);
+	}
+	getThinkingLevel() { return this.thinkingLevel; }
+	setThinkingLevel(level: string) {
+		this.thinkingLevel = level;
+		this.setThinkingLevelCalls.push(level);
 	}
 	async emit(name: string, event: unknown, ctx: any = {}) {
 		for (const handler of this.events.get(name) ?? []) await handler(event, ctx);
@@ -97,6 +104,22 @@ describe.serial("todo tool", () => {
 		const cleared = await tool.execute("call", { action: "clear" }, undefined, undefined, {});
 		expect(cleared.content[0].text).toContain("Cleared");
 		expect(getTodos()).toEqual([]);
+	});
+
+	test.serial("stores and formats per-task thinking levels", async () => {
+		const { registerTodoTool, getTodos } = await loadTodoModule();
+		const pi = new FakePi();
+		registerTodoTool(pi as any);
+		const tool = pi.tools.get("todo");
+
+		await tool.execute("call", { action: "create", subject: "Deep fix", thinking: "high" }, undefined, undefined, {});
+		expect(getTodos()).toMatchObject([{ id: 1, subject: "Deep fix", status: "pending", thinking: "high" }]);
+
+		const listed = await tool.execute("call", { action: "list" }, undefined, undefined, {});
+		expect(listed.content[0].text).toContain("[pending] #1 Deep fix {thinking:high}");
+
+		const got = await tool.execute("call", { action: "get", id: 1 }, undefined, undefined, {});
+		expect(got.content[0].text).toContain("thinking: high");
 	});
 
 	test.serial("publishes live todo state events after commits", async () => {
@@ -492,6 +515,42 @@ describe.serial("/todos command", () => {
 });
 
 describe.serial("todo extension lifecycle", () => {
+	test.serial("adds compact thinking prompt and switches/restores active task thinking", async () => {
+		const previousEnv = process.env.PI_TOOLS_SUITE_TODO_THINKING;
+		process.env.PI_TOOLS_SUITE_TODO_THINKING = "1";
+		const extension = (await import("../src/todo/index.js")).default;
+		const pi = new FakePi();
+		const ctx = {
+			cwd: mkdtempSync(join(tmpdir(), "todo-thinking-")),
+			hasUI: false,
+			model: { reasoning: true, thinkingLevelMap: { xhigh: null } },
+			sessionManager: { getBranch: () => [] },
+			isIdle: () => true,
+			hasPendingMessages: () => false,
+		};
+		try {
+			extension(pi as any);
+			await pi.emit("session_start", {}, ctx);
+			const tool = pi.tools.get("todo");
+			expect(tool.promptSnippet).toContain("Optional per-item thinking: off|minimal|low|medium|high");
+			expect(tool.promptSnippet).not.toContain("xhigh");
+			expect(tool.promptGuidelines.join("\n")).toContain("Split todos to change thinking by work type");
+
+			await tool.execute("todo-1", { action: "create", subject: "Investigate", thinking: "high" }, undefined, undefined, ctx);
+			await tool.execute("todo-2", { action: "update", id: 1, status: "in_progress", activeForm: "investigating" }, undefined, undefined, ctx);
+			expect(pi.thinkingLevel).toBe("high");
+			expect(pi.setThinkingLevelCalls).toEqual(["high"]);
+
+			await tool.execute("todo-3", { action: "update", id: 1, status: "completed" }, undefined, undefined, ctx);
+			expect(pi.thinkingLevel).toBe("off");
+			expect(pi.setThinkingLevelCalls).toEqual(["high", "off"]);
+		} finally {
+			if (previousEnv === undefined) delete process.env.PI_TOOLS_SUITE_TODO_THINKING;
+			else process.env.PI_TOOLS_SUITE_TODO_THINKING = previousEnv;
+			rmSync(ctx.cwd, { recursive: true, force: true });
+		}
+	});
+
 	test.serial("loads persisted plans on startup, prompts for scope, and suppresses duplicate auto-nudge", async () => {
 		const extension = (await import("../src/todo/index.js")).default;
 		const { savePersistedPlan } = await import("../src/todo/state/persistence.js");

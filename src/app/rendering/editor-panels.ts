@@ -2,6 +2,7 @@ import { stringDisplayWidth } from "../../terminal-width.js";
 import type { Theme } from "../../theme.js";
 import { SUBAGENTS_WIDGET_MAX_ROWS } from "../constants.js";
 import { ellipsizeDisplay, padOrTrimPlain, wrapLine } from "./render-text.js";
+import { thinkingLevelThemeColor } from "./status-line-renderer.js";
 import {
 	activeSubagentStates,
 	formatElapsedSince,
@@ -36,13 +37,14 @@ export function renderTodoPanel(details: TodoDetails | undefined, expanded: bool
 	const headerText = `todos ${expanded ? "▾" : "▸"}${stats ? ` ${stats}` : ""}`;
 	const todoPanelColor = colors.warning;
 	const todoMetaColor = colors.muted;
+	const todoThinkingColor = (level: string) => thinkingLevelThemeColor(level, colors);
 
 	if (!expanded) {
 		const prefix = `${headerText} — current: `;
 		const current = activeTask ? formatTodoTaskLine(activeTask) : "no active todo";
 		const collapsedText = `${prefix}${current}`;
 		const segments = activeTask
-			? todoTaskLineSegments(activeTask, todoMetaColor).map((segment) => ({
+			? todoTaskLineSegments(activeTask, todoMetaColor, { thinkingColor: todoThinkingColor }).map((segment) => ({
 				...segment,
 				start: segment.start + prefix.length,
 				end: segment.end + prefix.length,
@@ -60,7 +62,7 @@ export function renderTodoPanel(details: TodoDetails | undefined, expanded: bool
 	const lines: RenderedLine[] = [];
 	for (const { task, depth } of visibleTodoTaskRows(details)) {
 		const text = formatTodoTaskLine(task, { depth });
-		const segments = todoTaskLineSegments(task, todoMetaColor, { depth });
+		const segments = todoTaskLineSegments(task, todoMetaColor, { depth, thinkingColor: todoThinkingColor });
 		let start = 0;
 		for (const wrapped of wrapLine(text, contentWidth)) {
 			lines.push({

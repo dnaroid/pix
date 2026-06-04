@@ -1,10 +1,12 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { loadPiToolsSuiteConfig } from "../config.js";
 import { autoClearCompletedTodos } from "./state/auto-clear.js";
 import { loadPersistedPlan, syncPersistedPlan } from "./state/persistence.js";
 import { replayFromBranch } from "./state/replay.js";
 import { ACTIVE_STATUSES, isTaskBlocked, selectVisibleTasks } from "./state/selectors.js";
 import { getState, replaceState } from "./state/store.js";
-import { publishTodoState, registerTodosCommand, registerTodoTool } from "./todo.js";
+import { DEFAULT_PROMPT_GUIDELINES, DEFAULT_PROMPT_SNIPPET, publishTodoState, registerTodosCommand, registerTodoTool } from "./todo.js";
+import type { TaskMutationParams } from "./tool/types.js";
 
 const TODO_NUDGE_LIMIT = 8;
 const TODO_NUDGE_INITIAL_DELAY_MS = 5_000;
@@ -12,6 +14,33 @@ const TODO_NUDGE_IDLE_RETRY_DELAY_MS = 100;
 const TODO_NUDGE_MAX_IDLE_ATTEMPTS = 40;
 const ASK_USER_TOOL_NAMES = new Set(["ask_user", "ask_user_question", "question"]);
 const TODO_RECONCILE_ACTIONS = new Set(["list"]);
+const TODO_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+
+type TodoThinkingLevel = (typeof TODO_THINKING_LEVELS)[number];
+type ModelLike = { reasoning?: boolean; thinkingLevelMap?: Partial<Record<TodoThinkingLevel, unknown | null>> };
+
+function isTodoThinkingLevel(value: unknown): value is TodoThinkingLevel {
+	return TODO_THINKING_LEVELS.includes(value as TodoThinkingLevel);
+}
+
+function getAvailableTodoThinkingLevels(model: unknown): TodoThinkingLevel[] {
+	const m = model as ModelLike | undefined;
+	if (!m?.reasoning) return ["off"];
+	const map = m.thinkingLevelMap;
+	return TODO_THINKING_LEVELS.filter((level) => level === "off" || map?.[level] !== null);
+}
+
+function buildThinkingPromptParts(model: unknown): { promptSnippet?: string; promptGuidelines?: string[] } {
+	const levels = getAvailableTodoThinkingLevels(model);
+	if (levels.length <= 1) return {};
+	return {
+		promptSnippet: `${DEFAULT_PROMPT_SNIPPET} Optional per-item thinking: ${levels.join("|")}.`.trim(),
+		promptGuidelines: [
+			...DEFAULT_PROMPT_GUIDELINES,
+			`If todoThinking is enabled, set task \`thinking\` only when useful; choose from ${levels.join(", ")}. Split todos to change thinking by work type (e.g. final report can use off; retry/hard debugging can use higher thinking).`,
+		],
+	};
+}
 
 function isAskUserToolName(toolName: string): boolean {
 	return ASK_USER_TOOL_NAMES.has(toolName);
@@ -118,11 +147,79 @@ function emitPersistedPlanPrompt(pi: ExtensionAPI, ctx: ExtensionContext, prompt
 }
 
 export default function (pi: ExtensionAPI) {
+	let currentModel: unknown;
+	const todoThinkingEnabled = loadPiToolsSuiteConfig(["todo"]).todoThinking;
+	const rememberedThinkingByTaskId = new Map<number, TodoThinkingLevel>();
 	let lastNudgedSignature: string | undefined;
 	let lastFinalGuardSignature: string | undefined;
 	let todoDirtySinceReconcile = false;
 	let nudgeTimer: ReturnType<typeof setTimeout> | undefined;
 	const pendingAskUserToolCallIds = new Set<string>();
+
+	function registerTodoToolWithCurrentPrompt(): void {
+		const thinkingPrompt = todoThinkingEnabled ? buildThinkingPromptParts(currentModel) : {};
+		registerTodoTool(pi, {
+			...thinkingPrompt,
+			afterCommit: async (state, ctx, info) => {
+				if (todoThinkingEnabled) applyTodoThinkingAfterCommit(state, info);
+
+				if (TODO_RECONCILE_ACTIONS.has(info.action)) {
+					todoDirtySinceReconcile = false;
+					lastFinalGuardSignature = undefined;
+				} else if (info.action !== "get" && info.action !== "export") {
+					todoDirtySinceReconcile = true;
+				}
+				try {
+					const sync = syncPersistedPlan(ctx.cwd, state);
+					if (sync?.completed) console.log(`rpiv-todo: completed persisted plan and removed ${sync.path}`);
+				} catch (err) {
+					console.warn(`rpiv-todo: failed to sync persisted plan — ${(err as Error).message}`);
+				}
+			},
+		});
+	}
+
+	function applyTodoThinkingAfterCommit(state: ReturnType<typeof getState>, info: { action: string; params: TaskMutationParams }): void {
+		const mutations = getTodoThinkingMutations(info.action, info.params);
+		if (mutations.length === 0) return;
+		for (const mutation of mutations) {
+			if (mutation.id === undefined || mutation.status === "in_progress") continue;
+			restoreTaskThinking(mutation.id);
+		}
+		for (const mutation of mutations) {
+			if (mutation.id === undefined) continue;
+			const task = state.tasks.find((item) => item.id === mutation.id);
+			if (!task || task.status !== "in_progress" || !task.thinking) continue;
+			if (mutation.status !== "in_progress" && mutation.thinking === undefined) continue;
+			switchToTaskThinking(task.id, task.thinking);
+		}
+	}
+
+	function getTodoThinkingMutations(action: string, params: TaskMutationParams): TaskMutationParams[] {
+		if (action === "update") return [params];
+		if (action === "batch_update") return params.items ?? [];
+		return [];
+	}
+
+	function getCurrentThinkingLevel(): TodoThinkingLevel | undefined {
+		const level = (pi as { getThinkingLevel?: () => unknown }).getThinkingLevel?.();
+		return isTodoThinkingLevel(level) ? level : undefined;
+	}
+
+	function switchToTaskThinking(taskId: number, level: TodoThinkingLevel): void {
+		if (!getAvailableTodoThinkingLevels(currentModel).includes(level)) return;
+		const current = getCurrentThinkingLevel();
+		if (!current) return;
+		if (!rememberedThinkingByTaskId.has(taskId)) rememberedThinkingByTaskId.set(taskId, current);
+		if (current !== level) (pi as { setThinkingLevel?: (level: TodoThinkingLevel) => void }).setThinkingLevel?.(level);
+	}
+
+	function restoreTaskThinking(taskId: number): void {
+		const previous = rememberedThinkingByTaskId.get(taskId);
+		if (!previous) return;
+		rememberedThinkingByTaskId.delete(taskId);
+		if (getCurrentThinkingLevel() !== previous) (pi as { setThinkingLevel?: (level: TodoThinkingLevel) => void }).setThinkingLevel?.(previous);
+	}
 
 	function clearNudgeTimer(): void {
 		if (!nudgeTimer) return;
@@ -163,25 +260,12 @@ export default function (pi: ExtensionAPI) {
 		}, delayMs);
 	}
 
-	registerTodoTool(pi, {
-		afterCommit: (state, ctx, info) => {
-			if (TODO_RECONCILE_ACTIONS.has(info.action)) {
-				todoDirtySinceReconcile = false;
-				lastFinalGuardSignature = undefined;
-			} else if (info.action !== "get" && info.action !== "export") {
-				todoDirtySinceReconcile = true;
-			}
-			try {
-				const sync = syncPersistedPlan(ctx.cwd, state);
-				if (sync?.completed) console.log(`rpiv-todo: completed persisted plan and removed ${sync.path}`);
-			} catch (err) {
-				console.warn(`rpiv-todo: failed to sync persisted plan — ${(err as Error).message}`);
-			}
-		},
-	});
+	registerTodoToolWithCurrentPrompt();
 	registerTodosCommand(pi);
 
 	pi.on("session_start", async (_event, ctx) => {
+		currentModel = ctx.model;
+		registerTodoToolWithCurrentPrompt();
 		const persisted = loadPersistedPlan(ctx.cwd);
 		const loaded = autoClearCompletedTodos(persisted?.state ?? replayFromBranch(ctx));
 		replaceState(loaded.state);
@@ -211,6 +295,11 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_shutdown", async () => {
 		clearNudgeTimer();
+	});
+
+	pi.on("model_select", async (event) => {
+		currentModel = event.model;
+		if (todoThinkingEnabled) registerTodoToolWithCurrentPrompt();
 	});
 
 	// Reads getTodos() at render time; do NOT call replayFromBranch here

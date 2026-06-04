@@ -81,6 +81,11 @@ interface TodoToolHooks {
 	afterCommit?: (state: ReturnType<typeof getState>, ctx: ExtensionContext, info: { action: TaskAction; params: TaskMutationParams }) => void | Promise<void>;
 }
 
+interface TodoToolRegistrationOptions extends TodoToolHooks {
+	promptSnippet?: string;
+	promptGuidelines?: string[];
+}
+
 type TodoStateEventContext = { sessionManager?: { getSessionFile?: () => unknown } };
 type TodoStateEventEmitter = { events?: { emit?: (channel: string, data: unknown) => void } };
 
@@ -362,13 +367,13 @@ export function reconstructTodoState(ctx: Parameters<typeof replayFromBranch>[0]
 export const DEFAULT_PROMPT_SNIPPET = TODO_TOOL_DESCRIPTION.promptSnippet ?? "";
 export const DEFAULT_PROMPT_GUIDELINES: string[] = TODO_TOOL_DESCRIPTION.promptGuidelines ?? [];
 
-export function registerTodoTool(pi: ExtensionAPI, hooks: TodoToolHooks = {}): void {
+export function registerTodoTool(pi: ExtensionAPI, hooks: TodoToolRegistrationOptions = {}): void {
 	pi.registerTool({
 		...TODO_TOOL_DESCRIPTION,
 		name: TOOL_NAME,
 		label: TOOL_LABEL,
-		promptSnippet: DEFAULT_PROMPT_SNIPPET,
-		promptGuidelines: DEFAULT_PROMPT_GUIDELINES,
+		promptSnippet: hooks.promptSnippet ?? DEFAULT_PROMPT_SNIPPET,
+		promptGuidelines: hooks.promptGuidelines ?? DEFAULT_PROMPT_GUIDELINES,
 		parameters: TodoParamsSchema,
 
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {

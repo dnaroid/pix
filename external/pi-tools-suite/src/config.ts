@@ -8,11 +8,13 @@ import { DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC } from "./default-pi-tools-suite-co
 export interface PiToolsSuiteConfig {
 	enabled: boolean;
 	disabledModules: string[];
+	todoThinking: boolean;
 }
 
 type MutableConfig = {
 	enabled: boolean;
 	disabledModules: Set<string>;
+	todoThinking: boolean;
 };
 
 type Env = Record<string, string | undefined>;
@@ -107,6 +109,7 @@ function removeDisabled(config: MutableConfig, value: unknown, knownModules: Rea
 
 function mergeConfigLayer(config: MutableConfig, raw: Record<string, unknown>, knownModules: ReadonlySet<string>): MutableConfig {
 	if (typeof raw.enabled === "boolean") config.enabled = raw.enabled;
+	if (typeof raw.todoThinking === "boolean") config.todoThinking = raw.todoThinking;
 
 	for (const key of DISABLED_LIST_KEYS) addDisabled(config, raw[key], knownModules);
 	for (const key of ENABLED_LIST_KEYS) removeDisabled(config, raw[key], knownModules);
@@ -150,6 +153,9 @@ function applyEnv(config: MutableConfig, env: Env, knownModules: ReadonlySet<str
 	addDisabled(config, env.PI_TOOLS_SUITE_DISABLED_MODULES, knownModules);
 	addDisabled(config, env.PI_TOOLS_SUITE_DISABLED_EXTENSIONS, knownModules);
 
+	const todoThinking = boolFromEnv(env.PI_TOOLS_SUITE_TODO_THINKING);
+	if (todoThinking !== undefined) config.todoThinking = todoThinking;
+
 	return config;
 }
 
@@ -159,6 +165,7 @@ export function loadPiToolsSuiteConfig(moduleNames: readonly string[], options: 
 	const config: MutableConfig = {
 		enabled: true,
 		disabledModules: new Set([...DEFAULT_DISABLED_MODULES].filter((name) => knownModules.has(name))),
+		todoThinking: false,
 	};
 	const userConfigPath = getPiToolsSuiteUserConfigPath(options.homeDir);
 
@@ -176,5 +183,6 @@ export function loadPiToolsSuiteConfig(moduleNames: readonly string[], options: 
 	return {
 		enabled: config.enabled,
 		disabledModules: [...config.disabledModules].sort(),
+		todoThinking: config.todoThinking,
 	};
 }

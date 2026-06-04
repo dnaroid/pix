@@ -308,6 +308,7 @@ export const PiToolsSuiteConfigSchema = Type.Object(
 		$schema: Type.Optional(Type.String({ description: "JSON Schema URL used by editors for validation and autocomplete." })),
 		enabled: Type.Optional(Type.Boolean({ description: "Enable or disable the entire pi-tools-suite extension." })),
 		disabledModules: Type.Optional(Type.Array(Type.String(), { description: "List of disabled module names (e.g. ['lsp', 'prompt-commands'])." })),
+		todoThinking: Type.Optional(Type.Boolean({ description: "Enable per-todo thinking levels and automatic thinking switch/restore when tasks become in-progress/completed." })),
 		terminalBell: Type.Optional(TerminalBellConfig),
 		dcp: Type.Optional(DcpConfig),
 		asyncSubagents: Type.Optional(AsyncSubagentsConfig),

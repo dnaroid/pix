@@ -478,36 +478,12 @@ export class StatusLineRenderer {
 	}
 
 	private thinkingLevelColor(label: string): string {
-		const levels = this.availableThinkingLevels();
-		const rank = levels.indexOf(label);
-		if (rank >= 0) return this.thinkingRankColor(label, rank, levels.length);
-
-		const fallbackLevels = ["off", "minimal", "low", "medium", "high", "xhigh"];
-		const fallbackRank = fallbackLevels.indexOf(label);
-		return fallbackRank >= 0
-			? this.thinkingRankColor(label, fallbackRank, fallbackLevels.length)
-			: this.host.theme.colors.info;
+		return thinkingLevelThemeColor(label, this.host.theme.colors, this.availableThinkingLevels());
 	}
 
 	private availableThinkingLevels(): string[] {
 		const levels = this.host.session?.getAvailableThinkingLevels();
 		return Array.isArray(levels) && levels.length > 0 ? levels.map(String) : ["off", "minimal", "low", "medium", "high", "xhigh"];
-	}
-
-	private thinkingRankColor(label: string, rank: number, count: number): string {
-		const baseColors = [
-			this.host.theme.colors.muted,
-			this.host.theme.colors.success,
-			this.host.theme.colors.warning,
-			this.host.theme.colors.toolMutation,
-			this.host.theme.colors.error,
-			this.host.theme.colors.thinkingXHigh,
-		];
-		const colors = count > baseColors.length ? [this.host.theme.colors.statusForeground, ...baseColors] : baseColors;
-		const fallbackLevels = ["off", "minimal", "low", "medium", "high", "xhigh"];
-		const fallbackRank = fallbackLevels.indexOf(label);
-		const colorIndex = count <= baseColors.length && fallbackRank >= 0 ? fallbackRank : rank;
-		return colors[Math.max(0, Math.min(colors.length - 1, colorIndex))] ?? this.host.theme.colors.info;
 	}
 
 	private contextBarLabel(status: string, width: number, workspaceLabel: string): string | undefined {
@@ -558,6 +534,34 @@ export class StatusLineRenderer {
 				return this.host.theme.colors.statusDotBase;
 		}
 	}
+}
+
+export function thinkingLevelThemeColor(label: string, colors: Theme["colors"], availableLevels?: readonly string[]): string {
+	const levels = availableLevels && availableLevels.length > 0 ? availableLevels.map(String) : ["off", "minimal", "low", "medium", "high", "xhigh"];
+	const rank = levels.indexOf(label);
+	if (rank >= 0) return thinkingRankThemeColor(label, rank, levels.length, colors);
+
+	const fallbackLevels = ["off", "minimal", "low", "medium", "high", "xhigh"];
+	const fallbackRank = fallbackLevels.indexOf(label);
+	return fallbackRank >= 0
+		? thinkingRankThemeColor(label, fallbackRank, fallbackLevels.length, colors)
+		: colors.info;
+}
+
+function thinkingRankThemeColor(label: string, rank: number, count: number, colors: Theme["colors"]): string {
+	const baseColors = [
+		colors.muted,
+		colors.success,
+		colors.warning,
+		colors.toolMutation,
+		colors.error,
+		colors.thinkingXHigh,
+	];
+	const palette = count > baseColors.length ? [colors.statusForeground, ...baseColors] : baseColors;
+	const fallbackLevels = ["off", "minimal", "low", "medium", "high", "xhigh"];
+	const fallbackRank = fallbackLevels.indexOf(label);
+	const colorIndex = count <= baseColors.length && fallbackRank >= 0 ? fallbackRank : rank;
+	return palette[Math.max(0, Math.min(palette.length - 1, colorIndex))] ?? colors.info;
 }
 
 export function modelProviderThemeColor(provider: string, colors: Theme["colors"]): string {

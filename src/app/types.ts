@@ -98,6 +98,7 @@ export type TodoTask = {
 	description?: string;
 	activeForm?: string;
 	priority?: TodoPriority;
+	thinking?: ThinkingLevel;
 	parentId?: number;
 	blockedBy?: number[];
 	tags?: string[];
@@ -108,6 +109,7 @@ export type TodoTask = {
 export type TodoTaskLinePart = {
 	text: string;
 	muted?: boolean;
+	thinking?: ThinkingLevel;
 };
 
 export type TodoTaskRow = {

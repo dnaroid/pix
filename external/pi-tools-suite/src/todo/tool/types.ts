@@ -25,6 +25,7 @@ export const MSG_NO_TODOS = "No todos yet. Ask the agent to add some!";
 
 export type TaskStatus = "pending" | "in_progress" | "deferred" | "completed" | "deleted";
 export type TaskPriority = "low" | "medium" | "high" | "urgent";
+export type TodoThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
 export type TaskAction = "create" | "update" | "batch_create" | "batch_update" | "list" | "get" | "delete" | "clear" | "export" | "import";
 
@@ -35,6 +36,7 @@ export interface Task {
 	activeForm?: string;
 	status: TaskStatus;
 	priority?: TaskPriority;
+	thinking?: TodoThinkingLevel;
 	parentId?: number;
 	blockedBy?: number[];
 	tags?: string[];
@@ -68,6 +70,7 @@ export interface TaskMutationParams {
 	activeForm?: string;
 	status?: TaskStatus;
 	priority?: TaskPriority;
+	thinking?: TodoThinkingLevel;
 	parentId?: number | null;
 	clearParent?: boolean;
 	blockedBy?: number[];
@@ -111,6 +114,11 @@ export const TodoParamsSchema = Type.Object({
 	priority: Type.Optional(
 		StringEnum(["low", "medium", "high", "urgent"] as const, {
 			description: "Task priority (create/update) or list/export filter (list/export)",
+		}),
+	),
+	thinking: Type.Optional(
+		StringEnum(["off", "minimal", "low", "medium", "high", "xhigh"] as const, {
+			description: "Per-task thinking level used when todoThinking is enabled and this task is in_progress",
 		}),
 	),
 	parentId: Type.Optional(

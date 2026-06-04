@@ -16,6 +16,10 @@
       },
       "description": "List of disabled module names (e.g. ['lsp', 'prompt-commands'])."
     },
+    "todoThinking": {
+      "type": "boolean",
+      "description": "Enable per-todo thinking levels and automatic thinking switch/restore when tasks become in-progress/completed."
+    },
     "terminalBell": {
       "type": "object",
       "properties": {
