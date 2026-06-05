@@ -182,11 +182,11 @@ export default function (pi: ExtensionAPI) {
 
 	function applyTodoThinkingAfterCommit(state: ReturnType<typeof getState>, info: { action: string; params: TaskMutationParams }): void {
 		const mutations = getTodoThinkingMutations(info.action, info.params);
-		if (mutations.length === 0) return;
 		for (const mutation of mutations) {
 			if (mutation.id === undefined || mutation.status === "in_progress") continue;
 			restoreTaskThinking(mutation.id);
 		}
+		restoreInactiveTodoThinking(state);
 		for (const mutation of mutations) {
 			if (mutation.id === undefined) continue;
 			const task = state.tasks.find((item) => item.id === mutation.id);
@@ -220,6 +220,14 @@ export default function (pi: ExtensionAPI) {
 		if (!previous) return;
 		rememberedThinkingByTaskId.delete(taskId);
 		if (getCurrentThinkingLevel() !== previous) setTodoThinkingLevel(previous);
+	}
+
+	function restoreInactiveTodoThinking(state: ReturnType<typeof getState>): void {
+		for (const taskId of [...rememberedThinkingByTaskId.keys()]) {
+			const task = state.tasks.find((item) => item.id === taskId);
+			if (task?.status === "in_progress") continue;
+			restoreTaskThinking(taskId);
+		}
 	}
 
 	function setTodoThinkingLevel(level: TodoThinkingLevel): void {

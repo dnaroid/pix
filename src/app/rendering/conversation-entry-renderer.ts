@@ -40,10 +40,10 @@ export function renderConversationEntry(entry: Entry, width: number, options: Co
 		...(entryId === undefined ? {} : { target: { kind: "user-message" as const, id: entryId } }),
 	});
 	const queuedLine = (text: string, entryId: string, segments?: readonly StyledSegment[]): RenderedLine => ({
-		text: padHorizontalText(text, width),
+		text,
 		variant: "muted" as const,
 		backgroundOverride: options.colors.userMessageBackground,
-		...(segments && segments.length > 0 ? { segments: segments.map((segment) => ({ ...segment, start: segment.start + userContentLeft, end: segment.end + userContentLeft })) } : {}),
+		...(segments && segments.length > 0 ? { segments } : {}),
 		target: { kind: "queue-message" as const, id: entryId },
 	});
 	const userMessageLines = (userEntry: Extract<Entry, { kind: "user" }>): RenderedLine[] => {
@@ -60,7 +60,7 @@ export function renderConversationEntry(entry: Entry, width: number, options: Co
 	};
 	const queuedMessageLines = (queuedEntry: Extract<Entry, { kind: "queued" }>): RenderedLine[] => {
 		const icon = queuedEntry.queueSource === "deferred" ? APP_ICONS.pause : APP_ICONS.timerSand;
-		const contentLines = wrapText(`${icon} ${queuedEntry.text}`, userContentWidth);
+		const contentLines = wrapText(`${icon} ${queuedEntry.text}`, width);
 		return contentLines.map((text, index) => queuedLine(text, queuedEntry.id, index === 0 ? [{ start: 0, end: icon.length, foreground: options.colors.info }] : undefined));
 	};
 

@@ -84,6 +84,8 @@ describe.serial("todo tool", () => {
 		const created = await tool.execute("call", { action: "create", subject: "Write tests", description: "cover tools" }, undefined, undefined, {});
 		expect(created.content[0].text).toContain("Created #1");
 		expect(created.content[0].text).toContain("include a final todo item for the user-facing final report");
+		expect(created.content[0].text).toContain("summarize changed files and behavior");
+		expect(created.content[0].text).toContain("never replace the user-facing report with a compression/housekeeping note");
 		expect(created.content[0].text).toContain("none is in_progress");
 		expect(getTodos()).toMatchObject([{ id: 1, subject: "Write tests", status: "pending" }]);
 
@@ -279,6 +281,7 @@ describe.serial("todo tool", () => {
 		);
 		expect(batch.content[0].text).toContain("Created 2 tasks: #1, #2");
 		expect(batch.content[0].text).toContain("include a final todo item for the user-facing final report");
+		expect(batch.content[0].text).toContain("summarize changed files and behavior");
 		expect(getTodos()).toMatchObject([
 			{ id: 1, priority: "urgent", tags: ["release", "v1"] },
 			{ id: 2, parentId: 1, blockedBy: [1], priority: "high", tags: ["release"] },
@@ -581,6 +584,46 @@ describe.serial("todo extension lifecycle", () => {
 			await tool.execute("todo-3", { action: "update", id: 1, status: "completed" }, undefined, undefined, ctx);
 			expect(pi.thinkingLevel).toBe("off");
 			expect(pi.setThinkingLevelCalls).toEqual(["high", "off"]);
+		} finally {
+			if (previousEnv === undefined) delete process.env.PI_TOOLS_SUITE_TODO_THINKING;
+			else process.env.PI_TOOLS_SUITE_TODO_THINKING = previousEnv;
+			rmSync(ctx.cwd, { recursive: true, force: true });
+		}
+	});
+
+	test.serial("restores original thinking after off final todo completion and plan replacement", async () => {
+		const previousEnv = process.env.PI_TOOLS_SUITE_TODO_THINKING;
+		process.env.PI_TOOLS_SUITE_TODO_THINKING = "1";
+		const extension = (await import("../src/todo/index.js")).default;
+		const pi = new FakePi();
+		pi.thinkingLevel = "high";
+		const ctx = {
+			cwd: mkdtempSync(join(tmpdir(), "todo-thinking-restore-")),
+			hasUI: false,
+			model: { reasoning: true, thinkingLevelMap: {} },
+			sessionManager: { getBranch: () => [] },
+			isIdle: () => true,
+			hasPendingMessages: () => false,
+		};
+		try {
+			extension(pi as any);
+			await pi.emit("session_start", {}, ctx);
+			const tool = pi.tools.get("todo");
+
+			await tool.execute("todo-1", { action: "create", subject: "Сформулировать финальный отчет пользователю", thinking: "off" }, undefined, undefined, ctx);
+			await tool.execute("todo-2", { action: "update", id: 1, status: "in_progress", activeForm: "формулируя отчет" }, undefined, undefined, ctx);
+			expect(pi.thinkingLevel).toBe("off");
+
+			await tool.execute("todo-3", { action: "update", id: 1, status: "completed" }, undefined, undefined, ctx);
+			expect(pi.thinkingLevel).toBe("high");
+
+			await tool.execute("todo-4", { action: "create", subject: "Another final report", thinking: "off" }, undefined, undefined, ctx);
+			await tool.execute("todo-5", { action: "update", id: 1, status: "in_progress", activeForm: "reporting" }, undefined, undefined, ctx);
+			expect(pi.thinkingLevel).toBe("off");
+
+			await tool.execute("todo-6", { action: "batch_create", replace: true, items: [{ subject: "Fresh plan" }] }, undefined, undefined, ctx);
+			expect(pi.thinkingLevel).toBe("high");
+			expect(pi.setThinkingLevelCalls).toEqual(["off", "high", "off", "high"]);
 		} finally {
 			if (previousEnv === undefined) delete process.env.PI_TOOLS_SUITE_TODO_THINKING;
 			else process.env.PI_TOOLS_SUITE_TODO_THINKING = previousEnv;

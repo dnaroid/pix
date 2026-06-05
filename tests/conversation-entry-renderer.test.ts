@@ -129,8 +129,9 @@ describe("renderConversationEntry", () => {
 			THEMES.dark.colors.userMessageBackground,
 		]);
 		assert.match(lines[0]?.text ?? "", new RegExp(`${APP_ICONS.timerSand} hello`, "u"));
+		assert.equal(lines[0]?.text, `${APP_ICONS.timerSand} hello`);
 		assert.doesNotMatch(lines[0]?.text ?? "", /\b(?:steer|follow|queued):/u);
-		assert.deepEqual(lines.map((line) => line.segments), [[{ start: 1, end: 1 + APP_ICONS.timerSand.length, foreground: THEMES.dark.colors.info }]]);
+		assert.deepEqual(lines.map((line) => line.segments), [[{ start: 0, end: APP_ICONS.timerSand.length, foreground: THEMES.dark.colors.info }]]);
 		assert.deepEqual(lines.map((line) => line.target), [
 			{ kind: "queue-message", id: "queue-bg" },
 		]);
@@ -157,8 +158,8 @@ describe("renderConversationEntry", () => {
 		assert.match(deferred[0]?.text ?? "", new RegExp(`${APP_ICONS.pause} send later`, "u"));
 		assert.match(followUp[0]?.text ?? "", new RegExp(`${APP_ICONS.timerSand} next step`, "u"));
 		assert.doesNotMatch(`${deferred[0]?.text ?? ""}\n${followUp[0]?.text ?? ""}`, /\b(?:steer|follow|queued):/u);
-		assert.deepEqual(deferred[0]?.segments, [{ start: 1, end: 1 + APP_ICONS.pause.length, foreground: THEMES.dark.colors.info }]);
-		assert.deepEqual(followUp[0]?.segments, [{ start: 1, end: 1 + APP_ICONS.timerSand.length, foreground: THEMES.dark.colors.info }]);
+		assert.deepEqual(deferred[0]?.segments, [{ start: 0, end: APP_ICONS.pause.length, foreground: THEMES.dark.colors.info }]);
+		assert.deepEqual(followUp[0]?.segments, [{ start: 0, end: APP_ICONS.timerSand.length, foreground: THEMES.dark.colors.info }]);
 	});
 
 	it("wraps user messages at word boundaries inside the padded bubble", () => {

@@ -154,7 +154,7 @@ function appendWorkflowReminder(text: string, op: Op, state: TaskState): string 
 	const lines = [text];
 	if (op.kind === "create" || op.kind === "batch_create") {
 		lines.push(
-			"Reminder: if this is a multi-step task, include a final todo item for the user-facing final report before completion.",
+			"Reminder: if this is a multi-step task, include a final todo item for the user-facing final report before completion. Give that final-report todo an explicit description/acceptance criteria: summarize changed files and behavior, list verification commands/results, mention any remaining manual action, and never replace the user-facing report with a compression/housekeeping note.",
 		);
 		const createdIds = new Set(op.kind === "create" ? [op.taskId] : op.ids);
 		const hasOlderUnfinished = !op.replacedCount && state.tasks.some((task) => {
