@@ -78,8 +78,9 @@ describe.serial("todo tool", () => {
 		const promptGuidelines = tool.promptGuidelines.join("\n");
 		expect(tool.promptGuidelines.length).toBeGreaterThan(3);
 		expect(promptGuidelines).toContain("synchronize the plan");
+		expect(promptGuidelines).toContain("include a final todo item in the initial create/batch_create plan");
 		expect(promptGuidelines).toContain("goal, scope, requirements");
-		expect(tool.promptSnippet).toContain("Track/sync");
+		expect(tool.promptSnippet).toContain("include final report item");
 
 		const created = await tool.execute("call", { action: "create", subject: "Write tests", description: "cover tools" }, undefined, undefined, {});
 		expect(created.content[0].text).toContain("Created #1");
@@ -574,7 +575,8 @@ describe.serial("todo extension lifecycle", () => {
 			const tool = pi.tools.get("todo");
 			expect(tool.promptSnippet).toContain("Optional per-item thinking: off|minimal|low|medium|high");
 			expect(tool.promptSnippet).not.toContain("xhigh");
-			expect(tool.promptGuidelines.join("\n")).toContain("Split todos to change thinking by work type");
+			expect(tool.promptGuidelines.join("\n")).toContain("assign task `thinking` during create/batch_create");
+			expect(tool.promptGuidelines.join("\n")).toContain("Do not leave all thinking unset for a non-trivial mixed-complexity plan");
 
 			await tool.execute("todo-1", { action: "create", subject: "Investigate", thinking: "high" }, undefined, undefined, ctx);
 			await tool.execute("todo-2", { action: "update", id: 1, status: "in_progress", activeForm: "investigating" }, undefined, undefined, ctx);
