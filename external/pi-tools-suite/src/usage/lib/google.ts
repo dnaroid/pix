@@ -1,7 +1,7 @@
 /**
  * Google Cloud 额度查询模块
  *
- * [输入]: ~/.config/opencode/antigravity-accounts.json 中的账号信息
+ * [输入]: ~/.pi/agent/auth.json 中的 Antigravity 账号信息
  * [输出]: 格式化的额度使用情况（按重置时间自动分组）
  * [定位]: 被 usage.ts 调用，处理 Google Cloud 账号
  * [同步]: usage.ts, types.ts, utils.ts
@@ -14,7 +14,6 @@ import { join } from "node:path";
 import {
   type QueryResult,
   type AntigravityAccount,
-  type AntigravityAccountsFile,
   HIGH_USAGE_THRESHOLD,
 } from "./types";
 import { createProgressBar, fetchWithTimeout, safeMax } from "./utils";
@@ -53,8 +52,15 @@ type PiAntigravityCredential = {
   type?: string;
   refresh?: string;
   email?: string;
+  clientId?: string;
+  clientSecret?: string;
+  googleClientId?: string;
+  googleClientSecret?: string;
+  oauthClient?: { clientId?: string; clientSecret?: string };
   accounts?: AntigravityAccount[];
 };
+
+type GoogleOAuthClientCredentials = { clientId: string; clientSecret?: string };
 
 // ============================================================================
 // 常量
@@ -85,16 +91,6 @@ const MODEL_DISPLAY_NAMES: Record<string, string> = {
   "claude-opus-4-6-thinking": "Claude Opus",
 };
 
-// 获取 Antigravity 账号文件路径
-function getAntigravityAccountsPath(): string {
-  const home = homedir();
-  const configDir =
-    process.platform === "win32"
-      ? process.env.APPDATA || join(home, "AppData", "Roaming")
-      : join(home, ".config");
-  return join(configDir, "opencode", "antigravity-accounts.json");
-}
-
 function getPiAuthPath(): string {
   return process.env.NODE_ENV === "test" && process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH
     ? process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH
@@ -114,15 +110,37 @@ function splitPiRefresh(refresh: string): AntigravityAccount | null {
   };
 }
 
-async function readAntigravityAccounts(): Promise<AntigravityAccount[]> {
-  try {
-    const content = await readFile(getAntigravityAccountsPath(), "utf-8");
-    const file = JSON.parse(content) as AntigravityAccountsFile;
-    return file.accounts ?? [];
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
+function getAccountRefreshToken(account: AntigravityAccount): string | undefined {
+  if (account.refreshToken) return account.refreshToken;
+  if (!account.refresh) return undefined;
+  return splitPiRefresh(account.refresh)?.refreshToken;
+}
 
+function stringProperty(source: unknown, keys: string[]): string | undefined {
+  if (!source || typeof source !== "object") return undefined;
+  const record = source as Record<string, unknown>;
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value) return value;
+  }
+  return undefined;
+}
+
+function getGoogleOAuthClientCredentials(...sources: unknown[]): GoogleOAuthClientCredentials | undefined {
+  for (const source of sources) {
+    const nested = source && typeof source === "object"
+      ? (source as Record<string, unknown>).oauthClient
+      : undefined;
+    const nestedClientId = stringProperty(nested, ["clientId", "client_id", "id"]);
+    const nestedClientSecret = stringProperty(nested, ["clientSecret", "client_secret", "secret"]);
+    const clientId = nestedClientId ?? stringProperty(source, ["clientId", "client_id", "googleClientId", "google_client_id", "oauthClientId", "oauth_client_id"]);
+    const clientSecret = nestedClientSecret ?? stringProperty(source, ["clientSecret", "client_secret", "googleClientSecret", "google_client_secret", "oauthClientSecret", "oauth_client_secret"]);
+    if (clientId) return { clientId, ...(clientSecret ? { clientSecret } : {}) };
+  }
+  return undefined;
+}
+
+async function readAntigravityAccounts(): Promise<AntigravityAccount[]> {
   try {
     const content = await readFile(getPiAuthPath(), "utf-8");
     const credential = (JSON.parse(content) as Record<string, PiAntigravityCredential>)[
@@ -130,8 +148,11 @@ async function readAntigravityAccounts(): Promise<AntigravityAccount[]> {
     ];
 
     if (!credential) return [];
+    const credentialClient = getGoogleOAuthClientCredentials(credential);
     const accounts = Array.isArray(credential.accounts)
-      ? credential.accounts.filter((account) => account.refreshToken)
+      ? credential.accounts
+          .filter((account) => getAccountRefreshToken(account))
+          .map((account) => ({ ...credentialClient, ...account }))
       : [];
     const primaryAccount =
       credential.type === "oauth" && credential.refresh
@@ -139,6 +160,7 @@ async function readAntigravityAccounts(): Promise<AntigravityAccount[]> {
         : null;
     if (primaryAccount) {
       primaryAccount.email = credential.email;
+      Object.assign(primaryAccount, credentialClient);
       accounts.unshift(primaryAccount);
     }
 
@@ -156,9 +178,6 @@ async function readAntigravityAccounts(): Promise<AntigravityAccount[]> {
 }
 
 const GOOGLE_TOKEN_REFRESH_URL = "https://oauth2.googleapis.com/token";
-
-const GOOGLE_CLIENT_ID = "";
-const GOOGLE_CLIENT_SECRET = "";
 
 // ============================================================================
 // 工具函数
@@ -250,18 +269,19 @@ function extractModelQuotas(data: GoogleQuotaResponse): ModelQuota[] {
  * 刷新 Google access token
  */
 async function refreshAccessToken(
-  refreshToken: string,
+  account: AntigravityAccount,
 ): Promise<{ access_token: string; expires_in: number }> {
-  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
-    throw new Error("Antigravity Google OAuth credentials are not bundled.");
-  }
+  const refreshToken = getAccountRefreshToken(account);
+  if (!refreshToken) throw new Error("Missing refresh token, cannot query quota.");
+  const clientCredentials = getGoogleOAuthClientCredentials(account);
+  if (!clientCredentials) throw new Error(`Antigravity Google OAuth client credentials are missing in Pi auth: ${getPiAuthPath()}.`);
 
   const params = new URLSearchParams({
-    client_id: GOOGLE_CLIENT_ID,
-    client_secret: GOOGLE_CLIENT_SECRET,
+    client_id: clientCredentials.clientId,
     refresh_token: refreshToken,
     grant_type: "refresh_token",
   });
+  if (clientCredentials.clientSecret) params.set("client_secret", clientCredentials.clientSecret);
 
   const response = await fetch(GOOGLE_TOKEN_REFRESH_URL, {
     method: "POST",
@@ -319,7 +339,7 @@ async function fetchAccountQuota(
 }> {
   try {
     // 刷新 access token
-    const { access_token } = await refreshAccessToken(account.refreshToken);
+    const { access_token } = await refreshAccessToken(account);
 
     // 使用 projectId 或 managedProjectId
     const projectId = account.projectId || account.managedProjectId;

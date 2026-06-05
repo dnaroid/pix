@@ -24,6 +24,7 @@ import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import { ellipsizeDisplay, padOrTrimPlain, sanitizeText } from "./render-text.js";
 
 const POPUP_MENU_ESCAPE_BUTTON = "Esc";
+const POPUP_MENU_DESCRIPTION_GAP = "  ";
 
 export type PopupMenuRendererHost = {
 	readonly theme: Theme;
@@ -137,10 +138,8 @@ export class PopupMenuRenderer {
 		}
 
 		for (const item of visibleItems) {
-			const command = item.label.padEnd(SLASH_COMMAND_DESCRIPTION_COLUMN, " ");
-			const description = item.description ?? "";
 			lines.push({
-				text: `${command}${description}`,
+				text: this.labelDescriptionText(item.label, item.description, width),
 				variant: item.selected ? "accent" : "normal",
 				target: { kind: "popup-menu", index: item.index },
 			});
@@ -159,10 +158,8 @@ export class PopupMenuRenderer {
 		}
 
 		for (const item of visibleItems) {
-			const model = item.label.padEnd(SLASH_COMMAND_DESCRIPTION_COLUMN, " ");
-			const description = item.description ?? "";
 			lines.push({
-				text: `${model}${description}`,
+				text: this.labelDescriptionText(item.label, item.description, width),
 				variant: this.selectableItemVariant(item.selected, item.value),
 				target: { kind: "popup-menu", index: item.index },
 			});
@@ -178,10 +175,8 @@ export class PopupMenuRenderer {
 		}
 
 		for (const item of visibleItems) {
-			const level = item.label.padEnd(SLASH_COMMAND_DESCRIPTION_COLUMN, " ");
-			const description = item.description ?? "";
 			lines.push({
-				text: `${level}${description}`,
+				text: this.labelDescriptionText(item.label, item.description, width),
 				variant: this.selectableItemVariant(item.selected, item.value),
 				target: { kind: "popup-menu", index: item.index },
 			});
@@ -256,10 +251,8 @@ export class PopupMenuRenderer {
 	renderQueueMessageMenu(width: number, menu: PopupMenu<QueueMessageMenuValue>): RenderedLine[] {
 		const lines: RenderedLine[] = [this.popupMenuHeader("Queued message", width)];
 		for (const item of menu.visibleItems()) {
-			const label = item.label.padEnd(18, " ");
-			const description = item.description ?? "";
 			lines.push({
-				text: `${label}${description}`,
+				text: this.labelDescriptionText(item.label, item.description, width, 18),
 				variant: this.queueMessageItemVariant(item.selected, item.value),
 				target: { kind: "popup-menu", index: item.index },
 			});
@@ -279,10 +272,8 @@ export class PopupMenuRenderer {
 		}
 
 		for (const item of menu.visibleItems()) {
-			const label = item.label.padEnd(SLASH_COMMAND_DESCRIPTION_COLUMN, " ");
-			const description = item.description ?? "";
 			lines.push({
-				text: `${label}${description}`,
+				text: this.labelDescriptionText(item.label, item.description, width),
 				variant: this.sdkItemVariant(item.selected, item.value),
 				target: { kind: "popup-menu", index: item.index },
 			});
@@ -297,6 +288,32 @@ export class PopupMenuRenderer {
 
 	private hasPopupActionItems<T>(items: readonly PopupMenuItem<T>[]): boolean {
 		return items.length > 0;
+	}
+
+	private labelDescriptionText(label: string, description: string | undefined, width: number, labelColumn = SLASH_COMMAND_DESCRIPTION_COLUMN): string {
+		const safeLabel = sanitizeText(label).replace(/\s+/gu, " ");
+		const safeDescription = description ? sanitizeText(description).replace(/\s+/gu, " ") : "";
+		if (!safeDescription) return ellipsizeDisplay(safeLabel, width);
+
+		const gapWidth = stringDisplayWidth(POPUP_MENU_DESCRIPTION_GAP);
+		const labelDisplayWidth = stringDisplayWidth(safeLabel);
+		const descriptionDisplayWidth = stringDisplayWidth(safeDescription);
+		if (width <= gapWidth + 1) return ellipsizeDisplay(safeLabel, width);
+
+		if (labelDisplayWidth <= labelColumn && labelColumn + gapWidth + descriptionDisplayWidth <= width) {
+			return `${safeLabel}${" ".repeat(labelColumn - labelDisplayWidth)}${POPUP_MENU_DESCRIPTION_GAP}${safeDescription}`;
+		}
+
+		if (labelDisplayWidth + gapWidth + descriptionDisplayWidth <= width) {
+			return `${safeLabel}${POPUP_MENU_DESCRIPTION_GAP}${safeDescription}`;
+		}
+
+		const labelWidth = descriptionDisplayWidth < width - gapWidth - 1
+			? Math.max(1, width - gapWidth - descriptionDisplayWidth)
+			: Math.max(1, Math.min(labelColumn, width - gapWidth - 1));
+		const visibleLabel = ellipsizeDisplay(safeLabel, labelWidth);
+		const padding = " ".repeat(Math.max(0, labelWidth - stringDisplayWidth(visibleLabel)));
+		return `${visibleLabel}${padding}${POPUP_MENU_DESCRIPTION_GAP}${safeDescription}`;
 	}
 
 	private userMessageActionForeground(selected: boolean, value: UserMessageMenuValue): string {

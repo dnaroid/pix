@@ -1,15 +1,14 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { decodeApiKey, getEffectiveProjectId, importOpencodeAntigravityAccount } from "./auth-store";
-import { formatAddAccountResult, formatImportResult, parseAddAccountCommandArgs, parseImportCommandArgs } from "./commands";
+import { decodeApiKey, getEffectiveProjectId } from "./auth-store";
+import { formatAddAccountResult, parseAddAccountCommandArgs } from "./commands";
 import { API_ID, DEFAULT_PROJECT_ID, ENDPOINT_DAILY, PROVIDER_ID } from "./constants";
 import { modelDefinitions } from "./models";
 import { addAntigravityAccount, loginAntigravity, refreshAntigravityToken } from "./oauth";
 import { emitAntigravityStatus, getCurrentAntigravityStatus, notifyAntigravityLoginFailure, notifyAntigravityProviderFailure, publishAntigravityAuthStartupSection, rememberAntigravityApi, rememberAntigravityUi } from "./status";
 import { streamAntigravity } from "./stream";
 
-export { importOpencodeAntigravityAccount } from "./auth-store";
 export { addAntigravityAccount } from "./oauth";
-export type { AntigravityAddAccountResult, OpencodeAntigravityImportResult } from "./types";
+export type { AntigravityAddAccountResult } from "./types";
 
 export default async function antigravityAuth(pi: ExtensionAPI): Promise<void> {
 	rememberAntigravityApi(pi);
@@ -29,18 +28,6 @@ export default async function antigravityAuth(pi: ExtensionAPI): Promise<void> {
 			notifyAntigravityProviderFailure(message.errorMessage, { ui: ctx.ui, model: message.model });
 		});
 	}
-
-	pi.registerCommand("antigravity-import", {
-		description: "Import Antigravity OAuth from opencode antigravity-accounts.json into Pi auth.json",
-		handler: async (args: string, ctx: any) => {
-			try {
-				const result = await importOpencodeAntigravityAccount(parseImportCommandArgs(args));
-				ctx.ui?.notify?.(formatImportResult(result), result.imported ? "info" : result.reason === "auth-exists-use-force" ? "warn" : "error");
-			} catch (error) {
-				ctx.ui?.notify?.(error instanceof Error ? error.message : String(error), "error");
-			}
-		},
-	});
 
 	pi.registerCommand("antigravity-add-account", {
 		description: "Add a new Google Antigravity OAuth account to the Pi rotation pool",

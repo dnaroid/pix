@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { DEFAULT_PROJECT_ID, PROVIDER_ID } from "./constants";
-import type { OpencodeAntigravityAccount, OpencodeAntigravityImportResult, OpencodeAntigravityStorage, PiAuthCredential, PiAuthData } from "./types";
+import type { GoogleOAuthClientCredentials, OpencodeAntigravityAccount, OpencodeAntigravityImportResult, OpencodeAntigravityStorage, PiAuthCredential, PiAuthData } from "./types";
 
 export const PI_AUTH_PATH = join(homedir(), ".pi", "agent", "auth.json");
 
@@ -67,7 +67,36 @@ export async function writeJsonFileSecure(path: string, data: unknown): Promise<
 }
 
 export function getStoredAccounts(credential?: PiAuthCredential): OpencodeAntigravityAccount[] {
-	return Array.isArray(credential?.accounts) ? credential.accounts.filter((account) => account.enabled !== false && account.refreshToken) : [];
+	return Array.isArray(credential?.accounts) ? credential.accounts.filter((account) => account.enabled !== false && getAccountRefreshToken(account)) : [];
+}
+
+export function getAccountRefreshToken(account: OpencodeAntigravityAccount): string | undefined {
+	if (account.refreshToken) return account.refreshToken;
+	if (!account.refresh) return undefined;
+	const refresh = splitRefresh(account.refresh);
+	return refresh.refreshToken || undefined;
+}
+
+function stringProperty(source: unknown, keys: string[]): string | undefined {
+	if (!source || typeof source !== "object") return undefined;
+	const record = source as Record<string, unknown>;
+	for (const key of keys) {
+		const value = record[key];
+		if (typeof value === "string" && value) return value;
+	}
+	return undefined;
+}
+
+export function getGoogleOAuthClientCredentials(...sources: Array<unknown>): GoogleOAuthClientCredentials | undefined {
+	for (const source of sources) {
+		const nested = source && typeof source === "object" ? (source as Record<string, unknown>).oauthClient : undefined;
+		const nestedClientId = stringProperty(nested, ["clientId", "client_id", "id"]);
+		const nestedClientSecret = stringProperty(nested, ["clientSecret", "client_secret", "secret"]);
+		const clientId = nestedClientId ?? stringProperty(source, ["clientId", "client_id", "googleClientId", "google_client_id", "oauthClientId", "oauth_client_id"]);
+		const clientSecret = nestedClientSecret ?? stringProperty(source, ["clientSecret", "client_secret", "googleClientSecret", "google_client_secret", "oauthClientSecret", "oauth_client_secret"]);
+		if (clientId) return { clientId, ...(clientSecret ? { clientSecret } : {}) };
+	}
+	return undefined;
 }
 
 export function clampAccountIndex(index: unknown, accountCount: number): number {
@@ -76,7 +105,12 @@ export function clampAccountIndex(index: unknown, accountCount: number): number 
 }
 
 export function getAccountProjectId(account: OpencodeAntigravityAccount): string {
-	return account.projectId || account.managedProjectId || DEFAULT_PROJECT_ID;
+	if (account.projectId || account.managedProjectId) return account.projectId || account.managedProjectId || DEFAULT_PROJECT_ID;
+	if (account.refresh) {
+		const refresh = splitRefresh(account.refresh);
+		return refresh.projectId || refresh.managedProjectId || DEFAULT_PROJECT_ID;
+	}
+	return DEFAULT_PROJECT_ID;
 }
 
 export function accountFromCredential(credential?: PiAuthCredential): OpencodeAntigravityAccount | undefined {
@@ -88,6 +122,7 @@ export function accountFromCredential(credential?: PiAuthCredential): OpencodeAn
 		refreshToken: refresh.refreshToken,
 		projectId: refresh.projectId || refresh.managedProjectId || DEFAULT_PROJECT_ID,
 		managedProjectId: refresh.managedProjectId,
+		...getGoogleOAuthClientCredentials(credential),
 		enabled: true,
 	};
 }
@@ -108,7 +143,7 @@ function selectOpencodeAccount(
 	storage: OpencodeAntigravityStorage,
 	options: { accountIndex?: number; email?: string },
 ): { account: OpencodeAntigravityAccount; index: number; count: number } | undefined {
-	const accounts = storage.accounts?.filter((account) => account && typeof account.refreshToken === "string" && account.refreshToken) ?? [];
+	const accounts = storage.accounts?.filter((account) => account && getAccountRefreshToken(account)) ?? [];
 	if (accounts.length === 0) return undefined;
 
 	if (options.email) {
@@ -186,7 +221,7 @@ export async function importOpencodeAntigravityAccount(options: {
 		access: "",
 		expires: 0,
 		email: selected.account.email,
-		accounts: storage.accounts.filter((account) => account.enabled !== false && account.refreshToken),
+		accounts: storage.accounts.filter((account) => account.enabled !== false && getAccountRefreshToken(account)),
 		activeIndex: selected.index,
 	};
 	await writeJsonFileSecure(authPath, piAuth);

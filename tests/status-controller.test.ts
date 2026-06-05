@@ -146,6 +146,30 @@ describe("StatusLineRenderer", () => {
 		assert.ok(layout.text.endsWith(`${iconButtonText(APP_ICONS.microphone)}─RU`));
 	});
 
+	it("keeps voice progress icons outside the language button", () => {
+		const widgetText = `${APP_ICONS.microphone} RU ${APP_ICONS.timerSand}`;
+		const renderer = statusLineRenderer({ widgetText, voiceActive: false });
+		const layout = renderer.inputBorderWidgetsLayout(40)!;
+
+		assert.ok(layout.text.endsWith(`${iconButtonText(APP_ICONS.microphone)}─RU ${APP_ICONS.timerSand}`));
+		assert.equal(layout.voiceWidget?.languageStartColumn, layout.voiceWidget!.micEndColumn + 1);
+		assert.equal(layout.voiceWidget?.languageEndColumn, layout.voiceWidget!.languageStartColumn + stringDisplayWidth("RU"));
+		assert.deepEqual(renderer.voiceLanguageTarget(layout, 1), {
+			row: 1,
+			startColumn: layout.voiceWidget!.languageStartColumn,
+			endColumn: layout.voiceWidget!.languageEndColumn,
+		});
+	});
+
+	it("does not treat a loading icon as a language when no language switcher is shown", () => {
+		const widgetText = `${APP_ICONS.microphone} ${APP_ICONS.timerSand}`;
+		const renderer = statusLineRenderer({ widgetText, voiceActive: false });
+		const layout = renderer.inputBorderWidgetsLayout(40)!;
+
+		assert.ok(layout.text.endsWith(`${iconButtonText(APP_ICONS.microphone)}─${APP_ICONS.timerSand}`));
+		assert.equal(renderer.voiceLanguageTarget(layout, 1), undefined);
+	});
+
 	it("places the prompt enhancer icon before the right-side status icons", () => {
 		const widgetText = `${APP_ICONS.microphone} RU`;
 		const promptWidgetText = APP_ICONS.autoFix;

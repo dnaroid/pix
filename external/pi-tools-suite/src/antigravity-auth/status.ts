@@ -128,7 +128,7 @@ async function startupAntigravityAccountList(): Promise<string> {
 	try {
 		const auth = await readJsonFile<PiAuthData>(getPiAuthPath(), {});
 		const accounts = getStartupAccounts(auth[PROVIDER_ID]);
-		if (accounts.length === 0) return "no accounts (run /antigravity-import or /antigravity-add-account)";
+		if (accounts.length === 0) return "no accounts in auth.json (run /antigravity-add-account)";
 		return accounts.map(formatStartupAccountName).join(", ");
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);

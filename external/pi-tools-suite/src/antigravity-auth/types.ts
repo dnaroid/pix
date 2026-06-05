@@ -39,10 +39,26 @@ export type AntigravityChunk = {
 
 export type OpencodeAntigravityAccount = {
 	email?: string;
+	access?: string;
+	refresh?: string;
+	expires?: number;
 	refreshToken?: string;
 	projectId?: string;
 	managedProjectId?: string;
 	enabled?: boolean;
+	clientId?: string;
+	clientSecret?: string;
+	googleClientId?: string;
+	googleClientSecret?: string;
+	oauthClient?: GoogleOAuthClientCredentials;
+	fingerprint?: { apiClient?: string; [key: string]: unknown };
+	fingerprintHistory?: Array<{ fingerprint?: { apiClient?: string; [key: string]: unknown }; [key: string]: unknown }>;
+	[key: string]: unknown;
+};
+
+export type GoogleOAuthClientCredentials = {
+	clientId?: string;
+	clientSecret?: string;
 };
 
 export type OpencodeAntigravityStorage = {
@@ -59,6 +75,11 @@ export type PiAuthCredential = {
 	email?: string;
 	accounts?: OpencodeAntigravityAccount[];
 	activeIndex?: number;
+	clientId?: string;
+	clientSecret?: string;
+	googleClientId?: string;
+	googleClientSecret?: string;
+	oauthClient?: GoogleOAuthClientCredentials;
 	[key: string]: unknown;
 };
 

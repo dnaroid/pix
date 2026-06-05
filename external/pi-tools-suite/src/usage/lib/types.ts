@@ -73,13 +73,23 @@ export interface CopilotQuotaConfig {
 }
 
 /**
- * Antigravity 账号（来自 ~/.config/opencode/antigravity-accounts.json）
+ * Antigravity 账号（来自 ~/.pi/agent/auth.json）
  */
 export interface AntigravityAccount {
   email?: string;
-  refreshToken: string;
+  access?: string;
+  refresh?: string;
+  expires?: number;
+  refreshToken?: string;
   projectId?: string;
   managedProjectId?: string;
+  clientId?: string;
+  clientSecret?: string;
+  googleClientId?: string;
+  googleClientSecret?: string;
+  oauthClient?: { clientId?: string; clientSecret?: string };
+  fingerprint?: { apiClient?: string; [key: string]: unknown };
+  fingerprintHistory?: Array<{ fingerprint?: { apiClient?: string; [key: string]: unknown }; [key: string]: unknown }>;
   addedAt: number;
   lastUsed: number;
   rateLimitResetTimes?: Record<string, number>;

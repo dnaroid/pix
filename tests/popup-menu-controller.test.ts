@@ -109,6 +109,38 @@ describe("popup menu header", () => {
 		controller.closeSdkMenu(undefined, { render: false });
 	});
 
+	it("does not truncate menu labels when the full label and description fit", () => {
+		const controller = createPopupMenuController({
+			...createPopupMenuHost([]),
+			getModelMenuItems: () => [{
+				value: { model: { provider: "test", id: "long", name: "Readable model name" } as never, ref: "test/long", current: false },
+				label: "provider/very-long-model-identifier-that-overflows",
+				description: "Readable model name",
+			}],
+		});
+
+		controller.setDirectMenu("model");
+		const lines = controller.renderActivePopupMenu(80);
+
+		assert.equal(lines[1]?.text, "provider/very-long-model-identifier-that-overflows  Readable model name");
+	});
+
+	it("keeps a visible gap between truncated menu labels and descriptions", () => {
+		const controller = createPopupMenuController({
+			...createPopupMenuHost([]),
+			getModelMenuItems: () => [{
+				value: { model: { provider: "test", id: "long", name: "Readable model name" } as never, ref: "test/long", current: false },
+				label: "provider/very-long-model-identifier-that-overflows",
+				description: "Readable model name",
+			}],
+		});
+
+		controller.setDirectMenu("model");
+		const lines = controller.renderActivePopupMenu(48);
+
+		assert.match(lines[1]?.text ?? "", /^provider\/very-long-model-i…  Readable model name/u);
+	});
+
 	it("formats resume sessions as a fork tree when not searching", () => {
 		const root = sessionInfo("root", "/sessions/root.jsonl", "Root", new Date("2024-01-01T00:00:00Z"));
 		const olderFork = sessionInfo("older", "/sessions/older.jsonl", "Older fork", new Date("2024-01-02T00:00:00Z"), root.path);

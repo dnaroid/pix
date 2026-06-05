@@ -9,6 +9,8 @@ const originalTestAuthPath = process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH;
 const originalOpencodeConfigDir = process.env.OPENCODE_CONFIG_DIR;
 const originalFetch = globalThis.fetch;
 const tempDirs: string[] = [];
+const testClientId = "test-antigravity-client-id";
+const testClientSecret = "test-antigravity-client-secret";
 
 class FakePi {
 	providers = new Map<string, any>();
@@ -46,6 +48,7 @@ function antigravityCredential(overrides: Record<string, unknown> = {}) {
 		refresh: "refresh-0|project-0",
 		expires: Date.now() + 60_000,
 		email: "first@example.com",
+		oauthClient: { clientId: testClientId, clientSecret: testClientSecret },
 		activeIndex: 0,
 		accounts: [
 			{ email: "first@example.com", refreshToken: "refresh-0", projectId: "project-0" },
@@ -114,38 +117,26 @@ describe.serial("Antigravity account rotation", () => {
 		expect(pi.messages.filter((message) => message.details?.kind === "provider-failure")).toHaveLength(0);
 	});
 
-	test.serial("uses opencode Antigravity accounts without requiring Pi login", async () => {
+	test.serial("does not auto-import opencode Antigravity accounts at request time", async () => {
 		const agentDir = tempDir();
 		writeJson(path.join(agentDir, "auth.json"), {});
 		writeOpencodeAccounts(path.join(agentDir, "opencode"), [
 			{ email: "opencode@example.com", refreshToken: "opencode-refresh", projectId: "opencode-project", enabled: true },
 		]);
-		const streamAuthorizations: string[] = [];
-		(globalThis as any).fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-			const url = String(input);
-			if (url === "https://oauth2.googleapis.com/token") {
-				const body = init?.body instanceof URLSearchParams ? init.body : new URLSearchParams(String(init?.body ?? ""));
-				expect(body.get("refresh_token")).toBe("opencode-refresh");
-				return new Response(JSON.stringify({ access_token: "opencode-access", expires_in: 3600 }), { status: 200, headers: { "content-type": "application/json" } });
-			}
-			if (url.includes("/v1internal:streamGenerateContent")) {
-				streamAuthorizations.push(new Headers(init?.headers as HeadersInit).get("authorization") ?? "");
-				return new Response('data: {"response":{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1,"totalTokenCount":2}}}\n\n', {
-					status: 200,
-					headers: { "content-type": "text/event-stream" },
-				});
-			}
-			throw new Error(`Unexpected fetch ${url}`);
+		let fetchCalls = 0;
+		(globalThis as any).fetch = async () => {
+			fetchCalls += 1;
+			throw new Error("fetch should not be called without an auth.json Antigravity account");
 		};
 
 		const { provider, model } = await loadProvider(agentDir);
 		const result = await runSimpleStream(provider, model);
 
-		expect(result.stopReason).toBe("stop");
-		expect(streamAuthorizations).toEqual(["Bearer opencode-access"]);
+		expect(result.stopReason).toBe("error");
+		expect(result.errorMessage).toContain("No Antigravity OAuth account found in Pi auth");
+		expect(fetchCalls).toBe(0);
 		const auth = JSON.parse(fs.readFileSync(path.join(agentDir, "auth.json"), "utf-8"));
-		expect(auth.antigravity.email).toBe("opencode@example.com");
-		expect(auth.antigravity.access).toBe("opencode-access|opencode-project");
+		expect(auth.antigravity).toBeUndefined();
 	});
 
 	test.serial("emits all-accounts-exhausted marker only after trying every account for the model", async () => {
@@ -157,6 +148,8 @@ describe.serial("Antigravity account rotation", () => {
 			const url = String(input);
 			if (url === "https://oauth2.googleapis.com/token") {
 				const body = init?.body instanceof URLSearchParams ? init.body : new URLSearchParams(String(init?.body ?? ""));
+				expect(body.get("client_id")).toBe(testClientId);
+				expect(body.get("client_secret")).toBe(testClientSecret);
 				tokenRefreshes.push(body.get("refresh_token") ?? "");
 				return new Response(JSON.stringify({ access_token: "access-1", expires_in: 3600 }), { status: 200, headers: { "content-type": "application/json" } });
 			}

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { calculateCost, createAssistantMessageEventStream, type AssistantMessage, type AssistantMessageEventStream, type Context, type SimpleStreamOptions, type ToolCall } from "@earendil-works/pi-ai";
 import { ALL_ACCOUNTS_EXHAUSTED_MARKER, API_ID, ENDPOINT_PROD, PROVIDER_ID, STREAM_ENDPOINTS } from "./constants";
-import { clampAccountIndex, decodeApiKey, getDefaultOpencodeAccountsPath, getPiAuthPath, getStoredAccounts, importDefaultOpencodeAntigravityAccount, readJsonFile } from "./auth-store";
+import { clampAccountIndex, decodeApiKey, getPiAuthPath, getStoredAccounts, readJsonFile } from "./auth-store";
 import { getAntigravityHeaders, getModelHeaderStyle } from "./headers";
 import { refreshNextFailoverCredential, refreshStoredAntigravityCredential } from "./oauth";
 import { buildPayload, extraHeadersForPayload, partThoughtSignature } from "./payload";
@@ -105,16 +105,8 @@ function updateUsage(output: AssistantMessage, model: AntigravityModel, metadata
 }
 
 async function resolveAntigravityApiKey(optionsApiKey?: string): Promise<{ auth: PiAuthData; apiKey: string }> {
-	let auth = await readJsonFile<PiAuthData>(getPiAuthPath(), {});
-	let storedCredential = auth[PROVIDER_ID];
-
-	if (storedCredential?.type !== "oauth") {
-		const imported = await importDefaultOpencodeAntigravityAccount().catch(() => undefined);
-		if (imported?.imported || imported?.reason === "already-imported") {
-			auth = await readJsonFile<PiAuthData>(getPiAuthPath(), {});
-			storedCredential = auth[PROVIDER_ID];
-		}
-	}
+	const auth = await readJsonFile<PiAuthData>(getPiAuthPath(), {});
+	const storedCredential = auth[PROVIDER_ID];
 
 	const storedApiKey = storedCredential?.type === "oauth" && storedCredential.access && (storedCredential.expires ?? 0) > Date.now()
 		? storedCredential.access
@@ -127,7 +119,7 @@ async function resolveAntigravityApiKey(optionsApiKey?: string): Promise<{ auth:
 		if (refreshed?.apiKey) return { auth: await readJsonFile<PiAuthData>(getPiAuthPath(), {}), apiKey: refreshed.apiKey };
 	}
 
-	throw new Error(`No Antigravity OAuth account found. Checked Pi auth: ${getPiAuthPath()}; opencode accounts: ${getDefaultOpencodeAccountsPath()}.`);
+	throw new Error(`No Antigravity OAuth account found in Pi auth: ${getPiAuthPath()}.`);
 }
 
 export function streamAntigravity(model: AntigravityModel, context: Context, options?: SimpleStreamOptions): AssistantMessageEventStream {

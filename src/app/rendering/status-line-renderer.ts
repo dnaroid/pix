@@ -124,7 +124,7 @@ export class StatusLineRenderer {
 		});
 		const voiceWidgetText = this.host.voiceStatusWidgetText();
 		appendWidget(this.voiceBorderWidgetText(voiceWidgetText), (column, text) => {
-			layout.voiceWidget = this.voiceWidgetLayout(column, text);
+			layout.voiceWidget = this.voiceWidgetLayout(column, voiceWidgetText, text);
 		});
 
 		if (!hasParts) return undefined;
@@ -578,26 +578,44 @@ export class StatusLineRenderer {
 	}
 
 	private voiceBorderWidgetText(widgetText: string): string {
-		if (widgetText.length <= 0) return "";
-		const separatorIndex = widgetText.indexOf(" ");
-		const micText = separatorIndex >= 0 ? widgetText.slice(0, separatorIndex) : widgetText;
-		const languageText = separatorIndex >= 0 ? widgetText.slice(separatorIndex).trim() : "";
-		const micButton = this.iconButtonText(micText);
-		return languageText ? `${micButton}${INPUT_BORDER_WIDGET_SEPARATOR}${languageText}` : micButton;
+		const parts = this.voiceBorderWidgetParts(widgetText);
+		if (!parts) return "";
+
+		const micButton = this.iconButtonText(parts.iconText);
+		if (parts.languageText) {
+			return `${micButton}${INPUT_BORDER_WIDGET_SEPARATOR}${parts.languageText}${parts.suffixText ? ` ${parts.suffixText}` : ""}`;
+		}
+		return parts.suffixText ? `${micButton}${INPUT_BORDER_WIDGET_SEPARATOR}${parts.suffixText}` : micButton;
 	}
 
-	private voiceWidgetLayout(startColumn: number, widgetText: string): NonNullable<StatusLineLayout["voiceWidget"]> {
-		const hasLanguage = stringDisplayWidth(widgetText) > STATUS_ICON_BUTTON_WIDTH + stringDisplayWidth(INPUT_BORDER_WIDGET_SEPARATOR);
-		const languageStartOffset = hasLanguage
+	private voiceWidgetLayout(startColumn: number, sourceText: string, widgetText: string): NonNullable<StatusLineLayout["voiceWidget"]> {
+		const parts = this.voiceBorderWidgetParts(sourceText);
+		const languageStartOffset = parts?.languageText
 			? STATUS_ICON_BUTTON_WIDTH + stringDisplayWidth(INPUT_BORDER_WIDGET_SEPARATOR)
 			: stringDisplayWidth(widgetText);
-		const languageEndOffset = stringDisplayWidth(widgetText.trimEnd());
+		const languageEndOffset = parts?.languageText
+			? languageStartOffset + stringDisplayWidth(parts.languageText)
+			: languageStartOffset;
 		return {
 			startColumn,
 			micEndColumn: startColumn + STATUS_ICON_BUTTON_WIDTH,
 			languageStartColumn: startColumn + languageStartOffset,
 			languageEndColumn: startColumn + languageEndOffset,
 			endColumn: startColumn + stringDisplayWidth(widgetText),
+		};
+	}
+
+	private voiceBorderWidgetParts(widgetText: string): { iconText: string; languageText: string; suffixText: string } | undefined {
+		const tokens = widgetText.trim().split(/\s+/u).filter((token) => token.length > 0);
+		const iconText = tokens[0];
+		if (!iconText) return undefined;
+
+		const maybeLanguage = tokens[1] ?? "";
+		const hasLanguage = /^[A-Z][A-Z0-9_-]*$/u.test(maybeLanguage);
+		return {
+			iconText,
+			languageText: hasLanguage ? maybeLanguage : "",
+			suffixText: tokens.slice(hasLanguage ? 2 : 1).join(" "),
 		};
 	}
 
