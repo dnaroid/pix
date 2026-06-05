@@ -580,13 +580,13 @@ export class AppMouseController {
 
 	private async openStatusUserJumpMenu(): Promise<void> {
 		try {
-			if (this.host.refreshUserMessageJumpMenuItems) {
-				this.host.setStatus("scanning session messages…");
-				this.host.render();
-				await this.host.refreshUserMessageJumpMenuItems();
-			}
+			const refreshPromise = this.host.refreshUserMessageJumpMenuItems?.();
 			this.popupMenus.openDirectPopupMenu("user-message-jump", { preserveStatus: true });
 			this.host.render();
+			if (this.host.refreshUserMessageJumpMenuItems) {
+				await refreshPromise;
+				this.host.render();
+			}
 		} catch (error) {
 			this.host.showToast(`Could not load jump messages: ${error instanceof Error ? error.message : stringifyUnknown(error)}`, "error");
 			this.host.render();

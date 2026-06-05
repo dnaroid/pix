@@ -38,36 +38,48 @@ export function renderTodoPanel(details: TodoDetails | undefined, expanded: bool
 	const todoPanelColor = colors.warning;
 	const todoMetaColor = colors.muted;
 	const todoThinkingColor = (level: string) => thinkingLevelThemeColor(level, colors);
+	const todoStatusThemeColor = (status: import("../types.js").TodoStatus) => {
+		switch (status) {
+			case "pending": return colors.muted;
+			case "in_progress": return colors.warning;
+			case "deferred": return colors.muted;
+			case "completed": return colors.success;
+			case "deleted": return colors.error;
+		}
+	};
 
 	if (!expanded) {
 		const prefix = `${headerText} — current: `;
 		const current = activeTask ? formatTodoTaskLine(activeTask) : "no active todo";
 		const collapsedText = `${prefix}${current}`;
-		const segments = activeTask
-			? todoTaskLineSegments(activeTask, todoMetaColor, { thinkingColor: todoThinkingColor }).map((segment) => ({
+		const segments: StyledSegment[] = [
+			{ start: 0, end: headerText.length, foreground: todoPanelColor },
+			{ start: headerText.length, end: prefix.length, foreground: todoMetaColor },
+		];
+		if (activeTask) {
+			const activeSegments = todoTaskLineSegments(activeTask, todoMetaColor, { thinkingColor: todoThinkingColor, statusColor: todoStatusThemeColor }).map((segment) => ({
 				...segment,
 				start: segment.start + prefix.length,
 				end: segment.end + prefix.length,
-			}))
-			: undefined;
+			}));
+			segments.push(...activeSegments);
+		}
 		const line: RenderedLine = {
 			text: padOrTrimPlain(ellipsizeDisplay(collapsedText, contentWidth), width),
-			colorOverride: todoPanelColor,
+			segments,
 			target,
 		};
-		if (segments) line.segments = segments;
 		return [line];
 	}
 
 	const lines: RenderedLine[] = [];
 	for (const { task, depth } of visibleTodoTaskRows(details)) {
 		const text = formatTodoTaskLine(task, { depth });
-		const segments = todoTaskLineSegments(task, todoMetaColor, { depth, thinkingColor: todoThinkingColor });
+		const segments = todoTaskLineSegments(task, todoMetaColor, { depth, thinkingColor: todoThinkingColor, statusColor: todoStatusThemeColor });
 		let start = 0;
 		for (const wrapped of wrapLine(text, contentWidth)) {
 			lines.push({
 				text: padOrTrimPlain(wrapped, width),
-				colorOverride: todoPanelColor,
 				segments: shiftSegmentsToSlice(segments, start, wrapped.length),
 				target,
 			});

@@ -247,9 +247,11 @@ describe("AppMouseController", () => {
 		let opened: { menu: string; options?: unknown } | undefined;
 		let renderCount = 0;
 		let refreshCount = 0;
+		const statuses: string[] = [];
 		const controller = new AppMouseController(
 			fakeHost({
 				render: () => { renderCount += 1; },
+				setStatus: (status) => { statuses.push(status); },
 				refreshUserMessageJumpMenuItems: async () => { refreshCount += 1; },
 			}),
 			fakePopupMenus({ openDirectPopupMenu: (menu, options) => { opened = { menu, options }; } }),
@@ -265,6 +267,7 @@ describe("AppMouseController", () => {
 
 		assert.equal(refreshCount, 1);
 		assert.deepEqual(opened, { menu: "user-message-jump", options: { preserveStatus: true } });
+		assert.deepEqual(statuses, []);
 		assert.ok(renderCount >= 1);
 	});
 

@@ -269,6 +269,19 @@ describe("popup menu header", () => {
 		assert.equal(lines[1]?.text, label);
 		assert.doesNotMatch(lines[1]?.text ?? "", /Enter to scroll/);
 	});
+
+	it("shows user message jump loading in the list", () => {
+		const controller = createPopupMenuController({
+			...createPopupMenuHost([]),
+			userMessageJumpLoading: true,
+		});
+
+		controller.setDirectMenu("user-message-jump");
+		const lines = controller.renderActivePopupMenu(80);
+
+		assert.match(lines[1]?.text ?? "", new RegExp(`${APP_ICONS.timerSand} Loading user messages`, "u"));
+	});
+
 	it("updates and clears direct popup queries as text is typed", () => {
 		const controller = createPopupMenuController(createPopupMenuHost([]));
 
@@ -485,6 +498,7 @@ function createPopupMenuHost(
 		session: undefined,
 		resumeLoading: false,
 		resumeSessionCount: 0,
+		userMessageJumpLoading: false,
 		isRunning: () => true,
 		getInput: () => "",
 		setInput: () => undefined,

@@ -27,6 +27,7 @@ describe("todo panel", () => {
 		assert.equal(stringDisplayWidth(lines[0]?.text ?? ""), 80);
 		assert.equal(lines[0]?.backgroundOverride, undefined);
 		assert.deepEqual(lines[0]?.segments, [
+			{ start: 0, end: 2, foreground: THEMES.dark.colors.success },
 			{ start: 3, end: 5, foreground: THEMES.dark.colors.muted, strikethrough: true },
 			{ start: 6, end: 10, strikethrough: true },
 			{ start: 11, end: 17, foreground: THEMES.dark.colors.muted, strikethrough: true },

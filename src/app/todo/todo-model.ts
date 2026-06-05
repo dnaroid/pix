@@ -124,7 +124,7 @@ export function formatTodoTaskLine(task: TodoTask, options: { depth?: number } =
 	return todoTaskLineParts(task, options).map((part) => part.text).join(" ");
 }
 
-export function todoTaskLineSegments(task: TodoTask, mutedColor: string, options: { depth?: number; thinkingColor?: (level: ThinkingLevel) => string } = {}): StyledSegment[] {
+export function todoTaskLineSegments(task: TodoTask, mutedColor: string, options: { depth?: number; thinkingColor?: (level: ThinkingLevel) => string; statusColor?: (status: TodoStatus) => string } = {}): StyledSegment[] {
 	const segments: StyledSegment[] = [];
 	let offset = 0;
 	for (const [index, part] of todoTaskLineParts(task, options).entries()) {
@@ -132,7 +132,11 @@ export function todoTaskLineSegments(task: TodoTask, mutedColor: string, options
 		const start = offset;
 		const end = start + part.text.length;
 		const segment: StyledSegment = { start, end };
-		if (part.thinking) {
+		if (index === 0 && options.statusColor) {
+			const foreground = options.statusColor(task.status);
+			if (foreground) segment.foreground = foreground;
+		}
+		else if (part.thinking) {
 			const foreground = options.thinkingColor?.(part.thinking);
 			if (foreground) segment.foreground = foreground;
 		}

@@ -109,12 +109,16 @@ export class NavigationCommandActions {
 		const runtime = getRuntime(this.host, "jump");
 		if (!runtime) return;
 
-		this.host.setStatus("scanning session messages…");
-		this.host.render();
-		await this.host.refreshUserMessageJumpMenuItems();
 		this.host.openDirectPopupMenu("user-message-jump", { preserveStatus: true });
 		this.host.setDirectPopupMenuQuery(argumentsText.trim());
 		this.host.render();
+		try {
+			await this.host.refreshUserMessageJumpMenuItems();
+		} catch (error) {
+			this.host.toast.error(`Could not load jump messages: ${error instanceof Error ? error.message : String(error)}`);
+		} finally {
+			this.host.render();
+		}
 	}
 
 	async runSearchCommand(argumentsText: string): Promise<void> {

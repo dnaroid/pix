@@ -146,12 +146,13 @@ describe("StatusLineRenderer", () => {
 		assert.ok(layout.text.endsWith(`${iconButtonText(APP_ICONS.microphone)}─RU`));
 	});
 
-	it("keeps voice progress icons outside the language button", () => {
+	it("replaces the microphone icon with voice progress while keeping the language button", () => {
 		const widgetText = `${APP_ICONS.microphone} RU ${APP_ICONS.timerSand}`;
 		const renderer = statusLineRenderer({ widgetText, voiceActive: false });
 		const layout = renderer.inputBorderWidgetsLayout(40)!;
 
-		assert.ok(layout.text.endsWith(`${iconButtonText(APP_ICONS.microphone)}─RU ${APP_ICONS.timerSand}`));
+		assert.ok(layout.text.endsWith(`${iconButtonText(APP_ICONS.timerSand)}─RU`));
+		assert.ok(!layout.text.endsWith(`${iconButtonText(APP_ICONS.microphone)}─RU ${APP_ICONS.timerSand}`));
 		assert.equal(layout.voiceWidget?.languageStartColumn, layout.voiceWidget!.micEndColumn + 1);
 		assert.equal(layout.voiceWidget?.languageEndColumn, layout.voiceWidget!.languageStartColumn + stringDisplayWidth("RU"));
 		assert.deepEqual(renderer.voiceLanguageTarget(layout, 1), {
@@ -161,12 +162,13 @@ describe("StatusLineRenderer", () => {
 		});
 	});
 
-	it("does not treat a loading icon as a language when no language switcher is shown", () => {
+	it("replaces the microphone icon with voice progress when no language switcher is shown", () => {
 		const widgetText = `${APP_ICONS.microphone} ${APP_ICONS.timerSand}`;
 		const renderer = statusLineRenderer({ widgetText, voiceActive: false });
 		const layout = renderer.inputBorderWidgetsLayout(40)!;
 
-		assert.ok(layout.text.endsWith(`${iconButtonText(APP_ICONS.microphone)}─${APP_ICONS.timerSand}`));
+		assert.ok(layout.text.endsWith(iconButtonText(APP_ICONS.timerSand)));
+		assert.ok(!layout.text.endsWith(`${iconButtonText(APP_ICONS.microphone)}─${APP_ICONS.timerSand}`));
 		assert.equal(renderer.voiceLanguageTarget(layout, 1), undefined);
 	});
 

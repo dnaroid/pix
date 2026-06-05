@@ -581,11 +581,11 @@ export class StatusLineRenderer {
 		const parts = this.voiceBorderWidgetParts(widgetText);
 		if (!parts) return "";
 
-		const micButton = this.iconButtonText(parts.iconText);
+		const micButton = this.iconButtonText(parts.buttonIconText);
 		if (parts.languageText) {
-			return `${micButton}${INPUT_BORDER_WIDGET_SEPARATOR}${parts.languageText}${parts.suffixText ? ` ${parts.suffixText}` : ""}`;
+			return `${micButton}${INPUT_BORDER_WIDGET_SEPARATOR}${parts.languageText}`;
 		}
-		return parts.suffixText ? `${micButton}${INPUT_BORDER_WIDGET_SEPARATOR}${parts.suffixText}` : micButton;
+		return micButton;
 	}
 
 	private voiceWidgetLayout(startColumn: number, sourceText: string, widgetText: string): NonNullable<StatusLineLayout["voiceWidget"]> {
@@ -605,17 +605,17 @@ export class StatusLineRenderer {
 		};
 	}
 
-	private voiceBorderWidgetParts(widgetText: string): { iconText: string; languageText: string; suffixText: string } | undefined {
+	private voiceBorderWidgetParts(widgetText: string): { buttonIconText: string; languageText: string } | undefined {
 		const tokens = widgetText.trim().split(/\s+/u).filter((token) => token.length > 0);
 		const iconText = tokens[0];
 		if (!iconText) return undefined;
 
 		const maybeLanguage = tokens[1] ?? "";
 		const hasLanguage = /^[A-Z][A-Z0-9_-]*$/u.test(maybeLanguage);
+		const suffixText = tokens.slice(hasLanguage ? 2 : 1).join(" ");
 		return {
-			iconText,
+			buttonIconText: suffixText || iconText,
 			languageText: hasLanguage ? maybeLanguage : "",
-			suffixText: tokens.slice(hasLanguage ? 2 : 1).join(" "),
 		};
 	}
 

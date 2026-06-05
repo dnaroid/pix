@@ -33,6 +33,7 @@ export type PopupMenuRendererHost = {
 	readonly session: AgentSession | undefined;
 	readonly resumeLoading: boolean;
 	readonly resumeSessionCount: number;
+	readonly userMessageJumpLoading: boolean;
 };
 
 export class PopupMenuRenderer {
@@ -225,7 +226,9 @@ export class PopupMenuRenderer {
 
 	renderUserMessageJumpMenu(width: number, menu: PopupMenu<UserMessageJumpMenuValue>, directQuery: string): RenderedLine[] {
 		const lines: RenderedLine[] = [this.popupMenuHeader("Jump to user message", width)];
-		if (!this.hasPopupActionItems(menu.items)) {
+		if (this.host.userMessageJumpLoading) {
+			lines.push({ text: `  ${APP_ICONS.timerSand} Loading user messages`, variant: "muted" });
+		} else if (!this.hasPopupActionItems(menu.items)) {
 			lines.push({
 				text: this.host.entries.some((entry) => entry.kind === "user") ? "  No matching user messages" : "  No user messages yet",
 				variant: "muted",

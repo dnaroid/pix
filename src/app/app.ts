@@ -251,6 +251,7 @@ export class PiUiExtendApp {
 			get session() { return app.runtime?.session; },
 			get resumeLoading() { return app.resumeLoading; },
 			get resumeSessionCount() { return app.resumeSessions.length; },
+			get userMessageJumpLoading() { return app.menuItems.isUserMessageJumpLoading(); },
 		});
 		this.popupMenus = new AppPopupMenuController({
 			get entries() { return app.entries; },
