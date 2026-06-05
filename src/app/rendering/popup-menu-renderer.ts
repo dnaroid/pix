@@ -1,5 +1,6 @@
 import { colorLine, type Theme } from "../../theme.js";
 import { stringDisplayWidth } from "../../terminal-width.js";
+import { resolveColor, resolveModelColor, type ModelColorsConfig } from "../../config.js";
 import type { PopupMenu, PopupMenuItem } from "../../ui.js";
 import {
 	SLASH_COMMAND_DESCRIPTION_COLUMN,
@@ -22,7 +23,7 @@ import type {
 } from "../types.js";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import { ellipsizeDisplay, padOrTrimPlain, sanitizeText } from "./render-text.js";
-import { thinkingLevelThemeColor } from "./status-line-renderer.js";
+import { modelProviderThemeColor, thinkingLevelThemeColor } from "./status-line-renderer.js";
 
 const POPUP_MENU_ESCAPE_BUTTON = "Esc";
 const POPUP_MENU_DESCRIPTION_GAP = "  ";
@@ -33,6 +34,7 @@ export type PopupMenuRendererHost = {
 	readonly screenStyler: ScreenStyler;
 	readonly entries: readonly Entry[];
 	readonly session: AgentSession | undefined;
+	readonly modelColors?: ModelColorsConfig;
 	readonly resumeLoading: boolean;
 	readonly resumeSessionCount: number;
 	readonly userMessageJumpLoading: boolean;
@@ -163,9 +165,11 @@ export class PopupMenuRenderer {
 
 		for (const item of visibleItems) {
 			const marker = item.selected ? "▶ " : "  ";
+			const text = `${marker}${this.labelDescriptionText(item.label, item.description, width - 2)}`;
 			lines.push({
-				text: `${marker}${this.labelDescriptionText(item.label, item.description, width - 2)}`,
+				text,
 				variant: this.selectableItemVariant(item.value),
+				segments: this.modelMenuItemSegments(item.value),
 				target: { kind: "popup-menu", index: item.index },
 			});
 		}
@@ -349,6 +353,24 @@ export class PopupMenuRenderer {
 			end: markerOffset + value.level.length,
 			foreground: thinkingLevelThemeColor(value.level, this.host.theme.colors, this.availableThinkingLevels()),
 		}];
+	}
+
+	private modelMenuItemSegments(value: ModelMenuValue): StyledSegment[] {
+		const markerOffset = 2; // "▶ " or "  "
+		return [{
+			start: markerOffset,
+			end: markerOffset + value.ref.length,
+			foreground: this.modelMenuItemColor(value),
+		}];
+	}
+
+	private modelMenuItemColor(value: ModelMenuValue): string {
+		const configuredColor = this.host.modelColors
+			? resolveModelColor(value.ref, this.host.modelColors)
+			: undefined;
+		return configuredColor
+			? resolveColor(configuredColor, this.host.theme.colors)
+			: modelProviderThemeColor(value.model.provider, this.host.theme.colors);
 	}
 
 	private availableThinkingLevels(): string[] {

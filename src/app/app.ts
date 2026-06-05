@@ -249,6 +249,7 @@ export class PiUiExtendApp {
 		const popupMenuRenderer = new PopupMenuRenderer({
 			theme: this.theme,
 			screenStyler: this.screenStyler,
+			modelColors: this.pixConfig.modelColors,
 			get entries() { return app.entries; },
 			get session() { return app.runtime?.session; },
 			get resumeLoading() { return app.resumeLoading; },
