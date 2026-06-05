@@ -40,8 +40,8 @@ function writePlan(projectDir: string): string {
 				updatedAt: "2026-01-01T00:00:00.000Z",
 				nextId: 3,
 				tasks: [
-					{ id: 1, subject: "Continue selected implementation", status: "pending", priority: "high" },
-					{ id: 2, subject: "Defer out-of-scope cleanup", status: "pending", priority: "medium" },
+					{ id: 1, subject: "Continue selected implementation", status: "pending" },
+					{ id: 2, subject: "Defer out-of-scope cleanup", status: "pending" },
 				],
 			},
 			null,
@@ -141,8 +141,8 @@ describe("todo persistence real pi e2e", () => {
 			const resumed = await runPi(projectDir, "ping", "resume-and-wait");
 			const resumeOutput = `${resumed.stdout}\n${resumed.stderr}`;
 			expect(resumeOutput).toContain("Persisted todo plan loaded");
-			expect(resumeOutput).toContain("#1 [pending] (high) Continue selected implementation");
-			expect(resumeOutput).toContain("#2 [deferred] (medium) Defer out-of-scope cleanup");
+			expect(resumeOutput).toContain("#1 [pending] Continue selected implementation");
+			expect(resumeOutput).toContain("#2 [deferred] Defer out-of-scope cleanup");
 			expect(resumeOutput).not.toContain("Todo auto-nudge");
 			// Keep this assertion outcome-based: process lifetime varies by host and
 			// shell (especially on Windows CI), while the regression this test guards

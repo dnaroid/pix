@@ -17,7 +17,6 @@ import type { AppOptions, Entry, SessionActivity, SessionTab, SubmittedUserMessa
 
 const TAB_STATE_VERSION = 3;
 const MAX_RESTORED_TABS = 8;
-const MAX_PROJECT_SESSIONS = 20;
 const TAB_ATTENTION_BLINK_KEY = "tab-attention";
 const LOADING_TAB_TITLE_PATTERN = /^loading(?:…|\.\.\.)?$/iu;
 
@@ -49,6 +48,7 @@ export type TabInputState = {
 
 export type AppTabsControllerHost = {
 	readonly options: AppOptions;
+	readonly maxProjectSessions?: number;
 	readonly blinkController: AppBlinkController;
 	runtime(): AgentSessionRuntime | undefined;
 	createRuntimeForNewSession(): Promise<AgentSessionRuntime>;
@@ -1234,7 +1234,7 @@ export class AppTabsController {
 	}
 
 	private scheduleProjectSessionRetention(): void {
-		if (this.host.options.noSession || this.retentionCleanupScheduled || this.retentionCleanupRunning) return;
+		if (this.host.options.noSession || this.maxProjectSessions() <= 0 || this.retentionCleanupScheduled || this.retentionCleanupRunning) return;
 		this.retentionCleanupScheduled = true;
 		setTimeout(() => {
 			this.retentionCleanupScheduled = false;
@@ -1246,6 +1246,9 @@ export class AppTabsController {
 		if (this.retentionCleanupRunning) return;
 		this.retentionCleanupRunning = true;
 		try {
+			const maxProjectSessions = this.maxProjectSessions();
+			if (maxProjectSessions <= 0) return;
+
 			const sessionDir = this.sessionDir();
 			const preserved = this.preservedSessionPaths();
 			const entries = await readdir(sessionDir, { withFileTypes: true });
@@ -1261,11 +1264,11 @@ export class AppTabsController {
 				}
 			}
 
-			if (sessions.length <= MAX_PROJECT_SESSIONS) return;
+			if (sessions.length <= maxProjectSessions) return;
 			sessions.sort((a, b) => b.modifiedMs - a.modifiedMs);
 			const keep = new Set(preserved);
 			for (const session of sessions) {
-				if (keep.size >= MAX_PROJECT_SESSIONS) break;
+				if (keep.size >= maxProjectSessions) break;
 				keep.add(session.path);
 			}
 
@@ -1294,5 +1297,10 @@ export class AppTabsController {
 		add(this.host.runtime()?.session.sessionFile);
 		for (const tab of this.tabItems) add(tab.sessionPath);
 		return preserved;
+	}
+
+	private maxProjectSessions(): number {
+		const value = this.host.maxProjectSessions;
+		return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
 	}
 }

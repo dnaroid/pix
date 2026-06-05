@@ -91,6 +91,7 @@ export type PixConfig = {
 	iconTheme: IconThemeConfig;
 	dictation: DictationConfig;
 	ignoreContextFiles: boolean;
+	maxProjectSessions: number;
 };
 
 const PIX_SCHEMA_URL = "https://unpkg.com/pi-ui-extend/schemas/pix.json";
@@ -363,6 +364,12 @@ function extractIgnoreContextFiles(raw: unknown): boolean | undefined {
 	return typeof raw.ignoreContextFiles === "boolean" ? raw.ignoreContextFiles : undefined;
 }
 
+function extractMaxProjectSessions(raw: unknown): number | undefined {
+	if (!isPlainObject(raw)) return undefined;
+	if (typeof raw.maxProjectSessions !== "number" || !Number.isFinite(raw.maxProjectSessions)) return undefined;
+	return Math.max(0, Math.floor(raw.maxProjectSessions));
+}
+
 function normalizeDictationLanguage(value: unknown): string | undefined {
 	if (typeof value !== "string") return undefined;
 	const normalized = value.trim().toLowerCase();
@@ -401,6 +408,7 @@ function defaultPixConfig(): PixConfig {
 		iconTheme: { name: resolveAppIconThemeNameFromEnv() },
 		dictation: DEFAULT_DICTATION,
 		ignoreContextFiles: false,
+		maxProjectSessions: 0,
 	};
 }
 
@@ -415,7 +423,8 @@ function pixConfigFromParsed(parsed: unknown, fallback: PixConfig = defaultPixCo
 	const iconTheme = { name: appIconThemeOverrideFromEnv() ?? configuredIconTheme.name } satisfies IconThemeConfig;
 	const dictation = extractDictationConfig(parsed) ?? fallback.dictation;
 	const ignoreContextFiles = extractIgnoreContextFiles(parsed) ?? fallback.ignoreContextFiles;
-	return { toolRenderer, outputFilters, ...(defaultModel === undefined ? {} : { defaultModel }), promptEnhancer, autocomplete, modelColors, iconTheme, dictation, ignoreContextFiles };
+	const maxProjectSessions = extractMaxProjectSessions(parsed) ?? fallback.maxProjectSessions;
+	return { toolRenderer, outputFilters, ...(defaultModel === undefined ? {} : { defaultModel }), promptEnhancer, autocomplete, modelColors, iconTheme, dictation, ignoreContextFiles, maxProjectSessions };
 }
 
 export function resolveDefaultModelRef(config: PixConfig): string | undefined {

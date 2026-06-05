@@ -217,7 +217,7 @@ export class StatusLineRenderer {
 		if (!session) return undefined;
 
 		const label = this.host.statusModelLabel(session);
-		const marker = `${label} ${this.host.statusThinkingLabel(session)} `;
+		const marker = `${label} ${this.statusThinkingDisplayLabel(session)} `;
 		const startIndex = statusText.indexOf(marker);
 		if (startIndex < 0) return undefined;
 
@@ -228,7 +228,7 @@ export class StatusLineRenderer {
 		const session = this.host.session;
 		if (!session) return undefined;
 
-		const label = this.host.statusThinkingLabel(session);
+		const label = this.statusThinkingDisplayLabel(session);
 		const marker = ` ${label} ${this.host.formatContextUsagePercent(session)}`;
 		const markerIndex = statusText.indexOf(marker);
 		const startIndex = markerIndex >= 0 ? markerIndex + 1 : statusText.indexOf(label);
@@ -241,7 +241,7 @@ export class StatusLineRenderer {
 		const session = this.host.session;
 		if (!session) return undefined;
 
-		const thinkingLabel = this.host.statusThinkingLabel(session);
+		const thinkingLabel = this.statusThinkingDisplayLabel(session);
 		const contextLabel = this.host.formatContextUsagePercent(session);
 		const marker = ` ${thinkingLabel} ${contextLabel}`;
 		const markerIndex = statusText.indexOf(marker);
@@ -336,7 +336,7 @@ export class StatusLineRenderer {
 		}] : [];
 		this.pushDraftQueueWidgetSegment(segments, statusText);
 		this.pushUserJumpWidgetSegment(segments, statusText);
-		this.pushThinkingExpandWidgetSegment(segments, statusText);
+		this.pushThinkingExpandWidgetSegment(segments, statusText, layout);
 		this.pushCompactToolsWidgetSegment(segments, statusText);
 		this.pushTerminalBellSoundWidgetSegment(segments, statusText);
 		this.pushWorkspaceSegments(segments, statusText, layout.workspaceLabel);
@@ -349,16 +349,17 @@ export class StatusLineRenderer {
 
 		const modelLabel = this.host.statusModelLabel(session);
 		const thinkingLabel = this.host.statusThinkingLabel(session);
+		const thinkingDisplayLabel = this.statusThinkingDisplayLabel(session);
 		const contextLabel = this.host.formatContextUsagePercent(session);
-		this.pushSegment(segments, statusText.indexOf(`${modelLabel} ${thinkingLabel} `), modelLabel.length, this.modelProviderColor(session));
+		this.pushSegment(segments, statusText.indexOf(`${modelLabel} ${thinkingDisplayLabel} `), modelLabel.length, this.modelProviderColor(session));
 
-		const thinkingMarkerStart = statusText.indexOf(` ${thinkingLabel} ${contextLabel}`);
+		const thinkingMarkerStart = statusText.indexOf(` ${thinkingDisplayLabel} ${contextLabel}`);
 		const thinkingStart = thinkingMarkerStart >= 0 ? thinkingMarkerStart + 1 : -1;
-		this.pushSegment(segments, thinkingStart, thinkingLabel.length, this.thinkingLevelColor(thinkingLabel));
+		this.pushSegment(segments, thinkingStart, thinkingDisplayLabel.length, this.thinkingLevelColor(thinkingLabel));
 
 		const contextPercent = this.host.roundedContextUsagePercent(session);
 		if (contextPercent !== undefined && thinkingStart >= 0) {
-			const contextStart = thinkingStart + thinkingLabel.length + 1;
+			const contextStart = thinkingStart + thinkingDisplayLabel.length + 1;
 			this.pushSegment(segments, contextStart, contextLabel.length, this.host.contextUsagePercentColor(contextPercent));
 
 			if (layout.contextBarLabel) {
@@ -406,9 +407,12 @@ export class StatusLineRenderer {
 		return this.host.queueableInputActive?.() ? APP_ICONS.timerSand : "";
 	}
 
-	private pushThinkingExpandWidgetSegment(segments: StyledSegment[], statusText: string): void {
+	private pushThinkingExpandWidgetSegment(segments: StyledSegment[], statusText: string, layout: StatusLineLayout): void {
+		if (!layout.thinkingExpandWidget) return;
 		const buttonText = APP_ICONS.thinkingExpanded;
-		const start = statusText.indexOf(buttonText);
+		const buttonMarker = ` ${buttonText} `;
+		const markerStart = statusText.indexOf(buttonMarker);
+		const start = markerStart >= 0 ? markerStart + 1 : -1;
 		if (start < 0) return;
 		this.pushSegment(segments, start, buttonText.length, this.host.allThinkingExpandedActive?.() ? this.host.theme.colors.info : this.host.theme.colors.muted);
 	}
@@ -479,17 +483,17 @@ export class StatusLineRenderer {
 			const percentText = match[1];
 			if (localStart === undefined || !percentText) continue;
 
-			if (!prefixColored) {
-				prefixColored = true;
-				const prefixLength = modelUsageLabel.slice(0, localStart).trimEnd().length;
-				this.pushSegment(segments, labelStart, prefixLength, this.host.theme.colors.selectionForeground);
-			}
-
 			const percent = Number.parseInt(percentText, 10);
 			if (!Number.isFinite(percent)) continue;
 
 			const start = labelStart + localStart;
 			const color = this.modelUsageProgressColor(percent);
+			if (!prefixColored) {
+				prefixColored = true;
+				const prefixLength = modelUsageLabel.slice(0, localStart).trimEnd().length;
+				this.pushSegment(segments, labelStart, prefixLength, color);
+			}
+
 			this.pushSegment(segments, start, percentToken.length, color);
 
 			const barStart = start + percentToken.length + 1;
@@ -544,6 +548,10 @@ export class StatusLineRenderer {
 
 	private thinkingLevelColor(label: string): string {
 		return thinkingLevelThemeColor(label, this.host.theme.colors, this.availableThinkingLevels());
+	}
+
+	private statusThinkingDisplayLabel(session: AgentSession): string {
+		return `${APP_ICONS.lightbulb} ${this.host.statusThinkingLabel(session)}`;
 	}
 
 	private availableThinkingLevels(): string[] {
@@ -656,8 +664,8 @@ function thinkingRankThemeColor(label: string, rank: number, count: number, colo
 	const baseColors = [
 		colors.muted,
 		colors.success,
+		colors.modelOpenAI,
 		colors.warning,
-		colors.toolMutation,
 		colors.error,
 		colors.thinkingXHigh,
 	];

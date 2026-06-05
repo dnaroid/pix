@@ -1467,7 +1467,7 @@ describe("AppTabsController", () => {
 		assert.deepEqual(toasts, ["Could not open session tab"]);
 	});
 
-	it("retains only twenty project sessions while preserving open tabs", async () => {
+	it("retains only configured project sessions while preserving open tabs", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "pix-tabs-retention-"));
 		const sessionDir = join(dir, "sessions");
 		const sessionPaths = Array.from({ length: 25 }, (_, index) => join(sessionDir, `${String(index + 1).padStart(2, "0")}.jsonl`));
@@ -1482,6 +1482,7 @@ describe("AppTabsController", () => {
 		const activeRuntime = fakeRuntime("one", preservedOldSession);
 		const controller = new AppTabsController({
 			options: { cwd: dir, themeName: "dark", noSession: false } satisfies AppOptions,
+			maxProjectSessions: 20,
 			blinkController: fakeBlinkController(),
 			runtime: () => activeRuntime,
 			createRuntimeForNewSession: async () => fakeRuntime("new", join(dir, "new.jsonl")),
@@ -1520,6 +1521,49 @@ describe("AppTabsController", () => {
 		assert.equal(remaining.includes("02.jsonl"), false);
 		assert.equal(remaining.includes("25.jsonl"), true);
 		assert.equal((await stat(preservedOldSession)).isFile(), true);
+	});
+
+	it("does not delete project sessions when retention is disabled", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "pix-tabs-retention-disabled-"));
+		const sessionDir = join(dir, "sessions");
+		const sessionPaths = Array.from({ length: 25 }, (_, index) => join(sessionDir, `${String(index + 1).padStart(2, "0")}.jsonl`));
+		await mkdir(sessionDir, { recursive: true });
+		for (const sessionPath of sessionPaths) await writeFile(sessionPath, "", "utf8");
+
+		const activeRuntime = fakeRuntime("one", sessionPaths[0] ?? "");
+		const controller = new AppTabsController({
+			options: { cwd: dir, themeName: "dark", noSession: false } satisfies AppOptions,
+			maxProjectSessions: 0,
+			blinkController: fakeBlinkController(),
+			runtime: () => activeRuntime,
+			createRuntimeForNewSession: async () => fakeRuntime("new", join(dir, "new.jsonl")),
+			createRuntimeForSession: async (path) => fakeRuntime("session", path),
+			activateRuntime: async () => {},
+			disposeRuntime: async () => {},
+			isRunning: () => true,
+			setStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			resetSessionView: () => {},
+			loadSessionHistory: () => {},
+			loadSessionHistoryAsync: async () => true,
+			syncUserSessionEntryMetadata: () => {},
+			captureInputState: () => ({ text: "", cursor: 0 }),
+			restoreInputState: () => {},
+			addEntry: () => {},
+			showToast: () => {},
+			render: () => {},
+		});
+		const tabs = controller as unknown as {
+			sessionDir: () => string;
+			cleanupOldProjectSessions: () => Promise<void>;
+		};
+		tabs.sessionDir = () => sessionDir;
+
+		await tabs.cleanupOldProjectSessions();
+
+		const remaining = (await readdir(sessionDir)).filter((name) => name.endsWith(".jsonl"));
+		assert.equal(remaining.length, 25);
 	});
 
 });

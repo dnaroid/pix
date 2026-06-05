@@ -1,6 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { fuzzySearch, type FuzzyMatch, type FuzzySearchItem } from "../../fuzzy.js";
 import {
 	REQUEST_HISTORY_MAX_BYTES,
 	REQUEST_HISTORY_MAX_ENTRIES,
@@ -16,6 +17,8 @@ export type RequestHistoryHost = {
 	resetInputMenuDismissals(): void;
 	render(): void;
 };
+
+export type RequestHistorySearchMatch = FuzzyMatch<string>;
 
 export class AppRequestHistory {
 	private entries: string[] = [];
@@ -50,6 +53,18 @@ export class AppRequestHistory {
 
 		this.entries = this.limited([...this.entries, normalized]);
 		void this.save();
+	}
+
+	search(query: string, limit = 50): string[] {
+		return this.searchMatches(query, limit).map((match) => match.value);
+	}
+
+	searchMatches(query: string, limit = 50): RequestHistorySearchMatch[] {
+		const items: FuzzySearchItem<string>[] = [...this.entries].reverse().map((entry) => ({
+			value: entry,
+			label: entry,
+		}));
+		return fuzzySearch(items, query, { limit, minScorePerCharacter: 8, preferKeyboardLayoutMatches: true });
 	}
 
 	resetNavigation(): void {

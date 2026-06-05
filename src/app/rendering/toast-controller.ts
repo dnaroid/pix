@@ -47,6 +47,22 @@ export class AppToastController {
 		this.host.render();
 	}
 
+	dismissActiveDialog(scopeKey = this.normalizeScopeKey(this.host.activeScope?.())): boolean {
+		const states = this.visibleStates(scopeKey);
+		let dialog: ToastEntry | undefined;
+		for (let index = states.length - 1; index >= 0; index -= 1) {
+			const toast = states[index];
+			if (!toast) continue;
+			if (toast.variant !== "dialog") continue;
+			dialog = toast;
+			break;
+		}
+		if (!dialog) return false;
+
+		this.dismissToast(dialog.id, scopeKey);
+		return true;
+	}
+
 	visibleStates(scopeKey = this.normalizeScopeKey(this.host.activeScope?.())): readonly ToastEntry[] {
 		return this.toastsByScope.get(scopeKey)?.visibleStates ?? [];
 	}

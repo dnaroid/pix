@@ -136,6 +136,7 @@ export const PixConfigSchema = Type.Object(
 	{
 		$schema: Type.Optional(Type.String({ description: "JSON Schema URL used by editors for validation and autocomplete." })),
 		ignoreContextFiles: Type.Optional(Type.Boolean({ description: "Disable AGENTS.md / CLAUDE.md discovery for sessions started in this project, equivalent to pi --no-context-files." })),
+		maxProjectSessions: Type.Optional(Type.Number({ description: "Maximum number of pi session JSONL files to retain per project. Set to 0 to disable automatic session deletion.", minimum: 0 })),
 		defaultModel: Type.Optional(DefaultModelConfig),
 		toolRenderer: Type.Optional(ToolRendererConfig),
 		outputFilters: Type.Optional(OutputFiltersConfig),

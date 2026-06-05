@@ -123,6 +123,20 @@ describe("AppScrollController", () => {
 		assert.equal(controller.conversationView(10, 5).metrics.start, 65);
 		assert.equal(slicedStart, 65);
 	});
+
+	it("can return a detached viewport to the bottom", () => {
+		const controller = createController({
+			lineCount: () => 20,
+			slice: (_width, start, count) => Array.from({ length: count }, (_, index) => ({ text: `line ${start + index}` })),
+		}, 5);
+
+		assert.equal(controller.scrollByLines(-4, { render: false }), true);
+		assert.equal(controller.conversationView(10, 5).metrics.start, 11);
+
+		assert.equal(controller.scrollToBottom(), true);
+		assert.equal(controller.conversationView(10, 5).metrics.start, 15);
+		assert.equal(controller.scrollToBottom(), false);
+	});
 });
 
 function createController(viewport: {

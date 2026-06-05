@@ -1,6 +1,6 @@
-import { THINKING_LEVELS, TODO_ACTIONS, TODO_PRIORITIES, TODO_STATUSES } from "../constants.js";
-import type { StyledSegment, ThinkingLevel, TodoAction, TodoDetails, TodoLiveStateEvent, TodoPriority, TodoStatus, TodoTask, TodoTaskLinePart, TodoTaskRow } from "../types.js";
-import { isNumberArray, isRecord, isStringArray } from "../guards.js";
+import { THINKING_LEVELS, TODO_ACTIONS, TODO_STATUSES } from "../constants.js";
+import type { StyledSegment, ThinkingLevel, TodoAction, TodoDetails, TodoLiveStateEvent, TodoStatus, TodoTask, TodoTaskLinePart, TodoTaskRow } from "../types.js";
+import { isNumberArray, isRecord } from "../guards.js";
 import { APP_ICONS } from "../icons.js";
 
 export function isTodoAction(value: unknown): value is TodoAction {
@@ -9,10 +9,6 @@ export function isTodoAction(value: unknown): value is TodoAction {
 
 export function isTodoStatus(value: unknown): value is TodoStatus {
 	return typeof value === "string" && TODO_STATUSES.includes(value as TodoStatus);
-}
-
-export function isTodoPriority(value: unknown): value is TodoPriority {
-	return typeof value === "string" && TODO_PRIORITIES.includes(value as TodoPriority);
 }
 
 export function isTodoThinkingLevel(value: unknown): value is ThinkingLevel {
@@ -26,11 +22,9 @@ export function isTodoTask(value: unknown): value is TodoTask {
 	if (!isTodoStatus(value.status)) return false;
 	if (value.description !== undefined && typeof value.description !== "string") return false;
 	if (value.activeForm !== undefined && typeof value.activeForm !== "string") return false;
-	if (value.priority !== undefined && !isTodoPriority(value.priority)) return false;
 	if (value.thinking !== undefined && !isTodoThinkingLevel(value.thinking)) return false;
 	if (value.parentId !== undefined && typeof value.parentId !== "number") return false;
 	if (value.blockedBy !== undefined && !isNumberArray(value.blockedBy)) return false;
-	if (value.tags !== undefined && !isStringArray(value.tags)) return false;
 	if (value.owner !== undefined && typeof value.owner !== "string") return false;
 	if (value.metadata !== undefined && !isRecord(value.metadata)) return false;
 	return true;
@@ -110,13 +104,11 @@ export function visibleTodoTaskRows(details: TodoDetails, showDeleted = false): 
 
 export function todoTaskLineParts(task: TodoTask, options: { depth?: number } = {}): TodoTaskLinePart[] {
 	const treePrefix = todoTaskTreePrefix(options.depth ?? 0);
-	const parts: TodoTaskLinePart[] = [{ text: `${treePrefix}${todoStatusIcon(task.status)}` }, { text: `#${task.id}`, muted: true }, { text: task.subject }];
+	const parts: TodoTaskLinePart[] = [{ text: `${treePrefix}${todoStatusIcon(task.status)}` }, { text: `${task.id}.${task.subject}` }];
+	if (task.thinking) parts.push({ text: APP_ICONS.lightbulb, thinking: task.thinking });
 	if (task.status === "in_progress" && task.activeForm) parts.push({ text: `— ${task.activeForm}` });
-	if (task.priority) parts.push({ text: `(${task.priority})`, muted: true });
-	if (task.thinking) parts.push({ text: `[${task.thinking}]`, thinking: task.thinking });
 	if (task.parentId !== undefined) parts.push({ text: `parent:#${task.parentId}` });
 	if (task.blockedBy && task.blockedBy.length > 0) parts.push({ text: `blocked:${task.blockedBy.map((id) => `#${id}`).join(",")}` });
-	if (task.tags && task.tags.length > 0) parts.push({ text: task.tags.map((tag) => `#${tag}`).join(" "), muted: true });
 	return parts;
 }
 

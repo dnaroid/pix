@@ -508,6 +508,45 @@ describe("AppInputActionController", () => {
 		assert.equal(cancelCalls, 1);
 	});
 
+	it("dismisses the active dialog on Escape", async () => {
+		let dismissDialogCalls = 0;
+		const controller = new AppInputActionController(
+			{
+				runtime: () => undefined,
+				isRunning: () => true,
+				isSessionSwitching: () => false,
+				inputEditor: () => new InputEditor(),
+				requestHistory: () => ({ add: () => {} }) as unknown as AppRequestHistory,
+				clearPersistedInputDraft: async () => {},
+				setStatus: () => {},
+				setSessionStatus: () => {},
+				setSessionActivity: () => {},
+				addEntry: () => {},
+				addSessionAbortedEntry: () => {},
+				showToast: () => {},
+				dismissActiveDialog: () => { dismissDialogCalls += 1; return true; },
+				stopVoiceInput: async () => {},
+				isShellCommandRunning: () => false,
+				runChatShellCommand: async () => ({ exitCode: 0, signal: null }),
+				sendShellInput: () => false,
+				interruptShellCommand: () => false,
+				runInteractiveShellCommand: async () => ({ exitCode: 0, signal: null }),
+				stop: async () => {},
+				render: () => {},
+			},
+			{ syncActivePopupMenu: () => false } as unknown as AppPopupMenuController,
+			{} as AppPopupActionController,
+			{
+				createSubmittedUserMessage: () => ({ id: "queued", promptText: "", displayText: "", images: [] }),
+				submitUserMessage: async () => {},
+			} as unknown as AppQueuedMessageController,
+		);
+
+		await controller.handleEscape();
+
+		assert.equal(dismissDialogCalls, 1);
+	});
+
 	it("closes the active popup before aborting running session work on Escape", async () => {
 		let cancelCalls = 0;
 		let abortCalls = 0;

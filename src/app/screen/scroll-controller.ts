@@ -40,6 +40,13 @@ export class AppScrollController {
 		this.detachedScrollStart = undefined;
 	}
 
+	scrollToBottom(): boolean {
+		const changed = this.scrollFromBottom !== 0 || this.detachedScrollStart !== undefined;
+		this.scrollFromBottom = 0;
+		this.detachedScrollStart = undefined;
+		return changed;
+	}
+
 	conversationView(columns: number, bodyHeight: number): { lines: RenderedLine[]; metrics: AppScrollMetrics } {
 		const metrics = this.scrollMetrics(columns, bodyHeight);
 		return {

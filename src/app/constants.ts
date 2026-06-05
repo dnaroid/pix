@@ -94,7 +94,6 @@ export const TODO_ACTIONS = [
 ] as const;
 
 export const TODO_STATUSES = ["pending", "in_progress", "deferred", "completed", "deleted"] as const;
-export const TODO_PRIORITIES = ["low", "medium", "high", "urgent"] as const;
 
 export const SUBAGENT_STATUSES = ["planned", "running", "retrying", "done", "failed", "stopped"] as const;
 export const SUBAGENT_ACTIVE_STATUSES = ["planned", "running", "retrying"] as const;

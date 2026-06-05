@@ -25,10 +25,10 @@ describe("AppStatusController", () => {
 		controller.setStatus("ready");
 		assert.equal(controller.currentStatus(), "ready");
 		controller.setSessionStatus(session);
-		assert.equal(controller.currentStatus(), "provider/model medium 42%");
+		assert.equal(controller.currentStatus(), `provider/model ${APP_ICONS.lightbulb} medium 42%`);
 
 		session = { ...session, model: undefined, thinkingLevel: "off", getContextUsage: () => undefined } as AgentSession;
-		assert.equal(controller.currentStatus(), "no model off ?%");
+		assert.equal(controller.currentStatus(), `no model ${APP_ICONS.lightbulb} off ?%`);
 	});
 
 	it("formats session, workspace, context, and severity labels", async () => {
@@ -249,7 +249,7 @@ describe("StatusLineRenderer", () => {
 			widgetText: "",
 			voiceActive: false,
 			session: sessionWithThinkingLevels(["off", "low", "medium", "high"]),
-			currentStatus: "model medium ?%",
+			currentStatus: `model ${APP_ICONS.lightbulb} medium ?%`,
 			thinkingLabel: "medium",
 			workspaceLabel: "workspace",
 		});
@@ -270,7 +270,7 @@ describe("StatusLineRenderer", () => {
 			voiceActive: false,
 			session: sessionWithModelProvider("anthropic"),
 			modelLabel: "anthropic/claude-sonnet-4",
-			currentStatus: "anthropic/claude-sonnet-4 medium ?%",
+			currentStatus: `anthropic/claude-sonnet-4 ${APP_ICONS.lightbulb} medium ?%`,
 		});
 		const layout = renderer.layout(100);
 		const rendered = renderer.render(1, layout, 100);
@@ -286,7 +286,7 @@ describe("StatusLineRenderer", () => {
 			voiceActive: false,
 			session: sessionWithModelProvider("zai", "glm-5-turbo"),
 			modelLabel: "zai/glm-5-turbo",
-			currentStatus: "zai/glm-5-turbo medium ?%",
+			currentStatus: `zai/glm-5-turbo ${APP_ICONS.lightbulb} medium ?%`,
 			modelColors: { rules: { "zai/*": "#22c55e" } },
 		});
 		const layout = renderer.layout(100);
@@ -309,7 +309,7 @@ describe("StatusLineRenderer", () => {
 			voiceActive: false,
 			session: sessionWithModelProvider("antigravity", "antigravity-claude-sonnet-4"),
 			modelLabel: "antigravity/antigravity-claude-sonnet-4",
-			currentStatus: "antigravity/antigravity-claude-sonnet-4 medium ?%",
+			currentStatus: `antigravity/antigravity-claude-sonnet-4 ${APP_ICONS.lightbulb} medium ?%`,
 			modelColors,
 		});
 		const layout = renderer.layout(120);
@@ -335,13 +335,13 @@ describe("StatusLineRenderer", () => {
 			widgetText: "",
 			voiceActive: false,
 			session: sessionWithThinkingLevels(["off", "low", "medium", "high"]),
-			currentStatus: "model high ?%",
+			currentStatus: `model ${APP_ICONS.lightbulb} high ?%`,
 			thinkingLabel: "high",
 		});
 		const layout = renderer.layout(80);
 		const rendered = renderer.render(1, layout, 80);
 
-		assert.ok(rendered.includes(colorize("high", {
+		assert.ok(rendered.includes(colorize(`${APP_ICONS.lightbulb} high`, {
 			foreground: THEMES.dark.colors.error,
 		})));
 	});
@@ -351,8 +351,8 @@ describe("StatusLineRenderer", () => {
 		const expectedColors = [
 			THEMES.dark.colors.muted,
 			THEMES.dark.colors.success,
+			THEMES.dark.colors.modelOpenAI,
 			THEMES.dark.colors.warning,
-			THEMES.dark.colors.toolMutation,
 			THEMES.dark.colors.error,
 			THEMES.dark.colors.thinkingXHigh,
 		];
@@ -362,13 +362,13 @@ describe("StatusLineRenderer", () => {
 				widgetText: "",
 				voiceActive: false,
 				session: sessionWithThinkingLevels(levels),
-				currentStatus: `model ${level} ?%`,
+				currentStatus: `model ${APP_ICONS.lightbulb} ${level} ?%`,
 				thinkingLabel: level,
 			});
 			const layout = renderer.layout(80);
 			const rendered = renderer.render(1, layout, 80);
 
-			assert.ok(rendered.includes(colorize(level, {
+			assert.ok(rendered.includes(colorize(`${APP_ICONS.lightbulb} ${level}`, {
 				foreground: expectedColors[index],
 			})));
 		}
@@ -382,13 +382,13 @@ describe("StatusLineRenderer", () => {
 			widgetText: "",
 			voiceActive: false,
 			session: sessionWithThinkingLevels(levels),
-			currentStatus: "model none ?%",
+			currentStatus: `model ${APP_ICONS.lightbulb} none ?%`,
 			thinkingLabel: "none",
 		});
 		const layout = renderer.layout(80);
 		const rendered = renderer.render(1, layout, 80);
 
-		assert.ok(rendered.includes(colorize("none", {
+		assert.ok(rendered.includes(colorize(`${APP_ICONS.lightbulb} none`, {
 			foreground: THEMES.dark.colors.statusForeground,
 		})));
 	});
@@ -424,14 +424,14 @@ describe("StatusLineRenderer", () => {
 		})));
 	});
 
-	it("renders Antigravity usage email in white", () => {
-		const usageLabel = "user@example.com 99% ████▉ 06.01";
+	it("renders Antigravity usage email with the limit color", () => {
+		const usageLabel = "user@example.com 20% █     06.01";
 		const renderer = statusLineRenderer({ widgetText: "", voiceActive: false, modelUsageLabel: usageLabel });
 		const layout = renderer.layout(100);
 		const rendered = renderer.render(1, layout, 100);
 
 		assert.ok(rendered.includes(colorize("user@example.com", {
-			foreground: THEMES.dark.colors.selectionForeground,
+			foreground: THEMES.dark.colors.warning,
 		})));
 	});
 
@@ -591,7 +591,7 @@ describe("StatusLineRenderer target helpers", () => {
 		widgetText: `${APP_ICONS.microphone} RU`,
 		voiceActive: false,
 		session,
-		currentStatus: "anthropic/claude-sonnet-4 medium ?%",
+		currentStatus: `anthropic/claude-sonnet-4 ${APP_ICONS.lightbulb} medium ?%`,
 		thinkingLabel: "medium",
 		modelLabel: "anthropic/claude-sonnet-4",
 		workspaceLabel: "workspace",
@@ -599,7 +599,7 @@ describe("StatusLineRenderer target helpers", () => {
 	const layout = renderer.layout(80);
 	const widgetLayout = renderer.inputBorderWidgetsLayout(80)!;
 	const modelLabel = "anthropic/claude-sonnet-4";
-	const thinkingLabel = "medium";
+	const thinkingLabel = `${APP_ICONS.lightbulb} medium`;
 	const contextLabel = "?%";
 
 	assert.deepEqual(renderer.modelTarget(layout.text, 1), {

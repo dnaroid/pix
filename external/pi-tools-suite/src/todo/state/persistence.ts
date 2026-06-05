@@ -22,7 +22,6 @@ function cloneTask(task: Task): Task {
 	return {
 		...task,
 		blockedBy: task.blockedBy ? [...task.blockedBy] : undefined,
-		tags: task.tags ? [...task.tags] : undefined,
 		metadata: task.metadata ? { ...task.metadata } : undefined,
 	};
 }

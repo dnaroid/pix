@@ -1,5 +1,6 @@
 import type { AgentSession, AgentSessionRuntime, SessionInfo } from "@earendil-works/pi-coding-agent";
 import type { SessionSearchResult } from "../session/session-search.js";
+import type { AppRequestHistory } from "../session/request-history.js";
 import type { ActivePopupMenu, AppOptions, Entry, ModelMenuValue, PixMenuItem, PixMenuOptions, PopupMenuPlacement, ScopedSessionModel, SessionModel, ThinkingMenuValue } from "../types.js";
 import type { ToastNotifier } from "../../ui.js";
 
@@ -8,6 +9,7 @@ export type DirectPopupMenu = Exclude<ActivePopupMenu, "slash">;
 export type CommandControllerHost = {
 	readonly options: AppOptions;
 	runtime(): AgentSessionRuntime | undefined;
+	requestHistory(): AppRequestHistory;
 	getInput(): string;
 	setInput(value: string): void;
 	promptEnhancerModelRef(): string;

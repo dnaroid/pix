@@ -9,6 +9,11 @@
       "type": "boolean",
       "description": "Disable AGENTS.md / CLAUDE.md discovery for sessions started in this project, equivalent to pi --no-context-files."
     },
+    "maxProjectSessions": {
+      "type": "number",
+      "description": "Maximum number of pi session JSONL files to retain per project. Set to 0 to disable automatic session deletion.",
+      "minimum": 0
+    },
     "defaultModel": {
       "type": "object",
       "properties": {

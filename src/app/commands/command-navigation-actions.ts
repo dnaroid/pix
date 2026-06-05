@@ -16,6 +16,28 @@ function nextTick(): Promise<void> {
 	});
 }
 
+export function formatHistoryMenuLabel(text: string): string {
+	return sanitizeText(text).replace(/\n/g, " ↵ ");
+}
+
+export function historyHighlightRanges(ranges: readonly { start: number; end: number }[], text: string): { start: number; end: number }[] {
+	return ranges.map((range) => ({
+		start: historyLabelIndex(range.start, text),
+		end: historyLabelIndex(range.end, text),
+	})).filter((range) => range.end > range.start);
+}
+
+function historyLabelIndex(index: number, text: string): number {
+	const before = text.slice(0, Math.max(0, Math.min(index, text.length)));
+	const newlineCount = before.split("\n").length - 1;
+	return before.length + newlineCount * 2;
+}
+
+function formatHistoryMenuDescription(text: string): string | undefined {
+	const lines = sanitizeText(text).split("\n");
+	return lines.length > 1 ? `${lines.length} lines` : undefined;
+}
+
 export class NavigationCommandActions {
 	private resumeLoadId = 0;
 
@@ -119,6 +141,44 @@ export class NavigationCommandActions {
 		} finally {
 			this.host.render();
 		}
+	}
+
+	async runHistoryCommand(argumentsText: string): Promise<void> {
+		const query = argumentsText.trim();
+		const matches = this.host.requestHistory().searchMatches(query, 100);
+		if (matches.length === 0) {
+			this.host.addEntry({ id: createId("system"), kind: "system", text: query ? `No command history found for: ${query}` : "Command history is empty." });
+			this.host.toast.info(query ? "No matching command history" : "Command history is empty");
+			this.host.setSessionStatus(this.host.runtime()?.session);
+			this.host.render();
+			return;
+		}
+
+		const selected = await this.host.showMenu(matches.map((match) => {
+			const description = formatHistoryMenuDescription(match.value);
+			return {
+				value: match.value,
+				label: formatHistoryMenuLabel(match.value),
+				labelHighlightRanges: match.matchedText === match.label ? historyHighlightRanges(match.matchedRanges, match.value) : [],
+				...(description === undefined ? {} : { description }),
+			};
+		}), {
+			title: query ? `Search command history: ${query}` : "Command history",
+			placeholder: "Filter history",
+			emptyText: "No matching command history",
+			searchable: true,
+			minScorePerCharacter: 8,
+			preferKeyboardLayoutMatches: true,
+		});
+		if (!selected) {
+			this.host.setSessionStatus(this.host.runtime()?.session);
+			return;
+		}
+
+		this.host.setInput(selected);
+		this.host.toast.info("Restored command from history");
+		this.host.setSessionStatus(this.host.runtime()?.session);
+		this.host.render();
 	}
 
 	async runSearchCommand(argumentsText: string): Promise<void> {

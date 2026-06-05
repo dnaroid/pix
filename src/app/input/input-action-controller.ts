@@ -28,6 +28,7 @@ export type AppInputActionControllerHost = {
 	addEntry(entry: Entry): void;
 	addSessionAbortedEntry(): void;
 	showToast(message: string, kind: "success" | "error" | "warning" | "info"): void;
+	dismissActiveDialog?(): boolean;
 	stopVoiceInput(): Promise<void>;
 	isShellCommandRunning(): boolean;
 	runChatShellCommand(command: string): Promise<InteractiveShellCommandResult>;
@@ -121,9 +122,12 @@ export class AppInputActionController {
 	}
 
 	private closeActiveGlobalUi(): boolean {
-		if (!this.popupMenus.syncActivePopupMenu()) return false;
-		this.popupMenus.cancelActivePopupMenu();
-		return true;
+		if (this.popupMenus.syncActivePopupMenu()) {
+			this.popupMenus.cancelActivePopupMenu();
+			return true;
+		}
+
+		return this.host.dismissActiveDialog?.() ?? false;
 	}
 
 	private async abortStreamingSession(

@@ -812,11 +812,19 @@ export class AppPopupMenuController {
 					...(item.keywords === undefined ? {} : { keywords: item.keywords }),
 				})),
 				query,
-			).map((match) => match.value);
+				{
+					...(request.options.minScorePerCharacter === undefined ? {} : { minScorePerCharacter: request.options.minScorePerCharacter }),
+					preferKeyboardLayoutMatches: request.options.preferKeyboardLayoutMatches ?? false,
+				},
+			).map((match) => ({
+				...match.value,
+				labelHighlightRanges: match.matchedText === match.label ? match.matchedRanges : [],
+			}));
 
 		return this.withoutCloseMenuItems(items.map((item) => ({
 			value: item,
 			label: item.label,
+			...(item.labelHighlightRanges === undefined ? {} : { labelHighlightRanges: item.labelHighlightRanges }),
 			...(item.description === undefined ? {} : { description: item.description }),
 		})));
 	}

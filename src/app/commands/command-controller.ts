@@ -61,6 +61,7 @@ export class AppCommandController {
 			runCloneCommand: () => this.navigationActions.runCloneCommand(),
 			runTreeCommand: (argumentsText) => this.navigationActions.runTreeCommand(argumentsText),
 			runJumpCommand: (argumentsText) => this.navigationActions.runJumpCommand(argumentsText),
+			runHistoryCommand: (argumentsText) => this.navigationActions.runHistoryCommand(argumentsText),
 			runSearchCommand: (argumentsText) => this.navigationActions.runSearchCommand(argumentsText),
 			runUnsupportedBuiltinCommand: (commandName, message) => this.navigationActions.runUnsupportedBuiltinCommand(commandName, message),
 			runResumePathCommand: (sessionPath) => this.navigationActions.runResumePathCommand(sessionPath),

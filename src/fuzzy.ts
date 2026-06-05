@@ -22,6 +22,8 @@ export type FuzzyMatch<T> = {
 export type FuzzySearchOptions = {
 	limit?: number;
 	includeEmptyQuery?: boolean;
+	minScorePerCharacter?: number;
+	preferKeyboardLayoutMatches?: boolean;
 };
 
 type FuzzyScore = {
@@ -32,6 +34,7 @@ type FuzzyScore = {
 type FuzzyQueryVariant = {
 	query: string;
 	penalty: number;
+	keyboardLayout: boolean;
 };
 
 const KEYBOARD_LAYOUT_VARIANT_PENALTY = 2;
@@ -86,10 +89,11 @@ export function fuzzySearch<T>(
 	const includeEmptyQuery = options.includeEmptyQuery ?? true;
 	if (!includeEmptyQuery && normalizedQuery.length === 0) return [];
 
-	const matches: FuzzyMatch<T>[] = [];
+	type CandidateMatch = FuzzyMatch<T> & { keyboardLayout: boolean };
+	const candidateMatches: CandidateMatch[] = [];
 	items.forEach((item, rank) => {
 		const texts = [item.label, ...(item.aliases ?? []), ...(item.keywords ?? [])];
-		let best: (FuzzyScore & { text: string }) | undefined;
+		let best: (FuzzyScore & { text: string; keyboardLayout: boolean }) | undefined;
 
 		for (const text of texts) {
 			for (const queryVariant of queryVariants) {
@@ -97,20 +101,28 @@ export function fuzzySearch<T>(
 				if (!score) continue;
 
 				const adjustedScore = score.score - queryVariant.penalty;
-				if (!best || adjustedScore > best.score) best = { ...score, score: adjustedScore, text };
+				if (!best || adjustedScore > best.score) {
+					best = { ...score, score: adjustedScore, text, keyboardLayout: queryVariant.keyboardLayout };
+				}
 			}
 		}
 
 		if (!best) return;
-		matches.push({
+		if (isBelowMinimumScore(best.score, normalizedQuery, options.minScorePerCharacter)) return;
+		candidateMatches.push({
 			value: item.value,
 			label: item.label,
 			matchedText: best.text,
 			matchedRanges: best.ranges,
 			score: best.score,
 			rank,
+			keyboardLayout: best.keyboardLayout,
 		});
 	});
+
+	const matches = options.preferKeyboardLayoutMatches && shouldPreferKeyboardLayoutMatches(query) && candidateMatches.some((match) => match.keyboardLayout)
+		? candidateMatches.filter((match) => match.keyboardLayout)
+		: candidateMatches;
 
 	matches.sort((left, right) => {
 		const scoreDelta = right.score - left.score;
@@ -120,7 +132,12 @@ export function fuzzySearch<T>(
 		return left.label.localeCompare(right.label);
 	});
 
-	return options.limit === undefined ? matches : matches.slice(0, options.limit);
+	return (options.limit === undefined ? matches : matches.slice(0, options.limit)).map(({ keyboardLayout: _keyboardLayout, ...match }) => match);
+}
+
+function isBelowMinimumScore(score: number, normalizedQuery: string, minScorePerCharacter: number | undefined): boolean {
+	if (minScorePerCharacter === undefined || normalizedQuery.length === 0) return false;
+	return score < normalizedQuery.length * minScorePerCharacter;
 }
 
 function scoreFuzzyMatch(normalizedQuery: string, text: string): FuzzyScore | undefined {
@@ -204,7 +221,7 @@ function normalizeText(value: string): string {
 }
 
 function getQueryVariants(normalizedQuery: string): FuzzyQueryVariant[] {
-	const variants: FuzzyQueryVariant[] = [{ query: normalizedQuery, penalty: 0 }];
+	const variants: FuzzyQueryVariant[] = [{ query: normalizedQuery, penalty: 0, keyboardLayout: false }];
 	addKeyboardLayoutVariant(variants, normalizedQuery, RUSSIAN_TO_ENGLISH_KEYBOARD_LAYOUT);
 	addKeyboardLayoutVariant(variants, normalizedQuery, ENGLISH_TO_RUSSIAN_KEYBOARD_LAYOUT);
 	return variants;
@@ -217,7 +234,14 @@ function addKeyboardLayoutVariant(
 ): void {
 	const variant = remapKeyboardLayout(normalizedQuery, layout);
 	if (variant === normalizedQuery || variants.some((existing) => existing.query === variant)) return;
-	variants.push({ query: variant, penalty: KEYBOARD_LAYOUT_VARIANT_PENALTY });
+	variants.push({ query: variant, penalty: KEYBOARD_LAYOUT_VARIANT_PENALTY, keyboardLayout: true });
+}
+
+function shouldPreferKeyboardLayoutMatches(query: string): boolean {
+	const trimmed = query.trim();
+	if (!trimmed) return false;
+	if (/^[А-ЯЁ][а-яё]+$/u.test(trimmed)) return false;
+	return /[А-ЯЁ]/u.test(trimmed);
 }
 
 function remapKeyboardLayout(value: string, layout: Readonly<Record<string, string>>): string {

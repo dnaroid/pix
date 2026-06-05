@@ -63,6 +63,19 @@ describe("renderToolBlock", () => {
 		assert.deepEqual(lines[0]?.segments?.[0], { start: 0, end: APP_ICONS.alert.length, foreground: colors.warning, bold: true });
 	});
 
+	it("colors write tool LSP diagnostic severities", () => {
+		setAppIconTheme("nerdFont");
+		const output = [
+			"LSP diagnostics after mutation:",
+			"src/a.ts:2:2 - warning TS6133: unused variable",
+		].join("\n");
+
+		const lines = renderToolBlock(toolEntry({ toolName: "functions.write", output, expandedText: output }), rule, 100, colors);
+
+		assert.deepEqual(lines[0]?.segments?.[0], { start: 0, end: APP_ICONS.alert.length, foreground: colors.warning, bold: true });
+		assert.deepEqual(lines[2]?.segments, [{ start: 2, end: lines[2]?.text.length, foreground: colors.warning }]);
+	});
+
 	it("marks truncated collapsed previews with a chevron in normal mode", () => {
 		const output = "one\ntwo\nthree";
 

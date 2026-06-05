@@ -1,4 +1,4 @@
-import type { Task, TaskAction, TaskMutationParams, TaskPriority, TaskStatus, TodoThinkingLevel } from "../tool/types.js";
+import type { Task, TaskAction, TaskMutationParams, TaskStatus, TodoThinkingLevel } from "../tool/types.js";
 import { isTransitionValid } from "./invariants.js";
 import type { TaskState } from "./state.js";
 import { detectCycle } from "./task-graph.js";
@@ -9,10 +9,10 @@ export type Op =
 	| { kind: "batch_create"; ids: number[]; replacedCount?: number }
 	| { kind: "batch_update"; ids: number[] }
 	| { kind: "delete"; id: number; subject: string }
-	| { kind: "list"; statusFilter?: TaskStatus; priorityFilter?: TaskPriority; tagFilter?: string; blockedOnly: boolean; includeDeleted: boolean }
+	| { kind: "list"; statusFilter?: TaskStatus; blockedOnly: boolean; includeDeleted: boolean }
 	| { kind: "get"; task: Task }
 	| { kind: "clear"; count: number }
-	| { kind: "export"; format: "json" | "markdown"; statusFilter?: TaskStatus; priorityFilter?: TaskPriority; tagFilter?: string; blockedOnly: boolean; includeDeleted: boolean }
+	| { kind: "export"; format: "json" | "markdown"; statusFilter?: TaskStatus; blockedOnly: boolean; includeDeleted: boolean }
 	| { kind: "import"; count: number; replaced: boolean }
 	| { kind: "error"; message: string };
 
@@ -27,11 +27,6 @@ function errorResult(state: TaskState, message: string): ApplyResult {
 
 function uniqueNumbers(values: number[] | undefined): number[] {
 	return [...new Set((values ?? []).filter((value) => Number.isFinite(value)))];
-}
-
-function normalizeTags(tags: string[] | undefined): string[] | undefined {
-	const normalized = [...new Set((tags ?? []).map((tag) => tag.trim()).filter(Boolean))];
-	return normalized.length ? normalized : undefined;
 }
 
 function isTodoThinkingLevel(value: unknown): value is TodoThinkingLevel {
@@ -91,13 +86,10 @@ function coerceTask(value: unknown, fallbackId: number): Task | undefined {
 	const task: Task = { id: typeof v.id === "number" && Number.isFinite(v.id) ? v.id : fallbackId, subject, status };
 	if (typeof v.description === "string" && v.description) task.description = v.description;
 	if (typeof v.activeForm === "string" && v.activeForm) task.activeForm = v.activeForm;
-	if (v.priority === "low" || v.priority === "medium" || v.priority === "high" || v.priority === "urgent") task.priority = v.priority;
 	if (isTodoThinkingLevel(v.thinking)) task.thinking = v.thinking;
 	if (typeof v.parentId === "number" && Number.isFinite(v.parentId)) task.parentId = v.parentId;
 	const blockedBy = Array.isArray(v.blockedBy) ? uniqueNumbers(v.blockedBy as number[]) : undefined;
 	if (blockedBy?.length) task.blockedBy = blockedBy;
-	const tags = Array.isArray(v.tags) ? normalizeTags(v.tags.filter((tag): tag is string => typeof tag === "string")) : undefined;
-	if (tags) task.tags = tags;
 	if (typeof v.owner === "string" && v.owner) task.owner = v.owner;
 	if (v.metadata && typeof v.metadata === "object" && !Array.isArray(v.metadata)) task.metadata = { ...(v.metadata as Record<string, unknown>) };
 	return task;
@@ -119,12 +111,11 @@ function parseMarkdownImport(content: string): Task[] {
 	const tasks: Task[] = [];
 	const stack: Array<{ indent: number; id: number }> = [];
 	for (const line of content.split(/\r?\n/)) {
-		const match = /^(\s*)- \[([ xX])\](?: #(\d+))?(?: \((low|medium|high|urgent)\))? (.+?)(?: \[(#[^\]]+)\])?$/.exec(line);
+		const match = /^(\s*)- \[([ xX])\](?: #(\d+))? (.+?)$/.exec(line);
 		if (!match) continue;
 		const indent = match[1].length;
 		const id = match[3] ? Number(match[3]) : tasks.length + 1;
-		const tags = match[6] ? normalizeTags(match[6].split(/\s+/).map((tag) => tag.replace(/^#/, ""))) : undefined;
-		const subjectParts = match[5].split(/\s+⛓\s+/);
+		const subjectParts = match[4].split(/\s+⛓\s+/);
 		const blockedBy = subjectParts[1] ? uniqueNumbers(subjectParts[1].split(/\s*,\s*/).map((ref) => Number(ref.replace(/^#/, "")))) : [];
 		while (stack.length && stack[stack.length - 1].indent >= indent) stack.pop();
 		const rawSubject = subjectParts[0];
@@ -137,10 +128,8 @@ function parseMarkdownImport(content: string): Task[] {
 			subject: rawSubject.replace(/\s+\{deferred\}$/, "").trim(),
 			status,
 		};
-		if (match[4]) task.priority = match[4] as TaskPriority;
 		if (stack.length) task.parentId = stack[stack.length - 1].id;
 		if (blockedBy.length) task.blockedBy = blockedBy;
-		if (tags) task.tags = tags;
 		tasks.push(task);
 		stack.push({ indent, id });
 	}
@@ -152,7 +141,6 @@ function remapImportedTasks(imported: readonly Task[], state: TaskState, replace
 		return imported.map((task) => ({
 			...task,
 			blockedBy: task.blockedBy ? [...task.blockedBy] : undefined,
-			tags: task.tags ? [...task.tags] : undefined,
 		}));
 	}
 	const idMap = new Map<number, number>();
@@ -162,7 +150,6 @@ function remapImportedTasks(imported: readonly Task[], state: TaskState, replace
 		id: idMap.get(task.id) ?? task.id,
 		parentId: task.parentId !== undefined ? (idMap.get(task.parentId) ?? task.parentId) : undefined,
 		blockedBy: task.blockedBy?.map((id) => idMap.get(id) ?? id),
-		tags: task.tags ? [...task.tags] : undefined,
 	}));
 }
 
@@ -183,13 +170,10 @@ export function applyTaskMutation(state: TaskState, action: TaskAction, params: 
 			const newTask: Task = { id: baseState.nextId, subject: params.subject.trim(), status: "pending" };
 			if (params.description) newTask.description = params.description;
 			if (params.activeForm) newTask.activeForm = params.activeForm;
-			if (params.priority) newTask.priority = params.priority;
 			if (params.thinking) newTask.thinking = params.thinking;
 			if (params.parentId !== undefined && params.parentId !== null) newTask.parentId = params.parentId;
 			const blockedBy = uniqueNumbers(params.blockedBy);
 			if (blockedBy.length) newTask.blockedBy = blockedBy;
-			const tags = normalizeTags(params.tags);
-			if (tags) newTask.tags = tags;
 			if (params.owner) newTask.owner = params.owner;
 			if (params.metadata) newTask.metadata = { ...params.metadata };
 			return {
@@ -205,8 +189,8 @@ export function applyTaskMutation(state: TaskState, action: TaskAction, params: 
 			const current = state.tasks[idx];
 			const hasMutation =
 				params.subject !== undefined || params.description !== undefined || params.activeForm !== undefined || params.status !== undefined ||
-				params.priority !== undefined || params.thinking !== undefined || params.parentId !== undefined || params.clearParent === true || params.owner !== undefined ||
-				params.metadata !== undefined || params.tags !== undefined || (params.addTags?.length ?? 0) > 0 || (params.removeTags?.length ?? 0) > 0 ||
+				params.thinking !== undefined || params.parentId !== undefined || params.clearParent === true || params.owner !== undefined ||
+				params.metadata !== undefined ||
 				(params.addBlockedBy?.length ?? 0) > 0 || (params.removeBlockedBy?.length ?? 0) > 0;
 			if (!hasMutation) return errorResult(state, "update requires at least one mutable field");
 
@@ -241,13 +225,6 @@ export function applyTaskMutation(state: TaskState, action: TaskAction, params: 
 				if (detectCycle(state.tasks, current.id, newBlockedBy)) return errorResult(state, "addBlockedBy would create a cycle in the blockedBy graph");
 			}
 
-			let newTags = params.tags !== undefined ? normalizeTags(params.tags) : current.tags ? [...current.tags] : undefined;
-			if (params.addTags?.length) newTags = normalizeTags([...(newTags ?? []), ...params.addTags]);
-			if (params.removeTags?.length && newTags) {
-				const remove = new Set(params.removeTags.map((tag) => tag.trim()).filter(Boolean));
-				newTags = normalizeTags(newTags.filter((tag) => !remove.has(tag)));
-			}
-
 			let newMetadata = current.metadata;
 			if (params.metadata !== undefined) {
 				const merged: Record<string, unknown> = { ...(current.metadata ?? {}) };
@@ -259,15 +236,12 @@ export function applyTaskMutation(state: TaskState, action: TaskAction, params: 
 			if (params.subject !== undefined) updated.subject = params.subject;
 			if (params.description !== undefined) updated.description = params.description;
 			if (params.activeForm !== undefined) updated.activeForm = params.activeForm;
-			if (params.priority !== undefined) updated.priority = params.priority;
 			if (params.thinking !== undefined) updated.thinking = params.thinking;
 			if (params.owner !== undefined) updated.owner = params.owner;
 			if (newParentId === undefined) delete updated.parentId;
 			else updated.parentId = newParentId;
 			if (newBlockedBy.length) updated.blockedBy = newBlockedBy;
 			else delete updated.blockedBy;
-			if (newTags) updated.tags = newTags;
-			else delete updated.tags;
 			if (newMetadata === undefined) delete updated.metadata;
 			else updated.metadata = newMetadata;
 
@@ -311,8 +285,6 @@ export function applyTaskMutation(state: TaskState, action: TaskAction, params: 
 					includeDeleted: params.includeDeleted === true,
 					blockedOnly: params.blockedOnly === true,
 					...(params.status ? { statusFilter: params.status } : {}),
-					...(params.priority ? { priorityFilter: params.priority } : {}),
-					...(params.tag ? { tagFilter: params.tag } : {}),
 				},
 			};
 
@@ -350,8 +322,6 @@ export function applyTaskMutation(state: TaskState, action: TaskAction, params: 
 					includeDeleted: params.includeDeleted === true,
 					blockedOnly: params.blockedOnly === true,
 					...(params.status ? { statusFilter: params.status } : {}),
-					...(params.priority ? { priorityFilter: params.priority } : {}),
-					...(params.tag ? { tagFilter: params.tag } : {}),
 				},
 			};
 

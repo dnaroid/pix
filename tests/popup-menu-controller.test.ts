@@ -4,11 +4,12 @@ import { APP_ICONS } from "../src/app/icons.js";
 import { stringDisplayWidth } from "../src/terminal-width.js";
 import { THEMES } from "../src/theme.js";
 import { ScreenStyler } from "../src/app/screen/screen-styler.js";
+import { formatHistoryMenuLabel, historyHighlightRanges } from "../src/app/commands/command-navigation-actions.js";
 import { RESUME_MENU_INITIAL_SESSION_ROWS, RESUME_MENU_LOAD_BATCH_ROWS, RESUME_MENU_LOAD_THRESHOLD_ROWS } from "../src/app/constants.js";
 import { AppPopupMenuController, buildUserMessageJumpItems, formatSessionInfoMenuItems, type AppPopupMenuControllerHost } from "../src/app/popup/popup-menu-controller.js";
 import { PopupMenuRenderer, formatPopupMenuHeader, type PopupMenuRendererHost } from "../src/app/rendering/popup-menu-renderer.js";
-import type { Entry, RenderedLine } from "../src/app/types.js";
-import type { PopupMenuItem } from "../src/ui.js";
+import type { Entry, RenderedLine, ThinkingMenuValue } from "../src/app/types.js";
+import { PopupMenu, type PopupMenuItem } from "../src/ui.js";
 import type { SessionInfo } from "@earendil-works/pi-coding-agent";
 
 type TestPopupMenuHost = AppPopupMenuControllerHost & PopupMenuRendererHost;
@@ -19,15 +20,15 @@ describe("popup menu header", () => {
 
 		assert.equal(stringDisplayWidth(header), 32);
 		assert.match(header, /Select model/);
-		assert.ok(header.startsWith("Select model"));
-		assert.ok(header.endsWith("Esc"));
+		assert.ok(header.startsWith("  Select model"));
+		assert.ok(header.endsWith("Esc  "));
 	});
 
 	it("sanitizes and truncates long titles", () => {
 		const header = formatPopupMenuHeader("Very\nlong\u001b menu title", 14);
 
 		assert.equal(stringDisplayWidth(header), 14);
-		assert.ok(header.endsWith("Esc"));
+		assert.ok(header.endsWith("Esc  "));
 		assert.doesNotMatch(header, /\n|\u001b/u);
 	});
 
@@ -38,7 +39,7 @@ describe("popup menu header", () => {
 		assert.equal(header.trim(), "Esc");
 	});
 
-	it("styles headers with a lighter popup header background", () => {
+	it("styles headers with a brighter popup header background", () => {
 		const theme = THEMES.dark;
 		const controller = createPopupMenuController(createPopupMenuHost([], theme));
 		const output = controller.styleOverlayLine(1, {
@@ -52,7 +53,7 @@ describe("popup menu header", () => {
 		assert.match(output, ansiColor("38", theme.colors.accent));
 	});
 
-	it("styles the inverse popup cursor with the input cursor background", () => {
+	it("styles the selected popup menu item with the highlighted background", () => {
 		const theme = THEMES.dark;
 		const controller = createPopupMenuController(createPopupMenuHost([], theme));
 		const output = controller.styleOverlayLine(1, {
@@ -60,8 +61,25 @@ describe("popup menu header", () => {
 			target: { kind: "popup-menu", index: 0 },
 		}, 32);
 
-		assert.match(output, ansiColor("38", theme.colors.inputBackground));
-		assert.match(output, ansiColor("48", theme.colors.inputCursorBackground));
+		assert.match(output, ansiColor("48", theme.colors.popupSelectedBackground));
+	});
+
+	it("colors thinking menu level labels with the thinking palette", () => {
+		const theme = THEMES.dark;
+		const host = createPopupMenuHost([], theme);
+		const renderer = new PopupMenuRenderer(host);
+		const menu = new PopupMenu<ThinkingMenuValue>({ maxVisibleRows: 6 });
+		menu.openWithItems([
+			{ value: { level: "off", current: false }, label: "off", description: "No reasoning/thinking" },
+			{ value: { level: "high", current: true }, label: `high ${APP_ICONS.check}`, description: "High reasoning" },
+		]);
+		menu.selectedIndex = 1;
+
+		const lines = renderer.renderThinkingMenu(64, menu);
+
+		assert.deepEqual(lines[1]?.segments, [{ start: 2, end: 5, foreground: theme.colors.muted }]);
+		assert.deepEqual(lines[2]?.segments, [{ start: 2, end: 6, foreground: theme.colors.error }]);
+		assert.match(renderer.styleOverlayLine(2, lines[2]!, 64, menu), ansiColor("38", theme.colors.error));
 	});
 
 	it("keeps the popup menu inset from both screen edges", () => {
@@ -87,7 +105,7 @@ describe("popup menu header", () => {
 		});
 
 		assert.match(lines[0]?.text ?? "", /Message actions/);
-		assert.ok(lines[0]?.text.endsWith("Esc"));
+		assert.ok(lines[0]?.text.endsWith("Esc  "));
 		assert.deepEqual(lines[0]?.target, { kind: "popup-menu-close" });
 		assert.equal(lines[0]?.segments?.[0]?.background, THEMES.dark.colors.popupHeaderBackground);
 		assert.equal(lines[1]?.target?.kind, "popup-menu");
@@ -109,6 +127,69 @@ describe("popup menu header", () => {
 		controller.closeSdkMenu(undefined, { render: false });
 	});
 
+	it("can prefer keyboard-layout matches while filtering SDK menus", () => {
+		const controller = createPopupMenuController(createPopupMenuHost([]));
+		void controller.showSdkMenu([
+			{ value: "russian", label: "продолжаем тестовое покрытие важной логики" },
+			{ value: "sdk", label: "read sdk references" },
+		], { title: "Command history", searchable: true, preferKeyboardLayoutMatches: true });
+
+		for (const char of "ыВЛ") assert.equal(controller.handleDirectPopupInput(char), true);
+		const lines = controller.renderActivePopupMenu(80);
+
+		assert.ok(lines.some((line) => /read sdk references/u.test(line.text)));
+		assert.ok(lines.every((line) => !/важной логики/u.test(line.text)));
+		controller.closeSdkMenu(undefined, { render: false });
+	});
+
+	it("can hide weak dispersed matches while filtering SDK menus", () => {
+		const controller = createPopupMenuController(createPopupMenuHost([]));
+		void controller.showSdkMenu([
+			{ value: "prompt", label: "Generate one PNG image of a single standalone transparent mobile game asset" },
+			{ value: "sdk", label: "read sdk references" },
+		], { title: "Command history", searchable: true, minScorePerCharacter: 8 });
+
+		for (const char of "sdk") assert.equal(controller.handleDirectPopupInput(char), true);
+		const lines = controller.renderActivePopupMenu(80);
+
+		assert.ok(lines.some((line) => /read sdk references/u.test(line.text)));
+		assert.ok(lines.every((line) => !/standalone transparent/u.test(line.text)));
+		controller.closeSdkMenu(undefined, { render: false });
+	});
+
+	it("highlights matching label ranges while filtering SDK menus", () => {
+		const controller = createPopupMenuController(createPopupMenuHost([]));
+		void controller.showSdkMenu([
+			{ value: "sdk", label: "read sdk references" },
+		], { title: "Command history", searchable: true });
+
+		for (const char of "sdk") assert.equal(controller.handleDirectPopupInput(char), true);
+		const lines = controller.renderActivePopupMenu(80);
+
+		assert.equal(lines[1]?.text, "▶ read sdk references");
+		assert.deepEqual(lines[1]?.segments, [{ start: 7, end: 10, foreground: THEMES.dark.colors.accent, bold: true }]);
+		controller.closeSdkMenu(undefined, { render: false });
+	});
+
+	it("renders initial SDK menu highlight ranges", () => {
+		const controller = createPopupMenuController(createPopupMenuHost([]));
+		void controller.showSdkMenu([
+			{ value: "sdk", label: "read sdk references", labelHighlightRanges: [{ start: 5, end: 8 }] },
+		], { title: "Command history", searchable: true });
+
+		const lines = controller.renderActivePopupMenu(80);
+
+		assert.deepEqual(lines[1]?.segments, [{ start: 7, end: 10, foreground: THEMES.dark.colors.accent, bold: true }]);
+		controller.closeSdkMenu(undefined, { render: false });
+	});
+
+	it("maps command-history highlight ranges through newline markers", () => {
+		const label = formatHistoryMenuLabel("read\nsdk references");
+
+		assert.equal(label, "read ↵ sdk references");
+		assert.deepEqual(historyHighlightRanges([{ start: 5, end: 8 }], "read\nsdk references"), [{ start: 7, end: 10 }]);
+	});
+
 	it("does not truncate menu labels when the full label and description fit", () => {
 		const controller = createPopupMenuController({
 			...createPopupMenuHost([]),
@@ -122,7 +203,7 @@ describe("popup menu header", () => {
 		controller.setDirectMenu("model");
 		const lines = controller.renderActivePopupMenu(80);
 
-		assert.equal(lines[1]?.text, "provider/very-long-model-identifier-that-overflows  Readable model name");
+		assert.equal(lines[1]?.text, "▶ provider/very-long-model-identifier-that-overflows  Readable model name");
 	});
 
 	it("keeps a visible gap between truncated menu labels and descriptions", () => {
@@ -138,7 +219,7 @@ describe("popup menu header", () => {
 		controller.setDirectMenu("model");
 		const lines = controller.renderActivePopupMenu(48);
 
-		assert.match(lines[1]?.text ?? "", /^provider\/very-long-model-i…  Readable model name/u);
+		assert.equal(lines[1]?.text, "▶ provider/very-long-model…  Readable model name");
 	});
 
 	it("formats resume sessions as a fork tree when not searching", () => {
@@ -228,8 +309,8 @@ describe("popup menu header", () => {
 
 		assert.ok(forkLine);
 		assert.deepEqual(forkLine?.segments, [
-			{ start: 0, end: 6, foreground: theme.colors.popupMuted },
-			{ start: 17, end: forkLine.text.length, foreground: theme.colors.popupMuted },
+			{ start: 2, end: 8, foreground: theme.colors.popupMuted },
+			{ start: 19, end: forkLine.text.length, foreground: theme.colors.popupMuted },
 		]);
 	});
 
@@ -266,8 +347,17 @@ describe("popup menu header", () => {
 		controller.setDirectMenu("user-message-jump");
 		const lines = controller.renderActivePopupMenu(100);
 
-		assert.equal(lines[1]?.text, label);
+		assert.equal(lines[1]?.text, `▶ ${label}`);
 		assert.doesNotMatch(lines[1]?.text ?? "", /Enter to scroll/);
+	});
+
+	it("leaves command history labels full-width for popup rendering", () => {
+		const text = "продолжаем тестовое покрытие важной логики, что еще покрыть? " + "длинный текст ".repeat(12);
+		const label = formatHistoryMenuLabel(text);
+
+		assert.equal(label, text);
+		assert.ok(stringDisplayWidth(label) > 120);
+		assert.doesNotMatch(label, /…$/u);
 	});
 
 	it("shows user message jump loading in the list", () => {

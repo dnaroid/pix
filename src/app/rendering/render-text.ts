@@ -28,10 +28,14 @@ export function hasLspDiagnosticsAfterMutation(output: string): boolean {
 	return /lsp\s+(?:errors?|warnings?|diagnostics?)\s+after\s+mutation/i.test(output) || /lsp\s+diagnostics\s*:/i.test(output);
 }
 
-const LSP_DIAGNOSTIC_MUTATION_TOOLS = new Set(["apply_patch", "ast_apply"]);
+const LSP_DIAGNOSTIC_MUTATION_TOOLS = new Set(["apply_patch", "ast_apply", "edit", "write"]);
 
 export function hasToolLspDiagnosticsAfterMutation(entry: ToolStatusEntry): boolean {
-	return LSP_DIAGNOSTIC_MUTATION_TOOLS.has(entry.toolName.toLowerCase()) && hasLspDiagnosticsAfterMutation(entry.output);
+	return LSP_DIAGNOSTIC_MUTATION_TOOLS.has(normalizedToolName(entry.toolName)) && hasLspDiagnosticsAfterMutation(entry.output);
+}
+
+function normalizedToolName(toolName: string): string {
+	return toolName.split(/[.:/]/).filter(Boolean).at(-1)?.trim().toLowerCase() ?? toolName.toLowerCase();
 }
 
 export function lspDiagnosticSeverityForLine(line: string): "error" | "warning" | "hint" | undefined {

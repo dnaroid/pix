@@ -5,6 +5,7 @@ import { GIT_BRANCH_CACHE_MS } from "../constants.js";
 import { runProcess } from "../process.js";
 import type { AppBlinkController } from "./blink-controller.js";
 import type { SessionActivity } from "../types.js";
+import { APP_ICONS } from "../icons.js";
 
 const STATUS_DOT_BLINK_KEY = "status-dot";
 
@@ -69,7 +70,7 @@ export class AppStatusController {
 	}
 
 	formatSessionStatus(session: AgentSession): string {
-		return `${this.statusModelLabel(session)} ${this.statusThinkingLabel(session)} ${this.formatContextUsagePercent(session)}`;
+		return `${this.statusModelLabel(session)} ${APP_ICONS.lightbulb} ${this.statusThinkingLabel(session)} ${this.formatContextUsagePercent(session)}`;
 	}
 
 	statusModelLabel(session: AgentSession): string {

@@ -34,7 +34,6 @@ import {
 	type Task,
 	type TaskAction,
 	type TaskMutationParams,
-	type TaskPriority,
 	type TaskStatus,
 	TOOL_LABEL,
 	TOOL_NAME,
@@ -63,8 +62,6 @@ const TODOS_ARGUMENT_COMPLETIONS: CommandCompletion[] = [
 	{ value: "--ready", label: "--ready", description: "Show pending tasks whose blockers are completed" },
 	{ value: "--blocked", label: "--blocked", description: "Show tasks with blockers" },
 	{ value: "--tree", label: "--tree", description: "Show parent/subtask tree" },
-	{ value: "--tag ", label: "--tag <tag>", description: "Filter by tag" },
-	{ value: "--priority ", label: "--priority <level>", description: "Filter by priority" },
 	{ value: "--status ", label: "--status <status>", description: "Filter by status" },
 	{ value: "--export markdown", label: "--export markdown", description: "Export visible todos as Markdown" },
 	{ value: "--export json", label: "--export json", description: "Export visible todos as JSON" },
@@ -91,8 +88,6 @@ type TodoStateEventEmitter = { events?: { emit?: (channel: string, data: unknown
 
 interface TodosCommandOptions {
 	status?: TaskStatus;
-	priority?: TaskPriority;
-	tag?: string;
 	blockedOnly: boolean;
 	readyOnly: boolean;
 	activeOnly: boolean;
@@ -129,12 +124,6 @@ function parseTodosArgs(args: unknown): TodosCommandOptions {
 				break;
 			case "--include-deleted":
 				options.includeDeleted = true;
-				break;
-			case "--tag":
-				if (next) options.tag = tokens[++i].replace(/^#/, "");
-				break;
-			case "--priority":
-				if (next === "low" || next === "medium" || next === "high" || next === "urgent") options.priority = tokens[++i] as TaskPriority;
 				break;
 			case "--status":
 				if (next === "pending" || next === "in_progress" || next === "deferred" || next === "completed" || next === "deleted") options.status = tokens[++i] as TaskStatus;
@@ -295,9 +284,6 @@ function filterCommandTasks(tasks: readonly Task[], options: TodosCommandOptions
 		view = view.filter((task) => task.status === "pending" && !isTaskBlocked(task, byId));
 	}
 	if (options.status) view = view.filter((task) => task.status === options.status);
-	if (options.priority) view = view.filter((task) => task.priority === options.priority);
-	const tag = options.tag;
-	if (tag) view = view.filter((task) => task.tags?.includes(tag));
 	if (options.blockedOnly) view = view.filter((task) => (task.blockedBy?.length ?? 0) > 0);
 	return view;
 }
@@ -348,7 +334,7 @@ export { isTransitionValid } from "./state/invariants.js";
 export { applyTaskMutation } from "./state/state-reducer.js";
 export { __resetState, getNextId, getTodos } from "./state/store.js";
 export { deriveBlocks, detectCycle } from "./state/task-graph.js";
-export type { Task, TaskAction, TaskDetails, TaskPriority, TaskStatus } from "./tool/types.js";
+export type { Task, TaskAction, TaskDetails, TaskStatus } from "./tool/types.js";
 export { TOOL_NAME } from "./tool/types.js";
 
 /**
@@ -402,7 +388,7 @@ export function registerTodoTool(pi: ExtensionAPI, hooks: TodoToolRegistrationOp
 
 export function registerTodosCommand(pi: ExtensionAPI): void {
 	pi.registerCommand(COMMAND_NAME, {
-		description: "Show todos on the current branch. Flags: --active, --ready, --blocked, --tree, --tag <tag>, --priority <level>, --status <status>, --export [json|markdown]. Commands: persist on|off|clear|status, scope <id...>",
+	description: "Show todos on the current branch. Flags: --active, --ready, --blocked, --tree, --status <status>, --export [json|markdown]. Commands: persist on|off|clear|status, scope <id...>",
 		getArgumentCompletions: (prefix) => completeCommandArguments(String(prefix ?? ""), TODOS_ARGUMENT_COMPLETIONS),
 		handler: async (args, ctx) => {
 			if (handlePersistCommand(args, ctx)) return;
@@ -421,8 +407,6 @@ export function registerTodosCommand(pi: ExtensionAPI): void {
 					includeDeleted: options.includeDeleted,
 					blockedOnly: options.blockedOnly,
 					...(options.status ? { statusFilter: options.status } : {}),
-					...(options.priority ? { priorityFilter: options.priority } : {}),
-					...(options.tag ? { tagFilter: options.tag } : {}),
 				};
 				ctx.ui.notify(formatContent(op, exportState), "info");
 				return;

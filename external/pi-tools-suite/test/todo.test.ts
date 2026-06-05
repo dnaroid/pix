@@ -261,7 +261,7 @@ describe.serial("todo tool", () => {
 		expect(got.content[0].text).toContain("owner: agent");
 	});
 
-	test.serial("supports priorities, tags, hierarchy, batch operations, and import/export", async () => {
+	test.serial("supports hierarchy, batch operations, and import/export", async () => {
 		const { registerTodoTool, getTodos } = await loadTodoModule();
 		const pi = new FakePi();
 		registerTodoTool(pi as any);
@@ -272,8 +272,8 @@ describe.serial("todo tool", () => {
 			{
 				action: "batch_create",
 				items: [
-					{ subject: "Plan release", priority: "urgent", tags: ["release", "v1"] },
-					{ subject: "Write migration", parentId: 1, priority: "high", tags: ["release"], blockedBy: [1] },
+					{ subject: "Plan release" },
+					{ subject: "Write migration", parentId: 1, blockedBy: [1] },
 				],
 			},
 			undefined,
@@ -284,12 +284,12 @@ describe.serial("todo tool", () => {
 		expect(batch.content[0].text).toContain("include a final todo item for the user-facing final report");
 		expect(batch.content[0].text).toContain("summarize changed files and behavior");
 		expect(getTodos()).toMatchObject([
-			{ id: 1, priority: "urgent", tags: ["release", "v1"] },
-			{ id: 2, parentId: 1, blockedBy: [1], priority: "high", tags: ["release"] },
+			{ id: 1, subject: "Plan release" },
+			{ id: 2, parentId: 1, blockedBy: [1] },
 		]);
 
-		const filtered = await tool.execute("call", { action: "list", priority: "high", tag: "release", blockedOnly: true }, undefined, undefined, {});
-		expect(filtered.content[0].text).toContain("[pending] #2 Write migration (high) ↳ #1 ⛓ #1 #release");
+		const filtered = await tool.execute("call", { action: "list", blockedOnly: true }, undefined, undefined, {});
+		expect(filtered.content[0].text).toContain("[pending] #2 Write migration ↳ #1 ⛓ #1");
 		expect(filtered.content[0].text).not.toContain("Plan release");
 
 		await expectToolError(tool.execute("call", { action: "delete", id: 1 }, undefined, undefined, {}), "cannot delete #1; still blocks #2");
@@ -297,13 +297,13 @@ describe.serial("todo tool", () => {
 
 		const updated = await tool.execute(
 			"call",
-			{ action: "batch_update", items: [{ id: 2, removeBlockedBy: [1], addTags: ["docs"], removeTags: ["release"] }, { id: 1, status: "in_progress", activeForm: "planning" }] },
+			{ action: "batch_update", items: [{ id: 2, removeBlockedBy: [1] }, { id: 1, status: "in_progress", activeForm: "planning" }] },
 			undefined,
 			undefined,
 			{},
 		);
 		expect(updated.content[0].text).toContain("Updated 2 tasks: #2, #1");
-		expect(getTodos()[1]).toMatchObject({ tags: ["docs"] });
+		expect(getTodos()[1]?.blockedBy).toBeUndefined();
 
 		const exported = await tool.execute("call", { action: "export", format: "json" }, undefined, undefined, {});
 		expect(exported.content[0].text).toContain('"subject": "Plan release"');
@@ -315,8 +315,8 @@ describe.serial("todo tool", () => {
 		expect(getTodos()).toHaveLength(2);
 
 		const markdown = await tool.execute("call", { action: "export", format: "markdown" }, undefined, undefined, {});
-		expect(markdown.content[0].text).toContain("- [ ] #1 (urgent) Plan release [#release #v1]");
-		expect(markdown.content[0].text).toContain("  - [ ] #2 (high) Write migration [#docs]");
+		expect(markdown.content[0].text).toContain("- [ ] #1 Plan release");
+		expect(markdown.content[0].text).toContain("  - [ ] #2 Write migration");
 	});
 });
 
@@ -453,14 +453,14 @@ describe.serial("/todos command", () => {
 		const ui = { notify: (message: string, level: string) => notifications.push({ message, level }) };
 		const tool = pi.tools.get("todo");
 
-		await tool.execute("call", { action: "create", subject: "Epic", priority: "urgent", tags: ["big"] }, undefined, undefined, {});
-		await tool.execute("call", { action: "create", subject: "Child", parentId: 1, blockedBy: [1], priority: "high", tags: ["big", "blocked"] }, undefined, undefined, {});
-		await tool.execute("call", { action: "create", subject: "Other", tags: ["small"] }, undefined, undefined, {});
+		await tool.execute("call", { action: "create", subject: "Epic" }, undefined, undefined, {});
+		await tool.execute("call", { action: "create", subject: "Child", parentId: 1, blockedBy: [1] }, undefined, undefined, {});
+		await tool.execute("call", { action: "create", subject: "Other" }, undefined, undefined, {});
 
-		await pi.commands.get("todos").handler("--blocked --tag big --priority high", { hasUI: true, ui });
+		await pi.commands.get("todos").handler("--blocked", { hasUI: true, ui });
 		const blocked = notifications[notifications.length - 1]?.message ?? "";
 		expect(blocked).toContain("1 pending");
-		expect(blocked).toContain("#2 Child (high)    ↳ #1    ⛓ #1    #big #blocked");
+		expect(blocked).toContain("#2 Child    ↳ #1    ⛓ #1");
 		expect(blocked).not.toContain("Epic");
 
 		await pi.commands.get("todos").handler("--ready", { hasUI: true, ui });
@@ -470,22 +470,22 @@ describe.serial("/todos command", () => {
 		expect(readyBeforeDependencyCompletes).not.toContain("#2 Child");
 
 		await tool.execute("call", { action: "update", id: 1, status: "completed" }, undefined, undefined, {});
-		await pi.commands.get("todos").handler("--ready --tag big", { hasUI: true, ui });
+		await pi.commands.get("todos").handler("--ready", { hasUI: true, ui });
 		const readyAfterDependencyCompletes = notifications[notifications.length - 1]?.message ?? "";
 		expect(readyAfterDependencyCompletes).toContain("#2 Child");
 		expect(readyAfterDependencyCompletes).not.toContain("#1 Epic");
 
-		await pi.commands.get("todos").handler("--tree --tag big", { hasUI: true, ui });
+		await pi.commands.get("todos").handler("--tree", { hasUI: true, ui });
 		const tree = notifications[notifications.length - 1]?.message ?? "";
 		expect(tree).toContain("── Tree ──");
-		expect(tree).toContain("✓ #1 Epic (urgent)");
-		expect(tree).toContain("  ○ #2 Child (high)");
+		expect(tree).toContain("✓ #1 Epic");
+		expect(tree).toContain("  ○ #2 Child");
 
-		await pi.commands.get("todos").handler("--export markdown --tag big", { hasUI: true, ui });
+		await pi.commands.get("todos").handler("--export markdown", { hasUI: true, ui });
 		const exported = notifications[notifications.length - 1]?.message ?? "";
-		expect(exported).toContain("- [x] #1 (urgent) Epic [#big]");
-		expect(exported).toContain("  - [ ] #2 (high) Child ⛓ #1 [#big #blocked]");
-		expect(exported).not.toContain("Other");
+		expect(exported).toContain("- [x] #1 Epic");
+		expect(exported).toContain("  - [ ] #2 Child ⛓ #1");
+		expect(exported).toContain("Other");
 	});
 
 	test.serial("/todos persist controls project plan file and scope defers out-of-scope tasks", async () => {
@@ -701,7 +701,7 @@ describe.serial("todo extension lifecycle", () => {
 			savePersistedPlan(cwd, {
 				nextId: 3,
 				tasks: [
-					{ id: 1, subject: "Continue now", status: "pending", priority: "high" },
+					{ id: 1, subject: "Continue now", status: "pending" },
 					{ id: 2, subject: "Later", status: "deferred" },
 				],
 			});
@@ -760,7 +760,7 @@ describe.serial("todo extension lifecycle", () => {
 		}
 	});
 
-	test.serial("queues a pre-final todo reconciliation follow-up after dirty todo mutations", async () => {
+	test.serial("does not queue a pre-final todo reconciliation follow-up after todo mutations", async () => {
 		const extension = (await import("../src/todo/index.js")).default;
 		const pi = new FakePi();
 		const ctx = { cwd: mkdtempSync(join(tmpdir(), "todo-final-guard-")) };
@@ -769,44 +769,6 @@ describe.serial("todo extension lifecycle", () => {
 			await pi.emit("agent_start", {}, ctx);
 			await pi.tools.get("todo").execute("todo-1", { action: "create", subject: "Finish guard" }, undefined, undefined, ctx);
 			await pi.emit("message_end", { message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "Done" }] } }, ctx);
-
-			expect(pi.sentMessages).toHaveLength(1);
-			expect(pi.sentMessages[0]).toContain("Todo final reconciliation required before answering the user.");
-			expect(pi.sentMessages[0]).toContain("Run `todo list` first");
-			expect(pi.sentMessages[0]).toContain("#1 [pending] Finish guard");
-			expect(pi.sentMessageOptions[0]).toEqual({ deliverAs: "followUp" });
-		} finally {
-			rmSync(ctx.cwd, { recursive: true, force: true });
-		}
-	});
-
-	test.serial("does not queue the pre-final guard after todo list reconciliation", async () => {
-		const extension = (await import("../src/todo/index.js")).default;
-		const pi = new FakePi();
-		const ctx = { cwd: mkdtempSync(join(tmpdir(), "todo-final-guard-")) };
-		try {
-			extension(pi as any);
-			await pi.emit("agent_start", {}, ctx);
-			const tool = pi.tools.get("todo");
-			await tool.execute("todo-1", { action: "create", subject: "Finish guard" }, undefined, undefined, ctx);
-			await tool.execute("todo-2", { action: "list" }, undefined, undefined, ctx);
-			await pi.emit("message_end", { message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "Done" }] } }, ctx);
-
-			expect(pi.sentMessages).toHaveLength(0);
-		} finally {
-			rmSync(ctx.cwd, { recursive: true, force: true });
-		}
-	});
-
-	test.serial("does not queue the pre-final guard for tool-use assistant messages", async () => {
-		const extension = (await import("../src/todo/index.js")).default;
-		const pi = new FakePi();
-		const ctx = { cwd: mkdtempSync(join(tmpdir(), "todo-final-guard-")) };
-		try {
-			extension(pi as any);
-			await pi.emit("agent_start", {}, ctx);
-			await pi.tools.get("todo").execute("todo-1", { action: "create", subject: "Finish guard" }, undefined, undefined, ctx);
-			await pi.emit("message_end", { message: { role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", id: "call-1", name: "todo", arguments: { action: "list" } }] } }, ctx);
 
 			expect(pi.sentMessages).toHaveLength(0);
 		} finally {

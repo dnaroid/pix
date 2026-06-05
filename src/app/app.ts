@@ -132,6 +132,7 @@ export class PiUiExtendApp {
 	private readonly extensionShutdownHandler = (): void => {};
 	private runtime: AgentSessionRuntime | undefined;
 	private readonly inputEditor = new InputEditor();
+	private lastInputEditorContentVersion = this.inputEditor.contentVersion;
 	private readonly requestHistory: AppRequestHistory;
 	/** Shortcut: get/set the editor text as a plain string. */
 	private get input(): string { return this.inputEditor.text; }
@@ -149,6 +150,8 @@ export class PiUiExtendApp {
 	constructor(options: AppOptions) {
 		this.options = options;
 		this.theme = THEMES[options.themeName];
+		this.pixConfig = loadPixConfig(this.options.cwd);
+		setAppIconTheme(this.pixConfig.iconTheme.name);
 		const app = this;
 		this.blinkController = new AppBlinkController({
 			render: () => this.render(),
@@ -180,6 +183,7 @@ export class PiUiExtendApp {
 		});
 		this.tabsController = new AppTabsController({
 			options: this.options,
+			maxProjectSessions: this.pixConfig.maxProjectSessions,
 			blinkController: this.blinkController,
 			runtime: () => this.runtime,
 			createRuntimeForNewSession: () => this.createRuntime(newTabRuntimeOptions(this.options)),
@@ -207,8 +211,6 @@ export class PiUiExtendApp {
 			showToast: (message, kind) => this.showToast(message, kind),
 			render: () => this.render(),
 		});
-		this.pixConfig = loadPixConfig(this.options.cwd);
-		setAppIconTheme(this.pixConfig.iconTheme.name);
 		this.terminalBellSoundController = new TerminalBellSoundController();
 		this.promptEnhancer = new AppPromptEnhancerController({
 			runtime: () => this.runtime,
@@ -454,6 +456,7 @@ export class PiUiExtendApp {
 		this.commandController = new AppCommandController({
 			options: this.options,
 			runtime: () => this.runtime,
+			requestHistory: () => this.requestHistory,
 			getInput: () => this.input,
 			setInput: (value) => this.setInput(value),
 			promptEnhancerModelRef: () => this.pixConfig.promptEnhancer.modelRef,
@@ -655,6 +658,7 @@ export class PiUiExtendApp {
 				addEntry: (entry) => this.addEntry(entry),
 				addSessionAbortedEntry: () => this.sessionEvents.addSessionAbortedEntry(),
 				showToast: (message, kind) => this.showToast(message, kind),
+				dismissActiveDialog: () => this.toastController.dismissActiveDialog(),
 				stopVoiceInput: () => this.voiceController.stopRecording(),
 				isShellCommandRunning: () => this.shellController.isRunning(),
 				runChatShellCommand: (command) => this.shellController.run(command),
@@ -1092,6 +1096,7 @@ export class PiUiExtendApp {
 			this.scheduledRenderTimer = undefined;
 		}
 		this.autocompleteController.observeInput();
+		this.syncScrollAfterInputEditorChange();
 		this.renderController.render();
 	}
 
@@ -1099,9 +1104,18 @@ export class PiUiExtendApp {
 		if (!this.running || this.scheduledRenderTimer) return;
 		this.scheduledRenderTimer = setTimeout(() => {
 			this.scheduledRenderTimer = undefined;
+			this.syncScrollAfterInputEditorChange();
 			this.renderController.render();
 		}, COALESCED_RENDER_DELAY_MS);
 		this.scheduledRenderTimer.unref?.();
+	}
+
+	private syncScrollAfterInputEditorChange(): void {
+		const contentVersion = this.inputEditor.contentVersion;
+		if (contentVersion === this.lastInputEditorContentVersion) return;
+
+		this.lastInputEditorContentVersion = contentVersion;
+		this.scrollController.scrollToBottom();
 	}
 
 	private renderStatusLine(): void {

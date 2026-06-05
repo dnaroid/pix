@@ -24,7 +24,6 @@ export const MSG_NO_TODOS = "No todos yet. Ask the agent to add some!";
 // ---------------------------------------------------------------------------
 
 export type TaskStatus = "pending" | "in_progress" | "deferred" | "completed" | "deleted";
-export type TaskPriority = "low" | "medium" | "high" | "urgent";
 export type TodoThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
 export type TaskAction = "create" | "update" | "batch_create" | "batch_update" | "list" | "get" | "delete" | "clear" | "export" | "import";
@@ -35,11 +34,9 @@ export interface Task {
 	description?: string;
 	activeForm?: string;
 	status: TaskStatus;
-	priority?: TaskPriority;
 	thinking?: TodoThinkingLevel;
 	parentId?: number;
 	blockedBy?: number[];
-	tags?: string[];
 	owner?: string;
 	metadata?: Record<string, unknown>;
 }
@@ -69,21 +66,16 @@ export interface TaskMutationParams {
 	description?: string;
 	activeForm?: string;
 	status?: TaskStatus;
-	priority?: TaskPriority;
 	thinking?: TodoThinkingLevel;
 	parentId?: number | null;
 	clearParent?: boolean;
 	blockedBy?: number[];
 	addBlockedBy?: number[];
 	removeBlockedBy?: number[];
-	tags?: string[];
-	addTags?: string[];
-	removeTags?: string[];
 	owner?: string;
 	metadata?: Record<string, unknown>;
 	id?: number;
 	includeDeleted?: boolean;
-	tag?: string;
 	blockedOnly?: boolean;
 	items?: TaskMutationParams[];
 	format?: "json" | "markdown";
@@ -109,11 +101,6 @@ export const TodoParamsSchema = Type.Object({
 	status: Type.Optional(
 		StringEnum(["pending", "in_progress", "deferred", "completed", "deleted"] as const, {
 			description: "Target status (update) or list filter (list)",
-		}),
-	),
-	priority: Type.Optional(
-		StringEnum(["low", "medium", "high", "urgent"] as const, {
-			description: "Task priority (create/update) or list/export filter (list/export)",
 		}),
 	),
 	thinking: Type.Optional(
@@ -146,21 +133,6 @@ export const TodoParamsSchema = Type.Object({
 			description: "Task ids to remove from blockedBy (update only, additive merge)",
 		}),
 	),
-	tags: Type.Optional(
-		Type.Array(Type.String(), {
-			description: "Tags to set on create/update, replacing the previous tag list",
-		}),
-	),
-	addTags: Type.Optional(
-		Type.Array(Type.String(), {
-			description: "Tags to add on update without replacing existing tags",
-		}),
-	),
-	removeTags: Type.Optional(
-		Type.Array(Type.String(), {
-			description: "Tags to remove on update",
-		}),
-	),
 	owner: Type.Optional(Type.String({ description: "Agent/owner assigned to this task" })),
 	metadata: Type.Optional(
 		Type.Record(Type.String(), Type.Unknown(), {
@@ -177,7 +149,6 @@ export const TodoParamsSchema = Type.Object({
 			description: "If true, list action returns deleted (tombstoned) tasks as well. Default: false.",
 		}),
 	),
-	tag: Type.Optional(Type.String({ description: "Tag filter for list/export" })),
 	blockedOnly: Type.Optional(Type.Boolean({ description: "If true, list only tasks blocked by another task" })),
 	items: Type.Optional(
 		Type.Array(Type.Record(Type.String(), Type.Unknown()), {

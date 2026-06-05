@@ -14,7 +14,7 @@ describe("todo panel", () => {
 			params: {},
 			nextId: 3,
 			tasks: [
-				{ id: 1, subject: "Ship", status: "completed", priority: "high", tags: ["done"] },
+				{ id: 1, subject: "Ship", status: "completed" },
 				{ id: 2, subject: "Next", status: "pending" },
 			],
 		};
@@ -22,16 +22,13 @@ describe("todo panel", () => {
 		const lines = renderTodoPanel(details, true, 80, THEMES.dark.colors);
 
 		assert.equal(lines.length, 2);
-		assert.ok(lines[0]?.text.startsWith(`${APP_ICONS.checkCircle} #1 Ship (high) #done`));
+		assert.ok(lines[0]?.text.startsWith(`${APP_ICONS.checkCircle} 1.Ship`));
 		assert.ok(lines[0]?.text.endsWith(" "));
 		assert.equal(stringDisplayWidth(lines[0]?.text ?? ""), 80);
 		assert.equal(lines[0]?.backgroundOverride, undefined);
 		assert.deepEqual(lines[0]?.segments, [
 			{ start: 0, end: 2, foreground: THEMES.dark.colors.success },
-			{ start: 3, end: 5, foreground: THEMES.dark.colors.muted, strikethrough: true },
-			{ start: 6, end: 10, strikethrough: true },
-			{ start: 11, end: 17, foreground: THEMES.dark.colors.muted, strikethrough: true },
-			{ start: 18, end: 23, foreground: THEMES.dark.colors.muted, strikethrough: true },
+			{ start: 3, end: 9, strikethrough: true },
 		]);
 	});
 
@@ -62,9 +59,9 @@ describe("todo panel", () => {
 		const lines = renderTodoPanel(details, true, 80, THEMES.dark.colors);
 
 		assert.equal(lines.length, 3);
-		assert.ok(lines[0]?.text.startsWith(`${APP_ICONS.timerSand} #1 Parent — working`));
-		assert.ok(lines[1]?.text.startsWith(`  ↳ ${APP_ICONS.circleOutline} #2 Child parent:#1`));
-		assert.ok(lines[2]?.text.startsWith(`${APP_ICONS.deferred} #3 Sibling`));
+		assert.ok(lines[0]?.text.startsWith(`${APP_ICONS.timerSand} 1.Parent — working`));
+		assert.ok(lines[1]?.text.startsWith(`  ↳ ${APP_ICONS.circleOutline} 2.Child parent:#1`));
+		assert.ok(lines[2]?.text.startsWith(`${APP_ICONS.deferred} 3.Sibling`));
 	});
 
 	it("shows per-task thinking using the thinking palette color", () => {
@@ -81,12 +78,15 @@ describe("todo panel", () => {
 		const expanded = renderTodoPanel(details, true, 80, THEMES.dark.colors);
 		const collapsed = renderTodoPanel(details, false, 80, THEMES.dark.colors);
 
-		assert.ok(expanded[0]?.text.includes("[high]"));
-		assert.ok(expanded[1]?.text.includes("[off]"));
-		assertThinkingSegmentColor(expanded[0]!, "[high]", THEMES.dark.colors.error);
-		assertThinkingSegmentColor(expanded[1]!, "[off]", THEMES.dark.colors.muted);
-		assert.ok(collapsed[0]?.text.includes("[high]"));
-		assertThinkingSegmentColor(collapsed[0]!, "[high]", THEMES.dark.colors.error);
+		assert.ok(expanded[0]?.text.startsWith(`${APP_ICONS.timerSand} 1.Deep fix ${APP_ICONS.lightbulb}`));
+		assert.ok(expanded[1]?.text.startsWith(`${APP_ICONS.circleOutline} 2.Report ${APP_ICONS.lightbulb}`));
+		assert.doesNotMatch(expanded[0]?.text ?? "", /\bhigh\b/u);
+		assert.doesNotMatch(expanded[1]?.text ?? "", /\boff\b/u);
+		for (const line of [...expanded, ...collapsed]) assert.doesNotMatch(line.text, /\[(high|off)\]/u);
+		assertThinkingSegmentColor(expanded[0]!, APP_ICONS.lightbulb, THEMES.dark.colors.error);
+		assertThinkingSegmentColor(expanded[1]!, APP_ICONS.lightbulb, THEMES.dark.colors.muted);
+		assert.ok(collapsed[0]?.text.includes(APP_ICONS.lightbulb));
+		assertThinkingSegmentColor(collapsed[0]!, APP_ICONS.lightbulb, THEMES.dark.colors.error);
 	});
 
 	it("leaves subagents panel rows on the terminal default background", () => {

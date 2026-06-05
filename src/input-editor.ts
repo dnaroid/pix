@@ -90,6 +90,7 @@ export class InputEditor {
 	private readonly _redoStack: EditorSnapshot[] = [];
 	private _historyMutationDepth = 0;
 	private _restoringHistory = false;
+	private _contentVersion = 0;
 
 	// ── public getters ──────────────────────────────────────────────
 
@@ -103,6 +104,7 @@ export class InputEditor {
 	get hasAttachments(): boolean { return this._attachments.length > 0; }
 	get canUndo(): boolean { return this._undoStack.length > 0; }
 	get canRedo(): boolean { return this._redoStack.length > 0; }
+	get contentVersion(): number { return this._contentVersion; }
 
 	/** Get only image attachments. */
 	get images(): ImageContent[] {
@@ -160,6 +162,7 @@ export class InputEditor {
 	}
 
 	clear(): void {
+		const hadContent = this._text.length > 0 || this._attachments.length > 0;
 		this._text = "";
 		this._cursor = 0;
 		this.clearSelection();
@@ -168,6 +171,7 @@ export class InputEditor {
 		this._imageCounter = 0;
 		this._pasteCounter = 0;
 		this.clearHistory();
+		if (hadContent) this._contentVersion += 1;
 	}
 
 	undo(): boolean {
@@ -182,6 +186,7 @@ export class InputEditor {
 		}
 
 		this.restoreHistorySnapshot(previous);
+		this._contentVersion += 1;
 		this.trimHistory();
 		return true;
 	}
@@ -198,6 +203,7 @@ export class InputEditor {
 		}
 
 		this.restoreHistorySnapshot(next);
+		this._contentVersion += 1;
 		this.trimHistory();
 		return true;
 	}
@@ -615,6 +621,7 @@ export class InputEditor {
 		}
 
 		if (!this.didContentChangeFrom(before)) return;
+		this._contentVersion += 1;
 		this.clearScrollOffset();
 		if (!this.isRecordableHistorySnapshot(before)) {
 			this.clearHistory();

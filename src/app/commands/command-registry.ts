@@ -27,6 +27,7 @@ export type CommandRegistryActions = {
 	runCloneCommand(): Promise<void>;
 	runTreeCommand(argumentsText: string): Promise<void>;
 	runJumpCommand(argumentsText: string): Promise<void>;
+	runHistoryCommand(argumentsText: string): Promise<void>;
 	runSearchCommand(argumentsText: string): Promise<void>;
 	runUnsupportedBuiltinCommand(commandName: string, message: string): Promise<void>;
 	runReloadCommand(): Promise<void>;
@@ -222,6 +223,14 @@ export function createSlashCommands(actions: CommandRegistryActions, host: Comma
 			keywords: ["user", "message", "messages", "history", "scroll", "goto", "navigate"],
 			allowArguments: true,
 			run: (argumentsText) => actions.runJumpCommand(argumentsText),
+		},
+		{
+			name: "history",
+			description: "Search command history and restore a match",
+			kind: "builtin",
+			keywords: ["command", "request", "prompt", "find", "recent"],
+			allowArguments: true,
+			run: (argumentsText) => actions.runHistoryCommand(argumentsText),
 		},
 		{
 			name: "search",

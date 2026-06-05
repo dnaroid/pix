@@ -22,9 +22,11 @@ import type {
 } from "../types.js";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import { ellipsizeDisplay, padOrTrimPlain, sanitizeText } from "./render-text.js";
+import { thinkingLevelThemeColor } from "./status-line-renderer.js";
 
 const POPUP_MENU_ESCAPE_BUTTON = "Esc";
 const POPUP_MENU_DESCRIPTION_GAP = "  ";
+const POPUP_MENU_HEADER_SIDE_PADDING = 2;
 
 export type PopupMenuRendererHost = {
 	readonly theme: Theme;
@@ -58,7 +60,7 @@ export class PopupMenuRenderer {
 		const menuWidth = this.effectivePopupMenuWidth(width);
 		const rightMargin = Math.max(0, width - margin - menuWidth);
 		const selected = line.target?.kind === "popup-menu" && activeMenu.selectedIndex === line.target.index;
-		const foreground = this.popupLineForeground(line, selected);
+		const foreground = this.popupLineForeground(line);
 		const background = this.popupLineBackground(line, selected);
 		const plain = `${" ".repeat(margin)}${padOrTrimPlain(line.text, menuWidth)}${" ".repeat(rightMargin)}`;
 
@@ -104,7 +106,7 @@ export class PopupMenuRenderer {
 		for (const item of menu.visibleItems()) {
 			const label = item.label.padEnd(18, " ");
 			const description = item.description ?? "";
-			const marker = item.selected ? "›" : " ";
+			const marker = item.selected ? "▶" : " ";
 			const rawText = `${marker} ${label}${description}`;
 			const text = ellipsizeDisplay(rawText, options.userContentWidth);
 			const line = options.userLine(text);
@@ -119,7 +121,7 @@ export class PopupMenuRenderer {
 				{
 					start: labelStart,
 					end: labelEnd,
-					foreground: this.userMessageActionForeground(item.selected, item.value),
+					foreground: this.userMessageActionForeground(item.value),
 					bold: item.selected,
 				},
 				...(descriptionStart < contentStart + text.length
@@ -139,9 +141,10 @@ export class PopupMenuRenderer {
 		}
 
 		for (const item of visibleItems) {
+			const marker = item.selected ? "▶ " : "  ";
 			lines.push({
-				text: this.labelDescriptionText(item.label, item.description, width),
-				variant: item.selected ? "accent" : "normal",
+				text: `${marker}${this.labelDescriptionText(item.label, item.description, width - 2)}`,
+				variant: "normal",
 				target: { kind: "popup-menu", index: item.index },
 			});
 		}
@@ -159,9 +162,10 @@ export class PopupMenuRenderer {
 		}
 
 		for (const item of visibleItems) {
+			const marker = item.selected ? "▶ " : "  ";
 			lines.push({
-				text: this.labelDescriptionText(item.label, item.description, width),
-				variant: this.selectableItemVariant(item.selected, item.value),
+				text: `${marker}${this.labelDescriptionText(item.label, item.description, width - 2)}`,
+				variant: this.selectableItemVariant(item.value),
 				target: { kind: "popup-menu", index: item.index },
 			});
 		}
@@ -176,9 +180,12 @@ export class PopupMenuRenderer {
 		}
 
 		for (const item of visibleItems) {
+			const marker = item.selected ? "▶ " : "  ";
+			const text = `${marker}${this.labelDescriptionText(item.label, item.description, width - 2)}`;
 			lines.push({
-				text: this.labelDescriptionText(item.label, item.description, width),
-				variant: this.selectableItemVariant(item.selected, item.value),
+				text,
+				variant: this.selectableItemVariant(item.value),
+				segments: this.thinkingMenuItemSegments(item.value),
 				target: { kind: "popup-menu", index: item.index },
 			});
 		}
@@ -203,11 +210,12 @@ export class PopupMenuRenderer {
 		for (const item of visibleItems) {
 			const label = item.label;
 			const description = item.description ?? "";
-			const text = `${label}  ${description}`;
+			const marker = item.selected ? "▶ " : "  ";
+			const text = `${marker}${label}  ${description}`;
 			const segments = this.resumeMenuItemSegments(item.value, label, description, text);
 			lines.push({
 				text,
-				variant: item.selected ? "accent" : "normal",
+				variant: "normal",
 				...(segments ? { segments } : {}),
 				target: { kind: "popup-menu", index: item.index },
 			});
@@ -235,12 +243,13 @@ export class PopupMenuRenderer {
 			});
 		}
 
-		const labelWidth = Math.max(1, width);
+		const labelWidth = Math.max(1, width - 2);
 		for (const item of menu.visibleItems()) {
 			const label = ellipsizeDisplay(item.label, labelWidth);
+			const marker = item.selected ? "▶ " : "  ";
 			lines.push({
-				text: label,
-				variant: item.selected ? "accent" : "normal",
+				text: `${marker}${label}`,
+				variant: "normal",
 				target: { kind: "popup-menu", index: item.index },
 			});
 		}
@@ -254,9 +263,10 @@ export class PopupMenuRenderer {
 	renderQueueMessageMenu(width: number, menu: PopupMenu<QueueMessageMenuValue>): RenderedLine[] {
 		const lines: RenderedLine[] = [this.popupMenuHeader("Queued message", width)];
 		for (const item of menu.visibleItems()) {
+			const marker = item.selected ? "▶ " : "  ";
 			lines.push({
-				text: this.labelDescriptionText(item.label, item.description, width, 18),
-				variant: this.queueMessageItemVariant(item.selected, item.value),
+				text: `${marker}${this.labelDescriptionText(item.label, item.description, width - 2, 16)}`,
+				variant: this.queueMessageItemVariant(item.value),
 				target: { kind: "popup-menu", index: item.index },
 			});
 		}
@@ -275,9 +285,13 @@ export class PopupMenuRenderer {
 		}
 
 		for (const item of menu.visibleItems()) {
+			const marker = item.selected ? "▶ " : "  ";
+			const text = `${marker}${this.labelDescriptionText(item.label, item.description, width - 2)}`;
+			const segments = this.sdkMenuItemSegments(item, text);
 			lines.push({
-				text: this.labelDescriptionText(item.label, item.description, width),
-				variant: this.sdkItemVariant(item.selected, item.value),
+				text,
+				variant: this.sdkItemVariant(item.value),
+				...(segments.length === 0 ? {} : { segments }),
 				target: { kind: "popup-menu", index: item.index },
 			});
 		}
@@ -319,37 +333,66 @@ export class PopupMenuRenderer {
 		return `${visibleLabel}${padding}${POPUP_MENU_DESCRIPTION_GAP}${safeDescription}`;
 	}
 
-	private userMessageActionForeground(selected: boolean, value: UserMessageMenuValue): string {
-		if (selected) return this.host.theme.colors.accent;
+	private userMessageActionForeground(value: UserMessageMenuValue): string {
 		if (value === "undo") return this.host.theme.colors.error;
 		return this.host.theme.colors.inputForeground;
 	}
 
-	private selectableItemVariant(selected: boolean, value: ModelMenuValue | ThinkingMenuValue): NonNullable<RenderedLine["variant"]> {
-		if (selected) return "accent";
+	private selectableItemVariant(value: ModelMenuValue | ThinkingMenuValue): NonNullable<RenderedLine["variant"]> {
 		return value.current ? "muted" : "normal";
 	}
 
-	private queueMessageItemVariant(selected: boolean, value: QueueMessageMenuValue): NonNullable<RenderedLine["variant"]> {
-		if (selected) return "accent";
+	private thinkingMenuItemSegments(value: ThinkingMenuValue): StyledSegment[] {
+		const markerOffset = 2; // "▶ " or "  "
+		return [{
+			start: markerOffset,
+			end: markerOffset + value.level.length,
+			foreground: thinkingLevelThemeColor(value.level, this.host.theme.colors, this.availableThinkingLevels()),
+		}];
+	}
+
+	private availableThinkingLevels(): string[] {
+		const levels = this.host.session?.getAvailableThinkingLevels();
+		return Array.isArray(levels) && levels.length > 0 ? levels.map(String) : ["off", "minimal", "low", "medium", "high", "xhigh"];
+	}
+
+	private queueMessageItemVariant(value: QueueMessageMenuValue): NonNullable<RenderedLine["variant"]> {
 		return value === "cancel" ? "error" : "normal";
 	}
 
-	private sdkItemVariant(selected: boolean, value: PixMenuItem<unknown>): NonNullable<RenderedLine["variant"]> {
-		if (selected) return "accent";
+	private sdkItemVariant(value: PixMenuItem<unknown>): NonNullable<RenderedLine["variant"]> {
 		return value.variant ?? "normal";
+	}
+
+	private sdkMenuItemSegments(item: PopupMenuItem<PixMenuItem<unknown>>, text: string): StyledSegment[] {
+		const ranges = item.labelHighlightRanges ?? item.value.labelHighlightRanges ?? [];
+		if (ranges.length === 0) return [];
+
+		const markerOffset = 2; // "▶ " or "  "
+		return ranges.flatMap((range): StyledSegment[] => {
+			const start = Math.max(markerOffset, markerOffset + range.start);
+			const end = Math.min(text.length, markerOffset + range.end);
+			if (end <= start) return [];
+			return [{
+				start,
+				end,
+				foreground: this.host.theme.colors.accent,
+				bold: true,
+			}];
+		});
 	}
 
 	private resumeMenuItemSegments(value: ResumeMenuValue, label: string, description: string, text: string): StyledSegment[] | undefined {
 		if (value.kind !== "session") return undefined;
 
 		const sessionLabel = value.session.name ?? value.session.firstMessage.slice(0, 50);
-		const sessionLabelStart = Math.max(0, label.length - sessionLabel.length);
+		const markerOffset = 2; // "▶ " or "  "
+		const sessionLabelStart = Math.max(0, label.length - sessionLabel.length) + markerOffset;
 		const muted = this.host.theme.colors.popupMuted;
 		const segments: StyledSegment[] = [];
 
-		if (sessionLabelStart > 0) segments.push({ start: 0, end: sessionLabelStart, foreground: muted });
-		if (description.length > 0) segments.push({ start: label.length, end: text.length, foreground: muted });
+		if (sessionLabelStart > markerOffset) segments.push({ start: markerOffset, end: sessionLabelStart, foreground: muted });
+		if (description.length > 0) segments.push({ start: markerOffset + label.length, end: text.length, foreground: muted });
 
 		return segments.length > 0 ? segments : undefined;
 	}
@@ -363,9 +406,8 @@ export class PopupMenuRenderer {
 		};
 	}
 
-	private popupLineForeground(line: RenderedLine, selected: boolean): string {
+	private popupLineForeground(line: RenderedLine): string {
 		const colors = this.host.theme.colors;
-		if (selected) return colors.popupSelectedForeground;
 		if (line.colorOverride) return line.colorOverride;
 
 		switch (line.variant) {
@@ -396,8 +438,16 @@ export function formatPopupMenuHeader(title: string, width: number): string {
 
 	if (safeWidth <= buttonWidth + 1) return padOrTrimPlain(POPUP_MENU_ESCAPE_BUTTON, safeWidth);
 
-	const titleWidth = safeWidth - buttonWidth - 1;
+	const sidePadding = safeWidth >= buttonWidth + POPUP_MENU_HEADER_SIDE_PADDING * 2 + 2
+		? POPUP_MENU_HEADER_SIDE_PADDING
+		: 1;
+	const contentWidth = Math.max(1, safeWidth - sidePadding * 2);
+	if (contentWidth <= buttonWidth + 1) {
+		return padOrTrimPlain(`${" ".repeat(sidePadding)}${POPUP_MENU_ESCAPE_BUTTON}`, safeWidth);
+	}
+
+	const titleWidth = contentWidth - buttonWidth - 1;
 	const titleText = ellipsizeDisplay(sanitizedTitle, titleWidth);
-	const gapWidth = Math.max(1, safeWidth - stringDisplayWidth(titleText) - buttonWidth);
-	return `${titleText}${" ".repeat(gapWidth)}${POPUP_MENU_ESCAPE_BUTTON}`;
+	const gapWidth = Math.max(1, contentWidth - stringDisplayWidth(titleText) - buttonWidth);
+	return `${" ".repeat(sidePadding)}${titleText}${" ".repeat(gapWidth)}${POPUP_MENU_ESCAPE_BUTTON}${" ".repeat(sidePadding)}`;
 }

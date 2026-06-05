@@ -77,6 +77,7 @@ describe("config helpers", () => {
 		assert.deepEqual(Object.keys(config.dictation.languages), ["en", "ru"]);
 		assert.equal(config.dictation.language, "en");
 		assert.equal(config.ignoreContextFiles, false);
+		assert.equal(config.maxProjectSessions, 0);
 		assert.equal(config.dictation.languages.en?.label, "English");
 		assert.equal(config.dictation.languages.ru?.label, "Russian");
 	});
@@ -91,6 +92,7 @@ describe("config helpers", () => {
 			"modelColors": { "zai/*": "#22c55e", "antigravity/*": "#f97316", "antigravity/antigravity-claude-*": "#ef4444" },
 			"iconTheme": "fallback",
 			"promptEnhancer": { "modelRef": "zai/custom-enhancer" },
+			"maxProjectSessions": 50,
 			"autocomplete": { "modelRef": "zai/custom-autocomplete", "debounceMs": 125, "timeoutMs": 2600, "maxTokens": 64, "maxPromptTokens": 1800, "includeRecentMessages": 9 },
 			"dictation": {
 				"language": "ru",
@@ -122,6 +124,7 @@ describe("config helpers", () => {
 		assert.equal(loaded.iconTheme.name, "fallback");
 		assert.equal(loaded.dictation.language, "ru");
 		assert.equal(loaded.ignoreContextFiles, false);
+		assert.equal(loaded.maxProjectSessions, 50);
 		assert.deepEqual(Object.keys(loaded.dictation.languages), ["en", "ru"]);
 		assert.equal(loaded.dictation.languages.ru?.dirName, "vosk-model-small-ru-0.22");
 
@@ -142,6 +145,7 @@ describe("config helpers", () => {
 		assert.equal(partial.iconTheme.name, "nerdFont");
 		assert.deepEqual(Object.keys(partial.dictation.languages), ["en", "ru"]);
 		assert.equal(partial.ignoreContextFiles, false);
+		assert.equal(partial.maxProjectSessions, 0);
 
 		writeFileSync(testConfigPath, "{");
 		assert.equal(loadPixConfig().toolRenderer.default.previewLines, 0);
@@ -154,6 +158,7 @@ describe("config helpers", () => {
 		writeFileSync(testConfigPath, `{
 			"defaultModel": { "modelRef": "openai-codex/gpt-5.5", "thinking": "medium" },
 			"autocomplete": { "modelRef": "zai/global-complete" },
+			"maxProjectSessions": 50,
 			"ignoreContextFiles": false
 		}`);
 		const projectDir = mkdtempSync(join(tmpdir(), "pix-project-"));
@@ -169,6 +174,7 @@ describe("config helpers", () => {
 		assert.equal(resolveDefaultModelRef(loaded), "openai-codex/gpt-5.5:medium");
 		assert.equal(loaded.autocomplete.modelRef, "zai/project-complete");
 		assert.equal(loaded.ignoreContextFiles, true);
+		assert.equal(loaded.maxProjectSessions, 50);
 	});
 
 	it("persists project ignoreContextFiles in JSONC config", () => {

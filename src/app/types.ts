@@ -19,7 +19,6 @@ import type {
 	SUBAGENT_TERMINAL_STATUSES,
 	THINKING_LEVELS,
 	TODO_ACTIONS,
-	TODO_PRIORITIES,
 	TODO_STATUSES,
 } from "./constants.js";
 
@@ -89,7 +88,6 @@ export type Entry =
 
 export type TodoAction = (typeof TODO_ACTIONS)[number];
 export type TodoStatus = (typeof TODO_STATUSES)[number];
-export type TodoPriority = (typeof TODO_PRIORITIES)[number];
 
 export type TodoTask = {
 	id: number;
@@ -97,11 +95,9 @@ export type TodoTask = {
 	status: TodoStatus;
 	description?: string;
 	activeForm?: string;
-	priority?: TodoPriority;
 	thinking?: ThinkingLevel;
 	parentId?: number;
 	blockedBy?: number[];
-	tags?: string[];
 	owner?: string;
 	metadata?: Record<string, unknown>;
 };
@@ -394,6 +390,7 @@ export type PixMenuItem<T = string> = {
 	label: string;
 	description?: string;
 	keywords?: readonly string[];
+	labelHighlightRanges?: readonly { start: number; end: number }[];
 	variant?: PixMenuVariant;
 };
 
@@ -402,6 +399,8 @@ export type PixMenuOptions = {
 	placeholder?: string;
 	emptyText?: string;
 	searchable?: boolean;
+	minScorePerCharacter?: number;
+	preferKeyboardLayoutMatches?: boolean;
 	preserveStatus?: boolean;
 };
 

@@ -31,12 +31,15 @@ describe("render-text helpers", () => {
 		assert.equal(hasLspDiagnosticsAfterMutation("LSP diagnostics: 2 warnings"), true);
 		assert.equal(hasLspDiagnosticsAfterMutation("nothing useful"), false);
 		assert.equal(hasToolLspDiagnosticsAfterMutation({ toolName: "apply_patch", output: "LSP diagnostics: 1 error" } as ToolStatusEntry), true);
+		assert.equal(hasToolLspDiagnosticsAfterMutation({ toolName: "functions.write", output: "LSP diagnostics: 1 error" } as ToolStatusEntry), true);
+		assert.equal(hasToolLspDiagnosticsAfterMutation({ toolName: "Edit", output: "LSP diagnostics: 1 error" } as ToolStatusEntry), true);
 		assert.equal(hasToolLspDiagnosticsAfterMutation({ toolName: "read", output: "LSP diagnostics: 1 error" } as ToolStatusEntry), false);
 		assert.equal(lspDiagnosticSeverityForLine("2 warnings"), "warning");
 		assert.equal(lspDiagnosticSeverityForLine("0 errors"), undefined);
 		assert.equal(lspDiagnosticSeverityForLine("diagnosticSeverity.error"), "error");
 		assert.equal(toolLspDiagnosticsAfterMutationSeverity({ toolName: "apply_patch", output: "LSP diagnostics: 1 warning" } as ToolStatusEntry), "warning");
 		assert.equal(toolLspDiagnosticsAfterMutationSeverity({ toolName: "apply_patch", output: "LSP diagnostics: 1 error" } as ToolStatusEntry), "error");
+		assert.equal(toolLspDiagnosticsAfterMutationSeverity({ toolName: "write", output: "LSP diagnostics: 1 warning" } as ToolStatusEntry), "warning");
 		assert.equal(toolStatusIcon({ toolName: "read", status: "running", isError: false, output: "" } as ToolStatusEntry), APP_ICONS.timerSand);
 		assert.equal(toolStatusIcon({ toolName: "read", status: "done", isError: true, output: "" } as ToolStatusEntry), APP_ICONS.closeCircle);
 		assert.equal(toolStatusIcon({ toolName: "apply_patch", status: "done", isError: false, output: "LSP diagnostics: 1 warning" } as ToolStatusEntry), APP_ICONS.alert);

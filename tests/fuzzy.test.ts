@@ -33,6 +33,24 @@ describe("fuzzySearch", () => {
 		assert.deepEqual(match?.matchedRanges, [{ start: 0, end: 3 }]);
 	});
 
+	it("can prefer keyboard-layout matches over literal fuzzy matches", () => {
+		const matches = fuzzySearch([
+			{ value: "russian", label: "важную логику покрыть" },
+			{ value: "sdk", label: "read sdk docs" },
+		], "ыВЛ", { preferKeyboardLayoutMatches: true });
+
+		assert.deepEqual(matches.map((match) => match.value), ["sdk"]);
+	});
+
+	it("can reject weak dispersed subsequence matches", () => {
+		const matches = fuzzySearch([
+			{ value: "prompt", label: "Generate one PNG image of a single standalone transparent mobile game asset" },
+			{ value: "sdk", label: "read sdk references" },
+		], "sdk", { minScorePerCharacter: 8 });
+
+		assert.deepEqual(matches.map((match) => match.value), ["sdk"]);
+	});
+
 	it("matches Russian labels from queries typed with the English keyboard layout selected", () => {
 		const [match] = fuzzySearch([
 			{ value: "new", label: "новый" },

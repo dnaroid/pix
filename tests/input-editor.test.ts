@@ -107,21 +107,47 @@ describe("InputEditor text editing", () => {
 
 	it("undoes and redoes bounded content edits", () => {
 		const editor = new InputEditor();
+		assert.equal(editor.contentVersion, 0);
 		editor.insert("a");
+		assert.equal(editor.contentVersion, 1);
 		editor.insert("b");
+		assert.equal(editor.contentVersion, 2);
 
 		assert.equal(editor.canUndo, true);
 		assert.equal(editor.undo(), true);
 		assert.equal(editor.text, "a");
 		assert.equal(editor.cursor, 1);
+		assert.equal(editor.contentVersion, 3);
 		assert.equal(editor.canRedo, true);
 
 		assert.equal(editor.redo(), true);
 		assert.equal(editor.text, "ab");
 		assert.equal(editor.cursor, 2);
+		assert.equal(editor.contentVersion, 4);
 
 		editor.insert("c");
+		assert.equal(editor.contentVersion, 5);
 		assert.equal(editor.canRedo, false);
+	});
+
+	it("tracks content version only for content changes", () => {
+		const editor = new InputEditor();
+
+		editor.moveLeft();
+		editor.selectAll();
+		editor.clear();
+		assert.equal(editor.contentVersion, 0);
+
+		editor.setText("abc");
+		assert.equal(editor.contentVersion, 1);
+		editor.moveLeft();
+		editor.moveRightExtend();
+		assert.equal(editor.contentVersion, 1);
+
+		editor.clear();
+		assert.equal(editor.contentVersion, 2);
+		editor.clear();
+		assert.equal(editor.contentVersion, 2);
 	});
 
 	it("restores attachments through undo and redo without surviving clear", () => {

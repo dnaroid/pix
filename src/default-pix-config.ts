@@ -4,6 +4,8 @@ export const DEFAULT_PIX_CONFIG_JSONC = String.raw`{
   "defaultModel": { "modelRef": "openai-codex/gpt-5.5", "thinking": "medium" },
   // Disable AGENTS.md / CLAUDE.md discovery for this project when set in <cwd>/.pi/pix.jsonc.
   "ignoreContextFiles": false,
+  // Maximum pi session JSONL files to retain per project. 0 disables automatic deletion.
+  "maxProjectSessions": 0,
 
   "toolRenderer": {
     "default": { "previewLines": 0, "direction": "head", "color": "toolTitle" },

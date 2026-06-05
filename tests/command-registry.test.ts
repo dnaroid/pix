@@ -63,6 +63,23 @@ describe("command registry", () => {
 		assert.equal(query, "needle");
 	});
 
+	it("registers /history as an argument-taking local command", async () => {
+		let query = "";
+		const commands = createSlashCommands({
+			...noopActions(),
+			runHistoryCommand: async (argumentsText) => {
+				query = argumentsText;
+			},
+		}, host());
+
+		const history = commands.find((command) => command.name === "history");
+		assert.equal(history?.kind, "builtin");
+		assert.equal(history.allowArguments, true);
+
+		await history.run?.("needle");
+		assert.equal(query, "needle");
+	});
+
 	it("registers /queue as an argument-taking local command", async () => {
 		let queued = "";
 		const commands = createSlashCommands({
@@ -257,6 +274,7 @@ describe("command registry", () => {
 		assert.ok(calls.includes("runCloneCommand"));
 		assert.ok(calls.includes("runTreeCommand: args "));
 		assert.ok(calls.includes("runJumpCommand: args "));
+		assert.ok(calls.includes("runHistoryCommand: args "));
 		assert.ok(calls.includes("runSearchCommand: args "));
 		assert.ok(calls.some((call) => call.startsWith("runUnsupportedBuiltinCommand:login:")));
 		assert.ok(calls.some((call) => call.startsWith("runUnsupportedBuiltinCommand:logout:")));
@@ -299,6 +317,7 @@ function noopActions(): CommandRegistryActions {
 		runCloneCommand: noop,
 		runTreeCommand: noop,
 		runJumpCommand: noop,
+		runHistoryCommand: noop,
 		runSearchCommand: noop,
 		runUnsupportedBuiltinCommand: noop,
 		runReloadCommand: noop,
@@ -339,6 +358,7 @@ function recordingActions(calls: string[]): CommandRegistryActions {
 		runCloneCommand: record("runCloneCommand"),
 		runTreeCommand: record("runTreeCommand"),
 		runJumpCommand: record("runJumpCommand"),
+		runHistoryCommand: record("runHistoryCommand"),
 		runSearchCommand: record("runSearchCommand"),
 		runUnsupportedBuiltinCommand: record("runUnsupportedBuiltinCommand"),
 		runReloadCommand: record("runReloadCommand"),

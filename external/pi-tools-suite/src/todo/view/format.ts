@@ -10,10 +10,8 @@ export { formatStatusLabel };
  */
 export function formatCommandTaskLine(t: Task, glyph: string): string {
 	const form = t.status === "in_progress" && t.activeForm ? ` (${t.activeForm})` : "";
-	const priority = t.priority ? ` (${t.priority})` : "";
 	const thinking = t.thinking ? ` {thinking:${t.thinking}}` : "";
 	const parent = t.parentId !== undefined ? `    ↳ #${t.parentId}` : "";
 	const block = t.blockedBy?.length ? `    ⛓ ${t.blockedBy.map((id) => `#${id}`).join(",")}` : "";
-	const tags = t.tags?.length ? `    ${t.tags.map((tag) => `#${tag}`).join(" ")}` : "";
-	return `  ${glyph} #${t.id} ${t.subject}${priority}${thinking}${form}${parent}${block}${tags}`;
+	return `  ${glyph} #${t.id} ${t.subject}${thinking}${form}${parent}${block}`;
 }

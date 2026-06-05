@@ -10,11 +10,9 @@ import type { Task, TaskAction, TaskDetails, TaskMutationParams } from "./types.
 function formatListLine(t: Task): string {
 	const block = t.blockedBy?.length ? ` ⛓ ${t.blockedBy.map((id) => `#${id}`).join(",")}` : "";
 	const parent = t.parentId !== undefined ? ` ↳ #${t.parentId}` : "";
-	const priority = t.priority ? ` (${t.priority})` : "";
 	const thinking = t.thinking ? ` {thinking:${t.thinking}}` : "";
-	const tags = t.tags?.length ? ` ${t.tags.map((tag) => `#${tag}`).join(" ")}` : "";
 	const form = t.status === "in_progress" && t.activeForm ? ` (${t.activeForm})` : "";
-	return `[${t.status}] #${t.id} ${t.subject}${priority}${thinking}${form}${parent}${block}${tags}`;
+	return `[${t.status}] #${t.id} ${t.subject}${thinking}${form}${parent}${block}`;
 }
 
 /**
@@ -26,7 +24,6 @@ function formatGetLines(task: Task, state: TaskState): string {
 	const lines = [`#${task.id} [${task.status}] ${task.subject}`];
 	if (task.description) lines.push(`  description: ${task.description}`);
 	if (task.activeForm) lines.push(`  activeForm: ${task.activeForm}`);
-	if (task.priority) lines.push(`  priority: ${task.priority}`);
 	if (task.thinking) lines.push(`  thinking: ${task.thinking}`);
 	if (task.parentId !== undefined) lines.push(`  parentId: #${task.parentId}`);
 	if (task.blockedBy?.length) {
@@ -35,7 +32,6 @@ function formatGetLines(task: Task, state: TaskState): string {
 	if (blocks.length) {
 		lines.push(`  blocks: ${blocks.map((id) => `#${id}`).join(", ")}`);
 	}
-	if (task.tags?.length) lines.push(`  tags: ${task.tags.map((tag) => `#${tag}`).join(" ")}`);
 	if (task.owner) lines.push(`  owner: ${task.owner}`);
 	return lines.join("\n");
 }
@@ -44,9 +40,6 @@ function filterTasks(op: Extract<Op, { kind: "list" | "export" }>, state: TaskSt
 	let view = state.tasks;
 	if (!op.includeDeleted) view = view.filter((t) => t.status !== "deleted");
 	if (op.statusFilter) view = view.filter((t) => t.status === op.statusFilter);
-	if (op.priorityFilter) view = view.filter((t) => t.priority === op.priorityFilter);
-	const tagFilter = op.tagFilter;
-	if (tagFilter) view = view.filter((t) => t.tags?.includes(tagFilter));
 	if (op.blockedOnly) view = view.filter((t) => (t.blockedBy?.length ?? 0) > 0);
 	return view;
 }
@@ -69,11 +62,9 @@ function formatMarkdownExport(tasks: readonly Task[]): string {
 		if (seen.has(task.id)) return;
 		seen.add(task.id);
 		const checked = task.status === "completed" ? "x" : " ";
-		const priority = task.priority ? ` (${task.priority})` : "";
 		const status = task.status === "deferred" ? " {deferred}" : "";
-		const tags = task.tags?.length ? ` [${task.tags.map((tag) => `#${tag}`).join(" ")}]` : "";
 		const blocked = task.blockedBy?.length ? ` ⛓ ${task.blockedBy.map((id) => `#${id}`).join(",")}` : "";
-		lines.push(`${"  ".repeat(depth)}- [${checked}] #${task.id}${priority} ${task.subject}${status}${blocked}${tags}`);
+		lines.push(`${"  ".repeat(depth)}- [${checked}] #${task.id} ${task.subject}${status}${blocked}`);
 		for (const child of byParent.get(task.id) ?? []) visit(child, depth + 1);
 	};
 	for (const root of byParent.get(undefined) ?? []) visit(root, 0);

@@ -47,5 +47,6 @@ function minimalPixConfig(): PixConfig {
 		iconTheme: { name: "fallback" },
 		dictation: { languages: {} },
 		ignoreContextFiles: false,
+		maxProjectSessions: 0,
 	};
 }
