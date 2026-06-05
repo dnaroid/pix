@@ -21,11 +21,14 @@ import type {
 	StyledSegment,
 } from "../types.js";
 import type { ScreenStyler } from "../screen/screen-styler.js";
-import { stringDisplayWidth } from "../../terminal-width.js";
+import { displayIndexForColumn, stringDisplayWidth } from "../../terminal-width.js";
 import { APP_ICONS } from "../icons.js";
 import { resolveColor, resolveModelColor, type ModelColorsConfig } from "../../config.js";
 
 const MODEL_USAGE_PROGRESS_BAR_WIDTH = stringDisplayWidth(formatCompactProgressBar(100));
+const INPUT_BORDER_WIDGET_INSET = 2;
+const INPUT_BORDER_WIDGET_SEPARATOR = "─";
+const STATUS_ICON_BUTTON_WIDTH = 3;
 
 export type StatusLineRendererHost = {
 	readonly theme: Theme;
@@ -61,85 +64,91 @@ export class StatusLineRenderer {
 
 	layout(width: number): StatusLineLayout {
 		const contentWidth = Math.max(1, width);
-		const left = 0;
 		const statusDot = APP_ICONS.record;
-		const draftQueueButton = this.draftQueueWidgetText();
-		const userJumpButton = APP_ICONS.user;
-		const thinkingExpandButton = APP_ICONS.thinkingExpanded;
-		const compactToolsButton = APP_ICONS.compactTools;
-		const terminalBellSoundWidgetText = this.host.terminalBellSoundStatusWidgetText();
-		const promptEnhancerWidgetText = this.host.promptEnhancerStatusWidgetText();
-		const voiceWidgetText = this.host.voiceStatusWidgetText();
-		const rightWidgetParts = [draftQueueButton, promptEnhancerWidgetText, userJumpButton, terminalBellSoundWidgetText, thinkingExpandButton, compactToolsButton, voiceWidgetText];
-		const rightWidgetText = rightWidgetParts.filter((text) => text.length > 0).join(" ");
-		const rightWidgetWidth = stringDisplayWidth(rightWidgetText);
-		const leftWidth = rightWidgetWidth > 0 && contentWidth > rightWidgetWidth + 1 ? contentWidth - rightWidgetWidth - 1 : contentWidth;
 		const baseStatus = this.host.currentStatus();
 		const workspaceLabel = this.host.statusWorkspaceLabel();
 		const modelUsageLabel = this.host.modelUsageStatusLabel();
 		const workspaceDetailsLabel = modelUsageLabel ? `${workspaceLabel} ${modelUsageLabel}` : workspaceLabel;
-		const contextBarLabel = this.contextBarLabel(baseStatus, leftWidth, workspaceDetailsLabel);
+		const contextBarLabel = this.contextBarLabel(baseStatus, contentWidth, workspaceDetailsLabel);
 		const status = contextBarLabel ? `${baseStatus} ${contextBarLabel}` : baseStatus;
 		const sessionLabel = "";
 		const details = `${status} ${workspaceDetailsLabel}`;
-		const leftText = padOrTrimPlain(`${statusDot} ${details}`, leftWidth);
-		const innerText = leftWidth < contentWidth ? `${leftText} ${rightWidgetText}` : padOrTrimPlain(leftText, contentWidth);
-		const text = padOrTrimPlain(innerText, width);
-		let nextWidgetStartColumn = left + leftWidth + 2;
-		let draftQueueWidget = leftWidth < contentWidth && draftQueueButton.length > 0
-			? this.widgetLayout(nextWidgetStartColumn, draftQueueButton)
-			: undefined;
-		if (draftQueueWidget) nextWidgetStartColumn = draftQueueWidget.endColumn + 1;
-		let promptEnhancerWidget: StatusLineLayout["promptEnhancerWidget"];
-		let userJumpWidget: StatusLineLayout["userJumpWidget"];
-		let terminalBellSoundWidget: StatusLineLayout["terminalBellSoundWidget"];
-		let thinkingExpandWidget: StatusLineLayout["thinkingExpandWidget"];
-		let compactToolsWidget: StatusLineLayout["compactToolsWidget"];
-
-		const appendPromptEnhancerWidget = () => {
-			promptEnhancerWidget = leftWidth < contentWidth && promptEnhancerWidgetText.length > 0
-				? this.widgetLayout(nextWidgetStartColumn, promptEnhancerWidgetText)
-				: undefined;
-			if (promptEnhancerWidget) nextWidgetStartColumn = promptEnhancerWidget.endColumn + 1;
-		};
-		const appendCoreStatusWidgets = () => {
-			userJumpWidget = leftWidth < contentWidth
-				? this.widgetLayout(nextWidgetStartColumn, userJumpButton)
-				: undefined;
-			if (userJumpWidget) nextWidgetStartColumn = userJumpWidget.endColumn + 1;
-			terminalBellSoundWidget = leftWidth < contentWidth && terminalBellSoundWidgetText.length > 0
-				? this.widgetLayout(nextWidgetStartColumn, terminalBellSoundWidgetText)
-				: undefined;
-			if (terminalBellSoundWidget) nextWidgetStartColumn = terminalBellSoundWidget.endColumn + 1;
-			thinkingExpandWidget = leftWidth < contentWidth
-				? this.widgetLayout(nextWidgetStartColumn, thinkingExpandButton)
-				: undefined;
-			if (thinkingExpandWidget) nextWidgetStartColumn = thinkingExpandWidget.endColumn + 1;
-			compactToolsWidget = leftWidth < contentWidth
-				? this.widgetLayout(nextWidgetStartColumn, compactToolsButton)
-				: undefined;
-			if (compactToolsWidget) nextWidgetStartColumn = compactToolsWidget.endColumn + 1;
-		};
-
-		appendPromptEnhancerWidget();
-		appendCoreStatusWidgets();
-		const voiceWidget = leftWidth < contentWidth && voiceWidgetText.length > 0 ? this.voiceWidgetLayout(nextWidgetStartColumn, voiceWidgetText) : undefined;
+		const text = padOrTrimPlain(`${statusDot} ${details}`, width);
 
 		return {
 			details,
 			text,
 			sessionLabel,
 			workspaceLabel,
-			...(draftQueueWidget ? { draftQueueWidget } : {}),
-			...(userJumpWidget ? { userJumpWidget } : {}),
-			...(thinkingExpandWidget ? { thinkingExpandWidget } : {}),
-			...(compactToolsWidget ? { compactToolsWidget } : {}),
-			...(terminalBellSoundWidget ? { terminalBellSoundWidget } : {}),
 			...(modelUsageLabel ? { modelUsageLabel } : {}),
 			...(contextBarLabel ? { contextBarLabel } : {}),
-			...(promptEnhancerWidget ? { promptEnhancerWidget } : {}),
-			...(voiceWidget ? { voiceWidget } : {}),
 		};
+	}
+
+	inputBorderWidgetsLayout(width: number): StatusLineLayout | undefined {
+		const layout: StatusLineLayout = {
+			details: "",
+			text: "",
+			sessionLabel: "",
+			workspaceLabel: "",
+		};
+		const widgets: { text: string; assign: (startColumn: number, text: string) => void }[] = [];
+		let hasParts = false;
+
+		const appendWidget = (text: string, assign: (startColumn: number, text: string) => void): void => {
+			if (text.length <= 0) return;
+			widgets.push({ text, assign });
+			hasParts = true;
+		};
+
+		const draftQueueButton = this.draftQueueWidgetText();
+		appendWidget(draftQueueButton ? this.iconButtonText(draftQueueButton) : "", (column, text) => {
+			layout.draftQueueWidget = this.widgetLayout(column, text);
+		});
+		const promptEnhancerWidgetText = this.host.promptEnhancerStatusWidgetText();
+		appendWidget(promptEnhancerWidgetText ? this.iconButtonText(promptEnhancerWidgetText) : "", (column, text) => {
+			layout.promptEnhancerWidget = this.widgetLayout(column, text);
+		});
+		appendWidget(this.iconButtonText(APP_ICONS.user), (column, text) => {
+			layout.userJumpWidget = this.widgetLayout(column, text);
+		});
+		const terminalBellSoundWidgetText = this.host.terminalBellSoundStatusWidgetText();
+		appendWidget(terminalBellSoundWidgetText ? this.iconButtonText(terminalBellSoundWidgetText) : "", (column, text) => {
+			layout.terminalBellSoundWidget = this.widgetLayout(column, text);
+		});
+		appendWidget(this.iconButtonText(APP_ICONS.thinkingExpanded), (column, text) => {
+			layout.thinkingExpandWidget = this.widgetLayout(column, text);
+		});
+		appendWidget(this.iconButtonText(APP_ICONS.compactTools), (column, text) => {
+			layout.compactToolsWidget = this.widgetLayout(column, text);
+		});
+		const voiceWidgetText = this.host.voiceStatusWidgetText();
+		appendWidget(this.voiceBorderWidgetText(voiceWidgetText), (column, text) => {
+			layout.voiceWidget = this.voiceWidgetLayout(column, text);
+		});
+
+		if (!hasParts) return undefined;
+
+		const parts: string[] = [];
+		const totalWidth = widgets.reduce((total, widget, index) => total + (index > 0 ? 1 : 0) + stringDisplayWidth(widget.text), 0);
+		const endColumn = Math.max(1, width - INPUT_BORDER_WIDGET_INSET);
+		const startColumn = endColumn - totalWidth;
+		if (startColumn < 2) return undefined;
+
+		layout.inputBorderWidgetStartColumn = startColumn;
+		let nextColumn = startColumn;
+		for (const [index, widget] of widgets.entries()) {
+			if (index > 0) {
+				parts.push(INPUT_BORDER_WIDGET_SEPARATOR);
+				nextColumn += 1;
+			}
+			parts.push(widget.text);
+			widget.assign(nextColumn, widget.text);
+			nextColumn += stringDisplayWidth(widget.text);
+		}
+
+		layout.text = parts.join("");
+		return layout;
 	}
 
 	render(row: number, layout: StatusLineLayout, width: number): string {
@@ -147,6 +156,60 @@ export class StatusLineRenderer {
 		return this.host.screenStyler.styleLineSegments(row, layout.text, width, {
 			foreground: colors.statusForeground,
 		}, this.segments(layout.text, layout));
+	}
+
+	renderInputBorderWidgets(row: number, layout: StatusLineLayout, borderText: string, width: number): string {
+		const startColumn = layout.inputBorderWidgetStartColumn ?? 1;
+		const text = overlayText(borderText, startColumn, layout.text);
+		return this.host.screenStyler.styleLineSegments(row, text, width, {
+			foreground: this.host.theme.colors.inputBorder,
+		}, this.inputBorderWidgetSegments(layout, text));
+	}
+
+	private inputBorderWidgetSegments(layout: StatusLineLayout, text: string): StyledSegment[] {
+		const colors = this.host.theme.colors;
+		const background = colors.inputBorder;
+		const segments: StyledSegment[] = [];
+		const pushWidgetSegment = (widget: { startColumn: number; endColumn: number } | undefined, foreground: string): void => {
+			if (!widget) return;
+			segments.push({
+				start: displayIndexForColumn(text, widget.startColumn),
+				end: displayIndexForColumn(text, widget.endColumn),
+				foreground,
+				background,
+			});
+		};
+
+		pushWidgetSegment(layout.draftQueueWidget, colors.info);
+		pushWidgetSegment(layout.promptEnhancerWidget, this.host.promptEnhancerStatusWidgetActive()
+			? colors.warning
+			: this.host.promptEnhancerStatusWidgetEnabled()
+				? colors.info
+				: colors.muted);
+		pushWidgetSegment(layout.userJumpWidget, this.host.userMessageJumpMenuActive?.() ? colors.info : colors.muted);
+		pushWidgetSegment(layout.terminalBellSoundWidget, this.host.terminalBellSoundStatusWidgetEnabled() ? colors.info : colors.muted);
+		pushWidgetSegment(layout.thinkingExpandWidget, this.host.allThinkingExpandedActive?.() ? colors.info : colors.muted);
+		pushWidgetSegment(layout.compactToolsWidget, this.host.superCompactToolsActive?.() ? colors.info : colors.muted);
+
+		const voiceWidget = layout.voiceWidget;
+		if (voiceWidget) {
+			segments.push({
+				start: displayIndexForColumn(text, voiceWidget.startColumn),
+				end: displayIndexForColumn(text, voiceWidget.micEndColumn),
+				foreground: this.host.voiceStatusWidgetActive() ? colors.error : colors.muted,
+				background,
+			});
+			if (voiceWidget.languageEndColumn > voiceWidget.languageStartColumn) {
+				segments.push({
+					start: displayIndexForColumn(text, voiceWidget.languageStartColumn),
+					end: displayIndexForColumn(text, voiceWidget.languageEndColumn),
+					foreground: colors.statusForeground,
+					background,
+				});
+			}
+		}
+
+		return segments;
 	}
 
 	modelTarget(statusText: string, row: number): StatusModelTarget | undefined {
@@ -366,19 +429,21 @@ export class StatusLineRenderer {
 
 	private pushVoiceWidgetSegment(segments: StyledSegment[], statusText: string): void {
 		const widgetText = this.host.voiceStatusWidgetText();
+		if (widgetText.length <= 0) return;
 		const start = statusText.lastIndexOf(widgetText);
-		if (start < 0 || widgetText.length <= 0) return;
+		const micStart = statusText.lastIndexOf(APP_ICONS.microphone);
+		if (start < 0 && micStart < 0) return;
 
 		if (this.host.voiceStatusWidgetActive()) {
 			const separatorIndex = widgetText.indexOf(" ");
 			const micLength = separatorIndex >= 0 ? separatorIndex : widgetText.length;
-			this.pushSegment(segments, start, micLength, this.host.theme.colors.error);
+			this.pushSegment(segments, micStart >= 0 ? micStart : start, micLength, this.host.theme.colors.error);
 			return;
 		}
 
 		const separatorIndex = widgetText.indexOf(" ");
 		const micLength = separatorIndex >= 0 ? separatorIndex : widgetText.length;
-		this.pushSegment(segments, start, micLength, this.host.theme.colors.muted);
+		this.pushSegment(segments, micStart >= 0 ? micStart : start, micLength, this.host.theme.colors.muted);
 	}
 
 	private pushWorkspaceSegments(segments: StyledSegment[], statusText: string, workspaceLabel: string): void {
@@ -508,16 +573,28 @@ export class StatusLineRenderer {
 		};
 	}
 
-	private voiceWidgetLayout(startColumn: number, widgetText: string): StatusLineLayout["voiceWidget"] {
+	private iconButtonText(icon: string): string {
+		return padOrTrimPlain(` ${icon} `, STATUS_ICON_BUTTON_WIDTH);
+	}
+
+	private voiceBorderWidgetText(widgetText: string): string {
+		if (widgetText.length <= 0) return "";
 		const separatorIndex = widgetText.indexOf(" ");
 		const micText = separatorIndex >= 0 ? widgetText.slice(0, separatorIndex) : widgetText;
-		const languageStartOffset = separatorIndex >= 0 ? stringDisplayWidth(widgetText.slice(0, separatorIndex + 1)) : stringDisplayWidth(widgetText);
-		const afterLanguageIndex = widgetText.indexOf(" ", separatorIndex + 1);
-		const languageTextEndIndex = afterLanguageIndex >= 0 ? afterLanguageIndex : widgetText.length;
-		const languageEndOffset = stringDisplayWidth(widgetText.slice(0, languageTextEndIndex));
+		const languageText = separatorIndex >= 0 ? widgetText.slice(separatorIndex).trim() : "";
+		const micButton = this.iconButtonText(micText);
+		return languageText ? `${micButton}${INPUT_BORDER_WIDGET_SEPARATOR}${languageText}` : micButton;
+	}
+
+	private voiceWidgetLayout(startColumn: number, widgetText: string): NonNullable<StatusLineLayout["voiceWidget"]> {
+		const hasLanguage = stringDisplayWidth(widgetText) > STATUS_ICON_BUTTON_WIDTH + stringDisplayWidth(INPUT_BORDER_WIDGET_SEPARATOR);
+		const languageStartOffset = hasLanguage
+			? STATUS_ICON_BUTTON_WIDTH + stringDisplayWidth(INPUT_BORDER_WIDGET_SEPARATOR)
+			: stringDisplayWidth(widgetText);
+		const languageEndOffset = stringDisplayWidth(widgetText.trimEnd());
 		return {
 			startColumn,
-			micEndColumn: startColumn + stringDisplayWidth(micText),
+			micEndColumn: startColumn + STATUS_ICON_BUTTON_WIDTH,
 			languageStartColumn: startColumn + languageStartOffset,
 			languageEndColumn: startColumn + languageEndOffset,
 			endColumn: startColumn + stringDisplayWidth(widgetText),
@@ -534,6 +611,15 @@ export class StatusLineRenderer {
 				return this.host.theme.colors.statusDotBase;
 		}
 	}
+}
+
+function overlayText(text: string, startColumn: number, overlay: string): string {
+	const start = Math.max(0, startColumn - 1);
+	const overlayWidth = stringDisplayWidth(overlay);
+	const startIndex = displayIndexForColumn(text, start + 1);
+	const endIndex = displayIndexForColumn(text, start + overlayWidth + 1);
+	const padded = text.padEnd(startIndex, " ");
+	return `${padded.slice(0, startIndex)}${overlay}${padded.slice(endIndex)}`;
 }
 
 export function thinkingLevelThemeColor(label: string, colors: Theme["colors"], availableLevels?: readonly string[]): string {

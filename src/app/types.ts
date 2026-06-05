@@ -263,6 +263,7 @@ export type StatusLineLayout = {
 	text: string;
 	sessionLabel: string;
 	workspaceLabel: string;
+	inputBorderWidgetStartColumn?: number;
 	modelUsageLabel?: string;
 	contextBarLabel?: string;
 	userJumpWidget?: StatusUserJumpWidgetLayout;

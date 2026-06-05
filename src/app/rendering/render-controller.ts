@@ -220,18 +220,29 @@ export class AppRenderController {
 			setRenderedBackground(row, rendered.line?.backgroundOverride);
 			appendFrameOutput("inputStatus", row, this.renderFrameRow(row, rendered.output(row)));
 		}
+		const statusLayout = this.deps.statusLineRenderer.layout(columns);
+		const statusLineRenderer = this.deps.statusLineRenderer as StatusLineRenderer & {
+			inputBorderWidgetsLayout?: StatusLineRenderer["inputBorderWidgetsLayout"];
+			renderInputBorderWidgets?: StatusLineRenderer["renderInputBorderWidgets"];
+		};
+		const inputBorderWidgetsLayout = statusLineRenderer.inputBorderWidgetsLayout?.(columns);
 		if (inputBottomSeparatorRow > 1) {
 			const separatorText = inputFrameLine(columns, "bottom");
 			const row = toScreenRow(inputBottomSeparatorRow);
 			if (row < statusRow) {
-				this.deps.mouseController.renderedRowTexts.set(row, separatorText);
-				appendFrameOutput("inputStatus", row, this.renderFrameRow(row, this.deps.screenStyler.styleLine(row, separatorText, columns, {
-					foreground: this.deps.theme.colors.inputBorder,
-				})));
+				const text = inputBorderWidgetsLayout
+					? overlayText(separatorText, inputBorderWidgetsLayout.inputBorderWidgetStartColumn ?? 1, inputBorderWidgetsLayout.text)
+					: separatorText;
+				this.deps.mouseController.renderedRowTexts.set(row, text);
+				const output = inputBorderWidgetsLayout && statusLineRenderer.renderInputBorderWidgets
+					? statusLineRenderer.renderInputBorderWidgets(row, inputBorderWidgetsLayout, separatorText, columns)
+					: this.deps.screenStyler.styleLine(row, separatorText, columns, {
+						foreground: this.deps.theme.colors.inputBorder,
+					});
+				appendFrameOutput("inputStatus", row, this.renderFrameRow(row, output));
 			}
 		}
-		const statusLayout = this.deps.statusLineRenderer.layout(columns);
-		this.updateStatusMouseState(statusLayout, statusRow);
+		this.updateStatusMouseState(statusLayout, statusRow, inputBorderWidgetsLayout, toScreenRow(inputBottomSeparatorRow));
 		appendFrameOutput("inputStatus", statusRow, this.renderFrameRow(statusRow, this.deps.statusLineRenderer.render(statusRow, statusLayout, columns)));
 
 		const voiceProgressOverlay = this.renderVoiceProgressOverlay(this.deps.voiceProgressOverlayText(), columns, statusRow);
@@ -313,20 +324,27 @@ export class AppRenderController {
 		return `\x1b[${flash.y};${flash.startColumn}H\x1b[7m${text}${ANSI_RESET}`;
 	}
 
-	private updateStatusMouseState(statusLayout: ReturnType<StatusLineRenderer["layout"]>, statusRow: number): void {
+	private updateStatusMouseState(
+		statusLayout: ReturnType<StatusLineRenderer["layout"]>,
+		statusRow: number,
+		inputBorderWidgetsLayout?: ReturnType<StatusLineRenderer["inputBorderWidgetsLayout"]>,
+		inputBorderWidgetsRow?: number,
+	): void {
+		const widgetLayout = inputBorderWidgetsLayout;
+		const widgetRow = inputBorderWidgetsRow ?? statusRow;
 		this.deps.mouseController.statusModelTarget = this.deps.statusLineRenderer.modelTarget(statusLayout.text, statusRow);
 		this.deps.mouseController.statusThinkingTarget = this.deps.statusLineRenderer.thinkingTarget(statusLayout.text, statusRow);
 		this.deps.mouseController.statusContextTarget = this.deps.statusLineRenderer.contextTarget(statusLayout.text, statusRow, statusLayout);
 		this.deps.mouseController.statusModelUsageTarget = this.deps.statusLineRenderer.modelUsageTarget(statusLayout.text, statusRow, statusLayout);
-		this.deps.mouseController.statusDraftQueueTarget = this.deps.statusLineRenderer.draftQueueTarget?.(statusLayout, statusRow);
-		this.deps.mouseController.statusUserJumpTarget = this.deps.statusLineRenderer.userJumpTarget?.(statusLayout, statusRow);
-		this.deps.mouseController.statusThinkingExpandTarget = this.deps.statusLineRenderer.thinkingExpandTarget?.(statusLayout, statusRow);
-		this.deps.mouseController.statusCompactToolsTarget = this.deps.statusLineRenderer.compactToolsTarget?.(statusLayout, statusRow);
-		this.deps.mouseController.statusTerminalBellSoundTarget = this.deps.statusLineRenderer.terminalBellSoundTarget?.(statusLayout, statusRow);
+		this.deps.mouseController.statusDraftQueueTarget = widgetLayout ? this.deps.statusLineRenderer.draftQueueTarget?.(widgetLayout, widgetRow) : undefined;
+		this.deps.mouseController.statusUserJumpTarget = widgetLayout ? this.deps.statusLineRenderer.userJumpTarget?.(widgetLayout, widgetRow) : undefined;
+		this.deps.mouseController.statusThinkingExpandTarget = widgetLayout ? this.deps.statusLineRenderer.thinkingExpandTarget?.(widgetLayout, widgetRow) : undefined;
+		this.deps.mouseController.statusCompactToolsTarget = widgetLayout ? this.deps.statusLineRenderer.compactToolsTarget?.(widgetLayout, widgetRow) : undefined;
+		this.deps.mouseController.statusTerminalBellSoundTarget = widgetLayout ? this.deps.statusLineRenderer.terminalBellSoundTarget?.(widgetLayout, widgetRow) : undefined;
 		this.deps.mouseController.statusSessionTarget = this.deps.statusLineRenderer.sessionTarget(statusLayout.text, statusRow, statusLayout.sessionLabel, statusLayout.workspaceLabel);
-		this.deps.mouseController.statusPromptEnhancerTarget = this.deps.statusLineRenderer.promptEnhancerTarget(statusLayout, statusRow);
-		this.deps.mouseController.statusVoiceMicTarget = this.deps.statusLineRenderer.voiceMicTarget(statusLayout, statusRow);
-		this.deps.mouseController.statusVoiceLanguageTarget = this.deps.statusLineRenderer.voiceLanguageTarget(statusLayout, statusRow);
+		this.deps.mouseController.statusPromptEnhancerTarget = widgetLayout ? this.deps.statusLineRenderer.promptEnhancerTarget(widgetLayout, widgetRow) : undefined;
+		this.deps.mouseController.statusVoiceMicTarget = widgetLayout ? this.deps.statusLineRenderer.voiceMicTarget(widgetLayout, widgetRow) : undefined;
+		this.deps.mouseController.statusVoiceLanguageTarget = widgetLayout ? this.deps.statusLineRenderer.voiceLanguageTarget(widgetLayout, widgetRow) : undefined;
 		this.deps.mouseController.renderedRowTexts.set(statusRow, statusLayout.text);
 	}
 
