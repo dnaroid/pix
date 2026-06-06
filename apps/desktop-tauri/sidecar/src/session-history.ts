@@ -28,7 +28,10 @@ export function sessionHistoryOlderMessagesReader(session: AgentSession): Sessio
       while (messages.length < limit && reader.hasOlder()) {
         const entries = await reader.readOlder(limit - messages.length);
         if (entries.length === 0) break;
-        messages.push(...sessionHistoryDisplayMessagesFromEntries(entries));
+        // The lazy reader walks older batches backwards from the tail cursor.
+        // If we need multiple batches to collect enough displayable messages,
+        // keep the final result in chronological display order.
+        messages.unshift(...sessionHistoryDisplayMessagesFromEntries(entries));
       }
       return messages;
     },

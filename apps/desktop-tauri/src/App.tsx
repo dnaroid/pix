@@ -31,6 +31,10 @@ const TABS_KEY_PREFIX = "pix-desktop.tabs:";
 const INITIAL_MESSAGE_CHUNK = 80;
 const BACKFILL_MESSAGE_CHUNK = 240;
 const LOAD_OLDER_SCROLL_THRESHOLD_PX = 80;
+const VIRTUAL_OVERSCAN_PX = 360;
+const ESTIMATED_MESSAGE_HEIGHT = 96;
+const INITIAL_VIEWPORT_BEFORE = 80;
+const INITIAL_VIEWPORT_AFTER = 160;
 
 // -- RPC event shape (flat: optional fields, narrowing via switch) --------
 
@@ -84,9 +88,9 @@ type HistoryContent =
   | { type: "toolCall"; id?: string; name?: string; arguments?: unknown };
 
 type HistoryMessage =
-  | { role: "user"; content?: string | HistoryContent[] }
-  | { role: "assistant"; content?: HistoryContent[] }
-  | { role: "toolResult"; toolCallId?: string; toolName?: string; content?: HistoryContent[]; details?: unknown; isError?: boolean }
+  | { role: "user"; content?: string | HistoryContent[]; __pixSessionEntryId?: string }
+  | { role: "assistant"; content?: HistoryContent[]; __pixSessionEntryId?: string }
+  | { role: "toolResult"; toolCallId?: string; toolName?: string; content?: HistoryContent[]; details?: unknown; isError?: boolean; __pixSessionEntryId?: string }
   | { role?: string; [k: string]: unknown };
 
 type MessagesPage = {
@@ -94,6 +98,9 @@ type MessagesPage = {
   offset: number;
   total: number;
   hasOlder?: boolean;
+  startIndex?: number;
+  endIndex?: number;
+  hasNewer?: boolean;
 };
 
 type HistoryLoadProgress = {
@@ -103,8 +110,29 @@ type HistoryLoadProgress = {
 };
 
 type OlderHistoryState = {
-  hasOlder: boolean;
+  nextOffset: number;
+  hasExternalOlder: boolean;
   loading: boolean;
+};
+
+type NewerHistoryState = {
+  nextOffset: number;
+  hasNewer: boolean;
+  loading: boolean;
+};
+
+type TabScrollState = {
+  scrollTop: number;
+  followOutput: boolean;
+  anchorId?: string;
+  anchorOffset?: number;
+};
+
+type VirtualRange = {
+  start: number;
+  end: number;
+  before: number;
+  after: number;
 };
 
 type SessionSummary = {
@@ -159,6 +187,7 @@ type PersistedTabs = {
   openTabs: string[];
   activeTabId: string | null;
   titles?: Record<string, string>;
+  scroll?: Record<string, TabScrollState>;
 };
 
 type SlashCommandDef = {
@@ -292,7 +321,9 @@ export default function App() {
   const [, setLoadingSessions] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [historyLoadProgress, setHistoryLoadProgress] = useState<HistoryLoadProgress | null>(null);
-  const [olderHistory, setOlderHistory] = useState<OlderHistoryState>({ hasOlder: false, loading: false });
+  const [olderHistory, setOlderHistory] = useState<OlderHistoryState>({ nextOffset: 0, hasExternalOlder: false, loading: false });
+  const [newerHistory, setNewerHistory] = useState<NewerHistoryState>({ nextOffset: 0, hasNewer: false, loading: false });
+  const [virtualRange, setVirtualRange] = useState<VirtualRange>({ start: 0, end: 0, before: 0, after: 0 });
   const [restoredTabTitles, setRestoredTabTitles] = useState<Record<string, string>>({});
   const [workspace, setWorkspace] = useState<string | null>(() => {
     try {
@@ -317,6 +348,12 @@ export default function App() {
   const historyLoadSeqRef = useRef(0);
   const sessionMessageCountRef = useRef(0);
   const prependScrollAnchorRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null);
+  const scrollToBottomNextRenderRef = useRef(false);
+  const followOutputRef = useRef(true);
+  const tabScrollRef = useRef<Map<string, TabScrollState>>(new Map());
+  const restoreScrollNextRenderRef = useRef<{ path: string; scrollTop: number; followOutput: boolean } | null>(null);
+  const messageHeightsRef = useRef<Map<string, number>>(new Map());
+  const scrollRef = useRef<HTMLDivElement>(null);
   /** Mirror of `messages` so stable callbacks can read the latest value. */
   const messagesRef = useRef<ChatMessage[]>([]);
 
@@ -344,6 +381,24 @@ export default function App() {
     return activeTabId ? sessionLabelFor(activeTabId, sessions, session, restoredTabTitles) : "Session";
   }, [workspace, activeTabId, sessions, session, restoredTabTitles]);
 
+  const renderedMessages = useMemo(() => {
+    const fallbackCount = Math.min(
+      messages.length,
+      Math.max(1, Math.ceil(((scrollRef.current?.clientHeight ?? window.innerHeight) + VIRTUAL_OVERSCAN_PX * 2) / ESTIMATED_MESSAGE_HEIGHT)),
+    );
+    const fallbackAfter = messages
+      .slice(fallbackCount)
+      .reduce((sum, message) => sum + (messageHeightsRef.current.get(message.id) ?? estimateMessageHeight(message)), 0);
+    const range = virtualRange.end > virtualRange.start
+      ? virtualRange
+      : { start: 0, end: fallbackCount, before: 0, after: fallbackAfter };
+    return {
+      before: range.before,
+      after: range.after,
+      messages: messages.slice(range.start, range.end),
+    };
+  }, [messages, virtualRange]);
+
   const windowTitle = sessionTitle ? `${workspaceTitle} | ${sessionTitle}` : workspaceTitle;
 
   useEffect(() => {
@@ -359,7 +414,6 @@ export default function App() {
   }, []);
 
   const subscribed = useRef(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const composerInputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -388,13 +442,10 @@ export default function App() {
   // -- RPC helpers -------------------------------------------------------
 
   const listSessionsForActiveWorkspace = useCallback(async (): Promise<SessionSummary[]> => {
-    const resp = await invoke<{ success: boolean; data?: { sessions: SessionSummary[] }; error?: string }>(
-      "rpc_call",
-      { cmd: { type: "pix:list_sessions" } },
-    );
-    if (resp.success && resp.data) return resp.data.sessions;
-    throw new Error(resp.error ?? "unknown");
-  }, []);
+    if (!workspace) return [];
+    const resp = await invoke<{ sessions: SessionSummary[] }>("list_workspace_sessions", { cwd: workspace });
+    return resp.sessions;
+  }, [workspace]);
 
   const refreshSessions = useCallback(async () => {
     if (!workspace) {
@@ -603,7 +654,86 @@ export default function App() {
     }
   }, [workspace]);
 
-  const fetchMessagesPage = useCallback(async (cmd: { offset?: number; limit?: number; fromEnd?: boolean; lazyOlder?: boolean }) => {
+  const updateVirtualRange = useCallback(() => {
+    const el = scrollRef.current;
+    const viewportHeight = el?.clientHeight ?? window.innerHeight;
+    const scrollTop = el?.scrollTop ?? 0;
+    const lower = Math.max(0, scrollTop - VIRTUAL_OVERSCAN_PX);
+    const upper = scrollTop + viewportHeight + VIRTUAL_OVERSCAN_PX;
+    const heights = messageHeightsRef.current;
+    const currentMessages = messagesRef.current;
+
+    let start = 0;
+    let before = 0;
+    while (start < currentMessages.length) {
+      const message = currentMessages[start];
+      if (!message) break;
+      const height = heights.get(message.id) ?? estimateMessageHeight(message);
+      if (before + height >= lower) break;
+      before += height;
+      start += 1;
+    }
+
+    let end = start;
+    let consumed = before;
+    while (end < currentMessages.length) {
+      const message = currentMessages[end];
+      if (!message) break;
+      consumed += heights.get(message.id) ?? estimateMessageHeight(message);
+      end += 1;
+      if (consumed >= upper) break;
+    }
+
+    let after = 0;
+    for (let index = end; index < currentMessages.length; index += 1) {
+      const message = currentMessages[index];
+      if (!message) continue;
+      after += heights.get(message.id) ?? estimateMessageHeight(message);
+    }
+
+    setVirtualRange((prev) => (
+      prev.start === start && prev.end === end && prev.before === before && prev.after === after
+        ? prev
+        : { start, end, before, after }
+    ));
+  }, []);
+
+  const measureMessage = useCallback((id: string, node: HTMLDivElement | null) => {
+    if (!node) return;
+    const height = node.getBoundingClientRect().height;
+    if (!Number.isFinite(height) || height <= 0) return;
+    const previous = messageHeightsRef.current.get(id);
+    if (previous !== undefined && Math.abs(previous - height) < 1) return;
+    messageHeightsRef.current.set(id, height);
+    window.requestAnimationFrame(updateVirtualRange);
+  }, [updateVirtualRange]);
+
+  useEffect(() => {
+    const ids = new Set(messages.map((message) => message.id));
+    for (const id of messageHeightsRef.current.keys()) {
+      if (!ids.has(id)) messageHeightsRef.current.delete(id);
+    }
+    updateVirtualRange();
+  }, [messages, updateVirtualRange]);
+
+  useEffect(() => {
+    const onResize = () => updateVirtualRange();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [updateVirtualRange]);
+
+  const fetchMessagesPage = useCallback(async (cmd: { sessionPath?: string; offset?: number; limit?: number; fromEnd?: boolean; lazyOlder?: boolean; anchorId?: string; before?: number; after?: number }) => {
+    if (cmd.sessionPath) {
+      return await invoke<MessagesPage>("read_session_messages_window", {
+        sessionPath: cmd.sessionPath,
+        offset: cmd.offset,
+        limit: cmd.limit,
+        fromEnd: cmd.fromEnd,
+        anchorId: cmd.anchorId,
+        before: cmd.before,
+        after: cmd.after,
+      });
+    }
     const resp = await invoke<{ success: boolean; data?: MessagesPage; error?: string }>(
       "rpc_call",
       { cmd: { type: "get_messages", ...cmd } },
@@ -617,6 +747,41 @@ export default function App() {
     setLoadingMessages(false);
     setHistoryLoadProgress(null);
     setOlderHistory((prev) => ({ ...prev, loading: false }));
+    setNewerHistory((prev) => ({ ...prev, loading: false }));
+  }, []);
+
+  const scrollAnchorFor = useCallback((scrollTop: number): Pick<TabScrollState, "anchorId" | "anchorOffset"> => {
+    const heights = messageHeightsRef.current;
+    let top = 0;
+    for (const message of messagesRef.current) {
+      const height = heights.get(message.id) ?? estimateMessageHeight(message);
+      if (top + height >= scrollTop) {
+        return { anchorId: message.id, anchorOffset: Math.max(0, scrollTop - top) };
+      }
+      top += height;
+    }
+    const last = messagesRef.current.at(-1);
+    return last ? { anchorId: last.id, anchorOffset: 0 } : {};
+  }, []);
+
+  const captureTabScroll = useCallback((path: string | null | undefined) => {
+    const el = scrollRef.current;
+    if (!path || !el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    tabScrollRef.current.set(path, {
+      scrollTop: el.scrollTop,
+      followOutput: distanceFromBottom < 80,
+      ...scrollAnchorFor(el.scrollTop),
+    });
+  }, [scrollAnchorFor]);
+
+  const scheduleRestoreTabScroll = useCallback((path: string | null | undefined): boolean => {
+    if (!path) return false;
+    const saved = tabScrollRef.current.get(path);
+    if (!saved) return false;
+    restoreScrollNextRenderRef.current = { path, ...saved };
+    followOutputRef.current = saved.followOutput;
+    return true;
   }, []);
 
   const loadMessages = useCallback(async (path?: string) => {
@@ -624,18 +789,27 @@ export default function App() {
     historyLoadSeqRef.current = loadSeq;
     setLoadingMessages(true);
     setHistoryLoadProgress({ loaded: 0, total: sessionMessageCountRef.current });
-    setOlderHistory({ hasOlder: false, loading: false });
+    setOlderHistory({ nextOffset: 0, hasExternalOlder: false, loading: false });
+    setNewerHistory({ nextOffset: 0, hasNewer: false, loading: false });
     const isStaleLoad = () =>
       historyLoadSeqRef.current !== loadSeq || (path ? activeTabIdRef.current !== path : false);
     try {
-      const first = await fetchMessagesPage({ fromEnd: true, limit: INITIAL_MESSAGE_CHUNK });
+      const saved = path ? tabScrollRef.current.get(path) : undefined;
+      const first = await fetchMessagesPage(saved?.anchorId && path
+        ? { sessionPath: path, anchorId: saved.anchorId, before: INITIAL_VIEWPORT_BEFORE, after: INITIAL_VIEWPORT_AFTER, limit: INITIAL_VIEWPORT_BEFORE + INITIAL_VIEWPORT_AFTER }
+        : path
+          ? { sessionPath: path, fromEnd: true, limit: INITIAL_MESSAGE_CHUNK }
+          : { fromEnd: true, limit: INITIAL_MESSAGE_CHUNK });
       if (isStaleLoad()) return;
 
-      let loadedHistory = first.messages;
-      const next = toChatMessages(loadedHistory);
+      const next = toChatMessages(first.messages);
+      if (!scheduleRestoreTabScroll(path)) scrollToBottomNextRenderRef.current = true;
       setMessages(next);
       if (path) tabMessagesRef.current.set(path, next);
-      setOlderHistory({ hasOlder: first.offset > 0 || Boolean(first.hasOlder), loading: false });
+      const startIndex = first.startIndex ?? first.offset;
+      const endIndex = first.endIndex ?? (first.offset + first.messages.length);
+      setOlderHistory({ nextOffset: startIndex, hasExternalOlder: Boolean(first.hasOlder), loading: false });
+      setNewerHistory({ nextOffset: endIndex, hasNewer: Boolean(first.hasNewer), loading: false });
       setLoadingMessages(false);
       setHistoryLoadProgress(null);
     } catch (e) {
@@ -643,25 +817,32 @@ export default function App() {
       if (historyLoadSeqRef.current === loadSeq) {
         setLoadingMessages(false);
         setHistoryLoadProgress(null);
-        setOlderHistory({ hasOlder: false, loading: false });
+        setOlderHistory({ nextOffset: 0, hasExternalOlder: false, loading: false });
+        setNewerHistory({ nextOffset: 0, hasNewer: false, loading: false });
       }
     }
-  }, [fetchMessagesPage]);
+  }, [fetchMessagesPage, scheduleRestoreTabScroll]);
 
   const loadOlderMessages = useCallback(async () => {
-    if (!olderHistory.hasOlder || olderHistory.loading || loadingMessages) return;
+    if ((olderHistory.nextOffset <= 0 && !olderHistory.hasExternalOlder) || olderHistory.loading || loadingMessages) return;
     const el = scrollRef.current;
     const previousScrollHeight = el?.scrollHeight ?? 0;
     const previousScrollTop = el?.scrollTop ?? 0;
     const loadSeq = historyLoadSeqRef.current;
     const path = activeTabIdRef.current;
     const isStaleLoad = () => historyLoadSeqRef.current !== loadSeq || activeTabIdRef.current !== path;
+    const loadFromOffset = olderHistory.nextOffset;
     setOlderHistory((prev) => ({ ...prev, loading: true }));
     try {
-      const older = await fetchMessagesPage({ offset: 0, limit: BACKFILL_MESSAGE_CHUNK, lazyOlder: true });
+      const offset = Math.max(0, loadFromOffset - BACKFILL_MESSAGE_CHUNK);
+      const older = path
+        ? await fetchMessagesPage({ sessionPath: path, offset, limit: Math.max(1, loadFromOffset - offset) })
+        : loadFromOffset > 0
+          ? await fetchMessagesPage({ offset, limit: loadFromOffset - offset })
+          : await fetchMessagesPage({ offset: 0, limit: BACKFILL_MESSAGE_CHUNK, lazyOlder: true });
       if (isStaleLoad()) return;
       if (older.messages.length === 0) {
-        setOlderHistory({ hasOlder: Boolean(older.hasOlder), loading: false });
+        setOlderHistory({ nextOffset: 0, hasExternalOlder: Boolean(older.hasOlder), loading: false });
         return;
       }
       const olderChatMessages = toChatMessages(older.messages);
@@ -671,18 +852,69 @@ export default function App() {
         if (path) tabMessagesRef.current.set(path, next);
         return next;
       });
-      setOlderHistory({ hasOlder: Boolean(older.hasOlder), loading: false });
+      setOlderHistory({
+        nextOffset: older.startIndex ?? (loadFromOffset > 0 ? older.offset : 0),
+        hasExternalOlder: Boolean(older.hasOlder),
+        loading: false,
+      });
     } catch (e) {
       if (!isStaleLoad()) setError(`get_messages: ${String(e)}`);
       setOlderHistory((prev) => ({ ...prev, loading: false }));
     }
-  }, [fetchMessagesPage, loadingMessages, olderHistory.hasOlder, olderHistory.loading]);
+  }, [fetchMessagesPage, loadingMessages, olderHistory.hasExternalOlder, olderHistory.loading, olderHistory.nextOffset]);
+
+  const loadNewerMessages = useCallback(async () => {
+    if (!newerHistory.hasNewer || newerHistory.loading || loadingMessages) return;
+    const loadSeq = historyLoadSeqRef.current;
+    const path = activeTabIdRef.current;
+    if (!path) return;
+    const isStaleLoad = () => historyLoadSeqRef.current !== loadSeq || activeTabIdRef.current !== path;
+    const loadFromOffset = newerHistory.nextOffset;
+    setNewerHistory((prev) => ({ ...prev, loading: true }));
+    try {
+      const newer = await fetchMessagesPage({ sessionPath: path, offset: loadFromOffset, limit: BACKFILL_MESSAGE_CHUNK });
+      if (isStaleLoad()) return;
+      if (newer.messages.length === 0) {
+        setNewerHistory({ nextOffset: loadFromOffset, hasNewer: Boolean(newer.hasNewer), loading: false });
+        return;
+      }
+      const newerChatMessages = toChatMessages(newer.messages);
+      setMessages((current) => {
+        const next = [...current, ...newerChatMessages];
+        tabMessagesRef.current.set(path, next);
+        return next;
+      });
+      setNewerHistory({
+        nextOffset: newer.endIndex ?? (loadFromOffset + newer.messages.length),
+        hasNewer: Boolean(newer.hasNewer),
+        loading: false,
+      });
+    } catch (e) {
+      if (!isStaleLoad()) setError(`get_messages: ${String(e)}`);
+      setNewerHistory((prev) => ({ ...prev, loading: false }));
+    }
+  }, [fetchMessagesPage, loadingMessages, newerHistory.hasNewer, newerHistory.loading, newerHistory.nextOffset]);
 
   const handleChatScroll = useCallback(() => {
     const el = scrollRef.current;
+    let distanceFromBottom = Number.POSITIVE_INFINITY;
+    if (el) {
+      distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+      followOutputRef.current = distanceFromBottom < 80;
+      const path = activeTabIdRef.current;
+      if (path) {
+        tabScrollRef.current.set(path, {
+          scrollTop: el.scrollTop,
+          followOutput: followOutputRef.current,
+          ...scrollAnchorFor(el.scrollTop),
+        });
+      }
+    }
+    updateVirtualRange();
     if (!el || el.scrollTop > LOAD_OLDER_SCROLL_THRESHOLD_PX) return;
     void loadOlderMessages();
-  }, [loadOlderMessages]);
+    if (distanceFromBottom <= LOAD_OLDER_SCROLL_THRESHOLD_PX) void loadNewerMessages();
+  }, [loadNewerMessages, loadOlderMessages, scrollAnchorFor, updateVirtualRange]);
 
   const restoreTabsForWorkspace = useCallback(async (cwd: string, currentSessionFile?: string) => {
     const persisted = readPersistedTabs(cwd);
@@ -696,6 +928,7 @@ export default function App() {
       : currentSessionFile ?? tabs[0] ?? null;
 
     tabMessagesRef.current.clear();
+    tabScrollRef.current = new Map(Object.entries(persisted.scroll ?? {}));
     hydratedTabsWorkspaceRef.current = cwd;
     setRestoredTabTitles(persisted.titles ?? {});
     setOpenTabs(tabs);
@@ -802,8 +1035,26 @@ export default function App() {
   // initial empty React state during startup.
   useEffect(() => {
     if (!workspace || hydratedTabsWorkspaceRef.current !== workspace) return;
-    writePersistedTabs(workspace, persistedTabsFor(openTabs, activeTabId, sessions, session, restoredTabTitles));
-  }, [workspace, openTabs, activeTabId, sessions, session, restoredTabTitles]);
+    captureTabScroll(activeTabId);
+    writePersistedTabs(workspace, persistedTabsFor(openTabs, activeTabId, sessions, session, restoredTabTitles, tabScrollRef.current));
+  }, [workspace, openTabs, activeTabId, sessions, session, restoredTabTitles, captureTabScroll]);
+
+  // Persist the current virtual viewport before the webview is torn down so a
+  // later /resume or app restart restores the same cursor position instead of
+  // always jumping to the tail.
+  useEffect(() => {
+    const persistViewport = () => {
+      if (!workspace || hydratedTabsWorkspaceRef.current !== workspace) return;
+      captureTabScroll(activeTabIdRef.current);
+      writePersistedTabs(workspace, persistedTabsFor(openTabs, activeTabIdRef.current, sessions, session, restoredTabTitles, tabScrollRef.current));
+    };
+    window.addEventListener("beforeunload", persistViewport);
+    window.addEventListener("pagehide", persistViewport);
+    return () => {
+      window.removeEventListener("beforeunload", persistViewport);
+      window.removeEventListener("pagehide", persistViewport);
+    };
+  }, [workspace, openTabs, sessions, session, restoredTabTitles, captureTabScroll]);
 
   // Refresh sessions whenever workspace changes (or on initial mount).
   useEffect(() => {
@@ -994,8 +1245,10 @@ export default function App() {
     [cancelHistoryLoad, handleExtensionUIRequest, refreshCommands, refreshState, refreshSessions],
   );
 
-  // Auto-scroll on live content and the initial tail load. Older history is
-  // prepended lazily on scroll and preserves the user's anchor separately.
+  // Follow opencode's shape: session sync renders one stable message snapshot
+  // and scrolls to bottom once. Older history prepends preserve the viewport
+  // anchor, so loading a long session does not animate through intermediate
+  // history chunks or jump after the first tail render.
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -1005,9 +1258,19 @@ export default function App() {
       el.scrollTop = el.scrollHeight - prependAnchor.scrollHeight + prependAnchor.scrollTop;
       return;
     }
-    if (olderHistory.loading) return;
-    el.scrollTo({ top: el.scrollHeight, behavior: loadingMessages ? "auto" : "smooth" });
-  }, [loadingMessages, messages, olderHistory.loading]);
+    const restore = restoreScrollNextRenderRef.current;
+    if (restore && activeTabIdRef.current === restore.path) {
+      restoreScrollNextRenderRef.current = null;
+      followOutputRef.current = restore.followOutput;
+      el.scrollTop = Math.min(restore.scrollTop, Math.max(0, el.scrollHeight - el.clientHeight));
+      return;
+    }
+    if (scrollToBottomNextRenderRef.current || followOutputRef.current) {
+      scrollToBottomNextRenderRef.current = false;
+      el.scrollTop = el.scrollHeight;
+    }
+    updateVirtualRange();
+  }, [messages, updateVirtualRange]);
 
   // -- Actions -----------------------------------------------------------
 
@@ -1241,6 +1504,7 @@ export default function App() {
       return;
     }
     setError(null);
+    captureTabScroll(activeTabId);
     cancelHistoryLoad();
     // Cache current messages under the previous active tab so switching back restores them.
     const prev = activeTabId;
@@ -1253,6 +1517,9 @@ export default function App() {
     pendingSessionSwitchRef.current = path;
     const hasCachedMessages = tabMessagesRef.current.has(path);
     const cached = tabMessagesRef.current.get(path);
+    if (cached) {
+      if (!scheduleRestoreTabScroll(path)) scrollToBottomNextRenderRef.current = true;
+    }
     setMessages(cached ?? []);
     if (!hasCachedMessages) {
       setLoadingMessages(true);
@@ -1289,7 +1556,7 @@ export default function App() {
       setHistoryLoadProgress(null);
       setError(String(e));
     }
-  }, [activeTabId, cancelHistoryLoad, loadMessages, refreshState, streaming]);
+  }, [activeTabId, cancelHistoryLoad, captureTabScroll, loadMessages, refreshState, scheduleRestoreTabScroll, streaming]);
 
   const closeTab = useCallback(
     async (path: string) => {
@@ -1300,6 +1567,7 @@ export default function App() {
       // Drop the closed tab; forget its cached messages.
       const next = openTabs.filter((p) => p !== path);
       tabMessagesRef.current.delete(path);
+      tabScrollRef.current.delete(path);
       cancelHistoryLoad();
       setOpenTabs(next);
       // If we closed the active tab, switch to the next remaining one (or clear).
@@ -1311,6 +1579,9 @@ export default function App() {
           pendingSessionSwitchRef.current = newActive;
           const hasCachedMessages = tabMessagesRef.current.has(newActive);
           const cached = tabMessagesRef.current.get(newActive);
+          if (cached) {
+            if (!scheduleRestoreTabScroll(newActive)) scrollToBottomNextRenderRef.current = true;
+          }
           setMessages(cached ?? []);
           if (!hasCachedMessages) {
             setLoadingMessages(true);
@@ -1588,7 +1859,13 @@ export default function App() {
               ) : null}
             </div>
           ) : (
-            messages.map((m) => <MessageView key={m.id} message={m} />)
+            <>
+              {renderedMessages.before > 0 && <div style={{ height: renderedMessages.before }} aria-hidden="true" />}
+              {renderedMessages.messages.map((m) => (
+                <MessageView key={m.id} message={m} measureRef={measureMessage} />
+              ))}
+              {renderedMessages.after > 0 && <div style={{ height: renderedMessages.after }} aria-hidden="true" />}
+            </>
           )}
           {error && (
             <div className="chat__error">
@@ -2059,13 +2336,22 @@ function persistedTabsFor(
   sessions: SessionSummary[],
   current: SessionState,
   restoredTitles: Record<string, string>,
+  scroll: ReadonlyMap<string, TabScrollState> = new Map(),
 ): PersistedTabs {
   const titles: Record<string, string> = {};
+  const scrollState: Record<string, TabScrollState> = {};
   for (const path of openTabs) {
     const label = sessionLabelFor(path, sessions, current, restoredTitles).trim();
     if (label) titles[path] = label;
+    const savedScroll = scroll.get(path);
+    if (savedScroll) scrollState[path] = savedScroll;
   }
-  return { openTabs, activeTabId, titles };
+  return {
+    openTabs,
+    activeTabId,
+    titles,
+    ...(Object.keys(scrollState).length > 0 ? { scroll: scrollState } : {}),
+  };
 }
 
 function pruneRestoredTabTitles(
@@ -2184,9 +2470,30 @@ function imageDataUrl(attachment: ImageAttachment): string {
 
 // -- Helpers --------------------------------------------------------------
 
-function MessageView({ message }: { message: ChatMessage }) {
+function estimateMessageHeight(message: ChatMessage): number {
+  if (message.role === "user") {
+    const textLines = Math.max(1, Math.ceil(message.text.length / 90));
+    const attachmentRows = message.attachments?.length ? 4 : 0;
+    return ESTIMATED_MESSAGE_HEIGHT + (textLines + attachmentRows - 1) * 20;
+  }
+
+  let lines = 0;
+  for (const part of message.parts) {
+    if (part.kind === "text") lines += Math.max(1, Math.ceil(part.text.length / 90));
+    else lines += 2;
+  }
+  return ESTIMATED_MESSAGE_HEIGHT + Math.max(0, lines - 1) * 20;
+}
+
+function MessageView({
+  message,
+  measureRef,
+}: {
+  message: ChatMessage;
+  measureRef?: (id: string, node: HTMLDivElement | null) => void;
+}) {
   return (
-    <div className={`msg msg--${message.role}`}>
+    <div ref={(node) => measureRef?.(message.id, node)} className={`msg msg--${message.role}`}>
       <div className="msg__avatar">
         {message.role === "user" ? <User size={14} /> : <Bot size={14} />}
       </div>
@@ -2284,10 +2591,12 @@ function appendText(parts: AssistantPart[], delta: string): AssistantPart[] {
 
 function toChatMessages(history: HistoryMessage[]): ChatMessage[] {
   const out: ChatMessage[] = [];
+  let fallbackIndex = 0;
   for (const m of history) {
+    const stableId = historyMessageStableId(m, fallbackIndex++);
     if (m.role === "user") {
       const text = contentToText(m.content);
-      if (text) out.push({ id: genId("u"), role: "user", text });
+      if (text) out.push({ id: stableId ?? genId("u"), role: "user", text });
       continue;
     }
 
@@ -2306,7 +2615,7 @@ function toChatMessages(history: HistoryMessage[]): ChatMessage[] {
           });
         }
       }
-      if (parts.length > 0) out.push({ id: genId("a"), role: "assistant", parts });
+      if (parts.length > 0) out.push({ id: stableId ?? genId("a"), role: "assistant", parts });
       continue;
     }
 
@@ -2316,7 +2625,7 @@ function toChatMessages(history: HistoryMessage[]): ChatMessage[] {
       const toolName = typeof m.toolName === "string" ? m.toolName : undefined;
       if (!updated && toolName) {
         out.push({
-          id: genId("a"),
+          id: stableId ?? genId("a"),
           role: "assistant",
           parts: [
             {
@@ -2333,6 +2642,19 @@ function toChatMessages(history: HistoryMessage[]): ChatMessage[] {
     }
   }
   return out;
+}
+
+function historyMessageStableId(message: HistoryMessage, fallbackIndex: number): string | undefined {
+  if (typeof message.__pixSessionEntryId === "string" && message.__pixSessionEntryId.length > 0) {
+    return `h-${message.__pixSessionEntryId}`;
+  }
+  if (typeof message.role !== "string") return undefined;
+  const timestampValue = (message as Record<string, unknown>).timestamp;
+  const timestamp = typeof timestampValue === "number" || typeof timestampValue === "string"
+    ? String(timestampValue)
+    : undefined;
+  if (timestamp) return `h-${message.role}-${timestamp}-${fallbackIndex}`;
+  return undefined;
 }
 
 function updateToolResult(
@@ -2417,7 +2739,8 @@ function readPersistedTabs(workspace: string): PersistedTabs {
       ? parsed.activeTabId
       : null;
     const titles = normalizePersistedTabTitles(openTabs, parsed.titles);
-    return { openTabs, activeTabId, ...(titles ? { titles } : {}) };
+    const scroll = normalizePersistedTabScroll(openTabs, parsed.scroll);
+    return { openTabs, activeTabId, ...(titles ? { titles } : {}), ...(scroll ? { scroll } : {}) };
   } catch {
     return { openTabs: [], activeTabId: null };
   }
@@ -2430,7 +2753,8 @@ function writePersistedTabs(workspace: string, tabs: PersistedTabs): void {
       ? tabs.activeTabId
       : null;
     const titles = normalizePersistedTabTitles(openTabs, tabs.titles);
-    localStorage.setItem(tabsStorageKey(workspace), JSON.stringify({ openTabs, activeTabId, ...(titles ? { titles } : {}) }));
+    const scroll = normalizePersistedTabScroll(openTabs, tabs.scroll);
+    localStorage.setItem(tabsStorageKey(workspace), JSON.stringify({ openTabs, activeTabId, ...(titles ? { titles } : {}), ...(scroll ? { scroll } : {}) }));
   } catch {
     // localStorage may be unavailable in tests or restricted webviews.
   }
@@ -2450,4 +2774,20 @@ function normalizePersistedTabTitles(openTabs: string[], value: unknown): Record
     if (trimmed) titles[path] = trimmed;
   }
   return Object.keys(titles).length > 0 ? titles : undefined;
+}
+
+function normalizePersistedTabScroll(openTabs: string[], value: unknown): Record<string, TabScrollState> | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const tabSet = new Set(openTabs);
+  const scroll: Record<string, TabScrollState> = {};
+  for (const [path, state] of Object.entries(value)) {
+    if (!tabSet.has(path) || typeof state !== "object" || state === null) continue;
+    const raw = state as Partial<TabScrollState>;
+    const scrollTop = typeof raw.scrollTop === "number" && Number.isFinite(raw.scrollTop)
+      ? Math.max(0, raw.scrollTop)
+      : undefined;
+    if (scrollTop === undefined) continue;
+    scroll[path] = { scrollTop, followOutput: raw.followOutput !== false };
+  }
+  return Object.keys(scroll).length > 0 ? scroll : undefined;
 }

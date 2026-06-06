@@ -183,6 +183,13 @@
   overflow-y: auto;
   overflow-x: hidden;
   scroll-behavior: smooth;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.chat__body::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 .chat__history-loading {

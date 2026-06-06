@@ -323,12 +323,34 @@ export async function runDispatcher(opts: DispatcherOptions): Promise<void> {
             return;
           }
 
+          if (raw.lazyOlder === true) {
+            writeLine(success(id, "get_messages", {
+              messages: [],
+              offset: 0,
+              total,
+              hasOlder: false,
+            }));
+            return;
+          }
+
           const offset = raw.fromEnd
             ? Math.max(0, total - limit)
             : Math.min(Math.max(0, requestedOffset ?? 0), total);
+          let messages = historyMessages.slice(offset, Math.min(total, offset + limit));
+
+          // Long sessions can end with mostly non-display session entries
+          // (labels/session_info/custom bookkeeping/tool results without the
+          // visible call in the same tail). In that case the initial tail page
+          // would be empty even though the session has visible chat history.
+          // Fill the first tail page from older entries until it has displayable
+          // messages, mirroring the TUI lazy history loader behavior.
+          if (raw.fromEnd === true && offset === 0 && messages.length < limit && olderReader?.hasOlder()) {
+            const older = await olderReader.readOlder(limit - messages.length);
+            messages = [...older, ...messages];
+          }
 
           writeLine(success(id, "get_messages", {
-            messages: historyMessages.slice(offset, Math.min(total, offset + limit)),
+            messages,
             offset,
             total,
             hasOlder: olderReader?.hasOlder() === true,

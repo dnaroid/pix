@@ -11,8 +11,10 @@
 //! See `sidecar.rs` for the protocol and framing details.
 
 mod sidecar;
+mod history;
 
 use crate::sidecar::SidecarHandle;
+use crate::history::{list_sessions_for_workspace, read_window, HistoryCache, HistoryWindow, SessionList};
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -260,6 +262,26 @@ async fn complete_path(cwd: String, prefix: String) -> Result<Vec<PathCompletion
     Ok(items)
 }
 
+#[tauri::command]
+async fn list_workspace_sessions(cwd: String) -> Result<SessionList, String> {
+    list_sessions_for_workspace(cwd)
+}
+
+#[tauri::command]
+async fn read_session_messages_window(
+    history_cache: State<'_, Arc<Mutex<HistoryCache>>>,
+    session_path: String,
+    offset: Option<usize>,
+    limit: Option<usize>,
+    from_end: Option<bool>,
+    anchor_id: Option<String>,
+    before: Option<usize>,
+    after: Option<usize>,
+) -> Result<HistoryWindow, String> {
+    let mut cache = history_cache.lock().await;
+    read_window(&mut cache, session_path, offset, limit, from_end, anchor_id, before, after)
+}
+
 pub fn run() {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -278,6 +300,7 @@ pub fn run() {
             let handle = tauri::async_runtime::block_on(sidecar::spawn_default())
                 .map_err(|e| format!("failed to start sidecar: {e}"))?;
             app.manage(Arc::new(Mutex::new(handle)));
+            app.manage(Arc::new(Mutex::new(HistoryCache::default())));
 
             #[cfg(target_os = "macos")]
             if let Some(window) = app.get_webview_window("main") {
@@ -288,7 +311,15 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![rpc_call, rpc_subscribe, set_workspace, run_shell, complete_path])
+        .invoke_handler(tauri::generate_handler![
+            rpc_call,
+            rpc_subscribe,
+            set_workspace,
+            run_shell,
+            complete_path,
+            list_workspace_sessions,
+            read_session_messages_window,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
