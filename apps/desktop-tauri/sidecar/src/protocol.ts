@@ -26,7 +26,7 @@ export type RpcCommand =
   | { id?: string; type: "abort" }
   // -- State ------------------------------------------------------------
   | { id?: string; type: "get_state" }
-  | { id?: string; type: "get_messages"; offset?: number; limit?: number; fromEnd?: boolean }
+  | { id?: string; type: "get_messages"; offset?: number; limit?: number; fromEnd?: boolean; lazyOlder?: boolean }
   | { id?: string; type: "get_session_stats" }
   | { id?: string; type: "get_commands" }
   | { id?: string; type: "get_command_completions"; command: string; argumentPrefix?: string }

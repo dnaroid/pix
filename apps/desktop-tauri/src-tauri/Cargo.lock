@@ -2278,6 +2278,7 @@ name = "pix-desktop"
 version = "0.0.1"
 dependencies = [
  "anyhow",
+ "objc2",
  "objc2-app-kit",
  "serde",
  "serde_json",

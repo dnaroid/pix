@@ -24,6 +24,7 @@ import {
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import { runDispatcher } from "./dispatcher.js";
+import { continueRecentLazySessionManager, openLazySessionManager } from "./lazy-session-manager.js";
 import type { RpcEvent } from "./protocol.js";
 
 function logErr(msg: string): void {
@@ -77,7 +78,7 @@ let runtime: AgentSessionRuntime;
 
 const initialSessionManager =
   sessionMode === "persistent"
-    ? SessionManager.continueRecent(initialCwd)
+    ? continueRecentLazySessionManager(initialCwd, { agentDir })
     : SessionManager.inMemory(initialCwd);
 
 runtime = await createAgentSessionRuntime(createRuntime, {
@@ -98,7 +99,7 @@ const switchCwd = async (newCwd: string): Promise<AgentSessionRuntime> => {
   // SessionManager picks the right session dir under the new workspace.
   const sessionManager =
     sessionMode === "persistent"
-      ? SessionManager.continueRecent(newCwd)
+      ? continueRecentLazySessionManager(newCwd, { agentDir })
       : SessionManager.inMemory(newCwd);
 
   await runtime.dispose();
@@ -112,6 +113,24 @@ const switchCwd = async (newCwd: string): Promise<AgentSessionRuntime> => {
   return next;
 };
 
+/** Replace the active runtime with a specific persisted session file. */
+const switchSession = async (sessionPath: string): Promise<AgentSessionRuntime> => {
+  if (sessionMode !== "persistent") return runtime;
+
+  const previousSessionFile = runtime.session.sessionFile;
+  const sessionManager = openLazySessionManager(sessionPath, { agentDir });
+  await runtime.dispose();
+  const next = await createAgentSessionRuntime(createRuntime, {
+    cwd: sessionManager.getCwd(),
+    agentDir,
+    sessionManager,
+    sessionStartEvent: { type: "session_start", reason: "resume", previousSessionFile },
+  });
+  runtime = next;
+  logErr(`switched session (sessionId=${next.session.sessionId}, sessionFile=${next.session.sessionFile ?? "none"})`);
+  return next;
+};
+
 // Bridge agent events to dispatcher output. Rebind every time the runtime
 // swaps sessions (pix:set_cwd / new_session / switch_session) so we never
 // emit events from a stale AgentSession.
@@ -121,6 +140,6 @@ const onSession = (session: AgentSession, output: (ev: RpcEvent) => void): (() =
   });
 };
 
-await runDispatcher({ initialRuntime: runtime, switchCwd, onSession });
+await runDispatcher({ initialRuntime: runtime, switchCwd, switchSession, onSession });
 
 logErr(`dispatcher exited`);

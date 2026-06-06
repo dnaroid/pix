@@ -1,4 +1,4 @@
-import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { invoke, Channel } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
@@ -92,11 +92,13 @@ type MessagesPage = {
   messages: HistoryMessage[];
   offset: number;
   total: number;
+  hasOlder?: boolean;
 };
 
 type HistoryLoadProgress = {
   loaded: number;
   total: number;
+  complete?: boolean;
 };
 
 type SessionSummary = {
@@ -583,7 +585,7 @@ export default function App() {
     }
   }, [workspace]);
 
-  const fetchMessagesPage = useCallback(async (cmd: { offset?: number; limit?: number; fromEnd?: boolean }) => {
+  const fetchMessagesPage = useCallback(async (cmd: { offset?: number; limit?: number; fromEnd?: boolean; lazyOlder?: boolean }) => {
     const resp = await invoke<{ success: boolean; data?: MessagesPage; error?: string }>(
       "rpc_call",
       { cmd: { type: "get_messages", ...cmd } },
@@ -613,10 +615,11 @@ export default function App() {
       const next = toChatMessages(loadedHistory);
       setMessages(next);
       if (path) tabMessagesRef.current.set(path, next);
-      setHistoryLoadProgress({ loaded: loadedHistory.length, total: first.total });
+      let hasOlderHistory = Boolean(first.hasOlder);
+      setHistoryLoadProgress({ loaded: loadedHistory.length, total: first.total, complete: loadedHistory.length >= first.total && !hasOlderHistory });
 
       let nextOlderEnd = first.offset;
-      if (nextOlderEnd <= 0) {
+      if (nextOlderEnd <= 0 && !hasOlderHistory) {
         setLoadingMessages(false);
         setHistoryLoadProgress(null);
         return;
@@ -629,17 +632,23 @@ export default function App() {
           await nextPaint();
           await idleYield();
 
-          while (nextOlderEnd > 0) {
+          while (nextOlderEnd > 0 || hasOlderHistory) {
             if (isStaleLoad()) return;
             const offset = Math.max(0, nextOlderEnd - BACKFILL_MESSAGE_CHUNK);
-            const older = await fetchMessagesPage({ offset, limit: nextOlderEnd - offset });
+            const older = nextOlderEnd > 0
+              ? await fetchMessagesPage({ offset, limit: nextOlderEnd - offset })
+              : await fetchMessagesPage({ offset: 0, limit: BACKFILL_MESSAGE_CHUNK, lazyOlder: true });
             if (isStaleLoad()) return;
+            if (older.messages.length === 0 && !older.hasOlder) break;
             loadedHistory = [...older.messages, ...loadedHistory];
             const hydrated = toChatMessages(loadedHistory);
-            startTransition(() => {
-              if (isStaleLoad()) return;
-              setMessages(hydrated);
-              setHistoryLoadProgress({ loaded: loadedHistory.length, total: older.total });
+            if (isStaleLoad()) return;
+            hasOlderHistory = Boolean(older.hasOlder);
+            setMessages(hydrated);
+            setHistoryLoadProgress({
+              loaded: loadedHistory.length,
+              total: Math.max(older.total, loadedHistory.length),
+              complete: older.offset <= 0 && !hasOlderHistory,
             });
             if (path) tabMessagesRef.current.set(path, hydrated);
             nextOlderEnd = older.offset;
@@ -1562,9 +1571,9 @@ export default function App() {
         )}
 
         <div className="chat__body" ref={scrollRef}>
-          {loadingMessages && historyLoadProgress && historyLoadProgress.loaded > 0 && historyLoadProgress.loaded < historyLoadProgress.total && (
+          {loadingMessages && historyLoadProgress && historyLoadProgress.loaded > 0 && !historyLoadProgress.complete && (
             <div className="chat__history-loading">
-              Loaded latest {historyLoadProgress.loaded} of {historyLoadProgress.total} messages. Backfilling older history…
+              Loaded latest {historyLoadProgress.loaded} messages. Backfilling older history…
             </div>
           )}
           {messages.length === 0 ? (

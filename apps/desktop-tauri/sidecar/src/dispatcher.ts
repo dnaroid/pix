@@ -23,6 +23,11 @@ import {
   serializeJsonLine,
 } from "./framing.js";
 import { listSessions } from "./pix-handlers.js";
+import {
+  sessionHistoryDisplayMessages,
+  sessionHistoryOlderMessagesReader,
+  type SessionHistoryOlderMessagesReader,
+} from "./session-history.js";
 import type { RpcEvent, RpcResponse, UnknownCommand } from "./protocol.js";
 
 export type DispatcherOptions = {
@@ -33,6 +38,8 @@ export type DispatcherOptions = {
    * active runtime for subsequent commands and event subscription.
    */
   switchCwd?: (newCwd: string) => Promise<AgentSessionRuntime>;
+  /** Replace the active runtime with a specific persisted session file. */
+  switchSession?: (sessionPath: string) => Promise<AgentSessionRuntime>;
   /** Called once on startup and again whenever the runtime replaces the session. */
   onSession: (session: AgentSession, output: (ev: RpcEvent) => void) => () => void;
 };
@@ -57,10 +64,21 @@ export async function runDispatcher(opts: DispatcherOptions): Promise<void> {
   // Holder for the active runtime — `pix:set_cwd` swaps it via opts.switchCwd.
   const holder: { runtime: AgentSessionRuntime } = { runtime: opts.initialRuntime };
   let unsubscribe: (() => void) | undefined;
+  let olderHistoryReaderKey: string | undefined;
+  let olderHistoryReader: SessionHistoryOlderMessagesReader | undefined;
   const pendingExtensionRequests = new Map<
     string,
     { resolve: (response: UnknownCommand) => void; reject: (error: unknown) => void }
   >();
+
+  const getOlderHistoryReader = (session: AgentSession): SessionHistoryOlderMessagesReader | undefined => {
+    const key = session.sessionFile ?? session.sessionId;
+    if (olderHistoryReaderKey !== key) {
+      olderHistoryReaderKey = key;
+      olderHistoryReader = sessionHistoryOlderMessagesReader(session);
+    }
+    return olderHistoryReader;
+  };
 
   const createDialogPromise = <T>(
     opts: { timeout?: number; signal?: AbortSignal } | undefined,
@@ -183,6 +201,8 @@ export async function runDispatcher(opts: DispatcherOptions): Promise<void> {
 
   const rebindSession = async (): Promise<void> => {
     unsubscribe?.();
+    olderHistoryReaderKey = undefined;
+    olderHistoryReader = undefined;
     const session = holder.runtime.session;
     await session.bindExtensions({
       uiContext: createExtensionUIContext(),
@@ -281,7 +301,9 @@ export async function runDispatcher(opts: DispatcherOptions): Promise<void> {
           return;
         }
         case "get_messages": {
-          const total = session.messages.length;
+          const historyMessages = sessionHistoryDisplayMessages(session);
+          const olderReader = getOlderHistoryReader(session);
+          const total = historyMessages.length;
           const requestedLimit = typeof raw.limit === "number" && Number.isFinite(raw.limit)
             ? Math.max(0, Math.floor(raw.limit))
             : undefined;
@@ -289,13 +311,27 @@ export async function runDispatcher(opts: DispatcherOptions): Promise<void> {
           const requestedOffset = typeof raw.offset === "number" && Number.isFinite(raw.offset)
             ? Math.floor(raw.offset)
             : undefined;
+
+          if (raw.lazyOlder === true && olderReader?.hasOlder()) {
+            const messages = await olderReader.readOlder(limit);
+            writeLine(success(id, "get_messages", {
+              messages,
+              offset: 0,
+              total,
+              hasOlder: olderReader.hasOlder(),
+            }));
+            return;
+          }
+
           const offset = raw.fromEnd
             ? Math.max(0, total - limit)
             : Math.min(Math.max(0, requestedOffset ?? 0), total);
+
           writeLine(success(id, "get_messages", {
-            messages: session.messages.slice(offset, Math.min(total, offset + limit)),
+            messages: historyMessages.slice(offset, Math.min(total, offset + limit)),
             offset,
             total,
+            hasOlder: olderReader?.hasOlder() === true,
           }));
           return;
         }
@@ -419,6 +455,12 @@ export async function runDispatcher(opts: DispatcherOptions): Promise<void> {
           const sessionPath = typeof raw.sessionPath === "string" ? raw.sessionPath : "";
           if (!sessionPath) {
             writeLine(failure(id, "switch_session", "sessionPath required"));
+            return;
+          }
+          if (opts.switchSession) {
+            holder.runtime = await opts.switchSession(sessionPath);
+            await rebindSession();
+            writeLine(success(id, "switch_session", { cancelled: false }));
             return;
           }
           const result = await holder.runtime.switchSession(sessionPath);
