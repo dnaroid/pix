@@ -182,7 +182,8 @@
   padding: 20px 0;
   overflow-y: auto;
   overflow-x: hidden;
-  scroll-behavior: smooth;
+  scroll-behavior: auto;
+  overflow-anchor: none;
   scrollbar-width: none;
   -ms-overflow-style: none;
 }

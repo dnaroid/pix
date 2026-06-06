@@ -14,7 +14,7 @@ mod sidecar;
 mod history;
 
 use crate::sidecar::SidecarHandle;
-use crate::history::{list_sessions_for_workspace, read_window, HistoryCache, HistoryWindow, SessionList};
+use crate::history::{list_sessions_for_workspace, read_window, save_viewport, HistoryCache, HistoryWindow, SessionList, ViewportCursor};
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -277,9 +277,22 @@ async fn read_session_messages_window(
     anchor_id: Option<String>,
     before: Option<usize>,
     after: Option<usize>,
+    restore_viewport: Option<bool>,
 ) -> Result<HistoryWindow, String> {
     let mut cache = history_cache.lock().await;
-    read_window(&mut cache, session_path, offset, limit, from_end, anchor_id, before, after)
+    read_window(&mut cache, session_path, offset, limit, from_end, anchor_id, before, after, restore_viewport)
+}
+
+#[tauri::command]
+async fn save_session_viewport(
+    history_cache: State<'_, Arc<Mutex<HistoryCache>>>,
+    session_path: String,
+    follow_output: bool,
+    anchor_id: Option<String>,
+    anchor_offset: Option<f64>,
+) -> Result<ViewportCursor, String> {
+    let mut cache = history_cache.lock().await;
+    save_viewport(&mut cache, session_path, follow_output, anchor_id, anchor_offset)
 }
 
 pub fn run() {
@@ -319,6 +332,7 @@ pub fn run() {
             complete_path,
             list_workspace_sessions,
             read_session_messages_window,
+            save_session_viewport,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

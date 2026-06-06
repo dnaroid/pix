@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::fs::File;
@@ -11,6 +11,8 @@ const PIX_SYSTEM_MESSAGE_CUSTOM_TYPE: &str = "pix-system";
 const PIX_SYSTEM_DISPLAY_ENTRY_CUSTOM_TYPE: &str = "pix:system_message";
 const DEFAULT_WINDOW_LIMIT: usize = 120;
 const MAX_WINDOW_LIMIT: usize = 500;
+const VIEWPORT_STATE_FILE: &str = "pix-desktop-viewports.json";
+const MAX_VIEWPORTS: usize = 1_024;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -37,6 +39,8 @@ pub struct SessionSummary {
 #[derive(Default)]
 pub struct HistoryCache {
     entries: HashMap<PathBuf, CachedHistory>,
+    viewports: HashMap<String, ViewportCursor>,
+    viewports_loaded: bool,
 }
 
 #[derive(Clone)]
@@ -57,6 +61,19 @@ pub struct HistoryWindow {
     pub total: usize,
     pub has_older: bool,
     pub has_newer: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<ViewportCursor>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ViewportCursor {
+    pub follow_output: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub anchor_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub anchor_offset: Option<f64>,
+    pub updated_at: u64,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -69,14 +86,32 @@ pub fn read_window(
     anchor_id: Option<String>,
     before: Option<usize>,
     after: Option<usize>,
+    restore_viewport: Option<bool>,
 ) -> Result<HistoryWindow, String> {
     let path = std::fs::canonicalize(PathBuf::from(&session_path))
         .map_err(|e| format!("session path not accessible: {e}"))?;
+    cache.ensure_viewports_loaded()?;
+    let saved_cursor = if restore_viewport.unwrap_or(false) {
+        cache.viewports.get(&path_key(&path)).cloned()
+    } else {
+        None
+    };
+    let effective_anchor_id = anchor_id.or_else(|| {
+        saved_cursor.as_ref().and_then(|cursor| {
+            if cursor.follow_output {
+                None
+            } else {
+                cursor.anchor_id.clone()
+            }
+        })
+    });
+    let effective_from_end = from_end.unwrap_or(false)
+        || saved_cursor.as_ref().is_some_and(|cursor| cursor.follow_output);
     let history = cache.get_or_load(&path)?;
     let total = history.messages.len();
     let limit = limit.unwrap_or(DEFAULT_WINDOW_LIMIT).clamp(1, MAX_WINDOW_LIMIT);
 
-    let start = if let Some(anchor_id) = anchor_id.as_deref() {
+    let start = if let Some(anchor_id) = effective_anchor_id.as_deref() {
         let anchor_index = history
             .ids
             .iter()
@@ -84,18 +119,18 @@ pub fn read_window(
             .unwrap_or_else(|| total.saturating_sub(limit));
         let before = before.unwrap_or(limit / 2).min(limit.saturating_sub(1));
         anchor_index.saturating_sub(before)
-    } else if from_end.unwrap_or(false) {
+    } else if effective_from_end {
         total.saturating_sub(limit)
     } else {
         offset.unwrap_or(0).min(total)
     };
 
-    let requested_end = if anchor_id.is_some() {
+    let requested_end = if effective_anchor_id.is_some() {
         let after = after.unwrap_or(limit / 2);
         let anchor_index = history
             .ids
             .iter()
-            .position(|id| anchor_id.as_deref().is_some_and(|anchor| id == anchor || format!("h-{id}") == anchor))
+            .position(|id| effective_anchor_id.as_deref().is_some_and(|anchor| id == anchor || format!("h-{id}") == anchor))
             .unwrap_or(start);
         anchor_index.saturating_add(after).saturating_add(1).max(start.saturating_add(limit))
     } else {
@@ -111,7 +146,30 @@ pub fn read_window(
         total,
         has_older: start > 0,
         has_newer: end < total,
+        cursor: saved_cursor,
     })
+}
+
+pub fn save_viewport(
+    cache: &mut HistoryCache,
+    session_path: String,
+    follow_output: bool,
+    anchor_id: Option<String>,
+    anchor_offset: Option<f64>,
+) -> Result<ViewportCursor, String> {
+    let path = std::fs::canonicalize(PathBuf::from(&session_path))
+        .map_err(|e| format!("session path not accessible: {e}"))?;
+    cache.ensure_viewports_loaded()?;
+    let cursor = ViewportCursor {
+        follow_output,
+        anchor_id: anchor_id.filter(|id| !id.trim().is_empty()),
+        anchor_offset: anchor_offset.filter(|value| value.is_finite()).map(|value| value.max(0.0)),
+        updated_at: now_unix_secs(),
+    };
+    cache.viewports.insert(path_key(&path), cursor.clone());
+    cache.prune_viewports();
+    cache.persist_viewports()?;
+    Ok(cursor)
 }
 
 pub fn list_sessions_for_workspace(cwd: String) -> Result<SessionList, String> {
@@ -140,6 +198,48 @@ pub fn list_sessions_for_workspace(cwd: String) -> Result<SessionList, String> {
 }
 
 impl HistoryCache {
+    fn ensure_viewports_loaded(&mut self) -> Result<(), String> {
+        if self.viewports_loaded {
+            return Ok(());
+        }
+        self.viewports_loaded = true;
+        let path = viewport_state_path()?;
+        let Ok(raw) = std::fs::read_to_string(&path) else {
+            return Ok(());
+        };
+        self.viewports = serde_json::from_str::<HashMap<String, ViewportCursor>>(&raw)
+            .map_err(|e| format!("read viewport state failed: {e}"))?;
+        Ok(())
+    }
+
+    fn persist_viewports(&self) -> Result<(), String> {
+        let path = viewport_state_path()?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("create viewport state dir failed: {e}"))?;
+        }
+        let raw = serde_json::to_string_pretty(&self.viewports)
+            .map_err(|e| format!("serialize viewport state failed: {e}"))?;
+        std::fs::write(&path, format!("{raw}\n"))
+            .map_err(|e| format!("write viewport state failed: {e}"))
+    }
+
+    fn prune_viewports(&mut self) {
+        if self.viewports.len() <= MAX_VIEWPORTS {
+            return;
+        }
+        let mut entries = self
+            .viewports
+            .iter()
+            .map(|(path, cursor)| (path.clone(), cursor.updated_at))
+            .collect::<Vec<_>>();
+        entries.sort_by_key(|(_, updated_at)| *updated_at);
+        let remove_count = self.viewports.len().saturating_sub(MAX_VIEWPORTS);
+        for (path, _) in entries.into_iter().take(remove_count) {
+            self.viewports.remove(&path);
+        }
+    }
+
     fn get_or_load(&mut self, path: &Path) -> Result<CachedHistory, String> {
         let metadata = std::fs::metadata(path).map_err(|e| format!("read session metadata failed: {e}"))?;
         let modified = metadata.modified().ok();
@@ -154,6 +254,21 @@ impl HistoryCache {
         self.entries.insert(path.to_path_buf(), loaded.clone());
         Ok(loaded)
     }
+}
+
+fn viewport_state_path() -> Result<PathBuf, String> {
+    Ok(agent_dir()?.join(VIEWPORT_STATE_FILE))
+}
+
+fn path_key(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
+}
+
+fn now_unix_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
 }
 
 #[derive(Clone)]
