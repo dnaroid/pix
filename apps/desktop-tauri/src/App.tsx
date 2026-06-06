@@ -30,6 +30,7 @@ const WORKSPACE_KEY = "pix-desktop.workspace";
 const TABS_KEY_PREFIX = "pix-desktop.tabs:";
 const INITIAL_MESSAGE_CHUNK = 80;
 const BACKFILL_MESSAGE_CHUNK = 240;
+const LOAD_OLDER_SCROLL_THRESHOLD_PX = 80;
 
 // -- RPC event shape (flat: optional fields, narrowing via switch) --------
 
@@ -99,6 +100,11 @@ type HistoryLoadProgress = {
   loaded: number;
   total: number;
   complete?: boolean;
+};
+
+type OlderHistoryState = {
+  hasOlder: boolean;
+  loading: boolean;
 };
 
 type SessionSummary = {
@@ -258,23 +264,6 @@ const BASE_SLASH_COMMANDS: SlashCommandDef[] = [
 let nextId = 0;
 const genId = (prefix: string) => `${prefix}-${++nextId}`;
 
-function nextPaint(): Promise<void> {
-  return new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
-}
-
-function idleYield(): Promise<void> {
-  const idleWindow = window as Window & {
-    requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number;
-  };
-  return new Promise((resolve) => {
-    if (idleWindow.requestIdleCallback) {
-      idleWindow.requestIdleCallback(() => resolve(), { timeout: 80 });
-      return;
-    }
-    window.setTimeout(resolve, 16);
-  });
-}
-
 // -- Component ------------------------------------------------------------
 
 export default function App() {
@@ -303,6 +292,7 @@ export default function App() {
   const [, setLoadingSessions] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [historyLoadProgress, setHistoryLoadProgress] = useState<HistoryLoadProgress | null>(null);
+  const [olderHistory, setOlderHistory] = useState<OlderHistoryState>({ hasOlder: false, loading: false });
   const [restoredTabTitles, setRestoredTabTitles] = useState<Record<string, string>>({});
   const [workspace, setWorkspace] = useState<string | null>(() => {
     try {
@@ -326,6 +316,7 @@ export default function App() {
   const hydratedTabsWorkspaceRef = useRef<string | null>(null);
   const historyLoadSeqRef = useRef(0);
   const sessionMessageCountRef = useRef(0);
+  const prependScrollAnchorRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null);
   /** Mirror of `messages` so stable callbacks can read the latest value. */
   const messagesRef = useRef<ChatMessage[]>([]);
 
@@ -376,8 +367,13 @@ export default function App() {
     const ta = composerInputRef.current;
     if (!ta) return;
     ta.style.height = "auto";
+    const computed = window.getComputedStyle(ta);
+    const borderV =
+      (parseFloat(computed.borderTopWidth) || 0) + (parseFloat(computed.borderBottomWidth) || 0);
     const max = Math.floor(window.innerHeight * 0.5);
-    ta.style.height = Math.max(40, Math.min(ta.scrollHeight, max)) + "px";
+    // scrollHeight excludes borders; height (border-box) includes them — add the difference.
+    const needed = ta.scrollHeight + borderV;
+    ta.style.height = Math.max(40, Math.min(needed, max)) + "px";
   }, []);
 
   useLayoutEffect(() => {
@@ -620,6 +616,7 @@ export default function App() {
     historyLoadSeqRef.current += 1;
     setLoadingMessages(false);
     setHistoryLoadProgress(null);
+    setOlderHistory((prev) => ({ ...prev, loading: false }));
   }, []);
 
   const loadMessages = useCallback(async (path?: string) => {
@@ -627,6 +624,7 @@ export default function App() {
     historyLoadSeqRef.current = loadSeq;
     setLoadingMessages(true);
     setHistoryLoadProgress({ loaded: 0, total: sessionMessageCountRef.current });
+    setOlderHistory({ hasOlder: false, loading: false });
     const isStaleLoad = () =>
       historyLoadSeqRef.current !== loadSeq || (path ? activeTabIdRef.current !== path : false);
     try {
@@ -637,66 +635,54 @@ export default function App() {
       const next = toChatMessages(loadedHistory);
       setMessages(next);
       if (path) tabMessagesRef.current.set(path, next);
-      let hasOlderHistory = Boolean(first.hasOlder);
-      setHistoryLoadProgress({ loaded: loadedHistory.length, total: first.total, complete: loadedHistory.length >= first.total && !hasOlderHistory });
-
-      let nextOlderEnd = first.offset;
-      if (nextOlderEnd <= 0 && !hasOlderHistory) {
-        setLoadingMessages(false);
-        setHistoryLoadProgress(null);
-        return;
-      }
-
-      void (async () => {
-        try {
-          // Let the tail chunk paint first. The caller should not wait for the
-          // historical backfill; it must stay a strictly background task.
-          await nextPaint();
-          await idleYield();
-
-          while (nextOlderEnd > 0 || hasOlderHistory) {
-            if (isStaleLoad()) return;
-            const offset = Math.max(0, nextOlderEnd - BACKFILL_MESSAGE_CHUNK);
-            const older = nextOlderEnd > 0
-              ? await fetchMessagesPage({ offset, limit: nextOlderEnd - offset })
-              : await fetchMessagesPage({ offset: 0, limit: BACKFILL_MESSAGE_CHUNK, lazyOlder: true });
-            if (isStaleLoad()) return;
-            if (older.messages.length === 0 && !older.hasOlder) break;
-            loadedHistory = [...older.messages, ...loadedHistory];
-            const hydrated = toChatMessages(loadedHistory);
-            if (isStaleLoad()) return;
-            hasOlderHistory = Boolean(older.hasOlder);
-            setMessages(hydrated);
-            setHistoryLoadProgress({
-              loaded: loadedHistory.length,
-              total: Math.max(older.total, loadedHistory.length),
-              complete: older.offset <= 0 && !hasOlderHistory,
-            });
-            if (path) tabMessagesRef.current.set(path, hydrated);
-            nextOlderEnd = older.offset;
-
-            // Give React/WebView a chance to commit the current prepend before
-            // requesting the next historical page.
-            await nextPaint();
-            await idleYield();
-          }
-        } catch (e) {
-          if (!isStaleLoad()) setError(`get_messages: ${String(e)}`);
-        } finally {
-          if (historyLoadSeqRef.current === loadSeq) {
-            setLoadingMessages(false);
-            setHistoryLoadProgress(null);
-          }
-        }
-      })();
+      setOlderHistory({ hasOlder: first.offset > 0 || Boolean(first.hasOlder), loading: false });
+      setLoadingMessages(false);
+      setHistoryLoadProgress(null);
     } catch (e) {
       setError(`get_messages: ${String(e)}`);
       if (historyLoadSeqRef.current === loadSeq) {
         setLoadingMessages(false);
         setHistoryLoadProgress(null);
+        setOlderHistory({ hasOlder: false, loading: false });
       }
     }
   }, [fetchMessagesPage]);
+
+  const loadOlderMessages = useCallback(async () => {
+    if (!olderHistory.hasOlder || olderHistory.loading || loadingMessages) return;
+    const el = scrollRef.current;
+    const previousScrollHeight = el?.scrollHeight ?? 0;
+    const previousScrollTop = el?.scrollTop ?? 0;
+    const loadSeq = historyLoadSeqRef.current;
+    const path = activeTabIdRef.current;
+    const isStaleLoad = () => historyLoadSeqRef.current !== loadSeq || activeTabIdRef.current !== path;
+    setOlderHistory((prev) => ({ ...prev, loading: true }));
+    try {
+      const older = await fetchMessagesPage({ offset: 0, limit: BACKFILL_MESSAGE_CHUNK, lazyOlder: true });
+      if (isStaleLoad()) return;
+      if (older.messages.length === 0) {
+        setOlderHistory({ hasOlder: Boolean(older.hasOlder), loading: false });
+        return;
+      }
+      const olderChatMessages = toChatMessages(older.messages);
+      prependScrollAnchorRef.current = { scrollHeight: previousScrollHeight, scrollTop: previousScrollTop };
+      setMessages((current) => {
+        const next = [...olderChatMessages, ...current];
+        if (path) tabMessagesRef.current.set(path, next);
+        return next;
+      });
+      setOlderHistory({ hasOlder: Boolean(older.hasOlder), loading: false });
+    } catch (e) {
+      if (!isStaleLoad()) setError(`get_messages: ${String(e)}`);
+      setOlderHistory((prev) => ({ ...prev, loading: false }));
+    }
+  }, [fetchMessagesPage, loadingMessages, olderHistory.hasOlder, olderHistory.loading]);
+
+  const handleChatScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el || el.scrollTop > LOAD_OLDER_SCROLL_THRESHOLD_PX) return;
+    void loadOlderMessages();
+  }, [loadOlderMessages]);
 
   const restoreTabsForWorkspace = useCallback(async (cwd: string, currentSessionFile?: string) => {
     const persisted = readPersistedTabs(cwd);
@@ -1008,14 +994,20 @@ export default function App() {
     [cancelHistoryLoad, handleExtensionUIRequest, refreshCommands, refreshState, refreshSessions],
   );
 
-  // Auto-scroll on new content. During history hydration, do it before paint so
-  // the first rendered chunk opens on the tail/visible chat instead of briefly
-  // flashing the top of that chunk.
+  // Auto-scroll on live content and the initial tail load. Older history is
+  // prepended lazily on scroll and preserves the user's anchor separately.
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
+    const prependAnchor = prependScrollAnchorRef.current;
+    if (prependAnchor) {
+      prependScrollAnchorRef.current = null;
+      el.scrollTop = el.scrollHeight - prependAnchor.scrollHeight + prependAnchor.scrollTop;
+      return;
+    }
+    if (olderHistory.loading) return;
     el.scrollTo({ top: el.scrollHeight, behavior: loadingMessages ? "auto" : "smooth" });
-  }, [loadingMessages, messages]);
+  }, [loadingMessages, messages, olderHistory.loading]);
 
   // -- Actions -----------------------------------------------------------
 
@@ -1574,7 +1566,12 @@ export default function App() {
           </div>
         )}
 
-        <div className="chat__body" ref={scrollRef}>
+        <div className="chat__body" ref={scrollRef} onScroll={handleChatScroll}>
+          {olderHistory.loading && (
+            <div className="chat__history-loading">
+              Loading older history…
+            </div>
+          )}
           {loadingMessages && historyLoadProgress && historyLoadProgress.loaded > 0 && !historyLoadProgress.complete && (
             <div className="chat__history-loading">
               Loaded latest {historyLoadProgress.loaded} messages. Backfilling older history…
