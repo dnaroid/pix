@@ -1,0 +1,39 @@
+{
+  "name": "pix-desktop",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Tauri desktop UI for the Pi coding agent (Pix desktop).",
+  "bin": {
+    "pix-desktop": "./bin/pix-desktop.mjs"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "tauri:check": "tauri info && cargo check --manifest-path src-tauri/Cargo.toml",
+    "sidecar:dev": "npm --prefix sidecar run dev",
+    "sidecar:build": "npm --prefix sidecar run build",
+    "icons": "tsx scripts/generate-icons.mjs"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.4.0",
+    "@tauri-apps/plugin-shell": "^2.2.0",
+    "@tauri-apps/plugin-dialog": "^2.2.0",
+    "lucide-react": "^1.17.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.4.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "tsx": "4.22.1",
+    "typescript": "5.9.3",
+    "vite": "^6.0.0"
+  }
+}

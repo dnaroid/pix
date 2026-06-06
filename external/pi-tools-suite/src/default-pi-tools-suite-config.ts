@@ -9,6 +9,11 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
   // module will switch/restore Pi's thinking level as in-progress tasks change.
   "todoThinking": false,
   "terminalBell": { "sound": true },
+  // "telegramMirror": {
+  //   "enabled": true,
+  //   "botToken": "123456789:ABCdef...",
+  //   "chatId": 123456789
+  // },
   "dcp": {
     "enabled": true,
     "manualMode": { "enabled": false, "automaticStrategies": true },
