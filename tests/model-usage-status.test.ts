@@ -302,7 +302,7 @@ describe("model usage status", () => {
 		assert.match(output, /5-hour limit\n█{30} 99% remaining\nResets in: 42m/u);
 		assert.match(output, /MCP monthly quota\n█{30} 100% remaining\nUsed: 0 \/ 1,000/u);
 		assert.match(output, /limited@example\.com/u);
-		assert.match(output, /Claude Opus\s+6d 13h\s+░{20} 0%/u);
+		assert.match(output, /Claude Opus\s+6d13h\s+░{20} 0%/u);
 		assert.match(output, /⚠️ Rate limit reached!/u);
 	});
 
@@ -403,7 +403,7 @@ function formatExpectedResetDuration(resetAt: number, now: number): string {
 	const days = Math.floor(totalMinutes / 1440);
 	const hours = Math.floor((totalMinutes % 1440) / 60);
 	const minutes = totalMinutes % 60;
-	if (days > 0) return `${days}d ${hours}h`;
-	if (hours > 0) return `${hours}h ${minutes}m`;
+	if (days > 0) return `${days}d${hours}h`;
+	if (hours > 0) return `${hours}h${minutes}m`;
 	return `${minutes}m`;
 }
