@@ -152,6 +152,7 @@ type ContextUsageInfo = {
 type PersistedTabs = {
   openTabs: string[];
   activeTabId: string | null;
+  titles?: Record<string, string>;
 };
 
 type SlashCommandDef = {
@@ -302,6 +303,7 @@ export default function App() {
   const [, setLoadingSessions] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [historyLoadProgress, setHistoryLoadProgress] = useState<HistoryLoadProgress | null>(null);
+  const [restoredTabTitles, setRestoredTabTitles] = useState<Record<string, string>>({});
   const [workspace, setWorkspace] = useState<string | null>(() => {
     try {
       return localStorage.getItem(WORKSPACE_KEY);
@@ -348,8 +350,8 @@ export default function App() {
   const workspaceTitle = workspace ? workspaceBasename(workspace) : "Pix Desktop";
   const sessionTitle = useMemo(() => {
     if (!workspace) return "";
-    return activeTabId ? sessionLabelFor(activeTabId, sessions, session) : "Session";
-  }, [workspace, activeTabId, sessions, session]);
+    return activeTabId ? sessionLabelFor(activeTabId, sessions, session, restoredTabTitles) : "Session";
+  }, [workspace, activeTabId, sessions, session, restoredTabTitles]);
 
   const windowTitle = sessionTitle ? `${workspaceTitle} | ${sessionTitle}` : workspaceTitle;
 
@@ -410,7 +412,9 @@ export default function App() {
     if (appliedWorkspaceRef.current !== workspace) return;
     setLoadingSessions(true);
     try {
-      setSessions(await listSessionsForActiveWorkspace());
+      const nextSessions = await listSessionsForActiveWorkspace();
+      setSessions(nextSessions);
+      setRestoredTabTitles((prev) => pruneRestoredTabTitles(prev, nextSessions));
     } catch (e) {
       setError(`list sessions: ${String(e)}`);
     } finally {
@@ -696,17 +700,7 @@ export default function App() {
 
   const restoreTabsForWorkspace = useCallback(async (cwd: string, currentSessionFile?: string) => {
     const persisted = readPersistedTabs(cwd);
-    let workspaceSessions: SessionSummary[] = [];
-    try {
-      workspaceSessions = await listSessionsForActiveWorkspace();
-      setSessions(workspaceSessions);
-    } catch (e) {
-      setError(`list sessions: ${String(e)}`);
-    }
-    const validSessionPaths = new Set(workspaceSessions.map((s) => s.path));
-    const restoredTabs = validSessionPaths.size > 0
-      ? persisted.openTabs.filter((path) => validSessionPaths.has(path))
-      : persisted.openTabs;
+    const restoredTabs = persisted.openTabs;
     const tabs = uniqueStrings([
       ...restoredTabs,
       ...(currentSessionFile ? [currentSessionFile] : []),
@@ -717,6 +711,7 @@ export default function App() {
 
     tabMessagesRef.current.clear();
     hydratedTabsWorkspaceRef.current = cwd;
+    setRestoredTabTitles(persisted.titles ?? {});
     setOpenTabs(tabs);
     activeTabIdRef.current = active;
     setActiveTabId(active);
@@ -736,16 +731,17 @@ export default function App() {
         setOpenTabs(fallbackTabs);
         activeTabIdRef.current = fallback;
         setActiveTabId(fallback);
-        await refreshState();
-        if (fallback) await loadMessages(fallback);
+        void refreshState();
+        if (fallback) void loadMessages(fallback);
         return;
       }
     }
 
-    await refreshState();
-    await refreshCommands();
-    if (active) await loadMessages(active);
-  }, [listSessionsForActiveWorkspace, loadMessages, refreshCommands, refreshState]);
+    void refreshState();
+    void refreshCommands();
+    void refreshSessions();
+    if (active) void loadMessages(active);
+  }, [loadMessages, refreshCommands, refreshSessions, refreshState]);
 
   const chooseFolder = useCallback(async (): Promise<string | null> => {
     try {
@@ -810,7 +806,7 @@ export default function App() {
           return;
         }
         appliedWorkspaceRef.current = workspace;
-        await restoreTabsForWorkspace(workspace, resp.data?.sessionFile);
+        void restoreTabsForWorkspace(workspace, resp.data?.sessionFile);
       })
       .catch((e) => setError(`restore workspace: ${String(e)}`));
   }, [workspace, restoreTabsForWorkspace]);
@@ -820,8 +816,8 @@ export default function App() {
   // initial empty React state during startup.
   useEffect(() => {
     if (!workspace || hydratedTabsWorkspaceRef.current !== workspace) return;
-    writePersistedTabs(workspace, { openTabs, activeTabId });
-  }, [workspace, openTabs, activeTabId]);
+    writePersistedTabs(workspace, persistedTabsFor(openTabs, activeTabId, sessions, session, restoredTabTitles));
+  }, [workspace, openTabs, activeTabId, sessions, session, restoredTabTitles]);
 
   // Refresh sessions whenever workspace changes (or on initial mount).
   useEffect(() => {
@@ -1541,7 +1537,7 @@ export default function App() {
                   title={p}
                 >
                   <span className="tabsbar__tab-label">
-                    {sessionLabelFor(p, sessions, session)}
+                    {sessionLabelFor(p, sessions, session, restoredTabTitles)}
                   </span>
                   <span
                     className="tabsbar__tab-close"
@@ -2048,14 +2044,44 @@ function sessionLabelFor(
   path: string,
   sessions: SessionSummary[],
   current: SessionState,
+  restoredTitles: Record<string, string> = {},
 ): string {
   const found = sessions.find((s) => s.path === path);
   if (current.sessionFile === path) {
-    const summaryLabel = found ? found.name ?? truncate(found.firstMessage, 24) : undefined;
+    const summaryLabel = found ? found.name ?? truncate(found.firstMessage, 24) : restoredTitles[path];
     return current.sessionName ?? summaryLabel ?? shortId(current.sessionId) ?? "Session";
   }
   if (found) return found.name ?? truncate(found.firstMessage, 24) ?? "Untitled";
+  if (restoredTitles[path]) return restoredTitles[path];
   return shortId(path.split("/").pop() ?? path);
+}
+
+function persistedTabsFor(
+  openTabs: string[],
+  activeTabId: string | null,
+  sessions: SessionSummary[],
+  current: SessionState,
+  restoredTitles: Record<string, string>,
+): PersistedTabs {
+  const titles: Record<string, string> = {};
+  for (const path of openTabs) {
+    const label = sessionLabelFor(path, sessions, current, restoredTitles).trim();
+    if (label) titles[path] = label;
+  }
+  return { openTabs, activeTabId, titles };
+}
+
+function pruneRestoredTabTitles(
+  restoredTitles: Record<string, string>,
+  sessions: SessionSummary[],
+): Record<string, string> {
+  if (Object.keys(restoredTitles).length === 0) return restoredTitles;
+  const sessionPaths = new Set(sessions.map((session) => session.path));
+  const next: Record<string, string> = {};
+  for (const [path, title] of Object.entries(restoredTitles)) {
+    if (!sessionPaths.has(path)) next[path] = title;
+  }
+  return next;
 }
 
 function mergeSlashCommands(commands: SlashCommandDef[]): SlashCommandDef[] {
@@ -2393,7 +2419,8 @@ function readPersistedTabs(workspace: string): PersistedTabs {
     const activeTabId = typeof parsed.activeTabId === "string" && openTabs.includes(parsed.activeTabId)
       ? parsed.activeTabId
       : null;
-    return { openTabs, activeTabId };
+    const titles = normalizePersistedTabTitles(openTabs, parsed.titles);
+    return { openTabs, activeTabId, ...(titles ? { titles } : {}) };
   } catch {
     return { openTabs: [], activeTabId: null };
   }
@@ -2405,7 +2432,8 @@ function writePersistedTabs(workspace: string, tabs: PersistedTabs): void {
     const activeTabId = tabs.activeTabId && openTabs.includes(tabs.activeTabId)
       ? tabs.activeTabId
       : null;
-    localStorage.setItem(tabsStorageKey(workspace), JSON.stringify({ openTabs, activeTabId }));
+    const titles = normalizePersistedTabTitles(openTabs, tabs.titles);
+    localStorage.setItem(tabsStorageKey(workspace), JSON.stringify({ openTabs, activeTabId, ...(titles ? { titles } : {}) }));
   } catch {
     // localStorage may be unavailable in tests or restricted webviews.
   }
@@ -2413,4 +2441,16 @@ function writePersistedTabs(workspace: string, tabs: PersistedTabs): void {
 
 function uniqueStrings(values: string[]): string[] {
   return Array.from(new Set(values.filter((value) => value.length > 0)));
+}
+
+function normalizePersistedTabTitles(openTabs: string[], value: unknown): Record<string, string> | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const tabSet = new Set(openTabs);
+  const titles: Record<string, string> = {};
+  for (const [path, title] of Object.entries(value)) {
+    if (!tabSet.has(path) || typeof title !== "string") continue;
+    const trimmed = title.trim();
+    if (trimmed) titles[path] = trimmed;
+  }
+  return Object.keys(titles).length > 0 ? titles : undefined;
 }
