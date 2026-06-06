@@ -368,6 +368,24 @@ export default function App() {
   const subscribed = useRef(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const composerInputRef = useRef<HTMLTextAreaElement>(null);
+
+  const resizeComposer = useCallback(() => {
+    const ta = composerInputRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    const max = Math.floor(window.innerHeight * 0.5);
+    ta.style.height = Math.max(40, Math.min(ta.scrollHeight, max)) + "px";
+  }, []);
+
+  useLayoutEffect(() => {
+    resizeComposer();
+  }, [input, resizeComposer]);
+
+  useEffect(() => {
+    window.addEventListener("resize", resizeComposer);
+    return () => window.removeEventListener("resize", resizeComposer);
+  }, [resizeComposer]);
 
   // -- RPC helpers -------------------------------------------------------
 
@@ -1680,6 +1698,7 @@ export default function App() {
               </div>
             )}
             <textarea
+              ref={composerInputRef}
               className="composer__input"
               placeholder="Message Pix… (Shift+Enter, / commands, ! shell, paste/drop images)"
               value={input}
