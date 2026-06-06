@@ -119,6 +119,7 @@ export async function runDispatcher(opts: DispatcherOptions): Promise<void> {
             autoCompactionEnabled: session.autoCompactionEnabled,
             messageCount: session.messages.length,
             pendingMessageCount: session.pendingMessageCount,
+            contextUsage: session.getContextUsage(),
           };
           writeLine(success(id, "get_state", state));
           return;

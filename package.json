@@ -67,7 +67,7 @@
     "desktop:install": "npm --prefix apps/desktop-tauri install",
     "desktop:dev": "npm --prefix apps/desktop-tauri run tauri:dev",
     "desktop:build": "npm --prefix apps/desktop-tauri run tauri:build",
-    "desktop:check": "npm --prefix apps/desktop-tauri run build && cargo check --manifest-path apps/desktop-tauri/src-tauri/Cargo.toml",
+    "desktop:check": "npm --prefix apps/desktop-tauri run build && npm --prefix apps/desktop-tauri/sidecar run check && cargo check --manifest-path apps/desktop-tauri/src-tauri/Cargo.toml",
     "desktop:icons": "npm --prefix apps/desktop-tauri run icons",
     "desktop": "node apps/desktop-tauri/bin/pix-desktop.mjs"
   },

@@ -81,217 +81,92 @@
   cursor: not-allowed;
 }
 
-/* -- Workspace row in sidebar ------------------------------------------- */
+/* -- Top bar ------------------------------------------------------------- */
 
-.sidebar__workspace {
+.topbar {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
+  gap: 12px;
+  padding: 10px 14px;
   border-bottom: 1px solid var(--border);
-  font-size: 11px;
-  color: var(--text-dim);
-  background: rgba(0, 0, 0, 0.02);
+  background: var(--surface);
+  min-height: 44px;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
-.sidebar__workspace-path {
+.topbar__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.topbar__logo {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.topbar__workspace {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   flex: 1;
+  color: var(--text-dim);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
+.topbar__workspace span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.sidebar__workspace-btn {
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--text-dim);
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 10px;
-  cursor: pointer;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.sidebar__workspace-btn:hover:not(:disabled) {
-  color: var(--text);
-  border-color: var(--text-dim);
-}
-
-.sidebar__workspace-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-/* -- Sidebar ------------------------------------------------------------- */
-
-.sidebar {
-  width: 260px;
-  flex-shrink: 0;
-  border-right: 1px solid var(--border);
-  background: var(--surface);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.sidebar__head {
-  display: flex;
+.topbar__actions {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 12px 12px;
-  border-bottom: 1px solid var(--border);
-  min-height: 48px;
+  gap: 6px;
 }
 
-.sidebar__logo {
-  color: var(--accent);
-  flex-shrink: 0;
-}
-
-.sidebar__title {
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.2px;
-  flex: 1;
-}
-
-.sidebar__btn {
-  width: 26px;
-  height: 26px;
-  display: flex;
+.topbar__btn,
+.topbar__icon-btn {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   background: transparent;
-  border: 1px solid transparent;
+  border: 1px solid var(--border);
   color: var(--text);
   border-radius: 5px;
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s, opacity 0.15s;
 }
 
-.sidebar__btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: var(--border);
+.topbar__btn {
+  padding: 4px 8px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
-.sidebar__btn:disabled {
+.topbar__icon-btn {
+  width: 26px;
+  height: 26px;
+}
+
+.topbar__btn:hover:not(:disabled),
+.topbar__icon-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--text-dim);
+}
+
+.topbar__btn:disabled,
+.topbar__icon-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
-}
-
-.sidebar__list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 4px;
-}
-
-.sidebar__empty {
-  padding: 16px;
-  font-size: 12px;
-  opacity: 0.5;
-  text-align: center;
-}
-
-.session-item {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 8px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background 0.12s;
-  margin-bottom: 1px;
-  outline: none;
-}
-
-.session-item:hover {
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.session-item--active {
-  background: rgba(122, 162, 247, 0.14);
-}
-
-.session-item--active:hover {
-  background: rgba(122, 162, 247, 0.18);
-}
-
-.session-item__main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.session-item__label {
-  font-size: 13px;
-  line-height: 1.3;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 500;
-}
-
-.session-item--active .session-item__label {
-  color: var(--accent);
-}
-
-.session-item__meta {
-  font-size: 10px;
-  opacity: 0.5;
-  display: flex;
-  gap: 4px;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  text-transform: lowercase;
-}
-
-.session-item__input {
-  width: 100%;
-  font: inherit;
-  font-size: 13px;
-  padding: 3px 6px;
-  background: var(--bg);
-  border: 1px solid var(--accent);
-  border-radius: 4px;
-  color: var(--text);
-  outline: none;
-}
-
-.session-item__rename {
-  width: 22px;
-  height: 22px;
-  flex-shrink: 0;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: none;
-  color: var(--text);
-  opacity: 0.5;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.session-item:hover .session-item__rename,
-.session-item--active .session-item__rename {
-  display: flex;
-}
-
-.session-item__rename:hover {
-  background: rgba(255, 255, 255, 0.08);
-  opacity: 1;
-}
-
-.session-item__actions {
-  display: flex;
-  gap: 2px;
-}
-
-.session-item__actions .session-item__rename {
-  display: flex;
 }
 
 /* -- Chat (right pane) --------------------------------------------------- */
@@ -637,11 +512,66 @@
 /* -- Composer ------------------------------------------------------------ */
 
 .composer {
+  position: relative;
   display: flex;
   gap: 8px;
   padding: 12px 20px 16px;
   border-top: 1px solid var(--border);
   background: var(--surface);
+}
+
+.slash-menu {
+  position: absolute;
+  left: 20px;
+  right: 68px;
+  bottom: calc(100% - 4px);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.32);
+  z-index: 10;
+}
+
+.slash-menu__item {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  width: 100%;
+  padding: 7px 9px;
+  background: transparent;
+  border: none;
+  border-radius: 7px;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.slash-menu__item:hover:not(:disabled),
+.slash-menu__item--active:not(:disabled) {
+  background: rgba(122, 162, 247, 0.14);
+}
+
+.slash-menu__item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.slash-menu__name {
+  min-width: 72px;
+  color: var(--accent);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.slash-menu__description {
+  color: var(--text-muted);
+  font-size: 12px;
 }
 
 .composer__input {
@@ -709,5 +639,204 @@
 @keyframes spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+/* -- Tabs bar (Phase 4) -------------------------------------------------- */
+
+.tabsbar {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  min-height: 32px;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.tabsbar__scroll {
+  display: flex;
+  flex: 1;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+.tabsbar__scroll::-webkit-scrollbar {
+  height: 4px;
+}
+
+.tabsbar__scroll::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 2px;
+}
+
+.tabsbar__tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px 6px 12px;
+  background: transparent;
+  border: none;
+  border-right: 1px solid var(--border);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  position: relative;
+  transition: background 0.1s, color 0.1s;
+  max-width: 220px;
+  flex-shrink: 0;
+}
+
+.tabsbar__tab:hover {
+  background: var(--bg);
+  color: var(--text);
+}
+
+.tabsbar__tab:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.tabsbar__tab--active {
+  background: var(--bg);
+  color: var(--text);
+}
+
+.tabsbar__tab--active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--accent);
+}
+
+.tabsbar__tab-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tabsbar__tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+
+.tabsbar__tab-close:hover {
+  background: var(--border);
+  color: var(--text);
+}
+
+.tabsbar__new {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  background: transparent;
+  border: none;
+  border-left: 1px solid var(--border);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+
+.tabsbar__new:hover:not(:disabled) {
+  background: var(--bg);
+  color: var(--accent);
+}
+
+.tabsbar__new:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* -- Status bar (Phase 4) ------------------------------------------------ */
+
+.statusbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 4px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 11px;
+  min-height: 24px;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.statusbar__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.statusbar__item > svg {
+  opacity: 0.7;
+}
+
+.statusbar__provider {
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+.statusbar__provider::after {
+  content: "/";
+  margin: 0 1px 0 3px;
+  opacity: 0.6;
+}
+
+.statusbar__model-name {
+  color: var(--text);
+}
+
+.statusbar__ctx {
+  margin-left: auto;
+  gap: 6px;
+}
+
+.statusbar__ctx-pct {
+  min-width: 32px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.statusbar__ctx-bar {
+  display: inline-block;
+  width: 80px;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.statusbar__ctx-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.25s ease-out;
+}
+
+.statusbar__compact {
+  color: var(--warning, #e0af68);
+  font-style: italic;
+}
+
+@media (max-width: 640px) {
+  .statusbar__ctx-bar {
+    display: none;
   }
 }

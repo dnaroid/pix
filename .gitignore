@@ -21,3 +21,4 @@ apps/*/.vite/
 apps/*/src-tauri/target/
 apps/*/src-tauri/gen/
 apps/*/sidecar/dist/
+.ruby-lsp/

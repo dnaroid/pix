@@ -17,7 +17,9 @@ import {
   type AgentSession,
   type AgentSessionRuntime,
   type CreateAgentSessionRuntimeFactory,
+  createAgentSessionFromServices,
   createAgentSessionRuntime,
+  createAgentSessionServices,
   getAgentDir,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
@@ -54,12 +56,8 @@ const createRuntime: CreateAgentSessionRuntimeFactory = async ({
   sessionManager,
   sessionStartEvent,
 }) => {
-  // Lazy-import the per-cwd services factory. Re-created on every runtime
-  // swap so cwd-bound resources (file watchers, working dir, etc.) follow
-  // the active workspace.
-  const { createAgentSessionServices, createAgentSessionFromServices } = await import(
-    "@earendil-works/pi-coding-agent"
-  );
+  // Re-created on every runtime swap so cwd-bound resources (file watchers,
+  // working dir, etc.) follow the active workspace.
   const services = await createAgentSessionServices({ cwd });
   return {
     ...(await createAgentSessionFromServices({
