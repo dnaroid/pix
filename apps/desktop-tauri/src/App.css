@@ -145,6 +145,11 @@
   min-width: 0;
 }
 
+.topbar__separator {
+  margin: 0 6px;
+  opacity: 0.45;
+}
+
 .topbar__session {
   overflow: hidden;
   text-overflow: ellipsis;

@@ -1507,16 +1507,6 @@ export default function App() {
             {sessionTitle && <span className="topbar__separator"> / </span>}
             {sessionTitle && <span className="topbar__session">{sessionTitle}</span>}
           </div>
-          <div className="topbar__meta">
-            {session.messageCount !== undefined && (
-              <span title="Message count">{session.messageCount} msgs</span>
-            )}
-            {session.sessionFile && (
-              <span className="topbar__file" title={session.sessionFile}>
-                {shortId(session.sessionId)}
-              </span>
-            )}
-          </div>
           <div className="topbar__spacer" />
         </div>
         {openTabs.length > 0 && (
@@ -2040,13 +2030,12 @@ function sessionLabelFor(
   sessions: SessionSummary[],
   current: SessionState,
 ): string {
-  if (current.sessionFile === path) {
-    return current.sessionName ?? shortId(current.sessionId) ?? "Session";
-  }
   const found = sessions.find((s) => s.path === path);
-  if (found) {
-    return found.name ?? truncate(found.firstMessage, 24) ?? "Untitled";
+  if (current.sessionFile === path) {
+    const summaryLabel = found ? found.name ?? truncate(found.firstMessage, 24) : undefined;
+    return current.sessionName ?? summaryLabel ?? shortId(current.sessionId) ?? "Session";
   }
+  if (found) return found.name ?? truncate(found.firstMessage, 24) ?? "Untitled";
   return shortId(path.split("/").pop() ?? path);
 }
 
