@@ -39,6 +39,12 @@ export interface VisualLine {
 	suggestionSpans?: Array<{ start: number; end: number }>;
 }
 
+export interface InputEditorDraftState {
+	text: string;
+	cursor: number;
+	attachments?: readonly Attachment[];
+}
+
 /** Full render-ready snapshot of the editor state. */
 export interface RenderedEditor {
 	visualLines: VisualLine[];
@@ -105,6 +111,13 @@ export class InputEditor {
 	get canUndo(): boolean { return this._undoStack.length > 0; }
 	get canRedo(): boolean { return this._redoStack.length > 0; }
 	get contentVersion(): number { return this._contentVersion; }
+	get draftState(): InputEditorDraftState {
+		return {
+			text: this._text,
+			cursor: this._cursor,
+			...(this._attachments.length > 0 ? { attachments: this._attachments.map(cloneAttachment) } : {}),
+		};
+	}
 
 	/** Get only image attachments. */
 	get images(): ImageContent[] {
@@ -156,6 +169,19 @@ export class InputEditor {
 		this.recordEdit(() => {
 			this._text = text;
 			this._cursor = cursor ?? text.length;
+			this.clampCursor();
+			this.clearSelection();
+		});
+	}
+
+	setDraftState(state: InputEditorDraftState): void {
+		this.recordEdit(() => {
+			this._text = state.text;
+			this._cursor = state.cursor;
+			this._attachments.length = 0;
+			this._attachments.push(...Array.from(state.attachments ?? [], cloneAttachment));
+			this._imageCounter = Math.max(this._imageCounter, maxTagCounter(this._attachments, /^\[Image (\d+)/u));
+			this._pasteCounter = Math.max(this._pasteCounter, maxTagCounter(this._attachments, /^\[Pasted ~?(\d+)/u));
 			this.clampCursor();
 			this.clearSelection();
 		});
@@ -997,6 +1023,32 @@ function removeVirtualAttachmentTag(text: string, tag: string): string {
 	const withTrailingSpace = `${tag} `;
 	if (text.includes(withTrailingSpace)) return text.replace(withTrailingSpace, "");
 	return text.replace(tag, "");
+}
+
+function cloneAttachment(attachment: Attachment): Attachment {
+	if (attachment.kind === "image") {
+		return { kind: "image", tag: attachment.tag, image: { ...attachment.image } };
+	}
+	if (attachment.kind === "pasted-text") {
+		return { kind: "pasted-text", tag: attachment.tag, text: attachment.text, lineCount: attachment.lineCount };
+	}
+	return {
+		kind: "file",
+		tag: attachment.tag,
+		path: attachment.path,
+		...(attachment.content === undefined ? {} : { content: attachment.content }),
+		...(attachment.image === undefined ? {} : { image: { ...attachment.image } }),
+	};
+}
+
+function maxTagCounter(attachments: readonly Attachment[], pattern: RegExp): number {
+	let max = 0;
+	for (const attachment of attachments) {
+		const match = pattern.exec(attachment.tag);
+		const value = match ? Number.parseInt(match[1] ?? "", 10) : NaN;
+		if (Number.isFinite(value)) max = Math.max(max, value);
+	}
+	return max;
 }
 
 function suggestionSpansForChunk(

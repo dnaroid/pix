@@ -7,6 +7,7 @@ import { describe, it } from "node:test";
 import { AppTabsController } from "../src/app/session/tabs-controller.js";
 import type { AppBlinkController } from "../src/app/screen/blink-controller.js";
 import type { AppOptions, SessionTab, SubmittedUserMessage } from "../src/app/types.js";
+import type { InputEditorDraftState } from "../src/input-editor.js";
 import type { AgentSessionEvent, AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 
 type FakeAgentSessionRuntime = AgentSessionRuntime & {
@@ -291,14 +292,18 @@ describe("AppTabsController", () => {
 		assert.deepEqual(currentDeferred.map((message) => message.displayText), ["queued two"]);
 	});
 
-	it("persists and restores draft input text after startup", async () => {
+	it("persists and restores draft input text and attachments after startup", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "pix-tabs-"));
 		const sessionPath = join(dir, "one.jsonl");
 		const tabsPath = join(dir, "tabs.json");
 		await writeFile(sessionPath, "", "utf8");
 
 		let currentRuntime = fakeRuntime("one", sessionPath);
-		let currentInput = { text: "draft one", cursor: 7 };
+		let currentInput: InputEditorDraftState = {
+			text: "draft one [Image 1] ",
+			cursor: 17,
+			attachments: [{ kind: "image" as const, tag: "[Image 1]", image: { type: "image" as const, data: "base64-image", mimeType: "image/png" } }],
+		};
 		const controller = new AppTabsController({
 			options: { cwd: dir, themeName: "dark", noSession: false } satisfies AppOptions,
 			blinkController: fakeBlinkController(),
@@ -342,12 +347,12 @@ describe("AppTabsController", () => {
 
 		const saved = JSON.parse(await readFile(tabsPath, "utf8")) as {
 			version: number;
-			tabs: Array<{ input?: { text: string; cursor: number } }>;
+			tabs: Array<{ input?: typeof currentInput }>;
 		};
 		assert.equal(saved.version, 3);
-		assert.deepEqual(saved.tabs[0]?.input, { text: "draft one", cursor: 7 });
+		assert.deepEqual(saved.tabs[0]?.input, currentInput);
 
-		currentInput = { text: "", cursor: 0 };
+		currentInput = { text: "", cursor: 0, attachments: [] };
 		const restoredController = new AppTabsController({
 			options: { cwd: dir, themeName: "dark", noSession: false } satisfies AppOptions,
 			blinkController: fakeBlinkController(),
@@ -383,7 +388,11 @@ describe("AppTabsController", () => {
 
 		await restoredController.restoreAfterStartup();
 
-		assert.deepEqual(currentInput, { text: "draft one", cursor: 7 });
+		assert.deepEqual(currentInput, {
+			text: "draft one [Image 1] ",
+			cursor: 17,
+			attachments: [{ kind: "image", tag: "[Image 1]", image: { type: "image", data: "base64-image", mimeType: "image/png" } }],
+		});
 	});
 
 	it("persists and restores deferred queued messages after startup", async () => {

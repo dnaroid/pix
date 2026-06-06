@@ -104,8 +104,12 @@ export function visibleTodoTaskRows(details: TodoDetails, showDeleted = false): 
 
 export function todoTaskLineParts(task: TodoTask, options: { depth?: number } = {}): TodoTaskLinePart[] {
 	const treePrefix = todoTaskTreePrefix(options.depth ?? 0);
-	const parts: TodoTaskLinePart[] = [{ text: `${treePrefix}${todoStatusIcon(task.status)}` }, { text: `${task.id}.${task.subject}` }];
-	if (task.thinking) parts.push({ text: APP_ICONS.lightbulb, thinking: task.thinking });
+	const subjectPart: TodoTaskLinePart = { text: `${task.id}.${task.subject}` };
+	if (task.thinking) subjectPart.thinking = task.thinking;
+	const parts: TodoTaskLinePart[] = [
+		{ text: `${treePrefix}${todoStatusIcon(task.status)}` },
+		subjectPart,
+	];
 	if (task.status === "in_progress" && task.activeForm) parts.push({ text: `— ${task.activeForm}` });
 	if (task.parentId !== undefined) parts.push({ text: `parent:#${task.parentId}` });
 	if (task.blockedBy && task.blockedBy.length > 0) parts.push({ text: `blocked:${task.blockedBy.map((id) => `#${id}`).join(",")}` });

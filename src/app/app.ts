@@ -1,6 +1,6 @@
 import { THEMES, type Theme } from "../theme.js";
 import type { ToastKind, ToastNotifier, ToastVariant } from "../ui.js";
-import { InputEditor } from "../input-editor.js";
+import { InputEditor, type InputEditorDraftState } from "../input-editor.js";
 import {
 	compileOutputFilterPatterns,
 	loadPixConfig,
@@ -202,8 +202,8 @@ export class PiUiExtendApp {
 			loadSessionHistory: () => this.loadSessionHistory(),
 			loadSessionHistoryAsync: (options) => this.loadSessionHistoryAsync(options),
 			syncUserSessionEntryMetadata: () => this.workspaceActions.syncUserSessionEntryMetadata(),
-			captureInputState: () => ({ text: this.inputEditor.text, cursor: this.inputEditor.cursor }),
-			restoreInputState: (state) => this.restoreTabInputState(state.text, state.cursor),
+			captureInputState: () => this.inputEditor.draftState,
+			restoreInputState: (state) => this.restoreTabInputState(state),
 			closeMenusForTabSwitch: () => this.popupMenus.closeMenusForTabSwitch(),
 			captureDeferredUserMessages: () => this.queuedMessages.captureDeferredUserMessages(),
 			restoreDeferredUserMessages: (messages) => this.queuedMessages.restoreDeferredUserMessages(messages),
@@ -875,10 +875,10 @@ export class PiUiExtendApp {
 		this.autocompleteController.dispose();
 	}
 
-	private restoreTabInputState(text: string, cursor: number): void {
+	private restoreTabInputState(state: InputEditorDraftState): void {
 		this.requestHistory.resetNavigation();
 		this.popupMenus.resetInputMenuDismissals();
-		this.inputEditor.setText(text, cursor);
+		this.inputEditor.setDraftState(state);
 		this.autocompleteController.dispose();
 	}
 

@@ -194,6 +194,22 @@ describe("InputEditor attachments", () => {
 		assert.deepEqual(stringImage.images, [{ type: "image", data: "base64data", mimeType: "image/jpeg" }]);
 	});
 
+	it("captures and restores draft attachments", () => {
+		const editor = new InputEditor();
+		editor.insert("draft ");
+		editor.attachImage("base64-image", "image/png");
+
+		const restored = new InputEditor();
+		restored.setDraftState(editor.draftState);
+
+		assert.equal(restored.text, "draft [Image 1] ");
+		assert.deepEqual(restored.images, [{ type: "image", data: "base64-image", mimeType: "image/png" }]);
+		assert.match(restored.promptText, /\[Image 1\]/);
+
+		restored.attachImage("next-image", "image/png");
+		assert.match(restored.text, /\[Image 2\]/);
+	});
+
 	it("removes attachments atomically by delete and cursor removal", () => {
 		const editor = new InputEditor();
 		editor.attachImage("abc", "image/png");

@@ -64,7 +64,7 @@ describe("todo panel", () => {
 		assert.ok(lines[2]?.text.startsWith(`${APP_ICONS.deferred} 3.Sibling`));
 	});
 
-	it("shows per-task thinking using the thinking palette color", () => {
+	it("colors task text using the thinking palette color", () => {
 		const details: TodoDetails = {
 			action: "list",
 			params: {},
@@ -78,15 +78,15 @@ describe("todo panel", () => {
 		const expanded = renderTodoPanel(details, true, 80, THEMES.dark.colors);
 		const collapsed = renderTodoPanel(details, false, 80, THEMES.dark.colors);
 
-		assert.ok(expanded[0]?.text.startsWith(`${APP_ICONS.timerSand} 1.Deep fix ${APP_ICONS.lightbulb}`));
-		assert.ok(expanded[1]?.text.startsWith(`${APP_ICONS.circleOutline} 2.Report ${APP_ICONS.lightbulb}`));
+		assert.ok(expanded[0]?.text.startsWith(`${APP_ICONS.timerSand} 1.Deep fix`));
+		assert.ok(expanded[1]?.text.startsWith(`${APP_ICONS.circleOutline} 2.Report`));
 		assert.doesNotMatch(expanded[0]?.text ?? "", /\bhigh\b/u);
 		assert.doesNotMatch(expanded[1]?.text ?? "", /\boff\b/u);
+		for (const line of [...expanded, ...collapsed]) assert.ok(!line.text.includes(APP_ICONS.lightbulb));
 		for (const line of [...expanded, ...collapsed]) assert.doesNotMatch(line.text, /\[(high|off)\]/u);
-		assertThinkingSegmentColor(expanded[0]!, APP_ICONS.lightbulb, THEMES.dark.colors.error);
-		assertThinkingSegmentColor(expanded[1]!, APP_ICONS.lightbulb, THEMES.dark.colors.muted);
-		assert.ok(collapsed[0]?.text.includes(APP_ICONS.lightbulb));
-		assertThinkingSegmentColor(collapsed[0]!, APP_ICONS.lightbulb, THEMES.dark.colors.error);
+		assertThinkingSegmentColor(expanded[0]!, "1.Deep fix", THEMES.dark.colors.error);
+		assertThinkingSegmentColor(expanded[1]!, "2.Report", THEMES.dark.colors.muted);
+		assertThinkingSegmentColor(collapsed[0]!, "1.Deep fix", THEMES.dark.colors.error);
 	});
 
 	it("leaves subagents panel rows on the terminal default background", () => {

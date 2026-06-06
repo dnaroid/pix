@@ -11,6 +11,7 @@ import {
 import { isRecord } from "../guards.js";
 import { createId } from "../id.js";
 import { createStartupInfoMessage, isEmptyStartupSession } from "../cli/startup-info.js";
+import type { Attachment, InputEditorDraftState } from "../../input-editor.js";
 import type { AppBlinkController } from "../screen/blink-controller.js";
 import { tabPanelRows } from "../rendering/tab-line-renderer.js";
 import type { AppOptions, Entry, SessionActivity, SessionTab, SubmittedUserMessage } from "../types.js";
@@ -41,10 +42,7 @@ type PersistedSubmittedUserMessage = {
 	images: Array<{ type: "image"; data: string; mimeType: string }>;
 };
 
-export type TabInputState = {
-	text: string;
-	cursor: number;
-};
+export type TabInputState = InputEditorDraftState;
 
 export type AppTabsControllerHost = {
 	readonly options: AppOptions;
@@ -131,9 +129,11 @@ export class AppTabsController {
 	}
 
 	async setInputStateForTab(tabId: string | undefined, state: TabInputState): Promise<void> {
-		const nextState = {
+		const attachments = state.attachments?.map(clonePersistedAttachment) ?? [];
+		const nextState: TabInputState = {
 			text: state.text,
 			cursor: Math.max(0, Math.min(state.text.length, Math.trunc(state.cursor))),
+			...(attachments.length > 0 ? { attachments } : {}),
 		};
 		const targetTabId = tabId ?? this.activeTabId;
 		if (targetTabId) {
@@ -873,9 +873,11 @@ export class AppTabsController {
 	private storeActiveInputState(): void {
 		if (!this.activeTabId) return;
 		const state = this.host.captureInputState();
+		const attachments = state.attachments?.map(clonePersistedAttachment) ?? [];
 		this.inputStatesByTabId.set(this.activeTabId, {
 			text: state.text,
 			cursor: state.cursor,
+			...(attachments.length > 0 ? { attachments } : {}),
 		});
 	}
 
@@ -1154,7 +1156,10 @@ export class AppTabsController {
 		const cursor = typeof value.cursor === "number" && Number.isFinite(value.cursor)
 			? Math.max(0, Math.min(value.text.length, Math.trunc(value.cursor)))
 			: value.text.length;
-		return { text: value.text, cursor };
+		const attachments = Array.isArray(value.attachments)
+			? value.attachments.flatMap(parsePersistedAttachment)
+			: [];
+		return { text: value.text, cursor, ...(attachments.length > 0 ? { attachments } : {}) };
 	}
 
 	private parsePersistedSubmittedUserMessages(value: unknown): PersistedSubmittedUserMessage[] {
@@ -1192,10 +1197,11 @@ export class AppTabsController {
 				seen.add(sessionPath);
 				const persistedTab: PersistedTab = { path: sessionPath, title: tab.title };
 				const input = this.inputStatesByTabId.get(tab.id);
-				if (input?.text.length) {
+				if (input && (input.text.length > 0 || (input.attachments?.length ?? 0) > 0)) {
 					persistedTab.input = {
 						text: input.text,
 						cursor: Math.max(0, Math.min(input.text.length, Math.trunc(input.cursor))),
+						...(input.attachments && input.attachments.length > 0 ? { attachments: input.attachments.map(clonePersistedAttachment) } : {}),
 					};
 				}
 				const deferredUserMessages = this.deferredUserMessagesByTabId.get(tab.id);
@@ -1303,4 +1309,46 @@ export class AppTabsController {
 		const value = this.host.maxProjectSessions;
 		return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
 	}
+}
+
+function parsePersistedAttachment(value: unknown): Attachment[] {
+	if (!isRecord(value) || typeof value.kind !== "string" || typeof value.tag !== "string") return [];
+	if (value.kind === "image") {
+		const image = parsePersistedImage(value.image);
+		return image ? [{ kind: "image", tag: value.tag, image }] : [];
+	}
+	if (value.kind === "pasted-text") {
+		if (typeof value.text !== "string" || typeof value.lineCount !== "number" || !Number.isFinite(value.lineCount)) return [];
+		return [{ kind: "pasted-text", tag: value.tag, text: value.text, lineCount: Math.max(1, Math.trunc(value.lineCount)) }];
+	}
+	if (value.kind === "file") {
+		if (typeof value.path !== "string") return [];
+		const image = parsePersistedImage(value.image);
+		return [{
+			kind: "file",
+			tag: value.tag,
+			path: value.path,
+			...(typeof value.content === "string" ? { content: value.content } : {}),
+			...(image ? { image } : {}),
+		}];
+	}
+	return [];
+}
+
+function parsePersistedImage(value: unknown): { type: "image"; data: string; mimeType: string } | undefined {
+	return isRecord(value) && value.type === "image" && typeof value.data === "string" && typeof value.mimeType === "string"
+		? { type: "image", data: value.data, mimeType: value.mimeType }
+		: undefined;
+}
+
+function clonePersistedAttachment(attachment: Attachment): Attachment {
+	if (attachment.kind === "image") return { kind: "image", tag: attachment.tag, image: { ...attachment.image } };
+	if (attachment.kind === "pasted-text") return { kind: "pasted-text", tag: attachment.tag, text: attachment.text, lineCount: attachment.lineCount };
+	return {
+		kind: "file",
+		tag: attachment.tag,
+		path: attachment.path,
+		...(attachment.content === undefined ? {} : { content: attachment.content }),
+		...(attachment.image === undefined ? {} : { image: { ...attachment.image } }),
+	};
 }
