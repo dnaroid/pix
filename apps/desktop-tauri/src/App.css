@@ -675,6 +675,11 @@
   border-color: var(--accent);
 }
 
+.composer__input::placeholder {
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
 .composer__input:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -957,7 +962,6 @@
   cursor: pointer;
   position: relative;
   transition: background 0.1s, color 0.1s;
-  max-width: 220px;
   flex-shrink: 0;
 }
 
