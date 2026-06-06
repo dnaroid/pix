@@ -96,7 +96,7 @@ describe("model usage status", () => {
 		assert.equal(status?.weekly?.remainingPercent, 88);
 		assert.equal(status?.hourly?.remainingPercent, 45);
 		assert.equal(modelUsageRemainingPercent(status), 45);
-		assert.equal(formatModelUsageStatusLabel(status, now), `45% ██▎   ${formatExpectedResetTime(now + 31 * 60 * 1000)} • 88% ████▍ ${formatExpectedResetDate(now + 5 * 24 * 60 * 60 * 1000)}`);
+		assert.equal(formatModelUsageStatusLabel(status, now), `45% ██▎   ${formatExpectedResetDuration(now + 31 * 60 * 1000, now)} • 88% ████▍ ${formatExpectedResetDuration(now + 5 * 24 * 60 * 60 * 1000, now)}`);
 	});
 
 	it("formats global resets within one day as a clock time", () => {
@@ -117,7 +117,7 @@ describe("model usage status", () => {
 		const status = openAIUsageStatusFromResponse(response, "openai-codex/gpt-5.5", now);
 
 		assert.equal(status?.weekly?.remainingPercent, 88);
-		assert.equal(formatModelUsageStatusLabel(status, now), `88% ████▍ ${formatExpectedResetTime(now + 14 * 60 * 60 * 1000)}`);
+		assert.equal(formatModelUsageStatusLabel(status, now), `88% ████▍ ${formatExpectedResetDuration(now + 14 * 60 * 60 * 1000, now)}`);
 	});
 
 	it("uses matching OpenAI additional model limits for the status bar", () => {
@@ -144,7 +144,7 @@ describe("model usage status", () => {
 
 		assert.equal(status?.hourly?.remainingPercent, 99);
 		assert.equal(status?.weekly?.remainingPercent, 100);
-		assert.equal(formatModelUsageStatusLabel(status, now), `99% ████▉ ${formatExpectedResetTime(now + 42 * 60 * 1000)} • 100% █████ ${formatExpectedResetDate(now + 5 * 24 * 60 * 60 * 1000)}`);
+		assert.equal(formatModelUsageStatusLabel(status, now), `99% ████▉ ${formatExpectedResetDuration(now + 42 * 60 * 1000, now)} • 100% █████ ${formatExpectedResetDuration(now + 5 * 24 * 60 * 60 * 1000, now)}`);
 	});
 
 	it("falls back to top-level Codex limits when no named bucket matches the selected model", () => {
@@ -220,7 +220,7 @@ describe("model usage status", () => {
 		assert.equal(status?.hourly?.remainingPercent, 65);
 		assert.equal(status?.weekly, undefined);
 		assert.equal(modelUsageRemainingPercent(status), 65);
-		assert.equal(formatModelUsageStatusLabel(status, now), `65% ███▎  ${formatExpectedResetTime(resetAt)}`);
+		assert.equal(formatModelUsageStatusLabel(status, now), `65% ███▎  ${formatExpectedResetDuration(resetAt, now)}`);
 	});
 
 	it("extracts Google Antigravity quota for the active account and model bucket", () => {
@@ -253,7 +253,7 @@ describe("model usage status", () => {
 		assert.equal(status?.accountEmail, "user@example.com");
 		assert.equal(status?.weekly?.remainingPercent, 99);
 		assert.equal(status?.hourly, undefined);
-		assert.equal(formatModelUsageStatusLabel(status, now), `user@example.com 99% ████▉ ${formatExpectedResetDate(now + (6 * 24 + 22) * 60 * 60 * 1000)}`);
+		assert.equal(formatModelUsageStatusLabel(status, now), `user@example.com 99% ████▉ ${formatExpectedResetDuration(now + (6 * 24 + 22) * 60 * 60 * 1000, now)}`);
 	});
 
 	it("formats the local account quota report", () => {
@@ -396,17 +396,14 @@ async function withPiAuthAsync(auth: unknown, run: () => Promise<void>): Promise
 	}
 }
 
-function formatExpectedResetTime(resetAt: number): string {
-	return new Date(resetAt).toLocaleTimeString("ru-RU", {
-		hour: "2-digit",
-		minute: "2-digit",
-		hourCycle: "h23",
-	});
-}
-
-function formatExpectedResetDate(resetAt: number): string {
-	return new Date(resetAt).toLocaleDateString("ru-RU", {
-		day: "2-digit",
-		month: "2-digit",
-	});
+function formatExpectedResetDuration(resetAt: number, now: number): string {
+	// Mirrors formatDurationShort in src/app/model/model-usage-status.ts
+	if (resetAt <= now) return "reset";
+	const totalMinutes = Math.max(0, Math.ceil((resetAt - now) / 60_000));
+	const days = Math.floor(totalMinutes / 1440);
+	const hours = Math.floor((totalMinutes % 1440) / 60);
+	const minutes = totalMinutes % 60;
+	if (days > 0) return `${days}d ${hours}h`;
+	if (hours > 0) return `${hours}h ${minutes}m`;
+	return `${minutes}m`;
 }

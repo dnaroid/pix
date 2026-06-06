@@ -1083,29 +1083,6 @@ function maskCredential(value: string): string {
 	return `${visible.slice(0, 4)}****${visible.slice(-4)}`;
 }
 
-function formatUsageWindow(prefix: "W" | "H", window: ModelUsageLimitWindow, now: number): string {
-	const resetLabel = prefix === "H" ? formatResetTime(window.resetAt, now) : formatGlobalResetLabel(window.resetAt, now);
-	return `${window.remainingPercent}% ${formatCompactProgressBar(window.remainingPercent)} ${resetLabel}`;
-}
-
-function formatGlobalResetLabel(resetAt: number, now: number): string {
-	if (resetAt <= now) return "reset";
-	return resetAt - now <= DAY_SECONDS * 1000 ? formatResetTime(resetAt, now) : formatResetDate(resetAt, now);
-}
-
-function formatResetTime(resetAt: number, now: number): string {
-	if (resetAt <= now) return "reset";
-	return new Date(resetAt).toLocaleTimeString("ru-RU", {
-		hour: "2-digit",
-		minute: "2-digit",
-		hourCycle: "h23",
-	});
-}
-
-function formatResetDate(resetAt: number, now: number): string {
-	if (resetAt <= now) return "reset";
-	return new Date(resetAt).toLocaleDateString("ru-RU", {
-		day: "2-digit",
-		month: "2-digit",
-	});
+function formatUsageWindow(_prefix: "W" | "H", window: ModelUsageLimitWindow, now: number): string {
+	return `${window.remainingPercent}% ${formatCompactProgressBar(window.remainingPercent)} ${formatDurationShort(window.resetAt, now)}`;
 }
