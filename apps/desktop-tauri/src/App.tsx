@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { invoke, Channel } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
@@ -24,10 +24,13 @@ import {
 } from "lucide-react";
 import { lookup, defaultRenderer } from "./tools";
 import type { ToolRenderProps } from "./tools/types";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./App.css";
 
 const WORKSPACE_KEY = "pix-desktop.workspace";
 const TABS_KEY_PREFIX = "pix-desktop.tabs:";
+const INITIAL_MESSAGE_CHUNK = 80;
+const BACKFILL_MESSAGE_CHUNK = 240;
 
 // -- RPC event shape (flat: optional fields, narrowing via switch) --------
 
@@ -85,6 +88,17 @@ type HistoryMessage =
   | { role: "assistant"; content?: HistoryContent[] }
   | { role: "toolResult"; toolCallId?: string; toolName?: string; content?: HistoryContent[]; details?: unknown; isError?: boolean }
   | { role?: string; [k: string]: unknown };
+
+type MessagesPage = {
+  messages: HistoryMessage[];
+  offset: number;
+  total: number;
+};
+
+type HistoryLoadProgress = {
+  loaded: number;
+  total: number;
+};
 
 type SessionSummary = {
   path: string;
@@ -242,6 +256,23 @@ const BASE_SLASH_COMMANDS: SlashCommandDef[] = [
 let nextId = 0;
 const genId = (prefix: string) => `${prefix}-${++nextId}`;
 
+function nextPaint(): Promise<void> {
+  return new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
+}
+
+function idleYield(): Promise<void> {
+  const idleWindow = window as Window & {
+    requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number;
+  };
+  return new Promise((resolve) => {
+    if (idleWindow.requestIdleCallback) {
+      idleWindow.requestIdleCallback(() => resolve(), { timeout: 80 });
+      return;
+    }
+    window.setTimeout(resolve, 16);
+  });
+}
+
 // -- Component ------------------------------------------------------------
 
 export default function App() {
@@ -267,7 +298,9 @@ export default function App() {
   const [extensionStatuses, setExtensionStatuses] = useState<Record<string, string>>({});
   const [extensionWidgets, setExtensionWidgets] = useState<Record<string, ExtensionWidget>>({});
   const [session, setSession] = useState<SessionState>({});
-  const [loadingSessions, setLoadingSessions] = useState(false);
+  const [, setLoadingSessions] = useState(false);
+  const [loadingMessages, setLoadingMessages] = useState(false);
+  const [historyLoadProgress, setHistoryLoadProgress] = useState<HistoryLoadProgress | null>(null);
   const [workspace, setWorkspace] = useState<string | null>(() => {
     try {
       return localStorage.getItem(WORKSPACE_KEY);
@@ -283,9 +316,13 @@ export default function App() {
   const [openTabs, setOpenTabs] = useState<string[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const tabMessagesRef = useRef<Map<string, ChatMessage[]>>(new Map());
+  const activeTabIdRef = useRef<string | null>(null);
+  const pendingSessionSwitchRef = useRef<string | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const appliedWorkspaceRef = useRef<string | null>(null);
   const hydratedTabsWorkspaceRef = useRef<string | null>(null);
+  const historyLoadSeqRef = useRef(0);
+  const sessionMessageCountRef = useRef(0);
   /** Mirror of `messages` so stable callbacks can read the latest value. */
   const messagesRef = useRef<ChatMessage[]>([]);
 
@@ -300,6 +337,33 @@ export default function App() {
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
+  useEffect(() => {
+    activeTabIdRef.current = activeTabId;
+  }, [activeTabId]);
+  useEffect(() => {
+    sessionMessageCountRef.current = session.messageCount ?? 0;
+  }, [session.messageCount]);
+
+  const workspaceTitle = workspace ? workspaceBasename(workspace) : "Pix Desktop";
+  const sessionTitle = useMemo(() => {
+    if (!workspace) return "";
+    return activeTabId ? sessionLabelFor(activeTabId, sessions, session) : "Session";
+  }, [workspace, activeTabId, sessions, session]);
+
+  const windowTitle = sessionTitle ? `${workspaceTitle} | ${sessionTitle}` : workspaceTitle;
+
+  useEffect(() => {
+    document.title = windowTitle;
+    getCurrentWindow().setTitle(windowTitle).catch(console.error);
+  }, [windowTitle]);
+
+  const handleTopbarMouseDown = useCallback((event: MouseEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    const target = event.target as HTMLElement | null;
+    if (target?.closest("[data-no-window-drag]")) return;
+    void getCurrentWindow().startDragging().catch(console.error);
+  }, []);
+
   const subscribed = useRef(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -520,23 +584,89 @@ export default function App() {
     }
   }, [workspace]);
 
+  const fetchMessagesPage = useCallback(async (cmd: { offset?: number; limit?: number; fromEnd?: boolean }) => {
+    const resp = await invoke<{ success: boolean; data?: MessagesPage; error?: string }>(
+      "rpc_call",
+      { cmd: { type: "get_messages", ...cmd } },
+    );
+    if (!resp.success) throw new Error(resp.error ?? "unknown");
+    return resp.data ?? { messages: [], offset: 0, total: 0 };
+  }, []);
+
+  const cancelHistoryLoad = useCallback(() => {
+    historyLoadSeqRef.current += 1;
+    setLoadingMessages(false);
+    setHistoryLoadProgress(null);
+  }, []);
+
   const loadMessages = useCallback(async (path?: string) => {
+    const loadSeq = historyLoadSeqRef.current + 1;
+    historyLoadSeqRef.current = loadSeq;
+    setLoadingMessages(true);
+    setHistoryLoadProgress({ loaded: 0, total: sessionMessageCountRef.current });
+    const isStaleLoad = () =>
+      historyLoadSeqRef.current !== loadSeq || (path ? activeTabIdRef.current !== path : false);
     try {
-      const resp = await invoke<{ success: boolean; data?: { messages: HistoryMessage[] }; error?: string }>(
-        "rpc_call",
-        { cmd: { type: "get_messages" } },
-      );
-      if (!resp.success) {
-        setError(`get_messages: ${resp.error ?? "unknown"}`);
-        return;
-      }
-      const next = toChatMessages(resp.data?.messages ?? []);
+      const first = await fetchMessagesPage({ fromEnd: true, limit: INITIAL_MESSAGE_CHUNK });
+      if (isStaleLoad()) return;
+
+      let loadedHistory = first.messages;
+      const next = toChatMessages(loadedHistory);
       setMessages(next);
       if (path) tabMessagesRef.current.set(path, next);
+      setHistoryLoadProgress({ loaded: loadedHistory.length, total: first.total });
+
+      let nextOlderEnd = first.offset;
+      if (nextOlderEnd <= 0) {
+        setLoadingMessages(false);
+        setHistoryLoadProgress(null);
+        return;
+      }
+
+      void (async () => {
+        try {
+          // Let the tail chunk paint first. The caller should not wait for the
+          // historical backfill; it must stay a strictly background task.
+          await nextPaint();
+          await idleYield();
+
+          while (nextOlderEnd > 0) {
+            if (isStaleLoad()) return;
+            const offset = Math.max(0, nextOlderEnd - BACKFILL_MESSAGE_CHUNK);
+            const older = await fetchMessagesPage({ offset, limit: nextOlderEnd - offset });
+            if (isStaleLoad()) return;
+            loadedHistory = [...older.messages, ...loadedHistory];
+            const hydrated = toChatMessages(loadedHistory);
+            startTransition(() => {
+              if (isStaleLoad()) return;
+              setMessages(hydrated);
+              setHistoryLoadProgress({ loaded: loadedHistory.length, total: older.total });
+            });
+            if (path) tabMessagesRef.current.set(path, hydrated);
+            nextOlderEnd = older.offset;
+
+            // Give React/WebView a chance to commit the current prepend before
+            // requesting the next historical page.
+            await nextPaint();
+            await idleYield();
+          }
+        } catch (e) {
+          if (!isStaleLoad()) setError(`get_messages: ${String(e)}`);
+        } finally {
+          if (historyLoadSeqRef.current === loadSeq) {
+            setLoadingMessages(false);
+            setHistoryLoadProgress(null);
+          }
+        }
+      })();
     } catch (e) {
       setError(`get_messages: ${String(e)}`);
+      if (historyLoadSeqRef.current === loadSeq) {
+        setLoadingMessages(false);
+        setHistoryLoadProgress(null);
+      }
     }
-  }, []);
+  }, [fetchMessagesPage]);
 
   const restoreTabsForWorkspace = useCallback(async (cwd: string, currentSessionFile?: string) => {
     const persisted = readPersistedTabs(cwd);
@@ -562,6 +692,7 @@ export default function App() {
     tabMessagesRef.current.clear();
     hydratedTabsWorkspaceRef.current = cwd;
     setOpenTabs(tabs);
+    activeTabIdRef.current = active;
     setActiveTabId(active);
     setMessages([]);
 
@@ -577,6 +708,7 @@ export default function App() {
         ]);
         setError(`restore tab: ${resp.error ?? "switch_session failed"}`);
         setOpenTabs(fallbackTabs);
+        activeTabIdRef.current = fallback;
         setActiveTabId(fallback);
         await refreshState();
         if (fallback) await loadMessages(fallback);
@@ -670,23 +802,34 @@ export default function App() {
     if (workspace) void refreshSessions();
   }, [workspace, refreshSessions]);
 
-  // Sync tab state with the active session: when the sidecar switches
-  // sessions (new_session, switch_session, folder change) the sessionFile in
-  // state updates. Make sure the new path is in openTabs and is active.
+  // Sync tab state when the sidecar reports a real session change. Do not run
+  // this as a reaction to `activeTabId`: tab clicks are optimistic and must not
+  // be rolled back to the old sidecar session while switch_session is pending.
   useEffect(() => {
     const path = session.sessionFile;
     if (!path) return;
-    if (activeTabId && activeTabId !== path) {
+    const pendingSwitch = pendingSessionSwitchRef.current;
+    const active = activeTabIdRef.current;
+    if (pendingSwitch && active === pendingSwitch && path !== pendingSwitch) {
+      return;
+    }
+    if (pendingSwitch === path) {
+      pendingSessionSwitchRef.current = null;
+    }
+    if (active && active !== path) {
       // Old tab's messages are already in tabMessagesRef via switchSession,
       // but events since the last switch may have updated them — refresh.
-      tabMessagesRef.current.set(activeTabId, messagesRef.current);
+      tabMessagesRef.current.set(active, messagesRef.current);
     }
     setOpenTabs((tabs) => (tabs.includes(path) ? tabs : [...tabs, path]));
-    setActiveTabId(path);
+    if (active !== path) {
+      activeTabIdRef.current = path;
+      setActiveTabId(path);
+    }
     if (!tabMessagesRef.current.has(path) && messagesRef.current.length === 0) {
       void loadMessages(path);
     }
-  }, [session.sessionFile, activeTabId, loadMessages]);
+  }, [session.sessionFile, loadMessages]);
 
   // Periodic refresh of stats (contextUsage, messageCount) for the status bar.
   // Cheap; sidecar just reads cached values. Skip while no session is active.
@@ -793,12 +936,14 @@ export default function App() {
           break;
         case "message_start":
           if (ev.message?.role === "assistant") {
+            cancelHistoryLoad();
             setMessages((prev) => [...prev, { id: genId("a"), role: "assistant", parts: [] }]);
           }
           break;
         case "message_update": {
           const d = ev.assistantMessageEvent;
           if (d?.type === "text_delta" && typeof d.delta === "string") {
+            cancelHistoryLoad();
             const delta = d.delta;
             setMessages((prev) => updateLastAssistant(prev, (parts) => appendText(parts, delta)));
           }
@@ -806,6 +951,7 @@ export default function App() {
         }
         case "tool_execution_start":
           if (!ev.toolCallId || !ev.toolName) break;
+          cancelHistoryLoad();
           setMessages((prev) =>
             updateLastAssistant(prev, (parts) => [
               ...parts,
@@ -821,6 +967,7 @@ export default function App() {
           break;
         case "tool_execution_end":
           if (!ev.toolCallId) break;
+          cancelHistoryLoad();
           setMessages((prev) =>
             updateLastAssistant(prev, (parts) =>
               parts.map((p) =>
@@ -836,15 +983,17 @@ export default function App() {
           break;
       }
     },
-    [handleExtensionUIRequest, refreshCommands, refreshState, refreshSessions],
+    [cancelHistoryLoad, handleExtensionUIRequest, refreshCommands, refreshState, refreshSessions],
   );
 
-  // Auto-scroll on new content.
-  useEffect(() => {
+  // Auto-scroll on new content. During history hydration, do it before paint so
+  // the first rendered chunk opens on the tail/visible chat instead of briefly
+  // flashing the top of that chunk.
+  useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-  }, [messages]);
+    el.scrollTo({ top: el.scrollHeight, behavior: loadingMessages ? "auto" : "smooth" });
+  }, [loadingMessages, messages]);
 
   // -- Actions -----------------------------------------------------------
 
@@ -855,6 +1004,7 @@ export default function App() {
     setError(null);
     setInput("");
     setSlashIndex(0);
+    cancelHistoryLoad();
 
     switch (command) {
       case "/help": {
@@ -965,12 +1115,13 @@ export default function App() {
         }
         setError(`Unknown slash command: ${command ?? raw}`);
     }
-  }, [activeTabId, loadMessages, refreshCommands, refreshModels, refreshSessions, refreshState, sdkSlashCommands, selectModel, streaming]);
+  }, [activeTabId, cancelHistoryLoad, loadMessages, refreshCommands, refreshModels, refreshSessions, refreshState, sdkSlashCommands, selectModel, streaming]);
 
   const executeShellCommand = useCallback(async (raw: string) => {
     const command = raw.replace(/^!+/, "").trim();
     setError(null);
     setInput("");
+    cancelHistoryLoad();
     if (!workspace) {
       setError("Choose a workspace before running shell commands.");
       return;
@@ -1005,7 +1156,7 @@ export default function App() {
         }),
       );
     }
-  }, [workspace]);
+  }, [cancelHistoryLoad, workspace]);
 
   const send = useCallback(async () => {
     const text = input.trim();
@@ -1026,6 +1177,7 @@ export default function App() {
     setError(null);
     setInput("");
     setAttachments([]);
+    cancelHistoryLoad();
     const promptText = text || "Attached image(s).";
     setMessages((prev) => [...prev, { id: genId("u"), role: "user", text: promptText, attachments: imageAttachments }]);
     try {
@@ -1040,7 +1192,7 @@ export default function App() {
     } catch (e) {
       setError(String(e));
     }
-  }, [attachments, executeShellCommand, executeSlashCommand, input, streaming]);
+  }, [attachments, cancelHistoryLoad, executeShellCommand, executeSlashCommand, input, streaming]);
 
   const abort = useCallback(async () => {
     try {
@@ -1053,6 +1205,7 @@ export default function App() {
   const newSession = useCallback(async () => {
     if (streaming) return;
     setError(null);
+    cancelHistoryLoad();
     // Note: actual new sessionFile will come back via the session_start event,
     // which triggers the openTabs/activeTabId sync effect below.
     setMessages([]);
@@ -1065,37 +1218,64 @@ export default function App() {
     } catch (e) {
       setError(String(e));
     }
-  }, [refreshState, streaming]);
+  }, [cancelHistoryLoad, refreshState, streaming]);
 
   const switchSession = useCallback(async (path: string) => {
+    if (path === activeTabId) return;
     if (streaming && path !== activeTabId) {
       setError("Cannot switch sessions while the agent is streaming. Stop the run first.");
       return;
     }
     setError(null);
+    cancelHistoryLoad();
     // Cache current messages under the previous active tab so switching back restores them.
     const prev = activeTabId;
     if (prev && prev !== path) {
       tabMessagesRef.current.set(prev, messagesRef.current);
     }
     setOpenTabs((tabs) => (tabs.includes(path) ? tabs : [...tabs, path]));
+    activeTabIdRef.current = path;
     setActiveTabId(path);
+    pendingSessionSwitchRef.current = path;
+    const hasCachedMessages = tabMessagesRef.current.has(path);
     const cached = tabMessagesRef.current.get(path);
     setMessages(cached ?? []);
+    if (!hasCachedMessages) {
+      setLoadingMessages(true);
+      setHistoryLoadProgress(null);
+    }
     try {
       const resp = await invoke<{ success: boolean; error?: string }>("rpc_call", {
         cmd: { type: "switch_session", sessionPath: path },
       });
       if (!resp.success) {
+        if (pendingSessionSwitchRef.current === path) pendingSessionSwitchRef.current = null;
+        if (prev && prev !== path) {
+          activeTabIdRef.current = prev;
+          setActiveTabId(prev);
+          setMessages(tabMessagesRef.current.get(prev) ?? messagesRef.current);
+        }
+        setLoadingMessages(false);
+        setHistoryLoadProgress(null);
         setError(resp.error ?? "switch_session failed");
         return;
       }
+      if (activeTabIdRef.current !== path) return;
       await refreshState();
-      if (!cached) await loadMessages(path);
+      if (activeTabIdRef.current !== path) return;
+      if (!hasCachedMessages) void loadMessages(path);
     } catch (e) {
+      if (pendingSessionSwitchRef.current === path) pendingSessionSwitchRef.current = null;
+      if (prev && prev !== path) {
+        activeTabIdRef.current = prev;
+        setActiveTabId(prev);
+        setMessages(tabMessagesRef.current.get(prev) ?? messagesRef.current);
+      }
+      setLoadingMessages(false);
+      setHistoryLoadProgress(null);
       setError(String(e));
     }
-  }, [activeTabId, loadMessages, refreshState, streaming]);
+  }, [activeTabId, cancelHistoryLoad, loadMessages, refreshState, streaming]);
 
   const closeTab = useCallback(
     async (path: string) => {
@@ -1106,27 +1286,43 @@ export default function App() {
       // Drop the closed tab; forget its cached messages.
       const next = openTabs.filter((p) => p !== path);
       tabMessagesRef.current.delete(path);
+      cancelHistoryLoad();
       setOpenTabs(next);
       // If we closed the active tab, switch to the next remaining one (or clear).
       if (activeTabId === path) {
         const newActive = next[next.length - 1] ?? null;
+        activeTabIdRef.current = newActive;
         setActiveTabId(newActive);
         if (newActive) {
+          pendingSessionSwitchRef.current = newActive;
+          const hasCachedMessages = tabMessagesRef.current.has(newActive);
           const cached = tabMessagesRef.current.get(newActive);
           setMessages(cached ?? []);
+          if (!hasCachedMessages) {
+            setLoadingMessages(true);
+            setHistoryLoadProgress(null);
+          }
           try {
             await invoke("rpc_call", { cmd: { type: "switch_session", sessionPath: newActive } });
+            if (activeTabIdRef.current !== newActive) return;
             await refreshState();
-            if (!cached) await loadMessages(newActive);
+            if (activeTabIdRef.current !== newActive) return;
+            if (!hasCachedMessages) void loadMessages(newActive);
           } catch (e) {
+            if (pendingSessionSwitchRef.current === newActive) pendingSessionSwitchRef.current = null;
+            setLoadingMessages(false);
+            setHistoryLoadProgress(null);
             setError(String(e));
           }
         } else {
+          pendingSessionSwitchRef.current = null;
           setMessages([]);
+          setLoadingMessages(false);
+          setHistoryLoadProgress(null);
         }
       }
     },
-    [openTabs, activeTabId, loadMessages, refreshState, streaming],
+    [openTabs, activeTabId, cancelHistoryLoad, loadMessages, refreshState, streaming],
   );
 
   const composerCompletionTarget = useMemo(() => parseComposerCompletionTarget(input), [input]);
@@ -1288,43 +1484,32 @@ export default function App() {
   return (
     <div className="app">
       <main className="chat">
-        <div className="topbar">
-          <div className="topbar__brand">
-            <Sparkles size={16} className="topbar__logo" />
-            <span>Pix Desktop</span>
-          </div>
-          <div className="topbar__workspace" title={workspace}>
-            <FolderOpen size={12} />
-            <span>{workspaceBasename(workspace)}</span>
-          </div>
-          <div className="topbar__actions">
+        <div className="topbar" onMouseDown={handleTopbarMouseDown}>
+          <div className="topbar__title">
             <button
-              className="topbar__btn"
+              type="button"
+              className="topbar__project"
+              data-no-window-drag
               onClick={() => void chooseFolder()}
               disabled={switchingWorkspace || streaming}
               title="Change folder"
             >
-              switch
+              {workspaceTitle}
             </button>
-            <button
-              className="topbar__icon-btn"
-              onClick={() => void refreshSessions()}
-              disabled={loadingSessions}
-              title="Refresh sessions"
-              aria-label="Refresh sessions"
-            >
-              <RefreshCw size={13} className={loadingSessions ? "spinning" : ""} />
-            </button>
-            <button
-              className="topbar__icon-btn"
-              onClick={() => void newSession()}
-              disabled={streaming}
-              title="New session"
-              aria-label="New session"
-            >
-              <Plus size={14} />
-            </button>
+            {sessionTitle && <span className="topbar__separator"> / </span>}
+            {sessionTitle && <span className="topbar__session">{sessionTitle}</span>}
           </div>
+          <div className="topbar__meta">
+            {session.messageCount !== undefined && (
+              <span title="Message count">{session.messageCount} msgs</span>
+            )}
+            {session.sessionFile && (
+              <span className="topbar__file" title={session.sessionFile}>
+                {shortId(session.sessionId)}
+              </span>
+            )}
+          </div>
+          <div className="topbar__spacer" />
         </div>
         {openTabs.length > 0 && (
           <div className="tabsbar" role="tablist" aria-label="Open sessions">
@@ -1377,32 +1562,19 @@ export default function App() {
           </div>
         )}
 
-        <header className="chat__header">
-          <div className="chat__title">
-            {session.sessionName || (
-              <span className="chat__title-placeholder">Untitled session</span>
-            )}
-          </div>
-          <div className="chat__meta">
-            {session.messageCount !== undefined && (
-              <span title="Message count">{session.messageCount} msgs</span>
-            )}
-            {session.sessionFile && (
-              <span className="chat__file" title={session.sessionFile}>
-                {shortId(session.sessionId)}
-              </span>
-            )}
-          </div>
-        </header>
-
         <div className="chat__body" ref={scrollRef}>
+          {loadingMessages && historyLoadProgress && historyLoadProgress.loaded > 0 && historyLoadProgress.loaded < historyLoadProgress.total && (
+            <div className="chat__history-loading">
+              Loaded latest {historyLoadProgress.loaded} of {historyLoadProgress.total} messages. Backfilling older history…
+            </div>
+          )}
           {messages.length === 0 ? (
             <div className="chat__empty">
-              <Sparkles size={28} />
-              <p>Send a message to start a conversation.</p>
-              {session.messageCount && session.messageCount > 0 && loadingSessions ? (
+              {loadingMessages ? <RefreshCw size={28} className="spinning" /> : <Sparkles size={28} />}
+              <p>{loadingMessages ? "Loading session messages…" : "Send a message to start a conversation."}</p>
+              {loadingMessages ? (
                 <p className="chat__empty-hint">
-                  Loading {session.messageCount} saved messages…
+                  The tab is already active. Content is loading in the background.
                 </p>
               ) : null}
             </div>

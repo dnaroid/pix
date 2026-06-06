@@ -281,7 +281,22 @@ export async function runDispatcher(opts: DispatcherOptions): Promise<void> {
           return;
         }
         case "get_messages": {
-          writeLine(success(id, "get_messages", { messages: session.messages }));
+          const total = session.messages.length;
+          const requestedLimit = typeof raw.limit === "number" && Number.isFinite(raw.limit)
+            ? Math.max(0, Math.floor(raw.limit))
+            : undefined;
+          const limit = requestedLimit === undefined ? total : requestedLimit;
+          const requestedOffset = typeof raw.offset === "number" && Number.isFinite(raw.offset)
+            ? Math.floor(raw.offset)
+            : undefined;
+          const offset = raw.fromEnd
+            ? Math.max(0, total - limit)
+            : Math.min(Math.max(0, requestedOffset ?? 0), total);
+          writeLine(success(id, "get_messages", {
+            messages: session.messages.slice(offset, Math.min(total, offset + limit)),
+            offset,
+            total,
+          }));
           return;
         }
         case "get_session_stats": {

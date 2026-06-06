@@ -22,7 +22,13 @@
         "decorations": true,
         "transparent": false,
         "fullscreen": false,
-        "center": true
+        "center": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": {
+          "x": 14,
+          "y": 24
+        }
       }
     ],
     "security": {
