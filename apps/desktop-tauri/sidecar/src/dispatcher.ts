@@ -14,7 +14,10 @@
 import type {
   AgentSessionRuntime,
   AgentSession,
+  ExtensionUIContext,
+  ExtensionWidgetOptions,
 } from "@earendil-works/pi-coding-agent";
+import { randomUUID } from "node:crypto";
 import {
   attachJsonlLineReader,
   serializeJsonLine,
@@ -54,13 +57,165 @@ export async function runDispatcher(opts: DispatcherOptions): Promise<void> {
   // Holder for the active runtime — `pix:set_cwd` swaps it via opts.switchCwd.
   const holder: { runtime: AgentSessionRuntime } = { runtime: opts.initialRuntime };
   let unsubscribe: (() => void) | undefined;
+  const pendingExtensionRequests = new Map<
+    string,
+    { resolve: (response: UnknownCommand) => void; reject: (error: unknown) => void }
+  >();
 
-  const rebindSession = (): void => {
+  const createDialogPromise = <T>(
+    opts: { timeout?: number; signal?: AbortSignal } | undefined,
+    defaultValue: T,
+    request: Record<string, unknown>,
+    parseResponse: (response: UnknownCommand) => T,
+  ): Promise<T> => {
+    if (opts?.signal?.aborted) return Promise.resolve(defaultValue);
+    const requestId = randomUUID();
+    return new Promise<T>((resolve, reject) => {
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      const cleanup = () => {
+        if (timeoutId) clearTimeout(timeoutId);
+        opts?.signal?.removeEventListener("abort", onAbort);
+        pendingExtensionRequests.delete(requestId);
+      };
+      const onAbort = () => {
+        cleanup();
+        resolve(defaultValue);
+      };
+      opts?.signal?.addEventListener("abort", onAbort, { once: true });
+      if (opts?.timeout) {
+        timeoutId = setTimeout(() => {
+          cleanup();
+          resolve(defaultValue);
+        }, opts.timeout);
+      }
+      pendingExtensionRequests.set(requestId, {
+        resolve: (response) => {
+          cleanup();
+          resolve(parseResponse(response));
+        },
+        reject,
+      });
+      writeLine({ type: "extension_ui_request", id: requestId, ...request });
+    });
+  };
+
+  const createExtensionUIContext = (): ExtensionUIContext => ({
+    select: (title, options, dialogOpts) =>
+      createDialogPromise(dialogOpts, undefined, { method: "select", title, options, timeout: dialogOpts?.timeout }, (response) =>
+        response.cancelled ? undefined : typeof response.value === "string" ? response.value : undefined,
+      ),
+    confirm: (title, message, dialogOpts) =>
+      createDialogPromise(dialogOpts, false, { method: "confirm", title, message, timeout: dialogOpts?.timeout }, (response) =>
+        response.cancelled ? false : response.confirmed === true,
+      ),
+    input: (title, placeholder, dialogOpts) =>
+      createDialogPromise(dialogOpts, undefined, { method: "input", title, placeholder, timeout: dialogOpts?.timeout }, (response) =>
+        response.cancelled ? undefined : typeof response.value === "string" ? response.value : undefined,
+      ),
+    notify(message, type) {
+      writeLine({ type: "extension_ui_request", id: randomUUID(), method: "notify", message, notifyType: type });
+    },
+    onTerminalInput() {
+      return () => {};
+    },
+    setStatus(key, text) {
+      writeLine({ type: "extension_ui_request", id: randomUUID(), method: "setStatus", statusKey: key, statusText: text });
+    },
+    setWorkingMessage() {},
+    setWorkingVisible() {},
+    setWorkingIndicator() {},
+    setHiddenThinkingLabel() {},
+    setWidget(key, content, options?: ExtensionWidgetOptions) {
+      if (content === undefined || Array.isArray(content)) {
+        writeLine({
+          type: "extension_ui_request",
+          id: randomUUID(),
+          method: "setWidget",
+          widgetKey: key,
+          widgetLines: content,
+          widgetPlacement: options?.placement,
+        });
+      }
+    },
+    setFooter() {},
+    setHeader() {},
+    setTitle(title) {
+      writeLine({ type: "extension_ui_request", id: randomUUID(), method: "setTitle", title });
+    },
+    async custom<T>() {
+      return undefined as T;
+    },
+    pasteToEditor(text) {
+      this.setEditorText(text);
+    },
+    setEditorText(text) {
+      writeLine({ type: "extension_ui_request", id: randomUUID(), method: "set_editor_text", text });
+    },
+    getEditorText() {
+      return "";
+    },
+    editor: (title, prefill) =>
+      createDialogPromise(undefined, undefined, { method: "editor", title, prefill }, (response) =>
+        response.cancelled ? undefined : typeof response.value === "string" ? response.value : undefined,
+      ),
+    addAutocompleteProvider() {},
+    setEditorComponent() {},
+    getEditorComponent() {
+      return undefined;
+    },
+    get theme() {
+      return undefined as unknown as ExtensionUIContext["theme"];
+    },
+    getAllThemes() {
+      return [];
+    },
+    getTheme() {
+      return undefined;
+    },
+    setTheme() {
+      return { success: false, error: "Theme switching is not supported in Pix Desktop sidecar mode" };
+    },
+    getToolsExpanded() {
+      return false;
+    },
+    setToolsExpanded() {},
+  });
+
+  const rebindSession = async (): Promise<void> => {
     unsubscribe?.();
+    const session = holder.runtime.session;
+    await session.bindExtensions({
+      uiContext: createExtensionUIContext(),
+      commandContextActions: {
+        waitForIdle: () => session.agent.waitForIdle(),
+        newSession: async (options) => holder.runtime.newSession(options),
+        fork: async (entryId, options) => {
+          const result = await holder.runtime.fork(entryId, options);
+          return { cancelled: result.cancelled };
+        },
+        navigateTree: async (targetId, options) => {
+          const result = await session.navigateTree(targetId, {
+            summarize: options?.summarize,
+            customInstructions: options?.customInstructions,
+            replaceInstructions: options?.replaceInstructions,
+            label: options?.label,
+          });
+          return { cancelled: result.cancelled };
+        },
+        switchSession: async (sessionPath, options) => holder.runtime.switchSession(sessionPath, options),
+        reload: async () => {
+          await session.reload();
+        },
+      },
+      shutdownHandler: () => process.exit(0),
+      onError: (err) => {
+        writeLine({ type: "extension_error", extensionPath: err.extensionPath, event: err.event, error: err.error });
+      },
+    });
     unsubscribe = opts.onSession(holder.runtime.session, (ev) => writeLine(ev));
   };
 
-  rebindSession();
+  await rebindSession();
 
   const handleCommand = async (raw: UnknownCommand): Promise<void> => {
     const id = typeof raw.id === "string" ? raw.id : undefined;
@@ -71,6 +226,7 @@ export async function runDispatcher(opts: DispatcherOptions): Promise<void> {
         // -- Prompting ----------------------------------------------------
         case "prompt": {
           const message = typeof raw.message === "string" ? raw.message : "";
+          const images = Array.isArray(raw.images) ? normalizeImages(raw.images) : undefined;
           // The SDK's prompt() resolves only after the full run; we emit the
           // success response eagerly once preflight accepts the prompt, then
           // let subsequent events stream. Rejections before preflight surface
@@ -82,7 +238,7 @@ export async function runDispatcher(opts: DispatcherOptions): Promise<void> {
                 raw.streamingBehavior === "steer" || raw.streamingBehavior === "followUp"
                   ? raw.streamingBehavior
                   : undefined,
-              // images and source are SDK-internal; we don't expose them yet.
+              images,
               source: "rpc",
               preflightResult: (ok: boolean) => {
                 if (ok) {
@@ -133,13 +289,114 @@ export async function runDispatcher(opts: DispatcherOptions): Promise<void> {
           writeLine(success(id, "get_session_stats", stats));
           return;
         }
+        case "get_commands": {
+          const commands = [];
+          for (const command of session.extensionRunner.getRegisteredCommands()) {
+            commands.push({
+              name: command.invocationName,
+              description: command.description,
+              source: "extension",
+              sourceInfo: command.sourceInfo,
+            });
+          }
+          for (const template of session.promptTemplates) {
+            commands.push({
+              name: template.name,
+              description: template.description,
+              source: "prompt",
+              sourceInfo: template.sourceInfo,
+            });
+          }
+          for (const skill of session.resourceLoader.getSkills().skills) {
+            commands.push({
+              name: `skill:${skill.name}`,
+              description: skill.description,
+              source: "skill",
+              sourceInfo: skill.sourceInfo,
+            });
+          }
+          writeLine(success(id, "get_commands", { commands }));
+          return;
+        }
+        case "get_command_completions": {
+          const commandName = typeof raw.command === "string" ? raw.command.replace(/^\/+/, "") : "";
+          const argumentPrefix = typeof raw.argumentPrefix === "string" ? raw.argumentPrefix : "";
+          if (!commandName) {
+            writeLine(failure(id, "get_command_completions", "command required"));
+            return;
+          }
+          const command = session.extensionRunner
+            .getRegisteredCommands()
+            .find((candidate) => candidate.invocationName.replace(/^\/+/, "") === commandName);
+          if (!command?.getArgumentCompletions) {
+            writeLine(success(id, "get_command_completions", { completions: [] }));
+            return;
+          }
+          const items = await command.getArgumentCompletions(argumentPrefix);
+          writeLine(success(id, "get_command_completions", { completions: normalizeCompletions(items) }));
+          return;
+        }
+        case "extension_ui_response": {
+          if (!id) {
+            writeLine(failure(id, "extension_ui_response", "id required"));
+            return;
+          }
+          const pending = pendingExtensionRequests.get(id);
+          if (!pending) {
+            writeLine(failure(id, "extension_ui_response", "No pending extension UI request for id"));
+            return;
+          }
+          pending.resolve(raw);
+          writeLine(success(id, "extension_ui_response"));
+          return;
+        }
+        case "get_models": {
+          const current = session.model;
+          const available = holder.runtime.services.modelRegistry.getAvailable();
+          writeLine(success(id, "get_models", {
+            models: available.map((model) => summarizeModel(model, current)),
+          }));
+          return;
+        }
+        case "set_model": {
+          const ref = typeof raw.ref === "string" ? raw.ref.trim() : "";
+          const provider = typeof raw.provider === "string" ? raw.provider.trim() : "";
+          const modelId = typeof raw.modelId === "string" ? raw.modelId.trim() : "";
+          const model = findModel(holder.runtime.services.modelRegistry.getAvailable(), { ref, provider, modelId });
+          if (!model) {
+            writeLine(failure(id, "set_model", "Model not found or unavailable"));
+            return;
+          }
+          await session.setModel(model as Parameters<typeof session.setModel>[0]);
+          writeLine(success(id, "set_model", { model: summarizeModel(model, session.model) }));
+          return;
+        }
+        case "compact": {
+          const instructions = typeof raw.instructions === "string" && raw.instructions.trim()
+            ? raw.instructions.trim()
+            : undefined;
+          const result = await session.compact(instructions);
+          writeLine(success(id, "compact", { result, contextUsage: session.getContextUsage() }));
+          return;
+        }
+        case "undo_last_turn": {
+          const userMessages = session.getUserMessagesForForking();
+          const last = userMessages[userMessages.length - 1];
+          if (!last) {
+            writeLine(failure(id, "undo_last_turn", "No user message to undo"));
+            return;
+          }
+          const result = await session.navigateTree(last.entryId, { summarize: false });
+          writeLine(success(id, "undo_last_turn", { ...result, target: last }));
+          return;
+        }
 
         // -- Session lifecycle -------------------------------------------
         case "new_session": {
           const options =
             typeof raw.parentSession === "string" ? { parentSession: raw.parentSession } : undefined;
           const result = await holder.runtime.newSession(options);
-          if (!result.cancelled) rebindSession();
+          if (!result.cancelled) await rebindSession();
           writeLine(success(id, "new_session", result));
           return;
         }
@@ -150,7 +407,7 @@ export async function runDispatcher(opts: DispatcherOptions): Promise<void> {
             return;
           }
           const result = await holder.runtime.switchSession(sessionPath);
-          if (!result.cancelled) rebindSession();
+          if (!result.cancelled) await rebindSession();
           writeLine(success(id, "switch_session", result));
           return;
         }
@@ -183,7 +440,7 @@ export async function runDispatcher(opts: DispatcherOptions): Promise<void> {
           }
           const newRuntime = await opts.switchCwd(newCwd);
           holder.runtime = newRuntime;
-          rebindSession();
+          await rebindSession();
           writeLine(
             success(id, "pix:set_cwd", {
               cwd: newRuntime.cwd,
@@ -231,7 +488,81 @@ export async function runDispatcher(opts: DispatcherOptions): Promise<void> {
   });
 }
 
+function normalizeImages(images: unknown[]): { type: "image"; data: string; mimeType: string }[] | undefined {
+  const normalized = images
+    .map((image) => {
+      if (!image || typeof image !== "object") return null;
+      const candidate = image as Record<string, unknown>;
+      const data = typeof candidate.data === "string" ? candidate.data : "";
+      const mimeType = typeof candidate.mimeType === "string" ? candidate.mimeType : "";
+      if (!data || !mimeType.startsWith("image/")) return null;
+      return { type: "image" as const, data, mimeType };
+    })
+    .filter((image): image is { type: "image"; data: string; mimeType: string } => image !== null);
+  return normalized.length > 0 ? normalized : undefined;
+}
+
 function errorMessage(e: unknown): string {
   if (e instanceof Error) return e.message;
   return String(e);
+}
+
+function normalizeCompletions(items: unknown): Array<{ label: string; value: string; description?: string }> {
+  if (!Array.isArray(items)) return [];
+  const completions: Array<{ label: string; value: string; description?: string }> = [];
+  for (const item of items) {
+    if (typeof item === "string") {
+      if (item) completions.push({ label: item, value: item });
+      continue;
+    }
+    if (!item || typeof item !== "object") continue;
+    const record = item as Record<string, unknown>;
+    const value = firstString(record.insertText, record.value, record.label, record.text, record.name);
+    if (!value) continue;
+    const label = firstString(record.label, record.text, record.name, record.value, record.insertText) ?? value;
+    const description = firstString(record.description, record.detail, record.documentation);
+    completions.push(description ? { label, value, description } : { label, value });
+  }
+  return completions;
+}
+
+function firstString(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return undefined;
+}
+
+type ModelLike = {
+  id: string;
+  name: string;
+  provider: string;
+  reasoning?: boolean;
+  contextWindow?: number;
+};
+
+function summarizeModel(model: ModelLike, current: ModelLike | undefined): Record<string, unknown> {
+  return {
+    id: model.id,
+    name: model.name,
+    provider: model.provider,
+    ref: `${model.provider}/${model.id}`,
+    reasoning: model.reasoning === true,
+    contextWindow: model.contextWindow,
+    current: Boolean(current && current.provider === model.provider && current.id === model.id),
+  };
+}
+
+function findModel(models: ModelLike[], target: { ref?: string; provider?: string; modelId?: string }): ModelLike | undefined {
+  const ref = target.ref?.toLowerCase();
+  if (ref) {
+    return models.find((model) => {
+      const fullRef = `${model.provider}/${model.id}`.toLowerCase();
+      return fullRef === ref || model.id.toLowerCase() === ref || model.name.toLowerCase() === ref;
+    });
+  }
+  const provider = target.provider?.toLowerCase();
+  const modelId = target.modelId?.toLowerCase();
+  if (!provider || !modelId) return undefined;
+  return models.find((model) => model.provider.toLowerCase() === provider && model.id.toLowerCase() === modelId);
 }

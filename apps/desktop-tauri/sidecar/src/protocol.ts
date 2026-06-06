@@ -28,6 +28,13 @@ export type RpcCommand =
   | { id?: string; type: "get_state" }
   | { id?: string; type: "get_messages" }
   | { id?: string; type: "get_session_stats" }
+  | { id?: string; type: "get_commands" }
+  | { id?: string; type: "get_command_completions"; command: string; argumentPrefix?: string }
+  | { id?: string; type: "extension_ui_response"; value?: unknown; confirmed?: boolean; cancelled?: boolean }
+  | { id?: string; type: "get_models" }
+  | { id?: string; type: "set_model"; provider?: string; modelId?: string; ref?: string }
+  | { id?: string; type: "compact"; instructions?: string }
+  | { id?: string; type: "undo_last_turn" }
   // -- Session lifecycle ------------------------------------------------
   | { id?: string; type: "new_session"; parentSession?: string }
   | { id?: string; type: "switch_session"; sessionPath: string }

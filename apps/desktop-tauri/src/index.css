@@ -1,14 +1,82 @@
+@import "tailwindcss";
+
+@theme {
+  --color-claude-canvas: var(--canvas);
+  --color-claude-surface-soft: var(--surface-soft);
+  --color-claude-surface-card: var(--surface-card);
+  --color-claude-surface-strong: var(--surface-cream-strong);
+  
+  --color-claude-dark: var(--surface-dark);
+  --color-claude-dark-elevated: var(--surface-dark-elevated);
+  --color-claude-dark-soft: var(--surface-dark-soft);
+
+  --color-claude-ink: var(--ink);
+  --color-claude-body: var(--body);
+  --color-claude-muted: var(--muted);
+  --color-claude-muted-soft: var(--muted-soft);
+
+  --color-claude-coral: var(--primary);
+  --color-claude-coral-active: var(--primary-active);
+  --color-claude-coral-disabled: var(--primary-disabled);
+
+  --color-claude-on-dark: var(--on-dark);
+  --color-claude-on-dark-soft: var(--on-dark-soft);
+  --color-claude-on-primary: var(--on-primary);
+}
+
 :root {
   color-scheme: dark;
-  --bg: #1a1b26;
-  --surface: #24283b;
-  --surface-2: #1f2335;
-  --border: #3b4261;
-  --text: #c0caf5;
-  --text-muted: #7c849f;
-  --accent: #7aa2f7;
-  --error: #f7768e;
-  --error-bg: rgba(247, 118, 142, 0.1);
+  
+  /* Brand colors */
+  --primary: #cc785c;
+  --primary-active: #a9583e;
+  --primary-disabled: #e6dfd8;
+  
+  /* Text colors */
+  --ink: #141413;
+  --body: #3d3d3a;
+  --body-strong: #252523;
+  --muted: #6c6a64;
+  --muted-soft: #8e8b82;
+  --on-primary: #ffffff;
+  --on-dark: #faf9f5;
+  --on-dark-soft: #a09d96;
+  
+  /* Surface colors */
+  --canvas: #faf9f5;
+  --surface-soft: #f5f0e8;
+  --surface-card: #efe9de;
+  --surface-cream-strong: #e8e0d2;
+  --surface-dark: #181715;
+  --surface-dark-elevated: #252320;
+  --surface-dark-soft: #1f1e1b;
+  
+  /* Borders */
+  --hairline: #e6dfd8;
+  --hairline-soft: #ebe6df;
+  
+  /* Semantic */
+  --accent-teal: #5db8a6;
+  --accent-amber: #e8a55a;
+  --success: #5db872;
+  --warning: #d4a017;
+  --error: #c64545;
+  --error-bg: rgba(198, 69, 69, 0.1);
+  
+  /* Typography */
+  --font-display: "Copernicus", "Tiempos Headline", "Cormorant Garamond", serif;
+  --font-sans: "StyreneB", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  /* Dark Theme Default Mappings */
+  --bg: var(--surface-dark);
+  --surface: var(--surface-dark-soft);
+  --surface-2: var(--surface-dark-elevated);
+  --border: #363430;
+  --text: var(--on-dark);
+  --text-muted: var(--on-dark-soft);
+  --text-dim: #737067;
+  --accent: var(--primary);
 }
 
 * {
@@ -26,12 +94,13 @@ body,
 }
 
 body {
+  font-family: var(--font-sans);
   font-size: 14px;
-  line-height: 1.5;
+  line-height: 1.55;
   -webkit-font-smoothing: antialiased;
 }
 
 code {
-  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  font-family: var(--font-mono);
   font-size: 0.95em;
 }

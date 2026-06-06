@@ -33,7 +33,7 @@ export const shellTool: ToolRenderer = {
     compactCommand(stringArg(args, ["command", "cmd", "script"])) ?? "",
   render: ({ args, result, status, isError }) => {
     const command = compactCommand(stringArg(args, ["command", "cmd", "script"])) ?? "(no command)";
-    const out = typeof result === "string" ? result : resultText(result, status);
+    const out = shellOutputText(result) ?? (typeof result === "string" ? result : resultText(result, status));
     const isDiff = isGitDiffCommand(command) && out.length > 0;
     return (
       <>
@@ -52,6 +52,22 @@ export const shellTool: ToolRenderer = {
     );
   },
 };
+
+function shellOutputText(result: unknown): string | undefined {
+  if (!result || typeof result !== "object" || Array.isArray(result)) return undefined;
+  const record = result as Record<string, unknown>;
+  const stdout = typeof record.stdout === "string" ? record.stdout : "";
+  const stderr = typeof record.stderr === "string" ? record.stderr : "";
+  const code = typeof record.code === "number" ? record.code : null;
+  const timedOut = record.timed_out === true;
+  const pieces = [stdout, stderr].filter(Boolean).join(stdout && stderr ? "\n" : "");
+  const suffix = timedOut
+    ? "\n[timeout after 60s]"
+    : code !== null && code !== 0
+      ? `\n[exit ${code}]`
+      : "";
+  return `${pieces}${suffix}`.trimEnd();
+}
 
 // -- Read -----------------------------------------------------------------
 

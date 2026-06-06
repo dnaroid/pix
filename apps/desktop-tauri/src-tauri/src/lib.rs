@@ -13,12 +13,32 @@
 mod sidecar;
 
 use crate::sidecar::SidecarHandle;
+use serde::Serialize;
 use serde_json::{json, Value};
 use std::path::PathBuf;
+use std::process::Stdio;
 use std::sync::Arc;
 use tauri::ipc::Channel;
 use tauri::{Manager, State};
 use tokio::sync::Mutex;
+use tokio::time::{timeout, Duration};
+
+#[derive(Debug, Serialize)]
+struct ShellRunResult {
+    code: Option<i32>,
+    signal: Option<i32>,
+    stdout: String,
+    stderr: String,
+    timed_out: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct PathCompletionItem {
+    label: String,
+    value: String,
+    description: Option<String>,
+    is_dir: bool,
+}
 
 /// Tauri command: send an RPC command to the sidecar and await the response.
 ///
@@ -78,6 +98,142 @@ async fn set_workspace(
         .map_err(|e| format!("sidecar pix:set_cwd failed: {e}"))
 }
 
+/// Tauri command: run a short, non-interactive shell command in the selected
+/// workspace and return captured stdout/stderr. This powers the desktop `!cmd`
+/// flow; raw TTY shells are intentionally not handled here.
+#[tauri::command]
+async fn run_shell(cwd: String, command: String) -> Result<ShellRunResult, String> {
+    let canonical = std::fs::canonicalize(PathBuf::from(&cwd))
+        .map_err(|e| format!("shell cwd not accessible: {e}"))?;
+    if !canonical.is_dir() {
+        return Err(format!("shell cwd is not a directory: {}", canonical.display()));
+    }
+
+    let trimmed = command.trim();
+    if trimmed.is_empty() {
+        return Err("shell command is empty".to_string());
+    }
+
+    #[cfg(windows)]
+    let child = tokio::process::Command::new("cmd")
+        .arg("/C")
+        .arg(trimmed)
+        .current_dir(canonical)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| format!("spawn shell failed: {e}"))?;
+
+    #[cfg(not(windows))]
+    let child = tokio::process::Command::new(std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string()))
+        .arg("-lc")
+        .arg(trimmed)
+        .current_dir(canonical)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| format!("spawn shell failed: {e}"))?;
+
+    let output = match timeout(Duration::from_secs(60), child.wait_with_output()).await {
+        Ok(result) => result.map_err(|e| format!("wait shell failed: {e}"))?,
+        Err(_) => {
+            return Ok(ShellRunResult {
+                code: None,
+                signal: None,
+                stdout: String::new(),
+                stderr: "Command timed out after 60s".to_string(),
+                timed_out: true,
+            });
+        }
+    };
+
+    #[cfg(unix)]
+    let signal = std::os::unix::process::ExitStatusExt::signal(&output.status);
+    #[cfg(not(unix))]
+    let signal = None;
+
+    Ok(ShellRunResult {
+        code: output.status.code(),
+        signal,
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        timed_out: false,
+    })
+}
+
+/// Tauri command: return lightweight filesystem path completions scoped to the
+/// selected workspace. The frontend uses this for composer autocomplete in
+/// shell commands, slash arguments, and @path mentions.
+#[tauri::command]
+async fn complete_path(cwd: String, prefix: String) -> Result<Vec<PathCompletionItem>, String> {
+    let canonical_cwd = std::fs::canonicalize(PathBuf::from(&cwd))
+        .map_err(|e| format!("completion cwd not accessible: {e}"))?;
+    if !canonical_cwd.is_dir() {
+        return Err(format!("completion cwd is not a directory: {}", canonical_cwd.display()));
+    }
+
+    let trimmed = prefix.trim_start_matches("./");
+    let prefix_path = PathBuf::from(trimmed);
+    if prefix_path.is_absolute() || trimmed.split(['/', '\\']).any(|part| part == "..") {
+        return Ok(Vec::new());
+    }
+
+    let (base_rel, file_prefix) = match trimmed.rsplit_once(['/', '\\']) {
+        Some((base, file)) => (base, file),
+        None => ("", trimmed),
+    };
+    let base = if base_rel.is_empty() {
+        canonical_cwd.clone()
+    } else {
+        canonical_cwd.join(base_rel)
+    };
+    let base = match std::fs::canonicalize(&base) {
+        Ok(path) => path,
+        Err(_) => return Ok(Vec::new()),
+    };
+    if !base.starts_with(&canonical_cwd) || !base.is_dir() {
+        return Ok(Vec::new());
+    }
+
+    let mut items = Vec::new();
+    let entries = std::fs::read_dir(&base).map_err(|e| format!("read completion dir failed: {e}"))?;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with('.') && !file_prefix.starts_with('.') {
+            continue;
+        }
+        if !name.to_lowercase().starts_with(&file_prefix.to_lowercase()) {
+            continue;
+        }
+        let metadata = match entry.metadata() {
+            Ok(metadata) => metadata,
+            Err(_) => continue,
+        };
+        let is_dir = metadata.is_dir();
+        let rel = if base_rel.is_empty() {
+            name.clone()
+        } else {
+            format!("{}/{}", base_rel.replace('\\', "/"), name)
+        };
+        let value = if is_dir { format!("{rel}/") } else { rel.clone() };
+        items.push(PathCompletionItem {
+            label: if is_dir { format!("{name}/") } else { name },
+            value,
+            description: Some(if is_dir { "directory".to_string() } else { "file".to_string() }),
+            is_dir,
+        });
+        if items.len() >= 50 {
+            break;
+        }
+    }
+
+    items.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then_with(|| a.label.to_lowercase().cmp(&b.label.to_lowercase())));
+    items.truncate(20);
+    Ok(items)
+}
+
 pub fn run() {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -98,7 +254,7 @@ pub fn run() {
             app.manage(Arc::new(Mutex::new(handle)));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![rpc_call, rpc_subscribe, set_workspace])
+        .invoke_handler(tauri::generate_handler![rpc_call, rpc_subscribe, set_workspace, run_shell, complete_path])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

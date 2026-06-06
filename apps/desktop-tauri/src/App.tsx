@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke, Channel } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
@@ -18,6 +18,9 @@ import {
   Cpu,
   Gauge,
   Brain,
+  Image as ImageIcon,
+  Mic,
+  MicOff,
 } from "lucide-react";
 import { lookup, defaultRenderer } from "./tools";
 import type { ToolRenderProps } from "./tools/types";
@@ -60,8 +63,16 @@ type ToolPart = {
 type AssistantPart = TextPart | ToolPart;
 
 type ChatMessage =
-  | { id: string; role: "user"; text: string }
+  | { id: string; role: "user"; text: string; attachments?: ImageAttachment[] }
   | { id: string; role: "assistant"; parts: AssistantPart[] };
+
+type ImageAttachment = {
+  id: string;
+  name: string;
+  mimeType: string;
+  data: string;
+  size: number;
+};
 
 type HistoryContent =
   | { type: "text"; text?: string }
@@ -99,6 +110,14 @@ type SessionState = {
   contextUsage?: ContextUsageInfo;
 };
 
+type ShellRunResult = {
+  code: number | null;
+  signal: number | null;
+  stdout: string;
+  stderr: string;
+  timed_out: boolean;
+};
+
 /** Subset of SDK Model we care about in the UI. Passed through as-is from sidecar. */
 type ModelInfo = {
   id?: string;
@@ -123,15 +142,101 @@ type PersistedTabs = {
 type SlashCommandDef = {
   name: string;
   description: string;
+  source?: "desktop" | "extension" | "prompt" | "skill";
   disabled?: boolean;
 };
 
+type SlashCompletionItem = {
+  label: string;
+  value: string;
+  description?: string;
+  kind?: "arg" | "model" | "path";
+};
+
+type ComposerCompletionTarget =
+  | { kind: "slash-arg"; command: string; prefix: string }
+  | { kind: "path"; prefix: string; replaceStart: number; replaceEnd: number; trigger: "shell" | "mention" | "slash" };
+
+type SdkSlashCommand = {
+  name: string;
+  description?: string;
+  source?: "extension" | "prompt" | "skill";
+};
+
+type DesktopModel = {
+  id: string;
+  name: string;
+  provider: string;
+  ref: string;
+  reasoning?: boolean;
+  contextWindow?: number;
+  current?: boolean;
+};
+
+type ExtensionUIMethod =
+  | "select"
+  | "confirm"
+  | "input"
+  | "editor"
+  | "notify"
+  | "setStatus"
+  | "setWidget"
+  | "setTitle"
+  | "set_editor_text";
+
+type ExtensionUIRequest = RpcEvent & {
+  id?: string;
+  method?: ExtensionUIMethod;
+  title?: string;
+  message?: string;
+  options?: string[];
+  placeholder?: string;
+  prefill?: string;
+  notifyType?: "info" | "warning" | "error";
+  statusKey?: string;
+  statusText?: string;
+  widgetKey?: string;
+  widgetLines?: string[];
+  widgetPlacement?: "aboveEditor" | "belowEditor";
+  text?: string;
+};
+
+type ExtensionToast = { id: string; message: string; type: "info" | "warning" | "error" };
+type ExtensionWidget = { key: string; lines: string[]; placement: "aboveEditor" | "belowEditor" };
+
+type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
+
+type SpeechRecognitionLike = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((event: SpeechRecognitionResultEventLike) => void) | null;
+  onerror: ((event: { error?: string }) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+};
+
+type SpeechRecognitionResultEventLike = {
+  resultIndex: number;
+  results: ArrayLike<{ isFinal: boolean; 0?: { transcript?: string } }>;
+};
+
+type SpeechWindow = Window & {
+  SpeechRecognition?: SpeechRecognitionConstructor;
+  webkitSpeechRecognition?: SpeechRecognitionConstructor;
+};
+
 const BASE_SLASH_COMMANDS: SlashCommandDef[] = [
-  { name: "/help", description: "Show available Pix Desktop commands" },
-  { name: "/new", description: "Start a new session" },
-  { name: "/clear", description: "Clear the visible chat for this tab" },
-  { name: "/refresh", description: "Refresh session list and status" },
-  { name: "/abort", description: "Stop the current agent run" },
+  { name: "/help", description: "Show available Pix Desktop commands", source: "desktop" },
+  { name: "/model", description: "Select an available model", source: "desktop" },
+  { name: "/compact", description: "Compact the current session context", source: "desktop" },
+  { name: "/undo", description: "Navigate back to the last user turn", source: "desktop" },
+  { name: "/new", description: "Start a new session", source: "desktop" },
+  { name: "/clear", description: "Clear the visible chat for this tab", source: "desktop" },
+  { name: "/refresh", description: "Refresh session list and status", source: "desktop" },
+  { name: "/abort", description: "Stop the current agent run", source: "desktop" },
 ];
 
 let nextId = 0;
@@ -142,10 +247,25 @@ const genId = (prefix: string) => `${prefix}-${++nextId}`;
 export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
+  const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
+  const [voiceSupported, setVoiceSupported] = useState(false);
+  const [voiceListening, setVoiceListening] = useState(false);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
   const [slashIndex, setSlashIndex] = useState(0);
+  const [slashCompletionIndex, setSlashCompletionIndex] = useState(0);
+  const [slashCompletions, setSlashCompletions] = useState<SlashCompletionItem[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [sdkSlashCommands, setSdkSlashCommands] = useState<SlashCommandDef[]>([]);
+  const [availableModels, setAvailableModels] = useState<DesktopModel[]>([]);
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [modelPickerQuery, setModelPickerQuery] = useState("");
+  const [extensionDialog, setExtensionDialog] = useState<ExtensionUIRequest | null>(null);
+  const [extensionDialogValue, setExtensionDialogValue] = useState("");
+  const [extensionToasts, setExtensionToasts] = useState<ExtensionToast[]>([]);
+  const [extensionStatuses, setExtensionStatuses] = useState<Record<string, string>>({});
+  const [extensionWidgets, setExtensionWidgets] = useState<Record<string, ExtensionWidget>>({});
   const [session, setSession] = useState<SessionState>({});
   const [loadingSessions, setLoadingSessions] = useState(false);
   const [workspace, setWorkspace] = useState<string | null>(() => {
@@ -163,40 +283,126 @@ export default function App() {
   const [openTabs, setOpenTabs] = useState<string[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const tabMessagesRef = useRef<Map<string, ChatMessage[]>>(new Map());
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const appliedWorkspaceRef = useRef<string | null>(null);
   const hydratedTabsWorkspaceRef = useRef<string | null>(null);
   /** Mirror of `messages` so stable callbacks can read the latest value. */
   const messagesRef = useRef<ChatMessage[]>([]);
+
+  useEffect(() => {
+    const speechWindow = window as SpeechWindow;
+    setVoiceSupported(Boolean(speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition));
+    return () => {
+      recognitionRef.current?.abort();
+      recognitionRef.current = null;
+    };
+  }, []);
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
   const subscribed = useRef(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // -- RPC helpers -------------------------------------------------------
+
+  const listSessionsForActiveWorkspace = useCallback(async (): Promise<SessionSummary[]> => {
+    const resp = await invoke<{ success: boolean; data?: { sessions: SessionSummary[] }; error?: string }>(
+      "rpc_call",
+      { cmd: { type: "pix:list_sessions" } },
+    );
+    if (resp.success && resp.data) return resp.data.sessions;
+    throw new Error(resp.error ?? "unknown");
+  }, []);
 
   const refreshSessions = useCallback(async () => {
     if (!workspace) {
       setSessions([]);
       return;
     }
+    // On startup `workspace` is restored from localStorage before the sidecar
+    // has necessarily switched to that cwd. Listing too early returns sessions
+    // for the sidecar/package cwd, which then makes the UI appear to restore
+    // unrelated tabs.
+    if (appliedWorkspaceRef.current !== workspace) return;
     setLoadingSessions(true);
     try {
-      const resp = await invoke<{ success: boolean; data?: { sessions: SessionSummary[] }; error?: string }>(
-        "rpc_call",
-        { cmd: { type: "pix:list_sessions" } },
-      );
-      if (resp.success && resp.data) {
-        setSessions(resp.data.sessions);
-      } else if (!resp.success) {
-        setError(`list sessions: ${resp.error ?? "unknown"}`);
-      }
+      setSessions(await listSessionsForActiveWorkspace());
     } catch (e) {
       setError(`list sessions: ${String(e)}`);
     } finally {
       setLoadingSessions(false);
     }
-  }, [workspace]);
+  }, [listSessionsForActiveWorkspace, workspace]);
+
+  const addImageFiles = useCallback(async (files: FileList | File[]) => {
+    const imageFiles = Array.from(files).filter((file) => file.type.startsWith("image/"));
+    if (imageFiles.length === 0) return;
+    try {
+      const nextAttachments = await Promise.all(imageFiles.map(readImageAttachment));
+      setAttachments((prev) => [...prev, ...nextAttachments].slice(0, 8));
+      setError(null);
+    } catch (e) {
+      setError(`attachment: ${String(e)}`);
+    }
+  }, []);
+
+  const removeAttachment = useCallback((id: string) => {
+    setAttachments((prev) => prev.filter((attachment) => attachment.id !== id));
+  }, []);
+
+  const toggleVoiceDictation = useCallback(() => {
+    if (voiceListening) {
+      recognitionRef.current?.stop();
+      setVoiceListening(false);
+      return;
+    }
+
+    const SpeechRecognition = (window as SpeechWindow).SpeechRecognition ?? (window as SpeechWindow).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setVoiceError("Voice dictation is not available in this WebView.");
+      return;
+    }
+
+    setVoiceError(null);
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = false;
+    recognition.lang = navigator.language || "en-US";
+    recognition.onresult = (event) => {
+      const finalText: string[] = [];
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        const result = event.results[i];
+        const transcript = result[0]?.transcript?.trim();
+        if (result.isFinal && transcript) finalText.push(transcript);
+      }
+      if (finalText.length > 0) {
+        setInput((prev) => {
+          const separator = prev.trim().length > 0 && !prev.endsWith(" ") ? " " : "";
+          return `${prev}${separator}${finalText.join(" ")}`;
+        });
+      }
+    };
+    recognition.onerror = (event) => {
+      setVoiceError(event.error ? `Voice dictation: ${event.error}` : "Voice dictation failed.");
+      setVoiceListening(false);
+    };
+    recognition.onend = () => {
+      if (recognitionRef.current === recognition) {
+        recognitionRef.current = null;
+        setVoiceListening(false);
+      }
+    };
+    recognitionRef.current = recognition;
+    try {
+      recognition.start();
+      setVoiceListening(true);
+    } catch (e) {
+      recognitionRef.current = null;
+      setVoiceListening(false);
+      setVoiceError(`Voice dictation: ${String(e)}`);
+    }
+  }, [voiceListening]);
 
   const refreshState = useCallback(async () => {
     try {
@@ -212,6 +418,107 @@ export default function App() {
       setError(`get_state: ${String(e)}`);
     }
   }, []);
+
+  const refreshCommands = useCallback(async () => {
+    try {
+      const resp = await invoke<{
+        success: boolean;
+        data?: { commands: SdkSlashCommand[] };
+        error?: string;
+      }>("rpc_call", { cmd: { type: "get_commands" } });
+      if (!resp.success) {
+        setError(`get_commands: ${resp.error ?? "unknown"}`);
+        return;
+      }
+      setSdkSlashCommands(toSlashCommandDefs(resp.data?.commands ?? []));
+    } catch (e) {
+      setError(`get_commands: ${String(e)}`);
+    }
+  }, []);
+
+  const refreshModels = useCallback(async (): Promise<DesktopModel[]> => {
+    try {
+      const resp = await invoke<{
+        success: boolean;
+        data?: { models: DesktopModel[] };
+        error?: string;
+      }>("rpc_call", { cmd: { type: "get_models" } });
+      if (!resp.success) {
+        setError(`get_models: ${resp.error ?? "unknown"}`);
+        setAvailableModels([]);
+        return [];
+      }
+      const models = resp.data?.models ?? [];
+      setAvailableModels(models);
+      return models;
+    } catch (e) {
+      setError(`get_models: ${String(e)}`);
+      setAvailableModels([]);
+      return [];
+    }
+  }, []);
+
+  const selectModel = useCallback(async (modelRef: string) => {
+    const ref = modelRef.trim();
+    if (!ref) return;
+    setError(null);
+    const resp = await invoke<{ success: boolean; data?: { model: DesktopModel }; error?: string }>("rpc_call", {
+      cmd: { type: "set_model", ref },
+    });
+    if (!resp.success) {
+      setError(`set_model: ${resp.error ?? "unknown"}`);
+      return;
+    }
+    setModelPickerOpen(false);
+    setModelPickerQuery("");
+    await refreshState();
+    await refreshModels();
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: genId("a"),
+        role: "assistant",
+        parts: [{ kind: "text", text: `Model set to ${resp.data?.model.name ?? ref}.` }],
+      },
+    ]);
+  }, [refreshModels, refreshState]);
+
+  const refreshSlashCompletions = useCallback(async (command: string, argumentPrefix: string) => {
+    try {
+      const resp = await invoke<{
+        success: boolean;
+        data?: { completions: SlashCompletionItem[] };
+        error?: string;
+      }>("rpc_call", {
+        cmd: { type: "get_command_completions", command: command.replace(/^\/+/, ""), argumentPrefix },
+      });
+      if (!resp.success) {
+        setSlashCompletions([]);
+        setError(`get_command_completions: ${resp.error ?? "unknown"}`);
+        return;
+      }
+      setSlashCompletions(resp.data?.completions ?? []);
+      setSlashCompletionIndex(0);
+    } catch (e) {
+      setSlashCompletions([]);
+      setError(`get_command_completions: ${String(e)}`);
+    }
+  }, []);
+
+  const refreshPathCompletions = useCallback(async (prefix: string) => {
+    if (!workspace) {
+      setSlashCompletions([]);
+      return;
+    }
+    try {
+      const items = await invoke<SlashCompletionItem[]>("complete_path", { cwd: workspace, prefix });
+      setSlashCompletions(items.map((item) => ({ ...item, kind: "path" })));
+      setSlashCompletionIndex(0);
+    } catch (e) {
+      setSlashCompletions([]);
+      setError(`complete_path: ${String(e)}`);
+    }
+  }, [workspace]);
 
   const loadMessages = useCallback(async (path?: string) => {
     try {
@@ -233,8 +540,19 @@ export default function App() {
 
   const restoreTabsForWorkspace = useCallback(async (cwd: string, currentSessionFile?: string) => {
     const persisted = readPersistedTabs(cwd);
+    let workspaceSessions: SessionSummary[] = [];
+    try {
+      workspaceSessions = await listSessionsForActiveWorkspace();
+      setSessions(workspaceSessions);
+    } catch (e) {
+      setError(`list sessions: ${String(e)}`);
+    }
+    const validSessionPaths = new Set(workspaceSessions.map((s) => s.path));
+    const restoredTabs = validSessionPaths.size > 0
+      ? persisted.openTabs.filter((path) => validSessionPaths.has(path))
+      : persisted.openTabs;
     const tabs = uniqueStrings([
-      ...persisted.openTabs,
+      ...restoredTabs,
       ...(currentSessionFile ? [currentSessionFile] : []),
     ]);
     const active = persisted.activeTabId && tabs.includes(persisted.activeTabId)
@@ -267,8 +585,9 @@ export default function App() {
     }
 
     await refreshState();
+    await refreshCommands();
     if (active) await loadMessages(active);
-  }, [loadMessages, refreshState]);
+  }, [listSessionsForActiveWorkspace, loadMessages, refreshCommands, refreshState]);
 
   const chooseFolder = useCallback(async (): Promise<string | null> => {
     try {
@@ -313,8 +632,8 @@ export default function App() {
     void invoke("rpc_subscribe", { onEvent: ch }).catch((e) =>
       setError(`subscribe failed: ${String(e)}`),
     );
-    void refreshState();
-  }, [refreshState]);
+    if (!workspace) void refreshState();
+  }, [refreshState, workspace]);
 
   // If a workspace was previously chosen, re-apply it on startup so the
   // sidecar picks up the same cwd (otherwise the sidecar is bound to its
@@ -381,9 +700,82 @@ export default function App() {
 
   // -- Event handler -----------------------------------------------------
 
+  const respondToExtensionDialog = useCallback(async (request: ExtensionUIRequest, payload: Record<string, unknown>) => {
+    if (!request.id) return;
+    try {
+      const resp = await invoke<{ success: boolean; error?: string }>("rpc_call", {
+        cmd: { type: "extension_ui_response", id: request.id, ...payload },
+      });
+      if (!resp.success) setError(`extension_ui_response: ${resp.error ?? "unknown"}`);
+    } catch (e) {
+      setError(`extension_ui_response: ${String(e)}`);
+    }
+  }, []);
+
+  const handleExtensionUIRequest = useCallback((ev: RpcEvent) => {
+    const request = ev as ExtensionUIRequest;
+    switch (request.method) {
+      case "select":
+      case "confirm":
+      case "input":
+      case "editor":
+        setExtensionDialog(request);
+        setExtensionDialogValue(request.prefill ?? "");
+        break;
+      case "notify": {
+        const toast = {
+          id: request.id ?? genId("toast"),
+          message: request.message ?? "Extension notification",
+          type: request.notifyType ?? "info",
+        } satisfies ExtensionToast;
+        setExtensionToasts((prev) => [...prev, toast]);
+        window.setTimeout(() => {
+          setExtensionToasts((prev) => prev.filter((item) => item.id !== toast.id));
+        }, 5000);
+        break;
+      }
+      case "setStatus":
+        if (!request.statusKey) break;
+        setExtensionStatuses((prev) => {
+          const next = { ...prev };
+          if (request.statusText) next[request.statusKey!] = request.statusText;
+          else delete next[request.statusKey!];
+          return next;
+        });
+        break;
+      case "setWidget":
+        if (!request.widgetKey) break;
+        setExtensionWidgets((prev) => {
+          const next = { ...prev };
+          if (Array.isArray(request.widgetLines)) {
+            next[request.widgetKey!] = {
+              key: request.widgetKey!,
+              lines: request.widgetLines,
+              placement: request.widgetPlacement ?? "aboveEditor",
+            };
+          } else {
+            delete next[request.widgetKey!];
+          }
+          return next;
+        });
+        break;
+      case "setTitle":
+        if (request.title) document.title = request.title;
+        break;
+      case "set_editor_text":
+        setInput(request.text ?? "");
+        break;
+      default:
+        setError(`Unsupported extension UI request: ${request.method ?? "unknown"}`);
+    }
+  }, []);
+
   const handleEvent = useCallback(
     (ev: RpcEvent) => {
       switch (ev.type) {
+        case "extension_ui_request":
+          handleExtensionUIRequest(ev);
+          break;
         case "agent_start":
           setStreaming(true);
           setSession((s) => ({ ...s, isStreaming: true }));
@@ -397,6 +789,7 @@ export default function App() {
           // Session may have been renamed or replaced; refresh both views.
           void refreshState();
           void refreshSessions();
+          void refreshCommands();
           break;
         case "message_start":
           if (ev.message?.role === "assistant") {
@@ -443,7 +836,7 @@ export default function App() {
           break;
       }
     },
-    [refreshState, refreshSessions],
+    [handleExtensionUIRequest, refreshCommands, refreshState, refreshSessions],
   );
 
   // Auto-scroll on new content.
@@ -456,7 +849,9 @@ export default function App() {
   // -- Actions -----------------------------------------------------------
 
   const executeSlashCommand = useCallback(async (raw: string) => {
-    const command = raw.trim().split(/\s+/, 1)[0]?.toLowerCase();
+    const trimmed = raw.trim();
+    const command = trimmed.split(/\s+/, 1)[0]?.toLowerCase();
+    const args = trimmed.slice((command ?? "").length).trim();
     setError(null);
     setInput("");
     setSlashIndex(0);
@@ -467,6 +862,72 @@ export default function App() {
         setMessages((prev) => [
           ...prev,
           { id: genId("a"), role: "assistant", parts: [{ kind: "text", text: lines.join("\n") }] },
+        ]);
+        return;
+      }
+      case "/model": {
+        if (streaming) {
+          setError("Cannot switch models while the agent is streaming. Stop the run first.");
+          return;
+        }
+        if (args) {
+          await selectModel(args);
+          return;
+        }
+        await refreshModels();
+        setModelPickerOpen(true);
+        setModelPickerQuery("");
+        return;
+      }
+      case "/compact": {
+        if (streaming) {
+          setError("Cannot compact while the agent is streaming. Stop the run first.");
+          return;
+        }
+        setMessages((prev) => [
+          ...prev,
+          { id: genId("u"), role: "user", text: trimmed },
+          { id: genId("a"), role: "assistant", parts: [{ kind: "text", text: "Compacting session context…" }] },
+        ]);
+        const resp = await invoke<{ success: boolean; error?: string }>("rpc_call", {
+          cmd: { type: "compact", instructions: args || undefined },
+        });
+        if (!resp.success) {
+          setError(`compact: ${resp.error ?? "unknown"}`);
+          return;
+        }
+        setMessages((prev) => [
+          ...prev.slice(0, -1),
+          { id: genId("a"), role: "assistant", parts: [{ kind: "text", text: "Compaction complete." }] },
+        ]);
+        await refreshState();
+        if (activeTabId) await loadMessages(activeTabId);
+        return;
+      }
+      case "/undo": {
+        if (streaming) {
+          setError("Cannot undo while the agent is streaming. Stop the run first.");
+          return;
+        }
+        const resp = await invoke<{
+          success: boolean;
+          data?: { editorText?: string; cancelled?: boolean; target?: { text?: string } };
+          error?: string;
+        }>("rpc_call", { cmd: { type: "undo_last_turn" } });
+        if (!resp.success) {
+          setError(`undo: ${resp.error ?? "unknown"}`);
+          return;
+        }
+        if (resp.data?.editorText) setInput(resp.data.editorText);
+        await refreshState();
+        if (activeTabId) await loadMessages(activeTabId);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: genId("a"),
+            role: "assistant",
+            parts: [{ kind: "text", text: resp.data?.cancelled ? "Undo cancelled." : "Navigated back to the last user turn." }],
+          },
         ]);
         return;
       }
@@ -488,35 +949,98 @@ export default function App() {
         if (activeTabId) tabMessagesRef.current.set(activeTabId, []);
         return;
       case "/refresh":
-        await Promise.all([refreshState(), refreshSessions()]);
+        await Promise.all([refreshState(), refreshSessions(), refreshCommands()]);
         return;
       case "/abort":
         await invoke("rpc_call", { cmd: { type: "abort" } });
         return;
       default:
+        if (sdkSlashCommands.some((cmd) => cmd.name.toLowerCase() === command)) {
+          setMessages((prev) => [...prev, { id: genId("u"), role: "user", text: trimmed }]);
+          const resp = await invoke<{ success: boolean; error?: string }>("rpc_call", {
+            cmd: { type: "prompt", message: trimmed },
+          });
+          if (!resp.success) setError(resp.error ?? "slash command rejected");
+          return;
+        }
         setError(`Unknown slash command: ${command ?? raw}`);
     }
-  }, [activeTabId, refreshSessions, refreshState, streaming]);
+  }, [activeTabId, loadMessages, refreshCommands, refreshModels, refreshSessions, refreshState, sdkSlashCommands, selectModel, streaming]);
+
+  const executeShellCommand = useCallback(async (raw: string) => {
+    const command = raw.replace(/^!+/, "").trim();
+    setError(null);
+    setInput("");
+    if (!workspace) {
+      setError("Choose a workspace before running shell commands.");
+      return;
+    }
+    if (!command) {
+      setError("Shell command is empty.");
+      return;
+    }
+    const toolCallId = genId("shell");
+    setMessages((prev) => [
+      ...prev,
+      { id: genId("u"), role: "user", text: `!${command}` },
+      {
+        id: genId("a"),
+        role: "assistant",
+        parts: [{ kind: "tool", toolCallId, name: "shell", args: { command, cwd: workspace }, status: "running" }],
+      },
+    ]);
+    try {
+      const result = await invoke<ShellRunResult>("run_shell", { cwd: workspace, command });
+      setMessages((prev) =>
+        updateLastTool(prev, toolCallId, {
+          status: result.code === 0 && !result.timed_out ? "done" : "error",
+          result,
+        }),
+      );
+    } catch (e) {
+      setMessages((prev) =>
+        updateLastTool(prev, toolCallId, {
+          status: "error",
+          result: { stderr: String(e), stdout: "", code: null, signal: null, timed_out: false } satisfies ShellRunResult,
+        }),
+      );
+    }
+  }, [workspace]);
 
   const send = useCallback(async () => {
     const text = input.trim();
-    if (!text || streaming) return;
-    if (text.startsWith("/")) {
+    const imageAttachments = attachments;
+    if ((!text && imageAttachments.length === 0) || streaming) return;
+    if (imageAttachments.length === 0 && text.startsWith("!!")) {
+      setError("Raw TTY shell mode (!!) is not implemented yet. Use !command for captured output.");
+      return;
+    }
+    if (imageAttachments.length === 0 && text.startsWith("!")) {
+      await executeShellCommand(text);
+      return;
+    }
+    if (imageAttachments.length === 0 && text.startsWith("/")) {
       await executeSlashCommand(text);
       return;
     }
     setError(null);
     setInput("");
-    setMessages((prev) => [...prev, { id: genId("u"), role: "user", text }]);
+    setAttachments([]);
+    const promptText = text || "Attached image(s).";
+    setMessages((prev) => [...prev, { id: genId("u"), role: "user", text: promptText, attachments: imageAttachments }]);
     try {
       const resp = await invoke<{ success: boolean; error?: string }>("rpc_call", {
-        cmd: { type: "prompt", message: text },
+        cmd: {
+          type: "prompt",
+          message: promptText,
+          images: imageAttachments.map(({ data, mimeType }) => ({ type: "image", data, mimeType })),
+        },
       });
       if (!resp.success) setError(resp.error ?? "prompt rejected");
     } catch (e) {
       setError(String(e));
     }
-  }, [executeSlashCommand, input, streaming]);
+  }, [attachments, executeShellCommand, executeSlashCommand, input, streaming]);
 
   const abort = useCallback(async () => {
     try {
@@ -605,11 +1129,19 @@ export default function App() {
     [openTabs, activeTabId, loadMessages, refreshState, streaming],
   );
 
-  const slashQuery = input.startsWith("/") ? input.slice(1).trimStart().toLowerCase() : null;
-  const slashCommands = BASE_SLASH_COMMANDS.map((cmd) => ({
+  const composerCompletionTarget = useMemo(() => parseComposerCompletionTarget(input), [input]);
+  const slashInput = parseSlashInput(input);
+  const slashQuery = slashInput && slashInput.argumentPrefix === null
+    ? slashInput.query.toLowerCase()
+    : null;
+  const showSlashCompletions = Boolean(composerCompletionTarget && slashCompletions.length > 0);
+  const slashCommands = mergeSlashCommands([...BASE_SLASH_COMMANDS, ...sdkSlashCommands]).map((cmd) => ({
     ...cmd,
     disabled:
       (cmd.name === "/new" && streaming) ||
+      (cmd.name === "/model" && streaming) ||
+      (cmd.name === "/compact" && streaming) ||
+      (cmd.name === "/undo" && streaming) ||
       (cmd.name === "/abort" && !streaming),
   }));
   const slashMatches = slashQuery === null
@@ -622,6 +1154,103 @@ export default function App() {
   useEffect(() => {
     setSlashIndex((idx) => Math.min(idx, Math.max(slashMatches.length - 1, 0)));
   }, [slashMatches.length]);
+
+  useEffect(() => {
+    if (!composerCompletionTarget) {
+      setSlashCompletions([]);
+      setSlashCompletionIndex(0);
+      return;
+    }
+    if (composerCompletionTarget.kind === "path") {
+      const timer = window.setTimeout(() => {
+        void refreshPathCompletions(composerCompletionTarget.prefix);
+      }, 120);
+      return () => window.clearTimeout(timer);
+    }
+    if (composerCompletionTarget.command.toLowerCase() === "model") {
+      const prefix = composerCompletionTarget.prefix.toLowerCase();
+      const timer = window.setTimeout(() => {
+        void refreshModels().then((models) => {
+          const completions = models
+            .filter((model) => `${model.ref} ${model.name}`.toLowerCase().includes(prefix))
+            .slice(0, 20)
+            .map((model) => ({
+              label: model.name,
+              value: model.ref,
+              description: `${model.provider}/${model.id}${model.current ? " · current" : ""}`,
+              kind: "model" as const,
+            }));
+          setSlashCompletions(completions);
+          setSlashCompletionIndex(0);
+        });
+      }, 120);
+      return () => window.clearTimeout(timer);
+    }
+    const discovered = sdkSlashCommands.find((cmd) => cmd.name.replace(/^\/+/, "").toLowerCase() === composerCompletionTarget.command.toLowerCase());
+    if (discovered?.source !== "extension") {
+      const timer = window.setTimeout(() => {
+        void refreshPathCompletions(composerCompletionTarget.prefix);
+      }, 120);
+      return () => window.clearTimeout(timer);
+    }
+    const command = composerCompletionTarget.command;
+    const prefix = composerCompletionTarget.prefix;
+    const timer = window.setTimeout(async () => {
+      await refreshSlashCompletions(command, prefix);
+      // If the extension has no argument suggestions, fall back to scoped path
+      // completions so generic slash arguments still have useful autocomplete.
+      const likelyPath = prefix.includes("/") || prefix.includes("\\") || prefix.startsWith(".");
+      if (likelyPath) {
+        void refreshPathCompletions(prefix);
+      }
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [composerCompletionTarget, refreshModels, refreshPathCompletions, refreshSlashCompletions, sdkSlashCommands]);
+
+  useEffect(() => {
+    if (composerCompletionTarget?.kind !== "slash-arg" || composerCompletionTarget.command.toLowerCase() === "model") {
+      return;
+    }
+    if (slashCompletions.length > 0 || !looksLikePathPrefix(composerCompletionTarget.prefix)) return;
+    const timer = window.setTimeout(() => {
+      void refreshPathCompletions(composerCompletionTarget.prefix);
+    }, 180);
+    return () => window.clearTimeout(timer);
+  }, [composerCompletionTarget, refreshPathCompletions, slashCompletions.length]);
+
+  useEffect(() => {
+    setSlashCompletionIndex((idx) => Math.min(idx, Math.max(slashCompletions.length - 1, 0)));
+  }, [slashCompletions.length]);
+
+  const applySlashCompletion = useCallback((item: SlashCompletionItem) => {
+    const target = composerCompletionTarget ?? parseComposerCompletionTarget(input);
+    if (!target) return;
+    if (target.kind === "path") {
+      const suffix = item.value.endsWith("/") ? "" : " ";
+      const replacement = target.trigger === "mention" ? `@${item.value}${suffix}` : `${item.value}${suffix}`;
+      setInput(`${input.slice(0, target.replaceStart)}${replacement}${input.slice(target.replaceEnd)}`);
+    } else {
+      setInput(`/${target.command} ${item.value}${item.value.endsWith(" ") ? "" : " "}`);
+    }
+    setSlashCompletionIndex(0);
+  }, [composerCompletionTarget, input]);
+
+  const widgetsAboveEditor = Object.values(extensionWidgets).filter((widget) => widget.placement !== "belowEditor");
+  const widgetsBelowEditor = Object.values(extensionWidgets).filter((widget) => widget.placement === "belowEditor");
+  const extensionStatusEntries = Object.entries(extensionStatuses);
+  const modelPickerMatches = availableModels.filter((model) => {
+    const query = modelPickerQuery.trim().toLowerCase();
+    if (!query) return true;
+    return `${model.ref} ${model.name}`.toLowerCase().includes(query);
+  });
+
+  const closeExtensionDialog = useCallback((payload: Record<string, unknown>) => {
+    const request = extensionDialog;
+    if (!request) return;
+    setExtensionDialog(null);
+    setExtensionDialogValue("");
+    void respondToExtensionDialog(request, payload);
+  }, [extensionDialog, respondToExtensionDialog]);
 
   // -- Render ------------------------------------------------------------
 
@@ -788,7 +1417,27 @@ export default function App() {
           )}
         </div>
 
+        {widgetsAboveEditor.length > 0 && <ExtensionWidgets widgets={widgetsAboveEditor} />}
+
         <footer className="composer">
+          {showSlashCompletions && (
+            <div className="slash-menu slash-menu--completions" role="listbox" aria-label="Command argument completions">
+              {slashCompletions.map((item, idx) => (
+                <button
+                  key={`${item.value}-${idx}`}
+                  className={`slash-menu__item ${idx === slashCompletionIndex ? "slash-menu__item--active" : ""}`}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => applySlashCompletion(item)}
+                  role="option"
+                  aria-selected={idx === slashCompletionIndex}
+                >
+                  <span className="slash-menu__name">{item.label}</span>
+                  {item.description && <span className="slash-menu__description">{item.description}</span>}
+                  <span className="slash-menu__source">{item.kind ?? "arg"}</span>
+                </button>
+              ))}
+            </div>
+          )}
           {slashMatches.length > 0 && (
             <div className="slash-menu" role="listbox" aria-label="Slash commands">
               {slashMatches.map((cmd, idx) => (
@@ -803,16 +1452,112 @@ export default function App() {
                 >
                   <span className="slash-menu__name">{cmd.name}</span>
                   <span className="slash-menu__description">{cmd.description}</span>
+                  {cmd.source && cmd.source !== "desktop" && (
+                    <span className="slash-menu__source">{cmd.source}</span>
+                  )}
                 </button>
               ))}
             </div>
           )}
-          <textarea
-            className="composer__input"
-            placeholder="Message Pix… (Shift+Enter for newline, / for commands)"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
+          <button
+            className="composer__btn composer__btn--secondary"
+            onClick={toggleVoiceDictation}
+            disabled={streaming || !voiceSupported}
+            title={voiceSupported ? (voiceListening ? "Stop voice dictation" : "Start voice dictation") : "Voice dictation unavailable"}
+            aria-label={voiceListening ? "Stop voice dictation" : "Start voice dictation"}
+            aria-pressed={voiceListening}
+            type="button"
+          >
+            {voiceListening ? <MicOff size={16} /> : <Mic size={16} />}
+          </button>
+          <button
+            className="composer__btn composer__btn--secondary"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={streaming}
+            title="Attach image"
+            aria-label="Attach image"
+            type="button"
+          >
+            <ImageIcon size={16} />
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            className="composer__file-input"
+            onChange={(e) => {
+              void addImageFiles(e.currentTarget.files ?? []);
+              e.currentTarget.value = "";
+            }}
+          />
+          <div
+            className="composer__main"
+            onDragOver={(e) => {
+              if (!streaming) e.preventDefault();
+            }}
+            onDrop={(e) => {
+              if (streaming) return;
+              e.preventDefault();
+              void addImageFiles(e.dataTransfer.files);
+            }}
+          >
+            {voiceError && <div className="composer__voice-error">{voiceError}</div>}
+            {attachments.length > 0 && (
+              <div className="composer__attachments" aria-label="Image attachments">
+                {attachments.map((attachment) => (
+                  <div key={attachment.id} className="composer__attachment">
+                    <img src={imageDataUrl(attachment)} alt="" />
+                    <span title={attachment.name}>{attachment.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeAttachment(attachment.id)}
+                      aria-label={`Remove ${attachment.name}`}
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <textarea
+              className="composer__input"
+              placeholder="Message Pix… (Shift+Enter, / commands, ! shell, paste/drop images)"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onPaste={(e) => {
+                if (streaming) return;
+                const files = Array.from(e.clipboardData.files).filter((file) => file.type.startsWith("image/"));
+                if (files.length > 0) {
+                  e.preventDefault();
+                  void addImageFiles(files);
+                }
+              }}
+              onKeyDown={(e) => {
+              if (showSlashCompletions) {
+                if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  setSlashCompletionIndex((idx) => (idx + 1) % slashCompletions.length);
+                  return;
+                }
+                if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  setSlashCompletionIndex((idx) => (idx - 1 + slashCompletions.length) % slashCompletions.length);
+                  return;
+                }
+                if (e.key === "Tab") {
+                  e.preventDefault();
+                  const item = slashCompletions[slashCompletionIndex];
+                  if (item) applySlashCompletion(item);
+                  return;
+                }
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  setSlashCompletions([]);
+                  setSlashCompletionIndex(0);
+                  return;
+                }
+              }
               if (slashMatches.length > 0) {
                 if (e.key === "ArrowDown") {
                   e.preventDefault();
@@ -827,7 +1572,7 @@ export default function App() {
                 if (e.key === "Tab") {
                   e.preventDefault();
                   const cmd = slashMatches[slashIndex];
-                  if (cmd) setInput(cmd.name);
+                  if (cmd) setInput(`${cmd.name} `);
                   return;
                 }
                 if (e.key === "Escape") {
@@ -839,7 +1584,7 @@ export default function App() {
               }
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                if (slashMatches.length > 0) {
+                if (slashMatches.length > 0 && !hasSlashArguments(input)) {
                   const cmd = slashMatches[slashIndex];
                   if (cmd && !cmd.disabled) void executeSlashCommand(cmd.name);
                   return;
@@ -847,9 +1592,10 @@ export default function App() {
                 void send();
               }
             }}
-            rows={1}
-            disabled={streaming}
-          />
+              rows={1}
+              disabled={streaming}
+            />
+          </div>
           {streaming ? (
             <button
               className="composer__btn composer__btn--stop"
@@ -863,7 +1609,7 @@ export default function App() {
             <button
               className="composer__btn"
               onClick={send}
-              disabled={!input.trim()}
+              disabled={!input.trim() && attachments.length === 0}
               title="Send (Enter)"
               aria-label="Send"
             >
@@ -872,15 +1618,194 @@ export default function App() {
           )}
         </footer>
 
-        <StatusBar session={session} />
+        {widgetsBelowEditor.length > 0 && <ExtensionWidgets widgets={widgetsBelowEditor} />}
+
+        <StatusBar session={session} extensionStatuses={extensionStatusEntries} />
       </main>
+      {extensionToasts.length > 0 && <ExtensionToasts toasts={extensionToasts} />}
+      {extensionDialog && (
+        <ExtensionDialog
+          request={extensionDialog}
+          value={extensionDialogValue}
+          onValueChange={setExtensionDialogValue}
+          onCancel={() => closeExtensionDialog({ cancelled: true })}
+          onSubmit={(payload) => closeExtensionDialog(payload)}
+        />
+      )}
+      {modelPickerOpen && (
+        <ModelPicker
+          models={modelPickerMatches}
+          query={modelPickerQuery}
+          onQueryChange={setModelPickerQuery}
+          onCancel={() => setModelPickerOpen(false)}
+          onSelect={(model) => void selectModel(model.ref)}
+        />
+      )}
+    </div>
+  );
+}
+
+// -- Extension UI ---------------------------------------------------------
+
+function ExtensionDialog({
+  request,
+  value,
+  onValueChange,
+  onCancel,
+  onSubmit,
+}: {
+  request: ExtensionUIRequest;
+  value: string;
+  onValueChange: (value: string) => void;
+  onCancel: () => void;
+  onSubmit: (payload: Record<string, unknown>) => void;
+}) {
+  const title = request.title ?? "Extension request";
+  if (request.method === "select") {
+    return (
+      <div className="extension-modal" role="dialog" aria-modal="true" aria-label={title}>
+        <div className="extension-modal__card">
+          <h2>{title}</h2>
+          <div className="extension-modal__options">
+            {(request.options ?? []).map((option) => (
+              <button key={option} className="extension-modal__option" onClick={() => onSubmit({ value: option })}>
+                {option}
+              </button>
+            ))}
+          </div>
+          <div className="extension-modal__actions">
+            <button onClick={onCancel}>Cancel</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  if (request.method === "confirm") {
+    return (
+      <div className="extension-modal" role="dialog" aria-modal="true" aria-label={title}>
+        <div className="extension-modal__card">
+          <h2>{title}</h2>
+          {request.message && <p>{request.message}</p>}
+          <div className="extension-modal__actions">
+            <button onClick={onCancel}>Cancel</button>
+            <button onClick={() => onSubmit({ confirmed: false })}>No</button>
+            <button className="extension-modal__primary" onClick={() => onSubmit({ confirmed: true })}>Yes</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  const multiLine = request.method === "editor";
+  return (
+    <div className="extension-modal" role="dialog" aria-modal="true" aria-label={title}>
+      <div className="extension-modal__card">
+        <h2>{title}</h2>
+        {multiLine ? (
+          <textarea
+            className="extension-modal__textarea"
+            value={value}
+            onChange={(e) => onValueChange(e.target.value)}
+            autoFocus
+            rows={8}
+          />
+        ) : (
+          <input
+            className="extension-modal__input"
+            value={value}
+            placeholder={request.placeholder}
+            onChange={(e) => onValueChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") onSubmit({ value });
+              if (e.key === "Escape") onCancel();
+            }}
+            autoFocus
+          />
+        )}
+        <div className="extension-modal__actions">
+          <button onClick={onCancel}>Cancel</button>
+          <button className="extension-modal__primary" onClick={() => onSubmit({ value })}>Submit</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ExtensionWidgets({ widgets }: { widgets: ExtensionWidget[] }) {
+  return (
+    <div className="extension-widgets">
+      {widgets.map((widget) => (
+        <div className="extension-widget" key={widget.key}>
+          <div className="extension-widget__key">{widget.key}</div>
+          <pre>{widget.lines.join("\n")}</pre>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ExtensionToasts({ toasts }: { toasts: ExtensionToast[] }) {
+  return (
+    <div className="extension-toasts" aria-live="polite">
+      {toasts.map((toast) => (
+        <div key={toast.id} className={`extension-toast extension-toast--${toast.type}`}>
+          {toast.message}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ModelPicker({
+  models,
+  query,
+  onQueryChange,
+  onCancel,
+  onSelect,
+}: {
+  models: DesktopModel[];
+  query: string;
+  onQueryChange: (value: string) => void;
+  onCancel: () => void;
+  onSelect: (model: DesktopModel) => void;
+}) {
+  return (
+    <div className="extension-modal" role="dialog" aria-modal="true" aria-label="Select model">
+      <div className="extension-modal__card extension-modal__card--wide">
+        <h2>Select model</h2>
+        <input
+          className="extension-modal__input"
+          placeholder="Filter by provider, id, or name…"
+          value={query}
+          onChange={(e) => onQueryChange(e.target.value)}
+          autoFocus
+        />
+        <div className="extension-modal__options extension-modal__options--scroll">
+          {models.length === 0 ? (
+            <div className="extension-modal__empty">No available models match this filter.</div>
+          ) : (
+            models.map((model) => (
+              <button key={model.ref} className="extension-modal__option" onClick={() => onSelect(model)}>
+                <span>{model.name}</span>
+                <small>
+                  {model.ref}
+                  {model.current ? " · current" : ""}
+                  {model.reasoning ? " · reasoning" : ""}
+                </small>
+              </button>
+            ))
+          )}
+        </div>
+        <div className="extension-modal__actions">
+          <button onClick={onCancel}>Cancel</button>
+        </div>
+      </div>
     </div>
   );
 }
 
 // -- Status bar -----------------------------------------------------------
 
-function StatusBar({ session }: { session: SessionState }) {
+function StatusBar({ session, extensionStatuses }: { session: SessionState; extensionStatuses: [string, string][] }) {
   const model = session.model;
   const modelLabel = model
     ? model.name ?? model.id ?? "unknown model"
@@ -926,6 +1851,12 @@ function StatusBar({ session }: { session: SessionState }) {
           </span>
         </span>
       )}
+      {extensionStatuses.map(([key, text]) => (
+        <span key={key} className="statusbar__item statusbar__extension" title={key}>
+          <span className="statusbar__extension-key">{key}</span>
+          <span>{text}</span>
+        </span>
+      ))}
       {session.isCompacting && <span className="statusbar__item statusbar__compact">compacting…</span>}
     </div>
   );
@@ -948,6 +1879,107 @@ function sessionLabelFor(
   return shortId(path.split("/").pop() ?? path);
 }
 
+function mergeSlashCommands(commands: SlashCommandDef[]): SlashCommandDef[] {
+  const seen = new Set<string>();
+  const merged: SlashCommandDef[] = [];
+  for (const command of commands) {
+    const key = command.name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(command);
+  }
+  return merged;
+}
+
+function toSlashCommandDefs(commands: SdkSlashCommand[]): SlashCommandDef[] {
+  return commands
+    .filter((command) => typeof command.name === "string" && command.name.trim())
+    .map((command) => ({
+      name: `/${command.name.replace(/^\/+/, "")}`,
+      description: command.description ?? `${command.source ?? "SDK"} command`,
+      source: command.source,
+    }));
+}
+
+function hasSlashArguments(input: string): boolean {
+  return /^\/\S+\s+/.test(input.trimStart());
+}
+
+function parseSlashInput(input: string): { query: string; command: string | null; argumentPrefix: string | null } | null {
+  if (!input.startsWith("/")) return null;
+  const withoutSlash = input.slice(1);
+  const match = withoutSlash.match(/^(\S+)(?:\s+(.*))?$/s);
+  if (!match) return { query: withoutSlash.trimStart(), command: null, argumentPrefix: null };
+  const command = match[1] ?? null;
+  if (!command) return { query: withoutSlash.trimStart(), command: null, argumentPrefix: null };
+  return {
+    query: withoutSlash.trimStart(),
+    command,
+    argumentPrefix: match[2] ?? null,
+  };
+}
+
+function parseComposerCompletionTarget(input: string): ComposerCompletionTarget | null {
+  if (input.startsWith("/")) {
+    const parsed = parseSlashInput(input);
+    if (!parsed?.command || parsed.argumentPrefix === null) return null;
+    return { kind: "slash-arg", command: parsed.command, prefix: parsed.argumentPrefix };
+  }
+
+  if (input.startsWith("!")) {
+    const commandStart = input.startsWith("!!") ? 2 : 1;
+    const token = trailingToken(input.slice(commandStart));
+    if (!token || !looksLikePathPrefix(token.value)) return null;
+    return {
+      kind: "path",
+      prefix: token.value,
+      replaceStart: commandStart + token.start,
+      replaceEnd: commandStart + token.end,
+      trigger: "shell",
+    };
+  }
+
+  const mention = input.match(/(^|\s)@([^\s]*)$/);
+  if (!mention || mention.index === undefined) return null;
+  const prefix = mention[2] ?? "";
+  return {
+    kind: "path",
+    prefix,
+    replaceStart: mention.index + mention[1].length,
+    replaceEnd: input.length,
+    trigger: "mention",
+  };
+}
+
+function trailingToken(text: string): { value: string; start: number; end: number } | null {
+  const match = text.match(/(?:^|\s)([^\s]*)$/);
+  if (!match || match.index === undefined) return null;
+  const value = match[1] ?? "";
+  return { value, start: match.index + match[0].length - value.length, end: text.length };
+}
+
+function looksLikePathPrefix(prefix: string): boolean {
+  return prefix.length > 0 && (prefix.includes("/") || prefix.includes("\\") || prefix.startsWith(".") || prefix.startsWith("~"));
+}
+
+function readImageAttachment(file: File): Promise<ImageAttachment> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error ?? new Error("Failed to read image"));
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      const comma = result.indexOf(",");
+      const data = comma >= 0 ? result.slice(comma + 1) : result;
+      resolve({ id: genId("img"), name: file.name || "pasted-image", mimeType: file.type || "image/png", data, size: file.size });
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function imageDataUrl(attachment: ImageAttachment): string {
+  return `data:${attachment.mimeType};base64,${attachment.data}`;
+}
+
 // -- Helpers --------------------------------------------------------------
 
 function MessageView({ message }: { message: ChatMessage }) {
@@ -958,7 +1990,19 @@ function MessageView({ message }: { message: ChatMessage }) {
       </div>
       <div className="msg__body">
         {message.role === "user" ? (
-          <div className="msg__text">{message.text}</div>
+          <>
+            <div className="msg__text">{message.text}</div>
+            {message.attachments && message.attachments.length > 0 && (
+              <div className="msg__attachments">
+                {message.attachments.map((attachment) => (
+                  <figure key={attachment.id} className="msg__attachment">
+                    <img src={imageDataUrl(attachment)} alt={attachment.name} />
+                    <figcaption>{attachment.name}</figcaption>
+                  </figure>
+                ))}
+              </div>
+            )}
+          </>
         ) : message.parts.length === 0 ? (
           <div className="msg__placeholder">…</div>
         ) : (
@@ -1106,6 +2150,27 @@ function updateToolResult(
     return true;
   }
   return false;
+}
+
+function updateLastTool(
+  prev: ChatMessage[],
+  toolCallId: string,
+  update: Pick<ToolPart, "status"> & { result?: unknown },
+): ChatMessage[] {
+  for (let messageIndex = prev.length - 1; messageIndex >= 0; messageIndex--) {
+    const message = prev[messageIndex];
+    if (message.role !== "assistant") continue;
+    const partIndex = message.parts.findIndex((part) => part.kind === "tool" && part.toolCallId === toolCallId);
+    if (partIndex === -1) continue;
+    const part = message.parts[partIndex];
+    if (part.kind !== "tool") return prev;
+    const next = [...prev];
+    const nextParts = [...message.parts];
+    nextParts[partIndex] = { ...part, ...update };
+    next[messageIndex] = { ...message, parts: nextParts };
+    return next;
+  }
+  return prev;
 }
 
 function contentToText(content: HistoryMessage["content"]): string {

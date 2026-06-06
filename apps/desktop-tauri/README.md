@@ -2,7 +2,7 @@
 
 Tauri-based desktop UI for the Pi coding agent. It is a sibling workspace of the `pix` terminal app and uses the same `@earendil-works/pi-coding-agent` SDK through a Node sidecar.
 
-> **Status — current prototype.** React talks to a Rust Tauri host via `rpc_call` / `rpc_subscribe`. Rust proxies line-delimited SDK-shaped JSON to a custom Node dispatcher. Implemented: workspace picker, persistent sessions, tabbed chat with per-workspace tab restore, tool-call cards, history loading, minimal slash commands, streaming/abort, and status bar. There is intentionally no sidebar.
+> **Status — current prototype.** React talks to a Rust Tauri host via `rpc_call` / `rpc_subscribe`. Rust proxies line-delimited SDK-shaped JSON to a custom Node dispatcher. Implemented: workspace picker, persistent sessions, tabbed chat with per-workspace tab restore, tool-call cards, history loading, SDK/pi-tools-suite slash-command discovery with extension argument completions, path/general composer autocomplete, image attachments via paste/drop/file picker, Web Speech voice dictation, captured `!shell` commands, extension UI request dialogs/toasts/widgets/status, desktop-native `/model`/`/compact`/`/undo`, streaming/abort, and status bar. There is intentionally no sidebar.
 
 ## Architecture
 
@@ -42,11 +42,11 @@ apps/desktop-tauri/
 
 This is **not JSON-RPC 2.0**. The sidecar uses the SDK-style flat JSONL protocol:
 
-- Command: `{ "id": "req-1", "type": "prompt", "message": "hi" }`
+- Command: `{ "id": "req-1", "type": "prompt", "message": "hi", "images": [] }`
 - Response: `{ "id": "req-1", "type": "response", "command": "prompt", "success": true, "data": ... }`
 - Event: `{ "type": "agent_start" | "message_update" | "tool_execution_*" | ... }`
 
-Implemented commands include `prompt`, `abort`, `get_state`, `get_messages`, `get_session_stats`, `new_session`, `switch_session`, `set_session_name`, `pix:list_sessions`, and `pix:set_cwd`.
+Implemented sidecar commands include `prompt`, `abort`, `get_state`, `get_messages`, `get_session_stats`, `get_commands`, `get_command_completions`, `extension_ui_response`, `get_models`, `set_model`, `compact`, `undo_last_turn`, `new_session`, `switch_session`, `set_session_name`, `pix:list_sessions`, and `pix:set_cwd`. The sidecar emits `extension_ui_request` events for extension `ctx.ui.*` calls, and the frontend answers dialog methods with `extension_ui_response`. The Rust host also exposes native `run_shell` and `complete_path` commands for the desktop `!cmd` flow and composer path autocomplete.
 
 ## Setup and run
 
@@ -89,7 +89,13 @@ cargo check --manifest-path apps/desktop-tauri/src-tauri/Cargo.toml
 
 - Tabs are the only session navigation surface; the old sidebar was removed.
 - Open tabs and the active tab are restored per workspace across Tauri restarts.
-- Typing `/` opens a minimal slash-command menu. Current built-ins: `/help`, `/new`, `/clear`, `/refresh`, `/abort`.
+- Typing `/` opens a slash-command menu. Desktop built-ins (`/help`, `/new`, `/clear`, `/refresh`, `/abort`) are merged with SDK-discovered extension, prompt-template, and skill commands from `get_commands`; selecting a discovered command sends it through `prompt` with arguments preserved. When an extension command exposes `getArgumentCompletions`, the frontend debounces `get_command_completions` and shows argument suggestions in the same keyboard/click popup.
+- Path/general autocomplete is handled locally through the Rust `complete_path` helper, scoped to the selected workspace. It completes `@path` mentions in normal messages, path-like `!cmd` shell tokens, and generic slash-command arguments when no richer extension/model completion is available.
+- Images can be attached from the composer with the image button, paste, or drag/drop. The frontend previews them locally, sends SDK `ImageContent[]` through the sidecar `prompt` command, and keeps file attachments as text/path mentions for now.
+- Voice dictation is available from the composer mic button when the current WebView exposes `SpeechRecognition`/`webkitSpeechRecognition`; final transcripts are appended to the composer. Unsupported/error states are shown inline. Offline Vosk parity remains future work.
+- Extension commands can request simple UI through the RPC-style `extension_ui_request` surface: `select`, `confirm`, `input`, and `editor` show modal dialogs; `notify` shows toasts; `setWidget` renders text widgets around the composer; `setStatus` adds status-bar entries; `set_editor_text` fills the composer.
+- Desktop-native interactive built-ins are available for commands that are not prompt-invokable: `/model` opens a model picker and `/model <provider/id>` sets directly; `/compact [instructions]` runs SDK compaction; `/undo` navigates back to the latest user turn and restores returned editor text when available.
+- Typing `!command` runs a short non-interactive shell command in the selected workspace and renders captured stdout/stderr as a shell tool card. Raw TTY mode (`!!`) is intentionally still pending.
 - Switching tabs/folders and closing tabs are blocked while an agent run is streaming, because the sidecar has one active SDK session subscription.
 - On session switch or workspace restore, the UI calls `get_messages` and transforms SDK messages into sanitized chat messages, filtering reasoning/image internals and attaching tool results to tool-call cards.
 - Sidecar logs must go to stderr only; stdout is reserved for JSONL protocol records.
