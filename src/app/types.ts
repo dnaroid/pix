@@ -391,6 +391,7 @@ export type PixMenuItem<T = string> = {
 	description?: string;
 	keywords?: readonly string[];
 	labelHighlightRanges?: readonly { start: number; end: number }[];
+	descriptionHighlightRanges?: readonly { start: number; end: number }[];
 	variant?: PixMenuVariant;
 };
 

@@ -3,6 +3,7 @@ export type PopupMenuItem<T> = {
 	label: string;
 	description?: string;
 	labelHighlightRanges?: readonly { start: number; end: number }[];
+	descriptionHighlightRanges?: readonly { start: number; end: number }[];
 };
 
 export type VisiblePopupMenuItem<T> = PopupMenuItem<T> & {

@@ -183,6 +183,20 @@ describe("popup menu header", () => {
 		controller.closeSdkMenu(undefined, { render: false });
 	});
 
+	it("renders initial SDK menu description highlight ranges", () => {
+		const controller = createPopupMenuController(createPopupMenuHost([]));
+		void controller.showSdkMenu([
+			{ value: "session", label: "Named session", description: "…needle…  ·  06.05.2024", descriptionHighlightRanges: [{ start: 1, end: 7 }] },
+		], { title: "Search sessions", searchable: true });
+
+		const lines = controller.renderActivePopupMenu(80);
+		const descriptionStart = lines[1]?.text.indexOf("…needle") ?? -1;
+
+		assert.match(lines[1]?.text ?? "", /Named session\s+…needle… · 06\.05\.2024/u);
+		assert.deepEqual(lines[1]?.segments, [{ start: descriptionStart + 1, end: descriptionStart + 7, foreground: THEMES.dark.colors.accent, bold: true }]);
+		controller.closeSdkMenu(undefined, { render: false });
+	});
+
 	it("maps command-history highlight ranges through newline markers", () => {
 		const label = formatHistoryMenuLabel("read\nsdk references");
 

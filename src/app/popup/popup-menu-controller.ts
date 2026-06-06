@@ -825,6 +825,7 @@ export class AppPopupMenuController {
 			value: item,
 			label: item.label,
 			...(item.labelHighlightRanges === undefined ? {} : { labelHighlightRanges: item.labelHighlightRanges }),
+			...(item.descriptionHighlightRanges === undefined ? {} : { descriptionHighlightRanges: item.descriptionHighlightRanges }),
 			...(item.description === undefined ? {} : { description: item.description }),
 		})));
 	}
@@ -846,6 +847,7 @@ type FlatSessionInfoTreeNode = {
 type SessionInfoMenuSourceItem = {
 	session: SessionInfo;
 	labelPrefix: string;
+	labelHighlightRanges?: readonly { start: number; end: number }[];
 };
 
 export type SessionInfoMenuItemsLoader = {
@@ -916,7 +918,8 @@ function formatSessionMenuDateTime(dateTime: Date): { date: string; time: string
 	};
 }
 
-function formatSessionInfoMenuItem(session: SessionInfo, labelPrefix = ""): PopupMenuItem<SessionInfo> {
+function formatSessionInfoMenuItem(source: SessionInfoMenuSourceItem): PopupMenuItem<SessionInfo> {
+	const { session, labelPrefix } = source;
 	const { date, time } = formatSessionMenuDateTime(session.modified);
 	const messages = `${session.messageCount} msg${session.messageCount !== 1 ? "s" : ""}`;
 	const label = session.name ?? session.firstMessage.slice(0, 50);
@@ -924,6 +927,7 @@ function formatSessionInfoMenuItem(session: SessionInfo, labelPrefix = ""): Popu
 		value: session,
 		label: `${labelPrefix}${label}`,
 		description: `${date} ${time} · ${messages} · ${session.id.slice(0, 8)}`,
+		...(source.labelHighlightRanges === undefined ? {} : { labelHighlightRanges: source.labelHighlightRanges }),
 	};
 }
 
@@ -948,7 +952,11 @@ function buildSessionInfoMenuSource(sessions: readonly SessionInfo[], currentSes
 			],
 		}));
 
-	return fuzzySearch(items, query).map((match) => ({ session: match.value, labelPrefix: "" }));
+	return fuzzySearch(items, query).map((match) => ({
+		session: match.value,
+		labelPrefix: "",
+		labelHighlightRanges: match.matchedText === match.label ? match.matchedRanges : [],
+	}));
 }
 
 export function createSessionInfoMenuItemsLoader(sessions: readonly SessionInfo[], currentSessionFile: string | undefined, query: string): SessionInfoMenuItemsLoader {
@@ -964,7 +972,7 @@ export function createSessionInfoMenuItemsLoader(sessions: readonly SessionInfo[
 			const cached = cachedItems.get(effectiveLimit);
 			if (cached) return cached;
 
-			const result = source.slice(0, effectiveLimit).map((item) => formatSessionInfoMenuItem(item.session, item.labelPrefix));
+			const result = source.slice(0, effectiveLimit).map((item) => formatSessionInfoMenuItem(item));
 			cachedItems.set(effectiveLimit, result);
 			return result;
 		},
@@ -1013,7 +1021,17 @@ export function filterUserMessageJumpItems(items: readonly PopupMenuItem<UserMes
 		...(item.keywords === undefined ? {} : { keywords: item.keywords }),
 	}));
 
-	return fuzzySearch(searchableItems, query).map((match) => match.value);
+	return fuzzySearch(searchableItems, query).map((match) => ({
+		...match.value,
+		labelHighlightRanges: labelHighlightRangesFromMatch(match.matchedText, match.matchedRanges, match.label),
+	}));
+}
+
+function labelHighlightRangesFromMatch(matchedText: string, matchedRanges: readonly { start: number; end: number }[], label: string): readonly { start: number; end: number }[] {
+	if (matchedText === label) return matchedRanges;
+	const offset = label.toLocaleLowerCase().indexOf(matchedText.toLocaleLowerCase());
+	if (offset < 0) return [];
+	return matchedRanges.map((range) => ({ start: offset + range.start, end: offset + range.end }));
 }
 
 export type {

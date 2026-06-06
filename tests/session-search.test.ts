@@ -44,6 +44,7 @@ describe("session search helpers", () => {
 
 		assert.equal(item?.label, "Named session");
 		assert.match(item?.description ?? "", /…needle…/);
+		assert.deepEqual(item?.descriptionHighlightRanges, [{ start: 1, end: 7 }]);
 		assert.match(item?.description ?? "", /2 msg/);
 		assert.equal(item?.value.session.id, "session-id");
 	});

@@ -25,9 +25,12 @@ describe("AppMenuItemsController queue menu", () => {
 
 		assert.deepEqual(controller.parseSlashInput("/search term"), { commandName: "search", hasArguments: true, arguments: "term" });
 		assert.deepEqual(controller.getSlashCommandMenuItems("sea").map((item) => item.label), ["/search"]);
+		assert.deepEqual(controller.getSlashCommandMenuItems("sea")[0]?.labelHighlightRanges, [{ start: 1, end: 4 }]);
 		assert.deepEqual(controller.getUserMessageMenuItems().map((item) => item.value), ["copy", "fork", "fork-new-tab", "undo"]);
 		assert.equal(controller.getUserMessageJumpMenuItems("find")[0]?.value.entryId, "u1");
+		assert.deepEqual(controller.getUserMessageJumpMenuItems("find")[0]?.labelHighlightRanges, [{ start: 3, end: 7 }]);
 		assert.deepEqual(controller.getResumeMenuItems("", 5).map((item) => item.label), ["new", "First"]);
+		assert.deepEqual(controller.getResumeMenuItems("fir", 5)[1]?.labelHighlightRanges, [{ start: 0, end: 3 }]);
 	});
 
 	it("builds model and thinking menus from runtime state and settings", () => {
@@ -51,6 +54,7 @@ describe("AppMenuItemsController queue menu", () => {
 		const controller = new AppMenuItemsController(host(runtime));
 
 		assert.deepEqual(controller.getModelMenuItems("").map((item) => item.label), ["openai-codex/gpt-5.5"]);
+		assert.deepEqual(controller.getModelMenuItems("gpt")[0]?.labelHighlightRanges, [{ start: 13, end: 16 }]);
 		assert.deepEqual(controller.getThinkingMenuItems("").map((item) => item.label), [`low ${APP_ICONS.check}`, "high"]);
 		assert.equal(controller.getFavoriteScopedModels()[0]?.thinkingLevel, "low");
 		assert.ok(refreshes >= 2);

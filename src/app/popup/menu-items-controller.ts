@@ -60,6 +60,9 @@ export class AppMenuItemsController {
 			value: match.value,
 			label: `/${match.value.name}`,
 			description: match.value.description,
+			labelHighlightRanges: match.matchedText === match.label
+				? match.matchedRanges.map((range) => ({ start: range.start + 1, end: range.end + 1 }))
+				: [],
 		}));
 	}
 
@@ -99,6 +102,7 @@ export class AppMenuItemsController {
 			value: match.value,
 			label: `${match.value.ref}${match.value.current ? ` ${APP_ICONS.check}` : ""}`,
 			description: match.value.model.name,
+			labelHighlightRanges: labelHighlightRangesFromMatch(match.matchedText, match.matchedRanges, match.label),
 		}));
 	}
 
@@ -265,6 +269,13 @@ export class AppMenuItemsController {
 				return "Extra high reasoning";
 		}
 	}
+}
+
+function labelHighlightRangesFromMatch(matchedText: string, matchedRanges: readonly { start: number; end: number }[], label: string): readonly { start: number; end: number }[] {
+	if (matchedText === label) return matchedRanges;
+	const offset = label.toLocaleLowerCase().indexOf(matchedText.toLocaleLowerCase());
+	if (offset < 0) return [];
+	return matchedRanges.map((range) => ({ start: offset + range.start, end: offset + range.end }));
 }
 
 function normalizeAvailableThinkingLevels(levels: readonly string[] | undefined): ThinkingLevel[] {

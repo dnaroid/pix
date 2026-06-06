@@ -64,6 +64,7 @@ export function createSessionSearchMenuItems(results: readonly SessionSearchResu
 			value: result,
 			label: title,
 			description: `${result.snippet}  ·  ${date} ${time} · ${messages} · ${result.session.id.slice(0, 8)}`,
+			descriptionHighlightRanges: sessionSearchSnippetHighlightRanges(result),
 			keywords: [
 				result.session.id,
 				result.session.name ?? "",
@@ -73,6 +74,15 @@ export function createSessionSearchMenuItems(results: readonly SessionSearchResu
 			].filter(Boolean),
 		};
 	});
+}
+
+function sessionSearchSnippetHighlightRanges(result: SessionSearchResult): readonly { start: number; end: number }[] {
+	const needle = result.query.trim();
+	if (!needle) return [];
+
+	const start = result.snippet.toLocaleLowerCase().indexOf(needle.toLocaleLowerCase());
+	if (start < 0) return [];
+	return [{ start, end: start + needle.length }];
 }
 
 export function searchResultTargetEntry(entries: readonly Entry[], result: SessionSearchResult): Entry | undefined {

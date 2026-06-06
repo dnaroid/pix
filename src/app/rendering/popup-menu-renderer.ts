@@ -144,9 +144,11 @@ export class PopupMenuRenderer {
 
 		for (const item of visibleItems) {
 			const marker = item.selected ? "▶ " : "  ";
+			const text = `${marker}${this.labelDescriptionText(item.label, item.description, width - 2)}`;
 			lines.push({
-				text: `${marker}${this.labelDescriptionText(item.label, item.description, width - 2)}`,
+				text,
 				variant: "normal",
+				segments: this.itemHighlightSegments(item, text),
 				target: { kind: "popup-menu", index: item.index },
 			});
 		}
@@ -169,7 +171,7 @@ export class PopupMenuRenderer {
 			lines.push({
 				text,
 				variant: this.selectableItemVariant(item.value),
-				segments: this.modelMenuItemSegments(item.value),
+				segments: [...this.modelMenuItemSegments(item.value), ...this.itemHighlightSegments(item, text)],
 				target: { kind: "popup-menu", index: item.index },
 			});
 		}
@@ -216,11 +218,11 @@ export class PopupMenuRenderer {
 			const description = item.description ?? "";
 			const marker = item.selected ? "▶ " : "  ";
 			const text = `${marker}${label}  ${description}`;
-			const segments = this.resumeMenuItemSegments(item.value, label, description, text);
+			const segments = [...(this.resumeMenuItemSegments(item.value, label, description, text) ?? []), ...this.itemHighlightSegments(item, text)];
 			lines.push({
 				text,
 				variant: "normal",
-				...(segments ? { segments } : {}),
+				...(segments.length === 0 ? {} : { segments }),
 				target: { kind: "popup-menu", index: item.index },
 			});
 		}
@@ -251,9 +253,11 @@ export class PopupMenuRenderer {
 		for (const item of menu.visibleItems()) {
 			const label = ellipsizeDisplay(item.label, labelWidth);
 			const marker = item.selected ? "▶ " : "  ";
+			const text = `${marker}${label}`;
 			lines.push({
-				text: `${marker}${label}`,
+				text,
 				variant: "normal",
+				segments: this.itemHighlightSegments(item, text),
 				target: { kind: "popup-menu", index: item.index },
 			});
 		}
@@ -387,10 +391,18 @@ export class PopupMenuRenderer {
 	}
 
 	private sdkMenuItemSegments(item: PopupMenuItem<PixMenuItem<unknown>>, text: string): StyledSegment[] {
-		const ranges = item.labelHighlightRanges ?? item.value.labelHighlightRanges ?? [];
-		if (ranges.length === 0) return [];
+		return [
+			...this.highlightSegments(item.labelHighlightRanges ?? item.value.labelHighlightRanges ?? [], text, 2),
+			...this.descriptionHighlightSegments(item.description, item.descriptionHighlightRanges ?? item.value.descriptionHighlightRanges ?? [], text),
+		];
+	}
 
-		const markerOffset = 2; // "▶ " or "  "
+	private itemHighlightSegments(item: PopupMenuItem<unknown>, text: string): StyledSegment[] {
+		return this.highlightSegments(item.labelHighlightRanges ?? [], text, 2);
+	}
+
+	private highlightSegments(ranges: readonly { start: number; end: number }[], text: string, markerOffset: number): StyledSegment[] {
+		if (ranges.length === 0) return [];
 		return ranges.flatMap((range): StyledSegment[] => {
 			const start = Math.max(markerOffset, markerOffset + range.start);
 			const end = Math.min(text.length, markerOffset + range.end);
@@ -402,6 +414,14 @@ export class PopupMenuRenderer {
 				bold: true,
 			}];
 		});
+	}
+
+	private descriptionHighlightSegments(description: string | undefined, ranges: readonly { start: number; end: number }[], text: string): StyledSegment[] {
+		if (!description || ranges.length === 0) return [];
+		const safeDescription = sanitizeText(description).replace(/\s+/gu, " ");
+		const descriptionStart = text.indexOf(safeDescription, 2);
+		if (descriptionStart < 0) return [];
+		return this.highlightSegments(ranges, text, descriptionStart);
 	}
 
 	private resumeMenuItemSegments(value: ResumeMenuValue, label: string, description: string, text: string): StyledSegment[] | undefined {
