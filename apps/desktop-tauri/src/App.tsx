@@ -3,7 +3,6 @@ import { invoke, Channel } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
   Sparkles,
-  Send,
   Square,
   User,
   Bot,
@@ -1633,17 +1632,6 @@ export default function App() {
           )}
           <button
             className="composer__btn composer__btn--secondary"
-            onClick={toggleVoiceDictation}
-            disabled={streaming || !voiceSupported}
-            title={voiceSupported ? (voiceListening ? "Stop voice dictation" : "Start voice dictation") : "Voice dictation unavailable"}
-            aria-label={voiceListening ? "Stop voice dictation" : "Start voice dictation"}
-            aria-pressed={voiceListening}
-            type="button"
-          >
-            {voiceListening ? <MicOff size={16} /> : <Mic size={16} />}
-          </button>
-          <button
-            className="composer__btn composer__btn--secondary"
             onClick={() => fileInputRef.current?.click()}
             disabled={streaming}
             title="Attach image"
@@ -1779,13 +1767,15 @@ export default function App() {
             </button>
           ) : (
             <button
-              className="composer__btn"
-              onClick={send}
-              disabled={!input.trim() && attachments.length === 0}
-              title="Send (Enter)"
-              aria-label="Send"
+              className="composer__btn composer__btn--secondary"
+              onClick={toggleVoiceDictation}
+              disabled={!voiceSupported}
+              title={voiceSupported ? (voiceListening ? "Stop voice dictation" : "Start voice dictation") : "Voice dictation unavailable"}
+              aria-label={voiceListening ? "Stop voice dictation" : "Start voice dictation"}
+              aria-pressed={voiceListening}
+              type="button"
             >
-              <Send size={16} />
+              {voiceListening ? <MicOff size={16} /> : <Mic size={16} />}
             </button>
           )}
         </footer>

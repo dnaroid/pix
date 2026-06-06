@@ -19,9 +19,68 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
 use tauri::ipc::Channel;
-use tauri::{Manager, State};
+use tauri::{Manager, State, Window, WindowEvent};
 use tokio::sync::Mutex;
 use tokio::time::{timeout, Duration};
+
+#[cfg(target_os = "macos")]
+mod macos_titlebar {
+    use objc2_app_kit::{NSWindow, NSWindowButton};
+    use std::ffi::c_void;
+    use tauri::Window;
+
+    const TRAFFIC_LIGHT_X: f64 = 14.0;
+    const TRAFFIC_LIGHT_Y: f64 = 24.0;
+
+    pub fn apply(window: &Window) {
+        let Ok(raw_window) = window.ns_window() else {
+            return;
+        };
+
+        apply_raw(raw_window);
+    }
+
+    pub fn apply_raw(raw_window: *mut c_void) {
+        if raw_window.is_null() {
+            return;
+        }
+
+        unsafe {
+            let ns_window: &NSWindow = &*raw_window.cast();
+            let Some(close_button) = ns_window.standardWindowButton(NSWindowButton::CloseButton) else {
+                return;
+            };
+            let Some(minimize_button) = ns_window.standardWindowButton(NSWindowButton::MiniaturizeButton) else {
+                return;
+            };
+            let Some(zoom_button) = ns_window.standardWindowButton(NSWindowButton::ZoomButton) else {
+                return;
+            };
+            let Some(buttons_row) = close_button.superview() else {
+                return;
+            };
+            let Some(titlebar_container) = buttons_row.superview() else {
+                return;
+            };
+
+            let close_frame = close_button.frame();
+            let button_height = close_frame.size.height;
+            let titlebar_height = button_height + TRAFFIC_LIGHT_Y;
+
+            let mut titlebar_frame = titlebar_container.frame();
+            titlebar_frame.size.height = titlebar_height;
+            titlebar_frame.origin.y = ns_window.frame().size.height - titlebar_height;
+            titlebar_container.setFrame(titlebar_frame);
+
+            let spacing = minimize_button.frame().origin.x - close_frame.origin.x;
+            for (index, button) in [close_button, minimize_button, zoom_button].into_iter().enumerate() {
+                let mut frame = button.frame();
+                frame.origin.x = TRAFFIC_LIGHT_X + (index as f64 * spacing);
+                button.setFrameOrigin(frame.origin);
+            }
+        }
+    }
+}
 
 #[derive(Debug, Serialize)]
 struct ShellRunResult {
@@ -252,7 +311,24 @@ pub fn run() {
             let handle = tauri::async_runtime::block_on(sidecar::spawn_default())
                 .map_err(|e| format!("failed to start sidecar: {e}"))?;
             app.manage(Arc::new(Mutex::new(handle)));
+
+            #[cfg(target_os = "macos")]
+            if let Some(window) = app.get_webview_window("main") {
+                if let Ok(raw_window) = window.ns_window() {
+                    macos_titlebar::apply_raw(raw_window);
+                }
+            }
+
             Ok(())
+        })
+        .on_window_event(|window: &Window, event: &WindowEvent| {
+            #[cfg(target_os = "macos")]
+            if window.label() == "main" {
+                match event {
+                    WindowEvent::Resized(_) | WindowEvent::ThemeChanged(_) => macos_titlebar::apply(window),
+                    _ => {}
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![rpc_call, rpc_subscribe, set_workspace, run_shell, complete_path])
         .run(tauri::generate_context!())
