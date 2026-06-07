@@ -283,16 +283,16 @@ export function registerSpawnTool(
 					onCancelled: () => {
 						stopAgents(runDir, [task.id], { signal: "SIGTERM" });
 						resolveCompleted();
-						liveRun.delete(task.id);
-						if (liveRun.size === 0) liveAgents.delete(runDir);
+						const state = getAgentState(runDir, task.id, { includeLineCounts: false }) ?? { id: task.id, status: "stopped" as const };
+						handleAgentCompletion({ runDir, agentId: task.id, agentDir: path.join(runDir, task.id), exitCode: 0, state });
 					},
 					onLaunchError: (error) => {
 						const message = errorMessage(error);
 						launchErrors.push({ id: task.id, error: message });
 						writeLaunchFailure(runDir, task, message, resolved.maxResultBytes);
 						resolveCompleted();
-						liveRun.delete(task.id);
-						if (liveRun.size === 0) liveAgents.delete(runDir);
+						const state = getAgentState(runDir, task.id, { includeLineCounts: false }) ?? { id: task.id, status: "failed" as const, exitCode: 1 };
+						handleAgentCompletion({ runDir, agentId: task.id, agentDir: path.join(runDir, task.id), exitCode: 1, state });
 					},
 					onUpdate: () => {
 						onLiveAgentsChange?.();

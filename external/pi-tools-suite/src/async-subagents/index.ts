@@ -24,6 +24,7 @@ import {
 	type BridgedImageAttachment,
 	type BridgeImageAttachmentsResult,
 } from "./core/attachment-bridge.js";
+import { buildAgentCompletionNotification, isTerminalAgentStatus } from "./core/notifications.js";
 import { appendUltraworkAutoHint, decideUltraworkAuto, isGptLikeModel, isUltraworkAutoEnvEnabled } from "./core/ultrawork-auto.js";
 import { SubagentOverlay } from "./subagent-overlay.js";
 import { registerSubagentsTool } from "./tools/subagents.js";
@@ -33,6 +34,7 @@ import { publishStartupSection } from "../startup-section.js";
 const SUBAGENTS_LIVE_COUNT_EVENT = "pi-tools-suite:async-subagents:live-count";
 const SUBAGENTS_LIVE_STATE_EVENT = "pi-tools-suite:async-subagents:live-state";
 const SESSION_SHUTDOWN_KILL_GRACE_MS = 500;
+const COMPLETION_WATCH_INTERVAL_MS = 2_000;
 
 interface ShutdownTarget {
 	runDir: string;
@@ -74,30 +76,89 @@ function agentMatchesSession(agent: LiveAgent, sessionFile: string | undefined):
 	return pathsEqual(sessionFile, agent.parentSession);
 }
 
-function isTerminalAgentStatus(status: ReturnType<typeof getRunState>["agents"][number]["status"]): boolean {
-	return status === "done" || status === "failed" || status === "stopped";
-}
-
 export default function (pi: ExtensionAPI) {
 	const liveAgents = new Map<string, Map<string, LiveAgent>>();
 	const subagentOverlay = new SubagentOverlay(liveAgents);
+	const notifiedAgentCompletions = new Set<string>();
 	let sawAutoUltraworkCandidate = false;
 	let currentSessionFile: string | undefined;
+	let completionWatchTimer: ReturnType<typeof setInterval> | undefined;
 	publishSubagentPresetsStartupSection();
 
 	function refreshSubagentOverlay(): void {
-		subagentOverlay.update();
+		reconcileLiveAgentCompletions();
 		const liveState = createLiveStatePayload(liveAgents, currentSessionFile);
 		pi.events?.emit?.(SUBAGENTS_LIVE_COUNT_EVENT, { count: liveState.count });
 		pi.events?.emit?.(SUBAGENTS_LIVE_STATE_EVENT, liveState);
+		updateCompletionWatcher();
 	}
 
+	function completionNotificationKey(runDir: string, agentId: string): string {
+		return `${path.resolve(runDir)}\0${agentId}`;
+	}
 
+	function notifyAgentCompletion(runDir: string, agentId: string, state: ReturnType<typeof getRunState>["agents"][number]): void {
+		const key = completionNotificationKey(runDir, agentId);
+		if (notifiedAgentCompletions.has(key)) return;
+		const liveAgent = liveAgents.get(runDir)?.get(agentId);
+		if (liveAgent?.parentSession && currentSessionFile && !pathsEqual(liveAgent.parentSession, currentSessionFile)) return;
+		notifiedAgentCompletions.add(key);
+		const runState = getRunState(runDir, undefined, { includeLineCounts: false, checkRpcPromptFailure: false });
+		try {
+			pi.sendMessage(
+				buildAgentCompletionNotification({ agentId, runDir, state, runAgents: runState.agents }),
+				{ triggerTurn: true, deliverAs: "followUp" },
+			);
+		} catch {
+			// Session-bound extension APIs can be invalidated during reload/switch.
+			// Completion artifacts remain available through status/result.
+		}
+	}
 
-	const handleAgentCompletion: AgentCompletionHandler = ({ runDir, agentId }) => {
+	function removeLiveAgent(runDir: string, agentId: string): void {
 		const liveRun = liveAgents.get(runDir);
 		liveRun?.delete(agentId);
 		if (liveRun?.size === 0) liveAgents.delete(runDir);
+	}
+
+	function reconcileLiveAgentCompletions(): void {
+		for (const [runDir, liveRun] of [...liveAgents.entries()]) {
+			const states = new Map(
+				getRunState(runDir, [...liveRun.keys()], {
+					includeLineCounts: false,
+					checkRpcPromptFailure: false,
+				}).agents.map((agent) => [agent.id, agent]),
+			);
+			for (const agentId of [...liveRun.keys()]) {
+				const state = states.get(agentId);
+				if (!state) {
+					removeLiveAgent(runDir, agentId);
+					continue;
+				}
+				if (!isTerminalAgentStatus(state.status)) continue;
+				notifyAgentCompletion(runDir, agentId, state);
+				removeLiveAgent(runDir, agentId);
+			}
+		}
+	}
+
+	function hasLiveAgentsForCurrentSession(): boolean {
+		return createLiveStatePayload(liveAgents, currentSessionFile).count > 0;
+	}
+
+	function updateCompletionWatcher(): void {
+		if (hasLiveAgentsForCurrentSession()) {
+			if (completionWatchTimer) return;
+			completionWatchTimer = setInterval(refreshSubagentOverlay, COMPLETION_WATCH_INTERVAL_MS);
+			completionWatchTimer.unref?.();
+			return;
+		}
+		if (!completionWatchTimer) return;
+		clearInterval(completionWatchTimer);
+		completionWatchTimer = undefined;
+	}
+
+	const handleAgentCompletion: AgentCompletionHandler = () => {
 		refreshSubagentOverlay();
 	};
 
@@ -166,6 +227,10 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_shutdown", async (event, ctx) => {
 		subagentOverlay.dispose();
+		if (completionWatchTimer) {
+			clearInterval(completionWatchTimer);
+			completionWatchTimer = undefined;
+		}
 		if (event?.reason === "reload" || event?.reason === "fork") return;
 		try {
 			await cleanupProjectSubagentState(ctx.cwd, liveAgents);

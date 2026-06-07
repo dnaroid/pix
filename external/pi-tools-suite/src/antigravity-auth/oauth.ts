@@ -203,6 +203,7 @@ export async function addAntigravityAccount(
 		access: shouldActivate ? credentials.access : existing?.access ?? "",
 		expires: shouldActivate ? credentials.expires : existing?.expires ?? 0,
 		email: shouldActivate ? account.email : existing?.email ?? activeAccount.email,
+		...getGoogleOAuthClientCredentials(existing, credentials, account),
 		accounts,
 		activeIndex,
 	};

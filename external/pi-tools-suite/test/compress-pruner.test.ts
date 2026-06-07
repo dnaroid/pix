@@ -21,6 +21,7 @@ import {
 } from "../src/dcp/pruner.js";
 import {
   createState,
+  createInputFingerprint,
   restoreState,
   serializeState,
   type CompressionBlock,
@@ -1236,7 +1237,8 @@ describe("DCP pruning effectiveness", () => {
 
   test("serialized state preserves tool fingerprints and accounting across reload", () => {
     const state = createState();
-    state.toolCalls.set("call-1", toolRecord("call-1", "read", "read::{path:a}", 100));
+    const inputFingerprint = createInputFingerprint("read", { path: "a" });
+    state.toolCalls.set("call-1", toolRecord("call-1", "read", inputFingerprint, 100));
     state.prunedToolIds.add("call-1");
     state.prunedToolReasons.set("call-1", "duplicate");
     state.accountedPrunedToolIds.add("call-1");
@@ -1266,7 +1268,7 @@ describe("DCP pruning effectiveness", () => {
     const restored = createState();
     restoreState(restored, serializeState(state));
 
-    expect(restored.toolCalls.get("call-1")?.inputFingerprint).toBe("read::{path:a}");
+    expect(restored.toolCalls.get("call-1")?.inputFingerprint).toBe(inputFingerprint);
     expect(restored.prunedToolIds.has("call-1")).toBe(true);
     expect(restored.prunedToolReasons.get("call-1")).toBe("duplicate");
     expect(restored.accountedPrunedToolIds.has("call-1")).toBe(true);

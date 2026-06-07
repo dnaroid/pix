@@ -69,7 +69,8 @@
     "desktop:build": "npm --prefix apps/desktop-tauri run tauri:build",
     "desktop:check": "npm --prefix apps/desktop-tauri run build && npm --prefix apps/desktop-tauri/sidecar run check && cargo check --manifest-path apps/desktop-tauri/src-tauri/Cargo.toml",
     "desktop:icons": "npm --prefix apps/desktop-tauri run icons",
-    "desktop": "node apps/desktop-tauri/bin/pix-desktop.mjs"
+    "desktop": "node apps/desktop-tauri/bin/pix-desktop.mjs",
+    "tui-rust": "mise exec node@24.16.0 -- tsx scripts/tui-rust-watch.ts"
   },
   "dependencies": {
     "@earendil-works/pi-tui": "0.77.0",

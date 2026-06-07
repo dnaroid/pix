@@ -169,6 +169,20 @@ Before committing code changes, run:
 npm run check
 ```
 
+## Experimental Rust TUI
+
+An experimental standalone Rust renderer lives in `apps/tui-rust/`. It currently reuses the existing Node sidecar rather than reimplementing the Pi SDK bridge in Rust.
+
+Quick setup:
+
+```bash
+npm --prefix apps/desktop-tauri/sidecar run build
+cargo run --manifest-path apps/tui-rust/Cargo.toml -- --diagnostics
+cargo run --manifest-path apps/tui-rust/Cargo.toml -- --cwd /path/to/workspace
+```
+
+`pix-tui --diagnostics` reports the resolved sidecar path, config candidates, crash-report directory, and relevant env overrides. If the sidecar is not in the default repo location, set `PIX_SIDECAR_PATH=/absolute/path/to/main.js`. Panic reports are written to a user-local crash-report directory, and `RUST_BACKTRACE=1` is recommended while reproducing crashes. See [apps/tui-rust/README.md](apps/tui-rust/README.md).
+
 ## Configuration
 
 Useful environment variables:

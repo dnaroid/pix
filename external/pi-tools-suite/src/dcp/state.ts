@@ -2,6 +2,7 @@
 // Types
 // ---------------------------------------------------------------------------
 
+import { createHash } from "node:crypto"
 import type { DcpNudgeType } from "./pruner-types.js"
 
 /**
@@ -15,8 +16,9 @@ export interface ToolRecord {
   /** The arguments passed to the tool (from the corresponding ToolCall) */
   inputArgs: Record<string, unknown>
   /**
-   * Deduplication fingerprint: `toolName::JSON(sortedArgs)`
-   * Two calls with the same name + identical args share the same fingerprint.
+   * Deduplication fingerprint: `toolName::sha256:<hash>` where the hash is
+   * computed over recursively key-sorted args. Two calls with the same name +
+   * identical args share the same fingerprint without persisting full args.
    */
   inputFingerprint: string
   /** Whether the tool result was an error */
@@ -714,14 +716,17 @@ function sortObjectKeys(value: unknown): unknown {
  * Two calls with the same `toolName` and semantically identical `args`
  * (regardless of key ordering) will produce the same fingerprint.
  *
- * Format: `<toolName>::<JSON of recursively key-sorted args>`
+ * Format: `<toolName>::sha256:<hash of recursively key-sorted args>`
  */
 export function createInputFingerprint(
   toolName: string,
   args: Record<string, unknown>,
 ): string {
   const sorted = sortObjectKeys(args)
-  return `${toolName}::${JSON.stringify(sorted)}`
+  const hash = createHash("sha256")
+    .update(JSON.stringify(sorted))
+    .digest("hex")
+  return `${toolName}::sha256:${hash}`
 }
 
 // ---------------------------------------------------------------------------

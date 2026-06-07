@@ -221,6 +221,7 @@ export async function importOpencodeAntigravityAccount(options: {
 		access: "",
 		expires: 0,
 		email: selected.account.email,
+		...getGoogleOAuthClientCredentials(selected.account),
 		accounts: storage.accounts.filter((account) => account.enabled !== false && getAccountRefreshToken(account)),
 		activeIndex: selected.index,
 	};

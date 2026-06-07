@@ -4,6 +4,7 @@ import {
   restoreState,
   serializeState,
   compactifyToolRecord,
+  createInputFingerprint,
   hashSerializedState,
   PERSISTED_TOOL_CALLS_MAX_RECENT,
   type CompressionBlock,
@@ -24,7 +25,9 @@ function makeToolRecord(
     toolCallId: id,
     toolName: overrides.toolName ?? "read",
     inputArgs: overrides.inputArgs ?? { file_path: `/src/${id}.ts` },
-    inputFingerprint: overrides.inputFingerprint ?? `read::{"file_path":"/src/${id}.ts"}`,
+    inputFingerprint:
+      overrides.inputFingerprint ??
+      createInputFingerprint("read", { file_path: `/src/${id}.ts` }),
     isError: overrides.isError ?? false,
     turnIndex: overrides.turnIndex ?? 0,
     timestamp: overrides.timestamp ?? Date.now(),
@@ -118,6 +121,44 @@ describe("compactifyToolRecord", () => {
     });
     const compact = compactifyToolRecord(record);
     expect(compact.inputStringValues).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// createInputFingerprint
+// ---------------------------------------------------------------------------
+
+describe("createInputFingerprint", () => {
+  test("hashes sorted args instead of embedding raw input", () => {
+    const content = "large patch content".repeat(1_000);
+    const fp = createInputFingerprint("apply_patch", {
+      input: content,
+      nested: { b: 2, a: 1 },
+    });
+
+    expect(fp).toMatch(/^apply_patch::sha256:[a-f0-9]{64}$/);
+    expect(fp).not.toContain(content.slice(0, 100));
+    expect(fp).not.toContain("nested");
+  });
+
+  test("is stable for semantically identical args with different key order", () => {
+    const a = createInputFingerprint("read", {
+      z: [2, { b: "b", a: "a" }],
+      a: true,
+    });
+    const b = createInputFingerprint("read", {
+      a: true,
+      z: [2, { a: "a", b: "b" }],
+    });
+
+    expect(a).toBe(b);
+  });
+
+  test("keeps tool name in the fingerprint namespace", () => {
+    const args = { file_path: "/src/foo.ts" };
+    expect(createInputFingerprint("read", args)).not.toBe(
+      createInputFingerprint("write", args),
+    );
   });
 });
 
@@ -298,11 +339,14 @@ describe("serializeState", () => {
 describe("restoreState", () => {
   test("restores from new compact format", () => {
     const state = createState();
+    const inputFingerprint = createInputFingerprint("read", {
+      file_path: "/src/foo.ts",
+    });
     const compact: CompactToolRecord[] = [
       {
         toolCallId: "tc-1",
         toolName: "read",
-        inputFingerprint: 'read::{"file_path":"/src/foo.ts"}',
+        inputFingerprint,
         isError: false,
         turnIndex: 2,
         timestamp: 1000,
@@ -331,7 +375,7 @@ describe("restoreState", () => {
     const restored = state.toolCalls.get("tc-1")!;
     expect(restored.toolCallId).toBe("tc-1");
     expect(restored.toolName).toBe("read");
-    expect(restored.inputFingerprint).toBe('read::{"file_path":"/src/foo.ts"}');
+    expect(restored.inputFingerprint).toBe(inputFingerprint);
     expect(restored.isError).toBe(false);
     expect(restored.turnIndex).toBe(2);
     expect(restored.timestamp).toBe(1000);

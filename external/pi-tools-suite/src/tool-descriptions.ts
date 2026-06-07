@@ -77,7 +77,7 @@ export function asyncSubagentToolDescriptions(options: ToolDescriptionSetOptions
 				repoDiscovery
 					? "Use for broad independent tracks, review axes, or hypotheses even though repo_* tools are available."
 					: "Use first for broad codebase discovery split into tracks, review axes, or incident-triage hypotheses when repo_* tools are unavailable.",
-				"Use action=spawn/status/wait/result/stop/cleanup with the matching options; spawned runs are registered under project .pi/subagents while the main session is alive so status/wait/stop can omit runDir for the latest run and result can resolve runDir by agentId.",
+				"Use action=spawn/status/wait/result/stop/cleanup with the matching options; spawned runs are registered under project .pi/subagents while the main session is alive so status/wait/stop can omit runDir for the latest run and result can resolve runDir by agentId. The parent session receives a follow-up system/custom message for each background agent when it finishes or fails, so the parent can stop after spawning instead of polling for completion.",
 				"Collect compact results only when the parent task needs them.",
 				"Spawned agents run in isolated background pi processes with extensions disabled to prevent recursive sub-agent spawning.",
 				"Each agent has a wall-clock watchdog timeout (default 30 minutes); spawn timeoutSeconds or task timeoutSeconds can shorten it for tests or bounded probes.",
@@ -110,7 +110,7 @@ export function asyncSubagentToolDescriptions(options: ToolDescriptionSetOptions
 				"For synthetic tests or intentionally bounded probes, pass timeoutSeconds slightly above the expected runtime so hung sub-agents are stopped automatically.",
 				"For subagents action='spawn', default to leaving subagentType unset and let the lightweight router choose from configured role descriptions. Do not choose a role just because a built-in example seems to fit; the router has the current user config and presets. Set subagentType explicitly only when the user named the role, image inspection requires vision, tests need deterministic routing, or there is another concrete technical reason to bypass the router.",
 				"Use subagentType='vision' with imagePaths and optional focus when a text-only/blind parent model needs a visual description of screenshots, UI state, diagrams, or other images.",
-				"If the user asks to start, run, launch, or test parallel sub-agents, call action='spawn' and then stop; do not immediately call action='wait'.",
+				"If the user asks to start, run, launch, or test parallel sub-agents, call action='spawn' and then stop; completion/failure notifications will wake the parent so do not immediately call action='status' or action='wait' just to see whether agents finished.",
 				"Use action='status' for a non-blocking progress check or to recover after reload/crash.",
 				"After spawn, project-local .pi/subagents/registry.json records latest runDir and agentId mappings until normal main-session shutdown; if runDir is missing after compaction/reload, call status without runDir or result with agentId instead of failing solely because runDir was lost.",
 				"Use action='wait' only when the user asks to wait/collect now, or your next parent step depends on completion.",

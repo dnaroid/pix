@@ -58,6 +58,7 @@ import {
 } from "../../src/async-subagents/lib.js";
 import { isRecord, isoNow, serializeJsonLine } from "../../src/async-subagents/core/utils.js";
 import { agentStrategyPrompt, appendAgentStrategyPrompt } from "../../src/async-subagents/core/agent-strategy.js";
+import { buildAgentCompletionNotification, isTerminalAgentStatus } from "../../src/async-subagents/core/notifications.js";
 import type { AgentTask } from "../../src/async-subagents/lib.js";
 
 const tempDirs: string[] = [];
@@ -215,6 +216,43 @@ describe.serial("core paths", () => {
 });
 
 describe.serial("core utils and prompt generation", () => {
+	test.serial("builds per-agent completion notifications with remaining active agents", () => {
+		const notification = buildAgentCompletionNotification({
+			agentId: "agent-1",
+			runDir: "/tmp/run",
+			state: { id: "agent-1", status: "done", exitCode: 0 },
+			runAgents: [
+				{ id: "agent-1", status: "done", exitCode: 0 },
+				{ id: "agent-2", status: "running" },
+				{ id: "agent-3", status: "planned" },
+				{ id: "agent-4", status: "failed", exitCode: 1 },
+			],
+		});
+
+		expect(notification.customType).toBe("async-subagents-agent-completion");
+		expect(notification.display).toBe(true);
+		expect(notification.details).toEqual({
+			agentId: "agent-1",
+			runDir: "/tmp/run",
+			status: "done",
+			exitCode: 0,
+			remainingAgentIds: ["agent-2", "agent-3"],
+		});
+		expect(notification.content).toContain("Background sub-agent agent-1 finished with status done, exitCode=0.");
+		expect(notification.content).toContain("2 other sub-agents still active: agent-2 (in progress), agent-3 (planned).");
+		expect(notification.content).toContain('subagents({ action: "result", agentId: "agent-1", runDir: "/tmp/run" })');
+		expect(notification.content).toContain("Do not poll for the remaining agents");
+	});
+
+	test.serial("classifies terminal notification statuses", () => {
+		expect(isTerminalAgentStatus("done")).toBe(true);
+		expect(isTerminalAgentStatus("failed")).toBe(true);
+		expect(isTerminalAgentStatus("stopped")).toBe(true);
+		expect(isTerminalAgentStatus("running")).toBe(false);
+		expect(isTerminalAgentStatus("planned")).toBe(false);
+		expect(isTerminalAgentStatus("retrying")).toBe(false);
+	});
+
 	test.serial("limits concurrent work with an abortable semaphore", async () => {
 		const semaphore = createSemaphore(1);
 		await semaphore.acquire();

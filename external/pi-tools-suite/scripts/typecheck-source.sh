@@ -10,6 +10,7 @@ declare module "@mariozechner/pi-coding-agent" {
     registerTool(tool: any): void;
     registerCommand(name: string, command: any): void;
     registerMessageRenderer<T = any>(name: string, renderer: (message: { details?: T; content?: any }, options: any, theme: any) => any): void;
+    sendMessage(message: any, options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" }): void;
     on(event: string, handler: (...args: any[]) => any): void;
     events: { emit(event: string, data?: unknown): void; on(event: string, handler: (data: unknown) => void): void };
   }
