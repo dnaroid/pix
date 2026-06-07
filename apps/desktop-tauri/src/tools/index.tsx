@@ -14,10 +14,17 @@
 import type { ToolRenderProps, ToolRenderer } from "./types";
 import { CodeBlock, Section, formatHeaderArgs, resultText } from "./common";
 import {
+  astApplyTool,
+  astGrepTool,
+  compressTool,
   applyPatchTool,
   folderTool,
+  questionTool,
   readTool,
+  repoTool,
   shellTool,
+  skillTool,
+  subagentsTool,
   todoTool,
   webFetchTool,
   webSearchTool,
@@ -43,13 +50,30 @@ const EXACT: Record<string, ToolRenderer> = {
 
   // planning
   todo: todoTool,
+  question: questionTool,
+  subagents: subagentsTool,
+  compress: compressTool,
+  skill: skillTool,
+
+  // codebase discovery / structural edits
+  ast_grep: astGrepTool,
+  ast_apply: astApplyTool,
+  repo_architecture: repoTool,
+  repo_structure: repoTool,
+  repo_ast: repoTool,
+  repo_search: repoTool,
+  repo_explain: repoTool,
+  repo_deps: repoTool,
 
   // web
   web_search: webSearchTool,
   web_fetch: webFetchTool,
 };
 
-const PREFIX: Array<{ prefix: string; renderer: ToolRenderer }> = [];
+const PREFIX: Array<{ prefix: string; renderer: ToolRenderer }> = [
+  { prefix: "repo_", renderer: repoTool },
+  { prefix: "ast_", renderer: astGrepTool },
+];
 
 /** Normalize a tool name: last segment of dotted/dashed/slash, lowercase. */
 function normalizeName(name: string): string {

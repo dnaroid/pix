@@ -12,9 +12,11 @@
 
 mod sidecar;
 mod history;
+mod pty;
 
 use crate::sidecar::SidecarHandle;
 use crate::history::{list_sessions_for_workspace, read_window, save_viewport, HistoryCache, HistoryWindow, SessionList, ViewportCursor};
+use crate::pty::{PtyRegistry, PtyStartOptions, PtyStartResult};
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -310,6 +312,42 @@ async fn save_session_viewport(
     save_viewport(&mut cache, session_path, follow_output, anchor_id, anchor_offset, anchor_entry_offset)
 }
 
+#[tauri::command]
+async fn pty_start(
+    pty_registry: State<'_, Arc<std::sync::Mutex<PtyRegistry>>>,
+    opts: PtyStartOptions,
+    on_event: Channel<Value>,
+) -> Result<PtyStartResult, String> {
+    pty::start(pty_registry.inner(), opts, on_event)
+}
+
+#[tauri::command]
+async fn pty_write(
+    pty_registry: State<'_, Arc<std::sync::Mutex<PtyRegistry>>>,
+    id: String,
+    data: String,
+) -> Result<(), String> {
+    pty::write(pty_registry.inner(), id, data)
+}
+
+#[tauri::command]
+async fn pty_resize(
+    pty_registry: State<'_, Arc<std::sync::Mutex<PtyRegistry>>>,
+    id: String,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    pty::resize(pty_registry.inner(), id, cols, rows)
+}
+
+#[tauri::command]
+async fn pty_kill(
+    pty_registry: State<'_, Arc<std::sync::Mutex<PtyRegistry>>>,
+    id: String,
+) -> Result<(), String> {
+    pty::kill(pty_registry.inner(), id)
+}
+
 pub fn run() {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -329,6 +367,7 @@ pub fn run() {
                 .map_err(|e| format!("failed to start sidecar: {e}"))?;
             app.manage(Arc::new(Mutex::new(handle)));
             app.manage(Arc::new(Mutex::new(HistoryCache::default())));
+            app.manage(Arc::new(std::sync::Mutex::new(PtyRegistry::default())));
 
             #[cfg(target_os = "macos")]
             if let Some(window) = app.get_webview_window("main") {
@@ -348,6 +387,10 @@ pub fn run() {
             list_workspace_sessions,
             read_session_messages_window,
             save_session_viewport,
+            pty_start,
+            pty_write,
+            pty_resize,
+            pty_kill,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

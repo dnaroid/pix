@@ -150,6 +150,7 @@ export class AppMouseController {
 	handleMouse(event: MouseEvent): void {
 		if (this.handleInputScrollBar(event)) return;
 		this.showClickFlashOnPress(event);
+		if (event.button === 0 && !event.released && this.handleInputBorderStatusClick(event)) return;
 		if (this.handleMouseSelection(event)) return;
 		if (this.withClickFlash(event, () => this.handleImageClick(event))) return;
 		if (this.withClickFlash(event, () => this.handleFileLinkClick(event))) return;
@@ -158,15 +159,7 @@ export class AppMouseController {
 		if (event.button === 0 && this.withClickFlash(event, () => this.handleStatusThinkingClick(event))) return;
 		if (event.button === 0 && this.withClickFlash(event, () => this.handleStatusContextClick(event))) return;
 		if (event.button === 0 && this.withClickFlash(event, () => this.handleStatusModelUsageClick(event))) return;
-		if (event.button === 0 && this.withClickFlash(event, () => this.handleStatusDraftQueueClick(event))) return;
-		if (event.button === 0 && this.withClickFlash(event, () => this.handleStatusUserJumpClick(event))) return;
-		if (event.button === 0 && this.withClickFlash(event, () => this.handleStatusThinkingExpandClick(event))) return;
-		if (event.button === 0 && this.withClickFlash(event, () => this.handleStatusCompactToolsClick(event))) return;
-		if (event.button === 0 && this.withClickFlash(event, () => this.handleStatusTerminalBellSoundClick(event))) return;
 		if (event.button === 0 && this.withClickFlash(event, () => this.handleStatusSessionClick(event))) return;
-		if (event.button === 0 && this.withClickFlash(event, () => this.handleStatusPromptEnhancerClick(event))) return;
-		if (event.button === 0 && this.withClickFlash(event, () => this.handleStatusVoiceMicClick(event))) return;
-		if (event.button === 0 && this.withClickFlash(event, () => this.handleStatusVoiceLanguageClick(event))) return;
 		if (event.button === 0 && this.withClickFlash(event, () => this.handleExtensionInputClick(event))) return;
 		if (event.button === 0 && this.withClickFlash(event, () => this.handleInputClick(event))) return;
 		const target = this.renderedTargets.get(event.y);
@@ -382,6 +375,7 @@ export class AppMouseController {
 			this.statusUserJumpTarget,
 			this.statusThinkingExpandTarget,
 			this.statusCompactToolsTarget,
+			this.statusTerminalBellSoundTarget,
 			this.statusSessionTarget,
 			this.statusPromptEnhancerTarget,
 			this.statusVoiceMicTarget,
@@ -576,6 +570,17 @@ export class AppMouseController {
 
 		void this.openStatusUserJumpMenu();
 		return true;
+	}
+
+	private handleInputBorderStatusClick(event: MouseEvent): boolean {
+		return this.handleStatusDraftQueueClick(event)
+			|| this.handleStatusUserJumpClick(event)
+			|| this.handleStatusThinkingExpandClick(event)
+			|| this.handleStatusCompactToolsClick(event)
+			|| this.handleStatusTerminalBellSoundClick(event)
+			|| this.handleStatusPromptEnhancerClick(event)
+			|| this.handleStatusVoiceMicClick(event)
+			|| this.handleStatusVoiceLanguageClick(event);
 	}
 
 	private async openStatusUserJumpMenu(): Promise<void> {

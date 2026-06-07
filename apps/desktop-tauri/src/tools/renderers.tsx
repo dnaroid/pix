@@ -9,13 +9,29 @@
  *   - render(props):   expanded body content
  */
 
-import { FolderOpen, FileText, FilePlus2, FileEdit, ListChecks, Search, Link as LinkIcon } from "lucide-react";
+import {
+  Archive,
+  Database,
+  FileCode2,
+  FileEdit,
+  FilePlus2,
+  FileText,
+  FolderOpen,
+  Link as LinkIcon,
+  ListChecks,
+  Search,
+  Sparkles,
+  Users,
+} from "lucide-react";
+import type { ReactNode } from "react";
 import type { ToolRenderer } from "./types";
 import {
   CodeBlock,
   DiffBlock,
   Section,
+  argsRecord,
   compactCommand,
+  formatHeaderArgs,
   isGitDiffCommand,
   numberArg,
   pathForDisplay,
@@ -299,7 +315,267 @@ export const folderTool: ToolRenderer = {
   },
 };
 
+// -- Codebase discovery / AST tools --------------------------------------
+
+export const repoTool: ToolRenderer = {
+  id: "repo",
+  summarize: ({ args, cwd }) => {
+    const target = stringArg(args, ["target", "path"]);
+    const displayTarget = target ? pathForDisplay(target, cwd) : undefined;
+    return displayTarget ?? formatHeaderArgs(args, ["target", "args"]);
+  },
+  render: ({ args, result, status, isError, name, cwd }) => {
+    const target = stringArg(args, ["target", "path"]);
+    const out = typeof result === "string" ? result : resultText(result, status);
+    return (
+      <>
+        <ToolMeta icon={<Database size={12} />} label={name} value={target ? pathForDisplay(target, cwd) : undefined} />
+        <ArgsSection args={args} preferredKeys={["target", "args", "maxLines", "maxBytes"]} />
+        {out && (
+          <Section label={isError ? "error" : "result"}>
+            <CodeBlock>{out}</CodeBlock>
+          </Section>
+        )}
+      </>
+    );
+  },
+};
+
+export const astGrepTool: ToolRenderer = {
+  id: "ast_grep",
+  summarize: ({ args }) => {
+    const pattern = stringArg(args, ["pattern"]);
+    const command = stringArg(args, ["command"]);
+    return [command, pattern].filter(Boolean).join(" · ") || formatHeaderArgs(args, ["pattern", "paths"]);
+  },
+  render: ({ args, result, status, isError }) => {
+    const pattern = stringArg(args, ["pattern"]);
+    const rewrite = stringArg(args, ["rewrite"]);
+    const out = typeof result === "string" ? result : resultText(result, status);
+    return (
+      <>
+        <ToolMeta icon={<FileCode2 size={12} />} label="ast-grep" value={pattern} />
+        {pattern && (
+          <Section label="pattern">
+            <CodeBlock>{pattern}</CodeBlock>
+          </Section>
+        )}
+        {rewrite && (
+          <Section label="rewrite preview">
+            <CodeBlock>{rewrite}</CodeBlock>
+          </Section>
+        )}
+        <ArgsSection args={args} preferredKeys={["command", "paths", "lang", "selector", "strictness"]} />
+        {out && (
+          <Section label={isError ? "error" : "matches"}>
+            <CodeBlock>{out}</CodeBlock>
+          </Section>
+        )}
+      </>
+    );
+  },
+};
+
+export const astApplyTool: ToolRenderer = {
+  id: "ast_apply",
+  summarize: ({ args }) => {
+    const pattern = stringArg(args, ["pattern"]);
+    const command = stringArg(args, ["command"]);
+    return [command ?? "apply", pattern].filter(Boolean).join(" · ");
+  },
+  render: ({ args, result, status, isError }) => {
+    const pattern = stringArg(args, ["pattern"]);
+    const rewrite = stringArg(args, ["rewrite"]);
+    const out = typeof result === "string" ? result : resultText(result, status);
+    return (
+      <>
+        <ToolMeta icon={<FileEdit size={12} />} label="ast apply" value={pattern} />
+        {pattern && (
+          <Section label="pattern">
+            <CodeBlock>{pattern}</CodeBlock>
+          </Section>
+        )}
+        {rewrite && (
+          <Section label="rewrite">
+            <CodeBlock>{rewrite}</CodeBlock>
+          </Section>
+        )}
+        <ArgsSection args={args} preferredKeys={["command", "paths", "lang", "selector", "strictness"]} />
+        {out && (
+          <Section label={isError ? "error" : "changed files"}>
+            <CodeBlock>{out}</CodeBlock>
+          </Section>
+        )}
+      </>
+    );
+  },
+};
+
+// -- Interactive / orchestration tools -----------------------------------
+
+export const questionTool: ToolRenderer = {
+  id: "question",
+  summarize: ({ args }) => {
+    const questions = argsRecord(args)?.questions;
+    if (Array.isArray(questions)) return `${questions.length} question${questions.length === 1 ? "" : "s"}`;
+    return formatHeaderArgs(args, ["questions"]);
+  },
+  render: ({ args, result, status, isError }) => {
+    const questions = argsRecord(args)?.questions;
+    const out = typeof result === "string" ? result : resultText(result, status);
+    return (
+      <>
+        {Array.isArray(questions) ? (
+          <Section label="questions">
+            <CodeBlock>{formatQuestions(questions)}</CodeBlock>
+          </Section>
+        ) : (
+          <ArgsSection args={args} preferredKeys={["questions"]} />
+        )}
+        {out && (
+          <Section label={isError ? "error" : "answer"}>
+            <CodeBlock>{out}</CodeBlock>
+          </Section>
+        )}
+      </>
+    );
+  },
+};
+
+export const subagentsTool: ToolRenderer = {
+  id: "subagents",
+  summarize: ({ args }) => {
+    const action = stringArg(args, ["action"]);
+    const tasks = argsRecord(args)?.tasks;
+    const count = Array.isArray(tasks) ? ` · ${tasks.length} task${tasks.length === 1 ? "" : "s"}` : "";
+    return `${action ?? "subagents"}${count}`;
+  },
+  render: ({ args, result, status, isError }) => {
+    const action = stringArg(args, ["action"]);
+    const tasks = argsRecord(args)?.tasks;
+    const out = typeof result === "string" ? result : resultText(result, status);
+    return (
+      <>
+        <ToolMeta icon={<Users size={12} />} label="subagents" value={action} />
+        {Array.isArray(tasks) && (
+          <Section label="tasks">
+            <CodeBlock>{formatSubagentTasks(tasks)}</CodeBlock>
+          </Section>
+        )}
+        <ArgsSection args={args} preferredKeys={["action", "agentIds", "agentId", "runDir", "timeout"]} />
+        {out && (
+          <Section label={isError ? "error" : "result"}>
+            <CodeBlock>{out}</CodeBlock>
+          </Section>
+        )}
+      </>
+    );
+  },
+};
+
+export const compressTool: ToolRenderer = {
+  id: "compress",
+  summarize: ({ args }) => {
+    const topic = stringArg(args, ["topic"]);
+    const record = argsRecord(args);
+    const ranges = Array.isArray(record?.ranges) ? record.ranges.length : 0;
+    const messages = Array.isArray(record?.messages) ? record.messages.length : 0;
+    const units = [ranges ? `${ranges} range${ranges === 1 ? "" : "s"}` : "", messages ? `${messages} message${messages === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ");
+    return [topic, units].filter(Boolean).join(" · ");
+  },
+  render: ({ args, result, status, isError }) => {
+    const topic = stringArg(args, ["topic"]);
+    const out = typeof result === "string" ? result : resultText(result, status);
+    return (
+      <>
+        <ToolMeta icon={<Archive size={12} />} label="context" value={topic} />
+        <ArgsSection args={args} preferredKeys={["topic", "ranges", "messages"]} />
+        {out && (
+          <Section label={isError ? "error" : "result"}>
+            <CodeBlock>{out}</CodeBlock>
+          </Section>
+        )}
+      </>
+    );
+  },
+};
+
+export const skillTool: ToolRenderer = {
+  id: "skill",
+  summarize: ({ args }) => stringArg(args, ["name", "skill", "path"]) ?? formatHeaderArgs(args),
+  render: ({ args, result, status, isError }) => {
+    const name = stringArg(args, ["name", "skill", "path"]);
+    const out = typeof result === "string" ? result : resultText(result, status);
+    return (
+      <>
+        <ToolMeta icon={<Sparkles size={12} />} label="skill" value={name} />
+        <ArgsSection args={args} preferredKeys={["name", "skill", "path"]} />
+        {out && (
+          <Section label={isError ? "error" : "result"}>
+            <CodeBlock>{out}</CodeBlock>
+          </Section>
+        )}
+      </>
+    );
+  },
+};
+
 // -- Helpers --------------------------------------------------------------
+
+function ToolMeta({ icon, label, value }: { icon: ReactNode; label: string; value?: string }): ReactNode {
+  if (!value) return null;
+  return (
+    <Section label={label}>
+      <div className="tool__path">
+        {icon}
+        <code>{truncate(value, 240)}</code>
+      </div>
+    </Section>
+  );
+}
+
+function ArgsSection({ args, preferredKeys }: { args: unknown; preferredKeys?: readonly string[] }): ReactNode {
+  const summary = formatHeaderArgs(args, preferredKeys);
+  if (!summary) return null;
+  return (
+    <Section label="args">
+      <CodeBlock>{summary}</CodeBlock>
+    </Section>
+  );
+}
+
+function formatQuestions(questions: unknown[]): string {
+  return questions
+    .map((q, i) => {
+      const record = typeof q === "object" && q !== null ? (q as Record<string, unknown>) : undefined;
+      const label = typeof record?.label === "string" ? record.label : `Question ${i + 1}`;
+      const prompt = typeof record?.prompt === "string" ? ` — ${record.prompt}` : "";
+      const choices = Array.isArray(record?.choices)
+        ? record.choices
+            .map((choice) => {
+              if (typeof choice !== "object" || choice === null) return undefined;
+              const c = choice as Record<string, unknown>;
+              return typeof c.label === "string" ? c.label : typeof c.value === "string" ? c.value : undefined;
+            })
+            .filter(Boolean)
+            .join(" / ")
+        : "";
+      return `${i + 1}. ${label}${prompt}${choices ? `\n   choices: ${choices}` : ""}`;
+    })
+    .join("\n");
+}
+
+function formatSubagentTasks(tasks: unknown[]): string {
+  return tasks
+    .map((task, i) => {
+      if (typeof task !== "object" || task === null) return `${i + 1}. ${String(task)}`;
+      const record = task as Record<string, unknown>;
+      const id = typeof record.id === "string" ? `${record.id}: ` : "";
+      const text = typeof record.task === "string" ? record.task : formatHeaderArgs(record);
+      return `${i + 1}. ${id}${truncate(text, 260)}`;
+    })
+    .join("\n");
+}
 
 function languageForPath(path: string | undefined): string | undefined {
   if (!path) return undefined;

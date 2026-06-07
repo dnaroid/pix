@@ -20,9 +20,17 @@ import {
   Image as ImageIcon,
   Mic,
   MicOff,
+  Search,
+  Clock3,
+  Activity,
+  PanelTop,
+  PanelBottom,
+  Puzzle,
+  Keyboard,
 } from "lucide-react";
 import { lookup, defaultRenderer } from "./tools";
 import type { ToolRenderProps } from "./tools/types";
+import { RawTerminal } from "./RawTerminal";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./App.css";
 
@@ -234,6 +242,16 @@ type ExtensionUIMethod =
   | "notify"
   | "setStatus"
   | "setWidget"
+  | "setWorkingMessage"
+  | "setWorkingVisible"
+  | "setWorkingIndicator"
+  | "setHiddenThinkingLabel"
+  | "setHeader"
+  | "setFooter"
+  | "custom"
+  | "setWidgetComponent"
+  | "setEditorComponent"
+  | "addAutocompleteProvider"
   | "setTitle"
   | "set_editor_text";
 
@@ -243,11 +261,18 @@ type ExtensionUIRequest = RpcEvent & {
   title?: string;
   message?: string;
   options?: string[];
+  timeout?: number;
   placeholder?: string;
   prefill?: string;
   notifyType?: "info" | "warning" | "error";
   statusKey?: string;
   statusText?: string;
+  workingMessage?: string;
+  workingVisible?: boolean;
+  workingIndicatorFrames?: string[];
+  hiddenThinkingLabel?: string;
+  active?: boolean;
+  overlay?: boolean;
   widgetKey?: string;
   widgetLines?: string[];
   widgetPlacement?: "aboveEditor" | "belowEditor";
@@ -255,7 +280,18 @@ type ExtensionUIRequest = RpcEvent & {
 };
 
 type ExtensionToast = { id: string; message: string; type: "info" | "warning" | "error" };
-type ExtensionWidget = { key: string; lines: string[]; placement: "aboveEditor" | "belowEditor" };
+type ExtensionWidget = { key: string; lines: string[]; placement: "aboveEditor" | "belowEditor"; degradedComponent?: boolean };
+type ExtensionChromeState = {
+  workingMessage?: string;
+  workingVisible?: boolean;
+  workingIndicatorFrames?: string[];
+  hiddenThinkingLabel?: string;
+  headerActive?: boolean;
+  footerActive?: boolean;
+  customUiRequested?: boolean;
+  editorComponentActive?: boolean;
+  autocompleteProviderActive?: boolean;
+};
 
 type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
 
@@ -304,6 +340,7 @@ export default function App() {
   const [voiceSupported, setVoiceSupported] = useState(false);
   const [voiceListening, setVoiceListening] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [rawTerminal, setRawTerminal] = useState<{ key: number; command?: string } | null>(null);
   const [slashIndex, setSlashIndex] = useState(0);
   const [slashCompletionIndex, setSlashCompletionIndex] = useState(0);
   const [slashCompletions, setSlashCompletions] = useState<SlashCompletionItem[]>([]);
@@ -319,6 +356,7 @@ export default function App() {
   const [extensionToasts, setExtensionToasts] = useState<ExtensionToast[]>([]);
   const [extensionStatuses, setExtensionStatuses] = useState<Record<string, string>>({});
   const [extensionWidgets, setExtensionWidgets] = useState<Record<string, ExtensionWidget>>({});
+  const [extensionChrome, setExtensionChrome] = useState<ExtensionChromeState>({});
   const [session, setSession] = useState<SessionState>({});
   const [, setLoadingSessions] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
@@ -379,6 +417,18 @@ export default function App() {
   useEffect(() => {
     sessionMessageCountRef.current = session.messageCount ?? 0;
   }, [session.messageCount]);
+
+  const clearExtensionSurface = useCallback(() => {
+    setExtensionDialog(null);
+    setExtensionDialogValue("");
+    setExtensionStatuses({});
+    setExtensionWidgets({});
+    setExtensionChrome({});
+  }, []);
+
+  useEffect(() => {
+    clearExtensionSurface();
+  }, [activeTabId, clearExtensionSurface, workspace]);
 
   const workspaceTitle = workspace ? workspaceBasename(workspace) : "Pix Desktop";
   const sessionTitle = useMemo(() => {
@@ -1270,6 +1320,66 @@ export default function App() {
           return next;
         });
         break;
+      case "setWidgetComponent":
+        if (!request.widgetKey) break;
+        setExtensionWidgets((prev) => {
+          const next = { ...prev };
+          if (request.active === false) {
+            delete next[request.widgetKey!];
+          } else {
+            next[request.widgetKey!] = {
+              key: request.widgetKey!,
+              placement: request.widgetPlacement ?? "aboveEditor",
+              degradedComponent: true,
+              lines: [
+                "This extension supplied a TUI component widget.",
+                "Pix Desktop cannot render extension component factories yet, so this degraded placeholder keeps the request visible instead of silently dropping it.",
+              ],
+            };
+          }
+          return next;
+        });
+        break;
+      case "setWorkingMessage":
+        setExtensionChrome((prev) => ({ ...prev, workingMessage: request.workingMessage || undefined }));
+        break;
+      case "setWorkingVisible":
+        setExtensionChrome((prev) => ({ ...prev, workingVisible: request.workingVisible }));
+        break;
+      case "setWorkingIndicator":
+        setExtensionChrome((prev) => ({ ...prev, workingIndicatorFrames: request.workingIndicatorFrames }));
+        break;
+      case "setHiddenThinkingLabel":
+        setExtensionChrome((prev) => ({ ...prev, hiddenThinkingLabel: request.hiddenThinkingLabel || undefined }));
+        break;
+      case "setHeader":
+        setExtensionChrome((prev) => ({ ...prev, headerActive: request.active === true }));
+        break;
+      case "setFooter":
+        setExtensionChrome((prev) => ({ ...prev, footerActive: request.active === true }));
+        break;
+      case "custom":
+        setExtensionChrome((prev) => ({ ...prev, customUiRequested: true }));
+        {
+          const toast = {
+            id: request.id ?? genId("toast"),
+            type: "warning",
+            message: request.overlay
+              ? "Extension requested a custom overlay component; Pix Desktop degrades it to an undefined result."
+              : "Extension requested a custom component; Pix Desktop degrades it to an undefined result.",
+          } satisfies ExtensionToast;
+          setExtensionToasts((prev) => [...prev, toast]);
+          window.setTimeout(() => {
+            setExtensionToasts((prev) => prev.filter((item) => item.id !== toast.id));
+          }, 5000);
+        }
+        break;
+      case "setEditorComponent":
+        setExtensionChrome((prev) => ({ ...prev, editorComponentActive: request.active === true }));
+        break;
+      case "addAutocompleteProvider":
+        setExtensionChrome((prev) => ({ ...prev, autocompleteProviderActive: request.active === true }));
+        break;
       case "setTitle":
         if (request.title) document.title = request.title;
         break;
@@ -1554,12 +1664,24 @@ export default function App() {
     }
   }, [cancelHistoryLoad, workspace]);
 
+  const openRawShell = useCallback((raw: string) => {
+    const command = raw.replace(/^!!/, "").trim();
+    setError(null);
+    setInput("");
+    cancelHistoryLoad();
+    if (!workspace) {
+      setError("Choose a workspace before opening a raw shell.");
+      return;
+    }
+    setRawTerminal({ key: Date.now(), command: command || undefined });
+  }, [cancelHistoryLoad, workspace]);
+
   const send = useCallback(async () => {
     const text = input.trim();
     const imageAttachments = attachments;
     if ((!text && imageAttachments.length === 0) || streaming) return;
     if (imageAttachments.length === 0 && text.startsWith("!!")) {
-      setError("Raw TTY shell mode (!!) is not implemented yet. Use !command for captured output.");
+      openRawShell(text);
       return;
     }
     if (imageAttachments.length === 0 && text.startsWith("!")) {
@@ -1588,7 +1710,7 @@ export default function App() {
     } catch (e) {
       setError(String(e));
     }
-  }, [attachments, cancelHistoryLoad, executeShellCommand, executeSlashCommand, input, streaming]);
+  }, [attachments, cancelHistoryLoad, executeShellCommand, executeSlashCommand, input, openRawShell, streaming]);
 
   const abort = useCallback(async () => {
     try {
@@ -1846,6 +1968,17 @@ export default function App() {
   const widgetsAboveEditor = Object.values(extensionWidgets).filter((widget) => widget.placement !== "belowEditor");
   const widgetsBelowEditor = Object.values(extensionWidgets).filter((widget) => widget.placement === "belowEditor");
   const extensionStatusEntries = Object.entries(extensionStatuses);
+  const extensionChromeActive = Boolean(
+    extensionChrome.workingMessage ||
+    extensionChrome.workingVisible !== undefined ||
+    extensionChrome.workingIndicatorFrames ||
+    extensionChrome.hiddenThinkingLabel ||
+    extensionChrome.headerActive ||
+    extensionChrome.footerActive ||
+    extensionChrome.customUiRequested ||
+    extensionChrome.editorComponentActive ||
+    extensionChrome.autocompleteProviderActive,
+  );
   const modelPickerMatches = availableModels.filter((model) => {
     const query = modelPickerQuery.trim().toLowerCase();
     if (!query) return true;
@@ -2019,6 +2152,15 @@ export default function App() {
         </div>
 
         {widgetsAboveEditor.length > 0 && <ExtensionWidgets widgets={widgetsAboveEditor} />}
+
+        {rawTerminal && workspace && (
+          <RawTerminal
+            key={rawTerminal.key}
+            cwd={workspace}
+            command={rawTerminal.command}
+            onClose={() => setRawTerminal(null)}
+          />
+        )}
 
         <footer className="composer">
           {showSlashCompletions && (
@@ -2213,7 +2355,11 @@ export default function App() {
 
         {widgetsBelowEditor.length > 0 && <ExtensionWidgets widgets={widgetsBelowEditor} />}
 
-        <StatusBar session={session} extensionStatuses={extensionStatusEntries} />
+        <StatusBar
+          session={session}
+          extensionStatuses={extensionStatusEntries}
+          extensionChrome={extensionChromeActive ? extensionChrome : undefined}
+        />
       </main>
       {extensionToasts.length > 0 && <ExtensionToasts toasts={extensionToasts} />}
       {extensionDialog && (
@@ -2254,20 +2400,84 @@ function ExtensionDialog({
   onSubmit: (payload: Record<string, unknown>) => void;
 }) {
   const title = request.title ?? "Extension request";
+  const timeoutMs = typeof request.timeout === "number" && Number.isFinite(request.timeout) && request.timeout > 0
+    ? request.timeout
+    : undefined;
+  const [selectQuery, setSelectQuery] = useState("");
+  const [remainingMs, setRemainingMs] = useState(timeoutMs ?? 0);
+  const options = request.options ?? [];
+  const filteredOptions = useMemo(() => {
+    const query = selectQuery.trim().toLowerCase();
+    if (!query) return options;
+    return options.filter((option) => option.toLowerCase().includes(query));
+  }, [options, selectQuery]);
+
+  useEffect(() => {
+    if (!timeoutMs) return;
+    const startedAt = Date.now();
+    setRemainingMs(timeoutMs);
+    const intervalId = window.setInterval(() => {
+      setRemainingMs(Math.max(0, timeoutMs - (Date.now() - startedAt)));
+    }, 250);
+    const timeoutId = window.setTimeout(onCancel, Math.max(0, timeoutMs - 100));
+    return () => {
+      window.clearInterval(intervalId);
+      window.clearTimeout(timeoutId);
+    };
+  }, [onCancel, request.id, timeoutMs]);
+
+  const timeoutLabel = timeoutMs ? `${Math.ceil(remainingMs / 1000)}s left` : undefined;
+  const shellClass = "fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-6";
+  const cardClass = "flex max-h-[min(720px,calc(100vh-48px))] w-full max-w-xl flex-col gap-3 overflow-hidden rounded-xl border border-claude-dark-elevated bg-claude-dark-elevated p-5 text-claude-on-dark shadow-2xl";
+  const inputClass = "w-full rounded-lg border border-[#363430] bg-claude-dark px-3 py-2 text-sm text-claude-on-dark outline-none transition focus:border-claude-coral";
+  const secondaryButtonClass = "rounded-lg border border-[#363430] px-3 py-2 text-sm text-claude-on-dark transition hover:bg-white/5 focus:outline-none focus:ring-2 focus:ring-claude-coral/50";
+  const primaryButtonClass = "rounded-lg border border-claude-coral bg-claude-coral px-3 py-2 text-sm font-medium text-claude-on-primary transition hover:bg-claude-coral-active focus:outline-none focus:ring-2 focus:ring-claude-coral/50";
+
+  const header = (
+    <div className="flex items-start justify-between gap-3">
+      <div className="min-w-0">
+        <h2 className="m-0 text-base font-semibold tracking-tight text-claude-on-dark">{title}</h2>
+        {request.message && <p className="mt-1 text-sm leading-5 text-claude-on-dark-soft">{request.message}</p>}
+      </div>
+      {timeoutLabel && (
+        <div className="flex shrink-0 items-center gap-1 rounded-full border border-[#363430] bg-claude-dark px-2 py-1 font-mono text-[11px] text-claude-on-dark-soft" title="This extension request has a timeout">
+          <Clock3 size={12} />
+          {timeoutLabel}
+        </div>
+      )}
+    </div>
+  );
+
   if (request.method === "select") {
     return (
-      <div className="extension-modal" role="dialog" aria-modal="true" aria-label={title}>
-        <div className="extension-modal__card">
-          <h2>{title}</h2>
-          <div className="extension-modal__options">
-            {(request.options ?? []).map((option) => (
-              <button key={option} className="extension-modal__option" onClick={() => onSubmit({ value: option })}>
+      <div className={shellClass} role="dialog" aria-modal="true" aria-label={title} onKeyDown={(e) => { if (e.key === "Escape") onCancel(); }}>
+        <div className={cardClass}>
+          {header}
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-claude-on-dark-soft" size={14} />
+            <input
+              className={`${inputClass} pl-9`}
+              value={selectQuery}
+              onChange={(e) => setSelectQuery(e.target.value)}
+              placeholder={options.length > 8 ? "Search options…" : "Filter options…"}
+              autoFocus
+            />
+          </div>
+          <div className="flex items-center justify-between text-xs text-claude-on-dark-soft">
+            <span>{filteredOptions.length} of {options.length} options</span>
+            {options.length > 12 && <span>Long list scrolls in place</span>}
+          </div>
+          <div className="flex max-h-[min(420px,48vh)] flex-col gap-2 overflow-y-auto pr-1">
+            {filteredOptions.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-[#363430] p-3 text-sm text-claude-on-dark-soft">No matching options.</div>
+            ) : filteredOptions.map((option, index) => (
+              <button key={`${option}-${index}`} className="rounded-lg border border-[#363430] bg-claude-dark p-3 text-left text-sm text-claude-on-dark transition hover:border-claude-coral hover:bg-white/5 focus:outline-none focus:ring-2 focus:ring-claude-coral/50" onClick={() => onSubmit({ value: option })}>
                 {option}
               </button>
             ))}
           </div>
-          <div className="extension-modal__actions">
-            <button onClick={onCancel}>Cancel</button>
+          <div className="flex justify-end gap-2">
+            <button className={secondaryButtonClass} onClick={onCancel}>Cancel</button>
           </div>
         </div>
       </div>
@@ -2275,14 +2485,13 @@ function ExtensionDialog({
   }
   if (request.method === "confirm") {
     return (
-      <div className="extension-modal" role="dialog" aria-modal="true" aria-label={title}>
-        <div className="extension-modal__card">
-          <h2>{title}</h2>
-          {request.message && <p>{request.message}</p>}
-          <div className="extension-modal__actions">
-            <button onClick={onCancel}>Cancel</button>
-            <button onClick={() => onSubmit({ confirmed: false })}>No</button>
-            <button className="extension-modal__primary" onClick={() => onSubmit({ confirmed: true })}>Yes</button>
+      <div className={shellClass} role="dialog" aria-modal="true" aria-label={title} onKeyDown={(e) => { if (e.key === "Escape") onCancel(); }}>
+        <div className={cardClass}>
+          {header}
+          <div className="flex justify-end gap-2">
+            <button className={secondaryButtonClass} onClick={onCancel}>Cancel</button>
+            <button className={secondaryButtonClass} onClick={() => onSubmit({ confirmed: false })}>No</button>
+            <button className={primaryButtonClass} onClick={() => onSubmit({ confirmed: true })}>Yes</button>
           </div>
         </div>
       </div>
@@ -2290,12 +2499,12 @@ function ExtensionDialog({
   }
   const multiLine = request.method === "editor";
   return (
-    <div className="extension-modal" role="dialog" aria-modal="true" aria-label={title}>
-      <div className="extension-modal__card">
-        <h2>{title}</h2>
+    <div className={shellClass} role="dialog" aria-modal="true" aria-label={title} onKeyDown={(e) => { if (e.key === "Escape") onCancel(); }}>
+      <div className={cardClass}>
+        {header}
         {multiLine ? (
           <textarea
-            className="extension-modal__textarea"
+            className={`${inputClass} min-h-48 resize-y font-mono text-xs leading-5`}
             value={value}
             onChange={(e) => onValueChange(e.target.value)}
             autoFocus
@@ -2303,7 +2512,7 @@ function ExtensionDialog({
           />
         ) : (
           <input
-            className="extension-modal__input"
+            className={inputClass}
             value={value}
             placeholder={request.placeholder}
             onChange={(e) => onValueChange(e.target.value)}
@@ -2314,9 +2523,9 @@ function ExtensionDialog({
             autoFocus
           />
         )}
-        <div className="extension-modal__actions">
-          <button onClick={onCancel}>Cancel</button>
-          <button className="extension-modal__primary" onClick={() => onSubmit({ value })}>Submit</button>
+        <div className="flex justify-end gap-2">
+          <button className={secondaryButtonClass} onClick={onCancel}>Cancel</button>
+          <button className={primaryButtonClass} onClick={() => onSubmit({ value })}>Submit</button>
         </div>
       </div>
     </div>
@@ -2325,11 +2534,17 @@ function ExtensionDialog({
 
 function ExtensionWidgets({ widgets }: { widgets: ExtensionWidget[] }) {
   return (
-    <div className="extension-widgets">
+    <div className="mx-4 mb-3 flex flex-col gap-2" aria-label="Extension widgets">
       {widgets.map((widget) => (
-        <div className="extension-widget" key={widget.key}>
-          <div className="extension-widget__key">{widget.key}</div>
-          <pre>{widget.lines.join("\n")}</pre>
+        <div className="rounded-xl border border-[#d8cfc0] bg-claude-card p-3 text-claude-ink" key={widget.key}>
+          <div className="mb-2 flex items-center justify-between gap-3 text-xs font-medium uppercase tracking-[0.14em] text-claude-muted">
+            <span className="flex min-w-0 items-center gap-2">
+              <Wrench size={13} />
+              <span className="truncate" title={widget.key}>{widget.key}</span>
+            </span>
+            <span>{widget.degradedComponent ? "component degraded" : widget.placement === "belowEditor" ? "below editor" : "above editor"}</span>
+          </div>
+          <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-claude-dark p-3 font-mono text-xs leading-5 text-claude-on-dark">{widget.lines.join("\n")}</pre>
         </div>
       ))}
     </div>
@@ -2398,7 +2613,15 @@ function ModelPicker({
 
 // -- Status bar -----------------------------------------------------------
 
-function StatusBar({ session, extensionStatuses }: { session: SessionState; extensionStatuses: [string, string][] }) {
+function StatusBar({
+  session,
+  extensionStatuses,
+  extensionChrome,
+}: {
+  session: SessionState;
+  extensionStatuses: [string, string][];
+  extensionChrome?: ExtensionChromeState;
+}) {
   const model = session.model;
   const modelLabel = model
     ? model.name ?? model.id ?? "unknown model"
@@ -2450,6 +2673,60 @@ function StatusBar({ session, extensionStatuses }: { session: SessionState; exte
           <span>{text}</span>
         </span>
       ))}
+      {extensionChrome?.workingMessage && (
+        <span className="statusbar__item statusbar__extension" title="Extension working message">
+          <Activity size={11} />
+          <span>{extensionChrome.workingMessage}</span>
+        </span>
+      )}
+      {extensionChrome?.workingVisible === false && (
+        <span className="statusbar__item statusbar__extension" title="Extension hid the working indicator">
+          <Activity size={11} />
+          <span>loader hidden</span>
+        </span>
+      )}
+      {extensionChrome?.workingIndicatorFrames && (
+        <span className="statusbar__item statusbar__extension" title="Extension customized the working indicator">
+          <Activity size={11} />
+          <span>{extensionChrome.workingIndicatorFrames.length === 0 ? "indicator hidden" : "custom indicator"}</span>
+        </span>
+      )}
+      {extensionChrome?.hiddenThinkingLabel && (
+        <span className="statusbar__item statusbar__extension" title="Hidden thinking label">
+          <Brain size={11} />
+          <span>{extensionChrome.hiddenThinkingLabel}</span>
+        </span>
+      )}
+      {extensionChrome?.headerActive && (
+        <span className="statusbar__item statusbar__extension" title="Desktop degrades custom extension header components to a status badge">
+          <PanelTop size={11} />
+          <span>custom header</span>
+        </span>
+      )}
+      {extensionChrome?.footerActive && (
+        <span className="statusbar__item statusbar__extension" title="Desktop degrades custom extension footer components to a status badge">
+          <PanelBottom size={11} />
+          <span>custom footer</span>
+        </span>
+      )}
+      {extensionChrome?.customUiRequested && (
+        <span className="statusbar__item statusbar__extension" title="Desktop returned undefined for an extension custom component request">
+          <Puzzle size={11} />
+          <span>custom UI degraded</span>
+        </span>
+      )}
+      {extensionChrome?.editorComponentActive && (
+        <span className="statusbar__item statusbar__extension" title="Desktop keeps the default composer instead of rendering a custom extension editor component">
+          <Keyboard size={11} />
+          <span>custom editor degraded</span>
+        </span>
+      )}
+      {extensionChrome?.autocompleteProviderActive && (
+        <span className="statusbar__item statusbar__extension" title="Extension autocomplete providers are acknowledged but not composed into the desktop autocomplete stack">
+          <Keyboard size={11} />
+          <span>extension autocomplete</span>
+        </span>
+      )}
       {session.isCompacting && <span className="statusbar__item statusbar__compact">compacting…</span>}
     </div>
   );

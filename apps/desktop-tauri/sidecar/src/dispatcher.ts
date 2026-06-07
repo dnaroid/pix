@@ -117,7 +117,9 @@ export async function runDispatcher(opts: DispatcherOptions): Promise<void> {
     });
   };
 
-  const createExtensionUIContext = (): ExtensionUIContext => ({
+  const createExtensionUIContext = (): ExtensionUIContext => {
+    let editorComponentFactory: ReturnType<ExtensionUIContext["getEditorComponent"]> | undefined;
+    const context: ExtensionUIContext = {
     select: (title, options, dialogOpts) =>
       createDialogPromise(dialogOpts, undefined, { method: "select", title, options, timeout: dialogOpts?.timeout }, (response) =>
         response.cancelled ? undefined : typeof response.value === "string" ? response.value : undefined,
@@ -139,10 +141,23 @@ export async function runDispatcher(opts: DispatcherOptions): Promise<void> {
     setStatus(key, text) {
       writeLine({ type: "extension_ui_request", id: randomUUID(), method: "setStatus", statusKey: key, statusText: text });
     },
-    setWorkingMessage() {},
-    setWorkingVisible() {},
-    setWorkingIndicator() {},
-    setHiddenThinkingLabel() {},
+    setWorkingMessage(message) {
+      writeLine({ type: "extension_ui_request", id: randomUUID(), method: "setWorkingMessage", workingMessage: message });
+    },
+    setWorkingVisible(visible) {
+      writeLine({ type: "extension_ui_request", id: randomUUID(), method: "setWorkingVisible", workingVisible: visible });
+    },
+    setWorkingIndicator(options) {
+      writeLine({
+        type: "extension_ui_request",
+        id: randomUUID(),
+        method: "setWorkingIndicator",
+        workingIndicatorFrames: options?.frames,
+      });
+    },
+    setHiddenThinkingLabel(label) {
+      writeLine({ type: "extension_ui_request", id: randomUUID(), method: "setHiddenThinkingLabel", hiddenThinkingLabel: label });
+    },
     setWidget(key, content, options?: ExtensionWidgetOptions) {
       if (content === undefined || Array.isArray(content)) {
         writeLine({
@@ -153,14 +168,37 @@ export async function runDispatcher(opts: DispatcherOptions): Promise<void> {
           widgetLines: content,
           widgetPlacement: options?.placement,
         });
+      } else {
+        writeLine({
+          type: "extension_ui_request",
+          id: randomUUID(),
+          method: "setWidgetComponent",
+          widgetKey: key,
+          widgetPlacement: options?.placement,
+          active: true,
+        });
       }
     },
-    setFooter() {},
-    setHeader() {},
+    setFooter(factory) {
+      writeLine({ type: "extension_ui_request", id: randomUUID(), method: "setFooter", active: Boolean(factory) });
+    },
+    setHeader(factory) {
+      writeLine({ type: "extension_ui_request", id: randomUUID(), method: "setHeader", active: Boolean(factory) });
+    },
     setTitle(title) {
       writeLine({ type: "extension_ui_request", id: randomUUID(), method: "setTitle", title });
     },
-    async custom<T>() {
+    async custom<T>(
+      _factory: Parameters<ExtensionUIContext["custom"]>[0],
+      options?: Parameters<ExtensionUIContext["custom"]>[1],
+    ) {
+      writeLine({
+        type: "extension_ui_request",
+        id: randomUUID(),
+        method: "custom",
+        active: true,
+        overlay: options?.overlay === true,
+      });
       return undefined as T;
     },
     pasteToEditor(text) {
@@ -176,10 +214,15 @@ export async function runDispatcher(opts: DispatcherOptions): Promise<void> {
       createDialogPromise(undefined, undefined, { method: "editor", title, prefill }, (response) =>
         response.cancelled ? undefined : typeof response.value === "string" ? response.value : undefined,
       ),
-    addAutocompleteProvider() {},
-    setEditorComponent() {},
+    addAutocompleteProvider() {
+      writeLine({ type: "extension_ui_request", id: randomUUID(), method: "addAutocompleteProvider", active: true });
+    },
+    setEditorComponent(factory) {
+      editorComponentFactory = factory;
+      writeLine({ type: "extension_ui_request", id: randomUUID(), method: "setEditorComponent", active: Boolean(factory) });
+    },
     getEditorComponent() {
-      return undefined;
+      return editorComponentFactory;
     },
     get theme() {
       return undefined as unknown as ExtensionUIContext["theme"];
@@ -197,7 +240,9 @@ export async function runDispatcher(opts: DispatcherOptions): Promise<void> {
       return false;
     },
     setToolsExpanded() {},
-  });
+  };
+    return context;
+  };
 
   const rebindSession = async (): Promise<void> => {
     unsubscribe?.();
