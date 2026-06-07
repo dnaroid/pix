@@ -603,10 +603,7 @@ export default function App() {
 
   const refreshState = useCallback(async () => {
     try {
-      const resp = await invoke<{ success: boolean; data?: SessionState; error?: string }>(
-        "rpc_call",
-        { cmd: { type: "get_state" } },
-      );
+      const resp = await invoke<{ success: boolean; data?: SessionState; error?: string }>("desktop_get_state");
       if (resp.success && resp.data) {
         setSession(resp.data);
         setStreaming(Boolean(resp.data.isStreaming));
@@ -622,7 +619,7 @@ export default function App() {
         success: boolean;
         data?: { commands: SdkSlashCommand[] };
         error?: string;
-      }>("rpc_call", { cmd: { type: "get_commands" } });
+      }>("desktop_get_commands");
       if (!resp.success) {
         setError(`get_commands: ${resp.error ?? "unknown"}`);
         return;
@@ -639,7 +636,7 @@ export default function App() {
         success: boolean;
         data?: { models: DesktopModel[] };
         error?: string;
-      }>("rpc_call", { cmd: { type: "get_models" } });
+      }>("desktop_get_models");
       if (!resp.success) {
         setError(`get_models: ${resp.error ?? "unknown"}`);
         setAvailableModels([]);
@@ -659,8 +656,8 @@ export default function App() {
     const ref = modelRef.trim();
     if (!ref) return;
     setError(null);
-    const resp = await invoke<{ success: boolean; data?: { model: DesktopModel }; error?: string }>("rpc_call", {
-      cmd: { type: "set_model", ref },
+    const resp = await invoke<{ success: boolean; data?: { model: DesktopModel }; error?: string }>("desktop_set_model", {
+      modelRef: ref,
     });
     if (!resp.success) {
       setError(`set_model: ${resp.error ?? "unknown"}`);
@@ -686,9 +683,7 @@ export default function App() {
         success: boolean;
         data?: { completions: SlashCompletionItem[] };
         error?: string;
-      }>("rpc_call", {
-        cmd: { type: "get_command_completions", command: command.replace(/^\/+/, ""), argumentPrefix },
-      });
+      }>("desktop_get_command_completions", { command: command.replace(/^\/+/, ""), argumentPrefix });
       if (!resp.success) {
         setSlashCompletions([]);
         setError(`get_command_completions: ${resp.error ?? "unknown"}`);
@@ -801,8 +796,8 @@ export default function App() {
       });
     }
     const resp = await invoke<{ success: boolean; data?: MessagesPage; error?: string }>(
-      "rpc_call",
-      { cmd: { type: "get_messages", ...cmd } },
+      "desktop_get_messages",
+      { cmd },
     );
     if (!resp.success) throw new Error(resp.error ?? "unknown");
     return resp.data ?? { messages: [], offset: 0, total: 0 };
@@ -1071,7 +1066,7 @@ export default function App() {
   }, [messages, loadingMessages, loadNewerMessages, newerGapHeight, newerHistory.hasNewer, newerHistory.loading]);
 
   const restoreTabsForWorkspace = useCallback(async (cwd: string, currentSessionFile?: string) => {
-    const persisted = readPersistedTabs(cwd);
+    const persisted = await readPersistedTabs(cwd);
     const restoredTabs = persisted.openTabs;
     const tabs = uniqueStrings([
       ...restoredTabs,
@@ -1091,9 +1086,7 @@ export default function App() {
     setMessages([]);
 
     if (active && active !== currentSessionFile) {
-      const resp = await invoke<{ success: boolean; error?: string }>("rpc_call", {
-        cmd: { type: "switch_session", sessionPath: active },
-      });
+      const resp = await switchDesktopSession(cwd, active);
       if (!resp.success) {
         const fallback = currentSessionFile ?? null;
         const fallbackTabs = uniqueStrings([
@@ -1136,7 +1129,7 @@ export default function App() {
         return null;
       }
       const newCwd = resp.data?.cwd ?? selected;
-      try { localStorage.setItem(WORKSPACE_KEY, newCwd); } catch { /* ignore */ }
+      void writePersistedWorkspace(newCwd).catch((e) => setError(`save workspace: ${String(e)}`));
       appliedWorkspaceRef.current = newCwd;
       setWorkspace(newCwd);
       await restoreTabsForWorkspace(newCwd, resp.data?.sessionFile);
@@ -1161,6 +1154,11 @@ export default function App() {
       setError(`subscribe failed: ${String(e)}`),
     );
     if (!workspace) void refreshState();
+    void readPersistedWorkspace()
+      .then((saved) => {
+        if (saved && !appliedWorkspaceRef.current) setWorkspace((current) => current ?? saved);
+      })
+      .catch((e) => setError(`restore workspace: ${String(e)}`));
   }, [refreshState, workspace]);
 
   // If a workspace was previously chosen, re-apply it on startup so the
@@ -1174,7 +1172,7 @@ export default function App() {
         if (!resp.success) {
           // Saved workspace is no longer accessible — drop it and let the
           // user re-pick.
-          try { localStorage.removeItem(WORKSPACE_KEY); } catch { /* ignore */ }
+          void writePersistedWorkspace(null).catch((e) => setError(`save workspace: ${String(e)}`));
           setWorkspace(null);
           setError(`workspace '${workspace}' unavailable: ${resp.error ?? "?"}`);
           return;
@@ -1191,7 +1189,7 @@ export default function App() {
   useEffect(() => {
     if (!workspace || hydratedTabsWorkspaceRef.current !== workspace) return;
     saveTabViewport(activeTabId, captureTabScroll(activeTabId));
-    writePersistedTabs(workspace, persistedTabsFor(openTabs, activeTabId, sessions, session, restoredTabTitles, tabScrollRef.current));
+    void writePersistedTabs(workspace, persistedTabsFor(openTabs, activeTabId, sessions, session, restoredTabTitles, tabScrollRef.current));
   }, [workspace, openTabs, activeTabId, sessions, session, restoredTabTitles, captureTabScroll, saveTabViewport]);
 
   // Persist the current virtual viewport before the webview is torn down so a
@@ -1201,7 +1199,7 @@ export default function App() {
     const persistViewport = () => {
       if (!workspace || hydratedTabsWorkspaceRef.current !== workspace) return;
       saveTabViewport(activeTabIdRef.current, captureTabScroll(activeTabIdRef.current));
-      writePersistedTabs(workspace, persistedTabsFor(openTabs, activeTabIdRef.current, sessions, session, restoredTabTitles, tabScrollRef.current));
+      void writePersistedTabs(workspace, persistedTabsFor(openTabs, activeTabIdRef.current, sessions, session, restoredTabTitles, tabScrollRef.current));
     };
     window.addEventListener("beforeunload", persistViewport);
     window.addEventListener("pagehide", persistViewport);
@@ -1264,8 +1262,9 @@ export default function App() {
   const respondToExtensionDialog = useCallback(async (request: ExtensionUIRequest, payload: Record<string, unknown>) => {
     if (!request.id) return;
     try {
-      const resp = await invoke<{ success: boolean; error?: string }>("rpc_call", {
-        cmd: { type: "extension_ui_response", id: request.id, ...payload },
+      const resp = await invoke<{ success: boolean; error?: string }>("desktop_extension_ui_response", {
+        requestId: request.id,
+        payload,
       });
       if (!resp.success) setError(`extension_ui_response: ${resp.error ?? "unknown"}`);
     } catch (e) {
@@ -1545,8 +1544,8 @@ export default function App() {
           { id: genId("u"), role: "user", text: trimmed },
           { id: genId("a"), role: "assistant", parts: [{ kind: "text", text: "Compacting session context…" }] },
         ]);
-        const resp = await invoke<{ success: boolean; error?: string }>("rpc_call", {
-          cmd: { type: "compact", instructions: args || undefined },
+        const resp = await invoke<{ success: boolean; error?: string }>("desktop_compact", {
+          instructions: args || undefined,
         });
         if (!resp.success) {
           setError(`compact: ${resp.error ?? "unknown"}`);
@@ -1569,7 +1568,7 @@ export default function App() {
           success: boolean;
           data?: { editorText?: string; cancelled?: boolean; target?: { text?: string } };
           error?: string;
-        }>("rpc_call", { cmd: { type: "undo_last_turn" } });
+        }>("desktop_undo_last_turn");
         if (!resp.success) {
           setError(`undo: ${resp.error ?? "unknown"}`);
           return;
@@ -1593,9 +1592,7 @@ export default function App() {
           return;
         }
         setMessages([]);
-        const resp = await invoke<{ success: boolean; error?: string }>("rpc_call", {
-          cmd: { type: "new_session" },
-        });
+        const resp = await invoke<{ success: boolean; error?: string }>("desktop_new_session");
         if (!resp.success) setError(resp.error ?? "new_session failed");
         await refreshState();
         return;
@@ -1608,14 +1605,12 @@ export default function App() {
         await Promise.all([refreshState(), refreshSessions(), refreshCommands()]);
         return;
       case "/abort":
-        await invoke("rpc_call", { cmd: { type: "abort" } });
+        await invoke("desktop_abort");
         return;
       default:
         if (sdkSlashCommands.some((cmd) => cmd.name.toLowerCase() === command)) {
           setMessages((prev) => [...prev, { id: genId("u"), role: "user", text: trimmed }]);
-          const resp = await invoke<{ success: boolean; error?: string }>("rpc_call", {
-            cmd: { type: "prompt", message: trimmed },
-          });
+          const resp = await invoke<{ success: boolean; error?: string }>("desktop_prompt", { message: trimmed });
           if (!resp.success) setError(resp.error ?? "slash command rejected");
           return;
         }
@@ -1699,12 +1694,9 @@ export default function App() {
     const promptText = text || "Attached image(s).";
     setMessages((prev) => [...prev, { id: genId("u"), role: "user", text: promptText, attachments: imageAttachments }]);
     try {
-      const resp = await invoke<{ success: boolean; error?: string }>("rpc_call", {
-        cmd: {
-          type: "prompt",
-          message: promptText,
-          images: imageAttachments.map(({ data, mimeType }) => ({ type: "image", data, mimeType })),
-        },
+      const resp = await invoke<{ success: boolean; error?: string }>("desktop_prompt", {
+        message: promptText,
+        images: imageAttachments.map(({ data, mimeType }) => ({ type: "image", data, mimeType })),
       });
       if (!resp.success) setError(resp.error ?? "prompt rejected");
     } catch (e) {
@@ -1714,7 +1706,7 @@ export default function App() {
 
   const abort = useCallback(async () => {
     try {
-      await invoke("rpc_call", { cmd: { type: "abort" } });
+      await invoke("desktop_abort");
     } catch (e) {
       setError(String(e));
     }
@@ -1728,9 +1720,7 @@ export default function App() {
     // which triggers the openTabs/activeTabId sync effect below.
     setMessages([]);
     try {
-      const resp = await invoke<{ success: boolean; error?: string }>("rpc_call", {
-        cmd: { type: "new_session" },
-      });
+      const resp = await invoke<{ success: boolean; error?: string }>("desktop_new_session");
       if (!resp.success) setError(resp.error ?? "new_session failed");
       await refreshState();
     } catch (e) {
@@ -1755,7 +1745,10 @@ export default function App() {
       if (previousMessages.length > 0) tabMessagesRef.current.set(prev, previousMessages);
       else tabMessagesRef.current.delete(prev);
     }
-    setOpenTabs((tabs) => (tabs.includes(path) ? tabs : [...tabs, path]));
+    const nextTabs = workspace
+      ? await mutatePersistedTabs(workspace, "activate_desktop_tab", path).catch(() => null)
+      : null;
+    setOpenTabs(nextTabs?.openTabs ?? ((tabs) => (tabs.includes(path) ? tabs : [...tabs, path])));
     activeTabIdRef.current = path;
     setActiveTabId(path);
     pendingSessionSwitchRef.current = path;
@@ -1770,9 +1763,9 @@ export default function App() {
       setHistoryLoadProgress(null);
     }
     try {
-      const resp = await invoke<{ success: boolean; error?: string }>("rpc_call", {
-        cmd: { type: "switch_session", sessionPath: path },
-      });
+      const resp = workspace
+        ? await switchDesktopSession(workspace, path)
+        : await invoke<{ success: boolean; error?: string }>("desktop_switch_session", { sessionPath: path });
       if (!resp.success) {
         if (pendingSessionSwitchRef.current === path) pendingSessionSwitchRef.current = null;
         if (prev && prev !== path) {
@@ -1803,7 +1796,7 @@ export default function App() {
       setHistoryLoadProgress(null);
       setError(String(e));
     }
-  }, [activeTabId, cancelHistoryLoad, captureTabScroll, loadMessages, refreshState, scheduleTabSwitchScrollRestore, saveTabViewport, streaming]);
+  }, [activeTabId, cancelHistoryLoad, captureTabScroll, loadMessages, refreshState, scheduleTabSwitchScrollRestore, saveTabViewport, streaming, workspace]);
 
   const closeTab = useCallback(
     async (path: string) => {
@@ -1812,7 +1805,10 @@ export default function App() {
         return;
       }
       // Drop the closed tab; forget its cached messages.
-      const next = openTabs.filter((p) => p !== path);
+      const nextTabs = workspace
+        ? await mutatePersistedTabs(workspace, "close_desktop_tab", path).catch(() => null)
+        : null;
+      const next = nextTabs?.openTabs ?? openTabs.filter((p) => p !== path);
       tabMessagesRef.current.delete(path);
       tabScrollRef.current.delete(path);
       cancelHistoryLoad();
@@ -1836,7 +1832,10 @@ export default function App() {
             setHistoryLoadProgress(null);
           }
           try {
-            await invoke("rpc_call", { cmd: { type: "switch_session", sessionPath: newActive } });
+            const resp = workspace
+              ? await switchDesktopSession(workspace, newActive)
+              : await invoke<{ success: boolean; error?: string }>("desktop_switch_session", { sessionPath: newActive });
+            if (!resp.success) throw new Error(resp.error ?? "switch_session failed");
             if (activeTabIdRef.current !== newActive) return;
             suppressNextSessionSyncRef.current = newActive;
             await refreshState();
@@ -1856,7 +1855,7 @@ export default function App() {
         }
       }
     },
-    [openTabs, activeTabId, cancelHistoryLoad, loadMessages, refreshState, scheduleTabSwitchScrollRestore, streaming],
+    [openTabs, activeTabId, cancelHistoryLoad, loadMessages, refreshState, scheduleTabSwitchScrollRestore, streaming, workspace],
   );
 
   const composerCompletionTarget = useMemo(() => parseComposerCompletionTarget(input), [input]);
@@ -3211,39 +3210,124 @@ function tabsStorageKey(workspace: string): string {
   return `${TABS_KEY_PREFIX}${workspace}`;
 }
 
-function readPersistedTabs(workspace: string): PersistedTabs {
+async function readPersistedWorkspace(): Promise<string | null> {
+  try {
+    const saved = await invoke<string | null>("get_desktop_workspace");
+    if (saved) return saved;
+  } catch {
+    // Fall through to the legacy localStorage value below.
+  }
+  try {
+    return localStorage.getItem(WORKSPACE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+async function writePersistedWorkspace(workspace: string | null): Promise<void> {
+  try {
+    await invoke("save_desktop_workspace", { workspace });
+  } catch {
+    // Keep the legacy browser fallback for tests/restricted webviews.
+  }
+  try {
+    if (workspace) localStorage.setItem(WORKSPACE_KEY, workspace);
+    else localStorage.removeItem(WORKSPACE_KEY);
+  } catch {
+    // localStorage may be unavailable in tests or restricted webviews.
+  }
+}
+
+async function readPersistedTabs(workspace: string): Promise<PersistedTabs> {
+  try {
+    const fromRust = await invoke<Partial<PersistedTabs>>("read_desktop_tabs", { workspace });
+    const normalized = normalizePersistedTabsShape(fromRust);
+    if (normalized.openTabs.length > 0 || normalized.activeTabId || normalized.titles || normalized.scroll) {
+      return normalized;
+    }
+  } catch {
+    // Fall through to the legacy localStorage value below.
+  }
   try {
     const raw = localStorage.getItem(tabsStorageKey(workspace));
     if (!raw) return { openTabs: [], activeTabId: null };
-    const parsed = JSON.parse(raw) as Partial<PersistedTabs>;
-    const openTabs = uniqueStrings(
-      Array.isArray(parsed.openTabs)
-        ? parsed.openTabs.filter((p): p is string => typeof p === "string" && p.length > 0)
-        : [],
-    );
-    const activeTabId = typeof parsed.activeTabId === "string" && openTabs.includes(parsed.activeTabId)
-      ? parsed.activeTabId
-      : null;
-    const titles = normalizePersistedTabTitles(openTabs, parsed.titles);
-    const scroll = normalizePersistedTabScroll(openTabs, parsed.scroll);
-    return { openTabs, activeTabId, ...(titles ? { titles } : {}), ...(scroll ? { scroll } : {}) };
+    return normalizePersistedTabsShape(JSON.parse(raw) as Partial<PersistedTabs>);
   } catch {
     return { openTabs: [], activeTabId: null };
   }
 }
 
-function writePersistedTabs(workspace: string, tabs: PersistedTabs): void {
+async function writePersistedTabs(workspace: string, tabs: PersistedTabs): Promise<void> {
+  const normalized = normalizePersistedTabsShape(tabs);
   try {
-    const openTabs = uniqueStrings(tabs.openTabs);
-    const activeTabId = tabs.activeTabId && openTabs.includes(tabs.activeTabId)
-      ? tabs.activeTabId
-      : null;
-    const titles = normalizePersistedTabTitles(openTabs, tabs.titles);
-    const scroll = normalizePersistedTabScroll(openTabs, tabs.scroll);
-    localStorage.setItem(tabsStorageKey(workspace), JSON.stringify({ openTabs, activeTabId, ...(titles ? { titles } : {}), ...(scroll ? { scroll } : {}) }));
+    await invoke("write_desktop_tabs", { workspace, tabs: normalized });
+  } catch {
+    // Keep legacy browser fallback below.
+  }
+  try {
+    localStorage.setItem(tabsStorageKey(workspace), JSON.stringify(normalized));
   } catch {
     // localStorage may be unavailable in tests or restricted webviews.
   }
+}
+
+async function mutatePersistedTabs(
+  workspace: string,
+  command: "open_desktop_tab" | "close_desktop_tab" | "activate_desktop_tab",
+  path: string,
+): Promise<PersistedTabs> {
+  try {
+    const tabs = normalizePersistedTabsShape(await invoke<Partial<PersistedTabs>>(command, { workspace, path }));
+    try { localStorage.setItem(tabsStorageKey(workspace), JSON.stringify(tabs)); } catch { /* ignore */ }
+    return tabs;
+  } catch (e) {
+    const current = normalizePersistedTabsShape(readLegacyPersistedTabs(workspace));
+    const openTabs = command === "close_desktop_tab"
+      ? current.openTabs.filter((tab) => tab !== path)
+      : uniqueStrings([...current.openTabs, path]);
+    const activeTabId = command === "close_desktop_tab"
+      ? current.activeTabId === path ? openTabs.at(-1) ?? null : current.activeTabId
+      : path;
+    const next = normalizePersistedTabsShape({ ...current, openTabs, activeTabId });
+    try { localStorage.setItem(tabsStorageKey(workspace), JSON.stringify(next)); } catch { /* ignore */ }
+    throw e;
+  }
+}
+
+async function switchDesktopSession(workspace: string, sessionPath: string): Promise<{ success: boolean; error?: string; tabs?: PersistedTabs }> {
+  const resp = await invoke<{ success: boolean; error?: string; tabs?: Partial<PersistedTabs> }>("switch_desktop_session", {
+    workspace,
+    sessionPath,
+  });
+  const tabs = normalizePersistedTabsShape(resp.tabs);
+  if (tabs.openTabs.length > 0 || tabs.activeTabId || tabs.titles || tabs.scroll) {
+    try { localStorage.setItem(tabsStorageKey(workspace), JSON.stringify(tabs)); } catch { /* ignore */ }
+    return { ...resp, tabs };
+  }
+  return { success: resp.success, error: resp.error };
+}
+
+function readLegacyPersistedTabs(workspace: string): Partial<PersistedTabs> | null {
+  try {
+    const raw = localStorage.getItem(tabsStorageKey(workspace));
+    return raw ? JSON.parse(raw) as Partial<PersistedTabs> : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizePersistedTabsShape(tabs: Partial<PersistedTabs> | null | undefined): PersistedTabs {
+  const openTabs = uniqueStrings(
+    Array.isArray(tabs?.openTabs)
+      ? tabs.openTabs.filter((p): p is string => typeof p === "string" && p.length > 0)
+      : [],
+  );
+  const activeTabId = typeof tabs?.activeTabId === "string" && openTabs.includes(tabs.activeTabId)
+    ? tabs.activeTabId
+    : null;
+  const titles = normalizePersistedTabTitles(openTabs, tabs?.titles);
+  const scroll = normalizePersistedTabScroll(openTabs, tabs?.scroll);
+  return { openTabs, activeTabId, ...(titles ? { titles } : {}), ...(scroll ? { scroll } : {}) };
 }
 
 function uniqueStrings(values: string[]): string[] {

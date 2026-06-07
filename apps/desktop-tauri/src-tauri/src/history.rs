@@ -7,7 +7,6 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const PIX_SESSION_ENTRY_ID_FIELD: &str = "__pixSessionEntryId";
-const PIX_SYSTEM_MESSAGE_CUSTOM_TYPE: &str = "pix-system";
 const PIX_SYSTEM_DISPLAY_ENTRY_CUSTOM_TYPE: &str = "pix:system_message";
 const DEFAULT_WINDOW_LIMIT: usize = 120;
 const MAX_WINDOW_LIMIT: usize = 500;
@@ -465,7 +464,6 @@ fn parse_display_entries_in_range(path: &Path, start: u64, end: u64) -> Result<V
             continue;
         }
         if !looks_like_display_entry_line(trimmed) {
-            out.push(WindowEntry { start: line_start, end: line_end, message: None });
             continue;
         }
         let value = match serde_json::from_slice::<Value>(trimmed) {
@@ -486,8 +484,6 @@ fn parse_display_entries_in_range(path: &Path, start: u64, end: u64) -> Result<V
         };
         if let Some(message) = display_message_from_entry(&entry) {
             out.push(WindowEntry { start: line_start, end: line_end, message: Some(message) });
-        } else {
-            out.push(WindowEntry { start: line_start, end: line_end, message: None });
         }
     }
     Ok(out)
@@ -856,40 +852,46 @@ fn display_message_from_entry(entry: &EntryRecord) -> Option<Value> {
     match obj.get("type").and_then(Value::as_str) {
         Some("message") => {
             let message = obj.get("message")?.as_object()?.clone();
-            Some(with_entry_id(message, &entry.id, entry.offset))
-        }
-        Some("custom_message") => {
-            let mut out = Map::new();
-            out.insert("role".to_string(), Value::String("custom".to_string()));
-            if let Some(custom_type) = obj.get("customType").cloned() {
-                out.insert("customType".to_string(), custom_type);
-            }
-            if let Some(content) = obj.get("content").cloned() {
-                out.insert("content".to_string(), content);
-            }
-            if let Some(display) = obj.get("display").cloned() {
-                out.insert("display".to_string(), display);
-            }
-            Some(with_entry_id(out, &entry.id, entry.offset))
-        }
-        Some("custom") if obj.get("customType").and_then(Value::as_str) == Some(PIX_SYSTEM_DISPLAY_ENTRY_CUSTOM_TYPE) => {
-            let text = obj
-                .get("data")
-                .and_then(Value::as_object)
-                .and_then(|data| data.get("text"))
-                .and_then(Value::as_str)?
-                .trim();
-            if text.is_empty() {
+            if !is_renderable_history_message(&message) {
                 return None;
             }
-            let mut out = Map::new();
-            out.insert("role".to_string(), Value::String("custom".to_string()));
-            out.insert("customType".to_string(), Value::String(PIX_SYSTEM_MESSAGE_CUSTOM_TYPE.to_string()));
-            out.insert("content".to_string(), Value::String(text.to_string()));
-            out.insert("display".to_string(), Value::Bool(true));
-            Some(with_entry_id(out, &entry.id, entry.offset))
+            Some(with_entry_id(message, &entry.id, entry.offset))
+        }
+        Some("custom_message") => None,
+        Some("custom") if obj.get("customType").and_then(Value::as_str) == Some(PIX_SYSTEM_DISPLAY_ENTRY_CUSTOM_TYPE) => {
+            None
         }
         _ => None,
+    }
+}
+
+fn is_renderable_history_message(message: &Map<String, Value>) -> bool {
+    match message.get("role").and_then(Value::as_str) {
+        Some("user") => !extract_text_content(message.get("content")).trim().is_empty(),
+        Some("assistant") => message
+            .get("content")
+            .and_then(Value::as_array)
+            .is_some_and(|blocks| {
+                blocks.iter().any(|block| {
+                    let Some(block) = block.as_object() else { return false };
+                    match block.get("type").and_then(Value::as_str) {
+                        Some("text") => block
+                            .get("text")
+                            .and_then(Value::as_str)
+                            .is_some_and(|text| !text.is_empty()),
+                        Some("toolCall") => {
+                            block.get("id").and_then(Value::as_str).is_some_and(|id| !id.is_empty())
+                                && block.get("name").and_then(Value::as_str).is_some_and(|name| !name.is_empty())
+                        }
+                        _ => false,
+                    }
+                })
+            }),
+        Some("toolResult") => message
+            .get("toolCallId")
+            .and_then(Value::as_str)
+            .is_some_and(|id| !id.is_empty()),
+        _ => false,
     }
 }
 
@@ -897,4 +899,108 @@ fn with_entry_id(mut object: Map<String, Value>, entry_id: &str, entry_offset: u
     object.insert(PIX_SESSION_ENTRY_ID_FIELD.to_string(), Value::String(entry_id.to_string()));
     object.insert("__pixSessionEntryOffset".to_string(), Value::Number(serde_json::Number::from(entry_offset)));
     Value::Object(object)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn read_window_skips_non_renderable_message_entries() {
+        let path = write_session(&[
+            r#"{"type":"session","id":"s","cwd":"/tmp"}"#,
+            r#"{"type":"message","id":"thinking-only","message":{"role":"assistant","content":[{"type":"thinking"}]}}"#,
+            r#"{"type":"message","id":"empty-user","message":{"role":"user","content":[{"type":"text","text":""}]}}"#,
+            r#"{"type":"message","id":"user-1","message":{"role":"user","content":[{"type":"text","text":"hello"}]}}"#,
+            r#"{"type":"message","id":"assistant-1","message":{"role":"assistant","content":[{"type":"text","text":"world"}]}}"#,
+        ]);
+        let mut cache = HistoryCache::default();
+
+        let window = read_window(
+            &mut cache,
+            path.to_string_lossy().to_string(),
+            Some(0),
+            Some(10),
+            Some(false),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .expect("read window");
+
+        let roles = window
+            .messages
+            .iter()
+            .filter_map(|message| message.get("role").and_then(Value::as_str))
+            .collect::<Vec<_>>();
+        assert_eq!(roles, vec!["user", "assistant"]);
+    }
+
+    #[test]
+    fn read_tail_window_limit_counts_renderable_messages_only() {
+        let path = write_session(&[
+            r#"{"type":"session","id":"s","cwd":"/tmp"}"#,
+            r#"{"type":"message","id":"user-1","message":{"role":"user","content":[{"type":"text","text":"first"}]}}"#,
+            r#"{"type":"message","id":"thinking-only","message":{"role":"assistant","content":[{"type":"thinking"}]}}"#,
+            r#"{"type":"message","id":"user-2","message":{"role":"user","content":[{"type":"text","text":"second"}]}}"#,
+        ]);
+        assert_tail_texts(path, vec!["first", "second"]);
+    }
+
+    #[test]
+    fn read_tail_window_limit_ignores_non_display_entries() {
+        let path = write_session(&[
+            r#"{"type":"session","id":"s","cwd":"/tmp"}"#,
+            r#"{"type":"message","id":"user-1","message":{"role":"user","content":[{"type":"text","text":"first"}]}}"#,
+            r#"{"type":"custom","customType":"dcp-state","data":{"large":true}}"#,
+            r#"{"type":"custom","customType":"dcp-state","data":{"large":true}}"#,
+            r#"{"type":"message","id":"user-2","message":{"role":"user","content":[{"type":"text","text":"second"}]}}"#,
+        ]);
+        assert_tail_texts(path, vec!["first", "second"]);
+    }
+
+    fn assert_tail_texts(path: PathBuf, expected: Vec<&str>) {
+        let mut cache = HistoryCache::default();
+        let window = read_window(
+            &mut cache,
+            path.to_string_lossy().to_string(),
+            None,
+            Some(2),
+            Some(true),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .expect("read tail window");
+        let texts = window
+            .messages
+            .iter()
+            .map(|message| extract_text_content(message.get("content")))
+            .collect::<Vec<_>>();
+        assert_eq!(texts, expected);
+    }
+
+    fn write_session(lines: &[&str]) -> PathBuf {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "pix-history-test-{}-{}.jsonl",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        let mut file = File::create(&path).expect("create temp session");
+        for line in lines {
+            writeln!(file, "{line}").expect("write temp session line");
+        }
+        path
+    }
 }

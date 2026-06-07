@@ -336,15 +336,19 @@ export class AppRenderController {
 		this.deps.mouseController.statusThinkingTarget = this.deps.statusLineRenderer.thinkingTarget(statusLayout.text, statusRow);
 		this.deps.mouseController.statusContextTarget = this.deps.statusLineRenderer.contextTarget(statusLayout.text, statusRow, statusLayout);
 		this.deps.mouseController.statusModelUsageTarget = this.deps.statusLineRenderer.modelUsageTarget(statusLayout.text, statusRow, statusLayout);
-		this.deps.mouseController.statusDraftQueueTarget = widgetLayout ? this.deps.statusLineRenderer.draftQueueTarget?.(widgetLayout, widgetRow) : undefined;
-		this.deps.mouseController.statusUserJumpTarget = widgetLayout ? this.deps.statusLineRenderer.userJumpTarget?.(widgetLayout, widgetRow) : undefined;
-		this.deps.mouseController.statusThinkingExpandTarget = widgetLayout ? this.deps.statusLineRenderer.thinkingExpandTarget?.(widgetLayout, widgetRow) : undefined;
-		this.deps.mouseController.statusCompactToolsTarget = widgetLayout ? this.deps.statusLineRenderer.compactToolsTarget?.(widgetLayout, widgetRow) : undefined;
-		this.deps.mouseController.statusTerminalBellSoundTarget = widgetLayout ? this.deps.statusLineRenderer.terminalBellSoundTarget?.(widgetLayout, widgetRow) : undefined;
+		if (widgetLayout) {
+			this.deps.mouseController.statusDraftQueueTarget = this.deps.statusLineRenderer.draftQueueTarget?.(widgetLayout, widgetRow);
+			this.deps.mouseController.statusUserJumpTarget = this.deps.statusLineRenderer.userJumpTarget?.(widgetLayout, widgetRow);
+			this.deps.mouseController.statusThinkingExpandTarget = this.deps.statusLineRenderer.thinkingExpandTarget?.(widgetLayout, widgetRow);
+			this.deps.mouseController.statusCompactToolsTarget = this.deps.statusLineRenderer.compactToolsTarget?.(widgetLayout, widgetRow);
+			this.deps.mouseController.statusTerminalBellSoundTarget = this.deps.statusLineRenderer.terminalBellSoundTarget?.(widgetLayout, widgetRow);
+		}
 		this.deps.mouseController.statusSessionTarget = this.deps.statusLineRenderer.sessionTarget(statusLayout.text, statusRow, statusLayout.sessionLabel, statusLayout.workspaceLabel);
-		this.deps.mouseController.statusPromptEnhancerTarget = widgetLayout ? this.deps.statusLineRenderer.promptEnhancerTarget(widgetLayout, widgetRow) : undefined;
-		this.deps.mouseController.statusVoiceMicTarget = widgetLayout ? this.deps.statusLineRenderer.voiceMicTarget(widgetLayout, widgetRow) : undefined;
-		this.deps.mouseController.statusVoiceLanguageTarget = widgetLayout ? this.deps.statusLineRenderer.voiceLanguageTarget(widgetLayout, widgetRow) : undefined;
+		if (widgetLayout) {
+			this.deps.mouseController.statusPromptEnhancerTarget = this.deps.statusLineRenderer.promptEnhancerTarget(widgetLayout, widgetRow);
+			this.deps.mouseController.statusVoiceMicTarget = this.deps.statusLineRenderer.voiceMicTarget(widgetLayout, widgetRow);
+			this.deps.mouseController.statusVoiceLanguageTarget = this.deps.statusLineRenderer.voiceLanguageTarget(widgetLayout, widgetRow);
+		}
 		this.deps.mouseController.renderedRowTexts.set(statusRow, statusLayout.text);
 	}
 

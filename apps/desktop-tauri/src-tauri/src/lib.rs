@@ -1,7 +1,6 @@
 //! Pix Desktop — Tauri host library.
 //!
-//! Phase 1 surface: generic RPC bridge to the SDK sidecar.
-//! - `rpc_call(cmd)`  sends an RPC command and awaits its response.
+//! Phase 1 surface: typed desktop commands over the SDK sidecar.
 //! - `rpc_subscribe(on_event)` registers a Tauri Channel that receives all
 //!   streaming events (`message_update`, `tool_execution_*`, etc.).
 //! - `set_workspace(path)` opens a project folder: validates it and forwards
@@ -12,10 +11,12 @@
 
 mod sidecar;
 mod history;
+mod desktop_state;
 mod pty;
 
 use crate::sidecar::SidecarHandle;
 use crate::history::{list_sessions_for_workspace, read_window, save_viewport, HistoryCache, HistoryWindow, SessionList, ViewportCursor};
+use crate::desktop_state::{DesktopStateCache, PersistedTabs};
 use crate::pty::{PtyRegistry, PtyStartOptions, PtyStartResult};
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -70,14 +71,8 @@ struct PathCompletionItem {
     is_dir: bool,
 }
 
-/// Tauri command: send an RPC command to the sidecar and await the response.
-///
-/// React invokes this as `invoke('rpc_call', { cmd: {...} })`. The command
-/// forwards `cmd` (with auto-assigned `id` if missing) to the sidecar over
-/// stdin and resolves with the matching response object.
-#[tauri::command]
-async fn rpc_call(
-    sidecar: State<'_, Arc<Mutex<SidecarHandle>>>,
+async fn sidecar_call(
+    sidecar: &State<'_, Arc<Mutex<SidecarHandle>>>,
     cmd: Value,
 ) -> Result<Value, String> {
     sidecar.lock().await.call(cmd).await.map_err(|e| e.to_string())
@@ -313,6 +308,206 @@ async fn save_session_viewport(
 }
 
 #[tauri::command]
+async fn get_desktop_workspace(
+    desktop_state: State<'_, Arc<Mutex<DesktopStateCache>>>,
+) -> Result<Option<String>, String> {
+    desktop_state.lock().await.workspace()
+}
+
+#[tauri::command]
+async fn save_desktop_workspace(
+    desktop_state: State<'_, Arc<Mutex<DesktopStateCache>>>,
+    workspace: Option<String>,
+) -> Result<(), String> {
+    desktop_state.lock().await.set_workspace(workspace)
+}
+
+#[tauri::command]
+async fn read_desktop_tabs(
+    desktop_state: State<'_, Arc<Mutex<DesktopStateCache>>>,
+    workspace: String,
+) -> Result<PersistedTabs, String> {
+    desktop_state.lock().await.read_tabs(workspace)
+}
+
+#[tauri::command]
+async fn write_desktop_tabs(
+    desktop_state: State<'_, Arc<Mutex<DesktopStateCache>>>,
+    workspace: String,
+    tabs: PersistedTabs,
+) -> Result<(), String> {
+    desktop_state.lock().await.write_tabs(workspace, tabs)
+}
+
+#[tauri::command]
+async fn open_desktop_tab(
+    desktop_state: State<'_, Arc<Mutex<DesktopStateCache>>>,
+    workspace: String,
+    path: String,
+) -> Result<PersistedTabs, String> {
+    desktop_state.lock().await.open_tab(workspace, path)
+}
+
+#[tauri::command]
+async fn close_desktop_tab(
+    desktop_state: State<'_, Arc<Mutex<DesktopStateCache>>>,
+    workspace: String,
+    path: String,
+) -> Result<PersistedTabs, String> {
+    desktop_state.lock().await.close_tab(workspace, path)
+}
+
+#[tauri::command]
+async fn activate_desktop_tab(
+    desktop_state: State<'_, Arc<Mutex<DesktopStateCache>>>,
+    workspace: String,
+    path: String,
+) -> Result<PersistedTabs, String> {
+    desktop_state.lock().await.activate_tab(workspace, path)
+}
+
+#[tauri::command]
+async fn switch_desktop_session(
+    sidecar: State<'_, Arc<Mutex<SidecarHandle>>>,
+    desktop_state: State<'_, Arc<Mutex<DesktopStateCache>>>,
+    workspace: String,
+    session_path: String,
+) -> Result<Value, String> {
+    let resp = sidecar
+        .lock()
+        .await
+        .call(json!({ "type": "switch_session", "sessionPath": session_path }))
+        .await
+        .map_err(|e| format!("sidecar switch_session failed: {e}"))?;
+    if resp.get("success").and_then(Value::as_bool) == Some(false) {
+        return Ok(resp);
+    }
+    let tabs = desktop_state
+        .lock()
+        .await
+        .activate_tab(workspace, session_path)
+        .map_err(|e| format!("persist active tab failed: {e}"))?;
+    let mut resp = resp;
+    if let Some(obj) = resp.as_object_mut() {
+        obj.insert("tabs".to_string(), serde_json::to_value(tabs).unwrap_or(Value::Null));
+    }
+    Ok(resp)
+}
+
+#[tauri::command]
+async fn desktop_switch_session(
+    sidecar: State<'_, Arc<Mutex<SidecarHandle>>>,
+    session_path: String,
+) -> Result<Value, String> {
+    sidecar_call(&sidecar, json!({ "type": "switch_session", "sessionPath": session_path })).await
+}
+
+#[tauri::command]
+async fn desktop_get_state(sidecar: State<'_, Arc<Mutex<SidecarHandle>>>) -> Result<Value, String> {
+    sidecar_call(&sidecar, json!({ "type": "get_state" })).await
+}
+
+#[tauri::command]
+async fn desktop_get_commands(sidecar: State<'_, Arc<Mutex<SidecarHandle>>>) -> Result<Value, String> {
+    sidecar_call(&sidecar, json!({ "type": "get_commands" })).await
+}
+
+#[tauri::command]
+async fn desktop_get_models(sidecar: State<'_, Arc<Mutex<SidecarHandle>>>) -> Result<Value, String> {
+    sidecar_call(&sidecar, json!({ "type": "get_models" })).await
+}
+
+#[tauri::command]
+async fn desktop_set_model(
+    sidecar: State<'_, Arc<Mutex<SidecarHandle>>>,
+    model_ref: String,
+) -> Result<Value, String> {
+    sidecar_call(&sidecar, json!({ "type": "set_model", "ref": model_ref })).await
+}
+
+#[tauri::command]
+async fn desktop_compact(
+    sidecar: State<'_, Arc<Mutex<SidecarHandle>>>,
+    instructions: Option<String>,
+) -> Result<Value, String> {
+    sidecar_call(&sidecar, json!({ "type": "compact", "instructions": instructions })).await
+}
+
+#[tauri::command]
+async fn desktop_undo_last_turn(sidecar: State<'_, Arc<Mutex<SidecarHandle>>>) -> Result<Value, String> {
+    sidecar_call(&sidecar, json!({ "type": "undo_last_turn" })).await
+}
+
+#[tauri::command]
+async fn desktop_new_session(sidecar: State<'_, Arc<Mutex<SidecarHandle>>>) -> Result<Value, String> {
+    sidecar_call(&sidecar, json!({ "type": "new_session" })).await
+}
+
+#[tauri::command]
+async fn desktop_abort(sidecar: State<'_, Arc<Mutex<SidecarHandle>>>) -> Result<Value, String> {
+    sidecar_call(&sidecar, json!({ "type": "abort" })).await
+}
+
+#[tauri::command]
+async fn desktop_prompt(
+    sidecar: State<'_, Arc<Mutex<SidecarHandle>>>,
+    message: String,
+    images: Option<Value>,
+) -> Result<Value, String> {
+    let mut cmd = json!({ "type": "prompt", "message": message });
+    if let Some(images) = images {
+        if !images.is_null() {
+            if let Some(obj) = cmd.as_object_mut() {
+                obj.insert("images".to_string(), images);
+            }
+        }
+    }
+    sidecar_call(&sidecar, cmd).await
+}
+
+#[tauri::command]
+async fn desktop_get_command_completions(
+    sidecar: State<'_, Arc<Mutex<SidecarHandle>>>,
+    command: String,
+    argument_prefix: String,
+) -> Result<Value, String> {
+    sidecar_call(&sidecar, json!({
+        "type": "get_command_completions",
+        "command": command,
+        "argumentPrefix": argument_prefix,
+    })).await
+}
+
+#[tauri::command]
+async fn desktop_get_messages(
+    sidecar: State<'_, Arc<Mutex<SidecarHandle>>>,
+    cmd: Value,
+) -> Result<Value, String> {
+    let mut forwarded = cmd;
+    if let Some(obj) = forwarded.as_object_mut() {
+        obj.insert("type".to_string(), Value::String("get_messages".to_string()));
+    } else {
+        forwarded = json!({ "type": "get_messages" });
+    }
+    sidecar_call(&sidecar, forwarded).await
+}
+
+#[tauri::command]
+async fn desktop_extension_ui_response(
+    sidecar: State<'_, Arc<Mutex<SidecarHandle>>>,
+    request_id: String,
+    payload: Value,
+) -> Result<Value, String> {
+    let mut cmd = json!({ "type": "extension_ui_response", "id": request_id });
+    if let (Some(dst), Some(src)) = (cmd.as_object_mut(), payload.as_object()) {
+        for (key, value) in src {
+            dst.insert(key.clone(), value.clone());
+        }
+    }
+    sidecar_call(&sidecar, cmd).await
+}
+
+#[tauri::command]
 async fn pty_start(
     pty_registry: State<'_, Arc<std::sync::Mutex<PtyRegistry>>>,
     opts: PtyStartOptions,
@@ -367,6 +562,7 @@ pub fn run() {
                 .map_err(|e| format!("failed to start sidecar: {e}"))?;
             app.manage(Arc::new(Mutex::new(handle)));
             app.manage(Arc::new(Mutex::new(HistoryCache::default())));
+            app.manage(Arc::new(Mutex::new(DesktopStateCache::default())));
             app.manage(Arc::new(std::sync::Mutex::new(PtyRegistry::default())));
 
             #[cfg(target_os = "macos")]
@@ -379,7 +575,6 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            rpc_call,
             rpc_subscribe,
             set_workspace,
             run_shell,
@@ -387,6 +582,27 @@ pub fn run() {
             list_workspace_sessions,
             read_session_messages_window,
             save_session_viewport,
+            get_desktop_workspace,
+            save_desktop_workspace,
+            read_desktop_tabs,
+            write_desktop_tabs,
+            open_desktop_tab,
+            close_desktop_tab,
+            activate_desktop_tab,
+            switch_desktop_session,
+            desktop_switch_session,
+            desktop_get_state,
+            desktop_get_commands,
+            desktop_get_models,
+            desktop_set_model,
+            desktop_compact,
+            desktop_undo_last_turn,
+            desktop_new_session,
+            desktop_abort,
+            desktop_prompt,
+            desktop_get_command_completions,
+            desktop_get_messages,
+            desktop_extension_ui_response,
             pty_start,
             pty_write,
             pty_resize,
