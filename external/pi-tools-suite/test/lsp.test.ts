@@ -87,7 +87,7 @@ function writeFakeLspServer(dir: string): string {
 		'}',
 		'',
 		'function diagnosticsForMode() {',
-		'  if (mode !== "diagnostic" && mode !== "pullDiagnostic" && mode !== "dynamicPullDiagnostic") return [];',
+		'  if (mode !== "diagnostic" && mode !== "delayedDiagnostic" && mode !== "pullDiagnostic" && mode !== "dynamicPullDiagnostic") return [];',
 		'  return [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }, severity: 1, source: "fake", message: "Fake issue", code: "F1" }];',
 		'}',
 		'',
@@ -119,7 +119,8 @@ function writeFakeLspServer(dir: string): string {
 		'  }',
 		'',
 		'  if (message.method === "textDocument/didOpen" || message.method === "textDocument/didChange") {',
-		'    publishDiagnostics(message.params);',
+		'    if (mode === "delayedDiagnostic") setTimeout(() => publishDiagnostics(message.params), 150);',
+		'    else publishDiagnostics(message.params);',
 		'    return;',
 		'  }',
 		'',
@@ -195,11 +196,13 @@ function writeGlobalLspConfig(options: {
 	cwd: string;
 	serverScript: string;
 	pidLog: string;
-	mode?: "basic" | "crash" | "diagnostic" | "pullDiagnostic" | "dynamicPullDiagnostic" | "stubborn" | "tsserver" | "childStubborn" | "hangInitialize";
+	mode?: "basic" | "crash" | "diagnostic" | "delayedDiagnostic" | "pullDiagnostic" | "dynamicPullDiagnostic" | "stubborn" | "tsserver" | "childStubborn" | "hangInitialize";
 	id?: string;
 	include?: string[];
 	rootMarkers?: string[];
 	diagnosticsWaitMs?: number;
+	pullDiagnostics?: boolean;
+	waitForPublishDiagnostics?: boolean;
 }) {
 	process.env.HOME = options.agentDir;
 	const configDir = path.join(options.agentDir, ".config", "pi");
@@ -216,6 +219,8 @@ function writeGlobalLspConfig(options: {
 				languageIdByExtension: { ".ts": "typescript", ".md": "markdown" },
 				startupTimeoutMs: 5_000,
 				diagnosticsWaitMs: options.diagnosticsWaitMs ?? 500,
+				pullDiagnostics: options.pullDiagnostics,
+				waitForPublishDiagnostics: options.waitForPublishDiagnostics,
 			}],
 		},
 	}), "utf8");
@@ -554,6 +559,60 @@ describe.serial("LSP library post-edit diagnostics", () => {
 		const summary = result.content.at(-1).text;
 		expect(summary).toContain("a.ts:1:1 - error: fake: Fake issue [F1]");
 		expect(summary).not.toContain("timed out");
+	});
+
+	test.serial("can keep slow pull-diagnostic servers non-blocking", async () => {
+		const cwd = tempDir();
+		const agentDir = tempDir();
+		const pidLog = path.join(cwd, "non-blocking-pull-diagnostic-pids.txt");
+		const serverScript = writeFakeLspServer(cwd);
+		process.env.PI_AGENT_DIR = agentDir;
+		fs.writeFileSync(path.join(cwd, "a.ts"), "const x: string = 1;\n");
+		writeGlobalLspConfig({
+			agentDir,
+			cwd,
+			serverScript,
+			pidLog,
+			mode: "pullDiagnostic",
+			diagnosticsWaitMs: 0,
+			pullDiagnostics: false,
+			waitForPublishDiagnostics: false,
+		});
+
+		const ctx = { cwd, signal: undefined };
+		const result = await appendMutationDiagnostics("apply_patch", "*** Begin Patch\n*** Update File: a.ts\n@@\n-const x = 1;\n+const x = 2;\n*** End Patch", { content: [{ type: "text", text: "ok" }] }, ctx);
+
+		expect(result.content).toEqual([{ type: "text", text: "ok" }]);
+		expect(readPids(pidLog)).toHaveLength(1);
+	});
+
+	test.serial("waits for published diagnostics when pull diagnostics is disabled", async () => {
+		const cwd = tempDir();
+		const agentDir = tempDir();
+		const pidLog = path.join(cwd, "publish-diagnostic-pids.txt");
+		const serverScript = writeFakeLspServer(cwd);
+		process.env.PI_AGENT_DIR = agentDir;
+		fs.writeFileSync(path.join(cwd, "a.ts"), "const x: string = 1;\n");
+		writeGlobalLspConfig({
+			agentDir,
+			cwd,
+			serverScript,
+			pidLog,
+			mode: "delayedDiagnostic",
+			diagnosticsWaitMs: 1000,
+			pullDiagnostics: false,
+			waitForPublishDiagnostics: true,
+		});
+
+		const ctx = { cwd, signal: undefined };
+		const startedAt = Date.now();
+		const result = await appendMutationDiagnostics("apply_patch", "*** Begin Patch\n*** Update File: a.ts\n@@\n-const x = 1;\n+const x = 2;\n*** End Patch", { content: [{ type: "text", text: "ok" }] }, ctx);
+
+		const summary = result.content.at(-1).text;
+		expect(Date.now() - startedAt).toBeGreaterThanOrEqual(100);
+		expect(summary).toContain("a.ts:1:1 - error: fake: Fake issue [F1]");
+		expect(summary).not.toContain("timed out");
+		expect(readPids(pidLog)).toHaveLength(1);
 	});
 
 	test.serial("uses dynamically registered pull diagnostics", async () => {

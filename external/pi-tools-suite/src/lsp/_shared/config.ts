@@ -76,6 +76,8 @@ function parseLspItems(parsed: unknown): LspServerConfig[] {
       languageIdByExtension: cleanStringRecord(object.languageIdByExtension),
       startupTimeoutMs: cleanNumber(object.startupTimeoutMs),
       diagnosticsWaitMs: cleanNumber(object.diagnosticsWaitMs),
+      pullDiagnostics: cleanBoolean(object.pullDiagnostics),
+      waitForPublishDiagnostics: cleanBoolean(object.waitForPublishDiagnostics),
       initializationOptions: object.initializationOptions,
       settings: object.settings,
     });

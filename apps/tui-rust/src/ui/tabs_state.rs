@@ -21,6 +21,36 @@ use crate::ui::theme::{Theme, ThemeRole};
 
 const TABS_STATE_VERSION: u8 = 2;
 const MAX_TABS: usize = 8;
+const TAB_SEPARATOR: &str = " │ ";
+const EMPTY_NEW_TAB_PREFIX: &str = "│ ";
+const CHECK_ICON: &str = "\u{f05e0}";
+const CLOSE_ICON: &str = "\u{f0156}";
+const PLUS_ICON: &str = "\u{f0415}";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TabTargetKind {
+    Tab,
+    Close,
+    NewTab,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TabLineTarget {
+    pub kind: TabTargetKind,
+    pub path: Option<String>,
+    pub active: bool,
+    /// 1-based inclusive start column, matching the TypeScript tab layout contract.
+    pub start_column: usize,
+    /// 1-based exclusive end column, matching the TypeScript tab layout contract.
+    pub end_column: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TabLineLayout {
+    pub top: Line<'static>,
+    pub bottom: Line<'static>,
+    pub targets: Vec<TabLineTarget>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct OpenTab {
@@ -245,89 +275,236 @@ pub fn tabs_line(
     current_id: Option<&str>,
     current_name: Option<&str>,
 ) -> Line<'static> {
-    let prefix = " tabs ";
-    let hint = "Ctrl+T picker";
-    let hint_width = UnicodeWidthStr::width(hint);
+    tabs_layout(state, theme, width, current_path, current_id, current_name).top
+}
+
+pub fn tabs_layout(
+    state: &TabsState,
+    theme: &Theme,
+    width: usize,
+    current_path: Option<&str>,
+    current_id: Option<&str>,
+    current_name: Option<&str>,
+) -> TabLineLayout {
     let max_width = if width == 0 { usize::MAX } else { width };
-    let mut used = UnicodeWidthStr::width(prefix);
-    let mut spans = vec![Span::styled(
-        prefix.to_string(),
-        theme.style_for(ThemeRole::StatusDim),
-    )];
+    let mut spans = Vec::new();
+    let mut targets = Vec::new();
+    let mut separator_columns = Vec::new();
+    let separator_width = UnicodeWidthStr::width(TAB_SEPARATOR);
 
     let current_resolved = current_path.map(|path| path.to_string());
-    let mut labels: Vec<(String, bool)> = state
+    let mut labels: Vec<(String, Option<String>, bool)> = state
         .tabs
         .iter()
         .map(|tab| {
             let active = state.active_path.as_deref() == Some(tab.path.as_str())
                 || current_resolved.as_deref() == Some(tab.path.as_str());
-            (tab_label(tab, current_id, current_name), active)
+            (
+                tab_label(tab, current_id, current_name),
+                Some(tab.path.clone()),
+                active,
+            )
         })
         .collect();
 
     if labels.is_empty() {
-        labels.push((current_session_label(current_name, current_id), true));
+        labels.push((
+            current_session_label(current_name, current_id),
+            current_resolved,
+            true,
+        ));
     }
 
-    let total_labels = labels.len();
-    let mut shown = 0usize;
-    for (idx, (label, active)) in labels.iter().enumerate() {
-        let chip = format!("[{}]", compact_label(label, 18));
-        let chip_width = UnicodeWidthStr::width(chip.as_str()) + 1;
-        let overflow = total_labels.saturating_sub(idx + 1);
-        let overflow_width = if overflow > 0 {
-            UnicodeWidthStr::width(format!("+{overflow}").as_str()) + 1
-        } else {
-            0
-        };
-        let remaining = max_width.saturating_sub(used);
-        let reserved_hint = if max_width == usize::MAX || remaining > hint_width {
-            hint_width + 1
-        } else {
-            0
-        };
-        if max_width != usize::MAX && used + chip_width + overflow_width + reserved_hint > max_width
-        {
-            break;
+    let tabs_count = labels.len();
+    let new_tab_prefix = if tabs_count > 0 {
+        TAB_SEPARATOR
+    } else {
+        EMPTY_NEW_TAB_PREFIX
+    };
+    let new_tab_prefix_width = UnicodeWidthStr::width(new_tab_prefix);
+    let new_tab_width = UnicodeWidthStr::width(PLUS_ICON);
+    let separator_count = tabs_count.saturating_sub(1);
+    let tabs_width = max_width.saturating_sub(new_tab_width + new_tab_prefix_width);
+    let natural_buttons: Vec<String> = labels
+        .iter()
+        .map(|(label, _, _)| button_text(label, None))
+        .collect();
+    let natural_width = natural_buttons
+        .iter()
+        .map(|button| UnicodeWidthStr::width(button.as_str()))
+        .sum::<usize>()
+        + separator_count * separator_width;
+    let button_max_width = if natural_width <= tabs_width || tabs_count == 0 {
+        None
+    } else {
+        Some(std::cmp::max(
+            7,
+            tabs_width
+                .saturating_sub(separator_count * separator_width)
+                .max(1)
+                / tabs_count,
+        ))
+    };
+
+    let mut display_column = 1usize;
+    for (idx, (label, path, active)) in labels.iter().enumerate() {
+        if idx > 0 {
+            separator_columns.push(display_column + 1);
+            spans.push(Span::styled(
+                TAB_SEPARATOR.to_string(),
+                theme.style_for(ThemeRole::InputBorder),
+            ));
+            display_column += separator_width;
         }
 
-        spans.push(render_chip(theme, &chip, *active));
-        spans.push(Span::raw(" "));
-        used += chip_width;
-        shown += 1;
+        let button = button_text(label, button_max_width);
+        let button_width = UnicodeWidthStr::width(button.as_str());
+        let close_width = UnicodeWidthStr::width(CLOSE_ICON);
+        let close_start = display_column + button_width.saturating_sub(close_width);
+        targets.push(TabLineTarget {
+            kind: TabTargetKind::Close,
+            path: path.clone(),
+            active: *active,
+            start_column: close_start,
+            end_column: close_start + close_width,
+        });
+        targets.push(TabLineTarget {
+            kind: TabTargetKind::Tab,
+            path: path.clone(),
+            active: *active,
+            start_column: display_column,
+            end_column: display_column + button_width,
+        });
+        spans.extend(button_spans(theme, &button, *active));
+        display_column += button_width;
     }
 
-    let hidden = total_labels.saturating_sub(shown);
-    if hidden > 0 {
-        let overflow = format!("+{hidden}");
+    if display_column > 1 || tabs_count > 0 {
+        let divider_column = display_column + if tabs_count > 0 { 1 } else { 0 };
+        if divider_column <= max_width {
+            separator_columns.push(divider_column);
+        }
         spans.push(Span::styled(
-            overflow,
-            theme.style_for(ThemeRole::StatusDim),
+            new_tab_prefix.to_string(),
+            theme.style_for(ThemeRole::InputBorder),
         ));
-        spans.push(Span::raw(" "));
-        used += UnicodeWidthStr::width(format!("+{hidden} ").as_str());
+        display_column += new_tab_prefix_width;
     }
+    targets.push(TabLineTarget {
+        kind: TabTargetKind::NewTab,
+        path: None,
+        active: false,
+        start_column: display_column,
+        end_column: display_column + new_tab_width,
+    });
+    spans.push(Span::styled(
+        PLUS_ICON.to_string(),
+        theme
+            .style_for(ThemeRole::ModelAccent)
+            .add_modifier(Modifier::BOLD),
+    ));
 
-    if max_width == usize::MAX || used + hint_width <= max_width {
-        spans.push(Span::styled(
-            hint.to_string(),
-            theme.style_for(ThemeRole::ModelAccent),
-        ));
+    let top = Line::from(spans);
+    let bottom = Line::from(Span::styled(
+        bottom_text(width, &targets, &separator_columns),
+        theme.style_for(ThemeRole::InputBorder),
+    ));
+
+    TabLineLayout {
+        top,
+        bottom,
+        targets: targets
+            .into_iter()
+            .filter(|target| target.start_column <= max_width)
+            .collect(),
     }
-
-    Line::from(spans)
 }
 
-fn render_chip(theme: &Theme, chip: &str, active: bool) -> Span<'static> {
-    let style = if active {
+fn button_spans(theme: &Theme, button: &str, active: bool) -> Vec<Span<'static>> {
+    let title_style = if active {
         theme
             .style_for(ThemeRole::SessionAccent)
             .add_modifier(Modifier::BOLD)
     } else {
         theme.style_for(ThemeRole::AssistantText)
     };
-    Span::styled(chip.to_string(), style)
+    let mut chars = button.chars();
+    let status = chars.next().unwrap_or(' ').to_string();
+    let rest: String = chars.collect();
+    let close_index = rest.rfind(CLOSE_ICON).unwrap_or(rest.len());
+    let (title, close_and_after) = rest.split_at(close_index);
+    vec![
+        Span::styled(status, theme.style_for(ThemeRole::StatusDim)),
+        Span::styled(title.to_string(), title_style),
+        Span::styled(
+            close_and_after.to_string(),
+            theme.style_for(ThemeRole::StatusDim),
+        ),
+    ]
+}
+
+fn button_text(label: &str, max_width: Option<usize>) -> String {
+    let prefix = format!("{CHECK_ICON} ");
+    let suffix = format!(" {CLOSE_ICON}");
+    let natural = format!("{prefix}{label}{suffix}");
+    let Some(max_width) = max_width else {
+        return natural;
+    };
+    if UnicodeWidthStr::width(natural.as_str()) <= max_width {
+        return natural;
+    }
+    let title_width = max_width
+        .saturating_sub(UnicodeWidthStr::width(prefix.as_str()))
+        .saturating_sub(UnicodeWidthStr::width(suffix.as_str()));
+    if title_width == 0 {
+        return compact_label(&format!("{CHECK_ICON}{CLOSE_ICON}"), max_width);
+    }
+    format!("{prefix}{}{suffix}", ellipsize_display(label, title_width))
+}
+
+fn bottom_text(width: usize, targets: &[TabLineTarget], separator_columns: &[usize]) -> String {
+    let mut chars = vec!["─"; width];
+    if let Some(active) = targets
+        .iter()
+        .find(|target| target.kind == TabTargetKind::Tab && target.active)
+    {
+        let left_separator = separator_columns
+            .iter()
+            .copied()
+            .filter(|column| *column < active.start_column)
+            .max()
+            .unwrap_or(0);
+        let right_separator = separator_columns
+            .iter()
+            .copied()
+            .filter(|column| *column >= active.end_column)
+            .min()
+            .unwrap_or(width + 1);
+        let clear_start = (left_separator + 1).max(1);
+        let clear_end = right_separator.saturating_sub(1).min(width);
+        for column in clear_start..=clear_end {
+            if let Some(ch) = chars.get_mut(column - 1) {
+                *ch = " ";
+            }
+        }
+    }
+    for column in separator_columns {
+        if *column < 1 || *column > width {
+            continue;
+        }
+        let has_left = *column > 1 && chars.get(column - 2) == Some(&"─");
+        let has_right = chars.get(*column) == Some(&"─");
+        chars[*column - 1] = if has_left && has_right {
+            "┴"
+        } else if has_left {
+            "┘"
+        } else if has_right {
+            "└"
+        } else {
+            "╵"
+        };
+    }
+    chars.join("")
 }
 
 fn tab_label(tab: &OpenTab, current_id: Option<&str>, current_name: Option<&str>) -> String {
@@ -364,6 +541,28 @@ fn compact_label(text: &str, max_chars: usize) -> String {
         out.pop();
         out.push('…');
     }
+    out
+}
+
+fn ellipsize_display(text: &str, max_width: usize) -> String {
+    if UnicodeWidthStr::width(text) <= max_width {
+        return text.to_string();
+    }
+    if max_width == 0 {
+        return String::new();
+    }
+    let ellipsis_width = UnicodeWidthStr::width("…");
+    let mut out = String::new();
+    let mut used = 0usize;
+    for ch in text.chars() {
+        let w = UnicodeWidthStr::width(ch.to_string().as_str());
+        if used + w + ellipsis_width > max_width {
+            break;
+        }
+        out.push(ch);
+        used += w;
+    }
+    out.push('…');
     out
 }
 
@@ -466,8 +665,70 @@ mod tests {
             .iter()
             .map(|span| span.content.as_ref())
             .collect();
-        assert!(text.contains("tabs"));
+        assert!(text.contains(CHECK_ICON));
         assert!(text.contains("Alpha"));
+        assert!(text.contains(CLOSE_ICON));
+        assert!(text.contains(PLUS_ICON));
+    }
+
+    #[test]
+    fn tabs_layout_exposes_click_targets_and_bottom_cutout() {
+        let theme = Theme::by_name("default");
+        let state = TabsState {
+            version: 2,
+            cwd: "/tmp/ws".to_string(),
+            tabs: vec![
+                OpenTab {
+                    path: "/tmp/a.jsonl".to_string(),
+                    session_id: Some("aaaaaaaa".to_string()),
+                    name: Some("Alpha".to_string()),
+                    draft: None,
+                },
+                OpenTab {
+                    path: "/tmp/b.jsonl".to_string(),
+                    session_id: Some("bbbbbbbb".to_string()),
+                    name: Some("Beta".to_string()),
+                    draft: None,
+                },
+            ],
+            active_path: Some("/tmp/a.jsonl".to_string()),
+        };
+
+        let layout = tabs_layout(
+            &state,
+            &theme,
+            80,
+            Some("/tmp/a.jsonl"),
+            Some("aaaaaaaa"),
+            Some("Alpha"),
+        );
+        let top: String = layout
+            .top
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect();
+        let bottom: String = layout
+            .bottom
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect();
+
+        assert!(top.starts_with(&format!(
+            "{CHECK_ICON} Alpha {CLOSE_ICON} │ {CHECK_ICON} Beta {CLOSE_ICON} │ {PLUS_ICON}"
+        )));
+        assert!(bottom.starts_with("          └"));
+        assert!(layout.targets.iter().any(|target| {
+            target.kind == TabTargetKind::Tab && target.path.as_deref() == Some("/tmp/a.jsonl")
+        }));
+        assert!(layout.targets.iter().any(|target| {
+            target.kind == TabTargetKind::Close && target.path.as_deref() == Some("/tmp/a.jsonl")
+        }));
+        assert!(layout
+            .targets
+            .iter()
+            .any(|target| target.kind == TabTargetKind::NewTab));
     }
 
     #[test]

@@ -286,6 +286,8 @@ const LspServerConfig = Type.Object(
 		languageIdByExtension: Type.Optional(Type.Record(Type.String(), Type.String(), { description: "File extension → language ID mapping, e.g. {'.ts': 'typescript'}." })),
 		startupTimeoutMs: Type.Optional(Type.Number({ description: "Server startup timeout in ms.", minimum: 1000 })),
 		diagnosticsWaitMs: Type.Optional(Type.Number({ description: "Wait time for diagnostics after file change.", minimum: 0 })),
+		pullDiagnostics: Type.Optional(Type.Boolean({ description: "When false, skip textDocument/diagnostic pull requests and rely on published diagnostics. Useful for servers where pull diagnostics is slow or incomplete." })),
+		waitForPublishDiagnostics: Type.Optional(Type.Boolean({ description: "When false, do not wait for a fresh textDocument/publishDiagnostics notification after file change. diagnosticsWaitMs still bounds the wait when enabled." })),
 		initializationOptions: Type.Optional(Type.Unknown({ description: "LSP initialization options passed to the server." })),
 		settings: Type.Optional(Type.Unknown({ description: "LSP workspace/settings passed to the server." })),
 	},

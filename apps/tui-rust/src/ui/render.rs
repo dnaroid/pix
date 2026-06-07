@@ -1,12 +1,13 @@
 //! ratatui rendering for the conversation UI.
 //!
 //! Layout (top to bottom):
-//! - Status line (1 row): model / session id / streaming flag.
+//! - Session tabs (2 rows): tab buttons + bottom connector line.
 //! - Conversation (fills remaining space minus input). Lines come from
 //!   `Viewport::slice`, which uses the per-width layout cache so a resize
 //!   does not tear down work for the previous width.
 //! - Input box (multi-line aware). Height grows with the editor's
 //!   rendered line count, capped at half the screen (and at least 3 rows).
+//! - Status line (1 row): mirrors pix's bottom status text.
 //!
 //! The renderer takes an `&mut App` so it can:
 //! - Pull `&app.blocks` for the viewport,
@@ -27,7 +28,11 @@ use super::autocomplete::render_suggestions;
 use super::input_editor::RenderedInput;
 use super::theme::ThemeRole;
 use super::viewport::ViewportWidth;
-use super::ContextBar;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+
+const COMPACT_PROGRESS_BAR_WIDTH: usize = 5;
+const COMPACT_PROGRESS_BAR_EMPTY: char = ' ';
+const COMPACT_PROGRESS_BAR_PARTIALS: [char; 7] = ['▏', '▎', '▍', '▌', '▋', '▊', '▉'];
 
 /// Visual prefixes used by the input editor. The first row gets
 /// `first_prefix`; subsequent rows of the same prompt get
@@ -57,21 +62,19 @@ pub fn render(f: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),                  // status
-            Constraint::Length(1),                  // context bar
-            Constraint::Length(1),                  // sessions
+            Constraint::Length(2),                  // session tabs
             Constraint::Min(3),                     // conversation
             Constraint::Length(input_total_height), // input
+            Constraint::Length(1),                  // status
         ])
         .split(size);
 
-    render_status(f, app, chunks[0]);
-    ContextBar::from_app(app).render(f, chunks[1]);
-    render_session_tabs(f, app, chunks[2]);
-    render_conversation(f, app, chunks[3]);
-    render_toasts(f, app, chunks[3]);
-    render_input(f, app, chunks[4], rendered_input);
-    render_autocomplete_popup(f, app, size, chunks[4]);
+    render_session_tabs(f, app, chunks[0]);
+    render_conversation(f, app, chunks[1]);
+    render_toasts(f, app, chunks[1]);
+    render_input(f, app, chunks[2], rendered_input);
+    render_status(f, app, chunks[3]);
+    render_autocomplete_popup(f, app, size, chunks[2]);
     render_popup(f, app, size);
 }
 
@@ -130,12 +133,8 @@ fn render_popup(f: &mut Frame, app: &App, size: Rect) {
 }
 
 fn render_status(f: &mut Frame, app: &App, area: Rect) {
-    let line = Line::from(build_status_spans(app));
-    let para = Paragraph::new(line).style(
-        Style::default()
-            .bg(app.theme_cache.status_bg)
-            .add_modifier(Modifier::REVERSED),
-    );
+    let line = Line::from(build_status_spans(app, area.width as usize));
+    let para = Paragraph::new(line);
     f.render_widget(para, area);
 }
 
@@ -144,7 +143,7 @@ fn render_session_tabs(f: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    let line = crate::ui::tabs_state::tabs_line(
+    let layout = crate::ui::tabs_state::tabs_layout(
         &app.tabs,
         &app.theme_cache,
         area.width as usize,
@@ -152,33 +151,22 @@ fn render_session_tabs(f: &mut Frame, app: &App, area: Rect) {
         app.session_id.as_deref(),
         app.session_name.as_deref(),
     );
-    let para = Paragraph::new(line).style(Style::default().bg(app.theme_cache.status_bg));
+    let lines = if area.height > 1 {
+        vec![layout.top, layout.bottom]
+    } else {
+        vec![layout.top]
+    };
+    let para = Paragraph::new(lines).style(Style::default().bg(app.theme_cache.status_bg));
     f.render_widget(para, area);
 }
 
-pub(crate) fn build_status_spans(app: &App) -> Vec<Span<'static>> {
-    let model = match (&app.provider, &app.model) {
-        (Some(provider), Some(model)) => compact(&format!("{provider}/{model}"), 32),
-        (None, Some(model)) => compact(model, 32),
-        _ => "—".to_string(),
-    };
+pub(crate) fn build_status_spans(app: &App, width: usize) -> Vec<Span<'static>> {
+    let model = status_model_label(app);
     let cwd = Path::new(&app.cwd)
         .file_name()
         .and_then(|name| name.to_str())
         .filter(|name| !name.is_empty())
         .unwrap_or(app.cwd.as_str());
-    let cwd = compact(cwd, 20);
-    let session = app
-        .session_name
-        .as_deref()
-        .filter(|name| !name.trim().is_empty())
-        .map(|name| compact(name, 18))
-        .or_else(|| {
-            app.session_id
-                .as_deref()
-                .map(|id| id.chars().take(8).collect::<String>())
-        })
-        .unwrap_or_else(|| "(no session)".to_string());
     let thinking = app
         .config
         .default_model
@@ -187,53 +175,59 @@ pub(crate) fn build_status_spans(app: &App) -> Vec<Span<'static>> {
         .unwrap_or_else(|| "—".to_string());
     let token_pct = match (app.last_token_count, app.context_limit) {
         (Some(tokens), Some(limit)) if limit > 0 => {
-            format!(
-                "{}%",
-                ((tokens.saturating_mul(100) + (limit / 2)) / limit).min(100)
-            )
+            let pct = rounded_context_percent(tokens, limit);
+            format!("{pct:>2}%")
         }
-        _ => "—%".to_string(),
+        _ => "?%".to_string(),
     };
-    let dot = if app.is_streaming { "●" } else { "○" };
+    let context_percent = match (app.last_token_count, app.context_limit) {
+        (Some(tokens), Some(limit)) if limit > 0 => Some(rounded_context_percent(tokens, limit)),
+        _ => None,
+    };
+    let context_bar = context_percent.map(format_compact_progress_bar);
+    let base_status = format!("{model} 💡 {thinking} {token_pct}");
+    let include_context_bar = context_bar
+        .as_ref()
+        .is_some_and(|bar| status_display_width(&base_status, Some(bar), cwd) <= width);
+    let dot = "●";
     let dot_color = if app.is_streaming {
-        app.theme_cache.tool_completed
+        app.theme_cache.diag_warn
     } else {
         app.theme_cache.status_dim
     };
-    let bridge_status = compact(&app.bridge_status, 18);
-    let dim = app.theme_cache.style_for(ThemeRole::StatusDim);
+    let context_style = Style::default()
+        .fg(context_percent.map_or(app.theme_cache.status_dim, |pct| {
+            context_usage_color(app, pct)
+        }));
 
     let mut spans = vec![
         Span::styled(dot, Style::default().fg(dot_color)),
         Span::raw(" "),
-        Span::styled(bridge_status, dim),
-        Span::raw("  "),
-        Span::styled(cwd, app.theme_cache.style_for(ThemeRole::AssistantText)),
-        Span::raw("  "),
         Span::styled(model, app.theme_cache.style_for(ThemeRole::ModelAccent)),
         Span::raw(" "),
         Span::styled(
             format!("💡 {thinking}"),
-            app.theme_cache.style_for(ThemeRole::Heading3Plus),
+            thinking_level_style(app, &thinking),
         ),
         Span::raw(" "),
-        Span::styled(token_pct, app.theme_cache.style_for(ThemeRole::ModelAccent)),
-        Span::raw("  "),
-        Span::styled(session, app.theme_cache.style_for(ThemeRole::SessionAccent)),
+        Span::styled(token_pct, context_style),
     ];
 
-    if app.message_count.is_some() || app.tool_use_count > 0 {
-        spans.push(Span::raw("  "));
-        spans.push(Span::styled(
-            format!(
-                "{} msg · {} tool{}",
-                app.message_count.unwrap_or(0),
-                app.tool_use_count,
-                if app.tool_use_count == 1 { "" } else { "s" }
-            ),
-            dim,
-        ));
+    if include_context_bar {
+        if let Some(bar) = context_bar {
+            spans.push(Span::raw(" "));
+            spans.push(Span::styled(
+                bar,
+                context_style.bg(app.theme_cache.status_dim),
+            ));
+        }
     }
+
+    spans.push(Span::raw(" "));
+    spans.push(Span::styled(
+        compact(cwd, 24),
+        app.theme_cache.style_for(ThemeRole::SessionAccent),
+    ));
 
     if app.voice.status_widget_active() {
         spans.push(Span::raw("  "));
@@ -244,6 +238,75 @@ pub(crate) fn build_status_spans(app: &App) -> Vec<Span<'static>> {
     }
 
     spans
+}
+
+fn status_model_label(app: &App) -> String {
+    match (&app.provider, &app.model) {
+        (Some(provider), Some(model)) => compact(&format!("{provider}/{model}"), 40),
+        (None, Some(model)) => compact(model, 40),
+        _ => "no model".to_string(),
+    }
+}
+
+fn rounded_context_percent(tokens: u64, limit: u64) -> u64 {
+    ((tokens.saturating_mul(100) + (limit / 2)) / limit).min(100)
+}
+
+fn status_display_width(status: &str, context_bar: Option<&str>, workspace: &str) -> usize {
+    let details = if let Some(bar) = context_bar {
+        format!("● {status} {bar} {workspace}")
+    } else {
+        format!("● {status} {workspace}")
+    };
+    UnicodeWidthStr::width(details.as_str())
+}
+
+fn context_usage_color(app: &App, percent: u64) -> Color {
+    if percent <= 30 {
+        app.theme_cache.tool_completed
+    } else if percent <= 50 {
+        app.theme_cache.diag_warn
+    } else {
+        app.theme_cache.diag_error
+    }
+}
+
+fn thinking_level_style(app: &App, level: &str) -> Style {
+    let color = match level {
+        "off" => app.theme_cache.status_dim,
+        "minimal" => app.theme_cache.tool_completed,
+        "low" => app.theme_cache.model_accent,
+        "medium" => app.theme_cache.diag_warn,
+        "high" => app.theme_cache.diag_error,
+        "xhigh" => app.theme_cache.resolve_color_ref("thinkingXHigh"),
+        _ => app.theme_cache.heading3_plus,
+    };
+    Style::default().fg(color)
+}
+
+fn format_compact_progress_bar(percent: u64) -> String {
+    (0..COMPACT_PROGRESS_BAR_WIDTH)
+        .map(|index| progress_bar_cell(percent, index, COMPACT_PROGRESS_BAR_WIDTH))
+        .collect()
+}
+
+fn progress_bar_cell(percent: u64, index: usize, width: usize) -> char {
+    let fill = progress_bar_cell_fill(percent, index, width);
+    if fill >= 1.0 {
+        return '█';
+    }
+    if fill <= 0.0 {
+        return COMPACT_PROGRESS_BAR_EMPTY;
+    }
+    let partial_index = ((fill * COMPACT_PROGRESS_BAR_PARTIALS.len() as f64).ceil() as usize)
+        .saturating_sub(1)
+        .min(COMPACT_PROGRESS_BAR_PARTIALS.len() - 1);
+    COMPACT_PROGRESS_BAR_PARTIALS[partial_index]
+}
+
+fn progress_bar_cell_fill(percent: u64, index: usize, width: usize) -> f64 {
+    let cell_size = 100.0 / width.max(1) as f64;
+    (((percent.min(100) as f64) - index as f64 * cell_size) / cell_size).clamp(0.0, 1.0)
 }
 
 fn compact(text: &str, max_chars: usize) -> String {
@@ -257,21 +320,24 @@ fn compact(text: &str, max_chars: usize) -> String {
 }
 
 fn render_conversation(f: &mut Frame, app: &mut App, area: Rect) {
-    let inner_width_cells = area.width.saturating_sub(2) as usize; // borders
-    let body_height = area.height.saturating_sub(2) as usize; // borders
+    let inner_width_cells = area.width as usize;
+    let body_height = area.height as usize;
     let viewport_width = ViewportWidth(inner_width_cells);
 
     // Measure total lines and compute the visible slice via ScrollView.
-    let total = app.viewport.line_count(&app.blocks, viewport_width);
+    let total = app
+        .viewport
+        .line_count_with_config(&app.blocks, viewport_width, &app.config);
     let metrics = app.scroll.metrics(total, body_height);
 
     let theme = app.theme_cache;
-    let visible = app.viewport.slice(
+    let visible = app.viewport.slice_with_config(
         &app.blocks,
         viewport_width,
         metrics.start,
         body_height,
         &theme,
+        &app.config,
     );
 
     let visible_lines: Vec<Line<'static>> = visible.iter().map(|vl| vl.line.clone()).collect();
@@ -281,21 +347,53 @@ fn render_conversation(f: &mut Frame, app: &mut App, area: Rect) {
     // Cache for the input handler.
     app.record_metrics(total, body_height);
 
-    let title = format!(" Conversation ({} lines) ", total);
-    let list_block = RBlock::default()
-        .borders(Borders::ALL)
-        .border_style(app.theme_cache.style_for(ThemeRole::StatusDim))
-        .title(Span::styled(
-            title,
-            app.theme_cache.style_for(ThemeRole::StatusDim),
-        ));
-
     let items: Vec<ListItem<'static>> = visible
         .into_iter()
-        .map(|vl| ListItem::new(vl.line))
+        .map(|vl| ListItem::new(normalize_and_fill_line(vl.line, inner_width_cells)))
         .collect();
-    let list = List::new(items).block(list_block);
-    f.render_widget(list, area);
+    f.render_widget(Clear, area);
+    f.render_widget(List::new(items), area);
+}
+
+fn normalize_and_fill_line(line: Line<'static>, width: usize) -> Line<'static> {
+    let width = width.max(1);
+    let mut spans = Vec::with_capacity(line.spans.len().saturating_add(1));
+    let mut used = 0usize;
+
+    for span in line.spans {
+        if used >= width {
+            break;
+        }
+        let mut text = String::new();
+        for ch in span.content.chars() {
+            let replacements: Vec<char> = match ch {
+                '\t' => vec![' ', ' ', ' ', ' '],
+                '\r' | '\n' => Vec::new(),
+                c if c.is_control() => vec![' '],
+                c => vec![c],
+            };
+            for replacement in replacements {
+                let char_width = UnicodeWidthChar::width(replacement).unwrap_or(0);
+                if used + char_width > width {
+                    break;
+                }
+                text.push(replacement);
+                used += char_width;
+            }
+            if used >= width {
+                break;
+            }
+        }
+        if !text.is_empty() {
+            spans.push(Span::styled(text, span.style));
+        }
+    }
+
+    if used < width {
+        spans.push(Span::raw(" ".repeat(width - used)));
+    }
+
+    Line::from(spans)
 }
 
 fn render_toasts(f: &mut Frame, app: &App, conversation_area: Rect) {
@@ -494,7 +592,8 @@ mod tests {
     fn render_status_text(app: &App, width: u16) -> String {
         let area = Rect::new(0, 0, width, 1);
         let mut buffer = Buffer::empty(area);
-        Paragraph::new(Line::from(build_status_spans(app))).render(area, &mut buffer);
+        Paragraph::new(Line::from(build_status_spans(app, width as usize)))
+            .render(area, &mut buffer);
         buffer
             .content()
             .iter()
@@ -519,13 +618,14 @@ mod tests {
         let text = render_status_text(&app, 200);
 
         assert!(text.contains("●"));
-        assert!(text.contains("ready"));
         assert!(text.contains("example-workspace"));
         assert!(text.contains("anthropic/claude-sonnet"));
         assert!(text.contains("medium"));
         assert!(text.contains("25%"));
-        assert!(text.contains("abcdef12"));
-        assert!(text.contains("12 msg · 3 tools"));
+        assert!(text.contains("█▎"));
+        assert!(!text.contains("ready"));
+        assert!(!text.contains("abcdef12"));
+        assert!(!text.contains("12 msg · 3 tools"));
     }
 
     #[test]
@@ -540,11 +640,29 @@ mod tests {
 
         let text = render_status_text(&app, 200);
 
-        assert!(text.contains("○"));
-        assert!(text.contains("—"));
-        assert!(text.contains("(no session)"));
-        assert!(text.contains("—"));
-        assert!(text.contains("—%"));
+        assert!(text.contains("●"));
+        assert!(text.contains("no model"));
+        assert!(text.contains("💡"));
+        assert!(text.contains("?%"));
+        assert!(!text.contains("(no session)"));
+    }
+
+    #[test]
+    fn status_omits_context_bar_when_too_narrow() {
+        let mut app = App::new("/tmp/example-workspace".to_string());
+        app.provider = Some("anthropic".to_string());
+        app.model = Some("claude-sonnet".to_string());
+        app.config.default_model.thinking = Some(crate::config::ThinkingLevel::High);
+        app.last_token_count = Some(5_000);
+        app.context_limit = Some(10_000);
+
+        let text = build_status_spans(&app, 32)
+            .into_iter()
+            .map(|span| span.content.into_owned())
+            .collect::<String>();
+
+        assert!(text.contains("50%"));
+        assert!(!text.contains("██"));
     }
 
     #[test]
@@ -594,5 +712,41 @@ mod tests {
         let title = build_input_title(&app);
 
         assert!(title.contains("🎙 drafting the next sentence"));
+    }
+
+    #[test]
+    fn conversation_line_fill_pads_short_rows() {
+        let line = normalize_and_fill_line(Line::from(Span::raw("abc")), 8);
+        let text = line
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert_eq!(text, "abc     ");
+    }
+
+    #[test]
+    fn conversation_line_fill_expands_tabs_and_drops_controls() {
+        let line = normalize_and_fill_line(Line::from(Span::raw("a\tb\rc\x1bd")), 12);
+        let text = line
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert_eq!(text, "a    bc d   ");
+    }
+
+    #[test]
+    fn conversation_line_fill_clips_to_display_width() {
+        let line = normalize_and_fill_line(Line::from(Span::raw("abcdef")), 4);
+        let text = line
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert_eq!(text, "abcd");
     }
 }

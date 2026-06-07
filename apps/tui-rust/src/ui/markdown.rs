@@ -16,7 +16,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
-use super::links::{apply_osc8_to_spans, envelope_osc8, extract_file_paths};
+use super::links::extract_file_paths;
 use super::syntax;
 use super::theme::{Theme, ThemeRole};
 
@@ -353,9 +353,47 @@ fn sanitize(text: &str) -> String {
     // Mirror TS `sanitizeMarkdownText`:
     // - drop `\r`
     // - replace bare ESC with the visible escape glyph
+    // - hide markdown/DCP reference metadata lines injected by the harness
     // - leave anything else alone (icon substitution and zero-width
     //   joins are M1 concerns).
-    text.replace('\r', "").replace('\x1b', "␛")
+    text.lines()
+        .filter(|line| !is_hidden_markdown_metadata_line(line))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .replace('\r', "")
+        .replace('\x1b', "␛")
+}
+
+fn is_hidden_markdown_metadata_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    let indent = line.len().saturating_sub(trimmed.len());
+    if indent > 3 {
+        return false;
+    }
+    is_markdown_reference_definition(trimmed) || is_streaming_dcp_metadata_prefix(trimmed)
+}
+
+fn is_markdown_reference_definition(line: &str) -> bool {
+    let Some(rest) = line.strip_prefix('[') else {
+        return false;
+    };
+    let Some(close) = rest.find("]:") else {
+        return false;
+    };
+    let after = rest[close + 2..].trim_start_matches([' ', '\t']);
+    !after.is_empty() && !after.chars().next().is_some_and(char::is_whitespace)
+}
+
+fn is_streaming_dcp_metadata_prefix(line: &str) -> bool {
+    is_dcp_reference_prefix(line, "[dcp-id]: # (m")
+        || is_dcp_reference_prefix(line, "[dcp-block-id]: # (b")
+}
+
+fn is_dcp_reference_prefix(line: &str, marker_prefix: &str) -> bool {
+    marker_prefix.starts_with(line)
+        || line
+            .strip_prefix(marker_prefix)
+            .is_some_and(|suffix| suffix.chars().all(|ch| ch.is_ascii_digit()))
 }
 
 // Trait helper for HR placement (can't appear inside a paragraph).
@@ -896,30 +934,23 @@ fn wrap_inline(inline: &[InlineToken], width: usize, theme: &Theme) -> Vec<Vec<S
     let mut pieces: Vec<Piece> = Vec::new();
     for tok in inline {
         let style = inline_style_for(&tok.style, theme);
-        if let InlineStyle::Link { url } = &tok.style {
-            if let Some(url) = file_link_url(url) {
-                pieces.push(Piece {
-                    style,
-                    text: envelope_osc8(&url, &tok.text),
-                    is_ws: tok.text.chars().all(|c| c.is_whitespace()),
-                    display_width: UnicodeWidthStr::width(tok.text.as_str()),
-                    is_link: true,
-                });
-                continue;
-            }
+        if matches!(tok.style, InlineStyle::Link { .. }) {
+            pieces.push(Piece {
+                style,
+                text: tok.text.clone(),
+                is_ws: tok.text.chars().all(|c| c.is_whitespace()),
+                display_width: UnicodeWidthStr::width(tok.text.as_str()),
+                is_link: true,
+            });
+            continue;
         }
         for w in split_words(&tok.text) {
             let display_width = UnicodeWidthStr::width(w.as_str());
             let spans = extract_file_paths(&w, None);
-            let text = if spans.is_empty() {
-                w
-            } else {
-                apply_osc8_to_spans(&w, &spans)
-            };
             let is_link = !spans.is_empty();
             pieces.push(Piece {
                 style,
-                text,
+                text: w,
                 is_ws: false,
                 display_width,
                 is_link,
@@ -1121,17 +1152,6 @@ fn inline_style_for(style: &InlineStyle, theme: &Theme) -> Style {
     }
 }
 
-fn file_link_url(url: &str) -> Option<String> {
-    if url.starts_with("file://") {
-        Some(url.to_string())
-    } else {
-        extract_file_paths(url, None)
-            .into_iter()
-            .next()
-            .map(|span| span.url)
-    }
-}
-
 fn flatten_with_style<I>(tokens: I, base: Style, theme: &Theme) -> Vec<Span<'static>>
 where
     I: IntoIterator<Item = InlineToken>,
@@ -1318,8 +1338,8 @@ mod tests {
         let has_code = lines[0]
             .spans
             .iter()
-            .any(|s| s.style.fg == Some(Color::LightYellow));
-        assert!(has_code, "expected a light-yellow code span");
+            .any(|s| s.style.fg == Some(Theme::default().code_inline));
+        assert!(has_code, "expected a theme code span");
     }
 
     #[test]
@@ -1343,11 +1363,11 @@ mod tests {
     }
 
     #[test]
-    fn plain_file_paths_are_wrapped_as_links() {
+    fn plain_file_paths_render_without_terminal_hyperlink_sequences() {
         let lines = render_markdown("See src/main.rs for details.", 80);
         let flat: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
-        assert!(flat.contains("\x1b]8;;file://"), "got {flat:?}");
         assert!(flat.contains("src/main.rs"));
+        assert!(!flat.contains("\x1b]8;;"), "got {flat:?}");
     }
 
     #[test]
@@ -1387,6 +1407,29 @@ mod tests {
             .map(|s| s.content.as_ref())
             .collect::<String>();
         assert!(!flat.contains('\r'));
+    }
+
+    #[test]
+    fn hides_dcp_and_markdown_reference_metadata_lines() {
+        let text =
+            "[dcp-id]: # (m154)\nvisible text\n[dcp-block-id]: # (b3)\n[ref]: https://example.com";
+        let lines = render_markdown(text, 80);
+        let flat: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter())
+            .map(|s| s.content.as_ref())
+            .collect::<String>();
+
+        assert!(flat.contains("visible text"), "got {flat:?}");
+        assert!(!flat.contains("dcp-id"), "got {flat:?}");
+        assert!(!flat.contains("dcp-block-id"), "got {flat:?}");
+        assert!(!flat.contains("https://example.com"), "got {flat:?}");
+    }
+
+    #[test]
+    fn hides_streaming_partial_dcp_metadata_prefix() {
+        let lines = render_markdown("[dcp-id]: # (m", 80);
+        assert!(lines.is_empty(), "got {lines:?}");
     }
 
     #[test]

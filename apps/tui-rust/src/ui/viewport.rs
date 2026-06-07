@@ -30,8 +30,11 @@
 
 use std::collections::HashMap;
 
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
+use unicode_width::UnicodeWidthStr;
+
+use crate::config::PixConfig;
 
 use super::app::{block_version, Block, DiagKind};
 use super::theme::{Theme, ThemeRole};
@@ -57,6 +60,7 @@ pub struct Viewport {
 
 #[derive(Debug)]
 struct Layout {
+    config: PixConfig,
     /// Total visual lines across all blocks (including inter-block gaps).
     total: usize,
     /// `offsets[i]` = sum of line counts for blocks `[0, i)` including gaps.
@@ -74,6 +78,7 @@ struct RenderedBlock {
     /// (`App::block_version`); mismatch forces a re-render.
     version: u64,
     theme: Theme,
+    config: PixConfig,
     lines: Vec<VisualLine>,
 }
 
@@ -95,7 +100,16 @@ impl Viewport {
     /// Total visual line count for `blocks` at the given width
     /// (including inter-block gap rows).
     pub fn line_count(&mut self, blocks: &[Block], width: ViewportWidth) -> usize {
-        self.ensure_layout(blocks, width).total
+        self.line_count_with_config(blocks, width, &PixConfig::default())
+    }
+
+    pub fn line_count_with_config(
+        &mut self,
+        blocks: &[Block],
+        width: ViewportWidth,
+        config: &PixConfig,
+    ) -> usize {
+        self.ensure_layout(blocks, width, config).total
     }
 
     /// Return the source block index for an absolute visual line offset.
@@ -123,10 +137,22 @@ impl Viewport {
         count: usize,
         theme: &Theme,
     ) -> Vec<VisualLine> {
+        self.slice_with_config(blocks, width, start, count, theme, &PixConfig::default())
+    }
+
+    pub fn slice_with_config(
+        &mut self,
+        blocks: &[Block],
+        width: ViewportWidth,
+        start: usize,
+        count: usize,
+        theme: &Theme,
+        config: &PixConfig,
+    ) -> Vec<VisualLine> {
         if count == 0 {
             return Vec::new();
         }
-        let total = self.ensure_layout(blocks, width).total;
+        let total = self.ensure_layout(blocks, width, config).total;
 
         if start >= total {
             return Vec::new();
@@ -160,26 +186,17 @@ impl Viewport {
                 break;
             }
             // Ensure this block's lines are rendered.
-            self.ensure_block_rendered(blocks, width, block_idx, theme);
-
-            let rendered = self
-                .layouts
-                .get(&width)
-                .expect("layout just built")
-                .rendered
-                .get(&block_idx)
-                .expect("rendered just ensured")
-                .clone();
+            self.ensure_block_rendered(blocks, width, block_idx, theme, config);
 
             let local_start = start.saturating_sub(block_start);
+            let layout = self.layouts.get(&width).expect("layout just built");
+            let rendered = layout
+                .rendered
+                .get(&block_idx)
+                .expect("rendered just ensured");
             let local_end = end.saturating_sub(block_start).min(rendered.lines.len());
-            for line in rendered
-                .lines
-                .into_iter()
-                .skip(local_start)
-                .take(local_end - local_start)
-            {
-                out.push(line);
+            if local_start < local_end {
+                out.extend(rendered.lines[local_start..local_end].iter().cloned());
             }
             block_idx += 1;
         }
@@ -187,27 +204,36 @@ impl Viewport {
         out
     }
 
-    fn ensure_layout(&mut self, blocks: &[Block], width: ViewportWidth) -> &mut Layout {
+    fn ensure_layout(
+        &mut self,
+        blocks: &[Block],
+        width: ViewportWidth,
+        config: &PixConfig,
+    ) -> &mut Layout {
         let needs_rebuild = self
             .layouts
             .get(&width)
-            .map(|l| l.line_counts.len() != blocks.len())
+            .map(|l| l.line_counts.len() != blocks.len() || l.config != *config)
             .unwrap_or(true);
         if needs_rebuild {
-            self.build_layout(blocks, width);
+            self.build_layout(blocks, width, config);
         }
         self.layouts.get_mut(&width).expect("layout just built")
     }
 
-    fn build_layout(&mut self, blocks: &[Block], width: ViewportWidth) {
+    fn build_layout(&mut self, blocks: &[Block], width: ViewportWidth, config: &PixConfig) {
         let content_width = content_width_for(width);
+        let visible_counts: Vec<usize> = blocks
+            .iter()
+            .map(|block| block_line_count(block, content_width, config))
+            .collect();
         let mut offsets = Vec::with_capacity(blocks.len() + 1);
         let mut line_counts = Vec::with_capacity(blocks.len());
         let mut total = 0usize;
         offsets.push(0);
-        for (idx, block) in blocks.iter().enumerate() {
-            let count = block_line_count(block, content_width)
-                + if has_trailing_gap(idx, blocks.len()) {
+        for (idx, visible_count) in visible_counts.iter().copied().enumerate() {
+            let count = visible_count
+                + if has_trailing_gap(idx, &visible_counts) {
                     1
                 } else {
                     0
@@ -217,6 +243,7 @@ impl Viewport {
             offsets.push(total);
         }
         let layout = Layout {
+            config: config.clone(),
             total,
             offsets,
             line_counts,
@@ -231,22 +258,23 @@ impl Viewport {
         width: ViewportWidth,
         idx: usize,
         theme: &Theme,
+        config: &PixConfig,
     ) {
         let version = block_version(blocks, idx);
         let needs_render = match self.layouts.get(&width).and_then(|l| l.rendered.get(&idx)) {
-            Some(r) => r.version != version || r.theme != *theme,
+            Some(r) => r.version != version || r.theme != *theme || r.config != *config,
             None => true,
         };
         if !needs_render {
             return;
         }
         let content_width = content_width_for(width);
-        let block = match blocks.get(idx).cloned() {
+        let block = match blocks.get(idx) {
             Some(b) => b,
             None => return,
         };
-        let gap = has_trailing_gap(idx, blocks.len());
-        let lines = render_block(&block, idx, content_width, gap, theme);
+        let gap = has_visible_trailing_gap(blocks, idx, content_width, config);
+        let lines = render_block(block, idx, content_width, gap, theme, config);
         let layout = self
             .layouts
             .get_mut(&width)
@@ -256,6 +284,7 @@ impl Viewport {
             RenderedBlock {
                 version,
                 theme: *theme,
+                config: config.clone(),
                 lines,
             },
         );
@@ -288,18 +317,41 @@ fn find_block_for_offset(offsets: &[usize], target: usize) -> Option<usize> {
 }
 
 fn content_width_for(width: ViewportWidth) -> usize {
-    // Conversation widget has a 1-cell border on each side. We also reserve
-    // a 2-cell left gutter for the icon column (tool statuses, raw marker).
-    width.0.saturating_sub(4).max(1)
+    // Conversation is borderless; blocks own their own local padding.
+    width.0.max(1)
 }
 
 /// Should block N be followed by a blank separator row? Mirrors
 /// `ConversationViewport.gapAfterEntry` with `superCompactTools = false`.
-fn has_trailing_gap(idx: usize, total_blocks: usize) -> bool {
-    idx + 1 < total_blocks
+fn has_trailing_gap(idx: usize, visible_counts: &[usize]) -> bool {
+    visible_counts.get(idx).copied().unwrap_or(0) > 0
+        && visible_counts
+            .get(idx + 1..)
+            .is_some_and(|rest| rest.iter().any(|count| *count > 0))
 }
 
-fn block_line_count(block: &Block, width: usize) -> usize {
+fn has_visible_trailing_gap(
+    blocks: &[Block],
+    idx: usize,
+    width: usize,
+    config: &PixConfig,
+) -> bool {
+    if blocks
+        .get(idx)
+        .map(|block| block_line_count(block, width, config))
+        .unwrap_or(0)
+        == 0
+    {
+        return false;
+    }
+
+    blocks.get(idx + 1..).is_some_and(|rest| {
+        rest.iter()
+            .any(|block| block_line_count(block, width, config) > 0)
+    })
+}
+
+fn block_line_count(block: &Block, width: usize, config: &PixConfig) -> usize {
     match block {
         Block::User { text } => {
             // Header line ("you: <text>") wraps to `width`.
@@ -314,9 +366,25 @@ fn block_line_count(block: &Block, width: usize) -> usize {
                 markdown::markdown_line_count(text, width).max(1)
             }
         }
-        Block::ToolCall { name, args, .. } => {
-            tool_renderers::tool_call_line_count(name, args, width)
-        }
+        Block::Thinking { .. } => 1,
+        Block::ToolCall {
+            name,
+            args,
+            status,
+            result_summary,
+            result_ok,
+            expanded,
+            ..
+        } => tool_renderers::tool_entry_line_count_with_config_and_expansion(
+            name,
+            args,
+            *status,
+            result_summary.as_deref(),
+            *result_ok,
+            *expanded,
+            width,
+            config,
+        ),
         Block::ToolResult {
             call_id,
             summary,
@@ -335,9 +403,10 @@ fn render_block(
     width: usize,
     gap: bool,
     theme: &Theme,
+    config: &PixConfig,
 ) -> Vec<VisualLine> {
     let mut out: Vec<VisualLine> = Vec::new();
-    append_block_lines(block, idx, width, &mut out, theme);
+    append_block_lines(block, idx, width, &mut out, theme, config);
     if gap {
         out.push(VisualLine {
             line: Line::raw(""),
@@ -353,27 +422,20 @@ fn append_block_lines(
     width: usize,
     out: &mut Vec<VisualLine>,
     theme: &Theme,
+    config: &PixConfig,
 ) {
     match block {
         Block::User { text } => {
-            let body_width = width.saturating_sub(5).max(1);
+            let body_width = width.saturating_sub(2).max(1);
             let lines = wrap::wrap_text(text, body_width);
-            for (i, line) in lines.into_iter().enumerate() {
-                let mut spans = Vec::with_capacity(3);
-                if i == 0 {
-                    spans.push(Span::styled(
-                        "you",
-                        Style::default()
-                            .fg(theme.list_marker)
-                            .add_modifier(Modifier::BOLD),
-                    ));
-                    spans.push(Span::raw(": "));
-                } else {
-                    spans.push(Span::raw("     "));
-                }
-                spans.push(Span::styled(line, theme.style_for(ThemeRole::UserText)));
+            for line in lines {
+                let used = UnicodeWidthStr::width(line.as_str()).min(body_width);
+                let padding = " ".repeat(body_width.saturating_sub(used));
+                let style = theme
+                    .style_for(ThemeRole::UserText)
+                    .bg(theme.user_message_background);
                 out.push(VisualLine {
-                    line: Line::from(spans),
+                    line: Line::from(Span::styled(format!(" {line}{padding} "), style)),
                     source_idx: Some(idx),
                 });
             }
@@ -381,33 +443,15 @@ fn append_block_lines(
         Block::Assistant {
             text,
             done,
-            provider,
-            model,
+            provider: _,
+            model: _,
         } => {
-            let header = vec![
-                Span::styled(
-                    "assistant",
-                    Style::default()
-                        .fg(theme.tool_completed)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(": "),
-                Span::styled(
-                    format!(
-                        "({}{}) ",
-                        provider.clone().unwrap_or_default(),
-                        model.clone().map(|m| format!("/{m}")).unwrap_or_default(),
-                    ),
-                    theme.style_for(ThemeRole::StatusDim),
-                ),
-                Span::styled(
-                    if *done { "" } else { "…" },
-                    theme.style_for(ThemeRole::ToolRunning),
-                ),
-            ];
             if text.is_empty() {
                 out.push(VisualLine {
-                    line: Line::from(header),
+                    line: Line::from(Span::styled(
+                        if *done { "" } else { "…" },
+                        theme.style_for(ThemeRole::ToolRunning),
+                    )),
                     source_idx: Some(idx),
                 });
                 return;
@@ -415,23 +459,22 @@ fn append_block_lines(
             let md_lines = markdown::render_markdown_with_theme(text, width, theme);
             if md_lines.is_empty() {
                 out.push(VisualLine {
-                    line: Line::from(header),
+                    line: Line::raw(""),
                     source_idx: Some(idx),
                 });
                 return;
             }
-            // First visual line carries the assistant header.
-            let mut iter = md_lines.into_iter();
-            let first = iter.next().unwrap();
-            let mut spans = header.clone();
-            // Note: ratatui Line.spans must have content whose first span
-            // may be empty; we just append the existing spans.
-            spans.extend(first.spans);
-            out.push(VisualLine {
-                line: Line::from(spans),
-                source_idx: Some(idx),
-            });
-            for line in iter {
+            for line in md_lines {
+                out.push(VisualLine {
+                    line,
+                    source_idx: Some(idx),
+                });
+            }
+        }
+        Block::Thinking { done, .. } => {
+            for line in
+                tool_renderers::render_thinking_entry_with_config(*done, width, theme, config)
+            {
                 out.push(VisualLine {
                     line,
                     source_idx: Some(idx),
@@ -439,11 +482,25 @@ fn append_block_lines(
             }
         }
         Block::ToolCall {
-            name, args, status, ..
+            name,
+            args,
+            status,
+            result_summary,
+            result_ok,
+            expanded,
+            ..
         } => {
-            for line in
-                tool_renderers::render_tool_call_with_theme(name, args, *status, width, theme)
-            {
+            for line in tool_renderers::render_tool_entry_with_config_and_expansion(
+                name,
+                args,
+                *status,
+                result_summary.as_deref(),
+                *result_ok,
+                *expanded,
+                width,
+                theme,
+                config,
+            ) {
                 out.push(VisualLine {
                     line,
                     source_idx: Some(idx),
@@ -497,6 +554,9 @@ fn append_block_lines(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+
+    use crate::ui::app::ToolStatus;
 
     fn blocks_of(blocks: Vec<Block>) -> Vec<Block> {
         blocks
@@ -504,6 +564,14 @@ mod tests {
 
     fn theme() -> Theme {
         Theme::default()
+    }
+
+    fn line_text(line: &VisualLine) -> String {
+        line.line
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect()
     }
 
     #[test]
@@ -514,11 +582,29 @@ mod tests {
     }
 
     #[test]
-    fn user_block_counts_prefix() {
+    fn user_block_counts_padded_bubble() {
         let blocks = blocks_of(vec![Block::User { text: "abc".into() }]);
         let mut v = Viewport::new();
-        // Width 80: content_width=76, prefix=5, body=71. "abc" fits.
+        // Width 80: borderless content_width=80, padded user bubble body=78.
         assert_eq!(v.line_count(&blocks, ViewportWidth(80)), 1);
+    }
+
+    #[test]
+    fn user_block_renders_without_author_prefix() {
+        let blocks = blocks_of(vec![Block::User {
+            text: "hello".into(),
+        }]);
+        let mut v = Viewport::new();
+        let lines = v.slice(&blocks, ViewportWidth(24), 0, 1, &theme());
+        let text: String = lines[0]
+            .line
+            .spans
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect();
+        assert!(text.starts_with(' '), "expected left padding, got {text:?}");
+        assert!(text.contains("hello"), "got {text:?}");
+        assert!(!text.contains("you:"), "got {text:?}");
     }
 
     #[test]
@@ -546,6 +632,91 @@ mod tests {
         let mut v = Viewport::new();
         // 1 line + 1 gap + 1 line = 3.
         assert_eq!(v.line_count(&blocks, ViewportWidth(80)), 3);
+    }
+
+    #[test]
+    fn consecutive_tool_blocks_have_at_most_one_blank_gap() {
+        let blocks = blocks_of(vec![
+            Block::ToolCall {
+                call_id: "call-1".into(),
+                name: "shell".into(),
+                args: json!({"command": "echo one"}),
+                status: ToolStatus::Completed,
+                result_summary: None,
+                result_ok: Some(true),
+                expanded: false,
+            },
+            Block::ToolCall {
+                call_id: "call-2".into(),
+                name: "shell".into(),
+                args: json!({"command": "echo two"}),
+                status: ToolStatus::Completed,
+                result_summary: None,
+                result_ok: Some(true),
+                expanded: false,
+            },
+        ]);
+        let mut v = Viewport::new();
+        let total = v.line_count(&blocks, ViewportWidth(80));
+        let lines = v.slice(&blocks, ViewportWidth(80), 0, total, &theme());
+        let texts: Vec<String> = lines.iter().map(line_text).collect();
+
+        assert_eq!(texts.len(), 3, "got {texts:?}");
+        assert_eq!(
+            texts.iter().filter(|line| line.is_empty()).count(),
+            1,
+            "got {texts:?}"
+        );
+        assert!(texts[0].contains("shell echo one"), "got {texts:?}");
+        assert!(texts[2].contains("shell echo two"), "got {texts:?}");
+    }
+
+    #[test]
+    fn hidden_tool_between_tools_does_not_add_extra_blank_gap() {
+        let blocks = blocks_of(vec![
+            Block::ToolCall {
+                call_id: "call-1".into(),
+                name: "shell".into(),
+                args: json!({"command": "echo one"}),
+                status: ToolStatus::Completed,
+                result_summary: None,
+                result_ok: Some(true),
+                expanded: false,
+            },
+            Block::ToolCall {
+                call_id: "todo-1".into(),
+                name: "todo".into(),
+                args: json!({"action": "create", "subject": "hidden"}),
+                status: ToolStatus::Completed,
+                result_summary: None,
+                result_ok: Some(true),
+                expanded: false,
+            },
+            Block::ToolCall {
+                call_id: "call-2".into(),
+                name: "shell".into(),
+                args: json!({"command": "echo two"}),
+                status: ToolStatus::Completed,
+                result_summary: None,
+                result_ok: Some(true),
+                expanded: false,
+            },
+        ]);
+        let mut v = Viewport::new();
+        let total = v.line_count(&blocks, ViewportWidth(80));
+        let lines = v.slice(&blocks, ViewportWidth(80), 0, total, &theme());
+        let texts: Vec<String> = lines.iter().map(line_text).collect();
+
+        assert_eq!(texts.len(), 3, "got {texts:?}");
+        assert_eq!(
+            texts.iter().filter(|line| line.is_empty()).count(),
+            1,
+            "got {texts:?}"
+        );
+        assert!(
+            !texts.iter().any(|line| line.contains("todo")),
+            "got {texts:?}"
+        );
     }
 
     #[test]
@@ -653,16 +824,55 @@ mod tests {
         );
 
         let lines = v.slice(&blocks, ViewportWidth(80), 0, total, &theme());
-        // First visual line carries the "assistant" header.
+        // Assistant text is rendered directly, without the legacy author header.
         let first: String = lines[0]
             .line
             .spans
             .iter()
             .map(|s| s.content.as_ref())
             .collect();
-        assert!(first.contains("assistant"), "got {first:?}");
-        // And contains the heading body.
+        assert!(!first.contains("assistant"), "got {first:?}");
         assert!(first.contains("Heading"), "got {first:?}");
+    }
+
+    #[test]
+    fn assistant_hides_dcp_metadata_markers() {
+        let blocks = blocks_of(vec![Block::Assistant {
+            text: "[dcp-id]: # (m154)\nvisible\n[dcp-block-id]: # (b3)".into(),
+            done: true,
+            provider: None,
+            model: None,
+        }]);
+        let mut v = Viewport::new();
+        let lines = v.slice(&blocks, ViewportWidth(80), 0, 5, &theme());
+        let flat: String = lines
+            .iter()
+            .flat_map(|line| line.line.spans.iter())
+            .map(|span| span.content.as_ref())
+            .collect();
+
+        assert!(flat.contains("visible"), "got {flat:?}");
+        assert!(!flat.contains("dcp-id"), "got {flat:?}");
+        assert!(!flat.contains("dcp-block-id"), "got {flat:?}");
+    }
+
+    #[test]
+    fn thinking_uses_tool_header_layout() {
+        let blocks = blocks_of(vec![Block::Thinking {
+            text: "private notes".into(),
+            done: true,
+        }]);
+        let mut v = Viewport::new();
+        let lines = v.slice(&blocks, ViewportWidth(80), 0, 1, &theme());
+        let text: String = lines[0]
+            .line
+            .spans
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect();
+
+        assert!(text.contains("thinking"), "got {text:?}");
+        assert!(!text.starts_with(' '), "got {text:?}");
     }
 
     #[test]

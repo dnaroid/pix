@@ -36,11 +36,8 @@ export async function appendLspDiagnosticsToMutationResult<T extends LspEnrichab
     if (files.length === 0) return options.result;
 
     const manager = getGlobalLspManager();
-    const summaries: string[] = [];
-    for (const file of files) {
-      const summary = await manager.updateDiagnosticsForFile(options.ctx, file);
-      if (summary.trim()) summaries.push(summary);
-    }
+    const summaries = (await Promise.all(files.map((file) => manager.updateDiagnosticsForFile(options.ctx, file))))
+      .filter((summary) => summary.trim());
 
     const summary = summaries.join("\n\n");
     if (!summary.trim()) return options.result;

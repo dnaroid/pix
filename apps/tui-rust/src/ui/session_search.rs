@@ -308,7 +308,9 @@ fn snippet_spans(snippet: &str, theme: &Theme, focused: bool) -> Vec<Span<'stati
 
 fn searchable_text(block: &Block) -> Option<String> {
     match block {
-        Block::User { text } | Block::Assistant { text, .. } => Some(text.clone()),
+        Block::User { text } | Block::Assistant { text, .. } | Block::Thinking { text, .. } => {
+            Some(text.clone())
+        }
         Block::ToolCall { name, args, .. } => Some(format!("{} {}", name, compact_json(args))),
         Block::ToolResult { summary, .. } => Some(summary.clone()),
         Block::RawEvent { .. } | Block::Diag { .. } => None,
@@ -429,6 +431,9 @@ mod tests {
             name: "read".to_string(),
             args: json!({"path": "src/main.rs"}),
             status: ToolStatus::Completed,
+            result_summary: None,
+            result_ok: None,
+            expanded: false,
         });
         app.blocks.push(Block::ToolResult {
             call_id: "1".to_string(),

@@ -862,6 +862,14 @@
                 "description": "Wait time for diagnostics after file change.",
                 "minimum": 0
               },
+              "pullDiagnostics": {
+                "type": "boolean",
+                "description": "When false, skip textDocument/diagnostic pull requests and rely on published diagnostics. Useful for servers where pull diagnostics is slow or incomplete."
+              },
+              "waitForPublishDiagnostics": {
+                "type": "boolean",
+                "description": "When false, do not wait for a fresh textDocument/publishDiagnostics notification after file change. diagnosticsWaitMs still bounds the wait when enabled."
+              },
               "initializationOptions": {
                 "description": "LSP initialization options passed to the server."
               },

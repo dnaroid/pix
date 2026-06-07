@@ -30,6 +30,8 @@ export interface LspServerConfig extends MatchableConfig {
   languageIdByExtension?: Record<string, string>;
   startupTimeoutMs?: number;
   diagnosticsWaitMs?: number;
+  pullDiagnostics?: boolean;
+  waitForPublishDiagnostics?: boolean;
   initializationOptions?: unknown;
   settings?: unknown;
 }

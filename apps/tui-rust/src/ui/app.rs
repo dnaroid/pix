@@ -9,7 +9,7 @@
 //! `Viewport`. Both are owned by `App` and exposed for the renderer and
 //! the input handler.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -48,12 +48,17 @@ pub enum Block {
         provider: Option<String>,
         model: Option<String>,
     },
+    /// Collapsed reasoning/thinking block from historical assistant content.
+    Thinking { text: String, done: bool },
     /// A tool invocation: name, raw args, running state.
     ToolCall {
         call_id: String,
         name: String,
         args: Value,
         status: ToolStatus,
+        result_summary: Option<String>,
+        result_ok: Option<bool>,
+        expanded: bool,
     },
     /// A tool result paired with the call above (matched by call_id).
     ToolResult {
@@ -123,6 +128,7 @@ pub struct App {
 
     pub blocks: Vec<Block>,
     pub call_index: CallIndex,
+    pub history_has_older: bool,
 
     /// Multi-line input editor for the prompt area.
     pub input: InputEditor,
@@ -184,6 +190,7 @@ pub struct TabRuntimeSnapshot {
     pub last_error: Option<String>,
     pub blocks: Vec<Block>,
     pub call_index: CallIndex,
+    pub history_has_older: bool,
     pub subagents_state: SubagentsState,
     pub todo_state: TodoState,
     pub scroll: ScrollView,
@@ -208,6 +215,7 @@ impl TabRuntimeSnapshot {
             last_error: app.last_error.clone(),
             blocks: app.blocks.clone(),
             call_index: app.call_index.clone(),
+            history_has_older: app.history_has_older,
             subagents_state: app.subagents_state.clone(),
             todo_state: app.todo_state.clone(),
             scroll: app.scroll.clone(),
@@ -251,6 +259,7 @@ impl App {
             voice_partial_text: None,
             blocks: Vec::new(),
             call_index: CallIndex::default(),
+            history_has_older: false,
             input: InputEditor::new(),
             autocomplete: AutocompleteState::default(),
             viewport: Viewport::new(),
@@ -444,6 +453,7 @@ impl App {
         self.last_error = snapshot.last_error;
         self.blocks = snapshot.blocks;
         self.call_index = snapshot.call_index;
+        self.history_has_older = snapshot.history_has_older;
         self.subagents_state = snapshot.subagents_state;
         self.todo_state = snapshot.todo_state;
         self.scroll = snapshot.scroll;
@@ -467,12 +477,13 @@ impl App {
         self.session_file
             .as_deref()
             .filter(|value| !value.trim().is_empty())
+            .map(|value| normalize_session_file_key(&self.workspace_root, value))
             .or_else(|| {
                 self.session_id
                     .as_deref()
                     .filter(|value| !value.trim().is_empty())
+                    .map(str::to_string)
             })
-            .map(str::to_string)
     }
 
     pub fn restore_input_from_active_tab(&mut self) {
@@ -546,6 +557,7 @@ impl App {
     pub fn reset_conversation(&mut self) {
         self.blocks.clear();
         self.call_index = CallIndex::default();
+        self.history_has_older = false;
         self.input.clear();
         self.autocomplete.dismiss();
         self.viewport.invalidate();
@@ -612,6 +624,7 @@ impl App {
 
         self.blocks.clear();
         self.call_index = CallIndex::default();
+        let tool_results = history_tool_results(messages);
         for message in messages {
             let role = get_nonempty_str(message, "role").unwrap_or_default();
             match role {
@@ -621,14 +634,7 @@ impl App {
                     }
                 }
                 "assistant" => {
-                    if let Some(text) = message_text(message) {
-                        self.blocks.push(Block::Assistant {
-                            text,
-                            done: true,
-                            provider: None,
-                            model: None,
-                        });
-                    }
+                    self.push_history_assistant_message(message, &tool_results);
                 }
                 "custom" => {
                     if message
@@ -644,6 +650,7 @@ impl App {
                         }
                     }
                 }
+                "toolResult" => {}
                 _ => {}
             }
         }
@@ -653,7 +660,183 @@ impl App {
         self.last_line_count = 0;
         self.link_click_targets.clear();
         self.session_search.clear();
+        self.history_has_older = payload
+            .get("hasOlder")
+            .or_else(|| payload.get("has_older"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         self.blocks.len()
+    }
+
+    pub fn prepend_history_messages(&mut self, payload: &Value) -> usize {
+        let Some(messages) = payload.get("messages").and_then(Value::as_array) else {
+            return 0;
+        };
+        if messages.is_empty() {
+            self.history_has_older = payload
+                .get("hasOlder")
+                .or_else(|| payload.get("has_older"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            return 0;
+        }
+
+        let mut older = App::with_config(
+            self.cwd.clone(),
+            self.workspace_root.clone(),
+            self.config.clone(),
+        );
+        older.apply_history_messages(payload);
+        let added = older.blocks.len();
+        if added == 0 {
+            self.history_has_older = older.history_has_older;
+            return 0;
+        }
+
+        let current = std::mem::take(&mut self.blocks);
+        self.blocks = older.blocks;
+        self.blocks.extend(current);
+        self.rebuild_call_index();
+        self.history_has_older = older.history_has_older;
+        self.viewport.invalidate();
+        self.last_line_count = 0;
+        self.link_click_targets.clear();
+        self.session_search.clear();
+        added
+    }
+
+    fn rebuild_call_index(&mut self) {
+        self.call_index = CallIndex::default();
+        for (idx, block) in self.blocks.iter().enumerate() {
+            if let Block::ToolCall { call_id, .. } = block {
+                if !call_id.is_empty() {
+                    self.call_index.insert(call_id.clone(), idx);
+                }
+            }
+        }
+    }
+
+    fn push_history_assistant_message(
+        &mut self,
+        message: &Value,
+        tool_results: &HashMap<String, HistoryToolResult>,
+    ) {
+        let Some(parts) = message.get("content").and_then(Value::as_array) else {
+            if let Some(text) = message_text(message) {
+                self.blocks.push(Block::Assistant {
+                    text,
+                    done: true,
+                    provider: None,
+                    model: None,
+                });
+            }
+            return;
+        };
+
+        let mut assistant_text = String::new();
+        let mut thinking_text = String::new();
+        for part in parts {
+            let part_type = get_nonempty_str(part, "type").unwrap_or_default();
+            match part_type {
+                "toolCall" => {
+                    self.flush_history_thinking(&mut thinking_text);
+                    self.flush_history_assistant_text(&mut assistant_text);
+                    self.push_history_tool_call(part, tool_results);
+                }
+                "thinking" => {
+                    if let Some(text) = get_nonempty_str(part, "thinking")
+                        .or_else(|| get_nonempty_str(part, "text"))
+                    {
+                        thinking_text.push_str(text);
+                    }
+                }
+                _ => {
+                    if let Some(text) = part
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .or_else(|| part.get("content").and_then(Value::as_str))
+                    {
+                        assistant_text.push_str(text);
+                    }
+                }
+            }
+        }
+        self.flush_history_thinking(&mut thinking_text);
+        self.flush_history_assistant_text(&mut assistant_text);
+    }
+
+    fn flush_history_assistant_text(&mut self, text: &mut String) {
+        let trimmed = text.trim();
+        if !trimmed.is_empty() {
+            self.blocks.push(Block::Assistant {
+                text: trimmed.to_string(),
+                done: true,
+                provider: None,
+                model: None,
+            });
+        }
+        text.clear();
+    }
+
+    fn flush_history_thinking(&mut self, text: &mut String) {
+        let trimmed = text.trim();
+        if !trimmed.is_empty() {
+            self.blocks.push(Block::Thinking {
+                text: trimmed.to_string(),
+                done: true,
+            });
+        }
+        text.clear();
+    }
+
+    fn push_history_tool_call(
+        &mut self,
+        part: &Value,
+        tool_results: &HashMap<String, HistoryToolResult>,
+    ) {
+        let call_id = get_nonempty_str(part, "id")
+            .or_else(|| get_nonempty_str(part, "toolCallId"))
+            .or_else(|| get_nonempty_str(part, "callId"))
+            .unwrap_or("")
+            .to_string();
+        let result = tool_results.get(&call_id);
+        let name = result
+            .and_then(|result| result.tool_name.as_deref())
+            .or_else(|| get_nonempty_str(part, "name"))
+            .unwrap_or("unknown")
+            .to_string();
+        let mut args = history_tool_args(part);
+        self.update_subagents_from_tool_call(&name, &mut args);
+        self.update_todo_from_tool_call(&name, &mut args);
+        let idx = self.blocks.len();
+        if !call_id.is_empty() {
+            self.call_index.insert(call_id.clone(), idx);
+        }
+        let result_summary = result.map(|result| {
+            if result.output.trim().is_empty() {
+                "(no output)".to_string()
+            } else {
+                result.output.clone()
+            }
+        });
+        let result_ok = result.map(|result| !result.is_error);
+        let expanded = crate::ui::tool_renderers::tool_default_expanded(&name, &self.config);
+        self.blocks.push(Block::ToolCall {
+            call_id: call_id.clone(),
+            name,
+            args,
+            status: match result_ok {
+                Some(false) => ToolStatus::Failed,
+                _ => ToolStatus::Completed,
+            },
+            result_summary,
+            result_ok,
+            expanded,
+        });
+        if let Some(result) = result {
+            self.update_subagents_from_tool_result(&call_id, &result.output, !result.is_error);
+            self.update_todo_from_tool_result(&call_id, &result.output, !result.is_error);
+        }
     }
 
     pub fn handle_event(&mut self, type_: &str, payload: &Value) {
@@ -664,7 +847,10 @@ impl App {
             EventKind::AssistantMessageStart => self.handle_assistant_start(payload),
             EventKind::ToolCallStart => self.handle_tool_call_start(payload),
             EventKind::ToolCallEnd => self.handle_tool_call_end(payload),
+            EventKind::ToolCallUpdate => self.handle_tool_call_update(payload),
             EventKind::ToolResult => self.handle_tool_result(payload),
+            EventKind::MessageUpdate => self.handle_message_update(payload),
+            EventKind::AgentEnd => self.finish_trailing_thinking(),
             EventKind::MessageStart
             | EventKind::MessageEnd
             | EventKind::StreamStart
@@ -758,6 +944,68 @@ impl App {
         self.scroll_to_bottom();
     }
 
+    fn handle_message_update(&mut self, payload: &Value) {
+        let event = payload
+            .get("assistantMessageEvent")
+            .or_else(|| payload.get("assistant_message_event"))
+            .unwrap_or(payload);
+        match get_nonempty_str(event, "type").unwrap_or_default() {
+            "text_delta" => {
+                self.finish_trailing_thinking();
+                if let Some(delta) = get_nonempty_str(event, "delta") {
+                    self.handle_assistant_part(&serde_json::json!({ "text": delta }));
+                }
+            }
+            "thinking_delta" => {
+                if let Some(delta) = get_nonempty_str(event, "delta") {
+                    self.append_thinking_delta(delta);
+                }
+            }
+            "done" => {
+                self.finish_trailing_thinking();
+                self.handle_assistant_end(&Value::Null);
+            }
+            "error" => {
+                self.finish_trailing_thinking();
+                self.handle_assistant_end(&Value::Null);
+                let text = event
+                    .get("error")
+                    .and_then(|error| get_nonempty_str(error, "errorMessage"))
+                    .or_else(|| get_nonempty_str(event, "reason"))
+                    .unwrap_or("assistant message error")
+                    .to_string();
+                self.blocks.push(Block::Diag {
+                    kind: DiagKind::BridgeError,
+                    text,
+                });
+            }
+            _ => {}
+        }
+    }
+
+    fn append_thinking_delta(&mut self, delta: &str) {
+        if !matches!(
+            self.blocks.last(),
+            Some(Block::Thinking { done: false, .. })
+        ) {
+            self.blocks.push(Block::Thinking {
+                text: String::new(),
+                done: false,
+            });
+        }
+        if let Some(Block::Thinking { text, .. }) = self.blocks.last_mut() {
+            text.push_str(delta);
+        }
+        self.scroll_to_bottom();
+    }
+
+    fn finish_trailing_thinking(&mut self) {
+        if let Some(Block::Thinking { done, .. }) = self.blocks.last_mut() {
+            *done = true;
+            self.viewport.invalidate();
+        }
+    }
+
     fn handle_assistant_end(&mut self, payload: &Value) {
         if let Some(Block::Assistant {
             done,
@@ -795,11 +1043,14 @@ impl App {
     }
 
     fn handle_tool_call_start(&mut self, payload: &Value) {
+        self.finish_trailing_thinking();
         self.tool_use_count += 1;
         let name = get_nonempty_str(payload, "name")
+            .or_else(|| get_nonempty_str(payload, "toolName"))
             .unwrap_or("(tool)")
             .to_string();
         let call_id = get_nonempty_str(payload, "callId")
+            .or_else(|| get_nonempty_str(payload, "toolCallId"))
             .or_else(|| get_nonempty_str(payload, "id"))
             .unwrap_or("")
             .to_string();
@@ -810,17 +1061,22 @@ impl App {
         if !call_id.is_empty() {
             self.call_index.insert(call_id.clone(), idx);
         }
+        let expanded = crate::ui::tool_renderers::tool_default_expanded(&name, &self.config);
         self.blocks.push(Block::ToolCall {
             call_id,
             name,
             args,
             status: ToolStatus::Running,
+            result_summary: None,
+            result_ok: None,
+            expanded,
         });
         self.scroll_to_bottom();
     }
 
     fn handle_tool_call_end(&mut self, payload: &Value) {
         let call_id = get_nonempty_str(payload, "callId")
+            .or_else(|| get_nonempty_str(payload, "toolCallId"))
             .or_else(|| get_nonempty_str(payload, "id"))
             .unwrap_or("");
         if let Some(idx) = self.call_index.get(call_id) {
@@ -830,18 +1086,77 @@ impl App {
         }
     }
 
-    fn handle_tool_result(&mut self, payload: &Value) {
+    fn handle_tool_call_update(&mut self, payload: &Value) {
         let call_id = get_nonempty_str(payload, "callId")
+            .or_else(|| get_nonempty_str(payload, "toolCallId"))
             .or_else(|| get_nonempty_str(payload, "id"))
             .unwrap_or("")
             .to_string();
-        let ok = !matches!(get_str(payload, "status"), Some("error"));
-        let summary = get_nonempty_str(payload, "summary")
-            .or_else(|| get_nonempty_str(payload, "text"))
-            .unwrap_or("(result)")
+        let summary = tool_result_summary(payload, "partialResult")
+            .or_else(|| tool_result_summary(payload, "result"))
+            .or_else(|| get_nonempty_str(payload, "summary").map(str::to_string))
+            .or_else(|| get_nonempty_str(payload, "text").map(str::to_string));
+        let ok = !payload
+            .get("isError")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if let Some(idx) = self.call_index.get(&call_id) {
+            if let Some(Block::ToolCall {
+                status,
+                result_summary,
+                result_ok,
+                ..
+            }) = self.blocks.get_mut(idx)
+            {
+                *status = ToolStatus::Running;
+                if let Some(summary) = summary {
+                    *result_summary = Some(summary);
+                    *result_ok = Some(ok);
+                }
+                self.viewport.invalidate();
+                self.scroll_to_bottom();
+            }
+        }
+    }
+
+    fn handle_tool_result(&mut self, payload: &Value) {
+        let call_id = get_nonempty_str(payload, "callId")
+            .or_else(|| get_nonempty_str(payload, "toolCallId"))
+            .or_else(|| get_nonempty_str(payload, "id"))
+            .unwrap_or("")
             .to_string();
+        let ok = !matches!(get_str(payload, "status"), Some("error"))
+            && !payload
+                .get("isError")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+        let summary = tool_result_summary(payload, "result")
+            .or_else(|| tool_result_summary(payload, "partialResult"))
+            .or_else(|| get_nonempty_str(payload, "summary").map(str::to_string))
+            .or_else(|| get_nonempty_str(payload, "text").map(str::to_string))
+            .unwrap_or_else(|| "(no output)".to_string());
         self.update_subagents_from_tool_result(&call_id, &summary, ok);
         self.update_todo_from_tool_result(&call_id, &summary, ok);
+        if let Some(idx) = self.call_index.get(&call_id) {
+            if let Some(Block::ToolCall {
+                status,
+                result_summary,
+                result_ok,
+                ..
+            }) = self.blocks.get_mut(idx)
+            {
+                *status = if ok {
+                    ToolStatus::Completed
+                } else {
+                    ToolStatus::Failed
+                };
+                *result_summary = Some(summary);
+                *result_ok = Some(ok);
+                self.viewport.invalidate();
+                self.scroll_to_bottom();
+                return;
+            }
+        }
         self.blocks.push(Block::ToolResult {
             call_id,
             summary,
@@ -927,6 +1242,15 @@ impl App {
     pub fn record_metrics(&mut self, line_count: usize, body_height: usize) {
         self.last_line_count = line_count;
         self.last_body_height = body_height;
+    }
+
+    pub fn toggle_tool_expanded(&mut self, block_idx: usize) -> bool {
+        let Some(Block::ToolCall { expanded, .. }) = self.blocks.get_mut(block_idx) else {
+            return false;
+        };
+        *expanded = !*expanded;
+        self.viewport.invalidate();
+        true
     }
 
     pub fn input_insert(&mut self, c: char) {
@@ -1044,9 +1368,32 @@ pub fn block_version(blocks: &[Block], idx: usize) -> u64 {
             }
             v
         }
-        Some(Block::ToolCall { status, args, .. }) => {
+        Some(Block::Thinking { text, done }) => {
+            let mut v: u64 = text.len() as u64;
+            if *done {
+                v |= 1u64 << 62;
+            }
+            v
+        }
+        Some(Block::ToolCall {
+            status,
+            args,
+            result_summary,
+            result_ok,
+            expanded,
+            ..
+        }) => {
             let mut v: u64 = 1;
             v |= (*status as u64) << 8;
+            if *expanded {
+                v |= 1u64 << 17;
+            }
+            if result_ok.unwrap_or(false) {
+                v |= 1u64 << 16;
+            }
+            if let Some(summary) = result_summary {
+                v ^= (summary.len() as u64) << 24;
+            }
             if let Some(arr) = args.as_array() {
                 v ^= arr.len() as u64;
             }
@@ -1062,6 +1409,68 @@ pub fn block_version(blocks: &[Block], idx: usize) -> u64 {
 
 fn compact_json(v: &Value) -> String {
     serde_json::to_string(v).unwrap_or_else(|_| format!("{v}"))
+}
+
+fn normalize_session_file_key(workspace_root: &Path, session_file: &str) -> String {
+    let trimmed = session_file.trim();
+    let path = PathBuf::from(trimmed);
+    if path.is_absolute() {
+        path.display().to_string()
+    } else {
+        workspace_root.join(path).display().to_string()
+    }
+}
+
+#[derive(Debug, Clone)]
+struct HistoryToolResult {
+    output: String,
+    is_error: bool,
+    tool_name: Option<String>,
+}
+
+fn history_tool_results(messages: &[Value]) -> HashMap<String, HistoryToolResult> {
+    let mut results = HashMap::new();
+    for message in messages {
+        if get_nonempty_str(message, "role") != Some("toolResult") {
+            continue;
+        }
+        let call_id = get_nonempty_str(message, "toolCallId")
+            .or_else(|| get_nonempty_str(message, "callId"))
+            .or_else(|| get_nonempty_str(message, "id"))
+            .unwrap_or("")
+            .to_string();
+        if call_id.is_empty() {
+            continue;
+        }
+        results.insert(
+            call_id,
+            HistoryToolResult {
+                output: message_text(message).unwrap_or_default(),
+                is_error: message
+                    .get("isError")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                tool_name: get_nonempty_str(message, "toolName").map(str::to_string),
+            },
+        );
+    }
+    results
+}
+
+fn history_tool_args(part: &Value) -> Value {
+    let Some(arguments) = part.get("arguments") else {
+        return Value::Null;
+    };
+    if let Some(text) = arguments.as_str() {
+        serde_json::from_str(text).unwrap_or_else(|_| Value::String(text.to_string()))
+    } else {
+        arguments.clone()
+    }
+}
+
+fn tool_result_summary(payload: &Value, key: &str) -> Option<String> {
+    let value = payload.get(key)?;
+    message_text(value).or_else(|| value.as_str().map(str::to_string))
 }
 
 fn message_text(message: &Value) -> Option<String> {
@@ -1126,6 +1535,46 @@ mod tests {
         assert_eq!(app.provider.as_deref(), Some("anthropic"));
         assert_eq!(app.model.as_deref(), Some("claude-sonnet"));
         assert!(app.blocks.is_empty());
+    }
+
+    #[test]
+    fn handle_tool_result_attaches_output_to_tool_call() {
+        let mut app = App::new("/tmp".to_string());
+        app.handle_event(
+            "tool_call_start",
+            &json!({ "callId": "call-1", "name": "bash", "args": { "command": "echo ok" } }),
+        );
+        app.handle_event(
+            "tool_result",
+            &json!({ "callId": "call-1", "status": "ok", "summary": "ok" }),
+        );
+
+        assert_eq!(app.blocks.len(), 1);
+        assert!(matches!(
+            app.blocks.first(),
+            Some(Block::ToolCall {
+                status: ToolStatus::Completed,
+                result_summary: Some(summary),
+                result_ok: Some(true),
+                ..
+            }) if summary == "ok"
+        ));
+    }
+
+    #[test]
+    fn toggle_tool_expanded_flips_tool_block_and_invalidates_viewport() {
+        let mut app = App::new("/tmp".to_string());
+        app.handle_event(
+            "tool_call_start",
+            &json!({ "callId": "call-1", "name": "bash", "args": { "command": "printf lines" } }),
+        );
+
+        assert!(app.toggle_tool_expanded(0));
+        assert!(matches!(
+            app.blocks.first(),
+            Some(Block::ToolCall { expanded: true, .. })
+        ));
+        assert!(!app.toggle_tool_expanded(99));
     }
 
     #[test]
@@ -1215,6 +1664,21 @@ mod tests {
     }
 
     #[test]
+    fn tab_runtime_snapshots_restore_relative_session_file_by_absolute_key() {
+        let mut app = App::new("/tmp/pix-tabs-test".to_string());
+        app.apply_session_state(&json!({
+            "sessionId": "session-a",
+            "sessionFile": "sessions/a.jsonl",
+            "cwd": "/tmp/pix-tabs-test"
+        }));
+        app.push_user_message("relative key");
+        app.save_active_runtime_state();
+
+        assert!(app.restore_runtime_state_for_key("/tmp/pix-tabs-test/sessions/a.jsonl"));
+        assert!(matches!(app.blocks.first(), Some(Block::User { text }) if text == "relative key"));
+    }
+
+    #[test]
     fn apply_history_messages_hydrates_visible_user_and_assistant_blocks() {
         let mut app = App::new("/tmp".to_string());
         let count = app.apply_history_messages(&json!({
@@ -1232,6 +1696,72 @@ mod tests {
         );
         assert!(
             matches!(app.blocks.get(2), Some(Block::Diag { kind: DiagKind::Info, text }) if text == "system note")
+        );
+    }
+
+    #[test]
+    fn apply_history_messages_hydrates_thinking_and_tool_blocks() {
+        let mut app = App::new("/tmp".to_string());
+        let count = app.apply_history_messages(&json!({
+            "messages": [
+                { "role": "user", "content": [{ "type": "text", "text": "check" }] },
+                {
+                    "role": "assistant",
+                    "content": [
+                        { "type": "thinking", "thinking": "I should inspect status" },
+                        { "type": "toolCall", "id": "call-1", "name": "shell", "arguments": { "command": "git status --short" } },
+                        { "type": "text", "text": "done" }
+                    ]
+                },
+                {
+                    "role": "toolResult",
+                    "toolCallId": "call-1",
+                    "toolName": "shell",
+                    "content": [{ "type": "text", "text": " M apps/tui-rust/src/ui/app.rs" }],
+                    "isError": false
+                }
+            ]
+        }));
+
+        assert_eq!(count, 4);
+        assert!(
+            matches!(app.blocks.get(1), Some(Block::Thinking { text, done: true }) if text == "I should inspect status")
+        );
+        assert!(
+            matches!(app.blocks.get(2), Some(Block::ToolCall { call_id, name, status: ToolStatus::Completed, result_summary: Some(summary), result_ok: Some(true), .. }) if call_id == "call-1" && name == "shell" && summary.contains("apps/tui-rust/src/ui/app.rs"))
+        );
+        assert!(
+            matches!(app.blocks.get(3), Some(Block::Assistant { text, done: true, .. }) if text == "done")
+        );
+    }
+
+    #[test]
+    fn sdk_tool_execution_events_render_as_tool_blocks() {
+        let mut app = App::new("/tmp".to_string());
+
+        app.handle_event(
+            "message_update",
+            &json!({ "assistantMessageEvent": { "type": "thinking_delta", "delta": "checking" } }),
+        );
+        app.handle_event(
+            "tool_execution_start",
+            &json!({ "toolCallId": "call-2", "toolName": "shell", "args": { "command": "cargo test" } }),
+        );
+        app.handle_event(
+            "tool_execution_end",
+            &json!({
+                "toolCallId": "call-2",
+                "toolName": "shell",
+                "result": { "content": [{ "type": "text", "text": "test result: ok" }] },
+                "isError": false
+            }),
+        );
+
+        assert!(
+            matches!(app.blocks.first(), Some(Block::Thinking { text, done: true }) if text == "checking")
+        );
+        assert!(
+            matches!(app.blocks.get(1), Some(Block::ToolCall { call_id, name, status: ToolStatus::Completed, result_summary: Some(summary), result_ok: Some(true), .. }) if call_id == "call-2" && name == "shell" && summary == "test result: ok")
         );
     }
 }

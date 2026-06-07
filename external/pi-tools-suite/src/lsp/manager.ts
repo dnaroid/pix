@@ -149,16 +149,22 @@ export class LspManager {
         }
 
         let pullDiagnosticsError: string | undefined;
-        try {
-          const pulledDiagnostics = await client.pullDiagnostics(file, diagnosticsWaitMs, ctx.signal);
-          if (pulledDiagnostics !== undefined) {
-            const diagnostics = diagnosticsWithLocalFallback(match.server.id, file, text, pulledDiagnostics);
-            this.diagnostics.set(match.server.id, match.root, filePathToUri(file), diagnostics, doc.version);
-            lines.push(formatLspDiagnostics(match.server.id, file, diagnostics, match.root));
-            continue;
+        if (match.server.pullDiagnostics !== false) {
+          try {
+            const pulledDiagnostics = await client.pullDiagnostics(file, diagnosticsWaitMs, ctx.signal);
+            if (pulledDiagnostics !== undefined) {
+              const diagnostics = diagnosticsWithLocalFallback(match.server.id, file, text, pulledDiagnostics);
+              this.diagnostics.set(match.server.id, match.root, filePathToUri(file), diagnostics, doc.version);
+              lines.push(formatLspDiagnostics(match.server.id, file, diagnostics, match.root));
+              continue;
+            }
+          } catch (error) {
+            pullDiagnosticsError = (error as Error).message;
           }
-        } catch (error) {
-          pullDiagnosticsError = (error as Error).message;
+        }
+
+        if (match.server.waitForPublishDiagnostics === false || diagnosticsWaitMs <= 0) {
+          continue;
         }
 
         const entry = await this.diagnostics.waitForFile(

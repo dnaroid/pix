@@ -7,6 +7,7 @@ use ratatui::style::{Color, Style};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Theme {
     pub user_text: Color, pub assistant_text: Color,
+    pub user_message_background: Color,
     pub tool_pending: Color, pub tool_running: Color, pub tool_completed: Color, pub tool_failed: Color,
     pub status_bg: Color, pub status_dim: Color, pub model_accent: Color, pub session_accent: Color,
     pub heading1: Color, pub heading2: Color, pub heading3_plus: Color,
@@ -20,7 +21,7 @@ pub struct Theme {
 #[rustfmt::skip]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThemeRole {
-    UserText, AssistantText, ToolPending, ToolRunning, ToolCompleted, ToolFailed,
+    UserText, AssistantText, UserMessageBackground, ToolPending, ToolRunning, ToolCompleted, ToolFailed,
     StatusBg, StatusDim, ModelAccent, SessionAccent, Heading1, Heading2, Heading3Plus,
     CodeInline, CodeFenceBorder, ListMarker, BlockquoteBar, Hr, Link, BoldText, ItalicText,
     DiagInfo, DiagWarn, DiagError, InputBorder, InputBorderBusy, Cursor,
@@ -73,8 +74,51 @@ impl Theme {
 
     pub fn style_for(&self, role: ThemeRole) -> Style {
         match role {
-            ThemeRole::StatusBg => Style::default().bg(self.color_for(role)),
+            ThemeRole::StatusBg | ThemeRole::UserMessageBackground => {
+                Style::default().bg(self.color_for(role))
+            }
             _ => Style::default().fg(self.color_for(role)),
+        }
+    }
+
+    pub fn resolve_color_ref(&self, color_ref: &str) -> Color {
+        let trimmed = color_ref.trim();
+        if let Some(color) = parse_color(trimmed) {
+            return color;
+        }
+
+        match normalize_key(trimmed).as_str() {
+            "muted" => Color::Rgb(125, 133, 144),
+            "statusforeground" | "statusdim" => self.status_dim,
+            "accent" => self.session_accent,
+            "success" => self.tool_completed,
+            "warning" => self.diag_warn,
+            "info" => self.diag_info,
+            "error" => self.tool_failed,
+            "toolmutation" => {
+                self.pix_palette_color(Color::Rgb(212, 122, 162), Color::Rgb(163, 58, 104))
+            }
+            "toolsearch" => {
+                self.pix_palette_color(Color::Rgb(168, 137, 214), Color::Rgb(109, 82, 165))
+            }
+            "tooltitle" => {
+                self.pix_palette_color(Color::Rgb(154, 167, 180), Color::Rgb(82, 96, 112))
+            }
+            "modelopenai" => {
+                self.pix_palette_color(Color::Rgb(200, 180, 90), Color::Rgb(117, 103, 31))
+            }
+            "foreground" | "assistantforeground" => self.assistant_text,
+            "userforeground" | "usertext" => self.user_text,
+            "link" => self.link,
+            _ => self.status_dim,
+        }
+    }
+
+    fn pix_palette_color(&self, dark: Color, light: Color) -> Color {
+        if self.status_bg == Color::Rgb(248, 250, 252) {
+            light
+        } else {
+            dark
         }
     }
 
@@ -82,6 +126,7 @@ impl Theme {
     pub fn color_for(&self, role: ThemeRole) -> Color {
         match role {
             ThemeRole::UserText => self.user_text, ThemeRole::AssistantText => self.assistant_text,
+            ThemeRole::UserMessageBackground => self.user_message_background,
             ThemeRole::ToolPending => self.tool_pending, ThemeRole::ToolRunning => self.tool_running,
             ThemeRole::ToolCompleted => self.tool_completed, ThemeRole::ToolFailed => self.tool_failed,
             ThemeRole::StatusBg => self.status_bg, ThemeRole::StatusDim => self.status_dim,
@@ -99,52 +144,49 @@ impl Theme {
     #[rustfmt::skip]
     fn default_theme() -> Self {
         Self {
-            user_text: Color::White, assistant_text: Color::White,
-            tool_pending: Color::DarkGray, tool_running: Color::Yellow, tool_completed: Color::Green, tool_failed: Color::Red,
-            status_bg: Color::Black, status_dim: Color::DarkGray, model_accent: Color::Yellow, session_accent: Color::Magenta,
-            heading1: Color::Cyan, heading2: Color::LightCyan, heading3_plus: Color::Yellow,
-            code_inline: Color::LightYellow, code_fence_border: Color::DarkGray,
-            list_marker: Color::Cyan, blockquote_bar: Color::Magenta, hr: Color::DarkGray, link: Color::Cyan,
-            bold_text: Color::White, italic_text: Color::White,
-            diag_info: Color::Cyan, diag_warn: Color::Yellow, diag_error: Color::Red,
-            input_border: Color::DarkGray, input_border_busy: Color::Yellow, cursor: Color::White,
+            user_text: Color::Rgb(214, 222, 235), assistant_text: Color::Rgb(201, 209, 217), user_message_background: Color::Rgb(30, 30, 30),
+            tool_pending: Color::Rgb(125, 133, 144), tool_running: Color::Rgb(212, 154, 74), tool_completed: Color::Rgb(124, 169, 130), tool_failed: Color::Rgb(201, 106, 103),
+            status_bg: Color::Rgb(9, 13, 19), status_dim: Color::Rgb(125, 133, 144), model_accent: Color::Rgb(200, 180, 90), session_accent: Color::Rgb(122, 162, 214),
+            heading1: Color::Rgb(127, 179, 200), heading2: Color::Rgb(122, 162, 214), heading3_plus: Color::Rgb(212, 154, 74),
+            code_inline: Color::Rgb(212, 154, 74), code_fence_border: Color::Rgb(48, 54, 61),
+            list_marker: Color::Rgb(127, 179, 200), blockquote_bar: Color::Rgb(122, 162, 214), hr: Color::Rgb(48, 54, 61), link: Color::Rgb(127, 179, 200),
+            bold_text: Color::Rgb(214, 222, 235), italic_text: Color::Rgb(214, 222, 235),
+            diag_info: Color::Rgb(127, 179, 200), diag_warn: Color::Rgb(212, 154, 74), diag_error: Color::Rgb(201, 106, 103),
+            input_border: Color::Rgb(48, 54, 61), input_border_busy: Color::Rgb(212, 154, 74), cursor: Color::Rgb(240, 246, 252),
         }
     }
 
     fn dark() -> Self {
-        Self {
-            status_bg: Color::Rgb(8, 12, 18),
-            status_dim: Color::Gray,
-            model_accent: Color::LightYellow,
-            session_accent: Color::LightMagenta,
-            heading3_plus: Color::LightYellow,
-            input_border: Color::Rgb(78, 86, 105),
-            ..Self::default_theme()
-        }
+        Self::default_theme()
     }
 
     fn light() -> Self {
         let mut t = Self::default_theme();
-        t.user_text = Color::Black;
-        t.assistant_text = Color::Black;
-        t.bold_text = Color::Black;
-        t.italic_text = Color::Black;
-        t.tool_pending = Color::Gray;
-        t.tool_running = Color::Rgb(160, 96, 0);
-        t.tool_completed = Color::Rgb(0, 120, 72);
-        t.tool_failed = Color::Rgb(184, 32, 32);
-        t.status_bg = Color::White;
-        t.status_dim = Color::Gray;
-        t.model_accent = Color::Rgb(120, 80, 0);
-        t.session_accent = Color::Rgb(128, 48, 128);
-        t.heading1 = Color::Blue;
-        t.heading3_plus = Color::Rgb(128, 96, 0);
-        t.code_inline = Color::Rgb(128, 80, 0);
-        t.link = Color::Blue;
-        t.list_marker = Color::Blue;
-        t.input_border = Color::Gray;
-        t.input_border_busy = Color::Rgb(160, 96, 0);
-        t.cursor = Color::Black;
+        t.user_text = Color::Rgb(31, 41, 55);
+        t.assistant_text = Color::Rgb(31, 41, 55);
+        t.user_message_background = Color::White;
+        t.bold_text = t.user_text;
+        t.italic_text = t.user_text;
+        t.tool_pending = Color::Rgb(100, 116, 139);
+        t.tool_running = Color::Rgb(154, 99, 29);
+        t.tool_completed = Color::Rgb(71, 121, 76);
+        t.tool_failed = Color::Rgb(164, 73, 73);
+        t.status_bg = Color::Rgb(248, 250, 252);
+        t.status_dim = Color::Rgb(100, 116, 139);
+        t.model_accent = Color::Rgb(117, 103, 31);
+        t.session_accent = Color::Rgb(49, 95, 159);
+        t.heading1 = Color::Rgb(36, 107, 142);
+        t.heading2 = Color::Rgb(49, 95, 159);
+        t.heading3_plus = Color::Rgb(154, 99, 29);
+        t.code_inline = Color::Rgb(154, 99, 29);
+        t.link = Color::Rgb(36, 107, 142);
+        t.list_marker = Color::Rgb(36, 107, 142);
+        t.diag_info = Color::Rgb(36, 107, 142);
+        t.diag_warn = Color::Rgb(154, 99, 29);
+        t.diag_error = Color::Rgb(164, 73, 73);
+        t.input_border = Color::Rgb(51, 65, 85);
+        t.input_border_busy = Color::Rgb(154, 99, 29);
+        t.cursor = Color::Rgb(15, 23, 42);
         t
     }
 
@@ -152,6 +194,7 @@ impl Theme {
         let mut t = Self::default_theme();
         t.user_text = Color::Rgb(248, 248, 242);
         t.assistant_text = t.user_text;
+        t.user_message_background = Color::Rgb(39, 40, 34);
         t.bold_text = t.user_text;
         t.italic_text = t.user_text;
         t.tool_pending = Color::Rgb(117, 113, 94);
@@ -184,6 +227,7 @@ impl Theme {
         match normalize_key(key).as_str() {
             "usertext" => self.user_text = color,
             "assistanttext" => self.assistant_text = color,
+            "usermessagebackground" | "usermessagebg" => self.user_message_background = color,
             "toolpending" => self.tool_pending = color,
             "toolrunning" => self.tool_running = color,
             "toolcompleted" => self.tool_completed = color,
@@ -269,8 +313,47 @@ mod tests {
     fn default_theme_matches_current_colors() {
         let theme = Theme::by_name("default");
         let actual = [theme.user_text, theme.assistant_text, theme.tool_pending, theme.tool_running, theme.tool_completed, theme.tool_failed, theme.status_bg, theme.heading1, theme.code_inline, theme.input_border_busy];
-        let expected = [Color::White, Color::White, Color::DarkGray, Color::Yellow, Color::Green, Color::Red, Color::Black, Color::Cyan, Color::LightYellow, Color::Yellow];
+        let expected = [Color::Rgb(214, 222, 235), Color::Rgb(201, 209, 217), Color::Rgb(125, 133, 144), Color::Rgb(212, 154, 74), Color::Rgb(124, 169, 130), Color::Rgb(201, 106, 103), Color::Rgb(9, 13, 19), Color::Rgb(127, 179, 200), Color::Rgb(212, 154, 74), Color::Rgb(212, 154, 74)];
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn default_theme_resolves_pix_tool_palette() {
+        let theme = Theme::by_name("default");
+        assert_eq!(
+            theme.resolve_color_ref("toolTitle"),
+            Color::Rgb(154, 167, 180)
+        );
+        assert_eq!(
+            theme.resolve_color_ref("toolMutation"),
+            Color::Rgb(212, 122, 162)
+        );
+        assert_eq!(
+            theme.resolve_color_ref("toolSearch"),
+            Color::Rgb(168, 137, 214)
+        );
+        assert_eq!(theme.resolve_color_ref("warning"), Color::Rgb(212, 154, 74));
+        assert_eq!(theme.resolve_color_ref("accent"), Color::Rgb(122, 162, 214));
+        assert_eq!(theme.resolve_color_ref("muted"), Color::Rgb(125, 133, 144));
+    }
+
+    #[test]
+    fn light_theme_resolves_pix_tool_palette() {
+        let theme = Theme::by_name("light");
+        assert_eq!(
+            theme.resolve_color_ref("toolTitle"),
+            Color::Rgb(82, 96, 112)
+        );
+        assert_eq!(
+            theme.resolve_color_ref("toolMutation"),
+            Color::Rgb(163, 58, 104)
+        );
+        assert_eq!(
+            theme.resolve_color_ref("toolSearch"),
+            Color::Rgb(109, 82, 165)
+        );
+        assert_eq!(theme.resolve_color_ref("warning"), Color::Rgb(154, 99, 29));
+        assert_eq!(theme.resolve_color_ref("accent"), Color::Rgb(49, 95, 159));
     }
 
     #[test]
@@ -281,10 +364,7 @@ mod tests {
 
     #[test]
     fn built_in_themes_are_distinct() {
-        assert_ne!(
-            Theme::by_name("default").status_bg,
-            Theme::by_name("dark").status_bg
-        );
+        assert_eq!(Theme::by_name("default"), Theme::by_name("dark"));
         assert_ne!(
             Theme::by_name("light").user_text,
             Theme::by_name("dark").user_text
@@ -300,9 +380,12 @@ mod tests {
         let theme = Theme::default();
         assert_eq!(
             theme.style_for(ThemeRole::ToolRunning).fg,
-            Some(Color::Yellow)
+            Some(Color::Rgb(212, 154, 74))
         );
-        assert_eq!(theme.style_for(ThemeRole::StatusBg).bg, Some(Color::Black));
+        assert_eq!(
+            theme.style_for(ThemeRole::StatusBg).bg,
+            Some(Color::Rgb(9, 13, 19))
+        );
     }
 
     #[test]
@@ -319,7 +402,7 @@ mod tests {
         assert_eq!(theme.user_text, Color::LightGreen);
         assert_eq!(theme.tool_failed, Color::Rgb(255, 0, 102));
         assert_eq!(theme.heading3_plus, Color::Blue);
-        assert_eq!(theme.assistant_text, Color::White);
+        assert_eq!(theme.assistant_text, Color::Rgb(201, 209, 217));
     }
 
     #[test]

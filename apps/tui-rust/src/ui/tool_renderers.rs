@@ -3,13 +3,14 @@
 //! The viewport owns the outer conversation layout, while this module keeps
 //! per-tool summaries concise and consistent with the TypeScript pix UI.
 
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use serde_json::Value;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
+use crate::config::{PixConfig, ToolRendererConfig, ToolRendererRule};
 use crate::ui::app::ToolStatus;
-use crate::ui::links::{envelope_osc8, extract_file_paths, LinkSpan};
+use crate::ui::links::{extract_file_paths, LinkSpan};
 use crate::ui::theme::{Theme, ThemeRole};
 
 use super::wrap;
@@ -29,12 +30,10 @@ pub fn render_tool_call(
 /// Render a path-like value as a standalone clickable OSC 8 link line.
 pub fn render_path_with_link(path: &str) -> Line<'static> {
     let theme = Theme::default();
-    let spans = extract_file_paths(path, None);
-    let text = spans
-        .first()
-        .map(|span| envelope_osc8(&span.url, path))
-        .unwrap_or_else(|| path.to_string());
-    Line::from(Span::styled(text, theme.style_for(ThemeRole::Link)))
+    Line::from(Span::styled(
+        path.to_string(),
+        theme.style_for(ThemeRole::Link),
+    ))
 }
 
 pub fn render_tool_call_with_theme(
@@ -44,7 +43,85 @@ pub fn render_tool_call_with_theme(
     width: usize,
     theme: &Theme,
 ) -> Vec<Line<'static>> {
+    render_tool_entry_with_theme(name, args, status, None, None, width, theme)
+}
+
+pub fn render_tool_call_with_config(
+    name: &str,
+    args: &Value,
+    status: crate::ui::app::ToolStatus,
+    width: usize,
+    theme: &Theme,
+    config: &PixConfig,
+) -> Vec<Line<'static>> {
+    render_tool_entry_with_config(name, args, status, None, None, width, theme, config)
+}
+
+/// Render a full pix-style tool block: header/args plus the captured result
+/// preview once the tool finishes. This mirrors TS pix's `renderToolBlock`
+/// behavior closely enough for the Rust TUI: tool output stays attached to the
+/// call, previews obey the same default head/tail line counts, and truncated
+/// previews are marked with `▶`.
+pub fn render_tool_entry_with_theme(
+    name: &str,
+    args: &Value,
+    status: crate::ui::app::ToolStatus,
+    result_summary: Option<&str>,
+    result_ok: Option<bool>,
+    width: usize,
+    theme: &Theme,
+) -> Vec<Line<'static>> {
+    render_tool_entry_with_config(
+        name,
+        args,
+        status,
+        result_summary,
+        result_ok,
+        width,
+        theme,
+        &PixConfig::default(),
+    )
+}
+
+pub fn render_tool_entry_with_config(
+    name: &str,
+    args: &Value,
+    status: crate::ui::app::ToolStatus,
+    result_summary: Option<&str>,
+    result_ok: Option<bool>,
+    width: usize,
+    theme: &Theme,
+    config: &PixConfig,
+) -> Vec<Line<'static>> {
+    render_tool_entry_with_config_and_expansion(
+        name,
+        args,
+        status,
+        result_summary,
+        result_ok,
+        false,
+        width,
+        theme,
+        config,
+    )
+}
+
+pub fn render_tool_entry_with_config_and_expansion(
+    name: &str,
+    args: &Value,
+    status: crate::ui::app::ToolStatus,
+    result_summary: Option<&str>,
+    result_ok: Option<bool>,
+    expanded: bool,
+    width: usize,
+    theme: &Theme,
+    config: &PixConfig,
+) -> Vec<Line<'static>> {
     let width = width.max(1);
+    let rule = resolve_tool_rule(name, &config.tool_renderer);
+    if rule.hidden.unwrap_or(false) {
+        return Vec::new();
+    }
     if crate::ui::todo_view::is_todo_tool_name(name)
         && crate::ui::todo_view::should_render_inline_task_list(args)
     {
@@ -52,21 +129,128 @@ pub fn render_tool_call_with_theme(
             name, args, status, width, theme,
         );
     }
-    let (status_icon, status_color) = status_icon_and_color(status, theme);
+    let icons = AppIcons::from_config(config);
+    let (status_icon, status_color) =
+        status_icon_and_color(name, status, result_summary, result_ok, theme, icons);
+    let title_color = rule
+        .color
+        .as_deref()
+        .map(|color_ref| theme.resolve_color_ref(color_ref))
+        .unwrap_or(theme.status_dim);
     let display = tool_display(name, args);
+    let title = tool_header_title(name, &display.title);
     let mut out = Vec::with_capacity(1 + MAX_DETAIL_LINES);
 
     out.push(header_line(
         status_icon,
         status_color,
-        &display.title,
+        title_color,
+        &title,
         width,
         theme,
     ));
     if let Some(details) = display.details.filter(|text| !text.trim().is_empty()) {
         out.extend(detail_lines(&details, width, MAX_DETAIL_LINES, theme));
     }
+    if let Some(summary) = result_summary.filter(|text| !text.trim().is_empty()) {
+        if expanded {
+            out.extend(result_body_lines(
+                summary,
+                result_ok.unwrap_or(true),
+                width,
+                theme,
+            ));
+        } else {
+            out.extend(result_preview_lines(
+                name,
+                summary,
+                result_ok.unwrap_or(true),
+                width,
+                theme,
+                &rule,
+            ));
+        }
+    }
     out
+}
+
+/// Cheap visual-line count for `render_tool_entry_with_config_and_expansion`.
+///
+/// The viewport calls this for every block while rebuilding its prefix-sum
+/// layout. Keep it allocation-light: do not construct `ratatui::Line`s or scan
+/// full collapsed previews just to discover they cap at `previewLines`.
+pub fn tool_entry_line_count_with_config_and_expansion(
+    name: &str,
+    args: &Value,
+    _status: crate::ui::app::ToolStatus,
+    result_summary: Option<&str>,
+    _result_ok: Option<bool>,
+    expanded: bool,
+    width: usize,
+    config: &PixConfig,
+) -> usize {
+    let width = width.max(1);
+    let rule = resolve_tool_rule(name, &config.tool_renderer);
+    if rule.hidden.unwrap_or(false) {
+        return 0;
+    }
+    if crate::ui::todo_view::is_todo_tool_name(name)
+        && crate::ui::todo_view::should_render_inline_task_list(args)
+    {
+        // Matches todo_view::render_todo_tool_call_with_theme: one header plus
+        // either the widget tasks or the `todo: no tasks` placeholder. This
+        // avoids building styled lines in the common viewport measurement path.
+        let tasks = args
+            .get(crate::ui::todo_view::WIDGET_KEY)
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len);
+        return 1 + tasks.max(1);
+    }
+
+    let display = tool_display(name, args);
+    let mut count = 1; // header
+    if let Some(details) = display.details.filter(|text| !text.trim().is_empty()) {
+        count += detail_line_count(&details, width, MAX_DETAIL_LINES);
+    }
+    if let Some(summary) = result_summary.filter(|text| !text.trim().is_empty()) {
+        count += if expanded {
+            result_body_line_count(summary, width)
+        } else {
+            result_preview_line_count(summary, width, &rule)
+        };
+    }
+    count
+}
+
+pub(crate) fn tool_default_expanded(name: &str, config: &PixConfig) -> bool {
+    resolve_tool_rule(name, &config.tool_renderer)
+        .default_expanded
+        .unwrap_or(false)
+}
+
+/// Render a reasoning/thinking entry with the same one-line tool header
+/// treatment as normal tool calls. The body stays collapsed for now, matching
+/// the current Rust TUI behavior while sharing pix-style status icons/spacing.
+pub fn render_thinking_entry_with_config(
+    done: bool,
+    width: usize,
+    theme: &Theme,
+    config: &PixConfig,
+) -> Vec<Line<'static>> {
+    let icons = AppIcons::from_config(config);
+    let (icon, icon_color) = if done {
+        (icons.check_circle, theme.tool_completed)
+    } else {
+        (icons.timer_sand, theme.status_dim)
+    };
+    vec![header_line(
+        icon,
+        icon_color,
+        theme.resolve_color_ref("accent"),
+        "thinking",
+        width.max(1),
+        theme,
+    )]
 }
 
 /// Number of visual lines `render_tool_call` emits for the same args/width.
@@ -158,7 +342,7 @@ fn tool_display(name: &str, args: &Value) -> ToolDisplay {
 fn read_display(name: &str, args: &Value) -> ToolDisplay {
     let path = get_str_any(args, &["file_path", "filePath", "path", "file", "target"]);
     let range = read_range(args);
-    let title = format!("📖 {}{}", path.unwrap_or(name), range);
+    let title = format!("{}{}", path.unwrap_or(name), range);
     ToolDisplay {
         title,
         details: compact_fields(
@@ -182,15 +366,18 @@ fn bash_display(name: &str, args: &Value) -> ToolDisplay {
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| name.to_string());
     ToolDisplay {
-        title: format!("$ {command}"),
-        details: compact_fields(args, &["command", "cmd", "script"]),
+        title: command,
+        // TS pix keeps shell metadata out of the header area: the visible shell
+        // header is exactly one row (`<icon> shell <command>`), and output lives
+        // in the preview/expanded body.
+        details: None,
     }
 }
 
 fn edit_display(name: &str, args: &Value) -> ToolDisplay {
     let path = get_str_any(args, &["file_path", "filePath", "path", "file"]);
     ToolDisplay {
-        title: format!("✎ {}", path.unwrap_or(name)),
+        title: path.unwrap_or(name).to_string(),
         details: compact_fields(args, &["file_path", "filePath", "path", "file"]),
     }
 }
@@ -206,7 +393,7 @@ fn write_display(name: &str, args: &Value) -> ToolDisplay {
         });
     }
     ToolDisplay {
-        title: format!("✍ {}", path.unwrap_or(name)),
+        title: path.unwrap_or(name).to_string(),
         details,
     }
 }
@@ -216,8 +403,11 @@ fn apply_patch_display(name: &str, args: &Value) -> ToolDisplay {
         .map(str::to_string)
         .or_else(|| patch_path(args));
     let title = match path {
-        Some(path) if !path.is_empty() => format!("⚡ apply-patch {path}"),
-        _ => "⚡ apply-patch".to_string(),
+        Some(path) if !path.is_empty() => path,
+        // TS renderApplyPatchTool uses `patch` as the header args when it
+        // cannot extract a path, so the visible header is
+        // `<icon> apply_patch patch` rather than just `<icon> apply_patch`.
+        _ => "patch".to_string(),
     };
     let mut details = compact_fields(
         args,
@@ -250,8 +440,8 @@ fn grep_display(name: &str, args: &Value) -> ToolDisplay {
     let pattern = get_str_any(args, &["pattern", "query", "regex"]).unwrap_or(name);
     let path = get_str_any(args, &["path", "file_path", "filePath", "dir", "include"]);
     let title = match path {
-        Some(path) if !path.is_empty() => format!("🔍 {pattern} in {path}"),
-        _ => format!("🔍 {pattern}"),
+        Some(path) if !path.is_empty() => format!("{pattern} in {path}"),
+        _ => pattern.to_string(),
     };
     ToolDisplay {
         title,
@@ -274,7 +464,7 @@ fn grep_display(name: &str, args: &Value) -> ToolDisplay {
 fn glob_display(name: &str, args: &Value) -> ToolDisplay {
     let pattern = get_str_any(args, &["pattern", "glob"]).unwrap_or(name);
     ToolDisplay {
-        title: format!("📂 {pattern}"),
+        title: pattern.to_string(),
         details: compact_fields(args, &["pattern", "glob"]),
     }
 }
@@ -294,7 +484,7 @@ fn ast_grep_display(name: &str, args: &Value) -> ToolDisplay {
         ],
     );
     let lang = get_str_any(args, &["lang", "language"]);
-    let mut title = format!("🔍 {pattern}");
+    let mut title = pattern.to_string();
     if let Some(paths) = paths.filter(|s| !s.is_empty()) {
         title.push_str(&format!(" in {paths}"));
     }
@@ -331,7 +521,7 @@ fn compress_display(name: &str, args: &Value) -> ToolDisplay {
     )
     .unwrap_or_else(|| name.to_string());
     ToolDisplay {
-        title: format!("📦 {target}"),
+        title: target,
         details: compact_fields(
             args,
             &["paths", "path", "target", "targets", "files", "topic"],
@@ -340,14 +530,15 @@ fn compress_display(name: &str, args: &Value) -> ToolDisplay {
 }
 
 fn question_display(name: &str, args: &Value) -> ToolDisplay {
-    let question = get_str_any(args, &["question", "prompt", "label", "text", "title"])
-        .map(str::to_string)
-        .or_else(|| first_question_text(args))
-        .unwrap_or_else(|| name.to_string());
-    let title = match choice_count(args) {
-        Some(count) => format!("❓ {question} ({count} {})", plural(count, "choice")),
-        None => format!("❓ {question}"),
-    };
+    let title = question_header(args).unwrap_or_else(|| {
+        let question = get_str_any(args, &["question", "prompt", "label", "text", "title"])
+            .map(str::to_string)
+            .unwrap_or_else(|| name.to_string());
+        match choice_count(args) {
+            Some(count) => format!("{question} ({count} {})", plural(count, "choice")),
+            None => question,
+        }
+    });
     ToolDisplay {
         title,
         details: compact_fields(
@@ -366,12 +557,34 @@ fn question_display(name: &str, args: &Value) -> ToolDisplay {
     }
 }
 
+fn question_header(args: &Value) -> Option<String> {
+    let questions = args.get("questions")?.as_array()?;
+    let labels = questions
+        .iter()
+        .filter_map(|question| get_str_any(question, &["label", "id"]))
+        .take(4)
+        .collect::<Vec<_>>();
+    let count = questions.len();
+    let count_text = format!("{count} {}", plural(count, "question"));
+    if labels.is_empty() {
+        return Some(count_text);
+    }
+    let shown = labels
+        .iter()
+        .take(3)
+        .copied()
+        .collect::<Vec<_>>()
+        .join(", ");
+    let suffix = if labels.len() > 3 { ", …" } else { "" };
+    Some(format!("{count_text} · {shown}{suffix}"))
+}
+
 fn repo_display(name: &str, args: &Value) -> ToolDisplay {
     let action = repo_action(name);
     let target = repo_target(args);
     let title = match target {
-        Some(target) if !target.is_empty() => format!("🏛️ {action} {target}"),
-        _ => format!("🏛️ {action}"),
+        Some(target) if !target.is_empty() => format!("{action} {target}"),
+        _ => action.to_string(),
     };
     ToolDisplay {
         title,
@@ -393,7 +606,7 @@ fn skill_display(name: &str, args: &Value) -> ToolDisplay {
         })
         .unwrap_or_else(|| name.to_string());
     ToolDisplay {
-        title: format!("🎯 {skill}"),
+        title: skill,
         details: compact_fields(
             args,
             &[
@@ -418,7 +631,7 @@ fn subagents_display(name: &str, args: &Value) -> ToolDisplay {
 fn web_search_display(name: &str, args: &Value) -> ToolDisplay {
     let query = get_str_any(args, &["query", "q", "search"]).unwrap_or(name);
     ToolDisplay {
-        title: format!("🌐 {query}"),
+        title: query.to_string(),
         details: compact_fields(args, &["query", "q", "search"]),
     }
 }
@@ -426,53 +639,84 @@ fn web_search_display(name: &str, args: &Value) -> ToolDisplay {
 fn web_fetch_display(name: &str, args: &Value) -> ToolDisplay {
     let url = get_str_any(args, &["url", "uri", "href"]).unwrap_or(name);
     ToolDisplay {
-        title: format!("🌐 {url}"),
+        title: url.to_string(),
         details: compact_fields(args, &["url", "uri", "href"]),
     }
 }
 
 fn default_display(name: &str, args: &Value) -> ToolDisplay {
-    let details = if args.is_null() {
-        None
-    } else {
-        Some(serde_json::to_string(args).unwrap_or_else(|_| format!("{args}")))
-    };
     ToolDisplay {
-        title: name.to_string(),
-        details,
+        // Match TS defaultToolRender: the generic block keeps the raw tool name
+        // as the label and renders parsed arguments as inline header args.
+        title: format_args_inline(args).unwrap_or_else(|| name.to_string()),
+        details: None,
+    }
+}
+
+fn tool_header_title(name: &str, title: &str) -> String {
+    let title = title.trim();
+    if title.is_empty() {
+        return name.to_string();
+    }
+    let normalized_title = normalized_tool_name(title);
+    let normalized_name = normalized_tool_name(name);
+    if normalized_title == normalized_name || normalized_title.starts_with(&normalized_name) {
+        title.to_string()
+    } else {
+        format!("{name} {title}")
     }
 }
 
 fn header_line(
     icon: &str,
-    color: Color,
+    icon_color: Color,
+    title_color: Color,
     title: &str,
     width: usize,
     theme: &Theme,
 ) -> Line<'static> {
-    let prefix = format!("  {icon} ");
+    let prefix = format!("{icon} ");
     let prefix_width = UnicodeWidthStr::width(prefix.as_str());
     if width <= prefix_width {
         return Line::from(Span::styled(
             truncate_display(&prefix, width),
-            Style::default().fg(color),
+            Style::default().fg(icon_color),
         ));
     }
 
     let title = truncate_display(&sanitize_inline(title), width - prefix_width);
-    let title_spans = spans_with_links(
-        &title,
-        Style::default().fg(color).add_modifier(Modifier::BOLD),
-        theme
-            .style_for(ThemeRole::Link)
-            .add_modifier(Modifier::BOLD),
-    );
-    let mut spans = vec![Span::styled(
-        prefix,
-        Style::default().fg(color).add_modifier(Modifier::BOLD),
-    )];
-    spans.extend(title_spans);
+    let mut spans = vec![Span::styled(prefix, Style::default().fg(icon_color))];
+    let (label, args) = split_header_label_args(&title);
+    spans.extend(spans_with_links(
+        label,
+        Style::default().fg(title_color),
+        theme.style_for(ThemeRole::Link),
+    ));
+    if let Some(args) = args {
+        spans.push(Span::raw(" ".to_string()));
+        spans.extend(spans_with_links(
+            args,
+            theme.style_for(ThemeRole::StatusDim),
+            theme.style_for(ThemeRole::Link),
+        ));
+    }
     Line::from(spans)
+}
+
+fn split_header_label_args(title: &str) -> (&str, Option<&str>) {
+    let trimmed = title.trim();
+    match trimmed.find(char::is_whitespace) {
+        Some(idx) => {
+            let (label, rest) = trimmed.split_at(idx);
+            let args = rest.trim_start();
+            if args.is_empty() {
+                (label, None)
+            } else {
+                (label, Some(args))
+            }
+        }
+        None => (trimmed, None),
+    }
 }
 
 fn detail_lines(text: &str, width: usize, max_lines: usize, theme: &Theme) -> Vec<Line<'static>> {
@@ -500,6 +744,122 @@ fn detail_lines(text: &str, width: usize, max_lines: usize, theme: &Theme) -> Ve
         .collect()
 }
 
+fn detail_line_count(text: &str, width: usize, max_lines: usize) -> usize {
+    let prefix = "    ";
+    let body_width = width.saturating_sub(UnicodeWidthStr::width(prefix)).max(1);
+    wrap::line_count(&sanitize_inline(text), body_width).min(max_lines)
+}
+
+fn result_preview_lines(
+    _name: &str,
+    text: &str,
+    ok: bool,
+    width: usize,
+    theme: &Theme,
+    rule: &ToolRendererRule,
+) -> Vec<Line<'static>> {
+    let preview_lines = rule.preview_lines.unwrap_or(0) as usize;
+    if rule.hidden.unwrap_or(false) || preview_lines == 0 {
+        return Vec::new();
+    }
+
+    let body_width = width.saturating_sub(2).max(1);
+    let color = if ok {
+        theme.style_for(ThemeRole::StatusDim)
+    } else {
+        theme.style_for(ThemeRole::DiagError)
+    };
+    let body_lines: Vec<String> = sanitize_tool_body(text)
+        .split('\n')
+        .flat_map(|line| wrap::wrap_text(line, body_width))
+        .map(|line| format!("  {line}"))
+        .collect();
+    if body_lines.is_empty() {
+        return Vec::new();
+    }
+
+    let tail = matches!(rule.direction, Some(crate::config::PreviewDirection::Tail));
+    let total = body_lines.len();
+    let mut selected: Vec<String> = if tail && total > preview_lines {
+        body_lines[total - preview_lines..].to_vec()
+    } else {
+        body_lines.into_iter().take(preview_lines).collect()
+    };
+    if total > preview_lines && !selected.is_empty() {
+        let marker_idx = if tail { 0 } else { selected.len() - 1 };
+        selected[marker_idx] = mark_truncated_preview_line(&selected[marker_idx]);
+    }
+
+    selected
+        .into_iter()
+        .map(|line| {
+            let spans = result_preview_spans(&line, color, theme);
+            Line::from(spans)
+        })
+        .collect()
+}
+
+fn result_preview_line_count(text: &str, width: usize, rule: &ToolRendererRule) -> usize {
+    let preview_lines = rule.preview_lines.unwrap_or(0) as usize;
+    if rule.hidden.unwrap_or(false) || preview_lines == 0 {
+        return 0;
+    }
+
+    let body_width = width.saturating_sub(2).max(1);
+    // Rendering later selects at most `previewLines` wrapped body rows (head or
+    // tail). For layout height we only need the capped count, so stop as soon
+    // as the cap is reached instead of wrapping/scanning huge tool outputs.
+    let mut count = 0usize;
+    for line in sanitize_tool_body(text).split('\n') {
+        count += wrap::line_count(line, body_width);
+        if count >= preview_lines {
+            return preview_lines;
+        }
+    }
+    count.min(preview_lines)
+}
+
+fn result_body_lines(text: &str, ok: bool, width: usize, theme: &Theme) -> Vec<Line<'static>> {
+    let body_width = width.saturating_sub(2).max(1);
+    let color = if ok {
+        theme.style_for(ThemeRole::StatusDim)
+    } else {
+        theme.style_for(ThemeRole::DiagError)
+    };
+    sanitize_tool_body(text)
+        .split('\n')
+        .flat_map(|line| wrap::wrap_text(line, body_width))
+        .map(|line| Line::from(result_preview_spans(&format!("  {line}"), color, theme)))
+        .collect()
+}
+
+fn result_body_line_count(text: &str, width: usize) -> usize {
+    let body_width = width.saturating_sub(2).max(1);
+    wrap::line_count(&sanitize_tool_body(text), body_width)
+}
+
+fn mark_truncated_preview_line(line: &str) -> String {
+    if let Some(rest) = line.strip_prefix("  ") {
+        format!("▶ {rest}")
+    } else {
+        format!("▶ {line}")
+    }
+}
+
+fn result_preview_spans(line: &str, color: Style, theme: &Theme) -> Vec<Span<'static>> {
+    let link_style = theme.style_for(ThemeRole::Link);
+    let Some(rest) = line.strip_prefix('▶') else {
+        return spans_with_links(line, color, link_style);
+    };
+
+    let mut spans = vec![Span::styled(
+        "▶".to_string(),
+        theme.style_for(ThemeRole::StatusDim),
+    )];
+    spans.extend(spans_with_links(rest, color, link_style));
+    spans
+}
+
 fn spans_with_links(text: &str, base_style: Style, link_style: Style) -> Vec<Span<'static>> {
     let link_spans = extract_file_paths(text, None);
     if link_spans.is_empty() {
@@ -509,7 +869,7 @@ fn spans_with_links(text: &str, base_style: Style, link_style: Style) -> Vec<Spa
     let mut out = Vec::new();
     let mut cursor = 0usize;
     for LinkSpan {
-        url,
+        url: _,
         text: link_text,
     } in link_spans
     {
@@ -521,7 +881,7 @@ fn spans_with_links(text: &str, base_style: Style, link_style: Style) -> Vec<Spa
         if start > cursor {
             out.push(Span::styled(text[cursor..start].to_string(), base_style));
         }
-        out.push(Span::styled(envelope_osc8(&url, &link_text), link_style));
+        out.push(Span::styled(link_text, link_style));
         cursor = end;
     }
     if cursor < text.len() {
@@ -588,20 +948,210 @@ fn wrapped_prefixed_lines(
     repaired
 }
 
-fn status_icon_and_color(status: ToolStatus, theme: &Theme) -> (&'static str, Color) {
+#[derive(Debug, Clone, Copy)]
+struct AppIcons {
+    alert: &'static str,
+    circle_outline: &'static str,
+    close_circle: &'static str,
+    check_circle: &'static str,
+    timer_sand: &'static str,
+}
+
+impl AppIcons {
+    fn from_config(config: &PixConfig) -> Self {
+        let normalized = config
+            .icon_theme
+            .name
+            .trim()
+            .to_ascii_lowercase()
+            .replace([' ', '_', '-'], "");
+        if matches!(normalized.as_str(), "fallback" | "plain" | "ascii") {
+            Self::fallback()
+        } else {
+            Self::nerd_font()
+        }
+    }
+
+    fn nerd_font() -> Self {
+        Self {
+            alert: "\u{f0026}",
+            circle_outline: "\u{f0766}",
+            close_circle: "\u{f0159}",
+            check_circle: "\u{f05e0}",
+            timer_sand: "\u{f051f}",
+        }
+    }
+
+    fn fallback() -> Self {
+        Self {
+            alert: "!",
+            circle_outline: "○",
+            close_circle: "×",
+            check_circle: "✓",
+            timer_sand: "⏳",
+        }
+    }
+}
+
+fn status_icon_and_color(
+    name: &str,
+    status: ToolStatus,
+    result_summary: Option<&str>,
+    result_ok: Option<bool>,
+    theme: &Theme,
+    icons: AppIcons,
+) -> (&'static str, Color) {
     match status {
-        ToolStatus::Pending => ("○", theme.tool_pending),
-        ToolStatus::Running => ("◑", theme.tool_running),
-        ToolStatus::Completed => ("●", theme.tool_completed),
-        ToolStatus::Failed => ("✖", theme.tool_failed),
+        ToolStatus::Pending => (icons.circle_outline, theme.status_dim),
+        ToolStatus::Running => (icons.timer_sand, theme.status_dim),
+        ToolStatus::Completed => {
+            if result_ok == Some(false) {
+                return (icons.close_circle, theme.tool_failed);
+            }
+            if let Some(severity) = lsp_diagnostic_severity_after_mutation(name, result_summary) {
+                return (
+                    icons.alert,
+                    if severity == DiagnosticSeverity::Error {
+                        theme.tool_failed
+                    } else {
+                        theme.diag_warn
+                    },
+                );
+            }
+            (icons.check_circle, theme.tool_completed)
+        }
+        ToolStatus::Failed => (icons.close_circle, theme.tool_failed),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DiagnosticSeverity {
+    Warning,
+    Error,
+}
+
+fn lsp_diagnostic_severity_after_mutation(
+    name: &str,
+    output: Option<&str>,
+) -> Option<DiagnosticSeverity> {
+    if !is_mutation_tool(name) {
+        return None;
+    }
+    let output = output?;
+    if !output.to_ascii_lowercase().contains("lsp diagnostics") {
+        return None;
+    }
+    if output.to_ascii_lowercase().contains("error") {
+        Some(DiagnosticSeverity::Error)
+    } else if output.to_ascii_lowercase().contains("warning") {
+        Some(DiagnosticSeverity::Warning)
+    } else {
+        None
+    }
+}
+
+fn is_mutation_tool(name: &str) -> bool {
+    matches!(
+        normalized_tool_name(name).as_str(),
+        "applypatch" | "apply_patch" | "edit" | "write" | "ast_apply" | "astapply"
+    )
+}
+
+fn resolve_tool_rule<'a>(name: &str, config: &'a ToolRendererConfig) -> ToolRendererRule {
+    if let Some(rule) = config.tools.get(name) {
+        return merged_tool_rule(rule, &config.default);
+    }
+
+    let normalized = normalized_tool_name(name);
+    if let Some(rule) = config
+        .tools
+        .iter()
+        .find_map(|(key, rule)| tool_rule_key_matches(key, &normalized).then_some(rule))
+    {
+        return merged_tool_rule(rule, &config.default);
+    }
+
+    config.default.clone()
+}
+
+fn tool_rule_key_matches(key: &str, normalized_name: &str) -> bool {
+    let normalized_key = normalized_tool_name(key.trim_end_matches('*'));
+    if key.ends_with('*') {
+        normalized_name.starts_with(&normalized_key)
+    } else {
+        normalized_name == normalized_key
+    }
+}
+
+fn merged_tool_rule(rule: &ToolRendererRule, default: &ToolRendererRule) -> ToolRendererRule {
+    ToolRendererRule {
+        preview_lines: rule.preview_lines.or(default.preview_lines),
+        direction: rule.direction.or(default.direction),
+        color: rule.color.clone().or_else(|| default.color.clone()),
+        default_expanded: rule.default_expanded.or(default.default_expanded),
+        compact_hidden: rule.compact_hidden.or(default.compact_hidden),
+        hidden: rule.hidden.or(default.hidden),
     }
 }
 
 fn normalized_tool_name(name: &str) -> String {
-    name.chars()
-        .filter(|c| *c != '-' && *c != ' ')
+    // TS `normalizeToolName` first drops namespace/path prefixes such as
+    // `functions.read`, `mcp:tool`, or `/nested/tool`. The Rust renderer then
+    // additionally removes separators for case-insensitive alias matching.
+    let last_part = name
+        .split(['.', ':', '/'])
+        .filter(|part| !part.is_empty())
+        .last()
+        .unwrap_or(name)
+        .trim();
+    last_part
+        .chars()
+        .filter(|c| *c != '-' && *c != '_' && *c != ' ')
         .flat_map(char::to_lowercase)
         .collect()
+}
+
+fn format_args_inline(args: &Value) -> Option<String> {
+    match args {
+        Value::Null => None,
+        Value::Object(obj) => {
+            let parts = obj
+                .iter()
+                .filter_map(|(key, value)| {
+                    format_inline_value(value).map(|value| format!("{key}: {value}"))
+                })
+                .collect::<Vec<_>>();
+            (!parts.is_empty()).then(|| parts.join(" · "))
+        }
+        other => format_inline_value(other),
+    }
+}
+
+fn format_inline_value(value: &Value) -> Option<String> {
+    match value {
+        Value::Null => Some("null".to_string()),
+        Value::Bool(value) => Some(value.to_string()),
+        Value::Number(value) => Some(value.to_string()),
+        Value::String(value) => Some(value.replace('\n', " ").trim().to_string()),
+        Value::Array(values) => {
+            let mut parts = values
+                .iter()
+                .take(3)
+                .filter_map(format_inline_value)
+                .collect::<Vec<_>>();
+            if values.len() > parts.len() {
+                parts.push(format!("+{}", values.len() - parts.len()));
+            }
+            Some(format!("[{}]", parts.join(", ")))
+        }
+        Value::Object(obj) => {
+            if obj.is_empty() {
+                Some("{}".to_string())
+            } else {
+                Some(format!("{{{} keys}}", obj.len()))
+            }
+        }
+    }
 }
 
 fn get_str_any<'a>(args: &'a Value, keys: &[&str]) -> Option<&'a str> {
@@ -718,15 +1268,6 @@ fn value_summary(value: &Value) -> Option<String> {
     }
 }
 
-fn first_question_text(args: &Value) -> Option<String> {
-    let first = args.get("questions")?.as_array()?.first()?;
-    get_str_any(
-        first,
-        &["question", "prompt", "label", "id", "text", "title"],
-    )
-    .map(str::to_string)
-}
-
 fn choice_count(args: &Value) -> Option<usize> {
     if let Some(count) = args.get("choices").and_then(Value::as_array).map(Vec::len) {
         return Some(count);
@@ -794,9 +1335,55 @@ fn plural(count: usize, word: &str) -> String {
 }
 
 fn sanitize_inline(text: &str) -> String {
-    text.replace('\r', "")
+    strip_hidden_metadata_lines(text)
+        .replace('\r', "")
         .replace('\n', " ")
         .replace('\x1b', "␛")
+}
+
+fn sanitize_tool_body(text: &str) -> String {
+    strip_hidden_metadata_lines(text)
+        .replace('\r', "")
+        .replace('\x1b', "␛")
+}
+
+fn strip_hidden_metadata_lines(text: &str) -> String {
+    text.lines()
+        .filter(|line| !is_hidden_metadata_line(line))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn is_hidden_metadata_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    let indent = line.len().saturating_sub(trimmed.len());
+    if indent > 3 {
+        return false;
+    }
+    is_markdown_reference_definition(trimmed) || is_streaming_dcp_metadata_prefix(trimmed)
+}
+
+fn is_markdown_reference_definition(line: &str) -> bool {
+    let Some(rest) = line.strip_prefix('[') else {
+        return false;
+    };
+    let Some(close) = rest.find("]:") else {
+        return false;
+    };
+    let after = rest[close + 2..].trim_start_matches([' ', '\t']);
+    !after.is_empty() && !after.chars().next().is_some_and(char::is_whitespace)
+}
+
+fn is_streaming_dcp_metadata_prefix(line: &str) -> bool {
+    is_dcp_reference_prefix(line, "[dcp-id]: # (m")
+        || is_dcp_reference_prefix(line, "[dcp-block-id]: # (b")
+}
+
+fn is_dcp_reference_prefix(line: &str, marker_prefix: &str) -> bool {
+    marker_prefix.starts_with(line)
+        || line
+            .strip_prefix(marker_prefix)
+            .is_some_and(|suffix| suffix.chars().all(|ch| ch.is_ascii_digit()))
 }
 
 fn truncate_display(text: &str, width: usize) -> String {
@@ -869,10 +1456,19 @@ fn strip_osc8(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::style::Modifier;
     use serde_json::json;
 
     fn first_text(name: &str, args: Value) -> String {
         line_text(&render_tool_call(name, &args, ToolStatus::Running, 80)[0])
+    }
+
+    fn nerd_running_prefix() -> String {
+        format!("{} ", AppIcons::nerd_font().timer_sand)
+    }
+
+    fn nerd_completed_prefix() -> String {
+        format!("{} ", AppIcons::nerd_font().check_circle)
     }
 
     fn rendered_texts(name: &str, args: Value) -> Vec<String> {
@@ -885,32 +1481,94 @@ mod tests {
     #[test]
     fn read_branch_renders_file_prefix() {
         let text = first_text("Read", json!({"file_path": "src/lib.rs"}));
-        assert!(text.starts_with("  ◑ 📖 src/lib.rs"), "got {text:?}");
+        assert!(
+            text.starts_with(&format!("{}Read src/lib.rs", nerd_running_prefix())),
+            "got {text:?}"
+        );
+    }
+
+    #[test]
+    fn namespaced_read_matches_pix_normalized_tool_name() {
+        let text = first_text(
+            "functions.read",
+            json!({"path": "src/lib.rs", "offset": 2, "limit": 5}),
+        );
+        assert!(
+            text.starts_with(&format!(
+                "{}functions.read src/lib.rs:2+5",
+                nerd_running_prefix()
+            )),
+            "got {text:?}"
+        );
     }
 
     #[test]
     fn bash_branch_renders_command_prefix() {
         let text = first_text("Bash", json!({"command": "cargo   test"}));
-        assert!(text.starts_with("  ◑ $ cargo test"), "got {text:?}");
+        assert!(
+            text.starts_with(&format!("{}Bash cargo test", nerd_running_prefix())),
+            "got {text:?}"
+        );
+    }
+
+    #[test]
+    fn shell_header_styles_label_color_and_args_muted_on_one_line() {
+        let theme = Theme::default();
+        let lines = render_tool_call_with_config(
+            "shell",
+            &json!({"command": "npm   run check", "cwd": "/repo"}),
+            ToolStatus::Completed,
+            80,
+            &theme,
+            &PixConfig::default(),
+        );
+        assert_eq!(
+            lines.len(),
+            1,
+            "shell header should not emit args detail rows"
+        );
+        assert_eq!(
+            line_text(&lines[0]),
+            format!("{}shell npm run check", nerd_completed_prefix())
+        );
+        assert_eq!(
+            lines[0].spans[1].style.fg,
+            Some(theme.resolve_color_ref("warning"))
+        );
+        assert_eq!(lines[0].spans[3].style.fg, Some(theme.status_dim));
+        assert!(!lines[0].spans[0]
+            .style
+            .add_modifier
+            .contains(Modifier::BOLD));
+        assert!(!lines[0].spans[1]
+            .style
+            .add_modifier
+            .contains(Modifier::BOLD));
     }
 
     #[test]
     fn edit_branch_renders_file_prefix() {
         let text = first_text("Edit", json!({"file_path": "src/main.rs"}));
-        assert!(text.starts_with("  ◑ ✎ src/main.rs"), "got {text:?}");
+        assert!(
+            text.starts_with(&format!("{}Edit src/main.rs", nerd_running_prefix())),
+            "got {text:?}"
+        );
     }
 
     #[test]
     fn write_branch_renders_file_prefix() {
         let text = first_text("Write", json!({"file_path": "out.txt", "content": "hello"}));
-        assert!(text.starts_with("  ◑ ✍ out.txt"), "got {text:?}");
+        assert!(
+            text.starts_with(&format!("{}Write out.txt", nerd_running_prefix())),
+            "got {text:?}"
+        );
     }
 
     #[test]
     fn apply_patch_branch_renders_file_prefix() {
         let text = first_text("ApplyPatch", json!({"file_path": "src/lib.rs"}));
         assert!(
-            text.starts_with("  ◑ ⚡ apply-patch src/lib.rs"),
+            text.starts_with(&format!("{}ApplyPatch src/lib.rs", nerd_running_prefix())),
             "got {text:?}"
         );
     }
@@ -921,19 +1579,81 @@ mod tests {
             "UpdateTodoList",
             json!({"items": [{"text": "a"}, {"text": "b"}]}),
         );
-        assert!(text.starts_with("  ◑ 📋 2 items"), "got {text:?}");
+        assert!(text.starts_with(&nerd_running_prefix()), "got {text:?}");
+        assert!(text.contains("2 items"), "got {text:?}");
+    }
+
+    #[test]
+    fn todo_tool_is_hidden_by_default_even_with_inline_widget_tasks() {
+        let args = json!({
+            "action": "list",
+            "__pix_todo_widget": [{"id": 1, "subject": "hidden"}],
+        });
+        let lines = render_tool_entry_with_config_and_expansion(
+            "todo",
+            &args,
+            ToolStatus::Completed,
+            Some("listed"),
+            Some(true),
+            false,
+            80,
+            &Theme::default(),
+            &PixConfig::default(),
+        );
+
+        assert!(lines.is_empty(), "todo should honor hidden config");
+        assert_eq!(
+            tool_entry_line_count_with_config_and_expansion(
+                "todo",
+                &args,
+                ToolStatus::Completed,
+                Some("listed"),
+                Some(true),
+                false,
+                80,
+                &PixConfig::default(),
+            ),
+            0
+        );
     }
 
     #[test]
     fn grep_branch_renders_pattern_and_path() {
         let text = first_text("Grep", json!({"pattern": "TODO", "path": "src"}));
-        assert!(text.starts_with("  ◑ 🔍 TODO in src"), "got {text:?}");
+        assert!(
+            text.starts_with(&format!("{}Grep TODO in src", nerd_running_prefix())),
+            "got {text:?}"
+        );
+    }
+
+    #[test]
+    fn grep_uses_default_zero_preview_lines_like_pix_config() {
+        let lines = render_tool_entry_with_theme(
+            "grep",
+            &json!({"pattern": "TODO", "path": "src"}),
+            ToolStatus::Completed,
+            Some("src/a.rs:1:TODO\nsrc/b.rs:2:TODO"),
+            Some(true),
+            80,
+            &Theme::default(),
+        );
+        let texts: Vec<String> = lines.iter().map(line_text).collect();
+
+        assert_eq!(
+            texts.len(),
+            1,
+            "grep should not render a result preview by default"
+        );
+        assert!(texts[0].contains("grep TODO in src"), "got {texts:?}");
     }
 
     #[test]
     fn glob_branch_renders_pattern() {
         let text = first_text("Glob", json!({"pattern": "**/*.rs"}));
-        assert!(text.starts_with("  ◑ 📂 **/*.rs"), "got {text:?}");
+        assert!(
+            text.starts_with(&format!("{}Glob **/*.rs", nerd_running_prefix())),
+            "got {text:?}"
+        );
     }
 
     #[test]
@@ -943,7 +1663,10 @@ mod tests {
             json!({"pattern": "console.log($X)", "paths": ["src", "tests"], "lang": "ts", "strictness": "relaxed"}),
         );
         assert!(
-            lines[0].starts_with("  ◑ 🔍 console.log($X) in src, tests [ts]"),
+            lines[0].starts_with(&format!(
+                "{}ast_grep console.log($X) in src, tests [ts]",
+                nerd_running_prefix()
+            )),
             "got {:?}",
             lines[0]
         );
@@ -954,8 +1677,14 @@ mod tests {
     fn ast_grep_aliases_match() {
         let dashed = first_text("ast-grep", json!({"pattern": "foo", "path": "src"}));
         let short = first_text("sg", json!({"pattern": "bar", "language": "rust"}));
-        assert!(dashed.starts_with("  ◑ 🔍 foo in src"), "got {dashed:?}");
-        assert!(short.starts_with("  ◑ 🔍 bar [rust]"), "got {short:?}");
+        assert!(
+            dashed.starts_with(&format!("{}ast-grep foo in src", nerd_running_prefix())),
+            "got {dashed:?}"
+        );
+        assert!(
+            short.starts_with(&format!("{}sg bar [rust]", nerd_running_prefix())),
+            "got {short:?}"
+        );
     }
 
     #[test]
@@ -965,7 +1694,10 @@ mod tests {
             json!({"paths": ["src/main.ts", "src/ui.ts"], "budget": 4096}),
         );
         assert!(
-            lines[0].starts_with("  ◑ 📦 src/main.ts, src/ui.ts"),
+            lines[0].starts_with(&format!(
+                "{}compress src/main.ts, src/ui.ts",
+                nerd_running_prefix()
+            )),
             "got {:?}",
             lines[0]
         );
@@ -979,11 +1711,32 @@ mod tests {
             json!({"question": "Pick a mode", "choices": ["fast", "safe", "custom"], "required": true}),
         );
         assert!(
-            lines[0].starts_with("  ◑ ❓ Pick a mode (3 choices)"),
+            lines[0].starts_with(&format!(
+                "{}question Pick a mode (3 choices)",
+                nerd_running_prefix()
+            )),
             "got {:?}",
             lines[0]
         );
         assert!(lines[1].contains("required=true"), "got {lines:?}");
+    }
+
+    #[test]
+    fn question_array_header_matches_pix_count_and_labels() {
+        let text = first_text(
+            "question",
+            json!({"questions": [
+                {"id": "scope", "label": "Scope", "prompt": "What?"},
+                {"id": "priority", "prompt": "Priority?"}
+            ]}),
+        );
+        assert!(
+            text.starts_with(&format!(
+                "{}question 2 questions · Scope, priority",
+                nerd_running_prefix()
+            )),
+            "got {text:?}"
+        );
     }
 
     #[test]
@@ -993,7 +1746,10 @@ mod tests {
             json!({"target": "src", "symbol": "ToolDisplay", "limit": 5}),
         );
         assert!(
-            lines[0].starts_with("  ◑ 🏛️ search src · ToolDisplay"),
+            lines[0].starts_with(&format!(
+                "{}repo_search search src · ToolDisplay",
+                nerd_running_prefix()
+            )),
             "got {:?}",
             lines[0]
         );
@@ -1007,7 +1763,10 @@ mod tests {
             json!({"path": "apps/tui-rust", "depth": 2}),
         );
         assert!(
-            lines[0].starts_with("  ◑ 🏛️ architecture apps/tui-rust"),
+            lines[0].starts_with(&format!(
+                "{}repo-architecture architecture apps/tui-rust",
+                nerd_running_prefix()
+            )),
             "got {:?}",
             lines[0]
         );
@@ -1020,7 +1779,11 @@ mod tests {
             "skill",
             json!({"path": "/tmp/skills/rust/SKILL.md", "mode": "read"}),
         );
-        assert!(lines[0].starts_with("  ◑ 🎯 rust"), "got {:?}", lines[0]);
+        assert!(
+            lines[0].starts_with(&format!("{}skill rust", nerd_running_prefix())),
+            "got {:?}",
+            lines[0]
+        );
         assert!(lines[1].contains("mode=\"read\""), "got {lines:?}");
     }
 
@@ -1031,7 +1794,7 @@ mod tests {
             json!({"action": "start", "tasks": [{"prompt": "a"}, {"prompt": "b"}], "concurrency": 2}),
         );
         assert!(
-            lines[0].starts_with("  ◑ 👥 start · 2 tasks"),
+            lines[0].starts_with(&nerd_running_prefix()) && lines[0].contains("start · 2 tasks"),
             "got {:?}",
             lines[0]
         );
@@ -1045,7 +1808,10 @@ mod tests {
             json!({"query": "rust ratatui widgets", "max_results": 3}),
         );
         assert!(
-            lines[0].starts_with("  ◑ 🌐 rust ratatui widgets"),
+            lines[0].starts_with(&format!(
+                "{}web_search rust ratatui widgets",
+                nerd_running_prefix()
+            )),
             "got {:?}",
             lines[0]
         );
@@ -1059,7 +1825,10 @@ mod tests {
             json!({"url": "https://example.com/docs", "timeout": 30}),
         );
         assert!(
-            lines[0].starts_with("  ◑ 🌐 https://example.com/docs"),
+            lines[0].starts_with(&format!(
+                "{}web_fetch https://example.com/docs",
+                nerd_running_prefix()
+            )),
             "got {:?}",
             lines[0]
         );
@@ -1069,22 +1838,39 @@ mod tests {
     #[test]
     fn default_fallback_renders_name_and_args() {
         let lines = render_tool_call("UnknownTool", &json!({"x": 1}), ToolStatus::Running, 80);
-        assert!(line_text(&lines[0]).contains("UnknownTool"));
-        assert!(line_text(&lines[1]).contains("\"x\":1"));
+        assert_eq!(
+            lines.len(),
+            1,
+            "TS defaultToolRender puts args in the header"
+        );
+        assert!(
+            line_text(&lines[0]).contains("UnknownTool x: 1"),
+            "got {:?}",
+            line_text(&lines[0])
+        );
+    }
+
+    #[test]
+    fn apply_patch_without_path_uses_patch_header_arg() {
+        let text = first_text("apply_patch", json!({}));
+        assert!(
+            text.starts_with(&format!("{}apply_patch patch", nerd_running_prefix())),
+            "got {text:?}"
+        );
     }
 
     #[test]
     fn status_icon_switches() {
         let args = json!({"file_path": "a"});
         let statuses = [
-            (ToolStatus::Pending, "○"),
-            (ToolStatus::Running, "◑"),
-            (ToolStatus::Completed, "●"),
-            (ToolStatus::Failed, "✖"),
+            (ToolStatus::Pending, AppIcons::nerd_font().circle_outline),
+            (ToolStatus::Running, AppIcons::nerd_font().timer_sand),
+            (ToolStatus::Completed, AppIcons::nerd_font().check_circle),
+            (ToolStatus::Failed, AppIcons::nerd_font().close_circle),
         ];
         for (status, icon) in statuses {
             let text = line_text(&render_tool_call("Read", &args, status, 80)[0]);
-            assert!(text.starts_with(&format!("  {icon} ")), "got {text:?}");
+            assert!(text.starts_with(&format!("{icon} ")), "got {text:?}");
         }
     }
 
@@ -1112,6 +1898,271 @@ mod tests {
         assert_eq!(
             tool_call_line_count("Unknown", &wrapped, 24),
             render_tool_call("Unknown", &wrapped, ToolStatus::Failed, 24).len()
+        );
+    }
+
+    #[test]
+    fn configured_tool_entry_line_count_matches_render_length() {
+        let mut config = PixConfig::default();
+        config.tool_renderer.default.preview_lines = Some(3);
+        let args = json!({"command": "printf '%s\\n' one two three four", "cwd": "/tmp"});
+        let summary = "one\ntwo\nthree\nfour\nfive\nsix";
+
+        let collapsed = render_tool_entry_with_config_and_expansion(
+            "bash",
+            &args,
+            ToolStatus::Completed,
+            Some(summary),
+            Some(true),
+            false,
+            32,
+            &Theme::default(),
+            &config,
+        );
+        assert_eq!(
+            tool_entry_line_count_with_config_and_expansion(
+                "bash",
+                &args,
+                ToolStatus::Completed,
+                Some(summary),
+                Some(true),
+                false,
+                32,
+                &config,
+            ),
+            collapsed.len()
+        );
+
+        let expanded = render_tool_entry_with_config_and_expansion(
+            "bash",
+            &args,
+            ToolStatus::Completed,
+            Some(summary),
+            Some(true),
+            true,
+            32,
+            &Theme::default(),
+            &config,
+        );
+        assert_eq!(
+            tool_entry_line_count_with_config_and_expansion(
+                "bash",
+                &args,
+                ToolStatus::Completed,
+                Some(summary),
+                Some(true),
+                true,
+                32,
+                &config,
+            ),
+            expanded.len()
+        );
+    }
+
+    #[test]
+    fn tool_entry_renders_pix_style_result_preview() {
+        let lines = render_tool_entry_with_theme(
+            "bash",
+            &json!({"command": "printf lines"}),
+            ToolStatus::Completed,
+            Some("one\ntwo\nthree\nfour\nfive\nsix\nseven"),
+            Some(true),
+            80,
+            &Theme::default(),
+        );
+        let texts: Vec<String> = lines.iter().map(line_text).collect();
+
+        assert!(
+            texts[0].starts_with(&format!("{}bash printf lines", nerd_completed_prefix())),
+            "got {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|line| line.starts_with("▶ two")),
+            "got {texts:?}"
+        );
+        assert!(texts.iter().any(|line| line == "  seven"), "got {texts:?}");
+        assert!(!texts.iter().any(|line| line == "  one"), "got {texts:?}");
+    }
+
+    #[test]
+    fn fallback_icon_theme_matches_pix_fallback_status_icons() {
+        let mut config = PixConfig::default();
+        config.icon_theme.name = "fallback".to_string();
+        let args = json!({"file_path": "a"});
+
+        let statuses = [
+            (ToolStatus::Pending, "○"),
+            (ToolStatus::Running, "⏳"),
+            (ToolStatus::Completed, "✓"),
+            (ToolStatus::Failed, "×"),
+        ];
+
+        for (status, icon) in statuses {
+            let line =
+                render_tool_call_with_config("read", &args, status, 80, &Theme::default(), &config);
+            let text = line_text(&line[0]);
+            assert!(text.starts_with(&format!("{icon} ")), "got {text:?}");
+        }
+    }
+
+    #[test]
+    fn configured_tool_rule_color_styles_title_separately_from_status_icon() {
+        let theme = Theme::default();
+        let mut config = PixConfig::default();
+        config.tool_renderer.tools.insert(
+            "bash".to_string(),
+            ToolRendererRule {
+                color: Some("toolSearch".to_string()),
+                ..ToolRendererRule::default()
+            },
+        );
+
+        let line = render_tool_call_with_config(
+            "bash",
+            &json!({"command": "cargo test"}),
+            ToolStatus::Completed,
+            80,
+            &theme,
+            &config,
+        )
+        .remove(0);
+
+        assert_eq!(line.spans[0].style.fg, Some(theme.tool_completed));
+        assert!(!line.spans[0].style.add_modifier.contains(Modifier::BOLD));
+        assert_eq!(
+            line.spans[1].style.fg,
+            Some(theme.resolve_color_ref("toolSearch"))
+        );
+        assert!(!line.spans[1].style.add_modifier.contains(Modifier::BOLD));
+        assert_eq!(
+            line_text(&line),
+            format!("{}bash cargo test", nerd_completed_prefix())
+        );
+        assert_eq!(line.spans[3].style.fg, Some(theme.status_dim));
+    }
+
+    #[test]
+    fn read_expanded_renders_tool_output_body() {
+        let lines = render_tool_entry_with_config_and_expansion(
+            "read",
+            &json!({"path": "src/lib.rs"}),
+            ToolStatus::Completed,
+            Some("line one\nline two"),
+            Some(true),
+            true,
+            80,
+            &Theme::default(),
+            &PixConfig::default(),
+        );
+        let texts: Vec<String> = lines.iter().map(line_text).collect();
+
+        assert_eq!(
+            texts[0],
+            format!("{}read src/lib.rs", nerd_completed_prefix())
+        );
+        assert!(
+            texts.iter().any(|line| line == "  line one"),
+            "got {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|line| line == "  line two"),
+            "got {texts:?}"
+        );
+    }
+
+    #[test]
+    fn mutation_lsp_diagnostics_use_alert_icon_and_severity_color() {
+        let theme = Theme::default();
+        let warning = render_tool_entry_with_config(
+            "apply_patch",
+            &json!({}),
+            ToolStatus::Completed,
+            Some("LSP diagnostics: 1 warning"),
+            Some(true),
+            80,
+            &theme,
+            &PixConfig::default(),
+        );
+        let error = render_tool_entry_with_config(
+            "apply_patch",
+            &json!({}),
+            ToolStatus::Completed,
+            Some("LSP diagnostics: 1 error"),
+            Some(true),
+            80,
+            &theme,
+            &PixConfig::default(),
+        );
+
+        assert!(line_text(&warning[0]).starts_with(&format!("{} ", AppIcons::nerd_font().alert)));
+        assert_eq!(warning[0].spans[0].style.fg, Some(theme.diag_warn));
+        assert!(line_text(&error[0]).starts_with(&format!("{} ", AppIcons::nerd_font().alert)));
+        assert_eq!(error[0].spans[0].style.fg, Some(theme.tool_failed));
+    }
+
+    #[test]
+    fn tool_header_has_no_outer_indent_and_truncated_preview_marker_matches_pix() {
+        let lines = render_tool_entry_with_theme(
+            "bash",
+            &json!({"command": "cargo test"}),
+            ToolStatus::Completed,
+            Some("one\ntwo\nthree\nfour\nfive\nsix\nseven"),
+            Some(false),
+            80,
+            &Theme::default(),
+        );
+        let texts: Vec<String> = lines.iter().map(line_text).collect();
+
+        assert!(!texts[0].starts_with(' '), "got {texts:?}");
+        assert!(texts[0].contains("bash cargo test"), "got {texts:?}");
+        assert!(texts.iter().any(|line| line == "▶ two"), "got {texts:?}");
+        assert!(texts.iter().any(|line| line == "  seven"), "got {texts:?}");
+        assert!(
+            !texts.iter().any(|line| line.starts_with("  ▶")),
+            "got {texts:?}"
+        );
+    }
+
+    #[test]
+    fn tool_result_preview_hides_dcp_metadata_markers() {
+        let lines = render_tool_entry_with_theme(
+            "bash",
+            &json!({"command": "echo ok"}),
+            ToolStatus::Completed,
+            Some("[dcp-id]: # (m154)\nreal output\n[dcp-block-id]: # (b3)"),
+            Some(true),
+            80,
+            &Theme::default(),
+        );
+        let texts: Vec<String> = lines.iter().map(line_text).collect();
+
+        assert!(
+            texts.iter().any(|line| line == "  real output"),
+            "got {texts:?}"
+        );
+        assert!(
+            !texts.iter().any(|line| line.contains("dcp-id")),
+            "got {texts:?}"
+        );
+        assert!(
+            !texts.iter().any(|line| line.contains("dcp-block-id")),
+            "got {texts:?}"
+        );
+    }
+
+    #[test]
+    fn thinking_entry_uses_tool_header_layout() {
+        let theme = Theme::default();
+        let line =
+            render_thinking_entry_with_config(true, 80, &theme, &PixConfig::default()).remove(0);
+        let text = line_text(&line);
+
+        assert!(text.starts_with(&nerd_completed_prefix()), "got {text:?}");
+        assert_eq!(text, format!("{}thinking", nerd_completed_prefix()));
+        assert!(!text.starts_with(' '), "got {text:?}");
+        assert_eq!(
+            line.spans[1].style.fg,
+            Some(theme.resolve_color_ref("accent"))
         );
     }
 }

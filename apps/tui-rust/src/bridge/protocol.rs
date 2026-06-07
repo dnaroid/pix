@@ -269,6 +269,8 @@ pub struct GetMessagesCommand {
     pub offset: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub from_end: Option<bool>,
+    #[serde(rename = "lazyOlder", skip_serializing_if = "Option::is_none")]
+    pub lazy_older: Option<bool>,
 }
 
 impl GetMessagesCommand {
@@ -279,6 +281,18 @@ impl GetMessagesCommand {
             limit: Some(limit),
             offset: None,
             from_end: Some(true),
+            lazy_older: None,
+        }
+    }
+
+    pub fn older(id: impl Into<String>, limit: u32) -> Self {
+        Self {
+            id: Some(id.into()),
+            type_: "get_messages",
+            limit: Some(limit),
+            offset: None,
+            from_end: None,
+            lazy_older: Some(true),
         }
     }
 }
@@ -356,7 +370,10 @@ pub enum EventKind {
     ModelChange,
     ToolCallStart,
     ToolCallEnd,
+    ToolCallUpdate,
     ToolResult,
+    MessageUpdate,
+    AgentEnd,
     MessageStart,
     MessageEnd,
     StreamStart,
@@ -375,7 +392,13 @@ impl EventKind {
             "model_change" => Self::ModelChange,
             "tool_call_start" => Self::ToolCallStart,
             "tool_call_end" => Self::ToolCallEnd,
+            "tool_call_update" => Self::ToolCallUpdate,
             "tool_result" => Self::ToolResult,
+            "tool_execution_start" => Self::ToolCallStart,
+            "tool_execution_update" => Self::ToolCallUpdate,
+            "tool_execution_end" => Self::ToolResult,
+            "message_update" => Self::MessageUpdate,
+            "agent_end" => Self::AgentEnd,
             "message_start" => Self::MessageStart,
             "message_end" => Self::MessageEnd,
             "stream_start" => Self::StreamStart,

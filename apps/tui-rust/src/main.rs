@@ -103,11 +103,13 @@ impl TabRuntimeManager {
     }
 
     fn runtime_id_for_session_key(&self, key: &str) -> Option<String> {
-        self.runtime_by_session_key.get(key).cloned()
+        let key = self.normalize_session_key(key);
+        self.runtime_by_session_key.get(&key).cloned()
     }
 
     fn register_runtime_state(&mut self, runtime_id: &str, state: &serde_json::Value) {
-        let Some(key) = runtime_session_key(state) else {
+        let Some(key) = runtime_session_key(state).map(|key| self.normalize_session_key(&key))
+        else {
             return;
         };
         if let Some(runtime) = self.runtimes.get_mut(runtime_id) {
@@ -169,7 +171,8 @@ impl TabRuntimeManager {
     }
 
     async fn close_runtime_for_path(&mut self, closed_path: &str) {
-        let Some(runtime_id) = self.runtime_by_session_key.remove(closed_path) else {
+        let closed_key = self.normalize_session_key(closed_path);
+        let Some(runtime_id) = self.runtime_by_session_key.remove(&closed_key) else {
             return;
         };
         if self.active_runtime_id == runtime_id {
@@ -193,6 +196,10 @@ impl TabRuntimeManager {
     fn alloc_runtime_id(&mut self) -> String {
         self.next_id += 1;
         format!("tab-runtime-{}", self.next_id)
+    }
+
+    fn normalize_session_key(&self, key: &str) -> String {
+        normalize_session_key(self.cwd.as_deref(), key)
     }
 
     async fn spawn_runtime(
@@ -277,6 +284,23 @@ fn runtime_session_key(state: &serde_json::Value) -> Option<String> {
                 .filter(|value| !value.trim().is_empty())
         })
         .map(str::to_string)
+}
+
+fn normalize_session_key(cwd: Option<&Path>, key: &str) -> String {
+    let trimmed = key.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let path = PathBuf::from(trimmed);
+    if path.is_absolute() {
+        return path.display().to_string();
+    }
+    if trimmed.contains('/') || trimmed.contains('\\') || trimmed.ends_with(".jsonl") {
+        if let Some(cwd) = cwd {
+            return cwd.join(path).display().to_string();
+        }
+    }
+    trimmed.to_string()
 }
 
 struct TerminalGuard {
@@ -451,259 +475,313 @@ async fn run_loop(
     voice_tx: mpsc::Sender<ui::voice::VoiceEvent>,
 ) -> Result<()> {
     let mut needs_redraw = true;
+    let mut events_since_draw = 0usize;
     loop {
         if needs_redraw {
-            render(terminal, app)?;
-            needs_redraw = false;
+            match rx.try_recv() {
+                Ok(ev) if events_since_draw < 64 => {
+                    events_since_draw += 1;
+                    handle_app_event(
+                        ev,
+                        terminal,
+                        app,
+                        rx,
+                        runtimes,
+                        tx.clone(),
+                        voice_tx.clone(),
+                    )
+                    .await?;
+                    if app.quit {
+                        return Ok(());
+                    }
+                    continue;
+                }
+                Ok(ev) => {
+                    render(terminal, app)?;
+                    needs_redraw = false;
+                    events_since_draw = 0;
+                    if handle_app_event(
+                        ev,
+                        terminal,
+                        app,
+                        rx,
+                        runtimes,
+                        tx.clone(),
+                        voice_tx.clone(),
+                    )
+                    .await?
+                    {
+                        needs_redraw = true;
+                    }
+                    if app.quit {
+                        return Ok(());
+                    }
+                    continue;
+                }
+                Err(mpsc::error::TryRecvError::Empty) => {
+                    render(terminal, app)?;
+                    needs_redraw = false;
+                    events_since_draw = 0;
+                }
+                Err(mpsc::error::TryRecvError::Disconnected) => {
+                    return Err(anyhow!("event loop closed"));
+                }
+            }
         }
         let ev = rx
             .recv()
             .await
             .ok_or_else(|| anyhow!("event loop closed"))?;
-        match ev {
-            AppEvent::Term(term_ev) => {
-                let Some(client) = runtimes.active_client() else {
-                    app.push_diag(DiagKind::BridgeError, "no active tab runtime");
-                    needs_redraw = true;
-                    continue;
-                };
-                if handle_term(
-                    app,
-                    term_ev,
-                    &client,
-                    runtimes,
-                    tx.clone(),
-                    voice_tx.clone(),
-                )
-                .await?
-                {
-                    needs_redraw = true;
-                }
-                if app.quit {
-                    return Ok(());
-                }
-            }
-            AppEvent::Bridge(bridge_ev) => {
-                handle_bridge(app, bridge_ev);
+        if handle_app_event(
+            ev,
+            terminal,
+            app,
+            rx,
+            runtimes,
+            tx.clone(),
+            voice_tx.clone(),
+        )
+        .await?
+        {
+            needs_redraw = true;
+            events_since_draw = events_since_draw.saturating_add(1);
+        }
+        if app.quit {
+            return Ok(());
+        }
+    }
+}
+
+async fn handle_app_event(
+    ev: AppEvent,
+    _terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    app: &mut ui::App,
+    _rx: &mut mpsc::Receiver<AppEvent>,
+    runtimes: &mut TabRuntimeManager,
+    tx: mpsc::Sender<AppEvent>,
+    voice_tx: mpsc::Sender<ui::voice::VoiceEvent>,
+) -> Result<bool> {
+    let mut needs_redraw = false;
+    match ev {
+        AppEvent::Term(term_ev) => {
+            let Some(client) = runtimes.active_client() else {
+                app.push_diag(DiagKind::BridgeError, "no active tab runtime");
+                return Ok(true);
+            };
+            if handle_term(
+                app,
+                term_ev,
+                &client,
+                runtimes,
+                tx.clone(),
+                voice_tx.clone(),
+            )
+            .await?
+            {
                 needs_redraw = true;
             }
-            AppEvent::TabBridge { runtime_id, event } => {
-                handle_tab_bridge(app, runtimes, &runtime_id, event);
-                needs_redraw = runtime_id == runtimes.active_runtime_id();
+            if app.quit {
+                return Ok(true);
             }
-            AppEvent::Tick => {
-                if app.tick_toasts(Instant::now()) {
-                    needs_redraw = true;
-                }
-            }
-            AppEvent::Diag(kind, text) => {
-                app.push_diag(kind, text);
-                needs_redraw = true;
-            }
-            AppEvent::SessionState(state) => {
-                let previous_cwd = app.cwd.clone();
-                let next_cwd = state
-                    .get("cwd")
-                    .and_then(|v| v.as_str())
-                    .map(str::to_string);
-                app.apply_session_state(&state);
-                if let Some(cwd) = next_cwd {
-                    if cwd != previous_cwd {
-                        app.toasts.push(
-                            ToastLevel::Info,
-                            ToastKindLabel::Info,
-                            format!("Switched workspace to {cwd}"),
-                            4,
-                        );
-                        refresh_autocomplete_for_cwd(app);
-                    }
-                }
-                needs_redraw = true;
-            }
-            AppEvent::TabSessionState { runtime_id, state } => {
-                runtimes.register_runtime_state(&runtime_id, &state);
-                if runtime_id == runtimes.active_runtime_id() {
-                    let previous_cwd = app.cwd.clone();
-                    let next_cwd = state
-                        .get("cwd")
-                        .and_then(|v| v.as_str())
-                        .map(str::to_string);
-                    app.apply_session_state(&state);
-                    app.save_active_runtime_state();
-                    if let Some(cwd) = next_cwd {
-                        if cwd != previous_cwd {
-                            app.toasts.push(
-                                ToastLevel::Info,
-                                ToastKindLabel::Info,
-                                format!("Switched workspace to {cwd}"),
-                                4,
-                            );
-                            refresh_autocomplete_for_cwd(app);
-                        }
-                    }
-                    needs_redraw = true;
-                }
-            }
-            AppEvent::SwitchedSessionState(state) => {
-                let previous_cwd = app.cwd.clone();
-                let next_cwd = state
-                    .get("cwd")
-                    .and_then(|v| v.as_str())
-                    .map(str::to_string);
-                app.save_active_runtime_state();
-                app.reset_conversation();
-                app.apply_session_state(&state);
-                app.restore_active_runtime_state();
-                if let Some(cwd) = next_cwd {
-                    if cwd != previous_cwd {
-                        app.toasts.push(
-                            ToastLevel::Info,
-                            ToastKindLabel::Info,
-                            format!("Switched workspace to {cwd}"),
-                            4,
-                        );
-                        refresh_autocomplete_for_cwd(app);
-                    }
-                }
-                needs_redraw = true;
-            }
-            AppEvent::ActivatedTabState { runtime_id, state } => {
-                runtimes.set_active_runtime(runtime_id.clone());
-                runtimes.register_runtime_state(&runtime_id, &state);
-                app.save_active_runtime_state();
-                app.reset_conversation();
-                app.apply_session_state(&state);
-                if !app.restore_active_runtime_state() {
-                    if let Some(client) = runtimes.client_for_runtime(&runtime_id) {
-                        load_active_runtime_history(app, &client).await;
-                    }
-                }
-                needs_redraw = true;
-            }
-            AppEvent::NewSessionState(state) => {
-                app.save_active_runtime_state();
-                app.reset_conversation();
-                app.apply_session_state(&state);
-                let id = app.session_id.as_deref().unwrap_or("(unknown)");
-                app.push_diag(DiagKind::Info, format!("started session {id}"));
-                needs_redraw = true;
-            }
-            AppEvent::NewTabRuntimeState { runtime_id, state } => {
-                runtimes.set_active_runtime(runtime_id.clone());
-                runtimes.register_runtime_state(&runtime_id, &state);
-                app.save_active_runtime_state();
-                app.reset_conversation();
-                app.apply_session_state(&state);
-                let id = app.session_id.as_deref().unwrap_or("(unknown)");
-                app.push_diag(DiagKind::Info, format!("started session {id}"));
-                app.save_active_runtime_state();
-                needs_redraw = true;
-            }
-            AppEvent::ClosedTabState { state, closed_path } => {
-                let previous_cwd = app.cwd.clone();
-                let next_cwd = state
-                    .get("cwd")
-                    .and_then(|v| v.as_str())
-                    .map(str::to_string);
-                app.save_active_runtime_state();
-                app.reset_conversation();
-                app.apply_session_state(&state);
-                app.restore_active_runtime_state();
-                app.remove_tab_path(&closed_path);
-                if let Some(cwd) = next_cwd {
-                    if cwd != previous_cwd {
-                        app.toasts.push(
-                            ToastLevel::Info,
-                            ToastKindLabel::Info,
-                            format!("Switched workspace to {cwd}"),
-                            4,
-                        );
-                        refresh_autocomplete_for_cwd(app);
-                    }
-                }
-                needs_redraw = true;
-            }
-            AppEvent::ClosedTabRuntimeState {
-                runtime_id,
-                state,
-                closed_path,
-            } => {
-                runtimes.set_active_runtime(runtime_id.clone());
-                runtimes.register_runtime_state(&runtime_id, &state);
-                app.save_active_runtime_state();
-                app.reset_conversation();
-                app.apply_session_state(&state);
-                if !app.restore_active_runtime_state() {
-                    if let Some(client) = runtimes.client_for_runtime(&runtime_id) {
-                        load_active_runtime_history(app, &client).await;
-                    }
-                }
-                app.remove_tab_path(&closed_path);
-                runtimes.close_runtime_for_path(&closed_path).await;
-                needs_redraw = true;
-            }
-            AppEvent::SessionList(result) => {
-                match result {
-                    Ok(sessions) => app
-                        .session_list
-                        .set_sessions(sessions, app.session_file.as_deref()),
-                    Err(error) => app.session_list.set_error(error),
-                }
-                needs_redraw = true;
-            }
-            AppEvent::EnhancerResult(result) => {
-                match result {
-                    Ok(text) => {
-                        app.input.set_text(text);
-                        // TODO(autocomplete): refresh suggestions after programmatic edits.
-                        app.toasts.push(
-                            ToastLevel::Info,
-                            ToastKindLabel::Info,
-                            "Prompt enhanced",
-                            2,
-                        );
-                    }
-                    Err(error) => {
-                        let message = match error {
-                            EnhancerError::NotSupported => {
-                                "prompt enhancer not supported by sidecar".to_string()
-                            }
-                            EnhancerError::Empty => "nothing to enhance".to_string(),
-                            other => other.to_string(),
-                        };
-                        app.toasts
-                            .push(ToastLevel::Warn, ToastKindLabel::Info, message, 0);
-                    }
-                }
-                needs_redraw = true;
-            }
-            AppEvent::ModelPickerLoaded(result) => {
-                match result {
-                    Ok(models) => app.model_picker.set_models(models),
-                    Err(error) => app.model_picker.set_error(error),
-                }
-                needs_redraw = true;
-            }
-            AppEvent::ModelSwitchResult(result) => {
-                match result {
-                    Ok(label) => app.toasts.push(
-                        ToastLevel::Info,
-                        ToastKindLabel::Info,
-                        format!("Switched model to {label}"),
-                        4,
-                    ),
-                    Err(error) => app
-                        .toasts
-                        .push(ToastLevel::Warn, ToastKindLabel::Info, error, 6),
-                }
-                needs_redraw = true;
-            }
-            AppEvent::VoiceEvent(ev) => {
-                app.handle_voice_event(ev);
+        }
+        AppEvent::Bridge(bridge_ev) => {
+            handle_bridge(app, bridge_ev);
+            needs_redraw = true;
+        }
+        AppEvent::TabBridge { runtime_id, event } => {
+            handle_tab_bridge(app, runtimes, &runtime_id, event);
+            needs_redraw = runtime_id == runtimes.active_runtime_id();
+        }
+        AppEvent::Tick => {
+            if app.tick_toasts(Instant::now()) {
                 needs_redraw = true;
             }
         }
+        AppEvent::Diag(kind, text) => {
+            app.push_diag(kind, text);
+            needs_redraw = true;
+        }
+        AppEvent::SessionState(state) => {
+            let previous_cwd = app.cwd.clone();
+            let next_cwd = state
+                .get("cwd")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            app.apply_session_state(&state);
+            if let Some(cwd) = next_cwd {
+                if cwd != previous_cwd {
+                    app.toasts.push(
+                        ToastLevel::Info,
+                        ToastKindLabel::Info,
+                        format!("Switched workspace to {cwd}"),
+                        4,
+                    );
+                    refresh_autocomplete_for_cwd(app);
+                }
+            }
+            needs_redraw = true;
+        }
+        AppEvent::TabSessionState { runtime_id, state } => {
+            runtimes.register_runtime_state(&runtime_id, &state);
+            if runtime_id == runtimes.active_runtime_id() {
+                let previous_cwd = app.cwd.clone();
+                let next_cwd = state
+                    .get("cwd")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string);
+                app.apply_session_state(&state);
+                app.save_active_runtime_state();
+                if let Some(cwd) = next_cwd {
+                    if cwd != previous_cwd {
+                        app.toasts.push(
+                            ToastLevel::Info,
+                            ToastKindLabel::Info,
+                            format!("Switched workspace to {cwd}"),
+                            4,
+                        );
+                        refresh_autocomplete_for_cwd(app);
+                    }
+                }
+                needs_redraw = true;
+            }
+        }
+        AppEvent::SwitchedSessionState(state) => {
+            let previous_cwd = app.cwd.clone();
+            let next_cwd = state
+                .get("cwd")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            app.save_active_runtime_state();
+            app.reset_conversation();
+            app.apply_session_state(&state);
+            app.restore_active_runtime_state();
+            if let Some(cwd) = next_cwd {
+                if cwd != previous_cwd {
+                    app.toasts.push(
+                        ToastLevel::Info,
+                        ToastKindLabel::Info,
+                        format!("Switched workspace to {cwd}"),
+                        4,
+                    );
+                    refresh_autocomplete_for_cwd(app);
+                }
+            }
+            needs_redraw = true;
+        }
+        AppEvent::ActivatedTabState { runtime_id, state } => {
+            app.save_active_runtime_state();
+            activate_tab_runtime_state(app, runtimes, runtime_id, state).await;
+            needs_redraw = true;
+        }
+        AppEvent::NewSessionState(state) => {
+            app.save_active_runtime_state();
+            app.reset_conversation();
+            app.apply_session_state(&state);
+            let id = app.session_id.as_deref().unwrap_or("(unknown)");
+            app.push_diag(DiagKind::Info, format!("started session {id}"));
+            needs_redraw = true;
+        }
+        AppEvent::NewTabRuntimeState { runtime_id, state } => {
+            app.save_active_runtime_state();
+            activate_tab_runtime_state(app, runtimes, runtime_id, state).await;
+            let id = app.session_id.as_deref().unwrap_or("(unknown)");
+            app.push_diag(DiagKind::Info, format!("started session {id}"));
+            app.save_active_runtime_state();
+            needs_redraw = true;
+        }
+        AppEvent::ClosedTabState { state, closed_path } => {
+            let previous_cwd = app.cwd.clone();
+            let next_cwd = state
+                .get("cwd")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            app.save_active_runtime_state();
+            app.reset_conversation();
+            app.apply_session_state(&state);
+            app.restore_active_runtime_state();
+            app.remove_tab_path(&closed_path);
+            if let Some(cwd) = next_cwd {
+                if cwd != previous_cwd {
+                    app.toasts.push(
+                        ToastLevel::Info,
+                        ToastKindLabel::Info,
+                        format!("Switched workspace to {cwd}"),
+                        4,
+                    );
+                    refresh_autocomplete_for_cwd(app);
+                }
+            }
+            needs_redraw = true;
+        }
+        AppEvent::ClosedTabRuntimeState {
+            runtime_id,
+            state,
+            closed_path,
+        } => {
+            app.save_active_runtime_state();
+            activate_tab_runtime_state(app, runtimes, runtime_id, state).await;
+            app.remove_tab_path(&closed_path);
+            runtimes.close_runtime_for_path(&closed_path).await;
+            needs_redraw = true;
+        }
+        AppEvent::SessionList(result) => {
+            match result {
+                Ok(sessions) => app
+                    .session_list
+                    .set_sessions(sessions, app.session_file.as_deref()),
+                Err(error) => app.session_list.set_error(error),
+            }
+            needs_redraw = true;
+        }
+        AppEvent::EnhancerResult(result) => {
+            match result {
+                Ok(text) => {
+                    app.input.set_text(text);
+                    // TODO(autocomplete): refresh suggestions after programmatic edits.
+                    app.toasts
+                        .push(ToastLevel::Info, ToastKindLabel::Info, "Prompt enhanced", 2);
+                }
+                Err(error) => {
+                    let message = match error {
+                        EnhancerError::NotSupported => {
+                            "prompt enhancer not supported by sidecar".to_string()
+                        }
+                        EnhancerError::Empty => "nothing to enhance".to_string(),
+                        other => other.to_string(),
+                    };
+                    app.toasts
+                        .push(ToastLevel::Warn, ToastKindLabel::Info, message, 0);
+                }
+            }
+            needs_redraw = true;
+        }
+        AppEvent::ModelPickerLoaded(result) => {
+            match result {
+                Ok(models) => app.model_picker.set_models(models),
+                Err(error) => app.model_picker.set_error(error),
+            }
+            needs_redraw = true;
+        }
+        AppEvent::ModelSwitchResult(result) => {
+            match result {
+                Ok(label) => app.toasts.push(
+                    ToastLevel::Info,
+                    ToastKindLabel::Info,
+                    format!("Switched model to {label}"),
+                    4,
+                ),
+                Err(error) => app
+                    .toasts
+                    .push(ToastLevel::Warn, ToastKindLabel::Info, error, 6),
+            }
+            needs_redraw = true;
+        }
+        AppEvent::VoiceEvent(ev) => {
+            app.handle_voice_event(ev);
+            needs_redraw = true;
+        }
     }
+    Ok(needs_redraw)
 }
 
 async fn establish_session_direct(
@@ -755,7 +833,7 @@ async fn ensure_session_state(
 }
 
 async fn load_active_runtime_history(app: &mut ui::App, client: &bridge::BridgeClient) {
-    match client.get_messages_tail(200).await {
+    match client.get_messages_tail(HISTORY_PAGE_SIZE).await {
         Ok(messages) => {
             app.apply_history_messages(&messages);
             app.save_active_runtime_state();
@@ -765,6 +843,114 @@ async fn load_active_runtime_history(app: &mut ui::App, client: &bridge::BridgeC
                 DiagKind::BridgeError,
                 format!("load session history failed: {error}"),
             );
+        }
+    }
+}
+
+const HISTORY_PAGE_SIZE: u32 = 200;
+
+fn current_conversation_geometry(
+    app: &mut ui::App,
+) -> Result<(ui::viewport::ViewportWidth, usize)> {
+    let (cols, rows) = crossterm::terminal::size().context("terminal size")?;
+    let size = Rect::new(0, 0, cols, rows);
+    let input_inner_width = size.width.saturating_sub(2) as usize;
+    let max_input_rows = ((size.height as usize) / 2).clamp(3, 10);
+    let rendered_input = app.input.render(
+        input_inner_width,
+        max_input_rows,
+        INPUT_FIRST_PREFIX,
+        INPUT_CONT_PREFIX,
+    );
+    let input_content_rows = rendered_input.visual_lines.len().max(1).min(max_input_rows);
+    let input_total_height = (input_content_rows + 2) as u16;
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Min(3),
+            Constraint::Length(input_total_height),
+            Constraint::Length(1),
+        ])
+        .split(size);
+    Ok((
+        ui::viewport::ViewportWidth(chunks[1].width as usize),
+        chunks[1].height as usize,
+    ))
+}
+
+async fn maybe_load_older_history(
+    app: &mut ui::App,
+    client: &bridge::BridgeClient,
+    viewport_width: ui::viewport::ViewportWidth,
+    body_height: usize,
+) -> bool {
+    if !app.history_has_older || body_height == 0 {
+        return false;
+    }
+    let old_total = app
+        .viewport
+        .line_count_with_config(&app.blocks, viewport_width, &app.config);
+    let old_metrics = app.scroll.metrics(old_total, body_height);
+    if old_metrics.start != 0 {
+        return false;
+    }
+
+    match client.get_messages_older(HISTORY_PAGE_SIZE).await {
+        Ok(messages) => {
+            let added_blocks = app.prepend_history_messages(&messages);
+            if added_blocks == 0 {
+                app.save_active_runtime_state();
+                return false;
+            }
+            let new_total =
+                app.viewport
+                    .line_count_with_config(&app.blocks, viewport_width, &app.config);
+            let added_lines = new_total.saturating_sub(old_total);
+            let anchored_start = old_metrics.start.saturating_add(added_lines);
+            app.scroll.detached_start = Some(anchored_start);
+            app.scroll.scroll_from_bottom = new_total
+                .saturating_sub(body_height)
+                .saturating_sub(anchored_start);
+            app.save_active_runtime_state();
+            true
+        }
+        Err(error) => {
+            app.toasts.push(
+                ToastLevel::Warn,
+                ToastKindLabel::Bridge,
+                format!("load older history failed: {error}"),
+                6,
+            );
+            true
+        }
+    }
+}
+
+async fn maybe_load_older_history_for_current_geometry(
+    app: &mut ui::App,
+    client: &bridge::BridgeClient,
+) -> Result<bool> {
+    let (viewport_width, body_height) = current_conversation_geometry(app)?;
+    Ok(maybe_load_older_history(app, client, viewport_width, body_height).await)
+}
+
+async fn activate_tab_runtime_state(
+    app: &mut ui::App,
+    runtimes: &mut TabRuntimeManager,
+    runtime_id: String,
+    state: serde_json::Value,
+) {
+    let client = runtimes.client_for_runtime(&runtime_id);
+    runtimes.set_active_runtime(runtime_id.clone());
+    runtimes.register_runtime_state(&runtime_id, &state);
+    app.reset_conversation();
+    app.apply_session_state(&state);
+    if !app.restore_active_runtime_state() {
+        if let Some(client) = client {
+            load_active_runtime_history(app, &client).await;
+        } else {
+            app.save_active_runtime_state();
         }
     }
 }
@@ -876,11 +1062,29 @@ async fn switch_tab_relative(app: &mut ui::App, runtimes: &mut TabRuntimeManager
 
     match runtimes.activate_or_spawn_for_session(path).await {
         Ok((runtime_id, state)) => {
-            runtimes.set_active_runtime(runtime_id.clone());
-            runtimes.register_runtime_state(&runtime_id, &state);
-            app.reset_conversation();
-            app.apply_session_state(&state);
-            app.restore_active_runtime_state();
+            activate_tab_runtime_state(app, runtimes, runtime_id, state).await;
+        }
+        Err(e) => app.toasts.push(
+            ToastLevel::Warn,
+            ToastKindLabel::Bridge,
+            format!("tab switch failed: {e}"),
+            6,
+        ),
+    }
+}
+
+async fn switch_tab_to_path(app: &mut ui::App, runtimes: &mut TabRuntimeManager, path: String) {
+    if app.session_file.as_deref() == Some(path.as_str()) {
+        return;
+    }
+    app.save_active_input_to_tabs();
+    app.save_active_runtime_state();
+    app.tabs.active_path = Some(path.clone());
+    app.persist_tabs_best_effort();
+
+    match runtimes.activate_or_spawn_for_session(path).await {
+        Ok((runtime_id, state)) => {
+            activate_tab_runtime_state(app, runtimes, runtime_id, state).await;
         }
         Err(e) => app.toasts.push(
             ToastLevel::Warn,
@@ -911,10 +1115,7 @@ async fn close_active_tab(app: &mut ui::App, runtimes: &mut TabRuntimeManager) {
         app.save_active_runtime_state();
         match runtimes.spawn_new_session_runtime().await {
             Ok((runtime_id, state)) => {
-                runtimes.set_active_runtime(runtime_id.clone());
-                runtimes.register_runtime_state(&runtime_id, &state);
-                app.reset_conversation();
-                app.apply_session_state(&state);
+                activate_tab_runtime_state(app, runtimes, runtime_id, state).await;
                 app.remove_tab_path(&closed_path);
                 runtimes.close_runtime_for_path(&closed_path).await;
             }
@@ -935,11 +1136,7 @@ async fn close_active_tab(app: &mut ui::App, runtimes: &mut TabRuntimeManager) {
     app.save_active_runtime_state();
     match runtimes.activate_or_spawn_for_session(next_path).await {
         Ok((runtime_id, state)) => {
-            runtimes.set_active_runtime(runtime_id.clone());
-            runtimes.register_runtime_state(&runtime_id, &state);
-            app.reset_conversation();
-            app.apply_session_state(&state);
-            app.restore_active_runtime_state();
+            activate_tab_runtime_state(app, runtimes, runtime_id, state).await;
             app.remove_tab_path(&closed_path);
             runtimes.close_runtime_for_path(&closed_path).await;
         }
@@ -947,6 +1144,44 @@ async fn close_active_tab(app: &mut ui::App, runtimes: &mut TabRuntimeManager) {
             ToastLevel::Warn,
             ToastKindLabel::Bridge,
             format!("close_tab switch failed: {e}"),
+            6,
+        ),
+    }
+}
+
+async fn close_tab_path(app: &mut ui::App, runtimes: &mut TabRuntimeManager, path: String) {
+    if app.session_file.as_deref() == Some(path.as_str()) {
+        close_active_tab(app, runtimes).await;
+        return;
+    }
+    if app.runtime_state_is_streaming(&path) {
+        app.toasts.push(
+            ToastLevel::Warn,
+            ToastKindLabel::Info,
+            "Cannot close streaming tab",
+            4,
+        );
+        return;
+    }
+    app.remove_tab_path(&path);
+    runtimes.close_runtime_for_path(&path).await;
+}
+
+async fn open_new_tab(app: &mut ui::App, runtimes: &mut TabRuntimeManager) {
+    app.save_active_input_to_tabs();
+    app.save_active_runtime_state();
+    app.push_diag(DiagKind::Info, "starting new tab runtime…");
+    match runtimes.spawn_new_session_runtime().await {
+        Ok((runtime_id, state)) => {
+            activate_tab_runtime_state(app, runtimes, runtime_id, state).await;
+            let id = app.session_id.as_deref().unwrap_or("(unknown)");
+            app.push_diag(DiagKind::Info, format!("started session {id}"));
+            app.save_active_runtime_state();
+        }
+        Err(e) => app.toasts.push(
+            ToastLevel::Warn,
+            ToastKindLabel::Bridge,
+            format!("new tab runtime failed: {e}"),
             6,
         ),
     }
@@ -982,19 +1217,29 @@ async fn handle_term(
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(1),
-                Constraint::Length(1),
+                Constraint::Length(2),
                 Constraint::Min(3),
                 Constraint::Length(input_total_height),
+                Constraint::Length(1),
             ])
             .split(size);
 
-        let conversation_area = chunks[2];
-        let input_area = chunks[3];
-        let body_height = conversation_area.height.saturating_sub(2) as usize;
-        let viewport_width =
-            ui::viewport::ViewportWidth(conversation_area.width.saturating_sub(2) as usize);
-        let total = app.viewport.line_count(&app.blocks, viewport_width);
+        let tabs_area = chunks[0];
+        let conversation_area = chunks[1];
+        let input_area = chunks[2];
+        let tab_layout = ui::tabs_state::tabs_layout(
+            &app.tabs,
+            &app.theme_cache,
+            tabs_area.width as usize,
+            app.session_file.as_deref(),
+            app.session_id.as_deref(),
+            app.session_name.as_deref(),
+        );
+        let body_height = conversation_area.height as usize;
+        let viewport_width = ui::viewport::ViewportWidth(conversation_area.width as usize);
+        let total = app
+            .viewport
+            .line_count_with_config(&app.blocks, viewport_width, &app.config);
         let metrics = app.scroll.metrics(total, body_height);
         app.record_metrics(total, body_height);
 
@@ -1004,6 +1249,8 @@ async fn handle_term(
             row,
             conversation_area,
             input_area,
+            tabs_area,
+            &tab_layout.targets,
             metrics.start,
             &app.viewport,
             &app.blocks,
@@ -1012,6 +1259,18 @@ async fn handle_term(
         );
 
         return match action {
+            ui::mouse::MouseAction::TabClick { path } => {
+                switch_tab_to_path(app, runtimes, path).await;
+                Ok(true)
+            }
+            ui::mouse::MouseAction::TabClose { path } => {
+                close_tab_path(app, runtimes, path).await;
+                Ok(true)
+            }
+            ui::mouse::MouseAction::TabNew => {
+                open_new_tab(app, runtimes).await;
+                Ok(true)
+            }
             ui::mouse::MouseAction::ConversationLinkClick { url } => {
                 app.toasts.push(
                     ToastLevel::Info,
@@ -1022,13 +1281,17 @@ async fn handle_term(
                 Ok(true)
             }
             ui::mouse::MouseAction::ConversationClick { block_idx } => {
-                app.toasts.push(
-                    ToastLevel::Info,
-                    ToastKindLabel::Info,
-                    format!("clicked block {block_idx}"),
-                    2,
-                );
-                Ok(true)
+                if app.toggle_tool_expanded(block_idx) {
+                    Ok(true)
+                } else {
+                    app.toasts.push(
+                        ToastLevel::Info,
+                        ToastKindLabel::Info,
+                        format!("clicked block {block_idx}"),
+                        2,
+                    );
+                    Ok(true)
+                }
             }
             ui::mouse::MouseAction::InputClick {
                 visual_row,
@@ -1042,7 +1305,13 @@ async fn handle_term(
                 width,
             )),
             ui::mouse::MouseAction::ConversationScroll { lines } => {
-                Ok(app.scroll.scroll_by_lines(lines, total, body_height))
+                let changed = app.scroll.scroll_by_lines(lines, total, body_height);
+                let loaded = if changed {
+                    maybe_load_older_history(app, client, viewport_width, body_height).await
+                } else {
+                    false
+                };
+                Ok(changed || loaded)
             }
             ui::mouse::MouseAction::Unhandled => Ok(false),
         };
@@ -1310,26 +1579,7 @@ async fn handle_term(
 
     if matches!(key, KeyEvent { code: KeyCode::Char('n'), modifiers, .. } if modifiers.contains(KeyModifiers::CONTROL))
     {
-        app.save_active_input_to_tabs();
-        app.save_active_runtime_state();
-        app.push_diag(DiagKind::Info, "starting new tab runtime…");
-        match runtimes.spawn_new_session_runtime().await {
-            Ok((runtime_id, state)) => {
-                runtimes.set_active_runtime(runtime_id.clone());
-                runtimes.register_runtime_state(&runtime_id, &state);
-                app.reset_conversation();
-                app.apply_session_state(&state);
-                let id = app.session_id.as_deref().unwrap_or("(unknown)");
-                app.push_diag(DiagKind::Info, format!("started session {id}"));
-                app.save_active_runtime_state();
-            }
-            Err(e) => app.toasts.push(
-                ToastLevel::Warn,
-                ToastKindLabel::Bridge,
-                format!("new tab runtime failed: {e}"),
-                6,
-            ),
-        }
+        open_new_tab(app, runtimes).await;
         return Ok(true);
     }
 
@@ -1337,12 +1587,15 @@ async fn handle_term(
         // When streaming, lock input except for navigation.
         return match key.code {
             KeyCode::PageUp => {
-                let _ = app.scroll.scroll_by_page(
+                let changed = app.scroll.scroll_by_page(
                     ui::scroll::PageDirection::Up,
                     app.last_body_height.saturating_sub(2).max(1),
                     app.last_line_count,
                     app.last_body_height,
                 );
+                if changed {
+                    let _ = maybe_load_older_history_for_current_geometry(app, client).await?;
+                }
                 Ok(true)
             }
             KeyCode::PageDown => {
@@ -1355,9 +1608,12 @@ async fn handle_term(
                 Ok(true)
             }
             KeyCode::Up => {
-                let _ = app
-                    .scroll
-                    .scroll_by_lines(1, app.last_line_count, app.last_body_height);
+                let changed =
+                    app.scroll
+                        .scroll_by_lines(1, app.last_line_count, app.last_body_height);
+                if changed {
+                    let _ = maybe_load_older_history_for_current_geometry(app, client).await?;
+                }
                 Ok(true)
             }
             KeyCode::Down => {
@@ -1525,9 +1781,12 @@ async fn handle_term(
             if app.input.is_multiline() {
                 app.input.move_up();
             } else {
-                let _ = app
-                    .scroll
-                    .scroll_by_lines(1, app.last_line_count, app.last_body_height);
+                let changed =
+                    app.scroll
+                        .scroll_by_lines(1, app.last_line_count, app.last_body_height);
+                if changed {
+                    let _ = maybe_load_older_history_for_current_geometry(app, client).await?;
+                }
             }
             Ok(true)
         }
@@ -1558,12 +1817,15 @@ async fn handle_term(
             Ok(true)
         }
         KeyCode::PageUp => {
-            let _ = app.scroll.scroll_by_page(
+            let changed = app.scroll.scroll_by_page(
                 ui::scroll::PageDirection::Up,
                 app.last_body_height.saturating_sub(2).max(1),
                 app.last_line_count,
                 app.last_body_height,
             );
+            if changed {
+                let _ = maybe_load_older_history_for_current_geometry(app, client).await?;
+            }
             Ok(true)
         }
         KeyCode::PageDown => {
@@ -1740,11 +2002,7 @@ async fn handle_session_picker_key(
                 app.save_active_runtime_state();
                 match runtimes.activate_or_spawn_for_session(path).await {
                     Ok((runtime_id, state)) => {
-                        runtimes.set_active_runtime(runtime_id.clone());
-                        runtimes.register_runtime_state(&runtime_id, &state);
-                        app.reset_conversation();
-                        app.apply_session_state(&state);
-                        app.restore_active_runtime_state();
+                        activate_tab_runtime_state(app, runtimes, runtime_id, state).await;
                     }
                     Err(e) => app.toasts.push(
                         ToastLevel::Warn,
@@ -2116,6 +2374,21 @@ mod tests {
 
         assert!(toast.contains("2000×1500"));
         assert!(toast.contains("resized"));
+    }
+
+    #[test]
+    fn normalize_session_key_resolves_relative_session_files() {
+        let cwd = Path::new("/tmp/workspace");
+
+        assert_eq!(
+            normalize_session_key(Some(cwd), "sessions/abc.jsonl"),
+            "/tmp/workspace/sessions/abc.jsonl"
+        );
+        assert_eq!(
+            normalize_session_key(Some(cwd), "/tmp/other.jsonl"),
+            "/tmp/other.jsonl"
+        );
+        assert_eq!(normalize_session_key(Some(cwd), "session-id"), "session-id");
     }
 }
 
