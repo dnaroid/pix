@@ -22,6 +22,7 @@ const MODULES: Array<{ name: string; load: () => Promise<ExtensionModule> }> = [
 	{ name: "web-search", load: () => import("./web-search/index") },
 	{ name: "dcp", load: () => import("./dcp/index") },
 	{ name: "prompt-commands", load: () => import("./prompt-commands/index") },
+	{ name: "telegram-mirror", load: () => import("./telegram-mirror/index") },
 ];
 
 export default async function piToolsSuite(pi: ExtensionAPI) {

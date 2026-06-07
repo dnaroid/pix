@@ -175,6 +175,24 @@ describe("AppMouseController", () => {
 		assert.equal(queueCount, 1);
 	});
 
+	it("handles input-border status buttons on press before screen selection", () => {
+		let queueCount = 0;
+		const controller = new AppMouseController(
+			fakeHost({ queueInputFromStatus: () => { queueCount += 1; } }),
+			fakePopupMenus(),
+			fakePopupActions(),
+			fakeScrollController(),
+			fakeCommandController(),
+		);
+		controller.statusDraftQueueTarget = { row: 5, startColumn: 1, endColumn: 3 };
+
+		controller.handleMouse({ button: 0, x: 2, y: 5, released: false });
+		controller.handleMouse({ button: 3, x: 2, y: 5, released: true });
+
+		assert.equal(queueCount, 1);
+		assert.equal(controller.mouseSelection, undefined);
+	});
+
 	it("does not queue editor input when clicking outside the draft queue status button", () => {
 		let queueCount = 0;
 		const controller = new AppMouseController(

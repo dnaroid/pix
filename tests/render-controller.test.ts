@@ -54,6 +54,59 @@ describe("AppRenderController", () => {
 		assert.deepEqual(mouseController.statusModelTarget, { row: 6, startColumn: 1, endColumn: 7 });
 	});
 
+	it("preserves input-border widget mouse targets during status-only repaint", () => {
+		const mouseController = fakeMouseController();
+		const statusLineRenderer = {
+			...fakeStatusLineRenderer(),
+			inputBorderWidgetsLayout: () => ({ text: "Q", inputBorderWidgetStartColumn: 2 }),
+			renderInputBorderWidgets: (_row: number, _layout: unknown, separatorText: string) => separatorText,
+			draftQueueTarget: (_layout: unknown, row: number) => ({ row, startColumn: 2, endColumn: 3 }),
+		} as unknown as StatusLineRenderer;
+		const controller = new AppRenderController({
+			isRunning: () => true,
+			terminalColumns: () => 40,
+			terminalRows: () => 6,
+		}, {
+			theme: THEMES.dark,
+			screenStyler: fakeScreenStyler(),
+			editorLayoutRenderer: {
+				computeLayout: () => ({
+					renderedInput: {
+						lines: ["INPUT"],
+						cursorRowOffset: 0,
+						cursorColumn: 1,
+						cursorVisible: false,
+						scrollOffset: 0,
+						editorStartRowOffset: 0,
+						tagSpans: [[]],
+					},
+					aboveEditorLines: [],
+					belowEditorLines: [],
+					inputStartRow: 3,
+					inputSeparatorRow: 2,
+					inputBottomSeparatorRow: 4,
+					bodyHeight: 1,
+				}),
+			} as unknown as EditorLayoutRenderer,
+			scrollController: {
+				conversationView: () => ({ lines: [{ text: "BODY" }], metrics: { bodyHeight: 1, viewportColumns: 40, conversationLineCount: 1, maxScroll: 0, start: 0 } }),
+			} as unknown as AppScrollController,
+			popupMenus: fakePopupMenus(),
+			mouseController,
+			statusLineRenderer,
+			tabLineRenderer: { panelRows: () => 0, layout: () => ({ text: "", segments: [], targets: [] }), render: () => "" } as unknown as TabLineRenderer,
+			toastController: { toast: { visibleStates: [] } } as unknown as AppToastController,
+			voiceProgressOverlayText: () => undefined,
+		});
+
+		captureStdout(() => controller.render());
+		assert.deepEqual(mouseController.statusDraftQueueTarget, { row: 4, startColumn: 2, endColumn: 3 });
+
+		captureStdout(() => controller.renderStatusLine());
+
+		assert.deepEqual(mouseController.statusDraftQueueTarget, { row: 4, startColumn: 2, endColumn: 3 });
+	});
+
 	it("renders the visible tab row at the top and starts toasts below it", () => {
 		const mouseController = fakeMouseController();
 		let layoutRows: number | undefined;
@@ -603,6 +656,7 @@ function fakeMouseController(): AppMouseController {
 		statusUserJumpTarget: undefined,
 		statusThinkingExpandTarget: undefined,
 		statusCompactToolsTarget: undefined,
+		statusTerminalBellSoundTarget: undefined,
 		statusSessionTarget: undefined,
 		statusPromptEnhancerTarget: undefined,
 		statusVoiceMicTarget: undefined,
