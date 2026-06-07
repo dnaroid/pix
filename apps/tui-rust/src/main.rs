@@ -88,6 +88,12 @@ impl TabRuntimeManager {
             .map(|runtime| runtime.client.clone())
     }
 
+    fn client_for_runtime(&self, runtime_id: &str) -> Option<bridge::BridgeClient> {
+        self.runtimes
+            .get(runtime_id)
+            .map(|runtime| runtime.client.clone())
+    }
+
     fn active_runtime_id(&self) -> &str {
         &self.active_runtime_id
     }
@@ -364,6 +370,9 @@ async fn main() -> Result<()> {
     )?;
     app.apply_session_state(&startup_state);
     app.save_active_runtime_state();
+    if let Some(client) = runtimes.active_client() {
+        load_active_runtime_history(&mut app, &client).await;
+    }
 
     // Terminal events pump.
     let term_tx = tx.clone();
@@ -564,7 +573,11 @@ async fn run_loop(
                 app.save_active_runtime_state();
                 app.reset_conversation();
                 app.apply_session_state(&state);
-                app.restore_active_runtime_state();
+                if !app.restore_active_runtime_state() {
+                    if let Some(client) = runtimes.client_for_runtime(&runtime_id) {
+                        load_active_runtime_history(app, &client).await;
+                    }
+                }
                 needs_redraw = true;
             }
             AppEvent::NewSessionState(state) => {
@@ -620,7 +633,11 @@ async fn run_loop(
                 app.save_active_runtime_state();
                 app.reset_conversation();
                 app.apply_session_state(&state);
-                app.restore_active_runtime_state();
+                if !app.restore_active_runtime_state() {
+                    if let Some(client) = runtimes.client_for_runtime(&runtime_id) {
+                        load_active_runtime_history(app, &client).await;
+                    }
+                }
                 app.remove_tab_path(&closed_path);
                 runtimes.close_runtime_for_path(&closed_path).await;
                 needs_redraw = true;
@@ -734,6 +751,21 @@ async fn ensure_session_state(
             .get_state()
             .await
             .context("get_state after session change")
+    }
+}
+
+async fn load_active_runtime_history(app: &mut ui::App, client: &bridge::BridgeClient) {
+    match client.get_messages_tail(200).await {
+        Ok(messages) => {
+            app.apply_history_messages(&messages);
+            app.save_active_runtime_state();
+        }
+        Err(error) => {
+            app.push_diag(
+                DiagKind::BridgeError,
+                format!("load session history failed: {error}"),
+            );
+        }
     }
 }
 

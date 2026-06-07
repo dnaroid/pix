@@ -605,6 +605,57 @@ impl App {
         }
     }
 
+    pub fn apply_history_messages(&mut self, payload: &Value) -> usize {
+        let Some(messages) = payload.get("messages").and_then(Value::as_array) else {
+            return 0;
+        };
+
+        self.blocks.clear();
+        self.call_index = CallIndex::default();
+        for message in messages {
+            let role = get_nonempty_str(message, "role").unwrap_or_default();
+            match role {
+                "user" => {
+                    if let Some(text) = message_text(message) {
+                        self.blocks.push(Block::User { text });
+                    }
+                }
+                "assistant" => {
+                    if let Some(text) = message_text(message) {
+                        self.blocks.push(Block::Assistant {
+                            text,
+                            done: true,
+                            provider: None,
+                            model: None,
+                        });
+                    }
+                }
+                "custom" => {
+                    if message
+                        .get("display")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false)
+                    {
+                        if let Some(text) = message_text(message) {
+                            self.blocks.push(Block::Diag {
+                                kind: DiagKind::Info,
+                                text,
+                            });
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        self.viewport.invalidate();
+        self.scroll.reset();
+        self.last_line_count = 0;
+        self.link_click_targets.clear();
+        self.session_search.clear();
+        self.blocks.len()
+    }
+
     pub fn handle_event(&mut self, type_: &str, payload: &Value) {
         let kind = EventKind::from_type(type_);
         match kind {
@@ -1013,6 +1064,34 @@ fn compact_json(v: &Value) -> String {
     serde_json::to_string(v).unwrap_or_else(|_| format!("{v}"))
 }
 
+fn message_text(message: &Value) -> Option<String> {
+    if let Some(text) = get_nonempty_str(message, "content") {
+        return Some(text.to_string());
+    }
+
+    if let Some(text) = message
+        .get("content")
+        .and_then(|content| content.get("text"))
+        .and_then(Value::as_str)
+        .filter(|text| !text.trim().is_empty())
+    {
+        return Some(text.to_string());
+    }
+
+    let parts = message.get("content")?.as_array()?;
+    let text = parts
+        .iter()
+        .filter_map(|part| {
+            part.get("text")
+                .and_then(Value::as_str)
+                .or_else(|| part.get("content").and_then(Value::as_str))
+        })
+        .filter(|text| !text.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    (!text.trim().is_empty()).then_some(text)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1133,5 +1212,26 @@ mod tests {
         assert_eq!(app.session_id.as_deref(), Some("session-b"));
         assert_eq!(app.tool_use_count, 3);
         assert!(matches!(app.blocks.first(), Some(Block::User { text }) if text == "hello from b"));
+    }
+
+    #[test]
+    fn apply_history_messages_hydrates_visible_user_and_assistant_blocks() {
+        let mut app = App::new("/tmp".to_string());
+        let count = app.apply_history_messages(&json!({
+            "messages": [
+                { "role": "user", "content": [{ "type": "text", "text": "hello" }] },
+                { "role": "assistant", "content": "world" },
+                { "role": "custom", "display": true, "content": "system note" }
+            ]
+        }));
+
+        assert_eq!(count, 3);
+        assert!(matches!(app.blocks.first(), Some(Block::User { text }) if text == "hello"));
+        assert!(
+            matches!(app.blocks.get(1), Some(Block::Assistant { text, done: true, .. }) if text == "world")
+        );
+        assert!(
+            matches!(app.blocks.get(2), Some(Block::Diag { kind: DiagKind::Info, text }) if text == "system note")
+        );
     }
 }
