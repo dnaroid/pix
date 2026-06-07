@@ -2568,7 +2568,7 @@ function ExtensionWidgets({ widgets }: { widgets: ExtensionWidget[] }) {
             </span>
             <span>{widget.degradedComponent ? "component degraded" : widget.placement === "belowEditor" ? "below editor" : "above editor"}</span>
           </div>
-          <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-claude-dark p-3 font-mono text-xs leading-5 text-claude-on-dark">{widget.lines.join("\n")}</pre>
+          <pre className="max-h-40 overflow-auto whitespace-pre-wrap wrap-break-words rounded-lg bg-claude-dark p-3 font-mono text-xs leading-5 text-claude-on-dark">{widget.lines.join("\n")}</pre>
         </div>
       ))}
     </div>

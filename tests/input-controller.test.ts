@@ -117,6 +117,33 @@ describe("AppInputController terminal input", () => {
 		assert.deepEqual(calls.scrollPages.slice(-2), [-1, 1]);
 	});
 
+	it("buffers bracketed paste payload without rendering per character", async () => {
+		const { controller, editor, calls } = createController({ extensionInputUsesEditor: false, shiftPressed: false, consumeExtensionInput: false });
+		const pastedText = ["first line", "second line", "third line"].join("\r\n");
+
+		controller.handleChunk(Buffer.from(`\x1b[200~${pastedText}\x1b[201~`));
+		assert.equal(calls.render, 0);
+
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		assert.equal(editor.text, "[Pasted ~3 lines] ");
+		assert.equal(editor.attachments.length, 1);
+		assert.equal(editor.attachments[0]?.kind, "pasted-text");
+		assert.equal(calls.render, 1);
+	});
+
+	it("keeps a split bracketed paste end sequence out of the pasted payload", async () => {
+		const { controller, editor } = createController({ extensionInputUsesEditor: false, shiftPressed: false, consumeExtensionInput: false });
+
+		controller.handleChunk(Buffer.from("\x1b[200~first\nsecond\x1b[201"));
+		controller.handleChunk(Buffer.from("~"));
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		assert.equal(editor.text, "[Pasted ~2 lines] ");
+		assert.equal(editor.attachments[0]?.kind, "pasted-text");
+		assert.equal(editor.attachments[0]?.text, "first\nsecond");
+	});
+
 	it("executes every registered escape-sequence handler without relying on terminal side effects", () => {
 		const { controller, editor, calls } = createController({ extensionInputUsesEditor: false, shiftPressed: false, consumeExtensionInput: false });
 		editor.setText("alpha beta\ngamma", 8);

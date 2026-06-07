@@ -15,7 +15,7 @@ export type InputPasteHost = {
 const PASTE_FINGERPRINT_PREFIX_CHARS = 64 * 1024;
 
 export class InputPasteHandler {
-	private pasteBuffer = "";
+	private pasteBufferParts: string[] = [];
 	private readonly recentPasteFingerprints = new Map<string, number>();
 	private suppressImagePathPasteUntil = 0;
 
@@ -42,17 +42,17 @@ export class InputPasteHandler {
 
 	beginBracketedPaste(): void {
 		this.host.inputEditor.beginBracketedPaste();
-		this.pasteBuffer = "";
+		this.pasteBufferParts = [];
 	}
 
 	appendBracketedPasteText(text: string): void {
-		this.pasteBuffer += text;
+		if (text) this.pasteBufferParts.push(text);
 	}
 
 	endBracketedPaste(): void {
 		this.host.inputEditor.endBracketedPaste();
-		const text = this.pasteBuffer;
-		this.pasteBuffer = "";
+		const text = this.pasteBufferParts.join("");
+		this.pasteBufferParts = [];
 		this.handlePasteEnd(text);
 	}
 

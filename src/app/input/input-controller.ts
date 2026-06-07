@@ -72,6 +72,8 @@ export class AppInputController {
 
 	private drainInputBuffer(): void {
 		while (this.inputBuffer.length > 0) {
+			if (this.consumeBracketedPastePayload()) continue;
+
 			const mouseMatch = /^\x1b\[<(\d+);(-?\d+);(-?\d+)([mM])/.exec(this.inputBuffer);
 			if (mouseMatch) {
 				this.inputBuffer = this.inputBuffer.slice(mouseMatch[0].length);
@@ -104,6 +106,24 @@ export class AppInputController {
 			this.inputBuffer = this.inputBuffer.slice(1);
 			if (char) this.handleChar(char);
 		}
+	}
+
+	private consumeBracketedPastePayload(): boolean {
+		if (!this.host.inputEditor.isInBracketedPaste) return false;
+
+		const endSequence = "\x1b[201~";
+		const endIndex = this.inputBuffer.indexOf(endSequence);
+		if (endIndex === 0) return false;
+
+		const payloadEnd = endIndex === -1
+			? safeBracketedPastePayloadLength(this.inputBuffer, endSequence)
+			: endIndex;
+		if (payloadEnd === 0) return false;
+
+		const payload = this.inputBuffer.slice(0, payloadEnd);
+		this.inputBuffer = this.inputBuffer.slice(payloadEnd);
+		this.pasteHandler.appendBracketedPasteText(normalizeBracketedPastePayload(payload));
+		return true;
 	}
 
 	private getEscapeSequences(): Array<[string, () => void]> {
@@ -445,4 +465,15 @@ export class AppInputController {
 		return this.host.isShiftPressed?.() ?? isNativeShiftPressed();
 	}
 
+}
+
+function normalizeBracketedPastePayload(payload: string): string {
+	return payload.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
+function safeBracketedPastePayloadLength(buffer: string, endSequence: string): number {
+	for (let length = Math.min(buffer.length, endSequence.length - 1); length > 0; length--) {
+		if (endSequence.startsWith(buffer.slice(buffer.length - length))) return buffer.length - length;
+	}
+	return buffer.length;
 }
