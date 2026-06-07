@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -11,6 +11,9 @@ const PIX_SYSTEM_MESSAGE_CUSTOM_TYPE: &str = "pix-system";
 const PIX_SYSTEM_DISPLAY_ENTRY_CUSTOM_TYPE: &str = "pix:system_message";
 const DEFAULT_WINDOW_LIMIT: usize = 120;
 const MAX_WINDOW_LIMIT: usize = 500;
+const WINDOW_SCAN_BYTES: u64 = 256 * 1024;
+const WINDOW_SCAN_BYTES_AROUND_ANCHOR: u64 = 16 * 1024 * 1024;
+const MAX_WINDOW_SCAN_BYTES: u64 = 16 * 1024 * 1024;
 const VIEWPORT_STATE_FILE: &str = "pix-desktop-viewports.json";
 const MAX_VIEWPORTS: usize = 1_024;
 
@@ -38,17 +41,8 @@ pub struct SessionSummary {
 
 #[derive(Default)]
 pub struct HistoryCache {
-    entries: HashMap<PathBuf, CachedHistory>,
     viewports: HashMap<String, ViewportCursor>,
     viewports_loaded: bool,
-}
-
-#[derive(Clone)]
-struct CachedHistory {
-    modified: Option<SystemTime>,
-    len: u64,
-    messages: Vec<Value>,
-    ids: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -73,6 +67,8 @@ pub struct ViewportCursor {
     pub anchor_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub anchor_offset: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub anchor_entry_offset: Option<u64>,
     pub updated_at: u64,
 }
 
@@ -84,12 +80,16 @@ pub fn read_window(
     limit: Option<usize>,
     from_end: Option<bool>,
     anchor_id: Option<String>,
+    anchor_entry_offset: Option<u64>,
     before: Option<usize>,
     after: Option<usize>,
+    before_offset: Option<bool>,
     restore_viewport: Option<bool>,
 ) -> Result<HistoryWindow, String> {
     let path = std::fs::canonicalize(PathBuf::from(&session_path))
         .map_err(|e| format!("session path not accessible: {e}"))?;
+    let metadata = std::fs::metadata(&path).map_err(|e| format!("read session metadata failed: {e}"))?;
+    let file_len = metadata.len();
     cache.ensure_viewports_loaded()?;
     let saved_cursor = if restore_viewport.unwrap_or(false) {
         cache.viewports.get(&path_key(&path)).cloned()
@@ -98,56 +98,55 @@ pub fn read_window(
     };
     let effective_anchor_id = anchor_id.or_else(|| {
         saved_cursor.as_ref().and_then(|cursor| {
-            if cursor.follow_output {
+            if cursor.follow_output || cursor.anchor_entry_offset.is_none() {
                 None
             } else {
                 cursor.anchor_id.clone()
             }
         })
     });
+    let effective_anchor_entry_offset = anchor_entry_offset.or_else(|| {
+        saved_cursor.as_ref().and_then(|cursor| {
+            if cursor.follow_output {
+                None
+            } else {
+                cursor.anchor_entry_offset
+            }
+        })
+    });
     let effective_from_end = from_end.unwrap_or(false)
         || saved_cursor.as_ref().is_some_and(|cursor| cursor.follow_output);
-    let history = cache.get_or_load(&path)?;
-    let total = history.messages.len();
     let limit = limit.unwrap_or(DEFAULT_WINDOW_LIMIT).clamp(1, MAX_WINDOW_LIMIT);
 
-    let start = if let Some(anchor_id) = effective_anchor_id.as_deref() {
-        let anchor_index = history
-            .ids
-            .iter()
-            .position(|id| id == anchor_id || format!("h-{id}") == anchor_id)
-            .unwrap_or_else(|| total.saturating_sub(limit));
-        let before = before.unwrap_or(limit / 2).min(limit.saturating_sub(1));
-        anchor_index.saturating_sub(before)
+    let mut window = if let Some(anchor_entry_offset) = effective_anchor_entry_offset {
+        read_window_around_entry_offset(
+            &path,
+            file_len,
+            anchor_entry_offset,
+            before.unwrap_or(limit / 2).min(limit.saturating_sub(1)),
+            after.unwrap_or(limit / 2),
+            limit,
+        )?
+    } else if let Some(anchor_id) = effective_anchor_id.as_deref() {
+        // Without a byte offset, keep the scan bounded. This can restore recent
+        // cursors from legacy localStorage without scanning the whole session.
+        read_recent_window_around_anchor_id(
+            &path,
+            file_len,
+            anchor_id,
+            before.unwrap_or(limit / 2).min(limit.saturating_sub(1)),
+            after.unwrap_or(limit / 2),
+            limit,
+        )?
     } else if effective_from_end {
-        total.saturating_sub(limit)
+        read_tail_window(&path, file_len, limit)?
+    } else if before_offset.unwrap_or(false) {
+        read_window_before_offset(&path, file_len, offset.map(|value| value as u64).unwrap_or(file_len), limit)?
     } else {
-        offset.unwrap_or(0).min(total)
+        read_window_after_offset(&path, file_len, offset.map(|value| value as u64).unwrap_or(0), limit)?
     };
-
-    let requested_end = if effective_anchor_id.is_some() {
-        let after = after.unwrap_or(limit / 2);
-        let anchor_index = history
-            .ids
-            .iter()
-            .position(|id| effective_anchor_id.as_deref().is_some_and(|anchor| id == anchor || format!("h-{id}") == anchor))
-            .unwrap_or(start);
-        anchor_index.saturating_add(after).saturating_add(1).max(start.saturating_add(limit))
-    } else {
-        start.saturating_add(limit)
-    };
-    let end = requested_end.min(total);
-
-    Ok(HistoryWindow {
-        messages: history.messages[start..end].to_vec(),
-        offset: start,
-        start_index: start,
-        end_index: end,
-        total,
-        has_older: start > 0,
-        has_newer: end < total,
-        cursor: saved_cursor,
-    })
+    window.cursor = saved_cursor;
+    Ok(window)
 }
 
 pub fn save_viewport(
@@ -156,6 +155,7 @@ pub fn save_viewport(
     follow_output: bool,
     anchor_id: Option<String>,
     anchor_offset: Option<f64>,
+    anchor_entry_offset: Option<u64>,
 ) -> Result<ViewportCursor, String> {
     let path = std::fs::canonicalize(PathBuf::from(&session_path))
         .map_err(|e| format!("session path not accessible: {e}"))?;
@@ -164,12 +164,369 @@ pub fn save_viewport(
         follow_output,
         anchor_id: anchor_id.filter(|id| !id.trim().is_empty()),
         anchor_offset: anchor_offset.filter(|value| value.is_finite()).map(|value| value.max(0.0)),
+        anchor_entry_offset,
         updated_at: now_unix_secs(),
     };
     cache.viewports.insert(path_key(&path), cursor.clone());
     cache.prune_viewports();
     cache.persist_viewports()?;
     Ok(cursor)
+}
+
+#[derive(Clone)]
+struct WindowEntry {
+    start: u64,
+    end: u64,
+    message: Option<Value>,
+}
+
+struct WindowReadResult {
+    entries: Vec<WindowEntry>,
+    start_offset: u64,
+    end_offset: u64,
+    has_older: bool,
+    has_newer: bool,
+}
+
+fn read_tail_window(path: &Path, file_len: u64, limit: usize) -> Result<HistoryWindow, String> {
+    history_window_from_result(collect_display_entries_before_offset(path, file_len, file_len, limit)?, file_len)
+}
+
+fn read_window_before_offset(path: &Path, file_len: u64, offset: u64, limit: usize) -> Result<HistoryWindow, String> {
+    history_window_from_result(collect_display_entries_before_offset(path, file_len, offset.min(file_len), limit)?, file_len)
+}
+
+fn read_window_after_offset(path: &Path, file_len: u64, offset: u64, limit: usize) -> Result<HistoryWindow, String> {
+    history_window_from_result(collect_display_entries_after_offset(path, file_len, offset.min(file_len), limit)?, file_len)
+}
+
+
+fn collect_display_entries_before_offset(
+    path: &Path,
+    file_len: u64,
+    end_offset: u64,
+    limit: usize,
+) -> Result<WindowReadResult, String> {
+    let end_offset = end_offset.min(file_len);
+    if end_offset == 0 {
+        return Ok(WindowReadResult {
+            entries: Vec::new(),
+            start_offset: 0,
+            end_offset: 0,
+            has_older: false,
+            has_newer: file_len > 0,
+        });
+    }
+
+    let max_bytes = end_offset.min(MAX_WINDOW_SCAN_BYTES);
+    let mut byte_count = end_offset.min(WINDOW_SCAN_BYTES);
+    let (mut collected, scanned_start) = loop {
+        let start = end_offset.saturating_sub(byte_count);
+        let entries = parse_display_entries_in_range(path, start, end_offset)?;
+        if entries.len() >= limit || byte_count >= max_bytes || byte_count >= end_offset {
+            break (entries, start);
+        }
+        byte_count = end_offset.min(max_bytes).min(byte_count.saturating_mul(2).max(byte_count + 1));
+    };
+
+    let saw_older_extra = collected.len() > limit;
+    if saw_older_extra {
+        collected = collected.split_off(collected.len() - limit);
+    }
+    let start_offset = collected.first().map(|entry| entry.start).unwrap_or(scanned_start);
+    let result_end_offset = collected.last().map(|entry| entry.end).unwrap_or(end_offset);
+    let has_older = saw_older_extra || scanned_start > 0;
+    Ok(WindowReadResult {
+        entries: collected,
+        start_offset,
+        end_offset: result_end_offset,
+        has_older,
+        has_newer: end_offset < file_len,
+    })
+}
+
+fn collect_display_entries_after_offset(
+    path: &Path,
+    file_len: u64,
+    start_offset: u64,
+    limit: usize,
+) -> Result<WindowReadResult, String> {
+    let start_offset = start_offset.min(file_len);
+    if start_offset >= file_len {
+        return Ok(WindowReadResult {
+            entries: Vec::new(),
+            start_offset,
+            end_offset: start_offset,
+            has_older: start_offset > 0,
+            has_newer: false,
+        });
+    }
+
+    let available = file_len.saturating_sub(start_offset);
+    let max_bytes = available.min(MAX_WINDOW_SCAN_BYTES);
+    let mut byte_count = available.min(WINDOW_SCAN_BYTES);
+    let (mut collected, scanned_end) = loop {
+        let end = start_offset.saturating_add(byte_count).min(file_len);
+        let entries = parse_display_entries_in_range(path, start_offset, end)?;
+        if entries.len() >= limit || byte_count >= max_bytes || byte_count >= available {
+            break (entries, end);
+        }
+        byte_count = available.min(max_bytes).min(byte_count.saturating_mul(2).max(byte_count + 1));
+    };
+
+    let saw_newer_extra = collected.len() > limit;
+    if saw_newer_extra {
+        collected.truncate(limit);
+    }
+    let has_newer = saw_newer_extra || scanned_end < file_len;
+    let result_start_offset = collected.first().map(|entry| entry.start).unwrap_or(start_offset);
+    let result_end_offset = collected.last().map(|entry| entry.end).unwrap_or(scanned_end);
+    Ok(WindowReadResult {
+        entries: collected,
+        start_offset: result_start_offset,
+        end_offset: result_end_offset,
+        has_older: start_offset > 0,
+        has_newer,
+    })
+}
+
+fn read_window_around_entry_offset(
+    path: &Path,
+    file_len: u64,
+    anchor_entry_offset: u64,
+    before_count: usize,
+    after_count: usize,
+    limit: usize,
+) -> Result<HistoryWindow, String> {
+    let anchor = anchor_entry_offset.min(file_len);
+    let half_scan = WINDOW_SCAN_BYTES_AROUND_ANCHOR / 2;
+    let start = anchor.saturating_sub(half_scan);
+    let end = anchor.saturating_add(half_scan).min(file_len);
+    let entries = parse_display_entries_in_range(path, start, end)?;
+    if entries.is_empty() {
+        return read_tail_window(path, file_len, limit);
+    }
+    let anchor_index = entries
+        .iter()
+        .position(|entry| entry.start == anchor_entry_offset)
+        .or_else(|| entries.iter().position(|entry| entry.start >= anchor_entry_offset))
+        .unwrap_or_else(|| entries.len().saturating_sub(1));
+    select_window_around_index(entries, anchor_index, before_count, after_count, limit, file_len)
+}
+
+fn read_recent_window_around_anchor_id(
+    path: &Path,
+    file_len: u64,
+    anchor_id: &str,
+    before_count: usize,
+    after_count: usize,
+    limit: usize,
+) -> Result<HistoryWindow, String> {
+    let start = file_len.saturating_sub(WINDOW_SCAN_BYTES_AROUND_ANCHOR);
+    let entries = parse_display_entries_in_range(path, start, file_len)?;
+    if entries.is_empty() {
+        return read_tail_window(path, file_len, limit);
+    }
+    let anchor_index = entries
+        .iter()
+        .position(|entry| {
+            entry
+                .message
+                .as_ref()
+                .and_then(message_entry_id)
+                .is_some_and(|id| id == anchor_id || format!("h-{id}") == anchor_id)
+        })
+        .unwrap_or_else(|| entries.len().saturating_sub(limit));
+    select_window_around_index(entries, anchor_index, before_count, after_count, limit, file_len)
+}
+
+fn select_window_around_index(
+    entries: Vec<WindowEntry>,
+    anchor_index: usize,
+    before_count: usize,
+    after_count: usize,
+    limit: usize,
+    file_len: u64,
+) -> Result<HistoryWindow, String> {
+    if entries.is_empty() {
+        return history_window_from_entries_with_flags(Vec::new(), file_len, false, false);
+    }
+    let entries_len = entries.len();
+    let start_index = anchor_index.saturating_sub(before_count);
+    let requested_end = anchor_index
+        .saturating_add(after_count)
+        .saturating_add(1)
+        .max(start_index.saturating_add(limit));
+    let selected = entries
+        .into_iter()
+        .skip(start_index)
+        .take(requested_end.saturating_sub(start_index))
+        .collect::<Vec<_>>();
+    history_window_from_entries_with_flags(
+        selected,
+        file_len,
+        start_index > 0,
+        requested_end < entries_len,
+    )
+}
+
+fn history_window_from_result(result: WindowReadResult, file_len: u64) -> Result<HistoryWindow, String> {
+    history_window_from_entries_with_offsets(
+        result.entries,
+        file_len,
+        result.start_offset,
+        result.end_offset,
+        result.has_older,
+        result.has_newer,
+    )
+}
+
+fn history_window_from_entries_with_flags(
+    entries: Vec<WindowEntry>,
+    file_len: u64,
+    has_older: bool,
+    has_newer: bool,
+) -> Result<HistoryWindow, String> {
+    let start = entries.first().map(|entry| entry.start).unwrap_or(0);
+    let end = entries.last().map(|entry| entry.end).unwrap_or(start);
+    history_window_from_entries_with_offsets(entries, file_len, start, end, has_older, has_newer)
+}
+
+fn history_window_from_entries_with_offsets(
+    entries: Vec<WindowEntry>,
+    file_len: u64,
+    start: u64,
+    end: u64,
+    has_older: bool,
+    has_newer: bool,
+) -> Result<HistoryWindow, String> {
+    Ok(HistoryWindow {
+        messages: entries.into_iter().filter_map(|entry| entry.message).collect(),
+        offset: usize::try_from(start).unwrap_or(usize::MAX),
+        start_index: usize::try_from(start).unwrap_or(usize::MAX),
+        end_index: usize::try_from(end).unwrap_or(usize::MAX),
+        total: usize::try_from(file_len).unwrap_or(usize::MAX),
+        has_older,
+        has_newer,
+        cursor: None,
+    })
+}
+
+fn parse_display_entries_in_range(path: &Path, start: u64, end: u64) -> Result<Vec<WindowEntry>, String> {
+    if end <= start {
+        return Ok(Vec::new());
+    }
+    let mut file = File::open(path).map_err(|e| format!("open session failed: {e}"))?;
+    file.seek(SeekFrom::Start(start)).map_err(|e| format!("seek session failed: {e}"))?;
+    let len = usize::try_from(end - start).map_err(|_| "session window too large".to_string())?;
+    let mut bytes = vec![0u8; len];
+    file.read_exact(&mut bytes).map_err(|e| format!("read session window failed: {e}"))?;
+
+    let mut base = start;
+    let mut slice_start = 0usize;
+    let mut slice_end = bytes.len();
+    if start > 0 {
+        if let Some(pos) = bytes.iter().position(|byte| *byte == b'\n') {
+            slice_start = pos + 1;
+            base = base.saturating_add(slice_start as u64);
+        } else {
+            return Ok(Vec::new());
+        }
+    }
+    if end > start && end != std::fs::metadata(path).map(|metadata| metadata.len()).unwrap_or(end) {
+        if let Some(pos) = bytes.iter().rposition(|byte| *byte == b'\n') {
+            slice_end = pos + 1;
+        }
+    }
+    let bytes = &bytes[slice_start..slice_end];
+
+    let mut out = Vec::new();
+    let mut line_start_index = 0usize;
+    while line_start_index < bytes.len() {
+        let relative_line_end = bytes[line_start_index..]
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map(|position| line_start_index + position);
+        let line_end_index = relative_line_end.unwrap_or(bytes.len());
+        let next_line_start_index = relative_line_end.map_or(bytes.len(), |position| position + 1);
+        let mut raw_line = &bytes[line_start_index..line_end_index];
+        if raw_line.last() == Some(&b'\r') {
+            raw_line = &raw_line[..raw_line.len().saturating_sub(1)];
+        }
+        let line_start = base.saturating_add(line_start_index as u64);
+        let line_end = base.saturating_add(next_line_start_index as u64);
+        let trimmed = trim_ascii(raw_line);
+        line_start_index = next_line_start_index;
+
+        if trimmed.is_empty() {
+            continue;
+        }
+        if contains_json_pair(trimmed, "type", "session") {
+            continue;
+        }
+        if !looks_like_display_entry_line(trimmed) {
+            out.push(WindowEntry { start: line_start, end: line_end, message: None });
+            continue;
+        }
+        let value = match serde_json::from_slice::<Value>(trimmed) {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+        let Some(obj) = value.as_object() else { continue };
+        if obj.get("type").and_then(Value::as_str) == Some("session") {
+            continue;
+        }
+        let Some(id) = obj.get("id").and_then(Value::as_str).filter(|id| !id.is_empty()) else {
+            continue;
+        };
+        let entry = EntryRecord {
+            id: id.to_string(),
+            offset: line_start,
+            value,
+        };
+        if let Some(message) = display_message_from_entry(&entry) {
+            out.push(WindowEntry { start: line_start, end: line_end, message: Some(message) });
+        } else {
+            out.push(WindowEntry { start: line_start, end: line_end, message: None });
+        }
+    }
+    Ok(out)
+}
+
+fn trim_ascii(mut raw: &[u8]) -> &[u8] {
+    while raw.first().is_some_and(u8::is_ascii_whitespace) {
+        raw = &raw[1..];
+    }
+    while raw.last().is_some_and(u8::is_ascii_whitespace) {
+        raw = &raw[..raw.len().saturating_sub(1)];
+    }
+    raw
+}
+
+fn looks_like_display_entry_line(raw: &[u8]) -> bool {
+    // Session files can contain very large non-display custom entries near the
+    // tail. JSON-parsing those just to skip them is the expensive path. The
+    // SDK writes compact JSON with `type` near the start, so a small prefix is
+    // enough to decide whether a line can produce a visible chat message.
+    let prefix = &raw[..raw.len().min(4096)];
+    contains_json_pair(prefix, "type", "message")
+        || contains_json_pair(prefix, "type", "custom_message")
+        || (contains_json_pair(prefix, "type", "custom")
+            && contains_json_pair(prefix, "customType", PIX_SYSTEM_DISPLAY_ENTRY_CUSTOM_TYPE))
+}
+
+fn contains_json_pair(haystack: &[u8], key: &str, value: &str) -> bool {
+    let compact = format!("\"{key}\":\"{value}\"");
+    let spaced = format!("\"{key}\": \"{value}\"");
+    contains_bytes(haystack, compact.as_bytes()) || contains_bytes(haystack, spaced.as_bytes())
+}
+
+fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+    !needle.is_empty() && haystack.windows(needle.len()).any(|window| window == needle)
+}
+
+fn message_entry_id(message: &Value) -> Option<&str> {
+    message.as_object()?.get(PIX_SESSION_ENTRY_ID_FIELD)?.as_str()
 }
 
 pub fn list_sessions_for_workspace(cwd: String) -> Result<SessionList, String> {
@@ -240,20 +597,6 @@ impl HistoryCache {
         }
     }
 
-    fn get_or_load(&mut self, path: &Path) -> Result<CachedHistory, String> {
-        let metadata = std::fs::metadata(path).map_err(|e| format!("read session metadata failed: {e}"))?;
-        let modified = metadata.modified().ok();
-        let len = metadata.len();
-        if let Some(cached) = self.entries.get(path) {
-            if cached.len == len && cached.modified == modified {
-                return Ok(cached.clone());
-            }
-        }
-
-        let loaded = load_history(path, modified, len)?;
-        self.entries.insert(path.to_path_buf(), loaded.clone());
-        Ok(loaded)
-    }
 }
 
 fn viewport_state_path() -> Result<PathBuf, String> {
@@ -274,59 +617,16 @@ fn now_unix_secs() -> u64 {
 #[derive(Clone)]
 struct EntryRecord {
     id: String,
-    parent_id: Option<String>,
+    offset: u64,
     value: Value,
-}
-
-fn load_history(path: &Path, modified: Option<SystemTime>, len: u64) -> Result<CachedHistory, String> {
-    let file = File::open(path).map_err(|e| format!("open session failed: {e}"))?;
-    let reader = BufReader::new(file);
-    let mut entries = Vec::<EntryRecord>::new();
-
-    for line in reader.lines() {
-        let line = match line {
-            Ok(line) => line,
-            Err(_) => continue,
-        };
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let value = match serde_json::from_str::<Value>(trimmed) {
-            Ok(value) => value,
-            Err(_) => continue,
-        };
-        let Some(obj) = value.as_object() else { continue };
-        if obj.get("type").and_then(Value::as_str) == Some("session") {
-            continue;
-        }
-        let Some(id) = obj.get("id").and_then(Value::as_str).filter(|id| !id.is_empty()) else {
-            continue;
-        };
-        entries.push(EntryRecord {
-            id: id.to_string(),
-            parent_id: obj.get("parentId").and_then(Value::as_str).map(str::to_string),
-            value,
-        });
-    }
-
-    let branch = branch_entries(&entries);
-    let mut messages = Vec::new();
-    let mut ids = Vec::new();
-    for entry in branch {
-        if let Some(message) = display_message_from_entry(entry) {
-            ids.push(entry.id.clone());
-            messages.push(message);
-        }
-    }
-
-    Ok(CachedHistory { modified, len, messages, ids })
 }
 
 fn build_session_summary(path: &Path, resolved_cwd: &Path) -> Option<SessionSummary> {
     let metadata = std::fs::metadata(path).ok()?;
-    let entries = read_session_file_values(path);
-    let header = entries.first()?.as_object()?;
+    let file_len = metadata.len();
+    let header_line = read_first_line(path, 64 * 1024)?;
+    let header_value = serde_json::from_str::<Value>(header_line.trim()).ok()?;
+    let header = header_value.as_object()?;
     if header.get("type").and_then(Value::as_str) != Some("session") {
         return None;
     }
@@ -344,12 +644,23 @@ fn build_session_summary(path: &Path, resolved_cwd: &Path) -> Option<SessionSumm
         .unwrap_or_else(|| system_time_to_iso(metadata.modified().ok()));
     let parent_session_path = header.get("parentSession").and_then(Value::as_str).map(str::to_string);
 
+    // Keep session listing cheap: inspect only the header, a small head sample
+    // for the first prompt, and a bounded tail sample for latest name/activity.
+    // Exact full-session message counts are intentionally not computed here.
+    let head_entries = read_values_in_range(path, 0, file_len.min(256 * 1024));
+    let tail_start = file_len.saturating_sub(512 * 1024);
+    let tail_entries = if tail_start > 0 {
+        read_values_in_range(path, tail_start, file_len)
+    } else {
+        Vec::new()
+    };
+
     let mut message_count = 0usize;
     let mut first_message = String::new();
     let mut name: Option<String> = None;
     let mut last_activity: Option<SystemTime> = None;
 
-    for entry in &entries {
+    for entry in head_entries.iter().chain(tail_entries.iter()) {
         let Some(obj) = entry.as_object() else { continue };
         if obj.get("type").and_then(Value::as_str) == Some("session_info") {
             name = obj
@@ -399,17 +710,64 @@ fn build_session_summary(path: &Path, resolved_cwd: &Path) -> Option<SessionSumm
     })
 }
 
-fn read_session_file_values(path: &Path) -> Vec<Value> {
-    let Ok(file) = File::open(path) else { return Vec::new() };
-    let reader = BufReader::new(file);
-    reader
-        .lines()
-        .map_while(Result::ok)
-        .filter_map(|line| {
-            let trimmed = line.trim();
-            if trimmed.is_empty() { None } else { serde_json::from_str::<Value>(trimmed).ok() }
-        })
-        .collect()
+fn read_first_line(path: &Path, max_bytes: usize) -> Option<String> {
+    let mut file = File::open(path).ok()?;
+    let mut bytes = vec![0u8; max_bytes];
+    let count = file.read(&mut bytes).ok()?;
+    bytes.truncate(count);
+    let text = String::from_utf8_lossy(&bytes);
+    text.split('\n').next().map(str::to_string)
+}
+
+fn read_values_in_range(path: &Path, start: u64, end: u64) -> Vec<Value> {
+    if end <= start {
+        return Vec::new();
+    }
+    let Ok(mut file) = File::open(path) else { return Vec::new() };
+    if file.seek(SeekFrom::Start(start)).is_err() {
+        return Vec::new();
+    }
+    let Ok(len) = usize::try_from(end - start) else { return Vec::new() };
+    let mut bytes = vec![0u8; len];
+    if file.read_exact(&mut bytes).is_err() {
+        return Vec::new();
+    }
+    let mut slice_start = 0usize;
+    let mut slice_end = bytes.len();
+    if start > 0 {
+        if let Some(pos) = bytes.iter().position(|byte| *byte == b'\n') {
+            slice_start = pos + 1;
+        } else {
+            return Vec::new();
+        }
+    }
+    if let Some(pos) = bytes.iter().rposition(|byte| *byte == b'\n') {
+        slice_end = pos + 1;
+    }
+    let bytes = &bytes[slice_start..slice_end];
+    let mut out = Vec::new();
+    let mut line_start = 0usize;
+    while line_start < bytes.len() {
+        let line_end = bytes[line_start..]
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map(|position| line_start + position)
+            .unwrap_or(bytes.len());
+        let trimmed = trim_ascii(&bytes[line_start..line_end]);
+        if !trimmed.is_empty() && looks_like_summary_entry_line(trimmed) {
+            if let Ok(value) = serde_json::from_slice::<Value>(trimmed) {
+                out.push(value);
+            }
+        }
+        line_start = if line_end < bytes.len() { line_end + 1 } else { bytes.len() };
+    }
+    out
+}
+
+fn looks_like_summary_entry_line(raw: &[u8]) -> bool {
+    let prefix = &raw[..raw.len().min(4096)];
+    contains_json_pair(prefix, "type", "message")
+        || contains_json_pair(prefix, "type", "session_info")
 }
 
 fn default_session_dir_path(cwd: &Path) -> Result<PathBuf, String> {
@@ -493,33 +851,12 @@ fn system_time_to_iso(time: Option<SystemTime>) -> String {
     }
 }
 
-fn branch_entries(entries: &[EntryRecord]) -> Vec<&EntryRecord> {
-    let Some(leaf) = entries.last() else { return Vec::new() };
-    let by_id = entries
-        .iter()
-        .map(|entry| (entry.id.as_str(), entry))
-        .collect::<HashMap<_, _>>();
-    let mut branch = Vec::new();
-    let mut cursor = Some(leaf.id.as_str());
-    let mut seen = std::collections::HashSet::new();
-    while let Some(id) = cursor {
-        if !seen.insert(id.to_string()) {
-            break;
-        }
-        let Some(entry) = by_id.get(id).copied() else { break };
-        branch.push(entry);
-        cursor = entry.parent_id.as_deref();
-    }
-    branch.reverse();
-    branch
-}
-
 fn display_message_from_entry(entry: &EntryRecord) -> Option<Value> {
     let obj = entry.value.as_object()?;
     match obj.get("type").and_then(Value::as_str) {
         Some("message") => {
             let message = obj.get("message")?.as_object()?.clone();
-            Some(with_entry_id(message, &entry.id))
+            Some(with_entry_id(message, &entry.id, entry.offset))
         }
         Some("custom_message") => {
             let mut out = Map::new();
@@ -533,7 +870,7 @@ fn display_message_from_entry(entry: &EntryRecord) -> Option<Value> {
             if let Some(display) = obj.get("display").cloned() {
                 out.insert("display".to_string(), display);
             }
-            Some(with_entry_id(out, &entry.id))
+            Some(with_entry_id(out, &entry.id, entry.offset))
         }
         Some("custom") if obj.get("customType").and_then(Value::as_str) == Some(PIX_SYSTEM_DISPLAY_ENTRY_CUSTOM_TYPE) => {
             let text = obj
@@ -550,13 +887,14 @@ fn display_message_from_entry(entry: &EntryRecord) -> Option<Value> {
             out.insert("customType".to_string(), Value::String(PIX_SYSTEM_MESSAGE_CUSTOM_TYPE.to_string()));
             out.insert("content".to_string(), Value::String(text.to_string()));
             out.insert("display".to_string(), Value::Bool(true));
-            Some(with_entry_id(out, &entry.id))
+            Some(with_entry_id(out, &entry.id, entry.offset))
         }
         _ => None,
     }
 }
 
-fn with_entry_id(mut object: Map<String, Value>, entry_id: &str) -> Value {
+fn with_entry_id(mut object: Map<String, Value>, entry_id: &str, entry_offset: u64) -> Value {
     object.insert(PIX_SESSION_ENTRY_ID_FIELD.to_string(), Value::String(entry_id.to_string()));
+    object.insert("__pixSessionEntryOffset".to_string(), Value::Number(serde_json::Number::from(entry_offset)));
     Value::Object(object)
 }

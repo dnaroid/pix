@@ -70,8 +70,8 @@ type ToolPart = {
 type AssistantPart = TextPart | ToolPart;
 
 type ChatMessage =
-  | { id: string; role: "user"; text: string; attachments?: ImageAttachment[] }
-  | { id: string; role: "assistant"; parts: AssistantPart[] };
+  | { id: string; role: "user"; text: string; attachments?: ImageAttachment[]; entryOffset?: number }
+  | { id: string; role: "assistant"; parts: AssistantPart[]; entryOffset?: number };
 
 type ImageAttachment = {
   id: string;
@@ -120,12 +120,14 @@ type NewerHistoryState = {
   nextOffset: number;
   hasNewer: boolean;
   loading: boolean;
+  gapBytes?: number;
 };
 
 type TabScrollState = {
   followOutput: boolean;
   anchorId?: string;
   anchorOffset?: number;
+  anchorEntryOffset?: number;
 };
 
 type VirtualRange = {
@@ -342,10 +344,12 @@ export default function App() {
   const tabMessagesRef = useRef<Map<string, ChatMessage[]>>(new Map());
   const activeTabIdRef = useRef<string | null>(null);
   const pendingSessionSwitchRef = useRef<string | null>(null);
+  const suppressNextSessionSyncRef = useRef<string | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const appliedWorkspaceRef = useRef<string | null>(null);
   const hydratedTabsWorkspaceRef = useRef<string | null>(null);
   const historyLoadSeqRef = useRef(0);
+  const historyLoadInFlightRef = useRef<string | null>(null);
   const sessionMessageCountRef = useRef(0);
   const prependScrollAnchorRef = useRef<{ anchorId?: string; anchorOffset?: number } | null>(null);
   const scrollToBottomNextRenderRef = useRef(false);
@@ -403,6 +407,10 @@ export default function App() {
       messages: messages.slice(range.start, range.end),
     };
   }, [messages, virtualRange]);
+  const newerGapHeight = useMemo(
+    () => estimatedHistoryGapHeight(newerHistory.gapBytes),
+    [newerHistory.gapBytes],
+  );
 
   const windowTitle = sessionTitle ? `${workspaceTitle} | ${sessionTitle}` : workspaceTitle;
 
@@ -727,7 +735,7 @@ export default function App() {
     return () => window.removeEventListener("resize", onResize);
   }, [updateVirtualRange]);
 
-  const fetchMessagesPage = useCallback(async (cmd: { sessionPath?: string; offset?: number; limit?: number; fromEnd?: boolean; lazyOlder?: boolean; anchorId?: string; before?: number; after?: number; restoreViewport?: boolean }) => {
+  const fetchMessagesPage = useCallback(async (cmd: { sessionPath?: string; offset?: number; limit?: number; fromEnd?: boolean; lazyOlder?: boolean; anchorId?: string; anchorEntryOffset?: number; before?: number; after?: number; beforeOffset?: boolean; restoreViewport?: boolean }) => {
     if (cmd.sessionPath) {
       return await invoke<MessagesPage>("read_session_messages_window", {
         sessionPath: cmd.sessionPath,
@@ -735,8 +743,10 @@ export default function App() {
         limit: cmd.limit,
         fromEnd: cmd.fromEnd,
         anchorId: cmd.anchorId,
+        anchorEntryOffset: cmd.anchorEntryOffset,
         before: cmd.before,
         after: cmd.after,
+        beforeOffset: cmd.beforeOffset,
         restoreViewport: cmd.restoreViewport,
       });
     }
@@ -750,13 +760,14 @@ export default function App() {
 
   const cancelHistoryLoad = useCallback(() => {
     historyLoadSeqRef.current += 1;
+    historyLoadInFlightRef.current = null;
     setLoadingMessages(false);
     setHistoryLoadProgress(null);
     setOlderHistory((prev) => ({ ...prev, loading: false }));
     setNewerHistory((prev) => ({ ...prev, loading: false }));
   }, []);
 
-  const scrollAnchorFor = useCallback((scrollTop: number): Pick<TabScrollState, "anchorId" | "anchorOffset"> => {
+  const scrollAnchorFor = useCallback((scrollTop: number): Pick<TabScrollState, "anchorId" | "anchorOffset" | "anchorEntryOffset"> => {
     const domAnchor = scrollRef.current ? domScrollAnchorFor(scrollRef.current) : undefined;
     if (domAnchor) return domAnchor;
 
@@ -765,12 +776,12 @@ export default function App() {
     for (const message of messagesRef.current) {
       const height = heights.get(message.id) ?? estimateMessageHeight(message);
       if (top + height >= scrollTop) {
-        return { anchorId: message.id, anchorOffset: Math.max(0, scrollTop - top) };
+        return { anchorId: message.id, anchorOffset: Math.max(0, scrollTop - top), anchorEntryOffset: message.entryOffset };
       }
       top += height;
     }
     const last = messagesRef.current.at(-1);
-    return last ? { anchorId: last.id, anchorOffset: 0 } : {};
+    return last ? { anchorId: last.id, anchorOffset: 0, anchorEntryOffset: last.entryOffset } : {};
   }, []);
 
   const captureTabScroll = useCallback((path: string | null | undefined) => {
@@ -794,6 +805,7 @@ export default function App() {
       followOutput: viewport.followOutput,
       anchorId: viewport.anchorId,
       anchorOffset: viewport.anchorOffset,
+      anchorEntryOffset: viewport.anchorEntryOffset,
     }).catch((e) => setError(`save viewport: ${String(e)}`));
   }, []);
 
@@ -812,7 +824,7 @@ export default function App() {
     restoreScrollNextRenderRef.current = {
       path,
       followOutput: saved?.followOutput ?? false,
-      ...(saved?.anchorId ? { anchorId: saved.anchorId, anchorOffset: saved.anchorOffset ?? 0 } : {}),
+      ...(saved?.anchorId ? { anchorId: saved.anchorId, anchorOffset: saved.anchorOffset ?? 0, anchorEntryOffset: saved.anchorEntryOffset } : {}),
     };
     followOutputRef.current = saved?.followOutput ?? false;
     scrollToBottomNextRenderRef.current = false;
@@ -820,6 +832,9 @@ export default function App() {
   }, []);
 
   const loadMessages = useCallback(async (path?: string) => {
+    const loadPath = path ?? "__active__";
+    if (historyLoadInFlightRef.current === loadPath) return;
+    historyLoadInFlightRef.current = loadPath;
     const loadSeq = historyLoadSeqRef.current + 1;
     historyLoadSeqRef.current = loadSeq;
     setLoadingMessages(true);
@@ -830,32 +845,58 @@ export default function App() {
       historyLoadSeqRef.current !== loadSeq || (path ? activeTabIdRef.current !== path : false);
     try {
       const saved = path ? tabScrollRef.current.get(path) : undefined;
-      const first = await fetchMessagesPage(saved?.anchorId && !saved.followOutput && path
-        ? { sessionPath: path, anchorId: saved.anchorId, before: INITIAL_VIEWPORT_BEFORE, after: INITIAL_VIEWPORT_AFTER, limit: INITIAL_VIEWPORT_BEFORE + INITIAL_VIEWPORT_AFTER }
+      const first = await fetchMessagesPage(saved?.anchorEntryOffset !== undefined && !saved.followOutput && path
+        ? { sessionPath: path, anchorId: saved.anchorId, anchorEntryOffset: saved.anchorEntryOffset, before: INITIAL_VIEWPORT_BEFORE, after: INITIAL_VIEWPORT_AFTER, limit: INITIAL_VIEWPORT_BEFORE + INITIAL_VIEWPORT_AFTER }
         : path
           ? { sessionPath: path, fromEnd: true, limit: INITIAL_MESSAGE_CHUNK, restoreViewport: true }
           : { fromEnd: true, limit: INITIAL_MESSAGE_CHUNK });
-      if (isStaleLoad()) return;
+      if (isStaleLoad()) {
+        if (historyLoadInFlightRef.current === loadPath) historyLoadInFlightRef.current = null;
+        return;
+      }
 
-      const next = toChatMessages(first.messages);
+      let page = first;
+      let next = toChatMessages(page.messages);
+      let loadedHeadFallback = false;
+      // Some pathological sessions end with hundreds of MB of non-display
+      // entries (for example dcp-state snapshots). Do not walk backward through
+      // all of that on initial paint. Show the first visible page immediately;
+      // the user can then scroll forward lazily through the file windows.
+      if (path && next.length === 0 && page.hasOlder) {
+        page = await fetchMessagesPage({ sessionPath: path, offset: 0, limit: INITIAL_MESSAGE_CHUNK });
+        if (isStaleLoad()) {
+          if (historyLoadInFlightRef.current === loadPath) historyLoadInFlightRef.current = null;
+          return;
+        }
+        next = toChatMessages(page.messages);
+        loadedHeadFallback = true;
+      }
       if (path && first.cursor) tabScrollRef.current.set(path, first.cursor);
-      if (!scheduleRestoreTabScroll(path)) scrollToBottomNextRenderRef.current = true;
+      if (loadedHeadFallback) {
+        followOutputRef.current = false;
+        scrollToBottomNextRenderRef.current = false;
+        restoreScrollNextRenderRef.current = null;
+      } else if (!scheduleRestoreTabScroll(path)) {
+        scrollToBottomNextRenderRef.current = true;
+      }
       setMessages(next);
       if (path) tabMessagesRef.current.set(path, next);
-      const startIndex = first.startIndex ?? first.offset;
-      const endIndex = first.endIndex ?? (first.offset + first.messages.length);
-      setOlderHistory({ nextOffset: startIndex, hasExternalOlder: Boolean(first.hasOlder), loading: false });
-      setNewerHistory({ nextOffset: endIndex, hasNewer: Boolean(first.hasNewer), loading: false });
+      const startIndex = page.startIndex ?? page.offset;
+      const endIndex = page.endIndex ?? (page.offset + page.messages.length);
+      setOlderHistory({ nextOffset: startIndex, hasExternalOlder: Boolean(page.hasOlder), loading: false });
+      setNewerHistory({ nextOffset: endIndex, hasNewer: Boolean(page.hasNewer), loading: false });
       setLoadingMessages(false);
       setHistoryLoadProgress(null);
+      if (historyLoadInFlightRef.current === loadPath) historyLoadInFlightRef.current = null;
     } catch (e) {
-      setError(`get_messages: ${String(e)}`);
+      if (!isStaleLoad()) setError(`get_messages: ${String(e)}`);
       if (historyLoadSeqRef.current === loadSeq) {
         setLoadingMessages(false);
         setHistoryLoadProgress(null);
         setOlderHistory({ nextOffset: 0, hasExternalOlder: false, loading: false });
         setNewerHistory({ nextOffset: 0, hasNewer: false, loading: false });
       }
+      if (historyLoadInFlightRef.current === loadPath) historyLoadInFlightRef.current = null;
     }
   }, [fetchMessagesPage, scheduleRestoreTabScroll]);
 
@@ -871,13 +912,20 @@ export default function App() {
     try {
       const offset = Math.max(0, loadFromOffset - BACKFILL_MESSAGE_CHUNK);
       const older = path
-        ? await fetchMessagesPage({ sessionPath: path, offset, limit: Math.max(1, loadFromOffset - offset) })
+        ? await fetchMessagesPage({ sessionPath: path, offset: loadFromOffset, limit: BACKFILL_MESSAGE_CHUNK, beforeOffset: true })
         : loadFromOffset > 0
           ? await fetchMessagesPage({ offset, limit: loadFromOffset - offset })
           : await fetchMessagesPage({ offset: 0, limit: BACKFILL_MESSAGE_CHUNK, lazyOlder: true });
-      if (isStaleLoad()) return;
+      if (isStaleLoad()) {
+        setOlderHistory((prev) => ({ ...prev, loading: false }));
+        return;
+      }
       if (older.messages.length === 0) {
-        setOlderHistory({ nextOffset: 0, hasExternalOlder: Boolean(older.hasOlder), loading: false });
+        setOlderHistory({
+          nextOffset: older.startIndex ?? older.offset ?? 0,
+          hasExternalOlder: Boolean(older.hasOlder),
+          loading: false,
+        });
         return;
       }
       const olderChatMessages = toChatMessages(older.messages);
@@ -908,9 +956,20 @@ export default function App() {
     setNewerHistory((prev) => ({ ...prev, loading: true }));
     try {
       const newer = await fetchMessagesPage({ sessionPath: path, offset: loadFromOffset, limit: BACKFILL_MESSAGE_CHUNK });
-      if (isStaleLoad()) return;
+      if (isStaleLoad()) {
+        setNewerHistory((prev) => ({ ...prev, loading: false }));
+        return;
+      }
       if (newer.messages.length === 0) {
-        setNewerHistory({ nextOffset: loadFromOffset, hasNewer: Boolean(newer.hasNewer), loading: false });
+        setNewerHistory({
+          nextOffset: newer.endIndex ?? newer.offset ?? loadFromOffset,
+          hasNewer: Boolean(newer.hasNewer),
+          loading: false,
+          gapBytes: Math.max(
+            newerHistory.gapBytes ?? 0,
+            Math.max(0, (newer.endIndex ?? newer.offset ?? loadFromOffset) - loadFromOffset),
+          ),
+        });
         return;
       }
       const newerChatMessages = toChatMessages(newer.messages);
@@ -923,6 +982,7 @@ export default function App() {
         nextOffset: newer.endIndex ?? (loadFromOffset + newer.messages.length),
         hasNewer: Boolean(newer.hasNewer),
         loading: false,
+        gapBytes: 0,
       });
     } catch (e) {
       if (!isStaleLoad()) setError(`get_messages: ${String(e)}`);
@@ -947,10 +1007,18 @@ export default function App() {
       }
     }
     updateVirtualRange();
-    if (!el || el.scrollTop > LOAD_OLDER_SCROLL_THRESHOLD_PX) return;
-    void loadOlderMessages();
+    if (!el) return;
+    if (el.scrollTop <= LOAD_OLDER_SCROLL_THRESHOLD_PX) void loadOlderMessages();
     if (distanceFromBottom <= LOAD_OLDER_SCROLL_THRESHOLD_PX) void loadNewerMessages();
   }, [loadNewerMessages, loadOlderMessages, scrollAnchorFor, updateVirtualRange]);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || loadingMessages || newerHistory.loading || !newerHistory.hasNewer || newerGapHeight > 0) return;
+    const contentUnderfillsViewport = el.scrollHeight <= el.clientHeight + LOAD_OLDER_SCROLL_THRESHOLD_PX;
+    const alreadyAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= LOAD_OLDER_SCROLL_THRESHOLD_PX;
+    if (contentUnderfillsViewport || alreadyAtBottom) void loadNewerMessages();
+  }, [messages, loadingMessages, loadNewerMessages, newerGapHeight, newerHistory.hasNewer, newerHistory.loading]);
 
   const restoreTabsForWorkspace = useCallback(async (cwd: string, currentSessionFile?: string) => {
     const persisted = readPersistedTabs(cwd);
@@ -992,6 +1060,7 @@ export default function App() {
       }
     }
 
+    if (active) suppressNextSessionSyncRef.current = active;
     void refreshState();
     void refreshCommands();
     void refreshSessions();
@@ -1103,6 +1172,10 @@ export default function App() {
   useEffect(() => {
     const path = session.sessionFile;
     if (!path) return;
+    if (suppressNextSessionSyncRef.current === path) {
+      suppressNextSessionSyncRef.current = null;
+      return;
+    }
     const pendingSwitch = pendingSessionSwitchRef.current;
     const active = activeTabIdRef.current;
     if (pendingSwitch && active === pendingSwitch && path !== pendingSwitch) {
@@ -1556,14 +1629,16 @@ export default function App() {
     // Cache current messages under the previous active tab so switching back restores them.
     const prev = activeTabId;
     if (prev && prev !== path) {
-      tabMessagesRef.current.set(prev, messagesRef.current);
+      const previousMessages = messagesRef.current;
+      if (previousMessages.length > 0) tabMessagesRef.current.set(prev, previousMessages);
+      else tabMessagesRef.current.delete(prev);
     }
     setOpenTabs((tabs) => (tabs.includes(path) ? tabs : [...tabs, path]));
     activeTabIdRef.current = path;
     setActiveTabId(path);
     pendingSessionSwitchRef.current = path;
-    const hasCachedMessages = tabMessagesRef.current.has(path);
     const cached = tabMessagesRef.current.get(path);
+    const hasCachedMessages = (cached?.length ?? 0) > 0;
     if (cached) {
       scheduleTabSwitchScrollRestore(path);
     }
@@ -1590,6 +1665,7 @@ export default function App() {
         return;
       }
       if (activeTabIdRef.current !== path) return;
+      suppressNextSessionSyncRef.current = path;
       await refreshState();
       if (activeTabIdRef.current !== path) return;
       if (!hasCachedMessages) void loadMessages(path);
@@ -1627,8 +1703,8 @@ export default function App() {
         setActiveTabId(newActive);
         if (newActive) {
           pendingSessionSwitchRef.current = newActive;
-          const hasCachedMessages = tabMessagesRef.current.has(newActive);
           const cached = tabMessagesRef.current.get(newActive);
+          const hasCachedMessages = (cached?.length ?? 0) > 0;
           if (cached) {
             scheduleTabSwitchScrollRestore(newActive);
           }
@@ -1640,6 +1716,7 @@ export default function App() {
           try {
             await invoke("rpc_call", { cmd: { type: "switch_session", sessionPath: newActive } });
             if (activeTabIdRef.current !== newActive) return;
+            suppressNextSessionSyncRef.current = newActive;
             await refreshState();
             if (activeTabIdRef.current !== newActive) return;
             if (!hasCachedMessages) void loadMessages(newActive);
@@ -1920,6 +1997,17 @@ export default function App() {
                 <MessageView key={m.id} message={m} measureRef={measureMessage} />
               ))}
               {renderedMessages.after > 0 && <div style={{ height: renderedMessages.after }} aria-hidden="true" />}
+              {newerGapHeight > 0 && (
+                <button
+                  type="button"
+                  className="chat__history-gap"
+                  style={{ minHeight: newerGapHeight }}
+                  onClick={() => void loadNewerMessages()}
+                  disabled={newerHistory.loading}
+                >
+                  {newerHistory.loading ? "Loading next session window…" : "Skip non-display session gap"}
+                </button>
+              )}
             </>
           )}
           {error && (
@@ -2540,6 +2628,12 @@ function estimateMessageHeight(message: ChatMessage): number {
   return ESTIMATED_MESSAGE_HEIGHT + Math.max(0, lines - 1) * 20;
 }
 
+function estimatedHistoryGapHeight(bytes: number | undefined): number {
+  if (!bytes || !Number.isFinite(bytes) || bytes <= 0) return 0;
+  const approxChunks = Math.ceil(bytes / (16 * 1024 * 1024));
+  return Math.min(4800, Math.max(180, approxChunks * 180));
+}
+
 function scrollTopForAnchor(
   container: HTMLDivElement | null,
   messages: readonly ChatMessage[],
@@ -2559,7 +2653,7 @@ function scrollTopForAnchor(
   return undefined;
 }
 
-function domScrollAnchorFor(container: HTMLDivElement): Pick<TabScrollState, "anchorId" | "anchorOffset"> | undefined {
+function domScrollAnchorFor(container: HTMLDivElement): Pick<TabScrollState, "anchorId" | "anchorOffset" | "anchorEntryOffset"> | undefined {
   const containerTop = container.getBoundingClientRect().top;
   for (const node of Array.from(container.querySelectorAll<HTMLElement>(".msg[data-message-id]"))) {
     const anchorId = node.dataset.messageId;
@@ -2567,7 +2661,7 @@ function domScrollAnchorFor(container: HTMLDivElement): Pick<TabScrollState, "an
     const rect = node.getBoundingClientRect();
     if (!Number.isFinite(rect.height) || rect.height <= 0) continue;
     if (rect.bottom < containerTop) continue;
-    return { anchorId, anchorOffset: Math.max(0, containerTop - rect.top) };
+    return { anchorId, anchorOffset: Math.max(0, containerTop - rect.top), ...domEntryOffsetFor(node) };
   }
   return undefined;
 }
@@ -2586,6 +2680,13 @@ function scrollTopForDomAnchor(
   return Number.isFinite(nextScrollTop) ? nextScrollTop : undefined;
 }
 
+function domEntryOffsetFor(node: HTMLElement): Pick<TabScrollState, "anchorEntryOffset"> {
+  const raw = node.dataset.entryOffset;
+  if (!raw) return {};
+  const value = Number(raw);
+  return Number.isFinite(value) ? { anchorEntryOffset: Math.max(0, value) } : {};
+}
+
 function MessageView({
   message,
   measureRef,
@@ -2594,7 +2695,7 @@ function MessageView({
   measureRef?: (id: string, node: HTMLDivElement | null) => void;
 }) {
   return (
-    <div ref={(node) => measureRef?.(message.id, node)} data-message-id={message.id} className={`msg msg--${message.role}`}>
+    <div ref={(node) => measureRef?.(message.id, node)} data-message-id={message.id} data-entry-offset={message.entryOffset} className={`msg msg--${message.role}`}>
       <div className="msg__avatar">
         {message.role === "user" ? <User size={14} /> : <Bot size={14} />}
       </div>
@@ -2695,9 +2796,10 @@ function toChatMessages(history: HistoryMessage[]): ChatMessage[] {
   let fallbackIndex = 0;
   for (const m of history) {
     const stableId = historyMessageStableId(m, fallbackIndex++);
+    const entryOffset = historyMessageEntryOffset(m);
     if (m.role === "user") {
       const text = contentToText(m.content);
-      if (text) out.push({ id: stableId ?? genId("u"), role: "user", text });
+      if (text) out.push({ id: stableId ?? genId("u"), role: "user", text, entryOffset });
       continue;
     }
 
@@ -2716,7 +2818,7 @@ function toChatMessages(history: HistoryMessage[]): ChatMessage[] {
           });
         }
       }
-      if (parts.length > 0) out.push({ id: stableId ?? genId("a"), role: "assistant", parts });
+      if (parts.length > 0) out.push({ id: stableId ?? genId("a"), role: "assistant", parts, entryOffset });
       continue;
     }
 
@@ -2728,6 +2830,7 @@ function toChatMessages(history: HistoryMessage[]): ChatMessage[] {
         out.push({
           id: stableId ?? genId("a"),
           role: "assistant",
+          entryOffset,
           parts: [
             {
               kind: "tool",
@@ -2743,6 +2846,11 @@ function toChatMessages(history: HistoryMessage[]): ChatMessage[] {
     }
   }
   return out;
+}
+
+function historyMessageEntryOffset(message: HistoryMessage): number | undefined {
+  const value = (message as Record<string, unknown>).__pixSessionEntryOffset;
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : undefined;
 }
 
 function historyMessageStableId(message: HistoryMessage, fallbackIndex: number): string | undefined {
@@ -2888,9 +2996,16 @@ function normalizePersistedTabScroll(openTabs: string[], value: unknown): Record
     const anchorOffset = typeof raw.anchorOffset === "number" && Number.isFinite(raw.anchorOffset)
       ? Math.max(0, raw.anchorOffset)
       : undefined;
+    const anchorEntryOffset = typeof raw.anchorEntryOffset === "number" && Number.isFinite(raw.anchorEntryOffset)
+      ? Math.max(0, raw.anchorEntryOffset)
+      : undefined;
     const followOutput = raw.followOutput !== false;
-    if (!followOutput && !anchorId) continue;
-    scroll[path] = { followOutput, ...(anchorId ? { anchorId, anchorOffset: anchorOffset ?? 0 } : {}) };
+    if (!followOutput && !anchorId && anchorEntryOffset === undefined) continue;
+    scroll[path] = {
+      followOutput,
+      ...(anchorId ? { anchorId, anchorOffset: anchorOffset ?? 0 } : {}),
+      ...(anchorEntryOffset === undefined ? {} : { anchorEntryOffset }),
+    };
   }
   return Object.keys(scroll).length > 0 ? scroll : undefined;
 }

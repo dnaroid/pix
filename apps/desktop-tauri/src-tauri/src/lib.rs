@@ -275,12 +275,26 @@ async fn read_session_messages_window(
     limit: Option<usize>,
     from_end: Option<bool>,
     anchor_id: Option<String>,
+    anchor_entry_offset: Option<u64>,
     before: Option<usize>,
     after: Option<usize>,
+    before_offset: Option<bool>,
     restore_viewport: Option<bool>,
 ) -> Result<HistoryWindow, String> {
     let mut cache = history_cache.lock().await;
-    read_window(&mut cache, session_path, offset, limit, from_end, anchor_id, before, after, restore_viewport)
+    read_window(
+        &mut cache,
+        session_path,
+        offset,
+        limit,
+        from_end,
+        anchor_id,
+        anchor_entry_offset,
+        before,
+        after,
+        before_offset,
+        restore_viewport,
+    )
 }
 
 #[tauri::command]
@@ -290,9 +304,10 @@ async fn save_session_viewport(
     follow_output: bool,
     anchor_id: Option<String>,
     anchor_offset: Option<f64>,
+    anchor_entry_offset: Option<u64>,
 ) -> Result<ViewportCursor, String> {
     let mut cache = history_cache.lock().await;
-    save_viewport(&mut cache, session_path, follow_output, anchor_id, anchor_offset)
+    save_viewport(&mut cache, session_path, follow_output, anchor_id, anchor_offset, anchor_entry_offset)
 }
 
 pub fn run() {
