@@ -176,6 +176,12 @@ export interface DcpState {
   tokensSaved: number
   /** Number of discrete pruning operations performed */
   totalPruneCount: number
+  /**
+   * Total number of tool calls observed during the session lifetime.
+   * Persisted so `/dcp stats` can show an approximate total even when the
+   * toolCalls map has been trimmed for compactness.
+   */
+  totalToolCallCount: number
   /** Compression block IDs already counted in tokensSaved/totalPruneCount. */
   accountedCompressionBlockIds: Set<number>
   /** compressionBlockId → raw active-token savings estimate for that block. */
@@ -229,6 +235,7 @@ export function createState(): DcpState {
     currentTurn: 0,
     tokensSaved: 0,
     totalPruneCount: 0,
+    totalToolCallCount: 0,
     accountedCompressionBlockIds: new Set(),
     compressionTokenSavings: new Map(),
     accountedPrunedToolIds: new Set(),
@@ -257,6 +264,7 @@ export function resetState(state: DcpState): void {
   state.currentTurn = 0
   state.tokensSaved = 0
   state.totalPruneCount = 0
+  state.totalToolCallCount = 0
   state.accountedCompressionBlockIds.clear()
   state.compressionTokenSavings.clear()
   state.accountedPrunedToolIds.clear()
@@ -268,12 +276,59 @@ export function resetState(state: DcpState): void {
   state.lastNudge = undefined
 }
 
+/**
+ * Compact tool record for persistence — strips outputText, outputDetails,
+ * and truncates/summarises inputArgs to keep serialized state bounded.
+ */
+export interface CompactToolRecord {
+  toolCallId: string
+  toolName: string
+  inputFingerprint: string
+  isError: boolean
+  turnIndex: number
+  timestamp: number
+  tokenEstimate: number
+  /**
+   * Extracted string values from inputArgs that could match file-protection
+   * patterns, persisted so `isProtectedByFilePattern` still works after
+   * session restore. Capped to avoid bloating state with huge arg values.
+   */
+  inputStringValues?: string[]
+}
+
+/**
+ * Maximum number of recent tool records retained in persisted state.
+ * Older records are still kept when referenced by active compression blocks,
+ * pruned tool IDs, or accounted prune IDs.
+ */
+export const PERSISTED_TOOL_CALLS_MAX_RECENT = 200
+
+/**
+ * Maximum length of individual string values extracted from inputArgs
+ * for file-pattern matching. Longer values are truncated.
+ */
+const INPUT_STRING_VALUE_MAX_LENGTH = 512
+
+/**
+ * Maximum number of inputStringValues to keep per tool record.
+ */
+const INPUT_STRING_VALUES_MAX_COUNT = 20
+
 export interface SerializedDcpState {
   compressionBlocks: CompressionBlock[]
   nextBlockId: number
   prunedToolIds: string[]
   prunedToolReasons: Array<[string, string]>
-  toolCalls: ToolRecord[]
+  /** Full tool records — present in legacy snapshots. */
+  toolCalls?: ToolRecord[]
+  /** Compact tool records — present in new compact snapshots. */
+  compactToolCalls?: CompactToolRecord[]
+  /**
+   * Total number of tool calls observed during the session, including those
+   * trimmed from the persisted snapshot. Allows `/dcp stats` to report
+   * approximate totals.
+   */
+  totalToolCallCount?: number
   tokensSaved: number
   totalPruneCount: number
   accountedCompressionBlockIds: number[]
@@ -297,11 +352,23 @@ export interface SerializedDcpState {
   nudgeCounter?: number
   /** Persisted since v?.?. Diagnostic turn of the last emitted nudge. */
   lastNudgeTurn?: number
+  /** Hash of the last persisted serialized state, used for dedup. */
+  _stateHash?: string
 }
 
 function isToolRecord(value: unknown): value is ToolRecord {
   if (!value || typeof value !== "object") return false
   const record = value as Partial<ToolRecord>
+  return (
+    typeof record.toolCallId === "string" &&
+    typeof record.toolName === "string" &&
+    typeof record.inputFingerprint === "string"
+  )
+}
+
+function isCompactToolRecord(value: unknown): value is CompactToolRecord {
+  if (!value || typeof value !== "object") return false
+  const record = value as Partial<CompactToolRecord>
   return (
     typeof record.toolCallId === "string" &&
     typeof record.toolName === "string" &&
@@ -334,14 +401,116 @@ function isLastNudge(value: unknown): value is DcpLastNudge {
   )
 }
 
+// ---------------------------------------------------------------------------
+// Compact tool-record helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Recursively extract string values from a nested object, matching the
+ * logic in `pruner-tools.ts::collectStringValues`. Depth-limited to 6.
+ */
+function extractStringValues(value: unknown, out: string[] = [], depth = 0): string[] {
+  if (depth > 6) return out
+  if (typeof value === "string") {
+    out.push(value)
+    return out
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) extractStringValues(item, out, depth + 1)
+    return out
+  }
+  if (value !== null && typeof value === "object") {
+    for (const item of Object.values(value as Record<string, unknown>)) {
+      extractStringValues(item, out, depth + 1)
+    }
+  }
+  return out
+}
+
+/**
+ * Produce a compact tool record for persistence: strip outputText,
+ * outputDetails, and reduce inputArgs to just extracted string values
+ * for file-pattern protection checking.
+ */
+export function compactifyToolRecord(record: ToolRecord): CompactToolRecord {
+  const stringValues = extractStringValues(record.inputArgs)
+  // Truncate individual values and limit total count
+  const cappedValues = stringValues
+    .slice(0, INPUT_STRING_VALUES_MAX_COUNT)
+    .map((v) => (v.length > INPUT_STRING_VALUE_MAX_LENGTH ? v.slice(0, INPUT_STRING_VALUE_MAX_LENGTH) : v))
+
+  const compact: CompactToolRecord = {
+    toolCallId: record.toolCallId,
+    toolName: record.toolName,
+    inputFingerprint: record.inputFingerprint,
+    isError: record.isError,
+    turnIndex: record.turnIndex,
+    timestamp: record.timestamp,
+    tokenEstimate: record.tokenEstimate,
+  }
+  if (cappedValues.length > 0) {
+    compact.inputStringValues = cappedValues
+  }
+  return compact
+}
+
+/**
+ * Determine which tool-call IDs are referenced by active compression blocks
+ * (via createdByToolCallId) or by pruned/accounted sets, and therefore must
+ * be retained even when trimming old records.
+ */
+function referencedToolCallIds(state: DcpState): Set<string> {
+  const refs = new Set<string>()
+  // Tool IDs referenced by active compression blocks
+  for (const block of state.compressionBlocks) {
+    if (block.active && block.createdByToolCallId) {
+      refs.add(block.createdByToolCallId)
+    }
+  }
+  // Pruned tool IDs
+  for (const id of state.prunedToolIds) refs.add(id)
+  // Accounted pruned tool IDs (superset of prunedToolIds in some cases)
+  for (const id of state.accountedPrunedToolIds) refs.add(id)
+  return refs
+}
+
 /** Serialize runtime state into a JSON-safe object for pi.appendEntry(). */
 export function serializeState(state: DcpState): SerializedDcpState {
+  // Build compact tool records, keeping referenced + recent ones.
+  const allRecords = Array.from(state.toolCalls.values())
+  const refs = referencedToolCallIds(state)
+
+  // Sort by timestamp descending so we can pick the most recent ones
+  const sorted = allRecords
+    .slice()
+    .sort((a, b) => b.timestamp - a.timestamp)
+
+  const compactToolCalls: CompactToolRecord[] = []
+  const seen = new Set<string>()
+
+  // First pass: always include referenced records
+  for (const record of sorted) {
+    if (refs.has(record.toolCallId)) {
+      compactToolCalls.push(compactifyToolRecord(record))
+      seen.add(record.toolCallId)
+    }
+  }
+
+  // Second pass: add recent records up to the limit
+  for (const record of sorted) {
+    if (seen.has(record.toolCallId)) continue
+    if (compactToolCalls.length >= PERSISTED_TOOL_CALLS_MAX_RECENT) break
+    compactToolCalls.push(compactifyToolRecord(record))
+    seen.add(record.toolCallId)
+  }
+
   return {
     compressionBlocks: state.compressionBlocks,
     nextBlockId: state.nextBlockId,
     prunedToolIds: Array.from(state.prunedToolIds),
     prunedToolReasons: Array.from(state.prunedToolReasons.entries()),
-    toolCalls: Array.from(state.toolCalls.values()),
+    compactToolCalls,
+    totalToolCallCount: allRecords.length,
     tokensSaved: state.tokensSaved,
     totalPruneCount: state.totalPruneCount,
     accountedCompressionBlockIds: Array.from(state.accountedCompressionBlockIds),
@@ -397,7 +566,34 @@ export function restoreState(state: DcpState, data: unknown): void {
     )
   }
 
-  if (Array.isArray(saved.toolCalls)) {
+  if (Array.isArray(saved.compactToolCalls)) {
+    // New compact format: restore CompactToolRecords as ToolRecords with
+    // synthetic inputArgs derived from inputStringValues.
+    state.toolCalls = new Map(
+      saved.compactToolCalls
+        .filter(isCompactToolRecord)
+        .map((compact) => {
+          const record: ToolRecord = {
+            toolCallId: compact.toolCallId,
+            toolName: compact.toolName,
+            // Reconstruct minimal inputArgs from persisted string values
+            // so isProtectedByFilePattern still works.
+            inputArgs: compact.inputStringValues
+              ? { _restoredValues: compact.inputStringValues }
+              : {},
+            inputFingerprint: compact.inputFingerprint,
+            isError: compact.isError,
+            turnIndex: compact.turnIndex,
+            timestamp: compact.timestamp,
+            tokenEstimate: compact.tokenEstimate,
+            // outputText and outputDetails intentionally not restored —
+            // they are only used during live compression block creation.
+          }
+          return [record.toolCallId, record] as const
+        }),
+    )
+  } else if (Array.isArray(saved.toolCalls)) {
+    // Legacy full format: restore as-is for backward compatibility.
     state.toolCalls = new Map(
       saved.toolCalls
         .filter(isToolRecord)
@@ -407,6 +603,14 @@ export function restoreState(state: DcpState, data: unknown): void {
 
   if (typeof saved.tokensSaved === "number") state.tokensSaved = saved.tokensSaved
   if (typeof saved.totalPruneCount === "number") state.totalPruneCount = saved.totalPruneCount
+
+  // Restore totalToolCallCount from the persisted snapshot, or fall back to
+  // the number of restored tool records (which may be a trimmed subset).
+  if (typeof saved.totalToolCallCount === "number" && saved.totalToolCallCount >= 0) {
+    state.totalToolCallCount = saved.totalToolCallCount
+  } else {
+    state.totalToolCallCount = state.toolCalls.size
+  }
 
   if (Array.isArray(saved.accountedCompressionBlockIds)) {
     state.accountedCompressionBlockIds = new Set(
@@ -518,4 +722,22 @@ export function createInputFingerprint(
 ): string {
   const sorted = sortObjectKeys(args)
   return `${toolName}::${JSON.stringify(sorted)}`
+}
+
+// ---------------------------------------------------------------------------
+// State hashing for save deduplication
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute a fast hash of serialized state for deduplication.
+ * Uses a simple DJB2-like hash over the JSON string. This is not
+ * cryptographic — it's only used to avoid writing identical snapshots.
+ */
+export function hashSerializedState(serialized: SerializedDcpState): string {
+  const json = JSON.stringify(serialized)
+  let hash = 5381
+  for (let i = 0; i < json.length; i++) {
+    hash = ((hash << 5) + hash + json.charCodeAt(i)) | 0
+  }
+  return (hash >>> 0).toString(36)
 }

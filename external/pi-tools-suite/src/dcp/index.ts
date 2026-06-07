@@ -9,6 +9,7 @@ import {
 	resetState,
 	createInputFingerprint,
 	serializeState,
+	hashSerializedState,
 	restoreState,
 	type DcpState,
 } from "./state.js"
@@ -45,11 +46,25 @@ import { safeGetContextUsage } from "../context-usage.js"
 // ---------------------------------------------------------------------------
 
 /**
+ * Hash of the last persisted dcp-state snapshot. Used to skip appending
+ * identical snapshots when saveState is called repeatedly without state change.
+ */
+let lastPersistedStateHash: string | undefined
+
+/**
  * Persist the current DCP runtime state as a custom session entry so it
  * survives session restarts and pi process restarts.
+ *
+ * Deduplication: serializes, hashes, and skips the append when the hash
+ * matches the previously persisted snapshot. This avoids writing identical
+ * multi-KB entries on every context event / nudge reapply.
  */
 function saveState(pi: ExtensionAPI, state: DcpState): void {
-	pi.appendEntry("dcp-state", serializeState(state))
+	const serialized = serializeState(state)
+	const hash = hashSerializedState(serialized)
+	if (hash === lastPersistedStateHash) return
+	lastPersistedStateHash = hash
+	pi.appendEntry("dcp-state", serialized)
 }
 
 function annotateMessagesWithBranchEntryIds(messages: any[], ctx: ExtensionContext): void {
@@ -147,6 +162,9 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 		// Reset to a clean slate first.
 		resetState(state)
 
+		// Reset dedup hash so the first save after restore always writes.
+		lastPersistedStateHash = undefined
+
 		// Re-apply config baseline so manual mode survives a session_start reset.
 		if (config.manualMode.enabled) {
 			state.manualMode = true
@@ -197,6 +215,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 				timestamp: 0,
 				tokenEstimate: 0,
 			})
+			state.totalToolCallCount++
 		}
 	})
 
@@ -228,6 +247,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 				outputText,
 				outputDetails: event.details,
 			})
+			state.totalToolCallCount++
 		}
 
 	})

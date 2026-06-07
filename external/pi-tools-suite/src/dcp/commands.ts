@@ -198,7 +198,7 @@ function handleContext(ctx: ExtensionCommandContext, state: DcpState): void {
 
   lines.push("")
   lines.push("Session Stats:")
-  lines.push(`  Tool calls tracked: ${fmt(state.toolCalls.size)}`)
+  lines.push(`  Tool calls tracked: ${fmt(state.totalToolCallCount)} (${fmt(state.toolCalls.size)} in memory)`)
   lines.push(`  Pruned tools: ${fmt(state.prunedToolIds.size)}`)
   lines.push(`  Compression blocks: ${state.compressionBlocks.filter((b) => b.active).length}`)
   lines.push(`  Tokens saved (estimated): ${fmt(state.tokensSaved)}`)
