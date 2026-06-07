@@ -41,8 +41,6 @@ const BACKFILL_MESSAGE_CHUNK = 240;
 const LOAD_OLDER_SCROLL_THRESHOLD_PX = 80;
 const VIRTUAL_OVERSCAN_PX = 360;
 const ESTIMATED_MESSAGE_HEIGHT = 96;
-const INITIAL_VIEWPORT_BEFORE = 80;
-const INITIAL_VIEWPORT_AFTER = 160;
 
 // -- RPC event shape (flat: optional fields, narrowing via switch) --------
 
@@ -102,7 +100,7 @@ type HistoryMessage =
   | { role?: string; [k: string]: unknown };
 
 type MessagesPage = {
-  messages: HistoryMessage[];
+  messages: ChatMessage[];
   offset: number;
   total: number;
   hasOlder?: boolean;
@@ -110,6 +108,17 @@ type MessagesPage = {
   endIndex?: number;
   hasNewer?: boolean;
   cursor?: TabScrollState;
+  meta?: SessionTailMeta;
+};
+
+type RawMessagesPage = Omit<MessagesPage, "messages" | "meta"> & {
+  messages: HistoryMessage[];
+};
+
+type SessionTailMeta = {
+  name?: string;
+  model?: ModelInfo | null;
+  contextUsage?: ContextUsageInfo;
 };
 
 type HistoryLoadProgress = {
@@ -780,6 +789,12 @@ export default function App() {
     return () => window.removeEventListener("resize", onResize);
   }, [updateVirtualRange]);
 
+  const initialViewportMessageLimit = useCallback(() => {
+    const viewportHeight = scrollRef.current?.clientHeight ?? window.innerHeight;
+    const visibleRows = Math.ceil(Math.max(1, viewportHeight) / ESTIMATED_MESSAGE_HEIGHT);
+    return Math.min(INITIAL_MESSAGE_CHUNK, Math.max(12, visibleRows + 8));
+  }, []);
+
   const fetchMessagesPage = useCallback(async (cmd: { sessionPath?: string; offset?: number; limit?: number; fromEnd?: boolean; lazyOlder?: boolean; anchorId?: string; anchorEntryOffset?: number; before?: number; after?: number; beforeOffset?: boolean; restoreViewport?: boolean }) => {
     if (cmd.sessionPath) {
       return await invoke<MessagesPage>("read_session_messages_window", {
@@ -795,12 +810,13 @@ export default function App() {
         restoreViewport: cmd.restoreViewport,
       });
     }
-    const resp = await invoke<{ success: boolean; data?: MessagesPage; error?: string }>(
+    const resp = await invoke<{ success: boolean; data?: RawMessagesPage; error?: string }>(
       "desktop_get_messages",
       { cmd },
     );
     if (!resp.success) throw new Error(resp.error ?? "unknown");
-    return resp.data ?? { messages: [], offset: 0, total: 0 };
+    const data = resp.data ?? { messages: [], offset: 0, total: 0 };
+    return { ...data, messages: toChatMessages(data.messages) } satisfies MessagesPage;
   }, []);
 
   const cancelHistoryLoad = useCallback(() => {
@@ -890,30 +906,31 @@ export default function App() {
       historyLoadSeqRef.current !== loadSeq || (path ? activeTabIdRef.current !== path : false);
     try {
       const saved = path ? tabScrollRef.current.get(path) : undefined;
+      const initialLimit = initialViewportMessageLimit();
       const first = await fetchMessagesPage(saved?.anchorEntryOffset !== undefined && !saved.followOutput && path
-        ? { sessionPath: path, anchorId: saved.anchorId, anchorEntryOffset: saved.anchorEntryOffset, before: INITIAL_VIEWPORT_BEFORE, after: INITIAL_VIEWPORT_AFTER, limit: INITIAL_VIEWPORT_BEFORE + INITIAL_VIEWPORT_AFTER }
+        ? { sessionPath: path, anchorId: saved.anchorId, anchorEntryOffset: saved.anchorEntryOffset, before: Math.floor(initialLimit / 2), after: initialLimit, limit: initialLimit * 2 }
         : path
-          ? { sessionPath: path, fromEnd: true, limit: INITIAL_MESSAGE_CHUNK, restoreViewport: true }
-          : { fromEnd: true, limit: INITIAL_MESSAGE_CHUNK });
+          ? { sessionPath: path, fromEnd: true, limit: initialLimit, restoreViewport: true }
+          : { fromEnd: true, limit: initialLimit });
       if (isStaleLoad()) {
         if (historyLoadInFlightRef.current === loadPath) historyLoadInFlightRef.current = null;
         return;
       }
 
       let page = first;
-      let next = toChatMessages(page.messages);
+      let next = page.messages;
       let loadedHeadFallback = false;
       // Some pathological sessions end with hundreds of MB of non-display
       // entries (for example dcp-state snapshots). Do not walk backward through
       // all of that on initial paint. Show the first visible page immediately;
       // the user can then scroll forward lazily through the file windows.
       if (path && next.length === 0 && page.hasOlder) {
-        page = await fetchMessagesPage({ sessionPath: path, offset: 0, limit: INITIAL_MESSAGE_CHUNK });
+        page = await fetchMessagesPage({ sessionPath: path, offset: 0, limit: initialLimit });
         if (isStaleLoad()) {
           if (historyLoadInFlightRef.current === loadPath) historyLoadInFlightRef.current = null;
           return;
         }
-        next = toChatMessages(page.messages);
+        next = page.messages;
         loadedHeadFallback = true;
       }
       if (path && first.cursor) tabScrollRef.current.set(path, first.cursor);
@@ -926,6 +943,14 @@ export default function App() {
       }
       setMessages(next);
       if (path) tabMessagesRef.current.set(path, next);
+      if (path && page.meta) {
+        setSession((prev) => ({
+          ...prev,
+          sessionName: page.meta?.name ?? prev.sessionName,
+          model: page.meta?.model ?? prev.model,
+          contextUsage: page.meta?.contextUsage ?? prev.contextUsage,
+        }));
+      }
       const startIndex = page.startIndex ?? page.offset;
       const endIndex = page.endIndex ?? (page.offset + page.messages.length);
       setOlderHistory({ nextOffset: startIndex, hasExternalOlder: Boolean(page.hasOlder), loading: false });
@@ -943,7 +968,7 @@ export default function App() {
       }
       if (historyLoadInFlightRef.current === loadPath) historyLoadInFlightRef.current = null;
     }
-  }, [fetchMessagesPage, scheduleRestoreTabScroll]);
+  }, [fetchMessagesPage, initialViewportMessageLimit, scheduleRestoreTabScroll]);
 
   const loadOlderMessages = useCallback(async () => {
     if ((olderHistory.nextOffset <= 0 && !olderHistory.hasExternalOlder) || olderHistory.loading || loadingMessages) return;
@@ -973,7 +998,7 @@ export default function App() {
         });
         return;
       }
-      const olderChatMessages = toChatMessages(older.messages);
+      const olderChatMessages = older.messages;
       prependScrollAnchorRef.current = prependAnchor;
       setMessages((current) => {
         const next = [...olderChatMessages, ...current];
@@ -1017,7 +1042,7 @@ export default function App() {
         });
         return;
       }
-      const newerChatMessages = toChatMessages(newer.messages);
+      const newerChatMessages = newer.messages;
       setMessages((current) => {
         const next = [...current, ...newerChatMessages];
         tabMessagesRef.current.set(path, next);

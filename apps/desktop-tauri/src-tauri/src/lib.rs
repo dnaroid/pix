@@ -15,7 +15,7 @@ mod desktop_state;
 mod pty;
 
 use crate::sidecar::SidecarHandle;
-use crate::history::{list_sessions_for_workspace, read_window, save_viewport, HistoryCache, HistoryWindow, SessionList, ViewportCursor};
+use crate::history::{list_sessions_for_workspace, read_chat_window, save_viewport, ChatHistoryWindow, HistoryCache, SessionList, ViewportCursor};
 use crate::desktop_state::{DesktopStateCache, PersistedTabs};
 use crate::pty::{PtyRegistry, PtyStartOptions, PtyStartResult};
 use serde::Serialize;
@@ -277,9 +277,9 @@ async fn read_session_messages_window(
     after: Option<usize>,
     before_offset: Option<bool>,
     restore_viewport: Option<bool>,
-) -> Result<HistoryWindow, String> {
+) -> Result<ChatHistoryWindow, String> {
     let mut cache = history_cache.lock().await;
-    read_window(
+    read_chat_window(
         &mut cache,
         session_path,
         offset,
