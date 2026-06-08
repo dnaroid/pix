@@ -929,11 +929,16 @@ export class AppMouseController {
 		const lines: string[] = [];
 
 		for (let index = 0; index < count; index += 1) {
-			const text = renderedLines[index]?.text ?? "";
+			const rendered = renderedLines[index];
+			const text = rendered?.text ?? "";
 			const line = range.start.line + index;
 			const startColumn = line === range.start.line ? range.start.x : 1;
 			const endColumn = line === range.end.line ? range.end.x : text.length + 1;
-			lines.push(sliceByDisplayColumns(text, startColumn, endColumn).trimEnd());
+			let lineText = sliceByDisplayColumns(text, startColumn, endColumn);
+			if (rendered?.backgroundOverride) {
+				lineText = lineText.replace(/^ /, "").replace(/ $/, "");
+			}
+			lines.push(lineText.trimEnd());
 		}
 
 		return lines.join("\n").replace(/\s+$/u, "");
