@@ -70,6 +70,31 @@ export function firstUserMessageText(ctx: ExtensionContext): string | undefined 
 	return undefined;
 }
 
+export function fallbackSessionTitleFromInput(input: string, maxTitleChars: number): string | undefined {
+	const normalized = input
+		.replace(/[\t\r\n]+/gu, " ")
+		.replace(/\s+/gu, " ")
+		.trim()
+		.replace(/^[`"'«»“”()[\]{}<>.,:;!?~@#$%^&*_+=\\/|\-]+/gu, "")
+		.trim();
+
+	if (!normalized) return undefined;
+
+	const words = normalized.split(/\s+/u).filter(Boolean);
+	if (words.length === 0) return undefined;
+
+	const selected: string[] = [];
+	for (const word of words) {
+		const next = selected.length === 0 ? word : `${selected.join(" ")} ${word}`;
+		if (selected.length > 0 && next.length > maxTitleChars) break;
+		selected.push(word);
+		if (selected.length >= 8) break;
+	}
+
+	const candidate = selected.join(" ");
+	return sanitizeSessionTitle(candidate || normalized, maxTitleChars);
+}
+
 function truncateInput(text: string, maxChars: number): string {
 	const trimmed = text.trim();
 	if (trimmed.length <= maxChars) return trimmed;
@@ -173,7 +198,9 @@ async function generateSessionTitle(
 	signal: AbortSignal,
 ): Promise<string | undefined> {
 	const resolved = await resolveTitleModel(ctx, config);
-	if (!resolved || signal.aborted) return undefined;
+	if (!resolved || signal.aborted) {
+		return fallbackSessionTitleFromInput(input, config.maxTitleChars);
+	}
 
 	const response = await complete(
 		resolved.model,
@@ -288,6 +315,17 @@ export default function sessionTitle(pi: ExtensionAPI) {
 		retryTimer.unref?.();
 	}
 
+	function applyFallbackSessionTitle(ctx: ExtensionContext, currentConfig: SessionTitleConfig, input: string, options: { force?: boolean } = {}): boolean {
+		const currentName = currentSessionName(ctx);
+		if (!options.force && currentName) return false;
+		const fallbackTitle = fallbackSessionTitleFromInput(input, currentConfig.maxTitleChars);
+		if (!fallbackTitle) return false;
+		pi.setSessionName(fallbackTitle);
+		refreshSessionUi(ctx, { force: true });
+		scheduleSessionUiRefresh(ctx);
+		return true;
+	}
+
 	function startTitleGeneration(ctx: ExtensionContext, currentConfig: SessionTitleConfig): void {
 		if (!pendingGeneration) return;
 		if (controller) return;
@@ -319,19 +357,30 @@ export default function sessionTitle(pi: ExtensionAPI) {
 				}
 			} finally {
 				if (controller === requestController) controller = undefined;
-				if (!requestController.signal.aborted && pendingGeneration?.sessionId === currentSessionId && shouldGeneratePendingTitle(ctx)) {
+				if (requestController.signal.aborted || pendingGeneration?.sessionId !== currentSessionId) return;
+				if (shouldGeneratePendingTitle(ctx)) {
 					scheduleGenerationRetry(ctx, currentConfig);
+					return;
+				}
+				if (pendingGeneration && pendingGeneration.attempts >= currentConfig.generationAttempts) {
+					applyFallbackSessionTitle(ctx, currentConfig, generation.input, {
+						force: Boolean(generation.replaceSessionName),
+					});
+					pendingGeneration = undefined;
 				}
 			}
 		})();
 	}
 
 	function primeTitleGenerationFromExistingSession(ctx: ExtensionContext, currentConfig: SessionTitleConfig): void {
-		if (!currentConfig.enabled) return;
 		if (currentSessionName(ctx)) return;
 
 		const input = firstUserMessageText(ctx);
 		if (!input) return;
+		if (!currentConfig.enabled) {
+			applyFallbackSessionTitle(ctx, currentConfig, input);
+			return;
+		}
 
 		pendingGeneration = {
 			sessionId: ctx.sessionManager.getSessionId(),
@@ -425,8 +474,6 @@ export default function sessionTitle(pi: ExtensionAPI) {
 		config = currentConfig;
 		refreshSessionUi(ctx);
 		scheduleSessionUiRefresh(ctx);
-
-		if (!currentConfig.enabled) return { action: "continue" as const };
 		if (event.source === "extension") return { action: "continue" as const };
 		if (!event.text.trim()) return { action: "continue" as const };
 		if (event.text.trimStart().startsWith("/")) return { action: "continue" as const };
@@ -435,6 +482,14 @@ export default function sessionTitle(pi: ExtensionAPI) {
 		const currentName = currentSessionName(ctx);
 		const activeForkTitleState = forkTitleState?.sessionId === currentSessionId ? forkTitleState : undefined;
 		if (currentName && (!activeForkTitleState || currentName !== activeForkTitleState.inheritedSessionName)) {
+			forkTitleState = undefined;
+			return { action: "continue" as const };
+		}
+		if (!currentConfig.enabled) {
+			applyFallbackSessionTitle(ctx, currentConfig, activeForkTitleState
+				? buildForkTitleInput(activeForkTitleState.parentTitle, event.text)
+				: event.text,
+				{ force: Boolean(activeForkTitleState) });
 			forkTitleState = undefined;
 			return { action: "continue" as const };
 		}

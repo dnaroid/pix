@@ -54,8 +54,15 @@ export type AppSessionLifecycleHost = {
 	render(): void;
 };
 
+export type BindCurrentSessionOptions = {
+	awaitExtensions?: boolean;
+};
+
 export class AppSessionLifecycleController {
 	private unsubscribe: (() => void) | undefined;
+	private extensionBindPromise: Promise<void> | undefined;
+	private extensionBindRuntime: AgentSessionRuntime | undefined;
+	private extensionBindSession: AgentSession | undefined;
 
 	constructor(private readonly host: AppSessionLifecycleHost) {}
 
@@ -79,9 +86,9 @@ export class AppSessionLifecycleController {
 
 			this.host.setRuntime(runtime);
 			runtime.setRebindSession(async () => {
-				await this.bindCurrentSession();
+				await this.bindCurrentSession({ awaitExtensions: false });
 			});
-			await this.bindCurrentSession();
+			await this.bindCurrentSession({ awaitExtensions: false });
 			if (isEmptyStartupSession(runtime)) {
 				this.host.addEntry({ id: createId("system"), kind: "system", text: createStartupInfoMessage(runtime) });
 			}
@@ -119,21 +126,29 @@ export class AppSessionLifecycleController {
 	}
 }
 
-	async bindCurrentSession(): Promise<void> {
+	async bindCurrentSession(options: BindCurrentSessionOptions = {}): Promise<void> {
 		const runtime = this.requireRuntime();
+		const session = runtime.session;
 		this.unsubscribe?.();
-		this.unsubscribe = runtime.session.subscribe((event) => {
+		this.unsubscribe = session.subscribe((event) => {
 			this.host.handleSessionEvent(event);
 		});
 		this.host.closeSdkMenuForBind();
-		const extensionUiScope = this.extensionUiScope(runtime.session);
+		const extensionUiScope = this.extensionUiScope(session);
 		this.host.clearExtensionWidgets(extensionUiScope, { cancelCustomUi: false });
-		await runtime.session.bindExtensions({
-			uiContext: this.host.createExtensionUIContext(extensionUiScope),
-			commandContextActions: this.host.createExtensionCommandContextActions(runtime),
-			shutdownHandler: this.host.extensionShutdownHandler(),
-			onError: (error) => this.host.handleExtensionError(error),
-		});
+
+		const bindPromise = this.bindSessionExtensions(runtime, session, extensionUiScope);
+		if (options.awaitExtensions === false) {
+			void bindPromise.catch((error) => {
+				if (!this.isCurrentRuntimeSession(runtime, session)) return;
+				this.host.addEntry({ id: createId("error"), kind: "error", text: `Extension bind failed: ${stringifyUnknown(error)}` });
+				this.host.showToast("Extension initialization failed", "error");
+				this.host.render();
+			});
+			return;
+		}
+
+		await bindPromise;
 	}
 
 	unsubscribeSession(): void {
@@ -181,6 +196,33 @@ export class AppSessionLifecycleController {
 		const runtime = this.host.runtime();
 		if (!runtime) throw new Error("Runtime is not initialized");
 		return runtime;
+	}
+
+	private bindSessionExtensions(runtime: AgentSessionRuntime, session: AgentSession, scopeKey: string): Promise<void> {
+		if (this.extensionBindPromise && this.extensionBindRuntime === runtime && this.extensionBindSession === session) {
+			return this.extensionBindPromise;
+		}
+
+		const promise = session.bindExtensions({
+			uiContext: this.host.createExtensionUIContext(scopeKey),
+			commandContextActions: this.host.createExtensionCommandContextActions(runtime),
+			shutdownHandler: this.host.extensionShutdownHandler(),
+			onError: (error) => this.host.handleExtensionError(error),
+		}).finally(() => {
+			if (this.extensionBindPromise !== promise) return;
+			this.extensionBindPromise = undefined;
+			this.extensionBindRuntime = undefined;
+			this.extensionBindSession = undefined;
+		});
+
+		this.extensionBindPromise = promise;
+		this.extensionBindRuntime = runtime;
+		this.extensionBindSession = session;
+		return promise;
+	}
+
+	private isCurrentRuntimeSession(runtime: AgentSessionRuntime, session: AgentSession): boolean {
+		return this.host.isRunning() && this.host.runtime() === runtime && runtime.session === session;
 	}
 
 	private extensionUiScope(session: AgentSession): string {

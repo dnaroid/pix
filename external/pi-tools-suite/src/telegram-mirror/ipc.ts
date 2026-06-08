@@ -237,6 +237,7 @@ export class IpcSocket {
 		this.closed = true;
 		this.clearTimers();
 		for (const pending of this.pendingRequests.values()) {
+			clearTimeout(pending.timer);
 			pending.reject(new Error("socket closed"));
 		}
 		this.pendingRequests.clear();

@@ -30,6 +30,9 @@ import {
 } from "./session-history.js";
 import type { RpcEvent, RpcResponse, UnknownCommand } from "./protocol.js";
 
+const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+type ThinkingLevel = (typeof THINKING_LEVELS)[number];
+
 export type DispatcherOptions = {
   initialRuntime: AgentSessionRuntime;
   /**
@@ -57,6 +60,10 @@ export function success(id: string | undefined, command: string, data?: unknown)
 
 export function failure(id: string | undefined, command: string, error: string): RpcResponse {
   return { id, type: "response", command, success: false, error };
+}
+
+function isThinkingLevel(value: string): value is ThinkingLevel {
+  return THINKING_LEVELS.includes(value as ThinkingLevel);
 }
 
 /** Run the dispatcher until stdin closes or the process is signalled. */
@@ -244,12 +251,14 @@ export async function runDispatcher(opts: DispatcherOptions): Promise<void> {
     return context;
   };
 
-  const rebindSession = async (): Promise<void> => {
-    unsubscribe?.();
-    olderHistoryReaderKey = undefined;
-    olderHistoryReader = undefined;
-    const session = holder.runtime.session;
-    await session.bindExtensions({
+  let pendingExtensionBind:
+    | { session: AgentSession; promise: Promise<void> }
+    | undefined;
+
+  const bindSessionExtensions = (session: AgentSession): Promise<void> => {
+    if (pendingExtensionBind?.session === session) return pendingExtensionBind.promise;
+
+    const promise = session.bindExtensions({
       uiContext: createExtensionUIContext(),
       commandContextActions: {
         waitForIdle: () => session.agent.waitForIdle(),
@@ -276,11 +285,35 @@ export async function runDispatcher(opts: DispatcherOptions): Promise<void> {
       onError: (err) => {
         writeLine({ type: "extension_error", extensionPath: err.extensionPath, event: err.event, error: err.error });
       },
+    }).catch((error: unknown) => {
+      if (holder.runtime.session === session) {
+        writeLine({
+          type: "extension_error",
+          extensionPath: "<session>",
+          event: "bindExtensions",
+          error: errorMessage(error),
+        });
+      }
+      throw error;
+    }).finally(() => {
+      if (pendingExtensionBind?.promise === promise) pendingExtensionBind = undefined;
     });
-    unsubscribe = opts.onSession(holder.runtime.session, (ev) => writeLine(ev));
+
+    pendingExtensionBind = { session, promise };
+    return promise;
   };
 
-  await rebindSession();
+  const rebindSession = async (options: { awaitExtensions?: boolean } = {}): Promise<void> => {
+    unsubscribe?.();
+    olderHistoryReaderKey = undefined;
+    olderHistoryReader = undefined;
+    const session = holder.runtime.session;
+    unsubscribe = opts.onSession(session, (ev) => writeLine(ev));
+    const bindPromise = bindSessionExtensions(session);
+    if (options.awaitExtensions !== false) await bindPromise;
+  };
+
+  await rebindSession({ awaitExtensions: false });
 
   const handleCommand = async (raw: UnknownCommand): Promise<void> => {
     const id = typeof raw.id === "string" ? raw.id : undefined;
@@ -330,6 +363,7 @@ export async function runDispatcher(opts: DispatcherOptions): Promise<void> {
           const state = {
             model: session.model,
             thinkingLevel: session.thinkingLevel,
+            availableThinkingLevels: session.getAvailableThinkingLevels(),
             isStreaming: session.isStreaming,
             isCompacting: session.isCompacting,
             steeringMode: session.steeringMode,
@@ -486,7 +520,24 @@ export async function runDispatcher(opts: DispatcherOptions): Promise<void> {
             return;
           }
           await session.setModel(model as Parameters<typeof session.setModel>[0]);
-          writeLine(success(id, "set_model", { model: summarizeModel(model, session.model) }));
+          writeLine(success(id, "set_model", {
+            model: summarizeModel(model, session.model),
+            thinkingLevel: session.thinkingLevel,
+            availableThinkingLevels: session.getAvailableThinkingLevels(),
+          }));
+          return;
+        }
+        case "set_thinking_level": {
+          const level = typeof raw.level === "string" ? raw.level.trim() : "";
+          if (!isThinkingLevel(level)) {
+            writeLine(failure(id, "set_thinking_level", "Invalid thinking level"));
+            return;
+          }
+          session.setThinkingLevel(level);
+          writeLine(success(id, "set_thinking_level", {
+            thinkingLevel: session.thinkingLevel,
+            availableThinkingLevels: session.getAvailableThinkingLevels(),
+          }));
           return;
         }
         case "compact": {
@@ -514,7 +565,7 @@ export async function runDispatcher(opts: DispatcherOptions): Promise<void> {
           const options =
             typeof raw.parentSession === "string" ? { parentSession: raw.parentSession } : undefined;
           const result = await holder.runtime.newSession(options);
-          if (!result.cancelled) await rebindSession();
+          if (!result.cancelled) await rebindSession({ awaitExtensions: false });
           writeLine(success(id, "new_session", result));
           return;
         }
@@ -526,12 +577,12 @@ export async function runDispatcher(opts: DispatcherOptions): Promise<void> {
           }
           if (opts.switchSession) {
             holder.runtime = await opts.switchSession(sessionPath);
-            await rebindSession();
+            await rebindSession({ awaitExtensions: false });
             writeLine(success(id, "switch_session", { cancelled: false }));
             return;
           }
           const result = await holder.runtime.switchSession(sessionPath);
-          if (!result.cancelled) await rebindSession();
+          if (!result.cancelled) await rebindSession({ awaitExtensions: false });
           writeLine(success(id, "switch_session", result));
           return;
         }
@@ -564,7 +615,7 @@ export async function runDispatcher(opts: DispatcherOptions): Promise<void> {
           }
           const newRuntime = await opts.switchCwd(newCwd);
           holder.runtime = newRuntime;
-          await rebindSession();
+          await rebindSession({ awaitExtensions: false });
           writeLine(
             success(id, "pix:set_cwd", {
               cwd: newRuntime.cwd,

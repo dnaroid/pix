@@ -30,6 +30,7 @@ pub enum Command {
     GetMessages(GetMessagesCommand),
     GetModels(GetModelsCommand),
     SetModel(SetModelCommand),
+    SetThinkingLevel(SetThinkingLevelCommand),
     Other(Value),
 }
 
@@ -322,6 +323,25 @@ pub struct SetModelCommand {
     pub type_: &'static str,
     #[serde(rename = "ref")]
     pub ref_: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SetThinkingLevelCommand {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(rename = "type")]
+    pub type_: &'static str,
+    pub level: String,
+}
+
+impl SetThinkingLevelCommand {
+    pub fn new(id: impl Into<String>, level: impl Into<String>) -> Self {
+        Self {
+            id: Some(id.into()),
+            type_: "set_thinking_level",
+            level: level.into(),
+        }
+    }
 }
 
 impl SetModelCommand {

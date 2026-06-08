@@ -26,6 +26,7 @@ export async function runProcess(command: string, args: readonly string[] = [], 
 		let stderr = "";
 		let error: Error | undefined;
 		let timedOut = false;
+		let forceKillTimer: NodeJS.Timeout | undefined;
 
 		const child = spawn(command, [...args], {
 			cwd: options.cwd,
@@ -43,6 +44,10 @@ export async function runProcess(command: string, args: readonly string[] = [], 
 			: setTimeout(() => {
 				timedOut = true;
 				child.kill("SIGTERM");
+				forceKillTimer = setTimeout(() => {
+					child.kill("SIGKILL");
+				}, 3_000);
+				forceKillTimer.unref?.();
 			}, options.timeoutMs);
 		timer?.unref?.();
 
@@ -57,6 +62,7 @@ export async function runProcess(command: string, args: readonly string[] = [], 
 		});
 		child.once("close", (status, signal) => {
 			if (timer) clearTimeout(timer);
+			if (forceKillTimer) clearTimeout(forceKillTimer);
 			resolve({
 				status,
 				signal,

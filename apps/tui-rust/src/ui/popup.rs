@@ -1,6 +1,7 @@
 //! Popup overlay framework for pix-tui.
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::Color;
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
@@ -17,6 +18,7 @@ use crate::ui::theme::{Theme, ThemeRole};
 pub enum PopupKind {
     Help,
     ModelPicker,
+    ThinkingPicker,
     SessionPicker,
     SlashMenu { query: String },
     Search { query: String },
@@ -35,6 +37,7 @@ pub struct PopupItem {
     pub label: String,
     pub hint: Option<String>,
     pub data: Value,
+    pub color: Option<Color>,
 }
 
 impl ActivePopup {
@@ -55,6 +58,7 @@ impl PopupItem {
             label: label.into(),
             hint: hint.map(Into::into),
             data,
+            color: None,
         }
     }
 }
@@ -63,6 +67,7 @@ pub fn compute_popup_rect(screen: Rect, kind: &PopupKind) -> Rect {
     let (target_width, target_height) = match kind {
         PopupKind::Help => (80, 24),
         PopupKind::ModelPicker => (76, MODEL_PICKER_POPUP_HEIGHT),
+        PopupKind::ThinkingPicker => (48, 10),
         PopupKind::SessionPicker => (96, 18),
         PopupKind::SlashMenu { .. } => (60, 8),
         PopupKind::Search { .. } => ((screen.width * 60 / 100), (screen.height * 60 / 100)),
@@ -147,6 +152,16 @@ fn popup_hint_line(active: &ActivePopup, theme: &Theme) -> Line<'static> {
                 ("Esc", "Close"),
             ],
         ),
+        PopupKind::ThinkingPicker => hint_line(
+            theme,
+            &[
+                ("↑↓", "Move"),
+                ("PgUp/PgDn", "Page"),
+                ("Home/End", "Jump"),
+                ("Enter", "Select"),
+                ("Esc", "Close"),
+            ],
+        ),
         PopupKind::SessionPicker => hint_line(
             theme,
             &[
@@ -200,6 +215,7 @@ pub fn popup_body_lines(active: &ActivePopup, theme: &Theme) -> Vec<Line<'static
     match &active.kind {
         PopupKind::Help => help_lines(theme),
         PopupKind::ModelPicker => item_lines(active, theme),
+        PopupKind::ThinkingPicker => item_lines(active, theme),
         PopupKind::SessionPicker => Vec::new(),
         PopupKind::Search { query } => vec![Line::from(vec![
             Span::styled("search: ", theme.style_for(ThemeRole::StatusDim)),
@@ -325,12 +341,15 @@ fn item_lines(active: &ActivePopup, theme: &Theme) -> Vec<Line<'static>> {
             let arrow_style = theme
                 .style_for(ThemeRole::StatusDim)
                 .add_modifier(Modifier::DIM);
-            let label_style = if focused {
-                theme
-                    .style_for(ThemeRole::AssistantText)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                theme.style_for(ThemeRole::AssistantText)
+            let label_style = {
+                let mut style = item
+                    .color
+                    .map(|color| theme.style_for(ThemeRole::AssistantText).fg(color))
+                    .unwrap_or_else(|| theme.style_for(ThemeRole::AssistantText));
+                if focused {
+                    style = style.add_modifier(Modifier::BOLD);
+                }
+                style
             };
 
             let mut spans = vec![
@@ -353,6 +372,7 @@ fn default_items_for_kind(kind: &PopupKind) -> Vec<PopupItem> {
     match kind {
         PopupKind::Help => Vec::new(),
         PopupKind::ModelPicker => Vec::new(),
+        PopupKind::ThinkingPicker => Vec::new(),
         PopupKind::SessionPicker => Vec::new(),
         PopupKind::SlashMenu { query } => slash_items(query),
         PopupKind::Search { .. } => Vec::new(),
@@ -376,6 +396,7 @@ fn popup_title(kind: &PopupKind) -> &'static str {
     match kind {
         PopupKind::Help => " Help ",
         PopupKind::ModelPicker => " Model Picker ",
+        PopupKind::ThinkingPicker => " Thinking Level ",
         PopupKind::SessionPicker => " Session Picker ",
         PopupKind::SlashMenu { .. } => " Slash Commands ",
         PopupKind::Search { .. } => " Search This Session ",

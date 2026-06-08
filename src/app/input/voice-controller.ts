@@ -6,6 +6,7 @@ import https from "node:https";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import { savePixDictationLanguage, type DictationConfig, type DictationLanguageModelConfig } from "../../config.js";
 import { APP_ICONS } from "../icons.js";
@@ -443,34 +444,44 @@ async function pathExists(path: string): Promise<boolean> {
 async function downloadFile(url: string, destination: string, redirects = 3): Promise<void> {
 	await new Promise<void>((resolve, reject) => {
 		const client = url.startsWith("https:") ? https : http;
+		let settled = false;
+		const finish = (callback: () => void): void => {
+			if (settled) return;
+			settled = true;
+			callback();
+		};
 		const request = client.get(url, (response) => {
 			const statusCode = response.statusCode ?? 0;
 			const location = response.headers.location;
 			if ([301, 302, 303, 307, 308].includes(statusCode) && location && redirects > 0) {
 				response.resume();
 				const redirectedUrl = new URL(location, url).toString();
-				downloadFile(redirectedUrl, destination, redirects - 1).then(resolve, reject);
+				downloadFile(redirectedUrl, destination, redirects - 1).then(
+					() => finish(resolve),
+					(error) => finish(() => reject(error)),
+				);
 				return;
 			}
 
 			if (statusCode !== 200) {
 				response.resume();
-				reject(new Error(`download failed with HTTP ${statusCode}`));
+				finish(() => reject(new Error(`download failed with HTTP ${statusCode}`)));
 				return;
 			}
 
 			const file = createWriteStream(destination);
-			file.on("finish", () => {
-				file.close((error) => {
-					if (error) reject(error);
-					else resolve();
-				});
+			response.on("error", (error) => {
+				finish(() => reject(error));
 			});
-			file.on("error", reject);
-			response.pipe(file);
+			pipeline(response, file).then(
+				() => finish(resolve),
+				(error) => finish(() => reject(error)),
+			);
 		});
 
-		request.on("error", reject);
+		request.on("error", (error) => {
+			finish(() => reject(error));
+		});
 	});
 }
 

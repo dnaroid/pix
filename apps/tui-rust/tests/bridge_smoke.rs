@@ -9,8 +9,10 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use pix_tui::bridge::{spawn_bridge, BridgeEvent};
+use serial_test::serial;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[serial]
 async fn bridge_roundtrip_get_state() -> anyhow::Result<()> {
     // Skip when the sidecar dist is not built (CI bootstrap path).
     let cwd = std::env::temp_dir().join("pix-tui-bridge-smoke");
@@ -66,6 +68,7 @@ async fn bridge_roundtrip_get_state() -> anyhow::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[serial]
 async fn bridge_roundtrip_undo_last_turn() -> anyhow::Result<()> {
     let cwd = std::env::temp_dir().join("pix-tui-bridge-undo-smoke");
     std::fs::create_dir_all(&cwd)?;
@@ -131,6 +134,7 @@ async fn bridge_roundtrip_undo_last_turn() -> anyhow::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[serial]
 async fn bridge_roundtrip_new_session() -> anyhow::Result<()> {
     let cwd = std::env::temp_dir().join("pix-tui-bridge-new-session-smoke");
     std::fs::create_dir_all(&cwd)?;

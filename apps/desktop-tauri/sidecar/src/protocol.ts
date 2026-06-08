@@ -33,6 +33,7 @@ export type RpcCommand =
   | { id?: string; type: "extension_ui_response"; value?: unknown; confirmed?: boolean; cancelled?: boolean }
   | { id?: string; type: "get_models" }
   | { id?: string; type: "set_model"; provider?: string; modelId?: string; ref?: string }
+  | { id?: string; type: "set_thinking_level"; level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" }
   | { id?: string; type: "compact"; instructions?: string }
   | { id?: string; type: "undo_last_turn" }
   // -- Session lifecycle ------------------------------------------------

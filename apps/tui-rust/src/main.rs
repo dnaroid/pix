@@ -12,7 +12,7 @@ use anyhow::{anyhow, Context, Result};
 use crossterm::cursor::{Hide, Show};
 use crossterm::event::{
     DisableMouseCapture, EnableMouseCapture, Event as TermEvent, EventStream, KeyCode, KeyEvent,
-    KeyModifiers, MouseEvent,
+    KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use crossterm::execute;
 use crossterm::terminal::{
@@ -22,7 +22,7 @@ use futures::StreamExt;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::Terminal;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -31,7 +31,7 @@ use tracing::{debug, error, info, warn};
 use tracing_subscriber::EnvFilter;
 
 use pix_tui::bridge::{self, spawn_bridge_with_session_mode, BridgeEvent};
-use pix_tui::bridge_event::AppEvent;
+use pix_tui::bridge_event::{AppEvent, CloseTabRollback};
 use pix_tui::cli;
 use pix_tui::runtime;
 use pix_tui::ui;
@@ -48,6 +48,8 @@ struct TabRuntime {
     session_key: Option<String>,
 }
 
+const SESSION_STATE_REFRESH_DELAYS_MS: &[u64] = &[0, 100, 500, 1500, 3000];
+
 struct TabRuntimeManager {
     cwd: Option<PathBuf>,
     session_mode: Option<String>,
@@ -56,6 +58,7 @@ struct TabRuntimeManager {
     active_runtime_id: String,
     runtimes: HashMap<String, TabRuntime>,
     runtime_by_session_key: HashMap<String, String>,
+    pending_session_keys: HashSet<String>,
 }
 
 impl TabRuntimeManager {
@@ -74,6 +77,7 @@ impl TabRuntimeManager {
             active_runtime_id: String::new(),
             runtimes: HashMap::new(),
             runtime_by_session_key: HashMap::new(),
+            pending_session_keys: HashSet::new(),
         };
         let runtime_id = manager.alloc_runtime_id();
         let state = manager
@@ -108,6 +112,89 @@ impl TabRuntimeManager {
         self.runtime_by_session_key.get(&key).cloned()
     }
 
+    fn has_runtime_or_pending_session_key(&self, key: &str) -> bool {
+        let key = self.normalize_session_key(key);
+        self.runtime_by_session_key.contains_key(&key) || self.pending_session_keys.contains(&key)
+    }
+
+    fn insert_runtime(&mut self, runtime_id: String, runtime: TabRuntime, state: &serde_json::Value) {
+        self.runtimes.insert(runtime_id.clone(), runtime);
+        self.register_runtime_state(&runtime_id, state);
+    }
+
+    fn mark_pending_session_key(&mut self, key: &str) {
+        let normalized = self.normalize_session_key(key);
+        if !normalized.is_empty() {
+            self.pending_session_keys.insert(normalized);
+        }
+    }
+
+    fn clear_pending_session_key(&mut self, key: Option<&str>) {
+        let Some(key) = key else { return; };
+        let normalized = self.normalize_session_key(key);
+        if !normalized.is_empty() {
+            self.pending_session_keys.remove(&normalized);
+        }
+    }
+
+    fn spawn_runtime_in_background(
+        &mut self,
+        session_path: Option<String>,
+        name: Option<String>,
+        activate: bool,
+    ) {
+        if let Some(path) = session_path.as_deref() {
+            self.mark_pending_session_key(path);
+        }
+        let runtime_id = self.alloc_runtime_id();
+        let tx = self.tx.clone();
+        let cwd = self.cwd.clone();
+        let session_mode = self.session_mode.clone();
+        let pending_session_key = session_path.clone();
+        tokio::spawn(async move {
+            match spawn_background_runtime(cwd, session_mode, tx.clone(), runtime_id.clone(), session_path, name).await {
+                Ok((runtime, state)) => {
+                    let _ = tx.send(AppEvent::SpawnedTabRuntime {
+                        runtime_id,
+                        client: runtime.client,
+                        handle: runtime.handle,
+                        state,
+                        activate,
+                    }).await;
+                }
+                Err(error) => {
+                    let _ = tx.send(AppEvent::RuntimeActivationFailed {
+                        message: format!("tab runtime activation failed: {error}"),
+                        session_key: pending_session_key,
+                    }).await;
+                }
+            }
+        });
+    }
+
+    fn prewarm_inactive_tabs(&mut self, app: &ui::App, limit: usize) {
+        if limit == 0 { return; }
+        let active_path = app.tabs.active_path.as_deref();
+        let candidates: Vec<String> = app
+            .tabs
+            .tabs
+            .iter()
+            .filter_map(|tab| {
+                if Some(tab.path.as_str()) == active_path {
+                    return None;
+                }
+                if self.has_runtime_or_pending_session_key(&tab.path) {
+                    return None;
+                }
+                Some(tab.path.clone())
+            })
+            .take(limit)
+            .collect();
+        for path in candidates {
+            self.spawn_runtime_in_background(Some(path), None, false);
+        }
+    }
+
     fn register_runtime_state(&mut self, runtime_id: &str, state: &serde_json::Value) {
         let Some(key) = runtime_session_key(state).map(|key| self.normalize_session_key(&key))
         else {
@@ -122,53 +209,6 @@ impl TabRuntimeManager {
         }
         self.runtime_by_session_key
             .insert(key, runtime_id.to_string());
-    }
-
-    async fn activate_or_spawn_for_session(
-        &mut self,
-        session_path: String,
-    ) -> Result<(String, serde_json::Value)> {
-        if let Some(runtime_id) = self.runtime_id_for_session_key(&session_path) {
-            let client = self
-                .runtimes
-                .get(&runtime_id)
-                .map(|runtime| runtime.client.clone())
-                .context("runtime missing for session")?;
-            let state = client
-                .get_state()
-                .await
-                .context("get_state for existing tab runtime")?;
-            self.set_active_runtime(runtime_id.clone());
-            self.register_runtime_state(&runtime_id, &state);
-            return Ok((runtime_id, state));
-        }
-
-        let runtime_id = self.alloc_runtime_id();
-        let state = self
-            .spawn_runtime(runtime_id.clone(), Some(session_path), None)
-            .await?;
-        self.set_active_runtime(runtime_id.clone());
-        Ok((runtime_id, state))
-    }
-
-    async fn spawn_new_session_runtime(&mut self) -> Result<(String, serde_json::Value)> {
-        let runtime_id = self.alloc_runtime_id();
-        let _ = self.spawn_runtime(runtime_id.clone(), None, None).await?;
-        let client = self
-            .runtimes
-            .get(&runtime_id)
-            .map(|runtime| runtime.client.clone())
-            .context("new tab runtime missing after spawn")?;
-        let state = client
-            .new_session(None)
-            .await
-            .context("new_session for tab runtime")?;
-        let state = ensure_session_state(&client, state)
-            .await
-            .context("new_session get_state for tab runtime")?;
-        self.register_runtime_state(&runtime_id, &state);
-        self.set_active_runtime(runtime_id.clone());
-        Ok((runtime_id, state))
     }
 
     async fn close_runtime_for_path(&mut self, closed_path: &str) {
@@ -203,7 +243,7 @@ impl TabRuntimeManager {
         normalize_session_key(self.cwd.as_deref(), key)
     }
 
-    async fn spawn_runtime(
+async fn spawn_runtime(
         &mut self,
         runtime_id: String,
         session_path: Option<String>,
@@ -243,8 +283,18 @@ impl TabRuntimeManager {
         let state = establish_session_direct(&client, session_path, name).await?;
         let tx = self.tx.clone();
         let pump_runtime_id = runtime_id.clone();
+        let pump_client = client.clone();
         tokio::spawn(async move {
             while let Some(event) = events.recv().await {
+                let refresh_event_type = match &event {
+                    BridgeEvent::Event { type_, .. }
+                        if should_refresh_runtime_session_state(type_) =>
+                    {
+                        Some(type_.clone())
+                    }
+                    _ => None,
+                };
+
                 if tx
                     .send(AppEvent::TabBridge {
                         runtime_id: pump_runtime_id.clone(),
@@ -254,6 +304,15 @@ impl TabRuntimeManager {
                     .is_err()
                 {
                     break;
+                }
+
+                if let Some(event_type) = refresh_event_type {
+                    schedule_runtime_session_state_refreshes(
+                        pump_runtime_id.clone(),
+                        pump_client.clone(),
+                        tx.clone(),
+                        event_type,
+                    );
                 }
             }
         });
@@ -271,6 +330,88 @@ impl TabRuntimeManager {
     }
 }
 
+async fn spawn_background_runtime(
+    cwd: Option<PathBuf>,
+    session_mode: Option<String>,
+    tx: mpsc::Sender<AppEvent>,
+    runtime_id: String,
+    session_path: Option<String>,
+    name: Option<String>,
+) -> Result<(TabRuntime, serde_json::Value)> {
+    let bridge = spawn_bridge_with_session_mode(cwd.clone(), session_mode.as_deref())
+        .await
+        .context("failed to start sidecar bridge")?;
+    let client = bridge.client.clone();
+    let mut events = bridge.events;
+
+    while let Some(ev) = events.recv().await {
+        match ev {
+            BridgeEvent::Ready => break,
+            BridgeEvent::Stderr(line) if line.contains("sidecar ready") => break,
+            BridgeEvent::Stderr(line) => {
+                let _ = tx
+                    .send(AppEvent::TabBridge {
+                        runtime_id: runtime_id.clone(),
+                        event: BridgeEvent::Stderr(line),
+                    })
+                    .await;
+            }
+            other => {
+                let _ = tx
+                    .send(AppEvent::TabBridge {
+                        runtime_id: runtime_id.clone(),
+                        event: other,
+                    })
+                    .await;
+            }
+        }
+    }
+
+    let state = establish_session_direct(&client, session_path, name).await?;
+    let tx_events = tx.clone();
+    let pump_runtime_id = runtime_id.clone();
+    let pump_client = client.clone();
+    tokio::spawn(async move {
+        while let Some(event) = events.recv().await {
+            let refresh_event_type = match &event {
+                BridgeEvent::Event { type_, .. } if should_refresh_runtime_session_state(type_) => {
+                    Some(type_.clone())
+                }
+                _ => None,
+            };
+
+            if tx_events
+                .send(AppEvent::TabBridge {
+                    runtime_id: pump_runtime_id.clone(),
+                    event,
+                })
+                .await
+                .is_err()
+            {
+                break;
+            }
+
+            if let Some(type_) = refresh_event_type {
+                schedule_runtime_session_state_refreshes(
+                    pump_runtime_id.clone(),
+                    pump_client.clone(),
+                    tx_events.clone(),
+                    type_,
+                );
+            }
+        }
+    });
+
+    Ok((
+        TabRuntime {
+            client,
+            handle: bridge.handle,
+            session_key: runtime_session_key(&state).map(|key| normalize_session_key(cwd.as_deref(), &key)),
+        },
+        state,
+    ))
+}
+
 fn runtime_session_key(state: &serde_json::Value) -> Option<String> {
     state
         .get("sessionFile")
@@ -285,6 +426,43 @@ fn runtime_session_key(state: &serde_json::Value) -> Option<String> {
                 .filter(|value| !value.trim().is_empty())
         })
         .map(str::to_string)
+}
+
+fn should_refresh_runtime_session_state(event_type: &str) -> bool {
+    matches!(event_type, "agent_end" | "turn_end" | "compaction_end")
+}
+
+fn schedule_runtime_session_state_refreshes(
+    runtime_id: String,
+    client: bridge::BridgeClient,
+    tx: mpsc::Sender<AppEvent>,
+    event_type: String,
+) {
+    for &delay_ms in SESSION_STATE_REFRESH_DELAYS_MS {
+        let runtime_id = runtime_id.clone();
+        let client = client.clone();
+        let tx = tx.clone();
+        let event_type = event_type.clone();
+        tokio::spawn(async move {
+            if delay_ms > 0 {
+                tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+            }
+            match client.get_state().await {
+                Ok(state) => {
+                    let _ = tx.send(AppEvent::TabSessionState { runtime_id, state }).await;
+                }
+                Err(error) => {
+                    debug!(
+                        runtime_id,
+                        event_type,
+                        delay_ms,
+                        ?error,
+                        "runtime session-state refresh failed"
+                    );
+                }
+            }
+        });
+    }
 }
 
 fn normalize_session_key(cwd: Option<&Path>, key: &str) -> String {
@@ -402,6 +580,7 @@ async fn main() -> Result<()> {
             &tx,
         );
     }
+    schedule_startup_prewarm(&app, &mut runtimes);
 
     // Terminal events pump.
     let term_tx = tx.clone();
@@ -677,6 +856,44 @@ async fn handle_app_event(
         AppEvent::ActivatedTabState { runtime_id, state } => {
             app.save_active_runtime_state();
             activate_tab_runtime_state(app, runtimes, runtime_id, state);
+            runtimes.prewarm_inactive_tabs(app, 2);
+            needs_redraw = true;
+        }
+        AppEvent::SpawnedTabRuntime {
+            runtime_id,
+            client,
+            handle,
+            state,
+            activate,
+        } => {
+            let session_key = runtime_session_key(&state).map(|key| runtimes.normalize_session_key(&key));
+            runtimes.insert_runtime(
+                runtime_id.clone(),
+                TabRuntime {
+                    client,
+                    handle,
+                    session_key: session_key.clone(),
+                },
+                &state,
+            );
+            runtimes.clear_pending_session_key(session_key.as_deref());
+
+            let should_activate = activate
+                || session_key
+                    .as_deref()
+                    .map(|key| app.tabs.active_path.as_deref() == Some(key) && app.is_runtime_loading(Some(key)))
+                    .unwrap_or(false);
+            if should_activate {
+                app.save_active_runtime_state();
+                activate_tab_runtime_state(app, runtimes, runtime_id, state);
+                runtimes.prewarm_inactive_tabs(app, 2);
+                needs_redraw = true;
+            }
+        }
+        AppEvent::RuntimeActivationFailed { message, session_key } => {
+            runtimes.clear_pending_session_key(session_key.as_deref());
+            app.toasts
+                .push(ToastLevel::Warn, ToastKindLabel::Bridge, message, 6);
             needs_redraw = true;
         }
         AppEvent::RuntimeHistoryLoaded { runtime_id, result } => {
@@ -697,6 +914,7 @@ async fn handle_app_event(
             let id = app.session_id.as_deref().unwrap_or("(unknown)");
             app.push_diag(DiagKind::Info, format!("started session {id}"));
             app.save_active_runtime_state();
+            runtimes.prewarm_inactive_tabs(app, 2);
             needs_redraw = true;
         }
         AppEvent::ClosedTabState { state, closed_path } => {
@@ -732,6 +950,39 @@ async fn handle_app_event(
             activate_tab_runtime_state(app, runtimes, runtime_id, state);
             app.remove_tab_path(&closed_path);
             runtimes.close_runtime_for_path(&closed_path).await;
+            runtimes.prewarm_inactive_tabs(app, 2);
+            needs_redraw = true;
+        }
+        AppEvent::SpawnedClosedTabRuntime {
+            runtime_id,
+            client,
+            handle,
+            state,
+            closed_path,
+        } => {
+            let session_key = runtime_session_key(&state).map(|key| runtimes.normalize_session_key(&key));
+            runtimes.insert_runtime(
+                runtime_id.clone(),
+                TabRuntime {
+                    client,
+                    handle,
+                    session_key: session_key.clone(),
+                },
+                &state,
+            );
+            runtimes.clear_pending_session_key(session_key.as_deref());
+            app.save_active_runtime_state();
+            activate_tab_runtime_state(app, runtimes, runtime_id, state);
+            app.remove_tab_path(&closed_path);
+            runtimes.close_runtime_for_path(&closed_path).await;
+            runtimes.prewarm_inactive_tabs(app, 2);
+            needs_redraw = true;
+        }
+        AppEvent::CloseTabFailed { message, rollback } => {
+            runtimes.clear_pending_session_key(app.tabs.active_path.as_deref());
+            restore_close_tab_rollback(app, rollback);
+            app.toasts
+                .push(ToastLevel::Warn, ToastKindLabel::Bridge, message, 6);
             needs_redraw = true;
         }
         AppEvent::SessionList(result) => {
@@ -778,6 +1029,20 @@ async fn handle_app_event(
                     ToastLevel::Info,
                     ToastKindLabel::Info,
                     format!("Switched model to {label}"),
+                    4,
+                ),
+                Err(error) => app
+                    .toasts
+                    .push(ToastLevel::Warn, ToastKindLabel::Info, error, 6),
+            }
+            needs_redraw = true;
+        }
+        AppEvent::ThinkingSwitchResult(result) => {
+            match result {
+                Ok(label) => app.toasts.push(
+                    ToastLevel::Info,
+                    ToastKindLabel::Info,
+                    format!("Switched thinking to {label}"),
                     4,
                 ),
                 Err(error) => app
@@ -1049,10 +1314,16 @@ fn open_model_picker(
         let result = c
             .get_models()
             .await
-            .map(|value| ui::model_picker::parse_models_response(&value))
+            .map(|value| {
+                ui::model_picker::favorite_models(ui::model_picker::parse_models_response(&value))
+            })
             .map_err(|e| format!("get_models failed: {e}"));
         let _ = tx.send(AppEvent::ModelPickerLoaded(result)).await;
     });
+}
+
+fn open_thinking_picker(app: &mut ui::App) {
+    app.open_thinking_picker();
 }
 
 fn open_session_picker(
@@ -1113,7 +1384,11 @@ fn request_model_switch(
                 if let Some(model) = value.get("model").cloned() {
                     let _ = tx
                         .send(AppEvent::SessionState(
-                            serde_json::json!({ "model": model }),
+                            serde_json::json!({
+                                "model": model,
+                                "thinkingLevel": value.get("thinkingLevel").cloned(),
+                                "availableThinkingLevels": value.get("availableThinkingLevels").cloned(),
+                            }),
                         ))
                         .await;
                 }
@@ -1128,6 +1403,59 @@ fn request_model_switch(
                 let _ = tx
                     .send(AppEvent::ModelSwitchResult(Err(format!(
                         "set_model failed: {e}"
+                    ))))
+                    .await;
+            }
+        }
+    });
+}
+
+fn request_thinking_switch(
+    app: &mut ui::App,
+    client: &bridge::BridgeClient,
+    tx: &mpsc::Sender<AppEvent>,
+    level: String,
+) {
+    let requested = level.trim().to_string();
+    if requested.is_empty() {
+        app.toasts.push(
+            ToastLevel::Warn,
+            ToastKindLabel::Info,
+            "Choose a thinking level",
+            4,
+        );
+        return;
+    }
+
+    app.toasts.push(
+        ToastLevel::Info,
+        ToastKindLabel::Info,
+        format!("Switching thinking level to {requested}…"),
+        2,
+    );
+
+    let c = client.clone();
+    let tx = tx.clone();
+    tokio::spawn(async move {
+        match c.set_thinking_level(requested.clone()).await {
+            Ok(value) => {
+                let _ = tx
+                    .send(AppEvent::SessionState(serde_json::json!({
+                        "thinkingLevel": value.get("thinkingLevel").cloned(),
+                        "availableThinkingLevels": value.get("availableThinkingLevels").cloned(),
+                    })))
+                    .await;
+                let label = value
+                    .get("thinkingLevel")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or(requested.as_str())
+                    .to_string();
+                let _ = tx.send(AppEvent::ThinkingSwitchResult(Ok(label))).await;
+            }
+            Err(e) => {
+                let _ = tx
+                    .send(AppEvent::ThinkingSwitchResult(Err(format!(
+                        "set_thinking_level failed: {e}"
                     ))))
                     .await;
             }
@@ -1153,21 +1481,35 @@ fn save_before_tab_switch(app: &mut ui::App) {
 }
 
 async fn finish_switch_tab_to_path(
-    app: &mut ui::App,
+    _app: &mut ui::App,
     runtimes: &mut TabRuntimeManager,
     path: String,
 ) {
-    match runtimes.activate_or_spawn_for_session(path).await {
-        Ok((runtime_id, state)) => {
-            activate_tab_runtime_state(app, runtimes, runtime_id, state);
+    if let Some(runtime_id) = runtimes.runtime_id_for_session_key(&path) {
+        if let Some(client) = runtimes.client_for_runtime(&runtime_id) {
+            let tx = runtimes.tx.clone();
+            tokio::spawn(async move {
+                match client.get_state().await {
+                    Ok(state) => {
+                        let _ = tx
+                            .send(AppEvent::ActivatedTabState { runtime_id, state })
+                            .await;
+                    }
+                    Err(error) => {
+                        let _ = tx
+                            .send(AppEvent::RuntimeActivationFailed {
+                                message: format!("tab switch failed: {error}"),
+                                session_key: None,
+                            })
+                            .await;
+                    }
+                }
+            });
         }
-        Err(e) => app.toasts.push(
-            ToastLevel::Warn,
-            ToastKindLabel::Bridge,
-            format!("tab switch failed: {e}"),
-            6,
-        ),
+        return;
     }
+
+    runtimes.spawn_runtime_in_background(Some(path), None, true);
 }
 
 fn show_loading_tab_placeholder(app: &mut ui::App, path: &str) {
@@ -1199,7 +1541,187 @@ fn show_loading_new_tab_placeholder(app: &mut ui::App) {
     app.set_pending_new_tab(true);
 }
 
-async fn close_active_tab(app: &mut ui::App, runtimes: &mut TabRuntimeManager) {
+fn capture_close_tab_rollback(app: &ui::App) -> CloseTabRollback {
+    CloseTabRollback {
+        tabs: app.tabs.clone(),
+        loading_runtime_key: app.loading_runtime_key.clone(),
+        pending_new_tab: app.pending_new_tab,
+        previous_runtime_key: app.active_runtime_key(),
+    }
+}
+
+fn restore_close_tab_rollback(app: &mut ui::App, rollback: CloseTabRollback) {
+    app.tabs = rollback.tabs;
+    app.loading_runtime_key = rollback.loading_runtime_key;
+    app.pending_new_tab = rollback.pending_new_tab;
+    app.persist_tabs_best_effort();
+    if let Some(previous_runtime_key) = rollback.previous_runtime_key {
+        let _ = app.restore_runtime_state_for_key(&previous_runtime_key);
+    }
+}
+
+fn finish_close_active_tab_to_new_session(
+    runtimes: &mut TabRuntimeManager,
+    closed_path: String,
+    rollback: CloseTabRollback,
+) {
+    let tx = runtimes.tx.clone();
+    let cwd = runtimes.cwd.clone();
+    let session_mode = runtimes.session_mode.clone();
+    tokio::spawn(async move {
+        let runtime_id = format!("tab-runtime-bg-close-{}", uuid_like_suffix());
+        match spawn_background_runtime(cwd, session_mode, tx.clone(), runtime_id.clone(), None, None).await {
+            Ok((runtime, _)) => {
+                let client = runtime.client.clone();
+                match client.new_session(None).await {
+                    Ok(state) => match ensure_session_state(&client, state).await {
+                        Ok(state) => {
+                            let _ = tx
+                                .send(AppEvent::SpawnedClosedTabRuntime {
+                                    runtime_id,
+                                    client: runtime.client,
+                                    handle: runtime.handle,
+                                    state,
+                                    closed_path,
+                                })
+                                .await;
+                        }
+                        Err(error) => {
+                            let _ = runtime.handle.shutdown().await;
+                            let _ = tx
+                                .send(AppEvent::CloseTabFailed {
+                                    message: format!("close_tab new_session failed: {error}"),
+                                    rollback,
+                                })
+                                .await;
+                        }
+                    },
+                    Err(error) => {
+                        let _ = runtime.handle.shutdown().await;
+                        let _ = tx
+                            .send(AppEvent::CloseTabFailed {
+                                message: format!("close_tab new_session failed: {error}"),
+                                rollback,
+                            })
+                            .await;
+                    }
+                }
+            }
+            Err(error) => {
+                let _ = tx
+                    .send(AppEvent::CloseTabFailed {
+                        message: format!("close_tab new_session failed: {error}"),
+                        rollback,
+                    })
+                    .await;
+            }
+        }
+    });
+}
+
+fn finish_close_active_tab_to_path(
+    runtimes: &mut TabRuntimeManager,
+    closed_path: String,
+    next_path: String,
+    rollback: CloseTabRollback,
+) {
+    if let Some(runtime_id) = runtimes.runtime_id_for_session_key(&next_path) {
+        if let Some(client) = runtimes.client_for_runtime(&runtime_id) {
+            let tx = runtimes.tx.clone();
+            tokio::spawn(async move {
+                match client.get_state().await {
+                    Ok(state) => {
+                        let _ = tx
+                            .send(AppEvent::ClosedTabRuntimeState {
+                                runtime_id,
+                                state,
+                                closed_path,
+                            })
+                            .await;
+                    }
+                    Err(error) => {
+                        let _ = tx
+                            .send(AppEvent::CloseTabFailed {
+                                message: format!("close_tab switch failed: {error}"),
+                                rollback,
+                            })
+                            .await;
+                    }
+                }
+            });
+        }
+        return;
+    }
+
+    runtimes.mark_pending_session_key(&next_path);
+    let tx = runtimes.tx.clone();
+    let cwd = runtimes.cwd.clone();
+    let session_mode = runtimes.session_mode.clone();
+    tokio::spawn(async move {
+        let runtime_id = format!("tab-runtime-bg-close-{}", uuid_like_suffix());
+        match spawn_background_runtime(
+            cwd,
+            session_mode,
+            tx.clone(),
+            runtime_id.clone(),
+            Some(next_path.clone()),
+            None,
+        )
+        .await
+        {
+            Ok((runtime, state)) => {
+                let _ = tx
+                    .send(AppEvent::SpawnedClosedTabRuntime {
+                        runtime_id,
+                        client: runtime.client,
+                        handle: runtime.handle,
+                        state,
+                        closed_path,
+                    })
+                    .await;
+            }
+            Err(error) => {
+                let _ = tx
+                    .send(AppEvent::CloseTabFailed {
+                        message: format!("close_tab switch failed: {error}"),
+                        rollback,
+                    })
+                    .await;
+            }
+        }
+    });
+}
+
+fn uuid_like_suffix() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0)
+}
+
+fn show_loading_close_tab_placeholder(app: &mut ui::App, closed_path: &str, next_path: &str) {
+    app.tabs.remove_path(closed_path);
+    app.tabs.active_path = Some(next_path.to_string());
+    app.persist_tabs_best_effort();
+
+    if app.restore_runtime_state_for_key(next_path) {
+        app.set_loading_runtime_key(None);
+    } else {
+        show_loading_tab_placeholder(app, next_path);
+    }
+}
+
+fn show_loading_close_last_tab_placeholder(app: &mut ui::App, closed_path: &str) {
+    app.tabs.remove_path(closed_path);
+    app.persist_tabs_best_effort();
+    show_loading_new_tab_placeholder(app);
+}
+
+async fn close_active_tab(
+    _terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    app: &mut ui::App,
+    runtimes: &mut TabRuntimeManager,
+) -> Result<()> {
     if app.is_streaming {
         app.toasts.push(
             ToastLevel::Warn,
@@ -1207,56 +1729,39 @@ async fn close_active_tab(app: &mut ui::App, runtimes: &mut TabRuntimeManager) {
             "Cannot close tabs while streaming",
             4,
         );
-        return;
+        return Ok(());
     }
 
     let Some(closed_path) = app.session_file.clone() else {
-        return;
+        return Ok(());
     };
 
+    app.save_active_input_to_tabs();
+    app.save_active_runtime_state();
+    let rollback = capture_close_tab_rollback(app);
+
     if app.tabs.tabs.len() <= 1 {
-        app.save_active_input_to_tabs();
-        app.save_active_runtime_state();
-        match runtimes.spawn_new_session_runtime().await {
-            Ok((runtime_id, state)) => {
-                activate_tab_runtime_state(app, runtimes, runtime_id, state);
-                app.remove_tab_path(&closed_path);
-                runtimes.close_runtime_for_path(&closed_path).await;
-            }
-            Err(e) => app.toasts.push(
-                ToastLevel::Warn,
-                ToastKindLabel::Bridge,
-                format!("close_tab new_session failed: {e}"),
-                6,
-            ),
-        }
-        return;
+        show_loading_close_last_tab_placeholder(app, &closed_path);
+        finish_close_active_tab_to_new_session(runtimes, closed_path, rollback);
+        return Ok(());
     }
 
     let Some(next_path) = app.tabs.next_path_after_closing_active() else {
-        return;
+        return Ok(());
     };
-    app.save_active_input_to_tabs();
-    app.save_active_runtime_state();
-    match runtimes.activate_or_spawn_for_session(next_path).await {
-        Ok((runtime_id, state)) => {
-            activate_tab_runtime_state(app, runtimes, runtime_id, state);
-            app.remove_tab_path(&closed_path);
-            runtimes.close_runtime_for_path(&closed_path).await;
-        }
-        Err(e) => app.toasts.push(
-            ToastLevel::Warn,
-            ToastKindLabel::Bridge,
-            format!("close_tab switch failed: {e}"),
-            6,
-        ),
-    }
+    show_loading_close_tab_placeholder(app, &closed_path, &next_path);
+    finish_close_active_tab_to_path(runtimes, closed_path, next_path, rollback);
+    Ok(())
 }
 
-async fn close_tab_path(app: &mut ui::App, runtimes: &mut TabRuntimeManager, path: String) {
+async fn close_tab_path(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    app: &mut ui::App,
+    runtimes: &mut TabRuntimeManager,
+    path: String,
+) -> Result<()> {
     if app.session_file.as_deref() == Some(path.as_str()) {
-        close_active_tab(app, runtimes).await;
-        return;
+        return close_active_tab(terminal, app, runtimes).await;
     }
     if app.runtime_state_is_streaming(&path) {
         app.toasts.push(
@@ -1265,43 +1770,25 @@ async fn close_tab_path(app: &mut ui::App, runtimes: &mut TabRuntimeManager, pat
             "Cannot close streaming tab",
             4,
         );
-        return;
+        return Ok(());
     }
     app.remove_tab_path(&path);
+    render(terminal, app)?;
     runtimes.close_runtime_for_path(&path).await;
+    Ok(())
 }
 
 async fn open_new_tab(
-    app: &mut ui::App,
+    _app: &mut ui::App,
     runtimes: &mut TabRuntimeManager,
     previous_runtime_key: Option<String>,
 ) {
-    match runtimes.spawn_new_session_runtime().await {
-        Ok((runtime_id, state)) => {
-            activate_tab_runtime_state(app, runtimes, runtime_id, state);
-            let id = app.session_id.as_deref().unwrap_or("(unknown)");
-            app.push_diag(DiagKind::Info, format!("started session {id}"));
-            app.save_active_runtime_state();
-        }
-        Err(e) => {
-            app.set_pending_new_tab(false);
-            app.set_loading_runtime_key(None);
-            if let Some(previous_runtime_key) = previous_runtime_key {
-                let _ = app.restore_runtime_state_for_key(&previous_runtime_key);
-            } else {
-                app.reset_conversation();
-                app.session_id = None;
-                app.session_file = None;
-                app.session_name = None;
-            }
-            app.toasts.push(
-                ToastLevel::Warn,
-                ToastKindLabel::Bridge,
-                format!("new tab runtime failed: {e}"),
-                6,
-            );
-        }
-    }
+    let _ = previous_runtime_key;
+    runtimes.spawn_runtime_in_background(None, None, true);
+}
+
+fn schedule_startup_prewarm(app: &ui::App, runtimes: &mut TabRuntimeManager) {
+    runtimes.prewarm_inactive_tabs(app, 2);
 }
 
 async fn handle_term(
@@ -1345,6 +1832,7 @@ async fn handle_term(
         let tabs_area = chunks[0];
         let conversation_area = chunks[1];
         let input_area = chunks[2];
+        let status_area = chunks[3];
         let tab_layout = ui::tabs_state::tabs_layout(
             &app.tabs,
             &app.theme_cache,
@@ -1362,6 +1850,29 @@ async fn handle_term(
             .line_count_with_config(&app.blocks, viewport_width, &app.config);
         let metrics = app.scroll.metrics(total, body_height);
         app.record_metrics(total, body_height);
+
+        if matches!(kind, MouseEventKind::Down(MouseButton::Left))
+            && row == status_area.y
+            && column >= status_area.x
+            && column < status_area.right()
+        {
+            let local_col = column.saturating_sub(status_area.x) as usize;
+            let targets = ui::render::status_targets(app, status_area.width as usize);
+            if targets
+                .model
+                .is_some_and(|(start, end)| local_col >= start && local_col < end)
+            {
+                open_model_picker(app, client, &tx);
+                return Ok(true);
+            }
+            if targets
+                .thinking
+                .is_some_and(|(start, end)| local_col >= start && local_col < end)
+            {
+                open_thinking_picker(app);
+                return Ok(true);
+            }
+        }
 
         let action = ui::mouse::resolve_mouse_event(
             kind,
@@ -1394,7 +1905,7 @@ async fn handle_term(
                 }
             }
             ui::mouse::MouseAction::TabClose { path } => {
-                close_tab_path(app, runtimes, path).await;
+                close_tab_path(terminal, app, runtimes, path).await?;
                 Ok(true)
             }
             ui::mouse::MouseAction::TabNew => {
@@ -1544,7 +2055,7 @@ async fn handle_term(
     if matches!(key, KeyEvent { code: KeyCode::Char('w'), modifiers, .. } if modifiers.contains(KeyModifiers::CONTROL))
         && app.active_popup.is_none()
     {
-        close_active_tab(app, runtimes).await;
+        close_active_tab(terminal, app, runtimes).await?;
         return Ok(true);
     }
     if matches!(key, KeyEvent { code: KeyCode::Left, modifiers, .. } if modifiers.contains(KeyModifiers::ALT))
@@ -1625,6 +2136,9 @@ async fn handle_term(
     // ---- Popup navigation ----------------------------------------------
     if matches!(app.current_popup_kind(), Some(PopupKind::ModelPicker)) {
         return handle_model_picker_key(app, key, client, &tx);
+    }
+    if matches!(app.current_popup_kind(), Some(PopupKind::ThinkingPicker)) {
+        return handle_thinking_picker_key(app, key, client, &tx);
     }
     if matches!(app.current_popup_kind(), Some(PopupKind::SessionPicker)) {
         return handle_session_picker_key(terminal, app, key, client, runtimes, &tx).await;
@@ -1867,13 +2381,21 @@ async fn handle_term(
             Ok(false)
         }
         KeyCode::Enter => {
+            let pre_accept = app.input.text().to_string();
             if app.autocomplete.is_active()
                 && !app.autocomplete.suggestions.is_empty()
                 && app.autocomplete.accept(&mut app.input)
             {
                 app.autocomplete.dismiss();
                 refresh_autocomplete_for_cwd(app);
-                return Ok(true);
+                // If accept completed a slash command, fall through to execute
+                // it instead of returning early (so /model, /sessions, etc.
+                // actually run on Enter).
+                if !pre_accept.starts_with('/') {
+                    return Ok(true);
+                }
+            } else {
+                app.autocomplete.dismiss();
             }
             let raw_text = app.input.text().to_string();
             let text = app.input.text_for_submit();
@@ -2137,6 +2659,72 @@ fn handle_model_picker_key(
         KeyCode::Backspace | KeyCode::Delete => Ok(app.model_picker.pop_query_char()),
         KeyCode::Char(c) if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT => {
             app.model_picker.push_query_char(c);
+            Ok(true)
+        }
+        _ => Ok(true),
+    }
+}
+
+fn handle_thinking_picker_key(
+    app: &mut ui::App,
+    key: KeyEvent,
+    client: &bridge::BridgeClient,
+    tx: &mpsc::Sender<AppEvent>,
+) -> Result<bool> {
+    let Some(active) = app.active_popup.as_mut() else {
+        return Ok(false);
+    };
+
+    match key.code {
+        KeyCode::Esc => {
+            app.close_popup();
+            Ok(true)
+        }
+        KeyCode::Enter => {
+            let selected = active
+                .items
+                .get(active.focus)
+                .and_then(|item| item.data.get("level"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string);
+            app.close_popup();
+            if let Some(level) = selected {
+                request_thinking_switch(app, client, tx, level);
+            }
+            Ok(true)
+        }
+        KeyCode::Up => {
+            active.focus = active.focus.saturating_sub(1);
+            active.scroll = active.scroll.min(active.focus);
+            Ok(true)
+        }
+        KeyCode::Down => {
+            let max_focus = active.items.len().saturating_sub(1);
+            active.focus = active.focus.saturating_add(1).min(max_focus);
+            if active.focus >= active.scroll.saturating_add(6) {
+                active.scroll = active.focus.saturating_sub(5);
+            }
+            Ok(true)
+        }
+        KeyCode::PageUp => {
+            active.focus = active.focus.saturating_sub(5);
+            active.scroll = active.scroll.saturating_sub(5).min(active.focus);
+            Ok(true)
+        }
+        KeyCode::PageDown => {
+            let max_focus = active.items.len().saturating_sub(1);
+            active.focus = active.focus.saturating_add(5).min(max_focus);
+            active.scroll = active.scroll.saturating_add(5).min(active.focus);
+            Ok(true)
+        }
+        KeyCode::Home => {
+            active.focus = 0;
+            active.scroll = 0;
+            Ok(true)
+        }
+        KeyCode::End => {
+            active.focus = active.items.len().saturating_sub(1);
+            active.scroll = active.focus.saturating_sub(5);
             Ok(true)
         }
         _ => Ok(true),
@@ -2548,6 +3136,85 @@ mod tests {
             "/tmp/other.jsonl"
         );
         assert_eq!(normalize_session_key(Some(cwd), "session-id"), "session-id");
+    }
+
+    #[test]
+    fn session_state_refresh_is_scheduled_for_delayed_title_events() {
+        assert!(should_refresh_runtime_session_state("agent_end"));
+        assert!(should_refresh_runtime_session_state("turn_end"));
+        assert!(should_refresh_runtime_session_state("compaction_end"));
+        assert!(!should_refresh_runtime_session_state("message_end"));
+        assert!(!should_refresh_runtime_session_state("session_start"));
+    }
+
+    #[test]
+    fn session_state_refresh_uses_same_retry_delays_as_typescript_tabs_fix() {
+        assert_eq!(SESSION_STATE_REFRESH_DELAYS_MS, &[0, 100, 500, 1500, 3000]);
+    }
+
+    #[test]
+    fn show_loading_close_tab_placeholder_switches_visible_tab_immediately() {
+        let mut app = ui::App::new("/tmp/workspace".to_string());
+        app.tabs.tabs = vec![
+            ui::tabs_state::OpenTab {
+                path: "/tmp/a.jsonl".to_string(),
+                session_id: Some("a".to_string()),
+                name: Some("A".to_string()),
+                draft: None,
+            },
+            ui::tabs_state::OpenTab {
+                path: "/tmp/b.jsonl".to_string(),
+                session_id: Some("b".to_string()),
+                name: Some("B".to_string()),
+                draft: None,
+            },
+        ];
+        app.tabs.active_path = Some("/tmp/a.jsonl".to_string());
+        app.session_file = Some("/tmp/a.jsonl".to_string());
+        app.session_id = Some("a".to_string());
+        app.session_name = Some("A".to_string());
+        app.save_active_runtime_state();
+
+        app.session_file = Some("/tmp/b.jsonl".to_string());
+        app.session_id = Some("b".to_string());
+        app.session_name = Some("B".to_string());
+        app.save_active_runtime_state();
+
+        app.session_file = Some("/tmp/a.jsonl".to_string());
+        app.session_id = Some("a".to_string());
+        app.session_name = Some("A".to_string());
+
+        show_loading_close_tab_placeholder(&mut app, "/tmp/a.jsonl", "/tmp/b.jsonl");
+
+        assert_eq!(app.tabs.active_path.as_deref(), Some("/tmp/b.jsonl"));
+        assert_eq!(app.tabs.tabs.len(), 1);
+        assert_eq!(app.session_file.as_deref(), Some("/tmp/b.jsonl"));
+        assert_eq!(app.session_id.as_deref(), Some("b"));
+        assert_eq!(app.session_name.as_deref(), Some("B"));
+        assert!(!app.pending_new_tab);
+    }
+
+    #[test]
+    fn show_loading_close_last_tab_placeholder_shows_new_tab_immediately() {
+        let mut app = ui::App::new("/tmp/workspace".to_string());
+        app.tabs.tabs = vec![ui::tabs_state::OpenTab {
+            path: "/tmp/a.jsonl".to_string(),
+            session_id: Some("a".to_string()),
+            name: Some("A".to_string()),
+            draft: None,
+        }];
+        app.tabs.active_path = Some("/tmp/a.jsonl".to_string());
+        app.session_file = Some("/tmp/a.jsonl".to_string());
+        app.session_id = Some("a".to_string());
+        app.session_name = Some("A".to_string());
+
+        show_loading_close_last_tab_placeholder(&mut app, "/tmp/a.jsonl");
+
+        assert!(app.tabs.tabs.is_empty());
+        assert_eq!(app.tabs.active_path, None);
+        assert!(app.pending_new_tab);
+        assert_eq!(app.session_name.as_deref(), Some("new"));
+        assert_eq!(app.session_file, None);
     }
 }
 

@@ -39,7 +39,7 @@ import { createPixRuntime } from "./runtime.js";
 import { ScreenStyler } from "./screen/screen-styler.js";
 import { AppScrollController } from "./screen/scroll-controller.js";
 import { searchResultScrollNeedles, searchResultTargetEntry, type SessionSearchResult } from "./session/session-search.js";
-import { AppSessionLifecycleController } from "./session/session-lifecycle-controller.js";
+import { AppSessionLifecycleController, type BindCurrentSessionOptions } from "./session/session-lifecycle-controller.js";
 import { AppShellController } from "./commands/shell-controller.js";
 import { runInteractiveShellCommand } from "./commands/shell-command.js";
 import { AppSessionEventController } from "./session/session-event-controller.js";
@@ -192,7 +192,7 @@ export class PiUiExtendApp {
 				noSession: false,
 				sessionPath,
 			}),
-			activateRuntime: (runtime) => this.activateRuntime(runtime),
+			activateRuntime: (runtime, options) => this.activateRuntime(runtime, options),
 			disposeRuntime: (runtime) => this.terminalController.disposeRuntime(runtime),
 			isRunning: () => this.running,
 			setStatus: (status) => this.setStatus(status),
@@ -818,16 +818,16 @@ export class PiUiExtendApp {
 		}
 	}
 
-	private async bindCurrentSession(): Promise<void> {
-		await this.sessionLifecycle.bindCurrentSession();
+	private async bindCurrentSession(options?: BindCurrentSessionOptions): Promise<void> {
+		await this.sessionLifecycle.bindCurrentSession(options);
 	}
 
-	private async activateRuntime(runtime: AgentSessionRuntime): Promise<void> {
+	private async activateRuntime(runtime: AgentSessionRuntime, options?: BindCurrentSessionOptions): Promise<void> {
 		this.runtime = runtime;
 		runtime.setRebindSession(async () => {
-			await this.bindCurrentSession();
+			await this.bindCurrentSession({ awaitExtensions: false });
 		});
-		await this.bindCurrentSession();
+		await this.bindCurrentSession(options);
 	}
 
 	private createExtensionEventBus(): EventBus {

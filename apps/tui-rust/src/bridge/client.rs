@@ -150,6 +150,10 @@ impl BridgeClient {
             }
             Command::GetModels(c) => (c.id.clone().unwrap_or_default(), "get_models".to_string()),
             Command::SetModel(c) => (c.id.clone().unwrap_or_default(), "set_model".to_string()),
+            Command::SetThinkingLevel(c) => (
+                c.id.clone().unwrap_or_default(),
+                "set_thinking_level".to_string(),
+            ),
             Command::Other(value) => {
                 let id = value
                     .get("id")
@@ -334,6 +338,15 @@ impl BridgeClient {
         self.request(Command::SetModel(super::protocol::SetModelCommand::new(
             id, model_ref,
         )))
+        .await
+    }
+
+    /// Helper: switch the active thinking level.
+    pub async fn set_thinking_level(&self, level: String) -> Result<Value, BridgeError> {
+        let id = self.alloc_id().await;
+        self.request(Command::SetThinkingLevel(
+            super::protocol::SetThinkingLevelCommand::new(id, level),
+        ))
         .await
     }
 

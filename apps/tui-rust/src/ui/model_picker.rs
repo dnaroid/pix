@@ -1,8 +1,43 @@
-use ratatui::style::Modifier;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use serde_json::Value;
 
 use crate::ui::theme::{Theme, ThemeRole};
+
+pub const PI_FAVORITE_MODEL_REFS: &[&str] = &[
+    "amazon-bedrock/us.anthropic.claude-opus-4-6-v1",
+    "anthropic/claude-opus-4-8",
+    "openai/gpt-5.4",
+    "azure-openai-responses/gpt-5.4",
+    "openai-codex/gpt-5.5",
+    "deepseek/deepseek-v4-pro",
+    "google/gemini-3.1-pro-preview",
+    "google-vertex/gemini-3.1-pro-preview",
+    "github-copilot/gpt-5.4",
+    "openrouter/moonshotai/kimi-k2.6",
+    "vercel-ai-gateway/zai/glm-5.1",
+    "xai/grok-4.20-0309-reasoning",
+    "groq/openai/gpt-oss-120b",
+    "cerebras/zai-glm-4.7",
+    "zai/glm-5.1",
+    "mistral/devstral-medium-latest",
+    "minimax/MiniMax-M2.7",
+    "minimax-cn/MiniMax-M2.7",
+    "moonshotai/kimi-k2.6",
+    "moonshotai-cn/kimi-k2.6",
+    "huggingface/moonshotai/Kimi-K2.6",
+    "fireworks/accounts/fireworks/models/kimi-k2p6",
+    "together/moonshotai/Kimi-K2.6",
+    "opencode/kimi-k2.6",
+    "opencode-go/kimi-k2.6",
+    "kimi-coding/kimi-for-coding",
+    "cloudflare-workers-ai/@cf/moonshotai/kimi-k2.6",
+    "cloudflare-ai-gateway/workers-ai/@cf/moonshotai/kimi-k2.6",
+    "xiaomi/mimo-v2.5-pro",
+    "xiaomi-token-plan-cn/mimo-v2.5-pro",
+    "xiaomi-token-plan-ams/mimo-v2.5-pro",
+    "xiaomi-token-plan-sgp/mimo-v2.5-pro",
+];
 
 pub const MODEL_PICKER_HEADER_ROWS: usize = 3;
 pub const MODEL_PICKER_POPUP_HEIGHT: u16 = 14;
@@ -221,6 +256,30 @@ pub fn parse_models_response(value: &Value) -> Vec<ModelSummary> {
         .collect()
 }
 
+pub fn favorite_models(mut models: Vec<ModelSummary>) -> Vec<ModelSummary> {
+    let favorites = PI_FAVORITE_MODEL_REFS
+        .iter()
+        .map(|value| value.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    let mut filtered = models
+        .drain(..)
+        .filter(|model| {
+            model.current
+                || favorites
+                    .iter()
+                    .any(|favorite| favorite == &model.ref_.to_ascii_lowercase())
+        })
+        .collect::<Vec<_>>();
+    filtered.sort_by(|left, right| {
+        right
+            .current
+            .cmp(&left.current)
+            .then_with(|| left.provider.cmp(&right.provider))
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    filtered
+}
+
 pub fn parse_model_summary(value: &Value) -> Option<ModelSummary> {
     let id = get_nonempty(value, &["id", "modelId"]).unwrap_or_default();
     let name = get_nonempty(value, &["name"]).unwrap_or_else(|| id.clone());
@@ -309,12 +368,13 @@ pub fn popup_lines(state: &ModelPickerState, theme: &Theme, max_rows: usize) -> 
         };
         let focused = visible_idx == state.focus;
         let arrow = if focused { "› " } else { "  " };
-        let label_style = if focused {
-            theme
-                .style_for(ThemeRole::AssistantText)
-                .add_modifier(Modifier::BOLD)
+        let label_style = Style::default()
+            .fg(model_color(theme, model))
+            .add_modifier(if focused { Modifier::BOLD } else { Modifier::empty() });
+        let label = if model.current {
+            format!("{} ✓", model.ref_)
         } else {
-            theme.style_for(ThemeRole::AssistantText)
+            model.ref_.clone()
         };
         lines.push(Line::from(vec![
             Span::styled(
@@ -323,9 +383,9 @@ pub fn popup_lines(state: &ModelPickerState, theme: &Theme, max_rows: usize) -> 
                     .style_for(ThemeRole::StatusDim)
                     .add_modifier(Modifier::DIM),
             ),
-            Span::styled(model.label(), label_style),
+            Span::styled(label, label_style),
             Span::raw("  "),
-            Span::styled(model.meta(), theme.style_for(ThemeRole::StatusDim)),
+            Span::styled(model.name.clone(), theme.style_for(ThemeRole::StatusDim)),
         ]));
     }
 
@@ -366,6 +426,23 @@ fn format_count(value: u64) -> String {
     } else {
         value.to_string()
     }
+}
+
+fn model_color(theme: &Theme, model: &ModelSummary) -> ratatui::style::Color {
+    let palette = [
+        theme.color_for(ThemeRole::SessionAccent),
+        theme.color_for(ThemeRole::DiagInfo),
+        theme.resolve_color_ref("toolSearch"),
+        theme.resolve_color_ref("toolMutation"),
+        theme.color_for(ThemeRole::ToolCompleted),
+        theme.color_for(ThemeRole::DiagWarn),
+    ];
+    let mut hash = 1_779_033_703u32 ^ model.provider.len() as u32;
+    for byte in model.provider.bytes() {
+        hash = (hash ^ byte as u32).wrapping_mul(3_432_918_353);
+        hash = hash.rotate_left(13);
+    }
+    palette[hash as usize % palette.len()]
 }
 
 #[cfg(test)]
@@ -506,7 +583,45 @@ mod tests {
         let text = text_of(&popup_lines(&state, &Theme::default(), 8));
         assert!(text.contains("filter: cla"));
         assert!(text.contains("1 match"));
-        assert!(text.contains("› Claude Sonnet"));
+        assert!(text.contains("› anthropic/claude-sonnet"));
+        assert!(text.contains("Claude Sonnet"));
         assert!(!text.contains("GPT 5.5  "));
+    }
+
+    #[test]
+    fn favorite_models_keeps_current_and_sorts_current_first() {
+        let filtered = favorite_models(vec![
+            ModelSummary {
+                id: "custom-model".to_string(),
+                name: "Custom".to_string(),
+                provider: "local".to_string(),
+                ref_: "local/custom-model".to_string(),
+                reasoning: false,
+                context_window: None,
+                current: true,
+            },
+            ModelSummary {
+                id: "gpt-5.5".to_string(),
+                name: "GPT 5.5".to_string(),
+                provider: "openai-codex".to_string(),
+                ref_: "openai-codex/gpt-5.5".to_string(),
+                reasoning: true,
+                context_window: None,
+                current: false,
+            },
+            ModelSummary {
+                id: "ignored".to_string(),
+                name: "Ignored".to_string(),
+                provider: "other".to_string(),
+                ref_: "other/ignored".to_string(),
+                reasoning: false,
+                context_window: None,
+                current: false,
+            },
+        ]);
+
+        assert_eq!(filtered.len(), 2);
+        assert_eq!(filtered[0].ref_, "local/custom-model");
+        assert_eq!(filtered[1].ref_, "openai-codex/gpt-5.5");
     }
 }

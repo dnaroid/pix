@@ -1,9 +1,8 @@
 //! Conversation model.
 //!
 //! We accumulate a flat list of `Block`s. Each event from the sidecar
-//! either appends a new block, mutates the trailing block, or is
-//! rendered as a raw event line (so we never lose information while the
-//! event-type catalogue is still being fleshed out).
+//! either appends a new block or mutates the trailing block. Low-level
+//! control events stay out of the visible transcript.
 //!
 //! Scroll state lives in `ScrollView`; layout/render caching lives in
 //! `Viewport`. Both are owned by `App` and exposed for the renderer and
@@ -70,8 +69,8 @@ pub enum Block {
         summary: String,
         ok: bool,
     },
-    /// Anything else the sidecar emitted. Rendered as a single line for
-    /// debuggability while we extend the typed catalog.
+    /// Anything else the sidecar emitted. Kept for potential debug-only
+    /// surfacing, but not shown in normal chat flow.
     RawEvent { type_: String, line: String },
     /// Diagnostics: sidecar stderr or local errors.
     Diag { kind: DiagKind, text: String },
@@ -119,6 +118,8 @@ pub struct App {
     pub session_name: Option<String>,
     pub provider: Option<String>,
     pub model: Option<String>,
+    pub thinking_level: Option<String>,
+    pub available_thinking_levels: Vec<String>,
     pub message_count: Option<usize>,
     pub is_streaming: bool,
     pub last_token_count: Option<u64>,
@@ -188,6 +189,8 @@ pub struct TabRuntimeSnapshot {
     pub session_name: Option<String>,
     pub provider: Option<String>,
     pub model: Option<String>,
+    pub thinking_level: Option<String>,
+    pub available_thinking_levels: Vec<String>,
     pub message_count: Option<usize>,
     pub is_streaming: bool,
     pub last_token_count: Option<u64>,
@@ -213,6 +216,8 @@ impl TabRuntimeSnapshot {
             session_name: app.session_name.clone(),
             provider: app.provider.clone(),
             model: app.model.clone(),
+            thinking_level: app.thinking_level.clone(),
+            available_thinking_levels: app.available_thinking_levels.clone(),
             message_count: app.message_count,
             is_streaming: app.is_streaming,
             last_token_count: app.last_token_count,
@@ -240,6 +245,10 @@ impl App {
     pub fn with_config(cwd: String, workspace_root: PathBuf, mut config: PixConfig) -> Self {
         config.refresh_derived();
         let initial_model = (!config.model.trim().is_empty()).then(|| config.model.clone());
+        let thinking_level = config
+            .default_model
+            .thinking
+            .map(|value| value.as_str().to_string());
         let theme_cache = Theme::by_name(&config.theme_name);
         let voice = VoiceController::new(&config.dictation);
         Self {
@@ -253,6 +262,8 @@ impl App {
             session_name: None,
             provider: None,
             model: initial_model,
+            thinking_level,
+            available_thinking_levels: default_thinking_levels(),
             message_count: None,
             is_streaming: false,
             last_token_count: None,
@@ -315,6 +326,34 @@ impl App {
     pub fn open_model_picker(&mut self) {
         self.model_picker.open();
         self.active_popup = Some(ActivePopup::new(PopupKind::ModelPicker));
+    }
+
+    pub fn open_thinking_picker(&mut self) {
+        let current = self.thinking_level.clone().unwrap_or_else(|| "off".to_string());
+        let levels = if self.available_thinking_levels.is_empty() {
+            default_thinking_levels()
+        } else {
+            self.available_thinking_levels.clone()
+        };
+        let items = levels
+            .iter()
+            .map(|level| {
+                let selected = if level == &current { " ✓" } else { "" };
+                let mut item = crate::ui::popup::PopupItem::new(
+                    format!("{level}{selected}"),
+                    Some(thinking_level_description(level)),
+                    serde_json::json!({"level": level}),
+                );
+                item.color = Some(crate::ui::render::thinking_level_color(self, level));
+                item
+            })
+            .collect::<Vec<_>>();
+        self.active_popup = Some(ActivePopup {
+            kind: PopupKind::ThinkingPicker,
+            focus: levels.iter().position(|level| level == &current).unwrap_or(0),
+            items,
+            scroll: 0,
+        });
     }
 
     pub fn open_session_search(&mut self, query: String) {
@@ -610,6 +649,7 @@ impl App {
         self.last_error = None;
         self.todo_state.clear();
         self.subagents_state.clear();
+        self.available_thinking_levels = default_thinking_levels();
         self.last_line_count = 0;
         self.link_click_targets.clear();
         self.session_search.clear();
@@ -652,6 +692,26 @@ impl App {
         } else if let Some(s) = get_nonempty_str(state, "model") {
             self.apply_model_ref(s);
         }
+        if let Some(level) = get_nonempty_str(state, "thinkingLevel")
+            .or_else(|| get_nonempty_str(state, "thinking_level"))
+        {
+            self.thinking_level = Some(level.to_string());
+        } else if state.get("model").is_some() || state.get("sessionId").is_some() {
+            self.thinking_level = None;
+        }
+        self.available_thinking_levels = state
+            .get("availableThinkingLevels")
+            .or_else(|| state.get("available_thinking_levels"))
+            .and_then(Value::as_array)
+            .map(|levels| {
+                levels
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .filter(|levels| !levels.is_empty())
+            .unwrap_or_else(default_thinking_levels);
         self.sync_config_model_from_status();
         self.sync_tabs_with_current_session();
         if self.session_id != previous_session_id || self.session_file != previous_session_file {
@@ -908,10 +968,7 @@ impl App {
                     .unwrap_or("(unknown error)");
                 self.push_diag(DiagKind::BridgeError, msg);
             }
-            EventKind::Other => {
-                let line = compact_json(payload);
-                self.push_raw_event(type_.to_string(), line);
-            }
+            EventKind::Other => {}
         }
     }
 
@@ -1330,6 +1387,21 @@ impl App {
             }
             self.model = Some(model_id.to_string());
         }
+        if let Some(level) = get_nonempty_str(payload, "thinkingLevel") {
+            self.thinking_level = Some(level.to_string());
+        }
+        self.available_thinking_levels = payload
+            .get("availableThinkingLevels")
+            .and_then(Value::as_array)
+            .map(|levels| {
+                levels
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .filter(|levels| !levels.is_empty())
+            .unwrap_or_else(|| self.available_thinking_levels.clone());
         self.sync_config_model_from_status();
     }
 
@@ -1369,13 +1441,42 @@ impl App {
     fn sync_config_model_from_status(&mut self) {
         match (&self.provider, &self.model) {
             (Some(provider), Some(model)) if !provider.trim().is_empty() => {
-                self.config.model = format!("{provider}/{model}");
+                self.config.model = format_model_ref(
+                    &format!("{provider}/{model}"),
+                    self.thinking_level.as_deref(),
+                );
             }
             (_, Some(model)) => {
-                self.config.model = model.clone();
+                self.config.model = format_model_ref(model, self.thinking_level.as_deref());
             }
             _ => {}
         }
+    }
+}
+
+fn default_thinking_levels() -> Vec<String> {
+    ["off", "minimal", "low", "medium", "high", "xhigh"]
+        .into_iter()
+        .map(str::to_string)
+        .collect()
+}
+
+fn format_model_ref(model_ref: &str, thinking_level: Option<&str>) -> String {
+    match thinking_level.map(str::trim).filter(|level| !level.is_empty()) {
+        Some(level) => format!("{model_ref}:{level}"),
+        None => model_ref.to_string(),
+    }
+}
+
+fn thinking_level_description(level: &str) -> &'static str {
+    match level {
+        "off" => "No reasoning/thinking",
+        "minimal" => "Minimal reasoning",
+        "low" => "Low reasoning",
+        "medium" => "Medium reasoning",
+        "high" => "High reasoning",
+        "xhigh" => "Extra high reasoning",
+        _ => "Thinking level",
     }
 }
 
@@ -1461,10 +1562,6 @@ pub fn block_version(blocks: &[Block], idx: usize) -> u64 {
         Some(_) => 1,
         None => 0,
     }
-}
-
-fn compact_json(v: &Value) -> String {
-    serde_json::to_string(v).unwrap_or_else(|_| format!("{v}"))
 }
 
 fn normalize_session_file_key(workspace_root: &Path, session_file: &str) -> String {
@@ -1590,6 +1687,16 @@ mod tests {
 
         assert_eq!(app.provider.as_deref(), Some("anthropic"));
         assert_eq!(app.model.as_deref(), Some("claude-sonnet"));
+        assert!(app.blocks.is_empty());
+    }
+
+    #[test]
+    fn handle_unknown_events_do_not_render_raw_blocks() {
+        let mut app = App::new("/tmp".to_string());
+        app.handle_event("agent_start", &json!({ "type": "agent_start" }));
+        app.handle_event("turn_start", &json!({ "type": "turn_start" }));
+        app.handle_event("turn_end", &json!({ "type": "turn_end" }));
+
         assert!(app.blocks.is_empty());
     }
 

@@ -57,4 +57,12 @@ describe("session-title config", () => {
 
 		assert.equal(config.model, "zai/title-from-dedicated");
 	});
+
+	it("uses stronger retry defaults for transient title-model outages", () => {
+		const config = loadSessionTitleConfig(join(testHome, "workspace"));
+
+		assert.equal(config.maxRetries, 2);
+		assert.equal(config.generationAttempts, 3);
+		assert.equal(config.retryDelayMs, 3000);
+	});
 });

@@ -42,6 +42,12 @@ const COMPACT_PROGRESS_BAR_PARTIALS: [char; 7] = ['▏', '▎', '▍', '▌', '�
 pub const INPUT_FIRST_PREFIX: &str = "";
 pub const INPUT_CONT_PREFIX: &str = "";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct StatusTargets {
+    pub model: Option<(usize, usize)>,
+    pub thinking: Option<(usize, usize)>,
+}
+
 pub fn render(f: &mut Frame, app: &mut App) {
     app.refresh_theme_cache();
     let size = f.area();
@@ -170,10 +176,8 @@ pub(crate) fn build_status_spans(app: &App, width: usize) -> Vec<Span<'static>> 
         .filter(|name| !name.is_empty())
         .unwrap_or(app.cwd.as_str());
     let thinking = app
-        .config
-        .default_model
-        .thinking
-        .map(|value| value.as_str().to_string())
+        .thinking_level
+        .clone()
         .unwrap_or_else(|| "—".to_string());
     let token_pct = match (app.last_token_count, app.context_limit) {
         (Some(tokens), Some(limit)) if limit > 0 => {
@@ -205,7 +209,7 @@ pub(crate) fn build_status_spans(app: &App, width: usize) -> Vec<Span<'static>> 
     let mut spans = vec![
         Span::styled(dot, Style::default().fg(dot_color)),
         Span::raw(" "),
-        Span::styled(model, app.theme_cache.style_for(ThemeRole::ModelAccent)),
+        Span::styled(model, Style::default().fg(model_label_color(app))),
         Span::raw(" "),
         Span::styled(
             format!("💡 {thinking}"),
@@ -242,6 +246,22 @@ pub(crate) fn build_status_spans(app: &App, width: usize) -> Vec<Span<'static>> 
     spans
 }
 
+pub fn status_targets(app: &App, width: usize) -> StatusTargets {
+    let spans = build_status_spans(app, width);
+    let mut column = 0usize;
+    let mut targets = StatusTargets::default();
+    for (idx, span) in spans.iter().enumerate() {
+        let span_width = UnicodeWidthStr::width(span.content.as_ref());
+        if idx == 2 {
+            targets.model = Some((column, column + span_width));
+        } else if idx == 4 {
+            targets.thinking = Some((column, column + span_width));
+        }
+        column += span_width;
+    }
+    targets
+}
+
 fn status_model_label(app: &App) -> String {
     match (&app.provider, &app.model) {
         (Some(provider), Some(model)) => compact(&format!("{provider}/{model}"), 40),
@@ -274,16 +294,119 @@ fn context_usage_color(app: &App, percent: u64) -> Color {
 }
 
 fn thinking_level_style(app: &App, level: &str) -> Style {
-    let color = match level {
-        "off" => app.theme_cache.status_dim,
-        "minimal" => app.theme_cache.tool_completed,
-        "low" => app.theme_cache.model_accent,
-        "medium" => app.theme_cache.diag_warn,
-        "high" => app.theme_cache.diag_error,
-        "xhigh" => app.theme_cache.resolve_color_ref("thinkingXHigh"),
-        _ => app.theme_cache.heading3_plus,
-    };
+    let color = thinking_level_color(app, level);
     Style::default().fg(color)
+}
+
+pub(crate) fn thinking_level_color(app: &App, level: &str) -> Color {
+    let base_colors = [
+        app.theme_cache.status_dim,
+        app.theme_cache.tool_completed,
+        app.theme_cache.model_accent,
+        app.theme_cache.diag_warn,
+        app.theme_cache.diag_error,
+        app.theme_cache.resolve_color_ref("thinkingXHigh"),
+    ];
+    let available = if app.available_thinking_levels.is_empty() {
+        ["off", "minimal", "low", "medium", "high", "xhigh"]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    } else {
+        app.available_thinking_levels.clone()
+    };
+    let fallback = ["off", "minimal", "low", "medium", "high", "xhigh"];
+    let index = available
+        .iter()
+        .position(|candidate| candidate == level)
+        .or_else(|| fallback.iter().position(|candidate| candidate == &level))
+        .unwrap_or(2)
+        .min(base_colors.len() - 1);
+    base_colors[index]
+}
+
+pub(crate) fn model_ref_color(app: &App, model_ref: &str, provider: Option<&str>) -> Color {
+    configured_model_color(app, model_ref)
+        .unwrap_or_else(|| provider_model_color(app, provider.unwrap_or(model_ref)))
+}
+
+fn model_label_color(app: &App) -> Color {
+    match (&app.provider, &app.model) {
+        (Some(provider), Some(model)) => model_ref_color(app, &format!("{provider}/{model}"), Some(provider)),
+        (_, Some(model)) => model_ref_color(app, model, None),
+        _ => app.theme_cache.model_accent,
+    }
+}
+
+fn configured_model_color(app: &App, model_ref: &str) -> Option<Color> {
+    let normalized_ref = model_ref.trim().to_ascii_lowercase();
+    if normalized_ref.is_empty() {
+        return None;
+    }
+
+    let mut best: Option<(&str, usize)> = None;
+    for (pattern, color) in &app.config.model_colors.rules {
+        let normalized_pattern = pattern.trim().to_ascii_lowercase();
+        if normalized_pattern.is_empty() || !glob_matches(&normalized_pattern, &normalized_ref) {
+            continue;
+        }
+        let specificity = normalized_pattern.replace('*', "").len();
+        if best.is_none_or(|(_, current)| specificity > current) {
+            best = Some((color.as_str(), specificity));
+        }
+    }
+
+    best.map(|(color, _)| app.theme_cache.resolve_color_ref(color))
+}
+
+fn provider_model_color(app: &App, provider: &str) -> Color {
+    let palette = [
+        app.theme_cache.session_accent,
+        app.theme_cache.diag_info,
+        app.theme_cache.resolve_color_ref("toolSearch"),
+        app.theme_cache.resolve_color_ref("toolMutation"),
+        app.theme_cache.tool_completed,
+        app.theme_cache.diag_warn,
+    ];
+    let hash = hash_string(&provider.trim().to_ascii_lowercase()) as usize;
+    palette[hash % palette.len()]
+}
+
+fn hash_string(value: &str) -> u32 {
+    let mut hash = 1_779_033_703u32 ^ value.len() as u32;
+    for byte in value.bytes() {
+        hash = (hash ^ byte as u32).wrapping_mul(3_432_918_353);
+        hash = hash.rotate_left(13);
+    }
+    hash = (hash ^ (hash >> 16)).wrapping_mul(2_246_822_507);
+    hash = (hash ^ (hash >> 13)).wrapping_mul(3_266_489_909);
+    hash ^ (hash >> 16)
+}
+
+fn glob_matches(pattern: &str, text: &str) -> bool {
+    let pattern = pattern.as_bytes();
+    let text = text.as_bytes();
+    let (mut p, mut t, mut star, mut matched) = (0usize, 0usize, None, 0usize);
+    while t < text.len() {
+        if p < pattern.len() && pattern[p] == text[t] {
+            p += 1;
+            t += 1;
+        } else if p < pattern.len() && pattern[p] == b'*' {
+            star = Some(p);
+            matched = t;
+            p += 1;
+        } else if let Some(star_idx) = star {
+            p = star_idx + 1;
+            matched += 1;
+            t = matched;
+        } else {
+            return false;
+        }
+    }
+    while p < pattern.len() && pattern[p] == b'*' {
+        p += 1;
+    }
+    p == pattern.len()
 }
 
 fn format_compact_progress_bar(percent: u64) -> String {
@@ -808,6 +931,7 @@ mod tests {
         app.provider = Some("anthropic".to_string());
         app.model = Some("claude-sonnet".to_string());
         app.config.default_model.thinking = Some(crate::config::ThinkingLevel::Medium);
+        app.thinking_level = Some("medium".to_string());
         app.session_id = Some("abcdef1234567890".to_string());
         app.last_token_count = Some(2_500);
         app.context_limit = Some(10_000);
@@ -834,6 +958,7 @@ mod tests {
         let mut app = App::new("".to_string());
         app.provider = None;
         app.model = None;
+        app.thinking_level = Some("off".to_string());
         app.session_id = None;
         app.last_token_count = None;
         app.context_limit = None;
@@ -854,6 +979,7 @@ mod tests {
         app.provider = Some("anthropic".to_string());
         app.model = Some("claude-sonnet".to_string());
         app.config.default_model.thinking = Some(crate::config::ThinkingLevel::High);
+        app.thinking_level = Some("high".to_string());
         app.last_token_count = Some(5_000);
         app.context_limit = Some(10_000);
 
@@ -884,6 +1010,35 @@ mod tests {
         assert!(text.contains("/ commands"));
         assert!(text.contains("Ctrl+H"));
         assert!(text.contains("Ctrl+T"));
+    }
+
+    #[test]
+    fn status_targets_cover_model_and_thinking_segments() {
+        let mut app = App::new("/tmp/example-workspace".to_string());
+        app.provider = Some("anthropic".to_string());
+        app.model = Some("claude-sonnet".to_string());
+        app.thinking_level = Some("medium".to_string());
+
+        let text = build_status_spans(&app, 120)
+            .into_iter()
+            .map(|span| span.content.into_owned())
+            .collect::<String>();
+        let targets = status_targets(&app, 120);
+
+        let (model_start, model_end) = targets.model.expect("model target");
+        let (thinking_start, thinking_end) = targets.thinking.expect("thinking target");
+        let model_text = text
+            .chars()
+            .skip(model_start)
+            .take(model_end.saturating_sub(model_start))
+            .collect::<String>();
+        let thinking_text = text
+            .chars()
+            .skip(thinking_start)
+            .take(thinking_end.saturating_sub(thinking_start))
+            .collect::<String>();
+        assert_eq!(model_text, "anthropic/claude-sonnet");
+        assert_eq!(thinking_text.trim_end(), "💡 medium");
     }
 
     #[test]

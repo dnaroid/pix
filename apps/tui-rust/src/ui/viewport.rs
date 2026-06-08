@@ -348,7 +348,7 @@ fn block_line_count(block: &Block, width: usize, config: &PixConfig) -> usize {
             // empty user bubble would render as a single padded blank row
             // that combines with the inter-block gap into two consecutive
             // blank lines. Hide it instead.
-            let collapsed = wrap::collapse_blank_runs(text);
+            let collapsed = sanitize_plain_chat_text(text);
             if collapsed.trim().is_empty() {
                 return 0;
             }
@@ -413,10 +413,55 @@ fn block_line_count(block: &Block, width: usize, config: &PixConfig) -> usize {
             wrap::line_count(&collapsed, width).max(1)
         }
         Block::Diag { text, .. } => {
-            let collapsed = wrap::collapse_blank_runs(text);
+            let collapsed = sanitize_plain_chat_text(text);
+            if collapsed.trim().is_empty() {
+                return 0;
+            }
             wrap::line_count(&collapsed, width).max(1)
         }
     }
+}
+
+fn sanitize_plain_chat_text(text: &str) -> String {
+    let filtered: Vec<&str> = text
+        .lines()
+        .filter(|line| !is_hidden_chat_metadata_line(line))
+        .collect();
+    wrap::collapse_blank_runs(&filtered.join("\n"))
+        .replace('\r', "")
+        .replace('\x1b', "␛")
+}
+
+fn is_hidden_chat_metadata_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    let indent = line.len().saturating_sub(trimmed.len());
+    if indent > 3 {
+        return false;
+    }
+    is_markdown_reference_definition(trimmed) || is_streaming_dcp_metadata_prefix(trimmed)
+}
+
+fn is_markdown_reference_definition(line: &str) -> bool {
+    let Some(rest) = line.strip_prefix('[') else {
+        return false;
+    };
+    let Some(close) = rest.find("]:") else {
+        return false;
+    };
+    let after = rest[close + 2..].trim_start_matches([' ', '\t']);
+    !after.is_empty() && !after.chars().next().is_some_and(char::is_whitespace)
+}
+
+fn is_streaming_dcp_metadata_prefix(line: &str) -> bool {
+    is_dcp_reference_prefix(line, "[dcp-id]: # (m")
+        || is_dcp_reference_prefix(line, "[dcp-block-id]: # (b")
+}
+
+fn is_dcp_reference_prefix(line: &str, marker_prefix: &str) -> bool {
+    marker_prefix.starts_with(line)
+        || line
+            .strip_prefix(marker_prefix)
+            .is_some_and(|suffix| suffix.chars().all(|ch| ch.is_ascii_digit()))
 }
 
 fn render_block(
@@ -457,7 +502,7 @@ fn append_block_lines(
 ) {
     match block {
         Block::User { text } => {
-            let collapsed = wrap::collapse_blank_runs(text);
+            let collapsed = sanitize_plain_chat_text(text);
             if collapsed.trim().is_empty() {
                 return;
             }
@@ -581,7 +626,10 @@ fn append_block_lines(
                 DiagKind::BridgeError => ("✖", theme.diag_error),
                 DiagKind::Info => ("i", theme.diag_info),
             };
-            let collapsed = wrap::collapse_blank_runs(text);
+            let collapsed = sanitize_plain_chat_text(text);
+            if collapsed.trim().is_empty() {
+                return;
+            }
             for line in wrap::wrap_text(&collapsed, width) {
                 out.push(VisualLine {
                     line: Line::from(vec![
@@ -649,6 +697,43 @@ mod tests {
         assert!(text.starts_with(' '), "expected left padding, got {text:?}");
         assert!(text.contains("hello"), "got {text:?}");
         assert!(!text.contains("you:"), "got {text:?}");
+    }
+
+    #[test]
+    fn user_hides_dcp_metadata_markers() {
+        let blocks = blocks_of(vec![Block::User {
+            text: "[dcp-id]: # (m154)\nvisible\n[dcp-block-id]: # (b3)".into(),
+        }]);
+        let mut v = Viewport::new();
+        let lines = v.slice(&blocks, ViewportWidth(80), 0, 5, &theme());
+        let flat: String = lines
+            .iter()
+            .flat_map(|line| line.line.spans.iter())
+            .map(|span| span.content.as_ref())
+            .collect();
+
+        assert!(flat.contains("visible"), "got {flat:?}");
+        assert!(!flat.contains("dcp-id"), "got {flat:?}");
+        assert!(!flat.contains("dcp-block-id"), "got {flat:?}");
+    }
+
+    #[test]
+    fn diag_hides_dcp_metadata_markers() {
+        let blocks = blocks_of(vec![Block::Diag {
+            kind: DiagKind::Info,
+            text: "[dcp-id]: # (m154)\nvisible\n[dcp-block-id]: # (b3)".into(),
+        }]);
+        let mut v = Viewport::new();
+        let lines = v.slice(&blocks, ViewportWidth(80), 0, 5, &theme());
+        let flat: String = lines
+            .iter()
+            .flat_map(|line| line.line.spans.iter())
+            .map(|span| span.content.as_ref())
+            .collect();
+
+        assert!(flat.contains("visible"), "got {flat:?}");
+        assert!(!flat.contains("dcp-id"), "got {flat:?}");
+        assert!(!flat.contains("dcp-block-id"), "got {flat:?}");
     }
 
     #[test]

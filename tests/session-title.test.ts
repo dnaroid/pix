@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { buildForkTitleInput, firstUserMessageText } from "../extensions/session-title/index.js";
+import { buildForkTitleInput, fallbackSessionTitleFromInput, firstUserMessageText } from "../extensions/session-title/index.js";
 
 describe("session-title extension", () => {
 	it("finds text from the first existing user message", () => {
@@ -56,6 +56,27 @@ describe("session-title extension", () => {
 
 	it("falls back to the fork prompt when the parent title is unavailable", () => {
 		assert.equal(buildForkTitleInput(undefined, "  Investigate crash  "), "Investigate crash");
+	});
+
+	it("builds a local fallback title from the first user words", () => {
+		assert.equal(
+			fallbackSessionTitleFromInput("  fix delayed session title refresh after model timeout in rust tui  ", 80),
+			"fix delayed session title refresh after model timeout",
+		);
+	});
+
+	it("truncates the fallback title to the configured character limit", () => {
+		assert.equal(
+			fallbackSessionTitleFromInput("Investigate intermittent title model outage and add a safer local fallback", 24),
+			"Investigate intermittent",
+		);
+	});
+
+	it("ignores leading punctuation in fallback titles", () => {
+		assert.equal(
+			fallbackSessionTitleFromInput("  --- \"\" Fix broken title retries now please  ", 80),
+			"Fix broken title retries now please",
+		);
 	});
 });
 

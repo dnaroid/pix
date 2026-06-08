@@ -8,6 +8,7 @@ import {
 	type AgentSessionEvent,
 	type AgentSessionRuntime,
 } from "@earendil-works/pi-coding-agent";
+import type { BindCurrentSessionOptions } from "./session-lifecycle-controller.js";
 import { isRecord } from "../guards.js";
 import { createId } from "../id.js";
 import { createStartupInfoMessage, isEmptyStartupSession } from "../cli/startup-info.js";
@@ -18,6 +19,7 @@ import type { AppOptions, Entry, SessionActivity, SessionTab, SubmittedUserMessa
 
 const TAB_STATE_VERSION = 3;
 const MAX_RESTORED_TABS = 8;
+const BACKGROUND_PREWARM_TAB_LIMIT = 2;
 const TAB_ATTENTION_BLINK_KEY = "tab-attention";
 const LOADING_TAB_TITLE_PATTERN = /^loading(?:…|\.\.\.)?$/iu;
 
@@ -51,7 +53,7 @@ export type AppTabsControllerHost = {
 	runtime(): AgentSessionRuntime | undefined;
 	createRuntimeForNewSession(): Promise<AgentSessionRuntime>;
 	createRuntimeForSession(sessionPath: string): Promise<AgentSessionRuntime>;
-	activateRuntime(runtime: AgentSessionRuntime): Promise<void>;
+	activateRuntime(runtime: AgentSessionRuntime, options?: BindCurrentSessionOptions): Promise<void>;
 	disposeRuntime(runtime: AgentSessionRuntime): Promise<void>;
 	isRunning(): boolean;
 	setStatus(status: string): void;
@@ -74,6 +76,7 @@ export type AppTabsControllerHost = {
 export class AppTabsController {
 	private readonly tabItems: SessionTab[] = [];
 	private readonly runtimesByTabId = new Map<string, AgentSessionRuntime>();
+	private readonly runtimeLoadsByTabId = new Map<string, Promise<AgentSessionRuntime | undefined>>();
 	private readonly runtimeSubscriptionsByTabId = new Map<string, { runtime: AgentSessionRuntime; session: AgentSession; unsubscribe: () => void }>();
 	private readonly runtimeRefreshTimersByTabId = new Map<string, Set<ReturnType<typeof setTimeout>>>();
 	private readonly inputStatesByTabId = new Map<string, TabInputState>();
@@ -84,6 +87,8 @@ export class AppTabsController {
 	private restored = false;
 	private retentionCleanupRunning = false;
 	private retentionCleanupScheduled = false;
+	private prewarmScheduled = false;
+	private prewarmRunning = false;
 
 	constructor(private readonly host: AppTabsControllerHost) {}
 
@@ -260,6 +265,7 @@ export class AppTabsController {
 			this.settleStartupTabPlaceholders();
 			await this.saveTabs();
 			this.scheduleProjectSessionRetention();
+			this.scheduleTabPrewarm();
 			return;
 		}
 
@@ -269,7 +275,7 @@ export class AppTabsController {
 			this.host.render();
 			try {
 				restoredRuntime = await this.host.createRuntimeForSession(desiredPath);
-				await this.host.activateRuntime(restoredRuntime);
+				await this.host.activateRuntime(restoredRuntime, { awaitExtensions: false });
 			} catch {
 				this.host.showToast("Could not restore the previous active tab", "warning");
 				this.replaceTabs([this.tabFromSession(runtime.session), ...restoredTabs], currentPath);
@@ -291,6 +297,7 @@ export class AppTabsController {
 		if (this.activeTabId) this.restoreInputState(this.activeTabId);
 		await this.saveTabs();
 		this.scheduleProjectSessionRetention();
+		this.scheduleTabPrewarm();
 	}
 
 	async openNewTab(): Promise<void> {
@@ -360,7 +367,7 @@ export class AppTabsController {
 		this.host.setSessionActivity("thinking");
 		this.host.render();
 		try {
-			await this.host.activateRuntime(newRuntime);
+			await this.host.activateRuntime(newRuntime, { awaitExtensions: false });
 		} finally {
 			if (this.pendingActiveTabId === targetTab.id) this.pendingActiveTabId = undefined;
 		}
@@ -412,23 +419,18 @@ export class AppTabsController {
 		this.host.setStatus("opening session tab");
 		this.host.render();
 
-		let newRuntime: AgentSessionRuntime;
-		try {
-			newRuntime = await this.host.createRuntimeForSession(resolvedSessionPath);
-		} catch {
-			this.host.showToast("Could not open session tab", "warning");
-			this.host.setSessionStatus(previousRuntime.session);
-			this.host.render();
-			return false;
-		}
-
-		const tab = this.tabFromSession(newRuntime.session, { titlePlaceholder: "loading" });
+		const tab: SessionTab = {
+			id: createId("tab"),
+			title: basename(resolvedSessionPath, extname(resolvedSessionPath)) || "loading",
+			titlePlaceholder: "loading",
+			status: "active",
+			activity: "thinking",
+			sessionPath: resolvedSessionPath,
+		};
 		this.tabItems.push(tab);
 		this.activeTabId = tab.id;
 		this.pendingActiveTabId = tab.id;
 		this.clearTabAttention(tab);
-		this.updateTabFromSession(tab, newRuntime.session);
-		this.setRuntimeForTab(tab.id, newRuntime);
 		this.restoreInputState(tab.id);
 		this.host.closeMenusForTabSwitch?.();
 		this.host.resetSessionView();
@@ -436,8 +438,31 @@ export class AppTabsController {
 		this.host.setSessionActivity("thinking");
 		this.host.render();
 
+		let newRuntime: AgentSessionRuntime;
 		try {
-			await this.host.activateRuntime(newRuntime);
+			newRuntime = await this.host.createRuntimeForSession(resolvedSessionPath);
+		} catch {
+			this.pendingActiveTabId = undefined;
+			this.removeTab(tab.id);
+			this.activeTabId = previousTabId;
+			if (previousTabId) this.restoreInputState(previousTabId);
+			this.host.closeMenusForTabSwitch?.();
+			this.host.resetSessionView();
+			if (previousTabId) this.restoreDeferredUserMessages(previousTabId);
+			this.host.loadSessionHistory();
+			this.host.showToast("Could not open session tab", "warning");
+			this.host.setSessionStatus(previousRuntime.session);
+			this.host.setSessionActivity(this.sessionActivity(previousRuntime.session));
+			this.host.render();
+			return false;
+		}
+
+		this.updateTabFromSession(tab, newRuntime.session);
+		this.setRuntimeForTab(tab.id, newRuntime);
+		this.host.render();
+
+		try {
+			await this.host.activateRuntime(newRuntime, { awaitExtensions: false });
 		} catch {
 			this.pendingActiveTabId = undefined;
 			this.removeTab(tab.id);
@@ -446,7 +471,7 @@ export class AppTabsController {
 			this.host.closeMenusForTabSwitch?.();
 			if (this.host.runtime() !== previousRuntime) {
 				try {
-					await this.host.activateRuntime(previousRuntime);
+					await this.host.activateRuntime(previousRuntime, { awaitExtensions: false });
 				} catch {
 					// Keep the best available runtime below and surface the switch failure.
 				}
@@ -469,6 +494,7 @@ export class AppTabsController {
 		this.setRuntimeForTab(tab.id, newRuntime);
 		this.restoreInputState(tab.id);
 		void this.saveTabs();
+		this.scheduleTabPrewarm();
 		await this.loadActiveSessionHistory(newRuntime);
 		return true;
 	}
@@ -551,7 +577,7 @@ export class AppTabsController {
 		this.host.render();
 
 		try {
-			await this.host.activateRuntime(forkRuntime);
+			await this.host.activateRuntime(forkRuntime, { awaitExtensions: false });
 		} catch {
 			this.pendingActiveTabId = undefined;
 			this.removeTab(tab.id);
@@ -560,7 +586,7 @@ export class AppTabsController {
 			this.host.closeMenusForTabSwitch?.();
 			if (this.host.runtime() !== previousRuntime) {
 				try {
-					await this.host.activateRuntime(previousRuntime);
+					await this.host.activateRuntime(previousRuntime, { awaitExtensions: false });
 				} catch {
 					// Keep the best available runtime below and surface the switch failure.
 				}
@@ -584,6 +610,7 @@ export class AppTabsController {
 		this.restoreInputState(tab.id);
 		void this.saveTabs();
 		this.scheduleProjectSessionRetention();
+		this.scheduleTabPrewarm();
 		await this.loadActiveSessionHistory(forkRuntime);
 		this.host.addEntry({ id: createId("system"), kind: "system", text: `Forked from entry ${entryId} in a new tab.` });
 		this.host.setSessionStatus(forkRuntime.session);
@@ -635,7 +662,7 @@ export class AppTabsController {
 		try {
 			targetRuntime = await this.runtimeForTab(target);
 			if (!targetRuntime) throw new Error("Could not load tab runtime");
-			await this.host.activateRuntime(targetRuntime);
+			await this.host.activateRuntime(targetRuntime, { awaitExtensions: false });
 		} catch {
 			this.pendingActiveTabId = undefined;
 			if (previousTargetActivity === undefined) delete target.activity;
@@ -645,7 +672,7 @@ export class AppTabsController {
 			this.host.closeMenusForTabSwitch?.();
 			if (this.host.runtime() !== previousRuntime) {
 				try {
-					await this.host.activateRuntime(previousRuntime);
+					await this.host.activateRuntime(previousRuntime, { awaitExtensions: false });
 				} catch {
 					// Keep the best available runtime below and surface the switch failure.
 				}
@@ -668,6 +695,7 @@ export class AppTabsController {
 		this.setRuntimeForTab(target.id, targetRuntime);
 		this.restoreInputState(target.id);
 		void this.saveTabs();
+		this.scheduleTabPrewarm();
 		await this.loadActiveSessionHistory(targetRuntime);
 	}
 
@@ -719,7 +747,7 @@ export class AppTabsController {
 		this.host.render();
 		const nextRuntime = await this.runtimeForTab(nextTab);
 		if (!nextRuntime) return;
-		await this.host.activateRuntime(nextRuntime);
+		await this.host.activateRuntime(nextRuntime, { awaitExtensions: false });
 
 		this.tabItems.splice(index, 1);
 		this.deleteRuntimeForTab(tabId);
@@ -734,6 +762,7 @@ export class AppTabsController {
 		this.host.closeMenusForTabSwitch?.();
 		void this.host.disposeRuntime(runtime);
 		void this.saveTabs();
+		this.scheduleTabPrewarm();
 		await this.loadActiveSessionHistory(nextRuntime);
 	}
 
@@ -868,6 +897,7 @@ export class AppTabsController {
 
 	private deleteRuntimeForTab(tabId: string): void {
 		this.runtimesByTabId.delete(tabId);
+		this.runtimeLoadsByTabId.delete(tabId);
 		this.clearRuntimeRefreshTimers(tabId);
 		const subscription = this.runtimeSubscriptionsByTabId.get(tabId);
 		subscription?.unsubscribe();
@@ -999,14 +1029,31 @@ export class AppTabsController {
 	private async runtimeForTab(tab: SessionTab): Promise<AgentSessionRuntime | undefined> {
 		const existing = this.runtimesByTabId.get(tab.id);
 		if (existing) return existing;
+		const loading = this.runtimeLoadsByTabId.get(tab.id);
+		if (loading) return await loading;
 		if (!tab.sessionPath) {
 			this.host.showToast("Tab has no persisted session path", "warning");
 			return undefined;
 		}
 
-		const runtime = await this.host.createRuntimeForSession(tab.sessionPath);
-		this.setRuntimeForTab(tab.id, runtime);
-		return runtime;
+		const expectedPath = resolve(tab.sessionPath);
+		const pending = (async (): Promise<AgentSessionRuntime | undefined> => {
+			const runtime = await this.host.createRuntimeForSession(expectedPath);
+			const liveTab = this.tabItems.find((item) => item.id === tab.id);
+			if (!liveTab || !liveTab.sessionPath || resolve(liveTab.sessionPath) !== expectedPath) {
+				void this.host.disposeRuntime(runtime);
+				return undefined;
+			}
+
+			this.setRuntimeForTab(tab.id, runtime);
+			return runtime;
+		})();
+		this.runtimeLoadsByTabId.set(tab.id, pending);
+		try {
+			return await pending;
+		} finally {
+			if (this.runtimeLoadsByTabId.get(tab.id) === pending) this.runtimeLoadsByTabId.delete(tab.id);
+		}
 	}
 
 	private findTabForSession(session: AgentSession, options: { excludeTabId?: string } = {}): SessionTab | undefined {
@@ -1330,6 +1377,33 @@ export class AppTabsController {
 			this.retentionCleanupScheduled = false;
 			void this.cleanupOldProjectSessions();
 		}, 0);
+	}
+
+	private scheduleTabPrewarm(): void {
+		if (this.host.options.noSession || this.prewarmScheduled || this.prewarmRunning) return;
+		this.prewarmScheduled = true;
+		setTimeout(() => {
+			this.prewarmScheduled = false;
+			void this.prewarmTabs();
+		}, 0);
+	}
+
+	private async prewarmTabs(): Promise<void> {
+		if (this.prewarmRunning || this.pendingActiveTabId || !this.host.isRunning()) return;
+		this.prewarmRunning = true;
+		try {
+			let warmed = 0;
+			for (const tab of this.tabItems) {
+				if (warmed >= BACKGROUND_PREWARM_TAB_LIMIT) break;
+				if (tab.id === this.activeTabId || !tab.sessionPath) continue;
+				if (this.runtimesByTabId.has(tab.id) || this.runtimeLoadsByTabId.has(tab.id)) continue;
+				const runtime = await this.runtimeForTab(tab).catch(() => undefined);
+				if (!runtime) continue;
+				warmed += 1;
+			}
+		} finally {
+			this.prewarmRunning = false;
+		}
 	}
 
 	private async cleanupOldProjectSessions(): Promise<void> {

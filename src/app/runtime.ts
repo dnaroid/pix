@@ -219,6 +219,35 @@ export type CreatePixRuntimeOptions = {
 	eventBus?: EventBus;
 };
 
+const bundledSkillsInstallPromises = new Map<string, Promise<BundledSkillsInstallResult>>();
+const piToolsSuiteInstallPromises = new Map<string, Promise<PiToolsSuiteInstallResult>>();
+
+async function ensureBundledSkillsInstalledOnce(options: BundledSkillsInstallOptions = {}): Promise<BundledSkillsInstallResult> {
+	const targetPath = resolve(options.targetPath ?? bundledSkillsInstallPath(options.homeDir));
+	const existing = bundledSkillsInstallPromises.get(targetPath);
+	if (existing) return await existing;
+
+	const pending = ensureBundledSkillsInstalled(options).catch((error) => {
+		bundledSkillsInstallPromises.delete(targetPath);
+		throw error;
+	});
+	bundledSkillsInstallPromises.set(targetPath, pending);
+	return await pending;
+}
+
+async function ensurePiToolsSuiteExtensionInstalledOnce(options: PiToolsSuiteInstallOptions = {}): Promise<PiToolsSuiteInstallResult> {
+	const targetPath = resolve(options.targetPath ?? piToolsSuiteExtensionInstallPath(options.agentDir));
+	const existing = piToolsSuiteInstallPromises.get(targetPath);
+	if (existing) return await existing;
+
+	const pending = ensurePiToolsSuiteExtensionInstalled(options).catch((error) => {
+		piToolsSuiteInstallPromises.delete(targetPath);
+		throw error;
+	});
+	piToolsSuiteInstallPromises.set(targetPath, pending);
+	return await pending;
+}
+
 type RuntimeSessionManagerModelState = Pick<SessionManager, "getEntries" | "getBranch">;
 
 export function resolvePixRuntimeModelRef(
@@ -269,8 +298,8 @@ export async function createPixRuntime(options: AppOptions, runtimeOptions: Crea
 		const effectiveModelRef = resolvePixRuntimeModelRef(options, sessionManager, config);
 		const parsedModel = effectiveModelRef ? parseModelRef(effectiveModelRef) : undefined;
 		const initialThinkingLevel = resolvePixRuntimeInitialThinkingLevel(options, sessionManager, config);
-		await ensureBundledSkillsInstalled();
-		await ensurePiToolsSuiteExtensionInstalled({ agentDir });
+		await ensureBundledSkillsInstalledOnce();
+		await ensurePiToolsSuiteExtensionInstalledOnce({ agentDir });
 		const bundledExtensionPaths = getBundledExtensionPaths();
 		const services = await createAgentSessionServices({
 			cwd,
