@@ -69,7 +69,7 @@ export class TabLineRenderer {
 				segments.push({
 					start: separatorOffset + 1,
 					end: separatorOffset + 2,
-					foreground: this.host.theme.colors.inputBorder,
+					foreground: this.host.theme.colors.tabBorder,
 				});
 				displayColumn += separatorWidth;
 			}
@@ -112,7 +112,7 @@ export class TabLineRenderer {
 		segments.push({
 			start: newTabDividerOffset,
 			end: newTabDividerOffset + 1,
-			foreground: this.host.theme.colors.inputBorder,
+			foreground: this.host.theme.colors.tabBorder,
 		});
 		segments.push({
 			start: lineText.length - APP_ICONS.plus.length,
@@ -145,7 +145,7 @@ export class TabLineRenderer {
 
 	renderBottom(row: number, layout: TabLineLayout, width: number): string {
 		return this.host.screenStyler.styleLine(row, this.bottomText(layout, width), width, {
-			foreground: this.host.theme.colors.inputBorder,
+			foreground: this.host.theme.colors.tabBorder,
 		});
 	}
 

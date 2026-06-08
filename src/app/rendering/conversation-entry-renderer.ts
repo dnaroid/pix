@@ -99,10 +99,20 @@ function renderCustomEntry(entry: Extract<Entry, { kind: "custom" }>, width: num
 function renderAssistantLines(text: string, width: number, options: ConversationEntryRenderOptions): RenderedLine[] {
 	const displayText = applyOutputFilters(text, options.outputFilters).trimEnd();
 	if (!displayText) return [];
-	return renderMarkdownTextLines(displayText, width).map((line) => ({
-		text: line.text,
-		colorOverride: options.colors.assistantForeground,
-		...(line.segments && line.segments.length > 0 ? { segments: line.segments } : {}),
-		...(line.syntaxHighlight ? { syntaxHighlight: line.syntaxHighlight } : {}),
-	}));
+	const { left: contentLeft, contentWidth } = horizontalPaddingLayout(width);
+	const background = options.colors.assistantMessageBackground;
+	const contentLines = renderMarkdownTextLines(displayText, contentWidth, contentLeft);
+	if (contentLines.length === 0) return [];
+	const lines: RenderedLine[] = [{ text: padHorizontalText("", width), backgroundOverride: background }];
+	for (const line of contentLines) {
+		lines.push({
+			text: padHorizontalText(line.text, width),
+			colorOverride: options.colors.assistantForeground,
+			backgroundOverride: background,
+			...(line.segments && line.segments.length > 0 ? { segments: line.segments.map((segment) => ({ ...segment, start: segment.start + contentLeft, end: segment.end + contentLeft })) } : {}),
+			...(line.syntaxHighlight ? { syntaxHighlight: line.syntaxHighlight } : {}),
+		});
+	}
+	lines.push({ text: padHorizontalText("", width), backgroundOverride: background });
+	return lines;
 }

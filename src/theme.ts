@@ -16,6 +16,9 @@ export type Theme = {
 		inputForeground: string;
 		inputBackground: string;
 		inputBorder: string;
+		inputBorderWidgetBackground: string;
+		tabBorder: string;
+		assistantMessageBackground: string;
 		userMessageBackground: string;
 		inputCursorBackground: string;
 		popupForeground: string;
@@ -60,7 +63,10 @@ export const THEMES: Record<ThemeName, Theme> = {
 			inputForeground: "#f0f6fc",
 			inputBackground: "#090d13",
 			inputBorder: "#30363d",
-			userMessageBackground: "#1e1e1e",
+			inputBorderWidgetBackground: "#2a2f36",
+			tabBorder: "#7d8590",
+			assistantMessageBackground: "#161b22",
+			userMessageBackground: "#262224",
 			inputCursorBackground: "#7fb3c8",
 			popupForeground: "#e6edf3",
 			popupBackground: "#1e1e1e",
@@ -102,7 +108,10 @@ export const THEMES: Record<ThemeName, Theme> = {
 			inputForeground: "#0f172a",
 			inputBackground: "#f8fafc",
 			inputBorder: "#334155",
-			userMessageBackground: "#ffffff",
+			inputBorderWidgetBackground: "#f1f5f9",
+			tabBorder: "#64748b",
+			assistantMessageBackground: "#eef2f7",
+			userMessageBackground: "#f9f0ee",
 			inputCursorBackground: "#0284c7",
 			popupForeground: "#0f172a",
 			popupBackground: "#ffffff",

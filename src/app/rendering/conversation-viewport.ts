@@ -365,7 +365,7 @@ export class ConversationViewport {
 		if (width <= 0) return 0;
 		switch (entry.kind) {
 			case "assistant":
-				return estimateWrappedLineCount(entry.text, width);
+				return estimateWrappedLineCount(entry.text, Math.max(1, width - 2)) + 2;
 			case "system":
 			case "error":
 			case "custom":

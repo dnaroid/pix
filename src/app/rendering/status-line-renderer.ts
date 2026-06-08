@@ -168,7 +168,7 @@ export class StatusLineRenderer {
 
 	private inputBorderWidgetSegments(layout: StatusLineLayout, text: string): StyledSegment[] {
 		const colors = this.host.theme.colors;
-		const background = colors.inputBorder;
+		const background = colors.inputBorderWidgetBackground;
 		const segments: StyledSegment[] = [];
 		const pushWidgetSegment = (widget: { startColumn: number; endColumn: number } | undefined, foreground: string): void => {
 			if (!widget) return;

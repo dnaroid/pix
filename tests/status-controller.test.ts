@@ -107,7 +107,7 @@ describe("StatusLineRenderer", () => {
 		assert.ok(layout.text.includes(`${iconButtonText(APP_ICONS.user)}─${iconButtonText(APP_ICONS.thinkingExpanded)}`));
 		assert.ok(rendered.includes(colorize(iconButtonText(APP_ICONS.user), {
 			foreground: THEMES.dark.colors.muted,
-			background: THEMES.dark.colors.inputBorder,
+			background: THEMES.dark.colors.inputBorderWidgetBackground,
 		})));
 		assert.ok(rendered.includes(colorize("─", {
 			foreground: THEMES.dark.colors.inputBorder,
