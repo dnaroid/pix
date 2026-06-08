@@ -4,12 +4,15 @@ import { autoClearCompletedTodos } from "./state/auto-clear.js";
 import { loadPersistedPlan, syncPersistedPlan } from "./state/persistence.js";
 import { replayFromBranch } from "./state/replay.js";
 import { ACTIVE_STATUSES, isTaskBlocked, selectVisibleTasks } from "./state/selectors.js";
+import { applyTaskMutation } from "./state/state-reducer.js";
 import { getState, replaceState } from "./state/store.js";
 import { DEFAULT_PROMPT_GUIDELINES, DEFAULT_PROMPT_SNIPPET, publishTodoState, registerTodosCommand, registerTodoTool } from "./todo.js";
-import type { TaskMutationParams } from "./tool/types.js";
+import type { Task, TaskMutationParams } from "./tool/types.js";
+
+type AgentMessageLike = { role?: unknown; stopReason?: unknown; content?: unknown };
 
 const TODO_NUDGE_LIMIT = 8;
-const TODO_NUDGE_INITIAL_DELAY_MS = 5_000;
+const TODO_NUDGE_INITIAL_DELAY_MS = 0;
 const TODO_NUDGE_IDLE_RETRY_DELAY_MS = 100;
 const TODO_NUDGE_MAX_IDLE_ATTEMPTS = 40;
 const ASK_USER_TOOL_NAMES = new Set(["ask_user", "ask_user_question", "question"]);
@@ -119,6 +122,7 @@ export default function (pi: ExtensionAPI) {
 	let nudgeTimer: ReturnType<typeof setTimeout> | undefined;
 	const pendingAskUserToolCallIds = new Set<string>();
 	let suppressNextNudgeForThinkingSwitch = false;
+	let inProgressAtAgentStart = new Set<number>();
 
 	function registerTodoToolWithCurrentPrompt(): void {
 		const thinkingPrompt = todoThinkingEnabled ? buildThinkingPromptParts(currentModel) : {};
@@ -191,6 +195,60 @@ export default function (pi: ExtensionAPI) {
 		if (!setter) return;
 		suppressNextNudgeForThinkingSwitch = true;
 		setter.call(pi, level);
+	}
+
+	function isCompletedAssistantReply(message: AgentMessageLike | undefined): boolean {
+		if (message?.role !== "assistant") return false;
+		if (message.stopReason === "aborted" || message.stopReason === "error" || message.stopReason === "length") return false;
+		if (!Array.isArray(message.content)) return false;
+		return message.content.some((block) => typeof (block as { type?: unknown }).type === "string");
+	}
+
+	function hasCompletedAssistantReply(messages: readonly unknown[] | undefined): boolean {
+		if (!Array.isArray(messages)) return false;
+		for (let i = messages.length - 1; i >= 0; i--) {
+			const message = messages[i] as AgentMessageLike | undefined;
+			if (message?.role !== "assistant") continue;
+			return isCompletedAssistantReply(message);
+		}
+		return false;
+	}
+
+	function findOptimisticallyCompletableTask(tasks: readonly Task[]): Task | undefined {
+		const visible = tasks.filter((task) => task.status !== "deleted");
+		const byId = new Map(visible.map((task) => [task.id, task]));
+		const unfinished = visible.filter((task) => ACTIVE_STATUSES.has(task.status) && !isTaskBlocked(task, byId));
+		if (unfinished.length !== 1) return undefined;
+		const [task] = unfinished;
+		if (task.status !== "in_progress") return undefined;
+		if (inProgressAtAgentStart.has(task.id)) return undefined;
+		return task;
+	}
+
+	function applyInternalTodoMutation(action: "update", params: TaskMutationParams, ctx: ExtensionContext): boolean {
+		const result = applyTaskMutation(getState(), action, params);
+		if (result.op.kind === "error") {
+			console.warn(`rpiv-todo: failed internal ${action} mutation — ${result.op.message}`);
+			return false;
+		}
+		const autoClear = autoClearCompletedTodos(result.state);
+		replaceState(autoClear.state);
+		publishTodoState(pi as any, ctx, action, params as Record<string, unknown>);
+		if (todoThinkingEnabled) applyTodoThinkingAfterCommit(autoClear.state, { action, params });
+		try {
+			const sync = syncPersistedPlan(ctx.cwd, autoClear.state);
+			if (sync?.completed) console.log(`rpiv-todo: completed persisted plan and removed ${sync.path}`);
+		} catch (err) {
+			console.warn(`rpiv-todo: failed to sync persisted plan — ${(err as Error).message}`);
+		}
+		return true;
+	}
+
+	function maybeRecoverCompletedCurrentTask(messages: readonly unknown[] | undefined, ctx: ExtensionContext): boolean {
+		if (!hasCompletedAssistantReply(messages)) return false;
+		const task = findOptimisticallyCompletableTask(getState().tasks);
+		if (!task) return false;
+		return applyInternalTodoMutation("update", { action: "update", id: task.id, status: "completed" }, ctx);
 	}
 
 	function clearNudgeTimer(): void {
@@ -288,16 +346,35 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("agent_start", async () => {
 		pendingAskUserToolCallIds.clear();
+		inProgressAtAgentStart = new Set(selectVisibleTasks(getState()).filter((task) => task.status === "in_progress").map((task) => task.id));
 	});
 
-	pi.on("agent_end", async (_event, ctx) => {
+	pi.on("message_end", async (event, ctx) => {
+		if (!isCompletedAssistantReply((event as { message?: AgentMessageLike } | undefined)?.message)) return;
+		if (maybeRecoverCompletedCurrentTask([(event as { message?: AgentMessageLike }).message], ctx)) {
+			lastNudgedSignature = undefined;
+			clearNudgeTimer();
+		}
+	});
+
+	pi.on("agent_end", async (event, ctx) => {
+		const completedAssistantReply = hasCompletedAssistantReply((event as { messages?: readonly unknown[] } | undefined)?.messages);
+
 		if (suppressNextNudgeForThinkingSwitch) {
 			suppressNextNudgeForThinkingSwitch = false;
+			if (!completedAssistantReply) {
+				clearNudgeTimer();
+				return;
+			}
+		}
+
+		if (pendingAskUserToolCallIds.size > 0) {
 			clearNudgeTimer();
 			return;
 		}
 
-		if (pendingAskUserToolCallIds.size > 0) {
+		if (completedAssistantReply && maybeRecoverCompletedCurrentTask((event as { messages?: readonly unknown[] } | undefined)?.messages, ctx)) {
+			lastNudgedSignature = undefined;
 			clearNudgeTimer();
 			return;
 		}

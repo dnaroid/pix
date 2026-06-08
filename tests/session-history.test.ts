@@ -65,10 +65,10 @@ describe("loadSessionHistoryEntriesAsync", () => {
 		assert.equal(entries[0]?.kind === "user" ? entries[0].sessionEntryId : undefined, "u1");
 	});
 
-	it("uses the lazy persisted tail for initial display", () => {
+	it("uses the lazy persisted tail for initial display", async () => {
 		const { sessionDir, sessionPath } = writeLinearUserSession(6);
 
-		const sessionManager = openLazySessionManager(sessionPath, { cwdOverride: sessionDir, tailEntryCount: 2 });
+		const sessionManager = await openLazySessionManager(sessionPath, { cwdOverride: sessionDir, tailEntryCount: 2 });
 		const messages = sessionHistoryDisplayMessages({
 			messages: [{ role: "user", content: "tail fallback" }],
 			sessionManager,
@@ -85,7 +85,7 @@ describe("loadSessionHistoryEntriesAsync", () => {
 
 		const session = {
 			messages: [{ role: "user", content: "tail fallback" }],
-			sessionManager: openLazySessionManager(sessionPath, { cwdOverride: sessionDir, tailEntryCount: 2 }),
+			sessionManager: await openLazySessionManager(sessionPath, { cwdOverride: sessionDir, tailEntryCount: 2 }),
 		} as never;
 		const entries: Entry[] = [];
 		let olderLoader: SessionHistoryOlderLoader | undefined;

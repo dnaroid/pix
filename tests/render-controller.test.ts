@@ -640,6 +640,52 @@ describe("AppRenderController", () => {
 		assert.equal(mouseController.renderedRowTexts.get(2)?.includes("Listening"), true);
 		assert.equal(mouseController.renderedRowBackgrounds.get(2), THEMES.dark.colors.info);
 	});
+
+	it("renders a centered loading label in the conversation area", () => {
+		const mouseController = fakeMouseController();
+		const controller = new AppRenderController({
+			isRunning: () => true,
+			terminalColumns: () => 40,
+			terminalRows: () => 7,
+		}, {
+			theme: THEMES.dark,
+			screenStyler: fakeScreenStyler(),
+			editorLayoutRenderer: {
+				computeLayout: () => ({
+					renderedInput: {
+						lines: ["INPUT"],
+						cursorRowOffset: 0,
+						cursorColumn: 1,
+						cursorVisible: false,
+						scrollOffset: 0,
+						editorStartRowOffset: 0,
+						tagSpans: [[]],
+					},
+					aboveEditorLines: [],
+					belowEditorLines: [],
+					inputStartRow: 4,
+					inputSeparatorRow: 3,
+					inputBottomSeparatorRow: 5,
+					bodyHeight: 1,
+				}),
+			} as unknown as EditorLayoutRenderer,
+			scrollController: {
+				conversationView: () => ({ lines: [{ text: "" }], metrics: { bodyHeight: 1, viewportColumns: 40, conversationLineCount: 0, maxScroll: 0, start: 0 } }),
+			} as unknown as AppScrollController,
+			popupMenus: fakePopupMenus(),
+			mouseController,
+			statusLineRenderer: fakeStatusLineRenderer(),
+			tabLineRenderer: { panelRows: () => 0, layout: () => ({ text: "", segments: [], targets: [] }), render: () => "" } as unknown as TabLineRenderer,
+			toastController: { toast: { visibleStates: [] } } as unknown as AppToastController,
+			loadingConversationOverlayText: () => "Loading…",
+			voiceProgressOverlayText: () => undefined,
+		});
+
+		const output = captureStdout(() => controller.render());
+
+		assert.equal(rowForRenderedText(output, "Loading…"), 1);
+		assert.equal(mouseController.renderedRowTexts.get(1), `${" ".repeat(16)}Loading…${" ".repeat(16)}`);
+	});
 });
 
 function fakeMouseController(): AppMouseController {

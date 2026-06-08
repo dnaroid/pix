@@ -577,7 +577,7 @@ impl InputEditor {
         let cursor_visible =
             cursor_visual_row >= scroll_offset && cursor_visual_row < scroll_offset + safe_max_rows;
 
-        let cursor_screen_col = self.compute_cursor_screen_col(first_prefix, cont_prefix);
+        let cursor_screen_col = self.compute_cursor_screen_col(width, first_prefix, cont_prefix);
 
         RenderedInput {
             visual_lines: visual,
@@ -898,7 +898,12 @@ impl InputEditor {
         bytes.len()
     }
 
-    fn compute_cursor_screen_col(&self, first_prefix: &str, cont_prefix: &str) -> usize {
+    fn compute_cursor_screen_col(
+        &self,
+        width: usize,
+        first_prefix: &str,
+        cont_prefix: &str,
+    ) -> usize {
         let line_start = self.find_line_start(self.cursor);
         let prefix = if line_start == 0 {
             first_prefix
@@ -906,9 +911,11 @@ impl InputEditor {
             cont_prefix
         };
         let prefix_w = UnicodeWidthStr::width(prefix);
+        let available = width.saturating_sub(prefix_w).max(1);
         let segment = &self.text[line_start..self.cursor];
         let seg_w = UnicodeWidthStr::width(segment);
-        prefix_w + seg_w + 1 // 1-based column
+        let col_in_chunk = seg_w % available;
+        prefix_w + col_in_chunk + 1 // 1-based column
     }
 }
 
@@ -917,23 +924,10 @@ impl InputEditor {
 fn take_width_bounded_chunk(s: &str, avail: usize) -> (String, usize) {
     let mut col = 0usize;
     let mut end_byte = 0usize;
-    let mut last_boundary_byte = 0usize;
-    let mut last_was_boundary = false;
 
     for (idx, ch) in s.char_indices() {
         let w = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
-        if ch.is_whitespace() {
-            // Word boundary — remember it as a wrap candidate.
-            last_boundary_byte = idx + ch.len_utf8();
-            last_was_boundary = true;
-        }
         if col + w > avail {
-            if last_was_boundary && last_boundary_byte > 0 {
-                let chunk = &s[..last_boundary_byte];
-                let trimmed = chunk.trim_end_matches(|c: char| c.is_whitespace());
-                let bytes = trimmed.len();
-                return (trimmed.to_string(), bytes);
-            }
             // Hard break in the middle of a long word.
             if end_byte == 0 {
                 // Wide char with no fit at all — emit one char to make progress.
@@ -948,9 +942,7 @@ fn take_width_bounded_chunk(s: &str, avail: usize) -> (String, usize) {
         }
     }
     let chunk = &s[..end_byte];
-    let trimmed = chunk.trim_end_matches(|c: char| c.is_whitespace());
-    let bytes = trimmed.len();
-    (trimmed.to_string(), bytes)
+    (chunk.to_string(), chunk.len())
 }
 
 fn char_class(b: u8) -> u8 {
@@ -1095,6 +1087,18 @@ mod tests {
             assert!(v.text.starts_with("  "));
             assert!(v.wrapped);
         }
+    }
+
+    #[test]
+    fn render_makes_progress_when_wrap_starts_with_space() {
+        let mut ed = InputEditor::with_text("a ");
+
+        let r = ed.render(1, 5, "", "");
+
+        assert_eq!(r.visual_lines.len(), 3);
+        assert_eq!(r.visual_lines[0].text, "a");
+        assert_eq!(r.visual_lines[1].text, " ");
+        assert_eq!(r.visual_lines[2].text, "");
     }
 
     #[test]

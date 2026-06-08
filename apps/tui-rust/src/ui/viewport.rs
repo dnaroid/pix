@@ -380,7 +380,9 @@ fn block_line_count(block: &Block, width: usize, config: &PixConfig) -> usize {
             }
             count
         }
-        Block::Thinking { .. } => 1,
+        Block::Thinking { text, expanded, .. } => {
+            tool_renderers::thinking_entry_line_count(text, width, *expanded, config)
+        }
         Block::ToolCall {
             name,
             args,
@@ -503,10 +505,19 @@ fn append_block_lines(
                 });
             }
         }
-        Block::Thinking { done, .. } => {
-            for line in
-                tool_renderers::render_thinking_entry_with_config(*done, width, theme, config)
-            {
+        Block::Thinking {
+            text,
+            done,
+            expanded,
+        } => {
+            for line in tool_renderers::render_thinking_entry_with_config(
+                text,
+                *done,
+                *expanded,
+                width,
+                theme,
+                config,
+            ) {
                 out.push(VisualLine {
                     line,
                     source_idx: Some(idx),
@@ -1010,6 +1021,7 @@ mod tests {
         let blocks = blocks_of(vec![Block::Thinking {
             text: "private notes".into(),
             done: true,
+            expanded: false,
         }]);
         let mut v = Viewport::new();
         let lines = v.slice(&blocks, ViewportWidth(80), 0, 1, &theme());
@@ -1022,6 +1034,25 @@ mod tests {
 
         assert!(text.contains("thinking"), "got {text:?}");
         assert!(!text.starts_with(' '), "got {text:?}");
+    }
+
+    #[test]
+    fn expanded_thinking_renders_body_lines() {
+        let blocks = blocks_of(vec![Block::Thinking {
+            text: "private notes\n\nmore".into(),
+            done: true,
+            expanded: true,
+        }]);
+        let mut v = Viewport::new();
+        let lines = v.slice(&blocks, ViewportWidth(80), 0, 4, &theme());
+        let texts: Vec<String> = lines
+            .iter()
+            .map(|line| line.line.spans.iter().map(|s| s.content.as_ref()).collect())
+            .collect();
+
+        assert!(texts[0].contains("thinking"), "got {texts:?}");
+        assert!(texts[1].starts_with("  private notes"), "got {texts:?}");
+        assert!(texts[1].contains("more") || texts.iter().any(|line| line.starts_with("  more")), "got {texts:?}");
     }
 
     #[test]

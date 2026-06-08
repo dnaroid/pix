@@ -37,6 +37,7 @@ use pix_tui::runtime;
 use pix_tui::ui;
 use pix_tui::ui::app::DiagKind;
 use pix_tui::ui::enhancer::EnhancerError;
+use pix_tui::ui::file_link_opener::{open_file_link, OpenTarget};
 use pix_tui::ui::popup::PopupKind;
 use pix_tui::ui::render::{INPUT_CONT_PREFIX, INPUT_FIRST_PREFIX};
 use pix_tui::ui::toast::{ToastKindLabel, ToastLevel};
@@ -395,7 +396,11 @@ async fn main() -> Result<()> {
     app.apply_session_state(&startup_state);
     app.save_active_runtime_state();
     if let Some(client) = runtimes.active_client() {
-        load_active_runtime_history(&mut app, &client).await;
+        spawn_runtime_history_load(
+            runtimes.active_runtime_id().to_string(),
+            client,
+            &tx,
+        );
     }
 
     // Terminal events pump.
@@ -554,7 +559,7 @@ async fn run_loop(
 
 async fn handle_app_event(
     ev: AppEvent,
-    _terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut ui::App,
     _rx: &mut mpsc::Receiver<AppEvent>,
     runtimes: &mut TabRuntimeManager,
@@ -569,6 +574,7 @@ async fn handle_app_event(
                 return Ok(true);
             };
             if handle_term(
+                terminal,
                 app,
                 term_ev,
                 &client,
@@ -670,7 +676,11 @@ async fn handle_app_event(
         }
         AppEvent::ActivatedTabState { runtime_id, state } => {
             app.save_active_runtime_state();
-            activate_tab_runtime_state(app, runtimes, runtime_id, state).await;
+            activate_tab_runtime_state(app, runtimes, runtime_id, state);
+            needs_redraw = true;
+        }
+        AppEvent::RuntimeHistoryLoaded { runtime_id, result } => {
+            apply_runtime_history_loaded(app, runtimes, &runtime_id, result);
             needs_redraw = true;
         }
         AppEvent::NewSessionState(state) => {
@@ -683,7 +693,7 @@ async fn handle_app_event(
         }
         AppEvent::NewTabRuntimeState { runtime_id, state } => {
             app.save_active_runtime_state();
-            activate_tab_runtime_state(app, runtimes, runtime_id, state).await;
+            activate_tab_runtime_state(app, runtimes, runtime_id, state);
             let id = app.session_id.as_deref().unwrap_or("(unknown)");
             app.push_diag(DiagKind::Info, format!("started session {id}"));
             app.save_active_runtime_state();
@@ -719,7 +729,7 @@ async fn handle_app_event(
             closed_path,
         } => {
             app.save_active_runtime_state();
-            activate_tab_runtime_state(app, runtimes, runtime_id, state).await;
+            activate_tab_runtime_state(app, runtimes, runtime_id, state);
             app.remove_tab_path(&closed_path);
             runtimes.close_runtime_for_path(&closed_path).await;
             needs_redraw = true;
@@ -832,19 +842,21 @@ async fn ensure_session_state(
     }
 }
 
-async fn load_active_runtime_history(app: &mut ui::App, client: &bridge::BridgeClient) {
-    match client.get_messages_tail(HISTORY_PAGE_SIZE).await {
-        Ok(messages) => {
-            app.apply_history_messages(&messages);
-            app.save_active_runtime_state();
-        }
-        Err(error) => {
-            app.push_diag(
-                DiagKind::BridgeError,
-                format!("load session history failed: {error}"),
-            );
-        }
-    }
+fn spawn_runtime_history_load(
+    runtime_id: String,
+    client: bridge::BridgeClient,
+    tx: &mpsc::Sender<AppEvent>,
+) {
+    let tx = tx.clone();
+    tokio::spawn(async move {
+        let result = client
+            .get_messages_tail(HISTORY_PAGE_SIZE)
+            .await
+            .map_err(|error| format!("load session history failed: {error}"));
+        let _ = tx
+            .send(AppEvent::RuntimeHistoryLoaded { runtime_id, result })
+            .await;
+    });
 }
 
 const HISTORY_PAGE_SIZE: u32 = 200;
@@ -935,23 +947,93 @@ async fn maybe_load_older_history_for_current_geometry(
     Ok(maybe_load_older_history(app, client, viewport_width, body_height).await)
 }
 
-async fn activate_tab_runtime_state(
+fn activate_tab_runtime_state(
     app: &mut ui::App,
     runtimes: &mut TabRuntimeManager,
     runtime_id: String,
     state: serde_json::Value,
 ) {
     let client = runtimes.client_for_runtime(&runtime_id);
+    let loading_key = runtime_session_key(&state).map(|key| runtimes.normalize_session_key(&key));
     runtimes.set_active_runtime(runtime_id.clone());
     runtimes.register_runtime_state(&runtime_id, &state);
+    app.set_pending_new_tab(false);
     app.reset_conversation();
     app.apply_session_state(&state);
     if !app.restore_active_runtime_state() {
         if let Some(client) = client {
-            load_active_runtime_history(app, &client).await;
+            app.save_active_runtime_state();
+            app.set_loading_runtime_key(loading_key);
+            spawn_runtime_history_load(runtime_id, client, &runtimes.tx);
         } else {
             app.save_active_runtime_state();
+            app.set_loading_runtime_key(None);
         }
+    } else {
+        app.set_loading_runtime_key(None);
+    }
+}
+
+fn apply_runtime_history_loaded(
+    app: &mut ui::App,
+    runtimes: &TabRuntimeManager,
+    runtime_id: &str,
+    result: Result<serde_json::Value, String>,
+) {
+    let session_key = runtimes
+        .runtimes
+        .get(runtime_id)
+        .and_then(|runtime| runtime.session_key.clone());
+
+    let Some(session_key) = session_key else {
+        if let Err(error) = result {
+            app.push_diag(DiagKind::BridgeError, error);
+        }
+        return;
+    };
+
+    if runtime_id == runtimes.active_runtime_id() {
+        match result {
+            Ok(messages) => {
+                app.apply_history_messages(&messages);
+                app.save_active_runtime_state();
+                app.clear_loading_runtime_key(Some(&session_key));
+            }
+            Err(error) => {
+                app.clear_loading_runtime_key(Some(&session_key));
+                app.push_diag(DiagKind::BridgeError, error)
+            }
+        }
+        return;
+    }
+
+    let active_key = app.active_runtime_key();
+    app.save_active_runtime_state();
+
+    if !app.restore_runtime_state_for_key(&session_key) {
+        if let Err(error) = result {
+            app.push_diag(DiagKind::BridgeError, error);
+        }
+        if let Some(active_key) = active_key {
+            let _ = app.restore_runtime_state_for_key(&active_key);
+        }
+        return;
+    }
+
+    match result {
+        Ok(messages) => {
+            app.apply_history_messages(&messages);
+            app.save_active_runtime_state();
+            app.clear_loading_runtime_key(Some(&session_key));
+        }
+        Err(error) => {
+            app.clear_loading_runtime_key(Some(&session_key));
+            app.push_diag(DiagKind::BridgeError, error)
+        }
+    }
+
+    if let Some(active_key) = active_key {
+        let _ = app.restore_runtime_state_for_key(&active_key);
     }
 }
 
@@ -1053,16 +1135,31 @@ fn request_model_switch(
     });
 }
 
-async fn switch_tab_relative(app: &mut ui::App, runtimes: &mut TabRuntimeManager, delta: isize) {
+fn prepare_tab_switch(app: &mut ui::App, path: &str) {
+    app.set_pending_new_tab(false);
+    app.tabs.active_path = Some(path.to_string());
+    app.persist_tabs_best_effort();
+
+    if app.restore_runtime_state_for_key(path) {
+        app.set_loading_runtime_key(None);
+    } else {
+        show_loading_tab_placeholder(app, path);
+    }
+}
+
+fn save_before_tab_switch(app: &mut ui::App) {
     app.save_active_input_to_tabs();
     app.save_active_runtime_state();
-    let Some(path) = app.switch_tab_relative(delta) else {
-        return;
-    };
+}
 
+async fn finish_switch_tab_to_path(
+    app: &mut ui::App,
+    runtimes: &mut TabRuntimeManager,
+    path: String,
+) {
     match runtimes.activate_or_spawn_for_session(path).await {
         Ok((runtime_id, state)) => {
-            activate_tab_runtime_state(app, runtimes, runtime_id, state).await;
+            activate_tab_runtime_state(app, runtimes, runtime_id, state);
         }
         Err(e) => app.toasts.push(
             ToastLevel::Warn,
@@ -1073,26 +1170,33 @@ async fn switch_tab_relative(app: &mut ui::App, runtimes: &mut TabRuntimeManager
     }
 }
 
-async fn switch_tab_to_path(app: &mut ui::App, runtimes: &mut TabRuntimeManager, path: String) {
-    if app.session_file.as_deref() == Some(path.as_str()) {
-        return;
-    }
-    app.save_active_input_to_tabs();
-    app.save_active_runtime_state();
-    app.tabs.active_path = Some(path.clone());
-    app.persist_tabs_best_effort();
+fn show_loading_tab_placeholder(app: &mut ui::App, path: &str) {
+    app.set_pending_new_tab(false);
+    app.reset_conversation();
+    app.session_file = Some(path.to_string());
+    app.session_name = app
+        .tabs
+        .tabs
+        .iter()
+        .find(|tab| tab.path == path)
+        .and_then(|tab| tab.name.clone());
+    app.session_id = app
+        .tabs
+        .tabs
+        .iter()
+        .find(|tab| tab.path == path)
+        .and_then(|tab| tab.session_id.clone());
+    app.set_loading_runtime_key(Some(path.to_string()));
+    app.restore_input_from_active_tab();
+}
 
-    match runtimes.activate_or_spawn_for_session(path).await {
-        Ok((runtime_id, state)) => {
-            activate_tab_runtime_state(app, runtimes, runtime_id, state).await;
-        }
-        Err(e) => app.toasts.push(
-            ToastLevel::Warn,
-            ToastKindLabel::Bridge,
-            format!("tab switch failed: {e}"),
-            6,
-        ),
-    }
+fn show_loading_new_tab_placeholder(app: &mut ui::App) {
+    app.reset_conversation();
+    app.session_id = None;
+    app.session_file = None;
+    app.session_name = Some("new".to_string());
+    app.set_loading_runtime_key(None);
+    app.set_pending_new_tab(true);
 }
 
 async fn close_active_tab(app: &mut ui::App, runtimes: &mut TabRuntimeManager) {
@@ -1115,7 +1219,7 @@ async fn close_active_tab(app: &mut ui::App, runtimes: &mut TabRuntimeManager) {
         app.save_active_runtime_state();
         match runtimes.spawn_new_session_runtime().await {
             Ok((runtime_id, state)) => {
-                activate_tab_runtime_state(app, runtimes, runtime_id, state).await;
+                activate_tab_runtime_state(app, runtimes, runtime_id, state);
                 app.remove_tab_path(&closed_path);
                 runtimes.close_runtime_for_path(&closed_path).await;
             }
@@ -1136,7 +1240,7 @@ async fn close_active_tab(app: &mut ui::App, runtimes: &mut TabRuntimeManager) {
     app.save_active_runtime_state();
     match runtimes.activate_or_spawn_for_session(next_path).await {
         Ok((runtime_id, state)) => {
-            activate_tab_runtime_state(app, runtimes, runtime_id, state).await;
+            activate_tab_runtime_state(app, runtimes, runtime_id, state);
             app.remove_tab_path(&closed_path);
             runtimes.close_runtime_for_path(&closed_path).await;
         }
@@ -1167,27 +1271,41 @@ async fn close_tab_path(app: &mut ui::App, runtimes: &mut TabRuntimeManager, pat
     runtimes.close_runtime_for_path(&path).await;
 }
 
-async fn open_new_tab(app: &mut ui::App, runtimes: &mut TabRuntimeManager) {
-    app.save_active_input_to_tabs();
-    app.save_active_runtime_state();
-    app.push_diag(DiagKind::Info, "starting new tab runtime…");
+async fn open_new_tab(
+    app: &mut ui::App,
+    runtimes: &mut TabRuntimeManager,
+    previous_runtime_key: Option<String>,
+) {
     match runtimes.spawn_new_session_runtime().await {
         Ok((runtime_id, state)) => {
-            activate_tab_runtime_state(app, runtimes, runtime_id, state).await;
+            activate_tab_runtime_state(app, runtimes, runtime_id, state);
             let id = app.session_id.as_deref().unwrap_or("(unknown)");
             app.push_diag(DiagKind::Info, format!("started session {id}"));
             app.save_active_runtime_state();
         }
-        Err(e) => app.toasts.push(
-            ToastLevel::Warn,
-            ToastKindLabel::Bridge,
-            format!("new tab runtime failed: {e}"),
-            6,
-        ),
+        Err(e) => {
+            app.set_pending_new_tab(false);
+            app.set_loading_runtime_key(None);
+            if let Some(previous_runtime_key) = previous_runtime_key {
+                let _ = app.restore_runtime_state_for_key(&previous_runtime_key);
+            } else {
+                app.reset_conversation();
+                app.session_id = None;
+                app.session_file = None;
+                app.session_name = None;
+            }
+            app.toasts.push(
+                ToastLevel::Warn,
+                ToastKindLabel::Bridge,
+                format!("new tab runtime failed: {e}"),
+                6,
+            );
+        }
     }
 }
 
 async fn handle_term(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut ui::App,
     ev: TermEvent,
     client: &bridge::BridgeClient,
@@ -1234,6 +1352,8 @@ async fn handle_term(
             app.session_file.as_deref(),
             app.session_id.as_deref(),
             app.session_name.as_deref(),
+            app.loading_runtime_key.as_deref(),
+            app.pending_new_tab.then_some("new"),
         );
         let body_height = conversation_area.height as usize;
         let viewport_width = ui::viewport::ViewportWidth(conversation_area.width as usize);
@@ -1260,24 +1380,46 @@ async fn handle_term(
 
         return match action {
             ui::mouse::MouseAction::TabClick { path } => {
-                switch_tab_to_path(app, runtimes, path).await;
-                Ok(true)
+                if app.tabs.active_path.as_deref() == Some(path.as_str())
+                    && app.session_file.as_deref() == Some(path.as_str())
+                    && !app.is_runtime_loading(Some(path.as_str()))
+                {
+                    Ok(true)
+                } else {
+                    save_before_tab_switch(app);
+                    prepare_tab_switch(app, &path);
+                    render(terminal, app)?;
+                    finish_switch_tab_to_path(app, runtimes, path).await;
+                    Ok(true)
+                }
             }
             ui::mouse::MouseAction::TabClose { path } => {
                 close_tab_path(app, runtimes, path).await;
                 Ok(true)
             }
             ui::mouse::MouseAction::TabNew => {
-                open_new_tab(app, runtimes).await;
+                app.save_active_input_to_tabs();
+                app.save_active_runtime_state();
+                let previous_runtime_key = app.active_runtime_key();
+                show_loading_new_tab_placeholder(app);
+                app.push_diag(DiagKind::Info, "starting new tab runtime…");
+                render(terminal, app)?;
+                open_new_tab(app, runtimes, previous_runtime_key).await;
                 Ok(true)
             }
             ui::mouse::MouseAction::ConversationLinkClick { url } => {
-                app.toasts.push(
-                    ToastLevel::Info,
-                    ToastKindLabel::Link,
-                    format!("Clicked: {url}"),
-                    4,
-                );
+                match open_file_link(&url) {
+                    Ok(result) => {
+                        let message = match result.target {
+                            OpenTarget::Editor => format!("Opened in {}", result.label),
+                            OpenTarget::System => format!("Opened via {}", result.label),
+                        };
+                        app.toasts.push(ToastLevel::Info, ToastKindLabel::Link, message, 4);
+                    }
+                    Err(error) => {
+                        app.toasts.push(ToastLevel::Warn, ToastKindLabel::Link, error, 6);
+                    }
+                }
                 Ok(true)
             }
             ui::mouse::MouseAction::ConversationClick { block_idx } => {
@@ -1408,13 +1550,31 @@ async fn handle_term(
     if matches!(key, KeyEvent { code: KeyCode::Left, modifiers, .. } if modifiers.contains(KeyModifiers::ALT))
         && app.active_popup.is_none()
     {
-        switch_tab_relative(app, runtimes, -1).await;
+        save_before_tab_switch(app);
+        if let Some(path) = app.switch_tab_relative(-1) {
+            if app.restore_runtime_state_for_key(&path) {
+                app.set_loading_runtime_key(None);
+            } else {
+                show_loading_tab_placeholder(app, &path);
+            }
+            render(terminal, app)?;
+            finish_switch_tab_to_path(app, runtimes, path).await;
+        }
         return Ok(true);
     }
     if matches!(key, KeyEvent { code: KeyCode::Right, modifiers, .. } if modifiers.contains(KeyModifiers::ALT))
         && app.active_popup.is_none()
     {
-        switch_tab_relative(app, runtimes, 1).await;
+        save_before_tab_switch(app);
+        if let Some(path) = app.switch_tab_relative(1) {
+            if app.restore_runtime_state_for_key(&path) {
+                app.set_loading_runtime_key(None);
+            } else {
+                show_loading_tab_placeholder(app, &path);
+            }
+            render(terminal, app)?;
+            finish_switch_tab_to_path(app, runtimes, path).await;
+        }
         return Ok(true);
     }
     if matches!(key, KeyEvent { code: KeyCode::Char('\\'), modifiers, .. } if modifiers.contains(KeyModifiers::CONTROL))
@@ -1467,7 +1627,7 @@ async fn handle_term(
         return handle_model_picker_key(app, key, client, &tx);
     }
     if matches!(app.current_popup_kind(), Some(PopupKind::SessionPicker)) {
-        return handle_session_picker_key(app, key, client, runtimes, &tx).await;
+        return handle_session_picker_key(terminal, app, key, client, runtimes, &tx).await;
     }
     if matches!(app.current_popup_kind(), Some(PopupKind::Search { .. })) {
         return handle_search_popup_key(app, key);
@@ -1579,7 +1739,13 @@ async fn handle_term(
 
     if matches!(key, KeyEvent { code: KeyCode::Char('n'), modifiers, .. } if modifiers.contains(KeyModifiers::CONTROL))
     {
-        open_new_tab(app, runtimes).await;
+        app.save_active_input_to_tabs();
+        app.save_active_runtime_state();
+        let previous_runtime_key = app.active_runtime_key();
+        show_loading_new_tab_placeholder(app);
+        app.push_diag(DiagKind::Info, "starting new tab runtime…");
+        render(terminal, app)?;
+        open_new_tab(app, runtimes, previous_runtime_key).await;
         return Ok(true);
     }
 
@@ -1675,8 +1841,9 @@ async fn handle_term(
         return Ok(true);
     }
 
-    // Alt-modifier handling (Alt+Enter inserts a newline).
-    if key.modifiers.contains(KeyModifiers::ALT) {
+    // Multiline input handling: match pix behavior with Shift+Enter,
+    // and keep Alt+Enter as an accepted fallback.
+    if key.modifiers.contains(KeyModifiers::SHIFT) || key.modifiers.contains(KeyModifiers::ALT) {
         if let KeyCode::Enter = key.code {
             app.input.insert_newline();
             refresh_autocomplete_for_cwd(app);
@@ -1977,6 +2144,7 @@ fn handle_model_picker_key(
 }
 
 async fn handle_session_picker_key(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut ui::App,
     key: KeyEvent,
     client: &bridge::BridgeClient,
@@ -1998,19 +2166,10 @@ async fn handle_session_picker_key(
                 if app.session_file.as_deref() == Some(path.as_str()) {
                     return Ok(true);
                 }
-                app.save_active_input_to_tabs();
-                app.save_active_runtime_state();
-                match runtimes.activate_or_spawn_for_session(path).await {
-                    Ok((runtime_id, state)) => {
-                        activate_tab_runtime_state(app, runtimes, runtime_id, state).await;
-                    }
-                    Err(e) => app.toasts.push(
-                        ToastLevel::Warn,
-                        ToastKindLabel::Bridge,
-                        format!("switch_session failed: {e}"),
-                        6,
-                    ),
-                }
+                save_before_tab_switch(app);
+                prepare_tab_switch(app, &path);
+                render(terminal, app)?;
+                finish_switch_tab_to_path(app, runtimes, path).await;
             }
             Ok(true)
         }

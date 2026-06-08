@@ -40,6 +40,7 @@ export type AppRenderControllerDeps = {
 	tabLineRenderer: TabLineRenderer;
 	toastController: AppToastController;
 	outputBuffer?: TerminalOutputBuffer;
+	loadingConversationOverlayText?: () => string | undefined;
 	voiceProgressOverlayText(): string | undefined;
 };
 
@@ -163,6 +164,11 @@ export class AppRenderController {
 			this.deps.mouseController.renderedRowTexts.set(row, rendered?.text ?? "");
 			setRenderedBackground(row, rendered?.backgroundOverride);
 			appendFrameOutput("conversation", row, this.renderFrameRow(row, this.deps.screenStyler.styleBaseLine(row, rendered, conversationColumns)));
+		}
+		const loadingConversationOverlay = this.renderConversationLoadingOverlay(this.deps.loadingConversationOverlayText?.(), conversationColumns, topReservedRows, bodyHeight);
+		if (loadingConversationOverlay) {
+			this.deps.mouseController.renderedRowTexts.set(loadingConversationOverlay.row, loadingConversationOverlay.text);
+			appendFrameOutput("conversation", loadingConversationOverlay.row, this.renderFrameRow(loadingConversationOverlay.row, loadingConversationOverlay.output));
 		}
 		const aboveEditorStartRow = inputSeparatorRow + 1;
 		for (let index = 0; index < aboveEditorLines.length; index += 1) {
@@ -371,6 +377,21 @@ export class AppRenderController {
 		].join("");
 
 		return { row: Math.min(2, rows - 1), text, output };
+	}
+
+	private renderConversationLoadingOverlay(message: string | undefined, width: number, topReservedRows: number, bodyHeight: number): { row: number; text: string; output: string } | undefined {
+		if (!message || width <= 0 || bodyHeight <= 0) return undefined;
+
+		const overlayWidth = Math.min(stringDisplayWidth(message), width);
+		const leftWidth = Math.max(0, Math.floor((width - overlayWidth) / 2));
+		const rightWidth = Math.max(0, width - leftWidth - overlayWidth);
+		const text = `${" ".repeat(leftWidth)}${padOrTrimPlain(message, overlayWidth)}${" ".repeat(rightWidth)}`;
+		const row = topReservedRows + Math.floor((bodyHeight + 1) / 2);
+		const output = this.deps.screenStyler.styleLine(row, text, width, {
+			foreground: this.deps.theme.colors.muted,
+		});
+
+		return { row, text, output };
 	}
 }
 

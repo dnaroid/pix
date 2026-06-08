@@ -13,7 +13,7 @@ use crate::ui::app::ToolStatus;
 use crate::ui::links::{extract_file_paths, LinkSpan};
 use crate::ui::theme::{Theme, ThemeRole};
 
-use super::wrap;
+use super::{markdown, wrap};
 
 const MAX_DETAIL_LINES: usize = 3;
 
@@ -124,10 +124,15 @@ pub fn render_tool_entry_with_config_and_expansion(
     }
     if crate::ui::todo_view::is_todo_tool_name(name)
         && crate::ui::todo_view::should_render_inline_task_list(args)
+        && result_ok.unwrap_or(true)
     {
-        return crate::ui::todo_view::render_todo_tool_call_with_theme(
+        let mut lines = crate::ui::todo_view::render_todo_tool_call_with_theme(
             name, args, status, width, theme,
         );
+        if !expanded {
+            lines.truncate(1);
+        }
+        return lines;
     }
     let icons = AppIcons::from_config(config);
     let (status_icon, status_color) =
@@ -196,12 +201,14 @@ pub fn tool_entry_line_count_with_config_and_expansion(
     }
     if crate::ui::todo_view::is_todo_tool_name(name)
         && crate::ui::todo_view::should_render_inline_task_list(args)
+        && _result_ok.unwrap_or(true)
     {
-        // Matches todo_view::render_todo_tool_call_with_theme: one header plus
-        // either the widget tasks or the `todo: no tasks` placeholder. This
-        // avoids building styled lines in the common viewport measurement path.
+        if !expanded {
+            return 1;
+        }
         let tasks = args
             .get(crate::ui::todo_view::WIDGET_KEY)
+            .and_then(|widget| widget.get("tasks"))
             .and_then(Value::as_array)
             .map_or(0, Vec::len);
         return 1 + tasks.max(1);
@@ -228,11 +235,13 @@ pub(crate) fn tool_default_expanded(name: &str, config: &PixConfig) -> bool {
         .unwrap_or(false)
 }
 
-/// Render a reasoning/thinking entry with the same one-line tool header
-/// treatment as normal tool calls. The body stays collapsed for now, matching
-/// the current Rust TUI behavior while sharing pix-style status icons/spacing.
+/// Render a reasoning/thinking entry with the same header treatment as normal
+/// tool calls. Collapsed entries stay on one line; expanded entries render the
+/// markdown body below the header so click-to-expand matches pix.
 pub fn render_thinking_entry_with_config(
+    text: &str,
     done: bool,
+    expanded: bool,
     width: usize,
     theme: &Theme,
     config: &PixConfig,
@@ -243,14 +252,59 @@ pub fn render_thinking_entry_with_config(
     } else {
         (icons.timer_sand, theme.status_dim)
     };
-    vec![header_line(
+    let mut lines = vec![header_line(
         icon,
         icon_color,
         theme.resolve_color_ref("accent"),
         "thinking",
         width.max(1),
         theme,
-    )]
+    )];
+    if expanded {
+        lines.extend(render_thinking_body_lines(text, width, theme));
+    }
+    lines
+}
+
+pub fn thinking_entry_line_count(text: &str, width: usize, expanded: bool, config: &PixConfig) -> usize {
+    render_thinking_entry_with_config(text, true, expanded, width, &Theme::default(), config).len()
+}
+
+fn render_thinking_body_lines(text: &str, width: usize, theme: &Theme) -> Vec<Line<'static>> {
+    let body_width = width.saturating_sub(2).max(1);
+    markdown::render_markdown_with_theme(text, body_width, theme)
+        .into_iter()
+        .flat_map(split_embedded_newlines)
+        .map(indent_line)
+        .collect()
+}
+
+fn indent_line(line: Line<'static>) -> Line<'static> {
+    let mut spans = Vec::with_capacity(line.spans.len() + 1);
+    spans.push(Span::raw("  "));
+    spans.extend(line.spans);
+    Line::from(spans)
+}
+
+fn split_embedded_newlines(line: Line<'static>) -> Vec<Line<'static>> {
+    let mut out = Vec::new();
+    let mut current = Vec::new();
+
+    for span in line.spans {
+        let style = span.style;
+        let mut parts = span.content.split('\n').peekable();
+        while let Some(part) = parts.next() {
+            if !part.is_empty() {
+                current.push(Span::styled(part.to_string(), style));
+            }
+            if parts.peek().is_some() {
+                out.push(Line::from(std::mem::take(&mut current)));
+            }
+        }
+    }
+
+    out.push(Line::from(current));
+    out
 }
 
 /// Number of visual lines `render_tool_call` emits for the same args/width.
@@ -515,17 +569,21 @@ fn ast_grep_display(name: &str, args: &Value) -> ToolDisplay {
 }
 
 fn compress_display(name: &str, args: &Value) -> ToolDisplay {
-    let target = value_summary_any(
-        args,
-        &["paths", "path", "target", "targets", "files", "topic"],
-    )
-    .unwrap_or_else(|| name.to_string());
+    let mut parts = Vec::new();
+    if let Some(topic) = value_summary_any(args, &["topic"]) {
+        parts.push(topic);
+    }
+    if let Some(target) = value_summary_any(args, &["paths", "path", "target", "targets", "files"]) {
+        parts.push(target);
+    }
+    let target = if parts.is_empty() {
+        name.to_string()
+    } else {
+        parts.join(" · ")
+    };
     ToolDisplay {
         title: target,
-        details: compact_fields(
-            args,
-            &["paths", "path", "target", "targets", "files", "topic"],
-        ),
+        details: None,
     }
 }
 
@@ -1690,10 +1748,13 @@ mod tests {
 
     #[test]
     fn compress_branch_renders_target_paths_and_detail() {
-        let lines = rendered_texts(
+        let lines = render_tool_call(
             "compress",
-            json!({"paths": ["src/main.ts", "src/ui.ts"], "budget": 4096}),
+            &json!({"paths": ["src/main.ts", "src/ui.ts"], "budget": 4096}),
+            ToolStatus::Running,
+            120,
         );
+        let lines: Vec<String> = lines.iter().map(line_text).collect();
         assert!(
             lines[0].starts_with(&format!(
                 "{}compress src/main.ts, src/ui.ts",
@@ -1702,7 +1763,7 @@ mod tests {
             "got {:?}",
             lines[0]
         );
-        assert!(lines[1].contains("budget=4096"), "got {lines:?}");
+        assert_eq!(lines.len(), 1, "got {lines:?}");
     }
 
     #[test]
@@ -2201,8 +2262,15 @@ mod tests {
     #[test]
     fn thinking_entry_uses_tool_header_layout() {
         let theme = Theme::default();
-        let line =
-            render_thinking_entry_with_config(true, 80, &theme, &PixConfig::default()).remove(0);
+        let line = render_thinking_entry_with_config(
+            "private notes",
+            true,
+            false,
+            80,
+            &theme,
+            &PixConfig::default(),
+        )
+        .remove(0);
         let text = line_text(&line);
 
         assert!(text.starts_with(&nerd_completed_prefix()), "got {text:?}");
@@ -2212,5 +2280,23 @@ mod tests {
             line.spans[1].style.fg,
             Some(theme.resolve_color_ref("accent"))
         );
+    }
+
+    #[test]
+    fn expanded_thinking_entry_renders_indented_body_lines() {
+        let theme = Theme::default();
+        let lines = render_thinking_entry_with_config(
+            "step one\n\nstep two",
+            true,
+            true,
+            80,
+            &theme,
+            &PixConfig::default(),
+        );
+        let texts: Vec<String> = lines.iter().map(line_text).collect();
+
+        assert_eq!(texts[0], format!("{}thinking", nerd_completed_prefix()));
+        assert!(texts[1].starts_with("  step one"), "got {texts:?}");
+        assert!(texts.iter().any(|line| line.starts_with("  step two")), "got {texts:?}");
     }
 }

@@ -30,7 +30,7 @@ test("lazy session manager exposes the tail branch and reads older entries on de
 	}
 	await writeFile(sessionPath, `${lines.join("\n")}\n`, "utf8");
 
-	const manager = openLazySessionManager(sessionPath, { cwdOverride: dir, tailEntryCount: 5 });
+	const manager = await openLazySessionManager(sessionPath, { cwdOverride: dir, tailEntryCount: 5 });
 
 	assert.deepEqual(
 		manager.getBranch().filter((entry) => entry.type === "message").map((entry) => entry.id),

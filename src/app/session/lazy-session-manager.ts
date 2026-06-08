@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { appendFileSync, closeSync, createReadStream, existsSync, mkdirSync, openSync, readSync, statSync, writeFileSync } from "node:fs";
-import { open as openFile } from "node:fs/promises";
+import { appendFileSync, createReadStream, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdir, open as openFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 
@@ -31,8 +31,8 @@ export type LazySessionHistoryReader = {
 	readOlder(limit: number): Promise<SessionEntry[]>;
 };
 
-export function openLazySessionManager(sessionPath: string, options: LazySessionManagerOptions = {}): SessionManager {
-	return new LazySessionManager(sessionPath, options) as unknown as SessionManager;
+export async function openLazySessionManager(sessionPath: string, options: LazySessionManagerOptions = {}): Promise<SessionManager> {
+	return await LazySessionManager.open(sessionPath, options) as unknown as SessionManager;
 }
 
 class LazySessionManager {
@@ -53,9 +53,20 @@ class LazySessionManager {
 		this.sessionFilePath = resolve(sessionPath);
 		this.sessionDirPath = resolve(options.sessionDir ?? dirname(this.sessionFilePath));
 		this.tailEntryCount = Math.max(1, Math.floor(options.tailEntryCount ?? DEFAULT_TAIL_ENTRY_COUNT));
-		this.header = this.loadHeader(options.cwdOverride);
-		this.cwdPath = resolve(options.cwdOverride ?? this.header.cwd ?? process.cwd());
-		this.loadTailEntries();
+		this.cwdPath = resolve(options.cwdOverride ?? process.cwd());
+		this.header = createSessionHeader(this.cwdPath);
+	}
+
+	static async open(sessionPath: string, options: LazySessionManagerOptions = {}): Promise<LazySessionManager> {
+		const manager = new LazySessionManager(sessionPath, options);
+		await manager.initialize(options.cwdOverride);
+		return manager;
+	}
+
+	private async initialize(cwdOverride: string | undefined): Promise<void> {
+		this.header = await this.loadHeaderAsync(cwdOverride);
+		this.cwdPath = resolve(cwdOverride ?? this.header.cwd ?? process.cwd());
+		await this.loadTailEntriesAsync();
 	}
 
 	setSessionFile(sessionFile: string): void {
@@ -66,9 +77,7 @@ class LazySessionManager {
 
 		this.sessionFilePath = resolve(sessionFile);
 		this.sessionDirPath = dirname(this.sessionFilePath);
-		this.header = this.loadHeader(this.cwdPath);
-		this.cwdPath = resolve(this.header.cwd || this.cwdPath);
-		this.loadTailEntries();
+		throw new Error("LazySessionManager.setSessionFile() before hydration is unsupported");
 	}
 
 	newSession(options?: NewSessionOptions): string | undefined {
@@ -141,14 +150,23 @@ class LazySessionManager {
 		if (this.hydrated || this.tailStartOffset <= 0) return undefined;
 
 		let cursorOffset = this.tailStartOffset;
-		const firstEntryOffset = readFirstSessionEntryOffset(this.sessionFilePath);
+		let firstEntryOffset = 0;
+		let firstEntryOffsetPromise: Promise<number> | undefined;
+		const loadFirstEntryOffset = async (): Promise<number> => {
+			firstEntryOffsetPromise ??= readFirstSessionEntryOffset(this.sessionFilePath).then((offset) => {
+				firstEntryOffset = offset;
+				return offset;
+			});
+			return await firstEntryOffsetPromise;
+		};
 		return {
 			hasOlder: () => cursorOffset > firstEntryOffset,
 			readOlder: async (limit: number) => {
-				if (cursorOffset <= firstEntryOffset) return [];
+				const resolvedFirstEntryOffset = await loadFirstEntryOffset();
+				if (cursorOffset <= resolvedFirstEntryOffset) return [];
 				const result = await readSessionEntriesBeforeOffset(this.sessionFilePath, cursorOffset, Math.max(1, Math.floor(limit)));
 				cursorOffset = result.startOffset;
-				if (result.entries.length === 0) cursorOffset = firstEntryOffset;
+				if (result.entries.length === 0) cursorOffset = resolvedFirstEntryOffset;
 				return result.entries;
 			},
 		};
@@ -293,20 +311,18 @@ class LazySessionManager {
 		return this.hydrated;
 	}
 
-	private loadHeader(cwdOverride: string | undefined): SessionHeader {
-		if (!existsSync(this.sessionFilePath)) {
-			mkdirSync(dirname(this.sessionFilePath), { recursive: true });
-			const header = createSessionHeader(resolve(cwdOverride ?? process.cwd()));
-			writeFileSync(this.sessionFilePath, `${JSON.stringify(header)}\n`, "utf8");
-			return header;
-		}
+	private async loadHeaderAsync(cwdOverride: string | undefined): Promise<SessionHeader> {
+		const existingHeader = await readSessionHeaderFast(this.sessionFilePath);
+		if (existingHeader) return existingHeader;
 
-		const header = readSessionHeaderFast(this.sessionFilePath);
-		return header ?? createSessionHeader(resolve(cwdOverride ?? process.cwd()));
+		await mkdir(dirname(this.sessionFilePath), { recursive: true });
+		const header = createSessionHeader(resolve(cwdOverride ?? process.cwd()));
+		await writeFile(this.sessionFilePath, `${JSON.stringify(header)}\n`, "utf8");
+		return header;
 	}
 
-	private loadTailEntries(): void {
-		const result = readTailSessionEntries(this.sessionFilePath, this.tailEntryCount);
+	private async loadTailEntriesAsync(): Promise<void> {
+		const result = await readTailSessionEntries(this.sessionFilePath, this.tailEntryCount);
 		this.entries = result.entries;
 		this.tailStartOffset = result.startOffset;
 		this.rebuildIndexes();
@@ -384,8 +400,8 @@ function createSessionId(): string {
 	return randomUUID();
 }
 
-function readSessionHeaderFast(filePath: string): SessionHeader | undefined {
-	const line = readFirstLine(filePath, 64 * 1024);
+async function readSessionHeaderFast(filePath: string): Promise<SessionHeader | undefined> {
+	const line = await readFirstLine(filePath, 64 * 1024);
 	if (!line) return undefined;
 	try {
 		const parsed = JSON.parse(line) as unknown;
@@ -397,33 +413,33 @@ function readSessionHeaderFast(filePath: string): SessionHeader | undefined {
 	}
 }
 
-function readFirstLine(filePath: string, maxBytes: number): string | undefined {
-	let fd: number | undefined;
+async function readFirstLine(filePath: string, maxBytes: number): Promise<string | undefined> {
+	let file: Awaited<ReturnType<typeof openFile>> | undefined;
 	try {
-		fd = openSync(filePath, "r");
+		file = await openFile(filePath, "r");
 		const buffer = Buffer.alloc(maxBytes);
-		const bytesRead = readSync(fd, buffer, 0, buffer.length, 0);
+		const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
 		const text = buffer.toString("utf8", 0, bytesRead);
 		return text.split("\n")[0];
 	} catch {
 		return undefined;
 	} finally {
-		if (fd !== undefined) closeSync(fd);
+		await file?.close();
 	}
 }
 
-function readFirstSessionEntryOffset(filePath: string): number {
-	let fd: number | undefined;
+async function readFirstSessionEntryOffset(filePath: string): Promise<number> {
+	let file: Awaited<ReturnType<typeof openFile>> | undefined;
 	try {
-		fd = openSync(filePath, "r");
+		file = await openFile(filePath, "r");
 		const buffer = Buffer.alloc(64 * 1024);
-		const bytesRead = readSync(fd, buffer, 0, buffer.length, 0);
+		const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
 		const entries = parseSessionEntryBufferLines(buffer.subarray(0, bytesRead), 0);
 		return entries[0]?.offset ?? 0;
 	} catch {
 		return 0;
 	} finally {
-		if (fd !== undefined) closeSync(fd);
+		await file?.close();
 	}
 }
 
@@ -432,15 +448,14 @@ type SessionEntriesReadResult = {
 	startOffset: number;
 };
 
-function readTailSessionEntries(filePath: string, limit: number): SessionEntriesReadResult {
-	if (!existsSync(filePath)) return { entries: [], startOffset: 0 };
-	const size = statSync(filePath).size;
+async function readTailSessionEntries(filePath: string, limit: number): Promise<SessionEntriesReadResult> {
+	const size = await stat(filePath).then((result) => result.size).catch(() => 0);
 	if (size <= 0) return { entries: [], startOffset: 0 };
 
 	let byteCount = Math.min(size, INITIAL_TAIL_BYTES);
 	const maxBytes = Math.min(size, MAX_TAIL_BYTES);
 	while (byteCount <= maxBytes) {
-		const result = readTailSessionEntriesWithByteCount(filePath, byteCount, limit);
+		const result = await readTailSessionEntriesWithByteCount(filePath, byteCount, limit, size);
 		if (result.entries.length >= limit || byteCount >= maxBytes || byteCount >= size) return result;
 		byteCount = Math.min(size, Math.max(byteCount + 1, byteCount * 2));
 	}
@@ -448,14 +463,13 @@ function readTailSessionEntries(filePath: string, limit: number): SessionEntries
 	return { entries: [], startOffset: 0 };
 }
 
-function readTailSessionEntriesWithByteCount(filePath: string, byteCount: number, limit: number): SessionEntriesReadResult {
-	let fd: number | undefined;
+async function readTailSessionEntriesWithByteCount(filePath: string, byteCount: number, limit: number, size: number): Promise<SessionEntriesReadResult> {
+	let file: Awaited<ReturnType<typeof openFile>> | undefined;
 	try {
-		const size = statSync(filePath).size;
 		const start = Math.max(0, size - byteCount);
 		const buffer = Buffer.alloc(size - start);
-		fd = openSync(filePath, "r");
-		readSync(fd, buffer, 0, buffer.length, start);
+		file = await openFile(filePath, "r");
+		await file.read(buffer, 0, buffer.length, start);
 
 		let parseStart = 0;
 		if (start > 0) {
@@ -467,12 +481,14 @@ function readTailSessionEntriesWithByteCount(filePath: string, byteCount: number
 	} catch {
 		return { entries: [], startOffset: 0 };
 	} finally {
-		if (fd !== undefined) closeSync(fd);
+		await file?.close();
 	}
 }
 
 async function readSessionEntriesBeforeOffset(filePath: string, endOffset: number, limit: number): Promise<SessionEntriesReadResult> {
-	if (!existsSync(filePath) || endOffset <= 0) return { entries: [], startOffset: 0 };
+	if (endOffset <= 0) return { entries: [], startOffset: 0 };
+	const exists = await stat(filePath).then(() => true).catch(() => false);
+	if (!exists) return { entries: [], startOffset: 0 };
 
 	let byteCount = Math.min(endOffset, INITIAL_TAIL_BYTES);
 	const maxBytes = Math.min(endOffset, MAX_TAIL_BYTES);

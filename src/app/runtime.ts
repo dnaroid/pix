@@ -327,7 +327,7 @@ export async function createPixRuntime(options: AppOptions, runtimeOptions: Crea
 		sessionManager: options.noSession
 			? SessionManager.inMemory(options.cwd)
 			: options.sessionPath
-				? openLazySessionManager(options.sessionPath, { cwdOverride: options.cwd })
-			: SessionManager.create(options.cwd),
+				? await openLazySessionManager(options.sessionPath, { cwdOverride: options.cwd })
+				: SessionManager.create(options.cwd),
 	});
 }

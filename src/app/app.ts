@@ -624,6 +624,7 @@ export class PiUiExtendApp {
 				statusLineRenderer: this.statusLineRenderer,
 				tabLineRenderer: this.tabLineRenderer,
 				toastController: this.toastController,
+				loadingConversationOverlayText: () => this.tabsController.isSwitching() ? "Loading…" : undefined,
 				voiceProgressOverlayText: () => this.voiceController.progressOverlayText(),
 			},
 		);

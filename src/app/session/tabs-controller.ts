@@ -75,6 +75,7 @@ export class AppTabsController {
 	private readonly tabItems: SessionTab[] = [];
 	private readonly runtimesByTabId = new Map<string, AgentSessionRuntime>();
 	private readonly runtimeSubscriptionsByTabId = new Map<string, { runtime: AgentSessionRuntime; session: AgentSession; unsubscribe: () => void }>();
+	private readonly runtimeRefreshTimersByTabId = new Map<string, Set<ReturnType<typeof setTimeout>>>();
 	private readonly inputStatesByTabId = new Map<string, TabInputState>();
 	private readonly deferredUserMessagesByTabId = new Map<string, SubmittedUserMessage[]>();
 	private activeTabId: string | undefined;
@@ -306,29 +307,67 @@ export class AppTabsController {
 		this.syncActiveTabFromRuntime();
 		this.storeActiveInputState();
 		this.storeActiveDeferredUserMessages();
-		this.host.setStatus("starting new tab");
-		this.host.render();
-
-		const newRuntime = await this.host.createRuntimeForNewSession();
-		const existingTab = this.findTabForSession(newRuntime.session);
-		const tab = existingTab ?? this.tabFromSession(newRuntime.session, { titlePlaceholder: "new" });
-		if (!existingTab) this.tabItems.push(tab);
+		const previousTabId = this.activeTabId;
+		const previousRuntime = runtime;
+		const tab: SessionTab = {
+			id: createId("tab"),
+			title: "new",
+			titlePlaceholder: "new",
+			status: "active",
+			activity: "thinking",
+		};
+		this.tabItems.push(tab);
 		this.activeTabId = tab.id;
 		this.pendingActiveTabId = tab.id;
 		this.clearTabAttention(tab);
-		this.updateTabFromSession(tab, newRuntime.session);
-		this.setRuntimeForTab(tab.id, newRuntime);
 		this.restoreInputState(tab.id);
 		this.host.closeMenusForTabSwitch?.();
+		this.host.resetSessionView();
+		this.restoreDeferredUserMessages(tab.id);
+		this.host.setSessionActivity("thinking");
+		this.host.setStatus("starting new tab");
+		this.host.render();
+
+		let newRuntime: AgentSessionRuntime;
+		try {
+			newRuntime = await this.host.createRuntimeForNewSession();
+		} catch (error) {
+			if (this.pendingActiveTabId === tab.id) this.pendingActiveTabId = undefined;
+			this.removeTab(tab.id);
+			this.activeTabId = previousTabId;
+			if (previousTabId) this.restoreInputState(previousTabId);
+			this.host.closeMenusForTabSwitch?.();
+			this.host.resetSessionView();
+			if (previousTabId) this.restoreDeferredUserMessages(previousTabId);
+			this.host.loadSessionHistory();
+			this.host.setSessionStatus(previousRuntime.session);
+			this.host.setSessionActivity(this.sessionActivity(previousRuntime.session));
+			this.host.render();
+			throw error;
+		}
+
+		const existingTab = this.findTabForSession(newRuntime.session);
+		const targetTab = existingTab && existingTab.id !== tab.id ? existingTab : tab;
+		if (targetTab !== tab) this.removeTab(tab.id);
+		this.activeTabId = targetTab.id;
+		this.pendingActiveTabId = targetTab.id;
+		this.clearTabAttention(targetTab);
+		this.updateTabFromSession(targetTab, newRuntime.session);
+		this.setRuntimeForTab(targetTab.id, newRuntime);
+		this.restoreInputState(targetTab.id);
+		this.host.resetSessionView();
+		this.restoreDeferredUserMessages(targetTab.id);
+		this.host.setSessionActivity("thinking");
+		this.host.render();
 		try {
 			await this.host.activateRuntime(newRuntime);
 		} finally {
-			if (this.pendingActiveTabId === tab.id) this.pendingActiveTabId = undefined;
+			if (this.pendingActiveTabId === targetTab.id) this.pendingActiveTabId = undefined;
 		}
 		void this.saveTabs();
 		this.scheduleProjectSessionRetention();
 		this.host.resetSessionView();
-		this.restoreDeferredUserMessages(tab.id);
+		this.restoreDeferredUserMessages(targetTab.id);
 		if (isEmptyStartupSession(newRuntime)) {
 			this.host.addEntry({ id: createId("system"), kind: "system", text: createStartupInfoMessage(newRuntime) });
 		} else {
@@ -392,6 +431,10 @@ export class AppTabsController {
 		this.setRuntimeForTab(tab.id, newRuntime);
 		this.restoreInputState(tab.id);
 		this.host.closeMenusForTabSwitch?.();
+		this.host.resetSessionView();
+		this.restoreDeferredUserMessages(tab.id);
+		this.host.setSessionActivity("thinking");
+		this.host.render();
 
 		try {
 			await this.host.activateRuntime(newRuntime);
@@ -502,6 +545,10 @@ export class AppTabsController {
 		if (result.selectedText) this.inputStatesByTabId.set(tab.id, this.inputStateFromText(result.selectedText));
 		this.restoreInputState(tab.id);
 		this.host.closeMenusForTabSwitch?.();
+		this.host.resetSessionView();
+		this.restoreDeferredUserMessages(tab.id);
+		this.host.setSessionActivity("thinking");
+		this.host.render();
 
 		try {
 			await this.host.activateRuntime(forkRuntime);
@@ -821,12 +868,16 @@ export class AppTabsController {
 
 	private deleteRuntimeForTab(tabId: string): void {
 		this.runtimesByTabId.delete(tabId);
+		this.clearRuntimeRefreshTimers(tabId);
 		const subscription = this.runtimeSubscriptionsByTabId.get(tabId);
 		subscription?.unsubscribe();
 		this.runtimeSubscriptionsByTabId.delete(tabId);
 	}
 
 	private clearRuntimeSubscriptions(): void {
+		for (const tabId of this.runtimeRefreshTimersByTabId.keys()) {
+			this.clearRuntimeRefreshTimers(tabId);
+		}
 		for (const subscription of this.runtimeSubscriptionsByTabId.values()) {
 			subscription.unsubscribe();
 		}
@@ -839,6 +890,9 @@ export class AppTabsController {
 		existing?.unsubscribe();
 
 		const unsubscribe = runtime.session.subscribe((event) => {
+			if (this.shouldScheduleDelayedSyncForRuntimeEvent(event)) {
+				this.scheduleDelayedRuntimeSync(tabId, runtime);
+			}
 			if (!this.shouldSyncTabFromRuntimeEvent(event)) return;
 			this.syncTabFromObservedRuntime(tabId, runtime);
 		});
@@ -851,6 +905,36 @@ export class AppTabsController {
 			|| event.type === "agent_end"
 			|| event.type === "compaction_start"
 			|| event.type === "compaction_end";
+	}
+
+	private shouldScheduleDelayedSyncForRuntimeEvent(event: AgentSessionEvent): boolean {
+		return event.type === "agent_end"
+			|| event.type === "turn_end"
+			|| event.type === "compaction_end";
+	}
+
+	private scheduleDelayedRuntimeSync(tabId: string, runtime: AgentSessionRuntime): void {
+		this.clearRuntimeRefreshTimers(tabId);
+		for (const delayMs of [0, 100, 500, 1500, 3000]) {
+			const timer = setTimeout(() => {
+				this.runtimeRefreshTimersByTabId.get(tabId)?.delete(timer);
+				this.syncTabFromObservedRuntime(tabId, runtime);
+			}, delayMs);
+			timer.unref?.();
+			let timers = this.runtimeRefreshTimersByTabId.get(tabId);
+			if (!timers) {
+				timers = new Set();
+				this.runtimeRefreshTimersByTabId.set(tabId, timers);
+			}
+			timers.add(timer);
+		}
+	}
+
+	private clearRuntimeRefreshTimers(tabId: string): void {
+		const timers = this.runtimeRefreshTimersByTabId.get(tabId);
+		if (!timers) return;
+		for (const timer of timers) clearTimeout(timer);
+		this.runtimeRefreshTimersByTabId.delete(tabId);
 	}
 
 	private syncTabFromObservedRuntime(tabId: string, runtime: AgentSessionRuntime): void {

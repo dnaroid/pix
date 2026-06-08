@@ -275,7 +275,8 @@ pub fn tabs_line(
     current_id: Option<&str>,
     current_name: Option<&str>,
 ) -> Line<'static> {
-    tabs_layout(state, theme, width, current_path, current_id, current_name).top
+    tabs_layout(state, theme, width, current_path, current_id, current_name, None, None)
+    .top
 }
 
 pub fn tabs_layout(
@@ -285,24 +286,31 @@ pub fn tabs_layout(
     current_path: Option<&str>,
     current_id: Option<&str>,
     current_name: Option<&str>,
+    loading_path: Option<&str>,
+    pending_new_tab_label: Option<&str>,
 ) -> TabLineLayout {
     let max_width = if width == 0 { usize::MAX } else { width };
     let mut spans = Vec::new();
     let mut targets = Vec::new();
     let mut separator_columns = Vec::new();
     let separator_width = UnicodeWidthStr::width(TAB_SEPARATOR);
+    let pending_new_tab = pending_new_tab_label.filter(|label| !label.trim().is_empty());
+    let has_pending_new_tab = pending_new_tab.is_some();
 
     let current_resolved = current_path.map(|path| path.to_string());
-    let mut labels: Vec<(String, Option<String>, bool)> = state
+    let mut labels: Vec<(String, Option<String>, bool, bool)> = state
         .tabs
         .iter()
         .map(|tab| {
-            let active = state.active_path.as_deref() == Some(tab.path.as_str())
-                || current_resolved.as_deref() == Some(tab.path.as_str());
+            let active = !has_pending_new_tab
+                && (state.active_path.as_deref() == Some(tab.path.as_str())
+                    || current_resolved.as_deref() == Some(tab.path.as_str()));
+            let loading = !has_pending_new_tab && loading_path == Some(tab.path.as_str());
             (
                 tab_label(tab, current_id, current_name),
                 Some(tab.path.clone()),
                 active,
+                loading,
             )
         })
         .collect();
@@ -311,8 +319,13 @@ pub fn tabs_layout(
         labels.push((
             current_session_label(current_name, current_id),
             current_resolved,
-            true,
+            !has_pending_new_tab,
+            !has_pending_new_tab && loading_path.is_some(),
         ));
+    }
+
+    if let Some(label) = pending_new_tab {
+        labels.push((label.trim().to_string(), None, true, true));
     }
 
     let tabs_count = labels.len();
@@ -327,7 +340,7 @@ pub fn tabs_layout(
     let tabs_width = max_width.saturating_sub(new_tab_width + new_tab_prefix_width);
     let natural_buttons: Vec<String> = labels
         .iter()
-        .map(|(label, _, _)| button_text(label, None))
+        .map(|(label, _, _, loading)| button_text(label, None, *loading))
         .collect();
     let natural_width = natural_buttons
         .iter()
@@ -347,7 +360,7 @@ pub fn tabs_layout(
     };
 
     let mut display_column = 1usize;
-    for (idx, (label, path, active)) in labels.iter().enumerate() {
+    for (idx, (label, path, active, loading)) in labels.iter().enumerate() {
         if idx > 0 {
             separator_columns.push(display_column + 1);
             spans.push(Span::styled(
@@ -357,7 +370,7 @@ pub fn tabs_layout(
             display_column += separator_width;
         }
 
-        let button = button_text(label, button_max_width);
+        let button = button_text(label, button_max_width, *loading);
         let button_width = UnicodeWidthStr::width(button.as_str());
         let close_width = UnicodeWidthStr::width(CLOSE_ICON);
         let close_start = display_column + button_width.saturating_sub(close_width);
@@ -375,7 +388,7 @@ pub fn tabs_layout(
             start_column: display_column,
             end_column: display_column + button_width,
         });
-        spans.extend(button_spans(theme, &button, *active));
+        spans.extend(button_spans(theme, &button, *active, *loading));
         display_column += button_width;
     }
 
@@ -420,7 +433,7 @@ pub fn tabs_layout(
     }
 }
 
-fn button_spans(theme: &Theme, button: &str, active: bool) -> Vec<Span<'static>> {
+fn button_spans(theme: &Theme, button: &str, active: bool, _loading: bool) -> Vec<Span<'static>> {
     let title_style = if active {
         theme
             .style_for(ThemeRole::SessionAccent)
@@ -433,8 +446,9 @@ fn button_spans(theme: &Theme, button: &str, active: bool) -> Vec<Span<'static>>
     let rest: String = chars.collect();
     let close_index = rest.rfind(CLOSE_ICON).unwrap_or(rest.len());
     let (title, close_and_after) = rest.split_at(close_index);
+    let status_style = theme.style_for(ThemeRole::StatusDim);
     vec![
-        Span::styled(status, theme.style_for(ThemeRole::StatusDim)),
+        Span::styled(status, status_style),
         Span::styled(title.to_string(), title_style),
         Span::styled(
             close_and_after.to_string(),
@@ -443,8 +457,9 @@ fn button_spans(theme: &Theme, button: &str, active: bool) -> Vec<Span<'static>>
     ]
 }
 
-fn button_text(label: &str, max_width: Option<usize>) -> String {
-    let prefix = format!("{CHECK_ICON} ");
+fn button_text(label: &str, max_width: Option<usize>, _loading: bool) -> String {
+    let status_icon = CHECK_ICON;
+    let prefix = format!("{status_icon} ");
     let suffix = format!(" {CLOSE_ICON}");
     let natural = format!("{prefix}{label}{suffix}");
     let Some(max_width) = max_width else {
@@ -701,6 +716,8 @@ mod tests {
             Some("/tmp/a.jsonl"),
             Some("aaaaaaaa"),
             Some("Alpha"),
+            None,
+            None,
         );
         let top: String = layout
             .top
@@ -729,6 +746,85 @@ mod tests {
             .targets
             .iter()
             .any(|target| target.kind == TabTargetKind::NewTab));
+    }
+
+    #[test]
+    fn tabs_line_keeps_check_icon_for_loading_tab() {
+        let theme = Theme::by_name("default");
+        let state = TabsState {
+            version: 2,
+            cwd: "/tmp/ws".to_string(),
+            tabs: vec![OpenTab {
+                path: "/tmp/a.jsonl".to_string(),
+                session_id: Some("abcdef12".to_string()),
+                name: Some("Alpha".to_string()),
+                draft: None,
+            }],
+            active_path: Some("/tmp/a.jsonl".to_string()),
+        };
+
+        let line = tabs_layout(
+            &state,
+            &theme,
+            80,
+            Some("/tmp/a.jsonl"),
+            Some("abcdef12"),
+            Some("Alpha"),
+            Some("/tmp/a.jsonl"),
+            None,
+        )
+        .top;
+        let text: String = line
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect();
+
+        assert!(text.contains(&format!("{CHECK_ICON} Alpha")));
+        assert!(!text.contains("… Alpha"));
+    }
+
+    #[test]
+    fn tabs_layout_appends_pending_new_tab_as_active() {
+        let theme = Theme::by_name("default");
+        let state = TabsState {
+            version: 2,
+            cwd: "/tmp/ws".to_string(),
+            tabs: vec![OpenTab {
+                path: "/tmp/a.jsonl".to_string(),
+                session_id: Some("abcdef12".to_string()),
+                name: Some("Alpha".to_string()),
+                draft: None,
+            }],
+            active_path: Some("/tmp/a.jsonl".to_string()),
+        };
+
+        let layout = tabs_layout(
+            &state,
+            &theme,
+            80,
+            None,
+            None,
+            None,
+            None,
+            Some("new"),
+        );
+        let top: String = layout
+            .top
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect();
+
+        assert!(top.contains(&format!("{CHECK_ICON} Alpha {CLOSE_ICON} │ {CHECK_ICON} new {CLOSE_ICON}")));
+        assert!(layout.targets.iter().any(|target| {
+            target.kind == TabTargetKind::Tab && target.active && target.path.is_none()
+        }));
+        assert!(!layout.targets.iter().any(|target| {
+            target.kind == TabTargetKind::Tab
+                && target.path.as_deref() == Some("/tmp/a.jsonl")
+                && target.active
+        }));
     }
 
     #[test]

@@ -7,6 +7,7 @@ pub mod clipboard;
 pub mod clipboard_image;
 pub mod context_bar;
 pub mod enhancer;
+pub mod file_link_opener;
 pub mod input_editor;
 pub mod links;
 pub mod markdown;

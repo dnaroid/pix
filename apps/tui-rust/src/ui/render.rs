@@ -16,7 +16,7 @@
 //! - Stash the resulting `line_count` / `body_height` on the app so the
 //!   input handler can translate PageUp/PageDown without re-measuring.
 
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block as RBlock, Borders, Clear, List, ListItem, Paragraph};
@@ -39,8 +39,8 @@ const COMPACT_PROGRESS_BAR_PARTIALS: [char; 7] = ['▏', '▎', '▍', '▌', '�
 /// `cont_prefix`. Kept centralised so render_input and the editor's
 /// `render()` agree, and exposed for the mouse resolver so it can map
 /// a click column back to a visual position with the same offset.
-pub const INPUT_FIRST_PREFIX: &str = "❯ ";
-pub const INPUT_CONT_PREFIX: &str = "  ";
+pub const INPUT_FIRST_PREFIX: &str = "";
+pub const INPUT_CONT_PREFIX: &str = "";
 
 pub fn render(f: &mut Frame, app: &mut App) {
     app.refresh_theme_cache();
@@ -150,6 +150,8 @@ fn render_session_tabs(f: &mut Frame, app: &App, area: Rect) {
         app.session_file.as_deref(),
         app.session_id.as_deref(),
         app.session_name.as_deref(),
+        app.loading_runtime_key.as_deref(),
+        app.pending_new_tab.then_some("new"),
     );
     let lines = if area.height > 1 {
         vec![layout.top, layout.bottom]
@@ -353,6 +355,24 @@ fn render_conversation(f: &mut Frame, app: &mut App, area: Rect) {
         .collect();
     f.render_widget(Clear, area);
     f.render_widget(List::new(items), area);
+
+    if app.is_runtime_loading(app.session_file.as_deref()) && total == 0 {
+        render_loading_overlay(f, app, area);
+    }
+}
+
+fn render_loading_overlay(f: &mut Frame, app: &App, area: Rect) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    let row = Rect::new(area.x, area.y + area.height / 2, area.width, 1);
+    let loading = Paragraph::new(Line::from(Span::styled(
+        "Loading…",
+        app.theme_cache.style_for(ThemeRole::StatusDim),
+    )))
+    .alignment(Alignment::Center);
+    f.render_widget(loading, row);
 }
 
 fn normalize_and_fill_line(line: Line<'static>, width: usize) -> Line<'static> {
@@ -459,35 +479,8 @@ fn toast_bg(theme: &super::theme::Theme, level: super::toast::ToastLevel) -> Col
 }
 
 fn render_input(f: &mut Frame, app: &mut App, area: Rect, rendered: RenderedInput) {
-    let title = build_input_title(app);
-    let border = if app.is_streaming {
-        app.theme_cache.style_for(ThemeRole::InputBorderBusy)
-    } else {
-        app.theme_cache.style_for(ThemeRole::InputBorder)
-    };
-    let input_block = RBlock::default()
-        .borders(Borders::ALL)
-        .border_style(border)
-        .title(Span::styled(
-            title,
-            app.theme_cache.style_for(ThemeRole::StatusDim),
-        ));
-
-    // Build the paragraph text by joining the visible visual rows with
-    // newlines. We slice by `scroll_offset..scroll_offset+area.height-2`
-    // so the editor's auto-scroll is respected.
-    let body_height = area.height.saturating_sub(2) as usize;
-    let start = rendered.scroll_offset;
-    let end = (start + body_height).min(rendered.visual_lines.len());
-    let mut lines: Vec<Line<'static>> = rendered.visual_lines[start..end]
-        .iter()
-        .map(|v| styled_input_line(app, &v.text))
-        .collect();
-    if app.input.is_empty() && !app.input.has_attachments() && !lines.is_empty() {
-        lines[0] = placeholder_input_line(app);
-    }
-    let para = Paragraph::new(lines).block(input_block);
-    f.render_widget(para, area);
+    let lines = build_input_lines(app, &rendered, area.width as usize, area.height as usize);
+    f.render_widget(Paragraph::new(lines), area);
 
     // Place the cursor.
     if rendered.cursor_visible {
@@ -504,20 +497,73 @@ fn render_input(f: &mut Frame, app: &mut App, area: Rect, rendered: RenderedInpu
     }
 }
 
-fn placeholder_input_line(app: &App) -> Line<'static> {
-    Line::from(vec![
-        Span::raw(INPUT_FIRST_PREFIX.to_string()),
-        Span::styled(
-            "Type a prompt — / commands, Ctrl+H help, Ctrl+T sessions",
-            app.theme_cache.style_for(ThemeRole::StatusDim),
-        ),
-    ])
+fn build_input_lines(app: &App, rendered: &RenderedInput, area_width: usize, area_height: usize) -> Vec<Line<'static>> {
+    let body_width = area_width.saturating_sub(2);
+    let body_height = area_height.saturating_sub(2);
+    let start = rendered.scroll_offset;
+    let end = (start + body_height).min(rendered.visual_lines.len());
+    let visible_visual = &rendered.visual_lines[start..end];
+    let ghost_chunks = ghost_suffix_chunks(app, rendered, body_width, body_height, start, visible_visual);
+    let scrollbar = input_scrollbar(rendered.visual_lines.len(), body_height, rendered.scroll_offset);
+
+    let mut body_lines = Vec::with_capacity(body_height);
+    for row_idx in 0..body_height {
+        let text = visible_visual
+            .get(row_idx)
+            .map(|line| line.text.as_str())
+            .unwrap_or("");
+        let ghost = ghost_chunks.get(row_idx).map(String::as_str);
+        let right_border = scrollbar_border_span(app, scrollbar.as_ref(), row_idx);
+
+        let line = if row_idx == 0 && app.input.is_empty() && !app.input.has_attachments() {
+            placeholder_input_line(app, body_width, right_border, ghost)
+        } else {
+            styled_input_line(app, text, body_width, ghost, right_border)
+        };
+        body_lines.push(line);
+    }
+
+    let mut lines = Vec::with_capacity(area_height.max(2));
+    lines.push(input_border_line(app, area_width, true));
+    lines.extend(body_lines);
+    lines.push(input_border_line(app, area_width, false));
+    lines
 }
 
-fn styled_input_line(app: &App, text: &str) -> Line<'static> {
+fn placeholder_input_line(
+    app: &App,
+    content_width: usize,
+    right_border: Span<'static>,
+    ghost_suffix: Option<&str>,
+) -> Line<'static> {
+    frame_spans(
+        app,
+        vec![Span::styled(
+            "Type a prompt — / commands, Ctrl+H help, Ctrl+T sessions".to_string(),
+            app.theme_cache.style_for(ThemeRole::StatusDim),
+        )],
+        content_width,
+        ghost_suffix,
+        right_border,
+    )
+}
+
+fn styled_input_line(
+    app: &App,
+    text: &str,
+    content_width: usize,
+    ghost_suffix: Option<&str>,
+    right_border: Span<'static>,
+) -> Line<'static> {
     let ranges = app.input.attachment_tag_ranges_for_line(text);
     if ranges.is_empty() {
-        return Line::from(Span::raw(text.to_string()));
+        return frame_spans(
+            app,
+            vec![Span::raw(text.to_string())],
+            content_width,
+            ghost_suffix,
+            right_border,
+        );
     }
     let mut spans = Vec::new();
     let mut pos = 0usize;
@@ -535,38 +581,193 @@ fn styled_input_line(app: &App, text: &str) -> Line<'static> {
     if pos < text.len() {
         spans.push(Span::raw(text[pos..].to_string()));
     }
-    Line::from(spans)
+    frame_spans(app, spans, content_width, ghost_suffix, right_border)
 }
 
-fn build_input_title(app: &App) -> String {
-    let mut title = if app.is_streaming {
-        " Input (busy · Esc stops reply · Ctrl+H help".to_string()
-    } else {
-        " Input (Enter sends · / commands · Tab completes · Ctrl+V paste/image · @path attach"
-            .to_string()
+fn frame_spans(
+    app: &App,
+    mut spans: Vec<Span<'static>>,
+    content_width: usize,
+    ghost_suffix: Option<&str>,
+    right_border: Span<'static>,
+) -> Line<'static> {
+    let border_style = input_border_style(app);
+    let mut used_width = spans_width(&spans).min(content_width);
+    if let Some(suffix) = ghost_suffix.filter(|suffix| !suffix.is_empty()) {
+        let avail = content_width.saturating_sub(used_width);
+        let ghost = take_width_chunk(suffix, avail);
+        if !ghost.is_empty() {
+            used_width += UnicodeWidthStr::width(ghost.as_str()).min(avail);
+            spans.push(Span::styled(
+                ghost,
+                app.theme_cache.style_for(ThemeRole::StatusDim),
+            ));
+        }
+    }
+    if used_width < content_width {
+        spans.push(Span::raw(" ".repeat(content_width - used_width)));
+    }
+
+    let mut framed = Vec::with_capacity(spans.len() + 2);
+    framed.push(Span::styled("│", border_style));
+    framed.extend(spans);
+    framed.push(right_border);
+    Line::from(framed)
+}
+
+fn ghost_suffix_chunks(
+    app: &App,
+    rendered: &RenderedInput,
+    content_width: usize,
+    body_height: usize,
+    start: usize,
+    visible_visual: &[super::input_editor::InputVisualLine],
+) -> Vec<String> {
+    let Some(mut suffix) = selected_autocomplete_suffix(app) else {
+        return Vec::new();
     };
-
-    title.push_str(" · ");
-    title.push_str(&app.voice.input_hint_text());
-
-    if let Some(partial) = app
-        .voice_partial_text
-        .as_deref()
-        .map(str::trim)
-        .filter(|text| !text.is_empty())
-    {
-        title.push_str(" · 🎙 ");
-        title.push_str(&compact(partial, 28));
+    if suffix.is_empty() || body_height == 0 {
+        return Vec::new();
     }
 
-    if let Some(summary) = app.input.attachment_summary() {
-        title.push_str(" · ");
-        title.push_str(&summary);
-        title.push_str(" · Del removes tag");
+    let Some(cursor_row_in_view) = rendered.cursor_visual_row.checked_sub(start) else {
+        return Vec::new();
+    };
+    if cursor_row_in_view >= body_height {
+        return Vec::new();
     }
 
-    title.push_str(") ");
-    title
+    let mut chunks = vec![String::new(); body_height];
+    for row_idx in cursor_row_in_view..body_height {
+        if suffix.is_empty() {
+            break;
+        }
+        let used_width = if row_idx == cursor_row_in_view {
+            visible_visual
+                .get(row_idx)
+                .map(|line| UnicodeWidthStr::width(line.text.as_str()).min(content_width))
+                .unwrap_or(0)
+        } else {
+            0
+        };
+        let avail = content_width.saturating_sub(used_width);
+        if avail == 0 {
+            continue;
+        }
+        let chunk = take_width_chunk(&suffix, avail);
+        if chunk.is_empty() {
+            break;
+        }
+        let chunk_len = chunk.len();
+        chunks[row_idx] = chunk;
+        suffix.drain(..chunk_len);
+    }
+    chunks
+}
+
+fn selected_autocomplete_suffix(app: &App) -> Option<String> {
+    let trigger = app.autocomplete.trigger.as_ref()?;
+    let suggestion = app.autocomplete.selected_suggestion()?;
+    let text = app.input.text();
+    let cursor = app.input.cursor();
+    if cursor != text.len() || trigger.replace_end != cursor || trigger.replace_start > cursor {
+        return None;
+    }
+    let typed = &text[trigger.replace_start..cursor];
+    suggestion
+        .replace_text
+        .strip_prefix(typed)
+        .filter(|suffix| !suffix.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn take_width_chunk(text: &str, width: usize) -> String {
+    if text.is_empty() || width == 0 {
+        return String::new();
+    }
+    let mut end = 0usize;
+    let mut used = 0usize;
+    for (idx, ch) in text.char_indices() {
+        let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if used + ch_width > width {
+            break;
+        }
+        used += ch_width;
+        end = idx + ch.len_utf8();
+    }
+    text[..end].to_string()
+}
+
+#[derive(Debug, Clone, Copy)]
+struct InputScrollbar {
+    top: usize,
+    height: usize,
+}
+
+fn input_scrollbar(total_rows: usize, body_height: usize, scroll_offset: usize) -> Option<InputScrollbar> {
+    if body_height == 0 || total_rows <= body_height {
+        return None;
+    }
+    let thumb_height = ((body_height * body_height) / total_rows).max(1).min(body_height);
+    let max_top = body_height.saturating_sub(thumb_height);
+    let max_scroll = total_rows.saturating_sub(body_height).max(1);
+    let top = ((scroll_offset * max_top) / max_scroll).min(max_top);
+    Some(InputScrollbar {
+        top,
+        height: thumb_height,
+    })
+}
+
+fn scrollbar_border_span(
+    app: &App,
+    scrollbar: Option<&InputScrollbar>,
+    row_idx: usize,
+) -> Span<'static> {
+    let border_style = input_border_style(app);
+    if let Some(scrollbar) = scrollbar {
+        let is_thumb = row_idx >= scrollbar.top && row_idx < scrollbar.top + scrollbar.height;
+        if is_thumb {
+            return Span::styled(
+                " ",
+                border_style.bg(app.theme_cache.color_for(ThemeRole::InputBorder)),
+            );
+        }
+    }
+    Span::styled("│", border_style)
+}
+
+fn input_border_line(app: &App, width: usize, top: bool) -> Line<'static> {
+    if width == 0 {
+        return Line::default();
+    }
+
+    let border_style = input_border_style(app);
+    if width == 1 {
+        return Line::from(Span::styled(if top { "╭" } else { "╰" }, border_style));
+    }
+
+    let left = if top { "╭" } else { "╰" };
+    let right = if top { "╮" } else { "╯" };
+    Line::from(vec![
+        Span::styled(left, border_style),
+        Span::styled("─".repeat(width.saturating_sub(2)), border_style),
+        Span::styled(right, border_style),
+    ])
+}
+
+fn input_border_style(app: &App) -> Style {
+    if app.is_streaming {
+        app.theme_cache.style_for(ThemeRole::InputBorderBusy)
+    } else {
+        app.theme_cache.style_for(ThemeRole::InputBorder)
+    }
+}
+
+fn spans_width(spans: &[Span<'_>]) -> usize {
+    spans
+        .iter()
+        .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
+        .sum()
 }
 
 fn attachment_tag_style(app: &App, tag_text: &str) -> Style {
@@ -668,7 +869,12 @@ mod tests {
     #[test]
     fn placeholder_line_mentions_commands_and_help() {
         let app = App::new("/tmp".to_string());
-        let text = placeholder_input_line(&app)
+        let text = placeholder_input_line(
+            &app,
+            48,
+            Span::styled("│", input_border_style(&app)),
+            None,
+        )
             .spans
             .iter()
             .map(|span| span.content.as_ref())
@@ -681,37 +887,84 @@ mod tests {
     }
 
     #[test]
-    fn input_title_mentions_attachment_summary() {
+    fn input_lines_match_pix_style_frame() {
         let mut app = App::new("/tmp".to_string());
-        app.input.attach_image("abc", "image/png");
-        app.input.attach_pasted_text("one\ntwo");
+        app.input.set_text("hello");
+        let rendered = RenderedInput {
+            visual_lines: vec![super::super::input_editor::InputVisualLine {
+                text: "hello".to_string(),
+                wrapped: false,
+                start_offset: 0,
+                end_offset: 5,
+            }],
+            cursor_visual_row: 0,
+            cursor_screen_col: 6,
+            scroll_offset: 0,
+            cursor_visible: true,
+        };
 
-        let title = build_input_title(&app);
+        let text = build_input_lines(&app, &rendered, 12, 3)
+            .into_iter()
+            .map(|line| line.spans.into_iter().map(|span| span.content.into_owned()).collect::<String>())
+            .collect::<Vec<_>>();
 
-        assert!(title.contains("1 image · 1 paste"));
-        assert!(title.contains("Del removes tag"));
+        assert_eq!(text, vec!["╭──────────╮", "│hello     │", "╰──────────╯"]);
     }
 
     #[test]
-    fn input_title_keeps_attach_and_voice_hints_without_attachments() {
-        let app = App::new("/tmp".to_string());
-        let title = build_input_title(&app);
+    fn input_lines_show_inline_autocomplete_suffix() {
+        let mut app = App::new("/tmp".to_string());
+        app.input.set_text("/he");
+        app.refresh_autocomplete(None);
+        let rendered = RenderedInput {
+            visual_lines: vec![super::super::input_editor::InputVisualLine {
+                text: "/he".to_string(),
+                wrapped: false,
+                start_offset: 0,
+                end_offset: 3,
+            }],
+            cursor_visual_row: 0,
+            cursor_screen_col: 4,
+            scroll_offset: 0,
+            cursor_visible: true,
+        };
 
-        assert!(title.contains("/ commands"));
-        assert!(title.contains("Ctrl+V paste/image"));
-        assert!(title.contains("@path attach"));
-        assert!(title.contains("Ctrl+M"));
-        assert!(!title.contains("Del removes tag"));
+        let text = build_input_lines(&app, &rendered, 12, 3)
+            .into_iter()
+            .map(|line| line.spans.into_iter().map(|span| span.content.into_owned()).collect::<String>())
+            .collect::<Vec<_>>();
+
+        assert_eq!(text, vec!["╭──────────╮", "│/help     │", "╰──────────╯"]);
     }
 
     #[test]
-    fn input_title_shows_partial_voice_preview() {
+    fn input_lines_show_scrollbar_thumb_when_editor_overflows() {
         let mut app = App::new("/tmp".to_string());
-        app.voice_partial_text = Some("drafting the next sentence".to_string());
+        app.input.set_text("seed");
+        let lines = build_input_lines(
+            &app,
+            &RenderedInput {
+                visual_lines: (0..5)
+                    .map(|i| super::super::input_editor::InputVisualLine {
+                        text: format!("l{i}"),
+                        wrapped: i > 0,
+                        start_offset: i * 2,
+                        end_offset: i * 2 + 2,
+                    })
+                    .collect(),
+                cursor_visual_row: 4,
+                cursor_screen_col: 3,
+                scroll_offset: 2,
+                cursor_visible: true,
+            },
+            8,
+            5,
+        )
+        .into_iter()
+        .map(|line| line.spans.into_iter().map(|span| span.content.into_owned()).collect::<String>())
+        .collect::<Vec<_>>();
 
-        let title = build_input_title(&app);
-
-        assert!(title.contains("🎙 drafting the next sentence"));
+        assert_eq!(lines, vec!["╭──────╮", "│l2    │", "│l3    │", "│l4     ", "╰──────╯"]);
     }
 
     #[test]
@@ -748,5 +1001,19 @@ mod tests {
             .collect::<String>();
 
         assert_eq!(text, "abcd");
+    }
+
+    #[test]
+    fn loading_overlay_centers_label_on_middle_row() {
+        let text = centered_overlay_text(20, "Loading…");
+
+        assert_eq!(text.chars().count(), 20);
+        assert!(text.contains("Loading…"));
+        assert_eq!(text.trim(), "Loading…");
+    }
+
+    fn centered_overlay_text(width: usize, text: &str) -> String {
+        let left = width.saturating_sub(text.chars().count()) / 2;
+        format!("{}{}", " ".repeat(left), text).chars().take(width).collect::<String>().chars().chain(std::iter::repeat(' ')).take(width).collect()
     }
 }

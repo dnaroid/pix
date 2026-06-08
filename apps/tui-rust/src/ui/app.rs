@@ -49,7 +49,11 @@ pub enum Block {
         model: Option<String>,
     },
     /// Collapsed reasoning/thinking block from historical assistant content.
-    Thinking { text: String, done: bool },
+    Thinking {
+        text: String,
+        done: bool,
+        expanded: bool,
+    },
     /// A tool invocation: name, raw args, running state.
     ToolCall {
         call_id: String,
@@ -157,6 +161,8 @@ pub struct App {
     pub active_popup: Option<ActivePopup>,
 
     pub tabs: TabsState,
+    pub loading_runtime_key: Option<String>,
+    pub pending_new_tab: bool,
 
     /// Per-tab live-session snapshots. This is the first Rust-side step toward
     /// TS pix's multi-runtime tabs: conversation/session UI state is no longer
@@ -271,6 +277,8 @@ impl App {
             toasts: ToastQueue::default(),
             active_popup: None,
             tabs: TabsState::default(),
+            loading_runtime_key: None,
+            pending_new_tab: false,
             tab_runtime_snapshots: BTreeMap::new(),
             session_list: SessionListState::default(),
             session_search: SessionSearchState::default(),
@@ -427,6 +435,39 @@ impl App {
             .insert(key, TabRuntimeSnapshot::from_app(self));
     }
 
+    pub fn set_loading_runtime_key(&mut self, key: Option<String>) -> bool {
+        if self.loading_runtime_key == key {
+            return false;
+        }
+        self.loading_runtime_key = key;
+        true
+    }
+
+    pub fn clear_loading_runtime_key(&mut self, key: Option<&str>) -> bool {
+        let should_clear = match (self.loading_runtime_key.as_deref(), key) {
+            (Some(current), Some(expected)) => current == expected,
+            (Some(_), None) => true,
+            _ => false,
+        };
+        if !should_clear {
+            return false;
+        }
+        self.loading_runtime_key = None;
+        true
+    }
+
+    pub fn is_runtime_loading(&self, key: Option<&str>) -> bool {
+        self.loading_runtime_key.as_deref() == key
+    }
+
+    pub fn set_pending_new_tab(&mut self, pending: bool) -> bool {
+        if self.pending_new_tab == pending {
+            return false;
+        }
+        self.pending_new_tab = pending;
+        true
+    }
+
     pub fn restore_active_runtime_state(&mut self) -> bool {
         let Some(key) = self.active_runtime_key() else {
             return false;
@@ -498,6 +539,7 @@ impl App {
 
     pub fn remove_tab_path(&mut self, session_path: &str) {
         self.tab_runtime_snapshots.remove(session_path);
+        self.clear_loading_runtime_key(Some(session_path));
         if self.tabs.remove_path(session_path) {
             self.persist_tabs_best_effort();
         }
@@ -784,6 +826,7 @@ impl App {
             self.blocks.push(Block::Thinking {
                 text: trimmed.to_string(),
                 done: true,
+                expanded: false,
             });
         }
         text.clear();
@@ -991,6 +1034,7 @@ impl App {
             self.blocks.push(Block::Thinking {
                 text: String::new(),
                 done: false,
+                expanded: false,
             });
         }
         if let Some(Block::Thinking { text, .. }) = self.blocks.last_mut() {
@@ -1245,12 +1289,17 @@ impl App {
     }
 
     pub fn toggle_tool_expanded(&mut self, block_idx: usize) -> bool {
-        let Some(Block::ToolCall { expanded, .. }) = self.blocks.get_mut(block_idx) else {
-            return false;
+        let toggled = match self.blocks.get_mut(block_idx) {
+            Some(Block::ToolCall { expanded, .. }) | Some(Block::Thinking { expanded, .. }) => {
+                *expanded = !*expanded;
+                true
+            }
+            _ => false,
         };
-        *expanded = !*expanded;
-        self.viewport.invalidate();
-        true
+        if toggled {
+            self.viewport.invalidate();
+        }
+        toggled
     }
 
     pub fn input_insert(&mut self, c: char) {
@@ -1368,10 +1417,17 @@ pub fn block_version(blocks: &[Block], idx: usize) -> u64 {
             }
             v
         }
-        Some(Block::Thinking { text, done }) => {
+        Some(Block::Thinking {
+            text,
+            done,
+            expanded,
+        }) => {
             let mut v: u64 = text.len() as u64;
             if *done {
                 v |= 1u64 << 62;
+            }
+            if *expanded {
+                v |= 1u64 << 61;
             }
             v
         }
@@ -1578,6 +1634,22 @@ mod tests {
     }
 
     #[test]
+    fn toggle_tool_expanded_flips_thinking_block_too() {
+        let mut app = App::new("/tmp".to_string());
+        app.blocks.push(Block::Thinking {
+            text: "private notes".to_string(),
+            done: true,
+            expanded: false,
+        });
+
+        assert!(app.toggle_tool_expanded(0));
+        assert!(matches!(
+            app.blocks.first(),
+            Some(Block::Thinking { expanded: true, .. })
+        ));
+    }
+
+    #[test]
     fn voice_error_is_humanized_for_feature_disabled_builds() {
         let mut app = App::new("/tmp".to_string());
 
@@ -1724,9 +1796,14 @@ mod tests {
         }));
 
         assert_eq!(count, 4);
-        assert!(
-            matches!(app.blocks.get(1), Some(Block::Thinking { text, done: true }) if text == "I should inspect status")
-        );
+        assert!(matches!(
+            app.blocks.get(1),
+            Some(Block::Thinking {
+                text,
+                done: true,
+                expanded: false,
+            }) if text == "I should inspect status"
+        ));
         assert!(
             matches!(app.blocks.get(2), Some(Block::ToolCall { call_id, name, status: ToolStatus::Completed, result_summary: Some(summary), result_ok: Some(true), .. }) if call_id == "call-1" && name == "shell" && summary.contains("apps/tui-rust/src/ui/app.rs"))
         );
@@ -1757,9 +1834,14 @@ mod tests {
             }),
         );
 
-        assert!(
-            matches!(app.blocks.first(), Some(Block::Thinking { text, done: true }) if text == "checking")
-        );
+        assert!(matches!(
+            app.blocks.first(),
+            Some(Block::Thinking {
+                text,
+                done: true,
+                expanded: false,
+            }) if text == "checking"
+        ));
         assert!(
             matches!(app.blocks.get(1), Some(Block::ToolCall { call_id, name, status: ToolStatus::Completed, result_summary: Some(summary), result_ok: Some(true), .. }) if call_id == "call-2" && name == "shell" && summary == "test result: ok")
         );

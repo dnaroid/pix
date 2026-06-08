@@ -28,6 +28,7 @@ pub struct TodoTask {
     pub subject: String,
     pub description: String,
     pub status: TodoStatus,
+    pub active_form: Option<String>,
     pub owner: Option<String>,
     pub parent_id: Option<i64>,
     pub blocked_by: Vec<i64>,
@@ -63,6 +64,7 @@ pub struct TodoMutation {
     pub subject: Option<String>,
     pub description: Option<String>,
     pub status: Option<TodoStatus>,
+    pub active_form: Option<String>,
     pub owner: Option<String>,
     pub parent_id: Option<i64>,
     pub clear_parent: bool,
@@ -106,7 +108,7 @@ impl TodoState {
         if tasks.is_empty() && parsed.action != Some(TodoAction::List) {
             return false;
         }
-        write_widget_tasks(args, parsed.action, &tasks);
+        write_widget_tasks(args, parsed.action, &tasks, Some(self.next_id()));
         true
     }
 
@@ -143,7 +145,7 @@ impl TodoState {
             } else {
                 display_override
             };
-            write_widget_tasks(args, parsed.action, &tasks);
+            write_widget_tasks(args, parsed.action, &tasks, Some(self.next_id()));
             if let Some(obj) = args.as_object_mut() {
                 obj.insert("__pix_todo_widget_result".into(), json!(true));
             }
@@ -417,54 +419,60 @@ pub fn parse_todo_args(args: &Value) -> ParsedTodoArgs {
 }
 
 pub fn should_render_inline_task_list(args: &Value) -> bool {
-    !widget_tasks(args).is_empty()
-        || matches!(
-            parse_todo_args(args).action,
-            Some(TodoAction::List | TodoAction::Get | TodoAction::BatchCreate)
-        )
+    args.get("__pix_todo_widget_result")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        && args.get(WIDGET_KEY).is_some()
 }
 
 pub fn tool_display_for_todo(name: &str, args: &Value) -> (String, Option<String>) {
     let parsed = parse_todo_args(args);
-    let count = item_count(args)
-        .or_else(|| (!widget_tasks(args).is_empty()).then(|| widget_tasks(args).len()));
-    let title = match (
+    let count = item_count(args);
+    let header_args = [
         parsed.action.map(TodoAction::as_str),
         parsed.primary.subject.as_deref(),
-        count,
-    ) {
-        (Some(a), Some(s), _) => format!("📋 {a} · {s}"),
-        (Some(a), None, Some(n)) => format!("📋 {a} · {n} {}", plural(n, "task")),
-        (Some(a), None, None) => format!("📋 {a}"),
-        (None, _, Some(n)) => format!("📋 {n} {}", plural(n, "item")),
-        _ => format!("📋 {name}"),
-    };
-    (title, None)
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join(" · ");
+
+    if header_args.is_empty() {
+        match count {
+            Some(n) => (format!("{name} {n} {}", plural(n, "item")), None),
+            None => (name.to_string(), None),
+        }
+    } else {
+        (format!("{name} {header_args}"), None)
+    }
 }
 
 pub fn render_todo_tool_call_with_theme(
-    name: &str,
+    _name: &str,
     args: &Value,
     status: ToolStatus,
     width: usize,
     theme: &Theme,
 ) -> Vec<Line<'static>> {
     let width = width.max(1);
-    let parsed = parse_todo_args(args);
     let (icon, color) = tool_icon(status, theme);
-    let title = parsed
-        .action
-        .map(|a| format!("📋 todo action={}", a.as_str()))
-        .unwrap_or_else(|| format!("📋 {name}"));
-    let mut out = vec![header_line(icon, color, &title, width, theme)];
-    let tasks = widget_tasks(args);
+    let header_args = widget_action(args).map(|action| match widget_next_id(args) {
+        Some(next_id) => format!("action={action} nextId={next_id}"),
+        None => format!("action={action}"),
+    });
+    let mut out = vec![header_line(icon, color, "todo", header_args.as_deref(), width, theme)];
+    let tasks = visible_task_rows(&widget_tasks(args));
     if tasks.is_empty() {
         out.push(Line::from(Span::styled(
             "    todo: no tasks",
             theme.style_for(ThemeRole::StatusDim),
         )));
     } else {
-        out.extend(tasks.iter().map(|task| task_line(task, width, theme)));
+        out.extend(
+            tasks
+                .iter()
+                .map(|(task, depth)| task_line(task, *depth, width, theme)),
+        );
     }
     out
 }
@@ -475,6 +483,7 @@ fn mutation_from_value(v: &Value) -> TodoMutation {
         subject: str_any(v, &["subject", "title", "text"]).map(str::to_string),
         description: str_any(v, &["description", "desc"]).map(str::to_string),
         status: str_any(v, &["status"]).and_then(TodoStatus::from_str),
+        active_form: str_any(v, &["activeForm", "active_form"]).map(str::to_string),
         owner: str_any(v, &["owner", "assignee"]).map(str::to_string),
         parent_id: i64_any(v, &["parentId", "parent_id"]),
         clear_parent: bool_any(v, &["clearParent", "clear_parent"]),
@@ -492,6 +501,7 @@ fn task_from_mutation(m: &TodoMutation, id: i64) -> Option<TodoTask> {
         subject: m.subject.clone()?,
         description: m.description.clone().unwrap_or_default(),
         status: m.status.unwrap_or(TodoStatus::Pending),
+        active_form: m.active_form.clone(),
         owner: m.owner.clone(),
         parent_id: m.parent_id,
         blocked_by: m.blocked_by.clone().unwrap_or_default(),
@@ -554,6 +564,9 @@ fn parse_human_task_line(line: &str) -> Option<TodoTask> {
         subject,
         description: String::new(),
         status,
+        active_form: (status == TodoStatus::InProgress)
+            .then(|| rest.to_string())
+            .filter(|value| !value.is_empty()),
         owner: None,
         parent_id,
         blocked_by,
@@ -561,9 +574,13 @@ fn parse_human_task_line(line: &str) -> Option<TodoTask> {
     })
 }
 
-fn write_widget_tasks(args: &mut Value, action: Option<TodoAction>, tasks: &[TodoTask]) {
+fn write_widget_tasks(args: &mut Value, action: Option<TodoAction>, tasks: &[TodoTask], next_id: Option<i64>) {
     if let Some(obj) = args.as_object_mut() {
-        obj.insert(WIDGET_KEY.into(), json!({"action": action.map(TodoAction::as_str), "tasks": tasks.iter().map(task_to_value).collect::<Vec<_>>() }));
+        obj.insert(WIDGET_KEY.into(), json!({
+            "action": action.map(TodoAction::as_str),
+            "nextId": next_id,
+            "tasks": tasks.iter().map(task_to_value).collect::<Vec<_>>()
+        }));
     }
 }
 
@@ -582,44 +599,199 @@ fn widget_tasks(args: &Value) -> Vec<TodoTask> {
 }
 
 fn task_to_value(t: &TodoTask) -> Value {
-    json!({"id":t.id,"subject":t.subject,"description":t.description,"status":t.status.as_str(),"owner":t.owner,"parentId":t.parent_id,"blockedBy":t.blocked_by,"thinking":t.thinking})
+    json!({"id":t.id,"subject":t.subject,"description":t.description,"status":t.status.as_str(),"activeForm":t.active_form,"owner":t.owner,"parentId":t.parent_id,"blockedBy":t.blocked_by,"thinking":t.thinking})
 }
 
 fn header_line(
     icon: &str,
     color: Color,
-    title: &str,
+    label: &str,
+    args_text: Option<&str>,
     width: usize,
     theme: &Theme,
 ) -> Line<'static> {
     let prefix = format!("  {icon} ");
     let pw = UnicodeWidthStr::width(prefix.as_str());
-    Line::from(vec![
-        Span::styled(
-            prefix,
+    if width <= pw {
+        return Line::from(Span::styled(
+            truncate(prefix.as_str(), width),
             Style::default().fg(color).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            truncate(title, width.saturating_sub(pw)),
-            theme
-                .style_for(ThemeRole::ToolRunning)
-                .add_modifier(Modifier::BOLD),
-        ),
-    ])
+        ));
+    }
+
+    let available = width.saturating_sub(pw);
+    let full_title = match args_text.filter(|text| !text.is_empty()) {
+        Some(args) => format!("{label} {args}"),
+        None => label.to_string(),
+    };
+    let truncated = truncate(full_title.as_str(), available);
+    let label_end = display_prefix_byte_index(
+        truncated.as_str(),
+        UnicodeWidthStr::width(label).min(UnicodeWidthStr::width(truncated.as_str())),
+    );
+    let (visible_label, visible_rest) = truncated.split_at(label_end);
+
+    let mut spans = vec![Span::styled(
+        prefix,
+        Style::default().fg(color).add_modifier(Modifier::BOLD),
+    )];
+    spans.push(Span::styled(
+        visible_label.to_string(),
+        theme
+            .style_for(ThemeRole::ToolRunning)
+            .add_modifier(Modifier::BOLD),
+    ));
+    if !visible_rest.is_empty() {
+        spans.push(Span::styled(
+            visible_rest.to_string(),
+            theme.style_for(ThemeRole::StatusDim),
+        ));
+    }
+    Line::from(spans)
 }
 
-fn task_line(t: &TodoTask, width: usize, theme: &Theme) -> Line<'static> {
-    let prefix = format!("    {} #{} ", t.status.icon(), t.id);
-    let body_w = width
-        .saturating_sub(UnicodeWidthStr::width(prefix.as_str()))
-        .max(1);
-    Line::from(vec![
-        Span::styled(prefix, Style::default().fg(status_color(t.status, theme))),
-        Span::styled(
-            truncate(&inline(&t.subject), body_w),
-            theme.style_for(ThemeRole::AssistantText),
-        ),
-    ])
+fn task_line(t: &TodoTask, depth: usize, width: usize, theme: &Theme) -> Line<'static> {
+    let text = truncate(&task_line_text(t, depth), width.max(1));
+    let icon_end = display_prefix_byte_index(text.as_str(), task_status_prefix(t, depth).width());
+    let mut spans = vec![Span::styled(
+        text[..icon_end].to_string(),
+        Style::default().fg(status_color(t.status, theme)),
+    )];
+    let subject_end = display_prefix_byte_index(text.as_str(), task_subject_prefix(t, depth).width());
+    if subject_end > icon_end {
+        spans.push(Span::styled(
+            text[icon_end..subject_end].to_string(),
+            task_subject_style(t, theme),
+        ));
+    }
+    if subject_end < text.len() {
+        spans.push(Span::styled(
+            text[subject_end..].to_string(),
+            theme.style_for(ThemeRole::StatusDim),
+        ));
+    }
+    Line::from(spans)
+}
+
+fn task_line_text(t: &TodoTask, depth: usize) -> String {
+    let mut parts = vec![task_status_prefix(t, depth), format!("{}.{}", t.id, inline(&t.subject))];
+    if t.status == TodoStatus::InProgress {
+        if let Some(active_form) = t.active_form.as_deref().filter(|value| !value.is_empty()) {
+            parts.push(format!("— {}", inline(active_form)));
+        }
+    }
+    if let Some(parent_id) = t.parent_id {
+        parts.push(format!("parent:#{parent_id}"));
+    }
+    if !t.blocked_by.is_empty() {
+        parts.push(format!(
+            "blocked:{}",
+            t.blocked_by
+                .iter()
+                .map(|id| format!("#{id}"))
+                .collect::<Vec<_>>()
+                .join(",")
+        ));
+    }
+    parts.join(" ")
+}
+
+fn task_tree_prefix(depth: usize) -> String {
+    if depth == 0 {
+        "    ".to_string()
+    } else {
+        format!("    {}↳ ", "  ".repeat(depth))
+    }
+}
+
+fn task_status_prefix(t: &TodoTask, depth: usize) -> String {
+    format!("{}{}", task_tree_prefix(depth), t.status.icon())
+}
+
+fn task_subject_prefix(t: &TodoTask, depth: usize) -> String {
+    format!("{} {}.{}", task_status_prefix(t, depth), t.id, inline(&t.subject))
+}
+
+fn task_subject_style(t: &TodoTask, theme: &Theme) -> Style {
+    let mut style = t
+        .thinking
+        .as_deref()
+        .map(|level| thinking_color(level, theme))
+        .map(|color| Style::default().fg(color))
+        .unwrap_or_else(|| theme.style_for(ThemeRole::AssistantText));
+    if t.status == TodoStatus::Completed {
+        style = style.add_modifier(Modifier::CROSSED_OUT);
+    }
+    style
+}
+
+fn thinking_color(level: &str, theme: &Theme) -> Color {
+    match level {
+        "low" => theme.status_dim,
+        "medium" => theme.tool_running,
+        "high" | "xhigh" => theme.diag_warn,
+        _ => theme.status_dim,
+    }
+}
+
+fn widget_action(args: &Value) -> Option<&str> {
+    args.get(WIDGET_KEY)
+        .and_then(|widget| widget.get("action"))
+        .and_then(Value::as_str)
+}
+
+fn widget_next_id(args: &Value) -> Option<i64> {
+    args.get(WIDGET_KEY)
+        .and_then(|widget| widget.get("nextId"))
+        .and_then(Value::as_i64)
+}
+
+fn visible_task_rows(tasks: &[TodoTask]) -> Vec<(TodoTask, usize)> {
+    let tasks: Vec<TodoTask> = tasks
+        .iter()
+        .filter(|task| task.status != TodoStatus::Deleted)
+        .cloned()
+        .collect();
+    let tasks_by_id: HashMap<i64, TodoTask> = tasks.iter().cloned().map(|task| (task.id, task)).collect();
+    let mut children_by_parent: HashMap<i64, Vec<TodoTask>> = HashMap::new();
+    let mut roots = Vec::new();
+    for task in &tasks {
+        if let Some(parent_id) = task.parent_id.filter(|parent_id| *parent_id != task.id) {
+            if tasks_by_id.contains_key(&parent_id) {
+                children_by_parent.entry(parent_id).or_default().push(task.clone());
+                continue;
+            }
+        }
+        roots.push(task.clone());
+    }
+
+    let mut rows = Vec::new();
+    let mut emitted = std::collections::HashSet::new();
+    fn emit_task(
+        task: TodoTask,
+        depth: usize,
+        rows: &mut Vec<(TodoTask, usize)>,
+        emitted: &mut std::collections::HashSet<i64>,
+        children_by_parent: &HashMap<i64, Vec<TodoTask>>,
+    ) {
+        if !emitted.insert(task.id) {
+            return;
+        }
+        rows.push((task.clone(), depth));
+        if let Some(children) = children_by_parent.get(&task.id) {
+            for child in children {
+                emit_task(child.clone(), depth + 1, rows, emitted, children_by_parent);
+            }
+        }
+    }
+
+    for task in roots {
+        emit_task(task, 0, &mut rows, &mut emitted, &children_by_parent);
+    }
+    for task in tasks {
+        emit_task(task, 0, &mut rows, &mut emitted, &children_by_parent);
+    }
+    rows
 }
 
 fn tool_icon(status: ToolStatus, theme: &Theme) -> (&'static str, Color) {
@@ -749,6 +921,24 @@ fn truncate(s: &str, width: usize) -> String {
     out
 }
 
+fn display_prefix_byte_index(s: &str, width: usize) -> usize {
+    if width == 0 {
+        return 0;
+    }
+    let mut used = 0;
+    for (idx, ch) in s.char_indices() {
+        let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if used + ch_width > width {
+            return idx;
+        }
+        used += ch_width;
+        if used == width {
+            return idx + ch.len_utf8();
+        }
+    }
+    s.len()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -763,6 +953,7 @@ mod tests {
             subject: subject.into(),
             description: String::new(),
             status,
+            active_form: None,
             owner: None,
             parent_id: None,
             blocked_by,
@@ -822,6 +1013,7 @@ mod tests {
                 TodoStatus::Pending,
                 vec![],
             )],
+            Some(2),
         );
         let lines = render_todo_tool_call_with_theme(
             "todo",
@@ -832,8 +1024,23 @@ mod tests {
         );
         assert_eq!(lines.len(), 2);
         let row = text(&lines[1]);
-        assert!(row.starts_with("    □ #1 A very"), "got {row:?}");
+        assert!(row.starts_with("    □ 1.A very"), "got {row:?}");
         assert!(UnicodeWidthStr::width(row.as_str()) <= 24);
+    }
+
+    #[test]
+    fn todo_header_keeps_suffix_muted() {
+        let theme = Theme::default();
+        let lines = render_todo_tool_call_with_theme(
+            "todo",
+            &json!({"action":"update", "__pix_todo_widget": {"action": "update"}}),
+            ToolStatus::Running,
+            80,
+            &theme,
+        );
+        assert_eq!(text(&lines[0]), "  ◑ todo action=update");
+        assert_eq!(lines[0].spans[1].style.fg, Some(theme.tool_running));
+        assert_eq!(lines[0].spans[2].style.fg, Some(theme.status_dim));
     }
 
     #[test]

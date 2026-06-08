@@ -33,6 +33,11 @@ pub enum AppEvent {
     SwitchedSessionState(Value),
     /// Result of activating a live tab runtime.
     ActivatedTabState { runtime_id: String, state: Value },
+    /// Background-loaded history tail for a specific live tab runtime.
+    RuntimeHistoryLoaded {
+        runtime_id: String,
+        result: Result<Value, String>,
+    },
     /// Result of starting a new session; reset conversation then apply state.
     NewSessionState(Value),
     /// Result of starting a new live tab runtime/session.

@@ -165,5 +165,10 @@ function appendWorkflowReminder(text: string, op: Op, state: TaskState): string 
 			"Reminder: pending todos exist but none is in_progress. Before starting work, call todo update on exactly one task with status in_progress and activeForm.",
 		);
 	}
+	if (hasInProgress) {
+		lines.push(
+			"Reminder: before you stop, update any finished todo items to completed. Treat the final user-facing report step like any other todo: once it is done, mark it completed immediately.",
+		);
+	}
 	return lines.join("\n\n");
 }

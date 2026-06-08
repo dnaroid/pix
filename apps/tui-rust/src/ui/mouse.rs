@@ -415,11 +415,11 @@ mod tests {
     fn mouse_input_prefix_widths_match_render_contract() {
         assert_eq!(
             unicode_width::UnicodeWidthStr::width(crate::ui::render::INPUT_FIRST_PREFIX),
-            2
+            0
         );
         assert_eq!(
             unicode_width::UnicodeWidthStr::width(crate::ui::render::INPUT_CONT_PREFIX),
-            2
+            0
         );
     }
 }

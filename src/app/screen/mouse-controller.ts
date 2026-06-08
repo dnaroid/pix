@@ -420,7 +420,7 @@ export class AppMouseController {
 		if (!link) return false;
 
 		const opened = this.host.openFileLink?.(link) ?? openDetectedFileLink(link);
-		if (!opened) this.host.showToast("Could not open file link. Install the Zed CLI or set ZED_CLI.", "warning");
+		if (!opened) this.host.showToast("Could not open file link in the detected editor or system viewer.", "warning");
 		return true;
 	}
 

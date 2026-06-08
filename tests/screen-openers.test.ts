@@ -27,26 +27,82 @@ describe("screen openers and platform fallbacks", () => {
 		assert.equal(isNativeCommandPressed(), false);
 	});
 
-	it("opens explicit file paths through the configured zed command without touching the real PATH", () => {
+	it("opens explicit file paths through the detected zed command without touching the real PATH", () => {
 		const zedCli = "/mock/bin/zed";
-		const previousZedCli = process.env.ZED_CLI;
 		const spawned: Array<{ command: string; args: readonly string[] }> = [];
 		const restore = setFileLinkOpenerTestDeps({
-			existsSync: (path) => path === zedCli,
+			env: { ZED_CLI: zedCli },
+			existsSync: (path: Parameters<typeof import("node:fs").existsSync>[0]) => path === zedCli,
 			spawn: ((command: string, args: readonly string[]) => {
 				spawned.push({ command, args });
 				return fakeChildProcess();
 			}) as never,
 		});
 		try {
-			process.env.ZED_CLI = zedCli;
-
 			assert.equal(openFileLink({ start: 0, end: 1, url: "file:///ignored", filePath: "/workspace/target.ts", line: 12, column: 3 }), true);
 			assert.deepEqual(spawned, [{ command: zedCli, args: ["/workspace/target.ts:12:3"] }]);
 		} finally {
 			restore();
-			if (previousZedCli === undefined) delete process.env.ZED_CLI;
-			else process.env.ZED_CLI = previousZedCli;
+		}
+	});
+
+	it("opens file links in VS Code with --goto when launched from a VS Code terminal", () => {
+		const spawned: Array<{ command: string; args: readonly string[] }> = [];
+		const restore = setFileLinkOpenerTestDeps({
+			env: { PATH: "/mock/bin", TERM_PROGRAM: "vscode" },
+			platform: "linux",
+			existsSync: (path: Parameters<typeof import("node:fs").existsSync>[0]) => path === "/mock/bin/code",
+			spawn: ((command: string, args: readonly string[]) => {
+				spawned.push({ command, args });
+				return fakeChildProcess();
+			}) as never,
+		});
+
+		try {
+			assert.equal(openFileLink({ start: 0, end: 1, url: "file:///ignored", filePath: "/workspace/target.ts", line: 12, column: 3 }), true);
+			assert.deepEqual(spawned, [{ command: "code", args: ["--goto", "/workspace/target.ts:12:3"] }]);
+		} finally {
+			restore();
+		}
+	});
+
+	it("falls back to xdg-open on Linux when the detected editor cli is unavailable", () => {
+		const spawned: Array<{ command: string; args: readonly string[] }> = [];
+		const restore = setFileLinkOpenerTestDeps({
+			env: { PATH: "/mock/bin", TERM_PROGRAM: "vscode" },
+			platform: "linux",
+			existsSync: () => false,
+			spawn: ((command: string, args: readonly string[]) => {
+				spawned.push({ command, args });
+				return fakeChildProcess();
+			}) as never,
+		});
+
+		try {
+			assert.equal(openFileLink({ start: 0, end: 1, url: "file:///ignored", filePath: "/workspace/target.ts", line: 12, column: 3 }), true);
+			assert.deepEqual(spawned, [{ command: "xdg-open", args: ["/workspace/target.ts"] }]);
+		} finally {
+			restore();
+		}
+	});
+
+	it("falls back to the Windows shell opener when the detected editor cli is unavailable", () => {
+		const spawned: Array<{ command: string; args: readonly string[] }> = [];
+		const restore = setFileLinkOpenerTestDeps({
+			env: { PATH: "C:\\mock\\bin", PATHEXT: ".EXE;.CMD;.BAT;.COM", TERM_PROGRAM: "vscode" },
+			platform: "win32",
+			existsSync: () => false,
+			spawn: ((command: string, args: readonly string[]) => {
+				spawned.push({ command, args });
+				return fakeChildProcess();
+			}) as never,
+		});
+
+		try {
+			assert.equal(openFileLink({ start: 0, end: 1, url: "file:///ignored", filePath: "C:\\workspace\\target.ts", line: 12, column: 3 }), true);
+			assert.deepEqual(spawned, [{ command: "cmd", args: ["/c", "start", "", "C:\\workspace\\target.ts"] }]);
+		} finally {
+			restore();
 		}
 	});
 
