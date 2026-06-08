@@ -354,12 +354,16 @@ fn sanitize(text: &str) -> String {
     // - drop `\r`
     // - replace bare ESC with the visible escape glyph
     // - hide markdown/DCP reference metadata lines injected by the harness
+    //   and collapse runs of blank lines left behind (plus trim
+    //   leading/trailing blanks) so they don't render as extra vertical
+    //   space.
     // - leave anything else alone (icon substitution and zero-width
     //   joins are M1 concerns).
-    text.lines()
+    let filtered: Vec<&str> = text
+        .lines()
         .filter(|line| !is_hidden_markdown_metadata_line(line))
-        .collect::<Vec<_>>()
-        .join("\n")
+        .collect();
+    crate::ui::wrap::collapse_blank_runs(&filtered.join("\n"))
         .replace('\r', "")
         .replace('\x1b', "␛")
 }
@@ -1430,6 +1434,37 @@ mod tests {
     fn hides_streaming_partial_dcp_metadata_prefix() {
         let lines = render_markdown("[dcp-id]: # (m", 80);
         assert!(lines.is_empty(), "got {lines:?}");
+    }
+
+    #[test]
+    fn sanitize_collapses_blank_lines_left_by_hidden_metadata() {
+        // Hidden metadata lines should not leave behind empty rendered rows
+        // in the surrounding paragraph.
+        let lines = render_markdown(
+            "first\n[dcp-id]: # (m9)\nsecond\n[dcp-block-id]: # (b2)\nthird",
+            80,
+        );
+        let non_empty: Vec<String> = lines
+            .iter()
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>()
+            })
+            .filter(|s| !s.trim().is_empty())
+            .collect();
+        // The three visible words should collapse to a single paragraph row
+        // without any blank rows around them.
+        assert_eq!(non_empty.len(), 1, "got {non_empty:?}");
+        let row = &non_empty[0];
+        assert!(row.contains("first"), "got {row:?}");
+        assert!(row.contains("second"), "got {row:?}");
+        assert!(row.contains("third"), "got {row:?}");
+        assert!(
+            !row.contains("dcp-id") && !row.contains("dcp-block-id"),
+            "got {row:?}"
+        );
     }
 
     #[test]

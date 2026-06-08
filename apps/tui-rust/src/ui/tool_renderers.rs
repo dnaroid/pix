@@ -1348,10 +1348,11 @@ fn sanitize_tool_body(text: &str) -> String {
 }
 
 fn strip_hidden_metadata_lines(text: &str) -> String {
-    text.lines()
+    let filtered: Vec<&str> = text
+        .lines()
         .filter(|line| !is_hidden_metadata_line(line))
-        .collect::<Vec<_>>()
-        .join("\n")
+        .collect();
+    crate::ui::wrap::collapse_blank_runs(&filtered.join("\n"))
 }
 
 fn is_hidden_metadata_line(line: &str) -> bool {
@@ -2147,6 +2148,53 @@ mod tests {
         assert!(
             !texts.iter().any(|line| line.contains("dcp-block-id")),
             "got {texts:?}"
+        );
+    }
+
+    #[test]
+    fn tool_result_preview_collapses_blank_lines_left_by_hidden_metadata() {
+        // A metadata marker sitting between real output lines must not leave
+        // an extra blank row in the rendered preview.
+        let lines = render_tool_entry_with_theme(
+            "bash",
+            &json!({"command": "echo ok"}),
+            ToolStatus::Completed,
+            Some("first\n[dcp-id]: # (m9)\nsecond\n[dcp-block-id]: # (b2)\nthird"),
+            Some(true),
+            80,
+            &Theme::default(),
+        );
+        let texts: Vec<String> = lines.iter().map(line_text).collect();
+        let body: Vec<&String> = texts.iter().filter(|line| line.starts_with("  ")).collect();
+
+        assert_eq!(
+            body.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+            vec!["  first", "  second", "  third"],
+            "got {texts:?}"
+        );
+    }
+
+    #[test]
+    fn tool_result_preview_trims_trailing_blank_lines_so_gap_does_not_double() {
+        // Tool output that ends with newlines must not produce a trailing
+        // blank row that would visually stack on top of the inter-block
+        // gap and create two consecutive blank rows.
+        let lines = render_tool_entry_with_theme(
+            "bash",
+            &json!({"command": "echo ok"}),
+            ToolStatus::Completed,
+            Some("first\nsecond\n\n"),
+            Some(true),
+            80,
+            &Theme::default(),
+        );
+        let texts: Vec<String> = lines.iter().map(line_text).collect();
+        let body: Vec<&String> = texts.iter().filter(|line| line.starts_with("  ")).collect();
+
+        assert_eq!(
+            body.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+            vec!["  first", "  second"],
+            "trailing blank rows should be trimmed; got {texts:?}"
         );
     }
 

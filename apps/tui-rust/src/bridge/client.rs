@@ -310,6 +310,15 @@ impl BridgeClient {
         .await
     }
 
+    /// Helper: lazily fetch older persisted messages before the current tail.
+    pub async fn get_messages_older(&self, limit: u32) -> Result<Value, BridgeError> {
+        let id = self.alloc_id().await;
+        self.request(Command::GetMessages(
+            super::protocol::GetMessagesCommand::older(id, limit),
+        ))
+        .await
+    }
+
     /// Helper: fetch available models.
     pub async fn get_models(&self) -> Result<Value, BridgeError> {
         let id = self.alloc_id().await;

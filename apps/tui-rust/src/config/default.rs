@@ -250,29 +250,23 @@ fn default_tool_rules() -> BTreeMap<String, ToolRendererRule> {
             rule(Some(0), tail, "muted", false, false),
         ),
         ("todo".to_string(), rule(None, None, "accent", false, true)),
-        (
-            "ls".to_string(),
-            rule(Some(6), head, "success", false, false),
-        ),
-        (
-            "LS".to_string(),
-            rule(Some(6), head, "success", false, false),
-        ),
+        ("ls".to_string(), rule(None, None, "success", false, false)),
+        ("LS".to_string(), rule(None, None, "success", false, false)),
         (
             "grep".to_string(),
-            rule(Some(6), head, "toolSearch", false, false),
+            rule(None, None, "toolSearch", false, false),
         ),
         (
             "Grep".to_string(),
-            rule(Some(6), head, "toolSearch", false, false),
+            rule(None, None, "toolSearch", false, false),
         ),
         (
             "find".to_string(),
-            rule(Some(6), head, "toolSearch", false, false),
+            rule(None, None, "toolSearch", false, false),
         ),
         (
             "Glob".to_string(),
-            rule(Some(6), head, "toolSearch", false, false),
+            rule(None, None, "toolSearch", false, false),
         ),
         (
             "skill".to_string(),

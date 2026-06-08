@@ -68,6 +68,10 @@ struct Layout {
     offsets: Vec<usize>,
     /// Visual line count for each block, including its trailing gap.
     line_counts: Vec<usize>,
+    /// Per-block visual line count WITHOUT the trailing gap. Cached so the
+    /// renderer can decide whether to emit a gap row without re-walking
+    /// later blocks (see `has_trailing_gap`).
+    visible_counts: Vec<usize>,
     /// Rendered lines per block index, lazily filled.
     rendered: HashMap<usize, RenderedBlock>,
 }
@@ -247,6 +251,7 @@ impl Viewport {
             total,
             offsets,
             line_counts,
+            visible_counts,
             rendered: HashMap::new(),
         };
         self.layouts.insert(width, layout);
@@ -273,7 +278,13 @@ impl Viewport {
             Some(b) => b,
             None => return,
         };
-        let gap = has_visible_trailing_gap(blocks, idx, content_width, config);
+        let gap = {
+            let layout = self
+                .layouts
+                .get(&width)
+                .expect("layout must exist before rendering block");
+            has_trailing_gap(idx, &layout.visible_counts)
+        };
         let lines = render_block(block, idx, content_width, gap, theme, config);
         let layout = self
             .layouts
@@ -330,41 +341,44 @@ fn has_trailing_gap(idx: usize, visible_counts: &[usize]) -> bool {
             .is_some_and(|rest| rest.iter().any(|count| *count > 0))
 }
 
-fn has_visible_trailing_gap(
-    blocks: &[Block],
-    idx: usize,
-    width: usize,
-    config: &PixConfig,
-) -> bool {
-    if blocks
-        .get(idx)
-        .map(|block| block_line_count(block, width, config))
-        .unwrap_or(0)
-        == 0
-    {
-        return false;
-    }
-
-    blocks.get(idx + 1..).is_some_and(|rest| {
-        rest.iter()
-            .any(|block| block_line_count(block, width, config) > 0)
-    })
-}
-
 fn block_line_count(block: &Block, width: usize, config: &PixConfig) -> usize {
     match block {
         Block::User { text } => {
-            // Header line ("you: <text>") wraps to `width`.
-            // We overestimate by 1 to account for the "you: " prefix.
-            let prefix = 5;
-            wrap::line_count(text, width.saturating_sub(prefix).max(1)).max(1)
-        }
-        Block::Assistant { text, .. } => {
-            if text.is_empty() {
-                1
-            } else {
-                markdown::markdown_line_count(text, width).max(1)
+            // Mirror opencode `UserMessage` `<Show when={text()}>`: an
+            // empty user bubble would render as a single padded blank row
+            // that combines with the inter-block gap into two consecutive
+            // blank lines. Hide it instead.
+            let collapsed = wrap::collapse_blank_runs(text);
+            if collapsed.trim().is_empty() {
+                return 0;
             }
+            // Render pads each row with " ... " (2 cells). The header width
+            // is intentionally conservative so the count overestimates by
+            // at most one row rather than underestimating.
+            let prefix = 5;
+            wrap::line_count(&collapsed, width.saturating_sub(prefix).max(1)).max(1)
+        }
+        Block::Assistant { text, done, .. } => {
+            // Mirror opencode `TextPart` `<Show when={props.part.text.trim()}>`:
+            // a finalised assistant turn whose text is empty (or sanitises
+            // to empty after stripping hidden metadata) renders as a single
+            // blank VisualLine, which combines with the inter-block gap
+            // into two consecutive blank rows. The empty assistant block is
+            // a common artefact of the live stream — `handle_assistant_start`
+            // pushes it eagerly and `handle_assistant_end` finalises it even
+            // when no text deltas arrived (e.g. a tool-only turn).
+            //
+            // While streaming (`!done`) we still emit 1 line so the `…`
+            // placeholder stays visible.
+            let empty_count = if *done { 0 } else { 1 };
+            if text.trim().is_empty() {
+                return empty_count;
+            }
+            let count = markdown::markdown_line_count(text, width);
+            if count == 0 {
+                return empty_count;
+            }
+            count
         }
         Block::Thinking { .. } => 1,
         Block::ToolCall {
@@ -392,8 +406,14 @@ fn block_line_count(block: &Block, width: usize, config: &PixConfig) -> usize {
         } => tool_renderers::render_tool_result(call_id, summary, *ok, width)
             .len()
             .max(1),
-        Block::RawEvent { line, .. } => wrap::line_count(line, width).max(1),
-        Block::Diag { text, .. } => wrap::line_count(text, width).max(1),
+        Block::RawEvent { line, .. } => {
+            let collapsed = wrap::collapse_blank_runs(line);
+            wrap::line_count(&collapsed, width).max(1)
+        }
+        Block::Diag { text, .. } => {
+            let collapsed = wrap::collapse_blank_runs(text);
+            wrap::line_count(&collapsed, width).max(1)
+        }
     }
 }
 
@@ -416,6 +436,15 @@ fn render_block(
     out
 }
 
+/// Append the single-cell `…` placeholder used while an assistant turn is
+/// streaming but has produced no visible text yet.
+fn push_streaming_placeholder(out: &mut Vec<VisualLine>, idx: usize, theme: &Theme) {
+    out.push(VisualLine {
+        line: Line::from(Span::styled("…", theme.style_for(ThemeRole::ToolRunning))),
+        source_idx: Some(idx),
+    });
+}
+
 fn append_block_lines(
     block: &Block,
     idx: usize,
@@ -426,8 +455,12 @@ fn append_block_lines(
 ) {
     match block {
         Block::User { text } => {
+            let collapsed = wrap::collapse_blank_runs(text);
+            if collapsed.trim().is_empty() {
+                return;
+            }
             let body_width = width.saturating_sub(2).max(1);
-            let lines = wrap::wrap_text(text, body_width);
+            let lines = wrap::wrap_text(&collapsed, body_width);
             for line in lines {
                 let used = UnicodeWidthStr::width(line.as_str()).min(body_width);
                 let padding = " ".repeat(body_width.saturating_sub(used));
@@ -446,22 +479,21 @@ fn append_block_lines(
             provider: _,
             model: _,
         } => {
-            if text.is_empty() {
-                out.push(VisualLine {
-                    line: Line::from(Span::styled(
-                        if *done { "" } else { "…" },
-                        theme.style_for(ThemeRole::ToolRunning),
-                    )),
-                    source_idx: Some(idx),
-                });
+            // See `block_line_count` for the rationale: a finalised empty
+            // assistant block must render as zero lines so it cannot stack
+            // a blank row on top of the inter-block gap. While streaming we
+            // keep the `…` placeholder.
+            if text.trim().is_empty() {
+                if !done {
+                    push_streaming_placeholder(out, idx, theme);
+                }
                 return;
             }
             let md_lines = markdown::render_markdown_with_theme(text, width, theme);
             if md_lines.is_empty() {
-                out.push(VisualLine {
-                    line: Line::raw(""),
-                    source_idx: Some(idx),
-                });
+                if !done {
+                    push_streaming_placeholder(out, idx, theme);
+                }
                 return;
             }
             for line in md_lines {
@@ -538,7 +570,8 @@ fn append_block_lines(
                 DiagKind::BridgeError => ("✖", theme.diag_error),
                 DiagKind::Info => ("i", theme.diag_info),
             };
-            for line in wrap::wrap_text(text, width) {
+            let collapsed = wrap::collapse_blank_runs(text);
+            for line in wrap::wrap_text(&collapsed, width) {
                 out.push(VisualLine {
                     line: Line::from(vec![
                         Span::styled(format!("  {icon} "), Style::default().fg(color)),
@@ -717,6 +750,122 @@ mod tests {
             !texts.iter().any(|line| line.contains("todo")),
             "got {texts:?}"
         );
+    }
+
+    #[test]
+    fn empty_assistant_done_block_is_hidden() {
+        // Mirror opencode `TextPart` `<Show when={props.part.text.trim()}>`:
+        // an assistant turn that produced no text (e.g. a tool-only turn)
+        // must contribute zero visual lines so its blank placeholder does
+        // not stack on top of the inter-block gap.
+        let blocks = blocks_of(vec![Block::Assistant {
+            text: String::new(),
+            done: true,
+            provider: None,
+            model: None,
+        }]);
+        let mut v = Viewport::new();
+        assert_eq!(v.line_count(&blocks, ViewportWidth(80)), 0);
+    }
+
+    #[test]
+    fn whitespace_only_assistant_done_block_is_hidden() {
+        let blocks = blocks_of(vec![Block::Assistant {
+            text: "   \n\n  \n".into(),
+            done: true,
+            provider: None,
+            model: None,
+        }]);
+        let mut v = Viewport::new();
+        assert_eq!(v.line_count(&blocks, ViewportWidth(80)), 0);
+    }
+
+    #[test]
+    fn empty_assistant_streaming_block_shows_placeholder() {
+        // While streaming we keep the `…` placeholder so the user can see
+        // that an assistant turn is in progress even before any text
+        // deltas have arrived.
+        let blocks = blocks_of(vec![Block::Assistant {
+            text: String::new(),
+            done: false,
+            provider: None,
+            model: None,
+        }]);
+        let mut v = Viewport::new();
+        let total = v.line_count(&blocks, ViewportWidth(80));
+        assert_eq!(total, 1, "streaming placeholder must occupy 1 line");
+        let lines = v.slice(&blocks, ViewportWidth(80), 0, total, &theme());
+        let text = line_text(&lines[0]);
+        assert!(text.contains('…'), "got {text:?}");
+    }
+
+    #[test]
+    fn empty_assistant_between_tools_does_not_double_blank_gap() {
+        // Regression: a tool-only assistant turn leaves an empty
+        // `Block::Assistant { text: "", done: true }` between two tool
+        // calls. Before the fix that empty block rendered one blank row,
+        // which combined with the inter-block gap produced two consecutive
+        // blank rows.
+        let blocks = blocks_of(vec![
+            Block::ToolCall {
+                call_id: "call-1".into(),
+                name: "shell".into(),
+                args: json!({"command": "echo one"}),
+                status: ToolStatus::Completed,
+                result_summary: None,
+                result_ok: Some(true),
+                expanded: false,
+            },
+            Block::Assistant {
+                text: String::new(),
+                done: true,
+                provider: None,
+                model: None,
+            },
+            Block::ToolCall {
+                call_id: "call-2".into(),
+                name: "shell".into(),
+                args: json!({"command": "echo two"}),
+                status: ToolStatus::Completed,
+                result_summary: None,
+                result_ok: Some(true),
+                expanded: false,
+            },
+        ]);
+        let mut v = Viewport::new();
+        let total = v.line_count(&blocks, ViewportWidth(80));
+        let lines = v.slice(&blocks, ViewportWidth(80), 0, total, &theme());
+        let texts: Vec<String> = lines.iter().map(line_text).collect();
+
+        assert_eq!(texts.len(), 3, "got {texts:?}");
+        assert_eq!(
+            texts.iter().filter(|line| line.is_empty()).count(),
+            1,
+            "expected exactly one blank gap row, got {texts:?}"
+        );
+        assert!(
+            !texts.iter().any(|line| line.contains('…')),
+            "empty finalised assistant must not leak the streaming placeholder, got {texts:?}"
+        );
+    }
+
+    #[test]
+    fn empty_user_block_is_hidden() {
+        // Mirror opencode `UserMessage` `<Show when={text()}>`.
+        let blocks = blocks_of(vec![
+            Block::User {
+                text: String::new(),
+            },
+            Block::User {
+                text: "hello".into(),
+            },
+        ]);
+        let mut v = Viewport::new();
+        let total = v.line_count(&blocks, ViewportWidth(80));
+        let lines = v.slice(&blocks, ViewportWidth(80), 0, total, &theme());
+        let texts: Vec<String> = lines.iter().map(line_text).collect();
+        assert_eq!(texts.len(), 1, "got {texts:?}");
+        assert!(texts[0].contains("hello"), "got {texts:?}");
     }
 
     #[test]

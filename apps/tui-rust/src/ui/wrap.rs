@@ -132,6 +132,36 @@ fn take_word_run(s: &str) -> (&str, &str) {
     s.split_at(i)
 }
 
+/// Collapse runs of consecutive blank lines into a single blank line and
+/// strip leading/trailing blank lines.
+///
+/// Used by sanitizers that hide metadata lines (DCP markers, markdown
+/// reference definitions): removing those lines leaves the surrounding
+/// newlines behind, which would otherwise render as extra empty rows.
+/// Trimming leading/trailing blanks prevents the resulting blank row from
+/// combining with the inter-block gap into two consecutive blank rows.
+pub fn collapse_blank_runs(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut prev_blank = false;
+    let mut last_non_blank_end = 0usize;
+    for line in text.split('\n') {
+        let is_blank = line.trim().is_empty();
+        if is_blank && prev_blank {
+            continue;
+        }
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(line);
+        if !is_blank {
+            last_non_blank_end = out.len();
+        }
+        prev_blank = is_blank;
+    }
+    out.truncate(last_non_blank_end);
+    out
+}
+
 /// Visual-line count for `text` at the given width. Equivalent to
 /// `wrap_text(text, width).len()` but without allocating the strings.
 pub fn line_count(text: &str, width: usize) -> usize {
@@ -244,6 +274,25 @@ mod tests {
         // width 11: "alpha beta " (11) fits, "gamma" doesn't.
         let lines = wrap_text("alpha beta gamma delta", 11);
         assert_eq!(lines, vec!["alpha beta", "gamma delta"]);
+    }
+
+    #[test]
+    fn collapse_blank_runs_collapses_consecutive_blanks() {
+        assert_eq!(collapse_blank_runs("a\n\n\nb"), "a\n\nb");
+        assert_eq!(collapse_blank_runs("a\n\n\n\nb"), "a\n\nb");
+    }
+
+    #[test]
+    fn collapse_blank_runs_preserves_single_blank() {
+        assert_eq!(collapse_blank_runs("a\n\nb"), "a\n\nb");
+    }
+
+    #[test]
+    fn collapse_blank_runs_strips_leading_and_trailing_blanks() {
+        assert_eq!(collapse_blank_runs("\n\na\n\n"), "a");
+        assert_eq!(collapse_blank_runs("\na\n"), "a");
+        assert_eq!(collapse_blank_runs("\n\n"), "");
+        assert_eq!(collapse_blank_runs(""), "");
     }
 
     #[test]

@@ -413,7 +413,7 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
       //   "bin": "rust-analyzer",
       //   "args": [],
       //   "startupTimeoutMs": 20000,
-      //   "diagnosticsWaitMs": 10000,
+      //   "diagnosticsWaitMs": 20000,
       //   "pullDiagnostics": false,
       //   "waitForPublishDiagnostics": true,
       //   "languageIdByExtension": {
