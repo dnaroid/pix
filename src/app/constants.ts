@@ -62,6 +62,7 @@ export const DISABLE_TERMINAL_WRAP = "\x1b[?7l";
 export const ENABLE_TERMINAL_WRAP = "\x1b[?7h";
 export const HIDE_CURSOR = "\x1b[?25l";
 export const SHOW_CURSOR = "\x1b[?25h";
+export const RESET_TERMINAL_VIEWPORT_STATE = "\x1b[?6l\x1b[?69l\x1b[r";
 export const CLEAR_TERMINAL = "\x1b[2J\x1b[3J\x1b[H";
 export const THINKING_TOOL_NAME = "thinking";
 export const SUBAGENTS_TOOL_NAME = "subagents";

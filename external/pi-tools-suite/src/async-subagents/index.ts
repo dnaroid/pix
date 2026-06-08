@@ -24,12 +24,17 @@ import {
 	type BridgedImageAttachment,
 	type BridgeImageAttachmentsResult,
 } from "./core/attachment-bridge.js";
-import { buildAgentCompletionNotification, isTerminalAgentStatus } from "./core/notifications.js";
+
 import { appendUltraworkAutoHint, decideUltraworkAuto, isGptLikeModel, isUltraworkAutoEnvEnabled } from "./core/ultrawork-auto.js";
 import { SubagentOverlay } from "./subagent-overlay.js";
 import { registerSubagentsTool } from "./tools/subagents.js";
 import type { LiveAgent, SubagentsLiveStateEvent } from "./types.js";
+import type { AgentState } from "./core/types.js";
 import { publishStartupSection } from "../startup-section.js";
+
+function isTerminalAgentStatus(status: AgentState["status"]): boolean {
+	return status === "done" || status === "failed" || status === "stopped";
+}
 
 const SUBAGENTS_LIVE_COUNT_EVENT = "pi-tools-suite:async-subagents:live-count";
 const SUBAGENTS_LIVE_STATE_EVENT = "pi-tools-suite:async-subagents:live-state";
@@ -79,7 +84,6 @@ function agentMatchesSession(agent: LiveAgent, sessionFile: string | undefined):
 export default function (pi: ExtensionAPI) {
 	const liveAgents = new Map<string, Map<string, LiveAgent>>();
 	const subagentOverlay = new SubagentOverlay(liveAgents);
-	const notifiedAgentCompletions = new Set<string>();
 	let sawAutoUltraworkCandidate = false;
 	let currentSessionFile: string | undefined;
 	let completionWatchTimer: ReturnType<typeof setInterval> | undefined;
@@ -91,28 +95,6 @@ export default function (pi: ExtensionAPI) {
 		pi.events?.emit?.(SUBAGENTS_LIVE_COUNT_EVENT, { count: liveState.count });
 		pi.events?.emit?.(SUBAGENTS_LIVE_STATE_EVENT, liveState);
 		updateCompletionWatcher();
-	}
-
-	function completionNotificationKey(runDir: string, agentId: string): string {
-		return `${path.resolve(runDir)}\0${agentId}`;
-	}
-
-	function notifyAgentCompletion(runDir: string, agentId: string, state: ReturnType<typeof getRunState>["agents"][number]): void {
-		const key = completionNotificationKey(runDir, agentId);
-		if (notifiedAgentCompletions.has(key)) return;
-		const liveAgent = liveAgents.get(runDir)?.get(agentId);
-		if (liveAgent?.parentSession && currentSessionFile && !pathsEqual(liveAgent.parentSession, currentSessionFile)) return;
-		notifiedAgentCompletions.add(key);
-		const runState = getRunState(runDir, undefined, { includeLineCounts: false, checkRpcPromptFailure: false });
-		try {
-			pi.sendMessage(
-				buildAgentCompletionNotification({ agentId, runDir, state, runAgents: runState.agents }),
-				{ triggerTurn: true, deliverAs: "followUp" },
-			);
-		} catch {
-			// Session-bound extension APIs can be invalidated during reload/switch.
-			// Completion artifacts remain available through status/result.
-		}
 	}
 
 	function removeLiveAgent(runDir: string, agentId: string): void {
@@ -136,7 +118,6 @@ export default function (pi: ExtensionAPI) {
 					continue;
 				}
 				if (!isTerminalAgentStatus(state.status)) continue;
-				notifyAgentCompletion(runDir, agentId, state);
 				removeLiveAgent(runDir, agentId);
 			}
 		}

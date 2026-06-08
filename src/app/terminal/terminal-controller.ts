@@ -9,6 +9,7 @@ import {
 	ENABLE_TERMINAL_KEY_REPORTING,
 	ENABLE_TERMINAL_WRAP,
 	HIDE_CURSOR,
+	RESET_TERMINAL_VIEWPORT_STATE,
 	RUNTIME_DISPOSE_GRACE_MS,
 	SHOW_CURSOR,
 } from "../constants.js";
@@ -39,6 +40,9 @@ export class AppTerminalController {
 	private interactiveSuspended = false;
 	private stopPromise: Promise<void> | undefined;
 
+	private readonly enterInteractiveSequence = `${ANSI_RESET}${RESET_TERMINAL_VIEWPORT_STATE}${CLEAR_TERMINAL}\x1b[?1049h${RESET_TERMINAL_VIEWPORT_STATE}${CLEAR_TERMINAL}${ENABLE_TERMINAL_KEY_REPORTING}${ENABLE_BRACKETED_PASTE}${DISABLE_TERMINAL_WRAP}\x1b[?1002h\x1b[?1006h${HIDE_CURSOR}`;
+	private readonly exitInteractiveSequence = `${ANSI_RESET}${RESET_TERMINAL_VIEWPORT_STATE}${DISABLE_TERMINAL_KEY_REPORTING}${DISABLE_BRACKETED_PASTE}${ENABLE_TERMINAL_WRAP}\x1b[?1006l\x1b[?1002l\x1b[?1049l${SHOW_CURSOR}`;
+
 	constructor(private readonly host: AppTerminalControllerHost) {}
 
 	isSuspended(): boolean {
@@ -53,7 +57,7 @@ export class AppTerminalController {
 		process.stdin.resume();
 		process.stdin.on("data", this.onInputData);
 		process.stdout.on("resize", this.onResize);
-		process.stdout.write(`${ANSI_RESET}${CLEAR_TERMINAL}\x1b[?1049h${CLEAR_TERMINAL}${ENABLE_TERMINAL_KEY_REPORTING}${ENABLE_BRACKETED_PASTE}${DISABLE_TERMINAL_WRAP}\x1b[?1002h\x1b[?1006h${HIDE_CURSOR}`);
+		process.stdout.write(this.enterInteractiveSequence);
 		process.on("exit", this.restoreTerminal);
 	}
 
@@ -106,7 +110,7 @@ export class AppTerminalController {
 
 		this.terminalEnabled = false;
 		this.interactiveSuspended = false;
-		process.stdout.write(`${ANSI_RESET}${DISABLE_TERMINAL_KEY_REPORTING}${DISABLE_BRACKETED_PASTE}${ENABLE_TERMINAL_WRAP}\x1b[?1006l\x1b[?1002l\x1b[?1049l${SHOW_CURSOR}`);
+		process.stdout.write(this.exitInteractiveSequence);
 		if (process.stdin.isTTY) process.stdin.setRawMode(false);
 	};
 
@@ -116,7 +120,7 @@ export class AppTerminalController {
 		process.stdin.off("data", this.onInputData);
 		process.stdin.pause();
 		process.stdout.off("resize", this.onResize);
-		process.stdout.write(`${ANSI_RESET}${DISABLE_TERMINAL_KEY_REPORTING}${DISABLE_BRACKETED_PASTE}${ENABLE_TERMINAL_WRAP}\x1b[?1006l\x1b[?1002l\x1b[?1049l${SHOW_CURSOR}`);
+		process.stdout.write(this.exitInteractiveSequence);
 		if (process.stdin.isTTY) process.stdin.setRawMode(false);
 	}
 
@@ -128,7 +132,7 @@ export class AppTerminalController {
 		process.stdin.on("data", this.onInputData);
 		process.stdout.on("resize", this.onResize);
 		this.host.resetRenderOutputBuffer();
-		process.stdout.write(`${ANSI_RESET}${CLEAR_TERMINAL}\x1b[?1049h${CLEAR_TERMINAL}${ENABLE_TERMINAL_KEY_REPORTING}${ENABLE_BRACKETED_PASTE}${DISABLE_TERMINAL_WRAP}\x1b[?1002h\x1b[?1006h${HIDE_CURSOR}`);
+		process.stdout.write(this.enterInteractiveSequence);
 		this.host.render();
 	}
 
