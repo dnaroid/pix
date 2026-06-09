@@ -5,7 +5,7 @@ import { InputEditor } from "../src/input-editor.js";
 import { THEMES } from "../src/theme.js";
 import { EditorLayoutRenderer } from "../src/app/rendering/editor-layout-renderer.js";
 import { APP_ICONS } from "../src/app/icons.js";
-import type { ExtensionWidgetRegistration, TodoDetails } from "../src/app/types.js";
+import type { Entry, ExtensionWidgetRegistration, TodoDetails } from "../src/app/types.js";
 
 describe("EditorLayoutRenderer voice partials", () => {
 	it("renders a live voice partial above the editor", () => {
@@ -94,6 +94,30 @@ describe("EditorLayoutRenderer extension input UI", () => {
 
 		assert.equal(renderedWidth, 12);
 		assert.equal(layout.aboveEditorLines[0]?.text, "x".repeat(12));
+	});
+
+	it("renders deferred queued messages inside the input frame as widget rows", () => {
+		const queuedEntry: Extract<Entry, { kind: "queued" }> = {
+			id: "deferred-1-0",
+			kind: "queued",
+			mode: "steering",
+			text: "queued later",
+			queueSource: "deferred",
+			queueIndex: 0,
+		};
+		const renderer = editorLayoutRenderer(undefined, {
+			queuedMessageWidgetEntries: [queuedEntry],
+		});
+
+		const layout = renderer.computeLayout(40, 10);
+		const line = layout.aboveEditorLines[0];
+
+		assert.equal(layout.aboveEditorLines.length, 2);
+		assert.ok(line?.text.includes(APP_ICONS.pause));
+		assert.ok(line?.text.includes("queued later"));
+		assert.deepEqual(line?.target, { kind: "queue-message", id: queuedEntry.id });
+		assert.equal(line?.colorOverride, THEMES.dark.colors.warning);
+		assert.equal(line?.segments?.[0]?.foreground, THEMES.dark.colors.info);
 	});
 
 	it("suppresses and disposes legacy todo widgets when the built-in todo panel is active", () => {
@@ -205,6 +229,7 @@ function createRendererHost(overrides: Partial<ConstructorParameters<typeof Edit
 		subagentsWidgetState: undefined,
 		voicePartialText: overrides.voicePartialText,
 		autocompleteSuggestion: overrides.autocompleteSuggestion,
+		queuedMessageWidgetEntries: overrides.queuedMessageWidgetEntries ?? [],
 		renderExtensionInputComponent: overrides.renderExtensionInputComponent ?? (() => undefined),
 		extensionInputUsesEditor: overrides.extensionInputUsesEditor ?? (() => false),
 		widgetTuiHandle: () => ({}) as never,

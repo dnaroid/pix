@@ -3,6 +3,7 @@ import type { ImageContent } from "../../input-editor.js";
 import { createId } from "../id.js";
 import { stringifyUnknown, submittedUserDisplayText } from "../rendering/message-content.js";
 import type { Entry, SessionActivity, SubmittedUserMessage } from "../types.js";
+import { deferredQueuedMessageEntries, queuedMessageEntries } from "./queued-message-entries.js";
 
 export type AppQueuedMessageControllerHost = {
 	runtime(): AgentSessionRuntime | undefined;
@@ -256,8 +257,17 @@ export class AppQueuedMessageController {
 	}
 
 	findQueuedEntry(entryId: string): Extract<Entry, { kind: "queued" }> | undefined {
-		const entry = this.host.visibleEntries().find((candidate) => candidate.id === entryId);
+		const entry = this.queuedEntries().find((candidate) => candidate.id === entryId)
+			?? this.host.visibleEntries().find((candidate) => candidate.id === entryId);
 		return entry?.kind === "queued" ? entry : undefined;
+	}
+
+	queuedEntries(): Extract<Entry, { kind: "queued" }>[] {
+		return queuedMessageEntries(this.host.runtime()?.session, this.deferredUserMessages);
+	}
+
+	deferredQueuedEntries(): Extract<Entry, { kind: "queued" }>[] {
+		return deferredQueuedMessageEntries(this.deferredUserMessages);
 	}
 
 	private shouldDeferUserMessage(session: AgentSession): boolean {

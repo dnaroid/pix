@@ -3,7 +3,8 @@ import { resolveToolRule, type PixConfig } from "../../config.js";
 import { stringDisplayWidth } from "../../terminal-width.js";
 import type { Theme } from "../../theme.js";
 import { renderConversationEntry as renderConversationEntryLines, type InlineUserMessageMenuContext } from "./conversation-entry-renderer.js";
-import { horizontalPaddingLayout, shortHash } from "./render-text.js";
+import { horizontalPaddingLayout } from "./render-text.js";
+import { sdkQueuedMessageEntries } from "../session/queued-message-entries.js";
 import type { ConversationBlockCache, Entry, RenderedLine, SubmittedUserMessage } from "../types.js";
 
 export type ConversationViewportHost = {
@@ -174,43 +175,7 @@ export class ConversationViewport {
 	}
 
 	private queuedEntries(): Entry[] {
-		const session = this.host.session;
-		const entries: Entry[] = [];
-
-		for (const [index, text] of (session?.getSteeringMessages() ?? []).entries()) {
-			entries.push({
-				id: `queued-sdk-steering-${index}-${shortHash(text)}`,
-				kind: "queued",
-				mode: "steering",
-				text,
-				queueSource: "sdk-steering",
-				queueIndex: index,
-			});
-		}
-
-		for (const [index, text] of (session?.getFollowUpMessages() ?? []).entries()) {
-			entries.push({
-				id: `queued-sdk-follow-up-${index}-${shortHash(text)}`,
-				kind: "queued",
-				mode: "follow-up",
-				text,
-				queueSource: "sdk-follow-up",
-				queueIndex: index,
-			});
-		}
-
-		for (const [index, message] of this.host.deferredUserMessages.entries()) {
-			entries.push({
-				id: `${message.id}-${index}`,
-				kind: "queued",
-				mode: "steering",
-				text: message.displayText,
-				queueSource: "deferred",
-				queueIndex: index,
-			});
-		}
-
-		return entries;
+		return sdkQueuedMessageEntries(this.host.session);
 	}
 
 	private layoutForWidth(width: number): ViewportLayoutCache {

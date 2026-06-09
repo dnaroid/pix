@@ -421,6 +421,7 @@ export class PiUiExtendApp {
 			get subagentsWidgetState() { return app.subagentsWidgetController.widgetState; },
 			get voicePartialText() { return app.voicePartialText; },
 			get autocompleteSuggestion() { return app.autocompleteController.suggestionText(); },
+			get queuedMessageWidgetEntries() { return app.queuedMessages.deferredQueuedEntries(); },
 			renderExtensionInputComponent: (width) => this.extensionUiController.renderActiveCustomUi(width),
 			extensionInputUsesEditor: () => this.extensionUiController.activeCustomUiUsesEditor(),
 			widgetTuiHandle: () => this.extensionUiController.widgetTuiHandle(),

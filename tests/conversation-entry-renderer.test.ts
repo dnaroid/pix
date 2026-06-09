@@ -508,7 +508,7 @@ describe("ConversationViewport super-compact tools", () => {
 
 
 describe("ConversationViewport cache behavior", () => {
-	it("includes queued session and deferred messages in entries()", () => {
+	it("includes SDK queued messages in entries()", () => {
 		const session = {
 			getSteeringMessages: () => ["alpha"],
 			getFollowUpMessages: () => ["beta"],
@@ -535,9 +535,7 @@ describe("ConversationViewport cache behavior", () => {
 		assert.equal(entries[1]?.text, "alpha");
 		assert.equal(entries[2]?.kind, "queued");
 		assert.ok(entries[2]?.id.startsWith("queued-sdk-follow-up-0-"));
-		assert.equal(entries[3]?.id, "draft-1-0");
-		assert.equal(entries[3]?.kind, "queued");
-		assert.equal(entries[3]?.queueSource, "deferred");
+		assert.equal(entries.length, 3);
 	});
 
 	it("refreshes dirty cached blocks after deleteEntry", () => {

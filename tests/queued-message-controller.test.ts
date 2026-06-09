@@ -132,6 +132,19 @@ describe("AppQueuedMessageController", () => {
 		assert.equal(state.deferredChangeCount, 2);
 	});
 
+	it("finds deferred queued entries from controller state", () => {
+		const session = fakeSession({ steering: [], followUp: [] });
+		const state = createHostState("");
+		const controller = new AppQueuedMessageController(createHost(session, state));
+		controller.deferredUserMessages.push({ id: "deferred-1", promptText: "send later", displayText: "send later", images: [] });
+
+		const entry = controller.findQueuedEntry("deferred-1-0");
+
+		assert.equal(entry?.kind, "queued");
+		assert.equal(entry?.queueSource, "deferred");
+		assert.equal(entry?.text, "send later");
+	});
+
 	it("cancels a deferred queued message without touching SDK queues", async () => {
 		const sdkQueue = { steering: ["keep steer"], followUp: ["keep follow"] };
 		const calls: string[] = [];

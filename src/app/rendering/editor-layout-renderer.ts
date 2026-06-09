@@ -7,10 +7,11 @@ import {
 	LEGACY_TODO_WIDGET_KEYS,
 } from "../constants.js";
 import { renderSubagentsPanel, renderTodoPanel } from "./editor-panels.js";
-import { ellipsizeDisplay, horizontalPaddingLayout, padHorizontalText, sanitizeText } from "./render-text.js";
+import { ellipsizeDisplay, horizontalPaddingLayout, padHorizontalText, sanitizeText, wrapText } from "./render-text.js";
 import { APP_ICONS } from "../icons.js";
 import type {
 	EditorLayout,
+	Entry,
 	ExtensionWidgetRegistration,
 	ExtensionWidgetTheme,
 	RenderedInput,
@@ -31,6 +32,7 @@ export type EditorLayoutRendererHost = {
 	readonly subagentsWidgetState: SubagentsWidgetState | undefined;
 	readonly voicePartialText: string | undefined;
 	readonly autocompleteSuggestion: string | undefined;
+	readonly queuedMessageWidgetEntries: readonly Extract<Entry, { kind: "queued" }>[];
 	renderExtensionInputComponent(width: number): string[] | undefined;
 	extensionInputUsesEditor(): boolean;
 	widgetTuiHandle(): WidgetTuiHandle;
@@ -96,7 +98,8 @@ export class EditorLayoutRenderer {
 		const hasBuiltInTodoPanel = todoPanelLines.length > 0;
 		const subagentsPanelLines = renderSubagentsPanel(this.host.subagentsWidgetState, this.host.subagentsPanelExpanded, width, this.host.theme.colors);
 		const hasBuiltInSubagentsPanel = subagentsPanelLines.length > 0;
-		const lines: RenderedLine[] = [...todoPanelLines, ...subagentsPanelLines];
+		const queuedMessageWidgetLines = this.renderQueuedMessageWidgets(width);
+		const lines: RenderedLine[] = [...todoPanelLines, ...subagentsPanelLines, ...queuedMessageWidgetLines];
 		let hasWidgets = lines.length > 0;
 		const consumedWidgetKeys = new Set<string>();
 
@@ -142,6 +145,23 @@ export class EditorLayoutRenderer {
 		lines.push(...this.renderVoicePartial(width));
 
 		return { lines, hasWidgets };
+	}
+
+	private renderQueuedMessageWidgets(width: number): RenderedLine[] {
+		const lines: RenderedLine[] = [];
+		for (const entry of this.host.queuedMessageWidgetEntries) {
+			const icon = entry.queueSource === "deferred" ? APP_ICONS.pause : APP_ICONS.timerSand;
+			const wrapped = wrapText(`${icon} ${sanitizeText(entry.text)}`, width);
+			for (const [index, text] of wrapped.entries()) {
+				lines.push({
+					text: padHorizontalText(text, width),
+					colorOverride: this.host.theme.colors.warning,
+					target: { kind: "queue-message", id: entry.id },
+					...(index === 0 ? { segments: [{ start: 0, end: icon.length, foreground: this.host.theme.colors.info }] } : {}),
+				});
+			}
+		}
+		return lines;
 	}
 
 	private renderVoicePartial(width: number): RenderedLine[] {
