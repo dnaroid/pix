@@ -269,7 +269,7 @@ export async function runQuestionnaire(questions: NormalizedQuestion[], ctx: Que
 		}
 
 		function advanceAfterAnswer(): void {
-			if (!pixCapabilities?.delegatedEditorInput && questions.length === 1) {
+			if (questions.length === 1) {
 				submitCompleteSelections();
 				return;
 			}
