@@ -599,20 +599,18 @@ const inputFrame: InputFrameCopyRows = {
 	inputStartRow: 9,
 	inputEndRow: 11,
 	inputBottomSeparatorRow: 11,
-	contentStartColumn: 2,
-	contentEndColumn: 20,
 };
 
 describe("screenSelectionLineText", () => {
-	it("omits input field borders from full-row copies", () => {
-		const text = "│hello             │";
+	it("preserves input field content from full-row copies", () => {
+		const text = "hello             ";
 
 		assert.equal(screenSelectionLineText(9, text, 1, text.length + 1, inputFrame), "hello             ");
 	});
 
 	it("omits input frame separator rows", () => {
-		assert.equal(screenSelectionLineText(8, "╭──────────────────╮", 1, 21, inputFrame), undefined);
-		assert.equal(screenSelectionLineText(11, "╰──────────────────╯", 1, 21, inputFrame), undefined);
+		assert.equal(screenSelectionLineText(8, "────────────────────", 1, 21, inputFrame), undefined);
+		assert.equal(screenSelectionLineText(11, "────────────────────", 1, 21, inputFrame), undefined);
 	});
 
 	it("preserves normal screen rows", () => {

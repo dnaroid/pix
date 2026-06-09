@@ -365,7 +365,7 @@ export class ConversationViewport {
 		if (width <= 0) return 0;
 		switch (entry.kind) {
 			case "assistant":
-				return estimateWrappedLineCount(entry.text, Math.max(1, width - 2)) + 2;
+				return estimateWrappedLineCount(entry.text, width);
 			case "system":
 			case "error":
 			case "custom":
@@ -373,7 +373,7 @@ export class ConversationViewport {
 				return estimateWrappedLineCount(entry.text, width);
 			case "user": {
 				const { contentWidth } = horizontalPaddingLayout(width);
-				return 2 + estimateWrappedLineCount(entry.text, contentWidth);
+				return estimateWrappedLineCount(entry.text, contentWidth);
 			}
 			case "queued": {
 				const { contentWidth } = horizontalPaddingLayout(width);

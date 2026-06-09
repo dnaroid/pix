@@ -51,14 +51,7 @@ type PopupMenuRendererPort = {
 	effectivePopupMenuWidth(columns: number): number;
 	styleOverlayLine(row: number, line: RenderedLine, width: number, activeMenu: PopupMenu<unknown>): string;
 	overlayPlainText(line: RenderedLine, width: number): string;
-	renderInlineUserMessageMenu(
-		options: {
-			userContentWidth: number;
-			userContentLeft: number;
-			userLine: (text: string, entryId?: string, syntaxHighlight?: RenderedLine["syntaxHighlight"]) => RenderedLine;
-		},
-		menu: PopupMenu<UserMessagePopupMenuValue>,
-	): RenderedLine[];
+	renderUserMessageMenu(width: number, menu: PopupMenu<UserMessagePopupMenuValue>): RenderedLine[];
 	renderSlashCommandMenu(width: number, menu: PopupMenu<SlashCommandMenuValue>): RenderedLine[];
 	renderModelMenu(width: number, menu: PopupMenu<ModelPopupMenuValue>): RenderedLine[];
 	renderThinkingMenu(width: number, menu: PopupMenu<ThinkingPopupMenuValue>): RenderedLine[];
@@ -548,9 +541,7 @@ export class AppPopupMenuController {
 
 	renderActivePopupMenu(width: number): RenderedLine[] {
 		if (this.syncQueueMessageMenu()) return this.renderer.renderQueueMessageMenu(width, this.queueMessageMenu);
-		// User-message actions are rendered inline inside the selected message block.
-		// They must never also appear as the global popup above the input editor.
-		if (this.syncUserMessageMenu()) return [];
+		if (this.syncUserMessageMenu()) return this.renderer.renderUserMessageMenu(width, this.userMessageMenu);
 		if (this.syncUserMessageJumpMenu()) return this.renderer.renderUserMessageJumpMenu(width, this.userMessageJumpMenu, this.directPopupMenuQuery);
 		if (this.syncResumeMenu()) {
 			return this.renderer.renderResumeMenu(width, this.resumeMenu, {
@@ -588,12 +579,13 @@ export class AppPopupMenuController {
 	}
 
 	isDynamicConversationBlock(entry: Entry): boolean {
-		return entry.kind === "user" && this.directPopupMenu === "user-message" && this.activeUserMessageEntryId === entry.id;
-	}
+		void entry;
+		return false;
+}
 
 	hasDynamicConversationBlock(): boolean {
-		return this.directPopupMenu === "user-message" && this.activeUserMessageEntryId !== undefined;
-	}
+		return false;
+}
 
 	renderInlineUserMessageMenu(
 		entry: Extract<Entry, { kind: "user" }>,
@@ -603,8 +595,9 @@ export class AppPopupMenuController {
 			userLine: (text: string, entryId?: string, syntaxHighlight?: RenderedLine["syntaxHighlight"]) => RenderedLine;
 		},
 	): RenderedLine[] {
-		if (!(this.directPopupMenu === "user-message" && this.activeUserMessageEntryId === entry.id && this.syncUserMessageMenu())) return [];
-		return this.renderer.renderInlineUserMessageMenu(options, this.userMessageMenu);
+		void entry;
+		void options;
+		return [];
 	}
 
 	private withoutCloseMenuItems<T>(items: readonly PopupMenuItem<T>[]): PopupMenuItem<T>[] {

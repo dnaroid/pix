@@ -36,27 +36,23 @@ describe("renderConversationEntry", () => {
 		const lines = renderConversationEntry({ id: "assistant-1", kind: "assistant", text: "# Title\nUse `code`." }, 80, renderOptions);
 
 		assert.deepEqual(lines.map((line) => line.syntaxHighlight), [
-			undefined,
-			{ language: "markdown", start: 1 },
-			{ language: "markdown", start: 1 },
-			undefined,
+			{ language: "markdown", start: 0 },
+			{ language: "markdown", start: 0 },
 		]);
 	});
 
 	it("uses the assistant foreground color for assistant messages", () => {
 		const lines = renderConversationEntry({ id: "assistant-color", kind: "assistant", text: "Less bright text." }, 80, renderOptions);
 
-		assert.deepEqual(lines.map((line) => line.colorOverride), [undefined, THEMES.dark.colors.assistantForeground, undefined]);
+		assert.deepEqual(lines.map((line) => line.colorOverride), [THEMES.dark.colors.assistantForeground]);
 	});
 
 	it("wraps assistant messages at word boundaries", () => {
 		const lines = renderConversationEntry({ id: "assistant-wrap", kind: "assistant", text: "alpha beta gamma" }, 12, renderOptions);
 
 		assert.deepEqual(lines.map((line) => line.text), [
-			"            ",
-			" alpha beta ",
-			" gamma      ",
-			"            ",
+			"alpha beta  ",
+			"gamma       ",
 		]);
 	});
 
@@ -78,13 +74,11 @@ describe("renderConversationEntry", () => {
 		}, 80, renderOptions);
 
 		assert.deepEqual(lines.map((line) => line.text), [
-			"                                                                                ",
-			" ┌──────┬──────┐                                                                ",
-			" │  A   │ Wide │                                                                ",
-			" ├──────┼──────┤                                                                ",
-			" │  1   │  30  │                                                                ",
-			" └──────┴──────┘                                                                ",
-			"                                                                                ",
+			"┌──────┬──────┐".padEnd(80),
+			"│  A   │ Wide │".padEnd(80),
+			"├──────┼──────┤".padEnd(80),
+			"│  1   │  30  │".padEnd(80),
+			"└──────┴──────┘".padEnd(80),
 		]);
 	});
 
@@ -97,39 +91,30 @@ describe("renderConversationEntry", () => {
 
 		assert(lines.every((line) => !line.text.includes("**")));
 		assert.deepEqual(lines.map((line) => line.text), [
-			"                                                ",
-			" \u041a\u043e\u0440\u043e\u0442\u043a\u043e: \u0434\u0430, \u043f\u0440\u0438 \u043f\u0440\u043e\u0434\u043e\u043b\u0436\u0435\u043d\u0438\u0438 \u0441\u0435\u0441\u0441\u0438\u0438 todo       ",
-			" \u0432\u043e\u0441\u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u0441\u044f \u0438\u0437 persisted plan.               ",
-			"                                                ",
+			"\u041a\u043e\u0440\u043e\u0442\u043a\u043e: \u0434\u0430, \u043f\u0440\u0438 \u043f\u0440\u043e\u0434\u043e\u043b\u0436\u0435\u043d\u0438\u0438 \u0441\u0435\u0441\u0441\u0438\u0438 todo        ",
+			"\u0432\u043e\u0441\u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u0441\u044f \u0438\u0437 persisted plan.                ",
 		]);
 		assert.deepEqual(lines.map((line) => line.segments), [
-			undefined,
-			[{ start: 10, end: 41, bold: true }],
-			[{ start: 1, end: 33, bold: true }],
-			undefined,
+			[{ start: 9, end: 40, bold: true }],
+			[{ start: 0, end: 32, bold: true }],
 		]);
 	});
 
 	it("marks user messages as markdown for syntax highlighting", () => {
 		const lines = renderConversationEntry({ id: "user-1", kind: "user", text: "Use `code`." }, 40, renderOptions);
 
-		assert.equal(lines[0]?.syntaxHighlight, undefined);
-		assert.deepEqual(lines[1]?.syntaxHighlight, { language: "markdown", start: 1 });
-		assert.equal(lines[2]?.syntaxHighlight, undefined);
+		assert.deepEqual(lines[0]?.syntaxHighlight, { language: "markdown", start: 0 });
 	});
 
-	it("keeps the user message bubble background", () => {
+	it("renders user messages in warning color without a bubble background", () => {
 		const lines = renderConversationEntry({ id: "user-bg", kind: "user", text: "hello" }, 40, renderOptions);
 
-		assert.deepEqual(lines.map((line) => line.backgroundOverride), [
-			THEMES.dark.colors.userMessageBackground,
-			THEMES.dark.colors.userMessageBackground,
-			THEMES.dark.colors.userMessageBackground,
-		]);
-		assert.deepEqual(lines.map((line) => line.segments), [undefined, undefined, undefined]);
+		assert.deepEqual(lines.map((line) => line.colorOverride), [THEMES.dark.colors.warning]);
+		assert.deepEqual(lines.map((line) => line.backgroundOverride), [undefined]);
+		assert.deepEqual(lines.map((line) => line.segments), [undefined]);
 	});
 
-	it("keeps queued messages on the user message bubble background", () => {
+	it("renders queued messages without a bubble background", () => {
 		const lines = renderConversationEntry({
 			id: "queue-bg",
 			kind: "queued",
@@ -139,9 +124,8 @@ describe("renderConversationEntry", () => {
 			queueIndex: 0,
 		}, 40, renderOptions);
 
-		assert.deepEqual(lines.map((line) => line.backgroundOverride), [
-			THEMES.dark.colors.userMessageBackground,
-		]);
+		assert.deepEqual(lines.map((line) => line.backgroundOverride), [undefined]);
+		assert.deepEqual(lines.map((line) => line.colorOverride), [THEMES.dark.colors.warning]);
 		assert.match(lines[0]?.text ?? "", new RegExp(`${APP_ICONS.timerSand} hello`, "u"));
 		assert.equal(lines[0]?.text, `${APP_ICONS.timerSand} hello`);
 		assert.doesNotMatch(lines[0]?.text ?? "", /\b(?:steer|follow|queued):/u);
@@ -179,7 +163,7 @@ describe("renderConversationEntry", () => {
 	it("wraps user messages at word boundaries inside the padded bubble", () => {
 		const lines = renderConversationEntry({ id: "user-wrap", kind: "user", text: "alpha beta gamma" }, 12, renderOptions);
 
-		assert.deepEqual(lines.map((line) => line.text), ["            ", " alpha beta ", " gamma      ", "            "]);
+		assert.deepEqual(lines.map((line) => line.text), ["alpha beta  ", "gamma       "]);
 	});
 
 	it("marks user image labels as clickable image targets", () => {
@@ -187,8 +171,8 @@ describe("renderConversationEntry", () => {
 		const lines = renderConversationEntry({ id: "user-image", kind: "user", text: "[Image]", images: [image] }, 40, renderOptions);
 		const imageLine = lines.find((line) => line.text.includes("[Image]"));
 
-		assert.deepEqual(imageLine?.imageTargets, [{ start: 1, end: 8, entryId: "user-image", imageIndex: 0 }]);
-		assert.deepEqual(imageLine?.segments, [{ start: 1, end: 8, foreground: THEMES.dark.colors.info, underline: true }]);
+		assert.deepEqual(imageLine?.imageTargets, [{ start: 0, end: 7, entryId: "user-image", imageIndex: 0 }]);
+		assert.deepEqual(imageLine?.segments, [{ start: 0, end: 7, foreground: THEMES.dark.colors.info, underline: true }]);
 	});
 
 	it("formats user markdown tables before wrapping", () => {
@@ -198,11 +182,11 @@ describe("renderConversationEntry", () => {
 			text: "| \u041f\u043d | \u0421\u0431 |\n|:--:|:--:|\n| 1 | **30** |",
 		}, 80, renderOptions);
 
-		assert.match(lines[1]?.text ?? "", /┌──────┬──────┐/u);
-		assert.match(lines[2]?.text ?? "", /│  \u041f\u043d  │  \u0421\u0431  │/u);
-		assert.match(lines[3]?.text ?? "", /├──────┼──────┤/u);
-		assert.match(lines[4]?.text ?? "", /│  1   │  30  │/u);
-		assert.match(lines[5]?.text ?? "", /└──────┴──────┘/u);
+		assert.match(lines[0]?.text ?? "", /┌──────┬──────┐/u);
+		assert.match(lines[1]?.text ?? "", /│  \u041f\u043d  │  \u0421\u0431  │/u);
+		assert.match(lines[2]?.text ?? "", /├──────┼──────┤/u);
+		assert.match(lines[3]?.text ?? "", /│  1   │  30  │/u);
+		assert.match(lines[4]?.text ?? "", /└──────┴──────┘/u);
 	});
 
 	it("renders expanded tool content in super-compact mode", () => {
@@ -552,6 +536,7 @@ describe("ConversationViewport cache behavior", () => {
 		assert.equal(entries[2]?.kind, "queued");
 		assert.ok(entries[2]?.id.startsWith("queued-sdk-follow-up-0-"));
 		assert.equal(entries[3]?.id, "draft-1-0");
+		assert.equal(entries[3]?.kind, "queued");
 		assert.equal(entries[3]?.queueSource, "deferred");
 	});
 
@@ -571,7 +556,7 @@ describe("ConversationViewport cache behavior", () => {
 			renderInlineUserMessageMenu: () => [],
 		} as ConversationViewportHost);
 
-		assert.equal(viewport.lineCount(80), 4);
+		assert.equal(viewport.lineCount(80), 2);
 		filters = [/alpha/u];
 		viewport.deleteEntry("assistant-dirty");
 
@@ -596,7 +581,7 @@ describe("ConversationViewport cache behavior", () => {
 			renderInlineUserMessageMenu: () => [],
 		} as ConversationViewportHost);
 
-		assert.equal(viewport.lineCount(80), 4);
+		assert.equal(viewport.lineCount(80), 2);
 		filters = [/alpha/u];
 
 		assert.equal(viewport.lineCount(80), 0);
@@ -630,7 +615,7 @@ describe("ConversationViewport cache behavior", () => {
 		const measuredBeforeAppend = viewport.lineCount(8);
 		entries.push({ id: "assistant-new", kind: "assistant", text: "new" });
 
-		assert.equal(viewport.lineCount(8), measuredBeforeAppend + 4);
+		assert.equal(viewport.lineCount(8), measuredBeforeAppend + 2);
 	});
 });
 

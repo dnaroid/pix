@@ -75,7 +75,7 @@ describe("EditorLayoutRenderer extension input UI", () => {
 		assert.equal(layout.inputStartRow, layout.inputSeparatorRow + layout.aboveEditorLines.length + 1);
 	});
 
-	it("renders above-editor widgets at the inner frame width", () => {
+	it("renders above-editor widgets at the full editor width", () => {
 		let renderedWidth: number | undefined;
 		const renderer = editorLayoutRenderer(undefined, {
 			extensionWidgets: new Map([["test-widget", {
@@ -92,8 +92,8 @@ describe("EditorLayoutRenderer extension input UI", () => {
 
 		const layout = renderer.computeLayout(12, 10);
 
-		assert.equal(renderedWidth, 10);
-		assert.equal(layout.aboveEditorLines[0]?.text, "x".repeat(10));
+		assert.equal(renderedWidth, 12);
+		assert.equal(layout.aboveEditorLines[0]?.text, "x".repeat(12));
 	});
 
 	it("suppresses and disposes legacy todo widgets when the built-in todo panel is active", () => {

@@ -103,8 +103,8 @@ export function padOrTrimPlain(text: string, width: number): string {
 
 export function horizontalPaddingLayout(width: number): { left: number; right: number; contentWidth: number } {
 	const safeWidth = Math.max(1, width);
-	const left = safeWidth > 1 ? 1 : 0;
-	const right = safeWidth > 2 ? 1 : 0;
+	const left = 0;
+	const right = 0;
 	return { left, right, contentWidth: Math.max(1, safeWidth - left - right) };
 }
 

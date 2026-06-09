@@ -55,9 +55,9 @@ describe("render-text helpers", () => {
 		assert.equal(normalizePastedTextForDuplicateKey("a\r\nb\rc"), "a\nb\nc");
 		assert.notEqual(shortHash("pix-ui-extend"), shortHash("pix-ui-extend!"));
 		assert.deepEqual(horizontalPaddingLayout(1), { left: 0, right: 0, contentWidth: 1 });
-		assert.deepEqual(horizontalPaddingLayout(4), { left: 1, right: 1, contentWidth: 2 });
+		assert.deepEqual(horizontalPaddingLayout(4), { left: 0, right: 0, contentWidth: 4 });
 		assert.equal(padHorizontalText("abc", 1), "a");
-		assert.equal(padHorizontalText("abc", 4), " ab ");
+		assert.equal(padHorizontalText("abc", 4), "abc ");
 		assert.deepEqual(wrapText("alpha beta", 5), ["alpha", " beta"]);
 		assert.equal(ellipsizeDisplay("abcdef", 0), "");
 		assert.equal(ellipsizeDisplay("abcdef", 1), "…");

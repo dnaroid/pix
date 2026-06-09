@@ -58,8 +58,6 @@ export type InputFrameCopyRows = {
 	inputEndRow: number;
 	inputSeparatorRow: number;
 	inputBottomSeparatorRow: number;
-	contentStartColumn: number;
-	contentEndColumn: number;
 };
 
 export type AppMouseControllerHost = {
@@ -916,8 +914,6 @@ export class AppMouseController {
 			inputEndRow: toScreenRowExclusive(layout.inputStartRow + layout.renderedInput.lines.length),
 			inputSeparatorRow: toScreenRow(layout.inputSeparatorRow),
 			inputBottomSeparatorRow: toScreenRow(layout.inputBottomSeparatorRow),
-			contentStartColumn: 2,
-			contentEndColumn: columns,
 		};
 	}
 
@@ -934,10 +930,7 @@ export class AppMouseController {
 			const line = range.start.line + index;
 			const startColumn = line === range.start.line ? range.start.x : 1;
 			const endColumn = line === range.end.line ? range.end.x : text.length + 1;
-			let lineText = sliceByDisplayColumns(text, startColumn, endColumn);
-			if (rendered?.backgroundOverride) {
-				lineText = lineText.replace(/^ /, "").replace(/ $/, "");
-			}
+			const lineText = sliceByDisplayColumns(text, startColumn, endColumn);
 			lines.push(lineText.trimEnd());
 		}
 
@@ -1093,14 +1086,7 @@ export function screenSelectionLineText(
 		return undefined;
 	}
 
-	let copyStartColumn = startColumn;
-	let copyEndColumn = endColumn;
-	if (inputFrame && row >= inputFrame.inputStartRow && row < inputFrame.inputEndRow) {
-		copyStartColumn = Math.max(copyStartColumn, inputFrame.contentStartColumn);
-		copyEndColumn = Math.min(copyEndColumn, inputFrame.contentEndColumn);
-	}
-
-	return sliceByDisplayColumns(text, copyStartColumn, copyEndColumn);
+	return sliceByDisplayColumns(text, startColumn, endColumn);
 }
 
 function sameConversationPoint(left: ConversationSelectionPoint | undefined, right: ConversationSelectionPoint): boolean {

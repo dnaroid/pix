@@ -102,7 +102,7 @@ export class ScreenStyler {
 		frameColor?: string,
 	): string {
 		const colors = this.host.theme.colors;
-		const baseOptions = { foreground: colors.inputForeground };
+		const baseOptions = { foreground: colors.warning };
 		if (this.selectionRangeForRow(row, width, text)) return this.styleLine(row, text, width, baseOptions);
 
 		const plain = padOrTrimPlain(text, width);

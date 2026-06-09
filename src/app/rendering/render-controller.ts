@@ -16,10 +16,6 @@ import { stringDisplayWidth } from "../../terminal-width.js";
 import { padOrTrimPlain } from "./render-text.js";
 
 const INPUT_FRAME = {
-	topLeft: "╭",
-	topRight: "╮",
-	bottomLeft: "╰",
-	bottomRight: "╯",
 	horizontal: "─",
 };
 
@@ -200,7 +196,7 @@ export class AppRenderController {
 			this.deps.mouseController.renderedRowTexts.set(row, inputLine);
 
 			const tagColor = this.deps.theme.colors.accent;
-			const styledLine = this.deps.screenStyler.styleInputLine(row, inputLine, tagSpans, suggestionSpans, columns, tagColor, this.deps.theme.colors.muted, this.deps.theme.colors.inputBorder);
+			const styledLine = this.deps.screenStyler.styleInputLine(row, inputLine, tagSpans, suggestionSpans, columns, tagColor, this.deps.theme.colors.muted);
 			appendFrameOutput("inputStatus", row, this.renderFrameRow(row, styledLine));
 		}
 		if (renderedInput.scrollBar && columns > 0) {
@@ -401,11 +397,9 @@ function visibleToastStates(toastController: AppToastController): ReturnType<App
 }
 
 function inputFrameLine(width: number, edge: "top" | "bottom"): string {
+	void edge;
 	if (width <= 0) return "";
-	if (width === 1) return edge === "top" ? INPUT_FRAME.topLeft : INPUT_FRAME.bottomLeft;
-	const left = edge === "top" ? INPUT_FRAME.topLeft : INPUT_FRAME.bottomLeft;
-	const right = edge === "top" ? INPUT_FRAME.topRight : INPUT_FRAME.bottomRight;
-	return `${left}${INPUT_FRAME.horizontal.repeat(Math.max(0, width - 2))}${right}`;
+	return INPUT_FRAME.horizontal.repeat(width);
 }
 
 function frameRenderedLine(
@@ -415,24 +409,13 @@ function frameRenderedLine(
 	screenStyler: ScreenStyler,
 ): { line: RenderedLine | undefined; text: string; output: (row: number) => string } {
 	if (width <= 0) return { line, text: "", output: () => "" };
-	if (width === 1) {
-		const border = colorize("│", {
-			foreground: theme.colors.inputBorder,
-		});
-		return { line, text: "│", output: () => border };
-	}
-
-	const innerWidth = Math.max(0, width - 2);
-	const innerText = padOrTrimPlain(line?.text ?? "", innerWidth);
-	const innerLine = line ? frameInnerRenderedLine(line, innerText, innerWidth) : undefined;
-	const leftBorder = colorize("│", {
-		foreground: theme.colors.inputBorder,
-	});
-	const rightBorder = leftBorder;
+	void theme;
+	const text = padOrTrimPlain(line?.text ?? "", width);
+	const outputLine = line ? frameInnerRenderedLine(line, text, width) : undefined;
 	return {
 		line,
-		text: `│${innerText}│`,
-		output: (row: number) => `${leftBorder}${screenStyler.styleBaseLine(row, innerLine, innerWidth)}${rightBorder}`,
+		text,
+		output: (row: number) => screenStyler.styleBaseLine(row, outputLine, width),
 	};
 }
 

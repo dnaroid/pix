@@ -33,29 +33,22 @@ export function renderConversationEntry(entry: Entry, width: number, options: Co
 		segments?: RenderedLine["segments"],
 	): RenderedLine => ({
 		text: padHorizontalText(text, width),
-		colorOverride: options.colors.inputForeground,
-		backgroundOverride: options.colors.userMessageBackground,
+		colorOverride: options.colors.warning,
 		...(segments && segments.length > 0 ? { segments: segments.map((segment) => ({ ...segment, start: segment.start + userContentLeft, end: segment.end + userContentLeft })) } : {}),
 		...(syntaxHighlight === undefined ? {} : { syntaxHighlight }),
 		...(entryId === undefined ? {} : { target: { kind: "user-message" as const, id: entryId } }),
 	});
 	const queuedLine = (text: string, entryId: string, segments?: readonly StyledSegment[]): RenderedLine => ({
 		text,
-		variant: "muted" as const,
-		backgroundOverride: options.colors.userMessageBackground,
+		colorOverride: options.colors.warning,
 		...(segments && segments.length > 0 ? { segments } : {}),
 		target: { kind: "queue-message" as const, id: entryId },
 	});
 	const userMessageLines = (userEntry: Extract<Entry, { kind: "user" }>): RenderedLine[] => {
-		const lines = [
-			userLine("", userEntry.id),
-			...renderMarkdownTextLines(userEntry.text, userContentWidth, userContentLeft).map((line) =>
-				userLine(line.text, userEntry.id, line.syntaxHighlight, line.segments),
-			),
-		];
+		const lines = renderMarkdownTextLines(userEntry.text, userContentWidth, userContentLeft).map((line) =>
+			userLine(line.text, userEntry.id, line.syntaxHighlight, line.segments),
+		);
 
-		lines.push(...options.renderInlineUserMessageMenu(userEntry, { userContentWidth, userContentLeft, userLine }));
-		lines.push(userLine("", userEntry.id));
 		return attachImageClickTargets(lines, userEntry.id, userEntry.images, { foreground: options.colors.info, underline: true });
 	};
 	const queuedMessageLines = (queuedEntry: Extract<Entry, { kind: "queued" }>): RenderedLine[] => {
@@ -100,19 +93,16 @@ function renderAssistantLines(text: string, width: number, options: Conversation
 	const displayText = applyOutputFilters(text, options.outputFilters).trimEnd();
 	if (!displayText) return [];
 	const { left: contentLeft, contentWidth } = horizontalPaddingLayout(width);
-	const background = options.colors.assistantMessageBackground;
 	const contentLines = renderMarkdownTextLines(displayText, contentWidth, contentLeft);
 	if (contentLines.length === 0) return [];
-	const lines: RenderedLine[] = [{ text: padHorizontalText("", width), backgroundOverride: background }];
+	const lines: RenderedLine[] = [];
 	for (const line of contentLines) {
 		lines.push({
 			text: padHorizontalText(line.text, width),
 			colorOverride: options.colors.assistantForeground,
-			backgroundOverride: background,
 			...(line.segments && line.segments.length > 0 ? { segments: line.segments.map((segment) => ({ ...segment, start: segment.start + contentLeft, end: segment.end + contentLeft })) } : {}),
 			...(line.syntaxHighlight ? { syntaxHighlight: line.syntaxHighlight } : {}),
 		});
 	}
-	lines.push({ text: padHorizontalText("", width), backgroundOverride: background });
 	return lines;
 }

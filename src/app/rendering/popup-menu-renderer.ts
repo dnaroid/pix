@@ -86,50 +86,34 @@ export class PopupMenuRenderer {
 		return `${" ".repeat(margin)}${padOrTrimPlain(line.text, menuWidth)}${" ".repeat(rightMargin)}`;
 	}
 
-	renderInlineUserMessageMenu(
-		options: {
-			userContentWidth: number;
-			userContentLeft: number;
-			userLine: (text: string, entryId?: string, syntaxHighlight?: RenderedLine["syntaxHighlight"]) => RenderedLine;
-		},
+	renderUserMessageMenu(
+		width: number,
 		menu: PopupMenu<UserMessageMenuValue>,
 	): RenderedLine[] {
-		const headerLine = options.userLine(formatPopupMenuHeader("Message actions", options.userContentWidth));
-		headerLine.target = { kind: "popup-menu-close" };
-		headerLine.segments = [{
-			start: options.userContentLeft,
-			end: options.userContentLeft + options.userContentWidth,
-			foreground: this.host.theme.colors.accent,
-			background: this.host.theme.colors.popupHeaderBackground,
-			bold: true,
-		}];
-
-		const lines: RenderedLine[] = [headerLine];
+		const lines: RenderedLine[] = [this.popupMenuHeader("Message actions", width)];
 		for (const item of menu.visibleItems()) {
-			const label = item.label.padEnd(18, " ");
-			const description = item.description ?? "";
-			const marker = item.selected ? "▶" : " ";
-			const rawText = `${marker} ${label}${description}`;
-			const text = ellipsizeDisplay(rawText, options.userContentWidth);
-			const line = options.userLine(text);
-			line.target = { kind: "popup-menu", index: item.index };
-
-			const contentStart = options.userContentLeft;
-			const labelStart = contentStart + 2;
-			const labelEnd = Math.min(contentStart + text.length, labelStart + item.label.length);
-			const descriptionStart = contentStart + 2 + label.length;
-			line.segments = [
-				...(item.selected ? [{ start: contentStart, end: contentStart + 1, foreground: this.host.theme.colors.accent, bold: true }] : []),
+			const marker = item.selected ? "▶ " : "  ";
+			const text = `${marker}${this.labelDescriptionText(item.label, item.description, width - 2, 18)}`;
+			const labelStart = 2;
+			const labelEnd = Math.min(text.length, labelStart + item.label.length);
+			const description = item.description ? sanitizeText(item.description).replace(/\s+/gu, " ") : "";
+			const descriptionStart = description ? text.indexOf(description, labelEnd) : -1;
+			const line: RenderedLine = {
+				text,
+				target: { kind: "popup-menu", index: item.index },
+				segments: [
+				...(item.selected ? [{ start: 0, end: 1, foreground: this.host.theme.colors.accent, bold: true }] : []),
 				{
 					start: labelStart,
 					end: labelEnd,
 					foreground: this.userMessageActionForeground(item.value),
 					bold: item.selected,
 				},
-				...(descriptionStart < contentStart + text.length
-					? [{ start: descriptionStart, end: contentStart + text.length, foreground: this.host.theme.colors.muted }]
+				...(descriptionStart >= 0
+					? [{ start: descriptionStart, end: text.length, foreground: this.host.theme.colors.muted }]
 					: []),
-			];
+				],
+			};
 			lines.push(line);
 		}
 		return lines;

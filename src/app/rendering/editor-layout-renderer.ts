@@ -21,9 +21,6 @@ import type {
 	WidgetPlacement,
 	WidgetTuiHandle,
 } from "../types.js";
-
-const INPUT_FRAME_VERTICAL = "│";
-
 export type EditorLayoutRendererHost = {
 	readonly theme: Theme;
 	readonly inputEditor: InputEditor;
@@ -48,14 +45,14 @@ export class EditorLayoutRenderer {
 		const maxAvailableInputRows = Math.max(1, rows - 5);
 		const renderedInput = this.renderInput(width, Math.min(INPUT_MAX_ROWS, maxAvailableInputRows), maxAvailableInputRows);
 		const maxEntityRows = Math.max(0, rows - renderedInput.lines.length - 4);
-		const framedEntityWidth = inputFrameContentWidth(width);
-		const aboveEditorEntities = this.renderAboveEditorEntities(framedEntityWidth);
+		const editorEntityWidth = inputFrameContentWidth(width);
+		const aboveEditorEntities = this.renderAboveEditorEntities(editorEntityWidth);
 		let aboveEditorLines = this.limitEntityLines(aboveEditorEntities.lines, maxEntityRows);
 		if (aboveEditorEntities.hasWidgets && aboveEditorLines.length < maxEntityRows) {
 			aboveEditorLines = [...aboveEditorLines, { text: "", variant: "normal" }];
 		}
 		const belowEditorLines = this.limitEntityLines(
-			this.renderExtensionWidgets("belowEditor", framedEntityWidth),
+			this.renderExtensionWidgets("belowEditor", editorEntityWidth),
 			maxEntityRows - aboveEditorLines.length,
 		);
 
@@ -195,7 +192,7 @@ export class EditorLayoutRenderer {
 		const scrollBar = usesEditor
 			? inputScrollBarMetrics(rendered.visualLines.length, visibleLines.length, rendered.scrollOffset)
 			: undefined;
-		const editorLines = usesEditor ? visibleLines.map((vl) => frameInputLine(padHorizontalText(vl.text, width))) : [];
+		const editorLines = usesEditor ? visibleLines.map((vl) => padHorizontalText(vl.text, width)) : [];
 		const editorTagSpans = usesEditor
 			? visibleLines.map((vl) => vl.tagSpans.map((span) => ({
 				start: span.start + left,
@@ -208,7 +205,7 @@ export class EditorLayoutRenderer {
 				end: span.end + left,
 			})))
 			: [];
-		const paddedCustomLines = customLines.map((line) => frameInputLine(padHorizontalText(line, width)));
+		const paddedCustomLines = customLines.map((line) => padHorizontalText(line, width));
 		return {
 			lines: [...paddedCustomLines, ...editorLines],
 			cursorRowOffset: customLines.length + rendered.cursorVisualRow - rendered.scrollOffset,
@@ -242,14 +239,8 @@ export class EditorLayoutRenderer {
 	}
 }
 
-function frameInputLine(line: string): string {
-	if (line.length <= 0) return line;
-	if (line.length === 1) return INPUT_FRAME_VERTICAL;
-	return `${INPUT_FRAME_VERTICAL}${line.slice(1, -1)}${INPUT_FRAME_VERTICAL}`;
-}
-
 function inputFrameContentWidth(width: number): number {
-	return Math.max(1, width - 2);
+	return Math.max(1, width);
 }
 
 function inputScrollBarMetrics(totalLineCount: number, visibleRowCount: number, scrollOffset: number): ScrollBarMetrics | undefined {

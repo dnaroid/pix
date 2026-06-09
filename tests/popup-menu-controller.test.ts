@@ -92,22 +92,18 @@ describe("popup menu header", () => {
 		assert.ok(output.endsWith("  "));
 	});
 
-	it("renders a header for the inline user-message action menu", () => {
+	it("renders user-message actions as a popup overlay", () => {
 		const entry: Extract<Entry, { kind: "user" }> = { id: "user-1", kind: "user", text: "hello" };
 		const controller = createPopupMenuController(createPopupMenuHost([entry]));
 
 		assert.equal(controller.openUserMessageMenu(entry.id), true);
 
-		const lines = controller.renderInlineUserMessageMenu(entry, {
-			userContentWidth: 32,
-			userContentLeft: 2,
-			userLine: (text): RenderedLine => ({ text }),
-		});
+		const lines = controller.renderActivePopupMenu(32);
 
 		assert.match(lines[0]?.text ?? "", /Message actions/);
 		assert.ok(lines[0]?.text.endsWith("Esc  "));
 		assert.deepEqual(lines[0]?.target, { kind: "popup-menu-close" });
-		assert.equal(lines[0]?.segments?.[0]?.background, THEMES.dark.colors.popupHeaderBackground);
+		assert.equal(lines[0]?.backgroundOverride, THEMES.dark.colors.popupHeaderBackground);
 		assert.equal(lines[1]?.target?.kind, "popup-menu");
 		assert.equal(lines.length, 2);
 		assert.ok(lines.every((line) => !/Cancel/.test(line.text)));
