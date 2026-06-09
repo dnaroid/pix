@@ -26,8 +26,6 @@ import { APP_ICONS } from "../icons.js";
 import { resolveColor, resolveModelColor, type ModelColorsConfig } from "../../config.js";
 
 const MODEL_USAGE_PROGRESS_BAR_WIDTH = stringDisplayWidth(formatCompactProgressBar(100));
-const INPUT_BORDER_WIDGET_SEPARATOR = "─";
-const STATUS_ICON_BUTTON_WIDTH = 3;
 
 export type StatusLineRendererHost = {
 	readonly theme: Theme;
@@ -141,18 +139,14 @@ export class StatusLineRenderer {
 		if (!hasParts) return undefined;
 
 		const parts: string[] = [];
-		const totalWidth = widgets.reduce((total, widget, index) => total + (index > 0 ? 1 : 0) + stringDisplayWidth(widget.text), 0);
+		const totalWidth = widgets.reduce((total, widget) => total + stringDisplayWidth(widget.text), 0);
 		const endColumn = Math.max(1, width + 1);
 		const startColumn = endColumn - totalWidth;
 		if (startColumn < 1) return undefined;
 
 		layout.inputBorderWidgetStartColumn = startColumn;
 		let nextColumn = startColumn;
-		for (const [index, widget] of widgets.entries()) {
-			if (index > 0) {
-				parts.push(INPUT_BORDER_WIDGET_SEPARATOR);
-				nextColumn += 1;
-			}
+		for (const widget of widgets) {
 			parts.push(widget.text);
 			widget.assign(nextColumn, widget.text);
 			nextColumn += stringDisplayWidth(widget.text);
@@ -179,7 +173,6 @@ export class StatusLineRenderer {
 
 	private inputBorderWidgetSegments(layout: StatusLineLayout, text: string): StyledSegment[] {
 		const colors = this.host.theme.colors;
-		const background = colors.inputBorderWidgetBackground;
 		const segments: StyledSegment[] = [];
 		const pushWidgetSegment = (widget: { startColumn: number; endColumn: number } | undefined, foreground: string): void => {
 			if (!widget) return;
@@ -187,7 +180,6 @@ export class StatusLineRenderer {
 				start: displayIndexForColumn(text, widget.startColumn),
 				end: displayIndexForColumn(text, widget.endColumn),
 				foreground,
-				background,
 			});
 		};
 
@@ -208,14 +200,12 @@ export class StatusLineRenderer {
 				start: displayIndexForColumn(text, voiceWidget.startColumn),
 				end: displayIndexForColumn(text, voiceWidget.micEndColumn),
 				foreground: this.host.voiceStatusWidgetActive() ? colors.error : colors.muted,
-				background,
 			});
 			if (voiceWidget.languageEndColumn > voiceWidget.languageStartColumn) {
 				segments.push({
 					start: displayIndexForColumn(text, voiceWidget.languageStartColumn),
 					end: displayIndexForColumn(text, voiceWidget.languageEndColumn),
 					foreground: colors.statusForeground,
-					background,
 				});
 			}
 		}
@@ -386,7 +376,6 @@ export class StatusLineRenderer {
 
 	private pushStatusWidgetSegments(segments: StyledSegment[], statusText: string, layout: StatusLineLayout): void {
 		const colors = this.host.theme.colors;
-		const background = colors.inputBorderWidgetBackground;
 		const widgets = [
 			{ widget: layout.draftQueueWidget, foreground: colors.info },
 			{ widget: layout.promptEnhancerWidget, foreground: this.host.promptEnhancerStatusWidgetActive()
@@ -405,7 +394,6 @@ export class StatusLineRenderer {
 				start: displayIndexForColumn(statusText, widget.startColumn),
 				end: displayIndexForColumn(statusText, widget.endColumn),
 				foreground,
-				background,
 			});
 		}
 
@@ -415,31 +403,14 @@ export class StatusLineRenderer {
 				start: displayIndexForColumn(statusText, voiceWidget.startColumn),
 				end: displayIndexForColumn(statusText, voiceWidget.micEndColumn),
 				foreground: this.host.voiceStatusWidgetActive() ? colors.error : colors.muted,
-				background,
 			});
 			if (voiceWidget.languageEndColumn > voiceWidget.languageStartColumn) {
 				segments.push({
 					start: displayIndexForColumn(statusText, voiceWidget.languageStartColumn),
 					end: displayIndexForColumn(statusText, voiceWidget.languageEndColumn),
 					foreground: colors.statusForeground,
-					background,
 				});
 			}
-		}
-
-		const ranges = [
-			...widgets.map(({ widget }) => widget),
-			...(voiceWidget ? [voiceWidget] : []),
-		].sort((left, right) => left.startColumn - right.startColumn);
-		for (let index = 1; index < ranges.length; index += 1) {
-			const previous = ranges[index - 1];
-			const current = ranges[index];
-			if (!previous || !current || current.startColumn <= previous.endColumn) continue;
-			segments.push({
-				start: displayIndexForColumn(statusText, previous.endColumn),
-				end: displayIndexForColumn(statusText, current.startColumn),
-				foreground: colors.tabBorder,
-			});
 		}
 	}
 
@@ -653,7 +624,7 @@ export class StatusLineRenderer {
 	}
 
 	private iconButtonText(icon: string): string {
-		return padOrTrimPlain(` ${icon} `, STATUS_ICON_BUTTON_WIDTH);
+		return icon;
 	}
 
 	private voiceBorderWidgetText(widgetText: string): string {
@@ -662,22 +633,23 @@ export class StatusLineRenderer {
 
 		const micButton = this.iconButtonText(parts.buttonIconText);
 		if (parts.languageText) {
-			return `${micButton}${INPUT_BORDER_WIDGET_SEPARATOR}${parts.languageText}`;
+			return `${micButton}${parts.languageText}`;
 		}
 		return micButton;
 	}
 
 	private voiceWidgetLayout(startColumn: number, sourceText: string, widgetText: string): NonNullable<StatusLineLayout["voiceWidget"]> {
 		const parts = this.voiceBorderWidgetParts(sourceText);
+		const micWidth = parts?.buttonIconText ? stringDisplayWidth(parts.buttonIconText) : stringDisplayWidth(widgetText);
 		const languageStartOffset = parts?.languageText
-			? STATUS_ICON_BUTTON_WIDTH + stringDisplayWidth(INPUT_BORDER_WIDGET_SEPARATOR)
+			? micWidth
 			: stringDisplayWidth(widgetText);
 		const languageEndOffset = parts?.languageText
 			? languageStartOffset + stringDisplayWidth(parts.languageText)
 			: languageStartOffset;
 		return {
 			startColumn,
-			micEndColumn: startColumn + STATUS_ICON_BUTTON_WIDTH,
+			micEndColumn: startColumn + micWidth,
 			languageStartColumn: startColumn + languageStartOffset,
 			languageEndColumn: startColumn + languageEndOffset,
 			endColumn: startColumn + stringDisplayWidth(widgetText),
