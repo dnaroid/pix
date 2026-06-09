@@ -100,11 +100,11 @@ describe("AppRenderController", () => {
 		});
 
 		captureStdout(() => controller.render());
-		assert.deepEqual(mouseController.statusDraftQueueTarget, { row: 4, startColumn: 2, endColumn: 3 });
+		assert.deepEqual(mouseController.statusDraftQueueTarget, { row: 6, startColumn: 2, endColumn: 3 });
 
 		captureStdout(() => controller.renderStatusLine());
 
-		assert.deepEqual(mouseController.statusDraftQueueTarget, { row: 4, startColumn: 2, endColumn: 3 });
+		assert.deepEqual(mouseController.statusDraftQueueTarget, { row: 6, startColumn: 2, endColumn: 3 });
 	});
 
 	it("renders the visible tab row at the top and starts toasts below it", () => {

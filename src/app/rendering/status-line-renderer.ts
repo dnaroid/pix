@@ -1,7 +1,7 @@
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import { compactProgressBarSegments, formatCompactProgressBar } from "../../context-progress-bar.js";
 import type { Theme } from "../../theme.js";
-import { padOrTrimPlain } from "./render-text.js";
+import { ellipsizeDisplay, padOrTrimPlain } from "./render-text.js";
 import type {
 	SessionActivity,
 	StatusCompactToolsTarget,
@@ -26,7 +26,6 @@ import { APP_ICONS } from "../icons.js";
 import { resolveColor, resolveModelColor, type ModelColorsConfig } from "../../config.js";
 
 const MODEL_USAGE_PROGRESS_BAR_WIDTH = stringDisplayWidth(formatCompactProgressBar(100));
-const INPUT_BORDER_WIDGET_INSET = 2;
 const INPUT_BORDER_WIDGET_SEPARATOR = "─";
 const STATUS_ICON_BUTTON_WIDTH = 3;
 
@@ -68,18 +67,30 @@ export class StatusLineRenderer {
 		const baseStatus = this.host.currentStatus();
 		const workspaceLabel = this.host.statusWorkspaceLabel();
 		const modelUsageLabel = this.host.modelUsageStatusLabel();
-		const workspaceDetailsLabel = modelUsageLabel ? `${workspaceLabel} ${modelUsageLabel}` : workspaceLabel;
-		const contextBarLabel = this.contextBarLabel(baseStatus, contentWidth, workspaceDetailsLabel);
+		const widgetsLayout = this.inputBorderWidgetsLayout(contentWidth);
+		const leftWidth = widgetsLayout?.inputBorderWidgetStartColumn
+			? Math.max(0, widgetsLayout.inputBorderWidgetStartColumn - 2)
+			: contentWidth;
+		const fullWorkspaceDetailsLabel = modelUsageLabel ? `${workspaceLabel} ${modelUsageLabel}` : workspaceLabel;
+		const contextBarLabel = this.contextBarLabel(baseStatus, leftWidth, fullWorkspaceDetailsLabel);
 		const status = contextBarLabel ? `${baseStatus} ${contextBarLabel}` : baseStatus;
 		const sessionLabel = "";
-		const details = `${status} ${workspaceDetailsLabel}`;
-		const text = padOrTrimPlain(`${statusDot} ${details}`, width);
+		const fittedWorkspaceLabel = this.fitWorkspaceLabel(statusDot, status, workspaceLabel, modelUsageLabel, leftWidth);
+		const workspaceDetailsLabel = modelUsageLabel
+			? `${fittedWorkspaceLabel ? `${fittedWorkspaceLabel} ` : ""}${modelUsageLabel}`
+			: fittedWorkspaceLabel;
+		const details = workspaceDetailsLabel ? `${status} ${workspaceDetailsLabel}` : status;
+		const leftText = padOrTrimPlain(`${statusDot} ${details}`, leftWidth);
+		const text = widgetsLayout?.inputBorderWidgetStartColumn
+			? overlayText(padOrTrimPlain(leftText, contentWidth), widgetsLayout.inputBorderWidgetStartColumn, widgetsLayout.text)
+			: padOrTrimPlain(leftText, contentWidth);
 
 		return {
+			...widgetsLayout,
 			details,
 			text,
 			sessionLabel,
-			workspaceLabel,
+			workspaceLabel: fittedWorkspaceLabel,
 			...(modelUsageLabel ? { modelUsageLabel } : {}),
 			...(contextBarLabel ? { contextBarLabel } : {}),
 		};
@@ -131,9 +142,9 @@ export class StatusLineRenderer {
 
 		const parts: string[] = [];
 		const totalWidth = widgets.reduce((total, widget, index) => total + (index > 0 ? 1 : 0) + stringDisplayWidth(widget.text), 0);
-		const endColumn = Math.max(1, width - INPUT_BORDER_WIDGET_INSET);
+		const endColumn = Math.max(1, width + 1);
 		const startColumn = endColumn - totalWidth;
-		if (startColumn < 2) return undefined;
+		if (startColumn < 1) return undefined;
 
 		layout.inputBorderWidgetStartColumn = startColumn;
 		let nextColumn = startColumn;
@@ -334,15 +345,9 @@ export class StatusLineRenderer {
 			end: statusDotStart + APP_ICONS.record.length,
 			foreground: this.statusDotColor(),
 		}] : [];
-		this.pushDraftQueueWidgetSegment(segments, statusText);
-		this.pushUserJumpWidgetSegment(segments, statusText);
-		this.pushThinkingExpandWidgetSegment(segments, statusText, layout);
-		this.pushCompactToolsWidgetSegment(segments, statusText);
-		this.pushTerminalBellSoundWidgetSegment(segments, statusText);
+		this.pushStatusWidgetSegments(segments, statusText, layout);
 		this.pushWorkspaceSegments(segments, statusText, layout.workspaceLabel);
 		if (layout.modelUsageLabel) this.pushModelUsageSegments(segments, statusText, layout.modelUsageLabel);
-		this.pushPromptEnhancerWidgetSegment(segments, statusText);
-		this.pushVoiceWidgetSegment(segments, statusText);
 
 		const session = this.host.session;
 		if (!session) return segments;
@@ -370,6 +375,72 @@ export class StatusLineRenderer {
 
 		this.pushSegment(segments, statusText.lastIndexOf(layout.sessionLabel), layout.sessionLabel.length, this.host.theme.colors.selectionForeground);
 		return segments;
+	}
+
+	private fitWorkspaceLabel(statusDot: string, status: string, workspaceLabel: string, modelUsageLabel: string, width: number): string {
+		const modelUsageSuffix = modelUsageLabel ? ` ${modelUsageLabel}` : "";
+		const available = width - stringDisplayWidth(`${statusDot} ${status} `) - stringDisplayWidth(modelUsageSuffix);
+		if (available <= 0) return "";
+		return ellipsizeDisplay(workspaceLabel, available);
+	}
+
+	private pushStatusWidgetSegments(segments: StyledSegment[], statusText: string, layout: StatusLineLayout): void {
+		const colors = this.host.theme.colors;
+		const background = colors.inputBorderWidgetBackground;
+		const widgets = [
+			{ widget: layout.draftQueueWidget, foreground: colors.info },
+			{ widget: layout.promptEnhancerWidget, foreground: this.host.promptEnhancerStatusWidgetActive()
+				? colors.warning
+				: this.host.promptEnhancerStatusWidgetEnabled()
+					? colors.info
+					: colors.muted },
+			{ widget: layout.userJumpWidget, foreground: this.host.userMessageJumpMenuActive?.() ? colors.info : colors.muted },
+			{ widget: layout.terminalBellSoundWidget, foreground: this.host.terminalBellSoundStatusWidgetEnabled() ? colors.info : colors.muted },
+			{ widget: layout.thinkingExpandWidget, foreground: this.host.allThinkingExpandedActive?.() ? colors.info : colors.muted },
+			{ widget: layout.compactToolsWidget, foreground: this.host.superCompactToolsActive?.() ? colors.info : colors.muted },
+		].filter((entry): entry is { widget: { startColumn: number; endColumn: number }; foreground: string } => Boolean(entry.widget));
+
+		for (const { widget, foreground } of widgets) {
+			segments.push({
+				start: displayIndexForColumn(statusText, widget.startColumn),
+				end: displayIndexForColumn(statusText, widget.endColumn),
+				foreground,
+				background,
+			});
+		}
+
+		const voiceWidget = layout.voiceWidget;
+		if (voiceWidget) {
+			segments.push({
+				start: displayIndexForColumn(statusText, voiceWidget.startColumn),
+				end: displayIndexForColumn(statusText, voiceWidget.micEndColumn),
+				foreground: this.host.voiceStatusWidgetActive() ? colors.error : colors.muted,
+				background,
+			});
+			if (voiceWidget.languageEndColumn > voiceWidget.languageStartColumn) {
+				segments.push({
+					start: displayIndexForColumn(statusText, voiceWidget.languageStartColumn),
+					end: displayIndexForColumn(statusText, voiceWidget.languageEndColumn),
+					foreground: colors.statusForeground,
+					background,
+				});
+			}
+		}
+
+		const ranges = [
+			...widgets.map(({ widget }) => widget),
+			...(voiceWidget ? [voiceWidget] : []),
+		].sort((left, right) => left.startColumn - right.startColumn);
+		for (let index = 1; index < ranges.length; index += 1) {
+			const previous = ranges[index - 1];
+			const current = ranges[index];
+			if (!previous || !current || current.startColumn <= previous.endColumn) continue;
+			segments.push({
+				start: displayIndexForColumn(statusText, previous.endColumn),
+				end: displayIndexForColumn(statusText, current.startColumn),
+				foreground: colors.tabBorder,
+			});
+		}
 	}
 
 	private pushPromptEnhancerWidgetSegment(segments: StyledSegment[], statusText: string): void {

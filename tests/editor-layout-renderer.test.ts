@@ -40,8 +40,8 @@ describe("EditorLayoutRenderer extension input UI", () => {
 		const layout = renderer.computeLayout(40, 8);
 
 		assert.equal(layout.renderedInput.totalLineCount, 5);
-		assert.equal(layout.renderedInput.visibleRowCount, 3);
-		assert.deepEqual(layout.renderedInput.scrollBar, { top: 1, height: 2, trackHeight: 3 });
+		assert.equal(layout.renderedInput.visibleRowCount, 4);
+		assert.deepEqual(layout.renderedInput.scrollBar, { top: 1, height: 3, trackHeight: 4 });
 	});
 
 	it("renders inline autocomplete suggestion as ghost text", () => {

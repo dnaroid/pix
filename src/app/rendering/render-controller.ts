@@ -86,7 +86,6 @@ export class AppRenderController {
 			belowEditorLines,
 			inputStartRow,
 			inputSeparatorRow,
-			inputBottomSeparatorRow,
 			bodyHeight,
 		} = layout;
 		const activePopupMenu = this.deps.popupMenus.syncActivePopupMenu();
@@ -184,7 +183,7 @@ export class AppRenderController {
 			if (row < statusRow) {
 				this.deps.mouseController.renderedRowTexts.set(row, separatorText);
 				appendFrameOutput("inputStatus", row, this.renderFrameRow(row, this.deps.screenStyler.styleLine(row, separatorText, columns, {
-					foreground: this.deps.theme.colors.inputBorder,
+					foreground: this.deps.theme.colors.tabBorder,
 				})));
 			}
 		}
@@ -223,28 +222,7 @@ export class AppRenderController {
 			appendFrameOutput("inputStatus", row, this.renderFrameRow(row, rendered.output(row)));
 		}
 		const statusLayout = this.deps.statusLineRenderer.layout(columns);
-		const statusLineRenderer = this.deps.statusLineRenderer as StatusLineRenderer & {
-			inputBorderWidgetsLayout?: StatusLineRenderer["inputBorderWidgetsLayout"];
-			renderInputBorderWidgets?: StatusLineRenderer["renderInputBorderWidgets"];
-		};
-		const inputBorderWidgetsLayout = statusLineRenderer.inputBorderWidgetsLayout?.(columns);
-		if (inputBottomSeparatorRow > 1) {
-			const separatorText = inputFrameLine(columns, "bottom");
-			const row = toScreenRow(inputBottomSeparatorRow);
-			if (row < statusRow) {
-				const text = inputBorderWidgetsLayout
-					? overlayText(separatorText, inputBorderWidgetsLayout.inputBorderWidgetStartColumn ?? 1, inputBorderWidgetsLayout.text)
-					: separatorText;
-				this.deps.mouseController.renderedRowTexts.set(row, text);
-				const output = inputBorderWidgetsLayout && statusLineRenderer.renderInputBorderWidgets
-					? statusLineRenderer.renderInputBorderWidgets(row, inputBorderWidgetsLayout, separatorText, columns)
-					: this.deps.screenStyler.styleLine(row, separatorText, columns, {
-						foreground: this.deps.theme.colors.inputBorder,
-					});
-				appendFrameOutput("inputStatus", row, this.renderFrameRow(row, output));
-			}
-		}
-		this.updateStatusMouseState(statusLayout, statusRow, inputBorderWidgetsLayout, toScreenRow(inputBottomSeparatorRow));
+		this.updateStatusMouseState(statusLayout, statusRow);
 		appendFrameOutput("inputStatus", statusRow, this.renderFrameRow(statusRow, this.deps.statusLineRenderer.render(statusRow, statusLayout, columns)));
 
 		const voiceProgressOverlay = this.renderVoiceProgressOverlay(this.deps.voiceProgressOverlayText(), columns, statusRow);
@@ -329,11 +307,9 @@ export class AppRenderController {
 	private updateStatusMouseState(
 		statusLayout: ReturnType<StatusLineRenderer["layout"]>,
 		statusRow: number,
-		inputBorderWidgetsLayout?: ReturnType<StatusLineRenderer["inputBorderWidgetsLayout"]>,
-		inputBorderWidgetsRow?: number,
 	): void {
-		const widgetLayout = inputBorderWidgetsLayout;
-		const widgetRow = inputBorderWidgetsRow ?? statusRow;
+		const widgetLayout = statusLayout;
+		const widgetRow = statusRow;
 		this.deps.mouseController.statusModelTarget = this.deps.statusLineRenderer.modelTarget(statusLayout.text, statusRow);
 		this.deps.mouseController.statusThinkingTarget = this.deps.statusLineRenderer.thinkingTarget(statusLayout.text, statusRow);
 		this.deps.mouseController.statusContextTarget = this.deps.statusLineRenderer.contextTarget(statusLayout.text, statusRow, statusLayout);

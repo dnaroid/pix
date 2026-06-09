@@ -57,7 +57,7 @@ export type InputFrameCopyRows = {
 	inputStartRow: number;
 	inputEndRow: number;
 	inputSeparatorRow: number;
-	inputBottomSeparatorRow: number;
+	inputBottomSeparatorRow?: number;
 };
 
 export type AppMouseControllerHost = {
@@ -909,12 +909,15 @@ export class AppMouseController {
 		const toScreenRow = (layoutRow: number) => Math.max(1, Math.min(terminalRows, topOffset + layoutRow));
 		const toScreenRowExclusive = (layoutRow: number) => Math.max(1, Math.min(terminalRows + 1, topOffset + layoutRow));
 
-		return {
+		const inputFrame: InputFrameCopyRows = {
 			inputStartRow: toScreenRow(layout.inputStartRow),
 			inputEndRow: toScreenRowExclusive(layout.inputStartRow + layout.renderedInput.lines.length),
 			inputSeparatorRow: toScreenRow(layout.inputSeparatorRow),
-			inputBottomSeparatorRow: toScreenRow(layout.inputBottomSeparatorRow),
 		};
+		if (layout.inputBottomSeparatorRow !== undefined) {
+			inputFrame.inputBottomSeparatorRow = toScreenRow(layout.inputBottomSeparatorRow);
+		}
+		return inputFrame;
 	}
 
 	private getSelectedConversationText(anchor: ConversationSelectionPoint, current: ConversationSelectionPoint): string {
@@ -1082,7 +1085,10 @@ export function screenSelectionLineText(
 	endColumn: number,
 	inputFrame: InputFrameCopyRows | undefined,
 ): string | undefined {
-	if (inputFrame && (row === inputFrame.inputSeparatorRow || row === inputFrame.inputBottomSeparatorRow)) {
+	if (inputFrame && row === inputFrame.inputSeparatorRow) {
+		return undefined;
+	}
+	if (inputFrame?.inputBottomSeparatorRow !== undefined && row === inputFrame.inputBottomSeparatorRow) {
 		return undefined;
 	}
 

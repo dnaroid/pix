@@ -464,7 +464,7 @@ export type EditorLayout = {
 	belowEditorLines: readonly RenderedLine[];
 	inputStartRow: number;
 	inputSeparatorRow: number;
-	inputBottomSeparatorRow: number;
+	inputBottomSeparatorRow?: number;
 	bodyHeight: number;
 };
 

@@ -77,40 +77,39 @@ describe("AppStatusController", () => {
 });
 
 describe("StatusLineRenderer", () => {
-	it("places the voice widget on the right side of the input border with a two-cell inset", () => {
+	it("places the voice widget flush right in the status bar", () => {
 		const widgetText = `${APP_ICONS.microphone} RU`;
 		const width = 40;
 		const renderer = statusLineRenderer({ widgetText, voiceActive: false });
 
 		const layout = renderer.inputBorderWidgetsLayout(width)!;
 		const borderWidgetText = `${iconButtonText(APP_ICONS.user)}─${iconButtonText(APP_ICONS.thinkingExpanded)}─${iconButtonText(APP_ICONS.compactTools)}─${iconButtonText(APP_ICONS.microphone)}─RU`;
-		const expectedStartColumn = width - 2 - stringDisplayWidth(borderWidgetText);
+		const expectedStartColumn = width + 1 - stringDisplayWidth(borderWidgetText);
 
 		assert.equal(layout.inputBorderWidgetStartColumn, expectedStartColumn);
 		assert.equal(layout.text, borderWidgetText);
 		assert.equal(layout.voiceWidget?.startColumn, expectedStartColumn + stringDisplayWidth(`${iconButtonText(APP_ICONS.user)}─${iconButtonText(APP_ICONS.thinkingExpanded)}─${iconButtonText(APP_ICONS.compactTools)}─`));
 		assert.equal(layout.voiceWidget?.languageStartColumn, layout.voiceWidget!.micEndColumn + 1);
 		assert.equal(layout.voiceWidget?.endColumn, layout.voiceWidget!.startColumn + stringDisplayWidth(`${iconButtonText(APP_ICONS.microphone)}─RU`));
-		assert.equal(layout.voiceWidget?.endColumn, width - 2);
+		assert.equal(layout.voiceWidget?.endColumn, width + 1);
 	});
 
-	it("renders input-border widgets with border-colored button backgrounds and border separators", () => {
+	it("renders status-bar widgets with button backgrounds and tab-border separators", () => {
 		const width = 40;
 		const renderer = statusLineRenderer({ widgetText: "", voiceActive: false });
-		const layout = renderer.inputBorderWidgetsLayout(width)!;
-		const borderText = `└${"─".repeat(width - 2)}┘`;
+		const widgetLayout = renderer.inputBorderWidgetsLayout(width)!;
+		const layout = renderer.layout(width);
+		const rendered = renderer.render(1, layout, width);
 
-		const rendered = renderer.renderInputBorderWidgets(1, layout, borderText, width);
-		const renderedText = overlayText(borderText, layout.inputBorderWidgetStartColumn!, layout.text);
-
-		assert.equal(renderedText, `└${"─".repeat(layout.inputBorderWidgetStartColumn! - 2)}${layout.text}${"─".repeat(2)}┘`);
-		assert.ok(layout.text.includes(`${iconButtonText(APP_ICONS.user)}─${iconButtonText(APP_ICONS.thinkingExpanded)}`));
+		assert.equal(widgetLayout.inputBorderWidgetStartColumn, width + 1 - stringDisplayWidth(widgetLayout.text));
+		assert.ok(layout.text.endsWith(widgetLayout.text));
+		assert.ok(widgetLayout.text.includes(`${iconButtonText(APP_ICONS.user)}─${iconButtonText(APP_ICONS.thinkingExpanded)}`));
 		assert.ok(rendered.includes(colorize(iconButtonText(APP_ICONS.user), {
 			foreground: THEMES.dark.colors.muted,
 			background: THEMES.dark.colors.inputBorderWidgetBackground,
 		})));
 		assert.ok(rendered.includes(colorize("─", {
-			foreground: THEMES.dark.colors.inputBorder,
+			foreground: THEMES.dark.colors.tabBorder,
 		})));
 	});
 
@@ -126,11 +125,13 @@ describe("StatusLineRenderer", () => {
 	it("colors only the microphone red while voice recording is active", () => {
 		const widgetText = `${APP_ICONS.microphone} RU`;
 		const renderer = statusLineRenderer({ widgetText, voiceActive: true });
-		const layout = renderer.inputBorderWidgetsLayout(40)!;
+		const widgetLayout = renderer.inputBorderWidgetsLayout(40)!;
+		const layout = renderer.layout(40);
 
 		const rendered = renderer.render(1, layout, 40);
-		const activeMicPrefix = colorize(APP_ICONS.microphone, {
+		const activeMicPrefix = colorize(iconButtonText(APP_ICONS.microphone), {
 			foreground: THEMES.dark.colors.error,
+			background: THEMES.dark.colors.inputBorderWidgetBackground,
 		});
 		const activeWholeWidgetPrefix = colorize(widgetText, {
 			foreground: THEMES.dark.colors.error,
@@ -143,7 +144,7 @@ describe("StatusLineRenderer", () => {
 		assert.ok(rendered.includes(activeMicPrefix));
 		assert.ok(!rendered.includes(activeWholeWidgetPrefix));
 		assert.ok(!rendered.includes(boldActiveMicPrefix));
-		assert.ok(layout.text.endsWith(`${iconButtonText(APP_ICONS.microphone)}─RU`));
+		assert.ok(widgetLayout.text.endsWith(`${iconButtonText(APP_ICONS.microphone)}─RU`));
 	});
 
 	it("replaces the microphone icon with voice progress while keeping the language button", () => {
@@ -198,10 +199,11 @@ describe("StatusLineRenderer", () => {
 
 	it("renders the prompt enhancer icon muted and non-clickable when disabled", () => {
 		const renderer = statusLineRenderer({ widgetText: "", voiceActive: false, promptWidgetText: APP_ICONS.autoFix, promptActive: false, promptEnabled: false });
-		const layout = renderer.inputBorderWidgetsLayout(40)!;
+		const layout = renderer.layout(40);
 		const rendered = renderer.render(1, layout, 40);
-		const mutedIcon = colorize(APP_ICONS.autoFix, {
+		const mutedIcon = colorize(iconButtonText(APP_ICONS.autoFix), {
 			foreground: THEMES.dark.colors.muted,
+			background: THEMES.dark.colors.inputBorderWidgetBackground,
 		});
 
 		assert.ok(rendered.includes(mutedIcon));
@@ -453,55 +455,61 @@ describe("StatusLineRenderer", () => {
 		const widgetText = `${APP_ICONS.microphone} RU`;
 		const promptWidgetText = APP_ICONS.autoFix;
 		const renderer = statusLineRenderer({ widgetText, voiceActive: false, promptWidgetText, promptActive: false, superCompactToolsActive: true });
-		const layout = renderer.inputBorderWidgetsLayout(40)!;
+		const widgetLayout = renderer.inputBorderWidgetsLayout(40)!;
+		const layout = renderer.layout(40);
 		const rendered = renderer.render(1, layout, 40);
 		const target = renderer.compactToolsTarget(layout, 1);
 
-		assert.ok(layout.text.endsWith(`${iconButtonText(promptWidgetText)}─${iconButtonText(APP_ICONS.user)}─${iconButtonText(APP_ICONS.thinkingExpanded)}─${iconButtonText(APP_ICONS.compactTools)}─${iconButtonText(APP_ICONS.microphone)}─RU`));
+		assert.ok(widgetLayout.text.endsWith(`${iconButtonText(promptWidgetText)}─${iconButtonText(APP_ICONS.user)}─${iconButtonText(APP_ICONS.thinkingExpanded)}─${iconButtonText(APP_ICONS.compactTools)}─${iconButtonText(APP_ICONS.microphone)}─RU`));
 		assert.deepEqual(target, {
 			row: 1,
 			startColumn: layout.compactToolsWidget?.startColumn,
 			endColumn: layout.compactToolsWidget?.endColumn,
 		});
-		assert.ok(rendered.includes(colorize(APP_ICONS.compactTools, {
+		assert.ok(rendered.includes(colorize(iconButtonText(APP_ICONS.compactTools), {
 			foreground: THEMES.dark.colors.info,
+			background: THEMES.dark.colors.inputBorderWidgetBackground,
 		})));
 	});
 
 	it("renders the user jump target before all-thinking-expanded", () => {
 		const renderer = statusLineRenderer({ widgetText: "", voiceActive: false, userMessageJumpMenuActive: true });
-		const layout = renderer.inputBorderWidgetsLayout(40)!;
+		const widgetLayout = renderer.inputBorderWidgetsLayout(40)!;
+		const layout = renderer.layout(40);
 		const rendered = renderer.render(1, layout, 40);
 		const target = renderer.userJumpTarget(layout, 1);
 
-		assert.ok(layout.text.endsWith(`${iconButtonText(APP_ICONS.user)}─${iconButtonText(APP_ICONS.thinkingExpanded)}─${iconButtonText(APP_ICONS.compactTools)}`));
+		assert.ok(widgetLayout.text.endsWith(`${iconButtonText(APP_ICONS.user)}─${iconButtonText(APP_ICONS.thinkingExpanded)}─${iconButtonText(APP_ICONS.compactTools)}`));
 		assert.deepEqual(target, {
 			row: 1,
 			startColumn: layout.userJumpWidget?.startColumn,
 			endColumn: layout.userJumpWidget?.endColumn,
 		});
-		assert.ok(rendered.includes(colorize(APP_ICONS.user, {
+		assert.ok(rendered.includes(colorize(iconButtonText(APP_ICONS.user), {
 			foreground: THEMES.dark.colors.info,
+			background: THEMES.dark.colors.inputBorderWidgetBackground,
 		})));
 	});
 
 	it("renders the draft queue button before the input-border icons when editor text is waiting", () => {
 		const renderer = statusLineRenderer({ widgetText: "", voiceActive: false, queueableInputActive: true });
 		const layout = renderer.inputBorderWidgetsLayout(40)!;
-		const rendered = renderer.render(1, layout, 40);
+		const statusLayout = renderer.layout(40);
+		const rendered = renderer.render(1, statusLayout, 40);
 		const buttonText = APP_ICONS.timerSand;
-		const target = renderer.draftQueueTarget(layout, 1);
+		const target = renderer.draftQueueTarget(statusLayout, 1);
 
-		assert.equal(layout.inputBorderWidgetStartColumn, 40 - 2 - stringDisplayWidth(layout.text));
+		assert.equal(layout.inputBorderWidgetStartColumn, 40 + 1 - stringDisplayWidth(layout.text));
 		assert.ok(layout.text.endsWith(`${iconButtonText(buttonText)}─${iconButtonText(APP_ICONS.user)}─${iconButtonText(APP_ICONS.thinkingExpanded)}─${iconButtonText(APP_ICONS.compactTools)}`));
 		assert.deepEqual(target, {
 			row: 1,
-			startColumn: layout.draftQueueWidget?.startColumn,
-			endColumn: layout.draftQueueWidget?.endColumn,
+			startColumn: statusLayout.draftQueueWidget?.startColumn,
+			endColumn: statusLayout.draftQueueWidget?.endColumn,
 		});
 		assert.equal((layout.draftQueueWidget?.endColumn ?? 0) + 1, layout.userJumpWidget?.startColumn);
-		assert.ok(rendered.includes(colorize(buttonText, {
+		assert.ok(rendered.includes(colorize(iconButtonText(buttonText), {
 			foreground: THEMES.dark.colors.info,
+			background: THEMES.dark.colors.inputBorderWidgetBackground,
 		})));
 	});
 
@@ -541,42 +549,46 @@ describe("StatusLineRenderer", () => {
 
 		assert.equal(layout.draftQueueWidget, undefined);
 		assert.equal(renderer.draftQueueTarget(layout, 1), undefined);
-		assert.equal(layout.inputBorderWidgetStartColumn, 40 - 2 - stringDisplayWidth(layout.text));
+		assert.equal(layout.inputBorderWidgetStartColumn, 40 + 1 - stringDisplayWidth(layout.text));
 		assert.ok(layout.text.endsWith(`${iconButtonText(APP_ICONS.user)}─${iconButtonText(APP_ICONS.thinkingExpanded)}─${iconButtonText(APP_ICONS.compactTools)}`));
 	});
 
 	it("renders the all-thinking-expanded target before super-compact tools", () => {
 		const renderer = statusLineRenderer({ widgetText: "", voiceActive: false, allThinkingExpandedActive: true });
-		const layout = renderer.inputBorderWidgetsLayout(40)!;
+		const widgetLayout = renderer.inputBorderWidgetsLayout(40)!;
+		const layout = renderer.layout(40);
 		const rendered = renderer.render(1, layout, 40);
 		const target = renderer.thinkingExpandTarget(layout, 1);
 
-		assert.ok(layout.text.endsWith(`${iconButtonText(APP_ICONS.user)}─${iconButtonText(APP_ICONS.thinkingExpanded)}─${iconButtonText(APP_ICONS.compactTools)}`));
+		assert.ok(widgetLayout.text.endsWith(`${iconButtonText(APP_ICONS.user)}─${iconButtonText(APP_ICONS.thinkingExpanded)}─${iconButtonText(APP_ICONS.compactTools)}`));
 		assert.deepEqual(target, {
 			row: 1,
 			startColumn: layout.thinkingExpandWidget?.startColumn,
 			endColumn: layout.thinkingExpandWidget?.endColumn,
 		});
-		assert.ok(rendered.includes(colorize(APP_ICONS.thinkingExpanded, {
+		assert.ok(rendered.includes(colorize(iconButtonText(APP_ICONS.thinkingExpanded), {
 			foreground: THEMES.dark.colors.info,
+			background: THEMES.dark.colors.inputBorderWidgetBackground,
 		})));
 	});
 
 	it("renders a terminal bell notification toggle before all-thinking-expanded", () => {
 		const renderer = statusLineRenderer({ widgetText: "", voiceActive: false, terminalBellWidgetText: APP_ICONS.volumeOff, terminalBellSoundEnabled: false });
-		const layout = renderer.inputBorderWidgetsLayout(40)!;
+		const widgetLayout = renderer.inputBorderWidgetsLayout(40)!;
+		const layout = renderer.layout(40);
 		const rendered = renderer.render(1, layout, 40);
 		const target = renderer.terminalBellSoundTarget(layout, 1);
 
-		assert.ok(layout.text.endsWith(`${iconButtonText(APP_ICONS.user)}─${iconButtonText(APP_ICONS.volumeOff)}─${iconButtonText(APP_ICONS.thinkingExpanded)}─${iconButtonText(APP_ICONS.compactTools)}`));
+		assert.ok(widgetLayout.text.endsWith(`${iconButtonText(APP_ICONS.user)}─${iconButtonText(APP_ICONS.volumeOff)}─${iconButtonText(APP_ICONS.thinkingExpanded)}─${iconButtonText(APP_ICONS.compactTools)}`));
 		assert.equal((layout.terminalBellSoundWidget?.endColumn ?? 0) + 1, layout.thinkingExpandWidget?.startColumn);
 		assert.deepEqual(target, {
 			row: 1,
 			startColumn: layout.terminalBellSoundWidget?.startColumn,
 			endColumn: layout.terminalBellSoundWidget?.endColumn,
 		});
-		assert.ok(rendered.includes(colorize(APP_ICONS.volumeOff, {
+		assert.ok(rendered.includes(colorize(iconButtonText(APP_ICONS.volumeOff), {
 			foreground: THEMES.dark.colors.muted,
+			background: THEMES.dark.colors.inputBorderWidgetBackground,
 		})));
 	});
 });
