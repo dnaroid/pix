@@ -166,7 +166,6 @@ export class StatusLineRenderer {
 		const colors = this.host.theme.colors;
 		return this.host.screenStyler.styleLineSegments(row, layout.text, width, {
 			foreground: colors.statusForeground,
-			background: colors.statusBackground,
 		}, this.segments(layout.text, layout));
 	}
 

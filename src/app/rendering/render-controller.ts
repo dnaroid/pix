@@ -86,6 +86,7 @@ export class AppRenderController {
 			belowEditorLines,
 			inputStartRow,
 			inputSeparatorRow,
+			inputBottomSeparatorRow,
 			bodyHeight,
 		} = layout;
 		const activePopupMenu = this.deps.popupMenus.syncActivePopupMenu();
@@ -210,7 +211,15 @@ export class AppRenderController {
 				})}`);
 			}
 		}
-		const belowEditorStartRow = inputStartRow + renderedInput.lines.length;
+		if (inputBottomSeparatorRow && inputBottomSeparatorRow > inputSeparatorRow && inputBottomSeparatorRow < statusRow) {
+			const separatorText = inputFrameLine(columns, "bottom");
+			const row = toScreenRow(inputBottomSeparatorRow);
+			this.deps.mouseController.renderedRowTexts.set(row, separatorText);
+			appendFrameOutput("inputStatus", row, this.renderFrameRow(row, this.deps.screenStyler.styleLine(row, separatorText, columns, {
+				foreground: this.deps.theme.colors.tabBorder,
+			})));
+		}
+		const belowEditorStartRow = (inputBottomSeparatorRow ?? (inputStartRow + renderedInput.lines.length - 1)) + 1;
 		for (let index = 0; index < belowEditorLines.length; index += 1) {
 			const rendered = frameRenderedLine(belowEditorLines[index], columns, this.deps.theme, this.deps.screenStyler);
 			const row = toScreenRow(belowEditorStartRow + index);

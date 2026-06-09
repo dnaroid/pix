@@ -46,7 +46,7 @@ export class EditorLayoutRenderer {
 	computeLayout(width: number, rows: number): EditorLayout {
 		const maxAvailableInputRows = Math.max(1, rows - 4);
 		const renderedInput = this.renderInput(width, Math.min(INPUT_MAX_ROWS, maxAvailableInputRows), maxAvailableInputRows);
-		const maxEntityRows = Math.max(0, rows - renderedInput.lines.length - 3);
+		const maxEntityRows = Math.max(0, rows - renderedInput.lines.length - 4);
 		const editorEntityWidth = inputFrameContentWidth(width);
 		const aboveEditorEntities = this.renderAboveEditorEntities(editorEntityWidth);
 		let aboveEditorLines = this.limitEntityLines(aboveEditorEntities.lines, maxEntityRows);
@@ -59,7 +59,8 @@ export class EditorLayoutRenderer {
 		);
 
 		const belowEditorStartRow = rows - belowEditorLines.length;
-		const inputStartRow = belowEditorStartRow - renderedInput.lines.length;
+		const inputBottomSeparatorRow = belowEditorStartRow - 1;
+		const inputStartRow = inputBottomSeparatorRow - renderedInput.lines.length;
 		const inputSeparatorRow = inputStartRow - aboveEditorLines.length - 1;
 
 		return {
@@ -68,6 +69,7 @@ export class EditorLayoutRenderer {
 			belowEditorLines,
 			inputStartRow,
 			inputSeparatorRow,
+			inputBottomSeparatorRow,
 			bodyHeight: Math.max(0, inputSeparatorRow - 1),
 		};
 	}

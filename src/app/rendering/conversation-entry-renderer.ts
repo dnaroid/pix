@@ -33,14 +33,14 @@ export function renderConversationEntry(entry: Entry, width: number, options: Co
 		segments?: RenderedLine["segments"],
 	): RenderedLine => ({
 		text: padHorizontalText(text, width),
-		colorOverride: options.colors.warning,
+		colorOverride: options.colors.userForeground,
 		...(segments && segments.length > 0 ? { segments: segments.map((segment) => ({ ...segment, start: segment.start + userContentLeft, end: segment.end + userContentLeft })) } : {}),
 		...(syntaxHighlight === undefined ? {} : { syntaxHighlight }),
 		...(entryId === undefined ? {} : { target: { kind: "user-message" as const, id: entryId } }),
 	});
 	const queuedLine = (text: string, entryId: string, segments?: readonly StyledSegment[]): RenderedLine => ({
 		text,
-		colorOverride: options.colors.warning,
+		colorOverride: options.colors.userForeground,
 		...(segments && segments.length > 0 ? { segments } : {}),
 		target: { kind: "queue-message" as const, id: entryId },
 	});

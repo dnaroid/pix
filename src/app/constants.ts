@@ -75,7 +75,7 @@ export const SUBAGENTS_WIDGET_MAX_ROWS = 8;
 export const DEFAULT_THINKING_TOOL_RULE: ResolvedToolRule = {
 	previewLines: 0,
 	direction: "head",
-	color: "accent",
+	color: "thinkingForeground",
 };
 export const TERMINAL_COMMAND_MODIFIER_FLAG = 8;
 export const GIT_BRANCH_CACHE_MS = 30_000;

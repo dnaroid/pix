@@ -39,6 +39,14 @@ export type Theme = {
 		toolMutation: string;
 		toolSearch: string;
 		toolTitle: string;
+		toolBash: string;
+		toolRead: string;
+		toolIndex: string;
+		toolEdit: string;
+		toolWeb: string;
+		toolMeta: string;
+		thinkingForeground: string;
+		userForeground: string;
 		thinkingXHigh: string;
 		modelOpenAI: string;
 		statusDotBase: string;
@@ -86,6 +94,14 @@ export const THEMES: Record<ThemeName, Theme> = {
 			toolMutation: "#d47aa2",
 			toolSearch: "#a889d6",
 			toolTitle: "#9aa7b4",
+			toolBash: "#c99670",
+			toolRead: "#6daa8a",
+			toolIndex: "#7a9ec7",
+			toolEdit: "#c76a8a",
+			toolWeb: "#8a9cc7",
+			toolMeta: "#8b8fa3",
+			thinkingForeground: "#b8a0d4",
+			userForeground: "#88b4dc",
 			thinkingXHigh: "#ff8a86",
 			modelOpenAI: "#c8b45a",
 			statusDotBase: "#30363d",
@@ -131,6 +147,14 @@ export const THEMES: Record<ThemeName, Theme> = {
 			toolMutation: "#a33a68",
 			toolSearch: "#6d52a5",
 			toolTitle: "#526070",
+			toolBash: "#8a6535",
+			toolRead: "#3d7a56",
+			toolIndex: "#3a6d96",
+			toolEdit: "#963a5e",
+			toolWeb: "#4a6096",
+			toolMeta: "#6b7280",
+			thinkingForeground: "#6b5491",
+			userForeground: "#4a78b5",
 			thinkingXHigh: "#cf333d",
 			modelOpenAI: "#75671f",
 			statusDotBase: "#334155",
