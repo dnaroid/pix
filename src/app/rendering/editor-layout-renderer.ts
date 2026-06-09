@@ -155,7 +155,7 @@ export class EditorLayoutRenderer {
 			for (const [index, text] of wrapped.entries()) {
 				lines.push({
 					text: padHorizontalText(text, width),
-					colorOverride: this.host.theme.colors.warning,
+					colorOverride: this.host.theme.colors.userForeground,
 					target: { kind: "queue-message", id: entry.id },
 					...(index === 0 ? { segments: [{ start: 0, end: icon.length, foreground: this.host.theme.colors.info }] } : {}),
 				});

@@ -75,6 +75,42 @@ describe("opencode import", () => {
 		expect(imported.providers.find((provider) => provider.targetProvider === "zai")?.status).toBe("imported");
 	});
 
+	test("preserves existing Antigravity OAuth client credentials when force-importing accounts", async () => {
+		const dir = tempDir();
+		const sourcePath = path.join(dir, "opencode-auth.json");
+		const antigravitySourcePath = path.join(dir, "antigravity-accounts.json");
+		const authPath = path.join(dir, "pi-auth.json");
+		const oauthClient = { clientId: "existing-client-id", clientSecret: "existing-client-secret" };
+
+		writeJson(sourcePath, {});
+		writeJson(authPath, {
+			antigravity: {
+				type: "oauth",
+				refresh: "old-refresh|old-project",
+				access: "old-access|old-project",
+				expires: 123,
+				email: "old@example.com",
+				oauthClient,
+			},
+		});
+		writeJson(antigravitySourcePath, {
+			version: 1,
+			activeIndex: 0,
+			accounts: [{ email: "new@example.com", refreshToken: "new-refresh", projectId: "new-project" }],
+		});
+
+		const result = await importOpencodeAccounts({ sourcePath, antigravitySourcePath, authPath, overwrite: true });
+		const auth = readJson(authPath);
+
+		expect(result.antigravity?.imported).toBe(true);
+		expect(auth.antigravity).toMatchObject({
+			type: "oauth",
+			refresh: "new-refresh|new-project",
+			email: "new@example.com",
+			oauthClient,
+		});
+	});
+
 	test("parses opencode import command arguments", () => {
 		expect(parseOpencodeImportCommandArgs("--path /tmp/auth.json --auth-path /tmp/pi-auth.json --antigravity-path /tmp/ag.json --antigravity-index 2 --force")).toEqual({
 			sourcePath: "/tmp/auth.json",

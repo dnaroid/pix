@@ -20,6 +20,7 @@ export type Theme = {
 		tabBorder: string;
 		assistantMessageBackground: string;
 		userMessageBackground: string;
+		thinkingMessageBackground: string;
 		inputCursorBackground: string;
 		popupForeground: string;
 		popupBackground: string;
@@ -63,7 +64,7 @@ export const THEMES: Record<ThemeName, Theme> = {
 		colors: {
 			background: "#090d13",
 			foreground: "#d6deeb",
-			assistantForeground: "#c9d1d9",
+			assistantForeground: "#a4bce0",
 			muted: "#7d8590",
 			headerForeground: "#c9d1d9",
 			headerBackground: "#161b22",
@@ -74,8 +75,9 @@ export const THEMES: Record<ThemeName, Theme> = {
 			inputBorder: "#30363d",
 			inputBorderWidgetBackground: "#2a2f36",
 			tabBorder: "#7d8590",
-			assistantMessageBackground: "#161b22",
-			userMessageBackground: "#262224",
+			assistantMessageBackground: "",
+			userMessageBackground: "",
+			thinkingMessageBackground: "",
 			inputCursorBackground: "#7fb3c8",
 			popupForeground: "#e6edf3",
 			popupBackground: "#1e1e1e",
@@ -93,17 +95,17 @@ export const THEMES: Record<ThemeName, Theme> = {
 			warning: "#d49a4a",
 			heading: "#e8c46a",
 			info: "#7fb3c8",
-			toolMutation: "#d47aa2",
-			toolSearch: "#a889d6",
-			toolTitle: "#9aa7b4",
-			toolBash: "#c99670",
-			toolRead: "#6daa8a",
-			toolIndex: "#7a9ec7",
-			toolEdit: "#c76a8a",
-			toolWeb: "#8a9cc7",
-			toolMeta: "#8b8fa3",
-			thinkingForeground: "#b8a0d4",
-			userForeground: "#88b4dc",
+			toolMutation: "#b8899e", // ~10% brighter from #a67c8f
+			toolSearch: "#9d8abb", // ~10% brighter from #8c7aa8
+			toolTitle: "#899199", // ~10% brighter from #7b848c
+			toolBash: "#b89071", // ~10% brighter from #a68266
+			toolRead: "#6d9b82", // ~10% brighter from #628c76
+			toolIndex: "#7692b4", // ~10% brighter from #6a84a3
+			toolEdit: "#b47389", // ~10% brighter from #a3687c
+			toolWeb: "#8192b6", // ~10% brighter from #7584a6
+			toolMeta: "#7d8192", // ~10% brighter from #707485
+			thinkingForeground: "#64748b",
+			userForeground: "#d97706",
 			thinkingXHigh: "#ff8a86",
 			modelOpenAI: "#c8b45a",
 			statusDotBase: "#30363d",
@@ -128,8 +130,9 @@ export const THEMES: Record<ThemeName, Theme> = {
 			inputBorder: "#334155",
 			inputBorderWidgetBackground: "#f1f5f9",
 			tabBorder: "#64748b",
-			assistantMessageBackground: "#eef2f7",
-			userMessageBackground: "#f9f0ee",
+			assistantMessageBackground: "",
+			userMessageBackground: "",
+			thinkingMessageBackground: "",
 			inputCursorBackground: "#0284c7",
 			popupForeground: "#0f172a",
 			popupBackground: "#ffffff",
@@ -147,17 +150,17 @@ export const THEMES: Record<ThemeName, Theme> = {
 			warning: "#9a631d",
 			heading: "#b88a28",
 			info: "#246b8e",
-			toolMutation: "#a33a68",
-			toolSearch: "#6d52a5",
-			toolTitle: "#526070",
-			toolBash: "#8a6535",
-			toolRead: "#3d7a56",
-			toolIndex: "#3a6d96",
-			toolEdit: "#963a5e",
-			toolWeb: "#4a6096",
-			toolMeta: "#6b7280",
+			toolMutation: "#8c5c70", // reverted
+			toolSearch: "#6e608c", // reverted
+			toolTitle: "#626c78", // reverted
+			toolBash: "#8c7556", // reverted
+			toolRead: "#507a62", // reverted
+			toolIndex: "#567a96", // reverted
+			toolEdit: "#8c586c", // reverted
+			toolWeb: "#5c6a8c", // reverted
+			toolMeta: "#787e8a", // reverted
 			thinkingForeground: "#6b5491",
-			userForeground: "#4a78b5",
+			userForeground: "#854d0e",
 			thinkingXHigh: "#cf333d",
 			modelOpenAI: "#75671f",
 			statusDotBase: "#334155",
@@ -178,18 +181,32 @@ export type TextStyleOptions = {
 	strikethrough?: boolean;
 };
 
+const rgbCodeCache = new Map<string, string>();
+const stylePrefixCache = new Map<string, string>();
+
 export function parseThemeName(value: string): ThemeName | undefined {
 	return value === "dark" || value === "light" ? value : undefined;
 }
 
 export function colorize(text: string, options: TextStyleOptions): string {
+	const prefix = ansiStylePrefix(options);
+	return prefix ? `${prefix}${text}${ANSI_RESET}` : text;
+}
+
+export function ansiStylePrefix(options: TextStyleOptions): string {
+	const cacheKey = styleCacheKey(options);
+	const cached = stylePrefixCache.get(cacheKey);
+	if (cached !== undefined) return cached;
+
 	const codes: string[] = [];
 	if (options.bold) codes.push("1");
 	if (options.underline) codes.push("4");
 	if (options.strikethrough) codes.push("9");
 	if (options.foreground) codes.push(rgbCode("38", options.foreground));
 	if (options.background) codes.push(rgbCode("48", options.background));
-	return codes.length === 0 ? text : `\x1b[${codes.join(";")}m${text}${ANSI_RESET}`;
+	const prefix = codes.length === 0 ? "" : `\x1b[${codes.join(";")}m`;
+	stylePrefixCache.set(cacheKey, prefix);
+	return prefix;
 }
 
 export function colorLine(text: string, width: number, options: TextStyleOptions): string {
@@ -202,8 +219,18 @@ export function padOrTrimPlain(text: string, width: number): string {
 
 function rgbCode(prefix: "38" | "48", hex: string): string {
 	const normalized = hex.replace(/^#/, "");
+	const cacheKey = `${prefix}:${normalized}`;
+	const cached = rgbCodeCache.get(cacheKey);
+	if (cached) return cached;
+
 	const red = Number.parseInt(normalized.slice(0, 2), 16);
 	const green = Number.parseInt(normalized.slice(2, 4), 16);
 	const blue = Number.parseInt(normalized.slice(4, 6), 16);
-	return `${prefix};2;${red};${green};${blue}`;
+	const code = `${prefix};2;${red};${green};${blue}`;
+	rgbCodeCache.set(cacheKey, code);
+	return code;
+}
+
+function styleCacheKey(options: TextStyleOptions): string {
+	return `${options.bold ? 1 : 0}|${options.underline ? 1 : 0}|${options.strikethrough ? 1 : 0}|${options.foreground ?? ""}|${options.background ?? ""}`;
 }

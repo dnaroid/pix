@@ -224,7 +224,7 @@ export async function addAntigravityAccount(
 async function refreshAccountToken(account: OpencodeAntigravityAccount, oauthClient?: GoogleOAuthClientCredentials): Promise<RefreshedAntigravityAccount> {
 	const refreshToken = getAccountRefreshToken(account);
 	if (!refreshToken) throw new Error(`Missing refresh token for Antigravity account ${account.email ?? "<unknown>"}`);
-	const clientCredentials = getGoogleOAuthClientCredentials(account) ?? oauthClient;
+	const clientCredentials = getGoogleOAuthClientCredentials(account, oauthClient);
 	assertGoogleOAuthCredentialsConfigured(clientCredentials);
 	const projectId = getAccountProjectId(account);
 	const start = Date.now();

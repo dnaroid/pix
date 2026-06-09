@@ -1,5 +1,6 @@
 import { applyOutputFilters, type PixConfig } from "../../config.js";
 import { renderMarkdownTextLines } from "../../markdown-format.js";
+import { stringDisplayWidth } from "../../terminal-width.js";
 import type { Theme } from "../../theme.js";
 import { attachImageClickTargets } from "../screen/image-click-targets.js";
 import { APP_ICONS } from "../icons.js";
@@ -31,13 +32,37 @@ export function renderConversationEntry(entry: Entry, width: number, options: Co
 		entryId?: string,
 		syntaxHighlight?: RenderedLine["syntaxHighlight"],
 		segments?: RenderedLine["segments"],
-	): RenderedLine => ({
-		text: padHorizontalText(text, width),
-		colorOverride: options.colors.userForeground,
-		...(segments && segments.length > 0 ? { segments: segments.map((segment) => ({ ...segment, start: segment.start + userContentLeft, end: segment.end + userContentLeft })) } : {}),
-		...(syntaxHighlight === undefined ? {} : { syntaxHighlight }),
-		...(entryId === undefined ? {} : { target: { kind: "user-message" as const, id: entryId } }),
-	});
+	): RenderedLine => {
+		const textWidth = stringDisplayWidth(text);
+		const padding = Math.max(0, width - textWidth);
+		const paddedText = " ".repeat(padding) + text;
+		const offset = padding;
+
+		return {
+			text: paddedText,
+			colorOverride: options.colors.userForeground,
+			backgroundOverride: options.colors.userMessageBackground,
+			...(segments && segments.length > 0
+				? {
+						segments: segments.map((segment) => ({
+							...segment,
+							start: segment.start + offset,
+							end: segment.end + offset,
+							foreground: options.colors.userForeground,
+						})),
+				  }
+				: {}),
+			...(syntaxHighlight === undefined
+				? {}
+				: {
+						syntaxHighlight: {
+							...syntaxHighlight,
+							start: syntaxHighlight.start + offset,
+						},
+				  }),
+			...(entryId === undefined ? {} : { target: { kind: "user-message" as const, id: entryId } }),
+		};
+	};
 	const queuedLine = (text: string, entryId: string, segments?: readonly StyledSegment[]): RenderedLine => ({
 		text,
 		colorOverride: options.colors.userForeground,
@@ -98,13 +123,14 @@ function renderAssistantLines(text: string, width: number, options: Conversation
 	const lines: RenderedLine[] = [];
 	for (const line of contentLines) {
 		const headingSegment: StyledSegment | undefined = line.heading
-			? { start: contentLeft, end: contentLeft + line.text.length, foreground: options.colors.heading, bold: true }
+			? { start: contentLeft, end: contentLeft + line.text.length, foreground: options.colors.assistantForeground, bold: true }
 			: undefined;
 		const existingSegments = line.segments?.map((segment) => ({ ...segment, start: segment.start + contentLeft, end: segment.end + contentLeft })) ?? [];
 		const allSegments = headingSegment ? [headingSegment, ...existingSegments] : existingSegments;
 		lines.push({
 			text: padHorizontalText(line.text, width),
 			colorOverride: options.colors.assistantForeground,
+			backgroundOverride: options.colors.assistantMessageBackground,
 			...(allSegments.length > 0 ? { segments: allSegments } : {}),
 			...(line.syntaxHighlight ? { syntaxHighlight: line.syntaxHighlight } : {}),
 		});

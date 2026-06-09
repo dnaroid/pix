@@ -103,14 +103,15 @@ describe("renderConversationEntry", () => {
 	it("marks user messages as markdown for syntax highlighting", () => {
 		const lines = renderConversationEntry({ id: "user-1", kind: "user", text: "Use `code`." }, 40, renderOptions);
 
-		assert.deepEqual(lines[0]?.syntaxHighlight, { language: "markdown", start: 0 });
+		assert.deepEqual(lines[0]?.syntaxHighlight, { language: "markdown", start: 29 });
 	});
 
-	it("renders user messages in user color without a bubble background", () => {
+	it("renders user messages in user color with a bubble background", () => {
 		const lines = renderConversationEntry({ id: "user-bg", kind: "user", text: "hello" }, 40, renderOptions);
 
 		assert.deepEqual(lines.map((line) => line.colorOverride), [THEMES.dark.colors.userForeground]);
-		assert.deepEqual(lines.map((line) => line.backgroundOverride), [undefined]);
+		assert.deepEqual(lines.map((line) => line.backgroundOverride), [THEMES.dark.colors.userMessageBackground]);
+		assert.deepEqual(lines.map((line) => line.text), [" ".repeat(35) + "hello"]);
 		assert.deepEqual(lines.map((line) => line.segments), [undefined]);
 	});
 
@@ -163,7 +164,7 @@ describe("renderConversationEntry", () => {
 	it("wraps user messages at word boundaries inside the padded bubble", () => {
 		const lines = renderConversationEntry({ id: "user-wrap", kind: "user", text: "alpha beta gamma" }, 12, renderOptions);
 
-		assert.deepEqual(lines.map((line) => line.text), ["alpha beta  ", "gamma       "]);
+		assert.deepEqual(lines.map((line) => line.text), ["  alpha beta", "       gamma"]);
 	});
 
 	it("marks user image labels as clickable image targets", () => {
@@ -171,8 +172,8 @@ describe("renderConversationEntry", () => {
 		const lines = renderConversationEntry({ id: "user-image", kind: "user", text: "[Image]", images: [image] }, 40, renderOptions);
 		const imageLine = lines.find((line) => line.text.includes("[Image]"));
 
-		assert.deepEqual(imageLine?.imageTargets, [{ start: 0, end: 7, entryId: "user-image", imageIndex: 0 }]);
-		assert.deepEqual(imageLine?.segments, [{ start: 0, end: 7, foreground: THEMES.dark.colors.info, underline: true }]);
+		assert.deepEqual(imageLine?.imageTargets, [{ start: 33, end: 40, entryId: "user-image", imageIndex: 0 }]);
+		assert.deepEqual(imageLine?.segments, [{ start: 33, end: 40, foreground: THEMES.dark.colors.info, underline: true }]);
 	});
 
 	it("formats user markdown tables before wrapping", () => {

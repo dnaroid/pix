@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { ANSI_RESET, THEMES, colorLine, colorize, padOrTrimPlain, parseThemeName } from "../src/theme.js";
+import { ANSI_RESET, THEMES, ansiStylePrefix, colorLine, colorize, padOrTrimPlain, parseThemeName } from "../src/theme.js";
 import { PopupMenu, Toast } from "../src/ui.js";
 
 describe("theme helpers", () => {
@@ -11,6 +11,8 @@ describe("theme helpers", () => {
 		assert.equal(parseThemeName("nope"), undefined);
 		assert.equal(colorize("plain", {}), "plain");
 		assert.equal(colorize("x", { foreground: "#010203", background: "#040506", bold: true }), "\u001b[1;38;2;1;2;3;48;2;4;5;6mx" + ANSI_RESET);
+		assert.equal(ansiStylePrefix({ foreground: "#010203", background: "#040506", bold: true }), "\u001b[1;38;2;1;2;3;48;2;4;5;6m");
+		assert.equal(ansiStylePrefix({}), "");
 		assert.equal(colorize("x", { underline: true }), "\u001b[4mx" + ANSI_RESET);
 		assert.equal(colorize("x", { strikethrough: true }), "\u001b[9mx" + ANSI_RESET);
 		assert.equal(colorLine("abc", 5, { foreground: "#000000" }), "\u001b[38;2;0;0;0mabc  " + ANSI_RESET);

@@ -7,6 +7,8 @@ const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
 const originalNodeEnv = process.env.NODE_ENV;
 const originalTestAuthPath = process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH;
 const originalOpencodeConfigDir = process.env.OPENCODE_CONFIG_DIR;
+const originalAntigravityClientId = process.env.PI_ANTIGRAVITY_GOOGLE_CLIENT_ID;
+const originalAntigravityClientSecret = process.env.PI_ANTIGRAVITY_GOOGLE_CLIENT_SECRET;
 const originalFetch = globalThis.fetch;
 const tempDirs: string[] = [];
 const testClientId = "test-antigravity-client-id";
@@ -92,11 +94,54 @@ afterEach(() => {
 	else process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH = originalTestAuthPath;
 	if (originalOpencodeConfigDir === undefined) delete process.env.OPENCODE_CONFIG_DIR;
 	else process.env.OPENCODE_CONFIG_DIR = originalOpencodeConfigDir;
+	if (originalAntigravityClientId === undefined) delete process.env.PI_ANTIGRAVITY_GOOGLE_CLIENT_ID;
+	else process.env.PI_ANTIGRAVITY_GOOGLE_CLIENT_ID = originalAntigravityClientId;
+	if (originalAntigravityClientSecret === undefined) delete process.env.PI_ANTIGRAVITY_GOOGLE_CLIENT_SECRET;
+	else process.env.PI_ANTIGRAVITY_GOOGLE_CLIENT_SECRET = originalAntigravityClientSecret;
 	globalThis.fetch = originalFetch;
 	for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
 describe.serial("Antigravity account rotation", () => {
+	test.serial("uses Antigravity OAuth client credentials from the environment when auth.json has only accounts", async () => {
+		const agentDir = tempDir();
+		process.env.PI_ANTIGRAVITY_GOOGLE_CLIENT_ID = testClientId;
+		process.env.PI_ANTIGRAVITY_GOOGLE_CLIENT_SECRET = testClientSecret;
+		writeJson(path.join(agentDir, "auth.json"), {
+			antigravity: {
+				type: "oauth",
+				access: "",
+				refresh: "refresh-0|project-0",
+				expires: 0,
+				email: "first@example.com",
+				activeIndex: 0,
+				accounts: [{ email: "first@example.com", refreshToken: "refresh-0", projectId: "project-0" }],
+			},
+		});
+		let refreshClientId = "";
+		let refreshClientSecret = "";
+		(globalThis as any).fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = String(input);
+			if (url === "https://oauth2.googleapis.com/token") {
+				const body = init?.body instanceof URLSearchParams ? init.body : new URLSearchParams(String(init?.body ?? ""));
+				refreshClientId = body.get("client_id") ?? "";
+				refreshClientSecret = body.get("client_secret") ?? "";
+				return new Response(JSON.stringify({ access_token: "access-1", expires_in: 3600 }), { status: 200, headers: { "content-type": "application/json" } });
+			}
+			if (url.includes("/v1internal:streamGenerateContent")) {
+				return new Response('data: {"response":{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}]}}\n\n', { status: 200, headers: { "content-type": "text/event-stream" } });
+			}
+			throw new Error(`Unexpected fetch ${url}`);
+		};
+
+		const { provider, model } = await loadProvider(agentDir);
+		const result = await runSimpleStream(provider, model);
+
+		expect(result.stopReason).toBe("stop");
+		expect(refreshClientId).toBeTruthy();
+		expect(refreshClientSecret).toBeTruthy();
+	});
+
 	test.serial("notifies the UI when an Antigravity model turn fails without auth", async () => {
 		const agentDir = tempDir();
 		writeJson(path.join(agentDir, "auth.json"), {});

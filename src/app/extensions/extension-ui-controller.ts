@@ -1,4 +1,4 @@
-import { ANSI_RESET, colorize, THEMES, type Theme, type ThemeName } from "../../theme.js";
+import { ANSI_RESET, ansiStylePrefix, colorize, THEMES, type Theme, type ThemeName } from "../../theme.js";
 import { isToastKind, type ToastKind, type ToastNotifier } from "../../ui.js";
 import type { ExtensionUIDialogOptions } from "@earendil-works/pi-coding-agent";
 import type {
@@ -94,9 +94,7 @@ export class ExtensionUiController {
 		const colors = this.host.theme.colors;
 		const foreground = (color: unknown): string => extensionForegroundColor(colors, String(color));
 		const background = (color: unknown): string => extensionBackgroundColor(colors, String(color));
-		const prefix = (options: { foreground?: string; background?: string; bold?: boolean }): string => (
-			colorize("", options).replace(new RegExp(`${escapeRegExp(ANSI_RESET)}$`), "")
-		);
+		const prefix = (options: { foreground?: string; background?: string; bold?: boolean }): string => ansiStylePrefix(options);
 
 		return {
 			fg: (color: unknown, text: string) => colorize(text, { foreground: foreground(color) }),

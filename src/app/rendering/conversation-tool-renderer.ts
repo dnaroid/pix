@@ -98,7 +98,7 @@ export function renderThinkingEntry(
 		expandedText: compactExpandedText || "(empty)",
 		bodyWrap: "word",
 		syntaxHighlight: compactExpandedText ? markdownSyntaxHighlightsForText(compactExpandedText) : undefined,
-	}, rule, width, options.colors, { superCompact: Boolean(options.superCompactTools && !forceExpanded) });
+	}, rule, width, options.colors, { superCompact: Boolean(options.superCompactTools && !forceExpanded), backgroundOverride: options.colors.thinkingMessageBackground, skipHeaderBackground: true });
 }
 
 function trimTrailingBlankLines(text: string): string {

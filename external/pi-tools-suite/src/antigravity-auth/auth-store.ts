@@ -96,6 +96,9 @@ export function getGoogleOAuthClientCredentials(...sources: Array<unknown>): Goo
 		const clientSecret = nestedClientSecret ?? stringProperty(source, ["clientSecret", "client_secret", "googleClientSecret", "google_client_secret", "oauthClientSecret", "oauth_client_secret"]);
 		if (clientId) return { clientId, ...(clientSecret ? { clientSecret } : {}) };
 	}
+	const clientId = process.env.PI_ANTIGRAVITY_GOOGLE_CLIENT_ID;
+	const clientSecret = process.env.PI_ANTIGRAVITY_GOOGLE_CLIENT_SECRET;
+	if (clientId) return { clientId, ...(clientSecret ? { clientSecret } : {}) };
 	return undefined;
 }
 
@@ -215,13 +218,15 @@ export async function importOpencodeAntigravityAccount(options: {
 		};
 	}
 
+	const oauthClient = getGoogleOAuthClientCredentials(selected.account, existing);
 	piAuth[PROVIDER_ID] = {
+		...existing,
 		type: "oauth",
 		refresh,
 		access: "",
 		expires: 0,
 		email: selected.account.email,
-		...getGoogleOAuthClientCredentials(selected.account),
+		...(oauthClient ? { oauthClient } : {}),
 		accounts: storage.accounts.filter((account) => account.enabled !== false && getAccountRefreshToken(account)),
 		activeIndex: selected.index,
 	};

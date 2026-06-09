@@ -1,4 +1,4 @@
-import { ANSI_RESET, colorize, type Theme } from "../../theme.js";
+import { ANSI_RESET, ansiStylePrefix, colorize, type Theme } from "../../theme.js";
 import { renderMarkdownLine } from "../../markdown-format.js";
 import { syntaxHighlightSegmentsForLine } from "../../syntax-highlight.js";
 import { displayIndexForColumn } from "../../terminal-width.js";
@@ -131,7 +131,7 @@ export class ScreenStyler {
 	}
 
 	private styleAnsiLine(text: string, options: { foreground?: string; background?: string; bold?: boolean }): string {
-		const prefix = colorize("", options).replace(new RegExp(`${escapeRegExp(ANSI_RESET)}$`), "");
+		const prefix = ansiStylePrefix(options);
 		if (!prefix) return text;
 		return `${prefix}${text.replaceAll(ANSI_RESET, `${ANSI_RESET}${prefix}`)}${ANSI_RESET}`;
 	}

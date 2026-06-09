@@ -116,7 +116,7 @@ describe("EditorLayoutRenderer extension input UI", () => {
 		assert.ok(line?.text.includes(APP_ICONS.pause));
 		assert.ok(line?.text.includes("queued later"));
 		assert.deepEqual(line?.target, { kind: "queue-message", id: queuedEntry.id });
-		assert.equal(line?.colorOverride, THEMES.dark.colors.warning);
+		assert.equal(line?.colorOverride, THEMES.dark.colors.userForeground);
 		assert.equal(line?.segments?.[0]?.foreground, THEMES.dark.colors.info);
 	});
 

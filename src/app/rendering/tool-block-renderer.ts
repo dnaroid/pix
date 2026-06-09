@@ -29,6 +29,8 @@ export type ToolBlockEntry = {
 
 export type ToolBlockRenderOptions = {
 	superCompact?: boolean;
+	backgroundOverride?: string;
+	skipHeaderBackground?: boolean;
 };
 
 export function renderToolBlock(entry: ToolBlockEntry, rule: ResolvedToolRule, width: number, colors: Theme["colors"], options: ToolBlockRenderOptions = {}): RenderedLine[] {
@@ -40,6 +42,8 @@ export function renderToolBlock(entry: ToolBlockEntry, rule: ResolvedToolRule, w
 	const toolColor = resolveColor(rule.color, colors);
 	const toolOutputColor = colors.statusForeground;
 	const headerLabel = (entry.headerLabel ?? entry.toolName).toLowerCase();
+	const bg = options.backgroundOverride;
+	const applyBackground = bg ? (lines: RenderedLine[]) => { for (const line of lines) line.backgroundOverride = bg; } : (_lines: RenderedLine[]) => {};
 	const headerPrefix = headerLabel ? `${stateIcon} ${headerLabel}` : stateIcon;
 	const headerArgs = formatToolHeaderArgs(entry.headerArgs);
 	const headerArgsWidth = width - stringDisplayWidth(headerPrefix) - 1;
@@ -52,6 +56,7 @@ export function renderToolBlock(entry: ToolBlockEntry, rule: ResolvedToolRule, w
 		text: header,
 		target,
 		colorOverride: toolColor,
+		...(options.backgroundOverride && !options.skipHeaderBackground ? { backgroundOverride: options.backgroundOverride } : {}),
 		segments: [
 			{ start: 0, end: stateIcon.length, foreground: toolStatusIconColor(entry, colors), bold: true },
 			{ start: stateIcon.length, end: headerPrefix.length, bold: true },
@@ -62,6 +67,11 @@ export function renderToolBlock(entry: ToolBlockEntry, rule: ResolvedToolRule, w
 
 	if (expanded) {
 		headerLines.push(...renderToolBodyLines(entry.expandedText, width, target, toolOutputColor, entry.bodyStyle, colors, entry.syntaxHighlight, entry.bodyWrap, hasLspDiagnostics, entry.bodyLineStyles, entry.preserveAnsi));
+		if (options.skipHeaderBackground && headerLines.length > 1) {
+			applyBackground(headerLines.slice(1));
+		} else {
+			applyBackground(headerLines);
+		}
 		return headerLines;
 	}
 
@@ -72,6 +82,7 @@ export function renderToolBlock(entry: ToolBlockEntry, rule: ResolvedToolRule, w
 
 	if (!options.superCompact) {
 		headerLines.push(...renderCollapsedPreviewLines(entry, body, rule, width, target, toolOutputColor, colors, hasLspDiagnostics));
+		applyBackground(headerLines);
 		return headerLines;
 	}
 
