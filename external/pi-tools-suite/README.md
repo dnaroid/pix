@@ -4,6 +4,7 @@ Local all-in-one Pi extension package.
 
 This package keeps shared Pi tools as ordinary source folders under `src/` and registers them through one entrypoint.
 
+- `src/glm-coding-discipline` — injects a deduplicated silent-mode and quality-discipline block at the very top of the main-session per-turn system prompt for GLM-family models immediately before the LLM request; disabled for async sub-agents
 - `src/ast-grep` — `ast_grep` / `ast_apply`
 - `src/async-subagents` — `subagents` tool and sub-agent slash commands, including oh-my-openagent-style `/ultrawork` (`/ulw`) and `/hyperplan` orchestration prompts, plus config-defined sub-agent model/thinking/args presets selected via `/subagent-preset` from `asyncSubagents` in `~/.config/pi/pi-tools-suite.jsonc`; includes the `frontend` profile for Gemini-friendly UI/UX and visual frontend work plus the `vision` profile for screenshot/image description via `openai-codex/gpt-5.4-mini`; enforces a 30-minute per-agent execution timeout, project-wide `maxConcurrent` queueing, optional retry/backoff, and `result.json` structured metadata/chaining fields next to raw `result.md`; stores project-local run files and a registry under `.pi/subagents/` so result/status collection can recover after compaction or reload while the main session remains alive
 - `src/lsp` — shared LSP diagnostics hook/library that enriches mutating tool results with diagnostics and shuts down language servers on session shutdown
@@ -18,7 +19,7 @@ This package keeps shared Pi tools as ordinary source folders under `src/` and r
 
 `index.ts` is intentionally only a thin auto-discovery shim that re-exports `src/index.ts`. There is no `pi.extensions` manifest here, so local Pi auto-discovery loads the suite once via `~/.pi/agent/extensions/pi-tools-suite/index.ts` and does not double-register tools.
 
-Registration order is preserved in `src/index.ts`: ast-grep, async-subagents, lsp, repo-discovery command/tool gate, antigravity-auth provider, todo, model-tools, usage, web-search, dcp, then prompt-commands. Tool metadata and active model-specific tool sets have two modes: standard and repo-aware. When `.indexer-cli` enables `repo_*`, those tools stay active ahead of overlapping lower-level aliases so the indexed discovery surface has priority.
+Registration order is preserved in `src/index.ts`: glm-coding-discipline, ast-grep, async-subagents, lsp, repo-discovery command/tool gate, antigravity-auth provider, todo, model-tools, usage, web-search, dcp, then prompt-commands. Tool metadata and active model-specific tool sets have two modes: standard and repo-aware. When `.indexer-cli` enables `repo_*`, those tools stay active ahead of overlapping lower-level aliases so the indexed discovery surface has priority.
 
 ## Disabling modules
 
