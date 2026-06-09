@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { cp, lstat, mkdir, readlink, realpath, rm, symlink } from "node:fs/promises";
+import { access, cp, lstat, mkdir, readlink, realpath, rm, symlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -107,7 +107,7 @@ export async function ensurePiToolsSuiteExtensionInstalled(options: PiToolsSuite
 	const sourcePath = resolve(options.sourcePath ?? piToolsSuiteExtensionSourcePath());
 	const targetPath = resolve(options.targetPath ?? piToolsSuiteExtensionInstallPath(options.agentDir));
 
-	if (!extensionEntryExists(sourcePath)) {
+	if (!(await extensionEntryExistsAsync(sourcePath))) {
 		return { action: "missing-source", sourcePath, targetPath };
 	}
 
@@ -161,6 +161,15 @@ export function getBundledExtensionPaths(): string[] {
 	].filter(extensionEntryExists);
 }
 
+export async function getBundledExtensionPathsAsync(): Promise<string[]> {
+	const paths = await Promise.all([
+		bundledQuestionExtensionPath(),
+		bundledSessionTitleExtensionPath(),
+		bundledTerminalBellExtensionPath(),
+	].map(async (extensionPath) => await extensionEntryExistsAsync(extensionPath) ? extensionPath : undefined));
+	return paths.filter((path): path is string => path !== undefined);
+}
+
 export function prioritizeBundledQuestionExtension(base: LoadExtensionsResult, questionExtensionPath = bundledQuestionExtensionPath()): LoadExtensionsResult {
 	const bundledQuestionExtensions = base.extensions.filter((extension) => isBundledQuestionExtension(extension, questionExtensionPath));
 	if (bundledQuestionExtensions.length === 0) return base;
@@ -178,6 +187,20 @@ export function prioritizeBundledQuestionExtension(base: LoadExtensionsResult, q
 
 function extensionEntryExists(extensionPath: string): boolean {
 	return existsSync(join(extensionPath, "index.ts")) || existsSync(join(extensionPath, "index.js"));
+}
+
+async function extensionEntryExistsAsync(extensionPath: string): Promise<boolean> {
+	try {
+		await access(join(extensionPath, "index.ts"));
+		return true;
+	} catch {
+		try {
+			await access(join(extensionPath, "index.js"));
+			return true;
+		} catch {
+			return false;
+		}
+	}
 }
 
 function extensionSymlinkType(): "dir" | "junction" {
@@ -217,6 +240,7 @@ function isBundledQuestionConflict(error: LoadExtensionsResult["errors"][number]
 
 export type CreatePixRuntimeOptions = {
 	eventBus?: EventBus;
+	config?: PixConfig;
 };
 
 const bundledSkillsInstallPromises = new Map<string, Promise<BundledSkillsInstallResult>>();
@@ -294,13 +318,13 @@ export function resolveSessionModelRefFromTail(entries: readonly SessionEntry[])
 export async function createPixRuntime(options: AppOptions, runtimeOptions: CreatePixRuntimeOptions = {}): Promise<AgentSessionRuntime> {
 	const agentDir = getAgentDir();
 	const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, sessionManager, sessionStartEvent }) => {
-		const config = loadPixConfig(cwd);
+		const config = runtimeOptions.config ?? loadPixConfig(cwd);
 		const effectiveModelRef = resolvePixRuntimeModelRef(options, sessionManager, config);
 		const parsedModel = effectiveModelRef ? parseModelRef(effectiveModelRef) : undefined;
 		const initialThinkingLevel = resolvePixRuntimeInitialThinkingLevel(options, sessionManager, config);
 		await ensureBundledSkillsInstalledOnce();
 		await ensurePiToolsSuiteExtensionInstalledOnce({ agentDir });
-		const bundledExtensionPaths = getBundledExtensionPaths();
+		const bundledExtensionPaths = await getBundledExtensionPathsAsync();
 		const services = await createAgentSessionServices({
 			cwd,
 			agentDir,

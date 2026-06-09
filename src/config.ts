@@ -398,17 +398,31 @@ function numberInRange(value: unknown, fallback: number, min: number, max: numbe
 	return Math.min(max, Math.max(min, rounded));
 }
 
-function defaultPixConfig(): PixConfig {
+export function defaultPixConfig(): PixConfig {
 	return {
-		toolRenderer: DEFAULT_TOOL_RENDERER,
-		outputFilters: DEFAULT_OUTPUT_FILTERS,
-		promptEnhancer: DEFAULT_PROMPT_ENHANCER,
-		autocomplete: DEFAULT_AUTOCOMPLETE,
-		modelColors: DEFAULT_MODEL_COLORS,
+		toolRenderer: cloneToolRendererConfig(DEFAULT_TOOL_RENDERER),
+		outputFilters: { patterns: [...DEFAULT_OUTPUT_FILTERS.patterns] },
+		promptEnhancer: { ...DEFAULT_PROMPT_ENHANCER },
+		autocomplete: { ...DEFAULT_AUTOCOMPLETE },
+		modelColors: { rules: { ...DEFAULT_MODEL_COLORS.rules } },
 		iconTheme: { name: resolveAppIconThemeNameFromEnv() },
-		dictation: DEFAULT_DICTATION,
+		dictation: cloneDictationConfig(DEFAULT_DICTATION),
 		ignoreContextFiles: false,
 		maxProjectSessions: 0,
+	};
+}
+
+function cloneToolRendererConfig(config: ToolRendererConfig): ToolRendererConfig {
+	return {
+		default: { ...config.default },
+		tools: Object.fromEntries(Object.entries(config.tools).map(([name, rule]) => [name, { ...rule }])),
+	};
+}
+
+function cloneDictationConfig(config: DictationConfig): DictationConfig {
+	return {
+		languages: Object.fromEntries(Object.entries(config.languages).map(([language, model]) => [language, { ...model }])),
+		...(config.language === undefined ? {} : { language: config.language }),
 	};
 }
 

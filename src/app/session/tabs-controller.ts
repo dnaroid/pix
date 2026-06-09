@@ -48,7 +48,7 @@ export type TabInputState = InputEditorDraftState;
 
 export type AppTabsControllerHost = {
 	readonly options: AppOptions;
-	readonly maxProjectSessions?: number;
+	readonly maxProjectSessions?: number | (() => number | undefined);
 	readonly blinkController: AppBlinkController;
 	runtime(): AgentSessionRuntime | undefined;
 	createRuntimeForNewSession(): Promise<AgentSessionRuntime>;
@@ -289,15 +289,11 @@ export class AppTabsController {
 
 		this.syncActiveTabFromRuntime({ save: false });
 		this.settleStartupTabPlaceholders();
-		this.host.resetSessionView();
-		if (this.activeTabId) this.restoreDeferredUserMessages(this.activeTabId);
-		this.host.loadSessionHistory();
-		this.host.setSessionStatus(restoredRuntime.session);
-		this.host.setSessionActivity(this.sessionActivity(restoredRuntime.session));
 		if (this.activeTabId) this.restoreInputState(this.activeTabId);
 		await this.saveTabs();
 		this.scheduleProjectSessionRetention();
 		this.scheduleTabPrewarm();
+		await this.loadActiveSessionHistory(restoredRuntime);
 	}
 
 	async openNewTab(): Promise<void> {
@@ -1464,7 +1460,8 @@ export class AppTabsController {
 	}
 
 	private maxProjectSessions(): number {
-		const value = this.host.maxProjectSessions;
+		const configured = this.host.maxProjectSessions;
+		const value = typeof configured === "function" ? configured() : configured;
 		return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
 	}
 }

@@ -25,6 +25,7 @@ export type AppSessionLifecycleHost = {
 	inputEditor(): InputEditor;
 	enableTerminal(): void;
 	disposeRuntimeForQuit(runtime: AgentSessionRuntime): Promise<void>;
+	loadStartupConfig(): Promise<void>;
 	loadRequestHistory(): Promise<void>;
 	startSubagentsPolling(): void;
 	closeSdkMenuForBind(): void;
@@ -72,12 +73,17 @@ export class AppSessionLifecycleController {
 		}
 
 		this.host.enableTerminal();
-		await this.host.loadRequestHistory();
 		this.host.setRunning(true);
 		this.host.startSubagentsPolling();
 		this.host.render();
+		void this.host.loadRequestHistory().catch((error) => {
+			if (!this.host.isRunning()) return;
+			this.host.addEntry({ id: createId("warning"), kind: "system", text: `Request history failed to load: ${stringifyUnknown(error)}` });
+			this.host.render();
+		});
 
 		try {
+			await this.host.loadStartupConfig();
 			const runtime = await this.host.createRuntime();
 			if (!this.host.isRunning()) {
 				await this.host.disposeRuntimeForQuit(runtime);
@@ -92,21 +98,6 @@ export class AppSessionLifecycleController {
 			if (isEmptyStartupSession(runtime)) {
 				this.host.addEntry({ id: createId("system"), kind: "system", text: createStartupInfoMessage(runtime) });
 			}
-			await this.host.restoreTabsAfterStartup();
-
-			const availabilityIssues = await collectStartupAvailabilityIssues(runtime);
-			for (const issue of availabilityIssues) {
-				this.host.addEntry({
-					id: createId(issue.kind),
-					kind: issue.kind === "error" ? "error" : "system",
-					text: issue.message,
-				});
-			}
-			if (availabilityIssues.some((issue) => issue.kind === "error")) {
-				this.host.showToast("Startup dependency unavailable", "error");
-			} else if (availabilityIssues.length > 0) {
-				this.host.showToast("Startup dependency warning", "warning");
-			}
 
 			if (runtime.modelFallbackMessage) {
 				this.host.addEntry({ id: createId("system"), kind: "system", text: runtime.modelFallbackMessage });
@@ -118,6 +109,13 @@ export class AppSessionLifecycleController {
 			this.host.setSessionStatus(runtime.session);
 			this.host.setSessionActivity(runtime.session.isStreaming ? "running" : "idle");
 			this.host.render();
+			void this.collectAvailabilityIssues(runtime);
+			void this.host.restoreTabsAfterStartup().catch((error) => {
+				if (!this.host.isRunning()) return;
+				this.host.addEntry({ id: createId("warning"), kind: "system", text: `Tab restore failed: ${stringifyUnknown(error)}` });
+				this.host.showToast("Could not restore tabs", "warning");
+				this.host.render();
+			});
 	} catch (error) {
 		this.host.addEntry({ id: createId("error"), kind: "error", text: stringifyUnknown(error) });
 		this.host.showToast("Session startup failed", "error");
@@ -219,6 +217,30 @@ export class AppSessionLifecycleController {
 		this.extensionBindRuntime = runtime;
 		this.extensionBindSession = session;
 		return promise;
+	}
+
+	private async collectAvailabilityIssues(runtime: AgentSessionRuntime): Promise<void> {
+		try {
+			const availabilityIssues = await collectStartupAvailabilityIssues(runtime);
+			if (!this.host.isRunning() || this.host.runtime() !== runtime) return;
+			for (const issue of availabilityIssues) {
+				this.host.addEntry({
+					id: createId(issue.kind),
+					kind: issue.kind === "error" ? "error" : "system",
+					text: issue.message,
+				});
+			}
+			if (availabilityIssues.some((issue) => issue.kind === "error")) {
+				this.host.showToast("Startup dependency unavailable", "error");
+			} else if (availabilityIssues.length > 0) {
+				this.host.showToast("Startup dependency warning", "warning");
+			}
+			if (availabilityIssues.length > 0) this.host.render();
+		} catch (error) {
+			if (!this.host.isRunning() || this.host.runtime() !== runtime) return;
+			this.host.addEntry({ id: createId("warning"), kind: "system", text: `Startup dependency check failed: ${stringifyUnknown(error)}` });
+			this.host.render();
+		}
 	}
 
 	private isCurrentRuntimeSession(runtime: AgentSessionRuntime, session: AgentSession): boolean {

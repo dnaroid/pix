@@ -3,6 +3,7 @@ import type { ToastKind, ToastNotifier, ToastVariant } from "../ui.js";
 import { InputEditor, type InputEditorDraftState } from "../input-editor.js";
 import {
 	compileOutputFilterPatterns,
+	defaultPixConfig,
 	loadPixConfig,
 	resolveToolRule,
 	type PixConfig,
@@ -90,7 +91,7 @@ export class PiUiExtendApp {
 	private readonly extensionUiController: ExtensionUiController;
 	private readonly extensionActions: AppExtensionActionsController;
 	private readonly pixConfig: PixConfig;
-	private readonly outputFilters: readonly RegExp[];
+	private readonly outputFilters: RegExp[] = [];
 	private readonly commandController: AppCommandController;
 	private readonly inputActions: AppInputActionController;
 	private readonly inputController: AppInputController;
@@ -150,7 +151,7 @@ export class PiUiExtendApp {
 	constructor(options: AppOptions) {
 		this.options = options;
 		this.theme = THEMES[options.themeName];
-		this.pixConfig = loadPixConfig(this.options.cwd);
+		this.pixConfig = defaultPixConfig();
 		setAppIconTheme(this.pixConfig.iconTheme.name);
 		const app = this;
 		this.blinkController = new AppBlinkController({
@@ -183,7 +184,7 @@ export class PiUiExtendApp {
 		});
 		this.tabsController = new AppTabsController({
 			options: this.options,
-			maxProjectSessions: this.pixConfig.maxProjectSessions,
+			maxProjectSessions: () => this.pixConfig.maxProjectSessions,
 			blinkController: this.blinkController,
 			runtime: () => this.runtime,
 			createRuntimeForNewSession: () => this.createRuntime(newTabRuntimeOptions(this.options)),
@@ -428,7 +429,7 @@ export class PiUiExtendApp {
 			createExtensionTheme: () => this.extensionUiController.createExtensionTheme(),
 			suppressExtensionWidget: (key) => this.extensionUiController.suppressWidget(key),
 		});
-		this.outputFilters = compileOutputFilterPatterns(this.pixConfig.outputFilters.patterns);
+		this.updateOutputFilters();
 		this.conversationViewport = new ConversationViewport({
 			get entries() { return app.entries; },
 			get entryRenderVersions() { return app.sessionEvents.entryRenderVersions; },
@@ -746,6 +747,7 @@ export class PiUiExtendApp {
 			inputEditor: () => this.inputEditor,
 			enableTerminal: () => this.terminalController.enableTerminal(),
 			disposeRuntimeForQuit: (runtime) => this.terminalController.disposeRuntimeForQuit(runtime),
+			loadStartupConfig: () => this.loadStartupConfig(),
 			loadRequestHistory: () => this.requestHistory.load(),
 			startSubagentsPolling: () => this.subagentsWidgetController.startPolling(),
 			closeSdkMenuForBind: () => this.popupMenus.closeSdkMenu(undefined, { render: false, restoreStatus: false }),
@@ -797,7 +799,35 @@ export class PiUiExtendApp {
 	private createRuntime(options: AppOptions): Promise<AgentSessionRuntime> {
 		return createPixRuntime(options, {
 			eventBus: this.createExtensionEventBus(),
+			config: this.pixConfig,
 		});
+	}
+
+	private async loadStartupConfig(): Promise<void> {
+		await yieldToEventLoop();
+		this.applyPixConfig(loadPixConfig(this.options.cwd));
+	}
+
+	private applyPixConfig(config: PixConfig): void {
+		replaceRecord(this.pixConfig.toolRenderer as unknown as MutableRecord, config.toolRenderer as unknown as MutableRecord);
+		replaceRecord(this.pixConfig.outputFilters as unknown as MutableRecord, config.outputFilters as unknown as MutableRecord);
+		replaceRecord(this.pixConfig.promptEnhancer as unknown as MutableRecord, config.promptEnhancer as unknown as MutableRecord);
+		replaceRecord(this.pixConfig.autocomplete as unknown as MutableRecord, config.autocomplete as unknown as MutableRecord);
+		replaceRecord(this.pixConfig.modelColors as unknown as MutableRecord, config.modelColors as unknown as MutableRecord);
+		replaceRecord(this.pixConfig.iconTheme as unknown as MutableRecord, config.iconTheme as unknown as MutableRecord);
+		replaceRecord(this.pixConfig.dictation as unknown as MutableRecord, config.dictation as unknown as MutableRecord);
+		if (config.defaultModel === undefined) delete this.pixConfig.defaultModel;
+		else this.pixConfig.defaultModel = { ...config.defaultModel };
+		this.pixConfig.ignoreContextFiles = config.ignoreContextFiles;
+		this.pixConfig.maxProjectSessions = config.maxProjectSessions;
+		this.updateOutputFilters();
+		this.voiceController.updateDictationConfig(this.pixConfig.dictation);
+		setAppIconTheme(this.pixConfig.iconTheme.name);
+		this.conversationViewport.clear();
+	}
+
+	private updateOutputFilters(): void {
+		this.outputFilters.splice(0, this.outputFilters.length, ...compileOutputFilterPatterns(this.pixConfig.outputFilters.patterns));
 	}
 
 	async start(): Promise<void> {
@@ -1139,4 +1169,41 @@ function newTabRuntimeOptions(options: AppOptions): AppOptions {
 		noSession: false,
 		...(options.modelRef === undefined ? {} : { modelRef: options.modelRef }),
 	};
+}
+
+type MutableRecord = Record<string, unknown>;
+
+async function yieldToEventLoop(): Promise<void> {
+	await new Promise<void>((resolve) => { setTimeout(resolve, 0); });
+}
+
+function replaceRecord(target: MutableRecord, source: MutableRecord): void {
+	for (const key of Object.keys(target)) {
+		if (!(key in source)) delete target[key];
+	}
+
+	for (const [key, value] of Object.entries(source)) {
+		const existing = target[key];
+		if (isMutableRecord(existing) && isMutableRecord(value)) {
+			replaceRecord(existing, value);
+		} else {
+			target[key] = cloneConfigValue(value);
+		}
+	}
+}
+
+function cloneConfigValue(value: unknown): unknown {
+	if (Array.isArray(value)) return value.map(cloneConfigValue);
+	if (isMutableRecord(value)) return cloneConfigRecord(value);
+	return value;
+}
+
+function cloneConfigRecord(value: MutableRecord): MutableRecord {
+	const cloned: MutableRecord = {};
+	for (const [key, nested] of Object.entries(value)) cloned[key] = cloneConfigValue(nested);
+	return cloned;
+}
+
+function isMutableRecord(value: unknown): value is MutableRecord {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
 }

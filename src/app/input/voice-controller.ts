@@ -90,8 +90,8 @@ export function setVoiceControllerTestDeps(overrides?: Partial<VoiceControllerTe
 }
 
 export class AppVoiceController {
-	private readonly modelDefinitions: Record<VoiceLanguage, VoiceModelDefinition>;
-	private readonly languages: VoiceLanguage[];
+	private modelDefinitions: Record<VoiceLanguage, VoiceModelDefinition>;
+	private languages: VoiceLanguage[];
 	private language: VoiceLanguage;
 	private state: VoiceInputState = "idle";
 	private readonly modelCache = new Map<VoiceLanguage, VoskModel>();
@@ -109,6 +109,15 @@ export class AppVoiceController {
 		this.modelDefinitions = dictationConfig.languages;
 		this.languages = Object.keys(this.modelDefinitions);
 		this.language = this.initialLanguage(dictationConfig.language);
+	}
+
+	updateDictationConfig(dictationConfig: DictationConfig): void {
+		this.modelDefinitions = dictationConfig.languages;
+		this.languages = Object.keys(this.modelDefinitions);
+		this.language = this.initialLanguage(dictationConfig.language ?? this.language);
+		for (const language of this.modelCache.keys()) {
+			if (!this.modelDefinitions[language]) this.modelCache.delete(language);
+		}
 	}
 
 	statusWidgetText(): string {
