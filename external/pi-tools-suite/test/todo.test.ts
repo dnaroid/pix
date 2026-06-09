@@ -680,6 +680,8 @@ describe.serial("todo extension lifecycle", () => {
 	});
 
 	test.serial("optimistically completes the current in-progress todo on agent_end when it was started this turn", async () => {
+		const previousEnv = process.env.PI_TOOLS_SUITE_TODO_THINKING;
+		process.env.PI_TOOLS_SUITE_TODO_THINKING = "1";
 		const extension = (await import("../src/todo/index.js")).default;
 		const { getTodos } = await import("../src/todo/todo.js");
 		const pi = new FakePi();
@@ -718,11 +720,15 @@ describe.serial("todo extension lifecycle", () => {
 		} finally {
 			globalThis.setTimeout = originalSetTimeout;
 			globalThis.clearTimeout = originalClearTimeout;
+			if (previousEnv === undefined) delete process.env.PI_TOOLS_SUITE_TODO_THINKING;
+			else process.env.PI_TOOLS_SUITE_TODO_THINKING = previousEnv;
 			rmSync(ctx.cwd, { recursive: true, force: true });
 		}
 	});
 
 	test.serial("optimistically completes the current in-progress todo on assistant message_end before agent_end", async () => {
+		const previousEnv = process.env.PI_TOOLS_SUITE_TODO_THINKING;
+		process.env.PI_TOOLS_SUITE_TODO_THINKING = "1";
 		const extension = (await import("../src/todo/index.js")).default;
 		const { getTodos } = await import("../src/todo/todo.js");
 		const pi = new FakePi();
@@ -757,6 +763,8 @@ describe.serial("todo extension lifecycle", () => {
 			await pi.emit("agent_end", {}, ctx);
 			expect(pi.sentMessages).toHaveLength(0);
 		} finally {
+			if (previousEnv === undefined) delete process.env.PI_TOOLS_SUITE_TODO_THINKING;
+			else process.env.PI_TOOLS_SUITE_TODO_THINKING = previousEnv;
 			rmSync(ctx.cwd, { recursive: true, force: true });
 		}
 	});

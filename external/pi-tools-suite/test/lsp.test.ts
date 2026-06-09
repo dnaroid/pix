@@ -369,7 +369,7 @@ describe.serial("LSP library post-edit diagnostics", () => {
 		const { default: registerSuite } = await import("../src/index.js");
 		await registerSuite(pi as any);
 
-		expect([...pi.handlers.keys()].sort()).toEqual(["session_shutdown", "tool_result"]);
+		expect([...pi.handlers.keys()].sort()).toEqual(["before_provider_request", "model_select", "session_shutdown", "session_start", "tool_result"]);
 	});
 
 	test.serial("registers post-edit diagnostics hook without TUI renderers", async () => {
