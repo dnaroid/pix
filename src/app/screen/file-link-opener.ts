@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
-import { delimiter, extname, isAbsolute, join } from "node:path";
+import { isAbsolute, posix, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { RenderedLink } from "./file-links.js";
 
@@ -140,16 +140,21 @@ function hasPathSeparator(command: string): boolean {
 }
 
 function commandOnPath(command: string): boolean {
-	const pathEntries = deps.env.PATH?.split(delimiter) ?? [];
+	const pathEntries = deps.env.PATH?.split(pathDelimiter()) ?? [];
 	const extensions = deps.platform === "win32"
 		? (deps.env.PATHEXT?.split(";") ?? [".EXE", ".CMD", ".BAT", ".COM"])
 		: [""];
 	return pathEntries.some((entry) => pathCommandCandidates(entry, command, extensions).some((candidate) => deps.existsSync(candidate)));
 }
 
+function pathDelimiter(): string {
+	return deps.platform === "win32" ? ";" : ":";
+}
+
 function pathCommandCandidates(entry: string, command: string, extensions: readonly string[]): string[] {
-	if (deps.platform !== "win32" || extname(command)) return [join(entry, command)];
-	return [join(entry, command), ...extensions.map((extension) => join(entry, `${command}${extension}`))];
+	const pathApi = deps.platform === "win32" ? win32 : posix;
+	if (deps.platform !== "win32" || pathApi.extname(command)) return [pathApi.join(entry, command)];
+	return [pathApi.join(entry, command), ...extensions.map((extension) => pathApi.join(entry, `${command}${extension}`))];
 }
 
 function openPathWithSystemViewer(filePath: string): boolean {

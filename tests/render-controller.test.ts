@@ -542,8 +542,8 @@ describe("AppRenderController", () => {
 
 		const output = captureStdout(() => controller.render());
 
-		assert.match(output, /\x1b\[3;1H\x1b\[0m\x1b\[2K\x1b\[[^m]+m│\x1b\[0mwidget {4}\x1b\[[^m]+m│\x1b\[0m/);
-		assert.equal(mouseController.renderedRowTexts.get(3), "│widget    │");
+		assert.match(output, /\x1b\[3;1H\x1b\[0m\x1b\[2Kwidget {6}/);
+		assert.equal(mouseController.renderedRowTexts.get(3), "widget      ");
 		assert.deepEqual(mouseController.renderedTargets.get(3), { kind: "todo-panel" });
 	});
 
