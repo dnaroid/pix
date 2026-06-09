@@ -93,7 +93,7 @@ export const THEMES: Record<ThemeName, Theme> = {
 			accent: "#7aa2d6",
 			success: "#7ca982",
 			warning: "#d49a4a",
-			heading: "#e8c46a",
+			heading: "#d4b35e",
 			info: "#7fb3c8",
 			toolMutation: "#b8899e", // ~10% brighter from #a67c8f
 			toolSearch: "#9d8abb", // ~10% brighter from #8c7aa8
