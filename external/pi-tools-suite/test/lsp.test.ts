@@ -12,6 +12,7 @@ mock.module("typebox", () => ({
 		String: (options?: any) => ({ kind: "string", options }),
 		Number: (options?: any) => ({ kind: "number", options }),
 		Boolean: (options?: any) => ({ kind: "boolean", options }),
+		Array: (items: any, options?: any) => ({ kind: "array", items, options }),
 	},
 }));
 
