@@ -83,14 +83,14 @@ describe("StatusLineRenderer", () => {
 		const renderer = statusLineRenderer({ widgetText, voiceActive: false });
 
 		const layout = renderer.inputBorderWidgetsLayout(width)!;
-		const borderWidgetText = `${iconButtonText(APP_ICONS.user)}${iconButtonText(APP_ICONS.thinkingExpanded)}${iconButtonText(APP_ICONS.compactTools)}${iconButtonText(APP_ICONS.microphone)}RU`;
+		const borderWidgetText = widgetsText(APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools, APP_ICONS.microphone, "RU");
 		const expectedStartColumn = width + 1 - stringDisplayWidth(borderWidgetText);
 
 		assert.equal(layout.inputBorderWidgetStartColumn, expectedStartColumn);
 		assert.equal(layout.text, borderWidgetText);
-		assert.equal(layout.voiceWidget?.startColumn, expectedStartColumn + stringDisplayWidth(`${iconButtonText(APP_ICONS.user)}${iconButtonText(APP_ICONS.thinkingExpanded)}${iconButtonText(APP_ICONS.compactTools)}`));
-		assert.equal(layout.voiceWidget?.languageStartColumn, layout.voiceWidget!.micEndColumn);
-		assert.equal(layout.voiceWidget?.endColumn, layout.voiceWidget!.startColumn + stringDisplayWidth(`${iconButtonText(APP_ICONS.microphone)}RU`));
+		assert.equal(layout.voiceWidget?.startColumn, expectedStartColumn + stringDisplayWidth(widgetsText(APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools)) + 1);
+		assert.equal(layout.voiceWidget?.languageStartColumn, layout.voiceWidget!.micEndColumn + 1);
+		assert.equal(layout.voiceWidget?.endColumn, layout.voiceWidget!.startColumn + stringDisplayWidth(`${APP_ICONS.microphone} RU`));
 		assert.equal(layout.voiceWidget?.endColumn, width + 1);
 	});
 
@@ -103,7 +103,7 @@ describe("StatusLineRenderer", () => {
 
 		assert.equal(widgetLayout.inputBorderWidgetStartColumn, width + 1 - stringDisplayWidth(widgetLayout.text));
 		assert.ok(layout.text.endsWith(widgetLayout.text));
-		assert.ok(widgetLayout.text.includes(`${iconButtonText(APP_ICONS.user)}${iconButtonText(APP_ICONS.thinkingExpanded)}`));
+		assert.ok(widgetLayout.text.includes(widgetsText(APP_ICONS.user, APP_ICONS.thinkingExpanded)));
 		assert.ok(rendered.includes(colorize(iconButtonText(APP_ICONS.user), {
 			foreground: THEMES.dark.colors.muted,
 		})));
@@ -141,7 +141,7 @@ describe("StatusLineRenderer", () => {
 		assert.ok(rendered.includes(activeMicPrefix));
 		assert.ok(!rendered.includes(activeWholeWidgetPrefix));
 		assert.ok(!rendered.includes(boldActiveMicPrefix));
-		assert.ok(widgetLayout.text.endsWith(`${iconButtonText(APP_ICONS.microphone)}RU`));
+		assert.ok(widgetLayout.text.endsWith(widgetsText(APP_ICONS.microphone, "RU")));
 	});
 
 	it("replaces the microphone icon with voice progress while keeping the language button", () => {
@@ -149,9 +149,9 @@ describe("StatusLineRenderer", () => {
 		const renderer = statusLineRenderer({ widgetText, voiceActive: false });
 		const layout = renderer.inputBorderWidgetsLayout(40)!;
 
-		assert.ok(layout.text.endsWith(`${iconButtonText(APP_ICONS.timerSand)}RU`));
-		assert.ok(!layout.text.endsWith(`${iconButtonText(APP_ICONS.microphone)}RU ${APP_ICONS.timerSand}`));
-		assert.equal(layout.voiceWidget?.languageStartColumn, layout.voiceWidget!.micEndColumn);
+		assert.ok(layout.text.endsWith(widgetsText(APP_ICONS.timerSand, "RU")));
+		assert.ok(!layout.text.endsWith(`${APP_ICONS.microphone} RU ${APP_ICONS.timerSand}`));
+		assert.equal(layout.voiceWidget?.languageStartColumn, layout.voiceWidget!.micEndColumn + 1);
 		assert.equal(layout.voiceWidget?.languageEndColumn, layout.voiceWidget!.languageStartColumn + stringDisplayWidth("RU"));
 		assert.deepEqual(renderer.voiceLanguageTarget(layout, 1), {
 			row: 1,
@@ -166,7 +166,7 @@ describe("StatusLineRenderer", () => {
 		const layout = renderer.inputBorderWidgetsLayout(40)!;
 
 		assert.ok(layout.text.endsWith(iconButtonText(APP_ICONS.timerSand)));
-		assert.ok(!layout.text.endsWith(`${iconButtonText(APP_ICONS.microphone)}${APP_ICONS.timerSand}`));
+		assert.ok(!layout.text.endsWith(`${APP_ICONS.microphone}${APP_ICONS.timerSand}`));
 		assert.equal(renderer.voiceLanguageTarget(layout, 1), undefined);
 	});
 
@@ -178,9 +178,9 @@ describe("StatusLineRenderer", () => {
 
 		const layout = renderer.inputBorderWidgetsLayout(width)!;
 
-		assert.ok(layout.text.endsWith(`${iconButtonText(promptWidgetText)}${iconButtonText(APP_ICONS.user)}${iconButtonText(APP_ICONS.thinkingExpanded)}${iconButtonText(APP_ICONS.compactTools)}${iconButtonText(APP_ICONS.microphone)}RU`));
-		assert.equal(layout.promptEnhancerWidget?.endColumn, layout.userJumpWidget?.startColumn);
-		assert.equal(layout.compactToolsWidget?.endColumn, layout.voiceWidget?.startColumn);
+		assert.ok(layout.text.endsWith(widgetsText(promptWidgetText, APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools, APP_ICONS.microphone, "RU")));
+		assert.equal(layout.promptEnhancerWidget?.endColumn, (layout.userJumpWidget?.startColumn ?? 0) - 1);
+		assert.equal(layout.compactToolsWidget?.endColumn, (layout.voiceWidget?.startColumn ?? 0) - 1);
 	});
 
 	it("keeps the prompt enhancer icon before the user icon without draft queue input", () => {
@@ -190,8 +190,8 @@ describe("StatusLineRenderer", () => {
 		const renderer = statusLineRenderer({ widgetText, voiceActive: false, promptWidgetText, promptActive: false });
 
 		const layout = renderer.inputBorderWidgetsLayout(width)!;
-		assert.ok(layout.text.endsWith(`${iconButtonText(promptWidgetText)}${iconButtonText(APP_ICONS.user)}${iconButtonText(APP_ICONS.thinkingExpanded)}${iconButtonText(APP_ICONS.compactTools)}${iconButtonText(APP_ICONS.microphone)}RU`));
-		assert.equal(layout.promptEnhancerWidget?.endColumn, layout.userJumpWidget?.startColumn);
+		assert.ok(layout.text.endsWith(widgetsText(promptWidgetText, APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools, APP_ICONS.microphone, "RU")));
+		assert.equal(layout.promptEnhancerWidget?.endColumn, (layout.userJumpWidget?.startColumn ?? 0) - 1);
 	});
 
 	it("renders the prompt enhancer icon muted and non-clickable when disabled", () => {
@@ -456,7 +456,7 @@ describe("StatusLineRenderer", () => {
 		const rendered = renderer.render(1, layout, 40);
 		const target = renderer.compactToolsTarget(layout, 1);
 
-		assert.ok(widgetLayout.text.endsWith(`${iconButtonText(promptWidgetText)}${iconButtonText(APP_ICONS.user)}${iconButtonText(APP_ICONS.thinkingExpanded)}${iconButtonText(APP_ICONS.compactTools)}${iconButtonText(APP_ICONS.microphone)}RU`));
+		assert.ok(widgetLayout.text.endsWith(widgetsText(promptWidgetText, APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools, APP_ICONS.microphone, "RU")));
 		assert.deepEqual(target, {
 			row: 1,
 			startColumn: layout.compactToolsWidget?.startColumn,
@@ -474,7 +474,7 @@ describe("StatusLineRenderer", () => {
 		const rendered = renderer.render(1, layout, 40);
 		const target = renderer.userJumpTarget(layout, 1);
 
-		assert.ok(widgetLayout.text.endsWith(`${iconButtonText(APP_ICONS.user)}${iconButtonText(APP_ICONS.thinkingExpanded)}${iconButtonText(APP_ICONS.compactTools)}`));
+		assert.ok(widgetLayout.text.endsWith(widgetsText(APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools)));
 		assert.deepEqual(target, {
 			row: 1,
 			startColumn: layout.userJumpWidget?.startColumn,
@@ -494,13 +494,13 @@ describe("StatusLineRenderer", () => {
 		const target = renderer.draftQueueTarget(statusLayout, 1);
 
 		assert.equal(layout.inputBorderWidgetStartColumn, 40 + 1 - stringDisplayWidth(layout.text));
-		assert.ok(layout.text.endsWith(`${iconButtonText(buttonText)}${iconButtonText(APP_ICONS.user)}${iconButtonText(APP_ICONS.thinkingExpanded)}${iconButtonText(APP_ICONS.compactTools)}`));
+		assert.ok(layout.text.endsWith(widgetsText(buttonText, APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools)));
 		assert.deepEqual(target, {
 			row: 1,
 			startColumn: statusLayout.draftQueueWidget?.startColumn,
 			endColumn: statusLayout.draftQueueWidget?.endColumn,
 		});
-		assert.equal(layout.draftQueueWidget?.endColumn, layout.userJumpWidget?.startColumn);
+		assert.equal(layout.draftQueueWidget?.endColumn, (layout.userJumpWidget?.startColumn ?? 0) - 1);
 		assert.ok(rendered.includes(colorize(iconButtonText(buttonText), {
 			foreground: THEMES.dark.colors.info,
 		})));
@@ -516,9 +516,9 @@ describe("StatusLineRenderer", () => {
 		});
 		const layout = renderer.inputBorderWidgetsLayout(40)!;
 
-		assert.ok(layout.text.endsWith(`${iconButtonText(APP_ICONS.timerSand)}${iconButtonText(APP_ICONS.autoFix)}${iconButtonText(APP_ICONS.user)}${iconButtonText(APP_ICONS.thinkingExpanded)}${iconButtonText(APP_ICONS.compactTools)}`));
-		assert.equal(layout.draftQueueWidget?.endColumn, layout.promptEnhancerWidget?.startColumn);
-		assert.equal(layout.promptEnhancerWidget?.endColumn, layout.userJumpWidget?.startColumn);
+		assert.ok(layout.text.endsWith(widgetsText(APP_ICONS.timerSand, APP_ICONS.autoFix, APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools)));
+		assert.equal(layout.draftQueueWidget?.endColumn, (layout.promptEnhancerWidget?.startColumn ?? 0) - 1);
+		assert.equal(layout.promptEnhancerWidget?.endColumn, (layout.userJumpWidget?.startColumn ?? 0) - 1);
 	});
 
 	it("keeps the prompt enhancer before the user icon when the draft queue button is hidden", () => {
@@ -532,8 +532,8 @@ describe("StatusLineRenderer", () => {
 		const layout = renderer.inputBorderWidgetsLayout(40)!;
 
 		assert.equal(layout.draftQueueWidget, undefined);
-		assert.ok(layout.text.endsWith(`${iconButtonText(APP_ICONS.autoFix)}${iconButtonText(APP_ICONS.user)}${iconButtonText(APP_ICONS.thinkingExpanded)}${iconButtonText(APP_ICONS.compactTools)}`));
-		assert.equal(layout.promptEnhancerWidget?.endColumn, layout.userJumpWidget?.startColumn);
+		assert.ok(layout.text.endsWith(widgetsText(APP_ICONS.autoFix, APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools)));
+		assert.equal(layout.promptEnhancerWidget?.endColumn, (layout.userJumpWidget?.startColumn ?? 0) - 1);
 	});
 
 	it("hides the draft queue button when the editor has no queueable input", () => {
@@ -543,7 +543,7 @@ describe("StatusLineRenderer", () => {
 		assert.equal(layout.draftQueueWidget, undefined);
 		assert.equal(renderer.draftQueueTarget(layout, 1), undefined);
 		assert.equal(layout.inputBorderWidgetStartColumn, 40 + 1 - stringDisplayWidth(layout.text));
-		assert.ok(layout.text.endsWith(`${iconButtonText(APP_ICONS.user)}${iconButtonText(APP_ICONS.thinkingExpanded)}${iconButtonText(APP_ICONS.compactTools)}`));
+		assert.ok(layout.text.endsWith(widgetsText(APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools)));
 	});
 
 	it("renders the all-thinking-expanded target before super-compact tools", () => {
@@ -553,7 +553,7 @@ describe("StatusLineRenderer", () => {
 		const rendered = renderer.render(1, layout, 40);
 		const target = renderer.thinkingExpandTarget(layout, 1);
 
-		assert.ok(widgetLayout.text.endsWith(`${iconButtonText(APP_ICONS.user)}${iconButtonText(APP_ICONS.thinkingExpanded)}${iconButtonText(APP_ICONS.compactTools)}`));
+		assert.ok(widgetLayout.text.endsWith(widgetsText(APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools)));
 		assert.deepEqual(target, {
 			row: 1,
 			startColumn: layout.thinkingExpandWidget?.startColumn,
@@ -571,8 +571,8 @@ describe("StatusLineRenderer", () => {
 		const rendered = renderer.render(1, layout, 40);
 		const target = renderer.terminalBellSoundTarget(layout, 1);
 
-		assert.ok(widgetLayout.text.endsWith(`${iconButtonText(APP_ICONS.user)}${iconButtonText(APP_ICONS.volumeOff)}${iconButtonText(APP_ICONS.thinkingExpanded)}${iconButtonText(APP_ICONS.compactTools)}`));
-		assert.equal(layout.terminalBellSoundWidget?.endColumn, layout.thinkingExpandWidget?.startColumn);
+		assert.ok(widgetLayout.text.endsWith(widgetsText(APP_ICONS.user, APP_ICONS.volumeOff, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools)));
+		assert.equal(layout.terminalBellSoundWidget?.endColumn, (layout.thinkingExpandWidget?.startColumn ?? 0) - 1);
 		assert.deepEqual(target, {
 			row: 1,
 			startColumn: layout.terminalBellSoundWidget?.startColumn,
@@ -635,7 +635,11 @@ describe("StatusLineRenderer target helpers", () => {
 });
 
 function iconButtonText(icon: string): string {
-	return ` ${icon} `;
+	return icon;
+}
+
+function widgetsText(...parts: string[]): string {
+	return parts.filter((part) => part.length > 0).join(" ");
 }
 
 function overlayText(text: string, startColumn: number, overlay: string): string {

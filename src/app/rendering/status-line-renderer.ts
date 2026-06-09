@@ -26,6 +26,7 @@ import { APP_ICONS } from "../icons.js";
 import { resolveColor, resolveModelColor, type ModelColorsConfig } from "../../config.js";
 
 const MODEL_USAGE_PROGRESS_BAR_WIDTH = stringDisplayWidth(formatCompactProgressBar(100));
+const STATUS_WIDGET_GAP = " ";
 
 export type StatusLineRendererHost = {
 	readonly theme: Theme;
@@ -139,14 +140,19 @@ export class StatusLineRenderer {
 		if (!hasParts) return undefined;
 
 		const parts: string[] = [];
-		const totalWidth = widgets.reduce((total, widget) => total + stringDisplayWidth(widget.text), 0);
+		const gapWidth = stringDisplayWidth(STATUS_WIDGET_GAP);
+		const totalWidth = widgets.reduce((total, widget, index) => total + stringDisplayWidth(widget.text) + (index > 0 ? gapWidth : 0), 0);
 		const endColumn = Math.max(1, width + 1);
 		const startColumn = endColumn - totalWidth;
 		if (startColumn < 1) return undefined;
 
 		layout.inputBorderWidgetStartColumn = startColumn;
 		let nextColumn = startColumn;
-		for (const widget of widgets) {
+		for (const [index, widget] of widgets.entries()) {
+			if (index > 0) {
+				parts.push(STATUS_WIDGET_GAP);
+				nextColumn += gapWidth;
+			}
 			parts.push(widget.text);
 			widget.assign(nextColumn, widget.text);
 			nextColumn += stringDisplayWidth(widget.text);
@@ -633,7 +639,7 @@ export class StatusLineRenderer {
 
 		const micButton = this.iconButtonText(parts.buttonIconText);
 		if (parts.languageText) {
-			return `${micButton}${parts.languageText}`;
+			return `${micButton}${STATUS_WIDGET_GAP}${parts.languageText}`;
 		}
 		return micButton;
 	}
@@ -642,7 +648,7 @@ export class StatusLineRenderer {
 		const parts = this.voiceBorderWidgetParts(sourceText);
 		const micWidth = parts?.buttonIconText ? stringDisplayWidth(parts.buttonIconText) : stringDisplayWidth(widgetText);
 		const languageStartOffset = parts?.languageText
-			? micWidth
+			? micWidth + stringDisplayWidth(STATUS_WIDGET_GAP)
 			: stringDisplayWidth(widgetText);
 		const languageEndOffset = parts?.languageText
 			? languageStartOffset + stringDisplayWidth(parts.languageText)
