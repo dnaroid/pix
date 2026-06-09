@@ -1,7 +1,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { complete, Type } from "@earendil-works/pi-ai";
+import { complete } from "@earendil-works/pi-ai";
 import type { Api, AssistantMessage, ImageContent, Model, TextContent } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 
 import { loadPiToolsSuiteConfig } from "../config.js";
 
