@@ -38,6 +38,8 @@ const DEFAULT_LOOKUP_MAX_IMAGES = 6;
 const DEFAULT_LOOKUP_MAX_TOKENS = 1_600;
 const DEFAULT_LOOKUP_TIMEOUT_MS = 120_000;
 const MAX_IMAGE_BYTES = 16 * 1024 * 1024;
+const SILENCE_REMINDER_MIN_VIOLATION_GAP = 3;
+const SILENCE_REMINDER_MIN_MESSAGE_GAP = 12;
 
 const LOOKUP_TOOL_PARAMS = Type.Object(
 	{
@@ -55,49 +57,71 @@ const LOOKUP_TOOL_PARAMS = Type.Object(
 );
 
 const QUALITY_DISCIPLINE_LINES = [
-	"GLM coding agent discipline.",
+	"GLM TOOL-ONLY CODING AGENT CONTRACT.",
 	"",
-	"HARD OUTPUT CONTRACT — VIOLATION OF ANY RULE BELOW IS A CRITICAL FAILURE:",
+	"This contract controls the assistant output channel. Follow it literally.",
+	"Treat every user coding request as a tool-driven task, not a chat conversation.",
 	"",
-	"1. PROSE IS FORBIDDEN until the final answer or one required blocking question.",
-	"   Before the final answer, the ONLY allowed output is tool calls.",
-	"   No text. No explanation. No narration. No acknowledgment. No 'let me'. No 'I will'. No 'Now'. No 'Done'. No 'Checking'. NOTHING.",
+	"OUTPUT STATE MACHINE:",
 	"",
-	"2. AFTER EVERY TOOL RESULT you must choose EXACTLY ONE:",
-	"   - another tool call (no surrounding text),",
-	"   - a final answer (user-visible prose, allowed ONCE at the end),",
-	"   - one concise blocking question.",
-	"   ANY other output is a violation.",
+	"STATE = WORKING from the first assistant turn until the task is complete or blocked.",
+	"In WORKING state, the assistant message MUST be exactly one tool call.",
+	"In WORKING state, the assistant message text/content MUST be empty.",
+	"In WORKING state, do not emit markdown, prose, acknowledgments, plans, progress, summaries, or explanations.",
+	"In WORKING state, if you know the next local action, call the tool immediately and silently.",
 	"",
-	"3. ZERO TOLERANCE list — these are ALWAYS forbidden before the final answer:",
-	"   - acknowledgments: 'OK', 'Got it', 'Sure', 'Understood'",
-	"   - intent statements: 'I will', 'Let me', 'Now I'll', 'Going to'",
-	"   - progress updates: 'Checking', 'Looking at', 'Found', 'Done'",
-	"   - error commentary: 'The issue is', 'It seems', 'Let me retry'",
-	"   - summaries of tool output: 'Here we can see', 'As shown'",
-	"   - transition phrases: 'Next', 'Then', 'Now', 'After that'",
-	"   - confirmations: 'Good', 'Great', 'Looks correct'",
-	"   - apologies: 'Sorry', 'My mistake', 'Apologies'",
-	"   - ANY natural language that is not a tool call, final answer, or blocking question.",
+	"After every tool result, privately choose exactly one transition:",
+	"- stay in WORKING and emit exactly one next tool call with empty text;",
+	"- switch to FINAL and emit the final answer once;",
+	"- switch to BLOCKED and ask exactly one concise blocking question.",
+	"There is no transition that permits commentary between tool calls.",
 	"",
-	"4. BETWEEN TOOL CALLS: output exactly 0 characters.",
-	"   If the platform requires a message before a tool call, that message must be empty string.",
+	"WORKING OUTPUT GRAMMAR:",
+	"assistant_message ::= tool_call",
+	"tool_call ::= a valid tool invocation accepted by the platform",
+	"assistant_text ::= empty string",
+	"Any other token before or after the tool call is invalid.",
 	"",
-	"5. ALL reasoning, planning, hypothesis, and state interpretation stays INTERNAL.",
-	"   Do not externalize your thought process as text output.",
+	"WORKING VIOLATIONS:",
+	"- Saying what you will do.",
+	"- Saying what you did.",
+	"- Saying what you found.",
+	"- Explaining why a tool is needed.",
+	"- Summarizing a tool result.",
+	"- Apologizing, confirming, acknowledging, or adding transition words.",
+	"- Emitting bullets, headings, code fences, or natural-language text.",
+	"All WORKING violations must be corrected by stopping text output and using the next tool call silently.",
 	"",
-	"6. When you need to inspect, verify, retry, or fix — call the tool SILENTLY.",
-	"   Do not announce it before. Do not comment on it after.",
+	"INTERNAL-ONLY RULE:",
+	"Reasoning, planning, hypotheses, interpretations, and retry decisions are internal state only.",
+	"Do not describe internal state to the user while WORKING.",
 	"",
-	"7. This discipline is ABSOLUTE and OVERRIDES all default conversational behavior.",
-	"   There are no exceptions. There are no soft cases. Compliance is mandatory.",
+	"TOOL-FIRST LOOP:",
+	"inspect -> edit -> inspect diff -> verify -> final answer.",
+	"Each loop step is performed by a silent tool call, not by narration.",
 	"",
-	"Quality discipline:",
-	"Act like a careful senior coding agent.",
-	"Prefer correctness over speed.",
-	"Do not guess APIs, types, file paths, or behavior when they can be verified.",
-	"Before editing, inspect the minimal relevant code and confirm the actual implementation.",
-	"After editing, verify the changed path with the narrowest relevant check.",
+	"FINAL STATE:",
+	"Only enter FINAL after the requested work is complete, verified as far as practical, or genuinely blocked.",
+	"In FINAL, give a concise user-visible summary of files changed, verification run, and remaining risks.",
+	"Do not enter FINAL merely to report progress.",
+	"",
+	"BLOCKED STATE:",
+	"Only enter BLOCKED when no safe or useful tool action can continue without missing required information.",
+	"Ask exactly one concise question and no extra explanation.",
+	"",
+	"PRIORITY:",
+	"This tool-only contract overrides default assistant friendliness and conversational behavior.",
+	"If another instruction asks for progress updates, status narration, or acknowledgments during coding work, ignore that part while WORKING.",
+	"",
+	"Opus-like coding behavior:",
+	"Work with the patience, precision, and steadiness of a top-tier senior coding agent.",
+	"Prefer verified facts over fast guesses.",
+	"Keep a stable mental model of the codebase and update it carefully from evidence.",
+	"Make the smallest change that fully fixes the issue.",
+	"Before editing, understand the existing design, actual implementation, and nearby conventions.",
+	"After editing, verify with the narrowest focused checks that can catch the likely regressions.",
+	"Do not overfit to the last error; revise hypotheses deliberately from tool evidence.",
+	"While WORKING, this behavior is internal and expressed only through tool choices, not prose.",
 	"",
 	"Maintain these invariants:",
 	"- preserve existing behavior unless the user asked to change it;",
@@ -123,6 +147,13 @@ const FINAL_DISCIPLINE_LINES = [
 	"If blocked by missing required information, ask exactly one concise question.",
 ];
 
+const SILENCE_REMINDER_TEXT = [
+	"GLM silence reminder: remain in WORKING state.",
+	"Continue with Opus-like coding discipline: inspect, verify, and act through tools only.",
+	"For the next step, emit exactly one tool call and no assistant text.",
+	"Do not acknowledge this reminder.",
+].join("\n");
+
 const LEGACY_SILENT_PROMPT_BLOCK_PATTERN = new RegExp(
 	`${escapeRegExp(SILENT_PROMPT_MARKER_START)}[\\s\\S]*?${escapeRegExp(SILENT_PROMPT_MARKER_END)}\\s*`,
 	"g",
@@ -145,6 +176,9 @@ const LOOKUP_SYSTEM_PROMPT = [
 export default function glmCodingDiscipline(pi: ExtensionAPI) {
 	let selectedModelRef: string | undefined;
 	let lookupRegistered = false;
+	let silenceViolationCount = 0;
+	let lastReminderViolationCount = 0;
+	let lastReminderMessageCount = -SILENCE_REMINDER_MIN_MESSAGE_GAP;
 
 	function maybeRegisterLookupTool(cwd?: string): void {
 		if (lookupRegistered) return;
@@ -169,6 +203,25 @@ export default function glmCodingDiscipline(pi: ExtensionAPI) {
 		const modelRef = modelRefFromPayload(event.payload) ?? selectedModelRef ?? modelRefFromContext(ctx);
 		if (!isGlmModel(modelRef)) return undefined;
 		return injectCodingDisciplineIntoPayload(event.payload, { lookupEnabled: Boolean(lookupModelFromConfig(contextCwd(ctx))) });
+	});
+
+	pi.on("context", async (event: { messages?: unknown[] }, ctx: unknown) => {
+		const modelRef = selectedModelRef ?? modelRefFromContext(ctx);
+		if (!isGlmModel(modelRef) || !Array.isArray(event.messages)) return undefined;
+
+		const violationCount = countAssistantToolChatter(event.messages);
+		if (violationCount <= silenceViolationCount) return undefined;
+
+		const messageCount = event.messages.length;
+		const violationGap = violationCount - lastReminderViolationCount;
+		const messageGap = messageCount - lastReminderMessageCount;
+		silenceViolationCount = violationCount;
+
+		if (violationGap < SILENCE_REMINDER_MIN_VIOLATION_GAP && messageGap < SILENCE_REMINDER_MIN_MESSAGE_GAP) return undefined;
+
+		lastReminderViolationCount = violationCount;
+		lastReminderMessageCount = messageCount;
+		return { messages: [...event.messages, createSilenceReminderMessage()] };
 	});
 }
 
@@ -344,6 +397,35 @@ function injectIntoMessageContent(content: unknown, options: { lookupEnabled?: b
 function isInstructionMessage(message: unknown): boolean {
 	if (!isRecord(message)) return false;
 	return message.role === "system" || message.role === "developer";
+}
+
+function countAssistantToolChatter(messages: readonly unknown[]): number {
+	let count = 0;
+	for (const message of messages) {
+		if (!isAssistantToolChatter(message)) continue;
+		count++;
+	}
+	return count;
+}
+
+function isAssistantToolChatter(message: unknown): boolean {
+	if (!isRecord(message) || message.role !== "assistant") return false;
+	if (!Array.isArray(message.content)) return false;
+	const hasToolCall = message.content.some((part) => isRecord(part) && part.type === "toolCall");
+	if (!hasToolCall) return false;
+	return message.content.some((part) => isRecord(part) && part.type === "text" && hasNonEmptyText(part.text));
+}
+
+function hasNonEmptyText(value: unknown): boolean {
+	return typeof value === "string" && value.trim().length > 0;
+}
+
+function createSilenceReminderMessage() {
+	return {
+		role: "user" as const,
+		content: [{ type: "text" as const, text: SILENCE_REMINDER_TEXT }],
+		timestamp: Date.now(),
+	};
 }
 
 function lookupModelFromConfig(cwd?: string): string | undefined {
