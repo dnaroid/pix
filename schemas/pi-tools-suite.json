@@ -20,6 +20,17 @@
       "type": "boolean",
       "description": "Enable per-todo thinking levels and automatic thinking switch/restore when tasks become in-progress/completed."
     },
+    "lookupModel": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Vision-capable provider/model used by GLM's lookup tool; unset or null disables lookup."
+    },
     "terminalBell": {
       "type": "object",
       "properties": {

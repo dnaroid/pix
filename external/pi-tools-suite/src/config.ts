@@ -15,6 +15,8 @@ export interface PiToolsSuiteConfig {
 	enabled: boolean;
 	disabledModules: string[];
 	todoThinking: boolean;
+	/** Vision-capable model used by the GLM lookup tool; unset disables lookup. */
+	lookupModel?: string;
 	telegramMirror?: TelegramMirrorConfig;
 }
 
@@ -22,6 +24,7 @@ type MutableConfig = {
 	enabled: boolean;
 	disabledModules: Set<string>;
 	todoThinking: boolean;
+	lookupModel: string | undefined;
 	telegramMirror: TelegramMirrorConfig | undefined;
 };
 
@@ -58,6 +61,13 @@ export function ensurePiToolsSuiteUserConfig(_moduleNames: readonly string[] = [
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeLookupModel(raw: unknown): string | undefined {
+	if (raw === null || raw === false) return undefined;
+	if (typeof raw !== "string") return undefined;
+	const trimmed = raw.trim();
+	return trimmed ? trimmed : undefined;
 }
 
 function normalizeTelegramMirror(raw: unknown): TelegramMirrorConfig | undefined {
@@ -139,6 +149,7 @@ function removeDisabled(config: MutableConfig, value: unknown, knownModules: Rea
 function mergeConfigLayer(config: MutableConfig, raw: Record<string, unknown>, knownModules: ReadonlySet<string>): MutableConfig {
 	if (typeof raw.enabled === "boolean") config.enabled = raw.enabled;
 	if (typeof raw.todoThinking === "boolean") config.todoThinking = raw.todoThinking;
+	if (Object.prototype.hasOwnProperty.call(raw, "lookupModel")) config.lookupModel = normalizeLookupModel(raw.lookupModel);
 
 	for (const key of DISABLED_LIST_KEYS) addDisabled(config, raw[key], knownModules);
 	for (const key of ENABLED_LIST_KEYS) removeDisabled(config, raw[key], knownModules);
@@ -198,6 +209,7 @@ export function loadPiToolsSuiteConfig(moduleNames: readonly string[], options: 
 		enabled: true,
 		disabledModules: new Set([...DEFAULT_DISABLED_MODULES].filter((name) => knownModules.has(name))),
 		todoThinking: false,
+		lookupModel: undefined,
 		telegramMirror: undefined,
 	};
 	const userConfigPath = getPiToolsSuiteUserConfigPath(options.homeDir);
@@ -217,6 +229,7 @@ export function loadPiToolsSuiteConfig(moduleNames: readonly string[], options: 
 		enabled: config.enabled,
 		disabledModules: [...config.disabledModules].sort(),
 		todoThinking: config.todoThinking,
+		...(config.lookupModel ? { lookupModel: config.lookupModel } : {}),
 		...(config.telegramMirror ? { telegramMirror: config.telegramMirror } : {}),
 	};
 }

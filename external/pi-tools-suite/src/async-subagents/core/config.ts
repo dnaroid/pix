@@ -158,9 +158,6 @@ export const DEFAULT_ROUTING_CONFIG: ResolvedSubagentRoutingConfig = {
 const BUILTIN_CONFIG: SubagentConfig = {
 	maxConcurrent: DEFAULT_MAX_CONCURRENT,
 	routing: { ...DEFAULT_ROUTING_CONFIG },
-	vision: {
-		blindModelPatterns: ["zai/glm*", "glm*", "*/glm*"],
-	},
 	types: {
 		quick: {
 			description: "Use for tiny cheap tasks: answer a simple question, inspect one known file, or verify one fact. Not for broad repo search.",

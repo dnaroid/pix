@@ -40,6 +40,20 @@ describe("pi-tools-suite config", () => {
 		expect(config.todoThinking).toBe(false);
 	});
 
+	test("loads lookupModel from config layers and allows disabling it", () => {
+		const homeDir = tempDir();
+		const cwd = tempDir();
+		mkdirSync(join(homeDir, ".config", "pi"), { recursive: true });
+		mkdirSync(join(cwd, ".pi"), { recursive: true });
+		writeFileSync(join(homeDir, ".config", "pi", "pi-tools-suite.jsonc"), `{ "lookupModel": "openai-codex/gpt-5.4-mini" }`);
+
+		expect(loadPiToolsSuiteConfig(MODULES, { cwd, homeDir, env: {} }).lookupModel).toBe("openai-codex/gpt-5.4-mini");
+
+		writeFileSync(join(cwd, ".pi", "pi-tools-suite.jsonc"), `{ "lookupModel": null }`);
+
+		expect(loadPiToolsSuiteConfig(MODULES, { cwd, homeDir, env: {} }).lookupModel).toBeUndefined();
+	});
+
 	test("loads todoThinking from config and environment", () => {
 		const homeDir = tempDir();
 		const cwd = tempDir();
@@ -95,6 +109,7 @@ describe("pi-tools-suite config", () => {
 		expect(content.startsWith(`{\n  "$schema": "${PI_TOOLS_SUITE_SCHEMA_URL}",`)).toBe(true);
 		expect(content).toContain('"disabledModules"');
 		expect(content).toContain('"todoThinking": false');
+		expect(content).toContain('"lookupModel": "openai-codex/gpt-5.4-mini"');
 		expect(content).toContain('// "ast-grep",');
 		expect(content).toContain('// "dcp"');
 		expect(content).toContain('"asyncSubagents"');

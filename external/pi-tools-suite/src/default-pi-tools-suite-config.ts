@@ -8,6 +8,8 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
   // When true, todo items may carry a per-task thinking level and the todo
   // module will switch/restore Pi's thinking level as in-progress tasks change.
   "todoThinking": false,
+  // Vision-capable model used by GLM's lookup tool. Remove or set to null to disable lookup.
+  "lookupModel": "openai-codex/gpt-5.4-mini",
   "terminalBell": { "sound": true },
   // "telegramMirror": {
   //   "enabled": true,

@@ -311,6 +311,7 @@ export const PiToolsSuiteConfigSchema = Type.Object(
 		enabled: Type.Optional(Type.Boolean({ description: "Enable or disable the entire pi-tools-suite extension." })),
 		disabledModules: Type.Optional(Type.Array(Type.String(), { description: "List of disabled module names (e.g. ['lsp', 'prompt-commands'])." })),
 		todoThinking: Type.Optional(Type.Boolean({ description: "Enable per-todo thinking levels and automatic thinking switch/restore when tasks become in-progress/completed." })),
+		lookupModel: Type.Optional(Type.Union([Type.String(), Type.Null()], { description: "Vision-capable provider/model used by GLM's lookup tool; unset or null disables lookup." })),
 		terminalBell: Type.Optional(TerminalBellConfig),
 		dcp: Type.Optional(DcpConfig),
 		asyncSubagents: Type.Optional(AsyncSubagentsConfig),
