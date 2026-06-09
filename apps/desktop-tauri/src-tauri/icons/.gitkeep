@@ -1,4 +1,0 @@
-# Placeholder icon directory. Run `npm run icons` from apps/desktop-tauri/
-# to generate the required PNG set (32x32, 128x128, 128x128@2x, 1024x1024).
-# For production bundles (.icns / .ico), use `npx tauri icon icon.png` after
-# replacing icon.png with the real artwork.

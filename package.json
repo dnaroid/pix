@@ -3,13 +3,8 @@
   "version": "0.1.18",
   "private": false,
   "type": "module",
-  "workspaces": [
-    "apps/desktop-tauri",
-    "apps/desktop-tauri/sidecar"
-  ],
   "bin": {
-    "pix": "./bin/pix.mjs",
-    "pix-desktop": "./apps/desktop-tauri/bin/pix-desktop.mjs"
+    "pix": "./bin/pix.mjs"
   },
   "exports": {
     ".": {
@@ -63,14 +58,7 @@
     "generate-schemas": "tsx scripts/generate-schemas.ts",
     "generate-schemas:check": "tsx scripts/generate-schemas.ts --check",
     "generate-schemas:watch": "tsx watch scripts/generate-schemas.ts",
-    "prepublishOnly": "npm run check && npm run build:pix && npm run generate-schemas",
-    "desktop:install": "npm --prefix apps/desktop-tauri install",
-    "desktop:dev": "npm --prefix apps/desktop-tauri run tauri:dev",
-    "desktop:build": "npm --prefix apps/desktop-tauri run tauri:build",
-    "desktop:check": "npm --prefix apps/desktop-tauri run build && npm --prefix apps/desktop-tauri/sidecar run check && cargo check --manifest-path apps/desktop-tauri/src-tauri/Cargo.toml",
-    "desktop:icons": "npm --prefix apps/desktop-tauri run icons",
-    "desktop": "node apps/desktop-tauri/bin/pix-desktop.mjs",
-    "tui-rust": "mise exec node@24.16.0 -- tsx scripts/tui-rust-watch.ts"
+    "prepublishOnly": "npm run check && npm run build:pix && npm run generate-schemas"
   },
   "dependencies": {
     "@earendil-works/pi-tui": "0.77.0",
