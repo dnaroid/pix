@@ -39,7 +39,7 @@ export function renderToolBlock(entry: ToolBlockEntry, rule: ResolvedToolRule, w
 	const stateIcon = toolStatusIcon(entry);
 	const toolColor = resolveColor(rule.color, colors);
 	const toolOutputColor = colors.statusForeground;
-	const headerLabel = entry.headerLabel ?? entry.toolName;
+	const headerLabel = (entry.headerLabel ?? entry.toolName).toLowerCase();
 	const headerPrefix = headerLabel ? `${stateIcon} ${headerLabel}` : stateIcon;
 	const headerArgs = formatToolHeaderArgs(entry.headerArgs);
 	const headerArgsWidth = width - stringDisplayWidth(headerPrefix) - 1;
@@ -54,6 +54,7 @@ export function renderToolBlock(entry: ToolBlockEntry, rule: ResolvedToolRule, w
 		colorOverride: toolColor,
 		segments: [
 			{ start: 0, end: stateIcon.length, foreground: toolStatusIconColor(entry, colors), bold: true },
+			{ start: stateIcon.length, end: headerPrefix.length, bold: true },
 			...headerArgsStyledSegments(headerArgsStart, clippedHeaderArgs.length, entry.headerArgsSegments, colors),
 		],
 	};

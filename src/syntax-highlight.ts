@@ -96,6 +96,8 @@ const MARKDOWN_FENCE_LANGUAGES: Record<string, SyntaxHighlightLanguage> = {
 	javascript: "javascript",
 	js: "javascript",
 	json: "json",
+	markdown: "markdown",
+	md: "markdown",
 	jsonc: "json",
 	jsx: "javascript",
 	python: "python",
@@ -291,7 +293,7 @@ function markdownSegments(code: string, colors: Theme["colors"]): SyntaxHighligh
 	const segments: SyntaxHighlightSegment[] = [];
 	const heading = /^(\s{0,3}#{1,6}\s+)(.*)$/.exec(code);
 	if (heading) {
-		addSegment(segments, 0, code.length, "tag", colors, true);
+		segments.push({ start: 0, end: code.length, foreground: colors.heading, bold: true });
 		return segments;
 	}
 	const fence = /^\s*`{3,}/.exec(code);

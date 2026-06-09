@@ -35,6 +35,7 @@ export type Theme = {
 		accent: string;
 		success: string;
 		warning: string;
+		heading: string;
 		info: string;
 		toolMutation: string;
 		toolSearch: string;
@@ -90,6 +91,7 @@ export const THEMES: Record<ThemeName, Theme> = {
 			accent: "#7aa2d6",
 			success: "#7ca982",
 			warning: "#d49a4a",
+			heading: "#e8c46a",
 			info: "#7fb3c8",
 			toolMutation: "#d47aa2",
 			toolSearch: "#a889d6",
@@ -143,6 +145,7 @@ export const THEMES: Record<ThemeName, Theme> = {
 			accent: "#315f9f",
 			success: "#47794c",
 			warning: "#9a631d",
+			heading: "#b88a28",
 			info: "#246b8e",
 			toolMutation: "#a33a68",
 			toolSearch: "#6d52a5",

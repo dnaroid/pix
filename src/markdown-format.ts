@@ -9,12 +9,14 @@ import {
 export type RenderedMarkdownLine = {
 	text: string;
 	segments: readonly { start: number; end: number; bold: true }[];
+	heading?: boolean;
 };
 
 export type RenderedMarkdownTextLine = {
 	text: string;
 	segments?: readonly { start: number; end: number; bold: true }[] | undefined;
 	syntaxHighlight?: SyntaxLineHighlight | undefined;
+	heading?: boolean;
 };
 
 type MarkdownTableAlignment = "center" | "left" | "none" | "right";
@@ -93,6 +95,8 @@ export function renderMarkdownLine(text: string, start = 0): RenderedMarkdownLin
 	let index = safeStart;
 	let inCode = false;
 
+	const isHeading = /^\s{0,3}#{1,6}\s/.test(text);
+
 	while (index < text.length) {
 		const char = text[index] ?? "";
 
@@ -118,7 +122,7 @@ export function renderMarkdownLine(text: string, start = 0): RenderedMarkdownLin
 		index += 1;
 	}
 
-	return { text: rendered, segments };
+	return { text: rendered, segments, ...(isHeading ? { heading: true } : {}) };
 }
 
 export function renderMarkdownTextLines(text: string, width: number, start = 0): RenderedMarkdownTextLine[] {
@@ -133,12 +137,14 @@ export function renderMarkdownTextLines(text: string, width: number, start = 0):
 		const opensFence = !fence && nextFence !== undefined;
 		const syntaxHighlight = markdownLineSyntaxHighlight(fence, Boolean(opensFence || closesFence), start);
 
-		const markdownLine = syntaxHighlight?.language === "markdown" ? renderMarkdownLine(rawLine) : undefined;
+		const isHeadingLine = !fence && /^\s{0,3}#{1,6}\s/.test(rawLine);
+		const markdownLine = syntaxHighlight?.language === "markdown" || isHeadingLine ? renderMarkdownLine(rawLine) : undefined;
 		for (const wrapped of wrapRenderedMarkdownLine(markdownLine ?? { text: rawLine, segments: [] }, width)) {
 			lines.push({
 				text: wrapped.text,
 				...(wrapped.segments.length > 0 ? { segments: wrapped.segments } : {}),
 				...(syntaxHighlight ? { syntaxHighlight } : {}),
+				...(isHeadingLine ? { heading: true } : {}),
 			});
 		}
 

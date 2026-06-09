@@ -97,10 +97,15 @@ function renderAssistantLines(text: string, width: number, options: Conversation
 	if (contentLines.length === 0) return [];
 	const lines: RenderedLine[] = [];
 	for (const line of contentLines) {
+		const headingSegment: StyledSegment | undefined = line.heading
+			? { start: contentLeft, end: contentLeft + line.text.length, foreground: options.colors.heading, bold: true }
+			: undefined;
+		const existingSegments = line.segments?.map((segment) => ({ ...segment, start: segment.start + contentLeft, end: segment.end + contentLeft })) ?? [];
+		const allSegments = headingSegment ? [headingSegment, ...existingSegments] : existingSegments;
 		lines.push({
 			text: padHorizontalText(line.text, width),
 			colorOverride: options.colors.assistantForeground,
-			...(line.segments && line.segments.length > 0 ? { segments: line.segments.map((segment) => ({ ...segment, start: segment.start + contentLeft, end: segment.end + contentLeft })) } : {}),
+			...(allSegments.length > 0 ? { segments: allSegments } : {}),
 			...(line.syntaxHighlight ? { syntaxHighlight: line.syntaxHighlight } : {}),
 		});
 	}

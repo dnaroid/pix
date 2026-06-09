@@ -1,16 +1,12 @@
-import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import { resolveToolRule, type PixConfig } from "../../config.js";
 import { stringDisplayWidth } from "../../terminal-width.js";
 import type { Theme } from "../../theme.js";
 import { renderConversationEntry as renderConversationEntryLines, type InlineUserMessageMenuContext } from "./conversation-entry-renderer.js";
 import { horizontalPaddingLayout } from "./render-text.js";
-import { sdkQueuedMessageEntries } from "../session/queued-message-entries.js";
-import type { ConversationBlockCache, Entry, RenderedLine, SubmittedUserMessage } from "../types.js";
+import type { ConversationBlockCache, Entry, RenderedLine } from "../types.js";
 
 export type ConversationViewportHost = {
 	readonly entries: readonly Entry[];
-	readonly session: AgentSession | undefined;
-	readonly deferredUserMessages: readonly SubmittedUserMessage[];
 	readonly entryRenderVersions: ReadonlyMap<string, number>;
 	readonly cwd: string;
 	readonly colors: Theme["colors"];
@@ -32,7 +28,6 @@ type ViewportLayoutCache = {
 	positions: Map<string, number>;
 	dirtyEntryIds: Set<string>;
 	totalLineCount: number;
-	queuedSignature: string;
 	superCompactTools: boolean;
 	allThinkingExpanded: boolean;
 };
@@ -115,8 +110,7 @@ export class ConversationViewport {
 	}
 
 	entries(): Entry[] {
-		const queued = this.queuedEntries();
-		return queued.length === 0 ? [...this.host.entries] : [...this.host.entries, ...queued];
+		return [...this.host.entries];
 	}
 
 	blockForEntry(entry: Entry, width: number): ConversationBlockCache {
@@ -174,23 +168,17 @@ export class ConversationViewport {
 		return lineCount;
 	}
 
-	private queuedEntries(): Entry[] {
-		return sdkQueuedMessageEntries(this.host.session);
-	}
-
 	private layoutForWidth(width: number): ViewportLayoutCache {
-		const queued = this.queuedEntries();
-		const entries = queued.length === 0 ? this.host.entries : [...this.host.entries, ...queued];
-		const queuedSignature = queued.map((entry) => entry.id).join("\n");
+		const entries = this.host.entries;
 		const superCompactTools = Boolean(this.host.superCompactTools);
 		const allThinkingExpanded = Boolean(this.host.allThinkingExpanded);
 
 		let layout = this.layoutCachesByWidth.get(width);
-		if (!layout || this.layoutStructureChanged(layout, entries, queuedSignature, superCompactTools, allThinkingExpanded)) {
-			const previousLayout = layout && layout.queuedSignature === queuedSignature && layout.superCompactTools === superCompactTools && layout.allThinkingExpanded === allThinkingExpanded
+		if (!layout || this.layoutStructureChanged(layout, entries, superCompactTools, allThinkingExpanded)) {
+			const previousLayout = layout && layout.superCompactTools === superCompactTools && layout.allThinkingExpanded === allThinkingExpanded
 				? layout
 				: undefined;
-			layout = this.buildLayout(entries, width, queuedSignature, superCompactTools, allThinkingExpanded, previousLayout);
+			layout = this.buildLayout(entries, width, superCompactTools, allThinkingExpanded, previousLayout);
 			this.layoutCachesByWidth.set(width, layout);
 		} else {
 			this.refreshDirtyLayoutEntries(layout, width);
@@ -206,7 +194,6 @@ export class ConversationViewport {
 	private buildLayout(
 		entries: readonly Entry[],
 		width: number,
-		queuedSignature: string,
 		superCompactTools: boolean,
 		allThinkingExpanded: boolean,
 		previousLayout?: ViewportLayoutCache,
@@ -231,7 +218,7 @@ export class ConversationViewport {
 		}
 
 		offsets.push(totalLineCount);
-		return { entries, entryIds, lineCounts, measuredLineCounts, offsets, positions, dirtyEntryIds: new Set(), totalLineCount, queuedSignature, superCompactTools, allThinkingExpanded };
+		return { entries, entryIds, lineCounts, measuredLineCounts, offsets, positions, dirtyEntryIds: new Set(), totalLineCount, superCompactTools, allThinkingExpanded };
 	}
 
 	private previousMeasuredLineCount(previousLayout: ViewportLayoutCache | undefined, entries: readonly Entry[], index: number, entry: Entry): number | undefined {
@@ -247,8 +234,8 @@ export class ConversationViewport {
 		return previousLayout.lineCounts[previousIndex];
 	}
 
-	private layoutStructureChanged(layout: ViewportLayoutCache, entries: readonly Entry[], queuedSignature: string, superCompactTools: boolean, allThinkingExpanded: boolean): boolean {
-		if (layout.entries.length !== entries.length || layout.queuedSignature !== queuedSignature || layout.superCompactTools !== superCompactTools || layout.allThinkingExpanded !== allThinkingExpanded) return true;
+	private layoutStructureChanged(layout: ViewportLayoutCache, entries: readonly Entry[], superCompactTools: boolean, allThinkingExpanded: boolean): boolean {
+		if (layout.entries.length !== entries.length || layout.superCompactTools !== superCompactTools || layout.allThinkingExpanded !== allThinkingExpanded) return true;
 		if (layout.entries.length === 0) return false;
 
 		return layout.entryIds[0] !== entries[0]?.id || layout.entryIds[layout.entryIds.length - 1] !== entries[entries.length - 1]?.id;

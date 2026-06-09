@@ -5,7 +5,7 @@ import type { PixConfig } from "../src/config.js";
 import { APP_ICONS } from "../src/app/icons.js";
 import { ConversationViewport, type ConversationViewportHost } from "../src/app/rendering/conversation-viewport.js";
 import { renderConversationEntry, type ConversationEntryRenderOptions } from "../src/app/rendering/conversation-entry-renderer.js";
-import type { Entry, SubmittedUserMessage } from "../src/app/types.js";
+import type { Entry } from "../src/app/types.js";
 import { stringDisplayWidth } from "../src/terminal-width.js";
 import { THEMES } from "../src/theme.js";
 
@@ -397,8 +397,6 @@ describe("ConversationViewport super-compact tools", () => {
 		];
 		const viewport = new ConversationViewport({
 			entries,
-			session: undefined,
-			deferredUserMessages: [],
 			entryRenderVersions: new Map(),
 			cwd: "/repo",
 			colors: THEMES.dark.colors,
@@ -426,8 +424,6 @@ describe("ConversationViewport super-compact tools", () => {
 		];
 		const viewport = new ConversationViewport({
 			entries,
-			session: undefined,
-			deferredUserMessages: [],
 			entryRenderVersions: new Map(),
 			cwd: "/repo",
 			colors: THEMES.dark.colors,
@@ -455,8 +451,6 @@ describe("ConversationViewport super-compact tools", () => {
 		];
 		const viewport = new ConversationViewport({
 			entries,
-			session: undefined,
-			deferredUserMessages: [],
 			entryRenderVersions: new Map(),
 			cwd: "/repo",
 			colors: THEMES.dark.colors,
@@ -487,8 +481,6 @@ describe("ConversationViewport super-compact tools", () => {
 		];
 		const viewport = new ConversationViewport({
 			entries,
-			session: undefined,
-			deferredUserMessages: [],
 			entryRenderVersions: new Map(),
 			cwd: "/repo",
 			colors: THEMES.dark.colors,
@@ -508,15 +500,9 @@ describe("ConversationViewport super-compact tools", () => {
 
 
 describe("ConversationViewport cache behavior", () => {
-	it("includes SDK queued messages in entries()", () => {
-		const session = {
-			getSteeringMessages: () => ["alpha"],
-			getFollowUpMessages: () => ["beta"],
-		} as unknown as ConversationViewportHost["session"];
+	it("keeps queued messages out of entries()", () => {
 		const viewport = new ConversationViewport({
 			entries: [{ id: "assistant-1", kind: "assistant", text: "hello" }],
-			session,
-			deferredUserMessages: [{ id: "draft-1", displayText: "later" }] as unknown as readonly SubmittedUserMessage[],
 			entryRenderVersions: new Map(),
 			cwd: "/repo",
 			colors: THEMES.dark.colors,
@@ -530,20 +516,13 @@ describe("ConversationViewport cache behavior", () => {
 		const entries = viewport.entries();
 
 		assert.equal(entries[0]?.id, "assistant-1");
-		assert.equal(entries[1]?.kind, "queued");
-		assert.ok(entries[1]?.id.startsWith("queued-sdk-steering-0-"));
-		assert.equal(entries[1]?.text, "alpha");
-		assert.equal(entries[2]?.kind, "queued");
-		assert.ok(entries[2]?.id.startsWith("queued-sdk-follow-up-0-"));
-		assert.equal(entries.length, 3);
+		assert.equal(entries.length, 1);
 	});
 
 	it("refreshes dirty cached blocks after deleteEntry", () => {
 		let filters: RegExp[] = [];
 		const viewport = new ConversationViewport({
 			entries: [{ id: "assistant-dirty", kind: "assistant", text: "alpha" }],
-			session: undefined,
-			deferredUserMessages: [],
 			entryRenderVersions: new Map(),
 			cwd: "/repo",
 			colors: THEMES.dark.colors,
@@ -566,8 +545,6 @@ describe("ConversationViewport cache behavior", () => {
 		let filters: RegExp[] = [];
 		const viewport = new ConversationViewport({
 			entries: [{ id: "assistant-dynamic", kind: "assistant", text: "alpha" }],
-			session: undefined,
-			deferredUserMessages: [],
 			entryRenderVersions: new Map(),
 			cwd: "/repo",
 			colors: THEMES.dark.colors,
@@ -597,8 +574,6 @@ describe("ConversationViewport cache behavior", () => {
 		];
 		const viewport = new ConversationViewport({
 			entries,
-			session: undefined,
-			deferredUserMessages: [],
 			entryRenderVersions: new Map(),
 			cwd: "/repo",
 			colors: THEMES.dark.colors,

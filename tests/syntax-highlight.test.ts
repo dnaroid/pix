@@ -34,7 +34,7 @@ describe("syntax highlighting", () => {
 		assertStyles('name: "pix" # comment', "yaml", ["property", "string", "comment"]);
 		assertStyles('<a href="/docs">Docs</a><!-- note -->', "html", ["keyword", "property", "string", "comment"]);
 		assertStyles('@media screen { color: #fff; width: 10px; content: "x"; }', "css", ["keyword", "property", "number", "string"]);
-		assertStyles('# Title', "markdown", ["keyword"]);
+		assertStyles('# Title', "markdown", ["heading"]);
 		assertStyles('- [link](https://example.test) `code` **bold** *em*', "markdown", ["keyword", "string", "emphasis"]);
 		assertStyles('escaped \\*not emphasis\\* but “*yes*”', "markdown", ["emphasis"]);
 	});
@@ -56,6 +56,7 @@ function assertStyles(text: string, language: Parameters<typeof syntaxHighlightS
 function styleForSegment(segment: { foreground?: string; bold?: boolean }): string {
 	if (segment.foreground === colors.muted) return "comment";
 	if (segment.foreground === colors.success) return "string";
+	if (segment.foreground === colors.heading && segment.bold) return "heading";
 	if (segment.foreground === colors.warning) return "number";
 	if (segment.foreground === colors.info) return "property";
 	if (segment.foreground === colors.accent && segment.bold) return "keyword";
