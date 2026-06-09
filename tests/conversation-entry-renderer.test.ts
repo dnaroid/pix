@@ -106,10 +106,10 @@ describe("renderConversationEntry", () => {
 		assert.deepEqual(lines[0]?.syntaxHighlight, { language: "markdown", start: 0 });
 	});
 
-	it("renders user messages in warning color without a bubble background", () => {
+	it("renders user messages in user color without a bubble background", () => {
 		const lines = renderConversationEntry({ id: "user-bg", kind: "user", text: "hello" }, 40, renderOptions);
 
-		assert.deepEqual(lines.map((line) => line.colorOverride), [THEMES.dark.colors.warning]);
+		assert.deepEqual(lines.map((line) => line.colorOverride), [THEMES.dark.colors.userForeground]);
 		assert.deepEqual(lines.map((line) => line.backgroundOverride), [undefined]);
 		assert.deepEqual(lines.map((line) => line.segments), [undefined]);
 	});
@@ -125,7 +125,7 @@ describe("renderConversationEntry", () => {
 		}, 40, renderOptions);
 
 		assert.deepEqual(lines.map((line) => line.backgroundOverride), [undefined]);
-		assert.deepEqual(lines.map((line) => line.colorOverride), [THEMES.dark.colors.warning]);
+		assert.deepEqual(lines.map((line) => line.colorOverride), [THEMES.dark.colors.userForeground]);
 		assert.match(lines[0]?.text ?? "", new RegExp(`${APP_ICONS.timerSand} hello`, "u"));
 		assert.equal(lines[0]?.text, `${APP_ICONS.timerSand} hello`);
 		assert.doesNotMatch(lines[0]?.text ?? "", /\b(?:steer|follow|queued):/u);
