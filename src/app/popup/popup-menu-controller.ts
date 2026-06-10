@@ -997,7 +997,13 @@ export function buildUserMessageJumpItems(entries: readonly Entry[] | readonly U
 		const preview = sanitizeText(entry.text).replace(/\s+/g, " ").trim();
 		const label = `${index + 1}. ${preview || "(empty message)"}`;
 		return {
-			value: { ...(entry.entryId === undefined ? {} : { entryId: entry.entryId }), ...(entry.sessionEntryId === undefined ? {} : { sessionEntryId: entry.sessionEntryId }) },
+			value: {
+				...(entry.entryId === undefined ? {} : { entryId: entry.entryId }),
+				...(entry.sessionEntryId === undefined ? {} : { sessionEntryId: entry.sessionEntryId }),
+				text: entry.text,
+				userIndex: index,
+				userCount: userEntries.length,
+			},
 			label,
 			...(entry.entryId ? {} : { description: "load older history and jump" }),
 			aliases: [entry.sessionEntryId ?? "", entry.entryId ?? ""],

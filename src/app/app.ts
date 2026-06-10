@@ -68,6 +68,10 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 const TERMINAL_BELL_ATTENTION_EVENT = "pix:terminal-bell:attention";
+
+function normalizeJumpTargetText(text: string): string {
+	return text.replace(/\s+/gu, " ").trim();
+}
 const SUBAGENTS_LIVE_STATE_EVENT = "pi-tools-suite:async-subagents:live-state";
 const TODO_STATE_EVENT = "pi-tools-suite:todo:state";
 const COALESCED_RENDER_DELAY_MS = 16;
@@ -979,20 +983,42 @@ export class PiUiExtendApp {
 
 	private async scrollToUserMessageJumpTarget(target: UserMessageJumpMenuValue): Promise<boolean> {
 		if (target.entryId && this.scrollController.scrollToConversationEntry(target.entryId)) return true;
-		if (!target.sessionEntryId) return false;
 
-		let entry = this.findUserEntryBySessionEntryId(target.sessionEntryId);
-		while (!entry && this.sessionEvents.hasOlderSessionHistory() && !this.sessionEvents.isLoadingOlderSessionHistory()) {
-			const loaded = await this.sessionEvents.loadOlderSessionHistory({ render: false });
-			if (!loaded) break;
-			entry = this.findUserEntryBySessionEntryId(target.sessionEntryId);
+		this.workspaceActions.syncUserSessionEntryMetadata();
+		if (target.sessionEntryId) {
+			let entry = this.findUserEntryBySessionEntryId(target.sessionEntryId);
+			while (!entry && this.sessionEvents.hasOlderSessionHistory() && !this.sessionEvents.isLoadingOlderSessionHistory()) {
+				const loaded = await this.sessionEvents.loadOlderSessionHistory({ render: false });
+				if (!loaded) break;
+				entry = this.findUserEntryBySessionEntryId(target.sessionEntryId);
+			}
+
+			if (entry && this.scrollController.scrollToConversationEntry(entry.id)) return true;
 		}
 
-		return entry ? this.scrollController.scrollToConversationEntry(entry.id) : false;
+		const fallbackEntry = this.findUserEntryByJumpText(target);
+		return fallbackEntry ? this.scrollController.scrollToConversationEntry(fallbackEntry.id) : false;
 	}
 
 	private findUserEntryBySessionEntryId(sessionEntryId: string): Extract<Entry, { kind: "user" }> | undefined {
 		return this.entries.find((entry): entry is Extract<Entry, { kind: "user" }> => entry.kind === "user" && entry.sessionEntryId === sessionEntryId);
+	}
+
+	private findUserEntryByJumpText(target: UserMessageJumpMenuValue): Extract<Entry, { kind: "user" }> | undefined {
+		if (!target.text) return undefined;
+		const userEntries = this.entries.filter((entry): entry is Extract<Entry, { kind: "user" }> => entry.kind === "user");
+		if (target.userIndex !== undefined && target.userCount !== undefined) {
+			const visibleIndex = target.userIndex - (target.userCount - userEntries.length);
+			const entry = userEntries[visibleIndex];
+			if (entry && normalizeJumpTargetText(entry.text) === normalizeJumpTargetText(target.text)) return entry;
+		}
+
+		const normalizedTargetText = normalizeJumpTargetText(target.text);
+		for (let index = userEntries.length - 1; index >= 0; index -= 1) {
+			const entry = userEntries[index];
+			if (entry && normalizeJumpTargetText(entry.text) === normalizedTargetText) return entry;
+		}
+		return undefined;
 	}
 
 	private async loadSessionHistoryAsync(options: { isCancelled: () => boolean; render: () => void; lazyOlderHistory?: boolean }): Promise<boolean> {
