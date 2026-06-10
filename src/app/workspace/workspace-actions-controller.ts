@@ -163,18 +163,7 @@ export class AppWorkspaceActionsController {
 		const sessionEntryId = this.resolveUserSessionEntryId(entry);
 		if (!sessionEntryId) throw new Error("Session entry for this message is not available yet");
 
-		const hasMutationLog = entry.workspaceMutations !== undefined || this.hasWorkspaceMutationsForSessionEntry(sessionEntryId);
-		const mutations = entry.workspaceMutations ?? this.workspaceMutationsForSessionEntry(sessionEntryId);
-		if (!hasMutationLog) {
-			throw new Error("No workspace mutation log was captured for this message. Undo is available for messages sent after this build.");
-		}
-
-		if (mutations.length > 0) {
-			this.host.setStatus("reverting recorded commands");
-			this.host.render();
-		}
-		const reverted = mutations.length === 0 ? { ok: true as const, changedFiles: 0, revertedChanges: 0 } : await revertWorkspaceMutations(runtime.cwd, mutations);
-		if (!reverted.ok) throw new Error(reverted.error);
+		const mutationPlan = this.workspaceMutationPlanFromSessionEntry(sessionEntryId);
 
 		this.host.setStatus("truncating session");
 		this.host.render();
@@ -192,14 +181,75 @@ export class AppWorkspaceActionsController {
 
 		this.host.resetSessionView();
 		this.host.loadSessionHistory();
-		if (result.editorText && !this.host.getInput().trim()) this.host.setInput(result.editorText);
+		this.host.setInput(result.editorText ?? entry.text);
+
+		let revertSummary = "No recorded file mutations were found for the removed branch.";
+		let revertToastKind: "success" | "warning" = "success";
+		if (mutationPlan.mutations.length > 0) {
+			this.host.setStatus("reverting recorded commands");
+			this.host.render();
+			const reverted = await revertWorkspaceMutations(runtime.cwd, mutationPlan.mutations);
+			if (reverted.ok) {
+				revertSummary = `Reverted ${reverted.revertedChanges} command${reverted.revertedChanges === 1 ? "" : "s"} across ${reverted.changedFiles} file${reverted.changedFiles === 1 ? "" : "s"}.`;
+			} else {
+				revertSummary = `Workspace revert failed: ${reverted.error}`;
+				revertToastKind = "warning";
+			}
+		} else if (mutationPlan.messagesWithoutLogs > 0) {
+			revertSummary = `No recorded file mutations were available for ${mutationPlan.messagesWithoutLogs} removed message${mutationPlan.messagesWithoutLogs === 1 ? "" : "s"}.`;
+			revertToastKind = "warning";
+		}
+
 		this.host.addEntry({
 			id: createId("system"),
 			kind: "system",
-			text: `Undid changes from entry ${sessionEntryId}. Reverted ${reverted.revertedChanges} command${reverted.revertedChanges === 1 ? "" : "s"} across ${reverted.changedFiles} file${reverted.changedFiles === 1 ? "" : "s"}.`,
+			text: `Undid changes from entry ${sessionEntryId}. ${revertSummary}`,
 		});
 		this.host.setSessionStatus(runtime.session);
-		this.host.showToast("Changes undone", "success");
+		this.host.showToast(revertToastKind === "success" ? "Changes undone" : "Session rewound with revert warnings", revertToastKind);
+	}
+
+	private workspaceMutationPlanFromSessionEntry(entryId: string): { mutations: WorkspaceMutation[]; messagesWithoutLogs: number } {
+		const runtime = this.host.runtime();
+		if (!runtime) return { mutations: [], messagesWithoutLogs: 0 };
+
+		const branch = runtime.session.sessionManager.getBranch();
+		const startIndex = branch.findIndex((entry) => entry.id === entryId);
+		if (startIndex < 0) {
+			return this.workspaceMutationPlanForSingleEntry(entryId);
+		}
+
+		const mutations: WorkspaceMutation[] = [];
+		let messagesWithoutLogs = 0;
+		for (const branchEntry of branch.slice(startIndex)) {
+			if (branchEntry.type !== "message") continue;
+			if (!isRecord(branchEntry.message) || branchEntry.message.role !== "user") continue;
+
+			const visibleEntry = this.findUserEntryBySessionEntryId(branchEntry.id);
+			const hasMutationLog = visibleEntry?.workspaceMutations !== undefined || this.hasWorkspaceMutationsForSessionEntry(branchEntry.id);
+			const entryMutations = visibleEntry?.workspaceMutations ?? this.workspaceMutationsForSessionEntry(branchEntry.id);
+			if (!hasMutationLog) {
+				messagesWithoutLogs += 1;
+				continue;
+			}
+
+			mutations.push(...entryMutations);
+		}
+
+		return { mutations, messagesWithoutLogs };
+	}
+
+	private workspaceMutationPlanForSingleEntry(entryId: string): { mutations: WorkspaceMutation[]; messagesWithoutLogs: number } {
+		const visibleEntry = this.findUserEntryBySessionEntryId(entryId);
+		const hasMutationLog = visibleEntry?.workspaceMutations !== undefined || this.hasWorkspaceMutationsForSessionEntry(entryId);
+		if (!hasMutationLog) return { mutations: [], messagesWithoutLogs: 1 };
+		return { mutations: visibleEntry?.workspaceMutations ?? this.workspaceMutationsForSessionEntry(entryId), messagesWithoutLogs: 0 };
+	}
+
+	private findUserEntryBySessionEntryId(sessionEntryId: string): Extract<Entry, { kind: "user" }> | undefined {
+		return this.host.entries.find(
+			(entry): entry is Extract<Entry, { kind: "user" }> => entry.kind === "user" && entry.sessionEntryId === sessionEntryId,
+		);
 	}
 
 	private resolveUserSessionEntryId(entry: Extract<Entry, { kind: "user" }>): string | undefined {
