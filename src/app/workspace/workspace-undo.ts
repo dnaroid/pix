@@ -103,7 +103,8 @@ export function workspaceMutationFromToolExecution(input: WorkspaceMutationFromT
 		};
 	}
 
-	const patch = patchFromDetails(input.details) ?? patchFromArgs(input.args);
+	const rawPatch = patchFromDetails(input.details) ?? patchFromArgs(input.args);
+	const patch = rawPatch && normalizePatchForWorkspace(input.cwd, rawPatch);
 	if (!patch || !looksLikeUnifiedPatch(patch)) return undefined;
 
 	if (name === "edit" || name === "apply_patch" || name === "ast_apply") {
@@ -154,14 +155,17 @@ async function applyPatchMutation(
 	mutation: WorkspacePatchMutation,
 	direction: "undo" | "redo",
 ): Promise<{ ok: true; changedFiles: string[] } | { ok: false; error: string }> {
+	const patch = normalizePatchForWorkspace(cwd, mutation.patch);
+	if (!patch) return { ok: false, error: "Refusing to apply patch with paths outside workspace." };
+
 	const args = ["apply", ...(direction === "undo" ? ["--reverse"] : []), "--whitespace=nowarn"];
-	const check = await runGitApply(cwd, [...args, "--check"], mutation.patch);
+	const check = await runGitApply(cwd, [...args, "--check"], patch);
 	if (check.status !== 0) return { ok: false, error: commandError(`git ${args.join(" ")} --check`, check) };
 
-	const apply = await runGitApply(cwd, args, mutation.patch);
+	const apply = await runGitApply(cwd, args, patch);
 	if (apply.status !== 0) return { ok: false, error: commandError(`git ${args.join(" ")}`, apply) };
 
-	return { ok: true, changedFiles: filesFromPatch(mutation.patch) };
+	return { ok: true, changedFiles: filesFromPatch(patch) };
 }
 
 async function applyWriteMutation(
@@ -250,6 +254,37 @@ function patchFromArgs(args: unknown): string | undefined {
 
 function looksLikeUnifiedPatch(text: string): boolean {
 	return /^---\s+/m.test(text) && /^\+\+\+\s+/m.test(text) && /^@@\s/m.test(text);
+}
+
+function normalizePatchForWorkspace(cwd: string, patch: string): string | undefined {
+	const normalizedLines: string[] = [];
+	for (const line of patch.split("\n")) {
+		const match = /^(---|\+\+\+)\s+(\S+)(.*)$/.exec(line);
+		if (!match) {
+			normalizedLines.push(line);
+			continue;
+		}
+
+		const marker = match[1]!;
+		const rawPath = match[2]!;
+		const suffix = match[3] ?? "";
+		if (rawPath === "/dev/null") {
+			normalizedLines.push(line);
+			continue;
+		}
+
+		const relativePath = patchWorkspacePath(cwd, rawPath);
+		if (!relativePath) return undefined;
+		const prefix = marker === "---" ? "a" : "b";
+		normalizedLines.push(`${marker} ${prefix}/${relativePath}${suffix}`);
+	}
+
+	return normalizedLines.join("\n");
+}
+
+function patchWorkspacePath(cwd: string, inputPath: string): string | undefined {
+	const path = !isAbsolute(inputPath) && /^[ab]\//u.test(inputPath) ? inputPath.slice(2) : inputPath;
+	return safeRelativePath(cwd, path);
 }
 
 function filesFromPatch(patch: string): string[] {

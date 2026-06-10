@@ -36,6 +36,29 @@ test("revertWorkspaceMutations applies recorded patches bottom-up and preserves 
 	}
 });
 
+test("revertWorkspaceMutations accepts edit patches recorded with absolute workspace paths", async () => {
+	const { cwd, cleanup } = createTempWorkspace();
+	try {
+		const absolutePath = join(cwd, "a.txt");
+		writeFileSync(absolutePath, "hello world\n", "utf8");
+		const absolutePatch = [
+			`--- ${absolutePath}`,
+			`+++ ${absolutePath}`,
+			"@@ -1,1 +1,1 @@",
+			"-hello",
+			"+hello world",
+			"",
+		].join("\n");
+
+		const reverted = await revertWorkspaceMutations(cwd, [{ type: "patch", patch: absolutePatch, toolName: "Edit" }]);
+
+		assert.equal(reverted.ok, true);
+		assert.equal(readFileSync(absolutePath, "utf8"), "hello\n");
+	} finally {
+		cleanup();
+	}
+});
+
 test("revertWorkspaceMutations rolls back earlier undo steps when a later command conflicts", async () => {
 	const { cwd, cleanup } = createTempWorkspace();
 	try {
@@ -161,8 +184,22 @@ test("mutation parsing rejects unsafe or no-op tool executions and accepts patch
 		const patch = unifiedPatch("notes.txt", numberedLines({ 5: "before" }), numberedLines({ 5: "after" }));
 		assert.deepEqual(workspaceMutationFromToolExecution({ cwd, toolName: "functions.apply_patch", args: {}, details: { diff: patch }, isError: false }), {
 			type: "patch",
-			patch,
+			patch: prefixedUnifiedPatch("notes.txt", numberedLines({ 5: "before" }), numberedLines({ 5: "after" })),
 			toolName: "functions.apply_patch",
+		});
+
+		const absolutePatch = [
+			`--- ${join(cwd, "absolute.txt")}`,
+			`+++ ${join(cwd, "absolute.txt")}`,
+			"@@ -1,1 +1,1 @@",
+			"-before",
+			"+after",
+			"",
+		].join("\n");
+		assert.deepEqual(workspaceMutationFromToolExecution({ cwd, toolName: "Edit", args: {}, details: { patch: absolutePatch }, isError: false }), {
+			type: "patch",
+			patch: ["--- a/absolute.txt", "+++ b/absolute.txt", "@@ -1,1 +1,1 @@", "-before", "+after", ""].join("\n"),
+			toolName: "Edit",
 		});
 		assert.equal(workspaceMutationFromToolExecution({ cwd, toolName: "apply_patch", args: { input: "not a patch" }, details: undefined, isError: false }), undefined);
 	} finally {
@@ -210,4 +247,8 @@ function unifiedPatch(path: string, before: string, after: string): string {
 		}),
 		"",
 	].join("\n");
+}
+
+function prefixedUnifiedPatch(path: string, before: string, after: string): string {
+	return unifiedPatch(path, before, after).replace(`--- ${path}`, `--- a/${path}`).replace(`+++ ${path}`, `+++ b/${path}`);
 }
