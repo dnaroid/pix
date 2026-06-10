@@ -293,6 +293,10 @@ export class AppWorkspaceActionsController {
 	private persistWorkspaceMutations(entryId: string, mutations: readonly WorkspaceMutation[]): void {
 		const key = this.workspaceUndoIndexKey(entryId);
 		if (!key) return;
+		if (mutations.length === 0) {
+			delete this.workspaceUndoIndex.entries[key];
+			return;
+		}
 		const hasExisting = Object.prototype.hasOwnProperty.call(this.workspaceUndoIndex.entries, key);
 		if (hasExisting && sameWorkspaceMutations(this.workspaceUndoIndex.entries[key] ?? [], mutations)) return;
 

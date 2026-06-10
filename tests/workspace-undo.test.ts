@@ -102,6 +102,30 @@ test("write tool mutations restore the previous file content or remove created f
 	}
 });
 
+test("write mutation parsing accepts SDK Write args that use absolute file_path", async () => {
+	const { cwd, cleanup } = createTempWorkspace();
+	try {
+		const absolutePath = join(cwd, "a.txt");
+		const preparation = prepareWorkspaceMutation(cwd, "Write", { file_path: absolutePath, content: "hello\n" });
+		assert.deepEqual(preparation, { type: "write", path: "a.txt" });
+
+		writeFileSync(absolutePath, "hello\n", "utf8");
+		assert.deepEqual(
+			workspaceMutationFromToolExecution({
+				cwd,
+				toolName: "Write",
+				args: { file_path: absolutePath, content: "hello\n" },
+				details: undefined,
+				isError: false,
+				preparation,
+			}),
+			{ type: "write", path: "a.txt", afterContent: "hello\n", toolName: "Write" },
+		);
+	} finally {
+		cleanup();
+	}
+});
+
 test("workspace undo index load/save is resilient to missing and invalid files", () => {
 	const { cwd, cleanup } = createTempWorkspace();
 	try {

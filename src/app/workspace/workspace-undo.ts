@@ -70,7 +70,7 @@ export function prepareWorkspaceMutation(cwd: string, toolName: string, args: un
 	if (name !== "write") return undefined;
 
 	const record = plainRecord(args);
-	const rawPath = stringValue(record?.path);
+	const rawPath = toolPathValue(record);
 	const afterContent = stringValue(record?.content);
 	if (!rawPath || afterContent === undefined) return undefined;
 
@@ -91,8 +91,9 @@ export function workspaceMutationFromToolExecution(input: WorkspaceMutationFromT
 	const name = normalizedToolName(input.toolName);
 	if (name === "write" && input.preparation?.type === "write") {
 		const record = plainRecord(input.args);
+		const rawPath = toolPathValue(record);
 		const afterContent = stringValue(record?.content);
-		if (afterContent === undefined || input.preparation.beforeContent === afterContent) return undefined;
+		if (!rawPath || afterContent === undefined || input.preparation.beforeContent === afterContent) return undefined;
 		return {
 			type: "write",
 			path: input.preparation.path,
@@ -231,6 +232,10 @@ function plainRecord(value: unknown): Record<string, unknown> | undefined {
 
 function stringValue(value: unknown): string | undefined {
 	return typeof value === "string" ? value : undefined;
+}
+
+function toolPathValue(record: Record<string, unknown> | undefined): string | undefined {
+	return stringValue(record?.path) ?? stringValue(record?.file_path);
 }
 
 function patchFromDetails(details: unknown): string | undefined {
