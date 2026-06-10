@@ -95,15 +95,15 @@ export const THEMES: Record<ThemeName, Theme> = {
 			warning: "#d49a4a",
 			heading: "#d4b35e",
 			info: "#7fb3c8",
-			toolMutation: "#b8899e", // ~10% brighter from #a67c8f
-			toolSearch: "#9d8abb", // ~10% brighter from #8c7aa8
-			toolTitle: "#899199", // ~10% brighter from #7b848c
-			toolBash: "#b89071", // ~10% brighter from #a68266
-			toolRead: "#6d9b82", // ~10% brighter from #628c76
-			toolIndex: "#7692b4", // ~10% brighter from #6a84a3
-			toolEdit: "#b47389", // ~10% brighter from #a3687c
-			toolWeb: "#8192b6", // ~10% brighter from #7584a6
-			toolMeta: "#7d8192", // ~10% brighter from #707485
+			toolMutation: "#b87f98",
+			toolSearch: "#9780bb",
+			toolTitle: "#858f99",
+			toolBash: "#b88862",
+			toolRead: "#639b7c",
+			toolIndex: "#698bb4",
+			toolEdit: "#b46680",
+			toolWeb: "#768ab6",
+			toolMeta: "#787d92",
 			thinkingForeground: "#64748b",
 			userForeground: "#d97706",
 			thinkingXHigh: "#ff8a86",
@@ -150,15 +150,15 @@ export const THEMES: Record<ThemeName, Theme> = {
 			warning: "#9a631d",
 			heading: "#b88a28",
 			info: "#246b8e",
-			toolMutation: "#8c5c70", // reverted
-			toolSearch: "#6e608c", // reverted
-			toolTitle: "#626c78", // reverted
-			toolBash: "#8c7556", // reverted
-			toolRead: "#507a62", // reverted
-			toolIndex: "#567a96", // reverted
-			toolEdit: "#8c586c", // reverted
-			toolWeb: "#5c6a8c", // reverted
-			toolMeta: "#787e8a", // reverted
+			toolMutation: "#8c526a",
+			toolSearch: "#68578c",
+			toolTitle: "#5d6978",
+			toolBash: "#8c704b",
+			toolRead: "#477a5d",
+			toolIndex: "#497496",
+			toolEdit: "#8c4d65",
+			toolWeb: "#52638c",
+			toolMeta: "#747b8a",
 			thinkingForeground: "#6b5491",
 			userForeground: "#854d0e",
 			thinkingXHigh: "#cf333d",
