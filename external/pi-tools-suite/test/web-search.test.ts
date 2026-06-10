@@ -6,6 +6,9 @@ const spawnCalls: Array<{ command: string; args: string[]; options: Record<strin
 mock.module("node:child_process", () => ({
 	...childProcess,
 	spawn: (command: string, args: string[], options: Record<string, unknown>) => {
+		if (command !== "ollama") {
+			return childProcess.spawn(command, args, options as childProcess.SpawnOptions);
+		}
 		spawnCalls.push({ command, args, options });
 		return {
 			on: () => undefined,

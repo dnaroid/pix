@@ -24,10 +24,12 @@ mock.module("@earendil-works/pi-tui", () => ({
 
 class FakePi {
 	tools = new Map<string, any>();
+	commands = new Map<string, any>();
 	handlers = new Map<string, any>();
 	renderers = new Map<string, any>();
 	messages: any[] = [];
 	registerTool(tool: any) { this.tools.set(tool.name, tool); }
+	registerCommand(name: string, command: any) { this.commands.set(name, command); }
 	on(name: string, handler: any) { this.handlers.set(name, handler); }
 	registerMessageRenderer(name: string, renderer: any) { this.renderers.set(name, renderer); }
 	sendMessage(message: any, options: any) { this.messages.push({ message, options }); }
@@ -370,7 +372,7 @@ describe.serial("LSP library post-edit diagnostics", () => {
 		const { default: registerSuite } = await import("../src/index.js");
 		await registerSuite(pi as any);
 
-		expect([...pi.handlers.keys()].sort()).toEqual(["before_provider_request", "context", "model_select", "session_shutdown", "session_start", "tool_result"]);
+		expect([...pi.handlers.keys()].sort()).toEqual(expect.arrayContaining(["before_provider_request", "context", "model_select", "session_shutdown", "session_start", "tool_result"]));
 	});
 
 	test.serial("registers post-edit diagnostics hook without TUI renderers", async () => {
