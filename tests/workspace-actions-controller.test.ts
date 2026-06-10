@@ -104,7 +104,7 @@ describe("AppWorkspaceActionsController undo changes", () => {
 	});
 
 	it("still rewinds the session when no mutation log is available", async () => {
-		const entries: Entry[] = [{ id: "visible-1", kind: "user", text: "Original prompt", sessionEntryId: "session-1" }];
+		const entries: Entry[] = [{ id: "visible-no-log", kind: "user", text: "Original prompt", sessionEntryId: "session-no-log" }];
 		const addedEntries: Entry[] = [];
 		const toasts: Array<{ message: string; kind: string }> = [];
 		let input = "stale draft";
@@ -116,8 +116,8 @@ describe("AppWorkspaceActionsController undo changes", () => {
 				isCompacting: false,
 				sessionFile: "/tmp/workspace/session.jsonl",
 				sessionManager: {
-					getBranch: () => [messageEntry("session-1", null, "user", "Original prompt")],
-					getSessionId: () => "session-id",
+					getBranch: () => [messageEntry("session-no-log", null, "user", "Original prompt")],
+					getSessionId: () => "session-no-log-id",
 				},
 				navigateTree: async () => ({ cancelled: false, editorText: "Original prompt" }),
 			},
@@ -147,12 +147,58 @@ describe("AppWorkspaceActionsController undo changes", () => {
 			forkSessionEntryInNewTab: async () => false,
 		});
 
-		await controller.undoChangesFromUserMessage("visible-1");
+		await controller.undoChangesFromUserMessage("visible-no-log");
 
 		assert.equal(input, "Original prompt");
 		assert.equal(toasts[toasts.length - 1]?.kind, "warning");
 		const lastAddedEntry = addedEntries[addedEntries.length - 1];
 		assert.match((lastAddedEntry?.kind === "system" ? lastAddedEntry.text : ""), /No recorded file mutations were available/u);
+	});
+
+	it("assigns the user session entry id while recording a mutation for a fresh user message", () => {
+		const entries: Entry[] = [{ id: "visible-1", kind: "user", text: "Original prompt", workspaceMutations: [] }];
+
+		const runtime = {
+			cwd: "/tmp/workspace",
+			session: {
+				isStreaming: false,
+				isCompacting: false,
+				sessionFile: "/tmp/workspace/session.jsonl",
+				sessionManager: {
+					getBranch: () => [messageEntry("session-1", null, "user", "Original prompt")],
+					getSessionId: () => "session-id",
+				},
+			},
+		} as unknown as AgentSessionRuntime;
+
+		const controller = new AppWorkspaceActionsController({
+			entries,
+			runtime: () => runtime,
+			findUserEntry: (entryId) => entries.find((entry): entry is Extract<Entry, { kind: "user" }> => entry.kind === "user" && entry.id === entryId),
+			touchEntry: () => {},
+			resetSessionView: () => {},
+			loadSessionHistory: () => {},
+			addEntry: () => {},
+			setInput: () => {},
+			getInput: () => "",
+			setStatus: () => {},
+			setSessionStatus: () => {},
+			showToast: () => {},
+			render: () => {},
+			isRunning: () => false,
+			forkSessionEntryInNewTab: async () => false,
+		});
+
+		controller.recordWorkspaceMutationForUserEntry("visible-1", {
+			type: "write",
+			path: "created.txt",
+			afterContent: "hello\n",
+		});
+
+		assert.equal(entries[0]?.kind === "user" ? entries[0].sessionEntryId : undefined, "session-1");
+		assert.deepEqual(entries[0]?.kind === "user" ? entries[0].workspaceMutations : undefined, [
+			{ type: "write", path: "created.txt", afterContent: "hello\n" },
+		]);
 	});
 });
 

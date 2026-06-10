@@ -294,7 +294,13 @@ export class AppWorkspaceActionsController {
 		const key = this.workspaceUndoIndexKey(entryId);
 		if (!key) return;
 		if (mutations.length === 0) {
+			if (!Object.prototype.hasOwnProperty.call(this.workspaceUndoIndex.entries, key)) return;
 			delete this.workspaceUndoIndex.entries[key];
+			try {
+				saveWorkspaceUndoIndex(getAgentDir(), this.workspaceUndoIndex);
+			} catch {
+				// Undo persistence is best-effort; in-memory undo still works for this run.
+			}
 			return;
 		}
 		const hasExisting = Object.prototype.hasOwnProperty.call(this.workspaceUndoIndex.entries, key);
