@@ -275,6 +275,7 @@ export async function refreshAntigravityToken(credentials: OAuthCredentials): Pr
 	);
 	return {
 		...refreshed.credentials,
+		...(oauthClient ? { oauthClient } : {}),
 		...(storedAccounts.length > 0 ? { accounts: storedAccounts, activeIndex: nextActiveIndex, email: rotationAccount?.email ?? credentialDetails.email } : {}),
 	};
 }

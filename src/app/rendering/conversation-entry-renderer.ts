@@ -1,6 +1,5 @@
 import { applyOutputFilters, type PixConfig } from "../../config.js";
 import { renderMarkdownTextLines } from "../../markdown-format.js";
-import { stringDisplayWidth } from "../../terminal-width.js";
 import type { Theme } from "../../theme.js";
 import { attachImageClickTargets } from "../screen/image-click-targets.js";
 import { APP_ICONS } from "../icons.js";
@@ -32,37 +31,14 @@ export function renderConversationEntry(entry: Entry, width: number, options: Co
 		entryId?: string,
 		syntaxHighlight?: RenderedLine["syntaxHighlight"],
 		segments?: RenderedLine["segments"],
-	): RenderedLine => {
-		const textWidth = stringDisplayWidth(text);
-		const padding = Math.max(0, width - textWidth);
-		const paddedText = " ".repeat(padding) + text;
-		const offset = padding;
-
-		return {
-			text: paddedText,
-			colorOverride: options.colors.userForeground,
-			backgroundOverride: options.colors.userMessageBackground,
-			...(segments && segments.length > 0
-				? {
-						segments: segments.map((segment) => ({
-							...segment,
-							start: segment.start + offset,
-							end: segment.end + offset,
-							foreground: options.colors.userForeground,
-						})),
-				  }
-				: {}),
-			...(syntaxHighlight === undefined
-				? {}
-				: {
-						syntaxHighlight: {
-							...syntaxHighlight,
-							start: syntaxHighlight.start + offset,
-						},
-				  }),
-			...(entryId === undefined ? {} : { target: { kind: "user-message" as const, id: entryId } }),
-		};
-	};
+	): RenderedLine => ({
+		text: padHorizontalText(text, width),
+		colorOverride: options.colors.userForeground,
+		backgroundOverride: options.colors.userMessageBackground,
+		...(segments && segments.length > 0 ? { segments: segments.map((segment) => ({ ...segment, start: segment.start + userContentLeft, end: segment.end + userContentLeft })) } : {}),
+		...(syntaxHighlight === undefined ? {} : { syntaxHighlight }),
+		...(entryId === undefined ? {} : { target: { kind: "user-message" as const, id: entryId } }),
+	});
 	const queuedLine = (text: string, entryId: string, segments?: readonly StyledSegment[]): RenderedLine => ({
 		text,
 		colorOverride: options.colors.userForeground,

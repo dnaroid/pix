@@ -85,6 +85,12 @@ async function runSimpleStream(provider: any, model: any) {
 	return await stream.result();
 }
 
+async function refreshViaRegisteredOAuth(agentDir: string) {
+	const { provider } = await loadProvider(agentDir);
+	const auth = JSON.parse(fs.readFileSync(path.join(agentDir, "auth.json"), "utf-8"));
+	return await provider.oauth.refreshToken(auth.antigravity);
+}
+
 afterEach(() => {
 	if (originalAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
 	else process.env.PI_CODING_AGENT_DIR = originalAgentDir;
@@ -103,6 +109,28 @@ afterEach(() => {
 });
 
 describe.serial("Antigravity account rotation", () => {
+	test.serial("preserves Antigravity OAuth client credentials when Pi auth storage refreshes", async () => {
+		const agentDir = tempDir();
+		writeJson(path.join(agentDir, "auth.json"), {
+			antigravity: antigravityCredential({ expires: 0 }),
+		});
+		(globalThis as any).fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = String(input);
+			if (url === "https://oauth2.googleapis.com/token") {
+				const body = init?.body instanceof URLSearchParams ? init.body : new URLSearchParams(String(init?.body ?? ""));
+				expect(body.get("client_id")).toBe(testClientId);
+				expect(body.get("client_secret")).toBe(testClientSecret);
+				return new Response(JSON.stringify({ access_token: "access-1", expires_in: 3600 }), { status: 200, headers: { "content-type": "application/json" } });
+			}
+			throw new Error(`Unexpected fetch ${url}`);
+		};
+
+		const refreshed = await refreshViaRegisteredOAuth(agentDir);
+
+		expect((refreshed as any).oauthClient).toEqual({ clientId: testClientId, clientSecret: testClientSecret });
+		expect((refreshed as any).accounts).toHaveLength(2);
+	});
+
 	test.serial("uses Antigravity OAuth client credentials from the environment when auth.json has only accounts", async () => {
 		const agentDir = tempDir();
 		process.env.PI_ANTIGRAVITY_GOOGLE_CLIENT_ID = testClientId;
