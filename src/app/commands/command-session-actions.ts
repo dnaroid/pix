@@ -11,6 +11,7 @@ import { copyTextToClipboard } from "../screen/clipboard.js";
 import { formatAccountUsageReport, queryAccountUsageReport } from "../model/model-usage-status.js";
 import type { SessionModel } from "../types.js";
 import { checkPixUpdate, formatPixUpdateCheck, parsePixUpdateArgs, pixUpdateUsage } from "../cli/update.js";
+import { createStartupInfoMessage } from "../cli/startup-info.js";
 
 export class SessionCommandActions {
 	constructor(private readonly host: CommandControllerHost) {}
@@ -124,6 +125,8 @@ export class SessionCommandActions {
 
 		const stats = runtime.session.getSessionStats();
 		const lines = [
+			createStartupInfoMessage(runtime),
+			"",
 			"Session info",
 			...(runtime.session.sessionName ? [`name: ${runtime.session.sessionName}`] : []),
 			`file: ${stats.sessionFile ?? "in-memory"}`,

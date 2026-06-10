@@ -1,6 +1,18 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, mock, test } from "bun:test";
+import * as childProcess from "node:child_process";
 
-import webSearch from "../src/web-search/index.js";
+const spawnCalls: Array<{ command: string; args: string[]; options: Record<string, unknown> }> = [];
+
+mock.module("node:child_process", () => ({
+	...childProcess,
+	spawn: (command: string, args: string[], options: Record<string, unknown>) => {
+		spawnCalls.push({ command, args, options });
+		return {
+			on: () => undefined,
+			unref: () => undefined,
+		};
+	},
+}));
 
 type RegisteredTool = {
 	name: string;
@@ -14,13 +26,15 @@ type FetchMock = (input: FetchInput, init?: FetchInit) => Promise<Response>;
 const originalFetch = globalThis.fetch;
 const originalOllamaHost = process.env.OLLAMA_HOST;
 const originalTimeout = process.env.PI_WEB_SEARCH_TIMEOUT_MS;
+const originalStartupTimeout = process.env.PI_WEB_SEARCH_OLLAMA_STARTUP_TIMEOUT_MS;
 
-function restoreEnv(name: "OLLAMA_HOST" | "PI_WEB_SEARCH_TIMEOUT_MS", value: string | undefined) {
+function restoreEnv(name: "OLLAMA_HOST" | "PI_WEB_SEARCH_TIMEOUT_MS" | "PI_WEB_SEARCH_OLLAMA_STARTUP_TIMEOUT_MS", value: string | undefined) {
 	if (value === undefined) delete process.env[name];
 	else process.env[name] = value;
 }
 
-function registeredTools() {
+async function registeredTools() {
+	const { default: webSearch } = await import("../src/web-search/index.js");
 	const tools: RegisteredTool[] = [];
 	webSearch({ registerTool: (tool: RegisteredTool) => tools.push(tool) } as never);
 	return Object.fromEntries(tools.map((tool) => [tool.name, tool])) as Record<"web_search" | "web_fetch", RegisteredTool>;
@@ -44,8 +58,10 @@ async function expectRejectsWithMessage(promise: Promise<unknown>, expectedMessa
 
 afterEach(() => {
 	globalThis.fetch = originalFetch;
+	spawnCalls.length = 0;
 	restoreEnv("OLLAMA_HOST", originalOllamaHost);
 	restoreEnv("PI_WEB_SEARCH_TIMEOUT_MS", originalTimeout);
+	restoreEnv("PI_WEB_SEARCH_OLLAMA_STARTUP_TIMEOUT_MS", originalStartupTimeout);
 });
 
 describe("web-search tools", () => {
@@ -69,7 +85,7 @@ describe("web-search tools", () => {
 			);
 		});
 
-		const result = await registeredTools().web_search.execute("call-1", { query: "pi news", max_results: 2 });
+		const result = await (await registeredTools()).web_search.execute("call-1", { query: "pi news", max_results: 2 });
 
 		expect(request?.url).toBe("http://localhost:9999/api/experimental/web_search");
 		expect(JSON.parse(request?.body ?? "{}")).toEqual({ query: "pi news", max_results: 2 });
@@ -95,7 +111,7 @@ describe("web-search tools", () => {
 				{ status: 200 },
 			));
 
-		const result = await registeredTools().web_fetch.execute("call-1", { url: "https://example.com" });
+		const result = await (await registeredTools()).web_fetch.execute("call-1", { url: "https://example.com" });
 
 		expect(result.content[0]?.text).toContain("Title: Example");
 		expect(result.content[0]?.text).toContain("Links found: 2");
@@ -111,23 +127,80 @@ describe("web-search tools", () => {
 	test("reports Ollama auth errors with signin guidance", async () => {
 		mockFetch(async () => new Response("auth required", { status: 401, statusText: "Unauthorized" }));
 
-		await expectRejectsWithMessage(registeredTools().web_search.execute("call-1", { query: "latest pi" }), "ollama signin");
+		await expectRejectsWithMessage((await registeredTools()).web_search.execute("call-1", { query: "latest pi" }), "ollama signin");
 	});
 
 	test("reports invalid JSON instead of leaking a generic parser error", async () => {
 		mockFetch(async () => new Response("not json", { status: 200 }));
 
-		await expectRejectsWithMessage(registeredTools().web_fetch.execute("call-1", { url: "https://example.com" }), "invalid JSON");
+		await expectRejectsWithMessage((await registeredTools()).web_fetch.execute("call-1", { url: "https://example.com" }), "invalid JSON");
 	});
 
-	test("maps connection refused to an Ollama startup hint", async () => {
+	test("starts local Ollama and retries after connection refused", async () => {
 		const error = new TypeError("fetch failed") as TypeError & { cause?: Error & { code?: string } };
 		error.cause = Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:11434"), { code: "ECONNREFUSED" });
+		const urls: string[] = [];
+		mockFetch(async () => {
+			throw error;
+		});
+		mockFetch(async (url) => {
+			urls.push(String(url));
+			if (urls.length === 1) throw error;
+			if (String(url).endsWith("/api/tags")) return new Response(JSON.stringify({ models: [] }), { status: 200 });
+			return new Response(JSON.stringify({ results: [] }), { status: 200 });
+		});
+
+		const result = await (await registeredTools()).web_search.execute("call-1", { query: "latest pi" });
+
+		expect(spawnCalls).toHaveLength(1);
+		expect(spawnCalls[0]?.command).toBe("ollama");
+		expect(spawnCalls[0]?.args).toEqual(["serve"]);
+		expect(spawnCalls[0]?.options).toMatchObject({ detached: true, stdio: "ignore" });
+		expect((spawnCalls[0]?.options.env as Record<string, string>).OLLAMA_HOST).toBe("http://localhost:11434");
+		expect(urls).toEqual([
+			"http://localhost:11434/api/experimental/web_search",
+			"http://localhost:11434/api/tags",
+			"http://localhost:11434/api/experimental/web_search",
+		]);
+		expect(result.content[0]?.text).toBe("No results found.");
+	});
+
+	test("waits and retries local endpoint 404s while Ollama web API is still becoming ready", async () => {
+		const urls: string[] = [];
+		mockFetch(async (url) => {
+			urls.push(String(url));
+			if (urls.length < 3) return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
+			return new Response(
+				JSON.stringify({
+					title: "Example",
+					content: "Ready now",
+					links: [],
+				}),
+				{ status: 200 },
+			);
+		});
+
+		const result = await (await registeredTools()).web_fetch.execute("call-1", { url: "https://example.com" });
+
+		expect(spawnCalls).toHaveLength(0);
+		expect(urls).toEqual([
+			"http://localhost:11434/api/experimental/web_fetch",
+			"http://localhost:11434/api/experimental/web_fetch",
+			"http://localhost:11434/api/experimental/web_fetch",
+		]);
+		expect(result.content[0]?.text).toContain("Ready now");
+	});
+
+	test("does not try to spawn Ollama for remote hosts", async () => {
+		process.env.OLLAMA_HOST = "https://ollama.example.com";
+		const error = new TypeError("fetch failed") as TypeError & { cause?: Error & { code?: string } };
+		error.cause = Object.assign(new Error("connect ECONNREFUSED 203.0.113.10:11434"), { code: "ECONNREFUSED" });
 		mockFetch(async () => {
 			throw error;
 		});
 
-		await expectRejectsWithMessage(registeredTools().web_search.execute("call-1", { query: "latest pi" }), "Could not connect to Ollama");
+		await expectRejectsWithMessage((await registeredTools()).web_search.execute("call-1", { query: "latest pi" }), "Could not connect to Ollama");
+		expect(spawnCalls).toHaveLength(0);
 	});
 
 	test("times out stalled Ollama requests", async () => {
@@ -143,6 +216,6 @@ describe("web-search tools", () => {
 				);
 			}));
 
-		await expectRejectsWithMessage(registeredTools().web_fetch.execute("call-1", { url: "https://example.com", timeout_ms: 1 }), "timed out after 1ms");
+		await expectRejectsWithMessage((await registeredTools()).web_fetch.execute("call-1", { url: "https://example.com", timeout_ms: 1 }), "timed out after 1ms");
 	});
 });

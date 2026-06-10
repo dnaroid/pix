@@ -87,7 +87,6 @@ Useful flags:
 - `--cwd <path>`: workspace used for Pi tools, settings, resources, and sessions.
 - `--no-session`: run with an in-memory SDK session.
 - `--model <provider/model[:thinking]>`: request a specific model, for example `anthropic/claude-sonnet-4-20250514:medium`.
-- `--reload-on-build`: restart the running Pix process after a successful watcher build.
 
 ## Updating Pix
 
@@ -143,18 +142,10 @@ Run Pix against a workspace:
 pix --cwd /path/to/workspace
 ```
 
-During UI development, run the watcher in another terminal:
+During UI development, run the watcher in another terminal, then restart Pix after rebuilds when needed:
 
 ```bash
 npm run watch:pix
-```
-
-Each running instance can reload after successful builds:
-
-```bash
-PIX_RELOAD_ON_BUILD=1 pix --cwd /path/to/workspace
-# or
-pix --reload-on-build --cwd /path/to/workspace
 ```
 
 For a one-shot dev launch that rebuilds and refreshes the global link first:

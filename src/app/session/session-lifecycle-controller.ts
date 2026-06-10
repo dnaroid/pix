@@ -9,7 +9,6 @@ import type { InputEditor } from "../../input-editor.js";
 import { createId } from "../id.js";
 import { stringifyUnknown } from "../rendering/message-content.js";
 import { collectStartupAvailabilityIssues } from "../cli/startup-checks.js";
-import { createStartupInfoMessage, isEmptyStartupSession } from "../cli/startup-info.js";
 import type { AppOptions, Entry, PixExtensionUIContext, SessionActivity } from "../types.js";
 
 export type AppSessionLifecycleHost = {
@@ -95,10 +94,6 @@ export class AppSessionLifecycleController {
 				await this.bindCurrentSession({ awaitExtensions: false });
 			});
 			await this.bindCurrentSession({ awaitExtensions: false });
-			if (isEmptyStartupSession(runtime)) {
-				this.host.addEntry({ id: createId("system"), kind: "system", text: createStartupInfoMessage(runtime) });
-			}
-
 			if (runtime.modelFallbackMessage) {
 				this.host.addEntry({ id: createId("system"), kind: "system", text: runtime.modelFallbackMessage });
 			}

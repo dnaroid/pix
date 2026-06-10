@@ -961,7 +961,7 @@ describe("AppTabsController", () => {
 		assert.equal(tab?.titlePlaceholder, "loading");
 	});
 
-	it("settles the only startup tab to New when there are no tabs to restore", async () => {
+	it("clears the only startup tab placeholder when there are no tabs to restore", async () => {
 		const runtime = fakeRuntime("019e7d3fabc", "/tmp/one.jsonl", { sessionName: undefined });
 		const controller = new AppTabsController({
 			options: { cwd: "/tmp", themeName: "dark", noSession: false } satisfies AppOptions,
@@ -999,10 +999,10 @@ describe("AppTabsController", () => {
 
 		const tab = controller.tabs()[0];
 		assert.equal(tab?.title, "session 019e7d3f");
-		assert.equal(tab?.titlePlaceholder, "new");
+		assert.equal(tab?.titlePlaceholder, undefined);
 	});
 
-	it("restores a previously empty startup tab as New instead of a persisted Loading title", async () => {
+	it("restores a previously empty startup tab as the session id instead of a persisted Loading title", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "pix-tabs-loading-"));
 		const sessionPath = join(dir, "019e7d3fabc.jsonl");
 		const tabsPath = join(dir, "tabs.json");
@@ -1048,10 +1048,63 @@ describe("AppTabsController", () => {
 
 		const tab = controller.tabs()[0];
 		assert.equal(tab?.title, "session 019e7d3f");
-		assert.equal(tab?.titlePlaceholder, "new");
+		assert.equal(tab?.titlePlaceholder, undefined);
 	});
 
-	it("restores a startup tab as New when the session list and runtime still report Loading", async () => {
+	it("refreshes a saved session title after startup without blocking restore", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "pix-tabs-title-"));
+		const sessionPath = join(dir, "019e7d3fabc.jsonl");
+		const tabsPath = join(dir, "tabs.json");
+		await writeFile(sessionPath, [
+			JSON.stringify({ type: "session", version: 3, id: "019e7d3fabc", timestamp: "2024-01-01T00:00:00.000Z", cwd: dir }),
+			JSON.stringify({ type: "session_info", id: "info-1", parentId: null, timestamp: "2024-01-01T00:00:01.000Z", name: "Restored real title" }),
+			"",
+		].join("\n"), "utf8");
+		await writeFile(tabsPath, JSON.stringify({
+			version: 3,
+			cwd: dir,
+			activePath: sessionPath,
+			tabs: [{ path: sessionPath, title: "Loading…" }],
+		}), "utf8");
+
+		const runtime = fakeRuntime("019e7d3fabc", sessionPath, { sessionName: undefined });
+		const controller = new AppTabsController({
+			options: { cwd: dir, themeName: "dark", noSession: false } satisfies AppOptions,
+			blinkController: fakeBlinkController(),
+			runtime: () => runtime,
+			createRuntimeForNewSession: async () => fakeRuntime("new", join(dir, "new.jsonl")),
+			createRuntimeForSession: async () => runtime,
+			activateRuntime: async () => {},
+			disposeRuntime: async () => {},
+			isRunning: () => true,
+			setStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			resetSessionView: () => {},
+			loadSessionHistory: () => {},
+			loadSessionHistoryAsync: async () => true,
+			syncUserSessionEntryMetadata: () => {},
+			captureInputState: () => ({ text: "", cursor: 0 }),
+			restoreInputState: () => {},
+			addEntry: () => {},
+			showToast: () => {},
+			render: () => {},
+		});
+		const tabs = controller as unknown as { filePath: () => string };
+		tabs.filePath = () => tabsPath;
+
+		await controller.restoreAfterStartup();
+
+		assert.equal(controller.tabs()[0]?.title, "session 019e7d3f");
+
+		await new Promise((resolve) => setTimeout(resolve, 10));
+
+		const tab = controller.tabs()[0];
+		assert.equal(tab?.title, "Restored real title");
+		assert.equal(tab?.titlePlaceholder, undefined);
+	});
+
+	it("restores a startup tab as the session id when the session list and runtime still report Loading", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "pix-tabs-runtime-loading-"));
 		const sessionPath = join(dir, "019e7d3fabc.jsonl");
 		const tabsPath = join(dir, "tabs.json");
@@ -1097,7 +1150,7 @@ describe("AppTabsController", () => {
 
 		const tab = controller.tabs()[0];
 		assert.equal(tab?.title, "session 019e7d3f");
-		assert.equal(tab?.titlePlaceholder, "new");
+		assert.equal(tab?.titlePlaceholder, undefined);
 	});
 
 	it("keeps the previous tab when activation renders during new tab creation", async () => {

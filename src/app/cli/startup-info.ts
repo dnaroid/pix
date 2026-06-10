@@ -22,10 +22,6 @@ export function createStartupInfoMessage(runtime: AgentSessionRuntime): string {
 	].join("\n").trimEnd();
 }
 
-export function isEmptyStartupSession(runtime: AgentSessionRuntime): boolean {
-	return Array.isArray(runtime.session.messages) && runtime.session.messages.length === 0;
-}
-
 function startupSections(runtime: AgentSessionRuntime): StartupSection[] {
 	const loader = runtime.session.resourceLoader;
 	const context = loader.getAgentsFiles();

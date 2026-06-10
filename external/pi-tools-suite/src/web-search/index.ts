@@ -1,3 +1,5 @@
+import { spawn } from "node:child_process";
+
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
@@ -22,11 +24,21 @@ interface FetchResponse {
 
 type Operation = "Search" | "Fetch";
 
+class OllamaEndpointUnavailableError extends Error {
+	constructor(message: string, readonly status: number) {
+		super(message);
+		this.name = "OllamaEndpointUnavailableError";
+	}
+}
+
 const DEFAULT_OLLAMA_HOST = "http://localhost:11434";
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const MAX_REQUEST_TIMEOUT_MS = 120_000;
 const REQUEST_TIMEOUT_ENV = "PI_WEB_SEARCH_TIMEOUT_MS";
+const OLLAMA_STARTUP_TIMEOUT_ENV = "PI_WEB_SEARCH_OLLAMA_STARTUP_TIMEOUT_MS";
+const DEFAULT_OLLAMA_STARTUP_TIMEOUT_MS = 30_000;
 const MAX_ERROR_BODY_CHARS = 1_200;
+const STARTED_OLLAMA_PROCESSES = new Set<string>();
 
 function normalizeOllamaHost(host: string | undefined): string {
 	const trimmed = host?.trim();
@@ -53,6 +65,88 @@ function resolveRequestTimeoutMs(timeoutMs: number | undefined): number {
 	if (envTimeout) return parseTimeoutMs(envTimeout, REQUEST_TIMEOUT_ENV);
 
 	return DEFAULT_REQUEST_TIMEOUT_MS;
+}
+
+function resolveOllamaStartupTimeoutMs(timeoutMs: number): number {
+	const envTimeout = process.env[OLLAMA_STARTUP_TIMEOUT_ENV]?.trim();
+	if (envTimeout) return parseTimeoutMs(envTimeout, OLLAMA_STARTUP_TIMEOUT_ENV);
+
+	return Math.min(timeoutMs, DEFAULT_OLLAMA_STARTUP_TIMEOUT_MS);
+}
+
+function isLoopbackHost(host: string): boolean {
+	try {
+		const { hostname } = new URL(host);
+		return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
+	} catch {
+		return false;
+	}
+}
+
+function sleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
+	return new Promise((resolve, reject) => {
+		const cleanup = () => signal?.removeEventListener("abort", abort);
+		const timeout = setTimeout(() => {
+			cleanup();
+			resolve();
+		}, ms);
+		const abort = () => {
+			clearTimeout(timeout);
+			cleanup();
+			reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+		};
+
+		if (signal?.aborted) abort();
+		else signal?.addEventListener("abort", abort, { once: true });
+	});
+}
+
+function startOllama(host: string): void {
+	if (!isLoopbackHost(host) || STARTED_OLLAMA_PROCESSES.has(host)) return;
+
+	const child = spawn("ollama", ["serve"], {
+		detached: true,
+		stdio: "ignore",
+		env: { ...process.env, OLLAMA_HOST: host },
+	});
+
+	STARTED_OLLAMA_PROCESSES.add(host);
+	child.on("error", () => STARTED_OLLAMA_PROCESSES.delete(host));
+	child.unref();
+}
+
+async function waitForOllama(host: string, timeoutMs: number, signal: AbortSignal | undefined): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	let lastError: unknown;
+
+	while (Date.now() < deadline) {
+		const remainingMs = deadline - Date.now();
+		const requestSignal = createRequestSignal(signal, Math.max(1, Math.min(1_000, remainingMs)));
+
+		try {
+			const response = await fetch(`${host}/api/tags`, { signal: requestSignal.signal });
+			if (response.ok) return;
+			lastError = new Error(`HTTP ${response.status}`);
+		} catch (error) {
+			if (requestSignal.timedOut()) lastError = error;
+			else if (isAbortError(error) && signal?.aborted) throw error;
+			else lastError = error;
+		} finally {
+			requestSignal.cleanup();
+		}
+
+		await sleep(Math.min(250, Math.max(1, deadline - Date.now())), signal);
+	}
+
+	const details = collectErrorText(lastError);
+	throw new Error(`Started Ollama for ${host}, but it did not become ready within ${timeoutMs}ms.${details ? ` ${details}` : ""}`);
+}
+
+async function ensureOllamaRunning(host: string, timeoutMs: number, signal: AbortSignal | undefined): Promise<void> {
+	if (!isLoopbackHost(host)) return;
+
+	startOllama(host);
+	await waitForOllama(host, resolveOllamaStartupTimeoutMs(timeoutMs), signal);
 }
 
 function createRequestSignal(parentSignal: AbortSignal | undefined, timeoutMs: number) {
@@ -145,9 +239,10 @@ function createHttpError(response: Response, operation: Operation, host: string,
 	}
 
 	if (response.status === 404 || response.status === 405) {
-		return new Error(
+		return new OllamaEndpointUnavailableError(
 			`Ollama ${apiName} endpoint is not available at ${host} (HTTP ${response.status}). ` +
 				`Update Ollama and make sure experimental web ${operationNoun(operation)} is enabled.${withBody}`,
+			response.status,
 		);
 	}
 
@@ -156,6 +251,31 @@ function createHttpError(response: Response, operation: Operation, host: string,
 	}
 
 	return new Error(`Ollama ${apiName} API at ${host} returned HTTP ${response.status}.${withBody || ` ${response.statusText}`}`);
+}
+
+function isEndpointUnavailable(error: unknown): boolean {
+	return error instanceof OllamaEndpointUnavailableError;
+}
+
+async function waitForEndpointReady<T>(request: () => Promise<T>, host: string, operation: Operation, timeoutMs: number, signal: AbortSignal | undefined): Promise<T> {
+	const startupTimeoutMs = resolveOllamaStartupTimeoutMs(timeoutMs);
+	const deadline = Date.now() + startupTimeoutMs;
+	let lastError: unknown;
+
+	while (Date.now() < deadline) {
+		try {
+			return await request();
+		} catch (error) {
+			if (!isEndpointUnavailable(error)) throw error;
+			lastError = error;
+		}
+
+		await sleep(Math.min(250, Math.max(1, deadline - Date.now())), signal);
+	}
+
+	throw lastError instanceof Error
+		? lastError
+		: new Error(`Ollama ${endpointName(operation)} endpoint at ${host} did not become ready within ${startupTimeoutMs}ms.`);
 }
 
 async function readJsonResponse<T>(response: Response, operation: Operation, host: string): Promise<T> {
@@ -207,7 +327,7 @@ function normalizeOllamaError(error: unknown, operation: Operation, host: string
 	return error instanceof Error ? error : new Error(String(error));
 }
 
-async function postOllamaJson<T>(host: string, endpoint: "web_search" | "web_fetch", body: Record<string, unknown>, operation: Operation, signal: AbortSignal | undefined, timeoutMs: number): Promise<T> {
+async function postOllamaJson<T>(host: string, endpoint: "web_search" | "web_fetch", body: Record<string, unknown>, operation: Operation, signal: AbortSignal | undefined, timeoutMs: number, retryEndpointUnavailable = true): Promise<T> {
 	const requestSignal = createRequestSignal(signal, timeoutMs);
 
 	try {
@@ -220,6 +340,17 @@ async function postOllamaJson<T>(host: string, endpoint: "web_search" | "web_fet
 
 		return await readJsonResponse<T>(response, operation, host);
 	} catch (error) {
+		if (isConnectionRefused(error) && isLoopbackHost(host)) {
+			requestSignal.cleanup();
+			await ensureOllamaRunning(host, timeoutMs, signal);
+			return waitForEndpointReady(() => postOllamaJson<T>(host, endpoint, body, operation, signal, timeoutMs, false), host, operation, timeoutMs, signal);
+		}
+
+		if (retryEndpointUnavailable && isEndpointUnavailable(error) && isLoopbackHost(host)) {
+			requestSignal.cleanup();
+			return waitForEndpointReady(() => postOllamaJson<T>(host, endpoint, body, operation, signal, timeoutMs, false), host, operation, timeoutMs, signal);
+		}
+
 		throw normalizeOllamaError(error, operation, host, timeoutMs, requestSignal.timedOut(), signal);
 	} finally {
 		requestSignal.cleanup();

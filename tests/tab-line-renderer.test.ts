@@ -39,7 +39,7 @@ describe("TabLineRenderer", () => {
 		});
 	});
 
-	it("renders default generated session titles as New by default", () => {
+	it("renders default generated session titles as session ids", () => {
 		const renderer = tabLineRenderer([
 			{ id: "tab-1", status: "active", title: "session 019e7d3f", sessionPath: "/tmp/one.jsonl" },
 			{ id: "tab-2", status: "waiting", title: "Session 019e7d3f", sessionPath: "/tmp/two.jsonl" },
@@ -48,21 +48,22 @@ describe("TabLineRenderer", () => {
 
 		const layout = renderer.layout(80);
 
-		assert.equal((layout.text.match(/New/gu) ?? []).length, 2);
-		assert.doesNotMatch(layout.text, /session 019e7d3f/iu);
+		assert.doesNotMatch(layout.text, /New/u);
+		assert.ok(layout.text.includes("session 019e7d3f"));
+		assert.ok(layout.text.includes("Session 019e7d3f"));
 		assert.ok(layout.text.includes("session work notes"));
 	});
 
-	it("renders startup-loading default generated session titles as Loading", () => {
+	it("renders startup-loading default generated session titles as session ids", () => {
 		const renderer = tabLineRenderer([
 			{ id: "tab-1", status: "active", title: "session 019e7d3f", titlePlaceholder: "loading", sessionPath: "/tmp/one.jsonl" },
 		]);
 
 		const layout = renderer.layout(80);
 
-		assert.ok(layout.text.includes("Loading…"));
+		assert.ok(layout.text.includes("session 019e7d3f"));
+		assert.doesNotMatch(layout.text, /Loading…/u);
 		assert.doesNotMatch(layout.text, /New/u);
-		assert.doesNotMatch(layout.text, /session 019e7d3f/iu);
 	});
 
 	it("renders the active tab without a panel background", () => {

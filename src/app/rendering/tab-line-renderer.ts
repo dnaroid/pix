@@ -21,7 +21,6 @@ type TabButtonLayout = {
 
 const TAB_SEPARATOR = " │ ";
 const EMPTY_NEW_TAB_PREFIX = "│ ";
-const DEFAULT_SESSION_TITLE_PATTERN = /^session [0-9a-f]{8}$/iu;
 export const TAB_PANEL_ROWS = 2;
 
 export function tabPanelRows(tabLineVisible: boolean, terminalRows: number, tabCount = TAB_PANEL_ROWS): number {
@@ -187,9 +186,7 @@ export class TabLineRenderer {
 	}
 
 	private displayTitle(tab: SessionTab): string {
-		const title = tab.title.trim();
-		if (!DEFAULT_SESSION_TITLE_PATTERN.test(title)) return tab.title;
-		return tab.titlePlaceholder === "loading" ? "Loading…" : "New";
+		return tab.title;
 	}
 
 	private buttonLayoutFromText(text: string, statusStart: number, statusLength: number): TabButtonLayout {

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, readdir, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, open as openFile, readFile, readdir, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import {
 	getAgentDir,
@@ -11,7 +11,6 @@ import {
 import type { BindCurrentSessionOptions } from "./session-lifecycle-controller.js";
 import { isRecord } from "../guards.js";
 import { createId } from "../id.js";
-import { createStartupInfoMessage, isEmptyStartupSession } from "../cli/startup-info.js";
 import type { Attachment, InputEditorDraftState } from "../../input-editor.js";
 import type { AppBlinkController } from "../screen/blink-controller.js";
 import { tabPanelRows } from "../rendering/tab-line-renderer.js";
@@ -22,6 +21,8 @@ const MAX_RESTORED_TABS = 8;
 const BACKGROUND_PREWARM_TAB_LIMIT = 2;
 const TAB_ATTENTION_BLINK_KEY = "tab-attention";
 const LOADING_TAB_TITLE_PATTERN = /^loading(?:…|\.\.\.)?$/iu;
+const DEFAULT_SESSION_TITLE_PATTERN = /^session [0-9a-f]{8}$/iu;
+const SESSION_TITLE_SCAN_MAX_BYTES = 2 * 1024 * 1024;
 
 type PersistedTab = {
 	path: string;
@@ -204,7 +205,7 @@ export class AppTabsController {
 		}
 
 		if (!active) {
-			const tab = this.tabFromSession(session, { titlePlaceholder: this.restored ? "new" : "loading" });
+			const tab = this.tabFromSession(session, { titlePlaceholder: "loading" });
 			this.tabItems.push(tab);
 			this.activeTabId = tab.id;
 			this.clearTabAttention(tab);
@@ -228,20 +229,20 @@ export class AppTabsController {
 
 		this.syncActiveTabFromRuntime({ save: false });
 		if (this.host.options.noSession) {
-			this.settleStartupTabPlaceholders();
+			this.clearStartupTabPlaceholders();
 			return;
 		}
 
 		const saved = await this.loadTabs();
 		if (!saved || saved.tabs.length === 0) {
-			this.settleStartupTabPlaceholders();
+			this.clearStartupTabPlaceholders();
 			await this.saveTabs();
 			return;
 		}
 
 		const restoredTabs = this.restoredTabs(saved);
 		if (restoredTabs.length === 0) {
-			this.settleStartupTabPlaceholders();
+			this.clearStartupTabPlaceholders();
 			await this.saveTabs();
 			this.scheduleProjectSessionRetention();
 			return;
@@ -259,10 +260,11 @@ export class AppTabsController {
 		this.replaceTabs(restoredTabs, desiredPath);
 		this.restorePersistedInputStates(saved);
 		this.restorePersistedDeferredUserMessages(saved);
+		this.scheduleRestoredTabTitleRefresh(saved.tabs.map((tab) => tab.path));
 		if (explicitSessionPath && currentPath) this.ensureCurrentSessionTab(runtime.session);
 
 		if (!desiredPath) {
-			this.settleStartupTabPlaceholders();
+			this.clearStartupTabPlaceholders();
 			await this.saveTabs();
 			this.scheduleProjectSessionRetention();
 			this.scheduleTabPrewarm();
@@ -280,7 +282,7 @@ export class AppTabsController {
 				this.host.showToast("Could not restore the previous active tab", "warning");
 				this.replaceTabs([this.tabFromSession(runtime.session), ...restoredTabs], currentPath);
 				this.storeActiveRuntime(runtime);
-				this.settleStartupTabPlaceholders();
+				this.clearStartupTabPlaceholders();
 				await this.saveTabs();
 				this.scheduleProjectSessionRetention();
 				return;
@@ -288,7 +290,7 @@ export class AppTabsController {
 		}
 
 		this.syncActiveTabFromRuntime({ save: false });
-		this.settleStartupTabPlaceholders();
+		this.clearStartupTabPlaceholders();
 		if (this.activeTabId) this.restoreInputState(this.activeTabId);
 		await this.saveTabs();
 		this.scheduleProjectSessionRetention();
@@ -371,11 +373,7 @@ export class AppTabsController {
 		this.scheduleProjectSessionRetention();
 		this.host.resetSessionView();
 		this.restoreDeferredUserMessages(targetTab.id);
-		if (isEmptyStartupSession(newRuntime)) {
-			this.host.addEntry({ id: createId("system"), kind: "system", text: createStartupInfoMessage(newRuntime) });
-		} else {
-			this.host.addEntry({ id: createId("system"), kind: "system", text: `Opened a new tab. cwd=${newRuntime.cwd}` });
-		}
+		this.host.addEntry({ id: createId("system"), kind: "system", text: `Opened a new tab. cwd=${newRuntime.cwd}` });
 		if (newRuntime.modelFallbackMessage) this.host.addEntry({ id: createId("system"), kind: "system", text: newRuntime.modelFallbackMessage });
 		for (const diag of newRuntime.diagnostics ?? []) {
 			const kind = diag.type === "error" ? "error" as const : "system" as const;
@@ -875,9 +873,9 @@ export class AppTabsController {
 		return this.activeTabId ? this.tabItems.find((tab) => tab.id === this.activeTabId) : undefined;
 	}
 
-	private settleStartupTabPlaceholders(): void {
+	private clearStartupTabPlaceholders(): void {
 		for (const tab of this.tabItems) {
-			if (tab.titlePlaceholder === "loading") tab.titlePlaceholder = "new";
+			delete tab.titlePlaceholder;
 		}
 	}
 
@@ -1165,9 +1163,10 @@ export class AppTabsController {
 	}
 
 	private updateTabFromSession(tab: SessionTab, session: AgentSession): void {
-		tab.title = this.sessionTitle(session);
-		tab.activity = this.sessionActivity(session);
+		const previousSessionPath = tab.sessionPath ? resolve(tab.sessionPath) : undefined;
 		const sessionPath = this.sessionPath(session);
+		tab.title = this.updatedSessionTitle(tab.title, this.sessionTitle(session), previousSessionPath, sessionPath, tab.titlePlaceholder !== undefined);
+		tab.activity = this.sessionActivity(session);
 		if (sessionPath) tab.sessionPath = sessionPath;
 	}
 
@@ -1182,6 +1181,19 @@ export class AppTabsController {
 	private sessionTitleFromParts(sessionId: string, sessionName: string | undefined): string {
 		const name = sessionName?.trim();
 		return name && !LOADING_TAB_TITLE_PATTERN.test(name) ? name : `session ${sessionId.slice(0, 8)}`;
+	}
+
+	private updatedSessionTitle(
+		currentTitle: string,
+		nextTitle: string,
+		currentSessionPath: string | undefined,
+		nextSessionPath: string | undefined,
+		hasTitlePlaceholder: boolean,
+	): string {
+		if (!isDefaultSessionTitle(nextTitle)) return nextTitle;
+		if (hasTitlePlaceholder) return nextTitle;
+		if (currentSessionPath !== undefined && nextSessionPath !== undefined && currentSessionPath !== nextSessionPath) return nextTitle;
+		return validSessionTitle(currentTitle) && !isDefaultSessionTitle(currentTitle) ? currentTitle : nextTitle;
 	}
 
 	private sessionActivity(session: AgentSession | undefined): SessionActivity {
@@ -1216,7 +1228,7 @@ export class AppTabsController {
 		});
 	}
 
-	private restoredTabs(saved: PersistedTabState): SessionTab[] {
+	private restoredTabs(saved: PersistedTabState, sessionTitles: ReadonlyMap<string, string> = new Map()): SessionTab[] {
 		const tabs: SessionTab[] = [];
 		const seen = new Set<string>();
 		for (const tab of saved.tabs) {
@@ -1227,11 +1239,11 @@ export class AppTabsController {
 			seen.add(sessionPath);
 			const savedTitle = tab.title?.trim();
 			const restoredLoadingTitle = savedTitle !== undefined && LOADING_TAB_TITLE_PATTERN.test(savedTitle);
-			const title = restoredLoadingTitle ? this.defaultSessionTitleFromPath(sessionPath) : savedTitle;
+			const sessionTitle = validSessionTitle(sessionTitles.get(sessionPath));
+			const title = sessionTitle || (restoredLoadingTitle ? this.defaultSessionTitleFromPath(sessionPath) : savedTitle);
 			tabs.push({
 				id: createId("tab"),
 				title: title || "session",
-				...(restoredLoadingTitle ? { titlePlaceholder: "new" as const } : {}),
 				status: "waiting",
 				sessionPath,
 			});
@@ -1245,6 +1257,42 @@ export class AppTabsController {
 		const sessionId = /^[0-9a-f]{8}/iu.exec(fileName)?.[0]?.toLowerCase()
 			?? createHash("sha256").update(sessionPath).digest("hex").slice(0, 8);
 		return `session ${sessionId}`;
+	}
+
+	private async loadSessionTitles(sessionPaths: readonly string[]): Promise<ReadonlyMap<string, string>> {
+		const uniquePaths = [...new Set(sessionPaths.map((sessionPath) => resolve(sessionPath)))].slice(0, MAX_RESTORED_TABS);
+		const entries = await Promise.all(uniquePaths.map(async (sessionPath) => {
+			const title = await readLatestSessionTitle(sessionPath);
+			return title ? [sessionPath, title] as const : undefined;
+		}));
+		return new Map(entries.filter((entry): entry is readonly [string, string] => entry !== undefined));
+	}
+
+	private scheduleRestoredTabTitleRefresh(sessionPaths: readonly string[]): void {
+		if (sessionPaths.length === 0) return;
+		setTimeout(() => {
+			void this.refreshRestoredTabTitles(sessionPaths);
+		}, 0).unref?.();
+	}
+
+	private async refreshRestoredTabTitles(sessionPaths: readonly string[]): Promise<void> {
+		const titles = await this.loadSessionTitles(sessionPaths);
+		if (titles.size === 0) return;
+
+		let changed = false;
+		for (const tab of this.tabItems) {
+			const sessionPath = tab.sessionPath ? resolve(tab.sessionPath) : undefined;
+			const title = sessionPath ? titles.get(sessionPath) : undefined;
+			if (!title || tab.title === title) continue;
+
+			tab.title = title;
+			delete tab.titlePlaceholder;
+			changed = true;
+		}
+
+		if (!changed) return;
+		void this.saveTabs();
+		this.host.render();
 	}
 
 	private async loadTabs(): Promise<PersistedTabState | undefined> {
@@ -1494,6 +1542,53 @@ function parsePersistedImage(value: unknown): { type: "image"; data: string; mim
 	return isRecord(value) && value.type === "image" && typeof value.data === "string" && typeof value.mimeType === "string"
 		? { type: "image", data: value.data, mimeType: value.mimeType }
 		: undefined;
+}
+
+async function readLatestSessionTitle(sessionPath: string): Promise<string | undefined> {
+	let file: Awaited<ReturnType<typeof openFile>> | undefined;
+	try {
+		file = await openFile(sessionPath, "r");
+		const { size } = await file.stat();
+		if (size <= 0) return undefined;
+
+		const byteCount = Math.min(size, SESSION_TITLE_SCAN_MAX_BYTES);
+		const buffer = Buffer.alloc(byteCount);
+		await file.read(buffer, 0, byteCount, size - byteCount);
+
+		const text = buffer.toString("utf8");
+		const lines = text.split("\n");
+		if (size > byteCount) lines.shift();
+
+		for (let index = lines.length - 1; index >= 0; index -= 1) {
+			const line = lines[index]?.trim();
+			if (!line) continue;
+
+			let parsed: unknown;
+			try {
+				parsed = JSON.parse(line);
+			} catch {
+				continue;
+			}
+
+			if (!isRecord(parsed) || parsed.type !== "session_info" || typeof parsed.name !== "string") continue;
+			return validSessionTitle(parsed.name);
+		}
+	} catch {
+		return undefined;
+	} finally {
+		await file?.close();
+	}
+
+	return undefined;
+}
+
+function validSessionTitle(value: string | undefined): string | undefined {
+	const title = value?.trim();
+	return title && !LOADING_TAB_TITLE_PATTERN.test(title) ? title : undefined;
+}
+
+function isDefaultSessionTitle(value: string): boolean {
+	return DEFAULT_SESSION_TITLE_PATTERN.test(value.trim());
 }
 
 function clonePersistedAttachment(attachment: Attachment): Attachment {

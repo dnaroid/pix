@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 
 import type { AgentSessionRuntime, LoadExtensionsResult, SourceInfo } from "@earendil-works/pi-coding-agent";
 
-import { createStartupInfoMessage, isEmptyStartupSession } from "../src/app/cli/startup-info.js";
+import { createStartupInfoMessage } from "../src/app/cli/startup-info.js";
 
 describe("startup info", () => {
 	it("shows the Pix package version instead of the pi sdk version", () => {
@@ -68,11 +68,6 @@ describe("startup info", () => {
 		assert.match(message, /extensions: extensions\/broken\.ts — boom/u);
 	});
 
-	it("detects whether startup sessions are empty", () => {
-		assert.equal(isEmptyStartupSession(runtimeWithExtensions([], { messages: [] })), true);
-		assert.equal(isEmptyStartupSession(runtimeWithExtensions([], { messages: [{ role: "user", content: "hello" }] })), false);
-		assert.equal(isEmptyStartupSession(runtimeWithExtensions([], { messages: undefined })), false);
-	});
 	it("falls back to sourceInfo paths and unknown labels when theme names are missing", () => {
 		const message = createStartupInfoMessage(runtimeWithExtensions([], {
 			themes: [{ sourceInfo: sourceInfo("/workspace/project/themes/dark.ts") }, {} as never],
