@@ -2,38 +2,31 @@
  * Streaming-aware message renderer.
  *
  * Pipeline:
- *   pix events → renderer.push(text|tool|thinking|status)
- *               → accumulate chunks in arrival order
- *               → coalesce consecutive same-kind same-name tool events into ×N
+ *   pix events → renderer.push(assistant_text|status)
+ *               → accumulate assistant-visible text only
  *               → throttled (~1.2 s) editMessageText flushes, paginated on overflow
  *               → on turn_end, flush remainder
  *
- * Tools render name-only (no args, no result). Thinking renders a single
- * `💭 thinking…` marker per turn. Tool-name batching reduces spam when
- * the agent fires many small tools in a row (e.g. 10× read).
+ * Tool calls/results and thinking deltas are intentionally ignored: Telegram
+ * is a second screen for user-visible assistant messages, not a debug log.
  */
 
 import { chunkForTelegram, markdownToTelegram, TELEGRAM_MESSAGE_MAX } from "./format.js";
 import type { TelegramBot } from "./bot.js";
 
 const THROTTLE_MS = 1200;
+const SESSION_SEPARATOR = "\n\n━━━━━━━━━━━━\n\n";
 
 export type RendererEvent =
-	| { kind: "turn_start" }
+	| { kind: "turn_start"; instance?: RendererInstance }
 	| { kind: "assistant_text"; delta: string }
-	| { kind: "thinking" }
-	| { kind: "tool_start"; toolCallId: string; toolName: string }
-	| { kind: "tool_end"; toolCallId: string; toolName: string; isError: boolean }
-	| { kind: "turn_end"; reason: "end" | "error" | "aborted" }
-	| { kind: "info"; text: string };
+	| { kind: "turn_end"; reason: "end" | "error" | "aborted" };
 
-type ToolStatus = "running" | "done" | "error";
-
-interface ToolEntry {
-	kind: "tool";
-	status: ToolStatus;
-	name: string;
-	count: number;
+export interface RendererInstance {
+	label: string;
+	cwd?: string;
+	sessionName?: string;
+	sessionId?: string;
 }
 
 interface TextEntry {
@@ -41,9 +34,14 @@ interface TextEntry {
 	content: string;
 }
 
-type Chunk = TextEntry | ToolEntry;
+type Chunk = TextEntry;
 
 interface ActiveMessage {
+	messageId: number;
+	body: string;
+}
+
+interface SentPage {
 	messageId: number;
 	body: string;
 }
@@ -51,9 +49,12 @@ interface ActiveMessage {
 export class TurnRenderer {
 	private active: ActiveMessage | undefined;
 	private chunks: Chunk[] = [];
-	private thinkingShown = false;
+	private header: string | undefined;
 	private scheduledFlush: ReturnType<typeof setTimeout> | undefined;
 	private readonly sentMessageIds: number[] = [];
+	private pages: SentPage[] = [];
+	private turnHasText = false;
+	private turnOpen = false;
 
 	constructor(
 		private readonly bot: TelegramBot,
@@ -67,33 +68,21 @@ export class TurnRenderer {
 	push(event: RendererEvent): void {
 		switch (event.kind) {
 			case "turn_start":
-				this.reset();
+				this.startTurn(event.instance);
+				this.header = renderHeader(event.instance);
 				return;
 			case "assistant_text":
 				if (!event.delta) return;
+				if (!this.turnOpen) this.startTurn(undefined);
+				this.turnHasText = true;
 				this.appendText(event.delta);
 				this.scheduleFlush();
 				return;
-			case "thinking":
-				if (this.thinkingShown) return;
-				this.thinkingShown = true;
-				this.appendText("\n💭 thinking…\n");
-				this.scheduleFlush();
-				return;
-			case "tool_start":
-				this.appendTool("running", event.toolName);
-				this.scheduleFlush();
-				return;
-			case "tool_end":
-				this.appendTool(event.isError ? "error" : "done", event.toolName);
-				this.scheduleFlush();
-				return;
-			case "info":
-				this.appendText(`\nℹ️ ${event.text}\n`);
-				this.scheduleFlush();
-				return;
 			case "turn_end":
-				this.appendText(`\n— ${event.reason === "aborted" ? "aborted" : event.reason === "error" ? "error" : "done"} —\n`);
+				if (this.turnHasText) {
+					this.appendText(`\n\n— ${event.reason === "aborted" ? "aborted" : event.reason === "error" ? "error" : "done"} —\n`);
+				}
+				this.turnOpen = false;
 				void this.flushNow();
 				return;
 		}
@@ -115,8 +104,21 @@ export class TurnRenderer {
 			this.scheduledFlush = undefined;
 		}
 		this.chunks = [];
-		this.thinkingShown = false;
+		this.header = undefined;
 		this.active = undefined;
+		this.pages = [];
+		this.turnHasText = false;
+		this.turnOpen = false;
+	}
+
+	/** Replace the current Telegram-rendered buffer with a session transcript. */
+	async showTranscript(instance: RendererInstance | undefined, transcript: string): Promise<void> {
+		this.reset();
+		this.header = renderHeader(instance);
+		const trimmed = transcript.trim();
+		if (!trimmed) return;
+		this.chunks = [{ kind: "text", content: trimmed }];
+		await this.flushNow();
 	}
 
 	/** Update the most recent message with [aborted] trailer. */
@@ -140,13 +142,12 @@ export class TurnRenderer {
 		}
 	}
 
-	private appendTool(status: ToolStatus, name: string): void {
-		const last = this.chunks[this.chunks.length - 1];
-		if (last && last.kind === "tool" && last.status === status && last.name === name) {
-			last.count += 1;
-		} else {
-			this.chunks.push({ kind: "tool", status, name, count: 1 });
-		}
+	private startTurn(instance: RendererInstance | undefined): void {
+		if (this.turnOpen) return;
+		if (!this.header) this.header = renderHeader(instance);
+		if (this.chunks.length > 0) this.appendText(SESSION_SEPARATOR);
+		this.turnHasText = false;
+		this.turnOpen = true;
 	}
 
 	private scheduleFlush(): void {
@@ -169,46 +170,42 @@ export class TurnRenderer {
 		if (chunks.length === 0) return;
 
 		try {
-			if (!this.active) {
-				const sent = await this.bot.sendMessage(chunks[0]);
+			for (let idx = 0; idx < chunks.length; idx += 1) {
+				const chunk = chunks[idx];
+				const page = this.pages[idx];
+				if (page) {
+					if (page.body !== chunk) {
+						await this.bot.editMessageText(page.messageId, chunk);
+						page.body = chunk;
+					}
+					continue;
+				}
+				const sent = await this.bot.sendMessage(chunk);
 				if (sent?.message_id) {
-					this.active = { messageId: sent.message_id, body: chunks[0] };
+					const next = { messageId: sent.message_id, body: chunk };
+					this.pages.push(next);
 					this.sentMessageIds.push(sent.message_id);
 				}
-				for (const chunk of chunks.slice(1)) {
-					const spilled = await this.bot.sendMessage(chunk);
-					if (spilled?.message_id) {
-						this.active = { messageId: spilled.message_id, body: chunk };
-						this.sentMessageIds.push(spilled.message_id);
-					}
-				}
-			} else {
-				await this.bot.editMessageText(this.active.messageId, chunks[0]);
-				this.active.body = chunks[0];
-				for (const chunk of chunks.slice(1)) {
-					const spilled = await this.bot.sendMessage(chunk);
-					if (spilled?.message_id) {
-						this.active = { messageId: spilled.message_id, body: chunk };
-						this.sentMessageIds.push(spilled.message_id);
-					}
-				}
 			}
+			this.active = this.pages[this.pages.length - 1];
 		} catch (error) {
 			this.logger(`telegram send failed: ${error instanceof Error ? error.message : String(error)}`);
 		}
 	}
 
 	private renderChunks(): string {
-		let out = "";
+		let out = this.header ? `${this.header}\n\n` : "";
 		for (const chunk of this.chunks) {
-			if (chunk.kind === "text") {
-				out += chunk.content;
-			} else {
-				const icon = chunk.status === "running" ? "🔧" : chunk.status === "done" ? "✅" : "❌";
-				const counter = chunk.count > 1 ? ` ×${chunk.count}` : "";
-				out += `\n${icon} ${chunk.name}${counter}\n`;
-			}
+			out += chunk.content;
 		}
 		return out;
 	}
+}
+
+function renderHeader(instance: RendererInstance | undefined): string | undefined {
+	if (!instance) return undefined;
+	const bits = [instance.label];
+	if (instance.sessionName) bits.push(instance.sessionName);
+	else if (instance.sessionId) bits.push(instance.sessionId.slice(0, 8));
+	return `🤖 ${bits.join(" · ")}`;
 }

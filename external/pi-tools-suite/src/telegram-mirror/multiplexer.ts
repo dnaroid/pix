@@ -27,14 +27,15 @@
  *     acquire leadership themselves (handled in index.ts, not here).
  */
 
-import type { TelegramBot } from "./bot.js";
-import type { RendererEvent } from "./renderer.js";
+import type { TelegramBot, TelegramReplyMarkup, TelegramUpdate } from "./bot.js";
+import type { RendererEvent, RendererInstance } from "./renderer.js";
 import type { IpcServer, IpcSocket, InstanceInfo } from "./ipc.js";
 import { generateReqId } from "./ipc.js";
 
 /** Locally-executable operations on the leader's own pi session. */
 export interface LocalDispatch {
 	sendUserMessage(text: string): void;
+	currentDialog(): string | undefined;
 	abort(): void;
 	compact(): void;
 	status(): { idle: boolean; hasPending: boolean } | undefined;
@@ -44,7 +45,12 @@ export interface MultiplexerDeps {
 	selfId: string;
 	selfInfo: InstanceInfo;
 	bot: TelegramBot;
-	renderer: { push(event: RendererEvent): void; reset(): void };
+	renderer: {
+		push(event: RendererEvent): void;
+		reset(): void;
+		showTranscript?(instance: RendererInstance | undefined, transcript: string): Promise<void>;
+		sentIds?: readonly number[];
+	};
 	server: IpcServer;
 	dispatch: LocalDispatch;
 	/** Cluster-wide teardown: broadcast stand_down to followers then stop polling. */
@@ -62,6 +68,11 @@ interface InstanceEntry {
 	isLeader: boolean;
 }
 
+interface InstanceStatus {
+	idle: boolean;
+	hasPending: boolean;
+}
+
 const COMMAND_TIMEOUT_MS = 10_000;
 
 export class Multiplexer {
@@ -76,6 +87,7 @@ export class Multiplexer {
 
 	private readonly followers = new Map<string, FollowerEntry>();
 	private activeId: string | null = null;
+	private readonly lastStatus = new Map<string, InstanceStatus>();
 
 	constructor(deps: MultiplexerDeps) {
 		this.selfId = deps.selfId;
@@ -111,7 +123,12 @@ export class Multiplexer {
 
 	/** Local pi events flow in here. */
 	pushLocalEvent(event: RendererEvent): void {
-		if (this.activeId === this.selfId) this.renderer.push(event);
+		this.handleInstanceEvent(this.selfId, event);
+	}
+
+	async showActiveDialog(): Promise<void> {
+		if (!this.activeId) return;
+		await this.showDialogFor(this.activeId);
 	}
 
 	// ─── Telegram → pix dispatch ──────────────────────────────────────────
@@ -121,13 +138,17 @@ export class Multiplexer {
 		if (!trimmed) return;
 
 		if (trimmed.startsWith("/")) {
+			const messageId = updateMessageIdFromText();
 			const [head, ...rest] = trimmed.split(/\s+/);
 			const arg = rest.join(" ").trim();
-			const command = head.toLowerCase();
+			const command = normalizeBotCommand(head);
 			switch (command) {
 				case "/start":
 				case "/help":
-					await this.reply(HELP_TEXT);
+					await this.reply(HELP_TEXT, mainMenuMarkup());
+					return;
+				case "/menu":
+					await this.reply("Choose a project/session to follow:", this.instancesMarkup());
 					return;
 				case "/list":
 					await this.replyList();
@@ -144,6 +165,11 @@ export class Multiplexer {
 					return;
 				case "/status":
 					await this.handleStatus();
+					return;
+				case "/clear":
+				case "/clear_history":
+				case "/clean":
+					await this.clearTelegramHistory(messageId ? [messageId] : []);
 					return;
 				case "/say":
 					if (!arg) {
@@ -174,12 +200,36 @@ export class Multiplexer {
 		await this.routeCommandToActive("sendUserMessage", { text: trimmed }, "message");
 	}
 
+	async handleTelegramUpdate(update: TelegramUpdate): Promise<void> {
+		const callback = update.callback_query;
+		if (callback) {
+			await this.handleCallback(callback.id, callback.data ?? "");
+			return;
+		}
+		const text = update.message?.text;
+		if (typeof text === "string") await this.handleTgTextWithMessage(text, update.message?.message_id);
+	}
+
+	async handleTgTextWithMessage(text: string, messageId: number | undefined): Promise<void> {
+		const previous = currentTelegramMessageId;
+		currentTelegramMessageId = messageId;
+		try {
+			await this.handleTgText(text);
+		} finally {
+			currentTelegramMessageId = previous;
+		}
+	}
+
 	// ─── Followers ───────────────────────────────────────────────────────
 
 	private attachFollower(socket: IpcSocket): void {
-		socket.onMessage = (msg) => {
+			socket.onMessage = (msg) => {
 			if (msg.type === "register") {
 				this.registerFollower(socket, msg.info);
+				return;
+			}
+			if (msg.type === "instance_update") {
+				this.updateFollowerInfo(socket, msg.info);
 				return;
 			}
 			if (msg.type === "event") {
@@ -213,6 +263,24 @@ export class Multiplexer {
 		this.followers.set(info.id, { socket, info });
 		this.log(`follower registered: ${info.label}`);
 		socket.send({ type: "registered", leader: this.selfInfo, activeId: this.activeId });
+		void this.reply(`➕ ${formatInstanceTitle(info)} connected.`, this.instancesMarkup());
+	}
+
+	private updateFollowerInfo(socket: IpcSocket, info: InstanceInfo): void {
+		const existing = this.followers.get(info.id);
+		if (existing) {
+			existing.info = info;
+			return;
+		}
+		this.followers.set(info.id, { socket, info });
+	}
+
+	updateSelfInfo(info: InstanceInfo): void {
+		this.selfInfo.cwd = info.cwd;
+		this.selfInfo.label = info.label;
+		this.selfInfo.sessionId = info.sessionId;
+		this.selfInfo.sessionFile = info.sessionFile;
+		this.selfInfo.sessionName = info.sessionName;
 	}
 
 	private findFollowerBySocket(socket: IpcSocket): FollowerEntry | undefined {
@@ -224,8 +292,34 @@ export class Multiplexer {
 
 	private handleFollowerEvent(fromId: string, event: RendererEvent): void {
 		if (!this.followers.has(fromId)) return; // unknown/unregistered
+		this.handleInstanceEvent(fromId, event);
+	}
+
+	private handleInstanceEvent(fromId: string, event: RendererEvent): void {
+		const entry = this.getInstance(fromId);
+		if (!entry) return;
+		if (event.kind === "turn_start") {
+			this.recordStatus(fromId, { idle: false, hasPending: false }, entry.info);
+			if (this.activeId === fromId) this.renderer.push(withInstance(event, entry.info));
+			return;
+		}
+		if (event.kind === "turn_end") {
+			this.recordStatus(fromId, { idle: true, hasPending: false }, entry.info);
+			if (this.activeId === fromId) {
+				this.renderer.push(event);
+			}
+			return;
+		}
 		if (this.activeId === fromId) this.renderer.push(event);
-		// silent drop otherwise
+	}
+
+	private recordStatus(instanceId: string, next: InstanceStatus, info: InstanceInfo): void {
+		const prev = this.lastStatus.get(instanceId);
+		this.lastStatus.set(instanceId, next);
+		if (prev && prev.idle === next.idle) return;
+		const icon = next.idle ? "🟢" : "🟡";
+		const text = `${icon} ${formatInstanceTitle(info)} is ${formatStatus(next)}.`;
+		void this.reply(text, this.instancesMarkup(), { silent: instanceId !== this.activeId });
 	}
 
 	// ─── Routing helpers ─────────────────────────────────────────────────
@@ -329,7 +423,42 @@ export class Multiplexer {
 			return;
 		}
 		this.activeId = target.info.id;
-		await this.reply(`✅ Active: ${target.info.label}${target.isLeader ? " (leader)" : ""}`);
+		this.renderer.reset();
+		await this.reply(`✅ Following: ${formatInstanceTitle(target.info)}${target.isLeader ? " (leader)" : ""}`, this.instancesMarkup());
+		await this.showDialogFor(target.info.id);
+	}
+
+	private async showDialogFor(instanceId: string): Promise<void> {
+		const entry = this.getInstance(instanceId);
+		if (!entry) return;
+		let text: string | undefined;
+		if (instanceId === this.selfId) {
+			text = this.dispatch.currentDialog();
+		} else {
+			const follower = this.followers.get(instanceId);
+			if (!follower) return;
+			try {
+				const reqId = generateReqId();
+				const reply = await follower.socket.request(
+					{ type: "query", reqId, to: instanceId, query: "dialog" },
+					COMMAND_TIMEOUT_MS,
+				);
+				if (reply.type === "query_reply" && reply.ok && isRecord(reply.result)) {
+					text = typeof reply.result.text === "string" ? reply.result.text : undefined;
+				}
+			} catch (error) {
+				this.log(`dialog query failed for ${entry.info.label}: ${errorMessage(error)}`);
+				return;
+			}
+		}
+		if (!text?.trim()) return;
+		if (this.renderer.showTranscript) {
+			await this.renderer.showTranscript(instanceToRenderer(entry.info), text);
+			return;
+		}
+		this.renderer.reset();
+		this.renderer.push({ kind: "turn_start", instance: instanceToRenderer(entry.info) });
+		this.renderer.push({ kind: "assistant_text", delta: text });
 	}
 
 	private async replyList(): Promise<void> {
@@ -339,18 +468,69 @@ export class Multiplexer {
 			return;
 		}
 		const lines = instances.map((entry, idx) => {
-			const marker = entry.info.id === this.activeId ? " [active]" : "";
+			const marker = entry.info.id === this.activeId ? " [following]" : "";
 			const role = entry.isLeader ? " (leader)" : "";
-			return `${idx + 1}. ${entry.info.label}${role}${marker}`;
+			const status = this.lastStatus.get(entry.info.id);
+			const statusText = status ? ` — ${formatStatus(status)}` : "";
+			return `${idx + 1}. ${formatInstanceTitle(entry.info)}${role}${marker}${statusText}`;
 		});
 		lines.push("");
-		lines.push("Use /use N or /use &lt;id&gt; to switch.");
-		await this.reply(lines.join("\n"));
+		lines.push("Tap a button below, or use /use N.");
+		await this.reply(lines.join("\n"), this.instancesMarkup());
 	}
 
-	private async reply(text: string): Promise<void> {
+	private async handleCallback(callbackId: string, data: string): Promise<void> {
 		try {
-			await this.bot.sendMessage(text);
+			await this.bot.answerCallbackQuery(callbackId);
+		} catch (error) {
+			this.log(`answerCallbackQuery failed: ${errorMessage(error)}`);
+		}
+
+		if (data === "tg:list") {
+			await this.replyList();
+			return;
+		}
+		if (data === "tg:status") {
+			await this.handleStatus();
+			return;
+		}
+		if (data === "tg:help") {
+			await this.reply(HELP_TEXT, mainMenuMarkup());
+			return;
+		}
+		if (data.startsWith("tg:use:")) {
+			await this.handleUse(data.slice("tg:use:".length));
+			return;
+		}
+	}
+
+	private instancesMarkup(): TelegramReplyMarkup {
+		const rows = this.listInstances().map((entry, idx) => {
+			const prefix = entry.info.id === this.activeId ? "✅ " : "";
+			return [{ text: `${prefix}${idx + 1}. ${buttonLabel(entry.info)}`, callback_data: `tg:use:${idx + 1}` }];
+		});
+		rows.push([
+			{ text: "🔄 List", callback_data: "tg:list" },
+			{ text: "📊 Status", callback_data: "tg:status" },
+		]);
+		return { inline_keyboard: rows };
+	}
+
+	private async clearTelegramHistory(extraMessageIds: readonly number[] = []): Promise<void> {
+		const result = await this.bot.deleteKnownMessages([...(this.renderer.sentIds ?? []), ...extraMessageIds]);
+		this.renderer.reset();
+		this.log(`telegram history clear requested: attempted=${result.attempted} deleted=${result.deleted}`);
+	}
+
+	private getInstance(id: string): InstanceEntry | undefined {
+		if (id === this.selfId) return { info: this.selfInfo, isLeader: true };
+		const follower = this.followers.get(id);
+		return follower ? { info: follower.info, isLeader: false } : undefined;
+	}
+
+	private async reply(text: string, replyMarkup?: TelegramReplyMarkup, options: { silent?: boolean } = {}): Promise<void> {
+		try {
+			await this.bot.sendMessage(text, { replyMarkup, silent: options.silent });
 		} catch (error) {
 			this.log(`reply failed: ${errorMessage(error)}`);
 		}
@@ -364,6 +544,54 @@ export class Multiplexer {
 function formatStatus(status: { idle: boolean; hasPending: boolean }): string {
 	if (status.idle) return "idle";
 	return status.hasPending ? "streaming (queued messages waiting)" : "streaming";
+}
+
+function formatInstanceTitle(info: InstanceInfo): string {
+	return info.sessionName ? `${info.label} · ${info.sessionName}` : info.label;
+}
+
+function buttonLabel(info: InstanceInfo): string {
+	return info.sessionName ? `${info.label} · ${info.sessionName}` : info.label;
+}
+
+function withInstance(event: Extract<RendererEvent, { kind: "turn_start" }>, info: InstanceInfo): RendererEvent {
+	return {
+		...event,
+		instance: instanceToRenderer(info),
+	};
+}
+
+function instanceToRenderer(info: InstanceInfo): RendererInstance {
+	return {
+		label: info.label,
+		cwd: info.cwd,
+		...(info.sessionId ? { sessionId: info.sessionId } : {}),
+		...(info.sessionName ? { sessionName: info.sessionName } : {}),
+	};
+}
+
+function normalizeBotCommand(head: string): string {
+	const withoutMention = head.split("@", 1)[0] ?? head;
+	return withoutMention.toLowerCase();
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+let currentTelegramMessageId: number | undefined;
+
+function updateMessageIdFromText(): number | undefined {
+	return currentTelegramMessageId;
+}
+
+function mainMenuMarkup(): TelegramReplyMarkup {
+	return {
+			inline_keyboard: [
+				[{ text: "🧭 Choose project/session", callback_data: "tg:list" }],
+				[{ text: "📊 Active status", callback_data: "tg:status" }],
+			],
+		};
 }
 
 function errorMessage(error: unknown): string {
@@ -390,11 +618,12 @@ function resolveUseTarget(arg: string, instances: { info: InstanceInfo; isLeader
 const HELP_TEXT = [
 	"<b>pix Telegram mirror</b>",
 	"",
-	"Free text → forwarded to the <i>active</i> pi instance.",
+	"Free text → forwarded to the <i>followed</i> pi session.",
 	"",
 	"<b>Multi-instance commands</b>",
+	"/menu — show Telegram buttons",
 	"/list — show all known pi instances",
-	"/use N — switch active by 1-based index from /list",
+	"/use N — follow by 1-based index from /list",
 	"/use &lt;id&gt; — switch by id/label substring",
 	"/disconnect — stop the bot cluster-wide (resume with /reload in pi)",
 	"",
@@ -402,6 +631,7 @@ const HELP_TEXT = [
 	"/abort /stop — cancel current turn on active",
 	"/compact — trigger compaction on active",
 	"/status — show idle/streaming state of active",
+	"/clear — best-effort delete known bot messages from this chat",
 	"/say &lt;msg&gt; — explicit send (escape /-prefixed text)",
 	"/new — not supported; run /new inside pi",
 	"/help — this message",

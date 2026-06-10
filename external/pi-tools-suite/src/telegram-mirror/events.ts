@@ -6,7 +6,7 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { RendererEvent } from "./renderer.js";
+import type { RendererEvent, RendererInstance } from "./renderer.js";
 
 /**
  * Minimal sink for rendering events. The leader wires this to a Multiplexer
@@ -18,14 +18,8 @@ export interface RendererSink {
 }
 
 export function registerPixEventHandlers(pi: ExtensionAPI, hooks: PixMirrorHooks): void {
-	pi.on("agent_start", () => {
-		hooks.getRenderer()?.push({ kind: "turn_start" });
-	});
-
-	pi.on("before_agent_start", (event) => {
-		const prompt = event?.prompt?.trim();
-		if (!prompt) return;
-		hooks.getRenderer()?.push({ kind: "info", text: `user: ${truncate(prompt, 200)}` });
+	pi.on("agent_start", (_event, ctx) => {
+		hooks.getRenderer()?.push({ kind: "turn_start", instance: hooks.describeInstance(ctx as ExtensionContext | undefined) });
 	});
 
 	pi.on("message_update", (event) => {
@@ -35,30 +29,8 @@ export function registerPixEventHandlers(pi: ExtensionAPI, hooks: PixMirrorHooks
 			if (delta) hooks.getRenderer()?.push({ kind: "assistant_text", delta });
 			return;
 		}
-		if (type === "thinking_delta" || type === "thinking_start") {
-			// Render a single `💭 thinking…` marker per turn. The renderer
-			// dedupes further thinking events so we don't spam the chat
-			// with streaming thinking chunks.
-			hooks.getRenderer()?.push({ kind: "thinking" });
-			return;
-		}
-	});
-
-	pi.on("tool_execution_start", (event) => {
-		hooks.getRenderer()?.push({
-			kind: "tool_start",
-			toolCallId: event.toolCallId,
-			toolName: event.toolName,
-		});
-	});
-
-	pi.on("tool_execution_end", (event) => {
-		hooks.getRenderer()?.push({
-			kind: "tool_end",
-			toolCallId: event.toolCallId,
-			toolName: event.toolName,
-			isError: event.isError,
-		});
+		// Ignore thinking and toolcall events. Telegram mirrors only the
+		// user-visible assistant answer, not internal reasoning/tools.
 	});
 
 	pi.on("agent_end", () => {
@@ -69,6 +41,7 @@ export function registerPixEventHandlers(pi: ExtensionAPI, hooks: PixMirrorHooks
 
 export interface PixMirrorHooks {
 	getRenderer(): RendererSink | undefined;
+	describeInstance(ctx: ExtensionContext | undefined): RendererInstance | undefined;
 	notifyAgentEnd(): void;
 }
 
@@ -87,8 +60,3 @@ export interface ContextCapture {
 	captureCompact(fn: () => void): void;
 }
 
-function truncate(value: string, max: number): string {
-	const collapsed = value.replace(/\s+/g, " ").trim();
-	if (collapsed.length <= max) return collapsed;
-	return `${collapsed.slice(0, Math.max(0, max - 1))}…`;
-}

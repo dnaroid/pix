@@ -13,13 +13,21 @@
 
 export interface TelegramUpdate {
 	update_id: number;
-	message?: {
-		message_id: number;
-		date: number;
-		chat: { id: number; type: string };
+	message?: TelegramIncomingMessage;
+	callback_query?: {
+		id: string;
 		from?: { id: number; first_name?: string; username?: string };
-		text?: string;
+		message?: TelegramIncomingMessage;
+		data?: string;
 	};
+}
+
+export interface TelegramIncomingMessage {
+	message_id: number;
+	date: number;
+	chat: { id: number; type: string };
+	from?: { id: number; first_name?: string; username?: string };
+	text?: string;
 }
 
 export interface TelegramMessage {
@@ -35,16 +43,33 @@ export interface BotConfig {
 	timeoutMs?: number;
 }
 
+export interface TelegramInlineKeyboardButton {
+	text: string;
+	callback_data?: string;
+	url?: string;
+}
+
+export interface TelegramReplyMarkup {
+	inline_keyboard: TelegramInlineKeyboardButton[][];
+}
+
+export interface TelegramBotCommand {
+	command: string;
+	description: string;
+}
+
 interface SendOptions {
 	parseMode?: "HTML" | "MarkdownV2" | "Markdown";
 	disablePreview?: boolean;
 	silent?: boolean;
 	replyToMessageId?: number;
+	replyMarkup?: TelegramReplyMarkup;
 }
 
 interface EditOptions {
 	parseMode?: "HTML" | "MarkdownV2" | "Markdown";
 	disablePreview?: boolean;
+	replyMarkup?: TelegramReplyMarkup;
 }
 
 export class TelegramBot {
@@ -52,6 +77,7 @@ export class TelegramBot {
 	private readonly allowedChatId: number;
 	private readonly timeoutMs: number;
 	private readonly controller = new AbortController();
+	private readonly sentMessageIds = new Set<number>();
 	private polling = false;
 	private lastUpdateId = 0;
 	private consecutiveErrors = 0;
@@ -71,6 +97,14 @@ export class TelegramBot {
 		return this.allowedChatId;
 	}
 
+	get sentIds(): readonly number[] {
+		return [...this.sentMessageIds];
+	}
+
+	forgetSentId(messageId: number): void {
+		this.sentMessageIds.delete(messageId);
+	}
+
 	isAllowedChat(chatId: number): boolean {
 		return chatId === this.allowedChatId;
 	}
@@ -79,26 +113,35 @@ export class TelegramBot {
 		return this.requestJson("GET", "getMe", undefined);
 	}
 
+	async setMyCommands(commands: TelegramBotCommand[]): Promise<void> {
+		await this.requestJson("POST", "setMyCommands", { commands });
+	}
+
 	async sendMessage(text: string, options: SendOptions = {}): Promise<TelegramMessage | undefined> {
-		return this.requestJson("POST", "sendMessage", {
+		const payload = await this.requestJson<{ ok: boolean; result?: TelegramMessage }>("POST", "sendMessage", {
 			chat_id: this.allowedChatId,
 			text,
 			parse_mode: options.parseMode ?? "HTML",
 			disable_web_page_preview: options.disablePreview ?? true,
 			disable_notification: options.silent ?? false,
+			reply_markup: options.replyMarkup,
 			...(options.replyToMessageId ? { reply_to_message_id: options.replyToMessageId } : {}),
 		});
+		if (payload.result?.message_id) this.sentMessageIds.add(payload.result.message_id);
+		return payload.result;
 	}
 
 	async editMessageText(messageId: number, text: string, options: EditOptions = {}): Promise<TelegramMessage | undefined> {
 		try {
-			return await this.requestJson("POST", "editMessageText", {
+			const payload = await this.requestJson<{ ok: boolean; result?: TelegramMessage }>("POST", "editMessageText", {
 				chat_id: this.allowedChatId,
 				message_id: messageId,
 				text,
 				parse_mode: options.parseMode ?? "HTML",
 				disable_web_page_preview: options.disablePreview ?? true,
+				reply_markup: options.replyMarkup,
 			});
+			return payload.result;
 		} catch (error) {
 			// Telegram returns 400 "message is not modified" if content is identical.
 			// Treat that as success; surface everything else.
@@ -114,9 +157,28 @@ export class TelegramBot {
 				chat_id: this.allowedChatId,
 				message_id: messageId,
 			});
+			this.sentMessageIds.delete(messageId);
 		} catch {
 			// best-effort
 		}
+	}
+
+	async deleteKnownMessages(extraMessageIds: readonly number[] = []): Promise<{ attempted: number; deleted: number }> {
+		const ids = [...new Set([...this.sentMessageIds, ...extraMessageIds])].sort((a, b) => b - a);
+		let deleted = 0;
+		for (const id of ids) {
+			const before = this.sentMessageIds.has(id);
+			await this.deleteMessage(id);
+			if (before && !this.sentMessageIds.has(id)) deleted += 1;
+		}
+		return { attempted: ids.length, deleted };
+	}
+
+	async answerCallbackQuery(callbackQueryId: string, text?: string): Promise<void> {
+		await this.requestJson("POST", "answerCallbackQuery", {
+			callback_query_id: callbackQueryId,
+			text,
+		});
 	}
 
 	/**
@@ -146,7 +208,7 @@ export class TelegramBot {
 				}>("POST", "getUpdates", {
 					offset: this.lastUpdateId > 0 ? this.lastUpdateId + 1 : undefined,
 					timeout: Math.floor(this.timeoutMs / 1000),
-					allowed_updates: ["message"],
+					allowed_updates: ["message", "callback_query"],
 				});
 
 				this.consecutiveErrors = 0;
@@ -157,8 +219,9 @@ export class TelegramBot {
 
 				for (const update of payload.result) {
 					if (update.update_id > this.lastUpdateId) this.lastUpdateId = update.update_id;
-					if (!update.message) continue;
-					if (!this.isAllowedChat(update.message.chat.id)) continue;
+					const chatId = getUpdateChatId(update);
+					if (chatId === undefined) continue;
+					if (!this.isAllowedChat(chatId)) continue;
 					try {
 						await onUpdate(update);
 					} catch (handlerError) {
@@ -213,6 +276,14 @@ export class TelegramBot {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function getUpdateChatId(update: TelegramUpdate): number | undefined {
+	// For callback_query Telegram may omit `message` or return an
+	// inaccessible message for older inline keyboards. In private chats the
+	// callback sender id is the chat id, so use it as a fallback; otherwise the
+	// auth gate silently drops button presses.
+	return update.message?.chat.id ?? update.callback_query?.message?.chat.id ?? update.callback_query?.from?.id;
 }
 
 function removeUndefined(value: Record<string, unknown>): Record<string, unknown> {

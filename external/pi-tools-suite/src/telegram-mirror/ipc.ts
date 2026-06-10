@@ -57,12 +57,19 @@ export interface InstanceInfo {
 	cwd: string;
 	/** Human-friendly label, e.g. basename of cwd + short pid suffix. */
 	label: string;
+	/** Current pi session id, when available. */
+	sessionId?: string;
+	/** Current pi session file, when available. */
+	sessionFile?: string;
+	/** Human-friendly pi session name, when set. */
+	sessionName?: string;
 	/** ms-since-epoch when this instance started. */
 	started: number;
 }
 
 export type IpcMessage =
 	| { type: "register"; info: InstanceInfo }
+	| { type: "instance_update"; info: InstanceInfo }
 	| { type: "registered"; leader: InstanceInfo; activeId: string | null }
 	| { type: "ping"; t: number }
 	| { type: "pong"; t: number }
@@ -411,6 +418,19 @@ export function buildInstanceId(): { id: string; info: InstanceInfo } {
 	return {
 		id,
 		info: { id, pid, cwd, label, started: Date.now() },
+	};
+}
+
+export function updateInstanceInfo(base: InstanceInfo, patch: Partial<Pick<InstanceInfo, "cwd" | "sessionId" | "sessionFile" | "sessionName">>): InstanceInfo {
+	const cwd = patch.cwd ?? base.cwd;
+	const cwdBase = path.basename(cwd) || cwd;
+	return {
+		...base,
+		cwd,
+		label: `${cwdBase} (#${base.pid})`,
+		...(patch.sessionId !== undefined ? { sessionId: patch.sessionId } : base.sessionId ? { sessionId: base.sessionId } : {}),
+		...(patch.sessionFile !== undefined ? { sessionFile: patch.sessionFile } : base.sessionFile ? { sessionFile: base.sessionFile } : {}),
+		...(patch.sessionName !== undefined ? { sessionName: patch.sessionName } : base.sessionName ? { sessionName: base.sessionName } : {}),
 	};
 }
 

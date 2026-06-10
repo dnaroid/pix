@@ -20,20 +20,46 @@ The module is a no-op until you add a `telegramMirror` block to
 }
 ```
 
-| Field       | Type              | Required | Notes                                                                                          |
-|-------------|-------------------|----------|------------------------------------------------------------------------------------------------|
-| `enabled`   | boolean           | no       | Defaults to `true` when the block is present and `botToken` + `chatId` are valid.              |
-| `botToken`  | string            | yes      | Telegram Bot API token from [@BotFather](https://t.me/BotFather). Empty string disables.       |
-| `chatId`    | number or string  | yes      | Numeric chat id of the private chat allowed to control the bot. Non-integer disables.          |
+- `enabled` (boolean, optional): defaults to `true` when the block is
+  present and `botToken` + `chatId` are valid.
+- `botToken` (string, required): Telegram Bot API token from @BotFather.
+  Empty string disables the mirror.
+- `chatId` (number or string, required): numeric private chat id allowed to
+  control the bot. Non-integer disables the mirror.
 
-When the block is present and valid, the module connects on the next `pi`
-start (or `/reload`).
+When the block is present and valid, the module registers the local
+`/telegram-mirror` and `/tg` slash commands. The bot does not connect until
+you run one of those commands in a pi session.
+
+## Activation
+
+Run this inside each pi session you want to expose to Telegram:
+
+```text
+/telegram-mirror
+```
+
+Short alias:
+
+```text
+/tg
+```
+
+Useful local variants:
+
+- `/telegram-mirror` or `/tg`: connect this pi session to Telegram mirror.
+- `/telegram-mirror status`: show local mirror role and session label.
+- `/telegram-mirror stop`: stop the mirror cluster.
+- `/tg-off`: stop the mirror cluster.
+
+After activation, the leader sends a Telegram message with buttons. Use
+`/menu` or `/list` in Telegram any time to reopen the project/session picker.
 
 ## How to get your chat id
 
 Open this URL in a browser (replace `<TOKEN>` with your bot token):
 
-```
+```text
 https://api.telegram.org/bot<TOKEN>/getUpdates
 ```
 
@@ -60,33 +86,37 @@ so this module elects a **leader** when N pi processes share one bot:
    followers race to bind the socket; the first to win becomes the new
    leader. `activeId` resets on failover — run `/use N` again.
 
-No setup needed: this is fully automatic. Just run more `pi` processes.
+Run `/telegram-mirror` in every `pi` process you want available in the
+Telegram picker. Only one process polls Telegram; the rest register as
+followers over IPC.
 
 When you start a new pi, it logs `[telegram-mirror] registered with
 leader <label>` on stderr. The leader logs `[telegram-mirror] connected
 as @<botname> (leader)`.
 
-### Selecting the active instance
+### Selecting the followed project/session
 
-In Telegram, use `/list` and `/use`:
+In Telegram, use `/menu`, `/list`, or the inline buttons:
 
-```
+```text
 /list
 →
-1. pi-ui-extend (#12345) (leader) \[active\]
-2. opencode (#67890)
+1. pi-ui-extend (#12345) (leader) [following] — idle
+2. opencode (#67890) — streaming
 3. other-repo (#99999)
 
-Use /use N or /use <id> to switch.
+Tap a button below, or use /use N.
 ```
 
-```
+```text
 /use 2
-→ ✅ Active: opencode (#67890)
+→ ✅ Following: opencode (#67890)
 ```
 
 `/use` accepts a 1-based index from `/list` or a substring of the id/label.
-Events from non-active instances are dropped (silent).
+Assistant messages are streamed only from the followed session. Status changes
+from other sessions still produce Telegram signals, so you can see when a
+different session starts or finishes work without switching to it.
 
 ### Cleanup
 
@@ -97,31 +127,38 @@ unlink it automatically (bind fails → connect fails → unlink → retry).
 
 ## Telegram → pix
 
-| Command           | Effect                                                 |
-|-------------------|--------------------------------------------------------|
-| Free text         | forwarded to the active pi instance as user message   |
-| `/list`           | show all known pi instances, mark active               |
-| `/use N` `/use X` | switch active instance (by index or id/label substring)|
-| `/abort` `/stop`  | cancel current turn on active                          |
-| `/compact`        | trigger context compaction on active                   |
-| `/status`         | show idle / streaming state of active                  |
-| `/say <msg>`      | explicit send (escape hatch for `/`-prefixed text)     |
-| `/disconnect`     | stop the bot cluster-wide (resume with `/reload` in pi)|
-| `/new`            | not supported via extension API — run `/new` in pi     |
-| `/help`           | show command list                                      |
+- Free text: forwarded to the followed pi session as a user message.
+- `/menu`: show inline project/session picker buttons.
+- `/list`: show all known pi sessions and mark followed.
+- `/use N` or `/use X`: follow by index, id, or label substring.
+- `/abort` or `/stop`: cancel current turn on followed session.
+- `/compact`: trigger context compaction on followed session.
+- `/status`: show idle / streaming state of followed session.
+- `/clear`: best-effort delete known bot messages from the chat.
+- `/say <msg>`: explicit send, for `/`-prefixed text.
+- `/disconnect`: stop the bot cluster-wide.
+- `/new`: not supported via extension API; run `/new` in pi.
+- `/help`: show command list.
 
 ## Pix → Telegram
 
 The leader subscribes to pix streaming events (its own + followers' via IPC)
-and renders one Telegram message per agent turn — but **only for the active
-instance**:
+and renders one Telegram message per agent turn — but only assistant-visible
+text from the followed session is streamed:
 
-- `before_agent_start` → `user: <prompt>`
 - `message_update` (`text_delta`) → appended to the active message, edited
   in place at ~1.2 s throttle (Telegram rate-limit friendly).
-- `tool_execution_start` → `🔧 tool: <args>` line.
-- `tool_execution_end` → `✅ tool: <summary>` or `❌` on error.
 - `agent_end` → final flush + `— done —` trailer.
+- `agent_start` / `agent_end` from any known session → compact status signal
+  such as `🟡 repo (#pid) is streaming` or `🟢 repo (#pid) is idle`.
+
+Tool calls, tool results, and thinking deltas are intentionally not mirrored
+to Telegram.
+
+Telegram does not expose a full private-chat history wipe API to bots. The
+`/clear` command therefore deletes the messages the bot knows about in this
+process, plus the `/clear` command message when Telegram allows it. Older
+messages from previous bot runs may remain.
 
 Messages are paginated at 4096 chars (Telegram's per-message limit).
 Markdown is converted to Telegram HTML with `**bold**`, `*italic*`,
@@ -147,8 +184,8 @@ in the same config file, then `/reload` pi.
   request open. If your network blocks Telegram, you'll see repeating
   `[telegram-mirror] polling: …` errors in stderr and the bot will back
   off up to 60 s between retries.
-- On leader failover, the in-flight streaming output for the active turn
-  is lost (the new leader's renderer starts empty). `activeId` also
+- On leader failover, the in-flight streaming output for the followed turn
+  is lost (the new leader's renderer starts empty). The followed session also
   resets to the new leader; run `/use N` to switch back to a follower.
 - The cluster is single-host only (unix socket). To mirror across
   machines, use separate bot tokens.
@@ -157,12 +194,10 @@ in the same config file, then `/reload` pi.
 
 ## Files
 
-| File            | Purpose                                                |
-|-----------------|--------------------------------------------------------|
-| `index.ts`      | module factory: role selection (leader/follower) + lifecycle |
-| `bot.ts`        | Telegram Bot API fetch client + long-poll loop         |
-| `ipc.ts`        | unix socket JSON-lines IPC + leader election           |
-| `multiplexer.ts`| leader-side registry + active-instance routing         |
-| `events.ts`     | pix event → sink adapters + ctx capture                |
-| `renderer.ts`   | per-turn buffer, throttled edit, pagination            |
-| `format.ts`     | markdown → Telegram HTML, chunking                     |
+- `index.ts`: module factory, activation command, role selection, lifecycle.
+- `bot.ts`: Telegram Bot API fetch client and long-poll loop.
+- `ipc.ts`: unix socket JSON-lines IPC and leader election.
+- `multiplexer.ts`: leader-side registry and active-instance routing.
+- `events.ts`: pix event to sink adapters and context capture.
+- `renderer.ts`: per-turn buffer, throttled edit, pagination.
+- `format.ts`: markdown to Telegram HTML and chunking.
