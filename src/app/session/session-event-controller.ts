@@ -338,7 +338,6 @@ export class AppSessionEventController {
 			this.finishCurrentThinkingEntry();
 			this.flushAssistantTextBuffer(true);
 			this.clearCurrentAssistantState();
-			this.currentUserEntryId = undefined;
 		}
 	}
 

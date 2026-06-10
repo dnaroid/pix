@@ -380,6 +380,72 @@ describe("AppSessionEventController", () => {
 		assert.equal(metadataSyncCalls, 2);
 	});
 
+	it("keeps the current user entry available when an assistant tool-call message ends before tool execution events", () => {
+		const entries: Entry[] = [];
+		const recordedMutations: Array<{ entryId: string; mutation: unknown }> = [];
+		let metadataSyncCalls = 0;
+		const controller = new AppSessionEventController({
+			entries,
+			runtime: () => ({ session: { isStreaming: false } }) as AgentSessionRuntime,
+			conversationViewport: () => ({ deleteEntry: () => {} }) as never,
+			isRunning: () => false,
+			render: () => {},
+			scheduleRender: () => {},
+			setStatus: () => {},
+			restoreSessionStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			updateQueuedMessageStatus: () => {},
+			prepareWorkspaceMutation: () => ({ type: "write", path: "a.txt" }),
+			workspaceMutationFromToolExecution: () => ({ type: "write", path: "a.txt", afterContent: "hello\n" }),
+			recordWorkspaceMutationForUserEntry: (entryId, mutation) => {
+				recordedMutations.push({ entryId, mutation });
+			},
+			scheduleUserSessionEntryMetadataSync: () => {
+				metadataSyncCalls += 1;
+			},
+			toolDefaultExpanded: () => false,
+			observeSubagentsToolResult: () => {},
+			observeTodoToolResult: () => {},
+			showToast: () => {},
+		});
+
+		controller.handleSessionEvent({
+			type: "message_start",
+			message: { role: "user", content: "создай a.txt" },
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "message_end",
+			message: { role: "user", content: "создай a.txt" },
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "message_end",
+			message: { role: "assistant", content: [{ type: "toolCall", id: "call-1", name: "Write" }] },
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "tool_execution_start",
+			toolCallId: "call-1",
+			toolName: "Write",
+			args: { file_path: "/tmp/a.txt", content: "hello\n" },
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "tool_execution_end",
+			toolCallId: "call-1",
+			toolName: "Write",
+			result: { content: [{ type: "text", text: "done" }], details: {} },
+			isError: false,
+		} as unknown as AgentSessionEvent);
+
+		assert.equal(entries[0]?.kind, "user");
+		assert.deepEqual(recordedMutations, [
+			{
+				entryId: entries[0]?.id,
+				mutation: { type: "write", path: "a.txt", afterContent: "hello\n" },
+			},
+		]);
+		assert.equal(metadataSyncCalls, 2);
+	});
+
 	it("schedules user metadata sync after a tool finishes even without a user message_end event", () => {
 		const entries: Entry[] = [];
 		let metadataSyncCalls = 0;
