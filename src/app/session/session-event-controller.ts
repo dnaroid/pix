@@ -186,6 +186,7 @@ export class AppSessionEventController {
 			case "tool_execution_end":
 				this.host.setSessionActivity(this.host.runtime()?.session.isStreaming ? "running" : "idle");
 				this.recordToolWorkspaceMutation(event.toolCallId, event.toolName, event.result.details, event.isError);
+				if (this.currentUserEntryId) this.host.scheduleUserSessionEntryMetadataSync();
 				this.host.observeSubagentsToolResult(event.toolName, isRecord(event.result) ? event.result.details : undefined);
 				this.host.observeTodoToolResult(event.toolName, isRecord(event.result) ? event.result.details : undefined, event.isError);
 				this.upsertToolEntry(event.toolCallId, {
