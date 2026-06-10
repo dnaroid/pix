@@ -213,6 +213,8 @@ export type SubagentsWidgetState = {
 
 export type RenderedLine = {
 	text: string;
+	copyText?: string;
+	continuesOnNextLine?: boolean;
 	variant?: "normal" | "muted" | "error" | "accent";
 	colorOverride?: string;
 	backgroundOverride?: string;

@@ -458,6 +458,31 @@ describe("AppMouseController", () => {
 		assert.equal(controller.mouseSelection, undefined);
 	});
 
+	it("copies wrapped conversation text without injecting extra newlines", () => {
+		let copiedText: string | undefined;
+		const controller = new AppMouseController(
+			fakeHost({
+				conversationViewport: () => ({
+					slice: () => [
+						{ text: "hello", copyText: "hello ", continuesOnNextLine: true },
+						{ text: "world", copyText: "world" },
+					],
+				}) as never,
+				copyTextToClipboard: (text) => { copiedText = text; },
+			}),
+			fakePopupMenus(),
+			fakePopupActions(),
+			fakeScrollController(),
+			fakeCommandController(),
+		);
+
+		controller.handleMouse({ button: 0, x: 1, y: 1, released: false });
+		controller.handleMouse({ button: 32, x: 6, y: 2, released: false });
+		controller.handleMouse({ button: 0, x: 6, y: 2, released: true });
+
+		assert.equal(copiedText, "hello world");
+	});
+
 	it("scrolls the input editor with the mouse wheel when the pointer is over it", () => {
 		const deltas: number[] = [];
 		let renderCount = 0;

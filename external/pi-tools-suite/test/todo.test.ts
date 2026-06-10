@@ -98,7 +98,7 @@ describe.serial("todo tool", () => {
 		expect(updated.content[0].text).toContain("pending → in_progress");
 		expect(updated.content[0].text).not.toContain("user-facing final report");
 		expect(updated.content[0].text).not.toContain("none is in_progress");
-		expect(updated.content[0].text).toContain("before you stop");
+		expect(updated.content[0].text).toContain("before your final response");
 
 		const got = await tool.execute("call", { action: "get", id: 1 }, undefined, undefined, {});
 		expect(got.content[0].text).toContain("writing tests");
@@ -761,6 +761,46 @@ describe.serial("todo extension lifecycle", () => {
 			expect(pi.thinkingLevel).toBe("off");
 			expect(pi.setThinkingLevelCalls).toEqual(["high", "off"]);
 			await pi.emit("agent_end", {}, ctx);
+			expect(pi.sentMessages).toHaveLength(0);
+		} finally {
+			if (previousEnv === undefined) delete process.env.PI_TOOLS_SUITE_TODO_THINKING;
+			else process.env.PI_TOOLS_SUITE_TODO_THINKING = previousEnv;
+			rmSync(ctx.cwd, { recursive: true, force: true });
+		}
+	});
+
+	test.serial("optimistically completes the current in-progress todo when the final assistant content is a plain string", async () => {
+		const previousEnv = process.env.PI_TOOLS_SUITE_TODO_THINKING;
+		process.env.PI_TOOLS_SUITE_TODO_THINKING = "1";
+		const extension = (await import("../src/todo/index.js")).default;
+		const { getTodos } = await import("../src/todo/todo.js");
+		const pi = new FakePi();
+		const ctx = {
+			cwd: mkdtempSync(join(tmpdir(), "todo-string-final-report-")),
+			hasUI: false,
+			model: { reasoning: true, thinkingLevelMap: {} },
+			sessionManager: { getBranch: () => [] },
+			isIdle: () => true,
+			hasPendingMessages: () => false,
+		};
+		try {
+			extension(pi as any);
+			await pi.emit("session_start", {}, ctx);
+			const tool = pi.tools.get("todo");
+
+			await pi.emit("agent_start", {}, ctx);
+			await tool.execute("todo-1", { action: "create", subject: "Report results to user", thinking: "high" }, undefined, undefined, ctx);
+			await tool.execute("todo-2", { action: "update", id: 1, status: "in_progress", activeForm: "reporting results" }, undefined, undefined, ctx);
+
+			await pi.emit(
+				"agent_end",
+				{ messages: [{ role: "assistant", stopReason: "stop", content: "Done. Changed files: x. Verification: y." }] },
+				ctx,
+			);
+
+			expect(getTodos()).toEqual([]);
+			expect(pi.thinkingLevel).toBe("off");
+			expect(pi.setThinkingLevelCalls).toEqual(["high", "off"]);
 			expect(pi.sentMessages).toHaveLength(0);
 		} finally {
 			if (previousEnv === undefined) delete process.env.PI_TOOLS_SUITE_TODO_THINKING;

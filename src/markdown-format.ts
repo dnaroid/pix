@@ -8,12 +8,16 @@ import {
 
 export type RenderedMarkdownLine = {
 	text: string;
+	copyText?: string;
+	continuesOnNextLine?: boolean;
 	segments: readonly { start: number; end: number; bold: true }[];
 	heading?: boolean;
 };
 
 export type RenderedMarkdownTextLine = {
 	text: string;
+	copyText?: string;
+	continuesOnNextLine?: boolean;
 	segments?: readonly { start: number; end: number; bold: true }[] | undefined;
 	syntaxHighlight?: SyntaxLineHighlight | undefined;
 	heading?: boolean;
@@ -142,6 +146,8 @@ export function renderMarkdownTextLines(text: string, width: number, start = 0):
 		for (const wrapped of wrapRenderedMarkdownLine(markdownLine ?? { text: rawLine, segments: [] }, width)) {
 			lines.push({
 				text: wrapped.text,
+				...(wrapped.copyText === undefined ? {} : { copyText: wrapped.copyText }),
+				...(wrapped.continuesOnNextLine ? { continuesOnNextLine: true } : {}),
 				...(wrapped.segments.length > 0 ? { segments: wrapped.segments } : {}),
 				...(syntaxHighlight ? { syntaxHighlight } : {}),
 				...(isHeadingLine ? { heading: true } : {}),
@@ -186,8 +192,11 @@ function wrapRenderedMarkdownLine(line: RenderedMarkdownLine, width: number): Re
 	const safeWidth = Math.max(1, width);
 	if (stringDisplayWidth(line.text) <= safeWidth) return [line];
 
-	return wrapDisplayLineByWordsWithRanges(line.text, safeWidth).map((range) => ({
+	const ranges = wrapDisplayLineByWordsWithRanges(line.text, safeWidth);
+	return ranges.map((range, index) => ({
 		text: range.text,
+		copyText: line.text.slice(range.start, ranges[index + 1]?.start ?? range.end),
+		...(index < ranges.length - 1 ? { continuesOnNextLine: true } : {}),
 		segments: line.segments.flatMap((segment) => shiftSegmentToRange(segment, range.start, range.end)),
 	}));
 }

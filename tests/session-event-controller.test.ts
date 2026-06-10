@@ -208,6 +208,53 @@ describe("AppSessionEventController", () => {
 		assert.equal(entries[2]?.kind === "assistant" ? entries[2].text : undefined, "After tool");
 	});
 
+	it("preserves whitespace-only assistant deltas after visible text", () => {
+		const entries: Entry[] = [];
+		const controller = createController(entries);
+
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "text_delta", delta: "и" },
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "text_delta", delta: " " },
+		} as unknown as AgentSessionEvent);
+
+		assert.equal(entries.length, 1);
+		assert.equal(entries[0]?.kind === "assistant" ? entries[0].text : undefined, "и ");
+
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "text_delta", delta: "ломало" },
+		} as unknown as AgentSessionEvent);
+
+		assert.equal(entries[0]?.kind === "assistant" ? entries[0].text : undefined, "и ломало");
+	});
+
+	it("does not drop a visible assistant entry trailing space when flushing before tools", () => {
+		const entries: Entry[] = [];
+		const controller = createController(entries);
+
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "text_delta", delta: "Before" },
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "text_delta", delta: " " },
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "tool_execution_start",
+			toolCallId: "call-1",
+			toolName: "shell",
+			args: {},
+		} as unknown as AgentSessionEvent);
+
+		assert.equal(entries[0]?.kind === "assistant" ? entries[0].text : undefined, "Before ");
+		assert.equal(entries[1]?.kind, "tool");
+	});
+
 	it("bounds appended conversation entries by pruning the oldest edge", () => {
 		const entries: Entry[] = [];
 		const deletedEntryIds: string[] = [];

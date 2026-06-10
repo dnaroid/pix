@@ -260,12 +260,13 @@ export class AppTabsController {
 		this.replaceTabs(restoredTabs, desiredPath);
 		this.restorePersistedInputStates(saved);
 		this.restorePersistedDeferredUserMessages(saved);
-		this.scheduleRestoredTabTitleRefresh(saved.tabs.map((tab) => tab.path));
+		const restoredSessionPaths = saved.tabs.map((tab) => tab.path);
 		if (explicitSessionPath && currentPath) this.ensureCurrentSessionTab(runtime.session);
 
 		if (!desiredPath) {
 			this.clearStartupTabPlaceholders();
 			await this.saveTabs();
+			this.scheduleRestoredTabTitleRefresh(restoredSessionPaths);
 			this.scheduleProjectSessionRetention();
 			this.scheduleTabPrewarm();
 			return;
@@ -284,6 +285,7 @@ export class AppTabsController {
 				this.storeActiveRuntime(runtime);
 				this.clearStartupTabPlaceholders();
 				await this.saveTabs();
+				this.scheduleRestoredTabTitleRefresh(restoredSessionPaths);
 				this.scheduleProjectSessionRetention();
 				return;
 			}
@@ -296,6 +298,7 @@ export class AppTabsController {
 		this.scheduleProjectSessionRetention();
 		this.scheduleTabPrewarm();
 		await this.loadActiveSessionHistory(restoredRuntime);
+		this.scheduleRestoredTabTitleRefresh(restoredSessionPaths);
 	}
 
 	async openNewTab(): Promise<void> {

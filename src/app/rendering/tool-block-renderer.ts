@@ -174,7 +174,13 @@ function renderToolBodyLines(
 			? wrapAnsiStyledDisplayLine(ansiLine, bodyWidth)
 			: wrapBodyLine(displayLine, bodyWidth).map((wrapped) => ({ text: wrapped, segments: [] as StyledSegment[] }));
 		for (const [wrapIndex, wrapped] of wrappedLines.entries()) {
-			const line: RenderedLine = { text: `  ${wrapped.text}`, target, colorOverride: color };
+			const line: RenderedLine = {
+				text: `  ${wrapped.text}`,
+				copyText: `  ${wrapped.text}`,
+				...(wrapIndex < wrappedLines.length - 1 ? { continuesOnNextLine: true } : {}),
+				target,
+				colorOverride: color,
+			};
 			if (diffStyle) {
 				const segment: StyledSegment = { start: 2, end: line.text.length, foreground: diffStyle.foreground };
 				if (diffStyle.bold != null) segment.bold = diffStyle.bold;

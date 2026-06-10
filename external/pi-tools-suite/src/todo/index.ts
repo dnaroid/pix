@@ -197,12 +197,13 @@ export default function (pi: ExtensionAPI) {
 		setter.call(pi, level);
 	}
 
-	function isCompletedAssistantReply(message: AgentMessageLike | undefined): boolean {
-		if (message?.role !== "assistant") return false;
-		if (message.stopReason === "aborted" || message.stopReason === "error" || message.stopReason === "length") return false;
-		if (!Array.isArray(message.content)) return false;
-		return message.content.some((block) => typeof (block as { type?: unknown }).type === "string");
-	}
+function isCompletedAssistantReply(message: AgentMessageLike | undefined): boolean {
+	if (message?.role !== "assistant") return false;
+	if (message.stopReason === "aborted" || message.stopReason === "error" || message.stopReason === "length") return false;
+	if (typeof message.content === "string") return message.content.trim().length > 0;
+	if (!Array.isArray(message.content)) return false;
+	return message.content.some((block) => typeof (block as { type?: unknown }).type === "string");
+}
 
 	function hasCompletedAssistantReply(messages: readonly unknown[] | undefined): boolean {
 		if (!Array.isArray(messages)) return false;

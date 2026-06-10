@@ -4,6 +4,12 @@ import type { Theme } from "../../theme.js";
 import { APP_ICONS } from "../icons.js";
 import type { ToolStatusEntry } from "../types.js";
 
+export type WrappedTextLine = {
+	text: string;
+	copyText: string;
+	continuesOnNextLine?: boolean;
+};
+
 const LSP_DIAGNOSTIC_ICON = "\u{f0026}";
 
 export function sanitizeText(text: string): string {
@@ -95,6 +101,16 @@ export function wrapLine(text: string, width: number): string[] {
 export function wrapText(text: string, width: number): string[] {
 	const lines = sanitizeText(text).split("\n");
 	return lines.flatMap((line) => wrapLine(line, width));
+}
+
+export function wrapTextLines(text: string, width: number): WrappedTextLine[] {
+	return sanitizeText(text)
+		.split("\n")
+		.flatMap((line) => wrapDisplayLine(line, width).map((wrapped, index, wrappedLines) => ({
+			text: wrapped,
+			copyText: wrapped,
+			...(index < wrappedLines.length - 1 ? { continuesOnNextLine: true } : {}),
+		})));
 }
 
 export function padOrTrimPlain(text: string, width: number): string {

@@ -925,19 +925,20 @@ export class AppMouseController {
 		const width = this.conversationArea()?.viewportColumns ?? this.host.terminalColumns();
 		const count = range.end.line - range.start.line + 1;
 		const renderedLines = this.host.conversationViewport().slice(width, range.start.line, count);
-		const lines: string[] = [];
+		let copiedText = "";
 
 		for (let index = 0; index < count; index += 1) {
 			const rendered = renderedLines[index];
-			const text = rendered?.text ?? "";
+			const lineText = rendered?.text ?? "";
 			const line = range.start.line + index;
 			const startColumn = line === range.start.line ? range.start.x : 1;
-			const endColumn = line === range.end.line ? range.end.x : text.length + 1;
-			const lineText = sliceByDisplayColumns(text, startColumn, endColumn);
-			lines.push(lineText.trimEnd());
+			const endColumn = line === range.end.line ? range.end.x : lineText.length + 1;
+			const selectedLine = selectedConversationLineText(rendered, lineText, startColumn, endColumn);
+			copiedText += selectedLine;
+			if (!(rendered?.continuesOnNextLine)) copiedText += "\n";
 		}
 
-		return lines.join("\n").replace(/\s+$/u, "");
+		return copiedText.replace(/\s+$/u, "");
 	}
 
 	private conversationPointFromMouse(event: MouseEvent, clampToViewport: boolean): { conversation: ConversationSelectionPoint; screen: ScreenPoint } | undefined {
@@ -1070,6 +1071,17 @@ export class AppMouseController {
 		};
 		selection.moved = true;
 	}
+}
+
+function selectedConversationLineText(
+	rendered: RenderedLine | undefined,
+	text: string,
+	startColumn: number,
+	endColumn: number,
+): string {
+	const selectsWholeLine = startColumn <= 1 && endColumn >= text.length + 1;
+	if (selectsWholeLine && rendered?.copyText !== undefined) return rendered.copyText;
+	return sliceByDisplayColumns(text, startColumn, endColumn).trimEnd();
 }
 
 function orderedConversationSelection(anchor: ConversationSelectionPoint, current: ConversationSelectionPoint): { start: ConversationSelectionPoint; end: ConversationSelectionPoint } {

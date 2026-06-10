@@ -3,7 +3,7 @@ import { renderMarkdownTextLines } from "../../markdown-format.js";
 import type { Theme } from "../../theme.js";
 import { attachImageClickTargets } from "../screen/image-click-targets.js";
 import { APP_ICONS } from "../icons.js";
-import { horizontalPaddingLayout, padHorizontalText, wrapText } from "./render-text.js";
+import { horizontalPaddingLayout, padHorizontalText, wrapTextLines } from "./render-text.js";
 import { renderConversationShellEntry } from "./conversation-shell-renderer.js";
 import { renderConversationToolEntry, renderThinkingEntry } from "./conversation-tool-renderer.js";
 import type { Entry, RenderedLine, StyledSegment } from "../types.js";
@@ -47,20 +47,28 @@ export function renderConversationEntry(entry: Entry, width: number, options: Co
 	});
 	const userMessageLines = (userEntry: Extract<Entry, { kind: "user" }>): RenderedLine[] => {
 		const lines = renderMarkdownTextLines(userEntry.text, userContentWidth, userContentLeft).map((line) =>
-			userLine(line.text, userEntry.id, line.syntaxHighlight, line.segments),
+			({
+				...userLine(line.text, userEntry.id, line.syntaxHighlight, line.segments),
+				...(line.copyText === undefined ? {} : { copyText: line.copyText }),
+				...(line.continuesOnNextLine ? { continuesOnNextLine: true } : {}),
+			}),
 		);
 
 		return attachImageClickTargets(lines, userEntry.id, userEntry.images, { foreground: options.colors.info, underline: true });
 	};
 	const queuedMessageLines = (queuedEntry: Extract<Entry, { kind: "queued" }>): RenderedLine[] => {
 		const icon = queuedEntry.queueSource === "deferred" ? APP_ICONS.pause : APP_ICONS.timerSand;
-		const contentLines = wrapText(`${icon} ${queuedEntry.text}`, width);
-		return contentLines.map((text, index) => queuedLine(text, queuedEntry.id, index === 0 ? [{ start: 0, end: icon.length, foreground: options.colors.info }] : undefined));
+		const contentLines = wrapTextLines(`${icon} ${queuedEntry.text}`, width);
+		return contentLines.map((line, index) => ({
+			...queuedLine(line.text, queuedEntry.id, index === 0 ? [{ start: 0, end: icon.length, foreground: options.colors.info }] : undefined),
+			copyText: line.copyText,
+			...(line.continuesOnNextLine ? { continuesOnNextLine: true } : {}),
+		}));
 	};
 
 	switch (entry.kind) {
 		case "system":
-			return wrapText(`system: ${entry.text}`, width).map((text) => ({ text, variant: "muted" as const }));
+			return wrapTextLines(`system: ${entry.text}`, width).map((line) => ({ text: line.text, copyText: line.copyText, ...(line.continuesOnNextLine ? { continuesOnNextLine: true } : {}), variant: "muted" as const }));
 		case "user":
 			return userMessageLines(entry);
 		case "queued":
@@ -70,13 +78,13 @@ export function renderConversationEntry(entry: Entry, width: number, options: Co
 		case "custom":
 			return renderCustomEntry(entry, width);
 		case "session-aborted":
-			return wrapText(entry.text, width).map((text) => ({ text, variant: "error" as const }));
+			return wrapTextLines(entry.text, width).map((line) => ({ text: line.text, copyText: line.copyText, ...(line.continuesOnNextLine ? { continuesOnNextLine: true } : {}), variant: "error" as const }));
 		case "shell":
 			return renderConversationShellEntry(entry, width, options);
 		case "thinking":
 			return renderThinkingEntry(entry, width, options);
 		case "error":
-			return wrapText(`error: ${entry.text}`, width).map((text) => ({ text, variant: "error" as const }));
+			return wrapTextLines(`error: ${entry.text}`, width).map((line) => ({ text: line.text, copyText: line.copyText, ...(line.continuesOnNextLine ? { continuesOnNextLine: true } : {}), variant: "error" as const }));
 		case "tool":
 			return renderConversationToolEntry(entry, width, options);
 	}
@@ -84,8 +92,10 @@ export function renderConversationEntry(entry: Entry, width: number, options: Co
 
 function renderCustomEntry(entry: Extract<Entry, { kind: "custom" }>, width: number): RenderedLine[] {
 	const label = `[${entry.customType}]`;
-	return wrapText(`${label}\n${entry.text}`, width).map((text, index) => ({
-		text,
+	return wrapTextLines(`${label}\n${entry.text}`, width).map((line, index) => ({
+		text: line.text,
+		copyText: line.copyText,
+		...(line.continuesOnNextLine ? { continuesOnNextLine: true } : {}),
 		variant: index === 0 ? "accent" as const : "normal" as const,
 	}));
 }
@@ -105,6 +115,8 @@ function renderAssistantLines(text: string, width: number, options: Conversation
 		const allSegments = headingSegment ? [headingSegment, ...existingSegments] : existingSegments;
 		lines.push({
 			text: padHorizontalText(line.text, width),
+			...(line.copyText === undefined ? {} : { copyText: line.copyText }),
+			...(line.continuesOnNextLine ? { continuesOnNextLine: true } : {}),
 			colorOverride: options.colors.assistantForeground,
 			backgroundOverride: options.colors.assistantMessageBackground,
 			...(allSegments.length > 0 ? { segments: allSegments } : {}),

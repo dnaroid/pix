@@ -167,7 +167,7 @@ function appendWorkflowReminder(text: string, op: Op, state: TaskState): string 
 	}
 	if (hasInProgress) {
 		lines.push(
-			"Reminder: before you stop, update any finished todo items to completed. Treat the final user-facing report step like any other todo: once it is done, mark it completed immediately.",
+			"Reminder: before your final response, update any finished todo items to completed. Treat the final user-facing report step like any other todo: mark it completed immediately before sending the report.",
 		);
 	}
 	return lines.join("\n\n");
