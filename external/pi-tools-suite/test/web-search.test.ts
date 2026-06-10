@@ -1,21 +1,7 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import * as childProcess from "node:child_process";
 
 const spawnCalls: Array<{ command: string; args: string[]; options: Record<string, unknown> }> = [];
-
-mock.module("node:child_process", () => ({
-	...childProcess,
-	spawn: (command: string, args: string[], options: Record<string, unknown>) => {
-		if (command !== "ollama") {
-			return childProcess.spawn(command, args, options as childProcess.SpawnOptions);
-		}
-		spawnCalls.push({ command, args, options });
-		return {
-			on: () => undefined,
-			unref: () => undefined,
-		};
-	},
-}));
 
 type RegisteredTool = {
 	name: string;
@@ -37,7 +23,20 @@ function restoreEnv(name: "OLLAMA_HOST" | "PI_WEB_SEARCH_TIMEOUT_MS" | "PI_WEB_S
 }
 
 async function registeredTools() {
-	const { default: webSearch } = await import("../src/web-search/index.js");
+	const { __setSpawnForTests, default: webSearch } = await import("../src/web-search/index.js");
+	__setSpawnForTests(((command: string, ...rest: any[]) => {
+		const args = Array.isArray(rest[0]) ? [...rest[0]] : [];
+		const options = (Array.isArray(rest[0]) ? rest[1] : rest[0]) as childProcess.SpawnOptions | undefined;
+		if (command !== "ollama") {
+			if (args.length > 0) return options === undefined ? childProcess.spawn(command, args) : childProcess.spawn(command, args, options);
+			return options === undefined ? childProcess.spawn(command) : childProcess.spawn(command, options);
+		}
+		spawnCalls.push({ command, args, options: (options ?? {}) as Record<string, unknown> });
+		return {
+			on: () => undefined,
+			unref: () => undefined,
+		} as unknown as ReturnType<typeof childProcess.spawn>;
+	}) as typeof childProcess.spawn);
 	const tools: RegisteredTool[] = [];
 	webSearch({ registerTool: (tool: RegisteredTool) => tools.push(tool) } as never);
 	return Object.fromEntries(tools.map((tool) => [tool.name, tool])) as Record<"web_search" | "web_fetch", RegisteredTool>;
@@ -59,12 +58,14 @@ async function expectRejectsWithMessage(promise: Promise<unknown>, expectedMessa
 	throw new Error(`Expected promise to reject with ${expectedMessagePart}`);
 }
 
-afterEach(() => {
+afterEach(async () => {
 	globalThis.fetch = originalFetch;
 	spawnCalls.length = 0;
 	restoreEnv("OLLAMA_HOST", originalOllamaHost);
 	restoreEnv("PI_WEB_SEARCH_TIMEOUT_MS", originalTimeout);
 	restoreEnv("PI_WEB_SEARCH_OLLAMA_STARTUP_TIMEOUT_MS", originalStartupTimeout);
+	const { __setSpawnForTests } = await import("../src/web-search/index.js");
+	__setSpawnForTests(undefined);
 });
 
 describe("web-search tools", () => {

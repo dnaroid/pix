@@ -6,6 +6,8 @@ import { Type } from "typebox";
 
 import { WEB_SEARCH_TOOL_DESCRIPTIONS } from "../tool-descriptions";
 
+let spawnImpl: typeof spawn = spawn;
+
 interface SearchResult {
 	title: string;
 	url: string;
@@ -104,7 +106,7 @@ function sleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
 function startOllama(host: string): void {
 	if (!isLoopbackHost(host) || STARTED_OLLAMA_PROCESSES.has(host)) return;
 
-	const child = spawn("ollama", ["serve"], {
+	const child = spawnImpl("ollama", ["serve"], {
 		detached: true,
 		stdio: "ignore",
 		env: { ...process.env, OLLAMA_HOST: host },
@@ -113,6 +115,10 @@ function startOllama(host: string): void {
 	STARTED_OLLAMA_PROCESSES.add(host);
 	child.on("error", () => STARTED_OLLAMA_PROCESSES.delete(host));
 	child.unref();
+}
+
+export function __setSpawnForTests(nextSpawn: typeof spawn | undefined): void {
+	spawnImpl = nextSpawn ?? spawn;
 }
 
 async function waitForOllama(host: string, timeoutMs: number, signal: AbortSignal | undefined): Promise<void> {
