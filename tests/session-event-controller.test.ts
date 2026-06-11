@@ -208,7 +208,7 @@ describe("AppSessionEventController", () => {
 		assert.equal(entries[2]?.kind === "assistant" ? entries[2].text : undefined, "After tool");
 	});
 
-	it("preserves whitespace-only assistant deltas after visible text", () => {
+	it("holds whitespace-only assistant deltas until more text arrives", () => {
 		const entries: Entry[] = [];
 		const controller = createController(entries);
 
@@ -222,7 +222,7 @@ describe("AppSessionEventController", () => {
 		} as unknown as AgentSessionEvent);
 
 		assert.equal(entries.length, 1);
-		assert.equal(entries[0]?.kind === "assistant" ? entries[0].text : undefined, "и ");
+		assert.equal(entries[0]?.kind === "assistant" ? entries[0].text : undefined, "и");
 
 		controller.handleSessionEvent({
 			type: "message_update",
@@ -230,6 +230,26 @@ describe("AppSessionEventController", () => {
 		} as unknown as AgentSessionEvent);
 
 		assert.equal(entries[0]?.kind === "assistant" ? entries[0].text : undefined, "и ломало");
+	});
+
+	it("flushes held assistant whitespace on final update", () => {
+		const entries: Entry[] = [];
+		const controller = createController(entries);
+
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "text_delta", delta: "done" },
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "text_delta", delta: " " },
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "done" },
+		} as unknown as AgentSessionEvent);
+
+		assert.equal(entries[0]?.kind === "assistant" ? entries[0].text : undefined, "done ");
 	});
 
 	it("does not drop a visible assistant entry trailing space when flushing before tools", () => {

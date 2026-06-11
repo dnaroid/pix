@@ -164,7 +164,7 @@ describe("AppTabsController", () => {
 			(runtime.session as { sessionName?: string }).sessionName = "Generated title";
 		}, 20);
 
-		await new Promise((resolve) => setTimeout(resolve, 180));
+		await waitFor(() => tabs.tabItems[0]?.title === "Generated title");
 
 		assert.equal(tabs.tabItems[0]?.title, "Generated title");
 		assert.ok(renderCount > 0);
@@ -220,7 +220,7 @@ describe("AppTabsController", () => {
 		await controller.switchToTab("tab-2");
 		assert.equal(historyLoadCount, 1);
 
-		await new Promise((resolve) => setTimeout(resolve, 220));
+		await waitFor(() => historyLoadCount >= 2, 1_500);
 
 		assert.ok(historyLoadCount >= 2);
 	});
@@ -1152,7 +1152,7 @@ describe("AppTabsController", () => {
 
 		assert.equal(controller.tabs()[0]?.title, "session 019e7d3f");
 
-		await new Promise((resolve) => setTimeout(resolve, 10));
+		await waitFor(() => controller.tabs()[0]?.title === "Restored real title");
 
 		const tab = controller.tabs()[0];
 		assert.equal(tab?.title, "Restored real title");
@@ -1939,4 +1939,12 @@ function submittedMessage(text: string): SubmittedUserMessage {
 		displayText: text,
 		images: [],
 	};
+}
+
+async function waitFor(predicate: () => boolean, timeoutMs = 500): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	while (!predicate()) {
+		if (Date.now() > deadline) throw new Error("timed out waiting for predicate");
+		await new Promise((resolve) => setTimeout(resolve, 5));
+	}
 }

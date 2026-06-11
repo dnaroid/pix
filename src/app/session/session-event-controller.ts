@@ -435,6 +435,10 @@ export class AppSessionEventController {
 
 		if (!this.assistantTextBuffer) return visibleText;
 
+		if (!final && shouldHoldAssistantStreamWhitespaceTail(this.assistantTextBuffer, this.hasVisibleAssistantText(visibleText))) {
+			return visibleText;
+		}
+
 		if (shouldHoldAssistantStreamTail(this.assistantTextBuffer, this.hasVisibleAssistantText(visibleText))) {
 			if (final) this.assistantTextBuffer = "";
 			return visibleText;
@@ -519,6 +523,10 @@ function shouldDropAssistantStreamLine(line: string, hasVisibleText: boolean): b
 function shouldHoldAssistantStreamTail(text: string, hasVisibleText: boolean): boolean {
 	if (text.trim().length === 0) return !hasVisibleText;
 	return isPotentialDcpMetadataLine(text);
+}
+
+function shouldHoldAssistantStreamWhitespaceTail(text: string, hasVisibleText: boolean): boolean {
+	return hasVisibleText && text.trim().length === 0;
 }
 
 function isHiddenMarkdownMetadataLine(line: string): boolean {
