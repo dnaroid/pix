@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { buildForkTitleInput, fallbackSessionTitleFromInput, firstUserMessageText } from "../extensions/session-title/index.js";
+import sessionTitle, { buildForkTitleInput, fallbackSessionTitleFromInput, firstUserMessageText } from "../extensions/session-title/index.js";
 
 describe("session-title extension", () => {
 	it("finds text from the first existing user message", () => {
@@ -78,6 +78,53 @@ describe("session-title extension", () => {
 			"Fix broken title retries now please",
 		);
 	});
+
+	it("does not generate a missing title from later prompts in an existing unnamed session", async () => {
+		await withSessionTitleDisabled(async () => {
+			const branch = [
+				{ type: "message", message: { role: "user", content: [{ type: "text", text: "Original first request" }] } },
+			];
+			const { handlers, setSessionNameCalls } = createExtensionHarness({ branch, sessionName: undefined, sessionId: "session-existing" });
+
+			sessionTitle(handlers.api);
+			await handlers.session_start?.({ type: "session_start", reason: "resume" }, handlers.ctx);
+			await handlers.input?.({ text: "A much later follow-up prompt", source: "user" }, handlers.ctx);
+
+			assert.deepEqual(setSessionNameCalls, []);
+		});
+	});
+
+	it("generates a fallback title from the very first prompt in a new session", async () => {
+		await withSessionTitleDisabled(async () => {
+			const { handlers, setSessionNameCalls } = createExtensionHarness({ branch: [], sessionName: undefined, sessionId: "session-new" });
+
+			sessionTitle(handlers.api);
+			await handlers.session_start?.({ type: "session_start", reason: "new" }, handlers.ctx);
+			await handlers.input?.({ text: "Fix delayed session title refresh after startup", source: "user" }, handlers.ctx);
+
+			assert.deepEqual(setSessionNameCalls, ["Fix delayed session title refresh after startup"]);
+		});
+	});
+
+	it("still regenerates the title from the first prompt after a fork", async () => {
+		await withSessionTitleDisabled(async () => {
+			const branch = [
+				{ type: "message", message: { role: "user", content: [{ type: "text", text: "Parent session request" }] } },
+			];
+			const { handlers, setSessionNameCalls } = createExtensionHarness({
+				branch,
+				sessionName: "Parent session title",
+				sessionId: "session-fork",
+			});
+
+			sessionTitle(handlers.api);
+			await handlers.session_start?.({ type: "session_start", reason: "fork" }, handlers.ctx);
+			await handlers.input?.({ text: "Investigate crash in fork", source: "user" }, handlers.ctx);
+
+			assert.equal(setSessionNameCalls.length, 1);
+			assert.notEqual(setSessionNameCalls[0], "Parent session title");
+		});
+	});
 });
 
 function fakeContext(branch: unknown[]): ExtensionContext {
@@ -86,4 +133,57 @@ function fakeContext(branch: unknown[]): ExtensionContext {
 			getBranch: () => branch,
 		},
 	} as unknown as ExtensionContext;
+}
+
+async function withSessionTitleDisabled<T>(callback: () => Promise<T>): Promise<T> {
+	const previous = process.env.PI_SESSION_TITLE_ENABLED;
+	process.env.PI_SESSION_TITLE_ENABLED = "0";
+	try {
+		return await callback();
+	} finally {
+		if (previous === undefined) delete process.env.PI_SESSION_TITLE_ENABLED;
+		else process.env.PI_SESSION_TITLE_ENABLED = previous;
+	}
+}
+
+function createExtensionHarness(options: { branch: unknown[]; sessionName: string | undefined; sessionId: string }) {
+	const handlers: Record<string, ((event: unknown, ctx: ExtensionContext) => unknown | Promise<unknown>) | undefined> = {};
+	const setSessionNameCalls: string[] = [];
+	let sessionName = options.sessionName;
+	const ctx = {
+		cwd: process.cwd(),
+		hasUI: false,
+		sessionManager: {
+			getBranch: () => options.branch,
+			getSessionId: () => options.sessionId,
+			getSessionName: () => sessionName,
+			getHeader: () => undefined,
+			getSessionDir: () => process.cwd(),
+		},
+	} as unknown as ExtensionContext;
+
+	const api = {
+		on(event: string, handler: (event: unknown, ctx: ExtensionContext) => unknown | Promise<unknown>) {
+			handlers[event] = handler;
+		},
+		getSessionName: () => sessionName,
+		setSessionName: (name: string) => {
+			sessionName = name;
+			setSessionNameCalls.push(name);
+		},
+	} as const;
+
+	return {
+		handlers: {
+			api: api as never,
+			ctx,
+			get session_start() {
+				return handlers.session_start;
+			},
+			get input() {
+				return handlers.input;
+			},
+		},
+		setSessionNameCalls,
+	};
 }

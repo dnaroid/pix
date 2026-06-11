@@ -70,6 +70,10 @@ export function firstUserMessageText(ctx: ExtensionContext): string | undefined 
 	return undefined;
 }
 
+function hasExistingUserMessage(ctx: ExtensionContext): boolean {
+	return firstUserMessageText(ctx) !== undefined;
+}
+
 export function fallbackSessionTitleFromInput(input: string, maxTitleChars: number): string | undefined {
 	const normalized = input
 		.replace(/[\t\r\n]+/gu, " ")
@@ -371,24 +375,6 @@ export default function sessionTitle(pi: ExtensionAPI) {
 		})();
 	}
 
-	function primeTitleGenerationFromExistingSession(ctx: ExtensionContext, currentConfig: SessionTitleConfig): void {
-		if (currentSessionName(ctx)) return;
-
-		const input = firstUserMessageText(ctx);
-		if (!input) return;
-		if (!currentConfig.enabled) {
-			applyFallbackSessionTitle(ctx, currentConfig, input);
-			return;
-		}
-
-		pendingGeneration = {
-			sessionId: ctx.sessionManager.getSessionId(),
-			input: truncateInput(input, currentConfig.maxInputChars),
-			attempts: 0,
-		};
-		startTitleGeneration(ctx, currentConfig);
-	}
-
 	function isSameSessionPath(left: string | undefined, right: string | undefined): boolean {
 		if (!left || !right) return false;
 		if (left === right) return true;
@@ -447,7 +433,6 @@ export default function sessionTitle(pi: ExtensionAPI) {
 		await prepareForkTitleState(event, ctx);
 		refreshSessionUi(ctx, { force: true });
 		scheduleSessionUiRefresh(ctx);
-		if (!forkTitleState) primeTitleGenerationFromExistingSession(ctx, config);
 	});
 
 	pi.on("session_shutdown", async () => {
@@ -480,6 +465,10 @@ export default function sessionTitle(pi: ExtensionAPI) {
 		sessionId = currentSessionId;
 		const currentName = currentSessionName(ctx);
 		const activeForkTitleState = forkTitleState?.sessionId === currentSessionId ? forkTitleState : undefined;
+		if (!activeForkTitleState && hasExistingUserMessage(ctx)) {
+			forkTitleState = undefined;
+			return { action: "continue" as const };
+		}
 		if (currentName && (!activeForkTitleState || currentName !== activeForkTitleState.inheritedSessionName)) {
 			forkTitleState = undefined;
 			return { action: "continue" as const };
