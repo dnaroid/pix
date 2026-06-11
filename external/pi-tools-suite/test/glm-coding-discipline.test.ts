@@ -1,24 +1,26 @@
-import { describe, expect, mock, test } from "bun:test";
+import { afterEach, describe, expect, mock, test } from "bun:test";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const completeMock = mock(async () => ({
 	message: { role: "assistant", content: [{ type: "text", text: "ok" }], timestamp: Date.now() },
 	stopReason: "stop",
 }));
 
-const loadPiToolsSuiteConfigMock = mock((_modules?: unknown, _options?: unknown) => ({
-	lookupModel: "openai-codex/gpt-5.4-mini",
-}));
-
-mock.module("@earendil-works/pi-ai", () => ({ complete: completeMock }));
-mock.module("typebox", () => ({
-	Type: {
-		Object: (properties: any, options?: any) => ({ kind: "object", properties, options }),
-		Optional: (schema: any) => ({ kind: "optional", schema }),
-		String: (options?: any) => ({ kind: "string", options }),
-		Array: (items: any, options?: any) => ({ kind: "array", items, options }),
-	},
-}));
-mock.module("../src/config.js", () => ({ loadPiToolsSuiteConfig: loadPiToolsSuiteConfigMock }));
+function installBaseMocks(): void {
+	mock.module("@earendil-works/pi-ai", () => ({ complete: completeMock }));
+	mock.module("typebox", () => ({
+		Type: {
+			Object: (properties: any, options?: any) => ({ kind: "object", properties, options }),
+			Optional: (schema: any) => ({ kind: "optional", schema }),
+			String: (options?: any) => ({ kind: "string", options }),
+			Array: (items: any, options?: any) => ({ kind: "array", items, options }),
+			Number: (options?: any) => ({ kind: "number", options }),
+			Boolean: (options?: any) => ({ kind: "boolean", options }),
+		},
+	}));
+}
 
 class FakePi {
 	tools = new Map<string, any>();
@@ -32,8 +34,36 @@ class FakePi {
 	async emit(name: string, event: any, ctx: any) { return await this.handlers.get(name)?.(event, ctx); }
 }
 
+installBaseMocks();
+
+const tempDirs: string[] = [];
+const originalPiConfigDir = process.env.PI_CONFIG_DIR;
+
+function tempDir(): string {
+	const dir = mkdtempSync(join(tmpdir(), "glm-coding-discipline-"));
+	tempDirs.push(dir);
+	return dir;
+}
+
+function setPiConfigDirConfig(body: string): string {
+	const configDir = tempDir();
+	mkdirSync(configDir, { recursive: true });
+	writeFileSync(join(configDir, "pi-tools-suite.jsonc"), body);
+	process.env.PI_CONFIG_DIR = configDir;
+	return configDir;
+}
+
+afterEach(() => {
+	mock.clearAllMocks();
+	if (originalPiConfigDir === undefined) delete process.env.PI_CONFIG_DIR;
+	else process.env.PI_CONFIG_DIR = originalPiConfigDir;
+	for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
 describe("glm coding discipline", () => {
 	test("keeps lookup active only for GLM models", async () => {
+		setPiConfigDirConfig(`{ "lookupModel": "openai-codex/gpt-5.4-mini" }`);
+
 		const { default: register } = await import("../src/glm-coding-discipline/index.js");
 		const pi = new FakePi();
 		register(pi as any);
@@ -51,13 +81,11 @@ describe("glm coding discipline", () => {
 	});
 
 	test("does not register lookup when lookupModel is disabled", async () => {
-		loadPiToolsSuiteConfigMock.mockImplementation(() => ({ lookupModel: undefined }));
+		setPiConfigDirConfig(`{ "lookupModel": null }`);
+
 		const { default: register } = await import("../src/glm-coding-discipline/index.js");
 		const pi = new FakePi();
 		register(pi as any);
 		expect(pi.tools.has("lookup")).toBe(false);
-		loadPiToolsSuiteConfigMock.mockImplementation((_modules?: unknown, _options?: unknown) => ({
-			lookupModel: "openai-codex/gpt-5.4-mini",
-		}));
 	});
 });
