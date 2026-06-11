@@ -82,7 +82,6 @@ export async function decideUltraworkAuto(
 				maxRetries: routing.maxRetries,
 				maxTokens: Math.min(routing.maxTokens, 32),
 				signal,
-				temperature: 0,
 				timeoutMs: routing.timeoutMs,
 			},
 		);

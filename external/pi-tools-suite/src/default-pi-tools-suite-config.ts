@@ -23,7 +23,7 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
   },
   "asyncSubagents": {
     "defaultType": "quick",
-    "routing": { "enabled": true, "model": "zai/glm-4.5-air", "maxTaskChars": 1200, "maxTokens": 512, "maxRetries": 1, "temperature": 0, "timeoutMs": 12000, "debug": false },
+    "routing": { "enabled": true, "model": "zai/glm-4.5-air", "maxTaskChars": 1200, "maxTokens": 512, "maxRetries": 1, "timeoutMs": 12000, "debug": false },
     "presets": {
       "cheap": {
         "description": "Use cheap GLM/Gemini Flash models for text/code roles; keep vision on the enabled GPT vision model.",

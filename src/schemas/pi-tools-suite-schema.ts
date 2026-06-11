@@ -177,7 +177,6 @@ const SubagentRoutingConfig = Type.Object(
 		maxTaskChars: Type.Optional(Type.Number({ description: "Max task/scope characters sent to router.", minimum: 100 })),
 		maxTokens: Type.Optional(Type.Number({ description: "Max router response tokens.", minimum: 8 })),
 		maxRetries: Type.Optional(Type.Number({ description: "Router request retries.", minimum: 0 })),
-		temperature: Type.Optional(Type.Number({ description: "Router sampling temperature.", minimum: 0, maximum: 2 })),
 		timeoutMs: Type.Optional(Type.Number({ description: "Router request timeout in ms.", minimum: 1000 })),
 		debug: Type.Optional(Type.Boolean({ description: "Show routing debug warnings." })),
 	},

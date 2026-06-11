@@ -12,7 +12,6 @@ export interface SessionTitleConfig {
 	maxRetries: number;
 	generationAttempts: number;
 	retryDelayMs: number;
-	temperature: number;
 	timeoutMs: number;
 	terminalTitle: boolean;
 	terminalTitlePrefix: string;
@@ -29,7 +28,6 @@ const DEFAULT_CONFIG: SessionTitleConfig = {
 	maxRetries: 2,
 	generationAttempts: 3,
 	retryDelayMs: 3000,
-	temperature: 0.2,
 	timeoutMs: 12_000,
 	terminalTitle: true,
 	terminalTitlePrefix: "pi — ",
@@ -82,9 +80,6 @@ function mergeConfig(base: SessionTitleConfig, raw: Record<string, unknown>): Se
 	}
 	if (typeof raw.retryDelayMs === "number" && Number.isFinite(raw.retryDelayMs)) {
 		next.retryDelayMs = Math.max(250, Math.floor(raw.retryDelayMs));
-	}
-	if (typeof raw.temperature === "number" && Number.isFinite(raw.temperature)) {
-		next.temperature = Math.min(2, Math.max(0, raw.temperature));
 	}
 	if (typeof raw.timeoutMs === "number" && Number.isFinite(raw.timeoutMs)) {
 		next.timeoutMs = Math.max(1000, Math.floor(raw.timeoutMs));

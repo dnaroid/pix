@@ -221,7 +221,6 @@ async function generateSessionTitle(
 			maxRetries: config.maxRetries,
 			maxTokens: config.maxTokens,
 			signal,
-			temperature: config.temperature,
 			timeoutMs: config.timeoutMs,
 		},
 	);

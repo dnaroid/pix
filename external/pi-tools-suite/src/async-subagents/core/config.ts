@@ -37,8 +37,6 @@ export interface SubagentRoutingConfig {
 	maxTokens?: number;
 	/** Router complete() retries. */
 	maxRetries?: number;
-	/** Router sampling temperature. */
-	temperature?: number;
 	/** Router request timeout. */
 	timeoutMs?: number;
 	/** Show best-effort UI warnings when routing falls back. */
@@ -150,7 +148,6 @@ export const DEFAULT_ROUTING_CONFIG: ResolvedSubagentRoutingConfig = {
 	maxTaskChars: 1200,
 	maxTokens: 512,
 	maxRetries: 1,
-	temperature: 0,
 	timeoutMs: 12_000,
 	debug: false,
 };
@@ -522,8 +519,6 @@ function normalizeRoutingConfig(value: Record<string, unknown>): SubagentRouting
 	if (maxTokens !== undefined) routing.maxTokens = Math.max(8, Math.round(maxTokens));
 	const maxRetries = finiteNumber(value.maxRetries);
 	if (maxRetries !== undefined) routing.maxRetries = Math.max(0, Math.round(maxRetries));
-	const temperature = finiteNumber(value.temperature);
-	if (temperature !== undefined) routing.temperature = Math.min(2, Math.max(0, temperature));
 	const timeoutMs = finiteNumber(value.timeoutMs);
 	if (timeoutMs !== undefined) routing.timeoutMs = Math.max(1000, Math.round(timeoutMs));
 	return routing;

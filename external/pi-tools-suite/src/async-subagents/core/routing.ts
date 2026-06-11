@@ -80,7 +80,6 @@ export async function routeSubagentTasks(
 				maxRetries: routing.maxRetries,
 				maxTokens: routing.maxTokens,
 				signal,
-				temperature: routing.temperature,
 				timeoutMs: routing.timeoutMs,
 			},
 		);

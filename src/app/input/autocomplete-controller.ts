@@ -218,7 +218,6 @@ export async function completeInputWithPi(
 			maxTokens: requestModel.maxTokens,
 			...(parsedModel.thinkingLevel && parsedModel.thinkingLevel !== "off" ? { reasoning: parsedModel.thinkingLevel } : {}),
 			signal: requestSignal.signal,
-			temperature: 0.1,
 			timeoutMs,
 		});
 

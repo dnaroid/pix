@@ -419,12 +419,6 @@
               "description": "Router request retries.",
               "minimum": 0
             },
-            "temperature": {
-              "type": "number",
-              "description": "Router sampling temperature.",
-              "minimum": 0,
-              "maximum": 2
-            },
             "timeoutMs": {
               "type": "number",
               "description": "Router request timeout in ms.",
