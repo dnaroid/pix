@@ -72,7 +72,7 @@ export function renderConversationToolEntry(
 		collapsedBody: display.collapsedBody,
 		expandedText: display.expandedText,
 		syntaxHighlight: display.syntaxHighlight,
-	}, rule, width, options.colors, { superCompact: Boolean(options.superCompactTools) });
+	}, rule, width, options.colors, { superCompact: Boolean(options.superCompactTools), showGutter: true });
 	return attachImageClickTargets(lines, entry.id, entry.images, { foreground: options.colors.info, underline: true });
 }
 
@@ -98,7 +98,7 @@ export function renderThinkingEntry(
 		expandedText: compactExpandedText || "(empty)",
 		bodyWrap: "word",
 		syntaxHighlight: compactExpandedText ? markdownSyntaxHighlightsForText(compactExpandedText) : undefined,
-	}, rule, width, options.colors, { superCompact: Boolean(options.superCompactTools && !forceExpanded), backgroundOverride: options.colors.thinkingMessageBackground, skipHeaderBackground: true });
+	}, rule, width, options.colors, { superCompact: Boolean(options.superCompactTools && !forceExpanded), backgroundOverride: options.colors.thinkingMessageBackground, skipHeaderBackground: true, showGutter: false });
 }
 
 function trimTrailingBlankLines(text: string): string {
@@ -129,7 +129,7 @@ function renderTodoToolEntry(
 		output: body,
 		collapsedBody: body,
 		expandedText: body,
-	}, rule, width, options.colors, { superCompact: Boolean(options.superCompactTools) });
+	}, rule, width, options.colors, { superCompact: Boolean(options.superCompactTools), showGutter: true });
 }
 
 function todoDetailsText(details: TodoDetails): string {

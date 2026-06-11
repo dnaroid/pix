@@ -248,7 +248,10 @@ describe("renderConversationEntry", () => {
 		const imageLine = lines.find((line) => line.text.includes("[Image: image/png]"));
 
 		assert.deepEqual(imageLine?.imageTargets, [{ start: 2, end: 20, entryId: "tool-image", imageIndex: 0 }]);
-		assert.deepEqual(imageLine?.segments, [{ start: 2, end: 20, foreground: THEMES.dark.colors.info, underline: true }]);
+		assert.deepEqual(imageLine?.segments, [
+			{ start: 0, end: 1, foreground: THEMES.dark.colors.statusDotBase },
+			{ start: 2, end: 20, foreground: THEMES.dark.colors.info, underline: true },
+		]);
 	});
 
 	it("renders ANSI colors in expanded shell output as styled segments", () => {
@@ -265,8 +268,11 @@ describe("renderConversationEntry", () => {
 		}, 80, renderOptions);
 
 		const outputLine = lines.find((line) => line.text.includes("red ok"));
-		assert.equal(outputLine?.text, "  red ok");
-		assert.deepEqual(outputLine?.segments, [{ start: 2, end: 5, foreground: "#cd3131" }]);
+		assert.equal(outputLine?.text, "└ red ok");
+		assert.deepEqual(outputLine?.segments, [
+			{ start: 0, end: 1, foreground: THEMES.dark.colors.statusDotBase },
+			{ start: 2, end: 5, foreground: "#cd3131" },
+		]);
 	});
 
 	it("strips ANSI escapes from collapsed shell previews", () => {
@@ -282,7 +288,7 @@ describe("renderConversationEntry", () => {
 			status: "done",
 		}, 80, renderOptions);
 
-		assert(lines.some((line) => line.text === "  green"));
+		assert(lines.some((line) => line.text === "└ green"));
 		assert.doesNotMatch(lines.map((line) => line.text).join("\n"), /\x1b/u);
 	});
 
@@ -299,11 +305,17 @@ describe("renderConversationEntry", () => {
 			status: "done",
 		}, 8, renderOptions);
 
-		const outputLines = lines.filter((line) => line.text === "  abcdef" || line.text === "  ghi");
-		assert.deepEqual(outputLines.map((line) => line.text), ["  abcdef", "  ghi"]);
+		const outputLines = lines.filter((line) => line.text === "│ abcdef" || line.text === "└ ghi");
+		assert.deepEqual(outputLines.map((line) => line.text), ["│ abcdef", "└ ghi"]);
 		assert.deepEqual(outputLines.map((line) => line.segments), [
-			[{ start: 2, end: 8, foreground: "#cd3131" }],
-			[{ start: 2, end: 5, foreground: "#cd3131" }],
+			[
+				{ start: 0, end: 1, foreground: THEMES.dark.colors.statusDotBase },
+				{ start: 2, end: 8, foreground: "#cd3131" },
+			],
+			[
+				{ start: 0, end: 1, foreground: THEMES.dark.colors.statusDotBase },
+				{ start: 2, end: 5, foreground: "#cd3131" },
+			],
 		]);
 	});
 

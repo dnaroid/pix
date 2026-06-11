@@ -6,7 +6,10 @@ import { alertIconPrefixLength, hasToolLspDiagnosticsAfterMutation, lspDiagnosti
 import type { RenderedLine, StyledSegment } from "../types.js";
 import type { ToolBodyLineStyle, ToolHeaderSegment } from "../../tool-renderers/types.js";
 
-const TRUNCATED_PREVIEW_MARKER = "▶ ";
+const TRUNCATED_PREVIEW_MARKER = "… ";
+const TOOL_BODY_PREFIX = "  ";
+const TOOL_BODY_GUTTER_PREFIX = "│ ";
+const TOOL_BODY_END_PREFIX = "└ ";
 
 export type ToolBlockEntry = {
 	id: string;
@@ -31,6 +34,7 @@ export type ToolBlockRenderOptions = {
 	superCompact?: boolean;
 	backgroundOverride?: string;
 	skipHeaderBackground?: boolean;
+	showGutter?: boolean;
 };
 
 export function renderToolBlock(entry: ToolBlockEntry, rule: ResolvedToolRule, width: number, colors: Theme["colors"], options: ToolBlockRenderOptions = {}): RenderedLine[] {
@@ -49,6 +53,7 @@ export function renderToolBlock(entry: ToolBlockEntry, rule: ResolvedToolRule, w
 	const headerArgsWidth = width - stringDisplayWidth(headerPrefix) - 1;
 	const clippedHeaderArgs = headerArgsWidth > 0 ? sliceByDisplayWidth(headerArgs, headerArgsWidth) : "";
 	const target = { kind: "tool" as const, id: entry.id };
+	const showGutter = options.showGutter ?? true;
 	const header = clippedHeaderArgs ? `${headerPrefix} ${clippedHeaderArgs}` : headerPrefix;
 	const headerArgsStart = clippedHeaderArgs ? headerPrefix.length + 1 : header.length;
 
@@ -66,7 +71,7 @@ export function renderToolBlock(entry: ToolBlockEntry, rule: ResolvedToolRule, w
 	const headerLines: RenderedLine[] = [headerLine];
 
 	if (expanded) {
-		headerLines.push(...renderToolBodyLines(entry.expandedText, width, target, toolOutputColor, entry.bodyStyle, colors, entry.syntaxHighlight, entry.bodyWrap, hasLspDiagnostics, entry.bodyLineStyles, entry.preserveAnsi));
+		headerLines.push(...renderToolBodyLines(entry.expandedText, width, target, toolOutputColor, entry.bodyStyle, colors, entry.syntaxHighlight, entry.bodyWrap, hasLspDiagnostics, entry.bodyLineStyles, entry.preserveAnsi, showGutter));
 		if (options.skipHeaderBackground && headerLines.length > 1) {
 			applyBackground(headerLines.slice(1));
 		} else {
@@ -81,7 +86,7 @@ export function renderToolBlock(entry: ToolBlockEntry, rule: ResolvedToolRule, w
 	if (!body || rule.previewLines === 0) return headerLines;
 
 	if (!options.superCompact) {
-		headerLines.push(...renderCollapsedPreviewLines(entry, body, rule, width, target, toolOutputColor, colors, hasLspDiagnostics));
+		headerLines.push(...renderCollapsedPreviewLines(entry, body, rule, width, target, toolOutputColor, colors, hasLspDiagnostics, showGutter));
 		applyBackground(headerLines);
 		return headerLines;
 	}
@@ -117,8 +122,9 @@ function renderCollapsedPreviewLines(
 	color: string,
 	colors: Theme["colors"],
 	hasLspDiagnostics: boolean,
+	showGutter: boolean,
 ): RenderedLine[] {
-	const allLines = renderToolBodyLines(body, width, target, color, entry.bodyStyle, colors, undefined, entry.bodyWrap, hasLspDiagnostics, entry.bodyLineStyles, entry.preserveAnsi);
+	const allLines = renderToolBodyLines(body, width, target, color, entry.bodyStyle, colors, undefined, entry.bodyWrap, hasLspDiagnostics, entry.bodyLineStyles, entry.preserveAnsi, showGutter);
 	if (rule.previewLines >= allLines.length) return allLines;
 	const previewLines = rule.direction === "tail" ? allLines.slice(-rule.previewLines) : allLines.slice(0, rule.previewLines);
 	return markTruncatedPreviewLine(previewLines, rule.direction, colors.statusDotBase);
@@ -138,11 +144,17 @@ function markTruncatedPreviewLine(lines: RenderedLine[], direction: ResolvedTool
 	const markerIndex = direction === "tail" ? 0 : lines.length - 1;
 	return lines.map((line, index) => {
 		if (index !== markerIndex) return line;
+		const text = line.text.startsWith(TOOL_BODY_GUTTER_PREFIX)
+			? `${TRUNCATED_PREVIEW_MARKER}${line.text.slice(TOOL_BODY_GUTTER_PREFIX.length)}`
+			: line.text.startsWith(TOOL_BODY_PREFIX)
+				? `${TRUNCATED_PREVIEW_MARKER}${line.text.slice(TOOL_BODY_PREFIX.length)}`
+				: `${TRUNCATED_PREVIEW_MARKER}${line.text}`;
+		const existingSegments = (line.segments ?? []).filter((segment) => !(segment.start === 0 && segment.end === 1 && segment.foreground === markerColor));
 
 		return {
 			...line,
-			text: line.text.startsWith("  ") ? `${TRUNCATED_PREVIEW_MARKER}${line.text.slice(2)}` : `${TRUNCATED_PREVIEW_MARKER}${line.text}`,
-			segments: [{ start: 0, end: 1, foreground: markerColor }, ...(line.segments ?? [])],
+			text,
+			segments: [{ start: 0, end: 1, foreground: markerColor }, ...existingSegments],
 		};
 	});
 }
@@ -159,10 +171,16 @@ function renderToolBodyLines(
 	hasLspDiagnostics = false,
 	bodyLineStyles?: readonly ToolBodyLineStyle[] | undefined,
 	preserveAnsi = false,
+	showGutter = false,
 ): RenderedLine[] {
-	const bodyWidth = Math.max(1, width - 2);
+	const displayPrefix = showGutter ? TOOL_BODY_GUTTER_PREFIX : TOOL_BODY_PREFIX;
+	const prefixWidth = stringDisplayWidth(displayPrefix);
+	const bodyWidth = Math.max(1, width - prefixWidth);
 	const lines: RenderedLine[] = [];
 	const wrapBodyLine = bodyWrap === "word" ? wrapDisplayLineByWords : wrapLine;
+	const gutterSegment: StyledSegment | undefined = showGutter
+		? { start: 0, end: 1, foreground: colors.statusDotBase }
+		: undefined;
 	for (const [rawLineIndex, rawLine] of sanitizeToolBodyText(text, preserveAnsi).split("\n").entries()) {
 		const ansiLine = preserveAnsi ? ansiStyledLine(rawLine) : undefined;
 		const displayLine = ansiLine?.text ?? rawLine;
@@ -175,29 +193,55 @@ function renderToolBodyLines(
 			: wrapBodyLine(displayLine, bodyWidth).map((wrapped) => ({ text: wrapped, segments: [] as StyledSegment[] }));
 		for (const [wrapIndex, wrapped] of wrappedLines.entries()) {
 			const line: RenderedLine = {
-				text: `  ${wrapped.text}`,
-				copyText: `  ${wrapped.text}`,
+				text: `${displayPrefix}${wrapped.text}`,
+				copyText: `${TOOL_BODY_PREFIX}${wrapped.text}`,
 				...(wrapIndex < wrappedLines.length - 1 ? { continuesOnNextLine: true } : {}),
 				target,
 				colorOverride: color,
 			};
 			if (diffStyle) {
-				const segment: StyledSegment = { start: 2, end: line.text.length, foreground: diffStyle.foreground };
+				const segment: StyledSegment = { start: displayPrefix.length, end: line.text.length, foreground: diffStyle.foreground };
 				if (diffStyle.bold != null) segment.bold = diffStyle.bold;
-				line.segments = [segment];
+				line.segments = gutterSegment ? [gutterSegment, segment] : [segment];
 			} else if (lspDiagnosticStyle?.kind === "alert" && wrapIndex === 0) {
-				line.segments = [{ start: 2, end: 2 + lspDiagnosticStyle.length, foreground: colors.warning, bold: true }];
+				line.segments = [
+					...(gutterSegment ? [gutterSegment] : []),
+					{ start: displayPrefix.length, end: displayPrefix.length + lspDiagnosticStyle.length, foreground: colors.warning, bold: true },
+				];
 			} else if (lspDiagnosticStyle?.kind === "severity") {
-				line.segments = [{ start: 2, end: line.text.length, foreground: lspDiagnosticStyle.foreground }];
-			} else if (bodyLineStyle && line.text.length > 2) {
-				line.segments = [{ start: 2, end: line.text.length, ...bodyLineStyle }];
+				line.segments = [
+					...(gutterSegment ? [gutterSegment] : []),
+					{ start: displayPrefix.length, end: line.text.length, foreground: lspDiagnosticStyle.foreground },
+				];
+			} else if (bodyLineStyle && line.text.length > displayPrefix.length) {
+				line.segments = [
+					...(gutterSegment ? [gutterSegment] : []),
+					{ start: displayPrefix.length, end: line.text.length, ...bodyLineStyle },
+				];
 			} else if (lineSyntaxHighlight) {
 				const rawStart = wrapIndex === 0 ? lineSyntaxHighlight.startColumn ?? 0 : 0;
-				line.syntaxHighlight = { language: lineSyntaxHighlight.language, start: Math.min(line.text.length, 2 + rawStart) };
+				line.syntaxHighlight = { language: lineSyntaxHighlight.language, start: Math.min(line.text.length, displayPrefix.length + rawStart) };
+				if (gutterSegment) line.segments = [gutterSegment];
 			} else if (wrapped.segments.length > 0) {
-				line.segments = wrapped.segments.map((segment) => ({ ...segment, start: segment.start + 2, end: segment.end + 2 }));
+				line.segments = [
+					...(gutterSegment ? [gutterSegment] : []),
+					...wrapped.segments.map((segment) => ({
+						...segment,
+						start: segment.start + displayPrefix.length,
+						end: segment.end + displayPrefix.length,
+					})),
+				];
+			} else if (gutterSegment) {
+				line.segments = [gutterSegment];
 			}
 			lines.push(line);
+		}
+	}
+	if (showGutter && lines.length > 0) {
+		const lastLine = lines.at(-1);
+		if (!lastLine) return lines;
+		if (lastLine.text.startsWith(TOOL_BODY_GUTTER_PREFIX)) {
+			lastLine.text = `${TOOL_BODY_END_PREFIX}${lastLine.text.slice(TOOL_BODY_GUTTER_PREFIX.length)}`;
 		}
 	}
 	return lines;

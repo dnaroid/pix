@@ -7,6 +7,7 @@ import { renderToolBlock, type ToolBlockEntry } from "../src/app/rendering/tool-
 import { THEMES } from "../src/theme.js";
 
 const colors = THEMES.dark.colors;
+const gutterSegment = { start: 0, end: 1, foreground: colors.statusDotBase };
 
 const rule: ResolvedToolRule = {
 	previewLines: 10,
@@ -42,11 +43,12 @@ describe("renderToolBlock", () => {
 		const lines = renderToolBlock(toolEntry({ output, expandedText: output }), rule, 100, colors);
 
 		assert.deepEqual(lines[0]?.segments?.[0], { start: 0, end: APP_ICONS.alert.length, foreground: colors.error, bold: true });
-		assert.equal(lines[1]?.segments, undefined);
-		assert.deepEqual(lines[2]?.segments, [{ start: 2, end: 2 + APP_ICONS.alert.length, foreground: colors.warning, bold: true }]);
-		assert.deepEqual(lines[3]?.segments, [{ start: 2, end: lines[3]?.text.length, foreground: colors.error }]);
-		assert.deepEqual(lines[4]?.segments, [{ start: 2, end: lines[4]?.text.length, foreground: colors.warning }]);
-		assert.deepEqual(lines[5]?.segments, [{ start: 2, end: lines[5]?.text.length, foreground: colors.muted }]);
+		assert.deepEqual(lines[1]?.segments, [gutterSegment]);
+		assert.deepEqual(lines[2]?.segments, [gutterSegment, { start: 2, end: 2 + APP_ICONS.alert.length, foreground: colors.warning, bold: true }]);
+		assert.deepEqual(lines[3]?.segments, [gutterSegment, { start: 2, end: lines[3]?.text.length, foreground: colors.error }]);
+		assert.deepEqual(lines[4]?.segments, [gutterSegment, { start: 2, end: lines[4]?.text.length, foreground: colors.warning }]);
+		assert.deepEqual(lines[5]?.segments, [gutterSegment, { start: 2, end: lines[5]?.text.length, foreground: colors.muted }]);
+		assert.equal(lines[5]?.text.startsWith("└ "), true);
 	});
 
 	it("colors edit tool LSP status icon yellow for warning-only reports", () => {
@@ -73,17 +75,19 @@ describe("renderToolBlock", () => {
 		const lines = renderToolBlock(toolEntry({ toolName: "functions.write", output, expandedText: output }), rule, 100, colors);
 
 		assert.deepEqual(lines[0]?.segments?.[0], { start: 0, end: APP_ICONS.alert.length, foreground: colors.warning, bold: true });
-		assert.deepEqual(lines[2]?.segments, [{ start: 2, end: lines[2]?.text.length, foreground: colors.warning }]);
+		assert.deepEqual(lines[2]?.segments, [gutterSegment, { start: 2, end: lines[2]?.text.length, foreground: colors.warning }]);
 	});
 
-	it("marks truncated collapsed previews with a chevron in normal mode", () => {
+	it("marks truncated collapsed previews with an ellipsis in normal mode", () => {
 		const output = "one\ntwo\nthree";
 
 		const lines = renderToolBlock(toolEntry({ expanded: false, output, collapsedBody: output }), { ...rule, previewLines: 2 }, 100, colors);
 
 		assert.match(lines[0]?.text ?? "", /apply_patch/u);
-		assert.deepEqual(lines.slice(1).map((line) => line.text), ["  one", "▶ two"]);
-		assert.deepEqual(lines[2]?.segments, [{ start: 0, end: 1, foreground: colors.statusDotBase }]);
+		assert.deepEqual(lines.slice(1).map((line) => line.text), ["│ one", "… two"]);
+		assert.deepEqual(lines[2]?.segments, [
+			{ start: 0, end: 1, foreground: colors.statusDotBase },
+		]);
 	});
 
 	it("does not mark collapsed previews that fit within previewLines", () => {
@@ -91,7 +95,7 @@ describe("renderToolBlock", () => {
 
 		const lines = renderToolBlock(toolEntry({ expanded: false, output, collapsedBody: output }), { ...rule, previewLines: 2 }, 100, colors);
 
-		assert.deepEqual(lines.slice(1).map((line) => line.text), ["  one", "  two"]);
+		assert.deepEqual(lines.slice(1).map((line) => line.text), ["│ one", "└ two"]);
 	});
 
 	it("marks the first tail preview line when earlier output was truncated", () => {
@@ -99,8 +103,10 @@ describe("renderToolBlock", () => {
 
 		const lines = renderToolBlock(toolEntry({ expanded: false, output, collapsedBody: output }), { ...rule, direction: "tail", previewLines: 2 }, 100, colors);
 
-		assert.deepEqual(lines.slice(1).map((line) => line.text), ["▶ two", "  three"]);
-		assert.deepEqual(lines[1]?.segments, [{ start: 0, end: 1, foreground: colors.statusDotBase }]);
+		assert.deepEqual(lines.slice(1).map((line) => line.text), ["… two", "└ three"]);
+		assert.deepEqual(lines[1]?.segments, [
+			{ start: 0, end: 1, foreground: colors.statusDotBase },
+		]);
 	});
 
 	it("renders collapsed previews inline only in super-compact mode", () => {
@@ -111,7 +117,7 @@ describe("renderToolBlock", () => {
 		assert.equal(lines.length, 1);
 		assert.match(lines[0]?.text ?? "", /apply_patch .*one two/u);
 		assert.doesNotMatch(lines[0]?.text ?? "", /three/u);
-		const markerStart = lines[0]?.text.indexOf("▶") ?? -1;
+		const markerStart = lines[0]?.text.indexOf("…") ?? -1;
 		assert.ok(markerStart >= 0);
 		assert.ok(lines[0]?.segments?.some((segment) => segment.start === markerStart && segment.end === markerStart + 1 && segment.foreground === colors.statusDotBase));
 	});
@@ -136,8 +142,8 @@ describe("renderToolBlock", () => {
 
 		assert.deepEqual(lines.map((line) => line.text), [
 			`${APP_ICONS.checkCircle} apply_patch`,
-			"  body",
-			"  line",
+			"│ body",
+			"└ line",
 		]);
 		assert.doesNotMatch(lines[0]?.text ?? "", /preview/u);
 	});
@@ -151,7 +157,7 @@ describe("renderToolBlock", () => {
 		const lines = renderToolBlock(toolEntry({ toolName: "read", output, expandedText: output }), rule, 100, colors);
 
 		assert.equal(lines[0]?.segments?.[0]?.foreground, colors.success);
-		assert.equal(lines[2]?.segments, undefined);
+		assert.deepEqual(lines[2]?.segments, [gutterSegment]);
 	});
 
 	it("renders styled body line ranges", () => {
@@ -160,9 +166,20 @@ describe("renderToolBlock", () => {
 			bodyLineStyles: [{ startLine: 0, endLine: 2, color: "muted" }],
 		}), rule, 100, colors);
 
-		assert.deepEqual(lines[1]?.segments, [{ start: 2, end: lines[1]?.text.length, foreground: colors.muted }]);
-		assert.deepEqual(lines[2]?.segments, [{ start: 2, end: lines[2]?.text.length, foreground: colors.muted }]);
-		assert.equal(lines[4]?.segments, undefined);
+		assert.deepEqual(lines[1]?.segments, [gutterSegment, { start: 2, end: lines[1]?.text.length, foreground: colors.muted }]);
+		assert.deepEqual(lines[2]?.segments, [gutterSegment, { start: 2, end: lines[2]?.text.length, foreground: colors.muted }]);
+		assert.deepEqual(lines[4]?.segments, [gutterSegment]);
+		assert.equal(lines[4]?.text.startsWith("└ "), true);
+	});
+
+	it("uses the corner glyph only on the real end of output", () => {
+		const output = "one\ntwo\nthree";
+
+		const headLines = renderToolBlock(toolEntry({ expanded: false, output, collapsedBody: output }), { ...rule, previewLines: 2 }, 100, colors);
+		const tailLines = renderToolBlock(toolEntry({ expanded: false, output, collapsedBody: output }), { ...rule, direction: "tail", previewLines: 2 }, 100, colors);
+
+		assert.equal(headLines[2]?.text.startsWith("└ "), false);
+		assert.equal(tailLines[2]?.text.startsWith("└ "), true);
 	});
 
 	it("dims patch file headers without using warning color", () => {
@@ -177,8 +194,9 @@ describe("renderToolBlock", () => {
 		const updateLine = lines.find((line) => line.text.includes("*** Update File:"));
 		assert.ok(updateLine);
 
-		assert.deepEqual(updateLine?.segments, [{ start: 2, end: updateLine.text.length, foreground: colors.statusForeground, bold: true }]);
-		assert.notEqual(updateLine?.segments?.[0]?.foreground, colors.warning);
+		assert.deepEqual(updateLine?.segments, [gutterSegment, { start: 2, end: updateLine.text.length, foreground: colors.statusForeground, bold: true }]);
+		const updateForeground = updateLine?.segments?.find((segment) => segment.start === 2) as { foreground?: string } | undefined;
+		assert.notEqual(updateForeground?.foreground, colors.warning);
 	});
 
 	it("returns no lines for hidden tool rules", () => {
