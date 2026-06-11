@@ -40,6 +40,7 @@ const DEFAULT_LOOKUP_TIMEOUT_MS = 120_000;
 const MAX_IMAGE_BYTES = 16 * 1024 * 1024;
 const SILENCE_REMINDER_MIN_VIOLATION_GAP = 3;
 const SILENCE_REMINDER_MIN_MESSAGE_GAP = 12;
+const LOOKUP_TOOL_NAME = "lookup";
 
 const LOOKUP_TOOL_PARAMS = Type.Object(
 	{
@@ -187,16 +188,35 @@ export default function glmCodingDiscipline(pi: ExtensionAPI) {
 		pi.registerTool(createLookupTool());
 	}
 
+	function syncLookupToolAvailability(modelRef: string | undefined, cwd?: string): void {
+		const activeTools = typeof pi.getActiveTools === "function" ? pi.getActiveTools() : undefined;
+		if (!Array.isArray(activeTools)) return;
+
+		const lookupEnabled = Boolean(lookupModelFromConfig(cwd));
+		const shouldExposeLookup = lookupEnabled && isGlmModel(modelRef);
+		const hasLookup = activeTools.includes(LOOKUP_TOOL_NAME);
+
+		if (shouldExposeLookup === hasLookup) return;
+		if (typeof pi.setActiveTools !== "function") return;
+
+		const nextTools = shouldExposeLookup
+			? [...activeTools, LOOKUP_TOOL_NAME]
+			: activeTools.filter((tool: unknown) => tool !== LOOKUP_TOOL_NAME);
+		pi.setActiveTools([...new Set(nextTools)]);
+	}
+
 	maybeRegisterLookupTool(process.cwd());
 
 	pi.on("session_start", async (_event: unknown, ctx: unknown) => {
 		selectedModelRef = modelRefFromContext(ctx);
 		maybeRegisterLookupTool(contextCwd(ctx));
+		syncLookupToolAvailability(selectedModelRef, contextCwd(ctx));
 	});
 
 	pi.on("model_select", async (event: { model?: unknown }, ctx: unknown) => {
 		selectedModelRef = modelRefFromModel(event.model) ?? modelRefFromContext(ctx);
 		maybeRegisterLookupTool(contextCwd(ctx));
+		syncLookupToolAvailability(selectedModelRef, contextCwd(ctx));
 	});
 
 	pi.on("before_provider_request", async (event: { payload?: unknown }, ctx: unknown) => {
@@ -273,7 +293,7 @@ export function injectCodingDisciplineIntoPayload(payload: unknown, options: { l
 
 function createLookupTool() {
 	return {
-		name: "lookup",
+		name: LOOKUP_TOOL_NAME,
 		label: "Lookup",
 		description: [
 			"Ask the configured vision-capable lookup model to inspect recent image/screenshot context and answer a focused visual question.",
