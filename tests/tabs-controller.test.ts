@@ -170,6 +170,61 @@ describe("AppTabsController", () => {
 		assert.ok(renderCount > 0);
 	});
 
+	it("reloads history after switching back to a tab that finished in the background", async () => {
+		const activeRuntime = fakeRuntime("one", "/tmp/one.jsonl") as FakeAgentSessionRuntime;
+		const targetRuntime = fakeRuntime("two", "/tmp/two.jsonl") as FakeAgentSessionRuntime;
+		let currentRuntime: AgentSessionRuntime = activeRuntime;
+		let historyLoadCount = 0;
+		const controller = new AppTabsController({
+			options: { cwd: "/tmp", themeName: "dark", noSession: true } satisfies AppOptions,
+			blinkController: fakeBlinkController(),
+			runtime: () => currentRuntime,
+			createRuntimeForNewSession: async () => fakeRuntime("new", "/tmp/new.jsonl"),
+			createRuntimeForSession: async () => targetRuntime,
+			activateRuntime: async (runtime) => {
+				currentRuntime = runtime;
+			},
+			disposeRuntime: async () => {},
+			isRunning: () => true,
+			setStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			resetSessionView: () => {},
+			loadSessionHistory: () => {},
+			loadSessionHistoryAsync: async () => {
+				historyLoadCount += 1;
+				return true;
+			},
+			syncUserSessionEntryMetadata: () => {},
+			captureInputState: () => ({ text: "", cursor: 0 }),
+			restoreInputState: () => {},
+			addEntry: () => {},
+			showToast: () => {},
+			render: () => {},
+		});
+		const tabs = controller as unknown as {
+			tabItems: SessionTab[];
+			activeTabId: string | undefined;
+			setRuntimeForTab(tabId: string, runtime: AgentSessionRuntime): void;
+		};
+		tabs.tabItems.push(
+			{ id: "tab-1", title: "one", status: "active", sessionPath: "/tmp/one.jsonl" },
+			{ id: "tab-2", title: "two", status: "waiting", sessionPath: "/tmp/two.jsonl" },
+		);
+		tabs.activeTabId = "tab-1";
+		tabs.setRuntimeForTab("tab-1", activeRuntime);
+		tabs.setRuntimeForTab("tab-2", targetRuntime);
+
+		targetRuntime.emitSessionEvent({ type: "agent_end", messages: [], willRetry: false });
+
+		await controller.switchToTab("tab-2");
+		assert.equal(historyLoadCount, 1);
+
+		await new Promise((resolve) => setTimeout(resolve, 220));
+
+		assert.ok(historyLoadCount >= 2);
+	});
+
 	it("preserves draft input text and cursor per tab", async () => {
 		const activeRuntime = fakeRuntime("one", "/tmp/one.jsonl");
 		const targetRuntime = fakeRuntime("two", "/tmp/two.jsonl");

@@ -80,8 +80,10 @@ export class AppTabsController {
 	private readonly runtimeLoadsByTabId = new Map<string, Promise<AgentSessionRuntime | undefined>>();
 	private readonly runtimeSubscriptionsByTabId = new Map<string, { runtime: AgentSessionRuntime; session: AgentSession; unsubscribe: () => void }>();
 	private readonly runtimeRefreshTimersByTabId = new Map<string, Set<ReturnType<typeof setTimeout>>>();
+	private readonly historyReloadTimersByTabId = new Map<string, Set<ReturnType<typeof setTimeout>>>();
 	private readonly inputStatesByTabId = new Map<string, TabInputState>();
 	private readonly deferredUserMessagesByTabId = new Map<string, SubmittedUserMessage[]>();
+	private readonly tabIdsNeedingHistoryReload = new Set<string>();
 	private activeTabId: string | undefined;
 	private pendingActiveTabId: string | undefined;
 	private historyLoadGeneration = 0;
@@ -694,6 +696,7 @@ export class AppTabsController {
 		void this.saveTabs();
 		this.scheduleTabPrewarm();
 		await this.loadActiveSessionHistory(targetRuntime);
+		this.scheduleDelayedHistoryReload(target.id, targetRuntime);
 	}
 
 	async closeTab(tabId: string): Promise<void> {
@@ -896,6 +899,8 @@ export class AppTabsController {
 		this.runtimesByTabId.delete(tabId);
 		this.runtimeLoadsByTabId.delete(tabId);
 		this.clearRuntimeRefreshTimers(tabId);
+		this.clearHistoryReloadTimers(tabId);
+		this.tabIdsNeedingHistoryReload.delete(tabId);
 		const subscription = this.runtimeSubscriptionsByTabId.get(tabId);
 		subscription?.unsubscribe();
 		this.runtimeSubscriptionsByTabId.delete(tabId);
@@ -904,6 +909,9 @@ export class AppTabsController {
 	private clearRuntimeSubscriptions(): void {
 		for (const tabId of this.runtimeRefreshTimersByTabId.keys()) {
 			this.clearRuntimeRefreshTimers(tabId);
+		}
+		for (const tabId of this.historyReloadTimersByTabId.keys()) {
+			this.clearHistoryReloadTimers(tabId);
 		}
 		for (const subscription of this.runtimeSubscriptionsByTabId.values()) {
 			subscription.unsubscribe();
@@ -919,6 +927,7 @@ export class AppTabsController {
 		const unsubscribe = runtime.session.subscribe((event) => {
 			if (this.shouldScheduleDelayedSyncForRuntimeEvent(event)) {
 				this.scheduleDelayedRuntimeSync(tabId, runtime);
+				this.tabIdsNeedingHistoryReload.add(tabId);
 			}
 			if (!this.shouldSyncTabFromRuntimeEvent(event)) return;
 			this.syncTabFromObservedRuntime(tabId, runtime);
@@ -962,6 +971,43 @@ export class AppTabsController {
 		if (!timers) return;
 		for (const timer of timers) clearTimeout(timer);
 		this.runtimeRefreshTimersByTabId.delete(tabId);
+	}
+
+	private clearHistoryReloadTimers(tabId: string): void {
+		const timers = this.historyReloadTimersByTabId.get(tabId);
+		if (!timers) return;
+		for (const timer of timers) clearTimeout(timer);
+		this.historyReloadTimersByTabId.delete(tabId);
+	}
+
+	private scheduleDelayedHistoryReload(tabId: string, runtime: AgentSessionRuntime): void {
+		if (!this.tabIdsNeedingHistoryReload.has(tabId)) return;
+		if (tabId !== this.activeTabId || this.pendingActiveTabId !== undefined) return;
+
+		this.clearHistoryReloadTimers(tabId);
+		for (const delayMs of [150, 1000, 3000]) {
+			const timer = setTimeout(() => {
+				this.historyReloadTimersByTabId.get(tabId)?.delete(timer);
+				void this.reloadActiveTabHistoryIfNeeded(tabId, runtime, delayMs === 3000);
+			}, delayMs);
+			timer.unref?.();
+			let timers = this.historyReloadTimersByTabId.get(tabId);
+			if (!timers) {
+				timers = new Set();
+				this.historyReloadTimersByTabId.set(tabId, timers);
+			}
+			timers.add(timer);
+		}
+	}
+
+	private async reloadActiveTabHistoryIfNeeded(tabId: string, runtime: AgentSessionRuntime, finalAttempt: boolean): Promise<void> {
+		if (tabId !== this.activeTabId || this.pendingActiveTabId !== undefined || this.host.runtime() !== runtime) return;
+		if (!this.tabIdsNeedingHistoryReload.has(tabId)) return;
+
+		await this.loadActiveSessionHistory(runtime);
+		if (finalAttempt && tabId === this.activeTabId && this.host.runtime() === runtime) {
+			this.tabIdsNeedingHistoryReload.delete(tabId);
+		}
 	}
 
 	private syncTabFromObservedRuntime(tabId: string, runtime: AgentSessionRuntime): void {
