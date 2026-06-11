@@ -20,8 +20,14 @@ describe("app icon themes", () => {
 		assert.equal(currentAppIconTheme(), "fallback");
 		assert.equal(APP_ICONS.plus, "+");
 		assert.equal(APP_ICONS.closeCircle, "×");
+		assert.equal(APP_ICONS.toolBodyGutter, "|");
+		assert.equal(APP_ICONS.toolBodyEnd, "`");
+		assert.equal(APP_ICONS.toolPreviewTruncated, "+");
 
 		setAppIconTheme("nerdFont");
+		assert.equal(APP_ICONS.toolBodyGutter, "│");
+		assert.equal(APP_ICONS.toolBodyEnd, "└");
+		assert.equal(APP_ICONS.toolPreviewTruncated, "⊞");
 	});
 
 	it("parses config names and fallback flags", () => {

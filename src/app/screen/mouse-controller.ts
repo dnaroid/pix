@@ -39,6 +39,7 @@ import { formatDcpStatsToast } from "../rendering/dcp-stats.js";
 import { detectFileLinks, type RenderedLink } from "./file-links.js";
 import { openFileLink as openDetectedFileLink } from "./file-link-opener.js";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import { APP_ICONS } from "../icons.js";
 
 const CLICK_FLASH_MS = 100;
 const LOST_MOUSE_RELEASE_SETTLE_MS = 180;
@@ -234,6 +235,7 @@ export class AppMouseController {
 		}
 
 		if (target?.kind === "tool") {
+			if (!this.toolTargetContainsEvent(event)) return;
 			const entry = this.host.findEntry(target.id);
 			if (entry?.kind === "tool" || entry?.kind === "thinking" || entry?.kind === "shell") {
 				entry.expanded = !entry.expanded;
@@ -241,6 +243,18 @@ export class AppMouseController {
 				this.showClickFlashForEvent(event);
 			}
 		}
+	}
+
+	private toolTargetContainsEvent(event: MouseEvent): boolean {
+		const text = this.renderedRowTexts.get(event.y) ?? "";
+		const gutter = toolGutterGlyphForLine(text);
+		if (gutter) {
+			const gutterWidth = Math.max(1, stringDisplayWidth(gutter));
+			return event.x >= 1 && event.x < 1 + gutterWidth;
+		}
+
+		const bounds = nonBlankLineBounds(text, event.x);
+		return event.x >= bounds.startColumn && event.x < bounds.endColumn;
 	}
 
 	activeClickFlash(): ClickFlash | undefined {
@@ -322,7 +336,10 @@ export class AppMouseController {
 		const statusTarget = this.statusTargetAt(event);
 		if (statusTarget) return statusTarget;
 
-		const toastTarget = this.renderedTargets.get(event.y);
+		const target = this.renderedTargets.get(event.y);
+		if (target?.kind === "tool") return this.toolClickFlashRegionForEvent(event);
+
+		const toastTarget = target;
 		if (toastTarget?.kind === "toast" && toastTargetContainsEvent(toastTarget, event)) {
 			return {
 				y: event.y,
@@ -337,6 +354,21 @@ export class AppMouseController {
 		}
 
 		return undefined;
+	}
+
+	private toolClickFlashRegionForEvent(event: MouseEvent): ClickFlashRegion | undefined {
+		const text = this.renderedRowTexts.get(event.y) ?? "";
+		const gutter = toolGutterGlyphForLine(text);
+		if (gutter) {
+			const gutterWidth = Math.max(1, stringDisplayWidth(gutter));
+			const region = { y: event.y, startColumn: 1, endColumn: 1 + gutterWidth };
+			return event.x >= region.startColumn && event.x < region.endColumn ? region : undefined;
+		}
+
+		const bounds = nonBlankLineBounds(text, event.x);
+		return event.x >= bounds.startColumn && event.x < bounds.endColumn
+			? { y: event.y, startColumn: bounds.startColumn, endColumn: bounds.endColumn }
+			: undefined;
 	}
 
 	private normalizedClickFlashRegion(region: ClickFlashRegion): ClickFlashRegion {
@@ -1151,6 +1183,13 @@ function nonBlankLineBounds(text: string, fallbackColumn: number): { startColumn
 	return startColumn === undefined || endColumn === undefined
 		? { startColumn: fallbackColumn, endColumn: fallbackColumn + 1 }
 		: { startColumn, endColumn };
+}
+
+function toolGutterGlyphForLine(text: string): string | undefined {
+	for (const glyph of [APP_ICONS.toolBodyGutter, APP_ICONS.toolBodyEnd, APP_ICONS.toolPreviewTruncated]) {
+		if (text.startsWith(`${glyph} `)) return glyph;
+	}
+	return undefined;
 }
 
 function displayCellAtColumn(text: string, column: number): string {

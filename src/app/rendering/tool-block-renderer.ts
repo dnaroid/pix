@@ -3,13 +3,23 @@ import type { ToolBodySyntaxHighlight, ToolBodySyntaxHighlights } from "../../sy
 import { expandTabs, sliceByDisplayWidth, stringDisplayWidth, wrapDisplayLineByWords } from "../../terminal-width.js";
 import type { Theme } from "../../theme.js";
 import { alertIconPrefixLength, hasToolLspDiagnosticsAfterMutation, lspDiagnosticSeverityForLine, sanitizeText, toolStatusIcon, toolStatusIconColor, wrapLine } from "./render-text.js";
+import { APP_ICONS } from "../icons.js";
 import type { RenderedLine, StyledSegment } from "../types.js";
 import type { ToolBodyLineStyle, ToolHeaderSegment } from "../../tool-renderers/types.js";
 
-const TRUNCATED_PREVIEW_MARKER = "… ";
 const TOOL_BODY_PREFIX = "  ";
-const TOOL_BODY_GUTTER_PREFIX = "│ ";
-const TOOL_BODY_END_PREFIX = "└ ";
+
+function truncatedPreviewMarker(): string {
+	return `${APP_ICONS.toolPreviewTruncated} `;
+}
+
+function toolBodyGutterPrefix(): string {
+	return `${APP_ICONS.toolBodyGutter} `;
+}
+
+function toolBodyEndPrefix(): string {
+	return `${APP_ICONS.toolBodyEnd} `;
+}
 
 export type ToolBlockEntry = {
 	id: string;
@@ -98,14 +108,15 @@ export function renderToolBlock(entry: ToolBlockEntry, rule: ResolvedToolRule, w
 	const availablePreviewWidth = width - stringDisplayWidth(header) - stringDisplayWidth(separator);
 	if (availablePreviewWidth <= 0) return headerLines;
 
-	const previewText = preview.overflow ? `${TRUNCATED_PREVIEW_MARKER}${preview.text}` : preview.text;
+	const markerPrefix = truncatedPreviewMarker();
+	const previewText = preview.overflow ? `${markerPrefix}${preview.text}` : preview.text;
 	const clippedPreview = sliceByDisplayWidth(previewText, availablePreviewWidth);
 	if (!clippedPreview) return headerLines;
 
 	headerLine.text = `${header}${separator}${clippedPreview}`;
 	const previewStart = header.length + separator.length;
-	const previewTextStart = previewStart + (preview.overflow ? TRUNCATED_PREVIEW_MARKER.length : 0);
-		headerLine.segments = [
+	const previewTextStart = previewStart + (preview.overflow ? markerPrefix.length : 0);
+	headerLine.segments = [
 		...(headerLine.segments ?? []),
 		...(preview.overflow ? [{ start: previewStart, end: previewStart + 1, foreground: colors.statusDotBase }] : []),
 		{ start: previewTextStart, end: headerLine.text.length, foreground: toolOutputColor },
@@ -142,13 +153,15 @@ function markTruncatedPreviewLine(lines: RenderedLine[], direction: ResolvedTool
 	if (lines.length === 0) return lines;
 
 	const markerIndex = direction === "tail" ? 0 : lines.length - 1;
+	const gutterPrefix = toolBodyGutterPrefix();
+	const markerPrefix = truncatedPreviewMarker();
 	return lines.map((line, index) => {
 		if (index !== markerIndex) return line;
-		const text = line.text.startsWith(TOOL_BODY_GUTTER_PREFIX)
-			? `${TRUNCATED_PREVIEW_MARKER}${line.text.slice(TOOL_BODY_GUTTER_PREFIX.length)}`
+		const text = line.text.startsWith(gutterPrefix)
+			? `${markerPrefix}${line.text.slice(gutterPrefix.length)}`
 			: line.text.startsWith(TOOL_BODY_PREFIX)
-				? `${TRUNCATED_PREVIEW_MARKER}${line.text.slice(TOOL_BODY_PREFIX.length)}`
-				: `${TRUNCATED_PREVIEW_MARKER}${line.text}`;
+				? `${markerPrefix}${line.text.slice(TOOL_BODY_PREFIX.length)}`
+				: `${markerPrefix}${line.text}`;
 		const existingSegments = (line.segments ?? []).filter((segment) => !(segment.start === 0 && segment.end === 1 && segment.foreground === markerColor));
 
 		return {
@@ -173,7 +186,7 @@ function renderToolBodyLines(
 	preserveAnsi = false,
 	showGutter = false,
 ): RenderedLine[] {
-	const displayPrefix = showGutter ? TOOL_BODY_GUTTER_PREFIX : TOOL_BODY_PREFIX;
+	const displayPrefix = showGutter ? toolBodyGutterPrefix() : TOOL_BODY_PREFIX;
 	const prefixWidth = stringDisplayWidth(displayPrefix);
 	const bodyWidth = Math.max(1, width - prefixWidth);
 	const lines: RenderedLine[] = [];
@@ -240,8 +253,9 @@ function renderToolBodyLines(
 	if (showGutter && lines.length > 0) {
 		const lastLine = lines.at(-1);
 		if (!lastLine) return lines;
-		if (lastLine.text.startsWith(TOOL_BODY_GUTTER_PREFIX)) {
-			lastLine.text = `${TOOL_BODY_END_PREFIX}${lastLine.text.slice(TOOL_BODY_GUTTER_PREFIX.length)}`;
+		const gutterPrefix = toolBodyGutterPrefix();
+		if (lastLine.text.startsWith(gutterPrefix)) {
+			lastLine.text = `${toolBodyEndPrefix()}${lastLine.text.slice(gutterPrefix.length)}`;
 		}
 	}
 	return lines;

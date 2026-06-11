@@ -33,6 +33,9 @@ const NERD_FONT_ICONS = {
 	thinkingExpanded: "\u{f0335}",
 	stopCircle: "\u{f0665}",
 	timerSand: "\u{f051f}",
+	toolBodyEnd: "└",
+	toolBodyGutter: "│",
+	toolPreviewTruncated: "⊞",
 	down: "\u{f0045}",
 } as const;
 
@@ -65,6 +68,9 @@ const FALLBACK_ICONS: AppIconMap = {
 	thinkingExpanded: ">",
 	stopCircle: "■",
 	timerSand: "⏳",
+	toolBodyEnd: "`",
+	toolBodyGutter: "|",
+	toolPreviewTruncated: "+",
 	down: "v",
 };
 

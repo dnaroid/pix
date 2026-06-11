@@ -78,13 +78,13 @@ describe("renderToolBlock", () => {
 		assert.deepEqual(lines[2]?.segments, [gutterSegment, { start: 2, end: lines[2]?.text.length, foreground: colors.warning }]);
 	});
 
-	it("marks truncated collapsed previews with an ellipsis in normal mode", () => {
+	it("marks truncated collapsed previews with a plus-box in normal mode", () => {
 		const output = "one\ntwo\nthree";
 
 		const lines = renderToolBlock(toolEntry({ expanded: false, output, collapsedBody: output }), { ...rule, previewLines: 2 }, 100, colors);
 
 		assert.match(lines[0]?.text ?? "", /apply_patch/u);
-		assert.deepEqual(lines.slice(1).map((line) => line.text), ["│ one", "… two"]);
+		assert.deepEqual(lines.slice(1).map((line) => line.text), ["│ one", "⊞ two"]);
 		assert.deepEqual(lines[2]?.segments, [
 			{ start: 0, end: 1, foreground: colors.statusDotBase },
 		]);
@@ -103,7 +103,7 @@ describe("renderToolBlock", () => {
 
 		const lines = renderToolBlock(toolEntry({ expanded: false, output, collapsedBody: output }), { ...rule, direction: "tail", previewLines: 2 }, 100, colors);
 
-		assert.deepEqual(lines.slice(1).map((line) => line.text), ["… two", "└ three"]);
+		assert.deepEqual(lines.slice(1).map((line) => line.text), ["⊞ two", "└ three"]);
 		assert.deepEqual(lines[1]?.segments, [
 			{ start: 0, end: 1, foreground: colors.statusDotBase },
 		]);
@@ -117,7 +117,7 @@ describe("renderToolBlock", () => {
 		assert.equal(lines.length, 1);
 		assert.match(lines[0]?.text ?? "", /apply_patch .*one two/u);
 		assert.doesNotMatch(lines[0]?.text ?? "", /three/u);
-		const markerStart = lines[0]?.text.indexOf("…") ?? -1;
+		const markerStart = lines[0]?.text.indexOf("⊞") ?? -1;
 		assert.ok(markerStart >= 0);
 		assert.ok(lines[0]?.segments?.some((segment) => segment.start === markerStart && segment.end === markerStart + 1 && segment.foreground === colors.statusDotBase));
 	});

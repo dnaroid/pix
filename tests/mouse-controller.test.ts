@@ -261,6 +261,112 @@ describe("AppMouseController", () => {
 		assert.equal(toggleCount, 1);
 	});
 
+	it("toggles tool rows only from header text or the first gutter column", () => {
+		const entry = { id: "tool-1", kind: "tool", expanded: false } as never;
+		let touchCount = 0;
+		const controller = new AppMouseController(
+			fakeHost({
+				findEntry: () => entry,
+				touchEntry: () => { touchCount += 1; },
+			}),
+			fakePopupMenus(),
+			fakePopupActions(),
+			fakeScrollController(),
+			fakeCommandController(),
+		);
+		controller.renderedTargets.set(2, { kind: "tool", id: "tool-1" });
+		controller.renderedRowTexts.set(2, `${APP_ICONS.checkCircle} read   `);
+		controller.renderedTargets.set(3, { kind: "tool", id: "tool-1" });
+		controller.renderedRowTexts.set(3, `${APP_ICONS.toolBodyGutter} body`);
+
+		controller.handleMouse({ button: 0, x: 2, y: 2, released: true });
+		controller.handleMouse({ button: 0, x: 8, y: 2, released: true });
+		controller.handleMouse({ button: 0, x: 2, y: 3, released: true });
+		controller.handleMouse({ button: 0, x: 1, y: 3, released: true });
+
+		assert.equal(touchCount, 2);
+	});
+
+	it("treats tool end and truncated preview markers as gutter-only click targets", () => {
+		const entry = { id: "tool-1", kind: "tool", expanded: false } as never;
+		let touchCount = 0;
+		const controller = new AppMouseController(
+			fakeHost({
+				findEntry: () => entry,
+				touchEntry: () => { touchCount += 1; },
+			}),
+			fakePopupMenus(),
+			fakePopupActions(),
+			fakeScrollController(),
+			fakeCommandController(),
+		);
+		controller.renderedTargets.set(2, { kind: "tool", id: "tool-1" });
+		controller.renderedRowTexts.set(2, `${APP_ICONS.toolBodyEnd} done`);
+		controller.renderedTargets.set(3, { kind: "tool", id: "tool-1" });
+		controller.renderedRowTexts.set(3, `${APP_ICONS.toolPreviewTruncated} hidden`);
+
+		controller.handleMouse({ button: 0, x: 2, y: 2, released: true });
+		controller.handleMouse({ button: 0, x: 1, y: 2, released: true });
+		controller.handleMouse({ button: 0, x: 2, y: 3, released: true });
+		controller.handleMouse({ button: 0, x: 1, y: 3, released: true });
+
+		assert.equal(touchCount, 2);
+	});
+
+	it("flashes only the effective tool click target", () => {
+		const gutterController = new AppMouseController(
+			fakeHost(),
+			fakePopupMenus(),
+			fakePopupActions(),
+			fakeScrollController(),
+			fakeCommandController(),
+		);
+		gutterController.renderedTargets.set(3, { kind: "tool", id: "tool-1" });
+		gutterController.renderedRowTexts.set(3, `${APP_ICONS.toolBodyGutter} body`);
+
+		gutterController.handleMouse({ button: 0, x: 1, y: 3, released: false });
+
+		assert.deepEqual(gutterController.activeClickFlash(), {
+			y: 3,
+			startColumn: 1,
+			endColumn: 2,
+			text: APP_ICONS.toolBodyGutter,
+		});
+
+		const bodyController = new AppMouseController(
+			fakeHost(),
+			fakePopupMenus(),
+			fakePopupActions(),
+			fakeScrollController(),
+			fakeCommandController(),
+		);
+		bodyController.renderedTargets.set(3, { kind: "tool", id: "tool-1" });
+		bodyController.renderedRowTexts.set(3, `${APP_ICONS.toolBodyGutter} body`);
+
+		bodyController.handleMouse({ button: 0, x: 3, y: 3, released: false });
+
+		assert.equal(bodyController.activeClickFlash(), undefined);
+
+		const headerController = new AppMouseController(
+			fakeHost(),
+			fakePopupMenus(),
+			fakePopupActions(),
+			fakeScrollController(),
+			fakeCommandController(),
+		);
+		headerController.renderedTargets.set(2, { kind: "tool", id: "tool-1" });
+		headerController.renderedRowTexts.set(2, `${APP_ICONS.checkCircle} shell   `);
+
+		headerController.handleMouse({ button: 0, x: 3, y: 2, released: false });
+
+		assert.deepEqual(headerController.activeClickFlash(), {
+			y: 2,
+			startColumn: 1,
+			endColumn: 8,
+			text: `${APP_ICONS.checkCircle} shell`,
+		});
+	});
+
 	it("opens the user-message jump menu when clicking its status target", async () => {
 		let opened: { menu: string; options?: unknown } | undefined;
 		let renderCount = 0;
