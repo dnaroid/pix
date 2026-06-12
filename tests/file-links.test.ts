@@ -29,6 +29,19 @@ describe("file link detection", () => {
 		assert.equal(links[0]?.url.endsWith("/src/app.ts:12:3"), true);
 	});
 
+	it("detects web URLs alongside file links", () => {
+		const cwd = mkdtempSync(join(tmpdir(), "pix-file-links-"));
+		mkdirSync(join(cwd, "docs"));
+		const readme = join(cwd, "docs", "readme.md");
+		writeFileSync(readme, "# readme\n", { flag: "wx" });
+
+		const links = detectFileLinks("See https://example.com/docs. Also open ./docs/readme.md", cwd);
+
+		assert.equal(links.length, 2);
+		assert.equal(links[0]?.url, "https://example.com/docs");
+		assert.equal(links[1]?.filePath, readme);
+	});
+
 	it("ignores non-files, invalid URLs, missing cwd, and overlapping shorter links", () => {
 		const cwd = mkdtempSync(join(tmpdir(), "pix-file-links-"));
 		const nested = join(cwd, "nested", "file.ts");

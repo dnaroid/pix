@@ -421,6 +421,50 @@ describe("AppMouseController", () => {
 		assert.deepEqual(opened, { filePath, line: 12, column: 3 });
 	});
 
+	it("opens a detected web link on plain click without starting a text selection", () => {
+		let openedUrl: string | undefined;
+		const controller = new AppMouseController(
+			fakeHost({
+				openFileLink: (link) => {
+					openedUrl = link.url;
+					return true;
+				},
+			}),
+			fakePopupMenus(),
+			fakePopupActions(),
+			fakeScrollController(),
+			fakeCommandController(),
+		);
+		controller.renderedRowTexts.set(2, "visit https://example.com/docs please");
+
+		controller.handleMouse({ button: 0, x: 8, y: 2, released: false });
+		controller.handleMouse({ button: 3, x: 10, y: 2, released: true });
+
+		assert.equal(openedUrl, "https://example.com/docs");
+	});
+
+	it("hit-tests detected web links by display columns after wide characters", () => {
+		let openedUrl: string | undefined;
+		const controller = new AppMouseController(
+			fakeHost({
+				openFileLink: (link) => {
+					openedUrl = link.url;
+					return true;
+				},
+			}),
+			fakePopupMenus(),
+			fakePopupActions(),
+			fakeScrollController(),
+			fakeCommandController(),
+		);
+		controller.renderedRowTexts.set(2, "界 visit https://example.com/docs");
+
+		controller.handleMouse({ button: 0, x: 33, y: 2, released: false });
+		controller.handleMouse({ button: 3, x: 33, y: 2, released: true });
+
+		assert.equal(openedUrl, "https://example.com/docs");
+	});
+
 	it("opens a clicked image label with the system viewer", () => {
 		const image = { type: "image" as const, data: Buffer.from("png").toString("base64"), mimeType: "image/png" };
 		let openedImage: typeof image | undefined;
@@ -442,7 +486,7 @@ describe("AppMouseController", () => {
 		controller.renderedRowTexts.set(2, "[Image]");
 		controller.renderedImageTargets.set(2, [{ start: 0, end: 7, entryId: "user-1", imageIndex: 0 }]);
 
-		controller.handleMouse({ button: 0, x: 3, y: 2, released: true });
+		controller.handleMouse({ button: 3, x: 3, y: 2, released: true });
 
 		assert.equal(openedImage, image);
 		assert.deepEqual(toast, { message: "Opened image.", kind: "success" });

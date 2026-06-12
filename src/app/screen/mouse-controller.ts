@@ -150,6 +150,7 @@ export class AppMouseController {
 		if (this.handleInputScrollBar(event)) return;
 		this.showClickFlashOnPress(event);
 		if (event.button === 0 && !event.released && this.handleInputBorderStatusClick(event)) return;
+		if (event.button === 0 && !event.released && this.fileLinkAt(event)) return;
 		if (this.handleMouseSelection(event)) return;
 		if (this.withClickFlash(event, () => this.handleImageClick(event))) return;
 		if (this.withClickFlash(event, () => this.handleFileLinkClick(event))) return;
@@ -327,8 +328,8 @@ export class AppMouseController {
 		const imageTarget = this.imageTargetAt(event);
 		if (imageTarget) return { y: event.y, startColumn: imageTarget.start + 1, endColumn: imageTarget.end + 1 };
 
-		const link = this.fileLinkAt(event);
-		if (link) return { y: event.y, startColumn: link.start + 1, endColumn: link.end + 1 };
+		const linkTarget = this.fileLinkTargetAt(event);
+		if (linkTarget) return { y: event.y, startColumn: linkTarget.startColumn, endColumn: linkTarget.endColumn };
 
 		const tabTarget = this.tabLineTargetAt(event);
 		if (tabTarget) return { y: tabTarget.row, startColumn: tabTarget.startColumn, endColumn: tabTarget.endColumn };
@@ -390,9 +391,18 @@ export class AppMouseController {
 	}
 
 	private fileLinkAt(event: MouseEvent): RenderedLink | undefined {
+		return this.fileLinkTargetAt(event)?.link;
+	}
+
+	private fileLinkTargetAt(event: MouseEvent): { link: RenderedLink; startColumn: number; endColumn: number } | undefined {
 		const text = this.renderedRowTexts.get(event.y);
 		if (!text) return undefined;
-		return detectFileLinks(text, this.host.cwd()).find((candidate) => event.x >= candidate.start + 1 && event.x <= candidate.end);
+		for (const link of detectFileLinks(text, this.host.cwd())) {
+			const startColumn = stringDisplayWidth(text.slice(0, link.start)) + 1;
+			const endColumn = startColumn + stringDisplayWidth(text.slice(link.start, link.end));
+			if (event.x >= startColumn && event.x < endColumn) return { link, startColumn, endColumn };
+		}
+		return undefined;
 	}
 
 	private statusTargetAt(event: MouseEvent): ClickFlashRegion | undefined {
@@ -423,7 +433,7 @@ export class AppMouseController {
 	}
 
 	private handleImageClick(event: MouseEvent): boolean {
-		if (event.button !== 0 || !event.released) return false;
+		if (!isPrimaryButtonRelease(event)) return false;
 
 		const imageTarget = this.imageTargetAt(event);
 		if (!imageTarget) return false;
@@ -443,7 +453,7 @@ export class AppMouseController {
 
 	private handleFileLinkClick(event: MouseEvent): boolean {
 		const modifiedPress = isModifiedPrimaryButton(event.button) && !event.released;
-		const plainRelease = event.button === 0 && event.released;
+		const plainRelease = isPrimaryButtonRelease(event);
 		if (!modifiedPress && !plainRelease) return false;
 
 		const link = this.fileLinkAt(event);
@@ -1214,6 +1224,10 @@ function isModifiedPrimaryButton(button: number): boolean {
 	const primaryButton = (button & 3) === 0;
 	const modifierBits = button & (8 | 16);
 	return primaryButton && modifierBits !== 0;
+}
+
+function isPrimaryButtonRelease(event: MouseEvent): boolean {
+	return event.released && (event.button === 0 || (event.button & 3) === 3);
 }
 
 function editorLayoutRows(terminalRows: number, tabPanelRows: number): number {

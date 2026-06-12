@@ -13,11 +13,12 @@ export type RenderedLink = {
 };
 
 const FILE_PATH_CANDIDATE = /(?<![\p{L}\p{N}_:])((?:file:\/\/\/|~[\\/]|\.{1,2}[\\/]|[A-Za-z]:[\\/]|[\\/]|[A-Za-z0-9_.@-]+[\\/])[^\s"'`<>]*)/gu;
+const WEB_URL_CANDIDATE = /https?:\/\/[^\s"'`<>]+/gu;
 const TRAILING_PUNCTUATION = new Set([".", ",", ";", ")", "]", "}"]);
 
 export function detectFileLinks(text: string, cwd: string | undefined): RenderedLink[] {
 	const links: RenderedLink[] = [];
-	if (!text.includes("/") && !text.includes("\\")) return links;
+	if (!text.includes("/") && !text.includes("\\") && !text.includes("http://") && !text.includes("https://")) return links;
 
 	for (const match of text.matchAll(FILE_PATH_CANDIDATE)) {
 		const raw = match[1];
@@ -37,6 +38,18 @@ export function detectFileLinks(text: string, cwd: string | undefined): Rendered
 			filePath: location.filePath,
 			line: location.line,
 			column: location.column,
+		});
+	}
+
+	for (const match of text.matchAll(WEB_URL_CANDIDATE)) {
+		const raw = match[0];
+		const candidate = trimTrailingPunctuation(raw);
+		if (!candidate) continue;
+
+		links.push({
+			start: match.index,
+			end: match.index + candidate.length,
+			url: candidate,
 		});
 	}
 

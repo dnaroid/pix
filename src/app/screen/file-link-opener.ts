@@ -24,6 +24,8 @@ export function setFileLinkOpenerTestDeps(overrides: Partial<FileLinkOpenerDeps>
 }
 
 export function openFileLink(link: RenderedLink): boolean {
+	if (isWebUrl(link.url)) return openPathWithSystemViewer(link.url);
+
 	const filePath = link.filePath ?? filePathFromUrl(link.url);
 	if (!filePath) return false;
 
@@ -31,6 +33,10 @@ export function openFileLink(link: RenderedLink): boolean {
 	if (editorLaunch && trySpawnCandidates(editorLaunch.candidates, editorLaunch.args)) return true;
 
 	return openPathWithSystemViewer(filePath);
+}
+
+function isWebUrl(url: string): boolean {
+	return url.startsWith("http://") || url.startsWith("https://");
 }
 
 function filePathFromUrl(url: string): string | undefined {

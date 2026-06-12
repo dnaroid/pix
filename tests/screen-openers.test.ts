@@ -10,9 +10,26 @@ import { hasTerminalCommandModifier, isNativeCommandPressed, isNativeShiftPresse
 
 describe("screen openers and platform fallbacks", () => {
 	it("returns false for invalid file and image open requests without spawning viewers", () => {
-		assert.equal(openFileLink({ start: 0, end: 1, url: "https://example.test/not-local" }), false);
 		assert.equal(openFileLink({ start: 0, end: 1, url: "file://%zz" }), false);
 		assert.equal(openImageContent({ type: "image", mimeType: "image/png", data: "" }), false);
+	});
+
+	it("opens web links with the system browser fallback", () => {
+		const spawned: Array<{ command: string; args: readonly string[] }> = [];
+		const restore = setFileLinkOpenerTestDeps({
+			platform: "linux",
+			spawn: ((command: string, args: readonly string[]) => {
+				spawned.push({ command, args });
+				return fakeChildProcess();
+			}) as never,
+		});
+
+		try {
+			assert.equal(openFileLink({ start: 0, end: 1, url: "https://example.test/docs" }), true);
+			assert.deepEqual(spawned, [{ command: "xdg-open", args: ["https://example.test/docs"] }]);
+		} finally {
+			restore();
+		}
 	});
 
 	it("formats clipboard hints and OSC52 passthrough sequences", () => {
