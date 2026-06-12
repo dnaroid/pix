@@ -1,6 +1,6 @@
 import path from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { DEFAULT_DIAGNOSTICS_WAIT_MS, DEFAULT_MAX_FILE_SIZE_BYTES, LSP_MANAGER_GLOBAL_KEY } from "./constants";
+import { DEFAULT_DIAGNOSTICS_WAIT_MS, DEFAULT_IDLE_SHUTDOWN_MS, DEFAULT_MAX_FILE_SIZE_BYTES, LSP_MANAGER_GLOBAL_KEY } from "./constants";
 import { DiagnosticsStore } from "./diagnostics-store";
 import { LspClient } from "./client";
 import { loadLspConfig } from "./_shared/config";
@@ -43,12 +43,51 @@ export class LspManager {
   private readonly diagnostics = new DiagnosticsStore();
   private readonly clients = new Map<string, LspClient>();
   private readonly backoff = new Map<string, { retryAt: number; attempts: number; reason: string }>();
+  private idleShutdownTimer: ReturnType<typeof setTimeout> | undefined;
+  private activeOperations = 0;
+  private handlingSignal = false;
   private readonly handleProcessExit = () => {
     this.shutdownAllSync();
+  };
+  private readonly handleProcessSignal = (signal: NodeJS.Signals) => {
+    this.shutdownAllSync();
+
+    // Restore the platform default for the terminating signal. LSP servers are
+    // spawned detached so they can otherwise outlive Pi when the process is
+    // killed by a terminal/editor without a session_shutdown event.
+    if (this.handlingSignal) return;
+    this.handlingSignal = true;
+    process.kill(process.pid, signal);
   };
 
   constructor() {
     process.once("exit", this.handleProcessExit);
+    process.once("SIGINT", this.handleProcessSignal);
+    process.once("SIGTERM", this.handleProcessSignal);
+    process.once("SIGHUP", this.handleProcessSignal);
+  }
+
+  private clearIdleShutdownTimer(): void {
+    if (!this.idleShutdownTimer) return;
+    clearTimeout(this.idleShutdownTimer);
+    this.idleShutdownTimer = undefined;
+  }
+
+  private beginOperation(): void {
+    this.activeOperations += 1;
+    this.clearIdleShutdownTimer();
+  }
+
+  private endOperation(): void {
+    this.activeOperations = Math.max(0, this.activeOperations - 1);
+    if (this.activeOperations > 0 || this.clients.size === 0) return;
+
+    this.clearIdleShutdownTimer();
+    this.idleShutdownTimer = setTimeout(() => {
+      if (this.activeOperations > 0 || this.clients.size === 0) return;
+      void this.shutdownAll();
+    }, DEFAULT_IDLE_SHUTDOWN_MS);
+    this.idleShutdownTimer.unref?.();
   }
 
   async matchingServers(ctx: ExtensionContext, file: string): Promise<{ matches: MatchedServer[]; warnings: string[]; workspace: string }> {
@@ -104,93 +143,98 @@ export class LspManager {
   }
 
   async updateDiagnosticsForFile(ctx: ExtensionContext, file: string): Promise<string> {
-    const { matches, warnings, workspace } = await this.matchingServers(ctx, file);
-    if (matches.length === 0) return formatWarnings("LSP diagnostics", warnings);
+    this.beginOperation();
+    try {
+      const { matches, warnings, workspace } = await this.matchingServers(ctx, file);
+      if (matches.length === 0) return formatWarnings("LSP diagnostics", warnings);
 
-    const lines: string[] = [];
-    for (const match of matches) {
-      try {
-        const maxFileSizeBytes = match.server.maxFileSizeBytes ?? DEFAULT_MAX_FILE_SIZE_BYTES;
-        if (!(await fileSizeAllowed(file, maxFileSizeBytes))) {
-          lines.push(`${LSP_DIAGNOSTIC_ICON} ${match.server.id}: skipped ${match.relFile}; file exceeds maxFileSizeBytes (${maxFileSizeBytes})`);
-          continue;
-        }
-
-        // Clear stale diagnostics before refreshing this file. The synchronous
-        // wait below must observe a fresh publishDiagnostics notification, not an
-        // old error from a previous document version. Empty diagnostics published
-        // by the server are stored, but this local clear is not.
-        this.diagnostics.clear(match.server.id, match.root, filePathToUri(file));
-
-        const text = await readTextFile(file);
-        const client = await this.getClient(match.server, match.root, file, workspace, ctx.signal);
-        const languageId = languageIdForFile(match.server, file);
-        const startedAt = Date.now();
-        const doc = await client.openOrChange(file, languageId, text, ctx.signal);
-        await client.didSave(file);
-        const diagnosticsWaitMs = match.server.diagnosticsWaitMs ?? DEFAULT_DIAGNOSTICS_WAIT_MS;
-
-        // typescript-language-server sometimes does not emit a fresh
-        // textDocument/publishDiagnostics notification after didChange/didSave,
-        // even though tsserver can answer diagnostics synchronously. Prefer the
-        // explicit tsserver request when the server exposes it, so post-edit
-        // diagnostics don't degrade into a misleading publishDiagnostics timeout.
-        let tsserverFallbackError: string | undefined;
+      const lines: string[] = [];
+      for (const match of matches) {
         try {
-          const tsserverDiagnostics = await client.tsserverDiagnostics(file, text, diagnosticsWaitMs, ctx.signal);
-          if (tsserverDiagnostics !== undefined) {
-            const diagnostics = diagnosticsWithLocalFallback(match.server.id, file, text, tsserverDiagnostics);
-            this.diagnostics.set(match.server.id, match.root, filePathToUri(file), diagnostics, doc.version);
-            lines.push(formatLspDiagnostics(match.server.id, file, diagnostics, match.root));
+          const maxFileSizeBytes = match.server.maxFileSizeBytes ?? DEFAULT_MAX_FILE_SIZE_BYTES;
+          if (!(await fileSizeAllowed(file, maxFileSizeBytes))) {
+            lines.push(`${LSP_DIAGNOSTIC_ICON} ${match.server.id}: skipped ${match.relFile}; file exceeds maxFileSizeBytes (${maxFileSizeBytes})`);
             continue;
           }
-        } catch (error) {
-          tsserverFallbackError = (error as Error).message;
-        }
 
-        let pullDiagnosticsError: string | undefined;
-        if (match.server.pullDiagnostics !== false) {
+          // Clear stale diagnostics before refreshing this file. The synchronous
+          // wait below must observe a fresh publishDiagnostics notification, not an
+          // old error from a previous document version. Empty diagnostics published
+          // by the server are stored, but this local clear is not.
+          this.diagnostics.clear(match.server.id, match.root, filePathToUri(file));
+
+          const text = await readTextFile(file);
+          const client = await this.getClient(match.server, match.root, file, workspace, ctx.signal);
+          const languageId = languageIdForFile(match.server, file);
+          const startedAt = Date.now();
+          const doc = await client.openOrChange(file, languageId, text, ctx.signal);
+          await client.didSave(file);
+          const diagnosticsWaitMs = match.server.diagnosticsWaitMs ?? DEFAULT_DIAGNOSTICS_WAIT_MS;
+
+          // typescript-language-server sometimes does not emit a fresh
+          // textDocument/publishDiagnostics notification after didChange/didSave,
+          // even though tsserver can answer diagnostics synchronously. Prefer the
+          // explicit tsserver request when the server exposes it, so post-edit
+          // diagnostics don't degrade into a misleading publishDiagnostics timeout.
+          let tsserverFallbackError: string | undefined;
           try {
-            const pulledDiagnostics = await client.pullDiagnostics(file, diagnosticsWaitMs, ctx.signal);
-            if (pulledDiagnostics !== undefined) {
-              const diagnostics = diagnosticsWithLocalFallback(match.server.id, file, text, pulledDiagnostics);
+            const tsserverDiagnostics = await client.tsserverDiagnostics(file, text, diagnosticsWaitMs, ctx.signal);
+            if (tsserverDiagnostics !== undefined) {
+              const diagnostics = diagnosticsWithLocalFallback(match.server.id, file, text, tsserverDiagnostics);
               this.diagnostics.set(match.server.id, match.root, filePathToUri(file), diagnostics, doc.version);
               lines.push(formatLspDiagnostics(match.server.id, file, diagnostics, match.root));
               continue;
             }
           } catch (error) {
-            pullDiagnosticsError = (error as Error).message;
+            tsserverFallbackError = (error as Error).message;
           }
-        }
 
-        if (match.server.waitForPublishDiagnostics === false || diagnosticsWaitMs <= 0) {
-          continue;
-        }
+          let pullDiagnosticsError: string | undefined;
+          if (match.server.pullDiagnostics !== false) {
+            try {
+              const pulledDiagnostics = await client.pullDiagnostics(file, diagnosticsWaitMs, ctx.signal);
+              if (pulledDiagnostics !== undefined) {
+                const diagnostics = diagnosticsWithLocalFallback(match.server.id, file, text, pulledDiagnostics);
+                this.diagnostics.set(match.server.id, match.root, filePathToUri(file), diagnostics, doc.version);
+                lines.push(formatLspDiagnostics(match.server.id, file, diagnostics, match.root));
+                continue;
+              }
+            } catch (error) {
+              pullDiagnosticsError = (error as Error).message;
+            }
+          }
 
-        const entry = await this.diagnostics.waitForFile(
-          match.server.id,
-          match.root,
-          file,
-          startedAt,
-          doc.version,
-          diagnosticsWaitMs,
-          ctx.signal,
-        );
-        if (!isFreshDiagnosticsEntry(entry, startedAt, doc.version)) {
-          const fallbackSuffix = tsserverFallbackError ? `; tsserver fallback failed: ${tsserverFallbackError}` : "";
-          const pullSuffix = pullDiagnosticsError ? `; pull diagnostics failed: ${pullDiagnosticsError}` : "";
-          lines.push(`${LSP_DIAGNOSTIC_ICON} ${match.server.id}: timed out after ${diagnosticsWaitMs}ms waiting for fresh diagnostics for ${match.relFile}${fallbackSuffix}${pullSuffix}`);
-          continue;
+          if (match.server.waitForPublishDiagnostics === false || diagnosticsWaitMs <= 0) {
+            continue;
+          }
+
+          const entry = await this.diagnostics.waitForFile(
+            match.server.id,
+            match.root,
+            file,
+            startedAt,
+            doc.version,
+            diagnosticsWaitMs,
+            ctx.signal,
+          );
+          if (!isFreshDiagnosticsEntry(entry, startedAt, doc.version)) {
+            const fallbackSuffix = tsserverFallbackError ? `; tsserver fallback failed: ${tsserverFallbackError}` : "";
+            const pullSuffix = pullDiagnosticsError ? `; pull diagnostics failed: ${pullDiagnosticsError}` : "";
+            lines.push(`${LSP_DIAGNOSTIC_ICON} ${match.server.id}: timed out after ${diagnosticsWaitMs}ms waiting for fresh diagnostics for ${match.relFile}${fallbackSuffix}${pullSuffix}`);
+            continue;
+          }
+          const diagnostics = diagnosticsWithLocalFallback(match.server.id, file, text, entry.diagnostics);
+          if (diagnostics !== entry.diagnostics) this.diagnostics.set(match.server.id, match.root, filePathToUri(file), diagnostics, doc.version);
+          lines.push(formatLspDiagnostics(match.server.id, file, diagnostics, match.root));
+        } catch (error) {
+          lines.push(`${LSP_DIAGNOSTIC_ICON} ${match.server.id}: ${(error as Error).message}`);
         }
-        const diagnostics = diagnosticsWithLocalFallback(match.server.id, file, text, entry.diagnostics);
-        if (diagnostics !== entry.diagnostics) this.diagnostics.set(match.server.id, match.root, filePathToUri(file), diagnostics, doc.version);
-        lines.push(formatLspDiagnostics(match.server.id, file, diagnostics, match.root));
-      } catch (error) {
-        lines.push(`${LSP_DIAGNOSTIC_ICON} ${match.server.id}: ${(error as Error).message}`);
       }
-    }
 
-    return [formatWarnings("LSP diagnostics", warnings), joinSections("LSP diagnostics", lines)].filter(Boolean).join("\n\n");
+      return [formatWarnings("LSP diagnostics", warnings), joinSections("LSP diagnostics", lines)].filter(Boolean).join("\n\n");
+    } finally {
+      this.endOperation();
+    }
   }
 
   async ensureDocumentForTool(ctx: ExtensionContext, inputPath: string): Promise<{ file: string; match: MatchedServer; client: LspClient; workspace: string } | undefined> {
@@ -215,15 +259,20 @@ export class LspManager {
   }
 
   async shutdownAll(): Promise<void> {
+    this.clearIdleShutdownTimer();
     const clients = [...this.clients.values()];
     this.clients.clear();
     await Promise.allSettled(clients.map((client) => client.shutdown()));
   }
 
   shutdownAllSync(): void {
+    this.clearIdleShutdownTimer();
     const clients = [...this.clients.values()];
     this.clients.clear();
     process.off("exit", this.handleProcessExit);
+    process.off("SIGINT", this.handleProcessSignal);
+    process.off("SIGTERM", this.handleProcessSignal);
+    process.off("SIGHUP", this.handleProcessSignal);
     for (const client of clients) client.shutdownSync();
   }
 }
