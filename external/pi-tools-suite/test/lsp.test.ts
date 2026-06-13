@@ -17,9 +17,17 @@ mock.module("typebox", () => ({
 }));
 
 mock.module("@earendil-works/pi-tui", () => ({
+	Container: class Container { children: any[] = []; addChild(child: any) { this.children.push(child); } },
 	Text: class Text { constructor(public text: string, public x = 0, public y = 0) {} },
 	Box: class Box { children: any[] = []; addChild(child: any) { this.children.push(child); } },
 	Spacer: class Spacer { constructor(public width = 0, public height = 0) {} },
+	visibleWidth: (text: string) => text.replace(/<[^>]+>/g, "").length,
+	truncateToWidth: (text: string, width: number, ellipsis = "…") => {
+		const visible = text.replace(/<[^>]+>/g, "");
+		if (visible.length <= width) return text;
+		if (width <= ellipsis.length) return ellipsis.slice(0, Math.max(0, width));
+		return visible.slice(0, width - ellipsis.length) + ellipsis;
+	},
 }));
 
 class FakePi {

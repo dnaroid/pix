@@ -5,16 +5,14 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { createPiAiMock } from "../support/pi-ai-mock.js";
 
-mock.module("@earendil-works/pi-ai", () => ({
-	Type: {
-		Object: (properties: any, options?: any) => ({ kind: "object", properties, options }),
-		Optional: (schema: any) => ({ kind: "optional", schema }),
-		String: (options?: any) => ({ kind: "string", options }),
-		Array: (items: any, options?: any) => ({ kind: "array", items, options }),
-		Number: (options?: any) => ({ kind: "number", options }),
-		Boolean: (options?: any) => ({ kind: "boolean", options }),
-	},
-}));
+const typeMock = {
+	Object: (properties: any, options?: any) => ({ kind: "object", properties, options }),
+	Optional: (schema: any) => ({ kind: "optional", schema }),
+	String: (options?: any) => ({ kind: "string", options }),
+	Array: (items: any, options?: any) => ({ kind: "array", items, options }),
+	Number: (options?: any) => ({ kind: "number", options }),
+	Boolean: (options?: any) => ({ kind: "boolean", options }),
+};
 
 mock.module("@earendil-works/pi-tui", () => ({
 	Container: class Container {
@@ -39,7 +37,7 @@ const routerCompleteMock = mock(async () => ({
 	content: [{ type: "text", text: routerResponseText }],
 }));
 
-mock.module("@earendil-works/pi-ai", () => createPiAiMock({ complete: routerCompleteMock }));
+mock.module("@earendil-works/pi-ai", () => createPiAiMock({ Type: typeMock, complete: routerCompleteMock }));
 
 const tempDirs: string[] = [];
 let originalArgv1 = process.argv[1];
