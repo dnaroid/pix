@@ -38,6 +38,7 @@ export type ModelUsageDescriptor = BaseModelUsageDescriptor & ({
 	readonly kind: "google-antigravity";
 	readonly quotaModelKey: string;
 	readonly account: AntigravityQuotaAccount;
+	readonly accounts?: readonly AntigravityQuotaAccount[];
 });
 
 export type ModelUsageLimitWindow = {
@@ -221,14 +222,16 @@ export function modelUsageDescriptor(model: SessionModel | undefined): ModelUsag
 
 	if (ANTIGRAVITY_QUOTA_PROVIDERS.has(provider)) {
 		const quotaModelKey = resolveAntigravityQuotaModelKey(model);
-		const account = readActiveAntigravityQuotaAccount();
+		const accounts = readAllAntigravityQuotaAccounts();
+		const account = readActiveAntigravityQuotaAccount(accounts);
 		if (!quotaModelKey || !account) return undefined;
 
 		return {
 			kind: "google-antigravity",
-			modelKey: `${model.provider}/${model.id}@${account.cacheKey}`,
+			modelKey: `${model.provider}/${model.id}@all:${accounts.map((item) => item.cacheKey).join(",")}`,
 			quotaModelKey,
 			account,
+			accounts,
 		};
 	}
 
@@ -611,15 +614,8 @@ export function googleAntigravityUsageStatusFromResponse(
 	descriptor: Extract<ModelUsageDescriptor, { kind: "google-antigravity" }>,
 	now = Date.now(),
 ): ModelUsageStatus | undefined {
-	const quotaInfo = data.models[descriptor.quotaModelKey]?.quotaInfo;
-	if (!quotaInfo) return undefined;
-
-	const resetAt = parseResetTime(quotaInfo.resetTime, now);
-	const window = {
-		remainingPercent: quotaRemainingPercent(quotaInfo),
-		resetAt,
-		windowSeconds: Math.max(0, Math.round((resetAt - now) / 1000)),
-	};
+	const window = googleAntigravityWindowFromResponse(data, descriptor.quotaModelKey, now);
+	if (!window) return undefined;
 	const weekly = window.windowSeconds >= DAY_SECONDS ? window : undefined;
 	const hourly = weekly ? undefined : window;
 
@@ -633,12 +629,54 @@ export function googleAntigravityUsageStatusFromResponse(
 	};
 }
 
+function googleAntigravityWindowFromResponse(
+	data: GoogleQuotaResponse,
+	quotaModelKey: string,
+	now: number,
+): ModelUsageLimitWindow | undefined {
+	const quotaInfo = data.models[quotaModelKey]?.quotaInfo;
+	if (!quotaInfo) return undefined;
+	const resetAt = parseResetTime(quotaInfo.resetTime, now);
+	return {
+		remainingPercent: quotaRemainingPercent(quotaInfo),
+		resetAt,
+		windowSeconds: Math.max(0, Math.round((resetAt - now) / 1000)),
+	};
+}
+
 async function queryGoogleAntigravityModelUsage(
 	descriptor: Extract<ModelUsageDescriptor, { kind: "google-antigravity" }>,
 ): Promise<ModelUsageStatus | undefined> {
 	const now = Date.now();
-	const response = await fetchGoogleAntigravityQuotaForAccount(descriptor.account, now);
-	return googleAntigravityUsageStatusFromResponse(response, descriptor, now);
+	const accounts = descriptor.accounts?.length ? descriptor.accounts : [descriptor.account];
+	const windows = (await Promise.all(accounts.map(async (account) => {
+		try {
+			const response = await fetchGoogleAntigravityQuotaForAccount(account, now);
+			return googleAntigravityWindowFromResponse(response, descriptor.quotaModelKey, now);
+		} catch {
+			return undefined;
+		}
+	}))).filter((window): window is ModelUsageLimitWindow => window !== undefined);
+	if (windows.length === 0) return undefined;
+
+	const resetAt = Math.min(...windows.map((window) => window.resetAt));
+	const windowSeconds = Math.max(0, Math.round((resetAt - now) / 1000));
+	const aggregateWindow = {
+		remainingPercent: clampPercent(Math.round(windows.reduce((sum, window) => sum + window.remainingPercent, 0) / windows.length)),
+		resetAt,
+		windowSeconds,
+	};
+	const weekly = aggregateWindow.windowSeconds >= DAY_SECONDS ? aggregateWindow : undefined;
+	const hourly = weekly ? undefined : aggregateWindow;
+
+	return {
+		modelKey: descriptor.modelKey,
+		provider: "google-antigravity",
+		updatedAt: now,
+		accountEmail: "Σ",
+		...(weekly ? { weekly } : {}),
+		...(hourly ? { hourly } : {}),
+	};
 }
 
 const GOOGLE_ACCOUNT_QUOTA_WINDOWS = [
@@ -675,8 +713,7 @@ async function queryGoogleAntigravityAccountUsage(now: number): Promise<AccountU
 	return results;
 }
 
-function readActiveAntigravityQuotaAccount(): AntigravityQuotaAccount | undefined {
-	const accounts = readAllAntigravityQuotaAccounts();
+function readActiveAntigravityQuotaAccount(accounts = readAllAntigravityQuotaAccounts()): AntigravityQuotaAccount | undefined {
 	const credential = readPiAuthSync().antigravity;
 	return accounts[clampAccountIndex(credential?.activeIndex, accounts.length)];
 }
@@ -813,8 +850,8 @@ function addCachedQuotaModels(
 	cachedQuotaUpdatedAt: number | undefined,
 	now: number,
 ): void {
-	if (!quota || !Number.isFinite(quota.remainingFraction)) return;
-	const remainingFraction = quota.remainingFraction as number;
+	if (!quota) return;
+	const remainingFraction = Number.isFinite(quota.remainingFraction) ? quota.remainingFraction as number : 0;
 	const resetTime = cachedQuotaResetTimeForDisplay(quota.resetTime, cachedQuotaUpdatedAt, now);
 	for (const quotaModelKey of quotaModelKeys) {
 		models[quotaModelKey] = {

@@ -12,6 +12,7 @@ import {
 	modelUsageRemainingPercent,
 	openAIUsageStatusFromResponse,
 	queryAccountUsageReport,
+	queryModelUsageStatus,
 	resolveAntigravityQuotaModelKey,
 	type AccountUsageReport,
 	zhipuUsageStatusFromResponse,
@@ -40,7 +41,7 @@ describe("model usage status", () => {
 		});
 	});
 
-	it("builds Antigravity descriptors from the currently rotated account", () => {
+	it("builds Antigravity descriptors for all accounts while preserving the active account", () => {
 		withPiAuth({
 			antigravity: {
 				type: "oauth",
@@ -55,13 +56,14 @@ describe("model usage status", () => {
 			const descriptor = modelUsageDescriptor({ provider: "antigravity", id: "G3" } as SessionModel);
 
 			assert.equal(descriptor?.kind, "google-antigravity");
-			assert.equal(descriptor?.modelKey, "antigravity/G3@second@example.com");
+			assert.equal(descriptor?.modelKey, "antigravity/G3@all:first@example.com,second@example.com");
 			if (descriptor?.kind !== "google-antigravity") throw new Error("Expected Google Antigravity descriptor");
 			assert.equal(descriptor.quotaModelKey, "gemini-3.1-pro-low");
 			assert.equal(descriptor.account.email, "second@example.com");
 			assert.equal(descriptor.account.projectId, "project-2");
 			assert.equal(descriptor.account.accountIndex, 1);
 			assert.equal(descriptor.account.accountCount, 2);
+			assert.equal(descriptor.accounts?.length, 2);
 		});
 	});
 
@@ -283,6 +285,50 @@ describe("model usage status", () => {
 
 		assert.equal(status?.weekly?.remainingPercent, 0);
 		assert.equal(formatModelUsageStatusLabel(status, now), `user@example.com 0%       ${formatExpectedResetDuration(now + 7 * 24 * 60 * 60 * 1000, now)}`);
+	});
+
+	it("aggregates Google Antigravity status across all accounts", async () => {
+		const now = Date.now();
+		const weeklyResetAt = now + 7 * 24 * 60 * 60 * 1000;
+		const nearestResetAt = now + 22 * 60 * 60 * 1000;
+		const cachedAt = now - 60_000;
+		await withPiAuthAsync({
+			antigravity: {
+				type: "oauth",
+				email: "active@example.com",
+				accounts: [{
+					email: "active@example.com",
+					refreshToken: "refresh-active",
+					projectId: "project-active",
+					enabled: true,
+					cachedQuotaUpdatedAt: cachedAt,
+					cachedQuota: {
+						claude: { remainingFraction: 0.42, resetTime: new Date(weeklyResetAt).toISOString() },
+					},
+				}, {
+					email: "limited@example.com",
+					refreshToken: "refresh-limited",
+					projectId: "project-limited",
+					enabled: true,
+					cachedQuotaUpdatedAt: cachedAt,
+					cachedQuota: {
+						claude: { resetTime: new Date(nearestResetAt).toISOString() },
+					},
+				}],
+				activeIndex: 0,
+			},
+		}, async () => {
+			const descriptor = modelUsageDescriptor({ provider: "antigravity", id: "antigravity-claude-opus-4-6-thinking" } as SessionModel);
+			if (descriptor?.kind !== "google-antigravity") throw new Error("Expected Google Antigravity descriptor");
+
+			const status = await queryModelUsageStatus(descriptor);
+
+			assert.equal(status?.accountEmail, "Σ");
+			assert.equal(status?.hourly?.remainingPercent, 21);
+			assert.ok(Math.abs((status?.hourly?.resetAt ?? 0) - nearestResetAt) < 2_000);
+			assert.equal(status?.weekly, undefined);
+			assert.equal(formatModelUsageStatusLabel(status, now), `Σ 21% █▏    ${formatExpectedResetDuration(nearestResetAt, now)}`);
+		});
 	});
 
 	it("formats the local account quota report", () => {
