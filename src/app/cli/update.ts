@@ -60,8 +60,6 @@ export type PixUpdateCheckOptions = {
 	fetchLatestVersion?: (packageName: string, currentVersion: string, timeoutMs: number) => Promise<string | undefined>;
 };
 
-export type PiUpdateCheckOptions = PixUpdateCheckOptions;
-
 export function pixUpdateUsage(): string {
 	return `Usage: pix update [--check] [--force]
 
@@ -107,11 +105,6 @@ export function getPixPackageVersion(packageRoot?: string): string {
 
 export async function checkPixUpdate(options: PixUpdateCheckOptions = {}): Promise<PixUpdateCheckResult> {
 	const packageInfo = readPixPackageInfo(options.packageRoot);
-	return await checkPackageUpdate(packageInfo, options);
-}
-
-export async function checkPiUpdate(options: PiUpdateCheckOptions = {}): Promise<PixUpdateCheckResult> {
-	const packageInfo = readPiPackageInfo(options.packageRoot);
 	return await checkPackageUpdate(packageInfo, options);
 }
 
@@ -197,23 +190,12 @@ export function formatPixStartupUpdateDialog(result: PixUpdateCheckResult): stri
 		`current: ${result.packageName} v${result.currentVersion}`,
 		...(result.latestVersion ? [`latest: ${result.latestVersion}`] : []),
 		"",
-		"To update:",
-		"1. Exit Pix.",
-		"2. Run `pix update` in your shell.",
-		"3. Start Pix again after the update completes.",
-	];
-	return lines.join("\n");
-}
-
-export function formatPiStartupUpdateDialog(result: PixUpdateCheckResult): string {
-	const lines = [
-		"A new Pi version is available.",
-		`current: ${result.packageName} v${result.currentVersion}`,
-		...(result.latestVersion ? [`latest: ${result.latestVersion}`] : []),
+		"Pix includes the pinned Pi SDK/dependencies used by this renderer.",
+		"Updating only the global `pi` CLI is not enough for Pix.",
 		"",
 		"To update:",
 		"1. Exit Pix.",
-		"2. Run `pi update --self` in your shell.",
+		"2. Run `pix update` in your shell.",
 		"3. Start Pix again after the update completes.",
 	];
 	return lines.join("\n");
@@ -287,10 +269,6 @@ function readPixPackageInfo(packageRoot = findPixPackageRoot()): PixPackageInfo 
 	return readPackageInfo(packageRoot, "pi-ui-extend");
 }
 
-function readPiPackageInfo(packageRoot = findPiPackageRoot()): PixPackageInfo {
-	return readPackageInfo(packageRoot, "@earendil-works/pi-coding-agent");
-}
-
 function readPackageInfo(packageRoot: string, fallbackName: string): PixPackageInfo {
 	const packageJsonPath = join(packageRoot, "package.json");
 	const raw = JSON.parse(readFileSync(packageJsonPath, "utf8")) as Record<string, unknown>;
@@ -313,10 +291,6 @@ function findPixPackageRoot(): string {
 		if (nextDir === currentDir) throw new Error("Could not find pix package.json");
 		currentDir = nextDir;
 	}
-}
-
-function findPiPackageRoot(): string {
-	return dirname(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))));
 }
 
 async function fetchLatestNpmVersion(packageName: string, currentVersion: string, timeoutMs: number): Promise<string | undefined> {

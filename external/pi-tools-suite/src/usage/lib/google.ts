@@ -52,6 +52,7 @@ type PiAntigravityCredential = {
   type?: string;
   refresh?: string;
   email?: string;
+  activeIndex?: number;
   clientId?: string;
   clientSecret?: string;
   googleClientId?: string;
@@ -61,6 +62,8 @@ type PiAntigravityCredential = {
 };
 
 type GoogleOAuthClientCredentials = { clientId: string; clientSecret?: string };
+
+type PreparedAccount = AntigravityAccount & { originalIndex: number };
 
 // ============================================================================
 // 常量
@@ -149,10 +152,10 @@ async function readAntigravityAccounts(): Promise<AntigravityAccount[]> {
 
     if (!credential) return [];
     const credentialClient = getGoogleOAuthClientCredentials(credential);
-    const accounts = Array.isArray(credential.accounts)
+    const accounts: PreparedAccount[] = Array.isArray(credential.accounts)
       ? credential.accounts
           .filter((account) => getAccountRefreshToken(account))
-          .map((account) => ({ ...credentialClient, ...account }))
+          .map((account, originalIndex) => ({ ...credentialClient, ...account, originalIndex }))
       : [];
     const primaryAccount =
       credential.type === "oauth" && credential.refresh
@@ -161,16 +164,48 @@ async function readAntigravityAccounts(): Promise<AntigravityAccount[]> {
     if (primaryAccount) {
       primaryAccount.email = credential.email;
       Object.assign(primaryAccount, credentialClient);
-      accounts.unshift(primaryAccount);
+      const matchIndex = accounts.findIndex((account) =>
+        (primaryAccount.email && account.email === primaryAccount.email)
+        || (primaryAccount.refreshToken && getAccountRefreshToken(account) === primaryAccount.refreshToken),
+      );
+      if (matchIndex >= 0) {
+        accounts[matchIndex] = { ...accounts[matchIndex], ...primaryAccount };
+      } else {
+        accounts.unshift({ ...primaryAccount, originalIndex: -1 });
+      }
     }
 
     const seen = new Set<string>();
-    return accounts.filter((account) => {
+    const deduped = accounts.filter((account) => {
       const key = account.email || account.refreshToken;
       if (!key || seen.has(key)) return false;
       seen.add(key);
       return true;
     });
+
+    const fallbackActiveIndex = deduped.findIndex((account) =>
+      (credential.email && account.email === credential.email)
+      || (primaryAccount?.refreshToken && getAccountRefreshToken(account) === primaryAccount.refreshToken),
+    );
+    const activeIndex = Number.isInteger(credential.activeIndex)
+      ? credential.activeIndex as number
+      : fallbackActiveIndex;
+    const mostRecentLastUsed = deduped.reduce(
+      (best, account, index) => (account.lastUsed > best.lastUsed ? { index, lastUsed: account.lastUsed } : best),
+      { index: -1, lastUsed: 0 },
+    ).index;
+    const priorityIndex = mostRecentLastUsed >= 0 ? mostRecentLastUsed : activeIndex;
+
+    return deduped
+      .map((account, index) => ({ account, index }))
+      .sort((a, b) => {
+        const aPriority = a.index === priorityIndex ? 1 : 0;
+        const bPriority = b.index === priorityIndex ? 1 : 0;
+        if (aPriority !== bPriority) return bPriority - aPriority;
+        if (a.account.lastUsed !== b.account.lastUsed) return b.account.lastUsed - a.account.lastUsed;
+        return a.account.originalIndex - b.account.originalIndex;
+      })
+      .map(({ account }) => account);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw error;

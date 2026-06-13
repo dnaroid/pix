@@ -5,9 +5,7 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import {
-	checkPiUpdate,
 	checkPixUpdate,
-	formatPiStartupUpdateDialog,
 	formatPixUpdateCheck,
 	formatPixStartupUpdateDialog,
 	getPixSelfUpdateCommand,
@@ -29,18 +27,6 @@ describe("pix update", () => {
 			help: true,
 		});
 		assert.throws(() => parsePixUpdateArgs(["--bad"]), /Unknown pix update argument/u);
-	});
-
-	it("reports Pi update availability deterministically", async () => {
-		await withPackageJson({ name: "@earendil-works/pi-coding-agent", version: "0.79.1" }, async (packageRoot) => {
-			const newer = await checkPiUpdate({
-				packageRoot,
-				fetchLatestVersion: async () => "0.80.0",
-			});
-
-			assert.equal(newer.status, "newer");
-			assert.equal(newer.latestVersion, "0.80.0");
-		});
 	});
 
 	it("reports current, skipped, and unknown update states deterministically", async () => {
@@ -85,23 +71,10 @@ describe("pix update", () => {
 
 		assert.match(message, /A new Pix version is available/u);
 		assert.match(message, /latest: 0\.2\.0/u);
+		assert.match(message, /pinned Pi SDK\/dependencies/u);
+		assert.match(message, /global `pi` CLI is not enough/u);
 		assert.match(message, /Exit Pix/u);
 		assert.match(message, /pix update/u);
-		assert.match(message, /Start Pix again/u);
-	});
-
-	it("formats Pi startup update dialog instructions", () => {
-		const message = formatPiStartupUpdateDialog({
-			status: "newer",
-			packageName: "@earendil-works/pi-coding-agent",
-			currentVersion: "0.79.1",
-			latestVersion: "0.80.0",
-			packageRoot: "/tmp/pi",
-		});
-
-		assert.match(message, /A new Pi version is available/u);
-		assert.match(message, /latest: 0\.80\.0/u);
-		assert.match(message, /pi update --self/u);
 		assert.match(message, /Start Pix again/u);
 	});
 

@@ -10,6 +10,8 @@ const OPENAI_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
 const ZAI_QUOTA_URL = "https://api.z.ai/api/monitor/usage/quota/limit";
 const ZHIPU_QUOTA_URL = "https://bigmodel.cn/api/monitor/usage/quota/limit";
 const GOOGLE_QUOTA_API_URL = "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels";
+const GOOGLE_TOKEN_REFRESH_URL = "https://oauth2.googleapis.com/token";
+const GOOGLE_ANTIGRAVITY_USER_AGENT = "antigravity/1.11.9 windows/amd64";
 const REQUEST_TIMEOUT_MS = 10_000;
 const DAY_SECONDS = 86_400;
 const HOUR_SECONDS = 3_600;
@@ -74,6 +76,11 @@ type PiAuthCredential = {
 	expires?: number;
 	key?: string;
 	email?: string;
+	clientId?: string;
+	clientSecret?: string;
+	googleClientId?: string;
+	googleClientSecret?: string;
+	oauthClient?: { clientId?: string; clientSecret?: string };
 	accounts?: AntigravityStoredAccount[];
 	activeIndex?: number;
 };
@@ -154,12 +161,20 @@ type JwtPayload = {
 type AntigravityStoredAccount = {
 	email?: string;
 	refreshToken?: string;
+	refresh?: string;
 	projectId?: string;
 	managedProjectId?: string;
 	enabled?: boolean;
+	clientId?: string;
+	clientSecret?: string;
+	googleClientId?: string;
+	googleClientSecret?: string;
+	oauthClient?: { clientId?: string; clientSecret?: string };
 	cachedQuota?: AntigravityCachedQuota;
 	cachedQuotaUpdatedAt?: number;
 };
+
+type GoogleOAuthClientCredentials = { clientId: string; clientSecret?: string };
 
 type AntigravityCachedQuotaBucket = {
 	remainingFraction?: number;
@@ -173,6 +188,8 @@ type AntigravityQuotaAccount = {
 	readonly email?: string;
 	readonly refreshToken: string;
 	readonly accessToken?: string;
+	readonly clientId?: string;
+	readonly clientSecret?: string;
 	readonly cachedQuota?: AntigravityCachedQuota;
 	readonly cachedQuotaUpdatedAt?: number;
 	readonly projectId: string;
@@ -595,11 +612,11 @@ export function googleAntigravityUsageStatusFromResponse(
 	now = Date.now(),
 ): ModelUsageStatus | undefined {
 	const quotaInfo = data.models[descriptor.quotaModelKey]?.quotaInfo;
-	if (!quotaInfo || !Number.isFinite(quotaInfo.remainingFraction)) return undefined;
+	if (!quotaInfo) return undefined;
 
 	const resetAt = parseResetTime(quotaInfo.resetTime, now);
 	const window = {
-		remainingPercent: clampPercent(Math.round((quotaInfo.remainingFraction ?? 0) * 100)),
+		remainingPercent: quotaRemainingPercent(quotaInfo),
 		resetAt,
 		windowSeconds: Math.max(0, Math.round((resetAt - now) / 1000)),
 	};
@@ -620,12 +637,8 @@ async function queryGoogleAntigravityModelUsage(
 	descriptor: Extract<ModelUsageDescriptor, { kind: "google-antigravity" }>,
 ): Promise<ModelUsageStatus | undefined> {
 	const now = Date.now();
-	const cachedResponse = googleQuotaResponseFromCachedQuota(descriptor.account.cachedQuota, descriptor.account.cachedQuotaUpdatedAt, now);
-	if (cachedResponse) return googleAntigravityUsageStatusFromResponse(cachedResponse, descriptor, now);
-
-	if (!descriptor.account.accessToken) return undefined;
-	const response = await fetchGoogleAntigravityQuota(descriptor.account.accessToken, descriptor.account.projectId);
-	return googleAntigravityUsageStatusFromResponse(response, descriptor);
+	const response = await fetchGoogleAntigravityQuotaForAccount(descriptor.account, now);
+	return googleAntigravityUsageStatusFromResponse(response, descriptor, now);
 }
 
 const GOOGLE_ACCOUNT_QUOTA_WINDOWS = [
@@ -641,13 +654,8 @@ async function queryGoogleAntigravityAccountUsage(now: number): Promise<AccountU
 	const results = await Promise.all(accounts.map(async (account) => {
 		const accountLabel = account.email ?? maskCredential(account.refreshToken);
 		try {
-			const response = account.cachedQuota ? googleQuotaResponseFromCachedQuota(account.cachedQuota, account.cachedQuotaUpdatedAt, now) : undefined;
-			const windows = response ? googleAccountWindowsFromResponse(response, now) : [];
-
-			if (windows.length === 0 && account.accessToken) {
-				const liveResponse = await fetchGoogleAntigravityQuota(account.accessToken, account.projectId);
-				windows.push(...googleAccountWindowsFromResponse(liveResponse, now));
-			}
+			const response = await fetchGoogleAntigravityQuotaForAccount(account, now);
+			const windows = googleAccountWindowsFromResponse(response, now);
 
 			return {
 				account: accountLabel,
@@ -676,6 +684,7 @@ function readActiveAntigravityQuotaAccount(): AntigravityQuotaAccount | undefine
 function readAllAntigravityQuotaAccounts(): AntigravityQuotaAccount[] {
 	const credential = readPiAuthSync().antigravity;
 	if (!credential) return [];
+	const credentialClient = getGoogleOAuthClientCredentials(credential);
 
 	const accounts = storedAntigravityAccounts(credential);
 	if (accounts.length > 0) {
@@ -683,6 +692,7 @@ function readAllAntigravityQuotaAccounts(): AntigravityQuotaAccount[] {
 		const activeAccess = antigravityAccessFromCredential(credential);
 		return accounts.map((account, accountIndex) => antigravityQuotaAccount(account, {
 			...(credential.email ? { fallbackEmail: credential.email } : {}),
+			...(credentialClient ? { clientCredentials: credentialClient } : {}),
 			...(accountIndex === activeIndex && activeAccess ? { accessToken: activeAccess.accessToken } : {}),
 			accountIndex,
 			accountCount: accounts.length,
@@ -693,6 +703,7 @@ function readAllAntigravityQuotaAccounts(): AntigravityQuotaAccount[] {
 	const fallbackAccess = antigravityAccessFromCredential(credential);
 	const account = fallbackAccount ? antigravityQuotaAccount(fallbackAccount, {
 		...(credential.email ? { fallbackEmail: credential.email } : {}),
+		...(credentialClient ? { clientCredentials: credentialClient } : {}),
 		...(fallbackAccess ? { accessToken: fallbackAccess.accessToken } : {}),
 	}) : undefined;
 	return account ? [account] : [];
@@ -706,9 +717,39 @@ function readPiAuthSync(): PiAuthData {
 	}
 }
 
+function getAccountRefreshToken(account: AntigravityStoredAccount): string | undefined {
+	if (account.refreshToken) return account.refreshToken;
+	if (!account.refresh) return undefined;
+	return splitAntigravityRefresh(account.refresh).refreshToken;
+}
+
+function stringProperty(source: unknown, keys: string[]): string | undefined {
+	if (!source || typeof source !== "object") return undefined;
+	const record = source as Record<string, unknown>;
+	for (const key of keys) {
+		const value = record[key];
+		if (typeof value === "string" && value) return value;
+	}
+	return undefined;
+}
+
+function getGoogleOAuthClientCredentials(...sources: unknown[]): GoogleOAuthClientCredentials | undefined {
+	for (const source of sources) {
+		const nested = source && typeof source === "object"
+			? (source as Record<string, unknown>).oauthClient
+			: undefined;
+		const nestedClientId = stringProperty(nested, ["clientId", "client_id", "id"]);
+		const nestedClientSecret = stringProperty(nested, ["clientSecret", "client_secret", "secret"]);
+		const clientId = nestedClientId ?? stringProperty(source, ["clientId", "client_id", "googleClientId", "google_client_id", "oauthClientId", "oauth_client_id"]);
+		const clientSecret = nestedClientSecret ?? stringProperty(source, ["clientSecret", "client_secret", "googleClientSecret", "google_client_secret", "oauthClientSecret", "oauth_client_secret"]);
+		if (clientId) return { clientId, ...(clientSecret ? { clientSecret } : {}) };
+	}
+	return undefined;
+}
+
 function storedAntigravityAccounts(credential: PiAuthCredential): AntigravityStoredAccount[] {
 	return Array.isArray(credential.accounts)
-		? credential.accounts.filter((account) => account.enabled !== false && !!account.refreshToken)
+		? credential.accounts.filter((account) => account.enabled !== false && !!getAccountRefreshToken(account))
 		: [];
 }
 
@@ -730,17 +771,20 @@ function antigravityAccountFromCredential(credential: PiAuthCredential): Antigra
 
 function antigravityQuotaAccount(
 	account: AntigravityStoredAccount,
-	options: { fallbackEmail?: string; accessToken?: string; accountIndex?: number; accountCount?: number } = {},
+	options: { fallbackEmail?: string; accessToken?: string; clientCredentials?: GoogleOAuthClientCredentials; accountIndex?: number; accountCount?: number } = {},
 ): AntigravityQuotaAccount | undefined {
-	const refreshToken = account.refreshToken;
+	const refreshToken = getAccountRefreshToken(account);
 	if (!refreshToken) return undefined;
 	const email = account.email || options.fallbackEmail;
 	const projectId = account.projectId || account.managedProjectId || DEFAULT_ANTIGRAVITY_PROJECT_ID;
+	const clientCredentials = getGoogleOAuthClientCredentials(account, options.clientCredentials);
 	return {
 		refreshToken,
 		projectId,
 		cacheKey: email ? email.toLowerCase() : shortHash(refreshToken),
 		...(options.accessToken ? { accessToken: options.accessToken } : {}),
+		...(clientCredentials ? { clientId: clientCredentials.clientId } : {}),
+		...(clientCredentials?.clientSecret ? { clientSecret: clientCredentials.clientSecret } : {}),
 		...(account.cachedQuota ? { cachedQuota: account.cachedQuota } : {}),
 		...(typeof account.cachedQuotaUpdatedAt === "number" ? { cachedQuotaUpdatedAt: account.cachedQuotaUpdatedAt } : {}),
 		...(email ? { email } : {}),
@@ -827,13 +871,52 @@ function shortHash(value: string): string {
 	return createHash("sha256").update(value).digest("hex").slice(0, 12);
 }
 
+async function fetchGoogleAntigravityQuotaForAccount(account: AntigravityQuotaAccount, now = Date.now()): Promise<GoogleQuotaResponse> {
+	if (account.accessToken) return await fetchGoogleAntigravityQuota(account.accessToken, account.projectId);
+
+	if (account.clientId) {
+		const { accessToken } = await refreshGoogleAntigravityAccessToken(account);
+		return await fetchGoogleAntigravityQuota(accessToken, account.projectId);
+	}
+
+	const cachedResponse = googleQuotaResponseFromCachedQuota(account.cachedQuota, account.cachedQuotaUpdatedAt, now);
+	if (cachedResponse) return cachedResponse;
+
+	throw new Error("Missing Google OAuth client credentials, cannot query live Antigravity quota.");
+}
+
+async function refreshGoogleAntigravityAccessToken(account: AntigravityQuotaAccount): Promise<{ accessToken: string }> {
+	if (!account.clientId) throw new Error("Missing Google OAuth client id, cannot refresh Antigravity access token.");
+
+	const params = new URLSearchParams({
+		client_id: account.clientId,
+		refresh_token: account.refreshToken,
+		grant_type: "refresh_token",
+	});
+	if (account.clientSecret) params.set("client_secret", account.clientSecret);
+
+	const response = await fetchWithTimeout(GOOGLE_TOKEN_REFRESH_URL, {
+		method: "POST",
+		headers: { "Content-Type": "application/x-www-form-urlencoded" },
+		body: params,
+	});
+	if (!response.ok) {
+		const errorText = await response.text();
+		throw new Error(`Google token refresh failed (${response.status}): ${errorText}`);
+	}
+
+	const data = await response.json() as { access_token?: string };
+	if (!data.access_token) throw new Error("Google token refresh did not return an access token.");
+	return { accessToken: data.access_token };
+}
+
 async function fetchGoogleAntigravityQuota(accessToken: string, projectId: string): Promise<GoogleQuotaResponse> {
 	const response = await fetchWithTimeout(GOOGLE_QUOTA_API_URL, {
 		method: "POST",
 		headers: {
 			"Content-Type": "application/json",
 			Authorization: `Bearer ${accessToken}`,
-			"User-Agent": "antigravity/1.18.3 darwin/arm64",
+			"User-Agent": GOOGLE_ANTIGRAVITY_USER_AGENT,
 		},
 		body: JSON.stringify({ project: projectId }),
 	});
@@ -1015,14 +1098,18 @@ function googleAccountWindowFromResponse(
 	now: number,
 ): AccountUsageLimitWindow | undefined {
 	const quotaInfo = data.models[quotaModelKey]?.quotaInfo;
-	if (!quotaInfo || !Number.isFinite(quotaInfo.remainingFraction)) return undefined;
+	if (!quotaInfo) return undefined;
 	const resetAt = parseResetTime(quotaInfo.resetTime, now);
 	return {
 		label,
-		remainingPercent: clampPercent(Math.round((quotaInfo.remainingFraction ?? 0) * 100)),
+		remainingPercent: quotaRemainingPercent(quotaInfo),
 		resetAt,
 		windowSeconds: Math.max(0, Math.round((resetAt - now) / 1000)),
 	};
+}
+
+function quotaRemainingPercent(quotaInfo: { remainingFraction?: number }): number {
+	return clampPercent(Math.round((Number.isFinite(quotaInfo.remainingFraction) ? quotaInfo.remainingFraction as number : 0) * 100));
 }
 
 function googleAccountWindowsFromResponse(data: GoogleQuotaResponse, now: number): AccountUsageLimitWindow[] {

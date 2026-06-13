@@ -79,15 +79,17 @@ describe.serial("todo tool", () => {
 		expect(tool.promptGuidelines.length).toBeGreaterThan(3);
 		expect(promptGuidelines).toContain("synchronize the plan");
 		expect(promptGuidelines).toContain("include a final todo item in the initial create/batch_create plan");
-		expect(promptGuidelines).toContain("Treat it like any other todo item");
+		expect(promptGuidelines).toContain("Close that report todo immediately before sending the final report to the user");
 		expect(promptGuidelines).toContain("goal, scope, requirements");
 		expect(tool.promptSnippet).toContain("include final report item");
+		expect(tool.promptSnippet).toContain("close it before sending the report");
 
 		const created = await tool.execute("call", { action: "create", subject: "Write tests", description: "cover tools" }, undefined, undefined, {});
 		expect(created.content[0].text).toContain("Created #1");
 		expect(created.content[0].text).toContain("include a final todo item for the user-facing final report");
 		expect(created.content[0].text).toContain("summarize changed files and behavior");
 		expect(created.content[0].text).toContain("never replace the user-facing report with a compression/housekeeping note");
+		expect(created.content[0].text).toContain("Close that report todo immediately before sending the report");
 		expect(created.content[0].text).toContain("none is in_progress");
 		expect(getTodos()).toMatchObject([{ id: 1, subject: "Write tests", status: "pending" }]);
 
@@ -99,6 +101,7 @@ describe.serial("todo tool", () => {
 		expect(updated.content[0].text).not.toContain("user-facing final report");
 		expect(updated.content[0].text).not.toContain("none is in_progress");
 		expect(updated.content[0].text).toContain("before your final response");
+		expect(updated.content[0].text).toContain("If one todo is the final user-facing report step");
 
 		const got = await tool.execute("call", { action: "get", id: 1 }, undefined, undefined, {});
 		expect(got.content[0].text).toContain("writing tests");
@@ -285,6 +288,7 @@ describe.serial("todo tool", () => {
 		expect(batch.content[0].text).toContain("Created 2 tasks: #1, #2");
 		expect(batch.content[0].text).toContain("include a final todo item for the user-facing final report");
 		expect(batch.content[0].text).toContain("summarize changed files and behavior");
+		expect(batch.content[0].text).toContain("Close that report todo immediately before sending the report");
 		expect(getTodos()).toMatchObject([
 			{ id: 1, subject: "Plan release" },
 			{ id: 2, parentId: 1, blockedBy: [1] },

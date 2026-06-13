@@ -256,6 +256,35 @@ describe("model usage status", () => {
 		assert.equal(formatModelUsageStatusLabel(status, now), `user@example.com 99% ████▉ ${formatExpectedResetDuration(now + (6 * 24 + 22) * 60 * 60 * 1000, now)}`);
 	});
 
+	it("treats missing Google Antigravity remaining fraction as exhausted quota", () => {
+		const now = Date.UTC(2026, 0, 1, 0, 0, 0);
+		const descriptor = {
+			kind: "google-antigravity",
+			modelKey: "antigravity/claude@user@example.com",
+			quotaModelKey: "claude-opus-4-6-thinking",
+			account: {
+				email: "user@example.com",
+				refreshToken: "refresh-token",
+				projectId: "project-id",
+				cacheKey: "user@example.com",
+			},
+		} as const satisfies Extract<ModelUsageDescriptor, { kind: "google-antigravity" }>;
+		const response = {
+			models: {
+				"claude-opus-4-6-thinking": {
+					quotaInfo: {
+						resetTime: new Date(now + 7 * 24 * 60 * 60 * 1000).toISOString(),
+					},
+				},
+			},
+		};
+
+		const status = googleAntigravityUsageStatusFromResponse(response, descriptor, now);
+
+		assert.equal(status?.weekly?.remainingPercent, 0);
+		assert.equal(formatModelUsageStatusLabel(status, now), `user@example.com 0%       ${formatExpectedResetDuration(now + 7 * 24 * 60 * 60 * 1000, now)}`);
+	});
+
 	it("formats the local account quota report", () => {
 		const now = Date.UTC(2026, 0, 1, 0, 0, 0);
 		const report: AccountUsageReport = {

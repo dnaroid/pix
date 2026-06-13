@@ -9,6 +9,7 @@ import {
 	type AgentSessionRuntime,
 } from "@earendil-works/pi-coding-agent";
 import type { BindCurrentSessionOptions } from "./session-lifecycle-controller.js";
+import type { AppSessionEventControllerState } from "./session-event-controller.js";
 import { isRecord } from "../guards.js";
 import { createId } from "../id.js";
 import type { Attachment, InputEditorDraftState } from "../../input-editor.js";
@@ -22,6 +23,7 @@ const BACKGROUND_PREWARM_TAB_LIMIT = 2;
 const TAB_ATTENTION_BLINK_KEY = "tab-attention";
 const LOADING_TAB_TITLE_PATTERN = /^loading(?:…|\.\.\.)?$/iu;
 const DEFAULT_SESSION_TITLE_PATTERN = /^session [0-9a-f]{8}$/iu;
+const SESSION_TITLE_HEAD_SCAN_MAX_BYTES = 256 * 1024;
 const SESSION_TITLE_SCAN_MAX_BYTES = 2 * 1024 * 1024;
 
 type PersistedTab = {
@@ -45,6 +47,11 @@ type PersistedSubmittedUserMessage = {
 	images: Array<{ type: "image"; data: string; mimeType: string }>;
 };
 
+type TabSessionView = {
+	entries: Entry[];
+	eventState: AppSessionEventControllerState;
+};
+
 export type TabInputState = InputEditorDraftState;
 
 export type AppTabsControllerHost = {
@@ -63,6 +70,8 @@ export type AppTabsControllerHost = {
 	resetSessionView(): void;
 	loadSessionHistory(): void;
 	loadSessionHistoryAsync(options: { isCancelled: () => boolean; render: () => void; lazyOlderHistory?: boolean }): Promise<boolean>;
+	captureSessionView?(): TabSessionView;
+	restoreSessionView?(view: TabSessionView): void;
 	syncUserSessionEntryMetadata(): void;
 	captureInputState(): TabInputState;
 	restoreInputState(state: TabInputState): void;
@@ -83,6 +92,7 @@ export class AppTabsController {
 	private readonly historyReloadTimersByTabId = new Map<string, Set<ReturnType<typeof setTimeout>>>();
 	private readonly inputStatesByTabId = new Map<string, TabInputState>();
 	private readonly deferredUserMessagesByTabId = new Map<string, SubmittedUserMessage[]>();
+	private readonly sessionViewsByTabId = new Map<string, TabSessionView>();
 	private readonly tabIdsNeedingHistoryReload = new Set<string>();
 	private activeTabId: string | undefined;
 	private pendingActiveTabId: string | undefined;
@@ -643,6 +653,7 @@ export class AppTabsController {
 		const previousTargetActivity = target.activity;
 
 		this.storeActiveRuntime(runtime);
+		this.storeActiveSessionView();
 		this.storeActiveInputState();
 		this.storeActiveDeferredUserMessages();
 		this.activeTabId = target.id;
@@ -651,8 +662,6 @@ export class AppTabsController {
 		this.clearTabAttention(target);
 		this.restoreInputState(target.id);
 		this.host.closeMenusForTabSwitch?.();
-		this.host.resetSessionView();
-		this.restoreDeferredUserMessages(target.id);
 		this.host.setStatus("switching tab");
 		this.host.setSessionActivity("thinking");
 		this.host.render();
@@ -695,7 +704,17 @@ export class AppTabsController {
 		this.restoreInputState(target.id);
 		void this.saveTabs();
 		this.scheduleTabPrewarm();
-		await this.loadActiveSessionHistory(targetRuntime);
+		const cachedView = this.sessionViewsByTabId.get(target.id);
+		if (cachedView && this.host.restoreSessionView) {
+			this.host.restoreSessionView(cachedView);
+			this.restoreDeferredUserMessages(target.id);
+			this.host.setSessionStatus(targetRuntime.session);
+			this.host.setSessionActivity(this.sessionActivity(targetRuntime.session));
+			this.host.render();
+		} else {
+			await this.loadActiveSessionHistory(targetRuntime);
+			this.tabIdsNeedingHistoryReload.delete(target.id);
+		}
 		this.scheduleDelayedHistoryReload(target.id, targetRuntime);
 	}
 
@@ -890,6 +909,11 @@ export class AppTabsController {
 		this.setRuntimeForTab(this.activeTabId, runtime);
 	}
 
+	private storeActiveSessionView(): void {
+		if (!this.activeTabId || !this.host.captureSessionView) return;
+		this.sessionViewsByTabId.set(this.activeTabId, this.host.captureSessionView());
+	}
+
 	private setRuntimeForTab(tabId: string, runtime: AgentSessionRuntime): void {
 		this.runtimesByTabId.set(tabId, runtime);
 		this.observeRuntimeForTab(tabId, runtime);
@@ -898,6 +922,7 @@ export class AppTabsController {
 	private deleteRuntimeForTab(tabId: string): void {
 		this.runtimesByTabId.delete(tabId);
 		this.runtimeLoadsByTabId.delete(tabId);
+		this.sessionViewsByTabId.delete(tabId);
 		this.clearRuntimeRefreshTimers(tabId);
 		this.clearHistoryReloadTimers(tabId);
 		this.tabIdsNeedingHistoryReload.delete(tabId);
@@ -983,12 +1008,16 @@ export class AppTabsController {
 	private scheduleDelayedHistoryReload(tabId: string, runtime: AgentSessionRuntime): void {
 		if (!this.tabIdsNeedingHistoryReload.has(tabId)) return;
 		if (tabId !== this.activeTabId || this.pendingActiveTabId !== undefined) return;
+		if (this.sessionActivity(runtime.session) === "running") {
+			this.clearHistoryReloadTimers(tabId);
+			return;
+		}
 
 		this.clearHistoryReloadTimers(tabId);
 		for (const delayMs of [150, 1000, 3000]) {
 			const timer = setTimeout(() => {
 				this.historyReloadTimersByTabId.get(tabId)?.delete(timer);
-				void this.reloadActiveTabHistoryIfNeeded(tabId, runtime, delayMs === 3000);
+				void this.reloadActiveTabHistoryIfNeeded(tabId, runtime);
 			}, delayMs);
 			timer.unref?.();
 			let timers = this.historyReloadTimersByTabId.get(tabId);
@@ -1000,12 +1029,13 @@ export class AppTabsController {
 		}
 	}
 
-	private async reloadActiveTabHistoryIfNeeded(tabId: string, runtime: AgentSessionRuntime, finalAttempt: boolean): Promise<void> {
+	private async reloadActiveTabHistoryIfNeeded(tabId: string, runtime: AgentSessionRuntime): Promise<void> {
 		if (tabId !== this.activeTabId || this.pendingActiveTabId !== undefined || this.host.runtime() !== runtime) return;
 		if (!this.tabIdsNeedingHistoryReload.has(tabId)) return;
+		if (this.sessionActivity(runtime.session) === "running") return;
 
 		await this.loadActiveSessionHistory(runtime);
-		if (finalAttempt && tabId === this.activeTabId && this.host.runtime() === runtime) {
+		if (tabId === this.activeTabId && this.host.runtime() === runtime) {
 			this.tabIdsNeedingHistoryReload.delete(tabId);
 		}
 	}
@@ -1119,6 +1149,7 @@ export class AppTabsController {
 		this.clearRuntimeSubscriptions();
 		this.inputStatesByTabId.clear();
 		this.deferredUserMessagesByTabId.clear();
+		this.sessionViewsByTabId.clear();
 		const seen = new Set<string>();
 		for (const tab of tabs) {
 			const sessionPath = tab.sessionPath ? resolve(tab.sessionPath) : undefined;
@@ -1600,32 +1631,48 @@ async function readLatestSessionTitle(sessionPath: string): Promise<string | und
 		const { size } = await file.stat();
 		if (size <= 0) return undefined;
 
-		const byteCount = Math.min(size, SESSION_TITLE_SCAN_MAX_BYTES);
-		const buffer = Buffer.alloc(byteCount);
-		await file.read(buffer, 0, byteCount, size - byteCount);
+		const tailByteCount = Math.min(size, SESSION_TITLE_SCAN_MAX_BYTES);
+		const tailTitle = await readSessionTitleChunk(file, size - tailByteCount, tailByteCount, { dropFirstLine: size > tailByteCount });
+		if (tailTitle) return tailTitle;
 
-		const text = buffer.toString("utf8");
-		const lines = text.split("\n");
-		if (size > byteCount) lines.shift();
+		if (size <= tailByteCount) return undefined;
 
-		for (let index = lines.length - 1; index >= 0; index -= 1) {
-			const line = lines[index]?.trim();
-			if (!line) continue;
-
-			let parsed: unknown;
-			try {
-				parsed = JSON.parse(line);
-			} catch {
-				continue;
-			}
-
-			if (!isRecord(parsed) || parsed.type !== "session_info" || typeof parsed.name !== "string") continue;
-			return validSessionTitle(parsed.name);
-		}
+		const headByteCount = Math.min(size - tailByteCount, SESSION_TITLE_HEAD_SCAN_MAX_BYTES);
+		return await readSessionTitleChunk(file, 0, headByteCount, { dropLastLine: headByteCount < size });
 	} catch {
 		return undefined;
 	} finally {
 		await file?.close();
+	}
+}
+
+async function readSessionTitleChunk(
+	file: Awaited<ReturnType<typeof openFile>>,
+	position: number,
+	byteCount: number,
+	options: { dropFirstLine?: boolean; dropLastLine?: boolean } = {},
+): Promise<string | undefined> {
+	if (byteCount <= 0) return undefined;
+	const buffer = Buffer.alloc(byteCount);
+	await file.read(buffer, 0, byteCount, position);
+
+	const lines = buffer.toString("utf8").split("\n");
+	if (options.dropFirstLine) lines.shift();
+	if (options.dropLastLine) lines.pop();
+
+	for (let index = lines.length - 1; index >= 0; index -= 1) {
+		const line = lines[index]?.trim();
+		if (!line) continue;
+
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(line);
+		} catch {
+			continue;
+		}
+
+		if (!isRecord(parsed) || parsed.type !== "session_info" || typeof parsed.name !== "string") continue;
+		return validSessionTitle(parsed.name);
 	}
 
 	return undefined;

@@ -43,7 +43,7 @@ import { searchResultScrollNeedles, searchResultTargetEntry, type SessionSearchR
 import { AppSessionLifecycleController, type BindCurrentSessionOptions } from "./session/session-lifecycle-controller.js";
 import { AppShellController } from "./commands/shell-controller.js";
 import { runInteractiveShellCommand } from "./commands/shell-command.js";
-import { AppSessionEventController } from "./session/session-event-controller.js";
+import { AppSessionEventController, type AppSessionEventControllerState } from "./session/session-event-controller.js";
 import { AppStatusController } from "./screen/status-controller.js";
 import { StatusLineRenderer } from "./rendering/status-line-renderer.js";
 import { AppModelUsageController } from "./model/model-usage-controller.js";
@@ -55,7 +55,7 @@ import { TabLineRenderer } from "./rendering/tab-line-renderer.js";
 import { AppTerminalController } from "./terminal/terminal-controller.js";
 import { TerminalBellSoundController } from "./terminal/terminal-bell-sound-controller.js";
 import { AppToastController } from "./rendering/toast-controller.js";
-import { checkPiUpdate, checkPixUpdate, formatPiStartupUpdateDialog, formatPixStartupUpdateDialog } from "./cli/update.js";
+import { checkPixUpdate, formatPixStartupUpdateDialog } from "./cli/update.js";
 import { AppVoiceController } from "./input/voice-controller.js";
 import { createIsolatedExtensionEventBus } from "./extensions/extension-event-bus.js";
 import { setAppIconTheme } from "./icons.js";
@@ -75,6 +75,11 @@ function normalizeJumpTargetText(text: string): string {
 const SUBAGENTS_LIVE_STATE_EVENT = "pi-tools-suite:async-subagents:live-state";
 const TODO_STATE_EVENT = "pi-tools-suite:todo:state";
 const COALESCED_RENDER_DELAY_MS = 16;
+
+type AppSessionView = {
+	entries: Entry[];
+	eventState: AppSessionEventControllerState;
+};
 
 export class PiUiExtendApp {
 	private readonly entries: Entry[] = [];
@@ -206,6 +211,8 @@ export class PiUiExtendApp {
 			resetSessionView: () => this.resetSessionView(),
 			loadSessionHistory: () => this.loadSessionHistory(),
 			loadSessionHistoryAsync: (options) => this.loadSessionHistoryAsync(options),
+			captureSessionView: () => this.captureSessionView(),
+			restoreSessionView: (view) => this.restoreSessionView(view),
 			syncUserSessionEntryMetadata: () => this.workspaceActions.syncUserSessionEntryMetadata(),
 			captureInputState: () => this.inputEditor.draftState,
 			restoreInputState: (state) => this.restoreTabInputState(state),
@@ -838,18 +845,7 @@ export class PiUiExtendApp {
 		await this.sessionLifecycle.start();
 		this.modelUsageController.startPolling();
 		this.nerdFontController.ensureInstalledOnStartup();
-		void this.checkPiUpdateOnStartup();
 		void this.checkPixUpdateOnStartup();
-	}
-
-	private async checkPiUpdateOnStartup(): Promise<void> {
-		try {
-			const result = await checkPiUpdate();
-			if (result.status !== "newer") return;
-			this.showToast(formatPiStartupUpdateDialog(result), "warning", { variant: "dialog" });
-		} catch {
-			// Startup update checks should never interrupt the TUI.
-		}
 	}
 
 	private async checkPixUpdateOnStartup(): Promise<void> {
@@ -962,6 +958,20 @@ export class PiUiExtendApp {
 
 	private resetSessionView(): void {
 		this.sessionLifecycle.resetSessionView();
+	}
+
+	private captureSessionView(): AppSessionView {
+		return {
+			entries: [...this.entries],
+			eventState: this.sessionEvents.snapshotState(),
+		};
+	}
+
+	private restoreSessionView(view: AppSessionView): void {
+		this.entries.splice(0, this.entries.length, ...view.entries);
+		this.sessionEvents.restoreState(view.eventState);
+		this.conversationViewport.clear();
+		this.workspaceActions.syncUserSessionEntryMetadata();
 	}
 
 	private loadSessionHistory(): void {

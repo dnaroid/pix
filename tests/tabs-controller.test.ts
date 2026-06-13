@@ -170,7 +170,7 @@ describe("AppTabsController", () => {
 		assert.ok(renderCount > 0);
 	});
 
-	it("reloads history after switching back to a tab that finished in the background", async () => {
+	it("reloads history once after switching back to a tab that finished in the background", async () => {
 		const activeRuntime = fakeRuntime("one", "/tmp/one.jsonl") as FakeAgentSessionRuntime;
 		const targetRuntime = fakeRuntime("two", "/tmp/two.jsonl") as FakeAgentSessionRuntime;
 		let currentRuntime: AgentSessionRuntime = activeRuntime;
@@ -220,9 +220,70 @@ describe("AppTabsController", () => {
 		await controller.switchToTab("tab-2");
 		assert.equal(historyLoadCount, 1);
 
-		await waitFor(() => historyLoadCount >= 2, 1_500);
+		await new Promise((resolve) => setTimeout(resolve, 250));
 
-		assert.ok(historyLoadCount >= 2);
+		assert.equal(historyLoadCount, 1);
+	});
+
+	it("does not reload cached history while switching back to a running tab", async () => {
+		const activeRuntime = fakeRuntime("one", "/tmp/one.jsonl");
+		const targetRuntime = fakeRuntime("two", "/tmp/two.jsonl", { isStreaming: true }) as FakeAgentSessionRuntime;
+		let currentRuntime: AgentSessionRuntime = activeRuntime;
+		let historyLoadCount = 0;
+		let resetCount = 0;
+		const controller = new AppTabsController({
+			options: { cwd: "/tmp", themeName: "dark", noSession: true } satisfies AppOptions,
+			blinkController: fakeBlinkController(),
+			runtime: () => currentRuntime,
+			createRuntimeForNewSession: async () => fakeRuntime("new", "/tmp/new.jsonl"),
+			createRuntimeForSession: async () => targetRuntime,
+			activateRuntime: async (runtime) => {
+				currentRuntime = runtime;
+			},
+			disposeRuntime: async () => {},
+			isRunning: () => true,
+			setStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			resetSessionView: () => {
+				resetCount += 1;
+			},
+			loadSessionHistory: () => {},
+			loadSessionHistoryAsync: async () => {
+				historyLoadCount += 1;
+				return true;
+			},
+			syncUserSessionEntryMetadata: () => {},
+			captureSessionView: () => fakeSessionView(),
+			restoreSessionView: () => {},
+			captureInputState: () => ({ text: "", cursor: 0 }),
+			restoreInputState: () => {},
+			addEntry: () => {},
+			showToast: () => {},
+			render: () => {},
+		});
+		const tabs = controller as unknown as {
+			tabItems: SessionTab[];
+			activeTabId: string | undefined;
+			sessionViewsByTabId: Map<string, ReturnType<typeof fakeSessionView>>;
+			setRuntimeForTab(tabId: string, runtime: AgentSessionRuntime): void;
+		};
+		tabs.tabItems.push(
+			{ id: "tab-1", title: "one", status: "active", sessionPath: "/tmp/one.jsonl" },
+			{ id: "tab-2", title: "two", status: "waiting", sessionPath: "/tmp/two.jsonl" },
+		);
+		tabs.activeTabId = "tab-1";
+		tabs.setRuntimeForTab("tab-1", activeRuntime);
+		tabs.setRuntimeForTab("tab-2", targetRuntime);
+		tabs.sessionViewsByTabId.set("tab-2", fakeSessionView());
+		targetRuntime.emitSessionEvent({ type: "agent_end", messages: [], willRetry: false });
+
+		await controller.switchToTab("tab-2");
+		await new Promise((resolve) => setTimeout(resolve, 250));
+
+		assert.equal(currentRuntime, targetRuntime);
+		assert.equal(historyLoadCount, 0);
+		assert.equal(resetCount, 0);
 	});
 
 	it("preserves draft input text and cursor per tab", async () => {
@@ -1159,6 +1220,58 @@ describe("AppTabsController", () => {
 		assert.equal(tab?.titlePlaceholder, undefined);
 	});
 
+	it("refreshes a saved session title from the session header area when the file is large", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "pix-tabs-title-large-"));
+		const sessionPath = join(dir, "019e7d3fabc.jsonl");
+		const tabsPath = join(dir, "tabs.json");
+		const fillerLine = `${JSON.stringify({ type: "custom", id: "filler", parentId: null, timestamp: "2024-01-01T00:00:02.000Z", customType: "filler", data: "x".repeat(1024) })}\n`;
+		await writeFile(sessionPath, [
+			JSON.stringify({ type: "session", version: 3, id: "019e7d3fabc", timestamp: "2024-01-01T00:00:00.000Z", cwd: dir }),
+			JSON.stringify({ type: "session_info", id: "info-1", parentId: null, timestamp: "2024-01-01T00:00:01.000Z", name: "Header area title" }),
+			fillerLine.repeat(2300),
+		].join("\n"), "utf8");
+		await writeFile(tabsPath, JSON.stringify({
+			version: 3,
+			cwd: dir,
+			activePath: sessionPath,
+			tabs: [{ path: sessionPath, title: "session 019e7d3f" }],
+		}), "utf8");
+
+		const runtime = fakeRuntime("019e7d3fabc", sessionPath, { sessionName: undefined });
+		const controller = new AppTabsController({
+			options: { cwd: dir, themeName: "dark", noSession: false } satisfies AppOptions,
+			blinkController: fakeBlinkController(),
+			runtime: () => runtime,
+			createRuntimeForNewSession: async () => fakeRuntime("new", join(dir, "new.jsonl")),
+			createRuntimeForSession: async () => runtime,
+			activateRuntime: async () => {},
+			disposeRuntime: async () => {},
+			isRunning: () => true,
+			setStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			resetSessionView: () => {},
+			loadSessionHistory: () => {},
+			loadSessionHistoryAsync: async () => true,
+			syncUserSessionEntryMetadata: () => {},
+			captureInputState: () => ({ text: "", cursor: 0 }),
+			restoreInputState: () => {},
+			addEntry: () => {},
+			showToast: () => {},
+			render: () => {},
+		});
+		const tabs = controller as unknown as { filePath: () => string };
+		tabs.filePath = () => tabsPath;
+
+		await controller.restoreAfterStartup();
+
+		assert.equal(controller.tabs()[0]?.title, "session 019e7d3f");
+
+		await waitFor(() => controller.tabs()[0]?.title === "Header area title");
+
+		assert.equal(controller.tabs()[0]?.title, "Header area title");
+	});
+
 	it("restores a startup tab as the session id when the session list and runtime still report Loading", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "pix-tabs-runtime-loading-"));
 		const sessionPath = join(dir, "019e7d3fabc.jsonl");
@@ -1930,6 +2043,22 @@ function fakeBlinkController(): AppBlinkController {
 		visible: () => visible,
 		dispose: () => {},
 	} as unknown as AppBlinkController;
+}
+
+function fakeSessionView() {
+	return {
+		entries: [],
+		eventState: {
+			toolEntryIdsByCallId: new Map(),
+			toolMutationPreparationsByCallId: new Map(),
+			olderHistoryLoader: undefined,
+			currentUserEntryId: undefined,
+			currentAssistantEntryId: undefined,
+			currentThinkingEntryId: undefined,
+			assistantTextBuffer: "",
+			entryRenderVersions: new Map(),
+		},
+	};
 }
 
 function submittedMessage(text: string): SubmittedUserMessage {

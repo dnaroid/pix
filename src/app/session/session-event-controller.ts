@@ -19,6 +19,17 @@ type ToolEntryUpdate = {
 	status?: "running" | "done";
 };
 
+export type AppSessionEventControllerState = {
+	toolEntryIdsByCallId: Map<string, string>;
+	toolMutationPreparationsByCallId: Map<string, { userEntryId: string; args: unknown; preparation?: WorkspaceMutationPreparation }>;
+	olderHistoryLoader: SessionHistoryOlderLoader | undefined;
+	currentUserEntryId: string | undefined;
+	currentAssistantEntryId: string | undefined;
+	currentThinkingEntryId: string | undefined;
+	assistantTextBuffer: string;
+	entryRenderVersions: Map<string, number>;
+};
+
 const DCP_MESSAGE_REFERENCE_PREFIX = "[dcp-id]: # (m";
 const DCP_BLOCK_REFERENCE_PREFIX = "[dcp-block-id]: # (b";
 const MAX_HISTORY_WINDOW_ENTRIES = 360;
@@ -66,6 +77,33 @@ export class AppSessionEventController {
 	private assistantTextBuffer = "";
 
 	constructor(private readonly host: AppSessionEventControllerHost) {}
+
+	snapshotState(): AppSessionEventControllerState {
+		return {
+			toolEntryIdsByCallId: new Map(this.toolEntryIdsByCallId),
+			toolMutationPreparationsByCallId: new Map(this.toolMutationPreparationsByCallId),
+			olderHistoryLoader: this.olderHistoryLoader,
+			currentUserEntryId: this.currentUserEntryId,
+			currentAssistantEntryId: this.currentAssistantEntryId,
+			currentThinkingEntryId: this.currentThinkingEntryId,
+			assistantTextBuffer: this.assistantTextBuffer,
+			entryRenderVersions: new Map(this.entryRenderVersions),
+		};
+	}
+
+	restoreState(state: AppSessionEventControllerState): void {
+		this.toolEntryIdsByCallId.clear();
+		for (const [key, value] of state.toolEntryIdsByCallId) this.toolEntryIdsByCallId.set(key, value);
+		this.toolMutationPreparationsByCallId.clear();
+		for (const [key, value] of state.toolMutationPreparationsByCallId) this.toolMutationPreparationsByCallId.set(key, value);
+		this.olderHistoryLoader = state.olderHistoryLoader;
+		this.currentUserEntryId = state.currentUserEntryId;
+		this.currentAssistantEntryId = state.currentAssistantEntryId;
+		this.currentThinkingEntryId = state.currentThinkingEntryId;
+		this.assistantTextBuffer = state.assistantTextBuffer;
+		this.entryRenderVersions.clear();
+		for (const [key, value] of state.entryRenderVersions) this.entryRenderVersions.set(key, value);
+	}
 
 	reset(): void {
 		this.toolEntryIdsByCallId.clear();
