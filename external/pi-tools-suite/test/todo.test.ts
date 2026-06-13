@@ -3,19 +3,9 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createPiAiMock } from "./support/pi-ai-mock.js";
+import { createTypeboxMock } from "./support/typebox-mock.js";
 
-mock.module("typebox", () => ({
-	Type: {
-		Object: (properties: any, options?: any) => ({ kind: "object", properties, options }),
-		Optional: (schema: any) => ({ kind: "optional", schema }),
-		String: (options?: any) => ({ kind: "string", options }),
-		Array: (items: any, options?: any) => ({ kind: "array", items, options }),
-		Number: (options?: any) => ({ kind: "number", options }),
-		Boolean: (options?: any) => ({ kind: "boolean", options }),
-		Record: (key: any, value: any, options?: any) => ({ kind: "record", key, value, options }),
-		Unknown: (options?: any) => ({ kind: "unknown", options }),
-	},
-}));
+mock.module("typebox", () => createTypeboxMock());
 
 mock.module("@earendil-works/pi-ai", () => createPiAiMock());
 

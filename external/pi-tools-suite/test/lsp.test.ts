@@ -2,19 +2,11 @@ import { afterEach, describe, expect, mock, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { createTypeboxMock } from "./support/typebox-mock.js";
 
 const LSP_DIAGNOSTIC_ICON = "\u{f0026}";
 
-mock.module("typebox", () => ({
-	Type: {
-		Object: (properties: any, options?: any) => ({ kind: "object", properties, options }),
-		Optional: (schema: any) => ({ kind: "optional", schema }),
-		String: (options?: any) => ({ kind: "string", options }),
-		Number: (options?: any) => ({ kind: "number", options }),
-		Boolean: (options?: any) => ({ kind: "boolean", options }),
-		Array: (items: any, options?: any) => ({ kind: "array", items, options }),
-	},
-}));
+mock.module("typebox", () => createTypeboxMock());
 
 mock.module("@earendil-works/pi-tui", () => ({
 	Container: class Container { children: any[] = []; addChild(child: any) { this.children.push(child); } },

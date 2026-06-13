@@ -2,17 +2,9 @@ import { afterEach, describe, expect, mock, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { createTypeboxMock } from "./support/typebox-mock.js";
 
-mock.module("typebox", () => ({
-	Type: {
-		Object: (properties: any, options?: any) => ({ kind: "object", properties, options }),
-		Optional: (schema: any) => ({ kind: "optional", schema }),
-		String: (options?: any) => ({ kind: "string", options }),
-		Array: (items: any, options?: any) => ({ kind: "array", items, options }),
-		Number: (options?: any) => ({ kind: "number", options }),
-		Boolean: (options?: any) => ({ kind: "boolean", options }),
-	},
-}));
+mock.module("typebox", () => createTypeboxMock());
 
 const builtinExecutions: Array<{ name: string; args: any; cwd: string }> = [];
 

@@ -3,19 +3,9 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { createPiAiMock } from "./support/pi-ai-mock.js";
+import { createTypeboxMock } from "./support/typebox-mock.js";
 
-mock.module("typebox", () => ({
-	Type: {
-		Object: (properties: any, options?: any) => ({ kind: "object", properties, options }),
-		Optional: (schema: any) => ({ kind: "optional", schema }),
-		String: (options?: any) => ({ kind: "string", options }),
-		Array: (items: any, options?: any) => ({ kind: "array", items, options }),
-		Number: (options?: any) => ({ kind: "number", options }),
-		Boolean: (options?: any) => ({ kind: "boolean", options }),
-		Union: (items: any, options?: any) => ({ kind: "union", items, options }),
-		Literal: (value: any, options?: any) => ({ kind: "literal", value, options }),
-	},
-}));
+mock.module("typebox", () => createTypeboxMock());
 
 mock.module("@earendil-works/pi-ai", () => createPiAiMock());
 
@@ -32,6 +22,7 @@ function builtinTool(name: string) {
 mock.module("@earendil-works/pi-coding-agent", () => ({
 	DEFAULT_MAX_BYTES: 1024 * 1024,
 	DEFAULT_MAX_LINES: 1000,
+	defineTool: (tool: any) => tool,
 	formatSize: (bytes: number) => `${bytes}B`,
 	truncateHead: (content: string) => ({ content, truncated: false, totalLines: content.split("\n").length, outputLines: content.split("\n").length, totalBytes: Buffer.byteLength(content), outputBytes: Buffer.byteLength(content) }),
 	withFileMutationQueue: async (_key: string, fn: () => Promise<unknown>) => fn(),

@@ -46,6 +46,8 @@ export function createPiAiMock(overrides: Record<string, unknown> = {}) {
 			Array: (items: any, options?: any) => ({ kind: "array", items, options }),
 			Number: (options?: any) => ({ kind: "number", options }),
 			Boolean: (options?: any) => ({ kind: "boolean", options }),
+			Record: (key: any, value: any, options?: any) => ({ kind: "record", key, value, options }),
+			Unknown: (options?: any) => ({ kind: "unknown", options }),
 			Union: (items: any, options?: any) => ({ kind: "union", items, options }),
 			Literal: (value: any, options?: any) => ({ kind: "literal", value, options }),
 		},
