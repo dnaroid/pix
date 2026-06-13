@@ -27,7 +27,7 @@ function builtin(name: string) {
 	});
 }
 
-mock.module("@mariozechner/pi-coding-agent", () => ({
+mock.module("@earendil-works/pi-coding-agent", () => ({
 	defineTool: (tool: any) => tool,
 	withFileMutationQueue: async (_key: string, fn: () => Promise<unknown>) => fn(),
 	createReadToolDefinition: builtin("read"),

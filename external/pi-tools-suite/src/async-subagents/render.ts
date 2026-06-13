@@ -1,4 +1,4 @@
-import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { AgentState } from "./lib.js";
 import { modelName, plural, statusGlyph, statusLabel } from "./format.js";
 import type { AgentTaskPreview, SubagentRunRenderDetails } from "./types.js";

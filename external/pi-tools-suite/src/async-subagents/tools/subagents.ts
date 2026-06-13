@@ -1,6 +1,6 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { Type } from "@mariozechner/pi-ai";
-import { Text } from "@mariozechner/pi-tui";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Type } from "@earendil-works/pi-ai";
+import { Text } from "@earendil-works/pi-tui";
 import { asyncSubagentToolDescriptions } from "../../tool-descriptions.js";
 import { hasIndexedProjectRoot } from "../../lib/project.js";
 import type { AgentCompletionHandler } from "../lib.js";

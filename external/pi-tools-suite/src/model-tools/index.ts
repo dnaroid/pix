@@ -11,7 +11,7 @@ import {
   type ExtensionContext,
   type ToolDefinition,
   type ToolRenderResultOptions,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import { realpath } from "node:fs/promises";
 import { resolve } from "node:path";
 import { Type, type TSchema } from "typebox";

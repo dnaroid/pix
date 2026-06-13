@@ -5,7 +5,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { createPiAiMock } from "../support/pi-ai-mock.js";
 
-mock.module("@mariozechner/pi-ai", () => ({
+mock.module("@earendil-works/pi-ai", () => ({
 	Type: {
 		Object: (properties: any, options?: any) => ({ kind: "object", properties, options }),
 		Optional: (schema: any) => ({ kind: "optional", schema }),
@@ -16,7 +16,7 @@ mock.module("@mariozechner/pi-ai", () => ({
 	},
 }));
 
-mock.module("@mariozechner/pi-tui", () => ({
+mock.module("@earendil-works/pi-tui", () => ({
 	Container: class Container {
 		children: any[] = [];
 		addChild(child: any) { this.children.push(child); }

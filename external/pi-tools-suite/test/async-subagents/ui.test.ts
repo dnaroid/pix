@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { AgentState } from "../../src/async-subagents/lib.js";
 
-mock.module("@mariozechner/pi-tui", () => ({
+mock.module("@earendil-works/pi-tui", () => ({
 	Container: class Container {
 		children: any[] = [];
 		addChild(child: any) { this.children.push(child); }

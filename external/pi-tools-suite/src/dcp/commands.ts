@@ -1,5 +1,5 @@
-import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent"
-import type { AutocompleteItem } from "@mariozechner/pi-tui"
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent"
+import type { AutocompleteItem } from "@earendil-works/pi-tui"
 import type { DcpState } from "./state.js"
 import type { DcpConfig } from "./config.js"
 import type { DcpNudgeType } from "./pruner-types.js"
