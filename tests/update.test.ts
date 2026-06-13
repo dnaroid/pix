@@ -6,6 +6,8 @@ import { describe, it } from "node:test";
 
 import {
 	checkPixUpdate,
+	checkPiUpdate,
+	formatPiStartupUpdateToast,
 	formatPixUpdateCheck,
 	formatPixStartupUpdateDialog,
 	getPixSelfUpdateCommand,
@@ -76,6 +78,23 @@ describe("pix update", () => {
 		assert.match(message, /Exit Pix/u);
 		assert.match(message, /pix update/u);
 		assert.match(message, /Start Pix again/u);
+	});
+
+	it("checks bundled Pi package updates and formats startup toast", async () => {
+		await withPackageJson({ name: "@earendil-works/pi-coding-agent", version: "0.79.3" }, async (packageRoot) => {
+			const result = await checkPiUpdate({
+				packageRoot,
+				fetchLatestVersion: async () => "0.79.4",
+			});
+
+			assert.equal(result.status, "newer");
+			assert.equal(result.packageName, "@earendil-works/pi-coding-agent");
+			assert.equal(result.currentVersion, "0.79.3");
+			assert.equal(result.latestVersion, "0.79.4");
+			assert.match(formatPiStartupUpdateToast(result), /Pi 0\.79\.4 is available/u);
+			assert.match(formatPiStartupUpdateToast(result), /Pix bundles Pi 0\.79\.3/u);
+			assert.match(formatPiStartupUpdateToast(result), /matching Pix update/u);
+		});
 	});
 
 	it("does not offer npm updates for private source packages", async () => {

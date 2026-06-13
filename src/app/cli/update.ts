@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -7,6 +8,8 @@ import { getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
 
 const DEFAULT_UPDATE_TIMEOUT_MS = 10_000;
 const NPM_REGISTRY_URL = "https://registry.npmjs.org";
+const PI_PACKAGE_NAME = "@earendil-works/pi-coding-agent";
+const requireFromUpdateModule = createRequire(import.meta.url);
 
 type PixUpdateTestDeps = {
 	checkPixUpdate: typeof checkPixUpdate;
@@ -60,6 +63,10 @@ export type PixUpdateCheckOptions = {
 	fetchLatestVersion?: (packageName: string, currentVersion: string, timeoutMs: number) => Promise<string | undefined>;
 };
 
+export type PiUpdateCheckOptions = PixUpdateCheckOptions & {
+	pixPackageRoot?: string;
+};
+
 export function pixUpdateUsage(): string {
 	return `Usage: pix update [--check] [--force]
 
@@ -105,6 +112,12 @@ export function getPixPackageVersion(packageRoot?: string): string {
 
 export async function checkPixUpdate(options: PixUpdateCheckOptions = {}): Promise<PixUpdateCheckResult> {
 	const packageInfo = readPixPackageInfo(options.packageRoot);
+	return await checkPackageUpdate(packageInfo, options);
+}
+
+export async function checkPiUpdate(options: PiUpdateCheckOptions = {}): Promise<PixUpdateCheckResult> {
+	const packageRoot = options.packageRoot ?? findPiPackageRoot(options.pixPackageRoot);
+	const packageInfo = readPackageInfo(packageRoot, PI_PACKAGE_NAME);
 	return await checkPackageUpdate(packageInfo, options);
 }
 
@@ -201,6 +214,12 @@ export function formatPixStartupUpdateDialog(result: PixUpdateCheckResult): stri
 	return lines.join("\n");
 }
 
+export function formatPiStartupUpdateToast(result: PixUpdateCheckResult): string {
+	return result.latestVersion
+		? `Pi ${result.latestVersion} is available; Pix bundles Pi ${result.currentVersion}. Waiting for a matching Pix update.`
+		: `Pi update detected; Pix bundles Pi ${result.currentVersion}. Waiting for a matching Pix update.`;
+}
+
 export function getPixSelfUpdateCommand(packageName: string, latestVersion?: string, packageRoot = readPixPackageInfo().packageRoot): PixSelfUpdateCommand | undefined {
 	if (!packageRootLooksPackageManaged(packageRoot)) return undefined;
 
@@ -291,6 +310,13 @@ function findPixPackageRoot(): string {
 		if (nextDir === currentDir) throw new Error("Could not find pix package.json");
 		currentDir = nextDir;
 	}
+}
+
+function findPiPackageRoot(pixPackageRoot = readPixPackageInfo().packageRoot): string {
+	const packageJsonPath = requireFromUpdateModule.resolve(`${PI_PACKAGE_NAME}/package.json`, {
+		paths: [pixPackageRoot],
+	});
+	return dirname(packageJsonPath);
 }
 
 async function fetchLatestNpmVersion(packageName: string, currentVersion: string, timeoutMs: number): Promise<string | undefined> {
