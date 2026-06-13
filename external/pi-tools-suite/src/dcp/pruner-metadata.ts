@@ -149,11 +149,11 @@ export function resolveContextThresholds(
     minContextPercent: min ??
       resolveThresholdValue(config.compress.minContextLimit) ??
       resolveThresholdValue(config.compress.minContextPercent) ??
-      0.4,
+      0.25,
     maxContextPercent: max ??
       resolveThresholdValue(config.compress.maxContextLimit) ??
       resolveThresholdValue(config.compress.maxContextPercent) ??
-      0.8,
+      0.65,
   };
 }
 

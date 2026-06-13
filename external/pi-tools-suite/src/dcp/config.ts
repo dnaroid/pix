@@ -24,8 +24,8 @@ export interface DcpConfig {
     modelMaxContextLimits?: Record<string, number | string>
     modelMinContextLimits?: Record<string, number | string>
     summaryBuffer: boolean
-    nudgeFrequency: number // inject nudge every N context events (default: 5)
-    iterationNudgeThreshold: number // nudge after N tool calls since last user msg (default: 15)
+    nudgeFrequency: number // inject nudge every N context events (default: 2)
+    iterationNudgeThreshold: number // nudge after N tool calls since last user msg (default: 8)
     nudgeForce: "strong" | "soft"
     protectedTools: string[] // these tool outputs always protected from pruning
     protectTags: boolean
@@ -81,27 +81,27 @@ const DEFAULT_CONFIG: DcpConfig = {
     automaticStrategies: true,
   },
   compress: {
-    maxContextPercent: 0.8,
-    minContextPercent: 0.4,
+    maxContextPercent: 0.65,
+    minContextPercent: 0.25,
     modelMaxContextPercent: {},
     modelMinContextPercent: {},
     summaryBuffer: true,
-    nudgeFrequency: 5,
-    iterationNudgeThreshold: 15,
+    nudgeFrequency: 2,
+    iterationNudgeThreshold: 8,
     nudgeForce: "soft",
     protectedTools: ["compress", "write", "edit"],
     protectTags: false,
     protectUserMessages: false,
     autoCandidates: {
       enabled: true,
-      minContextPercent: 0.4,
+      minContextPercent: 0.25,
       keepRecentTurns: 2,
       minMessages: 6,
       minTokens: 1500,
     },
     messageMode: {
       enabled: true,
-      minContextPercent: 0.4,
+      minContextPercent: 0.25,
       keepRecentTurns: 2,
       mediumTokens: 500,
       highTokens: 5000,

@@ -291,11 +291,11 @@ export function getNudgeType(
     config.compress;
   const minContextPercent = coercePercentThreshold(
     thresholds.minContextPercent ?? config.compress.minContextPercent,
-    0.4,
+    0.25,
   );
   const maxContextPercent = coercePercentThreshold(
     thresholds.maxContextPercent ?? config.compress.maxContextPercent,
-    0.8,
+    0.65,
   );
   const cadence = Math.max(1, Math.floor(nudgeFrequency));
 

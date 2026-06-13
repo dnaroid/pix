@@ -174,6 +174,7 @@ You are at or beyond the configured max context threshold. This is an emergency 
 You MUST use the \`compress\` tool now. Do not continue normal exploration until compression is handled.
 
 If you are in the middle of a critical atomic operation, finish that atomic step first, then compress immediately.
+If a completed implementation+verification slice exists, compress it before replying or starting another task.
 
 RANGE STRATEGY (MANDATORY)
 Prioritize one large, closed, high-yield compression range first.
@@ -201,6 +202,8 @@ ACTION REQUIRED: Context usage is high.
 Before doing more exploration, look for a closed, self-contained range that no longer needs to stay raw and compress it now.
 
 Do not treat this as optional housekeeping. If any completed research, implementation, verification, CI-log inspection, or dead-end debugging slice is present, call the \`compress\` tool before continuing normal work.
+If a completed implementation+verification slice exists, compress it before replying or starting another task.
+High-priority stale tool outputs must be compressed once no exact raw text is needed.
 
 RANGE SELECTION
 Prefer older, resolved history. Avoid the newest active working slice unless it is clearly done.
@@ -222,6 +225,7 @@ If any range is cleanly closed and unlikely to be needed again, use the \`compre
 If direction has shifted, compress earlier ranges that are now less relevant.
 
 Do not defer this across another batch of searches, reads, CI log fetches, or tests. The next safe action should be compression whenever a closed slice exists.
+High-priority stale tool outputs must be compressed once no exact raw text is needed.
 
 Prefer small, closed-range compressions over one broad compression.
 Use message-mode compression for isolated large stale messages.
@@ -238,6 +242,7 @@ ACTION REQUIRED: You've been iterating for a while after the last user message.
 Pause before the next non-atomic tool call. If there is a closed portion that is unlikely to be referenced immediately (for example, finished research before implementation, completed CI-log triage, a verified fix, or a dead-end investigation), use the \`compress\` tool on it now.
 
 Do not keep accumulating tool outputs while a completed slice remains raw. If a range is closed, compression is the next safe action.
+If a completed implementation+verification slice exists, compress it before replying or starting another task.
 
 Prefer multiple short, closed ranges over one large range when several independent slices are ready.
 Use message-mode compression for isolated large stale messages.
