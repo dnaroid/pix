@@ -41,7 +41,7 @@ describe("TabLineRenderer", () => {
 
 	it("renders default generated session titles as session ids", () => {
 		const renderer = tabLineRenderer([
-			{ id: "tab-1", status: "active", title: "session 019e7d3f", sessionPath: "/tmp/one.jsonl" },
+			{ id: "tab-1", status: "active", title: "019e7d3f", sessionPath: "/tmp/one.jsonl" },
 			{ id: "tab-2", status: "waiting", title: "Session 019e7d3f", sessionPath: "/tmp/two.jsonl" },
 			{ id: "tab-3", status: "waiting", title: "session work notes", sessionPath: "/tmp/three.jsonl" },
 		]);
@@ -49,19 +49,19 @@ describe("TabLineRenderer", () => {
 		const layout = renderer.layout(80);
 
 		assert.doesNotMatch(layout.text, /New/u);
-		assert.ok(layout.text.includes("session 019e7d3f"));
+		assert.ok(layout.text.includes("019e7d3f"));
 		assert.ok(layout.text.includes("Session 019e7d3f"));
 		assert.ok(layout.text.includes("session work notes"));
 	});
 
 	it("renders startup-loading default generated session titles as session ids", () => {
 		const renderer = tabLineRenderer([
-			{ id: "tab-1", status: "active", title: "session 019e7d3f", titlePlaceholder: "loading", sessionPath: "/tmp/one.jsonl" },
+			{ id: "tab-1", status: "active", title: "019e7d3f", titlePlaceholder: "loading", sessionPath: "/tmp/one.jsonl" },
 		]);
 
 		const layout = renderer.layout(80);
 
-		assert.ok(layout.text.includes("session 019e7d3f"));
+		assert.ok(layout.text.includes("019e7d3f"));
 		assert.doesNotMatch(layout.text, /Loading…/u);
 		assert.doesNotMatch(layout.text, /New/u);
 	});
@@ -178,8 +178,19 @@ describe("TabLineRenderer", () => {
 
 		const layout = renderer.layout(80);
 
-		assert.deepEqual(statusSegmentForegrounds(layout), [THEMES.dark.colors.statusDotBase, THEMES.dark.colors.statusDotBase]);
+		assert.deepEqual(statusSegmentForegrounds(layout), [THEMES.dark.colors.statusDotBase, THEMES.dark.colors.success]);
 		assert.equal(layout.text.split(APP_ICONS.checkCircle).length - 1, 2);
+	});
+
+	it("renders completed inactive tabs with a green checkmark", () => {
+		const renderer = tabLineRenderer([
+			{ id: "tab-1", status: "active", title: "Current", activity: "idle", sessionPath: "/tmp/one.jsonl" },
+			{ id: "tab-2", status: "waiting", title: "Completed", activity: "idle", sessionPath: "/tmp/two.jsonl" },
+		]);
+
+		const layout = renderer.layout(80);
+
+		assert.deepEqual(statusSegmentForegrounds(layout), [THEMES.dark.colors.statusDotBase, THEMES.dark.colors.success]);
 	});
 
 	it("renders a single tab and keeps the new-tab button", () => {

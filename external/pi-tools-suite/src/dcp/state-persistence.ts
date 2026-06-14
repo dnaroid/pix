@@ -1,7 +1,7 @@
 import { mkdir, readFile, readdir, stat, unlink, writeFile } from "node:fs/promises"
 import type { Dirent } from "node:fs"
 import { dirname, join } from "node:path"
-import { SessionManager, type ExtensionContext } from "@earendil-works/pi-coding-agent"
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent"
 import { hashSerializedState, serializeState, type DcpState, type SerializedDcpState } from "./state.js"
 
 const DCP_STATE_DIR = "dcp-state"
@@ -13,6 +13,35 @@ let saveQueue: Promise<void> = Promise.resolve()
 
 function safeSessionFileName(sessionId: string): string {
 	return sessionId.replace(/[^a-zA-Z0-9._-]/g, "_") + DCP_STATE_EXT
+}
+
+async function listSessionIds(sessionDir: string): Promise<string[]> {
+	let entries: Dirent[]
+	try {
+		entries = await readdir(sessionDir, { withFileTypes: true })
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return []
+		throw error
+	}
+
+	const sessionIds = new Set<string>()
+	for (const entry of entries) {
+		if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue
+
+		const sessionPath = join(sessionDir, entry.name)
+		try {
+			const firstLine = (await readFile(sessionPath, "utf8")).split("\n", 1)[0]?.trim()
+			if (!firstLine) continue
+			const parsed = JSON.parse(firstLine) as { type?: string; id?: unknown }
+			if (parsed.type === "session" && typeof parsed.id === "string" && parsed.id.length > 0) {
+				sessionIds.add(parsed.id)
+			}
+		} catch {
+			// Ignore malformed or transient session files during cleanup.
+		}
+	}
+
+	return [...sessionIds]
 }
 
 function resolveDcpStateDir(ctx: ExtensionContext): string | undefined {
@@ -56,9 +85,9 @@ export async function cleanupStaleDcpStateFiles(ctx: ExtensionContext): Promise<
 	const liveStateFiles = new Set<string>()
 	if (currentSessionId) liveStateFiles.add(safeSessionFileName(currentSessionId))
 
-	const sessions = await SessionManager.list(ctx.cwd, sessionDir)
-	for (const session of sessions) {
-		liveStateFiles.add(safeSessionFileName(session.id))
+	const sessionIds = await listSessionIds(sessionDir)
+	for (const sessionId of sessionIds) {
+		liveStateFiles.add(safeSessionFileName(sessionId))
 	}
 
 	let entries: Dirent[]

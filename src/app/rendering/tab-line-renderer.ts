@@ -235,6 +235,10 @@ export class TabLineRenderer {
 			return { foreground: this.host.theme.colors.success, bold: true };
 		}
 
+		if (tab.status !== "active") {
+			return { foreground: this.host.theme.colors.success };
+		}
+
 		return { foreground: this.host.theme.colors.statusDotBase };
 	}
 

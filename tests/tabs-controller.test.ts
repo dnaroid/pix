@@ -157,7 +157,7 @@ describe("AppTabsController", () => {
 
 		controller.syncActiveTabFromRuntime({ save: false });
 		const tabs = controller as unknown as { tabItems: SessionTab[] };
-		assert.equal(tabs.tabItems[0]?.title, "session one");
+		assert.equal(tabs.tabItems[0]?.title, "one");
 
 		runtime.emitSessionEvent({ type: "agent_end", messages: [], willRetry: false });
 		setTimeout(() => {
@@ -1285,7 +1285,7 @@ describe("AppTabsController", () => {
 		await controller.openNewTab();
 
 		const newTab = tabs.tabItems.find((tab) => tab.sessionPath === resolve("/tmp/two.jsonl"));
-		assert.equal(newTab?.title, "session 019e7d3f");
+		assert.equal(newTab?.title, "019e7d3f");
 		assert.equal(newTab?.titlePlaceholder, "new");
 	});
 
@@ -1317,7 +1317,7 @@ describe("AppTabsController", () => {
 		controller.syncActiveTabFromRuntime({ save: false });
 
 		const tab = controller.tabs()[0];
-		assert.equal(tab?.title, "session 019e7d3f");
+		assert.equal(tab?.title, "019e7d3f");
 		assert.equal(tab?.titlePlaceholder, "loading");
 	});
 
@@ -1358,7 +1358,7 @@ describe("AppTabsController", () => {
 		await controller.restoreAfterStartup();
 
 		const tab = controller.tabs()[0];
-		assert.equal(tab?.title, "session 019e7d3f");
+		assert.equal(tab?.title, "019e7d3f");
 		assert.equal(tab?.titlePlaceholder, undefined);
 	});
 
@@ -1407,7 +1407,7 @@ describe("AppTabsController", () => {
 		await controller.restoreAfterStartup();
 
 		const tab = controller.tabs()[0];
-		assert.equal(tab?.title, "session 019e7d3f");
+		assert.equal(tab?.title, "019e7d3f");
 		assert.equal(tab?.titlePlaceholder, undefined);
 	});
 
@@ -1455,7 +1455,7 @@ describe("AppTabsController", () => {
 
 		await controller.restoreAfterStartup();
 
-		assert.equal(controller.tabs()[0]?.title, "session 019e7d3f");
+		assert.equal(controller.tabs()[0]?.title, "019e7d3f");
 
 		await waitFor(() => controller.tabs()[0]?.title === "Restored real title");
 
@@ -1478,7 +1478,7 @@ describe("AppTabsController", () => {
 			version: 3,
 			cwd: dir,
 			activePath: sessionPath,
-			tabs: [{ path: sessionPath, title: "session 019e7d3f" }],
+			tabs: [{ path: sessionPath, title: "019e7d3f" }],
 		}), "utf8");
 
 		const runtime = fakeRuntime("019e7d3fabc", sessionPath, { sessionName: undefined });
@@ -1509,7 +1509,7 @@ describe("AppTabsController", () => {
 
 		await controller.restoreAfterStartup();
 
-		assert.equal(controller.tabs()[0]?.title, "session 019e7d3f");
+		assert.equal(controller.tabs()[0]?.title, "019e7d3f");
 
 		await waitFor(() => controller.tabs()[0]?.title === "Header area title");
 
@@ -1561,7 +1561,7 @@ describe("AppTabsController", () => {
 		await controller.restoreAfterStartup();
 
 		const tab = controller.tabs()[0];
-		assert.equal(tab?.title, "session 019e7d3f");
+		assert.equal(tab?.title, "019e7d3f");
 		assert.equal(tab?.titlePlaceholder, undefined);
 	});
 

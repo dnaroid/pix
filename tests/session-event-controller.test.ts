@@ -404,6 +404,65 @@ describe("AppSessionEventController", () => {
 		assert.equal(entries[0]?.kind === "assistant" ? entries[0].text : undefined, "answer\nnext");
 	});
 
+	it("reconciles streamed assistant text from text_end so missing tail chunks are restored", () => {
+		const entries: Entry[] = [];
+		const controller = createController(entries);
+
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "text_start", contentIndex: 0, partial: { role: "assistant", content: [] } },
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "visible prefix", partial: { role: "assistant", content: [{ text: "visible prefix" }] } },
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "text_end", contentIndex: 0, content: "visible prefix and restored suffix", partial: { role: "assistant", content: [{ text: "visible prefix and restored suffix" }] } },
+		} as unknown as AgentSessionEvent);
+
+		assert.equal(entries.length, 1);
+		assert.equal(entries[0]?.kind === "assistant" ? entries[0].text : undefined, "visible prefix and restored suffix");
+	});
+
+	it("creates pending tool entries from toolcall_end and reuses them for execution events", () => {
+		const entries: Entry[] = [];
+		const controller = createController(entries);
+
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "text_delta", delta: "Before tool" },
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: {
+				type: "toolcall_end",
+				contentIndex: 1,
+				toolCall: { type: "toolCall", id: "call-1", name: "shell", arguments: { command: "echo ok" } },
+				partial: { role: "assistant", content: [] },
+			},
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "tool_execution_start",
+			toolCallId: "call-1",
+			toolName: "shell",
+			args: { command: "echo ok" },
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "tool_execution_end",
+			toolCallId: "call-1",
+			toolName: "shell",
+			result: { content: [{ type: "text", text: "ok" }] },
+			isError: false,
+		} as unknown as AgentSessionEvent);
+
+		assert.deepEqual(entries.map((entry) => entry.kind), ["assistant", "tool"]);
+		assert.equal(entries[0]?.kind === "assistant" ? entries[0].text : undefined, "Before tool");
+		assert.equal(entries[1]?.kind === "tool" ? entries[1].toolCallId : undefined, "call-1");
+		assert.equal(entries[1]?.kind === "tool" ? entries[1].status : undefined, "done");
+		assert.equal(entries[1]?.kind === "tool" ? entries[1].output : undefined, "ok");
+	});
+
 	it("records workspace mutations and user metadata from session events", () => {
 		const entries: Entry[] = [];
 		const preparedCalls: Array<{ toolName: string; args: unknown }> = [];

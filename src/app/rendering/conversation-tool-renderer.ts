@@ -1,7 +1,7 @@
-import { resolveColor, resolveToolRule, type PixConfig, type ResolvedToolRule } from "../../config.js";
+import { resolveColor, resolveToolRule, type PixConfig } from "../../config.js";
 import { formatMarkdownTables, markdownSyntaxHighlightsForText } from "../../markdown-format.js";
 import { renderToolDisplay } from "../../tool-renderers/index.js";
-import { DEFAULT_THINKING_TOOL_RULE, SUBAGENT_STATUSES, THINKING_TOOL_NAME, TODO_TOOL_NAME } from "../constants.js";
+import { SUBAGENT_STATUSES, THINKING_TOOL_NAME, TODO_TOOL_NAME } from "../constants.js";
 import { attachImageClickTargets } from "../screen/image-click-targets.js";
 import { formatStructuredText } from "./message-content.js";
 import {
@@ -81,7 +81,7 @@ export function renderThinkingEntry(
 	width: number,
 	options: ConversationToolRenderOptions,
 ): RenderedLine[] {
-	const rule = resolveThinkingToolRule(options.pixConfig);
+	const rule = resolveToolRule(THINKING_TOOL_NAME, options.pixConfig.toolRenderer);
 	const markdownText = entry.text ? formatMarkdownTables(entry.text, Math.max(1, width - 2)) : "";
 	const expandedText = trimTrailingBlankLines(markdownText);
 	const forceExpanded = Boolean(options.allThinkingExpanded);
@@ -98,7 +98,7 @@ export function renderThinkingEntry(
 		expandedText: compactExpandedText || "(empty)",
 		bodyWrap: "word",
 		syntaxHighlight: compactExpandedText ? markdownSyntaxHighlightsForText(compactExpandedText) : undefined,
-	}, rule, width, options.colors, { superCompact: Boolean(options.superCompactTools && !forceExpanded), backgroundOverride: options.colors.thinkingMessageBackground, skipHeaderBackground: true, showGutter: false });
+	}, rule, width, options.colors, { superCompact: Boolean(options.superCompactTools && !forceExpanded), backgroundOverride: options.colors.thinkingMessageBackground, showGutter: true });
 }
 
 function trimTrailingBlankLines(text: string): string {
@@ -236,18 +236,4 @@ function formatSubagentToolLine(agent: SubagentAgentState, preview: SubagentTask
 	if (agent.nextRetryAt) parts.push(`nextRetry:${agent.nextRetryAt}`);
 	if (agent.retryCount !== undefined) parts.push(`retry:${agent.retryCount}`);
 	return parts.join(" ");
-}
-
-function resolveThinkingToolRule(pixConfig: PixConfig): ResolvedToolRule {
-	const configured = pixConfig.toolRenderer.tools[THINKING_TOOL_NAME];
-	if (!configured) return DEFAULT_THINKING_TOOL_RULE;
-
-	const rule: ResolvedToolRule = {
-		previewLines: configured.previewLines ?? DEFAULT_THINKING_TOOL_RULE.previewLines,
-		direction: configured.direction ?? DEFAULT_THINKING_TOOL_RULE.direction,
-		color: configured.color ?? DEFAULT_THINKING_TOOL_RULE.color,
-	};
-	if (configured.compactHidden != null) rule.compactHidden = configured.compactHidden;
-	if (configured.hidden != null) rule.hidden = configured.hidden;
-	return rule;
 }

@@ -113,6 +113,7 @@ const DEFAULT_TOOL_RENDERER: ToolRendererConfig = {
 		color: "toolTitle",
 	},
 	tools: {
+		thinking: { previewLines: 0, direction: "head", color: "thinkingForeground" },
 		bash: { previewLines: 6, direction: "tail", color: "warning" },
 		Bash: { previewLines: 6, direction: "tail", color: "warning" },
 		shell: { previewLines: 6, direction: "tail", color: "warning" },

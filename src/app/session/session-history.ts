@@ -3,6 +3,7 @@ import { isRecord } from "../guards.js";
 import { createId } from "../id.js";
 import { isOnlyHiddenMetadata } from "../../markdown-format.js";
 import { extractImageContents, renderContent, renderUserMessageContent, stringifyUnknown } from "../rendering/message-content.js";
+import { THINKING_TOOL_NAME } from "../constants.js";
 import { PIX_SESSION_ENTRY_ID_FIELD, PIX_SYSTEM_MESSAGE_CUSTOM_TYPE } from "./pix-system-message.js";
 
 type ToolResultRecord = {
@@ -268,7 +269,13 @@ function renderAssistantHistoryMessage(
 		if (block.type === "toolCall") {
 			// Flush accumulated text/thinking before tool call.
 			if (thinkingText) {
-				options.addEntry({ id: createId("thinking"), kind: "thinking", text: thinkingText, expanded: false, status: "done" });
+				options.addEntry({
+					id: createId("thinking"),
+					kind: "thinking",
+					text: thinkingText,
+					expanded: options.toolDefaultExpanded(THINKING_TOOL_NAME),
+					status: "done",
+				});
 				thinkingText = "";
 			}
 			if (assistantText && !isOnlyHiddenMetadata(assistantText)) {
@@ -309,7 +316,13 @@ function renderAssistantHistoryMessage(
 
 	// Flush remaining text.
 	if (thinkingText) {
-		options.addEntry({ id: createId("thinking"), kind: "thinking", text: thinkingText, expanded: false, status: "done" });
+		options.addEntry({
+			id: createId("thinking"),
+			kind: "thinking",
+			text: thinkingText,
+			expanded: options.toolDefaultExpanded(THINKING_TOOL_NAME),
+			status: "done",
+		});
 	}
 	if (assistantText && !isOnlyHiddenMetadata(assistantText)) {
 		options.addEntry({ id: createId("assistant"), kind: "assistant", text: assistantText });

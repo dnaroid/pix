@@ -23,7 +23,7 @@ const MAX_RESTORED_TABS = 8;
 const BACKGROUND_PREWARM_TAB_LIMIT = 2;
 const TAB_ATTENTION_BLINK_KEY = "tab-attention";
 const LOADING_TAB_TITLE_PATTERN = /^loading(?:…|\.\.\.)?$/iu;
-const DEFAULT_SESSION_TITLE_PATTERN = /^session [0-9a-f]{8}$/iu;
+const DEFAULT_SESSION_TITLE_PATTERN = /^(?:session )?[0-9a-f]{8}$/iu;
 const SESSION_TITLE_HEAD_SCAN_MAX_BYTES = 256 * 1024;
 const SESSION_TITLE_SCAN_MAX_BYTES = 2 * 1024 * 1024;
 
@@ -1313,7 +1313,7 @@ export class AppTabsController {
 
 	private sessionTitleFromParts(sessionId: string, sessionName: string | undefined): string {
 		const name = sessionName?.trim();
-		return name && !LOADING_TAB_TITLE_PATTERN.test(name) ? name : `session ${sessionId.slice(0, 8)}`;
+		return name && !LOADING_TAB_TITLE_PATTERN.test(name) ? name : sessionId.slice(0, 8);
 	}
 
 	private updatedSessionTitle(
@@ -1389,7 +1389,7 @@ export class AppTabsController {
 		const fileName = basename(sessionPath, extname(sessionPath));
 		const sessionId = /^[0-9a-f]{8}/iu.exec(fileName)?.[0]?.toLowerCase()
 			?? createHash("sha256").update(sessionPath).digest("hex").slice(0, 8);
-		return `session ${sessionId}`;
+		return sessionId;
 	}
 
 	private async loadSessionTitles(sessionPaths: readonly string[]): Promise<ReadonlyMap<string, string>> {

@@ -228,7 +228,7 @@ describe("renderConversationEntry", () => {
 			superCompactTools: true,
 		});
 
-		assert.deepEqual(lines.map((line) => line.text), [`${APP_ICONS.checkCircle} thinking`]);
+		assert.deepEqual(lines.map((line) => line.text), [`${APP_ICONS.checkCircle} thinking — Plan`]);
 	});
 
 	it("marks tool image labels as clickable image targets", () => {
@@ -330,13 +330,13 @@ describe("renderConversationEntry", () => {
 	it("wraps expanded thinking text at word boundaries", () => {
 		const lines = renderConversationEntry({ id: "thinking-wrap", kind: "thinking", text: "alpha beta gamma", expanded: true, status: "done" }, 12, renderOptions);
 
-		assert.deepEqual(lines.slice(1).map((line) => line.text), ["  alpha beta", "  gamma"]);
+		assert.deepEqual(lines.slice(1).map((line) => line.text), ["│ alpha beta", "└ gamma"]);
 	});
 
 	it("removes trailing blank lines from expanded thinking text", () => {
 		const lines = renderConversationEntry({ id: "thinking-trailing-blank", kind: "thinking", text: "alpha\n\n \t", expanded: true, status: "done" }, 80, renderOptions);
 
-		assert.deepEqual(lines.slice(1).map((line) => line.text), ["  alpha"]);
+		assert.deepEqual(lines.slice(1).map((line) => line.text), ["└ alpha"]);
 	});
 
 
@@ -370,15 +370,15 @@ describe("renderConversationEntry", () => {
 		const bodyLines = lines.slice(1);
 		assert(bodyLines.every((line) => stringDisplayWidth(line.text) <= 27));
 		assert.deepEqual(bodyLines.map((line) => line.text), [
-			"  ┌────────┬──────────────┐",
-			"  │ A      │ B            │",
-			"  ├────────┼──────────────┤",
-			"  │ short  │ one two      │",
-			"  │        │ three four   │",
-			"  │        │ five         │",
-			"  ├────────┼──────────────┤",
-			"  │ second │ six seven    │",
-			"  └────────┴──────────────┘",
+			"│ ┌────────┬──────────────┐",
+			"│ │ A      │ B            │",
+			"│ ├────────┼──────────────┤",
+			"│ │ short  │ one two      │",
+			"│ │        │ three four   │",
+			"│ │        │ five         │",
+			"│ ├────────┼──────────────┤",
+			"│ │ second │ six seven    │",
+			"└ └────────┴──────────────┘",
 		]);
 	});
 
@@ -397,7 +397,7 @@ describe("renderConversationEntry", () => {
 
 		const bodyLines = lines.slice(1);
 		assert(bodyLines.every((line) => stringDisplayWidth(line.text) <= 100));
-		assert(bodyLines.every((line) => /^  [┌│├└]/u.test(line.text)));
+		assert(bodyLines.every((line) => /^[│└] [┌│├└]/u.test(line.text)));
 		assert(bodyLines.some((line) => line.text.includes("`chatgpt.com/backend-api/wham/usage`")));
 	});
 });
@@ -481,8 +481,8 @@ describe("ConversationViewport super-compact tools", () => {
 		assert.equal(lines.length, 5);
 		assert.match(lines[0] ?? "", /read/u);
 		assert.equal(lines[1], `${APP_ICONS.checkCircle} thinking`);
-		assert.equal(lines[2], "  Plan");
-		assert.equal(lines[3], "  - detail");
+		assert.equal(lines[2], "│ Plan");
+		assert.equal(lines[3], "└ - detail");
 		assert.match(lines[4] ?? "", /read/u);
 		assert.ok(lines.every((line) => line.trim().length > 0));
 	});

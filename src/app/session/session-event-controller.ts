@@ -5,6 +5,7 @@ import { createId } from "../id.js";
 import { extractImageContents, renderContent, renderUserMessageContent, stringifyUnknown } from "../rendering/message-content.js";
 import { customMessageEntry, loadSessionHistoryEntries, loadSessionHistoryEntriesAsync, type LoadOlderSessionHistoryOptions, type SessionHistoryOlderLoader } from "./session-history.js";
 import { sessionHistoryDisplayMessages, sessionHistoryOlderMessagesReader } from "./pix-system-message.js";
+import { THINKING_TOOL_NAME } from "../constants.js";
 import type { Entry, SessionActivity } from "../types.js";
 import { isRecord } from "../guards.js";
 import type { WorkspaceMutation, WorkspaceMutationPreparation } from "../workspace/workspace-undo.js";
@@ -25,6 +26,8 @@ export type AppSessionEventControllerState = {
 	olderHistoryLoader: SessionHistoryOlderLoader | undefined;
 	currentUserEntryId: string | undefined;
 	currentAssistantEntryId: string | undefined;
+	currentAssistantTextBlockEntryId: string | undefined;
+	currentAssistantTextBlockStartLength: number | undefined;
 	currentThinkingEntryId: string | undefined;
 	assistantTextBuffer: string;
 	entryRenderVersions: Map<string, number>;
@@ -74,6 +77,8 @@ export class AppSessionEventController {
 	private olderHistoryLoader: SessionHistoryOlderLoader | undefined;
 	private currentUserEntryId: string | undefined;
 	private currentAssistantEntryId: string | undefined;
+	private currentAssistantTextBlockEntryId: string | undefined;
+	private currentAssistantTextBlockStartLength: number | undefined;
 	private currentThinkingEntryId: string | undefined;
 	private assistantTextBuffer = "";
 
@@ -86,6 +91,8 @@ export class AppSessionEventController {
 			olderHistoryLoader: this.olderHistoryLoader,
 			currentUserEntryId: this.currentUserEntryId,
 			currentAssistantEntryId: this.currentAssistantEntryId,
+			currentAssistantTextBlockEntryId: this.currentAssistantTextBlockEntryId,
+			currentAssistantTextBlockStartLength: this.currentAssistantTextBlockStartLength,
 			currentThinkingEntryId: this.currentThinkingEntryId,
 			assistantTextBuffer: this.assistantTextBuffer,
 			entryRenderVersions: new Map(this.entryRenderVersions),
@@ -100,6 +107,8 @@ export class AppSessionEventController {
 		this.olderHistoryLoader = state.olderHistoryLoader;
 		this.currentUserEntryId = state.currentUserEntryId;
 		this.currentAssistantEntryId = state.currentAssistantEntryId;
+		this.currentAssistantTextBlockEntryId = state.currentAssistantTextBlockEntryId;
+		this.currentAssistantTextBlockStartLength = state.currentAssistantTextBlockStartLength;
 		this.currentThinkingEntryId = state.currentThinkingEntryId;
 		this.assistantTextBuffer = state.assistantTextBuffer;
 		this.entryRenderVersions.clear();
@@ -112,6 +121,8 @@ export class AppSessionEventController {
 		this.currentUserEntryId = undefined;
 		this.entryRenderVersions.clear();
 		this.currentAssistantEntryId = undefined;
+		this.currentAssistantTextBlockEntryId = undefined;
+		this.currentAssistantTextBlockStartLength = undefined;
 		this.currentThinkingEntryId = undefined;
 		this.assistantTextBuffer = "";
 		this.olderHistoryLoader = undefined;
@@ -415,14 +426,39 @@ export class AppSessionEventController {
 		assistantEvent: Extract<AgentSessionEvent, { type: "message_update" }>["assistantMessageEvent"],
 	): void {
 		switch (assistantEvent.type) {
+			case "text_start":
+				this.finishCurrentThinkingEntry();
+				this.flushAssistantTextBuffer(true);
+				this.currentAssistantTextBlockEntryId = undefined;
+				this.currentAssistantTextBlockStartLength = undefined;
+				break;
 			case "text_delta":
 				this.finishCurrentThinkingEntry();
 				this.host.setSessionActivity("running");
 				this.appendAssistantText(assistantEvent.delta);
 				break;
+			case "text_end":
+				this.finishCurrentThinkingEntry();
+				this.host.setSessionActivity("running");
+				this.reconcileAssistantTextBlock(assistantEvent.content);
+				break;
 			case "thinking_delta":
 				this.host.setSessionActivity("thinking");
 				this.appendThinkingText(assistantEvent.delta);
+				break;
+			case "thinking_end":
+				this.host.setSessionActivity("thinking");
+				this.reconcileThinkingText(assistantEvent.content);
+				this.finishCurrentThinkingEntry();
+				break;
+			case "toolcall_end":
+				this.finishCurrentThinkingEntry();
+				this.flushAssistantTextBuffer(true);
+				this.currentAssistantEntryId = undefined;
+				this.currentAssistantTextBlockEntryId = undefined;
+				this.currentAssistantTextBlockStartLength = undefined;
+				this.host.setSessionActivity("running");
+				this.upsertPendingToolCall(assistantEvent.toolCall);
 				break;
 			case "done":
 				this.finishCurrentThinkingEntry();
@@ -456,9 +492,53 @@ export class AppSessionEventController {
 			this.addEntry(entry);
 			this.currentAssistantEntryId = entry.id;
 		}
+		this.ensureAssistantTextBlockStarted(entry);
 		entry.text += visibleText;
 
 		this.touchEntry(entry);
+	}
+
+	private reconcileAssistantTextBlock(content: string): void {
+		this.flushAssistantTextBuffer(true);
+		const hasVisibleTextBeforeBlock = this.hasVisibleTextBeforeCurrentAssistantBlock();
+		const visibleText = assistantStreamVisibleTextForCompleteBlock(content, hasVisibleTextBeforeBlock);
+		if (!visibleText && this.currentAssistantTextBlockEntryId === undefined) return;
+
+		let entry = this.currentAssistantTextBlockEntryId ? this.findEntry(this.currentAssistantTextBlockEntryId) : undefined;
+		if (!entry || entry.kind !== "assistant") {
+			entry = this.currentAssistantEntryId ? this.findEntry(this.currentAssistantEntryId) : undefined;
+		}
+		if (!entry || entry.kind !== "assistant") {
+			if (!visibleText) return;
+			entry = { id: createId("assistant"), kind: "assistant", text: "" };
+			this.addEntry(entry);
+			this.currentAssistantEntryId = entry.id;
+		}
+
+		const startLength = this.currentAssistantTextBlockEntryId === entry.id
+			? Math.min(this.currentAssistantTextBlockStartLength ?? entry.text.length, entry.text.length)
+			: entry.text.length;
+		const currentBlockText = entry.text.slice(startLength);
+		if (currentBlockText !== visibleText) {
+			entry.text = `${entry.text.slice(0, startLength)}${visibleText}`;
+			this.touchEntry(entry);
+		}
+		this.currentAssistantEntryId = entry.id;
+		this.currentAssistantTextBlockEntryId = undefined;
+		this.currentAssistantTextBlockStartLength = undefined;
+		this.assistantTextBuffer = "";
+	}
+
+	private ensureAssistantTextBlockStarted(entry: Extract<Entry, { kind: "assistant" }>): void {
+		if (this.currentAssistantTextBlockEntryId === entry.id && this.currentAssistantTextBlockStartLength !== undefined) return;
+		this.currentAssistantTextBlockEntryId = entry.id;
+		this.currentAssistantTextBlockStartLength = entry.text.length;
+	}
+
+	private hasVisibleTextBeforeCurrentAssistantBlock(): boolean {
+		const entry = this.currentAssistantTextBlockEntryId ? this.findEntry(this.currentAssistantTextBlockEntryId) : undefined;
+		if (entry?.kind !== "assistant") return this.hasVisibleAssistantText("");
+		return (this.currentAssistantTextBlockStartLength ?? 0) > 0;
 	}
 
 	private drainAssistantTextBuffer(final: boolean): string {
@@ -499,7 +579,13 @@ export class AppSessionEventController {
 	private appendThinkingText(delta: string): void {
 		let entry = this.currentThinkingEntryId ? this.findEntry(this.currentThinkingEntryId) : undefined;
 		if (!entry || entry.kind !== "thinking") {
-			entry = { id: createId("thinking"), kind: "thinking", text: "", expanded: false, status: "running" };
+			entry = {
+				id: createId("thinking"),
+				kind: "thinking",
+				text: "",
+				expanded: this.host.toolDefaultExpanded(THINKING_TOOL_NAME),
+				status: "running",
+			};
 			this.addEntry(entry);
 			this.currentThinkingEntryId = entry.id;
 		}
@@ -515,6 +601,37 @@ export class AppSessionEventController {
 			this.touchEntry(entry);
 		}
 		this.currentThinkingEntryId = undefined;
+	}
+
+	private reconcileThinkingText(content: string): void {
+		let entry = this.currentThinkingEntryId ? this.findEntry(this.currentThinkingEntryId) : undefined;
+		if (!entry || entry.kind !== "thinking") {
+			entry = {
+				id: createId("thinking"),
+				kind: "thinking",
+				text: "",
+				expanded: this.host.toolDefaultExpanded(THINKING_TOOL_NAME),
+				status: "running",
+			};
+			this.addEntry(entry);
+			this.currentThinkingEntryId = entry.id;
+		}
+		if (entry.text !== content || entry.status !== "running") {
+			entry.text = content;
+			entry.status = "running";
+			this.touchEntry(entry);
+		}
+	}
+
+	private upsertPendingToolCall(toolCall: unknown): void {
+		if (!isRecord(toolCall)) return;
+		const toolCallId = typeof toolCall.id === "string" ? toolCall.id : createId("tool-call");
+		const toolName = typeof toolCall.name === "string" ? toolCall.name : "tool";
+		this.upsertToolEntry(toolCallId, {
+			toolName,
+			argsText: stringifyUnknown(toolCall.arguments),
+			status: "running",
+		});
 	}
 
 	private upsertToolEntry(toolCallId: string, update: ToolEntryUpdate): void {
@@ -551,9 +668,30 @@ export class AppSessionEventController {
 
 	private clearCurrentAssistantState(): void {
 		this.currentAssistantEntryId = undefined;
+		this.currentAssistantTextBlockEntryId = undefined;
+		this.currentAssistantTextBlockStartLength = undefined;
 		this.currentThinkingEntryId = undefined;
 		this.assistantTextBuffer = "";
 	}
+}
+
+function assistantStreamVisibleTextForCompleteBlock(text: string, hasVisibleTextBeforeBlock: boolean): string {
+	let buffer = text;
+	let visibleText = "";
+
+	for (;;) {
+		const newlineIndex = buffer.indexOf("\n");
+		if (newlineIndex === -1) break;
+
+		const line = buffer.slice(0, newlineIndex);
+		buffer = buffer.slice(newlineIndex + 1);
+		if (shouldDropAssistantStreamLine(line, hasVisibleTextBeforeBlock || visibleText.length > 0)) continue;
+		visibleText += `${line}\n`;
+	}
+
+	if (!buffer) return visibleText;
+	if (shouldHoldAssistantStreamTail(buffer, hasVisibleTextBeforeBlock || visibleText.length > 0)) return visibleText;
+	return visibleText + buffer;
 }
 
 function shouldDropAssistantStreamLine(line: string, hasVisibleText: boolean): boolean {
