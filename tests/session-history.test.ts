@@ -216,6 +216,59 @@ describe("loadSessionHistoryEntriesAsync", () => {
 		assert.deepEqual(entries.map((entry) => entry.kind), ["user", "tool"]);
 	});
 
+	it("keeps unresolved historical tool calls running so pending tools are visible", async () => {
+		const entries: Entry[] = [];
+		const mappedToolCalls = new Map<string, string>();
+
+		await loadSessionHistoryEntriesAsync({
+			messages: [
+				{ role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", id: "call-pending", name: "shell", arguments: { command: "sleep 10" } }] },
+			],
+			addEntry: (entry) => entries.push(entry),
+			prependEntries: (newEntries) => entries.unshift(...newEntries),
+			setToolEntryId: (toolCallId, entryId) => {
+				mappedToolCalls.set(toolCallId, entryId);
+			},
+			toolDefaultExpanded: () => false,
+			observeSubagentsToolResult: () => {},
+			observeTodoToolResult: () => {},
+			isCancelled: () => false,
+			render: () => {},
+		});
+
+		const toolEntry = entries[0];
+		assert.equal(toolEntry?.kind, "tool");
+		if (toolEntry?.kind !== "tool") return;
+		assert.equal(toolEntry.status, "running");
+		assert.equal(toolEntry.output, "");
+		assert.equal(mappedToolCalls.get("call-pending"), toolEntry.id);
+	});
+
+	it("keeps completed historical tool calls done when a result exists", async () => {
+		const entries: Entry[] = [];
+
+		await loadSessionHistoryEntriesAsync({
+			messages: [
+				{ role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", id: "call-done", name: "shell", arguments: { command: "echo hi" } }] },
+				{ role: "toolResult", toolCallId: "call-done", toolName: "shell", content: [{ text: "hi" }], isError: false },
+			],
+			addEntry: (entry) => entries.push(entry),
+			prependEntries: (newEntries) => entries.unshift(...newEntries),
+			setToolEntryId: () => {},
+			toolDefaultExpanded: () => false,
+			observeSubagentsToolResult: () => {},
+			observeTodoToolResult: () => {},
+			isCancelled: () => false,
+			render: () => {},
+		});
+
+		const toolEntry = entries[0];
+		assert.equal(toolEntry?.kind, "tool");
+		if (toolEntry?.kind !== "tool") return;
+		assert.equal(toolEntry.status, "done");
+		assert.equal(toolEntry.output, "hi");
+	});
+
 	it("does not hydrate the current todo widget from historical todo tool results", async () => {
 		const entries: Entry[] = [];
 		let observedTodoResults = 0;

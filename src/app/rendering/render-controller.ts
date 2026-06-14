@@ -111,6 +111,8 @@ export class AppRenderController {
 		this.deps.mouseController.statusUserJumpTarget = undefined;
 		this.deps.mouseController.statusThinkingExpandTarget = undefined;
 		this.deps.mouseController.statusCompactToolsTarget = undefined;
+		this.deps.mouseController.statusQuickScrollUpTarget = undefined;
+		this.deps.mouseController.statusQuickScrollDownTarget = undefined;
 		this.deps.mouseController.statusTerminalBellSoundTarget = undefined;
 		this.deps.mouseController.statusSessionTarget = undefined;
 		this.deps.mouseController.statusPromptEnhancerTarget = undefined;
@@ -328,6 +330,8 @@ export class AppRenderController {
 			this.deps.mouseController.statusUserJumpTarget = this.deps.statusLineRenderer.userJumpTarget?.(widgetLayout, widgetRow);
 			this.deps.mouseController.statusThinkingExpandTarget = this.deps.statusLineRenderer.thinkingExpandTarget?.(widgetLayout, widgetRow);
 			this.deps.mouseController.statusCompactToolsTarget = this.deps.statusLineRenderer.compactToolsTarget?.(widgetLayout, widgetRow);
+			this.deps.mouseController.statusQuickScrollUpTarget = this.deps.statusLineRenderer.quickScrollUpTarget?.(widgetLayout, widgetRow);
+			this.deps.mouseController.statusQuickScrollDownTarget = this.deps.statusLineRenderer.quickScrollDownTarget?.(widgetLayout, widgetRow);
 			this.deps.mouseController.statusTerminalBellSoundTarget = this.deps.statusLineRenderer.terminalBellSoundTarget?.(widgetLayout, widgetRow);
 		}
 		this.deps.mouseController.statusSessionTarget = this.deps.statusLineRenderer.sessionTarget(statusLayout.text, statusRow, statusLayout.sessionLabel, statusLayout.workspaceLabel);

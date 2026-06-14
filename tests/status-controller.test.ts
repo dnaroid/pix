@@ -582,6 +582,19 @@ describe("StatusLineRenderer", () => {
 			foreground: THEMES.dark.colors.muted,
 		})));
 	});
+
+	it("renders quick-scroll arrows on the right according to scroll position", () => {
+		const topRenderer = statusLineRenderer({ widgetText: "", voiceActive: false, quickScroll: { up: false, down: true } });
+		const middleRenderer = statusLineRenderer({ widgetText: "", voiceActive: false, quickScroll: { up: true, down: true } });
+		const bottomRenderer = statusLineRenderer({ widgetText: "", voiceActive: false, quickScroll: { up: true, down: false } });
+
+		assert.ok(topRenderer.inputBorderWidgetsLayout(40)!.text.endsWith(widgetsText(APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools, APP_ICONS.down)));
+		assert.ok(middleRenderer.inputBorderWidgetsLayout(40)!.text.endsWith(widgetsText(APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools, APP_ICONS.up, APP_ICONS.down)));
+		assert.ok(bottomRenderer.inputBorderWidgetsLayout(40)!.text.endsWith(widgetsText(APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools, APP_ICONS.up)));
+
+		const voiceRenderer = statusLineRenderer({ widgetText: `${APP_ICONS.microphone} RU`, voiceActive: false, quickScroll: { up: true, down: true } });
+		assert.ok(voiceRenderer.inputBorderWidgetsLayout(40)!.text.endsWith(widgetsText(APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools, APP_ICONS.up, APP_ICONS.down, APP_ICONS.microphone, "RU")));
+	});
 });
 
 
@@ -651,7 +664,7 @@ function overlayText(text: string, startColumn: number, overlay: string): string
 	return `${padded.slice(0, startIndex)}${overlay}${padded.slice(endIndex)}`;
 }
 
-function statusLineRenderer(options: { widgetText: string; voiceActive: boolean; promptWidgetText?: string; promptActive?: boolean; promptEnabled?: boolean; terminalBellWidgetText?: string; terminalBellSoundEnabled?: boolean; sessionActivity?: "idle" | "running" | "thinking"; statusDotBright?: boolean; workspaceLabel?: string; workspaceGitBranchLabel?: string; modelUsageLabel?: string; session?: AgentSession; currentStatus?: string; thinkingLabel?: string; modelLabel?: string; modelColors?: ModelColorsConfig; userMessageJumpMenuActive?: boolean; queueableInputActive?: boolean; allThinkingExpandedActive?: boolean; superCompactToolsActive?: boolean }): StatusLineRenderer {
+function statusLineRenderer(options: { widgetText: string; voiceActive: boolean; promptWidgetText?: string; promptActive?: boolean; promptEnabled?: boolean; terminalBellWidgetText?: string; terminalBellSoundEnabled?: boolean; sessionActivity?: "idle" | "running" | "thinking"; statusDotBright?: boolean; workspaceLabel?: string; workspaceGitBranchLabel?: string; modelUsageLabel?: string; session?: AgentSession; currentStatus?: string; thinkingLabel?: string; modelLabel?: string; modelColors?: ModelColorsConfig; userMessageJumpMenuActive?: boolean; queueableInputActive?: boolean; allThinkingExpandedActive?: boolean; superCompactToolsActive?: boolean; quickScroll?: { up: boolean; down: boolean } }): StatusLineRenderer {
 	return new StatusLineRenderer({
 		theme: THEMES.dark,
 		screenStyler: new ScreenStyler({ theme: THEMES.dark, mouseSelection: undefined }),
@@ -675,6 +688,7 @@ function statusLineRenderer(options: { widgetText: string; voiceActive: boolean;
 		terminalBellSoundStatusWidgetEnabled: () => options.terminalBellSoundEnabled ?? true,
 		voiceStatusWidgetText: () => options.widgetText,
 		voiceStatusWidgetActive: () => options.voiceActive,
+		conversationQuickScrollDirections: () => options.quickScroll ?? { up: false, down: false },
 		queueableInputActive: () => Boolean(options.queueableInputActive),
 		userMessageJumpMenuActive: () => Boolean(options.userMessageJumpMenuActive),
 		allThinkingExpandedActive: () => Boolean(options.allThinkingExpandedActive),

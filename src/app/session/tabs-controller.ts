@@ -14,6 +14,7 @@ import { isRecord } from "../guards.js";
 import { createId } from "../id.js";
 import type { Attachment, InputEditorDraftState } from "../../input-editor.js";
 import type { AppBlinkController } from "../screen/blink-controller.js";
+import type { AppScrollState } from "../screen/scroll-controller.js";
 import { tabPanelRows } from "../rendering/tab-line-renderer.js";
 import type { AppOptions, Entry, SessionActivity, SessionTab, SubmittedUserMessage } from "../types.js";
 
@@ -30,6 +31,7 @@ type PersistedTab = {
 	path: string;
 	title?: string;
 	input?: TabInputState;
+	scrollState?: AppScrollState;
 	deferredUserMessages?: PersistedSubmittedUserMessage[];
 };
 
@@ -50,6 +52,7 @@ type PersistedSubmittedUserMessage = {
 type TabSessionView = {
 	entries: Entry[];
 	eventState: AppSessionEventControllerState;
+	scrollState: AppScrollState;
 };
 
 export type TabInputState = InputEditorDraftState;
@@ -72,6 +75,7 @@ export type AppTabsControllerHost = {
 	loadSessionHistoryAsync(options: { isCancelled: () => boolean; render: () => void; lazyOlderHistory?: boolean }): Promise<boolean>;
 	captureSessionView?(): TabSessionView;
 	restoreSessionView?(view: TabSessionView): void;
+	restoreScrollState?(state: AppScrollState): void;
 	syncUserSessionEntryMetadata(): void;
 	captureInputState(): TabInputState;
 	restoreInputState(state: TabInputState): void;
@@ -93,6 +97,7 @@ export class AppTabsController {
 	private readonly inputStatesByTabId = new Map<string, TabInputState>();
 	private readonly deferredUserMessagesByTabId = new Map<string, SubmittedUserMessage[]>();
 	private readonly sessionViewsByTabId = new Map<string, TabSessionView>();
+	private readonly scrollStatesByTabId = new Map<string, AppScrollState>();
 	private readonly tabIdsNeedingHistoryReload = new Set<string>();
 	private activeTabId: string | undefined;
 	private pendingActiveTabId: string | undefined;
@@ -306,6 +311,7 @@ export class AppTabsController {
 		this.syncActiveTabFromRuntime({ save: false });
 		this.clearStartupTabPlaceholders();
 		if (this.activeTabId) this.restoreInputState(this.activeTabId);
+		this.restorePersistedScrollStates(saved);
 		await this.saveTabs();
 		this.scheduleProjectSessionRetention();
 		this.scheduleTabPrewarm();
@@ -325,6 +331,7 @@ export class AppTabsController {
 
 		this.cancelHistoryLoad();
 		this.syncActiveTabFromRuntime();
+		this.storeActiveSessionView();
 		this.storeActiveInputState();
 		this.storeActiveDeferredUserMessages();
 		const previousTabId = this.activeTabId;
@@ -421,6 +428,7 @@ export class AppTabsController {
 		}
 
 		this.cancelHistoryLoad();
+		this.storeActiveSessionView();
 		this.storeActiveInputState();
 		this.storeActiveDeferredUserMessages();
 		const previousTabId = this.activeTabId;
@@ -529,6 +537,7 @@ export class AppTabsController {
 
 		this.cancelHistoryLoad();
 		this.syncActiveTabFromRuntime({ save: false });
+		this.storeActiveSessionView();
 		this.storeActiveInputState();
 		this.storeActiveDeferredUserMessages();
 		const previousTabId = this.activeTabId;
@@ -847,6 +856,7 @@ export class AppTabsController {
 		});
 		if (!completed || isCancelled()) return;
 
+		this.restoreStoredScrollState(this.activeTabId);
 		this.host.setSessionStatus(runtime.session);
 		this.host.syncUserSessionEntryMetadata();
 		this.host.setSessionActivity(this.sessionActivity(runtime.session));
@@ -911,7 +921,16 @@ export class AppTabsController {
 
 	private storeActiveSessionView(): void {
 		if (!this.activeTabId || !this.host.captureSessionView) return;
-		this.sessionViewsByTabId.set(this.activeTabId, this.host.captureSessionView());
+		const view = this.host.captureSessionView();
+		this.sessionViewsByTabId.set(this.activeTabId, view);
+		this.scrollStatesByTabId.set(this.activeTabId, view.scrollState);
+	}
+
+	private restoreStoredScrollState(tabId: string | undefined): void {
+		if (!tabId || !this.host.restoreScrollState) return;
+		const scrollState = this.scrollStatesByTabId.get(tabId);
+		if (!scrollState) return;
+		this.host.restoreScrollState(scrollState);
 	}
 
 	private setRuntimeForTab(tabId: string, runtime: AgentSessionRuntime): void {
@@ -923,6 +942,7 @@ export class AppTabsController {
 		this.runtimesByTabId.delete(tabId);
 		this.runtimeLoadsByTabId.delete(tabId);
 		this.sessionViewsByTabId.delete(tabId);
+		this.scrollStatesByTabId.delete(tabId);
 		this.clearRuntimeRefreshTimers(tabId);
 		this.clearHistoryReloadTimers(tabId);
 		this.tabIdsNeedingHistoryReload.delete(tabId);
@@ -1150,6 +1170,7 @@ export class AppTabsController {
 		this.inputStatesByTabId.clear();
 		this.deferredUserMessagesByTabId.clear();
 		this.sessionViewsByTabId.clear();
+		this.scrollStatesByTabId.clear();
 		const seen = new Set<string>();
 		for (const tab of tabs) {
 			const sessionPath = tab.sessionPath ? resolve(tab.sessionPath) : undefined;
@@ -1195,6 +1216,21 @@ export class AppTabsController {
 			const input = inputsByPath.get(resolve(tab.sessionPath));
 			if (!input) continue;
 			this.inputStatesByTabId.set(tab.id, input);
+		}
+	}
+
+	private restorePersistedScrollStates(saved: PersistedTabState): void {
+		const scrollStatesByPath = new Map<string, AppScrollState>();
+		for (const tab of saved.tabs) {
+			if (!tab.scrollState) continue;
+			scrollStatesByPath.set(resolve(tab.path), tab.scrollState);
+		}
+
+		for (const tab of this.tabItems) {
+			if (!tab.sessionPath) continue;
+			const scrollState = scrollStatesByPath.get(resolve(tab.sessionPath));
+			if (!scrollState) continue;
+			this.scrollStatesByTabId.set(tab.id, scrollState);
 		}
 	}
 
@@ -1385,11 +1421,13 @@ export class AppTabsController {
 			for (const value of parsed.tabs) {
 				if (!isRecord(value) || typeof value.path !== "string") continue;
 				const input = this.parsePersistedInputState(value.input);
+				const scrollState = this.parsePersistedScrollState(value.scrollState);
 				const deferredUserMessages = this.parsePersistedSubmittedUserMessages(value.deferredUserMessages);
 				tabs.push({
 					path: value.path,
 					...(typeof value.title === "string" ? { title: value.title } : {}),
 					...(input ? { input } : {}),
+					...(scrollState ? { scrollState } : {}),
 					...(deferredUserMessages.length > 0 ? { deferredUserMessages } : {}),
 				});
 			}
@@ -1415,6 +1453,18 @@ export class AppTabsController {
 			? value.attachments.flatMap(parsePersistedAttachment)
 			: [];
 		return { text: value.text, cursor, ...(attachments.length > 0 ? { attachments } : {}) };
+	}
+
+	private parsePersistedScrollState(value: unknown): AppScrollState | undefined {
+		if (!isRecord(value) || typeof value.scrollFromBottom !== "number" || !Number.isFinite(value.scrollFromBottom)) return undefined;
+		const scrollFromBottom = Math.max(0, Math.trunc(value.scrollFromBottom));
+		const detachedScrollStart = typeof value.detachedScrollStart === "number" && Number.isFinite(value.detachedScrollStart)
+			? Math.max(0, Math.trunc(value.detachedScrollStart))
+			: undefined;
+		return {
+			scrollFromBottom,
+			...(detachedScrollStart === undefined ? {} : { detachedScrollStart }),
+		};
 	}
 
 	private parsePersistedSubmittedUserMessages(value: unknown): PersistedSubmittedUserMessage[] {
@@ -1451,6 +1501,10 @@ export class AppTabsController {
 				if (seen.has(sessionPath)) continue;
 				seen.add(sessionPath);
 				const persistedTab: PersistedTab = { path: sessionPath, title: tab.title };
+				const scrollState = tab.id === this.activeTabId
+					? this.host.captureSessionView?.().scrollState
+					: this.sessionViewsByTabId.get(tab.id)?.scrollState ?? this.scrollStatesByTabId.get(tab.id);
+				if (scrollState) persistedTab.scrollState = scrollState;
 				const input = this.inputStatesByTabId.get(tab.id);
 				if (input && (input.text.length > 0 || (input.attachments?.length ?? 0) > 0)) {
 					persistedTab.input = {

@@ -26,6 +26,7 @@ import type {
 	StatusModelTarget,
 	StatusModelUsageTarget,
 	StatusPromptEnhancerTarget,
+	StatusQuickScrollTarget,
 	StatusSessionTarget,
 	StatusTerminalBellSoundTarget,
 	TabLineMouseTarget,
@@ -92,6 +93,7 @@ export type AppMouseControllerHost = {
 	refreshModelUsageStatus(): void | Promise<void>;
 	refreshUserMessageJumpMenuItems?(): Promise<void>;
 	queueInputFromStatus?(): void | Promise<void>;
+	scrollConversationQuick(direction: "up" | "down"): void | Promise<void>;
 	toggleAllThinkingExpanded?(): void;
 	toggleSuperCompactTools?(): void;
 	toggleTerminalBellSound?(): void;
@@ -114,6 +116,8 @@ export class AppMouseController {
 	statusDraftQueueTarget: StatusDraftQueueTarget | undefined;
 	statusThinkingExpandTarget: StatusThinkingExpandTarget | undefined;
 	statusCompactToolsTarget: StatusCompactToolsTarget | undefined;
+	statusQuickScrollUpTarget: StatusQuickScrollTarget | undefined;
+	statusQuickScrollDownTarget: StatusQuickScrollTarget | undefined;
 	statusTerminalBellSoundTarget: StatusTerminalBellSoundTarget | undefined;
 	statusSessionTarget: StatusSessionTarget | undefined;
 	statusPromptEnhancerTarget: StatusPromptEnhancerTarget | undefined;
@@ -159,6 +163,7 @@ export class AppMouseController {
 		if (event.button === 0 && this.withClickFlash(event, () => this.handleStatusThinkingClick(event))) return;
 		if (event.button === 0 && this.withClickFlash(event, () => this.handleStatusContextClick(event))) return;
 		if (event.button === 0 && this.withClickFlash(event, () => this.handleStatusModelUsageClick(event))) return;
+		if (event.button === 0 && this.withClickFlash(event, () => this.handleStatusQuickScrollClick(event))) return;
 		if (event.button === 0 && this.withClickFlash(event, () => this.handleStatusSessionClick(event))) return;
 		if (event.button === 0 && this.withClickFlash(event, () => this.handleExtensionInputClick(event))) return;
 		if (event.button === 0 && this.withClickFlash(event, () => this.handleInputClick(event))) return;
@@ -415,6 +420,8 @@ export class AppMouseController {
 			this.statusUserJumpTarget,
 			this.statusThinkingExpandTarget,
 			this.statusCompactToolsTarget,
+			this.statusQuickScrollUpTarget,
+			this.statusQuickScrollDownTarget,
 			this.statusTerminalBellSoundTarget,
 			this.statusSessionTarget,
 			this.statusPromptEnhancerTarget,
@@ -707,6 +714,17 @@ export class AppMouseController {
 		if (event.y !== target.row || event.x < target.startColumn || event.x >= target.endColumn) return false;
 
 		this.host.toggleVoiceLanguage();
+		return true;
+	}
+
+	private handleStatusQuickScrollClick(event: MouseEvent): boolean {
+		const target = [this.statusQuickScrollUpTarget, this.statusQuickScrollDownTarget].find((candidate) => !!candidate
+			&& event.y === candidate.row
+			&& event.x >= candidate.startColumn
+			&& event.x < candidate.endColumn);
+		if (!target) return false;
+
+		this.host.scrollConversationQuick(target.direction);
 		return true;
 	}
 

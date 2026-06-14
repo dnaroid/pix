@@ -278,6 +278,7 @@ function renderAssistantHistoryMessage(
 
 			const toolCallId = String(block.id ?? createId("tool"));
 			const result = toolResults.get(toolCallId);
+			const isPendingToolCall = result === undefined && message.stopReason !== "aborted" && message.stopReason !== "error";
 			const toolName = result?.toolName ?? String(block.name ?? "unknown");
 			const argsText = stringifyUnknown(block.arguments);
 			const output = result ? renderContent(result.content) : "";
@@ -296,7 +297,7 @@ function renderAssistantHistoryMessage(
 				...(result?.details === undefined ? {} : { details: result.details }),
 				expanded: options.toolDefaultExpanded(toolName),
 				isError: result?.isError ?? false,
-				status: "done",
+				status: isPendingToolCall ? "running" : "done",
 			});
 			options.setToolEntryId(toolCallId, entryId);
 		} else if (block.type === "thinking") {

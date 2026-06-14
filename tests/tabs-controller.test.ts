@@ -338,6 +338,153 @@ describe("AppTabsController", () => {
 		assert.equal(tabs.activeTabId, "tab-2");
 	});
 
+	it("captures the previous tab view before opening a new tab", async () => {
+		const activeRuntime = fakeRuntime("one", "/tmp/one.jsonl");
+		const newRuntime = fakeRuntime("two", "/tmp/two.jsonl");
+		let currentRuntime = activeRuntime;
+		const capturedView = fakeSessionView({ scrollState: { scrollFromBottom: 9, detachedScrollStart: 23 } });
+		const controller = new AppTabsController({
+			options: { cwd: "/tmp", themeName: "dark", noSession: false } satisfies AppOptions,
+			blinkController: fakeBlinkController(),
+			runtime: () => currentRuntime,
+			createRuntimeForNewSession: async () => newRuntime,
+			createRuntimeForSession: async () => newRuntime,
+			activateRuntime: async (runtime) => {
+				currentRuntime = runtime;
+			},
+			disposeRuntime: async () => {},
+			isRunning: () => true,
+			setStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			resetSessionView: () => {},
+			loadSessionHistory: () => {},
+			loadSessionHistoryAsync: async () => true,
+			syncUserSessionEntryMetadata: () => {},
+			captureSessionView: () => capturedView,
+			captureInputState: () => ({ text: "", cursor: 0 }),
+			restoreInputState: () => {},
+			addEntry: () => {},
+			showToast: () => {},
+			render: () => {},
+		});
+		const tabs = controller as unknown as {
+			tabItems: SessionTab[];
+			activeTabId: string | undefined;
+			runtimesByTabId: Map<string, AgentSessionRuntime>;
+			sessionViewsByTabId: Map<string, ReturnType<typeof fakeSessionView>>;
+			saveTabs: () => Promise<void>;
+		};
+		tabs.saveTabs = async () => {};
+		tabs.tabItems.push({ id: "tab-1", title: "one", status: "active", sessionPath: "/tmp/one.jsonl" });
+		tabs.activeTabId = "tab-1";
+		tabs.runtimesByTabId.set("tab-1", activeRuntime);
+
+		await controller.openNewTab();
+
+		assert.deepEqual(tabs.sessionViewsByTabId.get("tab-1"), capturedView);
+	});
+
+	it("restores the cached scroll position when switching back to a tab", async () => {
+		const activeRuntime = fakeRuntime("one", "/tmp/one.jsonl");
+		const targetRuntime = fakeRuntime("two", "/tmp/two.jsonl", { isStreaming: true });
+		let currentRuntime = activeRuntime;
+		const restoredViews: unknown[] = [];
+		let capturedView = fakeSessionView({ scrollState: { scrollFromBottom: 11, detachedScrollStart: 37 } });
+		const controller = new AppTabsController({
+			options: { cwd: "/tmp", themeName: "dark", noSession: true } satisfies AppOptions,
+			blinkController: fakeBlinkController(),
+			runtime: () => currentRuntime,
+			createRuntimeForNewSession: async () => fakeRuntime("new", "/tmp/new.jsonl"),
+			createRuntimeForSession: async () => targetRuntime,
+			activateRuntime: async (runtime) => {
+				currentRuntime = runtime;
+			},
+			disposeRuntime: async () => {},
+			isRunning: () => true,
+			setStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			resetSessionView: () => {},
+			loadSessionHistory: () => {},
+			loadSessionHistoryAsync: async () => true,
+			syncUserSessionEntryMetadata: () => {},
+			captureSessionView: () => capturedView,
+			restoreSessionView: (view) => {
+				restoredViews.push(view);
+			},
+			captureInputState: () => ({ text: "", cursor: 0 }),
+			restoreInputState: () => {},
+			addEntry: () => {},
+			showToast: () => {},
+			render: () => {},
+		});
+		const tabs = controller as unknown as {
+			tabItems: SessionTab[];
+			activeTabId: string | undefined;
+			runtimesByTabId: Map<string, AgentSessionRuntime>;
+			sessionViewsByTabId: Map<string, ReturnType<typeof fakeSessionView>>;
+		};
+		tabs.tabItems.push(
+			{ id: "tab-1", title: "one", status: "active", sessionPath: "/tmp/one.jsonl" },
+			{ id: "tab-2", title: "two", status: "waiting", sessionPath: "/tmp/two.jsonl" },
+		);
+		tabs.activeTabId = "tab-1";
+		tabs.runtimesByTabId.set("tab-1", activeRuntime);
+		tabs.sessionViewsByTabId.set("tab-2", fakeSessionView({ scrollState: { scrollFromBottom: 4, detachedScrollStart: 18 } }));
+
+		await controller.switchToTab("tab-2");
+
+		assert.deepEqual(tabs.sessionViewsByTabId.get("tab-1"), capturedView);
+		assert.deepEqual(restoredViews, [fakeSessionView({ scrollState: { scrollFromBottom: 4, detachedScrollStart: 18 } })]);
+		assert.equal(tabs.activeTabId, "tab-2");
+	});
+
+	it("captures the previous tab view before opening a fork in a new tab", async () => {
+		const activeRuntime = fakeRuntime("one", "/tmp/one.jsonl", { forkSessionFile: "/tmp/fork.jsonl" });
+		let currentRuntime = activeRuntime;
+		const capturedView = fakeSessionView({ scrollState: { scrollFromBottom: 6, detachedScrollStart: 14 } });
+		const controller = new AppTabsController({
+			options: { cwd: "/tmp", themeName: "dark", noSession: false } satisfies AppOptions,
+			blinkController: fakeBlinkController(),
+			runtime: () => currentRuntime,
+			createRuntimeForNewSession: async () => fakeRuntime("new", "/tmp/new.jsonl"),
+			createRuntimeForSession: async () => activeRuntime,
+			activateRuntime: async (runtime) => {
+				currentRuntime = runtime;
+			},
+			disposeRuntime: async () => {},
+			isRunning: () => true,
+			setStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			resetSessionView: () => {},
+			loadSessionHistory: () => {},
+			loadSessionHistoryAsync: async () => true,
+			syncUserSessionEntryMetadata: () => {},
+			captureSessionView: () => capturedView,
+			captureInputState: () => ({ text: "", cursor: 0 }),
+			restoreInputState: () => {},
+			addEntry: () => {},
+			showToast: () => {},
+			render: () => {},
+		});
+		const tabs = controller as unknown as {
+			tabItems: SessionTab[];
+			activeTabId: string | undefined;
+			runtimesByTabId: Map<string, AgentSessionRuntime>;
+			sessionViewsByTabId: Map<string, ReturnType<typeof fakeSessionView>>;
+		};
+		tabs.tabItems.push({ id: "tab-1", title: "one", status: "active", sessionPath: "/tmp/one.jsonl" });
+		tabs.activeTabId = "tab-1";
+		tabs.runtimesByTabId.set("tab-1", activeRuntime);
+
+		const opened = await controller.forkSessionEntryInNewTab("entry-1");
+
+		assert.equal(opened, true);
+		assert.deepEqual(tabs.sessionViewsByTabId.get("tab-1"), capturedView);
+	});
+
 	it("closes menus after restoring the target tab input", async () => {
 		const activeRuntime = fakeRuntime("one", "/tmp/one.jsonl");
 		const targetRuntime = fakeRuntime("two", "/tmp/two.jsonl");
@@ -660,6 +807,103 @@ describe("AppTabsController", () => {
 
 		assert.deepEqual(currentDeferred.map((message) => message.displayText), ["queued one"]);
 		assert.deepEqual(currentDeferred[0]?.images, [{ type: "image", data: "base64-image", mimeType: "image/png" }]);
+	});
+
+	it("persists and restores scroll position after startup", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "pix-tabs-scroll-"));
+		const sessionPath = join(dir, "one.jsonl");
+		const tabsPath = join(dir, "tabs.json");
+		await writeFile(sessionPath, "", "utf8");
+
+		let currentRuntime = fakeRuntime("one", sessionPath);
+		let restoredScrollState: { scrollFromBottom: number; detachedScrollStart?: number } | undefined;
+		const capturedView = fakeSessionView({ scrollState: { scrollFromBottom: 12, detachedScrollStart: 41 } });
+		const controller = new AppTabsController({
+			options: { cwd: dir, themeName: "dark", noSession: false } satisfies AppOptions,
+			blinkController: fakeBlinkController(),
+			runtime: () => currentRuntime,
+			createRuntimeForNewSession: async () => fakeRuntime("new", join(dir, "new.jsonl")),
+			createRuntimeForSession: async (path) => fakeRuntime("one", path),
+			activateRuntime: async (runtime) => {
+				currentRuntime = runtime;
+			},
+			disposeRuntime: async () => {},
+			isRunning: () => true,
+			setStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			resetSessionView: () => {},
+			loadSessionHistory: () => {},
+			loadSessionHistoryAsync: async () => true,
+			syncUserSessionEntryMetadata: () => {},
+			captureSessionView: () => capturedView,
+			restoreScrollState: (state) => {
+				restoredScrollState = state;
+			},
+			captureInputState: () => ({ text: "", cursor: 0 }),
+			restoreInputState: () => {},
+			addEntry: () => {},
+			showToast: () => {},
+			render: () => {},
+		});
+		const tabs = controller as unknown as {
+			filePath: () => string;
+			loadSessionTitles: () => Promise<ReadonlyMap<string, string>>;
+			tabItems: SessionTab[];
+			activeTabId: string | undefined;
+			runtimesByTabId: Map<string, AgentSessionRuntime>;
+		};
+		tabs.filePath = () => tabsPath;
+		tabs.loadSessionTitles = async () => new Map([[sessionPath, "one"]]);
+		tabs.tabItems.push({ id: "tab-1", title: "one", status: "active", sessionPath });
+		tabs.activeTabId = "tab-1";
+		tabs.runtimesByTabId.set("tab-1", currentRuntime);
+
+		await controller.disposeInactiveRuntimes();
+
+		const saved = JSON.parse(await readFile(tabsPath, "utf8")) as {
+			tabs: Array<{ scrollState?: { scrollFromBottom: number; detachedScrollStart?: number } }>;
+		};
+		assert.deepEqual(saved.tabs[0]?.scrollState, { scrollFromBottom: 12, detachedScrollStart: 41 });
+
+		restoredScrollState = undefined;
+		const restoredController = new AppTabsController({
+			options: { cwd: dir, themeName: "dark", noSession: false } satisfies AppOptions,
+			blinkController: fakeBlinkController(),
+			runtime: () => currentRuntime,
+			createRuntimeForNewSession: async () => fakeRuntime("new", join(dir, "new.jsonl")),
+			createRuntimeForSession: async (path) => fakeRuntime("one", path),
+			activateRuntime: async (runtime) => {
+				currentRuntime = runtime;
+			},
+			disposeRuntime: async () => {},
+			isRunning: () => true,
+			setStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			resetSessionView: () => {},
+			loadSessionHistory: () => {},
+			loadSessionHistoryAsync: async () => true,
+			syncUserSessionEntryMetadata: () => {},
+			restoreScrollState: (state) => {
+				restoredScrollState = state;
+			},
+			captureInputState: () => ({ text: "", cursor: 0 }),
+			restoreInputState: () => {},
+			addEntry: () => {},
+			showToast: () => {},
+			render: () => {},
+		});
+		const restoredTabs = restoredController as unknown as {
+			filePath: () => string;
+			loadSessionTitles: () => Promise<ReadonlyMap<string, string>>;
+		};
+		restoredTabs.filePath = () => tabsPath;
+		restoredTabs.loadSessionTitles = async () => new Map([[sessionPath, "one"]]);
+
+		await restoredController.restoreAfterStartup();
+
+		assert.deepEqual(restoredScrollState, { scrollFromBottom: 12, detachedScrollStart: 41 });
 	});
 
 	it("restores a draft-only tab even when its session file has not been flushed yet", async () => {
@@ -2045,7 +2289,8 @@ function fakeBlinkController(): AppBlinkController {
 	} as unknown as AppBlinkController;
 }
 
-function fakeSessionView() {
+
+function fakeSessionView(overrides: Partial<{ scrollState: { scrollFromBottom: number; detachedScrollStart?: number } }> = {}) {
 	return {
 		entries: [],
 		eventState: {
@@ -2058,6 +2303,7 @@ function fakeSessionView() {
 			assistantTextBuffer: "",
 			entryRenderVersions: new Map(),
 		},
+		scrollState: overrides.scrollState ?? { scrollFromBottom: 0 },
 	};
 }
 

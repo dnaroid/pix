@@ -90,22 +90,15 @@ describe("AppQueuedMessageController", () => {
 		assert.equal(state.deferredChangeCount, 0);
 	});
 
-	it("does not auto-flush deferred messages after an immediate send", async () => {
+	it("keeps paused messages after an immediate send", async () => {
 		const sdkQueue = { steering: ["send now"], followUp: [] };
 		const calls: string[] = [];
-		let controller: AppQueuedMessageController | undefined;
-		const session = fakeSession(sdkQueue, {
-			calls,
-			isStreaming: true,
-			onAbort: async () => {
-				await controller?.flushDeferredUserMessages();
-			},
-		});
+		const session = fakeSession(sdkQueue, { calls, isStreaming: true });
 		const state = createHostState("");
 		state.visibleEntries = [
 			{ id: "queued-selected", kind: "queued", mode: "steering", text: "send now", queueSource: "sdk-steering", queueIndex: 0 },
 		];
-		controller = new AppQueuedMessageController(createHost(session, state));
+		const controller = new AppQueuedMessageController(createHost(session, state));
 		controller.deferredUserMessages.push({ id: "deferred-1", promptText: "deferred later", displayText: "deferred later", images: [] });
 
 		await controller.sendQueuedMessageImmediately("queued-selected");
@@ -114,22 +107,26 @@ describe("AppQueuedMessageController", () => {
 		assert.equal(controller.deferredUserMessages.length, 1);
 	});
 
-	it("flushes all deferred messages only when explicitly requested", async () => {
+	it("sends paused messages only when explicitly requested", async () => {
 		const sdkQueue = { steering: [], followUp: [] };
 		const calls: string[] = [];
 		const session = fakeSession(sdkQueue, { calls });
 		const state = createHostState("");
+		state.visibleEntries = [
+			{ id: "deferred-selected", kind: "queued", mode: "steering", text: "send first", queueSource: "deferred", queueIndex: 0 },
+		];
 		const controller = new AppQueuedMessageController(createHost(session, state));
 		controller.deferredUserMessages.push(
 			{ id: "deferred-1", promptText: "send first", displayText: "send first", images: [] },
 			{ id: "deferred-2", promptText: "send second", displayText: "send second", images: [] },
 		);
 
-		await controller.flushDeferredUserMessages();
+		await controller.sendQueuedMessageImmediately("deferred-selected");
 
-		assert.deepEqual(calls, ["prompt:send first", "prompt:send second"]);
-		assert.equal(controller.deferredUserMessages.length, 0);
-		assert.equal(state.deferredChangeCount, 2);
+		assert.deepEqual(calls, ["prompt:send first"]);
+		assert.equal(controller.deferredUserMessages.length, 1);
+		assert.equal(controller.deferredUserMessages[0]?.promptText, "send second");
+		assert.equal(state.deferredChangeCount, 1);
 	});
 
 	it("finds deferred queued entries from controller state", () => {
@@ -201,16 +198,20 @@ describe("AppQueuedMessageController", () => {
 		assert.equal(state.toasts.length, 0);
 	});
 
-	it("defers submitted messages while compaction is active", async () => {
-		const session = fakeSession({ steering: [], followUp: [] }, { isCompacting: true });
+	it("queues submitted messages as SDK steering while compaction is active", async () => {
+		const sdkQueue = { steering: [], followUp: [] };
+		const calls: string[] = [];
+		const session = fakeSession(sdkQueue, { calls, isCompacting: true });
 		const state = createHostState("");
 		const controller = new AppQueuedMessageController(createHost(session, state));
 
 		await controller.submitUserMessage(controller.createSubmittedUserMessage("defer me", "defer me", []));
 
-		assert.equal(controller.deferredUserMessages.length, 1);
-		assert.deepEqual(state.toasts, ["info:Message queued; send it from the queue menu or status button"]);
-		assert.equal(state.deferredChangeCount, 1);
+		assert.equal(controller.deferredUserMessages.length, 0);
+		assert.deepEqual(sdkQueue, { steering: ["defer me"], followUp: [] });
+		assert.deepEqual(calls, ["steer:defer me"]);
+		assert.deepEqual(state.toasts, ["info:Message queued for the next agent turn"]);
+		assert.equal(state.deferredChangeCount, 0);
 		assert.equal(state.input, "");
 	});
 

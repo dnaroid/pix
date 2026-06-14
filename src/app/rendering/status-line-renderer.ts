@@ -11,6 +11,7 @@ import type {
 	StatusModelTarget,
 	StatusModelUsageTarget,
 	StatusPromptEnhancerTarget,
+	StatusQuickScrollTarget,
 	StatusSessionTarget,
 	StatusTerminalBellSoundTarget,
 	StatusThinkingExpandTarget,
@@ -51,6 +52,7 @@ export type StatusLineRendererHost = {
 	terminalBellSoundStatusWidgetEnabled(): boolean;
 	voiceStatusWidgetText(): string;
 	voiceStatusWidgetActive(): boolean;
+	conversationQuickScrollDirections?(): { up: boolean; down: boolean };
 	queueableInputActive?(): boolean;
 	userMessageJumpMenuActive?(): boolean;
 	allThinkingExpandedActive?(): boolean;
@@ -111,6 +113,8 @@ export class StatusLineRenderer {
 			hasParts = true;
 		};
 
+		const quickScrollDirections = this.host.conversationQuickScrollDirections?.() ?? { up: false, down: false };
+
 		const draftQueueButton = this.draftQueueWidgetText();
 		appendWidget(draftQueueButton ? this.iconButtonText(draftQueueButton) : "", (column, text) => {
 			layout.draftQueueWidget = this.widgetLayout(column, text);
@@ -131,6 +135,12 @@ export class StatusLineRenderer {
 		});
 		appendWidget(this.iconButtonText(APP_ICONS.compactTools), (column, text) => {
 			layout.compactToolsWidget = this.widgetLayout(column, text);
+		});
+		appendWidget(quickScrollDirections.up ? this.iconButtonText(APP_ICONS.up) : "", (column, text) => {
+			layout.quickScrollUpWidget = this.widgetLayout(column, text);
+		});
+		appendWidget(quickScrollDirections.down ? this.iconButtonText(APP_ICONS.down) : "", (column, text) => {
+			layout.quickScrollDownWidget = this.widgetLayout(column, text);
 		});
 		const voiceWidgetText = this.host.voiceStatusWidgetText();
 		appendWidget(this.voiceBorderWidgetText(voiceWidgetText), (column, text) => {
@@ -195,6 +205,8 @@ export class StatusLineRenderer {
 			: this.host.promptEnhancerStatusWidgetEnabled()
 				? colors.info
 				: colors.muted);
+		pushWidgetSegment(layout.quickScrollUpWidget, colors.info);
+		pushWidgetSegment(layout.quickScrollDownWidget, colors.info);
 		pushWidgetSegment(layout.userJumpWidget, this.host.userMessageJumpMenuActive?.() ? colors.info : colors.muted);
 		pushWidgetSegment(layout.terminalBellSoundWidget, this.host.terminalBellSoundStatusWidgetEnabled() ? colors.info : colors.muted);
 		pushWidgetSegment(layout.thinkingExpandWidget, this.host.allThinkingExpandedActive?.() ? colors.info : colors.muted);
@@ -312,6 +324,18 @@ export class StatusLineRenderer {
 		const widget = layout.compactToolsWidget;
 		if (!widget) return undefined;
 		return { row, startColumn: widget.startColumn, endColumn: widget.endColumn };
+	}
+
+	quickScrollUpTarget(layout: StatusLineLayout, row: number): StatusQuickScrollTarget | undefined {
+		const widget = layout.quickScrollUpWidget;
+		if (!widget) return undefined;
+		return { row, startColumn: widget.startColumn, endColumn: widget.endColumn, direction: "up" };
+	}
+
+	quickScrollDownTarget(layout: StatusLineLayout, row: number): StatusQuickScrollTarget | undefined {
+		const widget = layout.quickScrollDownWidget;
+		if (!widget) return undefined;
+		return { row, startColumn: widget.startColumn, endColumn: widget.endColumn, direction: "down" };
 	}
 
 	terminalBellSoundTarget(layout: StatusLineLayout, row: number): StatusTerminalBellSoundTarget | undefined {

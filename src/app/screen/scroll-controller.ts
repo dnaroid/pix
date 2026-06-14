@@ -16,6 +16,11 @@ export type ConversationTextScrollTarget = {
 	needles: readonly string[];
 };
 
+export type AppScrollState = {
+	scrollFromBottom: number;
+	detachedScrollStart?: number;
+};
+
 export type AppScrollControllerHost = {
 	conversationViewport(): ConversationViewport;
 	editorLayoutRenderer(): EditorLayoutRenderer;
@@ -45,6 +50,52 @@ export class AppScrollController {
 		this.scrollFromBottom = 0;
 		this.detachedScrollStart = undefined;
 		return changed;
+	}
+
+	scrollToTop(): boolean {
+		const columns = this.host.terminalColumns();
+		const terminalRows = this.host.terminalRows();
+		const rows = editorLayoutRows(terminalRows, this.host.tabPanelRows(terminalRows));
+		const { bodyHeight } = this.host.editorLayoutRenderer().computeLayout(columns, rows);
+		const metrics = this.scrollMetrics(columns, bodyHeight);
+		return this.setScrollStart(0, metrics);
+	}
+
+	async scrollToAbsoluteTop(): Promise<boolean> {
+		let loadedOlder = false;
+		while (this.host.hasOlderSessionHistory?.() === true && this.host.isLoadingOlderSessionHistory?.() !== true) {
+			const loaded = await this.host.loadOlderSessionHistory?.({ render: false });
+			if (!loaded) break;
+			loadedOlder = true;
+			this.host.render();
+			await yieldToEventLoop();
+		}
+
+		return this.scrollToTop() || loadedOlder;
+	}
+
+	quickScrollDirections(columns: number, bodyHeight: number): { up: boolean; down: boolean } {
+		if (bodyHeight <= 0) return { up: false, down: false };
+
+		const metrics = this.scrollMetrics(columns, bodyHeight);
+		return {
+			up: metrics.start > 0 || this.host.hasOlderSessionHistory?.() === true,
+			down: metrics.start < metrics.maxScroll,
+		};
+	}
+
+	captureState(): AppScrollState {
+		return {
+			scrollFromBottom: this.scrollFromBottom,
+			...(this.detachedScrollStart === undefined ? {} : { detachedScrollStart: this.detachedScrollStart }),
+		};
+	}
+
+	restoreState(state: AppScrollState): void {
+		this.scrollFromBottom = Math.max(0, state.scrollFromBottom);
+		this.detachedScrollStart = state.detachedScrollStart === undefined
+			? undefined
+			: Math.max(0, state.detachedScrollStart);
 	}
 
 	conversationView(columns: number, bodyHeight: number): { lines: RenderedLine[]; metrics: AppScrollMetrics } {
@@ -209,6 +260,10 @@ export class AppScrollController {
 		const safeColumns = Math.max(1, columns);
 		return safeColumns;
 	}
+}
+
+async function yieldToEventLoop(): Promise<void> {
+	await new Promise<void>((resolve) => { setTimeout(resolve, 0); });
 }
 
 function editorLayoutRows(terminalRows: number, tabPanelRows: number): number {

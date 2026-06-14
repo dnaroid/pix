@@ -1,0 +1,122 @@
+import { mkdir, readFile, readdir, stat, unlink, writeFile } from "node:fs/promises"
+import type { Dirent } from "node:fs"
+import { dirname, join } from "node:path"
+import { SessionManager, type ExtensionContext } from "@earendil-works/pi-coding-agent"
+import { hashSerializedState, serializeState, type DcpState, type SerializedDcpState } from "./state.js"
+
+const DCP_STATE_DIR = "dcp-state"
+const DCP_STATE_EXT = ".json"
+const DCP_STATE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
+
+let lastPersistedStateHash: string | undefined
+let saveQueue: Promise<void> = Promise.resolve()
+
+function safeSessionFileName(sessionId: string): string {
+	return sessionId.replace(/[^a-zA-Z0-9._-]/g, "_") + DCP_STATE_EXT
+}
+
+function resolveDcpStateDir(ctx: ExtensionContext): string | undefined {
+	const sessionDir = ctx.sessionManager.getSessionDir()
+	if (!sessionDir) return undefined
+	return join(sessionDir, DCP_STATE_DIR)
+}
+
+export function resolveDcpStatePath(ctx: ExtensionContext): string | undefined {
+	const sessionId = ctx.sessionManager.getSessionId()
+	const stateDir = resolveDcpStateDir(ctx)
+	if (!sessionId || !stateDir) return undefined
+	return join(stateDir, safeSessionFileName(sessionId))
+}
+
+export function resetDcpPersistenceDedup(): void {
+	lastPersistedStateHash = undefined
+}
+
+export async function loadDcpState(ctx: ExtensionContext): Promise<SerializedDcpState | undefined> {
+	const statePath = resolveDcpStatePath(ctx)
+	if (!statePath) return undefined
+
+	try {
+		const text = await readFile(statePath, "utf8")
+		const data = JSON.parse(text) as SerializedDcpState
+		lastPersistedStateHash = hashSerializedState(data)
+		return data
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined
+		throw error
+	}
+}
+
+export async function cleanupStaleDcpStateFiles(ctx: ExtensionContext): Promise<number> {
+	const stateDir = resolveDcpStateDir(ctx)
+	const sessionDir = ctx.sessionManager.getSessionDir()
+	if (!stateDir || !sessionDir) return 0
+
+	const currentSessionId = ctx.sessionManager.getSessionId()
+	const liveStateFiles = new Set<string>()
+	if (currentSessionId) liveStateFiles.add(safeSessionFileName(currentSessionId))
+
+	const sessions = await SessionManager.list(ctx.cwd, sessionDir)
+	for (const session of sessions) {
+		liveStateFiles.add(safeSessionFileName(session.id))
+	}
+
+	let entries: Dirent[]
+	try {
+		entries = await readdir(stateDir, { withFileTypes: true })
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return 0
+		throw error
+	}
+
+	const now = Date.now()
+	let deleted = 0
+	for (const entry of entries) {
+		if (!entry.isFile() || !entry.name.endsWith(DCP_STATE_EXT)) continue
+		if (currentSessionId && entry.name === safeSessionFileName(currentSessionId)) continue
+
+		const statePath = join(stateDir, entry.name)
+		const isLiveSession = liveStateFiles.has(entry.name)
+		let isTooOld = false
+		try {
+			const info = await stat(statePath)
+			isTooOld = now - info.mtimeMs > DCP_STATE_MAX_AGE_MS
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") continue
+			throw error
+		}
+
+		if (isLiveSession && !isTooOld) continue
+
+		await unlink(statePath)
+		deleted++
+	}
+
+	return deleted
+}
+
+export async function saveDcpState(ctx: ExtensionContext, state: DcpState): Promise<void> {
+	const statePath = resolveDcpStatePath(ctx)
+	if (!statePath) return
+
+	const serialized = serializeState(state)
+	const hash = hashSerializedState(serialized)
+	if (hash === lastPersistedStateHash) return
+	lastPersistedStateHash = hash
+
+	saveQueue = saveQueue
+		.catch(() => {
+			// Keep later saves moving even if an earlier write failed.
+		})
+		.then(async () => {
+			await mkdir(dirname(statePath), { recursive: true })
+			await writeFile(statePath, JSON.stringify(serialized), "utf8")
+		})
+
+	try {
+		await saveQueue
+	} catch (error) {
+		if (lastPersistedStateHash === hash) lastPersistedStateHash = undefined
+		throw error
+	}
+}

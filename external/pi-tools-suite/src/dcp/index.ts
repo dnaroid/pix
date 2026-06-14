@@ -8,11 +8,14 @@ import {
 	createState,
 	resetState,
 	createInputFingerprint,
-	serializeState,
-	hashSerializedState,
 	restoreState,
-	type DcpState,
 } from "./state.js"
+import {
+	cleanupStaleDcpStateFiles,
+	loadDcpState,
+	resetDcpPersistenceDedup,
+	saveDcpState,
+} from "./state-persistence.js"
 import {
 	SYSTEM_PROMPT,
 	MANUAL_MODE_SYSTEM_PROMPT,
@@ -44,28 +47,6 @@ import { safeGetContextUsage } from "../context-usage.js"
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Hash of the last persisted dcp-state snapshot. Used to skip appending
- * identical snapshots when saveState is called repeatedly without state change.
- */
-let lastPersistedStateHash: string | undefined
-
-/**
- * Persist the current DCP runtime state as a custom session entry so it
- * survives session restarts and pi process restarts.
- *
- * Deduplication: serializes, hashes, and skips the append when the hash
- * matches the previously persisted snapshot. This avoids writing identical
- * multi-KB entries on every context event / nudge reapply.
- */
-function saveState(pi: ExtensionAPI, state: DcpState): void {
-	const serialized = serializeState(state)
-	const hash = hashSerializedState(serialized)
-	if (hash === lastPersistedStateHash) return
-	lastPersistedStateHash = hash
-	pi.appendEntry("dcp-state", serialized)
-}
 
 function annotateMessagesWithBranchEntryIds(messages: any[], ctx: ExtensionContext): void {
 	let branch: any[] = []
@@ -168,30 +149,27 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 		// Reset to a clean slate first.
 		resetState(state)
 
-		// Reset dedup hash so the first save after restore always writes.
-		lastPersistedStateHash = undefined
+		// Reset dedup hash before loading the sidecar state for this session.
+		resetDcpPersistenceDedup()
 
 		// Re-apply config baseline so manual mode survives a session_start reset.
 		if (config.manualMode.enabled) {
 			state.manualMode = true
 		}
 
-		// Walk the branch looking for the most-recent persisted dcp-state entry.
-		let latestDcpState: unknown
-		for (const entry of ctx.sessionManager.getBranch()) {
-			if (entry.type === "custom" && entry.customType === "dcp-state") {
-				latestDcpState = entry.data
-			}
-		}
-
-		restoreState(state, latestDcpState)
+		// Restore from an overwrite sidecar file keyed by session id. Legacy
+		// append-only custom `dcp-state` entries are intentionally ignored.
+		void cleanupStaleDcpStateFiles(ctx).catch(() => {
+			// Cleanup is opportunistic; stale sidecars must not block session startup.
+		})
+		restoreState(state, await loadDcpState(ctx))
 
 		// Headless by design: no extension status/footer/widgets are rendered.
 	})
 
 	// ── 6. session_shutdown: save state ───────────────────────────────────────
-	pi.on("session_shutdown", async (_event, _ctx) => {
-		saveState(pi, state)
+	pi.on("session_shutdown", async (_event, ctx) => {
+		await saveDcpState(ctx, state)
 	})
 
 	// ── 7. before_agent_start: inject system prompt ───────────────────────────
@@ -356,7 +334,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 							usage,
 							toolCallsSinceLastUser,
 						)
-						saveState(pi, state)
+						await saveDcpState(ctx, state)
 					} else {
 						// Anchor already exists at >= priority; the reminder text is
 						// re-applied below via applyAnchoredNudges on every context
@@ -398,7 +376,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 	})
 
 	// ── 11. agent_end: persist state after each agent run ────────────────────
-	pi.on("agent_end", async (_event, _ctx) => {
-		saveState(pi, state)
+	pi.on("agent_end", async (_event, ctx) => {
+		await saveDcpState(ctx, state)
 	})
 }

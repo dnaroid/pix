@@ -36,7 +36,8 @@ const NERD_FONT_ICONS = {
 	toolBodyEnd: "└",
 	toolBodyGutter: "│",
 	toolPreviewTruncated: "⊞",
-	down: "\u{f0045}",
+	up: "↑",
+	down: "↓",
 } as const;
 
 export type AppIconName = keyof typeof NERD_FONT_ICONS;
@@ -71,7 +72,8 @@ const FALLBACK_ICONS: AppIconMap = {
 	toolBodyEnd: "`",
 	toolBodyGutter: "|",
 	toolPreviewTruncated: "+",
-	down: "v",
+	up: "↑",
+	down: "↓",
 };
 
 export const APP_ICON_THEMES: Record<AppIconThemeName, AppIconMap> = {

@@ -38,7 +38,7 @@ import { AppRequestHistory } from "./session/request-history.js";
 import { AppRenderController } from "./rendering/render-controller.js";
 import { createPixRuntime } from "./runtime.js";
 import { ScreenStyler } from "./screen/screen-styler.js";
-import { AppScrollController } from "./screen/scroll-controller.js";
+import { AppScrollController, type AppScrollState } from "./screen/scroll-controller.js";
 import { searchResultScrollNeedles, searchResultTargetEntry, type SessionSearchResult } from "./session/session-search.js";
 import { AppSessionLifecycleController, type BindCurrentSessionOptions } from "./session/session-lifecycle-controller.js";
 import { AppShellController } from "./commands/shell-controller.js";
@@ -79,6 +79,7 @@ const COALESCED_RENDER_DELAY_MS = 16;
 type AppSessionView = {
 	entries: Entry[];
 	eventState: AppSessionEventControllerState;
+	scrollState: AppScrollState;
 };
 
 export class PiUiExtendApp {
@@ -213,6 +214,7 @@ export class PiUiExtendApp {
 			loadSessionHistoryAsync: (options) => this.loadSessionHistoryAsync(options),
 			captureSessionView: () => this.captureSessionView(),
 			restoreSessionView: (view) => this.restoreSessionView(view),
+			restoreScrollState: (state) => this.scrollController.restoreState(state),
 			syncUserSessionEntryMetadata: () => this.workspaceActions.syncUserSessionEntryMetadata(),
 			captureInputState: () => this.inputEditor.draftState,
 			restoreInputState: (state) => this.restoreTabInputState(state),
@@ -313,6 +315,7 @@ export class PiUiExtendApp {
 			terminalBellSoundStatusWidgetEnabled: () => this.terminalBellSoundController.isEnabled(),
 			voiceStatusWidgetText: () => this.voiceController.statusWidgetText(),
 			voiceStatusWidgetActive: () => this.voiceController.statusWidgetActive(),
+			conversationQuickScrollDirections: () => this.conversationQuickScrollDirections(),
 			queueableInputActive: () => this.inputEditor.promptText.trimEnd().length > 0 || this.inputEditor.images.length > 0,
 			userMessageJumpMenuActive: () => this.popupMenus.directMenu === "user-message-jump",
 			allThinkingExpandedActive: () => this.allThinkingExpanded,
@@ -602,6 +605,7 @@ export class PiUiExtendApp {
 						this.render();
 					});
 				},
+				scrollConversationQuick: (direction) => this.scrollConversationQuick(direction),
 				toggleAllThinkingExpanded: () => {
 					this.allThinkingExpanded = !this.allThinkingExpanded;
 					this.render();
@@ -974,6 +978,7 @@ export class PiUiExtendApp {
 		return {
 			entries: [...this.entries],
 			eventState: this.sessionEvents.snapshotState(),
+			scrollState: this.scrollController.captureState(),
 		};
 	}
 
@@ -981,6 +986,7 @@ export class PiUiExtendApp {
 		this.entries.splice(0, this.entries.length, ...view.entries);
 		this.sessionEvents.restoreState(view.eventState);
 		this.conversationViewport.clear();
+		this.scrollController.restoreState(view.scrollState);
 		this.workspaceActions.syncUserSessionEntryMetadata();
 	}
 
@@ -1204,6 +1210,23 @@ export class PiUiExtendApp {
 
 		this.lastInputEditorContentVersion = contentVersion;
 		this.scrollController.scrollToBottom();
+	}
+
+	private conversationQuickScrollDirections(): { up: boolean; down: boolean } {
+		const columns = this.terminalColumns();
+		const terminalRows = this.terminalRows();
+		const rows = Math.max(1, terminalRows - this.tabLineRenderer.panelRows(terminalRows));
+		const { bodyHeight } = this.editorLayoutRenderer.computeLayout(columns, rows);
+		if (bodyHeight <= 0) return { up: false, down: false };
+
+		return this.scrollController.quickScrollDirections(columns, bodyHeight);
+	}
+
+	private async scrollConversationQuick(direction: "up" | "down"): Promise<void> {
+		const changed = direction === "up"
+			? await this.scrollController.scrollToAbsoluteTop()
+			: this.scrollController.scrollToBottom();
+		if (changed) this.render();
 	}
 
 	private renderStatusLine(): void {

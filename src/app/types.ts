@@ -264,6 +264,8 @@ export type StatusLineLayout = {
 	inputBorderWidgetStartColumn?: number;
 	modelUsageLabel?: string;
 	contextBarLabel?: string;
+	quickScrollUpWidget?: StatusQuickScrollWidgetLayout;
+	quickScrollDownWidget?: StatusQuickScrollWidgetLayout;
 	userJumpWidget?: StatusUserJumpWidgetLayout;
 	draftQueueWidget?: StatusDraftQueueWidgetLayout;
 	thinkingExpandWidget?: StatusThinkingExpandWidgetLayout;
@@ -271,6 +273,11 @@ export type StatusLineLayout = {
 	terminalBellSoundWidget?: StatusTerminalBellSoundWidgetLayout;
 	promptEnhancerWidget?: StatusPromptEnhancerWidgetLayout;
 	voiceWidget?: StatusVoiceWidgetLayout;
+};
+
+export type StatusQuickScrollWidgetLayout = {
+	startColumn: number;
+	endColumn: number;
 };
 
 export type StatusUserJumpWidgetLayout = {
@@ -617,6 +624,13 @@ export type StatusCompactToolsTarget = {
 	row: number;
 	startColumn: number;
 	endColumn: number;
+};
+
+export type StatusQuickScrollTarget = {
+	row: number;
+	startColumn: number;
+	endColumn: number;
+	direction: "up" | "down";
 };
 
 export type ParsedSlashInput = {

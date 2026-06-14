@@ -1,7 +1,7 @@
 import type { AgentSession, AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 import type { ImageContent } from "../../input-editor.js";
 import { createId } from "../id.js";
-import { stringifyUnknown, submittedUserDisplayText } from "../rendering/message-content.js";
+import { submittedUserDisplayText } from "../rendering/message-content.js";
 import type { Entry, SessionActivity, SubmittedUserMessage } from "../types.js";
 import { deferredQueuedMessageEntries, queuedMessageEntries } from "./queued-message-entries.js";
 
@@ -30,7 +30,6 @@ export class AppQueuedMessageController {
 	readonly deferredUserMessages: SubmittedUserMessage[] = [];
 
 	private promptSubmissionInFlight = false;
-	private flushingDeferredUserMessages = false;
 	private immediateSendInProgress = false;
 
 	constructor(private readonly host: AppQueuedMessageControllerHost) {}
@@ -38,7 +37,6 @@ export class AppQueuedMessageController {
 	reset(): void {
 		this.deferredUserMessages.length = 0;
 		this.promptSubmissionInFlight = false;
-		this.flushingDeferredUserMessages = false;
 	}
 
 	captureDeferredUserMessages(): SubmittedUserMessage[] {
@@ -67,8 +65,8 @@ export class AppQueuedMessageController {
 			return;
 		}
 
-		if (this.shouldDeferUserMessage(session)) {
-			this.deferUserMessage(message);
+		if (this.shouldQueueUserMessageAsSteering(session)) {
+			await this.queueUserMessageAsSteering(message);
 			return;
 		}
 
@@ -99,44 +97,6 @@ export class AppQueuedMessageController {
 				this.host.setSessionActivity(activeSession.isStreaming || activeSession.isCompacting ? "running" : "idle");
 			}
 			if (this.totalQueuedMessageCount() > 0) this.updateQueuedMessageStatus();
-		}
-	}
-
-	async flushDeferredUserMessages(): Promise<void> {
-		if (this.immediateSendInProgress || this.flushingDeferredUserMessages || this.deferredUserMessages.length === 0) return;
-
-		const session = this.host.runtime()?.session;
-		if (!session || session.isCompacting) return;
-		if (!session.isStreaming && this.promptSubmissionInFlight) return;
-
-		this.flushingDeferredUserMessages = true;
-		try {
-			while (this.deferredUserMessages.length > 0) {
-				if (this.immediateSendInProgress) break;
-
-				const activeSession = this.host.runtime()?.session;
-				if (!activeSession || activeSession.isCompacting) break;
-				if (!activeSession.isStreaming && this.promptSubmissionInFlight) break;
-
-				const message = this.deferredUserMessages.shift();
-				if (!message) break;
-				this.notifyDeferredUserMessagesChanged();
-				this.updateQueuedMessageStatus();
-
-				try {
-					await this.sendUserMessageToSession(message);
-				} catch (error) {
-					this.deferredUserMessages.unshift(message);
-					this.notifyDeferredUserMessagesChanged();
-					this.updateQueuedMessageStatus();
-					this.host.addEntry({ id: createId("error"), kind: "error", text: `Queued message failed: ${stringifyUnknown(error)}` });
-					break;
-				}
-			}
-		} finally {
-			this.flushingDeferredUserMessages = false;
-			if (this.totalQueuedMessageCount() > 0) this.updateQueuedMessageStatus();
-			if (this.host.isRunning()) this.host.render();
 		}
 	}
 
@@ -270,15 +230,24 @@ export class AppQueuedMessageController {
 		return deferredQueuedMessageEntries(this.deferredUserMessages);
 	}
 
-	private shouldDeferUserMessage(session: AgentSession): boolean {
+	private shouldQueueUserMessageAsSteering(session: AgentSession): boolean {
 		return session.isCompacting || this.promptSubmissionInFlight;
+	}
+
+	private async queueUserMessageAsSteering(message: SubmittedUserMessage): Promise<void> {
+		const session = this.host.requireRuntime().session;
+		await session.steer(message.promptText, message.images.length > 0 ? message.images : undefined);
+		this.updateQueuedMessageStatus();
+		this.host.setSessionStatus(session);
+		this.host.showToast("Message queued for the next agent turn", "info");
+		this.host.render();
 	}
 
 	deferUserMessage(message: SubmittedUserMessage): void {
 		this.deferredUserMessages.push(message);
 		this.notifyDeferredUserMessagesChanged();
 		this.updateQueuedMessageStatus();
-		this.host.showToast("Message queued; send it from the queue menu or status button", "info");
+		this.host.showToast("Message paused; send it from the queue menu or status button", "info");
 		this.host.render();
 	}
 

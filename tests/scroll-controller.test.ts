@@ -137,6 +137,44 @@ describe("AppScrollController", () => {
 		assert.equal(controller.conversationView(10, 5).metrics.start, 15);
 		assert.equal(controller.scrollToBottom(), false);
 	});
+
+	it("exposes an up quick-scroll direction when older history is still lazy-loaded", () => {
+		const controller = createController({
+			lineCount: () => 4,
+			slice: (_width, start, count) => Array.from({ length: count }, (_, index) => ({ text: `line ${start + index}` })),
+		}, 5, {
+			hasOlderSessionHistory: () => true,
+		});
+
+		assert.deepEqual(controller.quickScrollDirections(10, 5), { up: true, down: false });
+	});
+
+	it("loads all lazy older history before jumping to the absolute top", async () => {
+		let lineCount = 4;
+		let olderBatches = 2;
+		let renders = 0;
+		const rendersBeforeLoad: number[] = [];
+		const controller = createController({
+			lineCount: () => lineCount,
+			slice: (_width, start, count) => Array.from({ length: count }, (_, index) => ({ text: `line ${start + index}` })),
+		}, 5, {
+			hasOlderSessionHistory: () => olderBatches > 0,
+			isLoadingOlderSessionHistory: () => false,
+			loadOlderSessionHistory: () => {
+				rendersBeforeLoad.push(renders);
+				olderBatches -= 1;
+				lineCount += 5;
+				return Promise.resolve(true);
+			},
+			render: () => { renders += 1; },
+		});
+
+		assert.equal(await controller.scrollToAbsoluteTop(), true);
+		assert.equal(olderBatches, 0);
+		assert.deepEqual(rendersBeforeLoad, [0, 1]);
+		assert.equal(renders, 2);
+		assert.equal(controller.conversationView(10, 5).metrics.start, 0);
+	});
 });
 
 function createController(viewport: {
