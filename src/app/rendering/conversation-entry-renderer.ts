@@ -19,6 +19,7 @@ export type ConversationEntryRenderOptions = {
 	colors: Theme["colors"];
 	pixConfig: PixConfig;
 	outputFilters: readonly RegExp[];
+	availableThinkingLevels?: readonly string[];
 	superCompactTools?: boolean;
 	allThinkingExpanded?: boolean;
 	renderInlineUserMessageMenu: (entry: Extract<Entry, { kind: "user" }>, context: InlineUserMessageMenuContext) => RenderedLine[];

@@ -12,6 +12,7 @@ export type ConversationViewportHost = {
 	readonly colors: Theme["colors"];
 	readonly pixConfig: PixConfig;
 	readonly outputFilters: readonly RegExp[];
+	availableThinkingLevels?(): readonly string[] | undefined;
 	readonly superCompactTools?: boolean;
 	readonly allThinkingExpanded?: boolean;
 	hasDynamicConversationBlock?(): boolean;
@@ -121,12 +122,14 @@ export class ConversationViewport {
 		const cached = blockCache.get(entry.id);
 		const dynamic = this.host.isDynamicConversationBlock(entry);
 		if (!dynamic && cached?.version === version) return cached;
+		const availableThinkingLevels = this.host.availableThinkingLevels?.();
 
 		const lines = renderConversationEntryLines(entry, width, {
 			cwd: this.host.cwd,
 			colors: this.host.colors,
 			pixConfig: this.host.pixConfig,
 			outputFilters: this.host.outputFilters,
+			...(availableThinkingLevels ? { availableThinkingLevels } : {}),
 			superCompactTools: Boolean(this.host.superCompactTools),
 			allThinkingExpanded: Boolean(this.host.allThinkingExpanded),
 			renderInlineUserMessageMenu: (userEntry, context) => this.host.renderInlineUserMessageMenu(userEntry, context),

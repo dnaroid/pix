@@ -14,6 +14,7 @@ import {
 } from "../subagents/subagents-model.js";
 import { formatTodoTaskLine, isTodoDetails, visibleTodoTasks } from "../todo/todo-model.js";
 import { renderToolBlock } from "./tool-block-renderer.js";
+import { thinkingLevelThemeColor } from "./status-line-renderer.js";
 import type { Theme } from "../../theme.js";
 import type {
 	Entry,
@@ -29,6 +30,7 @@ export type ConversationToolRenderOptions = {
 	cwd: string;
 	pixConfig: PixConfig;
 	colors: Theme["colors"];
+	availableThinkingLevels?: readonly string[];
 	superCompactTools?: boolean;
 	allThinkingExpanded?: boolean;
 };
@@ -87,6 +89,9 @@ export function renderThinkingEntry(
 	const forceExpanded = Boolean(options.allThinkingExpanded);
 	const compactExpandedText = options.superCompactTools && forceExpanded ? removeBlankLines(expandedText) : expandedText;
 	const expanded = forceExpanded || (entry.expanded && expandedText.trim().length > 0);
+	const headerColorOverride = entry.level
+		? thinkingLevelThemeColor(entry.level, options.colors, options.availableThinkingLevels)
+		: undefined;
 	return renderToolBlock({
 		id: entry.id,
 		toolName: THINKING_TOOL_NAME,
@@ -98,7 +103,12 @@ export function renderThinkingEntry(
 		expandedText: compactExpandedText || "(empty)",
 		bodyWrap: "word",
 		syntaxHighlight: compactExpandedText ? markdownSyntaxHighlightsForText(compactExpandedText) : undefined,
-	}, rule, width, options.colors, { superCompact: Boolean(options.superCompactTools && !forceExpanded), backgroundOverride: options.colors.thinkingMessageBackground, showGutter: true });
+	}, rule, width, options.colors, {
+		superCompact: Boolean(options.superCompactTools && !forceExpanded),
+		backgroundOverride: options.colors.thinkingMessageBackground,
+		showGutter: true,
+		...(headerColorOverride === undefined ? {} : { headerColorOverride }),
+	});
 }
 
 function trimTrailingBlankLines(text: string): string {

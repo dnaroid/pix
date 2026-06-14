@@ -8,7 +8,7 @@ import {
 	parseAppIconThemeName,
 	resolveAppIconThemeNameFromEnv,
 	type AppIconThemeName,
-} from "./app/icons.js";
+} from "./icon-theme.js";
 import { DEFAULT_PIX_CONFIG_JSONC } from "./default-pix-config.js";
 
 export type ToolRendererRule = {

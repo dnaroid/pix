@@ -456,6 +456,7 @@ export class PiUiExtendApp {
 			colors: this.theme.colors,
 			pixConfig: this.pixConfig,
 			outputFilters: this.outputFilters,
+			availableThinkingLevels: () => this.runtime?.session.getAvailableThinkingLevels(),
 			hasDynamicConversationBlock: () => this.popupMenus.hasDynamicConversationBlock(),
 			isDynamicConversationBlock: (entry) => this.popupMenus.isDynamicConversationBlock(entry),
 			renderInlineUserMessageMenu: (entry, context) => this.popupMenus.renderInlineUserMessageMenu(entry, context),

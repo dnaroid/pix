@@ -70,7 +70,7 @@ export type Entry =
 			signal?: NodeJS.Signals | null;
 			error?: string;
 	  }
-	| { id: string; kind: "thinking"; text: string; expanded: boolean; status: "running" | "done" }
+	| { id: string; kind: "thinking"; text: string; expanded: boolean; status: "running" | "done"; level?: string }
 	| {
 			id: string;
 			kind: "tool";

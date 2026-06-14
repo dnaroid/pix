@@ -5,6 +5,7 @@ import type { LazySessionHistoryReader } from "./lazy-session-manager.js";
 export const PIX_SYSTEM_MESSAGE_CUSTOM_TYPE = "pix-system";
 export const PIX_SYSTEM_DISPLAY_ENTRY_CUSTOM_TYPE = "pix:system_message";
 export const PIX_SESSION_ENTRY_ID_FIELD = "__pixSessionEntryId";
+export const PIX_THINKING_LEVEL_FIELD = "__pixThinkingLevel";
 
 export function appendPixSystemDisplayEntry(session: AgentSession, text: string): void {
 	const trimmed = text.trim();
@@ -35,9 +36,12 @@ export function sessionHistoryOlderMessagesReader(session: AgentSession): Sessio
 
 export function sessionHistoryDisplayMessagesFromEntries(branch: readonly SessionEntry[]): readonly unknown[] {
 	const messages: unknown[] = [];
+	let currentThinkingLevel: string | undefined;
 	for (const entry of branch) {
 		if (entry.type === "message") {
-			messages.push(withSessionEntryId(entry.message, entry.id));
+			messages.push(withSessionHistoryMetadata(entry.message, entry.id, currentThinkingLevel));
+		} else if (entry.type === "thinking_level_change") {
+			currentThinkingLevel = typeof entry.thinkingLevel === "string" ? entry.thinkingLevel : currentThinkingLevel;
 		} else if (entry.type === "custom_message") {
 			messages.push({
 				role: "custom",
@@ -67,8 +71,13 @@ export async function sessionHistoryFullBranchEntries(session: AgentSession): Pr
 	return await reader.readFullBranchEntries?.() ?? session.sessionManager.getBranch();
 }
 
-function withSessionEntryId(message: unknown, entryId: string): unknown {
-	return isRecord(message) ? { ...message, [PIX_SESSION_ENTRY_ID_FIELD]: entryId } : message;
+function withSessionHistoryMetadata(message: unknown, entryId: string, thinkingLevel: string | undefined): unknown {
+	if (!isRecord(message)) return message;
+	return {
+		...message,
+		[PIX_SESSION_ENTRY_ID_FIELD]: entryId,
+		...(thinkingLevel === undefined ? {} : { [PIX_THINKING_LEVEL_FIELD]: thinkingLevel }),
+	};
 }
 
 function isPixSystemDisplayEntry(entry: { type: string; customType?: string; data?: unknown }): entry is { type: "custom"; customType: typeof PIX_SYSTEM_DISPLAY_ENTRY_CUSTOM_TYPE; data: { text: string } } {

@@ -45,6 +45,7 @@ export type ToolBlockRenderOptions = {
 	backgroundOverride?: string;
 	skipHeaderBackground?: boolean;
 	showGutter?: boolean;
+	headerColorOverride?: string;
 };
 
 export function renderToolBlock(entry: ToolBlockEntry, rule: ResolvedToolRule, width: number, colors: Theme["colors"], options: ToolBlockRenderOptions = {}): RenderedLine[] {
@@ -53,7 +54,7 @@ export function renderToolBlock(entry: ToolBlockEntry, rule: ResolvedToolRule, w
 	const hasLspDiagnostics = hasToolLspDiagnosticsAfterMutation(entry);
 	const expanded = entry.expanded;
 	const stateIcon = toolStatusIcon(entry);
-	const toolColor = resolveColor(rule.color, colors);
+	const toolColor = options.headerColorOverride ?? resolveColor(rule.color, colors);
 	const toolOutputColor = colors.statusForeground;
 	const headerLabel = (entry.headerLabel ?? entry.toolName).toLowerCase();
 	const bg = options.backgroundOverride;

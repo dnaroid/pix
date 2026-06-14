@@ -4,7 +4,7 @@ import { createId } from "../id.js";
 import { isOnlyHiddenMetadata } from "../../markdown-format.js";
 import { extractImageContents, renderContent, renderUserMessageContent, stringifyUnknown } from "../rendering/message-content.js";
 import { THINKING_TOOL_NAME } from "../constants.js";
-import { PIX_SESSION_ENTRY_ID_FIELD, PIX_SYSTEM_MESSAGE_CUSTOM_TYPE } from "./pix-system-message.js";
+import { PIX_SESSION_ENTRY_ID_FIELD, PIX_SYSTEM_MESSAGE_CUSTOM_TYPE, PIX_THINKING_LEVEL_FIELD } from "./pix-system-message.js";
 
 type ToolResultRecord = {
 	content: readonly unknown[];
@@ -259,6 +259,9 @@ function renderAssistantHistoryMessage(
 ): void {
 	const content = message.content;
 	if (!Array.isArray(content)) return;
+	const messageThinkingLevel = typeof message[PIX_THINKING_LEVEL_FIELD] === "string"
+		? message[PIX_THINKING_LEVEL_FIELD]
+		: undefined;
 
 	let assistantText = "";
 	let thinkingText = "";
@@ -274,6 +277,7 @@ function renderAssistantHistoryMessage(
 					kind: "thinking",
 					text: thinkingText,
 					expanded: options.toolDefaultExpanded(THINKING_TOOL_NAME),
+					...(messageThinkingLevel === undefined ? {} : { level: messageThinkingLevel }),
 					status: "done",
 				});
 				thinkingText = "";
@@ -321,6 +325,7 @@ function renderAssistantHistoryMessage(
 			kind: "thinking",
 			text: thinkingText,
 			expanded: options.toolDefaultExpanded(THINKING_TOOL_NAME),
+			...(messageThinkingLevel === undefined ? {} : { level: messageThinkingLevel }),
 			status: "done",
 		});
 	}

@@ -596,18 +596,25 @@ export class AppSessionEventController {
 	}
 
 	private appendThinkingText(delta: string): void {
-		let entry = this.currentThinkingEntryId ? this.findEntry(this.currentThinkingEntryId) : undefined;
+		let entry: Extract<Entry, { kind: "thinking" }> | undefined = this.currentThinkingEntryId
+			? this.findEntry(this.currentThinkingEntryId) as Extract<Entry, { kind: "thinking" }> | undefined
+			: undefined;
 		if (!entry || entry.kind !== "thinking") {
+			const level = this.currentThinkingLevel();
 			entry = {
 				id: createId("thinking"),
 				kind: "thinking",
 				text: "",
 				expanded: this.host.toolDefaultExpanded(THINKING_TOOL_NAME),
+				...(level === undefined ? {} : { level }),
 				status: "running",
 			};
 			this.addEntry(entry);
 			this.currentThinkingEntryId = entry.id;
 		}
+		const level = this.currentThinkingLevel();
+		if (level === undefined) delete entry.level;
+		else entry.level = level;
 		entry.status = "running";
 		entry.text += delta;
 		this.touchEntry(entry);
@@ -623,23 +630,34 @@ export class AppSessionEventController {
 	}
 
 	private reconcileThinkingText(content: string): void {
-		let entry = this.currentThinkingEntryId ? this.findEntry(this.currentThinkingEntryId) : undefined;
+		let entry: Extract<Entry, { kind: "thinking" }> | undefined = this.currentThinkingEntryId
+			? this.findEntry(this.currentThinkingEntryId) as Extract<Entry, { kind: "thinking" }> | undefined
+			: undefined;
 		if (!entry || entry.kind !== "thinking") {
+			const level = this.currentThinkingLevel();
 			entry = {
 				id: createId("thinking"),
 				kind: "thinking",
 				text: "",
 				expanded: this.host.toolDefaultExpanded(THINKING_TOOL_NAME),
+				...(level === undefined ? {} : { level }),
 				status: "running",
 			};
 			this.addEntry(entry);
 			this.currentThinkingEntryId = entry.id;
 		}
-		if (entry.text !== content || entry.status !== "running") {
+		const level = this.currentThinkingLevel();
+		if (entry.text !== content || entry.status !== "running" || entry.level !== level) {
 			entry.text = content;
+			if (level === undefined) delete entry.level;
+			else entry.level = level;
 			entry.status = "running";
 			this.touchEntry(entry);
 		}
+	}
+
+	private currentThinkingLevel(): string | undefined {
+		return this.host.runtime()?.session.thinkingLevel;
 	}
 
 	private renderAssistantToolCallsFromMessage(message: unknown): void {
