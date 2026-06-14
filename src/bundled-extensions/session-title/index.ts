@@ -1,22 +1,15 @@
 import { SessionManager, type ExtensionAPI, type ExtensionContext, type SessionStartEvent } from "@earendil-works/pi-coding-agent";
-import { complete } from "@earendil-works/pi-ai";
-import type { Api, Model } from "@earendil-works/pi-ai";
 import { resolve } from "node:path";
 import type { ImageContent } from "../../input-editor.js";
 import { loadSessionTitleConfig, type SessionTitleConfig } from "./config.js";
+import {
+	fallbackSessionTitleFromInput,
+	firstUserMessageText as firstUserMessageTextFromEntries,
+	generateSessionTitle,
+	sessionTitleModelRefs,
+	} from "./title-generation.js";
 
-type SessionEntryLike = {
-	type?: string;
-	message?: {
-		role?: string;
-		content?: unknown;
-	};
-};
-
-type TextContentLike = {
-	type?: string;
-	text?: unknown;
-};
+export { fallbackSessionTitleFromInput, generateSessionTitle, sessionTitleModelRefs, sanitizeSessionTitle } from "./title-generation.js";
 
 type PendingGeneration = {
 	sessionId: string;
@@ -36,35 +29,6 @@ type ForkTitleState = {
 
 const DEFAULT_TERMINAL_TITLE = "pi";
 
-const TITLE_SYSTEM_PROMPT = [
-	"You name Pi coding-agent sessions from the user's first request.",
-	"Return only one concise title, without quotes, markdown, emoji, or explanations.",
-	"Use the same language as the task when possible.",
-	"Keep it specific, 3-7 words, and under the requested character limit.",
-].join("\n");
-
-function parseModelRef(modelRef: string): { provider: string; modelId: string } | undefined {
-	const trimmed = modelRef.trim();
-	const slash = trimmed.indexOf("/");
-	if (slash <= 0 || slash === trimmed.length - 1) return undefined;
-	return { provider: trimmed.slice(0, slash), modelId: trimmed.slice(slash + 1) };
-}
-
-function messageContentText(content: unknown): string | undefined {
-	if (typeof content === "string") return content.trim() || undefined;
-	if (!Array.isArray(content)) return undefined;
-
-	const text = content
-		.filter((block: TextContentLike): block is { type: string; text: string } => (
-			block?.type === "text" && typeof block.text === "string"
-		))
-		.map((block) => block.text)
-		.join("\n")
-		.trim();
-
-	return text || undefined;
-}
-
 function imageAttachmentLabel(images: readonly ImageContent[]): string | undefined {
 	if (images.length === 0) return undefined;
 	return images.length === 1 ? "Attached image" : `Attached images (${images.length})`;
@@ -83,41 +47,11 @@ function titleGenerationInputFromPrompt(text: string, images: readonly ImageCont
 }
 
 export function firstUserMessageText(ctx: ExtensionContext): string | undefined {
-	for (const entry of ctx.sessionManager.getBranch() as SessionEntryLike[]) {
-		if (entry.type !== "message" || entry.message?.role !== "user") continue;
-		const text = messageContentText(entry.message.content);
-		if (text) return text;
-	}
-	return undefined;
+	return firstUserMessageTextFromEntries(ctx.sessionManager.getBranch() as Parameters<typeof firstUserMessageTextFromEntries>[0]);
 }
 
 function hasExistingUserMessage(ctx: ExtensionContext): boolean {
 	return firstUserMessageText(ctx) !== undefined;
-}
-
-export function fallbackSessionTitleFromInput(input: string, maxTitleChars: number): string | undefined {
-	const normalized = input
-		.replace(/[\t\r\n]+/gu, " ")
-		.replace(/\s+/gu, " ")
-		.trim()
-		.replace(/^[`"'«»“”()[\]{}<>.,:;!?~@#$%^&*_+=\\/|\-]+/gu, "")
-		.trim();
-
-	if (!normalized) return undefined;
-
-	const words = normalized.split(/\s+/u).filter(Boolean);
-	if (words.length === 0) return undefined;
-
-	const selected: string[] = [];
-	for (const word of words) {
-		const next = selected.length === 0 ? word : `${selected.join(" ")} ${word}`;
-		if (selected.length > 0 && next.length > maxTitleChars) break;
-		selected.push(word);
-		if (selected.length >= 8) break;
-	}
-
-	const candidate = selected.join(" ");
-	return sanitizeSessionTitle(candidate || normalized, maxTitleChars);
 }
 
 function truncateInput(text: string, maxChars: number): string {
@@ -131,18 +65,6 @@ function terminalSafeText(text: string): string {
 		.replace(/[\u0000-\u001f\u007f]/gu, " ")
 		.replace(/\s+/gu, " ")
 		.trim();
-}
-
-function buildTitlePrompt(input: string, maxTitleChars: number): string {
-	return [
-		`Generate a session title under ${maxTitleChars} characters for this session.`,
-		"If a parent session title is provided, use it only as context and focus on the new request.",
-		"Output only the title.",
-		"",
-		"<session_context>",
-		input,
-		"</session_context>",
-	].join("\n");
 }
 
 export function buildForkTitleInput(parentTitle: string | undefined, forkPrompt: string): string {
@@ -159,109 +81,6 @@ export function buildForkTitleInput(parentTitle: string | undefined, forkPrompt:
 	].join("\n");
 }
 
-function responseText(response: { content: Array<{ type: string; text?: string }> }): string {
-	return response.content
-		.filter((block): block is { type: "text"; text: string } => block.type === "text" && typeof block.text === "string")
-		.map((block) => block.text)
-		.join("\n");
-}
-
-export function sanitizeSessionTitle(raw: string, maxTitleChars: number): string | undefined {
-	let title = raw
-		.split("\n")
-		.map((line) => line.trim())
-		.find(Boolean) ?? "";
-
-	title = title
-		.replace(/^```(?:\w+)?\s*/u, "")
-		.replace(/```$/u, "")
-		.replace(/^(?:title|\u043d\u0430\u0437\u0432\u0430\u043d\u0438\u0435|\u0438\u043c\u044f \u0441\u0435\u0441\u0441\u0438\u0438)\s*[:—-]\s*/iu, "")
-		.replace(/["'`«»“”]+/gu, "")
-		.replace(/[\t\r\n]+/gu, " ")
-		.replace(/\s+/gu, " ")
-		.trim()
-		.replace(/[.。!！?？,:;]+$/u, "")
-		.trim();
-
-	if (!title) return undefined;
-	if (title.length > maxTitleChars) {
-		title = title.slice(0, maxTitleChars).trimEnd().replace(/[\s,;:—-]+$/u, "");
-	}
-	return title || undefined;
-}
-
-export function sessionTitleModelRefs(config: SessionTitleConfig): string[] {
-	return [config.model, ...config.fallbackModels]
-		.map((modelRef) => modelRef.trim())
-		.filter(Boolean)
-		.filter((modelRef, index, refs) => refs.indexOf(modelRef) === index);
-}
-
-async function resolveTitleModel(ctx: ExtensionContext, modelRefValue: string, config: SessionTitleConfig): Promise<{
-	model: Model<Api>;
-	apiKey?: string;
-	headers?: Record<string, string>;
-} | undefined> {
-	const modelRef = parseModelRef(modelRefValue);
-	if (!modelRef) {
-		if (config.debug && ctx.hasUI) ctx.ui.notify(`Invalid session-title model: ${modelRefValue}`, "warning");
-		return undefined;
-	}
-
-	const model = ctx.modelRegistry.find(modelRef.provider, modelRef.modelId);
-	if (!model) {
-		if (config.debug && ctx.hasUI) ctx.ui.notify(`Session-title model not found: ${modelRefValue}`, "warning");
-		return undefined;
-	}
-
-	const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-	if (auth.ok === false) {
-		if (config.debug && ctx.hasUI) ctx.ui.notify(auth.error, "warning");
-		return undefined;
-	}
-
-	return {
-		model,
-		...(auth.apiKey === undefined ? {} : { apiKey: auth.apiKey }),
-		...(auth.headers === undefined ? {} : { headers: auth.headers }),
-	};
-}
-
-async function generateSessionTitle(
-	input: string,
-	ctx: ExtensionContext,
-	config: SessionTitleConfig,
-	modelRef: string,
-	signal: AbortSignal,
-): Promise<string | undefined> {
-	const resolved = await resolveTitleModel(ctx, modelRef, config);
-	if (!resolved || signal.aborted) return undefined;
-
-	const response = await complete(
-		resolved.model,
-		{
-			systemPrompt: TITLE_SYSTEM_PROMPT,
-			messages: [
-				{
-					role: "user" as const,
-					content: [{ type: "text" as const, text: buildTitlePrompt(input, config.maxTitleChars) }],
-					timestamp: Date.now(),
-				},
-			],
-		},
-		{
-			...(resolved.apiKey === undefined ? {} : { apiKey: resolved.apiKey }),
-			...(resolved.headers === undefined ? {} : { headers: resolved.headers }),
-			cacheRetention: "none",
-			maxRetries: config.maxRetries,
-			maxTokens: config.maxTokens,
-			signal,
-			timeoutMs: config.timeoutMs,
-		},
-	);
-
-	return sanitizeSessionTitle(responseText(response), config.maxTitleChars);
-}
 
 export default function sessionTitle(pi: ExtensionAPI) {
 	let config: SessionTitleConfig | undefined;
@@ -396,7 +215,14 @@ export default function sessionTitle(pi: ExtensionAPI) {
 
 		void (async () => {
 			try {
-				const title = await generateSessionTitle(generation.input, ctx, currentConfig, generation.modelRef, requestController.signal);
+				const title = await generateSessionTitle(
+					generation.input,
+					ctx.modelRegistry,
+					currentConfig,
+					generation.modelRef,
+					requestController.signal,
+					currentConfig.debug && ctx.hasUI ? (message) => ctx.ui.notify(message, "warning") : undefined,
+				);
 				if (!title || requestController.signal.aborted) return;
 				if (sessionId !== currentSessionId) return;
 				if (!shouldGeneratePendingTitle(ctx)) return;

@@ -12,6 +12,13 @@ import { formatAccountUsageReport, queryAccountUsageReport } from "../model/mode
 import type { SessionModel } from "../types.js";
 import { checkPixUpdate, formatPixUpdateCheck, parsePixUpdateArgs, pixUpdateUsage } from "../cli/update.js";
 import { createStartupInfoMessage } from "../cli/startup-info.js";
+import { loadSessionTitleConfig } from "../../bundled-extensions/session-title/config.js";
+import {
+	fallbackSessionTitleFromInput,
+	firstUserMessageText,
+	generateSessionTitle,
+	sessionTitleModelRefs,
+} from "../../bundled-extensions/session-title/title-generation.js";
 
 export class SessionCommandActions {
 	constructor(private readonly host: CommandControllerHost) {}
@@ -108,8 +115,41 @@ export class SessionCommandActions {
 
 		const name = argumentsText.trim();
 		if (!name) {
-			this.host.addEntry({ id: createId("system"), kind: "system", text: `Session name: ${runtime.session.sessionName ?? "(none)"}` });
+			const branch = runtime.session.sessionManager.getBranch() as Parameters<typeof firstUserMessageText>[0];
+			const firstPrompt = firstUserMessageText(branch);
+			if (!firstPrompt) throw new Error("Cannot auto-name this session yet: no user messages found.");
+
+			const config = loadSessionTitleConfig(runtime.cwd);
+			const fallbackTitle = fallbackSessionTitleFromInput(firstPrompt, config.maxTitleChars);
+			const modelRefs = sessionTitleModelRefs(config);
+			let generatedName: string | undefined;
+
+			this.host.setStatus("generating session name");
+			this.host.render();
+
+			if (config.enabled) {
+				for (const modelRef of modelRefs) {
+					for (let attempt = 0; attempt < config.generationAttempts; attempt++) {
+						generatedName = await generateSessionTitle(
+							firstPrompt.slice(0, config.maxInputChars).trim(),
+							runtime.services.modelRegistry,
+							config,
+							modelRef,
+							AbortSignal.timeout(config.timeoutMs),
+						);
+						if (generatedName) break;
+					}
+					if (generatedName) break;
+				}
+			}
+
+			const nextName = generatedName ?? fallbackTitle;
+			if (!nextName) throw new Error("Could not generate a session name for this session.");
+
+			runtime.session.setSessionName(nextName);
+			this.host.addEntry({ id: createId("system"), kind: "system", text: `Session name set: ${nextName}` });
 			this.host.setSessionStatus(runtime.session);
+			this.host.render();
 			return;
 		}
 

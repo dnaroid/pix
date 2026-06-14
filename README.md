@@ -212,7 +212,7 @@ Type `/` in the prompt to open the command picker. Commands that accept argument
 | `/import` | `<path.jsonl>` | Import and resume a session from a JSONL file. |
 | `/share` | — | Share the session as a private GitHub gist (requires `gh` CLI). |
 | `/copy` | — | Copy the last agent message to the clipboard. |
-| `/name` | `[name]` | Show or set the session display name. |
+| `/name` | `[name]` | Set the session display name. Without arguments, generate one automatically using the session-title logic. |
 | `/session` | — | Show session info: message counts, token usage, and cost. |
 | `/usage` | — | Show local account quota usage and context window utilization. |
 | `/changelog` | — | Show the Pi package changelog. |
