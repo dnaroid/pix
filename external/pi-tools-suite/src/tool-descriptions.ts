@@ -78,7 +78,7 @@ export function asyncSubagentToolDescriptions(options: ToolDescriptionSetOptions
 					? "Use for broad independent tracks, review axes, or hypotheses even though repo_* tools are available."
 					: "Use first for broad codebase discovery split into tracks, review axes, or incident-triage hypotheses when repo_* tools are unavailable.",
 				"Use action=spawn/status/wait/result/stop/cleanup with the matching options; spawned runs are registered under project .pi/subagents while the main session is alive so status/wait/stop can omit runDir for the latest run and result can resolve runDir by agentId. The parent session receives a follow-up system/custom message for each background agent when it finishes or fails, so the parent can stop after spawning instead of polling for completion.",
-				"Collect compact results only when the parent task needs them.",
+				"Collect results only when the parent task needs them; result reads are always compact and link to artifacts instead of inlining raw logs.",
 				"Spawned agents run in isolated background pi processes with extensions disabled to prevent recursive sub-agent spawning.",
 				"Each agent has a wall-clock watchdog timeout (default 30 minutes); spawn timeoutSeconds or task timeoutSeconds can shorten it for tests or bounded probes.",
 				"Concurrency is limited project-wide by maxConcurrent (default 5); excess agents queue automatically.",
@@ -89,8 +89,8 @@ export function asyncSubagentToolDescriptions(options: ToolDescriptionSetOptions
 				"Use subagents action='spawn' when multiple independent agents are useful, the user asks to delegate/parallelize/split work, or one large review/deep investigation should stay out of the main context. " +
 				"Default to omitting subagentType so the configured router chooses from the live role config; set it only when the user explicitly named a role, vision/image handling is required, or a deterministic technical override is needed. Avoid trivial reads/edits, and do not call status/wait immediately after spawn just for progress. " +
 				(repoDiscovery
-					? "For one semantic code-discovery question, use repo_search directly instead; for independent tracks/hypotheses/review axes, delegate even when repo_* tools are available. Use result with compact=true only after completion when findings are needed in the parent context."
-					: "For one focused code-discovery question, use direct read/grep tools instead. When the user asks for broad discovery split into tracks, hypotheses, incident triage, release readiness, risk strategy, or parallel reviews and indexed discovery is unavailable, spawn several focused scan/quick agents first before parent-context file search. Use result with compact=true only after completion when findings are needed in the parent context."),
+					? "For one semantic code-discovery question, use repo_search directly instead; for independent tracks/hypotheses/review axes, delegate even when repo_* tools are available. Use result only after completion when findings are needed in the parent context; it returns compact output with artifact links."
+					: "For one focused code-discovery question, use direct read/grep tools instead. When the user asks for broad discovery split into tracks, hypotheses, incident triage, release readiness, risk strategy, or parallel reviews and indexed discovery is unavailable, spawn several focused scan/quick agents first before parent-context file search. Use result only after completion when findings are needed in the parent context; it returns compact output with artifact links."),
 			promptGuidelines: [
 				"Use action='spawn' only for LARGE or PARALLEL tasks: independent investigations, repo-wide sweeps, deep debugging, or code review/audit that would bloat the parent context.",
 				"Treat explicit requests to delegate, use sub-agents, run parallel agents, split into independent tracks, investigate hypotheses, or run separate review axes as spawn triggers; spawn first unless the request is trivial or clearly single-file.",
@@ -114,7 +114,7 @@ export function asyncSubagentToolDescriptions(options: ToolDescriptionSetOptions
 				"Use action='status' for a non-blocking progress check or to recover after reload/crash.",
 				"After spawn, project-local .pi/subagents/registry.json records latest runDir and agentId mappings until normal main-session shutdown; if runDir is missing after compaction/reload, call status without runDir or result with agentId instead of failing solely because runDir was lost.",
 				"Use action='wait' only when the user asks to wait/collect now, or your next parent step depends on completion.",
-				"Use action='result' only after status/wait confirms completion; keep compact=true unless full output is necessary.",
+				"Use action='result' only after status/wait confirms completion; raw output is not inlined, so inspect linked artifacts only when full details are truly necessary.",
 				"Use action='stop' when the user asks to stop, cancel, or kill running sub-agents.",
 				"Use action='cleanup' with delete=true after collecting all results to free disk space.",
 				"Do NOT use subagents for trivial tasks, single file reads, simple edits, or interactive user input.",
@@ -143,10 +143,9 @@ export function asyncSubagentToolDescriptions(options: ToolDescriptionSetOptions
 			label: "Subagent Result Action",
 			description: [
 				"Read output from one async sub-agent after it completes.",
-				"By default returns a compact structured summary/findings/files/risks/next actions plus artifact paths, not the full raw result text.",
-				"Set compact=false only when the parent needs the full result text and stderr in context.",
+				"Always returns a compact structured summary/findings/files/risks/next actions plus artifact paths, not the full raw result text or stderr.",
 				"A result.json with machine-readable structured output is written alongside the raw result.md on completion.",
-				"Defaults to compact output to avoid polluting the parent context; the full result.md path is included for later inspection.",
+				"Compact output avoids polluting the parent context; full result.md and stderr.log paths are included for manual inspection.",
 			].join(" "),
 		},
 		stopAction: {

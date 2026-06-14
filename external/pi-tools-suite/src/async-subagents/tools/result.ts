@@ -27,13 +27,12 @@ export function registerResultTool(pi: ExtensionAPI): void {
 		parameters: Type.Object({
 			runDir: Type.Optional(Type.String({ description: "Run directory path. If omitted, resolves agentId through the project sub-agent registry under .pi/subagents/registry.json, falling back to scanning .pi/subagents/." })),
 			agentId: Type.String({ description: "Agent ID to read" }),
-			compact: Type.Optional(Type.Boolean({ description: "Return summary and artifact paths instead of raw output (default true); set false for full result/stderr", default: true })),
 		}),
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			validateBasename(params.agentId, "agentId");
 			const runDir = resolveSubagentAgentRunDir(ctx.cwd, params.agentId, params.runDir);
-			const result = readResult(runDir, params.agentId);
+			const result = readResult(runDir, params.agentId, { includeRawFiles: false });
 
 			if (!result) {
 				return {
@@ -61,26 +60,9 @@ export function registerResultTool(pi: ExtensionAPI): void {
 				if (s.subagentType) parts.push(`Type: ${s.subagentType}`);
 				if (s.model) parts.push(`Model: ${s.model}`);
 				if (s.resultTruncated) parts.push(`Result truncated: ${s.resultOriginalBytes} bytes → maxResultBytes`);
-				if (params.compact === false) {
-					if (s.summary) parts.push(`Summary: ${s.summary}`);
-					if (s.confidence) parts.push(`Confidence: ${s.confidence}`);
-					if (s.findings?.length) parts.push(`Structured findings: ${s.findings.length}`);
-					if (s.files?.length) parts.push(`Referenced files: ${s.files.length}`);
-					if (s.nextActions?.length) parts.push(`Next actions: ${s.nextActions.length}`);
-				}
 			}
 
-			if (params.compact !== false) {
-				appendCompactResult(parts, result, artifacts, params.agentId);
-			} else if (result.result) {
-				parts.push(`\n--- Result ---\n${result.result}`);
-			} else {
-				parts.push("\n--- No result yet ---");
-			}
-
-			if (params.compact === false && result.stderr) {
-				parts.push(`\n--- Stderr ---\n${result.stderr}`);
-			}
+			appendCompactResult(parts, result, artifacts);
 
 			return {
 				content: [{ type: "text", text: parts.join("\n") }],
@@ -89,7 +71,7 @@ export function registerResultTool(pi: ExtensionAPI): void {
 					agentId: params.agentId,
 					state: result.state,
 					exitCode: result.exitCode,
-					structured: result.structured,
+					structured: compactStructuredForDetails(result.structured),
 					artifacts,
 				},
 			};
@@ -121,12 +103,12 @@ function displayPath(cwd: string, filePath: string): string {
 	return filePath;
 }
 
-function appendCompactResult(parts: string[], result: AgentResult, artifacts: ResultArtifactPaths, agentId: string): void {
+function appendCompactResult(parts: string[], result: AgentResult, artifacts: ResultArtifactPaths): void {
 	const structured = result.structured;
 
 	if (structured?.summary) {
 		parts.push(`\nSummary:\n${structured.summary}`);
-	} else if (result.result !== undefined) {
+	} else if (result.resultAvailable) {
 		parts.push("\nSummary:\n(summary unavailable; see the full result artifact below)");
 	} else {
 		parts.push("\n--- No result yet ---");
@@ -138,16 +120,22 @@ function appendCompactResult(parts: string[], result: AgentResult, artifacts: Re
 	if (structured?.risks?.length) appendList(parts, "Risks", structured.risks, formatRisk, MAX_COMPACT_RISKS);
 	if (structured?.nextActions?.length) appendList(parts, "Next actions", structured.nextActions, (action) => truncate(action, 500), MAX_COMPACT_NEXT_ACTIONS);
 
-	if (result.stderr) {
+	if (result.stderrAvailable) {
 		parts.push("\nStderr:");
 		if (structured?.stderrPreview) parts.push(`Preview: ${structured.stderrPreview}`);
 		parts.push(`Full stderr: ${artifacts.stderrLog}`);
 	}
 
 	parts.push("\nArtifacts:");
-	parts.push(`${result.result !== undefined ? "Full result" : "Full result (not written yet)"}: ${artifacts.resultMd}`);
+	parts.push(`${result.resultAvailable ? "Full result" : "Full result (not written yet)"}: ${artifacts.resultMd}`);
 	parts.push(`${structured ? "Structured result" : "Structured result (not available yet)"}: ${artifacts.resultJson}`);
-	parts.push(`To read full output: subagents({ action: "result", agentId: "${agentId}", compact: false })`);
+	parts.push("Raw result/stderr are intentionally not inlined to keep parent context and IPC buffers small.");
+}
+
+function compactStructuredForDetails(structured: AgentResult["structured"]): AgentResult["structured"] {
+	if (!structured) return undefined;
+	const { resultText: _resultText, ...compact } = structured;
+	return compact;
 }
 
 function appendList<T>(parts: string[], title: string, items: readonly T[], format: (item: T) => string, limit: number): void {

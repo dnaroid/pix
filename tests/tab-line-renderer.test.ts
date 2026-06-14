@@ -77,7 +77,7 @@ describe("TabLineRenderer", () => {
 		const activeTitleEnd = activeTitleStart + "Main session".length;
 
 		assert.equal(layout.segments.some((segment) => segment.background), false);
-		assert.ok(layout.segments.some((segment) => segment.start === 0 && segment.end === APP_ICONS.checkCircle.length && segment.foreground === THEMES.dark.colors.statusDotBase));
+		assert.ok(layout.segments.some((segment) => segment.start === 0 && segment.end === APP_ICONS.checkCircle.length && segment.foreground === THEMES.dark.colors.success));
 		assert.ok(layout.segments.some((segment) => segment.start <= activeTitleStart && segment.end >= activeTitleEnd && segment.foreground === THEMES.dark.colors.selectionForeground));
 		const rendered = renderer.render(1, layout, 80);
 		assert.ok(rendered.includes(colorize(" Main session ", {
@@ -165,8 +165,8 @@ describe("TabLineRenderer", () => {
 		assert.ok(layout.text.includes(APP_ICONS.timerSand));
 		assert.ok(layout.text.includes(APP_ICONS.alert));
 		const foregrounds = statusSegmentForegrounds(layout);
-		assert.ok(foregrounds.includes(THEMES.dark.colors.statusDotBase));
 		assert.ok(foregrounds.includes(THEMES.dark.colors.success));
+		assert.ok(foregrounds.includes(THEMES.dark.colors.warning));
 		assert.ok(foregrounds.includes(THEMES.dark.colors.error));
 	});
 
@@ -178,7 +178,7 @@ describe("TabLineRenderer", () => {
 
 		const layout = renderer.layout(80);
 
-		assert.deepEqual(statusSegmentForegrounds(layout), [THEMES.dark.colors.statusDotBase, THEMES.dark.colors.success]);
+		assert.deepEqual(statusSegmentForegrounds(layout), [THEMES.dark.colors.success, THEMES.dark.colors.success]);
 		assert.equal(layout.text.split(APP_ICONS.checkCircle).length - 1, 2);
 	});
 
@@ -190,7 +190,7 @@ describe("TabLineRenderer", () => {
 
 		const layout = renderer.layout(80);
 
-		assert.deepEqual(statusSegmentForegrounds(layout), [THEMES.dark.colors.statusDotBase, THEMES.dark.colors.success]);
+		assert.deepEqual(statusSegmentForegrounds(layout), [THEMES.dark.colors.success, THEMES.dark.colors.success]);
 	});
 
 	it("renders a single tab and keeps the new-tab button", () => {

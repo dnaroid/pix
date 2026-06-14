@@ -22,6 +22,7 @@ type ToolEntryUpdate = {
 
 export type AppSessionEventControllerState = {
 	toolEntryIdsByCallId: Map<string, string>;
+	pendingToolCallIdsByContentIndex: Map<number, string>;
 	toolMutationPreparationsByCallId: Map<string, { userEntryId: string; args: unknown; preparation?: WorkspaceMutationPreparation }>;
 	olderHistoryLoader: SessionHistoryOlderLoader | undefined;
 	currentUserEntryId: string | undefined;
@@ -73,6 +74,7 @@ export class AppSessionEventController {
 	readonly entryRenderVersions = new Map<string, number>();
 
 	private readonly toolEntryIdsByCallId = new Map<string, string>();
+	private readonly pendingToolCallIdsByContentIndex = new Map<number, string>();
 	private readonly toolMutationPreparationsByCallId = new Map<string, { userEntryId: string; args: unknown; preparation?: WorkspaceMutationPreparation }>();
 	private olderHistoryLoader: SessionHistoryOlderLoader | undefined;
 	private currentUserEntryId: string | undefined;
@@ -87,6 +89,7 @@ export class AppSessionEventController {
 	snapshotState(): AppSessionEventControllerState {
 		return {
 			toolEntryIdsByCallId: new Map(this.toolEntryIdsByCallId),
+			pendingToolCallIdsByContentIndex: new Map(this.pendingToolCallIdsByContentIndex),
 			toolMutationPreparationsByCallId: new Map(this.toolMutationPreparationsByCallId),
 			olderHistoryLoader: this.olderHistoryLoader,
 			currentUserEntryId: this.currentUserEntryId,
@@ -102,6 +105,8 @@ export class AppSessionEventController {
 	restoreState(state: AppSessionEventControllerState): void {
 		this.toolEntryIdsByCallId.clear();
 		for (const [key, value] of state.toolEntryIdsByCallId) this.toolEntryIdsByCallId.set(key, value);
+		this.pendingToolCallIdsByContentIndex.clear();
+		for (const [key, value] of state.pendingToolCallIdsByContentIndex) this.pendingToolCallIdsByContentIndex.set(key, value);
 		this.toolMutationPreparationsByCallId.clear();
 		for (const [key, value] of state.toolMutationPreparationsByCallId) this.toolMutationPreparationsByCallId.set(key, value);
 		this.olderHistoryLoader = state.olderHistoryLoader;
@@ -117,6 +122,7 @@ export class AppSessionEventController {
 
 	reset(): void {
 		this.toolEntryIdsByCallId.clear();
+		this.pendingToolCallIdsByContentIndex.clear();
 		this.toolMutationPreparationsByCallId.clear();
 		this.currentUserEntryId = undefined;
 		this.entryRenderVersions.clear();
@@ -348,6 +354,9 @@ export class AppSessionEventController {
 		for (const [toolCallId, entryId] of this.toolEntryIdsByCallId) {
 			if (entryId === entry.id) this.toolEntryIdsByCallId.delete(toolCallId);
 		}
+		for (const [contentIndex, toolCallId] of this.pendingToolCallIdsByContentIndex) {
+			if (this.toolEntryIdsByCallId.get(toolCallId) === undefined) this.pendingToolCallIdsByContentIndex.delete(contentIndex);
+		}
 	}
 
 	addSessionAbortedEntry(): void {
@@ -387,6 +396,7 @@ export class AppSessionEventController {
 			this.host.scheduleUserSessionEntryMetadataSync();
 		}
 		if (isRecord(message) && message.role === "assistant") {
+			this.renderAssistantToolCallsFromMessage(message);
 			this.finishCurrentThinkingEntry();
 			this.flushAssistantTextBuffer(true);
 			this.clearCurrentAssistantState();
@@ -451,16 +461,15 @@ export class AppSessionEventController {
 				this.reconcileThinkingText(assistantEvent.content);
 				this.finishCurrentThinkingEntry();
 				break;
+			case "toolcall_start":
+			case "toolcall_delta":
+				this.handleToolCallStreamUpdate(assistantEvent.contentIndex, assistantEvent.partial);
+				break;
 			case "toolcall_end":
-				this.finishCurrentThinkingEntry();
-				this.flushAssistantTextBuffer(true);
-				this.currentAssistantEntryId = undefined;
-				this.currentAssistantTextBlockEntryId = undefined;
-				this.currentAssistantTextBlockStartLength = undefined;
-				this.host.setSessionActivity("running");
-				this.upsertPendingToolCall(assistantEvent.toolCall);
+				this.handleToolCallStreamUpdate(assistantEvent.contentIndex, assistantEvent.partial, assistantEvent.toolCall);
 				break;
 			case "done":
+				this.renderAssistantToolCallsFromMessage(assistantEvent.message);
 				this.finishCurrentThinkingEntry();
 				this.flushAssistantTextBuffer(true);
 				this.clearCurrentAssistantState();
@@ -475,6 +484,16 @@ export class AppSessionEventController {
 			default:
 				break;
 		}
+	}
+
+	private handleToolCallStreamUpdate(contentIndex: number, partial: unknown, finalToolCall?: unknown): void {
+		this.finishCurrentThinkingEntry();
+		this.flushAssistantTextBuffer(true);
+		this.currentAssistantEntryId = undefined;
+		this.currentAssistantTextBlockEntryId = undefined;
+		this.currentAssistantTextBlockStartLength = undefined;
+		this.host.setSessionActivity("running");
+		this.upsertPendingToolCall(finalToolCall ?? partialToolCallAt(partial, contentIndex), contentIndex);
 	}
 
 	private appendAssistantText(delta: string): void {
@@ -623,13 +642,32 @@ export class AppSessionEventController {
 		}
 	}
 
-	private upsertPendingToolCall(toolCall: unknown): void {
-		if (!isRecord(toolCall)) return;
-		const toolCallId = typeof toolCall.id === "string" ? toolCall.id : createId("tool-call");
-		const toolName = typeof toolCall.name === "string" ? toolCall.name : "tool";
+	private renderAssistantToolCallsFromMessage(message: unknown): void {
+		if (!isRecord(message) || !Array.isArray(message.content)) return;
+		for (let contentIndex = 0; contentIndex < message.content.length; contentIndex += 1) {
+			const block = message.content[contentIndex];
+			if (isRecord(block) && block.type === "toolCall") this.upsertPendingToolCall(block, contentIndex);
+		}
+	}
+
+	private upsertPendingToolCall(toolCall: unknown, contentIndex?: number): void {
+		const existingCallId = contentIndex === undefined ? undefined : this.pendingToolCallIdsByContentIndex.get(contentIndex);
+		const existingEntryId = existingCallId === undefined ? undefined : this.toolEntryIdsByCallId.get(existingCallId);
+		const toolCallId = isRecord(toolCall) && typeof toolCall.id === "string" ? toolCall.id : existingCallId ?? createId("tool-call");
+		if (contentIndex !== undefined) this.pendingToolCallIdsByContentIndex.set(contentIndex, toolCallId);
+
+		if (existingCallId !== undefined && existingCallId !== toolCallId && existingEntryId !== undefined) {
+			this.toolEntryIdsByCallId.delete(existingCallId);
+			this.toolEntryIdsByCallId.set(toolCallId, existingEntryId);
+			const existing = this.findEntry(existingEntryId);
+			if (existing?.kind === "tool") existing.toolCallId = toolCallId;
+		}
+
+		const toolName = isRecord(toolCall) && typeof toolCall.name === "string" ? toolCall.name : undefined;
+		const argsText = isRecord(toolCall) && "arguments" in toolCall ? stringifyUnknown(toolCall.arguments) : undefined;
 		this.upsertToolEntry(toolCallId, {
-			toolName,
-			argsText: stringifyUnknown(toolCall.arguments),
+			...(toolName === undefined ? {} : { toolName }),
+			...(argsText === undefined ? {} : { argsText }),
 			status: "running",
 		});
 	}
@@ -672,7 +710,14 @@ export class AppSessionEventController {
 		this.currentAssistantTextBlockStartLength = undefined;
 		this.currentThinkingEntryId = undefined;
 		this.assistantTextBuffer = "";
+		this.pendingToolCallIdsByContentIndex.clear();
 	}
+}
+
+function partialToolCallAt(partial: unknown, contentIndex: number): unknown {
+	if (!isRecord(partial) || !Array.isArray(partial.content)) return undefined;
+	const block = partial.content[contentIndex];
+	return isRecord(block) && block.type === "toolCall" ? block : undefined;
 }
 
 function assistantStreamVisibleTextForCompleteBlock(text: string, hasVisibleTextBeforeBlock: boolean): string {

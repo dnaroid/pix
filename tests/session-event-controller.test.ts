@@ -463,6 +463,71 @@ describe("AppSessionEventController", () => {
 		assert.equal(entries[1]?.kind === "tool" ? entries[1].output : undefined, "ok");
 	});
 
+	it("shows tool calls while arguments are still streaming", () => {
+		const entries: Entry[] = [];
+		const controller = createController(entries);
+
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "Before tool", partial: { role: "assistant", content: [{ type: "text", text: "Before tool" }] } },
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: {
+				type: "toolcall_start",
+				contentIndex: 1,
+				partial: { role: "assistant", content: [{ type: "text", text: "Before tool" }, { type: "toolCall" }] },
+			},
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: {
+				type: "toolcall_delta",
+				contentIndex: 1,
+				delta: "{\"command\":\"echo",
+				partial: { role: "assistant", content: [{ type: "text", text: "Before tool" }, { type: "toolCall", name: "shell", arguments: { command: "echo" } }] },
+			},
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: {
+				type: "toolcall_end",
+				contentIndex: 1,
+				toolCall: { type: "toolCall", id: "call-1", name: "shell", arguments: { command: "echo ok" } },
+				partial: { role: "assistant", content: [{ type: "text", text: "Before tool" }, { type: "toolCall", id: "call-1", name: "shell", arguments: { command: "echo ok" } }] },
+			},
+		} as unknown as AgentSessionEvent);
+
+		assert.deepEqual(entries.map((entry) => entry.kind), ["assistant", "tool"]);
+		assert.equal(entries[1]?.kind === "tool" ? entries[1].toolCallId : undefined, "call-1");
+		assert.equal(entries[1]?.kind === "tool" ? entries[1].toolName : undefined, "shell");
+		assert.equal(entries[1]?.kind === "tool" ? entries[1].argsText.includes("echo ok") : undefined, true);
+		assert.equal(entries[1]?.kind === "tool" ? entries[1].status : undefined, "running");
+	});
+
+	it("recovers missing streamed toolcall events from the final assistant message", () => {
+		const entries: Entry[] = [];
+		const controller = createController(entries);
+
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: {
+				type: "done",
+				reason: "toolUse",
+				message: {
+					role: "assistant",
+					content: [{ type: "toolCall", id: "call-1", name: "read", arguments: { path: "src/app.ts" } }],
+					stopReason: "toolUse",
+				},
+			},
+		} as unknown as AgentSessionEvent);
+
+		assert.deepEqual(entries.map((entry) => entry.kind), ["tool"]);
+		assert.equal(entries[0]?.kind === "tool" ? entries[0].toolCallId : undefined, "call-1");
+		assert.equal(entries[0]?.kind === "tool" ? entries[0].toolName : undefined, "read");
+		assert.equal(entries[0]?.kind === "tool" ? entries[0].status : undefined, "running");
+	});
+
 	it("records workspace mutations and user metadata from session events", () => {
 		const entries: Entry[] = [];
 		const preparedCalls: Array<{ toolName: string; args: unknown }> = [];

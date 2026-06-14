@@ -11,6 +11,11 @@ interface AgentStateReadOptions {
 	checkRpcPromptFailure?: boolean;
 }
 
+interface AgentResultReadOptions {
+	/** Read raw result.md/stderr.log contents for internal callers that explicitly need file contents. */
+	includeRawFiles?: boolean;
+}
+
 export function getAgentState(
 	runDir: string,
 	agentId: string,
@@ -210,28 +215,37 @@ export function getRunState(
 export function readResult(
 	runDir: string,
 	agentId: string,
+	options: AgentResultReadOptions = {},
 ): AgentResult | null {
 	const state = getAgentState(runDir, agentId);
 	if (!state) return null;
 
 	const agentDir = path.join(runDir, agentId);
+	const includeRawFiles = options.includeRawFiles ?? true;
 	let result: string | undefined;
 	let stderr: string | undefined;
+	let resultAvailable = false;
+	let stderrAvailable = false;
 
 	const resultFile = path.join(agentDir, "result.md");
 	if (fs.existsSync(resultFile)) {
-		result = fs.readFileSync(resultFile, "utf-8");
+		resultAvailable = true;
+		if (includeRawFiles) result = fs.readFileSync(resultFile, "utf-8");
 	}
 
 	const stderrFile = path.join(agentDir, "stderr.log");
 	if (fs.existsSync(stderrFile)) {
-		const content = fs.readFileSync(stderrFile, "utf-8");
-		if (content.trim()) stderr = content;
+		stderrAvailable = fs.statSync(stderrFile).size > 0;
+		if (includeRawFiles) {
+			const content = fs.readFileSync(stderrFile, "utf-8");
+			if (content.trim()) stderr = content;
+			stderrAvailable = Boolean(stderr);
+		}
 	}
 
 	const structured = readStructuredResult(agentDir);
 
-	return { result, stderr, exitCode: state.exitCode, state, structured };
+	return { resultAvailable, result, stderrAvailable, stderr, exitCode: state.exitCode, state, structured };
 }
 
 export async function waitForAgents(

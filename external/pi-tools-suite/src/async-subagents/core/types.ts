@@ -120,7 +120,11 @@ export interface StructuredResult {
 }
 
 export interface AgentResult {
+	/** True when result.md exists. Raw text is only populated for explicit internal readers. */
+	resultAvailable?: boolean;
 	result?: string;
+	/** True when stderr.log exists and may contain diagnostics. Raw text is only populated for explicit internal readers. */
+	stderrAvailable?: boolean;
 	stderr?: string;
 	exitCode?: number;
 	state: AgentState;

@@ -551,6 +551,7 @@ describe.serial("subagents tool", () => {
 		const pi = new FakePi();
 		registerSubagentsTool(pi as any, new Map(), () => {});
 		const tool = pi.tools.get("subagents");
+		expect(tool.parameters.properties.compact).toBeUndefined();
 		const cwd = tempDir();
 		const runDir = path.join(cwd, "run");
 		createAgent(runDir, "done", { exit_code: "0", "result.md": "wrapped ok" });
@@ -567,14 +568,16 @@ describe.serial("subagents tool", () => {
 		expect(tool.renderResult(status).children).toEqual([]);
 		expect(tool.renderResult({ details: { runDir, agents: [{ id: "running", status: "running" }], mode: "spawn" } }).children).toEqual([]);
 
-		const result = await tool.execute("call", { action: "result", runDir: "run", agentId: "done", compact: false }, undefined, undefined, { cwd });
-		expect(result.content[0].text).toContain("wrapped ok");
+		const result = await tool.execute("call", { action: "result", runDir: "run", agentId: "done" }, undefined, undefined, { cwd });
+		expect(result.content[0].text).toContain("summary unavailable");
+		expect(result.content[0].text).not.toContain("wrapped ok");
 		expect(tool.renderResult(result).children).toEqual([]);
 
 		const defaultStatus = await tool.execute("call", { action: "status" }, undefined, undefined, { cwd });
 		expect(defaultStatus.content[0].text).toContain("[done] registered exit=0");
-		const resolvedResult = await tool.execute("call", { action: "result", agentId: "registered", compact: false }, undefined, undefined, { cwd });
-		expect(resolvedResult.content[0].text).toContain("registry ok");
+		const resolvedResult = await tool.execute("call", { action: "result", agentId: "registered" }, undefined, undefined, { cwd });
+		expect(resolvedResult.content[0].text).toContain("summary unavailable");
+		expect(resolvedResult.content[0].text).not.toContain("registry ok");
 	});
 });
 
@@ -606,11 +609,12 @@ describe.serial("status tool", () => {
 });
 
 describe.serial("result tool", () => {
-	test.serial("reads missing, compact, and full agent output", async () => {
+	test.serial("reads missing and compact agent output without inlining raw logs", async () => {
 		const { registerResultTool } = await import("../../src/async-subagents/tools/result.js");
 		const pi = new FakePi();
 		registerResultTool(pi as any);
 		const tool = pi.tools.get("async_subagents_result");
+		expect(tool.parameters.properties.compact).toBeUndefined();
 		const cwd = tempDir();
 		const runDir = path.join(cwd, "run");
 		const { recordSubagentRun } = await import("../../src/async-subagents/lib.js");
@@ -636,9 +640,9 @@ describe.serial("result tool", () => {
 		expect(compact.content[0].text).toContain(`Full result: ${path.join("run", "agent-1", "result.md")}`);
 		expect(compact.details).toMatchObject({ runDir, agentId: "agent-1", exitCode: 0 });
 
-		const full = await tool.execute("call", { runDir: "run", agentId: "agent-1", compact: false }, undefined, undefined, { cwd });
-		expect(full.content[0].text).toContain("r".repeat(9000));
-		expect(full.content[0].text).toContain("s".repeat(2500));
+		expect(compact.content[0].text).toContain(`Full stderr: ${path.join("run", "agent-1", "stderr.log")}`);
+		expect(compact.content[0].text).not.toContain("r".repeat(9000));
+		expect(compact.content[0].text).not.toContain("s".repeat(2500));
 		const running = await tool.execute("call", { runDir: "run", agentId: "running" }, undefined, undefined, { cwd });
 		expect(running.content[0].text).toContain("Agent is still running");
 		const resolved = await tool.execute("call", { agentId: "agent-1" }, undefined, undefined, { cwd });
@@ -909,7 +913,7 @@ setTimeout(() => {}, 1000);
 		expect(compactText).toContain(`Full result: ${path.join(".pi", "subagents", "run-1", "agent-1", "result.md")}`);
 		expect(compactText).toContain(`Structured result: ${path.join(".pi", "subagents", "run-1", "agent-1", "result.json")}`);
 		expect(compactText).toContain(`Full stderr: ${path.join(".pi", "subagents", "run-1", "agent-1", "stderr.log")}`);
-		expect(compactText).toContain("compact: false");
+		expect(compactText).toContain("Raw result/stderr are intentionally not inlined");
 		expect(compactText).not.toContain("--- Result ---");
 		expect(compactText).not.toContain("RAW-DETAIL-SHOULD-NOT-APPEAR");
 		expect(compact.details.artifacts).toEqual({
@@ -918,10 +922,7 @@ setTimeout(() => {}, 1000);
 			stderrLog: path.join(".pi", "subagents", "run-1", "agent-1", "stderr.log"),
 		});
 
-		const full = await tool.execute("call", { runDir, agentId: "agent-1", compact: false }, undefined, undefined, { cwd });
-		const fullText = full.content[0].text;
-		expect(fullText).toContain("--- Result ---\nShort summary\n\nRAW-DETAIL-SHOULD-NOT-APPEAR");
-		expect(fullText).toContain("--- Stderr ---\nstderr raw detail");
+		expect(compactText).not.toContain("--- Stderr ---");
 	});
 
 	test.serial("queues excess agents without blocking spawn when maxConcurrent is reached", async () => {

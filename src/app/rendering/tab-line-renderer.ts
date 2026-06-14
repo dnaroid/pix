@@ -232,14 +232,10 @@ export class TabLineRenderer {
 		}
 
 		if (tab.activity === "running" || tab.activity === "thinking") {
-			return { foreground: this.host.theme.colors.success, bold: true };
+			return { foreground: this.host.theme.colors.warning, bold: true };
 		}
 
-		if (tab.status !== "active") {
-			return { foreground: this.host.theme.colors.success };
-		}
-
-		return { foreground: this.host.theme.colors.statusDotBase };
+		return { foreground: this.host.theme.colors.success };
 	}
 
 	private statusIndicatorIcon(tab: SessionTab): string {

@@ -100,7 +100,6 @@ export function registerSubagentsTool(
 			// status/wait/stop/result options
 			agentIds: Type.Optional(Type.Array(Type.String(), { description: "status/wait/stop: filter to these agent IDs" })),
 			agentId: Type.Optional(Type.String({ description: "result: agent ID to read" })),
-			compact: Type.Optional(Type.Boolean({ description: "result: return summary and artifact paths instead of raw output (default true); set false for full result/stderr", default: true })),
 			timeout: Type.Optional(Type.Number({ description: "wait: max wait seconds (default 300)", default: 300 })),
 			interval: Type.Optional(Type.Number({ description: "wait: poll interval seconds (default 3)", default: 3 })),
 			failFast: Type.Optional(Type.Boolean({ description: "wait: return immediately on first failure (default false)", default: false })),
