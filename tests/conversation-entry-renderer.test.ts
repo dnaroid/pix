@@ -603,6 +603,72 @@ describe("ConversationViewport cache behavior", () => {
 
 		assert.equal(viewport.lineCount(8), measuredBeforeAppend + 2);
 	});
+
+	it("preserves measured layout when entries are pruned from the top and appended", () => {
+		const entries: Entry[] = [
+			{ id: "assistant-head", kind: "assistant", text: "head" },
+			{
+				...toolEntry("tool-ansi", "shell"),
+				output: "\x1b[31mabcdefghi\x1b[0m",
+				expanded: true,
+			},
+			{ id: "assistant-tail", kind: "assistant", text: "tail" },
+		];
+		const viewport = new ConversationViewport({
+			entries,
+			entryRenderVersions: new Map(),
+			cwd: "/repo",
+			colors: THEMES.dark.colors,
+			pixConfig,
+			outputFilters: [],
+			superCompactTools: false,
+			isDynamicConversationBlock: () => false,
+			renderInlineUserMessageMenu: () => [],
+		} as ConversationViewportHost);
+
+		const measuredToolLines = viewport.entryBlockPositionById(8, "tool-ansi")?.lineCount;
+		entries.shift();
+		entries.push({ id: "assistant-new", kind: "assistant", text: "new" });
+
+		const position = viewport.entryBlockPositionById(8, "tool-ansi");
+
+		assert.equal(position?.offset, 0);
+		assert.equal(position?.lineCount, measuredToolLines);
+		assert.equal(viewport.lineCount(8), viewport.slice(8, 0, 100).length);
+	});
+
+	it("preserves measured layout when entries are prepended and pruned from the bottom", () => {
+		const entries: Entry[] = [
+			{
+				...toolEntry("tool-ansi", "shell"),
+				output: "\x1b[31mabcdefghi\x1b[0m",
+				expanded: true,
+			},
+			{ id: "assistant-tail", kind: "assistant", text: "tail" },
+			{ id: "assistant-pruned", kind: "assistant", text: "pruned" },
+		];
+		const viewport = new ConversationViewport({
+			entries,
+			entryRenderVersions: new Map(),
+			cwd: "/repo",
+			colors: THEMES.dark.colors,
+			pixConfig,
+			outputFilters: [],
+			superCompactTools: false,
+			isDynamicConversationBlock: () => false,
+			renderInlineUserMessageMenu: () => [],
+		} as ConversationViewportHost);
+
+		const measuredToolLines = viewport.entryBlockPositionById(8, "tool-ansi")?.lineCount;
+		entries.unshift({ id: "assistant-new", kind: "assistant", text: "new" });
+		entries.pop();
+
+		const position = viewport.entryBlockPositionById(8, "tool-ansi");
+
+		assert.equal(position?.offset, 2);
+		assert.equal(position?.lineCount, measuredToolLines);
+		assert.equal(viewport.lineCount(8), viewport.slice(8, 0, 100).length);
+	});
 });
 
 function toolEntry(id: string, toolName: string): Extract<Entry, { kind: "tool" }> {

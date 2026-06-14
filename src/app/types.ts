@@ -28,7 +28,7 @@ export type SessionActivity = "idle" | "running" | "thinking";
 export type SessionTabStatus = "active" | "waiting";
 export type SessionTabAttention = "terminal-bell";
 export type QueuedMessageMode = "steering" | "follow-up";
-export type QueuedMessageSource = "sdk-steering" | "sdk-follow-up" | "deferred";
+export type QueuedMessageSource = "sdk-steering" | "sdk-follow-up" | "auto" | "deferred";
 
 export type SubmittedUserMessage = {
 	id: string;

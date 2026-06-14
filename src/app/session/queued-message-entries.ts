@@ -44,9 +44,25 @@ export function deferredQueuedMessageEntries(messages: readonly SubmittedUserMes
 	}));
 }
 
-export function queuedMessageEntries(session: AgentSession | undefined, deferredUserMessages: readonly SubmittedUserMessage[]): QueuedEntry[] {
+export function autoQueuedMessageEntries(messages: readonly SubmittedUserMessage[]): QueuedEntry[] {
+	return messages.map((message, index) => ({
+		id: `${message.id}-auto-${index}`,
+		kind: "queued",
+		mode: "steering",
+		text: message.displayText,
+		queueSource: "auto",
+		queueIndex: index,
+	}));
+}
+
+export function queuedMessageEntries(
+	session: AgentSession | undefined,
+	autoUserMessages: readonly SubmittedUserMessage[],
+	deferredUserMessages: readonly SubmittedUserMessage[],
+): QueuedEntry[] {
 	return [
 		...sdkQueuedMessageEntries(session),
+		...autoQueuedMessageEntries(autoUserMessages),
 		...deferredQueuedMessageEntries(deferredUserMessages),
 	];
 }

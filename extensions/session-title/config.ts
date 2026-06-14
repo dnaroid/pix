@@ -6,6 +6,7 @@ import { parse as parseJsonc } from "jsonc-parser";
 export interface SessionTitleConfig {
 	enabled: boolean;
 	model: string;
+	fallbackModels: string[];
 	maxInputChars: number;
 	maxTitleChars: number;
 	maxTokens: number;
@@ -22,6 +23,7 @@ export interface SessionTitleConfig {
 const DEFAULT_CONFIG: SessionTitleConfig = {
 	enabled: true,
 	model: "zai/glm-4.5-air",
+	fallbackModels: [],
 	maxInputChars: 2000,
 	maxTitleChars: 80,
 	maxTokens: 32,
@@ -58,6 +60,8 @@ function mergeConfig(base: SessionTitleConfig, raw: Record<string, unknown>): Se
 	if (typeof raw.enabled === "boolean") next.enabled = raw.enabled;
 	const model = readNonEmptyString(raw.modelRef) ?? readNonEmptyString(raw.model);
 	if (model) next.model = model;
+	const fallbackModels = readModelList(raw.fallbackModels);
+	if (fallbackModels) next.fallbackModels = fallbackModels;
 	if (typeof raw.terminalTitle === "boolean") next.terminalTitle = raw.terminalTitle;
 	if (typeof raw.terminalTitlePrefix === "string") next.terminalTitlePrefix = raw.terminalTitlePrefix;
 	if (typeof raw.notify === "boolean") next.notify = raw.notify;
@@ -92,6 +96,13 @@ function readNonEmptyString(value: unknown): string | undefined {
 	if (typeof value !== "string") return undefined;
 	const trimmed = value.trim();
 	return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function readModelList(value: unknown): string[] | undefined {
+	if (!Array.isArray(value)) return undefined;
+	return value
+		.map((item) => readNonEmptyString(item))
+		.filter((item): item is string => item !== undefined);
 }
 
 function readPixSessionTitleConfig(configDir: string): Record<string, unknown> {

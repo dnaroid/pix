@@ -1,9 +1,9 @@
 import type { AgentSession, AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 import type { ImageContent } from "../../input-editor.js";
 import { createId } from "../id.js";
-import { submittedUserDisplayText } from "../rendering/message-content.js";
+import { stringifyUnknown, submittedUserDisplayText } from "../rendering/message-content.js";
 import type { Entry, SessionActivity, SubmittedUserMessage } from "../types.js";
-import { deferredQueuedMessageEntries, queuedMessageEntries } from "./queued-message-entries.js";
+import { autoQueuedMessageEntries, deferredQueuedMessageEntries, queuedMessageEntries } from "./queued-message-entries.js";
 
 export type AppQueuedMessageControllerHost = {
 	runtime(): AgentSessionRuntime | undefined;
@@ -27,16 +27,29 @@ export type AppQueuedMessageControllerHost = {
 };
 
 export class AppQueuedMessageController {
+	readonly autoUserMessages: SubmittedUserMessage[] = [];
 	readonly deferredUserMessages: SubmittedUserMessage[] = [];
 
-	private promptSubmissionInFlight = false;
+	private promptSubmissionInFlightSession: AgentSession | undefined;
 	private immediateSendInProgress = false;
 
 	constructor(private readonly host: AppQueuedMessageControllerHost) {}
 
 	reset(): void {
+		this.autoUserMessages.length = 0;
 		this.deferredUserMessages.length = 0;
-		this.promptSubmissionInFlight = false;
+		this.promptSubmissionInFlightSession = undefined;
+	}
+
+	captureAutoUserMessages(): SubmittedUserMessage[] {
+		return this.autoUserMessages.map((message) => this.cloneSubmittedUserMessage(message));
+	}
+
+	restoreAutoUserMessages(messages: readonly SubmittedUserMessage[]): void {
+		this.autoUserMessages.length = 0;
+		this.autoUserMessages.push(...messages.map((message) => this.cloneSubmittedUserMessage(message)));
+		this.updateQueuedMessageStatus();
+		void this.flushAutoUserMessages();
 	}
 
 	captureDeferredUserMessages(): SubmittedUserMessage[] {
@@ -79,7 +92,7 @@ export class AppQueuedMessageController {
 	): Promise<void> {
 		const session = this.host.requireRuntime().session;
 		const markInFlight = !session.isStreaming;
-		if (markInFlight) this.promptSubmissionInFlight = true;
+		if (markInFlight) this.promptSubmissionInFlightSession = session;
 		this.host.setSessionActivity("running");
 
 		try {
@@ -88,7 +101,7 @@ export class AppQueuedMessageController {
 			if (message.images.length > 0) opts.images = message.images;
 			await session.prompt(message.promptText, Object.keys(opts).length > 0 ? opts : undefined);
 		} finally {
-			if (markInFlight) this.promptSubmissionInFlight = false;
+			if (markInFlight && this.promptSubmissionInFlightSession === session) this.promptSubmissionInFlightSession = undefined;
 
 			const runtime = this.host.runtime();
 			if (runtime) {
@@ -97,13 +110,37 @@ export class AppQueuedMessageController {
 				this.host.setSessionActivity(activeSession.isStreaming || activeSession.isCompacting ? "running" : "idle");
 			}
 			if (this.totalQueuedMessageCount() > 0) this.updateQueuedMessageStatus();
+			void this.flushAutoUserMessages();
+		}
+	}
+
+	async flushAutoUserMessages(): Promise<void> {
+		if (this.immediateSendInProgress || this.autoUserMessages.length === 0) return;
+
+		const session = this.host.runtime()?.session;
+		if (!session || session.isStreaming || session.isCompacting || this.promptSubmissionInFlightSession === session) return;
+
+		const message = this.autoUserMessages.shift();
+		if (!message) return;
+		this.notifyAutoUserMessagesChanged();
+		this.updateQueuedMessageStatus();
+		if (this.host.isRunning()) this.host.render();
+
+		try {
+			await this.sendUserMessageToSession(message);
+		} catch (error) {
+			this.autoUserMessages.unshift(message);
+			this.notifyAutoUserMessagesChanged();
+			this.updateQueuedMessageStatus();
+			this.host.addEntry({ id: createId("error"), kind: "error", text: `Queued message failed: ${stringifyUnknown(error)}` });
+			if (this.host.isRunning()) this.host.render();
 		}
 	}
 
 	queuedMessageCounts(): { steering: number; followUp: number } {
 		const session = this.host.runtime()?.session;
 		return {
-			steering: (session?.getSteeringMessages().length ?? 0) + this.deferredUserMessages.length,
+			steering: (session?.getSteeringMessages().length ?? 0) + this.autoUserMessages.length + this.deferredUserMessages.length,
 			followUp: session?.getFollowUpMessages().length ?? 0,
 		};
 	}
@@ -120,17 +157,19 @@ export class AppQueuedMessageController {
 	restoreQueuedMessagesToEditorForAbort(): number {
 		const session = this.host.runtime()?.session;
 		const sdkQueued = session?.clearQueue() ?? { steering: [], followUp: [] };
+		const auto = this.autoUserMessages.splice(0);
 		const deferred = this.deferredUserMessages.splice(0);
 		if (deferred.length > 0) this.notifyDeferredUserMessagesChanged();
 		const restoredTexts = [
 			...sdkQueued.steering,
+			...auto.map((message) => this.restorableSubmittedMessageText(message)),
 			...deferred.map((message) => this.restorableSubmittedMessageText(message)),
 			...sdkQueued.followUp,
 		]
 			.map((text) => text.trimEnd())
 			.filter((text) => text.trim().length > 0);
-		const images = deferred.flatMap((message) => message.images);
-		const restoredCount = sdkQueued.steering.length + sdkQueued.followUp.length + deferred.length;
+		const images = [...auto, ...deferred].flatMap((message) => message.images);
+		const restoredCount = sdkQueued.steering.length + sdkQueued.followUp.length + auto.length + deferred.length;
 
 		if (restoredTexts.length > 0 || images.length > 0) {
 			const currentText = this.host.inputText().trimEnd();
@@ -223,7 +262,11 @@ export class AppQueuedMessageController {
 	}
 
 	queuedEntries(): Extract<Entry, { kind: "queued" }>[] {
-		return queuedMessageEntries(this.host.runtime()?.session, this.deferredUserMessages);
+		return queuedMessageEntries(this.host.runtime()?.session, this.autoUserMessages, this.deferredUserMessages);
+	}
+
+	autoQueuedEntries(): Extract<Entry, { kind: "queued" }>[] {
+		return autoQueuedMessageEntries(this.autoUserMessages);
 	}
 
 	deferredQueuedEntries(): Extract<Entry, { kind: "queued" }>[] {
@@ -231,16 +274,17 @@ export class AppQueuedMessageController {
 	}
 
 	private shouldQueueUserMessageAsSteering(session: AgentSession): boolean {
-		return session.isCompacting || this.promptSubmissionInFlight;
+		return session.isCompacting || this.promptSubmissionInFlightSession === session;
 	}
 
 	private async queueUserMessageAsSteering(message: SubmittedUserMessage): Promise<void> {
-		const session = this.host.requireRuntime().session;
-		await session.steer(message.promptText, message.images.length > 0 ? message.images : undefined);
+		this.autoUserMessages.push(message);
+		this.notifyAutoUserMessagesChanged();
 		this.updateQueuedMessageStatus();
-		this.host.setSessionStatus(session);
+		this.host.setSessionStatus(this.host.runtime()?.session);
 		this.host.showToast("Message queued for the next agent turn", "info");
 		this.host.render();
+		void this.flushAutoUserMessages();
 	}
 
 	deferUserMessage(message: SubmittedUserMessage): void {
@@ -285,11 +329,12 @@ export class AppQueuedMessageController {
 			steering: [...session.getSteeringMessages()],
 			followUp: [...session.getFollowUpMessages()],
 		};
-		if (entry.queueSource === "deferred") {
-			const [message] = this.deferredUserMessages.splice(entry.queueIndex, 1);
+		if (entry.queueSource === "auto" || entry.queueSource === "deferred") {
+			const source = entry.queueSource === "auto" ? this.autoUserMessages : this.deferredUserMessages;
+			const [message] = source.splice(entry.queueIndex, 1);
 			if (!message) throw new Error("Queued message is no longer available");
 			session.clearQueue();
-			this.notifyDeferredUserMessagesChanged();
+			if (entry.queueSource === "deferred") this.notifyDeferredUserMessagesChanged();
 			return { removed: message, sdkMessagesToRestore: sdkMessages };
 		}
 
@@ -341,10 +386,11 @@ export class AppQueuedMessageController {
 	}
 
 	private async removeQueuedEntry(entry: Extract<Entry, { kind: "queued" }>): Promise<string | SubmittedUserMessage> {
-		if (entry.queueSource === "deferred") {
-			const [message] = this.deferredUserMessages.splice(entry.queueIndex, 1);
+		if (entry.queueSource === "auto" || entry.queueSource === "deferred") {
+			const source = entry.queueSource === "auto" ? this.autoUserMessages : this.deferredUserMessages;
+			const [message] = source.splice(entry.queueIndex, 1);
 			if (!message) throw new Error("Queued message is no longer available");
-			this.notifyDeferredUserMessagesChanged();
+			if (entry.queueSource === "deferred") this.notifyDeferredUserMessagesChanged();
 			return message;
 		}
 
@@ -358,10 +404,11 @@ export class AppQueuedMessageController {
 	}
 
 	private async requeueRemovedEntry(entry: Extract<Entry, { kind: "queued" }>, removed: string | SubmittedUserMessage): Promise<void> {
-		if (entry.queueSource === "deferred") {
+		if (entry.queueSource === "auto" || entry.queueSource === "deferred") {
 			if (typeof removed === "string") return;
-			this.deferredUserMessages.splice(Math.min(entry.queueIndex, this.deferredUserMessages.length), 0, removed);
-			this.notifyDeferredUserMessagesChanged();
+			const source = entry.queueSource === "auto" ? this.autoUserMessages : this.deferredUserMessages;
+			source.splice(Math.min(entry.queueIndex, source.length), 0, removed);
+			if (entry.queueSource === "deferred") this.notifyDeferredUserMessagesChanged();
 			return;
 		}
 
@@ -397,6 +444,10 @@ export class AppQueuedMessageController {
 	}
 
 	private notifyDeferredUserMessagesChanged(): void {
+		this.host.onDeferredUserMessagesChanged?.();
+	}
+
+	private notifyAutoUserMessagesChanged(): void {
 		this.host.onDeferredUserMessagesChanged?.();
 	}
 }

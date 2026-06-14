@@ -151,6 +151,24 @@ export class ConversationViewport {
 		}));
 	}
 
+	entryBlockPositionById(width: number, entryId: string): ConversationEntryBlockPosition | undefined {
+		const layout = this.layoutForWidth(width);
+		const targetIndex = layout.positions.get(entryId);
+		if (targetIndex === undefined) return undefined;
+
+		for (let index = 0; index <= targetIndex; index += 1) this.ensureEntryMeasured(layout, width, index);
+
+		const entry = layout.entries[targetIndex];
+		if (!entry) return undefined;
+
+		return {
+			entry,
+			offset: layout.offsets[targetIndex] ?? 0,
+			lineCount: layout.lineCounts[targetIndex] ?? 0,
+			block: this.blockForEntry(entry, width),
+		};
+	}
+
 	measuredLineCountForEntries(width: number, entryIds: readonly string[]): number {
 		if (entryIds.length === 0) return 0;
 
@@ -174,15 +192,20 @@ export class ConversationViewport {
 		const allThinkingExpanded = Boolean(this.host.allThinkingExpanded);
 
 		let layout = this.layoutCachesByWidth.get(width);
-		if (!layout || this.layoutStructureChanged(layout, entries, superCompactTools, allThinkingExpanded)) {
-			const previousLayout = layout && layout.superCompactTools === superCompactTools && layout.allThinkingExpanded === allThinkingExpanded
-				? layout
-				: undefined;
-			layout = this.buildLayout(entries, width, superCompactTools, allThinkingExpanded, previousLayout);
+		if (!layout) {
+			layout = this.buildLayout(entries, width, superCompactTools, allThinkingExpanded);
 			this.layoutCachesByWidth.set(width, layout);
-		} else {
-			this.refreshDirtyLayoutEntries(layout, width);
+		} else if (this.layoutStructureChanged(layout, entries, superCompactTools, allThinkingExpanded)) {
+			const synced = this.syncLayoutStructure(layout, entries, width, superCompactTools, allThinkingExpanded);
+			if (!synced) {
+				const previousLayout = layout.superCompactTools === superCompactTools && layout.allThinkingExpanded === allThinkingExpanded
+					? layout
+					: undefined;
+				layout = this.buildLayout(entries, width, superCompactTools, allThinkingExpanded, previousLayout);
+				this.layoutCachesByWidth.set(width, layout);
+			}
 		}
+		this.refreshDirtyLayoutEntries(layout, width);
 
 		if (this.host.hasDynamicConversationBlock?.()) {
 			this.refreshDynamicLayoutEntries(layout, width);
@@ -235,10 +258,72 @@ export class ConversationViewport {
 	}
 
 	private layoutStructureChanged(layout: ViewportLayoutCache, entries: readonly Entry[], superCompactTools: boolean, allThinkingExpanded: boolean): boolean {
-		if (layout.entries.length !== entries.length || layout.superCompactTools !== superCompactTools || layout.allThinkingExpanded !== allThinkingExpanded) return true;
-		if (layout.entries.length === 0) return false;
+		if (layout.entryIds.length !== entries.length || layout.superCompactTools !== superCompactTools || layout.allThinkingExpanded !== allThinkingExpanded) return true;
+		if (layout.entryIds.length === 0) return false;
 
 		return layout.entryIds[0] !== entries[0]?.id || layout.entryIds[layout.entryIds.length - 1] !== entries[entries.length - 1]?.id;
+	}
+
+	private syncLayoutStructure(
+		layout: ViewportLayoutCache,
+		entries: readonly Entry[],
+		width: number,
+		superCompactTools: boolean,
+		allThinkingExpanded: boolean,
+	): boolean {
+		if (layout.superCompactTools !== superCompactTools || layout.allThinkingExpanded !== allThinkingExpanded) return false;
+
+		const currentEntryIds = entries.map((entry) => entry.id);
+		const overlap = layoutOverlap(layout.entryIds, currentEntryIds);
+		if (!overlap) return false;
+
+		const estimatedBlockLineCounts = entries.map((entry) => this.estimatedBlockLineCountForEntry(entry, width));
+		const lineCounts: number[] = [];
+		const measuredLineCounts: boolean[] = [];
+		const positions = new Map<string, number>();
+
+		for (let index = 0; index < entries.length; index += 1) {
+			const entry = entries[index]!;
+			positions.set(entry.id, index);
+
+			const oldIndex = index >= overlap.currentStart && index < overlap.currentStart + overlap.length
+				? overlap.previousStart + index - overlap.currentStart
+				: undefined;
+			if (oldIndex !== undefined) {
+				lineCounts.push(layout.lineCounts[oldIndex] ?? 0);
+				measuredLineCounts.push(layout.measuredLineCounts[oldIndex] === true);
+				continue;
+			}
+
+			lineCounts.push(this.estimatedLineCountForEntry(entry, entries, index, estimatedBlockLineCounts));
+			measuredLineCounts.push(false);
+		}
+
+		layout.entries = entries;
+		layout.entryIds = currentEntryIds;
+		layout.lineCounts = lineCounts;
+		layout.measuredLineCounts = measuredLineCounts;
+		layout.positions = positions;
+		this.rebuildOffsets(layout);
+
+		const changedNextIndexes = new Set([overlap.currentStart - 1, overlap.currentStart + overlap.length - 1]);
+		for (const index of changedNextIndexes) {
+			if (index >= 0 && index < entries.length) this.refreshLayoutEntry(layout, width, index, layout.measuredLineCounts[index] === true);
+		}
+
+		return true;
+	}
+
+	private rebuildOffsets(layout: ViewportLayoutCache): void {
+		const offsets: number[] = [];
+		let totalLineCount = 0;
+		for (const lineCount of layout.lineCounts) {
+			offsets.push(totalLineCount);
+			totalLineCount += lineCount;
+		}
+		offsets.push(totalLineCount);
+		layout.offsets = offsets;
+		layout.totalLineCount = totalLineCount;
 	}
 
 	private refreshDirtyLayoutEntries(layout: ViewportLayoutCache, width: number): void {
@@ -284,7 +369,12 @@ export class ConversationViewport {
 		const previousLineCount = layout.lineCounts[index] ?? 0;
 		const nextLineCount = measure
 			? this.measuredLineCountForEntry(entry, layout.entries, index, width)
-			: this.estimatedLineCountForEntry(entry, layout.entries, index, width);
+			: this.estimatedLineCountForEntry(
+				entry,
+				layout.entries,
+				index,
+				layout.entries.map((candidate) => this.estimatedBlockLineCountForEntry(candidate, width)),
+			);
 		layout.measuredLineCounts[index] = measure;
 		if (previousLineCount === nextLineCount) return false;
 
@@ -302,9 +392,8 @@ export class ConversationViewport {
 		return this.lineCountWithGap(entry, block.lineCount, this.nextVisibleEntry(entries, index, width));
 	}
 
-	private estimatedLineCountForEntry(entry: Entry, entries: readonly Entry[], index: number, width: number): number {
-		const blockLineCount = this.estimatedBlockLineCountForEntry(entry, width);
-		const blockLineCounts = entries.map((candidate) => this.estimatedBlockLineCountForEntry(candidate, width));
+	private estimatedLineCountForEntry(entry: Entry, entries: readonly Entry[], index: number, blockLineCounts: readonly number[]): number {
+		const blockLineCount = blockLineCounts[index] ?? 0;
 		return this.lineCountWithGap(entry, blockLineCount, this.nextEstimatedVisibleEntry(entries, blockLineCounts, index));
 	}
 
@@ -400,6 +489,69 @@ function estimateWrappedLineCount(text: string, width: number): number {
 		count += Math.max(1, Math.ceil(displayWidth / safeWidth));
 	}
 	return count;
+}
+
+function layoutOverlap(
+	previousIds: readonly string[],
+	currentIds: readonly string[],
+): { previousStart: number; currentStart: number; length: number } | undefined {
+	if (currentIds.length === 0 || previousIds.length === 0) return { previousStart: 0, currentStart: 0, length: 0 };
+
+	const candidates: Array<{ previousStart: number; currentStart: number; length: number }> = [];
+	const prefixLength = commonPrefixLength(previousIds, currentIds);
+	if (prefixLength > 0) candidates.push({ previousStart: 0, currentStart: 0, length: prefixLength });
+
+	const suffixLength = commonSuffixLength(previousIds, currentIds);
+	if (suffixLength > 0) candidates.push({
+		previousStart: previousIds.length - suffixLength,
+		currentStart: currentIds.length - suffixLength,
+		length: suffixLength,
+	});
+
+	const suffixPrefixLength = maxSuffixPrefixOverlap(previousIds, currentIds);
+	if (suffixPrefixLength > 0) candidates.push({
+		previousStart: previousIds.length - suffixPrefixLength,
+		currentStart: 0,
+		length: suffixPrefixLength,
+	});
+
+	const prefixSuffixLength = maxSuffixPrefixOverlap(currentIds, previousIds);
+	if (prefixSuffixLength > 0) candidates.push({
+		previousStart: 0,
+		currentStart: currentIds.length - prefixSuffixLength,
+		length: prefixSuffixLength,
+	});
+
+	return candidates.sort((left, right) => right.length - left.length)[0];
+}
+
+function commonPrefixLength(left: readonly string[], right: readonly string[]): number {
+	const maxLength = Math.min(left.length, right.length);
+	let length = 0;
+	while (length < maxLength && left[length] === right[length]) length += 1;
+	return length;
+}
+
+function commonSuffixLength(left: readonly string[], right: readonly string[]): number {
+	const maxLength = Math.min(left.length, right.length);
+	let length = 0;
+	while (length < maxLength && left[left.length - length - 1] === right[right.length - length - 1]) length += 1;
+	return length;
+}
+
+function maxSuffixPrefixOverlap(left: readonly string[], right: readonly string[]): number {
+	const maxLength = Math.min(left.length, right.length);
+	for (let length = maxLength; length > 0; length -= 1) {
+		let matches = true;
+		for (let offset = 0; offset < length; offset += 1) {
+			if (left[left.length - length + offset] !== right[offset]) {
+				matches = false;
+				break;
+			}
+		}
+		if (matches) return length;
+	}
+	return 0;
 }
 
 function estimateToolLikeLineCount(

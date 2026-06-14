@@ -53,7 +53,7 @@ export const DEFAULT_PIX_CONFIG_JSONC = String.raw`{
 
   "promptEnhancer": { "modelRef": "zai/glm-5-turbo" },
   "autocomplete": { "modelRef": "zai/glm-5-turbo", "debounceMs": 350, "timeoutMs": 3000, "maxTokens": 48, "maxPromptTokens": 1200, "includeRecentMessages": 0 },
-  "sessionTitle": { "modelRef": "zai/glm-5-turbo" },
+  "sessionTitle": { "modelRef": "zai/glm-5-turbo", "fallbackModels": ["openai-codex/gpt-5.3-codex-spark"] },
   "dictation": {
     "language": "en",
     "languages": {

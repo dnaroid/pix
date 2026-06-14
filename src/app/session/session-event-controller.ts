@@ -49,6 +49,7 @@ export type AppSessionEventControllerHost = {
 	setSessionStatus(session: AgentSessionRuntime["session"] | undefined): void;
 	setSessionActivity(activity: SessionActivity): void;
 	updateQueuedMessageStatus(): void;
+	flushAutoUserMessages(): void;
 	prepareWorkspaceMutation(toolName: string, args: unknown): WorkspaceMutationPreparation | undefined;
 	recordWorkspaceMutationForUserEntry(entryId: string, mutation: WorkspaceMutation): void;
 	workspaceMutationFromToolExecution(input: {
@@ -189,6 +190,7 @@ export class AppSessionEventController {
 				this.currentUserEntryId = undefined;
 				this.host.setSessionActivity("idle");
 				this.host.setSessionStatus(this.host.runtime()?.session);
+				this.host.flushAutoUserMessages();
 				break;
 			case "queue_update":
 				this.host.updateQueuedMessageStatus();
@@ -243,6 +245,7 @@ export class AppSessionEventController {
 			case "compaction_end": {
 				this.host.setSessionActivity(this.host.runtime()?.session.isStreaming ? "running" : "idle");
 				this.host.restoreSessionStatus();
+				this.host.flushAutoUserMessages();
 				const message = event.result
 					? `Compacted ${event.result.tokensBefore} tokens`
 					: event.aborted
@@ -258,6 +261,7 @@ export class AppSessionEventController {
 			case "auto_retry_end":
 				this.host.setSessionActivity(this.host.runtime()?.session.isStreaming ? "running" : "idle");
 				this.host.restoreSessionStatus();
+				this.host.flushAutoUserMessages();
 				this.host.showToast(
 					event.success ? "Retry succeeded" : `Retry failed: ${event.finalError}`,
 					event.success ? "success" : "error",
@@ -309,10 +313,9 @@ export class AppSessionEventController {
 		if (removeCount <= 0) return;
 
 		const targetRemoveCount = Math.max(removeCount, this.host.entries.length - HISTORY_WINDOW_TARGET_ENTRIES);
-		const removedEntryIds = edge === "top"
-			? this.host.entries.slice(0, targetRemoveCount).map((entry) => entry.id)
-			: this.host.entries.slice(Math.max(0, this.host.entries.length - targetRemoveCount)).map((entry) => entry.id);
-		const removedLineCount = this.measuredLineCountForEntries(removedEntryIds);
+		const removedLineCount = edge === "top"
+			? this.measuredLineCountForEntries(this.host.entries.slice(0, targetRemoveCount).map((entry) => entry.id))
+			: 0;
 		const removed = edge === "top"
 			? this.host.entries.splice(0, targetRemoveCount)
 			: this.host.entries.splice(Math.max(0, this.host.entries.length - targetRemoveCount), targetRemoveCount);

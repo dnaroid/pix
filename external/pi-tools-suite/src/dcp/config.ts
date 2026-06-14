@@ -15,14 +15,14 @@ export interface DcpConfig {
     automaticStrategies: boolean // run dedup/purge even in manual mode
   }
   compress: {
-    maxContextPercent: number | string // legacy: 0-1 percent; also accepts absolute tokens or "80%"
-    minContextPercent: number | string // legacy: 0-1 percent; also accepts absolute tokens or "40%"
-    modelMaxContextPercent: Record<string, number>
-    modelMinContextPercent: Record<string, number>
-    maxContextLimit?: number | string
-    minContextLimit?: number | string
-    modelMaxContextLimits?: Record<string, number | string>
-    modelMinContextLimits?: Record<string, number | string>
+    maxContextPercent: number | string // accepts a 0-1 fraction, absolute tokens, or a percent string like "80%"
+    minContextPercent: number | string // accepts a 0-1 fraction, absolute tokens, or a percent string like "40%"
+    modelMaxContextPercent: Record<string, number | string> // accepts a 0-1 fraction, absolute tokens, or a percent string like "80%"
+    modelMinContextPercent: Record<string, number | string> // accepts a 0-1 fraction, absolute tokens, or a percent string like "40%"
+    maxContextLimit?: number | string // same formats as maxContextPercent; checked before the global percent fallback
+    minContextLimit?: number | string // same formats as minContextPercent; checked before the global percent fallback
+    modelMaxContextLimits?: Record<string, number | string> // same formats as modelMaxContextPercent; checked before modelMaxContextPercent
+    modelMinContextLimits?: Record<string, number | string> // same formats as modelMinContextPercent; checked before modelMinContextPercent
     summaryBuffer: boolean
     nudgeFrequency: number // inject nudge every N context events (default: 2)
     iterationNudgeThreshold: number // nudge after N tool calls since last user msg (default: 8)
@@ -81,27 +81,27 @@ const DEFAULT_CONFIG: DcpConfig = {
     automaticStrategies: true,
   },
   compress: {
-    maxContextPercent: 0.65,
-    minContextPercent: 0.25,
+    maxContextPercent: 0.55,
+    minContextPercent: 0.20,
     modelMaxContextPercent: {},
     modelMinContextPercent: {},
     summaryBuffer: true,
-    nudgeFrequency: 2,
-    iterationNudgeThreshold: 8,
+    nudgeFrequency: 1,
+    iterationNudgeThreshold: 6,
     nudgeForce: "soft",
     protectedTools: ["compress", "write", "edit"],
     protectTags: false,
     protectUserMessages: false,
     autoCandidates: {
       enabled: true,
-      minContextPercent: 0.25,
+      minContextPercent: 0.20,
       keepRecentTurns: 2,
       minMessages: 6,
       minTokens: 1500,
     },
     messageMode: {
       enabled: true,
-      minContextPercent: 0.25,
+      minContextPercent: 0.20,
       keepRecentTurns: 2,
       mediumTokens: 500,
       highTokens: 5000,

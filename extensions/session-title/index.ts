@@ -20,6 +20,8 @@ type TextContentLike = {
 type PendingGeneration = {
 	sessionId: string;
 	input: string;
+	modelRefs: string[];
+	modelIndex: number;
 	attempts: number;
 	replaceSessionName?: string;
 };
@@ -169,20 +171,27 @@ export function sanitizeSessionTitle(raw: string, maxTitleChars: number): string
 	return title || undefined;
 }
 
-async function resolveTitleModel(ctx: ExtensionContext, config: SessionTitleConfig): Promise<{
+export function sessionTitleModelRefs(config: SessionTitleConfig): string[] {
+	return [config.model, ...config.fallbackModels]
+		.map((modelRef) => modelRef.trim())
+		.filter(Boolean)
+		.filter((modelRef, index, refs) => refs.indexOf(modelRef) === index);
+}
+
+async function resolveTitleModel(ctx: ExtensionContext, modelRefValue: string, config: SessionTitleConfig): Promise<{
 	model: Model<Api>;
 	apiKey?: string;
 	headers?: Record<string, string>;
 } | undefined> {
-	const modelRef = parseModelRef(config.model);
+	const modelRef = parseModelRef(modelRefValue);
 	if (!modelRef) {
-		if (config.debug && ctx.hasUI) ctx.ui.notify(`Invalid session-title model: ${config.model}`, "warning");
+		if (config.debug && ctx.hasUI) ctx.ui.notify(`Invalid session-title model: ${modelRefValue}`, "warning");
 		return undefined;
 	}
 
 	const model = ctx.modelRegistry.find(modelRef.provider, modelRef.modelId);
 	if (!model) {
-		if (config.debug && ctx.hasUI) ctx.ui.notify(`Session-title model not found: ${config.model}`, "warning");
+		if (config.debug && ctx.hasUI) ctx.ui.notify(`Session-title model not found: ${modelRefValue}`, "warning");
 		return undefined;
 	}
 
@@ -199,12 +208,11 @@ async function generateSessionTitle(
 	input: string,
 	ctx: ExtensionContext,
 	config: SessionTitleConfig,
+	modelRef: string,
 	signal: AbortSignal,
 ): Promise<string | undefined> {
-	const resolved = await resolveTitleModel(ctx, config);
-	if (!resolved || signal.aborted) {
-		return fallbackSessionTitleFromInput(input, config.maxTitleChars);
-	}
+	const resolved = await resolveTitleModel(ctx, modelRef, config);
+	if (!resolved || signal.aborted) return undefined;
 
 	const response = await complete(
 		resolved.model,
@@ -267,10 +275,19 @@ export default function sessionTitle(pi: ExtensionAPI) {
 	function shouldGeneratePendingTitle(ctx: ExtensionContext): boolean {
 		if (!pendingGeneration) return false;
 		if (pendingGeneration.sessionId !== ctx.sessionManager.getSessionId()) return false;
-		if (pendingGeneration.attempts >= (config?.generationAttempts ?? 1)) return false;
 		const name = currentSessionName(ctx);
 		if (!name) return true;
 		return Boolean(pendingGeneration.replaceSessionName && name === pendingGeneration.replaceSessionName);
+	}
+
+	function advancePendingGeneration(currentConfig: SessionTitleConfig): boolean {
+		if (!pendingGeneration) return false;
+		while (pendingGeneration.attempts >= currentConfig.generationAttempts) {
+			if (pendingGeneration.modelIndex >= pendingGeneration.modelRefs.length - 1) return false;
+			pendingGeneration.modelIndex++;
+			pendingGeneration.attempts = 0;
+		}
+		return pendingGeneration.modelIndex < pendingGeneration.modelRefs.length;
 	}
 
 	function renderTerminalTitle(ctx: ExtensionContext, name: string | undefined, force = false): void {
@@ -309,8 +326,8 @@ export default function sessionTitle(pi: ExtensionAPI) {
 	function scheduleGenerationRetry(ctx: ExtensionContext, currentConfig: SessionTitleConfig): void {
 		clearRetryTimer();
 		if (!pendingGeneration) return;
-		if (pendingGeneration.attempts >= currentConfig.generationAttempts) return;
 		if (!shouldGeneratePendingTitle(ctx)) return;
+		if (!advancePendingGeneration(currentConfig)) return;
 		retryTimer = setTimeout(() => {
 			retryTimer = undefined;
 			startTitleGeneration(ctx, currentConfig);
@@ -333,17 +350,25 @@ export default function sessionTitle(pi: ExtensionAPI) {
 		if (!pendingGeneration) return;
 		if (controller) return;
 		if (!shouldGeneratePendingTitle(ctx)) return;
+		if (!advancePendingGeneration(currentConfig)) {
+			applyFallbackSessionTitle(ctx, currentConfig, pendingGeneration.input, {
+				force: Boolean(pendingGeneration.replaceSessionName),
+			});
+			pendingGeneration = undefined;
+			return;
+		}
 
+		const modelRef = pendingGeneration.modelRefs[pendingGeneration.modelIndex];
 		pendingGeneration.attempts++;
 		abortCurrentRequest();
 		controller = new AbortController();
 		const requestController = controller;
 		const currentSessionId = pendingGeneration.sessionId;
-		const generation = { ...pendingGeneration };
+		const generation = { ...pendingGeneration, modelRef };
 
 		void (async () => {
 			try {
-				const title = await generateSessionTitle(generation.input, ctx, currentConfig, requestController.signal);
+				const title = await generateSessionTitle(generation.input, ctx, currentConfig, generation.modelRef, requestController.signal);
 				if (!title || requestController.signal.aborted) return;
 				if (sessionId !== currentSessionId) return;
 				if (!shouldGeneratePendingTitle(ctx)) return;
@@ -362,14 +387,15 @@ export default function sessionTitle(pi: ExtensionAPI) {
 				if (controller === requestController) controller = undefined;
 				if (requestController.signal.aborted || pendingGeneration?.sessionId !== currentSessionId) return;
 				if (shouldGeneratePendingTitle(ctx)) {
+					if (!advancePendingGeneration(currentConfig)) {
+						applyFallbackSessionTitle(ctx, currentConfig, generation.input, {
+							force: Boolean(generation.replaceSessionName),
+						});
+						pendingGeneration = undefined;
+						return;
+					}
 					scheduleGenerationRetry(ctx, currentConfig);
 					return;
-				}
-				if (pendingGeneration && pendingGeneration.attempts >= currentConfig.generationAttempts) {
-					applyFallbackSessionTitle(ctx, currentConfig, generation.input, {
-						force: Boolean(generation.replaceSessionName),
-					});
-					pendingGeneration = undefined;
 				}
 			}
 		})();
@@ -509,6 +535,8 @@ export default function sessionTitle(pi: ExtensionAPI) {
 			pendingGeneration = {
 				sessionId: currentSessionId,
 				input: truncateInput(input, currentConfig.maxInputChars),
+				modelRefs: sessionTitleModelRefs(currentConfig),
+				modelIndex: 0,
 				attempts: 0,
 				replaceSessionName: activeForkTitleState?.inheritedSessionName,
 			};

@@ -19,6 +19,7 @@ describe("AppSessionEventController", () => {
 			setSessionStatus: () => {},
 			setSessionActivity: () => {},
 			updateQueuedMessageStatus: () => {},
+			flushAutoUserMessages: () => {},
 			prepareWorkspaceMutation: () => undefined,
 			workspaceMutationFromToolExecution: () => undefined,
 			recordWorkspaceMutationForUserEntry: () => {},
@@ -53,6 +54,7 @@ describe("AppSessionEventController", () => {
 			},
 			setSessionActivity: () => {},
 			updateQueuedMessageStatus: () => {},
+			flushAutoUserMessages: () => {},
 			prepareWorkspaceMutation: () => undefined,
 			workspaceMutationFromToolExecution: () => undefined,
 			recordWorkspaceMutationForUserEntry: () => {},
@@ -83,6 +85,7 @@ describe("AppSessionEventController", () => {
 			setSessionStatus: () => {},
 			setSessionActivity: () => {},
 			updateQueuedMessageStatus: () => {},
+			flushAutoUserMessages: () => {},
 			prepareWorkspaceMutation: () => undefined,
 			workspaceMutationFromToolExecution: () => undefined,
 			recordWorkspaceMutationForUserEntry: () => {},
@@ -128,6 +131,7 @@ describe("AppSessionEventController", () => {
 			setSessionStatus: () => {},
 			setSessionActivity: () => {},
 			updateQueuedMessageStatus: () => {},
+			flushAutoUserMessages: () => {},
 			prepareWorkspaceMutation: () => undefined,
 			workspaceMutationFromToolExecution: () => undefined,
 			recordWorkspaceMutationForUserEntry: () => {},
@@ -290,6 +294,7 @@ describe("AppSessionEventController", () => {
 			setSessionStatus: () => {},
 			setSessionActivity: () => {},
 			updateQueuedMessageStatus: () => {},
+			flushAutoUserMessages: () => {},
 			prepareWorkspaceMutation: () => undefined,
 			workspaceMutationFromToolExecution: () => undefined,
 			recordWorkspaceMutationForUserEntry: () => {},
@@ -312,7 +317,35 @@ describe("AppSessionEventController", () => {
 
 	it("bounds prepended older history by pruning the newest edge", () => {
 		const entries: Entry[] = Array.from({ length: 300 }, (_, index) => ({ id: `entry-${index}`, kind: "assistant", text: `entry ${index}` }));
-		const controller = createController(entries);
+		let measuredLineCountCalls = 0;
+		const controller = new AppSessionEventController({
+			entries,
+			runtime: () => ({ session: { isStreaming: false } }) as AgentSessionRuntime,
+			conversationViewport: () => ({
+				deleteEntry: () => {},
+				measuredLineCountForEntries: () => {
+					measuredLineCountCalls += 1;
+					return 1;
+				},
+			}) as never,
+			isRunning: () => false,
+			render: () => {},
+			scheduleRender: () => {},
+			setStatus: () => {},
+			restoreSessionStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			updateQueuedMessageStatus: () => {},
+			flushAutoUserMessages: () => {},
+			prepareWorkspaceMutation: () => undefined,
+			workspaceMutationFromToolExecution: () => undefined,
+			recordWorkspaceMutationForUserEntry: () => {},
+			scheduleUserSessionEntryMetadataSync: () => {},
+			toolDefaultExpanded: () => false,
+			observeSubagentsToolResult: () => {},
+			observeTodoToolResult: () => {},
+			showToast: () => {},
+		});
 
 		(controller as unknown as { prependEntries(entries: readonly Entry[]): void }).prependEntries(
 			Array.from({ length: 61 }, (_, index) => ({ id: `older-${index}`, kind: "assistant", text: `older ${index}` })),
@@ -322,6 +355,7 @@ describe("AppSessionEventController", () => {
 		assert.equal(entries[0]?.id, "older-0");
 		assert.equal(entries[60]?.id, "older-60");
 		assert.equal(entries[entries.length - 1]?.id, "entry-238");
+		assert.equal(measuredLineCountCalls, 0);
 	});
 
 	it("buffers split dcp metadata markers so suffix chunks do not leak", () => {
@@ -388,6 +422,7 @@ describe("AppSessionEventController", () => {
 			setSessionStatus: () => {},
 			setSessionActivity: () => {},
 			updateQueuedMessageStatus: () => {},
+			flushAutoUserMessages: () => {},
 			prepareWorkspaceMutation: (toolName, args) => {
 				preparedCalls.push({ toolName, args });
 				return { toolName, args } as never;
@@ -463,6 +498,7 @@ describe("AppSessionEventController", () => {
 			setSessionStatus: () => {},
 			setSessionActivity: () => {},
 			updateQueuedMessageStatus: () => {},
+			flushAutoUserMessages: () => {},
 			prepareWorkspaceMutation: () => ({ type: "write", path: "a.txt" }),
 			workspaceMutationFromToolExecution: () => ({ type: "write", path: "a.txt", afterContent: "hello\n" }),
 			recordWorkspaceMutationForUserEntry: (entryId, mutation) => {
@@ -528,6 +564,7 @@ describe("AppSessionEventController", () => {
 			setSessionStatus: () => {},
 			setSessionActivity: () => {},
 			updateQueuedMessageStatus: () => {},
+			flushAutoUserMessages: () => {},
 			prepareWorkspaceMutation: () => ({ type: "write", path: "a.txt" }),
 			workspaceMutationFromToolExecution: () => ({ type: "write", path: "a.txt", afterContent: "hello\n" }),
 			recordWorkspaceMutationForUserEntry: () => {},
@@ -599,6 +636,7 @@ describe("AppSessionEventController", () => {
 			updateQueuedMessageStatus: () => {
 				queuedStatusUpdates += 1;
 			},
+			flushAutoUserMessages: () => {},
 			prepareWorkspaceMutation: () => undefined,
 			workspaceMutationFromToolExecution: () => undefined,
 			recordWorkspaceMutationForUserEntry: () => {},

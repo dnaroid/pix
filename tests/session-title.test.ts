@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { SessionManager, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import sessionTitle, { buildForkTitleInput, fallbackSessionTitleFromInput, firstUserMessageText } from "../extensions/session-title/index.js";
+import sessionTitle, { buildForkTitleInput, fallbackSessionTitleFromInput, firstUserMessageText, sessionTitleModelRefs } from "../extensions/session-title/index.js";
 
 describe("session-title extension", () => {
 	it("finds text from the first existing user message", () => {
@@ -76,6 +76,28 @@ describe("session-title extension", () => {
 		assert.equal(
 			fallbackSessionTitleFromInput("  --- \"\" Fix broken title retries now please  ", 80),
 			"Fix broken title retries now please",
+		);
+	});
+
+	it("tries configured fallback models after the primary title model", () => {
+		assert.deepEqual(
+			sessionTitleModelRefs({
+				enabled: true,
+				model: "zai/glm-5-turbo",
+				fallbackModels: ["openai-codex/gpt-5.3-codex-spark", "zai/glm-5-turbo"],
+				maxInputChars: 2000,
+				maxTitleChars: 80,
+				maxTokens: 32,
+				maxRetries: 2,
+				generationAttempts: 3,
+				retryDelayMs: 3000,
+				timeoutMs: 12_000,
+				terminalTitle: true,
+				terminalTitlePrefix: "pi — ",
+				notify: false,
+				debug: false,
+			}),
+			["zai/glm-5-turbo", "openai-codex/gpt-5.3-codex-spark"],
 		);
 	});
 

@@ -31,7 +31,7 @@ describe("DCP config", () => {
 		expect(config.manualMode.automaticStrategies).toBe(true);
 		expect(config.compress.minContextPercent).toBe(0.25);
 		expect(config.compress.nudgeFrequency).toBe(1);
-		expect(config.compress.maxContextPercent).toBe(0.65);
+		expect(config.compress.maxContextPercent).toBe(0.55);
 	});
 
 	test("ignores legacy, project, and PI_CONFIG_DIR DCP config files", () => {

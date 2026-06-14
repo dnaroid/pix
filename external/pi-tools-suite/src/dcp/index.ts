@@ -89,6 +89,7 @@ function isUserVisibleOnlyMessage(message: any): boolean {
 }
 
 const DCP_CONTROL_PLANE_CUSTOM_TYPES = new Set(["dcp-state", "dcp-nudge"])
+const SUMMARY_BUFFER_MAX_CONTEXT_BONUS = 0.05
 
 function isDcpControlPlaneMessage(message: any): boolean {
 	return message?.role === "custom" && DCP_CONTROL_PLANE_CUSTOM_TYPES.has(message.customType)
@@ -277,7 +278,8 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 				model,
 			], usage.contextWindow)
 			if (config.compress.summaryBuffer) {
-				thresholds.maxContextPercent += getActiveSummaryTokenEstimate(state) / usage.contextWindow
+				const summaryBonus = getActiveSummaryTokenEstimate(state) / usage.contextWindow
+				thresholds.maxContextPercent += Math.min(summaryBonus, SUMMARY_BUFFER_MAX_CONTEXT_BONUS)
 			}
 
 			let toolCallsSinceLastUser = 0

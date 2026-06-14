@@ -19,7 +19,14 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
   "dcp": {
     "enabled": true,
     "manualMode": { "enabled": false, "automaticStrategies": true },
-    "compress": { "minContextPercent": 0.25, "nudgeFrequency": 1, "iterationNudgeThreshold": 8 }
+    "compress": {
+      "minContextPercent": "20%",
+      "maxContextPercent": "55%",
+      "nudgeFrequency": 1,
+      "iterationNudgeThreshold": 6,
+      "autoCandidates": { "minContextPercent": 0.2 },
+      "messageMode": { "minContextPercent": 0.2 }
+    }
   },
   "asyncSubagents": {
     "defaultType": "quick",

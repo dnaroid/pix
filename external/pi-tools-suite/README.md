@@ -62,11 +62,11 @@ DCP settings are stored only under `dcp` in the user shared config file `~/.conf
   "dcp": {
     "enabled": true,
     "compress": {
-      "minContextPercent": "25%",
-      "maxContextPercent": "65%",
+      "minContextPercent": "20%",
+      "maxContextPercent": "55%",
       "maxContextLimit": 160000,
       "nudgeFrequency": 1,
-      "iterationNudgeThreshold": 8,
+      "iterationNudgeThreshold": 6,
       "protectedTools": ["compress", "write", "edit", "subagents"]
     }
   }

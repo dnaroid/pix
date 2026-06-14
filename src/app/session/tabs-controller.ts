@@ -80,6 +80,8 @@ export type AppTabsControllerHost = {
 	captureInputState(): TabInputState;
 	restoreInputState(state: TabInputState): void;
 	closeMenusForTabSwitch?(): void;
+	captureAutoUserMessages?(): readonly SubmittedUserMessage[];
+	restoreAutoUserMessages?(messages: readonly SubmittedUserMessage[]): void;
 	captureDeferredUserMessages?(): readonly SubmittedUserMessage[];
 	restoreDeferredUserMessages?(messages: readonly SubmittedUserMessage[]): void;
 	addEntry(entry: Entry): void;
@@ -95,6 +97,7 @@ export class AppTabsController {
 	private readonly runtimeRefreshTimersByTabId = new Map<string, Set<ReturnType<typeof setTimeout>>>();
 	private readonly historyReloadTimersByTabId = new Map<string, Set<ReturnType<typeof setTimeout>>>();
 	private readonly inputStatesByTabId = new Map<string, TabInputState>();
+	private readonly autoUserMessagesByTabId = new Map<string, SubmittedUserMessage[]>();
 	private readonly deferredUserMessagesByTabId = new Map<string, SubmittedUserMessage[]>();
 	private readonly sessionViewsByTabId = new Map<string, TabSessionView>();
 	private readonly scrollStatesByTabId = new Map<string, AppScrollState>();
@@ -752,6 +755,7 @@ export class AppTabsController {
 			this.tabItems.splice(index, 1);
 			this.deleteRuntimeForTab(tabId);
 			this.inputStatesByTabId.delete(tabId);
+			this.autoUserMessagesByTabId.delete(tabId);
 			this.deferredUserMessagesByTabId.delete(tabId);
 			this.storeActiveInputState();
 			this.storeActiveDeferredUserMessages();
@@ -780,6 +784,7 @@ export class AppTabsController {
 		this.tabItems.splice(index, 1);
 		this.deleteRuntimeForTab(tabId);
 		this.inputStatesByTabId.delete(tabId);
+		this.autoUserMessagesByTabId.delete(tabId);
 		this.deferredUserMessagesByTabId.delete(tabId);
 		this.stopAttentionBlinkIfIdle();
 		this.activeTabId = nextTab.id;
@@ -818,6 +823,7 @@ export class AppTabsController {
 		this.updateTabFromSession(tab, runtime.session);
 		this.setRuntimeForTab(tab.id, runtime);
 		this.inputStatesByTabId.delete(tab.id);
+		this.autoUserMessagesByTabId.delete(tab.id);
 		this.deferredUserMessagesByTabId.delete(tab.id);
 		this.restoreInputState(tab.id);
 		this.host.closeMenusForTabSwitch?.();
@@ -1089,10 +1095,18 @@ export class AppTabsController {
 	}
 
 	private storeActiveDeferredUserMessages(): void {
-		if (!this.activeTabId || !this.host.captureDeferredUserMessages) return;
-		const messages = this.host.captureDeferredUserMessages();
-		if (messages.length > 0) {
-			this.deferredUserMessagesByTabId.set(this.activeTabId, messages.map((message) => this.cloneSubmittedUserMessage(message)));
+		if (!this.activeTabId) return;
+
+		const autoMessages = this.host.captureAutoUserMessages?.() ?? [];
+		if (autoMessages.length > 0) {
+			this.autoUserMessagesByTabId.set(this.activeTabId, autoMessages.map((message) => this.cloneSubmittedUserMessage(message)));
+		} else {
+			this.autoUserMessagesByTabId.delete(this.activeTabId);
+		}
+
+		const deferredMessages = this.host.captureDeferredUserMessages?.() ?? [];
+		if (deferredMessages.length > 0) {
+			this.deferredUserMessagesByTabId.set(this.activeTabId, deferredMessages.map((message) => this.cloneSubmittedUserMessage(message)));
 		} else {
 			this.deferredUserMessagesByTabId.delete(this.activeTabId);
 		}
@@ -1107,6 +1121,7 @@ export class AppTabsController {
 	}
 
 	private restoreDeferredUserMessages(tabId: string): void {
+		this.host.restoreAutoUserMessages?.(this.autoUserMessagesByTabId.get(tabId) ?? []);
 		this.host.restoreDeferredUserMessages?.(this.deferredUserMessagesByTabId.get(tabId) ?? []);
 	}
 
@@ -1168,6 +1183,7 @@ export class AppTabsController {
 		this.runtimesByTabId.clear();
 		this.clearRuntimeSubscriptions();
 		this.inputStatesByTabId.clear();
+		this.autoUserMessagesByTabId.clear();
 		this.deferredUserMessagesByTabId.clear();
 		this.sessionViewsByTabId.clear();
 		this.scrollStatesByTabId.clear();
@@ -1201,6 +1217,7 @@ export class AppTabsController {
 		if (index >= 0) this.tabItems.splice(index, 1);
 		this.deleteRuntimeForTab(tabId);
 		this.inputStatesByTabId.delete(tabId);
+		this.autoUserMessagesByTabId.delete(tabId);
 		this.deferredUserMessagesByTabId.delete(tabId);
 	}
 

@@ -37,13 +37,20 @@ describe("AppQueuedMessageController", () => {
 			displayText: "deferred [Image 1]",
 			images: [{ type: "image", data: "image-data", mimeType: "image/png" }],
 		});
+		controller.autoUserMessages.push({
+			id: "auto-1",
+			promptText: "auto send",
+			displayText: "auto send",
+			images: [],
+		});
 
 		const restored = controller.restoreQueuedMessagesToEditorForAbort();
 
-		assert.equal(restored, 3);
+		assert.equal(restored, 4);
 		assert.deepEqual(sdkQueue, { steering: [], followUp: [] });
+		assert.equal(controller.autoUserMessages.length, 0);
 		assert.equal(controller.deferredUserMessages.length, 0);
-		assert.equal(state.input, "queued steer\n\ndeferred\n\nqueued follow\n\ndraft\n[Image 1] ");
+		assert.equal(state.input, "queued steer\n\nauto send\n\ndeferred\n\nqueued follow\n\ndraft\n[Image 1] ");
 		assert.deepEqual(state.images, [{ data: "image-data", mimeType: "image/png" }]);
 	});
 
@@ -198,7 +205,7 @@ describe("AppQueuedMessageController", () => {
 		assert.equal(state.toasts.length, 0);
 	});
 
-	it("queues submitted messages as SDK steering while compaction is active", async () => {
+	it("auto-sends submitted messages after compaction ends", async () => {
 		const sdkQueue = { steering: [], followUp: [] };
 		const calls: string[] = [];
 		const session = fakeSession(sdkQueue, { calls, isCompacting: true });
@@ -207,12 +214,72 @@ describe("AppQueuedMessageController", () => {
 
 		await controller.submitUserMessage(controller.createSubmittedUserMessage("defer me", "defer me", []));
 
+		assert.equal(controller.autoUserMessages.length, 1);
 		assert.equal(controller.deferredUserMessages.length, 0);
-		assert.deepEqual(sdkQueue, { steering: ["defer me"], followUp: [] });
-		assert.deepEqual(calls, ["steer:defer me"]);
+		assert.deepEqual(sdkQueue, { steering: [], followUp: [] });
+		assert.deepEqual(calls, []);
 		assert.deepEqual(state.toasts, ["info:Message queued for the next agent turn"]);
-		assert.equal(state.deferredChangeCount, 0);
+		assert.equal(state.deferredChangeCount, 1);
 		assert.equal(state.input, "");
+
+		session.abortCompaction();
+		await controller.flushAutoUserMessages();
+
+		assert.equal(controller.autoUserMessages.length, 0);
+		assert.deepEqual(calls, ["abortCompaction", "prompt:defer me"]);
+	});
+
+	it("auto-sends messages queued during prompt submission after the active prompt finishes", async () => {
+		const sdkQueue = { steering: [], followUp: [] };
+		const calls: string[] = [];
+		let releasePrompt: (() => void) | undefined;
+		const session = fakeSession(sdkQueue, {
+			calls,
+			promptWait: () => new Promise<void>((resolve) => { releasePrompt = resolve; }),
+		});
+		const state = createHostState("");
+		const controller = new AppQueuedMessageController(createHost(session, state));
+
+		const first = controller.sendUserMessageToSession(controller.createSubmittedUserMessage("first", "first", []));
+		await Promise.resolve();
+		await controller.submitUserMessage(controller.createSubmittedUserMessage("second", "second", []));
+
+		assert.equal(controller.autoUserMessages.length, 1);
+		assert.deepEqual(calls, ["prompt:first"]);
+
+		releasePrompt?.();
+		await first;
+		await Promise.resolve();
+
+		assert.equal(controller.autoUserMessages.length, 0);
+		assert.deepEqual(calls, ["prompt:first", "prompt:second"]);
+	});
+
+	it("does not queue the first message in another idle session while a previous tab prompt is in flight", async () => {
+		const firstQueue = { steering: [], followUp: [] };
+		const secondQueue = { steering: [], followUp: [] };
+		const calls: string[] = [];
+		let releaseFirstPrompt: (() => void) | undefined;
+		const firstSession = fakeSession(firstQueue, {
+			calls,
+			promptWait: () => new Promise<void>((resolve) => { releaseFirstPrompt = resolve; }),
+		});
+		const secondSession = fakeSession(secondQueue, { calls });
+		const state = createHostState("");
+		let activeSession = firstSession;
+		const controller = new AppQueuedMessageController(createHostFromRuntime(() => activeSession, state));
+
+		const first = controller.sendUserMessageToSession(controller.createSubmittedUserMessage("first tab", "first tab", []));
+		await Promise.resolve();
+		activeSession = secondSession;
+
+		await controller.submitUserMessage(controller.createSubmittedUserMessage("first message in second tab", "first message in second tab", []));
+
+		assert.equal(controller.autoUserMessages.length, 0);
+		assert.deepEqual(calls, ["prompt:first tab", "prompt:first message in second tab"]);
+
+		releaseFirstPrompt?.();
+		await first;
 	});
 
 	it("restores queued messages if an immediate send fails", async () => {
@@ -261,7 +328,7 @@ type HostState = {
 
 function fakeSession(
 	queue: QueueState,
-	options: { calls?: string[]; isStreaming?: boolean; isCompacting?: boolean; onAbort?: () => Promise<void>; promptError?: Error } = {},
+	options: { calls?: string[]; isStreaming?: boolean; isCompacting?: boolean; onAbort?: () => Promise<void>; promptError?: Error; promptWait?: () => Promise<void> } = {},
 ): AgentSession {
 	let isStreaming = options.isStreaming ?? false;
 	let isCompacting = options.isCompacting ?? false;
@@ -296,6 +363,7 @@ function fakeSession(
 		prompt: async (text: string, promptOptions?: { streamingBehavior?: "steer" | "followUp" }) => {
 			calls?.push(promptOptions?.streamingBehavior ? `prompt:${text}:${promptOptions.streamingBehavior}` : `prompt:${text}`);
 			if (options.promptError) throw options.promptError;
+			await options.promptWait?.();
 			if (isStreaming && promptOptions?.streamingBehavior === "steer") queue.steering.push(text);
 			if (isStreaming && promptOptions?.streamingBehavior === "followUp") queue.followUp.push(text);
 		},
@@ -316,10 +384,14 @@ function createHostState(input: string): HostState {
 }
 
 function createHost(session: AgentSession, state: HostState): AppQueuedMessageControllerHost {
-	const runtime = { session } as unknown as AgentSessionRuntime;
+	return createHostFromRuntime(() => session, state);
+}
+
+function createHostFromRuntime(session: () => AgentSession, state: HostState): AppQueuedMessageControllerHost {
+	const runtime = () => ({ session: session() }) as unknown as AgentSessionRuntime;
 	return {
-		runtime: () => runtime,
-		requireRuntime: () => runtime,
+		runtime,
+		requireRuntime: runtime,
 		visibleEntries: () => state.visibleEntries,
 		isRunning: () => true,
 		render: () => undefined,

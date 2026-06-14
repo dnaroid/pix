@@ -135,18 +135,67 @@ function renderCollapsedPreviewLines(
 	hasLspDiagnostics: boolean,
 	showGutter: boolean,
 ): RenderedLine[] {
-	const allLines = renderToolBodyLines(body, width, target, color, entry.bodyStyle, colors, undefined, entry.bodyWrap, hasLspDiagnostics, entry.bodyLineStyles, entry.preserveAnsi, showGutter);
-	if (rule.previewLines >= allLines.length) return allLines;
-	const previewLines = rule.direction === "tail" ? allLines.slice(-rule.previewLines) : allLines.slice(0, rule.previewLines);
+	const preview = previewBodyText(body, rule.direction, rule.previewLines);
+	const allPreviewLines = renderToolBodyLines(
+		preview.text,
+		width,
+		target,
+		color,
+		entry.bodyStyle,
+		colors,
+		undefined,
+		entry.bodyWrap,
+		hasLspDiagnostics,
+		entry.bodyLineStyles,
+		entry.preserveAnsi,
+		showGutter,
+		{ rawLineOffset: preview.rawLineOffset, bodyEndsAfterText: !preview.omittedAfter },
+	);
+	const overflow = preview.omittedBefore || preview.omittedAfter || allPreviewLines.length > rule.previewLines;
+	if (!overflow) return allPreviewLines;
+
+	const previewLines = rule.direction === "tail" ? allPreviewLines.slice(-rule.previewLines) : allPreviewLines.slice(0, rule.previewLines);
 	return markTruncatedPreviewLine(previewLines, rule.direction, colors.statusDotBase);
 }
 
 function collapsedInlinePreview(text: string, rule: ResolvedToolRule, preserveAnsi = false): { text: string; overflow: boolean } {
-	const rawLines = sanitizeToolBodyText(text, preserveAnsi).split("\n").map((line) => stripAnsi(line).trim()).filter(Boolean);
+	const preview = previewBodyText(text, rule.direction, rule.previewLines);
+	const rawLines = sanitizeToolBodyText(preview.text, preserveAnsi).split("\n").map((line) => stripAnsi(line).trim()).filter(Boolean);
 	if (rawLines.length === 0) return { text: "", overflow: false };
 
 	const selectedLines = rule.direction === "tail" ? rawLines.slice(-rule.previewLines) : rawLines.slice(0, rule.previewLines);
-	return { text: selectedLines.join(" "), overflow: rawLines.length > rule.previewLines };
+	return { text: selectedLines.join(" "), overflow: preview.omittedBefore || preview.omittedAfter || rawLines.length > rule.previewLines };
+}
+
+type PreviewBodyText = {
+	text: string;
+	rawLineOffset: number;
+	omittedBefore: boolean;
+	omittedAfter: boolean;
+};
+
+function previewBodyText(text: string, direction: ResolvedToolRule["direction"], previewLines: number): PreviewBodyText {
+	const rawLines = text.split("\n");
+	const previewRawLines = Math.max(1, previewLines + 1);
+
+	if (rawLines.length <= previewRawLines) return { text, rawLineOffset: 0, omittedBefore: false, omittedAfter: false };
+
+	if (direction === "tail") {
+		const start = Math.max(0, rawLines.length - previewRawLines);
+		return {
+			text: rawLines.slice(start).join("\n"),
+			rawLineOffset: start,
+			omittedBefore: start > 0,
+			omittedAfter: false,
+		};
+	}
+
+	return {
+		text: rawLines.slice(0, previewRawLines).join("\n"),
+		rawLineOffset: 0,
+		omittedBefore: false,
+		omittedAfter: rawLines.length > previewRawLines,
+	};
 }
 
 function markTruncatedPreviewLine(lines: RenderedLine[], direction: ResolvedToolRule["direction"], markerColor: string): RenderedLine[] {
@@ -185,6 +234,7 @@ function renderToolBodyLines(
 	bodyLineStyles?: readonly ToolBodyLineStyle[] | undefined,
 	preserveAnsi = false,
 	showGutter = false,
+	options: { rawLineOffset?: number; bodyEndsAfterText?: boolean } = {},
 ): RenderedLine[] {
 	const displayPrefix = showGutter ? toolBodyGutterPrefix() : TOOL_BODY_PREFIX;
 	const prefixWidth = stringDisplayWidth(displayPrefix);
@@ -194,13 +244,15 @@ function renderToolBodyLines(
 	const gutterSegment: StyledSegment | undefined = showGutter
 		? { start: 0, end: 1, foreground: colors.statusDotBase }
 		: undefined;
+	const rawLineOffset = options.rawLineOffset ?? 0;
 	for (const [rawLineIndex, rawLine] of sanitizeToolBodyText(text, preserveAnsi).split("\n").entries()) {
+		const absoluteRawLineIndex = rawLineOffset + rawLineIndex;
 		const ansiLine = preserveAnsi ? ansiStyledLine(rawLine) : undefined;
 		const displayLine = ansiLine?.text ?? rawLine;
 		const diffStyle = style === "diff" ? diffLineStyle(displayLine, colors) : undefined;
 		const lspDiagnosticStyle = hasLspDiagnostics ? lspDiagnosticLineStyle(displayLine, colors) : undefined;
-		const bodyLineStyle = bodyLineStyleForLine(bodyLineStyles, rawLineIndex, colors);
-		const lineSyntaxHighlight = syntaxHighlightForLine(syntaxHighlight, rawLineIndex);
+		const bodyLineStyle = bodyLineStyleForLine(bodyLineStyles, absoluteRawLineIndex, colors);
+		const lineSyntaxHighlight = syntaxHighlightForLine(syntaxHighlight, absoluteRawLineIndex);
 		const wrappedLines = ansiLine && !diffStyle && !lspDiagnosticStyle && !bodyLineStyle && !lineSyntaxHighlight
 			? wrapAnsiStyledDisplayLine(ansiLine, bodyWidth)
 			: wrapBodyLine(displayLine, bodyWidth).map((wrapped) => ({ text: wrapped, segments: [] as StyledSegment[] }));
@@ -250,7 +302,7 @@ function renderToolBodyLines(
 			lines.push(line);
 		}
 	}
-	if (showGutter && lines.length > 0) {
+	if (showGutter && lines.length > 0 && options.bodyEndsAfterText !== false) {
 		const lastLine = lines.at(-1);
 		if (!lastLine) return lines;
 		const gutterPrefix = toolBodyGutterPrefix();

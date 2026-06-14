@@ -175,8 +175,10 @@ export class AppScrollController {
 		void this.host.loadOlderSessionHistory?.({
 			render: false,
 			onPrependedEntries: (entries) => {
+				if (this.detachedScrollStart === undefined) return;
+
 				const prependedLineCount = this.host.conversationViewport().measuredLineCountForEntries(metrics.viewportColumns, entries.map((entry) => entry.id));
-				if (prependedLineCount > 0 && this.detachedScrollStart !== undefined) this.detachedScrollStart += prependedLineCount;
+				if (prependedLineCount > 0) this.detachedScrollStart += prependedLineCount;
 			},
 		}).then((loaded) => {
 			if (loaded && options.render) this.host.render();
@@ -198,7 +200,7 @@ export class AppScrollController {
 		const conversationViewport = this.host.conversationViewport();
 		const { bodyHeight } = this.host.editorLayoutRenderer().computeLayout(columns, rows);
 		const metrics = this.scrollMetrics(columns, bodyHeight);
-		const position = conversationViewport.entryBlockPositions(metrics.viewportColumns).find((candidate) => candidate.entry.id === entryId);
+		const position = conversationViewport.entryBlockPositionById(metrics.viewportColumns, entryId);
 		if (!position) return false;
 
 		this.setScrollStart(position.offset, metrics);
@@ -216,10 +218,9 @@ export class AppScrollController {
 		const conversationViewport = this.host.conversationViewport();
 		const { bodyHeight } = this.host.editorLayoutRenderer().computeLayout(columns, rows);
 		const metrics = this.scrollMetrics(columns, bodyHeight);
-		const positions = conversationViewport.entryBlockPositions(metrics.viewportColumns);
 
 		const targetPosition = target.entryId
-			? positions.find((position) => position.entry.id === target.entryId)
+			? conversationViewport.entryBlockPositionById(metrics.viewportColumns, target.entryId)
 			: undefined;
 		const targetMatch = targetPosition ? lineMatchInPosition(targetPosition, needles) : undefined;
 		if (targetMatch) {
@@ -234,6 +235,19 @@ export class AppScrollController {
 			return true;
 		}
 
+		for (const entry of conversationViewport.entries()) {
+			if (!entryMatchesNeedles(entry, needles)) continue;
+
+			const position = conversationViewport.entryBlockPositionById(metrics.viewportColumns, entry.id);
+			const match = position ? lineMatchInPosition(position, needles) : undefined;
+			if (!match) continue;
+
+			this.setScrollStart(match.start, metrics);
+			this.host.render();
+			return true;
+		}
+
+		const positions = conversationViewport.entryBlockPositions(metrics.viewportColumns);
 		const anyMatch = positions
 			.map((position) => lineMatchInPosition(position, needles))
 			.find((match) => match !== undefined);
@@ -284,6 +298,24 @@ function normalizeLineSearchNeedles(needles: readonly string[]): string[] {
 
 function normalizeLineSearchText(text: string): string {
 	return sanitizeText(text).replace(/…/gu, " ").replace(/\s+/gu, " ").trim().toLocaleLowerCase();
+}
+
+function entryMatchesNeedles(entry: Entry, needles: readonly string[]): boolean {
+	const text = normalizeLineSearchText(entrySearchText(entry));
+	return needles.some((needle) => text.includes(needle));
+}
+
+function entrySearchText(entry: Entry): string {
+	switch (entry.kind) {
+		case "shell":
+			return [entry.command, entry.output, entry.status, entry.error ?? ""].join("\n");
+		case "tool":
+			return [entry.toolName, entry.argsText, entry.output, entry.status].join("\n");
+		case "custom":
+			return [entry.customType, entry.text].join("\n");
+		default:
+			return "text" in entry ? entry.text : "";
+	}
 }
 
 function lineMatchInPosition(

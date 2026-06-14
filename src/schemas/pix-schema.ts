@@ -69,6 +69,7 @@ const PromptEnhancerConfig = Type.Object(
 const SessionTitleConfig = Type.Object(
 	{
 		modelRef: Type.Optional(Type.String({ description: "Model used to generate compact session titles." })),
+		fallbackModels: Type.Optional(Type.Array(Type.String({ description: "Fallback provider/model identifiers to try after the primary title model exhausts its retries." }))),
 	},
 	{ description: "Automatic session title generation configuration." },
 );

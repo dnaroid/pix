@@ -182,6 +182,37 @@ describe("renderToolBlock", () => {
 		assert.equal(tailLines[2]?.text.startsWith("└ "), true);
 	});
 
+	it("renders long collapsed head previews from only the preview edge", () => {
+		const output = Array.from({ length: 1000 }, (_, index) => `line-${index}`).join("\n");
+
+		const lines = renderToolBlock(toolEntry({ expanded: false, output, collapsedBody: output }), { ...rule, previewLines: 2 }, 100, colors);
+
+		assert.deepEqual(lines.slice(1).map((line) => line.text), ["│ line-0", "⊞ line-1"]);
+		assert.doesNotMatch(lines.map((line) => line.text).join("\n"), /line-500|line-999/u);
+	});
+
+	it("renders long collapsed tail previews from only the preview edge", () => {
+		const output = Array.from({ length: 1000 }, (_, index) => `line-${index}`).join("\n");
+
+		const lines = renderToolBlock(toolEntry({ expanded: false, output, collapsedBody: output }), { ...rule, direction: "tail", previewLines: 2 }, 100, colors);
+
+		assert.deepEqual(lines.slice(1).map((line) => line.text), ["⊞ line-998", "└ line-999"]);
+		assert.doesNotMatch(lines.map((line) => line.text).join("\n"), /line-0|line-500/u);
+	});
+
+	it("keeps absolute body line styles in long tail previews", () => {
+		const output = Array.from({ length: 1000 }, (_, index) => `line-${index}`).join("\n");
+
+		const lines = renderToolBlock(toolEntry({
+			expanded: false,
+			output,
+			collapsedBody: output,
+			bodyLineStyles: [{ startLine: 999, endLine: 1000, color: "error" }],
+		}), { ...rule, direction: "tail", previewLines: 2 }, 100, colors);
+
+		assert.deepEqual(lines[2]?.segments, [gutterSegment, { start: 2, end: lines[2]?.text.length, foreground: colors.error }]);
+	});
+
 	it("dims patch file headers without using warning color", () => {
 		const output = [
 			"*** Begin Patch",

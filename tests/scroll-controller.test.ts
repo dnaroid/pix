@@ -43,10 +43,10 @@ describe("AppScrollController", () => {
 				slicedStart = start;
 				return [{ text: "visible" }];
 			},
-			entryBlockPositions: () => [
+			entryBlockPositionById: (_width, entryId) => [
 				entryPosition("entry-1", 0, ["alpha", "beta"]),
 				entryPosition("entry-2", 3, ["start", "the needle sample is here", "end"]),
-			],
+			].find((position) => position.entry.id === entryId),
 		});
 
 		assert.equal(controller.scrollToConversationText({ entryId: "entry-2", needles: ["needle sample"] }), true);
@@ -63,16 +63,73 @@ describe("AppScrollController", () => {
 				slicedStart = start;
 				return [{ text: "visible" }];
 			},
-			entryBlockPositions: () => [
+			entryBlockPositionById: (_width, entryId) => [
 				entryPosition("entry-1", 0, ["earlier needle sample", "beta"]),
 				entryPosition("entry-2", 3, ["start", "different text", "end"]),
-			],
+			].find((position) => position.entry.id === entryId),
 		});
 
 		assert.equal(controller.scrollToConversationText({ entryId: "entry-2", needles: ["needle sample"] }), true);
 		controller.conversationView(10, 2);
 
 		assert.equal(slicedStart, 3);
+	});
+
+	it("searches raw candidate entries before scanning all rendered positions", () => {
+		let fullPositionScanCount = 0;
+		let slicedStart: number | undefined;
+		const controller = createController({
+			lineCount: () => 8,
+			slice: (_width, start) => {
+				slicedStart = start;
+				return [{ text: "visible" }];
+			},
+			entries: () => [
+				{ id: "entry-1", kind: "assistant", text: "alpha" },
+				{ id: "entry-2", kind: "assistant", text: "raw needle sample" },
+			],
+			entryBlockPositionById: (_width, entryId) => [
+				entryPosition("entry-1", 0, ["alpha"]),
+				entryPosition("entry-2", 3, ["rendered needle sample"]),
+			].find((position) => position.entry.id === entryId),
+			entryBlockPositions: () => {
+				fullPositionScanCount += 1;
+				return [];
+			},
+		});
+
+		assert.equal(controller.scrollToConversationText({ needles: ["needle sample"] }), true);
+		controller.conversationView(10, 2);
+
+		assert.equal(slicedStart, 3);
+		assert.equal(fullPositionScanCount, 0);
+	});
+
+	it("falls back to scanning rendered positions when raw candidates do not match", () => {
+		let fullPositionScanCount = 0;
+		let slicedStart: number | undefined;
+		const controller = createController({
+			lineCount: () => 8,
+			slice: (_width, start) => {
+				slicedStart = start;
+				return [{ text: "visible" }];
+			},
+			entries: () => [
+				{ id: "entry-1", kind: "assistant", text: "alpha" },
+				{ id: "entry-2", kind: "assistant", text: "beta" },
+			],
+			entryBlockPositionById: () => undefined,
+			entryBlockPositions: () => {
+				fullPositionScanCount += 1;
+				return [entryPosition("entry-2", 3, ["rendered needle sample"])];
+			},
+		});
+
+		assert.equal(controller.scrollToConversationText({ needles: ["needle sample"] }), true);
+		controller.conversationView(10, 2);
+
+		assert.equal(slicedStart, 3);
+		assert.equal(fullPositionScanCount, 1);
 	});
 
 	it("preserves the visible anchor when older history is prepended", async () => {
@@ -101,6 +158,32 @@ describe("AppScrollController", () => {
 
 		assert.equal(controller.conversationView(10, 5).metrics.start, 5);
 		assert.ok(rendered > 0);
+	});
+
+	it("does not measure prepended history when no detached anchor is active", async () => {
+		let lineCount = 3;
+		let measuredLineCountCalls = 0;
+		const controller = createController({
+			lineCount: () => lineCount,
+			slice: (_width, start, count) => Array.from({ length: count }, (_, index) => ({ text: `line ${start + index}` })),
+			measuredLineCountForEntries: () => {
+				measuredLineCountCalls += 1;
+				return 5;
+			},
+		}, 5, {
+			hasOlderSessionHistory: () => true,
+			isLoadingOlderSessionHistory: () => false,
+			loadOlderSessionHistory: (options) => {
+				lineCount += 5;
+				options?.onPrependedEntries?.([{ id: "older", kind: "assistant", text: "older" }]);
+				return Promise.resolve(true);
+			},
+		});
+
+		assert.equal(controller.scrollByLines(-1, { render: false }), true);
+		await Promise.resolve();
+
+		assert.equal(measuredLineCountCalls, 0);
 	});
 
 	it("preserves a detached visible anchor when appended messages prune the oldest lines", () => {
@@ -180,6 +263,8 @@ describe("AppScrollController", () => {
 function createController(viewport: {
 	lineCount(width: number): number;
 	slice(width: number, start: number, count: number): { text: string }[];
+	entries?: () => unknown[];
+	entryBlockPositionById?: (width: number, entryId: string) => unknown;
 	entryBlockPositions?: (width: number) => unknown[];
 	measuredLineCountForEntries?: (width: number, entryIds: readonly string[]) => number;
 }, bodyHeight = 1, hostOverrides: Partial<AppScrollControllerHost> = {}): AppScrollController {

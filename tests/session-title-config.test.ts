@@ -33,6 +33,7 @@ describe("session-title config", () => {
 			"promptEnhancer": { "modelRef": "zai/enhancer" },
 			"sessionTitle": {
 				"modelRef": "zai/title-model",
+				"fallbackModels": ["openai-codex/gpt-5.3-codex-spark"],
 				"maxTitleChars": 42,
 				"terminalTitle": false
 			}
@@ -41,6 +42,7 @@ describe("session-title config", () => {
 		const config = loadSessionTitleConfig(join(testHome, "workspace"));
 
 		assert.equal(config.model, "zai/title-model");
+		assert.deepEqual(config.fallbackModels, ["openai-codex/gpt-5.3-codex-spark"]);
 		assert.equal(config.maxTitleChars, 42);
 		assert.equal(config.terminalTitle, false);
 	});
@@ -56,6 +58,12 @@ describe("session-title config", () => {
 		const config = loadSessionTitleConfig(join(testHome, "workspace"));
 
 		assert.equal(config.model, "zai/title-from-dedicated");
+	});
+
+	it("defaults to no fallback models when none are configured", () => {
+		const config = loadSessionTitleConfig(join(testHome, "workspace"));
+
+		assert.deepEqual(config.fallbackModels, []);
 	});
 
 	it("uses stronger retry defaults for transient title-model outages", () => {
