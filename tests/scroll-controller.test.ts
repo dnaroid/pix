@@ -270,6 +270,60 @@ describe("AppScrollController", () => {
 		assert.equal(controller.scrollToBottom(), false);
 	});
 
+	it("advances the history cursor when a downward scroll reaches the window bottom", async () => {
+		let lineCount = 20;
+		let loadCount = 0;
+		const controller = createController({
+			lineCount: () => lineCount,
+			slice: (_width, start, count) => Array.from({ length: count }, (_, index) => ({ text: `line ${start + index}` })),
+		}, 5, {
+			hasNewerSessionHistory: () => loadCount < 1,
+			isLoadingNewerSessionHistory: () => false,
+			loadNewerSessionHistory: () => {
+				loadCount += 1;
+				lineCount += 5;
+				return Promise.resolve(true);
+			},
+		});
+
+		assert.equal(controller.scrollByLines(-20, { render: false }), true);
+		assert.equal(controller.conversationView(10, 5).metrics.start, 0);
+
+		assert.equal(controller.scrollByLines(40, { render: false }), true);
+		await Promise.resolve();
+
+		assert.equal(loadCount, 1);
+		const metrics = controller.conversationView(10, 5).metrics;
+		assert.equal(metrics.start, metrics.maxScroll);
+	});
+
+	it("advances the history cursor to the absolute bottom before jumping there", async () => {
+		let lineCount = 20;
+		let newerBatches = 2;
+		let renders = 0;
+		const controller = createController({
+			lineCount: () => lineCount,
+			slice: (_width, start, count) => Array.from({ length: count }, (_, index) => ({ text: `line ${start + index}` })),
+		}, 5, {
+			hasNewerSessionHistory: () => newerBatches > 0,
+			isLoadingNewerSessionHistory: () => false,
+			loadNewerSessionHistory: () => {
+				newerBatches -= 1;
+				lineCount += 5;
+				return Promise.resolve(true);
+			},
+			render: () => { renders += 1; },
+		});
+
+		assert.equal(controller.scrollByLines(-20, { render: false }), true);
+		assert.equal(await controller.scrollToAbsoluteBottom(), true);
+
+		assert.equal(newerBatches, 0);
+		assert.equal(renders, 2);
+		const metrics = controller.conversationView(10, 5).metrics;
+		assert.equal(metrics.start, metrics.maxScroll);
+	});
+
 	it("exposes an up quick-scroll direction when older history is still lazy-loaded", () => {
 		const controller = createController({
 			lineCount: () => 4,
@@ -279,6 +333,17 @@ describe("AppScrollController", () => {
 		});
 
 		assert.deepEqual(controller.quickScrollDirections(10, 5), { up: true, down: false });
+	});
+
+	it("exposes a down quick-scroll direction when the history cursor has newer entries", () => {
+		const controller = createController({
+			lineCount: () => 4,
+			slice: (_width, start, count) => Array.from({ length: count }, (_, index) => ({ text: `line ${start + index}` })),
+		}, 5, {
+			hasNewerSessionHistory: () => true,
+		});
+
+		assert.deepEqual(controller.quickScrollDirections(10, 5), { up: false, down: true });
 	});
 
 	it("loads all lazy older history before jumping to the absolute top", async () => {

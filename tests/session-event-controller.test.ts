@@ -6,10 +6,10 @@ import type { Entry } from "../src/app/types.js";
 import type { AgentSession, AgentSessionEvent, AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 
 describe("AppSessionEventController", () => {
-	function createController(entries: Entry[] = []): AppSessionEventController {
+	function createController(entries: Entry[] = [], runtime: AgentSessionRuntime = ({ session: { isStreaming: false } }) as AgentSessionRuntime): AppSessionEventController {
 		return new AppSessionEventController({
 			entries,
-			runtime: () => ({ session: { isStreaming: false } }) as AgentSessionRuntime,
+			runtime: () => runtime,
 			conversationViewport: () => ({ deleteEntry: () => {} }) as never,
 			isRunning: () => false,
 			render: () => {},
@@ -30,6 +30,45 @@ describe("AppSessionEventController", () => {
 			showToast: () => {},
 		});
 	}
+
+	it("moves a cursor over the full history window without pruned newer buffers", async () => {
+		const entries: Entry[] = [];
+		const branch = Array.from({ length: 430 }, (_value, index) => ({
+			type: "message",
+			id: `entry-${index}`,
+			parentId: index === 0 ? null : `entry-${index - 1}`,
+			timestamp: `2026-01-01T00:00:${String(index % 60).padStart(2, "0")}.000Z`,
+			message: { role: "user", content: `message ${index}` },
+		}));
+		const controller = createController(entries, {
+			session: {
+				isStreaming: false,
+				messages: [],
+				sessionManager: { getBranch: () => branch },
+			},
+		} as unknown as AgentSessionRuntime);
+
+		await controller.loadSessionHistoryAsync({
+			isCancelled: () => false,
+			render: () => {},
+			lazyOlderHistory: true,
+		});
+
+		assert.deepEqual(entries.map(historyEntryText).slice(0, 2), ["message 130", "message 131"]);
+		assert.equal(lastEntryText(entries), "message 429");
+
+		assert.equal(await controller.loadOlderSessionHistory({ render: false }), true);
+
+		assert.equal(controller.hasNewerSessionHistory(), true);
+		assert.deepEqual(entries.map(historyEntryText).slice(0, 2), ["message 80", "message 81"]);
+		assert.equal(lastEntryText(entries), "message 379");
+
+		assert.equal(await controller.loadNewerSessionHistory({ render: false }), true);
+
+		assert.deepEqual(entries.map(historyEntryText).slice(0, 2), ["message 130", "message 131"]);
+		assert.equal(lastEntryText(entries), "message 429");
+		assert.equal(controller.hasNewerSessionHistory(), false);
+	});
 
 	it("refreshes session status when session info changes", () => {
 		const session = {
@@ -980,3 +1019,12 @@ describe("AppSessionEventController", () => {
 	});
 
 });
+
+function historyEntryText(entry: Entry): string {
+	return "text" in entry ? entry.text : "";
+}
+
+function lastEntryText(entries: readonly Entry[]): string | undefined {
+	const entry = entries[entries.length - 1];
+	return entry ? historyEntryText(entry) : undefined;
+}

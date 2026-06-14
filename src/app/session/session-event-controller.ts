@@ -4,7 +4,7 @@ import type { ConversationViewport } from "../rendering/conversation-viewport.js
 import { createId } from "../id.js";
 import { extractImageContents, renderContent, renderUserMessageContent, stringifyUnknown } from "../rendering/message-content.js";
 import { customMessageEntry, loadSessionHistoryEntries, loadSessionHistoryEntriesAsync, type LoadOlderSessionHistoryOptions, type SessionHistoryOlderLoader } from "./session-history.js";
-import { sessionHistoryDisplayMessages, sessionHistoryOlderMessagesReader } from "./pix-system-message.js";
+import { sessionHistoryDisplayMessages, sessionHistoryDisplayMessagesFromEntries, sessionHistoryFullBranchEntries } from "./pix-system-message.js";
 import { THINKING_TOOL_NAME } from "../constants.js";
 import type { Entry, SessionActivity } from "../types.js";
 import { isRecord } from "../guards.js";
@@ -35,12 +35,15 @@ export type AppSessionEventControllerState = {
 	assistantMessageClosed: boolean;
 	assistantTextBuffer: string;
 	entryRenderVersions: Map<string, number>;
+	historyEntries: Entry[];
+	historyWindowStart: number;
 };
 
 const DCP_MESSAGE_REFERENCE_PREFIX = "[dcp-id]: # (m";
 const DCP_BLOCK_REFERENCE_PREFIX = "[dcp-block-id]: # (b";
 const MAX_HISTORY_WINDOW_ENTRIES = 360;
 const HISTORY_WINDOW_TARGET_ENTRIES = 300;
+const HISTORY_WINDOW_SHIFT_ENTRIES = 50;
 
 export type AppSessionEventControllerHost = {
 	readonly entries: Entry[];
@@ -87,6 +90,8 @@ export class AppSessionEventController {
 	private currentAssistantTextBlockContentIndex: number | undefined;
 	private readonly assistantTextBlocksByContentIndex = new Map<number, string>();
 	private readonly finalizedToolCallContentIndexes = new Set<number>();
+	private historyEntries: Entry[] = [];
+	private historyWindowStart = 0;
 	private currentThinkingEntryId: string | undefined;
 	private assistantMessageClosed = false;
 	private assistantTextBuffer = "";
@@ -109,6 +114,8 @@ export class AppSessionEventController {
 			assistantMessageClosed: this.assistantMessageClosed,
 			assistantTextBuffer: this.assistantTextBuffer,
 			entryRenderVersions: new Map(this.entryRenderVersions),
+			historyEntries: [...this.historyEntries],
+			historyWindowStart: this.historyWindowStart,
 		};
 	}
 
@@ -132,6 +139,8 @@ export class AppSessionEventController {
 		this.assistantTextBuffer = state.assistantTextBuffer;
 		this.entryRenderVersions.clear();
 		for (const [key, value] of state.entryRenderVersions) this.entryRenderVersions.set(key, value);
+		this.historyEntries = [...state.historyEntries];
+		this.historyWindowStart = state.historyWindowStart;
 	}
 
 	reset(): void {
@@ -140,6 +149,8 @@ export class AppSessionEventController {
 		this.toolMutationPreparationsByCallId.clear();
 		this.currentUserEntryId = undefined;
 		this.entryRenderVersions.clear();
+		this.historyEntries = [];
+		this.historyWindowStart = 0;
 		this.currentAssistantEntryId = undefined;
 		this.currentAssistantTextBlockEntryId = undefined;
 		this.currentAssistantTextBlockStartLength = undefined;
@@ -170,26 +181,35 @@ export class AppSessionEventController {
 		const runtime = this.host.runtime();
 		if (!runtime) return !options.isCancelled();
 		this.olderHistoryLoader = undefined;
+		this.historyEntries = [];
+		this.historyWindowStart = 0;
 
-		return loadSessionHistoryEntriesAsync({
-			messages: sessionHistoryDisplayMessages(runtime.session),
-			olderMessagesReader: sessionHistoryOlderMessagesReader(runtime.session),
-			addEntry: (entry) => this.addEntry(entry),
-			prependEntries: (entries) => this.prependEntries(entries),
+		const branchEntries = await sessionHistoryFullBranchEntries(runtime.session);
+		if (options.isCancelled()) return false;
+		const historyEntries: Entry[] = [];
+
+		const loaded = await loadSessionHistoryEntriesAsync({
+			messages: sessionHistoryDisplayMessagesFromEntries(branchEntries),
+			addEntry: (entry) => historyEntries.push(entry),
+			prependEntries: (entries) => historyEntries.unshift(...entries),
 			setToolEntryId: (toolCallId, entryId) => this.toolEntryIdsByCallId.set(toolCallId, entryId),
 			toolDefaultExpanded: (toolName) => this.host.toolDefaultExpanded(toolName),
 			observeSubagentsToolResult: (toolName, details, options) => this.host.observeSubagentsToolResult(toolName, details, options),
 			observeTodoToolResult: (toolName, details, isError) => this.host.observeTodoToolResult(toolName, details, isError),
 			isCancelled: options.isCancelled,
-			render: options.render,
-			lazyOlderHistory: options.lazyOlderHistory === true,
-			onOlderLoaderReady: (loader) => {
-				this.olderHistoryLoader = loader;
-			},
+			render: () => {},
+			lazyOlderHistory: false,
 		});
+		if (!loaded) return false;
+
+		this.historyEntries = historyEntries;
+		this.setHistoryWindowStart(this.maxHistoryWindowStart());
+		options.render();
+		return !options.isCancelled();
 	}
 
 	hasOlderSessionHistory(): boolean {
+		if (this.historyEntries.length > 0) return this.historyWindowStart > 0;
 		return this.olderHistoryLoader?.hasOlder() === true;
 	}
 
@@ -198,7 +218,20 @@ export class AppSessionEventController {
 	}
 
 	async loadOlderSessionHistory(options: LoadOlderSessionHistoryOptions = {}): Promise<boolean> {
+		if (this.historyEntries.length > 0) return this.shiftHistoryWindow(-HISTORY_WINDOW_SHIFT_ENTRIES, options);
 		return this.olderHistoryLoader?.loadOlder(options) ?? false;
+	}
+
+	hasNewerSessionHistory(): boolean {
+		return this.historyEntries.length > 0 && this.historyWindowStart < this.maxHistoryWindowStart();
+	}
+
+	isLoadingNewerSessionHistory(): boolean {
+		return false;
+	}
+
+	async loadNewerSessionHistory(options: { render?: boolean } = {}): Promise<boolean> {
+		return this.shiftHistoryWindow(HISTORY_WINDOW_SHIFT_ENTRIES, options);
 	}
 
 	handleSessionEvent(event: AgentSessionEvent): void {
@@ -317,7 +350,7 @@ export class AppSessionEventController {
 	}
 
 	findEntry(id: string): Entry | undefined {
-		return this.host.entries.find((entry) => entry.id === id);
+		return this.host.entries.find((entry) => entry.id === id) ?? this.historyEntries.find((entry) => entry.id === id);
 	}
 
 	findUserEntry(id: string): Extract<Entry, { kind: "user" }> | undefined {
@@ -331,19 +364,62 @@ export class AppSessionEventController {
 	}
 
 	addEntry(entry: Entry): void {
+		if (this.historyEntries.length > 0) {
+			const wasAtBottom = !this.hasNewerSessionHistory();
+			this.historyEntries.push(entry);
+			this.registerEntry(entry);
+			if (wasAtBottom) this.setHistoryWindowStart(this.maxHistoryWindowStart());
+			return;
+		}
+
 		this.host.entries.push(entry);
-		this.entryRenderVersions.set(entry.id, 1);
-		this.host.conversationViewport().deleteEntry(entry.id);
+		this.registerEntry(entry);
 		this.pruneHistoryWindow("top");
 	}
 
-	private prependEntries(entries: readonly Entry[]): void {
+	prependEntries(entries: readonly Entry[]): void {
 		this.host.entries.unshift(...entries);
-		for (const entry of entries) {
-			this.entryRenderVersions.set(entry.id, 1);
-			this.host.conversationViewport().deleteEntry(entry.id);
-		}
+		for (const entry of entries) this.registerEntry(entry);
 		this.pruneHistoryWindow("bottom");
+	}
+
+	private shiftHistoryWindow(delta: number, options: { render?: boolean; onPrependedEntries?: (entries: readonly Entry[]) => void } = {}): boolean {
+		if (this.historyEntries.length === 0) return false;
+		const previousStart = this.historyWindowStart;
+		const nextStart = Math.max(0, Math.min(this.maxHistoryWindowStart(), previousStart + delta));
+		if (nextStart === previousStart) return true;
+
+		if (nextStart < previousStart) options.onPrependedEntries?.(this.historyEntries.slice(nextStart, previousStart));
+		this.setHistoryWindowStart(nextStart);
+		if (options.render !== false) this.host.render();
+		return true;
+	}
+
+	private setHistoryWindowStart(start: number): void {
+		const nextStart = Math.max(0, Math.min(this.maxHistoryWindowStart(), start));
+		this.historyWindowStart = nextStart;
+		const nextEntries = this.historyEntries.slice(nextStart, nextStart + this.historyWindowSize());
+		const nextEntryIds = new Set(nextEntries.map((entry) => entry.id));
+
+		for (const entry of this.host.entries) {
+			if (!nextEntryIds.has(entry.id)) this.host.conversationViewport().deleteEntry(entry.id);
+		}
+		this.host.entries.splice(0, this.host.entries.length, ...nextEntries);
+		for (const entry of nextEntries) this.registerEntry(entry);
+	}
+
+	private historyWindowSize(): number {
+		return Math.min(HISTORY_WINDOW_TARGET_ENTRIES, this.historyEntries.length);
+	}
+
+	private maxHistoryWindowStart(): number {
+		return Math.max(0, this.historyEntries.length - this.historyWindowSize());
+	}
+
+	private registerEntry(entry: Entry): void {
+		this.entryRenderVersions.set(entry.id, this.entryRenderVersions.get(entry.id) ?? 1);
+		if (entry.kind === "tool") this.toolEntryIdsByCallId.set(entry.toolCallId, entry.id);
+		this.host.conversationViewport().deleteEntry(entry.id);
 	}
 
 	private pruneHistoryWindow(edge: "top" | "bottom"): void {

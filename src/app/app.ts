@@ -470,6 +470,9 @@ export class PiUiExtendApp {
 			hasOlderSessionHistory: () => this.sessionEvents.hasOlderSessionHistory(),
 			isLoadingOlderSessionHistory: () => this.sessionEvents.isLoadingOlderSessionHistory(),
 			loadOlderSessionHistory: (options) => this.sessionEvents.loadOlderSessionHistory(options),
+			hasNewerSessionHistory: () => this.sessionEvents.hasNewerSessionHistory(),
+			isLoadingNewerSessionHistory: () => this.sessionEvents.isLoadingNewerSessionHistory(),
+			loadNewerSessionHistory: (options) => this.sessionEvents.loadNewerSessionHistory(options),
 			render: () => this.render(),
 		});
 		this.commandController = new AppCommandController({
@@ -1229,7 +1232,7 @@ export class PiUiExtendApp {
 	private async scrollConversationQuick(direction: "up" | "down"): Promise<void> {
 		const changed = direction === "up"
 			? await this.scrollController.scrollToAbsoluteTop()
-			: this.scrollController.scrollToBottom();
+			: await this.scrollController.scrollToAbsoluteBottom();
 		if (changed) this.render();
 	}
 

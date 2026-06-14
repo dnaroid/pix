@@ -30,6 +30,9 @@ export type AppScrollControllerHost = {
 	hasOlderSessionHistory?(): boolean;
 	isLoadingOlderSessionHistory?(): boolean;
 	loadOlderSessionHistory?(options?: { render?: boolean; onPrependedEntries?: (entries: readonly Entry[]) => void }): Promise<boolean>;
+	hasNewerSessionHistory?(): boolean;
+	isLoadingNewerSessionHistory?(): boolean;
+	loadNewerSessionHistory?(options?: { render?: boolean }): Promise<boolean>;
 	render(): void;
 };
 
@@ -74,13 +77,26 @@ export class AppScrollController {
 		return this.scrollToTop() || loadedOlder;
 	}
 
+	async scrollToAbsoluteBottom(): Promise<boolean> {
+		let loadedNewer = false;
+		while (this.host.hasNewerSessionHistory?.() === true && this.host.isLoadingNewerSessionHistory?.() !== true) {
+			const loaded = await this.host.loadNewerSessionHistory?.({ render: false });
+			if (!loaded) break;
+			loadedNewer = true;
+			this.host.render();
+			await yieldToEventLoop();
+		}
+
+		return this.scrollToBottom() || loadedNewer;
+	}
+
 	quickScrollDirections(columns: number, bodyHeight: number): { up: boolean; down: boolean } {
 		if (bodyHeight <= 0) return { up: false, down: false };
 
 		const metrics = this.scrollMetrics(columns, bodyHeight);
 		return {
 			up: metrics.start > 0 || this.host.hasOlderSessionHistory?.() === true,
-			down: metrics.start < metrics.maxScroll,
+			down: metrics.start < metrics.maxScroll || this.host.hasNewerSessionHistory?.() === true,
 		};
 	}
 
@@ -143,6 +159,7 @@ export class AppScrollController {
 		const nextScrollFromBottom = Math.max(0, Math.min(maxScroll, this.scrollFromBottom + -delta));
 		const nextStart = Math.max(0, maxScroll - nextScrollFromBottom);
 		const shouldLoadOlderHistory = this.shouldLoadOlderHistory(delta, metrics, nextStart);
+		const shouldLoadNewerHistory = this.shouldLoadNewerHistory(delta, metrics, nextStart);
 		const pinToTopAfterOlderHistoryLoad = shouldLoadOlderHistory && nextStart === 0;
 		let changed = false;
 		if (nextScrollFromBottom === this.scrollFromBottom) {
@@ -152,7 +169,7 @@ export class AppScrollController {
 			} else if (pinToTopAfterOlderHistoryLoad && this.detachedScrollStart !== 0) {
 				this.detachedScrollStart = 0;
 				changed = true;
-			} else if (!shouldLoadOlderHistory) {
+			} else if (!shouldLoadOlderHistory && !shouldLoadNewerHistory) {
 				return false;
 			}
 		} else {
@@ -164,8 +181,9 @@ export class AppScrollController {
 		}
 
 		if (shouldLoadOlderHistory) this.loadOlderHistoryAnchored(metrics, { render: shouldRender, pinToTop: pinToTopAfterOlderHistoryLoad });
+		if (shouldLoadNewerHistory) this.loadNewerHistoryAnchored({ render: shouldRender, pinToBottom: nextScrollFromBottom === 0 });
 		if (shouldRender) this.host.render();
-		return changed || shouldLoadOlderHistory;
+		return changed || shouldLoadOlderHistory || shouldLoadNewerHistory;
 	}
 
 	private shouldLoadOlderHistory(delta: number, metrics: AppScrollMetrics, nextStart = metrics.start): boolean {
@@ -173,6 +191,14 @@ export class AppScrollController {
 		if (metrics.start > this.olderHistoryThresholdLines && nextStart > this.olderHistoryThresholdLines) return false;
 		if (this.host.hasOlderSessionHistory?.() !== true) return false;
 		if (this.host.isLoadingOlderSessionHistory?.() === true) return false;
+		return true;
+	}
+
+	private shouldLoadNewerHistory(delta: number, metrics: AppScrollMetrics, nextStart = metrics.start): boolean {
+		if (delta <= 0) return false;
+		if (metrics.maxScroll - metrics.start > this.olderHistoryThresholdLines && metrics.maxScroll - nextStart > this.olderHistoryThresholdLines) return false;
+		if (this.host.hasNewerSessionHistory?.() !== true) return false;
+		if (this.host.isLoadingNewerSessionHistory?.() === true) return false;
 		return true;
 	}
 
@@ -190,6 +216,13 @@ export class AppScrollController {
 				if (prependedLineCount > 0) this.detachedScrollStart += prependedLineCount;
 			},
 		}).then((loaded) => {
+			if (loaded && options.render) this.host.render();
+		});
+	}
+
+	private loadNewerHistoryAnchored(options: { render: boolean; pinToBottom?: boolean }): void {
+		void this.host.loadNewerSessionHistory?.({ render: false }).then((loaded) => {
+			if (loaded && options.pinToBottom) this.scrollToBottom();
 			if (loaded && options.render) this.host.render();
 		});
 	}
