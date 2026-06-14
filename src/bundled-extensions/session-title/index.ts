@@ -2,7 +2,8 @@ import { SessionManager, type ExtensionAPI, type ExtensionContext, type SessionS
 import { complete } from "@earendil-works/pi-ai";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { resolve } from "node:path";
-import { loadSessionTitleConfig, type SessionTitleConfig } from "./config";
+import type { ImageContent } from "../../input-editor.js";
+import { loadSessionTitleConfig, type SessionTitleConfig } from "./config.js";
 
 type SessionEntryLike = {
 	type?: string;
@@ -62,6 +63,23 @@ function messageContentText(content: unknown): string | undefined {
 		.trim();
 
 	return text || undefined;
+}
+
+function imageAttachmentLabel(images: readonly ImageContent[]): string | undefined {
+	if (images.length === 0) return undefined;
+	return images.length === 1 ? "Attached image" : `Attached images (${images.length})`;
+}
+
+function fallbackTitleInputFromPrompt(text: string, images: readonly ImageContent[] = []): string | undefined {
+	const trimmedText = text.trim();
+	return trimmedText || imageAttachmentLabel(images);
+}
+
+function titleGenerationInputFromPrompt(text: string, images: readonly ImageContent[] = []): string | undefined {
+	const trimmedText = text.trim();
+	const imageLabel = imageAttachmentLabel(images);
+	if (trimmedText && imageLabel) return `${trimmedText}\n\n${imageLabel}`;
+	return trimmedText || imageLabel;
 }
 
 export function firstUserMessageText(ctx: ExtensionContext): string | undefined {
@@ -202,7 +220,11 @@ async function resolveTitleModel(ctx: ExtensionContext, modelRefValue: string, c
 		return undefined;
 	}
 
-	return { model, apiKey: auth.apiKey, headers: auth.headers };
+	return {
+		model,
+		...(auth.apiKey === undefined ? {} : { apiKey: auth.apiKey }),
+		...(auth.headers === undefined ? {} : { headers: auth.headers }),
+	};
 }
 
 async function generateSessionTitle(
@@ -228,8 +250,8 @@ async function generateSessionTitle(
 			],
 		},
 		{
-			apiKey: resolved.apiKey,
-			headers: resolved.headers,
+			...(resolved.apiKey === undefined ? {} : { apiKey: resolved.apiKey }),
+			...(resolved.headers === undefined ? {} : { headers: resolved.headers }),
 			cacheRetention: "none",
 			maxRetries: config.maxRetries,
 			maxTokens: config.maxTokens,
@@ -361,6 +383,10 @@ export default function sessionTitle(pi: ExtensionAPI) {
 		}
 
 		const modelRef = pendingGeneration.modelRefs[pendingGeneration.modelIndex];
+		if (!modelRef) {
+			pendingGeneration = undefined;
+			return;
+		}
 		pendingGeneration.attempts++;
 		abortCurrentRequest();
 		controller = new AbortController();
@@ -507,7 +533,9 @@ export default function sessionTitle(pi: ExtensionAPI) {
 		refreshSessionUi(ctx);
 		scheduleSessionUiRefresh(ctx);
 		if (event.source === "extension") return { action: "continue" as const };
-		if (!event.text.trim()) return { action: "continue" as const };
+		const fallbackInput = fallbackTitleInputFromPrompt(event.text, event.images);
+		if (!fallbackInput) return { action: "continue" as const };
+		const titleInput = titleGenerationInputFromPrompt(event.text, event.images) ?? fallbackInput;
 		if (event.text.trimStart().startsWith("/")) return { action: "continue" as const };
 		const currentSessionId = ctx.sessionManager.getSessionId();
 		sessionId = currentSessionId;
@@ -523,8 +551,8 @@ export default function sessionTitle(pi: ExtensionAPI) {
 		}
 		if (!currentConfig.enabled) {
 			applyFallbackSessionTitle(ctx, currentConfig, activeForkTitleState
-				? buildForkTitleInput(activeForkTitleState.parentTitle, event.text)
-				: event.text,
+				? buildForkTitleInput(activeForkTitleState.parentTitle, fallbackInput)
+				: fallbackInput,
 				{ force: Boolean(activeForkTitleState) });
 			forkTitleState = undefined;
 			return { action: "continue" as const };
@@ -532,9 +560,12 @@ export default function sessionTitle(pi: ExtensionAPI) {
 
 		if (!pendingGeneration || pendingGeneration.sessionId !== currentSessionId) {
 			const input = activeForkTitleState
-				? buildForkTitleInput(activeForkTitleState.parentTitle, event.text)
-				: event.text;
-			const provisionalSessionName = fallbackSessionTitleFromInput(input, currentConfig.maxTitleChars);
+				? buildForkTitleInput(activeForkTitleState.parentTitle, titleInput)
+				: titleInput;
+			const fallbackTitleInput = activeForkTitleState
+				? buildForkTitleInput(activeForkTitleState.parentTitle, fallbackInput)
+				: fallbackInput;
+			const provisionalSessionName = fallbackSessionTitleFromInput(fallbackTitleInput, currentConfig.maxTitleChars);
 			if (provisionalSessionName && (!currentName || activeForkTitleState)) {
 				pi.setSessionName(provisionalSessionName);
 				refreshSessionUi(ctx, { force: true });
@@ -546,8 +577,8 @@ export default function sessionTitle(pi: ExtensionAPI) {
 				modelRefs: sessionTitleModelRefs(currentConfig),
 				modelIndex: 0,
 				attempts: 0,
-				replaceSessionName: activeForkTitleState?.inheritedSessionName,
-				provisionalSessionName,
+				...(activeForkTitleState?.inheritedSessionName === undefined ? {} : { replaceSessionName: activeForkTitleState.inheritedSessionName }),
+				...(provisionalSessionName === undefined ? {} : { provisionalSessionName }),
 			};
 			forkTitleState = undefined;
 		}

@@ -86,6 +86,7 @@ export class AppSessionEventController {
 	private currentAssistantTextBlockStartLength: number | undefined;
 	private currentAssistantTextBlockContentIndex: number | undefined;
 	private readonly assistantTextBlocksByContentIndex = new Map<number, string>();
+	private readonly finalizedToolCallContentIndexes = new Set<number>();
 	private currentThinkingEntryId: string | undefined;
 	private assistantMessageClosed = false;
 	private assistantTextBuffer = "";
@@ -144,6 +145,7 @@ export class AppSessionEventController {
 		this.currentAssistantTextBlockStartLength = undefined;
 		this.currentAssistantTextBlockContentIndex = undefined;
 		this.assistantTextBlocksByContentIndex.clear();
+		this.finalizedToolCallContentIndexes.clear();
 		this.currentThinkingEntryId = undefined;
 		this.assistantMessageClosed = false;
 		this.assistantTextBuffer = "";
@@ -221,6 +223,7 @@ export class AppSessionEventController {
 			case "agent_end":
 				this.finishCurrentThinkingEntry();
 				this.clearCurrentAssistantState();
+				this.finalizeAbandonedToolEntries();
 				this.currentUserEntryId = undefined;
 				this.host.setSessionActivity("idle");
 				this.host.setSessionStatus(this.host.runtime()?.session);
@@ -377,10 +380,36 @@ export class AppSessionEventController {
 		}
 	}
 
+	private removeToolEntryOrphan(entryId: string): void {
+		const index = this.host.entries.findIndex((entry) => entry.id === entryId);
+		if (index === -1) return;
+		const removed = this.host.entries.splice(index, 1)[0];
+		if (removed === undefined) return;
+		this.forgetEntry(removed);
+		this.host.scheduleRender();
+	}
+
 	addSessionAbortedEntry(): void {
 		this.finishCurrentThinkingEntry();
 		this.clearCurrentAssistantState();
+		this.finalizeAbandonedToolEntries();
 		this.addEntry({ id: createId("session-aborted"), kind: "session-aborted", text: "Session aborted." });
+	}
+
+	// D.16: when a turn aborts (agent_end, error, or session abort) without the
+	// SDK emitting tool_execution_end for a tool that already started executing,
+	// mark any running tool entries as done so they don't render a perpetual
+	// spinner. The output is left as whatever partial was last observed.
+	private finalizeAbandonedToolEntries(): void {
+		let touched = false;
+		for (const entry of this.host.entries) {
+			if (entry.kind === "tool" && entry.status === "running") {
+				entry.status = "done";
+				this.touchEntry(entry);
+				touched = true;
+			}
+		}
+		if (touched) this.host.scheduleRender();
 	}
 
 	private handleMessageStart(message: unknown): void {
@@ -417,6 +446,10 @@ export class AppSessionEventController {
 		if (isRecord(message) && message.role === "user") {
 			this.host.scheduleUserSessionEntryMetadataSync();
 		}
+		if (isRecord(message) && message.role === "toolResult") {
+			this.finalizeToolResultMessage(message);
+			return;
+		}
 		if (isRecord(message) && message.role === "assistant") {
 			this.renderAssistantToolCallsFromMessage(message);
 			this.finishCurrentThinkingEntry();
@@ -436,6 +469,31 @@ export class AppSessionEventController {
 			args,
 			...(preparation === undefined ? {} : { preparation }),
 		});
+	}
+
+	private finalizeToolResultMessage(message: Record<string, unknown>): void {
+		const toolCallId = typeof message.toolCallId === "string" ? message.toolCallId : undefined;
+		const toolName = typeof message.toolName === "string" ? message.toolName : undefined;
+		const content = Array.isArray(message.content) ? message.content : [];
+		const details = message.details;
+		const isError = Boolean(message.isError);
+
+		if (toolCallId && toolName) {
+			this.recordToolWorkspaceMutation(toolCallId, toolName, details, isError);
+			if (this.currentUserEntryId) this.host.scheduleUserSessionEntryMetadataSync();
+			this.host.observeSubagentsToolResult(toolName, details);
+			this.host.observeTodoToolResult(toolName, details, isError);
+			this.upsertToolEntry(toolCallId, {
+				toolName,
+				output: renderContent(content),
+				images: extractImageContents(content),
+				details,
+				isError,
+				status: "done",
+			});
+		}
+
+		this.host.setSessionActivity(this.host.runtime()?.session.isStreaming ? "running" : "idle");
 	}
 
 	private recordToolWorkspaceMutation(toolCallId: string, toolName: string, details: unknown, isError: boolean): void {
@@ -522,6 +580,13 @@ export class AppSessionEventController {
 	}
 
 	private handleToolCallStreamUpdate(contentIndex: number, partial: unknown, finalToolCall?: unknown): void {
+		// B.6: once a tool call block has been finalised by toolcall_end, a later
+		// toolcall_delta for the same contentIndex is a stale re-stream of the
+		// partial args. Applying it would clobber the final, complete args with
+		// an incomplete version. Ignore it.
+		if (finalToolCall === undefined && contentIndex !== undefined && this.finalizedToolCallContentIndexes.has(contentIndex)) {
+			return;
+		}
 		this.finishCurrentThinkingEntry();
 		this.flushAssistantTextBuffer(true);
 		this.finishCurrentAssistantTextBlock();
@@ -531,11 +596,15 @@ export class AppSessionEventController {
 		this.currentAssistantTextBlockContentIndex = undefined;
 		this.host.setSessionActivity("running");
 		this.upsertPendingToolCall(finalToolCall ?? partialToolCallAt(partial, contentIndex), contentIndex);
+		if (finalToolCall !== undefined && contentIndex !== undefined) this.finalizedToolCallContentIndexes.add(contentIndex);
 	}
 
 	private appendAssistantText(delta: string, contentIndex: number | undefined): void {
 		if (contentIndex !== undefined) this.currentAssistantTextBlockContentIndex = contentIndex;
-		this.assistantTextBuffer += delta;
+		// C.11: providers may emit Windows-style CRLF (\r\n) line endings. The
+		// drain logic splits on "\n", which would leave a dangling "\r" at the
+		// end of each line and corrupt width/layout calculations. Normalise to LF.
+		this.assistantTextBuffer += delta.includes("\r") ? delta.replace(/\r\n?/gu, "\n") : delta;
 		this.flushAssistantTextBuffer(false);
 	}
 
@@ -558,13 +627,27 @@ export class AppSessionEventController {
 	private reconcileAssistantTextBlock(content: string, contentIndex: number | undefined): void {
 		this.flushAssistantTextBuffer(true);
 		const hasVisibleTextBeforeBlock = this.hasVisibleTextBeforeCurrentAssistantBlock();
-		const visibleText = assistantStreamVisibleTextForCompleteBlock(content, hasVisibleTextBeforeBlock);
+		// C.11: normalise CRLF in the final block content (see appendAssistantText).
+		const normalisedContent = content.includes("\r") ? content.replace(/\r\n?/gu, "\n") : content;
+		const visibleText = assistantStreamVisibleTextForCompleteBlock(normalisedContent, hasVisibleTextBeforeBlock);
+		// B.5: a late text_end for a block that was already finished (it is not the
+		// currently-streaming block and is already recorded) must not clobber the
+		// current block or duplicate the early block's text.
+		if (
+			contentIndex !== undefined
+			&& this.currentAssistantTextBlockContentIndex !== undefined
+			&& contentIndex !== this.currentAssistantTextBlockContentIndex
+			&& this.assistantTextBlocksByContentIndex.has(contentIndex)
+		) return;
 		if (
 			this.currentAssistantTextBlockEntryId === undefined
 			&& contentIndex !== undefined
 			&& this.assistantTextBlocksByContentIndex.get(contentIndex) === visibleText
 		) return;
-		if (!visibleText && this.currentAssistantTextBlockEntryId === undefined) return;
+		// A.1: a text_end carrying empty content (provider content-filtering /
+		// truncation quirk) must not wipe assistant text already rendered to the
+		// user. Only finalize the block state, leaving any committed text intact.
+		if (!visibleText) return;
 
 		let entry = this.currentAssistantTextBlockEntryId ? this.findEntry(this.currentAssistantTextBlockEntryId) : undefined;
 		if (!entry || entry.kind !== "assistant") {
@@ -581,7 +664,13 @@ export class AppSessionEventController {
 			? Math.min(this.currentAssistantTextBlockStartLength ?? entry.text.length, entry.text.length)
 			: entry.text.length;
 		const currentBlockText = entry.text.slice(startLength);
-		if (currentBlockText !== visibleText) {
+		// C.10: when the final block content is a strict prefix of what was
+		// already streamed to the user (provider truncation / retroactive
+		// content filtering), preserve the longer streamed text rather than
+		// silently retracting already-rendered content. Same principle as A.1.
+		const preserveStreamedText = visibleText.length < currentBlockText.length
+			&& currentBlockText.startsWith(visibleText);
+		if (!preserveStreamedText && currentBlockText !== visibleText) {
 			entry.text = `${entry.text.slice(0, startLength)}${visibleText}`;
 			this.touchEntry(entry);
 		}
@@ -589,8 +678,7 @@ export class AppSessionEventController {
 		if (contentIndex !== undefined) this.assistantTextBlocksByContentIndex.set(contentIndex, visibleText);
 		this.currentAssistantTextBlockEntryId = undefined;
 		this.currentAssistantTextBlockStartLength = undefined;
-		this.currentAssistantTextBlockContentIndex = undefined;
-		this.assistantTextBuffer = "";
+		this.currentAssistantTextBlockContentIndex = undefined;		this.assistantTextBuffer = "";
 	}
 
 	private ensureAssistantTextBlockStarted(entry: Extract<Entry, { kind: "assistant" }>): void {
@@ -740,9 +828,17 @@ export class AppSessionEventController {
 
 		if (existingCallId !== undefined && existingCallId !== toolCallId && existingEntryId !== undefined) {
 			this.toolEntryIdsByCallId.delete(existingCallId);
+			// B.7: if tool_execution_start arrived before toolcall_end finalised the
+			// call id, an orphan tool entry may already be registered under
+			// toolCallId. Reuse the pending entry and drop the orphan so a single
+			// logical tool call renders as a single tool entry.
+			const orphanEntryId = this.toolEntryIdsByCallId.get(toolCallId);
 			this.toolEntryIdsByCallId.set(toolCallId, existingEntryId);
 			const existing = this.findEntry(existingEntryId);
 			if (existing?.kind === "tool") existing.toolCallId = toolCallId;
+			if (orphanEntryId !== undefined && orphanEntryId !== existingEntryId) {
+				this.removeToolEntryOrphan(orphanEntryId);
+			}
 		}
 
 		const toolName = isRecord(toolCall) && typeof toolCall.name === "string" ? toolCall.name : undefined;
@@ -760,7 +856,11 @@ export class AppSessionEventController {
 		if (existing?.kind === "tool") {
 			existing.toolName = update.toolName ?? existing.toolName;
 			existing.argsText = update.argsText ?? existing.argsText;
-			existing.output = update.output ?? existing.output;
+			// A.2: an update carrying empty output (e.g. a partial
+			// tool_execution_update with content:[]) must not erase output already
+			// shown to the user; only non-empty output replaces the existing value.
+			const nextOutput = update.output ?? existing.output;
+			existing.output = nextOutput.length > 0 ? nextOutput : (existing.output ?? "");
 			if ("images" in update) existing.images = update.images;
 			if ("details" in update) existing.details = update.details;
 			existing.isError = update.isError ?? existing.isError;
@@ -794,6 +894,7 @@ export class AppSessionEventController {
 		this.currentThinkingEntryId = undefined;
 		this.assistantTextBuffer = "";
 		this.assistantTextBlocksByContentIndex.clear();
+		this.finalizedToolCallContentIndexes.clear();
 		this.pendingToolCallIdsByContentIndex.clear();
 	}
 }

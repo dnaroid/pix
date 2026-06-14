@@ -135,6 +135,58 @@ describe("AppScrollController", () => {
 	it("preserves the visible anchor when older history is prepended", async () => {
 		let lineCount = 20;
 		let rendered = 0;
+		let loadCount = 0;
+		const controller = createController({
+			lineCount: () => lineCount,
+			slice: (_width, start, count) => Array.from({ length: count }, (_, index) => ({ text: `line ${start + index}` })),
+			measuredLineCountForEntries: () => 5,
+		}, 5, {
+			hasOlderSessionHistory: () => loadCount < 1,
+			isLoadingOlderSessionHistory: () => false,
+			loadOlderSessionHistory: (options) => {
+				loadCount += 1;
+				lineCount += 5;
+				options?.onPrependedEntries?.([{ id: "older", kind: "assistant", text: "older" }]);
+				return Promise.resolve(true);
+			},
+			render: () => { rendered += 1; },
+		});
+
+		assert.equal(controller.scrollByLines(-10), true);
+		await Promise.resolve();
+
+		assert.equal(controller.conversationView(10, 5).metrics.start, 10);
+		assert.ok(rendered > 0);
+	});
+
+	it("pins to absolute top when an upward scroll clamps to the top while loading older history", async () => {
+		let lineCount = 20;
+		let loadCount = 0;
+		const controller = createController({
+			lineCount: () => lineCount,
+			slice: (_width, start, count) => Array.from({ length: count }, (_, index) => ({ text: `line ${start + index}` })),
+			measuredLineCountForEntries: () => 5,
+		}, 5, {
+			hasOlderSessionHistory: () => loadCount < 1,
+			isLoadingOlderSessionHistory: () => false,
+			loadOlderSessionHistory: (options) => {
+				loadCount += 1;
+				lineCount += 5;
+				options?.onPrependedEntries?.([{ id: "older", kind: "assistant", text: "older" }]);
+				return Promise.resolve(true);
+			},
+		});
+
+		assert.equal(controller.scrollByLines(-20, { render: false }), true);
+		await Promise.resolve();
+
+		assert.equal(loadCount, 1);
+		assert.equal(controller.conversationView(10, 5).metrics.start, 0);
+	});
+
+	it("loads older history on the same large upward scroll that reaches the top", async () => {
+		let lineCount = 100;
+		let loadCount = 0;
 		const controller = createController({
 			lineCount: () => lineCount,
 			slice: (_width, start, count) => Array.from({ length: count }, (_, index) => ({ text: `line ${start + index}` })),
@@ -143,21 +195,17 @@ describe("AppScrollController", () => {
 			hasOlderSessionHistory: () => true,
 			isLoadingOlderSessionHistory: () => false,
 			loadOlderSessionHistory: (options) => {
+				loadCount += 1;
 				lineCount += 5;
 				options?.onPrependedEntries?.([{ id: "older", kind: "assistant", text: "older" }]);
 				return Promise.resolve(true);
 			},
-			render: () => { rendered += 1; },
 		});
 
-		assert.equal(controller.scrollByLines(-20, { render: false }), true);
-		assert.equal(controller.conversationView(10, 5).metrics.start, 0);
-
-		assert.equal(controller.scrollByLines(-1), true);
+		assert.equal(controller.scrollByLines(-200, { render: false }), true);
 		await Promise.resolve();
 
-		assert.equal(controller.conversationView(10, 5).metrics.start, 5);
-		assert.ok(rendered > 0);
+		assert.equal(loadCount, 1);
 	});
 
 	it("does not measure prepended history when no detached anchor is active", async () => {
@@ -184,6 +232,7 @@ describe("AppScrollController", () => {
 		await Promise.resolve();
 
 		assert.equal(measuredLineCountCalls, 0);
+		assert.equal(controller.conversationView(10, 5).metrics.start, 0);
 	});
 
 	it("preserves a detached visible anchor when appended messages prune the oldest lines", () => {

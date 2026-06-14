@@ -1,13 +1,13 @@
 import * as PiTui from "@earendil-works/pi-tui";
 
-import { CUSTOM_ANSWER_LABEL } from "./contract";
+import { CUSTOM_ANSWER_LABEL } from "./contract.js";
 import type {
 	NormalizedQuestion,
 	QuestionInputHandlingResult,
 	QuestionMouseEvent,
 	QuestionSelection,
 	QuestionUiContext,
-} from "./types";
+} from "./types.js";
 
 type QuestionMode = "choices" | "custom" | "review";
 type AddLine = (text: string) => number;
@@ -524,7 +524,7 @@ export async function runQuestionnaire(questions: NormalizedQuestion[], ctx: Que
 					add,
 					index === selectedReviewIndex,
 					`${status} ${index + 1}. ${question.label}: ${label}`,
-					{ kind: "review", index },
+					{ kind: "review", index } as Extract<ClickZone, { kind: "review" }>,
 					width,
 					answer ? "success" : "warning",
 				);
@@ -542,7 +542,7 @@ export async function runQuestionnaire(questions: NormalizedQuestion[], ctx: Que
 			renderSeparator(add, width);
 			addWrapped(theme.fg("info", ` ${question.prompt}`));
 			question.choices.forEach((choice, index) => {
-				renderSelectableLine(add, mode === "choices" && index === selectedChoiceIndex, `${index + 1}. ${choice.label}`, { kind: "choice", index }, width, "warning");
+				renderSelectableLine(add, mode === "choices" && index === selectedChoiceIndex, `${index + 1}. ${choice.label}`, { kind: "choice", index } as Extract<ClickZone, { kind: "choice" }>, width, "warning");
 				if (choice.description) renderMutedLine(add, `    ${choice.description}`, width);
 			});
 			renderSelectableLine(add, mode === "choices" && selectedChoiceIndex === customAnswerIndex(), `${question.choices.length + 1}. ${CUSTOM_ANSWER_LABEL}`, { kind: "custom" }, width, "warning");

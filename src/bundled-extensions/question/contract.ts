@@ -1,6 +1,6 @@
 import { Type } from "typebox";
 
-import type { NormalizedQuestion, QuestionToolInput } from "./types";
+import type { NormalizedQuestion, QuestionToolInput } from "./types.js";
 
 export const CUSTOM_ANSWER_LABEL = "Something else…";
 export const CUSTOM_ANSWER_SENTINEL_VALUE = "__question_custom_answer__";

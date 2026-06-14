@@ -1,6 +1,6 @@
 import { Text, truncateToWidth } from "@earendil-works/pi-tui";
 
-import type { QuestionTheme, QuestionToolInput, QuestionToolResult } from "./types";
+import type { QuestionTheme, QuestionToolInput, QuestionToolResult } from "./types.js";
 
 export function renderQuestionCall(args: Partial<QuestionToolInput>, theme: QuestionTheme): Text {
 	const questions = Array.isArray(args.questions) ? args.questions : [];

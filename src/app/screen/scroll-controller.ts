@@ -139,13 +139,18 @@ export class AppScrollController {
 		const rows = editorLayoutRows(terminalRows, this.host.tabPanelRows(terminalRows));
 		const { bodyHeight } = this.host.editorLayoutRenderer().computeLayout(columns, rows);
 		const metrics = this.scrollMetrics(columns, bodyHeight);
-		const shouldLoadOlderHistory = this.shouldLoadOlderHistory(delta, metrics);
 		const { conversationLineCount, maxScroll } = metrics;
 		const nextScrollFromBottom = Math.max(0, Math.min(maxScroll, this.scrollFromBottom + -delta));
+		const nextStart = Math.max(0, maxScroll - nextScrollFromBottom);
+		const shouldLoadOlderHistory = this.shouldLoadOlderHistory(delta, metrics, nextStart);
+		const pinToTopAfterOlderHistoryLoad = shouldLoadOlderHistory && nextStart === 0;
 		let changed = false;
 		if (nextScrollFromBottom === this.scrollFromBottom) {
 			if (nextScrollFromBottom === 0 && this.detachedScrollStart !== undefined && delta > 0) {
 				this.detachedScrollStart = undefined;
+				changed = true;
+			} else if (pinToTopAfterOlderHistoryLoad && this.detachedScrollStart !== 0) {
+				this.detachedScrollStart = 0;
 				changed = true;
 			} else if (!shouldLoadOlderHistory) {
 				return false;
@@ -158,24 +163,28 @@ export class AppScrollController {
 			changed = true;
 		}
 
-		if (shouldLoadOlderHistory) this.loadOlderHistoryAnchored(metrics, { render: shouldRender });
+		if (shouldLoadOlderHistory) this.loadOlderHistoryAnchored(metrics, { render: shouldRender, pinToTop: pinToTopAfterOlderHistoryLoad });
 		if (shouldRender) this.host.render();
 		return changed || shouldLoadOlderHistory;
 	}
 
-	private shouldLoadOlderHistory(delta: number, metrics: AppScrollMetrics): boolean {
+	private shouldLoadOlderHistory(delta: number, metrics: AppScrollMetrics, nextStart = metrics.start): boolean {
 		if (delta >= 0) return false;
-		if (metrics.start > this.olderHistoryThresholdLines) return false;
+		if (metrics.start > this.olderHistoryThresholdLines && nextStart > this.olderHistoryThresholdLines) return false;
 		if (this.host.hasOlderSessionHistory?.() !== true) return false;
 		if (this.host.isLoadingOlderSessionHistory?.() === true) return false;
 		return true;
 	}
 
-	private loadOlderHistoryAnchored(metrics: AppScrollMetrics, options: { render: boolean }): void {
+	private loadOlderHistoryAnchored(metrics: AppScrollMetrics, options: { render: boolean; pinToTop?: boolean }): void {
 		void this.host.loadOlderSessionHistory?.({
 			render: false,
 			onPrependedEntries: (entries) => {
 				if (this.detachedScrollStart === undefined) return;
+				if (options.pinToTop) {
+					this.detachedScrollStart = 0;
+					return;
+				}
 
 				const prependedLineCount = this.host.conversationViewport().measuredLineCountForEntries(metrics.viewportColumns, entries.map((entry) => entry.id));
 				if (prependedLineCount > 0) this.detachedScrollStart += prependedLineCount;

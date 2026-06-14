@@ -9,12 +9,17 @@ Shared pi-tools-suite config (`~/.config/pi/pi-tools-suite.jsonc`):
 ```jsonc
 {
   "terminalBell": {
-    "sound": true
+    "sound": true,
+    "telegram": {
+      "botToken": "123456789:AA...your-bot-token",
+      "chatId": "123456789"
+    }
   }
 }
 ```
 
 - `terminalBell.sound: false` disables bundled bell sound and bundled notifications by default.
+- `terminalBell.telegram` forwards the same completion/error/question notifications to a Telegram chat. It is independent of `sound`, so it keeps working even when the desktop bell is muted. Both `botToken` and `chatId` must be set to enable it.
 
 ## Environment variables
 
@@ -26,6 +31,9 @@ Shared pi-tools-suite config (`~/.config/pi/pi-tools-suite.jsonc`):
 - `PI_TERMINAL_BELL_NOTIFY_TITLE=<template>` — notification title template.
 - `PI_TERMINAL_BELL_NOTIFY_MESSAGE=<template>` — notification message template.
 - `PI_TERMINAL_BELL_ASK_USER_NOTIFY_MESSAGE=<template>` — message used when Pi is waiting for a user answer.
+- `PI_TERMINAL_BELL_TELEGRAM=0` — force Telegram forwarding off (overrides config).
+- `PI_TERMINAL_BELL_TELEGRAM_BOT_TOKEN=<token>` — override `terminalBell.telegram.botToken`.
+- `PI_TERMINAL_BELL_TELEGRAM_CHAT_ID=<id>` — override `terminalBell.telegram.chatId`.
 
 Platform-specific variables are still supported, including:
 

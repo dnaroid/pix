@@ -82,9 +82,9 @@ fi
 
 banner "Step 4/5: Checking bundled payload..."
 REQUIRED_FILES=(
-	"$PKG_ROOT/extensions/question/index.ts"
-	"$PKG_ROOT/extensions/session-title/index.ts"
-	"$PKG_ROOT/extensions/terminal-bell/index.ts"
+	"$PKG_ROOT/dist/bundled-extensions/question/index.js"
+	"$PKG_ROOT/dist/bundled-extensions/session-title/index.js"
+	"$PKG_ROOT/dist/bundled-extensions/terminal-bell/index.js"
 	"$PKG_ROOT/external/pi-tools-suite/index.ts"
 	"$PKG_ROOT/external/pi-tools-suite/src/index.ts"
 	"$PKG_ROOT/external/pi-tools-suite/package.json"

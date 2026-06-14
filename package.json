@@ -22,7 +22,6 @@
     "bin",
     "docs",
     "dist",
-    "extensions",
     "schemas",
     "skills",
     "external/pi-tools-suite/index.ts",

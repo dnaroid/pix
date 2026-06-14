@@ -1,5 +1,5 @@
-import { throwInvalid } from "./contract";
-import type { CanceledQuestionResult, NormalizedQuestion, QuestionResultDetails, QuestionSelection, QuestionToolResult, SuccessfulQuestionResult } from "./types";
+import { throwInvalid } from "./contract.js";
+import type { CanceledQuestionResult, NormalizedQuestion, QuestionResultDetails, QuestionSelection, QuestionToolResult, SuccessfulQuestionResult } from "./types.js";
 
 export function createSuccessfulQuestionResult(questions: NormalizedQuestion[], selections: QuestionSelection[]): SuccessfulQuestionResult {
 	const selectionsById = new Map(selections.map((selection) => [selection.id, selection]));

@@ -38,9 +38,18 @@ const ToolRendererConfig = Type.Object(
 // Terminal bell
 // ---------------------------------------------------------------------------
 
+const TerminalBellTelegramConfig = Type.Object(
+	{
+		botToken: Type.Optional(Type.String({ description: "Telegram bot token (from @BotFather) used to send completion/error/question notifications." })),
+		chatId: Type.Optional(Type.String({ description: "Telegram chat id that receives the notifications. Message @userinfobot to look yours up." })),
+	},
+	{ description: "Forward terminal-bell notifications to a Telegram chat. Independent of the bundled desktop sound gate." },
+);
+
 const TerminalBellConfig = Type.Object(
 	{
 		sound: Type.Optional(Type.Boolean({ description: "Play terminal bell sound on completion/error." })),
+		telegram: Type.Optional(TerminalBellTelegramConfig),
 	},
 	{ description: "Terminal bell configuration." },
 );

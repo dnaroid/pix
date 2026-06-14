@@ -19,7 +19,7 @@ delete process.env.PI_SESSION_TITLE_TERMINAL_PREFIX;
 delete process.env.PI_SESSION_TITLE_NOTIFY;
 delete process.env.PI_SESSION_TITLE_DEBUG;
 
-const { loadSessionTitleConfig } = await import("../extensions/session-title/config.js");
+const { loadSessionTitleConfig } = await import("../src/bundled-extensions/session-title/config.js");
 
 describe("session-title config", () => {
 	beforeEach(() => {

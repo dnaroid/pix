@@ -477,7 +477,7 @@ async function readTailSessionEntriesWithByteCount(filePath: string, byteCount: 
 			parseStart = firstNewline >= 0 ? firstNewline + 1 : buffer.length;
 		}
 
-		return selectLastSessionEntries(parseSessionEntryBufferLines(buffer.subarray(parseStart), start + parseStart), limit, size);
+		return selectLastSessionEntries(parseSessionEntryBufferLines(buffer.subarray(parseStart), start + parseStart), limit, start, size);
 	} catch {
 		return { entries: [], startOffset: 0 };
 	} finally {
@@ -494,11 +494,39 @@ async function readSessionEntriesBeforeOffset(filePath: string, endOffset: numbe
 	const maxBytes = Math.min(endOffset, MAX_TAIL_BYTES);
 	while (byteCount <= maxBytes) {
 		const result = await readSessionEntriesBeforeOffsetWithByteCount(filePath, endOffset, byteCount, limit);
-		if (result.entries.length >= limit || byteCount >= maxBytes || byteCount >= endOffset) return result;
+		if (result.entries.length >= limit || byteCount >= endOffset) return result;
+		if (byteCount >= maxBytes) return await readSessionEntriesBeforeOffsetStreaming(filePath, endOffset, limit);
 		byteCount = Math.min(endOffset, Math.max(byteCount + 1, byteCount * 2));
 	}
 
 	return { entries: [], startOffset: 0 };
+}
+
+async function readSessionEntriesBeforeOffsetStreaming(filePath: string, endOffset: number, limit: number): Promise<SessionEntriesReadResult> {
+	const selected: Array<{ entry: SessionEntry; offset: number }> = [];
+	let offset = 0;
+	const stream = createReadStream(filePath, { encoding: "utf8", start: 0, end: Math.max(0, endOffset - 1) });
+	const lines = createInterface({ input: stream, crlfDelay: Infinity });
+
+	try {
+		for await (const line of lines) {
+			const lineOffset = offset;
+			offset += Buffer.byteLength(line, "utf8") + 1;
+			if (lineOffset >= endOffset) break;
+
+			const entry = parseSessionEntryLine(line);
+			if (!entry) continue;
+			selected.push({ entry, offset: lineOffset });
+			if (selected.length > limit) selected.shift();
+		}
+	} finally {
+		stream.destroy();
+	}
+
+	return {
+		entries: selected.map((item) => item.entry),
+		startOffset: selected[0]?.offset ?? 0,
+	};
 }
 
 async function readSessionEntriesBeforeOffsetWithByteCount(filePath: string, endOffset: number, byteCount: number, limit: number): Promise<SessionEntriesReadResult> {
@@ -515,7 +543,7 @@ async function readSessionEntriesBeforeOffsetWithByteCount(filePath: string, end
 			parseStart = firstNewline >= 0 ? firstNewline + 1 : buffer.length;
 		}
 
-		return selectLastSessionEntries(parseSessionEntryBufferLines(buffer.subarray(parseStart), start + parseStart), limit, start);
+		return selectLastSessionEntries(parseSessionEntryBufferLines(buffer.subarray(parseStart), start + parseStart), limit, start, start);
 	} catch {
 		return { entries: [], startOffset: 0 };
 	} finally {
@@ -523,11 +551,17 @@ async function readSessionEntriesBeforeOffsetWithByteCount(filePath: string, end
 	}
 }
 
-function selectLastSessionEntries(parsedEntries: Array<{ entry: SessionEntry; offset: number }>, limit: number, emptyStartOffset: number): SessionEntriesReadResult {
+function selectLastSessionEntries(
+	parsedEntries: Array<{ entry: SessionEntry; offset: number }>,
+	limit: number,
+	windowStartOffset: number,
+	emptyStartOffset: number,
+): SessionEntriesReadResult {
 	const selected = parsedEntries.slice(-limit);
+	const hasOlderEntriesBeforeSelected = windowStartOffset > 0 || parsedEntries.length > selected.length;
 	return {
 		entries: selected.map((item) => item.entry),
-		startOffset: selected[0]?.offset ?? emptyStartOffset,
+		startOffset: hasOlderEntriesBeforeSelected ? selected[0]?.offset ?? emptyStartOffset : 0,
 	};
 }
 

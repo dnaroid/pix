@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { SessionManager, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import sessionTitle, { buildForkTitleInput, fallbackSessionTitleFromInput, firstUserMessageText, sessionTitleModelRefs } from "../extensions/session-title/index.js";
+import sessionTitle, { buildForkTitleInput, fallbackSessionTitleFromInput, firstUserMessageText, sessionTitleModelRefs } from "../src/bundled-extensions/session-title/index.js";
 
 describe("session-title extension", () => {
 	it("finds text from the first existing user message", () => {
@@ -125,6 +125,38 @@ describe("session-title extension", () => {
 			await handlers.input?.({ text: "Fix delayed session title refresh after startup", source: "user" }, handlers.ctx);
 
 			assert.deepEqual(setSessionNameCalls, ["Fix delayed session title refresh after startup"]);
+		});
+	});
+
+	it("generates a fallback title when the first prompt includes images", async () => {
+		await withSessionTitleDisabled(async () => {
+			const { handlers, setSessionNameCalls } = createExtensionHarness({ branch: [], sessionName: undefined, sessionId: "session-new-images" });
+
+			sessionTitle(handlers.api);
+			await handlers.session_start?.({ type: "session_start", reason: "new" }, handlers.ctx);
+			await handlers.input?.({
+				text: "Что не так на скриншоте?",
+				images: [{ type: "image", data: "...", mimeType: "image/png" }],
+				source: "interactive",
+			}, handlers.ctx);
+
+			assert.deepEqual(setSessionNameCalls, ["Что не так на скриншоте"]);
+		});
+	});
+
+	it("generates a generic fallback title for an image-only first prompt", async () => {
+		await withSessionTitleDisabled(async () => {
+			const { handlers, setSessionNameCalls } = createExtensionHarness({ branch: [], sessionName: undefined, sessionId: "session-image-only" });
+
+			sessionTitle(handlers.api);
+			await handlers.session_start?.({ type: "session_start", reason: "new" }, handlers.ctx);
+			await handlers.input?.({
+				text: "",
+				images: [{ type: "image", data: "...", mimeType: "image/png" }],
+				source: "interactive",
+			}, handlers.ctx);
+
+			assert.deepEqual(setSessionNameCalls, ["Attached image"]);
 		});
 	});
 

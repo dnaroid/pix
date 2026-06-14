@@ -37,6 +37,20 @@
         "sound": {
           "type": "boolean",
           "description": "Play terminal bell sound on completion/error."
+        },
+        "telegram": {
+          "type": "object",
+          "properties": {
+            "botToken": {
+              "type": "string",
+              "description": "Telegram bot token (from @BotFather) used to send completion/error/question notifications."
+            },
+            "chatId": {
+              "type": "string",
+              "description": "Telegram chat id that receives the notifications. Message @userinfobot to look yours up."
+            }
+          },
+          "description": "Forward terminal-bell notifications to a Telegram chat. Independent of the bundled desktop sound gate."
         }
       },
       "description": "Terminal bell configuration."

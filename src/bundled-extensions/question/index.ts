@@ -1,9 +1,9 @@
-import { QUESTION_TOOL_DESCRIPTION } from "./tool-description";
-import { questionParameters, normalizeQuestionInput } from "./contract";
-import { renderQuestionCall, renderQuestionResult } from "./render";
-import { createCanceledQuestionResult, createQuestionToolResult, createSuccessfulQuestionResult } from "./result";
-import { runQuestionnaire } from "./tui";
-import type { QuestionToolInput, QuestionUiContext } from "./types";
+import { QUESTION_TOOL_DESCRIPTION } from "./tool-description.js";
+import { questionParameters, normalizeQuestionInput } from "./contract.js";
+import { renderQuestionCall, renderQuestionResult } from "./render.js";
+import { createCanceledQuestionResult, createQuestionToolResult, createSuccessfulQuestionResult } from "./result.js";
+import { runQuestionnaire } from "./tui.js";
+import type { QuestionToolInput, QuestionUiContext } from "./types.js";
 
 interface ExtensionApiLike {
 	registerTool(tool: unknown): void;
@@ -29,6 +29,6 @@ export default function questionExtension(pi: ExtensionApiLike): void {
 	});
 }
 
-export { questionParameters, normalizeQuestionInput } from "./contract";
-export { createCanceledQuestionResult, createFallbackPrompt, createQuestionToolResult, createSuccessfulQuestionResult, summarizeQuestionResult } from "./result";
-export type { QuestionResultDetails, QuestionToolInput } from "./types";
+export { questionParameters, normalizeQuestionInput } from "./contract.js";
+export { createCanceledQuestionResult, createFallbackPrompt, createQuestionToolResult, createSuccessfulQuestionResult, summarizeQuestionResult } from "./result.js";
+export type { QuestionResultDetails, QuestionToolInput } from "./types.js";

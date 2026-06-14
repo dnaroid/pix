@@ -26,8 +26,8 @@ const BUNDLED_QUESTION_EXTENSION_NAME = "question";
 const PI_TOOLS_SUITE_EXTENSION_NAME = "pi-tools-suite";
 const BUNDLED_EXTENSIONS_DIR = resolve(
 	dirname(fileURLToPath(import.meta.url)),
-	"../..",
-	"extensions",
+	"..",
+	"bundled-extensions",
 );
 const BUNDLED_QUESTION_EXTENSION_DIR = resolve(
 	BUNDLED_EXTENSIONS_DIR,

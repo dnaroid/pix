@@ -4,7 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 
-import { canRingTerminal, readTerminalBellSoundConfig, terminalBellNotificationsEnabled, terminalBellSoundEnabled } from "../extensions/terminal-bell/index.js";
+import {
+	canRingTerminal,
+	readTerminalBellSoundConfig,
+	readTerminalBellTelegramConfig,
+	resolveTerminalBellTelegramConfig,
+	terminalBellNotificationsEnabled,
+	terminalBellSoundEnabled,
+	terminalBellTelegramEnabled,
+} from "../src/bundled-extensions/terminal-bell/index.js";
 
 describe("bundled terminal-bell config", () => {
 	it("reads terminalBell.sound from the shared pi-tools-suite jsonc config", () => {
@@ -48,6 +56,52 @@ describe("bundled terminal-bell config", () => {
 	});
 });
 
+describe("bundled terminal-bell telegram config", () => {
+	it("reads terminalBell.telegram.botToken/chatId from the shared jsonc config", () => {
+		withTempConfig(`{
+			"terminalBell": {
+				"telegram": {
+					"botToken": "123:abc",
+					"chatId": "42"
+				}
+			}
+		}\n`, (configPath) => {
+			assert.deepEqual(readTerminalBellTelegramConfig(configPath), { botToken: "123:abc", chatId: "42" });
+			assert.deepEqual(resolveTerminalBellTelegramConfig(configPath), { botToken: "123:abc", chatId: "42" });
+			assert.equal(terminalBellTelegramEnabled(configPath), true);
+		});
+	});
+
+	it("trims configured values and drops empty strings", () => {
+		withTempConfig(`{"terminalBell": { "telegram": { "botToken": "  ", "chatId": "  42  " } }}\n`, (configPath) => {
+			assert.deepEqual(readTerminalBellTelegramConfig(configPath), { chatId: "42" });
+			assert.equal(terminalBellTelegramEnabled(configPath), false);
+		});
+	});
+
+	it("returns disabled when only one of token/chatId is set", () => {
+		withTempConfig(`{"terminalBell": { "telegram": { "botToken": "123:abc" } }}\n`, (configPath) => {
+			assert.equal(terminalBellTelegramEnabled(configPath), false);
+		});
+	});
+
+	it("lets env override the configured botToken/chatId", () => {
+		withTempConfig(`{"terminalBell": { "telegram": { "botToken": "123:abc", "chatId": "42" } }}\n`, (configPath) => {
+			const resolved = withEnvChain(
+				[["PI_TERMINAL_BELL_TELEGRAM_BOT_TOKEN", "999:zzz"], ["PI_TERMINAL_BELL_TELEGRAM_CHAT_ID", "77"]],
+				() => resolveTerminalBellTelegramConfig(configPath),
+			);
+			assert.deepEqual(resolved, { botToken: "999:zzz", chatId: "77" });
+		});
+	});
+
+	it("PI_TERMINAL_BELL_TELEGRAM=0 forces telegram off even when fully configured", () => {
+		withTempConfig(`{"terminalBell": { "telegram": { "botToken": "123:abc", "chatId": "42" } }}\n`, (configPath) => {
+			assert.equal(withEnv("PI_TERMINAL_BELL_TELEGRAM", "0", () => terminalBellTelegramEnabled(configPath)), false);
+		});
+	});
+});
+
 function withTempConfig<T>(content: string, fn: (configPath: string) => T): T {
 	const dir = mkdtempSync(join(tmpdir(), "pix-terminal-bell-"));
 	try {
@@ -68,5 +122,22 @@ function withEnv<T>(name: string, value: string | undefined, fn: () => T): T {
 	} finally {
 		if (previous === undefined) delete process.env[name];
 		else process.env[name] = previous;
+	}
+}
+
+function withEnvChain<T>(entries: Array<[string, string | undefined]>, fn: () => T): T {
+	const restore: Array<[string, string | undefined]> = [];
+	for (const [name, value] of entries) {
+		restore.push([name, process.env[name]]);
+		if (value === undefined) delete process.env[name];
+		else process.env[name] = value;
+	}
+	try {
+		return fn();
+	} finally {
+		for (const [name, previous] of restore) {
+			if (previous === undefined) delete process.env[name];
+			else process.env[name] = previous;
+		}
 	}
 }

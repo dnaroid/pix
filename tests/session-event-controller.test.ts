@@ -181,6 +181,41 @@ describe("AppSessionEventController", () => {
 		]);
 	});
 
+	for (const toolName of ["edit", "shell", "todo"] as const) {
+		it(`marks a pending ${toolName} tool entry done when a toolResult message ends without a tool_execution_end event`, () => {
+			const entries: Entry[] = [];
+			const controller = createController(entries);
+
+			controller.handleSessionEvent({
+				type: "message_update",
+				assistantMessageEvent: {
+					type: "done",
+					reason: "toolUse",
+					message: {
+						role: "assistant",
+						content: [{ type: "toolCall", id: "call-1", name: toolName, arguments: { sample: true } }],
+						stopReason: "toolUse",
+					},
+				},
+			} as unknown as AgentSessionEvent);
+
+			controller.handleSessionEvent({
+				type: "message_end",
+				message: {
+					role: "toolResult",
+					toolCallId: "call-1",
+					toolName,
+					content: [{ type: "text", text: "ok" }],
+					isError: false,
+				},
+			} as unknown as AgentSessionEvent);
+
+			assert.equal(entries.filter((entry) => entry.kind === "tool").length, 1);
+			assert.equal(entries[0]?.kind === "tool" ? entries[0].status : undefined, "done");
+			assert.equal(entries[0]?.kind === "tool" ? entries[0].output : undefined, "ok");
+		});
+	}
+
 	it("starts a new assistant entry for text streamed after a tool call", () => {
 		const entries: Entry[] = [];
 		const controller = createController(entries);
