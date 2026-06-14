@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, isAbsolute, join } from "node:path";
+import { basename, delimiter, isAbsolute, join } from "node:path";
 import { parse as parseJsonc } from "jsonc-parser";
 
 const BELL = "\x07";
@@ -11,9 +11,12 @@ const IDLE_RETRY_DELAY_MS = 100;
 const MAX_IDLE_RETRIES = 40;
 const SUBAGENTS_LIVE_COUNT_EVENT = "pi-tools-suite:async-subagents:live-count";
 const TERMINAL_BELL_ATTENTION_EVENT = "pix:terminal-bell:attention";
-const DEFAULT_NOTIFICATION_TITLE = "Pi";
-const DEFAULT_NOTIFICATION_MESSAGE = "Session stopped";
-const DEFAULT_ASK_USER_NOTIFICATION_MESSAGE = "Waiting for your answer";
+const DEFAULT_COMPLETION_NOTIFICATION_TITLE = "Pix - completion";
+const DEFAULT_ERROR_NOTIFICATION_TITLE = "Pix - error";
+const DEFAULT_QUESTION_NOTIFICATION_TITLE = "Pix - question";
+const DEFAULT_NOTIFICATION_MESSAGE = "{sessionName}";
+const DEFAULT_RETRY_FAILED_NOTIFICATION_MESSAGE = "{sessionName}";
+const DEFAULT_ASK_USER_NOTIFICATION_MESSAGE = "{sessionName}";
 const DEFAULT_MAC_SOUND = "Glass";
 const TERMINAL_BELL_CONFIG_KEY = "terminalBell";
 const SOUND_CONFIG_KEY = "sound";
@@ -37,6 +40,27 @@ type Timer = ReturnType<typeof setTimeout>;
 
 type SubagentsLiveCountEvent = {
 	count?: unknown;
+};
+
+type AgentEndRetryState = {
+	willRetry?: unknown;
+};
+
+type AssistantMessageUpdateLike = {
+	type?: unknown;
+	error?: {
+		errorMessage?: unknown;
+	};
+};
+
+type NotificationTemplateValues = {
+	sessionId: string;
+	sessionName?: string;
+	sessionTitle: string;
+	sessionFile: string;
+	sessionFileBase: string;
+	cwd: string;
+	reason?: string;
 };
 
 function parseDelayMs(value: string | undefined): number {
@@ -111,6 +135,58 @@ function shellSingleQuote(value: string): string {
 	return `'${value.replace(/'/g, `'"'"'`)}'`;
 }
 
+function trimmed(value: string | undefined): string | undefined {
+	const normalized = value?.trim();
+	return normalized ? normalized : undefined;
+}
+
+function buildNotificationTemplateValues(ctx: ExtensionContext, pi?: Pick<ExtensionAPI, "getSessionName">): NotificationTemplateValues {
+	const sessionId = ctx.sessionManager.getSessionId();
+	const sessionName = trimmed(pi?.getSessionName?.() ?? ctx.sessionManager.getSessionName?.());
+	const sessionFile = ctx.sessionManager.getSessionFile() ?? "";
+	return {
+		sessionId,
+		sessionName,
+		sessionTitle: sessionName ?? sessionId.slice(0, 8),
+		sessionFile,
+		sessionFileBase: basename(sessionFile),
+		cwd: ctx.cwd,
+	};
+}
+
+function renderNotificationTemplate(template: string, values: NotificationTemplateValues, appendReasonIfUnused = false): string {
+	let usedReason = false;
+	const rendered = template.replace(/\{(sessionId|sessionName|sessionTitle|sessionFile|sessionFileBase|cwd|reason)\}/g, (_match, key: keyof NotificationTemplateValues) => {
+		if (key === "reason") usedReason = true;
+		return values[key] ?? "";
+	});
+	if (appendReasonIfUnused && values.reason && !usedReason) return `${rendered}: ${values.reason}`;
+	return rendered;
+}
+
+function retryFailureMessageTemplate(): string {
+	const configured = trimmed(process.env.PI_TERMINAL_BELL_NOTIFY_MESSAGE);
+	return configured ?? DEFAULT_RETRY_FAILED_NOTIFICATION_MESSAGE;
+}
+
+function notificationTitleTemplate(defaultTitle: string): string {
+	return process.env.PI_TERMINAL_BELL_NOTIFY_TITLE ?? defaultTitle;
+}
+
+function willRetryAfterAgentEnd(event: AgentEndRetryState): boolean {
+	return event.willRetry === true;
+}
+
+function failureReasonFromMessageUpdate(event: AssistantMessageUpdateLike): string | undefined {
+	if (event.type !== "error") return undefined;
+	const reason = event.error?.errorMessage;
+	return typeof reason === "string" ? trimmed(reason) : undefined;
+}
+
+function isNonErrorMessageUpdate(event: AssistantMessageUpdateLike): boolean {
+	return typeof event.type === "string" && event.type !== "error";
+}
+
 function spawnDetached(command: string, args: string[]): void {
 	try {
 		const child = spawn(command, args, { detached: true, stdio: "ignore" });
@@ -166,16 +242,19 @@ function playAttentionSound(ctx: ExtensionContext): void {
 
 function notifySessionStopped(
 	ctx: ExtensionContext,
+	pi: Pick<ExtensionAPI, "getSessionName">,
 	macActivationBundleId: string | undefined,
-	message = process.env.PI_TERMINAL_BELL_NOTIFY_MESSAGE ?? DEFAULT_NOTIFICATION_MESSAGE,
+	options: { title: string; message?: string },
 ): void {
 	if (!terminalBellNotificationsEnabled(ctx)) return;
-	const title = process.env.PI_TERMINAL_BELL_NOTIFY_TITLE ?? DEFAULT_NOTIFICATION_TITLE;
+	const templateValues = buildNotificationTemplateValues(ctx, pi);
+	const title = renderNotificationTemplate(notificationTitleTemplate(options.title), templateValues);
+	const renderedMessage = renderNotificationTemplate(options.message ?? process.env.PI_TERMINAL_BELL_NOTIFY_MESSAGE ?? DEFAULT_NOTIFICATION_MESSAGE, templateValues);
 
 	if (process.platform === "darwin") {
 		const terminalNotifier = findExecutable(process.env.PI_TERMINAL_BELL_NOTIFIER ?? "terminal-notifier");
 		if (terminalNotifier) {
-			const args = ["-title", title, "-message", message];
+			const args = ["-title", title, "-message", renderedMessage];
 			const activate = macActivationBundleId;
 			if (activate) {
 				args.push("-activate", activate);
@@ -199,13 +278,13 @@ function notifySessionStopped(
 		if (process.env.PI_TERMINAL_BELL_NOTIFY_OSASCRIPT !== "1") return;
 		spawnDetached("/usr/bin/osascript", [
 			"-e",
-			`display notification ${appleScriptString(message)} with title ${appleScriptString(title)}`,
+			`display notification ${appleScriptString(renderedMessage)} with title ${appleScriptString(title)}`,
 		]);
 		return;
 	}
 
 	if (process.platform === "linux") {
-		spawnDetached("notify-send", [title, message]);
+		spawnDetached("notify-send", [title, renderedMessage]);
 	}
 }
 
@@ -235,6 +314,7 @@ export default function terminalBell(pi: ExtensionAPI) {
 	let lastCtx: ExtensionContext | undefined;
 	let deferredUntilSubagentsFinish = false;
 	let liveSubagentCount = 0;
+	let lastFailureReason: string | undefined;
 	const activeSubagentWaitToolCallIds = new Set<string>();
 	const notifiedAskUserToolCallIds = new Set<string>();
 	const idleDelayMs = parseDelayMs(process.env.PI_TERMINAL_BELL_DELAY_MS);
@@ -253,7 +333,10 @@ export default function terminalBell(pi: ExtensionAPI) {
 	function notifyAttention(ctx: ExtensionContext, message?: string): void {
 		if (canRingTerminal(ctx)) writeBell();
 		playAttentionSound(ctx);
-		notifySessionStopped(ctx, macActivationBundleId, message);
+		notifySessionStopped(ctx, pi, macActivationBundleId, {
+			title: message ? DEFAULT_ERROR_NOTIFICATION_TITLE : DEFAULT_COMPLETION_NOTIFICATION_TITLE,
+			...(message ? { message } : {}),
+		});
 		pi.events.emit(TERMINAL_BELL_ATTENTION_EVENT, {
 			cwd: ctx.cwd,
 			sessionFile: ctx.sessionManager.getSessionFile(),
@@ -261,11 +344,11 @@ export default function terminalBell(pi: ExtensionAPI) {
 		});
 	}
 
-	function attemptBell(ctx: ExtensionContext, attempt: number): void {
+	function attemptBell(ctx: ExtensionContext, attempt: number, message?: string): void {
 		timer = undefined;
 
 		if (!ctx.isIdle()) {
-			if (attempt < MAX_IDLE_RETRIES) scheduleBell(ctx, IDLE_RETRY_DELAY_MS, attempt + 1);
+			if (attempt < MAX_IDLE_RETRIES) scheduleBell(ctx, IDLE_RETRY_DELAY_MS, attempt + 1, message);
 			return;
 		}
 
@@ -277,20 +360,30 @@ export default function terminalBell(pi: ExtensionAPI) {
 		}
 
 		deferredUntilSubagentsFinish = false;
-		notifyAttention(ctx);
+		notifyAttention(ctx, message);
 	}
 
-	function scheduleBell(ctx: ExtensionContext, delayMs = idleDelayMs, attempt = 0): void {
+	function scheduleBell(ctx: ExtensionContext, delayMs = idleDelayMs, attempt = 0, message?: string): void {
 		lastCtx = ctx;
 		clearTimer();
-		timer = setTimeout(() => attemptBell(ctx, attempt), delayMs);
+		timer = setTimeout(() => attemptBell(ctx, attempt, message), delayMs);
 		timer.unref?.();
 	}
 
 	function notifyAskUserWaiting(toolCallId: string, ctx: ExtensionContext): void {
 		if (notifiedAskUserToolCallIds.has(toolCallId)) return;
 		notifiedAskUserToolCallIds.add(toolCallId);
-		notifyAttention(ctx, process.env.PI_TERMINAL_BELL_ASK_USER_NOTIFY_MESSAGE ?? DEFAULT_ASK_USER_NOTIFICATION_MESSAGE);
+		if (canRingTerminal(ctx)) writeBell();
+		playAttentionSound(ctx);
+		notifySessionStopped(ctx, pi, macActivationBundleId, {
+			title: DEFAULT_QUESTION_NOTIFICATION_TITLE,
+			message: process.env.PI_TERMINAL_BELL_ASK_USER_NOTIFY_MESSAGE ?? DEFAULT_ASK_USER_NOTIFICATION_MESSAGE,
+		});
+		pi.events.emit(TERMINAL_BELL_ATTENTION_EVENT, {
+			cwd: ctx.cwd,
+			sessionFile: ctx.sessionManager.getSessionFile(),
+			sessionId: ctx.sessionManager.getSessionId(),
+		});
 	}
 
 	pi.events.on(SUBAGENTS_LIVE_COUNT_EVENT, (data: unknown) => {
@@ -306,8 +399,20 @@ export default function terminalBell(pi: ExtensionAPI) {
 	pi.on("agent_start", async () => {
 		clearTimer();
 		deferredUntilSubagentsFinish = false;
+		lastFailureReason = undefined;
 		activeSubagentWaitToolCallIds.clear();
 		notifiedAskUserToolCallIds.clear();
+	});
+
+	pi.on("message_update", async (event) => {
+		const reason = failureReasonFromMessageUpdate(event.assistantMessageEvent as AssistantMessageUpdateLike);
+		if (reason) {
+			lastFailureReason = reason;
+			return;
+		}
+		if (isNonErrorMessageUpdate(event.assistantMessageEvent as AssistantMessageUpdateLike)) {
+			lastFailureReason = undefined;
+		}
 	});
 
 	pi.on("tool_execution_start", async (event, ctx) => {
@@ -330,7 +435,23 @@ export default function terminalBell(pi: ExtensionAPI) {
 		notifiedAskUserToolCallIds.delete(event.toolCallId);
 	});
 
-	pi.on("agent_end", async (_event, ctx) => {
+	pi.on("agent_end", async (event, ctx) => {
+		if (willRetryAfterAgentEnd(event as AgentEndRetryState)) {
+			clearTimer();
+			return;
+		}
+		if (lastFailureReason) {
+			scheduleBell(
+				ctx,
+				idleDelayMs,
+				0,
+				renderNotificationTemplate(retryFailureMessageTemplate(), {
+					...buildNotificationTemplateValues(ctx, pi),
+					reason: lastFailureReason,
+				}, true),
+			);
+			return;
+		}
 		scheduleBell(ctx);
 	});
 
@@ -339,6 +460,7 @@ export default function terminalBell(pi: ExtensionAPI) {
 		lastCtx = undefined;
 		deferredUntilSubagentsFinish = false;
 		liveSubagentCount = 0;
+		lastFailureReason = undefined;
 		activeSubagentWaitToolCallIds.clear();
 		notifiedAskUserToolCallIds.clear();
 	});

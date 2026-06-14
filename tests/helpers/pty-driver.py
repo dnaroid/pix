@@ -1,12 +1,39 @@
 #!/usr/bin/env python3
 import fcntl
 import os
+import re
 import selectors
 import signal
 import struct
 import subprocess
 import sys
 import termios
+
+
+# Sideband for test-driven resize: a chunk on stdin matching this pattern tells
+# the driver to TIOCSWINSZ the PTY and signal SIGWINCH to the child, instead of
+# forwarding the bytes. Terminal input never contains null bytes, so the
+# sentinel cannot collide with real typing.
+WINSZ_RE = re.compile(rb"^\x00PIXWINSZ:(\d+):(\d+)\x00$")
+
+
+def resize_pty(pty_fd: int, child: subprocess.Popen, rows: int, cols: int) -> None:
+    fcntl.ioctl(pty_fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+    try:
+        os.killpg(child.pid, signal.SIGWINCH)
+    except ProcessLookupError:
+        pass
+
+
+def handle_stdin_chunk(data: bytes, master_fd: int, child: subprocess.Popen) -> bool:
+    """Return True if the chunk was consumed as a control message (not forwarded)."""
+    match = WINSZ_RE.match(data)
+    if not match:
+        return False
+    rows = int(match.group(1))
+    cols = int(match.group(2))
+    resize_pty(master_fd, child, rows, cols)
+    return True
 
 
 def terminate_child(child: subprocess.Popen) -> int:
@@ -69,6 +96,8 @@ def main() -> int:
                 else:
                     data = sys.stdin.buffer.read1(8192)
                     if not data:
+                        continue
+                    if handle_stdin_chunk(data, master_fd, child):
                         continue
                     os.write(master_fd, data)
     finally:

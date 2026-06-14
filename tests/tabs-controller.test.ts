@@ -658,7 +658,7 @@ describe("AppTabsController", () => {
 			version: number;
 			tabs: Array<{ input?: typeof currentInput }>;
 		};
-		assert.equal(saved.version, 3);
+		assert.equal(saved.version, 4);
 		assert.deepEqual(saved.tabs[0]?.input, currentInput);
 
 		currentInput = { text: "", cursor: 0, attachments: [] };
@@ -761,7 +761,7 @@ describe("AppTabsController", () => {
 			version: number;
 			tabs: Array<{ deferredUserMessages?: SubmittedUserMessage[] }>;
 		};
-		assert.equal(saved.version, 3);
+		assert.equal(saved.version, 4);
 		assert.deepEqual(saved.tabs[0]?.deferredUserMessages?.map((message) => message.displayText), ["queued one"]);
 		assert.deepEqual(saved.tabs[0]?.deferredUserMessages?.[0]?.images, [{ type: "image", data: "base64-image", mimeType: "image/png" }]);
 
@@ -807,6 +807,115 @@ describe("AppTabsController", () => {
 
 		assert.deepEqual(currentDeferred.map((message) => message.displayText), ["queued one"]);
 		assert.deepEqual(currentDeferred[0]?.images, [{ type: "image", data: "base64-image", mimeType: "image/png" }]);
+	});
+
+	it("persists and restores auto steering queued messages after startup", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "pix-tabs-auto-"));
+		const sessionPath = join(dir, "one.jsonl");
+		const tabsPath = join(dir, "tabs.json");
+		await writeFile(sessionPath, "", "utf8");
+
+		const queued = submittedMessage("queued auto");
+		queued.images.push({ type: "image", data: "base64-auto", mimeType: "image/png" });
+		let currentRuntime = fakeRuntime("one", sessionPath);
+		let currentAuto: SubmittedUserMessage[] = [queued];
+		const controller = new AppTabsController({
+			options: { cwd: dir, themeName: "dark", noSession: false } satisfies AppOptions,
+			blinkController: fakeBlinkController(),
+			runtime: () => currentRuntime,
+			createRuntimeForNewSession: async () => fakeRuntime("new", join(dir, "new.jsonl")),
+			createRuntimeForSession: async (path) => fakeRuntime("one", path),
+			activateRuntime: async (runtime) => {
+				currentRuntime = runtime;
+			},
+			disposeRuntime: async () => {},
+			isRunning: () => true,
+			setStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			resetSessionView: () => {},
+			loadSessionHistory: () => {},
+			loadSessionHistoryAsync: async () => true,
+			syncUserSessionEntryMetadata: () => {},
+			captureInputState: () => ({ text: "", cursor: 0 }),
+			restoreInputState: () => {},
+			captureAutoUserMessages: () => currentAuto,
+			restoreAutoUserMessages: (messages) => {
+				currentAuto = messages.map((message) => ({ ...message, images: message.images.map((image) => ({ ...image })) }));
+			},
+			captureDeferredUserMessages: () => [],
+			restoreDeferredUserMessages: () => {},
+			addEntry: () => {},
+			showToast: () => {},
+			render: () => {},
+		});
+		const tabs = controller as unknown as {
+			filePath: () => string;
+			loadSessionTitles: () => Promise<ReadonlyMap<string, string>>;
+			tabItems: SessionTab[];
+			activeTabId: string | undefined;
+			runtimesByTabId: Map<string, AgentSessionRuntime>;
+		};
+		tabs.filePath = () => tabsPath;
+		tabs.loadSessionTitles = async () => new Map([[sessionPath, "one"]]);
+		tabs.tabItems.push({ id: "tab-1", title: "one", status: "active", sessionPath });
+		tabs.activeTabId = "tab-1";
+		tabs.runtimesByTabId.set("tab-1", currentRuntime);
+
+		await controller.disposeInactiveRuntimes();
+
+		const saved = JSON.parse(await readFile(tabsPath, "utf8")) as {
+			version: number;
+			tabs: Array<{ autoUserMessages?: SubmittedUserMessage[] }>;
+		};
+		assert.equal(saved.version, 4);
+		assert.deepEqual(saved.tabs[0]?.autoUserMessages?.map((message) => message.displayText), ["queued auto"]);
+		assert.deepEqual(saved.tabs[0]?.autoUserMessages?.[0]?.images, [{ type: "image", data: "base64-auto", mimeType: "image/png" }]);
+
+		currentAuto = [];
+		const restoredController = new AppTabsController({
+			options: { cwd: dir, themeName: "dark", noSession: false } satisfies AppOptions,
+			blinkController: fakeBlinkController(),
+			runtime: () => currentRuntime,
+			createRuntimeForNewSession: async () => fakeRuntime("new", join(dir, "new.jsonl")),
+			createRuntimeForSession: async (path) => fakeRuntime("one", path),
+			activateRuntime: async (runtime) => {
+				currentRuntime = runtime;
+			},
+			disposeRuntime: async () => {},
+			isRunning: () => true,
+			setStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			resetSessionView: () => {
+				currentAuto = [];
+			},
+			loadSessionHistory: () => {},
+			loadSessionHistoryAsync: async () => true,
+			syncUserSessionEntryMetadata: () => {},
+			captureInputState: () => ({ text: "", cursor: 0 }),
+			restoreInputState: () => {},
+			captureAutoUserMessages: () => currentAuto,
+			restoreAutoUserMessages: (messages) => {
+				currentAuto = messages.map((message) => ({ ...message, images: message.images.map((image) => ({ ...image })) }));
+			},
+			captureDeferredUserMessages: () => [],
+			restoreDeferredUserMessages: () => {},
+			addEntry: () => {},
+			showToast: () => {},
+			render: () => {},
+		});
+		const restoredTabs = restoredController as unknown as {
+			filePath: () => string;
+			loadSessionTitles: () => Promise<ReadonlyMap<string, string>>;
+		};
+		restoredTabs.filePath = () => tabsPath;
+		restoredTabs.loadSessionTitles = async () => new Map([[sessionPath, "one"]]);
+
+		await restoredController.restoreAfterStartup();
+
+		assert.deepEqual(currentAuto.map((message) => message.displayText), ["queued auto"]);
+		assert.deepEqual(currentAuto[0]?.images, [{ type: "image", data: "base64-auto", mimeType: "image/png" }]);
 	});
 
 	it("persists and restores scroll position after startup", async () => {
@@ -2295,11 +2404,17 @@ function fakeSessionView(overrides: Partial<{ scrollState: { scrollFromBottom: n
 		entries: [],
 		eventState: {
 			toolEntryIdsByCallId: new Map(),
+			pendingToolCallIdsByContentIndex: new Map(),
 			toolMutationPreparationsByCallId: new Map(),
 			olderHistoryLoader: undefined,
 			currentUserEntryId: undefined,
 			currentAssistantEntryId: undefined,
+			currentAssistantTextBlockEntryId: undefined,
+			currentAssistantTextBlockStartLength: undefined,
+			currentAssistantTextBlockContentIndex: undefined,
+			assistantTextBlocksByContentIndex: new Map(),
 			currentThinkingEntryId: undefined,
+			assistantMessageClosed: false,
 			assistantTextBuffer: "",
 			entryRenderVersions: new Map(),
 		},

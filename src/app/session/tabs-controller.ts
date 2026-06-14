@@ -18,7 +18,7 @@ import type { AppScrollState } from "../screen/scroll-controller.js";
 import { tabPanelRows } from "../rendering/tab-line-renderer.js";
 import type { AppOptions, Entry, SessionActivity, SessionTab, SubmittedUserMessage } from "../types.js";
 
-const TAB_STATE_VERSION = 3;
+const TAB_STATE_VERSION = 4;
 const MAX_RESTORED_TABS = 8;
 const BACKGROUND_PREWARM_TAB_LIMIT = 2;
 const TAB_ATTENTION_BLINK_KEY = "tab-attention";
@@ -32,11 +32,12 @@ type PersistedTab = {
 	title?: string;
 	input?: TabInputState;
 	scrollState?: AppScrollState;
+	autoUserMessages?: PersistedSubmittedUserMessage[];
 	deferredUserMessages?: PersistedSubmittedUserMessage[];
 };
 
 type PersistedTabState = {
-	version: 1 | 2 | 3;
+	version: 1 | 2 | 3 | 4;
 	cwd: string;
 	tabs: PersistedTab[];
 	activePath?: string;
@@ -279,7 +280,7 @@ export class AppTabsController {
 
 		this.replaceTabs(restoredTabs, desiredPath);
 		this.restorePersistedInputStates(saved);
-		this.restorePersistedDeferredUserMessages(saved);
+		this.restorePersistedQueuedUserMessages(saved);
 		const restoredSessionPaths = saved.tabs.map((tab) => tab.path);
 		if (explicitSessionPath && currentPath) this.ensureCurrentSessionTab(runtime.session);
 
@@ -1251,18 +1252,26 @@ export class AppTabsController {
 		}
 	}
 
-	private restorePersistedDeferredUserMessages(saved: PersistedTabState): void {
-		const messagesByPath = new Map<string, SubmittedUserMessage[]>();
+	private restorePersistedQueuedUserMessages(saved: PersistedTabState): void {
+		const autoMessagesByPath = new Map<string, SubmittedUserMessage[]>();
+		const deferredMessagesByPath = new Map<string, SubmittedUserMessage[]>();
 		for (const tab of saved.tabs) {
-			if (!tab.deferredUserMessages || tab.deferredUserMessages.length === 0) continue;
-			messagesByPath.set(resolve(tab.path), tab.deferredUserMessages.map((message) => this.cloneSubmittedUserMessage(message)));
+			const sessionPath = resolve(tab.path);
+			if (tab.autoUserMessages && tab.autoUserMessages.length > 0) {
+				autoMessagesByPath.set(sessionPath, tab.autoUserMessages.map((message) => this.cloneSubmittedUserMessage(message)));
+			}
+			if (tab.deferredUserMessages && tab.deferredUserMessages.length > 0) {
+				deferredMessagesByPath.set(sessionPath, tab.deferredUserMessages.map((message) => this.cloneSubmittedUserMessage(message)));
+			}
 		}
 
 		for (const tab of this.tabItems) {
 			if (!tab.sessionPath) continue;
-			const messages = messagesByPath.get(resolve(tab.sessionPath));
-			if (!messages || messages.length === 0) continue;
-			this.deferredUserMessagesByTabId.set(tab.id, messages);
+			const sessionPath = resolve(tab.sessionPath);
+			const autoMessages = autoMessagesByPath.get(sessionPath);
+			if (autoMessages && autoMessages.length > 0) this.autoUserMessagesByTabId.set(tab.id, autoMessages);
+			const deferredMessages = deferredMessagesByPath.get(sessionPath);
+			if (deferredMessages && deferredMessages.length > 0) this.deferredUserMessagesByTabId.set(tab.id, deferredMessages);
 		}
 	}
 
@@ -1367,8 +1376,8 @@ export class AppTabsController {
 		for (const tab of saved.tabs) {
 			const sessionPath = resolve(tab.path);
 			const hasDraftInput = (tab.input?.text.length ?? 0) > 0;
-			const hasDeferredQueue = (tab.deferredUserMessages?.length ?? 0) > 0;
-			if (seen.has(sessionPath) || (!existsSync(sessionPath) && !hasDraftInput && !hasDeferredQueue)) continue;
+			const hasQueuedMessages = (tab.autoUserMessages?.length ?? 0) > 0 || (tab.deferredUserMessages?.length ?? 0) > 0;
+			if (seen.has(sessionPath) || (!existsSync(sessionPath) && !hasDraftInput && !hasQueuedMessages)) continue;
 			seen.add(sessionPath);
 			const savedTitle = tab.title?.trim();
 			const restoredLoadingTitle = savedTitle !== undefined && LOADING_TAB_TITLE_PATTERN.test(savedTitle);
@@ -1432,25 +1441,27 @@ export class AppTabsController {
 		try {
 			const raw = await readFile(this.filePath(), "utf8");
 			const parsed: unknown = JSON.parse(raw);
-			if (!isRecord(parsed) || (parsed.version !== 1 && parsed.version !== 2 && parsed.version !== TAB_STATE_VERSION) || !Array.isArray(parsed.tabs)) return undefined;
+			if (!isRecord(parsed) || (parsed.version !== 1 && parsed.version !== 2 && parsed.version !== 3 && parsed.version !== TAB_STATE_VERSION) || !Array.isArray(parsed.tabs)) return undefined;
 
 			const tabs: PersistedTab[] = [];
 			for (const value of parsed.tabs) {
 				if (!isRecord(value) || typeof value.path !== "string") continue;
 				const input = this.parsePersistedInputState(value.input);
 				const scrollState = this.parsePersistedScrollState(value.scrollState);
+				const autoUserMessages = this.parsePersistedSubmittedUserMessages(value.autoUserMessages);
 				const deferredUserMessages = this.parsePersistedSubmittedUserMessages(value.deferredUserMessages);
 				tabs.push({
 					path: value.path,
 					...(typeof value.title === "string" ? { title: value.title } : {}),
 					...(input ? { input } : {}),
 					...(scrollState ? { scrollState } : {}),
+					...(autoUserMessages.length > 0 ? { autoUserMessages } : {}),
 					...(deferredUserMessages.length > 0 ? { deferredUserMessages } : {}),
 				});
 			}
 
 			return {
-				version: parsed.version === 1 ? 1 : parsed.version === 2 ? 2 : TAB_STATE_VERSION,
+				version: parsed.version === 1 ? 1 : parsed.version === 2 ? 2 : parsed.version === 3 ? 3 : TAB_STATE_VERSION,
 				cwd: typeof parsed.cwd === "string" ? parsed.cwd : this.host.options.cwd,
 				tabs,
 				...(typeof parsed.activePath === "string" ? { activePath: parsed.activePath } : {}),
@@ -1529,6 +1540,10 @@ export class AppTabsController {
 						cursor: Math.max(0, Math.min(input.text.length, Math.trunc(input.cursor))),
 						...(input.attachments && input.attachments.length > 0 ? { attachments: input.attachments.map(clonePersistedAttachment) } : {}),
 					};
+				}
+				const autoUserMessages = this.autoUserMessagesByTabId.get(tab.id);
+				if (autoUserMessages && autoUserMessages.length > 0) {
+					persistedTab.autoUserMessages = autoUserMessages.map((message) => this.cloneSubmittedUserMessage(message));
 				}
 				const deferredUserMessages = this.deferredUserMessagesByTabId.get(tab.id);
 				if (deferredUserMessages && deferredUserMessages.length > 0) {

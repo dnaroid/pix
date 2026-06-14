@@ -425,6 +425,31 @@ describe("AppSessionEventController", () => {
 		assert.equal(entries[0]?.kind === "assistant" ? entries[0].text : undefined, "visible prefix and restored suffix");
 	});
 
+	it("ignores late text_end for an assistant text block already flushed before a tool", () => {
+		const entries: Entry[] = [];
+		const controller = createController(entries);
+
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "Before tool", partial: { role: "assistant", content: [{ type: "text", text: "Before tool" }] } },
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: {
+				type: "toolcall_start",
+				contentIndex: 1,
+				partial: { role: "assistant", content: [{ type: "text", text: "Before tool" }, { type: "toolCall" }] },
+			},
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "text_end", contentIndex: 0, content: "Before tool", partial: { role: "assistant", content: [{ type: "text", text: "Before tool" }] } },
+		} as unknown as AgentSessionEvent);
+
+		assert.deepEqual(entries.map((entry) => entry.kind), ["assistant", "tool"]);
+		assert.equal(entries[0]?.kind === "assistant" ? entries[0].text : undefined, "Before tool");
+	});
+
 	it("creates pending tool entries from toolcall_end and reuses them for execution events", () => {
 		const entries: Entry[] = [];
 		const controller = createController(entries);
@@ -734,6 +759,108 @@ describe("AppSessionEventController", () => {
 
 		assert.deepEqual(entries.map((entry) => entry.kind), ["assistant", "session-aborted"]);
 		assert.equal(entries[1]?.kind === "session-aborted" ? entries[1].text : undefined, "Session aborted.");
+	});
+
+	it("ignores stale thinking updates after assistant text has started", () => {
+		const entries: Entry[] = [];
+		const controller = createController(entries);
+
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "thinking_delta", delta: "thinking" },
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "text_delta", delta: "final answer" },
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "thinking_end", content: "thinking with late tail" },
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "thinking_delta", delta: "late thinking delta" },
+		} as unknown as AgentSessionEvent);
+
+		assert.deepEqual(entries.map((entry) => entry.kind), ["thinking", "assistant"]);
+		assert.equal(entries[0]?.kind === "thinking" ? entries[0].status : undefined, "done");
+		assert.equal(entries[0]?.kind === "thinking" ? entries[0].text : undefined, "thinking");
+		assert.equal(entries[1]?.kind === "assistant" ? entries[1].text : undefined, "final answer");
+	});
+
+	it("ignores thinking updates that arrive after the assistant message is closed", () => {
+		const entries: Entry[] = [];
+		const controller = createController(entries);
+
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "text_delta", delta: "final answer" },
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "done" },
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "thinking_end", content: "late thinking" },
+		} as unknown as AgentSessionEvent);
+
+		assert.deepEqual(entries.map((entry) => entry.kind), ["assistant"]);
+		assert.equal(entries[0]?.kind === "assistant" ? entries[0].text : undefined, "final answer");
+	});
+
+	it("does not render empty thinking signature blocks", () => {
+		const entries: Entry[] = [];
+		const controller = createController(entries);
+
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "thinking_delta", delta: "" },
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "thinking_end", content: "" },
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "text_delta", delta: "visible answer" },
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: {
+				type: "toolcall_end",
+				contentIndex: 1,
+				toolCall: { type: "toolCall", id: "call-1", name: "shell", arguments: { command: "echo ok" } },
+				partial: { role: "assistant", content: [] },
+			},
+		} as unknown as AgentSessionEvent);
+
+		assert.deepEqual(entries.map((entry) => entry.kind), ["assistant", "tool"]);
+		assert.equal(entries[0]?.kind === "assistant" ? entries[0].text : undefined, "visible answer");
+		assert.equal(entries[1]?.kind === "tool" ? entries[1].toolName : undefined, "shell");
+	});
+
+	it("keeps accumulated thinking when thinking_end carries only an empty signature block", () => {
+		const entries: Entry[] = [];
+		const controller = createController(entries);
+
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "thinking_delta", delta: "real reasoning" },
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "thinking_end", content: "" },
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "text_delta", delta: "answer" },
+		} as unknown as AgentSessionEvent);
+
+		assert.deepEqual(entries.map((entry) => entry.kind), ["thinking", "assistant"]);
+		assert.equal(entries[0]?.kind === "thinking" ? entries[0].text : undefined, "real reasoning");
+		assert.equal(entries[0]?.kind === "thinking" ? entries[0].status : undefined, "done");
+		assert.equal(entries[1]?.kind === "assistant" ? entries[1].text : undefined, "answer");
 	});
 
 	it("handles custom messages, assistant thinking, and compaction or retry outcomes", () => {

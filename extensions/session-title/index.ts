@@ -24,6 +24,7 @@ type PendingGeneration = {
 	modelIndex: number;
 	attempts: number;
 	replaceSessionName?: string;
+	provisionalSessionName?: string;
 };
 
 type ForkTitleState = {
@@ -277,6 +278,7 @@ export default function sessionTitle(pi: ExtensionAPI) {
 		if (pendingGeneration.sessionId !== ctx.sessionManager.getSessionId()) return false;
 		const name = currentSessionName(ctx);
 		if (!name) return true;
+		if (pendingGeneration.provisionalSessionName && name === pendingGeneration.provisionalSessionName) return true;
 		return Boolean(pendingGeneration.replaceSessionName && name === pendingGeneration.replaceSessionName);
 	}
 
@@ -532,6 +534,12 @@ export default function sessionTitle(pi: ExtensionAPI) {
 			const input = activeForkTitleState
 				? buildForkTitleInput(activeForkTitleState.parentTitle, event.text)
 				: event.text;
+			const provisionalSessionName = fallbackSessionTitleFromInput(input, currentConfig.maxTitleChars);
+			if (provisionalSessionName && (!currentName || activeForkTitleState)) {
+				pi.setSessionName(provisionalSessionName);
+				refreshSessionUi(ctx, { force: true });
+				scheduleSessionUiRefresh(ctx);
+			}
 			pendingGeneration = {
 				sessionId: currentSessionId,
 				input: truncateInput(input, currentConfig.maxInputChars),
@@ -539,6 +547,7 @@ export default function sessionTitle(pi: ExtensionAPI) {
 				modelIndex: 0,
 				attempts: 0,
 				replaceSessionName: activeForkTitleState?.inheritedSessionName,
+				provisionalSessionName,
 			};
 			forkTitleState = undefined;
 		}
