@@ -194,7 +194,7 @@ describe.serial("extension entrypoint", () => {
 		expect(beforeStartHandlers).toHaveLength(1);
 
 		const handler = beforeStartHandlers[0]!;
-		const glmResult = await handler({ systemPrompt: "base" }, { model: { provider: "zai", id: "glm-5.1" } });
+		const glmResult = await handler({ systemPrompt: "base" }, { model: { provider: "zai", id: "glm-5.2" } });
 		expect(glmResult.systemPrompt).toContain('name="parallel-first"');
 		expect(glmResult.systemPrompt).toContain("ultrawork mode");
 
@@ -202,7 +202,7 @@ describe.serial("extension entrypoint", () => {
 		expect(gptResult.systemPrompt).toContain('name="deep-work"');
 		expect(gptResult.systemPrompt).toContain("autonomous deep worker");
 
-		const customPromptResult = await handler({ systemPrompt: "base", systemPromptOptions: { customPrompt: "SYSTEM.md" } }, { model: { provider: "zai", id: "glm-5.1" } });
+		const customPromptResult = await handler({ systemPrompt: "base", systemPromptOptions: { customPrompt: "SYSTEM.md" } }, { model: { provider: "zai", id: "glm-5.2" } });
 		expect(customPromptResult?.systemPrompt ?? "base").not.toContain('name="parallel-first"');
 		expect(customPromptResult?.systemPrompt ?? "base").not.toContain('name="deep-work"');
 	});

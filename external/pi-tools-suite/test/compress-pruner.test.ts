@@ -1215,6 +1215,58 @@ describe("DCP pruning effectiveness", () => {
     expect(rendered).not.toContain("DCP Session Statistics");
   });
 
+  test("DCP context transform hides persisted control-plane custom entries from the model", async () => {
+    const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
+    const pi = {
+      on(event: string, handler: (event: any, ctx: any) => unknown) {
+        handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+      },
+      registerTool() {},
+      registerCommand() {},
+      appendEntry() {},
+      sendMessage() {},
+    } as any;
+
+    await dcpModule(pi);
+    const contextHandler = handlers.get("context")?.[0];
+    expect(contextHandler).toBeDefined();
+
+    const result = await contextHandler?.(
+      {
+        type: "context",
+        messages: [
+          textMessage("user", "keep visible user content", 1),
+          {
+            role: "custom",
+            customType: "dcp-state",
+            content: "DCP_STATE_PAYLOAD " + "x".repeat(50_000),
+            timestamp: 2,
+          },
+          {
+            role: "custom",
+            customType: "dcp-nudge",
+            content: "DCP_NUDGE_TELEMETRY",
+            timestamp: 3,
+          },
+        ],
+      },
+      {
+        hasUI: false,
+        sessionManager: { getBranch: () => [] },
+        getContextUsage: () => ({ tokens: 10, contextWindow: 10_000, percent: 0.1 }),
+      },
+    ) as { messages: any[] } | undefined;
+
+    const rendered = result?.messages
+      .map((message) => Array.isArray(message.content)
+        ? message.content.map((part: any) => part?.text ?? "").join("")
+        : String(message.content ?? ""))
+      .join("\n") ?? "";
+    expect(rendered).toContain("keep visible user content");
+    expect(rendered).not.toContain("DCP_STATE_PAYLOAD");
+    expect(rendered).not.toContain("DCP_NUDGE_TELEMETRY");
+  });
+
   test("DCP module stays headless and does not register TUI/display hooks", async () => {
     const events: string[] = [];
     const pi = {

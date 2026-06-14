@@ -107,6 +107,12 @@ function isUserVisibleOnlyMessage(message: any): boolean {
 	return message.details?.userVisibleOnly === true
 }
 
+const DCP_CONTROL_PLANE_CUSTOM_TYPES = new Set(["dcp-state", "dcp-nudge"])
+
+function isDcpControlPlaneMessage(message: any): boolean {
+	return message?.role === "custom" && DCP_CONTROL_PLANE_CUSTOM_TYPES.has(message.customType)
+}
+
 // ---------------------------------------------------------------------------
 // Module export
 // ---------------------------------------------------------------------------
@@ -254,7 +260,9 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 
 	// ── 10. context: apply pruning and inject nudges ──────────────────────────
 	pi.on("context", async (event, ctx) => {
-		const contextMessages = event.messages.filter((message: any) => !isUserVisibleOnlyMessage(message))
+		const contextMessages = event.messages.filter((message: any) =>
+			!isUserVisibleOnlyMessage(message) && !isDcpControlPlaneMessage(message)
+		)
 		annotateMessagesWithBranchEntryIds(contextMessages, ctx)
 		let prunedMessages = applyPruning(contextMessages, state, config)
 		let candidate = null as ReturnType<typeof detectCompressionCandidate>

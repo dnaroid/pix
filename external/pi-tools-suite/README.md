@@ -182,9 +182,9 @@ Example shared async-subagents config section:
       "cheap": {
         "description": "Use GLM for text/code roles; keep vision on its dedicated model.",
         "types": {
-          "quick": { "model": "zai/glm-5.1", "thinking": "off" },
-          "frontend": { "model": "antigravity/gemini-3-flash-preview", "fallbackModels": ["zai/glm-5.1"], "thinking": "medium" },
-          "review": { "model": "zai/glm-5.1", "thinking": "high" }
+          "quick": { "model": "zai/glm-5.2", "thinking": "off" },
+          "frontend": { "model": "antigravity/gemini-3-flash-preview", "fallbackModels": ["zai/glm-5.2"], "thinking": "medium" },
+          "review": { "model": "zai/glm-5.2", "thinking": "high" }
         }
       }
     },

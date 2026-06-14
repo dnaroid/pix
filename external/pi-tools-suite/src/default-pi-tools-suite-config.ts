@@ -7,7 +7,7 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
   ],
   // When true, todo items may carry a per-task thinking level and the todo
   // module will switch/restore Pi's thinking level as in-progress tasks change.
-  "todoThinking": false,
+  "todoThinking": true,
   // Vision-capable model used by GLM's lookup tool. Remove or set to null to disable lookup.
   "lookupModel": "openai-codex/gpt-5.4-mini",
   "terminalBell": { "sound": true },
@@ -34,13 +34,13 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
           "docs": { "model": "zai/glm-4.5-air", "thinking": "low" },
           "frontend": {
             "model": "antigravity/gemini-3-flash-preview",
-            "fallbackModels": ["zai/glm-5.1"],
+            "fallbackModels": ["zai/glm-5.2"],
             "thinking": "medium"
           },
           "tests": { "model": "zai/glm-5-turbo", "thinking": "medium" },
-          "review": { "model": "zai/glm-5.1", "thinking": "high" },
-          "implement": { "model": "zai/glm-5.1", "thinking": "high" },
-          "deep": { "model": "zai/glm-5.1", "thinking": "high" },
+          "review": { "model": "zai/glm-5.2", "thinking": "high" },
+          "implement": { "model": "zai/glm-5.2", "thinking": "high" },
+          "deep": { "model": "zai/glm-5.2", "thinking": "high" },
           "vision": { "model": "openai-codex/gpt-5.4-mini", "thinking": "off" }
         }
       },
@@ -69,7 +69,7 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
           },
           "frontend": {
             "model": "antigravity/gemini-3-flash-preview",
-            "fallbackModels": ["zai/glm-5.1"],
+            "fallbackModels": ["zai/glm-5.2"],
             "thinking": "medium"
           },
           "tests": {
@@ -79,17 +79,17 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
           },
           "review": {
             "model": "openai-codex/gpt-5.5",
-            "fallbackModels": ["zai/glm-5.1"],
+            "fallbackModels": ["zai/glm-5.2"],
             "thinking": "high"
           },
           "implement": {
             "model": "openai-codex/gpt-5.5",
-            "fallbackModels": ["zai/glm-5.1"],
+            "fallbackModels": ["zai/glm-5.2"],
             "thinking": "high"
           },
           "deep": {
             "model": "openai-codex/gpt-5.5",
-            "fallbackModels": ["zai/glm-5.1"],
+            "fallbackModels": ["zai/glm-5.2"],
             "thinking": "high"
           },
           "vision": { "model": "openai-codex/gpt-5.4-mini", "thinking": "off" }
@@ -120,7 +120,7 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
           },
           "frontend": {
             "model": "antigravity/gemini-3.1-pro-preview-customtools",
-            "fallbackModels": ["zai/glm-5.1"],
+            "fallbackModels": ["zai/glm-5.2"],
             "thinking": "low"
           },
           "tests": {
@@ -130,17 +130,17 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
           },
           "review": {
             "model": "antigravity/antigravity-claude-sonnet-4-6",
-            "fallbackModels": ["openai-codex/gpt-5.5", "zai/glm-5.1"],
+            "fallbackModels": ["openai-codex/gpt-5.5", "zai/glm-5.2"],
             "thinking": "high"
           },
           "implement": {
             "model": "openai-codex/gpt-5.5",
-            "fallbackModels": ["zai/glm-5.1"],
+            "fallbackModels": ["zai/glm-5.2"],
             "thinking": "high"
           },
           "deep": {
             "model": "antigravity/antigravity-claude-opus-4-6-thinking",
-            "fallbackModels": ["openai-codex/gpt-5.5", "zai/glm-5.1"],
+            "fallbackModels": ["openai-codex/gpt-5.5", "zai/glm-5.2"],
             "thinking": "high"
           },
           "vision": { "model": "openai-codex/gpt-5.4-mini", "thinking": "off" }
@@ -169,7 +169,7 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
       "frontend": {
         "description": "Use for frontend UI/UX visual work: styling, layout, typography, animation, responsive states, component polish, accessibility. Avoid backend/business logic unless needed for UI behavior.",
         "model": "antigravity/gemini-3-flash-preview",
-        "fallbackModels": ["openai-codex/gpt-5.4-mini", "zai/glm-5.1"],
+        "fallbackModels": ["openai-codex/gpt-5.4-mini", "zai/glm-5.2"],
         "thinking": "medium",
         "promptAppend": [
           "Act as a frontend UI/UX engineer for visual and product-facing work.",
@@ -187,20 +187,20 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
       "review": {
         "description": "Use for review/audit of existing code or changes: correctness, security, performance, maintainability, API risks, quality. Do not implement new code.",
         "model": "openai-codex/gpt-5.5",
-        "fallbackModels": ["zai/glm-5.1"],
+        "fallbackModels": ["zai/glm-5.2"],
         "thinking": "high",
         "tools": ["read", "grep"]
       },
       "implement": {
         "description": "Use when the sub-agent should make or plan code changes for a feature, bug fix, or refactor.",
         "model": "openai-codex/gpt-5.5",
-        "fallbackModels": ["zai/glm-5.1"],
+        "fallbackModels": ["zai/glm-5.2"],
         "thinking": "high"
       },
       "deep": {
         "description": "Use for broad hard reasoning: architecture, system design, cross-module impact, complex tradeoffs.",
         "model": "openai-codex/gpt-5.5",
-        "fallbackModels": ["zai/glm-5.1"],
+        "fallbackModels": ["zai/glm-5.2"],
         "thinking": "high"
       },
       "vision": {

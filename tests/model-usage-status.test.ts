@@ -31,9 +31,9 @@ describe("model usage status", () => {
 	});
 
 	it("builds descriptors for Zhipu/Z.ai quota-backed models", () => {
-		assert.deepEqual(modelUsageDescriptor({ provider: "zai", id: "glm-5.1" } as SessionModel), {
+		assert.deepEqual(modelUsageDescriptor({ provider: "zai", id: "glm-5.2" } as SessionModel), {
 			kind: "zhipu",
-			modelKey: "zai/glm-5.1",
+			modelKey: "zai/glm-5.2",
 		});
 		assert.deepEqual(modelUsageDescriptor({ provider: "zhipuai-coding-plan", id: "glm-4" } as SessionModel), {
 			kind: "zhipu",
@@ -216,7 +216,7 @@ describe("model usage status", () => {
 			success: true,
 		};
 
-		const status = zhipuUsageStatusFromResponse(response, "zai/glm-5.1", now);
+		const status = zhipuUsageStatusFromResponse(response, "zai/glm-5.2", now);
 
 		assert.equal(status?.provider, "zhipu");
 		assert.equal(status?.hourly?.remainingPercent, 65);

@@ -108,7 +108,7 @@ describe("pi-tools-suite config", () => {
 		expect(content).toBe(DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC);
 		expect(content.startsWith(`{\n  "$schema": "${PI_TOOLS_SUITE_SCHEMA_URL}",`)).toBe(true);
 		expect(content).toContain('"disabledModules"');
-		expect(content).toContain('"todoThinking": false');
+		expect(content).toContain('"todoThinking": true');
 		expect(content).toContain('"lookupModel": "openai-codex/gpt-5.4-mini"');
 		expect(content).toContain('// "ast-grep",');
 		expect(content).toContain('// "dcp"');

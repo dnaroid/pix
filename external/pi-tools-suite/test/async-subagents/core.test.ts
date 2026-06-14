@@ -317,13 +317,13 @@ describe.serial("core utils and prompt generation", () => {
 	});
 
 	test.serial("selects parallel-first/deep-work agent strategy prompts by model", () => {
-		expect(agentStrategyPrompt({ modelRef: "zai/glm-5.1", env: {} })).toContain('name="parallel-first"');
+		expect(agentStrategyPrompt({ modelRef: "zai/glm-5.2", env: {} })).toContain('name="parallel-first"');
 		expect(agentStrategyPrompt({ modelRef: "antigravity/gemini-3.1-pro", env: {} })).toContain('name="parallel-first"');
 		expect(agentStrategyPrompt({ modelRef: "openai-codex/gpt-5.5", env: {} })).toContain('name="deep-work"');
 		expect(agentStrategyPrompt({ modelRef: "openai/gpt-5.4", env: {} })).toContain('name="deep-work"');
 		expect(agentStrategyPrompt({ modelRef: "openai/gpt-5.5", customPrompt: true, env: {} })).toBeUndefined();
-		expect(agentStrategyPrompt({ modelRef: "zai/glm-5.1", env: { PI_AGENT_STRATEGY: "off" } })).toBeUndefined();
-		expect(agentStrategyPrompt({ modelRef: "zai/glm-5.1", env: { PI_AGENT_STRATEGY: "deep-work" } })).toContain('name="deep-work"');
+		expect(agentStrategyPrompt({ modelRef: "zai/glm-5.2", env: { PI_AGENT_STRATEGY: "off" } })).toBeUndefined();
+		expect(agentStrategyPrompt({ modelRef: "zai/glm-5.2", env: { PI_AGENT_STRATEGY: "deep-work" } })).toContain('name="deep-work"');
 		expect(agentStrategyPrompt({ modelRef: "openai/gpt-5.4", env: { PI_AGENT_STRATEGY: "parallel_first" } })).toContain('name="parallel-first"');
 		expect(appendAgentStrategyPrompt("base\n", "strategy")).toBe("base\n\nstrategy");
 	});

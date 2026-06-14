@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { SessionManager, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import sessionTitle, { buildForkTitleInput, fallbackSessionTitleFromInput, firstUserMessageText } from "../extensions/session-title/index.js";
 
 describe("session-title extension", () => {
@@ -125,6 +125,40 @@ describe("session-title extension", () => {
 			assert.notEqual(setSessionNameCalls[0], "Parent session title");
 		});
 	});
+
+	it("does not touch a stale ctx after async fork startup work", async () => {
+		await withSessionTitleDisabled(async () => {
+			const originalOpen = SessionManager.open;
+			const originalList = SessionManager.list;
+			let stale = false;
+
+			SessionManager.open = (() => {
+				throw new Error("missing parent");
+			}) as typeof SessionManager.open;
+			SessionManager.list = (async () => {
+				await Promise.resolve();
+				stale = true;
+				return [];
+			}) as typeof SessionManager.list;
+
+			try {
+				const { handlers } = createExtensionHarness({
+					branch: [],
+					sessionName: "Parent session title",
+					sessionId: "session-fork-stale",
+					previousSessionFile: "/tmp/parent.jsonl",
+					staleGuard: () => stale,
+				});
+
+				sessionTitle(handlers.api);
+				await handlers.session_start?.({ type: "session_start", reason: "fork", previousSessionFile: "/tmp/parent.jsonl" }, handlers.ctx);
+				await Promise.resolve();
+			} finally {
+				SessionManager.open = originalOpen;
+				SessionManager.list = originalList;
+			}
+		});
+	});
 });
 
 function fakeContext(branch: unknown[]): ExtensionContext {
@@ -146,19 +180,41 @@ async function withSessionTitleDisabled<T>(callback: () => Promise<T>): Promise<
 	}
 }
 
-function createExtensionHarness(options: { branch: unknown[]; sessionName: string | undefined; sessionId: string }) {
+function createExtensionHarness(options: {
+	branch: unknown[];
+	sessionName: string | undefined;
+	sessionId: string;
+	previousSessionFile?: string;
+	staleGuard?: () => boolean;
+}) {
 	const handlers: Record<string, ((event: unknown, ctx: ExtensionContext) => unknown | Promise<unknown>) | undefined> = {};
 	const setSessionNameCalls: string[] = [];
 	let sessionName = options.sessionName;
+	const staleGuard = options.staleGuard ?? (() => false);
+	const assertFresh = () => {
+		if (staleGuard()) throw new Error("stale ctx accessed");
+	};
 	const ctx = {
 		cwd: process.cwd(),
 		hasUI: false,
 		sessionManager: {
 			getBranch: () => options.branch,
-			getSessionId: () => options.sessionId,
-			getSessionName: () => sessionName,
-			getHeader: () => undefined,
-			getSessionDir: () => process.cwd(),
+			getSessionId: () => {
+				assertFresh();
+				return options.sessionId;
+			},
+			getSessionName: () => {
+				assertFresh();
+				return sessionName;
+			},
+			getHeader: () => {
+				assertFresh();
+				return options.previousSessionFile ? { parentSession: options.previousSessionFile } : undefined;
+			},
+			getSessionDir: () => {
+				assertFresh();
+				return process.cwd();
+			},
 		},
 	} as unknown as ExtensionContext;
 

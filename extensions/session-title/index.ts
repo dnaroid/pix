@@ -385,39 +385,59 @@ export default function sessionTitle(pi: ExtensionAPI) {
 		}
 	}
 
-	async function resolveParentSessionTitle(ctx: ExtensionContext, previousSessionFile: string | undefined): Promise<string | undefined> {
-		const parentSessionFile = previousSessionFile ?? ctx.sessionManager.getHeader()?.parentSession;
-		if (!parentSessionFile) return currentSessionName(ctx);
+	async function resolveParentSessionTitle(options: {
+		parentSessionFile: string | undefined;
+		cwd: string;
+		sessionDir: string;
+		fallbackTitle: string | undefined;
+	}): Promise<string | undefined> {
+		const { parentSessionFile, cwd, sessionDir, fallbackTitle } = options;
+		if (!parentSessionFile) return fallbackTitle;
 
 		try {
 			const directParentName = SessionManager.open(parentSessionFile).getSessionName()?.trim();
 			if (directParentName) return directParentName;
 
-			const sessions = await SessionManager.list(ctx.cwd, ctx.sessionManager.getSessionDir());
+			const sessions = await SessionManager.list(cwd, sessionDir);
 			const parent = sessions.find((info) => isSameSessionPath(info.path, parentSessionFile));
 			const parentName = parent?.name?.trim();
 			if (parentName) return parentName;
-		} catch (error) {
-			if (config?.debug && ctx.hasUI) {
-				const message = error instanceof Error ? error.message : String(error);
-				ctx.ui.notify(`Could not resolve parent session title: ${message}`, "warning");
-			}
+		} catch {
+			// Ignore lookup failures and keep the inherited session name as fallback.
 		}
 
-		return currentSessionName(ctx);
+		return fallbackTitle;
 	}
 
-	async function prepareForkTitleState(event: SessionStartEvent, ctx: ExtensionContext): Promise<void> {
+	function prepareForkTitleState(event: SessionStartEvent, ctx: ExtensionContext): void {
 		forkTitleState = undefined;
 		if (event.reason !== "fork") return;
 
 		const currentSessionId = ctx.sessionManager.getSessionId();
 		const inheritedSessionName = currentSessionName(ctx);
+		const parentSessionFile = event.previousSessionFile ?? ctx.sessionManager.getHeader()?.parentSession;
+		const cwd = ctx.cwd;
+		const sessionDir = ctx.sessionManager.getSessionDir();
 		forkTitleState = {
 			sessionId: currentSessionId,
-			parentTitle: await resolveParentSessionTitle(ctx, event.previousSessionFile),
+			parentTitle: inheritedSessionName,
 			inheritedSessionName,
 		};
+
+		void resolveParentSessionTitle({
+			parentSessionFile,
+			cwd,
+			sessionDir,
+			fallbackTitle: inheritedSessionName,
+		}).then((parentTitle) => {
+			if (sessionId !== currentSessionId) return;
+			if (forkTitleState?.sessionId !== currentSessionId) return;
+			forkTitleState = {
+				sessionId: currentSessionId,
+				parentTitle,
+				inheritedSessionName,
+			};
+		});
 	}
 
 	pi.on("session_start", async (event, ctx) => {
@@ -430,9 +450,9 @@ export default function sessionTitle(pi: ExtensionAPI) {
 		forkTitleState = undefined;
 		lastRenderedName = undefined;
 		lastRenderedTitle = undefined;
-		await prepareForkTitleState(event, ctx);
 		refreshSessionUi(ctx, { force: true });
 		scheduleSessionUiRefresh(ctx);
+		prepareForkTitleState(event, ctx);
 	});
 
 	pi.on("session_shutdown", async () => {
