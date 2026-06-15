@@ -640,6 +640,7 @@ export class AppSessionEventController {
 				this.handleToolCallStreamUpdate(assistantEvent.contentIndex, assistantEvent.partial, assistantEvent.toolCall);
 				break;
 			case "done":
+				this.reconcileAssistantTextFromFinalMessage(assistantEvent.message);
 				this.renderAssistantToolCallsFromMessage(assistantEvent.message);
 				this.finishCurrentThinkingEntry();
 				this.flushAssistantTextBuffer(true);
@@ -898,6 +899,27 @@ export class AppSessionEventController {
 		return this.host.runtime()?.session.thinkingLevel;
 	}
 
+	private reconcileAssistantTextFromFinalMessage(message: unknown): void {
+		const openContentIndex = this.currentAssistantTextBlockContentIndex;
+		if (openContentIndex !== undefined) {
+			const content = assistantTextContentAt(message, openContentIndex);
+			if (content !== undefined) this.reconcileAssistantTextBlock(content, openContentIndex);
+			return;
+		}
+
+		const textBlocks = assistantTextContents(message);
+		if (textBlocks.length !== 1) return;
+
+		const entry = this.currentAssistantEntryId ? this.findEntry(this.currentAssistantEntryId) : undefined;
+		if (entry?.kind !== "assistant") return;
+
+		const visibleText = assistantStreamVisibleTextForCompleteBlock(textBlocks[0] ?? "", false);
+		if (!visibleText || entry.text === visibleText) return;
+
+		entry.text = visibleText;
+		this.touchEntry(entry);
+	}
+
 	private renderAssistantToolCallsFromMessage(message: unknown): void {
 		if (!isRecord(message) || !Array.isArray(message.content)) return;
 		for (let contentIndex = 0; contentIndex < message.content.length; contentIndex += 1) {
@@ -1000,6 +1022,13 @@ function assistantTextContentAt(value: unknown, contentIndex: number): string | 
 	if (!isRecord(value) || !Array.isArray(value.content)) return undefined;
 	const block = value.content[contentIndex];
 	return isRecord(block) && block.type === "text" && typeof block.text === "string" ? block.text : undefined;
+}
+
+function assistantTextContents(value: unknown): string[] {
+	if (!isRecord(value) || !Array.isArray(value.content)) return [];
+	return value.content.flatMap((block) => (
+		isRecord(block) && block.type === "text" && typeof block.text === "string" ? [block.text] : []
+	));
 }
 
 function assistantStreamVisibleTextForCompleteBlock(text: string, hasVisibleTextBeforeBlock: boolean): string {

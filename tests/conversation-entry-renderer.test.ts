@@ -5,6 +5,7 @@ import type { PixConfig } from "../src/config.js";
 import { APP_ICONS } from "../src/app/icons.js";
 import { ConversationViewport, type ConversationViewportHost } from "../src/app/rendering/conversation-viewport.js";
 import { renderConversationEntry, type ConversationEntryRenderOptions } from "../src/app/rendering/conversation-entry-renderer.js";
+import { ScreenStyler } from "../src/app/screen/screen-styler.js";
 import type { Entry } from "../src/app/types.js";
 import { stringDisplayWidth } from "../src/terminal-width.js";
 import { THEMES } from "../src/theme.js";
@@ -54,6 +55,49 @@ describe("renderConversationEntry", () => {
 			"alpha beta  ",
 			"gamma       ",
 		]);
+	});
+
+	it("keeps a visible separator when assistant word wrap splits a phrase at the right edge", () => {
+		const text = "Готово. По новой задаче (агент не генерировал все картинки) сделал следующее.";
+		const lines = renderConversationEntry({ id: "assistant-russian-wrap", kind: "assistant", text }, 66, renderOptions);
+
+		assert.deepEqual(lines.map((line) => line.text), [
+			"Готово. По новой задаче (агент не генерировал все картинки)".padEnd(66),
+			"сделал следующее.".padEnd(66),
+		]);
+	});
+
+	it("does not add leading spaces to assistant continuation lines when preserving wrap separators", () => {
+		const text = "Готово. По новой задаче (агент не генерировал все картинки) сделал следующее.";
+		const lines = renderConversationEntry({ id: "assistant-russian-wrap-no-indent", kind: "assistant", text }, 67, renderOptions);
+
+		assert.deepEqual(lines.map((line) => line.text), [
+			"Готово. По новой задаче (агент не генерировал все картинки)".padEnd(67),
+			"сделал следующее.".padEnd(67),
+		]);
+	});
+
+	it("moves the trailing word when a stopped-session assistant line would otherwise lose a separator", () => {
+		const text = "Готово. По новой задаче (агент не генерировал все картинки) сделал следующее.";
+		const lines = renderConversationEntry({ id: "assistant-russian-stopped-session-wrap", kind: "assistant", text }, 70, renderOptions);
+
+		assert.deepEqual(lines.map((line) => line.text), [
+			"Готово. По новой задаче (агент не генерировал все картинки)".padEnd(70),
+			"сделал следующее.".padEnd(70),
+		]);
+	});
+
+	it("keeps assistant word separators when the phrase stays in the middle of a rendered line", () => {
+		const text = "Готово. По новой задаче (агент не генерировал все картинки) сделал следующее.\n\nЧто изменилось в `blocks/scene-assets-svg-agent.ts`:";
+		const width = 80;
+		const lines = renderConversationEntry({ id: "assistant-russian-midline", kind: "assistant", text }, width, renderOptions);
+		const styler = new ScreenStyler({ theme: THEMES.dark, mouseSelection: undefined });
+		const plainStyledLine = styler.styleBaseLine(1, lines[0], width).replace(/\x1b\[[0-9;]*m/gu, "");
+
+		assert.match(lines[0]?.text ?? "", /сделал следующее/u);
+		assert.doesNotMatch(lines[0]?.text ?? "", /сделалследующее/u);
+		assert.match(plainStyledLine, /сделал следующее/u);
+		assert.doesNotMatch(plainStyledLine, /сделалследующее/u);
 	});
 
 	it("hides assistant markdown reference metadata", () => {

@@ -1,11 +1,21 @@
 import { InputEditor } from "../../input-editor.js";
 import { InputPasteHandler } from "./input-paste-handler.js";
 import { hasTerminalCommandModifier, isNativeCommandPressed, isNativeShiftPressed } from "./native-modifiers.js";
-import { parseTerminalEditShortcutSequence, parseTerminalInterruptSequence, terminalEditShortcutForControlChar } from "./terminal-edit-shortcuts.js";
+import {
+	parseTerminalEditShortcutSequence,
+	parseTerminalInterruptSequence,
+	parseTerminalModifiedKeySequence,
+	terminalEditShortcutForControlChar,
+	terminalKeyIsClipboardImagePaste,
+	terminalKeyIsShiftEnter,
+	terminalKeyShouldIgnore,
+} from "./terminal-edit-shortcuts.js";
 import type { ExtensionTerminalInputResult } from "../extensions/extension-ui-controller.js";
 import type { MouseEvent, ActivePopupMenu } from "../types.js";
 
 type DirectPopupMenu = Exclude<ActivePopupMenu, "slash">;
+
+const SHIFT_ENTER_ESCAPE_SEQUENCES = ["\x1b\r", "\x1b\n"];
 
 export type InputControllerHost = {
 	readonly inputEditor: InputEditor;
@@ -50,7 +60,7 @@ export class AppInputController {
 			this.drainInputBuffer();
 			return;
 		}
-		if (this.consumeSharedEditorShiftEnter(data)) return;
+		if (this.consumeSharedEditorInput(data)) return;
 		const extensionInput = this.host.handleExtensionTerminalInput(data);
 		if (extensionInput.consume) return;
 		if (extensionInput.data !== undefined) data = extensionInput.data;
@@ -60,14 +70,43 @@ export class AppInputController {
 		this.drainInputBuffer();
 	}
 
-	private consumeSharedEditorShiftEnter(data: string): boolean {
+	private consumeSharedEditorInput(data: string): boolean {
 		if (this.host.extensionInputUsesEditor?.() !== true) return false;
 		if (this.host.inputEditor.isInBracketedPaste) return false;
-		if (!this.isShiftPressed()) return false;
-		if (data !== "\r" && data !== "\n") return false;
 
-		this.insertInputNewline();
-		return true;
+		if (data === "\n") {
+			this.insertInputNewline();
+			return true;
+		}
+
+		if (data === "\r" && this.isShiftPressed()) {
+			this.insertInputNewline();
+			return true;
+		}
+
+		if (SHIFT_ENTER_ESCAPE_SEQUENCES.includes(data)) {
+			this.insertInputNewline();
+			return true;
+		}
+
+		if (data === "\x16") {
+			void this.pasteHandler.handleClipboardImagePaste();
+			return true;
+		}
+
+		const modifiedKey = parseTerminalModifiedKeySequence(data);
+		if (modifiedKey.kind !== "key") return false;
+		if (terminalKeyShouldIgnore(modifiedKey.key)) return true;
+		if (terminalKeyIsShiftEnter(modifiedKey.key)) {
+			this.insertInputNewline();
+			return true;
+		}
+		if (terminalKeyIsClipboardImagePaste(modifiedKey.key)) {
+			void this.pasteHandler.handleClipboardImagePaste();
+			return true;
+		}
+
+		return false;
 	}
 
 	private drainInputBuffer(): void {
@@ -96,9 +135,18 @@ export class AppInputController {
 			const terminalInterruptSequence = this.consumeTerminalInterruptSequence();
 			if (terminalInterruptSequence === "consumed") continue;
 			if (terminalInterruptSequence === "pending") return;
+			const shiftEnterSequence = this.consumeShiftEnterSequence();
+			if (shiftEnterSequence === "consumed") continue;
+			if (shiftEnterSequence === "pending") return;
+			const clipboardImagePasteSequence = this.consumeClipboardImagePasteSequence();
+			if (clipboardImagePasteSequence === "consumed") continue;
+			if (clipboardImagePasteSequence === "pending") return;
 			const terminalEditShortcutSequence = this.consumeTerminalEditShortcutSequence();
 			if (terminalEditShortcutSequence === "consumed") continue;
 			if (terminalEditShortcutSequence === "pending") return;
+			const ignoredModifiedKeySequence = this.consumeIgnoredModifiedKeySequence();
+			if (ignoredModifiedKeySequence === "consumed") continue;
+			if (ignoredModifiedKeySequence === "pending") return;
 			if (this.consumeEscapeSequence()) continue;
 			if (this.isPendingEscapeSequence()) return;
 
@@ -128,13 +176,9 @@ export class AppInputController {
 
 	private getEscapeSequences(): Array<[string, () => void]> {
 		return [
-			["\x1b[13;2u", () => this.insertInputNewline()],
-			["\x1b[13;2~", () => this.insertInputNewline()],
-			["\x1b[27;2;13~", () => this.insertInputNewline()],
+			...SHIFT_ENTER_ESCAPE_SEQUENCES.map((sequence) => [sequence, () => this.insertInputNewline()] as [string, () => void]),
 			["\x1b[13u", () => this.host.handleEnter()],
 			["\x1b[13;1u", () => this.host.handleEnter()],
-			["\x1b\r", () => this.insertInputNewline()],
-			["\x1b\n", () => this.insertInputNewline()],
 			["\x1b[5~", () => this.host.scrollByPage(-1)],
 			["\x1b[6~", () => this.host.scrollByPage(1)],
 			["\x1b[A", () => this.handleArrowUp()],
@@ -161,8 +205,6 @@ export class AppInputController {
 			["\x1b[201~", () => this.pasteHandler.endBracketedPaste()],
 			["\x1b[1;2H", () => { this.host.inputEditor.moveToLineStartExtend(); this.host.render(); }],
 			["\x1b[1;2F", () => { this.host.inputEditor.moveToLineEndExtend(); this.host.render(); }],
-			["\x1b[118;5u", () => { void this.pasteHandler.handleClipboardImagePaste(); }],
-			["\x1b[27;5;118~", () => { void this.pasteHandler.handleClipboardImagePaste(); }],
 			["\x1b[122;9u", () => this.undoInput()],
 			["\x1b[27;9;122~", () => this.undoInput()],
 			["\x1b[90;10u", () => this.redoInput()],
@@ -255,6 +297,38 @@ export class AppInputController {
 			if (result.shortcut === "undo") this.undoInput();
 			else this.redoInput();
 		}
+		return "consumed";
+	}
+
+	private consumeIgnoredModifiedKeySequence(): "consumed" | "pending" | "none" {
+		const result = parseTerminalModifiedKeySequence(this.inputBuffer);
+		if (result.kind === "pending") return "pending";
+		if (result.kind === "none") return "none";
+		if (!terminalKeyShouldIgnore(result.key)) return "none";
+
+		this.inputBuffer = this.inputBuffer.slice(result.key.length);
+		return "consumed";
+	}
+
+	private consumeClipboardImagePasteSequence(): "consumed" | "pending" | "none" {
+		const result = parseTerminalModifiedKeySequence(this.inputBuffer);
+		if (result.kind === "pending") return "pending";
+		if (result.kind === "none") return "none";
+		if (!terminalKeyIsClipboardImagePaste(result.key)) return "none";
+
+		this.inputBuffer = this.inputBuffer.slice(result.key.length);
+		if (!terminalKeyShouldIgnore(result.key)) void this.pasteHandler.handleClipboardImagePaste();
+		return "consumed";
+	}
+
+	private consumeShiftEnterSequence(): "consumed" | "pending" | "none" {
+		const result = parseTerminalModifiedKeySequence(this.inputBuffer);
+		if (result.kind === "pending") return "pending";
+		if (result.kind === "none") return "none";
+		if (!terminalKeyIsShiftEnter(result.key)) return "none";
+
+		this.inputBuffer = this.inputBuffer.slice(result.key.length);
+		if (!terminalKeyShouldIgnore(result.key)) this.insertInputNewline();
 		return "consumed";
 	}
 
@@ -423,7 +497,15 @@ export class AppInputController {
 			this.host.toggleVoiceRecording();
 			return;
 		}
-		if (char === "\r" || char === "\n") {
+		if (char === "\n") {
+			if (this.host.inputEditor.isInBracketedPaste) {
+				this.pasteHandler.appendBracketedPasteText("\n");
+				return;
+			}
+			this.insertInputNewline();
+			return;
+		}
+		if (char === "\r") {
 			if (this.host.inputEditor.isInBracketedPaste) {
 				this.pasteHandler.appendBracketedPasteText("\n");
 				return;

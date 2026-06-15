@@ -105,7 +105,7 @@ function renderAssistantLines(text: string, width: number, options: Conversation
 	const displayText = applyOutputFilters(text, options.outputFilters).trimEnd();
 	if (!displayText) return [];
 	const { left: contentLeft, contentWidth } = horizontalPaddingLayout(width);
-	const contentLines = renderMarkdownTextLines(displayText, contentWidth, contentLeft);
+	const contentLines = renderMarkdownTextLines(displayText, contentWidth, contentLeft, { preserveWrappedWordSeparator: true });
 	if (contentLines.length === 0) return [];
 	const lines: RenderedLine[] = [];
 	for (const line of contentLines) {

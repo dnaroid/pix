@@ -23,6 +23,10 @@ export type RenderedMarkdownTextLine = {
 	heading?: boolean;
 };
 
+export type RenderMarkdownTextLinesOptions = {
+	preserveWrappedWordSeparator?: boolean;
+};
+
 type MarkdownTableAlignment = "center" | "left" | "none" | "right";
 
 type MarkdownTableRow = {
@@ -46,6 +50,8 @@ type MarkdownFence = {
 type ActiveMarkdownFence = MarkdownFence & {
 	language: SyntaxLineHighlight["language"] | undefined;
 };
+
+const MIN_TRAILING_WORD_WIDTH_TO_REBALANCE = 5;
 
 export function formatMarkdownTables(text: string, maxWidth?: number): string {
 	const lines = text.split("\n");
@@ -129,7 +135,7 @@ export function renderMarkdownLine(text: string, start = 0): RenderedMarkdownLin
 	return { text: rendered, segments, ...(isHeading ? { heading: true } : {}) };
 }
 
-export function renderMarkdownTextLines(text: string, width: number, start = 0): RenderedMarkdownTextLine[] {
+export function renderMarkdownTextLines(text: string, width: number, start = 0, options: RenderMarkdownTextLinesOptions = {}): RenderedMarkdownTextLine[] {
 	const lines: RenderedMarkdownTextLine[] = [];
 	let fence: ActiveMarkdownFence | undefined;
 	const formattedText = formatMarkdownTables(sanitizeMarkdownText(text), width);
@@ -143,7 +149,7 @@ export function renderMarkdownTextLines(text: string, width: number, start = 0):
 
 		const isHeadingLine = !fence && /^\s{0,3}#{1,6}\s/.test(rawLine);
 		const markdownLine = syntaxHighlight?.language === "markdown" || isHeadingLine ? renderMarkdownLine(rawLine) : undefined;
-		for (const wrapped of wrapRenderedMarkdownLine(markdownLine ?? { text: rawLine, segments: [] }, width)) {
+		for (const wrapped of wrapRenderedMarkdownLine(markdownLine ?? { text: rawLine, segments: [] }, width, options)) {
 			lines.push({
 				text: wrapped.text,
 				...(wrapped.copyText === undefined ? {} : { copyText: wrapped.copyText }),
@@ -188,11 +194,11 @@ export function markdownSyntaxHighlightsForText(text: string, startColumn = 0): 
 	return highlights;
 }
 
-function wrapRenderedMarkdownLine(line: RenderedMarkdownLine, width: number): RenderedMarkdownLine[] {
+function wrapRenderedMarkdownLine(line: RenderedMarkdownLine, width: number, options: RenderMarkdownTextLinesOptions): RenderedMarkdownLine[] {
 	const safeWidth = Math.max(1, width);
 	if (stringDisplayWidth(line.text) <= safeWidth) return [line];
 
-	const ranges = wrapDisplayLineByWordsWithRanges(line.text, safeWidth);
+	const ranges = wrapDisplayLineByWordsWithRanges(line.text, safeWidth, options);
 	return ranges.map((range, index) => ({
 		text: range.text,
 		copyText: line.text.slice(range.start, ranges[index + 1]?.start ?? range.end),
@@ -201,13 +207,13 @@ function wrapRenderedMarkdownLine(line: RenderedMarkdownLine, width: number): Re
 	}));
 }
 
-function wrapDisplayLineByWordsWithRanges(text: string, width: number): { text: string; start: number; end: number }[] {
-	const chunks: { text: string; start: number; end: number }[] = [];
+function wrapDisplayLineByWordsWithRanges(text: string, width: number, options: RenderMarkdownTextLinesOptions): WrappedTextRange[] {
+	const chunks: WrappedTextRange[] = [];
 	let chunkText = "";
 	let chunkStart = 0;
 	let chunkEnd = 0;
 
-	const setChunk = (chunk: { text: string; start: number; end: number }) => {
+	const setChunk = (chunk: WrappedTextRange) => {
 		chunkText = chunk.text;
 		chunkStart = chunk.start;
 		chunkEnd = chunk.end;
@@ -236,10 +242,18 @@ function wrapDisplayLineByWordsWithRanges(text: string, width: number): { text: 
 				chunkText = candidate;
 				chunkEnd = token.end;
 			} else {
-				chunks.push(trimTrailingWhitespaceChunk(chunkText, chunkStart));
-				chunkText = "";
-				chunkStart = token.end;
-				chunkEnd = token.end;
+				const rewrapped = options.preserveWrappedWordSeparator
+					? splitChunkBeforeTrailingWord(chunkText, chunkStart, token, width)
+					: undefined;
+				if (rewrapped) {
+					chunks.push(rewrapped.previous);
+					setChunk(rewrapped.next);
+				} else {
+					chunks.push(trimTrailingWhitespaceChunk(chunkText, chunkStart));
+					chunkText = "";
+					chunkStart = token.end;
+					chunkEnd = chunkStart;
+				}
 			}
 			continue;
 		}
@@ -256,6 +270,15 @@ function wrapDisplayLineByWordsWithRanges(text: string, width: number): { text: 
 			continue;
 		}
 
+		const rewrapped = options.preserveWrappedWordSeparator
+			? splitChunkBeforeTrailingWordWithNextToken(chunkText, chunkStart, token, width)
+			: undefined;
+		if (rewrapped) {
+			chunks.push(rewrapped.previous);
+			setChunk(rewrapped.next);
+			continue;
+		}
+
 		chunks.push(trimTrailingWhitespaceChunk(chunkText, chunkStart));
 		appendTokenToEmptyChunk(token);
 	}
@@ -269,6 +292,12 @@ type DisplayTokenWithRange = {
 	start: number;
 	end: number;
 	whitespace: boolean;
+};
+
+type WrappedTextRange = {
+	text: string;
+	start: number;
+	end: number;
 };
 
 function displayTokensWithRanges(text: string): DisplayTokenWithRange[] {
@@ -297,8 +326,8 @@ function displayTokensWithRanges(text: string): DisplayTokenWithRange[] {
 	return tokens;
 }
 
-function wrapDisplayTokenByWidth(token: DisplayTokenWithRange, width: number): { text: string; start: number; end: number }[] {
-	const chunks: { text: string; start: number; end: number }[] = [];
+function wrapDisplayTokenByWidth(token: DisplayTokenWithRange, width: number): WrappedTextRange[] {
+	const chunks: WrappedTextRange[] = [];
 	let chunkText = "";
 	let chunkStart = token.start;
 	let chunkWidth = 0;
@@ -323,9 +352,70 @@ function wrapDisplayTokenByWidth(token: DisplayTokenWithRange, width: number): {
 	return chunks;
 }
 
-function trimTrailingWhitespaceChunk(text: string, start: number): { text: string; start: number; end: number } {
+function trimTrailingWhitespaceChunk(text: string, start: number): WrappedTextRange {
 	const trimmed = text.replace(/\s+$/u, "");
 	return { text: trimmed, start, end: start + trimmed.length };
+}
+
+function splitChunkBeforeTrailingWord(
+	chunkText: string,
+	chunkStart: number,
+	separator: DisplayTokenWithRange,
+	width: number,
+): { previous: WrappedTextRange; next: WrappedTextRange } | undefined {
+	const match = /^(.*\S)(\s+)(\S+)$/u.exec(chunkText);
+	if (!match) return undefined;
+
+	const prefix = match[1] ?? "";
+	const whitespace = match[2] ?? "";
+	const trailingWord = match[3] ?? "";
+	if (!prefix || !whitespace || !trailingWord) return undefined;
+
+	const nextText = `${trailingWord}${separator.text}`;
+	if (stringDisplayWidth(nextText) > width) return undefined;
+
+	const previous = trimTrailingWhitespaceChunk(prefix, chunkStart);
+	if (!previous.text) return undefined;
+
+	const trailingWordStart = chunkStart + prefix.length + whitespace.length;
+	return {
+		previous,
+		next: { text: nextText, start: trailingWordStart, end: separator.end },
+	};
+}
+
+function splitChunkBeforeTrailingWordWithNextToken(
+	chunkText: string,
+	chunkStart: number,
+	nextToken: DisplayTokenWithRange,
+	width: number,
+): { previous: WrappedTextRange; next: WrappedTextRange } | undefined {
+	const match = /^(.*\S)(\s+)(\S+)(\s+)$/u.exec(chunkText);
+	if (!match) return undefined;
+
+	const prefix = match[1] ?? "";
+	const whitespace = match[2] ?? "";
+	const trailingWord = match[3] ?? "";
+	const trailingWhitespace = match[4] ?? "";
+	if (!prefix || !whitespace || !trailingWord || !trailingWhitespace) return undefined;
+	if (!shouldMoveTrailingWordToPreserveSeparator(prefix, trailingWord, width)) return undefined;
+
+	const nextText = `${trailingWord}${trailingWhitespace}${nextToken.text}`;
+	if (stringDisplayWidth(nextText) > width) return undefined;
+
+	const previous = trimTrailingWhitespaceChunk(prefix, chunkStart);
+	if (!previous.text) return undefined;
+
+	const trailingWordStart = chunkStart + prefix.length + whitespace.length;
+	return {
+		previous,
+		next: { text: nextText, start: trailingWordStart, end: nextToken.end },
+	};
+}
+
+function shouldMoveTrailingWordToPreserveSeparator(prefix: string, trailingWord: string, width: number): boolean {
+	return stringDisplayWidth(prefix) >= Math.floor(width / 2)
+		&& stringDisplayWidth(trailingWord) >= MIN_TRAILING_WORD_WIDTH_TO_REBALANCE;
 }
 
 function shiftSegmentToRange(segment: { start: number; end: number; bold: true }, rangeStart: number, rangeEnd: number): { start: number; end: number; bold: true }[] {

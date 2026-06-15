@@ -16,6 +16,39 @@ describe("AppInputController extension editor input", () => {
 		assert.equal(calls.render, 1);
 	});
 
+	it("inserts a newline for iTerm2-style Shift+Enter sequences before a focused extension can submit them", () => {
+		const { controller, editor, calls } = createController({ extensionInputUsesEditor: true, shiftPressed: false });
+
+		controller.handleChunk(Buffer.from("\x1b[13;2u"));
+
+		assert.equal(editor.text, "\n");
+		assert.equal(calls.extensionInput, 0);
+		assert.equal(calls.enter, 0);
+		assert.equal(calls.render, 1);
+	});
+
+	it("inserts a newline for Kitty Shift+Enter press events before a focused extension can submit them", () => {
+		const { controller, editor, calls } = createController({ extensionInputUsesEditor: true, shiftPressed: false });
+
+		controller.handleChunk(Buffer.from("\x1b[13;2:1u"));
+
+		assert.equal(editor.text, "\n");
+		assert.equal(calls.extensionInput, 0);
+		assert.equal(calls.enter, 0);
+		assert.equal(calls.render, 1);
+	});
+
+	it("inserts a newline for LF Shift+Enter before a focused extension can submit it", () => {
+		const { controller, editor, calls } = createController({ extensionInputUsesEditor: true, shiftPressed: false });
+
+		controller.handleChunk(Buffer.from("\n"));
+
+		assert.equal(editor.text, "\n");
+		assert.equal(calls.extensionInput, 0);
+		assert.equal(calls.enter, 0);
+		assert.equal(calls.render, 1);
+	});
+
 	it("keeps raw Enter routed to the focused extension when Shift is not pressed", () => {
 		const { controller, editor, calls } = createController({ extensionInputUsesEditor: true, shiftPressed: false });
 
@@ -115,6 +148,52 @@ describe("AppInputController terminal input", () => {
 		assert.match(editor.text, /\n/u);
 		controller.handleChunk(Buffer.from("\x1b[5~\x1b[6~"));
 		assert.deepEqual(calls.scrollPages.slice(-2), [-1, 1]);
+	});
+
+	it("treats LF as newline and CR as submit like pi's editor", () => {
+		const { controller, editor, calls } = createController({ extensionInputUsesEditor: false, shiftPressed: false, consumeExtensionInput: false });
+
+		controller.handleChunk(Buffer.from("\n"));
+		assert.equal(editor.text, "\n");
+		assert.equal(calls.enter, 0);
+
+		controller.handleChunk(Buffer.from("\r"));
+		assert.equal(calls.enter, 1);
+	});
+
+	it("swallows Kitty key release packets for ordinary text input", () => {
+		const { controller, editor } = createController({ extensionInputUsesEditor: false, shiftPressed: false, consumeExtensionInput: false });
+
+		controller.handleChunk(Buffer.from("h\x1b[104;1:3ue\x1b[101;1:3ul\x1b[108;1:3ul\x1b[108;1:3uo\x1b[111;1:3u"));
+
+		assert.equal(editor.text, "hello");
+	});
+
+	it("handles clipboard image paste for Command+V terminal sequences", () => {
+		const { controller } = createController({ extensionInputUsesEditor: false, shiftPressed: false, consumeExtensionInput: false });
+		let clipboardImagePasteCalls = 0;
+		const testController = controller as unknown as { pasteHandler: { handleClipboardImagePaste(): Promise<void> } };
+		testController.pasteHandler.handleClipboardImagePaste = async () => {
+			clipboardImagePasteCalls += 1;
+		};
+
+		controller.handleChunk(Buffer.from("\x1b[118;9u\x1b[27;10;118~"));
+
+		assert.equal(clipboardImagePasteCalls, 2);
+	});
+
+	it("handles clipboard image paste for non-Latin xterm modifyOtherKeys sequences", () => {
+		const { controller, editor } = createController({ extensionInputUsesEditor: false, shiftPressed: false, consumeExtensionInput: false });
+		let clipboardImagePasteCalls = 0;
+		const testController = controller as unknown as { pasteHandler: { handleClipboardImagePaste(): Promise<void> } };
+		testController.pasteHandler.handleClipboardImagePaste = async () => {
+			clipboardImagePasteCalls += 1;
+		};
+
+		controller.handleChunk(Buffer.from("\x1b[27;5;1084~"));
+
+		assert.equal(editor.text, "");
+		assert.equal(clipboardImagePasteCalls, 1);
 	});
 
 	it("buffers bracketed paste payload without rendering per character", async () => {

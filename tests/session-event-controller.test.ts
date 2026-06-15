@@ -499,6 +499,43 @@ describe("AppSessionEventController", () => {
 		assert.equal(entries[0]?.kind === "assistant" ? entries[0].text : undefined, "visible prefix and restored suffix");
 	});
 
+	it("reconciles an open assistant text block from the final done message", () => {
+		const entries: Entry[] = [];
+		const controller = createController(entries);
+
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "text_start", contentIndex: 1, partial: { role: "assistant", content: [] } },
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "text_delta", contentIndex: 1, delta: "сделал" },
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "text_delta", contentIndex: 1, delta: "следующее" },
+		} as unknown as AgentSessionEvent);
+
+		assert.equal(entries[0]?.kind === "assistant" ? entries[0].text : undefined, "сделалследующее");
+
+		controller.handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: {
+				type: "done",
+				message: {
+					role: "assistant",
+					content: [
+						{ type: "thinking", thinking: "internal" },
+						{ type: "text", text: "сделал следующее" },
+					],
+				},
+			},
+		} as unknown as AgentSessionEvent);
+
+		assert.equal(entries.length, 1);
+		assert.equal(entries[0]?.kind === "assistant" ? entries[0].text : undefined, "сделал следующее");
+	});
+
 	it("ignores late text_end for an assistant text block already flushed before a tool", () => {
 		const entries: Entry[] = [];
 		const controller = createController(entries);

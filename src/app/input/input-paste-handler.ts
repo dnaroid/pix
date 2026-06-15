@@ -103,7 +103,10 @@ export class InputPasteHandler {
 	}
 
 	private handlePasteEnd(text: string): void {
-		if (!text) return;
+		if (!text) {
+			void this.handleClipboardImagePaste();
+			return;
+		}
 
 		const filePath = this.plainPasteFilePath(text);
 		if (filePath) {

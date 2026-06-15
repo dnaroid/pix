@@ -12,6 +12,7 @@ import {
 	SessionManager,
 	type EventBus,
 	type AgentSessionRuntime,
+	type AgentSessionServices,
 	type CreateAgentSessionRuntimeFactory,
 	type LoadExtensionsResult,
 	type SessionEntry,
@@ -241,6 +242,7 @@ function isBundledQuestionConflict(error: LoadExtensionsResult["errors"][number]
 export type CreatePixRuntimeOptions = {
 	eventBus?: EventBus;
 	config?: PixConfig;
+	reuseServicesFrom?: AgentSessionRuntime;
 };
 
 const bundledSkillsInstallPromises = new Map<string, Promise<BundledSkillsInstallResult>>();
@@ -317,26 +319,20 @@ export function resolveSessionModelRefFromTail(entries: readonly SessionEntry[])
 
 export async function createPixRuntime(options: AppOptions, runtimeOptions: CreatePixRuntimeOptions = {}): Promise<AgentSessionRuntime> {
 	const agentDir = getAgentDir();
+	const reusableServices = reusableRuntimeServices(runtimeOptions.reuseServicesFrom, options.cwd, agentDir);
 	const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, sessionManager, sessionStartEvent }) => {
 		const config = runtimeOptions.config ?? loadPixConfig(cwd);
 		const effectiveModelRef = resolvePixRuntimeModelRef(options, sessionManager, config);
 		const parsedModel = effectiveModelRef ? parseModelRef(effectiveModelRef) : undefined;
 		const initialThinkingLevel = resolvePixRuntimeInitialThinkingLevel(options, sessionManager, config);
-		await ensureBundledSkillsInstalledOnce();
-		await ensurePiToolsSuiteExtensionInstalledOnce({ agentDir });
-		const bundledExtensionPaths = await getBundledExtensionPathsAsync();
-		const services = await createAgentSessionServices({
-			cwd,
-			agentDir,
-			resourceLoaderOptions: {
-				...(config.ignoreContextFiles ? { noContextFiles: true } : {}),
+		const services = reusableServices && sameRuntimeServiceTarget(reusableServices, cwd, agentDir)
+			? reusableServices
+			: await createPixRuntimeServices({
+				cwd,
+				agentDir,
+				config,
 				...(runtimeOptions.eventBus === undefined ? {} : { eventBus: runtimeOptions.eventBus }),
-				...(bundledExtensionPaths.length === 0 ? {} : {
-					additionalExtensionPaths: bundledExtensionPaths,
-					extensionsOverride: prioritizeBundledQuestionExtension,
-				}),
-			},
-		});
+			});
 		services.modelRegistry.refresh();
 		const model = parsedModel ? services.modelRegistry.find(parsedModel.provider, parsedModel.modelId) : undefined;
 		if (parsedModel && !model) {
@@ -383,4 +379,37 @@ export async function createPixRuntime(options: AppOptions, runtimeOptions: Crea
 				? await openLazySessionManager(options.sessionPath, { cwdOverride: options.cwd })
 				: SessionManager.create(options.cwd),
 	});
+}
+
+async function createPixRuntimeServices(options: {
+	cwd: string;
+	agentDir: string;
+	eventBus?: EventBus;
+	config: PixConfig;
+}): Promise<AgentSessionServices> {
+	await ensureBundledSkillsInstalledOnce();
+	await ensurePiToolsSuiteExtensionInstalledOnce({ agentDir: options.agentDir });
+	const bundledExtensionPaths = await getBundledExtensionPathsAsync();
+	return await createAgentSessionServices({
+		cwd: options.cwd,
+		agentDir: options.agentDir,
+		resourceLoaderOptions: {
+			...(options.config.ignoreContextFiles ? { noContextFiles: true } : {}),
+			...(options.eventBus === undefined ? {} : { eventBus: options.eventBus }),
+			...(bundledExtensionPaths.length === 0 ? {} : {
+				additionalExtensionPaths: bundledExtensionPaths,
+				extensionsOverride: prioritizeBundledQuestionExtension,
+			}),
+		},
+	});
+}
+
+function reusableRuntimeServices(runtime: AgentSessionRuntime | undefined, cwd: string, agentDir: string): AgentSessionServices | undefined {
+	const services = runtime?.services;
+	return services && sameRuntimeServiceTarget(services, cwd, agentDir) ? services : undefined;
+}
+
+function sameRuntimeServiceTarget(services: AgentSessionServices, cwd: string, agentDir: string): boolean {
+	return normalizePathForCompare(services.cwd) === normalizePathForCompare(cwd)
+		&& normalizePathForCompare(services.agentDir) === normalizePathForCompare(agentDir);
 }

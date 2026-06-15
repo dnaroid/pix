@@ -1,11 +1,39 @@
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { resizeImage } from "@earendil-works/pi-coding-agent";
-import { hasImage, getImageBinary } from "@mariozechner/clipboard";
 
 export interface ClipboardImage {
 	/** Base64-encoded image data. */
 	data: string;
 	mimeType: string;
 }
+
+type ClipboardModule = {
+	hasImage: () => boolean;
+	getImageBinary: () => Promise<Array<number> | Uint8Array>;
+};
+
+type ClipboardRequire = (id: string) => unknown;
+
+const moduleRequire = createRequire(import.meta.url);
+const executableDirRequire = createRequire(pathToFileURL(join(dirname(process.execPath), "package.json")).href);
+
+function loadClipboardNative(requires: readonly ClipboardRequire[] = [moduleRequire, executableDirRequire]): ClipboardModule | null {
+	for (const requireClipboard of requires) {
+		try {
+			return requireClipboard("@mariozechner/clipboard") as ClipboardModule;
+		} catch {
+			// Try the next resolution root. This mirrors pi's packaged-binary fallback,
+			// where native sidecars may resolve relative to the executable directory.
+		}
+	}
+	return null;
+}
+
+const nativeClipboard = !process.env.TERMUX_VERSION && (process.platform !== "linux" || Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY))
+	? loadClipboardNative()
+	: null;
 
 /**
  * Read an image from the system clipboard.
@@ -14,12 +42,12 @@ export interface ClipboardImage {
  */
 export async function readClipboardImage(): Promise<ClipboardImage | null> {
 	try {
-		if (!hasImage()) return null;
+		if (!nativeClipboard?.hasImage()) return null;
 
-		const bytes = await getImageBinary();
+		const bytes = await nativeClipboard.getImageBinary();
 		if (!bytes || bytes.length === 0) return null;
 
-		const uint8 = new Uint8Array(bytes);
+		const uint8 = bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes);
 
 		try {
 			const resized = await resizeImage(uint8, "image/png", { maxWidth: 2000, maxHeight: 2000 });

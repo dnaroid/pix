@@ -7,6 +7,7 @@ import {
 	DISABLE_TERMINAL_KEY_REPORTING,
 	DISABLE_TERMINAL_WRAP,
 	ENABLE_BRACKETED_PASTE,
+	ENABLE_TERMINAL_MODIFY_OTHER_KEYS,
 	ENABLE_TERMINAL_KEY_REPORTING,
 	ENABLE_TERMINAL_WRAP,
 	HIDE_CURSOR,
@@ -52,9 +53,45 @@ describe("AppTerminalController", () => {
 			`${ANSI_RESET}${RESET_TERMINAL_VIEWPORT_STATE}${DISABLE_TERMINAL_KEY_REPORTING}${DISABLE_BRACKETED_PASTE}${ENABLE_TERMINAL_WRAP}\x1b[?1006l\x1b[?1002l\x1b[?1049l${SHOW_CURSOR}`,
 		);
 	});
+
+	it("falls back to modifyOtherKeys after a non-Kitty terminal response", async () => {
+		const writes: string[] = [];
+		const inputChunks: string[] = [];
+		const controller = new AppTerminalController(fakeHost(inputChunks));
+		const restore = stubTerminalIo(writes);
+
+		try {
+			controller.enableTerminal();
+			restore.emitInput("\x1b[?1;2c");
+			await controller.stop();
+		} finally {
+			restore();
+		}
+
+		assert.equal(inputChunks.length, 0);
+		assert.equal(writes.includes(ENABLE_TERMINAL_MODIFY_OTHER_KEYS), true);
+	});
+
+	it("swallows Kitty keyboard protocol responses before forwarding input", async () => {
+		const writes: string[] = [];
+		const inputChunks: string[] = [];
+		const controller = new AppTerminalController(fakeHost(inputChunks));
+		const restore = stubTerminalIo(writes);
+
+		try {
+			controller.enableTerminal();
+			restore.emitInput("\x1b[?7uabc");
+			await controller.stop();
+		} finally {
+			restore();
+		}
+
+		assert.deepEqual(inputChunks, ["abc"]);
+		assert.equal(writes.includes(ENABLE_TERMINAL_MODIFY_OTHER_KEYS), false);
+	});
 });
 
-function fakeHost() {
+function fakeHost(inputChunks: string[] = []) {
 	let running = true;
 	return {
 		isRunning: () => running,
@@ -65,7 +102,9 @@ function fakeHost() {
 		saveInputStateForQuit: async () => {},
 		disposeInactiveRuntimesForQuit: async () => {},
 		render: () => {},
-		handleInputChunk: (_chunk: Buffer) => {},
+		handleInputChunk: (chunk: Buffer) => {
+			inputChunks.push(chunk.toString("utf8"));
+		},
 		closeSdkMenuForStop: () => {},
 		clearToastTimers: () => {},
 		stopBlinking: () => {},
@@ -80,7 +119,7 @@ function fakeHost() {
 	};
 }
 
-function stubTerminalIo(writes: string[]): () => void {
+function stubTerminalIo(writes: string[]): (() => void) & { emitInput(chunk: string): void } {
 	const stdout = process.stdout as NodeJS.WriteStream & {
 		write: (chunk: string | Uint8Array) => boolean;
 		on: (event: string, listener: (...args: unknown[]) => void) => NodeJS.WriteStream;
@@ -101,6 +140,7 @@ function stubTerminalIo(writes: string[]): () => void {
 	const originalStdinOn = stdin.on.bind(process.stdin);
 	const originalStdinOff = stdin.off.bind(process.stdin);
 	const originalSetRawMode = stdin.setRawMode?.bind(process.stdin);
+	let stdinDataListener: ((chunk: Buffer) => void) | undefined;
 
 	stdout.write = ((chunk: string | Uint8Array) => {
 		writes.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
@@ -110,11 +150,17 @@ function stubTerminalIo(writes: string[]): () => void {
 	stdout.off = ((_: string, __: (...args: unknown[]) => void) => stdout) as typeof stdout.off;
 	stdin.resume = (() => stdin) as typeof stdin.resume;
 	stdin.pause = (() => stdin) as typeof stdin.pause;
-	stdin.on = ((_: string, __: (...args: unknown[]) => void) => stdin) as typeof stdin.on;
-	stdin.off = ((_: string, __: (...args: unknown[]) => void) => stdin) as typeof stdin.off;
+	stdin.on = ((event: string, listener: (...args: unknown[]) => void) => {
+		if (event === "data") stdinDataListener = listener as (chunk: Buffer) => void;
+		return stdin;
+	}) as typeof stdin.on;
+	stdin.off = ((event: string, listener: (...args: unknown[]) => void) => {
+		if (event === "data" && stdinDataListener === listener) stdinDataListener = undefined;
+		return stdin;
+	}) as typeof stdin.off;
 	stdin.setRawMode = ((_value: boolean) => {}) as typeof stdin.setRawMode;
 
-	return () => {
+	const restore = (() => {
 		stdout.write = originalWrite as typeof stdout.write;
 		stdout.on = originalStdoutOn as typeof stdout.on;
 		stdout.off = originalStdoutOff as typeof stdout.off;
@@ -123,5 +169,9 @@ function stubTerminalIo(writes: string[]): () => void {
 		stdin.on = originalStdinOn as typeof stdin.on;
 		stdin.off = originalStdinOff as typeof stdin.off;
 		if (originalSetRawMode) stdin.setRawMode = originalSetRawMode as typeof stdin.setRawMode;
+	}) as (() => void) & { emitInput(chunk: string): void };
+	restore.emitInput = (chunk: string) => {
+		stdinDataListener?.(Buffer.from(chunk, "utf8"));
 	};
+	return restore;
 }

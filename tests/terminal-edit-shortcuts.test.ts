@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { parseTerminalEditShortcutSequence, parseTerminalInterruptSequence, terminalEditShortcutForControlChar } from "../src/app/input/terminal-edit-shortcuts.js";
+import {
+	parseTerminalEditShortcutSequence,
+	parseTerminalInterruptSequence,
+	parseTerminalModifiedKeySequence,
+	terminalEditShortcutForControlChar,
+	terminalKeyIsClipboardImagePaste,
+	terminalKeyIsShiftEnter,
+} from "../src/app/input/terminal-edit-shortcuts.js";
 
 describe("terminal edit shortcut parsing", () => {
 	it("parses Cmd+Z from Kitty CSI-u with and without event types", () => {
@@ -61,6 +68,16 @@ describe("terminal edit shortcut parsing", () => {
 			shortcut: "redo",
 			length: "\x1b[27;10;90~".length,
 		});
+	});
+
+	it("parses modified-key sequences for Shift+Enter and clipboard paste across layouts", () => {
+		const shiftEnter = parseTerminalModifiedKeySequence("\x1b[13;2:1u");
+		assert.equal(shiftEnter.kind, "key");
+		if (shiftEnter.kind === "key") assert.equal(terminalKeyIsShiftEnter(shiftEnter.key), true);
+
+		const russianPaste = parseTerminalModifiedKeySequence("\x1b[27;5;1084~");
+		assert.equal(russianPaste.kind, "key");
+		if (russianPaste.kind === "key") assert.equal(terminalKeyIsClipboardImagePaste(russianPaste.key), true);
 	});
 
 	it("returns pending for split edit shortcut sequences", () => {

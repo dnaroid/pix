@@ -61,4 +61,19 @@ describe("InputPasteHandler file paths", () => {
 		assert.equal(editor.attachments.length, 1);
 		assert.equal(editor.attachments[0]?.kind, "pasted-text");
 	});
+
+	it("tries clipboard image paste when bracketed paste payload is empty", async () => {
+		const cwd = await mkdtemp(join(tmpdir(), "pix-cwd-"));
+		const { handler } = createHandler(cwd);
+		let clipboardImagePasteCalls = 0;
+		(handler as unknown as { handleClipboardImagePaste(): Promise<void> }).handleClipboardImagePaste = async () => {
+			clipboardImagePasteCalls += 1;
+		};
+
+		handler.beginBracketedPaste();
+		handler.endBracketedPaste();
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		assert.equal(clipboardImagePasteCalls, 1);
+	});
 });

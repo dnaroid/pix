@@ -1,5 +1,10 @@
 export type TerminalEditShortcut = "undo" | "redo";
 
+export type ParsedTerminalModifiedKeyResult =
+	| { readonly kind: "key"; readonly key: ParsedModifiedKey }
+	| { readonly kind: "pending" }
+	| { readonly kind: "none" };
+
 export type TerminalEditShortcutSequenceResult =
 	| { readonly kind: "shortcut"; readonly shortcut: TerminalEditShortcut; readonly length: number }
 	| { readonly kind: "ignore"; readonly length: number }
@@ -12,10 +17,14 @@ const COMMAND_MODIFIER_FLAG = 8;
 const LOCK_MODIFIER_MASK = 64 + 128;
 
 const KEY_CODE_C = 99;
+const KEY_CODE_ENTER = 13;
+const KEY_CODE_V = 118;
 const KEY_CODE_Y = 121;
 const KEY_CODE_Z = 122;
 const CYRILLIC_SMALL_ES_CODE = 1089;
 const CYRILLIC_CAPITAL_ES_CODE = 1057;
+const CYRILLIC_SMALL_EM_CODE = 1084;
+const CYRILLIC_CAPITAL_EM_CODE = 1052;
 
 const KITTY_CSI_U_SEQUENCE = /^\x1b\[(\d+)(?::(\d*))?(?::(\d+))?(?:;(\d+))?(?::(\d+))?u/;
 const XTERM_MODIFY_OTHER_KEYS_SEQUENCE = /^\x1b\[27;(\d+);(\d+)~/;
@@ -28,26 +37,47 @@ interface ParsedModifiedKey {
 	readonly length: number;
 }
 
-export function parseTerminalEditShortcutSequence(input: string): TerminalEditShortcutSequenceResult {
+export function parseTerminalModifiedKeySequence(input: string): ParsedTerminalModifiedKeyResult {
 	const kitty = parseKittyCsiUSequence(input);
-	if (kitty) return terminalEditShortcutResult(kitty);
+	if (kitty) return { kind: "key", key: kitty };
 
 	const xterm = parseXtermModifyOtherKeysSequence(input);
-	if (xterm) return terminalEditShortcutResult(xterm);
+	if (xterm) return { kind: "key", key: xterm };
 
-	if (isPotentialEditShortcutPrefix(input)) return { kind: "pending" };
+	if (isPotentialModifiedKeyPrefix(input)) return { kind: "pending" };
 	return { kind: "none" };
 }
 
+export function parseTerminalEditShortcutSequence(input: string): TerminalEditShortcutSequenceResult {
+	const result = parseTerminalModifiedKeySequence(input);
+	if (result.kind === "pending") return { kind: "pending" };
+	if (result.kind === "none") return { kind: "none" };
+	return terminalEditShortcutResult(result.key);
+}
+
 export function parseTerminalInterruptSequence(input: string): { readonly kind: "interrupt"; readonly length: number } | { readonly kind: "pending" } | { readonly kind: "none" } {
-	const kitty = parseKittyCsiUSequence(input);
-	if (kitty && terminalKeyIsControlC(kitty)) return { kind: "interrupt", length: kitty.length };
+	const result = parseTerminalModifiedKeySequence(input);
+	if (result.kind === "pending") return { kind: "pending" };
+	if (result.kind === "key" && terminalKeyIsControlC(result.key)) return { kind: "interrupt", length: result.key.length };
 
-	const xterm = parseXtermModifyOtherKeysSequence(input);
-	if (xterm && terminalKeyIsControlC(xterm)) return { kind: "interrupt", length: xterm.length };
-
-	if (isPotentialInterruptPrefix(input)) return { kind: "pending" };
+	if (result.kind === "key" || isPotentialInterruptPrefix(input)) return { kind: "none" };
 	return { kind: "none" };
+}
+
+export function terminalKeyIsShiftEnter(key: ParsedModifiedKey): boolean {
+	const effectiveModifier = key.modifier & ~LOCK_MODIFIER_MASK;
+	if ((effectiveModifier & SHIFT_MODIFIER_FLAG) === 0) return false;
+	return terminalKeyMatchesCodepoint(key, KEY_CODE_ENTER);
+}
+
+export function terminalKeyIsClipboardImagePaste(key: ParsedModifiedKey): boolean {
+	const effectiveModifier = key.modifier & ~LOCK_MODIFIER_MASK;
+	if ((effectiveModifier & (CONTROL_MODIFIER_FLAG | COMMAND_MODIFIER_FLAG)) === 0) return false;
+	return terminalKeyMatchesCodepoint(key, KEY_CODE_V, CYRILLIC_SMALL_EM_CODE, CYRILLIC_CAPITAL_EM_CODE);
+}
+
+export function terminalKeyShouldIgnore(key: ParsedModifiedKey): boolean {
+	return key.eventType === 3;
 }
 
 export function terminalEditShortcutForControlChar(char: string, shiftPressed: boolean): TerminalEditShortcut | undefined {
@@ -116,6 +146,19 @@ function interruptCodepointIsC(codepoint: number): boolean {
 	return normalized === KEY_CODE_C || normalized === CYRILLIC_SMALL_ES_CODE || normalized === CYRILLIC_CAPITAL_ES_CODE;
 }
 
+function terminalKeyMatchesCodepoint(key: ParsedModifiedKey, ...expectedCodepoints: number[]): boolean {
+	return expectedCodepoints.some((codepoint) => keyMatchesCodepoint(key, codepoint));
+}
+
+function keyMatchesCodepoint(key: ParsedModifiedKey, expectedCodepoint: number): boolean {
+	const normalizedExpected = normalizeLetterCodepoint(expectedCodepoint);
+	const primary = normalizeLetterCodepoint(key.codepoint);
+	if (primary === normalizedExpected) return true;
+
+	const baseLayout = key.baseLayoutKey;
+	return baseLayout !== undefined && normalizeLetterCodepoint(baseLayout) === normalizedExpected;
+}
+
 function terminalEditShortcutForKey(key: ParsedModifiedKey, effectiveModifier: number): TerminalEditShortcut | undefined {
 	const codepoint = editShortcutCodepoint(key);
 	if (codepoint === KEY_CODE_Y) return "redo";
@@ -136,15 +179,12 @@ function normalizeLetterCodepoint(codepoint: number): number {
 	return codepoint;
 }
 
-function isPotentialEditShortcutPrefix(input: string): boolean {
+function isPotentialModifiedKeyPrefix(input: string): boolean {
 	if (!input.startsWith("\x1b[")) return false;
 	if (input.includes("u") || input.includes("~")) return false;
 
 	const body = input.slice(2);
-	if (!/^[\d:;]*$/.test(body)) return false;
-
-	const possibleStarts = ["122", "121", "90", "27;"];
-	return possibleStarts.some((start) => start.startsWith(body) || body.startsWith(start));
+	return /^[\d:;]*$/.test(body);
 }
 
 function isPotentialInterruptPrefix(input: string): boolean {

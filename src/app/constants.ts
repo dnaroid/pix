@@ -54,7 +54,12 @@ export const REQUEST_HISTORY_VERSION = 1;
 export const REQUEST_HISTORY_MAX_ENTRIES = 200;
 export const REQUEST_HISTORY_MAX_BYTES = 128 * 1024;
 export const REQUEST_HISTORY_MAX_ENTRY_BYTES = 16 * 1024;
-export const ENABLE_TERMINAL_KEY_REPORTING = "\x1b[>7u\x1b[>4;2m";
+// Match pi/@earendil-works/pi-tui keyboard setup: request Kitty keyboard
+// protocol flags, query the terminal response, and use xterm modifyOtherKeys
+// only as a response-driven fallback. Enabling both protocols blindly can make
+// terminals disagree about modified Enter reporting.
+export const ENABLE_TERMINAL_KEY_REPORTING = "\x1b[>7u\x1b[?u\x1b[c";
+export const ENABLE_TERMINAL_MODIFY_OTHER_KEYS = "\x1b[>4;2m";
 export const DISABLE_TERMINAL_KEY_REPORTING = "\x1b[<u\x1b[>4;0m";
 export const ENABLE_BRACKETED_PASTE = "\x1b[?2004h";
 export const DISABLE_BRACKETED_PASTE = "\x1b[?2004l";

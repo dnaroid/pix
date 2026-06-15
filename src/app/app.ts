@@ -36,7 +36,7 @@ import { AppAutocompleteController } from "./input/autocomplete-controller.js";
 import { AppQueuedMessageController } from "./session/queued-message-controller.js";
 import { AppRequestHistory } from "./session/request-history.js";
 import { AppRenderController } from "./rendering/render-controller.js";
-import { createPixRuntime } from "./runtime.js";
+import { createPixRuntime, type CreatePixRuntimeOptions } from "./runtime.js";
 import { ScreenStyler } from "./screen/screen-styler.js";
 import { AppScrollController, type AppScrollState } from "./screen/scroll-controller.js";
 import { searchResultScrollNeedles, searchResultTargetEntry, type SessionSearchResult } from "./session/session-search.js";
@@ -81,6 +81,8 @@ type AppSessionView = {
 	eventState: AppSessionEventControllerState;
 	scrollState: AppScrollState;
 };
+
+type AppRuntimeCreationOptions = Partial<Pick<CreatePixRuntimeOptions, "reuseServicesFrom">>;
 
 export class PiUiExtendApp {
 	private readonly entries: Entry[] = [];
@@ -197,7 +199,10 @@ export class PiUiExtendApp {
 			maxProjectSessions: () => this.pixConfig.maxProjectSessions,
 			blinkController: this.blinkController,
 			runtime: () => this.runtime,
-			createRuntimeForNewSession: () => this.createRuntime(newTabRuntimeOptions(this.options)),
+			createRuntimeForNewSession: () => this.createRuntime(
+				newTabRuntimeOptions(this.options),
+				this.runtime === undefined ? {} : { reuseServicesFrom: this.runtime },
+			),
 			createRuntimeForSession: (sessionPath) => this.createRuntime({
 				...this.options,
 				noSession: false,
@@ -818,10 +823,11 @@ export class PiUiExtendApp {
 		this.slashCommands = this.commandController.slashCommands;
 	}
 
-	private createRuntime(options: AppOptions): Promise<AgentSessionRuntime> {
+	private createRuntime(options: AppOptions, runtimeOptions: AppRuntimeCreationOptions = {}): Promise<AgentSessionRuntime> {
 		return createPixRuntime(options, {
 			eventBus: this.createExtensionEventBus(),
 			config: this.pixConfig,
+			...runtimeOptions,
 		});
 	}
 
