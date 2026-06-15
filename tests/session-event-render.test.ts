@@ -480,6 +480,41 @@ it("strips carriage returns from streamed assistant text so CRLF line endings do
 		`carriage return leaked into rendered assistant text\n\n${JSON.stringify(text)}`);
 });
 
+it("uses accumulated assistant text snapshots so split stream whitespace is not lost", () => {
+	const { entries, controller } = createHarness();
+
+	emit(controller, { type: "message_start", message: { role: "assistant" } } as unknown as AgentSessionEvent);
+	emit(controller, {
+		type: "message_update",
+		message: { role: "assistant", content: [{ type: "text", text: "PIX-FIRST" }] },
+		assistantMessageEvent: {
+			type: "text_delta",
+			contentIndex: 0,
+			delta: "PIX-FIRST",
+			partial: { role: "assistant", content: [{ type: "text", text: "PIX-FIRST" }] },
+		},
+	} as unknown as AgentSessionEvent);
+	// Regression shape: the delta path can be missing/lose the separator at a
+	// chunk boundary, while the SDK event snapshot still carries the authoritative
+	// accumulated text (the same source of truth pi's own TUI renders).
+	emit(controller, {
+		type: "message_update",
+		message: { role: "assistant", content: [{ type: "text", text: "PIX-FIRST PIX-SECOND" }] },
+		assistantMessageEvent: {
+			type: "text_delta",
+			contentIndex: 0,
+			delta: "PIX-SECOND",
+			partial: { role: "assistant", content: [{ type: "text", text: "PIX-FIRST PIX-SECOND" }] },
+		},
+	} as unknown as AgentSessionEvent);
+
+	const transcript = renderTranscript(entries);
+	assert.ok(transcript.includes("PIX-FIRST PIX-SECOND"),
+		`assistant stream snapshot whitespace was not preserved\n\n${transcript}`);
+	assert.equal(countOccurrences(transcript, "PIX-FIRSTPIX-SECOND"), 0,
+		`assistant words were joined across stream chunks\n\n${transcript}`);
+});
+
 it("marks running tool entries as done when an error aborts the turn without tool_execution_end", () => {
 	const { entries, controller } = createHarness();
 

@@ -266,7 +266,7 @@ export class AppSessionEventController {
 				this.host.updateQueuedMessageStatus();
 				break;
 			case "message_update":
-				this.handleMessageUpdate(event.assistantMessageEvent);
+				this.handleMessageUpdate(event);
 				break;
 			case "tool_execution_start":
 				this.finishCurrentThinkingEntry();
@@ -589,9 +589,8 @@ export class AppSessionEventController {
 		this.host.recordWorkspaceMutationForUserEntry(prepared.userEntryId, mutation);
 	}
 
-	private handleMessageUpdate(
-		assistantEvent: Extract<AgentSessionEvent, { type: "message_update" }>["assistantMessageEvent"],
-	): void {
+	private handleMessageUpdate(event: Extract<AgentSessionEvent, { type: "message_update" }>): void {
+		const assistantEvent = event.assistantMessageEvent;
 		if (this.assistantMessageClosed && assistantEvent.type !== "done") return;
 		this.assistantMessageClosed = false;
 		switch (assistantEvent.type) {
@@ -606,7 +605,11 @@ export class AppSessionEventController {
 			case "text_delta":
 				this.finishCurrentThinkingEntry();
 				this.host.setSessionActivity("running");
-				this.appendAssistantText(assistantEvent.delta, assistantEvent.contentIndex);
+				{
+					const snapshotText = assistantTextSnapshotForContentIndex(event.message, assistantEvent.partial, assistantEvent.contentIndex);
+					if (snapshotText === undefined) this.appendAssistantText(assistantEvent.delta, assistantEvent.contentIndex);
+					else this.reconcileAssistantTextBlock(snapshotText, assistantEvent.contentIndex, { keepOpen: true });
+				}
 				break;
 			case "text_end":
 				this.finishCurrentThinkingEntry();
@@ -700,7 +703,7 @@ export class AppSessionEventController {
 		this.touchEntry(entry);
 	}
 
-	private reconcileAssistantTextBlock(content: string, contentIndex: number | undefined): void {
+	private reconcileAssistantTextBlock(content: string, contentIndex: number | undefined, options: { keepOpen?: boolean } = {}): void {
 		this.flushAssistantTextBuffer(true);
 		const hasVisibleTextBeforeBlock = this.hasVisibleTextBeforeCurrentAssistantBlock();
 		// C.11: normalise CRLF in the final block content (see appendAssistantText).
@@ -752,9 +755,16 @@ export class AppSessionEventController {
 		}
 		this.currentAssistantEntryId = entry.id;
 		if (contentIndex !== undefined) this.assistantTextBlocksByContentIndex.set(contentIndex, visibleText);
-		this.currentAssistantTextBlockEntryId = undefined;
-		this.currentAssistantTextBlockStartLength = undefined;
-		this.currentAssistantTextBlockContentIndex = undefined;		this.assistantTextBuffer = "";
+		if (options.keepOpen) {
+			this.currentAssistantTextBlockEntryId = entry.id;
+			this.currentAssistantTextBlockStartLength = startLength;
+			this.currentAssistantTextBlockContentIndex = contentIndex;
+		} else {
+			this.currentAssistantTextBlockEntryId = undefined;
+			this.currentAssistantTextBlockStartLength = undefined;
+			this.currentAssistantTextBlockContentIndex = undefined;
+		}
+		this.assistantTextBuffer = "";
 	}
 
 	private ensureAssistantTextBlockStarted(entry: Extract<Entry, { kind: "assistant" }>): void {
@@ -979,6 +989,17 @@ function partialToolCallAt(partial: unknown, contentIndex: number): unknown {
 	if (!isRecord(partial) || !Array.isArray(partial.content)) return undefined;
 	const block = partial.content[contentIndex];
 	return isRecord(block) && block.type === "toolCall" ? block : undefined;
+}
+
+function assistantTextSnapshotForContentIndex(message: unknown, partial: unknown, contentIndex: number | undefined): string | undefined {
+	if (contentIndex === undefined) return undefined;
+	return assistantTextContentAt(message, contentIndex) ?? assistantTextContentAt(partial, contentIndex);
+}
+
+function assistantTextContentAt(value: unknown, contentIndex: number): string | undefined {
+	if (!isRecord(value) || !Array.isArray(value.content)) return undefined;
+	const block = value.content[contentIndex];
+	return isRecord(block) && block.type === "text" && typeof block.text === "string" ? block.text : undefined;
 }
 
 function assistantStreamVisibleTextForCompleteBlock(text: string, hasVisibleTextBeforeBlock: boolean): string {
