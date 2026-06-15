@@ -122,6 +122,27 @@ describe.serial("todo tool", () => {
 		expect(got.content[0].text).toContain("thinking: high");
 	});
 
+	test.serial("keeps live tool state isolated by session id in one process", async () => {
+		const { activateTodoStateScope, registerTodoTool, getTodos } = await loadTodoModule();
+		const pi = new FakePi();
+		registerTodoTool(pi as any);
+		const tool = pi.tools.get("todo");
+		const ctxA = { cwd: "/tmp/project", sessionManager: { getSessionId: () => "session-a" } };
+		const ctxB = { cwd: "/tmp/project", sessionManager: { getSessionId: () => "session-b" } };
+
+		await tool.execute("call-a", { action: "create", subject: "Session A" }, undefined, undefined, ctxA);
+		expect(getTodos()).toMatchObject([{ id: 1, subject: "Session A" }]);
+
+		await tool.execute("call-b", { action: "create", subject: "Session B" }, undefined, undefined, ctxB);
+		expect(getTodos()).toMatchObject([{ id: 1, subject: "Session B" }]);
+
+		activateTodoStateScope(ctxA);
+		expect(getTodos()).toMatchObject([{ id: 1, subject: "Session A" }]);
+
+		activateTodoStateScope(ctxB);
+		expect(getTodos()).toMatchObject([{ id: 1, subject: "Session B" }]);
+	});
+
 	test.serial("warns before appending to unfinished todos and supports replace for new plans", async () => {
 		const { registerTodoTool, getTodos } = await loadTodoModule();
 		const pi = new FakePi();

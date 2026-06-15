@@ -45,6 +45,7 @@ export function isTodoLiveStateEvent(value: unknown): value is TodoLiveStateEven
 	if (value.version !== 1) return false;
 	if (!isTodoDetails(value.details)) return false;
 	if (value.sessionFile !== undefined && typeof value.sessionFile !== "string") return false;
+	if (value.sessionId !== undefined && typeof value.sessionId !== "string") return false;
 	return typeof value.checkedAt === "number" && Number.isFinite(value.checkedAt);
 }
 

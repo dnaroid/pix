@@ -370,6 +370,7 @@ export class PiUiExtendApp {
 		});
 		this.todoWidgetController = new AppTodoWidgetController({
 			sessionFile: () => this.runtime?.session.sessionFile,
+			sessionId: () => this.runtime?.session.sessionId,
 			isRunning: () => this.running,
 			render: () => this.scheduleRender(),
 		});

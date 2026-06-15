@@ -46,6 +46,7 @@ describe("todo widget controller", () => {
 			version: 1,
 			details,
 			sessionFile: "/tmp/project/session.jsonl",
+			sessionId: "session-1",
 			checkedAt: Date.now(),
 		});
 
@@ -81,9 +82,11 @@ describe("todo widget controller", () => {
 
 	it("caches live todo state events for inactive sessions until they become current", () => {
 		let currentSessionFile = "/tmp/project/current.jsonl";
+		let currentSessionId = "session-current";
 		let renders = 0;
 		const controller = new AppTodoWidgetController({
 			sessionFile: () => currentSessionFile,
+			sessionId: () => currentSessionId,
 			isRunning: () => true,
 			render: () => {
 				renders += 1;
@@ -100,6 +103,7 @@ describe("todo widget controller", () => {
 			version: 1,
 			details: inactiveDetails,
 			sessionFile: "/tmp/project/other.jsonl",
+			sessionId: "session-other",
 			checkedAt: Date.now(),
 		});
 
@@ -107,14 +111,17 @@ describe("todo widget controller", () => {
 		assert.equal(renders, 0);
 
 		currentSessionFile = "/tmp/project/other.jsonl";
+		currentSessionId = "session-other";
 
 		assert.equal(controller.widgetDetails, inactiveDetails);
 	});
 
 	it("keeps scoped todo details across session view resets", () => {
 		let currentSessionFile = "/tmp/project/current.jsonl";
+		let currentSessionId = "session-current";
 		const controller = new AppTodoWidgetController({
 			sessionFile: () => currentSessionFile,
+			sessionId: () => currentSessionId,
 			isRunning: () => true,
 			render: () => {},
 		});
@@ -129,6 +136,7 @@ describe("todo widget controller", () => {
 			version: 1,
 			details,
 			sessionFile: currentSessionFile,
+			sessionId: currentSessionId,
 			checkedAt: Date.now(),
 		});
 
@@ -137,8 +145,76 @@ describe("todo widget controller", () => {
 		assert.equal(controller.widgetDetails, details);
 
 		currentSessionFile = "/tmp/project/other.jsonl";
+		currentSessionId = "session-other";
 
 		assert.equal(controller.widgetDetails, undefined);
+	});
+
+	it("scopes details by session id when the session file is not available yet", () => {
+		let currentSessionId = "session-a";
+		const controller = new AppTodoWidgetController({
+			sessionId: () => currentSessionId,
+			isRunning: () => true,
+			render: () => {},
+		});
+		const detailsA: TodoDetails = {
+			action: "list",
+			params: {},
+			nextId: 2,
+			tasks: [{ id: 1, subject: "Session A", status: "pending" }],
+		};
+		const detailsB: TodoDetails = {
+			action: "list",
+			params: {},
+			nextId: 2,
+			tasks: [{ id: 1, subject: "Session B", status: "pending" }],
+		};
+
+		controller.observeLiveState({
+			version: 1,
+			details: detailsA,
+			sessionId: "session-a",
+			checkedAt: Date.now(),
+		});
+
+		currentSessionId = "session-b";
+		controller.observeLiveState({
+			version: 1,
+			details: detailsB,
+			sessionId: "session-b",
+			checkedAt: Date.now(),
+		});
+
+		assert.equal(controller.widgetDetails, detailsB);
+
+		currentSessionId = "session-a";
+		assert.equal(controller.widgetDetails, detailsA);
+	});
+
+	it("does not attribute unscoped live events to the active session", () => {
+		let renders = 0;
+		const controller = new AppTodoWidgetController({
+			sessionId: () => "active-session",
+			isRunning: () => true,
+			render: () => {
+				renders += 1;
+			},
+		});
+		const details: TodoDetails = {
+			action: "list",
+			params: {},
+			nextId: 2,
+			tasks: [{ id: 1, subject: "Foreign unscoped event", status: "pending" }],
+		};
+
+		controller.observeLiveState({
+			version: 1,
+			details,
+			checkedAt: Date.now(),
+		});
+
+		assert.equal(controller.widgetDetails, undefined);
+		assert.equal(renders, 0);
 	});
 
 	it("ignores non-todo, invalid, and error results", () => {

@@ -17,6 +17,55 @@ interface CandidateBoundary {
   isSystemReminder: boolean;
 }
 
+function hasAddressableSnapshot(state: DcpState): boolean {
+  return state.messageMetaSnapshot.size > 0 || state.messageIdSnapshot.size > 0;
+}
+
+function isActiveBlockId(blockId: number, state: DcpState): boolean {
+  return state.compressionBlocks.some((block) => block.id === blockId && block.active);
+}
+
+function findCurrentMessageId(msg: any, state: DcpState): string | undefined {
+  const role = msg?.role ?? "";
+  const timestamp = msg?.timestamp;
+  if (!Number.isFinite(timestamp)) return undefined;
+
+  for (const [id, meta] of state.messageMetaSnapshot) {
+    if (meta.timestamp === timestamp && meta.role === role && meta.blockId === undefined) return id;
+  }
+
+  for (const [id, ts] of state.messageIdSnapshot) {
+    if (ts === timestamp) return id;
+  }
+
+  return undefined;
+}
+
+function resolveAddressableBoundaryId(
+  msg: any,
+  state: DcpState,
+  options: { allowBlocks: boolean },
+): { id: string; blockId?: number; text: string } | null {
+  const text = messageText(msg);
+  const blockId = extractBlockId(text);
+  if (blockId !== undefined) {
+    if (options.allowBlocks && isActiveBlockId(blockId, state)) return { id: `b${blockId}`, blockId, text };
+    if (!hasAddressableSnapshot(state) && options.allowBlocks) return { id: `b${blockId}`, blockId, text };
+    return null;
+  }
+
+  const messageId = extractMessageId(text);
+  if (!messageId) return null;
+  if (!hasAddressableSnapshot(state)) return { id: messageId, text };
+
+  if (state.messageMetaSnapshot.has(messageId) || state.messageIdSnapshot.has(messageId)) {
+    return { id: messageId, text };
+  }
+
+  const currentId = findCurrentMessageId(msg, state);
+  return currentId ? { id: currentId, text } : null;
+}
+
 export function detectCompressionCandidate(
   messages: any[],
   _state: DcpState,
@@ -29,19 +78,16 @@ export function detectCompressionCandidate(
 
   const boundaries: CandidateBoundary[] = [];
   for (const msg of messages) {
-    const text = messageText(msg);
-    const blockId = extractBlockId(text);
-    const messageId = extractMessageId(text);
-    const id = blockId !== undefined ? `b${blockId}` : messageId;
-    if (!id) continue;
+    const boundary = resolveAddressableBoundaryId(msg, _state, { allowBlocks: true });
+    if (!boundary) continue;
     if (!Number.isFinite(msg.timestamp)) continue;
     boundaries.push({
-      id,
+      id: boundary.id,
       role: msg.role ?? "",
       timestamp: msg.timestamp,
       tokenEstimate: estimateMessageTokens(msg),
-      blockId,
-      isSystemReminder: text.includes("<dcp-system-reminder>"),
+      blockId: boundary.blockId,
+      isSystemReminder: boundary.text.includes("<dcp-system-reminder>"),
     });
   }
 
@@ -102,6 +148,7 @@ export function formatCompressionCandidateHint(candidate: CompressionCandidate):
 
 export function detectMessageCompressionCandidates(
   messages: any[],
+  state: DcpState,
   config: DcpConfig,
   contextPercent: number,
 ): MessageCompressionCandidate[] {
@@ -111,18 +158,15 @@ export function detectMessageCompressionCandidates(
 
   const boundaries: CandidateBoundary[] = [];
   for (const msg of messages) {
-    const text = messageText(msg);
-    const blockId = extractBlockId(text);
-    const messageId = extractMessageId(text);
-    if (!messageId || blockId !== undefined) continue;
+    const boundary = resolveAddressableBoundaryId(msg, state, { allowBlocks: false });
+    if (!boundary || boundary.blockId !== undefined) continue;
     if (!Number.isFinite(msg.timestamp)) continue;
     boundaries.push({
-      id: messageId,
+      id: boundary.id,
       role: msg.role ?? "",
       timestamp: msg.timestamp,
       tokenEstimate: estimateMessageTokens(msg),
-      blockId,
-      isSystemReminder: text.includes("<dcp-system-reminder>"),
+      isSystemReminder: boundary.text.includes("<dcp-system-reminder>"),
     });
   }
 

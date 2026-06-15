@@ -213,6 +213,26 @@ describe("session-title extension", () => {
 			}
 		});
 	});
+
+	it("ignores stale ctx in delayed UI refreshes scheduled from input", async () => {
+		await withSessionTitleDisabled(async () => {
+			let stale = false;
+			const { handlers } = createExtensionHarness({
+				branch: [],
+				sessionName: undefined,
+				sessionId: "session-stale-refresh",
+				hasUI: true,
+				staleGuard: () => stale,
+			});
+
+			sessionTitle(handlers.api);
+			await handlers.session_start?.({ type: "session_start", reason: "new" }, handlers.ctx);
+			await handlers.input?.({ text: "Refresh title after startup", source: "user" }, handlers.ctx);
+			stale = true;
+			await new Promise((resolve) => setTimeout(resolve, 10));
+			await handlers.session_shutdown?.({ type: "session_shutdown", reason: "new" }, handlers.ctx);
+		});
+	});
 });
 
 function fakeContext(branch: unknown[]): ExtensionContext {
@@ -239,6 +259,7 @@ function createExtensionHarness(options: {
 	sessionName: string | undefined;
 	sessionId: string;
 	previousSessionFile?: string;
+	hasUI?: boolean;
 	staleGuard?: () => boolean;
 }) {
 	const handlers: Record<string, ((event: unknown, ctx: ExtensionContext) => unknown | Promise<unknown>) | undefined> = {};
@@ -250,7 +271,15 @@ function createExtensionHarness(options: {
 	};
 	const ctx = {
 		cwd: process.cwd(),
-		hasUI: false,
+		hasUI: options.hasUI ?? false,
+		ui: {
+			setTitle: () => {
+				assertFresh();
+			},
+			notify: () => {
+				assertFresh();
+			},
+		},
 		sessionManager: {
 			getBranch: () => options.branch,
 			getSessionId: () => {
@@ -292,6 +321,9 @@ function createExtensionHarness(options: {
 			},
 			get input() {
 				return handlers.input;
+			},
+			get session_shutdown() {
+				return handlers.session_shutdown;
 			},
 		},
 		setSessionNameCalls,

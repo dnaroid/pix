@@ -125,6 +125,7 @@ export type TodoLiveStateEvent = {
 	version: 1;
 	details: TodoDetails;
 	sessionFile?: string;
+	sessionId?: string;
 	checkedAt: number;
 };
 

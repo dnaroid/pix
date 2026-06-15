@@ -6,7 +6,7 @@ import { replayFromBranch } from "./state/replay.js";
 import { ACTIVE_STATUSES, isTaskBlocked, selectVisibleTasks } from "./state/selectors.js";
 import { applyTaskMutation } from "./state/state-reducer.js";
 import { getState, replaceState } from "./state/store.js";
-import { DEFAULT_PROMPT_GUIDELINES, DEFAULT_PROMPT_SNIPPET, publishTodoState, registerTodosCommand, registerTodoTool } from "./todo.js";
+import { activateTodoStateScope, DEFAULT_PROMPT_GUIDELINES, DEFAULT_PROMPT_SNIPPET, publishTodoState, registerTodosCommand, registerTodoTool } from "./todo.js";
 import type { Task, TaskMutationParams } from "./tool/types.js";
 
 type AgentMessageLike = { role?: unknown; stopReason?: unknown; content?: unknown };
@@ -227,6 +227,7 @@ function isCompletedAssistantReply(message: AgentMessageLike | undefined): boole
 	}
 
 	function applyInternalTodoMutation(action: "update", params: TaskMutationParams, ctx: ExtensionContext): boolean {
+		activateTodoStateScope(ctx);
 		const result = applyTaskMutation(getState(), action, params);
 		if (result.op.kind === "error") {
 			console.warn(`rpiv-todo: failed internal ${action} mutation — ${result.op.message}`);
@@ -246,6 +247,7 @@ function isCompletedAssistantReply(message: AgentMessageLike | undefined): boole
 	}
 
 	function maybeRecoverCompletedCurrentTask(messages: readonly unknown[] | undefined, ctx: ExtensionContext): boolean {
+		activateTodoStateScope(ctx);
 		if (!hasCompletedAssistantReply(messages)) return false;
 		const task = findOptimisticallyCompletableTask(getState().tasks);
 		if (!task) return false;
@@ -264,6 +266,7 @@ function isCompletedAssistantReply(message: AgentMessageLike | undefined): boole
 		nudgeTimer = setTimeout(() => {
 			nudgeTimer = undefined;
 			try {
+				activateTodoStateScope(ctx);
 				if (!ctx.isIdle()) {
 					if (attempt < TODO_NUDGE_MAX_IDLE_ATTEMPTS) scheduleTodoNudge(ctx, attempt + 1);
 					return;
@@ -295,6 +298,7 @@ function isCompletedAssistantReply(message: AgentMessageLike | undefined): boole
 	registerTodosCommand(pi);
 
 	pi.on("session_start", async (_event, ctx) => {
+		activateTodoStateScope(ctx);
 		currentModel = ctx.model;
 		registerTodoToolWithCurrentPrompt();
 		const persisted = loadPersistedPlan(ctx.cwd);
@@ -313,12 +317,14 @@ function isCompletedAssistantReply(message: AgentMessageLike | undefined): boole
 	});
 
 	pi.on("session_compact", async (_event, ctx) => {
+		activateTodoStateScope(ctx);
 		replaceState(autoClearCompletedTodos(loadPersistedPlan(ctx.cwd)?.state ?? replayFromBranch(ctx)).state);
 		publishTodoState(pi as any, ctx);
 		lastNudgedSignature = undefined;
 	});
 
 	pi.on("session_tree", async (_event, ctx) => {
+		activateTodoStateScope(ctx);
 		replaceState(autoClearCompletedTodos(loadPersistedPlan(ctx.cwd)?.state ?? replayFromBranch(ctx)).state);
 		publishTodoState(pi as any, ctx);
 		lastNudgedSignature = undefined;
@@ -345,12 +351,14 @@ function isCompletedAssistantReply(message: AgentMessageLike | undefined): boole
 		if (isAskUserToolName(event.toolName)) pendingAskUserToolCallIds.delete(event.toolCallId);
 	});
 
-	pi.on("agent_start", async () => {
+	pi.on("agent_start", async (_event, ctx) => {
+		activateTodoStateScope(ctx);
 		pendingAskUserToolCallIds.clear();
 		inProgressAtAgentStart = new Set(selectVisibleTasks(getState()).filter((task) => task.status === "in_progress").map((task) => task.id));
 	});
 
 	pi.on("message_end", async (event, ctx) => {
+		activateTodoStateScope(ctx);
 		if (!isCompletedAssistantReply((event as { message?: AgentMessageLike } | undefined)?.message)) return;
 		if (maybeRecoverCompletedCurrentTask([(event as { message?: AgentMessageLike }).message], ctx)) {
 			lastNudgedSignature = undefined;
@@ -359,6 +367,7 @@ function isCompletedAssistantReply(message: AgentMessageLike | undefined): boole
 	});
 
 	pi.on("agent_end", async (event, ctx) => {
+		activateTodoStateScope(ctx);
 		const completedAssistantReply = hasCompletedAssistantReply((event as { messages?: readonly unknown[] } | undefined)?.messages);
 
 		if (suppressNextNudgeForThinkingSwitch) {

@@ -239,4 +239,40 @@ describe("ConversationViewport on a huge session", () => {
 		const tail = view.lines.map((line) => line.text).join("\n");
 		assert.ok(tail.includes("PIX-HUGE-00499"), `newest sentinel not visible at the pinned bottom\n\n${tail}`);
 	});
+
+	it("accounts for expanded tool arguments before computing the pinned bottom", () => {
+		const patch = Array.from({ length: 80 }, (_value, index) => `+line ${String(index).padStart(2, "0")}`).join("\n");
+		const entries: Entry[] = [
+			{ id: "user-1", kind: "user", text: "apply a large patch" },
+			{
+				id: "patch-1",
+				kind: "tool",
+				toolCallId: "call-patch-1",
+				toolName: "apply_patch",
+				argsText: JSON.stringify({ input: patch }),
+				output: "Success. Updated files.",
+				expanded: true,
+				isError: false,
+				status: "done",
+			},
+			{
+				id: "shell-1",
+				kind: "tool",
+				toolCallId: "call-shell-1",
+				toolName: "shell",
+				argsText: JSON.stringify({ command: "npm run check" }),
+				output: "CHECK-DONE",
+				expanded: false,
+				isError: false,
+				status: "done",
+			},
+		];
+		const viewport = createViewport(entries);
+		const bodyHeight = 20;
+		const controller = createScrollController(viewport, { bodyHeight });
+
+		const view = controller.conversationView(WIDTH, bodyHeight);
+		const tail = view.lines.map((line) => line.text).join("\n");
+		assert.ok(tail.includes("CHECK-DONE"), `bottom view lost the tool call after an expanded patch\n\n${tail}`);
+	});
 });

@@ -309,6 +309,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 			)
 			messageCandidates = detectMessageCompressionCandidates(
 				prunedMessages,
+				state,
 				config,
 				contextPercent,
 			)

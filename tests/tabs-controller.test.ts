@@ -225,6 +225,67 @@ describe("AppTabsController", () => {
 		assert.equal(historyLoadCount, 1);
 	});
 
+	it("reloads stale cached tab view before showing a tab that finished in the background", async () => {
+		const activeRuntime = fakeRuntime("one", "/tmp/one.jsonl") as FakeAgentSessionRuntime;
+		const targetRuntime = fakeRuntime("two", "/tmp/two.jsonl") as FakeAgentSessionRuntime;
+		let currentRuntime: AgentSessionRuntime = activeRuntime;
+		let historyLoadCount = 0;
+		let restoreCachedViewCount = 0;
+		const controller = new AppTabsController({
+			options: { cwd: "/tmp", themeName: "dark", noSession: true } satisfies AppOptions,
+			blinkController: fakeBlinkController(),
+			runtime: () => currentRuntime,
+			createRuntimeForNewSession: async () => fakeRuntime("new", "/tmp/new.jsonl"),
+			createRuntimeForSession: async () => targetRuntime,
+			activateRuntime: async (runtime) => {
+				currentRuntime = runtime;
+			},
+			disposeRuntime: async () => {},
+			isRunning: () => true,
+			setStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			resetSessionView: () => {},
+			loadSessionHistory: () => {},
+			loadSessionHistoryAsync: async () => {
+				historyLoadCount += 1;
+				return true;
+			},
+			syncUserSessionEntryMetadata: () => {},
+			captureSessionView: () => fakeSessionView(),
+			restoreSessionView: () => {
+				restoreCachedViewCount += 1;
+			},
+			captureInputState: () => ({ text: "", cursor: 0 }),
+			restoreInputState: () => {},
+			addEntry: () => {},
+			showToast: () => {},
+			render: () => {},
+		});
+		const tabs = controller as unknown as {
+			tabItems: SessionTab[];
+			activeTabId: string | undefined;
+			sessionViewsByTabId: Map<string, ReturnType<typeof fakeSessionView>>;
+			setRuntimeForTab(tabId: string, runtime: AgentSessionRuntime): void;
+		};
+		tabs.tabItems.push(
+			{ id: "tab-1", title: "one", status: "active", sessionPath: "/tmp/one.jsonl" },
+			{ id: "tab-2", title: "two", status: "waiting", sessionPath: "/tmp/two.jsonl" },
+		);
+		tabs.activeTabId = "tab-1";
+		tabs.setRuntimeForTab("tab-1", activeRuntime);
+		tabs.setRuntimeForTab("tab-2", targetRuntime);
+		tabs.sessionViewsByTabId.set("tab-2", fakeSessionView());
+
+		targetRuntime.emitSessionEvent({ type: "agent_end", messages: [], willRetry: false });
+
+		await controller.switchToTab("tab-2");
+
+		assert.equal(currentRuntime, targetRuntime);
+		assert.equal(historyLoadCount, 1);
+		assert.equal(restoreCachedViewCount, 0);
+	});
+
 	it("does not reload cached history while switching back to a running tab", async () => {
 		const activeRuntime = fakeRuntime("one", "/tmp/one.jsonl");
 		const targetRuntime = fakeRuntime("two", "/tmp/two.jsonl", { isStreaming: true }) as FakeAgentSessionRuntime;
@@ -2417,6 +2478,8 @@ function fakeSessionView(overrides: Partial<{ scrollState: { scrollFromBottom: n
 			assistantMessageClosed: false,
 			assistantTextBuffer: "",
 			entryRenderVersions: new Map(),
+			historyEntries: [],
+			historyWindowStart: 0,
 		},
 		scrollState: overrides.scrollState ?? { scrollFromBottom: 0 },
 	};

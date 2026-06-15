@@ -13,6 +13,7 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { resolve } from "node:path";
 import { TODO_TOOL_DESCRIPTION } from "../tool-descriptions.js";
 import {
 	disablePersistence,
@@ -25,7 +26,7 @@ import { AUTO_CLEAR_COMPLETED_MESSAGE, autoClearCompletedTodos } from "./state/a
 import { replayFromBranch } from "./state/replay.js";
 import { isTaskBlocked, selectTasksByStatus, selectTodoCounts } from "./state/selectors.js";
 import { applyTaskMutation } from "./state/state-reducer.js";
-import { commitState, getState, replaceState } from "./state/store.js";
+import { activateStateScope, commitState, getState, replaceState } from "./state/store.js";
 import { buildToolResult, formatContent } from "./tool/response-envelope.js";
 import {
 	COMMAND_NAME,
@@ -83,7 +84,7 @@ interface TodoToolRegistrationOptions extends TodoToolHooks {
 	promptGuidelines?: string[];
 }
 
-type TodoStateEventContext = { sessionManager?: { getSessionFile?: () => unknown } };
+type TodoStateEventContext = { sessionManager?: { getSessionFile?: () => unknown; getSessionId?: () => unknown } };
 type TodoStateEventEmitter = { events?: { emit?: (channel: string, data: unknown) => void } };
 
 interface TodosCommandOptions {
@@ -183,14 +184,34 @@ function sessionFileFromContext(ctx: unknown): string | undefined {
 	return typeof sessionFile === "string" && sessionFile.trim() ? sessionFile : undefined;
 }
 
+function sessionIdFromContext(ctx: unknown): string | undefined {
+	const sessionId = (ctx as TodoStateEventContext | undefined)?.sessionManager?.getSessionId?.();
+	return typeof sessionId === "string" && sessionId.trim() ? sessionId : undefined;
+}
+
+function todoStateScopeFromContext(ctx: unknown): string | undefined {
+	const sessionFile = sessionFileFromContext(ctx);
+	if (sessionFile) return `file:${resolve(sessionFile)}`;
+	const sessionId = sessionIdFromContext(ctx);
+	if (sessionId) return `id:${sessionId}`;
+	const cwd = (ctx as { cwd?: unknown } | undefined)?.cwd;
+	return typeof cwd === "string" && cwd.trim() ? `cwd:${resolve(cwd)}` : undefined;
+}
+
+export function activateTodoStateScope(ctx: unknown): void {
+	activateStateScope(todoStateScopeFromContext(ctx));
+}
+
 export function publishTodoState(
 	pi: TodoStateEventEmitter,
 	ctx: unknown,
 	action: TaskAction = "list",
 	params: Record<string, unknown> = {},
 ): void {
+	activateTodoStateScope(ctx);
 	const state = getState();
 	const sessionFile = sessionFileFromContext(ctx);
+	const sessionId = sessionIdFromContext(ctx);
 	pi.events?.emit?.(TODO_STATE_EVENT, {
 		version: 1,
 		details: {
@@ -200,6 +221,7 @@ export function publishTodoState(
 			nextId: state.nextId,
 		},
 		...(sessionFile ? { sessionFile } : {}),
+		...(sessionId ? { sessionId } : {}),
 		checkedAt: Date.now(),
 	});
 }
@@ -363,6 +385,7 @@ export function registerTodoTool(pi: ExtensionAPI, hooks: TodoToolRegistrationOp
 		parameters: TodoParamsSchema,
 
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+			activateTodoStateScope(_ctx);
 			const result = applyTaskMutation(getState(), params.action, params as TaskMutationParams);
 			if (result.op.kind === "error") {
 				throw new Error(result.op.message);
@@ -391,6 +414,7 @@ export function registerTodosCommand(pi: ExtensionAPI): void {
 	description: "Show todos on the current branch. Flags: --active, --ready, --blocked, --tree, --status <status>, --export [json|markdown]. Commands: persist on|off|clear|status, scope <id...>",
 		getArgumentCompletions: (prefix) => completeCommandArguments(String(prefix ?? ""), TODOS_ARGUMENT_COMPLETIONS),
 		handler: async (args, ctx) => {
+			activateTodoStateScope(ctx);
 			if (handlePersistCommand(args, ctx)) return;
 			if (handleScopeCommand(args, ctx, () => publishTodoState(pi as TodoStateEventEmitter, ctx))) return;
 			if (!ctx.hasUI) {
@@ -459,6 +483,7 @@ export function registerTodosCommand(pi: ExtensionAPI): void {
 		description: "Enable, disable, clear, or inspect project todo persistence. Args: on|off|clear|status.",
 		getArgumentCompletions: (prefix) => completeCommandArguments(String(prefix ?? ""), PERSIST_ARGUMENT_COMPLETIONS),
 		handler: async (args, ctx) => {
+			activateTodoStateScope(ctx);
 			handlePersistCommand(`persist ${getCommandText(args)}`, ctx);
 		},
 	});
@@ -466,6 +491,7 @@ export function registerTodosCommand(pi: ExtensionAPI): void {
 	pi.registerCommand(SCOPE_COMMAND_NAME, {
 		description: "Select todo ids to continue from a persisted plan; pending/in_progress items outside the scope become deferred.",
 		handler: async (args, ctx) => {
+			activateTodoStateScope(ctx);
 			handleScopeCommand(`scope ${getCommandText(args)}`, ctx, () => publishTodoState(pi as TodoStateEventEmitter, ctx));
 		},
 	});

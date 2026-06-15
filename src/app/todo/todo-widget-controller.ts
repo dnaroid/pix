@@ -6,6 +6,7 @@ import type { TodoDetails } from "../types.js";
 
 export type TodoWidgetControllerHost = {
 	sessionFile?(): string | undefined;
+	sessionId?(): string | undefined;
 	isRunning(): boolean;
 	render(): void;
 };
@@ -34,7 +35,11 @@ export class AppTodoWidgetController {
 	observeLiveState(data: unknown): void {
 		if (!isTodoLiveStateEvent(data)) return;
 
-		this.updateDetailsForSession(data.sessionFile ?? this.host.sessionFile?.(), this.visibleDetails(data.details));
+		const sessionFile = data.sessionFile;
+		const sessionId = data.sessionId;
+		if (!sessionFile && !sessionId && this.currentSessionKey()) return;
+
+		this.updateDetailsForSession(sessionFile, sessionId, this.visibleDetails(data.details));
 	}
 
 	private visibleDetails(details: TodoDetails): TodoDetails | undefined {
@@ -42,12 +47,12 @@ export class AppTodoWidgetController {
 	}
 
 	private updateDetailsForCurrentSession(next: TodoDetails | undefined, options: { preserveScoped?: boolean } = {}): void {
-		this.updateDetailsForSession(this.host.sessionFile?.(), next, options);
+		this.updateDetailsForSession(this.host.sessionFile?.(), this.host.sessionId?.(), next, options);
 	}
 
-	private updateDetailsForSession(sessionFile: string | undefined, next: TodoDetails | undefined, options: { preserveScoped?: boolean } = {}): void {
+	private updateDetailsForSession(sessionFile: string | undefined, sessionId: string | undefined, next: TodoDetails | undefined, options: { preserveScoped?: boolean } = {}): void {
 		const previous = stringifyUnknown(this.currentSessionDetails());
-		const key = this.sessionKey(sessionFile);
+		const key = this.sessionKey(sessionFile, sessionId);
 		if (key) {
 			if (next) this.detailsBySessionFile.set(key, next);
 			else if (options.preserveScoped !== true) this.detailsBySessionFile.delete(key);
@@ -60,11 +65,17 @@ export class AppTodoWidgetController {
 	}
 
 	private currentSessionDetails(): TodoDetails | undefined {
-		const key = this.sessionKey(this.host.sessionFile?.());
+		const key = this.currentSessionKey();
 		return key ? this.detailsBySessionFile.get(key) : this.unscopedDetails;
 	}
 
-	private sessionKey(sessionFile: string | undefined): string | undefined {
-		return sessionFile ? resolve(sessionFile) : undefined;
+	private currentSessionKey(): string | undefined {
+		return this.sessionKey(this.host.sessionFile?.(), this.host.sessionId?.());
+	}
+
+	private sessionKey(sessionFile: string | undefined, sessionId: string | undefined): string | undefined {
+		if (sessionFile) return `file:${resolve(sessionFile)}`;
+		const normalizedSessionId = sessionId?.trim();
+		return normalizedSessionId ? `id:${normalizedSessionId}` : undefined;
 	}
 }

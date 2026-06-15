@@ -3,7 +3,6 @@ import type { Theme } from "../../theme.js";
 import {
 	ABOVE_EDITOR_WIDGET_KEY_GROUPS,
 	BUILT_IN_SUBAGENTS_WIDGET_KEYS,
-	INPUT_MAX_ROWS,
 	LEGACY_TODO_WIDGET_KEYS,
 } from "../constants.js";
 import { renderSubagentsPanel, renderTodoPanel } from "./editor-panels.js";
@@ -45,7 +44,8 @@ export class EditorLayoutRenderer {
 
 	computeLayout(width: number, rows: number): EditorLayout {
 		const maxAvailableInputRows = Math.max(1, rows - 4);
-		const renderedInput = this.renderInput(width, Math.min(INPUT_MAX_ROWS, maxAvailableInputRows), maxAvailableInputRows);
+		const maxComposerRows = Math.max(1, Math.min(maxAvailableInputRows, Math.floor(rows * 0.7)));
+		const renderedInput = this.renderInput(width, maxComposerRows, maxComposerRows);
 		const maxEntityRows = Math.max(0, rows - renderedInput.lines.length - 4);
 		const editorEntityWidth = inputFrameContentWidth(width);
 		const aboveEditorEntities = this.renderAboveEditorEntities(editorEntityWidth);

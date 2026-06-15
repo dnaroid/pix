@@ -73,6 +73,13 @@ function wrapLine(line: string, width: number): string[] {
 	return lines.length > 0 ? lines : [""];
 }
 
+function wrapIndentedLine(line: string, width: number): string[] {
+	const indent = line.match(/^\s*/)?.[0] ?? "";
+	const content = line.slice(indent.length);
+	const contentWidth = Math.max(1, width - indent.length);
+	return wrapLine(content, contentWidth).map((wrapped) => `${indent}${wrapped}`);
+}
+
 function stripAnsi(text: string): string {
 	return text.replace(/\u001b\[[0-9;]*m/g, "");
 }
@@ -228,7 +235,7 @@ export async function runQuestionnaire(questions: NormalizedQuestion[], ctx: Que
 		}
 
 		function renderMutedLine(add: AddLine, text: string, width: number): void {
-			add(paintLine(theme, text, width, { foreground: "muted" }));
+			for (const line of wrapIndentedLine(text, width)) add(paintLine(theme, line, width, { foreground: "muted" }));
 		}
 
 		function moveToQuestion(index: number): void {

@@ -97,6 +97,36 @@ describe("pix interactive PTY", { skip: PTY_SKIP_REASON }, () => {
 		}
 	});
 
+	it("keeps later tool calls visible after a large expanded apply_patch block", async () => {
+		const patchBody = Array.from({ length: 90 }, (_value, index) => `+PIX-E2E-PATCH-LINE-${String(index).padStart(2, "0")}`).join("\n");
+		const patch = [
+			"*** Begin Patch",
+			"*** Add File: pix-e2e-large-patch.txt",
+			patchBody,
+			"*** End Patch",
+		].join("\n");
+		const mockModel = await MockModel.start([
+			{ segments: [{ kind: "tool_use", name: "apply_patch", input: { input: patch } }] },
+			{ segments: [{ kind: "tool_use", name: "shell", input: { command: "printf PIX-E2E-SHELL-DONE" } }] },
+		], { defaultResponse: "PIX-E2E-FINAL" });
+		const pix = await PixPty.start(mockModel);
+
+		try {
+			await pix.waitForText(mockModel.openaiModelRef, "initial status line");
+
+			pix.write("apply a large patch, then run the shell marker");
+			pix.enter();
+
+			await pix.waitForText("apply_patch", "large apply_patch tool header");
+			await pix.waitForText("PIX-E2E-SHELL-DONE", "shell result remains visible after the expanded patch", 15_000);
+			await pix.waitForText("PIX-E2E-FINAL", "final assistant response after shell", 15_000);
+			assert.ok(mockModel.requestCount >= 3, `expected patch, shell follow-up, and final requests; got ${mockModel.requestCount}`);
+		} finally {
+			await pix.stop();
+			await mockModel.stop();
+		}
+	});
+
 	it("streams reasoning and text through the anthropic-messages provider", async () => {
 		const mockModel = await MockModel.start([{
 			segments: [

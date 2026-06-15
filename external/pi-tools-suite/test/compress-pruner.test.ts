@@ -543,6 +543,50 @@ describe("DCP pruning effectiveness", () => {
     expect(candidate?.startId).toBe("m001");
   });
 
+  test("compression candidates use current addressable ids when stale ids appear later in message text", () => {
+    const state = createState();
+    const candidateConfig = config({
+      compress: {
+        autoCandidates: {
+          enabled: true,
+          minContextPercent: 0.1,
+          keepRecentTurns: 1,
+          minMessages: 2,
+          minTokens: 0,
+        },
+        messageMode: {
+          enabled: true,
+          minContextPercent: 0.1,
+          keepRecentTurns: 1,
+          mediumTokens: 1,
+          highTokens: 1000,
+          maxSuggestions: 5,
+        },
+      } as any,
+    });
+
+    const pruned = applyPruning(
+      [
+        textMessage("user", "old user", 1),
+        textMessage("assistant", "old assistant " + "a".repeat(80), 2),
+        textMessage("user", "recent", 3),
+      ],
+      state,
+      candidateConfig,
+    );
+
+    pruned[0].content += "\n[dcp-id]: # (m999)";
+    (pruned[1].content as any[]).push({ type: "text", text: "\n[dcp-id]: # (m998)" });
+
+    const rangeCandidate = detectCompressionCandidate(pruned, state, candidateConfig, 0.5);
+    const messageCandidates = detectMessageCompressionCandidates(pruned, state, candidateConfig, 0.5);
+
+    expect(rangeCandidate?.startId).toBe("m001");
+    expect(rangeCandidate?.endId).toBe("m002");
+    expect(messageCandidates.map((candidate) => candidate.messageId)).toContain("m002");
+    expect(messageCandidates.map((candidate) => candidate.messageId)).not.toContain("m998");
+  });
+
   test("compress tool rolls up covered bN blocks and deactivates old blocks", async () => {
     const state = createState();
     state.compressionBlocks = [block(1, 1, 3), block(2, 4, 6)];
@@ -888,7 +932,7 @@ describe("DCP pruning effectiveness", () => {
       cfg,
     );
 
-    const candidates = detectMessageCompressionCandidates(pruned, cfg, 0.5);
+    const candidates = detectMessageCompressionCandidates(pruned, state, cfg, 0.5);
 
     expect(candidates.map((candidate) => candidate.messageId)).toEqual(["m002", "m003"]);
     expect(candidates[0]?.priority).toBe("high");

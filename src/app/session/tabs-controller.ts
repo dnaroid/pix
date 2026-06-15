@@ -718,7 +718,9 @@ export class AppTabsController {
 		void this.saveTabs();
 		this.scheduleTabPrewarm();
 		const cachedView = this.sessionViewsByTabId.get(target.id);
-		if (cachedView && this.host.restoreSessionView) {
+		const cachedViewNeedsHistoryReload = this.tabIdsNeedingHistoryReload.has(target.id)
+			&& this.sessionActivity(targetRuntime.session) !== "running";
+		if (cachedView && this.host.restoreSessionView && !cachedViewNeedsHistoryReload) {
 			this.host.restoreSessionView(cachedView);
 			this.restoreDeferredUserMessages(target.id);
 			this.host.setSessionStatus(targetRuntime.session);

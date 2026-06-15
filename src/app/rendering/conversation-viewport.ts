@@ -1,4 +1,5 @@
 import { resolveToolRule, type PixConfig } from "../../config.js";
+import { renderToolDisplay } from "../../tool-renderers/index.js";
 import { stringDisplayWidth } from "../../terminal-width.js";
 import type { Theme } from "../../theme.js";
 import { renderConversationEntry as renderConversationEntryLines, type InlineUserMessageMenuContext } from "./conversation-entry-renderer.js";
@@ -430,10 +431,37 @@ export class ConversationViewport {
 			case "shell":
 				return estimateToolLikeLineCount("shell", entry.expanded, `${entry.output}\n${entry.status}`, width, this.host.pixConfig, this.host.superCompactTools === true, true);
 			case "tool":
-				return estimateToolLikeLineCount(entry.toolName, entry.expanded, entry.output, width, this.host.pixConfig, this.host.superCompactTools === true, false);
+				return this.estimatedToolEntryLineCount(entry, width);
 			default:
 				return 1;
 		}
+	}
+
+	private estimatedToolEntryLineCount(entry: Extract<Entry, { kind: "tool" }>, width: number): number {
+		const display = renderToolDisplay({
+			toolName: entry.toolName,
+			argsText: entry.argsText,
+			output: entry.output,
+			details: entry.details,
+			isError: entry.isError,
+			status: entry.status,
+			cwd: this.host.cwd,
+			colors: this.host.colors,
+		});
+		const toolName = display.toolName ?? entry.toolName;
+		const rule = resolveToolRule(toolName, this.host.pixConfig.toolRenderer);
+		if (rule.hidden) return 0;
+
+		const bodyWidth = Math.max(1, width - 2);
+		if (entry.expanded) return 1 + estimateWrappedLineCount(display.expandedText, bodyWidth);
+		if (rule.compactHidden || (rule.defaultExpanded === true && this.host.superCompactTools !== true)) return 1;
+
+		const body = display.collapsedBody.trimEnd();
+		if (!body || rule.previewLines === 0) return 1;
+
+		const bodyLineCount = estimateWrappedLineCount(body, bodyWidth);
+		const previewLineCount = Math.min(rule.previewLines, bodyLineCount);
+		return this.host.superCompactTools === true ? 1 : 1 + previewLineCount;
 	}
 
 	private nextVisibleEntry(entries: readonly Entry[], index: number, width: number): Entry | undefined {

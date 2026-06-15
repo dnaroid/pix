@@ -29,6 +29,15 @@ type ForkTitleState = {
 
 const DEFAULT_TERMINAL_TITLE = "pi";
 
+function isStaleExtensionContextError(error: unknown): boolean {
+	if (!(error instanceof Error)) return false;
+	return /ctx is stale|stale after session replacement|stale after.*reload/i.test(error.message);
+}
+
+function ignoreStaleExtensionContextError(error: unknown): void {
+	if (!isStaleExtensionContextError(error)) throw error;
+}
+
 function imageAttachmentLabel(images: readonly ImageContent[]): string | undefined {
 	if (images.length === 0) return undefined;
 	return images.length === 1 ? "Attached image" : `Attached images (${images.length})`;
@@ -109,14 +118,27 @@ export default function sessionTitle(pi: ExtensionAPI) {
 		refreshTimers.clear();
 	}
 
+	function safeCtxCall<T>(callback: () => T): T | undefined {
+		try {
+			return callback();
+		} catch (error) {
+			ignoreStaleExtensionContextError(error);
+			return undefined;
+		}
+	}
+
+	function currentSessionId(ctx: ExtensionContext): string | undefined {
+		return safeCtxCall(() => ctx.sessionManager.getSessionId());
+	}
+
 	function currentSessionName(ctx?: ExtensionContext): string | undefined {
-		const name = pi.getSessionName() ?? ctx?.sessionManager.getSessionName?.();
+		const name = pi.getSessionName() ?? safeCtxCall(() => ctx?.sessionManager.getSessionName?.());
 		return name?.trim() || undefined;
 	}
 
 	function shouldGeneratePendingTitle(ctx: ExtensionContext): boolean {
 		if (!pendingGeneration) return false;
-		if (pendingGeneration.sessionId !== ctx.sessionManager.getSessionId()) return false;
+		if (pendingGeneration.sessionId !== currentSessionId(ctx)) return false;
 		const name = currentSessionName(ctx);
 		if (!name) return true;
 		if (pendingGeneration.provisionalSessionName && name === pendingGeneration.provisionalSessionName) return true;
@@ -138,7 +160,11 @@ export default function sessionTitle(pi: ExtensionAPI) {
 		const title = name ? `${config.terminalTitlePrefix}${name}` : DEFAULT_TERMINAL_TITLE;
 		const safeTitle = terminalSafeText(title) || DEFAULT_TERMINAL_TITLE;
 		if (!force && safeTitle === lastRenderedTitle) return;
-		ctx.ui.setTitle(safeTitle);
+		const rendered = safeCtxCall(() => {
+			ctx.ui.setTitle(safeTitle);
+			return true;
+		});
+		if (!rendered) return;
 		lastRenderedTitle = safeTitle;
 	}
 
@@ -159,7 +185,7 @@ export default function sessionTitle(pi: ExtensionAPI) {
 		for (const delayMs of [0, 100, 500, 1500, 3000]) {
 			const timer = setTimeout(() => {
 				refreshTimers.delete(timer);
-				refreshSessionUi(ctx, { reapplyTitle: true });
+				safeCtxCall(() => refreshSessionUi(ctx, { reapplyTitle: true }));
 			}, delayMs);
 			timer.unref?.();
 			refreshTimers.add(timer);
@@ -173,7 +199,7 @@ export default function sessionTitle(pi: ExtensionAPI) {
 		if (!advancePendingGeneration(currentConfig)) return;
 		retryTimer = setTimeout(() => {
 			retryTimer = undefined;
-			startTitleGeneration(ctx, currentConfig);
+			safeCtxCall(() => startTitleGeneration(ctx, currentConfig));
 		}, currentConfig.retryDelayMs);
 		retryTimer.unref?.();
 	}
@@ -210,36 +236,42 @@ export default function sessionTitle(pi: ExtensionAPI) {
 		abortCurrentRequest();
 		controller = new AbortController();
 		const requestController = controller;
-		const currentSessionId = pendingGeneration.sessionId;
+		const pendingSessionId = pendingGeneration.sessionId;
 		const generation = { ...pendingGeneration, modelRef };
 
 		void (async () => {
 			try {
+				const notifyDebug = currentConfig.debug && ctx.hasUI
+					? (message: string) => {
+						safeCtxCall(() => ctx.ui.notify(message, "warning"));
+					}
+					: undefined;
 				const title = await generateSessionTitle(
 					generation.input,
 					ctx.modelRegistry,
 					currentConfig,
 					generation.modelRef,
 					requestController.signal,
-					currentConfig.debug && ctx.hasUI ? (message) => ctx.ui.notify(message, "warning") : undefined,
+					notifyDebug,
 				);
 				if (!title || requestController.signal.aborted) return;
-				if (sessionId !== currentSessionId) return;
+				if (sessionId !== pendingSessionId) return;
+				if (pendingSessionId !== currentSessionId(ctx)) return;
 				if (!shouldGeneratePendingTitle(ctx)) return;
 				pi.setSessionName(title);
 				pendingGeneration = undefined;
 				refreshSessionUi(ctx, { force: true });
 				scheduleSessionUiRefresh(ctx);
-				if (currentConfig.notify && ctx.hasUI) ctx.ui.notify(`Session named: ${title}`, "info");
+				if (currentConfig.notify && ctx.hasUI) safeCtxCall(() => ctx.ui.notify(`Session named: ${title}`, "info"));
 			} catch (error) {
 				if (requestController.signal.aborted) return;
 				if (currentConfig.debug && ctx.hasUI) {
 					const message = error instanceof Error ? error.message : String(error);
-					ctx.ui.notify(`Session title generation failed: ${message}`, "warning");
+					safeCtxCall(() => ctx.ui.notify(`Session title generation failed: ${message}`, "warning"));
 				}
 			} finally {
 				if (controller === requestController) controller = undefined;
-				if (requestController.signal.aborted || pendingGeneration?.sessionId !== currentSessionId) return;
+				if (requestController.signal.aborted || pendingGeneration?.sessionId !== pendingSessionId) return;
 				if (shouldGeneratePendingTitle(ctx)) {
 					if (!advancePendingGeneration(currentConfig)) {
 						applyFallbackSessionTitle(ctx, currentConfig, generation.input, {
