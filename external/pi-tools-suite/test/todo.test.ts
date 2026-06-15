@@ -67,10 +67,10 @@ describe.serial("todo tool", () => {
 		const tool = pi.tools.get("todo");
 		const promptGuidelines = tool.promptGuidelines.join("\n");
 		expect(tool.promptGuidelines.length).toBeGreaterThan(3);
-		expect(promptGuidelines).toContain("synchronize the plan");
-		expect(promptGuidelines).toContain("include a final todo item in the initial create/batch_create plan");
-		expect(promptGuidelines).toContain("Close that report todo immediately before sending the final report to the user");
-		expect(promptGuidelines).toContain("goal, scope, requirements");
+		expect(promptGuidelines).toContain("Use `todo` for complex work with 3+ steps");
+		expect(promptGuidelines).toContain("include a final user-facing report todo in the initial plan");
+		expect(promptGuidelines).toContain("close it immediately before the final response");
+		expect(promptGuidelines).toContain("scope, requirements, safety, feasibility, approach, dependencies, or order");
 		expect(tool.promptSnippet).toContain("include final report item");
 		expect(tool.promptSnippet).toContain("close it before sending the report");
 
