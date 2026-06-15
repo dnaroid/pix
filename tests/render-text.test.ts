@@ -10,14 +10,14 @@ describe("render text sanitization", () => {
 		assert.equal(sanitizeText("⚠️ typescript:"), `${APP_ICONS.alert} typescript:`);
 
 		setAppIconTheme("fallback");
-		assert.equal(sanitizeText("⚠ typescript:"), "! typescript:");
+		assert.equal(sanitizeText("⚠ typescript:"), `${APP_ICONS.alert} typescript:`);
 
 		setAppIconTheme("nerdFont");
 	});
 
 	it("renders the source LSP diagnostic icon through the active icon theme", () => {
 		setAppIconTheme("fallback");
-		assert.equal(sanitizeText("\u{f0026} typescript:"), "! typescript:");
+		assert.equal(sanitizeText("\u{f0026} typescript:"), `${APP_ICONS.alert} typescript:`);
 
 		setAppIconTheme("nerdFont");
 	});

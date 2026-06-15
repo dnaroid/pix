@@ -19,6 +19,7 @@ import {
 	type ModelUsageDescriptor,
 	type OpenAIUsageResponse,
 } from "../src/app/model/model-usage-status.js";
+import { APP_ICONS } from "../src/app/icons.js";
 import type { SessionModel } from "../src/app/types.js";
 
 describe("model usage status", () => {
@@ -41,7 +42,7 @@ describe("model usage status", () => {
 		});
 	});
 
-	it("builds Antigravity descriptors for all accounts while preserving the active account", () => {
+	it("builds Antigravity descriptors without reading auth synchronously", () => {
 		withPiAuth({
 			antigravity: {
 				type: "oauth",
@@ -56,14 +57,11 @@ describe("model usage status", () => {
 			const descriptor = modelUsageDescriptor({ provider: "antigravity", id: "G3" } as SessionModel);
 
 			assert.equal(descriptor?.kind, "google-antigravity");
-			assert.equal(descriptor?.modelKey, "antigravity/G3@all:first@example.com,second@example.com");
+			assert.equal(descriptor?.modelKey, "antigravity/G3");
 			if (descriptor?.kind !== "google-antigravity") throw new Error("Expected Google Antigravity descriptor");
 			assert.equal(descriptor.quotaModelKey, "gemini-3.1-pro-low");
-			assert.equal(descriptor.account.email, "second@example.com");
-			assert.equal(descriptor.account.projectId, "project-2");
-			assert.equal(descriptor.account.accountIndex, 1);
-			assert.equal(descriptor.account.accountCount, 2);
-			assert.equal(descriptor.accounts?.length, 2);
+			assert.equal(descriptor.account, undefined);
+			assert.equal(descriptor.accounts, undefined);
 		});
 	});
 
@@ -120,6 +118,42 @@ describe("model usage status", () => {
 
 		assert.equal(status?.weekly?.remainingPercent, 88);
 		assert.equal(formatModelUsageStatusLabel(status, now), `88% ████▍ ${formatExpectedResetDuration(now + 14 * 60 * 60 * 1000, now)}`);
+	});
+
+	it("warns when a multi-day status-bar limit will exhaust before reset at the current pace", () => {
+		const now = Date.UTC(2026, 0, 3, 0, 0, 0);
+		const response: OpenAIUsageResponse = {
+			plan_type: "plus",
+			rate_limit: {
+				limit_reached: false,
+				primary_window: {
+					used_percent: 60,
+					limit_window_seconds: 7 * 24 * 60 * 60,
+					reset_after_seconds: 5 * 24 * 60 * 60,
+				},
+				secondary_window: null,
+			},
+		};
+
+		const status = openAIUsageStatusFromResponse(response, "openai-codex/gpt-5.5", now);
+
+		assert.equal(formatModelUsageStatusLabel(status, now), `40% ██    ${APP_ICONS.alert} ${formatExpectedResetDuration(now + 5 * 24 * 60 * 60 * 1000, now)}`);
+	});
+
+	it("does not warn for exhausted or single-day-and-shorter status-bar limits", () => {
+		const now = Date.UTC(2026, 0, 1, 0, 0, 0);
+		const exhausted: OpenAIUsageResponse = {
+			plan_type: "plus",
+			rate_limit: {
+				limit_reached: true,
+				primary_window: { used_percent: 100, limit_window_seconds: 7 * 24 * 60 * 60, reset_after_seconds: 5 * 24 * 60 * 60 },
+				secondary_window: { used_percent: 80, limit_window_seconds: 5 * 60 * 60, reset_after_seconds: 2 * 60 * 60 },
+			},
+		};
+
+		const status = openAIUsageStatusFromResponse(exhausted, "openai-codex/gpt-5.5", now);
+
+		assert.equal(formatModelUsageStatusLabel(status, now), `20% █     ${formatExpectedResetDuration(now + 2 * 60 * 60 * 1000, now)} • 0%       ${formatExpectedResetDuration(now + 5 * 24 * 60 * 60 * 1000, now)}`);
 	});
 
 	it("uses matching OpenAI additional model limits for the status bar", () => {
@@ -256,6 +290,37 @@ describe("model usage status", () => {
 		assert.equal(status?.weekly?.remainingPercent, 99);
 		assert.equal(status?.hourly, undefined);
 		assert.equal(formatModelUsageStatusLabel(status, now), `user@example.com 99% ████▉ ${formatExpectedResetDuration(now + (6 * 24 + 22) * 60 * 60 * 1000, now)}`);
+	});
+
+	it("does not warn for Antigravity reset-only multi-day windows", () => {
+		const fetchedAt = Date.UTC(2026, 0, 1, 0, 0, 0);
+		const formattedAt = fetchedAt + 2 * 24 * 60 * 60 * 1000;
+		const descriptor = {
+			kind: "google-antigravity",
+			modelKey: "antigravity/G3@user@example.com",
+			quotaModelKey: "gemini-3.1-pro-low",
+			account: {
+				email: "user@example.com",
+				refreshToken: "refresh-token",
+				projectId: "project-id",
+				cacheKey: "user@example.com",
+			},
+		} as const satisfies Extract<ModelUsageDescriptor, { kind: "google-antigravity" }>;
+		const response = {
+			models: {
+				"gemini-3.1-pro-low": {
+					quotaInfo: {
+						remainingFraction: 0.4,
+						resetTime: new Date(fetchedAt + 7 * 24 * 60 * 60 * 1000).toISOString(),
+					},
+				},
+			},
+		};
+
+		const status = googleAntigravityUsageStatusFromResponse(response, descriptor, fetchedAt);
+
+		assert.equal(status?.weekly?.hasKnownWindowDuration, undefined);
+		assert.equal(formatModelUsageStatusLabel(status, formattedAt), `user@example.com 40% ██    ${formatExpectedResetDuration(fetchedAt + 7 * 24 * 60 * 60 * 1000, formattedAt)}`);
 	});
 
 	it("treats missing Google Antigravity remaining fraction as exhausted quota", () => {
@@ -423,11 +488,11 @@ describe("model usage status", () => {
 			]);
 		});
 	});
-	it("returns empty labels and no descriptor when quota data is unavailable", () => {
+	it("returns empty labels and no descriptor when quota bucket is unavailable", () => {
 		assert.equal(formatModelUsageStatusLabel(undefined), "");
 		assert.equal(modelUsageRemainingPercent(undefined), undefined);
 		withPiAuth({}, () => {
-			assert.equal(modelUsageDescriptor({ provider: "antigravity", id: "G3" } as SessionModel), undefined);
+			assert.equal(modelUsageDescriptor({ provider: "antigravity", id: "unknown-model" } as SessionModel), undefined);
 		});
 	});
 

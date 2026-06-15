@@ -574,10 +574,24 @@ export class StatusLineRenderer {
 				track: this.host.theme.colors.statusDotBase,
 			}, MODEL_USAGE_PROGRESS_BAR_WIDTH));
 
-			const resetStart = barStart + MODEL_USAGE_PROGRESS_BAR_WIDTH + 1;
+			const defaultResetStart = barStart + MODEL_USAGE_PROGRESS_BAR_WIDTH + 1;
+			const warningStart = this.modelUsageHasWarning(modelUsageLabel, defaultResetStart - labelStart)
+				? defaultResetStart
+				: undefined;
+			const resetStart = warningStart === undefined
+				? defaultResetStart
+				: warningStart + APP_ICONS.alert.length + 1;
+			if (warningStart !== undefined) {
+				this.pushSegment(segments, warningStart, APP_ICONS.alert.length, this.host.theme.colors.warning);
+			}
 			const resetLength = this.modelUsageResetLength(modelUsageLabel, resetStart - labelStart);
 			this.pushSegment(segments, resetStart, resetLength, this.host.theme.colors.muted);
 		}
+	}
+
+	private modelUsageHasWarning(modelUsageLabel: string, localStart: number): boolean {
+		if (localStart < 0 || localStart >= modelUsageLabel.length) return false;
+		return modelUsageLabel.startsWith(APP_ICONS.alert, localStart);
 	}
 
 	private modelUsageResetLength(modelUsageLabel: string, localStart: number): number {

@@ -422,6 +422,20 @@ describe("StatusLineRenderer", () => {
 		})));
 	});
 
+	it("colors model usage forecast warnings with the warning color", () => {
+		const usageLabel = `40% ██    ${APP_ICONS.alert} 5d0h`;
+		const renderer = statusLineRenderer({ widgetText: "", voiceActive: false, modelUsageLabel: usageLabel });
+		const layout = renderer.layout(100);
+		const rendered = renderer.render(1, layout, 100);
+
+		assert.ok(rendered.includes(colorize(APP_ICONS.alert, {
+			foreground: THEMES.dark.colors.warning,
+		})));
+		assert.ok(rendered.includes(colorize("5d0h", {
+			foreground: THEMES.dark.colors.muted,
+		})));
+	});
+
 	it("renders Antigravity usage email with the limit color", () => {
 		const usageLabel = "user@example.com 20% █     06.01";
 		const renderer = statusLineRenderer({ widgetText: "", voiceActive: false, modelUsageLabel: usageLabel });

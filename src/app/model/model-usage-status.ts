@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { formatCompactProgressBar } from "../../context-progress-bar.js";
+import { APP_ICONS } from "../icons.js";
 import type { SessionModel } from "../types.js";
 
 const OPENAI_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
@@ -37,7 +37,7 @@ export type ModelUsageDescriptor = BaseModelUsageDescriptor & ({
 } | {
 	readonly kind: "google-antigravity";
 	readonly quotaModelKey: string;
-	readonly account: AntigravityQuotaAccount;
+	readonly account?: AntigravityQuotaAccount;
 	readonly accounts?: readonly AntigravityQuotaAccount[];
 });
 
@@ -45,6 +45,7 @@ export type ModelUsageLimitWindow = {
 	readonly remainingPercent: number;
 	readonly resetAt: number;
 	readonly windowSeconds: number;
+	readonly hasKnownWindowDuration?: boolean;
 };
 
 export type ModelUsageStatus = {
@@ -222,16 +223,12 @@ export function modelUsageDescriptor(model: SessionModel | undefined): ModelUsag
 
 	if (ANTIGRAVITY_QUOTA_PROVIDERS.has(provider)) {
 		const quotaModelKey = resolveAntigravityQuotaModelKey(model);
-		const accounts = readAllAntigravityQuotaAccounts();
-		const account = readActiveAntigravityQuotaAccount(accounts);
-		if (!quotaModelKey || !account) return undefined;
+		if (!quotaModelKey) return undefined;
 
 		return {
 			kind: "google-antigravity",
-			modelKey: `${model.provider}/${model.id}@all:${accounts.map((item) => item.cacheKey).join(",")}`,
+			modelKey: `${model.provider}/${model.id}`,
 			quotaModelKey,
-			account,
-			accounts,
 		};
 	}
 
@@ -623,7 +620,7 @@ export function googleAntigravityUsageStatusFromResponse(
 		modelKey: descriptor.modelKey,
 		provider: "google-antigravity",
 		updatedAt: now,
-		...(descriptor.account.email ? { accountEmail: descriptor.account.email } : {}),
+		...(descriptor.account?.email ? { accountEmail: descriptor.account.email } : {}),
 		...(weekly ? { weekly } : {}),
 		...(hourly ? { hourly } : {}),
 	};
@@ -648,7 +645,8 @@ async function queryGoogleAntigravityModelUsage(
 	descriptor: Extract<ModelUsageDescriptor, { kind: "google-antigravity" }>,
 ): Promise<ModelUsageStatus | undefined> {
 	const now = Date.now();
-	const accounts = descriptor.accounts?.length ? descriptor.accounts : [descriptor.account];
+	const accounts = await readAllAntigravityQuotaAccounts();
+	if (accounts.length === 0) return undefined;
 	const windows = (await Promise.all(accounts.map(async (account) => {
 		try {
 			const response = await fetchGoogleAntigravityQuotaForAccount(account, now);
@@ -688,7 +686,7 @@ const GOOGLE_ACCOUNT_QUOTA_WINDOWS = [
 ] as const;
 
 async function queryGoogleAntigravityAccountUsage(now: number): Promise<AccountUsageReport["googleAccounts"]> {
-	const accounts = readAllAntigravityQuotaAccounts();
+	const accounts = await readAllAntigravityQuotaAccounts();
 	const results = await Promise.all(accounts.map(async (account) => {
 		const accountLabel = account.email ?? maskCredential(account.refreshToken);
 		try {
@@ -713,13 +711,8 @@ async function queryGoogleAntigravityAccountUsage(now: number): Promise<AccountU
 	return results;
 }
 
-function readActiveAntigravityQuotaAccount(accounts = readAllAntigravityQuotaAccounts()): AntigravityQuotaAccount | undefined {
-	const credential = readPiAuthSync().antigravity;
-	return accounts[clampAccountIndex(credential?.activeIndex, accounts.length)];
-}
-
-function readAllAntigravityQuotaAccounts(): AntigravityQuotaAccount[] {
-	const credential = readPiAuthSync().antigravity;
+async function readAllAntigravityQuotaAccounts(): Promise<AntigravityQuotaAccount[]> {
+	const credential = (await readPiAuth()).antigravity;
 	if (!credential) return [];
 	const credentialClient = getGoogleOAuthClientCredentials(credential);
 
@@ -744,14 +737,6 @@ function readAllAntigravityQuotaAccounts(): AntigravityQuotaAccount[] {
 		...(fallbackAccess ? { accessToken: fallbackAccess.accessToken } : {}),
 	}) : undefined;
 	return account ? [account] : [];
-}
-
-function readPiAuthSync(): PiAuthData {
-	try {
-		return JSON.parse(readFileSync(getPiAuthPath(), "utf8")) as PiAuthData;
-	} catch {
-		return {};
-	}
 }
 
 function getAccountRefreshToken(account: AntigravityStoredAccount): string | undefined {
@@ -1115,6 +1100,7 @@ function modelUsageWindow(window: RateLimitWindow, now: number): ModelUsageLimit
 		remainingPercent: clampPercent(Math.round(100 - window.used_percent)),
 		resetAt: now + Math.max(0, Math.round(window.reset_after_seconds)) * 1000,
 		windowSeconds: Math.max(0, Math.round(window.limit_window_seconds)),
+		hasKnownWindowDuration: true,
 	};
 }
 
@@ -1208,5 +1194,25 @@ function maskCredential(value: string): string {
 }
 
 function formatUsageWindow(_prefix: "W" | "H", window: ModelUsageLimitWindow, now: number): string {
-	return `${window.remainingPercent}% ${formatCompactProgressBar(window.remainingPercent)} ${formatDurationShort(window.resetAt, now)}`;
+	const warning = modelUsageWindowWillExhaustBeforeReset(window, now) ? ` ${APP_ICONS.alert}` : "";
+	return `${window.remainingPercent}% ${formatCompactProgressBar(window.remainingPercent)}${warning} ${formatDurationShort(window.resetAt, now)}`;
+}
+
+function modelUsageWindowWillExhaustBeforeReset(window: ModelUsageLimitWindow, now: number): boolean {
+	if (!window.hasKnownWindowDuration) return false;
+	if (window.windowSeconds <= DAY_SECONDS) return false;
+	if (window.remainingPercent <= 0) return false;
+
+	const timeUntilResetSeconds = Math.max(0, (window.resetAt - now) / 1000);
+	const elapsedSeconds = Math.max(0, window.windowSeconds - timeUntilResetSeconds);
+	if (elapsedSeconds <= 0) return false;
+
+	const total = 100;
+	const used = total - window.remainingPercent;
+	if (used <= 0) return false;
+
+	const remaining = total - used;
+	const averageRate = used / elapsedSeconds;
+	const projectedSecondsUntilExhaustion = remaining / averageRate;
+	return projectedSecondsUntilExhaustion < timeUntilResetSeconds;
 }

@@ -61,7 +61,7 @@ export type AppIconName = keyof typeof NERD_FONT_ICONS;
 export type AppIconMap = Record<AppIconName, string>;
 
 const FALLBACK_ICONS: AppIconMap = {
-	alert: "!",
+	alert: "⚠",
 	autoFix: "*",
 	check: "✓",
 	checkCircle: "✓",
