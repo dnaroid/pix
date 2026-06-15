@@ -72,52 +72,38 @@ export function asyncSubagentToolDescriptions(options: ToolDescriptionSetOptions
 			label: "Subagents",
 			description: [
 				"Manage isolated async sub-agents for large, parallel, context-heavy work.",
-				"Sub-agent presets defined in async-subagents config and selected with /subagent-preset can choose per-role model/thinking/extra-arg configurations for future spawns across sessions until changed; AGENTS_PRESET or /subagent-preset session <name> overrides the saved preset for the current process/session; /subagent-preset init copies the bundled sample when no config exists.",
-				"When subagentType is omitted, async-subagents asks a lightweight router model to choose the configured role from the current config; prefer omitting it unless the user or task constraints require an explicit role.",
+				"Presets from async-subagents config and /subagent-preset choose role model/thinking/args; AGENTS_PRESET or /subagent-preset session <name> overrides the current session; /subagent-preset init creates a sample config.",
+				"Omit subagentType so the router chooses a configured role unless the user or task requires a role, vision, or deterministic override.",
 				repoDiscovery
 					? "Use for broad independent tracks, review axes, or hypotheses even though repo_* tools are available."
 					: "Use first for broad codebase discovery split into tracks, review axes, or incident-triage hypotheses when repo_* tools are unavailable.",
-				"Use action=spawn/status/wait/result/stop/cleanup with the matching options; spawned runs are registered under project .pi/subagents while the main session is alive so status/wait/stop can omit runDir for the latest run and result can resolve runDir by agentId. The parent session receives a follow-up system/custom message for each background agent when it finishes or fails, so the parent can stop after spawning instead of polling for completion.",
-				"Collect results only when the parent task needs them; result reads are always compact and link to artifacts instead of inlining raw logs.",
-				"Spawned agents run in isolated background pi processes with extensions disabled to prevent recursive sub-agent spawning.",
-				"Each agent has a wall-clock watchdog timeout (default 30 minutes); spawn timeoutSeconds or task timeoutSeconds can shorten it for tests or bounded probes.",
-				"Concurrency is limited project-wide by maxConcurrent (default 5); excess agents queue automatically.",
-				"Failed agents can be auto-retried with exponential backoff when retry is configured per type or globally.",
-				"Preset fallbackModels can switch future sub-agent spawns in the current process/session to a fallback provider/model after quota/rate-limit failures; Antigravity account rotation is allowed to exhaust all accounts for the model first.",
+				"Use action=spawn/status/wait/result/stop/cleanup; .pi/subagents tracks runs so status/wait/stop can omit the latest runDir and result can resolve by agentId. Parent sessions receive completion/failure follow-ups, so spawn can return without polling.",
+				"Results are compact with artifact links. Agents run isolated pi processes with extensions disabled to prevent recursive spawning; spawn/task timeoutSeconds can shorten the default 30m watchdog, project concurrency queues excess agents, and retry backoff/fallback models/Antigravity account rotation are config-driven.",
 			].join(" "),
 			promptSnippet:
-				"Use subagents action='spawn' when multiple independent agents are useful, the user asks to delegate/parallelize/split work, or one large review/deep investigation should stay out of the main context. " +
-				"Default to omitting subagentType so the configured router chooses from the live role config; set it only when the user explicitly named a role, vision/image handling is required, or a deterministic technical override is needed. Avoid trivial reads/edits, and do not call status/wait immediately after spawn just for progress. " +
+				"Use subagents action='spawn' for multiple independent agents, explicit delegate/parallelize/split work requests, or one large review/debug track that should stay out of the parent context. " +
+				"Usually omit subagentType so the router chooses; set it only for user-named roles, vision/image handling, deterministic tests, or another concrete override. Avoid trivial reads/edits and do not call status/wait immediately after spawn just for progress. " +
 				(repoDiscovery
-					? "For one semantic code-discovery question, use repo_search directly instead; for independent tracks/hypotheses/review axes, delegate even when repo_* tools are available. Use result only after completion when findings are needed in the parent context; it returns compact output with artifact links."
-					: "For one focused code-discovery question, use direct read/grep tools instead. When the user asks for broad discovery split into tracks, hypotheses, incident triage, release readiness, risk strategy, or parallel reviews and indexed discovery is unavailable, spawn several focused scan/quick agents first before parent-context file search. Use result only after completion when findings are needed in the parent context; it returns compact output with artifact links."),
+					? "For one semantic code-discovery question, use repo_search; for independent tracks/hypotheses/review axes, delegate even when repo_* tools exist. Read result only after completion when findings are needed."
+					: "For one focused code-discovery question, use direct read/grep. Without repo_* tools, spawn several focused scan/quick agents first for broad multi-track discovery, incident triage, release readiness, risk strategy, or parallel reviews. Read result only after completion when findings are needed."),
 			promptGuidelines: [
 				"Use action='spawn' only for LARGE or PARALLEL tasks: independent investigations, repo-wide sweeps, deep debugging, or code review/audit that would bloat the parent context.",
 				"Treat explicit requests to delegate, use sub-agents, run parallel agents, split into independent tracks, investigate hypotheses, or run separate review axes as spawn triggers; spawn first unless the request is trivial or clearly single-file.",
 				repoDiscovery
-					? "Do not spawn merely because code is unfamiliar; make one direct repo_search call for a single discovery question, and spawn only when several separate questions or review axes should run independently."
-					: "Do not spawn merely because code is unfamiliar; use direct read/grep tools for a single discovery question, and spawn only when several separate questions or review axes should run independently.",
+					? "For one discovery question, use repo_search; spawn only for several independent tracks/hypotheses/review axes, and do not let repo_* availability suppress delegation."
+					: "For one discovery question, use direct read/grep; without repo_* tools, spawn a small focused swarm before parent-context search when the task spans several files/modules/hypotheses/tracks.",
 				repoDiscovery
-					? "When repo_search answers one discovery question, prefer it over a swarm; do not let repo_* availability suppress delegation for multi-track reviews, independent hypotheses, explicit parallelism, or deep isolated review."
-					: "When indexed discovery is unavailable and the task spans multiple files, modules, hypotheses, or explicitly separate tracks, spawn a small swarm of focused scan/quick agents before serial grep/read in the parent context, even for a small project.",
-				repoDiscovery
-					? "For incident triage, release-readiness, or risk/test-strategy prompts with separate hypotheses or review tracks, prefer spawning focused review agents over doing every track serially in the parent context."
-					: "For incident triage, release-readiness, or risk/test-strategy prompts with separate hypotheses or review tracks and no repo_* tools, call action='spawn' as the first discovery step; direct read/grep can follow after delegation if needed.",
-				repoDiscovery
-					? "Do not use subagents for exact-string lookups, known-file edits, typo/text replacements, or obvious one-file changes; use the cheapest direct path instead."
-					: "Do not use subagents for exact-string lookups, known-file edits, typo/text replacements, or obvious one-file changes; use the cheapest direct path instead.",
-				"Spawn multiple focused agents in one action='spawn' call when they investigate independent questions.",
-				"For synthetic tests or intentionally bounded probes, pass timeoutSeconds slightly above the expected runtime so hung sub-agents are stopped automatically.",
-				"For subagents action='spawn', default to leaving subagentType unset and let the lightweight router choose from configured role descriptions. Do not choose a role just because a built-in example seems to fit; the router has the current user config and presets. Set subagentType explicitly only when the user named the role, image inspection requires vision, tests need deterministic routing, or there is another concrete technical reason to bypass the router.",
-				"Use subagentType='vision' with imagePaths and optional focus when a text-only/blind parent model needs a visual description of screenshots, UI state, diagrams, or other images.",
+					? "For incident triage, release readiness, or risk/test strategy with separate hypotheses or review tracks, prefer focused review agents over serial parent-context work."
+					: "For incident triage, release readiness, or risk/test strategy with separate hypotheses or review tracks and no repo_* tools, call action='spawn' as the first discovery step; direct read/grep can follow.",
+				"Do not use subagents for exact-string lookups, known-file edits, typo/text replacements, obvious one-file changes, or interactive user input; use the cheapest direct path.",
+				"Spawn multiple focused agents in one action='spawn' call for independent questions; for synthetic tests or bounded probes, pass timeoutSeconds slightly above expected runtime.",
+				"For spawn, leave subagentType unset so the router chooses from configured roles. Set it only for user-named roles, vision/image handling, deterministic tests, or another concrete override.",
+				"Use subagentType='vision' with imagePaths and optional focus when images/screenshots/diagrams need visual inspection.",
 				"If the user asks to start, run, launch, or test parallel sub-agents, call action='spawn' and then stop; completion/failure notifications will wake the parent so do not immediately call action='status' or action='wait' just to see whether agents finished.",
-				"Use action='status' for a non-blocking progress check or to recover after reload/crash.",
-				"After spawn, project-local .pi/subagents/registry.json records latest runDir and agentId mappings until normal main-session shutdown; if runDir is missing after compaction/reload, call status without runDir or result with agentId instead of failing solely because runDir was lost.",
-				"Use action='wait' only when the user asks to wait/collect now, or your next parent step depends on completion.",
-				"Use action='result' only after status/wait confirms completion; raw output is not inlined, so inspect linked artifacts only when full details are truly necessary.",
+				"Use status for non-blocking progress/recovery, wait only when requested or needed, and result only after completion; registry mappings can recover latest runDir/agentId after reload.",
+				"Result output is compact with artifact links; inspect raw artifacts only when full details are necessary.",
 				"Use action='stop' when the user asks to stop, cancel, or kill running sub-agents.",
 				"Use action='cleanup' with delete=true after collecting all results to free disk space.",
-				"Do NOT use subagents for trivial tasks, single file reads, simple edits, or interactive user input.",
 			],
 		},
 		spawnAction: {
@@ -143,9 +129,8 @@ export function asyncSubagentToolDescriptions(options: ToolDescriptionSetOptions
 			label: "Subagent Result Action",
 			description: [
 				"Read output from one async sub-agent after it completes.",
-				"Always returns a compact structured summary/findings/files/risks/next actions plus artifact paths, not the full raw result text or stderr.",
-				"A result.json with machine-readable structured output is written alongside the raw result.md on completion.",
-				"Compact output avoids polluting the parent context; full result.md and stderr.log paths are included for manual inspection.",
+				"Returns compact structured summary/findings/files/risks/next actions plus artifact paths, not raw result text or stderr.",
+				"Writes structured result.json alongside raw result.md; full result.md and stderr.log paths are included for manual inspection.",
 			].join(" "),
 		},
 		stopAction: {
@@ -209,11 +194,9 @@ export const REPO_DISCOVERY_TOOLS: RepoDiscoveryToolDescription[] = [
 		promptGuidelines: [
 			"Phrase target as the behavior to locate, not a whitespace-separated pile of near-synonyms; keep exact identifiers only as useful anchors.",
 			"For initial unknown-file behavior searches, prefer the default hybrid ranking; pass --mode semantic only when lexical/symbol terms are misleading or the query is purely conceptual.",
-			"Do not launch several broad repo_search calls for the same question before reading results. Make one targeted search, read the best returned ranges, then refine only if evidence is missing.",
-			"Write a specific conceptual target, not a generic word. Add --path-prefix, --max-files, --dedupe-file, or --exclude-tests in args to reduce noise.",
-			"After repo_search, read the returned ranges instead of launching another broad search unless a specific gap remains; prefer read over --include-content for full evidence unless you only need a compact preview.",
-			"For mutation-site, bug-location, or behavior-cause questions, the assignment/write/branch/call that directly causes the behavior is the answer. If a read range contains that exact evidence, stop searching and answer from it.",
-			"Avoid repeated near-duplicate searches after finding direct source evidence. Continue only for a named gap such as callers, persistence path, tests, or user-requested impact analysis, and make the follow-up query narrower.",
+			"Make one targeted search, read the best returned ranges (prefer read over --include-content for full evidence), then refine only for a named gap; do not launch duplicate broad searches.",
+			"Use a specific conceptual target and narrow with --path-prefix, --max-files, --dedupe-file, or --exclude-tests when useful.",
+			"For bug/cause questions, stop when a read range shows the causal assignment/write/branch/call; continue only for a named gap such as callers, persistence, tests, or requested impact, and narrow follow-ups.",
 		],
 		targetDescription: "Natural-language behavior query, e.g. auth session token validation.",
 	},
@@ -248,25 +231,23 @@ export const REPO_DISCOVERY_TOOL_NAMES = REPO_DISCOVERY_TOOLS.map((tool) => tool
 export const TODO_TOOL_DESCRIPTION: ToolDescription = {
 	name: "todo",
 	label: "Todo",
-	description: "Track and keep in sync non-trivial multi-step work as todos. Actions: create, update, batch_create, batch_update, list, get, delete, clear, export, import. Supports parent/subtask hierarchy, blockers, deferred out-of-scope items, dependencies, and replace:true on create/batch_create/import for intentionally replacing an obsolete plan; skip trivial or chat-only requests. Resynchronize the plan when requirements are added, canceled, or become obsolete, whether from user input or discovered facts. For multi-step plans, include a final user-facing report todo in the initial create/batch_create plan when possible. Keep exactly one task in_progress and complete it only after verification.",
+	description: "Track and synchronize non-trivial multi-step work. Actions: create, update, batch_create, batch_update, list, get, delete, clear, export, import. Supports hierarchy, blockers, deferred/out-of-scope items, dependencies, and replace:true for replacing obsolete plans. Skip trivial or chat-only requests; resync when requirements or discovered facts change. For multi-step plans, include a final user-facing report todo and keep exactly one task in_progress until verified.",
 	promptSnippet: "Track/sync non-trivial multi-step work; include final report item and close it before sending the report; resync when requirements change; keep one task in_progress",
 	promptGuidelines: [
 		"Use `todo` for complex work with 3+ steps, explicit user task lists, or new non-trivial requirements. Skip single trivial tasks and purely conversational requests.",
-		"For any multi-step implementation/debugging plan, include a final todo item in the initial create/batch_create plan for the user-facing final report. Give it explicit description/acceptance criteria covering changed files/behavior, verification commands/results, remaining manual actions, and never substitute a compression/housekeeping note for the final report. Close that report todo immediately before sending the final report to the user.",
-		"When the user adds, removes, cancels, reprioritizes, or changes the goal, scope, requirements, constraints, or chosen approach, use `todo` before continuing to synchronize the plan: update still-relevant tasks, defer or delete obsolete tasks, add new required tasks, and adjust dependencies/order.",
-		"When your own investigation or verification discovers new facts that make the current todo plan stale, incomplete, impossible, unsafe, or no longer the best approach, use `todo` to revise the plan immediately instead of following outdated tasks.",
-		"Update todos as part of the workflow, not as end-of-task cleanup: whenever you start, finish, block, split, abandon, or materially change a step, call `todo` immediately before continuing.",
-		"Before any non-trivial read/edit/test/tool work on a planned task, mark exactly one task in_progress with activeForm (present-continuous label); do this immediately after creating a plan if no task is active. Mark it completed immediately after the required verification, never in batches.",
+		"For multi-step implementation/debugging plans, include a final user-facing report todo in the initial plan with acceptance criteria for changed files/behavior, verification results, and remaining manual actions; close it immediately before the final response, never via compression.",
+		"Resync before continuing when the user or new findings change scope, requirements, safety, feasibility, approach, dependencies, or order; update relevant tasks, add required tasks/blockers, and defer obsolete work.",
+		"Update todos when you start, finish, block, split, abandon, or materially change a step; do not leave todo maintenance for end-of-task cleanup.",
+		"Before non-trivial planned work, mark exactly one task in_progress with activeForm. Complete it only after required verification, never in batches.",
 		"If implementation is partial, tests fail, or a blocker remains, keep the task in_progress and add/update a blocker task instead of completing it.",
 		"Never use `clear`, `delete`, or batch deletion to hide unfinished, stale, or forgotten todos. Defer obsolete items or update them with the reason; only delete when the user explicitly asks or the item was created by mistake.",
 		"Before giving a final response for work that used todos, ensure every visible todo is completed, deferred, or intentionally still in_progress with a blocker/explanation. Do not leave any just-finished todo item in_progress after you stop.",
 		"Keep subjects short and imperative; put details in description only when needed. Use parentId for large plans; use blockedBy on create and addBlockedBy/removeBlockedBy on update for dependencies.",
 		"Use batch_create/batch_update for large explicit plans, but still keep exactly one visible task in_progress unless the user asks otherwise.",
 		"When starting a new plan that supersedes existing unfinished todos, use batch_create with replace:true instead of appending; only omit replace when intentionally extending the current plan.",
-		"list hides deleted tombstones unless includeDeleted:true; pass status or blockedOnly only when you need a filtered list.",
-		"Use export/import for handoff or plan migration; import with replace:true only when the user explicitly wants to overwrite the current todo state.",
+		"list hides deleted tombstones unless includeDeleted:true; use status/blockedOnly filters only when needed. Use export/import for handoff or migration; import with replace:true only when explicitly overwriting todo state.",
 		"When every visible todo is completed, todo state clears automatically; do not call clear afterward just to remove completed tasks.",
-		"Optional project persistence is controlled by `/todos persist on|off|status` or the discoverable `/todos-persist on|off|status` alias; when resuming a persisted plan, ask the user which items are in scope and run `/todos scope <id...>` or `/todos-scope <id...>` so out-of-scope active tasks become deferred.",
+		"Persistence uses `/todos persist on|off|status` or `/todos-persist on|off|status`; when resuming, ask which ids are in scope and run `/todos scope <id...>` or `/todos-scope <id...>` so out-of-scope active tasks are deferred.",
 	],
 };
 
@@ -348,12 +329,12 @@ export const CODEX_ALIAS_TOOL_DESCRIPTIONS = {
 	shellCommand: {
 		name: "shell",
 		label: "shell",
-		description: "Run shell commands for builds, tests, package managers, git, and project CLIs. Set workdir/cwd instead of cd; prefer read for simple file reads.",
+		description: "Run shell commands for builds, tests, package managers, git, and project CLIs. Prefer tail for long test output. Set workdir/cwd instead of cd; prefer read for simple file reads.",
 	},
 	applyPatch: {
 		name: "apply_patch",
 		label: "apply_patch",
-		description: `Apply file edits with a relative-path patch or a standard unified diff. Use for creating, updating, moving, or deleting files; keep each patch focused.
+		description: `Apply file edits with a relative-path patch or standard unified diff. Use for creating, updating, moving, or deleting files; keep each patch focused.
 
 Begin-patch format:
 *** Begin Patch
@@ -363,8 +344,8 @@ Begin-patch format:
 +new text
 *** End Patch
 
-Begin-patch sections: *** Add File (new lines start with +), *** Update File (may include *** Move to: new/path), and *** Delete File. A single Begin Patch block may contain multiple file sections and modify multiple files; use one multi-file patch for tightly related edits, while keeping unrelated changes separate. Update hunks may use @@ optional context, omit the first @@, and use *** End of File. The whole begin patch may be wrapped in <<EOF ... EOF. Matching tolerates trailing-space, trim, and common Unicode punctuation differences.
+Sections: *** Add File (new lines start with +), *** Update File (optionally *** Move to: new/path), and *** Delete File. One Begin Patch may edit multiple tightly related files; keep unrelated changes separate. Update hunks may use optional @@ context, omit line numbers/the first @@, use *** End of File, and be wrapped in <<EOF ... EOF. Matching tolerates trailing-space, trim, and common Unicode punctuation differences.
 
-Unified diff is also supported (for example, git diff output with ---/+++ headers). Paths must be workspace-relative, never absolute. Provide the complete patch in input.`,
+Unified diff with ---/+++ headers is also supported. Paths must be workspace-relative, never absolute. Provide the complete patch in input.`,
 	},
 } satisfies Record<string, ToolDescription>;
