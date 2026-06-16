@@ -329,7 +329,7 @@ export const CODEX_ALIAS_TOOL_DESCRIPTIONS = {
 	shellCommand: {
 		name: "shell",
 		label: "shell",
-		description: "Run shell commands for builds, tests, package managers, git, and project CLIs. Prefer tail for long test output. Set workdir/cwd instead of cd; prefer read for simple file reads.",
+		description: "Run shell commands for builds, tests, package managers, git, and project CLIs. For long/verification output, redirect to a log and show only bounded tail on failure; summarize passing logs. Set workdir/cwd instead of cd; prefer read for simple file reads.",
 	},
 	applyPatch: {
 		name: "apply_patch",
