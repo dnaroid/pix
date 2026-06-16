@@ -154,6 +154,13 @@ const DcpConfig = Type.Object(
 	{
 		enabled: Type.Optional(Type.Boolean({ description: "Enable DCP (Dynamic Context Pruning)." })),
 		debug: Type.Optional(Type.Boolean({ description: "Enable DCP debug logging." })),
+		debugLog: Type.Optional(Type.Object(
+			{
+				maxBytes: Type.Optional(Type.Number({ description: "Maximum size in bytes of the active debug log before it is rotated. Default 5242880 (5 MB).", minimum: 1024 })),
+				maxBackups: Type.Optional(Type.Number({ description: "Number of rotated backups to keep (.1 .. .N). Default 3, minimum 1.", minimum: 1 })),
+			},
+			{ description: "Debug log rotation. The JSONL log is written to ~/.pi/agent/dcp-debug.jsonl." },
+		)),
 		manualMode: Type.Optional(DcpManualModeConfig),
 		compress: Type.Optional(DcpCompressConfig),
 		strategies: Type.Optional(DcpStrategiesConfig),

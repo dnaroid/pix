@@ -30,8 +30,11 @@ import {
 import {
   DCP_MESSAGE_IDS_CUSTOM_TYPE,
   buildMessageIdControlMessage,
+  buildMessageIdControlText,
 } from "../src/dcp/pruner-message-ids.js";
-import { stripStaleDcpMetadataFromAssistantMessage } from "../src/dcp/pruner-metadata.js";
+import {
+  stripStaleDcpMetadataFromAssistantMessage,
+} from "../src/dcp/pruner-metadata.js";
 
 function config(overrides: Partial<DcpConfig> = {}): DcpConfig {
   const base: DcpConfig = {
@@ -1415,7 +1418,7 @@ describe("DCP pruning effectiveness", () => {
     expect(rendered).not.toContain("DCP Session Statistics");
   });
 
-  test("DCP context transform appends hidden message-id control metadata without mutating visible content", async () => {
+  test("DCP context transform keeps message-id control out of transcript messages", async () => {
     const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
     const pi = {
       on(event: string, handler: (event: any, ctx: any) => unknown) {
@@ -1449,10 +1452,61 @@ describe("DCP pruning effectiveness", () => {
     const messages = result?.messages ?? [];
     const normalMessages = messages.filter((message) => message.role !== "custom");
     expect(JSON.stringify(normalMessages)).not.toContain("[dcp-id]");
+    expect(JSON.stringify(messages)).not.toContain("<dcp-message-ids>");
+    expect(buildMessageIdControlText(createState())).toBeUndefined();
+  });
 
-    const control = messages.find((message) => message.customType === DCP_MESSAGE_IDS_CUSTOM_TYPE);
-    expect(control?.display).toBe(false);
-    expect(String(control?.content ?? "")).toContain("Current raw message IDs: m001, m002");
+  test("DCP injects message-id control only into provider payload", async () => {
+    const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
+    const pi = {
+      on(event: string, handler: (event: any, ctx: any) => unknown) {
+        handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+      },
+      registerTool() {},
+      registerCommand() {},
+      appendEntry() {},
+      sendMessage() {},
+    } as any;
+
+    await dcpModule(pi);
+    const contextHandler = handlers.get("context")?.[0];
+    const providerHandler = handlers.get("before_provider_request")?.[0];
+    expect(contextHandler).toBeDefined();
+    expect(providerHandler).toBeDefined();
+
+    await contextHandler?.(
+      {
+        type: "context",
+        messages: [
+          textMessage("user", "visible user content", 1),
+          textMessage("assistant", "visible assistant content", 2),
+        ],
+      },
+      {
+        hasUI: false,
+        sessionManager: { getBranch: () => [] },
+        getContextUsage: () => ({ tokens: 10, contextWindow: 10_000, percent: 0.1 }),
+      },
+    );
+
+    const payload = await providerHandler?.(
+      {
+        type: "before_provider_request",
+        payload: {
+          messages: [
+            { role: "system", content: "base system" },
+            { role: "user", content: "visible user content" },
+          ],
+        },
+      },
+      { hasUI: false, sessionManager: { getBranch: () => [] } },
+    ) as any;
+
+    expect(payload?.messages).toHaveLength(2);
+    expect(payload?.messages[0]?.role).toBe("system");
+    expect(payload?.messages[0]?.content).toContain("base system");
+    expect(payload?.messages[0]?.content).toContain("Current raw message IDs: m001, m002");
+    expect(payload?.messages[1]?.content).not.toContain("<dcp-message-ids>");
   });
 
   test("DCP context transform stays quiet below routine context pressure and clears stale anchors", async () => {
@@ -1539,13 +1593,49 @@ describe("DCP pruning effectiveness", () => {
     const messages = result?.messages ?? [];
     const rendered = messages.map(contentText).join("\n");
     const normalMessages = messages.filter((message) => message.role !== "custom");
-    const control = messages.find((message) => message.customType === DCP_MESSAGE_IDS_CUSTOM_TYPE);
 
     expect(rendered).toContain("ACTION REQUIRED: Context usage is high.");
     expect(rendered).toContain("Recommended range candidate: m001..m006");
     expect(JSON.stringify(normalMessages)).not.toContain("[dcp-id]");
-    expect(control?.display).toBe(false);
-    expect(String(control?.content ?? "")).toContain("Current raw message IDs: m001, m002, m003, m004, m005, m006, m007");
+    expect(JSON.stringify(messages)).not.toContain("<dcp-message-ids>");
+  });
+
+  test("DCP context transform strips leaked message-id control blocks from prior transcript", async () => {
+    const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
+    const pi = {
+      on(event: string, handler: (event: any, ctx: any) => unknown) {
+        handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+      },
+      registerTool() {},
+      registerCommand() {},
+      appendEntry() {},
+      sendMessage() {},
+    } as any;
+
+    await dcpModule(pi);
+    const contextHandler = handlers.get("context")?.[0];
+    expect(contextHandler).toBeDefined();
+
+    const result = await contextHandler?.(
+      {
+        type: "context",
+        messages: [
+          textMessage("user", "before\n<dcp-message-ids>\nsecret ids\n</dcp-message-ids>\nafter", 1),
+          textMessage("assistant", "visible assistant", 2),
+        ],
+      },
+      {
+        hasUI: false,
+        sessionManager: { getBranch: () => [] },
+        getContextUsage: () => ({ tokens: 10, contextWindow: 10_000, percent: 0.1 }),
+      },
+    ) as { messages: any[] } | undefined;
+
+    const rendered = result?.messages.map(contentText).join("\n") ?? "";
+    expect(rendered).toContain("before");
+    expect(rendered).toContain("after");
+    expect(rendered).not.toContain("secret ids");
+    expect(rendered).not.toContain("dcp-message-ids");
   });
 
   test("DCP context transform hides persisted control-plane custom entries from the model", async () => {

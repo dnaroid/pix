@@ -4,7 +4,7 @@ import type { DcpState } from "./state.js"
 import { modelKeysFromContext, resolveModelConfig, type DcpConfig } from "./config.js"
 import type { DcpNudgeType } from "./pruner-types.js"
 import { isToolRecordProtected, markToolPruned } from "./pruner.js"
-import { safeGetContextUsage } from "../context-usage.js"
+import { ignoreStaleExtensionContextError, safeGetContextUsage } from "../context-usage.js"
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -54,12 +54,20 @@ function customEntryData(entry: unknown, customType: string): Record<string, unk
   return record.data as Record<string, unknown>
 }
 
-function branchEntries(ctx: ExtensionCommandContext): unknown[] {
+function branchEntries(ctx: ExtensionCommandContext): any[] {
   try {
     const branch = ctx.sessionManager?.getBranch?.()
     return Array.isArray(branch) ? branch : []
   } catch {
     return []
+  }
+}
+
+async function staleSafe(action: () => void | Promise<void>): Promise<void> {
+  try {
+    await action()
+  } catch (error) {
+    ignoreStaleExtensionContextError(error)
   }
 }
 
@@ -262,7 +270,7 @@ async function handleSweep(
 ): Promise<void> {
   await ctx.waitForIdle()
 
-  const branch = ctx.sessionManager.getBranch()
+  const branch = branchEntries(ctx)
 
   // Build the full set of protected tool names.
   const protectedTools = new Set<string>([
@@ -341,7 +349,9 @@ async function handleSweep(
     }
   }
 
-  ctx.ui.notify(`Swept ${count} tool output${count === 1 ? "" : "s"}`, "info")
+  await staleSafe(() => {
+    ctx.ui.notify(`Swept ${count} tool output${count === 1 ? "" : "s"}`, "info")
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -495,17 +505,19 @@ function handleRecompress(
 async function handleCompress(pi: ExtensionAPI, ctx: ExtensionCommandContext): Promise<void> {
   await ctx.waitForIdle()
 
-  pi.sendMessage(
-    {
-      customType: "dcp-compress-trigger",
-      content:
-        "Please compress stale conversation sections using the compress tool now.",
-      display: false,
-    },
-    { triggerTurn: true, deliverAs: "followUp" },
-  )
+  await staleSafe(() => {
+    pi.sendMessage(
+      {
+        customType: "dcp-compress-trigger",
+        content:
+          "Please compress stale conversation sections using the compress tool now.",
+        display: false,
+      },
+      { triggerTurn: true, deliverAs: "followUp" },
+    )
 
-  ctx.ui.notify("Triggered compression", "info")
+    ctx.ui.notify("Triggered compression", "info")
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -588,7 +600,9 @@ export function registerCommands(
             break
         }
       } finally {
-        hooks.onStateChanged?.(ctx)
+        await staleSafe(() => {
+          hooks.onStateChanged?.(ctx)
+        })
       }
     },
   })

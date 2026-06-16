@@ -1,4 +1,5 @@
 import { isAbsolute, relative, sep } from "node:path";
+import { normalizeBeginPatchForDisplay } from "./patch-normalize.js";
 import type { ToolRendererMiddleware } from "./types.js";
 import { expandedTextFromParts, resultText, stringArg, summarizePatch } from "./utils.js";
 
@@ -10,7 +11,11 @@ type DiffDetails = {
 export const renderApplyPatchTool: ToolRendererMiddleware = (input) => {
 	const detailsDiff = diffFromDetails(input.details);
 	const argPatch = stringArg(input, ["input", "patch"]);
-	const patch = argPatch ?? detailsDiff?.text;
+	const rawPatch = argPatch ?? detailsDiff?.text;
+	// Re-minimize loose `*** Begin Patch` hunks so unchanged neighbor lines are
+	// rendered as context instead of spurious `-` deletions. Plain unified diffs
+	// and other formats pass through unchanged.
+	const patch = rawPatch ? normalizeBeginPatchForDisplay(rawPatch) : rawPatch;
 	const path = pathForDisplay(stringArg(input, ["path", "file_path", "filePath"]), input.cwd);
 	const summary = summarizePatch(patch) ?? "patch";
 	const expanded = expandedTextFromParts({ text: patch }, { text: resultText(input, { empty: !patch }) });

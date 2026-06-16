@@ -1,4 +1,5 @@
 import type { ImageContent } from "../../input-editor.js";
+import { stripDcpControlMetadata } from "../../markdown-format.js";
 import { isRecord } from "../guards.js";
 
 const MAX_FORMAT_STRING_CHARS = 256 * 1024;
@@ -73,11 +74,11 @@ export function renderContent(content: readonly unknown[]): string {
 		}
 		if (!pushPart(stringifyUnknown(item))) break;
 	}
-	return parts.join("\n");
+	return stripDcpControlMetadata(parts.join("\n"));
 }
 
 export function renderUserMessageContent(content: unknown): string {
-	if (typeof content === "string") return content;
+	if (typeof content === "string") return stripDcpControlMetadata(content);
 	if (!Array.isArray(content)) return stringifyUnknown(content);
 
 	const textParts: string[] = [];
@@ -99,7 +100,7 @@ export function renderUserMessageContent(content: unknown): string {
 		textParts.push(stringifyUnknown(item));
 	}
 
-	const text = textParts.join("\n").replace(/\[Image \d+(?:: [^\]]+)?\]/g, "").trimEnd();
+	const text = stripDcpControlMetadata(textParts.join("\n")).replace(/\[Image \d+(?:: [^\]]+)?\]/g, "").trimEnd();
 	if (imageCount === 0) return text;
 
 	const imageText = userImageLabels(imageCount);

@@ -12,6 +12,7 @@ import type { DcpCompressionVisualDetails } from "./ui.js"
 import { normalizeDcpContextUsage } from "./ui.js"
 import { COMPRESS_TOOL_DESCRIPTION } from "../tool-descriptions.js"
 import { safeGetContextUsage } from "../context-usage.js"
+import { summarizeDcpState, writeDcpDebugLog } from "./debug-log.js"
 import {
   createRangeCompressionBlock,
   findCoveredAndPartialBlocks,
@@ -161,73 +162,111 @@ export function registerCompressTool(
       let operationRemovedTokens = 0
       let operationSummaryTokens = 0
 
+      const log = (event: string, details: Record<string, unknown> = {}) =>
+        writeDcpDebugLog(effectiveConfig, event, details, ctx)
+
+      log("compress.request", {
+        toolCallId: _toolCallId,
+        topic: params.topic,
+        ranges: ranges.map((range) => ({ startId: range.startId, endId: range.endId })),
+        messages: messages.map((entry) => ({ messageId: entry.messageId, topic: entry.topic })),
+        state: summarizeDcpState(state),
+      })
+
       if (ranges.length === 0 && messages.length === 0) {
         throw new Error("compress requires at least one ranges[] or messages[] entry")
       }
 
-      const rangePlans: ResolvedRangePlan[] = ranges.map((range) => {
-        const { startId, endId, summary } = range
+      let rangePlans: ResolvedRangePlan[]
+      try {
+        rangePlans = ranges.map((range) => {
+          const { startId, endId, summary } = range
 
-        // ── Resolve boundary timestamps ──────────────────────────────────
-        const startBoundary = resolveIdToBoundary(startId, "startTimestamp", state)
-        const endBoundary = resolveIdToBoundary(endId, "endTimestamp", state)
-        const startTimestamp = startBoundary.timestamp
-        const endTimestamp = endBoundary.timestamp
+          // ── Resolve boundary timestamps ──────────────────────────────────
+          const startBoundary = resolveIdToBoundary(startId, "startTimestamp", state)
+          const endBoundary = resolveIdToBoundary(endId, "endTimestamp", state)
+          const startTimestamp = startBoundary.timestamp
+          const endTimestamp = endBoundary.timestamp
 
-        if (startTimestamp > endTimestamp) {
-          throw new Error(
-            `Range start "${startId}" must appear before end "${endId}" in the conversation`,
-          )
-        }
+          if (startTimestamp > endTimestamp) {
+            throw new Error(
+              `Range start "${startId}" must appear before end "${endId}" in the conversation`,
+            )
+          }
 
-        // ── Validate timestamps are finite ──────────────────────────────
-        if (!Number.isFinite(startTimestamp)) {
-          throw new Error(
-            `Start ID "${startId}" resolved to a non-finite timestamp (${startTimestamp}). ` +
-            `This usually means the referenced message has a corrupted timestamp.`,
-          )
-        }
-        if (!Number.isFinite(endTimestamp)) {
-          throw new Error(
-            `End ID "${endId}" resolved to a non-finite timestamp (${endTimestamp}). ` +
-            `This usually means the referenced message has a corrupted timestamp.`,
-          )
-        }
+          // ── Validate timestamps are finite ──────────────────────────────
+          if (!Number.isFinite(startTimestamp)) {
+            throw new Error(
+              `Start ID "${startId}" resolved to a non-finite timestamp (${startTimestamp}). ` +
+              `This usually means the referenced message has a corrupted timestamp.`,
+            )
+          }
+          if (!Number.isFinite(endTimestamp)) {
+            throw new Error(
+              `End ID "${endId}" resolved to a non-finite timestamp (${endTimestamp}). ` +
+              `This usually means the referenced message has a corrupted timestamp.`,
+            )
+          }
 
-        return {
-          startId,
-          endId,
-          summary,
-          startTimestamp,
-          endTimestamp,
-          startMessageId: startBoundary.stableId,
-          endMessageId: endBoundary.stableId,
-        }
-      })
+          return {
+            startId,
+            endId,
+            summary,
+            startTimestamp,
+            endTimestamp,
+            startMessageId: startBoundary.stableId,
+            endMessageId: endBoundary.stableId,
+          }
+        })
 
-      validateNonOverlappingRanges(rangePlans)
+        validateNonOverlappingRanges(rangePlans)
+      } catch (error) {
+        log("compress.resolve_failed", {
+          toolCallId: _toolCallId,
+          error: error instanceof Error ? error.message : String(error),
+          state: summarizeDcpState(state),
+        })
+        throw error
+      }
 
       for (const range of rangePlans) {
-        const anchor = resolveAnchorBoundary(range.endTimestamp, state)
+        try {
+          const anchor = resolveAnchorBoundary(range.endTimestamp, state)
 
-        const created = createRangeCompressionBlock({
-          topic: params.topic,
-          summary: range.summary,
-          startTimestamp: range.startTimestamp,
-          endTimestamp: range.endTimestamp,
-          startMessageId: range.startMessageId,
-          endMessageId: range.endMessageId,
-          anchorTimestamp: anchor.timestamp,
-          anchorMessageId: anchor.stableId,
-          createdByToolCallId: _toolCallId,
-          state,
-          config: effectiveConfig,
-          mode: "range",
-        })
-        const block = created.block
-        newBlockIds.push(block.id)
-        operationRemovedTokens += created.removedTokenEstimate
-        operationSummaryTokens += created.summaryTokenEstimate
+          const created = createRangeCompressionBlock({
+            topic: params.topic,
+            summary: range.summary,
+            startTimestamp: range.startTimestamp,
+            endTimestamp: range.endTimestamp,
+            startMessageId: range.startMessageId,
+            endMessageId: range.endMessageId,
+            anchorTimestamp: anchor.timestamp,
+            anchorMessageId: anchor.stableId,
+            createdByToolCallId: _toolCallId,
+            state,
+            config: effectiveConfig,
+            mode: "range",
+          })
+          const block = created.block
+          newBlockIds.push(block.id)
+          operationRemovedTokens += created.removedTokenEstimate
+          operationSummaryTokens += created.summaryTokenEstimate
+          log("compress.range_created", {
+            toolCallId: _toolCallId,
+            range: { startId: range.startId, endId: range.endId },
+            blockId: `b${block.id}`,
+            coveredBlockIds: block.coveredBlockIds ?? [],
+            anchorMessageId: block.anchorMessageId,
+          })
+        } catch (error) {
+          log("compress.range_failed", {
+            toolCallId: _toolCallId,
+            range: { startId: range.startId, endId: range.endId },
+            error: error instanceof Error ? error.message : String(error),
+            state: summarizeDcpState(state),
+          })
+          throw error
+        }
       }
 
       const skippedMessageIssues: MessageSkipIssue[] = []
@@ -333,6 +372,13 @@ export function registerCompressTool(
       if (newBlockIds.length > 0) {
         await saveDcpState(ctx, state)
       }
+
+      log("compress.success", {
+        toolCallId: _toolCallId,
+        newBlockIds: newBlockIds.map((id) => `b${id}`),
+        skippedMessages: skippedMessageIssues.length,
+        state: summarizeDcpState(state),
+      })
 
       const usage = normalizeDcpContextUsage(safeGetContextUsage(ctx))
       const operationTokensSaved = Math.max(0, operationRemovedTokens - operationSummaryTokens)

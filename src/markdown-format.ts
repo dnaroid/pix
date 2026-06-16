@@ -782,7 +782,34 @@ function markdownLineSyntaxHighlight(fence: ActiveMarkdownFence | undefined, fen
 }
 
 function sanitizeMarkdownText(text: string): string {
-	return expandTabs(text.replace(/\x1b/g, "␛").replace(/\r/g, ""));
+	return expandTabs(stripDcpControlMetadata(text).replace(/\x1b/g, "␛").replace(/\r/g, ""));
+}
+
+export function stripDcpControlMetadata(text: string): string {
+	if (!text.includes("<dcp-message-ids>")) return text;
+
+	const lines = text.split("\n");
+	const kept: string[] = [];
+	let inMessageIds = false;
+	let touched = false;
+
+	for (const line of lines) {
+		if (inMessageIds) {
+			touched = true;
+			if (/<\/dcp-message-ids>\s*$/i.test(line)) inMessageIds = false;
+			continue;
+		}
+
+		if (/^\s*<dcp-message-ids>/i.test(line)) {
+			touched = true;
+			if (!/<\/dcp-message-ids>\s*$/i.test(line)) inMessageIds = true;
+			continue;
+		}
+
+		kept.push(line);
+	}
+
+	return touched ? kept.join("\n").trimEnd() : text;
 }
 
 function isHiddenMarkdownMetadataLine(line: string): boolean {
@@ -790,8 +817,9 @@ function isHiddenMarkdownMetadataLine(line: string): boolean {
 }
 
 export function isOnlyHiddenMetadata(text: string): boolean {
-	if (!text) return false;
-	for (const line of text.split("\n")) {
+	const stripped = stripDcpControlMetadata(text);
+	if (!stripped) return text.length > 0;
+	for (const line of stripped.split("\n")) {
 		if (line.length === 0) continue;
 		if (!isHiddenMarkdownMetadataLine(line)) return false;
 	}

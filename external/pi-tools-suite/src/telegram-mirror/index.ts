@@ -362,7 +362,7 @@ export default function telegramMirror(pi: ExtensionAPI): void {
 		try {
 			switch (command) {
 				case "sendUserMessage":
-					sendUserMessageSafely(((args as { text?: string } | undefined)?.text ?? ""));
+					staleSafe(() => sendUserMessageSafely(((args as { text?: string } | undefined)?.text ?? "")));
 					break;
 				case "abort":
 					mirrorCtx?.abort();

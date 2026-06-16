@@ -325,7 +325,12 @@ export async function createPixRuntime(options: AppOptions, runtimeOptions: Crea
 		const effectiveModelRef = resolvePixRuntimeModelRef(options, sessionManager, config);
 		const parsedModel = effectiveModelRef ? parseModelRef(effectiveModelRef) : undefined;
 		const initialThinkingLevel = resolvePixRuntimeInitialThinkingLevel(options, sessionManager, config);
-		const services = reusableServices && sameRuntimeServiceTarget(reusableServices, cwd, agentDir)
+		// Only reuse services for the initial session. Session replacements
+		// (switchSession/newSession/fork) must get fresh services so extensions
+		// are re-loaded with a fresh pi — otherwise handlers capture the old,
+		// invalidated pi and throw stale-ctx errors on the next session_start.
+		const isInitialSession = !sessionStartEvent || sessionStartEvent.reason === "startup";
+		const services = isInitialSession && reusableServices && sameRuntimeServiceTarget(reusableServices, cwd, agentDir)
 			? reusableServices
 			: await createPixRuntimeServices({
 				cwd,

@@ -2,9 +2,9 @@
 // Mechanized sync of the bundled `pi-tools-suite` extension into the Pi agent
 // extensions directory (~/.pi/agent/extensions/pi-tools-suite by default).
 //
-// Replaces the former manual "copy + cmp/grep + restart" workflow described in
-// CLAUDE.md. Only source-bearing entries are mirrored; environment-specific
-// entries (node_modules, test, .git, package-lock.json, .pi, opencode) at the
+// Replaces the former manual "copy + cmp/grep + restart" workflow. Only
+// source-bearing entries are mirrored; environment-specific entries
+// (node_modules, test, .git, package-lock.json, .pi, opencode) at the
 // target are preserved.
 //
 // Usage:
@@ -35,7 +35,6 @@ const MIRROR_ENTRIES = [
 	"scripts",
 	"index.ts",
 	"package.json",
-	"CLAUDE.md",
 	"README.md",
 ];
 

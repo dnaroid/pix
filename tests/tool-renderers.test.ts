@@ -5,6 +5,7 @@ import { describe, it } from "node:test";
 import { renderToolBlock } from "../src/app/rendering/tool-block-renderer.js";
 import { THEMES } from "../src/theme.js";
 import { renderToolDisplay, type ToolRenderInput } from "../src/tool-renderers/index.js";
+import { normalizeBeginPatchForDisplay } from "../src/tool-renderers/patch-normalize.js";
 import { renderExecTool, renderShellTool } from "../src/tool-renderers/shell.js";
 import {
 	compactCommand,
@@ -320,5 +321,176 @@ describe("renderToolDisplay", () => {
 		assert.match(renderToolDisplay(input({ toolName: "compress", output: "boom", isError: true })).headerArgs ?? "", /error: boom/);
 		assert.equal(renderToolDisplay(input({ toolName: "compress", status: "running" })).expandedText, "running…");
 		assert.equal(renderToolDisplay(input({ toolName: "compress", output: "not json" })).headerArgs, "not json");
+	});
+});
+
+describe("normalizeBeginPatchForDisplay", () => {
+	it("collapses loose before/after blocks into a single addition", () => {
+		// A patch that effectively only adds one rule, but the model emitted the
+		// whole block as a `-`/`+` before/after pair (loose matching).
+		const loose = [
+			"*** Begin Patch",
+			"*** Update File: CLAUDE.md",
+			"@@",
+			"- rule one",
+			"- rule two",
+			"- rule three",
+			"+ rule one",
+			"+ rule two",
+			"+ rule three",
+			"+ new rule",
+			"*** End Patch",
+		].join("\n");
+
+		const normalized = normalizeBeginPatchForDisplay(loose);
+		assert.deepEqual(normalized.split("\n"), [
+			"*** Begin Patch",
+			"*** Update File: CLAUDE.md",
+			"@@",
+			" rule one",
+			" rule two",
+			" rule three",
+			"+ new rule",
+			"*** End Patch",
+		]);
+	});
+
+	it("keeps a real deletion as a deletion", () => {
+		const patch = [
+			"*** Begin Patch",
+			"*** Update File: a.ts",
+			"@@",
+			"- removed line",
+			"*** End Patch",
+		].join("\n");
+
+		assert.equal(normalizeBeginPatchForDisplay(patch), patch);
+	});
+
+	it("keeps a real modification as deletion + addition", () => {
+		const patch = [
+			"*** Begin Patch",
+			"*** Update File: a.ts",
+			"@@",
+			"- old value",
+			"+ new value",
+			"*** End Patch",
+		].join("\n");
+
+		assert.equal(normalizeBeginPatchForDisplay(patch), patch);
+	});
+
+	it("preserves explicit context lines and interleaved edits", () => {
+		const patch = [
+			"*** Begin Patch",
+			"*** Update File: a.ts",
+			"@@",
+			" context before",
+			"- old",
+			"+ new",
+			" context after",
+			"*** End Patch",
+		].join("\n");
+
+		assert.equal(normalizeBeginPatchForDisplay(patch), patch);
+	});
+
+	it("leaves plain unified diffs and Add/Delete files untouched", () => {
+		const unified = [
+			"diff --git a/a.ts b/a.ts",
+			"--- a/a.ts",
+			"+++ b/a.ts",
+			"@@ -1 +1 @@",
+			"-old",
+			"+new",
+		].join("\n");
+		assert.equal(normalizeBeginPatchForDisplay(unified), unified);
+
+		const addFile = [
+			"*** Begin Patch",
+			"*** Add File: new.ts",
+			"+line one",
+			"+line two",
+			"*** End Patch",
+		].join("\n");
+		assert.equal(normalizeBeginPatchForDisplay(addFile), addFile);
+
+		const noMarker = "*** Update File: a.ts\n+hi";
+		assert.equal(normalizeBeginPatchForDisplay(noMarker), noMarker);
+	});
+
+	it("renders an add-only loose Begin Patch without spurious deletions", () => {
+		const colors = THEMES.dark.colors;
+		const loose = [
+			"*** Begin Patch",
+			"*** Update File: CLAUDE.md",
+			"@@",
+			"- rule one",
+			"- rule two",
+			"+ rule one",
+			"+ rule two",
+			"+ new rule",
+			"*** End Patch",
+		].join("\n");
+
+		const display = renderToolDisplay(input({ toolName: "apply_patch", argsText: JSON.stringify({ input: loose }), output: "done" }));
+		assert.equal(display.bodyStyle, "diff");
+
+		const lines = renderToolBlock({
+			id: "patch-1",
+			toolName: "apply_patch",
+			expanded: true,
+			status: "done",
+			isError: false,
+			output: "",
+			collapsedBody: display.collapsedBody,
+			expandedText: display.expandedText,
+			bodyStyle: "diff",
+		}, { previewLines: 9999, direction: "head", color: "muted" }, 100, colors);
+
+		// The added line is green.
+		const addedLine = lines.find((line) => line.text.includes("new rule"));
+		assert.ok(addedLine, "added line should be rendered");
+		assert.ok(addedLine?.segments?.some((segment) => segment.foreground === colors.success), "added line should be colored as success");
+
+		// The unchanged neighbor lines must NOT be colored as deletions.
+		const neighborLine = lines.find((line) => line.text.includes("rule one") && !line.text.includes("rule two"));
+		assert.ok(neighborLine, "neighbor line should be rendered");
+		const neighborRed = neighborLine?.segments?.find((segment) => segment.foreground === colors.error);
+		assert.equal(neighborRed, undefined, "unchanged neighbor line should not be rendered as a deletion");
+
+		// No line in the body should be red (no deletions remain).
+		const anyDeletion = lines.some((line) => line.segments?.some((segment) => segment.foreground === colors.error));
+		assert.equal(anyDeletion, false, "add-only patch should render no deletions");
+	});
+
+	it("still renders real deletions red in a Begin Patch", () => {
+		const colors = THEMES.dark.colors;
+		const patch = [
+			"*** Begin Patch",
+			"*** Update File: a.ts",
+			"@@",
+			"- real removal",
+			"+ real addition",
+			"*** End Patch",
+		].join("\n");
+
+		const display = renderToolDisplay(input({ toolName: "apply_patch", argsText: JSON.stringify({ input: patch }), output: "done" }));
+		const lines = renderToolBlock({
+			id: "patch-2",
+			toolName: "apply_patch",
+			expanded: true,
+			status: "done",
+			isError: false,
+			output: "",
+			collapsedBody: display.collapsedBody,
+			expandedText: display.expandedText,
+			bodyStyle: "diff",
+		}, { previewLines: 9999, direction: "head", color: "muted" }, 100, colors);
+
+		const removal = lines.find((line) => line.text.includes("real removal"));
+		assert.ok(removal?.segments?.some((segment) => segment.foreground === colors.error), "real removal should be red");
+		const addition = lines.find((line) => line.text.includes("real addition"));
+		assert.ok(addition?.segments?.some((segment) => segment.foreground === colors.success), "real addition should be green");
 	});
 });

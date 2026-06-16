@@ -559,10 +559,8 @@ export class PiUiExtendApp {
 				setSessionStatus: (session) => this.setSessionStatus(session),
 				showToast: (message, kind) => this.showToast(message, kind),
 				render: () => this.render(),
-				resetSessionView: () => this.resetSessionView(),
 				awaitCurrentSessionExtensions: (runtime) => this.awaitCurrentSessionExtensions(runtime),
-				bindCurrentSession: () => this.bindCurrentSession(),
-				loadSessionHistory: () => this.loadSessionHistory(),
+				afterSessionReplacement: (message) => this.afterSessionReplacement(message),
 				scrollToConversationEntry: (entryId) => this.scrollController.scrollToConversationEntry(entryId),
 				scrollToUserMessageJumpTarget: (target) => this.scrollToUserMessageJumpTarget(target),
 			},
@@ -903,6 +901,9 @@ export class PiUiExtendApp {
 		this.runtime = runtime;
 		runtime.setRebindSession(async () => {
 			await this.bindCurrentSession({ awaitExtensions: false });
+		});
+		runtime.setBeforeSessionInvalidate(() => {
+			this.extensionUiController.clearWidgets(this.activeExtensionUiScope());
 		});
 		await this.bindCurrentSession(options);
 	}

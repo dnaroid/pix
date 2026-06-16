@@ -72,6 +72,17 @@ type NotificationTemplateValues = {
 	reason?: string;
 };
 
+type NotificationContextSnapshot = {
+	hasUI: boolean;
+	templateValues: NotificationTemplateValues;
+};
+
+type PendingBell = {
+	ctx: ExtensionContext;
+	notification: NotificationContextSnapshot;
+	message?: string;
+};
+
 function parseDelayMs(value: string | undefined): number {
 	if (value === undefined || value.trim() === "") return DEFAULT_IDLE_DELAY_MS;
 	const parsed = Number(value);
@@ -190,9 +201,22 @@ function trimmed(value: string | undefined): string | undefined {
 	return normalized ? normalized : undefined;
 }
 
+function isStaleExtensionContextError(error: unknown): boolean {
+	return error instanceof Error && /ctx is stale|stale ctx|stale after session replacement|stale after.*reload/i.test(error.message);
+}
+
+function safeSessionName(ctx: ExtensionContext, pi?: Pick<ExtensionAPI, "getSessionName">): string | undefined {
+	try {
+		return trimmed(pi?.getSessionName?.() ?? ctx.sessionManager.getSessionName?.());
+	} catch (error) {
+		if (isStaleExtensionContextError(error)) return undefined;
+		throw error;
+	}
+}
+
 function buildNotificationTemplateValues(ctx: ExtensionContext, pi?: Pick<ExtensionAPI, "getSessionName">): NotificationTemplateValues {
 	const sessionId = ctx.sessionManager.getSessionId();
-	const sessionName = trimmed(pi?.getSessionName?.() ?? ctx.sessionManager.getSessionName?.());
+	const sessionName = safeSessionName(ctx, pi);
 	const sessionFile = ctx.sessionManager.getSessionFile() ?? "";
 	return {
 		sessionId,
@@ -202,6 +226,18 @@ function buildNotificationTemplateValues(ctx: ExtensionContext, pi?: Pick<Extens
 		sessionFileBase: basename(sessionFile),
 		cwd: ctx.cwd,
 	};
+}
+
+function buildNotificationContextSnapshot(ctx: ExtensionContext, pi?: Pick<ExtensionAPI, "getSessionName">): NotificationContextSnapshot | undefined {
+	try {
+		return {
+			hasUI: ctx.hasUI === true,
+			templateValues: buildNotificationTemplateValues(ctx, pi),
+		};
+	} catch (error) {
+		if (isStaleExtensionContextError(error)) return undefined;
+		throw error;
+	}
 }
 
 function renderNotificationTemplate(template: string, values: NotificationTemplateValues, appendReasonIfUnused = false): string {
@@ -279,8 +315,8 @@ function detectMacActivationBundleId(): string | undefined {
 	return TERM_PROGRAM_BUNDLE_IDS[termProgram];
 }
 
-function playAttentionSound(ctx: ExtensionContext): void {
-	if (!terminalBellSoundEnabled(ctx)) return;
+function playAttentionSoundFor(context: Pick<ExtensionContext, "hasUI">): void {
+	if (!terminalBellSoundEnabled(context)) return;
 	if (process.platform !== "darwin") return;
 	const sound = process.env.PI_TERMINAL_BELL_SOUND && process.env.PI_TERMINAL_BELL_SOUND !== "1"
 		? process.env.PI_TERMINAL_BELL_SOUND
@@ -325,19 +361,18 @@ function sendTelegramNotification(title: string, message: string): void {
 }
 
 function notifySessionStopped(
-	ctx: ExtensionContext,
-	pi: Pick<ExtensionAPI, "getSessionName">,
+	context: NotificationContextSnapshot,
 	macActivationBundleId: string | undefined,
 	options: { title: string; message?: string },
 ): void {
-	const templateValues = buildNotificationTemplateValues(ctx, pi);
+	const templateValues = context.templateValues;
 	const title = renderNotificationTemplate(notificationTitleTemplate(options.title), templateValues);
 	const renderedMessage = renderNotificationTemplate(options.message ?? process.env.PI_TERMINAL_BELL_NOTIFY_MESSAGE ?? DEFAULT_NOTIFICATION_MESSAGE, templateValues);
 
 	// Telegram is independent of the bundled desktop sound/notification gate.
 	sendTelegramNotification(title, renderedMessage);
 
-	if (!terminalBellNotificationsEnabled(ctx)) return;
+	if (!terminalBellNotificationsEnabled(context)) return;
 
 	if (process.platform === "darwin") {
 		const terminalNotifier = findExecutable(process.env.PI_TERMINAL_BELL_NOTIFIER ?? "terminal-notifier");
@@ -399,7 +434,7 @@ export default function terminalBell(pi: ExtensionAPI) {
 	if (extensionDisabled()) return;
 
 	let timer: Timer | undefined;
-	let lastCtx: ExtensionContext | undefined;
+	let pendingBell: PendingBell | undefined;
 	let deferredUntilSubagentsFinish = false;
 	let liveSubagentCount = 0;
 	let lastFailureReason: string | undefined;
@@ -418,29 +453,39 @@ export default function terminalBell(pi: ExtensionAPI) {
 		return liveSubagentCount > 0 || activeSubagentWaitToolCallIds.size > 0;
 	}
 
-	function notifyAttention(ctx: ExtensionContext, message?: string): void {
-		if (canRingTerminal(ctx)) writeBell();
-		playAttentionSound(ctx);
-		notifySessionStopped(ctx, pi, macActivationBundleId, {
+	function notifyAttention(notification: NotificationContextSnapshot, message?: string): void {
+		if (canRingTerminal(notification)) writeBell();
+		playAttentionSoundFor(notification);
+		notifySessionStopped(notification, macActivationBundleId, {
 			title: message ? DEFAULT_ERROR_NOTIFICATION_TITLE : DEFAULT_COMPLETION_NOTIFICATION_TITLE,
 			...(message ? { message } : {}),
 		});
 		pi.events.emit(TERMINAL_BELL_ATTENTION_EVENT, {
-			cwd: ctx.cwd,
-			sessionFile: ctx.sessionManager.getSessionFile(),
-			sessionId: ctx.sessionManager.getSessionId(),
+			cwd: notification.templateValues.cwd,
+			sessionFile: notification.templateValues.sessionFile,
+			sessionId: notification.templateValues.sessionId,
 		});
 	}
 
-	function attemptBell(ctx: ExtensionContext, attempt: number, message?: string): void {
+	function attemptBell(pending: PendingBell, attempt: number): void {
 		timer = undefined;
+		const { ctx, notification, message } = pending;
 
-		if (!ctx.isIdle()) {
-			if (attempt < MAX_IDLE_RETRIES) scheduleBell(ctx, IDLE_RETRY_DELAY_MS, attempt + 1, message);
-			return;
+		try {
+			if (!ctx.isIdle()) {
+				if (attempt < MAX_IDLE_RETRIES) scheduleBell(ctx, IDLE_RETRY_DELAY_MS, attempt + 1, message, notification);
+				return;
+			}
+
+			if (ctx.hasPendingMessages()) return;
+		} catch (error) {
+			if (isStaleExtensionContextError(error)) {
+				pendingBell = undefined;
+				deferredUntilSubagentsFinish = false;
+				return;
+			}
+			throw error;
 		}
-
-		if (ctx.hasPendingMessages()) return;
 
 		if (hasSubagentWork()) {
 			deferredUntilSubagentsFinish = true;
@@ -448,29 +493,50 @@ export default function terminalBell(pi: ExtensionAPI) {
 		}
 
 		deferredUntilSubagentsFinish = false;
-		notifyAttention(ctx, message);
+		notifyAttention(notification, message);
 	}
 
-	function scheduleBell(ctx: ExtensionContext, delayMs = idleDelayMs, attempt = 0, message?: string): void {
-		lastCtx = ctx;
+	function scheduleBell(
+		ctx: ExtensionContext,
+		delayMs = idleDelayMs,
+		attempt = 0,
+		message?: string,
+		notification = buildNotificationContextSnapshot(ctx, pi),
+	): void {
+		if (!notification) return;
+		pendingBell = { ctx, notification, ...(message ? { message } : {}) };
 		clearTimer();
-		timer = setTimeout(() => attemptBell(ctx, attempt, message), delayMs);
+		timer = setTimeout(() => {
+			if (!pendingBell) return;
+			try {
+				attemptBell(pendingBell, attempt);
+			} catch (error) {
+				if (isStaleExtensionContextError(error)) {
+					pendingBell = undefined;
+					deferredUntilSubagentsFinish = false;
+					return;
+				}
+				throw error;
+			}
+		}, delayMs);
 		timer.unref?.();
 	}
 
 	function notifyAskUserWaiting(toolCallId: string, ctx: ExtensionContext): void {
 		if (notifiedAskUserToolCallIds.has(toolCallId)) return;
 		notifiedAskUserToolCallIds.add(toolCallId);
-		if (canRingTerminal(ctx)) writeBell();
-		playAttentionSound(ctx);
-		notifySessionStopped(ctx, pi, macActivationBundleId, {
+		const notification = buildNotificationContextSnapshot(ctx, pi);
+		if (!notification) return;
+		if (canRingTerminal(notification)) writeBell();
+		playAttentionSoundFor(notification);
+		notifySessionStopped(notification, macActivationBundleId, {
 			title: DEFAULT_QUESTION_NOTIFICATION_TITLE,
 			message: process.env.PI_TERMINAL_BELL_ASK_USER_NOTIFY_MESSAGE ?? DEFAULT_ASK_USER_NOTIFICATION_MESSAGE,
 		});
 		pi.events.emit(TERMINAL_BELL_ATTENTION_EVENT, {
-			cwd: ctx.cwd,
-			sessionFile: ctx.sessionManager.getSessionFile(),
-			sessionId: ctx.sessionManager.getSessionId(),
+			cwd: notification.templateValues.cwd,
+			sessionFile: notification.templateValues.sessionFile,
+			sessionId: notification.templateValues.sessionId,
 		});
 	}
 
@@ -479,8 +545,8 @@ export default function terminalBell(pi: ExtensionAPI) {
 		const count = normalizeLiveCount(event);
 		if (count === undefined) return;
 		liveSubagentCount = count;
-		if (count === 0 && deferredUntilSubagentsFinish && lastCtx) {
-			scheduleBell(lastCtx);
+		if (count === 0 && deferredUntilSubagentsFinish && pendingBell) {
+			scheduleBell(pendingBell.ctx, idleDelayMs, 0, pendingBell.message, pendingBell.notification);
 		}
 	});
 
@@ -545,7 +611,7 @@ export default function terminalBell(pi: ExtensionAPI) {
 
 	pi.on("session_shutdown", async () => {
 		clearTimer();
-		lastCtx = undefined;
+		pendingBell = undefined;
 		deferredUntilSubagentsFinish = false;
 		liveSubagentCount = 0;
 		lastFailureReason = undefined;

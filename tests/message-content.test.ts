@@ -28,6 +28,19 @@ describe("message-content", () => {
 		assert.equal(renderUserMessageContent("plain text"), "plain text");
 	});
 
+	it("strips leaked DCP message-id control blocks from rendered content", () => {
+		const leaked = [
+			"before",
+			"<dcp-message-ids>",
+			"internal ids",
+			"</dcp-message-ids>",
+			"after",
+		].join("\n");
+
+		assert.equal(renderContent([{ text: leaked }]), "before\nafter");
+		assert.equal(renderUserMessageContent([{ type: "text", text: leaked }]), "before\nafter");
+	});
+
 	it("extracts images and falls back to prompt text only when needed", () => {
 		const image: ImageContent = { type: "image", data: Buffer.from("png").toString("base64"), mimeType: "image/png" };
 		const mixed = [image, { type: "text", text: "nope" }, null];

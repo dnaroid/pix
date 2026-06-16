@@ -1141,6 +1141,7 @@ function selectedConversationLineText(
 ): string {
 	const selectsWholeLine = startColumn <= 1 && endColumn >= text.length + 1;
 	if (selectsWholeLine && rendered?.copyText !== undefined) return rendered.copyText;
+	if (rendered?.copyText !== undefined) return sliceByDisplayColumns(rendered.copyText, startColumn, endColumn).trimEnd();
 	return sliceByDisplayColumns(text, startColumn, endColumn).trimEnd();
 }
 

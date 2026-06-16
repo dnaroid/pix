@@ -17,6 +17,8 @@ const DCP_BLOCK_ID_METADATA_LINE_RE = /^\s*<dcp-block-id(?:>|=)b\d+(?:<\/dcp-blo
 const DCP_ID_MARKDOWN_REF_LINE_RE = /^\s*\[dcp-id\]:\s*#\s*\(m\d+(?:\s+priority=(?:low|medium|high))?\)(?:\s+priority=(?:low|medium|high))?\s*$/i;
 const DCP_BLOCK_ID_MARKDOWN_REF_LINE_RE = /^\s*\[dcp-block-id\]:\s*#\s*\(b\d+\)\s*$/i;
 const DCP_MARKDOWN_REF_FRAGMENT_LINE_RE = /^\s*\[dcp[^\n]*$/i;
+const DCP_MESSAGE_IDS_START_LINE_RE = /^\s*<dcp-message-ids>/i;
+const DCP_MESSAGE_IDS_END_LINE_RE = /<\/dcp-message-ids>\s*$/i;
 const DCP_SYSTEM_REMINDER_START_LINE_RE = /^\s*<dcp-system-reminder>/i;
 const DCP_SYSTEM_REMINDER_END_LINE_RE = /(?:<\/dcp-system-reminder>|(?<!<)dcp-system-reminder>)\s*$/i;
 const MARKDOWN_FENCE_LINE_RE = /^\s*(```|~~~)/;
@@ -185,6 +187,7 @@ function stripStaleDcpMetadataLines(text: string): string {
 
   const lines = text.split("\n");
   const kept: string[] = [];
+  let inMessageIds = false;
   let inSystemReminder = false;
   let inMarkdownFence = false;
 
@@ -197,6 +200,16 @@ function stripStaleDcpMetadataLines(text: string): string {
 
     if (inMarkdownFence) {
       kept.push(line);
+      continue;
+    }
+
+    if (inMessageIds) {
+      if (DCP_MESSAGE_IDS_END_LINE_RE.test(line)) inMessageIds = false;
+      continue;
+    }
+
+    if (DCP_MESSAGE_IDS_START_LINE_RE.test(line)) {
+      if (!DCP_MESSAGE_IDS_END_LINE_RE.test(line)) inMessageIds = true;
       continue;
     }
 
@@ -253,6 +266,11 @@ function stripStaleDcpMetadataFromAssistantBlock(block: any): any | undefined {
 
 export function stripStaleDcpMetadataFromAssistantMessage(message: any): any {
   if (!message || typeof message !== "object" || message.role !== "assistant") return message;
+  return stripStaleDcpMetadataFromMessage(message);
+}
+
+export function stripStaleDcpMetadataFromMessage(message: any): any {
+  if (!message || typeof message !== "object") return message;
   if (typeof message.content === "string") {
     return { ...message, content: stripStaleDcpMetadataLines(message.content) };
   }

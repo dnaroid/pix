@@ -18,6 +18,14 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
   // },
   "dcp": {
     "enabled": true,
+    // Write a JSONL debug log of DCP context/prune/compress events to
+    // ~/.pi/agent/dcp-debug.jsonl. Also overridable via env
+    // PI_DCP_DEBUG=1 / PI_DCP_DEBUG_LOG=/path. Off by default.
+    // The log is size-limited and rotated: when it reaches debugLog.maxBytes
+    // (default 5 MB) it is renamed to .1, pushing older backups down and
+    // dropping the oldest past debugLog.maxBackups (default 3).
+    "debug": false,
+    "debugLog": { "maxBytes": 5242880, "maxBackups": 3 },
     "manualMode": { "enabled": false, "automaticStrategies": true },
     "modelOverrides": {
       "openai-codex/gpt-5.5": {

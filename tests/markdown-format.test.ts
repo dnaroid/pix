@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { formatMarkdownTables, isOnlyHiddenMetadata, renderMarkdownLine, renderMarkdownTextLines } from "../src/markdown-format.js";
+import { formatMarkdownTables, isOnlyHiddenMetadata, renderMarkdownLine, renderMarkdownTextLines, stripDcpControlMetadata } from "../src/markdown-format.js";
 import { stringDisplayWidth } from "../src/terminal-width.js";
 
 describe("formatMarkdownTables", () => {
@@ -224,6 +224,19 @@ describe("renderMarkdownTextLines", () => {
 
 		assert.deepEqual(lines.map((line) => line.text), ["[details]", "answer"]);
 	});
+
+	it("does not render leaked DCP message-id control blocks", () => {
+		const text = [
+			"before",
+			"<dcp-message-ids>",
+			"internal ids",
+			"</dcp-message-ids>",
+			"after",
+		].join("\n");
+
+		assert.deepEqual(renderMarkdownTextLines(text, 80).map((line) => line.text), ["before", "after"]);
+		assert.equal(stripDcpControlMetadata(text), "before\nafter");
+	});
 });
 
 describe("isOnlyHiddenMetadata", () => {
@@ -252,5 +265,10 @@ describe("isOnlyHiddenMetadata", () => {
 	it("does not hide incomplete DCP prefixes", () => {
 		assert.equal(isOnlyHiddenMetadata("[dcp-id]: # (m159"), true);
 		assert.equal(isOnlyHiddenMetadata("[d"), false);
+	});
+
+	it("treats leaked DCP message-id control blocks as hidden metadata", () => {
+		assert.equal(isOnlyHiddenMetadata("<dcp-message-ids>\ninternal ids\n</dcp-message-ids>"), true);
+		assert.equal(isOnlyHiddenMetadata("answer\n<dcp-message-ids>\ninternal ids\n</dcp-message-ids>"), false);
 	});
 });

@@ -10,6 +10,10 @@ import { parse as parseJsonc, type ParseError } from "jsonc-parser"
 export interface DcpConfig {
   enabled: boolean
   debug: boolean
+  debugLog?: {
+    maxBytes?: number
+    maxBackups?: number
+  }
   manualMode: {
     enabled: boolean
     automaticStrategies: boolean // run dedup/purge even in manual mode

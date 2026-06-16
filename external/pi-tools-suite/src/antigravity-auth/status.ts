@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
+import { ignoreStaleExtensionContextError } from "../context-usage";
 import { publishStartupSection } from "../startup-section";
 import { LEGACY_STATUS_KEY, PROVIDER_ID, STATUS_KEY } from "./constants";
 import { accountFromCredential, clampAccountIndex, decodeApiKey, getAccountProjectId, getEffectiveProjectId, getPiAuthPath, getStoredAccounts, readJsonFile } from "./auth-store";
@@ -23,6 +24,14 @@ function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
+function staleSafe(action: () => void): void {
+	try {
+		action();
+	} catch (error) {
+		ignoreStaleExtensionContextError(error);
+	}
+}
+
 export function formatAntigravityLoginFailure(error: unknown): string {
 	return `Antigravity login failed: ${errorMessage(error)}. Auth file: ${getPiAuthPath()}`;
 }
@@ -34,18 +43,22 @@ export function formatAntigravityProviderFailure(error: unknown): string {
 function notifyAntigravityFailure(message: string, details: Record<string, unknown>, options: { ui?: ExtensionUIContext; sendSessionMessage?: boolean } = {}): void {
 	const { ui, sendSessionMessage = true } = options;
 	const targetUi = ui ?? extensionUi;
-	if (typeof targetUi?.notify === "function") {
-		targetUi.notify(message, "error");
-	} else if (typeof (targetUi as any)?.toast?.error === "function") {
-		(targetUi as any).toast.error(message);
-	}
+	staleSafe(() => {
+		if (typeof targetUi?.notify === "function") {
+			targetUi.notify(message, "error");
+		} else if (typeof (targetUi as any)?.toast?.error === "function") {
+			(targetUi as any).toast.error(message);
+		}
+	});
 	if (!sendSessionMessage) return;
-	(extensionApi as any)?.sendMessage?.({
-		customType: "antigravity-auth-status",
-		content: message,
-		display: true,
-		details,
-	}, { triggerTurn: false });
+	staleSafe(() => {
+		(extensionApi as any)?.sendMessage?.({
+			customType: "antigravity-auth-status",
+			content: message,
+			display: true,
+			details,
+		}, { triggerTurn: false });
+	});
 }
 
 function shouldNotifyProviderFailure(message: string, model?: string): boolean {
@@ -145,13 +158,17 @@ export async function publishAntigravityAuthStartupSection(): Promise<void> {
 }
 
 export function emitAntigravityStatus(details: AntigravityStatusDetails): void {
-	if (typeof extensionUi?.setStatus === "function") {
-		extensionUi.setStatus(LEGACY_STATUS_KEY, undefined);
-		extensionUi.setStatus(STATUS_KEY, formatAntigravityStatus(details));
-	}
-	(extensionApi as any)?.sendMessage?.({
-		role: "system",
-		content: formatAntigravityStatus(details),
-		details,
+	staleSafe(() => {
+		if (typeof extensionUi?.setStatus === "function") {
+			extensionUi.setStatus(LEGACY_STATUS_KEY, undefined);
+			extensionUi.setStatus(STATUS_KEY, formatAntigravityStatus(details));
+		}
+	});
+	staleSafe(() => {
+		(extensionApi as any)?.sendMessage?.({
+			role: "system",
+			content: formatAntigravityStatus(details),
+			details,
+		});
 	});
 }

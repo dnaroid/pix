@@ -19,9 +19,7 @@ export type AppPopupActionControllerHost = {
 	setSessionStatus(session: AgentSession | undefined): void;
 	showToast(message: string, kind: "success" | "error" | "warning" | "info"): void;
 	render(): void;
-	resetSessionView(): void;
-	bindCurrentSession(): Promise<void>;
-	loadSessionHistory(): void;
+	afterSessionReplacement(message?: string): void;
 	scrollToConversationEntry(entryId: string): boolean;
 	scrollToUserMessageJumpTarget(target: UserMessageJumpMenuValue): Promise<boolean>;
 };
@@ -264,12 +262,8 @@ export class AppPopupActionController {
 				return true;
 			}
 
-			this.host.resetSessionView();
-			await this.host.bindCurrentSession();
-			this.host.loadSessionHistory();
 			const name = runtime.session.sessionName ?? session.id.slice(0, 8);
-			this.host.addEntry({ id: createId("system"), kind: "system", text: `Resumed session "${name}"` });
-			this.host.setSessionStatus(runtime.session);
+			this.host.afterSessionReplacement(`Resumed session "${name}"`);
 	} catch (error) {
 		this.host.addEntry({ id: createId("error"), kind: "error", text: `Resume failed: ${error instanceof Error ? error.message : String(error)}` });
 		this.host.showToast("Failed to resume session", "error");

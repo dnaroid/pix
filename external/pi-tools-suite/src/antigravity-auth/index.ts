@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { ignoreStaleExtensionContextError } from "../context-usage";
 import { decodeApiKey, getEffectiveProjectId } from "./auth-store";
 import { formatAddAccountResult, parseAddAccountCommandArgs } from "./commands";
 import { API_ID, DEFAULT_PROJECT_ID, ENDPOINT_DAILY, PROVIDER_ID } from "./constants";
@@ -9,6 +10,14 @@ import { streamAntigravity } from "./stream";
 
 export { addAntigravityAccount } from "./oauth";
 export type { AntigravityAddAccountResult } from "./types";
+
+async function staleSafe(action: () => void | Promise<void>): Promise<void> {
+	try {
+		await action();
+	} catch (error) {
+		ignoreStaleExtensionContextError(error);
+	}
+}
 
 export default async function antigravityAuth(pi: ExtensionAPI): Promise<void> {
 	rememberAntigravityApi(pi);
@@ -40,7 +49,9 @@ export default async function antigravityAuth(pi: ExtensionAPI): Promise<void> {
 					{
 						onAuth: ({ url }) => {
 							authUrl = url;
-							ctx.ui?.notify?.(`Open this Antigravity OAuth URL, then paste the callback URL:\n${url}`, "info");
+							void staleSafe(() => {
+								ctx.ui?.notify?.(`Open this Antigravity OAuth URL, then paste the callback URL:\n${url}`, "info");
+							});
 						},
 						onPrompt: async ({ message }) => {
 							if (typeof ctx.ui?.input !== "function") {
@@ -53,7 +64,9 @@ export default async function antigravityAuth(pi: ExtensionAPI): Promise<void> {
 					},
 					options,
 				);
-				ctx.ui?.notify?.(formatAddAccountResult(result), "info");
+				await staleSafe(() => {
+					ctx.ui?.notify?.(formatAddAccountResult(result), "info");
+				});
 				emitAntigravityStatus(await getCurrentAntigravityStatus());
 			} catch (error) {
 				notifyAntigravityLoginFailure(error);

@@ -39,11 +39,15 @@ import {
 	resolveContextThresholds,
 	estimateTokens,
 } from "./pruner.js"
-import { stripStaleDcpMetadataFromAssistantMessage } from "./pruner-metadata.js"
+import {
+	stripStaleDcpMetadataFromAssistantMessage,
+	stripStaleDcpMetadataFromMessage,
+} from "./pruner-metadata.js"
 import {
 	DCP_MESSAGE_IDS_CUSTOM_TYPE,
-	buildMessageIdControlMessage,
+	buildMessageIdControlText,
 } from "./pruner-message-ids.js"
+import { summarizeDcpState, writeDcpDebugLog } from "./debug-log.js"
 import type { DcpNudgeType } from "./pruner-types.js"
 import { registerCompressTool } from "./compress-tool.js"
 import { DCP_STATS_MESSAGE_TYPE, registerCommands } from "./commands.js"
@@ -101,9 +105,75 @@ function isDcpControlPlaneMessage(message: any): boolean {
 	return message?.role === "custom" && DCP_CONTROL_PLANE_CUSTOM_TYPES.has(message.customType)
 }
 
-function appendDcpMessageIdControl(messages: any[], state: ReturnType<typeof createState>): any[] {
-	const controlMessage = buildMessageIdControlMessage(state)
-	return controlMessage ? [...messages, controlMessage] : messages
+const DCP_PROVIDER_CONTROL_HEADER = "DCP message ID control data (do not quote or output):"
+
+function appendTextToContent(content: unknown, text: string): unknown {
+	if (typeof content === "string") return `${content}\n\n${text}`
+	if (Array.isArray(content)) {
+		const textType = content.some((part: any) => part?.type === "input_text") ? "input_text" : "text"
+		return [...content, { type: textType, text }]
+	}
+	return text
+}
+
+function appendDcpControlToMessages(messages: unknown, text: string): unknown {
+	if (!Array.isArray(messages)) return messages
+	const existingIndex = messages.findIndex((message: any) =>
+		message?.role === "system" || message?.role === "developer"
+	)
+	const block = `${DCP_PROVIDER_CONTROL_HEADER}\n${text}`
+	if (existingIndex >= 0) {
+		return messages.map((message: any, index) => index === existingIndex
+			? { ...message, content: appendTextToContent(message.content, block) }
+			: message)
+	}
+	return [{ role: "system", content: block }, ...messages]
+}
+
+function appendDcpControlToAnthropicSystem(system: unknown, text: string): unknown {
+	const block = `${DCP_PROVIDER_CONTROL_HEADER}\n${text}`
+	if (typeof system === "string") return `${system}\n\n${block}`
+	if (Array.isArray(system)) return [...system, { type: "text", text: block }]
+	if (system === undefined || system === null) return [{ type: "text", text: block }]
+	return system
+}
+
+function appendDcpControlToGoogleSystemInstruction(systemInstruction: unknown, text: string): unknown {
+	const block = `${DCP_PROVIDER_CONTROL_HEADER}\n${text}`
+	if (typeof systemInstruction === "string") return `${systemInstruction}\n\n${block}`
+	if (systemInstruction === undefined || systemInstruction === null) return block
+	return systemInstruction
+}
+
+function appendDcpControlToProviderPayload(payload: unknown, text: string): unknown {
+	if (Array.isArray(payload)) return appendDcpControlToMessages(payload, text)
+	if (!payload || typeof payload !== "object") return payload
+	const record = payload as Record<string, unknown>
+
+	if ("system" in record) {
+		return { ...record, system: appendDcpControlToAnthropicSystem(record.system, text) }
+	}
+
+	if (Array.isArray(record.input)) {
+		return { ...record, input: appendDcpControlToMessages(record.input, text) }
+	}
+
+	if (Array.isArray(record.messages)) {
+		return { ...record, messages: appendDcpControlToMessages(record.messages, text) }
+	}
+
+	if (record.config && typeof record.config === "object") {
+		const config = record.config as Record<string, unknown>
+		return {
+			...record,
+			config: {
+				...config,
+				systemInstruction: appendDcpControlToGoogleSystemInstruction(config.systemInstruction, text),
+			},
+		}
+	}
+
+	return payload
 }
 
 // ---------------------------------------------------------------------------
@@ -267,10 +337,32 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 	// ── 10. context: apply pruning and inject nudges ──────────────────────────
 	pi.on("context", async (event, ctx) => {
 		const effectiveConfig = configForContext(ctx)
-		const contextMessages = event.messages.filter((message: any) =>
-			!isUserVisibleOnlyMessage(message) && !isDcpControlPlaneMessage(message)
-		)
+		const contextMessages = event.messages
+			.filter((message: any) => !isUserVisibleOnlyMessage(message) && !isDcpControlPlaneMessage(message))
+			.map((message: any) => stripStaleDcpMetadataFromMessage(message))
+		const finishContext = (reason: string, messages: any[], details: Record<string, unknown> = {}) => {
+			writeDcpDebugLog(effectiveConfig, "context.result", {
+				reason,
+				inputMessages: event.messages.length,
+				filteredMessages: contextMessages.length,
+				outputMessages: messages.length,
+				messageIdControl: "provider-payload",
+				state: summarizeDcpState(state),
+				...details,
+			}, ctx)
+			return { messages }
+		}
+
+		writeDcpDebugLog(effectiveConfig, "context.start", {
+			inputMessages: event.messages.length,
+			filteredMessages: contextMessages.length,
+			filteredDcpControlPlaneMessages: event.messages.length - contextMessages.length,
+		}, ctx)
 		if (!effectiveConfig.enabled) {
+			writeDcpDebugLog(effectiveConfig, "context.disabled", {
+				inputMessages: event.messages.length,
+				filteredMessages: contextMessages.length,
+			}, ctx)
 			return { messages: contextMessages }
 		}
 		annotateMessagesWithBranchEntryIds(contextMessages, ctx)
@@ -292,7 +384,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 			if (contextPercent === undefined) {
 				const clearedAnchors = clearDcpNudgeAnchors(state)
 				if (clearedAnchors > 0) await saveDcpState(ctx, state)
-				return { messages: appendDcpMessageIdControl(prunedMessages, state) }
+				return finishContext("unknown-context-percent", prunedMessages, { clearedAnchors })
 			}
 
 			const ctxModel = (ctx as any).model
@@ -312,7 +404,11 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 			if (!contextLimitReached && !routineNudgesAllowed) {
 				const clearedAnchors = clearDcpNudgeAnchors(state)
 				if (clearedAnchors > 0) await saveDcpState(ctx, state)
-				return { messages: appendDcpMessageIdControl(prunedMessages, state) }
+				return finishContext("below-threshold", prunedMessages, {
+					contextPercent,
+					thresholds,
+					clearedAnchors,
+				})
 			}
 
 			let toolCallsSinceLastUser = 0
@@ -347,6 +443,14 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 					effectiveConfig,
 					contextPercent,
 				)
+				writeDcpDebugLog(effectiveConfig, "context.candidates", {
+					contextPercent,
+					thresholds,
+					nudgeType,
+					candidate,
+					messageCandidates,
+					state: summarizeDcpState(state),
+				}, ctx)
 			}
 
 			if (nudgeType && !manualEmergencyOnly) {
@@ -410,7 +514,26 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 			appendConcreteNudgeGuidance(baseNudgeText(anchor.type), candidate, messageCandidates, state),
 		)
 
-		return { messages: appendDcpMessageIdControl(prunedMessages, state) }
+		return finishContext("complete", prunedMessages, {
+			candidate,
+			messageCandidates,
+		})
+	})
+
+	// ── 10b. before_provider_request: inject DCP IDs outside transcript ────────
+	pi.on("before_provider_request", async (event, ctx) => {
+		const effectiveConfig = configForContext(ctx)
+		if (!effectiveConfig.enabled) return undefined
+
+		const controlText = buildMessageIdControlText(state)
+		if (!controlText) return undefined
+
+		const payload = appendDcpControlToProviderPayload(event.payload, controlText)
+		writeDcpDebugLog(effectiveConfig, "provider_payload.message_ids", {
+			injected: payload !== event.payload,
+			state: summarizeDcpState(state),
+		}, ctx)
+		return payload === event.payload ? undefined : payload
 	})
 
 	// ── 11. agent_end: persist state after each agent run ────────────────────

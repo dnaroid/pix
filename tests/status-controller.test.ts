@@ -431,7 +431,20 @@ describe("StatusLineRenderer", () => {
 		assert.ok(rendered.includes(colorize(APP_ICONS.alert, {
 			foreground: THEMES.dark.colors.warning,
 		})));
-		assert.ok(rendered.includes(colorize("5d0h", {
+		// Reset duration digits render brighter than the unit letters (h/m/d).
+		assert.ok(!rendered.includes(colorize("5d0h", {
+			foreground: THEMES.dark.colors.muted,
+		})));
+		assert.ok(rendered.includes(colorize("5", {
+			foreground: THEMES.dark.colors.statusForeground,
+		})));
+		assert.ok(rendered.includes(colorize("0", {
+			foreground: THEMES.dark.colors.statusForeground,
+		})));
+		assert.ok(rendered.includes(colorize("d", {
+			foreground: THEMES.dark.colors.muted,
+		})));
+		assert.ok(rendered.includes(colorize("h", {
 			foreground: THEMES.dark.colors.muted,
 		})));
 	});

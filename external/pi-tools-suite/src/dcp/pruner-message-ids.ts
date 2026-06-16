@@ -70,11 +70,11 @@ function controlLineForMessageId(id: string, state: DcpState): string {
   return `- ${id}: ${details.join(", ")}`;
 }
 
-export function buildMessageIdControlMessage(state: DcpState): any | undefined {
+export function buildMessageIdControlText(state: DcpState): string | undefined {
   const ids = [...state.messageIdSnapshot.keys()];
   if (ids.length === 0) return undefined;
 
-  const text = [
+  return [
     "<dcp-message-ids>",
     "DCP metadata for the preceding conversation messages. These IDs are model-visible but UI-hidden control data.",
     "Use only these current IDs with the compress tool; do not quote or output this metadata.",
@@ -82,6 +82,12 @@ export function buildMessageIdControlMessage(state: DcpState): any | undefined {
     ...ids.map((id) => controlLineForMessageId(id, state)),
     "</dcp-message-ids>",
   ].join("\n");
+}
+
+export function buildMessageIdControlMessage(state: DcpState): any | undefined {
+  const text = buildMessageIdControlText(state);
+  if (!text) return undefined;
+  const ids = [...state.messageIdSnapshot.keys()];
 
   return {
     role: "custom",

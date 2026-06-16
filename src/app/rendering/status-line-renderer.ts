@@ -584,8 +584,21 @@ export class StatusLineRenderer {
 			if (warningStart !== undefined) {
 				this.pushSegment(segments, warningStart, APP_ICONS.alert.length, this.host.theme.colors.warning);
 			}
-			const resetLength = this.modelUsageResetLength(modelUsageLabel, resetStart - labelStart);
-			this.pushSegment(segments, resetStart, resetLength, this.host.theme.colors.muted);
+			const localResetStart = resetStart - labelStart;
+			const resetLength = this.modelUsageResetLength(modelUsageLabel, localResetStart);
+			const resetText = modelUsageLabel.slice(localResetStart, localResetStart + resetLength);
+			this.pushResetDurationSegments(segments, resetStart, resetText);
+		}
+	}
+
+	private pushResetDurationSegments(segments: StyledSegment[], resetStart: number, resetText: string): void {
+		const colors = this.host.theme.colors;
+		const muted = colors.muted;
+		const bright = colors.statusForeground;
+		for (const match of resetText.matchAll(/\d+|\D+/gu)) {
+			const text = match[0];
+			const localStart = match.index ?? 0;
+			this.pushSegment(segments, resetStart + localStart, text.length, /\d/.test(text) ? bright : muted);
 		}
 	}
 

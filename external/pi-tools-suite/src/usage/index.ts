@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { publishStartupSection } from "../startup-section";
+import { ignoreStaleExtensionContextError } from "../context-usage";
 import { queryGoogleUsage } from "./lib/google";
 import { queryOpenAIUsage } from "./lib/openai";
 import { type AuthData, type QueryResult } from "./lib/types";
@@ -127,6 +128,14 @@ function sendStatusMessage(pi: ExtensionAPI, text: string): void {
 	});
 }
 
+async function staleSafe(action: () => void | Promise<void>): Promise<void> {
+	try {
+		await action();
+	} catch (error) {
+		ignoreStaleExtensionContextError(error);
+	}
+}
+
 export default function usage(pi: ExtensionAPI) {
 	publishStartupSection({
 		id: "usage",
@@ -137,13 +146,18 @@ export default function usage(pi: ExtensionAPI) {
 	async function showStatusFromCommand(ctx: ExtensionCommandContext): Promise<void> {
 		const text = await queryUsage();
 
-		if (ctx.hasUI) {
-			ctx.ui.notify("usage: quota usage refreshed", "info");
-		} else {
+		if (!ctx.hasUI) {
 			console.log(text);
+			await staleSafe(() => {
+				sendStatusMessage(pi, text);
+			});
+			return;
 		}
 
-		sendStatusMessage(pi, text);
+		await staleSafe(async () => {
+			ctx.ui.notify("usage: quota usage refreshed", "info");
+			sendStatusMessage(pi, text);
+		});
 	}
 
 	pi.registerCommand("usage", {

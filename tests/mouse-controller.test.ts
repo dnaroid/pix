@@ -633,6 +633,31 @@ describe("AppMouseController", () => {
 		assert.equal(copiedText, "hello world");
 	});
 
+	it("copies partial wrapped conversation selections from copyText instead of viewport line breaks", () => {
+		let copiedText: string | undefined;
+		const controller = new AppMouseController(
+			fakeHost({
+				conversationViewport: () => ({
+					slice: () => [
+						{ text: "hello", copyText: "hello ", continuesOnNextLine: true },
+						{ text: "world", copyText: "world" },
+					],
+				}) as never,
+				copyTextToClipboard: (text) => { copiedText = text; },
+			}),
+			fakePopupMenus(),
+			fakePopupActions(),
+			fakeScrollController(),
+			fakeCommandController(),
+		);
+
+		controller.handleMouse({ button: 0, x: 2, y: 1, released: false });
+		controller.handleMouse({ button: 32, x: 4, y: 2, released: false });
+		controller.handleMouse({ button: 0, x: 4, y: 2, released: true });
+
+		assert.equal(copiedText, "ellowor");
+	});
+
 	it("scrolls the input editor with the mouse wheel when the pointer is over it", () => {
 		const deltas: number[] = [];
 		let renderCount = 0;
@@ -823,6 +848,7 @@ function fakeHost(overrides: Partial<AppMouseControllerHost> = {}): AppMouseCont
 		showToast: () => {},
 		dismissToast: () => {},
 		refreshModelUsageStatus: () => {},
+		scrollConversationQuick: () => {},
 		copyTextToClipboard: () => {},
 		handleExtensionInputMouse: () => false,
 		render: () => {},

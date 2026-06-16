@@ -1,5 +1,7 @@
+import { basename } from "node:path";
 import type { AgentSessionRuntime, ExtensionCommandContextActions, ExtensionError } from "@earendil-works/pi-coding-agent";
 import { createId } from "../id.js";
+import { logPixEvent, type PixLogDetails, type PixLogLevel } from "../logger.js";
 import type { Entry } from "../types.js";
 
 export type AppExtensionActionsHost = {
@@ -17,8 +19,13 @@ export type AppExtensionActionsHost = {
 	render(): void;
 };
 
+export type ExtensionErrorLogger = (level: PixLogLevel, event: string, details?: PixLogDetails) => void;
+
 export class AppExtensionActionsController {
-	constructor(private readonly host: AppExtensionActionsHost) {}
+	constructor(
+		private readonly host: AppExtensionActionsHost,
+		private readonly logExtensionError: ExtensionErrorLogger = logPixEvent,
+	) {}
 
 	createCommandContextActions(runtime: AgentSessionRuntime): ExtensionCommandContextActions {
 		return {
@@ -69,9 +76,34 @@ export class AppExtensionActionsController {
 	}
 
 	handleExtensionError(error: ExtensionError): void {
-	const pathText = error.extensionPath ? ` (${error.extensionPath})` : "";
-	this.host.addEntry({ id: createId("error"), kind: "error", text: `Extension ${error.event} failed${pathText}: ${error.error}` });
-	this.host.showToast(`Extension ${error.event} failed`, "error");
-	if (this.host.isRunning()) this.host.render();
+		const sourceText = formatExtensionErrorSource(error.extensionPath);
+		const pathText = error.extensionPath ? ` (${error.extensionPath})` : "";
+		this.logExtensionError("error", "extension:error", extensionErrorLogDetails(error));
+		this.host.addEntry({
+			id: createId("error"),
+			kind: "error",
+			text: `Extension ${error.event} failed${sourceText}${pathText}: ${error.error}`,
+		});
+		this.host.showToast(`Extension ${error.event} failed`, "error");
+		if (this.host.isRunning()) this.host.render();
+	}
 }
+
+function formatExtensionErrorSource(extensionPath: string | undefined): string {
+	if (!extensionPath) return "";
+	const extensionName = basename(extensionPath);
+	return extensionName && extensionName !== extensionPath ? ` [${extensionName}]` : "";
+}
+
+function extensionErrorLogDetails(error: ExtensionError): PixLogDetails {
+	const details: PixLogDetails = {
+		event: error.event,
+		error: error.error,
+	};
+	if (error.extensionPath) {
+		details.extensionPath = error.extensionPath;
+		details.extensionName = basename(error.extensionPath);
+	}
+	if (error.stack) details.stack = error.stack;
+	return details;
 }
