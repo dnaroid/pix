@@ -20,9 +20,9 @@ describe("tool descriptions", () => {
 			...(COMPRESS_TOOL_DESCRIPTION.promptGuidelines ?? []),
 		].join("\n");
 
-		expect(promptText).toContain("implementation + verification");
-		expect(promptText).toContain("before replying or starting a new task");
-		expect(promptText).toContain("large stale tool outputs");
+		expect(promptText).toContain("implementation, verification");
+		expect(promptText).toContain("before any new search/read/test/web lookup");
+		expect(promptText).toContain("large stale shell/read/repo/web outputs");
 	});
 
 	test("subagents prompt keeps explicit delegation triggers in repo-aware mode", () => {
