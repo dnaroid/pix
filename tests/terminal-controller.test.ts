@@ -89,9 +89,26 @@ describe("AppTerminalController", () => {
 		assert.deepEqual(inputChunks, ["abc"]);
 		assert.equal(writes.includes(ENABLE_TERMINAL_MODIFY_OTHER_KEYS), false);
 	});
+
+	it("resets buffered render output before repainting after resize", async () => {
+		const writes: string[] = [];
+		const events: string[] = [];
+		const controller = new AppTerminalController(fakeHost([], events));
+		const restore = stubTerminalIo(writes);
+
+		try {
+			controller.enableTerminal();
+			restore.emitResize();
+			await controller.stop();
+		} finally {
+			restore();
+		}
+
+		assert.deepEqual(events.slice(0, 2), ["resetRenderOutputBuffer", "render"]);
+	});
 });
 
-function fakeHost(inputChunks: string[] = []) {
+function fakeHost(inputChunks: string[] = [], events: string[] = []) {
 	let running = true;
 	return {
 		isRunning: () => running,
@@ -101,7 +118,9 @@ function fakeHost(inputChunks: string[] = []) {
 		runtime: () => undefined,
 		saveInputStateForQuit: async () => {},
 		disposeInactiveRuntimesForQuit: async () => {},
-		render: () => {},
+		render: () => {
+			events.push("render");
+		},
 		handleInputChunk: (chunk: Buffer) => {
 			inputChunks.push(chunk.toString("utf8"));
 		},
@@ -115,11 +134,13 @@ function fakeHost(inputChunks: string[] = []) {
 		stopShellCommand: () => {},
 		unsubscribeSession: () => {},
 		clearExtensionWidgets: () => {},
-		resetRenderOutputBuffer: () => {},
+		resetRenderOutputBuffer: () => {
+			events.push("resetRenderOutputBuffer");
+		},
 	};
 }
 
-function stubTerminalIo(writes: string[]): (() => void) & { emitInput(chunk: string): void } {
+function stubTerminalIo(writes: string[]): (() => void) & { emitInput(chunk: string): void; emitResize(): void } {
 	const stdout = process.stdout as NodeJS.WriteStream & {
 		write: (chunk: string | Uint8Array) => boolean;
 		on: (event: string, listener: (...args: unknown[]) => void) => NodeJS.WriteStream;
@@ -141,13 +162,20 @@ function stubTerminalIo(writes: string[]): (() => void) & { emitInput(chunk: str
 	const originalStdinOff = stdin.off.bind(process.stdin);
 	const originalSetRawMode = stdin.setRawMode?.bind(process.stdin);
 	let stdinDataListener: ((chunk: Buffer) => void) | undefined;
+	let stdoutResizeListener: (() => void) | undefined;
 
 	stdout.write = ((chunk: string | Uint8Array) => {
 		writes.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
 		return true;
 	}) as typeof stdout.write;
-	stdout.on = ((_: string, __: (...args: unknown[]) => void) => stdout) as typeof stdout.on;
-	stdout.off = ((_: string, __: (...args: unknown[]) => void) => stdout) as typeof stdout.off;
+	stdout.on = ((event: string, listener: (...args: unknown[]) => void) => {
+		if (event === "resize") stdoutResizeListener = listener as () => void;
+		return stdout;
+	}) as typeof stdout.on;
+	stdout.off = ((event: string, listener: (...args: unknown[]) => void) => {
+		if (event === "resize" && stdoutResizeListener === listener) stdoutResizeListener = undefined;
+		return stdout;
+	}) as typeof stdout.off;
 	stdin.resume = (() => stdin) as typeof stdin.resume;
 	stdin.pause = (() => stdin) as typeof stdin.pause;
 	stdin.on = ((event: string, listener: (...args: unknown[]) => void) => {
@@ -169,9 +197,12 @@ function stubTerminalIo(writes: string[]): (() => void) & { emitInput(chunk: str
 		stdin.on = originalStdinOn as typeof stdin.on;
 		stdin.off = originalStdinOff as typeof stdin.off;
 		if (originalSetRawMode) stdin.setRawMode = originalSetRawMode as typeof stdin.setRawMode;
-	}) as (() => void) & { emitInput(chunk: string): void };
+	}) as (() => void) & { emitInput(chunk: string): void; emitResize(): void };
 	restore.emitInput = (chunk: string) => {
 		stdinDataListener?.(Buffer.from(chunk, "utf8"));
+	};
+	restore.emitResize = () => {
+		stdoutResizeListener?.();
 	};
 	return restore;
 }

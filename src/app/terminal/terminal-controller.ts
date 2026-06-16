@@ -179,6 +179,7 @@ export class AppTerminalController {
 	}
 
 	private readonly onResize = (): void => {
+		this.host.resetRenderOutputBuffer();
 		this.host.render();
 	};
 

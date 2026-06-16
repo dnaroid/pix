@@ -32,6 +32,7 @@ import {
 	detectMessageCompressionCandidates,
 	appendConcreteNudgeGuidance,
 	applyAnchoredNudges,
+	clearDcpNudgeAnchors,
 	nudgeTypeLabel,
 	upsertNudgeAnchor,
 	getActiveSummaryTokenEstimate,
@@ -289,14 +290,8 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 					: undefined
 
 			if (contextPercent === undefined) {
-				if (state.manualMode) {
-					state.nudgeAnchors = state.nudgeAnchors.filter((anchor) =>
-						anchor.type === "context-strong" || anchor.type === "context-soft",
-					)
-				}
-				applyAnchoredNudges(prunedMessages, state, (anchor) =>
-					appendConcreteNudgeGuidance(baseNudgeText(anchor.type), candidate, messageCandidates, state),
-				)
+				const clearedAnchors = clearDcpNudgeAnchors(state)
+				if (clearedAnchors > 0) await saveDcpState(ctx, state)
 				return { messages: appendDcpMessageIdControl(prunedMessages, state) }
 			}
 
@@ -310,6 +305,14 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 			if (effectiveConfig.compress.summaryBuffer) {
 				const summaryBonus = getActiveSummaryTokenEstimate(state) / usage.contextWindow
 				thresholds.maxContextPercent += Math.min(summaryBonus, SUMMARY_BUFFER_MAX_CONTEXT_BONUS)
+			}
+
+			const contextLimitReached = contextPercent > thresholds.maxContextPercent
+			const routineNudgesAllowed = contextPercent > thresholds.minContextPercent
+			if (!contextLimitReached && !routineNudgesAllowed) {
+				const clearedAnchors = clearDcpNudgeAnchors(state)
+				if (clearedAnchors > 0) await saveDcpState(ctx, state)
+				return { messages: appendDcpMessageIdControl(prunedMessages, state) }
 			}
 
 			let toolCallsSinceLastUser = 0
@@ -331,18 +334,20 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 				state.manualMode &&
 				(nudgeType !== "context-strong" && nudgeType !== "context-soft")
 
-			candidate = detectCompressionCandidate(
-				prunedMessages,
-				state,
-				effectiveConfig,
-				contextPercent,
-			)
-			messageCandidates = detectMessageCompressionCandidates(
-				prunedMessages,
-				state,
-				effectiveConfig,
-				contextPercent,
-			)
+			if (!manualEmergencyOnly) {
+				candidate = detectCompressionCandidate(
+					prunedMessages,
+					state,
+					effectiveConfig,
+					contextPercent,
+				)
+				messageCandidates = detectMessageCompressionCandidates(
+					prunedMessages,
+					state,
+					effectiveConfig,
+					contextPercent,
+				)
+			}
 
 			if (nudgeType && !manualEmergencyOnly) {
 				const nudgeText = appendConcreteNudgeGuidance(

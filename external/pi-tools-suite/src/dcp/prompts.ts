@@ -26,21 +26,21 @@ When multiple independent stale sections exist, prefer several focused compressi
 When one older message is huge but the surrounding context is still useful, use message-mode compression for that single message instead of compressing a broad range.
 Summaries should be proportional to future usefulness, not proportional to the amount of text being removed.
 
-Use \`compress\` as steady housekeeping while you work. Closed slice => compress now. Do not start a new search, file-read batch, test, verification run, or web lookup while older completed work remains raw.
+Use \`compress\` as context-pressure housekeeping, not as a reflex after every small step. When context usage is meaningfully high or a DCP reminder provides concrete candidates, compress closed slices before accumulating another large batch of tool output. At low context usage, continue normal work unless a closed slice is clearly large enough that keeping it raw would reduce signal.
 
 A closed slice is any finished implementation, verification, config edit, answered exploration, dead-end debugging branch, or test/log inspection. Passing logs are summary-only: preserve command, pass/fail, key failures if any, and whether follow-up is needed; never keep a full passing log in live context. Treat large shell/read/repo/web outputs as disposable evidence once their facts are extracted.
 
 Before compressing while work is unfinished, ensure one \`todo in_progress\` captures the active objective and next step.
 
-When a \`<dcp-system-reminder>\` appears, treat it as an active instruction for the next safe action, not as background advice. Before making another exploratory tool call or starting a new subtask, check whether any earlier slice is closed; if yes, call \`compress\` first. Do not merely acknowledge the reminder or postpone it across multiple tool calls.
+When a \`<dcp-system-reminder>\` appears, treat it as a context-pressure signal. Follow critical/high-context reminders promptly. For routine reminders, compress only if a genuinely closed, useful-to-summarize slice exists; otherwise continue the next atomic step and re-check later.
 
 CADENCE, SIGNALS, AND LATENCY
 
-- No fixed threshold mandates compression
+- Low context usage does not mandate compression
 - Prioritize closedness and independence over raw size
 - Prefer smaller, regular compressions over infrequent massive compressions for better latency and summary quality
 - When multiple independent stale sections are ready, batch compressions in parallel
-- Before more exploration, ask whether an older completed slice can become summary-only; if yes, compress first
+- Before large new exploration, ask whether an older completed slice can become summary-only; if yes and context pressure is meaningful, compress first
 
 COMPRESS WHEN
 
@@ -81,14 +81,14 @@ It is your responsibility to keep a sharp, high-quality context window for optim
  */
 export const COMPRESS_RANGE_DESCRIPTION = `Collapse one or more ranges of the conversation into detailed summaries.
 
-AUTONOMOUS HOUSEKEEPING
-Do not wait for context emergencies. Closed slice => compress now. A closed slice includes completed implementation, verification, config/doc edit, answered exploration, dead-end debugging, or finished test/log inspection. Compress before starting the next search/read/test/web lookup unless exact raw text is still needed.
+CONTEXT-PRESSURE HOUSEKEEPING
+Use compression when it will materially improve the live context window. Low context usage by itself does not require compression, even when a small closed slice exists. When context usage is meaningfully high, or a DCP reminder supplies concrete high-yield candidates, closed implementation, verification, config/doc edit, answered exploration, dead-end debugging, or finished test/log inspection can become summary-only before another large exploratory batch.
 
 PASSING LOGS AND LARGE OUTPUTS
 Passing check/test/lint/tsc logs are summary-only after you know the result. Preserve command, pass/fail, key failures if any, and follow-up status; drop full passing output. Treat large shell/read/repo/web outputs as disposable evidence once important facts are extracted.
 
 DCP REMINDERS
-If a \`<dcp-system-reminder>\` is present in context, treat it as a direct instruction to evaluate compression immediately. If a safe closed range exists, call this tool before further exploration. Skipping compression is acceptable only when the newest raw context is still needed for the next concrete edit, test, or answer.
+If a \`<dcp-system-reminder>\` is present in context, treat it as a signal to evaluate compression. Critical or high-context reminders should be handled promptly. Routine reminders should lead to compression only when a safe, closed, useful-to-summarize range exists; otherwise continue the next atomic step and re-check later.
 
 THE SUMMARY
 Your summary must be COMPLETE FOR CONTINUATION, not a transcript rewrite. Preserve only information that will plausibly matter later: user intent, accepted constraints, decisions, files/symbols changed or inspected, exact errors that are still actionable, verification status, and next steps.
@@ -202,24 +202,23 @@ If the compressed range includes user messages, preserve user intent exactly. Pr
 
 /**
  * Injected into messages when context usage exceeds maxContextPercent.
- * nudgeForce = "soft" — steady housekeeping tone.
+ * nudgeForce = "soft" — high context-pressure tone.
  */
 export const CONTEXT_LIMIT_NUDGE_SOFT = `<dcp-system-reminder>
 ACTION REQUIRED: Context usage is high.
 
-Before doing more exploration, look for a closed, self-contained range that no longer needs to stay raw and compress it now.
+Before doing more exploration, look for a high-yield closed range that no longer needs to stay raw. Compress it now if one is safe and useful.
 
-Do not treat this as optional housekeeping. If any completed research, implementation, verification, config/doc edit, CI-log inspection, or dead-end debugging slice is present, call the \`compress\` tool before continuing normal work.
-If a completed implementation+verification slice exists, compress it before replying or starting another task.
-High-priority stale shell/read/repo/web outputs must be compressed once no exact raw text is needed. Passing logs should not remain raw after they are understood.
+This is context-pressure guidance, not a request to compress tiny or still-needed slices. If completed research, implementation, verification, config/doc edit, CI-log inspection, or dead-end debugging is large enough to reduce signal, call the \`compress\` tool before continuing normal work.
+High-priority stale shell/read/repo/web outputs should be compressed once no exact raw text is needed. Passing logs should not remain raw after they are understood.
 
 RANGE SELECTION
 Prefer older, resolved history. Avoid the newest active working slice unless it is clearly done.
 Use injected boundary IDs (\`mNNN\` for messages, \`bN\` for compressed blocks) and ensure \`startId\` appears before \`endId\`.
 For a single large stale message, use message-mode compression via the \`messages\` array.
 
-If multiple independent ranges are ready, batch them in a single \`compress\` call.
-If nothing is cleanly closed yet, continue only with the next atomic step and re-check immediately afterward.
+If multiple independent high-yield ranges are ready, batch them in a single \`compress\` call.
+If nothing is cleanly closed and worth summarizing yet, continue with the next atomic step and re-check later.
 </dcp-system-reminder>`
 
 /**
@@ -227,17 +226,16 @@ If nothing is cleanly closed yet, continue only with the next atomic step and re
  * at the configured nudgeFrequency cadence.
  */
 export const TURN_NUDGE = `<dcp-system-reminder>
-ACTION REQUIRED: Evaluate the conversation for compressible ranges before continuing.
+CONTEXT CHECK: Evaluate whether compression would materially improve the live context.
 
-If any range is cleanly closed and unlikely to be needed again, use the \`compress\` tool now.
-If direction has shifted, compress earlier ranges that are now less relevant.
+If a range is cleanly closed, non-trivial, and unlikely to be needed verbatim again, use the \`compress\` tool. If direction has shifted, consider whether earlier ranges are now less relevant.
 
-Do not defer this across another batch of searches, reads, CI log fetches, or tests. The next safe action should be compression whenever a closed slice exists.
-High-priority stale shell/read/repo/web outputs and understood passing logs must be compressed once no exact raw text is needed.
+Do not compress just because a small slice closed while context is still low. Prefer compression before another large batch of searches, reads, CI log fetches, or tests when a high-yield stale slice exists.
+High-priority stale shell/read/repo/web outputs and understood passing logs should be compressed once no exact raw text is needed.
 
 Prefer small, closed-range compressions over one broad compression.
 Use message-mode compression for isolated large stale messages.
-The goal is to filter noise and distill key information so context accumulation stays under control.
+The goal is to filter meaningful noise and distill key information so context accumulation stays under control.
 Keep active context uncompressed.
 </dcp-system-reminder>`
 
@@ -245,12 +243,11 @@ Keep active context uncompressed.
  * Injected after iterationNudgeThreshold tool calls since the last user message.
  */
 export const ITERATION_NUDGE = `<dcp-system-reminder>
-ACTION REQUIRED: You've been iterating for a while after the last user message.
+CONTEXT CHECK: You've been iterating for a while after the last user message.
 
-Pause before the next non-atomic tool call. If there is a closed portion that is unlikely to be referenced immediately (for example, finished research before implementation, completed config edit, completed CI-log triage, a verified fix, or a dead-end investigation), use the \`compress\` tool on it now.
+Pause before the next large non-atomic tool batch. If there is a closed portion that is unlikely to be referenced immediately and is worth summarizing (for example, finished research before implementation, completed config edit, completed CI-log triage, a verified fix, or a dead-end investigation), use the \`compress\` tool on it.
 
-Do not keep accumulating tool outputs while a completed slice remains raw. If a range is closed, compression is the next safe action.
-If a completed implementation+verification slice exists, compress it before replying or starting another task.
+Avoid accumulating large tool outputs while a high-yield completed slice remains raw. If only small or still-needed ranges are closed, continue the next atomic step and re-check later.
 
 Prefer multiple short, closed ranges over one large range when several independent slices are ready.
 Use message-mode compression for isolated large stale messages.

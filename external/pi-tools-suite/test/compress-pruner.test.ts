@@ -40,7 +40,7 @@ function config(overrides: Partial<DcpConfig> = {}): DcpConfig {
     manualMode: { enabled: false, automaticStrategies: true },
     compress: {
       maxContextPercent: 0.65,
-      minContextPercent: 0.25,
+      minContextPercent: 0.40,
       modelMaxContextPercent: {},
       modelMinContextPercent: {},
       summaryBuffer: true,
@@ -52,14 +52,14 @@ function config(overrides: Partial<DcpConfig> = {}): DcpConfig {
       protectUserMessages: false,
       autoCandidates: {
         enabled: true,
-        minContextPercent: 0.25,
+        minContextPercent: 0.40,
         keepRecentTurns: 2,
         minMessages: 6,
         minTokens: 100,
       },
       messageMode: {
         enabled: true,
-        minContextPercent: 0.25,
+        minContextPercent: 0.40,
         keepRecentTurns: 2,
         mediumTokens: 500,
         highTokens: 5000,
@@ -354,6 +354,14 @@ describe("DCP pruning effectiveness", () => {
     expect(getNudgeType(0.5, immediate, immediateCfg, 0)).toBe("turn");
   });
 
+  test("context-limit nudges bypass routine cadence", () => {
+    const state = createState();
+    const cfg = config({ compress: { nudgeFrequency: 99, minContextPercent: 0.40, maxContextPercent: 0.65 } as any });
+
+    expect(getNudgeType(0.41, state, cfg, 0)).toBe(null);
+    expect(getNudgeType(0.66, state, cfg, 0)).toBe("context-soft");
+  });
+
   test("nudge thresholds accept percent strings when called without pre-resolved thresholds", () => {
     const state = createState();
     const cfg = config({ compress: { minContextPercent: "25%", maxContextPercent: "80%", nudgeFrequency: 1 } as any });
@@ -474,6 +482,56 @@ describe("DCP pruning effectiveness", () => {
     expect(candidate).not.toBe(null);
     expect(candidate?.startId).toBe("m001");
     expect(candidate?.endId).toBe("m002");
+  });
+
+  test("compression candidates are suppressed below configured context pressure", () => {
+    const state = createState();
+    const candidateConfig = config({
+      compress: {
+        autoCandidates: {
+          enabled: true,
+          minContextPercent: 0.40,
+          keepRecentTurns: 1,
+          minMessages: 2,
+          minTokens: 0,
+        },
+        messageMode: {
+          enabled: true,
+          minContextPercent: 0.40,
+          keepRecentTurns: 1,
+          mediumTokens: 1,
+          highTokens: 1000,
+          maxSuggestions: 5,
+        },
+      } as any,
+      strategies: {
+        deduplication: { enabled: false, protectedTools: [] },
+        purgeErrors: { enabled: false, turns: 4, protectedTools: [] },
+        autoToolPruning: {
+          enabled: false,
+          maxOutputTokens: 2000,
+          keepRecentTurns: 2,
+          readLikeTools: [],
+          readLikeTurns: 3,
+          protectedTools: [],
+        },
+      },
+    });
+
+    const pruned = applyPruning(
+      [
+        textMessage("user", "old user " + "a".repeat(80), 1),
+        textMessage("assistant", "old assistant " + "b".repeat(80), 2),
+        textMessage("user", "recent user", 3),
+      ],
+      state,
+      candidateConfig,
+    );
+
+    expect(detectCompressionCandidate(pruned, state, candidateConfig, 0.39)).toBe(null);
+    expect(detectMessageCompressionCandidates(pruned, state, candidateConfig, 0.39)).toEqual([]);
+    expect(detectCompressionCandidate(pruned, state, candidateConfig, 0.40)).not.toBe(null);
+    expect(detectMessageCompressionCandidates(pruned, state, candidateConfig, 0.40).map((item) => item.messageId)).toContain("m002");
   });
 
   test("detects legacy malformed dcp-id tags in compression candidates", () => {
@@ -1395,6 +1453,99 @@ describe("DCP pruning effectiveness", () => {
     const control = messages.find((message) => message.customType === DCP_MESSAGE_IDS_CUSTOM_TYPE);
     expect(control?.display).toBe(false);
     expect(String(control?.content ?? "")).toContain("Current raw message IDs: m001, m002");
+  });
+
+  test("DCP context transform stays quiet below routine context pressure and clears stale anchors", async () => {
+    const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
+    const nudgeEvents: any[] = [];
+    const pi = {
+      on(event: string, handler: (event: any, ctx: any) => unknown) {
+        handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+      },
+      registerTool() {},
+      registerCommand() {},
+      appendEntry(type: string, data: any) {
+        if (type === "dcp-nudge") nudgeEvents.push(data);
+      },
+      sendMessage() {},
+    } as any;
+
+    await dcpModule(pi);
+    const contextHandler = handlers.get("context")?.[0];
+    expect(contextHandler).toBeDefined();
+
+    const messages = [
+      textMessage("user", "older completed research " + "a".repeat(2000), 1),
+      textMessage("assistant", "older result " + "b".repeat(2000), 2),
+      textMessage("user", "current request", 3),
+    ];
+    const ctx = (percent: number) => ({
+      hasUI: false,
+      sessionManager: { getBranch: () => [] },
+      getContextUsage: () => ({ tokens: percent * 100, contextWindow: 10_000, percent }),
+    });
+
+    const highResult = await contextHandler?.({ type: "context", messages }, ctx(70)) as { messages: any[] } | undefined;
+    const highRendered = highResult?.messages.map(contentText).join("\n") ?? "";
+    expect(highRendered).toContain("<dcp-system-reminder>");
+    expect(nudgeEvents.map((event) => event.event)).toEqual(["emitted"]);
+
+    const lowResult = await contextHandler?.({ type: "context", messages }, ctx(5)) as { messages: any[] } | undefined;
+    const lowRendered = lowResult?.messages.map(contentText).join("\n") ?? "";
+    expect(lowRendered).toContain("current request");
+    expect(lowRendered).not.toContain("<dcp-system-reminder>");
+    expect(lowRendered).not.toContain("CONCRETE NEXT ACTION");
+
+    await contextHandler?.({ type: "context", messages }, ctx(70));
+    expect(nudgeEvents.map((event) => event.event)).toEqual(["emitted", "emitted"]);
+  });
+
+  test("DCP context transform emits context-limit nudges with concrete candidates", async () => {
+    const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
+    const pi = {
+      on(event: string, handler: (event: any, ctx: any) => unknown) {
+        handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+      },
+      registerTool() {},
+      registerCommand() {},
+      appendEntry() {},
+      sendMessage() {},
+    } as any;
+
+    await dcpModule(pi);
+    const contextHandler = handlers.get("context")?.[0];
+    expect(contextHandler).toBeDefined();
+
+    const result = await contextHandler?.(
+      {
+        type: "context",
+        messages: [
+          textMessage("user", "old request " + "a".repeat(1500), 1),
+          textMessage("assistant", "old analysis " + "b".repeat(1500), 2),
+          textMessage("user", "old follow-up " + "c".repeat(1500), 3),
+          textMessage("assistant", "old result " + "d".repeat(1500), 4),
+          textMessage("user", "older verification " + "e".repeat(1500), 5),
+          textMessage("assistant", "older verification result " + "f".repeat(1500), 6),
+          textMessage("user", "current request", 7),
+        ],
+      },
+      {
+        hasUI: false,
+        sessionManager: { getBranch: () => [] },
+        getContextUsage: () => ({ tokens: 7_000, contextWindow: 10_000, percent: 70 }),
+      },
+    ) as { messages: any[] } | undefined;
+
+    const messages = result?.messages ?? [];
+    const rendered = messages.map(contentText).join("\n");
+    const normalMessages = messages.filter((message) => message.role !== "custom");
+    const control = messages.find((message) => message.customType === DCP_MESSAGE_IDS_CUSTOM_TYPE);
+
+    expect(rendered).toContain("ACTION REQUIRED: Context usage is high.");
+    expect(rendered).toContain("Recommended range candidate: m001..m006");
+    expect(JSON.stringify(normalMessages)).not.toContain("[dcp-id]");
+    expect(control?.display).toBe(false);
+    expect(String(control?.content ?? "")).toContain("Current raw message IDs: m001, m002, m003, m004, m005, m006, m007");
   });
 
   test("DCP context transform hides persisted control-plane custom entries from the model", async () => {

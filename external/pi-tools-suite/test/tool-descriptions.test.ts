@@ -13,7 +13,7 @@ describe("tool descriptions", () => {
 		expect(promptText).toContain("workspace-relative");
 	});
 
-	test("compress prompt encourages steady housekeeping after completed work", () => {
+	test("compress prompt encourages context-pressure housekeeping after completed work", () => {
 		const promptText = [
 			COMPRESS_TOOL_DESCRIPTION.description,
 			COMPRESS_TOOL_DESCRIPTION.promptSnippet,
@@ -21,7 +21,8 @@ describe("tool descriptions", () => {
 		].join("\n");
 
 		expect(promptText).toContain("implementation, verification");
-		expect(promptText).toContain("before any new search/read/test/web lookup");
+		expect(promptText).toContain("Low context usage by itself does not require compression");
+		expect(promptText).toContain("context-pressure housekeeping");
 		expect(promptText).toContain("large stale shell/read/repo/web outputs");
 	});
 

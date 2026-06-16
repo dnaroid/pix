@@ -300,12 +300,12 @@ export function getNudgeType(
   const cadence = Math.max(1, Math.floor(nudgeFrequency));
 
   if (!Number.isFinite(contextPercent)) return null;
-  if (contextPercent <= minContextPercent) return null;
-  if (state.nudgeCounter + 1 < cadence) return null;
-
   if (contextPercent > maxContextPercent) {
     return nudgeForce === "strong" ? "context-strong" : "context-soft";
   }
+
+  if (contextPercent <= minContextPercent) return null;
+  if (state.nudgeCounter + 1 < cadence) return null;
 
   if (toolCallsSinceLastUser >= iterationNudgeThreshold) {
     return "iteration";

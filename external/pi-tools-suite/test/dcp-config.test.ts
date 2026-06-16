@@ -10,12 +10,17 @@ function tempDir(): string {
 }
 
 describe("DCP config", () => {
-	test("uses aggressive built-in DCP cleanup defaults", () => {
+	test("uses context-pressure DCP cleanup defaults", () => {
 		const homeDir = tempDir();
 		const config = loadConfig({ homeDir });
 
-		expect(config.compress.iterationNudgeThreshold).toBe(4);
+		expect(config.compress.minContextPercent).toBe(0.40);
+		expect(config.compress.maxContextPercent).toBe(0.65);
+		expect(config.compress.nudgeFrequency).toBe(2);
+		expect(config.compress.iterationNudgeThreshold).toBe(8);
+		expect(config.compress.autoCandidates.minContextPercent).toBe(0.40);
 		expect(config.compress.autoCandidates.keepRecentTurns).toBe(1);
+		expect(config.compress.messageMode.minContextPercent).toBe(0.40);
 		expect(config.compress.messageMode.keepRecentTurns).toBe(1);
 		expect(config.strategies.autoToolPruning.maxOutputTokens).toBe(1200);
 		expect(config.strategies.autoToolPruning.keepRecentTurns).toBe(1);
@@ -45,7 +50,7 @@ describe("DCP config", () => {
 		expect(config.manualMode.automaticStrategies).toBe(true);
 		expect(config.compress.minContextPercent).toBe(0.25);
 		expect(config.compress.nudgeFrequency).toBe(1);
-		expect(config.compress.maxContextPercent).toBe(0.55);
+		expect(config.compress.maxContextPercent).toBe(0.65);
 	});
 
 	test("applies model-specific overrides on top of the shared DCP config", () => {
