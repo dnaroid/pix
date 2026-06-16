@@ -6,6 +6,7 @@ import { Type } from "typebox"
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
 import type { DcpState } from "./state.js"
 import { modelKeysFromContext, resolveModelConfig, type DcpConfig } from "./config.js"
+import { saveDcpState } from "./state-persistence.js"
 import { clearDcpNudgeAnchors } from "./pruner.js"
 import type { DcpCompressionVisualDetails } from "./ui.js"
 import { normalizeDcpContextUsage } from "./ui.js"
@@ -327,6 +328,10 @@ export function registerCompressTool(
         } catch {
           // Diagnostic telemetry should never affect a successful compression.
         }
+      }
+
+      if (newBlockIds.length > 0) {
+        await saveDcpState(ctx, state)
       }
 
       const usage = normalizeDcpContextUsage(safeGetContextUsage(ctx))

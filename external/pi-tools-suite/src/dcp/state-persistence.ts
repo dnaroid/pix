@@ -45,13 +45,13 @@ async function listSessionIds(sessionDir: string): Promise<string[]> {
 }
 
 function resolveDcpStateDir(ctx: ExtensionContext): string | undefined {
-	const sessionDir = ctx.sessionManager.getSessionDir()
+	const sessionDir = ctx.sessionManager?.getSessionDir?.()
 	if (!sessionDir) return undefined
 	return join(sessionDir, DCP_STATE_DIR)
 }
 
 export function resolveDcpStatePath(ctx: ExtensionContext): string | undefined {
-	const sessionId = ctx.sessionManager.getSessionId()
+	const sessionId = ctx.sessionManager?.getSessionId?.()
 	const stateDir = resolveDcpStateDir(ctx)
 	if (!sessionId || !stateDir) return undefined
 	return join(stateDir, safeSessionFileName(sessionId))

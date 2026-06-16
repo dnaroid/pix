@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DcpConfig } from "../src/dcp/config.js";
@@ -797,6 +797,44 @@ describe("DCP pruning effectiveness", () => {
     });
     expect(result.content[0].text).not.toContain("█");
     expect(result.content[0].text).not.toContain("░");
+  });
+
+  test("compress tool persists sidecar immediately after creating blocks", async () => {
+    const state = createState();
+    state.messageIdSnapshot.set("m001", 1);
+    state.messageIdSnapshot.set("m002", 2);
+    state.messageMetaSnapshot.set("m001", { timestamp: 1, role: "assistant", tokenEstimate: 200 });
+    state.messageMetaSnapshot.set("m002", { timestamp: 2, role: "assistant", tokenEstimate: 200 });
+
+    let registeredTool: any;
+    registerCompressTool({ registerTool: (tool: any) => { registeredTool = tool } } as any, state, config());
+
+    const sessionDir = mkdtempSync(join(tmpdir(), "dcp-sidecar-"));
+    const ctx = {
+      sessionManager: {
+        getSessionDir: () => sessionDir,
+        getSessionId: () => "sidecar-session",
+      },
+      ui: { notify() {} },
+    };
+
+    await registeredTool.execute(
+      "tool-call",
+      { topic: "Sidecar", ranges: [{ startId: "m001", endId: "m002", summary: "sidecar summary" }] },
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    const persisted = JSON.parse(readFileSync(join(sessionDir, "dcp-state", "sidecar-session.json"), "utf8"));
+    expect(persisted.compressionBlocks).toHaveLength(1);
+    expect(persisted.compressionBlocks[0]).toMatchObject({
+      id: 1,
+      topic: "Sidecar",
+      summary: "sidecar summary",
+      active: true,
+    });
+    expect(persisted.nextBlockId).toBe(2);
   });
 
   test("compress tool rejects partial overlap and preserves protected raw user messages", async () => {
