@@ -318,9 +318,8 @@ it("suppresses a second reasoning block that arrives after assistant text has st
 
 // CONSCIOUS TRADE-OFF (documents current behaviour, not a defect):
 // Markdown reference-definition lines (`[label]: url`) are hidden from the
-// rendered assistant text. This is intentional: the DCP/context-pruning system
-// injects its `[dcp-id]: ...` markers as reference definitions, and they must
-// not leak to the user. Legitimate model-authored reference definitions are
+// rendered assistant text. This keeps control/reference metadata from leaking
+// into the transcript. Legitimate model-authored reference definitions are
 // caught by the same filter — see the dedicated coverage in
 // markdown-format.test.ts ("hides markdown reference definitions outside fenced
 // code blocks"). If that trade-off is ever revisited, this test will flag it.
@@ -339,7 +338,7 @@ it("hides markdown reference-definition lines from the rendered assistant text",
 
 	const transcript = renderTranscript(entries);
 	assert.equal(countOccurrences(transcript, "[pi-link]: https://example.com/pi"), 0,
-		`reference-definition line should be hidden (conscious trade-off; DCP markers share this shape)\n\n${transcript}`);
+		`reference-definition line should be hidden (conscious trade-off)\n\n${transcript}`);
 	assert.ok(transcript.includes("Done."), `non-reference text should still render\n\n${transcript}`);
 });
 

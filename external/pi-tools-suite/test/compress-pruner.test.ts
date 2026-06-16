@@ -27,6 +27,10 @@ import {
   type CompressionBlock,
   type ToolRecord,
 } from "../src/dcp/state.js";
+import {
+  DCP_MESSAGE_IDS_CUSTOM_TYPE,
+  buildMessageIdControlMessage,
+} from "../src/dcp/pruner-message-ids.js";
 import { stripStaleDcpMetadataFromAssistantMessage } from "../src/dcp/pruner-metadata.js";
 
 function config(overrides: Partial<DcpConfig> = {}): DcpConfig {
@@ -389,7 +393,8 @@ describe("DCP pruning effectiveness", () => {
     expect(pruned).toHaveLength(3);
     expect(contentText(pruned[2])).toContain("current request");
     expect(contentText(pruned[2])).toContain("compress now");
-    expect(contentText(pruned[2])).toContain("[dcp-id]: # (m003)");
+    expect(contentText(pruned[2])).not.toContain("[dcp-id]");
+    expect(state.messageMetaSnapshot.get("m003")?.text).toContain("current request");
 
     expect(clearDcpNudgeAnchors(state)).toBe(1);
     expect(state.nudgeAnchors).toHaveLength(0);
@@ -527,7 +532,7 @@ describe("DCP pruning effectiveness", () => {
     expect(asJson).toContain("I will inspect that now.");
     expect(asJson).not.toContain("m999");
     expect(asJson).not.toContain("hidden nudge");
-    expect(asJson).toContain("[dcp-id]: # (m002)");
+    expect(asJson).not.toContain("[dcp-id]");
     expect(state.messageMetaSnapshot.get("m002")?.text).toBe("I will inspect that now.");
 
     const assistantTextBlock = (pruned[1].content as any[]).find((block) => block.text === "I will inspect that now.");
@@ -900,7 +905,9 @@ describe("DCP pruning effectiveness", () => {
       cfg,
     );
 
-    expect(JSON.stringify(visible)).toContain("m001");
+    expect(JSON.stringify(visible)).not.toContain("[dcp-id]");
+    expect(state.messageIdSnapshot.has("m001")).toBe(true);
+    expect(JSON.stringify(buildMessageIdControlMessage(state))).toContain("m001");
 
     let registeredTool: any;
     registerCompressTool({ registerTool: (tool: any) => { registeredTool = tool } } as any, state, cfg);
@@ -1028,8 +1035,8 @@ describe("DCP pruning effectiveness", () => {
     expect(candidates.map((candidate) => candidate.messageId)).toEqual(["m002", "m003"]);
     expect(candidates[0]?.priority).toBe("high");
     expect(candidates[1]?.priority).toBe("medium");
-    expect(JSON.stringify(pruned)).toContain("[dcp-id]: # (m002)");
-    expect(JSON.stringify(pruned)).not.toContain("priority=high");
+    expect(JSON.stringify(pruned)).not.toContain("[dcp-id]");
+    expect(JSON.stringify(buildMessageIdControlMessage(state))).toContain("m002");
     expect(state.messageMetaSnapshot.get("m002")?.priority).toBe("high");
   });
 
@@ -1350,6 +1357,46 @@ describe("DCP pruning effectiveness", () => {
     expect(rendered).not.toContain("DCP Session Statistics");
   });
 
+  test("DCP context transform appends hidden message-id control metadata without mutating visible content", async () => {
+    const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
+    const pi = {
+      on(event: string, handler: (event: any, ctx: any) => unknown) {
+        handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+      },
+      registerTool() {},
+      registerCommand() {},
+      appendEntry() {},
+      sendMessage() {},
+    } as any;
+
+    await dcpModule(pi);
+    const contextHandler = handlers.get("context")?.[0];
+    expect(contextHandler).toBeDefined();
+
+    const result = await contextHandler?.(
+      {
+        type: "context",
+        messages: [
+          textMessage("user", "visible user content", 1),
+          textMessage("assistant", "visible assistant content", 2),
+        ],
+      },
+      {
+        hasUI: false,
+        sessionManager: { getBranch: () => [] },
+        getContextUsage: () => ({ tokens: 10, contextWindow: 10_000, percent: 0.1 }),
+      },
+    ) as { messages: any[] } | undefined;
+
+    const messages = result?.messages ?? [];
+    const normalMessages = messages.filter((message) => message.role !== "custom");
+    expect(JSON.stringify(normalMessages)).not.toContain("[dcp-id]");
+
+    const control = messages.find((message) => message.customType === DCP_MESSAGE_IDS_CUSTOM_TYPE);
+    expect(control?.display).toBe(false);
+    expect(String(control?.content ?? "")).toContain("Current raw message IDs: m001, m002");
+  });
+
   test("DCP context transform hides persisted control-plane custom entries from the model", async () => {
     const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
     const pi = {
@@ -1383,6 +1430,12 @@ describe("DCP pruning effectiveness", () => {
             content: "DCP_NUDGE_TELEMETRY",
             timestamp: 3,
           },
+          {
+            role: "custom",
+            customType: DCP_MESSAGE_IDS_CUSTOM_TYPE,
+            content: "STALE_DCP_MESSAGE_IDS",
+            timestamp: 4,
+          },
         ],
       },
       {
@@ -1400,6 +1453,7 @@ describe("DCP pruning effectiveness", () => {
     expect(rendered).toContain("keep visible user content");
     expect(rendered).not.toContain("DCP_STATE_PAYLOAD");
     expect(rendered).not.toContain("DCP_NUDGE_TELEMETRY");
+    expect(rendered).not.toContain("STALE_DCP_MESSAGE_IDS");
   });
 
   test("DCP module stays headless and only registers non-UI hooks", async () => {

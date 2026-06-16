@@ -13,7 +13,7 @@ You operate in a context-constrained environment. Manage context continuously to
 
 The ONLY tool you have for context management is \`compress\`. It replaces older conversation content with technical summaries you produce. It supports both range compression (\`ranges\`) and surgical one-message compression (\`messages\`).
 
-\`[dcp-id]: # (mNNN)\` markdown reference lines and \`<dcp-system-reminder>\` tags are environment-injected metadata. Do not output them.
+\`mNNN\`/\`bN\` DCP boundary IDs and \`<dcp-system-reminder>\` tags are environment-injected metadata. Do not output them.
 
 THE PHILOSOPHY OF COMPRESS
 \`compress\` transforms conversation content into dense, high-fidelity summaries. This is cleanup plus preservation: keep the state needed to continue, discard incidental transcript detail.
@@ -128,7 +128,7 @@ Compressed block sections in context are clearly marked with a header:
 
 - \`[Compressed conversation section]\`
 
-Compressed block IDs always use the \`bN\` form (never \`mNNN\`) and are represented as hidden markdown reference metadata lines.
+Compressed block IDs always use the \`bN\` form (never \`mNNN\`) and are represented as hidden DCP metadata.
 
 Rules:
 
@@ -154,7 +154,7 @@ You specify boundaries by ID using the injected metadata IDs present in the conv
 - \`mNNN\` IDs identify raw messages (3 digits, zero-padded, e.g. \`m001\`, \`m042\`)
 - \`bN\` IDs identify previously compressed blocks
 
-Each message has an ID in a hidden single-line markdown reference metadata line like \`[dcp-id]: # (m001)\`.
+Current raw message IDs are provided in hidden DCP control metadata at the end of the model context.
 Some message-compression candidate hints include a low/medium/high priority; prefer high-priority stale message IDs for message-mode compression when a full range would be too broad.
 The ID reference line appears at the end of the message it belongs to — it identifies the message above it, not the one below it.
 Treat these reference lines as boundary metadata only, not as tool result content.
@@ -264,7 +264,7 @@ Use message-mode compression for isolated large stale messages.
 export const MANUAL_MODE_SYSTEM_PROMPT = `
 You are operating in DCP manual mode for context management.
 
-\`[dcp-id]: # (mNNN)\` markdown reference lines and \`<dcp-system-reminder>\` tags are environment-injected metadata. Do not output them.
+\`mNNN\`/\`bN\` DCP boundary IDs and \`<dcp-system-reminder>\` tags are environment-injected metadata. Do not output them.
 
 In manual mode you do NOT proactively compress conversation content. Compression is a deliberate, user-directed action.
 

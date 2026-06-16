@@ -39,6 +39,10 @@ import {
 	estimateTokens,
 } from "./pruner.js"
 import { stripStaleDcpMetadataFromAssistantMessage } from "./pruner-metadata.js"
+import {
+	DCP_MESSAGE_IDS_CUSTOM_TYPE,
+	buildMessageIdControlMessage,
+} from "./pruner-message-ids.js"
 import type { DcpNudgeType } from "./pruner-types.js"
 import { registerCompressTool } from "./compress-tool.js"
 import { DCP_STATS_MESSAGE_TYPE, registerCommands } from "./commands.js"
@@ -89,11 +93,16 @@ function isUserVisibleOnlyMessage(message: any): boolean {
 	return message.details?.userVisibleOnly === true
 }
 
-const DCP_CONTROL_PLANE_CUSTOM_TYPES = new Set(["dcp-state", "dcp-nudge"])
+const DCP_CONTROL_PLANE_CUSTOM_TYPES = new Set(["dcp-state", "dcp-nudge", DCP_MESSAGE_IDS_CUSTOM_TYPE])
 const SUMMARY_BUFFER_MAX_CONTEXT_BONUS = 0.05
 
 function isDcpControlPlaneMessage(message: any): boolean {
 	return message?.role === "custom" && DCP_CONTROL_PLANE_CUSTOM_TYPES.has(message.customType)
+}
+
+function appendDcpMessageIdControl(messages: any[], state: ReturnType<typeof createState>): any[] {
+	const controlMessage = buildMessageIdControlMessage(state)
+	return controlMessage ? [...messages, controlMessage] : messages
 }
 
 // ---------------------------------------------------------------------------
@@ -288,7 +297,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 				applyAnchoredNudges(prunedMessages, state, (anchor) =>
 					appendConcreteNudgeGuidance(baseNudgeText(anchor.type), candidate, messageCandidates, state),
 				)
-				return { messages: prunedMessages }
+				return { messages: appendDcpMessageIdControl(prunedMessages, state) }
 			}
 
 			const ctxModel = (ctx as any).model
@@ -396,7 +405,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 			appendConcreteNudgeGuidance(baseNudgeText(anchor.type), candidate, messageCandidates, state),
 		)
 
-		return { messages: prunedMessages }
+		return { messages: appendDcpMessageIdControl(prunedMessages, state) }
 	})
 
 	// ── 11. agent_end: persist state after each agent run ────────────────────

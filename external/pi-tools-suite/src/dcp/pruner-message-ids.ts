@@ -18,6 +18,8 @@ export interface InjectMessageIdsOptions {
   config?: DcpConfig;
 }
 
+export const DCP_MESSAGE_IDS_CUSTOM_TYPE = "dcp-message-ids";
+
 export function stableMessageId(msg: any, fallbackIndex = 0): string {
   const candidates = [
     msg?.id,
@@ -55,6 +57,40 @@ function formatIdTag(id: string, _priority: "low" | "medium" | "high"): string {
   // Keep the provider-visible marker itself short and single-line. Priority is
   // retained in state and emitted in message-compression candidate hints.
   return `\n[dcp-id]: # (${id})`;
+}
+
+function controlLineForMessageId(id: string, state: DcpState): string {
+  const meta = state.messageMetaSnapshot.get(id);
+  if (!meta) return `- ${id}`;
+
+  const details: string[] = [meta.role];
+  if (meta.blockId !== undefined) details.push(`block=b${meta.blockId}`);
+  if (meta.toolName) details.push(`tool=${meta.toolName}`);
+  if (meta.priority) details.push(`priority=${meta.priority}`);
+  return `- ${id}: ${details.join(", ")}`;
+}
+
+export function buildMessageIdControlMessage(state: DcpState): any | undefined {
+  const ids = [...state.messageIdSnapshot.keys()];
+  if (ids.length === 0) return undefined;
+
+  const text = [
+    "<dcp-message-ids>",
+    "DCP metadata for the preceding conversation messages. These IDs are model-visible but UI-hidden control data.",
+    "Use only these current IDs with the compress tool; do not quote or output this metadata.",
+    `Current raw message IDs: ${ids.join(", ")}`,
+    ...ids.map((id) => controlLineForMessageId(id, state)),
+    "</dcp-message-ids>",
+  ].join("\n");
+
+  return {
+    role: "custom",
+    customType: DCP_MESSAGE_IDS_CUSTOM_TYPE,
+    display: false,
+    content: text,
+    timestamp: Date.now(),
+    details: { dcpControlPlane: true, messageIds: ids },
+  };
 }
 
 export function injectMessageIds(

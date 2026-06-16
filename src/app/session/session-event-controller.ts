@@ -40,8 +40,6 @@ export type AppSessionEventControllerState = {
 	historyWindowStart: number;
 };
 
-const DCP_MESSAGE_REFERENCE_PREFIX = "[dcp-id]: # (m";
-const DCP_BLOCK_REFERENCE_PREFIX = "[dcp-block-id]: # (b";
 const MAX_HISTORY_WINDOW_ENTRIES = 360;
 const HISTORY_WINDOW_TARGET_ENTRIES = 300;
 const HISTORY_WINDOW_SHIFT_ENTRIES = 50;
@@ -1113,7 +1111,7 @@ function shouldDropAssistantStreamLine(line: string, hasVisibleText: boolean): b
 
 function shouldHoldAssistantStreamTail(text: string, hasVisibleText: boolean): boolean {
 	if (text.trim().length === 0) return !hasVisibleText;
-	return isPotentialDcpMetadataLine(text);
+	return false;
 }
 
 function shouldHoldAssistantStreamWhitespaceTail(text: string, hasVisibleText: boolean): boolean {
@@ -1121,19 +1119,9 @@ function shouldHoldAssistantStreamWhitespaceTail(text: string, hasVisibleText: b
 }
 
 function isHiddenMarkdownMetadataLine(line: string): boolean {
-	return isMarkdownReferenceDefinition(line) || isPotentialDcpMetadataLine(line);
+	return isMarkdownReferenceDefinition(line);
 }
 
 function isMarkdownReferenceDefinition(line: string): boolean {
 	return /^ {0,3}\[[^\]\n]+\]:[ \t]*\S.*$/u.test(line);
-}
-
-function isPotentialDcpMetadataLine(line: string): boolean {
-	const content = line.replace(/^ {0,3}/u, "");
-	if (content.length === 0) return false;
-	return isPotentialDcpReference(content, DCP_MESSAGE_REFERENCE_PREFIX) || isPotentialDcpReference(content, DCP_BLOCK_REFERENCE_PREFIX);
-}
-
-function isPotentialDcpReference(content: string, markerPrefix: string): boolean {
-	return markerPrefix.startsWith(content) || (content.startsWith(markerPrefix) && /^\d*\)?$/u.test(content.slice(markerPrefix.length)));
 }

@@ -39,13 +39,13 @@ export interface ToolRecord {
 }
 
 export interface MessageIdMeta {
-  /** The actual message.timestamp associated with the visible DCP id. */
+  /** The actual message.timestamp associated with the model-visible DCP id. */
   timestamp: number
   /** Stable raw message key when available; falls back to timestamp-derived key. */
   stableId?: string
   /** The message role at the time the id was injected. */
   role: string
-  /** Present when this visible message represents an active compression block. */
+  /** Present when this addressable message represents an active compression block. */
   blockId?: number
   /** Tool call metadata for tool-result-like messages. */
   toolCallId?: string
@@ -54,7 +54,7 @@ export interface MessageIdMeta {
   text?: string
   /** Rough token estimate for priority/candidate guidance. */
   tokenEstimate?: number
-  /** Optional compression priority marker exposed with the visible message ID. */
+  /** Optional compression priority marker exposed with the model-visible message ID. */
   priority?: "low" | "medium" | "high"
 }
 
@@ -162,7 +162,7 @@ export interface DcpState {
    * message positions by timestamp (which is stable across pruning passes).
    */
   messageIdSnapshot: Map<string, number>
-  /** Extra metadata for the visible DCP message IDs in messageIdSnapshot. */
+  /** Extra metadata for the model-visible DCP message IDs in messageIdSnapshot. */
   messageMetaSnapshot: Map<string, MessageIdMeta>
 
   // ── Turn tracking ──────────────────────────────────────────────────────────

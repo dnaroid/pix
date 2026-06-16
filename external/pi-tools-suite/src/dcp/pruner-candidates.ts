@@ -55,15 +55,26 @@ function resolveAddressableBoundaryId(
   }
 
   const messageId = extractMessageId(text);
-  if (!messageId) return null;
-  if (!hasAddressableSnapshot(state)) return { id: messageId, text };
+  const hasSnapshot = hasAddressableSnapshot(state);
 
-  if (state.messageMetaSnapshot.has(messageId) || state.messageIdSnapshot.has(messageId)) {
-    return { id: messageId, text };
+  // In hidden-marker mode, ordinary message content no longer contains
+  // provider-visible [dcp-id] lines. The authoritative addressability source is
+  // the fresh snapshot rebuilt by injectMessageIds(..., { visible: false }).
+  // Prefer that current mapping even when stale/literal dcp-id examples are
+  // present in the message text.
+  if (hasSnapshot) {
+    const currentId = findCurrentMessageId(msg, state);
+    if (currentId) return { id: currentId, text };
+
+    if (messageId && (state.messageMetaSnapshot.has(messageId) || state.messageIdSnapshot.has(messageId))) {
+      return { id: messageId, text };
+    }
+
+    return null;
   }
 
-  const currentId = findCurrentMessageId(msg, state);
-  return currentId ? { id: currentId, text } : null;
+  if (!messageId) return null;
+  return { id: messageId, text };
 }
 
 export function detectCompressionCandidate(

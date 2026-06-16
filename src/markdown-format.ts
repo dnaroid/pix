@@ -786,7 +786,7 @@ function sanitizeMarkdownText(text: string): string {
 }
 
 function isHiddenMarkdownMetadataLine(line: string): boolean {
-	return isMarkdownReferenceDefinition(line) || isStreamingDcpMetadataPrefix(line);
+	return isMarkdownReferenceDefinition(line);
 }
 
 export function isOnlyHiddenMetadata(text: string): boolean {
@@ -801,19 +801,6 @@ export function isOnlyHiddenMetadata(text: string): boolean {
 function isMarkdownReferenceDefinition(line: string): boolean {
 	return /^ {0,3}\[[^\]\n]+\]:[ \t]*\S.*$/u.test(line);
 }
-
-function isStreamingDcpMetadataPrefix(line: string): boolean {
-	const content = line.replace(/^ {0,3}/u, "");
-	if (content.length === 0) return false;
-	return isDcpReferencePrefix(content, DCP_MESSAGE_REFERENCE_PREFIX) || isDcpReferencePrefix(content, DCP_BLOCK_REFERENCE_PREFIX);
-}
-
-function isDcpReferencePrefix(content: string, markerPrefix: string): boolean {
-	return markerPrefix.startsWith(content) || (content.startsWith(markerPrefix) && /^\d*$/u.test(content.slice(markerPrefix.length)));
-}
-
-const DCP_MESSAGE_REFERENCE_PREFIX = "[dcp-id]: # (m";
-const DCP_BLOCK_REFERENCE_PREFIX = "[dcp-block-id]: # (b";
 
 function markdownFence(line: string): MarkdownFence | undefined {
 	const match = /^\s{0,3}(`{3,}|~{3,})(.*)$/.exec(line);

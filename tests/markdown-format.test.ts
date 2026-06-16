@@ -107,7 +107,7 @@ describe("formatMarkdownTables", () => {
 	it("hides markdown reference definitions outside fenced code blocks", () => {
 		const input = [
 			"visible before",
-			"[dcp-id]: # (m159)",
+			"[note]: # (m159)",
 			"  [doc]: https://example.test/docs",
 			"```md",
 			"[literal]: # (kept)",
@@ -207,42 +207,33 @@ describe("renderMarkdownTextLines", () => {
 		assert.equal(line?.syntaxHighlight?.start, 2);
 	});
 
-	it("does not render injected markdown reference metadata", () => {
-		const lines = renderMarkdownTextLines("[dcp-id]: # (m159)\n\nanswer\n[dcp-block-id]: # (b5)", 80);
+	it("does not render markdown reference metadata", () => {
+		const lines = renderMarkdownTextLines("[note]: # (m159)\n\nanswer\n[block]: # (b5)", 80);
 
 		assert.deepEqual(lines.map((line) => line.text), ["answer"]);
 	});
 
-	it("does not render partial streaming dcp metadata references", () => {
-		const cases = [
-			"[d",
-			"[dcp-id]",
-			"[dcp-id]: # (m",
-			"[dcp-id]: # (m159",
-			"[dcp-block-id]: # (b",
-			"[dcp-block-id]: # (b5",
-		];
-
-		for (const text of cases) {
-			assert.deepEqual(renderMarkdownTextLines(text, 80), [], text);
-		}
+	it("renders incomplete bracketed text without DCP-prefix compatibility filtering", () => {
+		assert.deepEqual(renderMarkdownTextLines("[d", 80).map((line) => line.text), ["[d"]);
+		assert.deepEqual(renderMarkdownTextLines("[dcp-id]", 80).map((line) => line.text), ["[dcp-id]"]);
+		assert.deepEqual(renderMarkdownTextLines("[dcp-id]: # (m", 80), []);
 	});
 
-	it("keeps non-dcp bracketed text while hiding partial trailing dcp metadata", () => {
-		const lines = renderMarkdownTextLines("[details]\nanswer\n[dcp-id]: # (m159", 80);
+	it("keeps bracketed text while hiding trailing markdown reference definitions", () => {
+		const lines = renderMarkdownTextLines("[details]\nanswer\n[note]: # (m159", 80);
 
 		assert.deepEqual(lines.map((line) => line.text), ["[details]", "answer"]);
 	});
 });
 
 describe("isOnlyHiddenMetadata", () => {
-	it("returns true for dcp-id markers", () => {
-		assert.equal(isOnlyHiddenMetadata("\n[dcp-id]: # (m008)"), true);
-		assert.equal(isOnlyHiddenMetadata("[dcp-id]: # (m123)"), true);
+	it("returns true for markdown reference definitions", () => {
+		assert.equal(isOnlyHiddenMetadata("\n[note]: # (m008)"), true);
+		assert.equal(isOnlyHiddenMetadata("[note]: # (m123)"), true);
 	});
 
 	it("returns true for multiple hidden lines", () => {
-		assert.equal(isOnlyHiddenMetadata("[dcp-id]: # (m1)\n[dcp-block-id]: # (b2)"), true);
+		assert.equal(isOnlyHiddenMetadata("[note]: # (m1)\n[block]: # (b2)"), true);
 	});
 
 	it("returns true for empty string", () => {
@@ -250,16 +241,16 @@ describe("isOnlyHiddenMetadata", () => {
 	});
 
 	it("returns false for text with visible content", () => {
-		assert.equal(isOnlyHiddenMetadata("Hello\n[dcp-id]: # (m1)"), false);
+		assert.equal(isOnlyHiddenMetadata("Hello\n[note]: # (m1)"), false);
 		assert.equal(isOnlyHiddenMetadata("Some answer"), false);
 	});
 
 	it("returns true for whitespace-only lines with dcp markers", () => {
-		assert.equal(isOnlyHiddenMetadata("\n\n[dcp-id]: # (m008)\n"), true);
+		assert.equal(isOnlyHiddenMetadata("\n\n[note]: # (m008)\n"), true);
 	});
 
-	it("returns true for partial streaming dcp prefixes", () => {
+	it("does not hide incomplete DCP prefixes", () => {
 		assert.equal(isOnlyHiddenMetadata("[dcp-id]: # (m159"), true);
-		assert.equal(isOnlyHiddenMetadata("[d"), true);
+		assert.equal(isOnlyHiddenMetadata("[d"), false);
 	});
 });

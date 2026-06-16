@@ -104,7 +104,7 @@ describe("renderConversationEntry", () => {
 		const lines = renderConversationEntry({
 			id: "assistant-ref-metadata",
 			kind: "assistant",
-			text: "[dcp-id]: # (m159)\n\n[dcp-id]: # (m161)",
+			text: "[note]: # (m159)\n\n[other-note]: # (m161)",
 		}, 80, renderOptions);
 
 		assert.deepEqual(lines, []);

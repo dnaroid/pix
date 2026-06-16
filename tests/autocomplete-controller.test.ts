@@ -11,7 +11,7 @@ describe("autocomplete controller helpers", () => {
 			{ role: "user", content: [{ type: "text", text: "first request" }] },
 			{ role: "assistant", content: [{ type: "thinking", thinking: "hidden" }, { type: "text", text: "first answer" }] },
 			{ role: "toolResult", content: [{ type: "text", text: "tool noise" }] },
-			{ role: "user", content: [{ type: "text", text: "latest request\n[dcp-id]: # (m123)" }, { type: "image", data: "x", mimeType: "image/png" }] },
+			{ role: "user", content: [{ type: "text", text: "latest request\n[note]: # (m123)" }, { type: "image", data: "x", mimeType: "image/png" }] },
 		], 2);
 
 		assert.deepEqual(history, [
