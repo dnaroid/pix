@@ -27,10 +27,10 @@ export const COMPRESS_TOOL_DESCRIPTION: ToolDescription = {
 	name: "compress",
 	label: "Compress Context",
 	description: COMPRESS_RANGE_DESCRIPTION,
-	promptSnippet: "Compress closed conversation slices as steady context housekeeping; after implementation + verification, compress before replying or starting a new task unless exact raw logs/diffs are still needed.",
+	promptSnippet: "Compress closed conversation slices as steady context housekeeping; before any new search/read/test/web lookup, compress older completed work unless exact raw text is still needed.",
 	promptGuidelines: [
-		"Treat completed implementation + verification slices as compression candidates immediately, not only at context-limit warnings.",
-		"Do not carry large stale tool outputs, diffs, or exploration logs across task boundaries; summarize their actionable result instead.",
+		"Treat completed implementation, verification, config/doc edits, answered exploration, dead ends, and log inspection as compression candidates immediately.",
+		"Do not carry large stale shell/read/repo/web outputs, diffs, or passing logs across task boundaries; summarize their actionable result instead.",
 		"Keep active, still-needed context raw; compress only closed ranges whose exact content is unlikely to be needed next.",
 	],
 };

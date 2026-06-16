@@ -25,7 +25,7 @@ export interface DcpConfig {
     modelMinContextLimits?: Record<string, number | string> // same formats as modelMinContextPercent; checked before modelMinContextPercent
     summaryBuffer: boolean
     nudgeFrequency: number // inject nudge every N context events (default: 2)
-    iterationNudgeThreshold: number // nudge after N tool calls since last user msg (default: 8)
+    iterationNudgeThreshold: number // nudge after N tool calls since last user msg (default: 4)
     nudgeForce: "strong" | "soft"
     protectedTools: string[] // these tool outputs always protected from pruning
     protectTags: boolean
@@ -96,7 +96,7 @@ const DEFAULT_CONFIG: DcpConfig = {
     modelMinContextPercent: {},
     summaryBuffer: true,
     nudgeFrequency: 1,
-    iterationNudgeThreshold: 6,
+    iterationNudgeThreshold: 4,
     nudgeForce: "soft",
     protectedTools: ["compress", "write", "edit"],
     protectTags: false,
@@ -104,14 +104,14 @@ const DEFAULT_CONFIG: DcpConfig = {
     autoCandidates: {
       enabled: true,
       minContextPercent: 0.20,
-      keepRecentTurns: 2,
+      keepRecentTurns: 1,
       minMessages: 6,
       minTokens: 1500,
     },
     messageMode: {
       enabled: true,
       minContextPercent: 0.20,
-      keepRecentTurns: 2,
+      keepRecentTurns: 1,
       mediumTokens: 500,
       highTokens: 5000,
       maxSuggestions: 5,
@@ -129,13 +129,17 @@ const DEFAULT_CONFIG: DcpConfig = {
     },
     autoToolPruning: {
       enabled: true,
-      maxOutputTokens: 2000,
-      keepRecentTurns: 2,
+      maxOutputTokens: 1200,
+      keepRecentTurns: 1,
       readLikeTools: [
         "read",
+        "shell",
+        "bash",
         "grep",
         "find",
         "ls",
+        "web_search",
+        "web_fetch",
         "repo_architecture",
         "repo_structure",
         "repo_ast",

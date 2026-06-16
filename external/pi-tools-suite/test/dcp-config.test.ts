@@ -10,6 +10,20 @@ function tempDir(): string {
 }
 
 describe("DCP config", () => {
+	test("uses aggressive built-in DCP cleanup defaults", () => {
+		const homeDir = tempDir();
+		const config = loadConfig({ homeDir });
+
+		expect(config.compress.iterationNudgeThreshold).toBe(4);
+		expect(config.compress.autoCandidates.keepRecentTurns).toBe(1);
+		expect(config.compress.messageMode.keepRecentTurns).toBe(1);
+		expect(config.strategies.autoToolPruning.maxOutputTokens).toBe(1200);
+		expect(config.strategies.autoToolPruning.keepRecentTurns).toBe(1);
+		expect(config.strategies.autoToolPruning.readLikeTools).toEqual(
+			expect.arrayContaining(["read", "shell", "bash", "repo_search", "web_search", "web_fetch"]),
+		);
+	});
+
 	test("reads DCP settings from the user pi-tools-suite config", () => {
 		const homeDir = tempDir();
 		mkdirSync(join(homeDir, ".config", "pi"), { recursive: true });

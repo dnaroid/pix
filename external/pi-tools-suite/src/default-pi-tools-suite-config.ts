@@ -73,7 +73,7 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
       "minContextPercent": "20%",
       "maxContextPercent": "55%",
       "nudgeFrequency": 1,
-      "iterationNudgeThreshold": 6,
+      "iterationNudgeThreshold": 4,
       "autoCandidates": { "minContextPercent": 0.2 },
       "messageMode": { "minContextPercent": 0.2 }
     }

@@ -26,7 +26,9 @@ When multiple independent stale sections exist, prefer several focused compressi
 When one older message is huge but the surrounding context is still useful, use message-mode compression for that single message instead of compressing a broad range.
 Summaries should be proportional to future usefulness, not proportional to the amount of text being removed.
 
-Use \`compress\` as steady housekeeping while you work. After any completed implementation + verification slice, compress that closed slice before replying or starting a new task unless the next step needs exact raw logs/diffs. Do not carry large stale tool outputs across task boundaries.
+Use \`compress\` as steady housekeeping while you work. Closed slice => compress now. Do not start a new search, file-read batch, test, verification run, or web lookup while older completed work remains raw.
+
+A closed slice is any finished implementation, verification, config edit, answered exploration, dead-end debugging branch, or test/log inspection. Passing logs are summary-only: preserve command, pass/fail, key failures if any, and whether follow-up is needed; never keep a full passing log in live context. Treat large shell/read/repo/web outputs as disposable evidence once their facts are extracted.
 
 Before compressing while work is unfinished, ensure one \`todo in_progress\` captures the active objective and next step.
 
@@ -38,6 +40,7 @@ CADENCE, SIGNALS, AND LATENCY
 - Prioritize closedness and independence over raw size
 - Prefer smaller, regular compressions over infrequent massive compressions for better latency and summary quality
 - When multiple independent stale sections are ready, batch compressions in parallel
+- Before more exploration, ask whether an older completed slice can become summary-only; if yes, compress first
 
 COMPRESS WHEN
 
@@ -45,6 +48,8 @@ A section is genuinely closed and the raw conversation has served its purpose:
 
 - Research concluded and findings are clear
 - Implementation finished and verified
+- Config/doc edit finished
+- Test, lint, or CI output has been understood, especially passing logs
 - Exploration exhausted and patterns understood
 - Dead-end noise can be discarded without waiting for a whole chapter to close
 
@@ -77,7 +82,10 @@ It is your responsibility to keep a sharp, high-quality context window for optim
 export const COMPRESS_RANGE_DESCRIPTION = `Collapse one or more ranges of the conversation into detailed summaries.
 
 AUTONOMOUS HOUSEKEEPING
-Do not wait for context emergencies. After a completed implementation + verification slice, compress that closed slice before replying or starting a new task unless the next step needs exact raw logs/diffs. Do not carry large stale tool outputs across task boundaries.
+Do not wait for context emergencies. Closed slice => compress now. A closed slice includes completed implementation, verification, config/doc edit, answered exploration, dead-end debugging, or finished test/log inspection. Compress before starting the next search/read/test/web lookup unless exact raw text is still needed.
+
+PASSING LOGS AND LARGE OUTPUTS
+Passing check/test/lint/tsc logs are summary-only after you know the result. Preserve command, pass/fail, key failures if any, and follow-up status; drop full passing output. Treat large shell/read/repo/web outputs as disposable evidence once important facts are extracted.
 
 DCP REMINDERS
 If a \`<dcp-system-reminder>\` is present in context, treat it as a direct instruction to evaluate compression immediately. If a safe closed range exists, call this tool before further exploration. Skipping compression is acceptable only when the newest raw context is still needed for the next concrete edit, test, or answer.
@@ -87,7 +95,7 @@ Your summary must be COMPLETE FOR CONTINUATION, not a transcript rewrite. Preser
 
 If active unfinished work exists, start with \`Active objective\` and \`Next step\`.
 
-Default to a compact structured summary (roughly 5-15 bullets for a normal completed work slice). Grow beyond that only when the compressed range contains multiple independent decisions, unresolved blockers, or precise state that is genuinely required to continue.
+Default to a compact structured summary (roughly 4-10 bullets for a normal completed work slice). Grow beyond that only when the compressed range contains multiple independent decisions, unresolved blockers, or precise state that is genuinely required to continue.
 
 Do not copy long raw code, JSON, diffs, logs, or tool output into summaries. Prefer semantic descriptions such as “updated foo.json so scene_assets_1.zai-svg has maxConcurrentRuns set to 5.” Include exact snippets only when the literal text is required for safe continuation, and keep them short and single-line.
 
@@ -98,7 +106,7 @@ USER INTENT FIDELITY
 When the compressed range includes user messages, preserve the user's intent with extra care. Do not change scope, constraints, priorities, acceptance criteria, or requested outcomes.
 Directly quote user messages when they are short enough to include safely. Direct quotes are preferred when they best preserve exact meaning.
 
-Be LEAN. Strip away the noise: failed attempts that led nowhere, verbose tool outputs, back-and-forth exploration, and incidental line-by-line edit history. What remains should be pure signal with enough detail to resume work confidently.
+Be LEAN. Strip away full logs, repeated search/read output, duplicate summaries, incidental failed attempts, and line-by-line edit history. What remains should be pure signal with enough detail to resume work confidently.
 
 TWO COMPRESSION MODES
 You may use either or both modes in one call:
@@ -174,7 +182,7 @@ You are at or beyond the configured max context threshold. This is an emergency 
 You MUST use the \`compress\` tool now. Do not continue normal exploration until compression is handled.
 
 If you are in the middle of a critical atomic operation, finish that atomic step first, then compress immediately.
-If a completed implementation+verification slice exists, compress it before replying or starting another task.
+If any closed slice exists (finished implementation, verification, config/doc edit, answered exploration, dead end, or test/log inspection), compress it before replying or starting another task. Passing logs should become command + pass/fail + follow-up status only.
 
 RANGE STRATEGY (MANDATORY)
 Prioritize one large, closed, high-yield compression range first.
@@ -201,9 +209,9 @@ ACTION REQUIRED: Context usage is high.
 
 Before doing more exploration, look for a closed, self-contained range that no longer needs to stay raw and compress it now.
 
-Do not treat this as optional housekeeping. If any completed research, implementation, verification, CI-log inspection, or dead-end debugging slice is present, call the \`compress\` tool before continuing normal work.
+Do not treat this as optional housekeeping. If any completed research, implementation, verification, config/doc edit, CI-log inspection, or dead-end debugging slice is present, call the \`compress\` tool before continuing normal work.
 If a completed implementation+verification slice exists, compress it before replying or starting another task.
-High-priority stale tool outputs must be compressed once no exact raw text is needed.
+High-priority stale shell/read/repo/web outputs must be compressed once no exact raw text is needed. Passing logs should not remain raw after they are understood.
 
 RANGE SELECTION
 Prefer older, resolved history. Avoid the newest active working slice unless it is clearly done.
@@ -225,7 +233,7 @@ If any range is cleanly closed and unlikely to be needed again, use the \`compre
 If direction has shifted, compress earlier ranges that are now less relevant.
 
 Do not defer this across another batch of searches, reads, CI log fetches, or tests. The next safe action should be compression whenever a closed slice exists.
-High-priority stale tool outputs must be compressed once no exact raw text is needed.
+High-priority stale shell/read/repo/web outputs and understood passing logs must be compressed once no exact raw text is needed.
 
 Prefer small, closed-range compressions over one broad compression.
 Use message-mode compression for isolated large stale messages.
@@ -239,7 +247,7 @@ Keep active context uncompressed.
 export const ITERATION_NUDGE = `<dcp-system-reminder>
 ACTION REQUIRED: You've been iterating for a while after the last user message.
 
-Pause before the next non-atomic tool call. If there is a closed portion that is unlikely to be referenced immediately (for example, finished research before implementation, completed CI-log triage, a verified fix, or a dead-end investigation), use the \`compress\` tool on it now.
+Pause before the next non-atomic tool call. If there is a closed portion that is unlikely to be referenced immediately (for example, finished research before implementation, completed config edit, completed CI-log triage, a verified fix, or a dead-end investigation), use the \`compress\` tool on it now.
 
 Do not keep accumulating tool outputs while a completed slice remains raw. If a range is closed, compression is the next safe action.
 If a completed implementation+verification slice exists, compress it before replying or starting another task.

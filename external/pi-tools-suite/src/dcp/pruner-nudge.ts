@@ -157,7 +157,7 @@ function formatCandidateActions(
 
   if (candidate) {
     parts.push(
-      `Recommended range candidate: ${candidate.startId}..${candidate.endId} (${candidate.messageCount} messages, ~${candidate.estimatedTokens} tokens, ${candidate.reason}). Compress this before the next search/read/test if it is closed.`,
+      `Recommended range candidate: ${candidate.startId}..${candidate.endId} (${candidate.messageCount} messages, ~${candidate.estimatedTokens} tokens, ${candidate.reason}). Compress this before the next search/read/test/web lookup if it is closed.`,
     );
     if (candidate.includedBlockIds.length > 0) {
       parts.push(
@@ -172,7 +172,7 @@ function formatCandidateActions(
     parts.push(
       `Recommended message candidates: ${listedMessages
         .map((item) => `${item.messageId} (${item.priority}, ${item.role}, ~${item.estimatedTokens} tokens)`)
-        .join(", ")}. High-priority stale messages MUST be compressed once their full text is no longer needed. Batch multiple messages in one compress call when possible.`,
+        .join(", ")}. High-priority stale messages MUST be compressed once their full text is no longer needed; passing logs should become command + pass/fail + follow-up status only. Batch multiple messages in one compress call when possible.`,
     );
   }
 
@@ -180,7 +180,7 @@ function formatCandidateActions(
   if (activeBlocks) parts.push(activeBlocks);
 
   if (parts.length === 0) {
-    parts.push("No automatic candidate is certain; scan the older closed context now and compress any completed research, implementation, verification, CI-log inspection, or dead-end debugging slice before accumulating more tool output.");
+    parts.push("No automatic candidate is certain; scan the older closed context now and compress any completed research, implementation, config/doc edit, verification, CI-log inspection, or dead-end debugging slice before accumulating more tool output.");
   }
 
   return [`CONCRETE NEXT ACTION`, ...parts].join("\n");
