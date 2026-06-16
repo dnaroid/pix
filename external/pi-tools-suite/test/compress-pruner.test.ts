@@ -27,6 +27,7 @@ import {
   type CompressionBlock,
   type ToolRecord,
 } from "../src/dcp/state.js";
+import { stripStaleDcpMetadataFromAssistantMessage } from "../src/dcp/pruner-metadata.js";
 
 function config(overrides: Partial<DcpConfig> = {}): DcpConfig {
   const base: DcpConfig = {
@@ -531,6 +532,32 @@ describe("DCP pruning effectiveness", () => {
 
     const assistantTextBlock = (pruned[1].content as any[]).find((block) => block.text === "I will inspect that now.");
     expect(assistantTextBlock?.textSignature).toBeUndefined();
+  });
+
+  test("sanitizes finalized assistant messages before stale DCP metadata can persist", () => {
+    const sanitized = stripStaleDcpMetadataFromAssistantMessage({
+      role: "assistant",
+      content: [
+        {
+          type: "text",
+          text:
+            "Done.\n[dcp-id]: # (m999)\n[dcp-block-id]: # (b9)\n<dcp-system-reminder>hidden nudge</dcp-system-reminder>",
+          textSignature: "signed-original-text",
+        },
+        {
+          type: "text",
+          text: "```markdown\n[dcp-id]: # (m123)\n```",
+          textSignature: "signed-code-example",
+        },
+      ],
+      timestamp: 2,
+    });
+
+    const blocks = sanitized.content as any[];
+    expect(blocks[0]?.text).toBe("Done.");
+    expect(blocks[0]?.textSignature).toBeUndefined();
+    expect(blocks[1]?.text).toContain("[dcp-id]: # (m123)");
+    expect(blocks[1]?.textSignature).toBe("signed-code-example");
   });
 
   test("keeps user, tool, and assistant code-block DCP examples intact", () => {
@@ -1337,7 +1364,7 @@ describe("DCP pruning effectiveness", () => {
     expect(rendered).not.toContain("DCP_NUDGE_TELEMETRY");
   });
 
-  test("DCP module stays headless and does not register TUI/display hooks", async () => {
+  test("DCP module stays headless and only registers non-UI hooks", async () => {
     const events: string[] = [];
     const pi = {
       on(event: string) {
@@ -1353,8 +1380,8 @@ describe("DCP pruning effectiveness", () => {
 
     expect(events).not.toContain("message_start");
     expect(events).not.toContain("message_update");
-    expect(events).not.toContain("message_end");
     expect(events).not.toContain("turn_end");
+    expect(events).toContain("message_end");
   });
 
   test("serialized state preserves tool fingerprints and accounting across reload", () => {

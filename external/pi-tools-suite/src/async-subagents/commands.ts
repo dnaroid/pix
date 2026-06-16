@@ -415,7 +415,12 @@ function registerSessionCommands(pi: ExtensionAPI): void {
 				});
 				if (result.cancelled) ctx.ui.notify("Sub-agent session switch cancelled.", "warning");
 			} catch (error) {
-				ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+				try {
+					ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+				} catch (notifyError) {
+					// If switchSession succeeded before a later callback threw, the old ctx is stale.
+					ignoreStaleExtensionContextError(notifyError);
+				}
 			}
 		},
 	});
@@ -452,7 +457,12 @@ function registerSessionCommands(pi: ExtensionAPI): void {
 				});
 				if (result.cancelled) ctx.ui.notify("Return session switch cancelled.", "warning");
 			} catch (error) {
-				ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+				try {
+					ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+				} catch (notifyError) {
+					// If switchSession succeeded before a later callback threw, the old ctx is stale.
+					ignoreStaleExtensionContextError(notifyError);
+				}
 			}
 		},
 	});

@@ -38,6 +38,7 @@ import {
 	resolveContextThresholds,
 	estimateTokens,
 } from "./pruner.js"
+import { stripStaleDcpMetadataFromAssistantMessage } from "./pruner-metadata.js"
 import type { DcpNudgeType } from "./pruner-types.js"
 import { registerCompressTool } from "./compress-tool.js"
 import { DCP_STATS_MESSAGE_TYPE, registerCommands } from "./commands.js"
@@ -189,6 +190,15 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 		return {
 			systemPrompt: event.systemPrompt + "\n\n" + promptAddition,
 		}
+	})
+
+	// ── 7b. message_end: never persist provider-echoed DCP control markers ─────
+	pi.on("message_end", async (event, ctx) => {
+		const effectiveConfig = configForContext(ctx)
+		if (!effectiveConfig.enabled || event.message?.role !== "assistant") return undefined
+
+		const sanitized = stripStaleDcpMetadataFromAssistantMessage(event.message)
+		return { message: sanitized }
 	})
 
 	// ── 8. tool_call: record input args for dedup / purge fingerprinting ───────

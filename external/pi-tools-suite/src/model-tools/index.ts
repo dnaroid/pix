@@ -429,12 +429,20 @@ export default function modelTools(pi: ExtensionAPI): void {
   let baseTools: string[] = [];
 
   pi.on("session_start", (_event, ctx) => {
-    baseTools = pi.getActiveTools().filter((tool) => !MANAGED_TOOLS.has(tool));
-    applyToolProfile(pi, ctx.model, baseTools);
+    try {
+      baseTools = pi.getActiveTools().filter((tool) => !MANAGED_TOOLS.has(tool));
+      applyToolProfile(pi, ctx.model, baseTools);
+    } catch (error) {
+      ignoreStaleExtensionContextError(error);
+    }
   });
 
   pi.on("model_select", (event) => {
-    applyToolProfile(pi, event.model, baseTools);
+    try {
+      applyToolProfile(pi, event.model, baseTools);
+    } catch (error) {
+      ignoreStaleExtensionContextError(error);
+    }
   });
 }
 

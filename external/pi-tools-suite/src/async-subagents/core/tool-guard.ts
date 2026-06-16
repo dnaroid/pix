@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { ignoreStaleExtensionContextError } from "../../context-usage";
 
 export const SUBAGENT_DENIED_TOOLS = new Set([
 	"question",
@@ -23,10 +24,14 @@ export default function subagentToolGuard(pi: ExtensionAPI): void {
 	};
 
 	const applyGuard = () => {
-		const activeTools = toolApi.getActiveTools?.() ?? [];
-		const filtered = filterSubagentTools(activeTools) ?? [];
-		if (filtered.length === activeTools.length) return;
-		toolApi.setActiveTools?.(filtered);
+		try {
+			const activeTools = toolApi.getActiveTools?.() ?? [];
+			const filtered = filterSubagentTools(activeTools) ?? [];
+			if (filtered.length === activeTools.length) return;
+			toolApi.setActiveTools?.(filtered);
+		} catch (error) {
+			ignoreStaleExtensionContextError(error);
+		}
 	};
 
 	pi.on("session_start", applyGuard);
