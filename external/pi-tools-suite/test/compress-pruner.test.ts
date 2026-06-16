@@ -75,6 +75,7 @@ function config(overrides: Partial<DcpConfig> = {}): DcpConfig {
     },
     protectedFilePatterns: [],
     pruneNotification: "off",
+    modelOverrides: {},
   };
 
   return {
@@ -180,6 +181,31 @@ function block(id: number, startTimestamp: number, endTimestamp: number): Compre
 }
 
 describe("DCP pruning effectiveness", () => {
+  test("resolveContextThresholds supports wildcard model keys with provider-specific precedence", () => {
+    const baseCompress = config().compress;
+    const thresholds = resolveContextThresholds(
+      config({
+        compress: {
+          ...baseCompress,
+          modelMinContextPercent: {
+            "gpt-*": "20%",
+            "openai/*": "30%",
+          },
+          modelMaxContextPercent: {
+            "gpt-*": "40%",
+            "openai/*": "45%",
+            "openai/gpt-5": "50%",
+          },
+        },
+      }),
+      ["openai/gpt-5", "gpt-5"],
+      200_000,
+    );
+
+    expect(thresholds.minContextPercent).toBe(0.3);
+    expect(thresholds.maxContextPercent).toBe(0.5);
+  });
+
   test("deduplication and stats are idempotent across repeated pruning passes", () => {
     const state = createState();
     state.toolCalls.set("call-1", toolRecord("call-1", "read", "read::{path:a}", 120));

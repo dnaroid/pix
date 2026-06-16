@@ -53,6 +53,31 @@ describe("subagents widget controller", () => {
 		}
 	});
 
+	it("shows all active registry runs for the current parent session together", async () => {
+		const cwd = await mkdtemp(join(tmpdir(), "pix-subagents-"));
+		try {
+			const currentSession = join(cwd, "current.jsonl");
+			const firstRunDir = await writeRun(cwd, "owned-run-1", "owned-agent-1", currentSession);
+			const secondRunDir = await writeRun(cwd, "owned-run-2", "owned-agent-2", currentSession);
+			await writeRegistry(cwd, [
+				registryRun("owned-run-1", firstRunDir, "owned-agent-1", "2026-05-30T10:00:00.000Z"),
+				registryRun("owned-run-2", secondRunDir, "owned-agent-2", "2026-05-30T11:00:00.000Z"),
+			], "owned-run-2");
+
+			const controller = newController(cwd, currentSession);
+			await (controller as unknown as RefreshableController).refreshFromFiles();
+
+			assert.equal(controller.widgetState?.runs?.length, 2);
+			assert.deepEqual(controller.widgetState?.runs?.map((run) => run.runDir), [secondRunDir, firstRunDir]);
+			assert.deepEqual(controller.widgetState?.agents.map((agent) => [agent.id, agent.status]), [
+				["owned-agent-2", "planned"],
+				["owned-agent-1", "planned"],
+			]);
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	});
+
 	it("clears current-session subagents on reset", () => {
 		const controller = newController("/tmp/project", "/tmp/project/current.jsonl", false);
 
@@ -103,6 +128,50 @@ describe("subagents widget controller", () => {
 		} finally {
 			await rm(cwd, { recursive: true, force: true });
 		}
+	});
+
+	it("shows all active runs from a live-state event instead of choosing only one", () => {
+		const controller = newController("/tmp/project", "/tmp/project/current.jsonl", false);
+
+		controller.observeLiveState({
+			version: 1,
+			count: 2,
+			sessionFile: "/tmp/project/current.jsonl",
+			checkedAt: Date.now(),
+			runs: [
+				{ runDir: "/tmp/project/.pi/subagents/run-a", agents: [{ id: "agent-a", status: "running" }] },
+				{ runDir: "/tmp/project/.pi/subagents/run-b", agents: [{ id: "agent-b", status: "running" }] },
+			],
+		});
+
+		assert.deepEqual(controller.widgetState?.runs?.map((run) => run.runDir), [
+			resolve("/tmp/project/.pi/subagents/run-a"),
+			resolve("/tmp/project/.pi/subagents/run-b"),
+		]);
+		assert.deepEqual(controller.widgetState?.agents.map((agent) => agent.id), ["agent-a", "agent-b"]);
+		controller.stopPolling();
+	});
+
+	it("sorts live-state runs by freshest startedAt", () => {
+		const controller = newController("/tmp/project", "/tmp/project/current.jsonl", false);
+
+		controller.observeLiveState({
+			version: 1,
+			count: 2,
+			sessionFile: "/tmp/project/current.jsonl",
+			checkedAt: Date.now(),
+			runs: [
+				{ runDir: "/tmp/project/.pi/subagents/run-a", agents: [{ id: "agent-a", status: "running", startedAt: "2026-05-30T10:00:00.000Z" }] },
+				{ runDir: "/tmp/project/.pi/subagents/run-b", agents: [{ id: "agent-b", status: "running", startedAt: "2026-05-30T11:00:00.000Z" }] },
+			],
+		});
+
+		assert.deepEqual(controller.widgetState?.runs?.map((run) => run.runDir), [
+			resolve("/tmp/project/.pi/subagents/run-b"),
+			resolve("/tmp/project/.pi/subagents/run-a"),
+		]);
+		assert.deepEqual(controller.widgetState?.agents.map((agent) => agent.id), ["agent-b", "agent-a"]);
+		controller.stopPolling();
 	});
 
 	it("keeps file-change refresh scoped to the active session tab", async () => {

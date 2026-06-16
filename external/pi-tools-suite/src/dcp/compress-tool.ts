@@ -5,7 +5,7 @@
 import { Type } from "typebox"
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
 import type { DcpState } from "./state.js"
-import type { DcpConfig } from "./config.js"
+import { modelKeysFromContext, resolveModelConfig, type DcpConfig } from "./config.js"
 import { clearDcpNudgeAnchors } from "./pruner.js"
 import type { DcpCompressionVisualDetails } from "./ui.js"
 import { normalizeDcpContextUsage } from "./ui.js"
@@ -149,6 +149,11 @@ export function registerCompressTool(
     }),
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const effectiveConfig = resolveModelConfig(config, modelKeysFromContext(ctx))
+      if (!effectiveConfig.enabled) {
+        throw new Error("DCP is disabled for the active model")
+      }
+
       const newBlockIds: number[] = []
       const ranges = Array.isArray(params.ranges) ? params.ranges : []
       const messages = Array.isArray(params.messages) ? params.messages : []
@@ -215,7 +220,7 @@ export function registerCompressTool(
           anchorMessageId: anchor.stableId,
           createdByToolCallId: _toolCallId,
           state,
-          config,
+          config: effectiveConfig,
           mode: "range",
         })
         const block = created.block
@@ -260,7 +265,7 @@ export function registerCompressTool(
           skippedMessageIssues.push({ kind: "non-finite", messageId })
           continue
         }
-        if (config.compress.protectUserMessages && meta.role === "user") {
+        if (effectiveConfig.compress.protectUserMessages && meta.role === "user") {
           skippedMessageIssues.push({ kind: "protected-user", messageId })
           continue
         }
@@ -291,7 +296,7 @@ export function registerCompressTool(
           anchorMessageId: anchor.stableId,
           createdByToolCallId: _toolCallId,
           state,
-          config,
+          config: effectiveConfig,
           mode: "message",
           validatePlaceholders: false,
           expandPlaceholders: false,

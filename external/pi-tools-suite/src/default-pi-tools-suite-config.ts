@@ -19,6 +19,56 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
   "dcp": {
     "enabled": true,
     "manualMode": { "enabled": false, "automaticStrategies": true },
+    "modelOverrides": {
+      "openai-codex/gpt-5.5": {
+        "compress": {
+          "minContextPercent": "28%",
+          "maxContextPercent": "48%"
+        }
+      },
+      "openai-codex/gpt-5.4-mini": {
+        "compress": {
+          "minContextPercent": "20%",
+          "maxContextPercent": "38%"
+        }
+      },
+      "zai/*": {
+        "compress": {
+          "minContextPercent": "16%",
+          "maxContextPercent": "30%"
+        }
+      },
+      "antigravity/*sonnet*": {
+        "compress": {
+          "minContextPercent": "22%",
+          "maxContextPercent": "40%"
+        }
+      },
+      "antigravity/gemini-3.1-pro*": {
+        "compress": {
+          "minContextPercent": "24%",
+          "maxContextPercent": "42%"
+        }
+      },
+      "antigravity/gemini-3-flash*": {
+        "compress": {
+          "minContextPercent": "18%",
+          "maxContextPercent": "34%"
+        }
+      },
+      "antigravity/gemini-2.5-flash*": {
+        "compress": {
+          "minContextPercent": "18%",
+          "maxContextPercent": "32%"
+        }
+      },
+      "antigravity/antigravity-claude-opus-4-6-thinking": {
+        "compress": {
+          "minContextPercent": "26%",
+          "maxContextPercent": "44%"
+        }
+      }
+    },
     "compress": {
       "minContextPercent": "20%",
       "maxContextPercent": "55%",

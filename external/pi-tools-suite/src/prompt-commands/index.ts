@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { applyEdits, modify, parse as parseJsonc } from "jsonc-parser";
 import { ensurePiToolsSuiteUserConfig, getPiToolsSuiteUserConfigPath } from "../config";
+import { ignoreStaleExtensionContextError } from "../context-usage";
 import { publishStartupSection } from "../startup-section";
 
 type PromptCommand = {
@@ -166,12 +167,20 @@ async function runPromptCommand(pi: ExtensionAPI, ctx: ExtensionCommandContext, 
 	if (!prompt) return notify(ctx, `/${name} has an empty prompt.`, "error");
 
 	await ctx.waitForIdle();
-	pi.sendUserMessage(prompt);
+	try {
+		pi.sendUserMessage(prompt);
+	} catch (error) {
+		ignoreStaleExtensionContextError(error);
+	}
 }
 
 async function reloadAfterConfigChange(ctx: ExtensionCommandContext, message: string): Promise<void> {
 	notify(ctx, `${message}\nReloading commands from ${getConfigPath()}…`);
-	await ctx.reload();
+	try {
+		await ctx.reload();
+	} catch (error) {
+		ignoreStaleExtensionContextError(error);
+	}
 }
 
 async function selectCommand(ctx: ExtensionContext, title: string, commands: Record<string, PromptCommand>): Promise<string | undefined> {

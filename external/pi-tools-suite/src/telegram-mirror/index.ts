@@ -35,6 +35,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { loadTelegramMirrorConfig } from "../config.js";
+import { ignoreStaleExtensionContextError, isAgentBusyRaceError } from "../context-usage.js";
 import { TelegramBot } from "./bot.js";
 import { captureAbortableContext, registerPixEventHandlers, type PixMirrorHooks, type RendererSink } from "./events.js";
 import { TurnRenderer, type RendererEvent } from "./renderer.js";
@@ -104,11 +105,32 @@ export default function telegramMirror(pi: ExtensionAPI): void {
 		console.error(`[telegram-mirror] ${message}`);
 	};
 
+	function staleSafe<T>(callback: () => T, fallback?: T): T | undefined {
+		try {
+			return callback();
+		} catch (error) {
+			ignoreStaleExtensionContextError(error);
+			return fallback;
+		}
+	}
+
+	function sendUserMessageSafely(text: string): void {
+		try {
+			pi.sendUserMessage(text);
+		} catch (error) {
+			if (isAgentBusyRaceError(error)) {
+				pi.sendUserMessage(text, { deliverAs: "followUp" });
+				return;
+			}
+			throw error;
+		}
+	}
+
 	// Dispatch the leader uses to execute commands on its own pi session.
-		const localDispatch: LocalDispatch = {
-			sendUserMessage(text) {
-				pi.sendUserMessage(text);
-			},
+	const localDispatch: LocalDispatch = {
+		sendUserMessage(text) {
+			staleSafe(() => sendUserMessageSafely(text));
+		},
 			currentDialog() {
 				return mirrorCtx?.currentDialog();
 			},
@@ -119,8 +141,12 @@ export default function telegramMirror(pi: ExtensionAPI): void {
 			mirrorCtx?.compact();
 		},
 		status() {
-			if (!mirrorCtx) return undefined;
-			return { idle: mirrorCtx.isIdle(), hasPending: mirrorCtx.hasPendingMessages() };
+			const ctx = mirrorCtx;
+			if (!ctx) return undefined;
+			return {
+				idle: staleSafe(() => ctx.isIdle(), true) ?? true,
+				hasPending: staleSafe(() => ctx.hasPendingMessages(), false) ?? false,
+			};
 		},
 	};
 
@@ -336,7 +362,7 @@ export default function telegramMirror(pi: ExtensionAPI): void {
 		try {
 			switch (command) {
 				case "sendUserMessage":
-					pi.sendUserMessage(((args as { text?: string } | undefined)?.text ?? ""));
+					sendUserMessageSafely(((args as { text?: string } | undefined)?.text ?? ""));
 					break;
 				case "abort":
 					mirrorCtx?.abort();
@@ -477,22 +503,30 @@ export default function telegramMirror(pi: ExtensionAPI): void {
 	function refreshCtx(ctx: ExtensionContext | undefined): void {
 		if (!ctx) return;
 		if (!mirrorCtx) {
-				mirrorCtx = makeCtx({
-					abort: () => ctx.abort(),
-					isIdle: () => ctx.isIdle(),
-					hasPendingMessages: () => ctx.hasPendingMessages(),
-					compact: () => ctx.compact(),
+			mirrorCtx = makeCtx({
+					abort: () => {
+						staleSafe(() => ctx.abort());
+					},
+					isIdle: () => staleSafe(() => ctx.isIdle(), true) ?? true,
+					hasPendingMessages: () => staleSafe(() => ctx.hasPendingMessages(), false) ?? false,
+					compact: () => {
+						staleSafe(() => ctx.compact());
+					},
 					currentDialog: () => currentDialogFromContext(ctx),
 				});
-				return;
-			}
-		const m = mirrorCtx as Mutable<MirrorContext>;
-		m.abort = () => ctx.abort();
-			m.isIdle = () => ctx.isIdle();
-			m.hasPendingMessages = () => ctx.hasPendingMessages();
-			m.compact = () => ctx.compact();
-			m.currentDialog = () => currentDialogFromContext(ctx);
+			return;
 		}
+		const m = mirrorCtx as Mutable<MirrorContext>;
+		m.abort = () => {
+			staleSafe(() => ctx.abort());
+		};
+		m.isIdle = () => staleSafe(() => ctx.isIdle(), true) ?? true;
+		m.hasPendingMessages = () => staleSafe(() => ctx.hasPendingMessages(), false) ?? false;
+		m.compact = () => {
+			staleSafe(() => ctx.compact());
+		};
+		m.currentDialog = () => currentDialogFromContext(ctx);
+	}
 
 	function refreshSelfInfo(ctx: ExtensionContext | undefined): void {
 		const snapshot = sessionSnapshot(ctx);
@@ -611,13 +645,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function sessionSnapshot(ctx: ExtensionContext | undefined): SessionSnapshot | undefined {
 	if (!ctx) return undefined;
-	const manager = ctx.sessionManager;
-	return {
-		cwd: manager.getCwd?.() ?? ctx.cwd,
-		...(manager.getSessionId?.() ? { sessionId: manager.getSessionId() } : {}),
-		...(manager.getSessionFile?.() ? { sessionFile: manager.getSessionFile() } : {}),
-		...(manager.getSessionName?.() ? { sessionName: manager.getSessionName() } : {}),
-	};
+	try {
+		const manager = ctx.sessionManager;
+		return {
+			cwd: manager.getCwd?.() ?? ctx.cwd,
+			...(manager.getSessionId?.() ? { sessionId: manager.getSessionId() } : {}),
+			...(manager.getSessionFile?.() ? { sessionFile: manager.getSessionFile() } : {}),
+			...(manager.getSessionName?.() ? { sessionName: manager.getSessionName() } : {}),
+		};
+	} catch (error) {
+		ignoreStaleExtensionContextError(error);
+		return undefined;
+	}
 }
 
 function notify(ctx: { hasUI?: boolean; ui?: { notify?: (message: string, type?: "info" | "warning" | "error") => void } }, message: string, type: "info" | "warning" | "error" = "info"): void {

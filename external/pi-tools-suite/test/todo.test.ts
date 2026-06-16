@@ -650,6 +650,49 @@ describe.serial("todo extension lifecycle", () => {
 		}
 	});
 
+	test.serial("restores original thinking from persisted task metadata when the in-memory map is gone", async () => {
+		const previousEnv = process.env.PI_TOOLS_SUITE_TODO_THINKING;
+		process.env.PI_TOOLS_SUITE_TODO_THINKING = "1";
+		const extension = (await import("../src/todo/index.js")).default;
+		const { getTodos } = await import("../src/todo/todo.js");
+		const pi = new FakePi();
+		pi.thinkingLevel = "off";
+		const snapshot = {
+			action: "update",
+			params: {},
+			tasks: [{
+				id: 1,
+				subject: "Report results to user",
+				status: "in_progress",
+				activeForm: "reporting results",
+				thinking: "off",
+				metadata: { __piTodoRestoreThinking: "high" },
+			}],
+			nextId: 2,
+		};
+		const ctx = {
+			cwd: mkdtempSync(join(tmpdir(), "todo-thinking-resume-")),
+			hasUI: false,
+			model: { reasoning: true, thinkingLevelMap: {} },
+			sessionManager: { getBranch: () => [{ type: "message", message: { role: "toolResult", toolName: "todo", details: snapshot } }] },
+			isIdle: () => true,
+			hasPendingMessages: () => false,
+		};
+		try {
+			extension(pi as any);
+			await pi.emit("session_start", {}, ctx);
+			await pi.tools.get("todo").execute("todo-complete", { action: "update", id: 1, status: "completed" }, undefined, undefined, ctx);
+
+			expect(getTodos()).toEqual([]);
+			expect(pi.thinkingLevel).toBe("high");
+			expect(pi.setThinkingLevelCalls).toEqual(["high"]);
+		} finally {
+			if (previousEnv === undefined) delete process.env.PI_TOOLS_SUITE_TODO_THINKING;
+			else process.env.PI_TOOLS_SUITE_TODO_THINKING = previousEnv;
+			rmSync(ctx.cwd, { recursive: true, force: true });
+		}
+	});
+
 	test.serial("suppresses the agent_end auto-nudge caused by an internal todo thinking switch", async () => {
 		const previousEnv = process.env.PI_TOOLS_SUITE_TODO_THINKING;
 		process.env.PI_TOOLS_SUITE_TODO_THINKING = "1";
@@ -818,6 +861,51 @@ describe.serial("todo extension lifecycle", () => {
 			expect(pi.setThinkingLevelCalls).toEqual(["high", "off"]);
 			expect(pi.sentMessages).toHaveLength(0);
 		} finally {
+			if (previousEnv === undefined) delete process.env.PI_TOOLS_SUITE_TODO_THINKING;
+			else process.env.PI_TOOLS_SUITE_TODO_THINKING = previousEnv;
+			rmSync(ctx.cwd, { recursive: true, force: true });
+		}
+	});
+
+	test.serial("does not auto-complete an in-progress todo on tool-use assistant turns", async () => {
+		const previousEnv = process.env.PI_TOOLS_SUITE_TODO_THINKING;
+		process.env.PI_TOOLS_SUITE_TODO_THINKING = "1";
+		const extension = (await import("../src/todo/index.js")).default;
+		const { getTodos } = await import("../src/todo/todo.js");
+		const pi = new FakePi();
+		const ctx = {
+			cwd: mkdtempSync(join(tmpdir(), "todo-tool-use-")),
+			hasUI: false,
+			model: { reasoning: true, thinkingLevelMap: {} },
+			sessionManager: { getBranch: () => [] },
+			isIdle: () => true,
+			hasPendingMessages: () => false,
+		};
+		const originalSetTimeout = globalThis.setTimeout;
+		const originalClearTimeout = globalThis.clearTimeout;
+		globalThis.setTimeout = ((callback: TimerHandler) => {
+			if (typeof callback === "function") callback();
+			return 1 as any;
+		}) as any;
+		globalThis.clearTimeout = (() => {}) as any;
+		try {
+			extension(pi as any);
+			await pi.emit("session_start", {}, ctx);
+			const tool = pi.tools.get("todo");
+
+			await pi.emit("agent_start", {}, ctx);
+			await tool.execute("todo-1", { action: "create", subject: "Report results to user", thinking: "off" }, undefined, undefined, ctx);
+			await tool.execute("todo-2", { action: "update", id: 1, status: "in_progress", activeForm: "reporting results" }, undefined, undefined, ctx);
+
+			await pi.emit("agent_end", { messages: [{ role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", id: "call-1", name: "read", arguments: {} }] }] }, ctx);
+
+			expect(getTodos()).toMatchObject([{ id: 1, status: "in_progress", subject: "Report results to user", thinking: "off" }]);
+			expect(pi.thinkingLevel).toBe("off");
+			expect(pi.sentMessages).toHaveLength(1);
+			expect(pi.sentMessages[0]).toContain("#1 [in_progress] Report results to user — reporting results");
+		} finally {
+			globalThis.setTimeout = originalSetTimeout;
+			globalThis.clearTimeout = originalClearTimeout;
 			if (previousEnv === undefined) delete process.env.PI_TOOLS_SUITE_TODO_THINKING;
 			else process.env.PI_TOOLS_SUITE_TODO_THINKING = previousEnv;
 			rmSync(ctx.cwd, { recursive: true, force: true });

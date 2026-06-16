@@ -33,6 +33,7 @@ export type ConversationToolRenderOptions = {
 	availableThinkingLevels?: readonly string[];
 	superCompactTools?: boolean;
 	allThinkingExpanded?: boolean;
+	currentTimeMs?: number;
 };
 
 export function renderConversationToolEntry(
@@ -92,9 +93,11 @@ export function renderThinkingEntry(
 	const headerColorOverride = entry.level
 		? thinkingLevelThemeColor(entry.level, options.colors, options.availableThinkingLevels)
 		: undefined;
+	const elapsed = thinkingElapsedText(entry, options.currentTimeMs ?? Date.now());
 	return renderToolBlock({
 		id: entry.id,
 		toolName: THINKING_TOOL_NAME,
+		...(elapsed === undefined ? {} : { headerArgs: elapsed }),
 		expanded,
 		status: entry.status,
 		isError: false,
@@ -109,6 +112,24 @@ export function renderThinkingEntry(
 		showGutter: true,
 		...(headerColorOverride === undefined ? {} : { headerColorOverride }),
 	});
+}
+
+function thinkingElapsedText(entry: Extract<Entry, { kind: "thinking" }>, currentTimeMs: number): string | undefined {
+	if (entry.startedAt === undefined) return undefined;
+	const endTimeMs = entry.finishedAt ?? currentTimeMs;
+	const elapsedMs = Math.max(0, endTimeMs - entry.startedAt);
+	return formatThinkingElapsed(elapsedMs);
+}
+
+function formatThinkingElapsed(elapsedMs: number): string {
+	const totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
+	const seconds = totalSeconds % 60;
+	const totalMinutes = Math.floor(totalSeconds / 60);
+	if (totalMinutes < 1) return `${seconds}s`;
+	const minutes = totalMinutes % 60;
+	const hours = Math.floor(totalMinutes / 60);
+	if (hours < 1) return `${minutes}m ${seconds.toString().padStart(2, "0")}s`;
+	return `${hours}h ${minutes.toString().padStart(2, "0")}m`;
 }
 
 function trimTrailingBlankLines(text: string): string {

@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent"
-import { loadConfig } from "./config.js"
+import { loadConfig, modelKeysFromContext, resolveModelConfig } from "./config.js"
 import {
 	createState,
 	resetState,
@@ -102,8 +102,12 @@ function isDcpControlPlaneMessage(message: any): boolean {
 export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 	// ── 1. Load config ────────────────────────────────────────────────────────
 	const config = loadConfig()
+	const configForContext = (ctx: unknown) => resolveModelConfig(config, modelKeysFromContext(ctx))
+	const hasEnabledModelOverride = Object.values(config.modelOverrides).some(
+		(override) => override.enabled === true,
+	)
 
-	if (!config.enabled) return
+	if (!config.enabled && !hasEnabledModelOverride) return
 
 	// ── 2. Create state ───────────────────────────────────────────────────────
 	const state = createState()
@@ -175,6 +179,9 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 
 	// ── 7. before_agent_start: inject system prompt ───────────────────────────
 	pi.on("before_agent_start", async (event, _ctx) => {
+		const effectiveConfig = configForContext(_ctx)
+		if (!effectiveConfig.enabled) return { systemPrompt: event.systemPrompt }
+
 		const promptAddition = state.manualMode
 			? MANUAL_MODE_SYSTEM_PROMPT
 			: SYSTEM_PROMPT
@@ -239,11 +246,15 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 
 	// ── 10. context: apply pruning and inject nudges ──────────────────────────
 	pi.on("context", async (event, ctx) => {
+		const effectiveConfig = configForContext(ctx)
 		const contextMessages = event.messages.filter((message: any) =>
 			!isUserVisibleOnlyMessage(message) && !isDcpControlPlaneMessage(message)
 		)
+		if (!effectiveConfig.enabled) {
+			return { messages: contextMessages }
+		}
 		annotateMessagesWithBranchEntryIds(contextMessages, ctx)
-		let prunedMessages = applyPruning(contextMessages, state, config)
+		let prunedMessages = applyPruning(contextMessages, state, effectiveConfig)
 		let candidate = null as ReturnType<typeof detectCompressionCandidate>
 		let messageCandidates = [] as ReturnType<typeof detectMessageCompressionCandidates>
 
@@ -273,11 +284,11 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 			const ctxModel = (ctx as any).model
 			const provider = ctxModel?.provider ?? ctxModel?.providerId ?? ctxModel?.providerID
 			const model = ctxModel?.id ?? ctxModel?.model ?? ctxModel?.modelId ?? ctxModel?.modelID
-			const thresholds = resolveContextThresholds(config, [
+			const thresholds = resolveContextThresholds(effectiveConfig, [
 				provider && model ? `${provider}/${model}` : undefined,
 				model,
 			], usage.contextWindow)
-			if (config.compress.summaryBuffer) {
+			if (effectiveConfig.compress.summaryBuffer) {
 				const summaryBonus = getActiveSummaryTokenEstimate(state) / usage.contextWindow
 				thresholds.maxContextPercent += Math.min(summaryBonus, SUMMARY_BUFFER_MAX_CONTEXT_BONUS)
 			}
@@ -292,7 +303,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 			const nudgeType = getNudgeType(
 				contextPercent,
 				state,
-				config,
+				effectiveConfig,
 				toolCallsSinceLastUser,
 				thresholds,
 			)
@@ -304,13 +315,13 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 			candidate = detectCompressionCandidate(
 				prunedMessages,
 				state,
-				config,
+				effectiveConfig,
 				contextPercent,
 			)
 			messageCandidates = detectMessageCompressionCandidates(
 				prunedMessages,
 				state,
-				config,
+				effectiveConfig,
 				contextPercent,
 			)
 

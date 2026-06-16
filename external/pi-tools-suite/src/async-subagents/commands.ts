@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { ignoreStaleExtensionContextError } from "../context-usage.js";
 import {
 	copySubagentConfigSample,
 	ensureSessionFileLink,
@@ -172,12 +173,17 @@ async function triggerOrchestrationPrompt(
 			? `${basePrompt}\n\nObjective:\n${objective}`
 			: basePrompt;
 
-	if (typeof pi.sendUserMessage === "function") {
-		pi.sendUserMessage(prompt);
-	} else if (typeof pi.sendMessage === "function") {
-		pi.sendMessage({ customType: `async-subagents-${modeName}`, content: prompt, display: false }, { triggerTurn: true, deliverAs: "followUp" });
-	} else {
-		ctx.ui.notify(`Cannot trigger /${modeName}: this Pi runtime does not expose sendUserMessage/sendMessage.`, "error");
+	try {
+		if (typeof pi.sendUserMessage === "function") {
+			pi.sendUserMessage(prompt);
+		} else if (typeof pi.sendMessage === "function") {
+			pi.sendMessage({ customType: `async-subagents-${modeName}`, content: prompt, display: false }, { triggerTurn: true, deliverAs: "followUp" });
+		} else {
+			ctx.ui.notify(`Cannot trigger /${modeName}: this Pi runtime does not expose sendUserMessage/sendMessage.`, "error");
+			return;
+		}
+	} catch (error) {
+		ignoreStaleExtensionContextError(error);
 		return;
 	}
 

@@ -31,11 +31,20 @@ const DEFAULT_TERMINAL_TITLE = "pi";
 
 function isStaleExtensionContextError(error: unknown): boolean {
 	if (!(error instanceof Error)) return false;
-	return /ctx is stale|stale after session replacement|stale after.*reload/i.test(error.message);
+	return /ctx is stale|stale ctx|stale after session replacement|stale after.*reload/i.test(error.message);
 }
 
 function ignoreStaleExtensionContextError(error: unknown): void {
 	if (!isStaleExtensionContextError(error)) throw error;
+}
+
+function staleSafe<T>(callback: () => T): T | undefined {
+	try {
+		return callback();
+	} catch (error) {
+		ignoreStaleExtensionContextError(error);
+		return undefined;
+	}
 }
 
 function imageAttachmentLabel(images: readonly ImageContent[]): string | undefined {
@@ -119,12 +128,11 @@ export default function sessionTitle(pi: ExtensionAPI) {
 	}
 
 	function safeCtxCall<T>(callback: () => T): T | undefined {
-		try {
-			return callback();
-		} catch (error) {
-			ignoreStaleExtensionContextError(error);
-			return undefined;
-		}
+		return staleSafe(callback);
+	}
+
+	function safePiCall<T>(callback: () => T): T | undefined {
+		return staleSafe(callback);
 	}
 
 	function currentSessionId(ctx: ExtensionContext): string | undefined {
@@ -132,7 +140,7 @@ export default function sessionTitle(pi: ExtensionAPI) {
 	}
 
 	function currentSessionName(ctx?: ExtensionContext): string | undefined {
-		const name = pi.getSessionName() ?? safeCtxCall(() => ctx?.sessionManager.getSessionName?.());
+		const name = safePiCall(() => pi.getSessionName()) ?? safeCtxCall(() => ctx?.sessionManager.getSessionName?.());
 		return name?.trim() || undefined;
 	}
 
@@ -209,7 +217,10 @@ export default function sessionTitle(pi: ExtensionAPI) {
 		if (!options.force && currentName) return false;
 		const fallbackTitle = fallbackSessionTitleFromInput(input, currentConfig.maxTitleChars);
 		if (!fallbackTitle) return false;
-		pi.setSessionName(fallbackTitle);
+		if (!safePiCall(() => {
+			pi.setSessionName(fallbackTitle);
+			return true;
+		})) return false;
 		refreshSessionUi(ctx, { force: true });
 		scheduleSessionUiRefresh(ctx);
 		return true;
@@ -258,7 +269,10 @@ export default function sessionTitle(pi: ExtensionAPI) {
 				if (sessionId !== pendingSessionId) return;
 				if (pendingSessionId !== currentSessionId(ctx)) return;
 				if (!shouldGeneratePendingTitle(ctx)) return;
-				pi.setSessionName(title);
+				if (!safePiCall(() => {
+					pi.setSessionName(title);
+					return true;
+				})) return;
 				pendingGeneration = undefined;
 				refreshSessionUi(ctx, { force: true });
 				scheduleSessionUiRefresh(ctx);
@@ -425,7 +439,10 @@ export default function sessionTitle(pi: ExtensionAPI) {
 				: fallbackInput;
 			const provisionalSessionName = fallbackSessionTitleFromInput(fallbackTitleInput, currentConfig.maxTitleChars);
 			if (provisionalSessionName && (!currentName || activeForkTitleState)) {
-				pi.setSessionName(provisionalSessionName);
+				if (!safePiCall(() => {
+					pi.setSessionName(provisionalSessionName);
+					return true;
+				})) return { action: "continue" as const };
 				refreshSessionUi(ctx, { force: true });
 				scheduleSessionUiRefresh(ctx);
 			}

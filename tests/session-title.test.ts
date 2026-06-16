@@ -233,6 +233,26 @@ describe("session-title extension", () => {
 			await handlers.session_shutdown?.({ type: "session_shutdown", reason: "new" }, handlers.ctx);
 		});
 	});
+
+	it("ignores stale pi session name access in delayed refreshes", async () => {
+		await withSessionTitleDisabled(async () => {
+			let stale = false;
+			const { handlers } = createExtensionHarness({
+				branch: [],
+				sessionName: undefined,
+				sessionId: "session-stale-pi-refresh",
+				hasUI: true,
+				staleGuard: () => stale,
+			});
+
+			sessionTitle(handlers.api);
+			await handlers.session_start?.({ type: "session_start", reason: "new" }, handlers.ctx);
+			await handlers.input?.({ text: "Refresh after stale pi access", source: "user" }, handlers.ctx);
+			stale = true;
+			await new Promise((resolve) => setTimeout(resolve, 10));
+			await handlers.session_shutdown?.({ type: "session_shutdown", reason: "new" }, handlers.ctx);
+		});
+	});
 });
 
 function fakeContext(branch: unknown[]): ExtensionContext {
@@ -305,8 +325,12 @@ function createExtensionHarness(options: {
 		on(event: string, handler: (event: unknown, ctx: ExtensionContext) => unknown | Promise<unknown>) {
 			handlers[event] = handler;
 		},
-		getSessionName: () => sessionName,
+		getSessionName: () => {
+			assertFresh();
+			return sessionName;
+		},
 		setSessionName: (name: string) => {
+			assertFresh();
 			sessionName = name;
 			setSessionNameCalls.push(name);
 		},

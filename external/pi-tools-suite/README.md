@@ -68,12 +68,62 @@ DCP settings are stored only under `dcp` in the user shared config file `~/.conf
       "nudgeFrequency": 1,
       "iterationNudgeThreshold": 6,
       "protectedTools": ["compress", "write", "edit", "subagents"]
+    },
+    "modelOverrides": {
+      "openai-codex/gpt-5.5": {
+        "compress": {
+          "minContextPercent": "28%",
+          "maxContextPercent": "48%"
+        }
+      },
+      "openai-codex/gpt-5.4-mini": {
+        "compress": {
+          "minContextPercent": "20%",
+          "maxContextPercent": "38%"
+        }
+      },
+      "zai/*": {
+        "compress": {
+          "minContextPercent": "16%",
+          "maxContextPercent": "30%"
+        }
+      },
+      "antigravity/*sonnet*": {
+        "compress": {
+          "minContextPercent": "22%",
+          "maxContextPercent": "40%"
+        }
+      },
+      "antigravity/gemini-3.1-pro*": {
+        "compress": {
+          "minContextPercent": "24%",
+          "maxContextPercent": "42%"
+        }
+      },
+      "antigravity/gemini-3-flash*": {
+        "compress": {
+          "minContextPercent": "18%",
+          "maxContextPercent": "34%"
+        }
+      },
+      "antigravity/gemini-2.5-flash*": {
+        "compress": {
+          "minContextPercent": "18%",
+          "maxContextPercent": "32%"
+        }
+      },
+      "antigravity/antigravity-claude-opus-4-6-thinking": {
+        "compress": {
+          "minContextPercent": "26%",
+          "maxContextPercent": "44%"
+        }
+      }
     }
   }
 }
 ```
 
-`minContextPercent` / `maxContextPercent` accept legacy fractions (`0.25`), percent strings (`"25%"`), or absolute token counts when Pi knows the current model context window. `minContextLimit` / `maxContextLimit` and `modelMinContextLimits` / `modelMaxContextLimits` are explicit absolute-or-percent aliases. If `compress.protectUserMessages` is enabled, range compression appends selected user messages verbatim instead of rejecting the range; individual message compression still skips protected raw user messages. Protected tool outputs are copied into summaries for tools protected by name or `protectedFilePatterns`; protected `subagents` result reads also try to include the saved `result.md` artifact when available.
+`minContextPercent` / `maxContextPercent` accept legacy fractions (`0.25`), percent strings (`"25%"`), or absolute token counts when Pi knows the current model context window. `minContextLimit` / `maxContextLimit` and `modelMinContextLimits` / `modelMaxContextLimits` are explicit absolute-or-percent aliases. `modelOverrides` and the `modelMin*` / `modelMax*` maps support exact model keys plus `*` / `?` wildcard patterns; matching is applied from generic to specific so exact bare-model matches override bare wildcards, and exact `provider/model` matches override provider wildcards. Array fields are union-merged, so model-specific `protectedTools` extend the defaults instead of replacing them. If `compress.protectUserMessages` is enabled, range compression appends selected user messages verbatim instead of rejecting the range; individual message compression still skips protected raw user messages. Protected tool outputs are copied into summaries for tools protected by name or `protectedFilePatterns`; protected `subagents` result reads also try to include the saved `result.md` artifact when available.
 
 ## LSP setup
 
@@ -270,6 +320,26 @@ npm run test:e2e
 ```
 
 Supporting docs and historical standalone README content are kept in `docs/`; third-party license texts are kept in `licenses/`.
+
+## SDK pin
+
+This suite runs inside the Pi host process, so its `@earendil-works/*`
+peerDependencies (`pi-ai`, `pi-coding-agent`, `pi-tui`) must match the host Pi
+SDK version exactly. Otherwise npm can resolve a stale copy in this package's
+own `node_modules` and cause a double-load (e.g. `0.75.4` here vs `0.79.4` in
+the host).
+
+The host repo keeps these aligned: `npm run sync:sdk-pin` rewrites these
+peerDeps to the host version, and `npm run sync:sdk-pin:check` reports drift
+(non-zero exit). When you bump the Pi SDK in the host `package.json`, the host
+runs `sync:sdk-pin` and then you reinstall here:
+
+```bash
+npm install --ignore-scripts
+```
+
+The suite deliberately does not bump its own `version` field for SDK changes;
+its peerDeps carry the version.
 
 ## Third-party notices
 

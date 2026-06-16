@@ -1,4 +1,4 @@
-import type { DcpConfig } from "./config.js";
+import { matchingModelEntries, type DcpConfig } from "./config.js";
 import type { DcpState } from "./state.js";
 import type { NudgeThresholds } from "./pruner-types.js";
 import { createRequire } from "node:module";
@@ -107,8 +107,6 @@ export function resolveContextThresholds(
   modelKeys: Array<string | undefined> = [],
   contextWindow?: number,
 ): Required<NudgeThresholds> {
-  const candidates = modelKeys.filter((key): key is string => typeof key === "string" && key.length > 0);
-
   const resolveThresholdValue = (value: number | string | undefined): number | undefined => {
     if (typeof value === "string") {
       const trimmed = value.trim();
@@ -130,12 +128,12 @@ export function resolveContextThresholds(
   };
 
   const resolveOverride = (map: Record<string, number | string> | undefined): number | undefined => {
-    if (!map) return undefined;
-    for (const key of candidates) {
-      const value = resolveThresholdValue(map[key]);
-      if (value !== undefined) return value;
+    let resolved: number | undefined;
+    for (const [, rawValue] of matchingModelEntries(map, modelKeys)) {
+      const value = resolveThresholdValue(rawValue);
+      if (value !== undefined) resolved = value;
     }
-    return undefined;
+    return resolved;
   };
 
   const min =

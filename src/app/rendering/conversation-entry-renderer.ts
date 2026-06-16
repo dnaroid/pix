@@ -22,6 +22,7 @@ export type ConversationEntryRenderOptions = {
 	availableThinkingLevels?: readonly string[];
 	superCompactTools?: boolean;
 	allThinkingExpanded?: boolean;
+	currentTimeMs?: number;
 	renderInlineUserMessageMenu: (entry: Extract<Entry, { kind: "user" }>, context: InlineUserMessageMenuContext) => RenderedLine[];
 };
 

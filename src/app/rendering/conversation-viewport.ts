@@ -121,7 +121,7 @@ export class ConversationViewport {
 			+ (this.host.superCompactTools ? 1_000_000_000 : 0)
 			+ (this.host.allThinkingExpanded ? 2_000_000_000 : 0);
 		const cached = blockCache.get(entry.id);
-		const dynamic = this.host.isDynamicConversationBlock(entry);
+		const dynamic = this.isDynamicConversationBlock(entry);
 		if (!dynamic && cached?.version === version) return cached;
 		const availableThinkingLevels = this.host.availableThinkingLevels?.();
 
@@ -133,6 +133,7 @@ export class ConversationViewport {
 			...(availableThinkingLevels ? { availableThinkingLevels } : {}),
 			superCompactTools: Boolean(this.host.superCompactTools),
 			allThinkingExpanded: Boolean(this.host.allThinkingExpanded),
+			currentTimeMs: Date.now(),
 			renderInlineUserMessageMenu: (userEntry, context) => this.host.renderInlineUserMessageMenu(userEntry, context),
 		});
 		const block = {
@@ -211,7 +212,7 @@ export class ConversationViewport {
 		}
 		this.refreshDirtyLayoutEntries(layout, width);
 
-		if (this.host.hasDynamicConversationBlock?.()) {
+		if (this.hasDynamicConversationBlock(layout.entries)) {
 			this.refreshDynamicLayoutEntries(layout, width);
 		}
 
@@ -355,15 +356,24 @@ export class ConversationViewport {
 
 	private refreshDynamicLayoutEntries(layout: ViewportLayoutCache, width: number): void {
 		for (let index = 0; index < layout.entries.length; index += 1) {
-			if (this.host.isDynamicConversationBlock(layout.entries[index]!)) this.refreshLayoutEntry(layout, width, index, true);
+			if (this.isDynamicConversationBlock(layout.entries[index]!)) this.refreshLayoutEntry(layout, width, index, true);
 		}
 	}
 
 	private ensureEntryMeasured(layout: ViewportLayoutCache, width: number, index: number): boolean {
 		const entry = layout.entries[index];
 		if (!entry) return false;
-		if (layout.measuredLineCounts[index] === true && !this.host.isDynamicConversationBlock(entry)) return false;
+		if (layout.measuredLineCounts[index] === true && !this.isDynamicConversationBlock(entry)) return false;
 		return this.refreshLayoutEntry(layout, width, index, true);
+	}
+
+	private hasDynamicConversationBlock(entries: readonly Entry[]): boolean {
+		return this.host.hasDynamicConversationBlock?.() === true || entries.some((entry) => this.isDynamicConversationBlock(entry));
+	}
+
+	private isDynamicConversationBlock(entry: Entry): boolean {
+		return (entry.kind === "thinking" && entry.status === "running" && entry.startedAt !== undefined)
+			|| this.host.isDynamicConversationBlock(entry);
 	}
 
 	private refreshLayoutEntry(layout: ViewportLayoutCache, width: number, index: number, measure: boolean): boolean {

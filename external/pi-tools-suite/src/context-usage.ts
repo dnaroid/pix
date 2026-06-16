@@ -10,11 +10,16 @@ export interface ContextUsageProvider {
 
 export function isStaleExtensionContextError(error: unknown): boolean {
 	if (!(error instanceof Error)) return false
-	return /ctx is stale|stale after session replacement|stale after.*reload/i.test(error.message)
+	return /ctx is stale|stale ctx|stale after session replacement|stale after.*reload/i.test(error.message)
 }
 
 export function ignoreStaleExtensionContextError(error: unknown): void {
 	if (!isStaleExtensionContextError(error)) throw error
+}
+
+export function isAgentBusyRaceError(error: unknown): boolean {
+	if (!(error instanceof Error)) return false
+	return /Agent is already processing(?: a prompt)?\.|Wait for completion before continuing|Specify streamingBehavior/i.test(error.message)
 }
 
 // Fork/newSession/switchSession/reload can invalidate a runner while late UI or

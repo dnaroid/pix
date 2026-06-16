@@ -220,6 +220,7 @@ describe.serial("extension entrypoint", () => {
 		const { default: registerExtension } = await import("../../src/async-subagents/index.js");
 		const { createRunDir, recordSubagentRun } = await import("../../src/async-subagents/lib.js");
 		const cwd = tempDir();
+		const parentSession = path.join(cwd, "sessions", "parent.jsonl");
 		const pi = new FakePi();
 		registerExtension(pi as any);
 		const runDir = createRunDir(cwd, "shutdown");
@@ -227,18 +228,53 @@ describe.serial("extension entrypoint", () => {
 		if (!child.pid) throw new Error("Failed to spawn child process for shutdown test");
 
 		try {
-			createAgent(runDir, "agent-1", { pid: String(child.pid), started_at: new Date().toISOString() });
+			createAgent(runDir, "agent-1", { pid: String(child.pid), started_at: new Date().toISOString(), parent_session: parentSession });
 			recordSubagentRun(cwd, runDir, ["agent-1"]);
 			const shutdownHandlers = pi.events.get("session_shutdown") ?? [];
 			expect(shutdownHandlers).toHaveLength(1);
 
-			await shutdownHandlers[0]({ reason: "exit" }, { cwd });
+			await shutdownHandlers[0]({ reason: "quit" }, { cwd, sessionManager: { getSessionFile: () => parentSession } });
 			await waitForChildExit(child);
 
 			expect(isProcessAlive(child.pid)).toBe(false);
 			expect(fs.existsSync(runDir)).toBe(false);
 		} finally {
 			if (child.pid && isProcessAlive(child.pid)) child.kill("SIGKILL");
+		}
+	});
+
+	test.serial("session shutdown keeps sibling-session sub-agents in the same cwd alive", async () => {
+		const { default: registerExtension } = await import("../../src/async-subagents/index.js");
+		const { createRunDir, recordSubagentRun } = await import("../../src/async-subagents/lib.js");
+		const cwd = tempDir();
+		const shuttingDownSession = path.join(cwd, "sessions", "shutting-down.jsonl");
+		const siblingSession = path.join(cwd, "sessions", "sibling.jsonl");
+		const pi = new FakePi();
+		registerExtension(pi as any);
+		const ownedRunDir = createRunDir(cwd, "owned-shutdown");
+		const siblingRunDir = createRunDir(cwd, "sibling-stays-running");
+		const ownedChild = spawnChild(process.execPath, ["-e", "process.on('SIGTERM',()=>{}); setInterval(()=>{},1000);"], { stdio: "ignore" });
+		const siblingChild = spawnChild(process.execPath, ["-e", "process.on('SIGTERM',()=>{}); setInterval(()=>{},1000);"], { stdio: "ignore" });
+		if (!ownedChild.pid || !siblingChild.pid) throw new Error("Failed to spawn child processes for shutdown test");
+
+		try {
+			createAgent(ownedRunDir, "owned-agent", { pid: String(ownedChild.pid), started_at: new Date().toISOString(), parent_session: shuttingDownSession });
+			createAgent(siblingRunDir, "sibling-agent", { pid: String(siblingChild.pid), started_at: new Date().toISOString(), parent_session: siblingSession });
+			recordSubagentRun(cwd, ownedRunDir, ["owned-agent"]);
+			recordSubagentRun(cwd, siblingRunDir, ["sibling-agent"]);
+			const shutdownHandlers = pi.events.get("session_shutdown") ?? [];
+			expect(shutdownHandlers).toHaveLength(1);
+
+			await shutdownHandlers[0]({ reason: "quit" }, { cwd, sessionManager: { getSessionFile: () => shuttingDownSession } });
+			await waitForChildExit(ownedChild);
+
+			expect(isProcessAlive(ownedChild.pid)).toBe(false);
+			expect(fs.existsSync(ownedRunDir)).toBe(false);
+			expect(isProcessAlive(siblingChild.pid)).toBe(true);
+			expect(fs.existsSync(siblingRunDir)).toBe(true);
+		} finally {
+			if (ownedChild.pid && isProcessAlive(ownedChild.pid)) ownedChild.kill("SIGKILL");
+			if (siblingChild.pid && isProcessAlive(siblingChild.pid)) siblingChild.kill("SIGKILL");
 		}
 	});
 
@@ -510,15 +546,16 @@ setTimeout(() => {}, 1000);
 		const pi = new FakePi();
 		registerExtension(pi as any);
 		const cwd = tempDir();
+		const parentSession = path.join(cwd, "sessions", "parent.jsonl");
 		const runRoot = path.join(cwd, ".pi", "subagents");
 		const completedRun = path.join(runRoot, "2026-01-01-completed");
 		const incompleteRun = path.join(runRoot, "2026-01-02-incomplete");
-		createAgent(completedRun, "done", { exit_code: "0", "result.md": "ok" });
-		createAgent(incompleteRun, "planned");
+		createAgent(completedRun, "done", { exit_code: "0", "result.md": "ok", parent_session: parentSession });
+		createAgent(incompleteRun, "planned", { parent_session: parentSession });
 		recordSubagentRun(cwd, completedRun, ["done"]);
 		recordSubagentRun(cwd, incompleteRun, ["planned"]);
 
-		await pi.events.get("session_shutdown")![0]({ reason: "quit" }, { cwd });
+		await pi.events.get("session_shutdown")![0]({ reason: "quit" }, { cwd, sessionManager: { getSessionFile: () => parentSession } });
 
 		expect(fs.existsSync(completedRun)).toBe(false);
 		expect(fs.existsSync(incompleteRun)).toBe(false);

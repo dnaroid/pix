@@ -70,7 +70,7 @@ export type Entry =
 			signal?: NodeJS.Signals | null;
 			error?: string;
 	  }
-	| { id: string; kind: "thinking"; text: string; expanded: boolean; status: "running" | "done"; level?: string }
+	| { id: string; kind: "thinking"; text: string; expanded: boolean; status: "running" | "done"; level?: string; startedAt?: number; finishedAt?: number }
 	| {
 			id: string;
 			kind: "tool";
@@ -204,6 +204,7 @@ export type SubagentRegistryAgent = {
 };
 
 export type SubagentsWidgetState = {
+	runs?: SubagentLiveStateRun[];
 	runDir: string;
 	agents: SubagentAgentState[];
 	tasks?: SubagentTaskPreview[];

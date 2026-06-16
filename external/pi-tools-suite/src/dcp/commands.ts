@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent"
 import type { AutocompleteItem } from "@earendil-works/pi-tui"
 import type { DcpState } from "./state.js"
-import type { DcpConfig } from "./config.js"
+import { modelKeysFromContext, resolveModelConfig, type DcpConfig } from "./config.js"
 import type { DcpNudgeType } from "./pruner-types.js"
 import { isToolRecordProtected, markToolPruned } from "./pruner.js"
 import { safeGetContextUsage } from "../context-usage.js"
@@ -540,6 +540,7 @@ export function registerCommands(
     async handler(args: string, ctx: ExtensionCommandContext): Promise<void> {
       const parts = args.trim().split(/\s+/).filter(Boolean)
       const sub = parts[0] ?? ""
+      const effectiveConfig = resolveModelConfig(config, modelKeysFromContext(ctx))
 
       try {
         switch (sub) {
@@ -559,7 +560,7 @@ export function registerCommands(
           case "sweep": {
             const rawN = parts[1] !== undefined ? parseInt(parts[1], 10) : 0
             const n = isNaN(rawN) || rawN < 0 ? 0 : rawN
-            await handleSweep(ctx, state, config, n)
+            await handleSweep(ctx, state, effectiveConfig, n)
             break
           }
 

@@ -76,7 +76,16 @@ const PERSIST_ARGUMENT_COMPLETIONS: CommandCompletion[] = [
 ];
 
 interface TodoToolHooks {
-	afterCommit?: (state: ReturnType<typeof getState>, ctx: ExtensionContext, info: { action: TaskAction; params: TaskMutationParams }) => void | Promise<void>;
+	prepareMutation?: (
+		state: ReturnType<typeof getState>,
+		ctx: ExtensionContext,
+		info: { action: TaskAction; params: TaskMutationParams },
+	) => TaskMutationParams | Promise<TaskMutationParams>;
+	afterCommit?: (
+		state: ReturnType<typeof getState>,
+		ctx: ExtensionContext,
+		info: { action: TaskAction; params: TaskMutationParams; committedState: ReturnType<typeof getState> },
+	) => void | Promise<void>;
 }
 
 interface TodoToolRegistrationOptions extends TodoToolHooks {
@@ -386,15 +395,23 @@ export function registerTodoTool(pi: ExtensionAPI, hooks: TodoToolRegistrationOp
 
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
 			activateTodoStateScope(_ctx);
-			const result = applyTaskMutation(getState(), params.action, params as TaskMutationParams);
+			const preparedParams = await hooks.prepareMutation?.(getState(), _ctx as ExtensionContext, {
+				action: params.action,
+				params: params as TaskMutationParams,
+			}) ?? params as TaskMutationParams;
+			const result = applyTaskMutation(getState(), params.action, preparedParams);
 			if (result.op.kind === "error") {
 				throw new Error(result.op.message);
 			}
 			const autoClear = autoClearCompletedTodos(result.state);
 			commitState(autoClear.state);
 			publishTodoState(pi as TodoStateEventEmitter, _ctx, params.action, params as Record<string, unknown>);
-			await hooks.afterCommit?.(autoClear.state, _ctx as ExtensionContext, { action: params.action, params: params as TaskMutationParams });
-			const toolResult = buildToolResult(params.action, params as TaskMutationParams, autoClear.state, result.op);
+			await hooks.afterCommit?.(result.state, _ctx as ExtensionContext, {
+				action: params.action,
+				params: preparedParams,
+				committedState: autoClear.state,
+			});
+			const toolResult = buildToolResult(params.action, preparedParams, autoClear.state, result.op);
 			if (!autoClear.cleared) return toolResult;
 			return {
 				...toolResult,

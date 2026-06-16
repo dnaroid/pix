@@ -67,7 +67,16 @@ export interface DcpConfig {
   }
   protectedFilePatterns: string[]
   pruneNotification: "off" | "minimal" | "detailed"
+  modelOverrides: Record<string, DcpConfigOverride>
 }
+
+export type DcpConfigOverride = DeepPartial<Omit<DcpConfig, "modelOverrides">>
+
+type DeepPartial<T> = T extends Array<infer U>
+  ? Array<DeepPartial<U>>
+  : T extends object
+    ? { [K in keyof T]?: DeepPartial<T[K]> }
+    : T
 
 // ---------------------------------------------------------------------------
 // Defaults
@@ -141,6 +150,7 @@ const DEFAULT_CONFIG: DcpConfig = {
   },
   protectedFilePatterns: [],
   pruneNotification: "detailed",
+  modelOverrides: {},
 }
 
 // ---------------------------------------------------------------------------
@@ -224,6 +234,128 @@ function mergeSuiteDcpConfig(config: DcpConfig, filePath: string): DcpConfig {
   const raw = readDcpFromSuiteConfig(filePath)
   if (Object.keys(raw).length === 0) return config
   return deepMerge(config, raw as Partial<DcpConfig>)
+}
+
+function normalizeModelKey(key: string | undefined): string | undefined {
+  if (typeof key !== "string") return undefined
+  const trimmed = key.trim()
+  return trimmed.length > 0 ? trimmed : undefined
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[|\\{}()[\]^$+?.]/g, "\\$&")
+}
+
+function globToRegExp(pattern: string): RegExp {
+  let source = "^"
+  for (let i = 0; i < pattern.length; i++) {
+    const char = pattern[i]!
+    if (char === "*") {
+      source += ".*"
+    } else if (char === "?") {
+      source += "."
+    } else {
+      source += escapeRegExp(char)
+    }
+  }
+  source += "$"
+  return new RegExp(source)
+}
+
+function isWildcardPattern(pattern: string): boolean {
+  return pattern.includes("*") || pattern.includes("?")
+}
+
+function modelPatternMatches(pattern: string, candidate: string): boolean {
+  return globToRegExp(pattern).test(candidate)
+}
+
+function uniqueModelCandidates(modelKeys: Array<string | undefined>): string[] {
+  return modelKeys
+    .map((key) => normalizeModelKey(key))
+    .filter((key, index, array): key is string => typeof key === "string" && array.indexOf(key) === index)
+}
+
+export function matchingModelEntries<T>(
+  record: Record<string, T> | undefined,
+  modelKeys: Array<string | undefined> = [],
+): Array<[string, T]> {
+  if (!record || Object.keys(record).length === 0) return []
+
+  const candidates = uniqueModelCandidates(modelKeys)
+  if (candidates.length === 0) return []
+
+  const exactEntries = new Map<string, T>()
+  const wildcardEntries: Array<[string, T]> = []
+
+  for (const [rawKey, value] of Object.entries(record)) {
+    const key = normalizeModelKey(rawKey)
+    if (!key) continue
+    if (isWildcardPattern(key)) wildcardEntries.push([key, value])
+    else exactEntries.set(key, value)
+  }
+
+  const fullCandidates = candidates.filter((candidate) => candidate.includes("/"))
+  const bareCandidates = candidates.filter((candidate) => !candidate.includes("/"))
+  const matches: Array<[string, T]> = []
+
+  for (const candidate of bareCandidates) {
+    for (const entry of wildcardEntries) {
+      if (entry[0].includes("/")) continue
+      if (modelPatternMatches(entry[0], candidate)) matches.push(entry)
+    }
+  }
+
+  for (const candidate of bareCandidates) {
+    const value = exactEntries.get(candidate)
+    if (value !== undefined) matches.push([candidate, value])
+  }
+
+  for (const candidate of fullCandidates) {
+    for (const entry of wildcardEntries) {
+      if (!entry[0].includes("/")) continue
+      if (modelPatternMatches(entry[0], candidate)) matches.push(entry)
+    }
+  }
+
+  for (const candidate of fullCandidates) {
+    const value = exactEntries.get(candidate)
+    if (value !== undefined) matches.push([candidate, value])
+  }
+
+  return matches
+}
+
+export function modelKeysFromContext(ctx: unknown): string[] {
+  const ctxModel = (ctx as any)?.model
+  const provider = normalizeModelKey(
+    ctxModel?.provider ?? ctxModel?.providerId ?? ctxModel?.providerID,
+  )
+  const model = normalizeModelKey(
+    ctxModel?.id ?? ctxModel?.model ?? ctxModel?.modelId ?? ctxModel?.modelID,
+  )
+
+  return [provider && model ? `${provider}/${model}` : undefined, model].filter(
+    (key): key is string => typeof key === "string",
+  )
+}
+
+export function resolveModelConfig(
+  config: DcpConfig,
+  modelKeys: Array<string | undefined> = [],
+): DcpConfig {
+  const overrides = config.modelOverrides
+  if (!overrides || Object.keys(overrides).length === 0) return config
+
+  const matches = matchingModelEntries(overrides, modelKeys)
+  if (matches.length === 0) return config
+
+  let resolved = deepMerge(config, {})
+  for (const [, override] of matches) {
+    resolved = deepMerge(resolved, override as Partial<DcpConfig>)
+  }
+
+  return resolved
 }
 
 // ---------------------------------------------------------------------------

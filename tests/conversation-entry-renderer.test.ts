@@ -275,6 +275,41 @@ describe("renderConversationEntry", () => {
 		assert.deepEqual(lines.map((line) => line.text), [`${APP_ICONS.checkCircle} thinking — Plan`]);
 	});
 
+	it("shows elapsed time for running thinking in super-compact mode", () => {
+		const lines = renderConversationEntry({
+			id: "thinking-running-elapsed",
+			kind: "thinking",
+			text: "Still planning",
+			expanded: false,
+			status: "running",
+			startedAt: 10_000,
+		}, 80, {
+			...renderOptions,
+			superCompactTools: true,
+			currentTimeMs: 75_000,
+		});
+
+		assert.deepEqual(lines.map((line) => line.text), [`${APP_ICONS.timerSand} thinking 1m 05s — Still planning`]);
+	});
+
+	it("shows final elapsed time for completed live thinking", () => {
+		const lines = renderConversationEntry({
+			id: "thinking-done-elapsed",
+			kind: "thinking",
+			text: "Plan",
+			expanded: false,
+			status: "done",
+			startedAt: 10_000,
+			finishedAt: 133_000,
+		}, 80, {
+			...renderOptions,
+			superCompactTools: true,
+			currentTimeMs: 999_000,
+		});
+
+		assert.deepEqual(lines.map((line) => line.text), [`${APP_ICONS.checkCircle} thinking 2m 03s — Plan`]);
+	});
+
 	it("marks tool image labels as clickable image targets", () => {
 		const image = { type: "image" as const, data: Buffer.from("png").toString("base64"), mimeType: "image/png" };
 		const lines = renderConversationEntry({

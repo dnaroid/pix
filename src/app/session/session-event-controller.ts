@@ -32,6 +32,7 @@ export type AppSessionEventControllerState = {
 	currentAssistantTextBlockContentIndex: number | undefined;
 	assistantTextBlocksByContentIndex: Map<number, string>;
 	currentThinkingEntryId: string | undefined;
+	currentThinkingEntryStartedAt: number | undefined;
 	assistantMessageClosed: boolean;
 	assistantTextBuffer: string;
 	entryRenderVersions: Map<string, number>;
@@ -93,6 +94,8 @@ export class AppSessionEventController {
 	private historyEntries: Entry[] = [];
 	private historyWindowStart = 0;
 	private currentThinkingEntryId: string | undefined;
+	private currentThinkingEntryStartedAt: number | undefined;
+	private thinkingElapsedRenderTimer: ReturnType<typeof setInterval> | undefined;
 	private assistantMessageClosed = false;
 	private assistantTextBuffer = "";
 
@@ -111,6 +114,7 @@ export class AppSessionEventController {
 			currentAssistantTextBlockContentIndex: this.currentAssistantTextBlockContentIndex,
 			assistantTextBlocksByContentIndex: new Map(this.assistantTextBlocksByContentIndex),
 			currentThinkingEntryId: this.currentThinkingEntryId,
+			currentThinkingEntryStartedAt: this.currentThinkingEntryStartedAt,
 			assistantMessageClosed: this.assistantMessageClosed,
 			assistantTextBuffer: this.assistantTextBuffer,
 			entryRenderVersions: new Map(this.entryRenderVersions),
@@ -135,6 +139,8 @@ export class AppSessionEventController {
 		this.assistantTextBlocksByContentIndex.clear();
 		for (const [key, value] of state.assistantTextBlocksByContentIndex) this.assistantTextBlocksByContentIndex.set(key, value);
 		this.currentThinkingEntryId = state.currentThinkingEntryId;
+		this.currentThinkingEntryStartedAt = state.currentThinkingEntryStartedAt;
+		this.syncThinkingElapsedRenderTimer();
 		this.assistantMessageClosed = state.assistantMessageClosed;
 		this.assistantTextBuffer = state.assistantTextBuffer;
 		this.entryRenderVersions.clear();
@@ -158,6 +164,8 @@ export class AppSessionEventController {
 		this.assistantTextBlocksByContentIndex.clear();
 		this.finalizedToolCallContentIndexes.clear();
 		this.currentThinkingEntryId = undefined;
+		this.currentThinkingEntryStartedAt = undefined;
+		this.stopThinkingElapsedRenderTimer();
 		this.assistantMessageClosed = false;
 		this.assistantTextBuffer = "";
 		this.olderHistoryLoader = undefined;
@@ -840,12 +848,15 @@ export class AppSessionEventController {
 			: undefined;
 		if (!entry || entry.kind !== "thinking") {
 			const level = this.currentThinkingLevel();
+			const startedAt = this.currentThinkingEntryStartedAt ?? Date.now();
+			this.currentThinkingEntryStartedAt = startedAt;
 			entry = {
 				id: createId("thinking"),
 				kind: "thinking",
 				text: "",
 				expanded: this.host.toolDefaultExpanded(THINKING_TOOL_NAME),
 				...(level === undefined ? {} : { level }),
+				startedAt,
 				status: "running",
 			};
 			this.addEntry(entry);
@@ -854,8 +865,12 @@ export class AppSessionEventController {
 		const level = this.currentThinkingLevel();
 		if (level === undefined) delete entry.level;
 		else entry.level = level;
+		entry.startedAt ??= this.currentThinkingEntryStartedAt ?? Date.now();
+		this.currentThinkingEntryStartedAt = entry.startedAt;
+		delete entry.finishedAt;
 		entry.status = "running";
 		entry.text += delta;
+		this.startThinkingElapsedRenderTimer();
 		this.touchEntry(entry);
 	}
 
@@ -863,9 +878,12 @@ export class AppSessionEventController {
 		const entry = this.currentThinkingEntryId ? this.findEntry(this.currentThinkingEntryId) : undefined;
 		if (entry?.kind === "thinking" && entry.status !== "done") {
 			entry.status = "done";
+			entry.finishedAt ??= Date.now();
 			this.touchEntry(entry);
 		}
 		this.currentThinkingEntryId = undefined;
+		this.currentThinkingEntryStartedAt = undefined;
+		this.stopThinkingElapsedRenderTimer();
 	}
 
 	private reconcileThinkingText(content: string): void {
@@ -874,12 +892,15 @@ export class AppSessionEventController {
 			: undefined;
 		if (!entry || entry.kind !== "thinking") {
 			const level = this.currentThinkingLevel();
+			const startedAt = this.currentThinkingEntryStartedAt ?? Date.now();
+			this.currentThinkingEntryStartedAt = startedAt;
 			entry = {
 				id: createId("thinking"),
 				kind: "thinking",
 				text: "",
 				expanded: this.host.toolDefaultExpanded(THINKING_TOOL_NAME),
 				...(level === undefined ? {} : { level }),
+				startedAt,
 				status: "running",
 			};
 			this.addEntry(entry);
@@ -890,9 +911,42 @@ export class AppSessionEventController {
 			entry.text = content;
 			if (level === undefined) delete entry.level;
 			else entry.level = level;
+			entry.startedAt ??= this.currentThinkingEntryStartedAt ?? Date.now();
+			this.currentThinkingEntryStartedAt = entry.startedAt;
+			delete entry.finishedAt;
 			entry.status = "running";
+			this.startThinkingElapsedRenderTimer();
 			this.touchEntry(entry);
 		}
+	}
+
+	private syncThinkingElapsedRenderTimer(): void {
+		const entry = this.currentThinkingEntryId ? this.findEntry(this.currentThinkingEntryId) : undefined;
+		if (entry?.kind === "thinking" && entry.status === "running" && entry.startedAt !== undefined) {
+			this.startThinkingElapsedRenderTimer();
+			return;
+		}
+
+		this.stopThinkingElapsedRenderTimer();
+	}
+
+	private startThinkingElapsedRenderTimer(): void {
+		if (this.thinkingElapsedRenderTimer) return;
+		this.thinkingElapsedRenderTimer = setInterval(() => {
+			if (!this.host.isRunning()) {
+				this.stopThinkingElapsedRenderTimer();
+				return;
+			}
+
+			this.host.scheduleRender();
+		}, 1000);
+		this.thinkingElapsedRenderTimer.unref?.();
+	}
+
+	private stopThinkingElapsedRenderTimer(): void {
+		if (!this.thinkingElapsedRenderTimer) return;
+		clearInterval(this.thinkingElapsedRenderTimer);
+		this.thinkingElapsedRenderTimer = undefined;
 	}
 
 	private currentThinkingLevel(): string | undefined {
@@ -1000,6 +1054,8 @@ export class AppSessionEventController {
 		this.currentAssistantTextBlockStartLength = undefined;
 		this.currentAssistantTextBlockContentIndex = undefined;
 		this.currentThinkingEntryId = undefined;
+		this.currentThinkingEntryStartedAt = undefined;
+		this.stopThinkingElapsedRenderTimer();
 		this.assistantTextBuffer = "";
 		this.assistantTextBlocksByContentIndex.clear();
 		this.finalizedToolCallContentIndexes.clear();

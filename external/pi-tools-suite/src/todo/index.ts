@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { loadPiToolsSuiteConfig } from "../config.js";
+import { isAgentBusyRaceError } from "../context-usage.js";
 import { autoClearCompletedTodos } from "./state/auto-clear.js";
 import { loadPersistedPlan, syncPersistedPlan } from "./state/persistence.js";
 import { replayFromBranch } from "./state/replay.js";
@@ -17,6 +18,11 @@ const TODO_NUDGE_IDLE_RETRY_DELAY_MS = 100;
 const TODO_NUDGE_MAX_IDLE_ATTEMPTS = 40;
 const ASK_USER_TOOL_NAMES = new Set(["ask_user", "ask_user_question", "question"]);
 const TODO_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+const TODO_THINKING_RESTORE_METADATA_KEY = "__piTodoRestoreThinking";
+
+function isStaleExtensionContextError(error: unknown): boolean {
+	return error instanceof Error && /ctx is stale|stale ctx|stale after session replacement|stale after.*reload/i.test(error.message);
+}
 
 type TodoThinkingLevel = (typeof TODO_THINKING_LEVELS)[number];
 type ModelLike = { reasoning?: boolean; thinkingLevelMap?: Partial<Record<TodoThinkingLevel, unknown | null>> };
@@ -108,7 +114,12 @@ function getPersistedPlanPrompt(path: string): string | undefined {
 
 function emitPersistedPlanPrompt(pi: ExtensionAPI, ctx: ExtensionContext, prompt: string): void {
 	if (ctx.hasUI) {
-		pi.sendUserMessage(prompt);
+		try {
+			pi.sendUserMessage(prompt);
+		} catch (error) {
+			if (isStaleExtensionContextError(error)) return;
+			throw error;
+		}
 		return;
 	}
 	console.log(prompt);
@@ -128,10 +139,21 @@ export default function (pi: ExtensionAPI) {
 		const thinkingPrompt = todoThinkingEnabled ? buildThinkingPromptParts(currentModel) : {};
 		registerTodoTool(pi, {
 			...thinkingPrompt,
+			prepareMutation: (state, _ctx, info) => {
+				if (!todoThinkingEnabled) return info.params;
+				if (info.action === "update") return prepareTodoThinkingMutation(state, info.params);
+				if (info.action === "batch_update") {
+					return {
+						...info.params,
+						items: (info.params.items ?? []).map((item) => prepareTodoThinkingMutation(state, item)),
+					};
+				}
+				return info.params;
+			},
 			afterCommit: async (state, ctx, info) => {
 				if (todoThinkingEnabled) applyTodoThinkingAfterCommit(state, info);
 				try {
-					const sync = syncPersistedPlan(ctx.cwd, state);
+					const sync = syncPersistedPlan(ctx.cwd, info.committedState);
 					if (sync?.completed) console.log(`rpiv-todo: completed persisted plan and removed ${sync.path}`);
 				} catch (err) {
 					console.warn(`rpiv-todo: failed to sync persisted plan — ${(err as Error).message}`);
@@ -144,7 +166,7 @@ export default function (pi: ExtensionAPI) {
 		const mutations = getTodoThinkingMutations(info.action, info.params);
 		for (const mutation of mutations) {
 			if (mutation.id === undefined || mutation.status === "in_progress") continue;
-			restoreTaskThinking(mutation.id);
+			restoreTaskThinking(mutation.id, state);
 		}
 		restoreInactiveTodoThinking(state);
 		for (const mutation of mutations) {
@@ -167,6 +189,34 @@ export default function (pi: ExtensionAPI) {
 		return isTodoThinkingLevel(level) ? level : undefined;
 	}
 
+	function prepareTodoThinkingMutation(state: ReturnType<typeof getState>, params: TaskMutationParams): TaskMutationParams {
+		if (params.id === undefined) return params;
+		const current = state.tasks.find((task) => task.id === params.id);
+		if (!current) return params;
+		const nextStatus = params.status ?? current.status;
+		const nextThinking = params.thinking ?? current.thinking;
+		const shouldCapturePreviousThinking =
+			nextStatus === "in_progress" && nextThinking !== undefined && (current.status !== "in_progress" || params.thinking !== undefined);
+		if (!shouldCapturePreviousThinking) return params;
+		const currentThinking = getCurrentThinkingLevel();
+		if (!currentThinking) return params;
+		return {
+			...params,
+			metadata: {
+				...(params.metadata ?? {}),
+				[TODO_THINKING_RESTORE_METADATA_KEY]: currentThinking,
+			},
+		};
+	}
+
+	function getRememberedThinking(taskId: number, state: ReturnType<typeof getState>): TodoThinkingLevel | undefined {
+		const remembered = rememberedThinkingByTaskId.get(taskId);
+		if (remembered) return remembered;
+		const task = state.tasks.find((item) => item.id === taskId);
+		const stored = task?.metadata?.[TODO_THINKING_RESTORE_METADATA_KEY];
+		return isTodoThinkingLevel(stored) ? stored : undefined;
+	}
+
 	function switchToTaskThinking(taskId: number, level: TodoThinkingLevel): void {
 		if (!getAvailableTodoThinkingLevels(currentModel).includes(level)) return;
 		const current = getCurrentThinkingLevel();
@@ -175,8 +225,8 @@ export default function (pi: ExtensionAPI) {
 		if (current !== level) setTodoThinkingLevel(level);
 	}
 
-	function restoreTaskThinking(taskId: number): void {
-		const previous = rememberedThinkingByTaskId.get(taskId);
+	function restoreTaskThinking(taskId: number, state: ReturnType<typeof getState>): void {
+		const previous = getRememberedThinking(taskId, state);
 		if (!previous) return;
 		rememberedThinkingByTaskId.delete(taskId);
 		if (getCurrentThinkingLevel() !== previous) setTodoThinkingLevel(previous);
@@ -186,7 +236,7 @@ export default function (pi: ExtensionAPI) {
 		for (const taskId of [...rememberedThinkingByTaskId.keys()]) {
 			const task = state.tasks.find((item) => item.id === taskId);
 			if (task?.status === "in_progress") continue;
-			restoreTaskThinking(taskId);
+			restoreTaskThinking(taskId, state);
 		}
 	}
 
@@ -197,13 +247,20 @@ export default function (pi: ExtensionAPI) {
 		setter.call(pi, level);
 	}
 
-function isCompletedAssistantReply(message: AgentMessageLike | undefined): boolean {
-	if (message?.role !== "assistant") return false;
-	if (message.stopReason === "aborted" || message.stopReason === "error" || message.stopReason === "length") return false;
-	if (typeof message.content === "string") return message.content.trim().length > 0;
-	if (!Array.isArray(message.content)) return false;
-	return message.content.some((block) => typeof (block as { type?: unknown }).type === "string");
-}
+	function hasVisibleAssistantContent(content: unknown): boolean {
+		if (typeof content === "string") return content.trim().length > 0;
+		if (!Array.isArray(content)) return false;
+		return content.some((block) => {
+			const candidate = block as { type?: unknown; text?: unknown };
+			return candidate.type === "text" && typeof candidate.text === "string" && candidate.text.trim().length > 0;
+		});
+	}
+
+	function isCompletedAssistantReply(message: AgentMessageLike | undefined): boolean {
+		if (message?.role !== "assistant") return false;
+		if (message.stopReason === "aborted" || message.stopReason === "error" || message.stopReason === "length" || message.stopReason === "toolUse") return false;
+		return hasVisibleAssistantContent(message.content);
+	}
 
 	function hasCompletedAssistantReply(messages: readonly unknown[] | undefined): boolean {
 		if (!Array.isArray(messages)) return false;
@@ -236,7 +293,7 @@ function isCompletedAssistantReply(message: AgentMessageLike | undefined): boole
 		const autoClear = autoClearCompletedTodos(result.state);
 		replaceState(autoClear.state);
 		publishTodoState(pi as any, ctx, action, params as Record<string, unknown>);
-		if (todoThinkingEnabled) applyTodoThinkingAfterCommit(autoClear.state, { action, params });
+		if (todoThinkingEnabled) applyTodoThinkingAfterCommit(result.state, { action, params });
 		try {
 			const sync = syncPersistedPlan(ctx.cwd, autoClear.state);
 			if (sync?.completed) console.log(`rpiv-todo: completed persisted plan and removed ${sync.path}`);
@@ -289,6 +346,11 @@ function isCompletedAssistantReply(message: AgentMessageLike | undefined): boole
 				// queueing followUp from inside agent_end can be too late to be drained.
 				pi.sendUserMessage(nudge.message);
 			} catch (err) {
+				if (isAgentBusyRaceError(err)) {
+					if (attempt < TODO_NUDGE_MAX_IDLE_ATTEMPTS) scheduleTodoNudge(ctx, attempt + 1);
+					return;
+				}
+				if (isStaleExtensionContextError(err)) return;
 				console.warn(`rpiv-todo: failed to auto-nudge unfinished todos — ${(err as Error).message}`);
 			}
 		}, delayMs);

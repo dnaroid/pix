@@ -5,6 +5,7 @@ import type { Api, AssistantMessage, ImageContent, Model, TextContent } from "@e
 import { Type } from "typebox";
 
 import { loadPiToolsSuiteConfig } from "../config.js";
+import { ignoreStaleExtensionContextError } from "../context-usage.js";
 
 type ExtensionAPI = any;
 
@@ -189,20 +190,24 @@ export default function glmCodingDiscipline(pi: ExtensionAPI) {
 	}
 
 	function syncLookupToolAvailability(modelRef: string | undefined, cwd?: string): void {
-		const activeTools = typeof pi.getActiveTools === "function" ? pi.getActiveTools() : undefined;
-		if (!Array.isArray(activeTools)) return;
+		try {
+			const activeTools = typeof pi.getActiveTools === "function" ? pi.getActiveTools() : undefined;
+			if (!Array.isArray(activeTools)) return;
 
-		const lookupEnabled = Boolean(lookupModelFromConfig(cwd));
-		const shouldExposeLookup = lookupEnabled && isGlmModel(modelRef);
-		const hasLookup = activeTools.includes(LOOKUP_TOOL_NAME);
+			const lookupEnabled = Boolean(lookupModelFromConfig(cwd));
+			const shouldExposeLookup = lookupEnabled && isGlmModel(modelRef);
+			const hasLookup = activeTools.includes(LOOKUP_TOOL_NAME);
 
-		if (shouldExposeLookup === hasLookup) return;
-		if (typeof pi.setActiveTools !== "function") return;
+			if (shouldExposeLookup === hasLookup) return;
+			if (typeof pi.setActiveTools !== "function") return;
 
-		const nextTools = shouldExposeLookup
-			? [...activeTools, LOOKUP_TOOL_NAME]
-			: activeTools.filter((tool: unknown) => tool !== LOOKUP_TOOL_NAME);
-		pi.setActiveTools([...new Set(nextTools)]);
+			const nextTools = shouldExposeLookup
+				? [...activeTools, LOOKUP_TOOL_NAME]
+				: activeTools.filter((tool: unknown) => tool !== LOOKUP_TOOL_NAME);
+			pi.setActiveTools([...new Set(nextTools)]);
+		} catch (error) {
+			ignoreStaleExtensionContextError(error);
+		}
 	}
 
 	maybeRegisterLookupTool(process.cwd());

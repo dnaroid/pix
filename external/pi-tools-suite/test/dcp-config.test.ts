@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 
-import { loadConfig } from "../src/dcp/config.js";
+import { loadConfig, modelKeysFromContext, resolveModelConfig } from "../src/dcp/config.js";
 
 function tempDir(): string {
 	return mkdtempSync(join(tmpdir(), "pi-tools-suite-dcp-config-"));
@@ -32,6 +32,77 @@ describe("DCP config", () => {
 		expect(config.compress.minContextPercent).toBe(0.25);
 		expect(config.compress.nudgeFrequency).toBe(1);
 		expect(config.compress.maxContextPercent).toBe(0.55);
+	});
+
+	test("applies model-specific overrides on top of the shared DCP config", () => {
+		const homeDir = tempDir();
+		mkdirSync(join(homeDir, ".config", "pi"), { recursive: true });
+		writeFileSync(
+			join(homeDir, ".config", "pi", "pi-tools-suite.jsonc"),
+			`{
+				"dcp": {
+					"compress": { "nudgeFrequency": 1, "protectedTools": ["compress"] },
+					"modelOverrides": {
+						"openai/gpt-5": {
+							"compress": { "nudgeFrequency": 3, "protectedTools": ["read"] },
+							"strategies": { "autoToolPruning": { "enabled": false } }
+						}
+					}
+				}
+			}`,
+		);
+
+		const config = loadConfig({ homeDir });
+		const resolved = resolveModelConfig(config, ["openai/gpt-5", "gpt-5"]);
+
+		expect(resolved.compress.nudgeFrequency).toBe(3);
+		expect(resolved.compress.protectedTools).toEqual(["compress", "write", "edit", "read"]);
+		expect(resolved.strategies.autoToolPruning.enabled).toBe(false);
+		expect(config.compress.nudgeFrequency).toBe(1);
+	});
+
+	test("supports wildcard model override keys with exact matches taking precedence", () => {
+		const homeDir = tempDir();
+		mkdirSync(join(homeDir, ".config", "pi"), { recursive: true });
+		writeFileSync(
+			join(homeDir, ".config", "pi", "pi-tools-suite.jsonc"),
+			`{
+				"dcp": {
+					"compress": { "nudgeFrequency": 1, "protectedTools": ["compress"] },
+					"modelOverrides": {
+						"gpt-*": {
+							"compress": { "nudgeFrequency": 2, "protectedTools": ["read"] }
+						},
+						"openai/*": {
+							"compress": { "nudgeFrequency": 3, "protectedTools": ["grep"] }
+						},
+						"openai/gpt-5": {
+							"compress": { "nudgeFrequency": 4, "protectedTools": ["find"] }
+						}
+					}
+				}
+			}`,
+		);
+
+		const config = loadConfig({ homeDir });
+		const resolved = resolveModelConfig(config, ["openai/gpt-5", "gpt-5"]);
+
+		expect(resolved.compress.nudgeFrequency).toBe(4);
+		expect(resolved.compress.protectedTools).toEqual([
+			"compress",
+			"write",
+			"edit",
+			"read",
+			"grep",
+			"find",
+		]);
+	});
+
+	test("extracts provider/model and model-only keys from context", () => {
+		expect(modelKeysFromContext({ model: { provider: "openai", id: "gpt-5" } })).toEqual([
+			"openai/gpt-5",
+			"gpt-5",
+		]);
 	});
 
 	test("ignores legacy, project, and PI_CONFIG_DIR DCP config files", () => {

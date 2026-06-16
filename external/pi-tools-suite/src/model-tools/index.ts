@@ -40,6 +40,14 @@ const MANAGED_TOOLS = new Set([...CLAUDE_ALIAS_TOOLS, ...CODEX_ALIAS_TOOLS, ...B
 const REPO_DISCOVERY_TOOL_NAME_SET = new Set(REPO_DISCOVERY_TOOL_NAMES);
 const MAX_BUILTIN_DEFINITIONS = 64;
 
+function isStaleExtensionContextError(error: unknown): boolean {
+	return error instanceof Error && /ctx is stale|stale ctx|stale after session replacement|stale after.*reload/i.test(error.message);
+}
+
+function ignoreStaleExtensionContextError(error: unknown): void {
+	if (!isStaleExtensionContextError(error)) throw error;
+}
+
 type ShellAliasInput = {
   command?: string;
   description?: string;
@@ -391,18 +399,22 @@ function sameTools(left: string[], right: string[]): boolean {
 }
 
 function applyToolProfile(pi: ExtensionAPI, model: unknown, baseTools: string[]): void {
-	const targetTools = toolsForProfile(detectModelProfile(model));
-	const preserveSelection = shouldPreserveSelection();
-	const active = pi.getActiveTools();
-	const repoTools = activeRepoDiscoveryTools(active, baseTools);
-	const preserved = active.filter((tool) => !MANAGED_TOOLS.has(tool) && !REPO_DISCOVERY_TOOL_NAME_SET.has(tool));
-	const baseWithoutRepoTools = baseTools.filter((tool) => !REPO_DISCOVERY_TOOL_NAME_SET.has(tool));
-	const selectedTargetTools = preserveSelection
-		? selectSuitableToolsForModel(model, active.filter((tool) => MANAGED_TOOLS.has(tool)))
-		: targetTools;
-	const next = selectedTargetTools ? [...repoTools, ...preserved, ...selectedTargetTools] : [...repoTools, ...preserved, ...baseWithoutRepoTools];
-	const nextTools = [...new Set(next)];
-	if (!sameTools(active, nextTools)) pi.setActiveTools(nextTools);
+	try {
+		const targetTools = toolsForProfile(detectModelProfile(model));
+		const preserveSelection = shouldPreserveSelection();
+		const active = pi.getActiveTools();
+		const repoTools = activeRepoDiscoveryTools(active, baseTools);
+		const preserved = active.filter((tool) => !MANAGED_TOOLS.has(tool) && !REPO_DISCOVERY_TOOL_NAME_SET.has(tool));
+		const baseWithoutRepoTools = baseTools.filter((tool) => !REPO_DISCOVERY_TOOL_NAME_SET.has(tool));
+		const selectedTargetTools = preserveSelection
+			? selectSuitableToolsForModel(model, active.filter((tool) => MANAGED_TOOLS.has(tool)))
+			: targetTools;
+		const next = selectedTargetTools ? [...repoTools, ...preserved, ...selectedTargetTools] : [...repoTools, ...preserved, ...baseWithoutRepoTools];
+		const nextTools = [...new Set(next)];
+		if (!sameTools(active, nextTools)) pi.setActiveTools(nextTools);
+	} catch (error) {
+		ignoreStaleExtensionContextError(error);
+	}
 }
 
 function shouldPreserveSelection(env: NodeJS.ProcessEnv = process.env): boolean {

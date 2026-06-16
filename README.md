@@ -160,6 +160,26 @@ Before committing code changes, run:
 npm run check
 ```
 
+### Keeping the bundled extension's SDK pin in sync
+
+Pix bundles the `pi-tools-suite` extension (in `external/pi-tools-suite`), which
+runs inside the Pi host process. Its `@earendil-works/*` peerDependencies must
+match the host Pi SDK version exactly, or npm can resolve a stale copy in the
+suite's own `node_modules` and cause a double-load (e.g. `0.75.4` in the suite
+vs `0.79.4` in the host).
+
+When you bump the Pi SDK in the root `package.json`, re-pin the suite and
+reinstall it:
+
+```bash
+npm run sync:sdk-pin                                          # rewrite suite peerDeps to host version
+cd external/pi-tools-suite && npm install --ignore-scripts    # update suite lockfile/node_modules
+```
+
+`npm run check` runs `npm run sync:sdk-pin:check` first, so a stale pin fails
+the check fast. Use `npm run sync:sdk-pin:check` on its own for a drift-only
+report (non-zero exit on drift).
+
 ## Configuration
 
 Useful environment variables:

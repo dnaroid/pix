@@ -31,7 +31,9 @@ export class AppSubagentsWidgetController {
 	private pollTimer: ReturnType<typeof setTimeout> | undefined;
 	private pollInFlight = false;
 	private currentRunDir: string | undefined;
+	private currentRunDirs: string[] = [];
 	private state: SubagentsWidgetState | undefined;
+	private readonly runFreshnessByRunDir = new Map<string, number>();
 	private readonly taskPreviewsByRunDir = new Map<string, SubagentTaskPreview[]>();
 	private readonly snapshotByRunDir = new Map<string, SubagentRunRenderDetails>();
 	private refreshGeneration = 0;
@@ -60,6 +62,8 @@ export class AppSubagentsWidgetController {
 	reset(): void {
 		this.refreshGeneration++;
 		this.currentRunDir = undefined;
+		this.currentRunDirs = [];
+		this.runFreshnessByRunDir.clear();
 		this.taskPreviewsByRunDir.clear();
 		this.snapshotByRunDir.clear();
 		this.updateState(undefined);
@@ -82,16 +86,15 @@ export class AppSubagentsWidgetController {
 
 		this.currentRunDir = runDir;
 		this.snapshotByRunDir.set(runDir, normalizedDetails);
+		this.rememberRunFreshness(runDir, this.runFreshnessFromAgents(normalizedDetails.agents) ?? Date.now());
 
 		if (activeSubagentStates(normalizedDetails.agents).length > 0) {
-			this.state = {
-				runDir,
-				agents: normalizedDetails.agents,
-				...(normalizedDetails.tasks === undefined ? {} : { tasks: normalizedDetails.tasks }),
+			this.currentRunDirs = this.orderRunDirs([runDir, ...this.currentRunDirs]);
+			this.updateState(this.buildStateFromRuns([normalizedDetails], {
 				live: false,
 				snapshotOnly: true,
 				checkedAt: Date.now(),
-			};
+			}));
 		}
 
 		void this.refreshFromFiles(this.refreshGeneration);
@@ -113,6 +116,7 @@ export class AppSubagentsWidgetController {
 			.filter((run) => activeSubagentStates(run.agents).length > 0);
 
 		for (const run of activeRuns) {
+			this.rememberRunFreshness(run.runDir, this.runFreshnessFromAgents(run.agents) ?? data.checkedAt);
 			this.snapshotByRunDir.set(run.runDir, {
 				runDir: run.runDir,
 				agents: run.agents,
@@ -122,23 +126,22 @@ export class AppSubagentsWidgetController {
 			if (run.tasks) this.taskPreviewsByRunDir.set(run.runDir, run.tasks);
 		}
 
-		const preferred = activeRuns.find((run) => run.runDir === this.currentRunDir) ?? activeRuns[0];
-		if (!preferred) {
+		if (activeRuns.length === 0) {
 			this.currentRunDir = undefined;
+			this.currentRunDirs = [];
 			this.updateState(undefined);
 			this.stopPolling();
 			return;
 		}
 
-		this.currentRunDir = preferred.runDir;
-		this.updateState({
-			runDir: preferred.runDir,
-			agents: preferred.agents,
-			...(preferred.tasks === undefined ? {} : { tasks: preferred.tasks }),
+		const orderedRuns = this.orderRuns(activeRuns);
+		this.currentRunDir = orderedRuns[0]?.runDir;
+		this.currentRunDirs = orderedRuns.map((run) => run.runDir);
+		this.updateState(this.buildStateFromRuns(orderedRuns, {
 			live: true,
 			snapshotOnly: false,
 			checkedAt: data.checkedAt,
-		});
+		}));
 		this.startFileWatcher();
 		this.schedulePoll(SUBAGENTS_POLL_INTERVAL_MS);
 	}
@@ -207,69 +210,77 @@ export class AppSubagentsWidgetController {
 	}
 
 	private async refreshFromFiles(generation = this.refreshGeneration): Promise<void> {
-		let runDir = this.currentRunDir;
-		if (!runDir) {
-			const registry = await readSubagentRegistry(this.host.cwd);
-			if (!this.isCurrentGeneration(generation)) return;
+		const registry = await readSubagentRegistry(this.host.cwd);
+		if (!this.isCurrentGeneration(generation)) return;
 
-			runDir = await this.findActiveRegistryRunDirForCurrentSession(registry, generation);
-			if (!this.isCurrentGeneration(generation)) return;
-			if (runDir) this.currentRunDir = runDir;
-		}
-
-		if (!runDir) {
-			if (!this.isCurrentGeneration(generation)) return;
+		const runDirs = await this.findActiveRegistryRunDirsForCurrentSession(registry, generation);
+		if (!this.isCurrentGeneration(generation)) return;
+		if (runDirs.length === 0) {
+			this.currentRunDir = undefined;
+			this.currentRunDirs = [];
 			this.updateState(undefined);
 			return;
 		}
 
-		this.currentRunDir = runDir;
-		const fileState = await readSubagentRunStateFromFiles(runDir, { includeLineCounts: false });
-		if (!this.isCurrentGeneration(generation)) return;
-		if (!fileState) {
-			await this.clearMissingRunAndMaybeSelectReplacement(runDir, generation);
-			return;
-		}
-
-		const activeAgents = activeSubagentStates(fileState.agents);
-		if (activeAgents.length === 0) {
-			if (allSubagentStatesTerminal(fileState.agents) || fileState.agents.length === 0) {
+		const runs: SubagentRunRenderDetails[] = [];
+		for (const runDir of runDirs) {
+			const fileState = await readSubagentRunStateFromFiles(runDir, { includeLineCounts: false });
+			if (!this.isCurrentGeneration(generation)) return;
+			if (!fileState) {
 				this.clearCachedRun(runDir);
-				this.currentRunDir = undefined;
-				this.updateState(undefined);
+				continue;
 			}
+
+			const activeAgents = activeSubagentStates(fileState.agents);
+			if (activeAgents.length === 0) {
+				if (allSubagentStatesTerminal(fileState.agents) || fileState.agents.length === 0) this.clearCachedRun(runDir);
+				continue;
+			}
+
+			const tasks = this.taskPreviewsByRunDir.get(runDir);
+			runs.push({
+				runDir,
+				agents: fileState.agents,
+				...(tasks === undefined ? {} : { tasks }),
+			});
+		}
+
+		if (runs.length === 0) {
+			this.currentRunDir = undefined;
+			this.currentRunDirs = [];
+			this.updateState(undefined);
 			return;
 		}
 
-		const tasks = this.taskPreviewsByRunDir.get(runDir);
-		this.updateState({
-			runDir,
-			agents: fileState.agents,
-			...(tasks === undefined ? {} : { tasks }),
+		const orderedRuns = this.orderRuns(runs);
+		this.currentRunDir = orderedRuns[0]?.runDir;
+		this.currentRunDirs = orderedRuns.map((run) => run.runDir);
+		this.updateState(this.buildStateFromRuns(orderedRuns, {
 			live: true,
 			snapshotOnly: false,
 			checkedAt: Date.now(),
-		});
+		}));
 	}
 
-	private async findActiveRegistryRunDirForCurrentSession(registry: SubagentRegistry | undefined, generation: number): Promise<string | undefined> {
-		if (!registry) return undefined;
+	private async findActiveRegistryRunDirsForCurrentSession(registry: SubagentRegistry | undefined, generation: number): Promise<string[]> {
+		if (!registry) return [];
 
 		const sessionFile = this.host.sessionFile();
-		if (!sessionFile) return undefined;
+		if (!sessionFile) return [];
 
 		const candidateRunDirs = this.registryRunDirsNewestFirst(registry);
+		const matchingRunDirs: string[] = [];
 		for (const runDir of candidateRunDirs) {
-			if (!this.isCurrentGeneration(generation)) return undefined;
+			if (!this.isCurrentGeneration(generation)) return [];
 			if (!(await subagentRunHasParentSession(runDir, sessionFile))) continue;
-			if (!this.isCurrentGeneration(generation)) return undefined;
+			if (!this.isCurrentGeneration(generation)) return [];
 
 			const state = await readSubagentRunStateFromFiles(runDir, { includeLineCounts: false });
-			if (!this.isCurrentGeneration(generation)) return undefined;
-			if (activeSubagentStates(state?.agents ?? []).length > 0) return runDir;
+			if (!this.isCurrentGeneration(generation)) return [];
+			if (activeSubagentStates(state?.agents ?? []).length > 0) matchingRunDirs.push(runDir);
 		}
 
-		return undefined;
+		return matchingRunDirs;
 	}
 
 	private registryRunDirsNewestFirst(registry: SubagentRegistry): string[] {
@@ -286,32 +297,93 @@ export class AppSubagentsWidgetController {
 		addRunDir(registry.latestRunDir);
 		Object.values(registry.runs)
 			.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
-			.forEach((run) => addRunDir(run.runDir));
+			.forEach((run) => {
+				this.rememberRunFreshness(run.runDir, this.parseRunTimestamp(run.updatedAt) ?? this.parseRunTimestamp(run.createdAt));
+				addRunDir(run.runDir);
+			});
 
 		return runDirs;
 	}
 
-	private async clearMissingRunAndMaybeSelectReplacement(runDir: string, generation: number): Promise<void> {
-		this.clearCachedRun(runDir);
-		if (this.currentRunDir === runDir) this.currentRunDir = undefined;
-
-		const registry = await readSubagentRegistry(this.host.cwd);
-		if (!this.isCurrentGeneration(generation)) return;
-		const replacementRunDir = await this.findActiveRegistryRunDirForCurrentSession(registry, generation);
-		if (!this.isCurrentGeneration(generation)) return;
-
-		if (replacementRunDir) {
-			this.currentRunDir = replacementRunDir;
-			await this.refreshFromFiles(generation);
-			return;
-		}
-
-		this.updateState(undefined);
-	}
-
 	private clearCachedRun(runDir: string): void {
+		this.runFreshnessByRunDir.delete(runDir);
 		this.snapshotByRunDir.delete(runDir);
 		this.taskPreviewsByRunDir.delete(runDir);
+	}
+
+	private buildStateFromRuns(
+		runs: readonly SubagentRunRenderDetails[],
+		meta: Pick<SubagentsWidgetState, "live" | "snapshotOnly" | "checkedAt">,
+	): SubagentsWidgetState | undefined {
+		const activeRuns = runs
+			.map((run) => ({ ...run, agents: activeSubagentStates(run.agents) }))
+			.filter((run) => run.agents.length > 0);
+		if (activeRuns.length === 0) return undefined;
+
+		const primary = activeRuns[0];
+		if (!primary) return undefined;
+		return {
+			runs: activeRuns.map((run) => ({
+				runDir: run.runDir,
+				agents: run.agents,
+				...(run.tasks === undefined ? {} : { tasks: run.tasks }),
+			})),
+			runDir: primary.runDir,
+			agents: activeRuns.flatMap((run) => run.agents),
+			...(primary.tasks === undefined ? {} : { tasks: primary.tasks }),
+			...meta,
+		};
+	}
+
+	private orderRuns(runs: readonly SubagentRunRenderDetails[]): SubagentRunRenderDetails[] {
+		const order = this.orderRunDirs(runs.map((run) => run.runDir));
+		const priority = new Map(order.map((runDir, index) => [runDir, index]));
+		return [...runs].sort((a, b) => {
+			const freshness = this.runFreshness(b) - this.runFreshness(a);
+			if (freshness !== 0) return freshness;
+			return (priority.get(a.runDir) ?? Number.MAX_SAFE_INTEGER) - (priority.get(b.runDir) ?? Number.MAX_SAFE_INTEGER);
+		});
+	}
+
+	private orderRunDirs(runDirs: readonly string[]): string[] {
+		const seen = new Set<string>();
+		const preferred = [this.currentRunDir, ...this.currentRunDirs, ...runDirs].filter((runDir): runDir is string => Boolean(runDir));
+		const ordered: string[] = [];
+		for (const runDir of preferred) {
+			if (seen.has(runDir)) continue;
+			seen.add(runDir);
+			ordered.push(runDir);
+		}
+		return ordered;
+	}
+
+	private rememberRunFreshness(runDir: string, freshness: number | undefined): void {
+		if (!Number.isFinite(freshness)) return;
+		const next = freshness ?? 0;
+		const previous = this.runFreshnessByRunDir.get(runDir) ?? Number.NEGATIVE_INFINITY;
+		if (next >= previous) this.runFreshnessByRunDir.set(runDir, next);
+	}
+
+	private runFreshness(run: SubagentRunRenderDetails): number {
+		return this.runFreshnessFromAgents(run.agents)
+			?? this.runFreshnessByRunDir.get(run.runDir)
+			?? 0;
+	}
+
+	private runFreshnessFromAgents(agents: readonly { startedAt?: string }[]): number | undefined {
+		let freshest: number | undefined;
+		for (const agent of agents) {
+			const parsed = this.parseRunTimestamp(agent.startedAt);
+			if (parsed === undefined) continue;
+			freshest = freshest === undefined ? parsed : Math.max(freshest, parsed);
+		}
+		return freshest;
+	}
+
+	private parseRunTimestamp(value: string | undefined): number | undefined {
+		if (!value) return undefined;
+		const parsed = Date.parse(value);
+		return Number.isFinite(parsed) ? parsed : undefined;
 	}
 
 	private updateState(next: SubagentsWidgetState | undefined): void {
@@ -326,6 +398,8 @@ export class AppSubagentsWidgetController {
 	}
 
 	private shouldContinuePolling(): boolean {
+		const runs = this.state?.runs;
+		if (runs?.length) return runs.some((run) => activeSubagentStates(run.agents).length > 0);
 		return activeSubagentStates(this.state?.agents ?? []).length > 0;
 	}
 

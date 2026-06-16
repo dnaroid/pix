@@ -92,33 +92,48 @@ export function renderTodoPanel(details: TodoDetails | undefined, expanded: bool
 export function renderSubagentsPanel(state: SubagentsWidgetState | undefined, expanded: boolean, width: number, colors: Theme["colors"]): RenderedLine[] {
 	if (!state) return [];
 
-	const activeAgents = activeSubagentStates(state.agents);
+	const runs = state.runs?.length
+		? state.runs
+		: [{ runDir: state.runDir, agents: state.agents, ...(state.tasks === undefined ? {} : { tasks: state.tasks }) }];
+	const activeRuns = runs
+		.map((run) => ({ ...run, activeAgents: activeSubagentStates(run.agents) }))
+		.filter((run) => run.activeAgents.length > 0);
+	const activeAgents = activeRuns.flatMap((run) => run.activeAgents);
 	if (activeAgents.length === 0) return [];
 
 	const target = { kind: "subagents-panel" as const };
-	const previewById = taskPreviewMap(state.tasks);
-	const runName = subagentRunName(state.runDir);
 	const titleSuffix = state.live ? "" : " (snapshot)";
 	const stats = formatSubagentsPanelStats(activeAgents);
 	const headerText = `subagents ${expanded ? "▾" : "▸"}${stats ? ` ${stats}` : ""}${titleSuffix}`;
 	const contentWidth = Math.max(1, width);
 
 	if (!expanded) {
-		const collapsedText = `${headerText} — ${runName}`;
+		const runSummary = activeRuns.length === 1 ? subagentRunName(activeRuns[0]?.runDir ?? state.runDir) : `${activeRuns.length} runs`;
+		const collapsedText = `${headerText} — ${runSummary}`;
 		return [{ text: padOrTrimPlain(ellipsizeDisplay(collapsedText, contentWidth), width), colorOverride: colors.accent, target }];
 	}
 
 	const lines: RenderedLine[] = [];
-	const visibleAgents = activeAgents.slice(0, SUBAGENTS_WIDGET_MAX_ROWS);
+	const flattenedRuns = activeRuns.flatMap((run) => {
+		const previewById = taskPreviewMap(run.tasks);
+		return run.activeAgents.map((agent, index) => ({
+			runDir: run.runDir,
+			agent,
+			preview: previewById.get(agent.id),
+			showRunLabel: activeRuns.length > 1 && index === 0,
+		}));
+	});
+	const visibleAgents = flattenedRuns.slice(0, SUBAGENTS_WIDGET_MAX_ROWS);
 	const rowWidth = contentWidth;
 	const now = Date.now();
 
-	for (const agent of visibleAgents) {
-		const preview = previewById.get(agent.id);
+	for (const visibleRun of visibleAgents) {
+		const { agent, preview } = visibleRun;
 		const model = subagentModelThinkingLabel(preview);
 		const task = preview?.task?.trim() || preview?.scope?.trim() || "task unavailable";
 		const icon = subagentStatusIcon(agent.status);
-		const prefix = `${icon} ${agent.id} ${model} `;
+		const runLabel = visibleRun.showRunLabel ? `${subagentRunName(visibleRun.runDir)} ` : "";
+		const prefix = `${runLabel}${icon} ${agent.id} ${model} `;
 		const suffix = ` ${formatElapsedSince(agent.startedAt, now)}`;
 		const taskWidth = Math.max(8, rowWidth - stringDisplayWidth(prefix) - stringDisplayWidth(suffix));
 		const taskText = ellipsizeDisplay(task, taskWidth);
@@ -126,12 +141,12 @@ export function renderSubagentsPanel(state: SubagentsWidgetState | undefined, ex
 		lines.push({
 			text: padOrTrimPlain(text, width),
 			colorOverride: colors.muted,
-			segments: subagentPanelLineSegments({ text, icon, agentId: agent.id, model, taskText, prefix, status: agent.status }, colors),
+			segments: subagentPanelLineSegments({ text, icon, agentId: agent.id, model, taskText, prefix, runLabel, status: agent.status }, colors),
 			target,
 		});
 	}
 
-	const hidden = activeAgents.length - visibleAgents.length;
+	const hidden = flattenedRuns.length - visibleAgents.length;
 	if (hidden > 0) lines.push({ text: padOrTrimPlain(`+${hidden} more`, width), variant: "muted", target });
 	return lines;
 }
@@ -143,14 +158,17 @@ function subagentPanelLineSegments(input: {
 	model: string;
 	taskText: string;
 	prefix: string;
+	runLabel: string;
 	status: SubagentStatus;
 }, colors: Theme["colors"]): StyledSegment[] {
 	const iconStart = input.text.indexOf(input.icon);
+	const runLabelStart = input.runLabel ? input.text.indexOf(input.runLabel) : -1;
 	const nameStart = input.text.indexOf(input.agentId, iconStart + input.icon.length);
 	const modelStart = input.text.indexOf(input.model, nameStart + input.agentId.length);
 	const taskStart = input.prefix.length;
 	const suffixStart = taskStart + input.taskText.length;
 	return [
+		...(runLabelStart >= 0 ? [{ start: runLabelStart, end: runLabelStart + input.runLabel.length, foreground: colors.warning }] : []),
 		{ start: iconStart, end: iconStart + input.icon.length, foreground: subagentStatusColor(input.status, colors), bold: true },
 		{ start: nameStart, end: nameStart + input.agentId.length, foreground: colors.accent, bold: true },
 		{ start: modelStart, end: modelStart + input.model.length, foreground: colors.info },
