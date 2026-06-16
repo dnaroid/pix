@@ -100,34 +100,41 @@ describe("DCP debug log", () => {
 			const backup = readFileSync(join(dir, "dcp-debug.jsonl.1"), "utf8");
 			expect(backup.trim().split("\n").length).toBeGreaterThan(0);
 
-			// A further write still appends to the active file.
+			// A further write still appends to the active file; wait until it lands.
 			writeDcpDebugLog(config, "test.event", { index: 999 });
-			await waitFor(() => statSync(logPath).size > 0);
+			await waitFor(() => readFileSync(logPath, "utf8").includes('"index":999'));
 			const active = readFileSync(logPath, "utf8");
-			expect(active).toContain('"index": 999');
+			expect(active).toContain('"index":999');
 		});
 	});
 
 	test("resolves limits from config then env, and floors maxBackups at 1", () => {
 		withCleanEnv(() => {
+			// Config values win over built-in defaults.
 			const base = makeConfig({ maxBytes: 1234, maxBackups: 4 });
 			expect(dcpDebugLogMaxBytes(base)).toBe(1234);
 			expect(dcpDebugLogMaxBackups(base)).toBe(4);
 
+			// Missing config falls back to built-in defaults.
 			const small = makeConfig({});
 			expect(dcpDebugLogMaxBytes(small)).toBe(5 * 1024 * 1024);
 			expect(dcpDebugLogMaxBackups(small)).toBe(3);
 
+			// Env overrides take precedence over config.
 			process.env.PI_DCP_DEBUG_MAX_BYTES = "999";
 			process.env.PI_DCP_DEBUG_MAX_BACKUPS = "9";
 			expect(dcpDebugLogMaxBytes(base)).toBe(999);
 			expect(dcpDebugLogMaxBackups(base)).toBe(9);
 
-			const underfloor = makeConfig({ maxBackups: 0 });
-			expect(dcpDebugLogMaxBackups(underfloor)).toBe(1);
-
+			// Invalid env values fall back to config/defaults.
 			process.env.PI_DCP_DEBUG_MAX_BYTES = "not-a-number";
 			expect(dcpDebugLogMaxBytes(base)).toBe(1234);
+		});
+
+		// With no env, a config maxBackups below the floor is clamped to 1.
+		withCleanEnv(() => {
+			const underfloor = makeConfig({ maxBackups: 0 });
+			expect(dcpDebugLogMaxBackups(underfloor)).toBe(1);
 		});
 	});
 
