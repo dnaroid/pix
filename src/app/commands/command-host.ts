@@ -9,6 +9,7 @@ export type DirectPopupMenu = Exclude<ActivePopupMenu, "slash">;
 export type CommandControllerHost = {
 	readonly options: AppOptions;
 	runtime(): AgentSessionRuntime | undefined;
+	awaitCurrentSessionExtensions(runtime?: AgentSessionRuntime): Promise<void>;
 	requestHistory(): AppRequestHistory;
 	getInput(): string;
 	setInput(value: string): void;

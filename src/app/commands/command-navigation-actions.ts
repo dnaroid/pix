@@ -59,6 +59,7 @@ export class NavigationCommandActions {
 
 		this.host.setStatus("forking session");
 		this.host.render();
+		await this.host.awaitCurrentSessionExtensions(runtime);
 		const result = await runtime.fork(entryId);
 		if (result.cancelled) {
 			this.host.addEntry({ id: createId("system"), kind: "system", text: "Fork cancelled." });
@@ -85,6 +86,7 @@ export class NavigationCommandActions {
 
 		this.host.setStatus("cloning session");
 		this.host.render();
+		await this.host.awaitCurrentSessionExtensions(runtime);
 		const result = await runtime.fork(leafId, { position: "at" });
 		if (result.cancelled) {
 			this.host.addEntry({ id: createId("system"), kind: "system", text: "Clone cancelled." });
@@ -250,6 +252,7 @@ export class NavigationCommandActions {
 		const resolvedSessionPath = resolve(runtime.cwd, sessionPath);
 		this.host.setStatus("switching session");
 		this.host.render();
+		await this.host.awaitCurrentSessionExtensions(runtime);
 		const result = await runtime.switchSession(resolvedSessionPath);
 		if (result.cancelled) {
 			this.host.addEntry({ id: createId("system"), kind: "system", text: "Resume cancelled." });

@@ -169,6 +169,16 @@ describe("AppInputController terminal input", () => {
 		assert.equal(editor.text, "hello");
 	});
 
+	it("handles Kitty arrow press packets and swallows their release packets", () => {
+		const { controller, editor } = createController({ extensionInputUsesEditor: false, shiftPressed: false, consumeExtensionInput: false });
+
+		editor.setText("abc", 1);
+		controller.handleChunk(Buffer.from("\x1b[1;1D\x1b[1;1:3D\x1b[1;1C\x1b[1;1:3C"));
+
+		assert.equal(editor.cursor, 1);
+		assert.equal(editor.text, "abc");
+	});
+
 	it("handles clipboard image paste for Command+V terminal sequences", () => {
 		const { controller } = createController({ extensionInputUsesEditor: false, shiftPressed: false, consumeExtensionInput: false });
 		let clipboardImagePasteCalls = 0;

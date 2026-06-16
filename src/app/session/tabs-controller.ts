@@ -65,6 +65,7 @@ export type AppTabsControllerHost = {
 	runtime(): AgentSessionRuntime | undefined;
 	createRuntimeForNewSession(): Promise<AgentSessionRuntime>;
 	createRuntimeForSession(sessionPath: string): Promise<AgentSessionRuntime>;
+	awaitCurrentSessionExtensions?(runtime?: AgentSessionRuntime): Promise<void>;
 	activateRuntime(runtime: AgentSessionRuntime, options?: BindCurrentSessionOptions): Promise<void>;
 	disposeRuntime(runtime: AgentSessionRuntime): Promise<void>;
 	isRunning(): boolean;
@@ -813,6 +814,7 @@ export class AppTabsController {
 		this.host.setStatus("starting new session");
 		this.host.render();
 
+		await this.host.awaitCurrentSessionExtensions?.(runtime);
 		const result = await runtime.newSession();
 		if (result.cancelled) {
 			this.host.addEntry({ id: createId("system"), kind: "system", text: "New session cancelled." });

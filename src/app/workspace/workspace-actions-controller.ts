@@ -18,6 +18,7 @@ import {
 export type AppWorkspaceActionsControllerHost = {
 	readonly entries: Entry[];
 	runtime(): AgentSessionRuntime | undefined;
+	awaitCurrentSessionExtensions(runtime?: AgentSessionRuntime): Promise<void>;
 	findUserEntry(entryId: string): Extract<Entry, { kind: "user" }> | undefined;
 	touchEntry(entry: Entry): void;
 	resetSessionView(): void;
@@ -127,6 +128,7 @@ export class AppWorkspaceActionsController {
 
 		this.host.setStatus("forking session");
 		this.host.render();
+		await this.host.awaitCurrentSessionExtensions(runtime);
 		const result = await runtime.fork(sessionEntryId);
 		if (result.cancelled) {
 			this.host.addEntry({ id: createId("system"), kind: "system", text: "Fork cancelled." });

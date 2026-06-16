@@ -10,6 +10,7 @@ import type { AppWorkspaceActionsController } from "../workspace/workspace-actio
 
 export type AppPopupActionControllerHost = {
 	runtime(): AgentSessionRuntime | undefined;
+	awaitCurrentSessionExtensions(runtime?: AgentSessionRuntime): Promise<void>;
 	getBuiltinSlashCommands(): readonly SlashCommand[];
 	isRunning(): boolean;
 	setInput(value: string): void;
@@ -254,6 +255,7 @@ export class AppPopupActionController {
 		this.host.render();
 
 		try {
+			await this.host.awaitCurrentSessionExtensions(runtime);
 			const result = await runtime.switchSession(session.path);
 			if (result.cancelled) {
 				this.host.addEntry({ id: createId("system"), kind: "system", text: "Resume cancelled." });

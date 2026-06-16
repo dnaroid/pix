@@ -144,6 +144,12 @@ export class AppSessionLifecycleController {
 		await bindPromise;
 	}
 
+	async awaitCurrentSessionExtensions(runtime: AgentSessionRuntime | undefined = this.host.runtime()): Promise<void> {
+		if (!runtime) return;
+		if (this.extensionBindRuntime !== runtime || this.extensionBindSession !== runtime.session) return;
+		await this.extensionBindPromise;
+	}
+
 	unsubscribeSession(): void {
 		this.unsubscribe?.();
 	}

@@ -4,9 +4,11 @@ import {
 	parseTerminalEditShortcutSequence,
 	parseTerminalInterruptSequence,
 	parseTerminalModifiedKeySequence,
+	terminalKeyArrowDirection,
 	terminalEditShortcutForControlChar,
 	terminalKeyIsClipboardImagePaste,
 	terminalKeyIsShiftEnter,
+	terminalKeyShouldIgnore,
 } from "../src/app/input/terminal-edit-shortcuts.js";
 
 describe("terminal edit shortcut parsing", () => {
@@ -78,6 +80,22 @@ describe("terminal edit shortcut parsing", () => {
 		const russianPaste = parseTerminalModifiedKeySequence("\x1b[27;5;1084~");
 		assert.equal(russianPaste.kind, "key");
 		if (russianPaste.kind === "key") assert.equal(terminalKeyIsClipboardImagePaste(russianPaste.key), true);
+	});
+
+	it("parses Kitty arrow press and release sequences", () => {
+		const leftPress = parseTerminalModifiedKeySequence("\x1b[1;1D");
+		assert.equal(leftPress.kind, "key");
+		if (leftPress.kind === "key") {
+			assert.equal(terminalKeyArrowDirection(leftPress.key), "left");
+			assert.equal(terminalKeyShouldIgnore(leftPress.key), false);
+		}
+
+		const rightRelease = parseTerminalModifiedKeySequence("\x1b[1;1:3C");
+		assert.equal(rightRelease.kind, "key");
+		if (rightRelease.kind === "key") {
+			assert.equal(terminalKeyArrowDirection(rightRelease.key), "right");
+			assert.equal(terminalKeyShouldIgnore(rightRelease.key), true);
+		}
 	});
 
 	it("returns pending for split edit shortcut sequences", () => {

@@ -6,6 +6,7 @@ export type AppExtensionActionsHost = {
 	isRunning(): boolean;
 	getInput(): string;
 	setInput(value: string): void;
+	awaitCurrentSessionExtensions(runtime?: AgentSessionRuntime): Promise<void>;
 	resetSessionView(): void;
 	loadSessionHistory(): void;
 	afterSessionReplacement(message?: string): void;
@@ -23,11 +24,13 @@ export class AppExtensionActionsController {
 		return {
 			waitForIdle: () => this.waitForSessionIdle(runtime),
 			newSession: async (options) => {
+				await this.host.awaitCurrentSessionExtensions(runtime);
 				const result = await runtime.newSession(options);
 				if (!result.cancelled) this.host.afterSessionReplacement("Started a new session.");
 				return result;
 			},
 			fork: async (entryId, options) => {
+				await this.host.awaitCurrentSessionExtensions(runtime);
 				const result = await runtime.fork(entryId, options);
 				if (!result.cancelled) this.host.afterSessionReplacement("Forked to a new session.");
 				return result;
@@ -44,11 +47,13 @@ export class AppExtensionActionsController {
 				return result;
 			},
 			switchSession: async (sessionPath, options) => {
+				await this.host.awaitCurrentSessionExtensions(runtime);
 				const result = await runtime.switchSession(sessionPath, options);
 				if (!result.cancelled) this.host.afterSessionReplacement(`Switched session: ${sessionPath}`);
 				return result;
 			},
 			reload: async () => {
+				await this.host.awaitCurrentSessionExtensions(runtime);
 				await runtime.session.reload();
 				this.host.setSessionStatus(runtime.session);
 				this.host.showToast("Reloaded resources", "success");

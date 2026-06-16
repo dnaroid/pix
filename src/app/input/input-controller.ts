@@ -5,6 +5,7 @@ import {
 	parseTerminalEditShortcutSequence,
 	parseTerminalInterruptSequence,
 	parseTerminalModifiedKeySequence,
+	terminalKeyArrowDirection,
 	terminalEditShortcutForControlChar,
 	terminalKeyIsClipboardImagePaste,
 	terminalKeyIsShiftEnter,
@@ -144,6 +145,9 @@ export class AppInputController {
 			const terminalEditShortcutSequence = this.consumeTerminalEditShortcutSequence();
 			if (terminalEditShortcutSequence === "consumed") continue;
 			if (terminalEditShortcutSequence === "pending") return;
+			const modifiedArrowKeySequence = this.consumeModifiedArrowKeySequence();
+			if (modifiedArrowKeySequence === "consumed") continue;
+			if (modifiedArrowKeySequence === "pending") return;
 			const ignoredModifiedKeySequence = this.consumeIgnoredModifiedKeySequence();
 			if (ignoredModifiedKeySequence === "consumed") continue;
 			if (ignoredModifiedKeySequence === "pending") return;
@@ -307,6 +311,24 @@ export class AppInputController {
 		if (!terminalKeyShouldIgnore(result.key)) return "none";
 
 		this.inputBuffer = this.inputBuffer.slice(result.key.length);
+		return "consumed";
+	}
+
+	private consumeModifiedArrowKeySequence(): "consumed" | "pending" | "none" {
+		const result = parseTerminalModifiedKeySequence(this.inputBuffer);
+		if (result.kind === "pending") return "pending";
+		if (result.kind === "none") return "none";
+
+		const direction = terminalKeyArrowDirection(result.key);
+		if (!direction) return "none";
+
+		this.inputBuffer = this.inputBuffer.slice(result.key.length);
+		if (terminalKeyShouldIgnore(result.key)) return "consumed";
+
+		if (direction === "up") this.handleArrowUp();
+		else if (direction === "down") this.handleArrowDown();
+		else if (direction === "right") this.handleArrowRight();
+		else this.handleArrowLeft();
 		return "consumed";
 	}
 

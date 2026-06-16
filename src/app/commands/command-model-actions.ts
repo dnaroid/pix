@@ -286,6 +286,18 @@ export class ModelCommandActions {
 		this.host.render();
 		await runtime.session.setModel(model);
 		this.host.addEntry({ id: createId("system"), kind: "system", text: `Selected model ${ref}` });
+		if (runtime.session.isStreaming) {
+			this.host.addEntry({
+				id: createId("system"),
+				kind: "system",
+				text: "Skipped reload because the agent is still running. Run /reload when idle to refresh model-specific tools.",
+			});
+			this.host.toast.warning("Model changed; reload skipped while the agent is running");
+			this.host.setSessionStatus(runtime.session);
+			return;
+		}
+
+		await this.reloadAfterModelChange(runtime.session, ref);
 		this.host.setSessionStatus(runtime.session);
 	}
 
@@ -303,6 +315,27 @@ export class ModelCommandActions {
 	private addPersistentSystemEntry(session: AgentSession, text: string): void {
 		appendPixSystemDisplayEntry(session, text);
 		this.host.addEntry({ id: createId("system"), kind: "system", text });
+	}
+
+	private async reloadAfterModelChange(session: AgentSession, ref: string): Promise<void> {
+		this.host.setStatus(`reloading resources for ${ref}`);
+		this.host.render();
+		try {
+			await session.reload();
+			this.host.addEntry({
+				id: createId("system"),
+				kind: "system",
+				text: `Reloaded resources after model change to ${ref}`,
+			});
+			this.host.toast.success("Model changed and resources reloaded");
+		} catch (error) {
+			this.host.addEntry({
+				id: createId("error"),
+				kind: "error",
+				text: `Model changed to ${ref}, but reload failed: ${error instanceof Error ? error.message : String(error)}`,
+			});
+			this.host.toast.error("Model changed, but reload failed");
+		}
 	}
 
 	private saveDefaultModel(modelRef: string): void {

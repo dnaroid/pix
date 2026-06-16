@@ -208,6 +208,7 @@ export class PiUiExtendApp {
 				noSession: false,
 				sessionPath,
 			}),
+			awaitCurrentSessionExtensions: (runtime) => this.awaitCurrentSessionExtensions(runtime),
 			activateRuntime: (runtime, options) => this.activateRuntime(runtime, options),
 			disposeRuntime: (runtime) => this.terminalController.disposeRuntime(runtime),
 			isRunning: () => this.running,
@@ -353,6 +354,7 @@ export class PiUiExtendApp {
 			isRunning: () => this.running,
 			getInput: () => this.input,
 			setInput: (value) => this.setInput(value),
+			awaitCurrentSessionExtensions: (runtime) => this.awaitCurrentSessionExtensions(runtime),
 			resetSessionView: () => this.resetSessionView(),
 			loadSessionHistory: () => this.loadSessionHistory(),
 			afterSessionReplacement: (message) => this.afterSessionReplacement(message),
@@ -377,6 +379,7 @@ export class PiUiExtendApp {
 		this.workspaceActions = new AppWorkspaceActionsController({
 			entries: this.entries,
 			runtime: () => this.runtime,
+			awaitCurrentSessionExtensions: (runtime) => this.awaitCurrentSessionExtensions(runtime),
 			findUserEntry: (entryId) => this.findUserEntry(entryId),
 			touchEntry: (entry) => this.touchEntry(entry),
 			resetSessionView: () => this.resetSessionView(),
@@ -507,6 +510,7 @@ export class PiUiExtendApp {
 			showMenu: (items, options) => this.popupMenus.menuController.show(items, options),
 			getModelMenuItems: (query) => this.menuItems.getModelMenuItems(query),
 			getThinkingMenuItems: (query) => this.menuItems.getThinkingMenuItems(query),
+			awaitCurrentSessionExtensions: (runtime) => this.awaitCurrentSessionExtensions(runtime),
 			modelRef: (model) => this.menuItems.modelRef(model),
 			getFavoriteScopedModels: () => this.menuItems.getFavoriteScopedModels(),
 			setSessionStatus: (session) => this.setSessionStatus(session),
@@ -556,6 +560,7 @@ export class PiUiExtendApp {
 				showToast: (message, kind) => this.showToast(message, kind),
 				render: () => this.render(),
 				resetSessionView: () => this.resetSessionView(),
+				awaitCurrentSessionExtensions: (runtime) => this.awaitCurrentSessionExtensions(runtime),
 				bindCurrentSession: () => this.bindCurrentSession(),
 				loadSessionHistory: () => this.loadSessionHistory(),
 				scrollToConversationEntry: (entryId) => this.scrollController.scrollToConversationEntry(entryId),
@@ -888,6 +893,10 @@ export class PiUiExtendApp {
 
 	private async bindCurrentSession(options?: BindCurrentSessionOptions): Promise<void> {
 		await this.sessionLifecycle.bindCurrentSession(options);
+	}
+
+	private async awaitCurrentSessionExtensions(runtime?: AgentSessionRuntime): Promise<void> {
+		await this.sessionLifecycle.awaitCurrentSessionExtensions(runtime);
 	}
 
 	private async activateRuntime(runtime: AgentSessionRuntime, options?: BindCurrentSessionOptions): Promise<void> {

@@ -25,8 +25,15 @@ const CYRILLIC_SMALL_ES_CODE = 1089;
 const CYRILLIC_CAPITAL_ES_CODE = 1057;
 const CYRILLIC_SMALL_EM_CODE = 1084;
 const CYRILLIC_CAPITAL_EM_CODE = 1052;
+const KITTY_ARROW_CODEPOINTS = {
+	A: -1,
+	B: -2,
+	C: -3,
+	D: -4,
+} as const;
 
 const KITTY_CSI_U_SEQUENCE = /^\x1b\[(\d+)(?::(\d*))?(?::(\d+))?(?:;(\d+))?(?::(\d+))?u/;
+const KITTY_ARROW_SEQUENCE = /^\x1b\[1;(\d+)(?::(\d+))?([ABCD])/;
 const XTERM_MODIFY_OTHER_KEYS_SEQUENCE = /^\x1b\[27;(\d+);(\d+)~/;
 
 interface ParsedModifiedKey {
@@ -40,6 +47,9 @@ interface ParsedModifiedKey {
 export function parseTerminalModifiedKeySequence(input: string): ParsedTerminalModifiedKeyResult {
 	const kitty = parseKittyCsiUSequence(input);
 	if (kitty) return { kind: "key", key: kitty };
+
+	const kittyArrow = parseKittyArrowSequence(input);
+	if (kittyArrow) return { kind: "key", key: kittyArrow };
 
 	const xterm = parseXtermModifyOtherKeysSequence(input);
 	if (xterm) return { kind: "key", key: xterm };
@@ -80,6 +90,17 @@ export function terminalKeyShouldIgnore(key: ParsedModifiedKey): boolean {
 	return key.eventType === 3;
 }
 
+export function terminalKeyArrowDirection(key: ParsedModifiedKey): "up" | "down" | "right" | "left" | undefined {
+	const effectiveModifier = key.modifier & ~LOCK_MODIFIER_MASK;
+	if (effectiveModifier !== 0) return undefined;
+
+	if (key.codepoint === KITTY_ARROW_CODEPOINTS.A) return "up";
+	if (key.codepoint === KITTY_ARROW_CODEPOINTS.B) return "down";
+	if (key.codepoint === KITTY_ARROW_CODEPOINTS.C) return "right";
+	if (key.codepoint === KITTY_ARROW_CODEPOINTS.D) return "left";
+	return undefined;
+}
+
 export function terminalEditShortcutForControlChar(char: string, shiftPressed: boolean): TerminalEditShortcut | undefined {
 	if (char === "\u001a") return shiftPressed ? "redo" : "undo";
 	if (char === "\u0019") return "redo";
@@ -99,6 +120,25 @@ function parseKittyCsiUSequence(input: string): ParsedModifiedKey | undefined {
 	return {
 		codepoint,
 		baseLayoutKey: Number.isFinite(baseLayoutKey) ? baseLayoutKey : undefined,
+		modifier: modifierValue - 1,
+		eventType: Number.isFinite(eventType) ? eventType : undefined,
+		length: match[0].length,
+	};
+}
+
+function parseKittyArrowSequence(input: string): ParsedModifiedKey | undefined {
+	const match = KITTY_ARROW_SEQUENCE.exec(input);
+	if (!match) return undefined;
+
+	const modifierValue = Number.parseInt(match[1] ?? "", 10);
+	const eventType = match[2] ? Number.parseInt(match[2], 10) : undefined;
+	const arrow = match[3] as keyof typeof KITTY_ARROW_CODEPOINTS | undefined;
+	const codepoint = arrow ? KITTY_ARROW_CODEPOINTS[arrow] : undefined;
+
+	if (!Number.isFinite(modifierValue) || codepoint === undefined) return undefined;
+	return {
+		codepoint,
+		baseLayoutKey: undefined,
 		modifier: modifierValue - 1,
 		eventType: Number.isFinite(eventType) ? eventType : undefined,
 		length: match[0].length,
