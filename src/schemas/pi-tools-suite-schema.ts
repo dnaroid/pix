@@ -190,6 +190,7 @@ const SubagentRoutingConfig = Type.Object(
 	{
 		enabled: Type.Optional(Type.Boolean({ description: "Enable LLM-based automatic role routing." })),
 		model: Type.Optional(Type.String({ description: "Router model in provider/model form." })),
+		fallbackModels: Type.Optional(Type.Array(Type.String(), { uniqueItems: true, description: "Ordered router model fallbacks tried when the primary routing model is unavailable or fails. The current parent model is always tried last." })),
 		maxTaskChars: Type.Optional(Type.Number({ description: "Max task/scope characters sent to router.", minimum: 100 })),
 		maxTokens: Type.Optional(Type.Number({ description: "Max router response tokens.", minimum: 8 })),
 		maxRetries: Type.Optional(Type.Number({ description: "Router request retries.", minimum: 0 })),

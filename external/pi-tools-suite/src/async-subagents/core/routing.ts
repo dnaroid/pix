@@ -54,35 +54,54 @@ export async function routeSubagentTasks(
 	if (signal?.aborted) throw new Error("Aborted");
 
 	try {
-		const resolved = await resolveRoutingModel(ctx, routing);
-		if (!resolved) {
+		const candidates = await resolveRoutingModels(ctx, routing);
+		if (candidates.length === 0) {
 			const warning = `LLM sub-agent routing model unavailable (${routing.model}); used defaultType fallback.`;
 			notifyRoutingWarning(ctx, routing, warning);
 			return { tasks: fallbackTasks(), usedLlm: false, routes: {}, warnings: [warning] };
 		}
 
-		const response = await complete(
-			resolved.model,
-			{
-				systemPrompt: ROUTER_SYSTEM_PROMPT,
-				messages: [
+		const prompt = buildRoutingPrompt(autoTasks, config, routing);
+		const failures: string[] = [];
+		let response: RoutingResponse | undefined;
+		for (const candidate of candidates) {
+			if (signal?.aborted) throw new Error("Aborted");
+			try {
+				response = await complete(
+					candidate.model,
 					{
-						role: "user" as const,
-						content: [{ type: "text" as const, text: buildRoutingPrompt(autoTasks, config, routing) }],
-						timestamp: Date.now(),
+						systemPrompt: ROUTER_SYSTEM_PROMPT,
+						messages: [
+							{
+								role: "user" as const,
+								content: [{ type: "text" as const, text: prompt }],
+								timestamp: Date.now(),
+							},
+						],
 					},
-				],
-			},
-			{
-				apiKey: resolved.apiKey,
-				headers: resolved.headers,
-				cacheRetention: "none",
-				maxRetries: routing.maxRetries,
-				maxTokens: routing.maxTokens,
-				signal,
-				timeoutMs: routing.timeoutMs,
-			},
-		);
+					{
+						apiKey: candidate.apiKey,
+						headers: candidate.headers,
+						cacheRetention: "none",
+						maxRetries: routing.maxRetries,
+						maxTokens: routing.maxTokens,
+						signal,
+						timeoutMs: routing.timeoutMs,
+					},
+				);
+				break;
+			} catch (error) {
+				if (signal?.aborted || isAbortError(error)) throw error;
+				failures.push(`${currentModelRef(candidate.model) ?? "(unknown)"}: ${errorMessage(error)}`);
+			}
+		}
+
+		if (!response) {
+			const warning = `LLM sub-agent routing failed (${failures.join("; ")}); used defaultType fallback.`;
+			notifyRoutingWarning(ctx, routing, warning);
+			return { tasks: fallbackTasks(), usedLlm: false, routes: {}, warnings: [warning] };
+		}
+
 		const routes = parseRoutingResponse(responseText(response), config, autoTasks);
 		const warnings = Object.keys(routes).length === autoTasks.length
 			? []
@@ -137,16 +156,32 @@ function buildRoutingPrompt(tasks: AgentTask[], config: SubagentConfig, routing:
 	].join("\n");
 }
 
-async function resolveRoutingModel(ctx: SubagentRoutingContext, routing: ResolvedSubagentRoutingConfig): Promise<{
+async function resolveRoutingModels(
+	ctx: SubagentRoutingContext,
+	routing: ResolvedSubagentRoutingConfig,
+): Promise<RoutingCandidate[]> {
+	const candidates: RoutingCandidate[] = [];
+	const seen = new Set<string>();
+	const refs = [routing.model, ...routing.fallbackModels];
+	const parentModel = currentModelRef(ctx.model);
+	if (parentModel) refs.push(parentModel);
+	for (const ref of refs) {
+		const trimmed = ref?.trim();
+		if (!trimmed || seen.has(trimmed)) continue;
+		seen.add(trimmed);
+		const resolved = await resolveModelRef(ctx, trimmed);
+		if (resolved) candidates.push(resolved);
+	}
+	return candidates;
+}
+
+interface RoutingCandidate {
 	model: Model<Api>;
 	apiKey?: string;
 	headers?: Record<string, string>;
-} | undefined> {
-	const configured = await resolveModelRef(ctx, routing.model);
-	if (configured) return configured;
-	const parentModel = currentModelRef(ctx.model);
-	return parentModel && parentModel !== routing.model ? resolveModelRef(ctx, parentModel) : undefined;
 }
+
+type RoutingResponse = Awaited<ReturnType<typeof complete>>;
 
 async function resolveModelRef(ctx: SubagentRoutingContext, modelRef: string): Promise<{
 	model: Model<Api>;

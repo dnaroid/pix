@@ -55,10 +55,13 @@
   "routing": {
     "enabled": true,
     "model": "zai/glm-4.5-air",
+    // Ordered router model fallbacks tried when the primary routing model is
+    // unavailable or fails. The current parent model is always tried last.
+    "fallbackModels": ["openai-codex/gpt-5.3-codex-spark"],
     "maxTaskChars": 1200,
     "maxTokens": 512,
-    "maxRetries": 1,
-    "timeoutMs": 12000,
+    "maxRetries": 3,
+    "timeoutMs": 10000,
     "debug": false
   },
 

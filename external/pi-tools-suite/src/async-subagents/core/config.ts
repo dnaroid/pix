@@ -29,8 +29,10 @@ export interface SubagentTypeConfig {
 export interface SubagentRoutingConfig {
 	/** Ask a lightweight model to choose subagentType when a task omits it. */
 	enabled?: boolean;
-	/** Router model in provider/model form. Falls back to the current parent model if unavailable. */
+	/** Router model in provider/model form. Falls back to fallbackModels, then the current parent model, if unavailable. */
 	model?: string;
+	/** Ordered router model fallbacks tried when the primary routing model is unavailable or fails. */
+	fallbackModels?: string[];
 	/** Maximum task/scope characters sent to the router per task. */
 	maxTaskChars?: number;
 	/** Maximum router response tokens. */
@@ -145,10 +147,11 @@ export const DEFAULT_MAX_CONCURRENT = 5;
 export const DEFAULT_ROUTING_CONFIG: ResolvedSubagentRoutingConfig = {
 	enabled: true,
 	model: "zai/glm-4.5-air",
+	fallbackModels: ["openai-codex/gpt-5.3-codex-spark"],
 	maxTaskChars: 1200,
 	maxTokens: 512,
-	maxRetries: 1,
-	timeoutMs: 12_000,
+	maxRetries: 3,
+	timeoutMs: 10_000,
 	debug: false,
 };
 
@@ -512,6 +515,8 @@ function normalizeRoutingConfig(value: Record<string, unknown>): SubagentRouting
 	const routing: SubagentRoutingConfig = {};
 	if (typeof value.enabled === "boolean") routing.enabled = value.enabled;
 	if (typeof value.model === "string" && value.model.trim()) routing.model = value.model.trim();
+	const fallbackModels = modelList(value.fallbackModels, value.fallbackModel);
+	if (fallbackModels) routing.fallbackModels = fallbackModels;
 	if (typeof value.debug === "boolean") routing.debug = value.debug;
 	const maxTaskChars = finiteNumber(value.maxTaskChars);
 	if (maxTaskChars !== undefined) routing.maxTaskChars = Math.max(100, Math.round(maxTaskChars));

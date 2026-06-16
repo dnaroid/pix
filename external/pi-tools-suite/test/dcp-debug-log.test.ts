@@ -5,6 +5,7 @@ import { describe, expect, test } from "bun:test";
 
 import { loadConfig } from "../src/dcp/config.js";
 import {
+	dcpDebugLogDrain,
 	dcpDebugLogMaxBackups,
 	dcpDebugLogMaxBytes,
 	writeDcpDebugLog,
@@ -12,22 +13,6 @@ import {
 
 function tempDir(prefix = "pi-tools-suite-dcp-debug-log-"): string {
 	return mkdtempSync(join(tmpdir(), prefix));
-}
-
-/**
- * The debug writer queues serialized async appends. Poll the directory until
- * `ready` returns true (or a timeout) so assertions see the final rotated set.
- */
-async function waitFor(
-	ready: () => boolean,
-	timeoutMs = 2000,
-	intervalMs = 10,
-): Promise<void> {
-	const deadline = Date.now() + timeoutMs;
-	while (Date.now() < deadline) {
-		if (ready()) return;
-		await new Promise((resolve) => setTimeout(resolve, intervalMs));
-	}
 }
 
 function makeConfig(debugLog: { maxBytes?: number; maxBackups?: number }) {
@@ -45,17 +30,17 @@ const ENV_KEYS = [
 	"PI_DCP_DEBUG_MAX_BACKUPS",
 ] as const;
 
-function withCleanEnv<T>(fn: () => Promise<T> | T): Promise<T> | T {
+function withCleanEnv<T>(fn: () => Promise<T> | T): Promise<T> {
 	const saved = ENV_KEYS.map((key) => [key, process.env[key]] as const);
 	for (const key of ENV_KEYS) delete process.env[key];
-	try {
-		return fn();
-	} finally {
+	// Restore only after the (possibly async) body settles, so env stays clean
+	// for any path/limit reads performed after awaits inside the body.
+	return Promise.resolve(fn()).finally(() => {
 		for (const [key, value] of saved) {
 			if (value === undefined) delete process.env[key];
 			else process.env[key] = value;
 		}
-	}
+	});
 }
 
 describe("DCP debug log", () => {
@@ -71,8 +56,7 @@ describe("DCP debug log", () => {
 			for (let i = 0; i < 80; i++) {
 				writeDcpDebugLog(config, "test.event", { index: i, payload: "x".repeat(60) });
 			}
-
-			await waitFor(() => existsSync(join(dir, "dcp-debug.jsonl.2")));
+			await dcpDebugLogDrain();
 
 			const names = new Set(readdirSync(dir));
 			expect(names.has("dcp-debug.jsonl.1")).toBe(true);
@@ -95,14 +79,14 @@ describe("DCP debug log", () => {
 			for (let i = 0; i < 40; i++) {
 				writeDcpDebugLog(config, "test.event", { index: i });
 			}
-			await waitFor(() => existsSync(join(dir, "dcp-debug.jsonl.1")));
+			await dcpDebugLogDrain();
 
 			const backup = readFileSync(join(dir, "dcp-debug.jsonl.1"), "utf8");
 			expect(backup.trim().split("\n").length).toBeGreaterThan(0);
 
-			// A further write still appends to the active file; wait until it lands.
+			// A further write still appends to the active file after draining.
 			writeDcpDebugLog(config, "test.event", { index: 999 });
-			await waitFor(() => readFileSync(logPath, "utf8").includes('"index":999'));
+			await dcpDebugLogDrain();
 			const active = readFileSync(logPath, "utf8");
 			expect(active).toContain('"index":999');
 		});

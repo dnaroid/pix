@@ -225,3 +225,11 @@ export function writeDcpDebugLog(
     })
 }
 
+/**
+ * Resolves when all queued debug-log writes (and rotations) have settled. Useful
+ * for flushing before shutdown and for deterministic test assertions.
+ */
+export function dcpDebugLogDrain(): Promise<void> {
+  return logWriteChain
+}
+
