@@ -91,7 +91,26 @@ describe("comment-checker detect", () => {
 		expect(result).toBeDefined();
 		const text = result.content.map((p: ContentPart) => p.text).join("");
 		expect(text).toContain("comment-checker");
-		expect(text).toContain("increment the counter");
+		// Compact format: line:tag, no comment text echoed.
+		expect(text).toContain("2:restate");
+		expect(text).not.toContain("increment the counter");
+	});
+
+	test("write: compact one-line-per-file format with line numbers", async () => {
+		const result = await fireToolResult("write", {
+			file_path: "src/app.ts",
+			content: "let x = 1;\n// simply set x\nlet y = 2;\n// obviously set y\n",
+		});
+		expect(result).toBeDefined();
+		const text = result.content.at(-1).text;
+		// Both comments on lines 2 and 4, on a single grouped file line.
+		expect(text).toContain("2:filler");
+		expect(text).toContain("4:filler");
+		// Comment text is NOT echoed (saves tokens).
+		expect(text).not.toContain("simply set x");
+		expect(text).not.toContain("obviously set y");
+		// Path appears once (grouped), not duplicated per finding.
+		expect((text.match(/src\/app\.ts/g) ?? []).length).toBe(1);
 	});
 
 	test("flags Python-style # comment", async () => {
@@ -138,14 +157,15 @@ describe("comment-checker detect", () => {
 			new_string: "let x = 1;\n// here we set the default value\nx = x;",
 		});
 		expect(result).toBeDefined();
-		expect(result.content.at(-1).text).toContain("here we set the default value");
+		// Nudge fires; comment text is not echoed in the compact format.
+		expect(result.content.at(-1).text).toContain("comment-checker");
 	});
 
 	test("flags apply_patch Add File with slop comments", async () => {
 		const patch = ["*** Begin Patch", "*** Add File: src/new.ts", "+let y = 2;", "+// obviously we return here", "+y;", "*** End Patch"].join("\n");
 		const result = await fireToolResult("apply_patch", { input: patch });
 		expect(result).toBeDefined();
-		expect(result.content.at(-1).text).toContain("obviously we return here");
+		expect(result.content.at(-1).text).toContain("comment-checker");
 	});
 
 	test("ignore non-mutation tools", async () => {
@@ -203,6 +223,20 @@ describe("comment-checker detect", () => {
 });
 
 describe("comment-checker detect unit", () => {
+	test("does not flag JSDoc/docstring block continuation lines", async () => {
+		const result = await fireToolResult("write", {
+			file_path: "src/app.ts",
+			content: [
+				"/**",
+				" * Adds two numbers and returns the sum.",
+				" * Returns the computed value.",
+				" */",
+				"function add(a, b) { return a + b; }",
+			].join("\n"),
+		});
+		expect(result).toBeUndefined();
+	});
+
 	test("detectSlopComments direct", async () => {
 		const { detectSlopComments } = await import("../src/comment-checker/detect.js");
 		const findings = detectSlopComments(

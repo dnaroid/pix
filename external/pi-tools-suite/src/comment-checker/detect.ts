@@ -41,6 +41,13 @@ export interface Edit {
 	filePath: string;
 	removedLines: readonly string[];
 	addedLines: readonly string[];
+	/**
+	 * Absolute 1-based line number of the FIRST line in `addedLines` within the
+	 * target file, when known. Used to report accurate finding line numbers.
+	 * For full-file writes this is 1; for edits/apply_patch it is resolved by
+	 * locating the block in the already-written file; when unknown, undefined.
+	 */
+	baseLineNumber?: number;
 }
 
 const MARKER_RE = /^\s*(\/\/+|\/\*+|\*+|#+|--+|<!--|:\s*)/;
@@ -161,15 +168,44 @@ export function detectSlopComments(edits: readonly Edit[], strictness: Strictnes
 		if (!edit.filePath) continue;
 		const removed = removedCommentSignatures(edit.removedLines);
 
+		// Track /* ... */ block comments (including /** JSDoc/docstrings) so that
+		// interior continuation lines (e.g. ` * Adds two numbers.`) are not
+		// individually flagged. Block-comment content is evaluated as a whole;
+		// only single-line `/* foo */` inline comments fall through to classification.
+		let inBlockComment = false;
+
+		let indexInBlock = 0;
 		for (const line of edit.addedLines) {
 			if (findings.length >= maxFindings) break;
+
+			const hasOpen = line.includes("/*");
+			const hasClose = line.includes("*/");
+
+			if (inBlockComment) {
+				if (hasClose) inBlockComment = false;
+				indexInBlock++;
+				continue;
+			}
+
+			if (hasOpen && !hasClose) {
+				// Opener of a multi-line block comment / docstring. Skip it and the
+				// following continuation lines until the matching `*/`.
+				inBlockComment = true;
+				indexInBlock++;
+				continue;
+			}
+
 			const body = commentBody(line);
+			const lineOffset = indexInBlock;
+			indexInBlock++;
 			if (body === null) continue;
 			if (removed.has(line.trim())) continue;
 			if (isValuable(body, line)) continue;
 			const reason = classifySlop(body, strictness);
 			if (!reason) continue;
-			findings.push({ filePath: edit.filePath, text: line.trim(), reason });
+
+			const absoluteLine = edit.baseLineNumber !== undefined ? edit.baseLineNumber + lineOffset : undefined;
+			findings.push({ filePath: edit.filePath, line: absoluteLine, text: line.trim(), reason });
 		}
 
 		if (findings.length >= maxFindings) break;

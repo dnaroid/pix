@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import { isAbsolute, relative } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { parseApplyPatch } from "../model-tools/apply-patch.js";
 import { detectSlopComments, type CommentFinding, type Edit, type Strictness } from "./detect.js";
@@ -11,7 +13,7 @@ type ExtensionContext = import("@earendil-works/pi-coding-agent").ExtensionConte
  * Listens to the pi "tool_result" event for write/edit/apply_patch/ast_apply
  * mutation tools, extracts the net-new comment lines the agent just added,
  * classifies them, and appends a nudge to the tool result when they look
- * unnecessary so the agent removes them on its next turn.
+ * unnecessary so the agent removes them on their next turn.
  *
  * Adapted from oh-my-opencode's comment-checker hook, but pure-TypeScript and
  * headless (no external binary, no pending-calls machinery: pi's tool_result
@@ -55,7 +57,8 @@ function editsFromWrite(input: Record<string, unknown>): Edit[] {
 	const filePath = asString(input.file_path) ?? asString(input.path);
 	const content = asString(input.content);
 	if (!filePath || content === undefined) return [];
-	return [{ filePath, removedLines: [], addedLines: splitLines(content) }];
+	// Full-file write: the added lines start at line 1 of the new file.
+	return [{ filePath, removedLines: [], addedLines: splitLines(content), baseLineNumber: 1 }];
 }
 
 function editsFromEdit(input: Record<string, unknown>): Edit[] {
@@ -106,7 +109,8 @@ function editsFromApplyPatch(input: Record<string, unknown>): Edit[] {
 	for (const op of operations) {
 		if (op.kind === "delete") continue;
 		if (op.kind === "add") {
-			edits.push({ filePath: op.path, removedLines: [], addedLines: op.lines });
+			// Add File creates a new file; added lines start at line 1.
+			edits.push({ filePath: op.path, removedLines: [], addedLines: op.lines, baseLineNumber: 1 });
 			continue;
 		}
 		// update: reconstruct added/removed lines from hunks.
@@ -126,10 +130,7 @@ function editsFromApplyPatch(input: Record<string, unknown>): Edit[] {
 }
 
 function editsFromAstApply(details: unknown): Edit[] {
-	if (typeof details !== "object" || details === null) return [];
-	const record = details as Record<string, unknown>;
-	const changedFiles = Array.isArray(record.changedFiles) ? record.changedFiles : undefined;
-	if (!changedFiles) return [];
+	void details;
 	// ast_apply does not expose per-file diffs cheaply in details; the caller
 	// would have to re-read. Skip diffing here and rely on write/edit/apply_patch.
 	return [];
@@ -151,29 +152,108 @@ function isMutationTool(toolName: string): boolean {
 	return MUTATION_TOOL_NAMES.has(base.toLowerCase());
 }
 
-const REASON_LABELS: Record<string, string> = {
-	"restate-code": "restates what the code already says",
-	filler: "is filler phrasing",
-	decorative: "is a decorative separator",
-	"generic-explanation": "paraphrases surrounding code",
-	"non-essential-comment": "looks unnecessary",
+/**
+ * Resolve absolute line numbers for edits that do not already know them
+ * (edit / apply_patch update hunks) by reading the already-written file and
+ * locating the start of the added block. write / Add File already carry
+ * baseLineNumber=1 and are skipped.
+ */
+async function resolveBaseLineNumbers(edits: readonly Edit[]): Promise<void> {
+	for (const edit of edits) {
+		if (edit.baseLineNumber !== undefined) continue;
+		if (edit.addedLines.length === 0) continue;
+		edit.baseLineNumber = await findBlockStartLine(edit.filePath, edit.addedLines);
+	}
+}
+
+/**
+ * Find the 1-based line number where `addedLines` begins in the target file.
+ * Matches the leading non-empty lines of `addedLines` against the file; returns
+ * undefined if the file cannot be read or the block is not found.
+ */
+async function findBlockStartLine(filePath: string, addedLines: readonly string[]): Promise<number | undefined> {
+	let raw: string;
+	try {
+		raw = await readFile(filePath, "utf8");
+	} catch {
+		return undefined;
+	}
+	const fileLines = raw.split(/\r?\n/);
+
+	// Anchor: up to 3 leading non-empty added lines.
+	const anchor: string[] = [];
+	for (const line of addedLines) {
+		if (line.trim().length === 0) {
+			if (anchor.length === 0) continue;
+			break;
+		}
+		anchor.push(line);
+		if (anchor.length >= 3) break;
+	}
+	if (anchor.length === 0) return undefined;
+
+	for (let i = 0; i + anchor.length <= fileLines.length; i++) {
+		let match = true;
+		for (let j = 0; j < anchor.length; j++) {
+			if (fileLines[i + j] !== anchor[j]) {
+				match = false;
+				break;
+			}
+		}
+		if (match) return i + 1;
+	}
+	return undefined;
+}
+
+const REASON_TAGS: Record<string, string> = {
+	"restate-code": "restate",
+	filler: "filler",
+	decorative: "decorative",
+	"generic-explanation": "generic",
+	"non-essential-comment": "slop",
 };
 
-function formatNudge(findings: CommentFinding[]): string {
-	const lines: string[] = [];
-	lines.push("");
-	lines.push("---");
-	lines.push("💬 comment-checker: the following code comments look unnecessary.");
-	lines.push("Re-read each one. If it does not add information beyond the code, remove it. Keep only comments that capture intent, contracts, non-obvious rationale, or TODO/FIXME tasks.");
-	lines.push("");
-	for (const finding of findings) {
-		const label = REASON_LABELS[finding.reason] ?? finding.reason;
-		lines.push(`- \`${finding.filePath}\` — ${finding.text}  (${label})`);
+/** Render a display path: relative when inside cwd, otherwise the raw path. */
+function displayPath(filePath: string, cwd: string): string {
+	if (isAbsolute(filePath)) {
+		const rel = relative(cwd, filePath);
+		if (rel && !rel.startsWith("..") && !isAbsolute(rel)) return rel;
 	}
-	lines.push("");
-	lines.push("If a flagged comment is genuinely valuable, keep it and ignore this notice.");
-	lines.push("---");
-	return lines.join("\n");
+	return filePath;
+}
+
+function formatNudge(findings: CommentFinding[], cwd: string): string {
+	// Group by display path, preserving first-seen order.
+	const groups = new Map<string, CommentFinding[]>();
+	const order: string[] = [];
+	for (const finding of findings) {
+		const key = displayPath(finding.filePath, cwd);
+		const bucket = groups.get(key);
+		if (bucket) bucket.push(finding);
+		else {
+			groups.set(key, [finding]);
+			order.push(key);
+		}
+	}
+
+	// Compact: one line per file. Each finding is `line:tag` (no comment text —
+	// the file already contains it, and the path+line locate it exactly). This
+	// keeps the nudge token-light while preserving location + failure category.
+	const out: string[] = [];
+	out.push("");
+	out.push("---");
+	out.push("💬 comment-checker — unnecessary comments at the lines below (line:reason). Remove any that only restate code / are filler; keep intent, contracts, rationale, TODO.");
+	out.push("");
+	for (const key of order) {
+		const entries = (groups.get(key) ?? []).map((finding) => {
+			const tag = REASON_TAGS[finding.reason] ?? finding.reason;
+			return finding.line !== undefined ? `${finding.line}:${tag}` : `?:${tag}`;
+		});
+		out.push(`${key}  ${entries.join(" ")}`);
+	}
+	out.push("");
+	out.push("---");
+	return out.join("\n");
 }
 
 /** Shared mutable state (module-scoped, like lsp's global manager). */
@@ -184,7 +264,7 @@ export function __resetCommentCheckerState(): void {
 }
 
 export default function commentCheckerExtension(pi: ExtensionAPI): void {
-	pi.on("tool_result", (event, ctx) => {
+	pi.on("tool_result", async (event, ctx) => {
 		if (event.isError) return undefined;
 		if (!isMutationTool(event.toolName)) return undefined;
 
@@ -194,6 +274,10 @@ export default function commentCheckerExtension(pi: ExtensionAPI): void {
 		const edits = extractEdits(event.toolName, event.input, event.details);
 		if (edits.length === 0) return undefined;
 
+		// Resolve absolute line numbers for edit/apply_patch by reading the file
+		// the tool just wrote. Failures are non-fatal: findings just lack a line.
+		await resolveBaseLineNumbers(edits);
+
 		const findings = detectSlopComments(edits, options.strictness, MAX_FINDINGS);
 		if (findings.length === 0) return undefined;
 
@@ -202,7 +286,7 @@ export default function commentCheckerExtension(pi: ExtensionAPI): void {
 		if (now - lastNudgeTimestamp < DEDUP_WINDOW_MS) return undefined;
 		lastNudgeTimestamp = now;
 
-		const nudge = formatNudge(findings);
+		const nudge = formatNudge(findings, ctx.cwd);
 		return {
 			content: [...event.content, { type: "text" as const, text: nudge }],
 		};
