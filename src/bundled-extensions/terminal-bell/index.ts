@@ -11,6 +11,12 @@ const IDLE_RETRY_DELAY_MS = 100;
 const MAX_IDLE_RETRIES = 40;
 const SUBAGENTS_LIVE_COUNT_EVENT = "pi-tools-suite:async-subagents:live-count";
 const TERMINAL_BELL_ATTENTION_EVENT = "pix:terminal-bell:attention";
+/**
+ * Renderer-relayed signal that the session is in an auto-retry cycle.
+ * Payload: `{ active: boolean }`. The SDK does not forward retry state to
+ * extensions, so the renderer emits this on the extension event bus.
+ */
+const RETRY_ACTIVE_EVENT = "pix:retry-active";
 const DEFAULT_COMPLETION_NOTIFICATION_TITLE = "Pix - completion";
 const DEFAULT_ERROR_NOTIFICATION_TITLE = "Pix - error";
 const DEFAULT_QUESTION_NOTIFICATION_TITLE = "Pix - question";
@@ -438,6 +444,11 @@ export default function terminalBell(pi: ExtensionAPI) {
 	let deferredUntilSubagentsFinish = false;
 	let liveSubagentCount = 0;
 	let lastFailureReason: string | undefined;
+	// True while the session is in an auto-retry cycle (relayed via the
+	// extension event bus). Suppresses the failure bell on intermediate retry
+	// attempts; the final exhausted failure still rings because no retry-start
+	// signal precedes it.
+	let retryActive = false;
 	const activeSubagentWaitToolCallIds = new Set<string>();
 	const notifiedAskUserToolCallIds = new Set<string>();
 	const idleDelayMs = parseDelayMs(process.env.PI_TERMINAL_BELL_DELAY_MS);
@@ -470,6 +481,10 @@ export default function terminalBell(pi: ExtensionAPI) {
 	function attemptBell(pending: PendingBell, attempt: number): void {
 		timer = undefined;
 		const { ctx, notification, message } = pending;
+
+		// Safety net: if a retry-start signal arrives between the agent_end that
+		// queued this bell and the timer firing, suppress the bell entirely.
+		if (retryActive) return;
 
 		try {
 			if (!ctx.isIdle()) {
@@ -550,10 +565,24 @@ export default function terminalBell(pi: ExtensionAPI) {
 		}
 	});
 
+	pi.events.on(RETRY_ACTIVE_EVENT, (data: unknown) => {
+		retryActive = data != null && typeof data === "object" && (data as { active?: unknown }).active === true;
+		if (retryActive) {
+			// A retry is starting right after an intermediate agent_end: cancel
+			// any bell queued from that attempt so we don't chime on every
+			// failed retry attempt. The final exhausted failure rings normally
+			// because it is not followed by a retry-start signal.
+			clearTimer();
+			pendingBell = undefined;
+			deferredUntilSubagentsFinish = false;
+		}
+	});
+
 	pi.on("agent_start", async () => {
 		clearTimer();
 		deferredUntilSubagentsFinish = false;
 		lastFailureReason = undefined;
+		retryActive = false;
 		activeSubagentWaitToolCallIds.clear();
 		notifiedAskUserToolCallIds.clear();
 	});
@@ -615,6 +644,7 @@ export default function terminalBell(pi: ExtensionAPI) {
 		deferredUntilSubagentsFinish = false;
 		liveSubagentCount = 0;
 		lastFailureReason = undefined;
+		retryActive = false;
 		activeSubagentWaitToolCallIds.clear();
 		notifiedAskUserToolCallIds.clear();
 	});

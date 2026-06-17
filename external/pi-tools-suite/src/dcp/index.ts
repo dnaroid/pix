@@ -46,7 +46,6 @@ import {
 	stripStaleDcpMetadataFromMessage,
 } from "./pruner-metadata.js"
 import {
-	DCP_MESSAGE_IDS_CUSTOM_TYPE,
 	buildMessageIdControlText,
 } from "./pruner-message-ids.js"
 import { summarizeDcpState, writeDcpDebugLog } from "./debug-log.js"
@@ -100,7 +99,10 @@ function isUserVisibleOnlyMessage(message: any): boolean {
 	return message.details?.userVisibleOnly === true
 }
 
-const DCP_CONTROL_PLANE_CUSTOM_TYPES = new Set(["dcp-state", "dcp-nudge", DCP_MESSAGE_IDS_CUSTOM_TYPE])
+// Control-plane custom message types filtered out of the transcript.
+// `dcp-message-ids` is retained only for backward-compat with logs written by
+// the removed inline control-message path.
+const DCP_CONTROL_PLANE_CUSTOM_TYPES = new Set(["dcp-state", "dcp-nudge", "dcp-message-ids"])
 const SUMMARY_BUFFER_MAX_CONTEXT_BONUS = 0.05
 
 function isDcpControlPlaneMessage(message: any): boolean {

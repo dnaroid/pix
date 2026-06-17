@@ -83,10 +83,10 @@ export function applyPruning(
   // 6. Apply explicit tool output pruning (prunedToolIds)
   applyToolOutputPruning(msgs, state);
 
-  // 7. Refresh message ID snapshots used by the compress tool without
-  // appending synthetic marker lines to ordinary provider-visible content.
-  // The context event appends a hidden custom control message for the model.
-  injectMessageIds(msgs, state, { config, visible: false });
+  // 7. Refresh message ID snapshots used by the compress tool. Markers are
+  // never injected into provider-visible content; the before_provider_request
+  // hook delivers the id map as a hidden control payload.
+  injectMessageIds(msgs, state, { config });
 
   // 8. state.messageIdSnapshot/messageMetaSnapshot are already updated by injectMessageIds
 

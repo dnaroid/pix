@@ -144,6 +144,13 @@ export class PiUiExtendApp {
 	};
 	private readonly extensionShutdownHandler = (): void => {};
 	private runtime: AgentSessionRuntime | undefined;
+	/**
+	 * Maps each session runtime to the isolated extension event bus it was
+	 * created with. The renderer uses this to emit signals (e.g. retry state)
+	 * back to the extensions running inside a specific runtime/tab, so a signal
+	 * for one tab never reaches another tab's extensions.
+	 */
+	private readonly extensionEventBusByRuntime = new WeakMap<AgentSessionRuntime, EventBus>();
 	private readonly inputEditor = new InputEditor();
 	private lastInputEditorContentVersion = this.inputEditor.contentVersion;
 	private readonly requestHistory: AppRequestHistory;
@@ -418,6 +425,15 @@ export class PiUiExtendApp {
 			setSessionActivity: (activity) => this.setSessionActivity(activity),
 			updateQueuedMessageStatus: () => this.queuedMessages.updateQueuedMessageStatus(),
 			flushAutoUserMessages: () => { void this.queuedMessages.flushAutoUserMessages(); },
+			emitExtensionEvent: (channel, data) => {
+				// Emit a signal to the extensions running inside the active
+				// runtime's event bus. Used to inform extensions (terminal-bell,
+				// todo) about session lifecycle state the SDK doesn't forward to
+				// them, such as auto-retry being in progress.
+				const runtime = this.runtime;
+				if (!runtime) return;
+				this.extensionEventBusByRuntime.get(runtime)?.emit(channel, data);
+			},
 			prepareWorkspaceMutation: (toolName, args) => this.workspaceActions.prepareWorkspaceMutation(toolName, args),
 			workspaceMutationFromToolExecution: (input) => this.workspaceActions.workspaceMutationFromToolExecution(input),
 			recordWorkspaceMutationForUserEntry: (entryId, mutation) => this.workspaceActions.recordWorkspaceMutationForUserEntry(entryId, mutation),
@@ -837,10 +853,16 @@ export class PiUiExtendApp {
 	}
 
 	private createRuntime(options: AppOptions, runtimeOptions: AppRuntimeCreationOptions = {}): Promise<AgentSessionRuntime> {
+		const eventBus = this.createExtensionEventBus();
 		return createPixRuntime(options, {
-			eventBus: this.createExtensionEventBus(),
+			eventBus,
 			config: this.pixConfig,
 			...runtimeOptions,
+		}).then((runtime) => {
+			// Record the bus this runtime's extensions use, so the renderer can
+			// emit signals (retry state, etc.) targeted at this runtime's extensions.
+			this.extensionEventBusByRuntime.set(runtime, eventBus);
+			return runtime;
 		});
 	}
 

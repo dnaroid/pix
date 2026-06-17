@@ -18,6 +18,7 @@ const LOCK_MODIFIER_MASK = 64 + 128;
 
 const KEY_CODE_C = 99;
 const KEY_CODE_ENTER = 13;
+const KEY_CODE_ESCAPE = 27;
 const KEY_CODE_V = 118;
 const KEY_CODE_Y = 121;
 const KEY_CODE_Z = 122;
@@ -88,6 +89,12 @@ export function terminalKeyIsClipboardImagePaste(key: ParsedModifiedKey): boolea
 
 export function terminalKeyShouldIgnore(key: ParsedModifiedKey): boolean {
 	return key.eventType === 3;
+}
+
+export function terminalKeyIsEscape(key: ParsedModifiedKey): boolean {
+	const effectiveModifier = key.modifier & ~LOCK_MODIFIER_MASK;
+	if (effectiveModifier !== 0) return false;
+	return key.codepoint === KEY_CODE_ESCAPE;
 }
 
 export function terminalKeyArrowDirection(key: ParsedModifiedKey): "up" | "down" | "right" | "left" | undefined {

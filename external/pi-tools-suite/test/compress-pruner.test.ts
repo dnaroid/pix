@@ -28,8 +28,6 @@ import {
   type ToolRecord,
 } from "../src/dcp/state.js";
 import {
-  DCP_MESSAGE_IDS_CUSTOM_TYPE,
-  buildMessageIdControlMessage,
   buildMessageIdControlText,
 } from "../src/dcp/pruner-message-ids.js";
 import {
@@ -968,7 +966,7 @@ describe("DCP pruning effectiveness", () => {
 
     expect(JSON.stringify(visible)).not.toContain("[dcp-id]");
     expect(state.messageIdSnapshot.has("m001")).toBe(true);
-    expect(JSON.stringify(buildMessageIdControlMessage(state))).toContain("m001");
+    expect(JSON.stringify(buildMessageIdControlText(state))).toContain("m001");
 
     let registeredTool: any;
     registerCompressTool({ registerTool: (tool: any) => { registeredTool = tool } } as any, state, cfg);
@@ -1097,7 +1095,7 @@ describe("DCP pruning effectiveness", () => {
     expect(candidates[0]?.priority).toBe("high");
     expect(candidates[1]?.priority).toBe("medium");
     expect(JSON.stringify(pruned)).not.toContain("[dcp-id]");
-    expect(JSON.stringify(buildMessageIdControlMessage(state))).toContain("m002");
+    expect(JSON.stringify(buildMessageIdControlText(state))).toContain("m002");
     expect(state.messageMetaSnapshot.get("m002")?.priority).toBe("high");
   });
 
@@ -1673,7 +1671,7 @@ describe("DCP pruning effectiveness", () => {
           },
           {
             role: "custom",
-            customType: DCP_MESSAGE_IDS_CUSTOM_TYPE,
+            customType: "dcp-message-ids",
             content: "STALE_DCP_MESSAGE_IDS",
             timestamp: 4,
           },

@@ -10,6 +10,16 @@ import { getState, replaceState } from "./state/store.js";
 import { activateTodoStateScope, DEFAULT_PROMPT_GUIDELINES, DEFAULT_PROMPT_SNIPPET, publishTodoState, registerTodosCommand, registerTodoTool } from "./todo.js";
 import type { Task, TaskMutationParams } from "./tool/types.js";
 
+/**
+ * Renderer-relayed signal that the session is in an auto-retry cycle.
+ * Payload: `{ active: boolean }`. The SDK does not forward retry state to
+ * extensions, so the renderer emits this on the extension event bus. We use it
+ * to suppress the auto-nudge on intermediate retry agent_end events: nudging
+ * then races the pending retry continuation and surfaces a benign
+ * "Agent is already processing" extension error in other tabs.
+ */
+const RETRY_ACTIVE_EVENT = "pix:retry-active";
+
 type AgentMessageLike = { role?: unknown; stopReason?: unknown; content?: unknown };
 
 const TODO_NUDGE_LIMIT = 8;
@@ -134,6 +144,10 @@ export default function (pi: ExtensionAPI) {
 	const pendingAskUserToolCallIds = new Set<string>();
 	let suppressNextNudgeForThinkingSwitch = false;
 	let inProgressAtAgentStart = new Set<number>();
+	// True while the session is in an auto-retry cycle (relayed via the
+	// extension event bus). Suppresses the auto-nudge on intermediate retry
+	// agent_end events so it doesn't race the pending retry continuation.
+	let retryActive = false;
 
 	function registerTodoToolWithCurrentPrompt(): void {
 		const thinkingPrompt = todoThinkingEnabled ? buildThinkingPromptParts(currentModel) : {};
@@ -322,6 +336,9 @@ export default function (pi: ExtensionAPI) {
 		const delayMs = attempt === 0 ? TODO_NUDGE_INITIAL_DELAY_MS : TODO_NUDGE_IDLE_RETRY_DELAY_MS;
 		nudgeTimer = setTimeout(() => {
 			nudgeTimer = undefined;
+			// A retry-start signal may have arrived after the agent_end that
+			// scheduled this nudge. Bail out so we don't nudge mid-retry.
+			if (retryActive) return;
 			try {
 				activateTodoStateScope(ctx);
 				if (!ctx.isIdle()) {
@@ -396,6 +413,12 @@ export default function (pi: ExtensionAPI) {
 		clearNudgeTimer();
 	});
 
+	pi.events.on(RETRY_ACTIVE_EVENT, (data: unknown) => {
+		const active = data != null && typeof data === "object" && (data as { active?: unknown }).active === true;
+		retryActive = active;
+		if (active) clearNudgeTimer();
+	});
+
 	pi.on("model_select", async (event) => {
 		currentModel = event.model;
 		if (todoThinkingEnabled) registerTodoToolWithCurrentPrompt();
@@ -416,6 +439,7 @@ export default function (pi: ExtensionAPI) {
 	pi.on("agent_start", async (_event, ctx) => {
 		activateTodoStateScope(ctx);
 		pendingAskUserToolCallIds.clear();
+		retryActive = false;
 		inProgressAtAgentStart = new Set(selectVisibleTasks(getState()).filter((task) => task.status === "in_progress").map((task) => task.id));
 	});
 

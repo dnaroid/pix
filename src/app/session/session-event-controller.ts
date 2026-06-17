@@ -20,6 +20,13 @@ type ToolEntryUpdate = {
 	status?: "running" | "done";
 };
 
+/**
+ * Event bus channel the renderer emits to inform extensions that the session is
+ * in an auto-retry cycle. Payload: `{ active: boolean }`. Extensions cannot see
+ * retry state via the SDK's extension events, so the renderer relays it here.
+ */
+const RETRY_ACTIVE_EVENT = "pix:retry-active";
+
 export type AppSessionEventControllerState = {
 	toolEntryIdsByCallId: Map<string, string>;
 	pendingToolCallIdsByContentIndex: Map<number, string>;
@@ -59,6 +66,13 @@ export type AppSessionEventControllerHost = {
 	setSessionActivity(activity: SessionActivity): void;
 	updateQueuedMessageStatus(): void;
 	flushAutoUserMessages(): void;
+	/**
+	 * Emit a signal onto the active runtime's extension event bus. The SDK
+	 * strips retry/streaming state from the events it forwards to extensions,
+	 * so this is how the renderer informs extensions (terminal-bell, todo)
+	 * about lifecycle state such as an auto-retry being in progress.
+	 */
+	emitExtensionEvent(channel: string, data: unknown): void;
 	prepareWorkspaceMutation(toolName: string, args: unknown): WorkspaceMutationPreparation | undefined;
 	recordWorkspaceMutationForUserEntry(entryId: string, mutation: WorkspaceMutation): void;
 	workspaceMutationFromToolExecution(input: {
@@ -334,11 +348,13 @@ export class AppSessionEventController {
 			case "auto_retry_start":
 				this.host.setSessionActivity("running");
 				this.host.setStatus(`retry ${event.attempt}/${event.maxAttempts}`);
+				this.host.emitExtensionEvent(RETRY_ACTIVE_EVENT, { active: true });
 				break;
 			case "auto_retry_end":
 				this.host.setSessionActivity(this.host.runtime()?.session.isStreaming ? "running" : "idle");
 				this.host.restoreSessionStatus();
 				this.host.flushAutoUserMessages();
+				this.host.emitExtensionEvent(RETRY_ACTIVE_EVENT, { active: false });
 				this.host.showToast(
 					event.success ? "Retry succeeded" : `Retry failed: ${event.finalError}`,
 					event.success ? "success" : "error",

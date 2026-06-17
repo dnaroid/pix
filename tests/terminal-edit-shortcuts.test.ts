@@ -7,6 +7,7 @@ import {
 	terminalKeyArrowDirection,
 	terminalEditShortcutForControlChar,
 	terminalKeyIsClipboardImagePaste,
+	terminalKeyIsEscape,
 	terminalKeyIsShiftEnter,
 	terminalKeyShouldIgnore,
 } from "../src/app/input/terminal-edit-shortcuts.js";
@@ -80,6 +81,22 @@ describe("terminal edit shortcut parsing", () => {
 		const russianPaste = parseTerminalModifiedKeySequence("\x1b[27;5;1084~");
 		assert.equal(russianPaste.kind, "key");
 		if (russianPaste.kind === "key") assert.equal(terminalKeyIsClipboardImagePaste(russianPaste.key), true);
+	});
+
+	it("parses Kitty ESC key presses and release events as escape", () => {
+		const escapePress = parseTerminalModifiedKeySequence("\x1b[27u");
+		assert.equal(escapePress.kind, "key");
+		if (escapePress.kind === "key") {
+			assert.equal(terminalKeyIsEscape(escapePress.key), true);
+			assert.equal(terminalKeyShouldIgnore(escapePress.key), false);
+		}
+
+		const escapeRelease = parseTerminalModifiedKeySequence("\x1b[27;1:3u");
+		assert.equal(escapeRelease.kind, "key");
+		if (escapeRelease.kind === "key") {
+			assert.equal(terminalKeyIsEscape(escapeRelease.key), true);
+			assert.equal(terminalKeyShouldIgnore(escapeRelease.key), true);
+		}
 	});
 
 	it("parses Kitty arrow press and release sequences", () => {

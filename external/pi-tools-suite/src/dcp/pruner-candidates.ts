@@ -4,7 +4,6 @@ import type { CompressionCandidate, MessageCompressionCandidate } from "./pruner
 import {
   estimateMessageTokens,
   extractBlockId,
-  extractMessageId,
   messageText,
 } from "./pruner-metadata.js";
 
@@ -54,27 +53,13 @@ function resolveAddressableBoundaryId(
     return null;
   }
 
-  const messageId = extractMessageId(text);
-  const hasSnapshot = hasAddressableSnapshot(state);
+  // Inline [dcp-id] markers are no longer injected into message content; the
+  // snapshot rebuilt by injectMessageIds() is the sole addressability source.
+  // Resolve the message id by matching its (timestamp, role) in the snapshot.
+  const currentId = findCurrentMessageId(msg, state);
+  if (currentId) return { id: currentId, text };
 
-  // In hidden-marker mode, ordinary message content no longer contains
-  // provider-visible [dcp-id] lines. The authoritative addressability source is
-  // the fresh snapshot rebuilt by injectMessageIds(..., { visible: false }).
-  // Prefer that current mapping even when stale/literal dcp-id examples are
-  // present in the message text.
-  if (hasSnapshot) {
-    const currentId = findCurrentMessageId(msg, state);
-    if (currentId) return { id: currentId, text };
-
-    if (messageId && (state.messageMetaSnapshot.has(messageId) || state.messageIdSnapshot.has(messageId))) {
-      return { id: messageId, text };
-    }
-
-    return null;
-  }
-
-  if (!messageId) return null;
-  return { id: messageId, text };
+  return null;
 }
 
 export function detectCompressionCandidate(

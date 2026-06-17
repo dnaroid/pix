@@ -8,6 +8,7 @@ import {
 	terminalKeyArrowDirection,
 	terminalEditShortcutForControlChar,
 	terminalKeyIsClipboardImagePaste,
+	terminalKeyIsEscape,
 	terminalKeyIsShiftEnter,
 	terminalKeyShouldIgnore,
 } from "./terminal-edit-shortcuts.js";
@@ -148,6 +149,9 @@ export class AppInputController {
 			const modifiedArrowKeySequence = this.consumeModifiedArrowKeySequence();
 			if (modifiedArrowKeySequence === "consumed") continue;
 			if (modifiedArrowKeySequence === "pending") return;
+			const escapeKeySequence = this.consumeEscapeKeySequence();
+			if (escapeKeySequence === "consumed") continue;
+			if (escapeKeySequence === "pending") return;
 			const ignoredModifiedKeySequence = this.consumeIgnoredModifiedKeySequence();
 			if (ignoredModifiedKeySequence === "consumed") continue;
 			if (ignoredModifiedKeySequence === "pending") return;
@@ -265,7 +269,10 @@ export class AppInputController {
 		}
 
 		if (/^\x1b\[(?:8|127);\d*$/.test(this.inputBuffer)) return "pending";
-		if (this.inputBuffer.startsWith("\x1b[27;") && !this.inputBuffer.includes("~")) return "pending";
+		// modifyOtherKeys backspace looks like \x1b[27;<mod>;(8|127)~ (two semicolons, no colons).
+		// Kitty key sequences also begin with \x1b[27; (e.g. the ESC release \x1b[27;1:3u), so only
+		// treat the buffer as a pending modifyOtherKeys partial when it matches that exact shape.
+		if (/^\x1b\[27;\d+;\d*$/.test(this.inputBuffer)) return "pending";
 		return "none";
 	}
 
@@ -329,6 +336,17 @@ export class AppInputController {
 		else if (direction === "down") this.handleArrowDown();
 		else if (direction === "right") this.handleArrowRight();
 		else this.handleArrowLeft();
+		return "consumed";
+	}
+
+	private consumeEscapeKeySequence(): "consumed" | "pending" | "none" {
+		const result = parseTerminalModifiedKeySequence(this.inputBuffer);
+		if (result.kind === "pending") return "pending";
+		if (result.kind === "none") return "none";
+		if (!terminalKeyIsEscape(result.key)) return "none";
+
+		this.inputBuffer = this.inputBuffer.slice(result.key.length);
+		if (!terminalKeyShouldIgnore(result.key)) void this.host.handleEscape();
 		return "consumed";
 	}
 

@@ -179,6 +179,27 @@ describe("AppInputController terminal input", () => {
 		assert.equal(editor.text, "abc");
 	});
 
+	it("handles Kitty ESC key packets without leaking [27u into the editor", () => {
+		const { controller, editor, calls } = createController({ extensionInputUsesEditor: false, shiftPressed: false, consumeExtensionInput: false });
+
+		editor.setText("hello", "hello".length);
+		controller.handleChunk(Buffer.from("\x1b[27u\x1b[27;1:3u"));
+
+		assert.equal(editor.text, "hello");
+		assert.equal(calls.escape, 1);
+	});
+
+	it("does not swallow input after Kitty ESC release packets (regression for ESC freeze)", () => {
+		const { controller, editor, calls } = createController({ extensionInputUsesEditor: false, shiftPressed: false, consumeExtensionInput: false });
+
+		editor.setText("ab", 2);
+		// ESC press then release, immediately followed by typing that must still arrive.
+		controller.handleChunk(Buffer.from("\x1b[27u\x1b[27;1:3uXY"));
+
+		assert.equal(editor.text, "abXY");
+		assert.equal(calls.escape, 1);
+	});
+
 	it("handles clipboard image paste for Command+V terminal sequences", () => {
 		const { controller } = createController({ extensionInputUsesEditor: false, shiftPressed: false, consumeExtensionInput: false });
 		let clipboardImagePasteCalls = 0;
@@ -251,14 +272,14 @@ function createController(options: { extensionInputUsesEditor: boolean; shiftPre
 	controller: AppInputController;
 	editor: InputEditor;
 	calls: {
-		extensionInput: number; enter: number; interrupt: number; mouseEvents: unknown[]; render: number;
+		extensionInput: number; enter: number; interrupt: number; escape: number; mouseEvents: unknown[]; render: number;
 		autocompleteSlash: number; voice: number; stop: number; scrollLines: number[]; scrollPages: number[];
 		menuDeltas: number[]; historyDeltas: number[]; moveMenuResult: boolean; navigateHistoryResult: boolean;
 	};
 } {
 	const editor = new InputEditor();
 	const calls = {
-		extensionInput: 0, enter: 0, interrupt: 0, mouseEvents: [] as unknown[], render: 0,
+		extensionInput: 0, enter: 0, interrupt: 0, escape: 0, mouseEvents: [] as unknown[], render: 0,
 		autocompleteSlash: 0, voice: 0, stop: 0, scrollLines: [] as number[], scrollPages: [] as number[],
 		menuDeltas: [] as number[], historyDeltas: [] as number[], moveMenuResult: false, navigateHistoryResult: false,
 	};
@@ -289,7 +310,7 @@ function createController(options: { extensionInputUsesEditor: boolean; shiftPre
 		handleInterrupt: async () => {
 			calls.interrupt += 1;
 		},
-		handleEscape: async () => undefined,
+		handleEscape: async () => { calls.escape += 1; },
 		handleDirectPopupInput: () => false,
 		autocompleteModel: () => false,
 		autocompleteThinking: () => false,
