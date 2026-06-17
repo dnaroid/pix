@@ -35,6 +35,7 @@ export type CommandRegistryActions = {
 	runResumeCommand(): Promise<void>;
 	runNewSessionCommand(): Promise<void>;
 	runNewTabCommand(): Promise<void>;
+	runDeleteCommand(argumentsText: string): Promise<void>;
 	runCompactCommand(customInstructions?: string): Promise<void>;
 };
 
@@ -285,6 +286,14 @@ export function createSlashCommands(actions: CommandRegistryActions, host: Comma
 			kind: "builtin",
 			keywords: ["tab", "session", "fresh", "new"],
 			run: () => actions.runNewTabCommand(),
+		},
+		{
+			name: "delete",
+			description: "Delete the current (or specified) session file plus its sidecar DCP state",
+			kind: "builtin",
+			keywords: ["remove", "destroy", "purge", "session", "sidecar", "dcp"],
+			allowArguments: true,
+			run: (argumentsText) => actions.runDeleteCommand(argumentsText),
 		},
 		{
 			name: "compact",

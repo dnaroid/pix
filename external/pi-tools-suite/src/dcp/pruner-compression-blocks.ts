@@ -1,6 +1,8 @@
+import type { DcpConfig } from "./config.js";
 import type { DcpState } from "./state.js";
 import { PASSTHROUGH_ROLES, estimateMessageTokens } from "./pruner-metadata.js";
 import { stableMessageId } from "./pruner-message-ids.js";
+import { writeDcpDebugLog } from "./debug-log.js";
 
 function messageMatchesBoundary(msg: any, messageIndex: number, stableId: string | undefined, timestamp: number): boolean {
   if (stableId && stableMessageId(msg, messageIndex) === stableId) return true;
@@ -23,7 +25,7 @@ function collectToolCallIds(messages: any[]): Set<string> {
   return ids;
 }
 
-export function syncCompressionBlocks(messages: any[], state: DcpState): void {
+export function syncCompressionBlocks(messages: any[], state: DcpState, config: DcpConfig): void {
   if (state.compressionBlocks.length === 0) return;
 
   const toolCallIds = collectToolCallIds(messages);
@@ -38,6 +40,13 @@ export function syncCompressionBlocks(messages: any[], state: DcpState): void {
     ) {
       block.active = false;
       block.deactivatedReason = "missing-origin-compress-call";
+      writeDcpDebugLog(config, "block.auto_deactivated", {
+        blockId: `b${block.id}`,
+        reason: "missing-origin-compress-call",
+        topic: block.topic,
+        createdByToolCallId: block.createdByToolCallId,
+        activeBlocksAfter: state.compressionBlocks.filter((b) => b.active).length,
+      });
       continue;
     }
 
@@ -49,6 +58,15 @@ export function syncCompressionBlocks(messages: any[], state: DcpState): void {
     if (startIdx === -1 || endIdx === -1) {
       block.active = false;
       block.deactivatedReason = "missing-origin-message";
+      writeDcpDebugLog(config, "block.auto_deactivated", {
+        blockId: `b${block.id}`,
+        reason: "missing-origin-message",
+        topic: block.topic,
+        missingBoundary: startIdx === -1 ? "start" : "end",
+        startMessageId: block.startMessageId,
+        endMessageId: block.endMessageId,
+        activeBlocksAfter: state.compressionBlocks.filter((b) => b.active).length,
+      });
     }
   }
 }

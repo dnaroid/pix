@@ -282,6 +282,7 @@ describe("command registry", () => {
 		assert.ok(calls.includes("runResumePathCommand:/tmp/session.jsonl"));
 		assert.ok(calls.includes("runNewSessionCommand"));
 		assert.ok(calls.includes("runNewTabCommand"));
+		assert.ok(calls.includes("runDeleteCommand: args "));
 		assert.ok(calls.includes("runCompactCommand:args"));
 	});
 });
@@ -325,6 +326,7 @@ function noopActions(): CommandRegistryActions {
 		runResumeCommand: noop,
 		runNewSessionCommand: noop,
 		runNewTabCommand: noop,
+		runDeleteCommand: noop,
 		runCompactCommand: noop,
 	};
 }
@@ -366,6 +368,7 @@ function recordingActions(calls: string[]): CommandRegistryActions {
 		runResumeCommand: record("runResumeCommand"),
 		runNewSessionCommand: record("runNewSessionCommand"),
 		runNewTabCommand: record("runNewTabCommand"),
+		runDeleteCommand: record("runDeleteCommand"),
 		runCompactCommand: record("runCompactCommand"),
 	};
 }

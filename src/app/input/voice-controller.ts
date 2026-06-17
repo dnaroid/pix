@@ -126,7 +126,7 @@ export class AppVoiceController {
 			case "installing":
 				return `${APP_ICONS.microphone}${languageLabel} ${APP_ICONS.timerSand}`;
 			case "downloading":
-				return `${APP_ICONS.down}${languageLabel}`;
+				return `${APP_ICONS.microphone}${languageLabel} ${APP_ICONS.timerSand}`;
 			case "loading":
 				return `${APP_ICONS.microphone}${languageLabel} ${APP_ICONS.timerSand}`;
 			case "listening":

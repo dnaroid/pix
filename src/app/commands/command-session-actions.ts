@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rm } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getAgentDir, type ContextUsage } from "@earendil-works/pi-coding-agent";
 import type { CommandControllerHost } from "./command-host.js";
@@ -301,6 +301,89 @@ export class SessionCommandActions {
 		}
 	}
 
+	async runDeleteCommand(argumentsText: string): Promise<void> {
+		const runtime = getIdleRuntime(this.host, "delete");
+		if (!runtime) return;
+
+		const sessionManager = runtime.session.sessionManager;
+		const currentSessionFile = sessionManager.getSessionFile();
+		const currentSessionId = sessionManager.getSessionId();
+
+		const targetArgument = argumentsText.trim();
+		const isCurrent = !targetArgument;
+
+		const targetSessionFile = targetArgument ? resolve(runtime.cwd, targetArgument) : currentSessionFile;
+		if (!targetSessionFile) {
+			this.host.addEntry({ id: createId("system"), kind: "system", text: "Nothing to delete: this session is in-memory and not persisted." });
+			this.host.toast.info("Nothing to delete");
+			this.host.setSessionStatus(runtime.session);
+			return;
+		}
+
+		const targetSessionId = parseSessionIdFromFileName(targetSessionFile) ?? currentSessionId;
+
+		const confirm = await this.host.showMenu<boolean>(
+			[
+				{
+					value: true,
+					label: `Yes, delete ${isCurrent ? "the current session" : basename(targetSessionFile)}`,
+					description: "This permanently removes the session file and any sidecar data. This cannot be undone.",
+					variant: "error",
+				},
+				{ value: false, label: "Cancel" },
+			],
+			{ title: "Delete session?", searchable: false, preserveStatus: true },
+		);
+		if (confirm !== true) {
+			this.host.addEntry({ id: createId("system"), kind: "system", text: "Delete cancelled." });
+			this.host.setSessionStatus(runtime.session);
+			return;
+		}
+
+		this.host.setStatus("deleting session");
+		this.host.render();
+
+		const sidecarRemoved = await this.removeDcpSidecarState(dirname(targetSessionFile), targetSessionId).catch(() => false);
+		await rm(targetSessionFile, { force: true }).catch(() => undefined);
+
+		const deleteCurrent = isCurrent || targetSessionFile === currentSessionFile;
+		if (deleteCurrent) {
+			await this.host.awaitCurrentSessionExtensions(runtime);
+			const result = await runtime.newSession();
+			if (result.cancelled) {
+				this.host.addEntry({ id: createId("system"), kind: "system", text: "Delete succeeded, but new session was cancelled." });
+				this.host.setSessionStatus(runtime.session);
+				return;
+			}
+
+			this.host.resetSessionView();
+			this.host.loadSessionHistory();
+			this.host.addEntry({
+				id: createId("system"),
+				kind: "system",
+				text: `Deleted session ${targetSessionId}. ${sidecarRemoved ? "Sidecar DCP state removed. " : ""}Started a new session. cwd=${runtime.cwd}`,
+			});
+			if (runtime.modelFallbackMessage) this.host.addEntry({ id: createId("system"), kind: "system", text: runtime.modelFallbackMessage });
+			this.host.setSessionStatus(runtime.session);
+		} else {
+			this.host.addEntry({
+				id: createId("system"),
+				kind: "system",
+				text: `Deleted session file ${targetSessionFile}${sidecarRemoved ? " and its sidecar DCP state" : ""}.`,
+			});
+			this.host.setSessionStatus(runtime.session);
+		}
+		this.host.toast.success("Session deleted");
+	}
+
+	private async removeDcpSidecarState(sessionDir: string, sessionId: string): Promise<boolean> {
+		if (!sessionId) return false;
+		const safeName = `${sessionId.replace(/[^a-zA-Z0-9._-]/g, "_")}.json`;
+		const statePath = join(sessionDir, "dcp-state", safeName);
+		await rm(statePath, { force: true });
+		return true;
+	}
+
 	async runNewSessionCommand(): Promise<void> {
 		const runtime = getIdleRuntime(this.host, "new");
 		if (!runtime) return;
@@ -371,4 +454,10 @@ function trimDecimal(value: number): string {
 function splitUpdateArguments(argumentsText: string): string[] {
 	const trimmed = argumentsText.trim();
 	return trimmed ? trimmed.split(/\s+/u) : [];
+}
+
+function parseSessionIdFromFileName(sessionFile: string): string | undefined {
+	const base = basename(sessionFile).replace(/\.jsonl$/iu, "");
+	const separator = base.indexOf("_");
+	return separator >= 0 ? base.slice(separator + 1) : undefined;
 }

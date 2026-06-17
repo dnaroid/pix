@@ -223,12 +223,12 @@ describe("AppVoiceController", () => {
 		assert.equal(stops, 1);
 	});
 
-	it("uses the download icon in place of the microphone while downloading a model", () => {
+	it("keeps the microphone icon with a busy spinner while downloading a model", () => {
 		const controller = new AppVoiceController(fakeHost(), dictationConfig({ language: "ru" }));
 		(controller as unknown as { state: VoiceInputState }).state = "downloading";
 
-		assert.equal(controller.statusWidgetText(), `${APP_ICONS.down} RU`);
-		assert.ok(!controller.statusWidgetText().includes(APP_ICONS.microphone));
+		assert.equal(controller.statusWidgetText(), `${APP_ICONS.microphone} RU ${APP_ICONS.timerSand}`);
+		assert.ok(!controller.statusWidgetText().includes(APP_ICONS.down));
 	});
 
 	it("initializes from the saved dictation language when it is enabled", () => {

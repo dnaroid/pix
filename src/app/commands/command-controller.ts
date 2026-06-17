@@ -56,6 +56,7 @@ export class AppCommandController {
 			runReloadCommand: () => this.sessionActions.runReloadCommand(),
 			runNewSessionCommand: () => this.sessionActions.runNewSessionCommand(),
 			runNewTabCommand: () => this.host.openNewTab(),
+			runDeleteCommand: (argumentsText) => this.sessionActions.runDeleteCommand(argumentsText),
 			runCompactCommand: (customInstructions) => this.sessionActions.runCompactCommand(customInstructions),
 			runForkCommand: (argumentsText) => this.navigationActions.runForkCommand(argumentsText),
 			runCloneCommand: () => this.navigationActions.runCloneCommand(),

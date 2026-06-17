@@ -64,7 +64,7 @@ export function applyPruning(
 
   // 2. Reconcile persisted compression blocks with the current raw context,
   // then apply active compression blocks.
-  syncCompressionBlocks(msgs, state);
+  syncCompressionBlocks(msgs, state, config);
   applyCompressionBlocks(msgs, state);
 
   // 2b. Post-compression safety net: remove any orphaned tool pairs that the
