@@ -1,11 +1,13 @@
 export const DISABLE_TERMINAL_OUTPUT_BUFFER_ENV = "PIX_DISABLE_TERMINAL_OUTPUT_BUFFER";
 export const TERMINAL_OUTPUT_BUFFER_ENV = "PIX_TERMINAL_OUTPUT_BUFFER";
 
-const FRAME_REGIONS = ["tabs", "conversation", "inputStatus"] as const;
+const ANSI_RESET = "\x1b[0m";
+const CLEAR_LINE_PREFIX = (row: number) => `\x1b[${row};1H${ANSI_RESET}\x1b[2K`;
 
-export type TerminalOutputFrameRegion = typeof FRAME_REGIONS[number];
-export type TerminalOutputRegion = TerminalOutputFrameRegion | "statusLine";
-export type TerminalOutputFrame = Partial<Record<TerminalOutputFrameRegion, string>>;
+export type TerminalOutputFrameRow = { row: number; output: string };
+export type TerminalOutputFrame = readonly TerminalOutputFrameRow[];
+
+export type TerminalOutputRegion = "statusLine";
 
 export type TerminalOutputBufferOptions = {
 	enabled?: boolean;
@@ -14,27 +16,30 @@ export type TerminalOutputBufferOptions = {
 
 export class TerminalOutputBuffer {
 	private readonly enabled: boolean;
-	private readonly previousByRegion = new Map<TerminalOutputRegion, string>();
+	private readonly previousByRow = new Map<number, string>();
+	private previousStatusLine: string | undefined;
 
 	constructor(options: TerminalOutputBufferOptions = {}) {
 		this.enabled = options.enabled ?? !terminalOutputBufferDisabled(options.env ?? process.env);
 	}
 
 	diffFrame(frame: TerminalOutputFrame): string {
-		const outputByRegion: Record<TerminalOutputFrameRegion, string> = {
-			tabs: frame.tabs ?? "",
-			conversation: frame.conversation ?? "",
-			inputStatus: frame.inputStatus ?? "",
-		};
-
-		if (!this.enabled) return FRAME_REGIONS.map((region) => outputByRegion[region]).join("");
+		if (!this.enabled) return frame.map((entry) => entry.output).join("");
 
 		const chunks: string[] = [];
-		for (const region of FRAME_REGIONS) {
-			const output = outputByRegion[region];
-			if (this.previousByRegion.get(region) === output) continue;
-			this.previousByRegion.set(region, output);
+		const seenRows = new Set<number>();
+
+		for (const { row, output } of frame) {
+			seenRows.add(row);
+			if (this.previousByRow.get(row) === output) continue;
+			this.previousByRow.set(row, output);
 			if (output.length > 0) chunks.push(output);
+		}
+
+		for (const row of this.previousByRow.keys()) {
+			if (seenRows.has(row)) continue;
+			this.previousByRow.delete(row);
+			chunks.push(CLEAR_LINE_PREFIX(row));
 		}
 
 		return chunks.join("");
@@ -42,13 +47,17 @@ export class TerminalOutputBuffer {
 
 	diff(region: TerminalOutputRegion, output: string): string {
 		if (!this.enabled) return output;
-		if (this.previousByRegion.get(region) === output) return "";
-		this.previousByRegion.set(region, output);
+		if (region === "statusLine") {
+			if (this.previousStatusLine === output) return "";
+			this.previousStatusLine = output;
+			return output;
+		}
 		return output;
 	}
 
 	reset(): void {
-		this.previousByRegion.clear();
+		this.previousByRow.clear();
+		this.previousStatusLine = undefined;
 	}
 }
 

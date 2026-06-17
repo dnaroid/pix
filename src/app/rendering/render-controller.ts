@@ -10,7 +10,7 @@ import type { TabLineRenderer } from "./tab-line-renderer.js";
 import type { RenderedLine } from "../types.js";
 import { renderToastOverlays } from "./toast-renderer.js";
 import type { AppToastController } from "./toast-controller.js";
-import { TerminalOutputBuffer, type TerminalOutputFrameRegion } from "../terminal/terminal-output-buffer.js";
+import { TerminalOutputBuffer, type TerminalOutputFrameRow } from "../terminal/terminal-output-buffer.js";
 import { ANSI_RESET, colorLine, colorize, type Theme } from "../../theme.js";
 import { stringDisplayWidth } from "../../terminal-width.js";
 import { padOrTrimPlain } from "./render-text.js";
@@ -119,20 +119,9 @@ export class AppRenderController {
 		this.deps.mouseController.statusVoiceMicTarget = undefined;
 		this.deps.mouseController.statusVoiceLanguageTarget = undefined;
 		this.deps.mouseController.tabLineTargets.length = 0;
-		const frameLines: Record<TerminalOutputFrameRegion, string[]> = {
-			tabs: [],
-			conversation: [],
-			inputStatus: [],
-		};
-		const inputStatusStartRow = toScreenRow(inputSeparatorRow);
-		const regionForOverlayRow = (row: number): TerminalOutputFrameRegion => {
-			if (row >= statusRow) return "inputStatus";
-			if (topReservedRows > 0 && row <= topReservedRows) return "tabs";
-			if (row >= inputStatusStartRow) return "inputStatus";
-			return "conversation";
-		};
-		const appendFrameOutput = (region: TerminalOutputFrameRegion, row: number, output: string): void => {
-			if (row >= 1 && row <= rows) frameLines[region].push(output);
+		const frameRows = new Map<number, string>();
+		const appendFrameOutput = (row: number, output: string): void => {
+			if (row >= 1 && row <= rows) frameRows.set(row, `${frameRows.get(row) ?? ""}${output}`);
 		};
 		const setRenderedBackground = (row: number, background: string | undefined): void => {
 			if (background !== undefined) this.deps.mouseController.renderedRowBackgrounds.set(row, background);
@@ -140,14 +129,14 @@ export class AppRenderController {
 		if (topReservedRows > 0) {
 			this.deps.mouseController.tabLineTargets.push(...tabLayout.targets.map((target) => ({ ...target, row: tabRow })));
 			this.deps.mouseController.renderedRowTexts.set(tabRow, tabLayout.text);
-			appendFrameOutput("tabs", tabRow, this.renderFrameRow(tabRow, this.deps.tabLineRenderer.render(tabRow, tabLayout, columns)));
+			appendFrameOutput(tabRow, this.renderFrameRow(tabRow, this.deps.tabLineRenderer.render(tabRow, tabLayout, columns)));
 			if (topReservedRows > 1) {
 				this.deps.mouseController.tabLineTargets.push(...tabLayout.targets
 					.filter((target) => target.kind === "new-tab")
 					.map((target) => ({ ...target, row: tabBottomRow })));
 				const bottomText = this.deps.tabLineRenderer.bottomText(tabLayout, columns);
 				this.deps.mouseController.renderedRowTexts.set(tabBottomRow, bottomText);
-				appendFrameOutput("tabs", tabBottomRow, this.renderFrameRow(tabBottomRow, this.deps.tabLineRenderer.renderBottom(tabBottomRow, tabLayout, columns)));
+				appendFrameOutput(tabBottomRow, this.renderFrameRow(tabBottomRow, this.deps.tabLineRenderer.renderBottom(tabBottomRow, tabLayout, columns)));
 			}
 		} else {
 			this.deps.mouseController.tabLineTargets.push(...tabLayout.targets
@@ -161,12 +150,12 @@ export class AppRenderController {
 			if (rendered?.imageTargets?.length) this.deps.mouseController.renderedImageTargets.set(row, rendered.imageTargets);
 			this.deps.mouseController.renderedRowTexts.set(row, rendered?.text ?? "");
 			setRenderedBackground(row, rendered?.backgroundOverride);
-			appendFrameOutput("conversation", row, this.renderFrameRow(row, this.deps.screenStyler.styleBaseLine(row, rendered, conversationColumns)));
+			appendFrameOutput(row, this.renderFrameRow(row, this.deps.screenStyler.styleBaseLine(row, rendered, conversationColumns)));
 		}
 		const loadingConversationOverlay = this.renderConversationLoadingOverlay(this.deps.loadingConversationOverlayText?.(), conversationColumns, topReservedRows, bodyHeight);
 		if (loadingConversationOverlay) {
 			this.deps.mouseController.renderedRowTexts.set(loadingConversationOverlay.row, loadingConversationOverlay.text);
-			appendFrameOutput("conversation", loadingConversationOverlay.row, this.renderFrameRow(loadingConversationOverlay.row, loadingConversationOverlay.output));
+			appendFrameOutput(loadingConversationOverlay.row, this.renderFrameRow(loadingConversationOverlay.row, loadingConversationOverlay.output));
 		}
 		const aboveEditorStartRow = inputSeparatorRow + 1;
 		for (let index = 0; index < aboveEditorLines.length; index += 1) {
@@ -177,7 +166,7 @@ export class AppRenderController {
 			if (rendered.line?.imageTargets?.length) this.deps.mouseController.renderedImageTargets.set(row, rendered.line.imageTargets);
 			this.deps.mouseController.renderedRowTexts.set(row, rendered.text);
 			setRenderedBackground(row, rendered.line?.backgroundOverride);
-			appendFrameOutput("inputStatus", row, this.renderFrameRow(row, rendered.output(row)));
+			appendFrameOutput(row, this.renderFrameRow(row, rendered.output(row)));
 		}
 
 		if (inputSeparatorRow > 1) {
@@ -185,7 +174,7 @@ export class AppRenderController {
 			const row = toScreenRow(inputSeparatorRow);
 			if (row < statusRow) {
 				this.deps.mouseController.renderedRowTexts.set(row, separatorText);
-				appendFrameOutput("inputStatus", row, this.renderFrameRow(row, this.deps.screenStyler.styleLine(row, separatorText, columns, {
+				appendFrameOutput(row, this.renderFrameRow(row, this.deps.screenStyler.styleLine(row, separatorText, columns, {
 					foreground: this.deps.theme.colors.tabBorder,
 				})));
 			}
@@ -199,7 +188,7 @@ export class AppRenderController {
 
 			const tagColor = this.deps.theme.colors.accent;
 			const styledLine = this.deps.screenStyler.styleInputLine(row, inputLine, tagSpans, suggestionSpans, columns, tagColor, this.deps.theme.colors.muted);
-			appendFrameOutput("inputStatus", row, this.renderFrameRow(row, styledLine));
+			appendFrameOutput(row, this.renderFrameRow(row, styledLine));
 		}
 		if (renderedInput.scrollBar && columns > 0) {
 			const scrollBar = renderedInput.scrollBar;
@@ -207,7 +196,7 @@ export class AppRenderController {
 				const row = toScreenRow(inputStartRow + renderedInput.editorStartRowOffset + offset);
 				const isThumb = offset >= scrollBar.top && offset < scrollBar.top + scrollBar.height;
 				const marker = isThumb ? " " : "│";
-				appendFrameOutput("inputStatus", row, `\x1b[${row};${columns}H${colorize(marker, {
+				appendFrameOutput(row, `\x1b[${row};${columns}H${colorize(marker, {
 					foreground: this.deps.theme.colors.inputBorder,
 					...(isThumb ? { background: this.deps.theme.colors.inputBorder } : {}),
 				})}`);
@@ -217,7 +206,7 @@ export class AppRenderController {
 			const separatorText = inputFrameLine(columns, "bottom");
 			const row = toScreenRow(inputBottomSeparatorRow);
 			this.deps.mouseController.renderedRowTexts.set(row, separatorText);
-			appendFrameOutput("inputStatus", row, this.renderFrameRow(row, this.deps.screenStyler.styleLine(row, separatorText, columns, {
+			appendFrameOutput(row, this.renderFrameRow(row, this.deps.screenStyler.styleLine(row, separatorText, columns, {
 				foreground: this.deps.theme.colors.tabBorder,
 			})));
 		}
@@ -230,17 +219,17 @@ export class AppRenderController {
 			if (rendered.line?.imageTargets?.length) this.deps.mouseController.renderedImageTargets.set(row, rendered.line.imageTargets);
 			this.deps.mouseController.renderedRowTexts.set(row, rendered.text);
 			setRenderedBackground(row, rendered.line?.backgroundOverride);
-			appendFrameOutput("inputStatus", row, this.renderFrameRow(row, rendered.output(row)));
+			appendFrameOutput(row, this.renderFrameRow(row, rendered.output(row)));
 		}
 		const statusLayout = this.deps.statusLineRenderer.layout(columns);
 		this.updateStatusMouseState(statusLayout, statusRow);
-		appendFrameOutput("inputStatus", statusRow, this.renderFrameRow(statusRow, this.deps.statusLineRenderer.render(statusRow, statusLayout, columns)));
+		appendFrameOutput(statusRow, this.renderFrameRow(statusRow, this.deps.statusLineRenderer.render(statusRow, statusLayout, columns)));
 
 		const voiceProgressOverlay = this.renderVoiceProgressOverlay(this.deps.voiceProgressOverlayText(), columns, statusRow);
 		if (voiceProgressOverlay) {
 			this.deps.mouseController.renderedRowTexts.set(voiceProgressOverlay.row, voiceProgressOverlay.text);
 			setRenderedBackground(voiceProgressOverlay.row, this.deps.theme.colors.info);
-			appendFrameOutput(regionForOverlayRow(voiceProgressOverlay.row), voiceProgressOverlay.row, this.renderFrameRow(voiceProgressOverlay.row, voiceProgressOverlay.output));
+			appendFrameOutput(voiceProgressOverlay.row, this.renderFrameRow(voiceProgressOverlay.row, voiceProgressOverlay.output));
 		}
 
 		if (defaultOverlayLines.length > 0 && popupMenuPlacement === "default") {
@@ -253,7 +242,7 @@ export class AppRenderController {
 				this.deps.mouseController.renderedTargets.set(row, line?.target ?? fallbackTarget);
 				this.deps.mouseController.renderedRowTexts.set(row, this.deps.popupMenus.overlayPlainText(line ?? { text: "" }, columns));
 				setRenderedBackground(row, line?.backgroundOverride);
-				appendFrameOutput(regionForOverlayRow(row), row, this.renderFrameRow(row, this.deps.popupMenus.styleOverlayLine(row, line ?? { text: "" }, columns)));
+				appendFrameOutput(row, this.renderFrameRow(row, this.deps.popupMenus.styleOverlayLine(row, line ?? { text: "" }, columns)));
 			}
 		}
 		if (underTabsOverlayLines.length > 0 && popupMenuPlacement === "under-tabs") {
@@ -265,7 +254,7 @@ export class AppRenderController {
 				this.deps.mouseController.renderedTargets.set(row, line?.target ?? fallbackTarget);
 				this.deps.mouseController.renderedRowTexts.set(row, this.deps.popupMenus.overlayPlainText(line ?? { text: "" }, columns));
 				setRenderedBackground(row, line?.backgroundOverride);
-				appendFrameOutput(regionForOverlayRow(row), row, this.renderFrameRow(row, this.deps.popupMenus.styleOverlayLine(row, line ?? { text: "" }, columns)));
+				appendFrameOutput(row, this.renderFrameRow(row, this.deps.popupMenus.styleOverlayLine(row, line ?? { text: "" }, columns)));
 			}
 		}
 
@@ -274,7 +263,7 @@ export class AppRenderController {
 			const rowText = this.deps.mouseController.renderedRowTexts.get(row) ?? "";
 			if (toastOverlay.target) this.deps.mouseController.renderedTargets.set(row, toastOverlay.target);
 			this.deps.mouseController.renderedRowTexts.set(row, overlayText(rowText, toastOverlay.column, toastOverlay.text));
-			appendFrameOutput(regionForOverlayRow(row), row, `\x1b[${row};${toastOverlay.column}H${toastOverlay.output}`);
+			appendFrameOutput(row, `\x1b[${row};${toastOverlay.column}H${toastOverlay.output}`);
 		}
 		if (topReservedRows === 0) {
 			const newTabTarget = tabLayout.targets.find((target) => target.kind === "new-tab");
@@ -282,7 +271,7 @@ export class AppRenderController {
 				const plusColumn = newTabTarget.endColumn - stringDisplayWidth(APP_ICONS.plus);
 				const rowText = this.deps.mouseController.renderedRowTexts.get(tabRow) ?? "";
 				this.deps.mouseController.renderedRowTexts.set(tabRow, overlayText(rowText, plusColumn, APP_ICONS.plus));
-				appendFrameOutput(regionForOverlayRow(tabRow), tabRow, `\x1b[${tabRow};${plusColumn}H${colorize(APP_ICONS.plus, {
+				appendFrameOutput(tabRow, `\x1b[${tabRow};${plusColumn}H${colorize(APP_ICONS.plus, {
 					foreground: this.deps.theme.colors.info,
 					bold: true,
 				})}`);
@@ -292,11 +281,8 @@ export class AppRenderController {
 		const cursorRow = toScreenRow(inputStartRow + renderedInput.cursorRowOffset);
 		const cursor = renderedInput.cursorVisible ? `\x1b[${cursorRow};${renderedInput.cursorColumn}H${SHOW_CURSOR}` : "";
 		if (this.deps.mouseController.consumeClickFlashDirty?.()) this.outputBuffer.reset();
-		const output = this.outputBuffer.diffFrame({
-			tabs: frameLines.tabs.join(""),
-			conversation: frameLines.conversation.join(""),
-			inputStatus: frameLines.inputStatus.join(""),
-		});
+		const frame: TerminalOutputFrameRow[] = [...frameRows.entries()].map(([row, output]) => ({ row, output }));
+		const output = this.outputBuffer.diffFrame(frame);
 		process.stdout.write(`${DISABLE_TERMINAL_WRAP}${HIDE_CURSOR}${output}${this.renderClickFlashOverlay(columns, rows)}${cursor}`);
 	}
 

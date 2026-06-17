@@ -8,22 +8,44 @@ import {
 	terminalOutputBufferDisabled,
 } from "../src/app/terminal/terminal-output-buffer.js";
 
+const row = (value: number, output: string) => ({ row: value, output });
+
 describe("TerminalOutputBuffer", () => {
-	it("diffs frame regions independently", () => {
+	it("diffs frame rows independently", () => {
 		const buffer = new TerminalOutputBuffer({ enabled: true });
 
-		assert.equal(buffer.diffFrame({ tabs: "tabs", conversation: "chat", inputStatus: "input" }), "tabschatinput");
-		assert.equal(buffer.diffFrame({ tabs: "tabs", conversation: "chat", inputStatus: "input" }), "");
-		assert.equal(buffer.diffFrame({ tabs: "tabs", conversation: "chat+scroll", inputStatus: "input" }), "chat+scroll");
-		assert.equal(buffer.diffFrame({ tabs: "tabs!", conversation: "chat+scroll", inputStatus: "input!" }), "tabs!input!");
+		assert.equal(buffer.diffFrame([row(1, "tabs"), row(3, "chat"), row(5, "input")]), "tabschatinput");
+		assert.equal(buffer.diffFrame([row(1, "tabs"), row(3, "chat"), row(5, "input")]), "");
+		assert.equal(buffer.diffFrame([row(1, "tabs"), row(3, "chat+scroll"), row(5, "input")]), "chat+scroll");
+		assert.equal(buffer.diffFrame([row(1, "tabs!"), row(3, "chat+scroll"), row(5, "input!")]), "tabs!input!");
+	});
+
+	it("clears rows that disappear between frames", () => {
+		const buffer = new TerminalOutputBuffer({ enabled: true });
+
+		buffer.diffFrame([row(3, "chat"), row(4, "chat2")]);
+		const cleared = buffer.diffFrame([row(3, "chat")]);
+
+		assert.match(cleared, /\x1b\[4;1H/);
+		assert.match(cleared, /\x1b\[2K/);
 	});
 
 	it("can be disabled for full repaint output", () => {
 		const buffer = new TerminalOutputBuffer({ enabled: false });
-		const frame = { tabs: "tabs", conversation: "chat", inputStatus: "input" };
+		const frame = [row(1, "tabs"), row(3, "chat"), row(5, "input")];
 
 		assert.equal(buffer.diffFrame(frame), "tabschatinput");
 		assert.equal(buffer.diffFrame(frame), "tabschatinput");
+	});
+
+	it("diffs status line separately and resets together", () => {
+		const buffer = new TerminalOutputBuffer({ enabled: true });
+
+		assert.equal(buffer.diff("statusLine", "status"), "status");
+		assert.equal(buffer.diff("statusLine", "status"), "");
+		assert.equal(buffer.diff("statusLine", "status2"), "status2");
+		buffer.reset();
+		assert.equal(buffer.diff("statusLine", "status"), "status");
 	});
 });
 
