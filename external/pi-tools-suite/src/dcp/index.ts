@@ -9,10 +9,12 @@ import {
 	resetState,
 	createInputFingerprint,
 	restoreState,
+	inheritCompressionBlocks,
 } from "./state.js"
 import {
 	cleanupStaleDcpStateFiles,
 	loadDcpState,
+	loadDcpStateFromSessionFile,
 	resetDcpPersistenceDedup,
 	saveDcpState,
 } from "./state-persistence.js"
@@ -231,7 +233,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 	registerCommands(pi, state, config)
 
 	// ── 5. session_start: restore state from session entries ──────────────────
-	pi.on("session_start", async (_event, ctx) => {
+	pi.on("session_start", async (event, ctx) => {
 		// Reset to a clean slate first.
 		resetState(state)
 
@@ -250,11 +252,37 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 		})
 		restoreState(state, await loadDcpState(ctx))
 
+		// fork/resume/new sessions inherit the source conversation but get a fresh
+		// sidecar; inherit the previous session's compression blocks so they are
+		// not silently lost (which previously forced re-compressing all history).
+		if (state.compressionBlocks.length === 0 && event.previousSessionFile) {
+			try {
+				const inherited = await loadDcpStateFromSessionFile(event.previousSessionFile)
+				const added = inheritCompressionBlocks(state, inherited)
+				if (added > 0) {
+					writeDcpDebugLog(configForContext(ctx), "session_start.inherited_blocks", {
+						reason: event.reason,
+						previousSessionFile: event.previousSessionFile,
+						added,
+						totalBlocks: state.compressionBlocks.length,
+					}, ctx)
+					// Persist inherited state into this session's own sidecar so a later
+					// reload restores it directly.
+					await saveDcpState(ctx, state)
+				}
+			} catch {
+				// Inheritance is best-effort; never block session startup.
+			}
+		}
+
 		// Headless by design: no extension status/footer/widgets are rendered.
 	})
 
 	// ── 6. session_shutdown: save state ───────────────────────────────────────
 	pi.on("session_shutdown", async (_event, ctx) => {
+		// Force-flush: bypass the dedup hash so the final snapshot is always
+		// written, guaranteeing the next session_start can restore it.
+		resetDcpPersistenceDedup()
 		await saveDcpState(ctx, state)
 	})
 

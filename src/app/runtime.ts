@@ -371,7 +371,12 @@ export async function createPixRuntime(options: AppOptions, runtimeOptions: Crea
 		return {
 			...created,
 			services,
-			diagnostics: services.diagnostics,
+			// Snapshot diagnostics per-runtime. When services are reused across
+			// tabs (reuseServicesFrom), services.diagnostics is a shared array —
+			// giving each runtime its own copy prevents one tab's creation
+			// errors (model-not-found, extension flags, provider registration)
+			// from leaking into another tab's diagnostics surface.
+			diagnostics: [...(services.diagnostics ?? [])],
 		};
 	};
 

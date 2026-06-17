@@ -11,6 +11,16 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
   // Vision-capable model used by GLM's lookup tool. Remove or set to null to disable lookup.
   "lookupModel": "openai-codex/gpt-5.4-mini",
   "terminalBell": { "sound": true },
+  // comment-checker: nudges the agent to remove AI-slop code comments it just
+  // added via write/edit/apply_patch. Net-new comments are classified and a
+  // short notice is appended to the tool result when they look unnecessary
+  // (filler phrasing, restating code, decorative separators, generic
+  // paraphrasing). TODO/FIXME, license headers, docstrings, pragmas, linter
+  // directives, and shebangs are never flagged. Strictness:
+  //   "conservative" — only obvious AI-slop (filler/decorative);
+  //   "balanced"     — + restate-code + generic-explanation (default);
+  //   "aggressive"   — any non-valuable net-new comment.
+  "commentChecker": { "enabled": true, "strictness": "balanced" },
   // "telegramMirror": {
   //   "enabled": true,
   //   "botToken": "123456789:ABCdef...",

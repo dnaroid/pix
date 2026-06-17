@@ -76,6 +76,35 @@ export async function loadDcpState(ctx: ExtensionContext): Promise<SerializedDcp
 	}
 }
 
+/**
+ * Load the DCP sidecar for an arbitrary session file path, e.g. the previous
+ * session during fork/resume/new. Resolves the sidecar via the session file's
+ * first-line session id rather than the live session manager, so it works
+ * independent of the current ctx.sessionManager state.
+ */
+export async function loadDcpStateFromSessionFile(
+	sessionFile: string,
+): Promise<SerializedDcpState | undefined> {
+	if (!sessionFile) return undefined
+
+	try {
+		const firstLine = (await readFile(sessionFile, "utf8")).split("\n", 1)[0]?.trim()
+		if (!firstLine) return undefined
+		const parsed = JSON.parse(firstLine) as { type?: string; id?: unknown }
+		if (parsed.type !== "session" || typeof parsed.id !== "string" || !parsed.id) {
+			return undefined
+		}
+		const stateDir = join(dirname(sessionFile), DCP_STATE_DIR)
+		const statePath = join(stateDir, safeSessionFileName(parsed.id))
+		const text = await readFile(statePath, "utf8")
+		return JSON.parse(text) as SerializedDcpState
+	} catch {
+		// A missing/unreadable sidecar for the previous session (e.g. a fresh
+		// fork with no prior compression) means there is simply nothing to inherit.
+		return undefined
+	}
+}
+
 export async function cleanupStaleDcpStateFiles(ctx: ExtensionContext): Promise<number> {
 	const stateDir = resolveDcpStateDir(ctx)
 	const sessionDir = ctx.sessionManager.getSessionDir()

@@ -279,6 +279,64 @@ export function resetState(state: DcpState): void {
 }
 
 /**
+ * Merge compression blocks (and their accounting) from a source sidecar into
+ * the current state without clobbering other fields. Used at session_start to
+ * carry compression state across fork/resume/new into a session whose own
+ * sidecar is empty.
+ *
+ * Returns the number of newly added blocks (blocks whose id already exists are
+ * skipped). Accounting is carried over so inherited blocks are neither lost
+ * nor double-counted when later folded by a new compression range.
+ */
+export function inheritCompressionBlocks(state: DcpState, data: unknown): number {
+  if (!data || typeof data !== "object") return 0
+  const saved = data as Partial<SerializedDcpState>
+  if (!Array.isArray(saved.compressionBlocks) || saved.compressionBlocks.length === 0) return 0
+
+  const existingIds = new Set(state.compressionBlocks.map((b) => b.id))
+  const validBlocks = saved.compressionBlocks
+    .filter(
+      (b: any) =>
+        b && Number.isFinite(b.startTimestamp) && Number.isFinite(b.endTimestamp),
+    )
+    .map((b: any) => ({
+      ...b,
+      anchorTimestamp: Number.isFinite(b.anchorTimestamp)
+        ? b.anchorTimestamp
+        : b.endTimestamp + 1,
+    })) as CompressionBlock[]
+
+  const toAdd = validBlocks.filter((b) => !existingIds.has(b.id))
+  if (toAdd.length === 0) return 0
+
+  state.compressionBlocks.push(...toAdd)
+  state.nextBlockId =
+    Math.max(state.nextBlockId, ...state.compressionBlocks.map((b) => b.id)) + 1
+
+  if (Array.isArray(saved.accountedCompressionBlockIds)) {
+    for (const id of saved.accountedCompressionBlockIds) {
+      if (typeof id === "number") state.accountedCompressionBlockIds.add(id)
+    }
+  }
+  if (Array.isArray(saved.compressionTokenSavings)) {
+    for (const [id, val] of saved.compressionTokenSavings) {
+      if (
+        typeof id === "number" &&
+        typeof val === "number" &&
+        !state.compressionTokenSavings.has(id)
+      ) {
+        state.compressionTokenSavings.set(id, val)
+      }
+    }
+  }
+  if (typeof saved.tokensSaved === "number" && saved.tokensSaved > state.tokensSaved) {
+    state.tokensSaved = saved.tokensSaved
+  }
+
+  return toAdd.length
+}
+
+/**
  * Compact tool record for persistence — strips outputText, outputDetails,
  * and truncates/summarises inputArgs to keep serialized state bounded.
  */

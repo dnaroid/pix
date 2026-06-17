@@ -200,8 +200,17 @@ export class PiUiExtendApp {
 			blinkController: this.blinkController,
 			runtime: () => this.runtime,
 			createRuntimeForNewSession: () => this.createRuntime(
+				// Never reuse services across tabs. The SDK ties the extension
+				// runtime (resourceLoader.getExtensions().runtime) to the
+				// resourceLoader, and that runtime is shared by every session
+				// built from the same services. When any such session is
+				// disposed (tab close / session replacement / reload), the SDK
+				// invalidates that shared runtime, which makes every sibling
+				// session's captured `pi`/ctx stale — session_start handlers
+				// then throw "ctx is stale after session replacement or reload".
+				// Fresh services per session = fresh extension runtime = no
+				// cross-session invalidation.
 				newTabRuntimeOptions(this.options),
-				this.runtime === undefined ? {} : { reuseServicesFrom: this.runtime },
 			),
 			createRuntimeForSession: (sessionPath) => this.createRuntime({
 				...this.options,
