@@ -9,10 +9,27 @@ mock.module("typebox", () => createTypeboxMock());
 
 mock.module("@earendil-works/pi-ai", () => createPiAiMock());
 
+function createFakeEventBus() {
+	const handlers = new Map<string, Array<(data: unknown) => void>>();
+	return {
+		on(channel: string, handler: (data: unknown) => void) {
+			const list = handlers.get(channel) ?? [];
+			list.push(handler);
+			handlers.set(channel, list);
+		},
+		emit(channel: string, data: unknown) {
+			for (const handler of handlers.get(channel) ?? []) handler(data);
+		},
+	};
+}
+
 class FakePi {
 	tools = new Map<string, any>();
 	commands = new Map<string, any>();
-	events = new Map<string, Array<(event: unknown, ctx: any) => unknown>>();
+	// Backing store for the pi.on / emit session-lifecycle event API.
+	sessionEvents = new Map<string, Array<(event: unknown, ctx: any) => unknown>>();
+	// SDK extension event bus: pi.events.on(channel, handler) / pi.events.emit(channel, data).
+	events = createFakeEventBus();
 	sentMessages: string[] = [];
 	sentMessageOptions: unknown[] = [];
 	thinkingLevel = "off";
@@ -21,9 +38,9 @@ class FakePi {
 	registerTool(tool: any) { this.tools.set(tool.name, tool); }
 	registerCommand(name: string, command: any) { this.commands.set(name, command); }
 	on(name: string, handler: (event: unknown, ctx: any) => unknown) {
-		const handlers = this.events.get(name) ?? [];
+		const handlers = this.sessionEvents.get(name) ?? [];
 		handlers.push(handler);
-		this.events.set(name, handlers);
+		this.sessionEvents.set(name, handlers);
 	}
 	sendUserMessage(message: string, options?: unknown) {
 		this.sentMessages.push(message);
@@ -35,7 +52,7 @@ class FakePi {
 		this.setThinkingLevelCalls.push(level);
 	}
 	async emit(name: string, event: unknown, ctx: any = {}) {
-		for (const handler of this.events.get(name) ?? []) await handler(event, ctx);
+		for (const handler of this.sessionEvents.get(name) ?? []) await handler(event, ctx);
 	}
 }
 

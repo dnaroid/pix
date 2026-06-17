@@ -549,7 +549,11 @@ describe("DCP pruning effectiveness", () => {
       } as any,
     });
 
-    const candidate = detectCompressionCandidate(
+    // Addressability now comes from the snapshot rebuilt by applyPruning
+    // (mirroring how detectCompressionCandidate is used in production), not
+    // from inline dcp-id tags. The malformed legacy tags below exercise that
+    // the pruner stays robust to transcripts that still contain them.
+    const pruned = applyPruning(
       [
         textMessage("user", "old user\n<dcp-id=m001</dcp-id>", 1),
         textMessage("assistant", "old assistant\n<dcp-id=m002</dcp-id>", 2),
@@ -558,8 +562,9 @@ describe("DCP pruning effectiveness", () => {
       ],
       state,
       cfg,
-      0.5,
     );
+
+    const candidate = detectCompressionCandidate(pruned, state, cfg, 0.5);
 
     expect(candidate).not.toBe(null);
     expect(candidate?.startId).toBe("m001");
