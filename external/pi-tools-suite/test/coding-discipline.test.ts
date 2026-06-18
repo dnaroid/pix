@@ -2,6 +2,7 @@ import { afterEach, describe, expect, mock, test } from "bun:test";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createPiAiMock } from "./support/pi-ai-mock.js";
 import { createTypeboxMock } from "./support/typebox-mock.js";
 
 const completeMock = mock(async () => ({
@@ -10,19 +11,21 @@ const completeMock = mock(async () => ({
 }));
 
 function installBaseMocks(): void {
-	mock.module("@earendil-works/pi-ai", () => ({
-		Type: {
-			Object: (properties: any, options?: any) => ({ kind: "object", properties, options }),
-			Optional: (schema: any) => ({ kind: "optional", schema }),
-			String: (options?: any) => ({ kind: "string", options }),
-			Array: (items: any, options?: any) => ({ kind: "array", items, options }),
-			Number: (options?: any) => ({ kind: "number", options }),
-			Boolean: (options?: any) => ({ kind: "boolean", options }),
-			Record: (key: any, value: any, options?: any) => ({ kind: "record", key, value, options }),
-			Unknown: (options?: any) => ({ kind: "unknown", options }),
-		},
-		complete: completeMock,
-	}));
+	mock.module("@earendil-works/pi-ai", () =>
+		createPiAiMock({
+			Type: {
+				Object: (properties: any, options?: any) => ({ kind: "object", properties, options }),
+				Optional: (schema: any) => ({ kind: "optional", schema }),
+				String: (options?: any) => ({ kind: "string", options }),
+				Array: (items: any, options?: any) => ({ kind: "array", items, options }),
+				Number: (options?: any) => ({ kind: "number", options }),
+				Boolean: (options?: any) => ({ kind: "boolean", options }),
+				Record: (key: any, value: any, options?: any) => ({ kind: "record", key, value, options }),
+				Unknown: (options?: any) => ({ kind: "unknown", options }),
+			},
+			complete: completeMock,
+		}),
+	);
 	mock.module("typebox", () => createTypeboxMock());
 }
 
