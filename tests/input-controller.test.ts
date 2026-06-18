@@ -58,6 +58,22 @@ describe("AppInputController extension editor input", () => {
 		assert.equal(calls.extensionInput, 1);
 		assert.equal(calls.enter, 0);
 	});
+
+	it("buffers split Command+V image-paste packets before a focused extension can consume them", () => {
+		const { controller, editor, calls } = createController({ extensionInputUsesEditor: true, shiftPressed: false });
+		let clipboardImagePasteCalls = 0;
+		const testController = controller as unknown as { pasteHandler: { handleClipboardImagePaste(): Promise<void> } };
+		testController.pasteHandler.handleClipboardImagePaste = async () => {
+			clipboardImagePasteCalls += 1;
+		};
+
+		controller.handleChunk(Buffer.from("\x1b[118;9"));
+		controller.handleChunk(Buffer.from(":1u"));
+
+		assert.equal(editor.text, "");
+		assert.equal(calls.extensionInput, 0);
+		assert.equal(clipboardImagePasteCalls, 1);
+	});
 });
 
 describe("AppInputController terminal input", () => {

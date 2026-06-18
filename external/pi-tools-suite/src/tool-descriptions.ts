@@ -251,6 +251,17 @@ export const TODO_TOOL_DESCRIPTION: ToolDescription = {
 	],
 };
 
+export const SESSION_NAME_TOOL_DESCRIPTION: ToolDescription = {
+	name: "session_name",
+	label: "Session Name",
+	description: "Show or set the current session name so the agent can retitle the active session without relying on slash-command parsing.",
+	promptSnippet: "Use session_name to rename the current session directly when the task calls for updating the session title.",
+	promptGuidelines: [
+		"Pass a short, user-meaningful name when renaming the current session.",
+		"Call without a name only when you need to read the current session name.",
+	],
+};
+
 export const WEB_SEARCH_TOOL_DESCRIPTIONS = {
 	webSearch: {
 		name: "web_search",

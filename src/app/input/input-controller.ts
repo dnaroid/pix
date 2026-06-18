@@ -57,12 +57,21 @@ export class AppInputController {
 
 	handleChunk(chunk: Buffer): void {
 		let data = chunk.toString("utf8");
+		const bufferedSharedEditorInput = this.consumeBufferedSharedEditorInput(data);
+		if (bufferedSharedEditorInput.kind === "consumed" || bufferedSharedEditorInput.kind === "pending") return;
+		if (bufferedSharedEditorInput.kind === "passthrough") data = bufferedSharedEditorInput.data;
+
 		if (this.inputBuffer.startsWith("\x1b[<") || data.startsWith("\x1b[<")) {
 			this.inputBuffer += data;
 			this.drainInputBuffer();
 			return;
 		}
-		if (this.consumeSharedEditorInput(data)) return;
+		const sharedEditorInput = this.consumeSharedEditorInput(data);
+		if (sharedEditorInput === "consumed") return;
+		if (sharedEditorInput === "pending") {
+			this.inputBuffer = data;
+			return;
+		}
 		const extensionInput = this.host.handleExtensionTerminalInput(data);
 		if (extensionInput.consume) return;
 		if (extensionInput.data !== undefined) data = extensionInput.data;
@@ -72,43 +81,64 @@ export class AppInputController {
 		this.drainInputBuffer();
 	}
 
-	private consumeSharedEditorInput(data: string): boolean {
-		if (this.host.extensionInputUsesEditor?.() !== true) return false;
-		if (this.host.inputEditor.isInBracketedPaste) return false;
+	private consumeBufferedSharedEditorInput(data: string):
+		| { kind: "none" }
+		| { kind: "consumed" }
+		| { kind: "pending" }
+		| { kind: "passthrough"; data: string } {
+		if (this.host.extensionInputUsesEditor?.() !== true) return { kind: "none" };
+		if (this.inputBuffer.length === 0) return { kind: "none" };
+
+		const buffered = `${this.inputBuffer}${data}`;
+		const result = this.consumeSharedEditorInput(buffered);
+		if (result === "pending") {
+			this.inputBuffer = buffered;
+			return { kind: "pending" };
+		}
+
+		this.inputBuffer = "";
+		if (result === "consumed") return { kind: "consumed" };
+		return { kind: "passthrough", data: buffered };
+	}
+
+	private consumeSharedEditorInput(data: string): "consumed" | "pending" | "none" {
+		if (this.host.extensionInputUsesEditor?.() !== true) return "none";
+		if (this.host.inputEditor.isInBracketedPaste) return "none";
 
 		if (data === "\n") {
 			this.insertInputNewline();
-			return true;
+			return "consumed";
 		}
 
 		if (data === "\r" && this.isShiftPressed()) {
 			this.insertInputNewline();
-			return true;
+			return "consumed";
 		}
 
 		if (SHIFT_ENTER_ESCAPE_SEQUENCES.includes(data)) {
 			this.insertInputNewline();
-			return true;
+			return "consumed";
 		}
 
 		if (data === "\x16") {
 			void this.pasteHandler.handleClipboardImagePaste();
-			return true;
+			return "consumed";
 		}
 
 		const modifiedKey = parseTerminalModifiedKeySequence(data);
-		if (modifiedKey.kind !== "key") return false;
-		if (terminalKeyShouldIgnore(modifiedKey.key)) return true;
+		if (modifiedKey.kind === "pending") return "pending";
+		if (modifiedKey.kind !== "key") return "none";
+		if (terminalKeyShouldIgnore(modifiedKey.key)) return "consumed";
 		if (terminalKeyIsShiftEnter(modifiedKey.key)) {
 			this.insertInputNewline();
-			return true;
+			return "consumed";
 		}
 		if (terminalKeyIsClipboardImagePaste(modifiedKey.key)) {
 			void this.pasteHandler.handleClipboardImagePaste();
-			return true;
+			return "consumed";
 		}
 
-		return false;
+		return "none";
 	}
 
 	private drainInputBuffer(): void {

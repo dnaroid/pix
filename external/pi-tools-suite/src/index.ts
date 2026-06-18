@@ -15,6 +15,7 @@ const MODULES: Array<{ name: string; load: () => Promise<ExtensionModule> }> = [
 	{ name: "async-subagents", load: () => import("./async-subagents/index") },
 	{ name: "lsp", load: () => import("./lsp/index") },
 	{ name: "comment-checker", load: () => import("./comment-checker/index") },
+	{ name: "session-name", load: () => import("./session-name/index") },
 	{ name: "repo-discovery", load: () => import("./repo-discovery/index") },
 	{ name: "antigravity-auth", load: () => import("./antigravity-auth/index") },
 	{ name: "opencode-import", load: () => import("./opencode-import/index") },
