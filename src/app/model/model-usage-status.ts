@@ -15,6 +15,8 @@ const GOOGLE_ANTIGRAVITY_USER_AGENT = "antigravity/1.11.9 windows/amd64";
 const REQUEST_TIMEOUT_MS = 10_000;
 const DAY_SECONDS = 86_400;
 const HOUR_SECONDS = 3_600;
+const MODEL_USAGE_WARNING_MIN_USED_PERCENT = 5;
+const MODEL_USAGE_WARNING_MIN_ELAPSED_SECONDS = 6 * HOUR_SECONDS;
 const PI_AUTH_PATH = join(homedir(), ".pi", "agent", "auth.json");
 const DEFAULT_ANTIGRAVITY_PROJECT_ID = "rising-fact-p41fc";
 
@@ -1205,11 +1207,11 @@ function modelUsageWindowWillExhaustBeforeReset(window: ModelUsageLimitWindow, n
 
 	const timeUntilResetSeconds = Math.max(0, (window.resetAt - now) / 1000);
 	const elapsedSeconds = Math.max(0, window.windowSeconds - timeUntilResetSeconds);
-	if (elapsedSeconds <= 0) return false;
+	if (elapsedSeconds < MODEL_USAGE_WARNING_MIN_ELAPSED_SECONDS) return false;
 
 	const total = 100;
 	const used = total - window.remainingPercent;
-	if (used <= 0) return false;
+	if (used < MODEL_USAGE_WARNING_MIN_USED_PERCENT) return false;
 
 	const remaining = total - used;
 	const averageRate = used / elapsedSeconds;

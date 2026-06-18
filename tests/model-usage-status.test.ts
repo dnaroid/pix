@@ -140,6 +140,26 @@ describe("model usage status", () => {
 		assert.equal(formatModelUsageStatusLabel(status, now), `40% ██    ${APP_ICONS.alert} ${formatExpectedResetDuration(now + 5 * 24 * 60 * 60 * 1000, now)}`);
 	});
 
+	it("does not warn from tiny early-window usage spikes", () => {
+		const now = Date.UTC(2026, 0, 1, 0, 0, 0);
+		const response: OpenAIUsageResponse = {
+			plan_type: "plus",
+			rate_limit: {
+				limit_reached: false,
+				primary_window: {
+					used_percent: 2,
+					limit_window_seconds: 7 * 24 * 60 * 60,
+					reset_after_seconds: 6 * 24 * 60 * 60 + 23 * 60 * 60,
+				},
+				secondary_window: null,
+			},
+		};
+
+		const status = openAIUsageStatusFromResponse(response, "openai-codex/gpt-5.5", now);
+
+		assert.equal(formatModelUsageStatusLabel(status, now), `98% ████▉ ${formatExpectedResetDuration(now + (6 * 24 + 23) * 60 * 60 * 1000, now)}`);
+	});
+
 	it("does not warn for exhausted or single-day-and-shorter status-bar limits", () => {
 		const now = Date.UTC(2026, 0, 1, 0, 0, 0);
 		const exhausted: OpenAIUsageResponse = {

@@ -31,6 +31,21 @@ describe("AppRequestHistory", () => {
 		assert.deepEqual(history.search("sdk"), ["read sdk references"]);
 		assert.deepEqual(history.search("asdfasdfasdfsgfsgs"), []);
 	});
+
+	it("starts arrow navigation only when the input is empty", () => {
+		const emptyHost = host();
+		const history = new AppRequestHistory(emptyHost);
+		history.add("first");
+		history.add("second");
+
+		emptyHost.setInput("draft");
+		assert.equal(history.navigate(-1), false);
+		assert.equal(emptyHost.getInput(), "draft");
+
+		emptyHost.setInput("");
+		assert.equal(history.navigate(-1), true);
+		assert.equal(emptyHost.getInput(), "second");
+	});
 });
 
 function host() {

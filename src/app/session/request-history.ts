@@ -77,6 +77,7 @@ export class AppRequestHistory {
 
 		if (this.cursor === undefined) {
 			if (direction > 0) return false;
+			if (this.host.getInput().length > 0) return false;
 			this.draft = this.host.getInput();
 			this.cursor = this.entries.length - 1;
 			const entry = this.entries[this.cursor];
