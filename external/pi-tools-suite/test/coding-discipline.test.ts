@@ -44,7 +44,7 @@ const tempDirs: string[] = [];
 const originalPiConfigDir = process.env.PI_CONFIG_DIR;
 
 function tempDir(): string {
-	const dir = mkdtempSync(join(tmpdir(), "glm-coding-discipline-"));
+	const dir = mkdtempSync(join(tmpdir(), "coding-discipline-"));
 	tempDirs.push(dir);
 	return dir;
 }
@@ -64,11 +64,11 @@ afterEach(() => {
 	for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-describe("glm coding discipline", () => {
+describe("coding discipline", () => {
 	test("keeps lookup active only for GLM models", async () => {
 		setPiConfigDirConfig(`{ "lookupModel": "openai-codex/gpt-5.4-mini" }`);
 
-		const { default: register } = await import("../src/glm-coding-discipline/index.js");
+		const { default: register } = await import("../src/coding-discipline/index.js");
 		const pi = new FakePi();
 		register(pi as any);
 
@@ -87,9 +87,60 @@ describe("glm coding discipline", () => {
 	test("does not register lookup when lookupModel is disabled", async () => {
 		setPiConfigDirConfig(`{ "lookupModel": null }`);
 
-		const { default: register } = await import("../src/glm-coding-discipline/index.js");
+		const { default: register } = await import("../src/coding-discipline/index.js");
 		const pi = new FakePi();
 		register(pi as any);
 		expect(pi.tools.has("lookup")).toBe(false);
+	});
+
+	test("injects discipline into non-GLM main-agent requests without enabling lookup guidance", async () => {
+		setPiConfigDirConfig(`{ "lookupModel": "openai-codex/gpt-5.4-mini" }`);
+
+		const {
+			default: register,
+			buildCodingDisciplinePrompt,
+		} = await import("../src/coding-discipline/index.js");
+		const pi = new FakePi();
+		register(pi as any);
+
+		const result = await pi.emit(
+			"before_provider_request",
+			{ payload: { system: "base prompt", model: "anthropic/claude-sonnet-4" } },
+			{ cwd: "/tmp/project", model: { provider: "anthropic", id: "claude-sonnet-4" } },
+		);
+
+		expect(result).toEqual({
+			system: `${buildCodingDisciplinePrompt()}\n\nbase prompt`,
+			model: "anthropic/claude-sonnet-4",
+		});
+	});
+
+	test("deduplicates the injected discipline block across repeated provider requests", async () => {
+		setPiConfigDirConfig(`{ "lookupModel": "openai-codex/gpt-5.4-mini" }`);
+
+		const {
+			default: register,
+			buildCodingDisciplinePrompt,
+		} = await import("../src/coding-discipline/index.js");
+		const pi = new FakePi();
+		register(pi as any);
+
+		const first = await pi.emit(
+			"before_provider_request",
+			{ payload: { system: "base prompt", model: "anthropic/claude-sonnet-4" } },
+			{ cwd: "/tmp/project", model: { provider: "anthropic", id: "claude-sonnet-4" } },
+		);
+		const second = await pi.emit(
+			"before_provider_request",
+			{ payload: first },
+			{ cwd: "/tmp/project", model: { provider: "anthropic", id: "claude-sonnet-4" } },
+		);
+
+		expect(first).toEqual({
+			system: `${buildCodingDisciplinePrompt()}\n\nbase prompt`,
+			model: "anthropic/claude-sonnet-4",
+		});
+		expect(second).toEqual(first);
+		expect((second.system.match(/<glm_coding_discipline>/g) ?? []).length).toBe(1);
 	});
 });

@@ -677,7 +677,7 @@ function subagentEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 		PI_TERMINAL_BELL_DISABLED: "1",
 		PI_TOOLS_SUITE_DISABLED_MODULES: appendEnvList(env.PI_TOOLS_SUITE_DISABLED_MODULES, [
 			"async-subagents",
-			"glm-coding-discipline",
+			"coding-discipline",
 			"question",
 		]),
 	};

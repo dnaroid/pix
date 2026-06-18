@@ -59,7 +59,7 @@ const LOOKUP_TOOL_PARAMS = Type.Object(
 );
 
 const QUALITY_DISCIPLINE_LINES = [
-	"GLM TOOL-ONLY CODING AGENT CONTRACT.",
+	"TOOL-ONLY CODING AGENT CONTRACT.",
 	"",
 	"This contract controls the assistant output channel. Follow it literally.",
 	"Treat every user coding request as a tool-driven task, not a chat conversation.",
@@ -126,9 +126,14 @@ const QUALITY_DISCIPLINE_LINES = [
 	"While WORKING, this behavior is internal and expressed only through tool choices, not prose.",
 	"",
 	"Maintain these invariants:",
-	"- preserve existing behavior unless the user asked to change it;",
-	"- make minimal, localized changes;",
-	"- respect project conventions already present in nearby code;",
+	"- make the smallest correct change;",
+	"- keep diffs local; no unrelated refactors, renames, moves, reformatting, or dependency changes;",
+	"- inspect code before editing; do not invent APIs, files, commands, or behavior;",
+	"- before non-trivial edits, know the verification path;",
+	"- for bugs, prefer a failing test or repro first; then make the minimal fix; then verify;",
+	"- high-risk changes need a short spec before coding: goal, scope, behavior, risks, verification;",
+	"- high-risk includes security, privacy, auth/authz, data/schema/migrations, public APIs, external integrations, payments, jobs, concurrency, and irreversible or cross-cutting changes;",
+	"- follow nearby conventions; preserve existing behavior unless explicitly changing it;",
 	"- handle edge cases, errors, cancellation, and async behavior;",
 	"- avoid blocking UI/event loops;",
 	"- avoid duplicate state, duplicate prompts, and repeated side effects.",
@@ -147,6 +152,9 @@ const FINAL_DISCIPLINE_LINES = [
 	"",
 	"When uncertain, test or inspect instead of assuming.",
 	"If blocked by missing required information, ask exactly one concise question.",
+	"Verify every non-trivial change. Never claim tests passed unless they were actually run.",
+	"Report: what changed, what was verified, what was not verified, and any risks.",
+	"Ask at most one blocking question; otherwise proceed with grounded best effort.",
 ];
 
 const SILENCE_REMINDER_TEXT = [
@@ -175,7 +183,7 @@ const LOOKUP_SYSTEM_PROMPT = [
 	"Return concise factual observations and practical implications for the parent agent.",
 ].join("\n");
 
-export default function glmCodingDiscipline(pi: ExtensionAPI) {
+export default function codingDiscipline(pi: ExtensionAPI) {
 	let selectedModelRef: string | undefined;
 	let lookupRegistered = false;
 	let silenceViolationCount = 0;
@@ -226,8 +234,9 @@ export default function glmCodingDiscipline(pi: ExtensionAPI) {
 
 	pi.on("before_provider_request", async (event: { payload?: unknown }, ctx: unknown) => {
 		const modelRef = modelRefFromPayload(event.payload) ?? selectedModelRef ?? modelRefFromContext(ctx);
-		if (!isGlmModel(modelRef)) return undefined;
-		return injectCodingDisciplineIntoPayload(event.payload, { lookupEnabled: Boolean(lookupModelFromConfig(contextCwd(ctx))) });
+		return injectCodingDisciplineIntoPayload(event.payload, {
+			lookupEnabled: isGlmModel(modelRef) && Boolean(lookupModelFromConfig(contextCwd(ctx))),
+		});
 	});
 
 	pi.on("context", async (event: { messages?: unknown[] }, ctx: unknown) => {
@@ -454,7 +463,7 @@ function createSilenceReminderMessage() {
 }
 
 function lookupModelFromConfig(cwd?: string): string | undefined {
-	return loadPiToolsSuiteConfig(["glm-coding-discipline"], { cwd: cwd ?? process.cwd() }).lookupModel;
+	return loadPiToolsSuiteConfig(["coding-discipline"], { cwd: cwd ?? process.cwd() }).lookupModel;
 }
 
 function buildLookupPrompt(params: LookupParams, recentContext: string, imageCount: number, warnings: string[]): string {
