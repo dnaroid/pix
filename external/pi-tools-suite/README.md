@@ -69,6 +69,7 @@ DCP settings are stored only under `dcp` in the user shared config file `~/.conf
       "maxContextLimit": 160000,
       "nudgeFrequency": 1,
       "iterationNudgeThreshold": 6,
+      "nudgeForce": "strong",
       "protectedTools": ["compress", "write", "edit", "subagents"]
     },
     "modelOverrides": {

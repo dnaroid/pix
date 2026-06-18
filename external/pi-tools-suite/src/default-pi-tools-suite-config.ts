@@ -39,10 +39,10 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
     "debugLog": { "maxBytes": 5242880, "maxBackups": 3 },
     "manualMode": { "enabled": false, "automaticStrategies": true },
     "modelOverrides": {
-      "openai-codex/gpt-5.5": {
+      "openai-codex/gpt-5*": {
         "compress": {
-          "minContextPercent": "28%",
-          "maxContextPercent": "48%"
+          "minContextPercent": "26%",
+          "maxContextPercent": "46%"
         }
       },
       "openai-codex/gpt-5.4-mini": {
@@ -93,6 +93,7 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
       "maxContextPercent": "55%",
       "nudgeFrequency": 1,
       "iterationNudgeThreshold": 4,
+      "nudgeForce": "strong",
       "autoCandidates": { "minContextPercent": 0.2 },
       "messageMode": { "minContextPercent": 0.2 }
     }

@@ -1597,7 +1597,8 @@ describe("DCP pruning effectiveness", () => {
     const rendered = messages.map(contentText).join("\n");
     const normalMessages = messages.filter((message) => message.role !== "custom");
 
-    expect(rendered).toContain("ACTION REQUIRED: Context usage is high.");
+    // Opener differs by nudgeForce ("soft"/"strong"); the candidate line is the force-independent signal.
+    expect(rendered).toMatch(/ACTION REQUIRED: Context usage is high\.|CRITICAL WARNING: MAX CONTEXT LIMIT REACHED/);
     expect(rendered).toContain("Recommended range candidate: m001..m006");
     expect(JSON.stringify(normalMessages)).not.toContain("[dcp-id]");
     expect(JSON.stringify(messages)).not.toContain("<dcp-message-ids>");
