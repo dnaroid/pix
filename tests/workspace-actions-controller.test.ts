@@ -61,6 +61,7 @@ describe("AppWorkspaceActionsController undo changes", () => {
 			const controller = new AppWorkspaceActionsController({
 				entries,
 				runtime: () => runtime,
+				awaitCurrentSessionExtensions: async () => {},
 				findUserEntry: (entryId) => entries.find((entry): entry is Extract<Entry, { kind: "user" }> => entry.kind === "user" && entry.id === entryId),
 				touchEntry: () => {},
 				resetSessionView: () => {
@@ -126,6 +127,7 @@ describe("AppWorkspaceActionsController undo changes", () => {
 		const controller = new AppWorkspaceActionsController({
 			entries,
 			runtime: () => runtime,
+			awaitCurrentSessionExtensions: async () => {},
 			findUserEntry: (entryId) => entries.find((entry): entry is Extract<Entry, { kind: "user" }> => entry.kind === "user" && entry.id === entryId),
 			touchEntry: () => {},
 			resetSessionView: () => {},
@@ -174,6 +176,7 @@ describe("AppWorkspaceActionsController undo changes", () => {
 		const controller = new AppWorkspaceActionsController({
 			entries,
 			runtime: () => runtime,
+			awaitCurrentSessionExtensions: async () => {},
 			findUserEntry: (entryId) => entries.find((entry): entry is Extract<Entry, { kind: "user" }> => entry.kind === "user" && entry.id === entryId),
 			touchEntry: () => {},
 			resetSessionView: () => {},
@@ -199,6 +202,59 @@ describe("AppWorkspaceActionsController undo changes", () => {
 		assert.deepEqual(entries[0]?.kind === "user" ? entries[0].workspaceMutations : undefined, [
 			{ type: "write", path: "created.txt", afterContent: "hello\n" },
 		]);
+	});
+
+	it("maps visible user messages with full loaded history instead of reindexing from the window start", () => {
+		const entries: Entry[] = [{ id: "visible-late", kind: "user", text: "Late prompt", workspaceMutations: [] }];
+		const allEntries: Entry[] = [
+			{ id: "visible-early", kind: "user", text: "Early prompt", sessionEntryId: "session-early", workspaceMutations: [] },
+			entries[0]!,
+		];
+
+		const runtime = {
+			cwd: "/tmp/workspace",
+			session: {
+				isStreaming: false,
+				isCompacting: false,
+				sessionFile: "/tmp/workspace/session.jsonl",
+				sessionManager: {
+					getBranch: () => [
+						messageEntry("session-early", null, "user", "Early prompt"),
+						messageEntry("assistant-1", "session-early", "assistant", "Done"),
+						messageEntry("session-late", "assistant-1", "user", "Late prompt"),
+					],
+					getSessionId: () => "session-id",
+				},
+			},
+		} as unknown as AgentSessionRuntime;
+
+		const controller = new AppWorkspaceActionsController({
+			entries,
+			allEntries: () => allEntries,
+			runtime: () => runtime,
+			awaitCurrentSessionExtensions: async () => {},
+			findUserEntry: (entryId) => allEntries.find((entry): entry is Extract<Entry, { kind: "user" }> => entry.kind === "user" && entry.id === entryId),
+			touchEntry: () => {},
+			resetSessionView: () => {},
+			loadSessionHistory: () => {},
+			addEntry: () => {},
+			setInput: () => {},
+			getInput: () => "",
+			setStatus: () => {},
+			setSessionStatus: () => {},
+			showToast: () => {},
+			render: () => {},
+			isRunning: () => false,
+			forkSessionEntryInNewTab: async () => false,
+		});
+
+		controller.recordWorkspaceMutationForUserEntry("visible-late", {
+			type: "write",
+			path: "late.txt",
+			afterContent: "late\n",
+		});
+
+		assert.equal(entries[0]?.kind === "user" ? entries[0].sessionEntryId : undefined, "session-late");
 	});
 });
 

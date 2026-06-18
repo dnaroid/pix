@@ -17,6 +17,7 @@ import {
 
 export type AppWorkspaceActionsControllerHost = {
 	readonly entries: Entry[];
+	allEntries?(): readonly Entry[];
 	runtime(): AgentSessionRuntime | undefined;
 	awaitCurrentSessionExtensions(runtime?: AgentSessionRuntime): Promise<void>;
 	findUserEntry(entryId: string): Extract<Entry, { kind: "user" }> | undefined;
@@ -80,8 +81,9 @@ export class AppWorkspaceActionsController {
 		});
 		if (branchUserEntries.length === 0) return;
 
+		const loadedEntries = this.host.allEntries?.() ?? this.host.entries;
 		let branchIndex = 0;
-		for (const entry of this.host.entries) {
+		for (const entry of loadedEntries) {
 			if (entry.kind !== "user") continue;
 
 			const sessionEntry = branchUserEntries[branchIndex];

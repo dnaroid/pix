@@ -394,6 +394,7 @@ export class PiUiExtendApp {
 		});
 		this.workspaceActions = new AppWorkspaceActionsController({
 			entries: this.entries,
+			allEntries: () => this.sessionEvents.allEntries(),
 			runtime: () => this.runtime,
 			awaitCurrentSessionExtensions: (runtime) => this.awaitCurrentSessionExtensions(runtime),
 			findUserEntry: (entryId) => this.findUserEntry(entryId),
@@ -1078,39 +1079,40 @@ export class PiUiExtendApp {
 
 		this.workspaceActions.syncUserSessionEntryMetadata();
 		if (target.sessionEntryId) {
-			let entry = this.findUserEntryBySessionEntryId(target.sessionEntryId);
-			while (!entry && this.sessionEvents.hasOlderSessionHistory() && !this.sessionEvents.isLoadingOlderSessionHistory()) {
-				const loaded = await this.sessionEvents.loadOlderSessionHistory({ render: false });
-				if (!loaded) break;
-				entry = this.findUserEntryBySessionEntryId(target.sessionEntryId);
-			}
-
-			if (entry && this.scrollController.scrollToConversationEntry(entry.id)) return true;
+			const entryId = this.sessionEvents.revealHistoryEntryForSessionEntryId(target.sessionEntryId);
+			if (entryId && this.scrollController.scrollToConversationEntry(entryId)) return true;
 		}
 
 		const fallbackEntry = this.findUserEntryByJumpText(target);
 		return fallbackEntry ? this.scrollController.scrollToConversationEntry(fallbackEntry.id) : false;
 	}
 
-	private findUserEntryBySessionEntryId(sessionEntryId: string): Extract<Entry, { kind: "user" }> | undefined {
-		return this.entries.find((entry): entry is Extract<Entry, { kind: "user" }> => entry.kind === "user" && entry.sessionEntryId === sessionEntryId);
-	}
-
 	private findUserEntryByJumpText(target: UserMessageJumpMenuValue): Extract<Entry, { kind: "user" }> | undefined {
 		if (!target.text) return undefined;
-		const userEntries = this.entries.filter((entry): entry is Extract<Entry, { kind: "user" }> => entry.kind === "user");
+		const userEntries = this.sessionEvents.allEntries().filter((entry): entry is Extract<Entry, { kind: "user" }> => entry.kind === "user");
+		let matched: Extract<Entry, { kind: "user" }> | undefined;
 		if (target.userIndex !== undefined && target.userCount !== undefined) {
-			const visibleIndex = target.userIndex - (target.userCount - userEntries.length);
-			const entry = userEntries[visibleIndex];
-			if (entry && normalizeJumpTargetText(entry.text) === normalizeJumpTargetText(target.text)) return entry;
+			const entry = userEntries[target.userIndex];
+			if (entry && normalizeJumpTargetText(entry.text) === normalizeJumpTargetText(target.text)) matched = entry;
 		}
 
-		const normalizedTargetText = normalizeJumpTargetText(target.text);
-		for (let index = userEntries.length - 1; index >= 0; index -= 1) {
-			const entry = userEntries[index];
-			if (entry && normalizeJumpTargetText(entry.text) === normalizedTargetText) return entry;
+		if (!matched) {
+			const normalizedTargetText = normalizeJumpTargetText(target.text);
+			for (let index = userEntries.length - 1; index >= 0; index -= 1) {
+				const entry = userEntries[index];
+				if (entry && normalizeJumpTargetText(entry.text) === normalizedTargetText) {
+					matched = entry;
+					break;
+				}
+			}
 		}
-		return undefined;
+
+		if (matched?.sessionEntryId) {
+			// Shift the sliding window onto the matched entry so it is present in the
+			// viewport for the subsequent scrollToConversationEntry call.
+			this.sessionEvents.revealHistoryEntryForSessionEntryId(matched.sessionEntryId);
+		}
+		return matched;
 	}
 
 	private async loadSessionHistoryAsync(options: { isCancelled: () => boolean; render: () => void; lazyOlderHistory?: boolean }): Promise<boolean> {

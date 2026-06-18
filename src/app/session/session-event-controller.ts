@@ -183,6 +183,10 @@ export class AppSessionEventController {
 		this.olderHistoryLoader = undefined;
 	}
 
+	allEntries(): readonly Entry[] {
+		return this.historyEntries.length > 0 ? this.historyEntries : this.host.entries;
+	}
+
 	loadSessionHistory(): void {
 		const runtime = this.host.runtime();
 		if (!runtime) return;
@@ -240,6 +244,34 @@ export class AppSessionEventController {
 	async loadOlderSessionHistory(options: LoadOlderSessionHistoryOptions = {}): Promise<boolean> {
 		if (this.historyEntries.length > 0) return this.shiftHistoryWindow(-HISTORY_WINDOW_SHIFT_ENTRIES, options);
 		return this.olderHistoryLoader?.loadOlder(options) ?? false;
+	}
+
+	/**
+	 * Reveal the conversation entry for a session entry id (e.g. a user message
+	 * selected from the jump menu) by shifting the sliding window directly onto
+	 * it, then return its local entry id so the caller can scroll to it.
+	 *
+	 * Unlike paging older history in fixed increments, this works for any branch
+	 * position in a single synchronous step and does not race with concurrent
+	 * window re-anchors (e.g. while the agent is streaming). Returns undefined
+	 * when the entry is neither in the full history window nor in the live
+	 * entries (e.g. older than the loaded branch).
+	 */
+	revealHistoryEntryForSessionEntryId(sessionEntryId: string): string | undefined {
+		if (this.historyEntries.length > 0) {
+			const index = this.historyEntries.findIndex(
+				(entry): entry is Extract<Entry, { kind: "user" }> => entry.kind === "user" && entry.sessionEntryId === sessionEntryId,
+			);
+			if (index === -1) return undefined;
+			const targetStart = Math.max(0, Math.min(this.maxHistoryWindowStart(), index - Math.floor(this.historyWindowSize() / 2)));
+			if (targetStart !== this.historyWindowStart) this.setHistoryWindowStart(targetStart);
+			return this.historyEntries[index]?.id;
+		}
+
+		const entry = this.host.entries.find(
+			(entry): entry is Extract<Entry, { kind: "user" }> => entry.kind === "user" && entry.sessionEntryId === sessionEntryId,
+		);
+		return entry?.id;
 	}
 
 	hasNewerSessionHistory(): boolean {
