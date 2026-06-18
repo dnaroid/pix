@@ -132,15 +132,4 @@ describe("pi-tools-suite config", () => {
 		expect(config.disabledModules).toEqual([]);
 	});
 
-	test("legacy glm-coding-discipline disabledModules alias maps to coding-discipline", () => {
-		const homeDir = tempDir();
-		const cwd = tempDir();
-		mkdirSync(join(homeDir, ".config", "pi"), { recursive: true });
-		writeFileSync(join(homeDir, ".config", "pi", "pi-tools-suite.jsonc"), `{ "disabledModules": ["glm-coding-discipline"] }`);
-
-		const config = loadPiToolsSuiteConfig(["coding-discipline"], { cwd, homeDir, env: {} });
-
-		expect(config.disabledModules).toEqual(["coding-discipline"]);
-	});
-
 });

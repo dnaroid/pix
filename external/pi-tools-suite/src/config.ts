@@ -37,9 +37,6 @@ const DISABLED_LIST_KEYS = ["disabledModules", "disabledExtensions"];
 const ENABLED_LIST_KEYS = ["enabledModules", "enabledExtensions"];
 const MODULE_MAP_KEYS = ["modules", "extensions"];
 const DEFAULT_DISABLED_MODULES = new Set<string>();
-const LEGACY_MODULE_ALIASES: Record<string, string> = {
-	"glm-coding-discipline": "coding-discipline",
-};
 
 export function getPiToolsSuiteUserConfigPath(homeDir = homedir()): string {
 	return join(homeDir, ".config", "pi", "pi-tools-suite.jsonc");
@@ -127,8 +124,7 @@ function splitNameList(value: unknown): string[] {
 function canonicalModuleName(name: string, knownModules: ReadonlySet<string>): string | undefined {
 	const normalized = name.trim().toLowerCase();
 	if (!normalized) return undefined;
-	const aliased = LEGACY_MODULE_ALIASES[normalized] ?? normalized;
-	return knownModules.has(aliased) ? aliased : undefined;
+	return knownModules.has(normalized) ? normalized : undefined;
 }
 
 function addDisabled(config: MutableConfig, value: unknown, knownModules: ReadonlySet<string>): void {
