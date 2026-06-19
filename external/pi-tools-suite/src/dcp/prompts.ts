@@ -30,6 +30,8 @@ Use \`compress\` as context-pressure housekeeping, not as a reflex after every s
 
 A closed slice is any finished implementation, verification, config edit, answered exploration, dead-end debugging branch, or test/log inspection. Passing logs are summary-only: preserve command, pass/fail, key failures if any, and whether follow-up is needed; never keep a full passing log in live context. Treat large shell/read/repo/web outputs as disposable evidence once their facts are extracted.
 
+Completed todo/task/subtask milestones are strong boundary signals, not automatic triggers. When context pressure makes compression useful, prefer the range covering a just-finished todo item if it is closed and non-trivial; do not compress merely because a todo was completed while context remains low.
+
 Before compressing while work is unfinished, ensure one \`todo in_progress\` captures the active objective and next step.
 
 When a \`<dcp-system-reminder>\` appears, treat it as a context-pressure signal. Follow critical/high-context reminders promptly. For routine reminders, compress only if a genuinely closed, useful-to-summarize slice exists; otherwise continue the next atomic step and re-check later.
@@ -183,6 +185,7 @@ You MUST use the \`compress\` tool now. Do not continue normal exploration until
 
 If you are in the middle of a critical atomic operation, finish that atomic step first, then compress immediately.
 If any closed slice exists (finished implementation, verification, config/doc edit, answered exploration, dead end, or test/log inspection), compress it before replying or starting another task. Passing logs should become command + pass/fail + follow-up status only.
+Recently completed todo/task/subtask items are preferred boundaries when they form a high-yield closed slice.
 
 RANGE STRATEGY (MANDATORY)
 Prioritize one large, closed, high-yield compression range first.
@@ -210,6 +213,7 @@ ACTION REQUIRED: Context usage is high.
 Before doing more exploration, look for a high-yield closed range that no longer needs to stay raw. Compress it now if one is safe and useful.
 
 This is context-pressure guidance, not a request to compress tiny or still-needed slices. If completed research, implementation, verification, config/doc edit, CI-log inspection, or dead-end debugging is large enough to reduce signal, call the \`compress\` tool before continuing normal work.
+Recently completed todo/task/subtask items are preferred candidates when they form a non-trivial closed slice; do not compress merely because a tiny todo was completed.
 High-priority stale shell/read/repo/web outputs should be compressed once no exact raw text is needed. Passing logs should not remain raw after they are understood.
 
 RANGE SELECTION
@@ -230,6 +234,8 @@ CONTEXT CHECK: Evaluate whether compression would materially improve the live co
 
 If a range is cleanly closed, non-trivial, and unlikely to be needed verbatim again, use the \`compress\` tool. If direction has shifted, consider whether earlier ranges are now less relevant.
 
+If a todo/task/subtask was just completed, treat that completed work as a preferred compression boundary when it is large enough and no longer needed raw; completion alone is not a reason to compress while context is still low.
+
 Do not compress just because a small slice closed while context is still low. Prefer compression before another large batch of searches, reads, CI log fetches, or tests when a high-yield stale slice exists.
 High-priority stale shell/read/repo/web outputs and understood passing logs should be compressed once no exact raw text is needed.
 
@@ -246,6 +252,8 @@ export const ITERATION_NUDGE = `<dcp-system-reminder>
 CONTEXT CHECK: You've been iterating for a while after the last user message.
 
 Pause before the next large non-atomic tool batch. If there is a closed portion that is unlikely to be referenced immediately and is worth summarizing (for example, finished research before implementation, completed config edit, completed CI-log triage, a verified fix, or a dead-end investigation), use the \`compress\` tool on it.
+
+If a todo/task/subtask was just completed, prefer that completed work as the compression boundary when it is non-trivial and safe to summarize; do not compress merely because the todo status changed.
 
 Avoid accumulating large tool outputs while a high-yield completed slice remains raw. If only small or still-needed ranges are closed, continue the next atomic step and re-check later.
 
