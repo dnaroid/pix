@@ -2326,6 +2326,73 @@ describe("AppTabsController", () => {
 		assert.equal((await stat(preservedOldSession)).isFile(), true);
 	});
 
+	it("removes DCP sidecar state when deleting old project sessions", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "pix-tabs-retention-sidecar-"));
+		const sessionDir = join(dir, "sessions");
+		const dcpStateDir = join(sessionDir, "dcp-state");
+		await mkdir(dcpStateDir, { recursive: true });
+		// 25 sessions, each with a first-line session marker and a matching DCP sidecar.
+		const sessionPaths = Array.from({ length: 25 }, (_, index) => {
+			const id = `session-${String(index + 1).padStart(2, "0")}`;
+			return { path: join(sessionDir, `${id}.jsonl`), id };
+		});
+		for (const [index, session] of sessionPaths.entries()) {
+			await writeFile(session.path, JSON.stringify({ type: "session", id: session.id }) + "\n", "utf8");
+			await writeFile(join(dcpStateDir, `${session.id}.json`), "{}", "utf8");
+			const time = new Date(1_700_000_000_000 + index * 1_000);
+			await utimes(session.path, time, time);
+		}
+
+		const preservedOldSession = sessionPaths[0]?.path ?? "";
+		const preservedOldId = sessionPaths[0]?.id ?? "";
+		const activeRuntime = fakeRuntime("one", preservedOldSession);
+		const controller = new AppTabsController({
+			options: { cwd: dir, themeName: "dark", noSession: false } satisfies AppOptions,
+			maxProjectSessions: 20,
+			blinkController: fakeBlinkController(),
+			runtime: () => activeRuntime,
+			createRuntimeForNewSession: async () => fakeRuntime("new", join(dir, "new.jsonl")),
+			createRuntimeForSession: async (path) => fakeRuntime("session", path),
+			activateRuntime: async () => {},
+			disposeRuntime: async () => {},
+			isRunning: () => true,
+			setStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			resetSessionView: () => {},
+			loadSessionHistory: () => {},
+			loadSessionHistoryAsync: async () => true,
+			syncUserSessionEntryMetadata: () => {},
+			captureInputState: () => ({ text: "", cursor: 0 }),
+			restoreInputState: () => {},
+			addEntry: () => {},
+			showToast: () => {},
+			render: () => {},
+		});
+		const tabs = controller as unknown as {
+			sessionDir: () => string;
+			cleanupOldProjectSessions: () => Promise<void>;
+			tabItems: SessionTab[];
+			activeTabId: string | undefined;
+		};
+		tabs.sessionDir = () => sessionDir;
+		tabs.tabItems.push({ id: "tab-1", title: "old", status: "active", sessionPath: preservedOldSession });
+		tabs.activeTabId = "tab-1";
+
+		await tabs.cleanupOldProjectSessions();
+
+		const remainingSidecars = (await readdir(dcpStateDir)).sort();
+		assert.equal(remainingSidecars.length, 20);
+		// Preserved (oldest, open tab) session's sidecar survives.
+		assert.equal(remainingSidecars.includes(`${preservedOldId}.json`), true);
+		// The 5 oldest non-preserved sessions were deleted along with their sidecars.
+		assert.equal(remainingSidecars.includes("session-02.json"), false);
+		assert.equal(remainingSidecars.includes("session-06.json"), false);
+		// The newest 19 sessions are kept.
+		assert.equal(remainingSidecars.includes("session-07.json"), true);
+		assert.equal(remainingSidecars.includes("session-25.json"), true);
+	});
+
 	it("does not delete project sessions when retention is disabled", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "pix-tabs-retention-disabled-"));
 		const sessionDir = join(dir, "sessions");

@@ -1652,16 +1652,46 @@ export class AppTabsController {
 
 			for (const session of sessions) {
 				if (keep.has(session.path)) continue;
-				try {
-					await unlink(session.path);
-				} catch {
-					// Session retention must never interrupt the terminal UI.
-				}
+				await this.unlinkSessionAndDcpSidecar(session.path);
 			}
 		} catch {
 			// Session retention must never interrupt the terminal UI.
 		} finally {
 			this.retentionCleanupRunning = false;
+		}
+	}
+
+	/**
+	 * Unlink a project session file and, best-effort, its DCP sidecar state.
+	 * The sidecar path is derived from the session id in the first line of the
+	 * `.jsonl` (mirrors the DCP module's `safeSessionFileName`), so retention
+	 * never leaves orphan sidecars behind. Everything here is best-effort:
+	 * session retention must never interrupt the terminal UI.
+	 */
+	private async unlinkSessionAndDcpSidecar(sessionPath: string): Promise<void> {
+		let sidecarPath: string | undefined;
+		try {
+			const firstLine = (await readFile(sessionPath, "utf8")).split("\n", 1)[0]?.trim();
+			if (firstLine) {
+				const parsed = JSON.parse(firstLine) as { type?: string; id?: unknown };
+				if (parsed.type === "session" && typeof parsed.id === "string" && parsed.id) {
+					sidecarPath = join(dirname(sessionPath), "dcp-state", parsed.id.replace(/[^a-zA-Z0-9._-]/g, "_") + ".json");
+				}
+			}
+		} catch {
+			// Reading the session id is best-effort; proceed to unlink the file.
+		}
+		try {
+			await unlink(sessionPath);
+		} catch {
+			// Session retention must never interrupt the terminal UI.
+		}
+		if (sidecarPath) {
+			try {
+				await unlink(sidecarPath);
+			} catch {
+				// Sidecar removal is best-effort; never interrupt the terminal UI.
+			}
 		}
 	}
 
