@@ -14,7 +14,7 @@ const TRUE_ENV_PATTERN = /^(1|true|on|yes|auto)$/i;
 const PARALLEL_FIRST_STRATEGY_PROMPT = `<agent_strategy name="parallel-first">
 This is an orchestration hint for Pi, not a replacement for the user's instructions.
 
-Default posture: orchestration-first for non-GPT models. For broad, multi-file, ambiguous, review/audit, frontend, test-strategy, architecture, or root-cause work, prefer ultrawork mode: split independent tracks and spawn focused async subagents with the configured roles. Keep the parent context lean, collect compact results only when needed, synthesize the findings, then verify before finishing.
+Default posture: orchestration-first for non-GPT models. For broad, multi-file, ambiguous, review/audit, frontend, test-strategy, architecture, or root-cause work, prefer ultrawork mode: split independent tracks and spawn focused async subagents with the configured roles. For high-stakes uncertainty, add one oracle track for a cross-provider second opinion. Keep the parent context lean, collect compact results only when needed, synthesize the findings, then verify before finishing.
 
 Before DCP/compress while work is unfinished, keep one in_progress todo with objective + next step; compression summaries must preserve Active objective and Next step.
 
@@ -28,7 +28,7 @@ Default posture: autonomous deep worker. Build context directly, make concrete p
 
 Before DCP/compress while work is unfinished, keep one in_progress todo with objective + next step; compression summaries must preserve Active objective and Next step.
 
-For broad work, keep delegation explicit and bounded: spawn focused review/research/tests/frontend/deep tracks, read compact results, make the final decisions in the parent session, and report only what matters.
+For broad work, keep delegation explicit and bounded: spawn focused review/research/tests/frontend/deep tracks, plus one oracle track only for high-stakes uncertainty or final plan checks. Read compact results, make the final decisions in the parent session, and report only what matters.
 </agent_strategy>`;
 
 export function agentStrategyPrompt(options: AgentStrategyOptions = {}): string | undefined {

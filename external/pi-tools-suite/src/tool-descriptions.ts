@@ -73,7 +73,7 @@ export function asyncSubagentToolDescriptions(options: ToolDescriptionSetOptions
 			description: [
 				"Manage isolated async sub-agents for large, parallel, context-heavy work.",
 				"Presets from async-subagents config and /subagent-preset choose role model/thinking/args; AGENTS_PRESET or /subagent-preset session <name> overrides the current session; /subagent-preset init creates a sample config.",
-				"Omit subagentType so the router chooses a configured role unless the user or task requires a role, vision, or deterministic override.",
+				"Omit subagentType so the router chooses a configured role unless the user or task requires a role or deterministic override.",
 				repoDiscovery
 					? "Use for broad independent tracks, review axes, or hypotheses even though repo_* tools are available."
 					: "Use first for broad codebase discovery split into tracks, review axes, or incident-triage hypotheses when repo_* tools are unavailable.",
@@ -82,7 +82,7 @@ export function asyncSubagentToolDescriptions(options: ToolDescriptionSetOptions
 			].join(" "),
 			promptSnippet:
 				"Use subagents action='spawn' for multiple independent agents, explicit delegate/parallelize/split work requests, or one large review/debug track that should stay out of the parent context. " +
-				"Usually omit subagentType so the router chooses; set it only for user-named roles, vision/image handling, deterministic tests, or another concrete override. Avoid trivial reads/edits and do not call status/wait immediately after spawn just for progress. " +
+				"Usually omit subagentType so the router chooses; set it only for user-named roles, deterministic tests, or another concrete override. Avoid trivial reads/edits and do not call status/wait immediately after spawn just for progress. " +
 				(repoDiscovery
 					? "For one semantic code-discovery question, use repo_search; for independent tracks/hypotheses/review axes, delegate even when repo_* tools exist. Read result only after completion when findings are needed."
 					: "For one focused code-discovery question, use direct read/grep. Without repo_* tools, spawn several focused scan/quick agents first for broad multi-track discovery, incident triage, release readiness, risk strategy, or parallel reviews. Read result only after completion when findings are needed."),
@@ -97,8 +97,9 @@ export function asyncSubagentToolDescriptions(options: ToolDescriptionSetOptions
 					: "For incident triage, release readiness, or risk/test strategy with separate hypotheses or review tracks and no repo_* tools, call action='spawn' as the first discovery step; direct read/grep can follow.",
 				"Do not use subagents for exact-string lookups, known-file edits, typo/text replacements, obvious one-file changes, or interactive user input; use the cheapest direct path.",
 				"Spawn multiple focused agents in one action='spawn' call for independent questions; for synthetic tests or bounded probes, pass timeoutSeconds slightly above expected runtime.",
-				"For spawn, leave subagentType unset so the router chooses from configured roles. Set it only for user-named roles, vision/image handling, deterministic tests, or another concrete override.",
-				"Use subagentType='vision' with imagePaths and optional focus when images/screenshots/diagrams need visual inspection.",
+				"For spawn, leave subagentType unset so the router chooses from configured roles. Set it only for user-named roles, deterministic tests, or another concrete override.",
+				"Use subagentType='oracle' sparingly for cross-provider second opinions on high-stakes uncertainty or final plan/risk checks.",
+				"For screenshot/image inspection by blind models, use lookup; subagents only receive imagePaths when a broader delegated track genuinely needs them.",
 				"If the user asks to start, run, launch, or test parallel sub-agents, call action='spawn' and then stop; completion/failure notifications will wake the parent so do not immediately call action='status' or action='wait' just to see whether agents finished.",
 				"Use status for non-blocking progress/recovery, wait only when requested or needed, and result only after completion; registry mappings can recover latest runDir/agentId after reload.",
 				"Result output is compact with artifact links; inspect raw artifacts only when full details are necessary.",

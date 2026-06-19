@@ -32,7 +32,7 @@ export interface RoutedSubagentTasks {
 const ROUTER_SYSTEM_PROMPT = [
 	"You route Pi async sub-agent tasks to the best configured subagentType.",
 	"Choose exactly one allowed type for each task. Use the allowed type descriptions as the source of truth.",
-	"Prefer the most specific matching type over generic quick/deep. Use frontend for UI/UX implementation or visual frontend polish; use vision only for attached images/screenshots or image inspection.",
+	"Prefer the most specific matching type over generic quick/deep. Use frontend for UI/UX implementation or visual frontend polish. For pure image inspection, use the lookup tool rather than subagents.",
 	"Return only strict JSON with this shape: {\"routes\":[{\"id\":\"task-id\",\"subagentType\":\"type\"}]}",
 	"Do not include markdown, comments, explanations, or unknown types.",
 ].join("\n");

@@ -14,7 +14,7 @@ export interface AgentTask {
 	promptAppend?: string;
 	/** Full prompt replacement for this task. Supports prompt template variables. */
 	promptOverride?: string;
-	/** Optional visual attention instructions for vision-capable sub-agents. */
+	/** Optional visual attention instructions for agents that receive imagePaths. */
 	focus?: string;
 	/** Local image files to attach to the sub-agent RPC prompt. */
 	imagePaths?: string[];

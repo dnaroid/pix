@@ -53,7 +53,7 @@ const COPY_SAMPLE_CONFIG_LABEL = "Copy sample asyncSubagents config";
 
 export const ULTRAWORK_PROMPT = `Run ultrawork mode for the current objective.
 
-Use subagents when independent parallel tracks help. Pick subagentType from configured roles: quick, scan, research, docs, frontend, implement, tests, review, deep, vision. Use review for security/performance/audit tracks, implement for refactors, deep for debugging/root-cause. Use frontend for UI/UX and visual frontend implementation; use vision only for screenshots/images when the parent model is a non-vision GLM-series model.
+Use subagents when independent parallel tracks help. Pick subagentType from configured roles: quick, scan, research, docs, frontend, implement, tests, review, deep, oracle. Use review for security/performance/audit tracks, implement for refactors, deep for debugging/root-cause. Use frontend for UI/UX and visual frontend implementation; use oracle sparingly for cross-provider second opinions on high-stakes uncertainty.
 
 Keep parent context lean: spawn for broad parallel work, read results only when needed, and finish unless genuinely blocked.`;
 

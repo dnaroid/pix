@@ -242,14 +242,14 @@ function readRunText(runDir: string): string {
 }
 
 describe("async-subagents live e2e orchestration", () => {
-	e2eTest("delegates screenshot inspection to the vision profile with an attached image", async () => {
+	e2eTest("delegates screenshot inspection to an image-capable frontend profile", async () => {
 		await withFixtureProject(async (projectDir) => {
 			if (!VISION_E2E_MODEL) throw new Error("ASYNC_SUBAGENTS_VISION_E2E_MODEL resolved to an empty model");
 			const prompt = `
-Launch exactly one sub-agent now to inspect this screenshot for a blind/text-only parent model.
+Launch exactly one sub-agent now to inspect this screenshot as a broader delegated frontend/UI track.
 Use the subagents tool with action=spawn and exactly these task fields:
-- id: vision-screenshot
-- subagentType: vision
+- id: image-screenshot
+- subagentType: frontend
 - imagePaths: ["@${VISION_E2E_IMAGE}"]
 - focus: Describe the visible UI text, form values, and the discard confirmation dialog.
 Do not inspect files or images in the parent. After spawning, you may finish; the test will collect the sub-agent result.`;
@@ -257,7 +257,7 @@ Do not inspect files or images in the parent. After spawning, you may finish; th
 			await runPiE2E(projectDir, prompt, "vision screenshot inspection", {
 				subagentConfig: {
 					types: {
-						vision: {
+						frontend: {
 							model: VISION_E2E_MODEL,
 						},
 					},
@@ -266,10 +266,10 @@ Do not inspect files or images in the parent. After spawning, you may finish; th
 			const runDir = findLatestRun(projectDir);
 			await expectCompletedDelegatedRun(runDir, 1, { expectedModel: VISION_E2E_MODEL });
 			const state = getRunState(runDir);
-			expect(state.agents.map((agent) => agent.id)).toEqual(["vision-screenshot"]);
+			expect(state.agents.map((agent) => agent.id)).toEqual(["image-screenshot"]);
 
-			const agentDir = path.join(runDir, "vision-screenshot");
-			expect(readOptionalFile(path.join(agentDir, "subagent_type")).trim()).toBe("vision");
+			const agentDir = path.join(runDir, "image-screenshot");
+			expect(readOptionalFile(path.join(agentDir, "subagent_type")).trim()).toBe("frontend");
 			expect(readOptionalFile(path.join(agentDir, "model")).trim()).toBe(VISION_E2E_MODEL);
 			expect(readOptionalFile(path.join(agentDir, "image_paths")).trim()).toBe(`@${VISION_E2E_IMAGE}`);
 			expect(readOptionalFile(path.join(agentDir, "prompt.md"))).toContain("Visual focus / attention instructions");

@@ -218,6 +218,24 @@ export interface DcpState {
   nextNudgeAnchorId: number
   /** Diagnostic/telemetry snapshot for the latest emitted reminder. */
   lastNudge?: DcpLastNudge
+  /**
+   * The context window observed on the previous `context` event, used to
+   * detect a mid-session model/window downgrade (e.g. switch from a 1M model
+   * to a 275K model). When the window shrinks and inherited tokens already
+   * exceed `minContextPercent`, the context handler forces a pre-emptive
+   * strong nudge so the model is told to compress before the window fills.
+   * `undefined` until the first context event records a window.
+   */
+  lastContextWindow?: number
+  /**
+   * How many consecutive `context-strong` nudges have been emitted without a
+   * subsequent successful `compress` (model- or DCP-initiated). When this
+   * reaches `compress.autoCompress.patience` while context is above the
+   * emergency threshold, the auto-compress fallback creates a block without
+   * waiting for the model. Reset to 0 on any successful compression, when
+   * pressure drops below the emergency threshold, or on a window change.
+   */
+  consecutiveIgnoredStrongNudges: number
 }
 
 // ---------------------------------------------------------------------------
@@ -247,6 +265,8 @@ export function createState(): DcpState {
     nudgeAnchors: [],
     nextNudgeAnchorId: 1,
     lastNudge: undefined,
+    lastContextWindow: undefined,
+    consecutiveIgnoredStrongNudges: 0,
   }
 }
 
@@ -276,6 +296,8 @@ export function resetState(state: DcpState): void {
   state.nudgeAnchors = []
   state.nextNudgeAnchorId = 1
   state.lastNudge = undefined
+  state.lastContextWindow = undefined
+  state.consecutiveIgnoredStrongNudges = 0
 }
 
 /**
@@ -412,6 +434,17 @@ export interface SerializedDcpState {
   nudgeCounter?: number
   /** Persisted since v?.?. Diagnostic turn of the last emitted nudge. */
   lastNudgeTurn?: number
+  /**
+   * Persisted so a mid-session window downgrade (model switch to a smaller
+   * context window) is still detectable after a pi process restart / resume.
+   */
+  lastContextWindow?: number
+  /**
+   * Persisted so the auto-compress fallback's patience counter survives a pi
+   * process restart / resume, preventing a stuck "model ignores strong nudges"
+   * state from being silently cleared by a reload.
+   */
+  consecutiveIgnoredStrongNudges?: number
   /** Hash of the last persisted serialized state, used for dedup. */
   _stateHash?: string
 }
@@ -583,6 +616,8 @@ export function serializeState(state: DcpState): SerializedDcpState {
     currentTurn: state.currentTurn,
     nudgeCounter: state.nudgeCounter,
     lastNudgeTurn: state.lastNudgeTurn,
+    lastContextWindow: state.lastContextWindow,
+    consecutiveIgnoredStrongNudges: state.consecutiveIgnoredStrongNudges,
   }
 }
 
@@ -742,6 +777,12 @@ export function restoreState(state: DcpState, data: unknown): void {
   }
   if (typeof saved.currentTurn === "number" && Number.isFinite(saved.currentTurn) && saved.currentTurn >= 0) {
     state.currentTurn = Math.floor(saved.currentTurn)
+  }
+  if (typeof saved.lastContextWindow === "number" && Number.isFinite(saved.lastContextWindow) && saved.lastContextWindow > 0) {
+    state.lastContextWindow = saved.lastContextWindow
+  }
+  if (typeof saved.consecutiveIgnoredStrongNudges === "number" && Number.isFinite(saved.consecutiveIgnoredStrongNudges) && saved.consecutiveIgnoredStrongNudges >= 0) {
+    state.consecutiveIgnoredStrongNudges = Math.floor(saved.consecutiveIgnoredStrongNudges)
   }
 }
 

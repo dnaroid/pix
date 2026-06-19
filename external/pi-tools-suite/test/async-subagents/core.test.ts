@@ -350,17 +350,17 @@ describe.serial("core utils and prompt generation", () => {
 		const appendedPrompt = generatePrompt({ id: "agent-3", task: "Review", subagentType: "review", promptAppend: "Act as {subagentType}: {task}" });
 		expect(appendedPrompt).toContain("Additional instructions from sub-agent profile:\nAct as review: Review");
 
-		const visionPrompt = generatePrompt({
-			id: "agent-vision",
+		const imagePrompt = generatePrompt({
+			id: "agent-image",
 			task: "Describe the screenshot",
-			subagentType: "vision",
+			subagentType: "frontend",
 			imagePaths: ["screen.png"],
 			focus: "Pay attention to error banners.",
 			promptAppend: "Focus: {focus}; images: {imagePaths}",
 		});
-		expect(visionPrompt).toContain("Visual focus / attention instructions:\nPay attention to error banners.");
-		expect(visionPrompt).toContain("- Attached image files: screen.png");
-		expect(visionPrompt).toContain("Focus: Pay attention to error banners.; images: screen.png");
+		expect(imagePrompt).toContain("Visual focus / attention instructions:\nPay attention to error banners.");
+		expect(imagePrompt).toContain("- Attached image files: screen.png");
+		expect(imagePrompt).toContain("Focus: Pay attention to error banners.; images: screen.png");
 
 		const overridePrompt = generatePrompt({
 			id: "agent-4",
@@ -408,7 +408,7 @@ describe.serial("subagent type config", () => {
 		expect(fs.readFileSync(targetPath, "utf-8")).toContain("Full config schema: https://unpkg.com/pi-ui-extend/schemas/pi-tools-suite.json");
 		const config = loadSubagentConfig(cwd, env);
 		expect(Object.keys(config.presets ?? {}).sort()).toEqual(["cheap", "deep", "gpt"]);
-		expect(Object.keys(config.types).sort()).toEqual(["deep", "docs", "frontend", "implement", "quick", "research", "review", "scan", "tests", "vision"]);
+		expect(Object.keys(config.types).sort()).toEqual(["deep", "docs", "frontend", "implement", "oracle", "quick", "research", "review", "scan", "tests"]);
 		expect(config.types.review.description).toContain("security");
 		expect(selectSubagentType({ id: "s", task: "vulnerability secret token" }, config)).toBe("quick");
 
@@ -551,9 +551,7 @@ describe.serial("subagent type config", () => {
 		expect(config.types.scan.model).toBe("env/fast-scan");
 		expect(selectSubagentType({ id: "a", task: "Do a repo-wide scan for auth files" }, config)).toBe("quick");
 		expect(selectSubagentType({ id: "b", task: "Careful code review", subagentType: "review" }, config)).toBe("review");
-		expect(selectSubagentType({ id: "v", task: "Look at this screenshot for the blind parent model", subagentType: "vision" }, config)).toBe("vision");
 		expect(selectSubagentType({ id: "c", task: "Read this note" }, config)).toBe("quick");
-		expect(config.types.vision.model).toBe("openai-codex/gpt-5.4-mini");
 
 		const scan = resolveAgentTaskConfig({ id: "a", task: "Scan files for auth", subagentType: "scan" }, config);
 		expect(scan.task).toMatchObject({ subagentType: "scan", model: "env/fast-scan", thinking: "off", tools: ["read", "grep"] });
@@ -1130,9 +1128,9 @@ setTimeout(() => {}, 1000);
 
 		const completed = await withTimeout(new Promise<any>((resolve) => {
 			spawnAgent(runDir, {
-				id: "agent-vision",
+				id: "agent-image",
 				task: "Describe screenshot",
-				subagentType: "vision",
+				subagentType: "frontend",
 				imagePaths: ["@screen.png"],
 				focus: "Check the top banner",
 			}, cwd, [], undefined, resolve);
@@ -1142,7 +1140,7 @@ setTimeout(() => {}, 1000);
 		const captured = JSON.parse(fs.readFileSync(promptCapturePath, "utf-8"));
 		expect(captured.images).toEqual([{ type: "image", data: Buffer.from("fake-png-bytes").toString("base64"), mimeType: "image/png" }]);
 		expect(captured.message).toContain("Visual focus / attention instructions:\nCheck the top banner");
-		expect(fs.readFileSync(path.join(runDir, "agent-vision", "image_paths"), "utf-8")).toBe("@screen.png");
+		expect(fs.readFileSync(path.join(runDir, "agent-image", "image_paths"), "utf-8")).toBe("@screen.png");
 	});
 
 	test.serial("turns RPC prompt failures into failed results", async () => {

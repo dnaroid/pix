@@ -51,6 +51,7 @@ import {
 import { summarizeDcpState, writeDcpDebugLog } from "./debug-log.js"
 import type { DcpNudgeType } from "./pruner-types.js"
 import { registerCompressTool } from "./compress-tool.js"
+import { decideAutoCompress, createAutoCompressionBlock } from "./auto-compress.js"
 import { DCP_STATS_MESSAGE_TYPE, registerCommands } from "./commands.js"
 import { normalizeDcpContextUsage } from "./ui.js"
 import { safeGetContextUsage } from "../context-usage.js"
@@ -417,6 +418,21 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 				return finishContext("unknown-context-percent", prunedMessages, { clearedAnchors })
 			}
 
+			// Record the observed context window on EVERY context event (before
+			// any early return) so a mid-session model/window downgrade is
+			// detectable even when earlier passes were below threshold. We
+			// snapshot the previous value first so the downgrade check below
+			// compares against the window the prior pass actually saw.
+			const currentContextWindow = usage.contextWindow
+			const previousContextWindow = state.lastContextWindow
+			if (
+				typeof currentContextWindow === "number" &&
+				Number.isFinite(currentContextWindow) &&
+				currentContextWindow > 0
+			) {
+				state.lastContextWindow = currentContextWindow
+			}
+
 			const ctxModel = (ctx as any).model
 			const provider = ctxModel?.provider ?? ctxModel?.providerId ?? ctxModel?.providerID
 			const model = ctxModel?.id ?? ctxModel?.model ?? ctxModel?.modelId ?? ctxModel?.modelID
@@ -448,13 +464,30 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 				if (msg.role === "toolResult") toolCallsSinceLastUser++
 			}
 
-			const nudgeType = getNudgeType(
-				contextPercent,
-				state,
-				effectiveConfig,
-				toolCallsSinceLastUser,
-				thresholds,
-			)
+			// Switch-aware pre-emptive nudge: detect a mid-session context-window
+			// downgrade (e.g. model switch from a 1M window to a 275K window).
+			// Inherited tokens that were cheap on the larger window can suddenly
+			// sit above minContextPercent on the smaller one. When that happens,
+			// force a strong nudge on this pass so the model is told to compress
+			// before the smaller window fills, instead of waiting for cadence.
+			const windowDowngraded =
+				typeof previousContextWindow === "number" &&
+				Number.isFinite(previousContextWindow) &&
+				previousContextWindow > 0 &&
+				typeof currentContextWindow === "number" &&
+				Number.isFinite(currentContextWindow) &&
+				currentContextWindow < previousContextWindow * 0.9 &&
+				contextPercent > thresholds.minContextPercent
+
+			const nudgeType = windowDowngraded
+				? "context-strong"
+				: getNudgeType(
+					contextPercent,
+					state,
+					effectiveConfig,
+					toolCallsSinceLastUser,
+					thresholds,
+				)
 
 			const manualEmergencyOnly =
 				state.manualMode &&
@@ -481,6 +514,76 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 					messageCandidates,
 					state: summarizeDcpState(state),
 				}, ctx)
+			}
+
+			// Track consecutive ignored context-strong nudges for the
+			// auto-compress fallback. A strong nudge is "ignored" if it fires
+			// again on a later context event without a successful compress in
+			// between. Reset on non-strong nudges and when pressure drops below
+			// the emergency threshold (handled by the below-threshold early
+			// return above, which clears anchors; counter is also reset on any
+			// successful compress in the compress tool).
+			if (nudgeType === "context-strong" || nudgeType === "context-soft") {
+				state.consecutiveIgnoredStrongNudges += 1
+			} else if (nudgeType === null) {
+				state.consecutiveIgnoredStrongNudges = 0
+			}
+
+			// Auto-compress fallback: if the model has ignored enough strong
+			// nudges while above the emergency threshold, DCP creates a
+			// compression block itself instead of nudging again.
+			if (!manualEmergencyOnly) {
+				const autoDecision = decideAutoCompress(
+					state,
+					effectiveConfig,
+					contextPercent,
+					thresholds.maxContextPercent,
+					candidate,
+				)
+				if (autoDecision.shouldFire && candidate) {
+					try {
+						const autoResult = await createAutoCompressionBlock({
+							candidate,
+							topic: "Auto-compressed slice",
+							state,
+							config: effectiveConfig,
+							messages: prunedMessages,
+							modelRegistry: (ctx as any).modelRegistry,
+							signal: (ctx as any).signal,
+						})
+						// Re-apply pruning so the new block takes effect on this
+						// same context pass instead of the next one.
+						prunedMessages = applyPruning(prunedMessages, state, effectiveConfig)
+						const clearedAnchors = clearDcpNudgeAnchors(state)
+						state.consecutiveIgnoredStrongNudges = 0
+						await saveDcpState(ctx, state)
+						writeDcpDebugLog(effectiveConfig, "compress.auto", {
+							trigger: autoDecision.reason,
+							blockId: `b${autoResult.blockId}`,
+							summaryMode: autoResult.summaryMode,
+							summaryTokens: autoResult.summaryTokens,
+							removedTokenEstimate: autoResult.removedTokenEstimate,
+							candidate,
+							clearedAnchors,
+							state: summarizeDcpState(state),
+						}, ctx)
+						return finishContext("compress.auto", prunedMessages, {
+							candidate,
+							messageCandidates,
+							contextPercent,
+							thresholds,
+							clearedAnchors,
+						})
+					} catch (error) {
+						writeDcpDebugLog(effectiveConfig, "compress.auto_failed", {
+							trigger: autoDecision.reason,
+							error: error instanceof Error ? error.message : String(error),
+							candidate,
+							state: summarizeDcpState(state),
+						}, ctx)
+						// Fall through to normal nudge emission on failure.
+					}
+				}
 			}
 
 			if (nudgeType && !manualEmergencyOnly) {

@@ -49,6 +49,23 @@ export interface DcpConfig {
       highTokens: number
       maxSuggestions: number
     }
+    /**
+     * Auto-compress fallback: when the model ignores repeated context-strong
+     * nudges above the emergency threshold, DCP creates a compression block
+     * itself (without waiting for the model). Lossy and irreversible within a
+     * session — disabled by default; opt in via config.
+     */
+    autoCompress: {
+      enabled: boolean
+      /** Number of context-strong nudges emitted (and ignored) before DCP
+       * auto-compresses. The model gets `patience` genuine strong chances. */
+      patience: number
+      /** Models to try, in order, when producing a model-generated summary.
+       * Empty array → deterministic programmatic digest (no model call). */
+      summarizerModel: string[]
+      /** Hard ceiling in ms for a single summarizer model call. */
+      timeoutMs: number
+    }
   }
   strategies: {
     deduplication: {
@@ -119,6 +136,12 @@ const DEFAULT_CONFIG: DcpConfig = {
       mediumTokens: 500,
       highTokens: 5000,
       maxSuggestions: 5,
+    },
+    autoCompress: {
+      enabled: false,
+      patience: 2,
+      summarizerModel: [],
+      timeoutMs: 20000,
     },
   },
   strategies: {

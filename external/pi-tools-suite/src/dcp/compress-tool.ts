@@ -355,6 +355,9 @@ export function registerCompressTool(
       }
 
       const clearedNudgeAnchors = newBlockIds.length > 0 ? clearDcpNudgeAnchors(state) : 0
+      if (newBlockIds.length > 0) {
+        state.consecutiveIgnoredStrongNudges = 0
+      }
       if (clearedNudgeAnchors > 0) {
         try {
           pi.appendEntry("dcp-nudge", {

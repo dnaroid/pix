@@ -351,7 +351,7 @@ function visionCapabilityPrompt(event: unknown, ctx: unknown): string | undefine
 		: "The current parent model cannot inspect images/screenshots directly.";
 	const delegation = subagentsAvailable
 		? visionSubagentDelegationText(bridge?.attachments ?? [])
-		: "If visual understanding is required, ask the user to switch to a vision-capable model or provide a path that can be inspected by a vision-capable helper.";
+		: "If visual understanding is required, use the lookup tool if available; otherwise ask the user to switch to a vision-capable model or provide an inspectable image path.";
 	const bridgeWarning = visionBridgeWarning(bridge);
 	return [
 		"Vision capability constraint:",
@@ -360,8 +360,8 @@ function visionCapabilityPrompt(event: unknown, ctx: unknown): string | undefine
 		bridgeWarning,
 		delegation,
 		bridge?.attachments.length
-			? "Use those bridged paths exactly as imagePaths if delegating."
-			: "If an image only arrived as an attachment and no local file path/reference is available to subagents, ask the user for a file path or to switch the parent model to one with image input support.",
+		? "Use those bridged paths exactly as lookup imagePaths if needed."
+		: "If an image only arrived as an attachment and no local file path/reference is available to lookup, ask the user for a file path or to switch the parent model to one with image input support.",
 	].filter(Boolean).join(" ");
 }
 
@@ -380,16 +380,16 @@ function visionCapableParentPrompt(event: unknown): string | undefined {
 		"Vision capability note:",
 		"The current parent model supports image input.",
 		"If the user provided image attachments or local image file paths, inspect them directly first; for local paths, use the read tool on the image path.",
-		"Do not delegate to a vision sub-agent solely to gain visual access; use a vision sub-agent only when the user explicitly asks to delegate/parallelize or a separate visual review is useful.",
+		"Do not delegate solely to gain visual access; use lookup for focused visual checks and subagents only for broader independent tracks.",
 	].join(" ");
 }
 
 function visionSubagentDelegationText(attachments: BridgedImageAttachment[]): string {
 	if (attachments.length === 0) {
-		return "If visual understanding is required, delegate to the subagents tool with subagentType='vision' plus imagePaths/focus when the image is available as a local file path.";
+		return "If visual understanding is required, use the lookup tool with imagePaths/focus when the image is available as a local file path.";
 	}
 	const imagePaths = attachments.map((attachment) => attachment.relativePath);
-	return `Attached images were saved for vision delegation. If visual understanding is required, delegate to the subagents tool with subagentType='vision' and imagePaths=${JSON.stringify(imagePaths)} plus a focused task/focus.`;
+	return `Attached images were saved for lookup. If visual understanding is required, call lookup with imagePaths=${JSON.stringify(imagePaths)} and a focused question.`;
 }
 
 function visionBridgeWarning(bridge: BridgeImageAttachmentsResult | undefined): string | undefined {

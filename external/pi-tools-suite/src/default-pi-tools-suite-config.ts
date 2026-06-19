@@ -95,7 +95,13 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
       "iterationNudgeThreshold": 4,
       "nudgeForce": "strong",
       "autoCandidates": { "minContextPercent": 0.2 },
-      "messageMode": { "minContextPercent": 0.2 }
+      "messageMode": { "minContextPercent": 0.2 },
+      "autoCompress": {
+        "enabled": false,
+        "patience": 2,
+        "summarizerModel": ["zai/glm-5.2", "zai/glm-4.5-air"],
+        "timeoutMs": 20000
+      }
     }
   },
   "asyncSubagents": {
@@ -103,7 +109,7 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
     "routing": { "enabled": true, "model": "zai/glm-4.5-air", "maxTaskChars": 1200, "maxTokens": 512, "maxRetries": 1, "timeoutMs": 12000, "debug": false },
     "presets": {
       "cheap": {
-        "description": "Use cheap GLM/Gemini Flash models for text/code roles; keep vision on the enabled GPT vision model.",
+        "description": "Use cheap GLM/Gemini Flash models for text/code roles.",
         "types": {
           "quick": { "model": "zai/glm-4.5-air", "thinking": "off" },
           "scan": { "model": "zai/glm-4.5-air", "thinking": "off" },
@@ -117,8 +123,7 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
           "tests": { "model": "zai/glm-5-turbo", "thinking": "medium" },
           "review": { "model": "zai/glm-5.2", "thinking": "high" },
           "implement": { "model": "zai/glm-5.2", "thinking": "high" },
-          "deep": { "model": "zai/glm-5.2", "thinking": "high" },
-          "vision": { "model": "openai-codex/gpt-5.4-mini", "thinking": "off" }
+          "deep": { "model": "zai/glm-5.2", "thinking": "high" }
         }
       },
       "gpt": {
@@ -168,8 +173,7 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
             "model": "openai-codex/gpt-5.5",
             "fallbackModels": ["zai/glm-5.2"],
             "thinking": "high"
-          },
-          "vision": { "model": "openai-codex/gpt-5.4-mini", "thinking": "off" }
+          }
         }
       },
       "deep": {
@@ -219,8 +223,7 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
             "model": "antigravity/antigravity-claude-opus-4-6-thinking",
             "fallbackModels": ["openai-codex/gpt-5.5", "zai/glm-5.2"],
             "thinking": "high"
-          },
-          "vision": { "model": "openai-codex/gpt-5.4-mini", "thinking": "off" }
+          }
         }
       }
     },
@@ -280,16 +283,19 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
         "fallbackModels": ["zai/glm-5.2"],
         "thinking": "high"
       },
-      "vision": {
-        "description": "Use only when task has imagePaths, screenshots, or asks to inspect visible UI/image content for a text-only parent.",
-        "model": "openai-codex/gpt-5.4-mini",
-        "thinking": "off",
-        "promptAppend": [
-          "You are a vision helper for a parent model that may not be able to see images.",
-          "Inspect any attached images and any image paths mentioned in the task/scope. Describe concrete visible details, UI state, text, layout, errors, and uncertainties.",
-          "If focus instructions are provided, prioritize them, but still mention other important visible findings.",
-          "Do not make code changes. Return a compact visual description that the parent agent can rely on."
-        ]
+      "oracle": {
+        "description": "Oracle: cross-provider flagship second opinion for hard or high-stakes uncertainty. Use sparingly to pressure-test architecture, plans, root-cause hypotheses, risk/security calls, or final recommendations when independent disagreement is valuable. Read-only; advise, do not edit.",
+        "model": "openai-codex/gpt-5.5",
+        "fallbackModels": ["zai/glm-5.2"],
+        "thinking": "xhigh",
+        "tools": ["read", "grep", "bash"],
+        "modelByParent": {
+          "zai/*": { "model": "openai-codex/gpt-5.5", "fallbackModels": ["zai/glm-5.2"] },
+          "openai-codex/*": { "model": "zai/glm-5.2", "fallbackModels": ["openai-codex/gpt-5.5"] },
+          "antigravity/*": { "model": "zai/glm-5.2", "fallbackModels": ["openai-codex/gpt-5.5"] },
+          "anthropic/*": { "model": "openai-codex/gpt-5.5", "fallbackModels": ["zai/glm-5.2"] }
+        },
+        "promptAppend": "You are an oracle: a flagship model from a different provider giving a second opinion to the parent agent. Give a concise, decisive recommendation with key tradeoffs and risks. Disagree when warranted; do not rubber-stamp. Do not edit unless explicitly asked."
       }
     }
   },

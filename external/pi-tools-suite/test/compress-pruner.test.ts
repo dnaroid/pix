@@ -33,6 +33,11 @@ import {
 import {
   stripStaleDcpMetadataFromAssistantMessage,
 } from "../src/dcp/pruner-metadata.js";
+import {
+  decideAutoCompress,
+  createAutoCompressionBlock,
+} from "../src/dcp/auto-compress.js";
+import type { CompressionCandidate } from "../src/dcp/pruner-types.js";
 
 function config(overrides: Partial<DcpConfig> = {}): DcpConfig {
   const base: DcpConfig = {
@@ -66,6 +71,12 @@ function config(overrides: Partial<DcpConfig> = {}): DcpConfig {
         highTokens: 5000,
         maxSuggestions: 5,
       },
+      autoCompress: {
+        enabled: false,
+        patience: 2,
+        summarizerModel: [],
+        timeoutMs: 20000,
+      },
     },
     strategies: {
       deduplication: { enabled: true, protectedTools: [] },
@@ -98,6 +109,10 @@ function config(overrides: Partial<DcpConfig> = {}): DcpConfig {
       messageMode: {
         ...base.compress.messageMode,
         ...overrides.compress?.messageMode,
+      },
+      autoCompress: {
+        ...base.compress.autoCompress,
+        ...overrides.compress?.autoCompress,
       },
     },
     strategies: {
@@ -1555,6 +1570,170 @@ describe("DCP pruning effectiveness", () => {
 
     await contextHandler?.({ type: "context", messages }, ctx(70));
     expect(nudgeEvents.map((event) => event.event)).toEqual(["emitted", "emitted"]);
+  });
+
+  test("DCP context transform forces a strong nudge on context-window downgrade", async () => {
+    const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
+    const nudgeEvents: any[] = [];
+    const pi = {
+      on(event: string, handler: (event: any, ctx: any) => unknown) {
+        handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+      },
+      registerTool() {},
+      registerCommand() {},
+      appendEntry(type: string, data: any) {
+        if (type === "dcp-nudge") nudgeEvents.push(data);
+      },
+      sendMessage() {},
+    } as any;
+
+    await dcpModule(pi);
+    const contextHandler = handlers.get("context")?.[0];
+    expect(contextHandler).toBeDefined();
+
+    const messages = [
+      textMessage("user", "older completed research " + "a".repeat(2000), 1),
+      textMessage("assistant", "older result " + "b".repeat(2000), 2),
+      textMessage("user", "current request", 3),
+    ];
+
+    // Pass 1: large window (1M), 30% pressure. Below the 0.40 min threshold on
+    // the large window, so no nudge fires — but the window is recorded.
+    const largeWindowCtx = {
+      hasUI: false,
+      sessionManager: { getBranch: () => [] },
+      getContextUsage: () => ({ tokens: 300_000, contextWindow: 1_000_000, percent: 30 }),
+    };
+    const pass1 = await contextHandler?.({ type: "context", messages }, largeWindowCtx) as { messages: any[] } | undefined;
+    const pass1Rendered = pass1?.messages.map(contentText).join("\n") ?? "";
+    expect(pass1Rendered).not.toContain("<dcp-system-reminder>");
+    expect(nudgeEvents).toHaveLength(0);
+
+    // Pass 2: window shrinks to 275K. The same ~300K inherited tokens now sit
+    // above minContextPercent (0.40) but below maxContextPercent (0.65), a zone
+    // where the normal cadence might only emit a turn/iteration nudge. The
+    // downgrade must force a context-strong nudge on this pass.
+    const downgradedCtx = {
+      hasUI: false,
+      sessionManager: { getBranch: () => [] },
+      getContextUsage: () => ({ tokens: 120_000, contextWindow: 275_000, percent: 43.6 }),
+    };
+    const pass2 = await contextHandler?.({ type: "context", messages }, downgradedCtx) as { messages: any[] } | undefined;
+    const pass2Rendered = pass2?.messages.map(contentText).join("\n") ?? "";
+    expect(pass2Rendered).toContain("<dcp-system-reminder>");
+    // A downgrade-forced strong nudge is recorded as context-strong telemetry.
+    expect(nudgeEvents.map((event) => event.type)).toContain("context-strong");
+  });
+
+  test("DCP auto-compress decision fires after patience ignored strong nudges above emergency threshold", () => {
+    const cfg = config({
+      compress: {
+        minContextPercent: 0.40,
+        maxContextPercent: 0.65,
+        autoCompress: { enabled: true, patience: 2, summarizerModel: [], timeoutMs: 1000 },
+      } as any,
+    });
+    const state = createState();
+    const candidate: CompressionCandidate = {
+      startId: "m001",
+      endId: "m003",
+      messageCount: 3,
+      estimatedTokens: 1000,
+      includedBlockIds: [],
+      reason: "test",
+    };
+
+    // Below patience: 2 ignored strongs, patience=2 → not yet (needs >patience).
+    state.consecutiveIgnoredStrongNudges = 2;
+    expect(decideAutoCompress(state, cfg, 0.80, 0.65, candidate).shouldFire).toBe(false);
+
+    // At patience+1 ignored strongs, above max, with a candidate → fires.
+    state.consecutiveIgnoredStrongNudges = 3;
+    expect(decideAutoCompress(state, cfg, 0.80, 0.65, candidate).shouldFire).toBe(true);
+
+    // Above patience but below emergency threshold → must not fire.
+    state.consecutiveIgnoredStrongNudges = 5;
+    expect(decideAutoCompress(state, cfg, 0.50, 0.65, candidate).shouldFire).toBe(false);
+
+    // No candidate → must not fire even above threshold + patience.
+    state.consecutiveIgnoredStrongNudges = 5;
+    expect(decideAutoCompress(state, cfg, 0.80, 0.65, null).shouldFire).toBe(false);
+  });
+
+  test("DCP auto-compress decision is disabled when autoCompress.enabled=false", () => {
+    const cfg = config(); // autoCompress.enabled defaults to false
+    const state = createState();
+    state.consecutiveIgnoredStrongNudges = 10;
+    const candidate: CompressionCandidate = {
+      startId: "m001",
+      endId: "m003",
+      messageCount: 3,
+      estimatedTokens: 1000,
+      includedBlockIds: [],
+      reason: "test",
+    };
+    expect(decideAutoCompress(state, cfg, 0.90, 0.65, candidate).shouldFire).toBe(false);
+  });
+
+  test("DCP auto-compress creates a programmatic block when summarizerModel is empty", async () => {
+    const cfg = config({
+      compress: {
+        minContextPercent: 0.40,
+        maxContextPercent: 0.65,
+        autoCompress: { enabled: true, patience: 2, summarizerModel: [], timeoutMs: 1000 },
+      } as any,
+    });
+    const state = createState();
+    const messages = [
+      textMessage("user", "older research " + "a".repeat(2000), 1000),
+      textMessage("assistant", "older result " + "b".repeat(2000), 2000),
+      textMessage("user", "current request", 3000),
+    ];
+    // Seed the message-id snapshot so the candidate's start/end resolve.
+    state.messageIdSnapshot.set("m001", 1000);
+    state.messageIdSnapshot.set("m002", 2000);
+    state.messageMetaSnapshot.set("m001", {
+      timestamp: 1000,
+      stableId: "id:start",
+      role: "user",
+      blockId: undefined,
+      text: "",
+      tokenEstimate: 100,
+      priority: "medium",
+    });
+    state.messageMetaSnapshot.set("m002", {
+      timestamp: 2000,
+      stableId: "id:end",
+      role: "assistant",
+      blockId: undefined,
+      text: "",
+      tokenEstimate: 100,
+      priority: "medium",
+    });
+
+    const candidate: CompressionCandidate = {
+      startId: "m001",
+      endId: "m002",
+      messageCount: 2,
+      estimatedTokens: 1000,
+      includedBlockIds: [],
+      reason: "test",
+    };
+
+    const result = await createAutoCompressionBlock({
+      candidate,
+      topic: "Earlier work",
+      state,
+      config: cfg,
+      messages,
+    });
+
+    expect(result.summaryMode).toBe("programmatic");
+    expect(result.blockId).toBeGreaterThan(0);
+    expect(state.compressionBlocks.length).toBe(1);
+    expect(state.compressionBlocks[0]?.active).toBe(true);
+    expect(state.compressionBlocks[0]?.summary).toContain("Earlier work");
+    expect(state.compressionBlocks[0]?.summary).toContain("Auto-compressed by DCP");
   });
 
   test("DCP context transform emits context-limit nudges with concrete candidates", async () => {
