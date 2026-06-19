@@ -6,11 +6,25 @@ import { applyEdits, modify, parse as parseJsonc } from "jsonc-parser";
 import { ensurePiToolsSuiteUserConfig, getPiToolsSuiteUserConfigPath } from "../../config.js";
 import type { AgentTask, RetryConfig } from "./types.js";
 
+export interface ModelByParentEntry {
+	/** Model ref to use when the parent model matches the entry's pattern. */
+	model: string;
+	/** Ordered fallbacks used when this entry's model hits quota/rate limits; replaces the normal fallback chain. */
+	fallbackModels?: string[];
+}
+
 export interface SubagentTypeConfig {
 	description?: string;
 	model?: string;
 	/** Ordered model fallbacks used when the selected model hits quota/rate limits. */
 	fallbackModels?: string[];
+	/**
+	 * Parent-model-aware model selection. Keys are glob model refs (e.g. "zai/*")
+	 * matched against the current parent model; the first matching key wins.
+	 * Values may be a model ref string or { model, fallbackModels? }.
+	 * Resolved after explicit task.model / forcedModel, before preset/static model.
+	 */
+	modelByParent?: Record<string, ModelByParentEntry>;
 	thinking?: string;
 	tools?: string[];
 	extraArgs?: string[];
@@ -127,6 +141,8 @@ export interface ResolveAgentTaskOptions {
 	extraArgs?: string[];
 	/** Force every sub-agent to use this model, ignoring task/profile/env model selection. */
 	forcedModel?: string;
+	/** Current parent model ref (provider/model). Enables type.modelByParent matching. */
+	parentModel?: string;
 	/** Force a wall-clock timeout for every sub-agent spawned by this call. */
 	timeoutMs?: number;
 }
@@ -325,14 +341,19 @@ export function resolveAgentTaskConfig(
 	const promptAppend = joinTextBlocks(profile?.promptAppend, task.promptAppend);
 	const forcedModel = trimString(globalOptions.forcedModel);
 	const taskModel = trimString(task.model);
+	const parentMatch = resolveModelByParent(profile, trimString(globalOptions.parentModel));
+	const parentMatchModel = trimString(parentMatch?.model);
 	const presetTypeModel = trimString(presetType?.model);
 	const globalModel = trimString(globalOptions.model);
 	const presetModel = trimString(preset?.model);
 	const profileModel = trimString(profile?.model);
-	const model = forcedModel || taskModel || presetTypeModel || globalModel || presetModel || profileModel;
+	const model = forcedModel || taskModel || parentMatchModel || presetTypeModel || globalModel || presetModel || profileModel;
+	const usedParentMatch = Boolean(parentMatchModel) && model === parentMatchModel;
 	const fallbackModels = forcedModel || taskModel
 		? []
-		: resolveFallbackModels({ model, presetType, preset, profile });
+		: usedParentMatch && parentMatch?.fallbackModels && parentMatch.fallbackModels.length > 0
+			? parentMatch.fallbackModels
+			: resolveFallbackModels({ model, presetType, preset, profile });
 	const extraArgs = forcedModel
 		? stripModelArgs([...profileExtraArgs, ...presetTypeExtraArgs, ...taskExtraArgs, ...presetExtraArgs, ...globalExtraArgs])
 		: [...profileExtraArgs, ...presetTypeExtraArgs, ...taskExtraArgs, ...presetExtraArgs, ...globalExtraArgs];
@@ -480,6 +501,7 @@ function normalizeConfig(value: Record<string, unknown>, file: string): Partial<
 			description: trimString(rawProfile.description),
 			model: trimString(rawProfile.model),
 			fallbackModels: modelList(rawProfile.fallbackModels, rawProfile.fallbackModel),
+			modelByParent: normalizeModelByParent(rawProfile.modelByParent, name, file),
 			thinking: trimString(rawProfile.thinking),
 			tools: arrayOfStrings(rawProfile.tools),
 			extraArgs: arrayOfStrings(rawProfile.extraArgs),
@@ -555,6 +577,7 @@ function compactProfile(profile: SubagentTypeConfig): SubagentTypeConfig {
 	if (profile.description) compact.description = profile.description;
 	if (profile.model) compact.model = profile.model;
 	if (profile.fallbackModels && profile.fallbackModels.length > 0) compact.fallbackModels = profile.fallbackModels;
+	if (profile.modelByParent) compact.modelByParent = profile.modelByParent;
 	if (profile.thinking) compact.thinking = profile.thinking;
 	if (profile.tools && profile.tools.length > 0) compact.tools = profile.tools;
 	if (profile.extraArgs && profile.extraArgs.length > 0) compact.extraArgs = profile.extraArgs;
@@ -604,6 +627,38 @@ function normalizePresetTypeOverrides(value: unknown, file: string, presetName: 
 		if (override.model || override.fallbackModels || override.thinking || override.extraArgs || override.timeoutMs !== undefined) types[name] = override;
 	}
 	return Object.keys(types).length > 0 ? types : undefined;
+}
+
+function normalizeModelByParent(value: unknown, typeName: string, file: string): Record<string, ModelByParentEntry> | undefined {
+	if (value === undefined || value === null) return undefined;
+	if (!isRecord(value)) throw new Error(`Subagent type "${typeName}" modelByParent must be an object: ${file}`);
+	const out: Record<string, ModelByParentEntry> = {};
+	for (const [pattern, raw] of Object.entries(value)) {
+		const pat = trimString(pattern);
+		if (!pat) continue;
+		if (typeof raw === "string") {
+			const model = trimString(raw);
+			if (model) out[pat] = { model };
+			continue;
+		}
+		if (isRecord(raw)) {
+			const model = trimString(raw.model);
+			if (!model) throw new Error(`Subagent type "${typeName}" modelByParent["${pat}"].model must be a non-empty string: ${file}`);
+			out[pat] = { model, fallbackModels: modelList(raw.fallbackModels, raw.fallbackModel) };
+			continue;
+		}
+		throw new Error(`Subagent type "${typeName}" modelByParent["${pat}"] must be a string or object: ${file}`);
+	}
+	return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function resolveModelByParent(profile: SubagentTypeConfig | undefined, parentModelRef: string | undefined): ModelByParentEntry | undefined {
+	const entries = profile?.modelByParent;
+	if (!entries || !parentModelRef) return undefined;
+	for (const [pattern, entry] of Object.entries(entries)) {
+		if (modelPatternRegExp(pattern).test(parentModelRef)) return entry;
+	}
+	return undefined;
 }
 
 function resolveFallbackModels(options: {

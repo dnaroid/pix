@@ -237,12 +237,14 @@ export function registerSpawnTool(
 			}
 			const routed = await routeSubagentTasks(normalized.tasks ?? [], config, ctx as any, signal ?? undefined);
 			const timeoutMs = timeoutMsFromSeconds(params.timeoutSeconds);
+			const parentModel = currentModelRef((ctx as { model?: unknown }).model);
 			const resolvedTasks = routed.tasks.map((task) => applySessionModelFallback(
 				resolveAgentTaskConfig(task, config, {
 					preset: activePreset,
 					thinking: params.thinking,
 					extraArgs: Array.isArray(params.extraArgs) ? params.extraArgs : [],
 					forcedModel,
+					parentModel,
 					timeoutMs,
 				}),
 			));

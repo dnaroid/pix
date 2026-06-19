@@ -47,6 +47,19 @@
   // ],
   // "promptOverride": "You are a specialized {subagentType} sub-agent.\nParent: {parentObjective}\nTask: {task}\nScope: {scope}",
 
+  // Parent-model-aware model selection (optional, any type profile).
+  // modelByParent maps glob model refs (matched against the current parent
+  // model, e.g. "zai/*") to a model for this role. The first matching key wins.
+  // Values may be a model string or { model, fallbackModels? }. It is resolved
+  // after an explicit task.model / forcedModel, but before the preset/static
+  // profile model, so a role like an "oracle" can always pick a flagship from a
+  // DIFFERENT provider than the parent. Example:
+  // "modelByParent": {
+  //   "zai/*": { "model": "openai-codex/gpt-5.5", "fallbackModels": ["zai/glm-5.2"] },
+  //   "openai-codex/*": "zai/glm-5.2",
+  //   "antigravity/*": { "model": "zai/glm-5.2", "fallbackModels": ["openai-codex/gpt-5.5"] }
+  // }
+
   // Role auto-selection when subagentType is omitted is handled by a small LLM
   // router request. The router receives each task plus the configured type
   // descriptions, then returns one allowed subagentType per task. Explicit

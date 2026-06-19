@@ -255,6 +255,29 @@ Example shared async-subagents config section:
 }
 ```
 
+### Parent-model-aware model selection (`modelByParent`)
+
+Any type profile can carry `modelByParent`: a map from glob model refs (matched against the **current parent model**, e.g. `"zai/*"`) to a model for that role. The first matching key wins. Values may be a model string or `{ "model": "...", "fallbackModels": [...] }`. It is resolved after an explicit task `model` / `forcedModel`, but **before** the preset/static profile `model`, so a role can always pick a model based on who the parent is — independent of the active preset.
+
+The canonical use case is an **`oracle`** role that consults a flagship model from a *different* provider than the parent for a second opinion:
+
+```jsonc
+"oracle": {
+  "description": "Cross-provider second opinion: consult a flagship from a different provider than the parent to pressure-test a hard decision. Read-only; advise, do not edit.",
+  "model": "openai-codex/gpt-5.5",
+  "fallbackModels": ["zai/glm-5.2"],
+  "thinking": "xhigh",
+  "modelByParent": {
+    "zai/*":         { "model": "openai-codex/gpt-5.5", "fallbackModels": ["zai/glm-5.2"] },
+    "openai-codex/*": "zai/glm-5.2",
+    "antigravity/*": { "model": "zai/glm-5.2", "fallbackModels": ["openai-codex/gpt-5.5"] },
+    "anthropic/*":   { "model": "openai-codex/gpt-5.5", "fallbackModels": ["zai/glm-5.2"] }
+  }
+}
+```
+
+With this config a GLM parent (`zai/*`) spawns the oracle on `gpt-5.5`, a GPT parent (`openai-codex/*`) spawns it on `glm-5.2`, and so on — automatically, at spawn time, with no `task.model` needed. The parent model ref is read from the spawn context (`ctx.model`) and passed into resolution. Pattern matching is case-insensitive `*` glob (same engine as `vision.blindModelPatterns`). When no key matches (or no parent model is known), the role falls back to its static `model` + `fallbackModels`. An explicit `task.model` or `ASYNC_SUBAGENTS_FORCE_CURRENT_MODEL=1` still overrides the match.
+
 Sub-agents run with `--no-session` by default to avoid writing duplicate Pi session JSONL files for fire-and-forget background work. Set `ASYNC_SUBAGENTS_ENABLE_SESSIONS=1` to restore persisted per-agent sessions under each agent's `sessions/` directory; this also registers the session-navigation slash commands (`/sub-open`, `/sub-back`, `/sub-where`) needed for switching and deeper post-mortem navigation.
 
 Sub-agent runs are stored in the current project's `.pi/subagents/` directory while the main session is alive. Each spawn updates `.pi/subagents/registry.json` with the latest run and `agentId -> runDir` mappings. Because of that, `subagents({ action: "status" })`, `wait`, and `stop` can omit `runDir` to target the latest run, and `subagents({ action: "result", agentId: "..." })` can resolve the run from the registry even if the exact `runDir` was lost during compaction. Result reads always return a summary-first response with artifact paths; raw `result.md` and `stderr.log` are not inlined, which avoids IPC/socket buffer overflows. Include `runDir` when you need an older or non-latest run, and use `cleanup` with `delete=true` to remove collected old runs before the session ends. On normal main-session shutdown, Pi stops sub-agents and removes the project-local run files/registry to avoid leaving `.pi/subagents/` clutter behind; reload and fork shutdowns preserve them so in-process recovery still works.

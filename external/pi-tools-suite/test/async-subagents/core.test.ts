@@ -581,6 +581,82 @@ describe.serial("subagent type config", () => {
 		expect(forced.extraArgs).toEqual(["--temperature", "0", "--foo", "--bar"]);
 	});
 
+	test.serial("resolves modelByParent from the current parent model", () => {
+		const cwd = tempDir();
+		const configPath = path.join(cwd, "async-subagents.json");
+		writeFile(configPath, JSON.stringify({
+			defaultType: "quick",
+			types: {
+				quick: { model: "zai/glm-4.5-air", thinking: "off" },
+				oracle: {
+					description: "Cross-provider second opinion.",
+					model: "openai-codex/gpt-5.5",
+					fallbackModels: ["zai/glm-5.2", "openai-codex/gpt-5.5"],
+					thinking: "xhigh",
+					modelByParent: {
+						"zai/*": { model: "openai-codex/gpt-5.5", fallbackModels: ["zai/glm-5.2"] },
+						"openai-codex/*": "zai/glm-5.2",
+						"antigravity/*": { model: "zai/glm-5.2", fallbackModels: ["openai-codex/gpt-5.5"] },
+					},
+				},
+			},
+		}));
+
+		const config = loadSubagentConfig(cwd, { ASYNC_SUBAGENTS_CONFIG: configPath });
+
+		// GLM parent -> GPT oracle, with entry-specific fallbacks.
+		const fromGlm = resolveAgentTaskConfig(
+			{ id: "a", task: "second opinion", subagentType: "oracle" },
+			config,
+			{ parentModel: "zai/glm-5.2" },
+		);
+		expect(fromGlm.task.model).toBe("openai-codex/gpt-5.5");
+		expect(fromGlm.fallbackModels).toEqual(["zai/glm-5.2"]);
+
+		// GPT parent -> GLM oracle (string shorthand), falls back to normal chain.
+		const fromGpt = resolveAgentTaskConfig(
+			{ id: "b", task: "second opinion", subagentType: "oracle" },
+			config,
+			{ parentModel: "openai-codex/gpt-5.5" },
+		);
+		expect(fromGpt.task.model).toBe("zai/glm-5.2");
+		expect(fromGpt.fallbackModels).toEqual(["openai-codex/gpt-5.5"]);
+
+		// Antigravity parent -> GLM oracle with entry fallbacks.
+		const fromAg = resolveAgentTaskConfig(
+			{ id: "c", task: "second opinion", subagentType: "oracle" },
+			config,
+			{ parentModel: "antigravity/gemini-3.1-pro-preview" },
+		);
+		expect(fromAg.task.model).toBe("zai/glm-5.2");
+		expect(fromAg.fallbackModels).toEqual(["openai-codex/gpt-5.5"]);
+
+		// No parent model -> static profile model.
+		const noParent = resolveAgentTaskConfig(
+			{ id: "d", task: "second opinion", subagentType: "oracle" },
+			config,
+		);
+		expect(noParent.task.model).toBe("openai-codex/gpt-5.5");
+		expect(noParent.fallbackModels).toEqual(["zai/glm-5.2"]);
+
+		// Explicit task.model still wins over the parent-driven match.
+		const explicit = resolveAgentTaskConfig(
+			{ id: "e", task: "second opinion", subagentType: "oracle", model: "manual/model" },
+			config,
+			{ parentModel: "zai/glm-5.2" },
+		);
+		expect(explicit.task.model).toBe("manual/model");
+		expect(explicit.fallbackModels).toEqual([]);
+
+		// Non-oracle types are unaffected when no parent match exists.
+		const quick = resolveAgentTaskConfig(
+			{ id: "f", task: "tiny" },
+			config,
+			{ parentModel: "zai/glm-5.2" },
+		);
+		expect(quick.task.model).toBe("zai/glm-4.5-air");
+	});
+
 	test.serial("detects force-current-model env flags and formats current model refs", () => {
 		expect(shouldForceCurrentSubagentModel({})).toBe(false);
 		expect(shouldForceCurrentSubagentModel({ ASYNC_SUBAGENTS_FORCE_CURRENT_MODEL: "1" })).toBe(true);
