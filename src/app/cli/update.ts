@@ -1,15 +1,13 @@
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
 
 const DEFAULT_UPDATE_TIMEOUT_MS = 10_000;
 const NPM_REGISTRY_URL = "https://registry.npmjs.org";
 const PI_PACKAGE_NAME = "@earendil-works/pi-coding-agent";
-const requireFromUpdateModule = createRequire(import.meta.url);
 
 type PixUpdateTestDeps = {
 	checkPixUpdate: typeof checkPixUpdate;
@@ -313,10 +311,21 @@ function findPixPackageRoot(): string {
 }
 
 function findPiPackageRoot(pixPackageRoot = readPixPackageInfo().packageRoot): string {
-	const packageJsonPath = requireFromUpdateModule.resolve(`${PI_PACKAGE_NAME}/package.json`, {
-		paths: [pixPackageRoot],
-	});
-	return dirname(packageJsonPath);
+	// `@earendil-works/pi-coding-agent` does not expose "./package.json" in its
+	// `exports` map, so a CJS `require.resolve(... + "/package.json")` throws
+	// ERR_PACKAGE_PATH_NOT_EXPORTED. Resolve the bare entrypoint via ESM
+	// (matching command-session-actions.ts) and walk up to the nearest package.json.
+	const resolvedDir = dirname(fileURLToPath(import.meta.resolve(PI_PACKAGE_NAME, pathToFileURL(`${pixPackageRoot}/`).href)));
+	let currentDir = resolvedDir;
+	while (true) {
+		const packageJsonPath = join(currentDir, "package.json");
+		if (existsSync(packageJsonPath)) return currentDir;
+		const nextDir = dirname(currentDir);
+		if (nextDir === currentDir) {
+			throw new Error(`Could not find ${PI_PACKAGE_NAME} package.json from ${resolvedDir}`);
+		}
+		currentDir = nextDir;
+	}
 }
 
 async function fetchLatestNpmVersion(packageName: string, currentVersion: string, timeoutMs: number): Promise<string | undefined> {

@@ -97,6 +97,18 @@ describe("pix update", () => {
 		});
 	});
 
+	it("resolves the bundled Pi package via the default runtime path", async () => {
+		// Regression: the default path used CJS require.resolve on a subpath the
+		// Pi package does not export, so the startup Pi update toast never showed.
+		const result = await checkPiUpdate({
+			fetchLatestVersion: async () => "0.0.0",
+		});
+
+		assert.equal(result.packageName, "@earendil-works/pi-coding-agent");
+		assert.equal(result.status, "current");
+		assert.match(result.packageRoot, /@earendil-works\/pi-coding-agent$/u);
+	});
+
 	it("does not offer npm updates for private source packages", async () => {
 		await withPackageJson({ name: "pi-ui-extend", version: "0.1.0", private: true }, async (packageRoot) => {
 			const result = await checkPixUpdate({
