@@ -146,4 +146,52 @@ describe("coding discipline", () => {
 		expect(second).toEqual(first);
 		expect((second.system.match(/<glm_coding_discipline>/g) ?? []).length).toBe(1);
 	});
+
+	test("strips pi's built-in Pi documentation block from the system prompt", async () => {
+		setPiConfigDirConfig(`{ "lookupModel": "openai-codex/gpt-5.4-mini" }`);
+
+		const {
+			default: register,
+			buildCodingDisciplinePrompt,
+		} = await import("../src/coding-discipline/index.js");
+		const pi = new FakePi();
+		register(pi as any);
+
+		const piPrompt = [
+			"You are an expert coding assistant operating inside pi.",
+			"",
+			"Guidelines:",
+			"- Be concise",
+			"",
+			"Pi documentation (read only when the user asks about pi itself, its SDK, extensions, themes, skills, or TUI):",
+			"- Main documentation: /path/to/README.md",
+			"- Additional docs: /path/to/docs",
+			"- Examples: /path/to/examples (extensions, custom tools, SDK)",
+			"- When reading pi docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory",
+			"- When asked about: extensions (docs/extensions.md, examples/extensions/), themes (docs/themes.md), skills (docs/skills.md), prompt templates (docs/prompt-templates.md), TUI components (docs/tui.md), keybindings (docs/keybindings.md), SDK integrations (docs/sdk.md), custom providers (docs/custom-provider.md), adding models (docs/models.md), pi packages (docs/packages.md)",
+			"- When working on pi topics, read the docs and examples, and follow .md cross-references before implementing",
+			"- Always read pi .md files completely and follow links to related docs (e.g., tui.md for TUI API details)",
+			"",
+			"<available_skills>",
+			"</available_skills>",
+			"",
+			"Current date: 2026-01-01",
+		].join("\n");
+
+		const result = await pi.emit(
+			"before_provider_request",
+			{ payload: { system: piPrompt, model: "anthropic/claude-sonnet-4" } },
+			{ cwd: "/tmp/project", model: { provider: "anthropic", id: "claude-sonnet-4" } },
+		);
+
+		const system = result.system as string;
+		expect(system.startsWith(buildCodingDisciplinePrompt())).toBe(true);
+		expect(system).not.toContain("Pi documentation");
+		expect(system).not.toContain("tui.md for TUI API details");
+		expect(system).toContain("<available_skills>");
+		expect(system).toContain("Current date: 2026-01-01");
+		expect(system).toContain("Guidelines:");
+		// No more than two consecutive newlines after stripping the block.
+		expect(/\n{3,}/.test(system)).toBe(false);
+	});
 });

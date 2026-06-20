@@ -174,6 +174,19 @@ const DISCIPLINE_PROMPT_BLOCK_PATTERN = new RegExp(
 	"g",
 );
 
+/**
+ * Strips pi's built-in "Pi documentation" reference block from the system prompt.
+ * That block (≈10 lines listing docs/examples paths and "when asked about X" routing)
+ * is useless dead weight for non-pi work and dilutes attention to the trailing
+ * <available_skills> section, which especially hurts weaker models like GLM.
+ * Anchored on the fixed header/footer strings from buildSystemPrompt() so it only
+ * ever matches pi's own block regardless of resolved doc/example paths.
+ */
+const PI_DOCS_BLOCK_PATTERN = new RegExp(
+	`\\n+Pi documentation \\(read only when the user asks about pi itself[\\s\\S]*?tui\\.md for TUI API details\\)\\n+`,
+	"g",
+);
+
 const LOOKUP_SYSTEM_PROMPT = [
 	"You are a vision-capable lookup helper for a blind GLM coding agent.",
 	"Inspect the provided screenshots/images and answer the parent agent's focused question using concrete visual evidence.",
@@ -263,6 +276,7 @@ export function prependCodingDisciplinePrompt(systemPrompt: string, options: { l
 	const deduped = systemPrompt
 		.replace(LEGACY_SILENT_PROMPT_BLOCK_PATTERN, "")
 		.replace(DISCIPLINE_PROMPT_BLOCK_PATTERN, "")
+		.replace(PI_DOCS_BLOCK_PATTERN, "\n\n")
 		.trimStart();
 	const prompt = buildCodingDisciplinePrompt(options);
 	return deduped ? `${prompt}\n\n${deduped}` : prompt;

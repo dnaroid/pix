@@ -90,6 +90,7 @@ def run_loop(
             eval_set=all_queries,
             skill_name=name,
             description=current_description,
+            skill_body=content,
             num_workers=num_workers,
             timeout=timeout,
             project_root=project_root,
