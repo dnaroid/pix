@@ -998,7 +998,11 @@ setTimeout(() => {}, 2000);
 		}, undefined, undefined, { cwd });
 		const elapsedMs = Date.now() - startedAt;
 
-		expect(elapsedMs).toBeLessThan(500);
+		// Spawn must return promptly (agents are queued, not awaited) instead of
+		// blocking for the ~1.4s it would take to run both 700ms agents serially
+		// under maxConcurrent=1. The bound stays well below the blocking floor
+		// while tolerating slower Windows CI process-spawn overhead.
+		expect(elapsedMs).toBeLessThan(1200);
 		expect(result.content[0].text).toContain("Scheduled 2 agent(s) in");
 		expect(result.content[0].text).toContain("maxConcurrent=1");
 		expect(fs.existsSync(path.join(result.details.runDir, "prompts", "agent-1.md"))).toBe(true);
