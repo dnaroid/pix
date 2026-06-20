@@ -1,6 +1,13 @@
 ---
 name: skill-creator
-description: Create new skills, modify and improve existing skills, and measure skill performance. Use when users want to create a skill from scratch, edit, or optimize an existing skill, run evals to test a skill, benchmark skill performance with variance analysis, or optimize a skill's description for better triggering accuracy.
+description: >-
+  Author, edit, and improve pi Agent-Skills. Use whenever asked to create, make,
+  or generate a new skill (RU: «создать / сгенерить скилл», «работать со
+  скиллами»), edit or rewrite an existing SKILL.md, write or fix YAML frontmatter
+  (name and description), tune a skill's trigger for reliable auto-loading without
+  bloating its description, fix validation warnings, or run skill evals and
+  benchmarks. Covers .pi/skills/ and skills/ authoring, progressive disclosure,
+  and the eval/improve loop.
 ---
 
 # Skill Creator
