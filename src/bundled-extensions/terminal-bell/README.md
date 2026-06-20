@@ -69,7 +69,7 @@ Retry behavior:
 Default titles:
 
 ```bash
-completion: "Pix - completion"
+completion: "Pix - complete"
 error: "Pix - error"
 question: "Pix - question"
 ```
@@ -83,7 +83,7 @@ PI_TERMINAL_BELL_NOTIFY_MESSAGE="{sessionName}"
 Examples:
 
 ```bash
-PI_TERMINAL_BELL_NOTIFY_TITLE="Pix - completion"
+PI_TERMINAL_BELL_NOTIFY_TITLE="Pix - complete"
 PI_TERMINAL_BELL_NOTIFY_MESSAGE="{sessionName}"
 
 PI_TERMINAL_BELL_NOTIFY_TITLE="{sessionFileBase}"

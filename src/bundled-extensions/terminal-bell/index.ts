@@ -17,7 +17,7 @@ const TERMINAL_BELL_ATTENTION_EVENT = "pix:terminal-bell:attention";
  * extensions, so the renderer emits this on the extension event bus.
  */
 const RETRY_ACTIVE_EVENT = "pix:retry-active";
-const DEFAULT_COMPLETION_NOTIFICATION_TITLE = "Pix - completion";
+const DEFAULT_COMPLETION_NOTIFICATION_TITLE = "Pix - complete";
 const DEFAULT_ERROR_NOTIFICATION_TITLE = "Pix - error";
 const DEFAULT_QUESTION_NOTIFICATION_TITLE = "Pix - question";
 const DEFAULT_NOTIFICATION_MESSAGE = "{sessionName}";
