@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { DcpConfig } from "../src/dcp/config.js";
+import { loadConfig, type DcpConfig } from "../src/dcp/config.js";
 import dcpModule from "../src/dcp/index.js";
 import { registerCompressTool } from "../src/dcp/compress-tool.js";
 import { registerCommands } from "../src/dcp/commands.js";
@@ -1597,26 +1597,43 @@ describe("DCP pruning effectiveness", () => {
       textMessage("user", "current request", 3),
     ];
 
-    // Pass 1: large window (1M), 30% pressure. Below the 0.40 min threshold on
-    // the large window, so no nudge fires — but the window is recorded.
+    // Derive pressure from the resolved config thresholds so the test is
+    // independent of the ambient user config at ~/.config/pi/pi-tools-suite.jsonc
+    // (its min/max can differ from the in-repo defaults, e.g. 20%/55% vs 40%/65%).
+    const resolvedThresholds = resolveContextThresholds(loadConfig(), []);
+    const pass1Fraction = Math.max(0.01, resolvedThresholds.minContextPercent - 0.05);
+    const pass2Fraction = (resolvedThresholds.minContextPercent + resolvedThresholds.maxContextPercent) / 2;
+    const largeWindow = 1_000_000;
+    const downgradedWindow = 275_000;
+
+    // Pass 1: large window, pressure just below minContextPercent so no nudge
+    // fires — but the window is recorded for the downgrade comparison.
     const largeWindowCtx = {
       hasUI: false,
       sessionManager: { getBranch: () => [] },
-      getContextUsage: () => ({ tokens: 300_000, contextWindow: 1_000_000, percent: 30 }),
+      getContextUsage: () => ({
+        tokens: Math.round(largeWindow * pass1Fraction),
+        contextWindow: largeWindow,
+        percent: pass1Fraction * 100,
+      }),
     };
     const pass1 = await contextHandler?.({ type: "context", messages }, largeWindowCtx) as { messages: any[] } | undefined;
     const pass1Rendered = pass1?.messages.map(contentText).join("\n") ?? "";
     expect(pass1Rendered).not.toContain("<dcp-system-reminder>");
     expect(nudgeEvents).toHaveLength(0);
 
-    // Pass 2: window shrinks to 275K. The same ~300K inherited tokens now sit
-    // above minContextPercent (0.40) but below maxContextPercent (0.65), a zone
-    // where the normal cadence might only emit a turn/iteration nudge. The
-    // downgrade must force a context-strong nudge on this pass.
+    // Pass 2: window shrinks to 275K (below 90% of the 1M pass-1 window). The
+    // same inherited tokens now sit above minContextPercent but below
+    // maxContextPercent, a zone where the normal cadence might only emit a
+    // turn/iteration nudge. The downgrade must force a context-strong nudge.
     const downgradedCtx = {
       hasUI: false,
       sessionManager: { getBranch: () => [] },
-      getContextUsage: () => ({ tokens: 120_000, contextWindow: 275_000, percent: 43.6 }),
+      getContextUsage: () => ({
+        tokens: Math.round(downgradedWindow * pass2Fraction),
+        contextWindow: downgradedWindow,
+        percent: pass2Fraction * 100,
+      }),
     };
     const pass2 = await contextHandler?.({ type: "context", messages }, downgradedCtx) as { messages: any[] } | undefined;
     const pass2Rendered = pass2?.messages.map(contentText).join("\n") ?? "";
