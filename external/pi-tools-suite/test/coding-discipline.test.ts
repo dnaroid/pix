@@ -96,13 +96,10 @@ describe("coding discipline", () => {
 		expect(pi.tools.has("lookup")).toBe(false);
 	});
 
-	test("injects discipline into non-GLM main-agent requests without enabling lookup guidance", async () => {
+	test("does not inject discipline into non-GLM main-agent requests", async () => {
 		setPiConfigDirConfig(`{ "lookupModel": "openai-codex/gpt-5.4-mini" }`);
 
-		const {
-			default: register,
-			buildCodingDisciplinePrompt,
-		} = await import("../src/coding-discipline/index.js");
+		const { default: register } = await import("../src/coding-discipline/index.js");
 		const pi = new FakePi();
 		register(pi as any);
 
@@ -112,10 +109,7 @@ describe("coding discipline", () => {
 			{ cwd: "/tmp/project", model: { provider: "anthropic", id: "claude-sonnet-4" } },
 		);
 
-		expect(result).toEqual({
-			system: `${buildCodingDisciplinePrompt()}\n\nbase prompt`,
-			model: "anthropic/claude-sonnet-4",
-		});
+		expect(result).toBeUndefined();
 	});
 
 	test("deduplicates the injected discipline block across repeated provider requests", async () => {
@@ -130,18 +124,18 @@ describe("coding discipline", () => {
 
 		const first = await pi.emit(
 			"before_provider_request",
-			{ payload: { system: "base prompt", model: "anthropic/claude-sonnet-4" } },
-			{ cwd: "/tmp/project", model: { provider: "anthropic", id: "claude-sonnet-4" } },
+			{ payload: { system: "base prompt", model: "zai/glm-5.2" } },
+			{ cwd: "/tmp/project", model: { provider: "zai", id: "glm-5.2" } },
 		);
 		const second = await pi.emit(
 			"before_provider_request",
 			{ payload: first },
-			{ cwd: "/tmp/project", model: { provider: "anthropic", id: "claude-sonnet-4" } },
+			{ cwd: "/tmp/project", model: { provider: "zai", id: "glm-5.2" } },
 		);
 
 		expect(first).toEqual({
-			system: `${buildCodingDisciplinePrompt()}\n\nbase prompt`,
-			model: "anthropic/claude-sonnet-4",
+			system: `${buildCodingDisciplinePrompt({ lookupEnabled: true })}\n\nbase prompt`,
+			model: "zai/glm-5.2",
 		});
 		expect(second).toEqual(first);
 		expect((second.system.match(/<glm_coding_discipline>/g) ?? []).length).toBe(1);
@@ -180,12 +174,12 @@ describe("coding discipline", () => {
 
 		const result = await pi.emit(
 			"before_provider_request",
-			{ payload: { system: piPrompt, model: "anthropic/claude-sonnet-4" } },
-			{ cwd: "/tmp/project", model: { provider: "anthropic", id: "claude-sonnet-4" } },
+			{ payload: { system: piPrompt, model: "zai/glm-5.2" } },
+			{ cwd: "/tmp/project", model: { provider: "zai", id: "glm-5.2" } },
 		);
 
 		const system = result.system as string;
-		expect(system.startsWith(buildCodingDisciplinePrompt())).toBe(true);
+		expect(system.startsWith(buildCodingDisciplinePrompt({ lookupEnabled: true }))).toBe(true);
 		expect(system).not.toContain("Pi documentation");
 		expect(system).not.toContain("tui.md for TUI API details");
 		expect(system).toContain("<available_skills>");
@@ -193,5 +187,102 @@ describe("coding discipline", () => {
 		expect(system).toContain("Guidelines:");
 		// No more than two consecutive newlines after stripping the block.
 		expect(/\n{3,}/.test(system)).toBe(false);
+	});
+
+	test("injects <available_skills> when pi-core's gate failed and skills are loaded", async () => {
+		setPiConfigDirConfig(`{ "lookupModel": "openai-codex/gpt-5.4-mini" }`);
+
+		const { default: register } = await import("../src/coding-discipline/index.js");
+		const pi = new FakePi();
+		register(pi as any);
+
+		// Core registered the read tool as PascalCase "Read" (Claude alias),
+		// so tools.includes("read") is false and pi-core skips the block.
+		const result = await pi.emit(
+			"before_agent_start",
+			{
+				systemPrompt: "You are an expert coding assistant.\n\nCurrent date: 2026-01-01",
+				systemPromptOptions: {
+					selectedTools: ["repo_search", "Read", "Bash"],
+					skills: [
+						{
+							name: "skill-creator",
+							description: "Author and edit pi Agent-Skills.",
+							filePath: "/skills/skill-creator/SKILL.md",
+							disableModelInvocation: false,
+						},
+						{
+							name: "hidden-skill",
+							description: "Should not appear.",
+							filePath: "/skills/hidden/SKILL.md",
+							disableModelInvocation: true,
+						},
+					],
+				},
+			},
+			{ cwd: "/tmp/project" },
+		);
+
+		expect(result).toBeDefined();
+		const system = result.systemPrompt as string;
+		expect(system).toContain("<available_skills>");
+		expect(system).toContain("<name>skill-creator</name>");
+		expect(system).toContain("<location>/skills/skill-creator/SKILL.md</location>");
+		expect(system).not.toContain("hidden-skill");
+		expect(system).toContain("Current date: 2026-01-01");
+		// Exactly one block (no duplicate).
+		expect((system.match(/<available_skills>/g) ?? []).length).toBe(1);
+	});
+
+	test("does not re-inject <available_skills> when the block is already present", async () => {
+		setPiConfigDirConfig(`{ "lookupModel": "openai-codex/gpt-5.4-mini" }`);
+
+		const { default: register } = await import("../src/coding-discipline/index.js");
+		const pi = new FakePi();
+		register(pi as any);
+
+		const existing = [
+			"You are an expert coding assistant.",
+			"",
+			"<available_skills>",
+			"  <skill>",
+			"    <name>already-here</name>",
+			"  </skill>",
+			"</available_skills>",
+		].join("\n");
+
+		const result = await pi.emit(
+			"before_agent_start",
+			{
+				systemPrompt: existing,
+				systemPromptOptions: {
+					selectedTools: ["Read"],
+					skills: [{ name: "other-skill", description: "x", filePath: "/x/SKILL.md" }],
+				},
+			},
+			{ cwd: "/tmp/project" },
+		);
+
+		// Idempotent: block already present -> no modification.
+		expect(result).toBeUndefined();
+	});
+
+	test("does not inject <available_skills> when no skills are loaded", async () => {
+		setPiConfigDirConfig(`{ "lookupModel": "openai-codex/gpt-5.4-mini" }`);
+
+		const { default: register } = await import("../src/coding-discipline/index.js");
+		const pi = new FakePi();
+		register(pi as any);
+
+		const result = await pi.emit(
+			"before_agent_start",
+			{
+				systemPrompt: "You are an expert coding assistant.\n\nCurrent date: 2026-01-01",
+				systemPromptOptions: { selectedTools: ["Read"], skills: [] },
+			},
+			{ cwd: "/tmp/project" },
+		);
+
+		expect(result).toBeUndefined();
 	});
 });

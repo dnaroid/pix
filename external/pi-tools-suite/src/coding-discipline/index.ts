@@ -126,8 +126,6 @@ const QUALITY_DISCIPLINE_LINES = [
 	"While WORKING, this behavior is internal and expressed only through tool choices, not prose.",
 	"",
 	"Maintain these invariants:",
-	"- make the smallest correct change;",
-	"- keep diffs local; no unrelated refactors, renames, moves, reformatting, or dependency changes;",
 	"- inspect code before editing; do not invent APIs, files, commands, or behavior;",
 	"- before non-trivial edits, know the verification path;",
 	"- for bugs, prefer a failing test or repro first; then make the minimal fix; then verify;",
@@ -247,9 +245,78 @@ export default function codingDiscipline(pi: ExtensionAPI) {
 
 	pi.on("before_provider_request", async (event: { payload?: unknown }, ctx: unknown) => {
 		const modelRef = modelRefFromPayload(event.payload) ?? selectedModelRef ?? modelRefFromContext(ctx);
-		return injectCodingDisciplineIntoPayload(event.payload, {
-			lookupEnabled: isGlmModel(modelRef) && Boolean(lookupModelFromConfig(contextCwd(ctx))),
+		if (!isGlmModel(modelRef)) return undefined;
+		const injected = injectCodingDisciplineIntoPayload(event.payload, {
+			lookupEnabled: Boolean(lookupModelFromConfig(contextCwd(ctx))),
 		});
+		if (process.env.PI_DEBUG_PROMPT === "1") {
+			logFinalPrompt(injected, modelRef, contextCwd(ctx) ?? process.cwd());
+		}
+		return injected;
+	});
+
+	pi.on("before_agent_start", async (event: { systemPromptOptions?: unknown; systemPrompt?: string }, ctx: unknown) => {
+		const debug = process.env.PI_DEBUG_PROMPT === "1";
+		const opts = event.systemPromptOptions as {
+			selectedTools?: unknown;
+			skills?: unknown[];
+			customPrompt?: unknown;
+			cwd?: string;
+		} | undefined;
+		const sys = typeof event.systemPrompt === "string" ? event.systemPrompt : "";
+		const toolsArr = Array.isArray(opts?.selectedTools) ? opts!.selectedTools as string[] : [];
+		const skillsCount = Array.isArray(opts?.skills) ? opts!.skills.length : -1;
+		const alreadyHasSkillsBlock = /<available_skills>/.test(sys);
+
+		// Inject <available_skills> when pi-core's gate failed to produce it.
+		// Core builds the block only when tools.includes("read") (lowercase), but
+		// Claude-alias registration exposes the tool as "Read" (PascalCase), so
+		// the gate returns false and skills never reach the prompt for any model.
+		// Guard: never re-inject if the block is already present (idempotent; safe
+		// once pi fixes the gate or aliases are removed).
+		let nextSystemPrompt = sys;
+		let injectedSkills = false;
+		if (!alreadyHasSkillsBlock) {
+			const skills = extractSkills(opts?.skills);
+			if (skills.length > 0) {
+				const block = buildAvailableSkillsBlock(skills);
+				if (block) {
+					nextSystemPrompt = sys ? `${sys}\n\n${block}` : block;
+					injectedSkills = true;
+				}
+			}
+		}
+
+		if (debug) {
+			try {
+				const cwd = contextCwd(ctx) ?? process.cwd();
+				const dir = path.join(cwd, ".pi-debug-prompt");
+				fs.mkdirSync(dir, { recursive: true });
+				const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+				fs.writeFileSync(
+					path.join(dir, `${stamp}__before_agent_start.txt`),
+					[
+						"# before_agent_start diagnostic",
+						`cwd: ${cwd}`,
+						`customPrompt present: ${typeof opts?.customPrompt === "string" && opts.customPrompt.length > 0}`,
+						`selectedTools (${toolsArr.length}): ${JSON.stringify(toolsArr)}`,
+						`hasRead (lowercase): ${toolsArr.includes("read")}`,
+						`skills.length: ${skillsCount}`,
+						`system had <available_skills> block (pre-inject): ${alreadyHasSkillsBlock}`,
+						`injected <available_skills>: ${injectedSkills}`,
+						`systemPrompt length: ${nextSystemPrompt.length}`,
+					].join("\n"),
+					"utf-8",
+				);
+			} catch {
+				// debug logging must never break agent flow
+			}
+		}
+
+		if (injectedSkills) {
+			return { systemPrompt: nextSystemPrompt };
+		}
+		return undefined;
 	});
 
 	pi.on("context", async (event: { messages?: unknown[] }, ctx: unknown) => {
@@ -317,6 +384,131 @@ export function injectCodingDisciplineIntoPayload(payload: unknown, options: { l
 	}
 
 	return payload;
+}
+
+/**
+ * Write the final provider-bound system prompt + message roles to a file for debugging.
+ * Enabled by PI_DEBUG_PROMPT=1. Writes one file per request to <cwd>/.pi-debug-prompt/
+ * so successive requests don't overwrite each other.
+ */
+function logFinalPrompt(payload: unknown, modelRef: string | undefined, cwd: string): void {
+	try {
+		const systemPrompt = extractPayloadSystemPrompt(payload);
+		const messages = extractPayloadMessages(payload);
+		if (systemPrompt === undefined && messages.length === 0) return;
+
+		const dir = path.join(cwd, ".pi-debug-prompt");
+		fs.mkdirSync(dir, { recursive: true });
+		const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+		const slug = (modelRef ?? "unknown").replace(/[^a-z0-9._-]+/gi, "-");
+		const file = path.join(dir, `${stamp}__${slug}.txt`);
+
+		const lines: string[] = [];
+		lines.push(`# PI_DEBUG_PROMPT dump`);
+		lines.push(`model: ${modelRef ?? "(unknown)"}`);
+		lines.push(`timestamp: ${stamp}`);
+		lines.push(`messages: ${messages.length}`);
+		lines.push("");
+		lines.push("=== SYSTEM PROMPT ===");
+		lines.push(systemPrompt ?? "(none found)");
+		lines.push("");
+		lines.push("=== MESSAGE ROLES (last 8) ===");
+		for (const m of messages.slice(-8)) {
+			const preview = truncate(m.preview, 200);
+			lines.push(`[${m.role}] ${preview}`);
+		}
+
+		fs.writeFileSync(file, lines.join("\n"), "utf-8");
+	} catch {
+		// Debug logging must never break a provider request.
+	}
+}
+
+/**
+ * Extract loadable skills from systemPromptOptions.skills, filtering out
+ * disable-model-invocation ones (matching pi-core formatSkillsForPrompt behavior).
+ */
+function extractSkills(raw: unknown): { name: string; description: string; filePath?: string }[] {
+	if (!Array.isArray(raw)) return [];
+	const skills: { name: string; description: string; filePath?: string }[] = [];
+	for (const entry of raw) {
+		if (!isRecord(entry)) continue;
+		if (entry.disableModelInvocation === true) continue;
+		const name = typeof entry.name === "string" ? entry.name : "";
+		const description = typeof entry.description === "string" ? entry.description : "";
+		if (!name || !description) continue;
+		const filePath = typeof entry.filePath === "string" ? entry.filePath : undefined;
+		skills.push({ name, description, filePath });
+	}
+	return skills;
+}
+
+/**
+ * Build the <available_skills> XML block in pi-core's exact format
+ * (see packages/coding-agent/src/core/skills.ts::formatSkillsForPrompt),
+ * so models trained on the Agent Skills standard see identical structure.
+ */
+function buildAvailableSkillsBlock(skills: { name: string; description: string; filePath?: string }[]): string | undefined {
+	const loadable = skills.filter((s) => s.filePath);
+	if (loadable.length === 0) return undefined;
+	const lines = [
+		"The following skills provide specialized instructions for specific tasks.",
+		"Use the read tool to load a skill's file when the task matches its description.",
+		"When a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.",
+		"",
+		"<available_skills>",
+	];
+	for (const skill of loadable) {
+		lines.push("  <skill>");
+		lines.push(`    <name>${escapeXml(skill.name)}</name>`);
+		lines.push(`    <description>${escapeXml(skill.description)}</description>`);
+		lines.push(`    <location>${escapeXml(skill.filePath ?? "")}</location>`);
+		lines.push("  </skill>");
+	}
+	lines.push("</available_skills>");
+	return lines.join("\n");
+}
+
+function escapeXml(str: string): string {
+	return str
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;")
+		.replace(/'/g, "&apos;");
+}
+
+function extractPayloadSystemPrompt(payload: unknown): string | undefined {
+	if (!isRecord(payload)) return undefined;
+	if (typeof payload.instructions === "string") return payload.instructions;
+	if (typeof payload.system === "string") return payload.system;
+	for (const field of ["messages", "input"] as const) {
+		const list = payload[field];
+		if (!Array.isArray(list)) continue;
+		for (const message of list) {
+			if (!isRecord(message)) continue;
+			if (message.role !== "system" && message.role !== "developer") continue;
+			const text = contentToText(message.content);
+			if (text) return text;
+		}
+	}
+	return undefined;
+}
+
+function extractPayloadMessages(payload: unknown): { role: string; preview: string }[] {
+	if (!isRecord(payload)) return [];
+	for (const field of ["messages", "input"] as const) {
+		const list = payload[field];
+		if (Array.isArray(list)) {
+			return list.map((message) => {
+				if (!isRecord(message)) return { role: "?", preview: "" };
+				const role = typeof message.role === "string" ? message.role : "?";
+				const preview = contentToText(message.content);
+				return { role, preview };
+			});
+		}
+	}
+	return [];
 }
 
 function createLookupTool() {
