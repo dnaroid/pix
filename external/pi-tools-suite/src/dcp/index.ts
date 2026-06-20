@@ -561,6 +561,8 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 							trigger: autoDecision.reason,
 							blockId: `b${autoResult.blockId}`,
 							summaryMode: autoResult.summaryMode,
+							summarizerModelRef: autoResult.summarizerModelRef,
+							summarizerAttempts: autoResult.summarizerAttempts,
 							summaryTokens: autoResult.summaryTokens,
 							removedTokenEstimate: autoResult.removedTokenEstimate,
 							candidate,

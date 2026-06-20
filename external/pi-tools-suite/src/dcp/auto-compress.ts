@@ -118,10 +118,28 @@ export function buildProgrammaticSummary(
 
 const SUMMARIZER_SYSTEM_PROMPT = `You summarize a slice of a coding agent's conversation so it can replace the raw messages in context. Produce a dense, continuation-focused summary: preserve user intent, decisions made, files/symbols changed or inspected, exact errors still actionable, verification status, and next steps. Drop full logs, repeated output, and incidental detail. Be concise (roughly 4-10 bullets). Output ONLY the summary text, no preamble.`
 
+/** Outcome of one summarizer-model attempt, surfaced in DCP debug logs. */
+export interface ModelSummaryAttempt {
+	ref: string
+	outcome: "ok" | "no-model" | "no-auth" | "empty" | "error"
+	error?: string
+}
+
+/** Result of {@link generateModelSummary}: optional text plus per-model attempts. */
+export interface ModelSummaryResult {
+	text?: string
+	/** Model ref that produced {@link text}, if any. */
+	usedModelRef?: string
+	/** One entry per model ref tried, in order, for debug visibility. */
+	attempts: ModelSummaryAttempt[]
+}
+
 /**
  * Try to produce a model-generated summary by calling each model in
- * `modelRefs` in order. Returns the summary text on success, or `undefined`
- * if every model failed (so the caller falls back to the programmatic digest).
+ * `modelRefs` in order. On success returns `{ text, usedModelRef, attempts }`;
+ * if every model fails, returns `{ attempts }` with `text` undefined so the
+ * caller falls back to the programmatic digest while still recording which
+ * models were tried and why.
  *
  * Never throws: a summarizer failure must never block the agent — the
  * programmatic digest is always available as a floor.
@@ -133,10 +151,11 @@ export async function generateModelSummary(
 	topic: string,
 	messagesInRange: any[],
 	timeoutMs: number,
-): Promise<string | undefined> {
-	if (!modelRefs || modelRefs.length === 0) return undefined
+): Promise<ModelSummaryResult> {
+	const attempts: ModelSummaryAttempt[] = []
+	if (!modelRefs || modelRefs.length === 0) return { attempts }
 	if (!modelRegistry || typeof modelRegistry.find !== "function" || typeof modelRegistry.getApiKeyAndHeaders !== "function") {
-		return undefined
+		return { attempts }
 	}
 
 	// Build a compact transcript from the range. Cap token budget so the
@@ -154,16 +173,23 @@ export async function generateModelSummary(
 		const parsed = parseModelRef(ref)
 		if (!parsed) continue
 		const model: Model<Api> | undefined = modelRegistry.find(parsed.provider, parsed.id)
-		if (!model) continue
+		if (!model) {
+			attempts.push({ ref, outcome: "no-model" })
+			continue
+		}
 
 		let auth
 		try {
 			auth = await modelRegistry.getApiKeyAndHeaders(model)
 		} catch (error) {
 			lastError = error
+			attempts.push({ ref, outcome: "no-auth", error: error instanceof Error ? error.message : String(error) })
 			continue
 		}
-		if (!auth?.ok || !auth.apiKey) continue
+		if (!auth?.ok || !auth.apiKey) {
+			attempts.push({ ref, outcome: "no-auth" })
+			continue
+		}
 
 		// Combine the agent signal with a local timeout so a slow summarizer
 		// cannot stall the context event indefinitely.
@@ -188,9 +214,14 @@ export async function generateModelSummary(
 				} as any,
 			)
 			const text = extractAssistantText(result)
-			if (text) return text
+			if (text) {
+				attempts.push({ ref, outcome: "ok" })
+				return { text, usedModelRef: ref, attempts }
+			}
+			attempts.push({ ref, outcome: "empty" })
 		} catch (error) {
 			lastError = error
+			attempts.push({ ref, outcome: "error", error: error instanceof Error ? error.message : String(error) })
 			// try next model in the fallback list
 		} finally {
 			clearTimeout(timer)
@@ -201,7 +232,7 @@ export async function generateModelSummary(
 	if (lastError) {
 		// Swallowed on purpose: callers use the programmatic digest floor.
 	}
-	return undefined
+	return { attempts }
 }
 
 function extractAssistantText(result: any): string | undefined {
@@ -234,9 +265,13 @@ export interface CreateAutoCompressionBlockOptions {
 
 export interface AutoCompressionResult {
 	blockId: number
-	summaryMode: "programmatic" | "model"
+	summaryMode: "programmatic" | "model" | "programmatic_fallback"
 	summaryTokens: number
 	removedTokenEstimate: number
+	/** Model ref that produced the summary; set only when `summaryMode === "model"`. */
+	summarizerModelRef?: string
+	/** Per-model attempts, surfaced for DCP debug visibility on fallback. */
+	summarizerAttempts?: ModelSummaryAttempt[]
 }
 
 /**
@@ -272,13 +307,20 @@ export async function createAutoCompressionBlock(
 			Number.isFinite(msg?.timestamp) && msg.timestamp >= startTimestamp && msg.timestamp <= endTimestamp,
 	)
 
-	// Summary source selection.
+	// Summary source selection. `summaryMode` distinguishes three cases so the
+	// DCP debug log can tell a real model summary from a programmatic fallback
+	// caused by summarizer failure:
+	//   - "model": a configured model produced the summary.
+	//   - "programmatic": no summarizer models configured (floor by design).
+	//   - "programmatic_fallback": models were configured but all failed/empty.
 	let summary = buildProgrammaticSummary(topic, candidate, messagesInRange)
-	let summaryMode: "programmatic" | "model" = "programmatic"
+	let summaryMode: "programmatic" | "model" | "programmatic_fallback" = "programmatic"
+	let summarizerModelRef: string | undefined
+	let summarizerAttempts: ModelSummaryAttempt[] | undefined
 
 	const modelRefs = settings.summarizerModel
 	if (modelRefs.length > 0) {
-		const modelSummary = await generateModelSummary(
+		const modelResult = await generateModelSummary(
 			modelRefs,
 			modelRegistry,
 			signal,
@@ -286,9 +328,16 @@ export async function createAutoCompressionBlock(
 			messagesInRange,
 			settings.timeoutMs,
 		)
-		if (modelSummary) {
-			summary = modelSummary
+		summarizerAttempts = modelResult.attempts.length > 0 ? modelResult.attempts : undefined
+		if (modelResult.text) {
+			summary = modelResult.text
 			summaryMode = "model"
+			summarizerModelRef = modelResult.usedModelRef
+		} else {
+			// All configured models failed or returned empty — fall back to the
+			// programmatic digest, but mark the mode distinctly so the fallback
+			// is visible in DCP debug logs.
+			summaryMode = "programmatic_fallback"
 		}
 	}
 
@@ -313,5 +362,7 @@ export async function createAutoCompressionBlock(
 		summaryMode,
 		summaryTokens: created.summaryTokenEstimate,
 		removedTokenEstimate: created.removedTokenEstimate,
+		summarizerModelRef,
+		summarizerAttempts,
 	}
 }
