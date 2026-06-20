@@ -78,6 +78,43 @@ describe("formatMarkdownTables", () => {
 		assert(formatted.includes("❌ -14.35%"));
 	});
 
+	it("wraps wide emoji cells without overflowing or splitting multi-codepoint emoji", () => {
+		// ⛔ is width 2; an unbreakable cell word wider than the column must wrap at a
+		// grapheme boundary so the rendered row never exceeds the table width and the
+		// emoji is never sliced from its trailing content.
+		const formatted = formatMarkdownTables([
+			"| Status | Detail |",
+			"|---|---|",
+			"| ok | ⛔aaaaaaaaaaaaa |",
+		].join("\n"), 20);
+
+		for (const line of formatted.split("\n")) {
+			assert(stringDisplayWidth(renderMarkdownLine(line).text) <= 20, `line overflows budget: ${line}`);
+		}
+		assert(formatted.includes("⛔"));
+	});
+
+	it("wraps prose with width-2 emoji so no wrapped line exceeds the budget", () => {
+		// A long unbreakable run carrying a width-2 emoji (⛔) must wrap at a grapheme
+		// boundary so the first chunk never overflows by a column. Regional flags are
+		// width 2 and must not be split.
+		for (const text of ["abc⛔defghij", "xx⛔yyyyyy", "🇷🇺🇷🇺🇷🇺"]) {
+			for (const width of [3, 4, 5, 6, 7]) {
+				for (const line of renderMarkdownTextLines(text, width)) {
+					assert(stringDisplayWidth(line.text) <= width, `"${text}" width ${width} overflows: ${JSON.stringify(line.text)}`);
+				}
+			}
+		}
+	});
+
+	it("keeps regional-indicator flags intact when wrapping", () => {
+		// 🇷🇺🇷🇺🇷🇺 (six regional indicators, three width-2 flags) must wrap into whole
+		// flags, never orphaning a single regional indicator on its own line.
+		for (const line of renderMarkdownTextLines("🇷🇺🇷🇺🇷🇺", 3)) {
+			assert.equal([...line.text].length, 2, `unexpected flag split: ${JSON.stringify(line.text)}`);
+		}
+	});
+
 	it("renders strong markdown without marker characters", () => {
 		assert.deepEqual(renderMarkdownLine("before **bold** after"), {
 			text: "before bold after",

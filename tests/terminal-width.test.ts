@@ -22,7 +22,15 @@ describe("terminal width helpers", () => {
 		assert.equal(stringDisplayWidth("e\u0301"), 1);
 		assert.equal(stringDisplayWidth("表🙂"), 4);
 		assert.equal(stringDisplayWidth("❌"), 2);
-		assert.equal(stringDisplayWidth("✔️"), 2);
+		assert.equal(stringDisplayWidth("⛔"), 2);
+		// Variation-selector-prompted symbols (⚠️ ✔️ ©️) keep their base width 1
+		// to match iTerm2/Zed/wcwidth, so columns stay aligned.
+		assert.equal(stringDisplayWidth("✔️"), 1);
+		assert.equal(stringDisplayWidth("⚠️"), 1);
+		assert.equal(stringDisplayWidth("©️"), 1);
+		// Keycaps, regional flags and ZWJ families stay width 2.
+		assert.equal(stringDisplayWidth("1️⃣"), 2);
+		assert.equal(stringDisplayWidth("🇷🇺"), 2);
 		assert.equal(stringDisplayWidth("👨‍👩‍👧‍👦"), 2);
 		assert.equal(stringDisplayWidth("\x1b[31mred\x1b[0m"), 3);
 	});
@@ -30,7 +38,7 @@ describe("terminal width helpers", () => {
 	it("slices and pads by display width without splitting wide characters", () => {
 		assert.equal(sliceByDisplayWidth("ab表c", 3), "ab");
 		assert.equal(sliceByDisplayWidth("ab表c", 4), "ab表");
-		assert.equal(sliceByDisplayWidth("a✔️b", 3), "a✔️");
+		assert.equal(sliceByDisplayWidth("a⛔b", 3), "a⛔");
 		assert.equal(sliceByDisplayWidth("abc", -1), "");
 		assert.equal(padOrTrimDisplay("表x", 4), "表x ");
 		assert.equal(padOrTrimDisplay("表x", 2), "表");

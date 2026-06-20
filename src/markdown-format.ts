@@ -1,4 +1,4 @@
-import { expandTabs, stringDisplayWidth } from "./terminal-width.js";
+import { displayGraphemes, expandTabs, stringDisplayWidth } from "./terminal-width.js";
 import {
 	syntaxHighlightLanguageForMarkdownFence,
 	type SyntaxLineHighlight,
@@ -306,20 +306,16 @@ function displayTokensWithRanges(text: string): DisplayTokenWithRange[] {
 	let currentStart = 0;
 	let currentWhitespace: boolean | undefined;
 
-	for (let index = 0; index < text.length;) {
-		const codePoint = text.codePointAt(index) ?? 0;
-		const char = String.fromCodePoint(codePoint);
+	for (const { text: char, start } of displayGraphemes(text)) {
 		const whitespace = /\s/u.test(char);
 		if (current && currentWhitespace !== whitespace) {
-			tokens.push({ text: current, start: currentStart, end: index, whitespace: currentWhitespace ?? false });
+			tokens.push({ text: current, start: currentStart, end: start, whitespace: currentWhitespace ?? false });
 			current = "";
-			currentStart = index;
 		}
 
-		if (!current) currentStart = index;
+		if (!current) currentStart = start;
 		current += char;
 		currentWhitespace = whitespace;
-		index += char.length;
 	}
 
 	if (current) tokens.push({ text: current, start: currentStart, end: text.length, whitespace: currentWhitespace ?? false });
@@ -332,20 +328,17 @@ function wrapDisplayTokenByWidth(token: DisplayTokenWithRange, width: number): W
 	let chunkStart = token.start;
 	let chunkWidth = 0;
 
-	for (let index = token.start; index < token.end;) {
-		const codePoint = token.text.codePointAt(index - token.start) ?? 0;
-		const char = String.fromCodePoint(codePoint);
-		const charWidth = stringDisplayWidth(char);
+	for (const { text: char, width: charWidth, start } of displayGraphemes(token.text)) {
+		const absoluteStart = token.start + start;
 		if (chunkText && chunkWidth + charWidth > width) {
-			chunks.push({ text: chunkText, start: chunkStart, end: index });
+			chunks.push({ text: chunkText, start: chunkStart, end: absoluteStart });
 			chunkText = "";
-			chunkStart = index;
+			chunkStart = absoluteStart;
 			chunkWidth = 0;
 		}
 
 		chunkText += char;
 		chunkWidth += charWidth;
-		index += char.length;
 	}
 
 	chunks.push({ text: chunkText, start: chunkStart, end: token.end });
@@ -663,18 +656,14 @@ function smartDisplayBreakIndex(text: string, width: number): number {
 	let fallbackIndex = 0;
 	let breakIndex = 0;
 
-	for (let index = 0; index < text.length;) {
-		const codePoint = text.codePointAt(index) ?? 0;
-		const char = String.fromCodePoint(codePoint);
-		const nextIndex = index + char.length;
-		const nextUsed = used + stringDisplayWidth(char);
+	for (const { text: char, width: charWidth, start, end } of displayGraphemes(text)) {
+		const nextUsed = used + charWidth;
 		if (nextUsed > width) break;
 
 		used = nextUsed;
-		fallbackIndex = nextIndex;
-		if (char === "/" && index > 0) breakIndex = index;
-		else if (/[._:-]/u.test(char)) breakIndex = nextIndex;
-		index = nextIndex;
+		fallbackIndex = end;
+		if (char === "/" && start > 0) breakIndex = start;
+		else if (/[._:-]/u.test(char)) breakIndex = end;
 	}
 
 	return breakIndex > 0 ? breakIndex : fallbackIndex;

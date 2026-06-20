@@ -1,7 +1,7 @@
 const TAB_WIDTH = 4;
 const ANSI_RESET = "\x1b[0m";
 const EMOJI_PRESENTATION_REGEX = /\p{Emoji_Presentation}/u;
-const EMOJI_REGEX = /\p{Emoji}/u;
+const REGIONAL_INDICATOR_REGEX = /[\u{1F1E6}-\u{1F1FF}]/u;
 const GRAPHEME_SEGMENTER = typeof Intl.Segmenter === "function" ? new Intl.Segmenter(undefined, { granularity: "grapheme" }) : undefined;
 
 type DisplayCluster = {
@@ -102,6 +102,23 @@ export function sliceByDisplayColumns(text: string, startColumn: number, endColu
 	const startIndex = displayIndexForColumn(text, startColumn);
 	const endIndex = Math.max(startIndex, displayIndexForColumn(text, endColumn));
 	return text.slice(startIndex, endIndex);
+}
+
+export type DisplayGrapheme = { text: string; width: number; start: number; end: number };
+
+/**
+ * Grapheme clusters of `text` with their display width and absolute string
+ * indices. Iterating graphemes (instead of code points) is required for correct
+ * width accounting: multi-codepoint emoji such as `⚠️` (U+26A0 U+FE0F), keycaps,
+ * skin-tone modifiers and regional-indicator flags are one width-2 cluster even
+ * though several of their code points have zero width.
+ */
+export function displayGraphemes(text: string): DisplayGrapheme[] {
+	const graphemes: DisplayGrapheme[] = [];
+	for (const cluster of indexedDisplayClusters(text)) {
+		graphemes.push({ text: cluster.text, width: cluster.width, start: cluster.start, end: cluster.end });
+	}
+	return graphemes;
 }
 
 export function padOrTrimDisplay(text: string, width: number): string {
@@ -320,7 +337,19 @@ function graphemeDisplayWidth(text: string): number {
 }
 
 function isEmojiGrapheme(text: string): boolean {
-	return EMOJI_PRESENTATION_REGEX.test(text) || (EMOJI_REGEX.test(text) && (text.includes("\ufe0f") || text.includes("\u20e3")));
+	// Default-presentation emoji (⛔ ✅ 🚀 ❌), supplementary pictographs, and
+	// regional-indicator flags render two cells wide in conforming terminals
+	// including iTerm2 and Zed, so they are measured at width 2.
+	if (EMOJI_PRESENTATION_REGEX.test(text)) return true;
+	// Keycap sequences (base + U+FE0F + U+20E3, e.g. 1️⃣) and regional-indicator
+	// pairs (🇷🇺) also occupy two cells.
+	if (text.includes("\u20e3")) return true;
+	if (REGIONAL_INDICATOR_REGEX.test(text) && /[\u{1F1E6}-\u{1F1FF}]{2}/u.test(text)) return true;
+	// Symbols promoted to an emoji glyph only by a variation selector (⚠️ ✔️ ©️
+	// ☀️) keep their base width of 1. Their base code point is East-Asian-Width
+	// Ambiguous, and iTerm2/Zed/wcwidth render them one cell wide; counting them
+	// as 2 would misalign table columns and shorten rendered rows.
+	return false;
 }
 
 function codePointLength(codePoint: number): number {
