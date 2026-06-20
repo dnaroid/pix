@@ -27,6 +27,7 @@ export type AppInputActionControllerHost = {
 	setSessionActivity(activity: SessionActivity): void;
 	addEntry(entry: Entry): void;
 	addSessionAbortedEntry(): void;
+	emitSessionAborted(): void;
 	showToast(message: string, kind: "success" | "error" | "warning" | "info"): void;
 	dismissActiveDialog?(): boolean;
 	stopVoiceInput(): Promise<void>;
@@ -135,6 +136,9 @@ export class AppInputActionController {
 		options: { stopIfAlreadyAborting: boolean },
 	): Promise<void> {
 		const session = runtime.session;
+		// Relay the user-initiated abort to extensions (e.g. the terminal-bell
+		// extension) so they can suppress the attention bell for this turn.
+		this.host.emitSessionAborted();
 		if (this.abortInFlight) {
 			session.agent.abort();
 			if (options.stopIfAlreadyAborting) await this.host.stop();

@@ -716,6 +716,11 @@ export class PiUiExtendApp {
 				setSessionActivity: (activity) => this.setSessionActivity(activity),
 				addEntry: (entry) => this.addEntry(entry),
 				addSessionAbortedEntry: () => this.sessionEvents.addSessionAbortedEntry(),
+				emitSessionAborted: () => {
+					const runtime = this.runtime;
+					if (!runtime) return;
+					this.extensionEventBusByRuntime.get(runtime)?.emit("pix:session-aborted", { aborted: true });
+				},
 				showToast: (message, kind) => this.showToast(message, kind),
 				dismissActiveDialog: () => this.toastController.dismissActiveDialog(),
 				stopVoiceInput: () => this.voiceController.stopRecording(),

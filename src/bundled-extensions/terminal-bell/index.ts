@@ -17,6 +17,13 @@ const TERMINAL_BELL_ATTENTION_EVENT = "pix:terminal-bell:attention";
  * extensions, so the renderer emits this on the extension event bus.
  */
 const RETRY_ACTIVE_EVENT = "pix:retry-active";
+/**
+ * Renderer-relayed signal that the user interrupted the session (Esc/Ctrl-C).
+ * Payload: `{ aborted: boolean }`. Aborting the SDK stream during tool
+ * execution does not always produce an aborted `message_update`, so the
+ * renderer relays the abort here to reliably suppress the attention bell.
+ */
+const SESSION_ABORTED_EVENT = "pix:session-aborted";
 const DEFAULT_COMPLETION_NOTIFICATION_TITLE = "Pix - complete";
 const DEFAULT_ERROR_NOTIFICATION_TITLE = "Pix - error";
 const DEFAULT_QUESTION_NOTIFICATION_TITLE = "Pix - question";
@@ -63,6 +70,7 @@ type AgentEndRetryState = {
 
 type AssistantMessageUpdateLike = {
 	type?: unknown;
+	reason?: unknown;
 	error?: {
 		errorMessage?: unknown;
 	};
@@ -269,8 +277,15 @@ function willRetryAfterAgentEnd(event: AgentEndRetryState): boolean {
 	return event.willRetry === true;
 }
 
+function isAbortedMessageUpdate(event: AssistantMessageUpdateLike): boolean {
+	return event.type === "error" && event.reason === "aborted";
+}
+
 function failureReasonFromMessageUpdate(event: AssistantMessageUpdateLike): string | undefined {
 	if (event.type !== "error") return undefined;
+	// The SDK reports a user-initiated interrupt as `{ type: "error", reason: "aborted" }`.
+	// That is not a failure the bell should announce, so treat it as "no reason".
+	if (event.reason === "aborted") return undefined;
 	const reason = event.error?.errorMessage;
 	return typeof reason === "string" ? trimmed(reason) : undefined;
 }
@@ -444,6 +459,10 @@ export default function terminalBell(pi: ExtensionAPI) {
 	let deferredUntilSubagentsFinish = false;
 	let liveSubagentCount = 0;
 	let lastFailureReason: string | undefined;
+	// True when the user interrupted the session this turn (Esc/Ctrl-C). The
+	// attention bell should never ring for a user-initiated abort, so this flag
+	// suppresses any queued/pending bell until the next agent_start resets it.
+	let userAborted = false;
 	// True while the session is in an auto-retry cycle (relayed via the
 	// extension event bus). Suppresses the failure bell on intermediate retry
 	// attempts; the final exhausted failure still rings because no retry-start
@@ -485,6 +504,14 @@ export default function terminalBell(pi: ExtensionAPI) {
 		// Safety net: if a retry-start signal arrives between the agent_end that
 		// queued this bell and the timer firing, suppress the bell entirely.
 		if (retryActive) return;
+
+		// Safety net: if the user aborted after the bell was queued (e.g. an
+		// aborted agent_end with no aborted message_update), suppress it.
+		if (userAborted) {
+			pendingBell = undefined;
+			deferredUntilSubagentsFinish = false;
+			return;
+		}
 
 		try {
 			if (!ctx.isIdle()) {
@@ -578,16 +605,40 @@ export default function terminalBell(pi: ExtensionAPI) {
 		}
 	});
 
+	pi.events.on(SESSION_ABORTED_EVENT, (data: unknown) => {
+		const aborted = data != null && typeof data === "object" && (data as { aborted?: unknown }).aborted === true;
+		if (!aborted) return;
+		// The user interrupted the session. Aborting during tool execution does
+		// not always produce an aborted `message_update`, so the renderer relays
+		// the interrupt here. Suppress any pending bell until the next agent_start.
+		userAborted = true;
+		lastFailureReason = undefined;
+		clearTimer();
+		pendingBell = undefined;
+		deferredUntilSubagentsFinish = false;
+	});
+
 	pi.on("agent_start", async () => {
 		clearTimer();
 		deferredUntilSubagentsFinish = false;
 		lastFailureReason = undefined;
+		userAborted = false;
 		retryActive = false;
 		activeSubagentWaitToolCallIds.clear();
 		notifiedAskUserToolCallIds.clear();
 	});
 
 	pi.on("message_update", async (event) => {
+		if (isAbortedMessageUpdate(event.assistantMessageEvent as AssistantMessageUpdateLike)) {
+			// The user interrupted the stream. Suppress any pending bell until
+			// the next agent_start.
+			userAborted = true;
+			lastFailureReason = undefined;
+			clearTimer();
+			pendingBell = undefined;
+			deferredUntilSubagentsFinish = false;
+			return;
+		}
 		const reason = failureReasonFromMessageUpdate(event.assistantMessageEvent as AssistantMessageUpdateLike);
 		if (reason) {
 			lastFailureReason = reason;
@@ -623,6 +674,10 @@ export default function terminalBell(pi: ExtensionAPI) {
 			clearTimer();
 			return;
 		}
+		if (userAborted) {
+			clearTimer();
+			return;
+		}
 		if (lastFailureReason) {
 			scheduleBell(
 				ctx,
@@ -644,6 +699,7 @@ export default function terminalBell(pi: ExtensionAPI) {
 		deferredUntilSubagentsFinish = false;
 		liveSubagentCount = 0;
 		lastFailureReason = undefined;
+		userAborted = false;
 		retryActive = false;
 		activeSubagentWaitToolCallIds.clear();
 		notifiedAskUserToolCallIds.clear();

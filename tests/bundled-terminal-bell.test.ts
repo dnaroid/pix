@@ -13,6 +13,7 @@ import {
 	terminalBellSoundEnabled,
 	terminalBellTelegramEnabled,
 } from "../src/bundled-extensions/terminal-bell/index.js";
+import terminalBell from "../src/bundled-extensions/terminal-bell/index.js";
 
 describe("bundled terminal-bell config", () => {
 	it("reads terminalBell.sound from the shared pi-tools-suite jsonc config", () => {
@@ -141,3 +142,153 @@ function withEnvChain<T>(entries: Array<[string, string | undefined]>, fn: () =>
 		}
 	}
 }
+
+describe("bundled terminal-bell abort suppression", () => {
+	type FakeCtx = {
+		hasUI: false;
+		cwd: string;
+		sessionManager: {
+			getSessionId: () => string;
+			getSessionName?: () => string;
+			getSessionFile?: () => string;
+		};
+		isIdle: () => boolean;
+		hasPendingMessages: () => boolean;
+	};
+
+	type Handler = (event?: unknown, ctx?: unknown) => void | Promise<void>;
+
+	interface Scenario {
+		handlers: Record<string, Handler>;
+		emit: (channel: string, data?: unknown) => void;
+		attentionEvents: Array<{ cwd: string; sessionFile: string; sessionId: string }>;
+		ctx: FakeCtx;
+		flush: () => Promise<void>;
+	}
+
+	const BELL_TEST_ENV: Array<[string, string | undefined]> = [
+		["HEADLESS", undefined],
+		["PI_TERMINAL_BELL_DISABLED", undefined],
+		["PI_TERMINAL_BELL_DELAY_MS", "0"],
+		["PI_TERMINAL_BELL_SOUND", "0"],
+		["PI_TERMINAL_BELL_NOTIFY", "0"],
+		["PI_TERMINAL_BELL_TELEGRAM", "0"],
+	];
+
+	async function runScenario(fn: (scenario: Scenario) => Promise<void>): Promise<void> {
+		const restore: Array<[string, string | undefined]> = [];
+		for (const [name, value] of BELL_TEST_ENV) {
+			restore.push([name, process.env[name]]);
+			if (value === undefined) delete process.env[name];
+			else process.env[name] = value;
+		}
+		try {
+			const handlers: Record<string, Handler> = {};
+			const eventHandlers: Record<string, (data?: unknown) => void> = {};
+			const attentionEvents: Scenario["attentionEvents"] = [];
+			const ctx: FakeCtx = {
+				hasUI: false,
+				cwd: "/test/cwd",
+				sessionManager: {
+					getSessionId: () => "session-abc",
+					getSessionName: () => "test session",
+					getSessionFile: () => "/test/session.json",
+				},
+				isIdle: () => true,
+				hasPendingMessages: () => false,
+			};
+			const fakePi = {
+				on: (channel: string, handler: Handler) => {
+					handlers[channel] = handler;
+				},
+				events: {
+					on: (channel: string, handler: (data?: unknown) => void) => {
+						eventHandlers[channel] = handler;
+					},
+					emit: (channel: string, data?: unknown) => {
+						if (channel === "pix:terminal-bell:attention") {
+							attentionEvents.push(data as Scenario["attentionEvents"][number]);
+						}
+						eventHandlers[channel]?.(data);
+					},
+				},
+				getSessionName: () => "test session",
+			};
+
+			terminalBell(fakePi as unknown as Parameters<typeof terminalBell>[0]);
+
+			await fn({
+				handlers,
+				emit: (channel, data) => eventHandlers[channel]?.(data),
+				attentionEvents,
+				ctx,
+				async flush() {
+					// idleDelayMs is 0, so the bell timer fires on the next macrotask.
+					await new Promise<void>((resolve) => setTimeout(resolve, 20));
+				},
+			});
+		} finally {
+			for (const [name, previous] of restore) {
+				if (previous === undefined) delete process.env[name];
+				else process.env[name] = previous;
+			}
+		}
+	}
+
+	it("does not ring when the SDK reports an aborted message_update", async () => {
+		await runScenario(async ({ handlers, attentionEvents, ctx, flush }) => {
+			await handlers.agent_start?.({}, ctx);
+			await handlers.message_update?.({ assistantMessageEvent: { type: "error", reason: "aborted" } }, ctx);
+			await handlers.agent_end?.({}, ctx);
+			await flush();
+			assert.equal(attentionEvents.length, 0);
+		});
+	});
+
+	it("does not ring when the renderer relays pix:session-aborted before the bell fires", async () => {
+		await runScenario(async ({ handlers, emit, attentionEvents, ctx, flush }) => {
+			await handlers.agent_start?.({}, ctx);
+			await handlers.agent_end?.({}, ctx);
+			emit("pix:session-aborted", { aborted: true });
+			await flush();
+			assert.equal(attentionEvents.length, 0);
+		});
+	});
+
+	it("rings once on a normal completion agent_end", async () => {
+		await runScenario(async ({ handlers, attentionEvents, ctx, flush }) => {
+			await handlers.agent_start?.({}, ctx);
+			await handlers.agent_end?.({}, ctx);
+			await flush();
+			assert.equal(attentionEvents.length, 1);
+		});
+	});
+
+	it("rings once on a real error (reason: error) message_update", async () => {
+		await runScenario(async ({ handlers, attentionEvents, ctx, flush }) => {
+			await handlers.agent_start?.({}, ctx);
+			await handlers.message_update?.(
+				{ assistantMessageEvent: { type: "error", reason: "error", error: { errorMessage: "boom" } } },
+				ctx,
+			);
+			await handlers.agent_end?.({}, ctx);
+			await flush();
+			assert.equal(attentionEvents.length, 1);
+		});
+	});
+
+	it("resets the abort flag on the next agent_start", async () => {
+		await runScenario(async ({ handlers, attentionEvents, ctx, flush }) => {
+			await handlers.agent_start?.({}, ctx);
+			await handlers.message_update?.({ assistantMessageEvent: { type: "error", reason: "aborted" } }, ctx);
+			await handlers.agent_end?.({}, ctx);
+			await flush();
+			await handlers.agent_start?.({}, ctx);
+			await handlers.agent_end?.({}, ctx);
+			await flush();
+			assert.equal(attentionEvents.length, 1);
+		});
+	});
+});
+
+

@@ -60,6 +60,15 @@ export async function runProcess(command: string, args: readonly string[] = [], 
 		child.once("error", (err) => {
 			error = err;
 		});
+		// Writing to stdin after the child has closed it raises EPIPE. This is
+		// common with clipboard helpers (xclip/xsel/wl-copy) that exit once they
+		// have read enough, or when a candidate command exits early. The child's
+		// exit status is still captured by the "close" handler, so treat EPIPE as
+		// benign and never let it surface as an unhandled "error" event.
+		child.stdin?.once("error", (err: NodeJS.ErrnoException) => {
+			if (err?.code === "EPIPE") return;
+			if (error === undefined) error = err;
+		});
 		child.once("close", (status, signal) => {
 			if (timer) clearTimeout(timer);
 			if (forceKillTimer) clearTimeout(forceKillTimer);

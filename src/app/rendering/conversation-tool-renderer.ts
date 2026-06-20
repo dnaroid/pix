@@ -14,7 +14,6 @@ import {
 } from "../subagents/subagents-model.js";
 import { formatTodoTaskLine, isTodoDetails, visibleTodoTasks } from "../todo/todo-model.js";
 import { renderToolBlock } from "./tool-block-renderer.js";
-import { thinkingLevelThemeColor } from "./status-line-renderer.js";
 import type { Theme } from "../../theme.js";
 import type {
 	Entry,
@@ -90,14 +89,14 @@ export function renderThinkingEntry(
 	const forceExpanded = Boolean(options.allThinkingExpanded);
 	const compactExpandedText = options.superCompactTools && forceExpanded ? removeBlankLines(expandedText) : expandedText;
 	const expanded = forceExpanded || (entry.expanded && expandedText.trim().length > 0);
-	const headerColorOverride = entry.level
-		? thinkingLevelThemeColor(entry.level, options.colors, options.availableThinkingLevels)
-		: undefined;
 	const elapsed = thinkingElapsedText(entry, options.currentTimeMs ?? Date.now());
+	const headerArgs = [entry.level ? `(${entry.level})` : undefined, elapsed]
+		.filter((part): part is string => part !== undefined)
+		.join(" ");
 	return renderToolBlock({
 		id: entry.id,
 		toolName: THINKING_TOOL_NAME,
-		...(elapsed === undefined ? {} : { headerArgs: elapsed }),
+		...(headerArgs === "" ? {} : { headerArgs }),
 		expanded,
 		status: entry.status,
 		isError: false,
@@ -110,7 +109,6 @@ export function renderThinkingEntry(
 		superCompact: Boolean(options.superCompactTools && !forceExpanded),
 		backgroundOverride: options.colors.thinkingMessageBackground,
 		showGutter: true,
-		...(headerColorOverride === undefined ? {} : { headerColorOverride }),
 	});
 }
 
