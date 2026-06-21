@@ -57,6 +57,20 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
           "maxContextPercent": "30%"
         }
       },
+      // glm-5.2 reports a ~1M-token window. Even zai/* 16%/30% = 160K/300K is
+      // above the ~15% (~150K) point where long sessions degrade, and an
+      // observed 14h/273K-token session never crossed 16%. Lower ONLY glm-5.2
+      // within the zai family: 8%/15% (~80K/150K) so nudging starts early and
+      // auto-compress fires at the observed degradation point. Other zai/*
+      // models keep 16%/30%.
+      "zai/glm-5.2": {
+        "compress": {
+          "minContextPercent": "8%",
+          "maxContextPercent": "15%",
+          "autoCandidates": { "minContextPercent": 0.08 },
+          "messageMode": { "minContextPercent": 0.08 }
+        }
+      },
       "antigravity/*sonnet*": {
         "compress": {
           "minContextPercent": "22%",
