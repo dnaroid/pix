@@ -88,7 +88,8 @@ const QUALITY_DISCIPLINE_LINES = [
 	"- for bugs, prefer a failing repro first, then the minimal fix, then verify;",
 	"- high-risk changes (security, data/schema, public APIs, concurrency, irreversible) need a short spec first;",
 	"- handle edge cases, errors, cancellation, and async behavior; do not block UI/event loops;",
-	"- avoid duplicate state, duplicate prompts, and repeated side effects.",
+	"- avoid duplicate state, duplicate prompts, and repeated side effects;",
+	"- write code, identifiers, comments, and commit messages in English.",
 ];
 
 const LOOKUP_DISCIPLINE_LINES = [
