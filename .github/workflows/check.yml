@@ -1,0 +1,30 @@
+name: Check
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-typecheck:
+    name: Lint & typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - uses: oven-sh/setup-bun@v2
+      - run: bun --version
+      - uses: jdx/mise-action@v2
+      - run: npm ci --ignore-scripts
+      - run: npx tsc --noEmit
+      - run: npm run generate-schemas:check

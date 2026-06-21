@@ -106,7 +106,7 @@ describe("pix update", () => {
 
 		assert.equal(result.packageName, "@earendil-works/pi-coding-agent");
 		assert.equal(result.status, "current");
-		assert.match(result.packageRoot, /@earendil-works\/pi-coding-agent$/u);
+		assert.match(result.packageRoot, /[/\\]@earendil-works[/\\]pi-coding-agent$/u);
 	});
 
 	it("does not offer npm updates for private source packages", async () => {

@@ -145,15 +145,19 @@ def run_single_query(
                         ame = event.get("assistantMessageEvent", {})
                         if ame.get("type") == "toolcall_end":
                             tool_call = ame.get("toolCall", {})
-                            if tool_call.get("name") == "read":
-                                path = (tool_call.get("arguments") or {}).get("path", "")
+                            # Tool name arrives capitalized ("Read"), not lowercase.
+                            if (tool_call.get("name") or "").lower() == "read":
+                                args = tool_call.get("arguments") or {}
+                                # Read tool's real arg is `file_path`.
+                                path = args.get("file_path", "") or args.get("path", "")
                                 if _targets_skill(path):
                                     return True
 
                     # Tool actually started executing — redundant but robust.
                     elif etype == "tool_execution_start":
-                        if event.get("toolName") == "read":
-                            path = (event.get("args") or {}).get("path", "")
+                        if (event.get("toolName") or "").lower() == "read":
+                            args = event.get("args") or {}
+                            path = args.get("file_path", "") or args.get("path", "")
                             if _targets_skill(path):
                                 return True
 

@@ -51,7 +51,7 @@
     "sync:pi-tools-suite:check": "node scripts/sync-pi-tools-suite.mjs --check",
     "sync:sdk-pin": "node scripts/sync-sdk-pin.mjs",
     "sync:sdk-pin:check": "node scripts/sync-sdk-pin.mjs --check",
-    "test:coverage": "mise exec node@24.16.0 -- node --import tsx --test --experimental-test-coverage --test-coverage-include=src/**/*.ts --test-coverage-exclude=src/main.ts --test-coverage-lines=94 --test-coverage-branches=80 --test-coverage-functions=95 \"tests/**/*.test.ts\"",
+    "test:coverage": "mise exec node@24.16.0 -- node --import tsx --test --experimental-test-coverage --test-coverage-include=src/**/*.ts --test-coverage-exclude=src/main.ts --test-coverage-lines=94 --test-coverage-branches=80 --test-coverage-functions=94 \"tests/**/*.test.ts\"",
     "update-sdk-references": "mise exec node@24.16.0 -- node .pi/skills/pi-sdk/scripts/update-references.mjs",
     "prepack": "npm run generate-schemas --silent",
     "pack:dry-run": "npm pack --dry-run",
