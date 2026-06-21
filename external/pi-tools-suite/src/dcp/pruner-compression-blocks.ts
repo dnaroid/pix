@@ -13,60 +13,76 @@ function findBoundaryIndex(messages: any[], stableId: string | undefined, timest
   return messages.findIndex((m, index) => messageMatchesBoundary(m, index, stableId, timestamp));
 }
 
-function collectToolCallIds(messages: any[]): Set<string> {
-  const ids = new Set<string>();
-  for (const msg of messages) {
-    if (typeof msg?.toolCallId === "string") ids.add(msg.toolCallId);
-    if (msg?.role !== "assistant" || !Array.isArray(msg.content)) continue;
-    for (const block of msg.content) {
-      if (block?.type === "toolCall" && typeof block.id === "string") ids.add(block.id);
-    }
-  }
-  return ids;
-}
 
 export function syncCompressionBlocks(messages: any[], state: DcpState, config: DcpConfig): void {
   if (state.compressionBlocks.length === 0) return;
 
-  const toolCallIds = collectToolCallIds(messages);
+  // Determine the conversation's timestamp range so we can tell whether a
+  // block's range is genuinely outside the current session history (which
+  // warrants deactivation) vs merely having its boundary messages pruned
+  // (which is normal and should NOT cause deactivation).
+  let conversationMinTs = Infinity;
+  let conversationMaxTs = -Infinity;
+  for (const msg of messages) {
+    const ts = msg?.timestamp;
+    if (typeof ts === "number" && Number.isFinite(ts)) {
+      if (ts < conversationMinTs) conversationMinTs = ts;
+      if (ts > conversationMaxTs) conversationMaxTs = ts;
+    }
+  }
 
   for (const block of state.compressionBlocks) {
     if (!block.active || block.deactivatedByUser) continue;
 
+    // ── Skip the missing-origin-compress-call check ────────────────────
+    // The compress tool-call that *created* this block is not the block's
+    // content — once the block exists the tool-call is irrelevant and will
+    // naturally be pruned by tool-output pruning, session compaction, or
+    // nested compression.  Deactivating a valid block because its creation
+    // tool-call was pruned silently loses the compressed summary and forces
+    // the original (larger) messages to be re-sent, which also invalidates
+    // the provider's prompt prefix cache.
+
+    // ── Boundary validation ────────────────────────────────────────────
+    // Only deactivate when the block's timestamp range falls entirely
+    // outside the conversation's time range, meaning the session genuinely
+    // does not contain that history (e.g. after a branch switch to a
+    // completely different conversation).  When boundary messages are merely
+    // absent because they were themselves pruned, compressed, or have
+    // fragile timestamp-based stable IDs, the block is still valid —
+    // applyCompressionBlocks already handles missing boundaries gracefully
+    // by skipping splicing when findBoundaryIndex returns -1.
     if (
-      typeof block.createdByToolCallId === "string" &&
-      state.toolCalls.has(block.createdByToolCallId) &&
-      !toolCallIds.has(block.createdByToolCallId)
+      Number.isFinite(block.startTimestamp) &&
+      Number.isFinite(block.endTimestamp) &&
+      Number.isFinite(conversationMinTs) &&
+      Number.isFinite(conversationMaxTs)
     ) {
-      block.active = false;
-      block.deactivatedReason = "missing-origin-compress-call";
-      writeDcpDebugLog(config, "block.auto_deactivated", {
-        blockId: `b${block.id}`,
-        reason: "missing-origin-compress-call",
-        topic: block.topic,
-        createdByToolCallId: block.createdByToolCallId,
-        activeBlocksAfter: state.compressionBlocks.filter((b) => b.active).length,
-      });
-      continue;
-    }
+      // Block range is entirely before or entirely after the conversation
+      const blockEntirelyOutside =
+        block.endTimestamp < conversationMinTs ||
+        block.startTimestamp > conversationMaxTs;
 
-    const hasStableBoundaries = !!block.startMessageId && !!block.endMessageId;
-    if (!hasStableBoundaries) continue;
+      if (blockEntirelyOutside) {
+        // Before deactivating, check if boundary messages can still be
+        // found by their stable ID — timestamps can change across
+        // session reloads while the underlying message persists.
+        const startFound = findBoundaryIndex(messages, block.startMessageId, block.startTimestamp) !== -1;
+        const endFound = findBoundaryIndex(messages, block.endMessageId, block.endTimestamp) !== -1;
 
-    const startIdx = findBoundaryIndex(messages, block.startMessageId, block.startTimestamp);
-    const endIdx = findBoundaryIndex(messages, block.endMessageId, block.endTimestamp);
-    if (startIdx === -1 || endIdx === -1) {
-      block.active = false;
-      block.deactivatedReason = "missing-origin-message";
-      writeDcpDebugLog(config, "block.auto_deactivated", {
-        blockId: `b${block.id}`,
-        reason: "missing-origin-message",
-        topic: block.topic,
-        missingBoundary: startIdx === -1 ? "start" : "end",
-        startMessageId: block.startMessageId,
-        endMessageId: block.endMessageId,
-        activeBlocksAfter: state.compressionBlocks.filter((b) => b.active).length,
-      });
+        if (!startFound && !endFound) {
+          block.active = false;
+          block.deactivatedReason = "outside-conversation-range";
+          writeDcpDebugLog(config, "block.auto_deactivated", {
+            blockId: `b${block.id}`,
+            reason: "outside-conversation-range",
+            topic: block.topic,
+            blockRange: [block.startTimestamp, block.endTimestamp],
+            conversationRange: [conversationMinTs, conversationMaxTs],
+            activeBlocksAfter: state.compressionBlocks.filter((b) => b.active).length,
+          });
+        }
+      }
     }
   }
 }

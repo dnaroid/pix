@@ -816,7 +816,7 @@ describe("DCP pruning effectiveness", () => {
     expect(state.compressionBlocks).toHaveLength(0);
   });
 
-  test("compress tool explains stale or unknown range IDs with current ID diagnostics", async () => {
+  test("compress tool explains unknown non-mNNN IDs with current ID diagnostics", async () => {
     const state = createState();
     state.messageIdSnapshot.set("m001", 1);
     state.messageMetaSnapshot.set("m001", { timestamp: 1, role: "assistant" });
@@ -827,13 +827,122 @@ describe("DCP pruning effectiveness", () => {
 
     await expect(registeredTool.execute(
       "tool-call",
-      { topic: "Stale", ranges: [{ startId: "m015", endId: "m001", summary: "old" }] },
+      { topic: "Stale", ranges: [{ startId: "xyz", endId: "m001", summary: "old" }] },
       undefined,
       undefined,
       { ui: { notify() {} } },
-    )).rejects.toThrow(/Unknown message ID: m015[\s\S]*Current raw message IDs: m001[\s\S]*Current active block IDs: b7 "Block 7"[\s\S]*use the corresponding bN block ID/i);
+    )).rejects.toThrow(/Unknown message ID: xyz[\s\S]*Current raw message IDs: m001[\s\S]*Current active block IDs: b7 "Block 7"[\s\S]*use the corresponding bN block ID/i);
 
     expect(state.compressionBlocks).toHaveLength(1);
+  });
+
+  test("compress tool clamps stale out-of-range mNNN IDs to nearest valid ID", async () => {
+    const state = createState();
+    state.messageIdSnapshot.set("m001", 1);
+    state.messageIdSnapshot.set("m002", 2);
+    state.messageIdSnapshot.set("m003", 3);
+    state.messageMetaSnapshot.set("m001", { timestamp: 1, role: "assistant", text: "first", tokenEstimate: 50 });
+    state.messageMetaSnapshot.set("m002", { timestamp: 2, role: "assistant", text: "second", tokenEstimate: 50 });
+    state.messageMetaSnapshot.set("m003", { timestamp: 3, role: "user", text: "third", tokenEstimate: 50 });
+
+    let registeredTool: any;
+    registerCompressTool({ registerTool: (tool: any) => { registeredTool = tool } } as any, state, config());
+
+    // m010 doesn't exist (only m001-m003) but should clamp to m003 for endId
+    const result = await registeredTool.execute(
+      "tool-call",
+      { topic: "Clamped", ranges: [{ startId: "m001", endId: "m010", summary: "clamped summary" }] },
+      undefined,
+      undefined,
+      { ui: { notify() {} } },
+    );
+
+    expect(result.details.blockIds).toHaveLength(1);
+    expect(result.content[0].text).toContain("Clamped");
+  });
+
+  test("compress tool rejects when a stale startId has no valid forward clamp target", async () => {
+    const state = createState();
+    state.messageIdSnapshot.set("m001", 1);
+    state.messageIdSnapshot.set("m002", 2);
+    state.messageIdSnapshot.set("m003", 3);
+    state.messageMetaSnapshot.set("m001", { timestamp: 1, role: "assistant", text: "first", tokenEstimate: 50 });
+    state.messageMetaSnapshot.set("m002", { timestamp: 2, role: "assistant", text: "second", tokenEstimate: 50 });
+    state.messageMetaSnapshot.set("m003", { timestamp: 3, role: "user", text: "third", tokenEstimate: 50 });
+
+    let registeredTool: any;
+    registerCompressTool({ registerTool: (tool: any) => { registeredTool = tool } } as any, state, config());
+
+    // m010 is stale and above the highest valid ID (m003). A start boundary
+    // must only clamp upward, so there is no safe target — the call must
+    // reject without mutating state or creating a block over the wrong content.
+    await expect(registeredTool.execute(
+      "tool-call",
+      { topic: "Bad", ranges: [{ startId: "m010", endId: "m010", summary: "should not land" }] },
+      undefined,
+      undefined,
+      { ui: { notify() {} } },
+    )).rejects.toThrow(/Unknown message ID: m010/);
+
+    expect(state.compressionBlocks).toHaveLength(0);
+  });
+
+  test("compress tool rolls up an active block when a stale mNNN resolves to its placeholder", async () => {
+    const state = createState();
+    // Active block b1 already covers an earlier range.
+    const existing = block(1, 10, 12);
+    existing.startMessageId = "stable-a";
+    existing.endMessageId = "stable-b";
+    state.compressionBlocks.push(existing);
+    state.nextBlockId = 2;
+    // m001 is the model-visible synthetic placeholder that represents b1.
+    state.messageIdSnapshot.set("m001", 10);
+    state.messageMetaSnapshot.set("m001", {
+      timestamp: 10,
+      role: "assistant",
+      text: "[dcp-block-id]: # (b1)",
+      tokenEstimate: 10,
+      blockId: 1,
+    });
+    state.messageIdSnapshot.set("m002", 20);
+    state.messageMetaSnapshot.set("m002", { timestamp: 20, role: "assistant", text: "later", tokenEstimate: 50 });
+
+    let registeredTool: any;
+    registerCompressTool({ registerTool: (tool: any) => { registeredTool = tool } } as any, state, config());
+
+    // startId m001 points at b1's placeholder. It must roll b1 up rather
+    // than nest a new block on top of the synthetic placeholder.
+    await registeredTool.execute(
+      "tool-call",
+      { topic: "Rollup", ranges: [{ startId: "m001", endId: "m002", summary: "rolled summary" }] },
+      undefined,
+      undefined,
+      { ui: { notify() {} } },
+    );
+
+    expect(state.compressionBlocks.find((b) => b.id === 1 && b.active)).toBeUndefined();
+    const rollup = state.compressionBlocks.find((b) => b.id === 2);
+    expect(rollup?.active).toBe(true);
+    expect(rollup?.coveredBlockIds).toEqual([1]);
+  });
+
+  test("compress tool throws on a stale mNNN with an empty snapshot and does not mutate state", async () => {
+    const state = createState();
+    // Empty snapshot: nothing addressable. Clamp would be guessing, so the
+    // call must reject. Mirrors the real "Current raw message IDs: none" case.
+    let registeredTool: any;
+    registerCompressTool({ registerTool: (tool: any) => { registeredTool = tool } } as any, state, config());
+
+    const result = registeredTool.execute(
+      "tool-call",
+      { topic: "Empty", ranges: [{ startId: "m001", endId: "m001", summary: "x" }] },
+      undefined,
+      undefined,
+      { ui: { notify() {} } },
+    );
+
+    await expect(result).rejects.toThrow(/Unknown message ID: m001/);
+    expect(state.compressionBlocks).toHaveLength(0);
   });
 
   test("compress tool reports per-operation savings and Pi context usage", async () => {
@@ -1158,7 +1267,7 @@ describe("DCP pruning effectiveness", () => {
     expect(asJson).not.toContain("old stable");
   });
 
-  test("compression block sync deactivates blocks whose origin compress call disappeared", () => {
+  test("compression block sync keeps blocks active when origin compress call is pruned", () => {
     const state = createState();
     const cfg = config();
     state.toolCalls.set("compress-call", toolRecord("compress-call", "compress", "compress::{}", 10));
@@ -1177,9 +1286,13 @@ describe("DCP pruning effectiveness", () => {
       cfg,
     );
 
-    expect(state.compressionBlocks[0]?.active).toBe(false);
-    expect(state.compressionBlocks[0]?.deactivatedReason).toBe("missing-origin-compress-call");
-    expect(JSON.stringify(pruned)).toContain("old stable");
+    // The block should remain active — the compress tool-call that created it
+    // being pruned is not a reason to deactivate; the block's content is the
+    // summary, not the tool-call.
+    expect(state.compressionBlocks[0]?.active).toBe(true);
+    expect(state.compressionBlocks[0]?.deactivatedReason).toBeUndefined();
+    // The original message should be replaced by the compressed summary
+    expect(JSON.stringify(pruned)).toContain("Compressed section");
   });
 
   test("protected tool outputs and subagent result artifacts are appended to summaries", async () => {

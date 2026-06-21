@@ -383,11 +383,86 @@ export function resolveIdToBoundary(
   }
 
   const meta = state.messageMetaSnapshot.get(id)
-  if (meta) return { timestamp: meta.timestamp, stableId: meta.stableId }
+  if (meta) return resolveMetaBoundary(meta, field, state)
 
   const ts = state.messageIdSnapshot.get(id)
-  if (ts === undefined) throw unknownCompressionIdError(id, state)
-  return { timestamp: ts }
+  if (ts !== undefined) return { timestamp: ts }
+
+  // ── Stale mNNN fallback: direction-only clamp ────────────────────────
+  // When compression or pruning removes messages between context passes,
+  // positional mNNN IDs shift (e.g. an end boundary m145 becomes m123
+  // after 22 messages are removed).  Clamp to the closest valid ID, but
+  // ONLY in a direction that preserves the range's semantics:
+  //   - start boundary: clamp upward to the first available ID at or after
+  //     the requested number.  The start must never move backwards into
+  //     older content; if no such ID exists, the requested start is gone
+  //     and we cannot safely compress — throw.
+  //   - end boundary: clamp downward to the last available ID at or before
+  //     the requested number.  The end must never move forwards into newer
+  //     content; if no such ID exists, throw.
+  // The previous implementation fell back to the highest available ID in
+  // both "no match" cases, which could clamp e.g. m010..m010 over a
+  // snapshot of m001..m003 to a single-message block over m003 — silently
+  // compressing the wrong content.
+  const mMatch = id.match(/^m(\d+)$/i)
+  if (mMatch && state.messageIdSnapshot.size > 0) {
+    const requestedNum = parseInt(mMatch[1]!, 10)
+    const allIds = sortIds([...state.messageIdSnapshot.keys()])
+    const allNums = allIds
+      .map((mid) => {
+        const n = mid.match(/^m(\d+)$/i)
+        return n ? { id: mid, num: parseInt(n[1]!, 10) } : null
+      })
+      .filter((entry): entry is { id: string; num: number } => entry !== null)
+      .sort((a, b) => a.num - b.num)
+
+    if (allNums.length > 0) {
+      let clamped: { id: string; num: number } | undefined
+      if (field === "startTimestamp") {
+        clamped = allNums.find((entry) => entry.num >= requestedNum)
+      } else {
+        for (let i = allNums.length - 1; i >= 0; i--) {
+          if (allNums[i]!.num <= requestedNum) {
+            clamped = allNums[i]
+            break
+          }
+        }
+      }
+      if (clamped) {
+        const clampedMeta = state.messageMetaSnapshot.get(clamped.id)
+        if (clampedMeta) return resolveMetaBoundary(clampedMeta, field, state)
+        const clampedTs = state.messageIdSnapshot.get(clamped.id)
+        if (clampedTs !== undefined) return { timestamp: clampedTs }
+      }
+    }
+  }
+
+  throw unknownCompressionIdError(id, state)
+}
+
+/**
+ * Resolve a `MessageIdMeta` to a compression boundary. When the meta is a
+ * synthetic placeholder for an active compression block (`meta.blockId` is
+ * set), resolve to that block's stored boundary so the caller rolls the
+ * block up instead of nesting a new block on top of the placeholder. This
+ * matters for both exact-match and clamped mNNN IDs: a model-visible mNNN
+ * may itself represent a previously compressed section.
+ */
+function resolveMetaBoundary(
+  meta: MessageIdMeta,
+  field: "startTimestamp" | "endTimestamp",
+  state: DcpState,
+): ResolvedCompressionBoundary {
+  if (meta.blockId !== undefined) {
+    const block = state.compressionBlocks.find((b) => b.id === meta.blockId && b.active)
+    if (block) {
+      return {
+        timestamp: block[field],
+        stableId: field === "startTimestamp" ? block.startMessageId : block.endMessageId,
+      }
+    }
+  }
+  return { timestamp: meta.timestamp, stableId: meta.stableId }
 }
 
 /**
