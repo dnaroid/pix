@@ -64,9 +64,9 @@
     "prepublishOnly": "npm run check && npm run build:pix && npm run generate-schemas"
   },
   "dependencies": {
-    "@earendil-works/pi-ai": "0.79.9",
-    "@earendil-works/pi-coding-agent": "0.79.9",
-    "@earendil-works/pi-tui": "0.79.9",
+    "@earendil-works/pi-ai": "0.79.10",
+    "@earendil-works/pi-coding-agent": "0.79.10",
+    "@earendil-works/pi-tui": "0.79.10",
     "@mariozechner/clipboard": "^0.3.9",
     "jsonc-parser": "3.3.1",
     "typebox": "1.1.38",
