@@ -1587,7 +1587,7 @@ describe("DCP pruning effectiveness", () => {
     expect(buildMessageIdControlText(createState())).toBeUndefined();
   });
 
-  test("DCP injects message-id control only into provider payload", async () => {
+  test("DCP injects compact message-id control at the provider payload tail", async () => {
     const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
     const pi = {
       on(event: string, handler: (event: any, ctx: any) => unknown) {
@@ -1636,8 +1636,28 @@ describe("DCP pruning effectiveness", () => {
     expect(payload?.messages).toHaveLength(2);
     expect(payload?.messages[0]?.role).toBe("system");
     expect(payload?.messages[0]?.content).toContain("base system");
-    expect(payload?.messages[0]?.content).toContain("Current raw message IDs: m001, m002");
-    expect(payload?.messages[1]?.content).not.toContain("<dcp-message-ids>");
+    expect(payload?.messages[0]?.content).not.toContain("<dcp-message-ids>");
+    expect(payload?.messages[1]?.content).toContain("visible user content");
+    expect(payload?.messages[1]?.content).toContain("Current raw message IDs: m001, m002");
+  });
+
+  test("DCP compacts long message-id control maps to protect provider cache", () => {
+    const state = createState();
+    for (let i = 1; i <= 25; i++) {
+      const id = `m${String(i).padStart(3, "0")}`;
+      state.messageIdSnapshot.set(id, i);
+      state.messageMetaSnapshot.set(id, {
+        timestamp: i,
+        role: i % 2 === 0 ? "assistant" : "user",
+        priority: i === 7 ? "high" : i === 12 ? "medium" : "low",
+      });
+    }
+
+    const rendered = buildMessageIdControlText(state) ?? "";
+    expect(rendered).toContain("Current raw message IDs: m001..m025 (25 messages)");
+    expect(rendered).toContain("Hints: high=m007; medium=m012");
+    expect(rendered).not.toContain("- m001:");
+    expect(rendered.length).toBeLessThan(360);
   });
 
   test("DCP context transform stays quiet below routine context pressure and clears stale anchors", async () => {

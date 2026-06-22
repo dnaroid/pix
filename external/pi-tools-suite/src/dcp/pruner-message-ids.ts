@@ -46,27 +46,87 @@ function priorityForMessage(tokenEstimate: number, config: DcpConfig | undefined
   return "low";
 }
 
-function controlLineForMessageId(id: string, state: DcpState): string {
-  const meta = state.messageMetaSnapshot.get(id);
-  if (!meta) return `- ${id}`;
+function messageIdIndex(id: string): number | undefined {
+  const match = /^m(\d+)$/.exec(id);
+  if (!match) return undefined;
+  const index = Number.parseInt(match[1]!, 10);
+  return Number.isFinite(index) ? index : undefined;
+}
 
-  const details: string[] = [meta.role];
-  if (meta.blockId !== undefined) details.push(`block=b${meta.blockId}`);
-  if (meta.toolName) details.push(`tool=${meta.toolName}`);
-  if (meta.priority) details.push(`priority=${meta.priority}`);
-  return `- ${id}: ${details.join(", ")}`;
+function summarizeMessageIds(ids: string[]): string {
+  if (ids.length === 0) return "none";
+
+  const ranges: string[] = [];
+  let start = ids[0]!;
+  let previous = ids[0]!;
+  let previousIndex = messageIdIndex(previous);
+
+  const flush = () => {
+    const startIndex = messageIdIndex(start);
+    const endIndex = messageIdIndex(previous);
+    if (
+      startIndex !== undefined &&
+      endIndex !== undefined &&
+      endIndex - startIndex >= 2
+    ) {
+      ranges.push(`${start}..${previous}`);
+    } else if (start === previous) {
+      ranges.push(start);
+    } else {
+      ranges.push(start, previous);
+    }
+  };
+
+  for (let i = 1; i < ids.length; i++) {
+    const id = ids[i]!;
+    const index = messageIdIndex(id);
+    if (previousIndex !== undefined && index === previousIndex + 1) {
+      previous = id;
+      previousIndex = index;
+      continue;
+    }
+
+    flush();
+    start = id;
+    previous = id;
+    previousIndex = index;
+  }
+
+  flush();
+  return ranges.join(", ");
+}
+
+function compactPriorityHint(ids: string[], state: DcpState): string | undefined {
+  const high: string[] = [];
+  const medium: string[] = [];
+  const blocks: string[] = [];
+
+  for (const id of ids) {
+    const meta = state.messageMetaSnapshot.get(id);
+    if (!meta) continue;
+    if (meta.priority === "high") high.push(id);
+    else if (meta.priority === "medium") medium.push(id);
+    if (meta.blockId !== undefined) blocks.push(`${id}=b${meta.blockId}`);
+  }
+
+  const parts: string[] = [];
+  if (high.length > 0) parts.push(`high=${summarizeMessageIds(high)}`);
+  if (medium.length > 0) parts.push(`medium=${summarizeMessageIds(medium)}`);
+  if (blocks.length > 0) parts.push(`blocks=${blocks.join(",")}`);
+  return parts.length > 0 ? `Hints: ${parts.join("; ")}` : undefined;
 }
 
 export function buildMessageIdControlText(state: DcpState): string | undefined {
   const ids = [...state.messageIdSnapshot.keys()];
   if (ids.length === 0) return undefined;
 
+  const hint = compactPriorityHint(ids, state);
+
   return [
     "<dcp-message-ids>",
-    "DCP metadata for the preceding conversation messages. These IDs are model-visible but UI-hidden control data.",
-    "Use only these current IDs with the compress tool; do not quote or output this metadata.",
-    `Current raw message IDs: ${ids.join(", ")}`,
-    ...ids.map((id) => controlLineForMessageId(id, state)),
+    "DCP metadata for the preceding conversation messages. IDs follow current message order; use only these IDs with compress; do not quote/output.",
+    `Current raw message IDs: ${summarizeMessageIds(ids)}${ids.length > 2 ? ` (${ids.length} messages)` : ""}`,
+    ...(hint ? [hint] : []),
     "</dcp-message-ids>",
   ].join("\n");
 }

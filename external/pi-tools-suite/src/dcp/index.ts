@@ -123,12 +123,28 @@ function appendTextToContent(content: unknown, text: string): unknown {
 
 function appendDcpControlToMessages(messages: unknown, text: string): unknown {
 	if (!Array.isArray(messages)) return messages
-	const existingIndex = messages.findIndex((message: any) =>
-		message?.role === "system" || message?.role === "developer"
-	)
 	const block = `${DCP_PROVIDER_CONTROL_HEADER}\n${text}`
-	if (existingIndex >= 0) {
-		return messages.map((message: any, index) => index === existingIndex
+
+	// Keep DCP's volatile ID map at the tail of the provider context instead of
+	// mutating the stable system/developer prefix. Prefix cache reuse is much
+	// better when only the newest transcript item changes on each request.
+	let targetIndex = -1
+	for (let index = messages.length - 1; index >= 0; index--) {
+		const message = messages[index] as any
+		if (!message || typeof message !== "object") continue
+		if (message.role === "system" || message.role === "developer") continue
+		targetIndex = index
+		break
+	}
+
+	if (targetIndex < 0) {
+		targetIndex = messages.findIndex((message: any) =>
+			message?.role === "system" || message?.role === "developer"
+		)
+	}
+
+	if (targetIndex >= 0) {
+		return messages.map((message: any, index) => index === targetIndex
 			? { ...message, content: appendTextToContent(message.content, block) }
 			: message)
 	}
@@ -155,16 +171,16 @@ function appendDcpControlToProviderPayload(payload: unknown, text: string): unkn
 	if (!payload || typeof payload !== "object") return payload
 	const record = payload as Record<string, unknown>
 
-	if ("system" in record) {
-		return { ...record, system: appendDcpControlToAnthropicSystem(record.system, text) }
-	}
-
 	if (Array.isArray(record.input)) {
 		return { ...record, input: appendDcpControlToMessages(record.input, text) }
 	}
 
 	if (Array.isArray(record.messages)) {
 		return { ...record, messages: appendDcpControlToMessages(record.messages, text) }
+	}
+
+	if ("system" in record) {
+		return { ...record, system: appendDcpControlToAnthropicSystem(record.system, text) }
 	}
 
 	if (record.config && typeof record.config === "object") {
