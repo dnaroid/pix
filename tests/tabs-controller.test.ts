@@ -286,7 +286,7 @@ describe("AppTabsController", () => {
 		assert.equal(restoreCachedViewCount, 0);
 	});
 
-	it("does not reload cached history while switching back to a running tab", async () => {
+	it("reloads a cached running tab when inactive events made its view stale", async () => {
 		const activeRuntime = fakeRuntime("one", "/tmp/one.jsonl");
 		const targetRuntime = fakeRuntime("two", "/tmp/two.jsonl", { isStreaming: true }) as FakeAgentSessionRuntime;
 		let currentRuntime: AgentSessionRuntime = activeRuntime;
@@ -337,14 +337,19 @@ describe("AppTabsController", () => {
 		tabs.setRuntimeForTab("tab-1", activeRuntime);
 		tabs.setRuntimeForTab("tab-2", targetRuntime);
 		tabs.sessionViewsByTabId.set("tab-2", fakeSessionView());
-		targetRuntime.emitSessionEvent({ type: "agent_end", messages: [], willRetry: false });
+		targetRuntime.emitSessionEvent({
+			type: "tool_execution_start",
+			toolCallId: "call-1",
+			toolName: "apply_patch",
+			args: {},
+		} as unknown as AgentSessionEvent);
 
 		await controller.switchToTab("tab-2");
 		await new Promise((resolve) => setTimeout(resolve, 250));
 
 		assert.equal(currentRuntime, targetRuntime);
-		assert.equal(historyLoadCount, 0);
-		assert.equal(resetCount, 0);
+		assert.equal(historyLoadCount, 1);
+		assert.equal(resetCount, 1);
 	});
 
 	it("preserves draft input text and cursor per tab", async () => {
@@ -2542,6 +2547,7 @@ function fakeSessionView(overrides: Partial<{ scrollState: { scrollFromBottom: n
 			currentAssistantTextBlockContentIndex: undefined,
 			assistantTextBlocksByContentIndex: new Map(),
 			currentThinkingEntryId: undefined,
+			currentThinkingEntryStartedAt: undefined,
 			assistantMessageClosed: false,
 			assistantTextBuffer: "",
 			entryRenderVersions: new Map(),

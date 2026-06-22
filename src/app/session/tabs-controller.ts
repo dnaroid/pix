@@ -719,8 +719,7 @@ export class AppTabsController {
 		void this.saveTabs();
 		this.scheduleTabPrewarm();
 		const cachedView = this.sessionViewsByTabId.get(target.id);
-		const cachedViewNeedsHistoryReload = this.tabIdsNeedingHistoryReload.has(target.id)
-			&& this.sessionActivity(targetRuntime.session) !== "running";
+		const cachedViewNeedsHistoryReload = this.tabIdsNeedingHistoryReload.has(target.id);
 		if (cachedView && this.host.restoreSessionView && !cachedViewNeedsHistoryReload) {
 			this.host.restoreSessionView(cachedView);
 			this.restoreDeferredUserMessages(target.id);
@@ -981,9 +980,11 @@ export class AppTabsController {
 		existing?.unsubscribe();
 
 		const unsubscribe = runtime.session.subscribe((event) => {
+			if (this.shouldInvalidateCachedViewForRuntimeEvent(event)) {
+				this.tabIdsNeedingHistoryReload.add(tabId);
+			}
 			if (this.shouldScheduleDelayedSyncForRuntimeEvent(event)) {
 				this.scheduleDelayedRuntimeSync(tabId, runtime);
-				this.tabIdsNeedingHistoryReload.add(tabId);
 			}
 			if (!this.shouldSyncTabFromRuntimeEvent(event)) return;
 			this.syncTabFromObservedRuntime(tabId, runtime);
@@ -1001,6 +1002,18 @@ export class AppTabsController {
 
 	private shouldScheduleDelayedSyncForRuntimeEvent(event: AgentSessionEvent): boolean {
 		return event.type === "agent_end"
+			|| event.type === "turn_end"
+			|| event.type === "compaction_end";
+	}
+
+	private shouldInvalidateCachedViewForRuntimeEvent(event: AgentSessionEvent): boolean {
+		return event.type === "message_start"
+			|| event.type === "message_update"
+			|| event.type === "message_end"
+			|| event.type === "tool_execution_start"
+			|| event.type === "tool_execution_update"
+			|| event.type === "tool_execution_end"
+			|| event.type === "agent_end"
 			|| event.type === "turn_end"
 			|| event.type === "compaction_end";
 	}
