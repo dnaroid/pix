@@ -532,6 +532,23 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 				}, ctx)
 			}
 
+			const hasCompressionSuggestion =
+				candidate !== null || messageCandidates.length > 0
+			if (!manualEmergencyOnly && !hasCompressionSuggestion) {
+				const clearedAnchors = clearDcpNudgeAnchors(state)
+				state.consecutiveIgnoredStrongNudges = 0
+				if (clearedAnchors > 0) await saveDcpState(ctx, state)
+				if (nudgeType || clearedAnchors > 0) {
+					writeDcpDebugLog(effectiveConfig, "context.no_compression_candidate", {
+						contextPercent,
+						thresholds,
+						nudgeType,
+						clearedAnchors,
+						state: summarizeDcpState(state),
+					}, ctx)
+				}
+			}
+
 			// Track consecutive ignored context-strong nudges for the
 			// auto-compress fallback. A strong nudge is "ignored" if it fires
 			// again on a later context event without a successful compress in
@@ -539,9 +556,12 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 			// the emergency threshold (handled by the below-threshold early
 			// return above, which clears anchors; counter is also reset on any
 			// successful compress in the compress tool).
-			if (nudgeType === "context-strong" || nudgeType === "context-soft") {
+			if (
+				hasCompressionSuggestion &&
+				(nudgeType === "context-strong" || nudgeType === "context-soft")
+			) {
 				state.consecutiveIgnoredStrongNudges += 1
-			} else if (nudgeType === null) {
+			} else if (nudgeType === null || !hasCompressionSuggestion) {
 				state.consecutiveIgnoredStrongNudges = 0
 			}
 
@@ -604,7 +624,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 				}
 			}
 
-			if (nudgeType && !manualEmergencyOnly) {
+			if (nudgeType && !manualEmergencyOnly && hasCompressionSuggestion) {
 				const nudgeText = appendConcreteNudgeGuidance(
 					baseNudgeText(nudgeType),
 					candidate,

@@ -171,3 +171,74 @@ describe("stripContentFromWireFrame (websocket delta path)", () => {
 		expect(stripContentFromWireFrame(frame)).toBeUndefined();
 	});
 });
+
+describe("stripCarrier (shared core)", () => {
+	test("strips content from non-message items in an `input` array", async () => {
+		const { stripCarrier } = await import("../src/codex-reasoning-fix/index.js");
+
+		const obj = {
+			input: [
+				{ role: "user", content: "hi" },
+				{ id: "rs_1", type: "reasoning", content: [], encrypted_content: "e" },
+				{ type: "function_call_output", call_id: "c1", output: "ok", content: [] },
+			],
+		};
+
+		const result = stripCarrier(obj) as any;
+		expect(result).toBeDefined();
+		expect(result.stripped).toBe(2);
+		expect(result.obj.input[0]).toHaveProperty("content");
+		expect(result.obj.input[1]).not.toHaveProperty("content");
+		expect(result.obj.input[2]).not.toHaveProperty("content");
+		// Original untouched.
+		expect(obj.input[1]).toHaveProperty("content");
+	});
+
+	test("returns undefined when nothing needs stripping", async () => {
+		const { stripCarrier } = await import("../src/codex-reasoning-fix/index.js");
+		expect(stripCarrier({ input: [{ role: "user", content: "hi" }] })).toBeUndefined();
+		expect(stripCarrier({ system: "x" })).toBeUndefined();
+		expect(stripCarrier(null)).toBeUndefined();
+	});
+});
+
+describe("stripFetchInit (SSE/fetch fallback path)", () => {
+	test("strips content from a JSON POST body carrying an `input` array", async () => {
+		const { stripFetchInit } = await import("../src/codex-reasoning-fix/index.js");
+
+		// Full-body Codex request as sent over fetch() after a websocket fallback.
+		const body = JSON.stringify({
+			model: "gpt-5.5",
+			input: [
+				{ type: "message", role: "user", content: [{ type: "input_text", text: "hi" }] },
+				{ id: "rs_99", type: "reasoning", content: [], encrypted_content: "e" },
+				{ type: "function_call_output", call_id: "c1", output: "ok", content: [] },
+			],
+		});
+		const init: RequestInit = { method: "POST", headers: { "content-type": "application/json" }, body };
+
+		const next = stripFetchInit(init) as RequestInit;
+		expect(next).toBeDefined();
+		expect(next).not.toBe(init); // cloned
+		const parsed = JSON.parse(next.body as string) as any;
+		expect(parsed.input[0]).toHaveProperty("content"); // message kept
+		expect(parsed.input[1]).not.toHaveProperty("content"); // reasoning stripped
+		expect(parsed.input[2]).not.toHaveProperty("content"); // function_call_output stripped
+		expect(next.method).toBe("POST");
+		expect(next.headers).toEqual(init.headers);
+	});
+
+	test("is a no-op for non-JSON / non-string / clean bodies", async () => {
+		const { stripFetchInit } = await import("../src/codex-reasoning-fix/index.js");
+
+		expect(stripFetchInit(undefined)).toBeUndefined();
+		expect(stripFetchInit({ method: "POST" })).toBeUndefined(); // no body
+		expect(stripFetchInit({ body: "not-json{" })).toBeUndefined(); // unparseable
+		expect(stripFetchInit({ body: JSON.stringify({ system: "x" }) })).toBeUndefined(); // no input/messages
+		expect(
+			stripFetchInit({ body: JSON.stringify({ input: [{ role: "user", content: "hi" }] }) }),
+		).toBeUndefined(); // nothing to strip
+		// Binary / non-string body left alone.
+		expect(stripFetchInit({ body: new Uint8Array([1, 2, 3]) } as any)).toBeUndefined();
+	});
+});

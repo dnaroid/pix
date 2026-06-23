@@ -1705,6 +1705,56 @@ describe("DCP pruning effectiveness", () => {
     expect(nudgeEvents.map((event) => event.event)).toEqual(["emitted", "emitted"]);
   });
 
+  test("DCP context transform suppresses nudges when there is no compression candidate", async () => {
+    const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
+    const nudgeEvents: any[] = [];
+    const pi = {
+      on(event: string, handler: (event: any, ctx: any) => unknown) {
+        handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+      },
+      registerTool() {},
+      registerCommand() {},
+      appendEntry(type: string, data: any) {
+        if (type === "dcp-nudge") nudgeEvents.push(data);
+      },
+      sendMessage() {},
+    } as any;
+
+    await dcpModule(pi);
+    const contextHandler = handlers.get("context")?.[0];
+    expect(contextHandler).toBeDefined();
+
+    const compressibleMessages = [
+      textMessage("user", "older completed research " + "a".repeat(2000), 1),
+      textMessage("assistant", "older result " + "b".repeat(2000), 2),
+      textMessage("user", "current request", 3),
+    ];
+    const highPressureCtx = {
+      hasUI: false,
+      sessionManager: { getBranch: () => [] },
+      getContextUsage: () => ({ tokens: 9_000, contextWindow: 10_000, percent: 90 }),
+    };
+
+    const firstResult = await contextHandler?.(
+      { type: "context", messages: compressibleMessages },
+      highPressureCtx,
+    ) as { messages: any[] } | undefined;
+    expect(firstResult?.messages.map(contentText).join("\n") ?? "").toContain("<dcp-system-reminder>");
+    expect(nudgeEvents).toHaveLength(1);
+
+    const messages = [
+      textMessage("user", "short current request", 1),
+      textMessage("assistant", "short answer", 2),
+    ];
+
+    const result = await contextHandler?.({ type: "context", messages }, highPressureCtx) as { messages: any[] } | undefined;
+    const rendered = result?.messages.map(contentText).join("\n") ?? "";
+
+    expect(rendered).not.toContain("<dcp-system-reminder>");
+    expect(rendered).not.toContain("CONCRETE NEXT ACTION");
+    expect(nudgeEvents).toHaveLength(1);
+  });
+
   test("DCP context transform forces a strong nudge on context-window downgrade", async () => {
     const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
     const nudgeEvents: any[] = [];

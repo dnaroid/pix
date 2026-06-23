@@ -4,6 +4,7 @@ import { renderCompressTool } from "./compress.js";
 import { renderQuestionTool } from "./question.js";
 import { renderReadTool } from "./read.js";
 import { renderRepoTool } from "./repo.js";
+import { renderSearchTool } from "./search.js";
 import { renderShellTool } from "./shell.js";
 import { applySkillReadDisplay } from "./skill.js";
 import { renderSubagentsTool } from "./subagents.js";
@@ -27,6 +28,13 @@ const TOOL_RENDERERS: Record<string, ToolRendererMiddleware> = {
 	Write: renderWriteTool,
 	ast_grep: renderAstTool,
 	ast_apply: renderAstTool,
+	grep: renderSearchTool,
+	Grep: renderSearchTool,
+	rg: renderSearchTool,
+	Glob: renderSearchTool,
+	glob: renderSearchTool,
+	find: renderSearchTool,
+	Find: renderSearchTool,
 	web_search: renderWebSearchTool,
 	web_fetch: renderWebFetchTool,
 	todo: renderTodoTool,
