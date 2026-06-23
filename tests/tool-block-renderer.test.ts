@@ -234,7 +234,7 @@ describe("renderToolBlock", () => {
 		assert.deepEqual(renderToolBlock(toolEntry(), { ...rule, hidden: true }, 80, colors), []);
 	});
 
-	it("renders header args and body in the tool color", () => {
+	it("renders header args and body in the neutral output color", () => {
 		const lines = renderToolBlock(toolEntry({
 			expanded: true,
 			toolName: "ls",
@@ -246,8 +246,19 @@ describe("renderToolBlock", () => {
 		assert.match(lines[0]?.text ?? "", /ls/u);
 		assert.match(lines[0]?.text ?? "", /--flag value/u);
 		assert.equal(lines[0]?.colorOverride, colors.success);
-		assert.equal(lines[1]?.colorOverride, colors.success);
+		assert.equal(lines[1]?.colorOverride, colors.statusForeground);
+		assert.ok(lines[0]?.segments?.some((segment) => segment.foreground === colors.statusForeground));
 		assert.equal((lines[0]?.segments ?? []).some((segment) => segment.foreground === colors.muted || segment.foreground === colors.info), false);
+	});
+
+	it("keeps syntax-highlighted body output on the neutral output color", () => {
+		const lines = renderToolBlock(toolEntry({
+			expandedText: "const value = 1;",
+			syntaxHighlight: { language: "typescript", startLine: 0, startColumn: 0 },
+		}), { ...rule, color: "success" }, 80, colors);
+
+		assert.equal(lines[1]?.colorOverride, colors.statusForeground);
+		assert.deepEqual(lines[1]?.syntaxHighlight, { language: "typescript", start: 2 });
 	});
 
 	it("preserves ANSI styling in expanded body output", () => {

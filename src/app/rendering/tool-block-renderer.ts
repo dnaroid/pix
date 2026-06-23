@@ -54,7 +54,7 @@ export function renderToolBlock(entry: ToolBlockEntry, rule: ResolvedToolRule, w
 	const expanded = entry.expanded;
 	const stateIcon = toolStatusIcon(entry);
 	const toolColor = options.headerColorOverride ?? resolveColor(rule.color, colors);
-	const toolOutputColor = toolColor;
+	const toolOutputColor = colors.statusForeground;
 	const headerLabel = (entry.headerLabel ?? entry.toolName).toLowerCase();
 	const bg = options.backgroundOverride;
 	const applyBackground = bg ? (lines: RenderedLine[]) => { for (const line of lines) line.backgroundOverride = bg; } : (_lines: RenderedLine[]) => {};
@@ -74,6 +74,7 @@ export function renderToolBlock(entry: ToolBlockEntry, rule: ResolvedToolRule, w
 		segments: [
 			{ start: 0, end: stateIcon.length, foreground: toolStatusIconColor(entry, colors), bold: true },
 			{ start: stateIcon.length, end: headerPrefix.length, bold: true },
+			...(clippedHeaderArgs ? [{ start: headerPrefix.length + 1, end: header.length, foreground: toolOutputColor }] : []),
 		],
 	};
 	const headerLines: RenderedLine[] = [headerLine];
