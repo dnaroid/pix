@@ -73,7 +73,6 @@ describe("tool renderer utils", () => {
 			headerArgs: "x: 1",
 			collapsedBody: "out",
 			expandedText: "x: 1\n\nout",
-			bodyLineStyles: [{ startLine: 0, endLine: 1, color: "muted" }],
 		});
 		assert.equal(defaultToolRender(input({ argsText: "{\"x\":1}" })).expandedText, "x: 1");
 		assert.equal(defaultToolRender(input({ argsText: "plain" })).collapsedBody, "plain");
@@ -101,7 +100,7 @@ describe("renderToolDisplay", () => {
 		assert.equal(skill.headerArgs, "pi-sdk");
 		assert.deepEqual(skill.syntaxHighlight, { language: "markdown", startLine: 2, startColumn: 0 });
 		assert.match(skill.expandedText, /^\/skills\/pi-sdk\/SKILL\.md\n\nskill text$/);
-		assert.deepEqual(skill.bodyLineStyles, [{ startLine: 0, endLine: 1, color: "muted" }]);
+		assert.equal(skill.bodyLineStyles, undefined);
 
 		const frontmatterSkill = renderToolDisplay(input({
 			toolName: "read",
@@ -164,7 +163,7 @@ describe("renderToolDisplay", () => {
 		const shell = renderToolDisplay(input({ toolName: "shell", argsText: "{\"command\":\"npm   test\"}", output: "ok" }));
 		assert.equal(shell.headerArgs, "npm test");
 		assert.equal(shell.expandedText, "$ npm test\n\nok");
-		assert.deepEqual(shell.bodyLineStyles, [{ startLine: 0, endLine: 1, color: "muted" }]);
+		assert.equal(shell.bodyLineStyles, undefined);
 
 		const diff = renderToolDisplay(input({ toolName: "bash", argsText: "{\"command\":\"git diff -- src\"}", output: "diff --git" }));
 		assert.equal(diff.bodyStyle, "diff");
@@ -263,7 +262,7 @@ describe("renderToolDisplay", () => {
 		const question = renderToolDisplay(input({ toolName: "question", argsText: "{\"questions\":[{},{}]}", output: "asked" }));
 		assert.equal(question.headerArgs, "2 questions");
 		assert.doesNotMatch(question.expandedText, /questions\n|result\n/);
-		assert.deepEqual(question.bodyLineStyles, [{ startLine: 0, endLine: 7, color: "muted" }]);
+		assert.equal(question.bodyLineStyles, undefined);
 		const answeredQuestion = renderToolDisplay(input({
 			toolName: "question",
 			argsText: JSON.stringify({ questions: [
@@ -311,12 +310,7 @@ describe("renderToolDisplay", () => {
 	it("renders compress summaries", () => {
 		const ok = renderToolDisplay(input({ toolName: "compress", argsText: "{\"topic\":\"Cleanup\"}", colors: THEMES.dark.colors, output: JSON.stringify({ tokensSaved: 1200, contextTokens: 8800, contextPercent: 50, contextWindow: 100000, ranges: 1, messages: 2, totalSummaryTokens: 45, activeBlocks: 3, totalBlocks: 5, prunedTools: 2 }) }));
 		assert.match(ok.headerArgs ?? "", /Cleanup · saved 1.2K · ████▍ 88% of 10K · context 50% · 3 items/);
-		assert.equal(ok.headerArgsSegments?.length, 5);
-		assert.equal(ok.headerArgsSegments?.[0]?.foreground, THEMES.dark.colors.muted);
 		assert.equal(ok.collapsedBody, "");
-
-		const withToolColor = renderToolDisplay(input({ toolName: "compress", colors: THEMES.dark.colors, toolColor: THEMES.dark.colors.info, output: JSON.stringify({ tokensSaved: 1200, contextTokens: 8800 }) }));
-		assert.equal(withToolColor.headerArgsSegments?.[0]?.foreground, THEMES.dark.colors.info);
 
 		assert.match(renderToolDisplay(input({ toolName: "compress", output: "boom", isError: true })).headerArgs ?? "", /error: boom/);
 		assert.equal(renderToolDisplay(input({ toolName: "compress", status: "running" })).expandedText, "running…");

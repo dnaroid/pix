@@ -1,15 +1,6 @@
 import type { Theme } from "../theme.js";
 import type { ToolBodySyntaxHighlights } from "../syntax-highlight.js";
 
-export type ToolHeaderSegment = {
-	start: number;
-	end: number;
-	foreground?: string;
-	background?: string;
-	bold?: boolean;
-	strikethrough?: boolean;
-};
-
 export type ToolBodyLineStyle = {
 	startLine: number;
 	endLine?: number;
@@ -35,7 +26,6 @@ export type ToolRenderInput = {
 export type ToolRenderResult = {
 	toolName?: string;
 	headerArgs?: string;
-	headerArgsSegments?: readonly ToolHeaderSegment[];
 	bodyLineStyles?: readonly ToolBodyLineStyle[];
 	bodyStyle?: "diff";
 	preserveAnsi?: boolean;

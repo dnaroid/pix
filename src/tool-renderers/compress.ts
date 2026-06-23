@@ -1,5 +1,5 @@
-import { compactProgressBarSegments, formatCompactProgressBar } from "../context-progress-bar.js";
-import type { ToolHeaderSegment, ToolRenderInput, ToolRendererMiddleware } from "./types.js";
+import { formatCompactProgressBar } from "../context-progress-bar.js";
+import type { ToolRenderInput, ToolRendererMiddleware } from "./types.js";
 import { parseArgsText, stringArg } from "./utils.js";
 
 type CompressResult = {
@@ -24,7 +24,6 @@ export const renderCompressTool: ToolRendererMiddleware = (input) => {
 	const header = joinHeaderParts(topic ? { text: topic } : undefined, summary) ?? { text: "" };
 	return {
 		...(header.text ? { headerArgs: header.text } : {}),
-		...((header.segments?.length ?? 0) > 0 ? { headerArgsSegments: header.segments } : {}),
 		collapsedBody: "",
 		expandedText: fullCompressResponse(input.output, input.status),
 	};
@@ -33,7 +32,6 @@ export const renderCompressTool: ToolRendererMiddleware = (input) => {
 
 type HeaderPart = {
 	text: string;
-	segments?: readonly ToolHeaderSegment[];
 };
 
 function formatCompressSummary(input: ToolRenderInput): HeaderPart | undefined {
@@ -43,7 +41,7 @@ function formatCompressSummary(input: ToolRenderInput): HeaderPart | undefined {
 
 	const parsed = parseArgsText(output);
 	if (!isRecord(parsed)) return { text: oneLine(output) };
-	return formatCompressSuccess(parsed, input);
+	return formatCompressSuccess(parsed);
 }
 
 function fullCompressResponse(output: string, status: "running" | "done"): string {
@@ -51,7 +49,7 @@ function fullCompressResponse(output: string, status: "running" | "done"): strin
 	return status === "running" ? "running…" : "(empty)";
 }
 
-function formatCompressSuccess(result: CompressResult, input: ToolRenderInput): HeaderPart {
+function formatCompressSuccess(result: CompressResult): HeaderPart {
 	const tokensSaved = numberValue(result.tokensSaved);
 	const contextPercent = numberValue(result.contextPercent);
 	const contextTokens = numberValue(result.contextTokens);
@@ -68,7 +66,7 @@ function formatCompressSuccess(result: CompressResult, input: ToolRenderInput): 
 
 	const parts = [
 		{ text: tokensSaved != null ? `saved ${formatCompactNumber(tokensSaved)}` : "compressed" },
-		barPercent != null ? progressPart(barPercent, input, originalContextTokens) : undefined,
+		barPercent != null ? progressPart(barPercent, originalContextTokens) : undefined,
 		compressedContextPercent != null && contextPercent != null ? { text: `context ${formatPercent(contextPercent)}` } : undefined,
 		itemCount != null ? { text: `${itemCount} ${plural(itemCount, "item")}` } : undefined,
 		summaryTokens != null ? { text: `${formatCompactNumber(summaryTokens)} summary tokens` } : undefined,
@@ -80,17 +78,9 @@ function formatCompressSuccess(result: CompressResult, input: ToolRenderInput): 
 	return joinHeaderParts(...parts) ?? { text: "compressed" };
 }
 
-function progressPart(percent: number, input: ToolRenderInput, previousContextTokens: number | undefined): HeaderPart {
+function progressPart(percent: number, previousContextTokens: number | undefined): HeaderPart {
 	const text = `${formatCompactProgressBar(percent)} ${formatPercent(percent)}${previousContextTokens != null ? ` of ${formatCompactNumber(previousContextTokens)}` : ""}`;
-	if (!input.colors) return { text };
-
-	return {
-		text,
-		segments: compactProgressBarSegments(0, percent, {
-			fill: input.toolColor ?? input.colors.muted,
-			track: input.colors.statusDotBase,
-		}),
-	};
+	return { text };
 }
 
 function inferContextTokens(contextPercent: number | undefined, contextWindow: number | undefined): number | undefined {
@@ -108,19 +98,7 @@ function joinHeaderParts(...parts: readonly (HeaderPart | undefined)[]): HeaderP
 	if (defined.length === 0) return undefined;
 
 	const separator = " · ";
-	const segments: ToolHeaderSegment[] = [];
-	let offset = 0;
-	for (const [index, part] of defined.entries()) {
-		if (index > 0) offset += separator.length;
-		if (part.segments) {
-			for (const segment of part.segments) {
-				segments.push({ ...segment, start: offset + segment.start, end: offset + segment.end });
-			}
-		}
-		offset += part.text.length;
-	}
-
-	return { text: defined.map((part) => part.text).join(separator), segments };
+	return { text: defined.map((part) => part.text).join(separator) };
 }
 
 function numberValue(value: unknown): number | undefined {

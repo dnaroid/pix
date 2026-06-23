@@ -82,7 +82,7 @@ export function argsAndResultExpandedText(input: ToolRenderInput, argsBlock: str
 	const formattedArgs = argsBlock.trimEnd();
 	const showArgs = formattedArgs.length > 0 && formattedArgs !== "(empty)";
 	return expandedTextFromParts(
-		...(showArgs ? [{ text: formattedArgs, color: "muted" as const }] : []),
+		...(showArgs ? [{ text: formattedArgs }] : []),
 		{ text: resultText(input, { empty: !showArgs }) },
 	);
 }

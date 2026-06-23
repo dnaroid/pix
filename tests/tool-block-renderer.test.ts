@@ -234,18 +234,20 @@ describe("renderToolBlock", () => {
 		assert.deepEqual(renderToolBlock(toolEntry(), { ...rule, hidden: true }, 80, colors), []);
 	});
 
-	it("clips header args and keeps custom header segments", () => {
+	it("renders header args and body in the tool color", () => {
 		const lines = renderToolBlock(toolEntry({
-			expanded: false,
+			expanded: true,
 			toolName: "ls",
-			headerArgs: "--very-long-flag value",
-			headerArgsSegments: [{ start: 0, end: 14, foreground: colors.info, bold: true }],
-		}), rule, 14, colors);
+			headerArgs: "--flag value",
+			expandedText: "output line",
+		}), { ...rule, color: "success" }, 80, colors);
 
-		assert.equal(lines.length, 1);
+		assert.equal(lines.length, 2);
 		assert.match(lines[0]?.text ?? "", /ls/u);
-		assert.doesNotMatch(lines[0]?.text ?? "", /very-long-flag value/u);
-		assert.ok((lines[0]?.segments ?? []).some((segment) => segment.foreground === colors.info));
+		assert.match(lines[0]?.text ?? "", /--flag value/u);
+		assert.equal(lines[0]?.colorOverride, colors.success);
+		assert.equal(lines[1]?.colorOverride, colors.success);
+		assert.equal((lines[0]?.segments ?? []).some((segment) => segment.foreground === colors.muted || segment.foreground === colors.info), false);
 	});
 
 	it("preserves ANSI styling in expanded body output", () => {

@@ -48,7 +48,7 @@ export const renderQuestionTool: ToolRendererMiddleware = (input) => {
 		headerArgs: formatHeader(questions),
 		collapsedBody: resultText,
 		...expandedTextFromParts(
-			{ text: questionsText, color: "muted" },
+			{ text: questionsText },
 			{ text: input.isError ? `error\n${resultText}` : resultText },
 		),
 	};

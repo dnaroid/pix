@@ -10,16 +10,8 @@ export const renderSearchTool: ToolRendererMiddleware = (input) => {
 	const args = argsRecord(input);
 	const result = input.output || (input.status === "running" ? "running…" : "(empty)");
 	const headerArgs = args ? formatArgsInline(args, PREFERRED_KEYS) : undefined;
-	// Render the header arguments in the same color as the output body (statusForeground) so the
-	// whole search block reads as a single uniform color instead of dimmed args + brighter output.
-	const argsColor = input.colors?.statusForeground;
 	return {
-		...(headerArgs
-			? {
-					headerArgs,
-					...(argsColor ? { headerArgsSegments: [{ start: 0, end: headerArgs.length, foreground: argsColor }] } : {}),
-				}
-			: {}),
+		...(headerArgs ? { headerArgs } : {}),
 		collapsedBody: input.output,
 		expandedText: result,
 	};

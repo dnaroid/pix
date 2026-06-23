@@ -19,7 +19,7 @@ export function applySkillReadDisplay(input: ToolRenderInput, rendered: ToolRend
 	if (!skill) return rendered;
 	const pathText = skill.path ?? "";
 	const expanded = expandedTextFromParts(
-		{ text: pathText, color: "muted" },
+		{ text: pathText },
 		{ text: resultText(input, { empty: !pathText }) },
 	);
 	const resultStartLine = pathText ? lineCount(pathText) + 1 : 0;

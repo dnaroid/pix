@@ -5,7 +5,7 @@ import type { Theme } from "../../theme.js";
 import { alertIconPrefixLength, hasToolLspDiagnosticsAfterMutation, lspDiagnosticSeverityForLine, sanitizeText, toolStatusIcon, toolStatusIconColor, wrapLine } from "./render-text.js";
 import { APP_ICONS } from "../icons.js";
 import type { RenderedLine, StyledSegment } from "../types.js";
-import type { ToolBodyLineStyle, ToolHeaderSegment } from "../../tool-renderers/types.js";
+import type { ToolBodyLineStyle } from "../../tool-renderers/types.js";
 
 const TOOL_BODY_PREFIX = "  ";
 
@@ -26,7 +26,6 @@ export type ToolBlockEntry = {
 	toolName: string;
 	headerLabel?: string | undefined;
 	headerArgs?: string | undefined;
-	headerArgsSegments?: readonly ToolHeaderSegment[] | undefined;
 	bodyLineStyles?: readonly ToolBodyLineStyle[] | undefined;
 	bodyStyle?: "diff" | undefined;
 	preserveAnsi?: boolean | undefined;
@@ -55,7 +54,7 @@ export function renderToolBlock(entry: ToolBlockEntry, rule: ResolvedToolRule, w
 	const expanded = entry.expanded;
 	const stateIcon = toolStatusIcon(entry);
 	const toolColor = options.headerColorOverride ?? resolveColor(rule.color, colors);
-	const toolOutputColor = colors.statusForeground;
+	const toolOutputColor = toolColor;
 	const headerLabel = (entry.headerLabel ?? entry.toolName).toLowerCase();
 	const bg = options.backgroundOverride;
 	const applyBackground = bg ? (lines: RenderedLine[]) => { for (const line of lines) line.backgroundOverride = bg; } : (_lines: RenderedLine[]) => {};
@@ -66,7 +65,6 @@ export function renderToolBlock(entry: ToolBlockEntry, rule: ResolvedToolRule, w
 	const target = { kind: "tool" as const, id: entry.id };
 	const showGutter = options.showGutter ?? true;
 	const header = clippedHeaderArgs ? `${headerPrefix} ${clippedHeaderArgs}` : headerPrefix;
-	const headerArgsStart = clippedHeaderArgs ? headerPrefix.length + 1 : header.length;
 
 	const headerLine: RenderedLine = {
 		text: header,
@@ -76,7 +74,6 @@ export function renderToolBlock(entry: ToolBlockEntry, rule: ResolvedToolRule, w
 		segments: [
 			{ start: 0, end: stateIcon.length, foreground: toolStatusIconColor(entry, colors), bold: true },
 			{ start: stateIcon.length, end: headerPrefix.length, bold: true },
-			...headerArgsStyledSegments(headerArgsStart, clippedHeaderArgs.length, entry.headerArgsSegments, colors),
 		],
 	};
 	const headerLines: RenderedLine[] = [headerLine];
@@ -560,43 +557,4 @@ function diffLineStyle(line: string, colors: Theme["colors"]): { foreground: str
 
 function formatToolHeaderArgs(argsText: string | undefined): string {
 	return sanitizeText(argsText ?? "").replace(/\n+/g, " ").trim();
-}
-
-function headerArgsStyledSegments(
-	headerArgsStart: number,
-	clippedLength: number,
-	customSegments: readonly ToolHeaderSegment[] | undefined,
-	colors: Theme["colors"],
-): StyledSegment[] {
-	if (clippedLength <= 0) return [];
-	if (!customSegments || customSegments.length === 0) return [{ start: headerArgsStart, end: headerArgsStart + clippedLength, foreground: colors.muted }];
-
-	const segments: StyledSegment[] = [];
-	let offset = 0;
-	const clippedCustomSegments = customSegments
-		.map((segment) => clippedHeaderSegment(segment, clippedLength))
-		.filter((segment): segment is ToolHeaderSegment => segment !== undefined)
-		.sort((left, right) => left.start - right.start || left.end - right.end);
-
-	for (const segment of clippedCustomSegments) {
-		const start = Math.max(offset, segment.start);
-		if (start >= segment.end) continue;
-		if (start > offset) segments.push({ start: headerArgsStart + offset, end: headerArgsStart + start, foreground: colors.muted });
-		segments.push({
-			...segment,
-			start: headerArgsStart + start,
-			end: headerArgsStart + segment.end,
-		});
-		offset = segment.end;
-	}
-
-	if (offset < clippedLength) segments.push({ start: headerArgsStart + offset, end: headerArgsStart + clippedLength, foreground: colors.muted });
-	return segments;
-}
-
-function clippedHeaderSegment(segment: ToolHeaderSegment, clippedLength: number): ToolHeaderSegment | undefined {
-	const start = Math.max(0, Math.min(clippedLength, segment.start));
-	const end = Math.max(start, Math.min(clippedLength, segment.end));
-	if (end <= start) return undefined;
-	return { ...segment, start, end };
 }

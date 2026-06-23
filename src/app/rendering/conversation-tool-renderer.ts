@@ -63,7 +63,6 @@ export function renderConversationToolEntry(
 		id: entry.id,
 		toolName,
 		headerArgs: display.headerArgs,
-		headerArgsSegments: display.headerArgsSegments,
 		bodyLineStyles: display.bodyLineStyles,
 		bodyStyle: display.bodyStyle,
 		preserveAnsi: display.preserveAnsi,
