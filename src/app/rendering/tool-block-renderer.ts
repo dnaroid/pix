@@ -137,6 +137,9 @@ function renderCollapsedPreviewLines(
 	showGutter: boolean,
 ): RenderedLine[] {
 	const preview = previewBodyText(body, rule.direction, rule.previewLines);
+	// bodyLineStyles is aligned to entry.expandedText (args block prefix + output), but the
+	// collapsed body here is the raw output only. Applying bodyLineStyles would misalign and
+	// incorrectly dim the first N output lines, so we do not pass it to the collapsed preview.
 	const allPreviewLines = renderToolBodyLines(
 		preview.text,
 		width,
@@ -147,7 +150,7 @@ function renderCollapsedPreviewLines(
 		undefined,
 		entry.bodyWrap,
 		hasLspDiagnostics,
-		entry.bodyLineStyles,
+		undefined,
 		entry.preserveAnsi,
 		showGutter,
 		{ rawLineOffset: preview.rawLineOffset, bodyEndsAfterText: !preview.omittedAfter },

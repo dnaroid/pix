@@ -200,7 +200,10 @@ describe("renderToolBlock", () => {
 		assert.doesNotMatch(lines.map((line) => line.text).join("\n"), /line-0|line-500/u);
 	});
 
-	it("keeps absolute body line styles in long tail previews", () => {
+	it("does not apply expanded-text body line styles to collapsed previews", () => {
+		// bodyLineStyles are aligned to entry.expandedText (which carries an args/command prefix),
+		// but the collapsed preview renders entry.collapsedBody (output only). Applying the
+		// expandedText-aligned styles here would dim the first output lines, so they are ignored.
 		const output = Array.from({ length: 1000 }, (_, index) => `line-${index}`).join("\n");
 
 		const lines = renderToolBlock(toolEntry({
@@ -210,7 +213,26 @@ describe("renderToolBlock", () => {
 			bodyLineStyles: [{ startLine: 999, endLine: 1000, color: "error" }],
 		}), { ...rule, direction: "tail", previewLines: 2 }, 100, colors);
 
-		assert.deepEqual(lines[2]?.segments, [gutterSegment, { start: 2, end: lines[2]?.text.length, foreground: colors.error }]);
+		assert.deepEqual(lines[2]?.segments, [gutterSegment]);
+	});
+
+	it("does not dim first collapsed preview lines from an expanded args block", () => {
+		// Mirrors defaultToolRender / shell renderer: expandedText = args block (muted) + output,
+		// collapsedBody = output only. The collapsed preview must render the output uniformly
+		// instead of dimming its first lines with the args-block style.
+		const output = "src/a.cpp:4:  int x;\nsrc/a.cpp:5:  int y;\nsrc/a.cpp:9:  return x;";
+		const argsBlock = "pattern: x\npath: src";
+
+		const lines = renderToolBlock(toolEntry({
+			expanded: false,
+			output,
+			collapsedBody: output,
+			expandedText: `${argsBlock}\n\n${output}`,
+			bodyLineStyles: [{ startLine: 0, endLine: argsBlock.split("\n").length, color: "muted" }],
+		}), rule, 100, colors);
+
+		assert.deepEqual(lines[1]?.segments, [gutterSegment]);
+		assert.deepEqual(lines[2]?.segments, [gutterSegment]);
 	});
 
 	it("dims patch file headers without using warning color", () => {
