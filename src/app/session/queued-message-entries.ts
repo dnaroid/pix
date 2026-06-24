@@ -66,3 +66,12 @@ export function queuedMessageEntries(
 		...deferredQueuedMessageEntries(deferredUserMessages),
 	];
 }
+
+export function cloneSubmittedUserMessage(message: SubmittedUserMessage): SubmittedUserMessage {
+	return {
+		id: message.id,
+		promptText: message.promptText,
+		displayText: message.displayText,
+		images: message.images.map((image) => ({ ...image })),
+	};
+}

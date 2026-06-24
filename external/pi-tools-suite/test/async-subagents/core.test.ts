@@ -25,6 +25,9 @@ import {
 	getRunRoot,
 	getRunState,
 	getSubagentPresetSelectionPath,
+	hasAgentPrompt,
+	hasLaunchedAgentPrompt,
+	hasQueuedAgentPrompt,
 	isQuotaLimitCompletion,
 	loadSubagentConfig,
 	loadSubagentPresetSelection,
@@ -394,6 +397,20 @@ describe.serial("pi invocation", () => {
 });
 
 describe.serial("subagent type config", () => {
+	test.serial("detects launched and queued agent prompt records through shared helpers", () => {
+		const runDir = tempDir();
+		fs.mkdirSync(path.join(runDir, "launched"), { recursive: true });
+		fs.writeFileSync(path.join(runDir, "launched", "prompt.md"), "launched");
+		fs.mkdirSync(path.join(runDir, "prompts"), { recursive: true });
+		fs.writeFileSync(path.join(runDir, "prompts", "queued.md"), "queued");
+
+		expect(hasLaunchedAgentPrompt(runDir, "launched")).toBe(true);
+		expect(hasQueuedAgentPrompt(runDir, "queued")).toBe(true);
+		expect(hasAgentPrompt(runDir, "launched")).toBe(true);
+		expect(hasAgentPrompt(runDir, "queued")).toBe(true);
+		expect(hasAgentPrompt(runDir, "missing")).toBe(false);
+	});
+
 	test.serial("copies bundled sample config only when no config exists", () => {
 		const cwd = tempDir();
 		const targetPath = path.join(cwd, "custom", "async-subagents.jsonc");

@@ -11,7 +11,7 @@ export type {
 	StructuredResult,
 } from "./core/types.js";
 
-export { createRunDir, getRunRoot, resolveRunDir, validateBasename } from "./core/paths.js";
+export { createRunDir, getRunRoot, hasAgentPrompt, hasLaunchedAgentPrompt, hasQueuedAgentPrompt, resolveRunDir, validateBasename } from "./core/paths.js";
 export type { CopySubagentConfigSampleResult, ModelByParentEntry, ResolvedAgentTaskConfig, ResolvedSubagentRoutingConfig, ResolveAgentTaskOptions, SubagentConfig, SubagentPreset, SubagentRoutingConfig, SubagentTypeConfig, SubagentVisionConfig } from "./core/config.js";
 export {
 	configFiles,

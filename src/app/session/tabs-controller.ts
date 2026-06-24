@@ -17,6 +17,7 @@ import type { AppBlinkController } from "../screen/blink-controller.js";
 import type { AppScrollState } from "../screen/scroll-controller.js";
 import { tabPanelRows } from "../rendering/tab-line-renderer.js";
 import type { AppOptions, Entry, SessionActivity, SessionTab, SubmittedUserMessage } from "../types.js";
+import { cloneSubmittedUserMessage } from "./queued-message-entries.js";
 
 const TAB_STATE_VERSION = 4;
 const MAX_RESTORED_TABS = 8;
@@ -1117,14 +1118,14 @@ export class AppTabsController {
 
 		const autoMessages = this.host.captureAutoUserMessages?.() ?? [];
 		if (autoMessages.length > 0) {
-			this.autoUserMessagesByTabId.set(this.activeTabId, autoMessages.map((message) => this.cloneSubmittedUserMessage(message)));
+			this.autoUserMessagesByTabId.set(this.activeTabId, autoMessages.map(cloneSubmittedUserMessage));
 		} else {
 			this.autoUserMessagesByTabId.delete(this.activeTabId);
 		}
 
 		const deferredMessages = this.host.captureDeferredUserMessages?.() ?? [];
 		if (deferredMessages.length > 0) {
-			this.deferredUserMessagesByTabId.set(this.activeTabId, deferredMessages.map((message) => this.cloneSubmittedUserMessage(message)));
+			this.deferredUserMessagesByTabId.set(this.activeTabId, deferredMessages.map(cloneSubmittedUserMessage));
 		} else {
 			this.deferredUserMessagesByTabId.delete(this.activeTabId);
 		}
@@ -1141,15 +1142,6 @@ export class AppTabsController {
 	private restoreDeferredUserMessages(tabId: string): void {
 		this.host.restoreAutoUserMessages?.(this.autoUserMessagesByTabId.get(tabId) ?? []);
 		this.host.restoreDeferredUserMessages?.(this.deferredUserMessagesByTabId.get(tabId) ?? []);
-	}
-
-	private cloneSubmittedUserMessage(message: SubmittedUserMessage): SubmittedUserMessage {
-		return {
-			id: message.id,
-			promptText: message.promptText,
-			displayText: message.displayText,
-			images: message.images.map((image) => ({ ...image })),
-		};
 	}
 
 	private async runtimeForTab(tab: SessionTab): Promise<AgentSessionRuntime | undefined> {
@@ -1275,10 +1267,10 @@ export class AppTabsController {
 		for (const tab of saved.tabs) {
 			const sessionPath = resolve(tab.path);
 			if (tab.autoUserMessages && tab.autoUserMessages.length > 0) {
-				autoMessagesByPath.set(sessionPath, tab.autoUserMessages.map((message) => this.cloneSubmittedUserMessage(message)));
+				autoMessagesByPath.set(sessionPath, tab.autoUserMessages.map(cloneSubmittedUserMessage));
 			}
 			if (tab.deferredUserMessages && tab.deferredUserMessages.length > 0) {
-				deferredMessagesByPath.set(sessionPath, tab.deferredUserMessages.map((message) => this.cloneSubmittedUserMessage(message)));
+				deferredMessagesByPath.set(sessionPath, tab.deferredUserMessages.map(cloneSubmittedUserMessage));
 			}
 		}
 
@@ -1560,11 +1552,11 @@ export class AppTabsController {
 				}
 				const autoUserMessages = this.autoUserMessagesByTabId.get(tab.id);
 				if (autoUserMessages && autoUserMessages.length > 0) {
-					persistedTab.autoUserMessages = autoUserMessages.map((message) => this.cloneSubmittedUserMessage(message));
+					persistedTab.autoUserMessages = autoUserMessages.map(cloneSubmittedUserMessage);
 				}
 				const deferredUserMessages = this.deferredUserMessagesByTabId.get(tab.id);
 				if (deferredUserMessages && deferredUserMessages.length > 0) {
-					persistedTab.deferredUserMessages = deferredUserMessages.map((message) => this.cloneSubmittedUserMessage(message));
+					persistedTab.deferredUserMessages = deferredUserMessages.map(cloneSubmittedUserMessage);
 				}
 				tabs.push(persistedTab);
 			}

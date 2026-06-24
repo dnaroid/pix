@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { isDir } from "./paths.js";
+import { hasLaunchedAgentPrompt, isDir } from "./paths.js";
 import { listSubagentRunDirs } from "./registry.js";
 import { getAgentState } from "./state.js";
 import type { AgentState } from "./types.js";
@@ -105,7 +105,7 @@ export function listSubagentSessionRecords(cwd: string): SubagentSessionRecord[]
 		for (const entry of fs.readdirSync(runDir, { withFileTypes: true })) {
 			if (!entry.isDirectory()) continue;
 			const agentDir = path.join(runDir, entry.name);
-			if (!fs.existsSync(path.join(agentDir, "prompt.md"))) continue;
+			if (!hasLaunchedAgentPrompt(runDir, entry.name)) continue;
 			records.push({
 				runDir,
 				runName: path.basename(runDir),

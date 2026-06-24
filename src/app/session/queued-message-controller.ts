@@ -3,7 +3,7 @@ import type { ImageContent } from "../../input-editor.js";
 import { createId } from "../id.js";
 import { stringifyUnknown, submittedUserDisplayText } from "../rendering/message-content.js";
 import type { Entry, SessionActivity, SubmittedUserMessage } from "../types.js";
-import { autoQueuedMessageEntries, deferredQueuedMessageEntries, queuedMessageEntries } from "./queued-message-entries.js";
+import { autoQueuedMessageEntries, cloneSubmittedUserMessage, deferredQueuedMessageEntries, queuedMessageEntries } from "./queued-message-entries.js";
 
 export type AppQueuedMessageControllerHost = {
 	runtime(): AgentSessionRuntime | undefined;
@@ -42,23 +42,23 @@ export class AppQueuedMessageController {
 	}
 
 	captureAutoUserMessages(): SubmittedUserMessage[] {
-		return this.autoUserMessages.map((message) => this.cloneSubmittedUserMessage(message));
+		return this.autoUserMessages.map(cloneSubmittedUserMessage);
 	}
 
 	restoreAutoUserMessages(messages: readonly SubmittedUserMessage[]): void {
 		this.autoUserMessages.length = 0;
-		this.autoUserMessages.push(...messages.map((message) => this.cloneSubmittedUserMessage(message)));
+		this.autoUserMessages.push(...messages.map(cloneSubmittedUserMessage));
 		this.updateQueuedMessageStatus();
 		void this.flushAutoUserMessages();
 	}
 
 	captureDeferredUserMessages(): SubmittedUserMessage[] {
-		return this.deferredUserMessages.map((message) => this.cloneSubmittedUserMessage(message));
+		return this.deferredUserMessages.map(cloneSubmittedUserMessage);
 	}
 
 	restoreDeferredUserMessages(messages: readonly SubmittedUserMessage[]): void {
 		this.deferredUserMessages.length = 0;
-		this.deferredUserMessages.push(...messages.map((message) => this.cloneSubmittedUserMessage(message)));
+		this.deferredUserMessages.push(...messages.map(cloneSubmittedUserMessage));
 		this.updateQueuedMessageStatus();
 	}
 
@@ -432,15 +432,6 @@ export class AppQueuedMessageController {
 		return message.images.length > 0
 			? message.promptText.replace(/\[Image \d+(?:: [^\]]+)?\]\s*/g, "").trimEnd()
 			: message.promptText.trimEnd();
-	}
-
-	private cloneSubmittedUserMessage(message: SubmittedUserMessage): SubmittedUserMessage {
-		return {
-			id: message.id,
-			promptText: message.promptText,
-			displayText: message.displayText,
-			images: message.images.map((image) => ({ ...image })),
-		};
 	}
 
 	private notifyDeferredUserMessagesChanged(): void {

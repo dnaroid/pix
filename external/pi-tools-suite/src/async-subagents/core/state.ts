@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { isDir } from "./paths.js";
+import { hasLaunchedAgentPrompt, isDir } from "./paths.js";
 import { readStructuredResult } from "./structured-result.js";
 import type { AgentResult, AgentState, RpcEventRecord, RunState } from "./types.js";
 
@@ -23,7 +23,7 @@ export function getAgentState(
 ): AgentState | null {
 	const agentDir = path.join(runDir, agentId);
 	if (!isDir(agentDir)) return null;
-	if (!fs.existsSync(path.join(agentDir, "prompt.md"))) return null;
+	if (!hasLaunchedAgentPrompt(runDir, agentId)) return null;
 	const includeLineCounts = options.includeLineCounts ?? true;
 	const checkRpcPromptFailure = options.checkRpcPromptFailure ?? true;
 
@@ -188,7 +188,7 @@ export function getRunState(
 	// Read launched agent dirs
 	for (const entry of fs.readdirSync(runDir, { withFileTypes: true })) {
 		if (!entry.isDirectory()) continue;
-		if (!fs.existsSync(path.join(runDir, entry.name, "prompt.md"))) continue;
+		if (!hasLaunchedAgentPrompt(runDir, entry.name)) continue;
 		if (filterIds && !filterIds.includes(entry.name)) continue;
 		const state = getAgentState(runDir, entry.name, options);
 		if (state) {

@@ -16,6 +16,8 @@ import type { ExtensionTerminalInputResult } from "../extensions/extension-ui-co
 import type { MouseEvent, ActivePopupMenu } from "../types.js";
 
 type DirectPopupMenu = Exclude<ActivePopupMenu, "slash">;
+type ConsumeSequenceResult = "consumed" | "pending" | "none";
+type ParsedModifiedKey = Parameters<typeof terminalKeyIsEscape>[0];
 
 const SHIFT_ENTER_ESCAPE_SEQUENCES = ["\x1b\r", "\x1b\n"];
 
@@ -279,7 +281,7 @@ export class AppInputController {
 		return false;
 	}
 
-	private consumeCommandBackspaceSequence(): "consumed" | "pending" | "none" {
+	private consumeCommandBackspaceSequence(): ConsumeSequenceResult {
 		if (!this.inputBuffer.startsWith("\x1b[")) return "none";
 
 		const match = /^\x1b\[(?:(?:8|127);(\d+)u|27;(\d+);(?:8|127)~)/.exec(this.inputBuffer);
@@ -306,7 +308,7 @@ export class AppInputController {
 		return "none";
 	}
 
-	private consumeCommandArrowPageSequence(): "consumed" | "pending" | "none" {
+	private consumeCommandArrowPageSequence(): ConsumeSequenceResult {
 		if (!this.inputBuffer.startsWith("\x1b[")) return "none";
 
 		const legacyMatch = /^\x1b\[1;(\d+)([AB])/.exec(this.inputBuffer);
@@ -320,7 +322,7 @@ export class AppInputController {
 		return "none";
 	}
 
-	private consumeCommandArrowPageMatch(length: number, modifierValue: number, arrow: string | undefined): "consumed" | "none" {
+	private consumeCommandArrowPageMatch(length: number, modifierValue: number, arrow: string | undefined): Exclude<ConsumeSequenceResult, "pending"> {
 		if (!hasTerminalCommandModifier(modifierValue)) return "none";
 
 		this.inputBuffer = this.inputBuffer.slice(length);
@@ -328,7 +330,7 @@ export class AppInputController {
 		return "consumed";
 	}
 
-	private consumeTerminalEditShortcutSequence(): "consumed" | "pending" | "none" {
+	private consumeTerminalEditShortcutSequence(): ConsumeSequenceResult {
 		const result = parseTerminalEditShortcutSequence(this.inputBuffer);
 		if (result.kind === "pending") return "pending";
 		if (result.kind === "none") return "none";
@@ -341,7 +343,7 @@ export class AppInputController {
 		return "consumed";
 	}
 
-	private consumeIgnoredModifiedKeySequence(): "consumed" | "pending" | "none" {
+	private consumeIgnoredModifiedKeySequence(): ConsumeSequenceResult {
 		const result = parseTerminalModifiedKeySequence(this.inputBuffer);
 		if (result.kind === "pending") return "pending";
 		if (result.kind === "none") return "none";
@@ -351,7 +353,7 @@ export class AppInputController {
 		return "consumed";
 	}
 
-	private consumeModifiedArrowKeySequence(): "consumed" | "pending" | "none" {
+	private consumeModifiedArrowKeySequence(): ConsumeSequenceResult {
 		const result = parseTerminalModifiedKeySequence(this.inputBuffer);
 		if (result.kind === "pending") return "pending";
 		if (result.kind === "none") return "none";
@@ -369,40 +371,33 @@ export class AppInputController {
 		return "consumed";
 	}
 
-	private consumeEscapeKeySequence(): "consumed" | "pending" | "none" {
+	private consumeEscapeKeySequence(): ConsumeSequenceResult {
+		return this.consumeModifiedKeySequence(terminalKeyIsEscape, () => { void this.host.handleEscape(); });
+	}
+
+	private consumeClipboardImagePasteSequence(): ConsumeSequenceResult {
+		return this.consumeModifiedKeySequence(terminalKeyIsClipboardImagePaste, () => { void this.pasteHandler.handleClipboardImagePaste(); });
+	}
+
+	private consumeShiftEnterSequence(): ConsumeSequenceResult {
+		return this.consumeModifiedKeySequence(terminalKeyIsShiftEnter, () => this.insertInputNewline());
+	}
+
+	private consumeModifiedKeySequence(
+		matches: (key: ParsedModifiedKey) => boolean,
+		handle: () => void,
+	): ConsumeSequenceResult {
 		const result = parseTerminalModifiedKeySequence(this.inputBuffer);
 		if (result.kind === "pending") return "pending";
 		if (result.kind === "none") return "none";
-		if (!terminalKeyIsEscape(result.key)) return "none";
+		if (!matches(result.key)) return "none";
 
 		this.inputBuffer = this.inputBuffer.slice(result.key.length);
-		if (!terminalKeyShouldIgnore(result.key)) void this.host.handleEscape();
+		if (!terminalKeyShouldIgnore(result.key)) handle();
 		return "consumed";
 	}
 
-	private consumeClipboardImagePasteSequence(): "consumed" | "pending" | "none" {
-		const result = parseTerminalModifiedKeySequence(this.inputBuffer);
-		if (result.kind === "pending") return "pending";
-		if (result.kind === "none") return "none";
-		if (!terminalKeyIsClipboardImagePaste(result.key)) return "none";
-
-		this.inputBuffer = this.inputBuffer.slice(result.key.length);
-		if (!terminalKeyShouldIgnore(result.key)) void this.pasteHandler.handleClipboardImagePaste();
-		return "consumed";
-	}
-
-	private consumeShiftEnterSequence(): "consumed" | "pending" | "none" {
-		const result = parseTerminalModifiedKeySequence(this.inputBuffer);
-		if (result.kind === "pending") return "pending";
-		if (result.kind === "none") return "none";
-		if (!terminalKeyIsShiftEnter(result.key)) return "none";
-
-		this.inputBuffer = this.inputBuffer.slice(result.key.length);
-		if (!terminalKeyShouldIgnore(result.key)) this.insertInputNewline();
-		return "consumed";
-	}
-
-	private consumeTerminalInterruptSequence(): "consumed" | "pending" | "none" {
+	private consumeTerminalInterruptSequence(): ConsumeSequenceResult {
 		const result = parseTerminalInterruptSequence(this.inputBuffer);
 		if (result.kind === "pending") return "pending";
 		if (result.kind === "none") return "none";

@@ -22,15 +22,7 @@ export class InputPasteHandler {
 	constructor(private readonly host: InputPasteHost) {}
 
 	handlePlainData(data: string): boolean {
-		const plainFilePath = !this.host.inputEditor.isInBracketedPaste && this.plainPasteFilePath(data);
-		if (plainFilePath) {
-			if (isImagePath(plainFilePath) && Date.now() < this.suppressImagePathPasteUntil) {
-				this.host.render();
-				return true;
-			}
-			void this.handleFilePaste(plainFilePath);
-			return true;
-		}
+		if (!this.host.inputEditor.isInBracketedPaste && this.handlePastedFilePath(data)) return true;
 
 		if (!this.host.inputEditor.isInBracketedPaste && this.isPlainMultilinePasteChunk(data)) {
 			this.schedulePastedText(data);
@@ -108,17 +100,20 @@ export class InputPasteHandler {
 			return;
 		}
 
-		const filePath = this.plainPasteFilePath(text);
-		if (filePath) {
-			if (isImagePath(filePath) && Date.now() < this.suppressImagePathPasteUntil) {
-				this.host.render();
-				return;
-			}
-			void this.handleFilePaste(filePath);
-			return;
-		}
+		if (this.handlePastedFilePath(text)) return;
 
 		this.schedulePastedText(text);
+	}
+
+	private handlePastedFilePath(text: string): boolean {
+		const filePath = this.plainPasteFilePath(text);
+		if (!filePath) return false;
+		if (isImagePath(filePath) && Date.now() < this.suppressImagePathPasteUntil) {
+			this.host.render();
+			return true;
+		}
+		void this.handleFilePaste(filePath);
+		return true;
 	}
 
 	private schedulePastedText(text: string): void {

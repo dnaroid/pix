@@ -54,6 +54,11 @@ type ClickFlash = {
 };
 
 type ClickFlashRegion = Omit<ClickFlash, "text">;
+type StatusClickTarget = {
+	row: number;
+	startColumn: number;
+	endColumn: number;
+};
 
 export type InputFrameCopyRows = {
 	inputStartRow: number;
@@ -535,6 +540,7 @@ export class AppMouseController {
 		renderedInput: ReturnType<EditorLayoutRenderer["computeLayout"]>["renderedInput"];
 		inputStartRow: number;
 		localY: number;
+		left: number;
 		contentWidth: number;
 	} | undefined {
 		const columns = this.host.terminalColumns();
@@ -546,8 +552,8 @@ export class AppMouseController {
 		const inputEndRow = inputStartRow + renderedInput.lines.length;
 		if (localY < inputStartRow || localY >= inputEndRow) return undefined;
 
-		const { contentWidth } = horizontalPaddingLayout(columns);
-		return { renderedInput, inputStartRow, localY, contentWidth };
+		const { left, contentWidth } = horizontalPaddingLayout(columns);
+		return { renderedInput, inputStartRow, localY, left, contentWidth };
 	}
 
 	private tabLineTargetAt(event: MouseEvent): TabLineMouseTarget | undefined {
@@ -570,9 +576,7 @@ export class AppMouseController {
 	}
 
 	private handleStatusModelClick(event: MouseEvent): boolean {
-		const target = this.statusModelTarget;
-		if (!target) return false;
-		if (event.y !== target.row || event.x < target.startColumn || event.x >= target.endColumn) return false;
+		if (!this.statusTargetContains(this.statusModelTarget, event)) return false;
 
 		this.popupMenus.openDirectPopupMenu("model");
 		this.host.render();
@@ -580,9 +584,7 @@ export class AppMouseController {
 	}
 
 	private handleStatusThinkingClick(event: MouseEvent): boolean {
-		const target = this.statusThinkingTarget;
-		if (!target) return false;
-		if (event.y !== target.row || event.x < target.startColumn || event.x >= target.endColumn) return false;
+		if (!this.statusTargetContains(this.statusThinkingTarget, event)) return false;
 
 		this.popupMenus.openDirectPopupMenu("thinking");
 		this.host.render();
@@ -590,9 +592,7 @@ export class AppMouseController {
 	}
 
 	private handleStatusContextClick(event: MouseEvent): boolean {
-		const target = this.statusContextTarget;
-		if (!target) return false;
-		if (event.y !== target.row || event.x < target.startColumn || event.x >= target.endColumn) return false;
+		if (!this.statusTargetContains(this.statusContextTarget, event)) return false;
 
 		const session = this.host.runtimeSession();
 		if (!session) return false;
@@ -602,18 +602,14 @@ export class AppMouseController {
 	}
 
 	private handleStatusModelUsageClick(event: MouseEvent): boolean {
-		const target = this.statusModelUsageTarget;
-		if (!target) return false;
-		if (event.y !== target.row || event.x < target.startColumn || event.x >= target.endColumn) return false;
+		if (!this.statusTargetContains(this.statusModelUsageTarget, event)) return false;
 
 		void this.host.refreshModelUsageStatus();
 		return true;
 	}
 
 	private handleStatusUserJumpClick(event: MouseEvent): boolean {
-		const target = this.statusUserJumpTarget;
-		if (!target) return false;
-		if (event.y !== target.row || event.x < target.startColumn || event.x >= target.endColumn) return false;
+		if (!this.statusTargetContains(this.statusUserJumpTarget, event)) return false;
 
 		void this.openStatusUserJumpMenu();
 		return true;
@@ -646,102 +642,84 @@ export class AppMouseController {
 	}
 
 	private handleStatusDraftQueueClick(event: MouseEvent): boolean {
-		const target = this.statusDraftQueueTarget;
-		if (!target) return false;
-		if (event.y !== target.row || event.x < target.startColumn || event.x >= target.endColumn) return false;
+		if (!this.statusTargetContains(this.statusDraftQueueTarget, event)) return false;
 
 		void this.host.queueInputFromStatus?.();
 		return true;
 	}
 
 	private handleStatusThinkingExpandClick(event: MouseEvent): boolean {
-		const target = this.statusThinkingExpandTarget;
-		if (!target) return false;
-		if (event.y !== target.row || event.x < target.startColumn || event.x >= target.endColumn) return false;
+		if (!this.statusTargetContains(this.statusThinkingExpandTarget, event)) return false;
 
 		this.host.toggleAllThinkingExpanded?.();
 		return true;
 	}
 
 	private handleStatusCompactToolsClick(event: MouseEvent): boolean {
-		const target = this.statusCompactToolsTarget;
-		if (!target) return false;
-		if (event.y !== target.row || event.x < target.startColumn || event.x >= target.endColumn) return false;
+		if (!this.statusTargetContains(this.statusCompactToolsTarget, event)) return false;
 
 		this.host.toggleSuperCompactTools?.();
 		return true;
 	}
 
 	private handleStatusTerminalBellSoundClick(event: MouseEvent): boolean {
-		const target = this.statusTerminalBellSoundTarget;
-		if (!target) return false;
-		if (event.y !== target.row || event.x < target.startColumn || event.x >= target.endColumn) return false;
+		if (!this.statusTargetContains(this.statusTerminalBellSoundTarget, event)) return false;
 
 		this.host.toggleTerminalBellSound?.();
 		return true;
 	}
 
 	private handleStatusSessionClick(event: MouseEvent): boolean {
-		const target = this.statusSessionTarget;
-		if (!target) return false;
-		if (event.y !== target.row || event.x < target.startColumn || event.x >= target.endColumn) return false;
+		if (!this.statusTargetContains(this.statusSessionTarget, event)) return false;
 
 		void this.commandController.runResumeCommand({ preserveStatus: true });
 		return true;
 	}
 
 	private handleStatusPromptEnhancerClick(event: MouseEvent): boolean {
-		const target = this.statusPromptEnhancerTarget;
-		if (!target) return false;
-		if (event.y !== target.row || event.x < target.startColumn || event.x >= target.endColumn) return false;
+		if (!this.statusTargetContains(this.statusPromptEnhancerTarget, event)) return false;
 
 		void this.host.enhancePrompt();
 		return true;
 	}
 
 	private handleStatusVoiceMicClick(event: MouseEvent): boolean {
-		const target = this.statusVoiceMicTarget;
-		if (!target) return false;
-		if (event.y !== target.row || event.x < target.startColumn || event.x >= target.endColumn) return false;
+		if (!this.statusTargetContains(this.statusVoiceMicTarget, event)) return false;
 
 		this.host.toggleVoiceRecording();
 		return true;
 	}
 
 	private handleStatusVoiceLanguageClick(event: MouseEvent): boolean {
-		const target = this.statusVoiceLanguageTarget;
-		if (!target) return false;
-		if (event.y !== target.row || event.x < target.startColumn || event.x >= target.endColumn) return false;
+		if (!this.statusTargetContains(this.statusVoiceLanguageTarget, event)) return false;
 
 		this.host.toggleVoiceLanguage();
 		return true;
 	}
 
 	private handleStatusQuickScrollClick(event: MouseEvent): boolean {
-		const target = [this.statusQuickScrollUpTarget, this.statusQuickScrollDownTarget].find((candidate) => !!candidate
-			&& event.y === candidate.row
-			&& event.x >= candidate.startColumn
-			&& event.x < candidate.endColumn);
+		const target = [this.statusQuickScrollUpTarget, this.statusQuickScrollDownTarget].find((candidate) => this.statusTargetContains(candidate, event));
 		if (!target) return false;
 
 		this.host.scrollConversationQuick(target.direction);
 		return true;
 	}
 
+	private statusTargetContains<T extends StatusClickTarget>(target: T | undefined, event: MouseEvent): target is T {
+		return !!target
+			&& event.y === target.row
+			&& event.x >= target.startColumn
+			&& event.x < target.endColumn;
+	}
+
 	private handleInputClick(event: MouseEvent): boolean {
-		const columns = this.host.terminalColumns();
-		const terminalRows = this.host.terminalRows();
-		const tabPanelRows = this.host.tabPanelRows(terminalRows);
-		const rows = editorLayoutRows(terminalRows, tabPanelRows);
-		const localY = event.y - editorLayoutTopOffset(tabPanelRows);
-		const { renderedInput, inputStartRow } = this.host.editorLayoutRenderer().computeLayout(columns, rows);
-		const inputEndRow = inputStartRow + renderedInput.lines.length;
-		if (localY < inputStartRow || localY >= inputEndRow) return false;
+		const geometry = this.inputGeometry(event);
+		if (!geometry) return false;
+		const { renderedInput, inputStartRow, localY, left, contentWidth } = geometry;
 		if (localY < inputStartRow + renderedInput.editorStartRowOffset) return false;
 
 		const visibleRowOffset = localY - inputStartRow - renderedInput.editorStartRowOffset;
 		const visualRow = renderedInput.scrollOffset + visibleRowOffset;
-		const { left, contentWidth } = horizontalPaddingLayout(columns);
 		const cursor = this.host.inputEditor().offsetAtVisualPosition(visualRow, event.x - left, contentWidth, "", "");
 		this.host.resetRequestHistoryNavigation();
 		this.host.inputEditor().setCursor(cursor, { preserveScroll: true });
@@ -750,16 +728,11 @@ export class AppMouseController {
 	}
 
 	private handleExtensionInputClick(event: MouseEvent): boolean {
-		const columns = this.host.terminalColumns();
-		const terminalRows = this.host.terminalRows();
-		const tabPanelRows = this.host.tabPanelRows(terminalRows);
-		const rows = editorLayoutRows(terminalRows, tabPanelRows);
-		const localY = event.y - editorLayoutTopOffset(tabPanelRows);
-		const { renderedInput, inputStartRow } = this.host.editorLayoutRenderer().computeLayout(columns, rows);
-		const inputEndRow = inputStartRow + renderedInput.editorStartRowOffset;
-		if (localY < inputStartRow || localY >= inputEndRow) return false;
+		const geometry = this.inputGeometry(event);
+		if (!geometry) return false;
+		const { renderedInput, inputStartRow, localY, left, contentWidth } = geometry;
+		if (localY >= inputStartRow + renderedInput.editorStartRowOffset) return false;
 
-		const { left, contentWidth } = horizontalPaddingLayout(columns);
 		return this.host.handleExtensionInputMouse({
 			...event,
 			localRow: localY - inputStartRow,

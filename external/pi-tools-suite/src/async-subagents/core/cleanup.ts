@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { isDir } from "./paths.js";
+import { hasLaunchedAgentPrompt, isDir } from "./paths.js";
 
 export function findCleanupCandidates(
 	runRoot: string,
@@ -57,8 +57,8 @@ function isCompletedRun(runDir: string): boolean {
 	let foundAgent = false;
 	for (const entry of fs.readdirSync(runDir, { withFileTypes: true })) {
 		if (!entry.isDirectory()) continue;
+		if (!hasLaunchedAgentPrompt(runDir, entry.name)) continue;
 		const agentDir = path.join(runDir, entry.name);
-		if (!fs.existsSync(path.join(agentDir, "prompt.md"))) continue;
 		foundAgent = true;
 		if (!fs.existsSync(path.join(agentDir, "exit_code"))) return false;
 	}

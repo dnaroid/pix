@@ -33,6 +33,18 @@ export function isDir(p: string): boolean {
 	}
 }
 
+export function hasLaunchedAgentPrompt(runDir: string, agentId: string): boolean {
+	return fs.existsSync(path.join(runDir, agentId, "prompt.md"));
+}
+
+export function hasQueuedAgentPrompt(runDir: string, agentId: string): boolean {
+	return fs.existsSync(path.join(runDir, "prompts", `${agentId}.md`));
+}
+
+export function hasAgentPrompt(runDir: string, agentId: string): boolean {
+	return hasLaunchedAgentPrompt(runDir, agentId) || hasQueuedAgentPrompt(runDir, agentId);
+}
+
 const SAFE_BASENAME = /^[A-Za-z0-9._-]+$/;
 
 export function validateBasename(value: string, label: string): void {

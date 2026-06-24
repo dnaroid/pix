@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getRunRoot, isDir, resolveRunDir } from "./paths.js";
+import { getRunRoot, hasAgentPrompt, hasLaunchedAgentPrompt, isDir, resolveRunDir } from "./paths.js";
 
 export const SUBAGENT_REGISTRY_FILE = "registry.json";
 
@@ -161,15 +161,14 @@ function looksLikeRunDir(runDir: string): boolean {
 	if (isDir(path.join(runDir, "prompts"))) return true;
 	try {
 		return fs.readdirSync(runDir, { withFileTypes: true })
-			.some((entry) => entry.isDirectory() && fs.existsSync(path.join(runDir, entry.name, "prompt.md")));
+			.some((entry) => entry.isDirectory() && hasLaunchedAgentPrompt(runDir, entry.name));
 	} catch {
 		return false;
 	}
 }
 
 function hasAgentRecord(runDir: string, agentId: string): boolean {
-	return fs.existsSync(path.join(runDir, agentId, "prompt.md"))
-		|| fs.existsSync(path.join(runDir, "prompts", `${agentId}.md`));
+	return hasAgentPrompt(runDir, agentId);
 }
 
 function normalizeRegistryRun(runId: string, value: unknown): SubagentRegistryRun | undefined {
