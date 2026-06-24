@@ -341,10 +341,31 @@ describe("normalizeBeginPatchForDisplay", () => {
 			"*** Begin Patch",
 			"*** Update File: CLAUDE.md",
 			"@@",
-			" rule one",
-			" rule two",
-			" rule three",
+			"  rule one",
+			"  rule two",
+			"  rule three",
 			"+ new rule",
+			"*** End Patch",
+		]);
+	});
+
+	it("keeps a marker column for indented unchanged loose context", () => {
+		const loose = [
+			"*** Begin Patch",
+			"*** Update File: tests/example.py",
+			"@@",
+			"-    assert before == 1",
+			"+    assert before == 1",
+			"+    assert after == 2",
+			"*** End Patch",
+		].join("\n");
+
+		assert.deepEqual(normalizeBeginPatchForDisplay(loose).split("\n"), [
+			"*** Begin Patch",
+			"*** Update File: tests/example.py",
+			"@@",
+			"     assert before == 1",
+			"+    assert after == 2",
 			"*** End Patch",
 		]);
 	});

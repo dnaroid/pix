@@ -124,10 +124,10 @@ function renderSection(section: PatchSection): string | null {
 function renderDiffOp(op: { type: DiffOp; text: string }): string {
 	if (op.type === "delete") return `-${op.text}`;
 	if (op.type === "insert") return `+${op.text}`;
-	// Context marker is a leading space. Loose `-`/`+` blocks carry the space
-	// that separated the marker from the content (e.g. `- rule one`), so reuse
-	// that space instead of emitting a second one.
-	return op.text.startsWith(" ") ? op.text : ` ${op.text}`;
+	// Context marker is a leading space. Always emit it even when the content is
+	// already indented, so unchanged lines reserve the same marker column as `+`
+	// and `-` lines in the terminal diff view.
+	return ` ${op.text}`;
 }
 
 /** Minimal LCS-based line diff. */
