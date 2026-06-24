@@ -13,7 +13,7 @@
 // automatic fallback to the programmatic digest on any failure/timeout.
 // ---------------------------------------------------------------------------
 
-import { complete } from "@earendil-works/pi-ai"
+import { complete } from "@earendil-works/pi-ai/compat"
 import type { Model, Api } from "@earendil-works/pi-ai"
 import type { DcpState } from "./state.js"
 import type { DcpConfig } from "./config.js"

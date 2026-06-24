@@ -12,11 +12,9 @@ const completeMock = mock(async (_model: unknown, _input: unknown) => {
 
 // Install the pi-ai mock at module-eval time so a later dynamic import of the
 // suite resolves `complete` against the mock.
-mock.module("@earendil-works/pi-ai", () =>
-	createPiAiMock({
-		complete: completeMock,
-	}),
-);
+const piAiMock = createPiAiMock({ complete: completeMock });
+mock.module("@earendil-works/pi-ai", () => piAiMock);
+mock.module("@earendil-works/pi-ai/compat", () => piAiMock);
 
 function textMessage(role: string, text: string, timestamp: number) {
 	return { role, content: [{ type: "text", text }], timestamp };

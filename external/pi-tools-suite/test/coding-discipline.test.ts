@@ -11,8 +11,7 @@ const completeMock = mock(async () => ({
 }));
 
 function installBaseMocks(): void {
-	mock.module("@earendil-works/pi-ai", () =>
-		createPiAiMock({
+	const piAiMock = createPiAiMock({
 			Type: {
 				Object: (properties: any, options?: any) => ({ kind: "object", properties, options }),
 				Optional: (schema: any) => ({ kind: "optional", schema }),
@@ -24,8 +23,9 @@ function installBaseMocks(): void {
 				Unknown: (options?: any) => ({ kind: "unknown", options }),
 			},
 			complete: completeMock,
-		}),
-	);
+		});
+	mock.module("@earendil-works/pi-ai", () => piAiMock);
+	mock.module("@earendil-works/pi-ai/compat", () => piAiMock);
 	mock.module("typebox", () => createTypeboxMock());
 }
 

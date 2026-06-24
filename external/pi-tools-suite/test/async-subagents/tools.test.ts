@@ -37,7 +37,9 @@ const routerCompleteMock = mock(async () => ({
 	content: [{ type: "text", text: routerResponseText }],
 }));
 
-mock.module("@earendil-works/pi-ai", () => createPiAiMock({ Type: typeMock, complete: routerCompleteMock }));
+const piAiMock = createPiAiMock({ Type: typeMock, complete: routerCompleteMock });
+mock.module("@earendil-works/pi-ai", () => piAiMock);
+mock.module("@earendil-works/pi-ai/compat", () => piAiMock);
 
 const tempDirs: string[] = [];
 let originalArgv1 = process.argv[1];

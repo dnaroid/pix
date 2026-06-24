@@ -1,4 +1,4 @@
-import { complete } from "@earendil-works/pi-ai";
+import { complete } from "@earendil-works/pi-ai/compat";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { currentModelRef, resolveSubagentRoutingConfig, type SubagentConfig } from "./config.js";
 

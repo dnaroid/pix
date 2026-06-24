@@ -1,5 +1,6 @@
 import type { AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
-import { streamSimple, type AssistantMessage } from "@earendil-works/pi-ai";
+import { streamSimple } from "@earendil-works/pi-ai/compat";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { AutocompleteConfig } from "../../config.js";
 import type { InputEditor } from "../../input-editor.js";
 import { isRecord } from "../guards.js";
