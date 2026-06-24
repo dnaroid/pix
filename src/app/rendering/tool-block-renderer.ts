@@ -547,7 +547,10 @@ function syntaxHighlightForLine(highlights: ToolBodySyntaxHighlights | undefined
 }
 
 function diffLineStyle(line: string, colors: Theme["colors"]): { foreground: string; bold?: boolean } | undefined {
-	const content = line.trimStart();
+	// Diff markers are only markers at column 0. Context lines in unified/apply_patch
+	// output start with a leading space, so trimming would incorrectly color
+	// markdown bullets like ` - item` as deletions and ` + item` as additions.
+	const content = line;
 	if (/^(?:diff --git|index |\*\*\* (?:Begin|End) Patch)/.test(content)) return { foreground: colors.muted, bold: true };
 	if (/^(?:---|\+\+\+|\*\*\* (?:Update|Add|Delete) File:)/.test(content)) return { foreground: colors.statusForeground, bold: true };
 	if (/^@@/.test(content)) return { foreground: colors.accent, bold: true };

@@ -230,6 +230,33 @@ describe("renderToolBlock", () => {
 		assert.notEqual(updateForeground?.foreground, colors.warning);
 	});
 
+	it("does not color context markdown bullets as diff additions or deletions", () => {
+		const output = [
+			"*** Begin Patch",
+			"*** Update File: docs/example.md",
+			"@@",
+			" - unchanged bullet",
+			" + unchanged plus bullet",
+			"-removed bullet",
+			"+added bullet",
+		].join("\n");
+
+		const lines = renderToolBlock(toolEntry({ bodyStyle: "diff", output, expandedText: output }), rule, 100, colors);
+		const contextDash = lines.find((line) => line.text.includes("unchanged bullet"));
+		const contextPlus = lines.find((line) => line.text.includes("unchanged plus bullet"));
+		const removed = lines.find((line) => line.text.includes("removed bullet"));
+		const added = lines.find((line) => line.text.includes("added bullet"));
+		assert.ok(contextDash);
+		assert.ok(contextPlus);
+		assert.ok(removed);
+		assert.ok(added);
+
+		assert.deepEqual(contextDash.segments, [gutterSegment]);
+		assert.deepEqual(contextPlus.segments, [gutterSegment]);
+		assert.deepEqual(removed.segments, [gutterSegment, { start: 2, end: removed.text.length, foreground: colors.error }]);
+		assert.deepEqual(added.segments, [gutterSegment, { start: 2, end: added.text.length, foreground: colors.success }]);
+	});
+
 	it("returns no lines for hidden tool rules", () => {
 		assert.deepEqual(renderToolBlock(toolEntry(), { ...rule, hidden: true }, 80, colors), []);
 	});
