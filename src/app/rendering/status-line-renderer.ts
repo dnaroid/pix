@@ -23,11 +23,13 @@ import type {
 } from "../types.js";
 import type { ScreenStyler } from "../screen/screen-styler.js";
 import { displayIndexForColumn, stringDisplayWidth } from "../../terminal-width.js";
+import { THINKING_LEVELS } from "../constants.js";
 import { APP_ICONS } from "../icons.js";
 import { resolveColor, resolveModelColor, type ModelColorsConfig } from "../../config.js";
 
 const MODEL_USAGE_PROGRESS_BAR_WIDTH = stringDisplayWidth(formatCompactProgressBar(100));
 const STATUS_WIDGET_GAP = " ";
+const DEFAULT_THINKING_LEVEL_LABELS: readonly string[] = THINKING_LEVELS;
 
 export type StatusLineRendererHost = {
 	readonly theme: Theme;
@@ -444,82 +446,8 @@ export class StatusLineRenderer {
 		}
 	}
 
-	private pushPromptEnhancerWidgetSegment(segments: StyledSegment[], statusText: string): void {
-		const widgetText = this.host.promptEnhancerStatusWidgetText();
-		const start = statusText.lastIndexOf(widgetText);
-		if (start < 0 || widgetText.length <= 0) return;
-		const foreground = this.host.promptEnhancerStatusWidgetActive()
-			? this.host.theme.colors.warning
-			: this.host.promptEnhancerStatusWidgetEnabled()
-				? this.host.theme.colors.info
-				: this.host.theme.colors.muted;
-
-		this.pushSegment(segments, start, widgetText.length, foreground);
-	}
-
-	private pushUserJumpWidgetSegment(segments: StyledSegment[], statusText: string): void {
-		const buttonText = APP_ICONS.user;
-		const start = statusText.indexOf(buttonText);
-		if (start < 0) return;
-
-		const foreground = this.host.userMessageJumpMenuActive?.()
-			? this.host.theme.colors.info
-			: this.host.theme.colors.muted;
-		this.pushSegment(segments, start, buttonText.length, foreground);
-	}
-
-	private pushDraftQueueWidgetSegment(segments: StyledSegment[], statusText: string): void {
-		const buttonText = this.draftQueueWidgetText();
-		const start = statusText.indexOf(buttonText);
-		if (start < 0 || buttonText.length <= 0) return;
-		this.pushSegment(segments, start, buttonText.length, this.host.theme.colors.info);
-	}
-
 	private draftQueueWidgetText(): string {
 		return this.host.queueableInputActive?.() ? APP_ICONS.timerSand : "";
-	}
-
-	private pushThinkingExpandWidgetSegment(segments: StyledSegment[], statusText: string, layout: StatusLineLayout): void {
-		if (!layout.thinkingExpandWidget) return;
-		const buttonText = APP_ICONS.thinkingExpanded;
-		const buttonMarker = ` ${buttonText} `;
-		const markerStart = statusText.indexOf(buttonMarker);
-		const start = markerStart >= 0 ? markerStart + 1 : -1;
-		if (start < 0) return;
-		this.pushSegment(segments, start, buttonText.length, this.host.allThinkingExpandedActive?.() ? this.host.theme.colors.info : this.host.theme.colors.muted);
-	}
-
-	private pushCompactToolsWidgetSegment(segments: StyledSegment[], statusText: string): void {
-		const buttonText = APP_ICONS.compactTools;
-		const start = statusText.indexOf(buttonText);
-		if (start < 0) return;
-		this.pushSegment(segments, start, buttonText.length, this.host.superCompactToolsActive?.() ? this.host.theme.colors.info : this.host.theme.colors.muted);
-	}
-
-	private pushTerminalBellSoundWidgetSegment(segments: StyledSegment[], statusText: string): void {
-		const widgetText = this.host.terminalBellSoundStatusWidgetText();
-		const start = statusText.lastIndexOf(widgetText);
-		if (start < 0 || widgetText.length <= 0) return;
-		this.pushSegment(segments, start, widgetText.length, this.host.terminalBellSoundStatusWidgetEnabled() ? this.host.theme.colors.info : this.host.theme.colors.muted);
-	}
-
-	private pushVoiceWidgetSegment(segments: StyledSegment[], statusText: string): void {
-		const widgetText = this.host.voiceStatusWidgetText();
-		if (widgetText.length <= 0) return;
-		const start = statusText.lastIndexOf(widgetText);
-		const micStart = statusText.lastIndexOf(APP_ICONS.microphone);
-		if (start < 0 && micStart < 0) return;
-
-		if (this.host.voiceStatusWidgetActive()) {
-			const separatorIndex = widgetText.indexOf(" ");
-			const micLength = separatorIndex >= 0 ? separatorIndex : widgetText.length;
-			this.pushSegment(segments, micStart >= 0 ? micStart : start, micLength, this.host.theme.colors.error);
-			return;
-		}
-
-		const separatorIndex = widgetText.indexOf(" ");
-		const micLength = separatorIndex >= 0 ? separatorIndex : widgetText.length;
-		this.pushSegment(segments, micStart >= 0 ? micStart : start, micLength, this.host.theme.colors.muted);
 	}
 
 	private pushWorkspaceSegments(segments: StyledSegment[], statusText: string, workspaceLabel: string): void {
@@ -655,7 +583,7 @@ export class StatusLineRenderer {
 
 	private availableThinkingLevels(): string[] {
 		const levels = this.host.session?.getAvailableThinkingLevels();
-		return Array.isArray(levels) && levels.length > 0 ? levels.map(String) : ["off", "minimal", "low", "medium", "high", "xhigh"];
+		return Array.isArray(levels) && levels.length > 0 ? levels.map(String) : [...DEFAULT_THINKING_LEVEL_LABELS];
 	}
 
 	private contextBarLabel(status: string, width: number, workspaceLabel: string): string | undefined {
@@ -749,14 +677,13 @@ function overlayText(text: string, startColumn: number, overlay: string): string
 }
 
 export function thinkingLevelThemeColor(label: string, colors: Theme["colors"], availableLevels?: readonly string[]): string {
-	const levels = availableLevels && availableLevels.length > 0 ? availableLevels.map(String) : ["off", "minimal", "low", "medium", "high", "xhigh"];
+	const levels = availableLevels && availableLevels.length > 0 ? availableLevels.map(String) : DEFAULT_THINKING_LEVEL_LABELS;
 	const rank = levels.indexOf(label);
 	if (rank >= 0) return thinkingRankThemeColor(label, rank, levels.length, colors);
 
-	const fallbackLevels = ["off", "minimal", "low", "medium", "high", "xhigh"];
-	const fallbackRank = fallbackLevels.indexOf(label);
+	const fallbackRank = DEFAULT_THINKING_LEVEL_LABELS.indexOf(label);
 	return fallbackRank >= 0
-		? thinkingRankThemeColor(label, fallbackRank, fallbackLevels.length, colors)
+		? thinkingRankThemeColor(label, fallbackRank, DEFAULT_THINKING_LEVEL_LABELS.length, colors)
 		: colors.info;
 }
 
@@ -770,8 +697,7 @@ function thinkingRankThemeColor(label: string, rank: number, count: number, colo
 		colors.thinkingXHigh,
 	];
 	const palette = count > baseColors.length ? [colors.statusForeground, ...baseColors] : baseColors;
-	const fallbackLevels = ["off", "minimal", "low", "medium", "high", "xhigh"];
-	const fallbackRank = fallbackLevels.indexOf(label);
+	const fallbackRank = DEFAULT_THINKING_LEVEL_LABELS.indexOf(label);
 	const colorIndex = count <= baseColors.length && fallbackRank >= 0 ? fallbackRank : rank;
 	return palette[Math.max(0, Math.min(palette.length - 1, colorIndex))] ?? colors.info;
 }

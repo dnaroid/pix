@@ -43,7 +43,6 @@ class LazySessionManager {
 	private entries: SessionEntry[] = [];
 	private byId = new Map<string, SessionEntry>();
 	private labelsById = new Map<string, string>();
-	private labelTimestampsById = new Map<string, string>();
 	private leafId: string | null = null;
 	private hydrated: SessionManager | undefined;
 	private readonly tailEntryCount: number;
@@ -98,7 +97,6 @@ class LazySessionManager {
 		this.entries = [];
 		this.byId.clear();
 		this.labelsById.clear();
-		this.labelTimestampsById.clear();
 		this.leafId = null;
 
 		mkdirSync(this.sessionDirPath, { recursive: true });
@@ -254,10 +252,8 @@ class LazySessionManager {
 		this.appendEntry(entry);
 		if (label) {
 			this.labelsById.set(targetId, label);
-			this.labelTimestampsById.set(targetId, entry.timestamp);
 		} else {
 			this.labelsById.delete(targetId);
-			this.labelTimestampsById.delete(targetId);
 		}
 		return entry.id;
 	}
@@ -331,7 +327,6 @@ class LazySessionManager {
 	private rebuildIndexes(): void {
 		this.byId.clear();
 		this.labelsById.clear();
-		this.labelTimestampsById.clear();
 		this.leafId = null;
 
 		for (const entry of this.entries) {
@@ -340,10 +335,8 @@ class LazySessionManager {
 			if (entry.type === "label") {
 				if (entry.label) {
 					this.labelsById.set(entry.targetId, entry.label);
-					this.labelTimestampsById.set(entry.targetId, entry.timestamp);
 				} else {
 					this.labelsById.delete(entry.targetId);
-					this.labelTimestampsById.delete(entry.targetId);
 				}
 			}
 		}

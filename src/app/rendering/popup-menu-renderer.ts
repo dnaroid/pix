@@ -4,6 +4,7 @@ import { resolveColor, resolveModelColor, type ModelColorsConfig } from "../../c
 import type { PopupMenu, PopupMenuItem } from "../../ui.js";
 import {
 	SLASH_COMMAND_DESCRIPTION_COLUMN,
+	THINKING_LEVELS,
 } from "../constants.js";
 import { APP_ICONS } from "../icons.js";
 import type { ScreenStyler } from "../screen/screen-styler.js";
@@ -363,7 +364,7 @@ export class PopupMenuRenderer {
 
 	private availableThinkingLevels(): string[] {
 		const levels = this.host.session?.getAvailableThinkingLevels();
-		return Array.isArray(levels) && levels.length > 0 ? levels.map(String) : ["off", "minimal", "low", "medium", "high", "xhigh"];
+		return Array.isArray(levels) && levels.length > 0 ? levels.map(String) : [...THINKING_LEVELS];
 	}
 
 	private queueMessageItemVariant(value: QueueMessageMenuValue): NonNullable<RenderedLine["variant"]> {

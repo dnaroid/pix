@@ -305,27 +305,21 @@ export class AppRenderController {
 		statusLayout: ReturnType<StatusLineRenderer["layout"]>,
 		statusRow: number,
 	): void {
-		const widgetLayout = statusLayout;
-		const widgetRow = statusRow;
 		this.deps.mouseController.statusModelTarget = this.deps.statusLineRenderer.modelTarget(statusLayout.text, statusRow);
 		this.deps.mouseController.statusThinkingTarget = this.deps.statusLineRenderer.thinkingTarget(statusLayout.text, statusRow);
 		this.deps.mouseController.statusContextTarget = this.deps.statusLineRenderer.contextTarget(statusLayout.text, statusRow, statusLayout);
 		this.deps.mouseController.statusModelUsageTarget = this.deps.statusLineRenderer.modelUsageTarget(statusLayout.text, statusRow, statusLayout);
-		if (widgetLayout) {
-			this.deps.mouseController.statusDraftQueueTarget = this.deps.statusLineRenderer.draftQueueTarget?.(widgetLayout, widgetRow);
-			this.deps.mouseController.statusUserJumpTarget = this.deps.statusLineRenderer.userJumpTarget?.(widgetLayout, widgetRow);
-			this.deps.mouseController.statusThinkingExpandTarget = this.deps.statusLineRenderer.thinkingExpandTarget?.(widgetLayout, widgetRow);
-			this.deps.mouseController.statusCompactToolsTarget = this.deps.statusLineRenderer.compactToolsTarget?.(widgetLayout, widgetRow);
-			this.deps.mouseController.statusQuickScrollUpTarget = this.deps.statusLineRenderer.quickScrollUpTarget?.(widgetLayout, widgetRow);
-			this.deps.mouseController.statusQuickScrollDownTarget = this.deps.statusLineRenderer.quickScrollDownTarget?.(widgetLayout, widgetRow);
-			this.deps.mouseController.statusTerminalBellSoundTarget = this.deps.statusLineRenderer.terminalBellSoundTarget?.(widgetLayout, widgetRow);
-		}
+		this.deps.mouseController.statusDraftQueueTarget = this.deps.statusLineRenderer.draftQueueTarget?.(statusLayout, statusRow);
+		this.deps.mouseController.statusUserJumpTarget = this.deps.statusLineRenderer.userJumpTarget?.(statusLayout, statusRow);
+		this.deps.mouseController.statusThinkingExpandTarget = this.deps.statusLineRenderer.thinkingExpandTarget?.(statusLayout, statusRow);
+		this.deps.mouseController.statusCompactToolsTarget = this.deps.statusLineRenderer.compactToolsTarget?.(statusLayout, statusRow);
+		this.deps.mouseController.statusQuickScrollUpTarget = this.deps.statusLineRenderer.quickScrollUpTarget?.(statusLayout, statusRow);
+		this.deps.mouseController.statusQuickScrollDownTarget = this.deps.statusLineRenderer.quickScrollDownTarget?.(statusLayout, statusRow);
+		this.deps.mouseController.statusTerminalBellSoundTarget = this.deps.statusLineRenderer.terminalBellSoundTarget?.(statusLayout, statusRow);
 		this.deps.mouseController.statusSessionTarget = this.deps.statusLineRenderer.sessionTarget(statusLayout.text, statusRow, statusLayout.sessionLabel, statusLayout.workspaceLabel);
-		if (widgetLayout) {
-			this.deps.mouseController.statusPromptEnhancerTarget = this.deps.statusLineRenderer.promptEnhancerTarget(widgetLayout, widgetRow);
-			this.deps.mouseController.statusVoiceMicTarget = this.deps.statusLineRenderer.voiceMicTarget(widgetLayout, widgetRow);
-			this.deps.mouseController.statusVoiceLanguageTarget = this.deps.statusLineRenderer.voiceLanguageTarget(widgetLayout, widgetRow);
-		}
+		this.deps.mouseController.statusPromptEnhancerTarget = this.deps.statusLineRenderer.promptEnhancerTarget(statusLayout, statusRow);
+		this.deps.mouseController.statusVoiceMicTarget = this.deps.statusLineRenderer.voiceMicTarget(statusLayout, statusRow);
+		this.deps.mouseController.statusVoiceLanguageTarget = this.deps.statusLineRenderer.voiceLanguageTarget(statusLayout, statusRow);
 		this.deps.mouseController.renderedRowTexts.set(statusRow, statusLayout.text);
 	}
 
