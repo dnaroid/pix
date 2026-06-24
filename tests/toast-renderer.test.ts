@@ -35,6 +35,18 @@ describe("renderToastOverlays", () => {
 		]);
 	});
 
+	it("preserves ANSI colors in toast output without leaking escapes into hit text", () => {
+		const overlays = renderToastOverlays([
+			toast("plain \x1b[38;2;214;222;235mcolored\x1b[0m done"),
+		], 80, 2, THEMES.dark);
+
+		assert.equal(overlays.length, 1);
+		assert.equal(overlays[0]?.text.includes("\x1b"), false);
+		assert.ok(overlays[0]?.text.includes("plain colored done"));
+		assert.ok(overlays[0]?.output.includes("48;2;0;0;0"));
+		assert.ok(overlays[0]?.output.includes("\x1b[38;2;214;222;235mcolored\x1b[0m"));
+	});
+
 	it("renders dialog toasts with a close target", () => {
 		const overlays = renderToastOverlays([
 			toast("Context usage\nTokens: 100 / 1000", "dialog"),

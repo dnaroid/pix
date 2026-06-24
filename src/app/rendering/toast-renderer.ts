@@ -1,8 +1,8 @@
-import { colorLine, type Theme } from "../../theme.js";
-import { stringDisplayWidth, wrapDisplayLine } from "../../terminal-width.js";
+import { ANSI_RESET, ansiStylePrefix, type TextStyleOptions, type Theme } from "../../theme.js";
+import { expandTabs, stringDisplayWidth, wrapDisplayLine } from "../../terminal-width.js";
 import type { ToastEntry, ToastKind } from "../../ui.js";
 import { APP_ICONS } from "../icons.js";
-import { padOrTrimPlain, sanitizeText } from "./render-text.js";
+import { padOrTrimPlain } from "./render-text.js";
 import type { ToastLineTarget } from "../types.js";
 
 export type ToastOverlay = { id: number; row: number; column: number; text: string; output: string; target?: ToastLineTarget };
@@ -32,12 +32,13 @@ export function renderToastOverlays(
 		const toastWidth = Math.min(Math.max(12, contentWidth + 2), Math.max(1, width - 4));
 		const leftWidth = Math.max(0, width - toastWidth - 2);
 		const column = leftWidth + 1;
+		const style = toastStyle(state, theme);
 
 		for (const line of visibleLines) {
 			const message = ` ${padOrTrimPlain(line, Math.max(0, toastWidth - 2))} `;
-			const text = padOrTrimPlain(message, toastWidth);
-			const output = colorLine(message, toastWidth, {
-				...toastKindStyle(state.kind, theme),
+			const text = padOrTrimPlain(` ${padOrTrimPlain(stripToastAnsi(line), Math.max(0, toastWidth - 2))} `, toastWidth);
+			const output = colorToastLine(message, toastWidth, {
+				...style,
 				bold: true,
 			});
 
@@ -62,7 +63,7 @@ function toastMessageLines(message: string, icon: string, maxWidth: number): str
 	const safeContinuationPrefix = stringDisplayWidth(continuationPrefix) < safeMaxWidth ? continuationPrefix : "";
 
 	const lines: string[] = [];
-	const logicalLines = sanitizeText(message).split("\n");
+	const logicalLines = sanitizeToastText(message).split("\n");
 	for (const [index, logicalLine] of logicalLines.entries()) {
 		const prefix = index === 0 ? firstPrefix : continuationPrefix;
 		const prefixWidth = stringDisplayWidth(prefix);
@@ -102,22 +103,22 @@ function renderDialogToastOverlay(
 	const visibleBodyLines = bodyLines.slice(0, bodyRows);
 	const includeBottom = maxRows > 1;
 	const dialogRows = [
-		dialogTopLine(closeLabel, dialogWidth),
-		...visibleBodyLines.map((line) => `│ ${padOrTrimPlain(line, bodyWidth)} │`),
-		...(includeBottom ? [`╰${"─".repeat(Math.max(0, dialogWidth - 2))}╯`] : []),
+		toastRow(dialogTopLine(closeLabel, dialogWidth)),
+		...visibleBodyLines.map((line) => toastRow(`│ ${padOrTrimPlain(line, bodyWidth)} │`, `│ ${padOrTrimPlain(stripToastAnsi(line), bodyWidth)} │`)),
+		...(includeBottom ? [toastRow(`╰${"─".repeat(Math.max(0, dialogWidth - 2))}╯`)] : []),
 	].slice(0, maxRows);
 	const leftWidth = Math.max(0, width - dialogWidth - 2);
 	const column = leftWidth + 1;
-	const style = toastKindStyle(state.kind, theme);
+	const style = toastStyle(state, theme);
 	const closeStartColumn = column + 1 + dialogTopCloseOffset(closeLabel, dialogWidth);
 	const closeEndColumn = closeStartColumn + stringDisplayWidth(closeLabel);
 
-	return dialogRows.map((text, index) => ({
+	return dialogRows.map((row, index) => ({
 		id: state.id,
 		row: rowOffset + index + 1,
 		column,
-		text,
-		output: colorLine(text, dialogWidth, { ...style, bold: true }),
+		text: row.text,
+		output: colorToastLine(row.output, dialogWidth, { ...style, bold: true }),
 		target: index === 0
 			? { kind: "toast", id: state.id, action: "close", startColumn: closeStartColumn, endColumn: closeEndColumn }
 			: { kind: "toast", id: state.id, action: "body", startColumn: column, endColumn: column + dialogWidth },
@@ -126,8 +127,32 @@ function renderDialogToastOverlay(
 
 function dialogMessageLines(message: string, maxWidth: number): string[] {
 	const safeMaxWidth = Math.max(1, maxWidth);
-	const lines = sanitizeText(message).split("\n").flatMap((line) => wrapDisplayLine(line, safeMaxWidth));
+	const lines = sanitizeToastText(message).split("\n").flatMap((line) => wrapDisplayLine(line, safeMaxWidth));
 	return lines.length > 0 ? lines : [""];
+}
+
+function toastRow(output: string, text = output): { output: string; text: string } {
+	return { output, text };
+}
+
+function sanitizeToastText(text: string): string {
+	return expandTabs(text.replace(/⚠️?|\u{f0026}/gu, APP_ICONS.alert).replace(/\r/g, ""))
+		.replace(/\x1b(?!\[[\d;:]*m)/gu, "␛");
+}
+
+function stripToastAnsi(text: string): string {
+	return text.replace(/\x1b\[[\d;:]*m/gu, "");
+}
+
+function hasToastAnsiColor(text: string): boolean {
+	return /\x1b\[[\d;:]*m/u.test(text);
+}
+
+function colorToastLine(text: string, width: number, options: TextStyleOptions): string {
+	const line = padOrTrimPlain(text, width);
+	const prefix = ansiStylePrefix(options);
+	if (!prefix) return line;
+	return `${prefix}${line.replaceAll(ANSI_RESET, `${ANSI_RESET}${prefix}`)}${ANSI_RESET}`;
 }
 
 function dialogTopLine(closeLabel: string, width: number): string {
@@ -168,4 +193,9 @@ function toastKindStyle(kind: ToastKind, theme: Theme): { foreground: string; ba
 		case "info":
 			return { foreground: theme.colors.background, background: theme.colors.info };
 	}
+}
+
+function toastStyle(state: ToastEntry, theme: Theme): { foreground: string; background: string } {
+	const style = toastKindStyle(state.kind, theme);
+	return hasToastAnsiColor(state.message) ? { ...style, background: "#000000" } : style;
 }
