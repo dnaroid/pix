@@ -330,6 +330,7 @@ export type SessionTab = {
 	id: string;
 	title: string;
 	titlePlaceholder?: "loading" | "new";
+	isFork?: boolean;
 	status: SessionTabStatus;
 	activity?: SessionActivity;
 	attention?: SessionTabAttention;

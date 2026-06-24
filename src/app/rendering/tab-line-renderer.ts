@@ -186,7 +186,7 @@ export class TabLineRenderer {
 	}
 
 	private displayTitle(tab: SessionTab): string {
-		return tab.title;
+		return tab.isFork ? `${APP_ICONS.fork}${tab.title}` : tab.title;
 	}
 
 	private buttonLayoutFromText(text: string, statusStart: number, statusLength: number): TabButtonLayout {

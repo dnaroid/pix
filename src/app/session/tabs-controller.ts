@@ -263,7 +263,9 @@ export class AppTabsController {
 			return;
 		}
 
-		const restoredTabs = this.restoredTabs(saved);
+		const restoredSessionPaths = saved.tabs.map((tab) => tab.path);
+		const forkedSessionPaths = await this.loadForkedSessionPaths(restoredSessionPaths);
+		const restoredTabs = this.restoredTabs(saved, new Map(), forkedSessionPaths);
 		if (restoredTabs.length === 0) {
 			this.clearStartupTabPlaceholders();
 			await this.saveTabs();
@@ -283,7 +285,6 @@ export class AppTabsController {
 		this.replaceTabs(restoredTabs, desiredPath);
 		this.restorePersistedInputStates(saved);
 		this.restorePersistedQueuedUserMessages(saved);
-		const restoredSessionPaths = saved.tabs.map((tab) => tab.path);
 		if (explicitSessionPath && currentPath) this.ensureCurrentSessionTab(runtime.session);
 
 		if (!desiredPath) {
@@ -1307,6 +1308,7 @@ export class AppTabsController {
 			id: createId("tab"),
 			title: this.sessionTitle(session),
 			...(options.titlePlaceholder ? { titlePlaceholder: options.titlePlaceholder } : {}),
+			...(this.sessionIsFork(session) ? { isFork: true } : {}),
 			status: "active",
 			activity: this.sessionActivity(session),
 			...(sessionPath ? { sessionPath } : {}),
@@ -1317,6 +1319,8 @@ export class AppTabsController {
 		const previousSessionPath = tab.sessionPath ? resolve(tab.sessionPath) : undefined;
 		const sessionPath = this.sessionPath(session);
 		tab.title = this.updatedSessionTitle(tab.title, this.sessionTitle(session), previousSessionPath, sessionPath, tab.titlePlaceholder !== undefined);
+		if (this.sessionIsFork(session)) tab.isFork = true;
+		else delete tab.isFork;
 		tab.activity = this.sessionActivity(session);
 		if (sessionPath) tab.sessionPath = sessionPath;
 	}
@@ -1327,6 +1331,11 @@ export class AppTabsController {
 
 	private sessionTitle(session: AgentSession): string {
 		return this.sessionTitleFromParts(session.sessionId, session.sessionName);
+	}
+
+	private sessionIsFork(session: AgentSession): boolean {
+		const sessionManager = (session as { sessionManager?: { getHeader?: () => { parentSession?: unknown } | null } }).sessionManager;
+		return typeof sessionManager?.getHeader?.()?.parentSession === "string";
 	}
 
 	private sessionTitleFromParts(sessionId: string, sessionName: string | undefined): string {
@@ -1379,7 +1388,7 @@ export class AppTabsController {
 		});
 	}
 
-	private restoredTabs(saved: PersistedTabState, sessionTitles: ReadonlyMap<string, string> = new Map()): SessionTab[] {
+	private restoredTabs(saved: PersistedTabState, sessionTitles: ReadonlyMap<string, string> = new Map(), forkedSessionPaths: ReadonlySet<string> = new Set()): SessionTab[] {
 		const tabs: SessionTab[] = [];
 		const seen = new Set<string>();
 		for (const tab of saved.tabs) {
@@ -1395,6 +1404,7 @@ export class AppTabsController {
 			tabs.push({
 				id: createId("tab"),
 				title: title || "session",
+				...(forkedSessionPaths.has(sessionPath) ? { isFork: true } : {}),
 				status: "waiting",
 				sessionPath,
 			});
@@ -1419,6 +1429,14 @@ export class AppTabsController {
 		return new Map(entries.filter((entry): entry is readonly [string, string] => entry !== undefined));
 	}
 
+	private async loadForkedSessionPaths(sessionPaths: readonly string[]): Promise<ReadonlySet<string>> {
+		const uniquePaths = [...new Set(sessionPaths.map((sessionPath) => resolve(sessionPath)))].slice(0, MAX_RESTORED_TABS);
+		const entries = await Promise.all(uniquePaths.map(async (sessionPath) => {
+			return await readSessionHasParent(sessionPath) ? sessionPath : undefined;
+		}));
+		return new Set(entries.filter((entry): entry is string => entry !== undefined));
+	}
+
 	private scheduleRestoredTabTitleRefresh(sessionPaths: readonly string[]): void {
 		if (sessionPaths.length === 0) return;
 		setTimeout(() => {
@@ -1427,18 +1445,28 @@ export class AppTabsController {
 	}
 
 	private async refreshRestoredTabTitles(sessionPaths: readonly string[]): Promise<void> {
-		const titles = await this.loadSessionTitles(sessionPaths);
-		if (titles.size === 0) return;
+		const [titles, forkedSessionPaths] = await Promise.all([
+			this.loadSessionTitles(sessionPaths),
+			this.loadForkedSessionPaths(sessionPaths),
+		]);
+		if (titles.size === 0 && forkedSessionPaths.size === 0) return;
 
 		let changed = false;
 		for (const tab of this.tabItems) {
 			const sessionPath = tab.sessionPath ? resolve(tab.sessionPath) : undefined;
 			const title = sessionPath ? titles.get(sessionPath) : undefined;
-			if (!title || tab.title === title) continue;
+			if (title && tab.title !== title) {
+				tab.title = title;
+				delete tab.titlePlaceholder;
+				changed = true;
+			}
 
-			tab.title = title;
-			delete tab.titlePlaceholder;
-			changed = true;
+			const isFork = sessionPath ? forkedSessionPaths.has(sessionPath) : false;
+			if (tab.isFork !== isFork) {
+				if (isFork) tab.isFork = true;
+				else delete tab.isFork;
+				changed = true;
+			}
 		}
 
 		if (!changed) return;
@@ -1801,6 +1829,26 @@ async function readSessionTitleChunk(
 	}
 
 	return undefined;
+}
+
+async function readSessionHasParent(sessionPath: string): Promise<boolean> {
+	let file: Awaited<ReturnType<typeof openFile>> | undefined;
+	try {
+		file = await openFile(sessionPath, "r");
+		const buffer = Buffer.alloc(4096);
+		const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
+		if (bytesRead <= 0) return false;
+
+		const firstLine = buffer.subarray(0, bytesRead).toString("utf8").split("\n", 1)[0]?.trim();
+		if (!firstLine) return false;
+
+		const parsed: unknown = JSON.parse(firstLine);
+		return isRecord(parsed) && parsed.type === "session" && typeof parsed.parentSession === "string";
+	} catch {
+		return false;
+	} finally {
+		await file?.close();
+	}
 }
 
 function validSessionTitle(value: string | undefined): string | undefined {

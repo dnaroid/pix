@@ -54,6 +54,18 @@ describe("TabLineRenderer", () => {
 		assert.ok(layout.text.includes("session work notes"));
 	});
 
+	it("prefixes forked tab titles with the fork icon", () => {
+		const renderer = tabLineRenderer([
+			{ id: "tab-1", status: "active", title: "Main session", sessionPath: "/tmp/one.jsonl" },
+			{ id: "tab-2", status: "waiting", title: "Follow-up", isFork: true, sessionPath: "/tmp/two.jsonl" },
+		]);
+
+		const layout = renderer.layout(80);
+
+		assert.ok(layout.text.includes(` ${APP_ICONS.fork}Follow-up `));
+		assert.equal(layout.text.includes(`${APP_ICONS.fork} Main session`), false);
+	});
+
 	it("renders startup-loading default generated session titles as session ids", () => {
 		const renderer = tabLineRenderer([
 			{ id: "tab-1", status: "active", title: "019e7d3f", titlePlaceholder: "loading", sessionPath: "/tmp/one.jsonl" },

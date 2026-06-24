@@ -26,12 +26,23 @@ export type ToolRenderInput = {
 export type ToolRenderResult = {
 	toolName?: string;
 	headerArgs?: string;
+	headerArgSegments?: readonly ToolHeaderSegment[];
 	bodyLineStyles?: readonly ToolBodyLineStyle[];
 	bodyStyle?: "diff";
 	preserveAnsi?: boolean;
 	syntaxHighlight?: ToolBodySyntaxHighlights | undefined;
 	collapsedBody: string;
 	expandedText: string;
+};
+
+export type ToolHeaderSegment = {
+	start: number;
+	end: number;
+	foreground?: string;
+	background?: string;
+	bold?: boolean;
+	underline?: boolean;
+	strikethrough?: boolean;
 };
 
 export type ToolRendererMiddleware = (input: ToolRenderInput) => ToolRenderResult | undefined;

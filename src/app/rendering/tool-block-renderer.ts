@@ -26,6 +26,7 @@ export type ToolBlockEntry = {
 	toolName: string;
 	headerLabel?: string | undefined;
 	headerArgs?: string | undefined;
+	headerArgSegments?: readonly StyledSegment[] | undefined;
 	bodyLineStyles?: readonly ToolBodyLineStyle[] | undefined;
 	bodyStyle?: "diff" | undefined;
 	preserveAnsi?: boolean | undefined;
@@ -62,9 +63,16 @@ export function renderToolBlock(entry: ToolBlockEntry, rule: ResolvedToolRule, w
 	const headerArgs = formatToolHeaderArgs(entry.headerArgs);
 	const headerArgsWidth = width - stringDisplayWidth(headerPrefix) - 1;
 	const clippedHeaderArgs = headerArgsWidth > 0 ? sliceByDisplayWidth(headerArgs, headerArgsWidth) : "";
+	const header = clippedHeaderArgs ? `${headerPrefix} ${clippedHeaderArgs}` : headerPrefix;
+	const headerArgsStart = headerPrefix.length + 1;
+	const clippedHeaderArgSegments = clippedHeaderArgs
+		? clipAndShiftSegments(entry.headerArgSegments, headerArgsStart, clippedHeaderArgs.length)
+		: [];
+	const headerArgBaseSegments = clippedHeaderArgs
+		? uncoveredSegments(headerArgsStart, header.length, toolOutputColor, clippedHeaderArgSegments)
+		: [];
 	const target = { kind: "tool" as const, id: entry.id };
 	const showGutter = options.showGutter ?? true;
-	const header = clippedHeaderArgs ? `${headerPrefix} ${clippedHeaderArgs}` : headerPrefix;
 
 	const headerLine: RenderedLine = {
 		text: header,
@@ -74,7 +82,8 @@ export function renderToolBlock(entry: ToolBlockEntry, rule: ResolvedToolRule, w
 		segments: [
 			{ start: 0, end: stateIcon.length, foreground: toolStatusIconColor(entry, colors), bold: true },
 			{ start: stateIcon.length, end: headerPrefix.length, bold: true },
-			...(clippedHeaderArgs ? [{ start: headerPrefix.length + 1, end: header.length, foreground: toolOutputColor }] : []),
+			...headerArgBaseSegments,
+			...clippedHeaderArgSegments,
 		],
 	};
 	const headerLines: RenderedLine[] = [headerLine];
@@ -121,6 +130,31 @@ export function renderToolBlock(entry: ToolBlockEntry, rule: ResolvedToolRule, w
 		{ start: previewTextStart, end: headerLine.text.length, foreground: toolOutputColor },
 	];
 	return headerLines;
+}
+
+function clipAndShiftSegments(segments: readonly StyledSegment[] | undefined, offset: number, length: number): StyledSegment[] {
+	if (!segments || length <= 0) return [];
+	return segments.flatMap((segment) => {
+		const start = Math.max(0, segment.start);
+		const end = Math.min(length, segment.end);
+		if (end <= start) return [];
+		return [{ ...segment, start: offset + start, end: offset + end }];
+	});
+}
+
+function uncoveredSegments(start: number, end: number, foreground: string, coveredSegments: readonly StyledSegment[]): StyledSegment[] {
+	if (end <= start) return [];
+	const result: StyledSegment[] = [];
+	let offset = start;
+	for (const segment of [...coveredSegments].sort((a, b) => a.start - b.start || a.end - b.end)) {
+		const segmentStart = Math.max(start, Math.min(end, segment.start));
+		const segmentEnd = Math.max(segmentStart, Math.min(end, segment.end));
+		if (segmentEnd <= offset) continue;
+		if (segmentStart > offset) result.push({ start: offset, end: segmentStart, foreground });
+		offset = segmentEnd;
+	}
+	if (offset < end) result.push({ start: offset, end, foreground });
+	return result;
 }
 
 function renderCollapsedPreviewLines(

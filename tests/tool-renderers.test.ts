@@ -310,7 +310,24 @@ describe("renderToolDisplay", () => {
 	it("renders compress summaries", () => {
 		const ok = renderToolDisplay(input({ toolName: "compress", argsText: "{\"topic\":\"Cleanup\"}", colors: THEMES.dark.colors, output: JSON.stringify({ tokensSaved: 1200, contextTokens: 8800, contextPercent: 50, contextWindow: 100000, ranges: 1, messages: 2, totalSummaryTokens: 45, activeBlocks: 3, totalBlocks: 5, prunedTools: 2 }) }));
 		assert.match(ok.headerArgs ?? "", /Cleanup · saved 1.2K · ████▍ 88% of 10K · context 50% · 3 items/);
+		assert.ok(ok.headerArgSegments?.every((segment) => segment.background === THEMES.dark.colors.statusDotBase), "progress segments should carry the track background");
+		assert.ok(ok.headerArgSegments?.every((segment) => segment.foreground === THEMES.dark.colors.statusForeground), "compress progress bar should keep the neutral header foreground");
 		assert.equal(ok.collapsedBody, "");
+		const lines = renderToolBlock({
+			id: "compress-call",
+			toolName: "compress",
+			headerArgs: ok.headerArgs,
+			headerArgSegments: ok.headerArgSegments,
+			expanded: false,
+			status: "done",
+			isError: false,
+			output: "",
+			collapsedBody: "",
+			expandedText: "",
+		}, { previewLines: 0, direction: "head", color: "muted" }, 120, THEMES.dark.colors);
+		const barStart = lines[0]?.text.indexOf("████") ?? -1;
+		assert.ok(lines[0]?.segments?.some((segment) => segment.start === barStart && segment.background === THEMES.dark.colors.statusDotBase), "rendered progress bar should keep its background");
+		assert.equal(lines[0]?.segments?.some((segment) => segment.background !== THEMES.dark.colors.statusDotBase && segment.start <= barStart && segment.end > barStart), false, "generic header args color should not cover the progress bar before its background segment is applied");
 
 		assert.match(renderToolDisplay(input({ toolName: "compress", output: "boom", isError: true })).headerArgs ?? "", /error: boom/);
 		assert.equal(renderToolDisplay(input({ toolName: "compress", status: "running" })).expandedText, "running…");

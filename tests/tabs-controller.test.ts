@@ -1411,6 +1411,7 @@ describe("AppTabsController", () => {
 		assert.equal(forkRuntime.session.sessionFile, "/tmp/fork.jsonl");
 		assert.equal(tabs.tabItems.length, 2);
 		assert.equal(tabs.activeTabId, tabs.tabItems[1]?.id);
+		assert.equal(tabs.tabItems[1]?.isFork, true);
 		assert.equal(tabs.runtimesByTabId.get("tab-1"), activeRuntime);
 		assert.equal(tabs.runtimesByTabId.get(tabs.activeTabId ?? ""), forkRuntime);
 		assert.deepEqual(currentInput, { text: "retry prompt", cursor: "retry prompt".length });
@@ -2457,12 +2458,21 @@ function fakeRuntime(
 		forkCancelled?: boolean;
 	} = {},
 ): AgentSessionRuntime {
-	const createSession = (id: string, file: string, name: string | undefined) => {
+	const createSession = (id: string, file: string, name: string | undefined, parentSession?: string) => {
 		const listeners: Array<(event: AgentSessionEvent) => void> = [];
 		return {
 			sessionId: id,
 			sessionName: name,
 			sessionFile: file,
+			sessionManager: {
+				getHeader: () => ({
+					type: "session" as const,
+					id,
+					timestamp: "2024-01-01T00:00:00.000Z",
+					cwd: "/tmp",
+					...(parentSession === undefined ? {} : { parentSession }),
+				}),
+			},
 			isStreaming: options.isStreaming === true,
 			isCompacting: false,
 			subscribe: (listener: (event: AgentSessionEvent) => void) => {
@@ -2503,10 +2513,12 @@ function fakeRuntime(
 		},
 		fork: async (_entryId: string) => {
 			if (options.forkCancelled) return { cancelled: true };
+			const parentSession = runtime.session.sessionFile;
 			runtime.session = createSession(
 				"fork",
 				options.forkSessionFile ?? "/tmp/fork.jsonl",
 				Object.prototype.hasOwnProperty.call(options, "forkSessionName") ? options.forkSessionName : "fork",
+				parentSession,
 			);
 			return {
 				cancelled: false,
