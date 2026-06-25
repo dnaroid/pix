@@ -4,7 +4,7 @@ import type { ToolRendererMiddleware } from "./types.js";
 import { numberArg, stringArg } from "./utils.js";
 
 export const renderReadTool: ToolRendererMiddleware = (input) => {
-	const filePath = stringArg(input, ["path", "file", "target"]);
+	const filePath = stringArg(input, ["path", "file_path", "filePath", "file", "target"]);
 	if (!filePath) return undefined;
 
 	const displayPath = pathForDisplay(filePath, input.cwd);

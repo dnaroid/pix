@@ -95,6 +95,9 @@ describe("renderToolDisplay", () => {
 		const plain = renderToolDisplay(input({ toolName: "read", argsText: "{\"path\":\"notes.txt\"}", output: "body" }));
 		assert.equal(plain.syntaxHighlight, undefined);
 
+		const sdkRead = renderToolDisplay(input({ toolName: "read", argsText: "{\"file_path\":\"src/sdk-read.ts\"}", output: "body" }));
+		assert.equal(sdkRead.headerArgs, "src/sdk-read.ts");
+
 		const skill = renderToolDisplay(input({ toolName: "read", argsText: "{\"path\":\"/skills/pi-sdk/SKILL.md\"}", output: "skill text" }));
 		assert.equal(skill.toolName, "skill");
 		assert.equal(skill.headerArgs, "pi-sdk");
