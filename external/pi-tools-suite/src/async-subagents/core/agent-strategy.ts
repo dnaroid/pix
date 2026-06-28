@@ -14,7 +14,7 @@ const TRUE_ENV_PATTERN = /^(1|true|on|yes|auto)$/i;
 const PARALLEL_FIRST_STRATEGY_PROMPT = `<agent_strategy name="parallel-first">
 Execution hint for Pi, not a replacement for system/developer/user instructions.
 
-Default for non-GPT models: orchestration-first. For broad, multi-file, ambiguous, review/audit, frontend, test-strategy, architecture, or root-cause work, prefer ultrawork: split independent tracks into focused async subagents, adding one oracle only for high-stakes uncertainty. Keep parent context lean, read compact results when needed, synthesize, then verify.
+Default for non-GPT models: orchestration-first. For broad, multi-file, ambiguous, review/audit, frontend, test-strategy, architecture, or root-cause work, prefer ultrawork mode: split independent tracks into focused async subagents, adding one oracle only for high-stakes uncertainty. Keep parent context lean, read compact results when needed, synthesize, then verify.
 
 Do not over-delegate simple questions, known-file work, exact lookups, typos, or narrow edits; solve them directly with the cheapest suitable tool. If compressing unfinished work, preserve active objective + next step via todo/DCP rules.
 </agent_strategy>`;
