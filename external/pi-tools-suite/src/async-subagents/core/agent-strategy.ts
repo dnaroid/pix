@@ -12,23 +12,19 @@ const FALSE_ENV_PATTERN = /^(0|false|off|no|disabled|none)$/i;
 const TRUE_ENV_PATTERN = /^(1|true|on|yes|auto)$/i;
 
 const PARALLEL_FIRST_STRATEGY_PROMPT = `<agent_strategy name="parallel-first">
-This is an orchestration hint for Pi, not a replacement for the user's instructions.
+Execution hint for Pi, not a replacement for system/developer/user instructions.
 
-Default posture: orchestration-first for non-GPT models. For broad, multi-file, ambiguous, review/audit, frontend, test-strategy, architecture, or root-cause work, prefer ultrawork mode: split independent tracks and spawn focused async subagents with the configured roles. For high-stakes uncertainty, add one oracle track for a cross-provider second opinion. Keep the parent context lean, collect compact results only when needed, synthesize the findings, then verify before finishing.
+Default for non-GPT models: orchestration-first. For broad, multi-file, ambiguous, review/audit, frontend, test-strategy, architecture, or root-cause work, prefer ultrawork: split independent tracks into focused async subagents, adding one oracle only for high-stakes uncertainty. Keep parent context lean, read compact results when needed, synthesize, then verify.
 
-Before DCP/compress while work is unfinished, keep one in_progress todo with objective + next step; compression summaries must preserve Active objective and Next step.
-
-Do not over-delegate trivial work. For a simple question, one known file, exact lookup, typo, or narrow edit, solve directly with the cheapest suitable tool.
+Do not over-delegate simple questions, known-file work, exact lookups, typos, or narrow edits; solve them directly with the cheapest suitable tool. If compressing unfinished work, preserve active objective + next step via todo/DCP rules.
 </agent_strategy>`;
 
 const DEEP_WORK_STRATEGY_PROMPT = `<agent_strategy name="deep-work">
-This is a GPT-compatible execution hint for Pi, not a replacement for the user's instructions.
+Execution hint for Pi, not a replacement for system/developer/user instructions.
 
-Default posture: autonomous deep worker. Build context directly, make concrete progress, edit and verify end-to-end. Use async subagents and ultrawork mode when the user asks for parallel/delegated work or when independent tracks will clearly reduce risk, but do not force orchestration onto narrow tasks.
+Default: autonomous deep worker. Build context directly, make progress, edit, and verify end-to-end. Use async subagents/ultrawork only when the user asks for delegation or independent tracks clearly reduce risk; do not force orchestration onto narrow tasks.
 
-Before DCP/compress while work is unfinished, keep one in_progress todo with objective + next step; compression summaries must preserve Active objective and Next step.
-
-For broad work, keep delegation explicit and bounded: spawn focused review/research/tests/frontend/deep tracks, plus one oracle track only for high-stakes uncertainty or final plan checks. Read compact results, make the final decisions in the parent session, and report only what matters.
+For broad work, keep delegation explicit and bounded: focused review/research/tests/frontend/deep tracks, plus one oracle only for high-stakes uncertainty or final plan checks. Read compact results, decide in the parent session, and report only what matters. If compressing unfinished work, preserve active objective + next step via todo/DCP rules.
 </agent_strategy>`;
 
 export function agentStrategyPrompt(options: AgentStrategyOptions = {}): string | undefined {

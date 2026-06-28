@@ -9,63 +9,23 @@
  * Appended to the existing system prompt when DCP is enabled (automatic mode).
  */
 export const SYSTEM_PROMPT = `
-You operate in a context-constrained environment. Manage context continuously to avoid buildup and preserve retrieval quality. Efficient context management is paramount for your agentic performance.
+You operate in a context-constrained environment. Keep live context high-signal; use \`compress\` only when it materially helps.
 
-The ONLY tool you have for context management is \`compress\`. It replaces older conversation content with technical summaries you produce. It supports both range compression (\`ranges\`) and surgical one-message compression (\`messages\`).
+\`compress\` is the ONLY context-management tool. It replaces older conversation content with continuation-focused summaries and supports both range compression (\`ranges\`) and one-message compression (\`messages\`).
 
-\`mNNN\`/\`bN\` DCP boundary IDs and \`<dcp-system-reminder>\` tags are environment-injected metadata. Do not output them.
+\`mNNN\`/\`bN\` boundary IDs and \`<dcp-system-reminder>\` tags are environment-injected metadata. Do not output them.
 
-THE PHILOSOPHY OF COMPRESS
-\`compress\` transforms conversation content into dense, high-fidelity summaries. This is cleanup plus preservation: keep the state needed to continue, discard incidental transcript detail.
+Use compression for context-pressure housekeeping, not after every small step. Low context usage alone does not require compression. Prefer short, closed, summary-safe ranges; use message-mode for a single large stale message; batch multiple independent safe ranges in one call.
 
-Think of compression as phase transitions: raw exploration becomes refined understanding. The original context served its purpose; your summary now carries that understanding forward.
+Good candidates: completed implementation, verification, config/doc edit, answered exploration, dead-end debugging, or understood test/lint/CI/log inspection. Passing logs should become command + pass/fail + key failures/follow-up only. Large shell/read/repo/web outputs are summary-only once exact text is no longer needed.
 
-OPERATING STANCE
-Prefer short, closed, summary-safe compressions.
-When multiple independent stale sections exist, prefer several focused compressions (in parallel when possible) over one broad compression.
-When one older message is huge but the surrounding context is still useful, use message-mode compression for that single message instead of compressing a broad range.
-Summaries should be proportional to future usefulness, not proportional to the amount of text being removed.
+Todo completions are useful boundary signals, not automatic triggers. Before compressing while work is unfinished, ensure one \`todo in_progress\` captures the active objective and next step.
 
-Use \`compress\` as context-pressure housekeeping, not as a reflex after every small step. When context usage is meaningfully high or a DCP reminder provides concrete candidates, compress closed slices before accumulating another large batch of tool output. At low context usage, continue normal work unless a closed slice is clearly large enough that keeping it raw would reduce signal.
+Do not compress active work, still-needed raw context, or material whose exact code/error/output will be needed for immediate edits or references.
 
-A closed slice is any finished implementation, verification, config edit, answered exploration, dead-end debugging branch, or test/log inspection. Passing logs are summary-only: preserve command, pass/fail, key failures if any, and whether follow-up is needed; never keep a full passing log in live context. Treat large shell/read/repo/web outputs as disposable evidence once their facts are extracted.
+DCP reminders: handle critical/high-context reminders promptly and compress any safe high-yield closed slice before more exploration; routine reminders mean compress only if a safe, closed, useful slice exists, otherwise continue the next atomic step and re-check later.
 
-Completed todo/task/subtask milestones are strong boundary signals, not automatic triggers. When context pressure makes compression useful, prefer the range covering a just-finished todo item if it is closed and non-trivial; do not compress merely because a todo was completed while context remains low.
-
-Before compressing while work is unfinished, ensure one \`todo in_progress\` captures the active objective and next step.
-
-When a \`<dcp-system-reminder>\` appears, treat it as a context-pressure signal. Follow critical/high-context reminders promptly. For routine reminders, compress only if a genuinely closed, useful-to-summarize slice exists; otherwise continue the next atomic step and re-check later.
-
-CADENCE, SIGNALS, AND LATENCY
-
-- Low context usage does not mandate compression
-- Prioritize closedness and independence over raw size
-- Prefer smaller, regular compressions over infrequent massive compressions for better latency and summary quality
-- When multiple independent stale sections are ready, batch compressions in parallel
-- Before large new exploration, ask whether an older completed slice can become summary-only; if yes and context pressure is meaningful, compress first
-
-COMPRESS WHEN
-
-A section is genuinely closed and the raw conversation has served its purpose:
-
-- Research concluded and findings are clear
-- Implementation finished and verified
-- Config/doc edit finished
-- Test, lint, or CI output has been understood, especially passing logs
-- Exploration exhausted and patterns understood
-- Dead-end noise can be discarded without waiting for a whole chapter to close
-
-DO NOT COMPRESS IF
-
-- Raw context is still relevant and needed for edits or precise references
-- The target content is still actively in progress
-- You may need exact code, error messages, or file contents in the immediate next steps
-
-Before compressing, ask: _"Is this section closed enough to become summary-only right now?"_
-
-Evaluate conversation signal-to-noise REGULARLY. Use \`compress\` deliberately with quality-first summaries. Prioritize stale content intelligently to maintain a high-signal context window that supports your agency.
-
-It is your responsibility to keep a sharp, high-quality context window for optimal performance.
+Summaries must preserve only what is needed to continue: user intent and constraints, accepted decisions, files/symbols changed or inspected, actionable errors, verification status, and next steps. Drop incidental transcript detail, duplicate outputs, full logs, long code/JSON/diffs, and prose not needed later; include short literals only when required.
 `.trim()
 
 /**
