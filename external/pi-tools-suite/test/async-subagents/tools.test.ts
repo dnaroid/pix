@@ -198,7 +198,7 @@ describe.serial("extension entrypoint", () => {
 		const handler = beforeStartHandlers[0]!;
 		const glmResult = await handler({ systemPrompt: "base" }, { model: { provider: "zai", id: "glm-5.2" } });
 		expect(glmResult.systemPrompt).toContain('name="parallel-first"');
-		expect(glmResult.systemPrompt).toContain("ultrawork mode");
+		expect(glmResult.systemPrompt).toContain("prefer ultrawork:");
 
 		const gptResult = await handler({ systemPrompt: "base" }, { model: { provider: "openai-codex", id: "gpt-5.5" } });
 		expect(gptResult.systemPrompt).toContain('name="deep-work"');
