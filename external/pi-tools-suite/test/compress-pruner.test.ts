@@ -1641,6 +1641,52 @@ describe("DCP pruning effectiveness", () => {
     expect(payload?.messages[1]?.content).toContain("Current raw message IDs: m001, m002");
   });
 
+  test("DCP keeps Responses function_call_output schema-valid", async () => {
+    const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
+    const pi = {
+      on(event: string, handler: (event: any, ctx: any) => unknown) {
+        handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+      },
+      registerTool() {},
+      registerCommand() {},
+      appendEntry() {},
+      sendMessage() {},
+    } as any;
+
+    await dcpModule(pi);
+    const contextHandler = handlers.get("context")?.[0];
+    const providerHandler = handlers.get("before_provider_request")?.[0];
+    await contextHandler?.(
+      {
+        type: "context",
+        messages: [textMessage("user", "inspect", 1), textMessage("assistant", "calling tool", 2)],
+      },
+      {
+        hasUI: false,
+        sessionManager: { getBranch: () => [] },
+        getContextUsage: () => ({ tokens: 10, contextWindow: 10_000, percent: 0.1 }),
+      },
+    );
+
+    const payload = await providerHandler?.(
+      {
+        type: "before_provider_request",
+        payload: {
+          input: [
+            { type: "message", role: "user", content: [{ type: "input_text", text: "inspect" }] },
+            { type: "function_call", call_id: "c1", name: "read", arguments: "{}" },
+            { type: "function_call_output", call_id: "c1", output: "tool result" },
+          ],
+        },
+      },
+      { hasUI: false, sessionManager: { getBranch: () => [] } },
+    ) as any;
+
+    expect(payload.input[2]).not.toHaveProperty("content");
+    expect(payload.input[2].output).toContain("tool result");
+    expect(payload.input[2].output).toContain("Current raw message IDs: m001, m002");
+  });
+
   test("DCP compacts long message-id control maps to protect provider cache", () => {
     const state = createState();
     for (let i = 1; i <= 25; i++) {

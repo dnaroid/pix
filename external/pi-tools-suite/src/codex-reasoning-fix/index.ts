@@ -3,10 +3,9 @@
  * rejects HTTP 400 `Unknown parameter: 'input[N].content'` when non-message
  * items (reasoning, function_call_output) carry a spurious `content` field.
  *
- * Root cause is in pi-ai's `convertResponsesMessages`, which pushes replayed
- * items verbatim including a stray `content` placeholder. The upstream fix is
- * uncommitted in pi-mono and never shipped, so every released pi-ai version
- * (incl. 0.79.10) is affected.
+ * Stray fields can come from replayed pi-ai items or from another extension
+ * that modifies the provider payload. The sanitizer therefore must be the
+ * LAST `before_provider_request` handler registered by pi-tools-suite.
  *
  * The fix must run at the transport layer because the provider has TWO paths:
  *
@@ -16,16 +15,13 @@
  *     strip `content` from every non-message input item of each
  *     `response.create` frame, on the exact bytes leaving the socket.
  *
- *  2. SSE/fetch fallback path: once a websocket attempt fails (common at large
- *     context — full body, ~100+ input items), the transport records an SSE
- *     fallback for the session and every subsequent request goes through a plain
- *     `fetch()` POST with the FULL body (`bodyJson`). The `before_provider_request`
- *     hook should clean this, but in practice it does not reliably catch every
- *     offending item, so we also wrap `globalThis.fetch` once and strip the same
- *     spurious `content` from the request body on the exact bytes leaving the
- *     HTTP client.
+ *  2. SSE/fetch fallback path: once a websocket attempt fails, subsequent
+ *     requests use the FULL body. pi-ai >= 0.80.6 zstd-compresses that body
+ *     before fetch, so a fetch wrapper cannot inspect it. The final
+ *     `before_provider_request` sanitizer is the primary guard for this path;
+ *     the fetch wrapper remains a best-effort fallback for uncompressed bodies.
  *
- * The `before_provider_request` hook is kept as a third secondary guard.
+ * Module registration order is part of this workaround's correctness.
  *
  * Remove this whole module once an upstream pi-ai release carries the fix.
  */
@@ -182,6 +178,9 @@ export function stripContentFromWireFrame(frame: unknown): { frame: Record<strin
 }
 
 export default function codexReasoningFix(pi: ExtensionAPI): void {
+	// src/index.ts deliberately registers this module last. A later payload
+	// modifier could otherwise reintroduce invalid content after sanitization,
+	// and compressed SSE bodies are too late to repair in the fetch wrapper.
 	pi.on("before_provider_request", async (event: ProviderRequestEvent, _ctx: ProviderRequestContext) => {
 		const result = stripReasoningContentFromPayload(event.payload);
 		return result === event.payload ? undefined : result;

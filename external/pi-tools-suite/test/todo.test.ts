@@ -56,6 +56,17 @@ class FakePi {
 	}
 }
 
+const successfulAssistantMessages = [{
+	role: "assistant",
+	stopReason: "stop",
+	content: [{ type: "text", text: "Completed the response." }],
+}];
+
+async function emitSuccessfulSettledRun(pi: FakePi, ctx: any) {
+	await pi.emit("agent_end", { messages: successfulAssistantMessages }, ctx);
+	await pi.emit("agent_settled", {}, ctx);
+}
+
 async function loadTodoModule() {
 	const mod = await import("../src/todo/todo.js");
 	mod.__resetState();
@@ -740,10 +751,12 @@ describe.serial("todo extension lifecycle", () => {
 			await tool.execute("todo-2", { action: "update", id: 1, status: "in_progress", activeForm: "investigating" }, undefined, undefined, ctx);
 
 			expect(pi.setThinkingLevelCalls).toEqual(["high"]);
+			await pi.emit("agent_start", {}, ctx);
 			await pi.emit("agent_end", {}, ctx);
+			await pi.emit("agent_settled", {}, ctx);
 			expect(pi.sentMessages).toHaveLength(0);
 
-			await pi.emit("agent_end", {}, ctx);
+			await emitSuccessfulSettledRun(pi, ctx);
 			expect(pi.sentMessages).toHaveLength(1);
 			expect(pi.sentMessages[0]).toContain("#1 [in_progress] Investigate — investigating");
 		} finally {
@@ -885,7 +898,7 @@ describe.serial("todo extension lifecycle", () => {
 		}
 	});
 
-	test.serial("does not auto-complete an in-progress todo on tool-use assistant turns", async () => {
+	test.serial("does not auto-complete or auto-nudge on tool-use assistant turns", async () => {
 		const previousEnv = process.env.PI_TOOLS_SUITE_TODO_THINKING;
 		process.env.PI_TOOLS_SUITE_TODO_THINKING = "1";
 		const extension = (await import("../src/todo/index.js")).default;
@@ -916,16 +929,53 @@ describe.serial("todo extension lifecycle", () => {
 			await tool.execute("todo-2", { action: "update", id: 1, status: "in_progress", activeForm: "reporting results" }, undefined, undefined, ctx);
 
 			await pi.emit("agent_end", { messages: [{ role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", id: "call-1", name: "read", arguments: {} }] }] }, ctx);
+			await pi.emit("agent_settled", {}, ctx);
 
 			expect(getTodos()).toMatchObject([{ id: 1, status: "in_progress", subject: "Report results to user", thinking: "off" }]);
 			expect(pi.thinkingLevel).toBe("off");
-			expect(pi.sentMessages).toHaveLength(1);
-			expect(pi.sentMessages[0]).toContain("#1 [in_progress] Report results to user — reporting results");
+			expect(pi.sentMessages).toHaveLength(0);
 		} finally {
 			globalThis.setTimeout = originalSetTimeout;
 			globalThis.clearTimeout = originalClearTimeout;
 			if (previousEnv === undefined) delete process.env.PI_TOOLS_SUITE_TODO_THINKING;
 			else process.env.PI_TOOLS_SUITE_TODO_THINKING = previousEnv;
+			rmSync(ctx.cwd, { recursive: true, force: true });
+		}
+	});
+
+	test.serial("does not auto-nudge after a terminal provider error", async () => {
+		const extension = (await import("../src/todo/index.js")).default;
+		const pi = new FakePi();
+		const ctx = {
+			cwd: mkdtempSync(join(tmpdir(), "todo-provider-error-")),
+			hasUI: false,
+			sessionManager: { getBranch: () => [] },
+			isIdle: () => true,
+			hasPendingMessages: () => false,
+		};
+		const originalSetTimeout = globalThis.setTimeout;
+		const originalClearTimeout = globalThis.clearTimeout;
+		globalThis.setTimeout = ((callback: TimerHandler) => {
+			if (typeof callback === "function") callback();
+			return 1 as any;
+		}) as any;
+		globalThis.clearTimeout = (() => {}) as any;
+		try {
+			extension(pi as any);
+			await pi.emit("session_start", {}, ctx);
+			await pi.tools.get("todo").execute("todo-1", { action: "create", subject: "Continue after recovery" }, undefined, undefined, ctx);
+
+			await pi.emit(
+				"agent_end",
+				{ messages: [{ role: "assistant", stopReason: "error", content: [], errorMessage: "Unknown parameter: input[163].content" }] },
+				ctx,
+			);
+			await pi.emit("agent_settled", {}, ctx);
+
+			expect(pi.sentMessages).toHaveLength(0);
+		} finally {
+			globalThis.setTimeout = originalSetTimeout;
+			globalThis.clearTimeout = originalClearTimeout;
 			rmSync(ctx.cwd, { recursive: true, force: true });
 		}
 	});
@@ -958,6 +1008,7 @@ describe.serial("todo extension lifecycle", () => {
 			await pi.emit("agent_start", {}, ctx);
 
 			await pi.emit("agent_end", { messages: [{ role: "assistant", stopReason: "stop", content: [{ type: "text", text: "I still need to investigate further." }] }] }, ctx);
+			await pi.emit("agent_settled", {}, ctx);
 
 			expect(getTodos()).toMatchObject([{ id: 1, status: "in_progress", subject: "Keep debugging" }]);
 			expect(pi.sentMessages).toHaveLength(1);
@@ -1005,7 +1056,7 @@ describe.serial("todo extension lifecycle", () => {
 			expect(pi.sentMessages[0]).toContain("synchronize the loaded plan");
 			expect(pi.sentMessages[0]).toContain("#2 [deferred] Later");
 
-			await pi.emit("agent_end", {}, ctx);
+			await emitSuccessfulSettledRun(pi, ctx);
 			expect(pi.sentMessages).toHaveLength(1);
 		} finally {
 			globalThis.setTimeout = originalSetTimeout;
@@ -1034,17 +1085,17 @@ describe.serial("todo extension lifecycle", () => {
 		try {
 			extension(pi as any);
 			await pi.emit("session_start", {}, ctx);
-			await pi.emit("agent_end", {}, ctx);
+			await emitSuccessfulSettledRun(pi, ctx);
 			expect(pi.sentMessages).toHaveLength(1);
 			expect(pi.sentMessages[0]).toContain("#1 [pending] Unfinished");
 			expect(pi.sentMessages[0]).toContain("synchronize todos first");
 			expect(pi.sentMessages[0]).not.toContain("Later");
 
-			await pi.emit("agent_end", {}, ctx);
+			await emitSuccessfulSettledRun(pi, ctx);
 			expect(pi.sentMessages).toHaveLength(1);
 
 			await pi.emit("session_start", {}, ctx);
-			await pi.emit("agent_end", {}, ctx);
+			await emitSuccessfulSettledRun(pi, ctx);
 			expect(pi.sentMessages).toHaveLength(2);
 		} finally {
 			globalThis.setTimeout = originalSetTimeout;
@@ -1052,7 +1103,7 @@ describe.serial("todo extension lifecycle", () => {
 		}
 	});
 
-	test.serial("schedules the first unfinished-todo nudge immediately after agent_end for older lingering work", async () => {
+	test.serial("schedules the first unfinished-todo nudge after agent_settled for older lingering work", async () => {
 		const extension = (await import("../src/todo/index.js")).default;
 		const pi = new FakePi();
 		const snapshot = { action: "create", params: {}, tasks: [{ id: 1, subject: "Finalize reply", status: "in_progress", activeForm: "reporting" }], nextId: 2 };
@@ -1075,7 +1126,10 @@ describe.serial("todo extension lifecycle", () => {
 			extension(pi as any);
 			await pi.emit("session_start", {}, ctx);
 			await pi.emit("agent_start", {}, ctx);
-			await pi.emit("agent_end", {}, ctx);
+			await pi.emit("agent_end", { messages: successfulAssistantMessages }, ctx);
+			expect(delays).toHaveLength(0);
+			expect(pi.sentMessages).toHaveLength(0);
+			await pi.emit("agent_settled", {}, ctx);
 
 			expect(delays[0]).toBe(0);
 			expect(pi.sentMessages).toHaveLength(1);
@@ -1130,7 +1184,7 @@ describe.serial("todo extension lifecycle", () => {
 		try {
 			extension(pi as any);
 			await pi.emit("session_start", {}, ctx);
-			await pi.emit("agent_end", {}, ctx);
+			await emitSuccessfulSettledRun(pi, ctx);
 			expect(pi.sentMessages).toHaveLength(1);
 			expect(pi.sentMessages[0]).toContain("#1 [pending] Finish prerequisite");
 			expect(pi.sentMessages[0]).not.toContain("Blocked follow-up");
@@ -1145,7 +1199,7 @@ describe.serial("todo extension lifecycle", () => {
 				nextId: 3,
 			};
 			await pi.emit("session_start", {}, ctx);
-			await pi.emit("agent_end", {}, ctx);
+			await emitSuccessfulSettledRun(pi, ctx);
 			expect(pi.sentMessages).toHaveLength(2);
 			expect(pi.sentMessages[1]).toContain("#2 [pending] Blocked follow-up");
 		} finally {
@@ -1174,12 +1228,14 @@ describe.serial("todo extension lifecycle", () => {
 		try {
 			extension(pi as any);
 			await pi.emit("session_start", {}, ctx);
+			await pi.emit("agent_start", {}, ctx);
 			await pi.emit("tool_execution_start", { toolName: "ask_user", toolCallId: "ask-1" }, ctx);
-			await pi.emit("agent_end", {}, ctx);
+			await pi.emit("agent_end", { messages: successfulAssistantMessages }, ctx);
+			await pi.emit("agent_settled", {}, ctx);
 			expect(pi.sentMessages).toHaveLength(0);
 
 			await pi.emit("tool_execution_end", { toolName: "ask_user", toolCallId: "ask-1", isError: false }, ctx);
-			await pi.emit("agent_end", {}, ctx);
+			await emitSuccessfulSettledRun(pi, ctx);
 			expect(pi.sentMessages).toHaveLength(1);
 			expect(pi.sentMessages[0]).toContain("#1 [in_progress] Need answer — waiting");
 		} finally {

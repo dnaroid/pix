@@ -25,6 +25,12 @@ class FakePi {
 }
 
 describe("codex-reasoning-fix", () => {
+	test("is registered last so no later suite hook can reintroduce invalid content", async () => {
+		const { MODULES } = await import("../src/index.js");
+		expect(MODULES[MODULES.length - 1]?.name).toBe("codex-reasoning-fix");
+		expect(MODULES.findIndex((module) => module.name === "dcp")).toBeLessThan(MODULES.length - 1);
+	});
+
 	test("strips content from reasoning items in a Responses `input` payload", async () => {
 		const { stripReasoningContentFromPayload } = await import("../src/codex-reasoning-fix/index.js");
 
@@ -119,6 +125,34 @@ describe("codex-reasoning-fix", () => {
 		);
 
 		expect(result).toBeUndefined();
+	});
+
+	test("final sanitizer removes content introduced by an earlier payload hook", async () => {
+		const handlers: any[] = [];
+		const pi = { on(name: string, handler: any) { if (name === "before_provider_request") handlers.push(handler); } };
+		pi.on("before_provider_request", async (event: any) => ({
+			...event.payload,
+			input: event.payload.input.map((item: any) => item.type === "function_call_output"
+				? { ...item, content: "late metadata" }
+				: item),
+		}));
+		const { default: register } = await import("../src/codex-reasoning-fix/index.js");
+		register(pi as any);
+
+		let payload: any = {
+			input: [
+				{ type: "message", role: "user", content: [{ type: "input_text", text: "hi" }] },
+				{ type: "function_call_output", call_id: "c1", output: "ok" },
+			],
+		};
+		for (const handler of handlers) {
+			const result = await handler({ type: "before_provider_request", payload }, {});
+			if (result !== undefined) payload = result;
+		}
+
+		expect(payload.input[0]).toHaveProperty("content");
+		expect(payload.input[1]).not.toHaveProperty("content");
+		expect(payload.input[1]).toHaveProperty("output", "ok");
 	});
 });
 

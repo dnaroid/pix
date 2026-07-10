@@ -132,6 +132,17 @@ function appendDcpControlToMessages(messages: unknown, text: string): unknown {
 	for (let index = messages.length - 1; index >= 0; index--) {
 		const message = messages[index] as any
 		if (!message || typeof message !== "object") continue
+		// Responses items such as reasoning/function_call_output do not accept a
+		// `content` field. Keep a function output at the tail by appending to its
+		// valid `output` string; otherwise scan back to an actual message item.
+		if (typeof message.type === "string" && message.type !== "message" && message.role === undefined) {
+			if (message.type === "function_call_output" && typeof message.output === "string") {
+				return messages.map((candidate: any, candidateIndex) => candidateIndex === index
+					? { ...candidate, output: `${candidate.output}\n\n${block}` }
+					: candidate)
+			}
+			continue
+		}
 		if (message.role === "system" || message.role === "developer") continue
 		targetIndex = index
 		break

@@ -10,16 +10,6 @@ import { getState, replaceState } from "./state/store.js";
 import { activateTodoStateScope, DEFAULT_PROMPT_GUIDELINES, DEFAULT_PROMPT_SNIPPET, publishTodoState, registerTodosCommand, registerTodoTool } from "./todo.js";
 import type { Task, TaskMutationParams } from "./tool/types.js";
 
-/**
- * Renderer-relayed signal that the session is in an auto-retry cycle.
- * Payload: `{ active: boolean }`. The SDK does not forward retry state to
- * extensions, so the renderer emits this on the extension event bus. We use it
- * to suppress the auto-nudge on intermediate retry agent_end events: nudging
- * then races the pending retry continuation and surfaces a benign
- * "Agent is already processing" extension error in other tabs.
- */
-const RETRY_ACTIVE_EVENT = "pix:retry-active";
-
 type AgentMessageLike = { role?: unknown; stopReason?: unknown; content?: unknown };
 
 const TODO_NUDGE_LIMIT = 8;
@@ -144,10 +134,10 @@ export default function (pi: ExtensionAPI) {
 	const pendingAskUserToolCallIds = new Set<string>();
 	let suppressNextNudgeForThinkingSwitch = false;
 	let inProgressAtAgentStart = new Set<number>();
-	// True while the session is in an auto-retry cycle (relayed via the
-	// extension event bus). Suppresses the auto-nudge on intermediate retry
-	// agent_end events so it doesn't race the pending retry continuation.
-	let retryActive = false;
+	// agent_end may be followed by an automatic retry, compaction, or queued
+	// continuation. Remember only whether its terminal assistant reply was a
+	// successful visible response; schedule a nudge later on agent_settled.
+	let settledNudgeEligible = false;
 
 	function registerTodoToolWithCurrentPrompt(): void {
 		const thinkingPrompt = todoThinkingEnabled ? buildThinkingPromptParts(currentModel) : {};
@@ -336,9 +326,6 @@ export default function (pi: ExtensionAPI) {
 		const delayMs = attempt === 0 ? TODO_NUDGE_INITIAL_DELAY_MS : TODO_NUDGE_IDLE_RETRY_DELAY_MS;
 		nudgeTimer = setTimeout(() => {
 			nudgeTimer = undefined;
-			// A retry-start signal may have arrived after the agent_end that
-			// scheduled this nudge. Bail out so we don't nudge mid-retry.
-			if (retryActive) return;
 			try {
 				activateTodoStateScope(ctx);
 				if (!ctx.isIdle()) {
@@ -358,9 +345,8 @@ export default function (pi: ExtensionAPI) {
 				if (nudge.signature === lastNudgedSignature) return;
 				lastNudgedSignature = nudge.signature;
 
-				// agent_end fires before Pi is fully back in idle dispatch. Sending as a
-				// normal user message on the next idle tick reliably starts a fresh turn;
-				// queueing followUp from inside agent_end can be too late to be drained.
+				// agent_settled means retries, compaction, and queued continuations are
+				// finished. Send on the next idle tick as a fresh turn.
 				pi.sendUserMessage(nudge.message);
 			} catch (err) {
 				if (isAgentBusyRaceError(err)) {
@@ -413,12 +399,6 @@ export default function (pi: ExtensionAPI) {
 		clearNudgeTimer();
 	});
 
-	pi.events.on(RETRY_ACTIVE_EVENT, (data: unknown) => {
-		const active = data != null && typeof data === "object" && (data as { active?: unknown }).active === true;
-		retryActive = active;
-		if (active) clearNudgeTimer();
-	});
-
 	pi.on("model_select", async (event) => {
 		currentModel = event.model;
 		if (todoThinkingEnabled) registerTodoToolWithCurrentPrompt();
@@ -439,7 +419,7 @@ export default function (pi: ExtensionAPI) {
 	pi.on("agent_start", async (_event, ctx) => {
 		activateTodoStateScope(ctx);
 		pendingAskUserToolCallIds.clear();
-		retryActive = false;
+		settledNudgeEligible = false;
 		inProgressAtAgentStart = new Set(selectVisibleTasks(getState()).filter((task) => task.status === "in_progress").map((task) => task.id));
 	});
 
@@ -455,26 +435,42 @@ export default function (pi: ExtensionAPI) {
 	pi.on("agent_end", async (event, ctx) => {
 		activateTodoStateScope(ctx);
 		const completedAssistantReply = hasCompletedAssistantReply((event as { messages?: readonly unknown[] } | undefined)?.messages);
+		settledNudgeEligible = completedAssistantReply;
 
 		if (suppressNextNudgeForThinkingSwitch) {
 			suppressNextNudgeForThinkingSwitch = false;
 			if (!completedAssistantReply) {
+				settledNudgeEligible = false;
 				clearNudgeTimer();
 				return;
 			}
 		}
 
 		if (pendingAskUserToolCallIds.size > 0) {
+			settledNudgeEligible = false;
 			clearNudgeTimer();
 			return;
 		}
 
 		if (completedAssistantReply && maybeRecoverCompletedCurrentTask((event as { messages?: readonly unknown[] } | undefined)?.messages, ctx)) {
+			settledNudgeEligible = false;
 			lastNudgedSignature = undefined;
 			clearNudgeTimer();
 			return;
 		}
+	});
 
+	pi.on("agent_settled", async (_event, ctx) => {
+		activateTodoStateScope(ctx);
+		if (!settledNudgeEligible) {
+			clearNudgeTimer();
+			return;
+		}
+		settledNudgeEligible = false;
+		if (pendingAskUserToolCallIds.size > 0) {
+			clearNudgeTimer();
+			return;
+		}
 		const nudge = getUnfinishedTodoNudge();
 		if (!nudge) {
 			lastNudgedSignature = undefined;
