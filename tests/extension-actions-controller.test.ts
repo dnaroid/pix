@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import { AppExtensionActionsController, type AppExtensionActionsHost, type ExtensionErrorLogger } from "../src/app/extensions/extension-actions-controller.js";
 import type { Entry } from "../src/app/types.js";
+import type { AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 
 describe("AppExtensionActionsController", () => {
 	it("surfaces extension error source details in the UI and pix log", () => {
@@ -74,6 +75,35 @@ describe("AppExtensionActionsController", () => {
 				details: { event: "send_user_message", error: "Agent is already processing." },
 			},
 		]);
+	});
+
+	it("delegates waitForIdle to the SDK session so settled handlers are included", async () => {
+		let waitCalls = 0;
+		let resolveIdle!: () => void;
+		const idle = new Promise<void>((resolve) => {
+			resolveIdle = resolve;
+		});
+		const runtime = {
+			session: {
+				waitForIdle: () => {
+					waitCalls += 1;
+					return idle;
+				},
+			},
+		} as unknown as AgentSessionRuntime;
+		const controller = new AppExtensionActionsController(createHost({}));
+		let completed = false;
+		const waiting = controller.waitForSessionIdle(runtime).then(() => {
+			completed = true;
+		});
+
+		await Promise.resolve();
+		assert.equal(waitCalls, 1);
+		assert.equal(completed, false);
+
+		resolveIdle();
+		await waiting;
+		assert.equal(completed, true);
 	});
 });
 

@@ -346,7 +346,7 @@ function renderToolBodyLines(
 	return lines;
 }
 
-type AnsiStyledLine = {
+export type AnsiStyledLine = {
 	text: string;
 	segments: StyledSegment[];
 };
@@ -366,7 +366,7 @@ function stripAnsi(text: string): string {
 	return ansiStyledLine(text).text;
 }
 
-function ansiStyledLine(rawLine: string): AnsiStyledLine {
+export function ansiStyledLine(rawLine: string): AnsiStyledLine {
 	let text = "";
 	let style: AnsiStyleState = {};
 	let segmentStart: number | undefined;

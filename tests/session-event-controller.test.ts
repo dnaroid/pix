@@ -112,6 +112,29 @@ describe("AppSessionEventController", () => {
 		assert.equal(scheduledRenderCount, 1);
 	});
 
+	it("adds extension custom entries from entry_appended events", () => {
+		const entries: Entry[] = [];
+		const controller = createController(entries);
+
+		controller.handleSessionEvent({
+			type: "entry_appended",
+			entry: {
+				type: "custom",
+				id: "custom-1",
+				parentId: null,
+				timestamp: "2026-01-01T00:00:00.000Z",
+				customType: "demo:status",
+				data: { label: "ready" },
+			},
+		} satisfies AgentSessionEvent);
+
+		assert.equal(entries.length, 1);
+		assert.equal(entries[0]?.kind, "extension-entry");
+		if (entries[0]?.kind !== "extension-entry") return;
+		assert.equal(entries[0].sessionEntry.customType, "demo:status");
+		assert.deepEqual(entries[0].sessionEntry.data, { label: "ready" });
+	});
+
 	it("observes successful todo tool results for the todo widget controller", () => {
 		const observed: unknown[] = [];
 		const controller = new AppSessionEventController({

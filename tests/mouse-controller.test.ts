@@ -287,6 +287,28 @@ describe("AppMouseController", () => {
 		assert.equal(touchCount, 2);
 	});
 
+	it("toggles extension entry renderers through their rendered target", () => {
+		const entry = { id: "extension-entry-1", kind: "extension-entry", expanded: false } as never;
+		let touchCount = 0;
+		const controller = new AppMouseController(
+			fakeHost({
+				findEntry: () => entry,
+				touchEntry: () => { touchCount += 1; },
+			}),
+			fakePopupMenus(),
+			fakePopupActions(),
+			fakeScrollController(),
+			fakeCommandController(),
+		);
+		controller.renderedTargets.set(2, { kind: "tool", id: "extension-entry-1" });
+		controller.renderedRowTexts.set(2, "extension details");
+
+		controller.handleMouse({ button: 0, x: 2, y: 2, released: true });
+
+		assert.equal((entry as { expanded: boolean }).expanded, true);
+		assert.equal(touchCount, 1);
+	});
+
 	it("treats tool end and truncated preview markers as gutter-only click targets", () => {
 		const entry = { id: "tool-1", kind: "tool", expanded: false } as never;
 		let touchCount = 0;

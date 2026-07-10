@@ -314,7 +314,7 @@ function convertTools(tools?: Tool[]): Array<{ functionDeclarations: unknown[] }
 function reasoningLevel(options?: SimpleStreamOptions): "minimal" | "low" | "medium" | "high" | undefined {
 	const reasoning = options?.reasoning;
 	if (!reasoning) return undefined;
-	if (reasoning === "xhigh") return "high";
+	if (reasoning === "xhigh" || reasoning === "max") return "high";
 	return reasoning;
 }
 

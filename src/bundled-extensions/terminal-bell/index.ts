@@ -12,12 +12,6 @@ const MAX_IDLE_RETRIES = 40;
 const SUBAGENTS_LIVE_COUNT_EVENT = "pi-tools-suite:async-subagents:live-count";
 const TERMINAL_BELL_ATTENTION_EVENT = "pix:terminal-bell:attention";
 /**
- * Renderer-relayed signal that the session is in an auto-retry cycle.
- * Payload: `{ active: boolean }`. The SDK does not forward retry state to
- * extensions, so the renderer emits this on the extension event bus.
- */
-const RETRY_ACTIVE_EVENT = "pix:retry-active";
-/**
  * Renderer-relayed signal that the user interrupted the session (Esc/Ctrl-C).
  * Payload: `{ aborted: boolean }`. Aborting the SDK stream during tool
  * execution does not always produce an aborted `message_update`, so the
@@ -62,10 +56,6 @@ type Timer = ReturnType<typeof setTimeout>;
 
 type SubagentsLiveCountEvent = {
 	count?: unknown;
-};
-
-type AgentEndRetryState = {
-	willRetry?: unknown;
 };
 
 type AssistantMessageUpdateLike = {
@@ -273,10 +263,6 @@ function notificationTitleTemplate(defaultTitle: string): string {
 	return process.env.PI_TERMINAL_BELL_NOTIFY_TITLE ?? defaultTitle;
 }
 
-function willRetryAfterAgentEnd(event: AgentEndRetryState): boolean {
-	return event.willRetry === true;
-}
-
 function isAbortedMessageUpdate(event: AssistantMessageUpdateLike): boolean {
 	return event.type === "error" && event.reason === "aborted";
 }
@@ -463,11 +449,6 @@ export default function terminalBell(pi: ExtensionAPI) {
 	// attention bell should never ring for a user-initiated abort, so this flag
 	// suppresses any queued/pending bell until the next agent_start resets it.
 	let userAborted = false;
-	// True while the session is in an auto-retry cycle (relayed via the
-	// extension event bus). Suppresses the failure bell on intermediate retry
-	// attempts; the final exhausted failure still rings because no retry-start
-	// signal precedes it.
-	let retryActive = false;
 	const activeSubagentWaitToolCallIds = new Set<string>();
 	const notifiedAskUserToolCallIds = new Set<string>();
 	const idleDelayMs = parseDelayMs(process.env.PI_TERMINAL_BELL_DELAY_MS);
@@ -500,10 +481,6 @@ export default function terminalBell(pi: ExtensionAPI) {
 	function attemptBell(pending: PendingBell, attempt: number): void {
 		timer = undefined;
 		const { ctx, notification, message } = pending;
-
-		// Safety net: if a retry-start signal arrives between the agent_end that
-		// queued this bell and the timer firing, suppress the bell entirely.
-		if (retryActive) return;
 
 		// Safety net: if the user aborted after the bell was queued (e.g. an
 		// aborted agent_end with no aborted message_update), suppress it.
@@ -592,19 +569,6 @@ export default function terminalBell(pi: ExtensionAPI) {
 		}
 	});
 
-	pi.events.on(RETRY_ACTIVE_EVENT, (data: unknown) => {
-		retryActive = data != null && typeof data === "object" && (data as { active?: unknown }).active === true;
-		if (retryActive) {
-			// A retry is starting right after an intermediate agent_end: cancel
-			// any bell queued from that attempt so we don't chime on every
-			// failed retry attempt. The final exhausted failure rings normally
-			// because it is not followed by a retry-start signal.
-			clearTimer();
-			pendingBell = undefined;
-			deferredUntilSubagentsFinish = false;
-		}
-	});
-
 	pi.events.on(SESSION_ABORTED_EVENT, (data: unknown) => {
 		const aborted = data != null && typeof data === "object" && (data as { aborted?: unknown }).aborted === true;
 		if (!aborted) return;
@@ -623,7 +587,6 @@ export default function terminalBell(pi: ExtensionAPI) {
 		deferredUntilSubagentsFinish = false;
 		lastFailureReason = undefined;
 		userAborted = false;
-		retryActive = false;
 		activeSubagentWaitToolCallIds.clear();
 		notifiedAskUserToolCallIds.clear();
 	});
@@ -669,11 +632,7 @@ export default function terminalBell(pi: ExtensionAPI) {
 		notifiedAskUserToolCallIds.delete(event.toolCallId);
 	});
 
-	pi.on("agent_end", async (event, ctx) => {
-		if (willRetryAfterAgentEnd(event as AgentEndRetryState)) {
-			clearTimer();
-			return;
-		}
+	pi.on("agent_settled", async (_event, ctx) => {
 		if (userAborted) {
 			clearTimer();
 			return;
@@ -700,7 +659,6 @@ export default function terminalBell(pi: ExtensionAPI) {
 		liveSubagentCount = 0;
 		lastFailureReason = undefined;
 		userAborted = false;
-		retryActive = false;
 		activeSubagentWaitToolCallIds.clear();
 		notifiedAskUserToolCallIds.clear();
 	});

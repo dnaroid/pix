@@ -1,10 +1,11 @@
+import type { CustomEntry } from "@earendil-works/pi-coding-agent";
 import type { Entry } from "../types.js";
 import { isRecord } from "../guards.js";
 import { createId } from "../id.js";
 import { isOnlyHiddenMetadata } from "../../markdown-format.js";
 import { extractImageContents, renderContent, renderUserMessageContent, stringifyUnknown } from "../rendering/message-content.js";
 import { THINKING_TOOL_NAME } from "../constants.js";
-import { PIX_SESSION_ENTRY_ID_FIELD, PIX_SYSTEM_MESSAGE_CUSTOM_TYPE, PIX_THINKING_LEVEL_FIELD } from "./pix-system-message.js";
+import { PIX_EXTENSION_ENTRY_ROLE, PIX_SESSION_ENTRY_ID_FIELD, PIX_SYSTEM_DISPLAY_ENTRY_CUSTOM_TYPE, PIX_SYSTEM_MESSAGE_CUSTOM_TYPE, PIX_THINKING_LEVEL_FIELD } from "./pix-system-message.js";
 
 type ToolResultRecord = {
 	content: readonly unknown[];
@@ -220,7 +221,10 @@ function addSessionHistoryRangeEntries(
 		const message = messages[index];
 		if (!isRecord(message)) continue;
 
-		if (message.role === "custom") {
+		if (message.role === PIX_EXTENSION_ENTRY_ROLE) {
+			const entry = extensionSessionEntry(message.entry);
+			if (entry) addEntry(entry);
+		} else if (message.role === "custom") {
 			const entry = customMessageEntry(message);
 			if (entry) addEntry(entry);
 		} else if (message.role === "user") {
@@ -250,6 +254,17 @@ export function customMessageEntry(message: Record<string, unknown>): Entry | un
 	if (customType === PIX_SYSTEM_MESSAGE_CUSTOM_TYPE) return { id: createId("system"), kind: "system", text };
 
 	return { id: createId("custom"), kind: "custom", customType, text };
+}
+
+export function extensionSessionEntry(value: unknown): Extract<Entry, { kind: "extension-entry" }> | undefined {
+	if (!isRecord(value) || value.type !== "custom" || typeof value.id !== "string" || typeof value.customType !== "string") return undefined;
+	if (value.customType === PIX_SYSTEM_DISPLAY_ENTRY_CUSTOM_TYPE) return undefined;
+	return {
+		id: `extension-entry-${value.id}`,
+		kind: "extension-entry",
+		sessionEntry: value as unknown as CustomEntry,
+		expanded: false,
+	};
 }
 
 function renderAssistantHistoryMessage(

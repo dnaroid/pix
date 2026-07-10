@@ -3,7 +3,7 @@ import type { ImageContent } from "../../input-editor.js";
 import type { ConversationViewport } from "../rendering/conversation-viewport.js";
 import { createId } from "../id.js";
 import { extractImageContents, renderContent, renderUserMessageContent, stringifyUnknown } from "../rendering/message-content.js";
-import { customMessageEntry, loadSessionHistoryEntries, loadSessionHistoryEntriesAsync, type LoadOlderSessionHistoryOptions, type SessionHistoryOlderLoader } from "./session-history.js";
+import { customMessageEntry, extensionSessionEntry, loadSessionHistoryEntries, loadSessionHistoryEntriesAsync, type LoadOlderSessionHistoryOptions, type SessionHistoryOlderLoader } from "./session-history.js";
 import { sessionHistoryDisplayMessages, sessionHistoryDisplayMessagesFromEntries, sessionHistoryFullBranchEntries } from "./pix-system-message.js";
 import { THINKING_TOOL_NAME } from "../constants.js";
 import type { Entry, SessionActivity } from "../types.js";
@@ -297,6 +297,11 @@ export class AppSessionEventController {
 			case "message_end":
 				this.handleMessageEnd(event.message);
 				break;
+			case "entry_appended": {
+				const entry = extensionSessionEntry(event.entry);
+				if (entry) this.addEntry(entry);
+				break;
+			}
 			case "agent_start":
 				this.assistantMessageClosed = false;
 				this.host.setSessionActivity("running");

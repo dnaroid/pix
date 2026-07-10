@@ -248,7 +248,7 @@ export class AppMouseController {
 		if (target?.kind === "tool") {
 			if (!this.toolTargetContainsEvent(event)) return;
 			const entry = this.host.findEntry(target.id);
-			if (entry?.kind === "tool" || entry?.kind === "thinking" || entry?.kind === "shell") {
+			if (entry?.kind === "tool" || entry?.kind === "thinking" || entry?.kind === "shell" || entry?.kind === "extension-entry") {
 				entry.expanded = !entry.expanded;
 				this.host.touchEntry(entry);
 				this.showClickFlashForEvent(event);

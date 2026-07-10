@@ -4,6 +4,7 @@ import type { LazySessionHistoryReader } from "./lazy-session-manager.js";
 
 export const PIX_SYSTEM_MESSAGE_CUSTOM_TYPE = "pix-system";
 export const PIX_SYSTEM_DISPLAY_ENTRY_CUSTOM_TYPE = "pix:system_message";
+export const PIX_EXTENSION_ENTRY_ROLE = "pix:extension_entry";
 export const PIX_SESSION_ENTRY_ID_FIELD = "__pixSessionEntryId";
 export const PIX_THINKING_LEVEL_FIELD = "__pixThinkingLevel";
 
@@ -56,6 +57,8 @@ export function sessionHistoryDisplayMessagesFromEntries(branch: readonly Sessio
 				content: entry.data.text,
 				display: true,
 			});
+		} else if (entry.type === "custom") {
+			messages.push({ role: PIX_EXTENSION_ENTRY_ROLE, entry });
 		}
 	}
 

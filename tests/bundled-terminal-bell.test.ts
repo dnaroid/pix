@@ -240,6 +240,7 @@ describe("bundled terminal-bell abort suppression", () => {
 			await handlers.agent_start?.({}, ctx);
 			await handlers.message_update?.({ assistantMessageEvent: { type: "error", reason: "aborted" } }, ctx);
 			await handlers.agent_end?.({}, ctx);
+			await handlers.agent_settled?.({}, ctx);
 			await flush();
 			assert.equal(attentionEvents.length, 0);
 		});
@@ -250,15 +251,19 @@ describe("bundled terminal-bell abort suppression", () => {
 			await handlers.agent_start?.({}, ctx);
 			await handlers.agent_end?.({}, ctx);
 			emit("pix:session-aborted", { aborted: true });
+			await handlers.agent_settled?.({}, ctx);
 			await flush();
 			assert.equal(attentionEvents.length, 0);
 		});
 	});
 
-	it("rings once on a normal completion agent_end", async () => {
+	it("rings once only after a normal completion settles", async () => {
 		await runScenario(async ({ handlers, attentionEvents, ctx, flush }) => {
 			await handlers.agent_start?.({}, ctx);
 			await handlers.agent_end?.({}, ctx);
+			await flush();
+			assert.equal(attentionEvents.length, 0);
+			await handlers.agent_settled?.({}, ctx);
 			await flush();
 			assert.equal(attentionEvents.length, 1);
 		});
@@ -272,6 +277,7 @@ describe("bundled terminal-bell abort suppression", () => {
 				ctx,
 			);
 			await handlers.agent_end?.({}, ctx);
+			await handlers.agent_settled?.({}, ctx);
 			await flush();
 			assert.equal(attentionEvents.length, 1);
 		});
@@ -282,13 +288,37 @@ describe("bundled terminal-bell abort suppression", () => {
 			await handlers.agent_start?.({}, ctx);
 			await handlers.message_update?.({ assistantMessageEvent: { type: "error", reason: "aborted" } }, ctx);
 			await handlers.agent_end?.({}, ctx);
+			await handlers.agent_settled?.({}, ctx);
 			await flush();
 			await handlers.agent_start?.({}, ctx);
 			await handlers.agent_end?.({}, ctx);
+			await handlers.agent_settled?.({}, ctx);
+			await flush();
+			assert.equal(attentionEvents.length, 1);
+		});
+	});
+
+	it("does not ring between retry or continuation attempts", async () => {
+		await runScenario(async ({ handlers, attentionEvents, ctx, flush }) => {
+			await handlers.agent_start?.({}, ctx);
+			await handlers.message_update?.(
+				{ assistantMessageEvent: { type: "error", reason: "error", error: { errorMessage: "transient" } } },
+				ctx,
+			);
+			await handlers.agent_end?.({ willRetry: true }, ctx);
+			await flush();
+			assert.equal(attentionEvents.length, 0);
+
+			await handlers.agent_start?.({}, ctx);
+			await handlers.message_update?.({ assistantMessageEvent: { type: "text_delta", delta: "done" } }, ctx);
+			await handlers.agent_end?.({ willRetry: false }, ctx);
+			await flush();
+			assert.equal(attentionEvents.length, 0);
+
+			await handlers.agent_settled?.({}, ctx);
 			await flush();
 			assert.equal(attentionEvents.length, 1);
 		});
 	});
 });
-
 

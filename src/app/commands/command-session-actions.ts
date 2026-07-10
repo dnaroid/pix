@@ -12,6 +12,7 @@ import { formatAccountUsageReport, queryAccountUsageReport } from "../model/mode
 import type { SessionModel } from "../types.js";
 import { checkPixUpdate, formatPixUpdateCheck, parsePixUpdateArgs, pixUpdateUsage } from "../cli/update.js";
 import { createStartupInfoMessage } from "../cli/startup-info.js";
+import { getCompleteSessionStats } from "../session/session-stats.js";
 import { loadSessionTitleConfig } from "../../bundled-extensions/session-title/config.js";
 import {
 	fallbackSessionTitleFromInput,
@@ -163,7 +164,7 @@ export class SessionCommandActions {
 		const runtime = getRuntime(this.host, "session");
 		if (!runtime) return;
 
-		const stats = runtime.session.getSessionStats();
+		const stats = await getCompleteSessionStats(runtime.session);
 		const lines = [
 			createStartupInfoMessage(runtime),
 			"",
@@ -206,7 +207,7 @@ export class SessionCommandActions {
 			return;
 		}
 
-		const stats = runtime.session.getSessionStats();
+		const stats = await getCompleteSessionStats(runtime.session);
 		const contextUsage = stats.contextUsage ?? runtime.session.getContextUsage();
 		const model = runtime.session.model ? this.host.modelRef(runtime.session.model as SessionModel) : "not selected";
 		const lines = [

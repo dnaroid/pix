@@ -166,7 +166,7 @@ export default function telegramMirror(pi: ExtensionAPI): void {
 	const hooks: PixMirrorHooks = {
 		getRenderer: () => eventSink,
 		describeInstance: (ctx) => describeInstance(ctx),
-		notifyAgentEnd: () => undefined,
+		notifyAgentSettled: () => undefined,
 	};
 
 	registerPixEventHandlers(pi, hooks);

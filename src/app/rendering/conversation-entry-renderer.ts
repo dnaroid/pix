@@ -24,6 +24,7 @@ export type ConversationEntryRenderOptions = {
 	allThinkingExpanded?: boolean;
 	currentTimeMs?: number;
 	renderInlineUserMessageMenu: (entry: Extract<Entry, { kind: "user" }>, context: InlineUserMessageMenuContext) => RenderedLine[];
+	renderExtensionEntry?: (entry: Extract<Entry, { kind: "extension-entry" }>, width: number) => RenderedLine[];
 };
 
 export function renderConversationEntry(entry: Entry, width: number, options: ConversationEntryRenderOptions): RenderedLine[] {
@@ -79,6 +80,8 @@ export function renderConversationEntry(entry: Entry, width: number, options: Co
 			return renderAssistantLines(entry.text, width, options);
 		case "custom":
 			return renderCustomEntry(entry, width);
+		case "extension-entry":
+			return options.renderExtensionEntry?.(entry, width) ?? [];
 		case "session-aborted":
 			return wrapTextLines(entry.text, width).map((line) => ({ text: line.text, copyText: line.copyText, ...(line.continuesOnNextLine ? { continuesOnNextLine: true } : {}), variant: "error" as const }));
 		case "shell":

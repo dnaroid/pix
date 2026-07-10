@@ -526,6 +526,7 @@ describe.serial("extension entrypoint", () => {
 		writeFile(piScript, `
 process.stdin.on("data", () => {
   console.log(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "entrypoint ok" }] }] }));
+  console.log(JSON.stringify({ type: "agent_settled" }));
 });
 setTimeout(() => {}, 1000);
 `);
@@ -835,6 +836,7 @@ process.stdin.on("data", () => {
   console.error("stderr from fake pi");
   console.log(JSON.stringify({ type: "response", command: "get_state", success: true, data: { sessionFile: "/tmp/fake-sub-session.jsonl" } }));
   console.log(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "spawned ok" }] }] }));
+  console.log(JSON.stringify({ type: "agent_settled" }));
 });
 setTimeout(() => {}, 1000);
 `);
@@ -891,6 +893,7 @@ setTimeout(() => {}, 1000);
 		writeFile(piScript, `
 process.stdin.on("data", () => {
   console.log(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "abcdef" }] }] }));
+  console.log(JSON.stringify({ type: "agent_settled" }));
 });
 setTimeout(() => {}, 1000);
 `);
@@ -983,6 +986,7 @@ setTimeout(() => {}, 1000);
 process.stdin.on("data", () => {
   setTimeout(() => {
     console.log(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "queued ok" }] }] }));
+    console.log(JSON.stringify({ type: "agent_settled" }));
   }, 700);
 });
 setTimeout(() => {}, 2000);
@@ -1080,6 +1084,7 @@ setInterval(() => {}, 1000);
 		writeFile(piScript, `
 process.stdin.on("data", () => {
   console.log(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "preset ok" }] }] }));
+  console.log(JSON.stringify({ type: "agent_settled" }));
 });
 setTimeout(() => {}, 1000);
 `);
@@ -1132,6 +1137,7 @@ process.stdin.on("data", () => {
     console.log(JSON.stringify({ type: "response", command: "prompt", success: false, error: "429 quota exceeded for preset/primary" }));
   } else {
     console.log(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "ok " + model }] }] }));
+    console.log(JSON.stringify({ type: "agent_settled" }));
   }
 });
 setTimeout(() => {}, 1000);
@@ -1201,6 +1207,7 @@ process.stdin.on("data", () => {
   console.log(JSON.stringify({ type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 10, errorMessage: "429 Rate limit reached for requests" }));
   setTimeout(() => {
     console.log(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", stopReason: "stop", content: [{ type: "text", text: "retried ok" }] }] }));
+    console.log(JSON.stringify({ type: "agent_settled" }));
   }, 100);
 });
 setTimeout(() => {}, 1000);
@@ -1251,6 +1258,7 @@ setTimeout(() => {}, 1000);
 process.stdin.on("data", () => {
   console.log(JSON.stringify({ type: "response", command: "get_state", success: true, data: { sessionFile: "/tmp/fake-typed-session.jsonl" } }));
   console.log(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "typed ok" }] }] }));
+  console.log(JSON.stringify({ type: "agent_settled" }));
 });
 setTimeout(() => {}, 1000);
 `);
@@ -1306,6 +1314,7 @@ setTimeout(() => {}, 1000);
 		writeFile(piScript, `
 process.stdin.on("data", () => {
   console.log(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "forced ok" }] }] }));
+  console.log(JSON.stringify({ type: "agent_settled" }));
 });
 setTimeout(() => {}, 1000);
 `);

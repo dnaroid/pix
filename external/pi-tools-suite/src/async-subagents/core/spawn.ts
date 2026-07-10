@@ -26,7 +26,6 @@ const AGENT_TIMEOUT_EXIT_CODE = 124;
 const AGENT_TIMEOUT_KILL_GRACE_MS = 5_000;
 const AGENT_SETTLED_TERMINATE_GRACE_MS = 50;
 const AGENT_SETTLED_COMPLETION_FALLBACK_MS = 1_000;
-const AGENT_END_BACKCOMPAT_SETTLE_FALLBACK_MS = 100;
 const EXIT_STDIO_FLUSH_GRACE_MS = 10;
 
 export function shouldPersistSubagentSessions(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -145,7 +144,6 @@ export function spawnAgent(
 	let timeoutKillTimer: NodeJS.Timeout | undefined;
 	let agentSettledKillTimer: NodeJS.Timeout | undefined;
 	let agentSettledCompletionFallbackTimer: NodeJS.Timeout | undefined;
-	let agentEndBackcompatFallbackTimer: NodeJS.Timeout | undefined;
 	let exitFinalizationTimer: NodeJS.Timeout | undefined;
 	const suppressedRpcEventCounts = new Map<string, number>();
 
@@ -157,7 +155,6 @@ export function spawnAgent(
 		if (timeoutKillTimer) clearTimeout(timeoutKillTimer);
 		if (agentSettledKillTimer) clearTimeout(agentSettledKillTimer);
 		if (agentSettledCompletionFallbackTimer) clearTimeout(agentSettledCompletionFallbackTimer);
-		if (agentEndBackcompatFallbackTimer) clearTimeout(agentEndBackcompatFallbackTimer);
 		if (exitFinalizationTimer) clearTimeout(exitFinalizationTimer);
 		if (!fs.existsSync(agentDir)) {
 			onComplete?.({
@@ -220,10 +217,6 @@ export function spawnAgent(
 	};
 
 	const scheduleAgentSettledTermination = () => {
-		if (agentEndBackcompatFallbackTimer) {
-			clearTimeout(agentEndBackcompatFallbackTimer);
-			agentEndBackcompatFallbackTimer = undefined;
-		}
 		if (agentSettledKillTimer) return;
 		agentSettledKillTimer = setTimeout(() => {
 			agentSettledKillTimer = undefined;
@@ -248,21 +241,6 @@ export function spawnAgent(
 			finalizeCompletion(0, null);
 		}, AGENT_SETTLED_COMPLETION_FALLBACK_MS);
 		agentSettledCompletionFallbackTimer.unref?.();
-	};
-
-	const clearAgentEndBackcompatFallback = () => {
-		if (!agentEndBackcompatFallbackTimer) return;
-		clearTimeout(agentEndBackcompatFallbackTimer);
-		agentEndBackcompatFallbackTimer = undefined;
-	};
-
-	const scheduleAgentEndBackcompatFallback = () => {
-		if (agentEndBackcompatFallbackTimer || agentSettledKillTimer) return;
-		agentEndBackcompatFallbackTimer = setTimeout(() => {
-			agentEndBackcompatFallbackTimer = undefined;
-			scheduleAgentSettledTermination();
-		}, AGENT_END_BACKCOMPAT_SETTLE_FALLBACK_MS);
-		agentEndBackcompatFallbackTimer.unref?.();
 	};
 
 	const timeoutMs = options.timeoutMs ?? DEFAULT_AGENT_TIMEOUT_MS;
@@ -305,15 +283,6 @@ export function spawnAgent(
 		}
 		try {
 			const event = JSON.parse(line) as RpcEventRecord;
-			if (
-				event.type === "agent_start"
-				|| event.type === "message_start"
-				|| event.type === "tool_execution_start"
-				|| event.type === "compaction_start"
-				|| event.type === "auto_retry_start"
-			) {
-				clearAgentEndBackcompatFallback();
-			}
 			const storedEvent = compactRpcEventForTranscript(event, Buffer.byteLength(line, "utf8"));
 			if (storedEvent) transcriptStream.write(serializeJsonLine(storedEvent));
 			onRpcEvent?.(event);
@@ -340,7 +309,6 @@ export function spawnAgent(
 				const result = extractAgentEndResult(event);
 				if (result.trim())
 					fs.writeFileSync(path.join(agentDir, "result.md"), result, "utf-8");
-				scheduleAgentEndBackcompatFallback();
 			}
 			if (event.type === "agent_settled") {
 				scheduleAgentSettledTermination();
@@ -368,7 +336,6 @@ export function spawnAgent(
 					lastAgentEndError = "Sub-agent produced an oversized agent_end RPC event before a final result could be captured.";
 					fs.writeFileSync(path.join(agentDir, "result.md"), lastAgentEndError, "utf-8");
 				}
-				scheduleAgentEndBackcompatFallback();
 				return true;
 			}
 			return false;

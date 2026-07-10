@@ -17,6 +17,7 @@ import type {
 } from "./types.js";
 import { AppCommandController } from "./commands/command-controller.js";
 import { ConversationViewport } from "./rendering/conversation-viewport.js";
+import { renderRegisteredExtensionEntry } from "./rendering/extension-entry-renderer.js";
 import { EditorLayoutRenderer } from "./rendering/editor-layout-renderer.js";
 import { AppExtensionActionsController } from "./extensions/extension-actions-controller.js";
 import { ExtensionUiController } from "./extensions/extension-ui-controller.js";
@@ -495,6 +496,12 @@ export class PiUiExtendApp {
 			hasDynamicConversationBlock: () => this.popupMenus.hasDynamicConversationBlock(),
 			isDynamicConversationBlock: (entry) => this.popupMenus.isDynamicConversationBlock(entry),
 			renderInlineUserMessageMenu: (entry, context) => this.popupMenus.renderInlineUserMessageMenu(entry, context),
+			renderExtensionEntry: (entry, width) => renderRegisteredExtensionEntry(
+				entry,
+				width,
+				this.runtime?.session.extensionRunner.getEntryRenderer(entry.sessionEntry.customType),
+				this.theme,
+			),
 		});
 		this.scrollController = new AppScrollController({
 			conversationViewport: () => this.conversationViewport,

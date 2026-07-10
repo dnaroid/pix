@@ -70,9 +70,7 @@ export class AppExtensionActionsController {
 	}
 
 	async waitForSessionIdle(runtime: AgentSessionRuntime): Promise<void> {
-		while (runtime.session.isStreaming || runtime.session.isCompacting) {
-			await new Promise((resolve) => setTimeout(resolve, 50));
-		}
+		await runtime.session.waitForIdle();
 	}
 
 	handleExtensionError(error: ExtensionError): void {

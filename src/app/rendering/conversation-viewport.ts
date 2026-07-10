@@ -19,6 +19,7 @@ export type ConversationViewportHost = {
 	hasDynamicConversationBlock?(): boolean;
 	isDynamicConversationBlock(entry: Entry): boolean;
 	renderInlineUserMessageMenu(entry: Extract<Entry, { kind: "user" }>, context: InlineUserMessageMenuContext): RenderedLine[];
+	renderExtensionEntry?(entry: Extract<Entry, { kind: "extension-entry" }>, width: number): RenderedLine[];
 };
 
 type ViewportLayoutCache = {
@@ -135,6 +136,7 @@ export class ConversationViewport {
 			allThinkingExpanded: Boolean(this.host.allThinkingExpanded),
 			currentTimeMs: Date.now(),
 			renderInlineUserMessageMenu: (userEntry, context) => this.host.renderInlineUserMessageMenu(userEntry, context),
+			renderExtensionEntry: (extensionEntry, renderWidth) => this.host.renderExtensionEntry?.(extensionEntry, renderWidth) ?? [],
 		});
 		const block = {
 			version,
@@ -373,6 +375,7 @@ export class ConversationViewport {
 
 	private isDynamicConversationBlock(entry: Entry): boolean {
 		return (entry.kind === "thinking" && entry.status === "running" && entry.startedAt !== undefined)
+			|| entry.kind === "extension-entry"
 			|| this.host.isDynamicConversationBlock(entry);
 	}
 
@@ -426,6 +429,8 @@ export class ConversationViewport {
 			case "custom":
 			case "session-aborted":
 				return estimateWrappedLineCount(entry.text, width);
+			case "extension-entry":
+				return 1;
 			case "user": {
 				const { contentWidth } = horizontalPaddingLayout(width);
 				return estimateWrappedLineCount(entry.text, contentWidth);

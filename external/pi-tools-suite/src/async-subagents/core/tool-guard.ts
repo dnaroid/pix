@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { ignoreStaleExtensionContextError } from "../../context-usage";
+import { ignoreStaleExtensionContextError } from "../../context-usage.js";
 
 export const SUBAGENT_DENIED_TOOLS = new Set([
 	"question",

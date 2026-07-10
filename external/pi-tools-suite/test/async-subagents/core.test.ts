@@ -1085,14 +1085,20 @@ setTimeout(() => {}, 1000);
 		expect(fs.statSync(path.join(agentDir, "stderr.log")).size).toBeLessThanOrEqual(256);
 	});
 
-	test.serial("completes after agent_end even if the child ignores termination", async () => {
+	test.serial("waits for agent_settled across a delayed continuation", async () => {
 		const cwd = tempDir();
-		const runDir = createRunDir(cwd, "spawn-agent-end-stubborn-child");
+		const runDir = createRunDir(cwd, "spawn-agent-settled-delayed-continuation");
 		const piScript = path.join(tempDir(), "pi.js");
 		writeFile(piScript, `
 process.on("SIGTERM", () => {});
 process.stdin.on("data", () => {
-  console.log(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "done despite stubborn child" }] }] }));
+  console.log(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "intermediate result" }] }], willRetry: false }));
+  setTimeout(() => {
+    console.log(JSON.stringify({ type: "compaction_start", reason: "threshold" }));
+    console.log(JSON.stringify({ type: "agent_start" }));
+    console.log(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "final result after continuation" }] }], willRetry: false }));
+    console.log(JSON.stringify({ type: "agent_settled" }));
+  }, 250);
 });
 setTimeout(() => process.exit(0), 2500);
 setInterval(() => {}, 1000);
@@ -1104,13 +1110,14 @@ setInterval(() => {}, 1000);
 			new Promise<any>((resolve) => {
 				spawnAgent(runDir, { id: "agent-1", task: "Do work" }, cwd, [], undefined, resolve);
 			}),
-			new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Timed out waiting for agent_end fallback completion")), 2000)),
+			new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Timed out waiting for agent_settled completion")), 2000)),
 		]);
 
 		const agentDir = path.join(runDir, "agent-1");
 		expect(Date.now() - startedAt).toBeLessThan(1500);
+		expect(Date.now() - startedAt).toBeGreaterThanOrEqual(250);
 		expect(completed).toMatchObject({ exitCode: 0, state: { status: "done" } });
-		expect(fs.readFileSync(path.join(agentDir, "result.md"), "utf-8")).toBe("done despite stubborn child");
+		expect(fs.readFileSync(path.join(agentDir, "result.md"), "utf-8")).toBe("final result after continuation");
 	});
 
 	test.serial("attaches task image paths to the RPC prompt", async () => {

@@ -39,7 +39,8 @@ describe("loadSessionHistoryEntriesAsync", () => {
 				getBranch: () => [
 					{ type: "message", id: "u1", parentId: null, timestamp: "2026-01-01T00:00:00.000Z", message: { role: "user", content: "hello" } },
 					{ type: "custom", id: "s1", parentId: "u1", timestamp: "2026-01-01T00:00:01.000Z", customType: PIX_SYSTEM_DISPLAY_ENTRY_CUSTOM_TYPE, data: { text: "Selected thinking level high" } },
-					{ type: "message", id: "a1", parentId: "s1", timestamp: "2026-01-01T00:00:02.000Z", message: { role: "assistant", content: [{ text: "done" }] } },
+					{ type: "custom", id: "e1", parentId: "s1", timestamp: "2026-01-01T00:00:02.000Z", customType: "demo:status", data: { label: "ready" } },
+					{ type: "message", id: "a1", parentId: "e1", timestamp: "2026-01-01T00:00:03.000Z", message: { role: "assistant", content: [{ text: "done" }] } },
 				],
 			},
 		} as never);
@@ -57,12 +58,14 @@ describe("loadSessionHistoryEntriesAsync", () => {
 			render: () => {},
 		});
 
-		assert.deepEqual(entries.map((entry) => ({ kind: entry.kind, text: entryText(entry) })), [
-			{ kind: "user", text: "hello" },
-			{ kind: "system", text: "Selected thinking level high" },
-			{ kind: "assistant", text: "done" },
+		assert.deepEqual(entries.map((entry) => entry.kind), ["user", "system", "extension-entry", "assistant"]);
+		assert.deepEqual(entries.filter((entry) => entry.kind !== "extension-entry").map(entryText), [
+			"hello",
+			"Selected thinking level high",
+			"done",
 		]);
 		assert.equal(entries[0]?.kind === "user" ? entries[0].sessionEntryId : undefined, "u1");
+		assert.equal(entries[2]?.kind === "extension-entry" ? entries[2].sessionEntry.customType : undefined, "demo:status");
 	});
 
 	it("uses the lazy persisted tail for initial display", async () => {

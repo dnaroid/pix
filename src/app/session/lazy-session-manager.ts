@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 
 import {
+	buildContextEntries as buildSdkContextEntries,
 	buildSessionContext,
 	SessionManager,
 	type NewSessionOptions,
@@ -35,7 +36,9 @@ export async function openLazySessionManager(sessionPath: string, options: LazyS
 	return await LazySessionManager.open(sessionPath, options) as unknown as SessionManager;
 }
 
-class LazySessionManager {
+type SessionManagerFacade = Omit<SessionManager, "_persist">;
+
+class LazySessionManager implements SessionManagerFacade {
 	private sessionFilePath: string;
 	private sessionDirPath: string;
 	private cwdPath: string;
@@ -65,6 +68,11 @@ class LazySessionManager {
 	private async initialize(cwdOverride: string | undefined): Promise<void> {
 		this.header = await this.loadHeaderAsync(cwdOverride);
 		this.cwdPath = resolve(cwdOverride ?? this.header.cwd ?? process.cwd());
+		if ((this.header.version ?? 1) < CURRENT_SESSION_VERSION) {
+			this.hydrated = SessionManager.open(this.sessionFilePath, this.sessionDirPath, this.cwdPath);
+			this.header = this.hydrated.getHeader() ?? this.header;
+			return;
+		}
 		await this.loadTailEntriesAsync();
 	}
 
@@ -175,6 +183,18 @@ class LazySessionManager {
 
 		const entries = await readAllSessionEntries(this.sessionFilePath);
 		return branchEntries(entries, this.leafId ?? entries.at(-1)?.id);
+	}
+
+	async readFullSessionEntries(): Promise<SessionEntry[]> {
+		if (this.hydrated) return this.hydrated.getEntries();
+		return readAllSessionEntries(this.sessionFilePath);
+	}
+
+	buildContextEntries(): SessionEntry[] {
+		if (this.hydrated) return this.hydrated.buildContextEntries();
+		const entries = this.contextEntries();
+		const byId = new Map(entries.map((entry) => [entry.id, entry]));
+		return buildSdkContextEntries(entries, entries.at(-1)?.id ?? null, byId);
 	}
 
 	buildSessionContext(): SessionContext {

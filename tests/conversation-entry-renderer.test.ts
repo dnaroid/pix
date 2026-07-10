@@ -5,6 +5,7 @@ import type { PixConfig } from "../src/config.js";
 import { APP_ICONS } from "../src/app/icons.js";
 import { ConversationViewport, type ConversationViewportHost } from "../src/app/rendering/conversation-viewport.js";
 import { renderConversationEntry, type ConversationEntryRenderOptions } from "../src/app/rendering/conversation-entry-renderer.js";
+import { renderRegisteredExtensionEntry } from "../src/app/rendering/extension-entry-renderer.js";
 import { ScreenStyler } from "../src/app/screen/screen-styler.js";
 import type { Entry } from "../src/app/types.js";
 import { stringDisplayWidth } from "../src/terminal-width.js";
@@ -33,6 +34,68 @@ const renderOptions: ConversationEntryRenderOptions = {
 	renderInlineUserMessageMenu: () => [],
 };
 describe("renderConversationEntry", () => {
+	it("adapts registered extension entry components into pix rendered lines", () => {
+		const entry = {
+			id: "extension-entry-1",
+			kind: "extension-entry" as const,
+			expanded: false,
+			sessionEntry: {
+				type: "custom" as const,
+				id: "custom-1",
+				parentId: null,
+				timestamp: "2026-01-01T00:00:00.000Z",
+				customType: "demo:status",
+				data: { label: "ready" },
+			},
+		};
+		let seenExpanded: boolean | undefined;
+		let renderedLabel = "ready";
+		let componentCreations = 0;
+		const renderer: NonNullable<Parameters<typeof renderRegisteredExtensionEntry>[2]> = (sessionEntry, options, theme) => {
+			componentCreations += 1;
+			seenExpanded = options.expanded;
+			assert.deepEqual(sessionEntry.data, { label: "ready" });
+			return { render: () => [theme.fg("accent", renderedLabel), "\x1b[1mdetails\x1b[22m"] } as never;
+		};
+		const lines = renderRegisteredExtensionEntry(entry, 40, renderer, THEMES.dark);
+
+		assert.equal(seenExpanded, false);
+		assert.deepEqual(lines.map((line) => line.text), ["ready", "details"]);
+		assert.equal(lines[0]?.segments?.[0]?.foreground, THEMES.dark.colors.accent);
+		assert.equal(lines[1]?.segments?.[0]?.bold, true);
+		assert.deepEqual(lines[0]?.target, { kind: "tool", id: "extension-entry-1" });
+
+		renderedLabel = "updated";
+		assert.equal(renderRegisteredExtensionEntry(entry, 40, renderer, THEMES.dark)[0]?.text, "updated");
+		assert.equal(componentCreations, 1);
+
+		entry.expanded = true;
+		renderRegisteredExtensionEntry(entry, 40, renderer, THEMES.dark);
+		assert.equal(seenExpanded, true);
+		assert.equal(componentCreations, 2);
+	});
+
+	it("hides unregistered extension entries and contains renderer failures", () => {
+		const entry = {
+			id: "extension-entry-1",
+			kind: "extension-entry" as const,
+			expanded: false,
+			sessionEntry: {
+				type: "custom" as const,
+				id: "custom-1",
+				parentId: null,
+				timestamp: "2026-01-01T00:00:00.000Z",
+				customType: "demo:status",
+			},
+		};
+
+		assert.deepEqual(renderRegisteredExtensionEntry(entry, 40, undefined, THEMES.dark), []);
+		assert.deepEqual(
+			renderRegisteredExtensionEntry(entry, 40, () => { throw new Error("broken"); }, THEMES.dark),
+			[{ text: "[demo:status] renderer failed: broken", variant: "error" }],
+		);
+	});
+
 	it("marks assistant messages as markdown for syntax highlighting", () => {
 		const lines = renderConversationEntry({ id: "assistant-1", kind: "assistant", text: "# Title\nUse `code`." }, 80, renderOptions);
 

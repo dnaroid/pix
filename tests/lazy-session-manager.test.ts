@@ -36,6 +36,10 @@ test("lazy session manager exposes the tail branch and reads older entries on de
 		manager.getBranch().filter((entry) => entry.type === "message").map((entry) => entry.id),
 		Array.from({ length: 5 }, (_value, index) => `entry-${index + 7}`),
 	);
+	assert.deepEqual(
+		manager.buildContextEntries().filter((entry) => entry.type === "message").map((entry) => entry.id),
+		Array.from({ length: 5 }, (_value, index) => `entry-${index + 7}`),
+	);
 
 	const reader = (manager as unknown as { createHistoryReader(): LazySessionHistoryReader | undefined }).createHistoryReader();
 	if (!reader) throw new Error("Expected lazy history reader");
@@ -46,6 +50,8 @@ test("lazy session manager exposes the tail branch and reads older entries on de
 
 	const fullBranch = await (manager as unknown as { readFullBranchEntries(): Promise<Array<{ id: string }>> }).readFullBranchEntries();
 	assert.deepEqual(fullBranch.map((entry) => entry.id), Array.from({ length: 12 }, (_value, index) => `entry-${index}`));
+	const fullSession = await (manager as unknown as { readFullSessionEntries(): Promise<Array<{ id: string }>> }).readFullSessionEntries();
+	assert.deepEqual(fullSession.map((entry) => entry.id), Array.from({ length: 12 }, (_value, index) => `entry-${index}`));
 });
 
 test("lazy session manager reads past oversized history entries", async (t) => {

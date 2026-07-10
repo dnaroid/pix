@@ -1,6 +1,7 @@
 import type {
 	AgentSession,
 	ExtensionUIContext,
+	CustomEntry,
 	SessionManager,
 	SessionInfo,
 	SlashCommandSource,
@@ -58,6 +59,7 @@ export type Entry =
 	| { id: string; kind: "queued"; mode: QueuedMessageMode; text: string; queueSource: QueuedMessageSource; queueIndex: number }
 	| { id: string; kind: "assistant"; text: string }
 	| { id: string; kind: "custom"; customType: string; text: string }
+	| { id: string; kind: "extension-entry"; sessionEntry: CustomEntry; expanded: boolean }
 	| { id: string; kind: "session-aborted"; text: string }
 	| {
 			id: string;

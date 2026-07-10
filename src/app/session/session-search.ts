@@ -170,6 +170,8 @@ function entrySearchText(entry: Entry): string {
 			return `${entry.toolName}\n${entry.argsText}\n${entry.output}`;
 		case "shell":
 			return `${entry.command}\n${entry.output}`;
+		case "extension-entry":
+			return entry.sessionEntry.customType;
 		case "user":
 		case "assistant":
 		case "custom":

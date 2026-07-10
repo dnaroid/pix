@@ -109,6 +109,27 @@ afterEach(() => {
 });
 
 describe.serial("Antigravity account rotation", () => {
+	test.serial("clamps the SDK max reasoning level to Antigravity high", async () => {
+		const { buildPayload } = await import("../src/antigravity-auth/payload.js");
+		const payload = buildPayload({
+			id: "gemini-3-flash-preview",
+			provider: "antigravity",
+			api: "antigravity",
+			name: "Gemini 3 Flash",
+			baseUrl: "https://example.invalid",
+			input: ["text"],
+			maxTokens: 8192,
+			contextWindow: 1_000_000,
+			reasoning: true,
+			antigravityProjectId: "project-1",
+		} as any, {
+			messages: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
+		} as any, { reasoning: "max" } as any);
+
+		const request = payload.request as { generationConfig: { thinkingConfig: Record<string, unknown> } };
+		expect(request.generationConfig.thinkingConfig).toEqual({ thinkingLevel: "high", includeThoughts: true });
+	});
+
 	test.serial("preserves Antigravity OAuth client credentials when Pi auth storage refreshes", async () => {
 		const agentDir = tempDir();
 		writeJson(path.join(agentDir, "auth.json"), {

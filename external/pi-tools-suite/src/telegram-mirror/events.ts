@@ -18,7 +18,11 @@ export interface RendererSink {
 }
 
 export function registerPixEventHandlers(pi: ExtensionAPI, hooks: PixMirrorHooks): void {
+	let turnActive = false;
+
 	pi.on("agent_start", (_event, ctx) => {
+		if (turnActive) return;
+		turnActive = true;
 		hooks.getRenderer()?.push({ kind: "turn_start", instance: hooks.describeInstance(ctx as ExtensionContext | undefined) });
 	});
 
@@ -33,16 +37,18 @@ export function registerPixEventHandlers(pi: ExtensionAPI, hooks: PixMirrorHooks
 		// user-visible assistant answer, not internal reasoning/tools.
 	});
 
-	pi.on("agent_end", () => {
+	pi.on("agent_settled", () => {
+		if (!turnActive) return;
+		turnActive = false;
 		hooks.getRenderer()?.push({ kind: "turn_end", reason: "end" });
-		hooks.notifyAgentEnd();
+		hooks.notifyAgentSettled();
 	});
 }
 
 export interface PixMirrorHooks {
 	getRenderer(): RendererSink | undefined;
 	describeInstance(ctx: ExtensionContext | undefined): RendererInstance | undefined;
-	notifyAgentEnd(): void;
+	notifyAgentSettled(): void;
 }
 
 export function captureAbortableContext(ctx: ExtensionContext | undefined, hooks: ContextCapture): void {
@@ -59,4 +65,3 @@ export interface ContextCapture {
 	capturePending(fn: () => boolean): void;
 	captureCompact(fn: () => void): void;
 }
-
