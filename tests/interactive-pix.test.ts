@@ -13,6 +13,9 @@ const PIX_MAIN = join(PROJECT_ROOT, "src", "main.ts");
 const PTY_DRIVER = join(PROJECT_ROOT, "tests", "helpers", "pty-driver.py");
 const DEFAULT_ROWS = 24;
 const DEFAULT_COLS = 100;
+// A cold Linux CI runner starts pix while the rest of the test files are also
+// loading. Keep startup waits separate from the tighter interaction waits.
+const PTY_STARTUP_TIMEOUT_MS = 20_000;
 
 /**
  * PTY tests run on Linux in CI. Set PIX_TEST_PTY=1 to force-run them locally on
@@ -28,7 +31,7 @@ describe("pix interactive PTY", { skip: PTY_SKIP_REASON }, () => {
 		const pix = await PixPty.start(mockModel);
 
 		try {
-			await pix.waitForText(mockModel.openaiModelRef, "initial status line");
+			await pix.waitForText(mockModel.openaiModelRef, "initial status line", PTY_STARTUP_TIMEOUT_MS);
 
 			const statusRow = pix.rows;
 			const statusLine = pix.screen.line(statusRow);
@@ -53,7 +56,7 @@ describe("pix interactive PTY", { skip: PTY_SKIP_REASON }, () => {
 		const pix = await PixPty.start(mockModel);
 
 		try {
-			await pix.waitForText(mockModel.openaiModelRef, "initial status line");
+			await pix.waitForText(mockModel.openaiModelRef, "initial status line", PTY_STARTUP_TIMEOUT_MS);
 
 			pix.write("please produce many lines");
 			pix.enter();
@@ -82,7 +85,7 @@ describe("pix interactive PTY", { skip: PTY_SKIP_REASON }, () => {
 		const pix = await PixPty.start(mockModel);
 
 		try {
-			await pix.waitForText(mockModel.openaiModelRef, "initial status line");
+			await pix.waitForText(mockModel.openaiModelRef, "initial status line", PTY_STARTUP_TIMEOUT_MS);
 
 			pix.write("please read the probe file");
 			pix.enter();
@@ -112,7 +115,7 @@ describe("pix interactive PTY", { skip: PTY_SKIP_REASON }, () => {
 		const pix = await PixPty.start(mockModel);
 
 		try {
-			await pix.waitForText(mockModel.openaiModelRef, "initial status line");
+			await pix.waitForText(mockModel.openaiModelRef, "initial status line", PTY_STARTUP_TIMEOUT_MS);
 
 			pix.write("apply a large patch, then run the shell marker");
 			pix.enter();
@@ -137,7 +140,7 @@ describe("pix interactive PTY", { skip: PTY_SKIP_REASON }, () => {
 		const pix = await PixPty.start(mockModel, { modelRef: mockModel.anthropicModelRef });
 
 		try {
-			await pix.waitForText(mockModel.anthropicModelRef, "anthropic provider status line");
+			await pix.waitForText(mockModel.anthropicModelRef, "anthropic provider status line", PTY_STARTUP_TIMEOUT_MS);
 
 			pix.write("answer via anthropic");
 			pix.enter();
@@ -163,7 +166,7 @@ describe("pix interactive PTY", { skip: PTY_SKIP_REASON }, () => {
 		const pix = await PixPty.start(mockModel);
 
 		try {
-			await pix.waitForText(mockModel.openaiModelRef, "initial status line");
+			await pix.waitForText(mockModel.openaiModelRef, "initial status line", PTY_STARTUP_TIMEOUT_MS);
 
 			pix.write("trigger an aborted stream");
 			pix.enter();
@@ -192,7 +195,7 @@ describe("pix interactive PTY", { skip: PTY_SKIP_REASON }, () => {
 		const pix = await PixPty.start(mockModel);
 
 		try {
-			await pix.waitForText(mockModel.openaiModelRef, "initial status line");
+			await pix.waitForText(mockModel.openaiModelRef, "initial status line", PTY_STARTUP_TIMEOUT_MS);
 
 			pix.write("trigger a rate limit");
 			pix.enter();
@@ -228,7 +231,7 @@ describe("pix interactive PTY", { skip: PTY_SKIP_REASON }, () => {
 		const pix = await PixPty.start(mockModel);
 
 		try {
-			await pix.waitForText(mockModel.openaiModelRef, "initial status line");
+			await pix.waitForText(mockModel.openaiModelRef, "initial status line", PTY_STARTUP_TIMEOUT_MS);
 
 			pix.write("emit malformed tool args");
 			pix.enter();
@@ -251,7 +254,7 @@ describe("pix interactive PTY", { skip: PTY_SKIP_REASON }, () => {
 		const pix = await PixPty.start(mockModel);
 
 		try {
-			await pix.waitForText(mockModel.openaiModelRef, "initial status line");
+			await pix.waitForText(mockModel.openaiModelRef, "initial status line", PTY_STARTUP_TIMEOUT_MS);
 
 			pix.write("first turn");
 			pix.enter();
@@ -276,7 +279,7 @@ describe("pix interactive PTY", { skip: PTY_SKIP_REASON }, () => {
 		const pix = await PixPty.start(mockModel);
 
 		try {
-			await pix.waitForText(mockModel.openaiModelRef, "initial status line");
+			await pix.waitForText(mockModel.openaiModelRef, "initial status line", PTY_STARTUP_TIMEOUT_MS);
 
 			pix.write("produce a long response");
 			pix.enter();
@@ -313,7 +316,7 @@ describe("pix interactive PTY", { skip: PTY_SKIP_REASON }, () => {
 		const pix = await PixPty.start(mockModel);
 
 		try {
-			await pix.waitForText(mockModel.openaiModelRef, "initial status line");
+			await pix.waitForText(mockModel.openaiModelRef, "initial status line", PTY_STARTUP_TIMEOUT_MS);
 
 			pix.write("read both probe files");
 			pix.enter();
@@ -339,7 +342,7 @@ describe("pix interactive PTY", { skip: PTY_SKIP_REASON }, () => {
 		const pix = await PixPty.start(mockModel);
 
 		try {
-			await pix.waitForText(mockModel.openaiModelRef, "initial status line");
+			await pix.waitForText(mockModel.openaiModelRef, "initial status line", PTY_STARTUP_TIMEOUT_MS);
 
 			pix.write("produce many lines then we resize");
 			pix.enter();
@@ -369,7 +372,7 @@ describe("pix interactive PTY", { skip: PTY_SKIP_REASON }, () => {
 		const pix = await PixPty.start(mockModel);
 
 		try {
-			await pix.waitForText(mockModel.openaiModelRef, "initial status line");
+			await pix.waitForText(mockModel.openaiModelRef, "initial status line", PTY_STARTUP_TIMEOUT_MS);
 
 			pix.write("produce a long response");
 			pix.enter();
@@ -397,7 +400,7 @@ describe("pix interactive PTY", { skip: PTY_SKIP_REASON }, () => {
 		const pix = await PixPty.start(mockModel);
 
 		try {
-			await pix.waitForText(mockModel.openaiModelRef, "initial status line");
+			await pix.waitForText(mockModel.openaiModelRef, "initial status line", PTY_STARTUP_TIMEOUT_MS);
 
 			pix.write("produce many lines");
 			pix.enter();
@@ -428,7 +431,7 @@ describe("pix interactive PTY", { skip: PTY_SKIP_REASON }, () => {
 		const pix = await PixPty.start(mockModel);
 
 		try {
-			await pix.waitForText(mockModel.openaiModelRef, "initial status line");
+			await pix.waitForText(mockModel.openaiModelRef, "initial status line", PTY_STARTUP_TIMEOUT_MS);
 
 			pix.write("\x1b[200~PIX-PASTE-LINE-ONE\nPIX-PASTE-LINE-TWO\x1b[201~");
 			await pix.waitForText(/\[Pasted ~2 lines\]/u, "multi-line paste collapsed into a virtual tag");
@@ -465,7 +468,7 @@ describe("pix interactive PTY", { skip: PTY_SKIP_REASON }, () => {
 		const pix = await PixPty.start(mockModel);
 
 		try {
-			await pix.waitForText(mockModel.openaiModelRef, "initial status line");
+			await pix.waitForText(mockModel.openaiModelRef, "initial status line", PTY_STARTUP_TIMEOUT_MS);
 
 			pix.write("send unicode");
 			pix.enter();
