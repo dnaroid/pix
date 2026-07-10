@@ -695,6 +695,7 @@ function thinkingRankThemeColor(label: string, rank: number, count: number, colo
 		colors.warning,
 		colors.error,
 		colors.thinkingXHigh,
+		colors.thinkingMax,
 	];
 	const palette = count > baseColors.length ? [colors.statusForeground, ...baseColors] : baseColors;
 	const fallbackRank = DEFAULT_THINKING_LEVEL_LABELS.indexOf(label);

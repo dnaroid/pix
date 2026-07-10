@@ -30,7 +30,7 @@ function uniqueNumbers(values: number[] | undefined): number[] {
 }
 
 function isTodoThinkingLevel(value: unknown): value is TodoThinkingLevel {
-	return value === "off" || value === "minimal" || value === "low" || value === "medium" || value === "high" || value === "xhigh";
+	return value === "off" || value === "minimal" || value === "low" || value === "medium" || value === "high" || value === "xhigh" || value === "max";
 }
 
 function findTask(state: TaskState, id: number): Task | undefined {

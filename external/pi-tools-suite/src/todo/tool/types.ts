@@ -24,7 +24,7 @@ export const MSG_NO_TODOS = "No todos yet. Ask the agent to add some!";
 // ---------------------------------------------------------------------------
 
 export type TaskStatus = "pending" | "in_progress" | "deferred" | "completed" | "deleted";
-export type TodoThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export type TodoThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 export type TaskAction = "create" | "update" | "batch_create" | "batch_update" | "list" | "get" | "delete" | "clear" | "export" | "import";
 
@@ -104,7 +104,7 @@ export const TodoParamsSchema = Type.Object({
 		}),
 	),
 	thinking: Type.Optional(
-		StringEnum(["off", "minimal", "low", "medium", "high", "xhigh"] as const, {
+		StringEnum(["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const, {
 			description: "Per-task thinking level used when todoThinking is enabled and this task is in_progress",
 		}),
 	),

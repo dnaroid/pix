@@ -117,6 +117,7 @@ export class AppMenuItemsController {
 				level === "off" ? "disabled none no reasoning" : "reasoning thinking effort",
 				level === "minimal" ? "fast small" : "",
 				level === "xhigh" ? "extra highest maximum" : "",
+				level === "max" ? "maximum most" : "",
 			].filter(Boolean),
 		}));
 
@@ -267,6 +268,8 @@ export class AppMenuItemsController {
 				return "High reasoning";
 			case "xhigh":
 				return "Extra high reasoning";
+			case "max":
+				return "Maximum reasoning";
 		}
 	}
 }

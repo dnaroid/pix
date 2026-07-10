@@ -27,7 +27,7 @@ const TODO_NUDGE_INITIAL_DELAY_MS = 0;
 const TODO_NUDGE_IDLE_RETRY_DELAY_MS = 100;
 const TODO_NUDGE_MAX_IDLE_ATTEMPTS = 40;
 const ASK_USER_TOOL_NAMES = new Set(["ask_user", "ask_user_question", "question"]);
-const TODO_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+const TODO_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 const TODO_THINKING_RESTORE_METADATA_KEY = "__piTodoRestoreThinking";
 
 function isStaleExtensionContextError(error: unknown): boolean {

@@ -59,7 +59,7 @@ export type AutocompleteConfig = {
 
 export type DefaultModelConfig = {
 	modelRef: string;
-	thinking?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+	thinking?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 };
 
 export type ModelColorsConfig = {
@@ -149,7 +149,7 @@ const DEFAULT_OUTPUT_FILTERS: OutputFiltersConfig = {
 	patterns: [],
 };
 
-const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 type ConfigThinkingLevel = (typeof THINKING_LEVELS)[number];
 
 const DEFAULT_PROMPT_ENHANCER: PromptEnhancerConfig = {

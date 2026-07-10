@@ -344,8 +344,8 @@ describe("StatusLineRenderer", () => {
 		})));
 	});
 
-	it("uses the muted theme thinking palette from off through xhigh", () => {
-		const levels = ["off", "minimal", "low", "medium", "high", "xhigh"];
+	it("uses the muted theme thinking palette from off through max", () => {
+		const levels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 		const expectedColors = [
 			THEMES.dark.colors.muted,
 			THEMES.dark.colors.success,
@@ -353,6 +353,7 @@ describe("StatusLineRenderer", () => {
 			THEMES.dark.colors.warning,
 			THEMES.dark.colors.error,
 			THEMES.dark.colors.thinkingXHigh,
+			THEMES.dark.colors.thinkingMax,
 		];
 
 		for (const [index, level] of levels.entries()) {
@@ -372,10 +373,11 @@ describe("StatusLineRenderer", () => {
 		}
 
 		assert.notEqual(THEMES.dark.colors.error, THEMES.dark.colors.thinkingXHigh);
+		assert.notEqual(THEMES.dark.colors.thinkingXHigh, THEMES.dark.colors.thinkingMax);
 	});
 
 	it("prepends the status foreground when thinking has more levels than the base palette", () => {
-		const levels = ["none", "off", "minimal", "low", "medium", "high", "xhigh"];
+		const levels = ["none", "off", "minimal", "low", "medium", "high", "xhigh", "max"];
 		const renderer = statusLineRenderer({
 			widgetText: "",
 			voiceActive: false,

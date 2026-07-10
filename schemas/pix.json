@@ -46,6 +46,10 @@
             {
               "type": "string",
               "const": "xhigh"
+            },
+            {
+              "type": "string",
+              "const": "max"
             }
           ],
           "description": "Default model thinking budget level."

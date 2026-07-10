@@ -310,6 +310,10 @@ export class AppSessionEventController {
 				this.clearCurrentAssistantState();
 				this.finalizeAbandonedToolEntries();
 				this.currentUserEntryId = undefined;
+				this.host.setSessionActivity(this.host.runtime()?.session.isStreaming ? "running" : "idle");
+				this.host.setSessionStatus(this.host.runtime()?.session);
+				break;
+			case "agent_settled":
 				this.host.setSessionActivity("idle");
 				this.host.setSessionStatus(this.host.runtime()?.session);
 				this.host.flushAutoUserMessages();

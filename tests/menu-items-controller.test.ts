@@ -66,13 +66,13 @@ describe("AppMenuItemsController queue menu", () => {
 				model: model("zai", "glm-5-turbo", "GLM"),
 				thinkingLevel: "low",
 				scopedModels: [],
-				getAvailableThinkingLevels: () => ["high", "xhigh"],
+				getAvailableThinkingLevels: () => ["high", "xhigh", "max"],
 			},
 			services: { settingsManager: { getEnabledModels: () => undefined } },
 		} as unknown as AgentSessionRuntime;
 		const controller = new AppMenuItemsController(host(runtime));
 
-		assert.deepEqual(controller.getThinkingMenuItems("").map((item) => item.label), ["high", "xhigh"]);
+		assert.deepEqual(controller.getThinkingMenuItems("").map((item) => item.label), ["high", "xhigh", "max"]);
 	});
 
 	it("uses one universal cancellation item for queued messages", () => {

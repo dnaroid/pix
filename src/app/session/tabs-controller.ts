@@ -998,12 +998,14 @@ export class AppTabsController {
 		return event.type === "session_info_changed"
 			|| event.type === "agent_start"
 			|| event.type === "agent_end"
+			|| event.type === "agent_settled"
 			|| event.type === "compaction_start"
 			|| event.type === "compaction_end";
 	}
 
 	private shouldScheduleDelayedSyncForRuntimeEvent(event: AgentSessionEvent): boolean {
 		return event.type === "agent_end"
+			|| event.type === "agent_settled"
 			|| event.type === "turn_end"
 			|| event.type === "compaction_end";
 	}
@@ -1016,6 +1018,7 @@ export class AppTabsController {
 			|| event.type === "tool_execution_update"
 			|| event.type === "tool_execution_end"
 			|| event.type === "agent_end"
+			|| event.type === "agent_settled"
 			|| event.type === "turn_end"
 			|| event.type === "compaction_end";
 	}

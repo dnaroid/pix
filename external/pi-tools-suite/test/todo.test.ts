@@ -598,7 +598,7 @@ describe.serial("todo extension lifecycle", () => {
 		const ctx = {
 			cwd: mkdtempSync(join(tmpdir(), "todo-thinking-")),
 			hasUI: false,
-			model: { reasoning: true, thinkingLevelMap: { xhigh: null } },
+			model: { reasoning: true, thinkingLevelMap: { xhigh: null, max: null } },
 			sessionManager: { getBranch: () => [] },
 			isIdle: () => true,
 			hasPendingMessages: () => false,
@@ -609,6 +609,7 @@ describe.serial("todo extension lifecycle", () => {
 			const tool = pi.tools.get("todo");
 			expect(tool.promptSnippet).toContain("Optional per-item thinking: off|minimal|low|medium|high");
 			expect(tool.promptSnippet).not.toContain("xhigh");
+			expect(tool.promptSnippet).not.toContain("max");
 			expect(tool.promptGuidelines.join("\n")).toContain("assign task `thinking` during create/batch_create");
 			expect(tool.promptGuidelines.join("\n")).toContain("Do not leave all thinking unset for a non-trivial mixed-complexity plan");
 

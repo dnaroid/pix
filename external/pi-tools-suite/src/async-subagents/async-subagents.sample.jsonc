@@ -96,7 +96,7 @@
   //     "extraArgs": ["optional", "global", "pi", "args"],
   //     "timeoutMs": 1800000,
   //     "types": {
-  //       "roleName": { "model": "provider/model", "fallbackModels": ["provider/backup"], "thinking": "off|low|medium|high|xhigh", "timeoutMs": 1800000 }
+  //       "roleName": { "model": "provider/model", "fallbackModels": ["provider/backup"], "thinking": "off|low|medium|high|xhigh|max", "timeoutMs": 1800000 }
   //     }
   //   }
   // }

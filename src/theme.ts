@@ -50,6 +50,7 @@ export type Theme = {
 		thinkingForeground: string;
 		userForeground: string;
 		thinkingXHigh: string;
+		thinkingMax: string;
 		modelOpenAI: string;
 		statusDotBase: string;
 		statusDotRunningDim: string;
@@ -107,6 +108,7 @@ export const THEMES: Record<ThemeName, Theme> = {
 			thinkingForeground: "#64748b",
 			userForeground: "#d97706",
 			thinkingXHigh: "#ff8a86",
+			thinkingMax: "#ff5f8f",
 			modelOpenAI: "#c8b45a",
 			statusDotBase: "#30363d",
 			statusDotRunningDim: "#30363d",
@@ -162,6 +164,7 @@ export const THEMES: Record<ThemeName, Theme> = {
 			thinkingForeground: "#6b5491",
 			userForeground: "#854d0e",
 			thinkingXHigh: "#cf333d",
+			thinkingMax: "#b91c57",
 			modelOpenAI: "#75671f",
 			statusDotBase: "#334155",
 			statusDotRunningDim: "#334155",

@@ -20,7 +20,7 @@ describe("theme helpers", () => {
 	});
 
 	it("keeps semantic text colors WCAG AA readable", () => {
-		const semanticTextColors = ["accent", "success", "warning", "info", "toolMutation", "toolSearch", "toolTitle", "thinkingXHigh", "modelOpenAI", "error"] as const;
+		const semanticTextColors = ["accent", "success", "warning", "info", "toolMutation", "toolSearch", "toolTitle", "thinkingXHigh", "thinkingMax", "modelOpenAI", "error"] as const;
 
 		for (const theme of Object.values(THEMES)) {
 			for (const colorName of semanticTextColors) {
