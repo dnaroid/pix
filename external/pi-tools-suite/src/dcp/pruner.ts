@@ -12,10 +12,18 @@ import {
 
 export type {
   CompressionCandidate,
+  EmergencyCurrentTurnSelection,
+  EmergencyCurrentTurnStats,
   MessageCompressionCandidate,
   MessagePriority,
   NudgeThresholds,
 } from "./pruner-types.js";
+export {
+  analyzeEmergencyCurrentTurn,
+  emergencyPressureState,
+  emergencyCurrentTurnMessageCandidates,
+  pruneEmergencyCurrentTurn,
+} from "./pruner-emergency.js";
 export {
   estimateTokens,
   getActiveSummaryTokenEstimate,

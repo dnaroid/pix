@@ -9,16 +9,25 @@ import { registerCommands } from "../src/dcp/commands.js";
 import {
   applyPruning,
   appendConcreteNudgeGuidance,
+  analyzeEmergencyCurrentTurn,
   applyAnchoredNudges,
   clearDcpNudgeAnchors,
   detectCompressionCandidate,
   detectMessageCompressionCandidates,
+  emergencyCurrentTurnMessageCandidates,
+  emergencyPressureState,
   estimateTokens,
   getActiveSummaryTokenEstimate,
   getNudgeType,
+  pruneEmergencyCurrentTurn,
   resolveContextThresholds,
   upsertNudgeAnchor,
 } from "../src/dcp/pruner.js";
+import {
+  collectProviderToolResultEvidence,
+  providerPayloadIncludesToolResult,
+} from "../src/dcp/provider-tool-results.js";
+import { dcpDebugLogDrain } from "../src/dcp/debug-log.js";
 import {
   createState,
   createInputFingerprint,
@@ -39,7 +48,7 @@ import {
 } from "../src/dcp/auto-compress.js";
 import type { CompressionCandidate } from "../src/dcp/pruner-types.js";
 
-function config(overrides: Partial<DcpConfig> = {}): DcpConfig {
+function config(overrides: any = {}): DcpConfig {
   const base: DcpConfig = {
     enabled: true,
     debug: false,
@@ -89,6 +98,16 @@ function config(overrides: Partial<DcpConfig> = {}): DcpConfig {
         readLikeTurns: 3,
         protectedTools: [],
       },
+      emergencyCurrentTurnPruning: {
+        enabled: true,
+        hardContextPercent: 0.82,
+        targetContextPercent: 0.70,
+        patience: 2,
+        keepRecentToolPairs: 8,
+        minOutputTokens: 500,
+        maxSuggestions: 8,
+        protectedTools: [],
+      },
     },
     protectedFilePatterns: [],
     pruneNotification: "off",
@@ -127,6 +146,10 @@ function config(overrides: Partial<DcpConfig> = {}): DcpConfig {
       autoToolPruning: {
         ...base.strategies.autoToolPruning,
         ...overrides.strategies?.autoToolPruning,
+      },
+      emergencyCurrentTurnPruning: {
+        ...base.strategies.emergencyCurrentTurnPruning,
+        ...overrides.strategies?.emergencyCurrentTurnPruning,
       },
     },
   };
@@ -1228,6 +1251,198 @@ describe("DCP pruning effectiveness", () => {
     expect(state.messageMetaSnapshot.get("m002")?.priority).toBe("high");
   });
 
+  test("emergency same-turn candidates preserve recent, unseen, user, and protected outputs", () => {
+    const state = createState();
+    const cfg = config({
+      compress: { protectTags: true },
+      protectedFilePatterns: ["**/.env"],
+      strategies: {
+        emergencyCurrentTurnPruning: {
+          keepRecentToolPairs: 2,
+          minOutputTokens: 100,
+          maxSuggestions: 10,
+        },
+      },
+    });
+    const messages = [textMessage("user", "active request " + "u".repeat(5_000), 1)];
+    const definitions = [
+      { id: "eligible", tool: "read", input: { path: "/tmp/a.txt" }, text: "a".repeat(2_000), seen: true },
+      { id: "protected-tool", tool: "write", input: { path: "/tmp/out.txt" }, text: "b".repeat(2_000), seen: true },
+      { id: "protected-file", tool: "read", input: { path: "/tmp/.env" }, text: "c".repeat(2_000), seen: true },
+      { id: "protected-tag", tool: "read", input: { path: "/tmp/tag.txt" }, text: `<protect>${"d".repeat(2_000)}</protect>`, seen: true },
+      { id: "unseen", tool: "read", input: { path: "/tmp/new.txt" }, text: "e".repeat(2_000), seen: false },
+      { id: "recent-1", tool: "read", input: { path: "/tmp/r1.txt" }, text: "f".repeat(2_000), seen: true },
+      { id: "recent-2", tool: "read", input: { path: "/tmp/r2.txt" }, text: "g".repeat(2_000), seen: true },
+    ];
+
+    definitions.forEach((definition, index) => {
+      const timestamp = 10 + index * 2;
+      messages.push(assistantToolCall(definition.id, timestamp));
+      messages.push(toolResult(definition.id, definition.tool, definition.text, timestamp + 1));
+      state.toolCalls.set(
+        definition.id,
+        toolRecord(definition.id, definition.tool, `${definition.tool}::${definition.id}`, 500, 1, definition.input),
+      );
+      if (definition.seen) state.providerSeenToolIds.add(definition.id);
+    });
+
+    const providerMessages = applyPruning(messages, state, cfg);
+    const selection = analyzeEmergencyCurrentTurn(providerMessages, state, cfg);
+    const candidates = emergencyCurrentTurnMessageCandidates(selection, cfg);
+
+    expect(selection.eligible.map((output) => output.toolCallId)).toEqual(["eligible"]);
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.role).toBe("toolResult");
+    expect(candidates[0]?.messageId).toBeDefined();
+    expect(selection.stats.preservedRecentPairs).toBe(2);
+    expect(selection.stats.preservedUnseenPairs).toBe(1);
+    expect(selection.stats.preservedProtectedPairs).toBe(3);
+
+    pruneEmergencyCurrentTurn(selection, state, 100_000);
+    expect(state.prunedToolIds).toEqual(new Set(["eligible"]));
+    expect(state.prunedToolIds.has("unseen")).toBe(false);
+    expect(providerMessages.map(contentText).join("\n")).toContain("active request");
+  });
+
+  test("emergency hard pressure is independent of a higher model threshold", () => {
+    expect(emergencyPressureState(0.85, 0.90, 0.82)).toEqual({
+      hardEmergencyReached: true,
+      contextLimitReached: false,
+      emergencyPressureReached: true,
+    });
+    expect(emergencyPressureState(0.80, 0.90, 0.82).emergencyPressureReached).toBe(false);
+  });
+
+  test("disabled emergency pruning produces no same-turn candidates", () => {
+    const state = createState();
+    const cfg = config({
+      strategies: {
+        emergencyCurrentTurnPruning: {
+          enabled: false,
+          keepRecentToolPairs: 0,
+          minOutputTokens: 1,
+        },
+      },
+    });
+    const messages = [
+      textMessage("user", "active request", 1),
+      assistantToolCall("disabled-pair", 2),
+      toolResult("disabled-pair", "read", "x".repeat(4_000), 3),
+    ];
+    state.toolCalls.set("disabled-pair", toolRecord("disabled-pair", "read", "read::disabled", 1_000, 1));
+    state.providerSeenToolIds.add("disabled-pair");
+
+    const selection = analyzeEmergencyCurrentTurn(applyPruning(messages, state, cfg), state, cfg);
+    expect(selection.eligible).toHaveLength(0);
+    expect(emergencyCurrentTurnMessageCandidates(selection, cfg)).toHaveLength(0);
+  });
+
+  test("provider exposure requires tool-result evidence in the outgoing payload", () => {
+    const record = toolRecord("call-1|item-1", "read", "read::call-1", 1_000, 1);
+    record.outputText = "provider-visible output";
+
+    expect(providerPayloadIncludesToolResult(
+      collectProviderToolResultEvidence({
+        input: [{ type: "function_call_output", call_id: "call-1", output: record.outputText }],
+      }),
+      record,
+    )).toBe(true);
+    expect(providerPayloadIncludesToolResult(
+      collectProviderToolResultEvidence({
+        contents: [{ parts: [{ functionResponse: { name: "read", response: { output: record.outputText } } }] }],
+      }),
+      record,
+    )).toBe(true);
+    expect(providerPayloadIncludesToolResult(
+      collectProviderToolResultEvidence({ messages: [{ role: "user", content: "continue" }] }),
+      record,
+    )).toBe(false);
+  });
+
+  test("emergency analysis excludes bashExecution messages that cannot be placeholder-pruned", () => {
+    const state = createState();
+    const cfg = config({
+      strategies: {
+        emergencyCurrentTurnPruning: {
+          keepRecentToolPairs: 0,
+          minOutputTokens: 1,
+        },
+      },
+    });
+    const messages = [
+      textMessage("user", "active request", 1),
+      assistantToolCall("bash-pair", 2),
+      {
+        role: "bashExecution",
+        toolCallId: "bash-pair",
+        toolName: "shell",
+        content: "x".repeat(4_000),
+        timestamp: 3,
+      },
+    ];
+    state.toolCalls.set("bash-pair", toolRecord("bash-pair", "shell", "shell::bash-pair", 1_000, 1));
+    state.providerSeenToolIds.add("bash-pair");
+
+    const selection = analyzeEmergencyCurrentTurn(applyPruning(messages, state, cfg), state, cfg);
+    expect(selection.eligible).toHaveLength(0);
+    expect(selection.stats.totalPairs).toBe(0);
+  });
+
+  test("emergency pruning stops at its budget and preserves tool-call/result validity", () => {
+    const state = createState();
+    const cfg = config({
+      strategies: {
+        emergencyCurrentTurnPruning: {
+          keepRecentToolPairs: 2,
+          minOutputTokens: 100,
+        },
+      },
+    });
+    const messages = [textMessage("user", "keep this user request", 1)];
+    for (let index = 0; index < 6; index++) {
+      const id = `pair-${index}`;
+      const timestamp = 10 + index * 2;
+      messages.push(assistantToolCall(id, timestamp));
+      messages.push(toolResult(id, "read", `raw-${id}-` + "x".repeat(4_000), timestamp + 1));
+      state.toolCalls.set(id, toolRecord(id, "read", `read::${id}`, 1_000, 1));
+      state.providerSeenToolIds.add(id);
+    }
+
+    const before = applyPruning(messages, state, cfg);
+    const beforeTokens = before.reduce((sum, message) => sum + estimateTokens(contentText(message)), 0);
+    const selection = analyzeEmergencyCurrentTurn(before, state, cfg);
+    expect(selection.eligible.map((output) => output.toolCallId)).toEqual([
+      "pair-0",
+      "pair-1",
+      "pair-2",
+      "pair-3",
+    ]);
+
+    const pruned = pruneEmergencyCurrentTurn(selection, state, 1_500);
+    expect(pruned.prunedToolCallIds).toEqual(["pair-0", "pair-1"]);
+    expect(pruned.estimatedTokensRecovered).toBe(
+      selection.eligible[0]!.recoverableTokens + selection.eligible[1]!.recoverableTokens,
+    );
+
+    const after = applyPruning(messages, state, cfg);
+    const afterTokens = after.reduce((sum, message) => sum + estimateTokens(contentText(message)), 0);
+    expect(afterTokens).toBeLessThan(beforeTokens);
+    expect(contentText(after.find((message) => message.toolCallId === "pair-0"))).toContain("current-turn context emergency");
+    expect(contentText(after.find((message) => message.toolCallId === "pair-2"))).toContain("raw-pair-2");
+    expect(contentText(after.find((message) => message.toolCallId === "pair-5"))).toContain("raw-pair-5");
+    expect(after.map(contentText).join("\n")).toContain("keep this user request");
+
+    const assistantIds = new Set(after
+      .filter((message) => message.role === "assistant")
+      .flatMap((message) => (message.content ?? [])
+        .filter((part: any) => part?.type === "toolCall")
+        .map((part: any) => part.id)));
+    const resultIds = new Set(after
+      .filter((message) => message.role === "toolResult")
+      .map((message) => message.toolCallId));
+    expect(assistantIds).toEqual(resultIds);
+  });
+
   test("compression blocks prefer stable raw message IDs over changed timestamps", async () => {
     const state = createState();
     const cfg = config();
@@ -1751,7 +1966,7 @@ describe("DCP pruning effectiveness", () => {
     expect(nudgeEvents.map((event) => event.event)).toEqual(["emitted", "emitted"]);
   });
 
-  test("DCP context transform suppresses nudges when there is no compression candidate", async () => {
+  test("DCP does not spam routine reminders when no candidate exists below emergency pressure", async () => {
     const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
     const nudgeEvents: any[] = [];
     const pi = {
@@ -1765,40 +1980,377 @@ describe("DCP pruning effectiveness", () => {
       },
       sendMessage() {},
     } as any;
+    await dcpModule(pi);
+    const contextHandler = handlers.get("context")?.[0];
+    const messages = [textMessage("user", "current short request", 1), textMessage("assistant", "short answer", 2)];
+    const ctx = {
+      hasUI: false,
+      sessionManager: { getBranch: () => [] },
+      getContextUsage: () => ({ tokens: 5_000, contextWindow: 10_000, percent: 50 }),
+    };
+
+    for (let pass = 0; pass < 4; pass++) {
+      const result = await contextHandler?.({ type: "context", messages }, ctx) as { messages: any[] } | undefined;
+      expect(result?.messages.map(contentText).join("\n") ?? "").not.toContain("<dcp-system-reminder>");
+    }
+    expect(nudgeEvents).toHaveLength(0);
+  });
+
+  test("DCP emits an emergency reminder when one active turn has no normal compression candidate", async () => {
+    const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
+    const nudgeEvents: any[] = [];
+    let compressTool: any;
+    const pi = {
+      on(event: string, handler: (event: any, ctx: any) => unknown) {
+        handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+      },
+      registerTool(tool: any) {
+        if (tool.name === "compress") compressTool = tool;
+      },
+      registerCommand() {},
+      appendEntry(type: string, data: any) {
+        if (type === "dcp-nudge") nudgeEvents.push(data);
+      },
+      sendMessage() {},
+    } as any;
 
     await dcpModule(pi);
     const contextHandler = handlers.get("context")?.[0];
+    const toolCallHandler = handlers.get("tool_call")?.[0];
+    const toolResultHandler = handlers.get("tool_result")?.[0];
     expect(contextHandler).toBeDefined();
+    expect(compressTool).toBeDefined();
 
-    const compressibleMessages = [
+    const seedMessages = [
       textMessage("user", "older completed research " + "a".repeat(2000), 1),
       textMessage("assistant", "older result " + "b".repeat(2000), 2),
       textMessage("user", "current request", 3),
     ];
+    const lowPressureCtx = {
+      hasUI: false,
+      sessionManager: { getBranch: () => [] },
+      getContextUsage: () => ({ tokens: 1_000, contextWindow: 10_000, percent: 10 }),
+      ui: { notify() {} },
+    };
     const highPressureCtx = {
       hasUI: false,
       sessionManager: { getBranch: () => [] },
       getContextUsage: () => ({ tokens: 9_000, contextWindow: 10_000, percent: 90 }),
+      ui: { notify() {} },
     };
 
-    const firstResult = await contextHandler?.(
-      { type: "context", messages: compressibleMessages },
-      highPressureCtx,
-    ) as { messages: any[] } | undefined;
-    expect(firstResult?.messages.map(contentText).join("\n") ?? "").toContain("<dcp-system-reminder>");
-    expect(nudgeEvents).toHaveLength(1);
+    // Seed addressable IDs, then cover every message before the latest user
+    // turn with an active block. This mirrors the production overflow: the
+    // normal detectors can only see b1 before the protected current turn.
+    await contextHandler?.({ type: "context", messages: seedMessages }, lowPressureCtx);
+    await compressTool.execute(
+      "compress-seed",
+      {
+        topic: "Older completed work",
+        ranges: [{ startId: "m001", endId: "m002", summary: "Completed work summary." }],
+      },
+      undefined,
+      undefined,
+      lowPressureCtx,
+    );
 
-    const messages = [
-      textMessage("user", "short current request", 1),
-      textMessage("assistant", "short answer", 2),
-    ];
+    const messages = [...seedMessages];
+    for (let i = 0; i < 12; i++) {
+      const toolCallId = `current-turn-${i}`;
+      const timestamp = 10 + i * 2;
+      const output = `large read output ${i} ` + "x".repeat(4_000);
+      messages.push(assistantToolCall(toolCallId, timestamp));
+      messages.push(toolResult(toolCallId, "read", output, timestamp + 1));
+      await toolCallHandler?.({
+        type: "tool_call",
+        toolCallId,
+        toolName: "read",
+        input: { path: `/tmp/file-${i}.txt` },
+      }, lowPressureCtx);
+      await toolResultHandler?.({
+        type: "tool_result",
+        toolCallId,
+        toolName: "read",
+        content: [{ type: "text", text: output }],
+        details: {},
+        isError: false,
+      }, lowPressureCtx);
+    }
+
+    // Confirm this really is the no-normal-candidate shape independently of
+    // the module's private state. The active block covers all older history;
+    // all large outputs belong to the latest protected user turn.
+    const candidateState = createState();
+    candidateState.compressionBlocks = [{
+      ...block(1, 1, 2),
+      anchorTimestamp: 3,
+    }];
+    const normalCandidateConfig = config({
+      compress: {
+        autoCandidates: { keepRecentTurns: 1 },
+        messageMode: { keepRecentTurns: 1 },
+      } as any,
+    });
+    const candidateMessages = applyPruning(messages, candidateState, normalCandidateConfig);
+    expect(detectCompressionCandidate(candidateMessages, candidateState, normalCandidateConfig, 0.9)).toBe(null);
+    expect(detectMessageCompressionCandidates(candidateMessages, candidateState, normalCandidateConfig, 0.9)).toEqual([]);
 
     const result = await contextHandler?.({ type: "context", messages }, highPressureCtx) as { messages: any[] } | undefined;
     const rendered = result?.messages.map(contentText).join("\n") ?? "";
 
-    expect(rendered).not.toContain("<dcp-system-reminder>");
-    expect(rendered).not.toContain("CONCRETE NEXT ACTION");
+    expect(rendered).toContain("<dcp-system-reminder>");
+    expect(rendered).toContain("CONCRETE NEXT ACTION");
     expect(nudgeEvents).toHaveLength(1);
+    expect(nudgeEvents[0]?.type).toMatch(/^context-(strong|soft)$/);
+  });
+
+  test.serial("DCP hard fallback lowers one-turn provider context and emits distinct diagnostics", async () => {
+    const debugDir = mkdtempSync(join(tmpdir(), "dcp-current-turn-debug-"));
+    const debugPath = join(debugDir, "dcp-debug.jsonl");
+    const previousDebug = process.env.PI_DCP_DEBUG;
+    const previousDebugLog = process.env.PI_DCP_DEBUG_LOG;
+    process.env.PI_DCP_DEBUG = "1";
+    process.env.PI_DCP_DEBUG_LOG = debugPath;
+
+    try {
+      const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
+      let compressTool: any;
+      const pi = {
+        on(event: string, handler: (event: any, ctx: any) => unknown) {
+          handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+        },
+        registerTool(tool: any) {
+          if (tool.name === "compress") compressTool = tool;
+        },
+        registerCommand() {},
+        appendEntry() {},
+        sendMessage() {},
+      } as any;
+      await dcpModule(pi);
+      const contextHandler = handlers.get("context")?.[0];
+      const providerHandler = handlers.get("before_provider_request")?.[0];
+      const afterProviderHandler = handlers.get("after_provider_response")?.[0];
+      const toolCallHandler = handlers.get("tool_call")?.[0];
+      const toolResultHandler = handlers.get("tool_result")?.[0];
+      const lowPressureCtx = {
+        hasUI: false,
+        sessionManager: { getBranch: () => [] },
+        getContextUsage: () => ({ tokens: 1_000, contextWindow: 10_000, percent: 10 }),
+        ui: { notify() {} },
+      };
+      const highPressureCtx = {
+        ...lowPressureCtx,
+        getContextUsage: () => ({ tokens: 9_000, contextWindow: 10_000, percent: 90 }),
+      };
+      const seedMessages = [
+        textMessage("user", "completed old request " + "a".repeat(2_000), 1),
+        textMessage("assistant", "completed old result " + "b".repeat(2_000), 2),
+        textMessage("user", "active implementation request", 3),
+      ];
+      await contextHandler?.({ type: "context", messages: seedMessages }, lowPressureCtx);
+      await compressTool.execute(
+        "seed-compress",
+        { topic: "Completed history", ranges: [{ startId: "m001", endId: "m002", summary: "Old work done." }] },
+        undefined,
+        undefined,
+        lowPressureCtx,
+      );
+
+      const messages = [...seedMessages];
+      const addPair = async (index: number) => {
+        const id = `long-turn-${index}`;
+        const timestamp = 10 + index * 2;
+        const output = `raw-${id}-` + "x".repeat(4_000);
+        messages.push(assistantToolCall(id, timestamp));
+        messages.push(toolResult(id, "read", output, timestamp + 1));
+        await toolCallHandler?.({ type: "tool_call", toolCallId: id, toolName: "read", input: { path: `/tmp/${id}` } }, lowPressureCtx);
+        await toolResultHandler?.({
+          type: "tool_result",
+          toolCallId: id,
+          toolName: "read",
+          content: [{ type: "text", text: output }],
+          details: {},
+          isError: false,
+        }, lowPressureCtx);
+      };
+      for (let index = 0; index < 12; index++) await addPair(index);
+
+      // A prior provider pass makes these results eligible. The final pair is
+      // deliberately added afterwards and must remain fresh/unpruned.
+      await contextHandler?.({ type: "context", messages }, lowPressureCtx);
+      await providerHandler?.(
+        {
+          type: "before_provider_request",
+          payload: {
+            messages: messages
+              .filter((message) => message.role === "toolResult")
+              .map((message) => ({
+                role: "tool",
+                tool_call_id: message.toolCallId,
+                content: contentText(message),
+              })),
+          },
+        },
+        lowPressureCtx,
+      );
+      await afterProviderHandler?.(
+        { type: "after_provider_response", status: 200, headers: {} },
+        lowPressureCtx,
+      );
+      await addPair(12);
+
+      const beforeTokens = messages.reduce((sum, message) => sum + estimateTokens(contentText(message)), 0);
+      const result = await contextHandler?.(
+        { type: "context", messages },
+        highPressureCtx,
+      ) as { messages: any[] } | undefined;
+      const outputMessages = result?.messages ?? [];
+      const afterTokens = outputMessages.reduce((sum, message) => sum + estimateTokens(contentText(message)), 0);
+      const rendered = outputMessages.map(contentText).join("\n");
+
+      expect(afterTokens).toBeLessThan(beforeTokens);
+      expect(rendered).toContain("current-turn context emergency");
+      expect(rendered).toContain("raw-long-turn-12");
+      expect(rendered).toContain("<dcp-system-reminder>");
+
+      await dcpDebugLogDrain();
+      const debugEntries = readFileSync(debugPath, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      const events = debugEntries.map((entry) => entry.event);
+      expect(events).toContain("context.strong_nudge_without_candidate");
+      expect(events).toContain("compress.auto_blocked_no_candidate");
+      expect(events).toContain("prune.emergency_current_turn");
+      const pruneEvent = debugEntries.find((entry) => entry.event === "prune.emergency_current_turn");
+      expect(pruneEvent.targetMet || pruneEvent.eligibleExhausted).toBe(true);
+      expect(pruneEvent.prunedOutputs).toBeLessThan(pruneEvent.totalPairs);
+      expect(pruneEvent.preservedRecentPairs).toBe(8);
+    } finally {
+      await dcpDebugLogDrain();
+      if (previousDebug === undefined) delete process.env.PI_DCP_DEBUG;
+      else process.env.PI_DCP_DEBUG = previousDebug;
+      if (previousDebugLog === undefined) delete process.env.PI_DCP_DEBUG_LOG;
+      else process.env.PI_DCP_DEBUG_LOG = previousDebugLog;
+    }
+  });
+
+  test.serial("DCP emergency no-candidate counter advances and persists across sidecar restore", async () => {
+    const sessionDir = mkdtempSync(join(tmpdir(), "dcp-emergency-counter-"));
+    const sessionId = "emergency-counter";
+    const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
+    const pi = {
+      on(event: string, handler: (event: any, ctx: any) => unknown) {
+        handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+      },
+      registerTool() {},
+      registerCommand() {},
+      appendEntry() {},
+      sendMessage() {},
+    } as any;
+    await dcpModule(pi);
+    let usagePercent = 70;
+    const ctx = {
+      hasUI: false,
+      sessionManager: {
+        getBranch: () => [],
+        getSessionId: () => sessionId,
+        getSessionDir: () => sessionDir,
+        getHeader: () => ({ id: sessionId, cwd: "/tmp" }),
+      },
+      getContextUsage: () => ({
+        tokens: usagePercent * 100,
+        contextWindow: 10_000,
+        percent: usagePercent,
+      }),
+    };
+    await handlers.get("session_start")?.[0]?.({ type: "session_start", reason: "startup" }, ctx);
+
+    const messages = [textMessage("user", "active request", 1), textMessage("assistant", "working", 2)];
+    await handlers.get("context")?.[0]?.({ type: "context", messages }, ctx);
+    await handlers.get("context")?.[0]?.({ type: "context", messages }, ctx);
+
+    const serialized = JSON.parse(readFileSync(
+      join(sessionDir, "dcp-state", `${sessionId}.json`),
+      "utf8",
+    ));
+    expect(serialized.consecutiveIgnoredStrongNudges).toBe(2);
+
+    const restored = createState();
+    restoreState(restored, serialized);
+    expect(restored.consecutiveIgnoredStrongNudges).toBe(2);
+
+    usagePercent = 30;
+    await handlers.get("context")?.[0]?.({ type: "context", messages }, ctx);
+    const afterRelief = JSON.parse(readFileSync(
+      join(sessionDir, "dcp-state", `${sessionId}.json`),
+      "utf8",
+    ));
+    expect(afterRelief.consecutiveIgnoredStrongNudges).toBe(0);
+  });
+
+  test.serial("DCP marks provider exposure only after a successful response", async () => {
+    const sessionDir = mkdtempSync(join(tmpdir(), "dcp-provider-exposure-"));
+    const sessionId = "provider-exposure";
+    const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
+    const pi = {
+      on(event: string, handler: (event: any, ctx: any) => unknown) {
+        handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+      },
+      registerTool() {},
+      registerCommand() {},
+      appendEntry() {},
+      sendMessage() {},
+    } as any;
+    await dcpModule(pi);
+    const ctx = {
+      hasUI: false,
+      sessionManager: {
+        getBranch: () => [],
+        getSessionId: () => sessionId,
+        getSessionDir: () => sessionDir,
+      },
+      getContextUsage: () => ({ tokens: 1_000, contextWindow: 10_000, percent: 10 }),
+    };
+    const output = "provider output";
+    const messages = [
+      textMessage("user", "active request", 1),
+      assistantToolCall("provider-pair", 2),
+      toolResult("provider-pair", "read", output, 3),
+    ];
+    await handlers.get("tool_call")?.[0]?.(
+      { type: "tool_call", toolCallId: "provider-pair", toolName: "read", input: { path: "/tmp/a" } },
+      ctx,
+    );
+    await handlers.get("tool_result")?.[0]?.({
+      type: "tool_result",
+      toolCallId: "provider-pair",
+      toolName: "read",
+      content: [{ type: "text", text: output }],
+      details: {},
+      isError: false,
+    }, ctx);
+    await handlers.get("context")?.[0]?.({ type: "context", messages }, ctx);
+
+    const providerEvent = {
+      type: "before_provider_request",
+      payload: { messages: [{ role: "tool", tool_call_id: "provider-pair", content: output }] },
+    };
+    await handlers.get("before_provider_request")?.[0]?.(providerEvent, ctx);
+    await handlers.get("after_provider_response")?.[0]?.(
+      { type: "after_provider_response", status: 500, headers: {} },
+      ctx,
+    );
+    await handlers.get("agent_end")?.[0]?.({ type: "agent_end" }, ctx);
+    const statePath = join(sessionDir, "dcp-state", `${sessionId}.json`);
+    expect(JSON.parse(readFileSync(statePath, "utf8")).providerSeenToolIds).toEqual([]);
+
+    await handlers.get("before_provider_request")?.[0]?.(providerEvent, ctx);
+    await handlers.get("after_provider_response")?.[0]?.(
+      { type: "after_provider_response", status: 200, headers: {} },
+      ctx,
+    );
+    expect(JSON.parse(readFileSync(statePath, "utf8")).providerSeenToolIds).toEqual(["provider-pair"]);
   });
 
   test("DCP context transform forces a strong nudge on context-window downgrade", async () => {

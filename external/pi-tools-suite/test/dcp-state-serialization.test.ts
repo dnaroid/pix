@@ -178,6 +178,7 @@ describe("serializeState", () => {
         inputArgs: { file_path: `/src/file${i}.ts`, code: "c".repeat(3_000) },
       });
       state.toolCalls.set(record.toolCallId, record);
+      state.providerSeenToolIds.add(record.toolCallId);
     }
 
     const serialized = serializeState(state);
@@ -218,6 +219,9 @@ describe("serializeState", () => {
 
     // Should retain at most PERSISTED_TOOL_CALLS_MAX_RECENT records
     expect(serialized.compactToolCalls!.length).toBeLessThanOrEqual(
+      PERSISTED_TOOL_CALLS_MAX_RECENT,
+    );
+    expect(serialized.providerSeenToolIds!.length).toBeLessThanOrEqual(
       PERSISTED_TOOL_CALLS_MAX_RECENT,
     );
 
@@ -297,6 +301,10 @@ describe("serializeState", () => {
     state.currentTurn = 42;
     state.nudgeCounter = 7;
     state.lastNudgeTurn = 38;
+    state.lastContextWindow = 372_000;
+    state.consecutiveIgnoredStrongNudges = 4;
+    state.toolCalls.set("seen-tool", makeToolRecord("seen-tool"));
+    state.providerSeenToolIds.add("seen-tool");
     state.tokensSaved = 5000;
     state.totalPruneCount = 12;
     state.nextBlockId = 5;
@@ -324,6 +332,9 @@ describe("serializeState", () => {
     expect(serialized.currentTurn).toBe(42);
     expect(serialized.nudgeCounter).toBe(7);
     expect(serialized.lastNudgeTurn).toBe(38);
+    expect(serialized.lastContextWindow).toBe(372_000);
+    expect(serialized.consecutiveIgnoredStrongNudges).toBe(4);
+    expect(serialized.providerSeenToolIds).toEqual(["seen-tool"]);
     expect(serialized.tokensSaved).toBe(5000);
     expect(serialized.totalPruneCount).toBe(12);
     expect(serialized.nextBlockId).toBe(5);
@@ -555,6 +566,10 @@ describe("serialize → restore round trip", () => {
     original.currentTurn = 8;
     original.nudgeCounter = 2;
     original.lastNudgeTurn = 6;
+    original.lastContextWindow = 372_000;
+    original.consecutiveIgnoredStrongNudges = 3;
+    original.providerSeenToolIds.add("tc-1");
+    original.providerSeenToolIds.add("tc-9");
     original.totalToolCallCount = 10;
 
     const serialized = serializeState(original);
@@ -572,6 +587,9 @@ describe("serialize → restore round trip", () => {
     expect(restored.currentTurn).toBe(8);
     expect(restored.nudgeCounter).toBe(2);
     expect(restored.lastNudgeTurn).toBe(6);
+    expect(restored.lastContextWindow).toBe(372_000);
+    expect(restored.consecutiveIgnoredStrongNudges).toBe(3);
+    expect(restored.providerSeenToolIds).toEqual(original.providerSeenToolIds);
 
     // Tool records survive but without heavy fields
     expect(restored.toolCalls.size).toBe(10);

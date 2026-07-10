@@ -63,6 +63,18 @@ describe("DCP sidecar state persistence", () => {
     const state = createState();
     state.manualMode = true;
     state.nudgeCounter = 7;
+    state.consecutiveIgnoredStrongNudges = 3;
+    state.toolCalls.set("provider-seen", {
+      toolCallId: "provider-seen",
+      toolName: "read",
+      inputArgs: { path: "/tmp/example" },
+      inputFingerprint: "read::provider-seen",
+      isError: false,
+      turnIndex: 1,
+      timestamp: 1,
+      tokenEstimate: 100,
+    });
+    state.providerSeenToolIds.add("provider-seen");
 
     await saveDcpState(ctx, state);
 
@@ -71,6 +83,8 @@ describe("DCP sidecar state persistence", () => {
 
     expect(restored.manualMode).toBe(true);
     expect(restored.nudgeCounter).toBe(7);
+    expect(restored.consecutiveIgnoredStrongNudges).toBe(3);
+    expect(restored.providerSeenToolIds).toEqual(new Set(["provider-seen"]));
   });
 
   test("returns undefined when the sidecar file does not exist", async () => {

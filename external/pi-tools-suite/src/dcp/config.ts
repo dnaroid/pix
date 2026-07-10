@@ -85,6 +85,23 @@ export interface DcpConfig {
       readLikeTurns: number
       protectedTools: string[]
     }
+    emergencyCurrentTurnPruning: {
+      /** Enable same-turn candidates and lossy fallback pruning; emergency reminders remain active. */
+      enabled: boolean
+      /** Prune immediately at or above this model-independent context fraction. */
+      hardContextPercent: number
+      /** Recover enough estimated tokens to reach this fraction or a margin below the model emergency threshold. */
+      targetContextPercent: number
+      /** Emergency reminders allowed before pruning even below hardContextPercent. */
+      patience: number
+      /** Newest complete assistant tool-call/result pairs that are never selected. */
+      keepRecentToolPairs: number
+      /** Ignore small results whose replacement would recover little context. */
+      minOutputTokens: number
+      /** Maximum emergency same-turn message candidates shown in a reminder. */
+      maxSuggestions: number
+      protectedTools: string[]
+    }
   }
   protectedFilePatterns: string[]
   pruneNotification: "off" | "minimal" | "detailed"
@@ -176,6 +193,16 @@ const DEFAULT_CONFIG: DcpConfig = {
         "ast_grep",
       ],
       readLikeTurns: 3,
+      protectedTools: [],
+    },
+    emergencyCurrentTurnPruning: {
+      enabled: true,
+      hardContextPercent: 0.82,
+      targetContextPercent: 0.70,
+      patience: 2,
+      keepRecentToolPairs: 8,
+      minOutputTokens: 500,
+      maxSuggestions: 8,
       protectedTools: [],
     },
   },

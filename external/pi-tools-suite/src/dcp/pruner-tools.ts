@@ -2,6 +2,9 @@ import type { DcpConfig } from "./config.js";
 import type { DcpState, ToolRecord } from "./state.js";
 import { estimateMessageTokens } from "./pruner-metadata.js";
 
+export const EMERGENCY_CURRENT_TURN_PLACEHOLDER =
+  "[Older tool output removed during current-turn context emergency; re-run the tool if exact content is needed]";
+
 // Tool outputs that must never be auto-pruned unless a future explicit user
 // action intentionally changes that policy. They mutate state or control DCP.
 const ALWAYS_PROTECTED_TOOLS = new Set(["compress", "write", "edit"]);
@@ -237,6 +240,9 @@ function placeholderForPrunedTool(msg: any, state: DcpState): string {
   }
   if (reason === "manual-sweep") {
     return "[Output removed by /dcp sweep to save context]";
+  }
+  if (reason === "emergency-current-turn") {
+    return EMERGENCY_CURRENT_TURN_PLACEHOLDER;
   }
   if (reason === "old-error" || msg.isError) {
     return "[Error output removed - tool failed more than the configured number of turns ago]";

@@ -32,6 +32,10 @@ import {
 	getNudgeType,
 	detectCompressionCandidate,
 	detectMessageCompressionCandidates,
+	analyzeEmergencyCurrentTurn,
+	emergencyPressureState,
+	emergencyCurrentTurnMessageCandidates,
+	pruneEmergencyCurrentTurn,
 	appendConcreteNudgeGuidance,
 	applyAnchoredNudges,
 	clearDcpNudgeAnchors,
@@ -55,6 +59,10 @@ import { decideAutoCompress, createAutoCompressionBlock } from "./auto-compress.
 import { DCP_STATS_MESSAGE_TYPE, registerCommands } from "./commands.js"
 import { normalizeDcpContextUsage } from "./ui.js"
 import { safeGetContextUsage } from "../context-usage.js"
+import {
+	collectProviderToolResultEvidence,
+	providerPayloadIncludesToolResult,
+} from "./provider-tool-results.js"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -224,6 +232,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 
 	// ── 2. Create state ───────────────────────────────────────────────────────
 	const state = createState()
+	const pendingProviderToolIds = new Set<string>()
 	const appendNudgeTelemetry = (
 		event: "emitted" | "upgraded" | "reapplied",
 		type: DcpNudgeType,
@@ -427,6 +436,8 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 		let prunedMessages = applyPruning(contextMessages, state, effectiveConfig)
 		let candidate = null as ReturnType<typeof detectCompressionCandidate>
 		let messageCandidates = [] as ReturnType<typeof detectMessageCompressionCandidates>
+		let emergencySelection = null as ReturnType<typeof analyzeEmergencyCurrentTurn> | null
+		let emergencyPruneResult = null as ReturnType<typeof pruneEmergencyCurrentTurn> | null
 
 		// In manual mode we still apply pruning strategies (if
 		// automaticStrategies is on) but skip routine autonomous nudges. Emergency
@@ -472,15 +483,27 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 				thresholds.maxContextPercent += Math.min(summaryBonus, SUMMARY_BUFFER_MAX_CONTEXT_BONUS)
 			}
 
-			const contextLimitReached = contextPercent > thresholds.maxContextPercent
+			const emergencySettings = effectiveConfig.strategies.emergencyCurrentTurnPruning
+			const {
+				hardEmergencyReached,
+				contextLimitReached,
+				emergencyPressureReached,
+			} = emergencyPressureState(
+				contextPercent,
+				thresholds.maxContextPercent,
+				emergencySettings.hardContextPercent,
+			)
 			const routineNudgesAllowed = contextPercent > thresholds.minContextPercent
-			if (!contextLimitReached && !routineNudgesAllowed) {
+			if (!emergencyPressureReached && !routineNudgesAllowed) {
 				const clearedAnchors = clearDcpNudgeAnchors(state)
-				if (clearedAnchors > 0) await saveDcpState(ctx, state)
+				const resetEmergencyPasses = state.consecutiveIgnoredStrongNudges > 0
+				state.consecutiveIgnoredStrongNudges = 0
+				if (clearedAnchors > 0 || resetEmergencyPasses) await saveDcpState(ctx, state)
 				return finishContext("below-threshold", prunedMessages, {
 					contextPercent,
 					thresholds,
 					clearedAnchors,
+					resetEmergencyPasses,
 				})
 			}
 
@@ -505,8 +528,17 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 				Number.isFinite(currentContextWindow) &&
 				currentContextWindow < previousContextWindow * 0.9 &&
 				contextPercent > thresholds.minContextPercent
+			const contextWindowChanged =
+				typeof previousContextWindow === "number" &&
+				Number.isFinite(previousContextWindow) &&
+				typeof currentContextWindow === "number" &&
+				Number.isFinite(currentContextWindow) &&
+				currentContextWindow !== previousContextWindow
+			if (contextWindowChanged) state.consecutiveIgnoredStrongNudges = 0
 
-			const nudgeType = windowDowngraded
+			const nudgeType = hardEmergencyReached && !contextLimitReached
+				? "context-strong"
+				: windowDowngraded
 				? "context-strong"
 				: getNudgeType(
 					contextPercent,
@@ -543,11 +575,37 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 				}, ctx)
 			}
 
-			const hasCompressionSuggestion =
+			const hasNormalCompressionSuggestion =
 				candidate !== null || messageCandidates.length > 0
-			if (!manualEmergencyOnly && !hasCompressionSuggestion) {
+			if (
+				emergencySettings.enabled &&
+				emergencyPressureReached &&
+				!manualEmergencyOnly &&
+				!hasNormalCompressionSuggestion
+			) {
+				emergencySelection = analyzeEmergencyCurrentTurn(
+					prunedMessages,
+					state,
+					effectiveConfig,
+				)
+				messageCandidates = emergencyCurrentTurnMessageCandidates(
+					emergencySelection,
+					effectiveConfig,
+				)
+				writeDcpDebugLog(effectiveConfig, "context.strong_nudge_without_candidate", {
+					contextPercent,
+					thresholds,
+					nudgeType,
+					emergencyCandidates: messageCandidates.length,
+					...emergencySelection.stats,
+					state: summarizeDcpState(state),
+				}, ctx)
+			}
+
+			let hasCompressionSuggestion =
+				candidate !== null || messageCandidates.length > 0
+			if (!manualEmergencyOnly && !emergencyPressureReached && !hasCompressionSuggestion) {
 				const clearedAnchors = clearDcpNudgeAnchors(state)
-				state.consecutiveIgnoredStrongNudges = 0
 				if (clearedAnchors > 0) await saveDcpState(ctx, state)
 				if (nudgeType || clearedAnchors > 0) {
 					writeDcpDebugLog(effectiveConfig, "context.no_compression_candidate", {
@@ -560,19 +618,11 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 				}
 			}
 
-			// Track consecutive ignored context-strong nudges for the
-			// auto-compress fallback. A strong nudge is "ignored" if it fires
-			// again on a later context event without a successful compress in
-			// between. Reset on non-strong nudges and when pressure drops below
-			// the emergency threshold (handled by the below-threshold early
-			// return above, which clears anchors; counter is also reset on any
-			// successful compress in the compress tool).
-			if (
-				hasCompressionSuggestion &&
-				(nudgeType === "context-strong" || nudgeType === "context-soft")
-			) {
+			// Emergency pressure must advance even when normal candidates are
+			// absent; otherwise the current-turn fallback can never reach patience.
+			if (emergencyPressureReached) {
 				state.consecutiveIgnoredStrongNudges += 1
-			} else if (nudgeType === null || !hasCompressionSuggestion) {
+			} else {
 				state.consecutiveIgnoredStrongNudges = 0
 			}
 
@@ -587,6 +637,17 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 					thresholds.maxContextPercent,
 					candidate,
 				)
+				if (contextLimitReached && candidate === null) {
+					writeDcpDebugLog(effectiveConfig, "compress.auto_blocked_no_candidate", {
+						autoCompressEnabled: effectiveConfig.compress.autoCompress.enabled,
+						decisionReason: autoDecision.reason,
+						contextPercent,
+						thresholds,
+						consecutiveEmergencyPasses: state.consecutiveIgnoredStrongNudges,
+						...(emergencySelection?.stats ?? {}),
+						state: summarizeDcpState(state),
+					}, ctx)
+				}
 				if (autoDecision.shouldFire && candidate) {
 					try {
 						const autoResult = await createAutoCompressionBlock({
@@ -635,7 +696,64 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 				}
 			}
 
-			if (nudgeType && !manualEmergencyOnly && hasCompressionSuggestion) {
+			// Model-independent safety floor for an unfinished active turn. Only
+			// result bodies are replaced; user messages and structural tool pairs
+			// stay intact. Fresh results are ineligible until before_provider_request
+			// records that the model has had a chance to consume them.
+			const emergencyPatienceExceeded =
+				state.consecutiveIgnoredStrongNudges > Math.max(0, Math.floor(emergencySettings.patience))
+			if (
+				emergencySettings.enabled &&
+				emergencyPressureReached &&
+				candidate === null &&
+				emergencySelection &&
+				emergencySelection.eligible.length > 0 &&
+				(hardEmergencyReached || emergencyPatienceExceeded)
+			) {
+				const selectionStatsBeforePrune = emergencySelection.stats
+				const configuredTarget = Math.max(0, Math.min(1, emergencySettings.targetContextPercent))
+				const emergencyMarginTarget = Math.max(0, thresholds.maxContextPercent * 0.9)
+				const targetContextPercent = Math.min(configuredTarget, emergencyMarginTarget)
+				const targetRecoveryTokens = Math.max(
+					1,
+					Math.ceil((contextPercent - targetContextPercent) * usage.contextWindow),
+				)
+				emergencyPruneResult = pruneEmergencyCurrentTurn(
+					emergencySelection,
+					state,
+					targetRecoveryTokens,
+				)
+				if (emergencyPruneResult.prunedToolCallIds.length > 0) {
+					prunedMessages = applyPruning(contextMessages, state, effectiveConfig)
+					state.consecutiveIgnoredStrongNudges = 0
+					emergencySelection = analyzeEmergencyCurrentTurn(prunedMessages, state, effectiveConfig)
+					messageCandidates = emergencyCurrentTurnMessageCandidates(emergencySelection, effectiveConfig)
+					hasCompressionSuggestion = candidate !== null || messageCandidates.length > 0
+					await saveDcpState(ctx, state)
+					writeDcpDebugLog(effectiveConfig, "prune.emergency_current_turn", {
+						trigger: hardEmergencyReached ? "hard-context-percent" : "ignored-emergency-reminders",
+						contextPercent,
+						thresholds,
+						targetContextPercent,
+						targetRecoveryTokens,
+						prunedOutputs: emergencyPruneResult.prunedToolCallIds.length,
+						estimatedTokensRecovered: emergencyPruneResult.estimatedTokensRecovered,
+						estimatedContextPercentAfter: Math.max(
+							0,
+							((usage.tokens ?? contextPercent * usage.contextWindow) -
+								emergencyPruneResult.estimatedTokensRecovered) /
+							usage.contextWindow,
+						),
+						targetMet: emergencyPruneResult.estimatedTokensRecovered >= targetRecoveryTokens,
+						eligibleExhausted:
+							emergencyPruneResult.prunedToolCallIds.length >= selectionStatsBeforePrune.eligiblePairs,
+						...selectionStatsBeforePrune,
+						state: summarizeDcpState(state),
+					}, ctx)
+				}
+			}
+
+			if (nudgeType && !manualEmergencyOnly && (hasCompressionSuggestion || emergencyPressureReached)) {
 				const nudgeText = appendConcreteNudgeGuidance(
 					baseNudgeText(nudgeType),
 					candidate,
@@ -685,6 +803,10 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 			} else {
 				state.nudgeCounter++
 			}
+
+			// Persist patience/window changes even when an existing anchor was only
+			// re-applied (that path intentionally emits telemetry without updating it).
+			await saveDcpState(ctx, state)
 		}
 
 		if (state.manualMode) {
@@ -699,13 +821,27 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 		return finishContext("complete", prunedMessages, {
 			candidate,
 			messageCandidates,
+			emergencyCurrentTurn: emergencySelection?.stats,
+			emergencyPrune: emergencyPruneResult,
 		})
 	})
 
 	// ── 10b. before_provider_request: inject DCP IDs outside transcript ────────
 	pi.on("before_provider_request", async (event, ctx) => {
 		const effectiveConfig = configForContext(ctx)
+		pendingProviderToolIds.clear()
 		if (!effectiveConfig.enabled) return undefined
+
+		const providerEvidence = collectProviderToolResultEvidence(event.payload)
+		for (const meta of state.messageMetaSnapshot.values()) {
+			if (meta.role !== "toolResult") continue
+			if (!meta.toolCallId || state.prunedToolIds.has(meta.toolCallId)) continue
+			if (state.providerSeenToolIds.has(meta.toolCallId)) continue
+			const record = state.toolCalls.get(meta.toolCallId)
+			if (record && providerPayloadIncludesToolResult(providerEvidence, record)) {
+				pendingProviderToolIds.add(meta.toolCallId)
+			}
+		}
 
 		const controlText = buildMessageIdControlText(state)
 		if (!controlText) return undefined
@@ -713,9 +849,35 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 		const payload = appendDcpControlToProviderPayload(event.payload, controlText)
 		writeDcpDebugLog(effectiveConfig, "provider_payload.message_ids", {
 			injected: payload !== event.payload,
+			pendingToolResults: pendingProviderToolIds.size,
 			state: summarizeDcpState(state),
 		}, ctx)
 		return payload === event.payload ? undefined : payload
+	})
+
+	// Promote pending IDs only after the provider accepted the exact payload.
+	// Failed/aborted requests leave results fresh and therefore ineligible.
+	pi.on("after_provider_response", async (event, ctx) => {
+		const effectiveConfig = configForContext(ctx)
+		const accepted = event.status >= 200 && event.status < 300
+		let newlySeenToolResults = 0
+		if (effectiveConfig.enabled && accepted) {
+			for (const toolCallId of pendingProviderToolIds) {
+				if (!state.providerSeenToolIds.has(toolCallId)) {
+					state.providerSeenToolIds.add(toolCallId)
+					newlySeenToolResults++
+				}
+			}
+			if (newlySeenToolResults > 0) await saveDcpState(ctx, state)
+		}
+		writeDcpDebugLog(effectiveConfig, "provider_payload.tool_results_seen", {
+			status: event.status,
+			accepted,
+			pendingToolResults: pendingProviderToolIds.size,
+			newlySeenToolResults,
+			state: summarizeDcpState(state),
+		}, ctx)
+		pendingProviderToolIds.clear()
 	})
 
 	// ── 11. agent_end: persist state after each agent run ────────────────────

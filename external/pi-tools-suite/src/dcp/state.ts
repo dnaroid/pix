@@ -145,6 +145,8 @@ export interface DcpState {
   prunedToolIds: Set<string>
   /** toolCallId → reason used for human-readable pruning placeholders/stats. */
   prunedToolReasons: Map<string, string>
+  /** Tool results included in at least one provider request. */
+  providerSeenToolIds: Set<string>
 
   // ── Compression ────────────────────────────────────────────────────────────
   /** All compression blocks (both active and soft-deleted) */
@@ -228,12 +230,10 @@ export interface DcpState {
    */
   lastContextWindow?: number
   /**
-   * How many consecutive `context-strong` nudges have been emitted without a
-   * subsequent successful `compress` (model- or DCP-initiated). When this
-   * reaches `compress.autoCompress.patience` while context is above the
-   * emergency threshold, the auto-compress fallback creates a block without
-   * waiting for the model. Reset to 0 on any successful compression, when
-   * pressure drops below the emergency threshold, or on a window change.
+   * How many consecutive emergency context reminders have been delivered
+   * without a successful compression or emergency prune. This advances even
+   * when no normal compression candidate exists so current-turn fallback
+   * patience cannot be reset by the exact condition it is designed to handle.
    */
   consecutiveIgnoredStrongNudges: number
 }
@@ -248,6 +248,7 @@ export function createState(): DcpState {
     toolCalls: new Map(),
     prunedToolIds: new Set(),
     prunedToolReasons: new Map(),
+    providerSeenToolIds: new Set(),
     compressionBlocks: [],
     nextBlockId: 1,
     messageIdSnapshot: new Map(),
@@ -279,6 +280,7 @@ export function resetState(state: DcpState): void {
   state.toolCalls.clear()
   state.prunedToolIds.clear()
   state.prunedToolReasons.clear()
+  state.providerSeenToolIds.clear()
   state.compressionBlocks = []
   state.nextBlockId = 1
   state.messageIdSnapshot.clear()
@@ -401,6 +403,8 @@ export interface SerializedDcpState {
   nextBlockId: number
   prunedToolIds: string[]
   prunedToolReasons: Array<[string, string]>
+  /** Tool result IDs known to have appeared in a provider request. */
+  providerSeenToolIds?: string[]
   /** Full tool records — present in legacy snapshots. */
   toolCalls?: ToolRecord[]
   /** Compact tool records — present in new compact snapshots. */
@@ -597,11 +601,16 @@ export function serializeState(state: DcpState): SerializedDcpState {
     seen.add(record.toolCallId)
   }
 
+  const persistedToolCallIds = new Set(compactToolCalls.map((record) => record.toolCallId))
+  const providerSeenToolIds = Array.from(state.providerSeenToolIds)
+    .filter((toolCallId) => persistedToolCallIds.has(toolCallId))
+
   return {
     compressionBlocks: state.compressionBlocks,
     nextBlockId: state.nextBlockId,
     prunedToolIds: Array.from(state.prunedToolIds),
     prunedToolReasons: Array.from(state.prunedToolReasons.entries()),
+    providerSeenToolIds,
     compactToolCalls,
     totalToolCallCount: allRecords.length,
     tokensSaved: state.tokensSaved,
@@ -658,6 +667,12 @@ export function restoreState(state: DcpState, data: unknown): void {
         (entry): entry is [string, string] =>
           Array.isArray(entry) && typeof entry[0] === "string" && typeof entry[1] === "string",
       ),
+    )
+  }
+
+  if (Array.isArray(saved.providerSeenToolIds)) {
+    state.providerSeenToolIds = new Set(
+      saved.providerSeenToolIds.filter((id): id is string => typeof id === "string"),
     )
   }
 

@@ -128,6 +128,8 @@ export function summarizeDcpState(state: DcpState): Record<string, unknown> {
     },
     inactiveBlocksTail: inactiveBlocks,
     prunedTools: state.prunedToolIds.size,
+    providerSeenTools: state.providerSeenToolIds.size,
+    consecutiveEmergencyPasses: state.consecutiveIgnoredStrongNudges,
     nudgeAnchors: state.nudgeAnchors.map((anchor) => ({
       id: anchor.id,
       type: anchor.type,
@@ -232,4 +234,3 @@ export function writeDcpDebugLog(
 export function dcpDebugLogDrain(): Promise<void> {
   return logWriteChain
 }
-

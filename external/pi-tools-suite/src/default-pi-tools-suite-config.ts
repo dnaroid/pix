@@ -38,6 +38,20 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
     "debug": false,
     "debugLog": { "maxBytes": 5242880, "maxBackups": 3 },
     "manualMode": { "enabled": false, "automaticStrategies": true },
+    "strategies": {
+      "emergencyCurrentTurnPruning": {
+        // Disabling this turns off same-turn candidates and lossy pruning;
+        // non-destructive emergency reminders remain active.
+        "enabled": true,
+        "hardContextPercent": 0.82,
+        "targetContextPercent": 0.70,
+        "patience": 2,
+        "keepRecentToolPairs": 8,
+        "minOutputTokens": 500,
+        "maxSuggestions": 8,
+        "protectedTools": []
+      }
+    },
     "modelOverrides": {
       "openai-codex/gpt-5*": {
         "compress": {

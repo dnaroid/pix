@@ -24,6 +24,16 @@ describe("DCP config", () => {
 		expect(config.compress.messageMode.keepRecentTurns).toBe(1);
 		expect(config.strategies.autoToolPruning.maxOutputTokens).toBe(1200);
 		expect(config.strategies.autoToolPruning.keepRecentTurns).toBe(1);
+		expect(config.strategies.emergencyCurrentTurnPruning).toEqual({
+			enabled: true,
+			hardContextPercent: 0.82,
+			targetContextPercent: 0.70,
+			patience: 2,
+			keepRecentToolPairs: 8,
+			minOutputTokens: 500,
+			maxSuggestions: 8,
+			protectedTools: [],
+		});
 		expect(config.strategies.autoToolPruning.readLikeTools).toEqual(
 			expect.arrayContaining(["read", "shell", "bash", "repo_search", "web_search", "web_fetch"]),
 		);
@@ -38,7 +48,10 @@ describe("DCP config", () => {
 				"dcp": {
 					"enabled": false,
 					"manualMode": { "enabled": true },
-					"compress": { "minContextPercent": 0.25, "nudgeFrequency": 1 }
+					"compress": { "minContextPercent": 0.25, "nudgeFrequency": 1 },
+					"strategies": {
+						"emergencyCurrentTurnPruning": { "patience": 4, "protectedTools": ["subagents"] }
+					}
 				}
 			}`,
 		);
@@ -51,6 +64,9 @@ describe("DCP config", () => {
 		expect(config.compress.minContextPercent).toBe(0.25);
 		expect(config.compress.nudgeFrequency).toBe(1);
 		expect(config.compress.maxContextPercent).toBe(0.65);
+		expect(config.strategies.emergencyCurrentTurnPruning.patience).toBe(4);
+		expect(config.strategies.emergencyCurrentTurnPruning.hardContextPercent).toBe(0.82);
+		expect(config.strategies.emergencyCurrentTurnPruning.protectedTools).toEqual(["subagents"]);
 	});
 
 	test("applies model-specific overrides on top of the shared DCP config", () => {
