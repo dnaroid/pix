@@ -71,7 +71,7 @@ describe("config helpers", () => {
 		assert.equal(config.autocomplete.maxTokens, 48);
 		assert.equal(config.autocomplete.maxPromptTokens, 1200);
 		assert.equal(config.autocomplete.includeRecentMessages, 0);
-		assert.equal(resolveDefaultModelRef(config), "openai-codex/gpt-5.5:medium");
+		assert.equal(resolveDefaultModelRef(config), "openai-codex/gpt-5.6-sol:medium");
 		assert.equal(config.modelColors.rules["zai/*"], "success");
 		assert.equal(config.iconTheme.name, "nerdFont");
 		assert.deepEqual(Object.keys(config.dictation.languages), ["en", "ru"]);

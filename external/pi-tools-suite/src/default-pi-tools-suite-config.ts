@@ -141,7 +141,7 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
         }
       },
       "gpt": {
-        "description": "Prefer enabled GPT-family models: spark/mini for cheap roles, gpt-5.5 for heavy roles; fallback cross-provider on quota.",
+        "description": "Prefer enabled GPT-family models: spark/mini for cheap roles, gpt-5.6-sol for heavy roles; fallback cross-provider on quota.",
         "types": {
           "quick": {
             "model": "openai-codex/gpt-5.3-codex-spark",
@@ -174,17 +174,17 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
             "thinking": "medium"
           },
           "review": {
-            "model": "openai-codex/gpt-5.5",
+            "model": "openai-codex/gpt-5.6-sol",
             "fallbackModels": ["zai/glm-5.2"],
             "thinking": "high"
           },
           "implement": {
-            "model": "openai-codex/gpt-5.5",
+            "model": "openai-codex/gpt-5.6-sol",
             "fallbackModels": ["zai/glm-5.2"],
             "thinking": "high"
           },
           "deep": {
-            "model": "openai-codex/gpt-5.5",
+            "model": "openai-codex/gpt-5.6-sol",
             "fallbackModels": ["zai/glm-5.2"],
             "thinking": "high"
           }
@@ -225,17 +225,17 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
           },
           "review": {
             "model": "antigravity/antigravity-claude-sonnet-4-6",
-            "fallbackModels": ["openai-codex/gpt-5.5", "zai/glm-5.2"],
+            "fallbackModels": ["openai-codex/gpt-5.6-sol", "zai/glm-5.2"],
             "thinking": "high"
           },
           "implement": {
-            "model": "openai-codex/gpt-5.5",
+            "model": "openai-codex/gpt-5.6-sol",
             "fallbackModels": ["zai/glm-5.2"],
             "thinking": "high"
           },
           "deep": {
             "model": "antigravity/antigravity-claude-opus-4-6-thinking",
-            "fallbackModels": ["openai-codex/gpt-5.5", "zai/glm-5.2"],
+            "fallbackModels": ["openai-codex/gpt-5.6-sol", "zai/glm-5.2"],
             "thinking": "high"
           }
         }
@@ -280,34 +280,34 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
       },
       "review": {
         "description": "Use for review/audit of existing code or changes: correctness, security, performance, maintainability, API risks, quality. Do not implement new code.",
-        "model": "openai-codex/gpt-5.5",
+        "model": "openai-codex/gpt-5.6-sol",
         "fallbackModels": ["zai/glm-5.2"],
         "thinking": "high",
         "tools": ["read", "grep"]
       },
       "implement": {
         "description": "Use when the sub-agent should make or plan code changes for a feature, bug fix, or refactor.",
-        "model": "openai-codex/gpt-5.5",
+        "model": "openai-codex/gpt-5.6-sol",
         "fallbackModels": ["zai/glm-5.2"],
         "thinking": "high"
       },
       "deep": {
         "description": "Use for broad hard reasoning: architecture, system design, cross-module impact, complex tradeoffs.",
-        "model": "openai-codex/gpt-5.5",
+        "model": "openai-codex/gpt-5.6-sol",
         "fallbackModels": ["zai/glm-5.2"],
         "thinking": "high"
       },
       "oracle": {
         "description": "Oracle: cross-provider flagship second opinion for hard or high-stakes uncertainty. Use sparingly to pressure-test architecture, plans, root-cause hypotheses, risk/security calls, or final recommendations when independent disagreement is valuable. Read-only; advise, do not edit.",
-        "model": "openai-codex/gpt-5.5",
+        "model": "openai-codex/gpt-5.6-sol",
         "fallbackModels": ["zai/glm-5.2"],
         "thinking": "xhigh",
         "tools": ["read", "grep", "bash"],
         "modelByParent": {
-          "zai/*": { "model": "openai-codex/gpt-5.5", "fallbackModels": ["zai/glm-5.2"] },
-          "openai-codex/*": { "model": "zai/glm-5.2", "fallbackModels": ["openai-codex/gpt-5.5"] },
-          "antigravity/*": { "model": "zai/glm-5.2", "fallbackModels": ["openai-codex/gpt-5.5"] },
-          "anthropic/*": { "model": "openai-codex/gpt-5.5", "fallbackModels": ["zai/glm-5.2"] }
+          "zai/*": { "model": "openai-codex/gpt-5.6-sol", "fallbackModels": ["zai/glm-5.2"] },
+          "openai-codex/*": { "model": "zai/glm-5.2", "fallbackModels": ["openai-codex/gpt-5.6-sol"] },
+          "antigravity/*": { "model": "zai/glm-5.2", "fallbackModels": ["openai-codex/gpt-5.6-sol"] },
+          "anthropic/*": { "model": "openai-codex/gpt-5.6-sol", "fallbackModels": ["zai/glm-5.2"] }
         },
         "promptAppend": "You are an oracle: a flagship model from a different provider giving a second opinion to the parent agent. Give a concise, decisive recommendation with key tradeoffs and risks. Disagree when warranted; do not rubber-stamp. Do not edit unless explicitly asked."
       }

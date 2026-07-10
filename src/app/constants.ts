@@ -8,7 +8,7 @@ export const PI_FAVORITE_MODEL_REFS = [
 	"anthropic/claude-opus-4-8",
 	"openai/gpt-5.4",
 	"azure-openai-responses/gpt-5.4",
-	"openai-codex/gpt-5.5",
+	"openai-codex/gpt-5.6-sol",
 	"deepseek/deepseek-v4-pro",
 	"google/gemini-3.1-pro-preview",
 	"google-vertex/gemini-3.1-pro-preview",

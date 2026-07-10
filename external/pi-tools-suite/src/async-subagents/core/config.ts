@@ -219,13 +219,13 @@ const BUILTIN_CONFIG: SubagentConfig = {
 		},
 		oracle: {
 			description: "Oracle: cross-provider flagship second opinion for hard or high-stakes uncertainty. Use sparingly to pressure-test architecture, plans, root-cause hypotheses, risk/security calls, or final recommendations when independent disagreement is valuable. Read-only; advise, do not edit.",
-			model: "openai-codex/gpt-5.5",
+			model: "openai-codex/gpt-5.6-sol",
 			fallbackModels: ["zai/glm-5.2"],
 			modelByParent: {
-				"zai/*": { model: "openai-codex/gpt-5.5", fallbackModels: ["zai/glm-5.2"] },
-				"openai-codex/*": { model: "zai/glm-5.2", fallbackModels: ["openai-codex/gpt-5.5"] },
-				"antigravity/*": { model: "zai/glm-5.2", fallbackModels: ["openai-codex/gpt-5.5"] },
-				"anthropic/*": { model: "openai-codex/gpt-5.5", fallbackModels: ["zai/glm-5.2"] },
+				"zai/*": { model: "openai-codex/gpt-5.6-sol", fallbackModels: ["zai/glm-5.2"] },
+				"openai-codex/*": { model: "zai/glm-5.2", fallbackModels: ["openai-codex/gpt-5.6-sol"] },
+				"antigravity/*": { model: "zai/glm-5.2", fallbackModels: ["openai-codex/gpt-5.6-sol"] },
+				"anthropic/*": { model: "openai-codex/gpt-5.6-sol", fallbackModels: ["zai/glm-5.2"] },
 			},
 			thinking: "xhigh",
 			tools: ["read", "grep", "bash"],

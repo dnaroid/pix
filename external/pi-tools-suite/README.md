@@ -265,19 +265,19 @@ The canonical use case is an **`oracle`** role that consults a flagship model fr
 ```jsonc
 "oracle": {
   "description": "Cross-provider second opinion: consult a flagship from a different provider than the parent to pressure-test a hard decision. Read-only; advise, do not edit.",
-  "model": "openai-codex/gpt-5.5",
+  "model": "openai-codex/gpt-5.6-sol",
   "fallbackModels": ["zai/glm-5.2"],
   "thinking": "xhigh",
   "modelByParent": {
-    "zai/*":         { "model": "openai-codex/gpt-5.5", "fallbackModels": ["zai/glm-5.2"] },
+    "zai/*":         { "model": "openai-codex/gpt-5.6-sol", "fallbackModels": ["zai/glm-5.2"] },
     "openai-codex/*": "zai/glm-5.2",
-    "antigravity/*": { "model": "zai/glm-5.2", "fallbackModels": ["openai-codex/gpt-5.5"] },
-    "anthropic/*":   { "model": "openai-codex/gpt-5.5", "fallbackModels": ["zai/glm-5.2"] }
+    "antigravity/*": { "model": "zai/glm-5.2", "fallbackModels": ["openai-codex/gpt-5.6-sol"] },
+    "anthropic/*":   { "model": "openai-codex/gpt-5.6-sol", "fallbackModels": ["zai/glm-5.2"] }
   }
 }
 ```
 
-With this config a GLM parent (`zai/*`) spawns the oracle on `gpt-5.5`, a GPT parent (`openai-codex/*`) spawns it on `glm-5.2`, and so on — automatically, at spawn time, with no `task.model` needed. The parent model ref is read from the spawn context (`ctx.model`) and passed into resolution. Pattern matching is case-insensitive `*` glob (same engine as `vision.blindModelPatterns`). When no key matches (or no parent model is known), the role falls back to its static `model` + `fallbackModels`. An explicit `task.model` or `ASYNC_SUBAGENTS_FORCE_CURRENT_MODEL=1` still overrides the match.
+With this config a GLM parent (`zai/*`) spawns the oracle on `gpt-5.6-sol`, a GPT parent (`openai-codex/*`) spawns it on `glm-5.2`, and so on — automatically, at spawn time, with no `task.model` needed. The parent model ref is read from the spawn context (`ctx.model`) and passed into resolution. Pattern matching is case-insensitive `*` glob (same engine as `vision.blindModelPatterns`). When no key matches (or no parent model is known), the role falls back to its static `model` + `fallbackModels`. An explicit `task.model` or `ASYNC_SUBAGENTS_FORCE_CURRENT_MODEL=1` still overrides the match.
 
 Sub-agents run with `--no-session` by default to avoid writing duplicate Pi session JSONL files for fire-and-forget background work. Set `ASYNC_SUBAGENTS_ENABLE_SESSIONS=1` to restore persisted per-agent sessions under each agent's `sessions/` directory; this also registers the session-navigation slash commands (`/sub-open`, `/sub-back`, `/sub-where`) needed for switching and deeper post-mortem navigation.
 
