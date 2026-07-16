@@ -155,35 +155,35 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
         }
       },
       "gpt": {
-        "description": "Prefer enabled GPT-family models: spark/mini for cheap roles, gpt-5.6-sol for heavy roles; fallback cross-provider on quota.",
+        "description": "Use the GPT-5.6 family by role: luna for fast tasks, terra for balanced work, and sol for heavy reasoning; fallback cross-provider on quota.",
         "types": {
           "quick": {
-            "model": "openai-codex/gpt-5.3-codex-spark",
+            "model": "openai-codex/gpt-5.6-luna",
             "fallbackModels": ["zai/glm-4.5-air"],
             "thinking": "off"
           },
           "scan": {
-            "model": "openai-codex/gpt-5.3-codex-spark",
+            "model": "openai-codex/gpt-5.6-luna",
             "fallbackModels": ["zai/glm-4.5-air"],
             "thinking": "off"
           },
           "research": {
-            "model": "openai-codex/gpt-5.4-mini",
+            "model": "openai-codex/gpt-5.6-terra",
             "fallbackModels": ["zai/glm-5-turbo"],
             "thinking": "low"
           },
           "docs": {
-            "model": "openai-codex/gpt-5.3-codex-spark",
+            "model": "openai-codex/gpt-5.6-luna",
             "fallbackModels": ["zai/glm-4.5-air"],
             "thinking": "low"
           },
           "frontend": {
-            "model": "antigravity/gemini-3-flash-preview",
-            "fallbackModels": ["zai/glm-5.2"],
+            "model": "openai-codex/gpt-5.6-terra",
+            "fallbackModels": ["antigravity/gemini-3-flash-preview", "zai/glm-5.2"],
             "thinking": "medium"
           },
           "tests": {
-            "model": "openai-codex/gpt-5.4-mini",
+            "model": "openai-codex/gpt-5.6-terra",
             "fallbackModels": ["zai/glm-5-turbo"],
             "thinking": "medium"
           },
