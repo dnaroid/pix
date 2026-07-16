@@ -1,6 +1,6 @@
 {
   "name": "pi-ui-extend",
-  "version": "0.1.62",
+  "version": "0.1.63",
   "private": false,
   "type": "module",
   "bin": {
