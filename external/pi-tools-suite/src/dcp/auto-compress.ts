@@ -13,8 +13,8 @@
 // automatic fallback to the programmatic digest on any failure/timeout.
 // ---------------------------------------------------------------------------
 
-import { complete } from "@earendil-works/pi-ai/compat"
 import type { Model, Api } from "@earendil-works/pi-ai"
+import { completeWithModelRegistry, type ModelCompletionRegistry } from "../model-completion.js"
 import type { DcpState } from "./state.js"
 import type { DcpConfig } from "./config.js"
 import type { CompressionCandidate } from "./pruner-types.js"
@@ -134,6 +134,14 @@ export interface ModelSummaryResult {
 	attempts: ModelSummaryAttempt[]
 }
 
+type ModelSummaryRegistry = ModelCompletionRegistry & {
+	find(provider: string, modelId: string): Model<Api> | undefined
+	getApiKeyAndHeaders(model: Model<Api>): Promise<
+		| { ok: true; apiKey?: string; headers?: Record<string, string>; env?: Record<string, string> }
+		| { ok: false; error: string }
+	>
+}
+
 /**
  * Try to produce a model-generated summary by calling each model in
  * `modelRefs` in order. On success returns `{ text, usedModelRef, attempts }`;
@@ -146,7 +154,7 @@ export interface ModelSummaryResult {
  */
 export async function generateModelSummary(
 	modelRefs: string[],
-	modelRegistry: any,
+	modelRegistry: ModelSummaryRegistry | undefined,
 	signal: AbortSignal | undefined,
 	topic: string,
 	messagesInRange: any[],
@@ -178,7 +186,7 @@ export async function generateModelSummary(
 			continue
 		}
 
-		let auth
+		let auth: Awaited<ReturnType<ModelSummaryRegistry["getApiKeyAndHeaders"]>>
 		try {
 			auth = await modelRegistry.getApiKeyAndHeaders(model)
 		} catch (error) {
@@ -186,7 +194,7 @@ export async function generateModelSummary(
 			attempts.push({ ref, outcome: "no-auth", error: error instanceof Error ? error.message : String(error) })
 			continue
 		}
-		if (!auth?.ok || !auth.apiKey) {
+		if (auth.ok === false) {
 			attempts.push({ ref, outcome: "no-auth" })
 			continue
 		}
@@ -202,7 +210,8 @@ export async function generateModelSummary(
 		}
 
 		try {
-			const result = await complete(
+			const result = await completeWithModelRegistry(
+				modelRegistry,
 				model,
 				{ systemPrompt: SUMMARIZER_SYSTEM_PROMPT, messages: [{ role: "user", content: userPrompt, timestamp: Date.now() }] },
 				{

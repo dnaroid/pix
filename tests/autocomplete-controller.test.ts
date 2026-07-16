@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { InputEditor } from "../src/input-editor.js";
-import { AppAutocompleteController, autocompleteHistoryFromMessages, autocompletePromptTokenEstimate, buildAutocompletePrompt, cleanupCompletion } from "../src/app/input/autocomplete-controller.js";
+import { AppAutocompleteController, autocompleteHistoryFromMessages, autocompletePromptTokenEstimate, buildAutocompletePrompt, cleanupCompletion, completeInputWithPi } from "../src/app/input/autocomplete-controller.js";
 
 describe("autocomplete controller helpers", () => {
 	it("builds recent active-session history from user and assistant messages", () => {
@@ -80,6 +80,42 @@ describe("autocomplete controller helpers", () => {
 		assert.equal(cleanupCompletion("Suffix:  с историей", "", { maxTokens: 8 }), "с историей");
 		assert.equal(cleanupCompletion("```text\nготово\n```", "", { maxTokens: 8 }), "готово");
 	});
+
+	it("streams autocomplete through the runtime model service", async () => {
+		const model = { provider: "provider", id: "model", name: "Model", maxTokens: 4096 };
+		let streamModel: unknown;
+		let reloads = 0;
+		const runtime = {
+			cwd: "/tmp/project",
+			session: { messages: [] },
+			services: {
+				modelRuntime: {
+					getModel: () => model,
+					reloadConfig: async () => { reloads += 1; },
+					streamSimple: (requestedModel: unknown) => {
+						streamModel = requestedModel;
+						return (async function* () {
+							yield { type: "text_delta", delta: " world" };
+						})();
+					},
+				},
+			},
+		} as never;
+
+		const completion = await completeInputWithPi(runtime, "hello", {
+			modelRef: "provider/model",
+			debounceMs: 0,
+			timeoutMs: 1_000,
+			maxTokens: 32,
+			maxPromptTokens: 1_200,
+			includeRecentMessages: 0,
+		});
+
+		assert.equal(completion, " world");
+		assert.equal(reloads, 0);
+		assert.equal((streamModel as { maxTokens?: number }).maxTokens, 32);
+	});
+
 	it("runs inline autocomplete for eligible drafts and accepts the suggestion", async () => {
 		const inputEditor = new InputEditor();
 		inputEditor.setText("hello");

@@ -4,7 +4,7 @@ import { createPiAiMock } from "./support/pi-ai-mock.js";
 // Controllable summarizer result. Each test sets `nextResult` / `nextError`
 // (per-call, FIFO) before exercising the code under test.
 let nextResults: Array<{ content?: any; error?: unknown }> = [];
-const completeMock = mock(async (_model: unknown, _input: unknown) => {
+const completeMock = mock(async (_model: unknown, _input: unknown, _options?: unknown) => {
 	const next = nextResults.shift();
 	if (next?.error) throw next.error;
 	return { content: next?.content ?? [{ type: "text", text: "model summary" }] };
@@ -24,15 +24,20 @@ function makeRegistry(opts: {
 	findModel?: boolean;
 	authOk?: boolean;
 	authError?: boolean;
-} = {}) {
-	const { findModel = true, authOk = true, authError = false } = opts;
+	apiKey?: string;
+	customResult?: { content: Array<{ type: string; text: string }> };
+} = {}): any {
+	const { findModel = true, authOk = true, authError = false, apiKey = "key", customResult } = opts;
 	return {
 		find: (_provider: string, _id: string) =>
 			findModel ? ({ provider: _provider, id: _id } as any) : undefined,
 		getApiKeyAndHeaders: async (_model: unknown) => {
 			if (authError) throw new Error("auth boom");
-			return { ok: authOk, apiKey: authOk ? "key" : undefined, headers: {}, env: {} };
+			return { ok: authOk, apiKey: authOk ? apiKey : undefined, headers: {}, env: { AWS_PROFILE: "pi" } };
 		},
+		getRegisteredProviderConfig: () => customResult
+			? { streamSimple: () => ({ result: async () => customResult }) }
+			: undefined,
 	};
 }
 
@@ -156,6 +161,39 @@ describe("generateModelSummary", () => {
 		);
 		expect(result.text).toBeUndefined();
 		expect(result.attempts).toEqual([{ ref: "zai/glm-5.2", outcome: "no-auth" }]);
+		expect(completeMock).not.toHaveBeenCalled();
+	});
+
+	test("supports successful auth supplied only through provider environment", async () => {
+		const { generateModelSummary } = await loadModule();
+		nextResults = [{ content: [{ type: "text", text: "env summary" }] }];
+		const result = await generateModelSummary(
+			["amazon-bedrock/claude"],
+			makeRegistry({ apiKey: "" }),
+			undefined,
+			"Environment auth",
+			[textMessage("user", "hi", 1)],
+			1000,
+		);
+
+		expect(result.text).toBe("env summary");
+		const options = completeMock.mock.calls[0]?.[2] as { apiKey?: string; env?: Record<string, string> };
+		expect(options.apiKey).toBe("");
+		expect(options.env).toEqual({ AWS_PROFILE: "pi" });
+	});
+
+	test("uses an extension provider stream instead of the global compat registry", async () => {
+		const { generateModelSummary } = await loadModule();
+		const result = await generateModelSummary(
+			["antigravity/gemini-3-pro"],
+			makeRegistry({ customResult: { content: [{ type: "text", text: "custom summary" }] } }),
+			undefined,
+			"Custom provider",
+			[textMessage("user", "hi", 1)],
+			1000,
+		);
+
+		expect(result.text).toBe("custom summary");
 		expect(completeMock).not.toHaveBeenCalled();
 	});
 

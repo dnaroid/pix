@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { AuthStorage } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime, readStoredCredential } from "@earendil-works/pi-coding-agent";
 import { formatCompactProgressBar } from "../../context-progress-bar.js";
 import { APP_ICONS } from "../icons.js";
 import type { SessionModel } from "../types.js";
@@ -411,9 +411,18 @@ async function queryOpenAIAccountUsage(now: number): Promise<AccountUsageReport[
 async function refreshOpenAICodexAuth(): Promise<OpenAIAuthData> {
 	// Delegate to pi core so refresh-token rotation is persisted under the same
 	// cross-process auth.json lock used by model requests.
-	const authStorage = AuthStorage.create(getPiAuthPath());
-	const access = await authStorage.getApiKey("openai-codex", { includeFallback: false });
-	const credential = authStorage.get("openai-codex");
+	const modelRuntime = await ModelRuntime.create({
+		authPath: getPiAuthPath(),
+		allowModelNetwork: false,
+	});
+	let resolvedAuth: Awaited<ReturnType<ModelRuntime["getAuth"]>>;
+	try {
+		resolvedAuth = await modelRuntime.getAuth("openai-codex");
+	} catch (error) {
+		throw new Error("OpenAI Codex OAuth token refresh failed", { cause: error });
+	}
+	const credential = readStoredCredential("openai-codex", getPiAuthPath()) as PiAuthCredential | undefined;
+	const access = resolvedAuth?.auth.apiKey ?? credential?.access;
 	if (!access || credential?.type !== "oauth" || !credential.access || isExpired(credential)) {
 		throw new Error("OpenAI Codex OAuth token refresh failed");
 	}
@@ -421,8 +430,8 @@ async function refreshOpenAICodexAuth(): Promise<OpenAIAuthData> {
 	return {
 		type: "oauth",
 		access: credential.access,
-		refresh: credential.refresh,
-		expires: credential.expires,
+		...(credential.refresh === undefined ? {} : { refresh: credential.refresh }),
+		...(credential.expires === undefined ? {} : { expires: credential.expires }),
 	};
 }
 

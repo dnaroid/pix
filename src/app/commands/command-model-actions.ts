@@ -68,8 +68,8 @@ export class ModelCommandActions {
 		const parsed = parseScopedModelRef(modelRef);
 		if (!parsed) throw new Error("Model must use provider/model[:thinking] format");
 
-		runtime.services.modelRegistry.refresh();
-		const model = runtime.services.modelRegistry.find(parsed.provider, parsed.modelId) as SessionModel | undefined;
+		await runtime.services.modelRuntime.reloadConfig();
+		const model = runtime.services.modelRuntime.getModel(parsed.provider, parsed.modelId) as SessionModel | undefined;
 		if (!model) throw new Error(`Model not found: ${parsed.provider}/${parsed.modelId}`);
 
 		await this.runModelCommand(model);
@@ -105,8 +105,8 @@ export class ModelCommandActions {
 		const parsed = parseScopedModelRef(modelRef);
 		if (!parsed) throw new Error("Model must use provider/model[:thinking] format");
 
-		runtime.services.modelRegistry.refresh();
-		const model = runtime.services.modelRegistry.find(parsed.provider, parsed.modelId) as SessionModel | undefined;
+		await runtime.services.modelRuntime.reloadConfig();
+		const model = runtime.services.modelRuntime.getModel(parsed.provider, parsed.modelId) as SessionModel | undefined;
 		if (!model) throw new Error(`Model not found: ${parsed.provider}/${parsed.modelId}`);
 
 		this.saveDefaultModel(modelRef);
@@ -128,8 +128,8 @@ export class ModelCommandActions {
 		const parsed = parseScopedModelRef(modelRef);
 		if (!parsed) throw new Error("Model must use provider/model[:thinking] format, or run /autocomplete with no arguments to disable");
 
-		runtime.services.modelRegistry.refresh();
-		const model = runtime.services.modelRegistry.find(parsed.provider, parsed.modelId) as SessionModel | undefined;
+		await runtime.services.modelRuntime.reloadConfig();
+		const model = runtime.services.modelRuntime.getModel(parsed.provider, parsed.modelId) as SessionModel | undefined;
 		if (!model) throw new Error(`Model not found: ${parsed.provider}/${parsed.modelId}`);
 
 		const saved = savePixAutocompleteModel(modelRef);
@@ -211,10 +211,10 @@ export class ModelCommandActions {
 		const refs = value.split(/[,\s]+/).map((ref) => ref.trim()).filter(Boolean);
 		const scopedModels: ScopedSessionModel[] = [];
 		const invalidRefs: string[] = [];
-		runtime.services.modelRegistry.refresh();
+		await runtime.services.modelRuntime.reloadConfig();
 		for (const ref of refs) {
 			const parsed = parseScopedModelRef(ref);
-			const model = parsed ? runtime.services.modelRegistry.find(parsed.provider, parsed.modelId) as SessionModel | undefined : undefined;
+			const model = parsed ? runtime.services.modelRuntime.getModel(parsed.provider, parsed.modelId) as SessionModel | undefined : undefined;
 			if (!parsed || !model) {
 				invalidRefs.push(ref);
 				continue;

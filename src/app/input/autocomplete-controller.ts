@@ -1,5 +1,4 @@
 import type { AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
-import { streamSimple } from "@earendil-works/pi-ai/compat";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { AutocompleteConfig } from "../../config.js";
 import type { InputEditor } from "../../input-editor.js";
@@ -181,16 +180,13 @@ export async function completeInputWithPi(
 	signal?: AbortSignal,
 ): Promise<string> {
 	const parsedModel = parseModelRef(config.modelRef);
-	const registry = runtime.services.modelRegistry;
-	let model = registry.find(parsedModel.provider, parsedModel.modelId) as SessionModel | undefined;
+	const modelRuntime = runtime.services.modelRuntime;
+	let model = modelRuntime.getModel(parsedModel.provider, parsedModel.modelId) as SessionModel | undefined;
 	if (!model) {
-		registry.refresh();
-		model = registry.find(parsedModel.provider, parsedModel.modelId) as SessionModel | undefined;
+		await modelRuntime.reloadConfig();
+		model = modelRuntime.getModel(parsedModel.provider, parsedModel.modelId) as SessionModel | undefined;
 	}
 	if (!model) throw new Error(`Model not found: ${parsedModel.provider}/${parsedModel.modelId}`);
-
-	const auth = await registry.getApiKeyAndHeaders(model);
-	if (!auth.ok) throw new Error(auth.error);
 
 	const timeoutMs = numberInRange(config.timeoutMs, AUTOCOMPLETE_TIMEOUT_MS, 250, 10_000);
 	const maxTokens = numberInRange(config.maxTokens, AUTOCOMPLETE_MAX_TOKENS, 8, 256);
@@ -207,12 +203,10 @@ export async function completeInputWithPi(
 	let streamError: string | undefined;
 
 	try {
-		const stream = streamSimple(requestModel, {
+		const stream = modelRuntime.streamSimple(requestModel, {
 			systemPrompt: AUTOCOMPLETE_SYSTEM_PROMPT,
 			messages: [{ role: "user", content: prompt, timestamp: Date.now() }],
 		}, {
-			...(auth.apiKey === undefined ? {} : { apiKey: auth.apiKey }),
-			...(auth.headers === undefined ? {} : { headers: auth.headers }),
 			cacheRetention: "none",
 			maxRetryDelayMs: 0,
 			maxRetries: 0,

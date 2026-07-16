@@ -38,6 +38,8 @@ function createMockAssistantMessageEventStream() {
 }
 
 export function createPiAiMock(overrides: Record<string, unknown> = {}) {
+	const defaultComplete = mock(async () => ({ content: [{ type: "text", text: "{}" }] }));
+	const complete = overrides.complete ?? defaultComplete;
 	return {
 		Type: {
 			Object: (properties: any, options?: any) => ({ kind: "object", properties, options }),
@@ -56,7 +58,8 @@ export function createPiAiMock(overrides: Record<string, unknown> = {}) {
 			usage.cost ??= { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
 			return usage.cost;
 		},
-		complete: mock(async () => ({ content: [{ type: "text", text: "{}" }] })),
+		complete,
+		completeSimple: complete,
 		createAssistantMessageEventStream: createMockAssistantMessageEventStream,
 		...overrides,
 	};

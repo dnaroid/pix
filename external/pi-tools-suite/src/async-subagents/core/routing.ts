@@ -1,5 +1,5 @@
-import { complete } from "@earendil-works/pi-ai/compat";
 import type { Api, Model } from "@earendil-works/pi-ai";
+import { completeWithModelRegistry, type ModelCompletionRegistry } from "../../model-completion.js";
 import type { AgentTask } from "./types.js";
 import {
 	currentModelRef,
@@ -11,10 +11,10 @@ import {
 
 export interface SubagentRoutingContext {
 	model?: unknown;
-	modelRegistry?: {
+	modelRegistry?: ModelCompletionRegistry & {
 		find(provider: string, modelId: string): Model<Api> | undefined;
 		getApiKeyAndHeaders(model: Model<Api>): Promise<
-			| { ok?: true; apiKey?: string; headers?: Record<string, string> }
+			| { ok?: true; apiKey?: string; headers?: Record<string, string>; env?: Record<string, string> }
 			| { ok: false; error: string }
 		>;
 	};
@@ -67,7 +67,8 @@ export async function routeSubagentTasks(
 		for (const candidate of candidates) {
 			if (signal?.aborted) throw new Error("Aborted");
 			try {
-				response = await complete(
+				response = await completeWithModelRegistry(
+					ctx.modelRegistry,
 					candidate.model,
 					{
 						systemPrompt: ROUTER_SYSTEM_PROMPT,
@@ -82,6 +83,7 @@ export async function routeSubagentTasks(
 					{
 						apiKey: candidate.apiKey,
 						headers: candidate.headers,
+						env: candidate.env,
 						cacheRetention: "none",
 						maxRetries: routing.maxRetries,
 						maxTokens: routing.maxTokens,
@@ -179,14 +181,16 @@ interface RoutingCandidate {
 	model: Model<Api>;
 	apiKey?: string;
 	headers?: Record<string, string>;
+	env?: Record<string, string>;
 }
 
-type RoutingResponse = Awaited<ReturnType<typeof complete>>;
+type RoutingResponse = Awaited<ReturnType<typeof completeWithModelRegistry>>;
 
 async function resolveModelRef(ctx: SubagentRoutingContext, modelRef: string): Promise<{
 	model: Model<Api>;
 	apiKey?: string;
 	headers?: Record<string, string>;
+	env?: Record<string, string>;
 } | undefined> {
 	const parsed = parseModelRef(modelRef);
 	if (!parsed || !ctx.modelRegistry) return undefined;
@@ -194,7 +198,7 @@ async function resolveModelRef(ctx: SubagentRoutingContext, modelRef: string): P
 	if (!model) return undefined;
 	const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
 	if (auth.ok === false) return undefined;
-	return { model, apiKey: auth.apiKey, headers: auth.headers };
+	return { model, apiKey: auth.apiKey, headers: auth.headers, env: auth.env };
 }
 
 function parseModelRef(modelRef: string): { provider: string; modelId: string } | undefined {

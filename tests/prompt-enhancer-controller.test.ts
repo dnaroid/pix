@@ -279,9 +279,8 @@ function createHost(
 			session,
 			services: {
 				agentDir: "/tmp/.pi",
-				authStorage: {},
 				settingsManager: {},
-				modelRegistry: {},
+				modelRuntime: {},
 			},
 		}) as unknown as ReturnType<AppPromptEnhancerControllerHost["runtime"]>,
 		inputEditor: () => editor,
@@ -321,10 +320,10 @@ function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
 
 function fakeServices(models: Array<{ provider: string; id: string; name?: string }>): never {
 	return {
-		modelRegistry: {
-			refresh: () => {},
-			find: (provider: string, id: string) => models.find((model) => model.provider === provider && model.id === id),
-			getAll: () => models,
+		modelRuntime: {
+			reloadConfig: async () => {},
+			getModel: (provider: string, id: string) => models.find((model) => model.provider === provider && model.id === id),
+			getModels: () => models,
 		},
 	} as never;
 }

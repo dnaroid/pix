@@ -338,8 +338,8 @@ export async function createPixRuntime(options: AppOptions, runtimeOptions: Crea
 				config,
 				...(runtimeOptions.eventBus === undefined ? {} : { eventBus: runtimeOptions.eventBus }),
 			});
-		services.modelRegistry.refresh();
-		const model = parsedModel ? services.modelRegistry.find(parsedModel.provider, parsedModel.modelId) : undefined;
+		await services.modelRuntime.reloadConfig();
+		const model = parsedModel ? services.modelRuntime.getModel(parsedModel.provider, parsedModel.modelId) : undefined;
 		if (parsedModel && !model) {
 			throw new Error(`Model not found: ${parsedModel.provider}/${parsedModel.modelId}`);
 		}
@@ -349,7 +349,7 @@ export async function createPixRuntime(options: AppOptions, runtimeOptions: Crea
 			const scoped = parseScopedModelRef(modelRef);
 			if (!scoped) return [];
 
-			const scopedModel = services.modelRegistry.find(scoped.provider, scoped.modelId) as SessionModel | undefined;
+			const scopedModel = services.modelRuntime.getModel(scoped.provider, scoped.modelId) as SessionModel | undefined;
 			if (!scopedModel) return [];
 
 			return [

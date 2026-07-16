@@ -5,11 +5,12 @@ import { loadSessionTitleConfig, type SessionTitleConfig } from "./config.js";
 import {
 	fallbackSessionTitleFromInput,
 	firstUserMessageText as firstUserMessageTextFromEntries,
-	generateSessionTitle,
 	sessionTitleModelRefs,
-	} from "./title-generation.js";
+} from "./title-generation.js";
+import { generateSessionTitle } from "./title-generation-compat.js";
 
-export { fallbackSessionTitleFromInput, generateSessionTitle, sessionTitleModelRefs, sanitizeSessionTitle } from "./title-generation.js";
+export { generateSessionTitle } from "./title-generation-compat.js";
+export { fallbackSessionTitleFromInput, generateSessionTitleWithRuntime, sessionTitleModelRefs, sanitizeSessionTitle } from "./title-generation.js";
 
 type PendingGeneration = {
 	sessionId: string;

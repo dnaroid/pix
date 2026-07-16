@@ -1,5 +1,4 @@
-import { complete } from "@earendil-works/pi-ai/compat";
-import type { Api, Model } from "@earendil-works/pi-ai";
+import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { SessionTitleConfig } from "./config.js";
 
 type SessionEntryLike = {
@@ -15,22 +14,16 @@ type TextContentLike = {
 	text?: unknown;
 };
 
-type TitleModelRegistry = {
-	find(provider: string, modelId: string): Model<Api> | undefined;
-	getApiKeyAndHeaders(model: Model<Api>): Promise<
-		| { ok: true; apiKey?: string; headers?: Record<string, string> }
-		| { ok: false; error: string }
-	>;
-};
+type TitleModelRuntime = Pick<ModelRuntime, "getModel" | "completeSimple">;
 
-const TITLE_SYSTEM_PROMPT = [
+export const TITLE_SYSTEM_PROMPT = [
 	"You name Pi coding-agent sessions from the user's first request.",
 	"Return only one concise title, without quotes, markdown, emoji, or explanations.",
 	"Use the same language as the task when possible.",
 	"Keep it specific, 3-7 words, and under the requested character limit.",
 ].join("\n");
 
-function parseModelRef(modelRef: string): { provider: string; modelId: string } | undefined {
+export function parseTitleModelRef(modelRef: string): { provider: string; modelId: string } | undefined {
 	const trimmed = modelRef.trim();
 	const slash = trimmed.indexOf("/");
 	if (slash <= 0 || slash === trimmed.length - 1) return undefined;
@@ -86,7 +79,7 @@ export function fallbackSessionTitleFromInput(input: string, maxTitleChars: numb
 	return sanitizeSessionTitle(candidate || normalized, maxTitleChars);
 }
 
-function buildTitlePrompt(input: string, maxTitleChars: number): string {
+export function buildTitlePrompt(input: string, maxTitleChars: number): string {
 	return [
 		`Generate a session title under ${maxTitleChars} characters for this session.`,
 		"If a parent session title is provided, use it only as context and focus on the new request.",
@@ -98,7 +91,7 @@ function buildTitlePrompt(input: string, maxTitleChars: number): string {
 	].join("\n");
 }
 
-function responseText(response: { content: Array<{ type: string; text?: string }> }): string {
+export function titleResponseText(response: { content: Array<{ type: string; text?: string }> }): string {
 	return response.content
 		.filter((block): block is { type: "text"; text: string } => block.type === "text" && typeof block.text === "string")
 		.map((block) => block.text)
@@ -136,33 +129,28 @@ export function sessionTitleModelRefs(config: SessionTitleConfig): string[] {
 		.filter((modelRef, index, refs) => refs.indexOf(modelRef) === index);
 }
 
-export async function generateSessionTitle(
+/** Host-side title generation through the canonical SDK ModelRuntime. */
+export async function generateSessionTitleWithRuntime(
 	input: string,
-	modelRegistry: TitleModelRegistry,
+	modelRuntime: TitleModelRuntime,
 	config: SessionTitleConfig,
 	modelRef: string,
 	signal: AbortSignal,
 	onWarning?: (message: string) => void,
 ): Promise<string | undefined> {
-	const parsedModel = parseModelRef(modelRef);
+	const parsedModel = parseTitleModelRef(modelRef);
 	if (!parsedModel) {
 		onWarning?.(`Invalid session-title model: ${modelRef}`);
 		return undefined;
 	}
 
-	const model = modelRegistry.find(parsedModel.provider, parsedModel.modelId);
+	const model = modelRuntime.getModel(parsedModel.provider, parsedModel.modelId);
 	if (!model) {
 		onWarning?.(`Session-title model not found: ${modelRef}`);
 		return undefined;
 	}
 
-	const auth = await modelRegistry.getApiKeyAndHeaders(model);
-	if (auth.ok === false) {
-		onWarning?.(auth.error);
-		return undefined;
-	}
-
-	const response = await complete(
+	const response = await modelRuntime.completeSimple(
 		model,
 		{
 			systemPrompt: TITLE_SYSTEM_PROMPT,
@@ -175,8 +163,6 @@ export async function generateSessionTitle(
 			],
 		},
 		{
-			...(auth.apiKey === undefined ? {} : { apiKey: auth.apiKey }),
-			...(auth.headers === undefined ? {} : { headers: auth.headers }),
 			cacheRetention: "none",
 			maxRetries: config.maxRetries,
 			maxTokens: config.maxTokens,
@@ -185,5 +171,5 @@ export async function generateSessionTitle(
 		},
 	);
 
-	return sanitizeSessionTitle(responseText(response), config.maxTitleChars);
+	return sanitizeSessionTitle(titleResponseText(response), config.maxTitleChars);
 }

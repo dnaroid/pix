@@ -109,9 +109,10 @@ function collectNudgeStats(ctx: ExtensionCommandContext, state: DcpState): DcpNu
       else stats.upgraded++
       stats.byType[data.type]++
       const createdAt = typeof data.createdAt === "number" ? data.createdAt : undefined
-      const contextPercent = typeof data.contextPercent === "number" || data.contextPercent === null
-        ? data.contextPercent
-        : undefined
+      const rawContextPercent = data.contextPercent
+      let contextPercent: number | null | undefined
+      if (typeof rawContextPercent === "number") contextPercent = rawContextPercent
+      else if (rawContextPercent === null) contextPercent = null
       if (!stats.last || (createdAt ?? 0) >= (stats.last.createdAt ?? 0)) {
         stats.last = { type: data.type, event, createdAt, contextPercent }
       }

@@ -34,7 +34,6 @@ describe("AppMenuItemsController queue menu", () => {
 	});
 
 	it("builds model and thinking menus from runtime state and settings", () => {
-		let refreshes = 0;
 		const models = [model("zai", "glm-5-turbo", "GLM"), model("openai-codex", "gpt-5.5", "GPT")];
 		const runtime = {
 			session: {
@@ -45,9 +44,8 @@ describe("AppMenuItemsController queue menu", () => {
 			},
 			services: {
 				settingsManager: { getEnabledModels: () => ["zai/glm-5-turbo:low", "bad-ref", "missing/model"] },
-				modelRegistry: {
-					refresh: () => { refreshes += 1; },
-					find: (provider: string, id: string) => models.find((candidate) => candidate.provider === provider && candidate.id === id),
+				modelRuntime: {
+					getModel: (provider: string, id: string) => models.find((candidate) => candidate.provider === provider && candidate.id === id),
 				},
 			},
 		} as unknown as AgentSessionRuntime;
@@ -57,7 +55,6 @@ describe("AppMenuItemsController queue menu", () => {
 		assert.deepEqual(controller.getModelMenuItems("gpt")[0]?.labelHighlightRanges, [{ start: 13, end: 16 }]);
 		assert.deepEqual(controller.getThinkingMenuItems("").map((item) => item.label), [`low ${APP_ICONS.check}`, "high"]);
 		assert.equal(controller.getFavoriteScopedModels()[0]?.thinkingLevel, "low");
-		assert.ok(refreshes >= 2);
 	});
 
 	it("uses available thinking levels without forcing unavailable current levels", () => {

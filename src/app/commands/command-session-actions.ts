@@ -17,7 +17,7 @@ import { loadSessionTitleConfig } from "../../bundled-extensions/session-title/c
 import {
 	fallbackSessionTitleFromInput,
 	firstUserMessageText,
-	generateSessionTitle,
+	generateSessionTitleWithRuntime,
 	sessionTitleModelRefs,
 } from "../../bundled-extensions/session-title/title-generation.js";
 
@@ -131,9 +131,9 @@ export class SessionCommandActions {
 			if (config.enabled) {
 				for (const modelRef of modelRefs) {
 					for (let attempt = 0; attempt < config.generationAttempts; attempt++) {
-						generatedName = await generateSessionTitle(
+						generatedName = await generateSessionTitleWithRuntime(
 							firstPrompt.slice(0, config.maxInputChars).trim(),
-							runtime.services.modelRegistry,
+							runtime.services.modelRuntime,
 							config,
 							modelRef,
 							AbortSignal.timeout(config.timeoutMs),

@@ -26,12 +26,13 @@ export async function createLiveModelContext(modelRef: string): Promise<LiveMode
 	// exposed through CommonJS interop there.
 	const imported = await import("@earendil-works/pi-coding-agent");
 	const fallback = (imported as unknown as { default?: typeof imported }).default;
-	const AuthStorage = imported.AuthStorage ?? fallback?.AuthStorage;
+	const ModelRuntime = imported.ModelRuntime ?? fallback?.ModelRuntime;
 	const ModelRegistryRuntime = imported.ModelRegistry ?? fallback?.ModelRegistry;
-	if (!AuthStorage || !ModelRegistryRuntime) {
-		throw new Error("Prompt eval SDK does not expose AuthStorage and ModelRegistry");
+	if (!ModelRuntime || !ModelRegistryRuntime) {
+		throw new Error("Prompt eval SDK does not expose ModelRuntime and ModelRegistry");
 	}
-	const modelRegistry = ModelRegistryRuntime.create(AuthStorage.create());
+	const modelRuntime = await ModelRuntime.create();
+	const modelRegistry = new ModelRegistryRuntime(modelRuntime);
 	const model = modelRegistry.find(provider, modelId);
 	if (!model) throw new Error(`Prompt eval model is not registered: ${modelRef}`);
 

@@ -198,9 +198,8 @@ async function enhancePromptWithPi(
 	const services = await promptEnhancerPiDeps.createAgentSessionServices({
 		cwd: runtime.cwd,
 		agentDir: runtime.services.agentDir,
-		authStorage: runtime.services.authStorage,
 		settingsManager: runtime.services.settingsManager,
-		modelRegistry: runtime.services.modelRegistry,
+		modelRuntime: runtime.services.modelRuntime,
 		resourceLoaderOptions: {
 			noExtensions: true,
 			noSkills: true,
@@ -211,13 +210,13 @@ async function enhancePromptWithPi(
 		},
 	});
 
-	services.modelRegistry.refresh();
-	const model = services.modelRegistry.find(parsedModel.provider, parsedModel.modelId) as SessionModel | undefined;
+	await services.modelRuntime.reloadConfig();
+	const model = services.modelRuntime.getModel(parsedModel.provider, parsedModel.modelId) as SessionModel | undefined;
 	if (!model) {
 		throw new Error(modelNotFoundMessage(
 			parsedModel.provider,
 			parsedModel.modelId,
-			services.modelRegistry.getAll() as SessionModel[],
+			services.modelRuntime.getModels() as SessionModel[],
 		));
 	}
 

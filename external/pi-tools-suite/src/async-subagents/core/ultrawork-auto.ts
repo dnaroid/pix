@@ -1,15 +1,15 @@
-import { complete } from "@earendil-works/pi-ai/compat";
 import type { Api, Model } from "@earendil-works/pi-ai";
+import { completeWithModelRegistry, type ModelCompletionRegistry } from "../../model-completion.js";
 import { currentModelRef, resolveSubagentRoutingConfig, type SubagentConfig } from "./config.js";
 
 export type UltraworkAutoDecision = "ultrawork" | "hint" | "none";
 
 export interface UltraworkAutoContext {
 	model?: unknown;
-	modelRegistry?: {
+	modelRegistry?: ModelCompletionRegistry & {
 		find(provider: string, modelId: string): Model<Api> | undefined;
 		getApiKeyAndHeaders(model: Model<Api>): Promise<
-			| { ok?: true; apiKey?: string; headers?: Record<string, string> }
+			| { ok?: true; apiKey?: string; headers?: Record<string, string>; env?: Record<string, string> }
 			| { ok: false; error: string }
 		>;
 	};
@@ -63,7 +63,8 @@ export async function decideUltraworkAuto(
 		const resolved = await resolveClassifierModel(ctx, routing.model);
 		if (!resolved) return "none";
 
-		const response = await complete(
+		const response = await completeWithModelRegistry(
+			ctx.modelRegistry,
 			resolved.model,
 			{
 				systemPrompt: CLASSIFIER_SYSTEM_PROMPT,
@@ -78,6 +79,7 @@ export async function decideUltraworkAuto(
 			{
 				apiKey: resolved.apiKey,
 				headers: resolved.headers,
+				env: resolved.env,
 				cacheRetention: "none",
 				maxRetries: routing.maxRetries,
 				maxTokens: Math.min(routing.maxTokens, 32),
@@ -130,6 +132,7 @@ async function resolveClassifierModel(ctx: UltraworkAutoContext, modelRef: strin
 	model: Model<Api>;
 	apiKey?: string;
 	headers?: Record<string, string>;
+	env?: Record<string, string>;
 } | undefined> {
 	const configured = await resolveModelRef(ctx, modelRef);
 	if (configured) return configured;
@@ -141,6 +144,7 @@ async function resolveModelRef(ctx: UltraworkAutoContext, modelRef: string): Pro
 	model: Model<Api>;
 	apiKey?: string;
 	headers?: Record<string, string>;
+	env?: Record<string, string>;
 } | undefined> {
 	const parsed = parseModelRef(modelRef);
 	if (!parsed || !ctx.modelRegistry) return undefined;
@@ -148,7 +152,7 @@ async function resolveModelRef(ctx: UltraworkAutoContext, modelRef: string): Pro
 	if (!model) return undefined;
 	const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
 	if (auth.ok === false) return undefined;
-	return { model, apiKey: auth.apiKey, headers: auth.headers };
+	return { model, apiKey: auth.apiKey, headers: auth.headers, env: auth.env };
 }
 
 function parseModelRef(modelRef: string): { provider: string; modelId: string } | undefined {

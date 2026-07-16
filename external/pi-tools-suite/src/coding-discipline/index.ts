@@ -1,11 +1,11 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { complete } from "@earendil-works/pi-ai/compat";
 import type { Api, AssistantMessage, ImageContent, Model, TextContent } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 
 import { loadPiToolsSuiteConfig } from "../config.js";
 import { ignoreStaleExtensionContextError } from "../context-usage.js";
+import { completeWithModelRegistry, type ModelCompletionRegistry } from "../model-completion.js";
 
 type ExtensionAPI = any;
 
@@ -25,9 +25,11 @@ type LookupDetails = {
 };
 
 type ResolvedLookupModel = {
+	modelRegistry: ModelCompletionRegistry;
 	model: Model<Api>;
 	apiKey?: string;
 	headers?: Record<string, string>;
+	env?: Record<string, string>;
 };
 
 const SILENT_PROMPT_MARKER_START = "<glm_silent_mode>";
@@ -504,7 +506,8 @@ function createLookupTool() {
 			const promptText = buildLookupPrompt(params, recentContext, images.length, pathImages.warnings);
 
 			try {
-				const response = await complete(
+				const response = await completeWithModelRegistry(
+					resolved.modelRegistry,
 					resolved.model,
 					{
 						systemPrompt: LOOKUP_SYSTEM_PROMPT,
@@ -519,6 +522,7 @@ function createLookupTool() {
 					{
 						apiKey: resolved.apiKey,
 						headers: resolved.headers,
+						env: resolved.env,
 						cacheRetention: "none",
 						maxRetries: 1,
 						maxTokens: DEFAULT_LOOKUP_MAX_TOKENS,
@@ -765,9 +769,20 @@ async function resolveLookupModel(ctx: unknown, modelRef: string): Promise<Resol
 	if (!isRecord(registry) || typeof registry.find !== "function" || typeof registry.getApiKeyAndHeaders !== "function") return undefined;
 	const model = registry.find(parsed.provider, parsed.modelId) as Model<Api> | undefined;
 	if (!model) return undefined;
-	const auth = await registry.getApiKeyAndHeaders(model) as { ok?: true; apiKey?: string; headers?: Record<string, string> } | { ok: false; error: string };
+	const auth = await registry.getApiKeyAndHeaders(model) as {
+		ok?: true;
+		apiKey?: string;
+		headers?: Record<string, string>;
+		env?: Record<string, string>;
+	} | { ok: false; error: string };
 	if (auth.ok === false) return undefined;
-	return { model, apiKey: auth.apiKey, headers: auth.headers };
+	return {
+		modelRegistry: registry as ModelCompletionRegistry,
+		model,
+		apiKey: auth.apiKey,
+		headers: auth.headers,
+		env: auth.env,
+	};
 }
 
 function parseModelRef(modelRef: string): { provider: string; modelId: string } | undefined {

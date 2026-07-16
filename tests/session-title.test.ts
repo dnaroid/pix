@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { SessionManager, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import sessionTitle, { buildForkTitleInput, fallbackSessionTitleFromInput, firstUserMessageText, sessionTitleModelRefs } from "../src/bundled-extensions/session-title/index.js";
+import sessionTitle, {
+	buildForkTitleInput,
+	fallbackSessionTitleFromInput,
+	firstUserMessageText,
+	generateSessionTitleWithRuntime,
+	sessionTitleModelRefs,
+} from "../src/bundled-extensions/session-title/index.js";
 
 describe("session-title extension", () => {
 	it("finds text from the first existing user message", () => {
@@ -99,6 +105,30 @@ describe("session-title extension", () => {
 			}),
 			["zai/glm-5-turbo", "openai-codex/gpt-5.3-codex-spark"],
 		);
+	});
+
+	it("generates host titles through ModelRuntime", async () => {
+		const calls: string[] = [];
+		const model = { provider: "zai", id: "glm-5-turbo" };
+		const title = await generateSessionTitleWithRuntime(
+			"Fix session title generation",
+			{
+				getModel(provider: string, modelId: string) {
+					calls.push(`get:${provider}/${modelId}`);
+					return model as never;
+				},
+				async completeSimple(selectedModel: { provider: string; id: string }) {
+					calls.push(`complete:${selectedModel.provider}/${selectedModel.id}`);
+					return { content: [{ type: "text", text: "Reliable session titles" }] } as never;
+				},
+			},
+			titleConfig(),
+			"zai/glm-5-turbo",
+			new AbortController().signal,
+		);
+
+		assert.equal(title, "Reliable session titles");
+		assert.deepEqual(calls, ["get:zai/glm-5-turbo", "complete:zai/glm-5-turbo"]);
 	});
 
 	it("does not generate a missing title from later prompts in an existing unnamed session", async () => {
@@ -254,6 +284,25 @@ describe("session-title extension", () => {
 		});
 	});
 });
+
+function titleConfig() {
+	return {
+		enabled: true,
+		model: "zai/glm-5-turbo",
+		fallbackModels: [],
+		maxInputChars: 2000,
+		maxTitleChars: 80,
+		maxTokens: 32,
+		maxRetries: 2,
+		generationAttempts: 3,
+		retryDelayMs: 3000,
+		timeoutMs: 12_000,
+		terminalTitle: true,
+		terminalTitlePrefix: "pi — ",
+		notify: false,
+		debug: false,
+	};
+}
 
 function fakeContext(branch: unknown[]): ExtensionContext {
 	return {

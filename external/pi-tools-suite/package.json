@@ -33,8 +33,9 @@
     "test:locate-benchmark-e2e": "PI_LOCATE_BENCH_E2E=1 PI_LOCATE_BENCH_MODEL=zai/glm-5-turbo bun test test/locate-benchmark-e2e.test.ts",
     "test:tool-selection-e2e": "TOOL_SELECTION_E2E=1 TOOL_SELECTION_E2E_MODEL=zai/glm-5-turbo bun test --concurrent --max-concurrency=30 test/tool-selection-e2e.test.ts",
     "test:e2e": "TOOL_SELECTION_E2E=1 TOOL_SELECTION_E2E_MODEL=zai/glm-5-turbo ASYNC_SUBAGENTS_E2E=1 ASYNC_SUBAGENTS_DEBUG_LOGS=1 ASYNC_SUBAGENTS_MODEL=zai/glm-5-turbo bun test --concurrent --max-concurrency=5 test/tool-selection-e2e.test.ts test/async-subagents/e2e.test.ts test/async-subagents/selection-e2e.test.ts test/todo-persistence-e2e.test.ts",
+    "typecheck": "tsc -p tsconfig.source.json",
     "typecheck:async-subagents": "bash scripts/typecheck-source.sh",
-    "check": "npm run smoke"
+    "check": "npm run typecheck && npm test && npm run smoke"
   },
   "dependencies": {
     "jsonc-parser": "^3.3.1",
@@ -42,9 +43,9 @@
     "vscode-languageserver-protocol": "^3.17.5"
   },
   "peerDependencies": {
-    "@earendil-works/pi-ai": "0.80.7",
-    "@earendil-works/pi-coding-agent": "0.80.7",
-    "@earendil-works/pi-tui": "0.80.7",
+    "@earendil-works/pi-ai": "0.80.9",
+    "@earendil-works/pi-coding-agent": "0.80.9",
+    "@earendil-works/pi-tui": "0.80.9",
     "typebox": "*"
   },
   "devDependencies": {

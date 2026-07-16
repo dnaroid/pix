@@ -222,16 +222,15 @@ export class AppMenuItemsController {
 	}
 
 	private resolveScopedModelRefs(modelRefs: readonly string[]): ScopedSessionModel[] {
-		const registry = this.host.runtime()?.services.modelRegistry;
-		if (!registry) return [];
+		const modelRuntime = this.host.runtime()?.services.modelRuntime;
+		if (!modelRuntime) return [];
 
-		registry.refresh();
 		const scopedModels: ScopedSessionModel[] = [];
 		for (const modelRef of modelRefs) {
 			const parsed = parseScopedModelRef(modelRef);
 			if (!parsed) continue;
 
-			const model = registry.find(parsed.provider, parsed.modelId) as SessionModel | undefined;
+			const model = modelRuntime.getModel(parsed.provider, parsed.modelId) as SessionModel | undefined;
 			if (!model) continue;
 			scopedModels.push({
 				model,
@@ -246,10 +245,9 @@ export class AppMenuItemsController {
 		const scopedModels = session?.scopedModels.length ? session.scopedModels : this.getFavoriteScopedModels();
 		if (!scopedModels.length) return [];
 
-		const registry = this.host.runtime()?.services.modelRegistry;
-		registry?.refresh();
+		const modelRuntime = this.host.runtime()?.services.modelRuntime;
 		return scopedModels.map((scoped) => {
-			const refreshed = registry?.find(scoped.model.provider, scoped.model.id);
+			const refreshed = modelRuntime?.getModel(scoped.model.provider, scoped.model.id);
 			return (refreshed ?? scoped.model) as SessionModel;
 		});
 	}
