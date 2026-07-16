@@ -1,4 +1,4 @@
-import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 
 export type LiveModelContext = {
 	model: NonNullable<ReturnType<ModelRegistry["find"]>>;
@@ -21,7 +21,17 @@ export async function createLiveModelContext(modelRef: string): Promise<LiveMode
 
 	const provider = modelRef.slice(0, separator);
 	const modelId = modelRef.slice(separator + 1);
-	const modelRegistry = ModelRegistry.create(AuthStorage.create());
+	// Keep this runtime import behind the live-eval gate. Bun on Windows validates
+	// named ESM exports even for skipped tests, while the installed SDK may be
+	// exposed through CommonJS interop there.
+	const imported = await import("@earendil-works/pi-coding-agent");
+	const fallback = (imported as unknown as { default?: typeof imported }).default;
+	const AuthStorage = imported.AuthStorage ?? fallback?.AuthStorage;
+	const ModelRegistryRuntime = imported.ModelRegistry ?? fallback?.ModelRegistry;
+	if (!AuthStorage || !ModelRegistryRuntime) {
+		throw new Error("Prompt eval SDK does not expose AuthStorage and ModelRegistry");
+	}
+	const modelRegistry = ModelRegistryRuntime.create(AuthStorage.create());
 	const model = modelRegistry.find(provider, modelId);
 	if (!model) throw new Error(`Prompt eval model is not registered: ${modelRef}`);
 
