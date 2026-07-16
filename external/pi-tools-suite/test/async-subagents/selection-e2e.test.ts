@@ -15,7 +15,7 @@ import type { AgentTask } from "../../src/async-subagents/lib.js";
 // ASYNC_SUBAGENTS_SELECTION_E2E=1 ASYNC_SUBAGENTS_MODEL=zai/glm-5-turbo \
 //   bun test test/async-subagents/selection-e2e.test.ts
 const RUN_E2E = /^(1|true|yes)$/i.test(
-	process.env.ASYNC_SUBAGENTS_SELECTION_E2E ?? process.env.ASYNC_SUBAGENTS_E2E ?? "",
+	process.env.ASYNC_SUBAGENTS_SELECTION_E2E ?? process.env.ASYNC_SUBAGENTS_E2E ?? process.env.PROMPT_EVAL_E2E ?? "",
 );
 const KEEP_E2E_DIRS = /^(1|true|yes)$/i.test(process.env.ASYNC_SUBAGENTS_SELECTION_E2E_KEEP ?? process.env.ASYNC_SUBAGENTS_E2E_KEEP ?? "");
 const DEFAULT_MODEL = "zai/glm-5-turbo";
@@ -23,6 +23,7 @@ const E2E_MODEL = (
 	process.env.ASYNC_SUBAGENTS_SELECTION_E2E_MODEL ||
 	process.env.ASYNC_SUBAGENTS_MODEL ||
 	process.env.ASYNC_SUBAGENTS_E2E_MODEL ||
+	process.env.PI_TOOLS_SUITE_E2E_MODEL ||
 	DEFAULT_MODEL
 ).trim();
 const E2E_TIMEOUT_MS = Number(process.env.ASYNC_SUBAGENTS_SELECTION_E2E_TIMEOUT_MS ?? process.env.ASYNC_SUBAGENTS_E2E_TIMEOUT_MS ?? 240_000);
@@ -223,6 +224,25 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 describe("async-subagents live e2e sub-agent type selection", () => {
+	e2eTest("omits optional routing overrides for a normal delegated task and does not poll", async () => {
+		await withFixtureProject(async (projectDir) => {
+			const prompt = `
+Delegate one independent payment-flow review now using the agent id payment-check, then stop immediately after the spawn call.
+Let the configured router choose the helper profile. Do not inspect files in the parent, do not wait for results, and do not check progress.`;
+
+			const result = await runPiSubagentSelectionE2E(projectDir, prompt, "default router omission");
+			const subagentCalls = result.events.filter((event) => event.type === "tool_call" && event.toolName === "subagents");
+			expect(subagentCalls).toHaveLength(1);
+			const input = firstSpawnInput(result.events);
+			expect(input.tasks).toHaveLength(1);
+			const task = input.tasks![0]!;
+			expect(task.id).toBe("payment-check");
+			expect(task.subagentType).toBeUndefined();
+			expect(task.model).toBeUndefined();
+			expect(task.thinking).toBeUndefined();
+		});
+	}, E2E_TIMEOUT_MS);
+
 	e2eTest("selects quick, scan, and review profiles for mixed explicit launch tracks", async () => {
 		await withFixtureProject(async (projectDir) => {
 			const prompt = `

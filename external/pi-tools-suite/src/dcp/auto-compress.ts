@@ -116,7 +116,7 @@ export function buildProgrammaticSummary(
 	return lines.join("\n")
 }
 
-const SUMMARIZER_SYSTEM_PROMPT = `You summarize a slice of a coding agent's conversation so it can replace the raw messages in context. Produce a dense, continuation-focused summary: preserve user intent, decisions made, files/symbols changed or inspected, exact errors still actionable, verification status, and next steps. Drop full logs, repeated output, and incidental detail. Be concise (roughly 4-10 bullets). Output ONLY the summary text, no preamble.`
+const SUMMARIZER_SYSTEM_PROMPT = `You summarize a slice of a coding agent's conversation so it can replace the raw messages in context. Produce a dense, continuation-focused summary: preserve user intent, decisions made, files/symbols changed or inspected, exact errors still actionable, verification status, and next steps. Do not infer, invent, or add facts absent from the source; preserve uncertainty instead of filling gaps. Drop full logs, repeated output, and incidental detail. Be concise (roughly 4-10 bullets). Output ONLY the summary text, no preamble.`
 
 /** Outcome of one summarizer-model attempt, surfaced in DCP debug logs. */
 export interface ModelSummaryAttempt {

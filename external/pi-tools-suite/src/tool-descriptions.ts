@@ -220,6 +220,7 @@ export const TODO_TOOL_DESCRIPTION: ToolDescription = {
 	promptGuidelines: [
 		"Use `todo` for complex work with 3+ steps, explicit user task lists, or new non-trivial requirements. Skip single trivial tasks and purely conversational requests.",
 		"For multi-step implementation/debugging plans, include a final user-facing report todo in the initial plan with acceptance criteria for changed files/behavior, verification results, and remaining manual actions; close it immediately before the final response, never via compression.",
+		"When create or batch_create already sets the intended status, do not issue a redundant update with the same status; continue the work instead.",
 		"Resync before continuing when user/new findings change scope, requirements, safety, feasibility, approach, dependencies, or order; update tasks/blockers and defer obsolete work.",
 		"Update todos when starting, finishing, blocking, splitting, abandoning, or materially changing a step; before planned work mark exactly one in_progress with activeForm and complete it only after verification.",
 		"If partial, tests fail, or blocked, keep the task in_progress and add/update a blocker. Never use `clear`, `delete`, or batch deletion to hide unfinished/stale/forgotten todos; delete only on explicit request or creation mistake.",

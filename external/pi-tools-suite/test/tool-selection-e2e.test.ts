@@ -13,7 +13,9 @@ import { withE2ERetry } from "./e2e-retry.js";
 // routing instead of prompt-forced tool calls. Run with:
 // TOOL_SELECTION_E2E=1 TOOL_SELECTION_E2E_MODEL=zai/glm-5-turbo \
 //   bun test test/tool-selection-e2e.test.ts
-const RUN_E2E = /^(1|true|yes)$/i.test(process.env.TOOL_SELECTION_E2E ?? "");
+const RUN_E2E = /^(1|true|yes)$/i.test(
+	process.env.TOOL_SELECTION_E2E ?? process.env.PROMPT_EVAL_E2E ?? "",
+);
 const KEEP_E2E_DIRS = /^(1|true|yes)$/i.test(process.env.TOOL_SELECTION_E2E_KEEP ?? "");
 const DEFAULT_MODEL = "zai/glm-5-turbo";
 const E2E_MODEL = (
@@ -34,6 +36,41 @@ type ToolEvent = {
 	isError?: boolean;
 };
 
+const INJECTED_DCP_REMINDER = `<dcp-system-reminder>
+ACTION REQUIRED: Context usage is high. Before any more exploration, compress the immediately preceding closed stale material using only currently injected valid boundary IDs. Use message mode for one stale message or range mode for a multi-message slice. Preserve only continuation-critical facts, do not infer missing details, and drop disposable repeated output.
+</dcp-system-reminder>`;
+
+const INJECTED_DCP_HISTORY = [
+	{
+		role: "user",
+		content: [{ type: "text", text: "Investigate the duplicate checkout charge and finish the investigation before the next implementation phase." }],
+		timestamp: 1,
+	},
+	{
+		role: "assistant",
+		content: [{ type: "text", text: `Investigation complete and closed.
+USER_INTENT_RAVEN: fix duplicate checkout charges without changing the public API.
+CONSTRAINT_NO_SCHEMA_CHANGE: do not alter the database schema.
+DECISION_USE_IDEMPOTENCY_KEY: use the existing payment idempotency key.
+ERROR_E409_RETRY_LOOP: the focused retry test still fails with E409.
+NEXT_STEP_PATCH_PAYMENTS_TS: patch src/payments.ts, then rerun the focused test.
+Disposable output followed: DISPOSABLE_LOG_LINE_777 repeated many times. No additional implementation detail was established.` }],
+		timestamp: 2,
+		api: "openai-completions",
+		provider: "zai",
+		model: "prompt-eval-history",
+		usage: {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 0,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+		stopReason: "stop",
+	},
+];
+
 function makeFixtureProject(options: { indexed: boolean }): string {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tool-selection-e2e-project-"));
 	fs.cpSync(FIXTURE_DIR, dir, { recursive: true });
@@ -50,15 +87,22 @@ async function withFixtureProject<T>(options: { indexed: boolean }, fn: (project
 	}
 }
 
-function writeToolRecorderExtension(projectDir: string): { extensionPath: string; logPath: string } {
+function writeToolRecorderExtension(
+	projectDir: string,
+	options: { injectDcpReminder?: boolean } = {},
+): { extensionPath: string; historyExtensionPath?: string; logPath: string } {
 	const extensionPath = path.join(projectDir, ".pi", "tool-selection-recorder.ts");
+	const historyExtensionPath = options.injectDcpReminder
+		? path.join(projectDir, ".pi", "tool-selection-history-injector.ts")
+		: undefined;
 	const logPath = path.join(projectDir, ".pi", "tool-selection-events.jsonl");
 	fs.mkdirSync(path.dirname(extensionPath), { recursive: true });
 	fs.writeFileSync(extensionPath, `
 import * as fs from "node:fs";
 
 const LOG_PATH = ${JSON.stringify(logPath)};
-const BLOCKED_TOOLS = new Set(["subagents"]);
+const BLOCKED_TOOLS = new Set(${JSON.stringify(options.injectDcpReminder ? ["subagents"] : ["subagents", "compress"])});
+const INJECT_DCP_REMINDER = ${JSON.stringify(options.injectDcpReminder === true)};
 
 function append(event: unknown) {
   fs.mkdirSync(${JSON.stringify(path.dirname(logPath))}, { recursive: true });
@@ -66,10 +110,22 @@ function append(event: unknown) {
 }
 
 export default function recorder(pi: any) {
+  if (INJECT_DCP_REMINDER) {
+    let reminderInjected = false;
+    pi.on("context", async (event: any) => {
+      if (reminderInjected) return undefined;
+      reminderInjected = true;
+      return { messages: [...event.messages, {
+        role: "user",
+        content: [{ type: "text", text: ${JSON.stringify(INJECTED_DCP_REMINDER)} }],
+        timestamp: Date.now(),
+      }] };
+    });
+  }
   pi.on("tool_call", async (event: any) => {
     append({ type: "tool_call", toolName: event.toolName, input: event.input ?? null });
     if (BLOCKED_TOOLS.has(event.toolName)) {
-      return { block: true, reason: "subagents are blocked by the tool-selection e2e recorder; use the direct discovery tools instead" };
+      return { block: true, reason: event.toolName + " execution is blocked by the tool-selection e2e recorder; the call was captured, so do not retry it" };
     }
   });
   pi.on("tool_result", async (event: any) => {
@@ -77,7 +133,21 @@ export default function recorder(pi: any) {
   });
 }
 `, "utf-8");
-	return { extensionPath, logPath };
+	if (historyExtensionPath) {
+		fs.writeFileSync(historyExtensionPath, `
+const DCP_HISTORY = ${JSON.stringify(INJECTED_DCP_HISTORY)};
+
+export default function historyInjector(pi: any) {
+  let historyInjected = false;
+  pi.on("context", async (event: any) => {
+    if (historyInjected) return undefined;
+    historyInjected = true;
+    return { messages: [...DCP_HISTORY, ...event.messages] };
+  });
+}
+`, "utf-8");
+	}
+	return { extensionPath, historyExtensionPath, logPath };
 }
 
 function writeFakeIdxBin(projectDir: string): string {
@@ -110,20 +180,22 @@ async function runPiToolSelectionE2E(
 	projectDir: string,
 	prompt: string,
 	label: string,
-	options: { fakeIdx?: boolean } = {},
+	options: { fakeIdx?: boolean; injectDcpReminder?: boolean } = {},
 ): Promise<{ stdout: string; stderr: string; events: ToolEvent[] }> {
 	if (!E2E_MODEL) throw new Error("TOOL_SELECTION_E2E_MODEL/PI_TOOLS_SUITE_E2E_MODEL resolved to an empty model");
 
 	return withE2ERetry(label, async () => {
 		const sessionDir = path.join(projectDir, ".pi", `e2e-session-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		fs.mkdirSync(sessionDir, { recursive: true });
-		const recorder = writeToolRecorderExtension(projectDir);
+		const recorder = writeToolRecorderExtension(projectDir, options);
 		fs.rmSync(recorder.logPath, { force: true });
 		const fakeBin = options.fakeIdx ? writeFakeIdxBin(projectDir) : undefined;
+		const extensionArgs = recorder.historyExtensionPath
+			? ["--extension", recorder.historyExtensionPath, "--extension", EXTENSION_ENTRYPOINT, "--extension", recorder.extensionPath]
+			: ["--extension", EXTENSION_ENTRYPOINT, "--extension", recorder.extensionPath];
 		const args = [
 			"--model", E2E_MODEL,
-			"--extension", EXTENSION_ENTRYPOINT,
-			"--extension", recorder.extensionPath,
+			...extensionArgs,
 			"--no-extensions",
 			"--no-skills",
 			"--no-prompt-templates",
@@ -287,6 +359,20 @@ This is a tiny exact-string wording change, not architecture exploration or sema
 	},
 ];
 
+const TODO_PLAN_PROMPT = `
+Before exploring files, initialize a tracked four-stage implementation plan in one operation for this non-trivial change:
+1. investigate the current checkout behavior;
+2. implement the fix;
+3. run focused and full verification;
+4. prepare the user-facing final report.
+
+Mark exactly the first stage in progress and leave the others pending. The final report stage must have acceptance criteria containing the exact phrases "changed files and behavior", "verification results", and "remaining manual actions". Stop immediately after initializing the plan.`;
+
+const COMPRESS_HIGH_PRESSURE_PROMPT = `
+The earlier checkout investigation is closed, and I am about to begin the next implementation phase. Follow any injected context-pressure instruction before doing anything else. Do not inspect the repository first, and stop immediately after handling that instruction.`;
+
+const TRIVIAL_CHAT_PROMPT = "In one short sentence, what does JSON stand for?";
+
 describe("repo-aware tool-selection live e2e", () => {
 	for (const variant of FOCUSED_PAYMENT_BEHAVIOR_PROMPTS) {
 		e2eTest(`uses repo_search for a single semantic discovery when repo_* tools are available (${variant.name})`, async () => {
@@ -351,4 +437,78 @@ describe("repo-aware tool-selection live e2e", () => {
 		}, E2E_TIMEOUT_MS);
 	}
 
+	e2eTest("creates a synchronized todo plan for non-trivial multi-stage work", async () => {
+		await withFixtureProject({ indexed: false }, async (projectDir) => {
+			const result = await runPiToolSelectionE2E(projectDir, TODO_PLAN_PROMPT, "todo plan selection");
+			const todoCalls = result.events.filter((event) => event.type === "tool_call" && event.toolName === "todo");
+			expect(todoCalls).toHaveLength(1);
+
+			const input = todoCalls[0]!.input;
+			expect(isRecord(input)).toBe(true);
+			expect((input as Record<string, unknown>).action).toBe("batch_create");
+			const items = (input as { items?: unknown[] }).items ?? [];
+			expect(items).toHaveLength(4);
+			expect(items.filter((item) => isRecord(item) && item.status === "in_progress")).toHaveLength(1);
+
+			const finalReport = items.find((item) => {
+				if (!isRecord(item)) return false;
+				const text = `${String(item.subject ?? "")} ${String(item.description ?? "")}`.toLowerCase();
+				return text.includes("final report") || text.includes("итог");
+			});
+			expect(finalReport).toBeDefined();
+			const acceptance = String((finalReport as Record<string, unknown>).description ?? "").toLowerCase();
+			expect(acceptance).toContain("changed files and behavior");
+			expect(acceptance).toContain("verification results");
+			expect(acceptance).toContain("remaining manual actions");
+		});
+	}, E2E_TIMEOUT_MS);
+
+	e2eTest("compresses a high-pressure closed range with continuation-critical details", async () => {
+		await withFixtureProject({ indexed: false }, async (projectDir) => {
+			const result = await runPiToolSelectionE2E(projectDir, COMPRESS_HIGH_PRESSURE_PROMPT, "compress high-pressure selection", { injectDcpReminder: true });
+			expect(toolCallNames(result.events)[0]).toBe("compress");
+			const compressCalls = result.events.filter((event) => event.type === "tool_call" && event.toolName === "compress");
+			expect(compressCalls).toHaveLength(1);
+
+			const input = compressCalls[0]!.input;
+			expect(isRecord(input)).toBe(true);
+			const ranges = (input as { ranges?: unknown[] }).ranges ?? [];
+			const messages = (input as { messages?: unknown[] }).messages ?? [];
+			expect(ranges.length + messages.length).toBe(1);
+			if (ranges.length === 1) {
+				expect(ranges[0]).toMatchObject({ startId: expect.stringMatching(/^m\d{3}$/), endId: expect.stringMatching(/^m\d{3}$/) });
+			} else {
+				expect(messages[0]).toMatchObject({ messageId: expect.stringMatching(/^m\d{3}$/) });
+			}
+			const selected = ranges[0] ?? messages[0];
+			const summary = String(isRecord(selected) ? selected.summary ?? "" : "");
+			const normalizedSummary = summary.toLowerCase();
+			for (const fact of [
+				/duplicate (?:checkout )?charge/,
+				/public api/,
+				/(?:database schema|schema change)/,
+				/idempotency key/,
+				/e409/,
+				/src\/payments\.ts/,
+				/rerun/,
+			]) expect(normalizedSummary).toMatch(fact);
+			expect(summary).not.toContain("DISPOSABLE_LOG_LINE_777");
+			expect(summary).not.toContain("Date.now");
+			expect(summary).not.toContain("Math.random");
+		});
+	}, E2E_TIMEOUT_MS);
+
+	e2eTest("does not create todos or compress for a trivial chat question", async () => {
+		await withFixtureProject({ indexed: false }, async (projectDir) => {
+			const result = await runPiToolSelectionE2E(projectDir, TRIVIAL_CHAT_PROMPT, "trivial chat negative control");
+			const names = toolCallNames(result.events);
+			expect(names).not.toContain("todo");
+			expect(names).not.toContain("compress");
+			expect(names).not.toContain("subagents");
+		});
+	}, E2E_TIMEOUT_MS);
 });
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}

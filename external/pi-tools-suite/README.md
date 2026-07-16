@@ -362,6 +362,22 @@ npm run test:async-subagents-selection-e2e
 npm run test:e2e
 ```
 
+### Prompt evaluations
+
+Prompt evaluations are opt-in because they call a real model. They cover model-facing behavior that deterministic tests cannot prove: tool selection for `todo` and `compress`, async-subagent delegation/lifecycle boundaries, default internal role routing, ultrawork classification, and DCP summary retention. They are intentionally excluded from `npm test`.
+
+```bash
+# Full prompt-eval suite
+npm run test:prompt-evals
+
+# Focused suites
+npm run test:prompt-evals:tool-selection
+npm run test:prompt-evals:async
+npm run test:prompt-evals:dcp
+```
+
+The default live model is `zai/glm-5-turbo`. Override it for the whole suite with `PI_TOOLS_SUITE_E2E_MODEL=provider/model`, or use the existing component variables such as `TOOL_SELECTION_E2E_MODEL`, `ASYNC_SUBAGENTS_MODEL`, `ASYNC_SUBAGENTS_ROUTING_E2E_MODEL`, and `DCP_SUMMARY_E2E_MODEL`. The normal deterministic coverage remains `npm test`; run prompt evals after changing tool descriptions, routing/classifier prompts, DCP summary prompts, or the default evaluation model.
+
 Supporting docs and historical standalone README content are kept in `docs/`; third-party license texts are kept in `licenses/`.
 
 ## SDK pin

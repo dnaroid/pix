@@ -1,0 +1,31 @@
+import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
+
+export type LiveModelContext = {
+	model: NonNullable<ReturnType<ModelRegistry["find"]>>;
+	modelRegistry: ModelRegistry;
+};
+
+export function resolveLiveModelRef(...envNames: string[]): string {
+	for (const name of envNames) {
+		const value = process.env[name]?.trim();
+		if (value) return value;
+	}
+	return process.env.PI_TOOLS_SUITE_E2E_MODEL?.trim() || "zai/glm-5-turbo";
+}
+
+export async function createLiveModelContext(modelRef: string): Promise<LiveModelContext> {
+	const separator = modelRef.indexOf("/");
+	if (separator <= 0 || separator === modelRef.length - 1) {
+		throw new Error(`Expected model ref in provider/model form, got ${modelRef}`);
+	}
+
+	const provider = modelRef.slice(0, separator);
+	const modelId = modelRef.slice(separator + 1);
+	const modelRegistry = ModelRegistry.create(AuthStorage.create());
+	const model = modelRegistry.find(provider, modelId);
+	if (!model) throw new Error(`Prompt eval model is not registered: ${modelRef}`);
+
+	const auth = await modelRegistry.getApiKeyAndHeaders(model);
+	if (auth.ok === false) throw new Error(`Prompt eval model auth is unavailable for ${modelRef}: ${auth.error}`);
+	return { model, modelRegistry };
+}

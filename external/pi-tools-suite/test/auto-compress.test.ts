@@ -79,6 +79,37 @@ describe("generateModelSummary", () => {
 		expect(result.attempts).toEqual([{ ref: "zai/glm-5.2", outcome: "ok" }]);
 	});
 
+	test("sends the summarizer continuation requirements and complete source transcript", async () => {
+		const { generateModelSummary } = await loadModule();
+		nextResults = [{ content: [{ type: "text", text: "summary" }] }];
+		await generateModelSummary(
+			["zai/glm-5.2"],
+			makeRegistry(),
+			undefined,
+			"Checkout retry",
+			[
+				textMessage("user", "USER_INTENT_RAVEN and CONSTRAINT_NO_SCHEMA_CHANGE", 1),
+				textMessage("assistant", "ERROR_E409_RETRY_LOOP then NEXT_STEP_PATCH_PAYMENTS_TS", 2),
+			],
+			1000,
+		);
+
+		const call = completeMock.mock.calls[0] as unknown as [unknown, { systemPrompt?: string; messages?: Array<{ content?: unknown }> }];
+		const request = call[1];
+		expect(request.systemPrompt).toContain("preserve user intent");
+		expect(request.systemPrompt).toContain("files/symbols changed or inspected");
+		expect(request.systemPrompt).toContain("exact errors still actionable");
+		expect(request.systemPrompt).toContain("verification status, and next steps");
+		expect(request.systemPrompt).toContain("Do not infer, invent, or add facts absent from the source");
+		expect(request.systemPrompt).toContain("Drop full logs, repeated output");
+		const transcript = String(request.messages?.[0]?.content ?? "");
+		expect(transcript).toContain("topic: Checkout retry");
+		expect(transcript).toContain("USER_INTENT_RAVEN");
+		expect(transcript).toContain("CONSTRAINT_NO_SCHEMA_CHANGE");
+		expect(transcript).toContain("ERROR_E409_RETRY_LOOP");
+		expect(transcript).toContain("NEXT_STEP_PATCH_PAYMENTS_TS");
+	});
+
 	test("records empty outcome and returns no text when the model yields nothing", async () => {
 		const { generateModelSummary } = await loadModule();
 		nextResults = [{ content: [{ type: "text", text: "  " }] }];

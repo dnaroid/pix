@@ -25,7 +25,7 @@ Do not compress active work, still-needed raw context, or material whose exact c
 
 DCP reminders: handle critical/high-context reminders promptly and compress any safe high-yield closed slice before more exploration; routine reminders mean compress only if a safe, closed, useful slice exists, otherwise continue the next atomic step and re-check later.
 
-Summaries must preserve only what is needed to continue: user intent and constraints, accepted decisions, files/symbols changed or inspected, actionable errors, verification status, and next steps. Drop incidental transcript detail, duplicate outputs, full logs, long code/JSON/diffs, and prose not needed later; include short literals only when required.
+Summaries must preserve only what is needed to continue: user intent and constraints, accepted decisions, files/symbols changed or inspected, actionable errors, verification status, and next steps. Do not infer, invent, or add facts that are not present in the selected messages. Drop incidental transcript detail, duplicate outputs, full logs, long code/JSON/diffs, and prose not needed later; include short literals only when required.
 `.trim()
 
 /**
@@ -54,6 +54,8 @@ If a \`<dcp-system-reminder>\` is present in context, treat it as a signal to ev
 
 THE SUMMARY
 Your summary must be COMPLETE FOR CONTINUATION, not a transcript rewrite. Preserve only information that will plausibly matter later: user intent, accepted constraints, decisions, files/symbols changed or inspected, exact errors that are still actionable, verification status, and next steps.
+
+Do not infer, invent, or add facts that are not present in the selected range. If the source is uncertain or incomplete, preserve that uncertainty instead of filling gaps.
 
 If active unfinished work exists, start with \`Active objective\` and \`Next step\`.
 
