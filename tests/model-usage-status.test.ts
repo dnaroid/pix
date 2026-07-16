@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -254,6 +254,103 @@ describe("model usage status", () => {
 		const status = openAIUsageStatusFromResponse(response, "openai-codex/gpt-5.5", now);
 
 		assert.equal(status?.hourly?.remainingPercent, 70);
+	});
+
+	it("refreshes expired OpenAI Codex OAuth and persists the rotated credential", async () => {
+		const oldFetch = globalThis.fetch;
+		const refreshedAccess = testJwt({
+			email: "user@example.com",
+			"https://api.openai.com/auth": { chatgpt_account_id: "account-refreshed" },
+		});
+		let tokenRequests = 0;
+		let usageRequests = 0;
+
+		globalThis.fetch = (async (
+			input: Parameters<typeof fetch>[0],
+			init?: Parameters<typeof fetch>[1],
+		) => {
+			const url = String(input);
+			if (url === "https://auth.openai.com/oauth/token") {
+				tokenRequests += 1;
+				assert.equal(init?.method, "POST");
+				assert.equal(String(init?.body), "grant_type=refresh_token&refresh_token=refresh-old&client_id=app_EMoamEEZ73f0CkXaXp7hrann");
+				return Response.json({
+					access_token: refreshedAccess,
+					refresh_token: "refresh-rotated",
+					expires_in: 3600,
+				});
+			}
+			if (url === "https://chatgpt.com/backend-api/wham/usage") {
+				usageRequests += 1;
+				const headers = new Headers(init?.headers);
+				assert.equal(headers.get("Authorization"), `Bearer ${refreshedAccess}`);
+				assert.equal(headers.get("ChatGPT-Account-Id"), "account-refreshed");
+				return Response.json({
+					rate_limit: {
+						limit_reached: false,
+						primary_window: {
+							used_percent: 0,
+							limit_window_seconds: 7 * 24 * 60 * 60,
+							reset_after_seconds: 6 * 24 * 60 * 60,
+						},
+						secondary_window: null,
+					},
+				});
+			}
+			throw new Error(`Unexpected fetch: ${url}`);
+		}) as typeof fetch;
+
+		try {
+			await withPiAuthAsync({
+				"openai-codex": {
+					type: "oauth",
+					access: testJwt({ "https://api.openai.com/auth": { chatgpt_account_id: "account-old" } }),
+					refresh: "refresh-old",
+					expires: Date.now() - 1_000,
+					accountId: "account-old",
+				},
+			}, async (authPath) => {
+				const descriptor = modelUsageDescriptor({ provider: "openai-codex", id: "gpt-5.5" } as SessionModel);
+				if (!descriptor) throw new Error("Expected OpenAI usage descriptor");
+
+				const status = await queryModelUsageStatus(descriptor);
+				const persisted = JSON.parse(readFileSync(authPath, "utf8")) as Record<string, Record<string, unknown>>;
+
+				assert.equal(status?.weekly?.remainingPercent, 100);
+				assert.equal(tokenRequests, 1);
+				assert.equal(usageRequests, 1);
+				assert.equal(persisted["openai-codex"]?.access, refreshedAccess);
+				assert.equal(persisted["openai-codex"]?.refresh, "refresh-rotated");
+				assert.equal(persisted["openai-codex"]?.accountId, "account-refreshed");
+				assert.ok(Number(persisted["openai-codex"]?.expires) > Date.now());
+			});
+		} finally {
+			globalThis.fetch = oldFetch;
+		}
+	});
+
+	it("rejects when an expired OpenAI Codex credential cannot be refreshed", async () => {
+		const oldFetch = globalThis.fetch;
+		globalThis.fetch = (async () => new Response("invalid_grant", { status: 400 })) as typeof fetch;
+
+		try {
+			await withPiAuthAsync({
+				"openai-codex": {
+					type: "oauth",
+					access: testJwt({ "https://api.openai.com/auth": { chatgpt_account_id: "account-old" } }),
+					refresh: "refresh-invalid",
+					expires: Date.now() - 1_000,
+					accountId: "account-old",
+				},
+			}, async () => {
+				const descriptor = modelUsageDescriptor({ provider: "openai-codex", id: "gpt-5.5" } as SessionModel);
+				if (!descriptor) throw new Error("Expected OpenAI usage descriptor");
+
+				await assert.rejects(queryModelUsageStatus(descriptor), /OAuth token refresh failed/u);
+			});
+		} finally {
+			globalThis.fetch = oldFetch;
+		}
 	});
 
 	it("extracts Zhipu 5-hour token window as hourly equivalent", () => {
@@ -537,7 +634,7 @@ function withPiAuth(auth: unknown, run: () => void): void {
 	}
 }
 
-async function withPiAuthAsync(auth: unknown, run: () => Promise<void>): Promise<void> {
+async function withPiAuthAsync(auth: unknown, run: (authPath: string) => Promise<void>): Promise<void> {
 	const previousNodeEnv = process.env.NODE_ENV;
 	const previousAuthPath = process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH;
 	const agentDir = mkdtempSync(join(tmpdir(), "pix-agent-"));
@@ -546,7 +643,7 @@ async function withPiAuthAsync(auth: unknown, run: () => Promise<void>): Promise
 	process.env.NODE_ENV = "test";
 	process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH = authPath;
 	try {
-		await run();
+		await run(authPath);
 	} finally {
 		if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
 		else process.env.NODE_ENV = previousNodeEnv;
@@ -554,6 +651,11 @@ async function withPiAuthAsync(auth: unknown, run: () => Promise<void>): Promise
 		else process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH = previousAuthPath;
 		rmSync(agentDir, { recursive: true, force: true });
 	}
+}
+
+function testJwt(payload: Record<string, unknown>): string {
+	const encode = (value: unknown): string => Buffer.from(JSON.stringify(value)).toString("base64url");
+	return `${encode({ alg: "none", typ: "JWT" })}.${encode(payload)}.`;
 }
 
 function formatExpectedResetDuration(resetAt: number, now: number): string {
