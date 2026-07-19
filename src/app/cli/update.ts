@@ -55,6 +55,16 @@ export type PixSelfUpdateCommand = {
 	display: string;
 };
 
+export type GlobalPiCheckStatus = "current" | "mismatched" | "missing" | "unavailable";
+
+export type GlobalPiCheckResult = {
+	status: GlobalPiCheckStatus;
+	targetVersion?: string;
+	currentVersion?: string;
+	packageRoot?: string;
+	reason?: string;
+};
+
 export type PixUpdateCheckOptions = {
 	timeoutMs?: number;
 	packageRoot?: string;
@@ -68,11 +78,11 @@ export type PiUpdateCheckOptions = PixUpdateCheckOptions & {
 export function pixUpdateUsage(): string {
 	return `Usage: pix update [--check] [--force]
 
-Check for or install the latest published Pix package.
+Check for or install the latest published Pix package and synchronize the global Pi CLI.
 
 Options:
-  --check    Only check for an available update
-  --force    Reinstall even when Pix appears up to date
+  --check    Only check Pix and global Pi; do not install anything
+  --force    Reinstall Pix and its matching global Pi version
   -h, --help Show this help
 
 Inside the TUI, /update performs the same non-mutating check.
@@ -117,6 +127,59 @@ export async function checkPiUpdate(options: PiUpdateCheckOptions = {}): Promise
 	const packageRoot = options.packageRoot ?? findPiPackageRoot(options.pixPackageRoot);
 	const packageInfo = readPackageInfo(packageRoot, PI_PACKAGE_NAME);
 	return await checkPackageUpdate(packageInfo, options);
+}
+
+export function getPixPinnedPiVersion(packageRoot = readPixPackageInfo().packageRoot): string | undefined {
+	const raw = readPackageJson(packageRoot);
+	const dependencies = isRecord(raw.dependencies) ? raw.dependencies : undefined;
+	const version = dependencies?.[PI_PACKAGE_NAME];
+	if (typeof version !== "string") return undefined;
+	const trimmedVersion = version.trim();
+	return parsePackageVersion(trimmedVersion) ? trimmedVersion : undefined;
+}
+
+export function checkGlobalPiInstall(pixPackageRoot = readPixPackageInfo().packageRoot): GlobalPiCheckResult {
+	let targetVersion: string | undefined;
+	try {
+		targetVersion = getPixPinnedPiVersion(pixPackageRoot);
+	} catch (error) {
+		return {
+			status: "unavailable",
+			reason: error instanceof Error ? error.message : String(error),
+		};
+	}
+	if (!targetVersion) {
+		return { status: "unavailable", reason: `Pix does not declare a pinned ${PI_PACKAGE_NAME} dependency` };
+	}
+
+	const packageRoot = getGlobalPiPackageRoot(pixPackageRoot);
+	if (!packageRoot) {
+		return {
+			status: "unavailable",
+			targetVersion,
+			reason: "Pix is not installed under a global node_modules prefix",
+		};
+	}
+
+	const packageJsonPath = join(packageRoot, "package.json");
+	if (!existsSync(packageJsonPath)) return { status: "missing", targetVersion, packageRoot };
+
+	try {
+		const packageInfo = readPackageInfo(packageRoot, PI_PACKAGE_NAME);
+		return {
+			status: packageVersionsEqual(packageInfo.version, targetVersion) ? "current" : "mismatched",
+			targetVersion,
+			currentVersion: packageInfo.version,
+			packageRoot,
+		};
+	} catch (error) {
+		return {
+			status: "unavailable",
+			targetVersion,
+			packageRoot,
+			reason: error instanceof Error ? error.message : String(error),
+		};
+	}
 }
 
 async function checkPackageUpdate(packageInfo: PixPackageInfo, options: PixUpdateCheckOptions): Promise<PixUpdateCheckResult> {
@@ -191,7 +254,34 @@ export function formatPixUpdateCheck(result: PixUpdateCheckResult): string {
 			break;
 	}
 
-	lines.push("scope: Pix package, renderer extensions, bundled skills copied into ~/.agents/skills, and the pi-tools-suite payload linked into ~/.pi/agent/extensions");
+	lines.push("scope: Pix package, matching global Pi CLI, renderer extensions, bundled skills copied into ~/.agents/skills, and the pi-tools-suite payload linked into ~/.pi/agent/extensions");
+	return lines.join("\n");
+}
+
+export function formatGlobalPiCheck(result: GlobalPiCheckResult): string {
+	const lines = [
+		"Global Pi compatibility",
+		...(result.currentVersion ? [`current: ${PI_PACKAGE_NAME} v${result.currentVersion}`] : []),
+		...(result.targetVersion ? [`required by Pix: ${PI_PACKAGE_NAME} v${result.targetVersion}`] : []),
+	];
+
+	switch (result.status) {
+		case "current":
+			lines.push("status: compatible");
+			break;
+		case "mismatched":
+			lines.push("status: version mismatch");
+			lines.push("run: pix update");
+			break;
+		case "missing":
+			lines.push("status: global Pi is not installed in Pix's package-manager prefix");
+			lines.push("run: pix update");
+			break;
+		case "unavailable":
+			lines.push(`status: unable to check${result.reason ? ` (${result.reason})` : ""}`);
+			break;
+	}
+
 	return lines.join("\n");
 }
 
@@ -202,7 +292,7 @@ export function formatPixStartupUpdateDialog(result: PixUpdateCheckResult): stri
 		...(result.latestVersion ? [`latest: ${result.latestVersion}`] : []),
 		"",
 		"Pix includes the pinned Pi SDK/dependencies used by this renderer.",
-		"Updating only the global `pi` CLI is not enough for Pix.",
+		"`pix update` also synchronizes the global `pi` CLI to that pinned version.",
 		"",
 		"To update:",
 		"1. Exit Pix.",
@@ -219,9 +309,17 @@ export function formatPiStartupUpdateToast(result: PixUpdateCheckResult): string
 }
 
 export function getPixSelfUpdateCommand(packageName: string, latestVersion?: string, packageRoot = readPixPackageInfo().packageRoot): PixSelfUpdateCommand | undefined {
+	return getGlobalPackageUpdateCommand(packageName, latestVersion, packageRoot);
+}
+
+export function getGlobalPiUpdateCommand(targetVersion: string, pixPackageRoot = readPixPackageInfo().packageRoot): PixSelfUpdateCommand | undefined {
+	return getGlobalPackageUpdateCommand(PI_PACKAGE_NAME, targetVersion, pixPackageRoot);
+}
+
+function getGlobalPackageUpdateCommand(packageName: string, version: string | undefined, packageRoot: string): PixSelfUpdateCommand | undefined {
 	if (!packageRootLooksPackageManaged(packageRoot)) return undefined;
 
-	const installSpec = latestVersion ? `${packageName}@${latestVersion}` : packageName;
+	const installSpec = version ? `${packageName}@${version}` : packageName;
 	const method = detectInstallMethod(packageRoot);
 	const commandParts = method === "npm" ? configuredNpmCommand() ?? ["npm"] : undefined;
 
@@ -257,25 +355,61 @@ export async function runPixUpdateCli(argv: readonly string[] = process.argv.sli
 
 	const check = await pixUpdateDeps.checkPixUpdate();
 	console.log(formatPixUpdateCheck(check));
+	let globalPiCheck = checkGlobalPiInstall(check.packageRoot);
+	console.log(`\n${formatGlobalPiCheck(globalPiCheck)}`);
 
-	if (options.checkOnly) return check.status === "unavailable" ? 1 : 0;
-	if (check.status === "current" && !options.force) return 0;
+	if (options.checkOnly) return check.status === "unavailable" || globalPiCheck.status === "unavailable" ? 1 : 0;
 	if ((check.status === "skipped" || check.status === "unavailable") && !options.force) return 1;
 
-	const command = getPixSelfUpdateCommand(check.packageName, check.latestVersion, check.packageRoot);
-	if (!command) {
-		console.error(`pix cannot self-update this installation. ${sourceCheckoutUpdateHint()}`);
+	const shouldUpdatePix = options.force || check.status !== "current";
+	if (shouldUpdatePix) {
+		const command = getPixSelfUpdateCommand(check.packageName, check.latestVersion, check.packageRoot);
+		if (!command) {
+			console.error(`pix cannot self-update this installation. ${sourceCheckoutUpdateHint()}`);
+			return 1;
+		}
+
+		console.log(`Updating Pix with ${command.display}...`);
+		try {
+			await pixUpdateDeps.runCommand(command);
+			console.log("Updated Pix.");
+		} catch (error) {
+			console.error(`Pix update failed: ${error instanceof Error ? error.message : String(error)}`);
+			console.error(`Try running manually: ${command.display}`);
+			return 1;
+		}
+
+		// npm may have replaced Pix's package.json, so refresh the required Pi pin.
+		globalPiCheck = checkGlobalPiInstall(check.packageRoot);
+		console.log(`\n${formatGlobalPiCheck(globalPiCheck)}`);
+	}
+
+	if (globalPiCheck.status === "current" && !options.force) {
+		if (shouldUpdatePix) console.log("Updated Pix and verified the matching global Pi CLI. Restart any running pix/pi sessions.");
+		return 0;
+	}
+
+	if (!globalPiCheck.targetVersion) {
+		console.error(`Cannot update global Pi: ${globalPiCheck.reason ?? "Pix's pinned Pi version is unavailable"}`);
 		return 1;
 	}
 
-	console.log(`Updating Pix with ${command.display}...`);
+	const piCommand = getGlobalPiUpdateCommand(globalPiCheck.targetVersion, check.packageRoot);
+	if (!piCommand) {
+		console.error(`Cannot update global Pi for this Pix installation. ${sourceCheckoutUpdateHint()}`);
+		return 1;
+	}
+
+	console.log(`Updating global Pi with ${piCommand.display}...`);
 	try {
-		await pixUpdateDeps.runCommand(command);
-		console.log("Updated Pix. Restart any running pix sessions.");
+		await pixUpdateDeps.runCommand(piCommand);
+		const successMessage = shouldUpdatePix ? "Updated Pix and global Pi." : "Updated global Pi to match Pix.";
+		console.log(`${successMessage} Restart any running pix/pi sessions.`);
 		return 0;
 	} catch (error) {
-		console.error(`Pix update failed: ${error instanceof Error ? error.message : String(error)}`);
-		console.error(`Try running manually: ${command.display}`);
+		const failureContext = shouldUpdatePix ? " after Pix update" : "";
+		console.error(`Global Pi update failed${failureContext}: ${error instanceof Error ? error.message : String(error)}`);
+		console.error(`Try running manually: ${piCommand.display}`);
 		return 1;
 	}
 }
@@ -287,8 +421,7 @@ function readPixPackageInfo(packageRoot = findPixPackageRoot()): PixPackageInfo 
 }
 
 function readPackageInfo(packageRoot: string, fallbackName: string): PixPackageInfo {
-	const packageJsonPath = join(packageRoot, "package.json");
-	const raw = JSON.parse(readFileSync(packageJsonPath, "utf8")) as Record<string, unknown>;
+	const raw = readPackageJson(packageRoot);
 	const name = typeof raw.name === "string" && raw.name.trim() ? raw.name.trim() : fallbackName;
 	const version = typeof raw.version === "string" && raw.version.trim() ? raw.version.trim() : "0.0.0";
 	return {
@@ -297,6 +430,23 @@ function readPackageInfo(packageRoot: string, fallbackName: string): PixPackageI
 		private: raw.private === true,
 		packageRoot,
 	};
+}
+
+function readPackageJson(packageRoot: string): Record<string, unknown> {
+	return JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")) as Record<string, unknown>;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function getGlobalPiPackageRoot(pixPackageRoot: string): string | undefined {
+	const normalized = pixPackageRoot.replace(/\\/g, "/");
+	const marker = "/node_modules/";
+	const markerIndex = normalized.toLowerCase().indexOf(marker);
+	if (markerIndex < 0) return undefined;
+	const nodeModulesRoot = normalized.slice(0, markerIndex + marker.length - 1);
+	return join(nodeModulesRoot, ...PI_PACKAGE_NAME.split("/"));
 }
 
 function findPixPackageRoot(): string {
@@ -402,6 +552,11 @@ function isNewerPackageVersion(candidateVersion: string, currentVersion: string)
 	const comparison = comparePackageVersions(candidateVersion, currentVersion);
 	if (comparison !== undefined) return comparison > 0;
 	return candidateVersion.trim() !== currentVersion.trim();
+}
+
+function packageVersionsEqual(leftVersion: string, rightVersion: string): boolean {
+	const comparison = comparePackageVersions(leftVersion, rightVersion);
+	return comparison === undefined ? leftVersion.trim() === rightVersion.trim() : comparison === 0;
 }
 
 function comparePackageVersions(leftVersion: string, rightVersion: string): number | undefined {

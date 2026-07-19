@@ -10,7 +10,14 @@ import { runProcess } from "../process.js";
 import { copyTextToClipboard } from "../screen/clipboard.js";
 import { formatAccountUsageReport, queryAccountUsageReport } from "../model/model-usage-status.js";
 import type { SessionModel } from "../types.js";
-import { checkPixUpdate, formatPixUpdateCheck, parsePixUpdateArgs, pixUpdateUsage } from "../cli/update.js";
+import {
+	checkGlobalPiInstall,
+	checkPixUpdate,
+	formatGlobalPiCheck,
+	formatPixUpdateCheck,
+	parsePixUpdateArgs,
+	pixUpdateUsage,
+} from "../cli/update.js";
 import { createStartupInfoMessage } from "../cli/startup-info.js";
 import { getCompleteSessionStats } from "../session/session-stats.js";
 import { loadSessionTitleConfig } from "../../bundled-extensions/session-title/config.js";
@@ -253,11 +260,16 @@ export class SessionCommandActions {
 		this.host.render();
 
 		const result = await checkPixUpdate();
+		const globalPiResult = checkGlobalPiInstall(result.packageRoot);
 		const forceHint = options.force ? "\n\n/update is check-only. To force a reinstall, run `pix update --force` in your shell and restart Pix." : "";
-		this.host.addEntry({ id: createId("system"), kind: "system", text: `${formatPixUpdateCheck(result)}${forceHint}` });
+		this.host.addEntry({
+			id: createId("system"),
+			kind: "system",
+			text: `${formatPixUpdateCheck(result)}\n\n${formatGlobalPiCheck(globalPiResult)}${forceHint}`,
+		});
 		this.host.setSessionStatus(runtime.session);
-		if (result.status === "newer") this.host.toast.info("Pix update available");
-		else if (result.status === "current") this.host.toast.success("Pix is up to date");
+		if (result.status === "newer" || globalPiResult.status === "mismatched" || globalPiResult.status === "missing") this.host.toast.info("Pix or global Pi update available");
+		else if (result.status === "current" && globalPiResult.status === "current") this.host.toast.success("Pix and global Pi are up to date");
 		else this.host.toast.warning("Pix update check incomplete");
 	}
 

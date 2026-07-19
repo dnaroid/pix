@@ -72,10 +72,12 @@ Some modules have optional runtime dependencies or host services:
 
 ## Update UX
 
-- `/update` inside Pix performs a non-mutating npm latest-version check and tells the user what to run.
-- `pix update --check` performs the same check without a TTY.
-- `pix update` updates package-manager installs of Pix and therefore also updates the `external/pi-tools-suite` payload. The next Pix startup refreshes the user extension link.
+- `/update` inside Pix performs a non-mutating Pix update check and reports whether the global Pi package in the same package-manager prefix matches Pix's pinned Pi SDK version.
+- `pix update --check` performs the same compatibility check without a TTY and never mutates either package.
+- `pix update` first updates a package-manager installation of Pix when needed, then installs the global `@earendil-works/pi-coding-agent` at the exact version pinned by the resulting Pix package. This keeps the shared `pi-tools-suite` host ABI aligned. The next Pix startup refreshes the user extension link.
+- `pix update --force` reinstalls both Pix and its matching global Pi version.
+- If the Pix update fails, Pi is not changed. If Pix is updated successfully (or is already current) but the Pi install fails, the command exits unsuccessfully and prints the exact Pi install command for recovery.
 - Source checkouts are intentionally not self-mutated; update them with `git pull`, `npm install --ignore-scripts`, `npm run build:pix`, and `npm run link:pix`.
-- Separately installed Pi packages are updated by Pi itself with `pi update --extensions` or `pi update`.
+- A `pi` executable installed under a different package-manager prefix is outside `pix update`'s scope and must be updated separately.
 
 Update checks respect `PI_OFFLINE=1`, `PI_SKIP_VERSION_CHECK=1`, and `PIX_SKIP_VERSION_CHECK=1`.

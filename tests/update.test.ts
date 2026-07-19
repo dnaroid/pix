@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -7,10 +7,13 @@ import { describe, it } from "node:test";
 import {
 	checkPixUpdate,
 	checkPiUpdate,
+	checkGlobalPiInstall,
+	formatGlobalPiCheck,
 	formatPiStartupUpdateToast,
 	formatPixUpdateCheck,
 	formatPixStartupUpdateDialog,
 	getPixSelfUpdateCommand,
+	getGlobalPiUpdateCommand,
 	parsePixUpdateArgs,
 	runPixUpdateCli,
 	setPixUpdateTestDeps,
@@ -74,7 +77,7 @@ describe("pix update", () => {
 		assert.match(message, /A new Pix version is available/u);
 		assert.match(message, /latest: 0\.2\.0/u);
 		assert.match(message, /pinned Pi SDK\/dependencies/u);
-		assert.match(message, /global `pi` CLI is not enough/u);
+		assert.match(message, /synchronizes the global `pi` CLI/u);
 		assert.match(message, /Exit Pix/u);
 		assert.match(message, /pix update/u);
 		assert.match(message, /Start Pix again/u);
@@ -129,6 +132,29 @@ describe("pix update", () => {
 		assert.equal(getPixSelfUpdateCommand("pi-ui-extend", "0.2.0", "/tmp/pi-ui-extend"), undefined);
 	});
 
+	it("checks the global Pi package against Pix's exact pinned version", async () => {
+		await withManagedInstall("0.80.10", "0.80.9", async (packageRoot) => {
+			const mismatched = checkGlobalPiInstall(packageRoot);
+			assert.equal(mismatched.status, "mismatched");
+			assert.equal(mismatched.currentVersion, "0.80.9");
+			assert.equal(mismatched.targetVersion, "0.80.10");
+			assert.match(formatGlobalPiCheck(mismatched), /version mismatch/u);
+
+			await writeGlobalPiPackage(packageRoot, "0.80.10");
+			assert.equal(checkGlobalPiInstall(packageRoot).status, "current");
+		});
+
+		await withManagedInstall("0.80.10", undefined, async (packageRoot) => {
+			assert.equal(checkGlobalPiInstall(packageRoot).status, "missing");
+		});
+	});
+
+	it("builds a global Pi install command pinned to Pix's package manager", () => {
+		const command = getGlobalPiUpdateCommand("0.80.10", "/tmp/prefix/lib/node_modules/pi-ui-extend");
+		assert.equal(command?.command, "npm");
+		assert.match(command?.display ?? "", /@earendil-works\/pi-coding-agent@0\.80\.10/u);
+	});
+
 	it("does not self-update source checkouts", () => {
 		assert.equal(getPixSelfUpdateCommand("pi-ui-extend", "0.2.0", "/tmp/pi-ui-extend"), undefined);
 	});
@@ -164,30 +190,115 @@ describe("pix update", () => {
 	});
 
 	it("runs forced self-update through a mocked package-manager command", async () => {
-		const restoreConsole = captureConsole();
-		const commands: string[] = [];
-		try {
-			setPixUpdateTestDeps({
-				checkPixUpdate: async () => ({
-					status: "current",
-					packageName: "pi-ui-extend",
-					currentVersion: "0.1.0",
-					latestVersion: "0.1.0",
-					packageRoot: "/tmp/prefix/lib/node_modules/pi-ui-extend",
-				}),
-				runCommand: async (command) => { commands.push(command.display); },
-			});
+		await withManagedInstall("0.80.10", "0.80.10", async (packageRoot) => {
+			const restoreConsole = captureConsole();
+			const commands: string[] = [];
+			try {
+				setPixUpdateTestDeps({
+					checkPixUpdate: async () => ({
+						status: "current",
+						packageName: "pi-ui-extend",
+						currentVersion: "0.1.0",
+						latestVersion: "0.1.0",
+						packageRoot,
+					}),
+					runCommand: async (command) => { commands.push(command.display); },
+				});
 
-			assert.equal(await runPixUpdateCli([]), 0);
-			assert.deepEqual(commands, []);
-			assert.equal(await runPixUpdateCli(["--force"]), 0);
-			assert.equal(commands.length, 1);
-			assert.match(commands[0] ?? "", /npm install -g/u);
-			assert.match(restoreConsole.output().stdout, /Updated Pix/u);
-		} finally {
-			setPixUpdateTestDeps();
-			restoreConsole.restore();
-		}
+				assert.equal(await runPixUpdateCli([]), 0);
+				assert.deepEqual(commands, []);
+				assert.equal(await runPixUpdateCli(["--force"]), 0);
+				assert.equal(commands.length, 2);
+				assert.match(commands[0] ?? "", /pi-ui-extend@0\.1\.0/u);
+				assert.match(commands[1] ?? "", /pi-coding-agent@0\.80\.10/u);
+				assert.match(restoreConsole.output().stdout, /Updated Pix and global Pi/u);
+			} finally {
+				setPixUpdateTestDeps();
+				restoreConsole.restore();
+			}
+		});
+	});
+
+	it("synchronizes Pi even when Pix itself is already current", async () => {
+		await withManagedInstall("0.80.10", "0.80.9", async (packageRoot) => {
+			const restoreConsole = captureConsole();
+			const commands: string[] = [];
+			try {
+				setPixUpdateTestDeps({
+					checkPixUpdate: async () => ({
+						status: "current",
+						packageName: "pi-ui-extend",
+						currentVersion: "0.1.0",
+						latestVersion: "0.1.0",
+						packageRoot,
+					}),
+					runCommand: async (command) => { commands.push(command.display); },
+				});
+
+				assert.equal(await runPixUpdateCli([]), 0);
+				assert.equal(commands.length, 1);
+				assert.match(commands[0] ?? "", /pi-coding-agent@0\.80\.10/u);
+			} finally {
+				setPixUpdateTestDeps();
+				restoreConsole.restore();
+			}
+		});
+	});
+
+	it("reports a global Pi mismatch in check-only mode without installing", async () => {
+		await withManagedInstall("0.80.10", "0.80.9", async (packageRoot) => {
+			const restoreConsole = captureConsole();
+			let runCalls = 0;
+			try {
+				setPixUpdateTestDeps({
+					checkPixUpdate: async () => ({
+						status: "current",
+						packageName: "pi-ui-extend",
+						currentVersion: "0.1.0",
+						latestVersion: "0.1.0",
+						packageRoot,
+					}),
+					runCommand: async () => { runCalls += 1; },
+				});
+
+				assert.equal(await runPixUpdateCli(["--check"]), 0);
+				assert.equal(runCalls, 0);
+				assert.match(restoreConsole.output().stdout, /Global Pi compatibility[\s\S]*version mismatch/u);
+			} finally {
+				setPixUpdateTestDeps();
+				restoreConsole.restore();
+			}
+		});
+	});
+
+	it("refreshes the Pi target after updating Pix", async () => {
+		await withManagedInstall("0.80.10", "0.80.10", async (packageRoot) => {
+			const restoreConsole = captureConsole();
+			const commands: string[] = [];
+			try {
+				setPixUpdateTestDeps({
+					checkPixUpdate: async () => ({
+						status: "newer",
+						packageName: "pi-ui-extend",
+						currentVersion: "0.1.0",
+						latestVersion: "0.2.0",
+						packageRoot,
+					}),
+					runCommand: async (command) => {
+						commands.push(command.display);
+						if (commands.length === 1) await writePixPackage(packageRoot, "0.2.0", "0.80.11");
+					},
+				});
+
+				assert.equal(await runPixUpdateCli([]), 0);
+				assert.equal(commands.length, 2);
+				assert.match(commands[0] ?? "", /pi-ui-extend@0\.2\.0/u);
+				assert.match(commands[1] ?? "", /pi-coding-agent@0\.80\.11/u);
+			} finally {
+				setPixUpdateTestDeps();
+				restoreConsole.restore();
+			}
+		});
 	});
 
 	it("reports mocked self-update command failures", async () => {
@@ -211,6 +322,32 @@ describe("pix update", () => {
 			restoreConsole.restore();
 		}
 	});
+
+	it("reports a recoverable partial failure when the global Pi install fails", async () => {
+		await withManagedInstall("0.80.10", "0.80.9", async (packageRoot) => {
+			const restoreConsole = captureConsole();
+			try {
+				setPixUpdateTestDeps({
+					checkPixUpdate: async () => ({
+						status: "current",
+						packageName: "pi-ui-extend",
+						currentVersion: "0.1.0",
+						latestVersion: "0.1.0",
+						packageRoot,
+					}),
+					runCommand: async () => { throw new Error("pi install failed"); },
+				});
+
+				assert.equal(await runPixUpdateCli([]), 1);
+				const stderr = restoreConsole.output().stderr;
+				assert.match(stderr, /Global Pi update failed: pi install failed/u);
+				assert.match(stderr, /Try running manually:.*pi-coding-agent@0\.80\.10/u);
+			} finally {
+				setPixUpdateTestDeps();
+				restoreConsole.restore();
+			}
+		});
+	});
 });
 
 async function withPackageJson(packageJson: Record<string, unknown>, callback: (packageRoot: string) => Promise<void>): Promise<void> {
@@ -221,6 +358,36 @@ async function withPackageJson(packageJson: Record<string, unknown>, callback: (
 	} finally {
 		await rm(packageRoot, { recursive: true, force: true });
 	}
+}
+
+async function withManagedInstall(piTargetVersion: string, globalPiVersion: string | undefined, callback: (packageRoot: string) => Promise<void>): Promise<void> {
+	const prefixRoot = await mkdtemp(join(tmpdir(), "pix-managed-update-"));
+	const packageRoot = join(prefixRoot, "lib", "node_modules", "pi-ui-extend");
+	try {
+		await writePixPackage(packageRoot, "0.1.0", piTargetVersion);
+		if (globalPiVersion) await writeGlobalPiPackage(packageRoot, globalPiVersion);
+		await callback(packageRoot);
+	} finally {
+		await rm(prefixRoot, { recursive: true, force: true });
+	}
+}
+
+async function writePixPackage(packageRoot: string, version: string, piTargetVersion: string): Promise<void> {
+	await mkdir(packageRoot, { recursive: true });
+	await writeFile(join(packageRoot, "package.json"), JSON.stringify({
+		name: "pi-ui-extend",
+		version,
+		dependencies: { "@earendil-works/pi-coding-agent": piTargetVersion },
+	}), "utf8");
+}
+
+async function writeGlobalPiPackage(pixPackageRoot: string, version: string): Promise<void> {
+	const packageRoot = join(pixPackageRoot, "..", "@earendil-works", "pi-coding-agent");
+	await mkdir(packageRoot, { recursive: true });
+	await writeFile(join(packageRoot, "package.json"), JSON.stringify({
+		name: "@earendil-works/pi-coding-agent",
+		version,
+	}), "utf8");
 }
 
 async function withEnv(env: Record<string, string | undefined>, callback: () => Promise<void>): Promise<void> {

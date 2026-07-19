@@ -193,7 +193,7 @@ Type `/` to open the command picker. Commands with arguments can also be typed d
 | `/new_tab` | Start a new session in a new tab. |
 | `/compact [instructions]` | Compact context with optional instructions. |
 | `/reload` | Reload keybindings, extensions, skills, prompts, and themes. |
-| `/update` | Check for Pix updates; install from the shell with `pix update`. |
+| `/update` | Check Pix and global Pi compatibility; install from the shell with `pix update`. |
 | `/changelog` | Show the changelog for Pi packages. |
 | `/quit`, `/exit` | Exit Pix. |
 
@@ -220,7 +220,9 @@ Force reinstall:
 pix update --force
 ```
 
-`pix update` updates the Pix npm package, pinned Pi SDK dependencies, renderer-owned extensions, and the bundled `pi-tools-suite`. On the next startup, Pix refreshes the extension symlink in `~/.pi/agent/extensions/pi-tools-suite`.
+`pix update` updates the Pix npm package, then installs the global `pi` CLI at the exact Pi SDK version pinned by the updated Pix package. It also updates renderer-owned extensions and the bundled `pi-tools-suite`. On the next startup, Pix refreshes the extension symlink in `~/.pi/agent/extensions/pi-tools-suite`.
+
+`pix update --check` reports both the Pix release status and whether global Pi in the same package-manager prefix matches Pix. `pix update --force` reinstalls both packages. If the active `pi` command comes from a different package-manager prefix, update that installation separately.
 
 Update checks are disabled by any of these environment variables:
 
@@ -228,11 +230,10 @@ Update checks are disabled by any of these environment variables:
 - `PI_SKIP_VERSION_CHECK=1`
 - `PIX_SKIP_VERSION_CHECK=1`
 
-If Pi packages are installed separately and managed by Pi itself, update them separately:
+Pi-managed extension packages remain separate from the global CLI synchronization:
 
 ```bash
 pi update --extensions
-pi update
 ```
 
 ## Configuration

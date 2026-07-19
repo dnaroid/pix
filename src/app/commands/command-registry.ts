@@ -181,7 +181,7 @@ export function createSlashCommands(actions: CommandRegistryActions, host: Comma
 		},
 		{
 			name: "update",
-			description: "Check for Pix package updates",
+			description: "Check Pix and global Pi updates",
 			kind: "builtin",
 			keywords: ["upgrade", "version", "release", "external"],
 			allowArguments: true,
