@@ -19,7 +19,7 @@ the suite (`external/pi-tools-suite/`) owns the higher-risk runtime behavior
 Candidate areas were screened against the high-risk criteria (auth/security/
 privacy, permissions, data/schema/migrations, public APIs, external integrations,
 payments, background jobs, concurrency, irreversible actions, cross-cutting
-architecture). The 5 retained are where the most risk and the most user-visible
+architecture). The 4 retained are where the most risk and the most user-visible
 behavior live, and all happen to live in `external/pi-tools-suite`.
 
 ## Areas covered
@@ -27,10 +27,9 @@ behavior live, and all happen to live in `external/pi-tools-suite`.
 | # | Area | Primary risk class | Spec |
 |---|------|--------------------|------|
 | 1 | `antigravity-auth` | auth/security — OAuth, refresh-token rotation, secret file writes | [01-antigravity-auth.md](./01-antigravity-auth.md) |
-| 2 | `telegram-mirror` | privacy + external integration + concurrency — mirrors session data to Telegram, leader election | [02-telegram-mirror.md](./02-telegram-mirror.md) |
-| 3 | `async-subagents` | background jobs + concurrency — spawns child pi processes, registry, retry/failover | [03-async-subagents.md](./03-async-subagents.md) |
-| 4 | `dcp` (dynamic context pruning) | data + cross-cutting — rewrites conversation context, persists state, irreversible pruning | [04-dcp.md](./04-dcp.md) |
-| 5 | `lsp` trust & command execution | security — executes configured LSP server commands gated by a trust hash | [05-lsp-trust.md](./05-lsp-trust.md) |
+| 2 | `async-subagents` | background jobs + concurrency — spawns child pi processes, registry, retry/failover | [02-async-subagents.md](./02-async-subagents.md) |
+| 3 | `dcp` (dynamic context pruning) | data + cross-cutting — rewrites conversation context, persists state, irreversible pruning | [03-dcp.md](./03-dcp.md) |
+| 4 | `lsp` trust & command execution | security — executes configured LSP server commands gated by a trust hash | [04-lsp-trust.md](./04-lsp-trust.md) |
 
 ## Cross-cutting observations
 
@@ -41,8 +40,8 @@ behavior live, and all happen to live in `external/pi-tools-suite`.
 - **One inter-area data flow.** `async-subagents` writes `result.md` artifacts
   that `dcp` reads synchronously from disk during compression; deleting a run
   dir before a rollup loses that content from the summary. `[confirmed by code]`
-- **No production code was changed** to produce these specs. Areas 3–5 were
-  investigated by read-only sub-agents; areas 1–2 by direct file reading. All
+- **No production code was changed** to produce these specs. Areas 2–4 were
+  investigated by read-only sub-agents; area 1 by direct file reading. All
   claims should be re-verified against current code before relying on them.
 
 ## Caveats / known unknowns

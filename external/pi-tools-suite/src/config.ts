@@ -5,19 +5,12 @@ import { parse as parseJsonc } from "jsonc-parser";
 
 import { DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC } from "./default-pi-tools-suite-config.js";
 
-export interface TelegramMirrorConfig {
-	enabled: boolean;
-	botToken: string;
-	chatId: number;
-}
-
 export interface PiToolsSuiteConfig {
 	enabled: boolean;
 	disabledModules: string[];
 	todoThinking: boolean;
 	/** Vision-capable model used by the coding-discipline lookup tool; unset disables lookup. */
 	lookupModel?: string;
-	telegramMirror?: TelegramMirrorConfig;
 }
 
 type MutableConfig = {
@@ -25,7 +18,6 @@ type MutableConfig = {
 	disabledModules: Set<string>;
 	todoThinking: boolean;
 	lookupModel: string | undefined;
-	telegramMirror: TelegramMirrorConfig | undefined;
 };
 
 type Env = Record<string, string | undefined>;
@@ -68,27 +60,6 @@ function normalizeLookupModel(raw: unknown): string | undefined {
 	if (typeof raw !== "string") return undefined;
 	const trimmed = raw.trim();
 	return trimmed ? trimmed : undefined;
-}
-
-function normalizeTelegramMirror(raw: unknown): TelegramMirrorConfig | undefined {
-	if (!isRecord(raw)) return undefined;
-	const botToken = typeof raw.botToken === "string" ? raw.botToken.trim() : "";
-	if (!botToken) return undefined;
-
-	let chatId: number | undefined;
-	if (typeof raw.chatId === "number" && Number.isFinite(raw.chatId) && Number.isInteger(raw.chatId)) {
-		chatId = raw.chatId;
-	} else if (typeof raw.chatId === "string") {
-		const trimmed = raw.chatId.trim();
-		if (/^-?\d+$/.test(trimmed)) {
-			const parsed = Number(trimmed);
-			if (Number.isFinite(parsed) && Number.isInteger(parsed)) chatId = parsed;
-		}
-	}
-	if (chatId === undefined) return undefined;
-
-	const enabled = typeof raw.enabled === "boolean" ? raw.enabled : true;
-	return { enabled, botToken, chatId };
 }
 
 function boolFromEnv(value: string | undefined): boolean | undefined {
@@ -165,9 +136,6 @@ function mergeConfigLayer(config: MutableConfig, raw: Record<string, unknown>, k
 		}
 	}
 
-	const telegramMirror = normalizeTelegramMirror(raw.telegramMirror);
-	if (telegramMirror) config.telegramMirror = telegramMirror;
-
 	return config;
 }
 
@@ -210,7 +178,6 @@ export function loadPiToolsSuiteConfig(moduleNames: readonly string[], options: 
 		disabledModules: new Set([...DEFAULT_DISABLED_MODULES].filter((name) => knownModules.has(name))),
 		todoThinking: false,
 		lookupModel: undefined,
-		telegramMirror: undefined,
 	};
 	const userConfigPath = getPiToolsSuiteUserConfigPath(options.homeDir);
 
@@ -230,15 +197,5 @@ export function loadPiToolsSuiteConfig(moduleNames: readonly string[], options: 
 		disabledModules: [...config.disabledModules].sort(),
 		todoThinking: config.todoThinking,
 		...(config.lookupModel ? { lookupModel: config.lookupModel } : {}),
-		...(config.telegramMirror ? { telegramMirror: config.telegramMirror } : {}),
 	};
-}
-
-/**
- * Load only the telegram-mirror section from the pi-tools-suite config layers.
- * Returns undefined when the section is missing or invalid (botToken empty /
- * chatId non-integer).
- */
-export function loadTelegramMirrorConfig(options: { cwd?: string; env?: Env; homeDir?: string } = {}): TelegramMirrorConfig | undefined {
-	return loadPiToolsSuiteConfig([], options).telegramMirror;
 }

@@ -26,7 +26,6 @@ export const MODULES: Array<{ name: string; load: () => Promise<ExtensionModule>
 	{ name: "dcp", load: () => import("./dcp/index") },
 	{ name: "prompt-commands", load: () => import("./prompt-commands/index") },
 	{ name: "skill-installer", load: () => import("./skill-installer/index") },
-	{ name: "telegram-mirror", load: () => import("./telegram-mirror/index") },
 	// Keep this last: its before_provider_request handler is the final payload
 	// sanitizer after DCP and any other provider-payload modifiers.
 	{ name: "codex-reasoning-fix", load: () => import("./codex-reasoning-fix/index") },

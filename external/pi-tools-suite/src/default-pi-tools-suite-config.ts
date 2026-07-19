@@ -22,11 +22,6 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
   //   "balanced"     — + restate-code + generic-explanation (default);
   //   "aggressive"   — any non-valuable net-new comment.
   "commentChecker": { "enabled": true, "strictness": "balanced" },
-  // "telegramMirror": {
-  //   "enabled": true,
-  //   "botToken": "123456789:ABCdef...",
-  //   "chatId": 123456789
-  // },
   "dcp": {
     "enabled": true,
     // Write a JSONL debug log of DCP context/prune/compress events to
