@@ -1,7 +1,16 @@
 {
   "name": "pi-ui-extend",
   "version": "0.1.66",
+  "description": "Pix: a workspace-first terminal UI for Pi with tabs, readable tool activity, voice input, and bundled agent tools.",
   "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dnaroid/pix.git"
+  },
+  "homepage": "https://github.com/dnaroid/pix#readme",
+  "bugs": {
+    "url": "https://github.com/dnaroid/pix/issues"
+  },
   "type": "module",
   "bin": {
     "pi-ui-extend": "./bin/pix.mjs",
@@ -20,6 +29,7 @@
     "./schemas/pi-tools-suite.json": "./schemas/pi-tools-suite.json"
   },
   "files": [
+    "assets/screenshots",
     "bin",
     "docs",
     "dist",
