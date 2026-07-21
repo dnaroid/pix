@@ -266,6 +266,12 @@ export function applyTaskMutation(state: TaskState, action: TaskAction, params: 
 
 		case "batch_update": {
 			if (!params.items?.length) return errorResult(state, "items required for batch_update");
+			const seenIds = new Set<number>();
+			for (const item of params.items) {
+				if (item.id === undefined) continue;
+				if (seenIds.has(item.id)) return errorResult(state, `duplicate id in batch_update: #${item.id}`);
+				seenIds.add(item.id);
+			}
 			let working = state;
 			const ids: number[] = [];
 			for (let i = 0; i < params.items.length; i++) {

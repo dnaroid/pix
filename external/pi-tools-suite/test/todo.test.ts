@@ -366,6 +366,30 @@ describe.serial("todo tool", () => {
 });
 
 describe.serial("todo reducer", () => {
+	test.serial("rejects repeated task ids in a batch update without changing the plan", async () => {
+		const { applyTaskMutation } = await import("../src/todo/state/state-reducer.js");
+		const state = {
+			tasks: [
+				{ id: 3, subject: "Обновить глобальный скилл", status: "pending" as const, description: "Old description" },
+				{ id: 4, subject: "Сообщить результат", status: "pending" as const },
+			],
+			nextId: 5,
+		};
+
+		const result = applyTaskMutation(state, "batch_update", {
+			action: "batch_update",
+			items: [
+				{ id: 3, description: "Опубликовать пакет" },
+				{ id: 4, subject: "Обновить глобальный скилл" },
+				{ id: 4, metadata: { note: "global sync" } },
+			],
+		} as any);
+
+		expect(result.op).toEqual({ kind: "error", message: "duplicate id in batch_update: #4" });
+		expect(result.state).toBe(state);
+		expect(result.state.tasks).toEqual(state.tasks);
+	});
+
 	test.serial("validates create blockedBy references", async () => {
 		const { applyTaskMutation } = await import("../src/todo/state/state-reducer.js");
 		const state = { tasks: [{ id: 1, subject: "Deleted", status: "deleted" as const }], nextId: 2 };
