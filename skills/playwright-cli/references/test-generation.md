@@ -10,25 +10,30 @@ This code appears in the output and can be copied directly into your test files.
 ## Example Workflow
 
 ```bash
-# Start a session
-playwright-cli open https://example.com/login
+# Choose a unique name, record it as owned by this task, and start the session.
+SESSION="testgen-login-$(date +%s)-$$"
+playwright-cli -s="$SESSION" open https://example.com/login
 
 # Take a snapshot to see elements
-playwright-cli snapshot
+playwright-cli -s="$SESSION" snapshot
 # Output shows: e1 [textbox "Email"], e2 [textbox "Password"], e3 [button "Sign In"]
 
 # Fill form fields - generates code automatically
-playwright-cli fill e1 "user@example.com"
+playwright-cli -s="$SESSION" fill e1 "user@example.com"
 # Ran Playwright code:
 # await page.getByRole('textbox', { name: 'Email' }).fill('user@example.com');
 
-playwright-cli fill e2 "password123"
+playwright-cli -s="$SESSION" fill e2 "password123"
 # Ran Playwright code:
 # await page.getByRole('textbox', { name: 'Password' }).fill('password123');
 
-playwright-cli click e3
+playwright-cli -s="$SESSION" click e3
 # Ran Playwright code:
 # await page.getByRole('button', { name: 'Sign In' }).click();
+
+# Mandatory on success and errors.
+playwright-cli -s="$SESSION" close
+playwright-cli list  # verify $SESSION is absent
 ```
 
 ## Building a Test File
@@ -69,10 +74,13 @@ await page.locator('#submit-btn').click();
 Take snapshots to understand the page structure before recording actions:
 
 ```bash
-playwright-cli open https://example.com
-playwright-cli snapshot
+SESSION="testgen-explore-$(date +%s)-$$"
+playwright-cli -s="$SESSION" open https://example.com
+playwright-cli -s="$SESSION" snapshot
 # Review the element structure
-playwright-cli click e5
+playwright-cli -s="$SESSION" click e5
+playwright-cli -s="$SESSION" close
+playwright-cli list  # verify $SESSION is absent
 ```
 
 ### 3. Add Assertions Manually

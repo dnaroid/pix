@@ -5,26 +5,30 @@ Capture browser automation sessions as video for debugging, documentation, or ve
 ## Basic Recording
 
 ```bash
+# Choose a unique name and record it as owned before opening.
+SESSION="video-demo-$(date +%s)-$$"
 # Open browser first
-playwright-cli open
+playwright-cli -s="$SESSION" open
 
 # Start recording
-playwright-cli video-start demo.webm
+playwright-cli -s="$SESSION" video-start demo.webm
 
 # Add a chapter marker for section transitions
-playwright-cli video-chapter "Getting Started" --description="Opening the homepage" --duration=2000
+playwright-cli -s="$SESSION" video-chapter "Getting Started" --description="Opening the homepage" --duration=2000
 
 # Navigate and perform actions
-playwright-cli goto https://example.com
-playwright-cli snapshot
-playwright-cli click e1
+playwright-cli -s="$SESSION" goto https://example.com
+playwright-cli -s="$SESSION" snapshot
+playwright-cli -s="$SESSION" click e1
 
 # Add another chapter
-playwright-cli video-chapter "Filling Form" --description="Entering test data" --duration=2000
-playwright-cli fill e2 "test input"
+playwright-cli -s="$SESSION" video-chapter "Filling Form" --description="Entering test data" --duration=2000
+playwright-cli -s="$SESSION" fill e2 "test input"
 
 # Stop and save
-playwright-cli video-stop
+playwright-cli -s="$SESSION" video-stop
+playwright-cli -s="$SESSION" close
+playwright-cli list  # verify $SESSION is absent
 ```
 
 ## Best Practices
@@ -44,7 +48,7 @@ It allows pulling appropriate pauses between the actions and annotating the vide
 
 1) Perform scenario using CLI and take note of all locators and actions. You'll need those locators to request their bounding boxes for highlight.
 2) Create a file with the intended script for video (below). Use pressSequentially w/ delay for nice typing, make reasonable pauses.
-3) Use playwright-cli run-code --filename your-script.js
+3) In the task-owned unique session, use `playwright-cli -s="$SESSION" run-code --filename your-script.js`, then close that exact session and verify it is absent from `playwright-cli list`, including on errors.
 
 **Important**: Overlays are `pointer-events: none` — they do not interfere with page interactions. You can safely keep sticky overlays visible while clicking, filling, or performing any actions on the page.
 

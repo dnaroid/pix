@@ -8,6 +8,8 @@ End-to-end workflow for authoring and maintaining Playwright tests using `playwr
 
 All three lean on the same mechanic: run `npx playwright test --debug=cli` in the background, then `playwright-cli attach tw-XXXX` to drive the paused page interactively. See [playwright-tests.md](playwright-tests.md) for the debug/attach mechanics and [test-generation.md](test-generation.md) for how every `playwright-cli` action emits Playwright TypeScript.
 
+Each debug run owns two resources: the background test PID and the unique generated `tw-XXXX` session. Record both as soon as they exist. On success, failure, interruption, or timeout, detach that exact CLI session, stop and reap that exact PID, and verify the session name is absent from `playwright-cli list` before starting another run or responding. Never substitute `close-all` or `kill-all`, because other sessions may have different owners.
+
 ---
 
 ## 1. Planning
@@ -76,7 +78,8 @@ If no seed exists, create one that at least navigates to the app.
 Launch the app via the seed in the background and attach:
 
 ```bash
-PLAYWRIGHT_HTML_OPEN=never npx playwright test tests/seed.spec.ts --debug=cli
+PLAYWRIGHT_HTML_OPEN=never npx playwright test tests/seed.spec.ts --debug=cli > playwright-debug.log 2>&1 &
+TEST_PID=$!
 # wait for "Debugging Instructions" and the session name tw-XXXX
 playwright-cli attach tw-XXXX
 ```
@@ -100,7 +103,7 @@ Map out:
 - Navigation: which controls change the URL, back/forward behaviour.
 
 **Important**: Do not just open the app url with playwright-cli, always go through the test to capture any custom setup done there.
-**Important**: Stop the background test when done exploring.
+**Important**: When done exploring, run `playwright-cli -s=tw-XXXX detach`, stop and `wait` for `$TEST_PID`, then run `playwright-cli list` and verify `tw-XXXX` is absent.
 
 ### 1.4 Write the spec file
 
@@ -164,7 +167,9 @@ Goal: take a spec file and produce Playwright test files. Optionally update the 
 For each target scenario, in sequence (never in parallel — scenarios share the seed session):
 
 ```bash
-PLAYWRIGHT_HTML_OPEN=never npx playwright test <seed-file> --debug=cli   # background
+PLAYWRIGHT_HTML_OPEN=never npx playwright test <seed-file> --debug=cli > playwright-debug.log 2>&1 &
+TEST_PID=$!
+# Read the log, register the generated session name, then attach.
 playwright-cli attach tw-XXXX
 # resume
 ```
@@ -216,11 +221,11 @@ Rules:
 - Prefix each numbered step with a `// N. <step text>` comment before its actions.
 - Use the describe group name verbatim from the spec (no `1.` ordinal).
 - Import from `./fixtures` if the project has one; otherwise `@playwright/test`.
-- **Important**: close the CLI session and stop the background test before moving to the next scenario.
+- **Important**: detach the exact `tw-XXXX` CLI session, stop and reap `$TEST_PID`, and verify the session is absent from `playwright-cli list` before moving to the next scenario.
 
 ### 2.3 Generate multiple scenarios
 
-Loop 2.2 over the targeted scenarios one at a time, restarting the seed between each so every test starts from a clean page. This is safe to parallelise due to unique generated session names - just make sure each test run is stopped.
+Loop 2.2 over the targeted scenarios one at a time, restarting the seed between each so every test starts from a clean page. Keep this sequential as required above; unique generated names prevent collisions but do not replace per-run ownership and verified cleanup.
 
 ### 2.4 Run generated tests
 
@@ -251,7 +256,8 @@ Record the list of failing `<file>:<line>` entries and process them one at a tim
 Run the single failing test in debug mode in the background, then attach:
 
 ```bash
-PLAYWRIGHT_HTML_OPEN=never npx playwright test tests/<group>/<scenario>.spec.ts:<line> --debug=cli
+PLAYWRIGHT_HTML_OPEN=never npx playwright test tests/<group>/<scenario>.spec.ts:<line> --debug=cli > playwright-debug.log 2>&1 &
+TEST_PID=$!
 # wait for "Debugging Instructions" and the tw-XXXX session name
 playwright-cli attach tw-XXXX
 ```
@@ -271,7 +277,7 @@ Rehearse the corrected interaction with `playwright-cli` — the generated code 
 
 ### 3.3 Apply the fix
 
-Edit the test file: update the locator, assertion, step order, or inputs to match the corrected behaviour. Stop the background debug run. Rerun the single test to confirm green.
+Edit the test file: update the locator, assertion, step order, or inputs to match the corrected behaviour. Detach the exact generated CLI session, stop and reap the background debug PID, and verify the session name is absent from `playwright-cli list`. Then rerun the single test to confirm green.
 
 Never skip hooks or add sleeps as a fix. Never use `networkidle`.
 

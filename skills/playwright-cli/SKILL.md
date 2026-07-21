@@ -6,31 +6,49 @@ allowed-tools: Bash(playwright-cli:*) Bash(npx:*) Bash(npm:*)
 
 # Browser Automation with playwright-cli
 
+## Required session lifecycle
+
+Browser sessions are daemon-backed and can outlive both a command and its task. Treat each session as an owned resource:
+
+1. Before the first session-scoped command, choose a unique, task-scoped name (semantic prefix plus timestamp/PID or random suffix), confirm it is not already in `playwright-cli list`, and record the exact name in task state as owned by this task. Do not create automation in the shared `default` session.
+2. Pass that exact name with `-s=<name>` to **every** command. In examples, `$SESSION` is shorthand for the recorded literal; do not assume shell variables persist between tool calls.
+3. As soon as the session is created, plan cleanup for success, failure, cancellation, and timeout. In a shell script, install an `EXIT INT TERM` trap immediately after registering the name.
+4. Before the final response—and on every error path—run `playwright-cli -s=<owned-name> close`. Then run `playwright-cli list` and verify that the exact owned name is absent. If it remains, retry the session-specific close and investigate before finishing.
+
+Only close sessions registered as owned by the current task. `close-all` and `kill-all` can disrupt other agents or users and are not routine cleanup. Use `kill-all` only as an emergency fallback when session-specific cleanup cannot remove a confirmed stale daemon, after checking `list` and either confirming every listed session is yours or obtaining user approval.
+
+For sessions attached to an external browser, use a unique name but `detach` instead of `close`; do not close the external browser. Only attach to a user's regular Chrome/Edge when explicitly requested. For `--debug=cli` sessions, also stop the background test process that owns the browser and verify its generated session is gone.
+
 ## Quick start
 
 ```bash
+# Pick once and record as owned; use this exact value for the whole task.
+SESSION="docs-check-$(date +%s)-$$"
 # open new browser
-playwright-cli open
+playwright-cli -s="$SESSION" open
 # navigate to a page
-playwright-cli goto https://playwright.dev
+playwright-cli -s="$SESSION" goto https://playwright.dev
 # interact with the page using refs from the snapshot
-playwright-cli click e15
-playwright-cli type "page.click"
-playwright-cli press Enter
+playwright-cli -s="$SESSION" click e15
+playwright-cli -s="$SESSION" type "page.click"
+playwright-cli -s="$SESSION" press Enter
 # take a screenshot (rarely used, as snapshot is more common)
-playwright-cli screenshot
-# close the browser
-playwright-cli close
+playwright-cli -s="$SESSION" screenshot
+# mandatory task cleanup, including error paths
+playwright-cli -s="$SESSION" close
+playwright-cli list  # verify the exact value of $SESSION is absent
 ```
 
 ## Commands
 
+Most of the command catalog omits `-s="$SESSION"` for readability. When executing it, always target the unique session registered under [Required session lifecycle](#required-session-lifecycle); session creation and cleanup show the option explicitly.
+
 ### Core
 
 ```bash
-playwright-cli open
+playwright-cli -s="$SESSION" open
 # open and navigate right away
-playwright-cli open https://example.com/
+playwright-cli -s="$SESSION" open https://example.com/
 playwright-cli goto https://playwright.dev
 playwright-cli type "search query"
 playwright-cli click e3
@@ -56,7 +74,7 @@ playwright-cli dialog-accept
 playwright-cli dialog-accept "confirmation text"
 playwright-cli dialog-dismiss
 playwright-cli resize 1920 1080
-playwright-cli close
+playwright-cli -s="$SESSION" close
 ```
 
 ### Navigation
@@ -200,33 +218,34 @@ playwright-cli list --json
 ## Open parameters
 ```bash
 # Use specific browser when creating session
-playwright-cli open --browser=chrome
-playwright-cli open --browser=firefox
-playwright-cli open --browser=webkit
-playwright-cli open --browser=msedge
+playwright-cli -s="$SESSION" open --browser=chrome
+playwright-cli -s="$SESSION" open --browser=firefox
+playwright-cli -s="$SESSION" open --browser=webkit
+playwright-cli -s="$SESSION" open --browser=msedge
 
 # Use persistent profile (by default profile is in-memory)
-playwright-cli open --persistent
+playwright-cli -s="$SESSION" open --persistent
 # Use persistent profile with custom directory
-playwright-cli open --profile=/path/to/profile
+playwright-cli -s="$SESSION" open --profile=/path/to/profile
 
 # Connect to browser via Playwright Extension
-playwright-cli attach --extension=chrome
+playwright-cli -s="$SESSION" attach --extension=chrome
 
 # Connect to a running Chrome or Edge by channel name
-playwright-cli attach --cdp=chrome
-playwright-cli attach --cdp=msedge
+playwright-cli -s="$SESSION" attach --cdp=chrome
+playwright-cli -s="$SESSION" attach --cdp=msedge
 
 # Connect to a running browser via CDP endpoint
-playwright-cli attach --cdp=http://localhost:9222
+playwright-cli -s="$SESSION" attach --cdp=http://localhost:9222
 
 # Start with config file
-playwright-cli open --config=my-config.json
+playwright-cli -s="$SESSION" open --config=my-config.json
 
-# Close the browser
-playwright-cli close
+# Close and verify an owned browser
+playwright-cli -s="$SESSION" close
+playwright-cli list
 # Detach from an attached browser (leaves the external browser running)
-playwright-cli -s=msedge detach
+playwright-cli -s="$SESSION" detach
 # Delete user data for the default session
 playwright-cli delete-data
 ```
@@ -292,20 +311,22 @@ playwright-cli click "getByTestId('submit-button')"
 ## Browser Sessions
 
 ```bash
-# create new browser session named "mysession" with persistent profile
-playwright-cli -s=mysession open example.com --persistent
-# same with manually specified profile directory (use when requested explicitly)
-playwright-cli -s=mysession open example.com --profile=/path/to/profile
-playwright-cli -s=mysession click e6
-playwright-cli -s=mysession close  # stop a named browser
-playwright-cli -s=mysession delete-data  # delete user data for persistent session
+# Choose a unique name once and register it as owned by this task.
+SESSION="profile-check-$(date +%s)-$$"
+# Choose either persistent option, not both.
+# Auto-generated profile location:
+playwright-cli -s="$SESSION" open example.com --persistent
+# Or a manually specified profile directory (only when requested explicitly):
+playwright-cli -s="$SESSION" open example.com --profile=/path/to/profile
+playwright-cli -s="$SESSION" click e6
+playwright-cli -s="$SESSION" delete-data  # delete user data if requested
+playwright-cli -s="$SESSION" close        # mandatory on success and errors
+playwright-cli list                        # verify $SESSION is absent
 
 playwright-cli list
-# Close all browsers
-playwright-cli close-all
-# Forcefully kill all browser processes
-playwright-cli kill-all
 ```
+
+The global commands `playwright-cli close-all` and `playwright-cli kill-all` may affect sessions owned by others. Do not use them for this workflow; follow the emergency-only policy above.
 
 ## Installation
 
@@ -324,45 +345,53 @@ npm install -g @playwright/cli@latest
 ## Example: Form submission
 
 ```bash
-playwright-cli open https://example.com/form
-playwright-cli snapshot
+SESSION="form-check-$(date +%s)-$$"
+playwright-cli -s="$SESSION" open https://example.com/form
+playwright-cli -s="$SESSION" snapshot
 
-playwright-cli fill e1 "user@example.com"
-playwright-cli fill e2 "password123"
-playwright-cli click e3
-playwright-cli snapshot
-playwright-cli close
+playwright-cli -s="$SESSION" fill e1 "user@example.com"
+playwright-cli -s="$SESSION" fill e2 "password123"
+playwright-cli -s="$SESSION" click e3
+playwright-cli -s="$SESSION" snapshot
+playwright-cli -s="$SESSION" close
+playwright-cli list  # verify $SESSION is absent
 ```
 
 ## Example: Multi-tab workflow
 
 ```bash
-playwright-cli open https://example.com
-playwright-cli tab-new https://example.com/other
-playwright-cli tab-list
-playwright-cli tab-select 0
-playwright-cli snapshot
-playwright-cli close
+SESSION="tabs-check-$(date +%s)-$$"
+playwright-cli -s="$SESSION" open https://example.com
+playwright-cli -s="$SESSION" tab-new https://example.com/other
+playwright-cli -s="$SESSION" tab-list
+playwright-cli -s="$SESSION" tab-select 0
+playwright-cli -s="$SESSION" snapshot
+playwright-cli -s="$SESSION" close
+playwright-cli list  # verify $SESSION is absent
 ```
 
 ## Example: Debugging with DevTools
 
 ```bash
-playwright-cli open https://example.com
-playwright-cli click e4
-playwright-cli fill e7 "test"
-playwright-cli console
-playwright-cli requests
-playwright-cli close
+SESSION="devtools-check-$(date +%s)-$$"
+playwright-cli -s="$SESSION" open https://example.com
+playwright-cli -s="$SESSION" click e4
+playwright-cli -s="$SESSION" fill e7 "test"
+playwright-cli -s="$SESSION" console
+playwright-cli -s="$SESSION" requests
+playwright-cli -s="$SESSION" close
+playwright-cli list  # verify $SESSION is absent
 ```
 
 ```bash
-playwright-cli open https://example.com
-playwright-cli tracing-start
-playwright-cli click e4
-playwright-cli fill e7 "test"
-playwright-cli tracing-stop
-playwright-cli close
+SESSION="trace-check-$(date +%s)-$$"
+playwright-cli -s="$SESSION" open https://example.com
+playwright-cli -s="$SESSION" tracing-start
+playwright-cli -s="$SESSION" click e4
+playwright-cli -s="$SESSION" fill e7 "test"
+playwright-cli -s="$SESSION" tracing-stop
+playwright-cli -s="$SESSION" close
+playwright-cli list  # verify $SESSION is absent
 ```
 
 ## Example: Interactive session
@@ -370,8 +399,11 @@ playwright-cli close
 Ask the user for UI review or design feedback. The user draws boxes on the live page and types comments; you receive the annotated screenshot, the snapshot of the marked region, and the user's notes. Use this whenever the user asks for "UI review", "design feedback", or to "ask the user what they think / want / mean":
 
 ```bash
-playwright-cli open https://example.com
-playwright-cli show --annotate
+SESSION="ui-review-$(date +%s)-$$"
+playwright-cli -s="$SESSION" open https://example.com
+playwright-cli -s="$SESSION" show --annotate
+playwright-cli -s="$SESSION" close
+playwright-cli list  # verify $SESSION is absent
 ```
 
 ## Specific tasks

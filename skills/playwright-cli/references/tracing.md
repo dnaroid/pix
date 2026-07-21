@@ -5,16 +5,19 @@ Capture detailed execution traces for debugging and analysis. Traces include DOM
 ## Basic Usage
 
 ```bash
+SESSION="trace-basic-$(date +%s)-$$"  # record as owned before first command
 # Start trace recording
-playwright-cli tracing-start
+playwright-cli -s="$SESSION" tracing-start
 
 # Perform actions
-playwright-cli open https://example.com
-playwright-cli click e1
-playwright-cli fill e2 "test"
+playwright-cli -s="$SESSION" open https://example.com
+playwright-cli -s="$SESSION" click e1
+playwright-cli -s="$SESSION" fill e2 "test"
 
 # Stop trace recording
-playwright-cli tracing-stop
+playwright-cli -s="$SESSION" tracing-stop
+playwright-cli -s="$SESSION" close
+playwright-cli list  # verify $SESSION is absent
 ```
 
 ## Trace Output Files
@@ -64,22 +67,28 @@ When you start tracing, Playwright creates a `traces/` directory with several fi
 ### Debugging Failed Actions
 
 ```bash
-playwright-cli tracing-start
-playwright-cli open https://app.example.com
+SESSION="trace-failure-$(date +%s)-$$"
+playwright-cli -s="$SESSION" tracing-start
+playwright-cli -s="$SESSION" open https://app.example.com
 
 # This click fails - why?
-playwright-cli click e5
+playwright-cli -s="$SESSION" click e5
 
-playwright-cli tracing-stop
+playwright-cli -s="$SESSION" tracing-stop
+playwright-cli -s="$SESSION" close
+playwright-cli list  # verify $SESSION is absent
 # Open trace to see DOM state when click was attempted
 ```
 
 ### Analyzing Performance
 
 ```bash
-playwright-cli tracing-start
-playwright-cli open https://slow-site.com
-playwright-cli tracing-stop
+SESSION="trace-performance-$(date +%s)-$$"
+playwright-cli -s="$SESSION" tracing-start
+playwright-cli -s="$SESSION" open https://slow-site.com
+playwright-cli -s="$SESSION" tracing-stop
+playwright-cli -s="$SESSION" close
+playwright-cli list  # verify $SESSION is absent
 
 # View network waterfall to identify slow resources
 ```
@@ -88,15 +97,18 @@ playwright-cli tracing-stop
 
 ```bash
 # Record a complete user flow for documentation
-playwright-cli tracing-start
+SESSION="trace-evidence-$(date +%s)-$$"
+playwright-cli -s="$SESSION" tracing-start
 
-playwright-cli open https://app.example.com/checkout
-playwright-cli fill e1 "4111111111111111"
-playwright-cli fill e2 "12/25"
-playwright-cli fill e3 "123"
-playwright-cli click e4
+playwright-cli -s="$SESSION" open https://app.example.com/checkout
+playwright-cli -s="$SESSION" fill e1 "4111111111111111"
+playwright-cli -s="$SESSION" fill e2 "12/25"
+playwright-cli -s="$SESSION" fill e3 "123"
+playwright-cli -s="$SESSION" click e4
 
-playwright-cli tracing-stop
+playwright-cli -s="$SESSION" tracing-stop
+playwright-cli -s="$SESSION" close
+playwright-cli list  # verify $SESSION is absent
 # Trace shows exact sequence of events
 ```
 
@@ -117,10 +129,13 @@ playwright-cli tracing-stop
 
 ```bash
 # Trace the entire flow, not just the failing step
-playwright-cli tracing-start
-playwright-cli open https://example.com
+SESSION="trace-flow-$(date +%s)-$$"
+playwright-cli -s="$SESSION" tracing-start
+playwright-cli -s="$SESSION" open https://example.com
 # ... all steps leading to the issue ...
-playwright-cli tracing-stop
+playwright-cli -s="$SESSION" tracing-stop
+playwright-cli -s="$SESSION" close
+playwright-cli list  # verify $SESSION is absent
 ```
 
 ### 2. Clean Up Old Traces
