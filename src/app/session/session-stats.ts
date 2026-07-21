@@ -32,8 +32,19 @@ export function aggregateSessionStats(entries: readonly SessionEntry[], base: Se
 	let cacheRead = 0;
 	let cacheWrite = 0;
 	let cost = 0;
+	function addUsage(usage: AssistantUsage | undefined): void {
+		input += finiteNumber(usage?.input);
+		output += finiteNumber(usage?.output);
+		cacheRead += finiteNumber(usage?.cacheRead);
+		cacheWrite += finiteNumber(usage?.cacheWrite);
+		cost += finiteNumber(usage?.cost?.total);
+	}
 
 	for (const entry of entries) {
+		if (entry.type === "compaction" || entry.type === "branch_summary") {
+			addUsage(entry.usage);
+			continue;
+		}
 		if (entry.type !== "message") continue;
 		totalMessages += 1;
 		const message = entry.message;
@@ -43,6 +54,7 @@ export function aggregateSessionStats(entries: readonly SessionEntry[], base: Se
 		}
 		if (message.role === "toolResult") {
 			toolResults += 1;
+			addUsage(message.usage);
 			continue;
 		}
 		if (message.role !== "assistant") continue;
@@ -51,12 +63,7 @@ export function aggregateSessionStats(entries: readonly SessionEntry[], base: Se
 		if (Array.isArray(message.content)) {
 			toolCalls += message.content.filter((content) => content.type === "toolCall").length;
 		}
-		const usage = message.usage as AssistantUsage | undefined;
-		input += finiteNumber(usage?.input);
-		output += finiteNumber(usage?.output);
-		cacheRead += finiteNumber(usage?.cacheRead);
-		cacheWrite += finiteNumber(usage?.cacheWrite);
-		cost += finiteNumber(usage?.cost?.total);
+		addUsage(message.usage);
 	}
 
 	return {

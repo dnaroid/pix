@@ -31,7 +31,7 @@ export async function createLiveModelContext(modelRef: string): Promise<LiveMode
 	if (!ModelRuntime || !ModelRegistryRuntime) {
 		throw new Error("Prompt eval SDK does not expose ModelRuntime and ModelRegistry");
 	}
-	const modelRuntime = await ModelRuntime.create();
+	const modelRuntime = await ModelRuntime.create({ allowModelNetwork: true });
 	const modelRegistry = new ModelRegistryRuntime(modelRuntime);
 	const model = modelRegistry.find(provider, modelId);
 	if (!model) throw new Error(`Prompt eval model is not registered: ${modelRef}`);

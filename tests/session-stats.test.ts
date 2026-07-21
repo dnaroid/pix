@@ -29,8 +29,10 @@ test("complete session stats aggregate the full lazy history without hydrating s
 				usage: { input: 10, output: 4, cacheRead: 3, cacheWrite: 2, cost: { total: 0.25 } },
 			},
 		},
-		{ type: "message", id: "tool-1", parentId: "assistant-1", timestamp: "2026-01-01T00:00:03.000Z", message: { role: "toolResult", toolCallId: "call-1", toolName: "read", content: [{ type: "text", text: "ok" }], isError: false } },
-		{ type: "message", id: "user-2", parentId: "tool-1", timestamp: "2026-01-01T00:00:04.000Z", message: { role: "user", content: "thanks" } },
+		{ type: "message", id: "tool-1", parentId: "assistant-1", timestamp: "2026-01-01T00:00:03.000Z", message: { role: "toolResult", toolCallId: "call-1", toolName: "read", content: [{ type: "text", text: "ok" }], isError: false, usage: { input: 2, output: 1, cacheRead: 0, cacheWrite: 0, cost: { total: 0.02 } } } },
+		{ type: "compaction", id: "compaction-1", parentId: "tool-1", timestamp: "2026-01-01T00:00:04.000Z", summary: "summary", firstKeptEntryId: "tool-1", tokensBefore: 20, usage: { input: 3, output: 2, cacheRead: 1, cacheWrite: 0, cost: { total: 0.03 } } },
+		{ type: "branch_summary", id: "branch-1", parentId: "compaction-1", timestamp: "2026-01-01T00:00:05.000Z", fromId: "tool-1", summary: "branch", usage: { input: 4, output: 2, cacheRead: 0, cacheWrite: 1, cost: { total: 0.04 } } },
+		{ type: "message", id: "user-2", parentId: "branch-1", timestamp: "2026-01-01T00:00:06.000Z", message: { role: "user", content: "thanks" } },
 	];
 	await writeFile(sessionPath, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
 
@@ -60,8 +62,8 @@ test("complete session stats aggregate the full lazy history without hydrating s
 		toolCalls: 1,
 		toolResults: 1,
 		totalMessages: 4,
-		tokens: { input: 10, output: 4, cacheRead: 3, cacheWrite: 2, total: 19 },
-		cost: 0.25,
+		tokens: { input: 19, output: 9, cacheRead: 4, cacheWrite: 3, total: 35 },
+		cost: 0.34,
 	});
 
 	assert.ok((sessionManager as unknown as { createHistoryReader(): unknown }).createHistoryReader());

@@ -106,3 +106,36 @@ test("lazy session manager does not expose older history when the full file is a
 
 	assert.equal((manager as unknown as { createHistoryReader(): LazySessionHistoryReader | undefined }).createHistoryReader(), undefined);
 });
+
+test("lazy session manager preserves summary usage added by SDK 0.81", async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "pix-lazy-session-usage-"));
+	t.after(async () => {
+		await rm(dir, { force: true, recursive: true });
+	});
+
+	const sessionPath = join(dir, "session.jsonl");
+	await writeFile(sessionPath, [
+		JSON.stringify({ type: "session", version: 3, id: "session-1", timestamp: "2026-01-01T00:00:00.000Z", cwd: dir }),
+		JSON.stringify({ type: "message", id: "user-1", parentId: null, timestamp: "2026-01-01T00:00:01.000Z", message: { role: "user", content: "first" } }),
+		JSON.stringify({ type: "message", id: "user-2", parentId: "user-1", timestamp: "2026-01-01T00:00:02.000Z", message: { role: "user", content: "tail" } }),
+		"",
+	].join("\n"), "utf8");
+
+	const usage = {
+		input: 4,
+		output: 2,
+		cacheRead: 1,
+		cacheWrite: 0,
+		totalTokens: 7,
+		cost: { input: 0.01, output: 0.02, cacheRead: 0.001, cacheWrite: 0, total: 0.031 },
+	};
+	const manager = await openLazySessionManager(sessionPath, { cwdOverride: dir, tailEntryCount: 1 });
+	manager.appendCompaction("compact", "user-2", 10, undefined, false, usage);
+
+	const fullEntries = await (manager as unknown as { readFullSessionEntries(): Promise<Array<{ type: string; usage?: unknown }>> }).readFullSessionEntries();
+	assert.deepEqual(fullEntries.find((entry) => entry.type === "compaction")?.usage, usage);
+
+	const branchSummaryId = manager.branchWithSummary("user-1", "branch", undefined, false, usage);
+	const branchSummary = manager.getEntry(branchSummaryId);
+	assert.deepEqual(branchSummary?.type === "branch_summary" ? branchSummary.usage : undefined, usage);
+});

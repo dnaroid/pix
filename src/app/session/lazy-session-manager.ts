@@ -13,6 +13,7 @@ import {
 	type SessionEntry,
 	type SessionHeader,
 } from "@earendil-works/pi-coding-agent";
+import type { Usage } from "@earendil-works/pi-ai";
 
 import { isRecord } from "../guards.js";
 
@@ -260,8 +261,8 @@ class LazySessionManager implements SessionManagerFacade {
 		return this.hydrate().createBranchedSession(leafId);
 	}
 
-	branchWithSummary(branchFromId: string | null, summary: string, details?: unknown, fromHook?: boolean): string {
-		return this.hydrate().branchWithSummary(branchFromId, summary, details, fromHook);
+	branchWithSummary(branchFromId: string | null, summary: string, details?: unknown, fromHook?: boolean, usage?: Usage): string {
+		return this.hydrate().branchWithSummary(branchFromId, summary, details, fromHook, usage);
 	}
 
 	appendLabelChange(targetId: string, label: string | undefined): string {
@@ -293,11 +294,12 @@ class LazySessionManager implements SessionManagerFacade {
 		return this.appendEntry(this.newEntry("model_change", { provider, modelId }));
 	}
 
-	appendCompaction<T = unknown>(summary: string, firstKeptEntryId: string, tokensBefore: number, details?: T, fromHook?: boolean): string {
-		if (this.hydrated) return this.hydrated.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromHook);
+	appendCompaction<T = unknown>(summary: string, firstKeptEntryId: string, tokensBefore: number, details?: T, fromHook?: boolean, usage?: Usage): string {
+		if (this.hydrated) return this.hydrated.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromHook, usage);
 		const payload: Record<string, unknown> = { summary, firstKeptEntryId, tokensBefore };
 		if (details !== undefined) payload.details = details;
 		if (fromHook !== undefined) payload.fromHook = fromHook;
+		if (usage !== undefined) payload.usage = usage;
 		return this.appendEntry(this.newEntry("compaction", payload));
 	}
 
