@@ -83,12 +83,12 @@ describe("StatusLineRenderer", () => {
 		const renderer = statusLineRenderer({ widgetText, voiceActive: false });
 
 		const layout = renderer.inputBorderWidgetsLayout(width)!;
-		const borderWidgetText = widgetsText(APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools, APP_ICONS.microphone, "RU");
+		const borderWidgetText = widgetsText(APP_ICONS.clipboardPaste, APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools, APP_ICONS.microphone, "RU");
 		const expectedStartColumn = width + 1 - stringDisplayWidth(borderWidgetText);
 
 		assert.equal(layout.inputBorderWidgetStartColumn, expectedStartColumn);
 		assert.equal(layout.text, borderWidgetText);
-		assert.equal(layout.voiceWidget?.startColumn, expectedStartColumn + stringDisplayWidth(widgetsText(APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools)) + 1);
+		assert.equal(layout.voiceWidget?.startColumn, expectedStartColumn + stringDisplayWidth(widgetsText(APP_ICONS.clipboardPaste, APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools)) + 1);
 		assert.equal(layout.voiceWidget?.languageStartColumn, layout.voiceWidget!.micEndColumn + 1);
 		assert.equal(layout.voiceWidget?.endColumn, layout.voiceWidget!.startColumn + stringDisplayWidth(`${APP_ICONS.microphone} RU`));
 		assert.equal(layout.voiceWidget?.endColumn, width + 1);
@@ -109,6 +109,26 @@ describe("StatusLineRenderer", () => {
 		})));
 		assert.ok(!widgetLayout.text.includes("─"));
 		assert.equal(rendered.includes(THEMES.dark.colors.inputBorderWidgetBackground), false);
+	});
+
+	it("renders the internal clipboard button muted until Pix has copied text", () => {
+		const inactiveRenderer = statusLineRenderer({ widgetText: "", voiceActive: false });
+		const inactiveLayout = inactiveRenderer.layout(40);
+		const inactiveTarget = inactiveRenderer.internalClipboardTarget(inactiveLayout, 1);
+		const activeRenderer = statusLineRenderer({ widgetText: "", voiceActive: false, internalClipboardActive: true });
+		const activeLayout = activeRenderer.layout(40);
+
+		assert.deepEqual(inactiveTarget, {
+			row: 1,
+			startColumn: inactiveLayout.internalClipboardWidget?.startColumn,
+			endColumn: inactiveLayout.internalClipboardWidget?.endColumn,
+		});
+		assert.ok(inactiveRenderer.render(1, inactiveLayout, 40).includes(colorize(APP_ICONS.clipboardPaste, {
+			foreground: THEMES.dark.colors.muted,
+		})));
+		assert.ok(activeRenderer.render(1, activeLayout, 40).includes(colorize(APP_ICONS.clipboardPaste, {
+			foreground: THEMES.dark.colors.info,
+		})));
 	});
 
 	it("does not expose a language click target for mic-only voice widget", () => {
@@ -178,7 +198,7 @@ describe("StatusLineRenderer", () => {
 
 		const layout = renderer.inputBorderWidgetsLayout(width)!;
 
-		assert.ok(layout.text.endsWith(widgetsText(promptWidgetText, APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools, APP_ICONS.microphone, "RU")));
+		assert.ok(layout.text.endsWith(widgetsText(APP_ICONS.clipboardPaste, promptWidgetText, APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools, APP_ICONS.microphone, "RU")));
 		assert.equal(layout.promptEnhancerWidget?.endColumn, (layout.userJumpWidget?.startColumn ?? 0) - 1);
 		assert.equal(layout.compactToolsWidget?.endColumn, (layout.voiceWidget?.startColumn ?? 0) - 1);
 	});
@@ -190,7 +210,7 @@ describe("StatusLineRenderer", () => {
 		const renderer = statusLineRenderer({ widgetText, voiceActive: false, promptWidgetText, promptActive: false });
 
 		const layout = renderer.inputBorderWidgetsLayout(width)!;
-		assert.ok(layout.text.endsWith(widgetsText(promptWidgetText, APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools, APP_ICONS.microphone, "RU")));
+		assert.ok(layout.text.endsWith(widgetsText(APP_ICONS.clipboardPaste, promptWidgetText, APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools, APP_ICONS.microphone, "RU")));
 		assert.equal(layout.promptEnhancerWidget?.endColumn, (layout.userJumpWidget?.startColumn ?? 0) - 1);
 	});
 
@@ -485,7 +505,7 @@ describe("StatusLineRenderer", () => {
 		const rendered = renderer.render(1, layout, 40);
 		const target = renderer.compactToolsTarget(layout, 1);
 
-		assert.ok(widgetLayout.text.endsWith(widgetsText(promptWidgetText, APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools, APP_ICONS.microphone, "RU")));
+		assert.ok(widgetLayout.text.endsWith(widgetsText(APP_ICONS.clipboardPaste, promptWidgetText, APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools, APP_ICONS.microphone, "RU")));
 		assert.deepEqual(target, {
 			row: 1,
 			startColumn: layout.compactToolsWidget?.startColumn,
@@ -503,7 +523,7 @@ describe("StatusLineRenderer", () => {
 		const rendered = renderer.render(1, layout, 40);
 		const target = renderer.userJumpTarget(layout, 1);
 
-		assert.ok(widgetLayout.text.endsWith(widgetsText(APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools)));
+		assert.ok(widgetLayout.text.endsWith(widgetsText(APP_ICONS.clipboardPaste, APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools)));
 		assert.deepEqual(target, {
 			row: 1,
 			startColumn: layout.userJumpWidget?.startColumn,
@@ -523,19 +543,19 @@ describe("StatusLineRenderer", () => {
 		const target = renderer.draftQueueTarget(statusLayout, 1);
 
 		assert.equal(layout.inputBorderWidgetStartColumn, 40 + 1 - stringDisplayWidth(layout.text));
-		assert.ok(layout.text.endsWith(widgetsText(buttonText, APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools)));
+		assert.ok(layout.text.endsWith(widgetsText(buttonText, APP_ICONS.clipboardPaste, APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools)));
 		assert.deepEqual(target, {
 			row: 1,
 			startColumn: statusLayout.draftQueueWidget?.startColumn,
 			endColumn: statusLayout.draftQueueWidget?.endColumn,
 		});
-		assert.equal(layout.draftQueueWidget?.endColumn, (layout.userJumpWidget?.startColumn ?? 0) - 1);
+		assert.equal(layout.draftQueueWidget?.endColumn, (layout.internalClipboardWidget?.startColumn ?? 0) - 1);
 		assert.ok(rendered.includes(colorize(iconButtonText(buttonText), {
 			foreground: THEMES.dark.colors.info,
 		})));
 	});
 
-	it("places the prompt enhancer immediately after the draft queue button", () => {
+	it("places the internal clipboard between the draft queue and prompt enhancer", () => {
 		const renderer = statusLineRenderer({
 			widgetText: "",
 			voiceActive: false,
@@ -545,8 +565,9 @@ describe("StatusLineRenderer", () => {
 		});
 		const layout = renderer.inputBorderWidgetsLayout(40)!;
 
-		assert.ok(layout.text.endsWith(widgetsText(APP_ICONS.timerSand, APP_ICONS.autoFix, APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools)));
-		assert.equal(layout.draftQueueWidget?.endColumn, (layout.promptEnhancerWidget?.startColumn ?? 0) - 1);
+		assert.ok(layout.text.endsWith(widgetsText(APP_ICONS.timerSand, APP_ICONS.clipboardPaste, APP_ICONS.autoFix, APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools)));
+		assert.equal(layout.draftQueueWidget?.endColumn, (layout.internalClipboardWidget?.startColumn ?? 0) - 1);
+		assert.equal(layout.internalClipboardWidget?.endColumn, (layout.promptEnhancerWidget?.startColumn ?? 0) - 1);
 		assert.equal(layout.promptEnhancerWidget?.endColumn, (layout.userJumpWidget?.startColumn ?? 0) - 1);
 	});
 
@@ -561,7 +582,7 @@ describe("StatusLineRenderer", () => {
 		const layout = renderer.inputBorderWidgetsLayout(40)!;
 
 		assert.equal(layout.draftQueueWidget, undefined);
-		assert.ok(layout.text.endsWith(widgetsText(APP_ICONS.autoFix, APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools)));
+		assert.ok(layout.text.endsWith(widgetsText(APP_ICONS.clipboardPaste, APP_ICONS.autoFix, APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools)));
 		assert.equal(layout.promptEnhancerWidget?.endColumn, (layout.userJumpWidget?.startColumn ?? 0) - 1);
 	});
 
@@ -572,7 +593,7 @@ describe("StatusLineRenderer", () => {
 		assert.equal(layout.draftQueueWidget, undefined);
 		assert.equal(renderer.draftQueueTarget(layout, 1), undefined);
 		assert.equal(layout.inputBorderWidgetStartColumn, 40 + 1 - stringDisplayWidth(layout.text));
-		assert.ok(layout.text.endsWith(widgetsText(APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools)));
+		assert.ok(layout.text.endsWith(widgetsText(APP_ICONS.clipboardPaste, APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools)));
 	});
 
 	it("renders the all-thinking-expanded target before super-compact tools", () => {
@@ -582,7 +603,7 @@ describe("StatusLineRenderer", () => {
 		const rendered = renderer.render(1, layout, 40);
 		const target = renderer.thinkingExpandTarget(layout, 1);
 
-		assert.ok(widgetLayout.text.endsWith(widgetsText(APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools)));
+		assert.ok(widgetLayout.text.endsWith(widgetsText(APP_ICONS.clipboardPaste, APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools)));
 		assert.deepEqual(target, {
 			row: 1,
 			startColumn: layout.thinkingExpandWidget?.startColumn,
@@ -600,7 +621,7 @@ describe("StatusLineRenderer", () => {
 		const rendered = renderer.render(1, layout, 40);
 		const target = renderer.terminalBellSoundTarget(layout, 1);
 
-		assert.ok(widgetLayout.text.endsWith(widgetsText(APP_ICONS.user, APP_ICONS.volumeOff, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools)));
+		assert.ok(widgetLayout.text.endsWith(widgetsText(APP_ICONS.clipboardPaste, APP_ICONS.user, APP_ICONS.volumeOff, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools)));
 		assert.equal(layout.terminalBellSoundWidget?.endColumn, (layout.thinkingExpandWidget?.startColumn ?? 0) - 1);
 		assert.deepEqual(target, {
 			row: 1,
@@ -617,12 +638,12 @@ describe("StatusLineRenderer", () => {
 		const middleRenderer = statusLineRenderer({ widgetText: "", voiceActive: false, quickScroll: { up: true, down: true } });
 		const bottomRenderer = statusLineRenderer({ widgetText: "", voiceActive: false, quickScroll: { up: true, down: false } });
 
-		assert.ok(topRenderer.inputBorderWidgetsLayout(40)!.text.endsWith(widgetsText(APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools, APP_ICONS.down)));
-		assert.ok(middleRenderer.inputBorderWidgetsLayout(40)!.text.endsWith(widgetsText(APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools, APP_ICONS.up, APP_ICONS.down)));
-		assert.ok(bottomRenderer.inputBorderWidgetsLayout(40)!.text.endsWith(widgetsText(APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools, APP_ICONS.up)));
+		assert.ok(topRenderer.inputBorderWidgetsLayout(40)!.text.endsWith(widgetsText(APP_ICONS.clipboardPaste, APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools, APP_ICONS.down)));
+		assert.ok(middleRenderer.inputBorderWidgetsLayout(40)!.text.endsWith(widgetsText(APP_ICONS.clipboardPaste, APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools, APP_ICONS.up, APP_ICONS.down)));
+		assert.ok(bottomRenderer.inputBorderWidgetsLayout(40)!.text.endsWith(widgetsText(APP_ICONS.clipboardPaste, APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools, APP_ICONS.up)));
 
 		const voiceRenderer = statusLineRenderer({ widgetText: `${APP_ICONS.microphone} RU`, voiceActive: false, quickScroll: { up: true, down: true } });
-		assert.ok(voiceRenderer.inputBorderWidgetsLayout(40)!.text.endsWith(widgetsText(APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools, APP_ICONS.up, APP_ICONS.down, APP_ICONS.microphone, "RU")));
+		assert.ok(voiceRenderer.inputBorderWidgetsLayout(40)!.text.endsWith(widgetsText(APP_ICONS.clipboardPaste, APP_ICONS.user, APP_ICONS.thinkingExpanded, APP_ICONS.compactTools, APP_ICONS.up, APP_ICONS.down, APP_ICONS.microphone, "RU")));
 	});
 });
 
@@ -693,7 +714,7 @@ function overlayText(text: string, startColumn: number, overlay: string): string
 	return `${padded.slice(0, startIndex)}${overlay}${padded.slice(endIndex)}`;
 }
 
-function statusLineRenderer(options: { widgetText: string; voiceActive: boolean; promptWidgetText?: string; promptActive?: boolean; promptEnabled?: boolean; terminalBellWidgetText?: string; terminalBellSoundEnabled?: boolean; sessionActivity?: "idle" | "running" | "thinking"; statusDotBright?: boolean; workspaceLabel?: string; workspaceGitBranchLabel?: string; modelUsageLabel?: string; session?: AgentSession; currentStatus?: string; thinkingLabel?: string; modelLabel?: string; modelColors?: ModelColorsConfig; userMessageJumpMenuActive?: boolean; queueableInputActive?: boolean; allThinkingExpandedActive?: boolean; superCompactToolsActive?: boolean; quickScroll?: { up: boolean; down: boolean } }): StatusLineRenderer {
+function statusLineRenderer(options: { widgetText: string; voiceActive: boolean; promptWidgetText?: string; promptActive?: boolean; promptEnabled?: boolean; terminalBellWidgetText?: string; terminalBellSoundEnabled?: boolean; sessionActivity?: "idle" | "running" | "thinking"; statusDotBright?: boolean; workspaceLabel?: string; workspaceGitBranchLabel?: string; modelUsageLabel?: string; session?: AgentSession; currentStatus?: string; thinkingLabel?: string; modelLabel?: string; modelColors?: ModelColorsConfig; userMessageJumpMenuActive?: boolean; queueableInputActive?: boolean; internalClipboardActive?: boolean; allThinkingExpandedActive?: boolean; superCompactToolsActive?: boolean; quickScroll?: { up: boolean; down: boolean } }): StatusLineRenderer {
 	return new StatusLineRenderer({
 		theme: THEMES.dark,
 		screenStyler: new ScreenStyler({ theme: THEMES.dark, mouseSelection: undefined }),
@@ -719,6 +740,7 @@ function statusLineRenderer(options: { widgetText: string; voiceActive: boolean;
 		voiceStatusWidgetActive: () => options.voiceActive,
 		conversationQuickScrollDirections: () => options.quickScroll ?? { up: false, down: false },
 		queueableInputActive: () => Boolean(options.queueableInputActive),
+		internalClipboardActive: () => Boolean(options.internalClipboardActive),
 		userMessageJumpMenuActive: () => Boolean(options.userMessageJumpMenuActive),
 		allThinkingExpandedActive: () => Boolean(options.allThinkingExpandedActive),
 		superCompactToolsActive: () => Boolean(options.superCompactToolsActive),

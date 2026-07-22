@@ -272,6 +272,7 @@ export type StatusLineLayout = {
 	quickScrollDownWidget?: StatusQuickScrollWidgetLayout;
 	userJumpWidget?: StatusUserJumpWidgetLayout;
 	draftQueueWidget?: StatusDraftQueueWidgetLayout;
+	internalClipboardWidget?: StatusInternalClipboardWidgetLayout;
 	thinkingExpandWidget?: StatusThinkingExpandWidgetLayout;
 	compactToolsWidget?: StatusCompactToolsWidgetLayout;
 	terminalBellSoundWidget?: StatusTerminalBellSoundWidgetLayout;
@@ -290,6 +291,11 @@ export type StatusUserJumpWidgetLayout = {
 };
 
 export type StatusDraftQueueWidgetLayout = {
+	startColumn: number;
+	endColumn: number;
+};
+
+export type StatusInternalClipboardWidgetLayout = {
 	startColumn: number;
 	endColumn: number;
 };
@@ -614,6 +620,12 @@ export type StatusUserJumpTarget = {
 };
 
 export type StatusDraftQueueTarget = {
+	row: number;
+	startColumn: number;
+	endColumn: number;
+};
+
+export type StatusInternalClipboardTarget = {
 	row: number;
 	startColumn: number;
 	endColumn: number;

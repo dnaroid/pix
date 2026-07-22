@@ -164,6 +164,7 @@ export class PiUiExtendApp {
 	private subagentsPanelExpanded = true;
 	private allThinkingExpanded = false;
 	private superCompactTools = false;
+	private internalClipboardText: string | undefined;
 	private voicePartialText: string | undefined;
 	private resumeSessions: SessionInfo[] = [];
 	private resumeLoading = false;
@@ -344,6 +345,7 @@ export class PiUiExtendApp {
 			voiceStatusWidgetActive: () => this.voiceController.statusWidgetActive(),
 			conversationQuickScrollDirections: () => this.conversationQuickScrollDirections(),
 			queueableInputActive: () => this.inputEditor.promptText.trimEnd().length > 0 || this.inputEditor.images.length > 0,
+			internalClipboardActive: () => Boolean(this.internalClipboardText),
 			userMessageJumpMenuActive: () => this.popupMenus.directMenu === "user-message-jump",
 			allThinkingExpandedActive: () => this.allThinkingExpanded,
 			superCompactToolsActive: () => this.superCompactTools,
@@ -659,6 +661,10 @@ export class PiUiExtendApp {
 						this.render();
 					});
 				},
+				pasteInternalClipboard: () => this.pasteInternalClipboard(),
+				setInternalClipboardText: (text) => {
+					this.internalClipboardText = text;
+				},
 				scrollConversationQuick: (direction) => this.scrollConversationQuick(direction),
 				toggleAllThinkingExpanded: () => {
 					this.allThinkingExpanded = !this.allThinkingExpanded;
@@ -854,6 +860,7 @@ export class PiUiExtendApp {
 				this.mouseController.statusContextTarget = undefined;
 				this.mouseController.statusModelUsageTarget = undefined;
 				this.mouseController.statusDraftQueueTarget = undefined;
+				this.mouseController.statusInternalClipboardTarget = undefined;
 				this.mouseController.statusUserJumpTarget = undefined;
 				this.mouseController.statusThinkingExpandTarget = undefined;
 				this.mouseController.statusCompactToolsTarget = undefined;
@@ -1037,6 +1044,18 @@ export class PiUiExtendApp {
 		this.requestHistory.resetNavigation();
 		this.popupMenus.resetInputMenuDismissals();
 		this.inputEditor.insert(`${prefix}${transcript}${suffix}`);
+		this.render();
+	}
+
+	private pasteInternalClipboard(): void {
+		if (!this.internalClipboardText) {
+			this.showToast("Nothing has been copied inside Pix yet.", "info");
+			return;
+		}
+
+		this.requestHistory.resetNavigation();
+		this.popupMenus.resetInputMenuDismissals();
+		this.inputEditor.attachPastedText(this.internalClipboardText);
 		this.render();
 	}
 

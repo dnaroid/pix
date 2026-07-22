@@ -310,6 +310,7 @@ export class AppRenderController {
 		this.deps.mouseController.statusContextTarget = this.deps.statusLineRenderer.contextTarget(statusLayout.text, statusRow, statusLayout);
 		this.deps.mouseController.statusModelUsageTarget = this.deps.statusLineRenderer.modelUsageTarget(statusLayout.text, statusRow, statusLayout);
 		this.deps.mouseController.statusDraftQueueTarget = this.deps.statusLineRenderer.draftQueueTarget?.(statusLayout, statusRow);
+		this.deps.mouseController.statusInternalClipboardTarget = this.deps.statusLineRenderer.internalClipboardTarget?.(statusLayout, statusRow);
 		this.deps.mouseController.statusUserJumpTarget = this.deps.statusLineRenderer.userJumpTarget?.(statusLayout, statusRow);
 		this.deps.mouseController.statusThinkingExpandTarget = this.deps.statusLineRenderer.thinkingExpandTarget?.(statusLayout, statusRow);
 		this.deps.mouseController.statusCompactToolsTarget = this.deps.statusLineRenderer.compactToolsTarget?.(statusLayout, statusRow);

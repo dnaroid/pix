@@ -7,6 +7,7 @@ import type {
 	StatusCompactToolsTarget,
 	StatusContextTarget,
 	StatusDraftQueueTarget,
+	StatusInternalClipboardTarget,
 	StatusLineLayout,
 	StatusModelTarget,
 	StatusModelUsageTarget,
@@ -56,6 +57,7 @@ export type StatusLineRendererHost = {
 	voiceStatusWidgetActive(): boolean;
 	conversationQuickScrollDirections?(): { up: boolean; down: boolean };
 	queueableInputActive?(): boolean;
+	internalClipboardActive?(): boolean;
 	userMessageJumpMenuActive?(): boolean;
 	allThinkingExpandedActive?(): boolean;
 	superCompactToolsActive?(): boolean;
@@ -120,6 +122,9 @@ export class StatusLineRenderer {
 		const draftQueueButton = this.draftQueueWidgetText();
 		appendWidget(draftQueueButton ? this.iconButtonText(draftQueueButton) : "", (column, text) => {
 			layout.draftQueueWidget = this.widgetLayout(column, text);
+		});
+		appendWidget(this.iconButtonText(APP_ICONS.clipboardPaste), (column, text) => {
+			layout.internalClipboardWidget = this.widgetLayout(column, text);
 		});
 		const promptEnhancerWidgetText = this.host.promptEnhancerStatusWidgetText();
 		appendWidget(promptEnhancerWidgetText ? this.iconButtonText(promptEnhancerWidgetText) : "", (column, text) => {
@@ -202,6 +207,7 @@ export class StatusLineRenderer {
 		};
 
 		pushWidgetSegment(layout.draftQueueWidget, colors.info);
+		pushWidgetSegment(layout.internalClipboardWidget, this.host.internalClipboardActive?.() ? colors.info : colors.muted);
 		pushWidgetSegment(layout.promptEnhancerWidget, this.host.promptEnhancerStatusWidgetActive()
 			? colors.warning
 			: this.host.promptEnhancerStatusWidgetEnabled()
@@ -316,6 +322,12 @@ export class StatusLineRenderer {
 		return { row, startColumn: widget.startColumn, endColumn: widget.endColumn };
 	}
 
+	internalClipboardTarget(layout: StatusLineLayout, row: number): StatusInternalClipboardTarget | undefined {
+		const widget = layout.internalClipboardWidget;
+		if (!widget) return undefined;
+		return { row, startColumn: widget.startColumn, endColumn: widget.endColumn };
+	}
+
 	thinkingExpandTarget(layout: StatusLineLayout, row: number): StatusThinkingExpandTarget | undefined {
 		const widget = layout.thinkingExpandWidget;
 		if (!widget) return undefined;
@@ -410,6 +422,7 @@ export class StatusLineRenderer {
 		const colors = this.host.theme.colors;
 		const widgets = [
 			{ widget: layout.draftQueueWidget, foreground: colors.info },
+			{ widget: layout.internalClipboardWidget, foreground: this.host.internalClipboardActive?.() ? colors.info : colors.muted },
 			{ widget: layout.promptEnhancerWidget, foreground: this.host.promptEnhancerStatusWidgetActive()
 				? colors.warning
 				: this.host.promptEnhancerStatusWidgetEnabled()

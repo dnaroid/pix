@@ -23,6 +23,7 @@ import type {
 	StatusContextTarget,
 	StatusCompactToolsTarget,
 	StatusDraftQueueTarget,
+	StatusInternalClipboardTarget,
 	StatusModelTarget,
 	StatusModelUsageTarget,
 	StatusPromptEnhancerTarget,
@@ -98,6 +99,8 @@ export type AppMouseControllerHost = {
 	refreshModelUsageStatus(): void | Promise<void>;
 	refreshUserMessageJumpMenuItems?(): Promise<void>;
 	queueInputFromStatus?(): void | Promise<void>;
+	pasteInternalClipboard?(): void;
+	setInternalClipboardText?(text: string): void;
 	scrollConversationQuick(direction: "up" | "down"): void | Promise<void>;
 	toggleAllThinkingExpanded?(): void;
 	toggleSuperCompactTools?(): void;
@@ -119,6 +122,7 @@ export class AppMouseController {
 	statusModelUsageTarget: StatusModelUsageTarget | undefined;
 	statusUserJumpTarget: StatusUserJumpTarget | undefined;
 	statusDraftQueueTarget: StatusDraftQueueTarget | undefined;
+	statusInternalClipboardTarget: StatusInternalClipboardTarget | undefined;
 	statusThinkingExpandTarget: StatusThinkingExpandTarget | undefined;
 	statusCompactToolsTarget: StatusCompactToolsTarget | undefined;
 	statusQuickScrollUpTarget: StatusQuickScrollTarget | undefined;
@@ -422,6 +426,7 @@ export class AppMouseController {
 			this.statusContextTarget,
 			this.statusModelUsageTarget,
 			this.statusDraftQueueTarget,
+			this.statusInternalClipboardTarget,
 			this.statusUserJumpTarget,
 			this.statusThinkingExpandTarget,
 			this.statusCompactToolsTarget,
@@ -617,6 +622,7 @@ export class AppMouseController {
 
 	private handleInputBorderStatusClick(event: MouseEvent): boolean {
 		return this.handleStatusDraftQueueClick(event)
+			|| this.handleStatusInternalClipboardClick(event)
 			|| this.handleStatusUserJumpClick(event)
 			|| this.handleStatusThinkingExpandClick(event)
 			|| this.handleStatusCompactToolsClick(event)
@@ -645,6 +651,13 @@ export class AppMouseController {
 		if (!this.statusTargetContains(this.statusDraftQueueTarget, event)) return false;
 
 		void this.host.queueInputFromStatus?.();
+		return true;
+	}
+
+	private handleStatusInternalClipboardClick(event: MouseEvent): boolean {
+		if (!this.statusTargetContains(this.statusInternalClipboardTarget, event)) return false;
+
+		this.host.pasteInternalClipboard?.();
 		return true;
 	}
 
@@ -819,8 +832,12 @@ export class AppMouseController {
 		}
 
 		const selectedText = this.getSelectedText(selection);
+		if (selectedText.trim().length === 0) {
+			this.host.render();
+			return true;
+		}
+		this.host.setInternalClipboardText?.(selectedText);
 		this.host.render();
-		if (selectedText.trim().length === 0) return true;
 
 		try {
 			this.copyTextToClipboard(selectedText);

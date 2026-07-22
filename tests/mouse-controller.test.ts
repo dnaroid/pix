@@ -175,6 +175,22 @@ describe("AppMouseController", () => {
 		assert.equal(queueCount, 1);
 	});
 
+	it("pastes the Pix-internal clipboard when clicking its status button", () => {
+		let pasteCount = 0;
+		const controller = new AppMouseController(
+			fakeHost({ pasteInternalClipboard: () => { pasteCount += 1; } }),
+			fakePopupMenus(),
+			fakePopupActions(),
+			fakeScrollController(),
+			fakeCommandController(),
+		);
+		controller.statusInternalClipboardTarget = { row: 5, startColumn: 1, endColumn: 2 };
+
+		controller.handleMouse({ button: 0, x: 1, y: 5, released: false });
+
+		assert.equal(pasteCount, 1);
+	});
+
 	it("handles input-border status buttons on press before screen selection", () => {
 		let queueCount = 0;
 		const controller = new AppMouseController(
@@ -545,6 +561,26 @@ describe("AppMouseController", () => {
 		controller.handleMouse({ button: 0, x: 7, y: 2, released: true });
 
 		assert.equal(copiedText, "line 0\nline 1");
+	});
+
+	it("retains selected text in Pix when the system clipboard copy fails", () => {
+		let internalText: string | undefined;
+		const controller = new AppMouseController(
+			fakeHost({
+				copyTextToClipboard: () => { throw new Error("clipboard unavailable"); },
+				setInternalClipboardText: (text) => { internalText = text; },
+			}),
+			fakePopupMenus(),
+			fakePopupActions(),
+			fakeScrollController(),
+			fakeCommandController(),
+		);
+
+		controller.handleMouse({ button: 0, x: 1, y: 1, released: false });
+		controller.handleMouse({ button: 32, x: 7, y: 2, released: false });
+		controller.handleMouse({ button: 0, x: 7, y: 2, released: true });
+
+		assert.equal(internalText, "line 0\nline 1");
 	});
 
 	it("copies mouse selections that release in the last column", () => {
