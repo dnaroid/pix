@@ -10,6 +10,14 @@ type TestApp = {
 	toggleSuperCompactTools(): void;
 };
 
+type RenderLifecycleTestApp = {
+	running: boolean;
+	scheduledRenderTimer: ReturnType<typeof setTimeout> | undefined;
+	render(): void;
+	scheduleRender(): void;
+	showToast(message: string): void;
+};
+
 function createApp(): TestApp {
 	return new PiUiExtendApp({ cwd: process.cwd(), themeName: "dark", noSession: true }) as unknown as TestApp;
 }
@@ -46,5 +54,55 @@ describe("PiUiExtendApp super-compact tool toggle", () => {
 		assert.equal(app.superCompactTools, false);
 		assert.equal(mutationTool.expanded, true);
 		assert.equal(regularTool.expanded, false);
+	});
+});
+
+describe("PiUiExtendApp render lifecycle", () => {
+	it("does not render after shutdown", () => {
+		let renders = 0;
+		const app = Object.assign(Object.create(PiUiExtendApp.prototype) as object, {
+			running: false,
+			scheduledRenderTimer: undefined,
+			autocompleteController: { observeInput: () => { throw new Error("should not observe input"); } },
+			inputEditor: { contentVersion: 0 },
+			lastInputEditorContentVersion: 0,
+			scrollController: { scrollToBottom: () => {} },
+			renderController: { render: () => { renders += 1; } },
+		}) as unknown as RenderLifecycleTestApp;
+
+		app.render();
+
+		assert.equal(renders, 0);
+	});
+
+	it("does not create late toasts after shutdown", () => {
+		let toasts = 0;
+		const app = Object.assign(Object.create(PiUiExtendApp.prototype) as object, {
+			running: false,
+			toastController: { showToast: () => { toasts += 1; } },
+		}) as unknown as RenderLifecycleTestApp;
+
+		app.showToast("late update");
+
+		assert.equal(toasts, 0);
+	});
+
+	it("rechecks shutdown state in an already scheduled render", async () => {
+		let renders = 0;
+		const app = Object.assign(Object.create(PiUiExtendApp.prototype) as object, {
+			running: true,
+			scheduledRenderTimer: undefined,
+			inputEditor: { contentVersion: 0 },
+			lastInputEditorContentVersion: 0,
+			scrollController: { scrollToBottom: () => {} },
+			renderController: { render: () => { renders += 1; } },
+		}) as unknown as RenderLifecycleTestApp;
+
+		app.scheduleRender();
+		app.running = false;
+		await new Promise<void>((resolve) => { setTimeout(resolve, 30); });
+
+		assert.equal(renders, 0);
+		assert.equal(app.scheduledRenderTimer, undefined);
 	});
 });

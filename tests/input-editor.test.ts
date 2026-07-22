@@ -167,6 +167,20 @@ describe("InputEditor text editing", () => {
 		editor.clear();
 		assert.equal(editor.undo(), false);
 	});
+
+	it("restores tab drafts without leaking undo or bracketed-paste state", () => {
+		const editor = new InputEditor();
+		editor.insert("draft from tab one");
+		editor.beginBracketedPaste();
+
+		editor.restoreDraftState({ text: "draft from tab two", cursor: 7 });
+
+		assert.equal(editor.text, "draft from tab two");
+		assert.equal(editor.cursor, 7);
+		assert.equal(editor.canUndo, false);
+		assert.equal(editor.canRedo, false);
+		assert.equal(editor.isInBracketedPaste, false);
+	});
 });
 
 describe("InputEditor attachments", () => {

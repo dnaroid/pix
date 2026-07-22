@@ -24,11 +24,13 @@ export class AppRequestHistory {
 	private entries: string[] = [];
 	private cursor: number | undefined;
 	private draft = "";
+	private saveChain = Promise.resolve();
+	private saveSequence = 0;
 
 	constructor(private readonly host: RequestHistoryHost) {}
 
 	async load(): Promise<void> {
-		if (this.host.noSession) return;
+		if (this.host.noSession) return Promise.resolve();
 
 		try {
 			const raw = await readFile(this.filePath(), "utf8");
@@ -109,20 +111,25 @@ export class AppRequestHistory {
 		return true;
 	}
 
-	private async save(): Promise<void> {
-		if (this.host.noSession) return;
+	private save(): Promise<void> {
+		if (this.host.noSession) return Promise.resolve();
+		this.entries = this.limited(this.entries);
+		const payload = this.payload(this.entries);
+		const sequence = ++this.saveSequence;
+		const writeSnapshot = async (): Promise<void> => {
+			try {
+				const filePath = this.filePath();
+				await mkdir(dirname(filePath), { recursive: true });
+				const tempPath = `${filePath}.${process.pid}.${sequence}.tmp`;
+				await writeFile(tempPath, payload, "utf8");
+				await rename(tempPath, filePath);
+			} catch {
+				// Request history is a convenience feature; never interrupt the UI on disk errors.
+			}
+		};
 
-		try {
-			this.entries = this.limited(this.entries);
-			const filePath = this.filePath();
-			const payload = this.payload(this.entries);
-			await mkdir(dirname(filePath), { recursive: true });
-			const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-			await writeFile(tempPath, payload, "utf8");
-			await rename(tempPath, filePath);
-		} catch {
-			// Request history is a convenience feature; never interrupt the UI on disk errors.
-		}
+		this.saveChain = this.saveChain.then(writeSnapshot, writeSnapshot);
+		return this.saveChain;
 	}
 
 	private replaceInput(value: string): void {

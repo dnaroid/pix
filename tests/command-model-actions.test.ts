@@ -90,11 +90,42 @@ describe("ModelCommandActions.runModelCommand", () => {
 			"session-status",
 		]);
 	});
+
+	it("does not apply a late model result to a different active runtime", async () => {
+		const events: string[] = [];
+		let resolveModel!: () => void;
+		const session = {
+			isStreaming: false,
+			async setModel(model: SessionModel) {
+				events.push(`setModel:${model.provider}/${model.id}`);
+				await new Promise<void>((resolve) => { resolveModel = resolve; });
+			},
+			async reload() {
+				events.push("reload");
+			},
+		};
+		const host = createHost(session, events);
+		let activeRuntime = host.runtime();
+		host.runtime = () => activeRuntime;
+
+		const changing = new ModelCommandActions(host).runModelCommand(model("openai", "gpt-5"));
+		activeRuntime = { session: {} } as ReturnType<CommandControllerHost["runtime"]>;
+		resolveModel();
+		await changing;
+
+		assert.deepEqual(events, [
+			"status:selecting model openai/gpt-5",
+			"render",
+			"setModel:openai/gpt-5",
+		]);
+	});
 });
 
 function createHost(session: { isStreaming: boolean; setModel(model: SessionModel): Promise<void>; reload(): Promise<void> }, events: string[]): CommandControllerHost {
+	const runtime = { session };
 	return ({
-		runtime: () => ({ session }),
+		runtime: () => runtime,
+		isRunning: () => true,
 		modelRef: (item: SessionModel) => `${item.provider}/${item.id}`,
 		setStatus: (status: string) => events.push(`status:${status}`),
 		render: () => events.push("render"),

@@ -8,6 +8,7 @@ import type { AppPopupMenuController } from "../src/app/popup/popup-menu-control
 import type { AppQueuedMessageController } from "../src/app/session/queued-message-controller.js";
 import type { AppRequestHistory } from "../src/app/session/request-history.js";
 import type { SubmittedUserMessage } from "../src/app/types.js";
+import type { AgentSession, AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 
 describe("AppInputActionController", () => {
 	it("clears the persisted draft when submitting input", async () => {
@@ -17,16 +18,22 @@ describe("AppInputActionController", () => {
 		let clearDraftCalls = 0;
 		let stopVoiceInputCalls = 0;
 		let submitted: SubmittedUserMessage | undefined;
+		const firstSession = {} as AgentSession;
+		const secondSession = {} as AgentSession;
+		let activeRuntime = { session: firstSession } as AgentSessionRuntime;
+		let releaseDraftSave: (() => void) | undefined;
+		const draftSaved = new Promise<void>((resolve) => { releaseDraftSave = resolve; });
 
 		const controller = new AppInputActionController(
 			{
-				runtime: () => undefined,
+				runtime: () => activeRuntime,
 				isRunning: () => true,
 				isSessionSwitching: () => false,
 				inputEditor: () => inputEditor,
 				requestHistory: () => ({ add: (value: string) => history.push(value) }) as unknown as AppRequestHistory,
 				clearPersistedInputDraft: async () => {
 					clearDraftCalls += 1;
+					await draftSaved;
 				},
 				setStatus: () => {},
 				setSessionStatus: () => {},
@@ -54,15 +61,21 @@ describe("AppInputActionController", () => {
 					displayText,
 					images,
 				}),
-				submitUserMessage: async (message: SubmittedUserMessage) => {
+				submitUserMessage: async (message: SubmittedUserMessage, session?: AgentSession) => {
 					submitted = message;
+					assert.equal(session, firstSession);
 					assert.equal(inputEditor.text, "");
 					assert.equal(clearDraftCalls, 1);
 				},
 			} as unknown as AppQueuedMessageController,
 		);
 
-		await (controller as unknown as { submitInput(): Promise<void> }).submitInput();
+		const submission = (controller as unknown as { submitInput(): Promise<void> }).submitInput();
+		await Promise.resolve();
+		await Promise.resolve();
+		activeRuntime = { session: secondSession } as AgentSessionRuntime;
+		releaseDraftSave?.();
+		await submission;
 
 		assert.deepEqual(history, ["hello draft"]);
 		assert.equal(submitted?.promptText, "hello draft");

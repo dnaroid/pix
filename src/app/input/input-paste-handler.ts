@@ -8,6 +8,7 @@ import { normalizePastedTextForDuplicateKey } from "../rendering/render-text.js"
 export type InputPasteHost = {
 	readonly inputEditor: InputEditor;
 	readonly cwd: string;
+	inputScopeKey?(): string | undefined;
 	resetRequestHistoryNavigation(): void;
 	render(): void;
 };
@@ -18,6 +19,7 @@ export class InputPasteHandler {
 	private pasteBufferParts: string[] = [];
 	private readonly recentPasteFingerprints = new Map<string, number>();
 	private suppressImagePathPasteUntil = 0;
+	private bracketedPasteScopeKey: string | undefined;
 
 	constructor(private readonly host: InputPasteHost) {}
 
@@ -35,6 +37,7 @@ export class InputPasteHandler {
 	beginBracketedPaste(): void {
 		this.host.inputEditor.beginBracketedPaste();
 		this.pasteBufferParts = [];
+		this.bracketedPasteScopeKey = this.host.inputScopeKey?.();
 	}
 
 	appendBracketedPasteText(text: string): void {
@@ -45,12 +48,16 @@ export class InputPasteHandler {
 		this.host.inputEditor.endBracketedPaste();
 		const text = this.pasteBufferParts.join("");
 		this.pasteBufferParts = [];
+		const scopeKey = this.bracketedPasteScopeKey;
+		this.bracketedPasteScopeKey = undefined;
+		if (!this.scopeIsActive(scopeKey)) return;
 		this.handlePasteEnd(text);
 	}
 
 	async handleClipboardImagePaste(): Promise<void> {
+		const scopeKey = this.host.inputScopeKey?.();
 		const image = await readClipboardImage();
-		if (!image) return;
+		if (!image || !this.scopeIsActive(scopeKey)) return;
 		if (this.isDuplicatePaste(`image:${image.mimeType}`, image.data)) {
 			this.host.render();
 			return;
@@ -112,27 +119,29 @@ export class InputPasteHandler {
 			this.host.render();
 			return true;
 		}
-		void this.handleFilePaste(filePath);
+		void this.handleFilePaste(filePath, this.host.inputScopeKey?.());
 		return true;
 	}
 
 	private schedulePastedText(text: string): void {
-		const timer = setTimeout(() => {
-			if (this.isDuplicatePaste("text", text)) {
-				this.host.render();
-				return;
-			}
-			this.host.resetRequestHistoryNavigation();
-			this.host.inputEditor.attachPastedText(text);
+		if (this.isDuplicatePaste("text", text)) {
 			this.host.render();
-		}, 0);
-		timer.unref?.();
+			return;
+		}
+		this.host.resetRequestHistoryNavigation();
+		this.host.inputEditor.attachPastedText(text);
+		this.host.render();
 	}
 
-	private async handleFilePaste(filePath: string): Promise<void> {
+	private async handleFilePaste(filePath: string, scopeKey = this.host.inputScopeKey?.()): Promise<void> {
 		const inputPath = await this.filePathForInput(filePath);
+		if (!this.scopeIsActive(scopeKey)) return;
 		this.insertPastedPathText(inputPath);
 		this.host.render();
+	}
+
+	private scopeIsActive(scopeKey: string | undefined): boolean {
+		return !this.host.inputScopeKey || this.host.inputScopeKey() === scopeKey;
 	}
 
 	private async filePathForInput(filePath: string): Promise<string> {

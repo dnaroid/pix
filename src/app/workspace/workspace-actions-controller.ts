@@ -63,9 +63,12 @@ export class AppWorkspaceActionsController {
 	}
 
 	scheduleUserSessionEntryMetadataSync(): void {
+		const runtime = this.host.runtime();
+		const session = runtime?.session;
 		const timer = setTimeout(() => {
+			if (!runtime || !session || !this.isSessionActive(runtime, session)) return;
 			this.syncUserSessionEntryMetadata();
-			if (this.host.isRunning()) this.host.render();
+			this.host.render();
 		}, 0);
 		timer.unref?.();
 	}
@@ -118,12 +121,14 @@ export class AppWorkspaceActionsController {
 	}
 
 	async copyUserMessage(entryId: string): Promise<void> {
+		const runtime = this.host.runtime();
 		const entry = this.host.findUserEntry(entryId);
 		if (!entry) throw new Error("User message is no longer available");
 
 		await copyTextToClipboard(entry.text);
+		if (!runtime || !this.isRuntimeActive(runtime)) return;
 		this.host.showToast("Message copied", "success");
-		this.host.setSessionStatus(this.host.runtime()?.session);
+		this.host.setSessionStatus(runtime.session);
 	}
 
 	async forkFromUserMessage(entryId: string): Promise<void> {
@@ -138,7 +143,9 @@ export class AppWorkspaceActionsController {
 		this.host.setStatus("forking session");
 		this.host.render();
 		await this.host.awaitCurrentSessionExtensions(runtime);
+		if (!this.isRuntimeActive(runtime)) return;
 		const result = await runtime.fork(sessionEntryId);
+		if (!this.isRuntimeActive(runtime)) return;
 		if (result.cancelled) {
 			this.host.addEntry({ id: createId("system"), kind: "system", text: "Fork cancelled." });
 			this.host.setSessionStatus(runtime.session);
@@ -178,7 +185,9 @@ export class AppWorkspaceActionsController {
 
 		this.host.setStatus("truncating session");
 		this.host.render();
-		const result = await runtime.session.navigateTree(sessionEntryId);
+		const session = runtime.session;
+		const result = await session.navigateTree(sessionEntryId);
+		if (!this.isSessionActive(runtime, session)) return;
 		if (result.aborted) {
 			this.host.showToast("Undo cancelled", "info");
 			this.host.setSessionStatus(runtime.session);
@@ -190,16 +199,13 @@ export class AppWorkspaceActionsController {
 			return;
 		}
 
-		this.host.resetSessionView();
-		this.host.loadSessionHistory();
-		this.host.setInput(result.editorText ?? entry.text);
-
 		let revertSummary = "No recorded file mutations were found for the removed branch.";
 		let revertToastKind: "success" | "warning" = "success";
 		if (mutationPlan.mutations.length > 0) {
 			this.host.setStatus("reverting recorded commands");
 			this.host.render();
 			const reverted = await revertWorkspaceMutations(runtime.cwd, mutationPlan.mutations);
+			if (!this.isSessionActive(runtime, session)) return;
 			if (reverted.ok) {
 				revertSummary = `Reverted ${reverted.revertedChanges} command${reverted.revertedChanges === 1 ? "" : "s"} across ${reverted.changedFiles} file${reverted.changedFiles === 1 ? "" : "s"}.`;
 			} else {
@@ -211,6 +217,10 @@ export class AppWorkspaceActionsController {
 			revertToastKind = "warning";
 		}
 
+		this.host.resetSessionView();
+		this.host.loadSessionHistory();
+		this.host.setInput(result.editorText ?? entry.text);
+
 		this.host.addEntry({
 			id: createId("system"),
 			kind: "system",
@@ -218,6 +228,14 @@ export class AppWorkspaceActionsController {
 		});
 		this.host.setSessionStatus(runtime.session);
 		this.host.showToast(revertToastKind === "success" ? "Changes undone" : "Session rewound with revert warnings", revertToastKind);
+	}
+
+	private isRuntimeActive(runtime: AgentSessionRuntime): boolean {
+		return this.host.isRunning() && this.host.runtime() === runtime;
+	}
+
+	private isSessionActive(runtime: AgentSessionRuntime, session: AgentSessionRuntime["session"]): boolean {
+		return this.isRuntimeActive(runtime) && runtime.session === session;
 	}
 
 	private workspaceMutationPlanFromSessionEntry(entryId: string): { mutations: WorkspaceMutation[]; messagesWithoutLogs: number } {

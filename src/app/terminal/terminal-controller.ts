@@ -1,3 +1,4 @@
+import { StringDecoder } from "node:string_decoder";
 import type { AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 import { ANSI_RESET } from "../../theme.js";
 import {
@@ -18,6 +19,7 @@ import {
 export type AppTerminalControllerHost = {
 	isRunning(): boolean;
 	setRunning(running: boolean): void;
+	cancelPendingTabLifecycle(): void;
 	runtime(): AgentSessionRuntime | undefined;
 	saveInputStateForQuit(): Promise<void>;
 	disposeInactiveRuntimesForQuit(): Promise<void>;
@@ -42,8 +44,10 @@ export class AppTerminalController {
 	private stopPromise: Promise<void> | undefined;
 	private keyboardProtocolNegotiationBuffer = "";
 	private keyboardProtocolBufferFlushTimer: ReturnType<typeof setTimeout> | undefined;
+	private inputDecoder = new StringDecoder("utf8");
 	private kittyProtocolActive = false;
 	private modifyOtherKeysActive = false;
+	private shutdownDeadlineAt: number | undefined;
 
 	private readonly enterInteractiveSequence = `${ANSI_RESET}${RESET_TERMINAL_VIEWPORT_STATE}${CLEAR_TERMINAL}\x1b[?1049h${RESET_TERMINAL_VIEWPORT_STATE}${CLEAR_TERMINAL}${ENABLE_TERMINAL_KEY_REPORTING}${ENABLE_BRACKETED_PASTE}${DISABLE_TERMINAL_WRAP}\x1b[?1002h\x1b[?1006h${HIDE_CURSOR}`;
 	private readonly exitInteractiveSequence = `${ANSI_RESET}${RESET_TERMINAL_VIEWPORT_STATE}${DISABLE_TERMINAL_KEY_REPORTING}${DISABLE_BRACKETED_PASTE}${ENABLE_TERMINAL_WRAP}\x1b[?1006l\x1b[?1002l\x1b[?1049l${SHOW_CURSOR}`;
@@ -78,13 +82,16 @@ export class AppTerminalController {
 	}
 
 	async disposeRuntimeForQuit(runtime: AgentSessionRuntime): Promise<void> {
+		const graceMs = this.shutdownDeadlineAt === undefined
+			? RUNTIME_DISPOSE_GRACE_MS
+			: Math.max(0, this.shutdownDeadlineAt - Date.now());
 		let timeout: ReturnType<typeof setTimeout> | undefined;
 		const dispose = runtime.dispose().then(
 			() => "disposed" as const,
 			() => "failed" as const,
 		);
 		const timeoutPromise = new Promise<"timeout">((resolveTimeout) => {
-			timeout = setTimeout(() => resolveTimeout("timeout"), RUNTIME_DISPOSE_GRACE_MS);
+			timeout = setTimeout(() => resolveTimeout("timeout"), graceMs);
 		});
 
 		const result = await Promise.race([dispose, timeoutPromise]);
@@ -146,28 +153,41 @@ export class AppTerminalController {
 
 	private async stopInternal(): Promise<void> {
 		if (!this.host.isRunning()) return;
-		this.clearKeyboardProtocolNegotiationBuffer();
 		this.host.setRunning(false);
+		this.host.cancelPendingTabLifecycle();
+		this.clearKeyboardProtocolNegotiationBuffer();
+		this.inputDecoder = new StringDecoder("utf8");
+		process.stdin.off("data", this.onInputData);
+		process.stdin.pause();
+		process.stdout.off("resize", this.onResize);
+		process.off("exit", this.restoreTerminal);
 		this.host.closeSdkMenuForStop();
 		this.host.clearToastTimers();
 		this.host.stopBlinking();
 		this.host.stopSubagentsPolling();
 		this.host.stopModelUsagePolling();
-		await this.host.stopVoiceInput();
 		this.host.stopAutocomplete();
 		this.host.stopShellCommand();
-		process.stdin.off("data", this.onInputData);
-		process.stdin.pause();
-		process.stdout.off("resize", this.onResize);
-		process.off("exit", this.restoreTerminal);
 		this.host.unsubscribeSession();
 		this.host.clearExtensionWidgets();
-		await this.host.saveInputStateForQuit();
 		this.restoreTerminal();
+		this.shutdownDeadlineAt = Date.now() + RUNTIME_DISPOSE_GRACE_MS;
 		this.scheduleForcedProcessExit();
-		await this.host.disposeInactiveRuntimesForQuit();
+
+		await this.runBestEffort(() => this.host.stopVoiceInput());
+		await this.runBestEffort(() => this.host.saveInputStateForQuit());
+		await this.runBestEffort(() => this.host.disposeInactiveRuntimesForQuit());
 		const runtime = this.host.runtime();
 		if (runtime) await this.disposeRuntimeForQuit(runtime);
+	}
+
+	private async runBestEffort(task: () => Promise<void>): Promise<void> {
+		try {
+			await task();
+		} catch {
+			// Shutdown continues so terminal restoration and runtime disposal are not
+			// skipped when one independent cleanup step fails.
+		}
 	}
 
 	private scheduleForcedProcessExit(): void {
@@ -179,17 +199,22 @@ export class AppTerminalController {
 	}
 
 	private readonly onResize = (): void => {
+		if (!this.terminalEnabled || this.interactiveSuspended || !this.host.isRunning()) return;
 		this.host.resetRenderOutputBuffer();
 		this.host.render();
 	};
 
 	private readonly onInputData = (chunk: Buffer): void => {
-		const input = this.filterKeyboardProtocolNegotiationInput(chunk.toString("utf8"));
+		if (!this.terminalEnabled || this.interactiveSuspended || !this.host.isRunning()) return;
+		const decoded = this.inputDecoder.write(chunk);
+		if (!decoded) return;
+		const input = this.filterKeyboardProtocolNegotiationInput(decoded);
 		if (input) this.host.handleInputChunk(Buffer.from(input, "utf8"));
 	};
 
 	private beginKeyboardProtocolNegotiation(): void {
 		this.clearKeyboardProtocolNegotiationBuffer();
+		this.inputDecoder = new StringDecoder("utf8");
 		this.kittyProtocolActive = false;
 		this.modifyOtherKeysActive = false;
 	}
@@ -246,7 +271,9 @@ export class AppTerminalController {
 			this.keyboardProtocolBufferFlushTimer = undefined;
 			const buffered = this.keyboardProtocolNegotiationBuffer;
 			this.keyboardProtocolNegotiationBuffer = "";
-			if (buffered) this.host.handleInputChunk(Buffer.from(buffered, "utf8"));
+			if (buffered && this.terminalEnabled && !this.interactiveSuspended && this.host.isRunning()) {
+				this.host.handleInputChunk(Buffer.from(buffered, "utf8"));
+			}
 		}, 150);
 	}
 

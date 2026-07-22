@@ -1,14 +1,26 @@
 import { createId } from "../id.js";
-import { runChatShellCommand, type InteractiveShellCommandResult, type RunningChatShellCommand } from "./shell-command.js";
+import {
+	runChatShellCommand,
+	type ChatShellCommandHandlers,
+	type InteractiveShellCommandResult,
+	type RunningChatShellCommand,
+} from "./shell-command.js";
 import type { Entry, SessionActivity } from "../types.js";
 
 const SHELL_RENDER_THROTTLE_MS = 33;
 
 type ShellEntry = Extract<Entry, { kind: "shell" }>;
 
+type AppShellControllerDeps = {
+	runChatShellCommand(command: string, cwd: string, handlers: ChatShellCommandHandlers): RunningChatShellCommand;
+};
+
+const defaultDeps: AppShellControllerDeps = { runChatShellCommand };
+
 export type AppShellControllerHost = {
 	readonly cwd: string;
 	isRunning(): boolean;
+	activeScopeKey(): string | undefined;
 	addEntry(entry: Entry): void;
 	touchEntry(entry: Entry): void;
 	setStatus(status: string): void;
@@ -19,17 +31,21 @@ export type AppShellControllerHost = {
 };
 
 export class AppShellController {
-	private activeRun: { entry: ShellEntry; command: RunningChatShellCommand } | undefined;
+	private activeRun: { entry: ShellEntry; command: RunningChatShellCommand; scopeKey: string | undefined } | undefined;
 	private renderTimer: ReturnType<typeof setTimeout> | undefined;
 
-	constructor(private readonly host: AppShellControllerHost) {}
+	constructor(
+		private readonly host: AppShellControllerHost,
+		private readonly deps: AppShellControllerDeps = defaultDeps,
+	) {}
 
 	isRunning(): boolean {
-		return this.activeRun !== undefined;
+		return this.activeRun !== undefined && this.isScopeActive(this.activeRun.scopeKey);
 	}
 
 	async run(command: string): Promise<InteractiveShellCommandResult> {
 		if (this.activeRun) throw new Error("A shell command is already running");
+		const scopeKey = this.host.activeScopeKey();
 
 		const entry: ShellEntry = {
 			id: createId("shell"),
@@ -44,36 +60,38 @@ export class AppShellController {
 		this.host.setSessionActivity("running");
 		this.host.render();
 
-		const runningCommand = runChatShellCommand(command, this.host.cwd, {
-			onOutput: (chunk) => this.appendOutput(entry, chunk),
-			onSettled: (result) => this.finishEntry(entry, result),
+		const runningCommand = this.deps.runChatShellCommand(command, this.host.cwd, {
+			onOutput: (chunk) => this.appendOutput(entry, chunk, scopeKey),
+			onSettled: (result) => this.finishEntry(entry, result, scopeKey),
 		});
-		this.activeRun = { entry, command: runningCommand };
+		this.activeRun = { entry, command: runningCommand, scopeKey };
 
 		try {
 			return await runningCommand.done;
 		} finally {
 			if (this.activeRun?.entry === entry) this.activeRun = undefined;
 			this.flushRender();
-			this.host.restoreSessionStatus();
-			if (this.host.isRunning()) this.host.render();
+			if (this.isScopeActive(scopeKey)) {
+				this.host.restoreSessionStatus();
+				if (this.host.isRunning()) this.host.render();
+			}
 		}
 	}
 
 	sendInput(text: string): boolean {
 		const activeRun = this.activeRun;
-		if (!activeRun) return false;
+		if (!activeRun || !this.isScopeActive(activeRun.scopeKey)) return false;
 
 		const input = text.endsWith("\n") ? text : `${text}\n`;
-		this.appendInputEcho(activeRun.entry, input);
+		this.appendInputEcho(activeRun.entry, input, activeRun.scopeKey);
 		return activeRun.command.writeInput(input);
 	}
 
 	interrupt(): boolean {
 		const activeRun = this.activeRun;
-		if (!activeRun) return false;
+		if (!activeRun || !this.isScopeActive(activeRun.scopeKey)) return false;
 
-		this.appendOutput(activeRun.entry, "\n^C\n");
+		this.appendOutput(activeRun.entry, "\n^C\n", activeRun.scopeKey);
 		return activeRun.command.interrupt();
 	}
 
@@ -85,25 +103,26 @@ export class AppShellController {
 		activeRun?.command.kill("SIGTERM");
 	}
 
-	private appendOutput(entry: ShellEntry, chunk: string): void {
+	private appendOutput(entry: ShellEntry, chunk: string, scopeKey: string | undefined): void {
 		entry.output = appendTerminalChunk(entry.output, chunk);
-		this.touchAndScheduleRender(entry);
+		this.touchAndScheduleRender(entry, scopeKey);
 	}
 
-	private appendInputEcho(entry: ShellEntry, input: string): void {
+	private appendInputEcho(entry: ShellEntry, input: string, scopeKey: string | undefined): void {
 		entry.output = appendTerminalChunk(entry.output, formatInputEcho(input));
-		this.touchAndScheduleRender(entry);
+		this.touchAndScheduleRender(entry, scopeKey);
 	}
 
-	private finishEntry(entry: ShellEntry, result: InteractiveShellCommandResult): void {
+	private finishEntry(entry: ShellEntry, result: InteractiveShellCommandResult, scopeKey: string | undefined): void {
 		entry.status = "done";
 		entry.exitCode = result.exitCode;
 		entry.signal = result.signal;
 		if (result.error) entry.error = result.error;
-		this.touchAndScheduleRender(entry);
+		this.touchAndScheduleRender(entry, scopeKey);
 	}
 
-	private touchAndScheduleRender(entry: ShellEntry): void {
+	private touchAndScheduleRender(entry: ShellEntry, scopeKey: string | undefined): void {
+		if (!this.isScopeActive(scopeKey)) return;
 		this.host.touchEntry(entry);
 		if (!this.host.isRunning() || this.renderTimer) return;
 
@@ -118,6 +137,10 @@ export class AppShellController {
 		if (!this.renderTimer) return;
 		clearTimeout(this.renderTimer);
 		this.renderTimer = undefined;
+	}
+
+	private isScopeActive(scopeKey: string | undefined): boolean {
+		return this.host.activeScopeKey() === scopeKey;
 	}
 }
 

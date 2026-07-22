@@ -29,6 +29,7 @@ export type AppPromptEnhancerControllerHost = {
 	runtime(): AgentSessionRuntime | undefined;
 	inputEditor(): InputEditor;
 	activeInputTabId(): string | undefined;
+	isInputTabOwnedByRuntime(tabId: string | undefined, runtime: AgentSessionRuntime, session: AgentSessionRuntime["session"]): boolean;
 	inputStateForTab(tabId: string | undefined): TabInputState | undefined;
 	setInputStateForTab(tabId: string | undefined, state: TabInputState): void;
 	promptEnhancerConfig(): PromptEnhancerConfig;
@@ -107,6 +108,7 @@ export class AppPromptEnhancerController {
 			this.host.toast.error("Prompt enhancer unavailable: runtime is not initialized");
 			return;
 		}
+		const session = runtime.session;
 
 		const target = this.currentTarget();
 		if (!target) {
@@ -121,20 +123,22 @@ export class AppPromptEnhancerController {
 
 		try {
 			const enhanced = await this.enhancePromptWithPi(runtime, target.text, this.host.promptEnhancerConfig());
+			if (!this.host.isInputTabOwnedByRuntime(target.tabId, runtime, session)) return;
 			const currentInputState = this.host.inputStateForTab(target.tabId);
 			if (!currentInputState || currentInputState.text !== target.originalEditorText) {
 				this.host.toast.warning("Prompt was changed before enhancement completed; result was not applied");
 				return;
 			}
 
-			this.applyEnhancedPrompt(target, enhanced);
+			this.applyEnhancedPrompt(target, enhanced, currentInputState);
 			this.host.resetInputAfterProgrammaticEdit();
 			this.host.toast.success(target.kind === "selection" ? "Selection enhanced" : "Prompt enhanced");
 		} catch (error) {
+			if (!this.host.isInputTabOwnedByRuntime(target.tabId, runtime, session)) return;
 			this.host.toast.error(`Prompt enhance failed: ${stringifyUnknown(error)}`);
 		} finally {
 			this.enhancing = false;
-			this.restoreSessionState();
+			if (this.host.runtime() === runtime && runtime.session === session) this.restoreSessionState(session);
 			this.host.render();
 		}
 	}
@@ -170,16 +174,16 @@ export class AppPromptEnhancerController {
 		};
 	}
 
-	private applyEnhancedPrompt(target: PromptEnhanceTarget, enhanced: string): void {
+	private applyEnhancedPrompt(target: PromptEnhanceTarget, enhanced: string, currentState: TabInputState): void {
 		const nextText = `${target.originalEditorText.slice(0, target.start)}${enhanced}${target.originalEditorText.slice(target.end)}`;
 		this.host.setInputStateForTab(target.tabId, {
 			text: nextText,
 			cursor: target.start + enhanced.length,
+			...(currentState.attachments ? { attachments: currentState.attachments } : {}),
 		});
 	}
 
-	private restoreSessionState(): void {
-		const session = this.host.runtime()?.session;
+	private restoreSessionState(session: AgentSessionRuntime["session"]): void {
 		this.host.setSessionStatus(session);
 		this.host.setSessionActivity(session?.isStreaming || session?.isCompacting ? "running" : "idle");
 	}

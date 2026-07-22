@@ -50,6 +50,7 @@ export class AppPopupActionController {
 	}
 
 	async submitSlashCommand(text: string): Promise<void> {
+		const scope = this.captureScope();
 		const parsed = this.menuItems.parseSlashInput(text);
 		if (!parsed) return;
 
@@ -83,18 +84,19 @@ export class AppPopupActionController {
 
 		try {
 			if (command.kind === "resource") {
-				await this.executeResourceSlashCommand(command, parsed.arguments);
+				await this.executeResourceSlashCommand(command, parsed.arguments, scope.session);
 			} else {
 				if (!command.run) throw new Error(`/${command.name} is not executable`);
 				await command.run(parsed.arguments);
 			}
 		} catch (error) {
+			if (!this.isScopeActive(scope)) return;
 			this.host.addEntry({ id: createId("error"), kind: "error", text: stringifyUnknown(error) });
 			this.host.showToast(`/${command.name} failed`, "error");
 			this.host.setSessionStatus(this.host.runtime()?.session);
 		}
 
-		if (this.host.isRunning()) this.host.render();
+		if (this.isScopeActive(scope)) this.host.render();
 	}
 
 	private async submitSelectedSlashCommand(): Promise<boolean> {
@@ -113,6 +115,7 @@ export class AppPopupActionController {
 	}
 
 	private async submitSelectedModel(): Promise<boolean> {
+		const scope = this.captureScope();
 		const selected = this.popupMenus.selectedModel();
 		if (!selected) return false;
 
@@ -126,16 +129,18 @@ export class AppPopupActionController {
 		try {
 			await this.commandController.runModelCommand(selected.value.model);
 		} catch (error) {
+			if (!this.isScopeActive(scope)) return true;
 			this.host.addEntry({ id: createId("error"), kind: "error", text: stringifyUnknown(error) });
 			this.host.showToast("/model failed", "error");
 			this.host.setSessionStatus(this.host.runtime()?.session);
 		}
 
-		if (this.host.isRunning()) this.host.render();
+		if (this.isScopeActive(scope)) this.host.render();
 		return true;
 	}
 
 	private async submitSelectedThinking(): Promise<boolean> {
+		const scope = this.captureScope();
 		const selected = this.popupMenus.selectedThinking();
 		if (!selected) return false;
 
@@ -149,16 +154,18 @@ export class AppPopupActionController {
 		try {
 			await this.commandController.runThinkingCommand(selected.value.level);
 		} catch (error) {
+			if (!this.isScopeActive(scope)) return true;
 			this.host.addEntry({ id: createId("error"), kind: "error", text: stringifyUnknown(error) });
 			this.host.showToast("/thinking failed", "error");
 			this.host.setSessionStatus(this.host.runtime()?.session);
 		}
 
-		if (this.host.isRunning()) this.host.render();
+		if (this.isScopeActive(scope)) this.host.render();
 		return true;
 	}
 
 	private async submitSelectedUserMessageAction(): Promise<boolean> {
+		const scope = this.captureScope();
 		const selected = this.popupMenus.selectedUserMessageAction();
 		if (!selected) return false;
 
@@ -181,6 +188,7 @@ export class AppPopupActionController {
 			await this.workspaceActions.undoChangesFromUserMessage(selected.entryId);
 			return true;
 		} catch (error) {
+			if (!this.isScopeActive(scope)) return true;
 			this.host.addEntry({ id: createId("error"), kind: "error", text: stringifyUnknown(error) });
 			this.host.showToast(`${selected.label} failed`, "error");
 			this.host.setSessionStatus(this.host.runtime()?.session);
@@ -189,11 +197,14 @@ export class AppPopupActionController {
 	}
 
 	private async submitSelectedUserMessageJump(): Promise<boolean> {
+		const scope = this.captureScope();
 		const selected = this.popupMenus.selectedUserMessageJump();
 		if (!selected) return false;
 
 		this.popupMenus.closeUserMessageJumpMenu();
-		if (!await this.host.scrollToUserMessageJumpTarget(selected)) {
+		const found = await this.host.scrollToUserMessageJumpTarget(selected);
+		if (!this.isScopeActive(scope)) return true;
+		if (!found) {
 			this.host.showToast("User message not found", "error");
 			this.host.setSessionStatus(this.host.runtime()?.session);
 			return true;
@@ -205,6 +216,7 @@ export class AppPopupActionController {
 	}
 
 	private async submitSelectedQueueMessageAction(): Promise<boolean> {
+		const scope = this.captureScope();
 		const selected = this.popupMenus.selectedQueueMessageAction();
 		if (!selected) return false;
 
@@ -223,6 +235,7 @@ export class AppPopupActionController {
 			await this.queuedMessages.sendQueuedMessageImmediately(selected.entryId);
 			return true;
 		} catch (error) {
+			if (!this.isScopeActive(scope)) return true;
 			this.host.addEntry({ id: createId("error"), kind: "error", text: stringifyUnknown(error) });
 			this.host.showToast(`${selected.label} failed`, "error");
 			this.host.setSessionStatus(this.host.runtime()?.session);
@@ -254,7 +267,9 @@ export class AppPopupActionController {
 
 		try {
 			await this.host.awaitCurrentSessionExtensions(runtime);
+			if (!this.isRuntimeActive(runtime)) return true;
 			const result = await runtime.switchSession(session.path);
+			if (!this.isRuntimeActive(runtime)) return true;
 			if (result.cancelled) {
 				this.host.addEntry({ id: createId("system"), kind: "system", text: "Resume cancelled." });
 				this.host.setSessionStatus(runtime.session);
@@ -265,12 +280,13 @@ export class AppPopupActionController {
 			const name = runtime.session.sessionName ?? session.id.slice(0, 8);
 			this.host.afterSessionReplacement(`Resumed session "${name}"`);
 	} catch (error) {
+		if (!this.isRuntimeActive(runtime)) return true;
 		this.host.addEntry({ id: createId("error"), kind: "error", text: `Resume failed: ${error instanceof Error ? error.message : String(error)}` });
 		this.host.showToast("Failed to resume session", "error");
 		this.host.setSessionStatus(runtime.session);
 	}
 
-		if (this.host.isRunning()) this.host.render();
+		if (this.isRuntimeActive(runtime)) this.host.render();
 		return true;
 	}
 
@@ -278,10 +294,23 @@ export class AppPopupActionController {
 		return `/${name}${argumentsText ? ` ${argumentsText}` : ""}`;
 	}
 
-	private async executeResourceSlashCommand(command: SlashCommand, argumentsText: string): Promise<void> {
+	private async executeResourceSlashCommand(command: SlashCommand, argumentsText: string, session: AgentSession | undefined): Promise<void> {
 		const promptText = this.formatSlashCommandLine(command.name, argumentsText);
 		this.host.setStatus(`running /${command.name}`);
-		await this.queuedMessages.submitUserMessage(this.queuedMessages.createSubmittedUserMessage(promptText, promptText, []));
+		await this.queuedMessages.submitUserMessage(this.queuedMessages.createSubmittedUserMessage(promptText, promptText, []), session);
+	}
+
+	private captureScope(): { runtime: AgentSessionRuntime | undefined; session: AgentSession | undefined } {
+		const runtime = this.host.runtime();
+		return { runtime, session: runtime?.session };
+	}
+
+	private isScopeActive(scope: { runtime: AgentSessionRuntime | undefined; session: AgentSession | undefined }): boolean {
+		return this.host.isRunning() && this.host.runtime() === scope.runtime && scope.runtime?.session === scope.session;
+	}
+
+	private isRuntimeActive(runtime: AgentSessionRuntime): boolean {
+		return this.host.isRunning() && this.host.runtime() === runtime;
 	}
 
 	private getRuntime(commandName: string): AgentSessionRuntime | undefined {

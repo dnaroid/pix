@@ -85,7 +85,7 @@ describe("AppWorkspaceActionsController undo changes", () => {
 				render: () => {
 					calls.render += 1;
 				},
-				isRunning: () => false,
+				isRunning: () => true,
 				forkSessionEntryInNewTab: async () => false,
 			});
 
@@ -145,7 +145,7 @@ describe("AppWorkspaceActionsController undo changes", () => {
 				toasts.push({ message, kind });
 			},
 			render: () => {},
-			isRunning: () => false,
+			isRunning: () => true,
 			forkSessionEntryInNewTab: async () => false,
 		});
 
@@ -155,6 +155,52 @@ describe("AppWorkspaceActionsController undo changes", () => {
 		assert.equal(toasts[toasts.length - 1]?.kind, "warning");
 		const lastAddedEntry = addedEntries[addedEntries.length - 1];
 		assert.match((lastAddedEntry?.kind === "system" ? lastAddedEntry.text : ""), /No recorded file mutations were available/u);
+	});
+
+	it("does not apply a late undo result to a different active runtime", async () => {
+		const entries: Entry[] = [{ id: "visible-stale", kind: "user", text: "Old tab", sessionEntryId: "session-stale" }];
+		let resolveNavigation!: (result: { cancelled: false; aborted: false; editorText: string }) => void;
+		const session = {
+			isStreaming: false,
+			isCompacting: false,
+			sessionFile: "/tmp/workspace/session.jsonl",
+			sessionManager: {
+				getBranch: () => [messageEntry("session-stale", null, "user", "Old tab")],
+				getSessionId: () => "session-stale-id",
+			},
+			navigateTree: async () => await new Promise<{ cancelled: false; aborted: false; editorText: string }>((resolve) => {
+				resolveNavigation = resolve;
+			}),
+		};
+		const runtime = { cwd: "/tmp/workspace", session } as unknown as AgentSessionRuntime;
+		const otherRuntime = { session: {} } as unknown as AgentSessionRuntime;
+		let activeRuntime: AgentSessionRuntime | undefined = runtime;
+		const lateMutations: string[] = [];
+		const controller = new AppWorkspaceActionsController({
+			entries,
+			runtime: () => activeRuntime,
+			awaitCurrentSessionExtensions: async () => {},
+			findUserEntry: (entryId) => entries.find((entry): entry is Extract<Entry, { kind: "user" }> => entry.kind === "user" && entry.id === entryId),
+			touchEntry: () => {},
+			resetSessionView: () => { lateMutations.push("reset"); },
+			loadSessionHistory: () => { lateMutations.push("history"); },
+			addEntry: () => { lateMutations.push("entry"); },
+			setInput: () => { lateMutations.push("input"); },
+			getInput: () => "",
+			setStatus: () => {},
+			setSessionStatus: () => { lateMutations.push("session-status"); },
+			showToast: () => { lateMutations.push("toast"); },
+			render: () => {},
+			isRunning: () => true,
+			forkSessionEntryInNewTab: async () => false,
+		});
+
+		const undoing = controller.undoChangesFromUserMessage("visible-stale");
+		activeRuntime = otherRuntime;
+		resolveNavigation({ cancelled: false, aborted: false, editorText: "Old tab draft" });
+		await undoing;
+
+		assert.deepEqual(lateMutations, []);
 	});
 
 	it("assigns the user session entry id while recording a mutation for a fresh user message", () => {
@@ -306,6 +352,47 @@ describe("AppWorkspaceActionsController undo changes", () => {
 
 		assert.deepEqual(entries.map((entry) => entry.kind === "user" ? entry.sessionEntryId : undefined), ["session-late-1", "session-late-2"]);
 		assert.equal(touchedEntryCount, 0);
+	});
+
+	it("does not let a metadata timer from one runtime rewrite another tab", async () => {
+		const entries: Entry[] = [{ id: "visible", kind: "user", text: "Visible prompt" }];
+		const makeRuntime = (sessionEntryId: string) => ({
+			session: {
+				isStreaming: false,
+				isCompacting: false,
+				sessionManager: {
+					getBranch: () => [messageEntry(sessionEntryId, null, "user", "Prompt")],
+					getSessionId: () => sessionEntryId,
+				},
+			},
+		}) as unknown as AgentSessionRuntime;
+		let activeRuntime = makeRuntime("session-a");
+		let renders = 0;
+		const controller = new AppWorkspaceActionsController({
+			entries,
+			runtime: () => activeRuntime,
+			awaitCurrentSessionExtensions: async () => {},
+			findUserEntry: () => undefined,
+			touchEntry: () => {},
+			resetSessionView: () => {},
+			loadSessionHistory: () => {},
+			addEntry: () => {},
+			setInput: () => {},
+			getInput: () => "",
+			setStatus: () => {},
+			setSessionStatus: () => {},
+			showToast: () => {},
+			render: () => { renders += 1; },
+			isRunning: () => true,
+			forkSessionEntryInNewTab: async () => false,
+		});
+
+		controller.scheduleUserSessionEntryMetadataSync();
+		activeRuntime = makeRuntime("session-b");
+		await new Promise<void>((resolve) => { setTimeout(resolve, 10); });
+
+		assert.equal(entries[0]?.kind === "user" ? entries[0].sessionEntryId : undefined, undefined);
+		assert.equal(renders, 0);
 	});
 });
 

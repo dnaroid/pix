@@ -11,6 +11,8 @@ import type {
 	ExtensionWidgetTheme,
 	PixExtensionUIContext,
 	PixMenuController,
+	PixMenuItem,
+	PixMenuOptions,
 	WidgetPlacement,
 	WidgetTuiHandle,
 } from "../types.js";
@@ -36,8 +38,9 @@ type CustomUiFactory<T> = (
 type ActiveCustomUi = {
 	key: string;
 	scopeKey: string;
-	component: FocusedCustomComponent;
+	component?: FocusedCustomComponent;
 	savedInput: string;
+	settled: boolean;
 	resolve(value: unknown): void;
 	reject(error: unknown): void;
 };
@@ -61,6 +64,7 @@ const CUSTOM_UI_WIDGET_KEY = "pix-custom-ui";
 export type ExtensionUiControllerHost = {
 	readonly theme: Theme;
 	activeExtensionUiScope?(): string | undefined;
+	isExtensionUiScopeActive?(scopeKey: string): boolean;
 	isRunning(): boolean;
 	render(): void;
 	showToast(message: string, kind?: ToastKind, options?: { scopeKey?: string }): void;
@@ -150,6 +154,10 @@ export class ExtensionUiController {
 		}
 	}
 
+	cancelCustomUi(scopeKey = this.activeScopeKey()): void {
+		this.cancelActiveCustomUi(this.normalizeScopeKey(scopeKey));
+	}
+
 	suppressWidget(key: string): void {
 		const scopedKey = this.scopedWidgetKey(this.activeScopeKey(), key);
 		const widget = this.extensionWidgets.get(scopedKey);
@@ -160,7 +168,7 @@ export class ExtensionUiController {
 
 	handleTerminalInput(data: string): ExtensionTerminalInputResult {
 		const active = this.activeCustomUiForActiveScope();
-		if (active) {
+		if (active?.component) {
 			if (data === "\u0003") return { consume: false };
 			try {
 				const result = active.component.handleInput?.(data);
@@ -189,7 +197,7 @@ export class ExtensionUiController {
 
 	renderActiveCustomUi(width: number): string[] | undefined {
 		const active = this.activeCustomUiForActiveScope();
-		if (!active) return undefined;
+		if (!active?.component) return undefined;
 		try {
 			return active.component.render(width);
 		} catch (error) {
@@ -199,7 +207,7 @@ export class ExtensionUiController {
 
 	activeCustomUiUsesEditor(): boolean {
 		const active = this.activeCustomUiForActiveScope();
-		if (!active) return false;
+		if (!active?.component) return false;
 		try {
 			return active.component.usesEditor?.() === true;
 		} catch {
@@ -209,7 +217,7 @@ export class ExtensionUiController {
 
 	handleCustomUiMouse(event: ExtensionInputMouseEvent): boolean {
 		const active = this.activeCustomUiForActiveScope();
-		if (!active) return false;
+		if (!active?.component) return false;
 		try {
 			return active.component.handleMouse?.(event) === true;
 		} catch (error) {
@@ -218,16 +226,17 @@ export class ExtensionUiController {
 		}
 	}
 
-	widgetTuiHandle(): WidgetTuiHandle {
-		const activeScopeToastNotifier = this.host.toastNotifierForScope?.(this.activeScopeKey()) ?? this.host.toastNotifier;
+	widgetTuiHandle(scopeKey = this.activeScopeKey()): WidgetTuiHandle {
+		const activeScopeToastNotifier = this.host.toastNotifierForScope?.(scopeKey) ?? this.host.toastNotifier;
+		const menuController = this.scopedMenuController(scopeKey);
 		return {
 			requestRender: () => {
-				if (this.host.isRunning()) this.host.render();
+				if (this.host.isRunning() && this.isScopeActive(scopeKey)) this.host.render();
 			},
 			showToast: activeScopeToastNotifier.show,
 			toast: activeScopeToastNotifier,
-			showMenu: this.host.menuController.show,
-			menu: this.host.menuController,
+			showMenu: menuController.show,
+			menu: menuController,
 			pix: {
 				delegatedEditorInput: true,
 				inputMouse: true,
@@ -243,13 +252,14 @@ export class ExtensionUiController {
 		};
 
 		const extensionTheme = this.createExtensionTheme();
+		const menuController = this.scopedMenuController(contextScopeKey);
 		const renderIfRunning = (): void => {
-			if (this.host.isRunning()) this.host.render();
+			if (this.host.isRunning() && this.isScopeActive(contextScopeKey)) this.host.render();
 		};
 
 		return {
-			select: async (title, options, opts) => await this.selectDialog(title, options, opts),
-			confirm: async (title, message, opts) => await this.confirmDialog(title, message, opts),
+			select: async (title, options, opts) => await this.selectDialog(title, options, opts, contextScopeKey),
+			confirm: async (title, message, opts) => await this.confirmDialog(title, message, opts, contextScopeKey),
 			input: async (title, placeholder, opts) => await this.inputDialog(title, placeholder, opts, contextScopeKey),
 			notify,
 			toast: scopedToastNotifier,
@@ -264,8 +274,8 @@ export class ExtensionUiController {
 			renderAboveInput: (key, content) => {
 				this.setAboveInputWidget(key, content, contextScopeKey);
 			},
-			showMenu: this.host.menuController.show,
-			menu: this.host.menuController,
+			showMenu: menuController.show,
+			menu: menuController,
 			onTerminalInput: (handler) => {
 				const terminalInputHandler = { scopeKey: contextScopeKey, handler: handler as TerminalInputHandler };
 				this.terminalInputHandlers.add(terminalInputHandler);
@@ -274,11 +284,13 @@ export class ExtensionUiController {
 				};
 			},
 			setStatus: (_key, text) => {
+				if (!this.isScopeActive(contextScopeKey)) return;
 				if (text) this.host.showToast(text, "info", { scopeKey: contextScopeKey });
 				this.host.restoreSessionStatus();
 				renderIfRunning();
 			},
 			setWorkingMessage: (message) => {
+				if (!this.isScopeActive(contextScopeKey)) return;
 				if (message) this.host.showToast(message, "info", { scopeKey: contextScopeKey });
 				this.host.restoreSessionStatus();
 				renderIfRunning();
@@ -292,19 +304,22 @@ export class ExtensionUiController {
 			setFooter: () => undefined,
 			setHeader: () => undefined,
 			setTitle: (title) => {
+				if (!this.isScopeActive(contextScopeKey)) return;
 				process.title = title;
 				renderIfRunning();
 			},
 			custom: (async <T,>(factory: CustomUiFactory<T>) => await this.showCustomUi(factory, { scopeKey: contextScopeKey })) as PixExtensionUIContext["custom"],
 			pasteToEditor: (text) => {
+				if (!this.isScopeActive(contextScopeKey)) return;
 				this.host.setInput(text);
 				renderIfRunning();
 			},
 			setEditorText: (text) => {
+				if (!this.isScopeActive(contextScopeKey)) return;
 				this.host.setInput(text);
 				renderIfRunning();
 			},
-			getEditorText: () => this.host.getInput(),
+			getEditorText: () => this.isScopeActive(contextScopeKey) ? this.host.getInput() : "",
 			editor: async (title, prefill) => await this.editorDialog(title, prefill, contextScopeKey),
 			addAutocompleteProvider: () => undefined,
 			setEditorComponent: () => undefined,
@@ -315,8 +330,9 @@ export class ExtensionUiController {
 			getAllThemes: () => (Object.keys(THEMES) as ThemeName[]).map((themeName) => ({ name: themeName, path: undefined })),
 			getTheme: () => undefined,
 			setTheme: () => ({ success: false, error: "Theme switching is not implemented in pix extension UI yet." }),
-			getToolsExpanded: () => this.host.entries.some((entry) => entry.kind === "tool" && entry.expanded),
+			getToolsExpanded: () => this.isScopeActive(contextScopeKey) && this.host.entries.some((entry) => entry.kind === "tool" && entry.expanded),
 			setToolsExpanded: (expanded) => {
+				if (!this.isScopeActive(contextScopeKey)) return;
 				for (const entry of this.host.entries) {
 					if (entry.kind === "tool") {
 						entry.expanded = expanded;
@@ -336,19 +352,19 @@ export class ExtensionUiController {
 		this.setWidget(key, undefined, { placement: "aboveEditor", scopeKey });
 	}
 
-	private async selectDialog(title: string, options: string[], opts?: ExtensionUIDialogOptions): Promise<string | undefined> {
-		if (opts?.signal?.aborted) return undefined;
+	private async selectDialog(title: string, options: string[], opts?: ExtensionUIDialogOptions, scopeKey = this.activeScopeKey()): Promise<string | undefined> {
+		if (opts?.signal?.aborted || !this.isScopeActive(scopeKey)) return undefined;
 		return await this.withDialogAutoDismiss(
 			this.host.menuController.select(title, options, { preserveStatus: true }),
 			opts,
 			() => {
-				this.host.menuController.close();
+				if (this.isScopeActive(scopeKey)) this.host.menuController.close();
 			},
 		);
 	}
 
-	private async confirmDialog(title: string, message: string, opts?: ExtensionUIDialogOptions): Promise<boolean> {
-		if (opts?.signal?.aborted) return false;
+	private async confirmDialog(title: string, message: string, opts?: ExtensionUIDialogOptions, scopeKey = this.activeScopeKey()): Promise<boolean> {
+		if (opts?.signal?.aborted || !this.isScopeActive(scopeKey)) return false;
 		const selected = await this.withDialogAutoDismiss(
 			this.host.menuController.show(
 				[
@@ -359,7 +375,7 @@ export class ExtensionUiController {
 			),
 			opts,
 			() => {
-				this.host.menuController.close();
+				if (this.isScopeActive(scopeKey)) this.host.menuController.close();
 			},
 		);
 		return selected === true;
@@ -393,9 +409,8 @@ export class ExtensionUiController {
 	}, scopeKey = this.activeScopeKey()): Promise<string | undefined> {
 		if (options.opts?.signal?.aborted) return undefined;
 		if (!this.host.isRunning()) return undefined;
+		if (!this.isScopeActive(scopeKey)) return undefined;
 		if (this.activeCustomUis.has(scopeKey)) throw new Error("Another extension custom UI is already active.");
-		const savedInput = this.host.getInput();
-		this.host.setInput(options.initialValue);
 		const promise = this.showCustomUi<string | undefined>((_tui, _theme, _keybindings, done) => {
 			let settled = false;
 			const finish = (value: string | undefined): void => {
@@ -419,7 +434,7 @@ export class ExtensionUiController {
 					return { consume: false, data };
 				},
 			};
-		}, { savedInput, scopeKey });
+		}, { editorInput: options.initialValue, scopeKey });
 
 		return await this.withDialogAutoDismiss(
 			promise,
@@ -471,94 +486,113 @@ export class ExtensionUiController {
 
 	private async showCustomUi<T>(
 		factory: CustomUiFactory<T>,
-		options: { savedInput?: string; scopeKey?: string } = {},
+		options: { editorInput?: string; savedInput?: string; scopeKey?: string } = {},
 	): Promise<T> {
 		if (!this.host.isRunning()) return undefined as T;
 		const scopeKey = this.normalizeScopeKey(options.scopeKey);
+		if (!this.isScopeActive(scopeKey)) return undefined as T;
 		if (this.activeCustomUis.has(scopeKey)) throw new Error("Another extension custom UI is already active.");
 		const savedInput = options.savedInput ?? this.host.getInput();
 
 		return await new Promise<T>((resolve, reject) => {
-			let settled = false;
+			const active: ActiveCustomUi = {
+				key: CUSTOM_UI_WIDGET_KEY,
+				scopeKey,
+				savedInput,
+				settled: false,
+				resolve: (value) => resolve(value as T),
+				reject,
+			};
+			this.activeCustomUis.set(scopeKey, active);
+			if (options.editorInput !== undefined) this.host.setInput(options.editorInput);
+
 			const done = (value: T): void => {
-				if (settled) return;
-				settled = true;
-				this.finishActiveCustomUi(scopeKey, value, { resolve: true });
-				resolve(value);
+				if (active.settled || this.activeCustomUis.get(scopeKey) !== active) return;
+				this.finishActiveCustomUi(active, this.isScopeActive(scopeKey) ? value : undefined, { resolve: true });
 			};
 
 			void (async () => {
 				try {
 					const component = await factory(
-						this.widgetTuiHandle() as never,
+						this.widgetTuiHandle(scopeKey) as never,
 						this.createExtensionTheme() as never,
 						{} as never,
 						done as never,
 					);
 
-					if (settled) {
+					if (active.settled || this.activeCustomUis.get(scopeKey) !== active || !this.isScopeActive(scopeKey)) {
 						component.dispose?.();
+						if (!active.settled && this.activeCustomUis.get(scopeKey) === active) {
+							this.finishActiveCustomUi(active, undefined, { resolve: true });
+						}
 						return;
 					}
 
-					this.activeCustomUis.set(scopeKey, {
-						key: CUSTOM_UI_WIDGET_KEY,
-						scopeKey,
-						component,
-						savedInput,
-						resolve: (value) => {
-							if (settled) return;
-							settled = true;
-							resolve(value as T);
-						},
-						reject: (error) => {
-							if (settled) return;
-							settled = true;
-							reject(error);
-						},
-					});
+					active.component = component;
 					if (this.host.isRunning()) this.host.render();
 				} catch (error) {
-					if (settled) return;
-					settled = true;
-					reject(error);
+					if (active.settled || this.activeCustomUis.get(scopeKey) !== active) return;
+					this.finishActiveCustomUi(active, error, { resolve: false });
 				}
 			})();
 		});
 	}
 
 	private cancelActiveCustomUi(scopeKey = this.activeScopeKey()): void {
-		this.finishActiveCustomUi(scopeKey, undefined, { resolve: true });
+		const active = this.activeCustomUis.get(scopeKey);
+		if (active) this.finishActiveCustomUi(active, undefined, { resolve: true });
 	}
 
 	private rejectActiveCustomUi(error: unknown): void {
 		const active = this.activeCustomUiForActiveScope();
 		if (!active) return;
-		this.finishActiveCustomUi(active.scopeKey, error, { resolve: false });
+		this.finishActiveCustomUi(active, error, { resolve: false });
 	}
 
-	private finishActiveCustomUi(scopeKey: string, value: unknown, options: { resolve: boolean }): void {
-		const active = this.activeCustomUis.get(scopeKey);
-		if (!active) return;
-		this.activeCustomUis.delete(scopeKey);
-		if (this.host.getInput() !== active.savedInput) this.host.setInput(active.savedInput);
+	private finishActiveCustomUi(active: ActiveCustomUi, value: unknown, options: { resolve: boolean }): void {
+		if (active.settled || this.activeCustomUis.get(active.scopeKey) !== active) return;
+		active.settled = true;
+		this.activeCustomUis.delete(active.scopeKey);
+		if (this.isScopeActive(active.scopeKey) && this.host.getInput() !== active.savedInput) this.host.setInput(active.savedInput);
 		try {
-			active.component.dispose?.();
+			active.component?.dispose?.();
 		} catch {
 			// Ignore extension cleanup failures while closing focused UI.
 		}
 		try {
-			active.component.invalidate?.();
+			active.component?.invalidate?.();
 		} catch {
 			// Ignore extension invalidation failures while closing focused UI.
 		}
 		if (options.resolve) active.resolve(value);
 		else active.reject(value);
-		if (this.host.isRunning()) this.host.render();
+		if (this.host.isRunning() && this.isScopeActive(active.scopeKey)) this.host.render();
 	}
 
 	private activeCustomUiForActiveScope(): ActiveCustomUi | undefined {
-		return this.activeCustomUis.get(this.activeScopeKey());
+		const scopeKey = this.activeScopeKey();
+		if (!this.isScopeActive(scopeKey)) return undefined;
+		return this.activeCustomUis.get(scopeKey);
+	}
+
+	private isScopeActive(scopeKey: string): boolean {
+		return this.host.isExtensionUiScopeActive?.(scopeKey) ?? this.activeScopeKey() === scopeKey;
+	}
+
+	private scopedMenuController(scopeKey: string): PixMenuController {
+		return {
+			show: async <T,>(items: readonly PixMenuItem<T>[], options: PixMenuOptions) => {
+				if (!this.isScopeActive(scopeKey)) return undefined;
+				return await this.host.menuController.show(items, options);
+			},
+			select: async (title, options, menuOptions) => {
+				if (!this.isScopeActive(scopeKey)) return undefined;
+				return await this.host.menuController.select(title, options, menuOptions);
+			},
+			close: () => {
+				if (this.isScopeActive(scopeKey)) this.host.menuController.close();
+			},
+		};
 	}
 
 	private activeScopeKey(): string {

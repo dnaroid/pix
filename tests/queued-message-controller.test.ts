@@ -282,6 +282,32 @@ describe("AppQueuedMessageController", () => {
 		await first;
 	});
 
+	it("does not flush the active tab queue when a background prompt finishes", async () => {
+		const firstCalls: string[] = [];
+		const secondCalls: string[] = [];
+		let releaseFirstPrompt: (() => void) | undefined;
+		const firstSession = fakeSession({ steering: [], followUp: [] }, {
+			calls: firstCalls,
+			promptWait: () => new Promise<void>((resolve) => { releaseFirstPrompt = resolve; }),
+		});
+		const secondSession = fakeSession({ steering: [], followUp: [] }, { calls: secondCalls });
+		const state = createHostState("");
+		let activeSession = firstSession;
+		const controller = new AppQueuedMessageController(createHostFromRuntime(() => activeSession, state));
+
+		const first = controller.sendUserMessageToSession(controller.createSubmittedUserMessage("first tab", "first tab", []));
+		await Promise.resolve();
+		activeSession = secondSession;
+		controller.autoUserMessages.push(controller.createSubmittedUserMessage("second tab queued", "second tab queued", []));
+		releaseFirstPrompt?.();
+		await first;
+		await Promise.resolve();
+
+		assert.deepEqual(firstCalls, ["prompt:first tab"]);
+		assert.deepEqual(secondCalls, []);
+		assert.equal(controller.autoUserMessages[0]?.promptText, "second tab queued");
+	});
+
 	it("restores queued messages if an immediate send fails", async () => {
 		const sdkQueue = { steering: ["keep before", "remove me", "keep after"], followUp: ["follow later"] };
 		const calls: string[] = [];

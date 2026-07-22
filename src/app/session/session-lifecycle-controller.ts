@@ -60,9 +60,15 @@ export type BindCurrentSessionOptions = {
 
 export class AppSessionLifecycleController {
 	private unsubscribe: (() => void) | undefined;
+	private ownershipRuntime: AgentSessionRuntime | undefined;
+	private ownershipSession: AgentSession | undefined;
+	private ownershipGeneration = 0;
+	private subscriptionGeneration = 0;
+	private replacementHistoryGeneration = 0;
 	private extensionBindPromise: Promise<void> | undefined;
 	private extensionBindRuntime: AgentSessionRuntime | undefined;
 	private extensionBindSession: AgentSession | undefined;
+	private extensionBindOwnershipGeneration: number | undefined;
 
 	constructor(private readonly host: AppSessionLifecycleHost) {}
 
@@ -91,6 +97,7 @@ export class AppSessionLifecycleController {
 
 			this.host.setRuntime(runtime);
 			runtime.setRebindSession(async () => {
+				if (!this.host.isRunning() || this.host.runtime() !== runtime) return;
 				await this.bindCurrentSession({ awaitExtensions: false });
 			});
 			await this.bindCurrentSession({ awaitExtensions: false });
@@ -122,8 +129,13 @@ export class AppSessionLifecycleController {
 	async bindCurrentSession(options: BindCurrentSessionOptions = {}): Promise<void> {
 		const runtime = this.requireRuntime();
 		const session = runtime.session;
+		const ownershipGeneration = this.advanceOwnership(runtime, session);
+		const subscriptionGeneration = ++this.subscriptionGeneration;
+		this.replacementHistoryGeneration += 1;
 		this.unsubscribe?.();
 		this.unsubscribe = session.subscribe((event) => {
+			if (!this.isCurrentRuntimeSession(runtime, session, ownershipGeneration)
+				|| subscriptionGeneration !== this.subscriptionGeneration) return;
 			this.host.handleSessionEvent(event);
 		});
 		this.host.closeSdkMenuForBind();
@@ -132,10 +144,12 @@ export class AppSessionLifecycleController {
 
 		const bindPromise = this.bindSessionExtensions(runtime, session, extensionUiScope, {
 			deferStart: options.awaitExtensions === false,
+			ownershipGeneration,
 		});
 		if (options.awaitExtensions === false) {
 			void bindPromise.catch((error) => {
-				if (!this.isCurrentRuntimeSession(runtime, session)) return;
+				if (!this.isCurrentRuntimeSession(runtime, session, ownershipGeneration)
+					|| subscriptionGeneration !== this.subscriptionGeneration) return;
 				this.host.addEntry({ id: createId("error"), kind: "error", text: `Extension bind failed: ${stringifyUnknown(error)}` });
 				this.host.showToast("Extension initialization failed", "error");
 				this.host.render();
@@ -149,30 +163,57 @@ export class AppSessionLifecycleController {
 	async awaitCurrentSessionExtensions(runtime: AgentSessionRuntime | undefined = this.host.runtime()): Promise<void> {
 		if (!runtime) return;
 		if (this.extensionBindRuntime !== runtime || this.extensionBindSession !== runtime.session) return;
+		if (this.extensionBindOwnershipGeneration !== this.ownershipGeneration) return;
 		await this.extensionBindPromise;
 	}
 
 	unsubscribeSession(): void {
 		this.unsubscribe?.();
+		this.unsubscribe = undefined;
+		this.ownershipRuntime = undefined;
+		this.ownershipSession = undefined;
+		this.ownershipGeneration += 1;
+		this.subscriptionGeneration += 1;
+		this.replacementHistoryGeneration += 1;
 	}
 
 	afterSessionReplacement(message?: string): void {
+		const runtime = this.host.runtime();
+		if (!runtime) {
+			this.resetSessionView();
+			this.host.render();
+			return;
+		}
+		const session = runtime.session;
+		const ownershipGeneration = this.advanceOwnership(runtime, session);
+		const historyGeneration = ++this.replacementHistoryGeneration;
 		this.resetSessionView();
-		void this.loadReplacementHistory(message);
+		void this.loadReplacementHistory(runtime, session, ownershipGeneration, historyGeneration, message);
 		this.host.render();
 	}
 
-	private async loadReplacementHistory(message?: string): Promise<void> {
-		await this.host.loadSessionHistoryEntriesAsync({
-			isCancelled: () => !this.host.isRunning(),
-			render: () => this.host.render(),
+	private async loadReplacementHistory(
+		runtime: AgentSessionRuntime,
+		session: AgentSession,
+		ownershipGeneration: number,
+		historyGeneration: number,
+		message?: string,
+	): Promise<void> {
+		const isCancelled = (): boolean => historyGeneration !== this.replacementHistoryGeneration
+			|| !this.isCurrentRuntimeSession(runtime, session, ownershipGeneration);
+		const completed = await this.host.loadSessionHistoryEntriesAsync({
+			isCancelled,
+			render: () => {
+				if (!isCancelled()) this.host.render();
+			},
 			lazyOlderHistory: true,
 		});
+		if (!completed || isCancelled()) return;
 		this.host.syncUserSessionEntryMetadata();
+		if (isCancelled()) return;
 		if (message) this.host.addEntry({ id: createId("system"), kind: "system", text: message });
-		const session = this.host.runtime()?.session;
 		this.host.setSessionStatus(session);
-		this.host.setSessionActivity(session?.isStreaming ? "running" : "idle");
+		this.host.setSessionActivity(session.isStreaming ? "running" : "idle");
 		this.host.render();
 	}
 
@@ -203,18 +244,26 @@ export class AppSessionLifecycleController {
 		runtime: AgentSessionRuntime,
 		session: AgentSession,
 		scopeKey: string,
-		options: { deferStart: boolean },
+		options: { deferStart: boolean; ownershipGeneration: number },
 	): Promise<void> {
-		if (this.extensionBindPromise && this.extensionBindRuntime === runtime && this.extensionBindSession === session) {
+		if (this.extensionBindPromise
+			&& this.extensionBindRuntime === runtime
+			&& this.extensionBindSession === session
+			&& this.extensionBindOwnershipGeneration === options.ownershipGeneration) {
 			return this.extensionBindPromise;
 		}
 
-		const startBind = () => session.bindExtensions({
-			uiContext: this.host.createExtensionUIContext(scopeKey),
-			commandContextActions: this.host.createExtensionCommandContextActions(runtime),
-			shutdownHandler: this.host.extensionShutdownHandler(),
-			onError: (error) => this.host.handleExtensionError(error),
-		});
+		const startBind = (): Promise<void> => {
+			if (!this.isCurrentRuntimeSession(runtime, session, options.ownershipGeneration)) return Promise.resolve();
+			return session.bindExtensions({
+				uiContext: this.host.createExtensionUIContext(scopeKey),
+				commandContextActions: this.host.createExtensionCommandContextActions(runtime),
+				shutdownHandler: this.host.extensionShutdownHandler(),
+				onError: (error) => {
+					if (this.isCurrentRuntimeSession(runtime, session, options.ownershipGeneration)) this.host.handleExtensionError(error);
+				},
+			});
+		};
 		const bindPromise = options.deferStart
 			? new Promise<void>((resolve) => setTimeout(resolve, 0)).then(startBind)
 			: startBind();
@@ -223,11 +272,13 @@ export class AppSessionLifecycleController {
 			this.extensionBindPromise = undefined;
 			this.extensionBindRuntime = undefined;
 			this.extensionBindSession = undefined;
+			this.extensionBindOwnershipGeneration = undefined;
 		});
 
 		this.extensionBindPromise = promise;
 		this.extensionBindRuntime = runtime;
 		this.extensionBindSession = session;
+		this.extensionBindOwnershipGeneration = options.ownershipGeneration;
 		return promise;
 	}
 
@@ -255,8 +306,26 @@ export class AppSessionLifecycleController {
 		}
 	}
 
-	private isCurrentRuntimeSession(runtime: AgentSessionRuntime, session: AgentSession): boolean {
-		return this.host.isRunning() && this.host.runtime() === runtime && runtime.session === session;
+	private advanceOwnership(runtime: AgentSessionRuntime, session: AgentSession): number {
+		if (this.ownershipRuntime !== runtime || this.ownershipSession !== session) {
+			this.ownershipRuntime = runtime;
+			this.ownershipSession = session;
+			this.ownershipGeneration += 1;
+		}
+		return this.ownershipGeneration;
+	}
+
+	private isCurrentRuntimeSession(
+		runtime: AgentSessionRuntime,
+		session: AgentSession,
+		ownershipGeneration: number,
+	): boolean {
+		return this.host.isRunning()
+			&& this.host.runtime() === runtime
+			&& runtime.session === session
+			&& this.ownershipRuntime === runtime
+			&& this.ownershipSession === session
+			&& this.ownershipGeneration === ownershipGeneration;
 	}
 
 	private extensionUiScope(session: AgentSession): string {

@@ -255,6 +255,7 @@ export class PiUiExtendApp {
 			runtime: () => this.runtime,
 			inputEditor: () => this.inputEditor,
 			activeInputTabId: () => this.tabsController.activeInputTabId(),
+			isInputTabOwnedByRuntime: (tabId, runtime, session) => this.tabsController.inputTabOwnedByRuntime(tabId, runtime, session),
 			inputStateForTab: (tabId) => this.tabsController.inputStateForTab(tabId),
 			setInputStateForTab: (tabId, state) => this.tabsController.setInputStateForTab(tabId, state),
 			promptEnhancerConfig: () => this.pixConfig.promptEnhancer,
@@ -273,6 +274,7 @@ export class PiUiExtendApp {
 			render: () => this.render(),
 		});
 		this.voiceController = new AppVoiceController({
+			activeInputScope: () => this.tabsController.activeInputTabId(),
 			insertTranscript: (text) => this.insertVoiceTranscript(text),
 			setPartialTranscript: (text) => this.setVoicePartialTranscript(text),
 			addSystemMessage: (message) => this.addVoiceSystemMessage(message),
@@ -354,6 +356,7 @@ export class PiUiExtendApp {
 		this.extensionUiController = new ExtensionUiController({
 			theme: this.theme,
 			activeExtensionUiScope: () => this.activeExtensionUiScope(),
+			isExtensionUiScopeActive: (scopeKey) => !this.tabsController.isSwitching() && this.activeExtensionUiScope() === scopeKey,
 			isRunning: () => this.running,
 			render: () => this.render(),
 			showToast: (message: string, kind?: ToastKind, options?: { scopeKey?: string }) => this.showToast(message, kind, options),
@@ -369,6 +372,7 @@ export class PiUiExtendApp {
 		});
 		this.extensionActions = new AppExtensionActionsController({
 			isRunning: () => this.running,
+			runtime: () => this.runtime,
 			getInput: () => this.input,
 			setInput: (value) => this.setInput(value),
 			awaitCurrentSessionExtensions: (runtime) => this.awaitCurrentSessionExtensions(runtime),
@@ -463,6 +467,7 @@ export class PiUiExtendApp {
 			setInput: (value) => this.inputEditor.setText(value),
 			insertInput: (value) => this.inputEditor.insert(value),
 			attachImage: (data, mimeType) => this.inputEditor.attachImage(data, mimeType),
+			requeueAutoUserMessageForSession: (session, message) => this.tabsController.requeueAutoUserMessageForSession(session, message),
 			onDeferredUserMessagesChanged: () => this.tabsController.persistActiveDeferredUserMessages(),
 		});
 		this.editorLayoutRenderer = new EditorLayoutRenderer({
@@ -702,6 +707,7 @@ export class PiUiExtendApp {
 		this.shellController = new AppShellController({
 			cwd: this.options.cwd,
 			isRunning: () => this.running,
+			activeScopeKey: () => this.tabsController.activeInputTabId(),
 			addEntry: (entry) => this.addEntry(entry),
 			touchEntry: (entry) => this.touchEntry(entry),
 			setStatus: (status) => this.setStatus(status),
@@ -713,6 +719,7 @@ export class PiUiExtendApp {
 		this.inputActions = new AppInputActionController(
 			{
 				runtime: () => this.runtime,
+				inputScopeKey: () => this.tabsController.activeInputTabId(),
 				isRunning: () => this.running,
 				isSessionSwitching: () => this.tabsController.isSwitching(),
 				inputEditor: () => this.inputEditor,
@@ -748,6 +755,7 @@ export class PiUiExtendApp {
 		this.inputController = new AppInputController({
 			inputEditor: this.inputEditor,
 			cwd: this.options.cwd,
+			inputScopeKey: () => this.tabsController.activeInputTabId(),
 			handleExtensionTerminalInput: (data) => this.extensionUiController.handleTerminalInput(data),
 			extensionInputUsesEditor: () => this.extensionUiController.activeCustomUiUsesEditor(),
 			getInput: () => this.input,
@@ -778,6 +786,7 @@ export class PiUiExtendApp {
 			setRunning: (running) => {
 				this.running = running;
 			},
+			cancelPendingTabLifecycle: () => this.tabsController.cancelPendingLifecycleWork(),
 			runtime: () => this.runtime,
 			saveInputStateForQuit: () => this.tabsController.saveInputStateForQuit(),
 			disposeInactiveRuntimesForQuit: () => this.tabsController.disposeInactiveRuntimes(
@@ -942,11 +951,15 @@ export class PiUiExtendApp {
 	}
 
 	private async activateRuntime(runtime: AgentSessionRuntime, options?: BindCurrentSessionOptions): Promise<void> {
+		this.extensionUiController.cancelCustomUi(this.activeExtensionUiScope());
+		void this.voiceController.stopRecording();
 		this.runtime = runtime;
 		runtime.setRebindSession(async () => {
+			if (!this.running || this.runtime !== runtime) return;
 			await this.bindCurrentSession({ awaitExtensions: false });
 		});
 		runtime.setBeforeSessionInvalidate(() => {
+			if (!this.running || this.runtime !== runtime) return;
 			this.extensionUiController.clearWidgets(this.activeExtensionUiScope());
 		});
 		await this.bindCurrentSession(options);
@@ -1001,7 +1014,7 @@ export class PiUiExtendApp {
 	private restoreTabInputState(state: InputEditorDraftState): void {
 		this.requestHistory.resetNavigation();
 		this.popupMenus.resetInputMenuDismissals();
-		this.inputEditor.setDraftState(state);
+		this.inputEditor.restoreDraftState(state);
 		this.autocompleteController.dispose();
 	}
 
@@ -1232,6 +1245,7 @@ export class PiUiExtendApp {
 	}
 
 	private showToast(message: string, kind: ToastKind = "info", options?: { durationMs?: number; variant?: ToastVariant; scopeKey?: string }): void {
+		if (!this.running) return;
 		this.toastController.showToast(message, kind, options);
 	}
 
@@ -1258,6 +1272,7 @@ export class PiUiExtendApp {
 			clearTimeout(this.scheduledRenderTimer);
 			this.scheduledRenderTimer = undefined;
 		}
+		if (!this.running) return;
 		this.autocompleteController.observeInput();
 		this.syncScrollAfterInputEditorChange();
 		this.renderController.render();
@@ -1267,6 +1282,7 @@ export class PiUiExtendApp {
 		if (!this.running || this.scheduledRenderTimer) return;
 		this.scheduledRenderTimer = setTimeout(() => {
 			this.scheduledRenderTimer = undefined;
+			if (!this.running) return;
 			this.syncScrollAfterInputEditorChange();
 			this.renderController.render();
 		}, COALESCED_RENDER_DELAY_MS);

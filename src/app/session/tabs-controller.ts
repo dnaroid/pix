@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, open as openFile, readFile, readdir, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
@@ -106,9 +106,18 @@ export class AppTabsController {
 	private readonly sessionViewsByTabId = new Map<string, TabSessionView>();
 	private readonly scrollStatesByTabId = new Map<string, AppScrollState>();
 	private readonly tabIdsNeedingHistoryReload = new Set<string>();
+	private readonly historyInvalidationGenerationByTabId = new Map<string, number>();
+	private readonly runtimeOwnershipGenerationByTabId = new Map<string, number>();
+	private readonly orphanRuntimeDisposals = new WeakSet<AgentSessionRuntime>();
+	private readonly lifecycleMutationQueue: Array<() => void> = [];
 	private activeTabId: string | undefined;
 	private pendingActiveTabId: string | undefined;
 	private historyLoadGeneration = 0;
+	private historyInvalidationGeneration = 0;
+	private runtimeOwnershipGeneration = 0;
+	private lifecycleGeneration = 0;
+	private lifecycleMutationRunning = false;
+	private saveTabsWriteTail: Promise<void> = Promise.resolve();
 	private restored = false;
 	private retentionCleanupRunning = false;
 	private retentionCleanupScheduled = false;
@@ -116,6 +125,49 @@ export class AppTabsController {
 	private prewarmRunning = false;
 
 	constructor(private readonly host: AppTabsControllerHost) {}
+
+	private runLifecycleMutation<T>(operation: (generation: number) => Promise<T>): Promise<T> {
+		return new Promise<T>((resolveOperation, rejectOperation) => {
+			const run = (): void => {
+				if (!this.host.isRunning()) {
+					resolveOperation(undefined as T);
+					const next = this.lifecycleMutationQueue.shift();
+					if (next) queueMicrotask(next);
+					return;
+				}
+				this.lifecycleMutationRunning = true;
+				const generation = ++this.lifecycleGeneration;
+				let result: Promise<T>;
+				try {
+					result = operation(generation);
+				} catch (error) {
+					result = Promise.reject(error);
+				}
+
+				void result.then(resolveOperation, rejectOperation).finally(() => {
+					this.lifecycleMutationRunning = false;
+					this.lifecycleMutationQueue.shift()?.();
+				});
+			};
+
+			if (this.lifecycleMutationRunning) this.lifecycleMutationQueue.push(run);
+			else run();
+		});
+	}
+
+	private isLifecycleOwner(generation: number, runtime: AgentSessionRuntime, session: AgentSession): boolean {
+		return this.host.isRunning()
+			&& generation === this.lifecycleGeneration
+			&& this.host.runtime() === runtime
+			&& runtime.session === session;
+	}
+
+	cancelPendingLifecycleWork(): void {
+		this.lifecycleGeneration += 1;
+		this.cancelHistoryLoad();
+		this.pendingActiveTabId = undefined;
+		this.clearRuntimeSubscriptions();
+	}
 
 	tabs(): readonly SessionTab[] {
 		if (!this.pendingActiveTabId) this.syncActiveTabFromRuntime({ save: false });
@@ -204,6 +256,22 @@ export class AppTabsController {
 		void this.saveTabs();
 	}
 
+	requeueAutoUserMessageForSession(session: AgentSession, message: SubmittedUserMessage): void {
+		if (this.host.runtime()?.session === session) return;
+		const tab = this.findTabForSession(session);
+		if (!tab) return;
+		const messages = this.autoUserMessagesByTabId.get(tab.id) ?? [];
+		messages.unshift(cloneSubmittedUserMessage(message));
+		this.autoUserMessagesByTabId.set(tab.id, messages);
+		void this.saveTabs();
+	}
+
+	inputTabOwnedByRuntime(tabId: string | undefined, runtime: AgentSessionRuntime, session: AgentSession): boolean {
+		if (runtime.session !== session) return false;
+		if (tabId === undefined) return this.host.runtime() === runtime;
+		return this.runtimesByTabId.get(tabId) === runtime;
+	}
+
 	syncActiveTabFromRuntime(options: { save?: boolean; force?: boolean } = {}): void {
 		if (this.pendingActiveTabId && options.force !== true) return;
 
@@ -244,12 +312,17 @@ export class AppTabsController {
 		if (options.save !== false) void this.saveTabs();
 	}
 
-	async restoreAfterStartup(): Promise<void> {
+	restoreAfterStartup(): Promise<void> {
+		return this.runLifecycleMutation((generation) => this.restoreAfterStartupMutation(generation));
+	}
+
+	private async restoreAfterStartupMutation(generation: number): Promise<void> {
 		if (this.restored) return;
 		this.restored = true;
 
 		const runtime = this.host.runtime();
 		if (!runtime) return;
+		const startupSession = runtime.session;
 
 		this.syncActiveTabFromRuntime({ save: false });
 		if (this.host.options.noSession) {
@@ -258,6 +331,10 @@ export class AppTabsController {
 		}
 
 		const saved = await this.loadTabs();
+		if (!this.isLifecycleOwner(generation, runtime, startupSession)) {
+			this.syncActiveTabFromRuntime({ save: false, force: true });
+			return;
+		}
 		if (!saved || saved.tabs.length === 0) {
 			this.clearStartupTabPlaceholders();
 			await this.saveTabs();
@@ -266,6 +343,10 @@ export class AppTabsController {
 
 		const restoredSessionPaths = saved.tabs.map((tab) => tab.path);
 		const forkedSessionPaths = await this.loadForkedSessionPaths(restoredSessionPaths);
+		if (!this.isLifecycleOwner(generation, runtime, startupSession)) {
+			this.syncActiveTabFromRuntime({ save: false, force: true });
+			return;
+		}
 		const restoredTabs = this.restoredTabs(saved, new Map(), forkedSessionPaths);
 		if (restoredTabs.length === 0) {
 			this.clearStartupTabPlaceholders();
@@ -274,7 +355,7 @@ export class AppTabsController {
 			return;
 		}
 
-		const currentPath = runtime.session.sessionFile ? resolve(runtime.session.sessionFile) : undefined;
+		const currentPath = startupSession.sessionFile ? resolve(startupSession.sessionFile) : undefined;
 		const explicitSessionPath = this.host.options.sessionPath ? resolve(this.host.options.sessionPath) : undefined;
 		const savedActivePath = saved.activePath ? resolve(saved.activePath) : undefined;
 		const desiredPath = explicitSessionPath && currentPath
@@ -286,12 +367,12 @@ export class AppTabsController {
 		this.replaceTabs(restoredTabs, desiredPath);
 		this.restorePersistedInputStates(saved);
 		this.restorePersistedQueuedUserMessages(saved);
-		if (explicitSessionPath && currentPath) this.ensureCurrentSessionTab(runtime.session);
+		if (explicitSessionPath && currentPath) this.ensureCurrentSessionTab(startupSession);
 
 		if (!desiredPath) {
 			this.clearStartupTabPlaceholders();
 			await this.saveTabs();
-			this.scheduleRestoredTabTitleRefresh(restoredSessionPaths);
+			this.scheduleRestoredTabTitleRefresh(restoredSessionPaths, generation);
 			this.scheduleProjectSessionRetention();
 			this.scheduleTabPrewarm();
 			return;
@@ -301,33 +382,63 @@ export class AppTabsController {
 		if (currentPath !== desiredPath) {
 			this.host.setStatus("restoring tabs");
 			this.host.render();
+			let candidateRuntime: AgentSessionRuntime | undefined;
 			try {
-				restoredRuntime = await this.host.createRuntimeForSession(desiredPath);
-				await this.host.activateRuntime(restoredRuntime, { awaitExtensions: false });
+				candidateRuntime = await this.host.createRuntimeForSession(desiredPath);
+				if (!this.isLifecycleOwner(generation, runtime, startupSession)) {
+					await this.disposeRuntimeIfOrphan(candidateRuntime);
+					this.syncActiveTabFromRuntime({ save: false, force: true });
+					return;
+				}
+				const candidateSession = candidateRuntime.session;
+				await this.host.activateRuntime(candidateRuntime, { awaitExtensions: false });
+				if (this.host.runtime() !== candidateRuntime || candidateRuntime.session !== candidateSession) {
+					await this.disposeRuntimeIfOrphan(candidateRuntime);
+					this.syncActiveTabFromRuntime({ save: false, force: true });
+					return;
+				}
+				restoredRuntime = candidateRuntime;
 			} catch {
+				if (candidateRuntime && this.host.runtime() === candidateRuntime) {
+					try {
+						await this.host.activateRuntime(runtime, { awaitExtensions: false });
+					} catch {
+						// Keep the best available runtime below and avoid overwriting a newer owner.
+					}
+				}
+				if (candidateRuntime) await this.disposeRuntimeIfOrphan(candidateRuntime);
+				if (this.host.runtime() !== runtime || runtime.session !== startupSession) {
+					this.syncActiveTabFromRuntime({ save: false, force: true });
+					return;
+				}
 				this.host.showToast("Could not restore the previous active tab", "warning");
-				this.replaceTabs([this.tabFromSession(runtime.session), ...restoredTabs], currentPath);
+				this.replaceTabs([this.tabFromSession(startupSession), ...restoredTabs], currentPath);
 				this.storeActiveRuntime(runtime);
 				this.clearStartupTabPlaceholders();
 				await this.saveTabs();
-				this.scheduleRestoredTabTitleRefresh(restoredSessionPaths);
+				this.scheduleRestoredTabTitleRefresh(restoredSessionPaths, generation);
 				this.scheduleProjectSessionRetention();
 				return;
 			}
 		}
 
 		this.syncActiveTabFromRuntime({ save: false });
+		if (restoredRuntime !== runtime) await this.disposeRuntimeIfOrphan(runtime);
 		this.clearStartupTabPlaceholders();
 		if (this.activeTabId) this.restoreInputState(this.activeTabId);
 		this.restorePersistedScrollStates(saved);
 		await this.saveTabs();
 		this.scheduleProjectSessionRetention();
 		this.scheduleTabPrewarm();
-		await this.loadActiveSessionHistory(restoredRuntime);
-		this.scheduleRestoredTabTitleRefresh(restoredSessionPaths);
+		await this.loadActiveSessionHistory(restoredRuntime, generation);
+		this.scheduleRestoredTabTitleRefresh(restoredSessionPaths, generation);
 	}
 
-	async openNewTab(): Promise<void> {
+	openNewTab(): Promise<void> {
+		return this.runLifecycleMutation((generation) => this.openNewTabMutation(generation));
+	}
+
+	private async openNewTabMutation(generation: number): Promise<void> {
 		if (this.pendingActiveTabId) {
 			this.host.showToast("Wait for the tab to finish loading", "info");
 			return;
@@ -344,6 +455,7 @@ export class AppTabsController {
 		this.storeActiveDeferredUserMessages();
 		const previousTabId = this.activeTabId;
 		const previousRuntime = runtime;
+		const previousSession = runtime.session;
 		const tab: SessionTab = {
 			id: createId("tab"),
 			title: "new",
@@ -380,6 +492,14 @@ export class AppTabsController {
 			this.host.render();
 			throw error;
 		}
+		if (!this.isLifecycleOwner(generation, previousRuntime, previousSession)) {
+			if (this.pendingActiveTabId === tab.id) this.pendingActiveTabId = undefined;
+			this.removeTab(tab.id);
+			this.activeTabId = previousTabId;
+			await this.disposeRuntimeIfOrphan(newRuntime);
+			this.syncActiveTabFromRuntime({ save: false, force: true });
+			return;
+		}
 
 		const existingTab = this.findTabForSession(newRuntime.session);
 		const targetTab = existingTab && existingTab.id !== tab.id ? existingTab : tab;
@@ -388,7 +508,6 @@ export class AppTabsController {
 		this.pendingActiveTabId = targetTab.id;
 		this.clearTabAttention(targetTab);
 		this.updateTabFromSession(targetTab, newRuntime.session);
-		this.setRuntimeForTab(targetTab.id, newRuntime);
 		this.restoreInputState(targetTab.id);
 		this.host.resetSessionView();
 		this.restoreDeferredUserMessages(targetTab.id);
@@ -396,9 +515,36 @@ export class AppTabsController {
 		this.host.render();
 		try {
 			await this.host.activateRuntime(newRuntime, { awaitExtensions: false });
-		} finally {
+		} catch (error) {
 			if (this.pendingActiveTabId === targetTab.id) this.pendingActiveTabId = undefined;
+			if (targetTab === tab) this.removeTab(tab.id);
+			this.activeTabId = previousTabId;
+			if (this.host.runtime() !== previousRuntime) {
+				try {
+					await this.host.activateRuntime(previousRuntime, { awaitExtensions: false });
+				} catch {
+					// Keep the best available runtime and preserve the original activation error.
+				}
+			}
+			await this.disposeRuntimeIfOrphan(newRuntime);
+			if (this.adoptCurrentRuntimeAfterFailedRollback(targetTab, newRuntime)) {
+				this.host.setSessionStatus(newRuntime.session);
+				this.host.setSessionActivity(this.sessionActivity(newRuntime.session));
+				this.host.render();
+				throw error;
+			}
+			if (previousTabId) this.restoreInputState(previousTabId);
+			this.host.closeMenusForTabSwitch?.();
+			this.host.resetSessionView();
+			if (previousTabId) this.restoreDeferredUserMessages(previousTabId);
+			this.host.loadSessionHistory();
+			this.host.setSessionStatus(this.host.runtime()?.session);
+			this.host.setSessionActivity(this.sessionActivity(this.host.runtime()?.session));
+			this.host.render();
+			throw error;
 		}
+		if (this.pendingActiveTabId === targetTab.id) this.pendingActiveTabId = undefined;
+		this.setRuntimeForTab(targetTab.id, newRuntime);
 		void this.saveTabs();
 		this.scheduleProjectSessionRetention();
 		this.host.resetSessionView();
@@ -414,7 +560,11 @@ export class AppTabsController {
 		this.host.render();
 	}
 
-	async openSessionInNewTab(sessionPath: string): Promise<boolean> {
+	openSessionInNewTab(sessionPath: string): Promise<boolean> {
+		return this.runLifecycleMutation((generation) => this.openSessionInNewTabMutation(sessionPath, generation));
+	}
+
+	private async openSessionInNewTabMutation(sessionPath: string, generation: number): Promise<boolean> {
 		if (this.pendingActiveTabId) {
 			this.host.showToast("Wait for the tab to finish loading", "info");
 			return false;
@@ -431,7 +581,7 @@ export class AppTabsController {
 		const resolvedSessionPath = resolve(runtime.cwd, sessionPath);
 		const existingTab = this.findTabBySessionPath(resolvedSessionPath);
 		if (existingTab) {
-			await this.switchToTab(existingTab.id);
+			await this.switchToTabMutation(existingTab.id, generation);
 			return true;
 		}
 
@@ -441,6 +591,7 @@ export class AppTabsController {
 		this.storeActiveDeferredUserMessages();
 		const previousTabId = this.activeTabId;
 		const previousRuntime = runtime;
+		const previousSession = runtime.session;
 		this.host.setStatus("opening session tab");
 		this.host.render();
 
@@ -481,9 +632,16 @@ export class AppTabsController {
 			this.host.render();
 			return false;
 		}
+		if (!this.isLifecycleOwner(generation, previousRuntime, previousSession)) {
+			if (this.pendingActiveTabId === tab.id) this.pendingActiveTabId = undefined;
+			this.removeTab(tab.id);
+			this.activeTabId = previousTabId;
+			await this.disposeRuntimeIfOrphan(newRuntime);
+			this.syncActiveTabFromRuntime({ save: false, force: true });
+			return false;
+		}
 
 		this.updateTabFromSession(tab, newRuntime.session);
-		this.setRuntimeForTab(tab.id, newRuntime);
 		this.host.render();
 
 		try {
@@ -501,7 +659,14 @@ export class AppTabsController {
 					// Keep the best available runtime below and surface the switch failure.
 				}
 			}
-			void this.host.disposeRuntime(newRuntime);
+			await this.disposeRuntimeIfOrphan(newRuntime);
+			if (this.adoptCurrentRuntimeAfterFailedRollback(tab, newRuntime)) {
+				this.host.showToast("Could not initialize session tab", "warning");
+				this.host.setSessionStatus(newRuntime.session);
+				this.host.setSessionActivity(this.sessionActivity(newRuntime.session));
+				this.host.render();
+				return false;
+			}
 			this.host.showToast("Could not open session tab", "warning");
 			this.host.resetSessionView();
 			if (previousTabId) this.restoreDeferredUserMessages(previousTabId);
@@ -520,11 +685,15 @@ export class AppTabsController {
 		this.restoreInputState(tab.id);
 		void this.saveTabs();
 		this.scheduleTabPrewarm();
-		await this.loadActiveSessionHistory(newRuntime);
+		await this.loadActiveSessionHistory(newRuntime, generation);
 		return true;
 	}
 
-	async forkSessionEntryInNewTab(entryId: string): Promise<boolean> {
+	forkSessionEntryInNewTab(entryId: string): Promise<boolean> {
+		return this.runLifecycleMutation((generation) => this.forkSessionEntryInNewTabMutation(entryId, generation));
+	}
+
+	private async forkSessionEntryInNewTabMutation(entryId: string, generation: number): Promise<boolean> {
 		if (this.pendingActiveTabId) {
 			this.host.showToast("Wait for the tab to finish loading", "info");
 			return false;
@@ -550,6 +719,7 @@ export class AppTabsController {
 		this.storeActiveDeferredUserMessages();
 		const previousTabId = this.activeTabId;
 		const previousRuntime = runtime;
+		const previousSession = runtime.session;
 		this.host.setStatus("forking session tab");
 		this.host.render();
 
@@ -567,22 +737,28 @@ export class AppTabsController {
 		try {
 			result = await forkRuntime.fork(entryId);
 		} catch (error) {
-			void this.host.disposeRuntime(forkRuntime);
+			await this.disposeRuntimeIfOrphan(forkRuntime);
 			throw error;
 		}
 		if (result.cancelled) {
-			void this.host.disposeRuntime(forkRuntime);
+			await this.disposeRuntimeIfOrphan(forkRuntime);
 			this.host.addEntry({ id: createId("system"), kind: "system", text: "Fork cancelled." });
 			this.host.setSessionStatus(previousRuntime.session);
 			this.host.render();
+			return false;
+		}
+		if (generation !== this.lifecycleGeneration
+			|| this.host.runtime() !== previousRuntime
+			|| (forkRuntime !== previousRuntime && previousRuntime.session !== previousSession)) {
+			await this.disposeRuntimeIfOrphan(forkRuntime);
 			return false;
 		}
 
 		const existingTab = this.findTabForSession(forkRuntime.session);
 		if (existingTab) {
 			if (result.selectedText) this.inputStatesByTabId.set(existingTab.id, this.inputStateFromText(result.selectedText));
-			void this.host.disposeRuntime(forkRuntime);
-			await this.switchToTab(existingTab.id);
+			await this.disposeRuntimeIfOrphan(forkRuntime);
+			await this.switchToTabMutation(existingTab.id, generation);
 			this.host.showToast("Fork opened in existing tab", "success");
 			return true;
 		}
@@ -593,7 +769,6 @@ export class AppTabsController {
 		this.pendingActiveTabId = tab.id;
 		this.clearTabAttention(tab);
 		this.updateTabFromSession(tab, forkRuntime.session);
-		this.setRuntimeForTab(tab.id, forkRuntime);
 		if (result.selectedText) this.inputStatesByTabId.set(tab.id, this.inputStateFromText(result.selectedText));
 		this.restoreInputState(tab.id);
 		this.host.closeMenusForTabSwitch?.();
@@ -617,7 +792,14 @@ export class AppTabsController {
 					// Keep the best available runtime below and surface the switch failure.
 				}
 			}
-			void this.host.disposeRuntime(forkRuntime);
+			await this.disposeRuntimeIfOrphan(forkRuntime);
+			if (this.adoptCurrentRuntimeAfterFailedRollback(tab, forkRuntime)) {
+				this.host.showToast("Could not initialize fork tab", "warning");
+				this.host.setSessionStatus(forkRuntime.session);
+				this.host.setSessionActivity(this.sessionActivity(forkRuntime.session));
+				this.host.render();
+				return false;
+			}
 			this.host.showToast("Could not open fork tab", "warning");
 			this.host.resetSessionView();
 			if (previousTabId) this.restoreDeferredUserMessages(previousTabId);
@@ -637,7 +819,7 @@ export class AppTabsController {
 		void this.saveTabs();
 		this.scheduleProjectSessionRetention();
 		this.scheduleTabPrewarm();
-		await this.loadActiveSessionHistory(forkRuntime);
+		await this.loadActiveSessionHistory(forkRuntime, generation);
 		this.host.addEntry({ id: createId("system"), kind: "system", text: `Forked from entry ${entryId} in a new tab.` });
 		this.host.setSessionStatus(forkRuntime.session);
 		this.host.showToast("Fork opened in new tab", "success");
@@ -645,7 +827,11 @@ export class AppTabsController {
 		return true;
 	}
 
-	async switchToTab(tabId: string): Promise<void> {
+	switchToTab(tabId: string): Promise<void> {
+		return this.runLifecycleMutation((generation) => this.switchToTabMutation(tabId, generation));
+	}
+
+	private async switchToTabMutation(tabId: string, generation: number): Promise<void> {
 		if (this.pendingActiveTabId) {
 			this.host.showToast("Wait for the tab to finish loading", "info");
 			return;
@@ -667,6 +853,7 @@ export class AppTabsController {
 		this.cancelHistoryLoad();
 		const previousTabId = this.activeTabId;
 		const previousRuntime = runtime;
+		const previousSession = runtime.session;
 		const previousTargetActivity = target.activity;
 
 		this.storeActiveRuntime(runtime);
@@ -687,6 +874,9 @@ export class AppTabsController {
 		try {
 			targetRuntime = await this.runtimeForTab(target);
 			if (!targetRuntime) throw new Error("Could not load tab runtime");
+			if (!this.isLifecycleOwner(generation, previousRuntime, previousSession)) {
+				throw new Error("Tab ownership changed while loading the runtime");
+			}
 			await this.host.activateRuntime(targetRuntime, { awaitExtensions: false });
 		} catch {
 			this.pendingActiveTabId = undefined;
@@ -730,13 +920,21 @@ export class AppTabsController {
 			this.host.setSessionActivity(this.sessionActivity(targetRuntime.session));
 			this.host.render();
 		} else {
-			await this.loadActiveSessionHistory(targetRuntime);
-			this.tabIdsNeedingHistoryReload.delete(target.id);
+			const invalidationGeneration = this.historyInvalidationGenerationByTabId.get(target.id);
+			const loaded = await this.loadActiveSessionHistory(targetRuntime, generation);
+			if (loaded && this.historyInvalidationGenerationByTabId.get(target.id) === invalidationGeneration) {
+				this.tabIdsNeedingHistoryReload.delete(target.id);
+				this.historyInvalidationGenerationByTabId.delete(target.id);
+			}
 		}
-		this.scheduleDelayedHistoryReload(target.id, targetRuntime);
+		this.scheduleDelayedHistoryReload(target.id, targetRuntime, generation);
 	}
 
-	async closeTab(tabId: string): Promise<void> {
+	closeTab(tabId: string): Promise<void> {
+		return this.runLifecycleMutation((generation) => this.closeTabMutation(tabId, generation));
+	}
+
+	private async closeTabMutation(tabId: string, generation: number): Promise<void> {
 		if (this.pendingActiveTabId) {
 			this.host.showToast("Wait for the tab to finish loading", "info");
 			return;
@@ -747,7 +945,7 @@ export class AppTabsController {
 		this.cancelHistoryLoad();
 
 		if (this.tabItems.length <= 1) {
-			await this.replaceLastTabWithNewSession(tabId);
+			await this.replaceLastTabWithNewSession(tabId, generation);
 			return;
 		}
 
@@ -766,7 +964,7 @@ export class AppTabsController {
 			this.storeActiveInputState();
 			this.storeActiveDeferredUserMessages();
 			this.stopAttentionBlinkIfIdle();
-			if (tabRuntime) void this.host.disposeRuntime(tabRuntime);
+			if (tabRuntime) await this.disposeRuntimeIfOrphan(tabRuntime);
 			void this.saveTabs();
 			this.host.render();
 			return;
@@ -783,9 +981,35 @@ export class AppTabsController {
 
 		this.host.setStatus("closing tab");
 		this.host.render();
+		const session = runtime.session;
 		const nextRuntime = await this.runtimeForTab(nextTab);
 		if (!nextRuntime) return;
-		await this.host.activateRuntime(nextRuntime, { awaitExtensions: false });
+		if (!this.isLifecycleOwner(generation, runtime, session)) return;
+		this.pendingActiveTabId = nextTab.id;
+		try {
+			await this.host.activateRuntime(nextRuntime, { awaitExtensions: false });
+		} catch {
+			if (this.pendingActiveTabId === nextTab.id) this.pendingActiveTabId = undefined;
+			if (this.host.runtime() !== runtime) {
+				try {
+					await this.host.activateRuntime(runtime, { awaitExtensions: false });
+				} catch {
+					// Keep the best available runtime below and surface the close failure.
+				}
+			}
+			if (this.host.runtime() === nextRuntime) {
+				this.activeTabId = nextTab.id;
+				this.clearTabAttention(nextTab);
+				this.setRuntimeForTab(nextTab.id, nextRuntime);
+				this.restoreInputState(nextTab.id);
+			}
+			this.host.showToast("Could not close tab", "warning");
+			this.host.setSessionStatus(this.host.runtime()?.session);
+			this.host.setSessionActivity(this.sessionActivity(this.host.runtime()?.session));
+			this.host.render();
+			return;
+		}
+		if (this.pendingActiveTabId === nextTab.id) this.pendingActiveTabId = undefined;
 
 		this.tabItems.splice(index, 1);
 		this.deleteRuntimeForTab(tabId);
@@ -799,25 +1023,33 @@ export class AppTabsController {
 		this.setRuntimeForTab(nextTab.id, nextRuntime);
 		this.restoreInputState(nextTab.id);
 		this.host.closeMenusForTabSwitch?.();
-		void this.host.disposeRuntime(runtime);
+		await this.disposeRuntimeIfOrphan(runtime);
 		void this.saveTabs();
 		this.scheduleTabPrewarm();
-		await this.loadActiveSessionHistory(nextRuntime);
+		await this.loadActiveSessionHistory(nextRuntime, generation);
 	}
 
-	private async replaceLastTabWithNewSession(tabId: string): Promise<void> {
+	private async replaceLastTabWithNewSession(tabId: string, generation: number): Promise<void> {
 		const tab = this.tabItems.find((item) => item.id === tabId);
 		if (!tab) return;
 
 		const runtime = this.idleRuntime("new");
 		if (!runtime) return;
+		const session = runtime.session;
 
 		this.activeTabId = tab.id;
+		this.pendingActiveTabId = tab.id;
 		this.host.setStatus("starting new session");
 		this.host.render();
 
-		await this.host.awaitCurrentSessionExtensions?.(runtime);
-		const result = await runtime.newSession();
+		let result: Awaited<ReturnType<AgentSessionRuntime["newSession"]>>;
+		try {
+			await this.host.awaitCurrentSessionExtensions?.(runtime);
+			if (!this.isLifecycleOwner(generation, runtime, session)) return;
+			result = await runtime.newSession();
+		} finally {
+			if (this.pendingActiveTabId === tab.id) this.pendingActiveTabId = undefined;
+		}
 		if (result.cancelled) {
 			this.host.addEntry({ id: createId("system"), kind: "system", text: "New session cancelled." });
 			this.host.setSessionStatus(runtime.session);
@@ -851,11 +1083,23 @@ export class AppTabsController {
 		this.host.render();
 	}
 
-	private async loadActiveSessionHistory(runtime: AgentSessionRuntime): Promise<void> {
-		const generation = ++this.historyLoadGeneration;
-		const isCancelled = (): boolean => generation !== this.historyLoadGeneration || this.host.runtime() !== runtime;
+	private async loadActiveSessionHistory(runtime: AgentSessionRuntime, lifecycleGeneration: number): Promise<boolean> {
+		const tabId = this.activeTabId;
+		if (!tabId) return false;
+		const session = runtime.session;
+		const ownershipGeneration = this.runtimeOwnershipGenerationByTabId.get(tabId);
+		const historyGeneration = ++this.historyLoadGeneration;
+		const isCancelled = (): boolean => ownershipGeneration === undefined
+			|| !this.host.isRunning()
+			|| historyGeneration !== this.historyLoadGeneration
+			|| lifecycleGeneration !== this.lifecycleGeneration
+			|| this.pendingActiveTabId !== undefined
+			|| this.activeTabId !== tabId
+			|| this.host.runtime() !== runtime
+			|| !this.isRuntimeOwnedByTab(tabId, runtime, session, ownershipGeneration);
+		if (isCancelled()) return false;
 		this.host.resetSessionView();
-		if (this.activeTabId) this.restoreDeferredUserMessages(this.activeTabId);
+		this.restoreDeferredUserMessages(tabId);
 		this.host.setStatus("loading session history");
 		this.host.setSessionActivity("thinking");
 		this.host.render();
@@ -867,13 +1111,15 @@ export class AppTabsController {
 			},
 			lazyOlderHistory: true,
 		});
-		if (!completed || isCancelled()) return;
+		if (!completed || isCancelled()) return false;
 
-		this.restoreStoredScrollState(this.activeTabId);
-		this.host.setSessionStatus(runtime.session);
+		this.restoreStoredScrollState(tabId);
+		this.host.setSessionStatus(session);
+		if (isCancelled()) return false;
 		this.host.syncUserSessionEntryMetadata();
-		this.host.setSessionActivity(this.sessionActivity(runtime.session));
+		this.host.setSessionActivity(this.sessionActivity(session));
 		this.host.render();
+		return true;
 	}
 
 	private cancelHistoryLoad(): void {
@@ -947,18 +1193,40 @@ export class AppTabsController {
 	}
 
 	private setRuntimeForTab(tabId: string, runtime: AgentSessionRuntime): void {
+		const session = runtime.session;
+		const existingRuntime = this.runtimesByTabId.get(tabId);
+		const existingSubscription = this.runtimeSubscriptionsByTabId.get(tabId);
+		if (existingRuntime === runtime && existingSubscription?.session === session) return;
+
+		for (const [ownerTabId, ownedRuntime] of this.runtimesByTabId) {
+			if (ownerTabId === tabId || ownedRuntime !== runtime) continue;
+			this.releaseRuntimeOwnership(ownerTabId);
+		}
+
+		if (existingRuntime && existingRuntime !== runtime) this.queueOrphanRuntimeDisposal(existingRuntime);
+		this.clearRuntimeRefreshTimers(tabId);
+		this.clearHistoryReloadTimers(tabId);
+		existingSubscription?.unsubscribe();
+		this.runtimeSubscriptionsByTabId.delete(tabId);
 		this.runtimesByTabId.set(tabId, runtime);
+		this.runtimeOwnershipGenerationByTabId.set(tabId, ++this.runtimeOwnershipGeneration);
 		this.observeRuntimeForTab(tabId, runtime);
 	}
 
 	private deleteRuntimeForTab(tabId: string): void {
-		this.runtimesByTabId.delete(tabId);
+		this.releaseRuntimeOwnership(tabId);
 		this.runtimeLoadsByTabId.delete(tabId);
 		this.sessionViewsByTabId.delete(tabId);
 		this.scrollStatesByTabId.delete(tabId);
+		this.tabIdsNeedingHistoryReload.delete(tabId);
+		this.historyInvalidationGenerationByTabId.delete(tabId);
+	}
+
+	private releaseRuntimeOwnership(tabId: string): void {
+		this.runtimesByTabId.delete(tabId);
+		this.runtimeOwnershipGenerationByTabId.delete(tabId);
 		this.clearRuntimeRefreshTimers(tabId);
 		this.clearHistoryReloadTimers(tabId);
-		this.tabIdsNeedingHistoryReload.delete(tabId);
 		const subscription = this.runtimeSubscriptionsByTabId.get(tabId);
 		subscription?.unsubscribe();
 		this.runtimeSubscriptionsByTabId.delete(tabId);
@@ -975,24 +1243,67 @@ export class AppTabsController {
 			subscription.unsubscribe();
 		}
 		this.runtimeSubscriptionsByTabId.clear();
+		this.runtimeOwnershipGenerationByTabId.clear();
 	}
 
 	private observeRuntimeForTab(tabId: string, runtime: AgentSessionRuntime): void {
 		const existing = this.runtimeSubscriptionsByTabId.get(tabId);
 		if (existing?.runtime === runtime && existing.session === runtime.session) return;
 		existing?.unsubscribe();
+		const session = runtime.session;
+		const ownershipGeneration = this.runtimeOwnershipGenerationByTabId.get(tabId);
+		if (ownershipGeneration === undefined) return;
 
-		const unsubscribe = runtime.session.subscribe((event) => {
+		const unsubscribe = session.subscribe((event) => {
+			if (!this.isRuntimeOwnedByTab(tabId, runtime, session, ownershipGeneration)) return;
 			if (this.shouldInvalidateCachedViewForRuntimeEvent(event)) {
 				this.tabIdsNeedingHistoryReload.add(tabId);
+				this.historyInvalidationGenerationByTabId.set(tabId, ++this.historyInvalidationGeneration);
 			}
 			if (this.shouldScheduleDelayedSyncForRuntimeEvent(event)) {
-				this.scheduleDelayedRuntimeSync(tabId, runtime);
+				this.scheduleDelayedRuntimeSync(tabId, runtime, session, ownershipGeneration);
 			}
 			if (!this.shouldSyncTabFromRuntimeEvent(event)) return;
-			this.syncTabFromObservedRuntime(tabId, runtime);
+			this.syncTabFromObservedRuntime(tabId, runtime, session, ownershipGeneration);
 		});
-		this.runtimeSubscriptionsByTabId.set(tabId, { runtime, session: runtime.session, unsubscribe });
+		this.runtimeSubscriptionsByTabId.set(tabId, { runtime, session, unsubscribe });
+	}
+
+	private isRuntimeOwnedByTab(
+		tabId: string,
+		runtime: AgentSessionRuntime,
+		session: AgentSession,
+		ownershipGeneration: number,
+	): boolean {
+		return this.runtimesByTabId.get(tabId) === runtime
+			&& runtime.session === session
+			&& this.runtimeOwnershipGenerationByTabId.get(tabId) === ownershipGeneration;
+	}
+
+	private queueOrphanRuntimeDisposal(runtime: AgentSessionRuntime): void {
+		if (this.orphanRuntimeDisposals.has(runtime)) return;
+		this.orphanRuntimeDisposals.add(runtime);
+		queueMicrotask(() => {
+			void this.disposeRuntimeIfOrphan(runtime).finally(() => {
+				this.orphanRuntimeDisposals.delete(runtime);
+			});
+		});
+	}
+
+	private async disposeRuntimeIfOrphan(runtime: AgentSessionRuntime): Promise<void> {
+		if (this.host.runtime() === runtime || [...this.runtimesByTabId.values()].includes(runtime)) return;
+		await this.host.disposeRuntime(runtime).catch(() => undefined);
+	}
+
+	private adoptCurrentRuntimeAfterFailedRollback(tab: SessionTab, runtime: AgentSessionRuntime): boolean {
+		if (this.host.runtime() !== runtime) return false;
+		if (!this.tabItems.some((item) => item.id === tab.id)) this.tabItems.push(tab);
+		this.activeTabId = tab.id;
+		this.clearTabAttention(tab);
+		this.updateTabFromSession(tab, runtime.session);
+		this.setRuntimeForTab(tab.id, runtime);
+		this.restoreInputState(tab.id);
+		return true;
 	}
 
 	private shouldSyncTabFromRuntimeEvent(event: AgentSessionEvent): boolean {
@@ -1024,12 +1335,17 @@ export class AppTabsController {
 			|| event.type === "compaction_end";
 	}
 
-	private scheduleDelayedRuntimeSync(tabId: string, runtime: AgentSessionRuntime): void {
+	private scheduleDelayedRuntimeSync(
+		tabId: string,
+		runtime: AgentSessionRuntime,
+		session: AgentSession,
+		ownershipGeneration: number,
+	): void {
 		this.clearRuntimeRefreshTimers(tabId);
 		for (const delayMs of [0, 100, 500, 1500, 3000]) {
 			const timer = setTimeout(() => {
 				this.runtimeRefreshTimersByTabId.get(tabId)?.delete(timer);
-				this.syncTabFromObservedRuntime(tabId, runtime);
+				this.syncTabFromObservedRuntime(tabId, runtime, session, ownershipGeneration);
 			}, delayMs);
 			timer.unref?.();
 			let timers = this.runtimeRefreshTimersByTabId.get(tabId);
@@ -1055,10 +1371,13 @@ export class AppTabsController {
 		this.historyReloadTimersByTabId.delete(tabId);
 	}
 
-	private scheduleDelayedHistoryReload(tabId: string, runtime: AgentSessionRuntime): void {
+	private scheduleDelayedHistoryReload(tabId: string, runtime: AgentSessionRuntime, lifecycleGeneration: number): void {
 		if (!this.tabIdsNeedingHistoryReload.has(tabId)) return;
 		if (tabId !== this.activeTabId || this.pendingActiveTabId !== undefined) return;
-		if (this.sessionActivity(runtime.session) === "running") {
+		const session = runtime.session;
+		const ownershipGeneration = this.runtimeOwnershipGenerationByTabId.get(tabId);
+		if (ownershipGeneration === undefined || !this.isRuntimeOwnedByTab(tabId, runtime, session, ownershipGeneration)) return;
+		if (this.sessionActivity(session) === "running") {
 			this.clearHistoryReloadTimers(tabId);
 			return;
 		}
@@ -1067,7 +1386,7 @@ export class AppTabsController {
 		for (const delayMs of [150, 1000, 3000]) {
 			const timer = setTimeout(() => {
 				this.historyReloadTimersByTabId.get(tabId)?.delete(timer);
-				void this.reloadActiveTabHistoryIfNeeded(tabId, runtime);
+				void this.reloadActiveTabHistoryIfNeeded(tabId, runtime, session, ownershipGeneration, lifecycleGeneration);
 			}, delayMs);
 			timer.unref?.();
 			let timers = this.historyReloadTimersByTabId.get(tabId);
@@ -1079,18 +1398,36 @@ export class AppTabsController {
 		}
 	}
 
-	private async reloadActiveTabHistoryIfNeeded(tabId: string, runtime: AgentSessionRuntime): Promise<void> {
+	private async reloadActiveTabHistoryIfNeeded(
+		tabId: string,
+		runtime: AgentSessionRuntime,
+		session: AgentSession,
+		ownershipGeneration: number,
+		lifecycleGeneration: number,
+	): Promise<void> {
+		if (lifecycleGeneration !== this.lifecycleGeneration) return;
 		if (tabId !== this.activeTabId || this.pendingActiveTabId !== undefined || this.host.runtime() !== runtime) return;
+		if (!this.isRuntimeOwnedByTab(tabId, runtime, session, ownershipGeneration)) return;
 		if (!this.tabIdsNeedingHistoryReload.has(tabId)) return;
-		if (this.sessionActivity(runtime.session) === "running") return;
+		if (this.sessionActivity(session) === "running") return;
 
-		await this.loadActiveSessionHistory(runtime);
-		if (tabId === this.activeTabId && this.host.runtime() === runtime) {
+		const invalidationGeneration = this.historyInvalidationGenerationByTabId.get(tabId);
+		const loaded = await this.loadActiveSessionHistory(runtime, lifecycleGeneration);
+		if (loaded
+			&& this.isRuntimeOwnedByTab(tabId, runtime, session, ownershipGeneration)
+			&& this.historyInvalidationGenerationByTabId.get(tabId) === invalidationGeneration) {
 			this.tabIdsNeedingHistoryReload.delete(tabId);
+			this.historyInvalidationGenerationByTabId.delete(tabId);
 		}
 	}
 
-	private syncTabFromObservedRuntime(tabId: string, runtime: AgentSessionRuntime): void {
+	private syncTabFromObservedRuntime(
+		tabId: string,
+		runtime: AgentSessionRuntime,
+		session: AgentSession,
+		ownershipGeneration: number,
+	): void {
+		if (!this.isRuntimeOwnedByTab(tabId, runtime, session, ownershipGeneration)) return;
 		const tab = this.tabItems.find((item) => item.id === tabId);
 		if (!tab) {
 			this.deleteRuntimeForTab(tabId);
@@ -1100,7 +1437,7 @@ export class AppTabsController {
 		const previousTitle = tab.title;
 		const previousActivity = tab.activity;
 		const previousSessionPath = tab.sessionPath;
-		this.updateTabFromSession(tab, runtime.session);
+		this.updateTabFromSession(tab, session);
 
 		if (tab.title === previousTitle && tab.activity === previousActivity && tab.sessionPath === previousSessionPath) return;
 		if (tab.title !== previousTitle || tab.sessionPath !== previousSessionPath) void this.saveTabs();
@@ -1150,8 +1487,13 @@ export class AppTabsController {
 	}
 
 	private async runtimeForTab(tab: SessionTab): Promise<AgentSessionRuntime | undefined> {
+		if (!this.host.isRunning()) return undefined;
 		const existing = this.runtimesByTabId.get(tab.id);
-		if (existing) return existing;
+		if (existing && tab.sessionPath && this.sessionPath(existing.session) === resolve(tab.sessionPath)) return existing;
+		if (existing) {
+			this.releaseRuntimeOwnership(tab.id);
+			await this.disposeRuntimeIfOrphan(existing);
+		}
 		const loading = this.runtimeLoadsByTabId.get(tab.id);
 		if (loading) return await loading;
 		if (!tab.sessionPath) {
@@ -1162,9 +1504,13 @@ export class AppTabsController {
 		const expectedPath = resolve(tab.sessionPath);
 		const pending = (async (): Promise<AgentSessionRuntime | undefined> => {
 			const runtime = await this.host.createRuntimeForSession(expectedPath);
+			if (!this.host.isRunning()) {
+				await this.disposeRuntimeIfOrphan(runtime);
+				return undefined;
+			}
 			const liveTab = this.tabItems.find((item) => item.id === tab.id);
 			if (!liveTab || !liveTab.sessionPath || resolve(liveTab.sessionPath) !== expectedPath) {
-				void this.host.disposeRuntime(runtime);
+				await this.disposeRuntimeIfOrphan(runtime);
 				return undefined;
 			}
 
@@ -1194,14 +1540,18 @@ export class AppTabsController {
 	}
 
 	private replaceTabs(tabs: readonly SessionTab[], activeSessionPath: string | undefined): void {
+		const displacedRuntimes = [...new Set(this.runtimesByTabId.values())];
 		this.tabItems.length = 0;
 		this.runtimesByTabId.clear();
+		this.runtimeLoadsByTabId.clear();
 		this.clearRuntimeSubscriptions();
 		this.inputStatesByTabId.clear();
 		this.autoUserMessagesByTabId.clear();
 		this.deferredUserMessagesByTabId.clear();
 		this.sessionViewsByTabId.clear();
 		this.scrollStatesByTabId.clear();
+		this.tabIdsNeedingHistoryReload.clear();
+		this.historyInvalidationGenerationByTabId.clear();
 		const seen = new Set<string>();
 		for (const tab of tabs) {
 			const sessionPath = tab.sessionPath ? resolve(tab.sessionPath) : undefined;
@@ -1225,6 +1575,7 @@ export class AppTabsController {
 			? this.tabItems.find((tab) => tab.sessionPath === activePath)?.id
 			: this.tabItems[0]?.id;
 		this.activeTabId ??= this.tabItems[0]?.id;
+		for (const runtime of displacedRuntimes) this.queueOrphanRuntimeDisposal(runtime);
 	}
 
 	private removeTab(tabId: string): void {
@@ -1441,18 +1792,19 @@ export class AppTabsController {
 		return new Set(entries.filter((entry): entry is string => entry !== undefined));
 	}
 
-	private scheduleRestoredTabTitleRefresh(sessionPaths: readonly string[]): void {
+	private scheduleRestoredTabTitleRefresh(sessionPaths: readonly string[], lifecycleGeneration: number): void {
 		if (sessionPaths.length === 0) return;
 		setTimeout(() => {
-			void this.refreshRestoredTabTitles(sessionPaths);
+			void this.refreshRestoredTabTitles(sessionPaths, lifecycleGeneration);
 		}, 0).unref?.();
 	}
 
-	private async refreshRestoredTabTitles(sessionPaths: readonly string[]): Promise<void> {
+	private async refreshRestoredTabTitles(sessionPaths: readonly string[], lifecycleGeneration: number): Promise<void> {
 		const [titles, forkedSessionPaths] = await Promise.all([
 			this.loadSessionTitles(sessionPaths),
 			this.loadForkedSessionPaths(sessionPaths),
 		]);
+		if (!this.host.isRunning() || lifecycleGeneration !== this.lifecycleGeneration) return;
 		if (titles.size === 0 && forkedSessionPaths.size === 0) return;
 
 		let changed = false;
@@ -1558,8 +1910,8 @@ export class AppTabsController {
 		return messages;
 	}
 
-	private async saveTabs(): Promise<void> {
-		if (this.host.options.noSession) return;
+	private saveTabs(): Promise<void> {
+		if (this.host.options.noSession) return Promise.resolve();
 
 		try {
 			const tabs: PersistedTab[] = [];
@@ -1592,7 +1944,7 @@ export class AppTabsController {
 				}
 				tabs.push(persistedTab);
 			}
-			if (tabs.length === 0) return;
+			if (tabs.length === 0) return Promise.resolve();
 
 			const activePath = this.activeTab()?.sessionPath;
 			const payload = JSON.stringify({
@@ -1602,12 +1954,27 @@ export class AppTabsController {
 				...(activePath ? { activePath: resolve(activePath) } : {}),
 			}, null, 2);
 			const filePath = this.filePath();
-			await mkdir(dirname(filePath), { recursive: true });
-			const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-			await writeFile(tempPath, payload, "utf8");
-			await rename(tempPath, filePath);
+			const tempPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+			const write = this.saveTabsWriteTail.then(async () => {
+				await this.writeTabsSnapshot(filePath, tempPath, payload);
+			}).catch(() => {
+				// Tab state should never interrupt the terminal UI.
+			});
+			this.saveTabsWriteTail = write;
+			return write;
 		} catch {
 			// Tab state should never interrupt the terminal UI.
+			return Promise.resolve();
+		}
+	}
+
+	private async writeTabsSnapshot(filePath: string, tempPath: string, payload: string): Promise<void> {
+		try {
+			await mkdir(dirname(filePath), { recursive: true });
+			await writeFile(tempPath, payload, "utf8");
+			await rename(tempPath, filePath);
+		} finally {
+			await unlink(tempPath).catch(() => undefined);
 		}
 	}
 
@@ -1622,7 +1989,7 @@ export class AppTabsController {
 	}
 
 	private scheduleProjectSessionRetention(): void {
-		if (this.host.options.noSession || this.maxProjectSessions() <= 0 || this.retentionCleanupScheduled || this.retentionCleanupRunning) return;
+		if (!this.host.isRunning() || this.host.options.noSession || this.maxProjectSessions() <= 0 || this.retentionCleanupScheduled || this.retentionCleanupRunning) return;
 		this.retentionCleanupScheduled = true;
 		setTimeout(() => {
 			this.retentionCleanupScheduled = false;
@@ -1631,7 +1998,7 @@ export class AppTabsController {
 	}
 
 	private scheduleTabPrewarm(): void {
-		if (this.host.options.noSession || this.prewarmScheduled || this.prewarmRunning) return;
+		if (!this.host.isRunning() || this.host.options.noSession || this.prewarmScheduled || this.prewarmRunning) return;
 		this.prewarmScheduled = true;
 		setTimeout(() => {
 			this.prewarmScheduled = false;
@@ -1645,6 +2012,7 @@ export class AppTabsController {
 		try {
 			let warmed = 0;
 			for (const tab of this.tabItems) {
+				if (!this.host.isRunning()) break;
 				if (warmed >= BACKGROUND_PREWARM_TAB_LIMIT) break;
 				if (tab.id === this.activeTabId || !tab.sessionPath) continue;
 				if (this.runtimesByTabId.has(tab.id) || this.runtimeLoadsByTabId.has(tab.id)) continue;

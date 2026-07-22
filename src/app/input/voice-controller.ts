@@ -16,6 +16,7 @@ export type VoiceLanguage = string;
 export type VoiceInputState = "idle" | "installing" | "downloading" | "loading" | "listening";
 
 export type AppVoiceControllerHost = {
+	activeInputScope(): string | undefined;
 	insertTranscript(text: string): void;
 	setPartialTranscript(text: string | undefined): void;
 	addSystemMessage(message: string): void;
@@ -104,6 +105,7 @@ export class AppVoiceController {
 	private partialTranscript: string | undefined;
 	private partialTranscriptTimer: ReturnType<typeof setTimeout> | undefined;
 	private startGeneration = 0;
+	private recordingScope: string | undefined;
 
 	constructor(private readonly host: AppVoiceControllerHost, dictationConfig: DictationConfig) {
 		this.modelDefinitions = dictationConfig.languages;
@@ -162,8 +164,10 @@ export class AppVoiceController {
 	async toggleLanguage(): Promise<void> {
 		if (!this.showLanguageSwitcher()) return;
 
+		const scope = this.host.activeInputScope();
 		const wasActive = this.state !== "idle";
 		if (wasActive) await this.stopRecording();
+		if (!this.isScopeActive(scope)) return;
 
 		this.language = this.nextLanguage();
 		this.saveLanguageSelection(this.language);
@@ -175,22 +179,24 @@ export class AppVoiceController {
 
 	async stopRecording(): Promise<void> {
 		this.startGeneration += 1;
+		const scope = this.recordingScope;
 		const audioProcess = this.audioProcess;
 		const recognizer = this.recognizer;
 		this.audioProcess = undefined;
 		this.recognizer = undefined;
+		this.recordingScope = undefined;
 
 		if (audioProcess && !audioProcess.killed) audioProcess.kill("SIGTERM");
 		if (recognizer) {
-			this.clearPartialTranscript();
-			this.emitTranscript(recognizer.finalResult());
+			this.clearPartialTranscript(scope);
+			this.emitTranscript(recognizer.finalResult(), scope);
 			recognizer.free?.();
 		}
 
 		if (this.state !== "idle") {
 			this.clearProgressMessage();
 			this.state = "idle";
-			this.host.render();
+			if (this.isScopeActive(scope)) this.host.render();
 		}
 	}
 
@@ -202,26 +208,29 @@ export class AppVoiceController {
 
 	private async startRecording(): Promise<void> {
 		const language = this.language;
+		const scope = this.host.activeInputScope();
 		const generation = this.startGeneration + 1;
 		this.startGeneration = generation;
+		this.recordingScope = scope;
 
 		try {
 			const initialVosk = voiceControllerDeps.tryLoadVosk();
 			const vosk = initialVosk.ok
 				? initialVosk.module
-				: await this.installAndLoadVosk(initialVosk.error, generation);
-			if (!this.isCurrentStart(generation)) return;
+				: await this.installAndLoadVosk(initialVosk.error, generation, scope);
+			if (!this.continueStart(generation, scope)) return;
 			vosk.setLogLevel?.(-1);
 
 			this.state = "downloading";
 			this.host.render();
 			const modelPath = await voiceControllerDeps.ensureModel(language, this.modelDefinition(language));
-			if (!this.isCurrentStart(generation)) return;
+			if (!this.continueStart(generation, scope)) return;
 
 			this.state = "loading";
 			this.host.render();
 			const model = this.cachedModel(language, modelPath, vosk);
 			const recorder = await voiceControllerDeps.selectRecorderCommand();
+			if (!this.continueStart(generation, scope)) return;
 			const recognizer = new vosk.Recognizer({ model, sampleRate: SAMPLE_RATE });
 			const audioProcess = voiceControllerDeps.spawn(recorder.command, recorder.args, { stdio: ["ignore", "pipe", "pipe"] });
 			this.recognizer = recognizer;
@@ -230,9 +239,9 @@ export class AppVoiceController {
 			this.host.render();
 			this.host.showToast(`Voice input on (${this.modelDefinition(language).label}, ${recorder.description})`, "info");
 
-			this.bindAudioProcess(audioProcess, recognizer, generation);
+			this.bindAudioProcess(audioProcess, recognizer, generation, scope);
 		} catch (error) {
-			if (!this.isCurrentStart(generation)) return;
+			if (!this.continueStart(generation, scope)) return;
 			this.clearProgressMessage();
 			this.cleanupRecognizer();
 			this.state = "idle";
@@ -276,28 +285,28 @@ export class AppVoiceController {
 		return definition;
 	}
 
-	private async installAndLoadVosk(initialError: unknown, generation: number): Promise<VoskModule> {
+	private async installAndLoadVosk(initialError: unknown, generation: number, scope: string | undefined): Promise<VoskModule> {
 		this.state = "installing";
-		this.setProgressMessage("Installing Vosk voice bindings...");
+		this.setProgressMessage("Installing Vosk voice bindings...", generation, scope);
 		const vosk = await loadVoskWithAutoInstall(initialError, (message) => {
-			if (this.isCurrentStart(generation)) this.setProgressMessage(message);
+			if (this.isCurrentStart(generation, scope)) this.setProgressMessage(message, generation, scope);
 		});
-		if (this.isCurrentStart(generation)) this.addProgressSystemMessage("Vosk voice bindings are ready.");
-		if (this.isCurrentStart(generation)) this.clearProgressMessage();
+		if (this.isCurrentStart(generation, scope)) this.addProgressSystemMessage("Vosk voice bindings are ready.");
+		if (this.isCurrentStart(generation, scope)) this.clearProgressMessage();
 		return vosk;
 	}
 
-	private bindAudioProcess(audioProcess: ChildProcessByStdio<null, Readable, Readable>, recognizer: VoskRecognizer, generation: number): void {
+	private bindAudioProcess(audioProcess: ChildProcessByStdio<null, Readable, Readable>, recognizer: VoskRecognizer, generation: number, scope = this.recordingScope): void {
 		let stderr = "";
 
 		audioProcess.stdout.on("data", (chunk: Buffer) => {
-			if (!this.isCurrentAudioProcess(audioProcess, recognizer, generation)) return;
+			if (!this.isCurrentAudioProcess(audioProcess, recognizer, generation, scope)) return;
 			try {
 				if (recognizer.acceptWaveform(chunk)) {
-					this.clearPartialTranscript();
-					this.emitTranscript(recognizer.result());
+					this.clearPartialTranscript(scope);
+					this.emitTranscript(recognizer.result(), scope);
 				} else {
-					this.emitPartialTranscript(recognizer.partialResult?.());
+					this.emitPartialTranscript(recognizer.partialResult?.(), audioProcess, recognizer, generation, scope);
 				}
 			} catch (error) {
 				this.host.showToast(`Voice recognition failed: ${errorMessage(error)}`, "error");
@@ -310,8 +319,8 @@ export class AppVoiceController {
 		});
 
 		audioProcess.once("error", (error) => {
-			if (!this.isCurrentAudioProcess(audioProcess, recognizer, generation)) return;
-			this.clearPartialTranscript();
+			if (!this.isCurrentAudioProcess(audioProcess, recognizer, generation, scope)) return;
+			this.clearPartialTranscript(scope);
 			this.cleanupRecognizer();
 			this.audioProcess = undefined;
 			this.state = "idle";
@@ -320,9 +329,9 @@ export class AppVoiceController {
 		});
 
 		audioProcess.once("close", (code, signal) => {
-			if (!this.isCurrentAudioProcess(audioProcess, recognizer, generation)) return;
-			this.clearPartialTranscript();
-			this.emitTranscript(recognizer.finalResult());
+			if (!this.isCurrentAudioProcess(audioProcess, recognizer, generation, scope)) return;
+			this.clearPartialTranscript(scope);
+			this.emitTranscript(recognizer.finalResult(), scope);
 			this.cleanupRecognizer();
 			this.audioProcess = undefined;
 			this.state = "idle";
@@ -339,11 +348,12 @@ export class AppVoiceController {
 		this.recognizer = undefined;
 	}
 
-	private setProgressMessage(message: string): void {
+	private setProgressMessage(message: string, generation = this.startGeneration, scope = this.recordingScope): void {
 		this.progressMessage = message;
 		this.addProgressSystemMessage(message);
 		if (!this.progressTimer) {
 			this.progressTimer = setInterval(() => {
+				if (!this.isCurrentStart(generation, scope)) return;
 				this.progressFrame += 1;
 				this.host.render();
 			}, 120);
@@ -368,44 +378,78 @@ export class AppVoiceController {
 		this.host.addSystemMessage(text);
 	}
 
-	private emitTranscript(result: VoskRecognitionResult): void {
+	private emitTranscript(result: VoskRecognitionResult, scope = this.recordingScope): void {
+		if (!this.isScopeActive(scope)) return;
 		const text = transcriptText(result);
 		if (!text) return;
 		this.host.insertTranscript(text);
 	}
 
-	private emitPartialTranscript(result: VoskRecognitionResult | undefined): void {
+	private emitPartialTranscript(
+		result: VoskRecognitionResult | undefined,
+		audioProcess = this.audioProcess,
+		recognizer = this.recognizer,
+		generation = this.startGeneration,
+		scope = this.recordingScope,
+	): void {
+		if (audioProcess || recognizer) {
+			if (!audioProcess || !recognizer || !this.isCurrentAudioProcess(audioProcess, recognizer, generation, scope)) return;
+		}
 		const text = partialTranscriptText(result);
 		if (text === this.partialTranscript) return;
 		this.partialTranscript = text;
-		this.schedulePartialTranscriptEmit();
+		this.schedulePartialTranscriptEmit(audioProcess, recognizer, generation, scope);
 	}
 
-	private clearPartialTranscript(): void {
+	private clearPartialTranscript(scope = this.recordingScope): void {
 		if (!this.partialTranscript) return;
 		this.partialTranscript = undefined;
 		if (this.partialTranscriptTimer) {
 			clearTimeout(this.partialTranscriptTimer);
 			this.partialTranscriptTimer = undefined;
 		}
-		this.host.setPartialTranscript(undefined);
+		if (this.isScopeActive(scope)) this.host.setPartialTranscript(undefined);
 	}
 
-	private schedulePartialTranscriptEmit(): void {
+	private schedulePartialTranscriptEmit(
+		audioProcess: ChildProcessByStdio<null, Readable, Readable> | undefined,
+		recognizer: VoskRecognizer | undefined,
+		generation: number,
+		scope: string | undefined,
+	): void {
 		if (this.partialTranscriptTimer) return;
 		this.partialTranscriptTimer = setTimeout(() => {
 			this.partialTranscriptTimer = undefined;
+			if (audioProcess && recognizer) {
+				if (!this.isCurrentAudioProcess(audioProcess, recognizer, generation, scope)) return;
+			} else if (!this.isScopeActive(scope)) {
+				return;
+			}
 			this.host.setPartialTranscript(this.partialTranscript);
 		}, VOICE_PARTIAL_TRANSCRIPT_THROTTLE_MS);
 		this.partialTranscriptTimer.unref?.();
 	}
 
-	private isCurrentStart(generation: number): boolean {
-		return this.startGeneration === generation;
+	private isCurrentStart(generation: number, scope = this.recordingScope): boolean {
+		return this.startGeneration === generation && this.recordingScope === scope && this.isScopeActive(scope);
 	}
 
-	private isCurrentAudioProcess(audioProcess: ChildProcessByStdio<null, Readable, Readable>, recognizer: VoskRecognizer, generation: number): boolean {
-		return this.startGeneration === generation && this.audioProcess === audioProcess && this.recognizer === recognizer;
+	private continueStart(generation: number, scope: string | undefined): boolean {
+		if (this.startGeneration !== generation || this.recordingScope !== scope) return false;
+		if (this.isScopeActive(scope)) return true;
+		this.startGeneration += 1;
+		this.recordingScope = undefined;
+		this.clearProgressMessage();
+		this.state = "idle";
+		return false;
+	}
+
+	private isCurrentAudioProcess(audioProcess: ChildProcessByStdio<null, Readable, Readable>, recognizer: VoskRecognizer, generation: number, scope = this.recordingScope): boolean {
+		return this.isCurrentStart(generation, scope) && this.audioProcess === audioProcess && this.recognizer === recognizer;
+	}
+
+	private isScopeActive(scope: string | undefined): boolean {
+		return this.host.activeInputScope() === scope;
 	}
 }
 

@@ -3,7 +3,12 @@ import { mkdir, readFile, rm } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getAgentDir, type ContextUsage } from "@earendil-works/pi-coding-agent";
-import type { CommandControllerHost } from "./command-host.js";
+import {
+	captureCommandScope,
+	isCommandRuntimeActive,
+	isCommandScopeActive,
+	type CommandControllerHost,
+} from "./command-host.js";
 import { getIdleRuntime, getRuntime, parsePathArgument } from "./command-runtime.js";
 import { createId } from "../id.js";
 import { runProcess } from "../process.js";
@@ -34,6 +39,7 @@ export class SessionCommandActions {
 	async runExportCommand(argumentsText: string): Promise<void> {
 		const runtime = getIdleRuntime(this.host, "export");
 		if (!runtime) return;
+		const scope = captureCommandScope(this.host);
 
 		const outputPath = parsePathArgument(argumentsText);
 		const resolvedOutputPath = outputPath ? resolve(runtime.cwd, outputPath) : undefined;
@@ -43,6 +49,7 @@ export class SessionCommandActions {
 		const filePath = resolvedOutputPath?.endsWith(".jsonl")
 			? runtime.session.exportToJsonl(resolvedOutputPath)
 			: await runtime.session.exportToHtml(resolvedOutputPath);
+		if (!isCommandScopeActive(this.host, scope)) return;
 		this.host.addEntry({ id: createId("system"), kind: "system", text: `Session exported to: ${filePath}` });
 		this.host.setSessionStatus(runtime.session);
 		this.host.toast.success("Session exported");
@@ -60,6 +67,7 @@ export class SessionCommandActions {
 		this.host.render();
 
 		const result = await runtime.importFromJsonl(resolvedInputPath);
+		if (!isCommandRuntimeActive(this.host, runtime)) return;
 		if (result.cancelled) {
 			this.host.addEntry({ id: createId("system"), kind: "system", text: "Import cancelled." });
 			this.host.setSessionStatus(runtime.session);
@@ -72,18 +80,23 @@ export class SessionCommandActions {
 	async runShareCommand(): Promise<void> {
 		const runtime = getIdleRuntime(this.host, "share");
 		if (!runtime) return;
+		const scope = captureCommandScope(this.host);
 
 		const authResult = await runProcess("gh", ["auth", "status"], { maxBufferBytes: 32 * 1024 });
+		if (!isCommandScopeActive(this.host, scope)) return;
 		if (authResult.status !== 0) throw new Error("GitHub CLI is not installed or is not logged in. Run `gh auth login` first.");
 
 		const shareDir = join(getAgentDir(), "pix");
 		await mkdir(shareDir, { recursive: true });
+		if (!isCommandScopeActive(this.host, scope)) return;
 		const tmpFile = join(shareDir, `session-share-${randomUUID()}.html`);
 		try {
 			this.host.setStatus("creating share gist");
 			this.host.render();
 			await runtime.session.exportToHtml(tmpFile);
+			if (!isCommandScopeActive(this.host, scope)) return;
 			const gistResult = await runProcess("gh", ["gist", "create", "--public=false", tmpFile], { maxBufferBytes: 64 * 1024 });
+			if (!isCommandScopeActive(this.host, scope)) return;
 			if (gistResult.status !== 0) throw new Error(gistResult.stderr?.trim() || "Failed to create gist");
 
 			const gistUrl = gistResult.stdout.trim();
@@ -98,11 +111,13 @@ export class SessionCommandActions {
 	async runCopyCommand(): Promise<void> {
 		const runtime = getRuntime(this.host, "copy");
 		if (!runtime) return;
+		const scope = captureCommandScope(this.host);
 
 		const text = runtime.session.getLastAssistantText();
 		if (!text) throw new Error("No agent messages to copy yet");
 
 		await copyTextToClipboard(text);
+		if (!isCommandScopeActive(this.host, scope)) return;
 		this.host.addEntry({ id: createId("system"), kind: "system", text: "Copied last agent message to clipboard." });
 		this.host.setSessionStatus(runtime.session);
 		this.host.toast.success("Copied last agent message");
@@ -123,6 +138,7 @@ export class SessionCommandActions {
 
 		const name = argumentsText.trim();
 		if (!name) {
+			const scope = captureCommandScope(this.host);
 			const branch = runtime.session.sessionManager.getBranch() as Parameters<typeof firstUserMessageText>[0];
 			const firstPrompt = firstUserMessageText(branch);
 			if (!firstPrompt) throw new Error("Cannot auto-name this session yet: no user messages found.");
@@ -145,6 +161,7 @@ export class SessionCommandActions {
 							modelRef,
 							AbortSignal.timeout(config.timeoutMs),
 						);
+						if (!isCommandScopeActive(this.host, scope)) return;
 						if (generatedName) break;
 					}
 					if (generatedName) break;
@@ -170,8 +187,10 @@ export class SessionCommandActions {
 	async runSessionInfoCommand(): Promise<void> {
 		const runtime = getRuntime(this.host, "session");
 		if (!runtime) return;
+		const scope = captureCommandScope(this.host);
 
 		const stats = await getCompleteSessionStats(runtime.session);
+		if (!isCommandScopeActive(this.host, scope)) return;
 		const lines = [
 			createStartupInfoMessage(runtime),
 			"",
@@ -202,11 +221,13 @@ export class SessionCommandActions {
 	async runUsageCommand(): Promise<void> {
 		const runtime = getRuntime(this.host, "usage");
 		if (!runtime) return;
+		const scope = captureCommandScope(this.host);
 
 		this.host.setStatus("loading usage");
 		this.host.render();
 
 		const accountReport = await queryAccountUsageReport();
+		if (!isCommandScopeActive(this.host, scope)) return;
 		const accountUsage = formatAccountUsageReport(accountReport);
 		if (accountUsage) {
 			this.host.addEntry({ id: createId("system"), kind: "system", text: accountUsage });
@@ -215,6 +236,7 @@ export class SessionCommandActions {
 		}
 
 		const stats = await getCompleteSessionStats(runtime.session);
+		if (!isCommandScopeActive(this.host, scope)) return;
 		const contextUsage = stats.contextUsage ?? runtime.session.getContextUsage();
 		const model = runtime.session.model ? this.host.modelRef(runtime.session.model as SessionModel) : "not selected";
 		const lines = [
@@ -238,8 +260,10 @@ export class SessionCommandActions {
 	}
 
 	async runChangelogCommand(): Promise<void> {
+		const scope = captureCommandScope(this.host);
 		const changelogPath = join(this.piPackageRoot(), "CHANGELOG.md");
 		const raw = await readFile(changelogPath, "utf8");
+		if (!isCommandScopeActive(this.host, scope)) return;
 		const lines = raw.trim().split(/\r?\n/).slice(0, 140);
 		this.host.addEntry({ id: createId("system"), kind: "system", text: lines.join("\n") });
 		this.host.setSessionStatus(this.host.runtime()?.session);
@@ -248,6 +272,7 @@ export class SessionCommandActions {
 	async runUpdateCommand(argumentsText: string): Promise<void> {
 		const runtime = getRuntime(this.host, "update");
 		if (!runtime) return;
+		const scope = captureCommandScope(this.host);
 
 		const options = parsePixUpdateArgs(splitUpdateArguments(argumentsText));
 		if (options.help) {
@@ -260,6 +285,7 @@ export class SessionCommandActions {
 		this.host.render();
 
 		const result = await checkPixUpdate();
+		if (!isCommandScopeActive(this.host, scope)) return;
 		const globalPiResult = checkGlobalPiInstall(result.packageRoot);
 		const forceHint = options.force ? "\n\n/update is check-only. To force a reinstall, run `pix update --force` in your shell and restart Pix." : "";
 		this.host.addEntry({
@@ -298,16 +324,20 @@ export class SessionCommandActions {
 	async runReloadCommand(): Promise<void> {
 		const runtime = getIdleRuntime(this.host, "reload");
 		if (!runtime) return;
+		const scope = captureCommandScope(this.host);
 
 		this.host.setStatus("reloading");
 		this.host.render();
 		try {
 			await this.host.awaitCurrentSessionExtensions(runtime);
+			if (!isCommandScopeActive(this.host, scope)) return;
 			await runtime.session.reload();
+			if (!isCommandScopeActive(this.host, scope)) return;
 			this.host.setSessionStatus(runtime.session);
 			this.host.addEntry({ id: createId("system"), kind: "system", text: "Reloaded keybindings, extensions, skills, prompts, themes" });
 			this.host.toast.success("Reloaded resources");
 		} catch (error) {
+			if (!isCommandScopeActive(this.host, scope)) return;
 			this.host.setSessionStatus(runtime.session);
 			this.host.addEntry({ id: createId("error"), kind: "error", text: `Reload failed: ${error instanceof Error ? error.message : String(error)}` });
 			this.host.toast.error("Reload failed");
@@ -317,6 +347,7 @@ export class SessionCommandActions {
 	async runDeleteCommand(argumentsText: string): Promise<void> {
 		const runtime = getIdleRuntime(this.host, "delete");
 		if (!runtime) return;
+		const scope = captureCommandScope(this.host);
 
 		const sessionManager = runtime.session.sessionManager;
 		const currentSessionFile = sessionManager.getSessionFile();
@@ -347,6 +378,7 @@ export class SessionCommandActions {
 			],
 			{ title: "Delete session?", searchable: false, preserveStatus: true },
 		);
+		if (!isCommandScopeActive(this.host, scope)) return;
 		if (confirm !== true) {
 			this.host.addEntry({ id: createId("system"), kind: "system", text: "Delete cancelled." });
 			this.host.setSessionStatus(runtime.session);
@@ -363,6 +395,7 @@ export class SessionCommandActions {
 		if (deleteCurrent) {
 			await this.host.awaitCurrentSessionExtensions(runtime);
 			const result = await runtime.newSession();
+			if (!isCommandRuntimeActive(this.host, runtime)) return;
 			if (result.cancelled) {
 				this.host.addEntry({ id: createId("system"), kind: "system", text: "Delete succeeded, but new session was cancelled." });
 				this.host.setSessionStatus(runtime.session);
@@ -379,6 +412,7 @@ export class SessionCommandActions {
 			if (runtime.modelFallbackMessage) this.host.addEntry({ id: createId("system"), kind: "system", text: runtime.modelFallbackMessage });
 			this.host.setSessionStatus(runtime.session);
 		} else {
+			if (!isCommandScopeActive(this.host, scope)) return;
 			this.host.addEntry({
 				id: createId("system"),
 				kind: "system",
@@ -404,7 +438,9 @@ export class SessionCommandActions {
 		this.host.setStatus("starting new session");
 		this.host.render();
 		await this.host.awaitCurrentSessionExtensions(runtime);
+		if (!isCommandRuntimeActive(this.host, runtime)) return;
 		const result = await runtime.newSession();
+		if (!isCommandRuntimeActive(this.host, runtime)) return;
 		if (result.cancelled) {
 			this.host.addEntry({ id: createId("system"), kind: "system", text: "New session cancelled." });
 			this.host.setSessionStatus(runtime.session);
@@ -424,6 +460,7 @@ export class SessionCommandActions {
 	async runCompactCommand(customInstructions?: string): Promise<void> {
 		const runtime = getRuntime(this.host, "compact");
 		if (!runtime) return;
+		const scope = captureCommandScope(this.host);
 
 		if (runtime.session.isCompacting) {
 			this.host.toast.warning("Compaction already running");
@@ -434,6 +471,7 @@ export class SessionCommandActions {
 		this.host.render();
 
 		const result = await runtime.session.compact(customInstructions);
+		if (!isCommandScopeActive(this.host, scope)) return;
 		this.host.addEntry({
 			id: createId("system"),
 			kind: "system",

@@ -6,6 +6,7 @@ import type { Entry } from "../types.js";
 
 export type AppExtensionActionsHost = {
 	isRunning(): boolean;
+	runtime(): AgentSessionRuntime | undefined;
 	getInput(): string;
 	setInput(value: string): void;
 	awaitCurrentSessionExtensions(runtime?: AgentSessionRuntime): Promise<void>;
@@ -32,19 +33,22 @@ export class AppExtensionActionsController {
 			waitForIdle: () => this.waitForSessionIdle(runtime),
 			newSession: async (options) => {
 				await this.host.awaitCurrentSessionExtensions(runtime);
+				if (!this.isRuntimeActive(runtime)) return { cancelled: true };
 				const result = await runtime.newSession(options);
-				if (!result.cancelled) this.host.afterSessionReplacement("Started a new session.");
+				if (!result.cancelled && this.isRuntimeActive(runtime)) this.host.afterSessionReplacement("Started a new session.");
 				return result;
 			},
 			fork: async (entryId, options) => {
 				await this.host.awaitCurrentSessionExtensions(runtime);
+				if (!this.isRuntimeActive(runtime)) return { cancelled: true };
 				const result = await runtime.fork(entryId, options);
-				if (!result.cancelled) this.host.afterSessionReplacement("Forked to a new session.");
+				if (!result.cancelled && this.isRuntimeActive(runtime)) this.host.afterSessionReplacement("Forked to a new session.");
 				return result;
 			},
 			navigateTree: async (targetId, options) => {
-				const result = await runtime.session.navigateTree(targetId, options);
-				if (!result.cancelled && !result.aborted) {
+				const session = runtime.session;
+				const result = await session.navigateTree(targetId, options);
+				if (!result.cancelled && !result.aborted && this.isSessionActive(runtime, session)) {
 					this.host.resetSessionView();
 					this.host.loadSessionHistory();
 					if (result.editorText && !this.host.getInput().trim()) this.host.setInput(result.editorText);
@@ -55,14 +59,18 @@ export class AppExtensionActionsController {
 			},
 			switchSession: async (sessionPath, options) => {
 				await this.host.awaitCurrentSessionExtensions(runtime);
+				if (!this.isRuntimeActive(runtime)) return { cancelled: true };
 				const result = await runtime.switchSession(sessionPath, options);
-				if (!result.cancelled) this.host.afterSessionReplacement(`Switched session: ${sessionPath}`);
+				if (!result.cancelled && this.isRuntimeActive(runtime)) this.host.afterSessionReplacement(`Switched session: ${sessionPath}`);
 				return result;
 			},
 			reload: async () => {
+				const session = runtime.session;
 				await this.host.awaitCurrentSessionExtensions(runtime);
-				await runtime.session.reload();
-				this.host.setSessionStatus(runtime.session);
+				if (!this.isSessionActive(runtime, session)) return;
+				await session.reload();
+				if (!this.isSessionActive(runtime, session)) return;
+				this.host.setSessionStatus(session);
 				this.host.showToast("Reloaded resources", "success");
 				this.host.render();
 			},
@@ -71,6 +79,14 @@ export class AppExtensionActionsController {
 
 	async waitForSessionIdle(runtime: AgentSessionRuntime): Promise<void> {
 		await runtime.session.waitForIdle();
+	}
+
+	private isRuntimeActive(runtime: AgentSessionRuntime): boolean {
+		return this.host.isRunning() && this.host.runtime() === runtime;
+	}
+
+	private isSessionActive(runtime: AgentSessionRuntime, session: AgentSessionRuntime["session"]): boolean {
+		return this.isRuntimeActive(runtime) && runtime.session === session;
 	}
 
 	handleExtensionError(error: ExtensionError): void {

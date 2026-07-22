@@ -90,6 +90,27 @@ describe("AppTerminalController", () => {
 		assert.equal(writes.includes(ENABLE_TERMINAL_MODIFY_OTHER_KEYS), false);
 	});
 
+	it("decodes UTF-8 statefully across stdin Buffer chunks", async () => {
+		const writes: string[] = [];
+		const inputChunks: string[] = [];
+		const controller = new AppTerminalController(fakeHost(inputChunks));
+		const restore = stubTerminalIo(writes);
+		const input = Buffer.from("🙂界", "utf8");
+
+		try {
+			controller.enableTerminal();
+			restore.emitInput(input.subarray(0, 2));
+			restore.emitInput(input.subarray(2, 5));
+			restore.emitInput(input.subarray(5));
+			await controller.stop();
+		} finally {
+			restore();
+		}
+
+		assert.equal(inputChunks.join(""), "🙂界");
+		assert.equal(inputChunks.includes("�"), false);
+	});
+
 	it("resets buffered render output before repainting after resize", async () => {
 		const writes: string[] = [];
 		const events: string[] = [];
@@ -106,6 +127,41 @@ describe("AppTerminalController", () => {
 
 		assert.deepEqual(events.slice(0, 2), ["resetRenderOutputBuffer", "render"]);
 	});
+
+	it("detaches input and resize rendering before awaiting shutdown cleanup", async () => {
+		const writes: string[] = [];
+		const inputChunks: string[] = [];
+		const events: string[] = [];
+		const host = fakeHost(inputChunks, events);
+		host.cancelPendingTabLifecycle = () => { events.push("cancelTabs"); };
+		let finishVoiceStop: (() => void) | undefined;
+		let cleanupSawDeadline = false;
+		host.stopVoiceInput = () => new Promise<void>((resolve) => {
+			const deadline = (controller as unknown as { shutdownDeadlineAt?: number }).shutdownDeadlineAt;
+			cleanupSawDeadline = typeof deadline === "number" && deadline > Date.now();
+			finishVoiceStop = resolve;
+		});
+		const controller = new AppTerminalController(host);
+		const restore = stubTerminalIo(writes);
+
+		try {
+			controller.enableTerminal();
+			const stopping = controller.stop();
+			restore.emitInput("late input");
+			restore.emitResize();
+
+			assert.deepEqual(inputChunks, []);
+			assert.deepEqual(events, ["cancelTabs"]);
+			assert.equal(host.isRunning(), false);
+			assert.equal(cleanupSawDeadline, true);
+
+			finishVoiceStop?.();
+			await stopping;
+		} finally {
+			finishVoiceStop?.();
+			restore();
+		}
+	});
 });
 
 function fakeHost(inputChunks: string[] = [], events: string[] = []) {
@@ -115,6 +171,7 @@ function fakeHost(inputChunks: string[] = [], events: string[] = []) {
 		setRunning: (value: boolean) => {
 			running = value;
 		},
+		cancelPendingTabLifecycle: () => {},
 		runtime: () => undefined,
 		saveInputStateForQuit: async () => {},
 		disposeInactiveRuntimesForQuit: async () => {},
@@ -140,7 +197,7 @@ function fakeHost(inputChunks: string[] = [], events: string[] = []) {
 	};
 }
 
-function stubTerminalIo(writes: string[]): (() => void) & { emitInput(chunk: string): void; emitResize(): void } {
+function stubTerminalIo(writes: string[]): (() => void) & { emitInput(chunk: string | Buffer): void; emitResize(): void } {
 	const stdout = process.stdout as NodeJS.WriteStream & {
 		write: (chunk: string | Uint8Array) => boolean;
 		on: (event: string, listener: (...args: unknown[]) => void) => NodeJS.WriteStream;
@@ -197,9 +254,9 @@ function stubTerminalIo(writes: string[]): (() => void) & { emitInput(chunk: str
 		stdin.on = originalStdinOn as typeof stdin.on;
 		stdin.off = originalStdinOff as typeof stdin.off;
 		if (originalSetRawMode) stdin.setRawMode = originalSetRawMode as typeof stdin.setRawMode;
-	}) as (() => void) & { emitInput(chunk: string): void; emitResize(): void };
-	restore.emitInput = (chunk: string) => {
-		stdinDataListener?.(Buffer.from(chunk, "utf8"));
+	}) as (() => void) & { emitInput(chunk: string | Buffer): void; emitResize(): void };
+	restore.emitInput = (chunk: string | Buffer) => {
+		stdinDataListener?.(typeof chunk === "string" ? Buffer.from(chunk, "utf8") : chunk);
 	};
 	restore.emitResize = () => {
 		stdoutResizeListener?.();

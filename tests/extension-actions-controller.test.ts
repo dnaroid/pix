@@ -105,11 +105,67 @@ describe("AppExtensionActionsController", () => {
 		await waiting;
 		assert.equal(completed, true);
 	});
+
+	it("does not apply a late navigation result to a different active runtime", async () => {
+		let resolveNavigation!: (result: { cancelled: false; aborted: false; editorText: string }) => void;
+		const session = {
+			navigateTree: async () => await new Promise<{ cancelled: false; aborted: false; editorText: string }>((resolve) => {
+				resolveNavigation = resolve;
+			}),
+		};
+		const runtime = { session } as unknown as AgentSessionRuntime;
+		const otherRuntime = { session: {} } as unknown as AgentSessionRuntime;
+		let activeRuntime: AgentSessionRuntime | undefined = runtime;
+		const mutations: string[] = [];
+		const controller = new AppExtensionActionsController(createHost({
+			isRunning: () => true,
+			runtime: () => activeRuntime,
+			resetSessionView: () => { mutations.push("reset"); },
+			loadSessionHistory: () => { mutations.push("history"); },
+			setInput: () => { mutations.push("input"); },
+			setSessionStatus: () => { mutations.push("status"); },
+			render: () => { mutations.push("render"); },
+		}));
+
+		const navigating = controller.createCommandContextActions(runtime).navigateTree("entry", {});
+		activeRuntime = otherRuntime;
+		resolveNavigation({ cancelled: false, aborted: false, editorText: "old tab" });
+		await navigating;
+
+		assert.deepEqual(mutations, []);
+	});
+
+	it("cancels a replacement when extension binding finishes after the tab changes", async () => {
+		let finishBinding!: () => void;
+		const binding = new Promise<void>((resolve) => { finishBinding = resolve; });
+		let replacements = 0;
+		const runtime = {
+			session: {},
+			newSession: async () => {
+				replacements += 1;
+				return { cancelled: false };
+			},
+		} as unknown as AgentSessionRuntime;
+		let activeRuntime: AgentSessionRuntime | undefined = runtime;
+		const controller = new AppExtensionActionsController(createHost({
+			isRunning: () => true,
+			runtime: () => activeRuntime,
+			awaitCurrentSessionExtensions: async () => { await binding; },
+		}));
+
+		const replacing = controller.createCommandContextActions(runtime).newSession();
+		activeRuntime = { session: {} } as unknown as AgentSessionRuntime;
+		finishBinding();
+
+		assert.deepEqual(await replacing, { cancelled: true });
+		assert.equal(replacements, 0);
+	});
 });
 
 function createHost(overrides: Partial<AppExtensionActionsHost>): AppExtensionActionsHost {
 	return {
 		isRunning: () => false,
+		runtime: () => undefined,
 		getInput: () => "",
 		setInput: () => undefined,
 		awaitCurrentSessionExtensions: async () => undefined,

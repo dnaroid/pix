@@ -51,3 +51,21 @@ export type CommandControllerHost = {
 	openNewTab(): Promise<void>;
 	openSearchResultInNewTab(result: SessionSearchResult): Promise<void>;
 };
+
+export type CommandScope = {
+	readonly runtime: AgentSessionRuntime | undefined;
+	readonly session: AgentSession | undefined;
+};
+
+export function captureCommandScope(host: CommandControllerHost): CommandScope {
+	const runtime = host.runtime();
+	return { runtime, session: runtime?.session };
+}
+
+export function isCommandRuntimeActive(host: CommandControllerHost, runtime: AgentSessionRuntime): boolean {
+	return host.isRunning() && host.runtime() === runtime;
+}
+
+export function isCommandScopeActive(host: CommandControllerHost, scope: CommandScope): boolean {
+	return host.isRunning() && host.runtime() === scope.runtime && scope.runtime?.session === scope.session;
+}

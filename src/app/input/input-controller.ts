@@ -1,3 +1,4 @@
+import { StringDecoder } from "node:string_decoder";
 import { InputEditor } from "../../input-editor.js";
 import { InputPasteHandler } from "./input-paste-handler.js";
 import { hasTerminalCommandModifier, isNativeCommandPressed, isNativeShiftPressed } from "./native-modifiers.js";
@@ -24,6 +25,7 @@ const SHIFT_ENTER_ESCAPE_SEQUENCES = ["\x1b\r", "\x1b\n"];
 export type InputControllerHost = {
 	readonly inputEditor: InputEditor;
 	readonly cwd: string;
+	inputScopeKey?(): string | undefined;
 	handleExtensionTerminalInput(data: string): ExtensionTerminalInputResult;
 	extensionInputUsesEditor?(): boolean;
 	isShiftPressed?(): boolean;
@@ -51,6 +53,7 @@ export type InputControllerHost = {
 
 export class AppInputController {
 	private inputBuffer = "";
+	private readonly inputDecoder = new StringDecoder("utf8");
 	private readonly pasteHandler: InputPasteHandler;
 
 	constructor(private readonly host: InputControllerHost) {
@@ -58,7 +61,8 @@ export class AppInputController {
 	}
 
 	handleChunk(chunk: Buffer): void {
-		let data = chunk.toString("utf8");
+		let data = this.inputDecoder.write(chunk);
+		if (!data) return;
 		const bufferedSharedEditorInput = this.consumeBufferedSharedEditorInput(data);
 		if (bufferedSharedEditorInput.kind === "consumed" || bufferedSharedEditorInput.kind === "pending") return;
 		if (bufferedSharedEditorInput.kind === "passthrough") data = bufferedSharedEditorInput.data;
@@ -189,11 +193,47 @@ export class AppInputController {
 			if (ignoredModifiedKeySequence === "pending") return;
 			if (this.consumeEscapeSequence()) continue;
 			if (this.isPendingEscapeSequence()) return;
+			if (this.consumePrintableRun()) continue;
 
 			const char = this.inputBuffer[0];
 			this.inputBuffer = this.inputBuffer.slice(1);
 			if (char) this.handleChar(char);
 		}
+	}
+
+	private consumePrintableRun(): boolean {
+		let length = 0;
+		while (length < this.inputBuffer.length) {
+			const char = this.inputBuffer[length];
+			if (!char || char < " " || char === "\u007f") break;
+			// Native undo/redo shortcuts must retain their individual key behavior.
+			const lower = char.toLowerCase();
+			if ((lower === "z" || lower === "y") && isNativeCommandPressed()) break;
+			length += 1;
+		}
+		if (length === 0) return false;
+
+		const text = this.inputBuffer.slice(0, length);
+		this.inputBuffer = this.inputBuffer.slice(length);
+		let editorChanged = false;
+		let pendingText = "";
+		const flushPendingText = (): void => {
+			if (!pendingText) return;
+			this.host.resetRequestHistoryNavigation();
+			this.host.inputEditor.insert(pendingText);
+			pendingText = "";
+			editorChanged = true;
+		};
+		for (const char of text) {
+			if (this.host.handleDirectPopupInput(char)) {
+				flushPendingText();
+				continue;
+			}
+			pendingText += char;
+		}
+		flushPendingText();
+		if (editorChanged) this.host.render();
+		return true;
 	}
 
 	private consumeBracketedPastePayload(): boolean {

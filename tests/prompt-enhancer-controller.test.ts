@@ -8,6 +8,7 @@ import {
 	setPromptEnhancerPiTestDeps,
 	type AppPromptEnhancerControllerHost,
 } from "../src/app/input/prompt-enhancer-controller.js";
+import type { TabInputState } from "../src/app/session/tabs-controller.js";
 import { InputEditor } from "../src/input-editor.js";
 
 describe("AppPromptEnhancerController", () => {
@@ -100,6 +101,22 @@ describe("AppPromptEnhancerController", () => {
 		assert.equal(statuses.length, 1);
 	});
 
+	it("preserves attachments when applying an enhanced selection", async () => {
+		const editor = new InputEditor();
+		editor.setText("weak draft");
+		editor.attachImage("image-data", "image/png");
+		(editor as unknown as { _selection: { anchor: number; active: number } })._selection = { anchor: 0, active: "weak draft".length };
+		const controller = new AppPromptEnhancerController(createHost(editor, emptyMessages()), {
+			enhancePromptWithPi: async () => "strong prompt",
+		});
+
+		await controller.enhancePrompt();
+
+		assert.match(editor.text, /^strong prompt.*\[Image 1\]/u);
+		assert.equal(editor.images.length, 1);
+		assert.equal(editor.images[0]?.data, "image-data");
+	});
+
 	it("enhances the whole draft when a whitespace selection is present", async () => {
 		const editor = new InputEditor();
 		editor.setText("improve this prompt");
@@ -169,6 +186,30 @@ describe("AppPromptEnhancerController", () => {
 		assert.deepEqual(inputStatesByTabId.get("tab-1"), { text: "enhanced result", cursor: "enhanced result".length });
 		assert.deepEqual(warnings, []);
 		assert.deepEqual(successes, ["Prompt enhanced"]);
+	});
+
+	it("discards an enhancement when the invoking tab runtime was replaced", async () => {
+		const editor = new InputEditor();
+		editor.setText("replace this prompt");
+		const enhancement = deferred<string>();
+		const firstRuntime = { cwd: "/tmp", session: { isStreaming: false, isCompacting: false } } as NonNullable<ReturnType<AppPromptEnhancerControllerHost["runtime"]>>;
+		const secondRuntime = { cwd: "/tmp", session: { isStreaming: false, isCompacting: false } } as NonNullable<ReturnType<AppPromptEnhancerControllerHost["runtime"]>>;
+		let currentRuntime = firstRuntime;
+		const messages = emptyMessages();
+		const controller = new AppPromptEnhancerController(createHost(editor, {
+			...messages,
+			runtime: () => currentRuntime,
+			isInputTabOwnedByRuntime: (_tabId, runtime, session) => runtime === currentRuntime && runtime.session === session,
+		}), { enhancePromptWithPi: async () => await enhancement.promise });
+
+		const running = controller.enhancePrompt();
+		await Promise.resolve();
+		currentRuntime = secondRuntime;
+		enhancement.resolve("must not apply");
+		await running;
+
+		assert.equal(editor.text, "replace this prompt");
+		assert.deepEqual(messages.successes, []);
 	});
 
 	it("enhances through mocked Pi services without starting a real SDK session", async () => {
@@ -266,29 +307,34 @@ function createHost(
 		errors?: string[];
 		runtime?: () => ReturnType<AppPromptEnhancerControllerHost["runtime"]>;
 		activeInputTabId?: () => string | undefined;
-		inputStateForTab?: (tabId: string | undefined) => { text: string; cursor: number } | undefined;
-		setInputStateForTab?: (tabId: string | undefined, state: { text: string; cursor: number }) => void;
+		inputStateForTab?: (tabId: string | undefined) => TabInputState | undefined;
+		setInputStateForTab?: (tabId: string | undefined, state: TabInputState) => void;
+		isInputTabOwnedByRuntime?: AppPromptEnhancerControllerHost["isInputTabOwnedByRuntime"];
 		setSessionStatus?: AppPromptEnhancerControllerHost["setSessionStatus"];
 		setSessionActivity?: AppPromptEnhancerControllerHost["setSessionActivity"];
 	},
 ): AppPromptEnhancerControllerHost {
 	const session = { isStreaming: false, isCompacting: false };
+	const defaultRuntime = ({
+		cwd: "/tmp",
+		session,
+		services: {
+			agentDir: "/tmp/.pi",
+			settingsManager: {},
+			modelRuntime: {},
+		},
+	}) as unknown as NonNullable<ReturnType<AppPromptEnhancerControllerHost["runtime"]>>;
+	const runtime = () => messages.runtime ? messages.runtime() : defaultRuntime;
 	return {
-		runtime: () => messages.runtime ? messages.runtime() : ({
-			cwd: "/tmp",
-			session,
-			services: {
-				agentDir: "/tmp/.pi",
-				settingsManager: {},
-				modelRuntime: {},
-			},
-		}) as unknown as ReturnType<AppPromptEnhancerControllerHost["runtime"]>,
+		runtime,
 		inputEditor: () => editor,
 		activeInputTabId: () => messages.activeInputTabId?.(),
-		inputStateForTab: (tabId) => messages.inputStateForTab?.(tabId) ?? { text: editor.text, cursor: editor.cursor },
+		isInputTabOwnedByRuntime: messages.isInputTabOwnedByRuntime
+			?? ((_tabId, ownerRuntime, ownerSession) => runtime() === ownerRuntime && ownerRuntime.session === ownerSession),
+		inputStateForTab: (tabId) => messages.inputStateForTab?.(tabId) ?? editor.draftState,
 		setInputStateForTab: (tabId, state) => {
 			if (messages.setInputStateForTab) messages.setInputStateForTab(tabId, state);
-			else editor.setText(state.text, state.cursor);
+			else editor.setDraftState(state);
 		},
 		promptEnhancerConfig: () => ({ modelRef: "test/model" }),
 		resetInputAfterProgrammaticEdit: () => {},

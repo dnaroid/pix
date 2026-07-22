@@ -94,6 +94,38 @@ describe("AppInputController terminal input", () => {
 		assert.deepEqual(calls.mouseEvents, [{ button: 0, x: -1, y: 2, released: true }]);
 	});
 
+	it("preserves UTF-8 characters split across Buffer chunks", () => {
+		const { controller, editor } = createController({ extensionInputUsesEditor: false, shiftPressed: false, consumeExtensionInput: false });
+		const input = Buffer.from("A🙂界B", "utf8");
+
+		controller.handleChunk(input.subarray(0, 3));
+		controller.handleChunk(input.subarray(3, 5));
+		controller.handleChunk(input.subarray(5, 8));
+		controller.handleChunk(input.subarray(8));
+
+		assert.equal(editor.text, "A🙂界B");
+	});
+
+	it("renders a large plain printable chunk once", () => {
+		const { controller, editor, calls } = createController({ extensionInputUsesEditor: false, shiftPressed: false, consumeExtensionInput: false });
+		const input = "plain text ".repeat(1_000);
+
+		controller.handleChunk(Buffer.from(input));
+
+		assert.equal(editor.text, input);
+		assert.equal(calls.render, 1);
+	});
+
+	it("batches printable runs while preserving embedded key-sequence semantics", () => {
+		const { controller, editor, calls } = createController({ extensionInputUsesEditor: false, shiftPressed: false, consumeExtensionInput: false });
+
+		controller.handleChunk(Buffer.from("abc\x1b[DQ!"));
+
+		assert.equal(editor.text, "abQ!c");
+		assert.equal(editor.cursor, 4);
+		assert.equal(calls.render, 3);
+	});
+
 	it("handles common editing, navigation, autocomplete, voice, and stop shortcuts", () => {
 		const { controller, editor, calls } = createController({ extensionInputUsesEditor: false, shiftPressed: false, consumeExtensionInput: false });
 
@@ -243,14 +275,11 @@ describe("AppInputController terminal input", () => {
 		assert.equal(clipboardImagePasteCalls, 1);
 	});
 
-	it("buffers bracketed paste payload without rendering per character", async () => {
+	it("buffers bracketed paste payload without rendering per character", () => {
 		const { controller, editor, calls } = createController({ extensionInputUsesEditor: false, shiftPressed: false, consumeExtensionInput: false });
 		const pastedText = ["first line", "second line", "third line"].join("\r\n");
 
 		controller.handleChunk(Buffer.from(`\x1b[200~${pastedText}\x1b[201~`));
-		assert.equal(calls.render, 0);
-
-		await new Promise((resolve) => setTimeout(resolve, 0));
 
 		assert.equal(editor.text, "[Pasted ~3 lines] ");
 		assert.equal(editor.attachments.length, 1);

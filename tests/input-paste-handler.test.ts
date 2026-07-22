@@ -55,10 +55,19 @@ describe("InputPasteHandler file paths", () => {
 		handler.beginBracketedPaste();
 		handler.appendBracketedPasteText("/tmp/example\nsecond line");
 		handler.endBracketedPaste();
-		await new Promise((resolve) => setTimeout(resolve, 0));
 
 		assert.equal(editor.text, "[Pasted ~2 lines] ");
 		assert.equal(editor.attachments.length, 1);
+		assert.equal(editor.attachments[0]?.kind, "pasted-text");
+	});
+
+	it("attaches plain multiline text before processing a following key", async () => {
+		const cwd = await mkdtemp(join(tmpdir(), "pix-cwd-"));
+		const { editor, handler } = createHandler(cwd);
+
+		assert.equal(handler.handlePlainData("first\nsecond"), true);
+
+		assert.equal(editor.text, "[Pasted ~2 lines] ");
 		assert.equal(editor.attachments[0]?.kind, "pasted-text");
 	});
 
@@ -75,5 +84,46 @@ describe("InputPasteHandler file paths", () => {
 		await new Promise((resolve) => setTimeout(resolve, 0));
 
 		assert.equal(clipboardImagePasteCalls, 1);
+	});
+
+	it("does not finish bracketed paste in a different input scope", () => {
+		const editor = new InputEditor();
+		let scope = "tab-one";
+		const handler = new InputPasteHandler({
+			inputEditor: editor,
+			cwd: "/tmp",
+			inputScopeKey: () => scope,
+			resetRequestHistoryNavigation() {},
+			render() {},
+		});
+
+		handler.beginBracketedPaste();
+		handler.appendBracketedPasteText("from tab one\nsecond line");
+		scope = "tab-two";
+		handler.endBracketedPaste();
+
+		assert.equal(editor.text, "");
+		assert.equal(editor.attachments.length, 0);
+	});
+
+	it("does not insert a file path after its input scope changes", async () => {
+		const cwd = await mkdtemp(join(tmpdir(), "pix-cwd-"));
+		const filePath = join(cwd, "deferred.txt");
+		await writeFile(filePath, "contents");
+		const editor = new InputEditor();
+		let scope = "tab-one";
+		const handler = new InputPasteHandler({
+			inputEditor: editor,
+			cwd,
+			inputScopeKey: () => scope,
+			resetRequestHistoryNavigation() {},
+			render() {},
+		});
+		const paste = (handler as unknown as TestPasteHandler).handleFilePaste(filePath);
+
+		scope = "tab-two";
+		await paste;
+
+		assert.equal(editor.text, "");
 	});
 });

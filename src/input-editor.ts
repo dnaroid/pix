@@ -187,6 +187,23 @@ export class InputEditor {
 		});
 	}
 
+	/** Restore a tab-owned draft without carrying undo or paste state across tabs. */
+	restoreDraftState(state: InputEditorDraftState): void {
+		const before = this.captureHistorySnapshot();
+		this._text = state.text;
+		this._cursor = state.cursor;
+		this._attachments.length = 0;
+		this._attachments.push(...Array.from(state.attachments ?? [], cloneAttachment));
+		this._imageCounter = maxTagCounter(this._attachments, /^\[Image (\d+)/u);
+		this._pasteCounter = maxTagCounter(this._attachments, /^\[Pasted ~?(\d+)/u);
+		this._bracketedPasteDepth = 0;
+		this.clampCursor();
+		this.clearSelection();
+		this.clearScrollOffset();
+		this.clearHistory();
+		if (this.didContentChangeFrom(before)) this._contentVersion += 1;
+	}
+
 	clear(): void {
 		const hadContent = this._text.length > 0 || this._attachments.length > 0;
 		this._text = "";

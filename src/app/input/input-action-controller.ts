@@ -17,6 +17,7 @@ const ABORT_STATUS_RESTORE_MS = 1200;
 
 export type AppInputActionControllerHost = {
 	runtime(): AgentSessionRuntime | undefined;
+	inputScopeKey?(): string | undefined;
 	isRunning(): boolean;
 	isSessionSwitching(): boolean;
 	inputEditor(): InputEditor;
@@ -41,7 +42,7 @@ export type AppInputActionControllerHost = {
 };
 
 export class AppInputActionController {
-	private abortInFlight = false;
+	private readonly abortsInFlight = new Set<AgentSessionRuntime["session"]>();
 
 	constructor(
 		private readonly host: AppInputActionControllerHost,
@@ -59,7 +60,9 @@ export class AppInputActionController {
 	}
 
 	async queueInputFromEditor(): Promise<void> {
+		const inputScopeKey = this.host.inputScopeKey?.();
 		await this.host.stopVoiceInput();
+		if (this.host.inputScopeKey && this.host.inputScopeKey() !== inputScopeKey) return;
 
 		if (this.popupMenus.syncActivePopupMenu()) this.popupMenus.cancelActivePopupMenu();
 
@@ -74,9 +77,8 @@ export class AppInputActionController {
 		const message = this.queuedMessages.createSubmittedUserMessage(promptText, displayText, images);
 		this.host.requestHistory().add(message.displayText);
 		inputEditor.clear();
-		await this.host.clearPersistedInputDraft();
-		this.host.render();
 		this.queuedMessages.deferUserMessage(message);
+		await this.host.clearPersistedInputDraft();
 		if (this.host.isRunning()) this.host.render();
 	}
 
@@ -139,21 +141,21 @@ export class AppInputActionController {
 		// Relay the user-initiated abort to extensions (e.g. the terminal-bell
 		// extension) so they can suppress the attention bell for this turn.
 		this.host.emitSessionAborted();
-		if (this.abortInFlight) {
+		if (this.abortsInFlight.has(session)) {
 			session.agent.abort();
 			if (options.stopIfAlreadyAborting) await this.host.stop();
 			else this.host.render();
 			return;
 		}
 
-		this.abortInFlight = true;
+		this.abortsInFlight.add(session);
 		this.queuedMessages.restoreQueuedMessagesToEditorForAbort();
 		this.host.setStatus("aborting");
 		this.host.addSessionAbortedEntry();
 		this.host.render();
 
 		let restoreTimer: ReturnType<typeof setTimeout> | undefined = setTimeout(() => {
-			if (!this.abortInFlight || this.host.runtime()?.session !== session || !this.host.isRunning()) return;
+			if (!this.abortsInFlight.has(session) || this.host.runtime()?.session !== session || !this.host.isRunning()) return;
 			this.restoreSessionState(session);
 			this.host.render();
 		}, ABORT_STATUS_RESTORE_MS);
@@ -163,13 +165,19 @@ export class AppInputActionController {
 			session.agent.abort();
 			await session.abort();
 		} catch (error) {
-			this.host.addEntry({ id: createId("error"), kind: "error", text: stringifyUnknown(error) });
+			if (this.host.runtime()?.session === session) {
+				this.host.addEntry({ id: createId("error"), kind: "error", text: stringifyUnknown(error) });
+			} else {
+				this.host.showToast(`Abort failed in a background tab: ${stringifyUnknown(error)}`, "error");
+			}
 		} finally {
 			if (restoreTimer) clearTimeout(restoreTimer);
 			restoreTimer = undefined;
-			this.abortInFlight = false;
-			this.restoreSessionState(this.host.runtime()?.session);
-			if (this.host.isRunning()) this.host.render();
+			this.abortsInFlight.delete(session);
+			if (this.host.runtime()?.session === session) {
+				this.restoreSessionState(session);
+				if (this.host.isRunning()) this.host.render();
+			}
 		}
 	}
 
@@ -183,8 +191,11 @@ export class AppInputActionController {
 	}
 
 	private async submitInput(): Promise<void> {
+		const inputScopeKey = this.host.inputScopeKey?.();
 		await this.host.stopVoiceInput();
+		if (this.host.inputScopeKey && this.host.inputScopeKey() !== inputScopeKey) return;
 
+		const runtime = this.host.runtime();
 		const inputEditor = this.host.inputEditor();
 		const rawPromptText = inputEditor.promptText;
 		const rawDisplayText = inputEditor.expandedText;
@@ -192,13 +203,13 @@ export class AppInputActionController {
 		const displayText = rawDisplayText.trimEnd();
 		const images = [...inputEditor.images];
 		if (this.host.isShellCommandRunning()) {
-			await this.submitShellInput(rawDisplayText, images.length);
+			await this.submitShellInput(rawDisplayText, images.length, inputScopeKey);
 			return;
 		}
 		if (!promptText && images.length === 0) return;
 		const shellCommand = bangShellCommandFromInput(promptText);
 		if (shellCommand !== undefined) {
-			await this.submitShellCommand(shellCommand.command, displayText, images.length, shellCommand.interactive ? "interactive" : "chat");
+			await this.submitShellCommand(shellCommand.command, displayText, images.length, shellCommand.interactive ? "interactive" : "chat", inputScopeKey);
 			return;
 		}
 		if (this.host.isSessionSwitching()) {
@@ -214,19 +225,24 @@ export class AppInputActionController {
 		const message = this.queuedMessages.createSubmittedUserMessage(promptText, displayText, images);
 		this.host.requestHistory().add(message.displayText);
 		inputEditor.clear();
-		await this.host.clearPersistedInputDraft();
+		const clearPersistedDraft = this.host.clearPersistedInputDraft();
 		this.host.render();
 
 		try {
-			await this.queuedMessages.submitUserMessage(message);
+			await this.queuedMessages.submitUserMessage(message, runtime?.session);
 		} catch (error) {
-			this.host.addEntry({ id: createId("error"), kind: "error", text: stringifyUnknown(error) });
+			if (!runtime || this.host.runtime() === runtime) {
+				this.host.addEntry({ id: createId("error"), kind: "error", text: stringifyUnknown(error) });
+			} else {
+				this.host.showToast(`Prompt failed in a background tab: ${stringifyUnknown(error)}`, "error");
+			}
 		}
+		await clearPersistedDraft;
 
 		if (this.host.isRunning()) this.host.render();
 	}
 
-	private async submitShellInput(text: string, imageCount: number): Promise<void> {
+	private async submitShellInput(text: string, imageCount: number, inputScopeKey: string | undefined): Promise<void> {
 		if (imageCount > 0) {
 			this.host.showToast("Shell stdin cannot include pasted images", "warning");
 			this.host.render();
@@ -235,12 +251,21 @@ export class AppInputActionController {
 
 		const inputEditor = this.host.inputEditor();
 		inputEditor.clear();
-		await this.host.clearPersistedInputDraft();
-		if (!this.host.sendShellInput(text)) this.host.showToast("No shell command is waiting for input", "info");
-		this.host.render();
+		const clearPersistedDraft = this.host.clearPersistedInputDraft();
+		const sent = this.host.sendShellInput(text);
+		await clearPersistedDraft;
+		if (!this.isInputScopeActive(inputScopeKey)) return;
+		if (!sent) this.host.showToast("No shell command is waiting for input", "info");
+		if (this.host.isRunning()) this.host.render();
 	}
 
-	private async submitShellCommand(command: string, displayText: string, imageCount: number, mode: "chat" | "interactive"): Promise<void> {
+	private async submitShellCommand(
+		command: string,
+		displayText: string,
+		imageCount: number,
+		mode: "chat" | "interactive",
+		inputScopeKey: string | undefined,
+	): Promise<void> {
 		if (!command) {
 			this.host.showToast(`Enter a shell command after ${mode === "interactive" ? "!!" : "!"}`, "info");
 			this.host.render();
@@ -257,7 +282,8 @@ export class AppInputActionController {
 			return;
 		}
 
-		const session = this.host.runtime()?.session;
+		const runtime = this.host.runtime();
+		const session = runtime?.session;
 		if (session?.isStreaming || session?.isCompacting) {
 			this.host.showToast("Wait for the current session turn to finish before running shell commands", "info");
 			this.host.render();
@@ -267,24 +293,43 @@ export class AppInputActionController {
 		const inputEditor = this.host.inputEditor();
 		this.host.requestHistory().add(displayText);
 		inputEditor.clear();
-		await this.host.clearPersistedInputDraft();
+		const clearPersistedDraft = this.host.clearPersistedInputDraft();
 		this.host.setStatus(`shell: ${command}`);
 		this.host.render();
 
 		try {
 			if (mode === "chat") {
-				await this.host.runChatShellCommand(command);
+				const result = this.host.runChatShellCommand(command);
+				await clearPersistedDraft;
+				await result;
 			} else {
-				const result = await this.host.runInteractiveShellCommand(command);
+				const runningCommand = this.host.runInteractiveShellCommand(command);
+				await clearPersistedDraft;
+				const result = await runningCommand;
+				if (!this.isSessionScopeActive(runtime, session, inputScopeKey)) return;
 				const entryKind = result.error ? "error" : "system";
 				this.host.addEntry({ id: createId(entryKind), kind: entryKind, text: formatShellCommandEntry(command, result, "!!") });
 			}
 		} catch (error) {
+			await clearPersistedDraft;
+			if (!this.isSessionScopeActive(runtime, session, inputScopeKey)) return;
 			this.host.addEntry({ id: createId("error"), kind: "error", text: `Shell command failed: ${stringifyUnknown(error)}` });
 		} finally {
-			this.restoreSessionState(this.host.runtime()?.session);
+			if (this.isSessionScopeActive(runtime, session, inputScopeKey)) this.restoreSessionState(session);
 		}
 
-		if (this.host.isRunning()) this.host.render();
+		if (this.host.isRunning() && this.isSessionScopeActive(runtime, session, inputScopeKey)) this.host.render();
+	}
+
+	private isInputScopeActive(inputScopeKey: string | undefined): boolean {
+		return !this.host.inputScopeKey || this.host.inputScopeKey() === inputScopeKey;
+	}
+
+	private isSessionScopeActive(
+		runtime: AgentSessionRuntime | undefined,
+		session: AgentSessionRuntime["session"] | undefined,
+		inputScopeKey: string | undefined,
+	): boolean {
+		return this.isInputScopeActive(inputScopeKey) && this.host.runtime() === runtime && runtime?.session === session;
 	}
 }

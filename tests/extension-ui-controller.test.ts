@@ -114,7 +114,7 @@ describe("ExtensionUiController custom UI", () => {
 		assert.ok(renders.count >= 2);
 	});
 
-	it("renders focused custom UI only for the tab scope that created it", async () => {
+	it("discards custom UI requested by a scope that no longer owns the editor", async () => {
 		const { controller, activeScope } = createController();
 		activeScope.value = "tab-b";
 		const ctxA = controller.createExtensionUIContext("tab-a");
@@ -130,11 +130,71 @@ describe("ExtensionUiController custom UI", () => {
 		assert.equal(controller.renderActiveCustomUi(80), undefined);
 		assert.deepEqual(controller.handleTerminalInput("1"), { consume: false });
 
-		controller.clearWidgets("tab-a", { cancelCustomUi: false });
 		activeScope.value = "tab-a";
-		assert.deepEqual(controller.renderActiveCustomUi(80), ["question panel"]);
-		assert.equal(controller.handleTerminalInput("1").consume, true);
-		assert.equal(await resultPromise, "one");
+		assert.equal(controller.renderActiveCustomUi(80), undefined);
+		assert.equal(await resultPromise, undefined);
+	});
+
+	it("reserves async custom UI immediately and discards it after its scope changes", async () => {
+		const { controller, activeScope, input } = createController("tab a draft");
+		activeScope.value = "tab-a";
+		const ctxA = controller.createExtensionUIContext("tab-a");
+		let resolveFactory!: (component: { render(): string[]; dispose(): void }) => void;
+		let disposed = 0;
+		const first = ctxA.custom<string>((async () => await new Promise((resolve) => {
+			resolveFactory = resolve;
+		})) as never);
+
+		await assert.rejects(ctxA.custom(async () => ({ render: () => ["duplicate"] }) as never), /already active/u);
+		activeScope.value = "tab-b";
+		input.value = "tab b draft";
+		resolveFactory({ render: () => ["late panel"], dispose: () => { disposed += 1; } });
+
+		assert.equal(await first, undefined);
+		assert.equal(disposed, 1);
+		assert.equal(input.value, "tab b draft");
+		assert.equal(controller.renderActiveCustomUi(80), undefined);
+	});
+
+	it("ignores late completion from a canceled reservation without closing its replacement", async () => {
+		const { controller } = createController("draft");
+		let resolveOldFactory!: (component: { render(): string[]; dispose(): void }) => void;
+		let oldDone!: (value: string) => void;
+		let newDone!: (value: string) => void;
+		let oldDisposed = 0;
+		const ctx = controller.createExtensionUIContext();
+		const oldPromise = ctx.custom<string>((async (_tui, _theme, _keys, done) => {
+			oldDone = done;
+			return await new Promise((resolve) => { resolveOldFactory = resolve; });
+		}) as never);
+
+		controller.cancelCustomUi();
+		assert.equal(await oldPromise, undefined);
+		const replacement = ctx.custom<string>(((_tui, _theme, _keys, done) => {
+			newDone = done;
+			return { render: () => ["replacement"] };
+		}) as never);
+		await Promise.resolve();
+		resolveOldFactory({ render: () => ["old"], dispose: () => { oldDisposed += 1; } });
+		oldDone("stale");
+		await new Promise<void>((resolve) => setImmediate(resolve));
+
+		assert.deepEqual(controller.renderActiveCustomUi(80), ["replacement"]);
+		assert.equal(oldDisposed, 1);
+		newDone("new");
+		assert.equal(await replacement, "new");
+	});
+
+	it("does not let a stale extension context edit the active tab", () => {
+		const { controller, activeScope, input } = createController("tab b draft");
+		activeScope.value = "tab-b";
+		const ctxA = controller.createExtensionUIContext("tab-a");
+
+		ctxA.setEditorText("stale text");
+		ctxA.pasteToEditor("stale paste");
+
+		assert.equal(input.value, "tab b draft");
+		assert.equal(ctxA.getEditorText(), "");
 	});
 
 	it("shows extension widgets only in their tab scope", () => {

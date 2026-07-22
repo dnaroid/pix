@@ -1,6 +1,12 @@
 import { resolve } from "node:path";
 import type { AgentSessionRuntime, SessionInfo } from "@earendil-works/pi-coding-agent";
-import type { CommandControllerHost } from "./command-host.js";
+import {
+	captureCommandScope,
+	isCommandRuntimeActive,
+	isCommandScopeActive,
+	type CommandControllerHost,
+	type CommandScope,
+} from "./command-host.js";
 import { getIdleRuntime, getRuntime } from "./command-runtime.js";
 import { createId } from "../id.js";
 import { isRecord } from "../guards.js";
@@ -60,7 +66,9 @@ export class NavigationCommandActions {
 		this.host.setStatus("forking session");
 		this.host.render();
 		await this.host.awaitCurrentSessionExtensions(runtime);
+		if (!isCommandRuntimeActive(this.host, runtime)) return;
 		const result = await runtime.fork(entryId);
+		if (!isCommandRuntimeActive(this.host, runtime)) return;
 		if (result.cancelled) {
 			this.host.addEntry({ id: createId("system"), kind: "system", text: "Fork cancelled." });
 			this.host.setSessionStatus(runtime.session);
@@ -87,7 +95,9 @@ export class NavigationCommandActions {
 		this.host.setStatus("cloning session");
 		this.host.render();
 		await this.host.awaitCurrentSessionExtensions(runtime);
+		if (!isCommandRuntimeActive(this.host, runtime)) return;
 		const result = await runtime.fork(leafId, { position: "at" });
+		if (!isCommandRuntimeActive(this.host, runtime)) return;
 		if (result.cancelled) {
 			this.host.addEntry({ id: createId("system"), kind: "system", text: "Clone cancelled." });
 			this.host.setSessionStatus(runtime.session);
@@ -110,7 +120,9 @@ export class NavigationCommandActions {
 
 		this.host.setStatus("navigating tree");
 		this.host.render();
+		const scope = captureCommandScope(this.host);
 		const result = await runtime.session.navigateTree(targetId);
+		if (!isCommandScopeActive(this.host, scope)) return;
 		if (result.aborted) {
 			this.host.toast.info("Tree navigation cancelled");
 			this.host.setSessionStatus(runtime.session);
@@ -132,6 +144,7 @@ export class NavigationCommandActions {
 	async runJumpCommand(argumentsText: string): Promise<void> {
 		const runtime = getRuntime(this.host, "jump");
 		if (!runtime) return;
+		const scope = captureCommandScope(this.host);
 
 		this.host.openDirectPopupMenu("user-message-jump", { preserveStatus: true });
 		this.host.setDirectPopupMenuQuery(argumentsText.trim());
@@ -139,13 +152,15 @@ export class NavigationCommandActions {
 		try {
 			await this.host.refreshUserMessageJumpMenuItems();
 		} catch (error) {
+			if (!isCommandScopeActive(this.host, scope)) return;
 			this.host.toast.error(`Could not load jump messages: ${error instanceof Error ? error.message : String(error)}`);
 		} finally {
-			this.host.render();
+			if (isCommandScopeActive(this.host, scope)) this.host.render();
 		}
 	}
 
 	async runHistoryCommand(argumentsText: string): Promise<void> {
+		const scope = captureCommandScope(this.host);
 		const query = argumentsText.trim();
 		const matches = this.host.requestHistory().searchMatches(query, 100);
 		if (matches.length === 0) {
@@ -172,6 +187,7 @@ export class NavigationCommandActions {
 			minScorePerCharacter: 8,
 			preferKeyboardLayoutMatches: true,
 		});
+		if (!isCommandScopeActive(this.host, scope)) return;
 		if (!selected) {
 			this.host.setSessionStatus(this.host.runtime()?.session);
 			return;
@@ -186,6 +202,7 @@ export class NavigationCommandActions {
 	async runSearchCommand(argumentsText: string): Promise<void> {
 		const runtime = getIdleRuntime(this.host, "search");
 		if (!runtime) return;
+		const scope = captureCommandScope(this.host);
 
 		const query = argumentsText.trim();
 		if (!query) {
@@ -203,6 +220,7 @@ export class NavigationCommandActions {
 			const results = await searchSessions(query, {
 				cwd: this.host.options.cwd,
 				onProgress: (loaded, total) => {
+					if (!isCommandScopeActive(this.host, scope)) return;
 					const progressText = total > 0 ? `searching sessions… ${loaded}/${total}` : "searching sessions…";
 					if (progressText === lastProgressText) return;
 					lastProgressText = progressText;
@@ -210,6 +228,7 @@ export class NavigationCommandActions {
 					this.host.render();
 				},
 			});
+			if (!isCommandScopeActive(this.host, scope)) return;
 
 			if (results.length === 0) {
 				this.host.addEntry({ id: createId("system"), kind: "system", text: `No sessions found for: ${query}` });
@@ -225,6 +244,7 @@ export class NavigationCommandActions {
 				emptyText: "No matching search results",
 				searchable: true,
 			});
+			if (!isCommandScopeActive(this.host, scope)) return;
 			if (!selected) {
 				this.host.setSessionStatus(runtime.session);
 				return;
@@ -232,6 +252,7 @@ export class NavigationCommandActions {
 
 			await this.host.openSearchResultInNewTab(selected);
 		} catch (error) {
+			if (!isCommandScopeActive(this.host, scope)) return;
 			this.host.addEntry({ id: createId("error"), kind: "error", text: `Session search failed: ${error instanceof Error ? error.message : String(error)}` });
 			this.host.toast.error("Session search failed");
 			this.host.setSessionStatus(runtime.session);
@@ -253,7 +274,9 @@ export class NavigationCommandActions {
 		this.host.setStatus("switching session");
 		this.host.render();
 		await this.host.awaitCurrentSessionExtensions(runtime);
+		if (!isCommandRuntimeActive(this.host, runtime)) return;
 		const result = await runtime.switchSession(resolvedSessionPath);
+		if (!isCommandRuntimeActive(this.host, runtime)) return;
 		if (result.cancelled) {
 			this.host.addEntry({ id: createId("system"), kind: "system", text: "Resume cancelled." });
 			this.host.setSessionStatus(runtime.session);
@@ -300,26 +323,27 @@ export class NavigationCommandActions {
 		this.host.render();
 
 		const loadId = ++this.resumeLoadId;
-		void this.loadResumeSessionsInBackground({ loadId, preserveStatus, session: runtime.session });
+		void this.loadResumeSessionsInBackground({ loadId, preserveStatus, scope: captureCommandScope(this.host) });
 	}
 
-	private async loadResumeSessionsInBackground(options: { loadId: number; preserveStatus: boolean; session: AgentSessionRuntime["session"] }): Promise<void> {
+	private async loadResumeSessionsInBackground(options: { loadId: number; preserveStatus: boolean; scope: CommandScope }): Promise<void> {
 		try {
 			await nextTick();
+			if (!isCommandScopeActive(this.host, options.scope)) return;
 			await this.resumeSessionLoader({
 				cwd: this.host.options.cwd,
 				onChunk: (sessions, progress) => {
-					if (options.loadId !== this.resumeLoadId) return;
+					if (options.loadId !== this.resumeLoadId || !isCommandScopeActive(this.host, options.scope)) return;
 					this.host.setResumeSessions([...sessions]);
 					if (progress.done) {
 						this.host.setResumeLoading(false);
-						if (!options.preserveStatus) this.host.setSessionStatus(options.session);
+						if (!options.preserveStatus) this.host.setSessionStatus(options.scope.session);
 					}
 					this.host.render();
 				},
 			});
 		} catch (error) {
-			if (options.loadId !== this.resumeLoadId) return;
+			if (options.loadId !== this.resumeLoadId || !isCommandScopeActive(this.host, options.scope)) return;
 			this.host.setResumeLoading(false);
 			this.host.setDirectPopupMenu(undefined);
 			this.host.setDirectPopupMenuPreserveStatus(false);
@@ -327,7 +351,7 @@ export class NavigationCommandActions {
 			this.host.closeResumeMenu();
 			this.host.addEntry({ id: createId("error"), kind: "error", text: `Session list failed: ${error instanceof Error ? error.message : String(error)}` });
 			if (!options.preserveStatus) this.host.toast.error("Failed to load sessions");
-			if (!options.preserveStatus) this.host.setSessionStatus(options.session);
+			if (!options.preserveStatus) this.host.setSessionStatus(options.scope.session);
 			this.host.render();
 		}
 	}

@@ -313,6 +313,75 @@ describe("AppVoiceController", () => {
 			setVoiceControllerTestDeps();
 		}
 	});
+
+	it("discards an async recording start after the originating tab changes", async () => {
+		const host = fakeHost();
+		host.activeScope.value = "tab-a";
+		const controller = new AppVoiceController(host, dictationConfig());
+		let resolveModel!: (path: string) => void;
+		let recorderSelections = 0;
+		setVoiceControllerTestDeps({
+			tryLoadVosk: () => ({ ok: true, module: {
+				Model: class {},
+				Recognizer: class {},
+			} }) as never,
+			ensureModel: async () => await new Promise((resolve) => { resolveModel = resolve; }),
+			selectRecorderCommand: async () => {
+				recorderSelections += 1;
+				return { command: "rec", args: [], description: "mock" };
+			},
+		});
+		try {
+			const starting = controller.toggleRecording();
+			await Promise.resolve();
+			host.activeScope.value = "tab-b";
+			resolveModel("/mock/model");
+			await starting;
+
+			assert.equal(controller.statusWidgetActive(), false);
+			assert.equal(recorderSelections, 0);
+			assert.deepEqual(host.transcripts, []);
+			assert.deepEqual(host.partials, []);
+		} finally {
+			setVoiceControllerTestDeps();
+		}
+	});
+
+	it("does not emit stop results or throttled partials into a newer tab", async () => {
+		const host = fakeHost();
+		host.activeScope.value = "tab-a";
+		const controller = new AppVoiceController(host, dictationConfig());
+		const audioProcess = fakeAudioProcess();
+		const recognizer = {
+			acceptWaveform: () => false,
+			partialResult: () => ({ partial: "old tab partial" }),
+			result: () => ({ text: "unused" }),
+			finalResult: () => ({ text: "old tab final" }),
+		};
+		const internals = controller as unknown as {
+			state: VoiceInputState;
+			audioProcess?: typeof audioProcess;
+			recognizer?: typeof recognizer;
+			recordingScope?: string;
+			startGeneration: number;
+			bindAudioProcess(process: typeof audioProcess, recognizerArg: typeof recognizer, generation: number, scope: string): void;
+		};
+		internals.state = "listening";
+		internals.audioProcess = audioProcess;
+		internals.recognizer = recognizer;
+		internals.recordingScope = "tab-a";
+		internals.startGeneration = 1;
+		internals.bindAudioProcess(audioProcess, recognizer, 1, "tab-a");
+		audioProcess.stdout.emit("data", Buffer.from("pcm"));
+
+		host.activeScope.value = "tab-b";
+		await controller.stopRecording();
+		await new Promise((resolve) => setTimeout(resolve, 130));
+		audioProcess.emit("close", 0, null);
+
+		assert.deepEqual(host.transcripts, []);
+		assert.deepEqual(host.partials, []);
+	});
 });
 
 
@@ -337,16 +406,25 @@ function dictationConfig(overrides: { language?: string } = {}): DictationConfig
 	};
 }
 
-function fakeHost(): AppVoiceControllerHost & { transcripts: string[]; partials: Array<string | undefined>; systemMessages: string[]; toasts: string[] } {
+function fakeHost(): AppVoiceControllerHost & {
+	transcripts: string[];
+	partials: Array<string | undefined>;
+	systemMessages: string[];
+	toasts: string[];
+	activeScope: { value: string | undefined };
+} {
 	const transcripts: string[] = [];
 	const partials: Array<string | undefined> = [];
 	const systemMessages: string[] = [];
 	const toasts: string[] = [];
+	const activeScope = { value: undefined as string | undefined };
 	return {
 		transcripts,
 		partials,
 		systemMessages,
 		toasts,
+		activeScope,
+		activeInputScope: () => activeScope.value,
 		insertTranscript: (text) => { transcripts.push(text); },
 		setPartialTranscript: (text) => { partials.push(text); },
 		addSystemMessage: (message) => { systemMessages.push(message); },

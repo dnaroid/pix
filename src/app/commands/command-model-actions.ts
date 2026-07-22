@@ -1,6 +1,11 @@
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import { getIdleRuntime, getRuntime } from "./command-runtime.js";
-import type { CommandControllerHost } from "./command-host.js";
+import {
+	captureCommandScope,
+	isCommandScopeActive,
+	type CommandControllerHost,
+	type CommandScope,
+} from "./command-host.js";
 import { getProjectPixConfigPath, savePixAutocompleteModel, savePixDefaultModel, savePixDefaultThinking, saveProjectPixIgnoreContextFiles } from "../../config.js";
 import { createId } from "../id.js";
 import { isThinkingLevel, parseScopedModelRef } from "../model/model-ref.js";
@@ -44,6 +49,7 @@ export class ModelCommandActions {
 	}
 
 	async runModelSlashCommand(argumentsText: string): Promise<void> {
+		const scope = captureCommandScope(this.host);
 		const modelRef = argumentsText.trim();
 		if (!modelRef) {
 			const selected = await this.host.showMenu(this.host.getModelMenuItems(""), {
@@ -51,6 +57,7 @@ export class ModelCommandActions {
 				placeholder: "Search models",
 				emptyText: "No matching models",
 			});
+			if (!isCommandScopeActive(this.host, scope)) return;
 			if (!selected) {
 				this.host.setSessionStatus(this.host.runtime()?.session);
 				this.host.render();
@@ -69,10 +76,12 @@ export class ModelCommandActions {
 		if (!parsed) throw new Error("Model must use provider/model[:thinking] format");
 
 		await runtime.services.modelRuntime.reloadConfig();
+		if (!isCommandScopeActive(this.host, scope)) return;
 		const model = runtime.services.modelRuntime.getModel(parsed.provider, parsed.modelId) as SessionModel | undefined;
 		if (!model) throw new Error(`Model not found: ${parsed.provider}/${parsed.modelId}`);
 
 		await this.runModelCommand(model);
+		if (!isCommandScopeActive(this.host, scope)) return;
 		if (parsed.thinkingLevel !== undefined) {
 			runtime.session.setThinkingLevel(parsed.thinkingLevel);
 			this.addPersistentSystemEntry(runtime.session, `Selected thinking level ${runtime.session.thinkingLevel}`);
@@ -81,6 +90,7 @@ export class ModelCommandActions {
 	}
 
 	async runDefaultModelSlashCommand(argumentsText: string): Promise<void> {
+		const scope = captureCommandScope(this.host);
 		const modelRef = argumentsText.trim();
 		if (!modelRef) {
 			const selected = await this.host.showMenu(this.host.getModelMenuItems(""), {
@@ -88,6 +98,7 @@ export class ModelCommandActions {
 				placeholder: "Search models",
 				emptyText: "No matching models",
 			});
+			if (!isCommandScopeActive(this.host, scope)) return;
 			if (!selected) {
 				this.host.setSessionStatus(this.host.runtime()?.session);
 				this.host.render();
@@ -106,6 +117,7 @@ export class ModelCommandActions {
 		if (!parsed) throw new Error("Model must use provider/model[:thinking] format");
 
 		await runtime.services.modelRuntime.reloadConfig();
+		if (!isCommandScopeActive(this.host, scope)) return;
 		const model = runtime.services.modelRuntime.getModel(parsed.provider, parsed.modelId) as SessionModel | undefined;
 		if (!model) throw new Error(`Model not found: ${parsed.provider}/${parsed.modelId}`);
 
@@ -114,6 +126,7 @@ export class ModelCommandActions {
 	}
 
 	async runAutocompleteSlashCommand(argumentsText: string): Promise<void> {
+		const scope = captureCommandScope(this.host);
 		const modelRef = argumentsText.trim();
 		if (!modelRef) {
 			const saved = savePixAutocompleteModel("");
@@ -129,6 +142,7 @@ export class ModelCommandActions {
 		if (!parsed) throw new Error("Model must use provider/model[:thinking] format, or run /autocomplete with no arguments to disable");
 
 		await runtime.services.modelRuntime.reloadConfig();
+		if (!isCommandScopeActive(this.host, scope)) return;
 		const model = runtime.services.modelRuntime.getModel(parsed.provider, parsed.modelId) as SessionModel | undefined;
 		if (!model) throw new Error(`Model not found: ${parsed.provider}/${parsed.modelId}`);
 
@@ -173,6 +187,7 @@ export class ModelCommandActions {
 	async runScopedModelsCommand(argumentsText: string): Promise<void> {
 		const runtime = getIdleRuntime(this.host, "scoped-models");
 		if (!runtime) return;
+		const scope = captureCommandScope(this.host);
 
 		const value = argumentsText.trim();
 		if (!value) {
@@ -212,6 +227,7 @@ export class ModelCommandActions {
 		const scopedModels: ScopedSessionModel[] = [];
 		const invalidRefs: string[] = [];
 		await runtime.services.modelRuntime.reloadConfig();
+		if (!isCommandScopeActive(this.host, scope)) return;
 		for (const ref of refs) {
 			const parsed = parseScopedModelRef(ref);
 			const model = parsed ? runtime.services.modelRuntime.getModel(parsed.provider, parsed.modelId) as SessionModel | undefined : undefined;
@@ -232,6 +248,7 @@ export class ModelCommandActions {
 	}
 
 	async runThinkingSlashCommand(argumentsText: string): Promise<void> {
+		const scope = captureCommandScope(this.host);
 		const level = argumentsText.trim();
 		if (!level) {
 			const selected = await this.host.showMenu(this.host.getThinkingMenuItems(""), {
@@ -239,6 +256,7 @@ export class ModelCommandActions {
 				placeholder: "Search thinking levels",
 				emptyText: "No matching thinking levels",
 			});
+			if (!isCommandScopeActive(this.host, scope)) return;
 			if (!selected) {
 				this.host.setSessionStatus(this.host.runtime()?.session);
 				this.host.render();
@@ -255,6 +273,7 @@ export class ModelCommandActions {
 	}
 
 	async runDefaultThinkingSlashCommand(argumentsText: string): Promise<void> {
+		const scope = captureCommandScope(this.host);
 		const level = argumentsText.trim();
 		if (!level) {
 			const selected = await this.host.showMenu(this.host.getThinkingMenuItems(""), {
@@ -262,6 +281,7 @@ export class ModelCommandActions {
 				placeholder: "Search thinking levels",
 				emptyText: "No matching thinking levels",
 			});
+			if (!isCommandScopeActive(this.host, scope)) return;
 			if (!selected) {
 				this.host.setSessionStatus(this.host.runtime()?.session);
 				this.host.render();
@@ -280,11 +300,13 @@ export class ModelCommandActions {
 	async runModelCommand(model: SessionModel): Promise<void> {
 		const runtime = getRuntime(this.host, "model");
 		if (!runtime) return;
+		const scope = captureCommandScope(this.host);
 
 		const ref = this.host.modelRef(model);
 		this.host.setStatus(`selecting model ${ref}`);
 		this.host.render();
 		await runtime.session.setModel(model);
+		if (!isCommandScopeActive(this.host, scope)) return;
 		this.host.addEntry({ id: createId("system"), kind: "system", text: `Selected model ${ref}` });
 		if (runtime.session.isStreaming) {
 			this.host.addEntry({
@@ -297,7 +319,8 @@ export class ModelCommandActions {
 			return;
 		}
 
-		await this.reloadAfterModelChange(runtime.session, ref);
+		await this.reloadAfterModelChange(runtime.session, ref, scope);
+		if (!isCommandScopeActive(this.host, scope)) return;
 		this.host.setSessionStatus(runtime.session);
 	}
 
@@ -317,11 +340,12 @@ export class ModelCommandActions {
 		this.host.addEntry({ id: createId("system"), kind: "system", text });
 	}
 
-	private async reloadAfterModelChange(session: AgentSession, ref: string): Promise<void> {
+	private async reloadAfterModelChange(session: AgentSession, ref: string, scope: CommandScope): Promise<void> {
 		this.host.setStatus(`reloading resources for ${ref}`);
 		this.host.render();
 		try {
 			await session.reload();
+			if (!isCommandScopeActive(this.host, scope)) return;
 			this.host.addEntry({
 				id: createId("system"),
 				kind: "system",
@@ -329,6 +353,7 @@ export class ModelCommandActions {
 			});
 			this.host.toast.success("Model changed and resources reloaded");
 		} catch (error) {
+			if (!isCommandScopeActive(this.host, scope)) return;
 			this.host.addEntry({
 				id: createId("error"),
 				kind: "error",

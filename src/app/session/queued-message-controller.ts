@@ -23,6 +23,7 @@ export type AppQueuedMessageControllerHost = {
 	setInput(value: string): void;
 	insertInput(value: string): void;
 	attachImage(data: string, mimeType: string): void;
+	requeueAutoUserMessageForSession?(session: AgentSession, message: SubmittedUserMessage): void;
 	onDeferredUserMessagesChanged?(): void;
 };
 
@@ -30,7 +31,7 @@ export class AppQueuedMessageController {
 	readonly autoUserMessages: SubmittedUserMessage[] = [];
 	readonly deferredUserMessages: SubmittedUserMessage[] = [];
 
-	private promptSubmissionInFlightSession: AgentSession | undefined;
+	private readonly promptSubmissionsInFlight = new Set<AgentSession>();
 	private immediateSendInProgress = false;
 
 	constructor(private readonly host: AppQueuedMessageControllerHost) {}
@@ -38,7 +39,7 @@ export class AppQueuedMessageController {
 	reset(): void {
 		this.autoUserMessages.length = 0;
 		this.deferredUserMessages.length = 0;
-		this.promptSubmissionInFlightSession = undefined;
+		this.promptSubmissionsInFlight.clear();
 	}
 
 	captureAutoUserMessages(): SubmittedUserMessage[] {
@@ -71,54 +72,54 @@ export class AppQueuedMessageController {
 		};
 	}
 
-	async submitUserMessage(message: SubmittedUserMessage): Promise<void> {
-		const session = this.host.requireRuntime().session;
-		if (session.isStreaming) {
-			await this.sendUserMessageToSession(message, { streamingBehavior: "steer" });
+	async submitUserMessage(message: SubmittedUserMessage, session?: AgentSession): Promise<void> {
+		const targetSession = session ?? this.host.requireRuntime().session;
+		if (targetSession.isStreaming) {
+			await this.sendUserMessageToSession(message, { streamingBehavior: "steer" }, targetSession);
 			return;
 		}
 
-		if (this.shouldQueueUserMessageAsSteering(session)) {
+		if (this.shouldQueueUserMessageAsSteering(targetSession)) {
 			await this.queueUserMessageAsSteering(message);
 			return;
 		}
 
-		await this.sendUserMessageToSession(message);
+		await this.sendUserMessageToSession(message, {}, targetSession);
 	}
 
 	async sendUserMessageToSession(
 		message: SubmittedUserMessage,
 		options: { streamingBehavior?: "steer" | "followUp" } = {},
+		session?: AgentSession,
 	): Promise<void> {
-		const session = this.host.requireRuntime().session;
-		const markInFlight = !session.isStreaming;
-		if (markInFlight) this.promptSubmissionInFlightSession = session;
+		const targetSession = session ?? this.host.requireRuntime().session;
+		const markInFlight = !targetSession.isStreaming;
+		if (markInFlight) this.promptSubmissionsInFlight.add(targetSession);
 		this.host.setSessionActivity("running");
 
 		try {
 			const opts: { streamingBehavior?: "steer" | "followUp"; images?: ImageContent[] } = {};
-			if (session.isStreaming) opts.streamingBehavior = options.streamingBehavior ?? "steer";
+			if (targetSession.isStreaming) opts.streamingBehavior = options.streamingBehavior ?? "steer";
 			if (message.images.length > 0) opts.images = message.images;
-			await session.prompt(message.promptText, Object.keys(opts).length > 0 ? opts : undefined);
+			await targetSession.prompt(message.promptText, Object.keys(opts).length > 0 ? opts : undefined);
 		} finally {
-			if (markInFlight && this.promptSubmissionInFlightSession === session) this.promptSubmissionInFlightSession = undefined;
+			if (markInFlight) this.promptSubmissionsInFlight.delete(targetSession);
 
 			const runtime = this.host.runtime();
-			if (runtime) {
-				const activeSession = runtime.session;
-				this.host.setSessionStatus(activeSession);
-				this.host.setSessionActivity(activeSession.isStreaming || activeSession.isCompacting ? "running" : "idle");
-			}
+			if (runtime?.session !== targetSession) return;
+			this.host.setSessionStatus(targetSession);
+			this.host.setSessionActivity(targetSession.isStreaming || targetSession.isCompacting ? "running" : "idle");
 			if (this.totalQueuedMessageCount() > 0) this.updateQueuedMessageStatus();
-			void this.flushAutoUserMessages();
+			void this.flushAutoUserMessages(targetSession);
 		}
 	}
 
-	async flushAutoUserMessages(): Promise<void> {
+	async flushAutoUserMessages(expectedSession?: AgentSession): Promise<void> {
 		if (this.immediateSendInProgress || this.autoUserMessages.length === 0) return;
 
 		const session = this.host.runtime()?.session;
-		if (!session || session.isStreaming || session.isCompacting || this.promptSubmissionInFlightSession === session) return;
+		if (expectedSession && session !== expectedSession) return;
+		if (!session || session.isStreaming || session.isCompacting || this.promptSubmissionsInFlight.has(session)) return;
 
 		const message = this.autoUserMessages.shift();
 		if (!message) return;
@@ -127,8 +128,12 @@ export class AppQueuedMessageController {
 		if (this.host.isRunning()) this.host.render();
 
 		try {
-			await this.sendUserMessageToSession(message);
+			await this.sendUserMessageToSession(message, {}, session);
 		} catch (error) {
+			if (this.host.runtime()?.session !== session) {
+				this.host.requeueAutoUserMessageForSession?.(session, message);
+				return;
+			}
 			this.autoUserMessages.unshift(message);
 			this.notifyAutoUserMessagesChanged();
 			this.updateQueuedMessageStatus();
@@ -239,7 +244,7 @@ export class AppQueuedMessageController {
 			const message = typeof taken.removed === "string"
 				? this.createSubmittedUserMessage(taken.removed, taken.removed, [])
 				: taken.removed;
-			await this.sendUserMessageToSession(message, { streamingBehavior: "steer" });
+			await this.sendUserMessageToSession(message, { streamingBehavior: "steer" }, session);
 			this.host.setSessionStatus(this.host.runtime()?.session);
 			this.host.showToast("Queued message sent", "success");
 		} catch (error) {
@@ -274,7 +279,7 @@ export class AppQueuedMessageController {
 	}
 
 	private shouldQueueUserMessageAsSteering(session: AgentSession): boolean {
-		return session.isCompacting || this.promptSubmissionInFlightSession === session;
+		return session.isCompacting || this.promptSubmissionsInFlight.has(session);
 	}
 
 	private async queueUserMessageAsSteering(message: SubmittedUserMessage): Promise<void> {
