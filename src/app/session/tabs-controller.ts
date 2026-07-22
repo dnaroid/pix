@@ -25,6 +25,7 @@ const BACKGROUND_PREWARM_TAB_LIMIT = 2;
 const TAB_ATTENTION_BLINK_KEY = "tab-attention";
 const LOADING_TAB_TITLE_PATTERN = /^loading(?:…|\.\.\.)?$/iu;
 const DEFAULT_SESSION_TITLE_PATTERN = /^(?:session )?[0-9a-f]{8}$/iu;
+const SESSION_HEADER_SCAN_MAX_BYTES = 64 * 1024;
 const SESSION_TITLE_HEAD_SCAN_MAX_BYTES = 256 * 1024;
 const SESSION_TITLE_SCAN_MAX_BYTES = 2 * 1024 * 1024;
 
@@ -1706,16 +1707,9 @@ export class AppTabsController {
 	 */
 	private async unlinkSessionAndDcpSidecar(sessionPath: string): Promise<void> {
 		let sidecarPath: string | undefined;
-		try {
-			const firstLine = (await readFile(sessionPath, "utf8")).split("\n", 1)[0]?.trim();
-			if (firstLine) {
-				const parsed = JSON.parse(firstLine) as { type?: string; id?: unknown };
-				if (parsed.type === "session" && typeof parsed.id === "string" && parsed.id) {
-					sidecarPath = join(dirname(sessionPath), "dcp-state", parsed.id.replace(/[^a-zA-Z0-9._-]/g, "_") + ".json");
-				}
-			}
-		} catch {
-			// Reading the session id is best-effort; proceed to unlink the file.
+		const header = await readSessionHeader(sessionPath);
+		if (header?.type === "session" && typeof header.id === "string" && header.id) {
+			sidecarPath = join(dirname(sessionPath), "dcp-state", header.id.replace(/[^a-zA-Z0-9._-]/g, "_") + ".json");
 		}
 		try {
 			await unlink(sessionPath);
@@ -1835,20 +1829,28 @@ async function readSessionTitleChunk(
 }
 
 async function readSessionHasParent(sessionPath: string): Promise<boolean> {
+	const header = await readSessionHeader(sessionPath);
+	return header?.type === "session" && typeof header.parentSession === "string";
+}
+
+async function readSessionHeader(sessionPath: string): Promise<Record<string, unknown> | undefined> {
 	let file: Awaited<ReturnType<typeof openFile>> | undefined;
 	try {
 		file = await openFile(sessionPath, "r");
-		const buffer = Buffer.alloc(4096);
+		const buffer = Buffer.alloc(SESSION_HEADER_SCAN_MAX_BYTES);
 		const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
-		if (bytesRead <= 0) return false;
+		if (bytesRead <= 0) return undefined;
 
-		const firstLine = buffer.subarray(0, bytesRead).toString("utf8").split("\n", 1)[0]?.trim();
-		if (!firstLine) return false;
+		const content = buffer.subarray(0, bytesRead);
+		const newlineIndex = content.indexOf(0x0a);
+		if (newlineIndex < 0 && bytesRead === buffer.length) return undefined;
+		const firstLine = content.subarray(0, newlineIndex >= 0 ? newlineIndex : bytesRead).toString("utf8").trim();
+		if (!firstLine) return undefined;
 
 		const parsed: unknown = JSON.parse(firstLine);
-		return isRecord(parsed) && parsed.type === "session" && typeof parsed.parentSession === "string";
+		return isRecord(parsed) ? parsed : undefined;
 	} catch {
-		return false;
+		return undefined;
 	} finally {
 		await file?.close();
 	}

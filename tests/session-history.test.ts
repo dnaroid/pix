@@ -191,6 +191,45 @@ describe("loadSessionHistoryEntriesAsync", () => {
 		assert.equal(olderLoader, undefined);
 	});
 
+	it("keeps the user prompt when the lazy tail begins inside a long assistant turn", async () => {
+		const entries: Entry[] = [];
+		let olderLoader: SessionHistoryOlderLoader | undefined;
+		const assistantTurn = Array.from({ length: 40 }, (_value, index) => [
+			{
+				role: "assistant",
+				content: [
+					{ type: "thinking", thinking: `thinking ${index}` },
+					{ type: "toolCall", id: `call-${index}`, name: "read", arguments: { path: `file-${index}` } },
+				],
+			},
+			{ role: "toolResult", toolCallId: `call-${index}`, toolName: "read", content: [{ text: `result ${index}` }], isError: false },
+		]).flat();
+		const messages = [
+			{ role: "user", content: "initial prompt" },
+			...assistantTurn,
+		];
+
+		await loadSessionHistoryEntriesAsync({
+			messages,
+			addEntry: (entry) => entries.push(entry),
+			prependEntries: (newEntries) => entries.unshift(...newEntries),
+			setToolEntryId: () => {},
+			toolDefaultExpanded: () => false,
+			observeSubagentsToolResult: () => {},
+			observeTodoToolResult: () => {},
+			isCancelled: () => false,
+			render: () => {},
+			lazyOlderHistory: true,
+			onOlderLoaderReady: (loader) => {
+				olderLoader = loader;
+			},
+		});
+
+		assert.equal(entries[0]?.kind, "user");
+		assert.equal(entryText(entries[0]!), "initial prompt");
+		assert.equal(olderLoader, undefined);
+	});
+
 	it("does not split a trailing tool result from its assistant tool call", async () => {
 		const entries: Entry[] = [];
 		const snapshots: Array<Array<Pick<Entry, "kind"> & { output?: string }>> = [];
@@ -215,7 +254,7 @@ describe("loadSessionHistoryEntriesAsync", () => {
 			tailMessageCount: 1,
 		});
 
-		assert.deepEqual(snapshots[0], [{ kind: "tool", output: "hi" }]);
+		assert.deepEqual(snapshots[0], [{ kind: "user" }, { kind: "tool", output: "hi" }]);
 		assert.deepEqual(entries.map((entry) => entry.kind), ["user", "tool"]);
 	});
 

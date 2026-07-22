@@ -4,7 +4,7 @@ import type { ConversationViewport } from "../rendering/conversation-viewport.js
 import { createId } from "../id.js";
 import { extractImageContents, renderContent, renderUserMessageContent, stringifyUnknown } from "../rendering/message-content.js";
 import { customMessageEntry, extensionSessionEntry, loadSessionHistoryEntries, loadSessionHistoryEntriesAsync, type LoadOlderSessionHistoryOptions, type SessionHistoryOlderLoader } from "./session-history.js";
-import { sessionHistoryDisplayMessages, sessionHistoryDisplayMessagesFromEntries, sessionHistoryFullBranchEntries } from "./pix-system-message.js";
+import { sessionHistoryDisplayMessages, sessionHistoryDisplayMessagesFromEntries, sessionHistoryFullBranchEntries, sessionHistoryOlderMessagesReader } from "./pix-system-message.js";
 import { THINKING_TOOL_NAME } from "../constants.js";
 import type { Entry, SessionActivity } from "../types.js";
 import { isRecord } from "../guards.js";
@@ -208,23 +208,37 @@ export class AppSessionEventController {
 		this.historyEntries = [];
 		this.historyWindowStart = 0;
 
-		const branchEntries = await sessionHistoryFullBranchEntries(runtime.session);
+		const lazyOlderHistory = options.lazyOlderHistory === true;
+		const historyEntries: Entry[] | undefined = lazyOlderHistory ? undefined : [];
+		const messages = lazyOlderHistory
+			? sessionHistoryDisplayMessages(runtime.session)
+			: sessionHistoryDisplayMessagesFromEntries(await sessionHistoryFullBranchEntries(runtime.session));
 		if (options.isCancelled()) return false;
-		const historyEntries: Entry[] = [];
 
 		const loaded = await loadSessionHistoryEntriesAsync({
-			messages: sessionHistoryDisplayMessagesFromEntries(branchEntries),
-			addEntry: (entry) => historyEntries.push(entry),
-			prependEntries: (entries) => historyEntries.unshift(...entries),
+			messages,
+			addEntry: (entry) => {
+				if (historyEntries) historyEntries.push(entry);
+				else this.addEntry(entry);
+			},
+			prependEntries: (entries) => {
+				if (historyEntries) historyEntries.unshift(...entries);
+				else this.prependEntries(entries);
+			},
 			setToolEntryId: (toolCallId, entryId) => this.toolEntryIdsByCallId.set(toolCallId, entryId),
 			toolDefaultExpanded: (toolName) => this.host.toolDefaultExpanded(toolName),
 			observeSubagentsToolResult: (toolName, details, options) => this.host.observeSubagentsToolResult(toolName, details, options),
 			observeTodoToolResult: (toolName, details, isError) => this.host.observeTodoToolResult(toolName, details, isError),
 			isCancelled: options.isCancelled,
-			render: () => {},
-			lazyOlderHistory: false,
+			render: lazyOlderHistory ? options.render : () => {},
+			lazyOlderHistory,
+			olderMessagesReader: lazyOlderHistory ? sessionHistoryOlderMessagesReader(runtime.session) : undefined,
+			onOlderLoaderReady: (loader) => {
+				if (!options.isCancelled()) this.olderHistoryLoader = loader;
+			},
 		});
 		if (!loaded) return false;
+		if (!historyEntries) return !options.isCancelled();
 
 		this.historyEntries = historyEntries;
 		this.setHistoryWindowStart(this.maxHistoryWindowStart());

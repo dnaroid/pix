@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, stat, unlink, writeFile } from "node:fs/promises"
+import { mkdir, open, readFile, readdir, stat, unlink, writeFile } from "node:fs/promises"
 import type { Dirent } from "node:fs"
 import { dirname, join } from "node:path"
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent"
@@ -7,12 +7,35 @@ import { hashSerializedState, serializeState, type DcpState, type SerializedDcpS
 const DCP_STATE_DIR = "dcp-state"
 const DCP_STATE_EXT = ".json"
 const DCP_STATE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
+const MAX_SESSION_HEADER_BYTES = 64 * 1024
 
 let lastPersistedStateHash: string | undefined
 let saveQueue: Promise<void> = Promise.resolve()
 
 function safeSessionFileName(sessionId: string): string {
 	return sessionId.replace(/[^a-zA-Z0-9._-]/g, "_") + DCP_STATE_EXT
+}
+
+export async function readSessionIdFromFile(sessionPath: string): Promise<string | undefined> {
+	const file = await open(sessionPath, "r")
+	try {
+		const buffer = Buffer.alloc(MAX_SESSION_HEADER_BYTES)
+		const { bytesRead } = await file.read(buffer, 0, buffer.length, 0)
+		if (bytesRead <= 0) return undefined
+
+		const content = buffer.subarray(0, bytesRead)
+		const newlineIndex = content.indexOf(0x0a)
+		if (newlineIndex < 0 && bytesRead === buffer.length) return undefined
+
+		const firstLine = content.subarray(0, newlineIndex >= 0 ? newlineIndex : bytesRead).toString("utf8").trim()
+		if (!firstLine) return undefined
+		const parsed = JSON.parse(firstLine) as { type?: string; id?: unknown }
+		return parsed.type === "session" && typeof parsed.id === "string" && parsed.id.length > 0
+			? parsed.id
+			: undefined
+	} finally {
+		await file.close()
+	}
 }
 
 async function listSessionIds(sessionDir: string): Promise<string[]> {
@@ -30,12 +53,8 @@ async function listSessionIds(sessionDir: string): Promise<string[]> {
 
 		const sessionPath = join(sessionDir, entry.name)
 		try {
-			const firstLine = (await readFile(sessionPath, "utf8")).split("\n", 1)[0]?.trim()
-			if (!firstLine) continue
-			const parsed = JSON.parse(firstLine) as { type?: string; id?: unknown }
-			if (parsed.type === "session" && typeof parsed.id === "string" && parsed.id.length > 0) {
-				sessionIds.add(parsed.id)
-			}
+			const sessionId = await readSessionIdFromFile(sessionPath)
+			if (sessionId) sessionIds.add(sessionId)
 		} catch {
 			// Ignore malformed or transient session files during cleanup.
 		}
@@ -88,14 +107,10 @@ export async function loadDcpStateFromSessionFile(
 	if (!sessionFile) return undefined
 
 	try {
-		const firstLine = (await readFile(sessionFile, "utf8")).split("\n", 1)[0]?.trim()
-		if (!firstLine) return undefined
-		const parsed = JSON.parse(firstLine) as { type?: string; id?: unknown }
-		if (parsed.type !== "session" || typeof parsed.id !== "string" || !parsed.id) {
-			return undefined
-		}
+		const sessionId = await readSessionIdFromFile(sessionFile)
+		if (!sessionId) return undefined
 		const stateDir = join(dirname(sessionFile), DCP_STATE_DIR)
-		const statePath = join(stateDir, safeSessionFileName(parsed.id))
+		const statePath = join(stateDir, safeSessionFileName(sessionId))
 		const text = await readFile(statePath, "utf8")
 		return JSON.parse(text) as SerializedDcpState
 	} catch {

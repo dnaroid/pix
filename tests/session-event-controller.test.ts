@@ -52,7 +52,7 @@ describe("AppSessionEventController", () => {
 		await controller.loadSessionHistoryAsync({
 			isCancelled: () => false,
 			render: () => {},
-			lazyOlderHistory: true,
+			lazyOlderHistory: false,
 		});
 
 		assert.deepEqual(entries.map(historyEntryText).slice(0, 2), ["message 130", "message 131"]);
@@ -69,6 +69,52 @@ describe("AppSessionEventController", () => {
 		assert.deepEqual(entries.map(historyEntryText).slice(0, 2), ["message 130", "message 131"]);
 		assert.equal(lastEntryText(entries), "message 429");
 		assert.equal(controller.hasNewerSessionHistory(), false);
+	});
+
+	it("loads only the persisted tail until older history is requested", async () => {
+		const entries: Entry[] = [];
+		let fullBranchReadCount = 0;
+		let olderReadCount = 0;
+		let hasOlder = true;
+		const sessionManager = {
+			getBranch: () => [
+				{ type: "message", id: "entry-2", parentId: "entry-1", timestamp: "2026-01-01T00:00:02.000Z", message: { role: "user", content: "message 2" } },
+				{ type: "message", id: "entry-3", parentId: "entry-2", timestamp: "2026-01-01T00:00:03.000Z", message: { role: "user", content: "message 3" } },
+			],
+			readFullBranchEntries: async () => {
+				fullBranchReadCount += 1;
+				throw new Error("lazy history must not read the full branch");
+			},
+			createHistoryReader: () => ({
+				hasOlder: () => hasOlder,
+				readOlder: async () => {
+					olderReadCount += 1;
+					hasOlder = false;
+					return [
+						{ type: "message", id: "entry-0", parentId: null, timestamp: "2026-01-01T00:00:00.000Z", message: { role: "user", content: "message 0" } },
+						{ type: "message", id: "entry-1", parentId: "entry-0", timestamp: "2026-01-01T00:00:01.000Z", message: { role: "user", content: "message 1" } },
+					];
+				},
+			}),
+		};
+		const controller = createController(entries, {
+			session: { isStreaming: false, messages: [], sessionManager },
+		} as unknown as AgentSessionRuntime);
+
+		assert.equal(await controller.loadSessionHistoryAsync({
+			isCancelled: () => false,
+			render: () => {},
+			lazyOlderHistory: true,
+		}), true);
+
+		assert.equal(fullBranchReadCount, 0);
+		assert.deepEqual(entries.map(historyEntryText), ["message 2", "message 3"]);
+		assert.equal(controller.hasOlderSessionHistory(), true);
+
+		assert.equal(await controller.loadOlderSessionHistory({ render: false }), true);
+		assert.equal(olderReadCount, 1);
+		assert.deepEqual(entries.map(historyEntryText), ["message 0", "message 1", "message 2", "message 3"]);
+		assert.equal(controller.hasOlderSessionHistory(), false);
 	});
 
 	it("refreshes session status when session info changes", () => {

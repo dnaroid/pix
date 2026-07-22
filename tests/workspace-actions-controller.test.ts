@@ -256,6 +256,57 @@ describe("AppWorkspaceActionsController undo changes", () => {
 
 		assert.equal(entries[0]?.kind === "user" ? entries[0].sessionEntryId : undefined, "session-late");
 	});
+
+	it("preserves session entry ids when lazy history starts in the middle of the branch", () => {
+		const entries: Entry[] = [
+			{ id: "visible-late-1", kind: "user", text: "Late prompt 1", sessionEntryId: "session-late-1" },
+			{ id: "visible-late-2", kind: "user", text: "Late prompt 2", sessionEntryId: "session-late-2" },
+		];
+		const runtime = {
+			cwd: "/tmp/workspace",
+			session: {
+				isStreaming: false,
+				isCompacting: false,
+				sessionFile: "/tmp/workspace/session.jsonl",
+				sessionManager: {
+					getBranch: () => [
+						messageEntry("session-early", null, "user", "Early prompt"),
+						messageEntry("assistant-1", "session-early", "assistant", "Done"),
+						messageEntry("session-late-1", "assistant-1", "user", "Late prompt 1"),
+						messageEntry("session-late-2", "session-late-1", "user", "Late prompt 2"),
+					],
+					getSessionId: () => "session-id",
+				},
+			},
+		} as unknown as AgentSessionRuntime;
+		let touchedEntryCount = 0;
+		const controller = new AppWorkspaceActionsController({
+			entries,
+			allEntries: () => entries,
+			runtime: () => runtime,
+			awaitCurrentSessionExtensions: async () => {},
+			findUserEntry: (entryId) => entries.find((entry): entry is Extract<Entry, { kind: "user" }> => entry.kind === "user" && entry.id === entryId),
+			touchEntry: () => {
+				touchedEntryCount += 1;
+			},
+			resetSessionView: () => {},
+			loadSessionHistory: () => {},
+			addEntry: () => {},
+			setInput: () => {},
+			getInput: () => "",
+			setStatus: () => {},
+			setSessionStatus: () => {},
+			showToast: () => {},
+			render: () => {},
+			isRunning: () => false,
+			forkSessionEntryInNewTab: async () => false,
+		});
+
+		controller.syncUserSessionEntryMetadata();
+
+		assert.deepEqual(entries.map((entry) => entry.kind === "user" ? entry.sessionEntryId : undefined), ["session-late-1", "session-late-2"]);
+		assert.equal(touchedEntryCount, 0);
+	});
 });
 
 function createTempWorkspace(): { cwd: string; cleanup: () => void } {

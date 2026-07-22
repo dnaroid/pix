@@ -80,14 +80,21 @@ export class AppWorkspaceActionsController {
 			return [{ entryId: sessionEntry.id }];
 		});
 		if (branchUserEntries.length === 0) return;
+		const branchIndexesByEntryId = new Map(branchUserEntries.map((entry, index) => [entry.entryId, index]));
 
 		const loadedEntries = this.host.allEntries?.() ?? this.host.entries;
 		let branchIndex = 0;
 		for (const entry of loadedEntries) {
 			if (entry.kind !== "user") continue;
 
-			const sessionEntry = branchUserEntries[branchIndex];
-			branchIndex += 1;
+			const existingBranchIndex = entry.sessionEntryId === undefined
+				? undefined
+				: branchIndexesByEntryId.get(entry.sessionEntryId);
+			const resolvedBranchIndex = existingBranchIndex !== undefined && existingBranchIndex >= branchIndex
+				? existingBranchIndex
+				: branchIndex;
+			const sessionEntry = branchUserEntries[resolvedBranchIndex];
+			branchIndex = resolvedBranchIndex + 1;
 			if (!sessionEntry) break;
 
 			let changed = false;

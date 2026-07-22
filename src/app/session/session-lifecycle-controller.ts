@@ -130,7 +130,9 @@ export class AppSessionLifecycleController {
 		const extensionUiScope = this.extensionUiScope(session);
 		this.host.clearExtensionWidgets(extensionUiScope, { cancelCustomUi: false });
 
-		const bindPromise = this.bindSessionExtensions(runtime, session, extensionUiScope);
+		const bindPromise = this.bindSessionExtensions(runtime, session, extensionUiScope, {
+			deferStart: options.awaitExtensions === false,
+		});
 		if (options.awaitExtensions === false) {
 			void bindPromise.catch((error) => {
 				if (!this.isCurrentRuntimeSession(runtime, session)) return;
@@ -197,17 +199,26 @@ export class AppSessionLifecycleController {
 		return runtime;
 	}
 
-	private bindSessionExtensions(runtime: AgentSessionRuntime, session: AgentSession, scopeKey: string): Promise<void> {
+	private bindSessionExtensions(
+		runtime: AgentSessionRuntime,
+		session: AgentSession,
+		scopeKey: string,
+		options: { deferStart: boolean },
+	): Promise<void> {
 		if (this.extensionBindPromise && this.extensionBindRuntime === runtime && this.extensionBindSession === session) {
 			return this.extensionBindPromise;
 		}
 
-		const promise = session.bindExtensions({
+		const startBind = () => session.bindExtensions({
 			uiContext: this.host.createExtensionUIContext(scopeKey),
 			commandContextActions: this.host.createExtensionCommandContextActions(runtime),
 			shutdownHandler: this.host.extensionShutdownHandler(),
 			onError: (error) => this.host.handleExtensionError(error),
-		}).finally(() => {
+		});
+		const bindPromise = options.deferStart
+			? new Promise<void>((resolve) => setTimeout(resolve, 0)).then(startBind)
+			: startBind();
+		const promise = bindPromise.finally(() => {
 			if (this.extensionBindPromise !== promise) return;
 			this.extensionBindPromise = undefined;
 			this.extensionBindRuntime = undefined;

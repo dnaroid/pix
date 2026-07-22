@@ -177,10 +177,16 @@ async function externalOlderMessagesBatch(
 
 function expandedTailStart(messages: readonly unknown[], initialStart: number): number {
 	let start = initialStart;
+	const firstMessage = messages[start];
+	if (!isRecord(firstMessage) || (firstMessage.role !== "assistant" && firstMessage.role !== "toolResult")) return start;
+
+	// A fixed-size tail can otherwise begin inside a long assistant/tool turn,
+	// hiding the user prompt that owns the first visible response. Keep that turn
+	// atomic so reaching the top never stops at an orphaned assistant block.
 	while (start > 0) {
-		const message = messages[start];
-		if (!isRecord(message) || message.role !== "toolResult") break;
 		start -= 1;
+		const message = messages[start];
+		if (isRecord(message) && message.role === "user") break;
 	}
 	return start;
 }

@@ -7,6 +7,7 @@ import { createState, restoreState } from "../src/dcp/state.js";
 import {
   cleanupStaleDcpStateFiles,
   loadDcpState,
+  readSessionIdFromFile,
   resetDcpPersistenceDedup,
   resolveDcpStatePath,
   saveDcpState,
@@ -36,6 +37,26 @@ function fakeContext(sessionDir: string, sessionId = "session-1"): ExtensionCont
 }
 
 describe("DCP sidecar state persistence", () => {
+  test("reads only the bounded header of a session file", async () => {
+    const sessionDir = await makeTempDir();
+    const sessionPath = join(sessionDir, "large-session.jsonl");
+    await writeFile(
+      sessionPath,
+      `${JSON.stringify({ type: "session", id: "large-session" })}\n${"x".repeat(1024 * 1024)}`,
+      "utf8",
+    );
+
+    await expect(readSessionIdFromFile(sessionPath)).resolves.toBe("large-session");
+  });
+
+  test("rejects a session header larger than the bounded read", async () => {
+    const sessionDir = await makeTempDir();
+    const sessionPath = join(sessionDir, "oversized-header.jsonl");
+    await writeFile(sessionPath, `${"x".repeat(64 * 1024)}\n`, "utf8");
+
+    await expect(readSessionIdFromFile(sessionPath)).resolves.toBeUndefined();
+  });
+
   test("saves state to a session-id sidecar file with overwrite semantics", async () => {
     const sessionDir = await makeTempDir();
     const ctx = fakeContext(sessionDir, "session:with/slashes");
