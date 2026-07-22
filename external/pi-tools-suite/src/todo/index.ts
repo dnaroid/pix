@@ -42,10 +42,10 @@ function buildThinkingPromptParts(model: unknown): { promptSnippet?: string; pro
 	const levels = getAvailableTodoThinkingLevels(model);
 	if (levels.length <= 1) return {};
 	return {
-		promptSnippet: `${DEFAULT_PROMPT_SNIPPET} Optional per-item thinking: ${levels.join("|")}.`.trim(),
+		promptSnippet: `${DEFAULT_PROMPT_SNIPPET} Set per-item thinking: ${levels.join("|")}.`.trim(),
 		promptGuidelines: [
 			...DEFAULT_PROMPT_GUIDELINES,
-			`If todoThinking is enabled, assign task \`thinking\` during create/batch_create or update whenever planned items differ in complexity; choose from ${levels.join(", ")}. Use higher thinking for investigation, hard debugging, risky edits, or review; use lower/off for mechanical steps and the final user-facing report. Do not leave all thinking unset for a non-trivial mixed-complexity plan.`,
+			`If todoThinking is enabled, set \`thinking\` on every planned task during create/batch_create (or update); choose from ${levels.join(", ")}. Use higher thinking for investigation, hard debugging, risky edits, or review; use lower/off for mechanical steps and the final report. Never leave it unset in a non-trivial plan.`,
 		],
 	};
 }

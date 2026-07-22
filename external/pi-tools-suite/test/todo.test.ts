@@ -642,11 +642,11 @@ describe.serial("todo extension lifecycle", () => {
 			extension(pi as any);
 			await pi.emit("session_start", {}, ctx);
 			const tool = pi.tools.get("todo");
-			expect(tool.promptSnippet).toContain("Optional per-item thinking: off|minimal|low|medium|high");
+			expect(tool.promptSnippet).toContain("Set per-item thinking: off|minimal|low|medium|high");
 			expect(tool.promptSnippet).not.toContain("xhigh");
 			expect(tool.promptSnippet).not.toContain("max");
-			expect(tool.promptGuidelines.join("\n")).toContain("assign task `thinking` during create/batch_create");
-			expect(tool.promptGuidelines.join("\n")).toContain("Do not leave all thinking unset for a non-trivial mixed-complexity plan");
+			expect(tool.promptGuidelines.join("\n")).toContain("set `thinking` on every planned task during create/batch_create");
+			expect(tool.promptGuidelines.join("\n")).toContain("Never leave it unset in a non-trivial plan");
 
 			await tool.execute("todo-1", { action: "create", subject: "Investigate", thinking: "high" }, undefined, undefined, ctx);
 			await tool.execute("todo-2", { action: "update", id: 1, status: "in_progress", activeForm: "investigating" }, undefined, undefined, ctx);
