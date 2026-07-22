@@ -235,7 +235,7 @@ export const SESSION_NAME_TOOL_DESCRIPTION: ToolDescription = {
 	name: "session_name",
 	label: "Session Name",
 	description: "Show or set the current session name so the agent can retitle the active session without relying on slash-command parsing.",
-	promptSnippet: "Use session_name to rename the current session directly when the task calls for updating the session title.",
+	promptSnippet: "Use session_name only for explicit renames, opaque first prompts (such as image-only or task links) once understood, or when the current name no longer fits the active task; ordinary first prompts are auto-named.",
 	promptGuidelines: [
 		"Pass a short, user-meaningful name to rename; call without a name only to read the current session name.",
 	],
