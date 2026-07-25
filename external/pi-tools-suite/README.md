@@ -15,7 +15,7 @@ This package keeps shared Pi tools as ordinary source folders under `src/` and r
 - `src/todo` — `todo` tool, `/todos`, `/todos-persist`, and `/todos-scope`; supports parent/subtask hierarchy, blockers, ready-task filtering, deferred out-of-scope items, batch operations, JSON/Markdown import/export, automatic clearing when all visible todos are completed, and optional project persistence via `/todos persist on` or `/todos-persist on`; localization/i18n has been removed
 - `src/model-tools` — model-specific tool aliases such as Claude/GLM-style `Read` / `Edit` / `Write` / `Bash` / `Grep` / `Glob` / `LS`, GPT/Codex-style `shell`, and model-gated `apply_patch`
 - `src/usage` — `/usage` command and startup hint for read-only AI quota checks across OpenAI, Zhipu AI, Z.ai, and Google Antigravity, including Antigravity quota by model
-- `src/web-search` — `web_search` and `web_fetch` tools migrated from `@ollama/pi-web-search`; calls the local Ollama experimental web search/fetch APIs, honors `OLLAMA_HOST`, supports request timeouts via `timeout_ms` / `PI_WEB_SEARCH_TIMEOUT_MS`, and reports targeted `ollama signin`, unsupported-endpoint, invalid-response, timeout, DNS, and Ollama-not-running errors
+- `src/web-search` — `web_search` and `web_fetch` tools migrated from `@ollama/pi-web-search`; uses local Ollama by default or the official Ollama cloud API when an API key is configured, supports Tavily Search/Extract fallback, provides `/web-credentials` for secure user-level key storage, honors `OLLAMA_HOST`, supports request timeouts via `timeout_ms` / `PI_WEB_SEARCH_TIMEOUT_MS`, and reports provider-specific errors
 - `src/dcp` — headless Dynamic Context Pruning ported from `opencode-dynamic-context-pruning` for the Pi SDK: explicit `compress` tool with range and message modes, `/dcp` commands (context, stats, sweep, manual, decompress, recompress, compress), same-call overlap validation, recoverable compressed-block rollups, grouped message-mode skip diagnostics, stable raw-message anchors when available, protected user/tool preservation, deduplication, error purging, and context nudges; visualization is left to `compress` tool responses and the renderer-owned context-percent click dialog
 - `src/prompt-commands` — user slash-command builder: `/prompt-commands` opens a CRUD menu for saved prompt-backed slash commands, stores them under `promptCommands` in `~/.config/pi/pi-tools-suite.jsonc`, reloads after edits, and runs each saved prompt as a normal user message
 - `src/skill-installer` — `/install-skill [name]` installs a personal skill folder from `~/.agents/local_skills` into the current project's `.pi/skills/` so it activates as a project-local skill, then automatically runs `/reload` so the new skill is picked up without a manual step; `/export-skill [name]` does the reverse, copying a project-local skill back to `~/.agents/local_skills/` for reuse in other projects (no reload, since the library lives outside the project); with no argument either command shows an interactive menu of available skills (folders containing `SKILL.md`), and the `<name>` form installs/exports it directly (headless-safe); existing destinations prompt to overwrite in the UI and are refused in headless mode; `.DS_Store` files are skipped
@@ -305,22 +305,49 @@ Runtime logs are minimized by default: successful agents do not keep `events.jso
 
 ## Web search
 
-`src/web-search` registers two Ollama-backed tools:
+`src/web-search` registers two Ollama-first tools and the `/web-credentials` setup command:
 
-- `web_search` posts `{ query, max_results }` to `/api/experimental/web_search` and returns formatted title/URL/snippet results plus structured `details.results`.
-- `web_fetch` posts `{ url }` to `/api/experimental/web_fetch` and returns extracted page text plus title/link metadata.
+- `web_search` posts `{ query, max_results }` and returns formatted title/URL/snippet results plus structured `details.results`.
+- `web_fetch` posts `{ url }` and returns extracted page text plus title/link metadata.
+- `/web-credentials` can set, inspect, or clear stored Ollama and Tavily API keys. Notifications and status output never display key values.
 
-Both tools default to `http://localhost:11434`; set `OLLAMA_HOST` to point at another Ollama instance. Requests time out after 30 seconds by default. Override globally with `PI_WEB_SEARCH_TIMEOUT_MS` or per call with `timeout_ms` (maximum 120000 ms). Tool results include `host`, `timeoutMs`, and truncation metadata in `details`.
+Without an Ollama API key, both tools default to `http://localhost:11434/api/experimental/...`; set `OLLAMA_HOST` to point at another Ollama instance. With an Ollama API key and no explicit `OLLAMA_HOST`, they use the official `https://ollama.com/api/web_search` and `/api/web_fetch` endpoints with bearer authentication. Requests time out after 30 seconds by default. Override globally with `PI_WEB_SEARCH_TIMEOUT_MS` or per call with `timeout_ms` (maximum 120000 ms). Tool results include `host`, `timeoutMs`, and truncation metadata in `details`.
+
+Configure a Tavily key to enable automatic fallback for both tools. Ollama remains the primary provider; if any Ollama request or response fails, `web_search` retries through `https://api.tavily.com/search` and `web_fetch` retries through `https://api.tavily.com/extract`. The Tavily key is sent only in Tavily's bearer authorization header and is never accepted as a tool parameter or included in result details. Fallback results set `details.provider` to `tavily` and include the primary Ollama error under `details.fallbackFrom`; ordinary results set `details.provider` to `ollama`.
+
+The recommended interactive setup is:
+
+```text
+/web-credentials
+```
+
+Choose Ollama or Tavily, paste the key, and it becomes active for later calls without a reload. Keys are stored in `~/.config/pi/pi-tools-suite-credentials.json` with mode `0600`. The same command can show configuration sources or clear stored keys without displaying them.
+
+The command displays the official key pages before opening its menu:
+
+- Ollama: <https://ollama.com/settings/keys>
+- Tavily: <https://app.tavily.com/home>
+
+Environment variables remain supported and take precedence over stored keys:
+
+```bash
+export OLLAMA_API_KEY="..."
+export TAVILY_API_KEY="tvly-..."
+```
+
+The timeout applies independently to each provider attempt, so a failed Ollama request followed by Tavily can take up to roughly twice the configured timeout. Tavily Search fallback uses basic search and clamps `max_results` to Tavily's documented maximum of 20. Tavily Extract does not return page title/link metadata, so fallback uses the requested URL as the title and reports no links.
 
 Troubleshooting:
 
 | Symptom | Fix |
 | --- | --- |
 | `Could not connect to Ollama` | Start Ollama and check `OLLAMA_HOST`. |
-| `Unauthorized by Ollama ... Run ollama signin` | Run `ollama signin`, then retry. |
+| `Unauthorized by Ollama` | Run `ollama signin` for local Ollama, or update the Ollama key through `/web-credentials` / `OLLAMA_API_KEY`. |
 | `endpoint is not available` | Update Ollama and make sure the experimental web search/fetch feature is enabled for that install. |
 | `timed out after ...` | Increase per-call `timeout_ms` or `PI_WEB_SEARCH_TIMEOUT_MS` if the local web endpoint is slow. |
 | `invalid JSON` / `unexpected response` | Check the Ollama version and the raw endpoint behavior; the tool reports the bad response shape instead of failing with a generic parser error. |
+| `Tavily ... rejected TAVILY_API_KEY` | Update the Tavily key through `/web-credentials` or `TAVILY_API_KEY`. |
+| `Tavily ... limit was exceeded` | Check Tavily usage/plan limits in the Tavily dashboard. |
 
 Do not send secrets, tokens, private repository text, or credential-bearing URLs through these tools; Ollama may query external web services to satisfy the request.
 

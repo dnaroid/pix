@@ -183,7 +183,7 @@ export async function completeInputWithPi(
 	const modelRuntime = runtime.services.modelRuntime;
 	let model = modelRuntime.getModel(parsedModel.provider, parsedModel.modelId) as SessionModel | undefined;
 	if (!model) {
-		await modelRuntime.reloadConfig();
+		await modelRuntime.refresh();
 		model = modelRuntime.getModel(parsedModel.provider, parsedModel.modelId) as SessionModel | undefined;
 	}
 	if (!model) throw new Error(`Model not found: ${parsedModel.provider}/${parsedModel.modelId}`);

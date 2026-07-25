@@ -214,7 +214,7 @@ async function enhancePromptWithPi(
 		},
 	});
 
-	await services.modelRuntime.reloadConfig();
+	await services.modelRuntime.refresh();
 	const model = services.modelRuntime.getModel(parsedModel.provider, parsedModel.modelId) as SessionModel | undefined;
 	if (!model) {
 		throw new Error(modelNotFoundMessage(

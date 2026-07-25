@@ -367,7 +367,7 @@ function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
 function fakeServices(models: Array<{ provider: string; id: string; name?: string }>): never {
 	return {
 		modelRuntime: {
-			reloadConfig: async () => {},
+			refresh: async () => {},
 			getModel: (provider: string, id: string) => models.find((model) => model.provider === provider && model.id === id),
 			getModels: () => models,
 		},

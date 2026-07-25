@@ -338,7 +338,7 @@ export async function createPixRuntime(options: AppOptions, runtimeOptions: Crea
 				config,
 				...(runtimeOptions.eventBus === undefined ? {} : { eventBus: runtimeOptions.eventBus }),
 			});
-		await services.modelRuntime.reloadConfig();
+		await services.modelRuntime.refresh();
 		const model = parsedModel ? services.modelRuntime.getModel(parsedModel.provider, parsedModel.modelId) : undefined;
 		if (parsedModel && !model) {
 			throw new Error(`Model not found: ${parsedModel.provider}/${parsedModel.modelId}`);

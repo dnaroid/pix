@@ -75,7 +75,7 @@ export class ModelCommandActions {
 		const parsed = parseScopedModelRef(modelRef);
 		if (!parsed) throw new Error("Model must use provider/model[:thinking] format");
 
-		await runtime.services.modelRuntime.reloadConfig();
+		await runtime.services.modelRuntime.refresh();
 		if (!isCommandScopeActive(this.host, scope)) return;
 		const model = runtime.services.modelRuntime.getModel(parsed.provider, parsed.modelId) as SessionModel | undefined;
 		if (!model) throw new Error(`Model not found: ${parsed.provider}/${parsed.modelId}`);
@@ -116,7 +116,7 @@ export class ModelCommandActions {
 		const parsed = parseScopedModelRef(modelRef);
 		if (!parsed) throw new Error("Model must use provider/model[:thinking] format");
 
-		await runtime.services.modelRuntime.reloadConfig();
+		await runtime.services.modelRuntime.refresh();
 		if (!isCommandScopeActive(this.host, scope)) return;
 		const model = runtime.services.modelRuntime.getModel(parsed.provider, parsed.modelId) as SessionModel | undefined;
 		if (!model) throw new Error(`Model not found: ${parsed.provider}/${parsed.modelId}`);
@@ -141,7 +141,7 @@ export class ModelCommandActions {
 		const parsed = parseScopedModelRef(modelRef);
 		if (!parsed) throw new Error("Model must use provider/model[:thinking] format, or run /autocomplete with no arguments to disable");
 
-		await runtime.services.modelRuntime.reloadConfig();
+		await runtime.services.modelRuntime.refresh();
 		if (!isCommandScopeActive(this.host, scope)) return;
 		const model = runtime.services.modelRuntime.getModel(parsed.provider, parsed.modelId) as SessionModel | undefined;
 		if (!model) throw new Error(`Model not found: ${parsed.provider}/${parsed.modelId}`);
@@ -226,7 +226,7 @@ export class ModelCommandActions {
 		const refs = value.split(/[,\s]+/).map((ref) => ref.trim()).filter(Boolean);
 		const scopedModels: ScopedSessionModel[] = [];
 		const invalidRefs: string[] = [];
-		await runtime.services.modelRuntime.reloadConfig();
+		await runtime.services.modelRuntime.refresh();
 		if (!isCommandScopeActive(this.host, scope)) return;
 		for (const ref of refs) {
 			const parsed = parseScopedModelRef(ref);

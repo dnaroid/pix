@@ -246,8 +246,8 @@ export const WEB_SEARCH_TOOL_DESCRIPTIONS = {
 		name: "web_search",
 		label: "web-search",
 		description:
-			"Search the web for real-time information using your local Ollama instance's web_search API. Requires Ollama running locally with web search enabled; supports per-call timeout_ms and PI_WEB_SEARCH_TIMEOUT_MS.",
-		promptSnippet: "Search the web for current or real-time information through the local Ollama web_search API.",
+			"Search the web for real-time information through Ollama, with automatic configured Tavily fallback. Credentials come from /web-credentials or environment variables. Supports per-call timeout_ms and PI_WEB_SEARCH_TIMEOUT_MS.",
+		promptSnippet: "Search the web for current or real-time information through Ollama, with Tavily fallback when configured.",
 		promptGuidelines: [
 			"Use web_search only for current public web information; keep queries focused and set max_results only when useful.",
 			"Never include secrets, tokens, or private repository data; do not use web_search for repo-local discovery—use repo_* or file/search tools.",
@@ -257,8 +257,8 @@ export const WEB_SEARCH_TOOL_DESCRIPTIONS = {
 		name: "web_fetch",
 		label: "web-fetch",
 		description:
-			"Fetch and extract text content from a web page URL using your local Ollama instance's web_fetch API. Requires Ollama running locally with web fetch enabled; supports per-call timeout_ms and PI_WEB_SEARCH_TIMEOUT_MS.",
-		promptSnippet: "Fetch and extract text from a specific URL through the local Ollama web_fetch API.",
+			"Fetch and extract text content from a web page URL through Ollama, with automatic configured Tavily Extract fallback. Credentials come from /web-credentials or environment variables. Supports per-call timeout_ms and PI_WEB_SEARCH_TIMEOUT_MS.",
+		promptSnippet: "Fetch and extract text from a specific URL through Ollama, with Tavily Extract fallback when configured.",
 		promptGuidelines: [
 			"Use web_fetch for user-provided URLs or web_search results needing deeper reading; never pass secret/private-credential URLs, and use read for local files.",
 		],

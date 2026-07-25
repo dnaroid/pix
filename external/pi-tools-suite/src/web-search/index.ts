@@ -1,6 +1,9 @@
 import { spawn } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
@@ -25,6 +28,22 @@ interface FetchResponse {
 }
 
 type Operation = "Search" | "Fetch";
+type Provider = "ollama" | "tavily";
+
+interface ProviderResponse<T> {
+	data: T;
+	provider: Provider;
+	host: string;
+	fallbackFrom?: {
+		provider: "ollama";
+		error: string;
+	};
+}
+
+interface OllamaTarget {
+	host: string;
+	apiKey?: string;
+}
 
 class OllamaEndpointUnavailableError extends Error {
 	constructor(message: string, readonly status: number) {
@@ -34,6 +53,14 @@ class OllamaEndpointUnavailableError extends Error {
 }
 
 const DEFAULT_OLLAMA_HOST = "http://localhost:11434";
+const OLLAMA_CLOUD_HOST = "https://ollama.com";
+const OLLAMA_API_KEY_ENV = "OLLAMA_API_KEY";
+const OLLAMA_API_KEYS_URL = "https://ollama.com/settings/keys";
+const TAVILY_API_HOST = "https://api.tavily.com";
+const TAVILY_API_KEY_ENV = "TAVILY_API_KEY";
+const TAVILY_API_KEYS_URL = "https://app.tavily.com/home";
+const CREDENTIAL_PATH_ENV = "PI_TOOLS_SUITE_WEB_CREDENTIALS_PATH";
+const TAVILY_MAX_SEARCH_RESULTS = 20;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const MAX_REQUEST_TIMEOUT_MS = 120_000;
 const REQUEST_TIMEOUT_ENV = "PI_WEB_SEARCH_TIMEOUT_MS";
@@ -48,8 +75,71 @@ function normalizeOllamaHost(host: string | undefined): string {
 	return /^https?:\/\//i.test(trimmed) ? trimmed.replace(/\/+$/, "") : `http://${trimmed.replace(/\/+$/, "")}`;
 }
 
-function getOllamaHost(): string {
-	return normalizeOllamaHost(process.env.OLLAMA_HOST);
+interface StoredCredentials {
+	ollama?: string;
+	tavily?: string;
+}
+
+type StoredCredentialName = keyof StoredCredentials;
+
+function credentialPath(): string {
+	return process.env[CREDENTIAL_PATH_ENV]?.trim() || join(homedir(), ".config", "pi", "pi-tools-suite-credentials.json");
+}
+
+function readStoredCredentials(): StoredCredentials {
+	try {
+		const value = JSON.parse(readFileSync(credentialPath(), "utf8")) as unknown;
+		if (!isRecord(value)) return {};
+		return {
+			ollama: optionalString(value.ollama)?.trim() || undefined,
+			tavily: optionalString(value.tavily)?.trim() || undefined,
+		};
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+		throw error;
+	}
+}
+
+function writeStoredCredentials(credentials: StoredCredentials): void {
+	const path = credentialPath();
+	mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+	const tempPath = `${path}.${process.pid}.${Date.now()}.tmp`;
+
+	try {
+		writeFileSync(tempPath, `${JSON.stringify(credentials, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
+		renameSync(tempPath, path);
+		chmodSync(path, 0o600);
+	} finally {
+		if (existsSync(tempPath)) unlinkSync(tempPath);
+	}
+}
+
+function updateStoredCredential(name: StoredCredentialName, apiKey: string | undefined): void {
+	const credentials = readStoredCredentials();
+	if (apiKey) credentials[name] = apiKey;
+	else delete credentials[name];
+	writeStoredCredentials(credentials);
+}
+
+function resolveApiKey(envName: string, credentialName: StoredCredentialName): string | undefined {
+	const envKey = process.env[envName]?.trim();
+	if (envKey) return envKey;
+	return readStoredCredentials()[credentialName];
+}
+
+function resolveOllamaTarget(): OllamaTarget {
+	const apiKey = resolveApiKey(OLLAMA_API_KEY_ENV, "ollama");
+	const configuredHost = process.env.OLLAMA_HOST?.trim();
+
+	return {
+		host: normalizeOllamaHost(configuredHost || (apiKey ? OLLAMA_CLOUD_HOST : undefined)),
+		apiKey,
+	};
+}
+
+function ollamaRequestUrl(target: OllamaTarget, endpoint: "web_search" | "web_fetch"): string {
+	const apiPath = target.host === OLLAMA_CLOUD_HOST ? `/api/${endpoint}` : `/api/experimental/${endpoint}`;
+	return `${target.host}${apiPath}`;
 }
 
 function parseTimeoutMs(value: unknown, source: string): number {
@@ -225,6 +315,10 @@ function operationNoun(operation: Operation): "search" | "fetch" {
 	return operation === "Search" ? "search" : "fetch";
 }
 
+function tavilyEndpoint(operation: Operation): "search" | "extract" {
+	return operation === "Search" ? "search" : "extract";
+}
+
 function formatErrorBody(body: string): string {
 	const normalized = body.trim().replace(/\s+/g, " ");
 	if (!normalized) return "";
@@ -237,7 +331,10 @@ function createHttpError(response: Response, operation: Operation, host: string,
 	const withBody = bodySuffix ? ` Response: ${bodySuffix}` : "";
 
 	if (response.status === 401) {
-		return new Error(`Unauthorized by Ollama ${apiName} API at ${host}. Run \`ollama signin\` to authenticate.`);
+		return new Error(
+			`Unauthorized by Ollama ${apiName} API at ${host}. ` +
+			`Run \`ollama signin\` for local Ollama, or update ${OLLAMA_API_KEY_ENV} through /web-credentials or the launch environment.`,
+		);
 	}
 
 	if (response.status === 403) {
@@ -333,13 +430,17 @@ function normalizeOllamaError(error: unknown, operation: Operation, host: string
 	return error instanceof Error ? error : new Error(String(error));
 }
 
-async function postOllamaJson<T>(host: string, endpoint: "web_search" | "web_fetch", body: Record<string, unknown>, operation: Operation, signal: AbortSignal | undefined, timeoutMs: number, retryEndpointUnavailable = true): Promise<T> {
+async function postOllamaJson<T>(target: OllamaTarget, endpoint: "web_search" | "web_fetch", body: Record<string, unknown>, operation: Operation, signal: AbortSignal | undefined, timeoutMs: number, retryEndpointUnavailable = true): Promise<T> {
+	const { host } = target;
 	const requestSignal = createRequestSignal(signal, timeoutMs);
 
 	try {
-		const response = await fetch(`${host}/api/experimental/${endpoint}`, {
+		const response = await fetch(ollamaRequestUrl(target, endpoint), {
 			method: "POST",
-			headers: { "Content-Type": "application/json" },
+			headers: {
+				...(target.apiKey ? { Authorization: `Bearer ${target.apiKey}` } : {}),
+				"Content-Type": "application/json",
+			},
 			body: JSON.stringify(body),
 			signal: requestSignal.signal,
 		});
@@ -349,15 +450,94 @@ async function postOllamaJson<T>(host: string, endpoint: "web_search" | "web_fet
 		if (isConnectionRefused(error) && isLoopbackHost(host)) {
 			requestSignal.cleanup();
 			await ensureOllamaRunning(host, timeoutMs, signal);
-			return waitForEndpointReady(() => postOllamaJson<T>(host, endpoint, body, operation, signal, timeoutMs, false), host, operation, timeoutMs, signal);
+			return waitForEndpointReady(() => postOllamaJson<T>(target, endpoint, body, operation, signal, timeoutMs, false), host, operation, timeoutMs, signal);
 		}
 
 		if (retryEndpointUnavailable && isEndpointUnavailable(error) && isLoopbackHost(host)) {
 			requestSignal.cleanup();
-			return waitForEndpointReady(() => postOllamaJson<T>(host, endpoint, body, operation, signal, timeoutMs, false), host, operation, timeoutMs, signal);
+			return waitForEndpointReady(() => postOllamaJson<T>(target, endpoint, body, operation, signal, timeoutMs, false), host, operation, timeoutMs, signal);
 		}
 
 		throw normalizeOllamaError(error, operation, host, timeoutMs, requestSignal.timedOut(), signal);
+	} finally {
+		requestSignal.cleanup();
+	}
+}
+
+function createTavilyHttpError(response: Response, operation: Operation, body: string): Error {
+	const endpoint = tavilyEndpoint(operation);
+	const bodySuffix = formatErrorBody(body);
+	const withBody = bodySuffix ? ` Response: ${bodySuffix}` : "";
+
+	if (response.status === 401) {
+		return new Error(`Tavily ${endpoint} API rejected ${TAVILY_API_KEY_ENV} (HTTP 401). Check that the API key is valid.`);
+	}
+
+	if (response.status === 429 || response.status === 432 || response.status === 433) {
+		return new Error(`Tavily ${endpoint} API limit was exceeded (HTTP ${response.status}).${withBody}`);
+	}
+
+	return new Error(`Tavily ${endpoint} API returned HTTP ${response.status}.${withBody || ` ${response.statusText}`}`);
+}
+
+function normalizeTavilyError(error: unknown, operation: Operation, timeoutMs: number, timedOut: boolean, parentSignal: AbortSignal | undefined): Error {
+	const endpoint = tavilyEndpoint(operation);
+
+	if (timedOut) {
+		return new Error(
+			`Tavily ${endpoint} request timed out after ${timeoutMs}ms. ` +
+				`Increase timeout_ms or ${REQUEST_TIMEOUT_ENV} if the fallback endpoint is slow.`,
+		);
+	}
+
+	if (isAbortError(error) && parentSignal?.aborted) {
+		return new Error(`Tavily ${endpoint} request was cancelled.`);
+	}
+
+	if (errorIncludes(error, "ENOTFOUND", "EAI_AGAIN")) {
+		return new Error(`Could not resolve Tavily host ${TAVILY_API_HOST}.`);
+	}
+
+	if (errorIncludes(error, "ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "UND_ERR_SOCKET", "UND_ERR_CONNECT_TIMEOUT")) {
+		const details = collectErrorText(error);
+		return new Error(`Connection to Tavily failed while calling ${endpoint}.${details ? ` ${details}` : ""}`);
+	}
+
+	if (error instanceof TypeError && error.message.toLowerCase().includes("fetch")) {
+		return new Error(`Request to Tavily failed while calling ${endpoint}: ${error.message}`);
+	}
+
+	return error instanceof Error ? error : new Error(String(error));
+}
+
+async function postTavilyJson<T>(apiKey: string, operation: Operation, body: Record<string, unknown>, signal: AbortSignal | undefined, timeoutMs: number): Promise<T> {
+	const endpoint = tavilyEndpoint(operation);
+	const requestSignal = createRequestSignal(signal, timeoutMs);
+
+	try {
+		const response = await fetch(`${TAVILY_API_HOST}/${endpoint}`, {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${apiKey}`,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify(body),
+			signal: requestSignal.signal,
+		});
+		const responseBody = await response.text().catch(() => "");
+
+		if (!response.ok) throw createTavilyHttpError(response, operation, responseBody);
+		if (!responseBody.trim()) throw new Error(`Tavily ${endpoint} API returned an empty response.`);
+
+		try {
+			return JSON.parse(responseBody) as T;
+		} catch (error) {
+			const parseMessage = error instanceof Error ? error.message : String(error);
+			const bodySuffix = formatErrorBody(responseBody);
+			throw new Error(`Tavily ${endpoint} API returned invalid JSON: ${parseMessage}.${bodySuffix ? ` Body: ${bodySuffix}` : ""}`);
+		}
+	} catch (error) {
+		throw normalizeTavilyError(error, operation, timeoutMs, requestSignal.timedOut(), signal);
 	} finally {
 		requestSignal.cleanup();
 	}
@@ -371,17 +551,17 @@ function optionalString(value: unknown): string | undefined {
 	return typeof value === "string" ? value : undefined;
 }
 
-function parseSearchResponse(data: unknown): SearchResponse {
+function parseSearchResponse(data: unknown, providerName = "Ollama"): SearchResponse {
 	if (!isRecord(data) || !Array.isArray(data.results)) {
-		throw new Error("Ollama web_search API returned an unexpected response: missing results array.");
+		throw new Error(`${providerName} web_search API returned an unexpected response: missing results array.`);
 	}
 
 	return {
 		results: data.results.map((item, index) => {
-			if (!isRecord(item)) throw new Error(`Ollama web_search API returned an invalid result at index ${index}.`);
+			if (!isRecord(item)) throw new Error(`${providerName} web_search API returned an invalid result at index ${index}.`);
 
 			const url = optionalString(item.url);
-			if (!url) throw new Error(`Ollama web_search API returned an invalid result at index ${index}: missing url.`);
+			if (!url) throw new Error(`${providerName} web_search API returned an invalid result at index ${index}: missing url.`);
 
 			return {
 				title: optionalString(item.title) || "Untitled",
@@ -390,6 +570,156 @@ function parseSearchResponse(data: unknown): SearchResponse {
 			};
 		}),
 	};
+}
+
+function parseTavilyExtractResponse(data: unknown, requestedUrl: string): FetchResponse {
+	if (!isRecord(data) || !Array.isArray(data.results)) {
+		throw new Error("Tavily extract API returned an unexpected response: missing results array.");
+	}
+
+	const result = data.results.find((item) => isRecord(item) && item.url === requestedUrl) ?? data.results[0];
+	if (!isRecord(result) || typeof result.raw_content !== "string") {
+		const failedResult = Array.isArray(data.failed_results)
+			? data.failed_results.find((item) => isRecord(item) && item.url === requestedUrl) ?? data.failed_results[0]
+			: undefined;
+		const failedMessage = isRecord(failedResult) ? optionalString(failedResult.error) : undefined;
+		throw new Error(`Tavily extract API did not return content for ${requestedUrl}.${failedMessage ? ` ${failedMessage}` : ""}`);
+	}
+
+	return {
+		title: requestedUrl,
+		content: result.raw_content,
+		links: [],
+	};
+}
+
+function errorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+async function withTavilyFallback<T>(
+	operation: Operation,
+	signal: AbortSignal | undefined,
+	ollamaHost: string,
+	tavilyApiKey: string | undefined,
+	ollamaRequest: () => Promise<T>,
+	tavilyRequest: (apiKey: string) => Promise<T>,
+): Promise<ProviderResponse<T>> {
+	try {
+		return { data: await ollamaRequest(), provider: "ollama", host: ollamaHost };
+	} catch (ollamaError) {
+		if (signal?.aborted) throw ollamaError;
+
+		if (!tavilyApiKey) throw ollamaError;
+
+		try {
+			return {
+				data: await tavilyRequest(tavilyApiKey),
+				provider: "tavily",
+				host: TAVILY_API_HOST,
+				fallbackFrom: { provider: "ollama", error: errorMessage(ollamaError) },
+			};
+		} catch (tavilyError) {
+			if (signal?.aborted) throw tavilyError;
+
+			throw new Error(
+				`Ollama ${endpointName(operation)} failed: ${errorMessage(ollamaError)} ` +
+					`Tavily ${tavilyEndpoint(operation)} fallback also failed: ${errorMessage(tavilyError)}`,
+			);
+		}
+	}
+}
+
+type CredentialChoice =
+	| "Set Ollama API key"
+	| "Set Tavily API key"
+	| "Show credential status"
+	| "Clear stored Ollama key"
+	| "Clear stored Tavily key";
+
+const CREDENTIAL_CHOICES: CredentialChoice[] = [
+	"Set Ollama API key",
+	"Set Tavily API key",
+	"Show credential status",
+	"Clear stored Ollama key",
+	"Clear stored Tavily key",
+];
+
+function storedCredentialConfigured(name: StoredCredentialName): boolean {
+	return Boolean(readStoredCredentials()[name]);
+}
+
+function credentialSource(envName: string, credentialName: StoredCredentialName): string {
+	if (process.env[envName]?.trim()) return `environment (${envName})`;
+	return storedCredentialConfigured(credentialName) ? "stored in pi-tools-suite credentials" : "not configured";
+}
+
+function showCredentialStatus(ctx: ExtensionCommandContext): void {
+	const ollama = credentialSource(OLLAMA_API_KEY_ENV, "ollama");
+	const tavily = credentialSource(TAVILY_API_KEY_ENV, "tavily");
+	ctx.ui.notify(`Web credentials\nOllama: ${ollama}\nTavily: ${tavily}`, "info");
+}
+
+function showCredentialLinks(ctx: ExtensionCommandContext): void {
+	ctx.ui.notify(
+		`Get API keys\nOllama: ${OLLAMA_API_KEYS_URL}\nTavily: ${TAVILY_API_KEYS_URL}`,
+		"info",
+	);
+}
+
+async function setCredential(
+	ctx: ExtensionCommandContext,
+	provider: "Ollama" | "Tavily",
+	credentialName: StoredCredentialName,
+): Promise<void> {
+	const key = (await ctx.ui.input(`${provider} API key`, "Paste the API key; Escape cancels"))?.trim();
+	if (!key) {
+		ctx.ui.notify(`${provider} credential was not changed.`, "warning");
+		return;
+	}
+
+	updateStoredCredential(credentialName, key);
+	ctx.ui.notify(`${provider} credential saved securely and active for future web tool calls.`, "info");
+}
+
+function clearCredential(
+	ctx: ExtensionCommandContext,
+	provider: "Ollama" | "Tavily",
+	credentialName: StoredCredentialName,
+	envName: string,
+): void {
+	updateStoredCredential(credentialName, undefined);
+	const envSuffix = process.env[envName]?.trim() ? ` ${envName} is still set and remains active.` : "";
+	ctx.ui.notify(`Stored ${provider} credential removed.${envSuffix}`, "info");
+}
+
+function registerCredentialCommand(pi: ExtensionAPI): void {
+	pi.registerCommand("web-credentials", {
+		description: "Configure Ollama and Tavily API keys for web_search/web_fetch",
+		handler: async (_args, ctx) => {
+			if (!ctx.hasUI) return;
+			showCredentialLinks(ctx);
+
+			const choice = await ctx.ui.select("Web search credentials", CREDENTIAL_CHOICES) as CredentialChoice | undefined;
+			switch (choice) {
+				case "Set Ollama API key":
+					await setCredential(ctx, "Ollama", "ollama");
+					break;
+				case "Set Tavily API key":
+					await setCredential(ctx, "Tavily", "tavily");
+					break;
+				case "Show credential status":
+					showCredentialStatus(ctx);
+					break;
+				case "Clear stored Ollama key":
+					clearCredential(ctx, "Ollama", "ollama", OLLAMA_API_KEY_ENV);
+					break;
+				case "Clear stored Tavily key":
+					clearCredential(ctx, "Tavily", "tavily", TAVILY_API_KEY_ENV);
+					break;
+			}
+		},
+	});
 }
 
 function parseFetchResponse(data: unknown): FetchResponse {
@@ -464,30 +794,37 @@ function timeoutParameter() {
 	);
 }
 
-function searchResultDetails(data: SearchResponse, host: string, timeoutMs: number, truncated: boolean) {
+function searchResultDetails(response: ProviderResponse<SearchResponse>, timeoutMs: number, truncated: boolean) {
 	return {
-		results: data.results,
-		resultCount: data.results.length,
-		host,
+		results: response.data.results,
+		resultCount: response.data.results.length,
+		provider: response.provider,
+		host: response.host,
+		fallbackFrom: response.fallbackFrom,
 		timeoutMs,
 		truncated,
 	};
 }
 
-function fetchResultDetails(data: FetchResponse, host: string, timeoutMs: number, truncated: boolean) {
+function fetchResultDetails(response: ProviderResponse<FetchResponse>, timeoutMs: number, truncated: boolean) {
+	const data = response.data;
 	return {
 		title: data.title,
 		content: data.content,
 		contentBytes: contentByteLength(data.content),
 		links: data.links ?? [],
 		linkCount: data.links?.length ?? 0,
-		host,
+		provider: response.provider,
+		host: response.host,
+		fallbackFrom: response.fallbackFrom,
 		timeoutMs,
 		truncated,
 	};
 }
 
 export default function webSearch(pi: ExtensionAPI) {
+	registerCredentialCommand(pi);
+
 	pi.registerTool({
 		...WEB_SEARCH_TOOL_DESCRIPTIONS.webSearch,
 		parameters: Type.Object({
@@ -497,16 +834,30 @@ export default function webSearch(pi: ExtensionAPI) {
 		}),
 		async execute(_toolCallId, params, signal) {
 			const maxResults = params.max_results ?? 5;
-			const host = getOllamaHost();
+			const ollamaTarget = resolveOllamaTarget();
+			const tavilyApiKey = resolveApiKey(TAVILY_API_KEY_ENV, "tavily");
 			const timeoutMs = resolveRequestTimeoutMs(params.timeout_ms);
 
-			const rawData = await postOllamaJson<unknown>(host, "web_search", { query: params.query, max_results: maxResults }, "Search", signal, timeoutMs);
-			const data = parseSearchResponse(rawData);
-			const formatted = truncateForTool(formatSearchResults(data.results));
+			const response = await withTavilyFallback(
+				"Search",
+				signal,
+				ollamaTarget.host,
+				tavilyApiKey,
+				async () => parseSearchResponse(await postOllamaJson<unknown>(ollamaTarget, "web_search", { query: params.query, max_results: maxResults }, "Search", signal, timeoutMs)),
+				async (apiKey) => parseSearchResponse(
+					await postTavilyJson<unknown>(apiKey, "Search", {
+						query: params.query,
+						max_results: Math.max(0, Math.min(TAVILY_MAX_SEARCH_RESULTS, Math.trunc(maxResults))),
+						search_depth: "basic",
+					}, signal, timeoutMs),
+					"Tavily",
+				),
+			);
+			const formatted = truncateForTool(formatSearchResults(response.data.results));
 
 			return {
 				content: [{ type: "text", text: formatted.text }],
-				details: searchResultDetails(data, host, timeoutMs, formatted.truncated),
+				details: searchResultDetails(response, timeoutMs, formatted.truncated),
 			};
 		},
 	});
@@ -518,16 +869,30 @@ export default function webSearch(pi: ExtensionAPI) {
 			timeout_ms: timeoutParameter(),
 		}),
 		async execute(_toolCallId, params, signal) {
-			const host = getOllamaHost();
+			const ollamaTarget = resolveOllamaTarget();
+			const tavilyApiKey = resolveApiKey(TAVILY_API_KEY_ENV, "tavily");
 			const timeoutMs = resolveRequestTimeoutMs(params.timeout_ms);
 
-			const rawData = await postOllamaJson<unknown>(host, "web_fetch", { url: params.url }, "Fetch", signal, timeoutMs);
-			const data = parseFetchResponse(rawData);
-			const formatted = truncateForTool(formatFetchResult(data));
+			const response = await withTavilyFallback(
+				"Fetch",
+				signal,
+				ollamaTarget.host,
+				tavilyApiKey,
+				async () => parseFetchResponse(await postOllamaJson<unknown>(ollamaTarget, "web_fetch", { url: params.url }, "Fetch", signal, timeoutMs)),
+				async (apiKey) => parseTavilyExtractResponse(
+					await postTavilyJson<unknown>(apiKey, "Fetch", {
+						urls: [params.url],
+						extract_depth: "basic",
+						format: "markdown",
+					}, signal, timeoutMs),
+					params.url,
+				),
+			);
+			const formatted = truncateForTool(formatFetchResult(response.data));
 
 			return {
 				content: [{ type: "text", text: formatted.text }],
-				details: fetchResultDetails(data, host, timeoutMs, formatted.truncated),
+				details: fetchResultDetails(response, timeoutMs, formatted.truncated),
 			};
 		},
 	});

@@ -91,7 +91,7 @@ describe("autocomplete controller helpers", () => {
 			services: {
 				modelRuntime: {
 					getModel: () => model,
-					reloadConfig: async () => { reloads += 1; },
+					refresh: async () => { reloads += 1; },
 					streamSimple: (requestedModel: unknown) => {
 						streamModel = requestedModel;
 						return (async function* () {
