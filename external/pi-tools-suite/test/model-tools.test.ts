@@ -20,7 +20,18 @@ function builtin(name: string) {
 }
 
 mock.module("@earendil-works/pi-coding-agent", () => ({
+	DEFAULT_MAX_BYTES: 1024 * 1024,
+	DEFAULT_MAX_LINES: 1000,
 	defineTool: (tool: any) => tool,
+	formatSize: (bytes: number) => `${bytes}B`,
+	truncateHead: (content: string) => ({
+		content,
+		truncated: false,
+		totalLines: content.split("\n").length,
+		outputLines: content.split("\n").length,
+		totalBytes: Buffer.byteLength(content),
+		outputBytes: Buffer.byteLength(content),
+	}),
 	withFileMutationQueue: async (_key: string, fn: () => Promise<unknown>) => fn(),
 	createReadToolDefinition: builtin("read"),
 	createEditToolDefinition: builtin("edit"),
