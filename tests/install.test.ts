@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { existsSync } from "node:fs";
+import { mkdtemp, readFile, rm, writeFile, mkdir } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 
-import { formatPixInstallNextSteps, parsePixInstallArgs, pixInstallUsage, runPixInstallCli, setPixInstallTestDeps } from "../src/app/cli/install.js";
+import { formatPixInstallNextSteps, inspectPixOnboarding, parsePixInstallArgs, pixInstallUsage, runPixInstallCli, setPixInstallTestDeps } from "../src/app/cli/install.js";
 
 describe("pix install", () => {
 	it("parses install CLI options", () => {
@@ -13,13 +17,58 @@ describe("pix install", () => {
 	});
 
 	it("prints post-install configuration guidance", () => {
-		const output = formatPixInstallNextSteps("/tmp/pix-home");
+		const output = formatPixInstallNextSteps("/tmp/pix-home", emptyOnboardingState());
 		assert.match(output, /[\\/]tmp[\\/]pix-home[\\/]\.config[\\/]pi[\\/]pix\.jsonc/u);
 		assert.match(output, /dictation\.language/u);
 		assert.match(output, /\.config[\\/]pi[\\/]pi-tools-suite\.jsonc/u);
 		assert.match(output, /lsp\.servers/u);
-		assert.match(output, /\/opencode-import/u);
-		assert.match(output, /\/antigravity-import/u);
+		assert.match(output, /Configure a model provider first/u);
+		assert.match(output, /\/web-credentials/u);
+		assert.doesNotMatch(output, /\/antigravity-import/u);
+	});
+
+	it("detects existing OpenCode credentials without exposing their values", async () => {
+		const homeDir = await mkdtemp(join(tmpdir(), "pix-install-opencode-"));
+		try {
+			const authPath = join(homeDir, ".local", "share", "opencode", "auth.json");
+			await mkdir(dirname(authPath), { recursive: true });
+			await writeFile(authPath, JSON.stringify({ openai: { access: "do-not-print" } }), "utf8");
+
+			const state = inspectPixOnboarding(homeDir, {});
+			assert.equal(state.opencodeAuthExists, true);
+			const output = formatPixInstallNextSteps(homeDir, state);
+			assert.match(output, /OpenCode credentials detected/u);
+			assert.match(output, /\/opencode-import/u);
+			assert.doesNotMatch(output, /do-not-print/u);
+		} finally {
+			await rm(homeDir, { recursive: true, force: true });
+		}
+	});
+
+	it("creates config templates during install and preserves them on repeat", async () => {
+		const homeDir = await mkdtemp(join(tmpdir(), "pix-install-config-"));
+		const restoreConsole = captureConsole();
+		try {
+			setPixInstallTestDeps({
+				isJetBrainsNerdFontInstalled: async () => true,
+				clipboardSupportAvailable: async () => true,
+				existsSync: (path) => String(path).includes("mock-bin") || existsSync(path),
+			});
+			const env = { PATH: "", PIX_BUNDLED_PI_BIN: join("/", "mock-bin") };
+			assert.equal(await runPixInstallCli([], { env, homeDir }), 0);
+
+			const pixConfigPath = join(homeDir, ".config", "pi", "pix.jsonc");
+			const toolsConfigPath = join(homeDir, ".config", "pi", "pi-tools-suite.jsonc");
+			assert.match(await readFile(pixConfigPath, "utf8"), /pix renderer configuration/u);
+			assert.match(await readFile(toolsConfigPath, "utf8"), /todoThinking/u);
+			await writeFile(toolsConfigPath, "user config\n", "utf8");
+			assert.equal(await runPixInstallCli([], { env, homeDir }), 0);
+			assert.equal(await readFile(toolsConfigPath, "utf8"), "user config\n");
+		} finally {
+			setPixInstallTestDeps();
+			restoreConsole.restore();
+			await rm(homeDir, { recursive: true, force: true });
+		}
 	});
 
 	it("prints help without running setup checks", async () => {
@@ -81,6 +130,26 @@ describe("pix install", () => {
 		}
 	});
 
+	it("does not fail check-only mode for optional font and clipboard helpers", async () => {
+		const restoreConsole = captureConsole();
+		try {
+			setPixInstallTestDeps({
+				existsSync: (path) => String(path).endsWith(process.platform === "win32" ? "pi.cmd" : "pi"),
+				isJetBrainsNerdFontInstalled: async () => false,
+				clipboardSupportAvailable: async () => false,
+				clipboardInstallHint: () => "optional clipboard helper",
+			});
+			const exitCode = await runPixInstallCli(["--check"], {
+				env: { PATH: "", PIX_BUNDLED_PI_BIN: "/mock/pix/bin" },
+				homeDir: "/home/test",
+			});
+			assert.equal(exitCode, 0);
+		} finally {
+			setPixInstallTestDeps();
+			restoreConsole.restore();
+		}
+	});
+
 	it("installs missing helpers through mocked installers and reports npm failures", async () => {
 		const restoreConsole = captureConsole();
 		let fontInstallCalls = 0;
@@ -113,6 +182,19 @@ describe("pix install", () => {
 		}
 	});
 });
+
+function emptyOnboardingState() {
+	return {
+		pixConfigExists: false,
+		toolsConfigExists: false,
+		providerAuthConfigured: false,
+		opencodeAuthExists: false,
+		opencodeAntigravityExists: false,
+		webCredentialsConfigured: false,
+		context7Configured: false,
+		telegramConfigured: false,
+	};
+}
 
 function closeWith(code: number, stderr: string): EventEmitter & { stderr: EventEmitter } {
 	const child = new EventEmitter() as EventEmitter & { stderr: EventEmitter };

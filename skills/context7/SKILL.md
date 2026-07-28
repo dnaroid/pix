@@ -9,6 +9,16 @@ This skill fetches current documentation and code examples for any programming l
 
 Context7 indexes documentation from official sources and provides version-specific, relevant excerpts — much more reliable than relying on potentially outdated training data.
 
+## Setup
+
+Create a Context7 API key in the Context7 dashboard and export it before using the skill:
+
+```bash
+export CONTEXT7_API_KEY="..."
+```
+
+The script does not contain a fallback key and exits before making a network request when the variable is missing. It also requires `curl` and `jq` on `PATH`.
+
 ## Two-step workflow
 
 ### Step 1: Resolve the library ID

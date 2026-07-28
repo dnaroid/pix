@@ -16,7 +16,24 @@ export async function collectStartupAvailabilityIssues(runtime: AgentSessionRunt
 	return [
 		...(await checkPiCliAvailability()),
 		...checkPiToolsSuiteExtensionAvailability(runtime.services.resourceLoader.getExtensions()),
+		...checkSelectedModelAuthAvailability(runtime),
 	];
+}
+
+export function checkSelectedModelAuthAvailability(runtime: AgentSessionRuntime): StartupAvailabilityIssue[] {
+	const model = runtime.session.model;
+	if (!model) {
+		return [{
+			kind: "error",
+			message: "No model is selected. Configure a provider with `npx @earendil-works/pi-coding-agent` and /login (or run /opencode-import), then choose /model in Pix.",
+		}];
+	}
+
+	if (runtime.services.modelRuntime.getProviderAuthStatus(model.provider).configured) return [];
+	return [{
+		kind: "error",
+		message: `Selected model ${model.provider}/${model.id} has no configured credentials. Use \`npx @earendil-works/pi-coding-agent\` and /login, or run /opencode-import for supported OpenCode accounts, then choose /model.`,
+	}];
 }
 
 export async function checkPiCliAvailability(pathValue = process.env.PATH ?? ""): Promise<StartupAvailabilityIssue[]> {

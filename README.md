@@ -22,7 +22,7 @@ npx pi-ui-extend install
 npx pi-ui-extend --cwd .
 ```
 
-The setup command checks the icon font, the `pi` CLI, and clipboard support. The second command opens the current project in Pix without requiring a global Pix install.
+The setup command checks runtime helpers, creates non-secret Pix and tools configuration templates when missing, and prints a credential-aware checklist. It never imports credentials. The second command opens the current project in Pix without requiring a global Pix install.
 
 > Already installed globally? Run `pix --cwd .`.
 
@@ -152,6 +152,19 @@ npx pi-ui-extend install
 npx pi-ui-extend --cwd /path/to/project
 ```
 
+### First-run checklist
+
+1. Run `npx pi-ui-extend install`. It preserves existing files and creates these non-secret templates when missing:
+   - `~/.config/pi/pix.jsonc`
+   - `~/.config/pi/pi-tools-suite.jsonc`
+2. Configure at least one model provider:
+   - With an existing OpenCode setup, start Pix and run `/opencode-import`; review [OpenCode migration](#opencode-migration) before using `--force`.
+   - Otherwise run `npx @earendil-works/pi-coding-agent`, use `/login` in the stock Pi TUI, then exit. Environment-based provider API keys also work.
+3. Start Pix, use `/model` to select an available model, and follow any startup authentication diagnostic.
+4. Configure only the optional integrations you need; none are required for normal model conversations.
+
+The installer installs JetBrainsMono Nerd Font when it is missing. Pix also checks it on startup and starts a background installation when needed so the icon UI remains readable even when setup was skipped. Installation failures are reported while Pix keeps its fallback icons. Use `--check` to inspect the machine without creating files, installing helpers, or changing credentials.
+
 ### Global install
 
 ```bash
@@ -190,8 +203,37 @@ pix --cwd . --no-session
 
 Pix uses Pi's model and authentication stores. Environment-based API keys and credentials already configured for Pi are available to Pix.
 
-- Run the stock `pi` TUI when you need its provider login/logout dialogs, then use `/reload` in Pix.
-- Run `/opencode-import` to import supported credentials from OpenCode.
+| Credential or integration | Required? | Setup | Notes |
+| --- | --- | --- | --- |
+| Model provider | **Yes**, unless the selected model needs no credentials | Run the stock Pi TUI with `npx @earendil-works/pi-coding-agent`, use `/login`, then `/reload` in Pix; or set a provider-supported environment key | Pix does not yet implement Pi's interactive `/login` and `/logout` dialogs. |
+| Existing OpenCode accounts | No; migration shortcut | Run `/opencode-import` in Pix | Imports only the credential types listed below and preserves existing Pi entries by default. |
+| Model-backed helpers | No | Review `promptEnhancer`, `autocomplete`, and `sessionTitle` in `pix.jsonc` | Each configured helper model needs credentials for its own provider; it need not use the main session provider. |
+| Ollama/Tavily web access | No | Use local Ollama without a cloud key, set `OLLAMA_API_KEY`/`TAVILY_API_KEY`, or run `/web-credentials` | Stored keys live in `~/.config/pi/pi-tools-suite-credentials.json` with mode `0600`. |
+| Context7 documentation skill | No | Export `CONTEXT7_API_KEY` | The skill fails before making a network request when the variable is absent. |
+| Telegram terminal bell | No | Configure `terminalBell.telegram` or `PI_TERMINAL_BELL_TELEGRAM_BOT_TOKEN` plus `PI_TERMINAL_BELL_TELEGRAM_CHAT_ID` | Used only for the optional terminal notification integration. |
+
+`pix install` reports whether these sources appear configured, but never displays, copies, or overwrites token values.
+
+### OpenCode migration
+
+Run this inside Pix after the bundled tools suite loads:
+
+```text
+/opencode-import
+```
+
+Supported mappings are deliberately narrow:
+
+- OpenAI OAuth → Pi's `openai-codex` provider
+- OpenAI API key → Pi's `openai` provider
+- GitHub Copilot OAuth → `github-copilot`
+- Z.ai/Zhipu-compatible credentials → `zai`
+- an OpenCode Antigravity account → Pi's Antigravity provider
+
+By default the command reads `$OPENCODE_AUTH_CONTENT`, `$OPENCODE_DATA_DIR/auth.json`, or the XDG/default OpenCode data path, plus the corresponding OpenCode Antigravity account file. It writes to Pi's active agent directory (`$PI_CODING_AGENT_DIR` when set), preserves existing provider entries, and reloads Pix only after a successful write. Use `/opencode-import --force` only when you intentionally want supported existing entries replaced. Explicit source and destination paths are available through `/opencode-import --path <file>`, `--auth-path <file>`, and `--antigravity-path <file>`.
+
+OpenCode model/provider definitions, default-model choices, MCP servers, plugins, instructions, and tool settings are **not** migrated because their formats and security assumptions do not map safely. Recreate those settings in Pix/Pi and `pi-tools-suite.jsonc` as needed. No secret is imported during `pix install` itself.
+
 - Run `/antigravity-add-account` to add an Antigravity OAuth account, then use `/antigravity-account` and `/antigravity-status` to manage it.
 - Use `/model`, `/scoped-models`, and `/thinking` to control the active runtime.
 - Use `/default-model`, `/default-thinking`, and `/autocomplete` to change defaults for new sessions.

@@ -2,7 +2,12 @@ import { afterEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { importOpencodeAccounts, parseOpencodeImportCommandArgs } from "../src/opencode-import/index.js";
+import opencodeImport, {
+	formatOpencodeImportResult,
+	importOpencodeAccounts,
+	notificationLevel,
+	parseOpencodeImportCommandArgs,
+} from "../src/opencode-import/index.js";
 
 const tempDirs: string[] = [];
 
@@ -75,6 +80,57 @@ describe("opencode import", () => {
 		expect(imported.providers.find((provider) => provider.targetProvider === "zai")?.status).toBe("imported");
 	});
 
+	test("routes OpenAI API keys separately from Codex OAuth", async () => {
+		const dir = tempDir();
+		const sourcePath = path.join(dir, "opencode-auth.json");
+		const authPath = path.join(dir, "pi-auth.json");
+
+		writeJson(sourcePath, { openai: { type: "api", key: "openai-key" } });
+		const result = await importOpencodeAccounts({ sourcePath, authPath, skipAntigravity: true });
+
+		expect(readJson(authPath).openai).toEqual({ type: "api_key", key: "openai-key" });
+		expect(readJson(authPath)["openai-codex"]).toBeUndefined();
+		expect(result.providers.find((provider) => provider.sourceProvider === "openai")).toMatchObject({
+			targetProvider: "openai",
+			status: "imported",
+		});
+	});
+
+	test("rejects incomplete OAuth credentials instead of writing partial auth", async () => {
+		const dir = tempDir();
+		const sourcePath = path.join(dir, "opencode-auth.json");
+		const authPath = path.join(dir, "pi-auth.json");
+
+		writeJson(sourcePath, { openai: { type: "oauth", access: "access-only", expires: 123 } });
+		const result = await importOpencodeAccounts({ sourcePath, authPath, skipAntigravity: true });
+
+		expect(fs.existsSync(authPath)).toBe(false);
+		expect(result.providers.find((provider) => provider.sourceProvider === "openai")).toMatchObject({
+			targetProvider: "openai-codex",
+			status: "invalid-source",
+		});
+	});
+
+	test("reads OPENCODE_AUTH_CONTENT and honors the canonical Pi agent directory", async () => {
+		const dir = tempDir();
+		const previousContent = process.env.OPENCODE_AUTH_CONTENT;
+		const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+		process.env.OPENCODE_AUTH_CONTENT = JSON.stringify({ openai: { type: "api", key: "from-env" } });
+		process.env.PI_CODING_AGENT_DIR = path.join(dir, "custom-agent");
+
+		try {
+			const result = await importOpencodeAccounts({ skipAntigravity: true });
+			expect(result.sourcePath).toBe("OPENCODE_AUTH_CONTENT");
+			expect(result.authPath).toBe(path.join(dir, "custom-agent", "auth.json"));
+			expect(readJson(result.authPath).openai.key).toBe("from-env");
+		} finally {
+			if (previousContent === undefined) delete process.env.OPENCODE_AUTH_CONTENT;
+			else process.env.OPENCODE_AUTH_CONTENT = previousContent;
+			if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+			else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+		}
+	});
+
 	test("preserves existing Antigravity OAuth client credentials when force-importing accounts", async () => {
 		const dir = tempDir();
 		const sourcePath = path.join(dir, "opencode-auth.json");
@@ -119,5 +175,52 @@ describe("opencode import", () => {
 			antigravityAccountIndex: 2,
 			overwrite: true,
 		});
+	});
+
+	test("describes no-write results without claiming that auth was written", async () => {
+		const dir = tempDir();
+		const sourcePath = path.join(dir, "opencode-auth.json");
+		const authPath = path.join(dir, "pi-auth.json");
+		writeJson(sourcePath, { openai: { type: "api", key: "same-key" } });
+		writeJson(authPath, { openai: { type: "api_key", key: "same-key" } });
+
+		const result = await importOpencodeAccounts({ sourcePath, authPath, skipAntigravity: true });
+		const message = formatOpencodeImportResult(result);
+
+		expect(result.wroteAuth).toBe(false);
+		expect(message).toContain("OpenCode credential check");
+		expect(message).not.toContain("wrote to");
+		expect(notificationLevel(result)).toBe("info");
+	});
+
+	test("reloads resources only after credentials are written", async () => {
+		const dir = tempDir();
+		const sourcePath = path.join(dir, "opencode-auth.json");
+		const authPath = path.join(dir, "pi-auth.json");
+		writeJson(sourcePath, { openai: { type: "api", key: "reload-key" } });
+
+		let handler: ((args: string, ctx: any) => Promise<void>) | undefined;
+		opencodeImport({
+			registerCommand: (_name: string, command: { handler: (args: string, ctx: any) => Promise<void> }) => {
+				handler = command.handler;
+			},
+		} as any);
+		let reloadCount = 0;
+		const notifications: Array<{ message: string; level: string }> = [];
+		const ctx = {
+			ui: { notify: (message: string, level: string) => notifications.push({ message, level }) },
+			reload: async () => {
+				reloadCount += 1;
+			},
+		};
+		const args = `--path ${sourcePath} --auth-path ${authPath} --skip-antigravity`;
+
+		await handler!(args, ctx);
+		expect(reloadCount).toBe(1);
+		expect(notifications[notifications.length - 1]?.level).toBe("info");
+
+		await handler!(args, ctx);
+		expect(reloadCount).toBe(1);
+		expect(notifications[notifications.length - 1]?.message).toContain("already imported");
 	});
 });

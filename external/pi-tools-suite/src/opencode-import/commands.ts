@@ -72,15 +72,18 @@ export function formatOpencodeImportResult(result: OpencodeImportResult): string
 	if (antigravity) providerLines.push(`- ${antigravity}`);
 
 	if (providerLines.length === 0) {
-		return `No opencode credentials were imported. Checked ${result.sourcePath}${result.antigravitySourcePath ? ` and ${result.antigravitySourcePath}` : ""}.`;
+		return `No OpenCode credentials were imported. Checked ${result.sourcePath}${result.antigravitySourcePath ? ` and ${result.antigravitySourcePath}` : ""}.`;
 	}
 
 	const suffix = missingCount > 0 ? `\nMissing ${missingCount} known opencode provider entr${missingCount === 1 ? "y" : "ies"}.` : "";
-	return `Opencode import wrote to ${result.authPath}:\n${providerLines.join("\n")}${suffix}`;
+	const heading = result.wroteAuth ? `Imported OpenCode credentials into ${result.authPath}:` : `OpenCode credential check for ${result.authPath}:`;
+	return `${heading}\n${providerLines.join("\n")}${suffix}`;
 }
 
-export function notificationLevel(result: OpencodeImportResult): "info" | "warn" | "error" {
+export function notificationLevel(result: OpencodeImportResult): "info" | "warning" | "error" {
 	if (result.wroteAuth) return "info";
-	if (result.providers.some((provider) => provider.status === "auth-exists-use-force") || result.antigravity?.reason === "auth-exists-use-force") return "warn";
-	return "error";
+	if (result.providers.some((provider) => provider.status === "auth-exists-use-force") || result.antigravity?.reason === "auth-exists-use-force") return "warning";
+	if (result.providers.some((provider) => provider.status === "invalid-source") || result.antigravity?.reason === "matching-account-not-found") return "error";
+	if (result.providers.some((provider) => provider.status === "already-imported") || result.antigravity?.reason === "already-imported") return "info";
+	return "warning";
 }

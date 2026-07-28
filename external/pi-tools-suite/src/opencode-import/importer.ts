@@ -55,16 +55,16 @@ export type OpencodeImportOptions = {
 type Mapping = {
 	label: string;
 	sourceProvider: string;
-	targetProvider: string;
+	targetProvider: string | ((credential: OpencodeAuthCredential | undefined) => string);
 	transform: (credential: OpencodeAuthCredential) => PiAuthCredential | undefined;
 };
 
 const AUTH_JSON_MAPPINGS: Mapping[] = [
 	{
-		label: "OpenAI Codex",
+		label: "OpenAI",
 		sourceProvider: "openai",
-		targetProvider: "openai-codex",
-		transform: transformOAuthCredential,
+		targetProvider: (credential) => (isOAuthCredential(credential) ? "openai-codex" : "openai"),
+		transform: transformOpenAiCredential,
 	},
 	{
 		label: "GitHub Copilot",
@@ -92,24 +92,45 @@ export function getDefaultOpencodeAuthPath(): string {
 }
 
 function transformOAuthCredential(credential: OpencodeAuthCredential): PiAuthCredential | undefined {
-	if (!credential.access && !credential.refresh) return undefined;
+	if (
+		typeof credential.access !== "string" ||
+		!credential.access ||
+		typeof credential.refresh !== "string" ||
+		!credential.refresh ||
+		typeof credential.expires !== "number" ||
+		!Number.isFinite(credential.expires)
+	) {
+		return undefined;
+	}
 	return { ...credential, type: "oauth" };
 }
 
 function transformApiKeyCredential(credential: OpencodeAuthCredential): PiAuthCredential | undefined {
-	if (!credential.key) return undefined;
+	if (typeof credential.key !== "string" || !credential.key) return undefined;
 	return { ...credential, type: "api_key", key: credential.key };
+}
+
+function isOAuthCredential(credential: OpencodeAuthCredential | undefined): boolean {
+	return credential?.type === "oauth" || typeof credential?.access === "string" || typeof credential?.refresh === "string";
+}
+
+function transformOpenAiCredential(credential: OpencodeAuthCredential): PiAuthCredential | undefined {
+	return isOAuthCredential(credential) ? transformOAuthCredential(credential) : transformApiKeyCredential(credential);
 }
 
 function sameCredential(a: PiAuthCredential | undefined, b: PiAuthCredential | undefined): boolean {
 	return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 }
 
-function providerResult(mapping: Mapping, status: OpencodeProviderImportStatus): OpencodeProviderImportResult {
+function targetProvider(mapping: Mapping, credential: OpencodeAuthCredential | undefined): string {
+	return typeof mapping.targetProvider === "function" ? mapping.targetProvider(credential) : mapping.targetProvider;
+}
+
+function providerResult(mapping: Mapping, status: OpencodeProviderImportStatus, credential?: OpencodeAuthCredential): OpencodeProviderImportResult {
 	return {
 		label: mapping.label,
 		sourceProvider: mapping.sourceProvider,
-		targetProvider: mapping.targetProvider,
+		targetProvider: targetProvider(mapping, credential),
 		status,
 	};
 }
@@ -123,8 +144,15 @@ async function pathExists(path: string): Promise<boolean> {
 	}
 }
 
+async function readOpencodeAuth(sourcePath: string, environmentSource: string | undefined): Promise<OpencodeAuthData> {
+	if (environmentSource !== undefined) return parseOpencodeAuthContent(environmentSource);
+	if (!(await pathExists(sourcePath))) return {};
+	return readJsonFile<OpencodeAuthData>(sourcePath, {});
+}
+
 export async function importOpencodeAccounts(options: OpencodeImportOptions = {}): Promise<OpencodeImportResult> {
-	const sourcePath = options.sourcePath ?? getDefaultOpencodeAuthPath();
+	const environmentSource = options.sourcePath === undefined ? process.env.OPENCODE_AUTH_CONTENT : undefined;
+	const sourcePath = options.sourcePath ?? (environmentSource !== undefined ? "OPENCODE_AUTH_CONTENT" : getDefaultOpencodeAuthPath());
 	const authPath = options.authPath ?? getPiAuthPath();
 	const result: OpencodeImportResult = {
 		sourcePath,
@@ -138,8 +166,7 @@ export async function importOpencodeAccounts(options: OpencodeImportOptions = {}
 	const changedTargets = new Set<string>();
 
 	if (!options.skipAuthJson) {
-		const sourceExists = await pathExists(sourcePath);
-		const opencodeAuth = sourceExists ? await readJsonFile<OpencodeAuthData>(sourcePath, {}) : {};
+		const opencodeAuth = await readOpencodeAuth(sourcePath, environmentSource);
 
 		for (const mapping of AUTH_JSON_MAPPINGS) {
 			const sourceCredential = opencodeAuth[mapping.sourceProvider];
@@ -147,34 +174,35 @@ export async function importOpencodeAccounts(options: OpencodeImportOptions = {}
 				result.providers.push(providerResult(mapping, "source-missing"));
 				continue;
 			}
+			const resolvedTargetProvider = targetProvider(mapping, sourceCredential);
 
-			if (changedTargets.has(mapping.targetProvider)) {
-				result.providers.push(providerResult(mapping, "target-set-from-other-source"));
+			if (changedTargets.has(resolvedTargetProvider)) {
+				result.providers.push(providerResult(mapping, "target-set-from-other-source", sourceCredential));
 				continue;
 			}
 
 			const nextCredential = mapping.transform(sourceCredential);
 			if (!nextCredential) {
-				result.providers.push(providerResult(mapping, "invalid-source"));
+				result.providers.push(providerResult(mapping, "invalid-source", sourceCredential));
 				continue;
 			}
 
-			const existingCredential = piAuth[mapping.targetProvider];
+			const existingCredential = piAuth[resolvedTargetProvider];
 			if (sameCredential(existingCredential, nextCredential)) {
-				result.providers.push(providerResult(mapping, "already-imported"));
-				changedTargets.add(mapping.targetProvider);
+				result.providers.push(providerResult(mapping, "already-imported", sourceCredential));
+				changedTargets.add(resolvedTargetProvider);
 				continue;
 			}
 
 			if (existingCredential && !options.overwrite) {
-				result.providers.push(providerResult(mapping, "auth-exists-use-force"));
-				changedTargets.add(mapping.targetProvider);
+				result.providers.push(providerResult(mapping, "auth-exists-use-force", sourceCredential));
+				changedTargets.add(resolvedTargetProvider);
 				continue;
 			}
 
-			piAuth = { ...piAuth, [mapping.targetProvider]: nextCredential };
-			changedTargets.add(mapping.targetProvider);
-			result.providers.push(providerResult(mapping, "imported"));
+			piAuth = { ...piAuth, [resolvedTargetProvider]: nextCredential };
+			changedTargets.add(resolvedTargetProvider);
+			result.providers.push(providerResult(mapping, "imported", sourceCredential));
 		}
 
 		if (result.providers.some((provider) => provider.status === "imported")) {
@@ -205,4 +233,17 @@ export async function importOpencodeAccounts(options: OpencodeImportOptions = {}
 	}
 
 	return result;
+}
+
+function parseOpencodeAuthContent(content: string): OpencodeAuthData {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(content);
+	} catch {
+		throw new Error("OPENCODE_AUTH_CONTENT must contain a valid JSON object.");
+	}
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+		throw new Error("OPENCODE_AUTH_CONTENT must contain a JSON object.");
+	}
+	return parsed as OpencodeAuthData;
 }

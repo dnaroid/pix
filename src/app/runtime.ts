@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { access, cp, lstat, mkdir, readlink, realpath, rm, symlink } from "node:fs/promises";
+import { access, cp, lstat, mkdir, readdir, readlink, realpath, rm, symlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -62,12 +62,14 @@ export type PiToolsSuiteInstallOptions = {
 	targetPath?: string;
 };
 
-export type BundledSkillsInstallAction = "installed" | "already-installed" | "missing-source";
+export type BundledSkillsInstallAction = "installed" | "already-installed" | "existing-kept" | "missing-source";
 
 export type BundledSkillsInstallResult = {
 	action: BundledSkillsInstallAction;
 	sourcePath: string;
 	targetPath: string;
+	installedSkills: string[];
+	preservedSkills: string[];
 };
 
 export type BundledSkillsInstallOptions = {
@@ -142,16 +144,31 @@ export async function ensureBundledSkillsInstalled(options: BundledSkillsInstall
 	const targetPath = resolve(options.targetPath ?? bundledSkillsInstallPath(options.homeDir));
 	const sourceStat = await lstat(sourcePath).catch(() => undefined);
 	if (!sourceStat?.isDirectory()) {
-		return { action: "missing-source", sourcePath, targetPath };
+		return { action: "missing-source", sourcePath, targetPath, installedSkills: [], preservedSkills: [] };
 	}
 
 	if (await pathsReferToSameEntry(sourcePath, targetPath)) {
-		return { action: "already-installed", sourcePath, targetPath };
+		return { action: "already-installed", sourcePath, targetPath, installedSkills: [], preservedSkills: [] };
 	}
 
-	await mkdir(dirname(targetPath), { recursive: true });
-	await cp(sourcePath, targetPath, { recursive: true, force: true });
-	return { action: "installed", sourcePath, targetPath };
+	await mkdir(targetPath, { recursive: true });
+	const installedSkills: string[] = [];
+	const preservedSkills: string[] = [];
+	for (const entry of await readdir(sourcePath, { withFileTypes: true })) {
+		if (!entry.isDirectory()) continue;
+		const skillTarget = join(targetPath, entry.name);
+		if (await lstat(skillTarget).catch(() => undefined)) {
+			preservedSkills.push(entry.name);
+			continue;
+		}
+		await cp(join(sourcePath, entry.name), skillTarget, { recursive: true, errorOnExist: true, force: false });
+		installedSkills.push(entry.name);
+	}
+
+	let action: BundledSkillsInstallAction = "already-installed";
+	if (installedSkills.length > 0) action = "installed";
+	else if (preservedSkills.length > 0) action = "existing-kept";
+	return { action, sourcePath, targetPath, installedSkills, preservedSkills };
 }
 
 export function getBundledExtensionPaths(): string[] {

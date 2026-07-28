@@ -10,11 +10,12 @@
 #   1. resolve — find the Context7 library ID for a package
 #   2. docs    — query documentation for a resolved library ID
 #
-# Requires CONTEXT7_API_KEY env var (falls back to hardcoded default).
+# Requires CONTEXT7_API_KEY env var.
 
 set -euo pipefail
 
-API_KEY="${CONTEXT7_API_KEY:-ctx7sk-d3b58838-f015-48a3-8059-93562f78837d}"
+: "${CONTEXT7_API_KEY:?Context7 requires CONTEXT7_API_KEY. Create a key at https://context7.com/dashboard and export it before using this skill.}"
+API_KEY="$CONTEXT7_API_KEY"
 BASE_URL="https://mcp.context7.com/mcp"
 
 call_mcp() {

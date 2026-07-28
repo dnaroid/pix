@@ -1,10 +1,12 @@
+import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { DEFAULT_PROJECT_ID, PROVIDER_ID } from "./constants";
 import type { GoogleOAuthClientCredentials, OpencodeAntigravityAccount, OpencodeAntigravityImportResult, OpencodeAntigravityStorage, PiAuthCredential, PiAuthData } from "./types";
 
-export const PI_AUTH_PATH = join(homedir(), ".pi", "agent", "auth.json");
+export const PI_AUTH_PATH = join(getAgentDir(), "auth.json");
 
 function testPiAuthPath(): string | undefined {
 	return process.env.NODE_ENV === "test" ? process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH : undefined;
@@ -48,7 +50,7 @@ export async function importDefaultOpencodeAntigravityAccount(options: { overwri
 }
 
 export function getPiAuthPath(): string {
-	return testPiAuthPath() ?? PI_AUTH_PATH;
+	return testPiAuthPath() ?? join(getAgentDir(), "auth.json");
 }
 
 export async function readJsonFile<T>(path: string, fallback: T): Promise<T> {
@@ -61,9 +63,21 @@ export async function readJsonFile<T>(path: string, fallback: T): Promise<T> {
 }
 
 export async function writeJsonFileSecure(path: string, data: unknown): Promise<void> {
-	await fs.mkdir(dirname(path), { recursive: true });
-	await fs.writeFile(path, `${JSON.stringify(data, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-	await fs.chmod(path, 0o600).catch(() => undefined);
+	const directory = dirname(path);
+	const temporaryPath = join(directory, `.${basename(path)}.${process.pid}.${randomUUID()}.tmp`);
+	await fs.mkdir(directory, { recursive: true });
+	try {
+		await fs.writeFile(temporaryPath, `${JSON.stringify(data, null, 2)}\n`, {
+			encoding: "utf8",
+			flag: "wx",
+			mode: 0o600,
+		});
+		await fs.rename(temporaryPath, path);
+		await fs.chmod(path, 0o600).catch(() => undefined);
+	} catch (error) {
+		await fs.rm(temporaryPath, { force: true }).catch(() => undefined);
+		throw error;
+	}
 }
 
 export function getStoredAccounts(credential?: PiAuthCredential): OpencodeAntigravityAccount[] {

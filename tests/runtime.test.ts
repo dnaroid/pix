@@ -52,20 +52,44 @@ describe("runtime installation helpers", () => {
 		const sourcePath = join(root, "skills-source");
 		const targetPath = join(root, "agents", "skills");
 		try {
-			await mkdir(join(sourcePath, "sub"), { recursive: true });
-			await writeFile(join(sourcePath, "index.ts"), "export const skill = 1;\n", "utf8");
-			await writeFile(join(sourcePath, "sub", "nested.txt"), "nested", "utf8");
+			await mkdir(join(sourcePath, "demo", "sub"), { recursive: true });
+			await writeFile(join(sourcePath, "demo", "SKILL.md"), "demo\n", "utf8");
+			await writeFile(join(sourcePath, "demo", "sub", "nested.txt"), "nested", "utf8");
 
 			const installed = await ensureBundledSkillsInstalled({ sourcePath, targetPath });
 			assert.equal(installed.action, "installed");
-			assert.equal(await readFile(join(targetPath, "index.ts"), "utf8"), "export const skill = 1;\n");
-			assert.equal(await readFile(join(targetPath, "sub", "nested.txt"), "utf8"), "nested");
+			assert.equal(await readFile(join(targetPath, "demo", "SKILL.md"), "utf8"), "demo\n");
+			assert.equal(await readFile(join(targetPath, "demo", "sub", "nested.txt"), "utf8"), "nested");
 
 			const repeated = await ensureBundledSkillsInstalled({ sourcePath, targetPath: sourcePath });
 			assert.equal(repeated.action, "already-installed");
 
 			const missing = await ensureBundledSkillsInstalled({ sourcePath: join(root, "missing"), targetPath: join(root, "missing-target") });
 			assert.equal(missing.action, "missing-source");
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
+	it("preserves existing user skills while installing missing bundled skills", async () => {
+		const root = await mkdtemp(join(tmpdir(), "pix-runtime-skill-conflict-"));
+		const sourcePath = join(root, "skills-source");
+		const targetPath = join(root, "agents", "skills");
+		try {
+			await mkdir(join(sourcePath, "existing"), { recursive: true });
+			await mkdir(join(sourcePath, "new-skill"), { recursive: true });
+			await mkdir(join(targetPath, "existing"), { recursive: true });
+			await writeFile(join(sourcePath, "existing", "SKILL.md"), "bundled\n", "utf8");
+			await writeFile(join(sourcePath, "new-skill", "SKILL.md"), "new\n", "utf8");
+			await writeFile(join(targetPath, "existing", "SKILL.md"), "user\n", "utf8");
+
+			const result = await ensureBundledSkillsInstalled({ sourcePath, targetPath });
+
+			assert.equal(result.action, "installed");
+			assert.deepEqual(result.installedSkills, ["new-skill"]);
+			assert.deepEqual(result.preservedSkills, ["existing"]);
+			assert.equal(await readFile(join(targetPath, "existing", "SKILL.md"), "utf8"), "user\n");
+			assert.equal(await readFile(join(targetPath, "new-skill", "SKILL.md"), "utf8"), "new\n");
 		} finally {
 			await rm(root, { recursive: true, force: true });
 		}

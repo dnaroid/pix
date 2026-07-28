@@ -9,6 +9,7 @@ import type { LoadExtensionsResult } from "@earendil-works/pi-coding-agent";
 import {
 	checkPiCliAvailability,
 	checkPiToolsSuiteExtensionAvailability,
+	checkSelectedModelAuthAvailability,
 } from "../src/app/cli/startup-checks.js";
 
 describe("startup availability checks", () => {
@@ -78,6 +79,26 @@ describe("startup availability checks", () => {
 		});
 
 		assert.deepEqual(checkPiToolsSuiteExtensionAvailability(result), []);
+	});
+
+	it("guides first-run users when no model or provider credentials are configured", () => {
+		const withoutModel = {
+			session: { model: undefined },
+			services: { modelRuntime: { getProviderAuthStatus: () => ({ configured: false }) } },
+		} as never;
+		assert.match(checkSelectedModelAuthAvailability(withoutModel)[0]?.message ?? "", /No model is selected/u);
+
+		const withoutAuth = {
+			session: { model: { provider: "openai-codex", id: "gpt-test" } },
+			services: { modelRuntime: { getProviderAuthStatus: () => ({ configured: false }) } },
+		} as never;
+		assert.match(checkSelectedModelAuthAvailability(withoutAuth)[0]?.message ?? "", /\/opencode-import/u);
+
+		const configured = {
+			session: { model: { provider: "zai", id: "glm-test" } },
+			services: { modelRuntime: { getProviderAuthStatus: () => ({ configured: true, source: "stored" }) } },
+		} as never;
+		assert.deepEqual(checkSelectedModelAuthAvailability(configured), []);
 	});
 
 });

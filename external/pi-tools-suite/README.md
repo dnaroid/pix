@@ -12,6 +12,7 @@ This package keeps shared Pi tools as ordinary source folders under `src/` and r
 - `src/session-name` — `session_name` tool for reading or setting the current session title directly from tool calls, without relying on slash-command parsing
 - `src/repo-discovery` — `/idx-init`, `/idx-update`, and indexed-only `repo_architecture` / `repo_structure` / `repo_ast` / `repo_search` / `repo_explain` / `repo_deps`; tools register only when the launch project has `.indexer-cli`
 - `src/antigravity-auth` — `antigravity` custom provider with Google Antigravity OAuth login, startup account list, auth.json-only runtime account loading, `/antigravity-add-account` OAuth append into rotation, `/antigravity-account` status display, account rotation/failover, Antigravity plus Gemini CLI model registration, and streaming through the Cloud Code Assist unified gateway
+- `src/opencode-import` — `/opencode-import` for bounded migration of supported OpenCode OpenAI/Codex, GitHub Copilot, Z.ai, and Antigravity credentials into Pi; existing entries are preserved unless `--force` is passed
 - `src/todo` — `todo` tool, `/todos`, `/todos-persist`, and `/todos-scope`; supports parent/subtask hierarchy, blockers, ready-task filtering, deferred out-of-scope items, batch operations, JSON/Markdown import/export, automatic clearing when all visible todos are completed, and optional project persistence via `/todos persist on` or `/todos-persist on`; localization/i18n has been removed
 - `src/model-tools` — model-specific tool aliases such as Claude/GLM-style `Read` / `Edit` / `Write` / `Bash` / `Grep` / `Glob` / `LS`, GPT/Codex-style `shell`, and model-gated `apply_patch`
 - `src/usage` — `/usage` command and startup hint for read-only AI quota checks across OpenAI, Zhipu AI, Z.ai, and Google Antigravity, including Antigravity quota by model
@@ -22,7 +23,7 @@ This package keeps shared Pi tools as ordinary source folders under `src/` and r
 
 `index.ts` is intentionally only a thin auto-discovery shim that re-exports `src/index.ts`. There is no `pi.extensions` manifest here, so local Pi auto-discovery loads the suite once via `~/.pi/agent/extensions/pi-tools-suite/index.ts` and does not double-register tools.
 
-Registration order is preserved in `src/index.ts`: coding-discipline, ast-grep, async-subagents, lsp, comment-checker, session-name, repo-discovery command/tool gate, antigravity-auth provider, todo, model-tools, usage, web-search, dcp, prompt-commands, then skill-installer. Tool metadata and active model-specific tool sets have two modes: standard and repo-aware. When `.indexer-cli` enables `repo_*`, those tools stay active ahead of overlapping lower-level aliases so the indexed discovery surface has priority.
+Registration order is preserved in `src/index.ts`: coding-discipline, ast-grep, async-subagents, lsp, comment-checker, session-name, repo-discovery command/tool gate, antigravity-auth provider, OpenCode import, todo, model-tools, usage, web-search, dcp, prompt-commands, then skill-installer. Tool metadata and active model-specific tool sets have two modes: standard and repo-aware. When `.indexer-cli` enables `repo_*`, those tools stay active ahead of overlapping lower-level aliases so the indexed discovery surface has priority.
 
 ## Disabling modules
 
@@ -302,6 +303,12 @@ Sub-agent runs are stored in the current project's `.pi/subagents/` directory wh
 Runtime logs are minimized by default: successful agents do not keep `events.jsonl`, and `stderr.log` is discarded unless the agent fails. Set `ASYNC_SUBAGENTS_DEBUG_LOGS=1` / `PI_SUBAGENTS_DEBUG_LOGS=1` to keep diagnostic logs for successful agents too; debug event logs store a compact RPC event summary instead of the full streaming transcript. Defaults are 0 bytes for `events.jsonl` without debug, 32 MiB for debug `events.jsonl`, 8 MiB for retained `stderr.log`, and 8 MiB for a single RPC JSON line; override with `ASYNC_SUBAGENTS_MAX_EVENTS_BYTES` / `PI_SUBAGENTS_MAX_EVENTS_BYTES`, `ASYNC_SUBAGENTS_MAX_STDERR_BYTES` / `PI_SUBAGENTS_MAX_STDERR_BYTES`, and `ASYNC_SUBAGENTS_MAX_RPC_LINE_CHARS` / `PI_SUBAGENTS_MAX_RPC_LINE_CHARS`.
 
 `asyncSubagents` config also supports `maxConcurrent` (default 5, project-wide; `0` means unlimited), global/per-type `retry` with exponential backoff, global/per-type `maxResultBytes` for bounding `result.json.resultText` while keeping raw `result.md` intact, and global/per-type/preset `timeoutMs` for wall-clock agent watchdogs. Spawn calls and individual task objects can pass `timeoutSeconds` to shorten the watchdog for synthetic tests or bounded probes. Stop requests mark running, queued planned, and retry-pending agents as `stopped` so queued work is not launched later. Completed agents write `result.json` with status/duration/model/retry metadata plus best-effort `summary`, `findings`, `files`, `risks`, `nextActions`, and `confidence` fields for parent-agent chaining.
+
+## OpenCode credential import
+
+`/opencode-import` migrates only credential formats with an explicit Pi mapping: OpenAI OAuth to `openai-codex`, OpenAI API keys to `openai`, GitHub Copilot OAuth, Z.ai aliases, and one matching OpenCode Antigravity account. It does not migrate OpenCode model definitions, defaults, MCP servers, plugins, instructions, or tool settings.
+
+The default source is `OPENCODE_AUTH_CONTENT`, `OPENCODE_DATA_DIR/auth.json`, or the XDG/default OpenCode data directory. The destination is the active Pi agent directory, including `PI_CODING_AGENT_DIR`. Existing Pi credentials are preserved; pass `--force` only to replace supported entries intentionally. Successful writes are atomic, use restrictive file permissions, and trigger a runtime reload. The command also accepts `--path`, `--auth-path`, `--antigravity-path`, `--skip-auth-json`, and `--skip-antigravity` for controlled migrations.
 
 ## Web search
 
