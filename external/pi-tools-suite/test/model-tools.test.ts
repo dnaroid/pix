@@ -24,7 +24,7 @@ mock.module("@earendil-works/pi-coding-agent", () => ({
 	DEFAULT_MAX_LINES: 1000,
 	defineTool: (tool: any) => tool,
 	formatSize: (bytes: number) => `${bytes}B`,
-	getAgentDir: () => process.cwd(),
+	getAgentDir: () => process.env.PI_CODING_AGENT_DIR ?? path.join(os.tmpdir(), "pi-tools-suite-test-agent"),
 	truncateHead: (content: string) => ({
 		content,
 		truncated: false,
