@@ -47,6 +47,9 @@ describe("tool descriptions", () => {
 		expect(promptText).toContain("close it immediately before the final response");
 		expect(promptText).toContain("do not issue a redundant update");
 		expect(promptText).toContain("Resync before continuing");
+		expect(promptText).toContain("reactivate and reuse an equivalent deferred todo instead of duplicating it");
+		expect(promptText).toContain("list and reconcile all visible todos, including deferred ones");
+		expect(promptText).toContain("Do not finish with stale/duplicate deferred todos");
 		expect(promptText).toContain("exactly one in_progress");
 		expect(promptText).toContain("Never use `clear`, `delete`");
 	});

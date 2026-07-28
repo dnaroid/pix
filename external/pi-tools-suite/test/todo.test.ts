@@ -99,6 +99,8 @@ describe.serial("todo tool", () => {
 		expect(promptGuidelines).toContain("include a final user-facing report todo in the initial plan");
 		expect(promptGuidelines).toContain("close it immediately before the final response");
 		expect(promptGuidelines).toContain("scope, requirements, safety, feasibility, approach, dependencies, or order");
+		expect(promptGuidelines).toContain("reactivate and reuse an equivalent deferred todo instead of duplicating it");
+		expect(promptGuidelines).toContain("list and reconcile all visible todos, including deferred ones");
 		expect(tool.promptSnippet).toContain("include final report item");
 		expect(tool.promptSnippet).toContain("close it before sending the report");
 
