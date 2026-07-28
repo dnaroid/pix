@@ -12,9 +12,10 @@ describe("context7 skill credentials", () => {
 
 		const env = { ...process.env };
 		delete env.CONTEXT7_API_KEY;
-		const result = spawnSync("bash", [scriptPath.pathname, "resolve", "React"], {
+		const result = spawnSync("bash", ["-s", "--", "resolve", "React"], {
 			env,
 			encoding: "utf8",
+			input: source,
 		});
 
 		assert.notEqual(result.status, 0);
