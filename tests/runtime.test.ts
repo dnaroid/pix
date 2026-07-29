@@ -14,6 +14,7 @@ import {
 	ensurePiToolsSuiteExtensionInstalled,
 	getBundledExtensionPaths,
 	prioritizeBundledQuestionExtension,
+	refreshPixModelRuntimeForStartup,
 } from "../src/app/runtime.js";
 
 const questionExtensionPath = bundledQuestionExtensionPath();
@@ -111,6 +112,19 @@ describe("runtime installation helpers", () => {
 
 		assert.deepEqual(prioritized.extensions.map((extension) => extension.path), [join(questionExtensionPath, "index.ts"), "/workspace/other-extension/index.ts"]);
 		assert.deepEqual(prioritized.errors, []);
+	});
+
+	it("refreshes the startup model catalog without network access", async () => {
+		const refreshCalls: unknown[] = [];
+
+		await refreshPixModelRuntimeForStartup({
+			refresh: async (options) => {
+				refreshCalls.push(options);
+				return {} as never;
+			},
+		});
+
+		assert.deepEqual(refreshCalls, [{ allowNetwork: false }]);
 	});
 });
 

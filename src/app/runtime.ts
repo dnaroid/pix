@@ -334,6 +334,14 @@ export function resolveSessionModelRefFromTail(entries: readonly SessionEntry[])
 	return thinkingLevel ? `${modelRef}:${thinkingLevel}` : modelRef;
 }
 
+export async function refreshPixModelRuntimeForStartup(
+	modelRuntime: Pick<AgentSessionServices["modelRuntime"], "refresh">,
+): Promise<void> {
+	// Startup only needs the locally configured model catalog. Remote catalog
+	// refreshes belong to explicit model-management flows and must not block boot.
+	await modelRuntime.refresh({ allowNetwork: false });
+}
+
 export async function createPixRuntime(options: AppOptions, runtimeOptions: CreatePixRuntimeOptions = {}): Promise<AgentSessionRuntime> {
 	const agentDir = getAgentDir();
 	const reusableServices = reusableRuntimeServices(runtimeOptions.reuseServicesFrom, options.cwd, agentDir);
@@ -355,7 +363,7 @@ export async function createPixRuntime(options: AppOptions, runtimeOptions: Crea
 				config,
 				...(runtimeOptions.eventBus === undefined ? {} : { eventBus: runtimeOptions.eventBus }),
 			});
-		await services.modelRuntime.refresh();
+		await refreshPixModelRuntimeForStartup(services.modelRuntime);
 		const model = parsedModel ? services.modelRuntime.getModel(parsedModel.provider, parsedModel.modelId) : undefined;
 		if (parsedModel && !model) {
 			throw new Error(`Model not found: ${parsedModel.provider}/${parsedModel.modelId}`);
