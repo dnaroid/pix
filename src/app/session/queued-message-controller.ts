@@ -8,6 +8,7 @@ import { autoQueuedMessageEntries, cloneSubmittedUserMessage, deferredQueuedMess
 export type AppQueuedMessageControllerHost = {
 	runtime(): AgentSessionRuntime | undefined;
 	requireRuntime(): AgentSessionRuntime;
+	awaitCurrentSessionExtensions(runtime: AgentSessionRuntime): Promise<void>;
 	visibleEntries(): readonly Entry[];
 	isRunning(): boolean;
 	render(): void;
@@ -98,6 +99,9 @@ export class AppQueuedMessageController {
 		this.host.setSessionActivity("running");
 
 		try {
+			const runtime = this.host.runtime();
+			if (runtime?.session === targetSession) await this.host.awaitCurrentSessionExtensions(runtime);
+
 			const opts: { streamingBehavior?: "steer" | "followUp"; images?: ImageContent[] } = {};
 			if (targetSession.isStreaming) opts.streamingBehavior = options.streamingBehavior ?? "steer";
 			if (message.images.length > 0) opts.images = message.images;

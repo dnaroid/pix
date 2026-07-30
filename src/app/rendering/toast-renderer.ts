@@ -1,14 +1,15 @@
 import { ANSI_RESET, ansiStylePrefix, type TextStyleOptions, type Theme } from "../../theme.js";
 import { expandTabs, stringDisplayWidth, wrapDisplayLine } from "../../terminal-width.js";
-import type { ToastEntry, ToastKind } from "../../ui.js";
+import type { ToastKind } from "../../ui.js";
 import { APP_ICONS } from "../icons.js";
 import { padOrTrimPlain } from "./render-text.js";
 import type { ToastLineTarget } from "../types.js";
+import type { AppToastEntry } from "./toast-controller.js";
 
 export type ToastOverlay = { id: number; row: number; column: number; text: string; output: string; target?: ToastLineTarget };
 
 export function renderToastOverlays(
-	states: readonly ToastEntry[],
+	states: readonly AppToastEntry[],
 	width: number,
 	maxRows: number,
 	theme: Theme,
@@ -25,10 +26,16 @@ export function renderToastOverlays(
 
 		const icon = toastKindIcon(state.kind);
 		const lines = toastMessageLines(state.message, icon, Math.max(1, width - 6));
-		const visibleLines = lines.slice(0, Math.max(0, maxRows - overlays.length));
+		const availableRows = Math.max(0, maxRows - overlays.length);
+		const actionLabel = compactToastActionLabel(state);
+		const includeAction = actionLabel !== undefined && availableRows >= 2;
+		const visibleLines = lines.slice(0, Math.max(0, availableRows - (includeAction ? 1 : 0)));
 		if (visibleLines.length === 0) continue;
 
-		const contentWidth = Math.max(...visibleLines.map((line) => stringDisplayWidth(line)));
+		const contentWidth = Math.max(
+			...visibleLines.map((line) => stringDisplayWidth(line)),
+			...(includeAction ? [stringDisplayWidth(actionLabel)] : []),
+		);
 		const toastWidth = Math.min(Math.max(12, contentWidth + 2), Math.max(1, width - 4));
 		const leftWidth = Math.max(0, width - toastWidth - 2);
 		const column = leftWidth + 1;
@@ -51,9 +58,40 @@ export function renderToastOverlays(
 				target: { kind: "toast", id: state.id, action: "toast", startColumn: column, endColumn: column + toastWidth },
 			});
 		}
+
+		if (includeAction) {
+			const innerWidth = Math.max(0, toastWidth - 2);
+			const renderedLabel = padOrTrimPlain(actionLabel, innerWidth).trimEnd();
+			const labelWidth = stringDisplayWidth(renderedLabel);
+			if (labelWidth > 0) {
+				const leftPadding = Math.max(0, innerWidth - labelWidth);
+				const message = ` ${" ".repeat(leftPadding)}${renderedLabel} `;
+				const startColumn = column + 1 + leftPadding;
+				overlays.push({
+					id: state.id,
+					row: overlays.length + 1,
+					column,
+					text: padOrTrimPlain(message, toastWidth),
+					output: colorToastLine(message, toastWidth, { ...style, bold: true }),
+					target: {
+						kind: "toast",
+						id: state.id,
+						action: "action",
+						startColumn,
+						endColumn: startColumn + labelWidth,
+					},
+				});
+			}
+		}
 	}
 
 	return overlays;
+}
+
+function compactToastActionLabel(state: AppToastEntry): string | undefined {
+	if (!state.action) return undefined;
+	const label = stripToastAnsi(sanitizeToastText(state.action.label)).split("\n", 1)[0]?.trim();
+	return label ? `[${label}]` : undefined;
 }
 
 function toastMessageLines(message: string, icon: string, maxWidth: number): string[] {
@@ -80,7 +118,7 @@ function toastMessageLines(message: string, icon: string, maxWidth: number): str
 }
 
 function renderDialogToastOverlay(
-	state: ToastEntry,
+	state: AppToastEntry,
 	width: number,
 	maxRows: number,
 	theme: Theme,
@@ -195,7 +233,7 @@ function toastKindStyle(kind: ToastKind, theme: Theme): { foreground: string; ba
 	}
 }
 
-function toastStyle(state: ToastEntry, theme: Theme): { foreground: string; background: string } {
+function toastStyle(state: AppToastEntry, theme: Theme): { foreground: string; background: string } {
 	const style = toastKindStyle(state.kind, theme);
 	return hasToastAnsiColor(state.message) ? { ...style, background: "#000000" } : style;
 }

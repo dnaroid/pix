@@ -1,4 +1,4 @@
-import type { AgentSessionEvent, AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
+import type { AgentSession, AgentSessionEvent, AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 import type { ImageContent } from "../../input-editor.js";
 import type { ConversationViewport } from "../rendering/conversation-viewport.js";
 import { createId } from "../id.js";
@@ -54,6 +54,7 @@ const HISTORY_WINDOW_SHIFT_ENTRIES = 50;
 export type AppSessionEventControllerHost = {
 	readonly entries: Entry[];
 	runtime(): AgentSessionRuntime | undefined;
+	awaitSessionExtensions?(runtime: AgentSessionRuntime): Promise<void>;
 	conversationViewport(): ConversationViewport;
 	conversationViewportColumns?(): number;
 	onHistoryWindowPruned?(edge: "top" | "bottom", lineCount: number): void;
@@ -86,7 +87,11 @@ export type AppSessionEventControllerHost = {
 	toolDefaultExpanded(toolName: string): boolean;
 	observeSubagentsToolResult(toolName: string, details: unknown, options?: { showSnapshot?: boolean }): void;
 	observeTodoToolResult(toolName: string, details: unknown, isError?: boolean): void;
-	showToast(message: string, kind: "success" | "error" | "warning" | "info"): void;
+	showToast(
+		message: string,
+		kind: "success" | "error" | "warning" | "info",
+		options?: { action?: { label: string; onSelect: () => void } },
+	): void;
 };
 
 export class AppSessionEventController {
@@ -405,20 +410,71 @@ export class AppSessionEventController {
 				this.host.setStatus(`retry ${event.attempt}/${event.maxAttempts}`);
 				this.host.emitExtensionEvent(RETRY_ACTIVE_EVENT, { active: true });
 				break;
-			case "auto_retry_end":
+			case "auto_retry_end": {
 				this.host.setSessionActivity(this.host.runtime()?.session.isStreaming ? "running" : "idle");
 				this.host.restoreSessionStatus();
 				this.host.flushAutoUserMessages();
 				this.host.emitExtensionEvent(RETRY_ACTIVE_EVENT, { active: false });
-				this.host.showToast(
-					event.success ? "Retry succeeded" : `Retry failed: ${event.finalError}`,
-					event.success ? "success" : "error",
-				);
+				if (event.success) {
+					this.host.showToast("Retry succeeded", "success");
+					break;
+				}
+
+				const session = this.host.runtime()?.session;
+				this.host.showToast(`Retry failed: ${event.finalError}`, "error", session
+					? { action: { label: "Retry", onSelect: () => this.retryFailedTurn(session) } }
+					: undefined);
 				break;
+			}
 			default:
 				break;
 		}
 		this.host.scheduleRender();
+	}
+
+	private retryFailedTurn(session: AgentSession): void {
+		void this.retryFailedTurnAsync(session);
+	}
+
+	private async retryFailedTurnAsync(session: AgentSession): Promise<void> {
+		const runtime = this.host.runtime();
+		if (!runtime || !this.isActiveRuntimeSession(runtime, session)) return;
+		if (session.isStreaming || session.isCompacting) {
+			this.host.showToast("Retry is unavailable while the session is busy", "warning");
+			return;
+		}
+
+		this.host.setStatus("retrying failed turn");
+		this.host.setSessionActivity("running");
+		this.host.render();
+
+		try {
+			await this.host.awaitSessionExtensions?.(runtime);
+			if (!this.isActiveRuntimeSession(runtime, session)) return;
+			if (session.isStreaming || session.isCompacting) {
+				this.host.showToast("Retry is unavailable while the session is busy", "warning");
+				return;
+			}
+			await session.sendCustomMessage({
+				customType: "pix-retry",
+				content: "Continue the previous task from where you stopped.",
+				display: false,
+			}, { triggerTurn: true });
+		} catch (error) {
+			if (this.isActiveRuntimeSession(runtime, session)) {
+				this.host.showToast(`Retry could not start: ${stringifyUnknown(error)}`, "error");
+			}
+		} finally {
+			if (this.isActiveRuntimeSession(runtime, session)) {
+				this.host.setSessionStatus(session);
+				this.host.setSessionActivity(session.isStreaming || session.isCompacting ? "running" : "idle");
+				this.host.render();
+			}
+		}
+	}
+
+	private isActiveRuntimeSession(runtime: AgentSessionRuntime, session: AgentSession): boolean {
+		return this.host.isRunning() && this.host.runtime() === runtime && runtime.session === session;
 	}
 
 	addCustomMessageEntry(message: Record<string, unknown>): void {

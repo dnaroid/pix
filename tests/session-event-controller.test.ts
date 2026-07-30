@@ -1011,6 +1011,7 @@ describe("AppSessionEventController", () => {
 		const statuses: string[] = [];
 		const activities: Array<"running" | "thinking" | "idle"> = [];
 		const toasts: string[] = [];
+		const toastActions: Array<string | undefined> = [];
 		let queuedStatusUpdates = 0;
 		const controller = new AppSessionEventController({
 			entries,
@@ -1039,8 +1040,9 @@ describe("AppSessionEventController", () => {
 			toolDefaultExpanded: () => false,
 			observeSubagentsToolResult: () => {},
 			observeTodoToolResult: () => {},
-			showToast: (message, kind) => {
+			showToast: (message, kind, options) => {
 				toasts.push(`${kind}:${message}`);
+				toastActions.push(options?.action?.label);
 			},
 		});
 
@@ -1086,6 +1088,87 @@ describe("AppSessionEventController", () => {
 			"success:Retry succeeded",
 			"error:Retry failed: nope",
 		]);
+		assert.deepEqual(toastActions, [undefined, undefined, undefined, undefined, "Retry"]);
+	});
+
+	it("continues the captured active session from a failed retry action", async () => {
+		const sent: Array<{ message: unknown; options: unknown }> = [];
+		const deliverySteps: string[] = [];
+		const statuses: string[] = [];
+		const activities: Array<"running" | "thinking" | "idle"> = [];
+		let statusRestores = 0;
+		let retryAction: (() => void) | undefined;
+		let blockExtensionBind = false;
+		let releaseExtensionBind: (() => void) | undefined;
+		const session = {
+			isStreaming: false,
+			isCompacting: false,
+			sendCustomMessage: async (message: unknown, options: unknown) => {
+				deliverySteps.push("send");
+				sent.push({ message, options });
+			},
+		} as unknown as AgentSession;
+		const runtime = { session } as AgentSessionRuntime;
+		let activeRuntime: AgentSessionRuntime | undefined = runtime;
+		const controller = new AppSessionEventController({
+			entries: [],
+			runtime: () => activeRuntime,
+			awaitSessionExtensions: async (targetRuntime) => {
+				assert.equal(targetRuntime, runtime);
+				deliverySteps.push("bind");
+				if (blockExtensionBind) {
+					await new Promise<void>((resolve) => { releaseExtensionBind = resolve; });
+				}
+			},
+			conversationViewport: () => ({ deleteEntry: () => {} }) as never,
+			isRunning: () => true,
+			render: () => {},
+			scheduleRender: () => {},
+			setStatus: (status) => { statuses.push(status); },
+			restoreSessionStatus: () => {},
+			setSessionStatus: () => { statusRestores += 1; },
+			setSessionActivity: (activity) => { activities.push(activity); },
+			updateQueuedMessageStatus: () => {},
+			flushAutoUserMessages: () => {},
+			emitExtensionEvent: () => {},
+			prepareWorkspaceMutation: () => undefined,
+			workspaceMutationFromToolExecution: () => undefined,
+			recordWorkspaceMutationForUserEntry: () => {},
+			scheduleUserSessionEntryMetadataSync: () => {},
+			toolDefaultExpanded: () => false,
+			observeSubagentsToolResult: () => {},
+			observeTodoToolResult: () => {},
+			showToast: (_message, _kind, options) => { retryAction = options?.action?.onSelect; },
+		});
+
+		controller.handleSessionEvent({ type: "auto_retry_end", success: false, finalError: "overloaded" } as AgentSessionEvent);
+		assert.ok(retryAction);
+		retryAction();
+		await new Promise<void>((resolve) => setImmediate(resolve));
+
+		assert.deepEqual(sent, [{
+			message: {
+				customType: "pix-retry",
+				content: "Continue the previous task from where you stopped.",
+				display: false,
+			},
+			options: { triggerTurn: true },
+		}]);
+		assert.deepEqual(statuses, ["retrying failed turn"]);
+		assert.deepEqual(activities, ["idle", "running", "idle"]);
+		assert.equal(statusRestores, 1);
+		assert.deepEqual(deliverySteps, ["bind", "send"]);
+
+		blockExtensionBind = true;
+		activeRuntime = runtime;
+		controller.handleSessionEvent({ type: "auto_retry_end", success: false, finalError: "again" } as AgentSessionEvent);
+		retryAction?.();
+		activeRuntime = { session: { isStreaming: false, isCompacting: false } as AgentSession } as AgentSessionRuntime;
+		releaseExtensionBind?.();
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		assert.equal(sent.length, 1);
+		assert.deepEqual(deliverySteps, ["bind", "send", "bind"]);
+		assert.equal(statusRestores, 1);
 	});
 
 });

@@ -232,7 +232,7 @@ export type RenderedLine = {
 export type ToastLineTarget = {
 	kind: "toast";
 	id: number;
-	action?: "toast" | "body" | "close";
+	action?: "toast" | "body" | "close" | "action";
 	startColumn?: number;
 	endColumn?: number;
 };

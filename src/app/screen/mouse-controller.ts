@@ -96,6 +96,7 @@ export type AppMouseControllerHost = {
 	toastEntry(toastId: number): ToastEntry | undefined;
 	showToast(message: string, kind: "success" | "error" | "warning" | "info", options?: { durationMs?: number; variant?: ToastVariant }): void;
 	dismissToast(toastId: number): void;
+	activateToastAction(toastId: number): boolean;
 	refreshModelUsageStatus(): void | Promise<void>;
 	refreshUserMessageJumpMenuItems?(): Promise<void>;
 	queueInputFromStatus?(): void | Promise<void>;
@@ -201,6 +202,10 @@ export class AppMouseController {
 		if (target?.kind === "toast") {
 			if (!toastTargetContainsEvent(target, event)) return;
 			if (target.action === "body") return;
+			if (target.action === "action") {
+				if (this.host.activateToastAction(target.id)) this.showClickFlashForEvent(event);
+				return;
+			}
 			if (this.copyErrorToast(target.id)) {
 				this.showClickFlashForEvent(event);
 				return;

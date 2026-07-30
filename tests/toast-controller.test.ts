@@ -61,3 +61,39 @@ test("AppToastController dismisses the latest dialog in the active scope", () =>
 	assert.equal(renders, 6);
 	controller.clearToastTimers();
 });
+
+test("AppToastController activates scoped toast actions once", () => {
+	let activeScope = "tab-a";
+	let activations = 0;
+	const controller = new AppToastController({
+		activeScope: () => activeScope,
+		render: () => undefined,
+	});
+
+	controller.showToast("retry failed", "error", {
+		action: { label: "Retry", onSelect: () => { activations += 1; } },
+	});
+	const toastId = controller.visibleStates()[0]!.id;
+
+	activeScope = "tab-b";
+	assert.equal(controller.activateAction(toastId), false);
+	activeScope = "tab-a";
+	assert.equal(controller.activateAction(toastId), true);
+	assert.equal(controller.activateAction(toastId), false);
+	assert.equal(activations, 1);
+	assert.deepEqual(controller.visibleStates(), []);
+});
+
+test("AppToastController removes actions when their toast is dismissed or cleared", () => {
+	const controller = new AppToastController({ render: () => undefined });
+
+	controller.showToast("dismissed", "error", { action: { label: "Run", onSelect: () => assert.fail("dismissed action ran") } });
+	const dismissedId = controller.visibleStates()[0]!.id;
+	controller.dismissToast(dismissedId);
+	assert.equal(controller.activateAction(dismissedId), false);
+
+	controller.showToast("cleared", "error", { action: { label: "Run", onSelect: () => assert.fail("cleared action ran") } });
+	const clearedId = controller.visibleStates()[0]!.id;
+	controller.clearToastTimers();
+	assert.equal(controller.activateAction(clearedId), false);
+});

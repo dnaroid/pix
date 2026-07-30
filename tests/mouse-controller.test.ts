@@ -64,6 +64,54 @@ describe("AppMouseController", () => {
 		assert.deepEqual(dismissed, [7]);
 	});
 
+	it("activates a toast action without copying or dismissing its error body", () => {
+		const activated: number[] = [];
+		const dismissed: number[] = [];
+		const copied: string[] = [];
+		const controller = new AppMouseController(
+			fakeHost({
+				toastEntry: () => ({ id: 7, message: "Retry failed", kind: "error", createdAt: 0 }),
+				activateToastAction: (toastId) => { activated.push(toastId); return true; },
+				dismissToast: (toastId) => { dismissed.push(toastId); },
+				copyTextToClipboard: (text) => { copied.push(text); },
+			}),
+			fakePopupMenus(),
+			fakePopupActions(),
+			fakeScrollController(),
+			fakeCommandController(),
+		);
+		controller.renderedTargets.set(2, { kind: "toast", id: 7, action: "action", startColumn: 30, endColumn: 37 });
+
+		controller.handleMouse({ button: 0, x: 29, y: 2, released: true });
+		controller.handleMouse({ button: 0, x: 32, y: 2, released: true });
+
+		assert.deepEqual(activated, [7]);
+		assert.deepEqual(dismissed, []);
+		assert.deepEqual(copied, []);
+	});
+
+	it("keeps compact error-body clicks as copy actions", () => {
+		const dismissed: number[] = [];
+		const copied: string[] = [];
+		const controller = new AppMouseController(
+			fakeHost({
+				toastEntry: () => ({ id: 7, message: "Retry failed", kind: "error", createdAt: 0 }),
+				dismissToast: (toastId) => { dismissed.push(toastId); },
+				copyTextToClipboard: (text) => { copied.push(text); },
+			}),
+			fakePopupMenus(),
+			fakePopupActions(),
+			fakeScrollController(),
+			fakeCommandController(),
+		);
+		controller.renderedTargets.set(2, { kind: "toast", id: 7, action: "toast", startColumn: 20, endColumn: 40 });
+
+		controller.handleMouse({ button: 0, x: 24, y: 2, released: true });
+
+		assert.deepEqual(copied, ["Retry failed"]);
+		assert.deepEqual(dismissed, [7]);
+	});
+
 	it("opens the session menu when clicking the active tab", () => {
 		let resumeOptions: unknown;
 		let switchCount = 0;
@@ -905,6 +953,7 @@ function fakeHost(overrides: Partial<AppMouseControllerHost> = {}): AppMouseCont
 		toastEntry: () => undefined,
 		showToast: () => {},
 		dismissToast: () => {},
+		activateToastAction: () => false,
 		refreshModelUsageStatus: () => {},
 		scrollConversationQuick: () => {},
 		copyTextToClipboard: () => {},

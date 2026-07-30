@@ -1,5 +1,5 @@
 import { THEMES, type Theme } from "../theme.js";
-import type { ToastKind, ToastNotifier, ToastVariant } from "../ui.js";
+import type { ToastKind, ToastNotifier } from "../ui.js";
 import { InputEditor, type InputEditorDraftState } from "../input-editor.js";
 import {
 	compileOutputFilterPatterns,
@@ -55,7 +55,7 @@ import { AppTabsController } from "./session/tabs-controller.js";
 import { TabLineRenderer } from "./rendering/tab-line-renderer.js";
 import { AppTerminalController } from "./terminal/terminal-controller.js";
 import { TerminalBellSoundController } from "./terminal/terminal-bell-sound-controller.js";
-import { AppToastController } from "./rendering/toast-controller.js";
+import { AppToastController, type AppToastOptions } from "./rendering/toast-controller.js";
 import { checkPiUpdate, checkPixUpdate, formatPixStartupUpdateDialog, formatPiStartupUpdateToast } from "./cli/update.js";
 import { AppVoiceController } from "./input/voice-controller.js";
 import { createIsolatedExtensionEventBus } from "./extensions/extension-event-bus.js";
@@ -421,6 +421,7 @@ export class PiUiExtendApp {
 		this.sessionEvents = new AppSessionEventController({
 			entries: this.entries,
 			runtime: () => this.runtime,
+			awaitSessionExtensions: (runtime) => this.awaitCurrentSessionExtensions(runtime),
 			conversationViewport: () => this.conversationViewport,
 			conversationViewportColumns: () => this.terminalColumns(),
 			onHistoryWindowPruned: (edge, lineCount) => this.scrollController.adjustForHistoryWindowPrune(edge, lineCount),
@@ -454,6 +455,7 @@ export class PiUiExtendApp {
 		this.queuedMessages = new AppQueuedMessageController({
 			runtime: () => this.runtime,
 			requireRuntime: () => this.requireRuntime(),
+			awaitCurrentSessionExtensions: (runtime) => this.awaitCurrentSessionExtensions(runtime),
 			visibleEntries: () => this.conversationViewport.entries(),
 			isRunning: () => this.running,
 			render: () => this.render(),
@@ -651,6 +653,7 @@ export class PiUiExtendApp {
 				toastEntry: (toastId) => this.toastController.entry(toastId),
 				showToast: (message, kind, options) => this.showToast(message, kind, options),
 				dismissToast: (toastId) => this.toastController.dismissToast(toastId),
+				activateToastAction: (toastId) => this.toastController.activateAction(toastId),
 				refreshModelUsageStatus: () => this.refreshModelUsageStatusFromClick(),
 				refreshUserMessageJumpMenuItems: () => this.menuItems.refreshUserMessageJumpMenuItems(),
 				queueInputFromStatus: () => {
@@ -1263,7 +1266,7 @@ export class PiUiExtendApp {
 		});
 	}
 
-	private showToast(message: string, kind: ToastKind = "info", options?: { durationMs?: number; variant?: ToastVariant; scopeKey?: string }): void {
+	private showToast(message: string, kind: ToastKind = "info", options?: AppToastOptions): void {
 		if (!this.running) return;
 		this.toastController.showToast(message, kind, options);
 	}

@@ -205,6 +205,33 @@ describe("AppQueuedMessageController", () => {
 		assert.equal(state.toasts.length, 0);
 	});
 
+	it("waits for current session extensions before sending the first prompt", async () => {
+		const calls: string[] = [];
+		let releaseExtensionBind: (() => void) | undefined;
+		const session = fakeSession({ steering: [], followUp: [] }, { calls });
+		const state = createHostState("");
+		const host = createHost(session, state);
+		host.awaitCurrentSessionExtensions = async (runtime) => {
+			assert.equal(runtime.session, session);
+			calls.push("await-extensions");
+			await new Promise<void>((resolve) => { releaseExtensionBind = resolve; });
+			calls.push("extensions-ready");
+		};
+		const controller = new AppQueuedMessageController(host);
+
+		const sending = controller.sendUserMessageToSession(
+			controller.createSubmittedUserMessage("first prompt", "first prompt", []),
+		);
+		await Promise.resolve();
+
+		assert.deepEqual(calls, ["await-extensions"]);
+
+		releaseExtensionBind?.();
+		await sending;
+
+		assert.deepEqual(calls, ["await-extensions", "extensions-ready", "prompt:first prompt"]);
+	});
+
 	it("auto-sends submitted messages after compaction ends", async () => {
 		const sdkQueue = { steering: [], followUp: [] };
 		const calls: string[] = [];
@@ -418,6 +445,7 @@ function createHostFromRuntime(session: () => AgentSession, state: HostState): A
 	return {
 		runtime,
 		requireRuntime: runtime,
+		awaitCurrentSessionExtensions: async () => undefined,
 		visibleEntries: () => state.visibleEntries,
 		isRunning: () => true,
 		render: () => undefined,

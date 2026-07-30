@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { APP_ICONS } from "../src/app/icons.js";
+import type { AppToastEntry } from "../src/app/rendering/toast-controller.js";
 import { renderToastOverlays } from "../src/app/rendering/toast-renderer.js";
 import { stringDisplayWidth } from "../src/terminal-width.js";
 import { THEMES } from "../src/theme.js";
-import type { ToastEntry } from "../src/ui.js";
 
 describe("renderToastOverlays", () => {
 	it("renders multiline toasts as compact overlay rows", () => {
@@ -33,6 +33,31 @@ describe("renderToastOverlays", () => {
 			`${APP_ICONS.info} one`,
 			"two",
 		]);
+	});
+
+	it("reserves a compact row for a toast action and targets only its label", () => {
+		const overlays = renderToastOverlays([
+			toast("one two three four five six seven eight nine ten", undefined, "Retry"),
+		], 40, 2, THEMES.dark);
+
+		assert.equal(overlays.length, 2);
+		assert.ok(overlays[0]?.text.includes("one two"));
+		assert.ok(overlays[1]?.text.includes("[Retry]"));
+		assert.equal(overlays[1]?.target?.action, "action");
+		const action = overlays[1]!;
+		const localStart = (action.target?.startColumn ?? action.column) - action.column;
+		const localEnd = (action.target?.endColumn ?? action.column) - action.column;
+		assert.equal(action.text.slice(localStart, localEnd), "[Retry]");
+	});
+
+	it("keeps the compact message when there is no row available for its action", () => {
+		const overlays = renderToastOverlays([
+			toast("retry failed", undefined, "Retry"),
+		], 40, 1, THEMES.dark);
+
+		assert.equal(overlays.length, 1);
+		assert.ok(overlays[0]?.text.includes("retry failed"));
+		assert.equal(overlays[0]?.target?.action, "toast");
 	});
 
 	it("preserves ANSI colors in toast output without leaking escapes into hit text", () => {
@@ -67,6 +92,13 @@ describe("renderToastOverlays", () => {
 	});
 });
 
-function toast(message: string, variant?: ToastEntry["variant"]): ToastEntry {
-	return { id: 1, message, kind: "info", createdAt: 0, ...(variant ? { variant } : {}) };
+function toast(message: string, variant?: AppToastEntry["variant"], actionLabel?: string): AppToastEntry {
+	return {
+		id: 1,
+		message,
+		kind: "info",
+		createdAt: 0,
+		...(variant ? { variant } : {}),
+		...(actionLabel ? { action: { label: actionLabel } } : {}),
+	};
 }

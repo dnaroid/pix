@@ -1,6 +1,22 @@
 import { Toast, type ToastEntry, type ToastKind, type ToastVariant } from "../../ui.js";
 import { TOAST_DURATION_MS } from "../constants.js";
 
+export type AppToastEntry = ToastEntry & {
+	action?: { label: string };
+};
+
+export type AppToastAction = {
+	label: string;
+	onSelect: () => void;
+};
+
+export type AppToastOptions = {
+	durationMs?: number;
+	variant?: ToastVariant;
+	scopeKey?: string;
+	action?: AppToastAction;
+};
+
 export type AppToastControllerHost = {
 	activeScope?(): string | undefined;
 	render(): void;
@@ -9,13 +25,16 @@ export type AppToastControllerHost = {
 export class AppToastController {
 	private readonly toastsByScope = new Map<string, Toast>();
 	private readonly timers = new Map<string, Map<number, ReturnType<typeof setTimeout>>>();
+	private readonly actions = new Map<string, Map<number, AppToastAction>>();
 
 	constructor(private readonly host: AppToastControllerHost) {}
 
-	showToast(message: string, kind: ToastKind = "info", options: { durationMs?: number; variant?: ToastVariant; scopeKey?: string } = {}): void {
+	showToast(message: string, kind: ToastKind = "info", options: AppToastOptions = {}): void {
 		const scopeKey = this.normalizeScopeKey(options.scopeKey ?? this.host.activeScope?.());
 		const toast = this.toastForScope(scopeKey);
+		const action = options.variant === "dialog" ? undefined : options.action;
 		const toastId = toast.show(message, kind, options.variant ? { variant: options.variant } : {});
+		if (action) this.actionsForScope(scopeKey).set(toastId, action);
 		if (kind === "error" || options.variant === "dialog") {
 			this.host.render();
 			return;
@@ -27,6 +46,7 @@ export class AppToastController {
 		const timer = setTimeout(() => {
 			toast.hide(toastId);
 			this.timers.get(scopeKey)?.delete(toastId);
+			this.removeAction(scopeKey, toastId);
 			this.deleteScopeIfEmpty(scopeKey);
 			this.host.render();
 		}, durationMs);
@@ -43,8 +63,18 @@ export class AppToastController {
 			timers?.delete(toastId);
 		}
 		this.toastsByScope.get(scopeKey)?.hide(toastId);
+		this.removeAction(scopeKey, toastId);
 		this.deleteScopeIfEmpty(scopeKey);
 		this.host.render();
+	}
+
+	activateAction(toastId: number, scopeKey = this.normalizeScopeKey(this.host.activeScope?.())): boolean {
+		const action = this.actions.get(scopeKey)?.get(toastId);
+		if (!action) return false;
+
+		this.dismissToast(toastId, scopeKey);
+		action.onSelect();
+		return true;
 	}
 
 	dismissActiveDialog(scopeKey = this.normalizeScopeKey(this.host.activeScope?.())): boolean {
@@ -63,8 +93,14 @@ export class AppToastController {
 		return true;
 	}
 
-	visibleStates(scopeKey = this.normalizeScopeKey(this.host.activeScope?.())): readonly ToastEntry[] {
-		return this.toastsByScope.get(scopeKey)?.visibleStates ?? [];
+	visibleStates(scopeKey = this.normalizeScopeKey(this.host.activeScope?.())): readonly AppToastEntry[] {
+		const states = this.toastsByScope.get(scopeKey)?.visibleStates ?? [];
+		const actions = this.actions.get(scopeKey);
+		if (!actions || actions.size === 0) return states;
+		return states.map((state) => {
+			const action = actions.get(state.id);
+			return action ? { ...state, action: { label: action.label } } : state;
+		});
 	}
 
 	entry(toastId: number, scopeKey = this.normalizeScopeKey(this.host.activeScope?.())): ToastEntry | undefined {
@@ -76,6 +112,7 @@ export class AppToastController {
 			for (const timer of timers.values()) clearTimeout(timer);
 		}
 		this.timers.clear();
+		this.actions.clear();
 		for (const toast of this.toastsByScope.values()) toast.hide();
 		this.toastsByScope.clear();
 	}
@@ -96,6 +133,21 @@ export class AppToastController {
 			this.timers.set(scopeKey, timers);
 		}
 		return timers;
+	}
+
+	private actionsForScope(scopeKey: string): Map<number, AppToastAction> {
+		let actions = this.actions.get(scopeKey);
+		if (!actions) {
+			actions = new Map();
+			this.actions.set(scopeKey, actions);
+		}
+		return actions;
+	}
+
+	private removeAction(scopeKey: string, toastId: number): void {
+		const actions = this.actions.get(scopeKey);
+		actions?.delete(toastId);
+		if (actions?.size === 0) this.actions.delete(scopeKey);
 	}
 
 	private deleteScopeIfEmpty(scopeKey: string): void {
