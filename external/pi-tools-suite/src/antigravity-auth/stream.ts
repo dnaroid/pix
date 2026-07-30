@@ -132,7 +132,7 @@ export function streamAntigravity(model: AntigravityModel, context: Context, opt
 			provider: model.provider,
 			model: model.id,
 			usage: baseUsage(),
-			stopReason: "stop",
+			stopReason: "pending",
 			timestamp: Date.now(),
 		};
 
@@ -258,12 +258,16 @@ export function streamAntigravity(model: AntigravityModel, context: Context, opt
 						stream.push({ type: "toolcall_end", contentIndex, toolCall, partial: output });
 					}
 				}
-				if (candidate?.finishReason) output.stopReason = mapStopReason(candidate.finishReason);
-				if (output.content.some((block) => block.type === "toolCall")) output.stopReason = "toolUse";
+				if (candidate?.finishReason) {
+					output.rawStopReason = candidate.finishReason;
+					output.stopReason = mapStopReason(candidate.finishReason);
+					if (output.content.some((block) => block.type === "toolCall")) output.stopReason = "toolUse";
+				}
 			}
 			closeOpenText();
 			closeOpenThinking();
 			if (options?.signal?.aborted) throw new Error("Request was aborted");
+			if (output.stopReason === "pending") throw new Error("Antigravity stream ended without a finish reason");
 			if (output.stopReason === "error" || output.stopReason === "aborted") throw new Error("Antigravity stopped with an error finish reason");
 			stream.push({ type: "done", reason: output.stopReason, message: output });
 			stream.end();

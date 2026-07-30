@@ -187,8 +187,30 @@ describe.serial("Antigravity account rotation", () => {
 		const result = await runSimpleStream(provider, model);
 
 		expect(result.stopReason).toBe("stop");
+		expect(result.rawStopReason).toBe("STOP");
 		expect(refreshClientId).toBeTruthy();
 		expect(refreshClientSecret).toBeTruthy();
+	});
+
+	test.serial("fails when an Antigravity stream ends without a finish reason", async () => {
+		const agentDir = tempDir();
+		writeJson(path.join(agentDir, "auth.json"), { antigravity: antigravityCredential() });
+		(globalThis as any).fetch = async (input: RequestInfo | URL) => {
+			const url = String(input);
+			if (url.includes("/v1internal:streamGenerateContent")) {
+				return new Response('data: {"response":{"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"lookup","args":{"query":"partial"}}}]}}]}}\n\n', {
+					status: 200,
+					headers: { "content-type": "text/event-stream" },
+				});
+			}
+			throw new Error(`Unexpected fetch ${url}`);
+		};
+
+		const { provider, model } = await loadProvider(agentDir);
+		const result = await runSimpleStream(provider, model);
+
+		expect(result.stopReason).toBe("error");
+		expect(result.errorMessage).toContain("stream ended without a finish reason");
 	});
 
 	test.serial("notifies the UI when an Antigravity model turn fails without auth", async () => {
