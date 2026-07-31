@@ -62,40 +62,33 @@ export function renderToolBlock(entry: ToolBlockEntry, rule: ResolvedToolRule, w
 	const headerPrefix = headerLabel ? `${stateIcon} ${headerLabel}` : stateIcon;
 	const headerArgs = formatToolHeaderArgs(entry.headerArgs);
 	const headerArgsWidth = width - stringDisplayWidth(headerPrefix) - 1;
-	const clippedHeaderArgs = headerArgsWidth > 0 ? sliceByDisplayWidth(headerArgs, headerArgsWidth) : "";
-	const header = clippedHeaderArgs ? `${headerPrefix} ${clippedHeaderArgs}` : headerPrefix;
-	const headerArgsStart = headerPrefix.length + 1;
-	const clippedHeaderArgSegments = clippedHeaderArgs
-		? clipAndShiftSegments(entry.headerArgSegments, headerArgsStart, clippedHeaderArgs.length)
-		: [];
-	const headerArgBaseSegments = clippedHeaderArgs
-		? uncoveredSegments(headerArgsStart, header.length, toolOutputColor, clippedHeaderArgSegments)
-		: [];
 	const target = { kind: "tool" as const, id: entry.id };
 	const showGutter = options.showGutter ?? true;
-
-	const headerLine: RenderedLine = {
-		text: header,
+	const headerLines = renderToolHeaderLines({
+		entry,
+		expanded,
+		headerPrefix,
+		headerArgs,
+		headerArgsWidth,
+		stateIcon,
+		width,
 		target,
-		colorOverride: toolColor,
-		...(options.backgroundOverride && !options.skipHeaderBackground ? { backgroundOverride: options.backgroundOverride } : {}),
-		segments: [
-			{ start: 0, end: stateIcon.length, foreground: toolStatusIconColor(entry, colors), bold: true },
-			{ start: stateIcon.length, end: headerPrefix.length, bold: true },
-			...headerArgBaseSegments,
-			...clippedHeaderArgSegments,
-		],
-	};
-	const headerLines: RenderedLine[] = [headerLine];
+		toolColor,
+		toolOutputColor,
+		statusIconColor: toolStatusIconColor(entry, colors),
+		backgroundOverride: options.backgroundOverride && !options.skipHeaderBackground ? options.backgroundOverride : undefined,
+	});
+	const headerLine = headerLines[0];
+	if (!headerLine) return [];
 
 	if (expanded) {
-		headerLines.push(...renderToolBodyLines(entry.expandedText, width, target, toolOutputColor, entry.bodyStyle, colors, entry.syntaxHighlight, entry.bodyWrap, hasLspDiagnostics, entry.bodyLineStyles, entry.preserveAnsi, showGutter));
-		if (options.skipHeaderBackground && headerLines.length > 1) {
-			applyBackground(headerLines.slice(1));
+		const bodyLines = renderToolBodyLines(entry.expandedText, width, target, toolOutputColor, entry.bodyStyle, colors, entry.syntaxHighlight, entry.bodyWrap, hasLspDiagnostics, entry.bodyLineStyles, entry.preserveAnsi, showGutter);
+		if (options.skipHeaderBackground) {
+			applyBackground(bodyLines);
 		} else {
-			applyBackground(headerLines);
+			applyBackground([...headerLines, ...bodyLines]);
 		}
-		return headerLines;
+		return [...headerLines, ...bodyLines];
 	}
 
 	if (rule.compactHidden || (rule.defaultExpanded === true && !options.superCompact)) return headerLines;
@@ -113,7 +106,7 @@ export function renderToolBlock(entry: ToolBlockEntry, rule: ResolvedToolRule, w
 	if (!preview.text) return headerLines;
 
 	const separator = " — ";
-	const availablePreviewWidth = width - stringDisplayWidth(header) - stringDisplayWidth(separator);
+	const availablePreviewWidth = width - stringDisplayWidth(headerLine.text) - stringDisplayWidth(separator);
 	if (availablePreviewWidth <= 0) return headerLines;
 
 	const markerPrefix = truncatedPreviewMarker();
@@ -121,8 +114,8 @@ export function renderToolBlock(entry: ToolBlockEntry, rule: ResolvedToolRule, w
 	const clippedPreview = sliceByDisplayWidth(previewText, availablePreviewWidth);
 	if (!clippedPreview) return headerLines;
 
-	headerLine.text = `${header}${separator}${clippedPreview}`;
-	const previewStart = header.length + separator.length;
+	headerLine.text = `${headerLine.text}${separator}${clippedPreview}`;
+	const previewStart = headerLine.text.length - clippedPreview.length;
 	const previewTextStart = previewStart + (preview.overflow ? markerPrefix.length : 0);
 	headerLine.segments = [
 		...(headerLine.segments ?? []),
@@ -132,13 +125,71 @@ export function renderToolBlock(entry: ToolBlockEntry, rule: ResolvedToolRule, w
 	return headerLines;
 }
 
-function clipAndShiftSegments(segments: readonly StyledSegment[] | undefined, offset: number, length: number): StyledSegment[] {
-	if (!segments || length <= 0) return [];
-	return segments.flatMap((segment) => {
-		const start = Math.max(0, segment.start);
-		const end = Math.min(length, segment.end);
-		if (end <= start) return [];
-		return [{ ...segment, start: offset + start, end: offset + end }];
+type ToolHeaderRenderInput = {
+	entry: ToolBlockEntry;
+	expanded: boolean;
+	headerPrefix: string;
+	headerArgs: string;
+	headerArgsWidth: number;
+	stateIcon: string;
+	width: number;
+	target: NonNullable<RenderedLine["target"]>;
+	toolColor: string;
+	toolOutputColor: string;
+	statusIconColor: string;
+	backgroundOverride?: string | undefined;
+};
+
+function renderToolHeaderLines(input: ToolHeaderRenderInput): RenderedLine[] {
+	const visibleArgs = input.expanded
+		? indexedWrappedText(input.headerArgs, Math.max(1, input.headerArgsWidth))
+		: indexedClippedText(input.headerArgs, input.headerArgsWidth);
+	const chunks = visibleArgs.length > 0 ? visibleArgs : [{ text: "", start: 0, end: 0 }];
+	const continuationIndent = " ".repeat(Math.min(stringDisplayWidth(input.headerPrefix) + 1, Math.max(0, input.width - 1)));
+
+	return chunks.map((chunk, index) => {
+		let linePrefix = continuationIndent;
+		if (index === 0) linePrefix = chunk.text ? `${input.headerPrefix} ` : input.headerPrefix;
+		const text = `${linePrefix}${chunk.text}`;
+		const argStart = linePrefix.length;
+		const customSegments = input.entry.headerArgSegments
+			?.flatMap((segment) => shiftSegmentToRange(segment, chunk.start, chunk.end))
+			.map((segment) => ({ ...segment, start: segment.start + argStart, end: segment.end + argStart })) ?? [];
+		const baseSegments = uncoveredSegments(argStart, text.length, input.toolOutputColor, customSegments);
+		return {
+			text,
+			target: input.target,
+			colorOverride: input.toolColor,
+			...(input.backgroundOverride ? { backgroundOverride: input.backgroundOverride } : {}),
+			segments: [
+				...(index === 0 ? [
+					{ start: 0, end: input.stateIcon.length, foreground: input.statusIconColor, bold: true },
+					{ start: input.stateIcon.length, end: input.headerPrefix.length, bold: true },
+				] : []),
+				...baseSegments,
+				...customSegments,
+			],
+		};
+	});
+}
+
+type IndexedText = { text: string; start: number; end: number };
+
+function indexedClippedText(text: string, width: number): IndexedText[] {
+	if (width <= 0) return [];
+	const clipped = sliceByDisplayWidth(text, width);
+	return clipped ? [{ text: clipped, start: 0, end: clipped.length }] : [];
+}
+
+function indexedWrappedText(text: string, width: number): IndexedText[] {
+	if (!text) return [];
+	let cursor = 0;
+	return wrapDisplayLineByWords(text, width).map((chunk) => {
+		const foundAt = text.indexOf(chunk, cursor);
+		const start = foundAt >= 0 ? foundAt : cursor;
+		const end = start + chunk.length;
+		cursor = end;
+		return { text: chunk, start, end };
 	});
 }
 

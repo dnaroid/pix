@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import type { ResolvedToolRule } from "../src/config.js";
 import { APP_ICONS, setAppIconTheme } from "../src/app/icons.js";
 import { renderToolBlock, type ToolBlockEntry } from "../src/app/rendering/tool-block-renderer.js";
+import { stringDisplayWidth } from "../src/terminal-width.js";
 import { THEMES } from "../src/theme.js";
 
 const colors = THEMES.dark.colors;
@@ -146,6 +147,40 @@ describe("renderToolBlock", () => {
 			"└ line",
 		]);
 		assert.doesNotMatch(lines[0]?.text ?? "", /preview/u);
+	});
+
+	it("wraps all header arguments when a tool is expanded", () => {
+		const headerArgs = "target: quiz answer submission behavior for correct versus incorrect answers · maxLines: 2000 · maxBytes: 50000";
+		const lines = renderToolBlock(toolEntry({
+			toolName: "repo_search",
+			headerArgs,
+			expandedText: "IDX noop",
+		}), rule, 42, colors);
+		const bodyStart = lines.findIndex((line) => line.text.includes("IDX noop"));
+		const headerLines = lines.slice(0, bodyStart);
+		const renderedHeader = headerLines.map((line) => line.text).join(" ").replace(/\s+/gu, " ");
+
+		assert.ok(headerLines.length > 1);
+		assert.ok(headerLines.every((line) => stringDisplayWidth(line.text) <= 42));
+		assert.match(renderedHeader, /target: quiz answer submission behavior for correct versus incorrect answers/u);
+		assert.match(renderedHeader, /maxLines: 2000 · maxBytes: 50000/u);
+	});
+
+	it("preserves styled header argument segments across wrapped lines", () => {
+		const headerArgs = "first: one · progress: ████ 80%";
+		const progressStart = headerArgs.indexOf("████");
+		const lines = renderToolBlock(toolEntry({
+			toolName: "compress",
+			headerArgs,
+			headerArgSegments: [{ start: progressStart, end: progressStart + 4, background: colors.statusDotBase }],
+			expandedText: "done",
+		}), rule, 25, colors);
+		const progressLine = lines.find((line) => line.text.includes("████"));
+		const renderedProgressStart = progressLine?.text.indexOf("████") ?? -1;
+
+		assert.ok(progressLine);
+		assert.ok(renderedProgressStart >= 0);
+		assert.ok(progressLine.segments?.some((segment) => segment.start === renderedProgressStart && segment.end === renderedProgressStart + 4 && segment.background === colors.statusDotBase));
 	});
 
 	it("does not mark read output as LSP diagnostics after mutation", () => {
