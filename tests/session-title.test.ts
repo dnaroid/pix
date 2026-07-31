@@ -158,6 +158,28 @@ describe("session-title extension", () => {
 		});
 	});
 
+	it("generates a title from the first regular prompt after a leading resource command", async () => {
+		await withSessionTitleDisabled(async () => {
+			const branch: unknown[] = [];
+			const { handlers, setSessionNameCalls } = createExtensionHarness({
+				branch,
+				sessionName: undefined,
+				sessionId: "session-resource-first",
+			});
+
+			sessionTitle(handlers.api);
+			await handlers.session_start?.({ type: "session_start", reason: "new" }, handlers.ctx);
+			await handlers.input?.({ text: "/skill:llm-wiki", source: "interactive" }, handlers.ctx);
+			branch.push({
+				type: "message",
+				message: { role: "user", content: [{ type: "text", text: "<skill name=\"llm-wiki\">...</skill>" }] },
+			});
+			await handlers.input?.({ text: "Initialize the wiki and ingest the documents", source: "interactive" }, handlers.ctx);
+
+			assert.deepEqual(setSessionNameCalls, ["Initialize the wiki and ingest the documents"]);
+		});
+	});
+
 	it("generates a fallback title when the first prompt includes images", async () => {
 		await withSessionTitleDisabled(async () => {
 			const { handlers, setSessionNameCalls } = createExtensionHarness({ branch: [], sessionName: undefined, sessionId: "session-new-images" });

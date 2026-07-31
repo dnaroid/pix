@@ -111,6 +111,7 @@ export default function sessionTitle(pi: ExtensionAPI) {
 	const refreshTimers = new Set<ReturnType<typeof setTimeout>>();
 	let pendingGeneration: PendingGeneration | undefined;
 	let forkTitleState: ForkTitleState | undefined;
+	let resourceCommandTitleSessionId: string | undefined;
 
 	function abortCurrentRequest(): void {
 		controller?.abort();
@@ -375,6 +376,7 @@ export default function sessionTitle(pi: ExtensionAPI) {
 		sessionId = ctx.sessionManager.getSessionId();
 		pendingGeneration = undefined;
 		forkTitleState = undefined;
+		resourceCommandTitleSessionId = undefined;
 		lastRenderedName = undefined;
 		lastRenderedTitle = undefined;
 		refreshSessionUi(ctx, { force: true });
@@ -387,6 +389,7 @@ export default function sessionTitle(pi: ExtensionAPI) {
 		clearRetryTimer();
 		clearRefreshTimers();
 		forkTitleState = undefined;
+		resourceCommandTitleSessionId = undefined;
 	});
 
 	function refreshOnEvent(ctx: ExtensionContext): void {
@@ -406,22 +409,34 @@ export default function sessionTitle(pi: ExtensionAPI) {
 		refreshSessionUi(ctx);
 		scheduleSessionUiRefresh(ctx);
 		if (event.source === "extension") return { action: "continue" as const };
-		const fallbackInput = fallbackTitleInputFromPrompt(event.text, event.images);
-		if (!fallbackInput) return { action: "continue" as const };
-		const titleInput = titleGenerationInputFromPrompt(event.text, event.images) ?? fallbackInput;
-		if (event.text.trimStart().startsWith("/")) return { action: "continue" as const };
 		const currentSessionId = ctx.sessionManager.getSessionId();
 		sessionId = currentSessionId;
 		const currentName = currentSessionName(ctx);
 		const activeForkTitleState = forkTitleState?.sessionId === currentSessionId ? forkTitleState : undefined;
-		if (!activeForkTitleState && hasExistingUserMessage(ctx)) {
+		if (event.text.trimStart().startsWith("/")) {
+			if (
+				!activeForkTitleState
+				&& !currentName
+				&& (resourceCommandTitleSessionId === currentSessionId || !hasExistingUserMessage(ctx))
+			) {
+				resourceCommandTitleSessionId = currentSessionId;
+			}
+			return { action: "continue" as const };
+		}
+		const fallbackInput = fallbackTitleInputFromPrompt(event.text, event.images);
+		if (!fallbackInput) return { action: "continue" as const };
+		const titleInput = titleGenerationInputFromPrompt(event.text, event.images) ?? fallbackInput;
+		const titleEligibleAfterResourceCommand = resourceCommandTitleSessionId === currentSessionId;
+		if (!activeForkTitleState && !titleEligibleAfterResourceCommand && hasExistingUserMessage(ctx)) {
 			forkTitleState = undefined;
 			return { action: "continue" as const };
 		}
 		if (currentName && (!activeForkTitleState || currentName !== activeForkTitleState.inheritedSessionName)) {
 			forkTitleState = undefined;
+			resourceCommandTitleSessionId = undefined;
 			return { action: "continue" as const };
 		}
+		resourceCommandTitleSessionId = undefined;
 		if (!currentConfig.enabled) {
 			applyFallbackSessionTitle(ctx, currentConfig, activeForkTitleState
 				? buildForkTitleInput(activeForkTitleState.parentTitle, fallbackInput)
