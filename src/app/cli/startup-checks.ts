@@ -8,7 +8,6 @@ import type { AgentSessionRuntime, LoadExtensionsResult } from "@earendil-works/
 const PI_CLI_COMMAND = "pi";
 const PI_TOOLS_SUITE_EXTENSION_ID = "pi-tools-suite";
 const IDX_CLI_COMMAND = "idx";
-const IDX_SPAWN_COMMAND = process.platform === "win32" ? "idx.cmd" : IDX_CLI_COMMAND;
 const IDX_UPDATE_TIMEOUT_MS = 600_000;
 const MAX_IDX_UPDATE_OUTPUT_BYTES = 32_000;
 
@@ -163,7 +162,8 @@ async function executableExistsOnPath(command: string, pathValue: string): Promi
 
 async function runIdxUpdate(timeoutMs: number, env: NodeJS.ProcessEnv): Promise<IdxUpdateCommandResult> {
 	return await new Promise<IdxUpdateCommandResult>((resolve, reject) => {
-		const child = spawn(IDX_SPAWN_COMMAND, ["update"], {
+		const invocation = idxUpdateInvocation(env);
+		const child = spawn(invocation.command, invocation.args, {
 			env,
 			stdio: ["ignore", "pipe", "pipe"],
 			windowsHide: true,
@@ -197,6 +197,13 @@ async function runIdxUpdate(timeoutMs: number, env: NodeJS.ProcessEnv): Promise<
 			resolve({ code, signal, stdout, stderr, ...(timedOut ? { timedOut: true } : {}) });
 		});
 	});
+}
+
+function idxUpdateInvocation(env: NodeJS.ProcessEnv): { command: string; args: string[] } {
+	if (process.platform !== "win32") return { command: IDX_CLI_COMMAND, args: ["update"] };
+
+	const commandProcessor = env.ComSpec ?? env.COMSPEC ?? process.env.ComSpec ?? process.env.COMSPEC ?? "cmd.exe";
+	return { command: commandProcessor, args: ["/d", "/s", "/c", `${IDX_CLI_COMMAND} update`] };
 }
 
 function appendBoundedOutput(existing: string, addition: string): string {
