@@ -439,7 +439,7 @@ cd /path/to/project
 pix
 ```
 
-`/idx-update` updates the globally installed `indexer-cli`; it does not refresh a project's index.
+When `indexer-cli` is installed and available on `PATH`, Pix checks it at startup and runs its official updater when needed. Pix silently skips this check when `idx` is absent. `/idx-update` remains available for a manual retry; neither flow refreshes a project's index.
 
 ### An extension behaves differently
 

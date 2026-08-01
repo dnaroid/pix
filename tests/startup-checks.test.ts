@@ -7,9 +7,11 @@ import { describe, it } from "node:test";
 import type { LoadExtensionsResult } from "@earendil-works/pi-coding-agent";
 
 import {
+	checkAndUpdateIdxOnStartup,
 	checkPiCliAvailability,
 	checkPiToolsSuiteExtensionAvailability,
 	checkSelectedModelAuthAvailability,
+	formatIdxStartupUpdateNotice,
 } from "../src/app/cli/startup-checks.js";
 
 describe("startup availability checks", () => {
@@ -35,6 +37,101 @@ describe("startup availability checks", () => {
 		} finally {
 			await rm(root, { recursive: true, force: true });
 		}
+	});
+
+	it("silently accepts an up-to-date idx version", async () => {
+		const result = await checkAndUpdateIdxOnStartup({
+			runUpdate: async () => ({
+				code: 0,
+				signal: null,
+				stdout: "indexer-cli is already up to date (0.12.33).\n",
+				stderr: "",
+			}),
+		});
+
+		assert.deepEqual(result, { status: "current", currentVersion: "0.12.33" });
+		assert.equal(formatIdxStartupUpdateNotice(result), undefined);
+	});
+
+	it("runs the official idx update command", async () => {
+		const root = await mkdtemp(join(tmpdir(), "pix-idx-update-"));
+		try {
+			const binDir = join(root, "bin");
+			const idxPath = join(binDir, process.platform === "win32" ? "idx.cmd" : "idx");
+			await mkdir(binDir, { recursive: true });
+			if (process.platform === "win32") {
+				await writeFile(idxPath, "@echo off\r\nif \"%1\"==\"update\" echo indexer-cli is already up to date (0.12.33).\r\n");
+			} else {
+				await writeFile(idxPath, "#!/bin/sh\n[ \"$1\" = update ] && echo 'indexer-cli is already up to date (0.12.33).'\n");
+				await chmod(idxPath, 0o755);
+			}
+
+			const result = await checkAndUpdateIdxOnStartup({
+				env: { ...process.env, PATH: binDir },
+				timeoutMs: 5_000,
+			});
+
+			assert.deepEqual(result, { status: "current", currentVersion: "0.12.33" });
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
+	it("reports an idx update with its previous and current versions", async () => {
+		const result = await checkAndUpdateIdxOnStartup({
+			runUpdate: async () => ({
+				code: 0,
+				signal: null,
+				stdout: "Updating indexer-cli 0.12.32 → 0.12.33...\nUpdated indexer-cli 0.12.32 → 0.12.33.\n",
+				stderr: "",
+			}),
+		});
+
+		assert.deepEqual(result, {
+			status: "updated",
+			previousVersion: "0.12.32",
+			currentVersion: "0.12.33",
+		});
+		assert.equal(formatIdxStartupUpdateNotice(result), "idx updated from 0.12.32 to 0.12.33.");
+	});
+
+	it("skips the idx update while Pix is offline", async () => {
+		let called = false;
+		const result = await checkAndUpdateIdxOnStartup({
+			env: { PI_OFFLINE: "1" },
+			runUpdate: async () => {
+				called = true;
+				throw new Error("must not run");
+			},
+		});
+
+		assert.deepEqual(result, { status: "skipped", reason: "PI_OFFLINE is set" });
+		assert.equal(called, false);
+	});
+
+	it("silently skips the startup update when idx is not installed", async () => {
+		const result = await checkAndUpdateIdxOnStartup({
+			env: { PATH: "" },
+		});
+
+		assert.deepEqual(result, { status: "unavailable" });
+		assert.equal(formatIdxStartupUpdateNotice(result), undefined);
+	});
+
+	it("reports a failed idx update with bounded diagnostic context", async () => {
+		const result = await checkAndUpdateIdxOnStartup({
+			runUpdate: async () => ({
+				code: 1,
+				signal: null,
+				stdout: "",
+				stderr: "registry unavailable",
+			}),
+		});
+
+		assert.deepEqual(result, {
+			status: "failed",
+			reason: "idx update exited with code 1: registry unavailable",
+		});
 	});
 
 	it("accepts a loaded pi-tools-suite extension", () => {

@@ -57,6 +57,7 @@ import { AppTerminalController } from "./terminal/terminal-controller.js";
 import { TerminalBellSoundController } from "./terminal/terminal-bell-sound-controller.js";
 import { AppToastController, type AppToastOptions } from "./rendering/toast-controller.js";
 import { checkPiUpdate, checkPixUpdate, formatPixStartupUpdateDialog, formatPiStartupUpdateToast } from "./cli/update.js";
+import { checkAndUpdateIdxOnStartup, formatIdxStartupUpdateNotice } from "./cli/startup-checks.js";
 import { AppVoiceController } from "./input/voice-controller.js";
 import { createIsolatedExtensionEventBus } from "./extensions/extension-event-bus.js";
 import { setAppIconTheme } from "./icons.js";
@@ -929,10 +930,21 @@ export class PiUiExtendApp {
 		await this.sessionLifecycle.start();
 		this.modelUsageController.startPolling();
 		this.nerdFontController.ensureInstalledOnStartup();
-		this.checkPixUpdateOnStartup();
+		this.checkUpdatesOnStartup();
 	}
 
-	private checkPixUpdateOnStartup(): void {
+	private checkUpdatesOnStartup(): void {
+		void checkAndUpdateIdxOnStartup()
+			.then((result) => {
+				if (!this.running) return;
+				const notice = formatIdxStartupUpdateNotice(result);
+				if (!notice) return;
+				this.showToast(notice, result.status === "updated" ? "success" : "warning");
+			})
+			.catch(() => {
+				// Startup update checks should never interrupt the TUI.
+			});
+
 		void checkPiUpdate()
 			.then((result) => {
 				if (result.status !== "newer") return;

@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { access } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 import { constants as fsConstants } from "node:fs";
@@ -6,10 +7,37 @@ import type { AgentSessionRuntime, LoadExtensionsResult } from "@earendil-works/
 
 const PI_CLI_COMMAND = "pi";
 const PI_TOOLS_SUITE_EXTENSION_ID = "pi-tools-suite";
+const IDX_CLI_COMMAND = "idx";
+const IDX_SPAWN_COMMAND = process.platform === "win32" ? "idx.cmd" : IDX_CLI_COMMAND;
+const IDX_UPDATE_TIMEOUT_MS = 600_000;
+const MAX_IDX_UPDATE_OUTPUT_BYTES = 32_000;
 
 export type StartupAvailabilityIssue = {
 	kind: "warning" | "error";
 	message: string;
+};
+
+export type IdxStartupUpdateStatus = "current" | "updated" | "checked" | "skipped" | "unavailable" | "failed";
+
+export type IdxStartupUpdateResult = {
+	status: IdxStartupUpdateStatus;
+	previousVersion?: string;
+	currentVersion?: string;
+	reason?: string;
+};
+
+type IdxUpdateCommandResult = {
+	code: number | null;
+	signal: NodeJS.Signals | null;
+	stdout: string;
+	stderr: string;
+	timedOut?: boolean;
+};
+
+export type IdxStartupUpdateOptions = {
+	timeoutMs?: number;
+	env?: NodeJS.ProcessEnv;
+	runUpdate?: (timeoutMs: number, env: NodeJS.ProcessEnv) => Promise<IdxUpdateCommandResult>;
 };
 
 export async function collectStartupAvailabilityIssues(runtime: AgentSessionRuntime): Promise<StartupAvailabilityIssue[]> {
@@ -45,6 +73,61 @@ export async function checkPiCliAvailability(pathValue = process.env.PATH ?? "")
 	}];
 }
 
+export async function checkAndUpdateIdxOnStartup(options: IdxStartupUpdateOptions = {}): Promise<IdxStartupUpdateResult> {
+	const env = options.env ?? process.env;
+	const disabledReason = startupVersionCheckDisabledReason(env);
+	if (disabledReason) return { status: "skipped", reason: disabledReason };
+	if (!options.runUpdate && !(await executableExistsOnPath(IDX_CLI_COMMAND, env.PATH ?? ""))) {
+		return { status: "unavailable" };
+	}
+
+	let commandResult: IdxUpdateCommandResult;
+	try {
+		commandResult = await (options.runUpdate ?? runIdxUpdate)(options.timeoutMs ?? IDX_UPDATE_TIMEOUT_MS, env);
+	} catch (error) {
+		if (isCommandNotFoundError(error)) {
+			return { status: "unavailable" };
+		}
+		return { status: "failed", reason: errorMessage(error) };
+	}
+
+	const output = [commandResult.stdout, commandResult.stderr].filter(Boolean).join("\n").trim();
+	if (commandResult.timedOut) {
+		return { status: "failed", reason: compactCommandFailure("idx update timed out", output) };
+	}
+	if (commandResult.code !== 0) {
+		const termination = commandResult.signal
+			? `idx update terminated by signal ${commandResult.signal}`
+			: `idx update exited with code ${commandResult.code ?? "unknown"}`;
+		return { status: "failed", reason: compactCommandFailure(termination, output) };
+	}
+
+	const updatedVersions = parseUpdatedIdxVersions(output);
+	if (updatedVersions) return { status: "updated", ...updatedVersions };
+
+	const currentVersion = parseCurrentIdxVersion(output);
+	if (currentVersion) return { status: "current", currentVersion };
+	return { status: "checked" };
+}
+
+export function formatIdxStartupUpdateNotice(result: IdxStartupUpdateResult): string | undefined {
+	switch (result.status) {
+		case "updated": {
+			if (!result.currentVersion) return "idx was updated to the latest version.";
+			const previousVersion = result.previousVersion ? ` from ${result.previousVersion}` : "";
+			return `idx updated${previousVersion} to ${result.currentVersion}.`;
+		}
+		case "unavailable":
+			return undefined;
+		case "failed":
+			return `idx startup update failed: ${result.reason ?? "unknown error"}`;
+		case "current":
+		case "checked":
+		case "skipped":
+			return undefined;
+	}
+}
+
 export function checkPiToolsSuiteExtensionAvailability(extensionsResult: LoadExtensionsResult): StartupAvailabilityIssue[] {
 	if (extensionsResult.extensions.some(isPiToolsSuiteExtension)) return [];
 
@@ -76,6 +159,89 @@ async function executableExistsOnPath(command: string, pathValue: string): Promi
 		}
 	}
 	return false;
+}
+
+async function runIdxUpdate(timeoutMs: number, env: NodeJS.ProcessEnv): Promise<IdxUpdateCommandResult> {
+	return await new Promise<IdxUpdateCommandResult>((resolve, reject) => {
+		const child = spawn(IDX_SPAWN_COMMAND, ["update"], {
+			env,
+			stdio: ["ignore", "pipe", "pipe"],
+			windowsHide: true,
+		});
+		let stdout = "";
+		let stderr = "";
+		let settled = false;
+		let timedOut = false;
+		const timer = setTimeout(() => {
+			timedOut = true;
+			child.kill();
+		}, timeoutMs);
+		timer.unref();
+
+		child.stdout?.on("data", (chunk: Buffer | string) => {
+			stdout = appendBoundedOutput(stdout, chunk.toString());
+		});
+		child.stderr?.on("data", (chunk: Buffer | string) => {
+			stderr = appendBoundedOutput(stderr, chunk.toString());
+		});
+		child.on("error", (error) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			reject(error);
+		});
+		child.on("close", (code, signal) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			resolve({ code, signal, stdout, stderr, ...(timedOut ? { timedOut: true } : {}) });
+		});
+	});
+}
+
+function appendBoundedOutput(existing: string, addition: string): string {
+	const combined = `${existing}${addition}`;
+	if (Buffer.byteLength(combined, "utf8") <= MAX_IDX_UPDATE_OUTPUT_BYTES) return combined;
+	return Buffer.from(combined, "utf8").subarray(-MAX_IDX_UPDATE_OUTPUT_BYTES).toString("utf8").replace(/^\uFFFD/u, "");
+}
+
+function parseUpdatedIdxVersions(output: string): Pick<IdxStartupUpdateResult, "previousVersion" | "currentVersion"> | undefined {
+	const match = output.match(/(?:Updating|Updated) indexer-cli\s+v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\s*(?:→|->)\s*v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/iu);
+	const previousVersion = match?.[1];
+	const currentVersion = match?.[2];
+	if (!previousVersion || !currentVersion) return undefined;
+	return { previousVersion, currentVersion };
+}
+
+function parseCurrentIdxVersion(output: string): string | undefined {
+	return output.match(/already up to date\s*\(v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\)/iu)?.[1];
+}
+
+function startupVersionCheckDisabledReason(env: NodeJS.ProcessEnv): string | undefined {
+	if (truthyEnv(env.PI_OFFLINE)) return "PI_OFFLINE is set";
+	if (truthyEnv(env.PI_SKIP_VERSION_CHECK)) return "PI_SKIP_VERSION_CHECK is set";
+	if (truthyEnv(env.PIX_SKIP_VERSION_CHECK)) return "PIX_SKIP_VERSION_CHECK is set";
+	return undefined;
+}
+
+function truthyEnv(value: string | undefined): boolean {
+	if (!value) return false;
+	return !["0", "false", "no", "off"].includes(value.toLowerCase());
+}
+
+function isCommandNotFoundError(error: unknown): boolean {
+	return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
+}
+
+function compactCommandFailure(prefix: string, output: string): string {
+	if (!output) return prefix;
+	const singleLine = output.split(/\r?\n/u).map((line) => line.trim()).filter(Boolean).slice(-4).join(" | ");
+	const summary = singleLine.length > 900 ? `${singleLine.slice(0, 897)}...` : singleLine;
+	return `${prefix}: ${summary}`;
+}
+
+function errorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
 }
 
 function isPiToolsSuiteExtension(extension: LoadExtensionsResult["extensions"][number]): boolean {
