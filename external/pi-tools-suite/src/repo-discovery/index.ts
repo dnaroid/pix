@@ -295,14 +295,14 @@ const COMMON_REPO_TOOL_PROPERTIES = {
 };
 
 const IDX_ARG_DESCRIPTIONS: Record<IdxCommand, string> = {
-	architecture: "idx architecture flags: [--path-prefix <area>] [--include-fixtures].",
+	architecture: "idx architecture flags: [--path-prefix <area>].",
 	structure:
-		"idx structure flags: [--path-prefix <area>] [--kind <kind>] [--max-depth <n>] [--max-files <n>] [--cursor <n>] [--include-internal] [--include-fixtures] [--no-tests] [--include-tests-summary].",
+		"idx structure flags: [--path-prefix <area>] [--kind <kind>] [--max-depth <n>] [--max-files <n>] [--cursor <n>] [--include-internal] [--no-tests] [--include-tests-summary].",
 	ast: "idx ast flags: [--max-depth <n>] [--max-nodes <n>] [--cursor <n>] [--no-include-text].",
 	search:
 		"idx search flags: [--max-files <n>] [--path-prefix <area>] [--chunk-types <types|api|impl|tests|imports>] [--mode hybrid|semantic|lexical|symbol] [--min-score <score>] [--include-content] [--include-imports] [--dedupe-file] [--dedupe-symbol] [--cluster] [--exclude-tests] [--include-tests].",
 	explain:
-		"idx explain flags: [--path-prefix <area>] [--include-fixtures] [--include-body] [--body-lines <n>] [--signature-only].",
+		"idx explain flags: [--path-prefix <area>] [--include-body] [--body-lines <n>] [--signature-only].",
 	deps: "idx deps flags: [--mode modules|module-imports|calls|call-graph] [--direction callers|callees|both] [--depth <n>] [--show-edges] [--tests].",
 };
 
