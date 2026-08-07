@@ -27,6 +27,58 @@ type ToolEntryUpdate = {
  */
 const RETRY_ACTIVE_EVENT = "pix:retry-active";
 
+/**
+ * Mirrors @earendil-works/pi-ai's internal `isRetryableAssistantError` classifier
+ * (it is not part of the package's public exports). Used to decide whether a
+ * terminal streaming error warrants a manual Retry toast when the session's
+ * auto-retry is disabled, so a transient failure such as a 429 rate limit can
+ * still be resumed by hand.
+ */
+const NON_RETRYABLE_PROVIDER_LIMIT_PATTERN = new RegExp(
+	[
+		"GoUsageLimitError",
+		"FreeUsageLimitError",
+		"Monthly usage limit reached",
+		"available balance",
+		"insufficient_quota",
+		"out of budget",
+		"quota exceeded",
+		"billing",
+	].join("|"),
+	"i",
+);
+const RETRYABLE_PROVIDER_ERROR_PATTERN = new RegExp(
+	[
+		"overloaded",
+		"rate.?limit",
+		"too many requests",
+		"429",
+		"500",
+		"502",
+		"503",
+		"504",
+		"524",
+		"service.?unavailable",
+		"server.?error",
+		"internal.?error",
+		"provider.?returned.?error",
+		"network.?error",
+		"connection",
+		"fetch failed",
+		"timed.?out",
+		"timeout",
+		"socket",
+		"reset before headers",
+	].join("|"),
+	"i",
+);
+
+function isRetryableErrorText(text: string | undefined): boolean {
+	if (!text) return false;
+	if (NON_RETRYABLE_PROVIDER_LIMIT_PATTERN.test(text)) return false;
+	return RETRYABLE_PROVIDER_ERROR_PATTERN.test(text);
+}
+
 export type AppSessionEventControllerState = {
 	toolEntryIdsByCallId: Map<string, string>;
 	pendingToolCallIdsByContentIndex: Map<number, string>;
@@ -436,6 +488,24 @@ export class AppSessionEventController {
 		void this.retryFailedTurnAsync(session);
 	}
 
+	/**
+	 * The SDK only emits `auto_retry_end` (whose toast carries the Retry button)
+	 * when auto-retry actually runs. When retry is disabled, a transient streaming
+	 * error such as a 429 rate limit surfaces only as the error entry above, with
+	 * no way to resume the failed turn. Offer a manual Retry toast in that case,
+	 * mirroring the auto-retry path. User aborts and non-retryable errors are
+	 * excluded, and retry being enabled means the auto-retry toast will handle it.
+	 */
+	private showManualRetryOnTerminalError(reason: string, errorText: string): void {
+		if (reason === "aborted") return;
+		if (!isRetryableErrorText(errorText)) return;
+		const session = this.host.runtime()?.session;
+		if (!session || session.autoRetryEnabled) return;
+		this.host.showToast(`Request failed: ${errorText}`, "error", {
+			action: { label: "Retry", onSelect: () => this.retryFailedTurn(session) },
+		});
+	}
+
 	private async retryFailedTurnAsync(session: AgentSession): Promise<void> {
 		const runtime = this.host.runtime();
 		if (!runtime || !this.isActiveRuntimeSession(runtime, session)) return;
@@ -781,12 +851,15 @@ export class AppSessionEventController {
 				this.assistantMessageClosed = true;
 				this.host.setSessionActivity(this.host.runtime()?.session.isStreaming ? "running" : "idle");
 				break;
-			case "error":
+			case "error": {
 				this.finishCurrentThinkingEntry();
 				this.flushAssistantTextBuffer(true);
 				this.host.setSessionActivity(this.host.runtime()?.session.isStreaming ? "running" : "idle");
-				this.addEntry({ id: createId("error"), kind: "error", text: assistantEvent.error.errorMessage ?? assistantEvent.reason });
+				const errorText = assistantEvent.error.errorMessage ?? assistantEvent.reason;
+				this.addEntry({ id: createId("error"), kind: "error", text: errorText });
+				this.showManualRetryOnTerminalError(assistantEvent.reason, errorText);
 				break;
+			}
 			default:
 				break;
 		}
