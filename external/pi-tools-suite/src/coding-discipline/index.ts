@@ -3,7 +3,7 @@ import * as path from "node:path";
 import type { Api, AssistantMessage, ImageContent, Model, TextContent } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 
-import { loadPiToolsSuiteConfig } from "../config.js";
+import { loadPiToolsSuiteConfig, DEFAULT_CODING_DISCIPLINE_STRICTNESS, type CodingDisciplineStrictness } from "../config.js";
 import { ignoreStaleExtensionContextError } from "../context-usage.js";
 import { completeWithModelRegistry, type ModelCompletionRegistry } from "../model-completion.js";
 
@@ -43,6 +43,9 @@ const DEFAULT_LOOKUP_TIMEOUT_MS = 120_000;
 const MAX_IMAGE_BYTES = 16 * 1024 * 1024;
 const SILENCE_REMINDER_MIN_VIOLATION_GAP = 3;
 const SILENCE_REMINDER_MIN_MESSAGE_GAP = 12;
+// When the visible history shrinks by more than this many messages (compaction or
+// truncation), the chatter baseline is reset so it isn't measured against a stale peak.
+const SILENCE_REMINDER_COMPACTION_MARGIN = 8;
 const LOOKUP_TOOL_NAME = "lookup";
 
 const LOOKUP_TOOL_PARAMS = Type.Object(
@@ -60,31 +63,46 @@ const LOOKUP_TOOL_PARAMS = Type.Object(
 	{ additionalProperties: false },
 );
 
-const QUALITY_DISCIPLINE_LINES = [
-	"TOOL-ONLY CODING AGENT CONTRACT.",
-	"",
-	"Follow this output-channel contract literally for coding tasks.",
-	"WORKING STATE: from the first assistant turn until complete, final, or blocked, emit exactly one tool call with empty text.",
-	"No prose, markdown, acknowledgments, plans, progress, summaries, explanations, or commentary before/after tool calls.",
-	"Keep reasoning, planning, hypotheses, and retry decisions internal; if a safe next local action exists, call the tool silently.",
-	"",
-	"After every tool result, choose exactly one transition:",
-	"- WORKING: exactly one next tool call with empty text;",
-	"- FINAL: one final answer after completion or practical verification;",
-	"- BLOCKED: one concise question only when no safe/useful tool action can continue.",
-	"No transition permits commentary between tool calls.",
-	"",
-	"PRIORITY: this overrides default assistant friendliness and conversational behavior.",
-	"",
-	"Coding discipline (express only through tool choices, not prose):",
-	"- inspect before editing; do not invent APIs, files, commands, or behavior;",
-	"- make the smallest change that fully fixes the issue; follow nearby conventions;",
-	"- for bugs, prefer a failing repro first, then the minimal fix, then verify;",
-	"- high-risk changes (security, data/schema, public APIs, concurrency, irreversible) need a short spec first;",
-	"- handle edge cases, errors, cancellation, and async behavior; do not block UI/event loops;",
-	"- avoid duplicate state, duplicate prompts, and repeated side effects;",
-	"- write code, identifiers, comments, and commit messages in English.",
-];
+type DisciplinePromptOptions = { lookupEnabled?: boolean; strictness?: CodingDisciplineStrictness };
+
+/**
+ * Builds the tool-only contract lines. The working-state rule is strictness-aware:
+ *   - "strict"  — one tool call per turn, no assistant text at all (Opus-like);
+ *   - "lenient" — independent (especially read-only) calls may be batched, and brief
+ *                 substantive reasoning text is acceptable when thinking is off.
+ */
+function buildDisciplineLines(strictness: CodingDisciplineStrictness): readonly string[] {
+	const isStrict = strictness === "strict";
+	return [
+		"TOOL-ONLY CODING AGENT CONTRACT.",
+		"",
+		"Follow this output-channel contract literally for coding tasks.",
+		isStrict
+			? "WORKING STATE: from the first assistant turn until complete, final, or blocked, emit exactly one tool call with empty text."
+			: "WORKING STATE: from the first assistant turn until complete, final, or blocked, emit tool calls with empty text.",
+		isStrict
+			? "No prose, markdown, acknowledgments, plans, progress, summaries, explanations, or commentary before/after tool calls."
+			: "Batch independent calls in one turn (especially read-only inspection: read/grep/glob/bash); make dependent calls sequentially. Avoid filler prose, acknowledgments, restatements, and narration of obvious next steps.",
+		"Keep reasoning, planning, hypotheses, and retry decisions internal when thinking is on; when thinking is off, brief substantive reasoning text is acceptable.",
+		"",
+		"After every tool result, choose exactly one transition:",
+		isStrict ? "- WORKING: exactly one next tool call with empty text;" : "- WORKING: one or more independent tool calls with empty text;",
+		"- FINAL: one final answer after completion or practical verification;",
+		"- BLOCKED: one concise question only when no safe/useful tool action can continue.",
+		"No transition permits commentary between tool calls.",
+		"",
+		"PRIORITY: this overrides default assistant friendliness and conversational behavior.",
+		"",
+		"Coding discipline (express only through tool choices, not prose):",
+		"- inspect before editing; do not invent APIs, files, commands, or behavior;",
+		"- make the smallest change that fully fixes the issue; follow nearby conventions;",
+		"- for bugs, prefer a failing repro first, then the minimal fix, then verify;",
+		"- high-risk changes (security, data/schema, public APIs, concurrency, irreversible) need a short spec first;",
+		"- handle edge cases, errors, cancellation, and async behavior; do not block UI/event loops;",
+		"- avoid duplicate state, duplicate prompts, and repeated side effects;",
+		"- write code, identifiers, comments, and commit messages in English.",
+	];
+}
 
 const LOOKUP_DISCIPLINE_LINES = [
 	"",
@@ -105,7 +123,7 @@ const FINAL_DISCIPLINE_LINES = [
 const SILENCE_REMINDER_TEXT = [
 	"GLM silence reminder: remain in WORKING state.",
 	"Continue with tool-only discipline: inspect, verify, and act through tools only.",
-	"For the next step, emit exactly one tool call and no assistant text.",
+	"For the next step, emit tool calls with no accompanying assistant text.",
 	"Do not acknowledge this reminder.",
 ].join("\n");
 
@@ -147,6 +165,7 @@ export default function codingDiscipline(pi: ExtensionAPI) {
 	let silenceViolationCount = 0;
 	let lastReminderViolationCount = 0;
 	let lastReminderMessageCount = -SILENCE_REMINDER_MIN_MESSAGE_GAP;
+	let peakMessageCount = 0;
 
 	function maybeRegisterLookupTool(cwd?: string): void {
 		if (lookupRegistered) return;
@@ -193,8 +212,10 @@ export default function codingDiscipline(pi: ExtensionAPI) {
 	pi.on("before_provider_request", async (event: { payload?: unknown }, ctx: unknown) => {
 		const modelRef = modelRefFromPayload(event.payload) ?? selectedModelRef ?? modelRefFromContext(ctx);
 		if (!isGlmModel(modelRef)) return undefined;
+		const cwd = contextCwd(ctx);
 		const injected = injectCodingDisciplineIntoPayload(event.payload, {
-			lookupEnabled: Boolean(lookupModelFromConfig(contextCwd(ctx))),
+			lookupEnabled: Boolean(lookupModelFromConfig(cwd)),
+			strictness: codingDisciplineStrictnessFromConfig(cwd),
 		});
 		if (process.env.PI_DEBUG_PROMPT === "1") {
 			logFinalPrompt(injected, modelRef, contextCwd(ctx) ?? process.cwd());
@@ -270,10 +291,22 @@ export default function codingDiscipline(pi: ExtensionAPI) {
 		const modelRef = selectedModelRef ?? modelRefFromContext(ctx);
 		if (!isGlmModel(modelRef) || !Array.isArray(event.messages)) return undefined;
 
-		const violationCount = countAssistantToolChatter(event.messages);
+		const messageCount = event.messages.length;
+		// Compaction/truncation prunes the visible history. Reset the stale chatter
+		// baseline so the post-compaction turn isn't measured against a pre-compaction
+		// violation peak (otherwise the model could chatter freely until the count
+		// climbed back above the old peak, or get nagged on a freshly small count).
+		if (messageCount + SILENCE_REMINDER_COMPACTION_MARGIN < peakMessageCount) {
+			silenceViolationCount = 0;
+			lastReminderViolationCount = 0;
+			lastReminderMessageCount = messageCount - SILENCE_REMINDER_MIN_MESSAGE_GAP;
+		}
+		peakMessageCount = Math.max(peakMessageCount, messageCount);
+
+		const strictness = codingDisciplineStrictnessFromConfig(contextCwd(ctx));
+		const violationCount = countAssistantToolChatter(event.messages, strictness);
 		if (violationCount <= silenceViolationCount) return undefined;
 
-		const messageCount = event.messages.length;
 		const violationGap = violationCount - lastReminderViolationCount;
 		const messageGap = messageCount - lastReminderMessageCount;
 		silenceViolationCount = violationCount;
@@ -286,7 +319,7 @@ export default function codingDiscipline(pi: ExtensionAPI) {
 	});
 }
 
-export function prependCodingDisciplinePrompt(systemPrompt: string, options: { lookupEnabled?: boolean } = {}): string {
+export function prependCodingDisciplinePrompt(systemPrompt: string, options: DisciplinePromptOptions = {}): string {
 	const deduped = systemPrompt
 		.replace(LEGACY_SILENT_PROMPT_BLOCK_PATTERN, "")
 		.replace(DISCIPLINE_PROMPT_BLOCK_PATTERN, "")
@@ -296,10 +329,11 @@ export function prependCodingDisciplinePrompt(systemPrompt: string, options: { l
 	return deduped ? `${prompt}\n\n${deduped}` : prompt;
 }
 
-export function buildCodingDisciplinePrompt(options: { lookupEnabled?: boolean } = {}): string {
+export function buildCodingDisciplinePrompt(options: DisciplinePromptOptions = {}): string {
+	const strictness = options.strictness ?? DEFAULT_CODING_DISCIPLINE_STRICTNESS;
 	return [
 		DISCIPLINE_PROMPT_MARKER_START,
-		...QUALITY_DISCIPLINE_LINES,
+		...buildDisciplineLines(strictness),
 		...(options.lookupEnabled ? LOOKUP_DISCIPLINE_LINES : []),
 		...FINAL_DISCIPLINE_LINES,
 		DISCIPLINE_PROMPT_MARKER_END,
@@ -311,7 +345,7 @@ export function isGlmModel(modelRef: string | undefined): boolean {
 	return /(?:^|[/:_.-])glm(?:$|[/:_.-]|\d)/i.test(modelRef);
 }
 
-export function injectCodingDisciplineIntoPayload(payload: unknown, options: { lookupEnabled?: boolean } = {}): unknown {
+export function injectCodingDisciplineIntoPayload(payload: unknown, options: DisciplinePromptOptions = {}): unknown {
 	if (!isRecord(payload)) return payload;
 
 	if (typeof payload.instructions === "string") {
@@ -555,7 +589,7 @@ function createLookupTool() {
 	};
 }
 
-function injectIntoMessages(messages: unknown[], options: { lookupEnabled?: boolean }): unknown[] {
+function injectIntoMessages(messages: unknown[], options: DisciplinePromptOptions): unknown[] {
 	const next = [...messages];
 	const index = next.findIndex(isInstructionMessage);
 	if (index === -1) return [{ role: "system", content: buildCodingDisciplinePrompt(options) }, ...next];
@@ -570,7 +604,7 @@ function injectIntoMessages(messages: unknown[], options: { lookupEnabled?: bool
 	return next;
 }
 
-function injectIntoMessageContent(content: unknown, options: { lookupEnabled?: boolean }): unknown {
+function injectIntoMessageContent(content: unknown, options: DisciplinePromptOptions): unknown {
 	if (typeof content === "string") return prependCodingDisciplinePrompt(content, options);
 	if (!Array.isArray(content)) return undefined;
 
@@ -588,21 +622,34 @@ function isInstructionMessage(message: unknown): boolean {
 	return message.role === "system" || message.role === "developer";
 }
 
-function countAssistantToolChatter(messages: readonly unknown[]): number {
+function countAssistantToolChatter(messages: readonly unknown[], strictness: CodingDisciplineStrictness): number {
 	let count = 0;
 	for (const message of messages) {
-		if (!isAssistantToolChatter(message)) continue;
+		if (!isAssistantToolChatter(message, strictness)) continue;
 		count++;
 	}
 	return count;
 }
 
-function isAssistantToolChatter(message: unknown): boolean {
+/**
+ * Detects assistant chatter (text alongside a tool call).
+ * - "strict"  — any such text counts as chatter.
+ * - "lenient" — text counts only when a thinking/reasoning block already captured the
+ *   reasoning; without a thinking block, the visible text is the model's only reasoning
+ *   channel and must not be suppressed.
+ */
+function isAssistantToolChatter(message: unknown, strictness: CodingDisciplineStrictness): boolean {
 	if (!isRecord(message) || message.role !== "assistant") return false;
 	if (!Array.isArray(message.content)) return false;
 	const hasToolCall = message.content.some((part) => isRecord(part) && part.type === "toolCall");
 	if (!hasToolCall) return false;
-	return message.content.some((part) => isRecord(part) && part.type === "text" && hasNonEmptyText(part.text));
+	const hasText = message.content.some((part) => isRecord(part) && part.type === "text" && hasNonEmptyText(part.text));
+	if (!hasText) return false;
+	if (strictness === "strict") return true;
+	const hasThinking = message.content.some(
+		(part) => isRecord(part) && (part.type === "thinking" || part.type === "reasoning"),
+	);
+	return Boolean(hasThinking);
 }
 
 function hasNonEmptyText(value: unknown): boolean {
@@ -611,7 +658,9 @@ function hasNonEmptyText(value: unknown): boolean {
 
 function createSilenceReminderMessage() {
 	return {
-		role: "user" as const,
+		// Inject as a developer/system-level nudge rather than impersonating the user,
+		// so it reads as an automated reminder, not a user instruction.
+		role: "developer" as const,
 		content: [{ type: "text" as const, text: SILENCE_REMINDER_TEXT }],
 		timestamp: Date.now(),
 	};
@@ -619,6 +668,10 @@ function createSilenceReminderMessage() {
 
 function lookupModelFromConfig(cwd?: string): string | undefined {
 	return loadPiToolsSuiteConfig(["coding-discipline"], { cwd: cwd ?? process.cwd() }).lookupModel;
+}
+
+function codingDisciplineStrictnessFromConfig(cwd?: string): CodingDisciplineStrictness {
+	return loadPiToolsSuiteConfig(["coding-discipline"], { cwd: cwd ?? process.cwd() }).codingDisciplineStrictness ?? DEFAULT_CODING_DISCIPLINE_STRICTNESS;
 }
 
 function buildLookupPrompt(params: LookupParams, recentContext: string, imageCount: number, warnings: string[]): string {

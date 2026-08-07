@@ -11,6 +11,14 @@ export interface PiToolsSuiteConfig {
 	todoThinking: boolean;
 	/** Vision-capable model used by the coding-discipline lookup tool; unset disables lookup. */
 	lookupModel?: string;
+	/**
+	 * Chatter-detector strictness for the coding-discipline module:
+	 *   "strict"  — any assistant text alongside a tool call is chatter (Opus-like);
+	 *   "lenient" — text is only chatter when a thinking block already captured the
+	 *               reasoning; without thinking, visible text is the reasoning channel.
+	 * Default: "lenient".
+	 */
+	codingDisciplineStrictness?: CodingDisciplineStrictness;
 }
 
 type MutableConfig = {
@@ -18,7 +26,12 @@ type MutableConfig = {
 	disabledModules: Set<string>;
 	todoThinking: boolean;
 	lookupModel: string | undefined;
+	codingDisciplineStrictness: CodingDisciplineStrictness;
 };
+
+export const CODING_DISCIPLINE_STRICTNESS_VALUES = ["strict", "lenient"] as const;
+export type CodingDisciplineStrictness = (typeof CODING_DISCIPLINE_STRICTNESS_VALUES)[number];
+export const DEFAULT_CODING_DISCIPLINE_STRICTNESS: CodingDisciplineStrictness = "lenient";
 
 type Env = Record<string, string | undefined>;
 
@@ -60,6 +73,10 @@ function normalizeLookupModel(raw: unknown): string | undefined {
 	if (typeof raw !== "string") return undefined;
 	const trimmed = raw.trim();
 	return trimmed ? trimmed : undefined;
+}
+
+function normalizeCodingDisciplineStrictness(raw: unknown): CodingDisciplineStrictness {
+	return raw === "strict" ? "strict" : "lenient";
 }
 
 function boolFromEnv(value: string | undefined): boolean | undefined {
@@ -121,6 +138,9 @@ function mergeConfigLayer(config: MutableConfig, raw: Record<string, unknown>, k
 	if (typeof raw.enabled === "boolean") config.enabled = raw.enabled;
 	if (typeof raw.todoThinking === "boolean") config.todoThinking = raw.todoThinking;
 	if (Object.prototype.hasOwnProperty.call(raw, "lookupModel")) config.lookupModel = normalizeLookupModel(raw.lookupModel);
+	if (Object.prototype.hasOwnProperty.call(raw, "codingDisciplineStrictness")) {
+		config.codingDisciplineStrictness = normalizeCodingDisciplineStrictness(raw.codingDisciplineStrictness);
+	}
 
 	for (const key of DISABLED_LIST_KEYS) addDisabled(config, raw[key], knownModules);
 	for (const key of ENABLED_LIST_KEYS) removeDisabled(config, raw[key], knownModules);
@@ -178,6 +198,7 @@ export function loadPiToolsSuiteConfig(moduleNames: readonly string[], options: 
 		disabledModules: new Set([...DEFAULT_DISABLED_MODULES].filter((name) => knownModules.has(name))),
 		todoThinking: false,
 		lookupModel: undefined,
+		codingDisciplineStrictness: DEFAULT_CODING_DISCIPLINE_STRICTNESS,
 	};
 	const userConfigPath = getPiToolsSuiteUserConfigPath(options.homeDir);
 
@@ -197,5 +218,6 @@ export function loadPiToolsSuiteConfig(moduleNames: readonly string[], options: 
 		disabledModules: [...config.disabledModules].sort(),
 		todoThinking: config.todoThinking,
 		...(config.lookupModel ? { lookupModel: config.lookupModel } : {}),
+		codingDisciplineStrictness: config.codingDisciplineStrictness,
 	};
 }
