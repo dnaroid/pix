@@ -19,6 +19,7 @@ import {
   estimateTokens,
   getActiveSummaryTokenEstimate,
   getNudgeType,
+  injectNudge,
   pruneEmergencyCurrentTurn,
   resolveContextThresholds,
   upsertNudgeAnchor,
@@ -435,6 +436,12 @@ describe("DCP pruning effectiveness", () => {
     expect(state.nudgeAnchors).toHaveLength(1);
     expect(state.nudgeAnchors[0]!.type).toBe("iteration");
 
+    const upgrade = upsertNudgeAnchor(pruned, state, "context-strong", { contextPercent: 0.90 });
+    expect(upgrade.created).toBe(false);
+    expect(upgrade.updated).toBe(true);
+    expect(state.nudgeAnchors).toHaveLength(1);
+    expect(state.nudgeAnchors[0]!.type).toBe("context-strong");
+
     applyAnchoredNudges(pruned, state, () => "<dcp-system-reminder>compress now</dcp-system-reminder>");
 
     expect(pruned).toHaveLength(3);
@@ -446,6 +453,145 @@ describe("DCP pruning effectiveness", () => {
     expect(clearDcpNudgeAnchors(state)).toBe(1);
     expect(state.nudgeAnchors).toHaveLength(0);
     expect(state.lastNudge).toBeUndefined();
+  });
+
+  test("moving nudge targets replace the previous anchor", () => {
+    const state = createState();
+    const firstMessages = [
+      textMessage("user", "first request", 1),
+      textMessage("assistant", "first response", 2),
+    ];
+
+    const first = upsertNudgeAnchor(firstMessages, state, "turn");
+    expect(first.created).toBe(true);
+    expect(state.nudgeAnchors).toHaveLength(1);
+    expect(state.nudgeAnchors[0]?.anchorTimestamp).toBe(1);
+
+    const nextMessages = [
+      ...firstMessages,
+      textMessage("user", "next request", 3),
+      textMessage("assistant", "next response", 4),
+    ];
+    const moved = upsertNudgeAnchor(nextMessages, state, "iteration");
+
+    expect(moved.created).toBe(true);
+    expect(state.nudgeAnchors).toHaveLength(1);
+    expect(state.nudgeAnchors[0]?.anchorTimestamp).toBe(3);
+    expect(state.nudgeAnchors[0]?.type).toBe("iteration");
+  });
+
+  test("assistant fallback targets move without accumulating reminders", () => {
+    const state = createState();
+    upsertNudgeAnchor([textMessage("assistant", "first response", 1)], state, "iteration");
+
+    const messages = [
+      textMessage("assistant", "first response", 1),
+      textMessage("assistant", "second response", 2),
+    ];
+    upsertNudgeAnchor(messages, state, "iteration");
+    applyAnchoredNudges(messages, state, () =>
+      "<dcp-system-reminder>singleton reminder</dcp-system-reminder>",
+    );
+
+    expect(state.nudgeAnchors).toHaveLength(1);
+    expect(state.nudgeAnchors[0]?.anchorTimestamp).toBe(2);
+    expect(JSON.stringify(messages).match(/<dcp-system-reminder>/g)).toHaveLength(1);
+    expect(contentText(messages[0])).not.toContain("singleton reminder");
+    expect(contentText(messages[1])).toContain("singleton reminder");
+  });
+
+  test("literal reminder tags in user text do not force assistant fallback", () => {
+    const state = createState();
+    const messages = [
+      textMessage("user", "why is <dcp-system-reminder>old</dcp-system-reminder> repeated?", 1),
+      textMessage("assistant", "I will investigate", 2),
+    ];
+
+    upsertNudgeAnchor(messages, state, "turn");
+    applyAnchoredNudges(messages, state, () =>
+      "<dcp-system-reminder>generated reminder</dcp-system-reminder>",
+    );
+
+    expect(state.nudgeAnchors).toHaveLength(1);
+    expect(state.nudgeAnchors[0]?.anchorRole).toBe("user");
+    expect(state.nudgeAnchors[0]?.anchorTimestamp).toBe(1);
+    expect(contentText(messages[0])).toContain("<dcp-system-reminder>old</dcp-system-reminder>");
+    expect(contentText(messages[0]).match(/generated reminder/g)).toHaveLength(1);
+  });
+
+  test("synthetic fallback clears persisted anchors before rendering", () => {
+    const state = createState();
+    const messages = [textMessage("user", "[dcp-block-id]: # (b1)", 1)];
+    state.nudgeAnchors = [{
+      id: 1,
+      type: "iteration",
+      anchorTimestamp: 1,
+      anchorRole: "user",
+      turnIndex: 1,
+      createdAt: 100,
+      updatedAt: 100,
+    }];
+
+    const result = upsertNudgeAnchor(messages, state, "iteration");
+    expect(result.anchor).toBeNull();
+    expect(state.nudgeAnchors).toHaveLength(0);
+    expect(state.lastNudge).toBeUndefined();
+
+    injectNudge(messages, "<dcp-system-reminder>fallback</dcp-system-reminder>");
+    applyAnchoredNudges(messages, state, () =>
+      "<dcp-system-reminder>stale anchor</dcp-system-reminder>",
+    );
+
+    expect(JSON.stringify(messages).match(/<dcp-system-reminder>/g)).toHaveLength(1);
+    expect(JSON.stringify(messages)).toContain("fallback");
+    expect(JSON.stringify(messages)).not.toContain("stale anchor");
+  });
+
+  test("legacy multi-anchor state renders only the newest valid reminder", () => {
+    const state = createState();
+    const messages = [
+      textMessage("user", "request", 1),
+      textMessage("assistant", "response", 2),
+    ];
+    state.nudgeAnchors = [
+      {
+        id: 1,
+        type: "turn",
+        anchorTimestamp: 1,
+        anchorRole: "user",
+        turnIndex: 1,
+        createdAt: 100,
+        updatedAt: 100,
+      },
+      {
+        id: 2,
+        type: "iteration",
+        anchorTimestamp: 2,
+        anchorRole: "assistant",
+        turnIndex: 1,
+        createdAt: 200,
+        updatedAt: 200,
+      },
+      {
+        id: 3,
+        type: "context-strong",
+        anchorTimestamp: 99,
+        anchorRole: "assistant",
+        turnIndex: 1,
+        createdAt: 300,
+        updatedAt: 300,
+      },
+    ];
+
+    applyAnchoredNudges(messages, state, (anchor) =>
+      `<dcp-system-reminder>anchor ${anchor.id}</dcp-system-reminder>`,
+    );
+
+    expect(state.nudgeAnchors).toHaveLength(1);
+    expect(state.nudgeAnchors[0]?.id).toBe(2);
+    expect(JSON.stringify(messages).match(/<dcp-system-reminder>/g)).toHaveLength(1);
+    expect(contentText(messages[0])).not.toContain("anchor 1");
+    expect(contentText(messages[1])).toContain("anchor 2");
   });
 
   test("nudge guidance includes concrete ranges, priority messages, and active blocks", () => {

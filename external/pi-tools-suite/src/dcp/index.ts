@@ -809,6 +809,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 			await saveDcpState(ctx, state)
 		}
 
+		const anchorsBeforeFinalization = state.nudgeAnchors.length
 		if (state.manualMode) {
 			state.nudgeAnchors = state.nudgeAnchors.filter((anchor) =>
 				anchor.type === "context-strong" || anchor.type === "context-soft",
@@ -817,6 +818,9 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 		applyAnchoredNudges(prunedMessages, state, (anchor) =>
 			appendConcreteNudgeGuidance(baseNudgeText(anchor.type), candidate, messageCandidates, state),
 		)
+		if (state.nudgeAnchors.length !== anchorsBeforeFinalization) {
+			await saveDcpState(ctx, state)
+		}
 
 		return finishContext("complete", prunedMessages, {
 			candidate,
