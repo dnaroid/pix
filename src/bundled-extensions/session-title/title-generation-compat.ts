@@ -1,5 +1,4 @@
-import type { Api, Model } from "@earendil-works/pi-ai";
-import { complete } from "@earendil-works/pi-ai/compat";
+import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import type { SessionTitleConfig } from "./config.js";
 import {
 	buildTitlePrompt,
@@ -9,13 +8,7 @@ import {
 	titleResponseText,
 } from "./title-generation.js";
 
-type TitleModelRegistry = {
-	find(provider: string, modelId: string): Model<Api> | undefined;
-	getApiKeyAndHeaders(model: Model<Api>): Promise<
-		| { ok: true; apiKey?: string; headers?: Record<string, string>; env?: Record<string, string> }
-		| { ok: false; error: string }
-	>;
-};
+type TitleModelRegistry = Pick<ModelRegistry, "complete" | "find">;
 
 /** Extension-side title generation through Pi's public ModelRegistry facade. */
 export async function generateSessionTitle(
@@ -38,13 +31,7 @@ export async function generateSessionTitle(
 		return undefined;
 	}
 
-	const auth = await modelRegistry.getApiKeyAndHeaders(model);
-	if (auth.ok === false) {
-		onWarning?.(auth.error);
-		return undefined;
-	}
-
-	const response = await complete(
+	const response = await modelRegistry.complete(
 		model,
 		{
 			systemPrompt: TITLE_SYSTEM_PROMPT,
@@ -57,9 +44,6 @@ export async function generateSessionTitle(
 			],
 		},
 		{
-			...(auth.apiKey === undefined ? {} : { apiKey: auth.apiKey }),
-			...(auth.headers === undefined ? {} : { headers: auth.headers }),
-			...(auth.env === undefined ? {} : { env: auth.env }),
 			cacheRetention: "none",
 			maxRetries: config.maxRetries,
 			maxTokens: config.maxTokens,

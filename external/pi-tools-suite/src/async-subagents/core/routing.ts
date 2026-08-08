@@ -1,4 +1,4 @@
-import type { Api, Model } from "@earendil-works/pi-ai";
+import type { Api, Model, ProviderHeaders } from "@earendil-works/pi-ai";
 import { completeWithModelRegistry, type ModelCompletionRegistry } from "../../model-completion.js";
 import type { AgentTask } from "./types.js";
 import {
@@ -14,7 +14,7 @@ export interface SubagentRoutingContext {
 	modelRegistry?: ModelCompletionRegistry & {
 		find(provider: string, modelId: string): Model<Api> | undefined;
 		getApiKeyAndHeaders(model: Model<Api>): Promise<
-			| { ok?: true; apiKey?: string; headers?: Record<string, string>; env?: Record<string, string> }
+			| { ok?: true; apiKey?: string; headers?: ProviderHeaders; baseUrl?: string; env?: Record<string, string> }
 			| { ok: false; error: string }
 		>;
 	};
@@ -180,7 +180,7 @@ async function resolveRoutingModels(
 interface RoutingCandidate {
 	model: Model<Api>;
 	apiKey?: string;
-	headers?: Record<string, string>;
+	headers?: ProviderHeaders;
 	env?: Record<string, string>;
 }
 
@@ -189,7 +189,7 @@ type RoutingResponse = Awaited<ReturnType<typeof completeWithModelRegistry>>;
 async function resolveModelRef(ctx: SubagentRoutingContext, modelRef: string): Promise<{
 	model: Model<Api>;
 	apiKey?: string;
-	headers?: Record<string, string>;
+	headers?: ProviderHeaders;
 	env?: Record<string, string>;
 } | undefined> {
 	const parsed = parseModelRef(modelRef);

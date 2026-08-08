@@ -5,6 +5,7 @@ import { SessionManager, type ExtensionContext } from "@earendil-works/pi-coding
 import sessionTitle, {
 	buildForkTitleInput,
 	fallbackSessionTitleFromInput,
+	generateSessionTitle,
 	firstUserMessageText,
 	generateSessionTitleWithRuntime,
 	sessionTitleModelRefs,
@@ -129,6 +130,30 @@ describe("session-title extension", () => {
 
 		assert.equal(title, "Reliable session titles");
 		assert.deepEqual(calls, ["get:zai/glm-5-turbo", "complete:zai/glm-5-turbo"]);
+	});
+
+	it("generates extension titles through ModelRegistry completion", async () => {
+		const calls: string[] = [];
+		const model = { provider: "zai", id: "glm-5-turbo" };
+		const title = await generateSessionTitle(
+			"Fix session title generation",
+			{
+				find(provider: string, modelId: string) {
+					calls.push(`find:${provider}/${modelId}`);
+					return model as never;
+				},
+				async complete(selectedModel: { provider: string; id: string }) {
+					calls.push(`complete:${selectedModel.provider}/${selectedModel.id}`);
+					return { content: [{ type: "text", text: "Registry-routed session titles" }] } as never;
+				},
+			},
+			titleConfig(),
+			"zai/glm-5-turbo",
+			new AbortController().signal,
+		);
+
+		assert.equal(title, "Registry-routed session titles");
+		assert.deepEqual(calls, ["find:zai/glm-5-turbo", "complete:zai/glm-5-turbo"]);
 	});
 
 	it("does not generate a missing title from later prompts in an existing unnamed session", async () => {

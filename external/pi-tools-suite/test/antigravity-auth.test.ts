@@ -78,17 +78,17 @@ async function loadProvider(agentDir: string) {
 	return { pi, provider, model };
 }
 
-async function runSimpleStream(provider: any, model: any) {
+async function runSimpleStream(provider: any, model: any, options?: any) {
 	const stream = provider.streamSimple(model, {
 		messages: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
-	});
+	}, options);
 	return await stream.result();
 }
 
-async function refreshViaRegisteredOAuth(agentDir: string) {
+async function refreshViaRegisteredOAuth(agentDir: string, signal = new AbortController().signal) {
 	const { provider } = await loadProvider(agentDir);
 	const auth = JSON.parse(fs.readFileSync(path.join(agentDir, "auth.json"), "utf-8"));
-	return await provider.oauth.refreshToken(auth.antigravity);
+	return await provider.oauth.refreshToken(auth.antigravity, signal);
 }
 
 afterEach(() => {
@@ -150,6 +150,48 @@ describe.serial("Antigravity account rotation", () => {
 
 		expect((refreshed as any).oauthClient).toEqual({ clientId: testClientId, clientSecret: testClientSecret });
 		expect((refreshed as any).accounts).toHaveLength(2);
+	});
+
+	test.serial("propagates the SDK cancellation signal to OAuth refresh", async () => {
+		const agentDir = tempDir();
+		writeJson(path.join(agentDir, "auth.json"), {
+			antigravity: antigravityCredential({ expires: 0 }),
+		});
+		const controller = new AbortController();
+		controller.abort();
+		(globalThis as any).fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+			expect(String(input)).toBe("https://oauth2.googleapis.com/token");
+			expect(init?.signal).toBe(controller.signal);
+			throw new DOMException("Aborted", "AbortError");
+		};
+
+		await expect(refreshViaRegisteredOAuth(agentDir, controller.signal)).rejects.toThrow("Aborted");
+	});
+
+	test.serial("applies nullable header deletion markers before raw fetch", async () => {
+		const agentDir = tempDir();
+		writeJson(path.join(agentDir, "auth.json"), { antigravity: antigravityCredential() });
+		let requestHeaders: Headers | undefined;
+		(globalThis as any).fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = String(input);
+			if (url.includes("/v1internal:streamGenerateContent")) {
+				requestHeaders = new Headers(init?.headers);
+				return new Response('data: {"response":{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}]}}\n\n', {
+					status: 200,
+					headers: { "content-type": "text/event-stream" },
+				});
+			}
+			throw new Error(`Unexpected fetch ${url}`);
+		};
+
+		const { provider, model } = await loadProvider(agentDir);
+		const result = await runSimpleStream(provider, model, {
+			headers: { "Content-Type": null, "X-Test-Header": "present" },
+		});
+
+		expect(result.stopReason).toBe("stop");
+		expect(requestHeaders?.has("Content-Type")).toBeFalse();
+		expect(requestHeaders?.get("X-Test-Header")).toBe("present");
 	});
 
 	test.serial("uses Antigravity OAuth client credentials from the environment when auth.json has only accounts", async () => {

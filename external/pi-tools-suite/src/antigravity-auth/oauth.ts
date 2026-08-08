@@ -221,7 +221,11 @@ export async function addAntigravityAccount(
 	};
 }
 
-async function refreshAccountToken(account: OpencodeAntigravityAccount, oauthClient?: GoogleOAuthClientCredentials): Promise<RefreshedAntigravityAccount> {
+async function refreshAccountToken(
+	account: OpencodeAntigravityAccount,
+	oauthClient?: GoogleOAuthClientCredentials,
+	signal?: AbortSignal,
+): Promise<RefreshedAntigravityAccount> {
 	const refreshToken = getAccountRefreshToken(account);
 	if (!refreshToken) throw new Error(`Missing refresh token for Antigravity account ${account.email ?? "<unknown>"}`);
 	const clientCredentials = getGoogleOAuthClientCredentials(account, oauthClient);
@@ -230,6 +234,7 @@ async function refreshAccountToken(account: OpencodeAntigravityAccount, oauthCli
 	const start = Date.now();
 	const response = await fetch("https://oauth2.googleapis.com/token", {
 		method: "POST",
+		signal,
 		headers: {
 			"Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
 			Accept: "*/*",
@@ -256,7 +261,7 @@ async function refreshAccountToken(account: OpencodeAntigravityAccount, oauthCli
 	};
 }
 
-export async function refreshAntigravityToken(credentials: OAuthCredentials): Promise<OAuthCredentials> {
+export async function refreshAntigravityToken(credentials: OAuthCredentials, signal: AbortSignal): Promise<OAuthCredentials> {
 	const credentialDetails = credentials as OAuthCredentials & PiAuthCredential;
 	const oauthClient = getGoogleOAuthClientCredentials(credentialDetails);
 	const storedAccounts = getStoredAccounts(credentialDetails);
@@ -272,6 +277,7 @@ export async function refreshAntigravityToken(credentials: OAuthCredentials): Pr
 			email: credentialDetails.email,
 		},
 		oauthClient,
+		signal,
 	);
 	return {
 		...refreshed.credentials,

@@ -1,37 +1,31 @@
 import type {
 	Api,
 	AssistantMessage,
-	AssistantMessageEventStream,
 	Context,
 	Model,
+	ModelsApiStreamOptions,
 	SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
+import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 
-type RegisteredProviderConfig = {
-	streamSimple?: (
-		model: Model<Api>,
-		context: Context,
-		options?: SimpleStreamOptions,
-	) => AssistantMessageEventStream;
-};
-
-export type ModelCompletionRegistry = {
-	getRegisteredProviderConfig?(providerId: string): RegisteredProviderConfig | undefined;
-};
+export type ModelCompletionRegistry = Partial<Pick<ModelRegistry, "complete" | "getRegisteredProviderConfig">>;
 
 /**
- * Complete through an extension provider's registered stream when available.
- * Pi 0.80.8+ no longer copies extension streams into pi-ai's global compat
- * registry, so falling back to compat is valid only for built-in APIs.
+ * Complete through Pi's model runtime when available so custom providers and
+ * resolved auth endpoints are preserved. The older stream/compat branches are
+ * retained for narrow test doubles that do not expose ModelRegistry.complete().
  */
 export async function completeWithModelRegistry(
 	modelRegistry: ModelCompletionRegistry | undefined,
 	model: Model<Api>,
 	context: Context,
-	options?: SimpleStreamOptions,
+	options?: ModelsApiStreamOptions<Api>,
 ): Promise<AssistantMessage> {
+	if (modelRegistry?.complete) return modelRegistry.complete(model, context, options);
+
 	const providerConfig = modelRegistry?.getRegisteredProviderConfig?.(model.provider);
-	if (providerConfig?.streamSimple) return providerConfig.streamSimple(model, context, options).result();
-	return completeSimple(model, context, options);
+	const simpleOptions = options as SimpleStreamOptions | undefined;
+	if (providerConfig?.streamSimple) return providerConfig.streamSimple(model, context, simpleOptions).result();
+	return completeSimple(model, context, simpleOptions);
 }

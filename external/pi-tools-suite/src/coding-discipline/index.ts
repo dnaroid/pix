@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { Api, AssistantMessage, ImageContent, Model, TextContent } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessage, ImageContent, Model, ProviderHeaders, TextContent } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 
 import { loadPiToolsSuiteConfig, DEFAULT_CODING_DISCIPLINE_STRICTNESS, type CodingDisciplineStrictness } from "../config.js";
@@ -28,7 +28,7 @@ type ResolvedLookupModel = {
 	modelRegistry: ModelCompletionRegistry;
 	model: Model<Api>;
 	apiKey?: string;
-	headers?: Record<string, string>;
+	headers?: ProviderHeaders;
 	env?: Record<string, string>;
 };
 
@@ -825,7 +825,8 @@ async function resolveLookupModel(ctx: unknown, modelRef: string): Promise<Resol
 	const auth = await registry.getApiKeyAndHeaders(model) as {
 		ok?: true;
 		apiKey?: string;
-		headers?: Record<string, string>;
+		headers?: ProviderHeaders;
+		baseUrl?: string;
 		env?: Record<string, string>;
 	} | { ok: false; error: string };
 	if (auth.ok === false) return undefined;

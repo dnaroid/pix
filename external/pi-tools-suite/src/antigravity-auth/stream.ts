@@ -68,17 +68,21 @@ async function sendAntigravityRequest(
 	const headerStyle = getModelHeaderStyle(model);
 	const endpoints = headerStyle === "gemini-cli" ? [ENDPOINT_PROD] : STREAM_ENDPOINTS;
 	for (const endpoint of endpoints) {
+		const headers = new Headers({
+			Authorization: `Bearer ${apiKey}`,
+			"Content-Type": "application/json",
+			Accept: "text/event-stream",
+			...getAntigravityHeaders(headerStyle),
+			...requestHeaders,
+		});
+		for (const [name, value] of Object.entries(options?.headers ?? {})) {
+			if (value === null) headers.delete(name);
+			else headers.set(name, value);
+		}
 		response = await fetch(`${endpoint}/v1internal:streamGenerateContent?alt=sse`, {
 			method: "POST",
 			signal: options?.signal,
-			headers: {
-				Authorization: `Bearer ${apiKey}`,
-				"Content-Type": "application/json",
-				Accept: "text/event-stream",
-				...getAntigravityHeaders(headerStyle),
-				...requestHeaders,
-				...(options?.headers ?? {}),
-			},
+			headers,
 			body: JSON.stringify(payload),
 		});
 		await options?.onResponse?.({ status: response.status, headers: Object.fromEntries(response.headers.entries()) }, model);
