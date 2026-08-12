@@ -1,4 +1,5 @@
 import { resolveColor, type ResolvedToolRule } from "../../config.js";
+import { renderMarkdownLine } from "../../markdown-format.js";
 import type { ToolBodySyntaxHighlight, ToolBodySyntaxHighlights } from "../../syntax-highlight.js";
 import { expandTabs, sliceByDisplayWidth, stringDisplayWidth, wrapDisplayLineByWords } from "../../terminal-width.js";
 import type { Theme } from "../../theme.js";
@@ -337,9 +338,16 @@ function renderToolBodyLines(
 		const lspDiagnosticStyle = hasLspDiagnostics ? lspDiagnosticLineStyle(displayLine, colors) : undefined;
 		const bodyLineStyle = bodyLineStyleForLine(bodyLineStyles, absoluteRawLineIndex, colors);
 		const lineSyntaxHighlight = syntaxHighlightForLine(syntaxHighlight, absoluteRawLineIndex);
+		const markdownLine = lineSyntaxHighlight?.language === "markdown"
+			? renderMarkdownLine(displayLine, lineSyntaxHighlight.startColumn ?? 0)
+			: undefined;
+		const syntaxDisplayLine = markdownLine?.text ?? displayLine;
 		const wrappedLines = ansiLine && !diffStyle && !lspDiagnosticStyle && !bodyLineStyle && !lineSyntaxHighlight
 			? wrapAnsiStyledDisplayLine(ansiLine, bodyWidth)
-			: wrapBodyLine(displayLine, bodyWidth).map((wrapped) => ({ text: wrapped, segments: [] as StyledSegment[] }));
+			: wrapBodyLine(syntaxDisplayLine, bodyWidth).map((wrapped) => ({ text: wrapped, segments: [] as StyledSegment[] }));
+		const wrappedSourceRanges = lineSyntaxHighlight && wrappedLines.length > 1
+			? sourceRangesForWrappedLines(syntaxDisplayLine, wrappedLines.map((line) => line.text))
+			: [];
 		for (const [wrapIndex, wrapped] of wrappedLines.entries()) {
 			const line: RenderedLine = {
 				text: `${displayPrefix}${wrapped.text}`,
@@ -369,8 +377,32 @@ function renderToolBodyLines(
 				];
 			} else if (lineSyntaxHighlight) {
 				const rawStart = wrapIndex === 0 ? lineSyntaxHighlight.startColumn ?? 0 : 0;
-				line.syntaxHighlight = { language: lineSyntaxHighlight.language, start: Math.min(line.text.length, displayPrefix.length + rawStart) };
-				if (gutterSegment) line.segments = [gutterSegment];
+				const sourceRange = wrappedSourceRanges[wrapIndex];
+				const markdownSegments = sourceRange
+					? markdownLine?.segments.flatMap((segment) => shiftStyledSegmentToRange(segment, sourceRange)) ?? []
+					: markdownLine?.segments ?? [];
+				line.syntaxHighlight = {
+					language: lineSyntaxHighlight.language,
+					start: Math.min(line.text.length, displayPrefix.length + rawStart),
+					...(sourceRange ? {
+						context: {
+							text: syntaxDisplayLine,
+							rangeStart: sourceRange.start,
+							rangeEnd: sourceRange.end,
+							renderStart: displayPrefix.length,
+							syntaxStart: lineSyntaxHighlight.startColumn ?? 0,
+						},
+					} : {}),
+				};
+				const syntaxSegments = [
+					...(gutterSegment ? [gutterSegment] : []),
+					...markdownSegments.map((segment) => ({
+						...segment,
+						start: segment.start + displayPrefix.length,
+						end: segment.end + displayPrefix.length,
+					})),
+				];
+				if (syntaxSegments.length > 0) line.segments = syntaxSegments;
 			} else if (wrapped.segments.length > 0) {
 				line.segments = [
 					...(gutterSegment ? [gutterSegment] : []),
@@ -395,6 +427,29 @@ function renderToolBodyLines(
 		}
 	}
 	return lines;
+}
+
+function shiftStyledSegmentToRange(
+	segment: StyledSegment,
+	range: { start: number; end: number },
+): StyledSegment[] {
+	const start = Math.max(segment.start, range.start);
+	const end = Math.min(segment.end, range.end);
+	if (end <= start) return [];
+	return [{ ...segment, start: start - range.start, end: end - range.start }];
+}
+
+function sourceRangesForWrappedLines(text: string, wrappedLines: readonly string[]): { start: number; end: number }[] {
+	const ranges: { start: number; end: number }[] = [];
+	let cursor = 0;
+	for (const wrapped of wrappedLines) {
+		const found = text.indexOf(wrapped, cursor);
+		const start = found === -1 ? cursor : found;
+		const end = Math.min(text.length, start + wrapped.length);
+		ranges.push({ start, end });
+		cursor = end;
+	}
+	return ranges;
 }
 
 export type AnsiStyledLine = {

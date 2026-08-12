@@ -21,6 +21,19 @@ export type SyntaxHighlightLanguage =
 export type SyntaxLineHighlight = {
 	language: SyntaxHighlightLanguage;
 	start: number;
+	context?: SyntaxHighlightContext;
+};
+
+export type SyntaxHighlightContext = {
+	/** Complete logical line, before it was soft-wrapped for display. */
+	text: string;
+	/** Source range represented by this visual line. */
+	rangeStart: number;
+	rangeEnd: number;
+	/** Visual column where rangeStart is rendered. */
+	renderStart: number;
+	/** Source column where syntax parsing begins. */
+	syntaxStart: number;
 };
 
 export type ToolBodySyntaxHighlight = {
@@ -170,10 +183,34 @@ export function syntaxHighlightSegmentsForLine(
 	highlight: SyntaxLineHighlight,
 	colors: Theme["colors"],
 ): SyntaxHighlightSegment[] {
+	if (highlight.context) return contextualSyntaxSegments(highlight.language, highlight.context, colors);
 	const start = Math.max(0, Math.min(text.length, highlight.start));
 	if (start >= text.length) return [];
 	const segments = localSyntaxSegments(text.slice(start), highlight.language, colors);
 	return segments.map((segment) => ({ ...segment, start: segment.start + start, end: segment.end + start }));
+}
+
+function contextualSyntaxSegments(
+	language: SyntaxHighlightLanguage,
+	context: SyntaxHighlightContext,
+	colors: Theme["colors"],
+): SyntaxHighlightSegment[] {
+	const syntaxStart = Math.max(0, Math.min(context.text.length, context.syntaxStart));
+	const rangeStart = Math.max(0, Math.min(context.text.length, context.rangeStart));
+	const rangeEnd = Math.max(rangeStart, Math.min(context.text.length, context.rangeEnd));
+	const segments = localSyntaxSegments(context.text.slice(syntaxStart), language, colors)
+		.map((segment) => ({ ...segment, start: segment.start + syntaxStart, end: segment.end + syntaxStart }));
+
+	return segments.flatMap((segment) => {
+		const start = Math.max(segment.start, rangeStart);
+		const end = Math.min(segment.end, rangeEnd);
+		if (end <= start) return [];
+		return [{
+			...segment,
+			start: context.renderStart + start - rangeStart,
+			end: context.renderStart + end - rangeStart,
+		}];
+	});
 }
 
 function localSyntaxSegments(code: string, language: SyntaxHighlightLanguage, colors: Theme["colors"]): SyntaxHighlightSegment[] {

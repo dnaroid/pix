@@ -22,7 +22,7 @@ export class ScreenStyler {
 			...(line?.backgroundOverride === undefined ? {} : { background: line.backgroundOverride }),
 		};
 		const colors = this.host.theme.colors;
-		const markdownLine = line?.syntaxHighlight?.language === "markdown"
+		const markdownLine = line?.syntaxHighlight?.language === "markdown" && !line.syntaxHighlight.context
 			? renderMarkdownDisplayLine(line.text, width, line.syntaxHighlight.start)
 			: undefined;
 		const text = markdownLine?.text ?? line?.text ?? "";

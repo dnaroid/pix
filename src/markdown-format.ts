@@ -12,6 +12,8 @@ export type RenderedMarkdownLine = {
 	continuesOnNextLine?: boolean;
 	segments: readonly { start: number; end: number; bold: true }[];
 	heading?: boolean;
+	sourceStart?: number;
+	sourceEnd?: number;
 };
 
 export type RenderedMarkdownTextLine = {
@@ -149,13 +151,26 @@ export function renderMarkdownTextLines(text: string, width: number, start = 0, 
 
 		const isHeadingLine = !fence && /^\s{0,3}#{1,6}\s/.test(rawLine);
 		const markdownLine = syntaxHighlight?.language === "markdown" || isHeadingLine ? renderMarkdownLine(rawLine) : undefined;
-		for (const wrapped of wrapRenderedMarkdownLine(markdownLine ?? { text: rawLine, segments: [] }, width, options)) {
+		const logicalLine = markdownLine ?? { text: rawLine, segments: [] };
+		for (const wrapped of wrapRenderedMarkdownLine(logicalLine, width, options)) {
+			const wrappedSyntaxHighlight = syntaxHighlight && wrapped.sourceStart !== undefined && wrapped.sourceEnd !== undefined
+				? {
+					...syntaxHighlight,
+					context: {
+						text: logicalLine.text,
+						rangeStart: wrapped.sourceStart,
+						rangeEnd: wrapped.sourceEnd,
+						renderStart: start,
+						syntaxStart: 0,
+					},
+				}
+				: syntaxHighlight;
 			lines.push({
 				text: wrapped.text,
 				...(wrapped.copyText === undefined ? {} : { copyText: wrapped.copyText }),
 				...(wrapped.continuesOnNextLine ? { continuesOnNextLine: true } : {}),
 				...(wrapped.segments.length > 0 ? { segments: wrapped.segments } : {}),
-				...(syntaxHighlight ? { syntaxHighlight } : {}),
+				...(wrappedSyntaxHighlight ? { syntaxHighlight: wrappedSyntaxHighlight } : {}),
 				...(isHeadingLine ? { heading: true } : {}),
 			});
 		}
@@ -204,6 +219,8 @@ function wrapRenderedMarkdownLine(line: RenderedMarkdownLine, width: number, opt
 		copyText: line.text.slice(range.start, ranges[index + 1]?.start ?? range.end),
 		...(index < ranges.length - 1 ? { continuesOnNextLine: true } : {}),
 		segments: line.segments.flatMap((segment) => shiftSegmentToRange(segment, range.start, range.end)),
+		sourceStart: range.start,
+		sourceEnd: range.end,
 	}));
 }
 

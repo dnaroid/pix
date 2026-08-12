@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import type { ResolvedToolRule } from "../src/config.js";
 import { APP_ICONS, setAppIconTheme } from "../src/app/icons.js";
 import { renderToolBlock, type ToolBlockEntry } from "../src/app/rendering/tool-block-renderer.js";
+import { syntaxHighlightSegmentsForLine } from "../src/syntax-highlight.js";
 import { stringDisplayWidth } from "../src/terminal-width.js";
 import { THEMES } from "../src/theme.js";
 
@@ -321,6 +322,28 @@ describe("renderToolBlock", () => {
 
 		assert.equal(lines[1]?.colorOverride, colors.statusForeground);
 		assert.deepEqual(lines[1]?.syntaxHighlight, { language: "typescript", start: 2 });
+	});
+
+	it("keeps wrapped markdown inline code literal and highlighted", () => {
+		const lines = renderToolBlock(toolEntry({
+			id: "tool-markdown-wrap",
+			toolName: "read",
+			headerArgs: "README.md",
+			output: "prefix `inline **literal** crossing words` suffix",
+			collapsedBody: "prefix `inline **literal** crossing words` suffix",
+			expandedText: "prefix `inline **literal** crossing words` suffix",
+			syntaxHighlight: { language: "markdown", startLine: 0, startColumn: 0 },
+		}), rule, 18, colors);
+		const body = lines.slice(1);
+		const plain = body.map((line) => line.text.slice(2)).join("");
+		const highlighted = body.flatMap((line) => line.syntaxHighlight
+			? syntaxHighlightSegmentsForLine(line.text, line.syntaxHighlight, colors)
+				.filter((segment) => segment.foreground === colors.success)
+			: []);
+
+		assert.match(plain, /\*\*literal\*\*/u);
+		assert(highlighted.length > 1);
+		assert(body.slice(0, -1).every((line) => line.continuesOnNextLine));
 	});
 
 	it("preserves ANSI styling in expanded body output", () => {

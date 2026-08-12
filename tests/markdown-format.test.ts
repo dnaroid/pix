@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { formatMarkdownTables, isOnlyHiddenMetadata, renderMarkdownLine, renderMarkdownTextLines, stripDcpControlMetadata } from "../src/markdown-format.js";
+import { syntaxHighlightSegmentsForLine } from "../src/syntax-highlight.js";
+import { THEMES } from "../src/theme.js";
 import { stringDisplayWidth } from "../src/terminal-width.js";
 
 describe("formatMarkdownTables", () => {
@@ -224,6 +226,64 @@ describe("formatMarkdownTables", () => {
 });
 
 describe("renderMarkdownTextLines", () => {
+	it("keeps inline markdown highlighting across soft wraps", () => {
+		const samples = [
+			{ text: "prefix `inline code crossing words` suffix", color: THEMES.dark.colors.success },
+			{ text: "prefix *emphasis crossing words* suffix", color: THEMES.dark.colors.accent },
+			{ text: "prefix [linked words crossing](https://example.test/path) suffix", color: THEMES.dark.colors.accent },
+		];
+
+		for (const sample of samples) {
+			const lines = renderMarkdownTextLines(sample.text, 14);
+			const highlightedText = lines
+				.flatMap((line) => line.syntaxHighlight
+					? syntaxHighlightSegmentsForLine(line.text, line.syntaxHighlight, THEMES.dark.colors)
+						.filter((segment) => segment.foreground === sample.color)
+						.map((segment) => line.text.slice(segment.start, segment.end))
+					: [])
+				.join("");
+
+			assert(highlightedText.length > 14, `expected highlighting on multiple wrapped lines for ${sample.text}`);
+		}
+	});
+
+	it("keeps strong markers literal inside wrapped inline code", () => {
+		const lines = renderMarkdownTextLines("prefix `inline **literal** crossing words` suffix", 14);
+
+		assert.equal(lines.map((line) => line.text).join(" ").includes("**literal**"), true);
+		assert.deepEqual(lines.flatMap((line) => line.segments ?? []), []);
+	});
+
+	it("keeps heading highlighting across soft wraps", () => {
+		const lines = renderMarkdownTextLines("## Heading words crossing several lines", 14);
+
+		assert(lines.length > 1);
+		for (const line of lines) {
+			const segments = syntaxHighlightSegmentsForLine(line.text, line.syntaxHighlight!, THEMES.dark.colors);
+			assert.deepEqual(segments, [{
+				start: 0,
+				end: line.text.length,
+				foreground: THEMES.dark.colors.heading,
+				bold: true,
+			}]);
+		}
+	});
+
+	it("keeps fenced-code strings and comments highlighted across soft wraps", () => {
+		const [fence, ...bodyAndFence] = renderMarkdownTextLines([
+			"```ts",
+			'const message = "a very long string crossing words"; // trailing comment crossing too',
+			"```",
+		].join("\n"), 14);
+		const body = bodyAndFence.slice(0, -1);
+
+		assert.equal(fence?.text, "```ts");
+		const colors = body.flatMap((line) => syntaxHighlightSegmentsForLine(line.text, line.syntaxHighlight!, THEMES.dark.colors))
+			.map((segment) => segment.foreground);
+		assert(colors.filter((color) => color === THEMES.dark.colors.success).length > 1);
+		assert(colors.filter((color) => color === THEMES.dark.colors.muted).length > 1);
+	});
+
 	it("uses the fenced code language for code block contents", () => {
 		const lines = renderMarkdownTextLines("```typescript\nconst answer = true;\n```", 80);
 
