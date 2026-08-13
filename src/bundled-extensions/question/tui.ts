@@ -127,7 +127,7 @@ function clampIndex(index: number, length: number): number {
 	return Math.max(0, Math.min(Math.max(0, length - 1), index));
 }
 
-export async function runQuestionnaire(questions: NormalizedQuestion[], ctx: QuestionUiContext): Promise<QuestionSelection[] | null> {
+export async function runQuestionnaire(questions: NormalizedQuestion[], ctx: QuestionUiContext): Promise<QuestionSelection[] | null | undefined> {
 	return ctx.ui.custom<QuestionSelection[] | null>((tui, theme, _keybindings, done) => {
 		const selections = new Map<string, QuestionSelection>();
 		const customDrafts = new Map<string, string>();

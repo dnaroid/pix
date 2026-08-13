@@ -75,7 +75,7 @@ export interface QuestionToolResult {
 export interface QuestionUiContext {
 	hasUI?: boolean;
 	ui: {
-		custom<T>(factory: (tui: QuestionTui, theme: QuestionTheme, keybindings: unknown, done: (value: T) => void) => QuestionComponent): Promise<T>;
+		custom<T>(factory: (tui: QuestionTui, theme: QuestionTheme, keybindings: unknown, done: (value: T) => void) => QuestionComponent): Promise<T | undefined>;
 		setEditorText?(text: string): void;
 		getEditorText?(): string;
 		notify?(message: string, level: "info" | "warning" | "error"): void;

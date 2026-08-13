@@ -114,7 +114,7 @@ describe("ExtensionUiController custom UI", () => {
 		assert.ok(renders.count >= 2);
 	});
 
-	it("discards custom UI requested by a scope that no longer owns the editor", async () => {
+	it("keeps custom UI requested by an inactive scope until that tab becomes active", async () => {
 		const { controller, activeScope } = createController();
 		activeScope.value = "tab-b";
 		const ctxA = controller.createExtensionUIContext("tab-a");
@@ -131,17 +131,20 @@ describe("ExtensionUiController custom UI", () => {
 		assert.deepEqual(controller.handleTerminalInput("1"), { consume: false });
 
 		activeScope.value = "tab-a";
-		assert.equal(controller.renderActiveCustomUi(80), undefined);
-		assert.equal(await resultPromise, undefined);
+		assert.deepEqual(controller.renderActiveCustomUi(80), ["question panel"]);
+		assert.equal(controller.handleTerminalInput("1").consume, true);
+		assert.equal(await resultPromise, "one");
 	});
 
-	it("reserves async custom UI immediately and discards it after its scope changes", async () => {
+	it("reserves async custom UI immediately and keeps it pending while its scope is inactive", async () => {
 		const { controller, activeScope, input } = createController("tab a draft");
 		activeScope.value = "tab-a";
 		const ctxA = controller.createExtensionUIContext("tab-a");
 		let resolveFactory!: (component: { render(): string[]; dispose(): void }) => void;
+		let done!: (value: string) => void;
 		let disposed = 0;
-		const first = ctxA.custom<string>((async () => await new Promise((resolve) => {
+		const first = ctxA.custom<string>((async (_tui, _theme, _keys, complete) => await new Promise((resolve) => {
+			done = complete;
 			resolveFactory = resolve;
 		})) as never);
 
@@ -150,10 +153,17 @@ describe("ExtensionUiController custom UI", () => {
 		input.value = "tab b draft";
 		resolveFactory({ render: () => ["late panel"], dispose: () => { disposed += 1; } });
 
-		assert.equal(await first, undefined);
-		assert.equal(disposed, 1);
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		assert.equal(disposed, 0);
 		assert.equal(input.value, "tab b draft");
 		assert.equal(controller.renderActiveCustomUi(80), undefined);
+		activeScope.value = "tab-a";
+		input.value = "tab a restored draft";
+		assert.deepEqual(controller.renderActiveCustomUi(80), ["late panel"]);
+		done("answered");
+		assert.equal(await first, "answered");
+		assert.equal(input.value, "tab a draft");
+		assert.equal(disposed, 1);
 	});
 
 	it("ignores late completion from a canceled reservation without closing its replacement", async () => {

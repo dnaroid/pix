@@ -39,7 +39,7 @@ type ActiveCustomUi = {
 	key: string;
 	scopeKey: string;
 	component?: FocusedCustomComponent;
-	savedInput: string;
+	savedInput?: string;
 	settled: boolean;
 	resolve(value: unknown): void;
 	reject(error: unknown): void;
@@ -490,15 +490,14 @@ export class ExtensionUiController {
 	): Promise<T> {
 		if (!this.host.isRunning()) return undefined as T;
 		const scopeKey = this.normalizeScopeKey(options.scopeKey);
-		if (!this.isScopeActive(scopeKey)) return undefined as T;
 		if (this.activeCustomUis.has(scopeKey)) throw new Error("Another extension custom UI is already active.");
-		const savedInput = options.savedInput ?? this.host.getInput();
+		const savedInput = options.savedInput ?? (this.isScopeActive(scopeKey) ? this.host.getInput() : undefined);
 
 		return await new Promise<T>((resolve, reject) => {
 			const active: ActiveCustomUi = {
 				key: CUSTOM_UI_WIDGET_KEY,
 				scopeKey,
-				savedInput,
+				...(savedInput === undefined ? {} : { savedInput }),
 				settled: false,
 				resolve: (value) => resolve(value as T),
 				reject,
@@ -508,7 +507,7 @@ export class ExtensionUiController {
 
 			const done = (value: T): void => {
 				if (active.settled || this.activeCustomUis.get(scopeKey) !== active) return;
-				this.finishActiveCustomUi(active, this.isScopeActive(scopeKey) ? value : undefined, { resolve: true });
+				this.finishActiveCustomUi(active, value, { resolve: true });
 			};
 
 			void (async () => {
@@ -520,16 +519,13 @@ export class ExtensionUiController {
 						done as never,
 					);
 
-					if (active.settled || this.activeCustomUis.get(scopeKey) !== active || !this.isScopeActive(scopeKey)) {
+					if (active.settled || this.activeCustomUis.get(scopeKey) !== active) {
 						component.dispose?.();
-						if (!active.settled && this.activeCustomUis.get(scopeKey) === active) {
-							this.finishActiveCustomUi(active, undefined, { resolve: true });
-						}
 						return;
 					}
 
 					active.component = component;
-					if (this.host.isRunning()) this.host.render();
+					if (this.host.isRunning() && this.isScopeActive(scopeKey)) this.host.render();
 				} catch (error) {
 					if (active.settled || this.activeCustomUis.get(scopeKey) !== active) return;
 					this.finishActiveCustomUi(active, error, { resolve: false });
@@ -553,7 +549,9 @@ export class ExtensionUiController {
 		if (active.settled || this.activeCustomUis.get(active.scopeKey) !== active) return;
 		active.settled = true;
 		this.activeCustomUis.delete(active.scopeKey);
-		if (this.isScopeActive(active.scopeKey) && this.host.getInput() !== active.savedInput) this.host.setInput(active.savedInput);
+		if (this.isScopeActive(active.scopeKey) && active.savedInput !== undefined && this.host.getInput() !== active.savedInput) {
+			this.host.setInput(active.savedInput);
+		}
 		try {
 			active.component?.dispose?.();
 		} catch {
@@ -572,7 +570,9 @@ export class ExtensionUiController {
 	private activeCustomUiForActiveScope(): ActiveCustomUi | undefined {
 		const scopeKey = this.activeScopeKey();
 		if (!this.isScopeActive(scopeKey)) return undefined;
-		return this.activeCustomUis.get(scopeKey);
+		const active = this.activeCustomUis.get(scopeKey);
+		if (active && active.savedInput === undefined) active.savedInput = this.host.getInput();
+		return active;
 	}
 
 	private isScopeActive(scopeKey: string): boolean {

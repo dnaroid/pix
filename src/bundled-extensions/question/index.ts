@@ -23,7 +23,7 @@ export default function questionExtension(pi: ExtensionApiLike): void {
 			const questions = normalizeQuestionInput(params);
 			if (!ctx.hasUI) return createQuestionToolResult(createCanceledQuestionResult("ui_unavailable", questions), questions);
 			const selections = await runQuestionnaire(questions, ctx);
-			if (selections === null) return createQuestionToolResult(createCanceledQuestionResult("user_canceled"), questions);
+			if (selections == null) return createQuestionToolResult(createCanceledQuestionResult("user_canceled"), questions);
 			return createQuestionToolResult(createSuccessfulQuestionResult(questions, selections), questions);
 		},
 	});

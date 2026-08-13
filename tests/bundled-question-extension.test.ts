@@ -16,8 +16,38 @@ import {
 	getBundledExtensionPaths,
 	prioritizeBundledQuestionExtension,
 } from "../src/app/runtime.js";
+import questionExtension from "../src/bundled-extensions/question/index.js";
 
 describe("bundled extensions", () => {
+	it("treats an unavailable scoped question UI as cancellation", async () => {
+		let tool: { execute(...args: unknown[]): Promise<{ details: { canceled: boolean; reason?: string } }> } | undefined;
+		questionExtension({
+			registerTool(registered) {
+				tool = registered as typeof tool;
+			},
+		});
+
+		const result = await tool!.execute(
+			"call-1",
+			{
+				questions: [{
+					id: "scope",
+					label: "Scope",
+					prompt: "Which scope?",
+					choices: [
+						{ value: "small", label: "Small" },
+						{ value: "large", label: "Large" },
+					],
+				}],
+			},
+			undefined,
+			undefined,
+			{ hasUI: true, ui: { custom: async () => undefined } },
+		);
+
+		assert.deepEqual(result.details, { answers: [], canceled: true, reason: "user_canceled" });
+	});
+
 	it("ships the renderer-owned extensions from the project extensions directory", async () => {
 		const questionExtensionPath = bundledQuestionExtensionPath();
 		const sessionTitleExtensionPath = bundledSessionTitleExtensionPath();
