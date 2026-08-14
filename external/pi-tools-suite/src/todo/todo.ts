@@ -91,6 +91,7 @@ interface TodoToolHooks {
 interface TodoToolRegistrationOptions extends TodoToolHooks {
 	promptSnippet?: string;
 	promptGuidelines?: string[];
+	parameters?: typeof TodoParamsSchema;
 }
 
 type TodoStateEventContext = { sessionManager?: { getSessionFile?: () => unknown; getSessionId?: () => unknown } };
@@ -391,7 +392,7 @@ export function registerTodoTool(pi: ExtensionAPI, hooks: TodoToolRegistrationOp
 		label: TOOL_LABEL,
 		promptSnippet: hooks.promptSnippet ?? DEFAULT_PROMPT_SNIPPET,
 		promptGuidelines: hooks.promptGuidelines ?? DEFAULT_PROMPT_GUIDELINES,
-		parameters: TodoParamsSchema,
+		parameters: hooks.parameters ?? TodoParamsSchema,
 
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
 			activateTodoStateScope(_ctx);

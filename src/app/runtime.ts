@@ -334,12 +334,59 @@ export function resolveSessionModelRefFromTail(entries: readonly SessionEntry[])
 	return thinkingLevel ? `${modelRef}:${thinkingLevel}` : modelRef;
 }
 
+const GLM_53_THINKING_LEVEL_MAP = {
+	off: null,
+	minimal: null,
+	low: "low",
+	medium: null,
+	high: "high",
+	xhigh: null,
+	max: "max",
+} as const;
+
+type Glm53ThinkingModelLike = {
+	id?: unknown;
+	reasoning?: unknown;
+	thinkingLevelMap?: unknown;
+	compat?: unknown;
+};
+
+/**
+ * pi-ai 0.84.2 predates GLM-5.3's final thinking contract. The released model
+ * is always-thinking and accepts exactly low/high/max via reasoning_effort.
+ * Patch the mutable catalog model before AgentSession clamps the selected level.
+ */
+export function patchGlm53ThinkingMetadata(model: unknown): boolean {
+	if (!model || typeof model !== "object" || Array.isArray(model)) return false;
+	const candidate = model as Glm53ThinkingModelLike;
+	if (candidate.id !== "glm-5.3") return false;
+	if (!candidate.compat || typeof candidate.compat !== "object" || Array.isArray(candidate.compat)) return false;
+	const compat = candidate.compat as Record<string, unknown>;
+	if (compat.thinkingFormat !== "zai") return false;
+
+	candidate.reasoning = true;
+	candidate.thinkingLevelMap = { ...GLM_53_THINKING_LEVEL_MAP };
+	candidate.compat = { ...compat, supportsReasoningEffort: true };
+	return true;
+}
+
+export function patchPixModelRuntimeCompatibility(
+	modelRuntime: Pick<AgentSessionServices["modelRuntime"], "getModels">,
+): number {
+	let patched = 0;
+	for (const model of modelRuntime.getModels()) {
+		if (patchGlm53ThinkingMetadata(model)) patched += 1;
+	}
+	return patched;
+}
+
 export async function refreshPixModelRuntimeForStartup(
-	modelRuntime: Pick<AgentSessionServices["modelRuntime"], "refresh">,
+	modelRuntime: Pick<AgentSessionServices["modelRuntime"], "refresh" | "getModels">,
 ): Promise<void> {
 	// Startup only needs the locally configured model catalog. Remote catalog
 	// refreshes belong to explicit model-management flows and must not block boot.
 	await modelRuntime.refresh({ allowNetwork: false });
+	patchPixModelRuntimeCompatibility(modelRuntime);
 }
 
 export async function createPixRuntime(options: AppOptions, runtimeOptions: CreatePixRuntimeOptions = {}): Promise<AgentSessionRuntime> {

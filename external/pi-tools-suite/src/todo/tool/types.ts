@@ -24,7 +24,8 @@ export const MSG_NO_TODOS = "No todos yet. Ask the agent to add some!";
 // ---------------------------------------------------------------------------
 
 export type TaskStatus = "pending" | "in_progress" | "deferred" | "completed" | "deleted";
-export type TodoThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+export const TODO_THINKING_LEVEL_VALUES = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+export type TodoThinkingLevel = (typeof TODO_THINKING_LEVEL_VALUES)[number];
 
 export type TaskAction = "create" | "update" | "batch_create" | "batch_update" | "list" | "get" | "delete" | "clear" | "export" | "import";
 
@@ -104,7 +105,7 @@ export const TodoParamsSchema = Type.Object({
 		}),
 	),
 	thinking: Type.Optional(
-		StringEnum(["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const, {
+		StringEnum(TODO_THINKING_LEVEL_VALUES, {
 			description: "Per-task thinking level used when todoThinking is enabled and this task is in_progress",
 		}),
 	),
@@ -163,5 +164,21 @@ export const TodoParamsSchema = Type.Object({
 	content: Type.Optional(Type.String({ description: "Import content for action=import" })),
 	replace: Type.Optional(Type.Boolean({ description: "For import/create/batch_create, replace existing tasks instead of appending. Use batch_create with replace:true when starting a new plan that supersedes old unfinished todos. Default: false." })),
 });
+
+export function todoParamsSchemaForThinkingLevels(levels: readonly TodoThinkingLevel[]): typeof TodoParamsSchema {
+	const supported = TODO_THINKING_LEVEL_VALUES.filter((level) => levels.includes(level));
+	const effective = supported.length > 0 ? supported : ["off"];
+	return {
+		...TodoParamsSchema,
+		properties: {
+			...TodoParamsSchema.properties,
+			thinking: Type.Optional(
+				StringEnum(effective as unknown as typeof TODO_THINKING_LEVEL_VALUES, {
+					description: "Per-task thinking level used when todoThinking is enabled and this task is in_progress",
+				}),
+			),
+		},
+	} as typeof TodoParamsSchema;
+}
 
 export type TodoParams = Static<typeof TodoParamsSchema>;

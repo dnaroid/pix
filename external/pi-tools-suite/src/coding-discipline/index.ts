@@ -49,6 +49,16 @@ const SILENCE_REMINDER_MIN_MESSAGE_GAP = 20;
 // truncation), the chatter baseline is reset so it isn't measured against a stale peak.
 const SILENCE_REMINDER_COMPACTION_MARGIN = 8;
 const LOOKUP_TOOL_NAME = "lookup";
+const GLM_53_THINKING_LEVEL_MAP = {
+	off: null,
+	minimal: null,
+	low: "low",
+	medium: null,
+	high: "high",
+	xhigh: null,
+	max: "max",
+} as const;
+const GLM_53_THINKING_LEVELS = ["low", "high", "max"] as const;
 
 const LOOKUP_TOOL_PARAMS = Type.Object(
 	{
@@ -203,13 +213,17 @@ export default function codingDiscipline(pi: ExtensionAPI) {
 	maybeRegisterLookupTool(process.cwd());
 
 	pi.on("session_start", async (_event: unknown, ctx: unknown) => {
+		patchGlm53ThinkingModels(ctx);
 		selectedModelRef = modelRefFromContext(ctx);
+		normalizeCurrentGlm53ThinkingLevel(pi, selectedModelRef);
 		maybeRegisterLookupTool(contextCwd(ctx));
 		syncLookupToolAvailability(selectedModelRef, contextCwd(ctx));
 	});
 
 	pi.on("model_select", async (event: { model?: unknown }, ctx: unknown) => {
+		patchGlm53ThinkingModels(ctx, event.model);
 		selectedModelRef = modelRefFromModel(event.model) ?? modelRefFromContext(ctx);
+		normalizeCurrentGlm53ThinkingLevel(pi, selectedModelRef);
 		maybeRegisterLookupTool(contextCwd(ctx));
 		syncLookupToolAvailability(selectedModelRef, contextCwd(ctx));
 	});
@@ -222,10 +236,11 @@ export default function codingDiscipline(pi: ExtensionAPI) {
 			lookupEnabled: Boolean(lookupModelFromConfig(cwd)),
 			strictness: codingDisciplineStrictnessFromConfig(cwd),
 		});
+		const corrected = applyGlm53ThinkingToPayload(injected, modelRef, ctx, pi);
 		if (process.env.PI_DEBUG_PROMPT === "1") {
-			logFinalPrompt(injected, modelRef, contextCwd(ctx) ?? process.cwd());
+			logFinalPrompt(corrected, modelRef, contextCwd(ctx) ?? process.cwd());
 		}
-		return injected;
+		return corrected;
 	});
 
 	pi.on("before_agent_start", async (event: { systemPromptOptions?: unknown; systemPrompt?: string }, ctx: unknown) => {
@@ -348,6 +363,83 @@ export function buildCodingDisciplinePrompt(options: DisciplinePromptOptions = {
 export function isGlmModel(modelRef: string | undefined): boolean {
 	if (!modelRef) return false;
 	return /(?:^|[/:_.-])glm(?:$|[/:_.-]|\d)/i.test(modelRef);
+}
+
+function isGlm53ModelRef(modelRef: string | undefined): boolean {
+	if (!modelRef) return false;
+	return /(?:^|\/)glm-5\.3(?:$|:)/i.test(modelRef) || /^glm-5\.3(?:$|:)/i.test(modelRef);
+}
+
+function patchGlm53ThinkingModel(model: unknown): boolean {
+	if (!isRecord(model)) return false;
+	const id = typeof model.id === "string"
+		? model.id
+		: typeof model.modelId === "string"
+			? model.modelId
+			: undefined;
+	if (id !== "glm-5.3") return false;
+	const provider = typeof model.provider === "string" ? model.provider : undefined;
+	const compat = isRecord(model.compat) ? model.compat : {};
+	if (provider !== "zai" && provider !== "zai-coding-cn" && compat.thinkingFormat !== "zai") return false;
+
+	model.reasoning = true;
+	model.thinkingLevelMap = { ...GLM_53_THINKING_LEVEL_MAP };
+	model.compat = { ...compat, supportsReasoningEffort: true };
+	return true;
+}
+
+function patchGlm53ThinkingModels(ctx: unknown, selectedModel?: unknown): void {
+	patchGlm53ThinkingModel(selectedModel);
+	if (!isRecord(ctx)) return;
+	patchGlm53ThinkingModel(ctx.model);
+
+	if (Array.isArray(ctx.scopedModels)) {
+		for (const entry of ctx.scopedModels) {
+			if (isRecord(entry)) patchGlm53ThinkingModel(entry.model);
+		}
+	}
+
+	const registry = ctx.modelRegistry;
+	if (!isRecord(registry) || typeof registry.getAll !== "function") return;
+	try {
+		const models = registry.getAll();
+		if (Array.isArray(models)) {
+			for (const model of models) patchGlm53ThinkingModel(model);
+		}
+	} catch {
+		// Compatibility patching must never break session startup.
+	}
+}
+
+function normalizeGlm53ThinkingLevel(level: unknown): (typeof GLM_53_THINKING_LEVELS)[number] {
+	if (level === "low" || level === "high" || level === "max") return level;
+	if (level === "off" || level === "minimal") return "low";
+	if (level === "medium") return "high";
+	return "max";
+}
+
+function normalizeCurrentGlm53ThinkingLevel(pi: ExtensionAPI, modelRef: string | undefined): void {
+	if (!isGlm53ModelRef(modelRef)) return;
+	const getter = (pi as { getThinkingLevel?: () => unknown }).getThinkingLevel;
+	const setter = (pi as { setThinkingLevel?: (level: string) => void }).setThinkingLevel;
+	if (!getter || !setter) return;
+	const current = getter.call(pi);
+	const normalized = normalizeGlm53ThinkingLevel(current);
+	if (current !== normalized) setter.call(pi, normalized);
+}
+
+function applyGlm53ThinkingToPayload(payload: unknown, modelRef: string | undefined, ctx: unknown, pi: ExtensionAPI): unknown {
+	if (!isGlm53ModelRef(modelRef) || !isRecord(payload)) return payload;
+	const getter = (pi as { getThinkingLevel?: () => unknown }).getThinkingLevel;
+	const runtimeLevel = getter ? getter.call(pi) : undefined;
+	const contextLevel = isRecord(ctx) ? ctx.thinkingLevel : undefined;
+	const effort = normalizeGlm53ThinkingLevel(runtimeLevel ?? contextLevel);
+	const existingThinking = isRecord(payload.thinking) ? payload.thinking : {};
+	return {
+		...payload,
+		thinking: { ...existingThinking, type: "enabled", clear_thinking: false },
+		reasoning_effort: effort,
+	};
 }
 
 export function injectCodingDisciplineIntoPayload(payload: unknown, options: DisciplinePromptOptions = {}): unknown {

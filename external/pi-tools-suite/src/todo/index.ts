@@ -8,7 +8,13 @@ import { ACTIVE_STATUSES, isTaskBlocked, selectVisibleTasks } from "./state/sele
 import { applyTaskMutation } from "./state/state-reducer.js";
 import { getState, replaceState } from "./state/store.js";
 import { activateTodoStateScope, DEFAULT_PROMPT_GUIDELINES, DEFAULT_PROMPT_SNIPPET, publishTodoState, registerTodosCommand, registerTodoTool } from "./todo.js";
-import type { Task, TaskMutationParams } from "./tool/types.js";
+import {
+	TODO_THINKING_LEVEL_VALUES,
+	todoParamsSchemaForThinkingLevels,
+	type Task,
+	type TaskMutationParams,
+	type TodoThinkingLevel,
+} from "./tool/types.js";
 
 type AgentMessageLike = { role?: unknown; stopReason?: unknown; content?: unknown };
 
@@ -17,37 +23,71 @@ const TODO_NUDGE_INITIAL_DELAY_MS = 0;
 const TODO_NUDGE_IDLE_RETRY_DELAY_MS = 100;
 const TODO_NUDGE_MAX_IDLE_ATTEMPTS = 40;
 const ASK_USER_TOOL_NAMES = new Set(["ask_user", "ask_user_question", "question"]);
-const TODO_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 const TODO_THINKING_RESTORE_METADATA_KEY = "__piTodoRestoreThinking";
 
 function isStaleExtensionContextError(error: unknown): boolean {
 	return error instanceof Error && /ctx is stale|stale ctx|stale after session replacement|stale after.*reload/i.test(error.message);
 }
 
-type TodoThinkingLevel = (typeof TODO_THINKING_LEVELS)[number];
-type ModelLike = { reasoning?: boolean; thinkingLevelMap?: Partial<Record<TodoThinkingLevel, unknown | null>> };
+type ModelLike = {
+	provider?: string;
+	id?: string;
+	modelId?: string;
+	reasoning?: boolean;
+	thinkingLevelMap?: Partial<Record<TodoThinkingLevel, unknown | null>>;
+	compat?: { thinkingFormat?: unknown };
+};
 
 function isTodoThinkingLevel(value: unknown): value is TodoThinkingLevel {
-	return TODO_THINKING_LEVELS.includes(value as TodoThinkingLevel);
+	return TODO_THINKING_LEVEL_VALUES.includes(value as TodoThinkingLevel);
+}
+
+function isGlm53TodoModel(model: ModelLike | undefined): boolean {
+	if (!model) return false;
+	const id = model.modelId ?? model.id;
+	if (id !== "glm-5.3") return false;
+	return model.provider === "zai" || model.provider === "zai-coding-cn" || model.compat?.thinkingFormat === "zai";
 }
 
 function getAvailableTodoThinkingLevels(model: unknown): TodoThinkingLevel[] {
 	const m = model as ModelLike | undefined;
 	if (!m?.reasoning) return ["off"];
+	if (isGlm53TodoModel(m)) return ["low", "high", "max"];
 	const map = m.thinkingLevelMap;
-	return TODO_THINKING_LEVELS.filter((level) => level === "off" || map?.[level] !== null);
+	return TODO_THINKING_LEVEL_VALUES.filter((level) => {
+		const mapped = map?.[level];
+		if (mapped === null) return false;
+		if (level === "xhigh" || level === "max") return mapped !== undefined;
+		return true;
+	});
 }
 
 function buildThinkingPromptParts(model: unknown): { promptSnippet?: string; promptGuidelines?: string[] } {
 	const levels = getAvailableTodoThinkingLevels(model);
 	if (levels.length <= 1) return {};
+	const lowEffortWording = levels.includes("off") ? "lower/off" : "lower";
 	return {
 		promptSnippet: `${DEFAULT_PROMPT_SNIPPET} Set per-item thinking: ${levels.join("|")}.`.trim(),
 		promptGuidelines: [
 			...DEFAULT_PROMPT_GUIDELINES,
-			`If todoThinking is enabled, set \`thinking\` on every planned task during create/batch_create (or update); choose from ${levels.join(", ")}. Use higher thinking for investigation, hard debugging, risky edits, or review; use lower/off for mechanical steps and the final report. Never leave it unset in a non-trivial plan.`,
+			`If todoThinking is enabled, set \`thinking\` on every planned task during create/batch_create (or update); choose from ${levels.join(", ")}. Use higher thinking for investigation, hard debugging, risky edits, or review; use ${lowEffortWording} for mechanical steps and the final report. Never leave it unset in a non-trivial plan.`,
 		],
 	};
+}
+
+function normalizeTodoThinkingLevelForModel(model: unknown, level: TodoThinkingLevel): TodoThinkingLevel {
+	const available = getAvailableTodoThinkingLevels(model);
+	if (available.includes(level)) return level;
+	const requestedIndex = TODO_THINKING_LEVEL_VALUES.indexOf(level);
+	for (let index = requestedIndex; index < TODO_THINKING_LEVEL_VALUES.length; index += 1) {
+		const candidate = TODO_THINKING_LEVEL_VALUES[index];
+		if (candidate && available.includes(candidate)) return candidate;
+	}
+	for (let index = requestedIndex - 1; index >= 0; index -= 1) {
+		const candidate = TODO_THINKING_LEVEL_VALUES[index];
+		if (candidate && available.includes(candidate)) return candidate;
+	}
+	return available[0] ?? "off";
 }
 
 function isAskUserToolName(toolName: string): boolean {
@@ -140,13 +180,15 @@ export default function (pi: ExtensionAPI) {
 	let settledNudgeEligible = false;
 
 	function registerTodoToolWithCurrentPrompt(): void {
+		const availableThinkingLevels = todoThinkingEnabled ? getAvailableTodoThinkingLevels(currentModel) : undefined;
 		const thinkingPrompt = todoThinkingEnabled ? buildThinkingPromptParts(currentModel) : {};
 		registerTodoTool(pi, {
 			...thinkingPrompt,
+			...(availableThinkingLevels ? { parameters: todoParamsSchemaForThinkingLevels(availableThinkingLevels) } : {}),
 			prepareMutation: (state, _ctx, info) => {
 				if (!todoThinkingEnabled) return info.params;
-				if (info.action === "update") return prepareTodoThinkingMutation(state, info.params);
-				if (info.action === "batch_update") {
+				if (info.action === "create" || info.action === "update") return prepareTodoThinkingMutation(state, info.params);
+				if (info.action === "batch_create" || info.action === "batch_update") {
 					return {
 						...info.params,
 						items: (info.params.items ?? []).map((item) => prepareTodoThinkingMutation(state, item)),
@@ -194,20 +236,29 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	function prepareTodoThinkingMutation(state: ReturnType<typeof getState>, params: TaskMutationParams): TaskMutationParams {
-		if (params.id === undefined) return params;
-		const current = state.tasks.find((task) => task.id === params.id);
-		if (!current) return params;
-		const nextStatus = params.status ?? current.status;
-		const nextThinking = params.thinking ?? current.thinking;
+		let nextParams = params;
+		if (params.thinking !== undefined) {
+			const normalized = normalizeTodoThinkingLevelForModel(currentModel, params.thinking);
+			if (normalized !== params.thinking) nextParams = { ...nextParams, thinking: normalized };
+		}
+		if (nextParams.id === undefined) return nextParams;
+		const current = state.tasks.find((task) => task.id === nextParams.id);
+		if (!current) return nextParams;
+		const nextStatus = nextParams.status ?? current.status;
+		if (nextStatus === "in_progress" && nextParams.thinking === undefined && current.thinking !== undefined) {
+			const normalized = normalizeTodoThinkingLevelForModel(currentModel, current.thinking);
+			if (normalized !== current.thinking) nextParams = { ...nextParams, thinking: normalized };
+		}
+		const nextThinking = nextParams.thinking ?? current.thinking;
 		const shouldCapturePreviousThinking =
-			nextStatus === "in_progress" && nextThinking !== undefined && (current.status !== "in_progress" || params.thinking !== undefined);
-		if (!shouldCapturePreviousThinking) return params;
+			nextStatus === "in_progress" && nextThinking !== undefined && (current.status !== "in_progress" || nextParams.thinking !== undefined);
+		if (!shouldCapturePreviousThinking) return nextParams;
 		const currentThinking = getCurrentThinkingLevel();
-		if (!currentThinking) return params;
+		if (!currentThinking) return nextParams;
 		return {
-			...params,
+			...nextParams,
 			metadata: {
-				...(params.metadata ?? {}),
+				...(nextParams.metadata ?? {}),
 				[TODO_THINKING_RESTORE_METADATA_KEY]: currentThinking,
 			},
 		};
@@ -233,7 +284,8 @@ export default function (pi: ExtensionAPI) {
 		const previous = getRememberedThinking(taskId, state);
 		if (!previous) return;
 		rememberedThinkingByTaskId.delete(taskId);
-		if (getCurrentThinkingLevel() !== previous) setTodoThinkingLevel(previous);
+		const restored = normalizeTodoThinkingLevelForModel(currentModel, previous);
+		if (getCurrentThinkingLevel() !== restored) setTodoThinkingLevel(restored);
 	}
 
 	function restoreInactiveTodoThinking(state: ReturnType<typeof getState>): void {

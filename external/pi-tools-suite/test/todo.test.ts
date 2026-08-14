@@ -665,6 +665,58 @@ describe.serial("todo extension lifecycle", () => {
 		}
 	});
 
+	test.serial("uses only GLM-5.3 low/high/max and normalizes unsupported todo thinking", async () => {
+		const previousEnv = process.env.PI_TOOLS_SUITE_TODO_THINKING;
+		process.env.PI_TOOLS_SUITE_TODO_THINKING = "1";
+		const extension = (await import("../src/todo/index.js")).default;
+		const { getTodos } = await import("../src/todo/todo.js");
+		const pi = new FakePi();
+		pi.thinkingLevel = "max";
+		const ctx = {
+			cwd: mkdtempSync(join(tmpdir(), "todo-thinking-glm53-")),
+			hasUI: false,
+			model: {
+				provider: "zai",
+				id: "glm-5.3",
+				reasoning: true,
+				compat: { thinkingFormat: "zai" },
+			},
+			sessionManager: { getBranch: () => [] },
+			isIdle: () => true,
+			hasPendingMessages: () => false,
+		};
+		try {
+			extension(pi as any);
+			await pi.emit("session_start", {}, ctx);
+			const tool = pi.tools.get("todo");
+			expect(tool.promptSnippet).toContain("Set per-item thinking: low|high|max");
+			expect(tool.promptSnippet).not.toContain("off|minimal");
+			const schemaText = JSON.stringify(tool.parameters);
+			expect(schemaText).toContain('"low"');
+			expect(schemaText).toContain('"high"');
+			expect(schemaText).toContain('"max"');
+			expect(schemaText).not.toContain('"minimal"');
+			expect(schemaText).not.toContain('"medium"');
+
+			await tool.execute("todo-1", { action: "create", subject: "Implement", thinking: "medium" }, undefined, undefined, ctx);
+			expect(getTodos()[0]?.thinking).toBe("high");
+			await tool.execute("todo-2", { action: "update", id: 1, status: "in_progress", activeForm: "implementing" }, undefined, undefined, ctx);
+			expect(pi.thinkingLevel).toBe("high");
+			expect(pi.setThinkingLevelCalls).toEqual(["high"]);
+
+			await tool.execute("todo-3", { action: "update", id: 1, status: "completed" }, undefined, undefined, ctx);
+			expect(pi.thinkingLevel).toBe("max");
+			expect(pi.setThinkingLevelCalls).toEqual(["high", "max"]);
+
+			await tool.execute("todo-4", { action: "create", subject: "Mechanical", thinking: "off" }, undefined, undefined, ctx);
+			expect(getTodos()[0]?.thinking).toBe("low");
+		} finally {
+			if (previousEnv === undefined) delete process.env.PI_TOOLS_SUITE_TODO_THINKING;
+			else process.env.PI_TOOLS_SUITE_TODO_THINKING = previousEnv;
+			rmSync(ctx.cwd, { recursive: true, force: true });
+		}
+	});
+
 	test.serial("restores original thinking after off final todo completion and plan replacement", async () => {
 		const previousEnv = process.env.PI_TOOLS_SUITE_TODO_THINKING;
 		process.env.PI_TOOLS_SUITE_TODO_THINKING = "1";
