@@ -18,7 +18,7 @@ export const PI_FAVORITE_MODEL_REFS = [
 	"xai/grok-4.5",
 	"groq/openai/gpt-oss-120b",
 	"cerebras/zai-glm-4.7",
-	"zai/glm-5.2",
+	"zai/glm-5.3",
 	"mistral/devstral-medium-latest",
 	"minimax/MiniMax-M2.7",
 	"minimax-cn/MiniMax-M2.7",

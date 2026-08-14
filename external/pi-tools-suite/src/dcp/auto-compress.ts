@@ -9,7 +9,7 @@
 // Lossy and irreversible within a session; disabled by default and gated by a
 // patience counter + the emergency threshold. The summary can be produced
 // either by a deterministic programmatic digest (default) or by a configured
-// list of summarizer models (e.g. a cheap model like zai/glm-5.2), with
+// list of summarizer models (e.g. a cheap model like zai/glm-5.3), with
 // automatic fallback to the programmatic digest on any failure/timeout.
 // ---------------------------------------------------------------------------
 

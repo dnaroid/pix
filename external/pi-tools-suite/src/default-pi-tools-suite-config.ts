@@ -72,13 +72,13 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
           "maxContextPercent": "30%"
         }
       },
-      // glm-5.2 reports a ~1M-token window. Even zai/* 16%/30% = 160K/300K is
+      // glm-5.3 reports a ~1M-token window. Even zai/* 16%/30% = 160K/300K is
       // above the ~15% (~150K) point where long sessions degrade, and an
-      // observed 14h/273K-token session never crossed 16%. Lower ONLY glm-5.2
+      // observed 14h/273K-token session never crossed 16%. Lower ONLY glm-5.3
       // within the zai family: 8%/15% (~80K/150K) so nudging starts early and
       // auto-compress fires at the observed degradation point. Other zai/*
       // models keep 16%/30%.
-      "zai/glm-5.2": {
+      "zai/glm-5.3": {
         "compress": {
           "minContextPercent": "8%",
           "maxContextPercent": "15%",
@@ -128,7 +128,7 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
       "autoCompress": {
         "enabled": false,
         "patience": 2,
-        "summarizerModel": ["zai/glm-5.2", "zai/glm-4.5-air"],
+        "summarizerModel": ["zai/glm-5.3", "zai/glm-4.5-air"],
         "timeoutMs": 20000
       }
     }
@@ -146,13 +146,13 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
           "docs": { "model": "zai/glm-4.5-air", "thinking": "low" },
           "frontend": {
             "model": "antigravity/gemini-3-flash-preview",
-            "fallbackModels": ["zai/glm-5.2"],
+            "fallbackModels": ["zai/glm-5.3"],
             "thinking": "medium"
           },
           "tests": { "model": "zai/glm-5-turbo", "thinking": "medium" },
-          "review": { "model": "zai/glm-5.2", "thinking": "high" },
-          "implement": { "model": "zai/glm-5.2", "thinking": "high" },
-          "deep": { "model": "zai/glm-5.2", "thinking": "high" }
+          "review": { "model": "zai/glm-5.3", "thinking": "high" },
+          "implement": { "model": "zai/glm-5.3", "thinking": "high" },
+          "deep": { "model": "zai/glm-5.3", "thinking": "high" }
         }
       },
       "gpt": {
@@ -180,7 +180,7 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
           },
           "frontend": {
             "model": "openai-codex/gpt-5.6-terra",
-            "fallbackModels": ["antigravity/gemini-3-flash-preview", "zai/glm-5.2"],
+            "fallbackModels": ["antigravity/gemini-3-flash-preview", "zai/glm-5.3"],
             "thinking": "medium"
           },
           "tests": {
@@ -190,17 +190,17 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
           },
           "review": {
             "model": "openai-codex/gpt-5.6-sol",
-            "fallbackModels": ["zai/glm-5.2"],
+            "fallbackModels": ["zai/glm-5.3"],
             "thinking": "high"
           },
           "implement": {
             "model": "openai-codex/gpt-5.6-sol",
-            "fallbackModels": ["zai/glm-5.2"],
+            "fallbackModels": ["zai/glm-5.3"],
             "thinking": "high"
           },
           "deep": {
             "model": "openai-codex/gpt-5.6-sol",
-            "fallbackModels": ["zai/glm-5.2"],
+            "fallbackModels": ["zai/glm-5.3"],
             "thinking": "high"
           }
         }
@@ -230,7 +230,7 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
           },
           "frontend": {
             "model": "antigravity/gemini-3.1-pro-preview-customtools",
-            "fallbackModels": ["zai/glm-5.2"],
+            "fallbackModels": ["zai/glm-5.3"],
             "thinking": "low"
           },
           "tests": {
@@ -240,17 +240,17 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
           },
           "review": {
             "model": "antigravity/antigravity-claude-sonnet-4-6",
-            "fallbackModels": ["openai-codex/gpt-5.6-sol", "zai/glm-5.2"],
+            "fallbackModels": ["openai-codex/gpt-5.6-sol", "zai/glm-5.3"],
             "thinking": "high"
           },
           "implement": {
             "model": "openai-codex/gpt-5.6-sol",
-            "fallbackModels": ["zai/glm-5.2"],
+            "fallbackModels": ["zai/glm-5.3"],
             "thinking": "high"
           },
           "deep": {
             "model": "antigravity/antigravity-claude-opus-4-6-thinking",
-            "fallbackModels": ["openai-codex/gpt-5.6-sol", "zai/glm-5.2"],
+            "fallbackModels": ["openai-codex/gpt-5.6-sol", "zai/glm-5.3"],
             "thinking": "high"
           }
         }
@@ -278,7 +278,7 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
       "frontend": {
         "description": "Use for frontend UI/UX visual work: styling, layout, typography, animation, responsive states, component polish, accessibility. Avoid backend/business logic unless needed for UI behavior.",
         "model": "antigravity/gemini-3-flash-preview",
-        "fallbackModels": ["openai-codex/gpt-5.4-mini", "zai/glm-5.2"],
+        "fallbackModels": ["openai-codex/gpt-5.4-mini", "zai/glm-5.3"],
         "thinking": "medium",
         "promptAppend": [
           "Act as a frontend UI/UX engineer for visual and product-facing work.",
@@ -296,33 +296,33 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
       "review": {
         "description": "Use for review/audit of existing code or changes: correctness, security, performance, maintainability, API risks, quality. Do not implement new code.",
         "model": "openai-codex/gpt-5.6-sol",
-        "fallbackModels": ["zai/glm-5.2"],
+        "fallbackModels": ["zai/glm-5.3"],
         "thinking": "high",
         "tools": ["read", "grep"]
       },
       "implement": {
         "description": "Use when the sub-agent should make or plan code changes for a feature, bug fix, or refactor.",
         "model": "openai-codex/gpt-5.6-sol",
-        "fallbackModels": ["zai/glm-5.2"],
+        "fallbackModels": ["zai/glm-5.3"],
         "thinking": "high"
       },
       "deep": {
         "description": "Use for broad hard reasoning: architecture, system design, cross-module impact, complex tradeoffs.",
         "model": "openai-codex/gpt-5.6-sol",
-        "fallbackModels": ["zai/glm-5.2"],
+        "fallbackModels": ["zai/glm-5.3"],
         "thinking": "high"
       },
       "oracle": {
         "description": "Oracle: cross-provider flagship second opinion for hard or high-stakes uncertainty. Use sparingly to pressure-test architecture, plans, root-cause hypotheses, risk/security calls, or final recommendations when independent disagreement is valuable. Read-only; advise, do not edit.",
         "model": "openai-codex/gpt-5.6-sol",
-        "fallbackModels": ["zai/glm-5.2"],
+        "fallbackModels": ["zai/glm-5.3"],
         "thinking": "xhigh",
         "tools": ["read", "grep", "bash"],
         "modelByParent": {
-          "zai/*": { "model": "openai-codex/gpt-5.6-sol", "fallbackModels": ["zai/glm-5.2"] },
-          "openai-codex/*": { "model": "zai/glm-5.2", "fallbackModels": ["openai-codex/gpt-5.6-sol"] },
-          "antigravity/*": { "model": "zai/glm-5.2", "fallbackModels": ["openai-codex/gpt-5.6-sol"] },
-          "anthropic/*": { "model": "openai-codex/gpt-5.6-sol", "fallbackModels": ["zai/glm-5.2"] }
+          "zai/*": { "model": "openai-codex/gpt-5.6-sol", "fallbackModels": ["zai/glm-5.3"] },
+          "openai-codex/*": { "model": "zai/glm-5.3", "fallbackModels": ["openai-codex/gpt-5.6-sol"] },
+          "antigravity/*": { "model": "zai/glm-5.3", "fallbackModels": ["openai-codex/gpt-5.6-sol"] },
+          "anthropic/*": { "model": "openai-codex/gpt-5.6-sol", "fallbackModels": ["zai/glm-5.3"] }
         },
         "promptAppend": "You are an oracle: a flagship model from a different provider giving a second opinion to the parent agent. Give a concise, decisive recommendation with key tradeoffs and risks. Disagree when warranted; do not rubber-stamp. Do not edit unless explicitly asked."
       }

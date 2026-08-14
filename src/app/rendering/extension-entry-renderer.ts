@@ -63,6 +63,7 @@ function extensionRendererTheme(theme: PixTheme): PiTheme {
 		dim: colors.muted,
 		text: colors.foreground,
 		thinkingText: colors.thinkingForeground,
+		searchMatchText: colors.popupSelectedForeground,
 		userMessageText: colors.userForeground,
 		customMessageText: colors.foreground,
 		customMessageLabel: colors.accent,
@@ -101,6 +102,7 @@ function extensionRendererTheme(theme: PixTheme): PiTheme {
 	} satisfies Record<ThemeColor, string>;
 	const backgrounds: ConstructorParameters<typeof PiTheme>[1] = {
 		selectedBg: colors.popupSelectedBackground,
+		searchMatchBg: colors.popupSelectedBackground,
 		userMessageBg: colors.userMessageBackground || colors.background,
 		customMessageBg: colors.assistantMessageBackground || colors.background,
 		toolPendingBg: colors.thinkingMessageBackground || colors.background,
