@@ -68,6 +68,14 @@ afterEach(() => {
 });
 
 describe("coding discipline", () => {
+	test("recognizes GLM-5.3 without a version-specific branch", async () => {
+		const { isGlmModel } = await import("../src/coding-discipline/index.js");
+
+		expect(isGlmModel("zai/glm-5.3")).toBe(true);
+		expect(isGlmModel("glm-5.3")).toBe(true);
+		expect(isGlmModel("anthropic/claude-sonnet-4")).toBe(false);
+	});
+
 	test("keeps lookup active only for GLM models", async () => {
 		setPiConfigDirConfig(`{ "lookupModel": "openai-codex/gpt-5.4-mini" }`);
 
@@ -391,8 +399,11 @@ describe("coding discipline strictness", () => {
 		const lenient = buildCodingDisciplinePrompt({ lookupEnabled: true });
 		const strict = buildCodingDisciplinePrompt({ lookupEnabled: true, strictness: "strict" });
 		expect(lenient).toContain("Batch independent calls");
+		expect(lenient).toContain("thinking/reasoning channel is available");
 		expect(lenient).not.toContain("emit exactly one tool call with empty text");
+		expect(lenient).toContain("Treat the current GLM coding endpoint as text-only");
 		expect(strict).toContain("emit exactly one tool call with empty text");
+		expect(strict).toContain("No transition permits commentary between tool calls");
 		expect(strict).not.toContain("Batch independent calls");
 	});
 

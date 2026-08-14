@@ -41,8 +41,10 @@ const DEFAULT_LOOKUP_MAX_IMAGES = 6;
 const DEFAULT_LOOKUP_MAX_TOKENS = 1_600;
 const DEFAULT_LOOKUP_TIMEOUT_MS = 120_000;
 const MAX_IMAGE_BYTES = 16 * 1024 * 1024;
-const SILENCE_REMINDER_MIN_VIOLATION_GAP = 3;
-const SILENCE_REMINDER_MIN_MESSAGE_GAP = 12;
+// Keep recovery nudges sparse: newer GLM coding models are substantially better at
+// long-horizon tool use, and repeated developer reminders can become prompt noise.
+const SILENCE_REMINDER_MIN_VIOLATION_GAP = 5;
+const SILENCE_REMINDER_MIN_MESSAGE_GAP = 20;
 // When the visible history shrinks by more than this many messages (compaction or
 // truncation), the chatter baseline is reset so it isn't measured against a stale peak.
 const SILENCE_REMINDER_COMPACTION_MARGIN = 8;
@@ -89,7 +91,9 @@ function buildDisciplineLines(strictness: CodingDisciplineStrictness): readonly 
 		isStrict ? "- WORKING: exactly one next tool call with empty text;" : "- WORKING: one or more independent tool calls with empty text;",
 		"- FINAL: one final answer after completion or practical verification;",
 		"- BLOCKED: one concise question only when no safe/useful tool action can continue.",
-		"No transition permits commentary between tool calls.",
+		isStrict
+			? "No transition permits commentary between tool calls."
+			: "When a thinking/reasoning channel is available, do not duplicate that reasoning as visible commentary between tool calls.",
 		"",
 		"PRIORITY: this overrides default assistant friendliness and conversational behavior.",
 		"",
@@ -107,7 +111,7 @@ function buildDisciplineLines(strictness: CodingDisciplineStrictness): readonly 
 const LOOKUP_DISCIPLINE_LINES = [
 	"",
 	"Visual lookup discipline:",
-	"The current GLM model may be unable to inspect images/screenshots directly.",
+	"Treat the current GLM coding endpoint as text-only; do not assume it can inspect images/screenshots directly.",
 	"When the user refers to an image, screenshot, UI visual bug, layout problem, arrow, annotation, highlight, visible text, chart, diagram, or any visual evidence, call the `lookup` tool before making visual claims.",
 	"Use a focused lookup query that includes the user's visual concern and asks the helper to pay attention to arrows, annotations, highlights, visible UI state, text, spacing/layout, and suspected bugs.",
 	"Treat lookup output as visual evidence; do not invent visual details beyond it.",
@@ -141,7 +145,8 @@ const DISCIPLINE_PROMPT_BLOCK_PATTERN = new RegExp(
  * Strips pi's built-in "Pi documentation" reference block from the system prompt.
  * That block (≈10 lines listing docs/examples paths and "when asked about X" routing)
  * is useless dead weight for non-pi work and dilutes attention to the trailing
- * <available_skills> section, which especially hurts weaker models like GLM.
+ * <available_skills> section and wastes attention that should stay on the task and
+ * the extension-provided agent contract.
  * Anchored on the fixed header/footer strings from buildSystemPrompt() so it only
  * ever matches pi's own block regardless of resolved doc/example paths.
  */
@@ -151,7 +156,7 @@ const PI_DOCS_BLOCK_PATTERN = new RegExp(
 );
 
 const LOOKUP_SYSTEM_PROMPT = [
-	"You are a vision-capable lookup helper for a blind GLM coding agent.",
+	"You are a vision-capable lookup helper for a text-only GLM coding agent.",
 	"Inspect the provided screenshots/images and answer the parent agent's focused question using concrete visual evidence.",
 	"Pay special attention to arrows, annotations, highlights, cursor position, visible UI state, text, layout, spacing, colors, overlays, visual bugs, and error messages.",
 	"Use recent session context only to understand what the user is asking; do not perform code changes.",
@@ -676,7 +681,7 @@ function codingDisciplineStrictnessFromConfig(cwd?: string): CodingDisciplineStr
 
 function buildLookupPrompt(params: LookupParams, recentContext: string, imageCount: number, warnings: string[]): string {
 	return [
-		"Lookup request from a blind GLM parent model.",
+		"Lookup request from a text-only GLM parent model.",
 		"",
 		"Focused question:",
 		params.query.trim(),
