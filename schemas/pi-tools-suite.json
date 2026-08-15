@@ -16,6 +16,22 @@
       },
       "description": "List of disabled module names (e.g. ['lsp', 'prompt-commands'])."
     },
+    "enabledModules": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "List of module names to explicitly enable, including modules that are disabled by default."
+    },
+    "modules": {
+      "type": "object",
+      "patternProperties": {
+        "^.*$": {
+          "type": "boolean"
+        }
+      },
+      "description": "Per-module enable/disable map. credential-firewall is disabled by default and can be enabled here."
+    },
     "todoThinking": {
       "type": "boolean",
       "description": "Enable per-todo thinking levels and automatic thinking switch/restore when tasks become in-progress/completed."
@@ -811,6 +827,20 @@
         }
       },
       "description": "User-defined slash commands."
+    },
+    "secretFirewall": {
+      "type": "object",
+      "properties": {
+        "sessionHygiene": {
+          "type": "boolean",
+          "description": "Redact detected secret material from tool results and completed messages before it remains in session history."
+        },
+        "notify": {
+          "type": "boolean",
+          "description": "Show a warning when one or more secrets are redacted. Secret values are never included in notifications."
+        }
+      },
+      "description": "Settings for the opt-in credential-firewall module."
     },
     "lsp": {
       "type": "object",

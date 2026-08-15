@@ -29,6 +29,7 @@ describe("codex-reasoning-fix", () => {
 		const { MODULES } = await import("../src/index.js");
 		expect(MODULES[MODULES.length - 1]?.name).toBe("codex-reasoning-fix");
 		expect(MODULES.findIndex((module) => module.name === "dcp")).toBeLessThan(MODULES.length - 1);
+		expect(MODULES.findIndex((module) => module.name === "credential-firewall")).toBe(MODULES.length - 2);
 	});
 
 	test("does not monkey-patch global fetch or WebSocket transport", async () => {

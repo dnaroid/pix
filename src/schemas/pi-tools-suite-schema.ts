@@ -282,6 +282,14 @@ const PromptCommandsConfig = Type.Object(
 	{ description: "User-defined slash commands." },
 );
 
+const SecretFirewallConfig = Type.Object(
+	{
+		sessionHygiene: Type.Optional(Type.Boolean({ description: "Redact detected secret material from tool results and completed messages before it remains in session history." })),
+		notify: Type.Optional(Type.Boolean({ description: "Show a warning when one or more secrets are redacted. Secret values are never included in notifications." })),
+	},
+	{ description: "Settings for the opt-in credential-firewall module." },
+);
+
 // ---------------------------------------------------------------------------
 // LSP
 // ---------------------------------------------------------------------------
@@ -326,6 +334,8 @@ export const PiToolsSuiteConfigSchema = Type.Object(
 		$schema: Type.Optional(Type.String({ description: "JSON Schema URL used by editors for validation and autocomplete." })),
 		enabled: Type.Optional(Type.Boolean({ description: "Enable or disable the entire pi-tools-suite extension." })),
 		disabledModules: Type.Optional(Type.Array(Type.String(), { description: "List of disabled module names (e.g. ['lsp', 'prompt-commands'])." })),
+		enabledModules: Type.Optional(Type.Array(Type.String(), { description: "List of module names to explicitly enable, including modules that are disabled by default." })),
+		modules: Type.Optional(Type.Record(Type.String(), Type.Boolean(), { description: "Per-module enable/disable map. credential-firewall is disabled by default and can be enabled here." })),
 		todoThinking: Type.Optional(Type.Boolean({ description: "Enable per-todo thinking levels and automatic thinking switch/restore when tasks become in-progress/completed." })),
 		lookupModel: Type.Optional(Type.Union([Type.String(), Type.Null()], { description: "Vision-capable provider/model used by GLM's lookup tool; unset or null disables lookup." })),
 		terminalBell: Type.Optional(TerminalBellConfig),
@@ -333,6 +343,7 @@ export const PiToolsSuiteConfigSchema = Type.Object(
 		asyncSubagents: Type.Optional(AsyncSubagentsConfig),
 		toolRenderer: Type.Optional(ToolRendererConfig),
 		promptCommands: Type.Optional(PromptCommandsConfig),
+		secretFirewall: Type.Optional(SecretFirewallConfig),
 		lsp: Type.Optional(LspConfig),
 	},
 	{

@@ -5,6 +5,13 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
     // "ast-grep",
     // "dcp"
   ],
+  // Secret firewall is deliberately opt-in for now. Flip this to true to enable
+  // high-confidence outbound redaction plus session-history hygiene.
+  "modules": { "credential-firewall": false },
+  "secretFirewall": {
+    "sessionHygiene": true,
+    "notify": true
+  },
   // When true, todo items may carry a per-task thinking level and the todo
   // module will switch/restore Pi's thinking level as in-progress tasks change.
   "todoThinking": true,

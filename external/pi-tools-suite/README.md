@@ -5,6 +5,7 @@ Local all-in-one Pi extension package.
 This package keeps shared Pi tools as ordinary source folders under `src/` and registers them through one entrypoint.
 
 - `src/coding-discipline` — injects a deduplicated silent-mode and quality-discipline block at the very top of the main-session per-turn system prompt for GLM main-session models only (`isGlmModel`) immediately before the LLM request; non-GLM models are left untouched; disabled for async sub-agents
+- `src/credential-firewall` — opt-in secret firewall for high-confidence outbound/session credential redaction; disabled by default
 - `src/ast-grep` — `ast_grep` / `ast_apply`
 - `src/async-subagents` — `subagents` tool and sub-agent slash commands, including oh-my-openagent-style `/ultrawork` (`/ulw`) and `/hyperplan` orchestration prompts, plus config-defined sub-agent model/thinking/args presets selected via `/subagent-preset` from `asyncSubagents` in `~/.config/pi/pi-tools-suite.jsonc`; includes the `frontend` profile for Gemini-friendly UI/UX and visual frontend work and the `oracle` profile for cross-provider second opinions; enforces a 30-minute per-agent execution timeout, project-wide `maxConcurrent` queueing, optional retry/backoff, and `result.json` structured metadata/chaining fields next to raw `result.md`; stores project-local run files and a registry under `.pi/subagents/` so result/status collection can recover after compaction or reload while the main session remains alive
 - `src/lsp` — shared LSP diagnostics hook/library that enriches mutating tool results with diagnostics and shuts down language servers on session shutdown
@@ -23,7 +24,7 @@ This package keeps shared Pi tools as ordinary source folders under `src/` and r
 
 `index.ts` is intentionally only a thin auto-discovery shim that re-exports `src/index.ts`. There is no `pi.extensions` manifest here, so local Pi auto-discovery loads the suite once via `~/.pi/agent/extensions/pi-tools-suite/index.ts` and does not double-register tools.
 
-Registration order is preserved in `src/index.ts`: coding-discipline, ast-grep, async-subagents, lsp, comment-checker, session-name, repo-discovery command/tool gate, antigravity-auth provider, OpenCode import, todo, model-tools, usage, web-search, dcp, prompt-commands, then skill-installer. Tool metadata and active model-specific tool sets have two modes: standard and repo-aware. When `.indexer-cli` enables `repo_*`, those tools stay active ahead of overlapping lower-level aliases so the indexed discovery surface has priority.
+Registration order is preserved in `src/index.ts`: coding-discipline, ast-grep, async-subagents, lsp, comment-checker, session-name, repo-discovery command/tool gate, antigravity-auth provider, OpenCode import, todo, model-tools, usage, web-search, dcp, prompt-commands, skill-installer, credential-firewall, then codex-reasoning-fix. Tool metadata and active model-specific tool sets have two modes: standard and repo-aware. When `.indexer-cli` enables `repo_*`, those tools stay active ahead of overlapping lower-level aliases so the indexed discovery surface has priority.
 
 ## Disabling modules
 
@@ -43,6 +44,8 @@ PI_TOOLS_SUITE_DISABLED=1 pi ...   # disables all pi-tools-suite modules
 ```
 
 `disabledExtensions`, `enabledModules`, `enabledExtensions`, and an `extensions` map are accepted as aliases for the same module names. Use `*` or `all` in `PI_TOOLS_SUITE_DISABLED_MODULES` to skip every registered module.
+
+`credential-firewall` is disabled by default. Enable it explicitly with `"modules": { "credential-firewall": true }`. When enabled it replaces high-confidence secret material in the final provider payload with stable placeholders such as `<SECRET:github_token:1>`. `secretFirewall.sessionHygiene` (default `true`) applies the same redactor to tool results and completed messages before they remain in session history; `secretFirewall.notify` controls warnings. Entropy-only detection is intentionally not used yet to avoid corrupting hashes, IDs, minified assets, and other high-entropy non-secrets.
 
 Saved prompt slash commands are stored under `promptCommands`. Use `/prompt-commands` to create, edit, rename, delete, list, show the config path, or run them from an interactive menu. After a CRUD edit the module reloads Pi resources so the slash-command list reflects the config. Each saved command sends its saved prompt as a user message.
 

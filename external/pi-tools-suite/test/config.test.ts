@@ -110,6 +110,8 @@ describe("pi-tools-suite config", () => {
 		expect(content).toContain('"disabledModules"');
 		expect(content).toContain('"todoThinking": true');
 		expect(content).toContain('"lookupModel": "openai-codex/gpt-5.4-mini"');
+		expect(content).toContain('"modules": { "credential-firewall": false }');
+		expect(content).toContain('"secretFirewall"');
 		expect(content).toContain('// "ast-grep",');
 		expect(content).toContain('// "dcp"');
 		expect(content).toContain('"asyncSubagents"');
@@ -129,6 +131,22 @@ describe("pi-tools-suite config", () => {
 
 		const config = loadPiToolsSuiteConfig(MODULES, { cwd, homeDir, env: {} });
 
+		expect(config.disabledModules).toEqual([]);
+	});
+
+	test("credential firewall is disabled by default and requires explicit opt-in", () => {
+		const homeDir = tempDir();
+		const cwd = tempDir();
+		mkdirSync(join(homeDir, ".config", "pi"), { recursive: true });
+
+		let config = loadPiToolsSuiteConfig(["credential-firewall", "usage"], { cwd, homeDir, env: {} });
+		expect(config.disabledModules).toEqual(["credential-firewall"]);
+
+		writeFileSync(
+			join(homeDir, ".config", "pi", "pi-tools-suite.jsonc"),
+			`{ "modules": { "credential-firewall": true } }`,
+		);
+		config = loadPiToolsSuiteConfig(["credential-firewall", "usage"], { cwd, homeDir, env: {} });
 		expect(config.disabledModules).toEqual([]);
 	});
 
