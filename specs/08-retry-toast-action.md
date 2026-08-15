@@ -6,12 +6,13 @@ Change
 
 ## Goal
 
-Let the user resume a failed turn directly from the final automatic-retry error toast instead of typing a continuation prompt.
+Let the user resume a transiently failed turn directly from its error toast instead of typing a continuation prompt.
 
 ## Scope
 
 - Add one optional clickable action to compact toasts.
 - Show a `Retry` action when an automatic retry cycle ends unsuccessfully.
+- When automatic retry is disabled, show the same action for terminal errors that the SDK classifies as retryable.
 - Start a new turn with a hidden continuation message when the action is clicked.
 - Keep toast actions scoped to the tab/session that created them.
 
@@ -29,6 +30,8 @@ Let the user resume a failed turn directly from the final automatic-retry error 
 4. A successful `auto_retry_end` keeps the existing success toast and has no action.
 5. If the original session is no longer active, the action does nothing. If it is currently streaming or compacting, Pix shows a warning instead of starting another turn.
 6. A synchronous or asynchronous failure to start the turn is shown as an error toast.
+7. When automatic retry is disabled, a terminal retryable streaming error (including HTTP 429) shows `Request failed: <error>` plus `[Retry]`.
+8. The terminal-error path does not offer Retry for aborted turns, quota/billing exhaustion, or other errors the SDK classifies as non-retryable. When automatic retry is enabled, it does not create a duplicate manual toast.
 
 ## Contracts
 
@@ -60,11 +63,13 @@ Let the user resume a failed turn directly from the final automatic-retry error 
 - Toast controller tests for scoped one-shot activation and callback cleanup.
 - Mouse controller tests for action activation versus error copying/dismissal.
 - Session event tests for failed-only action wiring and captured-session retry.
+- Session event tests for retryable terminal errors with automatic retry disabled, including 429, abort, quota, and enabled-policy cases.
 - Host checks via `npm run check`.
 
 ## Risks / unknowns
 
 - The SDK has no public manual retry primitive. A hidden custom message with `triggerTurn: true` intentionally models the user's current manual “continue” workaround.
+- Retryability follows the public `@earendil-works/pi-ai` `isRetryableAssistantError` classifier rather than a Pix-specific copy of provider-error patterns.
 
 ## Evidence
 

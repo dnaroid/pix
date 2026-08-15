@@ -1,4 +1,5 @@
 import type { AgentSession, AgentSessionEvent, AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
+import { isRetryableAssistantError, type AssistantMessage } from "@earendil-works/pi-ai";
 import type { ImageContent } from "../../input-editor.js";
 import type { ConversationViewport } from "../rendering/conversation-viewport.js";
 import { createId } from "../id.js";
@@ -436,6 +437,24 @@ export class AppSessionEventController {
 		void this.retryFailedTurnAsync(session);
 	}
 
+	/**
+	 * The SDK only emits `auto_retry_end` (whose toast carries the Retry button)
+	 * when auto-retry actually runs. When retry is disabled, a transient streaming
+	 * error such as a 429 rate limit surfaces only as the error entry above, with
+	 * no way to resume the failed turn. Offer a manual Retry toast in that case,
+	 * mirroring the auto-retry path. User aborts and non-retryable errors are
+	 * excluded, and retry being enabled means the auto-retry toast will handle it.
+	 */
+	private showManualRetryOnTerminalError(error: AssistantMessage): void {
+		const errorText = error.errorMessage;
+		if (!errorText || !isRetryableAssistantError(error)) return;
+		const session = this.host.runtime()?.session;
+		if (!session || session.autoRetryEnabled) return;
+		this.host.showToast(`Request failed: ${errorText}`, "error", {
+			action: { label: "Retry", onSelect: () => this.retryFailedTurn(session) },
+		});
+	}
+
 	private async retryFailedTurnAsync(session: AgentSession): Promise<void> {
 		const runtime = this.host.runtime();
 		if (!runtime || !this.isActiveRuntimeSession(runtime, session)) return;
@@ -781,12 +800,15 @@ export class AppSessionEventController {
 				this.assistantMessageClosed = true;
 				this.host.setSessionActivity(this.host.runtime()?.session.isStreaming ? "running" : "idle");
 				break;
-			case "error":
+			case "error": {
 				this.finishCurrentThinkingEntry();
 				this.flushAssistantTextBuffer(true);
 				this.host.setSessionActivity(this.host.runtime()?.session.isStreaming ? "running" : "idle");
-				this.addEntry({ id: createId("error"), kind: "error", text: assistantEvent.error.errorMessage ?? assistantEvent.reason });
+				const errorText = assistantEvent.error.errorMessage ?? assistantEvent.reason;
+				this.addEntry({ id: createId("error"), kind: "error", text: errorText });
+				this.showManualRetryOnTerminalError(assistantEvent.error);
 				break;
+			}
 			default:
 				break;
 		}

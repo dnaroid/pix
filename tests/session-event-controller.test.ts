@@ -1091,6 +1091,78 @@ describe("AppSessionEventController", () => {
 		assert.deepEqual(toastActions, [undefined, undefined, undefined, undefined, "Retry"]);
 	});
 
+	it("offers a manual retry toast for a retryable streaming error when auto-retry is disabled", () => {
+		const toasts: string[] = [];
+		const toastActions: Array<string | undefined> = [];
+		const buildController = (autoRetryEnabled: boolean) => new AppSessionEventController({
+			entries: [],
+			runtime: () => ({ session: { isStreaming: false, isCompacting: false, autoRetryEnabled } }) as AgentSessionRuntime,
+			conversationViewport: () => ({ deleteEntry: () => {} }) as never,
+			isRunning: () => false,
+			render: () => {},
+			scheduleRender: () => {},
+			setStatus: () => {},
+			restoreSessionStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			updateQueuedMessageStatus: () => {},
+			flushAutoUserMessages: () => {},
+			emitExtensionEvent: () => {},
+			prepareWorkspaceMutation: () => undefined,
+			workspaceMutationFromToolExecution: () => undefined,
+			recordWorkspaceMutationForUserEntry: () => {},
+			scheduleUserSessionEntryMetadataSync: () => {},
+			toolDefaultExpanded: () => false,
+			observeSubagentsToolResult: () => {},
+			observeTodoToolResult: () => {},
+			showToast: (message, kind, options) => {
+				toasts.push(`${kind}:${message}`);
+				toastActions.push(options?.action?.label);
+			},
+		});
+		const rateLimit = '429: {"code":"1302","message":"Rate limit reached for requests"}';
+
+		// Auto-retry disabled: a transient 429 surfaces only as the error entry,
+		// so a manual Retry toast is offered for it.
+		buildController(false).handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "error", reason: "error", error: { stopReason: "error", errorMessage: rateLimit } },
+		} as unknown as AgentSessionEvent);
+		assert.deepEqual(toasts, [`error:Request failed: ${rateLimit}`]);
+		assert.deepEqual(toastActions, ["Retry"]);
+
+		// Auto-retry enabled: the SDK's own auto_retry_end toast carries the Retry
+		// button, so no duplicate manual toast is emitted here.
+		toasts.length = 0;
+		toastActions.length = 0;
+		buildController(true).handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "error", reason: "error", error: { stopReason: "error", errorMessage: rateLimit } },
+		} as unknown as AgentSessionEvent);
+		assert.deepEqual(toasts, []);
+		assert.deepEqual(toastActions, []);
+
+		// User aborts never offer a retry, even with retry disabled.
+		toasts.length = 0;
+		toastActions.length = 0;
+		buildController(false).handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "error", reason: "aborted", error: { stopReason: "aborted", errorMessage: "Operation aborted" } },
+		} as unknown as AgentSessionEvent);
+		assert.deepEqual(toasts, []);
+		assert.deepEqual(toastActions, []);
+
+		// Non-retryable limit errors (quota/billing) do not offer a retry.
+		toasts.length = 0;
+		toastActions.length = 0;
+		buildController(false).handleSessionEvent({
+			type: "message_update",
+			assistantMessageEvent: { type: "error", reason: "error", error: { stopReason: "error", errorMessage: "insufficient_quota: billing quota exceeded" } },
+		} as unknown as AgentSessionEvent);
+		assert.deepEqual(toasts, []);
+		assert.deepEqual(toastActions, []);
+	});
+
 	it("continues the captured active session from a failed retry action", async () => {
 		const sent: Array<{ message: unknown; options: unknown }> = [];
 		const deliverySteps: string[] = [];
