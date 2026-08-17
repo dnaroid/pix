@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { loadPiToolsSuiteConfig } from "../config.js";
+import { loadPiToolsSuiteConfig, type TodoThinkingLevel as ConfigTodoThinkingLevel } from "../config.js";
 import { isAgentBusyRaceError } from "../context-usage.js";
 import { autoClearCompletedTodos } from "./state/auto-clear.js";
 import { loadPersistedPlan, syncPersistedPlan } from "./state/persistence.js";
@@ -31,12 +31,58 @@ function isStaleExtensionContextError(error: unknown): boolean {
 
 type ModelLike = {
 	provider?: string;
+	providerId?: string;
 	id?: string;
 	modelId?: string;
 	reasoning?: boolean;
 	thinkingLevelMap?: Partial<Record<TodoThinkingLevel, unknown | null>>;
 	compat?: { thinkingFormat?: unknown };
 };
+
+function escapeRegExp(text: string): string {
+	return text.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
+}
+
+function modelPatternMatches(pattern: string, candidate: string): boolean {
+	let source = "^";
+	for (const char of pattern) {
+		if (char === "*") source += ".*";
+		else if (char === "?") source += ".";
+		else source += escapeRegExp(char);
+	}
+	return new RegExp(`${source}$`, "i").test(candidate);
+}
+
+function modelKeys(model: unknown): { bare?: string; full?: string } {
+	const candidate = model as ModelLike | undefined;
+	const provider = candidate?.provider ?? candidate?.providerId;
+	const rawId = candidate?.modelId ?? candidate?.id;
+	if (!rawId) return {};
+	if (rawId.includes("/")) {
+		const slash = rawId.indexOf("/");
+		return { bare: rawId.slice(slash + 1), full: rawId };
+	}
+	return { bare: rawId, ...(provider ? { full: `${provider}/${rawId}` } : {}) };
+}
+
+function resolveTodoThinkingOverride(
+	model: unknown,
+	overrides: Record<string, ConfigTodoThinkingLevel>,
+): TodoThinkingLevel | undefined {
+	const keys = modelKeys(model);
+	let best: { level: TodoThinkingLevel; score: number } | undefined;
+	for (const [rawPattern, level] of Object.entries(overrides)) {
+		const pattern = rawPattern.trim();
+		const isFull = pattern.includes("/");
+		const candidate = isFull ? keys.full : keys.bare;
+		if (!candidate || !modelPatternMatches(pattern, candidate)) continue;
+		const exact = !pattern.includes("*") && !pattern.includes("?");
+		const literalLength = pattern.replace(/[?*]/g, "").length;
+		const score = (isFull ? 30_000 : 10_000) + (exact ? 10_000 : 0) + literalLength;
+		if (!best || score >= best.score) best = { level, score };
+	}
+	return best?.level;
+}
 
 function isTodoThinkingLevel(value: unknown): value is TodoThinkingLevel {
 	return TODO_THINKING_LEVEL_VALUES.includes(value as TodoThinkingLevel);
@@ -167,7 +213,9 @@ function emitPersistedPlanPrompt(pi: ExtensionAPI, ctx: ExtensionContext, prompt
 
 export default function (pi: ExtensionAPI) {
 	let currentModel: unknown;
-	const todoThinkingEnabled = loadPiToolsSuiteConfig(["todo"]).todoThinking;
+	const todoConfig = loadPiToolsSuiteConfig(["todo"]);
+	const todoThinkingEnabled = todoConfig.todoThinking;
+	const todoThinkingOverrides = todoConfig.todoThinkingOverrides;
 	const rememberedThinkingByTaskId = new Map<number, TodoThinkingLevel>();
 	let lastNudgedSignature: string | undefined;
 	let nudgeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -237,7 +285,11 @@ export default function (pi: ExtensionAPI) {
 
 	function prepareTodoThinkingMutation(state: ReturnType<typeof getState>, params: TaskMutationParams): TaskMutationParams {
 		let nextParams = params;
-		if (params.thinking !== undefined) {
+		const configuredOverride = resolveTodoThinkingOverride(currentModel, todoThinkingOverrides);
+		if (configuredOverride !== undefined) {
+			const forced = normalizeTodoThinkingLevelForModel(currentModel, configuredOverride);
+			nextParams = { ...nextParams, thinking: forced };
+		} else if (params.thinking !== undefined) {
 			const normalized = normalizeTodoThinkingLevelForModel(currentModel, params.thinking);
 			if (normalized !== params.thinking) nextParams = { ...nextParams, thinking: normalized };
 		}

@@ -38,6 +38,7 @@ describe("pi-tools-suite config", () => {
 		expect(config.enabled).toBe(true);
 		expect(config.disabledModules).toEqual(["ast-grep", "usage"]);
 		expect(config.todoThinking).toBe(false);
+		expect(config.todoThinkingOverrides).toEqual({ "zai/glm-5.3": "max" });
 	});
 
 	test("loads lookupModel from config layers and allows disabling it", () => {
@@ -62,6 +63,25 @@ describe("pi-tools-suite config", () => {
 
 		expect(loadPiToolsSuiteConfig(MODULES, { cwd, homeDir, env: {} }).todoThinking).toBe(true);
 		expect(loadPiToolsSuiteConfig(MODULES, { cwd, homeDir, env: { PI_TOOLS_SUITE_TODO_THINKING: "0" } }).todoThinking).toBe(false);
+	});
+
+	test("merges todo thinking model overrides and allows later layers to remove inherited entries", () => {
+		const homeDir = tempDir();
+		const cwd = tempDir();
+		mkdirSync(join(homeDir, ".config", "pi"), { recursive: true });
+		mkdirSync(join(cwd, ".pi"), { recursive: true });
+		writeFileSync(
+			join(homeDir, ".config", "pi", "pi-tools-suite.jsonc"),
+			`{ "todoThinkingOverrides": { "cheap/*": "high", "zai/glm-5.3": "low", "bad/*": "turbo" } }`,
+		);
+		writeFileSync(
+			join(cwd, ".pi", "pi-tools-suite.jsonc"),
+			`{ "todoThinkingOverrides": { "cheap/small": "max", "zai/glm-5.3": null } }`,
+		);
+
+		const config = loadPiToolsSuiteConfig(MODULES, { cwd, homeDir, env: {} });
+
+		expect(config.todoThinkingOverrides).toEqual({ "cheap/*": "high", "cheap/small": "max" });
 	});
 
 	test("project config can re-enable a globally disabled module", () => {
@@ -109,6 +129,8 @@ describe("pi-tools-suite config", () => {
 		expect(content.startsWith(`{\n  "$schema": "${PI_TOOLS_SUITE_SCHEMA_URL}",`)).toBe(true);
 		expect(content).toContain('"disabledModules"');
 		expect(content).toContain('"todoThinking": true');
+		expect(content).toContain('"todoThinkingOverrides"');
+		expect(content).toContain('"zai/glm-5.3": "max"');
 		expect(content).toContain('"lookupModel": "openai-codex/gpt-5.4-mini"');
 		expect(content).toContain('"modules": { "credential-firewall": false }');
 		expect(content).toContain('"secretFirewall"');

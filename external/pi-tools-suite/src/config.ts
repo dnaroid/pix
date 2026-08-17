@@ -9,6 +9,7 @@ export interface PiToolsSuiteConfig {
 	enabled: boolean;
 	disabledModules: string[];
 	todoThinking: boolean;
+	todoThinkingOverrides: Record<string, TodoThinkingLevel>;
 	/** Vision-capable model used by the coding-discipline lookup tool; unset disables lookup. */
 	lookupModel?: string;
 	/**
@@ -25,6 +26,7 @@ type MutableConfig = {
 	enabled: boolean;
 	disabledModules: Set<string>;
 	todoThinking: boolean;
+	todoThinkingOverrides: Map<string, TodoThinkingLevel>;
 	lookupModel: string | undefined;
 	codingDisciplineStrictness: CodingDisciplineStrictness;
 };
@@ -32,6 +34,8 @@ type MutableConfig = {
 export const CODING_DISCIPLINE_STRICTNESS_VALUES = ["strict", "lenient"] as const;
 export type CodingDisciplineStrictness = (typeof CODING_DISCIPLINE_STRICTNESS_VALUES)[number];
 export const DEFAULT_CODING_DISCIPLINE_STRICTNESS: CodingDisciplineStrictness = "lenient";
+const TODO_THINKING_OVERRIDE_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+export type TodoThinkingLevel = (typeof TODO_THINKING_OVERRIDE_LEVELS)[number];
 
 type Env = Record<string, string | undefined>;
 
@@ -42,6 +46,7 @@ const DISABLED_LIST_KEYS = ["disabledModules", "disabledExtensions"];
 const ENABLED_LIST_KEYS = ["enabledModules", "enabledExtensions"];
 const MODULE_MAP_KEYS = ["modules", "extensions"];
 const DEFAULT_DISABLED_MODULES = new Set<string>(["credential-firewall"]);
+const DEFAULT_TODO_THINKING_OVERRIDES = new Map<string, TodoThinkingLevel>([["zai/glm-5.3", "max"]]);
 
 export function getPiToolsSuiteUserConfigPath(homeDir = homedir()): string {
 	return join(homeDir, ".config", "pi", "pi-tools-suite.jsonc");
@@ -77,6 +82,23 @@ function normalizeLookupModel(raw: unknown): string | undefined {
 
 function normalizeCodingDisciplineStrictness(raw: unknown): CodingDisciplineStrictness {
 	return raw === "strict" ? "strict" : "lenient";
+}
+
+function isTodoThinkingLevel(raw: unknown): raw is TodoThinkingLevel {
+	return TODO_THINKING_OVERRIDE_LEVELS.includes(raw as TodoThinkingLevel);
+}
+
+function mergeTodoThinkingOverrides(config: MutableConfig, raw: unknown): void {
+	if (!isRecord(raw)) return;
+	for (const [rawPattern, value] of Object.entries(raw)) {
+		const pattern = rawPattern.trim().toLowerCase();
+		if (!pattern) continue;
+		if (value === null) {
+			config.todoThinkingOverrides.delete(pattern);
+			continue;
+		}
+		if (isTodoThinkingLevel(value)) config.todoThinkingOverrides.set(pattern, value);
+	}
 }
 
 function boolFromEnv(value: string | undefined): boolean | undefined {
@@ -137,6 +159,7 @@ function removeDisabled(config: MutableConfig, value: unknown, knownModules: Rea
 function mergeConfigLayer(config: MutableConfig, raw: Record<string, unknown>, knownModules: ReadonlySet<string>): MutableConfig {
 	if (typeof raw.enabled === "boolean") config.enabled = raw.enabled;
 	if (typeof raw.todoThinking === "boolean") config.todoThinking = raw.todoThinking;
+	mergeTodoThinkingOverrides(config, raw.todoThinkingOverrides);
 	if (Object.prototype.hasOwnProperty.call(raw, "lookupModel")) config.lookupModel = normalizeLookupModel(raw.lookupModel);
 	if (Object.prototype.hasOwnProperty.call(raw, "codingDisciplineStrictness")) {
 		config.codingDisciplineStrictness = normalizeCodingDisciplineStrictness(raw.codingDisciplineStrictness);
@@ -197,6 +220,7 @@ export function loadPiToolsSuiteConfig(moduleNames: readonly string[], options: 
 		enabled: true,
 		disabledModules: new Set([...DEFAULT_DISABLED_MODULES].filter((name) => knownModules.has(name))),
 		todoThinking: false,
+		todoThinkingOverrides: new Map(DEFAULT_TODO_THINKING_OVERRIDES),
 		lookupModel: undefined,
 		codingDisciplineStrictness: DEFAULT_CODING_DISCIPLINE_STRICTNESS,
 	};
@@ -217,6 +241,7 @@ export function loadPiToolsSuiteConfig(moduleNames: readonly string[], options: 
 		enabled: config.enabled,
 		disabledModules: [...config.disabledModules].sort(),
 		todoThinking: config.todoThinking,
+		todoThinkingOverrides: Object.fromEntries(config.todoThinkingOverrides),
 		...(config.lookupModel ? { lookupModel: config.lookupModel } : {}),
 		codingDisciplineStrictness: config.codingDisciplineStrictness,
 	};

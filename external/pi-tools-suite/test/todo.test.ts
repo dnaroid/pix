@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createPiAiMock } from "./support/pi-ai-mock.js";
@@ -665,13 +665,13 @@ describe.serial("todo extension lifecycle", () => {
 		}
 	});
 
-	test.serial("uses only GLM-5.3 low/high/max and normalizes unsupported todo thinking", async () => {
+	test.serial("forces the configured GLM-5.3 todo thinking override to max", async () => {
 		const previousEnv = process.env.PI_TOOLS_SUITE_TODO_THINKING;
 		process.env.PI_TOOLS_SUITE_TODO_THINKING = "1";
 		const extension = (await import("../src/todo/index.js")).default;
 		const { getTodos } = await import("../src/todo/todo.js");
 		const pi = new FakePi();
-		pi.thinkingLevel = "max";
+		pi.thinkingLevel = "high";
 		const ctx = {
 			cwd: mkdtempSync(join(tmpdir(), "todo-thinking-glm53-")),
 			hasUI: false,
@@ -699,20 +699,68 @@ describe.serial("todo extension lifecycle", () => {
 			expect(schemaText).not.toContain('"medium"');
 
 			await tool.execute("todo-1", { action: "create", subject: "Implement", thinking: "medium" }, undefined, undefined, ctx);
-			expect(getTodos()[0]?.thinking).toBe("high");
+			expect(getTodos()[0]?.thinking).toBe("max");
 			await tool.execute("todo-2", { action: "update", id: 1, status: "in_progress", activeForm: "implementing" }, undefined, undefined, ctx);
-			expect(pi.thinkingLevel).toBe("high");
-			expect(pi.setThinkingLevelCalls).toEqual(["high"]);
+			expect(pi.thinkingLevel).toBe("max");
+			expect(pi.setThinkingLevelCalls).toEqual(["max"]);
 
 			await tool.execute("todo-3", { action: "update", id: 1, status: "completed" }, undefined, undefined, ctx);
-			expect(pi.thinkingLevel).toBe("max");
-			expect(pi.setThinkingLevelCalls).toEqual(["high", "max"]);
+			expect(pi.thinkingLevel).toBe("high");
+			expect(pi.setThinkingLevelCalls).toEqual(["max", "high"]);
 
 			await tool.execute("todo-4", { action: "create", subject: "Mechanical", thinking: "off" }, undefined, undefined, ctx);
+			expect(getTodos()[0]?.thinking).toBe("max");
+		} finally {
+			if (previousEnv === undefined) delete process.env.PI_TOOLS_SUITE_TODO_THINKING;
+			else process.env.PI_TOOLS_SUITE_TODO_THINKING = previousEnv;
+			rmSync(ctx.cwd, { recursive: true, force: true });
+		}
+	});
+
+	test.serial("prefers exact provider/model todo overrides over wildcard and bare-model matches", async () => {
+		const previousEnv = process.env.PI_TOOLS_SUITE_TODO_THINKING;
+		const previousConfigDir = process.env.PI_CONFIG_DIR;
+		const configDir = mkdtempSync(join(tmpdir(), "todo-thinking-overrides-"));
+		mkdirSync(configDir, { recursive: true });
+		writeFileSync(join(configDir, "pi-tools-suite.jsonc"), JSON.stringify({
+			todoThinking: true,
+			todoThinkingOverrides: {
+				"glm-*": "low",
+				"zai/*": "high",
+				"zai/glm-5.2": "max",
+			},
+		}));
+		process.env.PI_CONFIG_DIR = configDir;
+		delete process.env.PI_TOOLS_SUITE_TODO_THINKING;
+		const extension = (await import("../src/todo/index.js")).default;
+		const { getTodos } = await import("../src/todo/todo.js");
+		const pi = new FakePi();
+		const ctx = {
+			cwd: mkdtempSync(join(tmpdir(), "todo-thinking-model-")),
+			hasUI: false,
+			model: { provider: "zai", id: "glm-5.2", reasoning: true, thinkingLevelMap: { max: "max" } },
+			sessionManager: { getBranch: () => [] },
+			isIdle: () => true,
+			hasPendingMessages: () => false,
+		};
+		try {
+			extension(pi as any);
+			await pi.emit("session_start", {}, ctx);
+			const tool = pi.tools.get("todo");
+			await tool.execute("todo-exact", { action: "create", subject: "Exact", thinking: "off" }, undefined, undefined, ctx);
+			expect(getTodos()[0]?.thinking).toBe("max");
+
+			await tool.execute("todo-clear", { action: "clear" }, undefined, undefined, ctx);
+			const otherModel = { ...ctx.model, provider: "other" };
+			await pi.emit("model_select", { model: otherModel }, { ...ctx, model: otherModel });
+			await pi.tools.get("todo").execute("todo-bare", { action: "create", subject: "Bare", thinking: "off" }, undefined, undefined, { ...ctx, model: otherModel });
 			expect(getTodos()[0]?.thinking).toBe("low");
 		} finally {
 			if (previousEnv === undefined) delete process.env.PI_TOOLS_SUITE_TODO_THINKING;
 			else process.env.PI_TOOLS_SUITE_TODO_THINKING = previousEnv;
+			if (previousConfigDir === undefined) delete process.env.PI_CONFIG_DIR;
+			else process.env.PI_CONFIG_DIR = previousConfigDir;
+			rmSync(configDir, { recursive: true, force: true });
 			rmSync(ctx.cwd, { recursive: true, force: true });
 		}
 	});

@@ -62,6 +62,18 @@ Saved prompt slash commands are stored under `promptCommands`. Use `/prompt-comm
 }
 ```
 
+Todo thinking can be enabled globally and forced to a fixed level for selected models. `todoThinkingOverrides` keys accept exact `provider/model` or bare-model names plus `*` and `?` wildcards. Full provider/model matches beat bare-model matches, exact matches beat wildcards, and the more specific wildcard wins. The override is applied at runtime to create/update and batch create/update mutations even when the model requests another level or omits `thinking`. Unsupported levels are normalized to the nearest level supported by the current model. Later config layers can remove an inherited entry with `null`.
+
+```jsonc
+{
+  "todoThinking": true,
+  "todoThinkingOverrides": {
+    "zai/glm-5.3": "max",
+    "cheap-provider/*": "high"
+  }
+}
+```
+
 DCP settings are stored only under `dcp` in the user shared config file `~/.config/pi/pi-tools-suite.jsonc`. Legacy standalone `dcp.jsonc`, `$PI_CONFIG_DIR`, and project-local `.pi/pi-tools-suite.jsonc` DCP settings are intentionally ignored by the ported headless DCP module.
 
 ```jsonc

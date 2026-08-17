@@ -15,6 +15,12 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
   // When true, todo items may carry a per-task thinking level and the todo
   // module will switch/restore Pi's thinking level as in-progress tasks change.
   "todoThinking": true,
+  // Force every todo mutation made under matching models to the configured
+  // thinking level. Supports provider/model or bare-model keys with * / ? globs.
+  // Set an inherited key to null in a later config layer to remove it.
+  "todoThinkingOverrides": {
+    "zai/glm-5.3": "max"
+  },
   // Vision-capable model used by the coding-discipline lookup tool for blind-model
   // screenshot/image questions. Remove or set to null to disable lookup.
   "lookupModel": "openai-codex/gpt-5.4-mini",
