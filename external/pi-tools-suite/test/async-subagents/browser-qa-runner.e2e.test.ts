@@ -9,13 +9,15 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { unzipSync } from "../../src/async-subagents/private-skills/browser-qa/vendor/fflate.mjs";
 
 const RUN_E2E = /^(?:1|true|yes)$/i.test(process.env.BROWSER_QA_RUNNER_E2E ?? "");
-const KEEP_EVIDENCE = /^(?:1|true|yes)$/i.test(process.env.BROWSER_QA_KEEP_EVIDENCE ?? "");
+const KEEP_EVIDENCE = !/^(?:0|false|no)$/i.test(process.env.BROWSER_QA_KEEP_EVIDENCE ?? "");
 const e2eTest = RUN_E2E ? test : test.skip;
+const testDirectory = path.dirname(fileURLToPath(import.meta.url));
+const repositoryRoot = path.resolve(testDirectory, "../../../..");
 const runner = path.resolve(
-	path.dirname(fileURLToPath(import.meta.url)),
+	testDirectory,
 	"../../src/async-subagents/private-skills/browser-qa/scripts/browser-qa-runner.mjs",
 );
-const mockPage = fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../fixtures/browser-qa/mock-page.html"), "utf8");
+const mockPage = fs.readFileSync(path.resolve(testDirectory, "../fixtures/browser-qa/mock-page.html"), "utf8");
 
 e2eTest("captures real screenshot, video, and trace artifacts from a local mock page", async () => {
 	let receivedAuthCookie = false;
@@ -30,16 +32,17 @@ e2eTest("captures real screenshot, video, and trace artifacts from a local mock 
 	});
 
 	const project = fs.mkdtempSync(path.join(os.tmpdir(), "browser-qa-real-e2e-"));
+	let publishedArtifacts: ArtifactManifest | undefined;
 	try {
 		const { port } = server.address() as AddressInfo;
 		const origin = `http://127.0.0.1:${port}`;
 		writePrivateJson(path.join(project, ".pi", "qa_auth.jsonc"), {
 			profiles: {
-			mock: {
-				description: "Local browser QA mock",
-				traits: ["test:mock"],
-				baseUrl: origin,
-				allowedOrigins: [origin],
+				mock: {
+					description: "Local browser QA mock",
+					traits: ["test:mock"],
+					baseUrl: origin,
+					allowedOrigins: [origin],
 					auth: {
 						type: "cookie",
 						cookies: [{ name: "session", value: "mock-session-secret", url: origin }],
@@ -83,19 +86,63 @@ e2eTest("captures real screenshot, video, and trace artifacts from a local mock 
 		expect(fs.readFileSync(result.json.artifacts.videos[0].path).subarray(0, 4)).toEqual(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]));
 		const traceEntries = unzipSync(new Uint8Array(fs.readFileSync(result.json.artifacts.traces[0].path)), {});
 		expect(Object.keys(traceEntries)).toContain("trace.trace");
+
+		if (KEEP_EVIDENCE) {
+			publishedArtifacts = publishEvidence(result.json.artifacts);
+			for (const artifact of allArtifacts(publishedArtifacts)) {
+				expect(fs.existsSync(artifact.path)).toBe(true);
+				expect(artifact.uri).toBe(pathToFileURL(artifact.path).href);
+			}
+		}
 	} finally {
 		await new Promise<void>((resolve) => server.close(() => resolve()));
-		if (!KEEP_EVIDENCE) fs.rmSync(project, { recursive: true, force: true });
-		else console.error(`browser QA evidence retained at ${project}`);
+		fs.rmSync(project, { recursive: true, force: true });
 	}
+	if (publishedArtifacts) printArtifactLinks(publishedArtifacts);
 }, 120_000);
 
 type Artifact = { path: string; uri: string };
+type ArtifactManifest = { screenshots: Artifact[]; videos: Artifact[]; traces: Artifact[] };
 type RunnerStatus = {
 	status: string;
 	profile?: string;
-	artifacts: { screenshots: Artifact[]; videos: Artifact[]; traces: Artifact[] };
+	artifacts: ArtifactManifest;
 };
+
+function publishEvidence(artifacts: ArtifactManifest): ArtifactManifest {
+	const outputDirectory = path.join(repositoryRoot, ".pi", "qa-runs", "browser-qa-e2e", "latest");
+	fs.rmSync(outputDirectory, { recursive: true, force: true });
+	fs.mkdirSync(outputDirectory, { recursive: true, mode: 0o700 });
+	const copyGroup = (group: Artifact[]): Artifact[] => group.map((artifact) => {
+		const outputPath = path.join(outputDirectory, path.basename(artifact.path));
+		fs.copyFileSync(artifact.path, outputPath);
+		fs.chmodSync(outputPath, 0o600);
+		return { path: outputPath, uri: pathToFileURL(outputPath).href };
+	});
+	return {
+		screenshots: copyGroup(artifacts.screenshots),
+		videos: copyGroup(artifacts.videos),
+		traces: copyGroup(artifacts.traces),
+	};
+}
+
+function allArtifacts(artifacts: ArtifactManifest): Artifact[] {
+	return [...artifacts.screenshots, ...artifacts.videos, ...artifacts.traces];
+}
+
+function printArtifactLinks(artifacts: ArtifactManifest): void {
+	console.error("\nBrowser QA artifacts retained for inspection:");
+	for (const [label, group] of [
+		["Screenshot", artifacts.screenshots],
+		["Video", artifacts.videos],
+		["Trace", artifacts.traces],
+	] as const) {
+		for (const artifact of group) {
+			console.error(`- ${label}: [${path.basename(artifact.path)}](${artifact.uri})`);
+			console.error(`  ${artifact.path}`);
+		}
+	}
+}
 
 function writePrivateJson(file: string, value: unknown): void {
 	fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });

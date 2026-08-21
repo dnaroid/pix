@@ -92,5 +92,6 @@ npm run test:browser-qa-e2e
 ```
 
 Normal suite tests keep this case skipped; the Publish workflow runs it on
-Linux after installing Chromium. Set `BROWSER_QA_KEEP_EVIDENCE=1` locally to
-retain the temporary evidence directory printed by the test.
+Linux after installing Chromium. Explicit runs retain the latest artifacts in
+`.pi/qa-runs/browser-qa-e2e/latest/` and print a clickable link for every file.
+Set `BROWSER_QA_KEEP_EVIDENCE=0` to clean up without publishing evidence.
