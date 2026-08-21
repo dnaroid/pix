@@ -63,6 +63,8 @@ describe("tool descriptions", () => {
 		expect(promptText).toContain("do not let repo_* availability suppress delegation");
 		expect(promptText).toContain("one discovery question");
 		expect(promptText).toContain("subagentType: \"browser-qa\"");
+		expect(promptText).toContain("generated `.pi/qa_auth.jsonc` template path");
+		expect(promptText).toContain("clickable screenshot, video, and trace links");
 		expect(promptText).toContain("mandatory delegation trigger");
 		expect(promptText).toContain("before checking prerequisites");
 		expect(promptText).toContain("parent must not inspect the project first");

@@ -20,9 +20,11 @@ from `.pi/qa_auth.jsonc` yourself.
    `node <runner> run --profile <id> --base-url <url> --flow <flow.jsonc>`.
    Profile id, URL, and flow path are non-secret; never pass credentials as
    arguments or environment variables.
-5. Report deterministic assertions and the runner's screenshot, video, and
-   trace paths. Visual inspection supplements assertions; it does not replace
-   them.
+5. Report deterministic assertions and every artifact returned by the runner.
+   For each screenshot, video, or trace, emit a separate clickable Markdown
+   link using its `uri` and also show its absolute `path`. Do this for failed
+   runs too whenever `artifacts` is present; never report only `evidenceDir`.
+   Visual inspection supplements assertions; it does not replace them.
 
 The flow is `{ "steps": [...] }` with at most 100 steps. Supported actions:
 
@@ -59,8 +61,16 @@ cleanup. Do not start an additional shared/default browser session. For multiple
 profiles, invoke the runner separately; each invocation gets an isolated context
 and exclusive evidence directory.
 
-If the runner returns `QA_AUTH_UPDATE_REQUIRED`, stop and relay only its profile,
-file, and reason fields so the parent can ask the user to update auth and rerun.
-Do not attempt to recover by exposing or replaying credentials.
+If the runner returns `QA_AUTH_UPDATE_REQUIRED`, stop and explicitly report that
+browser QA requires credentials or an auth-config update. Ask the user to fill
+the reported file and rerun QA. If `templateCreated` is true, say that a private
+empty template was created at that path. Relay only the runner's profile, file,
+reason, action, and template-created state; never read the generated file or
+attempt to recover by exposing or replaying credentials.
+
+After any runner invocation that actually performed browser testing, include
+all non-empty `artifacts.screenshots`, `artifacts.videos`, and
+`artifacts.traces` groups in the final response. These links are mandatory so
+the user can open the evidence directly.
 
 See `references/qa-auth.example.jsonc` and `references/qa-flow.example.jsonc`.

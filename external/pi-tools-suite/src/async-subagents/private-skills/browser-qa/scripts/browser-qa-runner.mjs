@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
 import { parse as parseJsonc, printParseErrorCode } from "jsonc-parser";
 import { strFromU8, strToU8, unzipSync, zipSync } from "../vendor/fflate.mjs";
 
@@ -13,6 +14,29 @@ const RUNS_RELATIVE = path.join(".pi", "qa-runs");
 const EXIT_AUTH_UPDATE_REQUIRED = 42;
 const EXIT_PROFILE_REQUIRED = 43;
 const PROFILE_ID = /^[A-Za-z0-9._-]+$/;
+const AUTH_TEMPLATE = `{
+  // Authenticated browser QA requires at least one project-local profile.
+  // Fill and uncomment a profile below. Keep this file private.
+  "profiles": {
+    // "staging-user": {
+    //   "description": "Staging user",
+    //   "traits": ["role:user"],
+    //   "baseUrl": "https://staging.example.test",
+    //   "allowedOrigins": ["https://staging.example.test"],
+    //   "auth": {
+    //     "type": "form",
+    //     "loginUrl": "https://staging.example.test/login",
+    //     "fields": [
+    //       { "selector": "input[name=email]", "value": "" },
+    //       { "selector": "input[name=password]", "value": "" }
+    //     ],
+    //     "submitSelector": "button[type=submit]",
+    //     "success": { "selector": "[data-testid=user-menu]" }
+    //   }
+    // }
+  }
+}
+`;
 process.umask(0o077);
 
 class QaStatusError extends Error {
@@ -137,25 +161,51 @@ async function runQa({ cwd, args, profileId, profile }) {
 	if (failure?.suppressEvidence) removeVisualEvidence(evidenceDir);
 
 	const evidence = existingEvidence(evidenceDir);
+	const evidenceDetails = {
+		evidenceDir: relativePath(cwd, evidenceDir),
+		evidence,
+		artifacts: artifactManifest(evidenceDir, evidence),
+	};
 	writeJsonPrivate(path.join(evidenceDir, "result.json"), {
 		status: outcome,
 		profile: profileId,
-		evidence,
+		...evidenceDetails,
 	});
 	if (failure) {
 		if (failure instanceof QaStatusError) {
 			failure.reason = redact(failure.reason, collectSecrets(profile.auth));
+			failure.details = { ...failure.details, ...evidenceDetails };
 			throw failure;
 		}
-		throw failure;
+		throw new QaStatusError(
+			"QA_RUN_FAILED",
+			redact(safeReason(failure), collectSecrets(profile.auth)),
+			1,
+			profileId,
+			evidenceDetails,
+		);
 	}
-	writeStatus({ status: "QA_PASSED", profile: profileId, evidenceDir: relativePath(cwd, evidenceDir), evidence });
+	writeStatus({ status: "QA_PASSED", profile: profileId, ...evidenceDetails });
 }
 
 function readAuthConfig(cwd) {
 	const candidate = path.join(cwd, CONFIG_RELATIVE);
 	if (!fs.existsSync(candidate)) {
-		throw new QaStatusError("QA_AUTH_UPDATE_REQUIRED", "auth config is missing", EXIT_AUTH_UPDATE_REQUIRED);
+		let templateCreated;
+		try {
+			templateCreated = createAuthTemplate(cwd);
+		} catch (error) {
+			throw new QaStatusError("QA_AUTH_UPDATE_REQUIRED", safeReason(error), EXIT_AUTH_UPDATE_REQUIRED);
+		}
+		if (templateCreated) {
+			throw new QaStatusError(
+				"QA_AUTH_UPDATE_REQUIRED",
+				"credentials are required; fill the generated auth config template and rerun browser QA",
+				EXIT_AUTH_UPDATE_REQUIRED,
+				undefined,
+				{ action: "provide_credentials", templateCreated: true },
+			);
+		}
 	}
 	let file;
 	try {
@@ -169,7 +219,13 @@ function readAuthConfig(cwd) {
 		throw new QaStatusError("QA_AUTH_UPDATE_REQUIRED", `auth config is invalid JSONC (${printParseErrorCode(errors[0].error)})`, EXIT_AUTH_UPDATE_REQUIRED);
 	}
 	if (!isObject(value) || !isObject(value.profiles) || Object.keys(value.profiles).length === 0) {
-		throw new QaStatusError("QA_AUTH_UPDATE_REQUIRED", "auth config must define a non-empty profiles object", EXIT_AUTH_UPDATE_REQUIRED);
+		throw new QaStatusError(
+			"QA_AUTH_UPDATE_REQUIRED",
+			"credentials are required; auth config must define a non-empty profiles object",
+			EXIT_AUTH_UPDATE_REQUIRED,
+			undefined,
+			{ action: "provide_credentials", templateCreated: false },
+		);
 	}
 	if (Object.keys(value.profiles).some((id) => !isSafeName(id))) {
 		throw new QaStatusError("QA_AUTH_UPDATE_REQUIRED", "auth profile ids may contain only letters, digits, dot, underscore, or dash", EXIT_AUTH_UPDATE_REQUIRED);
@@ -753,6 +809,36 @@ function assertNoSymlinkComponents(root, target, label) {
 
 }
 
+function createAuthTemplate(cwd) {
+	const root = fs.realpathSync(cwd);
+	const directory = path.join(root, path.dirname(CONFIG_RELATIVE));
+	const file = path.join(root, CONFIG_RELATIVE);
+	assertInside(root, directory, "auth config directory");
+	if (!fs.existsSync(directory)) {
+		try {
+			fs.mkdirSync(directory, { mode: 0o700 });
+		} catch (error) {
+			if (!isAlreadyExistsError(error)) throw error;
+		}
+	}
+	const directoryStat = fs.lstatSync(directory);
+	if (directoryStat.isSymbolicLink() || !directoryStat.isDirectory()) {
+		throw new Error("auth config directory must be a real project-local directory");
+	}
+	try {
+		fs.writeFileSync(file, AUTH_TEMPLATE, { encoding: "utf8", mode: 0o600, flag: "wx" });
+	} catch (error) {
+		if (isAlreadyExistsError(error)) return false;
+		throw error;
+	}
+	fs.chmodSync(file, 0o600);
+	return true;
+}
+
+function isAlreadyExistsError(error) {
+	return error !== null && typeof error === "object" && error.code === "EEXIST";
+}
+
 function createExclusivePrivateDirectory(cwd, target) {
 	createPrivateDirectory(cwd, target, true);
 }
@@ -802,6 +888,18 @@ function existingEvidence(evidenceDir) {
 	return fs.readdirSync(evidenceDir)
 		.filter((name) => /^(?:[A-Za-z0-9._-]+\.png|video\.webm|trace\.zip)$/.test(name))
 		.sort();
+}
+
+function artifactManifest(evidenceDir, evidence) {
+	const artifacts = { screenshots: [], videos: [], traces: [] };
+	for (const name of evidence) {
+		const absolutePath = path.resolve(evidenceDir, name);
+		const artifact = { path: absolutePath, uri: pathToFileURL(absolutePath).href };
+		if (name.endsWith(".png")) artifacts.screenshots.push(artifact);
+		else if (name.endsWith(".webm")) artifacts.videos.push(artifact);
+		else if (name.endsWith(".zip")) artifacts.traces.push(artifact);
+	}
+	return artifacts;
 }
 
 function removeVisualEvidence(evidenceDir) {

@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { strFromU8, strToU8, unzipSync, zipSync } from "../../src/async-subagents/private-skills/browser-qa/vendor/fflate.mjs";
 
 const runner = path.resolve(
@@ -264,9 +264,43 @@ describe("private browser QA runner", () => {
 		expect(fs.existsSync(path.join(project, "executed"))).toBe(false);
 	});
 
-	test("rejects missing config and disallowed base URLs with update-required status", () => {
-		const missing = run(tempProject(), ["profiles"]);
-		expect(missing).toMatchObject({ code: 42, json: { status: "QA_AUTH_UPDATE_REQUIRED", file: ".pi/qa_auth.jsonc" } });
+	test("creates a private empty auth template and explicitly requests credentials", () => {
+		const project = tempProject();
+		const missing = run(project, ["profiles"]);
+		expect(missing).toMatchObject({
+			code: 42,
+			json: {
+				status: "QA_AUTH_UPDATE_REQUIRED",
+				file: ".pi/qa_auth.jsonc",
+				action: "provide_credentials",
+				templateCreated: true,
+			},
+		});
+		expect(missing.json.reason).toContain("credentials are required");
+		const template = path.join(project, ".pi", "qa_auth.jsonc");
+		expect(fs.readFileSync(template, "utf8")).toContain('"profiles": {');
+		expect(fs.readFileSync(template, "utf8")).not.toContain("replace-me");
+		if (process.platform !== "win32") expect(fs.statSync(template).mode & 0o777).toBe(0o600);
+
+		const stillEmpty = run(project, ["profiles"]);
+		expect(stillEmpty).toMatchObject({
+			code: 42,
+			json: { action: "provide_credentials", templateCreated: false },
+		});
+		expect(stillEmpty.json.reason).toContain("non-empty profiles object");
+
+		if (process.platform !== "win32") {
+			const symlinkProject = tempProject();
+			const outside = tempProject();
+			fs.symlinkSync(outside, path.join(symlinkProject, ".pi"), "dir");
+			const symlinkedDirectory = run(symlinkProject, ["profiles"]);
+			expect(symlinkedDirectory).toMatchObject({ code: 42, json: { status: "QA_AUTH_UPDATE_REQUIRED" } });
+			expect(symlinkedDirectory.json.reason).toContain("real project-local directory");
+			expect(fs.existsSync(path.join(outside, "qa_auth.jsonc"))).toBe(false);
+		}
+	});
+
+	test("rejects disallowed base URLs with update-required status", () => {
 
 		const project = tempProject();
 		writeAuth(project, { admin: profile("top-secret-cookie") });
@@ -294,7 +328,12 @@ describe("private browser QA runner", () => {
 			json: { status: "QA_PASSED", profile: "admin", evidenceDir: ".pi/qa-runs/proof/admin" },
 		});
 		expect(result.json.evidence.sort()).toEqual(["final.png", "trace.zip", "video.webm"]);
-		const evidenceDir = path.join(project, ".pi", "qa-runs", "proof", "admin");
+		const evidenceDir = path.join(fs.realpathSync(project), ".pi", "qa-runs", "proof", "admin");
+		expect(result.json.artifacts).toEqual({
+			screenshots: [{ path: path.join(evidenceDir, "final.png"), uri: pathToFileURL(path.join(evidenceDir, "final.png")).href }],
+			videos: [{ path: path.join(evidenceDir, "video.webm"), uri: pathToFileURL(path.join(evidenceDir, "video.webm")).href }],
+			traces: [{ path: path.join(evidenceDir, "trace.zip"), uri: pathToFileURL(path.join(evidenceDir, "trace.zip")).href }],
+		});
 		for (const name of ["final.png", "trace.zip", "video.webm", "result.json"]) {
 			expect(fs.existsSync(path.join(evidenceDir, name))).toBe(true);
 			expect(fs.readFileSync(path.join(evidenceDir, name), "utf8")).not.toContain(secret);
@@ -325,6 +364,9 @@ describe("private browser QA runner", () => {
 			json: { status: "QA_AUTH_UPDATE_REQUIRED", profile: "admin", file: ".pi/qa_auth.jsonc" },
 		});
 		expect(result.json.reason).toContain("rejected or expired");
+		expect(result.json.artifacts.screenshots[0].path).toEndWith(path.join("expired", "admin", "failure.png"));
+		expect(result.json.artifacts.videos[0].uri).toStartWith("file:");
+		expect(result.json.artifacts.traces[0].uri).toStartWith("file:");
 		expect(result.stdout).not.toContain(secret);
 	});
 });

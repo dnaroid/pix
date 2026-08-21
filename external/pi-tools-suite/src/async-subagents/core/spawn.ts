@@ -90,6 +90,9 @@ export function spawnAgent(
 	else piArgs.push("--no-session");
 	piArgs.push("--no-extensions");
 	piArgs.push("--extension", getModelToolsExtensionPath());
+	// `--no-extensions` keeps sub-agents isolated, but the suite-owned provider
+	// is infrastructure: always restore it, regardless of the selected model.
+	piArgs.push("--extension", getAntigravityAuthExtensionPath());
 	if (options.isolatedSkills && options.isolatedSkills.length > 0) {
 		piArgs.push("--no-skills");
 		for (const skillPath of options.isolatedSkills) piArgs.push("--skill", skillPath);
@@ -411,6 +414,10 @@ function withoutSkillArgs(args: string[]): string[] {
 
 function getModelToolsExtensionPath(): string {
 	return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "model-tools", "index.ts");
+}
+
+function getAntigravityAuthExtensionPath(): string {
+	return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "antigravity-auth", "index.ts");
 }
 
 function terminateChildProcess(proc: ChildProcess, signal: NodeJS.Signals): void {
