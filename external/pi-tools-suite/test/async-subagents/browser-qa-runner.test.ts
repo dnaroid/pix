@@ -288,7 +288,11 @@ describe("private browser QA runner", () => {
 		] }));
 
 		const result = run(project, ["run", "--profile", "admin", "--flow", "flow.jsonc", "--run-id", "proof"]);
-		expect(result).toMatchObject({ code: 0, stderr: "", json: { status: "QA_PASSED", profile: "admin" } });
+		expect(result).toMatchObject({
+			code: 0,
+			stderr: "",
+			json: { status: "QA_PASSED", profile: "admin", evidenceDir: ".pi/qa-runs/proof/admin" },
+		});
 		expect(result.json.evidence.sort()).toEqual(["final.png", "trace.zip", "video.webm"]);
 		const evidenceDir = path.join(project, ".pi", "qa-runs", "proof", "admin");
 		for (const name of ["final.png", "trace.zip", "video.webm", "result.json"]) {

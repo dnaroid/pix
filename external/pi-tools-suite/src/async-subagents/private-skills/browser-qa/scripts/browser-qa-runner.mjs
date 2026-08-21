@@ -7,7 +7,7 @@ import { createRequire } from "node:module";
 import { parse as parseJsonc, printParseErrorCode } from "jsonc-parser";
 import { strFromU8, strToU8, unzipSync, zipSync } from "../vendor/fflate.mjs";
 
-const CONFIG_RELATIVE = path.join(".pi", "qa_auth.jsonc");
+const CONFIG_RELATIVE = ".pi/qa_auth.jsonc";
 const STATE_RELATIVE = path.join(".pi", "qa-auth-state");
 const RUNS_RELATIVE = path.join(".pi", "qa-runs");
 const EXIT_AUTH_UPDATE_REQUIRED = 42;
@@ -795,7 +795,7 @@ function timestamp() {
 }
 
 function relativePath(cwd, value) {
-	return path.relative(cwd, value) || ".";
+	return (path.relative(cwd, value) || ".").split(path.sep).join("/");
 }
 
 function existingEvidence(evidenceDir) {
