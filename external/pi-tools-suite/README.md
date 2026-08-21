@@ -251,8 +251,9 @@ The built-in `browser-qa` role runs on `antigravity/gemini-3-flash-preview`, wit
 `openai-codex/gpt-5.4-mini` as its fallback. Its browser workflow is an explicit
 private skill under `src/async-subagents/private-skills/`, outside normal Pi skill
 discovery. The role's first-class `isolatedSkills` setting launches the child with
-`--no-skills` plus only that skill, so parent and ordinary sub-agent sessions do
-not discover it.
+`--no-skills` plus the private workflow and the packaged `skills/playwright-cli`
+skill. Both are mandatory even when configuration adds other isolated skills;
+parent and ordinary sub-agent sessions do not discover the private workflow.
 
 Keep named dev/staging auth profiles in project `.pi/qa_auth.jsonc` (there is no
 `/qa-auth` command). The private runner supports `form`, `cookie`, `localStorage`,

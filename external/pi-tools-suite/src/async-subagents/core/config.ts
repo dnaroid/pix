@@ -288,6 +288,21 @@ export function getBrowserQaSkillPath(): string {
 	return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "private-skills", "browser-qa", "SKILL.md");
 }
 
+export function getPlaywrightCliSkillPath(): string {
+	const bundledPath = path.resolve(
+		path.dirname(fileURLToPath(import.meta.url)),
+		"../../../../..",
+		"skills",
+		"playwright-cli",
+		"SKILL.md",
+	);
+	const installedPaths = [
+		path.join(os.homedir(), ".agents", "skills", "playwright-cli", "SKILL.md"),
+		path.join(os.homedir(), ".pi", "agent", "skills", "playwright-cli", "SKILL.md"),
+	];
+	return [bundledPath, ...installedPaths].find((candidate) => fs.existsSync(candidate)) ?? bundledPath;
+}
+
 export function getSubagentConfigInitTargetPath(cwd: string, env: NodeJS.ProcessEnv = process.env): string {
 	return explicitSubagentConfigPath(cwd, env) ?? getDefaultSubagentConfigPath();
 }
@@ -381,7 +396,7 @@ export function resolveAgentTaskConfig(
 	return {
 		profile,
 		extraArgs,
-		isolatedSkills: arrayOfStrings(profile?.isolatedSkills) ?? [],
+		isolatedSkills: resolveIsolatedSkills(selectedType, profile),
 		fallbackModels,
 		retry: resolveRetryConfig(config.retry, profile?.retry),
 		maxResultBytes: profile?.maxResultBytes ?? config.maxResultBytes,
@@ -397,6 +412,12 @@ export function resolveAgentTaskConfig(
 			extraArgs: taskExtraArgs.length > 0 ? taskExtraArgs : undefined,
 		},
 	};
+}
+
+function resolveIsolatedSkills(selectedType: string | undefined, profile: SubagentTypeConfig | undefined): string[] {
+	const configured = arrayOfStrings(profile?.isolatedSkills) ?? [];
+	if (selectedType !== "browser-qa") return configured;
+	return [...new Set([getBrowserQaSkillPath(), getPlaywrightCliSkillPath(), ...configured])];
 }
 
 export function resolveSubagentRoutingConfig(config: SubagentConfig): ResolvedSubagentRoutingConfig {

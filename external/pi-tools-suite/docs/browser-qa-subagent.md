@@ -17,6 +17,9 @@ evidence. The role uses `antigravity/gemini-3-flash-preview`, falling back to
   Antigravity-backed role unavailable.
 - A type profile may declare `isolatedSkills`. Spawning that profile adds
   `--no-skills` followed by one explicit `--skill` per configured path.
+- The `browser-qa` profile always loads both its private workflow and the
+  packaged `skills/playwright-cli` skill. Configuration may append isolated
+  skills but cannot remove either mandatory browser skill.
 - Other sub-agent profiles and the parent session must not discover the private
   skill automatically.
 
@@ -66,9 +69,10 @@ evidence. The role uses `antigravity/gemini-3-flash-preview`, falling back to
 
 ## Acceptance criteria
 
-1. `browser-qa` resolves to the intended model/fallback and private skill, and
-   its isolated child process can register the configured Antigravity model.
-2. Spawn args contain `--no-skills` and only the explicit private skill for this
+1. `browser-qa` resolves to the intended model/fallback, private workflow, and
+   packaged `playwright-cli` skill, and its isolated child process can register
+   the configured Antigravity model.
+2. Spawn args contain `--no-skills` and both mandatory explicit skills for this
    profile; ordinary profiles retain existing skill discovery behavior.
 3. Auth profile listing and all error output are redacted; model-authored input
    cannot execute code in the credential-bearing process.

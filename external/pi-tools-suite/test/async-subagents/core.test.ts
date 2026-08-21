@@ -20,6 +20,7 @@ import {
 	getAgentState,
 	getActiveSubagentPresetName,
 	getBrowserQaSkillPath,
+	getPlaywrightCliSkillPath,
 	getSubagentRegistryPath,
 	getSubagentConfigSamplePath,
 	getPiInvocation,
@@ -436,15 +437,27 @@ describe.serial("subagent type config", () => {
 		expect(fs.readFileSync(targetPath, "utf-8")).toBe(before);
 	});
 
-	test.serial("resolves the built-in browser QA profile with its private skill", () => {
+	test.serial("resolves the built-in browser QA profile with its mandatory isolated skills", () => {
 		const config = loadSubagentConfig(tempDir(), {});
 		const resolved = resolveAgentTaskConfig({ id: "qa", task: "verify the browser bug", subagentType: "browser-qa" }, config);
 
 		expect(resolved.task.model).toBe("antigravity/gemini-3-flash-preview");
 		expect(resolved.fallbackModels).toEqual(["openai-codex/gpt-5.4-mini"]);
 		expect(resolved.task.tools).toEqual(["read", "grep", "bash"]);
-		expect(resolved.isolatedSkills).toEqual([getBrowserQaSkillPath()]);
-		expect(fs.existsSync(resolved.isolatedSkills[0])).toBe(true);
+		expect(resolved.isolatedSkills).toEqual([getBrowserQaSkillPath(), getPlaywrightCliSkillPath()]);
+		for (const skillPath of resolved.isolatedSkills) expect(fs.existsSync(skillPath)).toBe(true);
+	});
+
+	test.serial("keeps browser QA skills mandatory when config adds isolated skills", () => {
+		const customSkill = path.join(tempDir(), "custom", "SKILL.md");
+		const config = {
+			types: {
+				"browser-qa": { isolatedSkills: [customSkill] },
+			},
+		};
+		const resolved = resolveAgentTaskConfig({ id: "qa", task: "verify the browser bug", subagentType: "browser-qa" }, config);
+
+		expect(resolved.isolatedSkills).toEqual([getBrowserQaSkillPath(), getPlaywrightCliSkillPath(), customSkill]);
 	});
 
 	test.serial("selects explicit roles or falls back to the configured default", () => {
@@ -923,8 +936,10 @@ describe.serial("spawning agents", () => {
 		const runDir = createRunDir(cwd, "spawn-skill");
 		const piScript = path.join(tempDir(), "pi.js");
 		const skillPath = path.join(cwd, "private", "SKILL.md");
+		const secondSkillPath = path.join(cwd, "playwright-cli", "SKILL.md");
 		const injectedSkillPath = path.join(cwd, "untrusted", "SKILL.md");
 		writeFile(skillPath, "---\nname: private-test\ndescription: test\n---\n");
+		writeFile(secondSkillPath, "---\nname: playwright-cli\ndescription: test\n---\n");
 		writeFile(piScript, `
 process.stdin.on("data", () => {
   console.log(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "done" }] }] }));
@@ -935,7 +950,7 @@ setTimeout(() => {}, 1000);
 		process.argv[1] = piScript;
 
 		await withTimeout(new Promise<any>((resolve) => {
-			spawnAgent(runDir, { id: "isolated", task: "Do QA" }, cwd, ["--skill", injectedSkillPath, `--skill=${injectedSkillPath}`, "--thinking", "high"], undefined, resolve, { isolatedSkills: [skillPath] });
+			spawnAgent(runDir, { id: "isolated", task: "Do QA" }, cwd, ["--skill", injectedSkillPath, `--skill=${injectedSkillPath}`, "--thinking", "high"], undefined, resolve, { isolatedSkills: [skillPath, secondSkillPath] });
 		}), "Timed out waiting for isolated-skill spawn");
 		await withTimeout(new Promise<any>((resolve) => {
 			spawnAgent(runDir, { id: "ordinary", task: "Do work" }, cwd, [], undefined, resolve);
@@ -945,9 +960,10 @@ setTimeout(() => {}, 1000);
 		expect(isolatedArgs).toContain("--no-skills");
 		expect(isolatedArgs).toContain("--skill");
 		expect(isolatedArgs).toContain(skillPath);
+		expect(isolatedArgs).toContain(secondSkillPath);
 		expect(isolatedArgs).not.toContain(injectedSkillPath);
 		expect(isolatedArgs).not.toContain(`--skill=${injectedSkillPath}`);
-		expect(isolatedArgs.filter((arg) => arg === "--skill")).toHaveLength(1);
+		expect(isolatedArgs.filter((arg) => arg === "--skill")).toHaveLength(2);
 		const ordinaryArgs = fs.readFileSync(path.join(runDir, "ordinary", "pi_args"), "utf8").split("\n");
 		expect(ordinaryArgs).not.toContain("--no-skills");
 		expect(ordinaryArgs).not.toContain("--skill");
