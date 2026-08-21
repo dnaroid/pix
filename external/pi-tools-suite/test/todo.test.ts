@@ -32,6 +32,7 @@ class FakePi {
 	events = createFakeEventBus();
 	sentMessages: string[] = [];
 	sentMessageOptions: unknown[] = [];
+	customEntries: Array<{ customType: string; data: unknown }> = [];
 	thinkingLevel = "off";
 	setThinkingLevelCalls: string[] = [];
 
@@ -45,6 +46,9 @@ class FakePi {
 	sendUserMessage(message: string, options?: unknown) {
 		this.sentMessages.push(message);
 		this.sentMessageOptions.push(options);
+	}
+	appendEntry(customType: string, data: unknown) {
+		this.customEntries.push({ customType, data });
 	}
 	getThinkingLevel() { return this.thinkingLevel; }
 	setThinkingLevel(level: string) {
@@ -473,6 +477,20 @@ describe.serial("todo replay", () => {
 		expect(second.tasks[0].subject).toBe("New");
 	});
 
+	test.serial("replays a command snapshot after an older tool result", async () => {
+		const { replayFromBranch, TODO_STATE_ENTRY_TYPE } = await import("../src/todo/state/replay.js");
+		const older = { action: "create", params: {}, tasks: [{ id: 1, subject: "Restored before fix", status: "pending" as const }], nextId: 2 };
+		const cleared = { action: "clear", params: { action: "clear" }, tasks: [], nextId: 1 };
+		const branch = [
+			{ type: "message", message: { role: "toolResult", toolName: "todo", details: older } },
+			{ type: "custom", customType: TODO_STATE_ENTRY_TYPE, data: { tasks: "bad", nextId: 1 } },
+			{ type: "custom", customType: "other-extension", data: older },
+			{ type: "custom", customType: TODO_STATE_ENTRY_TYPE, data: cleared },
+		];
+
+		expect(replayFromBranch({ sessionManager: { getBranch: () => branch } })).toEqual({ tasks: [], nextId: 1 });
+	});
+
 });
 
 describe.serial("/todos command", () => {
@@ -590,6 +608,10 @@ describe.serial("/todos command", () => {
 			expect(scoped.tasks.find((task: any) => task.id === 1).status).toBe("pending");
 			expect(scoped.tasks.find((task: any) => task.id === 2).status).toBe("deferred");
 			expect(emitted[emitted.length - 1]?.data.details.tasks.find((task: any) => task.id === 2).status).toBe("deferred");
+			expect(pi.customEntries[pi.customEntries.length - 1]).toMatchObject({
+				customType: "pi-tools-suite:todo-state",
+				data: { action: "update", params: { command: "scope" }, tasks: [{ id: 1, status: "pending" }, { id: 2, status: "deferred" }], nextId: 3 },
+			});
 			expect(notifications[notifications.length - 1]?.message).toContain("Deferred out-of-scope active tasks: 1");
 
 			await pi.commands.get("todos-persist").handler("status", { cwd, hasUI: true, ui });
@@ -623,6 +645,10 @@ describe.serial("/todos command", () => {
 			await pi.commands.get("todos-clear").handler("", { cwd, hasUI: true, ui });
 			expect(getTodos()).toHaveLength(0);
 			expect(existsSync(planPath)).toBe(false);
+			expect(pi.customEntries[pi.customEntries.length - 1]).toEqual({
+				customType: "pi-tools-suite:todo-state",
+				data: { action: "clear", params: { action: "clear" }, tasks: [], nextId: 1 },
+			});
 			expect(emitted[emitted.length - 1]?.data.details.action).toBe("clear");
 			expect(notifications[notifications.length - 1]?.message).toContain("Cleared 1 todos.");
 

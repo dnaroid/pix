@@ -23,7 +23,7 @@ import {
 	syncPersistedPlan,
 } from "./state/persistence.js";
 import { AUTO_CLEAR_COMPLETED_MESSAGE, autoClearCompletedTodos } from "./state/auto-clear.js";
-import { replayFromBranch } from "./state/replay.js";
+import { replayFromBranch, TODO_STATE_ENTRY_TYPE } from "./state/replay.js";
 import { isTaskBlocked, selectTasksByStatus, selectTodoCounts } from "./state/selectors.js";
 import { applyTaskMutation } from "./state/state-reducer.js";
 import { activateStateScope, commitState, getState, replaceState } from "./state/store.js";
@@ -98,6 +98,7 @@ interface TodoToolRegistrationOptions extends TodoToolHooks {
 
 type TodoStateEventContext = { sessionManager?: { getSessionFile?: () => unknown; getSessionId?: () => unknown } };
 type TodoStateEventEmitter = { events?: { emit?: (channel: string, data: unknown) => void } };
+type TodoStateEntryWriter = { appendEntry<T = unknown>(customType: string, data?: T): void };
 
 interface TodosCommandOptions {
 	status?: TaskStatus;
@@ -238,6 +239,20 @@ export function publishTodoState(
 	});
 }
 
+function appendTodoStateSnapshot(
+	pi: TodoStateEntryWriter,
+	action: TaskAction,
+	params: Record<string, unknown>,
+): void {
+	const state = getState();
+	pi.appendEntry(TODO_STATE_ENTRY_TYPE, {
+		action,
+		params,
+		tasks: state.tasks,
+		nextId: state.nextId,
+	});
+}
+
 function handlePersistCommand(args: unknown, ctx: { cwd?: string; hasUI?: boolean; ui?: { notify?: (message: string, level?: NotifyLevel) => void } }): boolean {
 	const [command, subcommand = "status"] = getCommandTokens(args);
 	if (command !== "persist") return false;
@@ -310,12 +325,13 @@ function handleScopeCommand(
 }
 
 function clearTodos(
-	pi: TodoStateEventEmitter,
+	pi: TodoStateEventEmitter & TodoStateEntryWriter,
 	ctx: { cwd?: string; hasUI?: boolean; ui?: { notify?: (message: string, level?: NotifyLevel) => void } },
 ): void {
 	const result = applyTaskMutation(getState(), "clear", { action: "clear" });
 	if (result.op.kind !== "clear") return;
 	commitState(result.state);
+	appendTodoStateSnapshot(pi, "clear", { action: "clear" });
 	publishTodoState(pi, ctx, "clear", { action: "clear" });
 	const sync = syncPersistedPlan(ctx.cwd, result.state);
 	const persistedText = sync?.completed ? `\nProject todo plan removed: ${sync.path}` : "";
@@ -449,9 +465,12 @@ export function registerTodosCommand(pi: ExtensionAPI): void {
 		handler: async (args, ctx) => {
 			activateTodoStateScope(ctx);
 			if (handlePersistCommand(args, ctx)) return;
-			if (handleScopeCommand(args, ctx, () => publishTodoState(pi as TodoStateEventEmitter, ctx))) return;
+			if (handleScopeCommand(args, ctx, () => {
+				appendTodoStateSnapshot(pi, "update", { command: "scope" });
+				publishTodoState(pi as TodoStateEventEmitter, ctx);
+			})) return;
 			if (getCommandTokens(args)[0] === "clear") {
-				clearTodos(pi as TodoStateEventEmitter, ctx);
+				clearTodos(pi, ctx);
 				return;
 			}
 			if (!ctx.hasUI) {
@@ -529,7 +548,10 @@ export function registerTodosCommand(pi: ExtensionAPI): void {
 		description: "Select todo ids to continue from a persisted plan; pending/in_progress items outside the scope become deferred.",
 		handler: async (args, ctx) => {
 			activateTodoStateScope(ctx);
-			handleScopeCommand(`scope ${getCommandText(args)}`, ctx, () => publishTodoState(pi as TodoStateEventEmitter, ctx));
+			handleScopeCommand(`scope ${getCommandText(args)}`, ctx, () => {
+				appendTodoStateSnapshot(pi, "update", { command: "scope" });
+				publishTodoState(pi as TodoStateEventEmitter, ctx);
+			});
 		},
 	});
 
@@ -537,7 +559,7 @@ export function registerTodosCommand(pi: ExtensionAPI): void {
 		description: "Clear all todos on the current branch and remove the persisted project plan if enabled.",
 		handler: async (_args, ctx) => {
 			activateTodoStateScope(ctx);
-			clearTodos(pi as TodoStateEventEmitter, ctx);
+			clearTodos(pi, ctx);
 		},
 	});
 }
