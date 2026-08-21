@@ -136,6 +136,95 @@ describe("codex-reasoning-fix", () => {
 		expect(result).toBeUndefined();
 	});
 
+	test("removes prompt_cache_retention from openai-codex requests", async () => {
+		const { default: register } = await import("../src/codex-reasoning-fix/index.js");
+		const pi = new FakePi();
+		register(pi as any);
+
+		const payload = {
+			model: "gpt-5.6-sol",
+			prompt_cache_key: "session-1",
+			prompt_cache_retention: "24h",
+			input: [{ type: "message", role: "user", content: "retry" }],
+		};
+		const result = await pi.emit(
+			"before_provider_request",
+			{ payload },
+			{ model: { provider: "openai-codex", id: "gpt-5.6-sol" } },
+		);
+
+		expect(result).toEqual({
+			model: "gpt-5.6-sol",
+			prompt_cache_key: "session-1",
+			input: [{ type: "message", role: "user", content: "retry" }],
+		});
+		expect(payload).toHaveProperty("prompt_cache_retention", "24h");
+	});
+
+	test("removes prompt_cache_retention from every current openai-codex model", async () => {
+		const { stripUnsupportedPromptCacheRetention } = await import("../src/codex-reasoning-fix/index.js");
+		for (const modelId of [
+			"gpt-5.3-codex-spark",
+			"gpt-5.4",
+			"gpt-5.4-mini",
+			"gpt-5.5",
+			"gpt-5.6-luna",
+			"gpt-5.6-sol",
+			"gpt-5.6-terra",
+		]) {
+			const payload = { model: modelId, prompt_cache_retention: "24h" };
+			expect(stripUnsupportedPromptCacheRetention(
+				payload,
+				{ provider: "openai-codex", id: modelId },
+			)).toEqual({ model: modelId });
+			expect(payload).toHaveProperty("prompt_cache_retention", "24h");
+		}
+	});
+
+	test("removes legacy retention from direct OpenAI GPT-5.6+ but preserves older and other providers", async () => {
+		const { stripUnsupportedPromptCacheRetention } = await import("../src/codex-reasoning-fix/index.js");
+		for (const modelId of ["gpt-5.6", "gpt-5.6-sol", "gpt-5.10", "gpt-6"]) {
+			const payload = { model: modelId, prompt_cache_retention: "24h" };
+			expect(stripUnsupportedPromptCacheRetention(
+				payload,
+				{ provider: "openai", id: modelId },
+			)).toEqual({ model: modelId });
+		}
+
+		const olderOpenAiPayload = { model: "gpt-5.5", prompt_cache_retention: "24h" };
+		const otherProviderPayload = { model: "openai/gpt-5.6-sol", prompt_cache_retention: "24h" };
+
+		expect(stripUnsupportedPromptCacheRetention(
+			olderOpenAiPayload,
+			{ provider: "openai", id: "gpt-5.5" },
+		)).toBe(olderOpenAiPayload);
+		expect(stripUnsupportedPromptCacheRetention(
+			otherProviderPayload,
+			{ provider: "openrouter", id: "openai/gpt-5.6-sol" },
+		)).toBe(otherProviderPayload);
+	});
+
+	test("uses a fully qualified payload model only when selected-model metadata is unavailable", async () => {
+		const { stripUnsupportedPromptCacheRetention } = await import("../src/codex-reasoning-fix/index.js");
+		const qualified = {
+			model: "openai-codex/gpt-5.4",
+			prompt_cache_retention: "24h",
+		};
+		const directOpenAi = {
+			model: "openai/gpt-5.6-terra",
+			prompt_cache_retention: "24h",
+		};
+		const bare = { model: "gpt-5.6-sol", prompt_cache_retention: "24h" };
+
+		expect(stripUnsupportedPromptCacheRetention(qualified, undefined)).toEqual({
+			model: "openai-codex/gpt-5.4",
+		});
+		expect(stripUnsupportedPromptCacheRetention(directOpenAi, undefined)).toEqual({
+			model: "openai/gpt-5.6-terra",
+		});
+		expect(stripUnsupportedPromptCacheRetention(bare, undefined)).toBe(bare);
+	});
+
 	test("final sanitizer removes content introduced by an earlier payload hook", async () => {
 		const handlers: any[] = [];
 		const pi = { on(name: string, handler: any) { if (name === "before_provider_request") handlers.push(handler); } };
