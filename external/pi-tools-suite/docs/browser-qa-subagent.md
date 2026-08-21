@@ -79,3 +79,18 @@ evidence. The role uses `antigravity/gemini-3-flash-preview`, falling back to
 5. Completed test runs report clickable screenshot, video, and trace links
    whenever those artifacts exist.
 6. Suite tests/typecheck, host checks, and suite sync pass.
+
+## Real-browser regression test
+
+The repository includes a local mock-page E2E that launches real Chromium and
+asserts PNG screenshots, WebM video, sanitized trace output, and absolute
+path/`file:` URI metadata:
+
+```bash
+npx playwright install chromium
+npm run test:browser-qa-e2e
+```
+
+Normal suite tests keep this case skipped; the Publish workflow runs it on
+Linux after installing Chromium. Set `BROWSER_QA_KEEP_EVIDENCE=1` locally to
+retain the temporary evidence directory printed by the test.

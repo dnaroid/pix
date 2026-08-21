@@ -40,6 +40,12 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm run check
       - run: npm run test:tools-suite
+      - name: Install Chromium for browser QA E2E
+        if: runner.os == 'Linux'
+        run: npx playwright install --with-deps chromium
+      - name: Run browser QA mock-page E2E
+        if: runner.os == 'Linux'
+        run: npm run test:browser-qa-e2e
       - run: npm run build:pix
 
   package-smoke-test:

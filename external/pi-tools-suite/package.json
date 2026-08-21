@@ -22,6 +22,7 @@
     "smoke:tools": "PI_OFFLINE=1 pi --no-session -p \"ping\"",
     "smoke": "npm run smoke:explicit && npm run smoke:auto && npm run smoke:tools",
     "test": "bun test test",
+    "test:browser-qa-e2e": "BROWSER_QA_RUNNER_E2E=1 bun test test/async-subagents/browser-qa-runner.e2e.test.ts",
     "test:async-subagents-e2e": "ASYNC_SUBAGENTS_E2E=1 ASYNC_SUBAGENTS_DEBUG_LOGS=1 ASYNC_SUBAGENTS_MODEL=zai/glm-5-turbo bun test --concurrent --max-concurrency=30 test/async-subagents",
     "test:async-subagents-selection-e2e": "ASYNC_SUBAGENTS_SELECTION_E2E=1 ASYNC_SUBAGENTS_MODEL=zai/glm-5-turbo bun test --concurrent --max-concurrency=30 test/async-subagents/selection-e2e.test.ts",
     "test:prompt-evals:tool-selection": "PROMPT_EVAL_E2E=1 bun test --concurrent --max-concurrency=10 test/tool-selection-e2e.test.ts",

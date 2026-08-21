@@ -1,0 +1,124 @@
+import { expect, test } from "bun:test";
+import { spawn } from "node:child_process";
+import * as fs from "node:fs";
+import { createServer } from "node:http";
+import * as os from "node:os";
+import * as path from "node:path";
+import type { AddressInfo } from "node:net";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { unzipSync } from "../../src/async-subagents/private-skills/browser-qa/vendor/fflate.mjs";
+
+const RUN_E2E = /^(?:1|true|yes)$/i.test(process.env.BROWSER_QA_RUNNER_E2E ?? "");
+const KEEP_EVIDENCE = /^(?:1|true|yes)$/i.test(process.env.BROWSER_QA_KEEP_EVIDENCE ?? "");
+const e2eTest = RUN_E2E ? test : test.skip;
+const runner = path.resolve(
+	path.dirname(fileURLToPath(import.meta.url)),
+	"../../src/async-subagents/private-skills/browser-qa/scripts/browser-qa-runner.mjs",
+);
+const mockPage = fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../fixtures/browser-qa/mock-page.html"), "utf8");
+
+e2eTest("captures real screenshot, video, and trace artifacts from a local mock page", async () => {
+	let receivedAuthCookie = false;
+	const server = createServer((request, response) => {
+		receivedAuthCookie ||= request.headers.cookie?.includes("session=mock-session-secret") === true;
+		response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+		response.end(mockPage);
+	});
+	await new Promise<void>((resolve, reject) => {
+		server.once("error", reject);
+		server.listen(0, "127.0.0.1", resolve);
+	});
+
+	const project = fs.mkdtempSync(path.join(os.tmpdir(), "browser-qa-real-e2e-"));
+	try {
+		const { port } = server.address() as AddressInfo;
+		const origin = `http://127.0.0.1:${port}`;
+		writePrivateJson(path.join(project, ".pi", "qa_auth.jsonc"), {
+			profiles: {
+			mock: {
+				description: "Local browser QA mock",
+				traits: ["test:mock"],
+				baseUrl: origin,
+				allowedOrigins: [origin],
+					auth: {
+						type: "cookie",
+						cookies: [{ name: "session", value: "mock-session-secret", url: origin }],
+					},
+				},
+			},
+		});
+		writePrivateJson(path.join(project, ".pi", "qa-flows", "mock.jsonc"), {
+			steps: [
+				{ action: "goto", path: "/" },
+				{ action: "assertVisible", locator: { testId: "qa-title" } },
+				{ action: "assertText", locator: { testId: "qa-title" }, equals: "Browser QA Mock" },
+				{ action: "waitForTimeout", timeoutMs: 500 },
+				{ action: "screenshot", name: "mock-page" },
+			],
+		});
+
+		const result = await runRunner(project, [
+			"run",
+			"--profile", "mock",
+			"--flow", ".pi/qa-flows/mock.jsonc",
+			"--run-id", "real-artifacts",
+		]);
+		expect(result.code).toBe(0);
+		expect(result.stderr).toBe("");
+		expect(result.json).toMatchObject({ status: "QA_PASSED", profile: "mock" });
+		expect(receivedAuthCookie).toBe(true);
+
+		const evidenceDir = path.join(fs.realpathSync(project), ".pi", "qa-runs", "real-artifacts", "mock");
+		const screenshots = result.json.artifacts.screenshots;
+		expect(screenshots.map((artifact) => path.basename(artifact.path)).sort()).toEqual(["final.png", "mock-page.png"]);
+		expect(result.json.artifacts.videos).toHaveLength(1);
+		expect(result.json.artifacts.traces).toHaveLength(1);
+
+		for (const artifact of [...screenshots, ...result.json.artifacts.videos, ...result.json.artifacts.traces] as Artifact[]) {
+			expect(artifact.path.startsWith(evidenceDir)).toBe(true);
+			expect(artifact.uri).toBe(pathToFileURL(artifact.path).href);
+			expect(fs.statSync(artifact.path).size).toBeGreaterThan(100);
+		}
+		expect(fs.readFileSync(screenshots[0].path).subarray(0, 8)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+		expect(fs.readFileSync(result.json.artifacts.videos[0].path).subarray(0, 4)).toEqual(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]));
+		const traceEntries = unzipSync(new Uint8Array(fs.readFileSync(result.json.artifacts.traces[0].path)), {});
+		expect(Object.keys(traceEntries)).toContain("trace.trace");
+	} finally {
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+		if (!KEEP_EVIDENCE) fs.rmSync(project, { recursive: true, force: true });
+		else console.error(`browser QA evidence retained at ${project}`);
+	}
+}, 120_000);
+
+type Artifact = { path: string; uri: string };
+type RunnerStatus = {
+	status: string;
+	profile?: string;
+	artifacts: { screenshots: Artifact[]; videos: Artifact[]; traces: Artifact[] };
+};
+
+function writePrivateJson(file: string, value: unknown): void {
+	fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+	fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+	fs.chmodSync(file, 0o600);
+}
+
+async function runRunner(project: string, args: string[]): Promise<{ code: number | null; stdout: string; stderr: string; json: RunnerStatus }> {
+	const child = spawn("node", [runner, ...args], { cwd: project, stdio: ["ignore", "pipe", "pipe"] });
+	let stdout = "";
+	let stderr = "";
+	child.stdout.setEncoding("utf8").on("data", (chunk) => { stdout += chunk; });
+	child.stderr.setEncoding("utf8").on("data", (chunk) => { stderr += chunk; });
+	const code = await new Promise<number | null>((resolve, reject) => {
+		child.once("error", reject);
+		child.once("close", resolve);
+	});
+	const trimmedStdout = stdout.trim();
+	if (!trimmedStdout) throw new Error(`browser QA runner produced no status (exit ${code}): ${stderr.trim()}`);
+	return {
+		code,
+		stdout: trimmedStdout,
+		stderr: stderr.trim(),
+		json: JSON.parse(trimmedStdout) as RunnerStatus,
+	};
+}

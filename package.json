@@ -58,6 +58,7 @@
     "test": "mise exec node@24.16.0 -- npm run test:inner",
     "test:inner": "node --import tsx --test \"tests/**/*.test.ts\"",
     "test:tools-suite": "npm --prefix external/pi-tools-suite test",
+    "test:browser-qa-e2e": "npm --prefix external/pi-tools-suite run test:browser-qa-e2e",
     "sync:pi-tools-suite": "node scripts/sync-pi-tools-suite.mjs",
     "sync:pi-tools-suite:check": "node scripts/sync-pi-tools-suite.mjs --check",
     "sync:sdk-pin": "node scripts/sync-sdk-pin.mjs",
@@ -86,6 +87,7 @@
   },
   "devDependencies": {
     "@types/node": "24.12.4",
+    "playwright": "1.62.1",
     "tsx": "4.22.1",
     "typescript": "5.9.3"
   },
