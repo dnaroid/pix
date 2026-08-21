@@ -49,6 +49,7 @@ const SECTION_DEFERRED = "── Deferred ──";
 const SECTION_COMPLETED = "── Completed ──";
 const PERSIST_COMMAND_NAME = "todos-persist";
 const SCOPE_COMMAND_NAME = "todos-scope";
+const CLEAR_COMMAND_NAME = "todos-clear";
 export const TODO_STATE_EVENT = "pi-tools-suite:todo:state";
 
 type CommandCompletion = { value: string; label: string; description?: string };
@@ -59,6 +60,7 @@ const TODOS_ARGUMENT_COMPLETIONS: CommandCompletion[] = [
 	{ value: "persist off", label: "persist off", description: "Disable persistence and remove the project plan file" },
 	{ value: "persist clear", label: "persist clear", description: "Alias for persist off" },
 	{ value: "scope ", label: "scope <id...>", description: "Keep selected items active and defer out-of-scope items" },
+	{ value: "clear", label: "clear", description: "Clear all todos" },
 	{ value: "--active", label: "--active", description: "Show pending/in_progress tasks" },
 	{ value: "--ready", label: "--ready", description: "Show pending tasks whose blockers are completed" },
 	{ value: "--blocked", label: "--blocked", description: "Show tasks with blockers" },
@@ -307,6 +309,19 @@ function handleScopeCommand(
 	return true;
 }
 
+function clearTodos(
+	pi: TodoStateEventEmitter,
+	ctx: { cwd?: string; hasUI?: boolean; ui?: { notify?: (message: string, level?: NotifyLevel) => void } },
+): void {
+	const result = applyTaskMutation(getState(), "clear", { action: "clear" });
+	if (result.op.kind !== "clear") return;
+	commitState(result.state);
+	publishTodoState(pi, ctx, "clear", { action: "clear" });
+	const sync = syncPersistedPlan(ctx.cwd, result.state);
+	const persistedText = sync?.completed ? `\nProject todo plan removed: ${sync.path}` : "";
+	notifyCommand(ctx, `Cleared ${result.op.count} todos.${persistedText}`);
+}
+
 function filterCommandTasks(tasks: readonly Task[], options: TodosCommandOptions): Task[] {
 	const byId = new Map(tasks.map((task) => [task.id, task]));
 	let view = [...tasks];
@@ -429,12 +444,16 @@ export function registerTodoTool(pi: ExtensionAPI, hooks: TodoToolRegistrationOp
 
 export function registerTodosCommand(pi: ExtensionAPI): void {
 	pi.registerCommand(COMMAND_NAME, {
-	description: "Show todos on the current branch. Flags: --active, --ready, --blocked, --tree, --status <status>, --export [json|markdown]. Commands: persist on|off|clear|status, scope <id...>",
+	description: "Show todos on the current branch. Flags: --active, --ready, --blocked, --tree, --status <status>, --export [json|markdown]. Commands: persist on|off|clear|status, scope <id...>, clear",
 		getArgumentCompletions: (prefix) => completeCommandArguments(String(prefix ?? ""), TODOS_ARGUMENT_COMPLETIONS),
 		handler: async (args, ctx) => {
 			activateTodoStateScope(ctx);
 			if (handlePersistCommand(args, ctx)) return;
 			if (handleScopeCommand(args, ctx, () => publishTodoState(pi as TodoStateEventEmitter, ctx))) return;
+			if (getCommandTokens(args)[0] === "clear") {
+				clearTodos(pi as TodoStateEventEmitter, ctx);
+				return;
+			}
 			if (!ctx.hasUI) {
 				console.error(ERR_REQUIRES_INTERACTIVE);
 				return;
@@ -511,6 +530,14 @@ export function registerTodosCommand(pi: ExtensionAPI): void {
 		handler: async (args, ctx) => {
 			activateTodoStateScope(ctx);
 			handleScopeCommand(`scope ${getCommandText(args)}`, ctx, () => publishTodoState(pi as TodoStateEventEmitter, ctx));
+		},
+	});
+
+	pi.registerCommand(CLEAR_COMMAND_NAME, {
+		description: "Clear all todos on the current branch and remove the persisted project plan if enabled.",
+		handler: async (_args, ctx) => {
+			activateTodoStateScope(ctx);
+			clearTodos(pi as TodoStateEventEmitter, ctx);
 		},
 	});
 }

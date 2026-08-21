@@ -570,6 +570,7 @@ describe.serial("/todos command", () => {
 		registerTodosCommand(pi as any);
 		expect(pi.commands.has("todos-persist")).toBe(true);
 		expect(pi.commands.has("todos-scope")).toBe(true);
+		expect(pi.commands.has("todos-clear")).toBe(true);
 		expect(pi.commands.get("todos-persist").getArgumentCompletions("o").map((item: any) => item.value)).toContain("on");
 		const notifications: Array<{ message: string; level: string }> = [];
 		const ui = { notify: (message: string, level: string) => notifications.push({ message, level }) };
@@ -596,6 +597,39 @@ describe.serial("/todos command", () => {
 
 			await pi.commands.get("todos").handler("persist off", { cwd, hasUI: true, ui });
 			expect(existsSync(planPath)).toBe(false);
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
+	test.serial("/todos-clear and /todos clear reset todo state and persisted plans", async () => {
+		const { getTodos, registerTodoTool, registerTodosCommand } = await loadTodoModule();
+		const cwd = mkdtempSync(join(tmpdir(), "todo-clear-"));
+		const planPath = join(cwd, ".pi", "todo-plan.json");
+		const pi = new FakePi();
+		const emitted: Array<{ channel: string; data: any }> = [];
+		(pi.events as any).emit = (channel: string, data: any) => emitted.push({ channel, data });
+		registerTodoTool(pi as any);
+		registerTodosCommand(pi as any);
+		const notifications: Array<{ message: string; level: string }> = [];
+		const ui = { notify: (message: string, level: string) => notifications.push({ message, level }) };
+		const tool = pi.tools.get("todo");
+
+		try {
+			await tool.execute("call", { action: "create", subject: "First" }, undefined, undefined, { cwd });
+			await pi.commands.get("todos-persist").handler("on", { cwd, hasUI: true, ui });
+			expect(existsSync(planPath)).toBe(true);
+
+			await pi.commands.get("todos-clear").handler("", { cwd, hasUI: true, ui });
+			expect(getTodos()).toHaveLength(0);
+			expect(existsSync(planPath)).toBe(false);
+			expect(emitted[emitted.length - 1]?.data.details.action).toBe("clear");
+			expect(notifications[notifications.length - 1]?.message).toContain("Cleared 1 todos.");
+
+			await tool.execute("call", { action: "create", subject: "Second" }, undefined, undefined, { cwd });
+			await pi.commands.get("todos").handler("clear", { cwd, hasUI: true, ui });
+			expect(getTodos()).toHaveLength(0);
+			expect(notifications[notifications.length - 1]?.message).toContain("Cleared 1 todos.");
 		} finally {
 			rmSync(cwd, { recursive: true, force: true });
 		}
