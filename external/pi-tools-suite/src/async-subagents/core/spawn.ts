@@ -19,6 +19,8 @@ export interface SpawnAgentOptions {
 	parentSession?: string;
 	timeoutMs?: number;
 	maxResultBytes?: number;
+	/** Explicit skills to load after disabling normal skill discovery. */
+	isolatedSkills?: string[];
 }
 
 export const DEFAULT_AGENT_TIMEOUT_MS = 30 * 60 * 1000;
@@ -88,6 +90,10 @@ export function spawnAgent(
 	else piArgs.push("--no-session");
 	piArgs.push("--no-extensions");
 	piArgs.push("--extension", getModelToolsExtensionPath());
+	if (options.isolatedSkills && options.isolatedSkills.length > 0) {
+		piArgs.push("--no-skills");
+		for (const skillPath of options.isolatedSkills) piArgs.push("--skill", skillPath);
+	}
 	const envModel = task.model || getEnvModel();
 	if (envModel) piArgs.push("--model", envModel);
 	const selectedTools = task.tools ? filterSubagentTools(selectSuitableToolsForModel(envModel, task.tools)) : undefined;
@@ -98,7 +104,7 @@ export function spawnAgent(
 	if (task.thinking) piArgs.push("--thinking", task.thinking);
 
 	// User-supplied extra args (e.g. --thinking high)
-	piArgs.push(...extraArgs);
+	piArgs.push(...(options.isolatedSkills?.length ? withoutSkillArgs(extraArgs) : extraArgs));
 	// Keep recursive/interactive parent-only tools disabled even if explicit
 	// sub-agent extraArgs load additional extensions or override --tools.
 	piArgs.push("--extension", getSubagentToolGuardExtensionPath());
@@ -387,6 +393,20 @@ export function spawnAgent(
 	fs.writeFileSync(path.join(agentDir, "pid"), String(pid), "utf-8");
 
 	return { pid, agentDir, process: proc };
+}
+
+function withoutSkillArgs(args: string[]): string[] {
+	const filtered: string[] = [];
+	for (let index = 0; index < args.length; index += 1) {
+		const arg = args[index];
+		if (arg === "--skill") {
+			index += 1;
+			continue;
+		}
+		if (arg === "--no-skills" || arg.startsWith("--skill=")) continue;
+		filtered.push(arg);
+	}
+	return filtered;
 }
 
 function getModelToolsExtensionPath(): string {

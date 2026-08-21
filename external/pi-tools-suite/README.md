@@ -243,7 +243,60 @@ Project-local overrides can be added in `.pi/pi-tools-suite.jsonc`; pi-tools-sui
 
 Sub-agent model routing normally follows task overrides, subagent type config, then `ASYNC_SUBAGENTS_MODEL` / `PI_SUBAGENTS_MODEL` fallbacks. Set `ASYNC_SUBAGENTS_FORCE_CURRENT_MODEL=1` (or `PI_SUBAGENTS_FORCE_CURRENT_MODEL=1`) to ignore task/config/env model choices and launch every sub-agent with the current parent session model. When this flag is enabled, any `--model` entries in sub-agent extra args are stripped so they cannot override the current model.
 
-For an oh-my-openagent-style workflow, run `/ultrawork` or `/ulw` to ask the parent agent to split broad work into configured async-subagents roles (`quick`, `scan`, `research`, `docs`, `frontend`, `implement`, `tests`, `review`, `deep`, `oracle`). Set `ULTRAWORK=1` before launching Pi to apply that compact routing prompt to normal non-slash user inputs automatically. Set `ULTRAWORK_AUTO=1` to ask the lightweight router model to classify only the first normal user input on non-GPT parent models: clear broad/parallel work is transformed into ultrawork, vague potentially-complex work gets a soft delegation hint, and narrow work is left unchanged. GPT-like parent models skip only this automatic transform; they can still use `/ultrawork` and `subagents` normally. `frontend` is for UI/UX, styling, layout, responsive behavior, and visual component polish; `review` covers security/performance/audit tracks; `implement` covers refactors; `deep` covers debugging/root-cause; `oracle` is for sparse cross-provider second opinions on high-stakes uncertainty. Run `/hyperplan` to pressure-test a plan before implementation.
+For an oh-my-openagent-style workflow, run `/ultrawork` or `/ulw` to ask the parent agent to split broad work into configured async-subagents roles (`quick`, `scan`, `research`, `docs`, `frontend`, `browser-qa`, `implement`, `tests`, `review`, `deep`, `oracle`). Set `ULTRAWORK=1` before launching Pi to apply that compact routing prompt to normal non-slash user inputs automatically. Set `ULTRAWORK_AUTO=1` to ask the lightweight router model to classify only the first normal user input on non-GPT parent models: clear broad/parallel work is transformed into ultrawork, vague potentially-complex work gets a soft delegation hint, and narrow work is left unchanged. GPT-like parent models skip only this automatic transform; they can still use `/ultrawork` and `subagents` normally. `frontend` is for UI/UX, styling, layout, responsive behavior, and visual component polish; `browser-qa` reproduces browser bugs and proves fixes with deterministic assertions plus screenshot/video/trace evidence; `review` covers security/performance/audit tracks; `implement` covers refactors; `deep` covers debugging/root-cause; `oracle` is for sparse cross-provider second opinions on high-stakes uncertainty. Run `/hyperplan` to pressure-test a plan before implementation.
+
+### Private browser QA and project auth
+
+The built-in `browser-qa` role runs on `antigravity/gemini-3-flash-preview`, with
+`openai-codex/gpt-5.4-mini` as its fallback. Its browser workflow is an explicit
+private skill under `src/async-subagents/private-skills/`, outside normal Pi skill
+discovery. The role's first-class `isolatedSkills` setting launches the child with
+`--no-skills` plus only that skill, so parent and ordinary sub-agent sessions do
+not discover it.
+
+Keep named dev/staging auth profiles in project `.pi/qa_auth.jsonc` (there is no
+`/qa-auth` command). The private runner supports `form`, `cookie`, `localStorage`,
+`sessionStorage`, `bearer`, and existing Playwright `storageState` auth. Every
+profile must declare exact `allowedOrigins`; select the profile id explicitly when
+spawning QA. On POSIX, keep the config at mode `0600`. During a run those origins
+also form the fail-closed HTTP(S)/WebSocket allowlist and service workers are
+blocked. Example:
+
+```jsonc
+{
+  "profiles": {
+    "staging-admin": {
+      "description": "Staging administrator",
+      "traits": ["role:admin", "plan:enterprise"],
+      "baseUrl": "https://staging.example.test",
+      "allowedOrigins": ["https://staging.example.test"],
+      "auth": {
+        "type": "form",
+        "loginUrl": "https://staging.example.test/login",
+        "fields": [
+          { "selector": "input[name=email]", "value": "admin@example.test" },
+          { "selector": "input[name=password]", "value": "replace-me" }
+        ],
+        "submitSelector": "button[type=submit]",
+        "success": { "selector": "[data-testid=user-menu]" }
+      }
+    }
+  }
+}
+```
+
+Do not place credential values in prompts, QA flows, shell arguments, reports,
+or evidence. The helper reads JSONC internally, emits only redacted statuses, and
+caches generated storage state under `.pi/qa-auth-state`. Evidence is isolated by
+run/profile under `.pi/qa-runs`; trace archives have network records and non-image
+resources removed, then known configured/runtime credential values are redacted
+and verified before the trace is retained. Missing, ambiguous, rejected, or
+expired auth returns `QA_PROFILE_REQUIRED` or `QA_AUTH_UPDATE_REQUIRED`, naming
+only the profile/file/reason needed for the parent to ask the user for an update
+and rerun. See
+`src/async-subagents/private-skills/browser-qa/references/qa-auth.example.jsonc`
+for complete profile shapes and `references/qa-flow.example.jsonc` beside it for
+the declarative, non-executable QA action/assertion format.
 
 Async-subagents also injects a lightweight oh-my-openagent-style system-prompt strategy by model: non-GPT parents get `parallel-first`, an orchestration-first hint that favors ultrawork/subagents for broad work, while GPT-like parents get `deep-work`, a direct deep-worker hint that uses subagents only when clearly useful. Explicit custom system prompts (`--system-prompt`, `SYSTEM.md`, custom templates) are respected and skip this injection by default. Disable it with `PI_AGENT_STRATEGY=off`; force a strategy with `PI_AGENT_STRATEGY=parallel-first` or `PI_AGENT_STRATEGY=deep-work`; set `PI_AGENT_STRATEGY_WITH_CUSTOM_PROMPT=1` to append it even when a custom prompt is present.
 

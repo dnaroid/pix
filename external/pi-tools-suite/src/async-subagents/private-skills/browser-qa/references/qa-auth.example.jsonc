@@ -1,0 +1,87 @@
+{
+  // Copy to <project>/.pi/qa_auth.jsonc. This file is private and ignored by
+  // the host repository's default .gitignore rule for .pi/. On POSIX, run
+  // chmod 600 .pi/qa_auth.jsonc.
+  "profiles": {
+    "staging-admin": {
+      "description": "Staging administrator",
+      "traits": ["role:admin", "plan:enterprise"],
+      "baseUrl": "https://staging.example.test",
+      "allowedOrigins": ["https://staging.example.test"],
+      "auth": {
+        "type": "form",
+        "loginUrl": "https://staging.example.test/login",
+        "fields": [
+          { "selector": "input[name=email]", "value": "admin@example.test" },
+          { "selector": "input[name=password]", "value": "replace-me" }
+        ],
+        "submitSelector": "button[type=submit]",
+        "success": { "url": "**/dashboard", "selector": "[data-testid=user-menu]" }
+      }
+    },
+    "staging-subscriber": {
+      "description": "Staging paid subscriber",
+      "traits": ["role:user", "plan:paid"],
+      "baseUrl": "https://staging.example.test",
+      "allowedOrigins": ["https://staging.example.test"],
+      "auth": {
+        "type": "cookie",
+        "cookies": [
+          {
+            "name": "session",
+            "value": "replace-me",
+            "domain": "staging.example.test",
+            "path": "/",
+            "httpOnly": true,
+            "secure": true,
+            "sameSite": "Lax"
+          }
+        ]
+      }
+    },
+    "staging-local-storage": {
+      "description": "Local-storage auth example",
+      "traits": ["role:user", "auth:localStorage"],
+      "baseUrl": "https://staging.example.test",
+      "allowedOrigins": ["https://staging.example.test"],
+      "auth": {
+        "type": "localStorage",
+        "origin": "https://staging.example.test",
+        "entries": { "access_token": "replace-me" }
+      }
+    },
+    "staging-session-storage": {
+      "description": "Session-storage auth example",
+      "traits": ["role:user", "auth:sessionStorage"],
+      "baseUrl": "https://staging.example.test",
+      "allowedOrigins": ["https://staging.example.test"],
+      "auth": {
+        "type": "sessionStorage",
+        "origin": "https://staging.example.test",
+        "entries": { "access_token": "replace-me" }
+      }
+    },
+    "staging-bearer": {
+      "description": "Bearer-token API auth example",
+      "traits": ["role:service", "auth:bearer"],
+      "baseUrl": "https://staging.example.test",
+      "allowedOrigins": ["https://staging.example.test"],
+      "auth": {
+        "type": "bearer",
+        "token": "replace-me",
+        "header": "Authorization",
+        "prefix": "Bearer "
+      }
+    },
+    "staging-storage-state": {
+      "description": "Existing Playwright storage-state example",
+      "traits": ["role:user", "auth:storageState"],
+      "baseUrl": "https://staging.example.test",
+      "allowedOrigins": ["https://staging.example.test"],
+      "auth": {
+        "type": "storageState",
+        "path": ".pi/qa-auth-state/imported-user.json"
+      }
+    }
+  }
+}

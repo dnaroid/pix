@@ -224,6 +224,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 describe("async-subagents live e2e sub-agent type selection", () => {
+	e2eTest("delegates real-browser QA to the explicit browser-qa profile", async () => {
+		await withFixtureProject(async (projectDir) => {
+			const prompt = `
+Verify in a real browser that the recent checkout UI fix works. Reproduce the original UI issue, use deterministic assertions, and collect a screenshot and trace as evidence.
+Do not substitute source inspection or non-browser tests for the browser verification.`;
+
+			const result = await runPiSubagentSelectionE2E(projectDir, prompt, "browser QA delegation");
+			const input = firstSpawnInput(result.events);
+			expect(input.tasks).toHaveLength(1);
+			expect(input.tasks![0]!.subagentType).toBe("browser-qa");
+		});
+	}, E2E_TIMEOUT_MS);
+
 	e2eTest("omits optional routing overrides for a normal delegated task and does not poll", async () => {
 		await withFixtureProject(async (projectDir) => {
 			const prompt = `

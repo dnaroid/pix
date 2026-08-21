@@ -238,6 +238,7 @@ const SubagentTypeConfig = Type.Object(
 		fallbackModels: Type.Optional(Type.Array(Type.String(), { description: "Ordered model fallbacks." })),
 		thinking: Type.Optional(Type.String({ description: "Thinking level." })),
 		tools: Type.Optional(Type.Array(Type.String(), { description: "Enabled tools for this type." })),
+		isolatedSkills: Type.Optional(Type.Array(Type.String(), { description: "Explicit skill files loaded after disabling normal skill discovery for this type." })),
 		extraArgs: Type.Optional(Type.Array(Type.String(), { description: "Extra CLI arguments." })),
 		promptAppend: Type.Optional(Type.String({ description: "Extra prompt text appended after generated prompt." })),
 		promptOverride: Type.Optional(Type.String({ description: "Full prompt replacement." })),

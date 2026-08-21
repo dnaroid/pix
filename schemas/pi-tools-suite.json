@@ -653,6 +653,13 @@
                   },
                   "description": "Enabled tools for this type."
                 },
+                "isolatedSkills": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Explicit skill files loaded after disabling normal skill discovery for this type."
+                },
                 "extraArgs": {
                   "type": "array",
                   "items": {

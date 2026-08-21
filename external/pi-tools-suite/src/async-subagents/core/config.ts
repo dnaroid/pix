@@ -27,6 +27,8 @@ export interface SubagentTypeConfig {
 	modelByParent?: Record<string, ModelByParentEntry>;
 	thinking?: string;
 	tools?: string[];
+	/** Explicit skill files loaded after disabling normal skill discovery. */
+	isolatedSkills?: string[];
 	extraArgs?: string[];
 	/** Extra prompt text appended after the generated or overridden prompt. */
 	promptAppend?: string;
@@ -118,6 +120,8 @@ export interface CopySubagentConfigSampleResult {
 export interface ResolvedAgentTaskConfig {
 	task: AgentTask;
 	extraArgs: string[];
+	/** Explicit skill files loaded with normal skill discovery disabled. */
+	isolatedSkills: string[];
 	/** Ordered model fallbacks for the resolved model. Current-process exhausted models are skipped before spawning. */
 	fallbackModels: string[];
 	profile?: SubagentTypeConfig;
@@ -201,6 +205,14 @@ const BUILTIN_CONFIG: SubagentConfig = {
 				"When no mockup exists, choose a clear aesthetic direction and explain it briefly. Verify with targeted build/lint/tests or screenshot-relevant checks when possible.",
 			].join("\n"),
 		},
+		"browser-qa": {
+			description: "Use for browser-based visual QA: reproduce UI bugs and verify fixes with deterministic assertions, screenshots, video, and traces.",
+			model: "antigravity/gemini-3-flash-preview",
+			fallbackModels: ["openai-codex/gpt-5.4-mini"],
+			thinking: "medium",
+			tools: ["read", "grep", "bash"],
+			isolatedSkills: [getBrowserQaSkillPath()],
+		},
 		implement: {
 			description: "Use when the sub-agent should make or plan code changes for a feature, bug fix, or refactor.",
 			thinking: "high",
@@ -270,6 +282,10 @@ export function getDefaultSubagentConfigPath(): string {
 
 export function getSubagentConfigSamplePath(): string {
 	return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "async-subagents.sample.jsonc");
+}
+
+export function getBrowserQaSkillPath(): string {
+	return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "private-skills", "browser-qa", "SKILL.md");
 }
 
 export function getSubagentConfigInitTargetPath(cwd: string, env: NodeJS.ProcessEnv = process.env): string {
@@ -365,6 +381,7 @@ export function resolveAgentTaskConfig(
 	return {
 		profile,
 		extraArgs,
+		isolatedSkills: arrayOfStrings(profile?.isolatedSkills) ?? [],
 		fallbackModels,
 		retry: resolveRetryConfig(config.retry, profile?.retry),
 		maxResultBytes: profile?.maxResultBytes ?? config.maxResultBytes,
@@ -507,6 +524,7 @@ function normalizeConfig(value: Record<string, unknown>, file: string): Partial<
 			modelByParent: normalizeModelByParent(rawProfile.modelByParent, name, file),
 			thinking: trimString(rawProfile.thinking),
 			tools: arrayOfStrings(rawProfile.tools),
+			isolatedSkills: arrayOfStrings(rawProfile.isolatedSkills),
 			extraArgs: arrayOfStrings(rawProfile.extraArgs),
 			promptAppend: textBlock(rawProfile.promptAppend),
 			promptOverride: textBlock(rawProfile.promptOverride),
@@ -583,6 +601,7 @@ function compactProfile(profile: SubagentTypeConfig): SubagentTypeConfig {
 	if (profile.modelByParent) compact.modelByParent = profile.modelByParent;
 	if (profile.thinking) compact.thinking = profile.thinking;
 	if (profile.tools && profile.tools.length > 0) compact.tools = profile.tools;
+	if (profile.isolatedSkills && profile.isolatedSkills.length > 0) compact.isolatedSkills = profile.isolatedSkills;
 	if (profile.extraArgs && profile.extraArgs.length > 0) compact.extraArgs = profile.extraArgs;
 	if (profile.promptAppend) compact.promptAppend = profile.promptAppend;
 	if (profile.promptOverride) compact.promptOverride = profile.promptOverride;

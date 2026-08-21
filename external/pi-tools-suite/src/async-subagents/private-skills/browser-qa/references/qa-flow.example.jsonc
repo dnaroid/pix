@@ -1,0 +1,19 @@
+{
+  "timeoutMs": 15000,
+  "steps": [
+    { "action": "goto", "path": "/settings" },
+    { "action": "authRejectedIf", "urlIncludes": "/login" },
+    {
+      "action": "assertVisible",
+      "locator": { "role": "heading", "name": "Settings", "exact": true }
+    },
+    {
+      "action": "fill",
+      "locator": { "label": "Display name", "exact": true },
+      "value": "QA Example"
+    },
+    { "action": "click", "locator": { "testId": "save-settings" } },
+    { "action": "assertText", "locator": { "testId": "toast" }, "includes": "Saved" },
+    { "action": "screenshot", "name": "settings-saved" }
+  ]
+}

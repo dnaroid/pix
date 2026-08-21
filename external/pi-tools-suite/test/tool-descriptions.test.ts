@@ -56,12 +56,16 @@ describe("tool descriptions", () => {
 
 	test("subagents prompt keeps explicit delegation triggers in repo-aware mode", () => {
 		const tool = asyncSubagentToolDescriptions(true).subagents;
-		const promptText = [tool.promptSnippet, ...tool.promptGuidelines].join("\n");
+		const promptText = [tool.description, tool.promptSnippet, ...tool.promptGuidelines].join("\n");
 
 		expect(promptText).toContain("delegate/parallelize/split work");
 		expect(promptText).toContain("spawn triggers");
 		expect(promptText).toContain("do not let repo_* availability suppress delegation");
 		expect(promptText).toContain("one discovery question");
+		expect(promptText).toContain("subagentType: \"browser-qa\"");
+		expect(promptText).toContain("mandatory delegation trigger");
+		expect(promptText).toContain("before checking prerequisites");
+		expect(promptText).toContain("parent must not inspect the project first");
 	});
 
 	test("subagents prompt prioritizes broad fallback delegation when repo tools are unavailable", () => {

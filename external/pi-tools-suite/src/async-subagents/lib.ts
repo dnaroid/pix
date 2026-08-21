@@ -23,6 +23,7 @@ export {
 	DEFAULT_ROUTING_CONFIG,
 	existingSubagentConfigFiles,
 	getDefaultSubagentConfigPath,
+	getBrowserQaSkillPath,
 	getSubagentConfigInitTargetPath,
 	getSubagentConfigSamplePath,
 	isBlindModelRef,

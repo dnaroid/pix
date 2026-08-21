@@ -90,7 +90,12 @@ async function launchQueuedAgent(options: LaunchQueuedAgentOptions): Promise<voi
 			return;
 		}
 
-		const spawnOptions = { parentSession, maxResultBytes: resolved.maxResultBytes, timeoutMs: resolved.timeoutMs };
+		const spawnOptions = {
+			parentSession,
+			maxResultBytes: resolved.maxResultBytes,
+			timeoutMs: resolved.timeoutMs,
+			isolatedSkills: resolved.isolatedSkills,
+		};
 		if (resolved.retry.maxRetries > 0 || resolved.fallbackModels.length > 0) {
 			const retryResult = spawnAgentWithRetry(
 				runDir,
