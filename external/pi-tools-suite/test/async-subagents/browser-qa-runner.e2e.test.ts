@@ -36,6 +36,7 @@ e2eTest("captures real screenshot, video, and trace artifacts from a local mock 
 	try {
 		const { port } = server.address() as AddressInfo;
 		const origin = `http://127.0.0.1:${port}`;
+		const agentDir = createBrowserQaAgent(project);
 		writePrivateJson(path.join(project, ".pi", "qa_auth.jsonc"), {
 			profiles: {
 				mock: {
@@ -50,7 +51,8 @@ e2eTest("captures real screenshot, video, and trace artifacts from a local mock 
 				},
 			},
 		});
-		writePrivateJson(path.join(project, ".pi", "qa-flows", "mock.jsonc"), {
+		const flowPath = path.join(agentDir, "browser-qa", "flows", "mock.jsonc");
+		writePrivateJson(flowPath, {
 			steps: [
 				{ action: "goto", path: "/" },
 				{ action: "assertVisible", locator: { testId: "qa-title" } },
@@ -63,15 +65,15 @@ e2eTest("captures real screenshot, video, and trace artifacts from a local mock 
 		const result = await runRunner(project, [
 			"run",
 			"--profile", "mock",
-			"--flow", ".pi/qa-flows/mock.jsonc",
+			"--flow", flowPath,
 			"--run-id", "real-artifacts",
-		]);
+		], agentDir);
 		expect(result.code).toBe(0);
 		expect(result.stderr).toBe("");
 		expect(result.json).toMatchObject({ status: "QA_PASSED", profile: "mock" });
 		expect(receivedAuthCookie).toBe(true);
 
-		const evidenceDir = path.join(fs.realpathSync(project), ".pi", "qa-runs", "real-artifacts", "mock");
+		const evidenceDir = path.join(fs.realpathSync(agentDir), "browser-qa", "evidence", "real-artifacts", "mock");
 		const screenshots = result.json.artifacts.screenshots;
 		expect(screenshots.map((artifact) => path.basename(artifact.path)).sort()).toEqual(["final.png", "mock-page.png"]);
 		expect(result.json.artifacts.videos).toHaveLength(1);
@@ -86,6 +88,7 @@ e2eTest("captures real screenshot, video, and trace artifacts from a local mock 
 		expect(fs.readFileSync(result.json.artifacts.videos[0].path).subarray(0, 4)).toEqual(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]));
 		const traceEntries = unzipSync(new Uint8Array(fs.readFileSync(result.json.artifacts.traces[0].path)), {});
 		expect(Object.keys(traceEntries)).toContain("trace.trace");
+		expect(fs.existsSync(path.join(project, ".pi", "qa-runs"))).toBe(false);
 
 		if (KEEP_EVIDENCE) {
 			publishedArtifacts = publishEvidence(result.json.artifacts);
@@ -150,8 +153,27 @@ function writePrivateJson(file: string, value: unknown): void {
 	fs.chmodSync(file, 0o600);
 }
 
-async function runRunner(project: string, args: string[]): Promise<{ code: number | null; stdout: string; stderr: string; json: RunnerStatus }> {
-	const child = spawn("node", [runner, ...args], { cwd: project, stdio: ["ignore", "pipe", "pipe"] });
+function createBrowserQaAgent(project: string): string {
+	const agentDir = path.join(project, ".pi", "subagents", "browser-qa-e2e", "qa-agent");
+	const workspace = path.join(agentDir, "browser-qa");
+	const flows = path.join(workspace, "flows");
+	fs.mkdirSync(flows, { recursive: true, mode: 0o700 });
+	fs.writeFileSync(path.join(agentDir, "prompt.md"), "browser QA E2E\n", "utf8");
+	fs.writeFileSync(path.join(agentDir, "project_cwd"), project, "utf8");
+	fs.writeFileSync(path.join(agentDir, "subagent_type"), "browser-qa", "utf8");
+	if (process.platform !== "win32") {
+		fs.chmodSync(workspace, 0o700);
+		fs.chmodSync(flows, 0o700);
+	}
+	return fs.realpathSync(agentDir);
+}
+
+async function runRunner(project: string, args: string[], agentDir: string): Promise<{ code: number | null; stdout: string; stderr: string; json: RunnerStatus }> {
+	const child = spawn("node", [runner, ...args], {
+		cwd: project,
+		env: { ...process.env, PI_SUBAGENT_AGENT_DIR: agentDir },
+		stdio: ["ignore", "pipe", "pipe"],
+	});
 	let stdout = "";
 	let stderr = "";
 	child.stdout.setEncoding("utf8").on("data", (chunk) => { stdout += chunk; });

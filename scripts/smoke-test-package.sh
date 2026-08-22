@@ -88,6 +88,9 @@ REQUIRED_FILES=(
 	"$PKG_ROOT/external/pi-tools-suite/index.ts"
 	"$PKG_ROOT/external/pi-tools-suite/src/index.ts"
 	"$PKG_ROOT/external/pi-tools-suite/package.json"
+	"$PKG_ROOT/external/pi-tools-suite/src/async-subagents/private-skills/browser-qa/SKILL.md"
+	"$PKG_ROOT/external/pi-tools-suite/src/async-subagents/private-skills/browser-qa/references/qa-design.md"
+	"$PKG_ROOT/external/pi-tools-suite/src/async-subagents/private-skills/browser-qa/scripts/browser-qa-runner.mjs"
 )
 
 for required_file in "${REQUIRED_FILES[@]}"; do
@@ -96,7 +99,7 @@ for required_file in "${REQUIRED_FILES[@]}"; do
 		exit 1
 	fi
 done
-pass "Renderer extensions and pi-tools-suite payload are present"
+pass "Renderer extensions, pi-tools-suite payload, and self-contained browser QA skill are present"
 
 banner "Step 5/5: Running non-interactive Pix commands..."
 ERRORS=0

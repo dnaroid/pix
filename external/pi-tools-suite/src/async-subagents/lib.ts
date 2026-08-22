@@ -24,7 +24,6 @@ export {
 	existingSubagentConfigFiles,
 	getDefaultSubagentConfigPath,
 	getBrowserQaSkillPath,
-	getPlaywrightCliSkillPath,
 	getSubagentConfigInitTargetPath,
 	getSubagentConfigSamplePath,
 	isBlindModelRef,

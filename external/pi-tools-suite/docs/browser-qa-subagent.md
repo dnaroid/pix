@@ -17,9 +17,10 @@ evidence. The role uses `antigravity/gemini-3-flash-preview`, falling back to
   Antigravity-backed role unavailable.
 - A type profile may declare `isolatedSkills`. Spawning that profile adds
   `--no-skills` followed by one explicit `--skill` per configured path.
-- The `browser-qa` profile always loads both its private workflow and the
-  packaged `skills/playwright-cli` skill. Configuration may append isolated
-  skills but cannot remove either mandatory browser skill.
+- The `browser-qa` profile always loads one self-contained private workflow.
+  Relevant browser-test design guidance is bundled beside its trusted runner;
+  no separately discovered skill or browser CLI is required. Configuration may
+  append isolated skills but cannot remove the mandatory private workflow.
 - Other sub-agent profiles and the parent session must not discover the private
   skill automatically.
 
@@ -40,9 +41,11 @@ evidence. The role uses `antigravity/gemini-3-flash-preview`, falling back to
 - The bundled runner reads secrets internally. Credentials must never be copied
   into prompts, generated QA flows, shell arguments, transcripts, reports,
   or QA evidence.
-- Generated browser state is private cache under `.pi/qa-auth-state`; evidence
-  is written under `.pi/qa-runs`. Multiple profiles always use separate browser
-  contexts and evidence directories.
+- Generated browser state is private cache under `.pi/qa-auth-state`. Ephemeral
+  flows, evidence, and result manifests are written under the owning agent's
+  `.pi/subagents/<run>/<agent-id>/browser-qa/` workspace. Multiple profiles use
+  separate browser contexts/evidence directories, and normal sub-agent shutdown
+  or cleanup removes the whole workspace with its run.
 - Missing, ambiguous, rejected, or expired auth returns a machine-readable
   update-required/profile-required status naming only the profile id, config
   file, and redacted reason. The parent asks the user to update the file and
@@ -54,6 +57,10 @@ evidence. The role uses `antigravity/gemini-3-flash-preview`, falling back to
   trusted runner implements a bounded set of navigation, interaction,
   assertion, screenshot, and auth-rejection actions and never gives the flow a
   Playwright context or credential values.
+- The launcher injects `PI_SUBAGENT_AGENT_DIR`, pre-creates a private
+  `browser-qa/flows/` workspace, and clears stale browser QA files when an agent
+  id is reused. The runner validates the directory's project/type metadata and
+  refuses flows outside it; the model cannot select a shared evidence root.
 - The runner owns browser lifecycle, origin checks, auth application, tracing,
   screenshots, video finalization, and redacted result output. Before retaining
   a trace it removes network/non-image resource entries, redacts configured and
@@ -69,10 +76,10 @@ evidence. The role uses `antigravity/gemini-3-flash-preview`, falling back to
 
 ## Acceptance criteria
 
-1. `browser-qa` resolves to the intended model/fallback, private workflow, and
-   packaged `playwright-cli` skill, and its isolated child process can register
-   the configured Antigravity model.
-2. Spawn args contain `--no-skills` and both mandatory explicit skills for this
+1. `browser-qa` resolves to the intended model/fallback and its self-contained
+   private workflow, and its isolated child process can register the configured
+   Antigravity model.
+2. Spawn args contain `--no-skills` and the mandatory private skill for this
    profile; ordinary profiles retain existing skill discovery behavior.
 3. Auth profile listing and all error output are redacted; model-authored input
    cannot execute code in the credential-bearing process.
@@ -80,9 +87,11 @@ evidence. The role uses `antigravity/gemini-3-flash-preview`, falling back to
    origins, path/mode hardening, private empty-template creation, explicit
    credential requests, non-executable flows, and successful redacted evidence
    creation.
-5. Completed test runs report clickable screenshot, video, and trace links
+5. Browser QA flows/evidence live only inside the owning sub-agent directory;
+   deleting the run removes them while persistent auth config/state remains.
+6. Completed test runs report clickable screenshot, video, and trace links
    whenever those artifacts exist.
-6. Suite tests/typecheck, host checks, and suite sync pass.
+7. Suite tests/typecheck, host checks, and suite sync pass.
 
 ## Real-browser regression test
 
@@ -96,6 +105,8 @@ npm run test:browser-qa-e2e
 ```
 
 Normal suite tests keep this case skipped; the Publish workflow runs it on
-Linux after installing Chromium. Explicit runs retain the latest artifacts in
-`.pi/qa-runs/browser-qa-e2e/latest/` and print a clickable link for every file.
-Set `BROWSER_QA_KEEP_EVIDENCE=0` to clean up without publishing evidence.
+Linux after installing Chromium. The runner writes into a temporary simulated
+sub-agent directory. For manual inspection only, explicit E2E runs copy the
+latest artifacts to `.pi/qa-runs/browser-qa-e2e/latest/` and print clickable
+links; this test-only published copy is not the runtime storage contract. Set
+`BROWSER_QA_KEEP_EVIDENCE=0` to skip that copy.

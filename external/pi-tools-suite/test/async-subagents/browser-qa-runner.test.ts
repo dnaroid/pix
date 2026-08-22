@@ -33,8 +33,32 @@ function writeAuth(project: string, profiles: Record<string, unknown>): void {
 	fs.chmodSync(file, 0o600);
 }
 
-function run(project: string, args: string[]) {
-	const result = spawnSync("node", [runner, ...args], { cwd: project, encoding: "utf8" });
+function createBrowserQaAgent(project: string, id = "qa-agent"): string {
+	const agentDir = path.join(project, ".pi", "subagents", "test-run", id);
+	const workspace = path.join(agentDir, "browser-qa");
+	const flows = path.join(workspace, "flows");
+	fs.mkdirSync(flows, { recursive: true, mode: 0o700 });
+	writeFile(path.join(agentDir, "prompt.md"), "browser QA test\n");
+	writeFile(path.join(agentDir, "project_cwd"), project);
+	writeFile(path.join(agentDir, "subagent_type"), "browser-qa");
+	if (process.platform !== "win32") {
+		fs.chmodSync(workspace, 0o700);
+		fs.chmodSync(flows, 0o700);
+	}
+	return fs.realpathSync(agentDir);
+}
+
+function writeAgentFlow(agentDir: string, content: string, name = "flow.jsonc"): string {
+	const file = path.join(agentDir, "browser-qa", "flows", name);
+	writeFile(file, content);
+	return file;
+}
+
+function run(project: string, args: string[], agentDir?: string) {
+	const env = { ...process.env };
+	if (agentDir) env.PI_SUBAGENT_AGENT_DIR = agentDir;
+	else delete env.PI_SUBAGENT_AGENT_DIR;
+	const result = spawnSync("node", [runner, ...args], { cwd: project, encoding: "utf8", env });
 	return {
 		code: result.status,
 		stdout: result.stdout.trim(),
@@ -176,11 +200,30 @@ describe("private browser QA runner", () => {
 		];
 		for (const [index, auth] of invalidAuth.entries()) {
 			const project = tempProject();
+			const agentDir = createBrowserQaAgent(project);
 			writeAuth(project, { admin: profile("unused-secret", { auth }) });
-			writeFile(path.join(project, "flow.jsonc"), '{"steps":[{"action":"goto","path":"/"}]}\n');
-			const result = run(project, ["run", "--profile", "admin", "--flow", "flow.jsonc", "--run-id", `invalid-${index}`]);
+			const flow = writeAgentFlow(agentDir, '{"steps":[{"action":"goto","path":"/"}]}\n');
+			const result = run(project, ["run", "--profile", "admin", "--flow", flow, "--run-id", `invalid-${index}`], agentDir);
 			expect(result).toMatchObject({ code: 42, json: { status: "QA_AUTH_UPDATE_REQUIRED", profile: "admin" } });
 		}
+	});
+
+	test("requires the launcher-owned agent directory and rejects flows outside its workspace", () => {
+		const project = tempProject();
+		const agentDir = createBrowserQaAgent(project);
+		writeAuth(project, { admin: profile("top-secret-cookie") });
+		installFakePlaywright(project);
+		const localFlow = writeAgentFlow(agentDir, '{"steps":[{"action":"goto","path":"/"}]}\n');
+		const missingAgentDir = run(project, ["run", "--profile", "admin", "--flow", localFlow]);
+		expect(missingAgentDir).toMatchObject({ code: 1, json: { status: "QA_RUN_FAILED", profile: "admin" } });
+		expect(missingAgentDir.json.reason).toContain("PI_SUBAGENT_AGENT_DIR");
+
+		const outsideFlow = path.join(project, "outside-flow.jsonc");
+		writeFile(outsideFlow, '{"steps":[{"action":"goto","path":"/"}]}\n');
+		const outside = run(project, ["run", "--profile", "admin", "--flow", outsideFlow], agentDir);
+		expect(outside).toMatchObject({ code: 1, json: { status: "QA_RUN_FAILED", profile: "admin" } });
+		expect(outside.json.reason).toContain("project-local");
+		expect(fs.existsSync(path.join(project, ".pi", "qa-runs"))).toBe(false);
 	});
 
 	test("executes every supported auth mode through the trusted flow runner", () => {
@@ -199,10 +242,11 @@ describe("private browser QA runner", () => {
 		];
 		for (const [name, auth] of authModes) {
 			const project = tempProject();
+			const agentDir = createBrowserQaAgent(project);
 			writeAuth(project, { admin: profile("unused-secret", { auth }) });
 			installFakePlaywright(project);
-			writeFile(path.join(project, "flow.jsonc"), JSON.stringify({ steps: [{ action: "goto", path: "/settings" }] }));
-			const result = run(project, ["run", "--profile", "admin", "--flow", "flow.jsonc", "--run-id", name]);
+			const flow = writeAgentFlow(agentDir, JSON.stringify({ steps: [{ action: "goto", path: "/settings" }] }));
+			const result = run(project, ["run", "--profile", "admin", "--flow", flow, "--run-id", name], agentDir);
 			expect(result).toMatchObject({ code: 0, json: { status: "QA_PASSED", profile: "admin" } });
 			expect(fs.readFileSync(path.join(project, "http-route-blocked"), "utf8")).toBe("yes");
 			expect(fs.readFileSync(path.join(project, "ws-route-blocked"), "utf8")).toBe("yes");
@@ -211,13 +255,14 @@ describe("private browser QA runner", () => {
 		}
 
 		const storageProject = tempProject();
+		const storageAgentDir = createBrowserQaAgent(storageProject);
 		const stateFile = path.join(storageProject, ".pi", "imported-state.json");
 		writeFile(stateFile, JSON.stringify({ cookies: [], origins: [] }));
 		fs.chmodSync(stateFile, 0o600);
 		writeAuth(storageProject, { admin: profile("unused-secret", { auth: { type: "storageState", path: ".pi/imported-state.json" } }) });
 		installFakePlaywright(storageProject);
-		writeFile(path.join(storageProject, "flow.jsonc"), JSON.stringify({ steps: [{ action: "goto", path: "/settings" }] }));
-		const storageResult = run(storageProject, ["run", "--profile", "admin", "--flow", "flow.jsonc", "--run-id", "storage"]);
+		const storageFlow = writeAgentFlow(storageAgentDir, JSON.stringify({ steps: [{ action: "goto", path: "/settings" }] }));
+		const storageResult = run(storageProject, ["run", "--profile", "admin", "--flow", storageFlow, "--run-id", "storage"], storageAgentDir);
 		expect(storageResult).toMatchObject({ code: 0, json: { status: "QA_PASSED", profile: "admin" } });
 	});
 
@@ -231,35 +276,38 @@ describe("private browser QA runner", () => {
 		expect(modeResult.json.reason).toContain("0600");
 
 		const symlinked = tempProject();
+		const symlinkedAgentDir = createBrowserQaAgent(symlinked);
 		writeAuth(symlinked, { admin: profile("top-secret-cookie") });
 		installFakePlaywright(symlinked);
-		const realFlow = path.join(symlinked, "real-flow.jsonc");
-		writeFile(realFlow, '{"steps":[{"action":"goto","path":"/"}]}');
-		fs.symlinkSync(realFlow, path.join(symlinked, "flow.jsonc"));
-		const symlinkResult = run(symlinked, ["run", "--profile", "admin", "--flow", "flow.jsonc", "--run-id", "symlink"]);
+		const realFlow = writeAgentFlow(symlinkedAgentDir, '{"steps":[{"action":"goto","path":"/"}]}', "real-flow.jsonc");
+		const symlinkedFlow = path.join(symlinkedAgentDir, "browser-qa", "flows", "flow.jsonc");
+		fs.symlinkSync(realFlow, symlinkedFlow);
+		const symlinkResult = run(symlinked, ["run", "--profile", "admin", "--flow", symlinkedFlow, "--run-id", "symlink"], symlinkedAgentDir);
 		expect(symlinkResult).toMatchObject({ code: 1, json: { status: "QA_RUN_FAILED" } });
 		expect(symlinkResult.json.reason).toContain("symbolic links");
 
 		const collision = tempProject();
+		const collisionAgentDir = createBrowserQaAgent(collision);
 		writeAuth(collision, { admin: profile("top-secret-cookie") });
 		installFakePlaywright(collision);
-		writeFile(path.join(collision, "flow.jsonc"), '{"steps":[{"action":"goto","path":"/"}]}');
-		const evidenceDir = path.join(collision, ".pi", "qa-runs", "proof", "admin");
+		const collisionFlow = writeAgentFlow(collisionAgentDir, '{"steps":[{"action":"goto","path":"/"}]}');
+		const evidenceDir = path.join(collisionAgentDir, "browser-qa", "evidence", "proof", "admin");
 		fs.mkdirSync(evidenceDir, { recursive: true, mode: 0o700 });
-		fs.chmodSync(path.join(collision, ".pi", "qa-runs"), 0o700);
-		fs.chmodSync(path.join(collision, ".pi", "qa-runs", "proof"), 0o700);
+		fs.chmodSync(path.join(collisionAgentDir, "browser-qa", "evidence"), 0o700);
+		fs.chmodSync(path.join(collisionAgentDir, "browser-qa", "evidence", "proof"), 0o700);
 		writeFile(path.join(evidenceDir, "keep"), "original");
-		const collisionResult = run(collision, ["run", "--profile", "admin", "--flow", "flow.jsonc", "--run-id", "proof"]);
+		const collisionResult = run(collision, ["run", "--profile", "admin", "--flow", collisionFlow, "--run-id", "proof"], collisionAgentDir);
 		expect(collisionResult).toMatchObject({ code: 1, json: { status: "QA_RUN_FAILED" } });
 		expect(fs.readFileSync(path.join(evidenceDir, "keep"), "utf8")).toBe("original");
 	});
 
 	test("never executes a model-authored JavaScript file", () => {
 		const project = tempProject();
+		const agentDir = createBrowserQaAgent(project);
 		writeAuth(project, { admin: profile("top-secret-cookie") });
 		installFakePlaywright(project);
-		writeFile(path.join(project, "flow.cjs"), "require('node:fs').writeFileSync('executed', 'yes');\n");
-		const result = run(project, ["run", "--profile", "admin", "--flow", "flow.cjs", "--run-id", "code"]);
+		const flow = writeAgentFlow(agentDir, "require('node:fs').writeFileSync('executed', 'yes');\n", "flow.cjs");
+		const result = run(project, ["run", "--profile", "admin", "--flow", flow, "--run-id", "code"], agentDir);
 		expect(result).toMatchObject({ code: 1, json: { status: "QA_RUN_FAILED", profile: "admin" } });
 		expect(fs.existsSync(path.join(project, "executed"))).toBe(false);
 	});
@@ -303,9 +351,10 @@ describe("private browser QA runner", () => {
 	test("rejects disallowed base URLs with update-required status", () => {
 
 		const project = tempProject();
+		const agentDir = createBrowserQaAgent(project);
 		writeAuth(project, { admin: profile("top-secret-cookie") });
-		writeFile(path.join(project, "flow.jsonc"), '{"steps":[{"action":"goto","path":"/"}]}\n');
-		const rejected = run(project, ["run", "--profile", "admin", "--base-url", "https://evil.example", "--flow", "flow.jsonc"]);
+		const flow = writeAgentFlow(agentDir, '{"steps":[{"action":"goto","path":"/"}]}\n');
+		const rejected = run(project, ["run", "--profile", "admin", "--base-url", "https://evil.example", "--flow", flow], agentDir);
 		expect(rejected).toMatchObject({ code: 42, json: { status: "QA_AUTH_UPDATE_REQUIRED", profile: "admin" } });
 		expect(rejected.json.reason).toContain("allowedOrigins");
 		expect(rejected.stdout).not.toContain("top-secret-cookie");
@@ -313,22 +362,24 @@ describe("private browser QA runner", () => {
 
 	test("creates isolated screenshot, video, trace, and redacted result evidence", () => {
 		const project = tempProject();
+		const agentDir = createBrowserQaAgent(project);
 		const secret = "top-secret-cookie";
 		writeAuth(project, { admin: profile(secret) });
 		installFakePlaywright(project);
-		writeFile(path.join(project, "flow.jsonc"), JSON.stringify({ steps: [
+		const flow = writeAgentFlow(agentDir, JSON.stringify({ steps: [
 			{ action: "goto", path: "/settings" },
 			{ action: "assertURL", equals: "https://staging.example.test/settings" },
 		] }));
 
-		const result = run(project, ["run", "--profile", "admin", "--flow", "flow.jsonc", "--run-id", "proof"]);
+		const result = run(project, ["run", "--profile", "admin", "--flow", flow, "--run-id", "proof"], agentDir);
+		const relativeEvidenceDir = path.relative(fs.realpathSync(project), path.join(agentDir, "browser-qa", "evidence", "proof", "admin")).split(path.sep).join("/");
 		expect(result).toMatchObject({
 			code: 0,
 			stderr: "",
-			json: { status: "QA_PASSED", profile: "admin", evidenceDir: ".pi/qa-runs/proof/admin" },
+			json: { status: "QA_PASSED", profile: "admin", evidenceDir: relativeEvidenceDir },
 		});
 		expect(result.json.evidence.sort()).toEqual(["final.png", "trace.zip", "video.webm"]);
-		const evidenceDir = path.join(fs.realpathSync(project), ".pi", "qa-runs", "proof", "admin");
+		const evidenceDir = path.join(fs.realpathSync(agentDir), "browser-qa", "evidence", "proof", "admin");
 		expect(result.json.artifacts).toEqual({
 			screenshots: [{ path: path.join(evidenceDir, "final.png"), uri: pathToFileURL(path.join(evidenceDir, "final.png")).href }],
 			videos: [{ path: path.join(evidenceDir, "video.webm"), uri: pathToFileURL(path.join(evidenceDir, "video.webm")).href }],
@@ -346,19 +397,24 @@ describe("private browser QA runner", () => {
 		expect(fs.readFileSync(path.join(project, "http-route-blocked"), "utf8")).toBe("yes");
 		expect(fs.readFileSync(path.join(project, "ws-route-blocked"), "utf8")).toBe("yes");
 		expect(fs.readFileSync(path.join(project, "ws-route-allowed"), "utf8")).toBe("yes");
+		expect(fs.existsSync(path.join(project, ".pi", "qa-runs"))).toBe(false);
+		const runDir = path.dirname(agentDir);
+		fs.rmSync(runDir, { recursive: true, force: true });
+		expect(fs.existsSync(evidenceDir)).toBe(false);
 	});
 
 	test("turns application auth rejection into a redacted update request", () => {
 		const project = tempProject();
+		const agentDir = createBrowserQaAgent(project);
 		const secret = "top-secret-cookie";
 		writeAuth(project, { admin: profile(secret) });
 		installFakePlaywright(project);
-		writeFile(path.join(project, "flow.jsonc"), JSON.stringify({ steps: [
+		const flow = writeAgentFlow(agentDir, JSON.stringify({ steps: [
 			{ action: "goto", path: "/login" },
 			{ action: "authRejectedIf", urlIncludes: "/login" },
 		] }));
 
-		const result = run(project, ["run", "--profile", "admin", "--flow", "flow.jsonc", "--run-id", "expired"]);
+		const result = run(project, ["run", "--profile", "admin", "--flow", flow, "--run-id", "expired"], agentDir);
 		expect(result).toMatchObject({
 			code: 42,
 			json: { status: "QA_AUTH_UPDATE_REQUIRED", profile: "admin", file: ".pi/qa_auth.jsonc" },

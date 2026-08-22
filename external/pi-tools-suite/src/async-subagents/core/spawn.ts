@@ -24,6 +24,8 @@ export interface SpawnAgentOptions {
 }
 
 export const DEFAULT_AGENT_TIMEOUT_MS = 30 * 60 * 1000;
+const BROWSER_QA_WORKSPACE_DIR = "browser-qa";
+const SUBAGENT_AGENT_DIR_ENV = "PI_SUBAGENT_AGENT_DIR";
 const AGENT_TIMEOUT_EXIT_CODE = 124;
 const AGENT_TIMEOUT_KILL_GRACE_MS = 5_000;
 const AGENT_SETTLED_TERMINATE_GRACE_MS = 50;
@@ -46,6 +48,7 @@ export function spawnAgent(
 	validateBasename(task.id, "task.id");
 	const agentDir = path.join(runDir, task.id);
 	fs.mkdirSync(agentDir, { recursive: true });
+	prepareBrowserQaWorkspace(agentDir, task.subagentType);
 
 	// Clean previous state when reusing a run directory/agent id.
 	for (const f of [
@@ -136,7 +139,7 @@ export function spawnAgent(
 
 	const proc = spawn(invocation.command, invocation.args, {
 		cwd,
-		env: subagentEnvironment(process.env),
+		env: subagentEnvironment(process.env, task.subagentType === "browser-qa" ? agentDir : undefined),
 		stdio: ["pipe", "pipe", "pipe"],
 	});
 	proc.stdin.on("error", (error: NodeJS.ErrnoException) => {
@@ -698,8 +701,8 @@ function getEnvModel(): string | undefined {
 	return trimmed ? trimmed : undefined;
 }
 
-function subagentEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-	return {
+function subagentEnvironment(env: NodeJS.ProcessEnv, agentDir?: string): NodeJS.ProcessEnv {
+	const result: NodeJS.ProcessEnv = {
 		...env,
 		PI_MODEL_SUITABLE_TOOLS_PRESERVE_SELECTION: "1",
 		PI_TERMINAL_BELL_DISABLED: "1",
@@ -709,6 +712,21 @@ function subagentEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 			"question",
 		]),
 	};
+	delete result[SUBAGENT_AGENT_DIR_ENV];
+	if (agentDir) result[SUBAGENT_AGENT_DIR_ENV] = fs.realpathSync(agentDir);
+	return result;
+}
+
+function prepareBrowserQaWorkspace(agentDir: string, subagentType: string | undefined): void {
+	const workspace = path.join(agentDir, BROWSER_QA_WORKSPACE_DIR);
+	fs.rmSync(workspace, { recursive: true, force: true });
+	if (subagentType !== "browser-qa") return;
+	const flows = path.join(workspace, "flows");
+	fs.mkdirSync(flows, { recursive: true, mode: 0o700 });
+	if (process.platform !== "win32") {
+		fs.chmodSync(workspace, 0o700);
+		fs.chmodSync(flows, 0o700);
+	}
 }
 
 function appendEnvList(value: string | undefined, items: readonly string[]): string {

@@ -251,9 +251,11 @@ The built-in `browser-qa` role runs on `antigravity/gemini-3-flash-preview`, wit
 `openai-codex/gpt-5.4-mini` as its fallback. Its browser workflow is an explicit
 private skill under `src/async-subagents/private-skills/`, outside normal Pi skill
 discovery. The role's first-class `isolatedSkills` setting launches the child with
-`--no-skills` plus the private workflow and the packaged `skills/playwright-cli`
-skill. Both are mandatory even when configuration adds other isolated skills;
-parent and ordinary sub-agent sessions do not discover the private workflow.
+`--no-skills` plus one self-contained private workflow. It bundles the relevant
+scenario-design, locator, waiting, assertion, evidence, and cleanup guidance next
+to its trusted runner, so browser QA does not depend on a separately installed
+skill or CLI. The private workflow remains mandatory when configuration appends
+other isolated skills; parent and ordinary sub-agent sessions do not discover it.
 
 Keep named dev/staging auth profiles in project `.pi/qa_auth.jsonc` (there is no
 `/qa-auth` command). The private runner supports `form`, `cookie`, `localStorage`,
@@ -288,13 +290,18 @@ blocked. Example:
 
 Do not place credential values in prompts, QA flows, shell arguments, reports,
 or evidence. The helper reads JSONC internally, emits only redacted statuses, and
-caches generated storage state under `.pi/qa-auth-state`. Evidence is isolated by
-run/profile under `.pi/qa-runs`; trace archives have network records and non-image
-resources removed, then known configured/runtime credential values are redacted
-and verified before the trace is retained. Missing, ambiguous, rejected, or
-expired auth returns `QA_PROFILE_REQUIRED` or `QA_AUTH_UPDATE_REQUIRED`, naming
-only the profile/file/reason needed for the parent to ask the user for an update
-and rerun. See
+caches generated storage state under `.pi/qa-auth-state`. The launcher provides
+each browser QA process with its own
+`.pi/subagents/<run>/<agent-id>/browser-qa/` workspace. Declarative flows,
+screenshots, video, sanitized traces, and result manifests stay there, so normal
+session shutdown or `subagents cleanup` removes them with the run directory.
+The runner validates the owning agent metadata and refuses flows outside that
+workspace; reusing an agent id clears stale browser QA files first. Trace archives
+have network records and non-image resources removed, then known
+configured/runtime credential values are redacted and verified before retention.
+Missing, ambiguous, rejected, or expired auth returns `QA_PROFILE_REQUIRED` or
+`QA_AUTH_UPDATE_REQUIRED`, naming only the profile/file/reason needed for the
+parent to ask the user for an update and rerun. See
 `src/async-subagents/private-skills/browser-qa/references/qa-auth.example.jsonc`
 for complete profile shapes and `references/qa-flow.example.jsonc` beside it for
 the declarative, non-executable QA action/assertion format.

@@ -10,7 +10,9 @@ import { strFromU8, strToU8, unzipSync, zipSync } from "../vendor/fflate.mjs";
 
 const CONFIG_RELATIVE = ".pi/qa_auth.jsonc";
 const STATE_RELATIVE = path.join(".pi", "qa-auth-state");
-const RUNS_RELATIVE = path.join(".pi", "qa-runs");
+const SUBAGENT_AGENT_DIR_ENV = "PI_SUBAGENT_AGENT_DIR";
+const QA_WORKSPACE_RELATIVE = "browser-qa";
+const EVIDENCE_RELATIVE = "evidence";
 const EXIT_AUTH_UPDATE_REQUIRED = 42;
 const EXIT_PROFILE_REQUIRED = 43;
 const PROFILE_ID = /^[A-Za-z0-9._-]+$/;
@@ -80,23 +82,25 @@ async function main() {
 	const profile = selected.profile;
 	const secrets = collectSecrets(profile.auth);
 	try {
-		await runQa({ cwd, args, profileId, profile });
+		const agentDir = resolveBrowserQaAgentDirectory(cwd, process.env[SUBAGENT_AGENT_DIR_ENV]);
+		await runQa({ cwd, agentDir, args, profileId, profile });
 	} catch (error) {
 		if (error instanceof QaStatusError) throw error;
 		throw new QaStatusError("QA_RUN_FAILED", redact(safeReason(error), secrets), 1, profileId);
 	}
 }
 
-async function runQa({ cwd, args, profileId, profile }) {
+async function runQa({ cwd, agentDir, args, profileId, profile }) {
 	if (!args.flow) throw new QaStatusError("QA_RUN_FAILED", "--flow is required", 1, profileId);
-	const flowPath = resolveExistingPrivateFile(cwd, args.flow, "QA flow", false);
+	const workspaceDir = path.join(agentDir, QA_WORKSPACE_RELATIVE);
+	const flowPath = resolveExistingPrivateFile(workspaceDir, args.flow, "QA flow", false);
 	const flow = readFlow(flowPath, profileId);
 	const allowedOrigins = normalizeAllowedOrigins(profile.allowedOrigins, profileId);
 	const baseURL = normalizeBaseUrl(args.baseUrl ?? profile.baseUrl ?? allowedOrigins[0], allowedOrigins, profileId);
 	validateAuthConfiguration(cwd, profile.auth, allowedOrigins, profileId);
 	const runId = safeRunId(args.runId ?? `${timestamp()}-${profileId}`);
-	const evidenceDir = path.join(cwd, RUNS_RELATIVE, runId, profileId);
-	createExclusivePrivateDirectory(cwd, evidenceDir);
+	const evidenceDir = path.join(workspaceDir, EVIDENCE_RELATIVE, runId, profileId);
+	createExclusivePrivateDirectory(agentDir, evidenceDir);
 
 	const playwright = loadPlaywright(cwd);
 	const browser = await playwright.chromium.launch({ headless: true });
@@ -779,6 +783,45 @@ function isAllowedUrl(raw, allowedOrigins) {
 	}
 }
 
+function resolveBrowserQaAgentDirectory(cwd, value) {
+	if (typeof value !== "string" || value.length === 0) {
+		throw new Error(`${SUBAGENT_AGENT_DIR_ENV} is required for browser QA runs`);
+	}
+	const projectRoot = fs.realpathSync(cwd);
+	const subagentRoot = path.join(projectRoot, ".pi", "subagents");
+	const resolved = path.resolve(value);
+	if (!fs.existsSync(resolved)) throw new Error("browser QA agent directory is missing");
+	const real = fs.realpathSync(resolved);
+	if (!isInside(subagentRoot, real)) throw new Error("browser QA agent directory must be inside .pi/subagents");
+	assertNoSymlinkComponents(projectRoot, real, "browser QA agent directory");
+	if (!fs.statSync(real).isDirectory()) throw new Error("browser QA agent directory must be a real directory");
+
+	const promptFile = path.join(real, "prompt.md");
+	const projectFile = path.join(real, "project_cwd");
+	const typeFile = path.join(real, "subagent_type");
+	for (const [file, label] of [[promptFile, "prompt"], [projectFile, "project metadata"], [typeFile, "type metadata"]]) {
+		if (!fs.existsSync(file) || !fs.statSync(file).isFile()) throw new Error(`browser QA ${label} is missing`);
+		assertNoSymlinkComponents(real, file, `browser QA ${label}`);
+	}
+	const recordedProject = fs.readFileSync(projectFile, "utf8").trim();
+	if (!recordedProject || fs.realpathSync(recordedProject) !== projectRoot) {
+		throw new Error("browser QA agent directory belongs to another project");
+	}
+	if (fs.readFileSync(typeFile, "utf8").trim() !== "browser-qa") {
+		throw new Error("browser QA runner requires a browser-qa sub-agent directory");
+	}
+
+	const workspace = path.join(real, QA_WORKSPACE_RELATIVE);
+	if (!fs.existsSync(workspace)) throw new Error("browser QA workspace is missing");
+	assertNoSymlinkComponents(real, workspace, "browser QA workspace");
+	const workspaceStat = fs.statSync(workspace);
+	if (!workspaceStat.isDirectory()) throw new Error("browser QA workspace must be a real directory");
+	if (process.platform !== "win32" && (workspaceStat.mode & 0o077) !== 0) {
+		throw new Error("browser QA workspace must use private directory permissions (0700)");
+	}
+	return real;
+}
+
 function resolveExistingPrivateFile(cwd, value, label, requirePrivate = true) {
 	if (typeof value !== "string" || value.length === 0) throw new Error(`${label} path is missing`);
 	const root = fs.realpathSync(cwd);
@@ -794,9 +837,13 @@ function resolveExistingPrivateFile(cwd, value, label, requirePrivate = true) {
 	return real;
 }
 
-function assertInside(root, target, label) {
+function isInside(root, target) {
 	const relative = path.relative(root, target);
-	if (!relative || (!relative.startsWith("..") && !path.isAbsolute(relative))) return;
+	return !relative || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function assertInside(root, target, label) {
+	if (isInside(root, target)) return;
 	throw new Error(`${label} must be project-local`);
 }
 

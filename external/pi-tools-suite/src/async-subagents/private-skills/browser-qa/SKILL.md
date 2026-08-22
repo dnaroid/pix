@@ -1,30 +1,70 @@
 ---
 name: browser-qa-private
-description: Private workflow for deterministic browser bug reproduction and fix verification with redacted project auth and Playwright evidence.
+description: Private self-contained workflow for deterministic browser bug reproduction and fix verification with redacted project auth and Playwright evidence.
 ---
 
 # Browser QA
 
-Use the bundled runner; do not read, print, grep, copy, or edit credential values
-from `.pi/qa_auth.jsonc` yourself.
+Use this skill's bundled runner as the only browser interface. It already owns
+Playwright, browser/context lifecycle, tracing, video, screenshots, origin
+isolation, authentication, redaction, and cleanup. Do not invoke another browser
+CLI, create shared/default browser sessions, or generate executable browser code.
+
+Never read, print, grep, copy, or edit credential values from
+`.pi/qa_auth.jsonc` yourself.
 
 ## Workflow
 
 1. Resolve `scripts/browser-qa-runner.mjs` relative to this skill.
-2. Run `node <runner> profiles`. Choose a profile only when the task names its
+2. Use the launcher-provided `$PI_SUBAGENT_AGENT_DIR/browser-qa/` workspace.
+   The launcher creates its private `flows/` directory and the runner rejects
+   flows or evidence destinations outside this owning sub-agent directory. Do
+   not override `PI_SUBAGENT_AGENT_DIR` or copy evidence to shared project paths.
+3. Discover the requested target, expected behavior, and the smallest scenario
+   that can prove it. If the target cannot be reached or started, report the
+   concrete blocker instead of substituting static checks for browser QA.
+4. Run `node <runner> profiles`. Choose a profile only when the task names its
    id or safe profile traits make the choice unambiguous. Otherwise stop with
    `QA_PROFILE_REQUIRED` and list only ids, descriptions, and traits.
-3. Inspect the target code and write a declarative JSONC flow under
-   `.pi/qa-flows/`. Never put credentials or executable JavaScript in it.
-4. Run:
+5. Inspect the target code and write a declarative JSONC flow under
+   `$PI_SUBAGENT_AGENT_DIR/browser-qa/flows/`. Never put credentials or
+   executable JavaScript in it.
+6. Run:
    `node <runner> run --profile <id> --base-url <url> --flow <flow.jsonc>`.
    Profile id, URL, and flow path are non-secret; never pass credentials as
    arguments or environment variables.
-5. Report deterministic assertions and every artifact returned by the runner.
+7. Report deterministic assertions and every artifact returned by the runner.
    For each screenshot, video, or trace, emit a separate clickable Markdown
    link using its `uri` and also show its absolute `path`. Do this for failed
    runs too whenever `artifacts` is present; never report only `evidenceDir`.
    Visual inspection supplements assertions; it does not replace them.
+
+## Scenario design
+
+- Define the expected postcondition before writing interactions. A successful
+  click or navigation is not proof; assert the resulting URL, text, value,
+  count, visibility, enabled state, or checked state.
+- Keep the flow minimal and reproducible. Capture setup, the action under test,
+  and at least one observable outcome; add a screenshot at the state that best
+  explains the result.
+- Prefer stable user-facing locators in this order: `testId`; semantic `role`
+  plus accessible `name`; `label`; `placeholder`; visible `text`; CSS only as a
+  last resort. Use `exact: true` when similar elements could make a match
+  ambiguous.
+- Let locator actions auto-wait. Use `waitFor` for an explicit UI state and use
+  `waitForTimeout` only for a short, unavoidable animation/debounce—not as a
+  substitute for an assertion. Set flow `timeoutMs` only as high as the target
+  legitimately needs.
+- Place `authRejectedIf` immediately after navigation or any transition that
+  may reveal expired authentication.
+- Never weaken an assertion merely to make a failing run pass. If the observed
+  product behavior differs from the expectation, preserve the failure evidence
+  and report the mismatch.
+
+Read `references/qa-design.md` when designing a non-trivial flow, diagnosing an
+ambiguous failure, or deciding what evidence proves the result.
+
+## Flow contract
 
 The flow is `{ "steps": [...] }` with at most 100 steps. Supported actions:
 
@@ -50,16 +90,21 @@ assertions require exactly one of `equals` or `includes`.
       "locator": { "role": "heading", "name": "Settings", "exact": true }
     },
     { "action": "click", "locator": { "testId": "save-settings" } },
-    { "action": "assertText", "locator": { "testId": "toast" }, "includes": "Saved" }
+    { "action": "assertText", "locator": { "testId": "toast" }, "includes": "Saved" },
+    { "action": "screenshot", "name": "settings-saved" }
   ]
 }
 ```
 
-The runner owns Playwright/browser lifecycle, strict network-origin boundaries,
-auth application, assertions, screenshots, video, trace sanitization, and
-cleanup. Do not start an additional shared/default browser session. For multiple
-profiles, invoke the runner separately; each invocation gets an isolated context
-and exclusive evidence directory.
+For multiple profiles, invoke the runner separately. Every invocation gets an
+isolated browser context and exclusive evidence directory; the runner closes
+all owned browser resources on success and failure. Flows, screenshots, video,
+sanitized traces, and runner result manifests remain under
+`$PI_SUBAGENT_AGENT_DIR/browser-qa/` so normal sub-agent shutdown or cleanup
+deletes them with the run directory. `.pi/qa_auth.jsonc` and reusable
+`.pi/qa-auth-state/` remain project-local and persistent.
+
+## Credentials and blocked runs
 
 If the runner returns `QA_AUTH_UPDATE_REQUIRED`, stop and explicitly report that
 browser QA requires credentials or an auth-config update. Ask the user to fill
@@ -68,9 +113,13 @@ empty template was created at that path. Relay only the runner's profile, file,
 reason, action, and template-created state; never read the generated file or
 attempt to recover by exposing or replaying credentials.
 
+For any other blocked run, report the runner status and redacted reason. Do not
+claim that browser QA passed based on source inspection, unit tests, or a build.
+
 After any runner invocation that actually performed browser testing, include
 all non-empty `artifacts.screenshots`, `artifacts.videos`, and
 `artifacts.traces` groups in the final response. These links are mandatory so
 the user can open the evidence directly.
 
-See `references/qa-auth.example.jsonc` and `references/qa-flow.example.jsonc`.
+See `references/qa-auth.example.jsonc`, `references/qa-flow.example.jsonc`, and
+`references/qa-design.md`.
