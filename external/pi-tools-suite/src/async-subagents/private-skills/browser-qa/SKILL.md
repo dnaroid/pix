@@ -23,14 +23,19 @@ Never read, print, grep, copy, or edit credential values from
 3. Discover the requested target, expected behavior, and the smallest scenario
    that can prove it. If the target cannot be reached or started, report the
    concrete blocker instead of substituting static checks for browser QA.
-4. Run `node <runner> profiles`. Choose a profile only when the task names its
-   id or safe profile traits make the choice unambiguous. Otherwise stop with
-   `QA_PROFILE_REQUIRED` and list only ids, descriptions, and traits.
+4. If the requested behavior requires authentication, run
+   `node <runner> profiles`. A missing auth config is valid and returns an empty
+   list without creating `.pi/qa_auth.jsonc`. Otherwise skip profile discovery
+   and use public mode. Choose an auth profile only when the task names its id,
+   safe profile traits make the choice unambiguous, or a public run proves that
+   the requested page requires login.
 5. Inspect the target code and write a declarative JSONC flow under
    `$PI_SUBAGENT_AGENT_DIR/browser-qa/flows/`. Never put credentials or
    executable JavaScript in it.
-6. Run:
-   `node <runner> run --profile <id> --base-url <url> --flow <flow.jsonc>`.
+6. Run public QA with
+   `node <runner> run --base-url <url> --flow <flow.jsonc>`. The URL's exact
+   origin becomes the fail-closed allowlist. Only for authenticated QA, add
+   `--profile <id>`; the selected profile then owns the URL and allowlist.
    Profile id, URL, and flow path are non-secret; never pass credentials as
    arguments or environment variables.
 7. Report deterministic assertions and every artifact returned by the runner.
@@ -108,12 +113,19 @@ after login succeeds so credentials are not captured in the trace.
 
 ## Credentials and blocked runs
 
-If the runner returns `QA_AUTH_UPDATE_REQUIRED`, stop and explicitly report that
-browser QA requires credentials or an auth-config update. Ask the user to fill
-the reported file and rerun QA. If `templateCreated` is true, say that a private
-empty template was created at that path. Relay only the runner's profile, file,
-reason, action, and template-created state; never read the generated file or
-attempt to recover by exposing or replaying credentials.
+Do not request credentials merely because `.pi/qa_auth.jsonc` is absent. If the
+task explicitly requires authenticated behavior, or a public run reaches the
+flow's `authRejectedIf` check, and `profiles` returned no usable profile, run
+`node <runner> profiles --require-auth`. Only this explicit authenticated path
+may create the private empty template.
+
+If that command or an authenticated run returns `QA_AUTH_UPDATE_REQUIRED`, stop
+and explicitly report that authenticated browser QA requires credentials or an
+auth-config update. Ask the user to fill the reported file and rerun QA. If
+`templateCreated` is true, say that a private empty template was created at that
+path. Relay only the runner's profile, file, reason, action, and template-created
+state; never read the generated file or attempt to recover by exposing or
+replaying credentials.
 
 For any other blocked run, report the runner status and redacted reason. Do not
 claim that browser QA passed based on source inspection, unit tests, or a build.

@@ -4,8 +4,8 @@
 
 Provide a cheap, fast `browser-qa` async-subagent that reproduces browser bugs
 and proves fixes with deterministic assertions plus screenshot, video, and trace
-evidence. The role uses `antigravity/gemini-3-flash-preview`, falling back to
-`openai-codex/gpt-5.4-mini`.
+evidence. The role uses `openai-codex/gpt-5.4-mini`, falling back to
+`antigravity/gemini-3-flash-preview` and then `zai/glm-5.3`.
 
 ## Private skill isolation
 
@@ -26,11 +26,16 @@ evidence. The role uses `antigravity/gemini-3-flash-preview`, falling back to
 
 ## Authentication contract
 
+- Public browser QA requires no auth profile and does not create or require
+  `.pi/qa_auth.jsonc`. Its explicit base URL supplies the one exact allowed
+  origin, and the runner still blocks every other HTTP(S)/WebSocket origin.
 - Auth profiles live in project-local `.pi/qa_auth.jsonc` and are selected by
   explicit id. The file must be a real project-local file with mode `0600` on
   POSIX. Profile listings expose only `id`, description, and traits.
-- When authenticated QA first needs credentials and that file is absent, the
-  runner creates a private empty template and returns `provide_credentials`.
+- Listing profiles when the file is absent returns an empty list without side
+  effects. When authenticated QA explicitly requests credentials and that file
+  is absent, the runner creates a private empty template and returns
+  `provide_credentials`.
   The sub-agent must explicitly ask the user to fill the reported file and
   rerun QA; it must not read or edit the credential values itself.
 - Every profile requires one or more exact `allowedOrigins`. Secret-bearing auth
@@ -46,8 +51,8 @@ evidence. The role uses `antigravity/gemini-3-flash-preview`, falling back to
   `.pi/subagents/<run>/<agent-id>/browser-qa/` workspace. Multiple profiles use
   separate browser contexts/evidence directories, and normal sub-agent shutdown
   or cleanup removes the whole workspace with its run.
-- Missing, ambiguous, rejected, or expired auth returns a machine-readable
-  update-required/profile-required status naming only the profile id, config
+- Missing, rejected, or expired explicitly selected auth returns a
+  machine-readable update-required status naming only the profile id, config
   file, and redacted reason. The parent asks the user to update the file and
   reruns; there is no `/qa-auth` command.
 
@@ -83,10 +88,10 @@ evidence. The role uses `antigravity/gemini-3-flash-preview`, falling back to
    profile; ordinary profiles retain existing skill discovery behavior.
 3. Auth profile listing and all error output are redacted; model-authored input
    cannot execute code in the credential-bearing process.
-4. Runner tests cover explicit profile selection, all auth modes, fail-closed
-   origins, path/mode hardening, private empty-template creation, explicit
-   credential requests, non-executable flows, and successful redacted evidence
-   creation.
+4. Runner tests cover public execution without an auth file, explicit profile
+   selection, all auth modes, fail-closed origins, path/mode hardening, private
+   empty-template creation only on an explicit auth request, non-executable
+   flows, and successful redacted evidence creation.
 5. Browser QA flows/evidence live only inside the owning sub-agent directory;
    deleting the run removes them while persistent auth config/state remains.
 6. Completed test runs report clickable screenshot, video, and trace links

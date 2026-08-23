@@ -22,7 +22,7 @@ const runner = path.resolve(
 );
 const mockPage = fs.readFileSync(path.resolve(testDirectory, "../fixtures/browser-qa/mock-page.html"), "utf8");
 
-e2eTest("records form login, waits for a private page, clicks its action, and captures real evidence", async () => {
+e2eTest("runs public QA without auth, then records form login and private action evidence", async () => {
 	let receivedLoginCredentials = false;
 	let loginPageLoadedAt = 0;
 	let loginSubmittedAt = 0;
@@ -74,6 +74,27 @@ e2eTest("records form login, waits for a private page, clicks its action, and ca
 		const { port } = server.address() as AddressInfo;
 		const origin = `http://127.0.0.1:${port}`;
 		const agentDir = createBrowserQaAgent(project);
+		const publicFlowPath = path.join(agentDir, "browser-qa", "flows", "public.jsonc");
+		writePrivateJson(publicFlowPath, {
+			steps: [
+				{ action: "goto", path: "/public" },
+				{ action: "waitFor", locator: { testId: "private-title" }, state: "visible" },
+				{ action: "assertText", locator: { testId: "private-title" }, equals: "Private QA area" },
+			],
+		});
+		const publicResult = await runRunner(project, [
+			"run",
+			"--base-url", origin,
+			"--flow", publicFlowPath,
+			"--run-id", "real-public",
+		], agentDir);
+		expect(publicResult.code).toBe(0);
+		expect(publicResult.json).toMatchObject({ status: "QA_PASSED", profile: "public" });
+		expect(publicResult.json.artifacts.screenshots).toHaveLength(1);
+		expect(publicResult.json.artifacts.videos).toHaveLength(1);
+		expect(publicResult.json.artifacts.traces).toHaveLength(1);
+		expect(fs.existsSync(path.join(project, ".pi", "qa_auth.jsonc"))).toBe(false);
+
 		writePrivateJson(path.join(project, ".pi", "qa_auth.jsonc"), {
 			profiles: {
 				mock: {

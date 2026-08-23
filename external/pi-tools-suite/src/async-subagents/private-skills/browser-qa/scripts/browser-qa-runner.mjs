@@ -13,7 +13,6 @@ const QA_WORKSPACE_RELATIVE = "browser-qa";
 const EVIDENCE_RELATIVE = "evidence";
 const FORM_VIDEO_STEP_DELAY_MS = 250;
 const EXIT_AUTH_UPDATE_REQUIRED = 42;
-const EXIT_PROFILE_REQUIRED = 43;
 const PROFILE_ID = /^[A-Za-z0-9._-]+$/;
 const AUTH_TEMPLATE = `{
   // Authenticated browser QA requires at least one project-local profile.
@@ -58,7 +57,7 @@ main().catch((error) => {
 	writeStatus({
 		status: statusError.status,
 		profile: statusError.profileId,
-		file: CONFIG_RELATIVE,
+		...(statusError.status === "QA_AUTH_UPDATE_REQUIRED" ? { file: CONFIG_RELATIVE } : {}),
 		reason: statusError.reason,
 		...statusError.details,
 	});
@@ -68,15 +67,21 @@ main().catch((error) => {
 async function main() {
 	const [command = "profiles", ...rawArgs] = process.argv.slice(2);
 	const cwd = fs.realpathSync(process.cwd());
-	const config = readAuthConfig(cwd);
 	if (command === "profiles") {
-		writeStatus({ status: "QA_PROFILES", profiles: safeProfiles(config.profiles) });
+		const requireAuth = rawArgs.length === 1 && rawArgs[0] === "--require-auth";
+		if (rawArgs.length > 0 && !requireAuth) {
+			throw new QaStatusError("QA_RUN_FAILED", `invalid profiles argument: ${rawArgs[0]}`, 1);
+		}
+		const config = readAuthConfig(cwd, requireAuth);
+		writeStatus({ status: "QA_PROFILES", authConfigPresent: config.present, profiles: safeProfiles(config.profiles) });
 		return;
 	}
 	if (command !== "run") throw new QaStatusError("QA_RUN_FAILED", `unknown command: ${command}`, 1);
 
 	const args = parseArgs(rawArgs);
-	const selected = selectProfile(config.profiles, args.profile);
+	const selected = args.profile
+		? selectProfile(readAuthConfig(cwd, true).profiles, args.profile)
+		: createPublicProfile(args.baseUrl);
 	const profileId = selected.id;
 	const profile = selected.profile;
 	const secrets = collectSecrets(profile.auth);
@@ -192,9 +197,10 @@ async function runQa({ cwd, agentDir, args, profileId, profile }) {
 	writeStatus({ status: "QA_PASSED", profile: profileId, ...evidenceDetails });
 }
 
-function readAuthConfig(cwd) {
+function readAuthConfig(cwd, required = false) {
 	const candidate = path.join(cwd, CONFIG_RELATIVE);
 	if (!fs.existsSync(candidate)) {
+		if (!required) return { present: false, profiles: {} };
 		let templateCreated;
 		try {
 			templateCreated = createAuthTemplate(cwd);
@@ -222,7 +228,10 @@ function readAuthConfig(cwd) {
 	if (errors.length > 0) {
 		throw new QaStatusError("QA_AUTH_UPDATE_REQUIRED", `auth config is invalid JSONC (${printParseErrorCode(errors[0].error)})`, EXIT_AUTH_UPDATE_REQUIRED);
 	}
-	if (!isObject(value) || !isObject(value.profiles) || Object.keys(value.profiles).length === 0) {
+	if (!isObject(value) || !isObject(value.profiles)) {
+		throw new QaStatusError("QA_AUTH_UPDATE_REQUIRED", "auth config must define a profiles object", EXIT_AUTH_UPDATE_REQUIRED);
+	}
+	if (required && Object.keys(value.profiles).length === 0) {
 		throw new QaStatusError(
 			"QA_AUTH_UPDATE_REQUIRED",
 			"credentials are required; auth config must define a non-empty profiles object",
@@ -234,7 +243,7 @@ function readAuthConfig(cwd) {
 	if (Object.keys(value.profiles).some((id) => !isSafeName(id))) {
 		throw new QaStatusError("QA_AUTH_UPDATE_REQUIRED", "auth profile ids may contain only letters, digits, dot, underscore, or dash", EXIT_AUTH_UPDATE_REQUIRED);
 	}
-	return value;
+	return { ...value, present: true };
 }
 
 function safeProfiles(profiles) {
@@ -248,15 +257,6 @@ function safeProfiles(profiles) {
 }
 
 function selectProfile(profiles, requestedId) {
-	if (!requestedId) {
-		throw new QaStatusError(
-			"QA_PROFILE_REQUIRED",
-			"select one auth profile by id",
-			EXIT_PROFILE_REQUIRED,
-			undefined,
-			{ profiles: safeProfiles(profiles) },
-		);
-	}
 	if (!isSafeName(requestedId) || !isObject(profiles[requestedId])) {
 		throw new QaStatusError("QA_AUTH_UPDATE_REQUIRED", "requested auth profile is missing or invalid", EXIT_AUTH_UPDATE_REQUIRED, requestedId);
 	}
@@ -265,6 +265,26 @@ function selectProfile(profiles, requestedId) {
 		throw new QaStatusError("QA_AUTH_UPDATE_REQUIRED", "profile auth configuration is missing or invalid", EXIT_AUTH_UPDATE_REQUIRED, requestedId);
 	}
 	return { id: requestedId, profile };
+}
+
+function createPublicProfile(rawBaseUrl) {
+	if (typeof rawBaseUrl !== "string") {
+		throw new QaStatusError("QA_RUN_FAILED", "--base-url is required when running without --profile", 1, "public");
+	}
+	try {
+		const url = new URL(rawBaseUrl);
+		if (!/^https?:$/.test(url.protocol) || url.username || url.password) throw new Error();
+		return {
+			id: "public",
+			profile: {
+				baseUrl: url.href,
+				allowedOrigins: [url.origin],
+				auth: { type: "none" },
+			},
+		};
+	} catch {
+		throw new QaStatusError("QA_RUN_FAILED", "public --base-url must be an http(s) URL without embedded credentials", 1, "public");
+	}
 }
 
 function normalizeAllowedOrigins(value, profileId) {
@@ -296,6 +316,8 @@ function normalizeBaseUrl(raw, allowedOrigins, profileId) {
 
 function validateAuthConfiguration(cwd, auth, allowedOrigins, profileId) {
 	switch (auth.type) {
+		case "none":
+			break;
 		case "cookie":
 			if (!Array.isArray(auth.cookies) || auth.cookies.length === 0) throw authError(profileId, "cookie auth requires cookies");
 			for (const cookie of auth.cookies) {
@@ -467,6 +489,7 @@ function isStringArray(value) {
 
 async function contextOptionsForAuth({ cwd, profileId, profile, allowedOrigins }) {
 	const auth = profile.auth;
+	if (auth.type === "none") return {};
 	if (auth.type === "storageState") {
 		if (typeof auth.path !== "string") throw authError(profileId, "storageState path is missing");
 		const statePath = resolveExistingPrivateFile(cwd, auth.path, "storageState");

@@ -257,13 +257,18 @@ to its trusted runner, so browser QA does not depend on a separately installed
 skill or CLI. The private workflow remains mandatory when configuration appends
 other isolated skills; parent and ordinary sub-agent sessions do not discover it.
 
-Keep named dev/staging auth profiles in project `.pi/qa_auth.jsonc` (there is no
-`/qa-auth` command). The private runner supports `form`, `cookie`, `localStorage`,
+Public browser QA does not require an auth profile or `.pi/qa_auth.jsonc`: run it
+with an explicit base URL, whose exact origin becomes the fail-closed allowlist.
+The runner neither creates nor requests a credential file for that path.
+
+For targets that actually require login, keep named dev/staging auth profiles in
+project `.pi/qa_auth.jsonc` (there is no `/qa-auth` command). The private runner
+supports `form`, `cookie`, `localStorage`,
 `sessionStorage`, `bearer`, and existing Playwright `storageState` auth. Every
-profile must declare exact `allowedOrigins`; select the profile id explicitly when
-spawning QA. On POSIX, keep the config at mode `0600`. During a run those origins
-also form the fail-closed HTTP(S)/WebSocket allowlist and service workers are
-blocked. Example:
+profile must declare exact `allowedOrigins`; select the profile id explicitly only
+for authenticated QA. On POSIX, keep the config at mode `0600`. During a run
+those origins also form the fail-closed HTTP(S)/WebSocket allowlist and service
+workers are blocked. Example:
 
 ```jsonc
 {
@@ -302,7 +307,9 @@ The runner validates the owning agent metadata and refuses flows outside that
 workspace; reusing an agent id clears stale browser QA files first. Trace archives
 have network records and non-image resources removed, then known
 configured/runtime credential values are redacted and verified before retention.
-Missing, ambiguous, rejected, or expired auth returns `QA_PROFILE_REQUIRED` or
+Listing profiles when the auth file is absent returns an empty list without
+creating a template. Only an explicit authenticated request may create the
+private template. Missing, rejected, or expired selected auth returns
 `QA_AUTH_UPDATE_REQUIRED`, naming only the profile/file/reason needed for the
 parent to ask the user for an update and rerun. See
 `src/async-subagents/private-skills/browser-qa/references/qa-auth.example.jsonc`

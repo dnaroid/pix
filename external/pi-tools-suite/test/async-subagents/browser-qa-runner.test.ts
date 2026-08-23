@@ -173,30 +173,44 @@ exports.chromium = {
 }
 
 describe("private browser QA runner", () => {
-	test("lists and requests profiles without exposing credentials or origins", () => {
+	test("lists auth profiles without exposing credentials or origins", () => {
 		const project = tempProject();
 		const secret = "top-secret-cookie";
 		writeAuth(project, { admin: profile(secret), subscriber: profile("other-secret") });
 
 		const listed = run(project, ["profiles"]);
-		expect(listed).toMatchObject({ code: 0, stderr: "", json: { status: "QA_PROFILES" } });
+		expect(listed).toMatchObject({ code: 0, stderr: "", json: { status: "QA_PROFILES", authConfigPresent: true } });
 		expect(listed.json.profiles).toEqual([
 			{ id: "admin", description: "Staging administrator", traits: ["role:admin", "plan:paid"] },
 			{ id: "subscriber", description: "Staging administrator", traits: ["role:admin", "plan:paid"] },
 		]);
 		expect(listed.stdout).not.toContain(secret);
 		expect(listed.stdout).not.toContain("staging.example.test");
+	});
 
-		const required = run(project, ["run", "--flow", "flow.jsonc"]);
-		expect(required).toMatchObject({ code: 43, json: { status: "QA_PROFILE_REQUIRED", file: ".pi/qa_auth.jsonc" } });
-		expect(required.json.profiles).toEqual(listed.json.profiles);
-		expect(required.stdout).not.toContain(secret);
+	test("runs public QA without auth config or profile", () => {
+		const project = tempProject();
+		const agentDir = createBrowserQaAgent(project);
+		installFakePlaywright(project);
+		const flow = writeAgentFlow(agentDir, JSON.stringify({ steps: [
+			{ action: "goto", path: "/public" },
+			{ action: "assertURL", equals: "https://staging.example.test/public" },
+		] }));
 
-		const singleProject = tempProject();
-		writeAuth(singleProject, { admin: profile(secret) });
-		writeFile(path.join(singleProject, "flow.jsonc"), '{"steps":[{"action":"goto","path":"/"}]}\n');
-		const singleRequired = run(singleProject, ["run", "--flow", "flow.jsonc"]);
-		expect(singleRequired).toMatchObject({ code: 43, json: { status: "QA_PROFILE_REQUIRED" } });
+		const listed = run(project, ["profiles"]);
+		expect(listed).toMatchObject({
+			code: 0,
+			json: { status: "QA_PROFILES", authConfigPresent: false, profiles: [] },
+		});
+		expect(fs.existsSync(path.join(project, ".pi", "qa_auth.jsonc"))).toBe(false);
+
+		const result = run(project, ["run", "--base-url", "https://staging.example.test", "--flow", flow, "--run-id", "public"], agentDir);
+		expect(result).toMatchObject({ code: 0, json: { status: "QA_PASSED", profile: "public" } });
+		expect(fs.existsSync(path.join(project, ".pi", "qa_auth.jsonc"))).toBe(false);
+
+		const missingBaseUrl = run(project, ["run", "--flow", flow], agentDir);
+		expect(missingBaseUrl).toMatchObject({ code: 1, json: { status: "QA_RUN_FAILED", profile: "public" } });
+		expect(missingBaseUrl.json.reason).toContain("--base-url is required");
 	});
 
 	test("rejects invalid configuration for every supported auth mode", () => {
@@ -341,7 +355,14 @@ describe("private browser QA runner", () => {
 
 	test("creates a private empty auth template and explicitly requests credentials", () => {
 		const project = tempProject();
-		const missing = run(project, ["profiles"]);
+		const publicProfiles = run(project, ["profiles"]);
+		expect(publicProfiles).toMatchObject({
+			code: 0,
+			json: { status: "QA_PROFILES", authConfigPresent: false, profiles: [] },
+		});
+		expect(fs.existsSync(path.join(project, ".pi", "qa_auth.jsonc"))).toBe(false);
+
+		const missing = run(project, ["profiles", "--require-auth"]);
 		expect(missing).toMatchObject({
 			code: 42,
 			json: {
@@ -357,7 +378,13 @@ describe("private browser QA runner", () => {
 		expect(fs.readFileSync(template, "utf8")).not.toContain("replace-me");
 		if (process.platform !== "win32") expect(fs.statSync(template).mode & 0o777).toBe(0o600);
 
-		const stillEmpty = run(project, ["profiles"]);
+		const emptyProfiles = run(project, ["profiles"]);
+		expect(emptyProfiles).toMatchObject({
+			code: 0,
+			json: { status: "QA_PROFILES", authConfigPresent: true, profiles: [] },
+		});
+
+		const stillEmpty = run(project, ["profiles", "--require-auth"]);
 		expect(stillEmpty).toMatchObject({
 			code: 42,
 			json: { action: "provide_credentials", templateCreated: false },
@@ -368,7 +395,7 @@ describe("private browser QA runner", () => {
 			const symlinkProject = tempProject();
 			const outside = tempProject();
 			fs.symlinkSync(outside, path.join(symlinkProject, ".pi"), "dir");
-			const symlinkedDirectory = run(symlinkProject, ["profiles"]);
+			const symlinkedDirectory = run(symlinkProject, ["profiles", "--require-auth"]);
 			expect(symlinkedDirectory).toMatchObject({ code: 42, json: { status: "QA_AUTH_UPDATE_REQUIRED" } });
 			expect(symlinkedDirectory.json.reason).toContain("real project-local directory");
 			expect(fs.existsSync(path.join(outside, "qa_auth.jsonc"))).toBe(false);
