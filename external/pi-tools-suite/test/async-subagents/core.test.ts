@@ -441,8 +441,8 @@ describe.serial("subagent type config", () => {
 		const resolved = resolveAgentTaskConfig({ id: "qa", task: "verify the browser bug", subagentType: "browser-qa" }, config);
 		const privateSkill = getBrowserQaSkillPath();
 
-		expect(resolved.task.model).toBe("antigravity/gemini-3-flash-preview");
-		expect(resolved.fallbackModels).toEqual(["openai-codex/gpt-5.4-mini"]);
+		expect(resolved.task.model).toBe("openai-codex/gpt-5.4-mini");
+		expect(resolved.fallbackModels).toEqual(["antigravity/gemini-3-flash-preview", "zai/glm-5.3"]);
 		expect(resolved.task.tools).toEqual(["read", "grep", "bash"]);
 		expect(resolved.isolatedSkills).toEqual([privateSkill]);
 		expect(fs.existsSync(privateSkill)).toBe(true);

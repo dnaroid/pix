@@ -10,6 +10,9 @@ import { unzipSync } from "../../src/async-subagents/private-skills/browser-qa/v
 
 const RUN_E2E = /^(?:1|true|yes)$/i.test(process.env.BROWSER_QA_RUNNER_E2E ?? "");
 const KEEP_EVIDENCE = !/^(?:0|false|no)$/i.test(process.env.BROWSER_QA_KEEP_EVIDENCE ?? "");
+const RUNNER_TIMEOUT_MS = 45_000;
+const FORM_EMAIL = "qa-user@example.test";
+const FORM_PASSWORD = "mock-form-secret";
 const e2eTest = RUN_E2E ? test : test.skip;
 const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(testDirectory, "../../../..");
@@ -19,10 +22,44 @@ const runner = path.resolve(
 );
 const mockPage = fs.readFileSync(path.resolve(testDirectory, "../fixtures/browser-qa/mock-page.html"), "utf8");
 
-e2eTest("captures real screenshot, video, and trace artifacts from a local mock page", async () => {
-	let receivedAuthCookie = false;
-	const server = createServer((request, response) => {
-		receivedAuthCookie ||= request.headers.cookie?.includes("session=mock-session-secret") === true;
+e2eTest("records form login, waits for a private page, clicks its action, and captures real evidence", async () => {
+	let receivedLoginCredentials = false;
+	let loginPageLoadedAt = 0;
+	let loginSubmittedAt = 0;
+	let privatePageLoads = 0;
+	let lastPrivatePageLoadedAt = 0;
+	let privateActionClickedAt = 0;
+	const server = createServer(async (request, response) => {
+		const authenticated = request.headers.cookie?.includes("session=mock-session") === true;
+		if (request.method === "POST" && request.url === "/api/login") {
+			loginSubmittedAt = Date.now();
+			const form = new URLSearchParams(await readRequestBody(request));
+			receivedLoginCredentials = form.get("email") === FORM_EMAIL && form.get("password") === FORM_PASSWORD;
+			if (!receivedLoginCredentials) {
+				response.writeHead(401).end();
+				return;
+			}
+			response.writeHead(204, { "set-cookie": "session=mock-session; Path=/; HttpOnly; SameSite=Lax" }).end();
+			return;
+		}
+		if (request.method === "POST" && request.url === "/api/private-action") {
+			if (!authenticated) {
+				response.writeHead(401).end();
+				return;
+			}
+			privateActionClickedAt = Date.now();
+			response.writeHead(204).end();
+			return;
+		}
+		if (request.url === "/private" && !authenticated) {
+			response.writeHead(302, { location: "/login" }).end();
+			return;
+		}
+		if (request.url === "/private") {
+			privatePageLoads += 1;
+			lastPrivatePageLoadedAt = Date.now();
+		}
+		if (request.url === "/login") loginPageLoadedAt = Date.now();
 		response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
 		response.end(mockPage);
 	});
@@ -45,8 +82,15 @@ e2eTest("captures real screenshot, video, and trace artifacts from a local mock 
 					baseUrl: origin,
 					allowedOrigins: [origin],
 					auth: {
-						type: "cookie",
-						cookies: [{ name: "session", value: "mock-session-secret", url: origin }],
+						type: "form",
+						loginUrl: `${origin}/login`,
+						fields: [
+							{ selector: "#email", value: FORM_EMAIL },
+							{ selector: "#password", value: FORM_PASSWORD },
+						],
+						submitSelector: 'button[type="submit"]',
+						success: { url: "**/private" },
+						timeoutMs: 10_000,
 					},
 				},
 			},
@@ -54,11 +98,13 @@ e2eTest("captures real screenshot, video, and trace artifacts from a local mock 
 		const flowPath = path.join(agentDir, "browser-qa", "flows", "mock.jsonc");
 		writePrivateJson(flowPath, {
 			steps: [
-				{ action: "goto", path: "/" },
-				{ action: "assertVisible", locator: { testId: "qa-title" } },
-				{ action: "assertText", locator: { testId: "qa-title" }, equals: "Browser QA Mock" },
-				{ action: "waitForTimeout", timeoutMs: 500 },
-				{ action: "screenshot", name: "mock-page" },
+				{ action: "goto", path: "/private" },
+				{ action: "waitFor", locator: { testId: "private-action" }, state: "visible" },
+				{ action: "assertText", locator: { testId: "private-title" }, equals: "Private QA area" },
+				{ action: "click", locator: { testId: "private-action" } },
+				{ action: "waitFor", locator: { testId: "action-complete" }, state: "visible" },
+				{ action: "assertText", locator: { testId: "action-complete" }, equals: "Private action completed" },
+				{ action: "screenshot", name: "private-action-complete" },
 			],
 		});
 
@@ -71,11 +117,16 @@ e2eTest("captures real screenshot, video, and trace artifacts from a local mock 
 		expect(result.code).toBe(0);
 		expect(result.stderr).toBe("");
 		expect(result.json).toMatchObject({ status: "QA_PASSED", profile: "mock" });
-		expect(receivedAuthCookie).toBe(true);
+		expect(receivedLoginCredentials).toBe(true);
+		expect(loginPageLoadedAt).toBeGreaterThan(0);
+		expect(loginSubmittedAt - loginPageLoadedAt).toBeGreaterThanOrEqual(600);
+		expect(privatePageLoads).toBeGreaterThanOrEqual(2);
+		expect(privateActionClickedAt).toBeGreaterThan(0);
+		expect(privateActionClickedAt - lastPrivatePageLoadedAt).toBeGreaterThanOrEqual(600);
 
 		const evidenceDir = path.join(fs.realpathSync(agentDir), "browser-qa", "evidence", "real-artifacts", "mock");
 		const screenshots = result.json.artifacts.screenshots;
-		expect(screenshots.map((artifact) => path.basename(artifact.path)).sort()).toEqual(["final.png", "mock-page.png"]);
+		expect(screenshots.map((artifact) => path.basename(artifact.path)).sort()).toEqual(["final.png", "private-action-complete.png"]);
 		expect(result.json.artifacts.videos).toHaveLength(1);
 		expect(result.json.artifacts.traces).toHaveLength(1);
 
@@ -88,7 +139,14 @@ e2eTest("captures real screenshot, video, and trace artifacts from a local mock 
 		expect(fs.readFileSync(result.json.artifacts.videos[0].path).subarray(0, 4)).toEqual(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]));
 		const traceEntries = unzipSync(new Uint8Array(fs.readFileSync(result.json.artifacts.traces[0].path)), {});
 		expect(Object.keys(traceEntries)).toContain("trace.trace");
+		const traceText = Object.entries(traceEntries)
+			.filter(([name]) => name.endsWith(".trace") || name.endsWith(".network"))
+			.map(([, bytes]) => Buffer.from(bytes as Uint8Array).toString("utf8"))
+			.join("\n");
+		expect(traceText).not.toContain(FORM_EMAIL);
+		expect(traceText).not.toContain(FORM_PASSWORD);
 		expect(fs.existsSync(path.join(project, ".pi", "qa-runs"))).toBe(false);
+		expect(fs.existsSync(path.join(project, ".pi", "qa-auth-state"))).toBe(false);
 
 		if (KEEP_EVIDENCE) {
 			publishedArtifacts = publishEvidence(result.json.artifacts);
@@ -178,9 +236,20 @@ async function runRunner(project: string, args: string[], agentDir: string): Pro
 	let stderr = "";
 	child.stdout.setEncoding("utf8").on("data", (chunk) => { stdout += chunk; });
 	child.stderr.setEncoding("utf8").on("data", (chunk) => { stderr += chunk; });
-	const code = await new Promise<number | null>((resolve, reject) => {
-		child.once("error", reject);
-		child.once("close", resolve);
+	let timeout: ReturnType<typeof setTimeout> | undefined;
+	const code = await Promise.race([
+		new Promise<number | null>((resolve, reject) => {
+			child.once("error", reject);
+			child.once("close", resolve);
+		}),
+		new Promise<never>((_, reject) => {
+			timeout = setTimeout(() => {
+				child.kill("SIGKILL");
+				reject(new Error(`browser QA runner timed out after ${RUNNER_TIMEOUT_MS} ms`));
+			}, RUNNER_TIMEOUT_MS);
+		}),
+	]).finally(() => {
+		if (timeout) clearTimeout(timeout);
 	});
 	const trimmedStdout = stdout.trim();
 	if (!trimmedStdout) throw new Error(`browser QA runner produced no status (exit ${code}): ${stderr.trim()}`);
@@ -190,4 +259,10 @@ async function runRunner(project: string, args: string[], agentDir: string): Pro
 		stderr: stderr.trim(),
 		json: JSON.parse(trimmedStdout) as RunnerStatus,
 	};
+}
+
+async function readRequestBody(request: import("node:http").IncomingMessage): Promise<string> {
+	const chunks: Buffer[] = [];
+	for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+	return Buffer.concat(chunks).toString("utf8");
 }

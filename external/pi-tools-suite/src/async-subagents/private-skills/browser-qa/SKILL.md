@@ -101,8 +101,10 @@ isolated browser context and exclusive evidence directory; the runner closes
 all owned browser resources on success and failure. Flows, screenshots, video,
 sanitized traces, and runner result manifests remain under
 `$PI_SUBAGENT_AGENT_DIR/browser-qa/` so normal sub-agent shutdown or cleanup
-deletes them with the run directory. `.pi/qa_auth.jsonc` and reusable
-`.pi/qa-auth-state/` remain project-local and persistent.
+deletes them with the run directory. For form auth, recording starts on the login
+page and includes field filling and submission; password inputs remain masked,
+but the private video may show visible login identifiers. Tracing starts only
+after login succeeds so credentials are not captured in the trace.
 
 ## Credentials and blocked runs
 

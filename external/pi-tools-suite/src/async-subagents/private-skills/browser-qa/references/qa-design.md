@@ -55,13 +55,16 @@ stale credentials into an explicit update request instead of misreporting a
 product regression.
 
 Do not encode credentials, tokens, storage values, or login form secrets in the
-flow. The trusted runner applies the selected profile internally and removes
-secret-bearing evidence if it detects disclosure.
+flow. The trusted runner applies the selected profile internally. For form auth,
+video starts on the login page and includes field filling and submission; password
+inputs remain masked, but visible identifiers can appear, so treat the video as
+sensitive private evidence. Tracing starts only after login succeeds and is
+sanitized before retention.
 
 ## Evidence strategy
 
-The runner always attempts a final or failure screenshot, records video, and
-creates a sanitized trace once the browser launches. Add named `screenshot`
+The runner always attempts a final or failure screenshot, records video from the
+first page, and creates a sanitized post-auth trace. Add named `screenshot`
 steps only at states that materially help explain the result—for example before
 and after a destructive interaction, or when a transient success message is
 the oracle.
@@ -102,5 +105,5 @@ result manifest inside `$PI_SUBAGENT_AGENT_DIR/browser-qa/`. The launcher owns
 that path and the runner validates it before opening a browser. Do not override
 the environment path or copy evidence into shared `.pi/qa-runs`/`.pi/qa-flows`
 directories: the agent-local workspace is intentionally removed by the normal
-sub-agent shutdown and cleanup lifecycle. Authentication config and reusable
-auth state are separate persistent inputs and stay under project `.pi/`.
+sub-agent shutdown and cleanup lifecycle. Authentication config remains a
+separate persistent input under project `.pi/`.

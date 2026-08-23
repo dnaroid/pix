@@ -247,10 +247,10 @@ For an oh-my-openagent-style workflow, run `/ultrawork` or `/ulw` to ask the par
 
 ### Private browser QA and project auth
 
-The built-in `browser-qa` role runs on `antigravity/gemini-3-flash-preview`, with
-`openai-codex/gpt-5.4-mini` as its fallback. Its browser workflow is an explicit
-private skill under `src/async-subagents/private-skills/`, outside normal Pi skill
-discovery. The role's first-class `isolatedSkills` setting launches the child with
+The built-in `browser-qa` role runs on `openai-codex/gpt-5.4-mini`, with
+`antigravity/gemini-3-flash-preview` and then `zai/glm-5.3` as fallbacks. Its browser
+workflow is an explicit private skill under `src/async-subagents/private-skills/`,
+outside normal Pi skill discovery. The role's first-class `isolatedSkills` setting launches the child with
 `--no-skills` plus one self-contained private workflow. It bundles the relevant
 scenario-design, locator, waiting, assertion, evidence, and cleanup guidance next
 to its trusted runner, so browser QA does not depend on a separately installed
@@ -288,10 +288,13 @@ blocked. Example:
 }
 ```
 
-Do not place credential values in prompts, QA flows, shell arguments, reports,
-or evidence. The helper reads JSONC internally, emits only redacted statuses, and
-caches generated storage state under `.pi/qa-auth-state`. The launcher provides
-each browser QA process with its own
+Do not place credential values in prompts, QA flows, shell arguments, or reports.
+The helper reads JSONC internally and emits only redacted statuses. For form auth,
+video recording begins on the login page and captures the field-filling and submit
+sequence; password inputs remain browser-masked, but the private video may show
+other visible login identifiers and must be treated as sensitive evidence. Tracing
+starts only after login succeeds and is sanitized before retention. The launcher
+provides each browser QA process with its own
 `.pi/subagents/<run>/<agent-id>/browser-qa/` workspace. Declarative flows,
 screenshots, video, sanitized traces, and result manifests stay there, so normal
 session shutdown or `subagents cleanup` removes them with the run directory.

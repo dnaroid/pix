@@ -300,6 +300,13 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
           "When no mockup exists, choose a clear aesthetic direction and explain it briefly. Verify with targeted build/lint/tests or screenshot-relevant checks when possible."
         ]
       },
+      "browser-qa": {
+        "description": "Use for browser-based visual QA: reproduce UI bugs and verify fixes with deterministic assertions, screenshots, video, and traces.",
+        "model": "openai-codex/gpt-5.4-mini",
+        "fallbackModels": ["antigravity/gemini-3-flash-preview", "zai/glm-5.3"],
+        "thinking": "medium",
+        "tools": ["read", "grep", "bash"]
+      },
       "tests": {
         "description": "Use for tests: locate coverage, find gaps, run/check targeted test commands, diagnose failing tests.",
         "model": "zai/glm-5-turbo",

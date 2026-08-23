@@ -4,16 +4,69 @@
     <meta charset="utf-8">
     <title>Browser QA mock</title>
     <style>
+      * { box-sizing: border-box; }
       body { font-family: sans-serif; margin: 0; background: #101827; color: #f8fafc; }
       main { min-height: 720px; display: grid; place-content: center; text-align: center; }
-      h1 { font-size: 56px; margin: 0 0 12px; }
-      p { color: #93c5fd; font-size: 24px; }
+      section { width: min(520px, calc(100vw - 48px)); padding: 40px; border: 1px solid #334155; border-radius: 18px; background: #172033; }
+      h1 { font-size: 44px; margin: 0 0 12px; }
+      p { color: #93c5fd; font-size: 22px; }
+      form { display: grid; gap: 16px; margin-top: 28px; text-align: left; }
+      label { display: grid; gap: 8px; color: #cbd5e1; }
+      input, button { min-height: 48px; border-radius: 10px; border: 1px solid #475569; font: inherit; }
+      input { padding: 0 14px; background: #0f172a; color: #f8fafc; }
+      button { padding: 0 20px; border: 0; background: #38bdf8; color: #082f49; font-weight: 700; cursor: pointer; }
+      [hidden] { display: none !important; }
+      [data-testid="action-complete"] { color: #86efac; }
     </style>
   </head>
   <body>
-    <main>
-      <h1 data-testid="qa-title">Browser QA Mock</h1>
-      <p>Real artifact capture</p>
-    </main>
+    <main id="app"></main>
+    <script>
+      const app = document.querySelector("#app");
+
+      if (location.pathname === "/login") {
+        app.innerHTML = `
+          <section>
+            <h1>Secure QA login</h1>
+            <p>Use the project-local test profile.</p>
+            <form data-testid="login-form">
+              <label>Email <input id="email" name="email" type="email" autocomplete="username" required></label>
+              <label>Password <input id="password" name="password" type="password" autocomplete="current-password" required></label>
+              <button type="submit">Sign in</button>
+              <p data-testid="login-error" hidden>Login failed</p>
+            </form>
+          </section>`;
+        const form = document.querySelector("form");
+        form.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const response = await fetch("/api/login", {
+            method: "POST",
+            headers: { "content-type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams(new FormData(form)),
+          });
+          if (response.ok) location.assign("/private");
+          else document.querySelector('[data-testid="login-error"]').hidden = false;
+        });
+      } else {
+        app.innerHTML = `
+          <section>
+            <p data-testid="private-loading">Loading private page…</p>
+            <div data-testid="private-content" hidden>
+              <h1 data-testid="private-title">Private QA area</h1>
+              <p>The authenticated page is ready.</p>
+              <button data-testid="private-action" type="button">Run private action</button>
+              <p data-testid="action-complete" hidden>Private action completed</p>
+            </div>
+          </section>`;
+        setTimeout(() => {
+          document.querySelector('[data-testid="private-loading"]').hidden = true;
+          document.querySelector('[data-testid="private-content"]').hidden = false;
+        }, 750);
+        document.querySelector('[data-testid="private-action"]').addEventListener("click", async () => {
+          const response = await fetch("/api/private-action", { method: "POST" });
+          if (response.ok) document.querySelector('[data-testid="action-complete"]').hidden = false;
+        });
+      }
+    </script>
   </body>
 </html>

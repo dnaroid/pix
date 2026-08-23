@@ -95,6 +95,7 @@ exports.chromium = {
   async launch() {
     return {
       async newContext(options = {}) {
+        fs.appendFileSync(path.join(process.cwd(), "context-options"), JSON.stringify({ recordVideo: Boolean(options.recordVideo) }) + "\\n");
         const videoPath = path.join(options.recordVideo?.dir || process.cwd(), "generated.webm");
         return {
           async route(_pattern, handler) {
@@ -134,19 +135,28 @@ exports.chromium = {
             async stop({ path: tracePath }) { fs.writeFileSync(tracePath, Buffer.from("${fakeTrace}", "base64")); },
           },
           async newPage() {
+            fs.appendFileSync(path.join(process.cwd(), "page-actions"), "page\\n");
             fs.mkdirSync(path.dirname(videoPath), { recursive: true });
             fs.writeFileSync(videoPath, "video");
             let currentUrl = "about:blank";
             return {
-              setDefaultTimeout() {},
-              setDefaultNavigationTimeout() {},
-              async goto(url) { currentUrl = url; },
+              setDefaultTimeout(value) { fs.appendFileSync(path.join(process.cwd(), "default-timeouts"), String(value) + "\\n"); },
+              setDefaultNavigationTimeout(value) { fs.appendFileSync(path.join(process.cwd(), "navigation-timeouts"), String(value) + "\\n"); },
+              async goto(url, options = {}) {
+                currentUrl = url;
+                fs.appendFileSync(path.join(process.cwd(), "page-actions"), "goto:" + url + "\\n");
+                if (options.timeout) fs.appendFileSync(path.join(process.cwd(), "goto-timeouts"), String(options.timeout) + "\\n");
+              },
               async reload() {},
               async waitForTimeout() {},
               async waitForURL() {},
               url() { return currentUrl; },
               async content() { return "<html><body><h1>Settings</h1></body></html>"; },
-              locator() { return { async fill() {}, async click() {}, async waitFor() {} }; },
+              locator(selector) { return {
+                async fill() { fs.appendFileSync(path.join(process.cwd(), "page-actions"), "fill:" + selector + "\\n"); },
+                async click() { fs.appendFileSync(path.join(process.cwd(), "page-actions"), "click:" + selector + "\\n"); },
+                async waitFor() {},
+              }; },
               async screenshot({ path: screenshotPath }) { fs.writeFileSync(screenshotPath, "screenshot"); },
               isClosed() { return false; },
               video() { return { async path() { return videoPath; } }; },
@@ -238,6 +248,7 @@ describe("private browser QA runner", () => {
 				fields: [{ selector: "#email", value: "qa@example.test" }, { selector: "#password", value: "form-secret" }],
 				submitSelector: "button[type=submit]",
 				success: { selector: "main" },
+				timeoutMs: 120_000,
 			}],
 		];
 		for (const [name, auth] of authModes) {
@@ -252,6 +263,22 @@ describe("private browser QA runner", () => {
 			expect(fs.readFileSync(path.join(project, "ws-route-blocked"), "utf8")).toBe("yes");
 			expect(fs.readFileSync(path.join(project, "ws-route-allowed"), "utf8")).toBe("yes");
 			if (name === "bearer") expect(fs.readFileSync(path.join(project, "allowed-route-headers"), "utf8")).toContain("bearer-secret");
+			if (name === "form") {
+				expect(fs.readFileSync(path.join(project, "context-options"), "utf8").trim().split("\n")).toEqual([
+					JSON.stringify({ recordVideo: true }),
+				]);
+				expect(fs.readFileSync(path.join(project, "page-actions"), "utf8").trim().split("\n")).toEqual([
+					"page",
+					"goto:https://staging.example.test/login",
+					"fill:#email",
+					"fill:#password",
+					"click:button[type=submit]",
+					"goto:https://staging.example.test/settings",
+				]);
+				expect(fs.readFileSync(path.join(project, "default-timeouts"), "utf8").split("\n")[0]).toBe("60000");
+				expect(fs.readFileSync(path.join(project, "navigation-timeouts"), "utf8").split("\n")[0]).toBe("60000");
+				expect(fs.readFileSync(path.join(project, "goto-timeouts"), "utf8").trim()).toBe("60000");
+			}
 		}
 
 		const storageProject = tempProject();

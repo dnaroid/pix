@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 
-import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -9,10 +8,10 @@ import { parse as parseJsonc, printParseErrorCode } from "jsonc-parser";
 import { strFromU8, strToU8, unzipSync, zipSync } from "../vendor/fflate.mjs";
 
 const CONFIG_RELATIVE = ".pi/qa_auth.jsonc";
-const STATE_RELATIVE = path.join(".pi", "qa-auth-state");
 const SUBAGENT_AGENT_DIR_ENV = "PI_SUBAGENT_AGENT_DIR";
 const QA_WORKSPACE_RELATIVE = "browser-qa";
 const EVIDENCE_RELATIVE = "evidence";
+const FORM_VIDEO_STEP_DELAY_MS = 250;
 const EXIT_AUTH_UPDATE_REQUIRED = 42;
 const EXIT_PROFILE_REQUIRED = 43;
 const PROFILE_ID = /^[A-Za-z0-9._-]+$/;
@@ -112,7 +111,7 @@ async function runQa({ cwd, agentDir, args, profileId, profile }) {
 	const runtimeSecrets = collectSecrets(profile.auth);
 	const tracePath = path.join(evidenceDir, "trace.zip");
 	try {
-		const contextOptions = await contextOptionsForAuth({ cwd, profileId, profile, allowedOrigins, browser });
+		const contextOptions = await contextOptionsForAuth({ cwd, profileId, profile, allowedOrigins });
 		context = await browser.newContext({
 			...contextOptions,
 			baseURL,
@@ -122,10 +121,11 @@ async function runQa({ cwd, agentDir, args, profileId, profile }) {
 		});
 		await installOriginGuard(context, allowedOrigins, profile.auth);
 		await applyContextAuth(context, profile.auth, allowedOrigins, baseURL, profileId);
-		runtimeSecrets.push(...collectStorageStateSecrets(await context.storageState()));
-		await context.tracing.start({ screenshots: true, snapshots: true, sources: false });
 		page = await context.newPage();
 		video = page.video();
+		await applyFormAuth(page, profile.auth, allowedOrigins, profileId);
+		runtimeSecrets.push(...collectStorageStateSecrets(await context.storageState()));
+		await context.tracing.start({ screenshots: true, snapshots: true, sources: false });
 		await executeFlow({ page, context, baseURL, evidenceDir, flow, allowedOrigins, profileId, secrets: runtimeSecrets });
 		await assertPageDoesNotExposeSecrets(page, runtimeSecrets, profileId);
 		await page.screenshot({ path: path.join(evidenceDir, "final.png"), fullPage: true });
@@ -465,7 +465,7 @@ function isStringArray(value) {
 	return Array.isArray(value) && value.length > 0 && value.every((item) => typeof item === "string");
 }
 
-async function contextOptionsForAuth({ cwd, profileId, profile, allowedOrigins, browser }) {
+async function contextOptionsForAuth({ cwd, profileId, profile, allowedOrigins }) {
 	const auth = profile.auth;
 	if (auth.type === "storageState") {
 		if (typeof auth.path !== "string") throw authError(profileId, "storageState path is missing");
@@ -473,16 +473,7 @@ async function contextOptionsForAuth({ cwd, profileId, profile, allowedOrigins, 
 		return { storageState: filteredStorageState(statePath, allowedOrigins, profileId) };
 	}
 	if (auth.type === "form") {
-		const stateDirectory = path.join(cwd, STATE_RELATIVE);
-		const statePath = path.join(stateDirectory, `${profileId}-${authCacheKey(auth, allowedOrigins)}.json`);
-		if (!fs.existsSync(statePath)) {
-			ensurePrivateDirectory(cwd, stateDirectory);
-			for (const name of fs.readdirSync(stateDirectory)) {
-				if (name.startsWith(`${profileId}-`) && name.endsWith(".json")) fs.rmSync(path.join(stateDirectory, name), { force: true });
-			}
-			await createFormState({ statePath, auth, allowedOrigins, browser, profileId });
-		}
-		return { storageState: filteredStorageState(statePath, allowedOrigins, profileId) };
+		return {};
 	}
 	if (!["cookie", "localStorage", "sessionStorage", "bearer"].includes(auth.type)) {
 		throw authError(profileId, `unsupported auth type: ${auth.type}`);
@@ -490,39 +481,36 @@ async function contextOptionsForAuth({ cwd, profileId, profile, allowedOrigins, 
 	return {};
 }
 
-async function createFormState({ statePath, auth, allowedOrigins, browser, profileId }) {
+async function applyFormAuth(page, auth, allowedOrigins, profileId) {
+	if (auth.type !== "form") return;
 	if (typeof auth.loginUrl !== "string" || !isAllowedUrl(auth.loginUrl, allowedOrigins)) {
 		throw authError(profileId, "form loginUrl is missing or outside allowedOrigins");
 	}
 	if (!Array.isArray(auth.fields) || auth.fields.length === 0 || typeof auth.submitSelector !== "string") {
 		throw authError(profileId, "form fields or submitSelector are missing");
 	}
-	const context = await browser.newContext();
 	try {
-		await installOriginGuard(context, allowedOrigins, auth);
-		const page = await context.newPage();
-		await page.goto(auth.loginUrl);
+		const timeout = Math.min(finitePositive(auth.timeoutMs) ?? 15_000, 60_000);
+		page.setDefaultTimeout(timeout);
+		page.setDefaultNavigationTimeout(timeout);
+		await page.goto(auth.loginUrl, { timeout });
+		await page.waitForTimeout(FORM_VIDEO_STEP_DELAY_MS);
 		for (const field of auth.fields) {
 			if (!isObject(field) || typeof field.selector !== "string" || typeof field.value !== "string") {
 				throw authError(profileId, "form fields must contain selector/value strings");
 			}
 			await page.locator(field.selector).fill(field.value);
+			await page.waitForTimeout(FORM_VIDEO_STEP_DELAY_MS);
 		}
 		await page.locator(auth.submitSelector).click();
-		const timeout = finitePositive(auth.timeoutMs) ?? 15_000;
 		if (isObject(auth.success) && typeof auth.success.url === "string") await page.waitForURL(auth.success.url, { timeout });
 		if (isObject(auth.success) && typeof auth.success.selector === "string") await page.locator(auth.success.selector).waitFor({ timeout });
 		if (!isObject(auth.success) || (typeof auth.success.url !== "string" && typeof auth.success.selector !== "string")) {
 			throw authError(profileId, "form success.url or success.selector is required");
 		}
-		fs.mkdirSync(path.dirname(statePath), { recursive: true, mode: 0o700 });
-		await context.storageState({ path: statePath });
-		fs.chmodSync(statePath, 0o600);
 	} catch (error) {
 		if (error instanceof QaStatusError) throw error;
 		throw authError(profileId, "form login was rejected or did not reach the configured success condition");
-	} finally {
-		await context.close().catch(() => {});
 	}
 }
 
@@ -548,10 +536,6 @@ async function applyContextAuth(context, auth, allowedOrigins, baseURL, profileI
 			for (const [key, value] of values) target.setItem(key, value);
 		}, { expectedOrigin: origin, storageName: storage, values: entries });
 	}
-}
-
-function authCacheKey(auth, allowedOrigins) {
-	return createHash("sha256").update(JSON.stringify({ auth, allowedOrigins })).digest("hex").slice(0, 16);
 }
 
 async function installOriginGuard(context, allowedOrigins, auth) {
@@ -888,10 +872,6 @@ function isAlreadyExistsError(error) {
 
 function createExclusivePrivateDirectory(cwd, target) {
 	createPrivateDirectory(cwd, target, true);
-}
-
-function ensurePrivateDirectory(cwd, target) {
-	createPrivateDirectory(cwd, target, false);
 }
 
 function createPrivateDirectory(cwd, target, exclusive) {

@@ -138,8 +138,18 @@ describe("pi-tools-suite config", () => {
 		expect(content).toContain('// "dcp"');
 		expect(content).toContain('"asyncSubagents"');
 		expect(content).toContain('"promptCommands"');
-		const parsed = parse(content) as { $schema?: string; lsp?: { servers?: Array<{ id?: string }> } };
+		const parsed = parse(content) as {
+			$schema?: string;
+			asyncSubagents?: {
+				types?: Record<string, { model?: string; fallbackModels?: string[] }>;
+			};
+			lsp?: { servers?: Array<{ id?: string }> };
+		};
 		expect(parsed.$schema).toBe(PI_TOOLS_SUITE_SCHEMA_URL);
+		expect(parsed.asyncSubagents?.types?.["browser-qa"]).toMatchObject({
+			model: "openai-codex/gpt-5.4-mini",
+			fallbackModels: ["antigravity/gemini-3-flash-preview", "zai/glm-5.3"],
+		});
 		expect(parsed.lsp?.servers?.map((server) => server.id)).toEqual(["typescript"]);
 		expect(content).toContain('//   "id": "python"');
 		expect(content).toContain('//   "id": "markdown"');

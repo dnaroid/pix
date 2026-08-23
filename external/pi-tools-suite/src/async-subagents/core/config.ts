@@ -207,8 +207,8 @@ const BUILTIN_CONFIG: SubagentConfig = {
 		},
 		"browser-qa": {
 			description: "Use for browser-based visual QA: reproduce UI bugs and verify fixes with deterministic assertions, screenshots, video, and traces.",
-			model: "antigravity/gemini-3-flash-preview",
-			fallbackModels: ["openai-codex/gpt-5.4-mini"],
+			model: "openai-codex/gpt-5.4-mini",
+			fallbackModels: ["antigravity/gemini-3-flash-preview", "zai/glm-5.3"],
 			thinking: "medium",
 			tools: ["read", "grep", "bash"],
 			isolatedSkills: [getBrowserQaSkillPath()],
