@@ -34,11 +34,15 @@ export function renderConversationEntry(entry: Entry, width: number, options: Co
 		entryId?: string,
 		syntaxHighlight?: RenderedLine["syntaxHighlight"],
 		segments?: RenderedLine["segments"],
+		links?: RenderedLine["links"],
 	): RenderedLine => ({
 		text: padHorizontalText(text, width),
 		colorOverride: options.colors.userForeground,
 		backgroundOverride: options.colors.userMessageBackground,
 		...(segments && segments.length > 0 ? { segments: segments.map((segment) => ({ ...segment, start: segment.start + userContentLeft, end: segment.end + userContentLeft })) } : {}),
+		...(links && links.length > 0 ? {
+			links: links.map((link) => ({ ...link, start: link.start + userContentLeft, end: link.end + userContentLeft })),
+		} : {}),
 		...(syntaxHighlight === undefined ? {} : { syntaxHighlight }),
 		...(entryId === undefined ? {} : { target: { kind: "user-message" as const, id: entryId } }),
 	});
@@ -51,7 +55,16 @@ export function renderConversationEntry(entry: Entry, width: number, options: Co
 	const userMessageLines = (userEntry: Extract<Entry, { kind: "user" }>): RenderedLine[] => {
 		const lines = renderMarkdownTextLines(userEntry.text, userContentWidth, userContentLeft).map((line) =>
 			({
-				...userLine(line.text, userEntry.id, line.syntaxHighlight, line.segments),
+				...userLine(
+					line.text,
+					userEntry.id,
+					line.syntaxHighlight,
+					[
+						...(line.segments ?? []),
+						...(line.links?.map((link) => ({ ...link, foreground: options.colors.info, underline: true })) ?? []),
+					],
+					line.links,
+				),
 				...(line.copyText === undefined ? {} : { copyText: line.copyText }),
 				...(line.continuesOnNextLine ? { continuesOnNextLine: true } : {}),
 			}),
@@ -117,7 +130,9 @@ function renderAssistantLines(text: string, width: number, options: Conversation
 			? { start: contentLeft, end: contentLeft + line.text.length, foreground: options.colors.assistantForeground, bold: true }
 			: undefined;
 		const existingSegments = line.segments?.map((segment) => ({ ...segment, start: segment.start + contentLeft, end: segment.end + contentLeft })) ?? [];
-		const allSegments = headingSegment ? [headingSegment, ...existingSegments] : existingSegments;
+		const links = line.links?.map((link) => ({ ...link, start: link.start + contentLeft, end: link.end + contentLeft })) ?? [];
+		const linkSegments: StyledSegment[] = links.map((link) => ({ start: link.start, end: link.end, foreground: options.colors.info, underline: true }));
+		const allSegments = headingSegment ? [headingSegment, ...existingSegments, ...linkSegments] : [...existingSegments, ...linkSegments];
 		lines.push({
 			text: padHorizontalText(line.text, width),
 			...(line.copyText === undefined ? {} : { copyText: line.copyText }),
@@ -125,6 +140,7 @@ function renderAssistantLines(text: string, width: number, options: Conversation
 			colorOverride: options.colors.assistantForeground,
 			backgroundOverride: options.colors.assistantMessageBackground,
 			...(allSegments.length > 0 ? { segments: allSegments } : {}),
+			...(links.length > 0 ? { links } : {}),
 			...(line.syntaxHighlight ? { syntaxHighlight: line.syntaxHighlight } : {}),
 		});
 	}

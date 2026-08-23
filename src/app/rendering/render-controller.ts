@@ -101,6 +101,7 @@ export class AppRenderController {
 
 		this.deps.mouseController.renderedTargets.clear();
 		this.deps.mouseController.renderedRowTexts.clear();
+		this.deps.mouseController.renderedLinks.clear();
 		this.deps.mouseController.renderedRowBackgrounds.clear();
 		this.deps.mouseController.renderedImageTargets.clear();
 		this.deps.mouseController.statusModelTarget = undefined;
@@ -148,6 +149,7 @@ export class AppRenderController {
 			const row = toScreenRow(index + 1);
 			if (rendered?.target) this.deps.mouseController.renderedTargets.set(row, rendered.target);
 			if (rendered?.imageTargets?.length) this.deps.mouseController.renderedImageTargets.set(row, rendered.imageTargets);
+			if (rendered?.links?.length) this.deps.mouseController.renderedLinks.set(row, rendered.links);
 			this.deps.mouseController.renderedRowTexts.set(row, rendered?.text ?? "");
 			setRenderedBackground(row, rendered?.backgroundOverride);
 			appendFrameOutput(row, this.renderFrameRow(row, this.deps.screenStyler.styleBaseLine(row, rendered, conversationColumns)));
@@ -164,6 +166,7 @@ export class AppRenderController {
 			if (row < 1 || row >= statusRow) continue;
 			if (rendered.line?.target) this.deps.mouseController.renderedTargets.set(row, rendered.line.target);
 			if (rendered.line?.imageTargets?.length) this.deps.mouseController.renderedImageTargets.set(row, rendered.line.imageTargets);
+			if (rendered.line?.links?.length) this.deps.mouseController.renderedLinks.set(row, rendered.line.links);
 			this.deps.mouseController.renderedRowTexts.set(row, rendered.text);
 			setRenderedBackground(row, rendered.line?.backgroundOverride);
 			appendFrameOutput(row, this.renderFrameRow(row, rendered.output(row)));
@@ -217,6 +220,7 @@ export class AppRenderController {
 			if (row < 1 || row >= statusRow) continue;
 			if (rendered.line?.target) this.deps.mouseController.renderedTargets.set(row, rendered.line.target);
 			if (rendered.line?.imageTargets?.length) this.deps.mouseController.renderedImageTargets.set(row, rendered.line.imageTargets);
+			if (rendered.line?.links?.length) this.deps.mouseController.renderedLinks.set(row, rendered.line.links);
 			this.deps.mouseController.renderedRowTexts.set(row, rendered.text);
 			setRenderedBackground(row, rendered.line?.backgroundOverride);
 			appendFrameOutput(row, this.renderFrameRow(row, rendered.output(row)));

@@ -89,7 +89,10 @@ describe("AppRenderController", () => {
 				}),
 			} as unknown as EditorLayoutRenderer,
 			scrollController: {
-				conversationView: () => ({ lines: [{ text: "BODY" }], metrics: { bodyHeight: 1, viewportColumns: 40, conversationLineCount: 1, maxScroll: 0, start: 0 } }),
+				conversationView: () => ({
+					lines: [{ text: "BODY", links: [{ start: 0, end: 4, url: "file:///tmp/body.txt" }] }],
+					metrics: { bodyHeight: 1, viewportColumns: 40, conversationLineCount: 1, maxScroll: 0, start: 0 },
+				}),
 			} as unknown as AppScrollController,
 			popupMenus: fakePopupMenus(),
 			mouseController,
@@ -101,6 +104,7 @@ describe("AppRenderController", () => {
 
 		captureStdout(() => controller.render());
 		assert.deepEqual(mouseController.statusDraftQueueTarget, { row: 6, startColumn: 2, endColumn: 3 });
+		assert.deepEqual(mouseController.renderedLinks.get(1), [{ start: 0, end: 4, url: "file:///tmp/body.txt" }]);
 
 		captureStdout(() => controller.renderStatusLine());
 
@@ -692,6 +696,7 @@ function fakeMouseController(): AppMouseController {
 	return {
 		renderedTargets: new Map(),
 		renderedRowTexts: new Map(),
+		renderedLinks: new Map(),
 		renderedRowBackgrounds: new Map(),
 		renderedImageTargets: new Map(),
 		statusModelTarget: undefined,

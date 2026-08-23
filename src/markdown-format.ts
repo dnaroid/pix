@@ -11,9 +11,16 @@ export type RenderedMarkdownLine = {
 	copyText?: string;
 	continuesOnNextLine?: boolean;
 	segments: readonly { start: number; end: number; bold: true }[];
+	links?: readonly RenderedMarkdownLink[];
 	heading?: boolean;
 	sourceStart?: number;
 	sourceEnd?: number;
+};
+
+export type RenderedMarkdownLink = {
+	start: number;
+	end: number;
+	url: string;
 };
 
 export type RenderedMarkdownTextLine = {
@@ -21,6 +28,7 @@ export type RenderedMarkdownTextLine = {
 	copyText?: string;
 	continuesOnNextLine?: boolean;
 	segments?: readonly { start: number; end: number; bold: true }[] | undefined;
+	links?: readonly RenderedMarkdownLink[] | undefined;
 	syntaxHighlight?: SyntaxLineHighlight | undefined;
 	heading?: boolean;
 };
@@ -103,6 +111,7 @@ export function formatMarkdownTables(text: string, maxWidth?: number): string {
 export function renderMarkdownLine(text: string, start = 0): RenderedMarkdownLine {
 	const safeStart = Math.max(0, Math.min(text.length, start));
 	const segments: { start: number; end: number; bold: true }[] = [];
+	const links: RenderedMarkdownLink[] = [];
 	let rendered = text.slice(0, safeStart);
 	let index = safeStart;
 	let inCode = false;
@@ -130,11 +139,22 @@ export function renderMarkdownLine(text: string, start = 0): RenderedMarkdownLin
 			}
 		}
 
+		if (!inCode && char === "[" && text[index - 1] !== "!" && !isEscaped(text, index)) {
+			const link = markdownLinkAt(text, index);
+			if (link) {
+				const linkStart = rendered.length;
+				rendered += link.label;
+				links.push({ start: linkStart, end: rendered.length, url: link.url });
+				index = link.end;
+				continue;
+			}
+		}
+
 		rendered += char;
 		index += 1;
 	}
 
-	return { text: rendered, segments, ...(isHeading ? { heading: true } : {}) };
+	return { text: rendered, segments, ...(links.length > 0 ? { links } : {}), ...(isHeading ? { heading: true } : {}) };
 }
 
 export function renderMarkdownTextLines(text: string, width: number, start = 0, options: RenderMarkdownTextLinesOptions = {}): RenderedMarkdownTextLine[] {
@@ -151,7 +171,7 @@ export function renderMarkdownTextLines(text: string, width: number, start = 0, 
 
 		const isHeadingLine = !fence && /^\s{0,3}#{1,6}\s/.test(rawLine);
 		const markdownLine = syntaxHighlight?.language === "markdown" || isHeadingLine ? renderMarkdownLine(rawLine) : undefined;
-		const logicalLine = markdownLine ?? { text: rawLine, segments: [] };
+		const logicalLine = markdownLine ?? { text: rawLine, segments: [], links: [] };
 		for (const wrapped of wrapRenderedMarkdownLine(logicalLine, width, options)) {
 			const wrappedSyntaxHighlight = syntaxHighlight && wrapped.sourceStart !== undefined && wrapped.sourceEnd !== undefined
 				? {
@@ -170,6 +190,7 @@ export function renderMarkdownTextLines(text: string, width: number, start = 0, 
 				...(wrapped.copyText === undefined ? {} : { copyText: wrapped.copyText }),
 				...(wrapped.continuesOnNextLine ? { continuesOnNextLine: true } : {}),
 				...(wrapped.segments.length > 0 ? { segments: wrapped.segments } : {}),
+				...(wrapped.links && wrapped.links.length > 0 ? { links: wrapped.links } : {}),
 				...(wrappedSyntaxHighlight ? { syntaxHighlight: wrappedSyntaxHighlight } : {}),
 				...(isHeadingLine ? { heading: true } : {}),
 			});
@@ -214,11 +235,15 @@ function wrapRenderedMarkdownLine(line: RenderedMarkdownLine, width: number, opt
 	if (stringDisplayWidth(line.text) <= safeWidth) return [line];
 
 	const ranges = wrapDisplayLineByWordsWithRanges(line.text, safeWidth, options);
+	const links = line.links ?? [];
 	return ranges.map((range, index) => ({
 		text: range.text,
 		copyText: line.text.slice(range.start, ranges[index + 1]?.start ?? range.end),
 		...(index < ranges.length - 1 ? { continuesOnNextLine: true } : {}),
 		segments: line.segments.flatMap((segment) => shiftSegmentToRange(segment, range.start, range.end)),
+		...(links.length > 0
+			? { links: links.flatMap((link) => shiftLinkToRange(link, range.start, range.end)) }
+			: {}),
 		sourceStart: range.start,
 		sourceEnd: range.end,
 	}));
@@ -433,6 +458,47 @@ function shiftSegmentToRange(segment: { start: number; end: number; bold: true }
 	const end = Math.min(segment.end, rangeEnd);
 	if (end <= start) return [];
 	return [{ ...segment, start: start - rangeStart, end: end - rangeStart }];
+}
+
+function shiftLinkToRange(link: RenderedMarkdownLink, rangeStart: number, rangeEnd: number): RenderedMarkdownLink[] {
+	const start = Math.max(link.start, rangeStart);
+	const end = Math.min(link.end, rangeEnd);
+	if (end <= start) return [];
+	return [{ ...link, start: start - rangeStart, end: end - rangeStart }];
+}
+
+function markdownLinkAt(text: string, start: number): { label: string; url: string; end: number } | undefined {
+	const labelEnd = findUnescapedCharacter(text, "]", start + 1);
+	if (labelEnd <= start + 1 || text[labelEnd + 1] !== "(") return undefined;
+
+	const destinationStart = labelEnd + 2;
+	let nestedParentheses = 0;
+	for (let index = destinationStart; index < text.length; index += 1) {
+		if (isEscaped(text, index)) continue;
+		const char = text[index] ?? "";
+		if (char === "(") {
+			nestedParentheses += 1;
+			continue;
+		}
+		if (char !== ")") continue;
+		if (nestedParentheses > 0) {
+			nestedParentheses -= 1;
+			continue;
+		}
+
+		const url = text.slice(destinationStart, index);
+		if (!/^(?:file|https?):\/\/\S+$/u.test(url)) return undefined;
+		return { label: text.slice(start + 1, labelEnd), url, end: index + 1 };
+	}
+
+	return undefined;
+}
+
+function findUnescapedCharacter(text: string, character: string, start: number): number {
+	for (let index = start; index < text.length; index += 1) {
+		if (text[index] === character && !isEscaped(text, index)) return index;
+	}
+	return -1;
 }
 
 function parseMarkdownTableBlock(lines: readonly string[], start: number): MarkdownTableBlock | undefined {

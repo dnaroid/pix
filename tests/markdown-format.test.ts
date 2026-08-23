@@ -124,6 +124,28 @@ describe("formatMarkdownTables", () => {
 		});
 	});
 
+	it("renders safe inline markdown links as clickable labels", () => {
+		assert.deepEqual(renderMarkdownLine("open [screenshot](file:///tmp/evidence.png) now"), {
+			text: "open screenshot now",
+			segments: [],
+			links: [{ start: 5, end: 15, url: "file:///tmp/evidence.png" }],
+		});
+		assert.deepEqual(renderMarkdownLine("`[literal](file:///tmp/evidence.png)`"), {
+			text: "`[literal](file:///tmp/evidence.png)`",
+			segments: [],
+		});
+	});
+
+	it("preserves clickable label ranges across wrapping", () => {
+		const lines = renderMarkdownTextLines("prefix [linked words crossing](https://example.test/path) suffix", 14);
+
+		assert.equal(lines.map((line) => line.text).join(" "), "prefix linked words crossing suffix");
+		assert.deepEqual(lines.flatMap((line) => line.links ?? []).map(({ url }) => url), [
+			"https://example.test/path",
+			"https://example.test/path",
+		]);
+	});
+
 	it("keeps strong markers inside inline code", () => {
 		assert.deepEqual(renderMarkdownLine("`**code**` and **bold**"), {
 			text: "`**code**` and bold",
@@ -230,7 +252,6 @@ describe("renderMarkdownTextLines", () => {
 		const samples = [
 			{ text: "prefix `inline code crossing words` suffix", color: THEMES.dark.colors.success },
 			{ text: "prefix *emphasis crossing words* suffix", color: THEMES.dark.colors.accent },
-			{ text: "prefix [linked words crossing](https://example.test/path) suffix", color: THEMES.dark.colors.accent },
 		];
 
 		for (const sample of samples) {

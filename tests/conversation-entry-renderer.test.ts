@@ -111,6 +111,34 @@ describe("renderConversationEntry", () => {
 		assert.deepEqual(lines.map((line) => line.colorOverride), [THEMES.dark.colors.assistantForeground]);
 	});
 
+	it("renders long browser QA evidence links as clickable labels", () => {
+		const base = "file:///Volumes/128GBSSD/Projects/llm-wiki/.pi/subagents/a-very-long-browser-qa-run/evidence/public";
+		const lines = renderConversationEntry({
+			id: "assistant-qa-links",
+			kind: "assistant",
+			text: `[screenshot](${base}/loaded.png) · [final](${base}/final.png) · [video](${base}/video.webm) ·`,
+		}, 40, renderOptions);
+
+		assert.equal(lines.map((line) => line.text.trimEnd()).join(" "), "screenshot · final · video ·");
+		assert.deepEqual(lines.flatMap((line) => line.links ?? []).map((link) => link.url), [
+			`${base}/loaded.png`,
+			`${base}/final.png`,
+			`${base}/video.webm`,
+		]);
+		assert(lines.flatMap((line) => line.segments ?? []).some((segment) => segment.underline));
+	});
+
+	it("preserves clickable markdown links in user messages", () => {
+		const [line] = renderConversationEntry({
+			id: "user-link",
+			kind: "user",
+			text: "Open [evidence](file:///tmp/evidence.png)",
+		}, 40, renderOptions);
+
+		assert.equal(line?.text.trim(), "Open evidence");
+		assert.equal(line?.links?.[0]?.url, "file:///tmp/evidence.png");
+	});
+
 	it("wraps assistant messages at word boundaries", () => {
 		const lines = renderConversationEntry({ id: "assistant-wrap", kind: "assistant", text: "alpha beta gamma" }, 12, renderOptions);
 

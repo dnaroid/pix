@@ -114,6 +114,7 @@ export type AppMouseControllerHost = {
 export class AppMouseController {
 	readonly renderedTargets = new Map<number, RenderedLine["target"]>();
 	readonly renderedRowTexts = new Map<number, string>();
+	readonly renderedLinks = new Map<number, readonly RenderedLink[]>();
 	readonly renderedRowBackgrounds = new Map<number, string>();
 	readonly renderedImageTargets = new Map<number, readonly ImageClickTarget[]>();
 
@@ -416,7 +417,7 @@ export class AppMouseController {
 	private fileLinkTargetAt(event: MouseEvent): { link: RenderedLink; startColumn: number; endColumn: number } | undefined {
 		const text = this.renderedRowTexts.get(event.y);
 		if (!text) return undefined;
-		for (const link of detectFileLinks(text, this.host.cwd())) {
+		for (const link of [...(this.renderedLinks.get(event.y) ?? []), ...detectFileLinks(text, this.host.cwd())]) {
 			const startColumn = stringDisplayWidth(text.slice(0, link.start)) + 1;
 			const endColumn = startColumn + stringDisplayWidth(text.slice(link.start, link.end));
 			if (event.x >= startColumn && event.x < endColumn) return { link, startColumn, endColumn };

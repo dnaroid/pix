@@ -529,6 +529,33 @@ describe("AppMouseController", () => {
 		assert.equal(openedUrl, "https://example.com/docs");
 	});
 
+	it("opens an explicit markdown link whose destination is not present in the rendered row", () => {
+		let openedUrl: string | undefined;
+		const controller = new AppMouseController(
+			fakeHost({
+				openFileLink: (link) => {
+					openedUrl = link.url;
+					return true;
+				},
+			}),
+			fakePopupMenus(),
+			fakePopupActions(),
+			fakeScrollController(),
+			fakeCommandController(),
+		);
+		controller.renderedRowTexts.set(2, "open screenshot please");
+		controller.renderedLinks.set(2, [{
+			start: 5,
+			end: 15,
+			url: "file:///Volumes/example/a-very-long-browser-qa-evidence-path/screenshot.png",
+		}]);
+
+		controller.handleMouse({ button: 0, x: 8, y: 2, released: false });
+		controller.handleMouse({ button: 3, x: 8, y: 2, released: true });
+
+		assert.equal(openedUrl, "file:///Volumes/example/a-very-long-browser-qa-evidence-path/screenshot.png");
+	});
+
 	it("hit-tests detected web links by display columns after wide characters", () => {
 		let openedUrl: string | undefined;
 		const controller = new AppMouseController(
