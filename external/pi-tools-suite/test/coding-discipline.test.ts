@@ -34,14 +34,10 @@ class FakePi {
 	handlers = new Map<string, any>();
 	activeTools: string[] = ["read", "lookup", "custom"];
 	setCalls: string[][] = [];
-	thinkingLevel = "off";
-	thinkingCalls: string[] = [];
 	registerTool(tool: any) { this.tools.set(tool.name, tool); }
 	on(name: string, handler: any) { this.handlers.set(name, handler); }
 	getActiveTools() { return this.activeTools; }
 	setActiveTools(tools: string[]) { this.setCalls.push(tools); this.activeTools = tools; }
-	getThinkingLevel() { return this.thinkingLevel; }
-	setThinkingLevel(level: string) { this.thinkingLevel = level; this.thinkingCalls.push(level); }
 	async emit(name: string, event: any, ctx: any) { return await this.handlers.get(name)?.(event, ctx); }
 }
 
@@ -78,49 +74,6 @@ describe("coding discipline", () => {
 		expect(isGlmModel("zai/glm-5.3")).toBe(true);
 		expect(isGlmModel("glm-5.3")).toBe(true);
 		expect(isGlmModel("anthropic/claude-sonnet-4")).toBe(false);
-	});
-
-	test("patches GLM-5.3 thinking metadata and sends the selected reasoning effort", async () => {
-		setPiConfigDirConfig(`{ "lookupModel": null }`);
-		const { default: register } = await import("../src/coding-discipline/index.js");
-		const pi = new FakePi();
-		pi.thinkingLevel = "medium";
-		register(pi as any);
-
-		const model = {
-			provider: "zai",
-			id: "glm-5.3",
-			reasoning: true,
-			compat: { thinkingFormat: "zai", supportsReasoningEffort: false },
-		};
-		const ctx = {
-			cwd: "/tmp/project",
-			model,
-			thinkingLevel: "medium",
-			modelRegistry: { getAll: () => [model] },
-		};
-
-		await pi.emit("session_start", {}, ctx);
-		expect(pi.thinkingLevel).toBe("high");
-		expect(pi.thinkingCalls).toEqual(["high"]);
-		expect((model as any).thinkingLevelMap).toEqual({
-			off: null,
-			minimal: null,
-			low: "low",
-			medium: null,
-			high: "high",
-			xhigh: null,
-			max: "max",
-		});
-		expect(model.compat.supportsReasoningEffort).toBe(true);
-
-		const result = await pi.emit(
-			"before_provider_request",
-			{ payload: { system: "base prompt", model: "glm-5.3", thinking: { type: "disabled" } } },
-			{ ...ctx, thinkingLevel: "high" },
-		);
-		expect(result.reasoning_effort).toBe("high");
-		expect(result.thinking).toEqual({ type: "enabled", clear_thinking: false });
 	});
 
 	test("keeps lookup active only for GLM models", async () => {

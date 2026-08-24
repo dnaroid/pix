@@ -17,7 +17,7 @@ export const PI_FAVORITE_MODEL_REFS = [
 	"vercel-ai-gateway/zai/glm-5.2",
 	"xai/grok-4.5",
 	"groq/openai/gpt-oss-120b",
-	"cerebras/zai-glm-4.7",
+	"cerebras/gpt-oss-120b",
 	"zai/glm-5.3",
 	"mistral/devstral-medium-latest",
 	"minimax/MiniMax-M2.7",

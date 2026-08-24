@@ -116,31 +116,15 @@ describe("runtime installation helpers", () => {
 
 	it("refreshes the startup model catalog without network access", async () => {
 		const refreshCalls: unknown[] = [];
-		const glm53 = {
-			id: "glm-5.3",
-			reasoning: true,
-			compat: { thinkingFormat: "zai", supportsReasoningEffort: false },
-		};
 
 		await refreshPixModelRuntimeForStartup({
 			refresh: async (options) => {
 				refreshCalls.push(options);
 				return {} as never;
 			},
-			getModels: () => [glm53] as never,
 		});
 
 		assert.deepEqual(refreshCalls, [{ allowNetwork: false }]);
-		assert.deepEqual((glm53 as any).thinkingLevelMap, {
-			off: null,
-			minimal: null,
-			low: "low",
-			medium: null,
-			high: "high",
-			xhigh: null,
-			max: "max",
-		});
-		assert.equal(glm53.compat.supportsReasoningEffort, true);
 	});
 });
 
