@@ -109,7 +109,7 @@ export class AgentPauseController {
 	}
 
 	statusWidgetText(session: AgentSession | undefined): string {
-		return this.state(session) === "paused" ? APP_ICONS.refresh : APP_ICONS.pause;
+		return this.state(session) === "paused" ? APP_ICONS.play : APP_ICONS.pause;
 	}
 
 	statusWidgetActive(session: AgentSession | undefined): boolean {

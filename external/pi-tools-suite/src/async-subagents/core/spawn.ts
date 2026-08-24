@@ -386,7 +386,11 @@ export function spawnAgent(
 		},
 	});
 
-	proc.once("exit", (code, signal) => {
+	// `exit` may arrive before the child stdout pipe has been drained. This is
+	// observable on Windows where a final RPC response can otherwise be lost,
+	// making a failed prompt look like a clean exit. `close` is emitted after
+	// stdout/stderr have closed, so all buffered RPC events have been processed.
+	proc.once("close", (code, signal) => {
 		exitFinalizationTimer = setTimeout(() => finalizeCompletion(code, signal), EXIT_STDIO_FLUSH_GRACE_MS);
 		exitFinalizationTimer.unref?.();
 	});

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 
+import { APP_ICONS } from "../src/app/icons.js";
 import { AgentPauseController } from "../src/app/session/agent-pause-controller.js";
 
 describe("AgentPauseController", () => {
@@ -17,6 +18,7 @@ describe("AgentPauseController", () => {
 		assert.equal(fixture.controller.state(fixture.session), "pause-requested");
 		assert.equal(await fixture.internals._handlePostAgentRun(), false);
 		assert.equal(fixture.controller.state(fixture.session), "paused");
+		assert.equal(fixture.controller.statusWidgetText(fixture.session), APP_ICONS.play);
 		assert.equal(fixture.postRunCalls(), 1);
 	});
 

@@ -249,6 +249,25 @@ exports.chromium = {
                         async close() { fs.writeFileSync(path.join(process.cwd(), "unexpected-popup-closed"), "yes"); },
                       });
                     }
+                    if (selector === ".declared-popup") {
+                      const popupVideoPath = path.join(options.recordVideo?.dir || process.cwd(), "generated-popup.webm");
+                      fs.writeFileSync(popupVideoPath, "popup-video");
+                      const popup = {
+                        setDefaultTimeout() {},
+                        setDefaultNavigationTimeout() {},
+                        async waitForLoadState() {},
+                        async bringToFront() { fs.writeFileSync(path.join(process.cwd(), "popup-brought-to-front"), "yes"); },
+                        async screenshot() { fs.writeFileSync(path.join(process.cwd(), "popup-repainted"), "yes"); },
+                        async waitForTimeout(value) { fs.writeFileSync(path.join(process.cwd(), "popup-video-settle-ms"), String(value)); },
+                        url() { return "https://staging.example.test/popup"; },
+                        async content() { return "<html><body><h1>Popup</h1></body></html>"; },
+                        isClosed() { return false; },
+                        video() { return { async path() { return popupVideoPath; } }; },
+                        async close() {},
+                      };
+                      emitContext("page", popup);
+                      emit("popup", popup);
+                    }
                     if (selector === ".download" || selector === ".secret-download") emit("download", {
                       url() { return "https://staging.example.test/export"; },
                       suggestedFilename() { return "report.csv"; },
@@ -553,6 +572,26 @@ describe("private browser QA runner", () => {
 		expect(unexpectedPopup).toMatchObject({ code: 1, json: { reason: expect.stringContaining("use openPopup") } });
 		expect(fs.readFileSync(path.join(popupProject, "unexpected-popup-closed"), "utf8")).toBe("yes");
 		expect(unexpectedPopup.json.evidence).not.toContain(expect.stringContaining("discarded-popup"));
+	});
+
+	test("brings declared popups forward and forces a repaint before recording video", () => {
+		const project = tempProject();
+		const agentDir = createBrowserQaAgent(project);
+		installFakePlaywright(project);
+		const flow = writeAgentFlow(agentDir, JSON.stringify({
+			steps: [
+				{ action: "goto", path: "/" },
+				{ action: "openPopup", locator: { css: ".declared-popup" }, name: "receipt" },
+			],
+		}));
+
+		const result = run(project, ["run", "--base-url", "https://staging.example.test", "--flow", flow, "--run-id", "declared-popup"], agentDir);
+
+		expect(result).toMatchObject({ code: 0, json: { status: "QA_PASSED" } });
+		expect(fs.readFileSync(path.join(project, "popup-brought-to-front"), "utf8")).toBe("yes");
+		expect(fs.readFileSync(path.join(project, "popup-repainted"), "utf8")).toBe("yes");
+		expect(fs.readFileSync(path.join(project, "popup-video-settle-ms"), "utf8")).toBe("250");
+		expect(result.json.evidence).toContain("video-popup-receipt.webm");
 	});
 
 	test("discards retained downloads that contain configured authentication", () => {

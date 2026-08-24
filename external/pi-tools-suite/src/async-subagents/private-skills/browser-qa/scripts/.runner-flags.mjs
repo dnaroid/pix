@@ -14,7 +14,6 @@ const SUBAGENT_AGENT_DIR_ENV = "PI_SUBAGENT_AGENT_DIR";
 const QA_WORKSPACE_RELATIVE = "browser-qa";
 const EVIDENCE_RELATIVE = "evidence";
 const FORM_VIDEO_STEP_DELAY_MS = 250;
-const POPUP_VIDEO_SETTLE_MS = 250;
 const EXIT_AUTH_UPDATE_REQUIRED = 42;
 const EXIT_RUNNER_TIMEOUT = 124;
 const DEFAULT_RUNNER_TIMEOUT_MS = 90_000;
@@ -176,7 +175,7 @@ async function runQa({ cwd, agentDir, args, profileId, profile, deadline, progre
 	progress("playwright_load_started");
 	const playwright = loadPlaywright(cwd);
 	progress("playwright_load_finished");
-	const browser = await runStage(progress, "browser_launch", deadline, () => playwright.chromium.launch({ headless: true }), profileId);
+	const browser = await runStage(progress, "browser_launch", deadline, () => playwright.chromium.launch({ headless: true, args: ["--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding"] }), profileId);
 	let context;
 	let page;
 	const videos = [];
@@ -604,10 +603,6 @@ async function executeFlow({ context, page, baseURL, evidenceDir, flow, allowedO
 					videos.push(popupVideo);
 					await popup.waitForLoadState("domcontentloaded", { timeout });
 					const origin = assertSameOriginPage(popup, ownerPage, allowedOrigins, profileId, index, "popup");
-					await popup.bringToFront();
-					// A static popup may not repaint after Playwright starts its screencast, leaving the video blank.
-					await popup.screenshot({ type: "png" });
-					await popup.waitForTimeout(POPUP_VIDEO_SETTLE_MS);
 					popups.set(step.name, { page: popup, origin });
 				} catch (error) {
 					popup ??= capturedPopup;
@@ -1383,36 +1378,7 @@ function createRunnerProgress(workspaceDir) {
 }
 
 function terminateRunnerDescendants() {
-	if (process.platform === "win32") {
-		// Detached children are not covered by a POSIX process-group kill. Walk
-		// the Windows process tree explicitly so a timed-out Playwright/browser
-		// child cannot keep the private QA workspace locked after the runner exits.
-		const script = `
-$root = ${process.pid}
-$processes = @(Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId)
-$pending = [System.Collections.Generic.Queue[int]]::new()
-$pending.Enqueue($root)
-$descendants = [System.Collections.Generic.HashSet[int]]::new()
-while ($pending.Count -gt 0) {
-  $parent = $pending.Dequeue()
-foreach ($candidate in $processes) {
-    $candidatePid = [int]$candidate.ProcessId
-    if ([int]$candidate.ParentProcessId -eq $parent -and $candidatePid -ne $root -and $descendants.Add($candidatePid)) {
-      $pending.Enqueue($candidatePid)
-    }
-  }
-}
-foreach ($candidatePid in $descendants) {
-  Stop-Process -Id $candidatePid -Force -ErrorAction SilentlyContinue
-}
-`;
-		spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
-			stdio: "ignore",
-			timeout: 2_000,
-			windowsHide: true,
-		});
-		return;
-	}
+	if (process.platform === "win32") return;
 	const snapshot = spawnSync("ps", ["-axo", "pid=,ppid=,pgid="], {
 		encoding: "utf8",
 		timeout: 1000,

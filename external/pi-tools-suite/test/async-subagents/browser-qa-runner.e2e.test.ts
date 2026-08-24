@@ -210,6 +210,9 @@ e2eTest("runs public QA without auth, then records form login and private action
 		const screenshots = result.json.artifacts.screenshots;
 		expect(screenshots.map((artifact) => path.basename(artifact.path)).sort()).toEqual(["final.png", "private-action-complete.png"]);
 		expect(result.json.artifacts.videos).toHaveLength(2);
+		const popupVideo = result.json.artifacts.videos.find((artifact) => path.basename(artifact.path) === "video-popup-receipt.webm");
+		expect(popupVideo).toBeDefined();
+		expect(fs.statSync(popupVideo!.path).size).toBeGreaterThan(5_000);
 		expect(result.json.artifacts.traces).toHaveLength(1);
 		expect(result.json.artifacts.downloads).toHaveLength(1);
 		expect(fs.readFileSync(result.json.artifacts.downloads[0].path, "utf8")).toBe("name,value\nqa,passed\n");
