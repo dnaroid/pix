@@ -373,7 +373,7 @@ Both support the published schema:
   },
   "promptEnhancer": { "modelRef": "openai-codex/gpt-5.6-luna" },
   "autocomplete": {
-    "modelRef": "openai-codex/gpt-5.6-luna",
+    "modelRef": "zai/glm-5-turbo",
     "debounceMs": 350,
     "timeoutMs": 3000
   },

@@ -72,7 +72,7 @@ describe("config helpers", () => {
 			{ previewLines: 9999, direction: "head", color: "toolMutation", defaultExpanded: true },
 		]);
 		assert.equal(config.promptEnhancer.modelRef, "openai-codex/gpt-5.6-luna");
-		assert.equal(config.autocomplete.modelRef, "openai-codex/gpt-5.6-luna");
+		assert.equal(config.autocomplete.modelRef, "zai/glm-5-turbo");
 		assert.equal(config.autocomplete.debounceMs, 350);
 		assert.equal(config.autocomplete.timeoutMs, 3000);
 		assert.equal(config.autocomplete.maxTokens, 48);
@@ -145,7 +145,7 @@ describe("config helpers", () => {
 		assert.deepEqual(partial.outputFilters.patterns, ["x"]);
 		assert.equal(resolveDefaultModelRef(partial), undefined);
 		assert.equal(partial.promptEnhancer.modelRef, "openai-codex/gpt-5.6-luna");
-		assert.equal(partial.autocomplete.modelRef, "openai-codex/gpt-5.6-luna");
+		assert.equal(partial.autocomplete.modelRef, "zai/glm-5-turbo");
 		assert.equal(partial.autocomplete.maxPromptTokens, 1200);
 		assert.equal(partial.autocomplete.includeRecentMessages, 0);
 		assert.equal(partial.modelColors.rules["zai/*"], "success");
@@ -157,7 +157,7 @@ describe("config helpers", () => {
 		writeFileSync(testConfigPath, "{");
 		assert.equal(loadPixConfig().toolRenderer.default.previewLines, 0);
 		assert.equal(loadPixConfig().promptEnhancer.modelRef, "openai-codex/gpt-5.6-luna");
-		assert.equal(loadPixConfig().autocomplete.modelRef, "openai-codex/gpt-5.6-luna");
+		assert.equal(loadPixConfig().autocomplete.modelRef, "zai/glm-5-turbo");
 	});
 
 	it("loads project pix config from cwd .pi/pix.jsonc over the user config", () => {

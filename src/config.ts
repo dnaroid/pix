@@ -157,7 +157,7 @@ const DEFAULT_PROMPT_ENHANCER: PromptEnhancerConfig = {
 };
 
 const DEFAULT_AUTOCOMPLETE: AutocompleteConfig = {
-	modelRef: "openai-codex/gpt-5.6-luna",
+	modelRef: "zai/glm-5-turbo",
 	debounceMs: 350,
 	timeoutMs: 3000,
 	maxTokens: 48,

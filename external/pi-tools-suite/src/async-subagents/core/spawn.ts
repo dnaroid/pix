@@ -335,7 +335,11 @@ export function spawnAgent(
 			if (event.type === "response" && event.command === "prompt" && event.success === false) {
 				const errorText = typeof event.error === "string" ? event.error : "RPC prompt failed";
 				fs.writeFileSync(path.join(agentDir, "result.md"), errorText, "utf-8");
-				terminateChildProcessTree(proc, "SIGTERM");
+				try {
+					terminateChildProcessTree(proc, "SIGTERM");
+				} catch {
+					/* process may have exited immediately after emitting the failure */
+				}
 				scheduleProcessTreeKill("prompt_failed");
 				notifyComplete(1);
 				return;
