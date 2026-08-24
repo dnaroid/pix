@@ -151,6 +151,20 @@ describe("AppInputController terminal input", () => {
 		assert.equal(calls.stop, 1);
 	});
 
+	it("uses the injected Command modifier state for raw Backspace", () => {
+		const { controller, editor } = createController({
+			extensionInputUsesEditor: false,
+			shiftPressed: false,
+			commandPressed: true,
+			consumeExtensionInput: false,
+		});
+
+		editor.setText("abc");
+		controller.handleChunk(Buffer.from("\u007f"));
+
+		assert.equal(editor.text, "");
+	});
+
 	it("routes arrows through menus, history, multiline editors, and scroll fallback", () => {
 		const { controller, editor, calls } = createController({ extensionInputUsesEditor: false, shiftPressed: false, consumeExtensionInput: false });
 
@@ -313,7 +327,7 @@ describe("AppInputController terminal input", () => {
 	});
 });
 
-function createController(options: { extensionInputUsesEditor: boolean; shiftPressed: boolean; consumeExtensionInput?: boolean }): {
+function createController(options: { extensionInputUsesEditor: boolean; shiftPressed: boolean; commandPressed?: boolean; consumeExtensionInput?: boolean }): {
 	controller: AppInputController;
 	editor: InputEditor;
 	calls: {
@@ -337,6 +351,7 @@ function createController(options: { extensionInputUsesEditor: boolean; shiftPre
 		},
 		extensionInputUsesEditor: () => options.extensionInputUsesEditor,
 		isShiftPressed: () => options.shiftPressed,
+		isCommandPressed: () => options.commandPressed ?? false,
 		getInput: () => editor.text,
 		getDirectPopupMenu: () => undefined,
 		resetRequestHistoryNavigation: () => undefined,

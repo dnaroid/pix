@@ -29,6 +29,7 @@ export type InputControllerHost = {
 	handleExtensionTerminalInput(data: string): ExtensionTerminalInputResult;
 	extensionInputUsesEditor?(): boolean;
 	isShiftPressed?(): boolean;
+	isCommandPressed?(): boolean;
 	getInput(): string;
 	getDirectPopupMenu(): DirectPopupMenu | undefined;
 	resetRequestHistoryNavigation(): void;
@@ -208,7 +209,7 @@ export class AppInputController {
 			if (!char || char < " " || char === "\u007f") break;
 			// Native undo/redo shortcuts must retain their individual key behavior.
 			const lower = char.toLowerCase();
-			if ((lower === "z" || lower === "y") && isNativeCommandPressed()) break;
+			if ((lower === "z" || lower === "y") && this.isCommandPressed()) break;
 			length += 1;
 		}
 		if (length === 0) return false;
@@ -448,7 +449,7 @@ export class AppInputController {
 	}
 
 	private handleArrowUp(): void {
-		if (isNativeCommandPressed()) {
+		if (this.isCommandPressed()) {
 			this.host.scrollByPage(-1);
 			return;
 		}
@@ -468,7 +469,7 @@ export class AppInputController {
 	}
 
 	private handleArrowDown(): void {
-		if (isNativeCommandPressed()) {
+		if (this.isCommandPressed()) {
 			this.host.scrollByPage(1);
 			return;
 		}
@@ -548,7 +549,7 @@ export class AppInputController {
 			return true;
 		}
 
-		if (!isNativeCommandPressed()) return false;
+		if (!this.isCommandPressed()) return false;
 
 		const lower = char.toLowerCase();
 		if (lower === "z") {
@@ -622,7 +623,7 @@ export class AppInputController {
 			this.host.handleEnter();
 			return;
 		}
-		if (char === "\u0015" || ((char === "\u007f" || char === "\b") && isNativeCommandPressed())) {
+		if (char === "\u0015" || ((char === "\u007f" || char === "\b") && this.isCommandPressed())) {
 			this.deleteCurrentInputLine();
 			return;
 		}
@@ -650,6 +651,10 @@ export class AppInputController {
 
 	private isShiftPressed(): boolean {
 		return this.host.isShiftPressed?.() ?? isNativeShiftPressed();
+	}
+
+	private isCommandPressed(): boolean {
+		return this.host.isCommandPressed?.() ?? isNativeCommandPressed();
 	}
 
 }
