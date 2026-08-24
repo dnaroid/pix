@@ -20,6 +20,7 @@ import type {
 	MouseSelection,
 	RenderedLine,
 	ScreenPoint,
+	StatusAgentPauseTarget,
 	StatusContextTarget,
 	StatusCompactToolsTarget,
 	StatusDraftQueueTarget,
@@ -106,6 +107,7 @@ export type AppMouseControllerHost = {
 	toggleAllThinkingExpanded?(): void;
 	toggleSuperCompactTools?(): void;
 	toggleTerminalBellSound?(): void;
+	toggleAgentPause?(): void | Promise<void>;
 	copyTextToClipboard?(text: string): void | Promise<void>;
 	handleExtensionInputMouse(event: MouseEvent & { localRow: number; localColumn: number; width: number }): boolean;
 	render(): void;
@@ -132,6 +134,7 @@ export class AppMouseController {
 	statusTerminalBellSoundTarget: StatusTerminalBellSoundTarget | undefined;
 	statusSessionTarget: StatusSessionTarget | undefined;
 	statusPromptEnhancerTarget: StatusPromptEnhancerTarget | undefined;
+	statusAgentPauseTarget: StatusAgentPauseTarget | undefined;
 	statusVoiceMicTarget: StatusVoiceMicTarget | undefined;
 	statusVoiceLanguageTarget: StatusVoiceLanguageTarget | undefined;
 	readonly tabLineTargets: TabLineMouseTarget[] = [];
@@ -441,6 +444,7 @@ export class AppMouseController {
 			this.statusTerminalBellSoundTarget,
 			this.statusSessionTarget,
 			this.statusPromptEnhancerTarget,
+			this.statusAgentPauseTarget,
 			this.statusVoiceMicTarget,
 			this.statusVoiceLanguageTarget,
 		].find((candidate) => !!candidate
@@ -634,6 +638,7 @@ export class AppMouseController {
 			|| this.handleStatusCompactToolsClick(event)
 			|| this.handleStatusTerminalBellSoundClick(event)
 			|| this.handleStatusPromptEnhancerClick(event)
+			|| this.handleStatusAgentPauseClick(event)
 			|| this.handleStatusVoiceMicClick(event)
 			|| this.handleStatusVoiceLanguageClick(event);
 	}
@@ -699,6 +704,13 @@ export class AppMouseController {
 		if (!this.statusTargetContains(this.statusPromptEnhancerTarget, event)) return false;
 
 		void this.host.enhancePrompt();
+		return true;
+	}
+
+	private handleStatusAgentPauseClick(event: MouseEvent): boolean {
+		if (!this.statusTargetContains(this.statusAgentPauseTarget, event)) return false;
+
+		void this.host.toggleAgentPause?.();
 		return true;
 	}
 

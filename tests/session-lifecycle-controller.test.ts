@@ -8,6 +8,23 @@ import {
 } from "../src/app/session/session-lifecycle-controller.js";
 
 describe("AppSessionLifecycleController", () => {
+	it("binds pause controls before subscribing to a session", async () => {
+		const order: string[] = [];
+		const session = fakeSession("session", async () => {});
+		session.subscribe = (() => {
+			order.push("subscribe");
+			return () => {};
+		}) as AgentSession["subscribe"];
+		const runtime = { session } as AgentSessionRuntime;
+		const controller = new AppSessionLifecycleController(lifecycleHost(() => runtime, {
+			bindAgentPause: () => order.push("pause"),
+		}));
+
+		await controller.bindCurrentSession({ awaitExtensions: false });
+
+		assert.deepEqual(order, ["pause", "subscribe"]);
+	});
+
 	it("defers background extension binding until the next event-loop turn", async () => {
 		let bindStarted = false;
 		let finishBind: () => void = () => {};
@@ -167,6 +184,7 @@ function createController(bindExtensions: () => Promise<void>): {
 	const runtime = { session } as AgentSessionRuntime;
 	const host = {
 		runtime: () => runtime,
+		bindAgentPause: () => {},
 		handleSessionEvent: () => {},
 		closeSdkMenuForBind: () => {},
 		clearExtensionWidgets: () => {},
@@ -209,6 +227,7 @@ function lifecycleHost(
 	return {
 		entries: [],
 		runtime,
+		bindAgentPause: () => {},
 		handleSessionEvent: () => {},
 		closeSdkMenuForBind: () => {},
 		clearExtensionWidgets: () => {},

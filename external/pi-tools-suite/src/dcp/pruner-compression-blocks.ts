@@ -13,6 +13,98 @@ function findBoundaryIndex(messages: any[], stableId: string | undefined, timest
   return messages.findIndex((m, index) => messageMatchesBoundary(m, index, stableId, timestamp));
 }
 
+export interface ReconcileInheritedBlocksResult {
+  fittingBlockIds: number[];
+  activatedBlockIds: number[];
+  deactivatedBlockIds: number[];
+}
+
+/**
+ * Reconcile inherited compression state with the branch that is actually
+ * being sent to the provider.
+ *
+ * A fork can branch before the source session's newest roll-up block ends.
+ * That roll-up remains active in the source sidecar, while the older block it
+ * covered is inactive. Since the roll-up's end boundary is absent on the
+ * fork, neither block would otherwise be applied and the whole history would
+ * be sent raw. Select the widest fitting block(s) instead, while preserving an
+ * explicit user decompression for the block and its covered descendants.
+ */
+export function reconcileInheritedCompressionBlocks(
+  messages: any[],
+  state: DcpState,
+): ReconcileInheritedBlocksResult {
+  const byId = new Map(state.compressionBlocks.map((block) => [block.id, block]));
+  const fittingBlockIds = new Set<number>();
+  const descendantCache = new Map<number, Set<number>>();
+
+  for (const block of state.compressionBlocks) {
+    if (!Number.isFinite(block.startTimestamp) || !Number.isFinite(block.endTimestamp)) continue;
+    const startFound = findBoundaryIndex(messages, block.startMessageId, block.startTimestamp) !== -1;
+    const endFound = findBoundaryIndex(messages, block.endMessageId, block.endTimestamp) !== -1;
+    if (startFound && endFound) fittingBlockIds.add(block.id);
+  }
+
+  function descendantsOf(rootId: number): Set<number> {
+    const cached = descendantCache.get(rootId);
+    if (cached) return cached;
+
+    const descendants = new Set<number>();
+    const pending = [...(byId.get(rootId)?.coveredBlockIds ?? [])];
+    while (pending.length > 0) {
+      const id = pending.pop()!;
+      if (id === rootId || descendants.has(id)) continue;
+      descendants.add(id);
+      pending.push(...(byId.get(id)?.coveredBlockIds ?? []));
+    }
+    descendantCache.set(rootId, descendants);
+    return descendants;
+  }
+
+  // Decompressing a roll-up intentionally exposes its whole range. Do not
+  // unexpectedly reactivate one of its older nested summaries after a fork.
+  const suppressedByUser = new Set<number>();
+  for (const block of state.compressionBlocks) {
+    if (!block.deactivatedByUser) continue;
+    suppressedByUser.add(block.id);
+    for (const id of descendantsOf(block.id)) suppressedByUser.add(id);
+  }
+
+  const eligibleBlockIds = new Set(
+    [...fittingBlockIds].filter((id) => !suppressedByUser.has(id)),
+  );
+  const coveredByFittingBlock = new Set<number>();
+  for (const id of eligibleBlockIds) {
+    for (const coveredId of descendantsOf(id)) coveredByFittingBlock.add(coveredId);
+  }
+
+  const activeBlockIds = new Set(
+    [...eligibleBlockIds].filter((id) => !coveredByFittingBlock.has(id)),
+  );
+  const activatedBlockIds: number[] = [];
+  const deactivatedBlockIds: number[] = [];
+
+  for (const block of state.compressionBlocks) {
+    const shouldBeActive = activeBlockIds.has(block.id);
+    if (block.active !== shouldBeActive) {
+      if (shouldBeActive) activatedBlockIds.push(block.id);
+      else deactivatedBlockIds.push(block.id);
+    }
+    block.active = shouldBeActive;
+
+    if (block.deactivatedByUser) continue;
+    block.deactivatedReason = fittingBlockIds.has(block.id)
+      ? undefined
+      : "outside-inherited-branch";
+  }
+
+  return {
+    fittingBlockIds: [...fittingBlockIds].sort((a, b) => a - b),
+    activatedBlockIds: activatedBlockIds.sort((a, b) => a - b),
+    deactivatedBlockIds: deactivatedBlockIds.sort((a, b) => a - b),
+  };
+}
+
 
 export function syncCompressionBlocks(messages: any[], state: DcpState, config: DcpConfig): void {
   if (state.compressionBlocks.length === 0) return;

@@ -4,6 +4,7 @@ import type { Theme } from "../../theme.js";
 import { ellipsizeDisplay, padOrTrimPlain } from "./render-text.js";
 import type {
 	SessionActivity,
+	StatusAgentPauseTarget,
 	StatusCompactToolsTarget,
 	StatusContextTarget,
 	StatusDraftQueueTarget,
@@ -53,6 +54,8 @@ export type StatusLineRendererHost = {
 	promptEnhancerStatusWidgetEnabled(): boolean;
 	terminalBellSoundStatusWidgetText(): string;
 	terminalBellSoundStatusWidgetEnabled(): boolean;
+	agentPauseStatusWidgetText?(): string;
+	agentPauseStatusWidgetActive?(): boolean;
 	voiceStatusWidgetText(): string;
 	voiceStatusWidgetActive(): boolean;
 	conversationQuickScrollDirections?(): { up: boolean; down: boolean };
@@ -149,6 +152,10 @@ export class StatusLineRenderer {
 		appendWidget(quickScrollDirections.down ? this.iconButtonText(APP_ICONS.down) : "", (column, text) => {
 			layout.quickScrollDownWidget = this.widgetLayout(column, text);
 		});
+		const agentPauseWidgetText = this.host.agentPauseStatusWidgetText?.() ?? "";
+		appendWidget(agentPauseWidgetText ? this.iconButtonText(agentPauseWidgetText) : "", (column, text) => {
+			layout.agentPauseWidget = this.widgetLayout(column, text);
+		});
 		const voiceWidgetText = this.host.voiceStatusWidgetText();
 		appendWidget(this.voiceBorderWidgetText(voiceWidgetText), (column, text) => {
 			layout.voiceWidget = this.voiceWidgetLayout(column, voiceWidgetText, text);
@@ -219,6 +226,7 @@ export class StatusLineRenderer {
 		pushWidgetSegment(layout.terminalBellSoundWidget, this.host.terminalBellSoundStatusWidgetEnabled() ? colors.info : colors.muted);
 		pushWidgetSegment(layout.thinkingExpandWidget, this.host.allThinkingExpandedActive?.() ? colors.info : colors.muted);
 		pushWidgetSegment(layout.compactToolsWidget, this.host.superCompactToolsActive?.() ? colors.info : colors.muted);
+		pushWidgetSegment(layout.agentPauseWidget, this.host.agentPauseStatusWidgetActive?.() ? colors.info : colors.muted);
 
 		const voiceWidget = layout.voiceWidget;
 		if (voiceWidget) {
@@ -293,6 +301,12 @@ export class StatusLineRenderer {
 	promptEnhancerTarget(layout: StatusLineLayout, row: number): StatusPromptEnhancerTarget | undefined {
 		if (!this.host.promptEnhancerStatusWidgetEnabled()) return undefined;
 		const widget = layout.promptEnhancerWidget;
+		if (!widget) return undefined;
+		return { row, startColumn: widget.startColumn, endColumn: widget.endColumn };
+	}
+
+	agentPauseTarget(layout: StatusLineLayout, row: number): StatusAgentPauseTarget | undefined {
+		const widget = layout.agentPauseWidget;
 		if (!widget) return undefined;
 		return { row, startColumn: widget.startColumn, endColumn: widget.endColumn };
 	}
@@ -432,6 +446,7 @@ export class StatusLineRenderer {
 			{ widget: layout.terminalBellSoundWidget, foreground: this.host.terminalBellSoundStatusWidgetEnabled() ? colors.info : colors.muted },
 			{ widget: layout.thinkingExpandWidget, foreground: this.host.allThinkingExpandedActive?.() ? colors.info : colors.muted },
 			{ widget: layout.compactToolsWidget, foreground: this.host.superCompactToolsActive?.() ? colors.info : colors.muted },
+			{ widget: layout.agentPauseWidget, foreground: this.host.agentPauseStatusWidgetActive?.() ? colors.info : colors.muted },
 		].filter((entry): entry is { widget: { startColumn: number; endColumn: number }; foreground: string } => Boolean(entry.widget));
 
 		for (const { widget, foreground } of widgets) {

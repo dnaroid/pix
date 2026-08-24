@@ -1,5 +1,12 @@
 {
   "timeoutMs": 15000,
+  "viewport": { "width": 844, "height": 847 },
+  "environment": {
+    "locale": "en-GB",
+    "timezoneId": "Europe/London",
+    "colorScheme": "dark",
+    "reducedMotion": "reduce"
+  },
   "steps": [
     { "action": "goto", "path": "/settings" },
     { "action": "authRejectedIf", "urlIncludes": "/login" },
@@ -12,8 +19,54 @@
       "locator": { "label": "Display name", "exact": true },
       "value": "QA Example"
     },
-    { "action": "click", "locator": { "testId": "save-settings" } },
+    { "action": "evaluate", "operation": "scrollTo", "locator": { "css": ".settings-panel" }, "y": 0 },
+    { "action": "wheel", "locator": { "css": ".settings-panel" }, "deltaY": 400 },
+    { "action": "assertDOMMetric", "locator": { "css": ".settings-panel" }, "metric": "scrollTop", "greaterThan": 0 },
+    { "action": "evaluate", "operation": "metrics", "locator": { "css": ".settings-panel" }, "name": "settings-scroll" },
+    {
+      "action": "dragTo",
+      "locator": { "testId": "available-widget" },
+      "dropTarget": { "testId": "enabled-widgets" }
+    },
+    {
+      "action": "uploadFiles",
+      "locator": { "label": "Import settings", "exact": true },
+      "files": [
+        { "name": "settings.json", "mimeType": "application/json", "base64": "eyJ0aGVtZSI6ImRhcmsifQ==" }
+      ]
+    },
+    {
+      "action": "click",
+      "locator": { "testId": "save-settings" },
+      "expectResponse": { "path": "/api/settings", "method": "PUT", "status": 200 },
+      "expectDialog": {
+        "type": "confirm",
+        "message": { "equals": "Save these settings?" },
+        "accept": true
+      }
+    },
+    { "action": "assertAttribute", "locator": { "testId": "save-settings" }, "attribute": "aria-busy", "equals": "false" },
     { "action": "assertText", "locator": { "testId": "toast" }, "includes": "Saved" },
+    { "action": "openPopup", "locator": { "testId": "preview-settings" }, "name": "preview" },
+    {
+      "action": "assertText",
+      "target": { "type": "popup", "name": "preview" },
+      "locator": { "role": "heading", "name": "Settings preview", "exact": true },
+      "equals": "Settings preview"
+    },
+    {
+      "action": "assertVisible",
+      "target": { "type": "frame", "locator": { "testId": "settings-help" } },
+      "locator": { "role": "heading", "name": "Settings help", "exact": true }
+    },
+    {
+      "action": "download",
+      "locator": { "testId": "export-settings" },
+      "filename": { "equals": "settings.json" },
+      "maxBytes": 1048576,
+      "retain": true,
+      "name": "settings-export"
+    },
     { "action": "screenshot", "name": "settings-saved" }
   ]
 }

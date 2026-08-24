@@ -37,8 +37,9 @@ source reading, server polling, capability probing, or retries.
    safe profile traits make the choice unambiguous, or a public run proves that
    the requested page requires login.
 5. Inspect the target code and write a declarative JSONC flow under
-   `$PI_SUBAGENT_AGENT_DIR/browser-qa/flows/`. Never put credentials or
-   executable JavaScript in it.
+   `$PI_SUBAGENT_AGENT_DIR/browser-qa/flows/`. Never put credentials or raw
+   executable JavaScript in it. The `evaluate` action exposes only the safe
+   operations documented below; it does not accept expressions or scripts.
 6. Run public QA with
    `node <runner> run --base-url <url> --flow <flow.jsonc>`. The URL's exact
    origin becomes the fail-closed allowlist. Only for authenticated QA, add
@@ -46,7 +47,7 @@ source reading, server polling, capability probing, or retries.
    Profile id, URL, and flow path are non-secret; never pass credentials as
    arguments or environment variables.
 7. Report deterministic assertions and every artifact returned by the runner.
-   For each screenshot, video, or trace, emit a separate clickable Markdown
+   For each screenshot, video, trace, or retained download, emit a separate clickable Markdown
    link using its `uri` and also show its absolute `path`. Do this for failed
    runs too whenever `artifacts` is present; never report only `evidenceDir`.
    Visual inspection supplements assertions; it does not replace them.
@@ -63,9 +64,10 @@ source reading, server polling, capability probing, or retries.
   plus accessible `name`; `label`; `placeholder`; visible `text`; CSS only as a
   last resort. Use `exact: true` when similar elements could make a match
   ambiguous.
-- Let locator actions auto-wait. Use `waitFor` for an explicit UI state and use
-  `waitForTimeout` only for a short, unavoidable animation/debounce—not as a
-  substitute for an assertion. Set flow `timeoutMs` only as high as the target
+- Let locator actions auto-wait. Assertions retry until the flow timeout, so
+  prefer them over a preceding sleep. Use `waitFor` for an explicit setup state
+  and `waitForTimeout` only for short input settling or an unavoidable
+  animation/debounce. Set flow `timeoutMs` only as high as the target
   legitimately needs.
 - Place `authRejectedIf` immediately after navigation or any transition that
   may reveal expired authentication.
@@ -78,22 +80,97 @@ ambiguous failure, or deciding what evidence proves the result.
 
 ## Flow contract
 
-The flow is `{ "steps": [...] }` with at most 100 steps. Supported actions:
+The flow is `{ "steps": [...] }`, no larger than 16 MiB, with at most 100
+steps. The larger bound exists only for bounded in-memory upload payloads.
+Supported actions:
 
 - navigation: `goto`, `reload`, `waitFor`, `waitForTimeout`
 - interaction: `click`, `doubleClick`, `hover`, `fill`, `press`, `check`,
-  `uncheck`, `selectOption`
+  `uncheck`, `selectOption`, `wheel`, `evaluate`, `dragTo`, `uploadFiles`,
+  `openPopup`, `download`
 - assertions: `assertVisible`, `assertHidden`, `assertEnabled`,
   `assertDisabled`, `assertChecked`, `assertUnchecked`, `assertText`,
-  `assertValue`, `assertCount`, `assertURL`
+  `assertValue`, `assertAttribute`, `assertCount`, `assertURL`,
+  `assertDOMMetric`
 - evidence/auth: `screenshot`, `authRejectedIf`
 
 Locators accept one of `testId`, `role` (plus optional `name`), `label`,
 `placeholder`, `text`, or `css`; add `exact: true` where useful. String
 assertions require exactly one of `equals` or `includes`.
+`assertAttribute` additionally requires a bounded `attribute` name and is
+useful for `aria-*`, `data-*`, `href`, and similar observable state. All
+assertions retry until `timeoutMs` and report generic failures without exposing
+the actual text, value, or attribute content.
+
+Set an optional top-level `viewport` with integer `width` and `height` from
+`320×240` through `3840×2160`; the default is `1280×720`. The same dimensions
+are used for the browser viewport and recorded video.
+
+The top-level `environment` may set `locale`, `timezoneId`, `colorScheme`, and
+`reducedMotion`. Defaults are deterministic: `en-US`, `UTC`, `light`, and
+`reduce`. Color scheme accepts `light`, `dark`, or `no-preference`; reduced
+motion accepts `reduce` or `no-preference`. The resolved environment is returned
+in the result alongside the viewport.
+
+Triggering interactions (`click`, `doubleClick`, `press`, `check`, `uncheck`,
+and `selectOption`) may declare race-free expectations that are armed before
+the interaction:
+
+- `expectResponse`: exact origin-relative `path` (without query/fragment),
+  uppercase `method`, and integer `status` from 100 through 599;
+- `expectDialog`: `type` (`alert`, `beforeunload`, `confirm`, or `prompt`), a
+  nested `message` matcher with exactly one of `equals`/`includes`, and boolean
+  `accept`.
+
+The runner never records response bodies, headers, URLs, actual dialog text, or
+prompt defaults in observations or failure reasons. A mismatching dialog is
+dismissed so it cannot deadlock the browser.
+
+`dragTo` requires a source `locator` and `dropTarget`, with optional bounded
+`sourcePosition` and `dropPosition` `{ x, y }`. `uploadFiles` accepts only
+in-memory entries `{ name, mimeType, base64 }`; up to 10 files, 5 MiB each and
+10 MiB total. An empty array clears the input. Filesystem paths and directories
+are not supported.
+
+`download` atomically clicks its locator and requires a nested `filename`
+matcher. `maxBytes` defaults to 5 MiB and is capped at 25 MiB. Downloads are
+deleted after validation unless `retain: true` and a safe `name` are supplied;
+retained bytes appear in `artifacts.downloads` under a runner-generated `.bin`
+name. The runner cancels while its private copy grows past `maxBytes`, but this
+is an evidence-retention bound rather than a network-bandwidth guarantee because
+the browser may already hold temporary bytes. Retained bytes are scanned for
+configured authentication before publication. The actual server filename is
+never placed in diagnostics.
+
+`openPopup` atomically clicks a locator, captures a same-origin popup, and stores
+it under a safe `name` (maximum three). Target later actions with
+`{ "target": { "type": "popup", "name": "..." } }`. Target same-origin
+iframes with `{ "target": { "type": "frame", "locator": { ... } } }`; add
+`page` with a popup name for a frame inside that popup. Frame origin is checked
+from its live document before every scoped step. Cross-origin popups/frames are
+rejected. Popup recordings are returned as separate video artifacts.
+
+`wheel` accepts finite `deltaX`/`deltaY` values and requires at least one
+non-zero delta. With a locator, the runner hovers that element before sending
+the wheel input. Safe `evaluate` operations are:
+
+- `scrollTo`: optional locator plus numeric `x`/`y` or the string `"max"`;
+- `scrollBy`: optional locator plus numeric `deltaX`/`deltaY`;
+- `metrics`: optional locator plus an optional safe `name`; values are returned
+  in the runner's `observations` array.
+
+Element metrics are `scrollLeft`, `scrollTop`, `scrollWidth`, `scrollHeight`,
+`clientWidth`, `clientHeight`, `x`, `y`, `width`, and `height`. Page metrics are
+`scrollX`, `scrollY`, `scrollWidth`, `scrollHeight`, `clientWidth`,
+`clientHeight`, `viewportWidth`, and `viewportHeight`. Use `assertDOMMetric`
+with a `metric` and exactly one of `equals`, `greaterThan`,
+`greaterThanOrEqual`, `lessThan`, or `lessThanOrEqual` for a deterministic
+oracle. Raw JavaScript remains intentionally unsupported.
 
 ```jsonc
 {
+  "viewport": { "width": 844, "height": 847 },
+  "environment": { "locale": "en-GB", "timezoneId": "Europe/London", "colorScheme": "dark" },
   "steps": [
     { "action": "goto", "path": "/settings" },
     { "action": "authRejectedIf", "urlIncludes": "/login" },
@@ -101,7 +178,18 @@ assertions require exactly one of `equals` or `includes`.
       "action": "assertVisible",
       "locator": { "role": "heading", "name": "Settings", "exact": true }
     },
-    { "action": "click", "locator": { "testId": "save-settings" } },
+    { "action": "wheel", "locator": { "css": ".settings-panel" }, "deltaY": 500 },
+    {
+      "action": "assertDOMMetric",
+      "locator": { "css": ".settings-panel" },
+      "metric": "scrollTop",
+      "greaterThan": 0
+    },
+    {
+      "action": "click",
+      "locator": { "testId": "save-settings" },
+      "expectResponse": { "path": "/api/settings", "method": "PUT", "status": 200 }
+    },
     { "action": "assertText", "locator": { "testId": "toast" }, "includes": "Saved" },
     { "action": "screenshot", "name": "settings-saved" }
   ]
@@ -111,7 +199,7 @@ assertions require exactly one of `equals` or `includes`.
 For multiple profiles, invoke the runner separately. Every invocation gets an
 isolated browser context and exclusive evidence directory; the runner closes
 all owned browser resources on success and failure. Flows, screenshots, video,
-sanitized traces, and runner result manifests remain under
+sanitized traces, retained downloads, and runner result manifests remain under
 `$PI_SUBAGENT_AGENT_DIR/browser-qa/` so normal sub-agent shutdown or cleanup
 deletes them with the run directory. For form auth, recording starts on the login
 page and includes field filling and submission; password inputs remain masked,
@@ -139,8 +227,8 @@ claim that browser QA passed based on source inspection, unit tests, or a build.
 
 After any runner invocation that actually performed browser testing, include
 all non-empty `artifacts.screenshots`, `artifacts.videos`, and
-`artifacts.traces` groups in the final response. These links are mandatory so
-the user can open the evidence directly.
+`artifacts.traces`, and `artifacts.downloads` groups in the final response.
+These links are mandatory so the user can open the evidence directly.
 
 See `references/qa-auth.example.jsonc`, `references/qa-flow.example.jsonc`, and
 `references/qa-design.md`.

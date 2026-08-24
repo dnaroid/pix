@@ -29,6 +29,7 @@ e2eTest("runs public QA without auth, then records form login and private action
 	let privatePageLoads = 0;
 	let lastPrivatePageLoadedAt = 0;
 	let privateActionClickedAt = 0;
+	let dialogActionReceived = false;
 	const server = createServer(async (request, response) => {
 		const authenticated = request.headers.cookie?.includes("session=mock-session") === true;
 		if (request.method === "POST" && request.url === "/api/login") {
@@ -49,6 +50,18 @@ e2eTest("runs public QA without auth, then records form login and private action
 			}
 			privateActionClickedAt = Date.now();
 			response.writeHead(204).end();
+			return;
+		}
+		if (request.method === "POST" && request.url === "/api/dialog-action") {
+			dialogActionReceived = true;
+			response.writeHead(202).end();
+			return;
+		}
+		if (request.method === "GET" && request.url === "/export.csv") {
+			response.writeHead(200, {
+				"content-type": "text/csv; charset=utf-8",
+				"content-disposition": 'attachment; filename="report.csv"',
+			}).end("name,value\nqa,passed\n");
 			return;
 		}
 		if (request.url === "/private" && !authenticated) {
@@ -118,13 +131,51 @@ e2eTest("runs public QA without auth, then records form login and private action
 		});
 		const flowPath = path.join(agentDir, "browser-qa", "flows", "mock.jsonc");
 		writePrivateJson(flowPath, {
+			viewport: { width: 844, height: 847 },
+			environment: { locale: "en-GB", timezoneId: "Europe/London", colorScheme: "dark", reducedMotion: "no-preference" },
 			steps: [
 				{ action: "goto", path: "/private" },
 				{ action: "waitFor", locator: { testId: "private-action" }, state: "visible" },
 				{ action: "assertText", locator: { testId: "private-title" }, equals: "Private QA area" },
+				{ action: "assertDOMMetric", metric: "viewportWidth", equals: 844 },
+				{ action: "evaluate", operation: "scrollTo", locator: { testId: "scroll-panel" }, y: 0 },
+				{ action: "wheel", locator: { testId: "scroll-panel" }, deltaY: 240 },
+				{ action: "waitForTimeout", timeoutMs: 100 },
+				{ action: "assertDOMMetric", locator: { testId: "scroll-panel" }, metric: "scrollTop", greaterThan: 0 },
+				{ action: "evaluate", operation: "metrics", locator: { testId: "scroll-panel" }, name: "panel-after-wheel" },
 				{ action: "click", locator: { testId: "private-action" } },
-				{ action: "waitFor", locator: { testId: "action-complete" }, state: "visible" },
+				{ action: "assertAttribute", locator: { testId: "private-action" }, attribute: "aria-busy", equals: "false" },
+				{ action: "assertVisible", locator: { testId: "action-complete" } },
 				{ action: "assertText", locator: { testId: "action-complete" }, equals: "Private action completed" },
+				{ action: "assertText", locator: { testId: "environment-result" }, equals: "en-GB|Europe/London|dark|no-preference" },
+				{ action: "dragTo", locator: { testId: "drag-source" }, dropTarget: { testId: "drop-target" } },
+				{ action: "assertText", locator: { testId: "drag-result" }, equals: "Drop completed" },
+				{
+					action: "uploadFiles",
+					locator: { testId: "upload-input" },
+					files: [{ name: "sample.txt", mimeType: "text/plain", base64: Buffer.from("hello-qa").toString("base64") }],
+				},
+				{ action: "assertText", locator: { testId: "upload-result" }, equals: "sample.txt:hello-qa" },
+				{
+					action: "click",
+					locator: { testId: "dialog-action" },
+					expectResponse: { path: "/api/dialog-action", method: "POST", status: 202 },
+					expectDialog: { type: "confirm", message: { equals: "Proceed safely?" }, accept: true },
+				},
+				{ action: "assertText", locator: { testId: "dialog-result" }, equals: "Confirmed action completed" },
+				{ action: "assertText", target: { type: "frame", locator: { testId: "qa-frame" } }, locator: { testId: "frame-result" }, equals: "Frame ready" },
+				{ action: "click", target: { type: "frame", locator: { testId: "qa-frame" } }, locator: { testId: "frame-action" } },
+				{ action: "assertText", target: { type: "frame", locator: { testId: "qa-frame" } }, locator: { testId: "frame-result" }, equals: "Frame action completed" },
+				{ action: "openPopup", locator: { testId: "popup-action" }, name: "receipt" },
+				{ action: "assertText", target: { type: "popup", name: "receipt" }, locator: { testId: "popup-title" }, equals: "Same-origin QA popup" },
+				{
+					action: "download",
+					locator: { testId: "download-action" },
+					filename: { equals: "report.csv" },
+					maxBytes: 1024,
+					retain: true,
+					name: "report",
+				},
 				{ action: "screenshot", name: "private-action-complete" },
 			],
 		});
@@ -137,24 +188,36 @@ e2eTest("runs public QA without auth, then records form login and private action
 		], agentDir);
 		expect(result.code).toBe(0);
 		expect(result.stderr).toBe("");
-		expect(result.json).toMatchObject({ status: "QA_PASSED", profile: "mock" });
+			expect(result.json).toMatchObject({
+			status: "QA_PASSED",
+			profile: "mock",
+			viewport: { width: 844, height: 847 },
+			environment: { locale: "en-GB", timezoneId: "Europe/London", colorScheme: "dark", reducedMotion: "no-preference" },
+			observations: [{ name: "panel-after-wheel", step: 9, value: { scrollHeight: 600 } }],
+		});
+		const panelObservation = result.json.observations?.[0];
+		expect(typeof panelObservation?.value.scrollTop).toBe("number");
+		expect((panelObservation?.value.scrollTop ?? 0) > 0).toBe(true);
 		expect(receivedLoginCredentials).toBe(true);
 		expect(loginPageLoadedAt).toBeGreaterThan(0);
 		expect(loginSubmittedAt - loginPageLoadedAt).toBeGreaterThanOrEqual(600);
 		expect(privatePageLoads).toBeGreaterThanOrEqual(2);
 		expect(privateActionClickedAt).toBeGreaterThan(0);
 		expect(privateActionClickedAt - lastPrivatePageLoadedAt).toBeGreaterThanOrEqual(600);
+		expect(dialogActionReceived).toBe(true);
 
 		const evidenceDir = path.join(fs.realpathSync(agentDir), "browser-qa", "evidence", "real-artifacts", "mock");
 		const screenshots = result.json.artifacts.screenshots;
 		expect(screenshots.map((artifact) => path.basename(artifact.path)).sort()).toEqual(["final.png", "private-action-complete.png"]);
-		expect(result.json.artifacts.videos).toHaveLength(1);
+		expect(result.json.artifacts.videos).toHaveLength(2);
 		expect(result.json.artifacts.traces).toHaveLength(1);
+		expect(result.json.artifacts.downloads).toHaveLength(1);
+		expect(fs.readFileSync(result.json.artifacts.downloads[0].path, "utf8")).toBe("name,value\nqa,passed\n");
 
-		for (const artifact of [...screenshots, ...result.json.artifacts.videos, ...result.json.artifacts.traces] as Artifact[]) {
+		for (const artifact of [...screenshots, ...result.json.artifacts.videos, ...result.json.artifacts.traces, ...result.json.artifacts.downloads] as Artifact[]) {
 			expect(artifact.path.startsWith(evidenceDir)).toBe(true);
 			expect(artifact.uri).toBe(pathToFileURL(artifact.path).href);
-			expect(fs.statSync(artifact.path).size).toBeGreaterThan(100);
+			expect(fs.statSync(artifact.path).size).toBeGreaterThan(artifact.path.endsWith(".bin") ? 0 : 100);
 		}
 		expect(fs.readFileSync(screenshots[0].path).subarray(0, 8)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
 		expect(fs.readFileSync(result.json.artifacts.videos[0].path).subarray(0, 4)).toEqual(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]));
@@ -184,11 +247,14 @@ e2eTest("runs public QA without auth, then records form login and private action
 }, 120_000);
 
 type Artifact = { path: string; uri: string };
-type ArtifactManifest = { screenshots: Artifact[]; videos: Artifact[]; traces: Artifact[] };
+type ArtifactManifest = { screenshots: Artifact[]; videos: Artifact[]; traces: Artifact[]; downloads: Artifact[] };
 type RunnerStatus = {
 	status: string;
 	profile?: string;
 	artifacts: ArtifactManifest;
+	viewport: { width: number; height: number };
+	environment: { locale: string; timezoneId: string; colorScheme: string; reducedMotion: string };
+	observations?: Array<{ name: string; step: number; value: Record<string, number> }>;
 };
 
 function publishEvidence(artifacts: ArtifactManifest): ArtifactManifest {
@@ -205,11 +271,12 @@ function publishEvidence(artifacts: ArtifactManifest): ArtifactManifest {
 		screenshots: copyGroup(artifacts.screenshots),
 		videos: copyGroup(artifacts.videos),
 		traces: copyGroup(artifacts.traces),
+		downloads: copyGroup(artifacts.downloads),
 	};
 }
 
 function allArtifacts(artifacts: ArtifactManifest): Artifact[] {
-	return [...artifacts.screenshots, ...artifacts.videos, ...artifacts.traces];
+	return [...artifacts.screenshots, ...artifacts.videos, ...artifacts.traces, ...artifacts.downloads];
 }
 
 function printArtifactLinks(artifacts: ArtifactManifest): void {
@@ -218,6 +285,7 @@ function printArtifactLinks(artifacts: ArtifactManifest): void {
 		["Screenshot", artifacts.screenshots],
 		["Video", artifacts.videos],
 		["Trace", artifacts.traces],
+		["Download", artifacts.downloads],
 	] as const) {
 		for (const artifact of group) {
 			console.error(`- ${label}: [${path.basename(artifact.path)}](${artifact.uri})`);

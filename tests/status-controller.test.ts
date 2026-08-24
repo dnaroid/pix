@@ -7,7 +7,7 @@ import type { AppBlinkController } from "../src/app/screen/blink-controller.js";
 import { modelProviderThemeColor, StatusLineRenderer } from "../src/app/rendering/status-line-renderer.js";
 import { ScreenStyler } from "../src/app/screen/screen-styler.js";
 import { APP_ICONS } from "../src/app/icons.js";
-import { displayIndexForColumn, stringDisplayWidth } from "../src/terminal-width.js";
+import { stringDisplayWidth } from "../src/terminal-width.js";
 import { colorize, THEMES } from "../src/theme.js";
 import type { ModelColorsConfig } from "../src/config.js";
 
@@ -633,6 +633,24 @@ describe("StatusLineRenderer", () => {
 		})));
 	});
 
+	it("lays out and targets the agent pause widget before voice controls", () => {
+		const renderer = statusLineRenderer({
+			widgetText: `${APP_ICONS.microphone} RU`,
+			voiceActive: false,
+			agentPauseWidgetText: APP_ICONS.pause,
+			agentPauseActive: true,
+		});
+		const layout = renderer.inputBorderWidgetsLayout(40)!;
+
+		assert.ok(layout.text.endsWith(widgetsText(APP_ICONS.pause, APP_ICONS.microphone, "RU")));
+		assert.equal(layout.agentPauseWidget?.endColumn, (layout.voiceWidget?.startColumn ?? 0) - 1);
+		assert.deepEqual(renderer.agentPauseTarget(layout, 2), {
+			row: 2,
+			startColumn: layout.agentPauseWidget?.startColumn,
+			endColumn: layout.agentPauseWidget?.endColumn,
+		});
+	});
+
 	it("renders quick-scroll arrows on the right according to scroll position", () => {
 		const topRenderer = statusLineRenderer({ widgetText: "", voiceActive: false, quickScroll: { up: false, down: true } });
 		const middleRenderer = statusLineRenderer({ widgetText: "", voiceActive: false, quickScroll: { up: true, down: true } });
@@ -705,16 +723,7 @@ function widgetsText(...parts: string[]): string {
 	return parts.filter((part) => part.length > 0).join(" ");
 }
 
-function overlayText(text: string, startColumn: number, overlay: string): string {
-	const start = Math.max(0, startColumn - 1);
-	const overlayWidth = stringDisplayWidth(overlay);
-	const startIndex = displayIndexForColumn(text, start + 1);
-	const endIndex = displayIndexForColumn(text, start + overlayWidth + 1);
-	const padded = text.padEnd(startIndex, " ");
-	return `${padded.slice(0, startIndex)}${overlay}${padded.slice(endIndex)}`;
-}
-
-function statusLineRenderer(options: { widgetText: string; voiceActive: boolean; promptWidgetText?: string; promptActive?: boolean; promptEnabled?: boolean; terminalBellWidgetText?: string; terminalBellSoundEnabled?: boolean; sessionActivity?: "idle" | "running" | "thinking"; statusDotBright?: boolean; workspaceLabel?: string; workspaceGitBranchLabel?: string; modelUsageLabel?: string; session?: AgentSession; currentStatus?: string; thinkingLabel?: string; modelLabel?: string; modelColors?: ModelColorsConfig; userMessageJumpMenuActive?: boolean; queueableInputActive?: boolean; internalClipboardActive?: boolean; allThinkingExpandedActive?: boolean; superCompactToolsActive?: boolean; quickScroll?: { up: boolean; down: boolean } }): StatusLineRenderer {
+function statusLineRenderer(options: { widgetText: string; voiceActive: boolean; promptWidgetText?: string; promptActive?: boolean; promptEnabled?: boolean; terminalBellWidgetText?: string; terminalBellSoundEnabled?: boolean; agentPauseWidgetText?: string; agentPauseActive?: boolean; sessionActivity?: "idle" | "running" | "thinking"; statusDotBright?: boolean; workspaceLabel?: string; workspaceGitBranchLabel?: string; modelUsageLabel?: string; session?: AgentSession; currentStatus?: string; thinkingLabel?: string; modelLabel?: string; modelColors?: ModelColorsConfig; userMessageJumpMenuActive?: boolean; queueableInputActive?: boolean; internalClipboardActive?: boolean; allThinkingExpandedActive?: boolean; superCompactToolsActive?: boolean; quickScroll?: { up: boolean; down: boolean } }): StatusLineRenderer {
 	return new StatusLineRenderer({
 		theme: THEMES.dark,
 		screenStyler: new ScreenStyler({ theme: THEMES.dark, mouseSelection: undefined }),
@@ -736,6 +745,8 @@ function statusLineRenderer(options: { widgetText: string; voiceActive: boolean;
 		promptEnhancerStatusWidgetEnabled: () => options.promptEnabled ?? true,
 		terminalBellSoundStatusWidgetText: () => options.terminalBellWidgetText ?? "",
 		terminalBellSoundStatusWidgetEnabled: () => options.terminalBellSoundEnabled ?? true,
+		agentPauseStatusWidgetText: () => options.agentPauseWidgetText ?? "",
+		agentPauseStatusWidgetActive: () => options.agentPauseActive ?? false,
 		voiceStatusWidgetText: () => options.widgetText,
 		voiceStatusWidgetActive: () => options.voiceActive,
 		conversationQuickScrollDirections: () => options.quickScroll ?? { up: false, down: false },

@@ -17,6 +17,10 @@
       button { padding: 0 20px; border: 0; background: #38bdf8; color: #082f49; font-weight: 700; cursor: pointer; }
       [hidden] { display: none !important; }
       [data-testid="action-complete"] { color: #86efac; }
+      [data-testid="scroll-panel"] { height: 120px; margin: 20px 0; overflow: auto; border: 1px solid #475569; }
+      [data-testid="scroll-content"] { height: 600px; padding-top: 520px; }
+      [data-testid="drag-source"], [data-testid="drop-target"] { min-height: 48px; margin: 12px 0; padding: 12px; border: 1px dashed #7dd3fc; }
+      iframe { width: 100%; min-height: 120px; border: 1px solid #475569; }
     </style>
   </head>
   <body>
@@ -24,7 +28,14 @@
     <script>
       const app = document.querySelector("#app");
 
-      if (location.pathname === "/login") {
+      if (location.pathname === "/frame") {
+        app.innerHTML = `<section><h1>Embedded QA frame</h1><button data-testid="frame-action">Run frame action</button><p data-testid="frame-result">Frame ready</p></section>`;
+        document.querySelector('[data-testid="frame-action"]').addEventListener("click", () => {
+          document.querySelector('[data-testid="frame-result"]').textContent = "Frame action completed";
+        });
+      } else if (location.pathname === "/popup") {
+        app.innerHTML = `<section><h1 data-testid="popup-title">Same-origin QA popup</h1></section>`;
+      } else if (location.pathname === "/login") {
         app.innerHTML = `
           <section>
             <h1>Secure QA login</h1>
@@ -54,8 +65,20 @@
             <div data-testid="private-content" hidden>
               <h1 data-testid="private-title">Private QA area</h1>
               <p>The authenticated page is ready.</p>
-              <button data-testid="private-action" type="button">Run private action</button>
+              <div data-testid="scroll-panel"><div data-testid="scroll-content">Scrollable content end</div></div>
+              <button data-testid="private-action" type="button" aria-busy="true">Run private action</button>
               <p data-testid="action-complete" hidden>Private action completed</p>
+              <p data-testid="environment-result"></p>
+              <div data-testid="drag-source" draggable="true">Drag source</div>
+              <div data-testid="drop-target">Drop target</div>
+              <p data-testid="drag-result">Not dropped</p>
+              <label>Import sample <input data-testid="upload-input" type="file"></label>
+              <p data-testid="upload-result">No file</p>
+              <button data-testid="dialog-action" type="button">Confirm action</button>
+              <p data-testid="dialog-result">Not confirmed</p>
+              <button data-testid="popup-action" type="button">Open popup</button>
+              <iframe data-testid="qa-frame" src="/frame" title="QA frame"></iframe>
+              <a data-testid="download-action" href="/export.csv" download>Download report</a>
             </div>
           </section>`;
         setTimeout(() => {
@@ -64,8 +87,35 @@
         }, 750);
         document.querySelector('[data-testid="private-action"]').addEventListener("click", async () => {
           const response = await fetch("/api/private-action", { method: "POST" });
-          if (response.ok) document.querySelector('[data-testid="action-complete"]').hidden = false;
+          if (response.ok) setTimeout(() => {
+            document.querySelector('[data-testid="private-action"]').setAttribute("aria-busy", "false");
+            document.querySelector('[data-testid="action-complete"]').hidden = false;
+          }, 150);
         });
+        document.querySelector('[data-testid="environment-result"]').textContent = [
+          navigator.language,
+          Intl.DateTimeFormat().resolvedOptions().timeZone,
+          matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light",
+          matchMedia("(prefers-reduced-motion: reduce)").matches ? "reduce" : "no-preference",
+        ].join("|");
+        const dragSource = document.querySelector('[data-testid="drag-source"]');
+        const dropTarget = document.querySelector('[data-testid="drop-target"]');
+        dragSource.addEventListener("dragstart", (event) => event.dataTransfer.setData("text/plain", "qa-card"));
+        dropTarget.addEventListener("dragover", (event) => event.preventDefault());
+        dropTarget.addEventListener("drop", (event) => {
+          event.preventDefault();
+          document.querySelector('[data-testid="drag-result"]').textContent = event.dataTransfer.getData("text/plain") === "qa-card" ? "Drop completed" : "Drop failed";
+        });
+        document.querySelector('[data-testid="upload-input"]').addEventListener("change", async (event) => {
+          const file = event.target.files[0];
+          document.querySelector('[data-testid="upload-result"]').textContent = file ? `${file.name}:${await file.text()}` : "No file";
+        });
+        document.querySelector('[data-testid="dialog-action"]').addEventListener("click", async () => {
+          if (!confirm("Proceed safely?")) return;
+          const response = await fetch("/api/dialog-action", { method: "POST" });
+          if (response.ok) document.querySelector('[data-testid="dialog-result"]').textContent = "Confirmed action completed";
+        });
+        document.querySelector('[data-testid="popup-action"]').addEventListener("click", () => window.open("/popup", "qa-popup"));
       }
     </script>
   </body>

@@ -21,7 +21,28 @@ const MAX_RUNNER_TIMEOUT_MS = 100_000;
 const CLEANUP_TIMEOUT_MS = 5_000;
 const HARD_EXIT_GRACE_MS = 15_000;
 const PROGRESS_LOG_MAX_BYTES = 1024 * 1024;
+const DEFAULT_VIEWPORT = Object.freeze({ width: 1280, height: 720 });
+const MIN_VIEWPORT = Object.freeze({ width: 320, height: 240 });
+const MAX_VIEWPORT = Object.freeze({ width: 3840, height: 2160 });
+const MAX_SCROLL_DISTANCE = 1_000_000;
+const ASSERTION_POLL_INTERVAL_MS = 100;
+const MAX_POPUPS = 3;
+const MAX_UPLOAD_FILES = 10;
+const MAX_UPLOAD_FILE_BYTES = 5 * 1024 * 1024;
+const MAX_UPLOAD_TOTAL_BYTES = 10 * 1024 * 1024;
+const MAX_FLOW_BYTES = 16 * 1024 * 1024;
+const DEFAULT_DOWNLOAD_MAX_BYTES = 5 * 1024 * 1024;
+const MAX_DOWNLOAD_BYTES = 25 * 1024 * 1024;
+const DEFAULT_ENVIRONMENT = Object.freeze({
+	locale: "en-US",
+	timezoneId: "UTC",
+	colorScheme: "light",
+	reducedMotion: "reduce",
+});
+const ATTRIBUTE_NAME = /^[A-Za-z_:][A-Za-z0-9_.:-]{0,127}$/;
 const PROFILE_ID = /^[A-Za-z0-9._-]+$/;
+const HTTP_METHODS = new Set(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]);
+const DIALOG_TYPES = new Set(["alert", "beforeunload", "confirm", "prompt"]);
 const AUTH_TEMPLATE = `{
   // Authenticated browser QA requires at least one project-local profile.
   // Fill and uncomment a profile below. Keep this file private.
@@ -142,6 +163,8 @@ async function runQa({ cwd, agentDir, args, profileId, profile, deadline, progre
 	const workspaceDir = path.join(agentDir, QA_WORKSPACE_RELATIVE);
 	const flowPath = resolveExistingPrivateFile(workspaceDir, args.flow, "QA flow", false);
 	const flow = readFlow(flowPath, profileId);
+	const viewport = resolveViewport(flow, profileId);
+	const environment = resolveEnvironment(flow, profileId);
 	const allowedOrigins = normalizeAllowedOrigins(profile.allowedOrigins, profileId);
 	const baseURL = normalizeBaseUrl(args.baseUrl ?? profile.baseUrl ?? allowedOrigins[0], allowedOrigins, profileId);
 	validateAuthConfiguration(cwd, profile.auth, allowedOrigins, profileId);
@@ -155,9 +178,10 @@ async function runQa({ cwd, agentDir, args, profileId, profile, deadline, progre
 	const browser = await runStage(progress, "browser_launch", deadline, () => playwright.chromium.launch({ headless: true }), profileId);
 	let context;
 	let page;
-	let video;
+	const videos = [];
 	let outcome = "passed";
 	let failure;
+	const observations = [];
 	const runtimeSecrets = collectSecrets(profile.auth);
 	const tracePath = path.join(evidenceDir, "trace.zip");
 	try {
@@ -165,20 +189,21 @@ async function runQa({ cwd, agentDir, args, profileId, profile, deadline, progre
 		context = await runStage(progress, "context_create", deadline, () => browser.newContext({
 			...contextOptions,
 			baseURL,
+			...environment,
 			serviceWorkers: "block",
-			recordVideo: { dir: evidenceDir, size: { width: 1280, height: 720 } },
-			viewport: { width: 1280, height: 720 },
+			recordVideo: { dir: evidenceDir, size: viewport },
+			viewport,
 		}), profileId);
 		await runStage(progress, "origin_guard_install", deadline, () => installOriginGuard(context, allowedOrigins, profile.auth), profileId);
 		await runStage(progress, "context_auth_apply", deadline, () => applyContextAuth(context, profile.auth, allowedOrigins, baseURL, profileId), profileId);
 		page = await runStage(progress, "page_create", deadline, () => context.newPage(), profileId);
-		video = page.video();
+		videos.push({ name: "video.webm", video: page.video() });
 		await runStage(progress, "form_auth_apply", deadline, () => applyFormAuth(page, profile.auth, allowedOrigins, profileId), profileId);
 		const initialStorageState = await runStage(progress, "storage_state_collect", deadline, () => context.storageState(), profileId);
 		runtimeSecrets.push(...collectStorageStateSecrets(initialStorageState));
 		await runStage(progress, "trace_start", deadline, () => context.tracing.start({ screenshots: true, snapshots: true, sources: false }), profileId);
-		await runStage(progress, "flow_execute", deadline, () => executeFlow({ page, context, baseURL, evidenceDir, flow, allowedOrigins, profileId, secrets: runtimeSecrets }), profileId);
-		await runStage(progress, "secret_exposure_check", deadline, () => assertPageDoesNotExposeSecrets(page, runtimeSecrets, profileId), profileId);
+		await runStage(progress, "flow_execute", deadline, () => executeFlow({ context, page, baseURL, evidenceDir, flow, allowedOrigins, profileId, secrets: runtimeSecrets, observations, videos }), profileId);
+		await runStage(progress, "secret_exposure_check", deadline, () => assertBrowserDoesNotExposeSecrets(context, page, runtimeSecrets, profileId), profileId);
 		await runStage(progress, "final_screenshot", deadline, () => page.screenshot({ path: path.join(evidenceDir, "final.png"), fullPage: true }), profileId);
 	} catch (error) {
 		outcome = error instanceof QaStatusError ? error.status : "failed";
@@ -212,13 +237,24 @@ async function runQa({ cwd, agentDir, args, profileId, profile, deadline, progre
 			}
 			await runCleanupStage(progress, "context_close", () => context.close(), cleanupDeadline).catch(() => {});
 		}
-		if (video) {
+		for (const [index, entry] of videos.entries()) {
+			if (!entry.video) continue;
 			try {
-				const generatedVideo = await runCleanupStage(progress, "video_finalize", () => video.path(), cleanupDeadline);
-				if (fs.existsSync(generatedVideo)) fs.renameSync(generatedVideo, path.join(evidenceDir, "video.webm"));
+				const generatedVideo = await runCleanupStage(progress, `video_${index + 1}_finalize`, () => entry.video.path(), cleanupDeadline);
+				if (!fs.existsSync(generatedVideo)) continue;
+				if (entry.discard) fs.rmSync(generatedVideo, { force: true });
+				else fs.renameSync(generatedVideo, path.join(evidenceDir, entry.name));
 			} catch { /* best effort */ }
 		}
 		await runCleanupStage(progress, "browser_close", () => browser.close(), cleanupDeadline).catch(() => {});
+	}
+	try {
+		for (const name of fs.readdirSync(evidenceDir).filter((name) => /^download-[A-Za-z0-9._-]+\.bin$/.test(name))) {
+			assertFileDoesNotExposeSecrets(path.join(evidenceDir, name), runtimeSecrets, profileId);
+		}
+	} catch (error) {
+		outcome = error instanceof QaStatusError ? error.status : "failed";
+		failure = error;
 	}
 	if (failure?.suppressEvidence) removeVisualEvidence(evidenceDir);
 
@@ -227,6 +263,9 @@ async function runQa({ cwd, agentDir, args, profileId, profile, deadline, progre
 		evidenceDir: relativePath(cwd, evidenceDir),
 		evidence,
 		artifacts: artifactManifest(evidenceDir, evidence),
+		viewport,
+		environment,
+		...(observations.length > 0 ? { observations } : {}),
 	};
 	writeJsonPrivate(path.join(evidenceDir, "result.json"), {
 		status: outcome,
@@ -407,7 +446,7 @@ function validateAuthConfiguration(cwd, auth, allowedOrigins, profileId) {
 
 function readFlow(flowPath, profileId) {
 	const stat = fs.statSync(flowPath);
-	if (!stat.isFile() || stat.size > 256 * 1024) throw new QaStatusError("QA_RUN_FAILED", "QA flow must be a regular JSONC file no larger than 256 KiB", 1, profileId);
+	if (!stat.isFile() || stat.size > MAX_FLOW_BYTES) throw new QaStatusError("QA_RUN_FAILED", "QA flow must be a regular JSONC file no larger than 16 MiB", 1, profileId);
 	const errors = [];
 	const flow = parseJsonc(fs.readFileSync(flowPath, "utf8"), errors, { allowTrailingComma: true });
 	if (errors.length > 0 || !isObject(flow) || !Array.isArray(flow.steps) || flow.steps.length === 0 || flow.steps.length > 100) {
@@ -416,26 +455,109 @@ function readFlow(flowPath, profileId) {
 	return flow;
 }
 
-async function executeFlow({ page, baseURL, evidenceDir, flow, allowedOrigins, profileId, secrets }) {
+function resolveViewport(flow, profileId) {
+	if (flow.viewport === undefined) return { ...DEFAULT_VIEWPORT };
+	if (!isObject(flow.viewport)) throw new QaStatusError("QA_RUN_FAILED", "QA flow viewport must be an object with width and height", 1, profileId);
+	const { width, height } = flow.viewport;
+	if (!Number.isInteger(width) || !Number.isInteger(height)
+		|| width < MIN_VIEWPORT.width || height < MIN_VIEWPORT.height
+		|| width > MAX_VIEWPORT.width || height > MAX_VIEWPORT.height) {
+		throw new QaStatusError(
+			"QA_RUN_FAILED",
+			`QA flow viewport must use integer dimensions from ${MIN_VIEWPORT.width}x${MIN_VIEWPORT.height} through ${MAX_VIEWPORT.width}x${MAX_VIEWPORT.height}`,
+			1,
+			profileId,
+		);
+	}
+	return { width, height };
+}
+
+function resolveEnvironment(flow, profileId) {
+	if (flow.environment === undefined) return { ...DEFAULT_ENVIRONMENT };
+	if (!isObject(flow.environment)) throw new QaStatusError("QA_RUN_FAILED", "QA flow environment must be an object", 1, profileId);
+	const environment = { ...DEFAULT_ENVIRONMENT };
+	if (flow.environment.locale !== undefined) {
+		if (typeof flow.environment.locale !== "string" || flow.environment.locale.length > 64) {
+			throw new QaStatusError("QA_RUN_FAILED", "QA flow environment locale is invalid", 1, profileId);
+		}
+		try {
+			environment.locale = Intl.getCanonicalLocales(flow.environment.locale)[0];
+		} catch {
+			throw new QaStatusError("QA_RUN_FAILED", "QA flow environment locale is invalid", 1, profileId);
+		}
+	}
+	if (flow.environment.timezoneId !== undefined) {
+		if (typeof flow.environment.timezoneId !== "string" || flow.environment.timezoneId.length > 100) {
+			throw new QaStatusError("QA_RUN_FAILED", "QA flow environment timezoneId is invalid", 1, profileId);
+		}
+		try {
+			new Intl.DateTimeFormat("en", { timeZone: flow.environment.timezoneId }).format(0);
+			environment.timezoneId = flow.environment.timezoneId;
+		} catch {
+			throw new QaStatusError("QA_RUN_FAILED", "QA flow environment timezoneId is invalid", 1, profileId);
+		}
+	}
+	if (flow.environment.colorScheme !== undefined) {
+		if (!["light", "dark", "no-preference"].includes(flow.environment.colorScheme)) {
+			throw new QaStatusError("QA_RUN_FAILED", "QA flow environment colorScheme is invalid", 1, profileId);
+		}
+		environment.colorScheme = flow.environment.colorScheme;
+	}
+	if (flow.environment.reducedMotion !== undefined) {
+		if (!["reduce", "no-preference"].includes(flow.environment.reducedMotion)) {
+			throw new QaStatusError("QA_RUN_FAILED", "QA flow environment reducedMotion is invalid", 1, profileId);
+		}
+		environment.reducedMotion = flow.environment.reducedMotion;
+	}
+	return environment;
+}
+
+async function executeFlow({ context, page, baseURL, evidenceDir, flow, allowedOrigins, profileId, secrets, observations, videos }) {
 	const timeout = Math.min(finitePositive(flow.timeoutMs) ?? 15_000, 60_000);
 	page.setDefaultTimeout(timeout);
 	page.setDefaultNavigationTimeout(timeout);
+	const popups = new Map();
+	let activeIndex = 0;
+	let popupCaptureArmed = false;
+	let capturedPopup;
+	let unexpectedPopupError;
+	const onContextPage = (candidate) => {
+		if (candidate === page) return;
+		if (popupCaptureArmed && !capturedPopup) {
+			capturedPopup = candidate;
+			return;
+		}
+		videos.push({ name: `discarded-popup-${videos.length}.webm`, video: candidate.video(), discard: true });
+		unexpectedPopupError ??= flowError(profileId, activeIndex, "unexpected popup opened; use openPopup to declare it");
+		void candidate.close().catch(() => {});
+	};
+	context.on("page", onContextPage);
+	try {
 	for (let index = 0; index < flow.steps.length; index += 1) {
+		activeIndex = index;
 		const step = flow.steps[index];
 		if (!isObject(step) || typeof step.action !== "string") throw flowError(profileId, index, "action is missing");
-		const locator = step.locator === undefined ? undefined : resolveLocator(page, step.locator, profileId, index);
+		if ((step.expectResponse !== undefined || step.expectDialog !== undefined)
+			&& !["click", "doubleClick", "press", "check", "uncheck", "selectOption"].includes(step.action)) {
+			throw flowError(profileId, index, "response and dialog expectations require a triggering interaction");
+		}
+		const { scope, ownerPage } = await resolveStepTarget({ page, popups, step, allowedOrigins, profileId, index });
+		const locator = step.locator === undefined ? undefined : resolveLocator(scope, step.locator, profileId, index);
 		switch (step.action) {
 			case "goto": {
 				const target = typeof step.url === "string" ? step.url : step.path;
 				if (typeof target !== "string") throw flowError(profileId, index, "goto requires url or path");
 				const url = new URL(target, baseURL);
 				if (url.username || url.password || !allowedOrigins.includes(url.origin)) throw flowError(profileId, index, "goto target is outside allowedOrigins");
-				await page.goto(url.href, { waitUntil: validWaitUntil(step.waitUntil) });
+				await scope.goto(url.href, { waitUntil: validWaitUntil(step.waitUntil) });
 				break;
 			}
-			case "reload": await page.reload({ waitUntil: validWaitUntil(step.waitUntil) }); break;
-			case "click": await requireLocator(locator, profileId, index).click(); break;
-			case "doubleClick": await requireLocator(locator, profileId, index).dblclick(); break;
+			case "reload":
+				if (scope !== ownerPage) throw flowError(profileId, index, "reload is not supported for frame targets");
+				await ownerPage.reload({ waitUntil: validWaitUntil(step.waitUntil) });
+				break;
+			case "click": await executeExpectedInteraction({ ownerPage, step, allowedOrigins, timeout, profileId, index, action: () => requireLocator(locator, profileId, index).click() }); break;
+			case "doubleClick": await executeExpectedInteraction({ ownerPage, step, allowedOrigins, timeout, profileId, index, action: () => requireLocator(locator, profileId, index).dblclick() }); break;
 			case "hover": await requireLocator(locator, profileId, index).hover(); break;
 			case "fill":
 				if (typeof step.value !== "string") throw flowError(profileId, index, "fill requires a string value");
@@ -443,42 +565,172 @@ async function executeFlow({ page, baseURL, evidenceDir, flow, allowedOrigins, p
 				break;
 			case "press":
 				if (typeof step.key !== "string" || step.key.length > 80) throw flowError(profileId, index, "press requires a valid key");
-				await requireLocator(locator, profileId, index).press(step.key);
+				await executeExpectedInteraction({ ownerPage, step, allowedOrigins, timeout, profileId, index, action: () => requireLocator(locator, profileId, index).press(step.key) });
 				break;
-			case "check": await requireLocator(locator, profileId, index).check(); break;
-			case "uncheck": await requireLocator(locator, profileId, index).uncheck(); break;
+			case "check": await executeExpectedInteraction({ ownerPage, step, allowedOrigins, timeout, profileId, index, action: () => requireLocator(locator, profileId, index).check() }); break;
+			case "uncheck": await executeExpectedInteraction({ ownerPage, step, allowedOrigins, timeout, profileId, index, action: () => requireLocator(locator, profileId, index).uncheck() }); break;
 			case "selectOption":
 				if (typeof step.value !== "string" && !isStringArray(step.value)) throw flowError(profileId, index, "selectOption requires a string or string array");
-				await requireLocator(locator, profileId, index).selectOption(step.value);
+				await executeExpectedInteraction({ ownerPage, step, allowedOrigins, timeout, profileId, index, action: () => requireLocator(locator, profileId, index).selectOption(step.value) });
+				break;
+			case "dragTo": {
+				const destination = resolveLocator(scope, step.dropTarget, profileId, index);
+				const options = {};
+				if (step.sourcePosition !== undefined) options.sourcePosition = resolvePoint(step.sourcePosition, profileId, index, "sourcePosition");
+				if (step.dropPosition !== undefined) options.targetPosition = resolvePoint(step.dropPosition, profileId, index, "dropPosition");
+				await requireLocator(locator, profileId, index).dragTo(destination, options);
+				break;
+			}
+			case "uploadFiles": {
+				const files = decodeUploadFiles(step.files, profileId, index);
+				await requireLocator(locator, profileId, index).setInputFiles(files);
+				break;
+			}
+			case "openPopup": {
+				if (!isSafeName(step.name)) throw flowError(profileId, index, "openPopup requires a safe name");
+				if (popups.has(step.name)) throw flowError(profileId, index, `popup name is duplicated: ${step.name}`);
+				if (popups.size >= MAX_POPUPS) throw flowError(profileId, index, `openPopup supports at most ${MAX_POPUPS} popups`);
+				popupCaptureArmed = true;
+				capturedPopup = undefined;
+				const popupPromise = ownerPage.waitForEvent("popup", { timeout });
+				let popup;
+				let popupVideo;
+				try {
+					[, popup] = await Promise.all([requireLocator(locator, profileId, index).click(), popupPromise]);
+					popup.setDefaultTimeout(timeout);
+					popup.setDefaultNavigationTimeout(timeout);
+					popupVideo = { name: `video-popup-${step.name}.webm`, video: popup.video(), discard: false };
+					videos.push(popupVideo);
+					await popup.waitForLoadState("domcontentloaded", { timeout });
+					const origin = assertSameOriginPage(popup, ownerPage, allowedOrigins, profileId, index, "popup");
+					popups.set(step.name, { page: popup, origin });
+				} catch (error) {
+					popup ??= capturedPopup;
+					if (popup && !popupVideo) {
+						popupVideo = { name: `discarded-popup-${videos.length}.webm`, video: popup.video(), discard: true };
+						videos.push(popupVideo);
+					}
+					if (popupVideo) popupVideo.discard = true;
+					await popup?.close().catch(() => {});
+					throw error;
+				} finally {
+					popupCaptureArmed = false;
+					capturedPopup = undefined;
+				}
+				break;
+			}
+			case "download": {
+				await executeDownload({ ownerPage, locator: requireLocator(locator, profileId, index), step, evidenceDir, allowedOrigins, timeout, profileId, index, secrets });
+				break;
+			}
+			case "wheel": {
+				const deltaX = optionalFiniteNumber(step.deltaX, 0, profileId, index, "wheel deltaX");
+				const deltaY = optionalFiniteNumber(step.deltaY, 0, profileId, index, "wheel deltaY");
+				if (deltaX === 0 && deltaY === 0) throw flowError(profileId, index, "wheel requires a non-zero deltaX or deltaY");
+				if (locator) await locator.hover();
+				await ownerPage.mouse.wheel(deltaX, deltaY);
+				break;
+			}
+			case "evaluate":
+				await executeSafeEvaluation({ page: scope, locator, step, profileId, index, observations });
 				break;
 			case "waitFor": await requireLocator(locator, profileId, index).waitFor({ state: validLocatorState(step.state) }); break;
 			case "waitForTimeout":
 				if (!finitePositive(step.timeoutMs) || step.timeoutMs > 5_000) throw flowError(profileId, index, "waitForTimeout must be between 1 and 5000 ms");
-				await page.waitForTimeout(step.timeoutMs);
+				await ownerPage.waitForTimeout(step.timeoutMs);
 				break;
-			case "assertVisible": assertCondition(await requireLocator(locator, profileId, index).isVisible(), profileId, index, "expected locator to be visible"); break;
-			case "assertHidden": assertCondition(await requireLocator(locator, profileId, index).isHidden(), profileId, index, "expected locator to be hidden"); break;
-			case "assertEnabled": assertCondition(await requireLocator(locator, profileId, index).isEnabled(), profileId, index, "expected locator to be enabled"); break;
-			case "assertDisabled": assertCondition(await requireLocator(locator, profileId, index).isDisabled(), profileId, index, "expected locator to be disabled"); break;
-			case "assertChecked": assertCondition(await requireLocator(locator, profileId, index).isChecked(), profileId, index, "expected locator to be checked"); break;
-			case "assertUnchecked": assertCondition(!(await requireLocator(locator, profileId, index).isChecked()), profileId, index, "expected locator to be unchecked"); break;
+			case "assertVisible": {
+				const target = requireLocator(locator, profileId, index);
+				await retryAssertion({ page: ownerPage, timeout, profileId, index, reason: "expected locator to be visible", check: () => target.isVisible() });
+				break;
+			}
+			case "assertHidden": {
+				const target = requireLocator(locator, profileId, index);
+				await retryAssertion({ page: ownerPage, timeout, profileId, index, reason: "expected locator to be hidden", check: () => target.isHidden() });
+				break;
+			}
+			case "assertEnabled": {
+				const target = requireLocator(locator, profileId, index);
+				await retryAssertion({ page: ownerPage, timeout, profileId, index, reason: "expected locator to be enabled", check: () => target.isEnabled() });
+				break;
+			}
+			case "assertDisabled": {
+				const target = requireLocator(locator, profileId, index);
+				await retryAssertion({ page: ownerPage, timeout, profileId, index, reason: "expected locator to be disabled", check: () => target.isDisabled() });
+				break;
+			}
+			case "assertChecked": {
+				const target = requireLocator(locator, profileId, index);
+				await retryAssertion({ page: ownerPage, timeout, profileId, index, reason: "expected locator to be checked", check: () => target.isChecked() });
+				break;
+			}
+			case "assertUnchecked": {
+				const target = requireLocator(locator, profileId, index);
+				await retryAssertion({ page: ownerPage, timeout, profileId, index, reason: "expected locator to be unchecked", check: async () => !(await target.isChecked()) });
+				break;
+			}
 			case "assertText": {
-				const actual = (await requireLocator(locator, profileId, index).textContent()) ?? "";
-				assertExpectedString(actual, step, profileId, index, "text");
+				const matches = expectedStringMatcher(step, profileId, index, "text");
+				const target = requireLocator(locator, profileId, index);
+				await retryAssertion({
+					page: ownerPage, timeout, profileId, index, reason: "text assertion failed",
+					check: async () => matches((await target.textContent()) ?? ""),
+				});
 				break;
 			}
 			case "assertValue": {
-				const actual = await requireLocator(locator, profileId, index).inputValue();
-				assertExpectedString(actual, step, profileId, index, "value");
+				const matches = expectedStringMatcher(step, profileId, index, "value");
+				const target = requireLocator(locator, profileId, index);
+				await retryAssertion({
+					page: ownerPage, timeout, profileId, index, reason: "value assertion failed",
+					check: async () => matches(await target.inputValue()),
+				});
 				break;
 			}
-			case "assertCount":
-				if (!Number.isInteger(step.equals) || step.equals < 0) throw flowError(profileId, index, "assertCount requires a non-negative integer equals");
-				assertCondition((await requireLocator(locator, profileId, index).count()) === step.equals, profileId, index, "locator count assertion failed");
+			case "assertAttribute": {
+				if (typeof step.attribute !== "string" || !ATTRIBUTE_NAME.test(step.attribute)) {
+					throw flowError(profileId, index, "assertAttribute requires a valid attribute name");
+				}
+				const matches = expectedStringMatcher(step, profileId, index, "attribute");
+				const target = requireLocator(locator, profileId, index);
+				await retryAssertion({
+					page: ownerPage, timeout, profileId, index, reason: "attribute assertion failed",
+					check: async () => {
+						const actual = await target.getAttribute(step.attribute);
+						return actual !== null && matches(actual);
+					},
+				});
 				break;
-			case "assertURL": assertExpectedString(page.url(), step, profileId, index, "URL"); break;
+			}
+			case "assertCount": {
+				if (!Number.isInteger(step.equals) || step.equals < 0) throw flowError(profileId, index, "assertCount requires a non-negative integer equals");
+				const target = requireLocator(locator, profileId, index);
+				await retryAssertion({
+					page: ownerPage, timeout, profileId, index, reason: "locator count assertion failed",
+					check: async () => (await target.count()) === step.equals,
+				});
+				break;
+			}
+			case "assertDOMMetric": {
+				if (typeof step.metric !== "string") throw flowError(profileId, index, "assertDOMMetric requires metric");
+				const initialMetrics = await collectDomMetrics(scope, locator);
+				if (!Object.prototype.hasOwnProperty.call(initialMetrics, step.metric)) {
+					throw flowError(profileId, index, `unsupported DOM metric: ${step.metric}`);
+				}
+				const matches = numericComparisonMatcher(step, profileId, index);
+				await retryAssertion({
+					page: ownerPage, timeout, profileId, index, reason: `${step.metric} assertion failed`,
+					check: async () => matches((await collectDomMetrics(scope, locator))[step.metric]),
+				});
+				break;
+			}
+			case "assertURL": {
+				const matches = expectedStringMatcher(step, profileId, index, "URL");
+				await retryAssertion({ page: ownerPage, timeout, profileId, index, reason: "URL assertion failed", check: () => matches(scope.url()) });
+				break;
+			}
 			case "authRejectedIf": {
-				const urlRejected = typeof step.urlIncludes === "string" && page.url().includes(step.urlIncludes);
+				const urlRejected = typeof step.urlIncludes === "string" && scope.url().includes(step.urlIncludes);
 				const locatorRejected = locator ? await locator.isVisible().catch(() => false) : false;
 				if (!urlRejected && !locatorRejected) break;
 				throw new QaStatusError("QA_AUTH_UPDATE_REQUIRED", "application rejected or expired the configured authentication", EXIT_AUTH_UPDATE_REQUIRED, profileId);
@@ -486,13 +738,377 @@ async function executeFlow({ page, baseURL, evidenceDir, flow, allowedOrigins, p
 			case "screenshot": {
 				const name = typeof step.name === "string" ? step.name : `step-${index + 1}`;
 				if (!isSafeName(name)) throw flowError(profileId, index, "screenshot name is invalid");
-				await assertPageDoesNotExposeSecrets(page, secrets, profileId);
-				await page.screenshot({ path: path.join(evidenceDir, `${name}.png`), fullPage: step.fullPage !== false });
+				await assertBrowserDoesNotExposeSecrets(context, page, secrets, profileId);
+				await ownerPage.screenshot({ path: path.join(evidenceDir, `${name}.png`), fullPage: step.fullPage !== false });
 				break;
 			}
 			default: throw flowError(profileId, index, `unsupported action: ${step.action}`);
 		}
-		await assertPageDoesNotExposeSecrets(page, secrets, profileId);
+		if (unexpectedPopupError) throw unexpectedPopupError;
+		await assertBrowserDoesNotExposeSecrets(context, page, secrets, profileId);
+	}
+	} finally {
+		context.off("page", onContextPage);
+	}
+}
+
+async function resolveStepTarget({ page, popups, step, allowedOrigins, profileId, index }) {
+	if (step.target === undefined || (isObject(step.target) && step.target.type === "main")) {
+		return { scope: page, ownerPage: page };
+	}
+	if (!isObject(step.target)) throw flowError(profileId, index, "target must be an object");
+	if (step.target.type === "popup") {
+		if (!isSafeName(step.target.name) || !popups.has(step.target.name)) throw flowError(profileId, index, "popup target is missing or unknown");
+		const record = popups.get(step.target.name);
+		const popup = record.page;
+		if (popup.isClosed()) throw flowError(profileId, index, "popup target is closed");
+		assertPageOrigin(popup, record.origin, allowedOrigins, profileId, index, "popup target");
+		return { scope: popup, ownerPage: popup };
+	}
+	if (step.target.type === "frame") {
+		const popupRecord = step.target.page === undefined ? undefined : popups.get(step.target.page);
+		const ownerPage = step.target.page === undefined ? page : popupRecord?.page;
+		if (!ownerPage || ownerPage.isClosed() || (step.target.page !== undefined && !isSafeName(step.target.page))) {
+			throw flowError(profileId, index, "frame target page is missing or unknown");
+		}
+		const frameLocator = resolveLocator(ownerPage, step.target.locator, profileId, index);
+		const handle = await frameLocator.elementHandle();
+		const frame = await handle?.contentFrame();
+		if (!frame) throw flowError(profileId, index, "frame target did not resolve to an iframe");
+		let origin;
+		try { origin = await frame.evaluate(() => location.origin); } catch { /* rejected below */ }
+		let ownerOrigin;
+		try { ownerOrigin = new URL(ownerPage.url()).origin; } catch { /* rejected below */ }
+		if (!allowedOrigins.includes(origin) || origin !== ownerOrigin) throw flowError(profileId, index, "frame target must be same-origin with its page");
+		return { scope: frame, ownerPage };
+	}
+	throw flowError(profileId, index, "target type must be main, popup, or frame");
+}
+
+function assertSameOriginPage(page, ownerPage, allowedOrigins, profileId, index, label) {
+	let ownerOrigin;
+	try { ownerOrigin = new URL(ownerPage.url()).origin; } catch { /* rejected below */ }
+	return assertPageOrigin(page, ownerOrigin, allowedOrigins, profileId, index, label);
+}
+
+function assertPageOrigin(page, expectedOrigin, allowedOrigins, profileId, index, label) {
+	try {
+		const url = new URL(page.url());
+		if (!url.username && !url.password && allowedOrigins.includes(url.origin) && url.origin === expectedOrigin) return url.origin;
+	} catch { /* rejected below */ }
+	throw flowError(profileId, index, `${label} must be same-origin with its opener`);
+}
+
+async function executeExpectedInteraction({ ownerPage, step, allowedOrigins, timeout, profileId, index, action }) {
+	const watchers = [];
+	try {
+		if (step.expectResponse !== undefined) watchers.push(createResponseWatcher(ownerPage, step.expectResponse, allowedOrigins, timeout, profileId, index));
+		if (step.expectDialog !== undefined) watchers.push(createDialogWatcher(ownerPage, step.expectDialog, timeout, profileId, index));
+		await Promise.all([action(), ...watchers.map((watcher) => watcher.promise)]);
+	} finally {
+		for (const watcher of watchers) watcher.cancel();
+	}
+}
+
+function createResponseWatcher(page, expectation, allowedOrigins, timeout, profileId, index) {
+	if (!isObject(expectation)
+		|| typeof expectation.path !== "string"
+		|| !expectation.path.startsWith("/")
+		|| expectation.path.startsWith("//")
+		|| /[?#\\]/.test(expectation.path)
+		|| !HTTP_METHODS.has(expectation.method)
+		|| !Number.isInteger(expectation.status)
+		|| expectation.status < 100
+		|| expectation.status > 599) {
+		throw flowError(profileId, index, "expectResponse requires exact path, method, and status");
+	}
+	let settled = false;
+	let settle;
+	const matchingRequests = new Set();
+	const promise = new Promise((resolve, reject) => {
+		settle = { resolve, reject };
+	});
+	const cleanup = () => {
+		clearTimeout(timer);
+		page.off("request", onRequest);
+		page.off("response", onResponse);
+	};
+	const finish = (error) => {
+		if (settled) return;
+		settled = true;
+		cleanup();
+		if (error) settle.reject(error);
+		else settle.resolve();
+	};
+	const onRequest = (request) => {
+		try {
+			const url = new URL(request.url());
+			if (!allowedOrigins.includes(url.origin)
+				|| url.pathname !== expectation.path
+				|| request.method() !== expectation.method) return;
+			matchingRequests.add(request);
+		} catch { /* unrelated request */ }
+	};
+	const onResponse = (response) => {
+		try {
+			if (!matchingRequests.has(response.request()) || response.status() !== expectation.status) return;
+			finish();
+		} catch { /* unrelated response */ }
+	};
+	const timer = setTimeout(() => finish(flowError(profileId, index, "expected response was not observed before timeout")), timeout);
+	page.on("request", onRequest);
+	page.on("response", onResponse);
+	return { promise, cancel: () => finish() };
+}
+
+function createDialogWatcher(page, expectation, timeout, profileId, index) {
+	if (!isObject(expectation)
+		|| !DIALOG_TYPES.has(expectation.type)
+		|| !isObject(expectation.message)
+		|| typeof expectation.accept !== "boolean") {
+		throw flowError(profileId, index, "expectDialog requires type, message matcher, and accept");
+	}
+	const matches = expectedStringMatcher(expectation.message, profileId, index, "dialog message");
+	let settled = false;
+	let settle;
+	const promise = new Promise((resolve, reject) => {
+		settle = { resolve, reject };
+	});
+	const cleanup = () => {
+		clearTimeout(timer);
+		page.off("dialog", onDialog);
+	};
+	const finish = (error) => {
+		if (settled) return;
+		settled = true;
+		cleanup();
+		if (error) settle.reject(error);
+		else settle.resolve();
+	};
+	const onDialog = async (dialog) => {
+		const matched = dialog.type() === expectation.type && matches(dialog.message());
+		try {
+			if (matched && expectation.accept) await dialog.accept();
+			else await dialog.dismiss();
+			finish(matched ? undefined : flowError(profileId, index, "native dialog did not match expectation"));
+		} catch {
+			finish(flowError(profileId, index, "native dialog could not be handled"));
+		}
+	};
+	const timer = setTimeout(() => finish(flowError(profileId, index, "expected native dialog was not observed before timeout")), timeout);
+	page.on("dialog", onDialog);
+	return { promise, cancel: () => finish() };
+}
+
+function resolvePoint(value, profileId, index, label) {
+	if (!isObject(value)
+		|| typeof value.x !== "number" || !Number.isFinite(value.x) || value.x < 0 || value.x > 100_000
+		|| typeof value.y !== "number" || !Number.isFinite(value.y) || value.y < 0 || value.y > 100_000) {
+		throw flowError(profileId, index, `${label} requires bounded non-negative x and y`);
+	}
+	return { x: value.x, y: value.y };
+}
+
+function decodeUploadFiles(value, profileId, index) {
+	if (!Array.isArray(value) || value.length > MAX_UPLOAD_FILES) {
+		throw flowError(profileId, index, `uploadFiles requires an array of at most ${MAX_UPLOAD_FILES} files`);
+	}
+	let totalBytes = 0;
+	return value.map((file) => {
+		if (!isObject(file)
+			|| typeof file.name !== "string" || file.name.length === 0 || file.name.length > 128 || /[\\/\0-\x1f]/.test(file.name)
+			|| typeof file.mimeType !== "string" || file.mimeType.length > 128 || !/^[\w!#$&^_.+-]+\/[\w!#$&^_.+-]+$/.test(file.mimeType)
+			|| typeof file.base64 !== "string" || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(file.base64)) {
+			throw flowError(profileId, index, "uploadFiles entries require a safe name, MIME type, and canonical base64");
+		}
+		const buffer = Buffer.from(file.base64, "base64");
+		if (buffer.toString("base64") !== file.base64 || buffer.length > MAX_UPLOAD_FILE_BYTES) {
+			throw flowError(profileId, index, `uploadFiles entries may not exceed ${MAX_UPLOAD_FILE_BYTES} bytes`);
+		}
+		totalBytes += buffer.length;
+		if (totalBytes > MAX_UPLOAD_TOTAL_BYTES) throw flowError(profileId, index, `uploadFiles total may not exceed ${MAX_UPLOAD_TOTAL_BYTES} bytes`);
+		return { name: file.name, mimeType: file.mimeType, buffer };
+	});
+}
+
+async function executeDownload({ ownerPage, locator, step, evidenceDir, allowedOrigins, timeout, profileId, index, secrets }) {
+	if (!isObject(step.filename)) throw flowError(profileId, index, "download requires a filename matcher");
+	const filenameMatches = expectedStringMatcher(step.filename, profileId, index, "download filename");
+	const maxBytes = step.maxBytes === undefined ? DEFAULT_DOWNLOAD_MAX_BYTES : step.maxBytes;
+	if (!Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_DOWNLOAD_BYTES) {
+		throw flowError(profileId, index, `download maxBytes must be between 1 and ${MAX_DOWNLOAD_BYTES}`);
+	}
+	if (step.retain !== undefined && typeof step.retain !== "boolean") throw flowError(profileId, index, "download retain must be boolean");
+	if (step.retain === true && !isSafeName(step.name)) throw flowError(profileId, index, "retained download requires a safe name");
+	const retained = step.retain === true ? path.join(evidenceDir, `download-${step.name}.bin`) : undefined;
+	if (retained && fs.existsSync(retained)) throw flowError(profileId, index, `retained download name is duplicated: ${step.name}`);
+	const downloadPromise = ownerPage.waitForEvent("download", { timeout });
+	const [, download] = await Promise.all([locator.click(), downloadPromise]);
+	try {
+		const url = new URL(download.url());
+		if (!allowedOrigins.includes(url.origin)) throw flowError(profileId, index, "download is outside allowedOrigins");
+	} catch (error) {
+		await download.cancel().catch(() => {});
+		if (error instanceof QaStatusError) throw error;
+		throw flowError(profileId, index, "download is outside allowedOrigins");
+	}
+	if (!filenameMatches(download.suggestedFilename())) {
+		await download.cancel().catch(() => {});
+		throw flowError(profileId, index, "download filename did not match expectation");
+	}
+	const temporary = path.join(evidenceDir, `.download-${index + 1}.tmp`);
+	try {
+		await saveDownloadWithLimit(download, temporary, maxBytes, profileId, index);
+		assertFileDoesNotExposeSecrets(temporary, secrets, profileId);
+		if (retained) {
+			fs.renameSync(temporary, retained);
+			fs.chmodSync(retained, 0o600);
+		}
+	} finally {
+		fs.rmSync(temporary, { force: true });
+	}
+}
+
+async function saveDownloadWithLimit(download, destination, maxBytes, profileId, index) {
+	let completed = false;
+	let failure;
+	const save = download.saveAs(destination).then(
+		() => { completed = true; },
+		(error) => { completed = true; failure = error; },
+	);
+	let exceeded = false;
+	while (!completed) {
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		if (!fs.existsSync(destination) || fs.statSync(destination).size <= maxBytes) continue;
+		exceeded = true;
+		await download.cancel().catch(() => {});
+		break;
+	}
+	await save;
+	if (exceeded || (fs.existsSync(destination) && fs.statSync(destination).size > maxBytes)) {
+		throw flowError(profileId, index, "download exceeded maxBytes");
+	}
+	if (failure) throw flowError(profileId, index, "download could not be saved");
+}
+
+function assertFileDoesNotExposeSecrets(file, secrets, profileId) {
+	if (secrets.length === 0) return;
+	const bytes = fs.readFileSync(file);
+	if (!secrets.some((secret) => secret && bytes.includes(Buffer.from(secret)))) return;
+	const error = new QaStatusError("QA_RUN_FAILED", "configured authentication appeared in a retained download; retained evidence was discarded", 1, profileId);
+	error.suppressEvidence = true;
+	throw error;
+}
+
+async function executeSafeEvaluation({ page, locator, step, profileId, index, observations }) {
+	switch (step.operation) {
+		case "scrollTo": {
+			const position = {
+				x: scrollPosition(step.x, profileId, index, "evaluate scrollTo x"),
+				y: scrollPosition(step.y, profileId, index, "evaluate scrollTo y"),
+			};
+			if (position.x === undefined && position.y === undefined) throw flowError(profileId, index, "evaluate scrollTo requires x or y");
+			if (locator) {
+				await locator.evaluate((element, next) => {
+					const maxX = Math.max(0, element.scrollWidth - element.clientWidth);
+					const maxY = Math.max(0, element.scrollHeight - element.clientHeight);
+					const x = next.x === "max" ? maxX : next.x ?? element.scrollLeft;
+					const y = next.y === "max" ? maxY : next.y ?? element.scrollTop;
+					element.scrollTo(x, y);
+				}, position);
+			} else {
+				await page.evaluate((next) => {
+					const root = document.scrollingElement ?? document.documentElement;
+					const maxX = Math.max(0, root.scrollWidth - window.innerWidth);
+					const maxY = Math.max(0, root.scrollHeight - window.innerHeight);
+					const x = next.x === "max" ? maxX : next.x ?? window.scrollX;
+					const y = next.y === "max" ? maxY : next.y ?? window.scrollY;
+					window.scrollTo(x, y);
+				}, position);
+			}
+			break;
+		}
+		case "scrollBy": {
+			const deltaX = optionalFiniteNumber(step.deltaX, 0, profileId, index, "evaluate scrollBy deltaX");
+			const deltaY = optionalFiniteNumber(step.deltaY, 0, profileId, index, "evaluate scrollBy deltaY");
+			if (deltaX === 0 && deltaY === 0) throw flowError(profileId, index, "evaluate scrollBy requires a non-zero deltaX or deltaY");
+			if (locator) await locator.evaluate((element, delta) => element.scrollBy(delta.x, delta.y), { x: deltaX, y: deltaY });
+			else await page.evaluate((delta) => window.scrollBy(delta.x, delta.y), { x: deltaX, y: deltaY });
+			break;
+		}
+		case "metrics": {
+			const name = step.name === undefined ? `metrics-${index + 1}` : step.name;
+			if (!isSafeName(name)) throw flowError(profileId, index, "evaluate metrics name is invalid");
+			if (observations.some((entry) => entry.name === name)) throw flowError(profileId, index, `evaluate metrics name is duplicated: ${name}`);
+			observations.push({ name, step: index + 1, value: await collectDomMetrics(page, locator) });
+			break;
+		}
+		default:
+			throw flowError(profileId, index, "evaluate requires operation scrollTo, scrollBy, or metrics; executable JavaScript is not allowed");
+	}
+}
+
+async function collectDomMetrics(page, locator) {
+	if (locator) {
+		return locator.evaluate((element) => {
+			const rect = element.getBoundingClientRect();
+			return {
+				scrollLeft: element.scrollLeft,
+				scrollTop: element.scrollTop,
+				scrollWidth: element.scrollWidth,
+				scrollHeight: element.scrollHeight,
+				clientWidth: element.clientWidth,
+				clientHeight: element.clientHeight,
+				x: rect.x,
+				y: rect.y,
+				width: rect.width,
+				height: rect.height,
+			};
+		});
+	}
+	return page.evaluate(() => {
+		const root = document.scrollingElement ?? document.documentElement;
+		return {
+			scrollX: window.scrollX,
+			scrollY: window.scrollY,
+			scrollWidth: root.scrollWidth,
+			scrollHeight: root.scrollHeight,
+			clientWidth: root.clientWidth,
+			clientHeight: root.clientHeight,
+			viewportWidth: window.innerWidth,
+			viewportHeight: window.innerHeight,
+		};
+	});
+}
+
+function scrollPosition(value, profileId, index, label) {
+	if (value === undefined || value === "max") return value;
+	return finiteNumber(value, profileId, index, label);
+}
+
+function optionalFiniteNumber(value, fallback, profileId, index, label) {
+	return value === undefined ? fallback : finiteNumber(value, profileId, index, label);
+}
+
+function finiteNumber(value, profileId, index, label) {
+	if (typeof value !== "number" || !Number.isFinite(value) || Math.abs(value) > MAX_SCROLL_DISTANCE) {
+		throw flowError(profileId, index, `${label} must be a finite number between -${MAX_SCROLL_DISTANCE} and ${MAX_SCROLL_DISTANCE}`);
+	}
+	return value;
+}
+
+function numericComparisonMatcher(step, profileId, index) {
+	const comparisons = ["equals", "greaterThan", "greaterThanOrEqual", "lessThan", "lessThanOrEqual"]
+		.filter((key) => typeof step[key] === "number" && Number.isFinite(step[key]));
+	if (comparisons.length !== 1) throw flowError(profileId, index, "assertDOMMetric requires exactly one numeric comparator");
+	const key = comparisons[0];
+	const expected = step[key];
+	switch (key) {
+		case "equals": return (actual) => actual === expected;
+		case "greaterThan": return (actual) => actual > expected;
+		case "greaterThanOrEqual": return (actual) => actual >= expected;
+		case "lessThan": return (actual) => actual < expected;
+		case "lessThanOrEqual": return (actual) => actual <= expected;
 	}
 }
 
@@ -513,15 +1129,25 @@ function requireLocator(locator, profileId, index) {
 	return locator;
 }
 
-function assertExpectedString(actual, step, profileId, index, label) {
+function expectedStringMatcher(step, profileId, index, label) {
 	const hasEquals = typeof step.equals === "string";
 	const hasIncludes = typeof step.includes === "string";
 	if (hasEquals === hasIncludes) throw flowError(profileId, index, `${label} assertion requires exactly one of equals or includes`);
-	assertCondition(hasEquals ? actual === step.equals : actual.includes(step.includes), profileId, index, `${label} assertion failed`);
+	return hasEquals ? (actual) => actual === step.equals : (actual) => actual.includes(step.includes);
 }
 
-function assertCondition(condition, profileId, index, reason) {
-	if (!condition) throw flowError(profileId, index, reason);
+async function retryAssertion({ page, timeout, profileId, index, reason, check }) {
+	const deadline = Date.now() + timeout;
+	while (true) {
+		try {
+			if (await check()) return;
+		} catch {
+			// Dynamic UI may temporarily detach or replace the target; retry until the assertion deadline.
+		}
+		const remaining = deadline - Date.now();
+		if (remaining <= 0) throw flowError(profileId, index, reason);
+		await page.waitForTimeout(Math.min(ASSERTION_POLL_INTERVAL_MS, remaining));
+	}
 }
 
 function flowError(profileId, index, reason) {
@@ -928,13 +1554,21 @@ function expandSecretForms(values) {
 	return [...forms].filter(Boolean).sort((left, right) => right.length - left.length);
 }
 
-async function assertPageDoesNotExposeSecrets(page, secrets, profileId) {
-	if (!page || page.isClosed() || secrets.length === 0) return;
-	const haystacks = [page.url(), await page.content()];
-	if (!secrets.some((secret) => secret && haystacks.some((value) => value.includes(secret)))) return;
-	const error = new QaStatusError("QA_RUN_FAILED", "configured authentication appeared in rendered page content; visual evidence was discarded", 1, profileId);
-	error.suppressEvidence = true;
-	throw error;
+async function assertBrowserDoesNotExposeSecrets(context, fallbackPage, secrets, profileId) {
+	if (secrets.length === 0) return;
+	const pages = typeof context?.pages === "function" ? context.pages() : [fallbackPage];
+	for (const page of pages) {
+		if (!page || page.isClosed()) continue;
+		const frames = typeof page.frames === "function" ? page.frames() : [page];
+		for (const frame of frames) {
+			let haystacks;
+			try { haystacks = [frame.url(), await frame.content()]; } catch { continue; }
+			if (!secrets.some((secret) => secret && haystacks.some((value) => value.includes(secret)))) continue;
+			const error = new QaStatusError("QA_RUN_FAILED", "configured authentication appeared in rendered page content; visual evidence was discarded", 1, profileId);
+			error.suppressEvidence = true;
+			throw error;
+		}
+	}
 }
 
 function sanitizeTraceArchive(tracePath, secrets) {
@@ -1143,25 +1777,26 @@ function relativePath(cwd, value) {
 
 function existingEvidence(evidenceDir) {
 	return fs.readdirSync(evidenceDir)
-		.filter((name) => /^(?:[A-Za-z0-9._-]+\.png|video\.webm|trace\.zip)$/.test(name))
+		.filter((name) => /^(?:[A-Za-z0-9._-]+\.png|video(?:-popup-[A-Za-z0-9._-]+)?\.webm|trace\.zip|download-[A-Za-z0-9._-]+\.bin)$/.test(name))
 		.sort();
 }
 
 function artifactManifest(evidenceDir, evidence) {
-	const artifacts = { screenshots: [], videos: [], traces: [] };
+	const artifacts = { screenshots: [], videos: [], traces: [], downloads: [] };
 	for (const name of evidence) {
 		const absolutePath = path.resolve(evidenceDir, name);
 		const artifact = { path: absolutePath, uri: pathToFileURL(absolutePath).href };
 		if (name.endsWith(".png")) artifacts.screenshots.push(artifact);
 		else if (name.endsWith(".webm")) artifacts.videos.push(artifact);
 		else if (name.endsWith(".zip")) artifacts.traces.push(artifact);
+		else if (name.endsWith(".bin")) artifacts.downloads.push(artifact);
 	}
 	return artifacts;
 }
 
 function removeVisualEvidence(evidenceDir) {
 	for (const name of fs.readdirSync(evidenceDir)) {
-		if (/\.(?:png|webm|zip)$/.test(name)) fs.rmSync(path.join(evidenceDir, name), { force: true });
+		if (/\.(?:png|webm|zip|bin)$/.test(name)) fs.rmSync(path.join(evidenceDir, name), { force: true });
 	}
 }
 

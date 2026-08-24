@@ -34,6 +34,7 @@ export type AppSessionLifecycleHost = {
 	createExtensionCommandContextActions(runtime: AgentSessionRuntime): ExtensionCommandContextActions;
 	handleExtensionError(error: ExtensionError): void;
 	handleSessionEvent(event: AgentSessionEvent): void;
+	bindAgentPause(session: AgentSession): void;
 	addEntry(entry: Entry): void;
 	setStatus(status: string): void;
 	showToast(message: string, kind: "success" | "error" | "warning" | "info"): void;
@@ -129,6 +130,7 @@ export class AppSessionLifecycleController {
 	async bindCurrentSession(options: BindCurrentSessionOptions = {}): Promise<void> {
 		const runtime = this.requireRuntime();
 		const session = runtime.session;
+		this.host.bindAgentPause(session);
 		const ownershipGeneration = this.advanceOwnership(runtime, session);
 		const subscriptionGeneration = ++this.subscriptionGeneration;
 		this.replacementHistoryGeneration += 1;

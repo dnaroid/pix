@@ -308,6 +308,23 @@ describe("AppMouseController", () => {
 		assert.equal(toggleCount, 1);
 	});
 
+	it("toggles agent pause when clicking its status target", () => {
+		let toggleCount = 0;
+		const controller = new AppMouseController(
+			fakeHost({ toggleAgentPause: () => { toggleCount += 1; } }),
+			fakePopupMenus(),
+			fakePopupActions(),
+			fakeScrollController(),
+			fakeCommandController(),
+		);
+		controller.statusAgentPauseTarget = { row: 5, startColumn: 1, endColumn: 2 };
+
+		controller.handleMouse({ button: 0, x: 1, y: 5, released: false });
+		controller.handleMouse({ button: 0, x: 1, y: 5, released: true });
+
+		assert.equal(toggleCount, 1);
+	});
+
 	it("toggles all thinking expansion when clicking its status target", () => {
 		let toggleCount = 0;
 		const controller = new AppMouseController(

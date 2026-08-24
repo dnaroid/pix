@@ -117,6 +117,7 @@ export class AppRenderController {
 		this.deps.mouseController.statusTerminalBellSoundTarget = undefined;
 		this.deps.mouseController.statusSessionTarget = undefined;
 		this.deps.mouseController.statusPromptEnhancerTarget = undefined;
+		this.deps.mouseController.statusAgentPauseTarget = undefined;
 		this.deps.mouseController.statusVoiceMicTarget = undefined;
 		this.deps.mouseController.statusVoiceLanguageTarget = undefined;
 		this.deps.mouseController.tabLineTargets.length = 0;
@@ -323,6 +324,7 @@ export class AppRenderController {
 		this.deps.mouseController.statusTerminalBellSoundTarget = this.deps.statusLineRenderer.terminalBellSoundTarget?.(statusLayout, statusRow);
 		this.deps.mouseController.statusSessionTarget = this.deps.statusLineRenderer.sessionTarget(statusLayout.text, statusRow, statusLayout.sessionLabel, statusLayout.workspaceLabel);
 		this.deps.mouseController.statusPromptEnhancerTarget = this.deps.statusLineRenderer.promptEnhancerTarget(statusLayout, statusRow);
+		this.deps.mouseController.statusAgentPauseTarget = this.deps.statusLineRenderer.agentPauseTarget?.(statusLayout, statusRow);
 		this.deps.mouseController.statusVoiceMicTarget = this.deps.statusLineRenderer.voiceMicTarget(statusLayout, statusRow);
 		this.deps.mouseController.statusVoiceLanguageTarget = this.deps.statusLineRenderer.voiceLanguageTarget(statusLayout, statusRow);
 		this.deps.mouseController.renderedRowTexts.set(statusRow, statusLayout.text);

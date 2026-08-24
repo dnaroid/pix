@@ -45,6 +45,7 @@ import { AppSessionLifecycleController, type BindCurrentSessionOptions } from ".
 import { AppShellController } from "./commands/shell-controller.js";
 import { runInteractiveShellCommand } from "./commands/shell-command.js";
 import { AppSessionEventController, type AppSessionEventControllerState } from "./session/session-event-controller.js";
+import { AgentPauseController } from "./session/agent-pause-controller.js";
 import { AppStatusController } from "./screen/status-controller.js";
 import { StatusLineRenderer } from "./rendering/status-line-renderer.js";
 import { AppModelUsageController } from "./model/model-usage-controller.js";
@@ -123,6 +124,7 @@ export class PiUiExtendApp {
 	private readonly popupMenus: AppPopupMenuController;
 	private readonly voiceController: AppVoiceController;
 	private readonly sessionEvents: AppSessionEventController;
+	private readonly agentPauseController: AgentPauseController;
 	private readonly shellController: AppShellController;
 	private readonly queuedMessages: AppQueuedMessageController;
 	private readonly workspaceActions: AppWorkspaceActionsController;
@@ -199,6 +201,11 @@ export class PiUiExtendApp {
 			blinkController: this.blinkController,
 			runtimeSession: () => this.runtime?.session,
 			render: () => this.scheduleRender(),
+		});
+		this.agentPauseController = new AgentPauseController({
+			showToast: (message, kind) => this.showToast(message, kind),
+			render: () => this.scheduleRender(),
+			isCurrentSession: (session) => this.runtime?.session === session,
 		});
 		this.modelUsageController = new AppModelUsageController({
 			runtimeSession: () => this.runtime?.session,
@@ -342,6 +349,8 @@ export class PiUiExtendApp {
 			promptEnhancerStatusWidgetEnabled: () => this.promptEnhancer.statusWidgetEnabled(),
 			terminalBellSoundStatusWidgetText: () => this.terminalBellSoundController.statusWidgetText(),
 			terminalBellSoundStatusWidgetEnabled: () => this.terminalBellSoundController.isEnabled(),
+			agentPauseStatusWidgetText: () => this.agentPauseController.statusWidgetText(this.runtime?.session),
+			agentPauseStatusWidgetActive: () => this.agentPauseController.statusWidgetActive(this.runtime?.session),
 			voiceStatusWidgetText: () => this.voiceController.statusWidgetText(),
 			voiceStatusWidgetActive: () => this.voiceController.statusWidgetActive(),
 			conversationQuickScrollDirections: () => this.conversationQuickScrollDirections(),
@@ -679,6 +688,7 @@ export class PiUiExtendApp {
 					this.render();
 				},
 				toggleTerminalBellSound: () => this.toggleTerminalBellSound(),
+				toggleAgentPause: () => this.agentPauseController.toggle(this.runtime?.session),
 				handleExtensionInputMouse: (event) => this.extensionUiController.handleCustomUiMouse(event),
 				render: () => this.render(),
 			},
@@ -845,6 +855,7 @@ export class PiUiExtendApp {
 			createExtensionCommandContextActions: (runtime) => this.extensionActions.createCommandContextActions(runtime),
 			handleExtensionError: (error) => this.extensionActions.handleExtensionError(error),
 			handleSessionEvent: (event) => this.handleSessionEvent(event),
+			bindAgentPause: (session) => this.agentPauseController.bind(session),
 			addEntry: (entry) => this.addEntry(entry),
 			setStatus: (status) => this.setStatus(status),
 			showToast: (message, kind) => this.showToast(message, kind),
@@ -871,6 +882,7 @@ export class PiUiExtendApp {
 				this.mouseController.statusTerminalBellSoundTarget = undefined;
 				this.mouseController.statusSessionTarget = undefined;
 				this.mouseController.statusPromptEnhancerTarget = undefined;
+				this.mouseController.statusAgentPauseTarget = undefined;
 				this.mouseController.statusVoiceMicTarget = undefined;
 				this.mouseController.statusVoiceLanguageTarget = undefined;
 				this.mouseController.tabLineTargets.length = 0;

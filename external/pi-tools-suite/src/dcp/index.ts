@@ -63,6 +63,7 @@ import {
 	collectProviderToolResultEvidence,
 	providerPayloadIncludesToolResult,
 } from "./provider-tool-results.js"
+import { reconcileInheritedCompressionBlocks } from "./pruner-compression-blocks.js"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -232,6 +233,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 
 	// ── 2. Create state ───────────────────────────────────────────────────────
 	const state = createState()
+	let pendingInheritedBlockReconciliation = false
 	const pendingProviderToolIds = new Set<string>()
 	const appendNudgeTelemetry = (
 		event: "emitted" | "upgraded" | "reapplied",
@@ -275,6 +277,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 	pi.on("session_start", async (event, ctx) => {
 		// Reset to a clean slate first.
 		resetState(state)
+		pendingInheritedBlockReconciliation = false
 
 		// Reset dedup hash before loading the sidecar state for this session.
 		resetDcpPersistenceDedup()
@@ -290,6 +293,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 			// Cleanup is opportunistic; stale sidecars must not block session startup.
 		})
 		restoreState(state, await loadDcpState(ctx))
+		pendingInheritedBlockReconciliation = state.compressionBlocks.length > 0
 
 		// fork/resume/new sessions inherit the source conversation but get a fresh
 		// sidecar; inherit the previous session's compression blocks so they are
@@ -299,6 +303,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 				const inherited = await loadDcpStateFromSessionFile(event.previousSessionFile)
 				const added = inheritCompressionBlocks(state, inherited)
 				if (added > 0) {
+					pendingInheritedBlockReconciliation = true
 					writeDcpDebugLog(configForContext(ctx), "session_start.inherited_blocks", {
 						reason: event.reason,
 						previousSessionFile: event.previousSessionFile,
@@ -433,6 +438,22 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 			return { messages: contextMessages }
 		}
 		annotateMessagesWithBranchEntryIds(contextMessages, ctx)
+		if (pendingInheritedBlockReconciliation) {
+			pendingInheritedBlockReconciliation = false
+			const reconciliation = reconcileInheritedCompressionBlocks(contextMessages, state)
+			writeDcpDebugLog(
+				effectiveConfig,
+				"context.reconciled_inherited_blocks",
+				{ ...reconciliation },
+				ctx,
+			)
+			if (
+				reconciliation.activatedBlockIds.length > 0 ||
+				reconciliation.deactivatedBlockIds.length > 0
+			) {
+				await saveDcpState(ctx, state)
+			}
+		}
 		let prunedMessages = applyPruning(contextMessages, state, effectiveConfig)
 		let candidate = null as ReturnType<typeof detectCompressionCandidate>
 		let messageCandidates = [] as ReturnType<typeof detectMessageCompressionCandidates>

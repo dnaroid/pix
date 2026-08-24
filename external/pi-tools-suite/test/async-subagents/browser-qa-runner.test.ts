@@ -105,8 +105,19 @@ exports.chromium = {
     return {
       async newContext(options = {}) {
         fs.appendFileSync(path.join(process.cwd(), "context-options"), JSON.stringify({ recordVideo: Boolean(options.recordVideo) }) + "\\n");
+        fs.appendFileSync(path.join(process.cwd(), "viewport-options"), JSON.stringify({
+          viewport: options.viewport,
+          videoSize: options.recordVideo?.size,
+          environment: { locale: options.locale, timezoneId: options.timezoneId, colorScheme: options.colorScheme, reducedMotion: options.reducedMotion },
+        }) + "\\n");
         const videoPath = path.join(options.recordVideo?.dir || process.cwd(), "generated.webm");
+        const contextListeners = new Map();
+        const onContext = (event, listener) => contextListeners.set(event, [...(contextListeners.get(event) || []), listener]);
+        const offContext = (event, listener) => contextListeners.set(event, (contextListeners.get(event) || []).filter((entry) => entry !== listener));
+        const emitContext = (event, value) => { for (const listener of [...(contextListeners.get(event) || [])]) listener(value); };
         return {
+          on: onContext,
+          off: offContext,
           async route(_pattern, handler) {
             const request = (url) => ({ url() { return url; }, headers() { return {}; } });
             await handler({
@@ -148,7 +159,45 @@ exports.chromium = {
             fs.mkdirSync(path.dirname(videoPath), { recursive: true });
             fs.writeFileSync(videoPath, "video");
             let currentUrl = "about:blank";
-            return {
+            let hoveredElement;
+            const elements = new Map();
+            const listeners = new Map();
+            const on = (event, listener) => listeners.set(event, [...(listeners.get(event) || []), listener]);
+            const off = (event, listener) => listeners.set(event, (listeners.get(event) || []).filter((entry) => entry !== listener));
+            const emit = (event, value) => {
+              fs.appendFileSync(path.join(process.cwd(), "page-actions"), "emit:" + event + "\\n");
+              for (const listener of [...(listeners.get(event) || [])]) listener(value);
+            };
+            const assertionPolls = new Map();
+            const nextAssertionPoll = (key) => {
+              const count = (assertionPolls.get(key) || 0) + 1;
+              assertionPolls.set(key, count);
+              return count;
+            };
+            const elementFor = (selector) => {
+              if (!elements.has(selector)) elements.set(selector, {
+                scrollLeft: 0,
+                scrollTop: 0,
+                scrollWidth: 600,
+                scrollHeight: 1000,
+                clientWidth: 300,
+                clientHeight: 200,
+                scrollTo(x, y) { this.scrollLeft = Math.max(0, Math.min(x, this.scrollWidth - this.clientWidth)); this.scrollTop = Math.max(0, Math.min(y, this.scrollHeight - this.clientHeight)); },
+                scrollBy(x, y) { this.scrollTo(this.scrollLeft + x, this.scrollTop + y); },
+                getBoundingClientRect() { return { x: 10, y: 20, width: this.clientWidth, height: this.clientHeight }; },
+              });
+              return elements.get(selector);
+            };
+            const page = {
+              on,
+              off,
+              waitForEvent(event, options = {}) {
+                return new Promise((resolve, reject) => {
+                  const handler = (value) => { off(event, handler); clearTimeout(timer); resolve(value); };
+                  const timer = setTimeout(() => { off(event, handler); reject(new Error("event timeout")); }, options.timeout || 1000);
+                  on(event, handler);
+                });
+              },
               setDefaultTimeout(value) { fs.appendFileSync(path.join(process.cwd(), "default-timeouts"), String(value) + "\\n"); },
               setDefaultNavigationTimeout(value) { fs.appendFileSync(path.join(process.cwd(), "navigation-timeouts"), String(value) + "\\n"); },
               async goto(url, options = {}) {
@@ -161,15 +210,73 @@ exports.chromium = {
               async waitForURL() {},
               url() { return currentUrl; },
               async content() { return "<html><body><h1>Settings</h1></body></html>"; },
-              locator(selector) { return {
-                async fill() { fs.appendFileSync(path.join(process.cwd(), "page-actions"), "fill:" + selector + "\\n"); },
-                async click() { fs.appendFileSync(path.join(process.cwd(), "page-actions"), "click:" + selector + "\\n"); },
-                async waitFor() {},
-              }; },
+              locator(selector) {
+                const element = elementFor(selector);
+                const locator = {
+                  selector,
+                  async fill() { fs.appendFileSync(path.join(process.cwd(), "page-actions"), "fill:" + selector + "\\n"); },
+                  async click() {
+                    fs.appendFileSync(path.join(process.cwd(), "page-actions"), "click:" + selector + "\\n");
+                    if (selector === ".atomic") {
+                      const evilRequest = { url() { return "https://evil.example/api/atomic"; }, method() { return "POST"; } };
+                      const matchingRequest = { url() { return "https://staging.example.test/api/atomic?secret=hidden"; }, method() { return "POST"; } };
+                      emit("request", evilRequest);
+                      emit("response", { request() { return evilRequest; }, status() { return 204; } });
+                      emit("request", matchingRequest);
+                      emit("response", { request() { return matchingRequest; }, status() { return 204; } });
+                      emit("dialog", {
+                        type() { return "confirm"; },
+                        message() { return "Proceed safely?"; },
+                        async accept() { fs.writeFileSync(path.join(process.cwd(), "dialog-result"), "accepted"); },
+                        async dismiss() { fs.writeFileSync(path.join(process.cwd(), "dialog-result"), "dismissed"); },
+                      });
+                    }
+                    if (selector === ".bad-dialog") emit("dialog", {
+                      type() { return "confirm"; },
+                      message() { return "secret-dialog-value"; },
+                      async accept() { fs.writeFileSync(path.join(process.cwd(), "dialog-result"), "accepted"); },
+                      async dismiss() { fs.writeFileSync(path.join(process.cwd(), "dialog-result"), "dismissed"); },
+                    });
+                    if (selector === ".preexisting-response") {
+                      const request = { url() { return "https://staging.example.test/api/atomic"; }, method() { return "POST"; } };
+                      emit("response", { request() { return request; }, status() { return 204; } });
+                    }
+                    if (selector === ".unexpected-popup") {
+                      const unexpectedVideoPath = path.join(options.recordVideo?.dir || process.cwd(), "unexpected.webm");
+                      fs.writeFileSync(unexpectedVideoPath, "unexpected-video");
+                      emitContext("page", {
+                        video() { return { async path() { return unexpectedVideoPath; } }; },
+                        async close() { fs.writeFileSync(path.join(process.cwd(), "unexpected-popup-closed"), "yes"); },
+                      });
+                    }
+                    if (selector === ".download" || selector === ".secret-download") emit("download", {
+                      url() { return "https://staging.example.test/export"; },
+                      suggestedFilename() { return "report.csv"; },
+                      async saveAs(file) { fs.writeFileSync(file, selector === ".secret-download" ? "top-secret-cookie" : "a,b\\n1,2\\n"); },
+                      async cancel() {},
+                    });
+                  },
+                  async hover() { hoveredElement = element; fs.appendFileSync(path.join(process.cwd(), "page-actions"), "hover:" + selector + "\\n"); },
+                  async evaluate(callback, argument) { return callback(element, argument); },
+                  async dragTo(destination, options) { fs.appendFileSync(path.join(process.cwd(), "page-actions"), "drag:" + selector + "->" + destination.selector + ":" + JSON.stringify(options) + "\\n"); },
+                  async setInputFiles(files) { fs.appendFileSync(path.join(process.cwd(), "page-actions"), "upload:" + selector + ":" + files.map((file) => file.name + "=" + file.buffer.toString("utf8")).join(",") + "\\n"); },
+                  async textContent() { return nextAssertionPoll(selector + ":text") > 1 ? "ready" : "pending"; },
+                  async getAttribute(name) { return nextAssertionPoll(selector + ":" + name) > 1 ? "ready" : "pending"; },
+                  async waitFor() {},
+                };
+                return locator;
+              },
+              mouse: {
+                async wheel(deltaX, deltaY) {
+                  fs.appendFileSync(path.join(process.cwd(), "page-actions"), "wheel:" + deltaX + "," + deltaY + "\\n");
+                  if (hoveredElement) hoveredElement.scrollBy(deltaX, deltaY);
+                },
+              },
               async screenshot({ path: screenshotPath }) { fs.writeFileSync(screenshotPath, "screenshot"); },
               isClosed() { return false; },
               video() { return { async path() { return videoPath; } }; },
             };
+            return page;
           },
           async close() {},
         };
@@ -291,6 +398,209 @@ describe("private browser QA runner", () => {
 		const missingBaseUrl = run(project, ["run", "--flow", flow], agentDir);
 		expect(missingBaseUrl).toMatchObject({ code: 1, json: { status: "QA_RUN_FAILED", profile: "public" } });
 		expect(missingBaseUrl.json.reason).toContain("--base-url is required");
+	});
+
+	test("applies viewport and supports safe scrolling, metrics, and retrying assertions", () => {
+		const project = tempProject();
+		const agentDir = createBrowserQaAgent(project);
+		installFakePlaywright(project);
+		const flow = writeAgentFlow(agentDir, JSON.stringify({
+			viewport: { width: 844, height: 847 },
+			steps: [
+				{ action: "goto", path: "/public" },
+				{ action: "evaluate", operation: "scrollTo", locator: { css: ".decision-detail" }, y: 0 },
+				{ action: "wheel", locator: { css: ".decision-detail" }, deltaY: 120 },
+				{ action: "assertDOMMetric", locator: { css: ".decision-detail" }, metric: "scrollTop", greaterThan: 0 },
+				{ action: "evaluate", operation: "metrics", locator: { css: ".decision-detail" }, name: "detail-after-wheel" },
+				{ action: "assertText", locator: { css: ".delayed-result" }, equals: "ready" },
+				{ action: "assertAttribute", locator: { css: ".delayed-result" }, attribute: "data-state", equals: "ready" },
+			],
+		}));
+
+		const result = run(project, ["run", "--base-url", "https://staging.example.test", "--flow", flow, "--run-id", "scroll"], agentDir);
+
+		expect(result).toMatchObject({
+			code: 0,
+			json: {
+				status: "QA_PASSED",
+				viewport: { width: 844, height: 847 },
+				observations: [{ name: "detail-after-wheel", step: 5, value: { scrollTop: 120, scrollHeight: 1000, clientHeight: 200 } }],
+			},
+		});
+		expect(JSON.parse(fs.readFileSync(path.join(project, "viewport-options"), "utf8").trim())).toEqual({
+			viewport: { width: 844, height: 847 },
+			videoSize: { width: 844, height: 847 },
+			environment: { locale: "en-US", timezoneId: "UTC", colorScheme: "light", reducedMotion: "reduce" },
+		});
+		expect(fs.readFileSync(path.join(project, "page-actions"), "utf8")).toContain("wheel:0,120");
+	});
+
+	test("supports deterministic environment, atomic expectations, drag/drop, memory uploads, and bounded downloads", () => {
+		const project = tempProject();
+		const agentDir = createBrowserQaAgent(project);
+		installFakePlaywright(project);
+		const flow = writeAgentFlow(agentDir, JSON.stringify({
+			environment: { locale: "en-GB", timezoneId: "Europe/London", colorScheme: "dark", reducedMotion: "no-preference" },
+			steps: [
+				{ action: "goto", path: "/public" },
+				{
+					action: "click",
+					locator: { css: ".atomic" },
+					expectResponse: { path: "/api/atomic", method: "POST", status: 204 },
+					expectDialog: { type: "confirm", message: { equals: "Proceed safely?" }, accept: true },
+				},
+				{
+					action: "dragTo",
+					locator: { css: ".source" },
+					dropTarget: { css: ".destination" },
+					sourcePosition: { x: 10, y: 20 },
+					dropPosition: { x: 30, y: 40 },
+				},
+				{
+					action: "uploadFiles",
+					locator: { css: "input[type=file]" },
+					files: [{ name: "sample.csv", mimeType: "text/csv", base64: Buffer.from("a,b\n1,2\n").toString("base64") }],
+				},
+				{
+					action: "download",
+					locator: { css: ".download" },
+					filename: { equals: "report.csv" },
+					maxBytes: 1024,
+					retain: true,
+					name: "report",
+				},
+			],
+		}));
+
+		const result = run(project, ["run", "--base-url", "https://staging.example.test", "--flow", flow, "--run-id", "capabilities"], agentDir);
+
+		expect(result).toMatchObject({
+			code: 0,
+			json: {
+				status: "QA_PASSED",
+				environment: { locale: "en-GB", timezoneId: "Europe/London", colorScheme: "dark", reducedMotion: "no-preference" },
+				artifacts: { downloads: [{ path: expect.stringContaining("download-report.bin"), uri: expect.stringContaining("download-report.bin") }] },
+			},
+		});
+		expect(fs.readFileSync(path.join(project, "dialog-result"), "utf8")).toBe("accepted");
+		const actions = fs.readFileSync(path.join(project, "page-actions"), "utf8");
+		expect(actions).toContain('drag:.source->.destination:{"sourcePosition":{"x":10,"y":20},"targetPosition":{"x":30,"y":40}}');
+		expect(actions).toContain("upload:input[type=file]:sample.csv=a,b\n1,2");
+	});
+
+	test("rejects unsafe capability inputs without exposing observed dialog content", () => {
+		const cases = [
+			{
+				name: "response",
+				flow: { steps: [{ action: "click", locator: { css: ".atomic" }, expectResponse: { path: "/api/items?token=secret", method: "POST", status: 200 } }] },
+				reason: "exact path, method, and status",
+			},
+			{
+				name: "upload",
+				flow: { steps: [{ action: "uploadFiles", locator: { css: "input" }, files: [{ name: "secret", mimeType: "text/plain", path: ".pi/qa_auth.jsonc" }] }] },
+				reason: "canonical base64",
+			},
+			{
+				name: "environment",
+				flow: { environment: { timezoneId: "Not/A_Timezone" }, steps: [{ action: "goto", path: "/" }] },
+				reason: "timezoneId is invalid",
+			},
+			{
+				name: "download",
+				flow: { steps: [{ action: "download", locator: { css: ".download" }, filename: { equals: "report.csv" }, maxBytes: 2, retain: true, name: "too-large" }] },
+				reason: "exceeded maxBytes",
+			},
+		];
+		for (const item of cases) {
+			const project = tempProject();
+			const agentDir = createBrowserQaAgent(project);
+			installFakePlaywright(project);
+			const flow = writeAgentFlow(agentDir, JSON.stringify(item.flow));
+			const result = run(project, ["run", "--base-url", "https://staging.example.test", "--flow", flow, "--run-id", item.name], agentDir);
+			expect(result).toMatchObject({ code: 1, json: { status: "QA_RUN_FAILED" } });
+			expect(result.json.reason).toContain(item.reason);
+		}
+
+		const project = tempProject();
+		const agentDir = createBrowserQaAgent(project);
+		installFakePlaywright(project);
+		const flow = writeAgentFlow(agentDir, JSON.stringify({ steps: [{
+			action: "click",
+			locator: { css: ".bad-dialog" },
+			expectDialog: { type: "confirm", message: { equals: "different" }, accept: true },
+		}] }));
+		const mismatch = run(project, ["run", "--base-url", "https://staging.example.test", "--flow", flow, "--run-id", "dialog-mismatch"], agentDir);
+		expect(mismatch).toMatchObject({ code: 1, json: { reason: expect.stringContaining("native dialog did not match expectation") } });
+		expect(fs.readFileSync(path.join(project, "dialog-result"), "utf8")).toBe("dismissed");
+		expect(mismatch.stdout).not.toContain("secret-dialog-value");
+
+		const responseProject = tempProject();
+		const responseAgentDir = createBrowserQaAgent(responseProject);
+		installFakePlaywright(responseProject);
+		const responseFlow = writeAgentFlow(responseAgentDir, JSON.stringify({ timeoutMs: 100, steps: [{
+			action: "click",
+			locator: { css: ".preexisting-response" },
+			expectResponse: { path: "/api/atomic", method: "POST", status: 204 },
+		}] }));
+		const preexisting = run(responseProject, ["run", "--base-url", "https://staging.example.test", "--flow", responseFlow, "--run-id", "preexisting-response"], responseAgentDir);
+		expect(preexisting).toMatchObject({ code: 1, json: { reason: expect.stringContaining("expected response was not observed") } });
+
+		const popupProject = tempProject();
+		const popupAgentDir = createBrowserQaAgent(popupProject);
+		installFakePlaywright(popupProject);
+		const popupFlow = writeAgentFlow(popupAgentDir, JSON.stringify({ steps: [{ action: "click", locator: { css: ".unexpected-popup" } }] }));
+		const unexpectedPopup = run(popupProject, ["run", "--base-url", "https://staging.example.test", "--flow", popupFlow, "--run-id", "unexpected-popup"], popupAgentDir);
+		expect(unexpectedPopup).toMatchObject({ code: 1, json: { reason: expect.stringContaining("use openPopup") } });
+		expect(fs.readFileSync(path.join(popupProject, "unexpected-popup-closed"), "utf8")).toBe("yes");
+		expect(unexpectedPopup.json.evidence).not.toContain(expect.stringContaining("discarded-popup"));
+	});
+
+	test("discards retained downloads that contain configured authentication", () => {
+		const project = tempProject();
+		const agentDir = createBrowserQaAgent(project);
+		writeAuth(project, { admin: profile("top-secret-cookie") });
+		installFakePlaywright(project);
+		const flow = writeAgentFlow(agentDir, JSON.stringify({ steps: [{
+			action: "download",
+			locator: { css: ".secret-download" },
+			filename: { equals: "report.csv" },
+			maxBytes: 1024,
+			retain: true,
+			name: "secret",
+		}] }));
+
+		const result = run(project, ["run", "--profile", "admin", "--flow", flow, "--run-id", "secret-download"], agentDir);
+
+		expect(result).toMatchObject({ code: 1, json: { status: "QA_RUN_FAILED", profile: "admin", evidence: [] } });
+		expect(result.json.reason).toContain("retained download");
+		expect(result.stdout).not.toContain("top-secret-cookie");
+	});
+
+	test("rejects unsafe evaluate scripts and out-of-range viewports", () => {
+		const project = tempProject();
+		const agentDir = createBrowserQaAgent(project);
+		installFakePlaywright(project);
+		const scriptFlow = writeAgentFlow(agentDir, JSON.stringify({ steps: [
+			{ action: "evaluate", expression: "window.localStorage" },
+		] }), "script.jsonc");
+		const scriptResult = run(project, ["run", "--base-url", "https://staging.example.test", "--flow", scriptFlow, "--run-id", "script"], agentDir);
+		expect(scriptResult).toMatchObject({ code: 1, json: { status: "QA_RUN_FAILED" } });
+		expect(scriptResult.json.reason).toContain("executable JavaScript is not allowed");
+
+		const viewportFlow = writeAgentFlow(agentDir, JSON.stringify({
+			viewport: { width: 200, height: 100 },
+			steps: [{ action: "goto", path: "/" }],
+		}), "viewport.jsonc");
+		const viewportResult = run(project, ["run", "--base-url", "https://staging.example.test", "--flow", viewportFlow, "--run-id", "viewport"], agentDir);
+		expect(viewportResult).toMatchObject({ code: 1, json: { status: "QA_RUN_FAILED" } });
+		expect(viewportResult.json.reason).toContain("320x240");
+
+		const attributeFlow = writeAgentFlow(agentDir, JSON.stringify({ steps: [
+			{ action: "assertAttribute", locator: { css: "main" }, attribute: "bad attribute", equals: "value" },
+		] }), "attribute.jsonc");
+		const attributeResult = run(project, ["run", "--base-url", "https://staging.example.test", "--flow", attributeFlow, "--run-id", "attribute"], agentDir);
+		expect(attributeResult).toMatchObject({ code: 1, json: { status: "QA_RUN_FAILED" } });
+		expect(attributeResult.json.reason).toContain("valid attribute name");
 	});
 
 	test("rejects invalid configuration for every supported auth mode", () => {
@@ -515,6 +825,7 @@ describe("private browser QA runner", () => {
 		expect(result.json.evidence.sort()).toEqual(["final.png", "trace.zip", "video.webm"]);
 		const evidenceDir = path.join(fs.realpathSync(agentDir), "browser-qa", "evidence", "proof", "admin");
 		expect(result.json.artifacts).toEqual({
+			downloads: [],
 			screenshots: [{ path: path.join(evidenceDir, "final.png"), uri: pathToFileURL(path.join(evidenceDir, "final.png")).href }],
 			videos: [{ path: path.join(evidenceDir, "video.webm"), uri: pathToFileURL(path.join(evidenceDir, "video.webm")).href }],
 			traces: [{ path: path.join(evidenceDir, "trace.zip"), uri: pathToFileURL(path.join(evidenceDir, "trace.zip")).href }],

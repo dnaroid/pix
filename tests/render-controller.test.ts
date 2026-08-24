@@ -710,6 +710,7 @@ function fakeMouseController(): AppMouseController {
 		statusTerminalBellSoundTarget: undefined,
 		statusSessionTarget: undefined,
 		statusPromptEnhancerTarget: undefined,
+		statusAgentPauseTarget: undefined,
 		statusVoiceMicTarget: undefined,
 		statusVoiceLanguageTarget: undefined,
 		tabLineTargets: [],

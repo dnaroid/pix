@@ -47,6 +47,86 @@ observable intermediate state. Sleeping longer hides races instead of proving
 behavior. If a normal operation legitimately needs more time, adjust the flow's
 `timeoutMs` rather than inserting repeated sleeps.
 
+All assertion actions retry until that timeout. This makes an action followed
+directly by `assertText`, `assertVisible`, `assertURL`, or another assertion
+safe for asynchronously rendered outcomes. Use `assertAttribute` for
+observable state such as `aria-expanded`, `aria-invalid`, or `data-state`
+instead of reading DOM state through executable JavaScript.
+
+## Responsive and scrolling scenarios
+
+Set the flow's top-level `viewport` whenever the bug depends on a breakpoint or
+available height. Assert `viewportWidth` or `viewportHeight` with
+`assertDOMMetric` when the dimensions themselves are part of the proof; the
+runner also includes the applied viewport in its result.
+
+Use `wheel` to reproduce real pointer-wheel input. Add a locator when the wheel
+must target a nested scrolling container—the runner hovers it before sending
+the input. Because browser scrolling may be scheduled after the wheel event,
+wait only for a short known settling interval when a direct metric assertion is
+otherwise racy.
+
+Use safe `evaluate` `scrollTo`/`scrollBy` operations for deterministic setup or
+to distinguish input handling from layout behavior. Use the `metrics` operation
+to retain a named page/element snapshot in result `observations`, and use
+`assertDOMMetric` for pass/fail. Raw JavaScript expressions are intentionally
+excluded: flows remain declarative and cannot inspect authentication storage or
+execute arbitrary same-origin requests.
+
+## Deterministic browser environment
+
+Set top-level `environment` when locale, timezone, color scheme, or motion
+preferences can change the behavior. The runner otherwise uses stable defaults
+(`en-US`, `UTC`, `light`, `reduce`) instead of inheriting host settings. Prefer
+asserting product-visible copy or state derived from those settings; do not use
+screenshot pixels as the only oracle.
+
+## Causal network and dialog expectations
+
+Put `expectResponse` or `expectDialog` on the interaction that causes the event.
+The runner arms both listeners before the interaction, avoiding the race in a
+separate “click, then wait” sequence. Response expectations deliberately match
+only an exact allowlisted-origin pathname, HTTP method, and status. This proves
+that a matching request started and received a response within the action
+window without retaining its URL query, headers, or body.
+
+Dialog expectations match a fixed dialog type and exact/included message, then
+accept or dismiss it declaratively. A mismatch is dismissed before the step
+fails so the page cannot freeze. Actual event metadata is never included in
+failure diagnostics. Do not place secrets in expected messages or response
+paths even though the runner keeps diagnostics generic.
+
+## Drag, upload, and download scenarios
+
+Use `dragTo` for native DOM drag/drop and assert the resulting product state.
+Optional source/drop positions are relative bounded coordinates. Canvas-only,
+OS-native, or custom synthetic-event drag protocols remain unsupported; do not
+work around that with executable JavaScript.
+
+Uploads are memory-only base64 payloads declared in the flow. This intentionally
+prevents a flow from selecting arbitrary project files, credential config, or
+directories. Keep fixtures minimal and non-secret. An empty file list clears a
+file input.
+
+Use the atomic `download` action rather than clicking a download link directly.
+Always match the suggested filename and choose a tight `maxBytes`. Retain a
+download only when its contents are needed as evidence; otherwise the runner
+deletes it after validation. Retained downloads use generated private names,
+not server-provided paths, and are scanned for configured authentication before
+publication. `maxBytes` bounds the runner's private evidence copy and triggers
+cancellation while it grows, but it is not a network-bandwidth guarantee: the
+browser can receive temporary bytes before cancellation.
+
+## Same-origin frames and popups
+
+Use a scoped `target` for iframe or named popup interactions. The runner checks
+the live frame origin before every scoped step and checks a popup after it loads;
+both must remain in `allowedOrigins`. This supports embedded application UI and
+same-origin auxiliary windows without opening a route around the network guard.
+Cross-origin login, payment, and third-party widgets remain intentionally out of
+scope. Each popup adds a separate private video artifact, so open only the
+windows needed for the proof.
+
 ## Authentication transitions
 
 Add `authRejectedIf` directly after initial navigation and after transitions
