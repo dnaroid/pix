@@ -202,7 +202,7 @@ function sessionIdFromContext(ctx: unknown): string | undefined {
 	return typeof sessionId === "string" && sessionId.trim() ? sessionId : undefined;
 }
 
-function todoStateScopeFromContext(ctx: unknown): string | undefined {
+export function todoStateScopeFromContext(ctx: unknown): string | undefined {
 	const sessionFile = sessionFileFromContext(ctx);
 	if (sessionFile) return `file:${resolve(sessionFile)}`;
 	const sessionId = sessionIdFromContext(ctx);

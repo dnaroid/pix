@@ -371,11 +371,15 @@ Both support the published schema:
       "apply_patch": { "defaultExpanded": true }
     }
   },
-  "promptEnhancer": { "modelRef": "zai/glm-5-turbo" },
+  "promptEnhancer": { "modelRef": "openai-codex/gpt-5.6-luna" },
   "autocomplete": {
-    "modelRef": "zai/glm-5-turbo",
+    "modelRef": "openai-codex/gpt-5.6-luna",
     "debounceMs": 350,
     "timeoutMs": 3000
+  },
+  "sessionTitle": {
+    "modelRef": "openai-codex/gpt-5.6-luna",
+    "fallbackModels": ["zai/glm-5-turbo"]
   },
   "dictation": { "language": "en" },
   "ignoreContextFiles": false,

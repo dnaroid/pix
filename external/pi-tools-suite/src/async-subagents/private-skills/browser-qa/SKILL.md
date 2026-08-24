@@ -15,6 +15,13 @@ Never read, print, grep, copy, or edit credential values from
 
 ## Workflow
 
+Treat target discovery as a 30-second preflight and invoke the runner within 45
+seconds of starting. Use at most one runner invocation unless the task explicitly
+requests multiple auth profiles. If you cannot identify a reachable target and
+a supported deterministic assertion inside that preflight, return a structured
+`BLOCKED` result immediately. Do not consume the launcher budget on further
+source reading, server polling, capability probing, or retries.
+
 1. Resolve `scripts/browser-qa-runner.mjs` relative to this skill.
 2. Use the launcher-provided `$PI_SUBAGENT_AGENT_DIR/browser-qa/` workspace.
    The launcher creates its private `flows/` directory and the runner rejects

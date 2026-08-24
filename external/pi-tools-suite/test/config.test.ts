@@ -131,7 +131,7 @@ describe("pi-tools-suite config", () => {
 		expect(content).toContain('"todoThinking": true');
 		expect(content).toContain('"todoThinkingOverrides"');
 		expect(content).toContain('"zai/glm-5.3": "max"');
-		expect(content).toContain('"lookupModel": "openai-codex/gpt-5.4-mini"');
+		expect(content).toContain('"lookupModel": "openai-codex/gpt-5.6-luna"');
 		expect(content).toContain('"modules": { "credential-firewall": false }');
 		expect(content).toContain('"secretFirewall"');
 		expect(content).toContain('// "ast-grep",');
@@ -141,14 +141,33 @@ describe("pi-tools-suite config", () => {
 		const parsed = parse(content) as {
 			$schema?: string;
 			asyncSubagents?: {
-				types?: Record<string, { model?: string; fallbackModels?: string[] }>;
+				routing?: { model?: string; fallbackModels?: string[] };
+				types?: Record<string, { model?: string; fallbackModels?: string[]; thinking?: string; timeoutMs?: number }>;
 			};
 			lsp?: { servers?: Array<{ id?: string }> };
 		};
 		expect(parsed.$schema).toBe(PI_TOOLS_SUITE_SCHEMA_URL);
+		expect(parsed.asyncSubagents?.routing).toMatchObject({
+			model: "zai/glm-4.5-air",
+			fallbackModels: ["openai-codex/gpt-5.6-luna"],
+		});
+		expect(parsed.asyncSubagents?.types?.quick).toMatchObject({
+			model: "openai-codex/gpt-5.6-luna",
+			fallbackModels: ["zai/glm-4.5-air"],
+		});
+		expect(parsed.asyncSubagents?.types?.research).toMatchObject({
+			model: "openai-codex/gpt-5.6-terra",
+			fallbackModels: ["zai/glm-5-turbo"],
+		});
+		expect(parsed.asyncSubagents?.types?.tests).toMatchObject({
+			model: "openai-codex/gpt-5.6-terra",
+			fallbackModels: ["zai/glm-5-turbo"],
+		});
 		expect(parsed.asyncSubagents?.types?.["browser-qa"]).toMatchObject({
-			model: "openai-codex/gpt-5.4-mini",
+			model: "openai-codex/gpt-5.6-luna",
 			fallbackModels: ["antigravity/gemini-3-flash-preview", "zai/glm-5.3"],
+			thinking: "low",
+			timeoutMs: 120_000,
 		});
 		expect(parsed.lsp?.servers?.map((server) => server.id)).toEqual(["typescript"]);
 		expect(content).toContain('//   "id": "python"');

@@ -436,14 +436,34 @@ describe.serial("subagent type config", () => {
 		expect(fs.readFileSync(targetPath, "utf-8")).toBe(before);
 	});
 
-	test.serial("resolves the built-in browser QA profile with its self-contained private skill", () => {
-		const config = loadSubagentConfig(tempDir(), {});
+	test.serial("resolves the built-in balanced role models and browser QA profile", () => {
+		const cwd = tempDir();
+		const configPath = path.join(cwd, "async-subagents.json");
+		writeFile(configPath, "{}");
+		const config = loadSubagentConfig(cwd, { ASYNC_SUBAGENTS_CONFIG: configPath });
 		const resolved = resolveAgentTaskConfig({ id: "qa", task: "verify the browser bug", subagentType: "browser-qa" }, config);
 		const privateSkill = getBrowserQaSkillPath();
 
-		expect(resolved.task.model).toBe("openai-codex/gpt-5.4-mini");
+		expect(config.routing).toMatchObject({
+			model: "zai/glm-4.5-air",
+			fallbackModels: ["openai-codex/gpt-5.6-luna"],
+		});
+		for (const [subagentType, model, fallbackModels] of [
+			["quick", "openai-codex/gpt-5.6-luna", ["zai/glm-4.5-air"]],
+			["scan", "openai-codex/gpt-5.6-luna", ["zai/glm-4.5-air"]],
+			["research", "openai-codex/gpt-5.6-terra", ["zai/glm-5-turbo"]],
+			["docs", "openai-codex/gpt-5.6-luna", ["zai/glm-4.5-air"]],
+			["tests", "openai-codex/gpt-5.6-terra", ["zai/glm-5-turbo"]],
+		] as const) {
+			const role = resolveAgentTaskConfig({ id: subagentType, task: subagentType, subagentType }, config);
+			expect(role.task.model).toBe(model);
+			expect(role.fallbackModels).toEqual([...fallbackModels]);
+		}
+		expect(resolved.task.model).toBe("openai-codex/gpt-5.6-luna");
+		expect(resolved.task.thinking).toBe("low");
 		expect(resolved.fallbackModels).toEqual(["antigravity/gemini-3-flash-preview", "zai/glm-5.3"]);
 		expect(resolved.task.tools).toEqual(["read", "grep", "bash"]);
+		expect(resolved.timeoutMs).toBe(120_000);
 		expect(resolved.isolatedSkills).toEqual([privateSkill]);
 		expect(fs.existsSync(privateSkill)).toBe(true);
 		expect(fs.existsSync(path.join(path.dirname(privateSkill), "references", "qa-design.md"))).toBe(true);
@@ -510,7 +530,7 @@ describe.serial("subagent type config", () => {
 			preset: activePreset,
 		});
 		expect(resolved.task.model).toBe("zai/fast");
-		expect(resolved.fallbackModels).toEqual(["zai/backup", "openai/backup"]);
+		expect(resolved.fallbackModels).toEqual(["zai/backup", "openai/backup", "zai/glm-4.5-air"]);
 		expect(resolved.task.thinking).toBe("off");
 		expect(resolved.extraArgs).toEqual(["--temperature", "0"]);
 
@@ -895,6 +915,47 @@ describe.serial("run and agent state", () => {
 		}
 	});
 
+	test.serial("stops the launcher-owned POSIX process group", async () => {
+		if (process.platform === "win32") return;
+		const runDir = tempDir();
+		const ready = path.join(runDir, "descendant-ready");
+		const signalled = path.join(runDir, "descendant-signalled");
+		const descendantSource = `
+const fs = require("node:fs");
+process.on("SIGTERM", () => {
+  fs.writeFileSync(${JSON.stringify(signalled)}, "SIGTERM");
+  process.exit(0);
+});
+fs.writeFileSync(${JSON.stringify(ready)}, String(process.pid));
+setInterval(() => {}, 1000);
+`;
+		const rootSource = `
+const { spawn } = require("node:child_process");
+spawn(process.execPath, ["-e", ${JSON.stringify(descendantSource)}], { stdio: "ignore" });
+setInterval(() => {}, 1000);
+`;
+		const root = spawnChild(process.execPath, ["-e", rootSource], { detached: true, stdio: "ignore" });
+		if (!root.pid) throw new Error("process-group root did not start");
+		createAgent(runDir, "owned-group", {
+			pid: String(root.pid),
+			process_group: String(root.pid),
+		});
+
+		try {
+			await waitUntil(() => fs.existsSync(ready), 2000);
+			const [result] = stopAgents(runDir, ["owned-group"], { signal: "SIGTERM" });
+			expect(result).toMatchObject({ id: "owned-group", stopped: true, signal: "SIGTERM", pid: root.pid });
+			await waitUntil(() => fs.existsSync(signalled), 2000);
+			expect(fs.readFileSync(signalled, "utf-8")).toBe("SIGTERM");
+		} finally {
+			try {
+				process.kill(-root.pid, "SIGKILL");
+			} catch {
+				/* group already stopped */
+			}
+		}
+	});
+
 	test.serial("stops planned queued agents before they launch", () => {
 		const runDir = tempDir();
 		writeFile(path.join(runDir, "prompts", "queued.md"), "queued prompt");
@@ -1045,6 +1106,16 @@ setTimeout(() => {}, 1000);
 		expect(fs.readFileSync(path.join(agentDir, "exit_code"), "utf-8")).toBe("0");
 		expect(fs.existsSync(path.join(agentDir, "events.jsonl"))).toBe(false);
 		expect(fs.existsSync(path.join(agentDir, "stderr.log"))).toBe(false);
+		const progress = fs.readFileSync(path.join(agentDir, "progress.jsonl"), "utf-8");
+		expect(progress).toContain('"stage":"spawned"');
+		expect(progress).toContain('"stage":"prompt_sent"');
+		expect(progress).toContain('"type":"agent_end"');
+		expect(progress).toContain('"stage":"completed"');
+		expect(progress).not.toContain("done result");
+		expect(progress).not.toContain("Do work");
+		if (process.platform !== "win32") {
+			expect(fs.readFileSync(path.join(agentDir, "process_group"), "utf-8")).toMatch(/^\d+$/);
+		}
 	});
 
 	test.serial("notifies completion when the pi process cannot be spawned", async () => {
@@ -1478,22 +1549,44 @@ setTimeout(() => {}, 1000);
 		const cwd = tempDir();
 		const runDir = createRunDir(cwd, "spawn-timeout");
 		const piScript = path.join(tempDir(), "pi.js");
+		const descendantReady = path.join(cwd, "descendant-ready");
+		const descendantSignalled = path.join(cwd, "descendant-signalled");
+		const descendantSource = `
+const fs = require("node:fs");
+process.on("SIGTERM", () => {
+  fs.writeFileSync(${JSON.stringify(descendantSignalled)}, "SIGTERM");
+  process.exit(0);
+});
+fs.writeFileSync(${JSON.stringify(descendantReady)}, String(process.pid));
+setInterval(() => {}, 1000);
+`;
 		writeFile(piScript, `
-process.stdin.on("data", () => {});
+const { spawn } = require("node:child_process");
+process.stdin.on("data", () => {
+  spawn(process.execPath, ["-e", ${JSON.stringify(descendantSource)}], { stdio: "ignore" });
+});
 setTimeout(() => {}, 10000);
 `);
 		process.argv[1] = piScript;
 
 		const completed = await withTimeout(new Promise<any>((resolve) => {
-			spawnAgent(runDir, { id: "agent-1", task: "Hang" }, cwd, [], undefined, resolve, { timeoutMs: 30 });
+			spawnAgent(runDir, { id: "agent-1", task: "Hang" }, cwd, [], undefined, resolve, { timeoutMs: 500 });
 		}), "Timed out waiting for timeout spawn completion");
 
 		const agentDir = path.join(runDir, "agent-1");
 		expect(completed.exitCode).toBe(124);
 		expect(completed.state.status).toBe("failed");
 		expect(fs.readFileSync(path.join(agentDir, "exit_code"), "utf-8")).toBe("124");
-		expect(fs.readFileSync(path.join(agentDir, "timeout_ms"), "utf-8")).toBe("30");
+		expect(fs.readFileSync(path.join(agentDir, "timeout_ms"), "utf-8")).toBe("500");
 		expect(fs.readFileSync(path.join(agentDir, "result.md"), "utf-8")).toContain("timed out");
+		const progress = fs.readFileSync(path.join(agentDir, "progress.jsonl"), "utf-8");
+		expect(progress).toContain('"stage":"timeout"');
+		expect(progress).toContain('"reason":"timeout","signal":"SIGTERM"');
+		if (process.platform !== "win32") {
+			expect(fs.existsSync(descendantReady)).toBe(true);
+			await waitUntil(() => fs.existsSync(descendantSignalled), 2000);
+			expect(fs.readFileSync(descendantSignalled, "utf-8")).toBe("SIGTERM");
+		}
 	});
 
 	test.serial("records invalid final JSON lines and exits with process status", async () => {

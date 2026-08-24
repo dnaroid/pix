@@ -23,7 +23,7 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
   },
   // Vision-capable model used by the coding-discipline lookup tool for blind-model
   // screenshot/image questions. Remove or set to null to disable lookup.
-  "lookupModel": "openai-codex/gpt-5.4-mini",
+  "lookupModel": "openai-codex/gpt-5.6-luna",
   // coding-discipline working-state strictness.
   //   "lenient" (default): batch independent read-only tool calls; brief reasoning
   //     text is acceptable when thinking is off. Text only counts as chatter when a
@@ -148,7 +148,7 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
   },
   "asyncSubagents": {
     "defaultType": "quick",
-    "routing": { "enabled": true, "model": "zai/glm-4.5-air", "maxTaskChars": 1200, "maxTokens": 512, "maxRetries": 1, "timeoutMs": 12000, "debug": false },
+    "routing": { "enabled": true, "model": "zai/glm-4.5-air", "fallbackModels": ["openai-codex/gpt-5.6-luna"], "maxTaskChars": 1200, "maxTokens": 512, "maxRetries": 1, "timeoutMs": 12000, "debug": false },
     "presets": {
       "cheap": {
         "description": "Use cheap GLM/Gemini Flash models for text/code roles.",
@@ -222,33 +222,33 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
         "description": "Use only enabled strong models, mixing GPT, Claude, and Gemini by role.",
         "types": {
           "quick": {
-            "model": "openai-codex/gpt-5.4-mini",
+            "model": "openai-codex/gpt-5.6-luna",
             "fallbackModels": ["zai/glm-4.5-air"],
             "thinking": "low"
           },
           "scan": {
             "model": "antigravity/gemini-3-flash-preview",
-            "fallbackModels": ["openai-codex/gpt-5.3-codex-spark", "zai/glm-4.5-air"],
+            "fallbackModels": ["openai-codex/gpt-5.6-luna", "zai/glm-4.5-air"],
             "thinking": "off"
           },
           "research": {
             "model": "antigravity/gemini-3.1-pro-preview",
-            "fallbackModels": ["openai-codex/gpt-5.4-mini", "zai/glm-5-turbo"],
+            "fallbackModels": ["openai-codex/gpt-5.6-luna", "zai/glm-5-turbo"],
             "thinking": "medium"
           },
           "docs": {
             "model": "antigravity/gemini-2.5-flash",
-            "fallbackModels": ["openai-codex/gpt-5.3-codex-spark", "zai/glm-4.5-air"],
+            "fallbackModels": ["openai-codex/gpt-5.6-luna", "zai/glm-4.5-air"],
             "thinking": "medium"
           },
           "frontend": {
             "model": "antigravity/gemini-3.1-pro-preview-customtools",
-            "fallbackModels": ["zai/glm-5.3"],
+            "fallbackModels": ["openai-codex/gpt-5.6-luna", "zai/glm-5.3"],
             "thinking": "low"
           },
           "tests": {
             "model": "antigravity/antigravity-claude-sonnet-4-6",
-            "fallbackModels": ["openai-codex/gpt-5.4-mini", "zai/glm-5-turbo"],
+            "fallbackModels": ["openai-codex/gpt-5.6-luna", "zai/glm-5-turbo"],
             "thinking": "high"
           },
           "review": {
@@ -272,26 +272,29 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
     "types": {
       "quick": {
         "description": "Use for tiny cheap tasks: answer a simple question, inspect one known file, or verify one fact. Not for broad repo search.",
-        "model": "zai/glm-5-turbo",
+        "model": "openai-codex/gpt-5.6-luna",
+        "fallbackModels": ["zai/glm-4.5-air"],
         "thinking": "off"
       },
       "scan": {
         "description": "Use for finding files, symbols, text, or inventory across a repo. Return paths/facts; do not judge code quality.",
-        "model": "zai/glm-5-turbo",
+        "model": "openai-codex/gpt-5.6-luna",
+        "fallbackModels": ["zai/glm-4.5-air"],
         "thinking": "off",
         "tools": ["read", "grep"]
       },
       "research": {
         "description": "Use for multi-file codebase research: read several files and explain how something works. No edits.",
-        "model": "zai/glm-5-turbo",
+        "model": "openai-codex/gpt-5.6-terra",
+        "fallbackModels": ["zai/glm-5-turbo"],
         "thinking": "low",
         "tools": ["read", "grep"]
       },
-      "docs": { "description": "Use for documentation work: README/API docs review, docs gaps, changelog, migration notes, examples.", "model": "zai/glm-5-turbo", "thinking": "low" },
+      "docs": { "description": "Use for documentation work: README/API docs review, docs gaps, changelog, migration notes, examples.", "model": "openai-codex/gpt-5.6-luna", "fallbackModels": ["zai/glm-4.5-air"], "thinking": "low" },
       "frontend": {
         "description": "Use for frontend UI/UX visual work: styling, layout, typography, animation, responsive states, component polish, accessibility. Avoid backend/business logic unless needed for UI behavior.",
         "model": "antigravity/gemini-3-flash-preview",
-        "fallbackModels": ["openai-codex/gpt-5.4-mini", "zai/glm-5.3"],
+        "fallbackModels": ["openai-codex/gpt-5.6-luna", "zai/glm-5.3"],
         "thinking": "medium",
         "promptAppend": [
           "Act as a frontend UI/UX engineer for visual and product-facing work.",
@@ -302,14 +305,16 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
       },
       "browser-qa": {
         "description": "Use for browser-based visual QA: reproduce UI bugs and verify fixes with deterministic assertions, screenshots, video, and traces.",
-        "model": "openai-codex/gpt-5.4-mini",
+        "model": "openai-codex/gpt-5.6-luna",
         "fallbackModels": ["antigravity/gemini-3-flash-preview", "zai/glm-5.3"],
-        "thinking": "medium",
+        "thinking": "low",
+        "timeoutMs": 120000,
         "tools": ["read", "grep", "bash"]
       },
       "tests": {
         "description": "Use for tests: locate coverage, find gaps, run/check targeted test commands, diagnose failing tests.",
-        "model": "zai/glm-5-turbo",
+        "model": "openai-codex/gpt-5.6-terra",
+        "fallbackModels": ["zai/glm-5-turbo"],
         "thinking": "medium",
         "tools": ["read", "grep", "bash"]
       },

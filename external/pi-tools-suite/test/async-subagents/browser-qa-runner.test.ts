@@ -54,8 +54,8 @@ function writeAgentFlow(agentDir: string, content: string, name = "flow.jsonc"):
 	return file;
 }
 
-function run(project: string, args: string[], agentDir?: string) {
-	const env = { ...process.env };
+function run(project: string, args: string[], agentDir?: string, extraEnv: Record<string, string> = {}) {
+	const env = { ...process.env, ...extraEnv };
 	if (agentDir) env.PI_SUBAGENT_AGENT_DIR = agentDir;
 	else delete env.PI_SUBAGENT_AGENT_DIR;
 	const result = spawnSync("node", [runner, ...args], { cwd: project, encoding: "utf8", env });
@@ -93,6 +93,15 @@ const path = require("node:path");
 
 exports.chromium = {
   async launch() {
+    if (process.env.BROWSER_QA_TEST_HANG_STAGE === "browser_launch") {
+      if (process.env.BROWSER_QA_TEST_CHILD_PID_FILE) {
+        const fs = require("node:fs");
+        const { spawn } = require("node:child_process");
+        const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { detached: true, stdio: "ignore" });
+        fs.writeFileSync(process.env.BROWSER_QA_TEST_CHILD_PID_FILE, String(child.pid));
+      }
+      return new Promise(() => {});
+    }
     return {
       async newContext(options = {}) {
         fs.appendFileSync(path.join(process.cwd(), "context-options"), JSON.stringify({ recordVideo: Boolean(options.recordVideo) }) + "\\n");
@@ -173,6 +182,77 @@ exports.chromium = {
 }
 
 describe("private browser QA runner", () => {
+	test("bounds a hung browser stage, kills its detached child, and leaves sanitized progress", async () => {
+		const project = tempProject();
+		const agentDir = createBrowserQaAgent(project);
+		installFakePlaywright(project);
+		const flow = writeAgentFlow(agentDir, JSON.stringify({ steps: [{ action: "goto", path: "/public" }] }));
+		const childPidFile = path.join(project, "hung-browser-child.pid");
+
+		const result = run(project, [
+			"run",
+			"--base-url", "https://staging.example.test",
+			"--flow", flow,
+			"--run-id", "hung-launch",
+			"--runner-timeout-ms", "100",
+		], agentDir, {
+			BROWSER_QA_TEST_HANG_STAGE: "browser_launch",
+			BROWSER_QA_TEST_CHILD_PID_FILE: childPidFile,
+		});
+
+		expect(result).toMatchObject({
+			code: 124,
+			stderr: "",
+			json: {
+				status: "QA_RUN_FAILED",
+				profile: "public",
+				timedOut: true,
+				lastStage: "browser_launch",
+			},
+		});
+		const progress = fs.readFileSync(path.join(agentDir, "browser-qa", "progress.jsonl"), "utf8");
+		expect(progress).toContain('"stage":"browser_launch_started"');
+		expect(progress).toContain('"stage":"browser_launch_timed_out"');
+		expect(progress).toContain('"stage":"runner_finished"');
+		expect(progress).not.toContain(flow);
+		if (process.platform !== "win32") {
+			const childPid = Number(fs.readFileSync(childPidFile, "utf8"));
+			const deadline = Date.now() + 1000;
+			while (Date.now() < deadline) {
+				try {
+					process.kill(childPid, 0);
+					await new Promise((resolve) => setTimeout(resolve, 10));
+				} catch {
+					return;
+				}
+			}
+			throw new Error(`detached browser child ${childPid} survived runner timeout`);
+		}
+	});
+
+	test("terminates hung synchronous trace sanitization in a worker", () => {
+		const project = tempProject();
+		const agentDir = createBrowserQaAgent(project);
+		installFakePlaywright(project);
+		const flow = writeAgentFlow(agentDir, JSON.stringify({ steps: [{ action: "goto", path: "/public" }] }));
+		const startedAt = Date.now();
+
+		const result = run(project, [
+			"run",
+			"--base-url", "https://staging.example.test",
+			"--flow", flow,
+			"--run-id", "hung-trace-sanitize",
+			"--runner-timeout-ms", "10000",
+		], agentDir, { BROWSER_QA_TEST_HANG_STAGE: "trace_sanitize" });
+
+		expect(Date.now() - startedAt).toBeLessThan(7000);
+		expect(result).toMatchObject({ code: 1, stderr: "", json: { status: "QA_RUN_FAILED", profile: "public" } });
+		const progress = fs.readFileSync(path.join(agentDir, "browser-qa", "progress.jsonl"), "utf8");
+		expect(progress).toContain('"stage":"trace_sanitize_started"');
+		expect(progress).toContain('"stage":"trace_sanitize_timed_out"');
+		expect(progress).toContain('"stage":"runner_finished"');
+	}, 8000);
+
 	test("lists auth profiles without exposing credentials or origins", () => {
 		const project = tempProject();
 		const secret = "top-secret-cookie";

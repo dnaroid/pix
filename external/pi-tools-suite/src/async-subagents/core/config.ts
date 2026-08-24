@@ -167,7 +167,7 @@ export const DEFAULT_MAX_CONCURRENT = 5;
 export const DEFAULT_ROUTING_CONFIG: ResolvedSubagentRoutingConfig = {
 	enabled: true,
 	model: "zai/glm-4.5-air",
-	fallbackModels: ["openai-codex/gpt-5.3-codex-spark"],
+	fallbackModels: ["openai-codex/gpt-5.6-luna"],
 	maxTaskChars: 1200,
 	maxTokens: 512,
 	maxRetries: 3,
@@ -181,18 +181,26 @@ const BUILTIN_CONFIG: SubagentConfig = {
 	types: {
 		quick: {
 			description: "Use for tiny cheap tasks: answer a simple question, inspect one known file, or verify one fact. Not for broad repo search.",
+			model: "openai-codex/gpt-5.6-luna",
+			fallbackModels: ["zai/glm-4.5-air"],
 			thinking: "off",
 		},
 		scan: {
 			description: "Use for finding files, symbols, text, or inventory across a repo. Return paths/facts; do not judge code quality.",
+			model: "openai-codex/gpt-5.6-luna",
+			fallbackModels: ["zai/glm-4.5-air"],
 			thinking: "off",
 		},
 		research: {
 			description: "Use for multi-file codebase research: read several files and explain how something works. No edits.",
+			model: "openai-codex/gpt-5.6-terra",
+			fallbackModels: ["zai/glm-5-turbo"],
 			thinking: "low",
 		},
 		docs: {
 			description: "Use for documentation work: README/API docs review, docs gaps, changelog, migration notes, examples.",
+			model: "openai-codex/gpt-5.6-luna",
+			fallbackModels: ["zai/glm-4.5-air"],
 			thinking: "low",
 		},
 		frontend: {
@@ -207,9 +215,10 @@ const BUILTIN_CONFIG: SubagentConfig = {
 		},
 		"browser-qa": {
 			description: "Use for browser-based visual QA: reproduce UI bugs and verify fixes with deterministic assertions, screenshots, video, and traces.",
-			model: "openai-codex/gpt-5.4-mini",
+			model: "openai-codex/gpt-5.6-luna",
 			fallbackModels: ["antigravity/gemini-3-flash-preview", "zai/glm-5.3"],
-			thinking: "medium",
+			thinking: "low",
+			timeoutMs: 120_000,
 			tools: ["read", "grep", "bash"],
 			isolatedSkills: [getBrowserQaSkillPath()],
 		},
@@ -219,6 +228,8 @@ const BUILTIN_CONFIG: SubagentConfig = {
 		},
 		tests: {
 			description: "Use for tests: locate coverage, find gaps, run/check targeted test commands, diagnose failing tests.",
+			model: "openai-codex/gpt-5.6-terra",
+			fallbackModels: ["zai/glm-5-turbo"],
 			thinking: "medium",
 		},
 		review: {

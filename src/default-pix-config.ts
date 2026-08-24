@@ -52,9 +52,9 @@ export const DEFAULT_PIX_CONFIG_JSONC = String.raw`{
     "antigravity/antigravity-claude-*": "error"
   },
 
-  "promptEnhancer": { "modelRef": "zai/glm-5-turbo" },
-  "autocomplete": { "modelRef": "zai/glm-5-turbo", "debounceMs": 350, "timeoutMs": 3000, "maxTokens": 48, "maxPromptTokens": 1200, "includeRecentMessages": 0 },
-  "sessionTitle": { "modelRef": "zai/glm-5-turbo", "fallbackModels": ["openai-codex/gpt-5.3-codex-spark"] },
+  "promptEnhancer": { "modelRef": "openai-codex/gpt-5.6-luna" },
+  "autocomplete": { "modelRef": "openai-codex/gpt-5.6-luna", "debounceMs": 350, "timeoutMs": 3000, "maxTokens": 48, "maxPromptTokens": 1200, "includeRecentMessages": 0 },
+  "sessionTitle": { "modelRef": "openai-codex/gpt-5.6-luna", "fallbackModels": ["zai/glm-5-turbo"] },
   "dictation": {
     "language": "en",
     "languages": {

@@ -247,7 +247,7 @@ For an oh-my-openagent-style workflow, run `/ultrawork` or `/ulw` to ask the par
 
 ### Private browser QA and project auth
 
-The built-in `browser-qa` role runs on `openai-codex/gpt-5.4-mini`, with
+The built-in `browser-qa` role runs on `openai-codex/gpt-5.6-luna`, with
 `antigravity/gemini-3-flash-preview` and then `zai/glm-5.3` as fallbacks. Its browser
 workflow is an explicit private skill under `src/async-subagents/private-skills/`,
 outside normal Pi skill discovery. The role's first-class `isolatedSkills` setting launches the child with

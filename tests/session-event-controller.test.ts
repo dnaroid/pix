@@ -117,6 +117,58 @@ describe("AppSessionEventController", () => {
 		assert.equal(controller.hasOlderSessionHistory(), false);
 	});
 
+	it("retains newer pages after lazy history reaches the true beginning", async () => {
+		const entries: Entry[] = [];
+		const messageEntry = (index: number) => ({
+			type: "message",
+			id: `entry-${index}`,
+			parentId: index === 0 ? null : `entry-${index - 1}`,
+			timestamp: `2026-01-01T00:00:${String(index % 60).padStart(2, "0")}.000Z`,
+			message: { role: "user", content: `message ${index}` },
+		});
+		const branch = Array.from({ length: 180 }, (_value, index) => messageEntry(index + 250));
+		const olderBatches = [200, 150, 100, 50, 0].map((start) => (
+			Array.from({ length: 50 }, (_value, index) => messageEntry(start + index))
+		));
+		const controller = createController(entries, {
+			session: {
+				isStreaming: false,
+				messages: [],
+				sessionManager: {
+					getBranch: () => branch,
+					createHistoryReader: () => ({
+						hasOlder: () => olderBatches.length > 0,
+						readOlder: async () => olderBatches.shift() ?? [],
+					}),
+				},
+			},
+		} as unknown as AgentSessionRuntime);
+
+		assert.equal(await controller.loadSessionHistoryAsync({
+			isCancelled: () => false,
+			render: () => {},
+			lazyOlderHistory: true,
+		}), true);
+
+		while (controller.hasOlderSessionHistory()) {
+			assert.equal(await controller.loadOlderSessionHistory({ render: false }), true);
+		}
+
+		assert.equal(entries.length, 300);
+		assert.equal(historyEntryText(entries[0]), "message 0");
+		assert.equal(lastEntryText(entries), "message 299");
+		assert.equal(controller.hasNewerSessionHistory(), true);
+
+		while (controller.hasNewerSessionHistory()) {
+			assert.equal(await controller.loadNewerSessionHistory({ render: false }), true);
+		}
+
+		assert.equal(entries.length, 300);
+		assert.equal(historyEntryText(entries[0]), "message 130");
+		assert.equal(lastEntryText(entries), "message 429");
+		assert.equal(controller.hasNewerSessionHistory(), false);
+	});
+
 	it("refreshes session status when session info changes", () => {
 		const session = {
 			sessionName: "Renamed session",

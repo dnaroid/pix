@@ -7,7 +7,15 @@ import { replayFromBranch } from "./state/replay.js";
 import { ACTIVE_STATUSES, isTaskBlocked, selectVisibleTasks } from "./state/selectors.js";
 import { applyTaskMutation } from "./state/state-reducer.js";
 import { getState, replaceState } from "./state/store.js";
-import { activateTodoStateScope, DEFAULT_PROMPT_GUIDELINES, DEFAULT_PROMPT_SNIPPET, publishTodoState, registerTodosCommand, registerTodoTool } from "./todo.js";
+import {
+	activateTodoStateScope,
+	DEFAULT_PROMPT_GUIDELINES,
+	DEFAULT_PROMPT_SNIPPET,
+	publishTodoState,
+	registerTodosCommand,
+	registerTodoTool,
+	todoStateScopeFromContext,
+} from "./todo.js";
 import {
 	TODO_THINKING_LEVEL_VALUES,
 	todoParamsSchemaForThinkingLevels,
@@ -216,7 +224,7 @@ export default function (pi: ExtensionAPI) {
 	const todoConfig = loadPiToolsSuiteConfig(["todo"]);
 	const todoThinkingEnabled = todoConfig.todoThinking;
 	const todoThinkingOverrides = todoConfig.todoThinkingOverrides;
-	const rememberedThinkingByTaskId = new Map<number, TodoThinkingLevel>();
+	const baselineThinkingByScope = new Map<string, TodoThinkingLevel>();
 	let lastNudgedSignature: string | undefined;
 	let nudgeTimer: ReturnType<typeof setTimeout> | undefined;
 	const pendingAskUserToolCallIds = new Set<string>();
@@ -233,19 +241,19 @@ export default function (pi: ExtensionAPI) {
 		registerTodoTool(pi, {
 			...thinkingPrompt,
 			...(availableThinkingLevels ? { parameters: todoParamsSchemaForThinkingLevels(availableThinkingLevels) } : {}),
-			prepareMutation: (state, _ctx, info) => {
+			prepareMutation: (state, ctx, info) => {
 				if (!todoThinkingEnabled) return info.params;
-				if (info.action === "create" || info.action === "update") return prepareTodoThinkingMutation(state, info.params);
+				if (info.action === "create" || info.action === "update") return prepareTodoThinkingMutation(state, ctx, info.params);
 				if (info.action === "batch_create" || info.action === "batch_update") {
 					return {
 						...info.params,
-						items: (info.params.items ?? []).map((item) => prepareTodoThinkingMutation(state, item)),
+						items: (info.params.items ?? []).map((item) => prepareTodoThinkingMutation(state, ctx, item)),
 					};
 				}
 				return info.params;
 			},
 			afterCommit: async (state, ctx, info) => {
-				if (todoThinkingEnabled) applyTodoThinkingAfterCommit(state, info);
+				if (todoThinkingEnabled) applyTodoThinkingAfterCommit(state, ctx, info);
 				try {
 					const sync = syncPersistedPlan(ctx.cwd, info.committedState);
 					if (sync?.completed) console.log(`rpiv-todo: completed persisted plan and removed ${sync.path}`);
@@ -256,20 +264,27 @@ export default function (pi: ExtensionAPI) {
 		});
 	}
 
-	function applyTodoThinkingAfterCommit(state: ReturnType<typeof getState>, info: { action: string; params: TaskMutationParams }): void {
+	function applyTodoThinkingAfterCommit(
+		state: ReturnType<typeof getState>,
+		ctx: ExtensionContext,
+		info: { action: string; params: TaskMutationParams },
+	): void {
 		const mutations = getTodoThinkingMutations(info.action, info.params);
-		for (const mutation of mutations) {
-			if (mutation.id === undefined || mutation.status === "in_progress") continue;
-			restoreTaskThinking(mutation.id, state);
+		const activeTasks = state.tasks.filter((task) => task.status === "in_progress" && task.thinking !== undefined);
+		if (activeTasks.length === 0) {
+			restoreTodoThinkingBaseline(state, ctx);
+			return;
 		}
-		restoreInactiveTodoThinking(state);
-		for (const mutation of mutations) {
-			if (mutation.id === undefined) continue;
-			const task = state.tasks.find((item) => item.id === mutation.id);
-			if (!task || task.status !== "in_progress" || !task.thinking) continue;
-			if (mutation.status !== "in_progress" && mutation.thinking === undefined) continue;
-			switchToTaskThinking(task.id, task.thinking);
-		}
+
+		rememberTodoThinkingBaseline(state, ctx);
+		const explicitlyActivated = [...mutations].reverse().find((mutation) => {
+			if (mutation.id === undefined || (mutation.status !== "in_progress" && mutation.thinking === undefined)) return false;
+			return activeTasks.some((task) => task.id === mutation.id);
+		});
+		let target: Task | undefined;
+		if (explicitlyActivated) target = activeTasks.find((task) => task.id === explicitlyActivated.id);
+		else if (activeTasks.length === 1) [target] = activeTasks;
+		if (target?.thinking) switchToTaskThinking(target.thinking);
 	}
 
 	function getTodoThinkingMutations(action: string, params: TaskMutationParams): TaskMutationParams[] {
@@ -283,7 +298,43 @@ export default function (pi: ExtensionAPI) {
 		return isTodoThinkingLevel(level) ? level : undefined;
 	}
 
-	function prepareTodoThinkingMutation(state: ReturnType<typeof getState>, params: TaskMutationParams): TaskMutationParams {
+	function thinkingScopeKey(ctx: ExtensionContext): string {
+		return todoStateScopeFromContext(ctx) ?? "__default__";
+	}
+
+	function storedRestoreThinking(task: Task): TodoThinkingLevel | undefined {
+		const stored = task.metadata?.[TODO_THINKING_RESTORE_METADATA_KEY];
+		return isTodoThinkingLevel(stored) ? stored : undefined;
+	}
+
+	function storedTodoThinkingBaseline(state: ReturnType<typeof getState>, activeOnly: boolean): TodoThinkingLevel | undefined {
+		for (const task of state.tasks) {
+			if (activeOnly && task.status !== "in_progress") continue;
+			const stored = storedRestoreThinking(task);
+			if (stored) return stored;
+		}
+		return undefined;
+	}
+
+	function getTodoThinkingBaseline(state: ReturnType<typeof getState>, ctx: ExtensionContext): TodoThinkingLevel | undefined {
+		return baselineThinkingByScope.get(thinkingScopeKey(ctx)) ?? storedTodoThinkingBaseline(state, true);
+	}
+
+	function rememberTodoThinkingBaseline(state: ReturnType<typeof getState>, ctx: ExtensionContext): void {
+		const scopeKey = thinkingScopeKey(ctx);
+		if (baselineThinkingByScope.has(scopeKey)) return;
+		const baseline = storedTodoThinkingBaseline(state, true);
+		if (baseline) baselineThinkingByScope.set(scopeKey, baseline);
+	}
+
+	function syncTodoThinkingBaseline(state: ReturnType<typeof getState>, ctx: ExtensionContext): void {
+		const scopeKey = thinkingScopeKey(ctx);
+		const baseline = storedTodoThinkingBaseline(state, true);
+		if (baseline) baselineThinkingByScope.set(scopeKey, baseline);
+		else baselineThinkingByScope.delete(scopeKey);
+	}
+
+	function prepareTodoThinkingMutation(state: ReturnType<typeof getState>, ctx: ExtensionContext, params: TaskMutationParams): TaskMutationParams {
 		let nextParams = params;
 		const configuredOverride = resolveTodoThinkingOverride(currentModel, todoThinkingOverrides);
 		if (configuredOverride !== undefined) {
@@ -305,47 +356,31 @@ export default function (pi: ExtensionAPI) {
 		const shouldCapturePreviousThinking =
 			nextStatus === "in_progress" && nextThinking !== undefined && (current.status !== "in_progress" || nextParams.thinking !== undefined);
 		if (!shouldCapturePreviousThinking) return nextParams;
-		const currentThinking = getCurrentThinkingLevel();
-		if (!currentThinking) return nextParams;
+		const baselineThinking = getTodoThinkingBaseline(state, ctx) ?? getCurrentThinkingLevel();
+		if (!baselineThinking) return nextParams;
 		return {
 			...nextParams,
 			metadata: {
 				...(nextParams.metadata ?? {}),
-				[TODO_THINKING_RESTORE_METADATA_KEY]: currentThinking,
+				[TODO_THINKING_RESTORE_METADATA_KEY]: baselineThinking,
 			},
 		};
 	}
 
-	function getRememberedThinking(taskId: number, state: ReturnType<typeof getState>): TodoThinkingLevel | undefined {
-		const remembered = rememberedThinkingByTaskId.get(taskId);
-		if (remembered) return remembered;
-		const task = state.tasks.find((item) => item.id === taskId);
-		const stored = task?.metadata?.[TODO_THINKING_RESTORE_METADATA_KEY];
-		return isTodoThinkingLevel(stored) ? stored : undefined;
-	}
-
-	function switchToTaskThinking(taskId: number, level: TodoThinkingLevel): void {
+	function switchToTaskThinking(level: TodoThinkingLevel): void {
 		if (!getAvailableTodoThinkingLevels(currentModel).includes(level)) return;
 		const current = getCurrentThinkingLevel();
 		if (!current) return;
-		if (!rememberedThinkingByTaskId.has(taskId)) rememberedThinkingByTaskId.set(taskId, current);
 		if (current !== level) setTodoThinkingLevel(level);
 	}
 
-	function restoreTaskThinking(taskId: number, state: ReturnType<typeof getState>): void {
-		const previous = getRememberedThinking(taskId, state);
+	function restoreTodoThinkingBaseline(state: ReturnType<typeof getState>, ctx: ExtensionContext): void {
+		const scopeKey = thinkingScopeKey(ctx);
+		const previous = baselineThinkingByScope.get(scopeKey) ?? storedTodoThinkingBaseline(state, false);
 		if (!previous) return;
-		rememberedThinkingByTaskId.delete(taskId);
+		baselineThinkingByScope.delete(scopeKey);
 		const restored = normalizeTodoThinkingLevelForModel(currentModel, previous);
 		if (getCurrentThinkingLevel() !== restored) setTodoThinkingLevel(restored);
-	}
-
-	function restoreInactiveTodoThinking(state: ReturnType<typeof getState>): void {
-		for (const taskId of [...rememberedThinkingByTaskId.keys()]) {
-			const task = state.tasks.find((item) => item.id === taskId);
-			if (task?.status === "in_progress") continue;
-			restoreTaskThinking(taskId, state);
-		}
 	}
 
 	function setTodoThinkingLevel(level: TodoThinkingLevel): void {
@@ -401,7 +436,7 @@ export default function (pi: ExtensionAPI) {
 		const autoClear = autoClearCompletedTodos(result.state);
 		replaceState(autoClear.state);
 		publishTodoState(pi as any, ctx, action, params as Record<string, unknown>);
-		if (todoThinkingEnabled) applyTodoThinkingAfterCommit(result.state, { action, params });
+		if (todoThinkingEnabled) applyTodoThinkingAfterCommit(result.state, ctx, { action, params });
 		try {
 			const sync = syncPersistedPlan(ctx.cwd, autoClear.state);
 			if (sync?.completed) console.log(`rpiv-todo: completed persisted plan and removed ${sync.path}`);
@@ -473,6 +508,7 @@ export default function (pi: ExtensionAPI) {
 		const persisted = loadPersistedPlan(ctx.cwd);
 		const loaded = autoClearCompletedTodos(persisted?.state ?? replayFromBranch(ctx));
 		replaceState(loaded.state);
+		if (todoThinkingEnabled) syncTodoThinkingBaseline(loaded.state, ctx);
 		publishTodoState(pi as any, ctx);
 		if (persisted && loaded.cleared) syncPersistedPlan(ctx.cwd, loaded.state);
 		lastNudgedSignature = undefined;
@@ -487,14 +523,18 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_compact", async (_event, ctx) => {
 		activateTodoStateScope(ctx);
-		replaceState(autoClearCompletedTodos(loadPersistedPlan(ctx.cwd)?.state ?? replayFromBranch(ctx)).state);
+		const state = autoClearCompletedTodos(loadPersistedPlan(ctx.cwd)?.state ?? replayFromBranch(ctx)).state;
+		replaceState(state);
+		if (todoThinkingEnabled) syncTodoThinkingBaseline(state, ctx);
 		publishTodoState(pi as any, ctx);
 		lastNudgedSignature = undefined;
 	});
 
 	pi.on("session_tree", async (_event, ctx) => {
 		activateTodoStateScope(ctx);
-		replaceState(autoClearCompletedTodos(loadPersistedPlan(ctx.cwd)?.state ?? replayFromBranch(ctx)).state);
+		const state = autoClearCompletedTodos(loadPersistedPlan(ctx.cwd)?.state ?? replayFromBranch(ctx)).state;
+		replaceState(state);
+		if (todoThinkingEnabled) syncTodoThinkingBaseline(state, ctx);
 		publishTodoState(pi as any, ctx);
 		lastNudgedSignature = undefined;
 	});

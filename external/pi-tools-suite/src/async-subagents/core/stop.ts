@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { getAgentState, getRunState } from "./state.js";
-import { terminateProcess } from "./process.js";
+import { terminateProcess, terminateProcessTree } from "./process.js";
 import { writeStructuredResult } from "./structured-result.js";
 import type { AgentState } from "./types.js";
 import { isoNow } from "./utils.js";
@@ -70,7 +70,9 @@ function stopAgent(runDir: string, agent: AgentState, signal: StopSignal): StopA
 	}
 
 	try {
-		terminateProcess(agent.pid, signal);
+		const ownsProcessGroup = fs.existsSync(path.join(runDir, agent.id, "process_group"));
+		if (ownsProcessGroup) terminateProcessTree(agent.pid, signal);
+		else terminateProcess(agent.pid, signal);
 		markStopped(runDir, agent.id, signal);
 		return {
 			...result,

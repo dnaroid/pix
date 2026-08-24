@@ -725,6 +725,46 @@ describe.serial("todo extension lifecycle", () => {
 		}
 	});
 
+	test.serial("restores the baseline thinking only after the last active todo completes", async () => {
+		const previousEnv = process.env.PI_TOOLS_SUITE_TODO_THINKING;
+		process.env.PI_TOOLS_SUITE_TODO_THINKING = "1";
+		const extension = (await import("../src/todo/index.js")).default;
+		const pi = new FakePi();
+		pi.thinkingLevel = "medium";
+		const ctx = {
+			cwd: mkdtempSync(join(tmpdir(), "todo-thinking-overlap-")),
+			hasUI: false,
+			model: { reasoning: true, thinkingLevelMap: {} },
+			sessionManager: { getBranch: () => [] },
+			isIdle: () => true,
+			hasPendingMessages: () => false,
+		};
+		try {
+			extension(pi as any);
+			await pi.emit("session_start", {}, ctx);
+			const tool = pi.tools.get("todo");
+
+			await tool.execute("todo-1", { action: "batch_create", items: [
+				{ subject: "Investigate", thinking: "high" },
+				{ subject: "Document", thinking: "low" },
+			] }, undefined, undefined, ctx);
+			await tool.execute("todo-2", { action: "update", id: 1, status: "in_progress", activeForm: "investigating" }, undefined, undefined, ctx);
+			await tool.execute("todo-3", { action: "update", id: 2, status: "in_progress", activeForm: "documenting" }, undefined, undefined, ctx);
+			expect(pi.thinkingLevel).toBe("low");
+
+			await tool.execute("todo-4", { action: "update", id: 1, status: "completed" }, undefined, undefined, ctx);
+			expect(pi.thinkingLevel).toBe("low");
+
+			await tool.execute("todo-5", { action: "update", id: 2, status: "completed" }, undefined, undefined, ctx);
+			expect(pi.thinkingLevel).toBe("medium");
+			expect(pi.setThinkingLevelCalls).toEqual(["high", "low", "medium"]);
+		} finally {
+			if (previousEnv === undefined) delete process.env.PI_TOOLS_SUITE_TODO_THINKING;
+			else process.env.PI_TOOLS_SUITE_TODO_THINKING = previousEnv;
+			rmSync(ctx.cwd, { recursive: true, force: true });
+		}
+	});
+
 	test.serial("forces the configured GLM-5.3 todo thinking override to max", async () => {
 		const previousEnv = process.env.PI_TOOLS_SUITE_TODO_THINKING;
 		process.env.PI_TOOLS_SUITE_TODO_THINKING = "1";

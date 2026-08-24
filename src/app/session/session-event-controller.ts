@@ -215,7 +215,8 @@ export class AppSessionEventController {
 		this.historyWindowStart = 0;
 
 		const lazyOlderHistory = options.lazyOlderHistory === true;
-		const historyEntries: Entry[] | undefined = lazyOlderHistory ? undefined : [];
+		const historyEntries: Entry[] = [];
+		let historyAttached = false;
 		const messages = lazyOlderHistory
 			? sessionHistoryDisplayMessages(runtime.session)
 			: sessionHistoryDisplayMessagesFromEntries(await sessionHistoryFullBranchEntries(runtime.session));
@@ -223,20 +224,19 @@ export class AppSessionEventController {
 
 		const loaded = await loadSessionHistoryEntriesAsync({
 			messages,
-			addEntry: (entry) => {
-				if (historyEntries) historyEntries.push(entry);
-				else this.addEntry(entry);
-			},
+			addEntry: (entry) => historyEntries.push(entry),
 			prependEntries: (entries) => {
-				if (historyEntries) historyEntries.unshift(...entries);
-				else this.prependEntries(entries);
+				if (historyAttached) this.prependLoadedHistoryEntries(entries);
+				else historyEntries.unshift(...entries);
 			},
 			setToolEntryId: (toolCallId, entryId) => this.toolEntryIdsByCallId.set(toolCallId, entryId),
 			toolDefaultExpanded: (toolName) => this.host.toolDefaultExpanded(toolName),
 			observeSubagentsToolResult: (toolName, details, options) => this.host.observeSubagentsToolResult(toolName, details, options),
 			observeTodoToolResult: (toolName, details, isError) => this.host.observeTodoToolResult(toolName, details, isError),
 			isCancelled: options.isCancelled,
-			render: lazyOlderHistory ? options.render : () => {},
+			render: () => {
+				if (historyAttached) options.render();
+			},
 			lazyOlderHistory,
 			olderMessagesReader: lazyOlderHistory ? sessionHistoryOlderMessagesReader(runtime.session) : undefined,
 			onOlderLoaderReady: (loader) => {
@@ -244,16 +244,16 @@ export class AppSessionEventController {
 			},
 		});
 		if (!loaded) return false;
-		if (!historyEntries) return !options.isCancelled();
 
 		this.historyEntries = historyEntries;
+		historyAttached = true;
 		this.setHistoryWindowStart(this.maxHistoryWindowStart());
 		options.render();
 		return !options.isCancelled();
 	}
 
 	hasOlderSessionHistory(): boolean {
-		if (this.historyEntries.length > 0) return this.historyWindowStart > 0;
+		if (this.historyEntries.length > 0) return this.historyWindowStart > 0 || this.olderHistoryLoader?.hasOlder() === true;
 		return this.olderHistoryLoader?.hasOlder() === true;
 	}
 
@@ -262,7 +262,9 @@ export class AppSessionEventController {
 	}
 
 	async loadOlderSessionHistory(options: LoadOlderSessionHistoryOptions = {}): Promise<boolean> {
-		if (this.historyEntries.length > 0) return this.shiftHistoryWindow(-HISTORY_WINDOW_SHIFT_ENTRIES, options);
+		if (this.historyEntries.length > 0 && this.historyWindowStart > 0) {
+			return this.shiftHistoryWindow(-HISTORY_WINDOW_SHIFT_ENTRIES, options);
+		}
 		return this.olderHistoryLoader?.loadOlder(options) ?? false;
 	}
 
@@ -533,6 +535,14 @@ export class AppSessionEventController {
 		this.host.entries.unshift(...entries);
 		for (const entry of entries) this.registerEntry(entry);
 		this.pruneHistoryWindow("bottom");
+	}
+
+	private prependLoadedHistoryEntries(entries: readonly Entry[]): void {
+		if (entries.length === 0) return;
+		const previousStart = this.historyWindowStart;
+		this.historyEntries.unshift(...entries);
+		const nextStart = previousStart === 0 ? 0 : previousStart + entries.length;
+		this.setHistoryWindowStart(nextStart);
 	}
 
 	private shiftHistoryWindow(delta: number, options: { render?: boolean; onPrependedEntries?: (entries: readonly Entry[]) => void } = {}): boolean {

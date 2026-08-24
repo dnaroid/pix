@@ -6,7 +6,7 @@ import { selectSuitableToolsForModel } from "../../lib/tool-args.js";
 import { validateBasename } from "./paths.js";
 import { getPiInvocation } from "./pi-invocation.js";
 import { writePromptFile } from "./prompt.js";
-import { terminateProcess } from "./process.js";
+import { terminateProcessTree } from "./process.js";
 import { getAgentSessionDir, SUBAGENT_PARENT_SESSION_FILE, SUBAGENT_RETURN_SESSION_FILE, SUBAGENT_SESSION_FILE, writeParentSessionLink, writeSessionFileLink } from "./sessions.js";
 import { getAgentState } from "./state.js";
 import { writeStructuredResult } from "./structured-result.js";
@@ -31,6 +31,7 @@ const AGENT_TIMEOUT_KILL_GRACE_MS = 5_000;
 const AGENT_SETTLED_TERMINATE_GRACE_MS = 50;
 const AGENT_SETTLED_COMPLETION_FALLBACK_MS = 1_000;
 const EXIT_STDIO_FLUSH_GRACE_MS = 10;
+const PROGRESS_LOG_MAX_BYTES = 1024 * 1024;
 
 export function shouldPersistSubagentSessions(env: NodeJS.ProcessEnv = process.env): boolean {
 	return isTruthyEnv(env.ASYNC_SUBAGENTS_ENABLE_SESSIONS);
@@ -136,11 +137,16 @@ export function spawnAgent(
 	const invocation = getPiInvocation(piArgs);
 	const stderrStream = createDeferredFileWriter(stderrFile, logLimits.stderrMaxBytes, "stderr.log");
 	const transcriptStream = createBoundedFileWriter(transcriptFile, logLimits.eventsMaxBytes, "events.jsonl");
+	const progressStream = createBoundedFileWriter(path.join(agentDir, "progress.jsonl"), PROGRESS_LOG_MAX_BYTES, "progress.jsonl");
+	const writeProgress = (stage: string, details: Record<string, unknown> = {}) => {
+		progressStream.write(serializeJsonLine({ at: isoNow(), stage, ...details }));
+	};
 
 	const proc = spawn(invocation.command, invocation.args, {
 		cwd,
 		env: subagentEnvironment(process.env, task.subagentType === "browser-qa" ? agentDir : undefined),
 		stdio: ["pipe", "pipe", "pipe"],
+		detached: process.platform !== "win32",
 	});
 	proc.stdin.on("error", (error: NodeJS.ErrnoException) => {
 		if (error.code === "EPIPE") return;
@@ -156,18 +162,31 @@ export function spawnAgent(
 	let timeoutKillTimer: NodeJS.Timeout | undefined;
 	let agentSettledKillTimer: NodeJS.Timeout | undefined;
 	let agentSettledCompletionFallbackTimer: NodeJS.Timeout | undefined;
+	let processExitTreeKillTimer: NodeJS.Timeout | undefined;
 	let exitFinalizationTimer: NodeJS.Timeout | undefined;
 	const suppressedRpcEventCounts = new Map<string, number>();
+	const scheduleProcessTreeKill = (reason: string) => {
+		if (processExitTreeKillTimer) return;
+		processExitTreeKillTimer = setTimeout(() => {
+			try {
+				writeProgress("shutdown_signal", { reason, signal: "SIGKILL" });
+				terminateChildProcessTree(proc, "SIGKILL");
+			} catch {
+				/* process group may already be gone */
+			}
+		}, AGENT_SETTLED_COMPLETION_FALLBACK_MS);
+		processExitTreeKillTimer.unref?.();
+	};
 
 	const notifyComplete = (exitCode: number) => {
 		if (completionNotified) return;
 		if (exitCode !== 0) shouldKeepStderr = true;
 		completionNotified = true;
 		if (timeoutTimer) clearTimeout(timeoutTimer);
-		if (timeoutKillTimer) clearTimeout(timeoutKillTimer);
 		if (agentSettledKillTimer) clearTimeout(agentSettledKillTimer);
-		if (agentSettledCompletionFallbackTimer) clearTimeout(agentSettledCompletionFallbackTimer);
 		if (exitFinalizationTimer) clearTimeout(exitFinalizationTimer);
+		writeProgress("completed", { exitCode });
+		progressStream.end();
 		if (!fs.existsSync(agentDir)) {
 			onComplete?.({
 				runDir,
@@ -207,6 +226,7 @@ export function spawnAgent(
 
 	const finalizeCompletion = (code: number | null, signal: NodeJS.Signals | null) => {
 		if (completionNotified) return;
+		if (!timeoutKillTimer && !agentSettledCompletionFallbackTimer) scheduleProcessTreeKill("process_exit");
 		writeSuppressedRpcEventSummary(transcriptStream, suppressedRpcEventCounts);
 		const exitCode = resolveAgentExitCode({
 			timedOut,
@@ -233,19 +253,21 @@ export function spawnAgent(
 		agentSettledKillTimer = setTimeout(() => {
 			agentSettledKillTimer = undefined;
 			try {
-				terminateChildProcess(proc, "SIGTERM");
+				writeProgress("shutdown_signal", { reason: "agent_settled", signal: "SIGTERM" });
+				terminateChildProcessTree(proc, "SIGTERM");
 			} catch {
 				/* process may have exited before the graceful termination timer fired */
 			}
 		}, AGENT_SETTLED_TERMINATE_GRACE_MS);
 		agentSettledKillTimer.unref?.();
 		agentSettledCompletionFallbackTimer = setTimeout(() => {
-			if (completionNotified) return;
 			try {
-				terminateChildProcess(proc, "SIGKILL");
+				writeProgress("shutdown_signal", { reason: "agent_settled", signal: "SIGKILL" });
+				terminateChildProcessTree(proc, "SIGKILL");
 			} catch {
 				/* process may already be gone */
 			}
+			if (completionNotified) return;
 			proc.stdin.destroy();
 			proc.stdout?.destroy();
 			proc.stderr?.destroy();
@@ -261,6 +283,7 @@ export function spawnAgent(
 			if (completionNotified) return;
 			timedOut = true;
 			const timeoutMessage = `Sub-agent timed out after ${Math.round(timeoutMs / 1000)} seconds.`;
+			writeProgress("timeout", { timeoutMs });
 			if (fs.existsSync(agentDir)) {
 				fs.writeFileSync(path.join(agentDir, "timeout_ms"), String(timeoutMs), "utf-8");
 				fs.writeFileSync(path.join(agentDir, "timed_out_at"), isoNow(), "utf-8");
@@ -269,14 +292,15 @@ export function spawnAgent(
 				stderrStream.write(`${timeoutMessage}\n`);
 			}
 			try {
-				terminateChildProcess(proc, "SIGTERM");
+				writeProgress("shutdown_signal", { reason: "timeout", signal: "SIGTERM" });
+				terminateChildProcessTree(proc, "SIGTERM");
 			} catch {
 				/* process may have exited between the timer and signal */
 			}
 			timeoutKillTimer = setTimeout(() => {
-				if (completionNotified) return;
 				try {
-					terminateChildProcess(proc, "SIGKILL");
+					writeProgress("shutdown_signal", { reason: "timeout", signal: "SIGKILL" });
+					terminateChildProcessTree(proc, "SIGKILL");
 				} catch {
 					/* process may have exited after SIGTERM */
 				}
@@ -297,6 +321,8 @@ export function spawnAgent(
 			const event = JSON.parse(line) as RpcEventRecord;
 			const storedEvent = compactRpcEventForTranscript(event, Buffer.byteLength(line, "utf8"));
 			if (storedEvent) transcriptStream.write(serializeJsonLine(storedEvent));
+			const progressEvent = compactRpcEventForProgress(event);
+			if (progressEvent) writeProgress("rpc_event", progressEvent);
 			onRpcEvent?.(event);
 			const sessionFile = extractSessionFileFromEvent(event);
 			if (sessionFile) writeSessionFileLink(agentDir, sessionFile);
@@ -307,8 +333,9 @@ export function spawnAgent(
 			if (event.type === "response" && event.command === "prompt" && event.success === false) {
 				const errorText = typeof event.error === "string" ? event.error : "RPC prompt failed";
 				fs.writeFileSync(path.join(agentDir, "result.md"), errorText, "utf-8");
+				terminateChildProcessTree(proc, "SIGTERM");
+				scheduleProcessTreeKill("prompt_failed");
 				notifyComplete(1);
-				terminateChildProcess(proc, "SIGTERM");
 				return;
 			}
 			if (event.type === "agent_end") {
@@ -376,6 +403,11 @@ export function spawnAgent(
 		notifyComplete(1);
 	});
 
+	const pid = proc.pid!;
+	fs.writeFileSync(path.join(agentDir, "pid"), String(pid), "utf-8");
+	if (process.platform !== "win32") fs.writeFileSync(path.join(agentDir, "process_group"), String(pid), "utf-8");
+	writeProgress("spawned", { pid });
+
 	proc.stdin.write([
 		serializeJsonLine({
 			id: "sub_get_state",
@@ -388,15 +420,13 @@ export function spawnAgent(
 			...(promptImages ? { images: promptImages } : {}),
 		}),
 	].join(""));
+	writeProgress("prompt_sent");
 	// Keep stdin open while the RPC prompt is running. pi RPC mode treats stdin
 	// EOF as a shutdown request, while the prompt command itself is handled
 	// asynchronously after preflight. Closing stdin here can therefore terminate
 	// the child before message_end/agent_end/agent_settled events are emitted,
 	// producing exit 0 with no result.md. The child is terminated explicitly after agent_settled,
 	// timeout, stop, or process error.
-
-	const pid = proc.pid!;
-	fs.writeFileSync(path.join(agentDir, "pid"), String(pid), "utf-8");
 
 	return { pid, agentDir, process: proc };
 }
@@ -423,9 +453,9 @@ function getAntigravityAuthExtensionPath(): string {
 	return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "antigravity-auth", "index.ts");
 }
 
-function terminateChildProcess(proc: ChildProcess, signal: NodeJS.Signals): void {
+function terminateChildProcessTree(proc: ChildProcess, signal: NodeJS.Signals): void {
 	if (proc.pid) {
-		terminateProcess(proc.pid, signal as "SIGTERM" | "SIGINT" | "SIGKILL");
+		terminateProcessTree(proc.pid, signal as "SIGTERM" | "SIGINT" | "SIGKILL");
 		return;
 	}
 	proc.kill(signal);
@@ -601,6 +631,31 @@ function compactRpcEventForTranscript(event: RpcEventRecord, originalBytes: numb
 		});
 	}
 	return { type: event.type, bytes: originalBytes };
+}
+
+function compactRpcEventForProgress(event: RpcEventRecord): Record<string, unknown> | undefined {
+	if (event.type === "message_update" || event.type === "tool_execution_update") return undefined;
+	if (event.type === "response") {
+		return stripUndefined({
+			type: event.type,
+			command: typeof event.command === "string" ? event.command : undefined,
+			success: typeof event.success === "boolean" ? event.success : undefined,
+		});
+	}
+	if (event.type === "tool_execution_start" || event.type === "tool_execution_end") {
+		return stripUndefined({
+			type: event.type,
+			toolName: typeof event.toolName === "string" ? event.toolName : undefined,
+		});
+	}
+	if (event.type === "message_end") {
+		return stripUndefined({
+			type: event.type,
+			role: isRecord(event.message) && typeof event.message.role === "string" ? event.message.role : undefined,
+			stopReason: isRecord(event.message) && typeof event.message.stopReason === "string" ? event.message.stopReason : undefined,
+		});
+	}
+	return { type: event.type };
 }
 
 function suppressedRpcEventType(line: string): string | undefined {

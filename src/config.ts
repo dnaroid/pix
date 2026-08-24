@@ -153,11 +153,11 @@ const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "ma
 type ConfigThinkingLevel = (typeof THINKING_LEVELS)[number];
 
 const DEFAULT_PROMPT_ENHANCER: PromptEnhancerConfig = {
-	modelRef: "zai/glm-5-turbo",
+	modelRef: "openai-codex/gpt-5.6-luna",
 };
 
 const DEFAULT_AUTOCOMPLETE: AutocompleteConfig = {
-	modelRef: "zai/glm-5-turbo",
+	modelRef: "openai-codex/gpt-5.6-luna",
 	debounceMs: 350,
 	timeoutMs: 3000,
 	maxTokens: 48,

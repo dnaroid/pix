@@ -4,7 +4,7 @@
 
 Provide a cheap, fast `browser-qa` async-subagent that reproduces browser bugs
 and proves fixes with deterministic assertions plus screenshot, video, and trace
-evidence. The role uses `openai-codex/gpt-5.4-mini`, falling back to
+evidence. The role uses `openai-codex/gpt-5.6-luna`, falling back to
 `antigravity/gemini-3-flash-preview` and then `zai/glm-5.3`.
 
 ## Private skill isolation
@@ -62,6 +62,9 @@ evidence. The role uses `openai-codex/gpt-5.4-mini`, falling back to
   trusted runner implements a bounded set of navigation, interaction,
   assertion, screenshot, and auth-rejection actions and never gives the flow a
   Playwright context or credential values.
+- Target discovery is a bounded preflight, not an open-ended research task. The
+  sub-agent invokes the runner within 45 seconds or returns `BLOCKED`; it does
+  not spend the full launcher budget reading source or probing prerequisites.
 - The launcher injects `PI_SUBAGENT_AGENT_DIR`, pre-creates a private
   `browser-qa/flows/` workspace, and clears stale browser QA files when an agent
   id is reused. The runner validates the directory's project/type metadata and
@@ -78,6 +81,32 @@ evidence. The role uses `openai-codex/gpt-5.4-mini`, falling back to
   but never replaces, explicit expected-state checks.
 - Auth rejection discovered by a QA flow is reported through the
   `authRejectedIf` action so the parent gets an update-required status.
+
+## Reliability and shutdown contract
+
+- The built-in `browser-qa` profile has a 120-second wall-clock budget unless
+  the caller explicitly supplies a task or spawn timeout. This bounds model
+  stalls as well as browser work.
+- The trusted runner has its own bounded lifecycle. Browser launch, context
+  setup, auth, flow execution, evidence finalization, and browser shutdown must
+  not wait forever; a timeout reports the last started stage without exposing
+  flow contents or credentials.
+- Trace sanitization runs in a memory-limited worker that can be terminated at
+  the cleanup deadline; synchronous archive work cannot defeat the watchdog.
+- The launcher always writes a small sanitized `progress.jsonl` journal in the
+  agent directory. It records lifecycle/RPC event types and tool names, but not
+  prompts, tool arguments, tool results, model text, or secrets. The browser
+  runner writes similarly sanitized stage entries under its private workspace.
+- On POSIX, newly launched agents own a process group. Settled, timed-out, and
+  explicitly stopped agents signal that group rather than only the Pi process;
+  timeout/settled shutdown escalates to `SIGKILL` after its grace period. On
+  Windows the existing recursive `taskkill /T /F` behavior remains in force.
+- Process-tree cleanup is scoped to a launcher-created process-group marker so
+  an old or externally-created PID is never treated as an owned process group.
+  User browser sessions outside that group must not be signalled.
+- Playwright can launch Chromium in its own POSIX process group. On runner
+  failure the runner snapshots and kills only its own descendants before it
+  exits, covering that detached browser tree without touching a user's browser.
 
 ## Acceptance criteria
 
@@ -96,7 +125,10 @@ evidence. The role uses `openai-codex/gpt-5.4-mini`, falling back to
    deleting the run removes them while persistent auth config/state remains.
 6. Completed test runs report clickable screenshot, video, and trace links
    whenever those artifacts exist.
-7. Suite tests/typecheck, host checks, and suite sync pass.
+7. Timeout tests identify the last browser stage, launcher progress remains
+   available when full RPC logging is disabled, and process-tree tests prove a
+   descendant is terminated without signalling unrelated processes.
+8. Suite tests/typecheck, host checks, and suite sync pass.
 
 ## Real-browser regression test
 

@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
-import path from "node:path";
 import { createRequire } from "node:module";
+import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { isMainThread, parentPort, Worker, workerData } from "node:worker_threads";
 import { parse as parseJsonc, printParseErrorCode } from "jsonc-parser";
 import { strFromU8, strToU8, unzipSync, zipSync } from "../vendor/fflate.mjs";
 
@@ -13,6 +15,12 @@ const QA_WORKSPACE_RELATIVE = "browser-qa";
 const EVIDENCE_RELATIVE = "evidence";
 const FORM_VIDEO_STEP_DELAY_MS = 250;
 const EXIT_AUTH_UPDATE_REQUIRED = 42;
+const EXIT_RUNNER_TIMEOUT = 124;
+const DEFAULT_RUNNER_TIMEOUT_MS = 90_000;
+const MAX_RUNNER_TIMEOUT_MS = 100_000;
+const CLEANUP_TIMEOUT_MS = 5_000;
+const HARD_EXIT_GRACE_MS = 15_000;
+const PROGRESS_LOG_MAX_BYTES = 1024 * 1024;
 const PROFILE_ID = /^[A-Za-z0-9._-]+$/;
 const AUTH_TEMPLATE = `{
   // Authenticated browser QA requires at least one project-local profile.
@@ -37,7 +45,7 @@ const AUTH_TEMPLATE = `{
   }
 }
 `;
-process.umask(0o077);
+if (isMainThread) process.umask(0o077);
 
 class QaStatusError extends Error {
 	constructor(status, reason, exitCode, profileId, details = {}) {
@@ -50,10 +58,22 @@ class QaStatusError extends Error {
 	}
 }
 
-main().catch((error) => {
+if (!isMainThread && workerData?.operation === "sanitize_trace") {
+	if (process.env.BROWSER_QA_TEST_HANG_STAGE === "trace_sanitize") {
+		setInterval(() => {}, 1000);
+	} else {
+		try {
+			sanitizeTraceArchive(workerData.tracePath, workerData.secrets);
+			parentPort?.postMessage({ success: true });
+		} catch (error) {
+			parentPort?.postMessage({ success: false, reason: redact(safeReason(error), workerData.secrets) });
+		}
+	}
+} else main().catch((error) => {
 	const statusError = error instanceof QaStatusError
 		? error
 		: new QaStatusError("QA_RUN_FAILED", safeReason(error), 1);
+	terminateRunnerDescendants();
 	writeStatus({
 		status: statusError.status,
 		profile: statusError.profileId,
@@ -61,7 +81,7 @@ main().catch((error) => {
 		reason: statusError.reason,
 		...statusError.details,
 	});
-	process.exitCode = statusError.exitCode;
+	process.exit(statusError.exitCode);
 });
 
 async function main() {
@@ -85,16 +105,39 @@ async function main() {
 	const profileId = selected.id;
 	const profile = selected.profile;
 	const secrets = collectSecrets(profile.auth);
+	let hardExitTimer;
+	let progress;
 	try {
 		const agentDir = resolveBrowserQaAgentDirectory(cwd, process.env[SUBAGENT_AGENT_DIR_ENV]);
-		await runQa({ cwd, agentDir, args, profileId, profile });
+		const workspaceDir = path.join(agentDir, QA_WORKSPACE_RELATIVE);
+		const runnerTimeoutMs = parseRunnerTimeout(args.runnerTimeoutMs, profileId);
+		const deadline = Date.now() + runnerTimeoutMs;
+		progress = createRunnerProgress(workspaceDir);
+		progress("runner_started", { timeoutMs: runnerTimeoutMs });
+		hardExitTimer = setTimeout(() => {
+			const lastStage = progress?.lastStage?.();
+			progress?.("hard_timeout", { timeoutMs: runnerTimeoutMs });
+			terminateRunnerDescendants();
+			writeStatus({
+				status: "QA_RUN_FAILED",
+				profile: profileId,
+				reason: `browser QA runner did not exit within ${runnerTimeoutMs + HARD_EXIT_GRACE_MS} ms${lastStage ? `; last stage: ${lastStage}` : ""}`,
+				timedOut: true,
+				...(lastStage ? { lastStage } : {}),
+			});
+			process.exit(EXIT_RUNNER_TIMEOUT);
+		}, runnerTimeoutMs + HARD_EXIT_GRACE_MS);
+		await runQa({ cwd, agentDir, args, profileId, profile, deadline, progress });
 	} catch (error) {
 		if (error instanceof QaStatusError) throw error;
 		throw new QaStatusError("QA_RUN_FAILED", redact(safeReason(error), secrets), 1, profileId);
+	} finally {
+		if (hardExitTimer) clearTimeout(hardExitTimer);
+		progress?.("runner_finished");
 	}
 }
 
-async function runQa({ cwd, agentDir, args, profileId, profile }) {
+async function runQa({ cwd, agentDir, args, profileId, profile, deadline, progress }) {
 	if (!args.flow) throw new QaStatusError("QA_RUN_FAILED", "--flow is required", 1, profileId);
 	const workspaceDir = path.join(agentDir, QA_WORKSPACE_RELATIVE);
 	const flowPath = resolveExistingPrivateFile(workspaceDir, args.flow, "QA flow", false);
@@ -106,8 +149,10 @@ async function runQa({ cwd, agentDir, args, profileId, profile }) {
 	const evidenceDir = path.join(workspaceDir, EVIDENCE_RELATIVE, runId, profileId);
 	createExclusivePrivateDirectory(agentDir, evidenceDir);
 
+	progress("playwright_load_started");
 	const playwright = loadPlaywright(cwd);
-	const browser = await playwright.chromium.launch({ headless: true });
+	progress("playwright_load_finished");
+	const browser = await runStage(progress, "browser_launch", deadline, () => playwright.chromium.launch({ headless: true }), profileId);
 	let context;
 	let page;
 	let video;
@@ -116,40 +161,48 @@ async function runQa({ cwd, agentDir, args, profileId, profile }) {
 	const runtimeSecrets = collectSecrets(profile.auth);
 	const tracePath = path.join(evidenceDir, "trace.zip");
 	try {
-		const contextOptions = await contextOptionsForAuth({ cwd, profileId, profile, allowedOrigins });
-		context = await browser.newContext({
+		const contextOptions = await runStage(progress, "auth_context_options", deadline, () => contextOptionsForAuth({ cwd, profileId, profile, allowedOrigins }), profileId);
+		context = await runStage(progress, "context_create", deadline, () => browser.newContext({
 			...contextOptions,
 			baseURL,
 			serviceWorkers: "block",
 			recordVideo: { dir: evidenceDir, size: { width: 1280, height: 720 } },
 			viewport: { width: 1280, height: 720 },
-		});
-		await installOriginGuard(context, allowedOrigins, profile.auth);
-		await applyContextAuth(context, profile.auth, allowedOrigins, baseURL, profileId);
-		page = await context.newPage();
+		}), profileId);
+		await runStage(progress, "origin_guard_install", deadline, () => installOriginGuard(context, allowedOrigins, profile.auth), profileId);
+		await runStage(progress, "context_auth_apply", deadline, () => applyContextAuth(context, profile.auth, allowedOrigins, baseURL, profileId), profileId);
+		page = await runStage(progress, "page_create", deadline, () => context.newPage(), profileId);
 		video = page.video();
-		await applyFormAuth(page, profile.auth, allowedOrigins, profileId);
-		runtimeSecrets.push(...collectStorageStateSecrets(await context.storageState()));
-		await context.tracing.start({ screenshots: true, snapshots: true, sources: false });
-		await executeFlow({ page, context, baseURL, evidenceDir, flow, allowedOrigins, profileId, secrets: runtimeSecrets });
-		await assertPageDoesNotExposeSecrets(page, runtimeSecrets, profileId);
-		await page.screenshot({ path: path.join(evidenceDir, "final.png"), fullPage: true });
+		await runStage(progress, "form_auth_apply", deadline, () => applyFormAuth(page, profile.auth, allowedOrigins, profileId), profileId);
+		const initialStorageState = await runStage(progress, "storage_state_collect", deadline, () => context.storageState(), profileId);
+		runtimeSecrets.push(...collectStorageStateSecrets(initialStorageState));
+		await runStage(progress, "trace_start", deadline, () => context.tracing.start({ screenshots: true, snapshots: true, sources: false }), profileId);
+		await runStage(progress, "flow_execute", deadline, () => executeFlow({ page, context, baseURL, evidenceDir, flow, allowedOrigins, profileId, secrets: runtimeSecrets }), profileId);
+		await runStage(progress, "secret_exposure_check", deadline, () => assertPageDoesNotExposeSecrets(page, runtimeSecrets, profileId), profileId);
+		await runStage(progress, "final_screenshot", deadline, () => page.screenshot({ path: path.join(evidenceDir, "final.png"), fullPage: true }), profileId);
 	} catch (error) {
 		outcome = error instanceof QaStatusError ? error.status : "failed";
 		failure = error;
 		if (page && !page.isClosed() && !error.suppressEvidence) {
 			try {
-				await page.screenshot({ path: path.join(evidenceDir, "failure.png"), fullPage: true });
+				await runCleanupStage(progress, "failure_screenshot", () => page.screenshot({ path: path.join(evidenceDir, "failure.png"), fullPage: true }));
 			} catch { /* best effort */ }
 		}
 	} finally {
+		const cleanupDeadline = Date.now() + CLEANUP_TIMEOUT_MS;
 		if (context) {
 			try {
-				runtimeSecrets.push(...collectStorageStateSecrets(await context.storageState()));
+				const finalStorageState = await runCleanupStage(progress, "storage_state_finalize", () => context.storageState(), cleanupDeadline);
+				runtimeSecrets.push(...collectStorageStateSecrets(finalStorageState));
 			} catch { /* best effort */ }
 			try {
-				await context.tracing.stop({ path: tracePath });
-				sanitizeTraceArchive(tracePath, runtimeSecrets);
+				await runCleanupStage(progress, "trace_stop", () => context.tracing.stop({ path: tracePath }), cleanupDeadline);
+				await runCleanupStage(
+					progress,
+					"trace_sanitize",
+					() => sanitizeTraceArchiveInWorker(tracePath, runtimeSecrets, cleanupDeadline),
+					cleanupDeadline,
+				);
 			} catch (error) {
 				fs.rmSync(tracePath, { force: true });
 				if (!failure) {
@@ -157,15 +210,15 @@ async function runQa({ cwd, agentDir, args, profileId, profile }) {
 					failure = new Error(`trace evidence could not be sanitized: ${safeReason(error)}`);
 				}
 			}
-			await context.close().catch(() => {});
+			await runCleanupStage(progress, "context_close", () => context.close(), cleanupDeadline).catch(() => {});
 		}
 		if (video) {
 			try {
-				const generatedVideo = await video.path();
+				const generatedVideo = await runCleanupStage(progress, "video_finalize", () => video.path(), cleanupDeadline);
 				if (fs.existsSync(generatedVideo)) fs.renameSync(generatedVideo, path.join(evidenceDir, "video.webm"));
 			} catch { /* best effort */ }
 		}
-		await browser.close().catch(() => {});
+		await runCleanupStage(progress, "browser_close", () => browser.close(), cleanupDeadline).catch(() => {});
 	}
 	if (failure?.suppressEvidence) removeVisualEvidence(evidenceDir);
 
@@ -664,10 +717,164 @@ function parseArgs(values) {
 		const value = values[index + 1];
 		if (!flag?.startsWith("--") || value === undefined) throw new QaStatusError("QA_RUN_FAILED", `invalid argument: ${flag ?? "(missing)"}`, 1);
 		const key = flag.slice(2).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
-		if (!["profile", "flow", "baseUrl", "runId"].includes(key)) throw new QaStatusError("QA_RUN_FAILED", `unknown option: ${flag}`, 1);
+		if (!["profile", "flow", "baseUrl", "runId", "runnerTimeoutMs"].includes(key)) throw new QaStatusError("QA_RUN_FAILED", `unknown option: ${flag}`, 1);
 		result[key] = value;
 	}
 	return result;
+}
+
+function parseRunnerTimeout(value, profileId) {
+	if (value === undefined) return DEFAULT_RUNNER_TIMEOUT_MS;
+	const parsed = Number(value);
+	if (!Number.isFinite(parsed) || parsed < 100 || parsed > MAX_RUNNER_TIMEOUT_MS) {
+		throw new QaStatusError(
+			"QA_RUN_FAILED",
+			`--runner-timeout-ms must be between 100 and ${MAX_RUNNER_TIMEOUT_MS}`,
+			1,
+			profileId,
+		);
+	}
+	return Math.round(parsed);
+}
+
+function createRunnerProgress(workspaceDir) {
+	const progressPath = path.join(workspaceDir, "progress.jsonl");
+	let lastStage;
+	const write = (stage, details = {}) => {
+		lastStage = stage;
+		if (fs.existsSync(progressPath) && fs.statSync(progressPath).size >= PROGRESS_LOG_MAX_BYTES) {
+			fs.writeFileSync(progressPath, "", { mode: 0o600 });
+		}
+		fs.appendFileSync(progressPath, `${JSON.stringify({ at: new Date().toISOString(), stage, ...details })}\n`, { mode: 0o600 });
+	};
+	write.lastStage = () => lastStage;
+	return write;
+}
+
+function terminateRunnerDescendants() {
+	if (process.platform === "win32") return;
+	const snapshot = spawnSync("ps", ["-axo", "pid=,ppid=,pgid="], {
+		encoding: "utf8",
+		timeout: 1000,
+		maxBuffer: 2 * 1024 * 1024,
+	});
+	if (snapshot.status !== 0 || !snapshot.stdout) return;
+	const processes = snapshot.stdout
+		.split("\n")
+		.map((line) => line.trim().split(/\s+/).map(Number))
+		.filter(([pid, parentPid, groupId]) => Number.isInteger(pid) && Number.isInteger(parentPid) && Number.isInteger(groupId))
+		.map(([pid, parentPid, groupId]) => ({ pid, parentPid, groupId }));
+	const descendants = [];
+	const pendingParents = [process.pid];
+	for (let index = 0; index < pendingParents.length; index += 1) {
+		const parentPid = pendingParents[index];
+		for (const candidate of processes) {
+			if (candidate.parentPid !== parentPid || descendants.some(({ pid }) => pid === candidate.pid)) continue;
+			descendants.push(candidate);
+			pendingParents.push(candidate.pid);
+		}
+	}
+	const ownGroup = processes.find(({ pid }) => pid === process.pid)?.groupId;
+	for (const { pid, groupId } of descendants) {
+		if (pid !== groupId || groupId === ownGroup) continue;
+		try {
+			process.kill(-groupId, "SIGKILL");
+		} catch { /* already gone */ }
+	}
+	for (const { pid } of descendants) {
+		try {
+			process.kill(pid, "SIGKILL");
+		} catch { /* already gone */ }
+	}
+}
+
+function sanitizeTraceArchiveInWorker(tracePath, secrets, deadline) {
+	return new Promise((resolve, reject) => {
+		const worker = new Worker(new URL(import.meta.url), {
+			workerData: { operation: "sanitize_trace", tracePath, secrets },
+			resourceLimits: { maxOldGenerationSizeMb: 256 },
+		});
+		let settled = false;
+		const finish = (error) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			void worker.terminate();
+			if (error) reject(error);
+			else resolve();
+		};
+		const timer = setTimeout(
+			() => finish(new RunnerStageTimeoutError("trace_sanitize")),
+			Math.max(1, deadline - Date.now()),
+		);
+		worker.once("message", (message) => {
+			if (message?.success === true) finish();
+			else finish(new Error(typeof message?.reason === "string" ? message.reason : "trace sanitization failed"));
+		});
+		worker.once("error", finish);
+		worker.once("exit", (code) => {
+			if (code !== 0) finish(new Error(`trace sanitizer exited with code ${code}`));
+		});
+	});
+}
+
+async function runStage(progress, stage, deadline, operation, profileId) {
+	progress(`${stage}_started`);
+	try {
+		const result = await withDeadline(operation(), deadline, stage);
+		progress(`${stage}_finished`);
+		return result;
+	} catch (error) {
+		if (error instanceof RunnerStageTimeoutError) {
+			progress(`${stage}_timed_out`);
+			throw new QaStatusError(
+				"QA_RUN_FAILED",
+				`browser QA stage ${stage} timed out`,
+				EXIT_RUNNER_TIMEOUT,
+				profileId,
+				{ timedOut: true, lastStage: stage },
+			);
+		}
+		progress(`${stage}_failed`, { errorType: error?.constructor?.name ?? typeof error });
+		throw error;
+	}
+}
+
+async function runCleanupStage(progress, stage, operation, deadline = Date.now() + CLEANUP_TIMEOUT_MS) {
+	progress(`${stage}_started`);
+	try {
+		const result = await withDeadline(operation(), deadline, stage);
+		progress(`${stage}_finished`);
+		return result;
+	} catch (error) {
+		progress(error instanceof RunnerStageTimeoutError ? `${stage}_timed_out` : `${stage}_failed`, {
+			errorType: error?.constructor?.name ?? typeof error,
+		});
+		throw error;
+	}
+}
+
+class RunnerStageTimeoutError extends Error {
+	constructor(stage) {
+		super(`browser QA stage ${stage} timed out`);
+		this.name = "RunnerStageTimeoutError";
+	}
+}
+
+async function withDeadline(promise, deadline, stage) {
+	const remaining = deadline - Date.now();
+	if (remaining <= 0) throw new RunnerStageTimeoutError(stage);
+	let timer;
+	try {
+		return await Promise.race([
+			promise,
+			new Promise((_, reject) => {
+				timer = setTimeout(() => reject(new RunnerStageTimeoutError(stage)), remaining);
+			}),
+		]);
+	} finally {
+		if (timer) clearTimeout(timer);
+	}
 }
 
 function collectSecrets(value, output = []) {

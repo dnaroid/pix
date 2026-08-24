@@ -854,7 +854,7 @@ setTimeout(() => {}, 1000);
 		expect(result.content[0].text).toContain("Started 1 agent(s) so far; maxConcurrent=5 (project-wide).");
 		expect(result.content[0].text).toContain("All scheduled agents are no longer running or queued.");
 		expect(result.details.mode).toBe("spawn");
-		expect(result.details.tasks).toEqual([{ id: "agent-1", task: "Run fake agent", scope: "test scope" }]);
+		expect(result.details.tasks).toEqual([{ id: "agent-1", task: "Run fake agent", scope: "test scope", model: "openai-codex/gpt-5.6-luna" }]);
 		expect(updates.length).toBeGreaterThan(0);
 		const runDir = result.details.runDir;
 		const registry = JSON.parse(fs.readFileSync(path.join(cwd, ".pi", "subagents", "registry.json"), "utf-8"));
