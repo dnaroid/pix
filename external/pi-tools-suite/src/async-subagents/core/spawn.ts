@@ -164,6 +164,8 @@ export function spawnAgent(
 	let agentSettledCompletionFallbackTimer: NodeJS.Timeout | undefined;
 	let processExitTreeKillTimer: NodeJS.Timeout | undefined;
 	let exitFinalizationTimer: NodeJS.Timeout | undefined;
+	let processTermination: { code: number | null; signal: NodeJS.Signals | null } | undefined;
+	let stdoutEnded = false;
 	const suppressedRpcEventCounts = new Map<string, number>();
 	const scheduleProcessTreeKill = (reason: string) => {
 		if (processExitTreeKillTimer) return;
@@ -386,14 +388,29 @@ export function spawnAgent(
 		},
 	});
 
-	// `exit` may arrive before the child stdout pipe has been drained. This is
-	// observable on Windows where a final RPC response can otherwise be lost,
-	// making a failed prompt look like a clean exit. `close` is emitted after
-	// stdout/stderr have closed, so all buffered RPC events have been processed.
-	proc.once("close", (code, signal) => {
-		exitFinalizationTimer = setTimeout(() => finalizeCompletion(code, signal), EXIT_STDIO_FLUSH_GRACE_MS);
+	// Bun on Windows may emit the ChildProcess `close` event before the stdout
+	// Readable has delivered its final buffered `data`/`end` events. Gate process
+	// finalization on stdout itself so a trailing RPC failure cannot be mistaken
+	// for a clean exit.
+	const finalizeAfterStdout = () => {
+		if (!processTermination || !stdoutEnded || completionNotified || exitFinalizationTimer) return;
+		const { code, signal } = processTermination;
+		exitFinalizationTimer = setTimeout(
+			() => finalizeCompletion(code, signal),
+			EXIT_STDIO_FLUSH_GRACE_MS,
+		);
 		exitFinalizationTimer.unref?.();
+	};
+	const recordProcessTermination = (code: number | null, signal: NodeJS.Signals | null) => {
+		processTermination ??= { code, signal };
+		finalizeAfterStdout();
+	};
+	proc.stdout.once("end", () => {
+		stdoutEnded = true;
+		finalizeAfterStdout();
 	});
+	proc.once("exit", recordProcessTermination);
+	proc.once("close", recordProcessTermination);
 
 	proc.once("error", (error) => {
 		const message = String(error);
