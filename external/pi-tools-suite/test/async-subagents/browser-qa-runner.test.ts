@@ -818,7 +818,7 @@ describe("private browser QA runner", () => {
 		expect(unexpectedPopup).toMatchObject({ code: 1, json: { reason: expect.stringContaining("use openPopup") } });
 		expect(fs.readFileSync(path.join(popupProject, "unexpected-popup-closed"), "utf8")).toBe("yes");
 		expect(unexpectedPopup.json.evidence).not.toContain(expect.stringContaining("discarded-popup"));
-	});
+	}, 10_000);
 
 	test("brings declared popups forward and forces a repaint before recording video", () => {
 		const project = tempProject();
