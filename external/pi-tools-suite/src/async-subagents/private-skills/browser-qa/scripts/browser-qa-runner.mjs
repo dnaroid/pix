@@ -2014,7 +2014,7 @@ function writeAuthScaffold(cwd, profileId, profile) {
 	const temporaryFile = `${initialTarget.file}.scaffold-${randomUUID()}.tmp`;
 	try {
 		fs.writeFileSync(temporaryFile, content, { encoding: "utf8", mode: 0o600, flag: "wx" });
-		const descriptor = fs.openSync(temporaryFile, "r");
+		const descriptor = fs.openSync(temporaryFile, "r+");
 		try { fs.fsyncSync(descriptor); } finally { fs.closeSync(descriptor); }
 
 		const currentTarget = assertAuthScaffoldWritable(cwd);
