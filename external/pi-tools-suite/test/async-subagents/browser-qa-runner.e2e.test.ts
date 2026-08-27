@@ -108,6 +108,30 @@ e2eTest("runs public QA without auth, then records form login and private action
 		expect(publicResult.json.artifacts.traces).toHaveLength(1);
 		expect(fs.existsSync(path.join(project, ".pi", "qa_auth.jsonc"))).toBe(false);
 
+		const scaffoldResult = await runRunner(project, [
+			"auth", "scaffold",
+			"--profile", "mock",
+			"--login-url", `${origin}/login`,
+			"--success-url", "**/private",
+		], agentDir);
+		expect(scaffoldResult.code).toBe(0);
+		expect(scaffoldResult.json).toMatchObject({
+			status: "QA_AUTH_SCAFFOLD_CREATED",
+			profile: "mock",
+			placeholderCount: 2,
+			action: "fill_credentials",
+		});
+		expect(scaffoldResult.stdout).not.toContain(origin);
+		const scaffold = JSON.parse(fs.readFileSync(path.join(project, ".pi", "qa_auth.jsonc"), "utf8").replace(/^\/\/.*$/gm, ""));
+		expect(scaffold.profiles.mock.auth).toMatchObject({
+			fields: [
+				{ selector: '[id="email"]', value: "__PI_QA_SECRET_1__" },
+				{ selector: '[id="password"]', value: "__PI_QA_SECRET_2__" },
+			],
+			success: { url: "**/private" },
+		});
+		expect(scaffold.profiles.mock.auth.submitSelector).toBeTypeOf("string");
+
 		writePrivateJson(path.join(project, ".pi", "qa_auth.jsonc"), {
 			profiles: {
 				mock: {

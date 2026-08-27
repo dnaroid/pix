@@ -208,6 +208,13 @@ exports.chromium = {
               async reload() {},
               async waitForTimeout() {},
               async waitForURL() {},
+              async evaluate() {
+                return JSON.parse(process.env.BROWSER_QA_TEST_DISCOVERY || JSON.stringify({
+                  fields: ['input[name="email"]', 'input[name="password"]'],
+                  submitSelector: 'button[type="submit"]',
+                  formSelector: 'form[data-testid="login-form"]',
+                }));
+              },
               url() { return currentUrl; },
               async content() { return "<html><body><h1>Settings</h1></body></html>"; },
               locator(selector) {
@@ -356,6 +363,48 @@ describe("private browser QA runner", () => {
 		}
 	});
 
+	test("bounds auth scaffold discovery and kills a hung browser child", async () => {
+		const project = tempProject();
+		const agentDir = createBrowserQaAgent(project);
+		installFakePlaywright(project);
+		const childPidFile = path.join(project, "hung-scaffold-child.pid");
+
+		const result = run(project, [
+			"auth", "scaffold",
+			"--profile", "staging-user",
+			"--login-url", "https://staging.example.test/login",
+			"--runner-timeout-ms", "100",
+		], agentDir, {
+			BROWSER_QA_TEST_HANG_STAGE: "browser_launch",
+			BROWSER_QA_TEST_CHILD_PID_FILE: childPidFile,
+		});
+
+		expect(result).toMatchObject({
+			code: 124,
+			stderr: "",
+			json: {
+				status: "QA_RUN_FAILED",
+				profile: "staging-user",
+				timedOut: true,
+				lastStage: "auth_scaffold_browser_launch",
+			},
+		});
+		expect(fs.existsSync(path.join(project, ".pi", "qa_auth.jsonc"))).toBe(false);
+		if (process.platform !== "win32") {
+			const childPid = Number(fs.readFileSync(childPidFile, "utf8"));
+			const deadline = Date.now() + 1000;
+			while (Date.now() < deadline) {
+				try {
+					process.kill(childPid, 0);
+					await new Promise((resolve) => setTimeout(resolve, 10));
+				} catch {
+					return;
+				}
+			}
+			throw new Error(`detached browser child ${childPid} survived auth scaffold timeout`);
+		}
+	});
+
 	test("terminates hung synchronous trace sanitization in a worker", () => {
 		const project = tempProject();
 		const agentDir = createBrowserQaAgent(project);
@@ -417,6 +466,203 @@ describe("private browser QA runner", () => {
 		const missingBaseUrl = run(project, ["run", "--flow", flow], agentDir);
 		expect(missingBaseUrl).toMatchObject({ code: 1, json: { status: "QA_RUN_FAILED", profile: "public" } });
 		expect(missingBaseUrl.json.reason).toContain("--base-url is required");
+	});
+
+	test("scaffolds form auth with private placeholders and blocks use until the user fills them", () => {
+		const project = tempProject();
+		const agentDir = createBrowserQaAgent(project);
+		installFakePlaywright(project);
+
+		const scaffolded = run(project, [
+			"auth", "scaffold",
+			"--profile", "staging-user",
+			"--login-url", "https://staging.example.test/login",
+		], agentDir);
+
+		expect(scaffolded).toMatchObject({
+			code: 0,
+			stderr: "",
+			json: {
+				status: "QA_AUTH_SCAFFOLD_CREATED",
+				file: ".pi/qa_auth.jsonc",
+				profile: "staging-user",
+				action: "fill_credentials",
+				placeholderCount: 2,
+				replacedEmptyTemplate: false,
+			},
+		});
+		expect(scaffolded.stdout).not.toContain("staging.example.test");
+		expect(scaffolded.stdout).not.toContain("input[name");
+
+		const authFile = path.join(project, ".pi", "qa_auth.jsonc");
+		const auth = JSON.parse(fs.readFileSync(authFile, "utf8").replace(/^\/\/.*$/gm, ""));
+		expect(auth.profiles["staging-user"]).toMatchObject({
+			baseUrl: "https://staging.example.test/",
+			allowedOrigins: ["https://staging.example.test"],
+			auth: {
+				type: "form",
+				loginUrl: "https://staging.example.test/login",
+				fields: [
+					{ selector: 'input[name="email"]', value: "__PI_QA_SECRET_1__" },
+					{ selector: 'input[name="password"]', value: "__PI_QA_SECRET_2__" },
+				],
+				submitSelector: 'button[type="submit"]',
+				success: { selector: 'form[data-testid="login-form"]', state: "hidden" },
+			},
+		});
+		if (process.platform !== "win32") expect(fs.statSync(authFile).mode & 0o777).toBe(0o600);
+		expect(fs.readdirSync(path.dirname(authFile)).some((name) => name.includes(".scaffold-") && name.endsWith(".tmp"))).toBe(false);
+
+		const required = run(project, ["profiles", "--require-auth"]);
+		expect(required).toMatchObject({
+			code: 42,
+			json: {
+				status: "QA_AUTH_UPDATE_REQUIRED",
+				file: ".pi/qa_auth.jsonc",
+				action: "fill_credentials",
+				placeholderCount: 2,
+				templateCreated: false,
+			},
+		});
+
+		const flow = writeAgentFlow(agentDir, JSON.stringify({ steps: [{ action: "goto", path: "/settings" }] }));
+		const blocked = run(project, ["run", "--profile", "staging-user", "--flow", flow], agentDir);
+		expect(blocked).toMatchObject({
+			code: 42,
+			json: {
+				status: "QA_AUTH_UPDATE_REQUIRED",
+				file: ".pi/qa_auth.jsonc",
+				profile: "staging-user",
+				action: "fill_credentials",
+				placeholderCount: 2,
+				templateCreated: false,
+			},
+		});
+		expect(blocked.stdout).not.toContain("__PI_QA_SECRET_");
+		expect(blocked.stdout).not.toContain("input[name");
+	});
+
+	test("replaces only the runner's empty template and supports an explicit success condition", () => {
+		const project = tempProject();
+		const agentDir = createBrowserQaAgent(project);
+		installFakePlaywright(project);
+		const template = run(project, ["profiles", "--require-auth"]);
+		expect(template.code).toBe(42);
+
+		const scaffolded = run(project, [
+			"auth", "scaffold",
+			"--profile", "staging-user",
+			"--login-url", "https://staging.example.test/login",
+			"--success-selector", "[data-testid=user-menu]",
+			"--success-state", "visible",
+		], agentDir);
+		expect(scaffolded).toMatchObject({ code: 0, json: { replacedEmptyTemplate: true, placeholderCount: 2 } });
+		const auth = JSON.parse(fs.readFileSync(path.join(project, ".pi", "qa_auth.jsonc"), "utf8").replace(/^\/\/.*$/gm, ""));
+		expect(auth.profiles["staging-user"].auth.success).toEqual({ selector: "[data-testid=user-menu]", state: "visible" });
+
+		const nonEmpty = tempProject();
+		const nonEmptyAgentDir = createBrowserQaAgent(nonEmpty);
+		writeAuth(nonEmpty, { admin: profile("existing-secret") });
+		const before = fs.readFileSync(path.join(nonEmpty, ".pi", "qa_auth.jsonc"), "utf8");
+		const refused = run(nonEmpty, [
+			"auth", "scaffold",
+			"--profile", "other",
+			"--login-url", "https://staging.example.test/login",
+		], nonEmptyAgentDir);
+		expect(refused).toMatchObject({ code: 1, json: { status: "QA_RUN_FAILED" } });
+		expect(refused.json.reason).toContain("will not overwrite");
+		expect(refused.stdout).not.toContain("existing-secret");
+		expect(fs.readFileSync(path.join(nonEmpty, ".pi", "qa_auth.jsonc"), "utf8")).toBe(before);
+
+		const customEmpty = tempProject();
+		const customEmptyAgentDir = createBrowserQaAgent(customEmpty);
+		writeAuth(customEmpty, {});
+		const customBefore = fs.readFileSync(path.join(customEmpty, ".pi", "qa_auth.jsonc"), "utf8");
+		const customRefused = run(customEmpty, [
+			"auth", "scaffold",
+			"--profile", "other",
+			"--login-url", "https://staging.example.test/login",
+		], customEmptyAgentDir);
+		expect(customRefused).toMatchObject({ code: 1, json: { status: "QA_RUN_FAILED" } });
+		expect(customRefused.json.reason).toContain("not generated by the trusted runner");
+		expect(fs.readFileSync(path.join(customEmpty, ".pi", "qa_auth.jsonc"), "utf8")).toBe(customBefore);
+	});
+
+	test("fails closed when auth scaffold discovery or public metadata is unsupported", () => {
+		const malformed = tempProject();
+		const malformedAgentDir = createBrowserQaAgent(malformed);
+		installFakePlaywright(malformed);
+		const discovery = JSON.stringify({ fields: [], submitSelector: "secret-submit-selector" });
+		const noForm = run(malformed, [
+			"auth", "scaffold",
+			"--profile", "staging-user",
+			"--login-url", "https://staging.example.test/private-login-url",
+		], malformedAgentDir, { BROWSER_QA_TEST_DISCOVERY: discovery });
+		expect(noForm).toMatchObject({ code: 1, json: { status: "QA_RUN_FAILED", profile: "staging-user" } });
+		expect(noForm.json.reason).toContain("verify the public login page");
+		expect(noForm.stdout).not.toContain("private-login-url");
+		expect(noForm.stdout).not.toContain("secret-submit-selector");
+		expect(fs.existsSync(path.join(malformed, ".pi", "qa_auth.jsonc"))).toBe(false);
+
+		const invalid = tempProject();
+		const invalidAgentDir = createBrowserQaAgent(invalid);
+		const crossOrigin = run(invalid, [
+			"auth", "scaffold",
+			"--profile", "staging-user",
+			"--login-url", "https://staging.example.test/login",
+			"--base-url", "https://evil.example/",
+		], invalidAgentDir);
+		expect(crossOrigin).toMatchObject({ code: 1, json: { status: "QA_RUN_FAILED" } });
+		expect(crossOrigin.json.reason).toContain("on the login origin");
+
+		const insecure = run(invalid, [
+			"auth", "scaffold",
+			"--profile", "staging-user",
+			"--login-url", "http://staging.example.test/login",
+		], invalidAgentDir);
+		expect(insecure).toMatchObject({ code: 1, json: { status: "QA_RUN_FAILED" } });
+		expect(insecure.json.reason).toContain("HTTPS or loopback HTTP");
+
+		const invalidState = run(invalid, [
+			"auth", "scaffold",
+			"--profile", "staging-user",
+			"--login-url", "https://staging.example.test/login",
+			"--success-state", "hidden",
+		], invalidAgentDir);
+		expect(invalidState).toMatchObject({ code: 1, json: { status: "QA_RUN_FAILED" } });
+		expect(invalidState.json.reason).toContain("requires --success-selector");
+
+		const formLess = tempProject();
+		const formLessAgentDir = createBrowserQaAgent(formLess);
+		installFakePlaywright(formLess);
+		const formLessDiscovery = JSON.stringify({ fields: ["#email", "#password"], submitSelector: "#sign-in" });
+		const missingSuccess = run(formLess, [
+			"auth", "scaffold",
+			"--profile", "local-user",
+			"--login-url", "https://staging.example.test/login",
+		], formLessAgentDir, { BROWSER_QA_TEST_DISCOVERY: formLessDiscovery });
+		expect(missingSuccess).toMatchObject({ code: 1, json: { status: "QA_RUN_FAILED", profile: "local-user" } });
+		expect(missingSuccess.json.reason).toContain("explicit success condition");
+
+		const explicitSuccess = run(formLess, [
+			"auth", "scaffold",
+			"--profile", "local-user",
+			"--login-url", "https://staging.example.test/login",
+			"--success-url", "**/dashboard",
+		], formLessAgentDir, { BROWSER_QA_TEST_DISCOVERY: formLessDiscovery });
+		expect(explicitSuccess).toMatchObject({ code: 0, json: { status: "QA_AUTH_SCAFFOLD_CREATED", placeholderCount: 2 } });
+
+		const controls = tempProject();
+		const controlsAgentDir = createBrowserQaAgent(controls);
+		installFakePlaywright(controls);
+		const unsafeDiscovery = JSON.stringify({ fields: ["#email\nsecret"], submitSelector: "#sign-in", formSelector: "#login" });
+		const unsafeSelector = run(controls, [
+			"auth", "scaffold",
+			"--profile", "staging-user",
+			"--login-url", "https://staging.example.test/login",
+		], controlsAgentDir, { BROWSER_QA_TEST_DISCOVERY: unsafeDiscovery });
+		expect(unsafeSelector).toMatchObject({ code: 1, json: { status: "QA_RUN_FAILED" } });
+		expect(unsafeSelector.stdout).not.toContain("secret");
 	});
 
 	test("applies viewport and supports safe scrolling, metrics, and retrying assertions", () => {

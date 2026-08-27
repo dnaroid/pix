@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -10,6 +11,7 @@ import { parse as parseJsonc, printParseErrorCode } from "jsonc-parser";
 import { strFromU8, strToU8, unzipSync, zipSync } from "../vendor/fflate.mjs";
 
 const CONFIG_RELATIVE = ".pi/qa_auth.jsonc";
+const AUTH_SECRET_PLACEHOLDER = /^__PI_QA_SECRET_[1-9][0-9]*__$/;
 const SUBAGENT_AGENT_DIR_ENV = "PI_SUBAGENT_AGENT_DIR";
 const QA_WORKSPACE_RELATIVE = "browser-qa";
 const EVIDENCE_RELATIVE = "evidence";
@@ -109,6 +111,12 @@ if (!isMainThread && workerData?.operation === "sanitize_trace") {
 async function main() {
 	const [command = "profiles", ...rawArgs] = process.argv.slice(2);
 	const cwd = fs.realpathSync(process.cwd());
+	if (command === "auth") {
+		const [authCommand, ...authArgs] = rawArgs;
+		if (authCommand !== "scaffold") throw new QaStatusError("QA_RUN_FAILED", `unknown auth command: ${authCommand ?? "(missing)"}`, 1);
+		await runAuthScaffold(cwd, parseAuthScaffoldArgs(authArgs));
+		return;
+	}
 	if (command === "profiles") {
 		const requireAuth = rawArgs.length === 1 && rawArgs[0] === "--require-auth";
 		if (rawArgs.length > 0 && !requireAuth) {
@@ -122,7 +130,7 @@ async function main() {
 
 	const args = parseArgs(rawArgs);
 	const selected = args.profile
-		? selectProfile(readAuthConfig(cwd, true).profiles, args.profile)
+		? selectProfile(readAuthConfig(cwd, true, true).profiles, args.profile)
 		: createPublicProfile(args.baseUrl);
 	const profileId = selected.id;
 	const profile = selected.profile;
@@ -290,7 +298,189 @@ async function runQa({ cwd, agentDir, args, profileId, profile, deadline, progre
 	writeStatus({ status: "QA_PASSED", profile: profileId, ...evidenceDetails });
 }
 
-function readAuthConfig(cwd, required = false) {
+async function runAuthScaffold(cwd, args) {
+	const profileId = args.profile;
+	if (!isSafeName(profileId) || profileId.length > 128) throw new QaStatusError("QA_RUN_FAILED", "--profile must be a safe profile id no longer than 128 characters", 1);
+	const loginUrl = normalizeScaffoldUrl(args.loginUrl, "--login-url");
+	const login = new URL(loginUrl);
+	const baseUrl = normalizeScaffoldUrl(args.baseUrl ?? `${login.origin}/`, "--base-url", login.origin);
+	const success = scaffoldSuccess(args);
+	const agentDir = resolveBrowserQaAgentDirectory(cwd, process.env[SUBAGENT_AGENT_DIR_ENV]);
+	const progress = createRunnerProgress(path.join(agentDir, QA_WORKSPACE_RELATIVE));
+	assertAuthScaffoldWritable(cwd);
+	const timeout = Math.min(parseRunnerTimeout(args.runnerTimeoutMs, profileId), 60_000);
+	const deadline = Date.now() + timeout;
+	let browser;
+	let context;
+	try {
+		progress("auth_scaffold_started", { timeoutMs: timeout });
+		const playwright = loadPlaywright(cwd);
+		browser = await runStage(progress, "auth_scaffold_browser_launch", deadline, () => playwright.chromium.launch({ headless: true }), profileId);
+		context = await runStage(progress, "auth_scaffold_context_create", deadline, () => browser.newContext({
+			...DEFAULT_ENVIRONMENT,
+			serviceWorkers: "block",
+			viewport: DEFAULT_VIEWPORT,
+		}), profileId);
+		await runStage(progress, "auth_scaffold_origin_guard", deadline, () => installOriginGuard(context, [login.origin], { type: "none" }), profileId);
+		const page = await runStage(progress, "auth_scaffold_page_create", deadline, () => context.newPage(), profileId);
+		await runStage(progress, "auth_scaffold_login_load", deadline, () => page.goto(loginUrl, { waitUntil: "domcontentloaded", timeout }), profileId);
+		const discovered = await runStage(progress, "auth_scaffold_form_discovery", deadline, () => discoverLoginForm(page), profileId);
+		if (!success && !discovered.formSelector) {
+			throw new QaStatusError("QA_RUN_FAILED", "no login form was found; provide an explicit success condition for a form-less login page", 1, profileId);
+		}
+		const profile = {
+			description: args.description ?? `Browser QA form login (${profileId})`,
+			traits: ["auth:form"],
+			baseUrl,
+			allowedOrigins: [login.origin],
+			auth: {
+				type: "form",
+				loginUrl,
+				fields: discovered.fields.map((selector, index) => ({ selector, value: `__PI_QA_SECRET_${index + 1}__` })),
+				submitSelector: discovered.submitSelector,
+				success: success ?? { selector: discovered.formSelector, state: "hidden" },
+			},
+		};
+		const replacedEmptyTemplate = writeAuthScaffold(cwd, profileId, profile);
+		writeStatus({
+			status: "QA_AUTH_SCAFFOLD_CREATED",
+			file: CONFIG_RELATIVE,
+			profile: profileId,
+			action: "fill_credentials",
+			placeholderCount: discovered.fields.length,
+			replacedEmptyTemplate,
+		});
+	} catch (error) {
+		if (error instanceof QaStatusError) {
+			if (error.details?.timedOut) terminateRunnerDescendants();
+			throw error;
+		}
+		if (error instanceof RunnerStageTimeoutError) {
+			terminateRunnerDescendants();
+			throw new QaStatusError("QA_RUN_FAILED", "auth scaffold timed out; verify the public login page and retry", EXIT_RUNNER_TIMEOUT, profileId, { timedOut: true });
+		}
+		throw new QaStatusError("QA_RUN_FAILED", "auth scaffold failed; verify the public login page and retry", 1, profileId);
+	} finally {
+		if (context) await runCleanupStage(progress, "auth_scaffold_context_close", () => context.close()).catch(terminateOnCleanupTimeout);
+		if (browser) await runCleanupStage(progress, "auth_scaffold_browser_close", () => browser.close()).catch(terminateOnCleanupTimeout);
+		progress("auth_scaffold_finished");
+	}
+}
+
+function terminateOnCleanupTimeout(error) {
+	if (error instanceof RunnerStageTimeoutError) terminateRunnerDescendants();
+}
+
+function normalizeScaffoldUrl(raw, flag, expectedOrigin) {
+	if (typeof raw !== "string") throw new QaStatusError("QA_RUN_FAILED", `${flag} is required`, 1);
+	try {
+		const url = new URL(raw);
+		if (!isSecureScaffoldUrl(url) || url.username || url.password || (expectedOrigin && url.origin !== expectedOrigin)) throw new Error();
+		return url.href;
+	} catch {
+		throw new QaStatusError("QA_RUN_FAILED", `${flag} must use HTTPS or loopback HTTP without credentials${expectedOrigin ? " on the login origin" : ""}`, 1);
+	}
+}
+
+function isSecureScaffoldUrl(url) {
+	if (url.protocol === "https:") return true;
+	if (url.protocol !== "http:") return false;
+	const hostname = url.hostname.toLowerCase();
+	return hostname === "localhost"
+		|| hostname.endsWith(".localhost")
+		|| /^127(?:\.[0-9]{1,3}){3}$/.test(hostname)
+		|| hostname === "[::1]"
+		|| hostname === "::1";
+}
+
+function scaffoldSuccess(args) {
+	if (args.successUrl && args.successSelector) throw new QaStatusError("QA_RUN_FAILED", "use only one of --success-url or --success-selector", 1);
+	if (args.successState && !args.successSelector) throw new QaStatusError("QA_RUN_FAILED", "--success-state requires --success-selector", 1);
+	if (args.successUrl) return { url: boundedScaffoldString(args.successUrl, "--success-url") };
+	if (!args.successSelector) return undefined;
+	const state = args.successState ?? "visible";
+	if (validLocatorState(state) !== state) throw new QaStatusError("QA_RUN_FAILED", "--success-state is invalid", 1);
+	return { selector: boundedScaffoldString(args.successSelector, "--success-selector"), state };
+}
+
+function boundedScaffoldString(value, flag) {
+	if (typeof value !== "string" || !value.trim() || value.length > 1024 || /[\r\n\0]/.test(value)) {
+		throw new QaStatusError("QA_RUN_FAILED", `${flag} must be a non-empty single-line string no longer than 1024 characters`, 1);
+	}
+	return value;
+}
+
+async function discoverLoginForm(page) {
+	const discovered = await page.evaluate(() => {
+		const quoteAttribute = (value) => value.replace(/[\0-\x1f\x7f"\\]/g, (character) => {
+			if (character === "\0") return "�";
+			if (character === '"') return '\\"';
+			if (character === "\\") return "\\\\";
+			return `\\${character.codePointAt(0).toString(16)} `;
+		});
+		const unique = (selector) => {
+			try { return document.querySelectorAll(selector).length === 1; } catch { return false; }
+		};
+		const selectorFor = (element) => {
+			if (element.id) {
+				const selector = `[id="${quoteAttribute(element.id)}"]`;
+				if (unique(selector)) return selector;
+			}
+			for (const attribute of ["data-testid", "data-test", "name", "aria-label"]) {
+				const value = element.getAttribute(attribute);
+				if (!value) continue;
+				const selector = `${element.tagName.toLowerCase()}[${attribute}="${quoteAttribute(value)}"]`;
+				if (unique(selector)) return selector;
+			}
+			const parts = [];
+			let current = element;
+			while (current && current.nodeType === Node.ELEMENT_NODE && current !== document.documentElement) {
+				const tag = current.tagName.toLowerCase();
+				const siblings = [...current.parentElement.children].filter((item) => item.tagName === current.tagName);
+				parts.unshift(`${tag}:nth-of-type(${siblings.indexOf(current) + 1})`);
+				const selector = parts.join(" > ");
+				if (unique(selector)) return selector;
+				current = current.parentElement;
+			}
+			return parts.join(" > ");
+		};
+		const fillable = (element) => {
+			if (element.disabled || element.getAttribute("aria-hidden") === "true") return false;
+			if (element instanceof HTMLTextAreaElement) return true;
+			if (!(element instanceof HTMLInputElement)) return false;
+			return ["email", "password", "text", "tel", "url", "search", "number"].includes((element.type || "text").toLowerCase());
+		};
+		const visible = (element) => Boolean(element.getClientRects().length) && getComputedStyle(element).visibility !== "hidden";
+		const forms = [...document.querySelectorAll("form")];
+		const ranked = forms.map((form) => {
+			const fields = [...form.querySelectorAll("input, textarea")].filter((element) => fillable(element) && visible(element));
+			const passwordCount = fields.filter((element) => element instanceof HTMLInputElement && element.type === "password").length;
+			return { form, fields, score: passwordCount * 100 + fields.length };
+		}).filter((entry) => entry.fields.length > 0).sort((left, right) => right.score - left.score);
+		const selected = ranked[0];
+		const root = selected?.form ?? document;
+		const fields = selected?.fields ?? [...document.querySelectorAll("input, textarea")].filter((element) => fillable(element) && visible(element));
+		const submit = [...root.querySelectorAll('button[type="submit"], input[type="submit"], button:not([type])')].find(visible);
+		return {
+			fields: fields.map(selectorFor),
+			submitSelector: submit ? selectorFor(submit) : undefined,
+			formSelector: selected ? selectorFor(selected.form) : undefined,
+		};
+	});
+	if (!isObject(discovered) || !Array.isArray(discovered.fields) || discovered.fields.length === 0
+		|| discovered.fields.length > 10 || !discovered.fields.every(isBoundedSelector)
+		|| !isBoundedSelector(discovered.submitSelector)
+		|| (discovered.formSelector !== undefined && !isBoundedSelector(discovered.formSelector))) {
+		throw new Error("no supported login form with fillable fields and a submit control was found");
+	}
+	return discovered;
+}
+
+function isBoundedSelector(value) {
+	return typeof value === "string" && value.length > 0 && value.length <= 1024 && !/[\0-\x1f\x7f]/.test(value);
+}
+
+function readAuthConfig(cwd, required = false, allowPlaceholders = false) {
 	const candidate = path.join(cwd, CONFIG_RELATIVE);
 	if (!fs.existsSync(candidate)) {
 		if (!required) return { present: false, profiles: {} };
@@ -333,6 +523,18 @@ function readAuthConfig(cwd, required = false) {
 			{ action: "provide_credentials", templateCreated: false },
 		);
 	}
+	const profileValues = Object.values(value.profiles);
+	if (required && !allowPlaceholders && profileValues.length > 0
+		&& profileValues.every((profile) => authPlaceholderCount(profile) > 0)) {
+		const placeholderCount = profileValues.reduce((count, profile) => count + authPlaceholderCount(profile), 0);
+		throw new QaStatusError(
+			"QA_AUTH_UPDATE_REQUIRED",
+			`credentials are required; replace ${placeholderCount} generated credential placeholder${placeholderCount === 1 ? "" : "s"} in the auth config`,
+			EXIT_AUTH_UPDATE_REQUIRED,
+			undefined,
+			{ action: "fill_credentials", templateCreated: false, placeholderCount },
+		);
+	}
 	if (Object.keys(value.profiles).some((id) => !isSafeName(id))) {
 		throw new QaStatusError("QA_AUTH_UPDATE_REQUIRED", "auth profile ids may contain only letters, digits, dot, underscore, or dash", EXIT_AUTH_UPDATE_REQUIRED);
 	}
@@ -357,7 +559,26 @@ function selectProfile(profiles, requestedId) {
 	if (!isObject(profile.auth) || typeof profile.auth.type !== "string") {
 		throw new QaStatusError("QA_AUTH_UPDATE_REQUIRED", "profile auth configuration is missing or invalid", EXIT_AUTH_UPDATE_REQUIRED, requestedId);
 	}
+	const placeholderCount = authPlaceholderCount(profile);
+	if (placeholderCount > 0) {
+		throw new QaStatusError(
+			"QA_AUTH_UPDATE_REQUIRED",
+			`credentials are required; replace ${placeholderCount} generated credential placeholder${placeholderCount === 1 ? "" : "s"} in the auth config`,
+			EXIT_AUTH_UPDATE_REQUIRED,
+			requestedId,
+			{ action: "fill_credentials", templateCreated: false, placeholderCount },
+		);
+	}
 	return { id: requestedId, profile };
+}
+
+function authPlaceholderCount(profile) {
+	if (!isObject(profile) || !isObject(profile.auth) || profile.auth.type !== "form" || !Array.isArray(profile.auth.fields)) return 0;
+	return profile.auth.fields.filter((field) => (
+		isObject(field)
+		&& typeof field.value === "string"
+		&& AUTH_SECRET_PLACEHOLDER.test(field.value.trim())
+	)).length;
 }
 
 function createPublicProfile(rawBaseUrl) {
@@ -436,6 +657,7 @@ function validateAuthConfiguration(cwd, auth, allowedOrigins, profileId) {
 			if (!Array.isArray(auth.fields) || auth.fields.length === 0 || auth.fields.some((field) => !isObject(field) || typeof field.selector !== "string" || !field.selector || typeof field.value !== "string" || !field.value)) throw authError(profileId, "form fields require non-empty selector/value strings");
 			if (typeof auth.submitSelector !== "string" || !auth.submitSelector) throw authError(profileId, "form submitSelector is missing");
 			if (!isObject(auth.success) || (typeof auth.success.url !== "string" && typeof auth.success.selector !== "string")) throw authError(profileId, "form success.url or success.selector is required");
+			if (auth.success.state !== undefined && (typeof auth.success.selector !== "string" || validLocatorState(auth.success.state) !== auth.success.state)) throw authError(profileId, "form success.state requires a selector and valid locator state");
 			break;
 		case "storageState":
 			if (typeof auth.path !== "string") throw authError(profileId, "storageState path is missing");
@@ -1211,7 +1433,9 @@ async function applyFormAuth(page, auth, allowedOrigins, profileId) {
 		}
 		await page.locator(auth.submitSelector).click();
 		if (isObject(auth.success) && typeof auth.success.url === "string") await page.waitForURL(auth.success.url, { timeout });
-		if (isObject(auth.success) && typeof auth.success.selector === "string") await page.locator(auth.success.selector).waitFor({ timeout });
+		if (isObject(auth.success) && typeof auth.success.selector === "string") {
+			await page.locator(auth.success.selector).waitFor({ timeout, state: validLocatorState(auth.success.state) });
+		}
 		if (!isObject(auth.success) || (typeof auth.success.url !== "string" && typeof auth.success.selector !== "string")) {
 			throw authError(profileId, "form success.url or success.selector is required");
 		}
@@ -1350,6 +1574,26 @@ function parseArgs(values) {
 		const key = flag.slice(2).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
 		if (!["profile", "flow", "baseUrl", "runId", "runnerTimeoutMs"].includes(key)) throw new QaStatusError("QA_RUN_FAILED", `unknown option: ${flag}`, 1);
 		result[key] = value;
+	}
+	return result;
+}
+
+function parseAuthScaffoldArgs(values) {
+	const result = {};
+	for (let index = 0; index < values.length; index += 2) {
+		const flag = values[index];
+		const value = values[index + 1];
+		if (!flag?.startsWith("--") || value === undefined) throw new QaStatusError("QA_RUN_FAILED", `invalid argument: ${flag ?? "(missing)"}`, 1);
+		const key = flag.slice(2).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+		if (!["profile", "loginUrl", "baseUrl", "description", "successUrl", "successSelector", "successState", "runnerTimeoutMs"].includes(key)) {
+			throw new QaStatusError("QA_RUN_FAILED", `unknown option: ${flag}`, 1);
+		}
+		if (result[key] !== undefined) throw new QaStatusError("QA_RUN_FAILED", `duplicate option: ${flag}`, 1);
+		result[key] = value;
+	}
+	if (result.description !== undefined) {
+		result.description = boundedScaffoldString(result.description, "--description");
+		if (result.description.length > 200) throw new QaStatusError("QA_RUN_FAILED", "--description must be no longer than 200 characters", 1);
 	}
 	return result;
 }
@@ -1762,6 +2006,67 @@ function createAuthTemplate(cwd) {
 	}
 	fs.chmodSync(file, 0o600);
 	return true;
+}
+
+function writeAuthScaffold(cwd, profileId, profile) {
+	const initialTarget = assertAuthScaffoldWritable(cwd);
+	const content = `// Generated by the trusted browser QA runner from the public login form.\n// Replace only __PI_QA_SECRET_n__ values yourself; agents must not read or edit this file.\n${JSON.stringify({ profiles: { [profileId]: profile } }, null, 2)}\n`;
+	const temporaryFile = `${initialTarget.file}.scaffold-${randomUUID()}.tmp`;
+	try {
+		fs.writeFileSync(temporaryFile, content, { encoding: "utf8", mode: 0o600, flag: "wx" });
+		const descriptor = fs.openSync(temporaryFile, "r");
+		try { fs.fsyncSync(descriptor); } finally { fs.closeSync(descriptor); }
+
+		const currentTarget = assertAuthScaffoldWritable(cwd);
+		if (currentTarget.replacedEmptyTemplate !== initialTarget.replacedEmptyTemplate) {
+			throw new QaStatusError("QA_RUN_FAILED", "auth config changed during scaffold creation; no file was overwritten", 1);
+		}
+		if (currentTarget.replacedEmptyTemplate) {
+			fs.renameSync(temporaryFile, currentTarget.file);
+		} else {
+			try {
+				fs.linkSync(temporaryFile, currentTarget.file);
+			} catch (error) {
+				if (isAlreadyExistsError(error)) throw new QaStatusError("QA_RUN_FAILED", "auth config changed during scaffold creation; no file was overwritten", 1);
+				throw error;
+			}
+			fs.unlinkSync(temporaryFile);
+		}
+		return currentTarget.replacedEmptyTemplate;
+	} finally {
+		if (fs.existsSync(temporaryFile)) fs.unlinkSync(temporaryFile);
+	}
+}
+
+function assertAuthScaffoldWritable(cwd) {
+	const root = fs.realpathSync(cwd);
+	const directory = path.join(root, path.dirname(CONFIG_RELATIVE));
+	const file = path.join(root, CONFIG_RELATIVE);
+	assertInside(root, directory, "auth config directory");
+	if (!fs.existsSync(directory)) fs.mkdirSync(directory, { mode: 0o700 });
+	const directoryStat = fs.lstatSync(directory);
+	if (directoryStat.isSymbolicLink() || !directoryStat.isDirectory()) {
+		throw new QaStatusError("QA_RUN_FAILED", "auth config directory must be a real project-local directory", 1);
+	}
+
+	let replacedEmptyTemplate = false;
+	if (fs.existsSync(file)) {
+		const existing = resolveExistingPrivateFile(root, CONFIG_RELATIVE, "auth config");
+		const existingContent = fs.readFileSync(existing, "utf8");
+		const errors = [];
+		const value = parseJsonc(existingContent, errors, { allowTrailingComma: true });
+		if (errors.length > 0 || !isObject(value) || !isObject(value.profiles)) {
+			throw new QaStatusError("QA_RUN_FAILED", "existing auth config is invalid; scaffold creation will not overwrite it", 1);
+		}
+		if (Object.keys(value.profiles).length > 0) {
+			throw new QaStatusError("QA_RUN_FAILED", "existing auth config has profiles; scaffold creation will not overwrite it", 1);
+		}
+		if (existingContent !== AUTH_TEMPLATE) {
+			throw new QaStatusError("QA_RUN_FAILED", "existing empty auth config was not generated by the trusted runner; scaffold creation will not overwrite it", 1);
+		}
+		replacedEmptyTemplate = true;
+	}
+	return { file, replacedEmptyTemplate };
 }
 
 function isAlreadyExistsError(error) {

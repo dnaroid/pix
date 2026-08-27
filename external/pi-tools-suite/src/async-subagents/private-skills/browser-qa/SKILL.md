@@ -35,7 +35,9 @@ source reading, server polling, capability probing, or retries.
    list without creating `.pi/qa_auth.jsonc`. Otherwise skip profile discovery
    and use public mode. Choose an auth profile only when the task names its id,
    safe profile traits make the choice unambiguous, or a public run proves that
-   the requested page requires login.
+   the requested page requires login. If form authentication is required but
+   there is no usable profile, follow **Form-auth scaffolding** below instead of
+   asking the user to discover selectors.
 5. Inspect the target code and write a declarative JSONC flow under
    `$PI_SUBAGENT_AGENT_DIR/browser-qa/flows/`. Never put credentials or raw
    executable JavaScript in it. The `evaluate` action exposes only the safe
@@ -208,11 +210,43 @@ after login succeeds so credentials are not captured in the trace.
 
 ## Credentials and blocked runs
 
+### Form-auth scaffolding
+
+When a public HTTPS login page (or loopback HTTP page for local development) is
+known and there is no usable profile, invoke the trusted runner once:
+
+```sh
+node <runner> auth scaffold \
+  --profile <safe-id> \
+  --login-url <public-login-url>
+```
+
+The runner discovers the login form and privately writes a target-specific
+`.pi/qa_auth.jsonc` containing `__PI_QA_SECRET_n__` values. It may create the
+file or replace only the runner's own empty generated template; it refuses to
+overwrite invalid or non-empty auth configuration. Never inspect the result.
+Relay `QA_AUTH_SCAFFOLD_CREATED`, the reported file, profile, placeholder count,
+and action, then ask the user to replace only those placeholder values. Browser
+QA must resume in a new run after the user confirms that edit.
+
+By default, login succeeds when the discovered form becomes hidden. A form-less
+page therefore requires an explicit deterministic signal using either
+`--success-url <glob>` or `--success-selector <selector>` with optional
+`--success-state attached|detached|visible|hidden`. Use `--base-url <url>` only
+to override the profile's same-origin application root. These are public
+metadata; never put credential values in command arguments or environment
+variables.
+
+Do not scaffold cookie, bearer, storage, storage-state, MFA, CAPTCHA, or
+federated login. For those modes, use the generic empty-template flow below and
+ask the user to configure the profile themselves.
+
 Do not request credentials merely because `.pi/qa_auth.jsonc` is absent. If the
 task explicitly requires authenticated behavior, or a public run reaches the
 flow's `authRejectedIf` check, and `profiles` returned no usable profile, run
-`node <runner> profiles --require-auth`. Only this explicit authenticated path
-may create the private empty template.
+form-auth scaffolding when supported. Otherwise run
+`node <runner> profiles --require-auth`. Only these explicit authenticated paths
+may create the private auth file.
 
 If that command or an authenticated run returns `QA_AUTH_UPDATE_REQUIRED`, stop
 and explicitly report that authenticated browser QA requires credentials or an
@@ -220,7 +254,9 @@ auth-config update. Ask the user to fill the reported file and rerun QA. If
 `templateCreated` is true, say that a private empty template was created at that
 path. Relay only the runner's profile, file, reason, action, and template-created
 state; never read the generated file or attempt to recover by exposing or
-replaying credentials.
+replaying credentials. If the action is `fill_credentials`, also relay the
+placeholder count and tell the user to replace only the generated placeholder
+values.
 
 For any other blocked run, report the runner status and redacted reason. Do not
 claim that browser QA passed based on source inspection, unit tests, or a build.
@@ -230,5 +266,5 @@ all non-empty `artifacts.screenshots`, `artifacts.videos`, and
 `artifacts.traces`, and `artifacts.downloads` groups in the final response.
 These links are mandatory so the user can open the evidence directly.
 
-See `references/qa-auth.example.jsonc`, `references/qa-flow.example.jsonc`, and
-`references/qa-design.md`.
+See `references/qa-auth.example.jsonc`, `references/qa-flow.example.jsonc`,
+`references/qa-design.md`, and `references/auth-scaffold-spec.md`.
