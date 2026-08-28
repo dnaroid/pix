@@ -250,7 +250,7 @@ const BUILTIN_CONFIG: SubagentConfig = {
 				"antigravity/*": { model: "zai/glm-5.3", fallbackModels: ["openai-codex/gpt-5.6-sol"] },
 				"anthropic/*": { model: "openai-codex/gpt-5.6-sol", fallbackModels: ["zai/glm-5.3"] },
 			},
-			thinking: "xhigh",
+			thinking: "max",
 			tools: ["read", "grep", "bash"],
 			promptAppend: "You are an oracle: a flagship model from a different provider giving a second opinion to the parent agent. Give a concise, decisive recommendation with key tradeoffs and risks. Disagree when warranted; do not rubber-stamp. Do not edit unless explicitly asked.",
 		},

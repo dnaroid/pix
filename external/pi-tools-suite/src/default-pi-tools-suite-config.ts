@@ -341,7 +341,7 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
         "description": "Oracle: cross-provider flagship second opinion for hard or high-stakes uncertainty. Use sparingly to pressure-test architecture, plans, root-cause hypotheses, risk/security calls, or final recommendations when independent disagreement is valuable. Read-only; advise, do not edit.",
         "model": "openai-codex/gpt-5.6-sol",
         "fallbackModels": ["zai/glm-5.3"],
-        "thinking": "xhigh",
+        "thinking": "max",
         "tools": ["read", "grep", "bash"],
         "modelByParent": {
           "zai/*": { "model": "openai-codex/gpt-5.6-sol", "fallbackModels": ["zai/glm-5.3"] },

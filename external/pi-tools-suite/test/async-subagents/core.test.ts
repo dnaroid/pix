@@ -459,6 +459,8 @@ describe.serial("subagent type config", () => {
 			expect(role.task.model).toBe(model);
 			expect(role.fallbackModels).toEqual([...fallbackModels]);
 		}
+		const oracle = resolveAgentTaskConfig({ id: "oracle", task: "oracle", subagentType: "oracle" }, config);
+		expect(oracle.task.thinking).toBe("max");
 		expect(resolved.task.model).toBe("openai-codex/gpt-5.6-luna");
 		expect(resolved.task.thinking).toBe("low");
 		expect(resolved.fallbackModels).toEqual(["antigravity/gemini-3-flash-preview", "zai/glm-5.3"]);

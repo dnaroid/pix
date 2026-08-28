@@ -370,7 +370,7 @@ The canonical use case is an **`oracle`** role that consults a flagship model fr
   "description": "Cross-provider second opinion: consult a flagship from a different provider than the parent to pressure-test a hard decision. Read-only; advise, do not edit.",
   "model": "openai-codex/gpt-5.6-sol",
   "fallbackModels": ["zai/glm-5.3"],
-  "thinking": "xhigh",
+  "thinking": "max",
   "modelByParent": {
     "zai/*":         { "model": "openai-codex/gpt-5.6-sol", "fallbackModels": ["zai/glm-5.3"] },
     "openai-codex/*": "zai/glm-5.3",
