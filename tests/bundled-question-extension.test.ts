@@ -17,6 +17,12 @@ import {
 	prioritizeBundledQuestionExtension,
 } from "../src/app/runtime.js";
 import questionExtension from "../src/bundled-extensions/question/index.js";
+import type { QuestionComponent, QuestionTheme, QuestionToolResult } from "../src/bundled-extensions/question/types.js";
+import { InputEditor } from "../src/input-editor.js";
+
+type RegisteredQuestionTool = {
+	execute(...args: unknown[]): Promise<QuestionToolResult>;
+};
 
 describe("bundled extensions", () => {
 	it("treats an unavailable scoped question UI as cancellation", async () => {
@@ -46,6 +52,74 @@ describe("bundled extensions", () => {
 		);
 
 		assert.deepEqual(result.details, { answers: [], canceled: true, reason: "user_canceled" });
+	});
+
+	it("expands pasted text and emits pasted images from a custom answer", async () => {
+		let tool: RegisteredQuestionTool | undefined;
+		questionExtension({
+			registerTool(registered) {
+				tool = registered as RegisteredQuestionTool;
+			},
+		});
+
+		const editor = new InputEditor();
+		const theme: QuestionTheme = {
+			fg: (_color, text) => text,
+			bg: (_color, text) => text,
+			bold: (text) => text,
+			style: (text) => text,
+		};
+		const result = await tool!.execute(
+			"call-with-attachments",
+			{
+				questions: [{
+					id: "details",
+					label: "Details",
+					prompt: "What should change?",
+					choices: [
+						{ value: "skip", label: "Skip" },
+						{ value: "later", label: "Later" },
+					],
+				}],
+			},
+			undefined,
+			undefined,
+			{
+				hasUI: true,
+				ui: {
+					custom: async <T,>(factory: (tui: unknown, theme: QuestionTheme, keybindings: unknown, done: (value: T) => void) => QuestionComponent): Promise<T> => await new Promise<T>((resolve) => {
+						const component = factory({ requestRender() {}, pix: { delegatedEditorInput: true } }, theme, {}, resolve);
+						component.handleInput("3");
+						editor.attachPastedText("first pasted line\nsecond pasted line");
+						editor.attachImage("aW1hZ2U=", "image/png");
+						component.handleInput("\n");
+					}),
+					setEditorText: (text: string) => editor.restoreDraftState({ text, cursor: text.length }),
+					getEditorText: () => editor.text,
+					setEditorSnapshot: (snapshot: { text: string; images: Array<{ data: string; mimeType: string }> }) => {
+						editor.restoreDraftState({ text: snapshot.text, cursor: snapshot.text.length });
+						for (const image of snapshot.images) editor.attachImage(image.data, image.mimeType);
+					},
+					getEditorSnapshot: () => ({
+						text: editor.expandedText,
+						images: editor.images.map((image) => ({ ...image })),
+					}),
+				},
+			},
+		);
+
+		assert.equal(result.details.canceled, false);
+		assert.deepEqual(result.details.answers, [{
+			id: "details",
+			value: "first pasted line\nsecond pasted line",
+			label: "first pasted line\nsecond pasted line",
+			wasCustom: true,
+			imageCount: 1,
+		}]);
+		assert.equal(result.content[0]?.type, "text");
+		assert.match(result.content[0]?.text ?? "", /first pasted line\nsecond pasted line/u);
+		assert.ok(!result.content[0]?.text?.includes("[Pasted"));
+		assert.deepEqual(result.content[1], { type: "image", data: "aW1hZ2U=", mimeType: "image/png" });
 	});
 
 	it("ships the renderer-owned extensions from the project extensions directory", async () => {

@@ -1,5 +1,9 @@
 import { throwInvalid } from "./contract.js";
-import type { CanceledQuestionResult, NormalizedQuestion, QuestionResultDetails, QuestionSelection, QuestionToolResult, SuccessfulQuestionResult } from "./types.js";
+import type { CanceledQuestionResult, NormalizedQuestion, QuestionImageContent, QuestionResultDetails, QuestionSelection, QuestionToolResult, SuccessfulQuestionResult } from "./types.js";
+
+function formatAttachedImages(count: number): string {
+	return `${count} image${count === 1 ? "" : "s"} attached`;
+}
 
 export function createSuccessfulQuestionResult(questions: NormalizedQuestion[], selections: QuestionSelection[]): SuccessfulQuestionResult {
 	const selectionsById = new Map(selections.map((selection) => [selection.id, selection]));
@@ -9,12 +13,15 @@ export function createSuccessfulQuestionResult(questions: NormalizedQuestion[], 
 			if (!selection) throwInvalid(`Missing answer for question "${question.id}".`, "Retry after collecting one answer for each normalized question.");
 			if ("customText" in selection) {
 				const customText = selection.customText.trim();
-				if (!customText) throwInvalid(`Custom Answer for question "${question.id}" is empty after trimming.`, "Retry with non-empty Custom Answer text or choose a predefined Choice.");
+				const imageCount = selection.images?.length ?? 0;
+				if (!customText && imageCount === 0) throwInvalid(`Custom Answer for question "${question.id}" is empty after trimming.`, "Retry with non-empty Custom Answer text, an image, or choose a predefined Choice.");
+				const label = customText || formatAttachedImages(imageCount);
 				return {
 					id: question.id,
-					value: customText,
-					label: customText,
+					value: customText || label,
+					label,
 					wasCustom: true,
+					...(imageCount > 0 ? { imageCount } : {}),
 				};
 			}
 
@@ -70,17 +77,24 @@ export function summarizeQuestionResult(result: QuestionResultDetails, questions
 	const questionLabels = new Map(questions.map((question) => [question.id, question.label]));
 	return `question answers: ${result.answers.map((answer) => {
 		const questionLabel = questionLabels.get(answer.id) ?? answer.id;
-		if (answer.wasCustom) return `${questionLabel}: ${answer.label} (custom answer)`;
+		if (answer.wasCustom) {
+			const imageLabel = answer.imageCount ? formatAttachedImages(answer.imageCount) : undefined;
+			const imageSuffix = imageLabel && answer.label !== imageLabel ? `; ${imageLabel}` : "";
+			return `${questionLabel}: ${answer.label} (custom answer${imageSuffix})`;
+		}
 		return `${questionLabel}: ${answer.label} (choice ${answer.index})`;
 	}).join("; ")}.`;
 }
 
-export function createQuestionToolResult(details: QuestionResultDetails, questions: NormalizedQuestion[] = []): QuestionToolResult {
+export function createQuestionToolResult(details: QuestionResultDetails, questions: NormalizedQuestion[] = [], images: QuestionImageContent[] = []): QuestionToolResult {
 	return {
-		content: [{
-			type: "text",
-			text: summarizeQuestionResult(details, questions),
-		}],
+		content: [
+			{
+				type: "text",
+				text: summarizeQuestionResult(details, questions),
+			},
+			...images.map((image) => ({ ...image })),
+		],
 		details,
 	};
 }

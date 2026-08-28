@@ -444,6 +444,12 @@ export type AboveInputRenderer = {
 	clear(key: string): void;
 };
 
+/** Attachment-aware editor content with virtual paste/image tags resolved. */
+export type PixEditorSnapshot = {
+	text: string;
+	images: readonly ImageContent[];
+};
+
 export type PixExtensionUIContext = Omit<ExtensionUIContext, "notify"> & {
 	notify(message: string, type?: ToastKind): void;
 	toast: ToastNotifier;
@@ -451,6 +457,8 @@ export type PixExtensionUIContext = Omit<ExtensionUIContext, "notify"> & {
 	renderAboveInput(key: string, content: ExtensionWidgetContent): void;
 	showMenu<T>(items: readonly PixMenuItem<T>[], options: PixMenuOptions): Promise<T | undefined>;
 	menu: PixMenuController;
+	getEditorSnapshot(): PixEditorSnapshot;
+	setEditorSnapshot(snapshot: PixEditorSnapshot): void;
 };
 
 export type WidgetTuiHandle = {

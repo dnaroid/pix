@@ -3,6 +3,7 @@ import * as PiTui from "@earendil-works/pi-tui";
 import { CUSTOM_ANSWER_LABEL } from "./contract.js";
 import type {
 	NormalizedQuestion,
+	QuestionEditorSnapshot,
 	QuestionInputHandlingResult,
 	QuestionMouseEvent,
 	QuestionSelection,
@@ -127,13 +128,18 @@ function clampIndex(index: number, length: number): number {
 	return Math.max(0, Math.min(Math.max(0, length - 1), index));
 }
 
+function formatAttachedImages(count: number): string {
+	return `${count} image${count === 1 ? "" : "s"} attached`;
+}
+
 export async function runQuestionnaire(questions: NormalizedQuestion[], ctx: QuestionUiContext): Promise<QuestionSelection[] | null | undefined> {
 	return ctx.ui.custom<QuestionSelection[] | null>((tui, theme, _keybindings, done) => {
 		const selections = new Map<string, QuestionSelection>();
-		const customDrafts = new Map<string, string>();
+		const customDrafts = new Map<string, QuestionEditorSnapshot>();
 		const reviewSubmitIndex = questions.length;
 		const pixCapabilities = (tui as unknown as { pix?: { delegatedEditorInput?: boolean; inputMouse?: boolean } }).pix;
 		const usesSharedEditor = Boolean(pixCapabilities?.delegatedEditorInput && ctx.ui.setEditorText && ctx.ui.getEditorText);
+		const usesEditorSnapshots = Boolean(usesSharedEditor && ctx.ui.setEditorSnapshot && ctx.ui.getEditorSnapshot);
 		let questionIndex = 0;
 		let selectedChoiceIndex = 0;
 		let selectedReviewIndex = reviewSubmitIndex;
@@ -163,21 +169,44 @@ export async function runQuestionnaire(questions: NormalizedQuestion[], ctx: Que
 
 		function sharedEditorText(): string {
 			if (usesSharedEditor) return ctx.ui.getEditorText?.() ?? "";
-			return customDrafts.get(currentQuestion().id) ?? "";
+			return customDrafts.get(currentQuestion().id)?.text ?? "";
+		}
+
+		function sharedEditorSnapshot(): QuestionEditorSnapshot {
+			if (usesEditorSnapshots) {
+				const snapshot = ctx.ui.getEditorSnapshot?.();
+				if (snapshot) return cloneEditorSnapshot(snapshot);
+			}
+			return { text: sharedEditorText(), images: [] };
+		}
+
+		function cloneEditorSnapshot(snapshot: QuestionEditorSnapshot): QuestionEditorSnapshot {
+			return {
+				text: snapshot.text,
+				images: snapshot.images.map((image) => ({ ...image })),
+			};
+		}
+
+		function setSharedEditorSnapshot(snapshot: QuestionEditorSnapshot): void {
+			const cloned = cloneEditorSnapshot(snapshot);
+			customDrafts.set(currentQuestion().id, cloned);
+			if (usesEditorSnapshots) ctx.ui.setEditorSnapshot?.(cloned);
+			else if (usesSharedEditor) ctx.ui.setEditorText?.(cloned.text);
 		}
 
 		function setSharedEditorText(text: string): void {
-			customDrafts.set(currentQuestion().id, text);
+			customDrafts.set(currentQuestion().id, { text, images: [] });
 			if (usesSharedEditor) ctx.ui.setEditorText?.(text);
 		}
 
 		function clearSharedEditorText(): void {
-			if (usesSharedEditor) ctx.ui.setEditorText?.("");
+			if (usesEditorSnapshots) ctx.ui.setEditorSnapshot?.({ text: "", images: [] });
+			else if (usesSharedEditor) ctx.ui.setEditorText?.("");
 		}
 
 		function captureCustomDraft(): void {
 			if (mode !== "custom") return;
-			customDrafts.set(currentQuestion().id, sharedEditorText());
+			customDrafts.set(currentQuestion().id, sharedEditorSnapshot());
 		}
 
 		function getCompleteSelections(): QuestionSelection[] | undefined {
@@ -209,7 +238,12 @@ export async function runQuestionnaire(questions: NormalizedQuestion[], ctx: Que
 		}
 
 		function formatReviewAnswerLabel(question: NormalizedQuestion, selection: QuestionSelection): string {
-			if ("customText" in selection) return `${CUSTOM_ANSWER_LABEL}: ${selection.customText}`;
+			if ("customText" in selection) {
+				const imageCount = selection.images?.length ?? 0;
+				const text = selection.customText || formatAttachedImages(imageCount);
+				const imageSuffix = selection.customText && imageCount > 0 ? ` (+${formatAttachedImages(imageCount)})` : "";
+				return `${CUSTOM_ANSWER_LABEL}: ${text}${imageSuffix}`;
+			}
 			return question.choices.find((choice) => choice.value === selection.choiceValue)?.label ?? "Unknown";
 		}
 
@@ -290,11 +324,13 @@ export async function runQuestionnaire(questions: NormalizedQuestion[], ctx: Que
 		function enterCustomMode(): void {
 			const question = currentQuestion();
 			const existing = selections.get(question.id);
-			const prefill = existing && "customText" in existing ? existing.customText : customDrafts.get(question.id) ?? "";
+			const prefill = existing && "customText" in existing
+				? { text: existing.customText, images: existing.images ?? [] }
+				: customDrafts.get(question.id) ?? { text: "", images: [] };
 			mode = "custom";
 			selectedChoiceIndex = customAnswerIndex(question);
 			customError = undefined;
-			setSharedEditorText(prefill);
+			setSharedEditorSnapshot(prefill);
 			refresh();
 		}
 
@@ -312,15 +348,19 @@ export async function runQuestionnaire(questions: NormalizedQuestion[], ctx: Que
 		}
 
 		function submitCustomAnswer(): void {
-			const text = sharedEditorText();
-			const trimmed = text.trim();
-			if (!trimmed) {
+			const snapshot = sharedEditorSnapshot();
+			const trimmed = snapshot.text.trim();
+			if (!trimmed && snapshot.images.length === 0) {
 				customError = "Custom Answer cannot be empty.";
 				refresh();
 				return;
 			}
 			const question = currentQuestion();
-			selections.set(question.id, { id: question.id, customText: trimmed });
+			selections.set(question.id, {
+				id: question.id,
+				customText: trimmed,
+				...(snapshot.images.length > 0 ? { images: snapshot.images } : {}),
+			});
 			customDrafts.delete(question.id);
 			clearSharedEditorText();
 			advanceAfterAnswer();

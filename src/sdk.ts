@@ -11,6 +11,7 @@ export type {
 	PixMenuSelectOptions,
 	PixMenuVariant,
 	PixExtensionUIContext,
+	PixEditorSnapshot,
 	WidgetPlacement,
 	WidgetTuiHandle,
 } from "./app/types.js";

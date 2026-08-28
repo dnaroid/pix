@@ -24,7 +24,8 @@ export default function questionExtension(pi: ExtensionApiLike): void {
 			if (!ctx.hasUI) return createQuestionToolResult(createCanceledQuestionResult("ui_unavailable", questions), questions);
 			const selections = await runQuestionnaire(questions, ctx);
 			if (selections == null) return createQuestionToolResult(createCanceledQuestionResult("user_canceled"), questions);
-			return createQuestionToolResult(createSuccessfulQuestionResult(questions, selections), questions);
+			const images = selections.flatMap((selection) => "customText" in selection ? selection.images ?? [] : []);
+			return createQuestionToolResult(createSuccessfulQuestionResult(questions, selections), questions, images);
 		},
 	});
 }

@@ -1,6 +1,7 @@
 import { ANSI_RESET, ansiStylePrefix, colorize, THEMES, type Theme, type ThemeName } from "../../theme.js";
 import { isToastKind, type ToastKind, type ToastNotifier } from "../../ui.js";
 import type { ExtensionUIDialogOptions } from "@earendil-works/pi-coding-agent";
+import type { InputEditorDraftState } from "../../input-editor.js";
 import type {
 	Entry,
 	ExtensionInputMouseEvent,
@@ -10,6 +11,7 @@ import type {
 	ExtensionWidgetRegistration,
 	ExtensionWidgetTheme,
 	PixExtensionUIContext,
+	PixEditorSnapshot,
 	PixMenuController,
 	PixMenuItem,
 	PixMenuOptions,
@@ -39,7 +41,7 @@ type ActiveCustomUi = {
 	key: string;
 	scopeKey: string;
 	component?: FocusedCustomComponent;
-	savedInput?: string;
+	savedInput?: InputEditorDraftState;
 	settled: boolean;
 	resolve(value: unknown): void;
 	reject(error: unknown): void;
@@ -75,6 +77,10 @@ export type ExtensionUiControllerHost = {
 	restoreSessionStatus(): void;
 	setInput(value: string): void;
 	getInput(): string;
+	setInputState(state: InputEditorDraftState): void;
+	getInputState(): InputEditorDraftState;
+	setInputSnapshot(snapshot: PixEditorSnapshot): void;
+	getInputSnapshot(): PixEditorSnapshot;
 	readonly entries: readonly Entry[];
 	deleteConversationEntry(entryId: string): void;
 };
@@ -311,15 +317,23 @@ export class ExtensionUiController {
 			custom: (async <T,>(factory: CustomUiFactory<T>) => await this.showCustomUi(factory, { scopeKey: contextScopeKey })) as PixExtensionUIContext["custom"],
 			pasteToEditor: (text) => {
 				if (!this.isScopeActive(contextScopeKey)) return;
-				this.host.setInput(text);
+				this.host.setInputState({ text, cursor: text.length });
 				renderIfRunning();
 			},
 			setEditorText: (text) => {
 				if (!this.isScopeActive(contextScopeKey)) return;
-				this.host.setInput(text);
+				this.host.setInputState({ text, cursor: text.length });
 				renderIfRunning();
 			},
 			getEditorText: () => this.isScopeActive(contextScopeKey) ? this.host.getInput() : "",
+			getEditorSnapshot: () => this.isScopeActive(contextScopeKey)
+				? this.host.getInputSnapshot()
+				: { text: "", images: [] },
+			setEditorSnapshot: (snapshot) => {
+				if (!this.isScopeActive(contextScopeKey)) return;
+				this.host.setInputSnapshot(snapshot);
+				renderIfRunning();
+			},
 			editor: async (title, prefill) => await this.editorDialog(title, prefill, contextScopeKey),
 			addAutocompleteProvider: () => undefined,
 			setEditorComponent: () => undefined,
@@ -486,12 +500,12 @@ export class ExtensionUiController {
 
 	private async showCustomUi<T>(
 		factory: CustomUiFactory<T>,
-		options: { editorInput?: string; savedInput?: string; scopeKey?: string } = {},
+		options: { editorInput?: string; savedInput?: InputEditorDraftState; scopeKey?: string } = {},
 	): Promise<T> {
 		if (!this.host.isRunning()) return undefined as T;
 		const scopeKey = this.normalizeScopeKey(options.scopeKey);
 		if (this.activeCustomUis.has(scopeKey)) throw new Error("Another extension custom UI is already active.");
-		const savedInput = options.savedInput ?? (this.isScopeActive(scopeKey) ? this.host.getInput() : undefined);
+		const savedInput = options.savedInput ?? (this.isScopeActive(scopeKey) ? this.host.getInputState() : undefined);
 
 		return await new Promise<T>((resolve, reject) => {
 			const active: ActiveCustomUi = {
@@ -503,7 +517,7 @@ export class ExtensionUiController {
 				reject,
 			};
 			this.activeCustomUis.set(scopeKey, active);
-			if (options.editorInput !== undefined) this.host.setInput(options.editorInput);
+			if (options.editorInput !== undefined) this.host.setInputState({ text: options.editorInput, cursor: options.editorInput.length });
 
 			const done = (value: T): void => {
 				if (active.settled || this.activeCustomUis.get(scopeKey) !== active) return;
@@ -549,8 +563,8 @@ export class ExtensionUiController {
 		if (active.settled || this.activeCustomUis.get(active.scopeKey) !== active) return;
 		active.settled = true;
 		this.activeCustomUis.delete(active.scopeKey);
-		if (this.isScopeActive(active.scopeKey) && active.savedInput !== undefined && this.host.getInput() !== active.savedInput) {
-			this.host.setInput(active.savedInput);
+		if (this.isScopeActive(active.scopeKey) && active.savedInput !== undefined) {
+			this.host.setInputState(active.savedInput);
 		}
 		try {
 			active.component?.dispose?.();
@@ -571,7 +585,7 @@ export class ExtensionUiController {
 		const scopeKey = this.activeScopeKey();
 		if (!this.isScopeActive(scopeKey)) return undefined;
 		const active = this.activeCustomUis.get(scopeKey);
-		if (active && active.savedInput === undefined) active.savedInput = this.host.getInput();
+		if (active && active.savedInput === undefined) active.savedInput = this.host.getInputState();
 		return active;
 	}
 

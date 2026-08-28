@@ -11,6 +11,7 @@ import {
 import type {
 	AppOptions,
 	Entry,
+	PixEditorSnapshot,
 	SessionActivity,
 	SlashCommand,
 	UserMessageJumpMenuValue,
@@ -379,6 +380,13 @@ export class PiUiExtendApp {
 			restoreSessionStatus: () => this.restoreSessionStatus(),
 			setInput: (value) => this.setInput(value),
 			getInput: () => this.input,
+			setInputState: (state) => this.restoreTabInputState(state),
+			getInputState: () => this.inputEditor.draftState,
+			setInputSnapshot: (snapshot) => this.restoreEditorSnapshot(snapshot),
+			getInputSnapshot: () => ({
+				text: this.inputEditor.expandedText,
+				images: this.inputEditor.images.map((image) => ({ ...image })),
+			}),
 			get entries() { return app.entries; },
 			deleteConversationEntry: (entryId) => this.conversationViewport.deleteEntry(entryId),
 		});
@@ -1050,6 +1058,11 @@ export class PiUiExtendApp {
 		this.popupMenus.resetInputMenuDismissals();
 		this.inputEditor.restoreDraftState(state);
 		this.autocompleteController.dispose();
+	}
+
+	private restoreEditorSnapshot(snapshot: PixEditorSnapshot): void {
+		this.restoreTabInputState({ text: snapshot.text, cursor: snapshot.text.length });
+		for (const image of snapshot.images) this.inputEditor.attachImage(image.data, image.mimeType);
 	}
 
 	private async clearPersistedInputDraft(): Promise<void> {

@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import { ExtensionUiController } from "../src/app/extensions/extension-ui-controller.js";
 import type { Entry, PixMenuController } from "../src/app/types.js";
+import { InputEditor } from "../src/input-editor.js";
 import { THEMES } from "../src/theme.js";
 import type { ToastNotifier } from "../src/ui.js";
 
@@ -293,6 +294,34 @@ describe("ExtensionUiController custom UI", () => {
 		assert.equal(input.value, "draft");
 	});
 
+	it("exposes resolved editor snapshots and restores the attachment-rich draft", async () => {
+		const { controller, editor } = createController("draft: ");
+		editor.attachPastedText("original line 1\noriginal line 2");
+		const savedDraft = editor.draftState;
+		const ctx = controller.createExtensionUIContext();
+		let done!: (value: string) => void;
+
+		const resultPromise = ctx.custom<string>(((_tui, _theme, _keybindings, complete) => {
+			done = complete;
+			return { render: () => ["question panel"], usesEditor: () => true };
+		}) as never);
+		await Promise.resolve();
+
+		ctx.setEditorSnapshot({
+			text: "custom line 1\ncustom line 2",
+			images: [{ type: "image", data: "aW1hZ2U=", mimeType: "image/png" }],
+		});
+		assert.match(editor.text, /\[Image 1\]/u);
+		assert.deepEqual(ctx.getEditorSnapshot(), {
+			text: "custom line 1\ncustom line 2",
+			images: [{ type: "image", data: "aW1hZ2U=", mimeType: "image/png" }],
+		});
+
+		done("answered");
+		assert.equal(await resultPromise, "answered");
+		assert.deepEqual(editor.draftState, savedDraft);
+	});
+
 	it("allows focused custom UI to delegate input back to the editor", async () => {
 		const { controller } = createController();
 		const ctx = controller.createExtensionUIContext();
@@ -420,6 +449,7 @@ function createController(initialInput = ""): {
 	controller: ExtensionUiController;
 	renders: { count: number };
 	input: { value: string };
+	editor: InputEditor;
 	statuses: { set: string[]; restored: number };
 	toasts: { message: string; kind: string | undefined }[];
 	menu: PixMenuController & { nextShow?: unknown; nextSelect?: string; showCalls: Array<{ items: unknown[]; options: { title?: string } }>; selectCalls: Array<{ title: string; options: string[] }> };
@@ -430,7 +460,12 @@ function createController(initialInput = ""): {
 	const entries: Entry[] = [];
 	const deleted: string[] = [];
 	const renders = { count: 0 };
-	const input = { value: initialInput };
+	const editor = new InputEditor();
+	editor.restoreDraftState({ text: initialInput, cursor: initialInput.length });
+	const input = {
+		get value() { return editor.text; },
+		set value(value: string) { editor.setText(value); },
+	};
 	const statuses = { set: [] as string[], restored: 0 };
 	const activeScope = { value: undefined as string | undefined };
 	const toasts: { message: string; kind: string | undefined }[] = [];
@@ -458,6 +493,7 @@ function createController(initialInput = ""): {
 	return {
 		renders,
 		input,
+		editor,
 		statuses,
 		toasts,
 		menu: menuController,
@@ -486,6 +522,16 @@ function createController(initialInput = ""): {
 				input.value = value;
 			},
 			getInput: () => input.value,
+			setInputState: (state) => editor.restoreDraftState(state),
+			getInputState: () => editor.draftState,
+			setInputSnapshot: (snapshot) => {
+				editor.restoreDraftState({ text: snapshot.text, cursor: snapshot.text.length });
+				for (const image of snapshot.images) editor.attachImage(image.data, image.mimeType);
+			},
+			getInputSnapshot: () => ({
+				text: editor.expandedText,
+				images: editor.images.map((image) => ({ ...image })),
+			}),
 			get entries() { return entries; },
 			deleteConversationEntry: (entryId) => {
 				deleted.push(entryId);

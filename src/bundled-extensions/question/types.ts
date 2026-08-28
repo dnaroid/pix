@@ -36,6 +36,7 @@ export interface PredefinedQuestionSelection {
 export interface CustomQuestionSelection {
 	id: string;
 	customText: string;
+	images?: QuestionImageContent[];
 }
 
 export type QuestionSelection = PredefinedQuestionSelection | CustomQuestionSelection;
@@ -46,6 +47,7 @@ export interface QuestionAnswer {
 	label: string;
 	wasCustom: boolean;
 	index?: number;
+	imageCount?: number;
 }
 
 export interface SuccessfulQuestionResult {
@@ -67,8 +69,19 @@ export interface TextContent {
 	text: string;
 }
 
+export interface QuestionImageContent {
+	type: "image";
+	data: string;
+	mimeType: string;
+}
+
+export interface QuestionEditorSnapshot {
+	text: string;
+	images: QuestionImageContent[];
+}
+
 export interface QuestionToolResult {
-	content: TextContent[];
+	content: Array<TextContent | QuestionImageContent>;
 	details: QuestionResultDetails;
 }
 
@@ -78,6 +91,8 @@ export interface QuestionUiContext {
 		custom<T>(factory: (tui: QuestionTui, theme: QuestionTheme, keybindings: unknown, done: (value: T) => void) => QuestionComponent): Promise<T | undefined>;
 		setEditorText?(text: string): void;
 		getEditorText?(): string;
+		setEditorSnapshot?(snapshot: QuestionEditorSnapshot): void;
+		getEditorSnapshot?(): QuestionEditorSnapshot;
 		notify?(message: string, level: "info" | "warning" | "error"): void;
 	};
 }
