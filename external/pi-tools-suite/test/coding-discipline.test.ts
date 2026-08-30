@@ -68,15 +68,19 @@ afterEach(() => {
 });
 
 describe("coding discipline", () => {
-	test("recognizes GLM-5.3 without a version-specific branch", async () => {
-		const { isGlmModel } = await import("../src/coding-discipline/index.js");
+	test("recognizes GLM models and the vision-capable GLM-5.3 Flash exception", async () => {
+		const { isGlmModel, isVisionCapableGlmModel } = await import("../src/coding-discipline/index.js");
 
 		expect(isGlmModel("zai/glm-5.3")).toBe(true);
 		expect(isGlmModel("glm-5.3")).toBe(true);
+		expect(isGlmModel("zai/glm-5.3-flash")).toBe(true);
 		expect(isGlmModel("anthropic/claude-sonnet-4")).toBe(false);
+		expect(isVisionCapableGlmModel("zai/glm-5.3-flash")).toBe(true);
+		expect(isVisionCapableGlmModel("glm-5.3-flash")).toBe(true);
+		expect(isVisionCapableGlmModel("zai/glm-5.3")).toBe(false);
 	});
 
-	test("keeps lookup active only for GLM models", async () => {
+	test("keeps lookup active only for text-only GLM models", async () => {
 		setPiConfigDirConfig(`{ "lookupModel": "openai-codex/gpt-5.4-mini" }`);
 
 		const { default: register } = await import("../src/coding-discipline/index.js");
@@ -91,8 +95,29 @@ describe("coding discipline", () => {
 		await pi.emit("model_select", { model: { provider: "zai", id: "glm-4.5" } }, { cwd: "/tmp/project" });
 		expect(pi.activeTools).toEqual(["read", "custom", "lookup"]);
 
+		await pi.emit("model_select", { model: { provider: "zai", id: "glm-5.3-flash" } }, { cwd: "/tmp/project" });
+		expect(pi.activeTools).toEqual(["read", "custom"]);
+
 		await pi.emit("model_select", { model: { provider: "openai", id: "gpt-5" } }, { cwd: "/tmp/project" });
 		expect(pi.activeTools).toEqual(["read", "custom"]);
+	});
+
+	test("keeps coding discipline but omits text-only lookup rules for GLM-5.3 Flash", async () => {
+		setPiConfigDirConfig(`{ "lookupModel": "zai/glm-5.3-flash" }`);
+
+		const { default: register } = await import("../src/coding-discipline/index.js");
+		const pi = new FakePi();
+		register(pi as any);
+
+		const result = await pi.emit(
+			"before_provider_request",
+			{ payload: { system: "base prompt", model: "zai/glm-5.3-flash" } },
+			{ cwd: "/tmp/project", model: { provider: "zai", id: "glm-5.3-flash" } },
+		) as { system: string };
+
+		expect(result.system).toContain("TOOL-ONLY CODING AGENT CONTRACT");
+		expect(result.system).not.toContain("Treat the current GLM coding endpoint as text-only");
+		expect(result.system).not.toContain("call the `lookup` tool before making visual claims");
 	});
 
 	test("does not register lookup when lookupModel is disabled", async () => {

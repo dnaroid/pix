@@ -24,7 +24,7 @@ export class ModelCommandActions {
 		const enabledModels = settings.getEnabledModels();
 		const scopedModelText = enabledModels && enabledModels.length > 0
 			? enabledModels.map((model) => `  - ${model}`).join("\n")
-			: "  - default favorites";
+			: "  - all available models (no scope)";
 		const text = [
 			"Settings summary",
 			`cwd: ${runtime.cwd}`,
@@ -199,7 +199,7 @@ export class ModelCommandActions {
 			let scopedModelLines: string[];
 			if (enabledModels && enabledModels.length > 0) scopedModelLines = enabledModels.map((model) => `  - ${model}`);
 			else if (sessionModels.length > 0) scopedModelLines = sessionModels;
-			else scopedModelLines = ["  - default favorites"];
+			else scopedModelLines = ["  - all available models (no scope)"];
 			this.host.addEntry({
 				id: createId("system"),
 				kind: "system",
@@ -208,7 +208,7 @@ export class ModelCommandActions {
 					...scopedModelLines,
 					"",
 					"Usage: /scoped-models <provider/model[:thinking]> [...more]",
-					"Use /scoped-models reset to restore the default favorites.",
+					"Use /scoped-models reset to use all available models.",
 				].join("\n"),
 			});
 			this.host.setSessionStatus(runtime.session);
@@ -217,8 +217,8 @@ export class ModelCommandActions {
 
 		if (["reset", "default", "clear"].includes(value.toLowerCase())) {
 			runtime.services.settingsManager.setEnabledModels(undefined);
-			runtime.session.setScopedModels(this.host.getFavoriteScopedModels());
-			this.host.addEntry({ id: createId("system"), kind: "system", text: "Scoped models reset to default favorites." });
+			runtime.session.setScopedModels([]);
+			this.host.addEntry({ id: createId("system"), kind: "system", text: "Model scope reset to all available models." });
 			this.host.setSessionStatus(runtime.session);
 			return;
 		}

@@ -185,7 +185,7 @@ export default function codingDiscipline(pi: ExtensionAPI) {
 			if (!Array.isArray(activeTools)) return;
 
 			const lookupEnabled = Boolean(lookupModelFromConfig(cwd));
-			const shouldExposeLookup = lookupEnabled && isGlmModel(modelRef);
+			const shouldExposeLookup = lookupEnabled && isBlindGlmModel(modelRef);
 			const hasLookup = activeTools.includes(LOOKUP_TOOL_NAME);
 
 			if (shouldExposeLookup === hasLookup) return;
@@ -219,7 +219,7 @@ export default function codingDiscipline(pi: ExtensionAPI) {
 		if (!isGlmModel(modelRef)) return undefined;
 		const cwd = contextCwd(ctx);
 		const injected = injectCodingDisciplineIntoPayload(event.payload, {
-			lookupEnabled: Boolean(lookupModelFromConfig(cwd)),
+			lookupEnabled: Boolean(lookupModelFromConfig(cwd)) && isBlindGlmModel(modelRef),
 			strictness: codingDisciplineStrictnessFromConfig(cwd),
 		});
 		if (process.env.PI_DEBUG_PROMPT === "1") {
@@ -348,6 +348,16 @@ export function buildCodingDisciplinePrompt(options: DisciplinePromptOptions = {
 export function isGlmModel(modelRef: string | undefined): boolean {
 	if (!modelRef) return false;
 	return /(?:^|[/:_.-])glm(?:$|[/:_.-]|\d)/i.test(modelRef);
+}
+
+export function isVisionCapableGlmModel(modelRef: string | undefined): boolean {
+	if (!modelRef) return false;
+	const normalized = modelRef.trim().toLowerCase();
+	return normalized === "zai/glm-5.3-flash" || normalized === "glm-5.3-flash";
+}
+
+function isBlindGlmModel(modelRef: string | undefined): boolean {
+	return isGlmModel(modelRef) && !isVisionCapableGlmModel(modelRef);
 }
 
 export function injectCodingDisciplineIntoPayload(payload: unknown, options: DisciplinePromptOptions = {}): unknown {

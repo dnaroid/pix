@@ -5,7 +5,7 @@
   // Global async-subagents routing.
   // Rule of thumb:
   // - GLM: cheap/fast discovery, grep-style scanning, docs/test inventory.
-  // - Gemini: frontend/UI/UX, visual/product polish, and multimodal-heavy analysis.
+  // - GLM-5.3 Flash: frontend/UI/UX, visual/product polish, and multimodal-heavy analysis.
   // - GPT/Claude: review/audit, deep reasoning, tests, and implementation/refactoring.
   // Override exact model IDs here if your pi provider uses different names.
   "defaultType": "quick",
@@ -34,7 +34,11 @@
   // screenshot inspection should use lookup; this only keeps guidance honest.
   // Matching is case-insensitive and supports `*` wildcards.
   "vision": {
-    "blindModelPatterns": ["zai/glm*", "glm*", "*/glm*"]
+    "blindModelPatterns": [
+      "zai/glm-4.5*", "glm-4.5*", "*/glm-4.5*",
+      "zai/glm-5-turbo*", "glm-5-turbo*", "*/glm-5-turbo*",
+      "zai/glm-5.3", "glm-5.3", "*/glm-5.3"
+    ]
   },
 
   // Optional per-type prompt customization (leave commented until needed):
@@ -109,14 +113,14 @@
 
   "presets": {
     "cheap": {
-      "description": "Use cheap GLM/Gemini Flash models for text/code roles.",
+      "description": "Use GLM models by role, including GLM-5.3 Flash for multimodal work.",
       "types": {
         "quick": { "model": "zai/glm-4.5-air", "thinking": "off" },
         "scan": { "model": "zai/glm-4.5-air", "thinking": "off" },
         "research": { "model": "zai/glm-5-turbo", "thinking": "low" },
         "docs": { "model": "zai/glm-4.5-air", "thinking": "low" },
-        "frontend": { "model": "antigravity/gemini-3-flash-preview", "fallbackModels": ["zai/glm-5.3"], "thinking": "medium" },
-        "browser-qa": { "model": "openai-codex/gpt-5.6-luna", "fallbackModels": ["antigravity/gemini-3-flash-preview", "zai/glm-5.3"], "thinking": "low" },
+        "frontend": { "model": "zai/glm-5.3-flash", "thinking": "medium" },
+        "browser-qa": { "model": "zai/glm-5.3-flash", "thinking": "low" },
         "tests": { "model": "zai/glm-5-turbo", "thinking": "medium" },
         "review": { "model": "zai/glm-5.3", "thinking": "high" },
         "implement": { "model": "zai/glm-5.3", "thinking": "high" },

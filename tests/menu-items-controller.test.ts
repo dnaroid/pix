@@ -33,7 +33,7 @@ describe("AppMenuItemsController queue menu", () => {
 		assert.deepEqual(controller.getResumeMenuItems("fir", 5)[1]?.labelHighlightRanges, [{ start: 0, end: 3 }]);
 	});
 
-	it("builds model and thinking menus from runtime state and settings", () => {
+	it("builds model and thinking menus from an explicit session scope", () => {
 		const models = [model("zai", "glm-5-turbo", "GLM"), model("openai-codex", "gpt-5.5", "GPT")];
 		const runtime = {
 			session: {
@@ -43,7 +43,6 @@ describe("AppMenuItemsController queue menu", () => {
 				getAvailableThinkingLevels: () => ["low", "high"],
 			},
 			services: {
-				settingsManager: { getEnabledModels: () => ["zai/glm-5-turbo:low", "bad-ref", "missing/model"] },
 				modelRuntime: {
 					getModel: (provider: string, id: string) => models.find((candidate) => candidate.provider === provider && candidate.id === id),
 				},
@@ -54,7 +53,27 @@ describe("AppMenuItemsController queue menu", () => {
 		assert.deepEqual(controller.getModelMenuItems("").map((item) => item.label), ["openai-codex/gpt-5.5"]);
 		assert.deepEqual(controller.getModelMenuItems("gpt")[0]?.labelHighlightRanges, [{ start: 13, end: 16 }]);
 		assert.deepEqual(controller.getThinkingMenuItems("").map((item) => item.label), [`low ${APP_ICONS.check}`, "high"]);
-		assert.equal(controller.getFavoriteScopedModels()[0]?.thinkingLevel, "low");
+	});
+
+	it("uses the available-model snapshot when the session has no explicit scope", () => {
+		const models = [model("zai", "glm-5-turbo", "GLM"), model("openai-codex", "gpt-5.5", "GPT")];
+		const runtime = {
+			session: {
+				model: models[0],
+				scopedModels: [],
+			},
+			services: {
+				modelRuntime: {
+					getAvailableSnapshot: () => models,
+				},
+			},
+		} as unknown as AgentSessionRuntime;
+		const controller = new AppMenuItemsController(host(runtime));
+
+		assert.deepEqual(controller.getModelMenuItems("").map((item) => item.label), [
+			`zai/glm-5-turbo ${APP_ICONS.check}`,
+			"openai-codex/gpt-5.5",
+		]);
 	});
 
 	it("uses available thinking levels without forcing unavailable current levels", () => {

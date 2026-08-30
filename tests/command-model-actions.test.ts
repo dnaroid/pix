@@ -121,6 +121,44 @@ describe("ModelCommandActions.runModelCommand", () => {
 	});
 });
 
+describe("ModelCommandActions.runScopedModelsCommand", () => {
+	it("resets model scope to all available models", async () => {
+		const events: string[] = [];
+		const session = {
+			isStreaming: false,
+			setScopedModels(models: unknown[]) {
+				events.push(`scope:${models.length}`);
+			},
+		};
+		const runtime = {
+			session,
+			services: {
+				settingsManager: {
+					setEnabledModels(models: string[] | undefined) {
+						events.push(`settings:${models === undefined ? "unset" : models.join(",")}`);
+					},
+				},
+			},
+		};
+		const host = {
+			runtime: () => runtime,
+			isRunning: () => true,
+			addEntry: (entry: { text?: string }) => events.push(`entry:${entry.text ?? ""}`),
+			setSessionStatus: () => events.push("session-status"),
+			toast: { error: () => {}, warning: () => {} },
+		} as unknown as CommandControllerHost;
+
+		await new ModelCommandActions(host).runScopedModelsCommand("reset");
+
+		assert.deepEqual(events, [
+			"settings:unset",
+			"scope:0",
+			"entry:Model scope reset to all available models.",
+			"session-status",
+		]);
+	});
+});
+
 function createHost(session: { isStreaming: boolean; setModel(model: SessionModel): Promise<void>; reload(): Promise<void> }, events: string[]): CommandControllerHost {
 	const runtime = { session };
 	return ({

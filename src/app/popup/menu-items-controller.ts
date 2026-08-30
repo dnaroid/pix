@@ -2,9 +2,8 @@ import { resolve } from "node:path";
 import type { AgentSessionRuntime, SessionInfo } from "@earendil-works/pi-coding-agent";
 import { fuzzySearch, type FuzzySearchItem } from "../../fuzzy.js";
 import type { PopupMenuItem } from "../../ui.js";
-import { PI_FAVORITE_MODEL_REFS, THINKING_LEVELS } from "../constants.js";
+import { THINKING_LEVELS } from "../constants.js";
 import { APP_ICONS } from "../icons.js";
-import { parseScopedModelRef } from "../model/model-ref.js";
 import { buildUserMessageJumpItems, createSessionInfoMenuItemsLoader, filterUserMessageJumpItems, type SessionInfoMenuItemsLoader } from "./popup-menu-controller.js";
 import { getResourceSlashCommands, getSlashCommandMatches, parseSlashInput } from "../commands/slash-commands.js";
 import { isRecord } from "../guards.js";
@@ -15,7 +14,6 @@ import type {
 	ModelMenuValue,
 	QueueMessageMenuValue,
 	ResumeMenuValue,
-	ScopedSessionModel,
 	SessionModel,
 	SlashCommand,
 	ThinkingLevel,
@@ -68,12 +66,6 @@ export class AppMenuItemsController {
 
 	modelRef(model: SessionModel): string {
 		return `${model.provider}/${model.id}`;
-	}
-
-	getFavoriteScopedModels(): ScopedSessionModel[] {
-		const configuredRefs = this.host.runtime()?.services.settingsManager.getEnabledModels();
-		const refs = configuredRefs && configuredRefs.length > 0 ? configuredRefs : PI_FAVORITE_MODEL_REFS;
-		return this.resolveScopedModelRefs(refs);
 	}
 
 	getModelMenuItems(query: string): PopupMenuItem<ModelMenuValue>[] {
@@ -221,33 +213,18 @@ export class AppMenuItemsController {
 		return current?.provider === model.provider && current.id === model.id;
 	}
 
-	private resolveScopedModelRefs(modelRefs: readonly string[]): ScopedSessionModel[] {
-		const modelRuntime = this.host.runtime()?.services.modelRuntime;
-		if (!modelRuntime) return [];
-
-		const scopedModels: ScopedSessionModel[] = [];
-		for (const modelRef of modelRefs) {
-			const parsed = parseScopedModelRef(modelRef);
-			if (!parsed) continue;
-
-			const model = modelRuntime.getModel(parsed.provider, parsed.modelId) as SessionModel | undefined;
-			if (!model) continue;
-			scopedModels.push({
-				model,
-				...(parsed.thinkingLevel === undefined ? {} : { thinkingLevel: parsed.thinkingLevel }),
-			});
-		}
-		return scopedModels;
-	}
-
 	private getModelMenuModels(): SessionModel[] {
-		const session = this.host.runtime()?.session;
-		const scopedModels = session?.scopedModels.length ? session.scopedModels : this.getFavoriteScopedModels();
-		if (!scopedModels.length) return [];
+		const runtime = this.host.runtime();
+		if (!runtime) return [];
 
-		const modelRuntime = this.host.runtime()?.services.modelRuntime;
-		return scopedModels.map((scoped) => {
-			const refreshed = modelRuntime?.getModel(scoped.model.provider, scoped.model.id);
+		const { session } = runtime;
+		const modelRuntime = runtime.services.modelRuntime;
+		if (!session.scopedModels.length) {
+			return [...modelRuntime.getAvailableSnapshot()] as SessionModel[];
+		}
+
+		return session.scopedModels.map((scoped) => {
+			const refreshed = modelRuntime.getModel(scoped.model.provider, scoped.model.id);
 			return (refreshed ?? scoped.model) as SessionModel;
 		});
 	}

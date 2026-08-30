@@ -4,7 +4,7 @@ Local all-in-one Pi extension package.
 
 This package keeps shared Pi tools as ordinary source folders under `src/` and registers them through one entrypoint.
 
-- `src/coding-discipline` — injects a deduplicated silent-mode and quality-discipline block at the very top of the main-session per-turn system prompt for GLM main-session models only (`isGlmModel`) immediately before the LLM request; non-GLM models are left untouched; disabled for async sub-agents
+- `src/coding-discipline` — injects a deduplicated silent-mode and quality-discipline block at the very top of the main-session per-turn system prompt for GLM main-session models only (`isGlmModel`) immediately before the LLM request; text-only GLM models get the `lookup` bridge while vision-capable `zai/glm-5.3-flash` inspects images directly; non-GLM models are left untouched; disabled for async sub-agents
 - `src/credential-firewall` — opt-in secret firewall for high-confidence outbound/session credential redaction; disabled by default
 - `src/ast-grep` — `ast_grep` / `ast_apply`
 - `src/async-subagents` — `subagents` tool and sub-agent slash commands, including oh-my-openagent-style `/ultrawork` (`/ulw`) and `/hyperplan` orchestration prompts, plus config-defined sub-agent model/thinking/args presets selected via `/subagent-preset` from `asyncSubagents` in `~/.config/pi/pi-tools-suite.jsonc`; includes the `frontend` profile for Gemini-friendly UI/UX and visual frontend work and the `oracle` profile for cross-provider second opinions; enforces a 30-minute per-agent execution timeout, project-wide `maxConcurrent` queueing, optional retry/backoff, and `result.json` structured metadata/chaining fields next to raw `result.md`; stores project-local run files and a registry under `.pi/subagents/` so result/status collection can recover after compaction or reload while the main session remains alive
@@ -318,7 +318,7 @@ the declarative, non-executable QA action/assertion format.
 
 Async-subagents also injects a lightweight oh-my-openagent-style system-prompt strategy by model: non-GPT parents get `parallel-first`, an orchestration-first hint that favors ultrawork/subagents for broad work, while GPT-like parents get `deep-work`, a direct deep-worker hint that uses subagents only when clearly useful. Explicit custom system prompts (`--system-prompt`, `SYSTEM.md`, custom templates) are respected and skip this injection by default. Disable it with `PI_AGENT_STRATEGY=off`; force a strategy with `PI_AGENT_STRATEGY=parallel-first` or `PI_AGENT_STRATEGY=deep-work`; set `PI_AGENT_STRATEGY_WITH_CUSTOM_PROMPT=1` to append it even when a custom prompt is present.
 
-For blind-model screenshot/image inspection, use the main-session `coding-discipline` lookup tool. Async-subagents still supports `imagePaths` on tasks when a broader delegated track genuinely needs images, but it no longer ships a dedicated `vision` role. Dynamic provider capabilities can be missing or stale after switching models, so blind parent models can still be configured explicitly with case-insensitive `*` masks under `asyncSubagents.vision.blindModelPatterns` in `~/.config/pi/pi-tools-suite.jsonc`; this keeps guidance honest, not a sub-agent role.
+For blind-model screenshot/image inspection, use the main-session `coding-discipline` lookup tool; the bundled default uses vision-capable `zai/glm-5.3-flash`. Async-subagents still supports `imagePaths` on tasks when a broader delegated track genuinely needs images, but it no longer ships a dedicated `vision` role. Dynamic provider capabilities can be missing or stale after switching models, so blind parent models can still be configured explicitly with case-insensitive `*` masks under `asyncSubagents.vision.blindModelPatterns` in `~/.config/pi/pi-tools-suite.jsonc`; do not include `zai/glm-5.3-flash` because it accepts image input. This keeps guidance honest, not a sub-agent role.
 
 When a task omits `subagentType`, async-subagents asks a lightweight router model to choose one configured type for each task from the task text/scope and the `types.<name>.description` metadata. Explicit task `subagentType` still wins. Keep type descriptions short, literal, and distinct because they are inserted into the router prompt for a small model. Router settings live under `asyncSubagents.routing` (`enabled`, `model`, `maxTaskChars`, `maxTokens`, `maxRetries`, `timeoutMs`, `debug`); the default router model is `zai/glm-4.5-air`. If the router is disabled, unavailable, aborted, or returns invalid JSON, omitted types fall back to `defaultType`.
 
@@ -337,10 +337,11 @@ Example shared async-subagents config section:
     },
     "presets": {
       "cheap": {
-        "description": "Use GLM for text/code roles.",
+        "description": "Use GLM by role, including GLM-5.3 Flash for multimodal work.",
         "types": {
           "quick": { "model": "zai/glm-5.3", "thinking": "off" },
-          "frontend": { "model": "antigravity/gemini-3-flash-preview", "fallbackModels": ["zai/glm-5.3"], "thinking": "medium" },
+          "frontend": { "model": "zai/glm-5.3-flash", "thinking": "medium" },
+          "browser-qa": { "model": "zai/glm-5.3-flash", "thinking": "low" },
           "review": { "model": "zai/glm-5.3", "thinking": "high" }
         }
       }

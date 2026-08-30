@@ -145,7 +145,7 @@ export class PopupMenuRenderer {
 		const visibleItems = menu.visibleItems();
 		if (!this.hasPopupActionItems(menu.items)) {
 			lines.push({
-				text: this.host.session ? "  No matching favorite models" : "  Model menu unavailable",
+				text: this.host.session ? "  No matching available models" : "  Model menu unavailable",
 				variant: "muted",
 			});
 		}

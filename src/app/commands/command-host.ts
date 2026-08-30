@@ -1,7 +1,7 @@
 import type { AgentSession, AgentSessionRuntime, SessionInfo } from "@earendil-works/pi-coding-agent";
 import type { SessionSearchResult } from "../session/session-search.js";
 import type { AppRequestHistory } from "../session/request-history.js";
-import type { ActivePopupMenu, AppOptions, Entry, ModelMenuValue, PixMenuItem, PixMenuOptions, PopupMenuPlacement, ScopedSessionModel, SessionModel, ThinkingMenuValue } from "../types.js";
+import type { ActivePopupMenu, AppOptions, Entry, ModelMenuValue, PixMenuItem, PixMenuOptions, PopupMenuPlacement, SessionModel, ThinkingMenuValue } from "../types.js";
 import type { ToastNotifier } from "../../ui.js";
 
 export type DirectPopupMenu = Exclude<ActivePopupMenu, "slash">;
@@ -29,7 +29,6 @@ export type CommandControllerHost = {
 	getModelMenuItems(query: string): readonly PixMenuItem<ModelMenuValue>[];
 	getThinkingMenuItems(query: string): readonly PixMenuItem<ThinkingMenuValue>[];
 	modelRef(model: SessionModel): string;
-	getFavoriteScopedModels(): ScopedSessionModel[];
 	setSessionStatus(session: AgentSession | undefined): void;
 	queueUserMessage(text: string): void;
 	resetSessionView(): void;

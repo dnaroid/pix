@@ -29,6 +29,7 @@ import {
 	hasAgentPrompt,
 	hasLaunchedAgentPrompt,
 	hasQueuedAgentPrompt,
+	isBlindModelRef,
 	isQuotaLimitCompletion,
 	loadSubagentConfig,
 	loadSubagentPresetSelection,
@@ -426,6 +427,10 @@ describe.serial("subagent type config", () => {
 		expect(fs.readFileSync(targetPath, "utf-8")).toContain("Full config schema: https://unpkg.com/pi-ui-extend/schemas/pi-tools-suite.json");
 		const config = loadSubagentConfig(cwd, env);
 		expect(Object.keys(config.presets ?? {}).sort()).toEqual(["cheap", "deep", "gpt"]);
+		expect(config.presets?.cheap?.types?.frontend).toMatchObject({ model: "zai/glm-5.3-flash", thinking: "medium" });
+		expect(config.presets?.cheap?.types?.["browser-qa"]).toMatchObject({ model: "zai/glm-5.3-flash", thinking: "low" });
+		expect(isBlindModelRef("zai/glm-5.3", config)).toBe(true);
+		expect(isBlindModelRef("zai/glm-5.3-flash", config)).toBe(false);
 		expect(Object.keys(config.types).sort()).toEqual(["browser-qa", "deep", "docs", "frontend", "implement", "oracle", "quick", "research", "review", "scan", "tests"]);
 		expect(config.types.review.description).toContain("security");
 		expect(selectSubagentType({ id: "s", task: "vulnerability secret token" }, config)).toBe("quick");

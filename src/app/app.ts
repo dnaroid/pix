@@ -572,7 +572,6 @@ export class PiUiExtendApp {
 			getThinkingMenuItems: (query) => this.menuItems.getThinkingMenuItems(query),
 			awaitCurrentSessionExtensions: (runtime) => this.awaitCurrentSessionExtensions(runtime),
 			modelRef: (model) => this.menuItems.modelRef(model),
-			getFavoriteScopedModels: () => this.menuItems.getFavoriteScopedModels(),
 			setSessionStatus: (session) => this.setSessionStatus(session),
 			queueUserMessage: (text) => {
 				this.queuedMessages.deferUserMessage(this.queuedMessages.createSubmittedUserMessage(text, text, []));

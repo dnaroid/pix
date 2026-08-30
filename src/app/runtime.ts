@@ -18,7 +18,6 @@ import {
 	type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import { loadPixConfig, resolveDefaultModelRef, type PixConfig } from "../config.js";
-import { PI_FAVORITE_MODEL_REFS } from "./constants.js";
 import { isThinkingLevel, parseModelRef, parseScopedModelRef } from "./model/model-ref.js";
 import { openLazySessionManager } from "./session/lazy-session-manager.js";
 import type { AppOptions, ScopedSessionModel, SessionModel, ThinkingLevel } from "./types.js";
@@ -369,8 +368,7 @@ export async function createPixRuntime(options: AppOptions, runtimeOptions: Crea
 			throw new Error(`Model not found: ${parsedModel.provider}/${parsedModel.modelId}`);
 		}
 		const enabledModelRefs = services.settingsManager.getEnabledModels();
-		const favoriteModelRefs = enabledModelRefs && enabledModelRefs.length > 0 ? enabledModelRefs : PI_FAVORITE_MODEL_REFS;
-		const scopedModels = favoriteModelRefs.flatMap((modelRef): ScopedSessionModel[] => {
+		const scopedModels = (enabledModelRefs ?? []).flatMap((modelRef): ScopedSessionModel[] => {
 			const scoped = parseScopedModelRef(modelRef);
 			if (!scoped) return [];
 

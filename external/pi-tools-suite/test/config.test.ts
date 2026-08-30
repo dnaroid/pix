@@ -131,7 +131,7 @@ describe("pi-tools-suite config", () => {
 		expect(content).toContain('"todoThinking": true');
 		expect(content).toContain('"todoThinkingOverrides"');
 		expect(content).toContain('"zai/glm-5.3": "max"');
-		expect(content).toContain('"lookupModel": "openai-codex/gpt-5.6-luna"');
+		expect(content).toContain('"lookupModel": "zai/glm-5.3-flash"');
 		expect(content).toContain('"modules": { "credential-firewall": false }');
 		expect(content).toContain('"secretFirewall"');
 		expect(content).toContain('// "ast-grep",');
@@ -142,6 +142,7 @@ describe("pi-tools-suite config", () => {
 			$schema?: string;
 			asyncSubagents?: {
 				routing?: { model?: string; fallbackModels?: string[] };
+				presets?: Record<string, { types?: Record<string, { model?: string; thinking?: string }> }>;
 				types?: Record<string, { model?: string; fallbackModels?: string[]; thinking?: string; timeoutMs?: number }>;
 			};
 			lsp?: { servers?: Array<{ id?: string }> };
@@ -168,6 +169,14 @@ describe("pi-tools-suite config", () => {
 			fallbackModels: ["antigravity/gemini-3-flash-preview", "zai/glm-5.3"],
 			thinking: "low",
 			timeoutMs: 120_000,
+		});
+		expect(parsed.asyncSubagents?.presets?.cheap?.types?.frontend).toMatchObject({
+			model: "zai/glm-5.3-flash",
+			thinking: "medium",
+		});
+		expect(parsed.asyncSubagents?.presets?.cheap?.types?.["browser-qa"]).toMatchObject({
+			model: "zai/glm-5.3-flash",
+			thinking: "low",
 		});
 		expect(parsed.lsp?.servers?.map((server) => server.id)).toEqual(["typescript"]);
 		expect(content).toContain('//   "id": "python"');

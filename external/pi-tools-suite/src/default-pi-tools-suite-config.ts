@@ -23,7 +23,7 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
   },
   // Vision-capable model used by the coding-discipline lookup tool for blind-model
   // screenshot/image questions. Remove or set to null to disable lookup.
-  "lookupModel": "openai-codex/gpt-5.6-luna",
+  "lookupModel": "zai/glm-5.3-flash",
   // coding-discipline working-state strictness.
   //   "lenient" (default): batch independent read-only tool calls; brief reasoning
   //     text is acceptable when thinking is off. Text only counts as chatter when a
@@ -151,17 +151,17 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
     "routing": { "enabled": true, "model": "zai/glm-4.5-air", "fallbackModels": ["openai-codex/gpt-5.6-luna"], "maxTaskChars": 1200, "maxTokens": 512, "maxRetries": 1, "timeoutMs": 12000, "debug": false },
     "presets": {
       "cheap": {
-        "description": "Use cheap GLM/Gemini Flash models for text/code roles.",
+        "description": "Use GLM models by role, including GLM-5.3 Flash for multimodal work.",
         "types": {
           "quick": { "model": "zai/glm-4.5-air", "thinking": "off" },
           "scan": { "model": "zai/glm-4.5-air", "thinking": "off" },
           "research": { "model": "zai/glm-5-turbo", "thinking": "low" },
           "docs": { "model": "zai/glm-4.5-air", "thinking": "low" },
           "frontend": {
-            "model": "antigravity/gemini-3-flash-preview",
-            "fallbackModels": ["zai/glm-5.3"],
+            "model": "zai/glm-5.3-flash",
             "thinking": "medium"
           },
+          "browser-qa": { "model": "zai/glm-5.3-flash", "thinking": "low" },
           "tests": { "model": "zai/glm-5-turbo", "thinking": "medium" },
           "review": { "model": "zai/glm-5.3", "thinking": "high" },
           "implement": { "model": "zai/glm-5.3", "thinking": "high" },
