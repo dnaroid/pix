@@ -19,9 +19,9 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
 ### Spawn (`core/spawn.ts`)
 1. Each sub-agent is spawned via `node:child_process.spawn()` running the pi binary in RPC mode. `[confirmed by code, spawn.ts ~188]`
 2. **Pi invocation resolution** (`core/pi-invocation.ts`): detects how pi was launched (Bun virtual script, direct node script, or generic runtime). Direct pi entrypoint → `process.execPath + [currentScript, ...args]`; generic node/bun → `pi` from PATH; Windows → `process.execPath args`. `[confirmed by code]`
-3. **Pi args**: `--mode rpc`, `--session-dir <dir>` or `--no-session`, `--no-extensions`, `--extension <model-tools>`, `--model <model>`, `--tools <list>` (or `--no-tools`), `--thinking <level>`, extra user args, then `--extension <tool-guard>`. `[confirmed by code, spawn.ts ~67-95]`
+3. **Pi args**: `--mode rpc`, `--session-dir <dir>` or `--no-session`, `--no-extensions`, `--extension <model-tools>`, conditionally `--extension <antigravity-auth>`, `--model <model>`, `--tools <list>` (or `--no-tools`), `--thinking <level>`, extra user args, then `--extension <tool-guard>`. `[confirmed by code, spawn.ts; confirmed by tests, core.test.ts]`
 4. **Stdin RPC**: sends two JSONL messages — `{type:"get_state",id:"sub_get_state"}` then `{type:"prompt",id:"sub_prompt",message:<prompt>[,images:<base64[]>]}`. Stdin stays open; EOF = pi shutdown. `[confirmed by code]`
-5. **Extensions** loaded into children: `model-tools` (model-specific tool args) and `tool-guard` (strips parent-only tools: `question`, `subagents`, all `async_subagents_*`). `[confirmed by code, tool-guard.ts:3-10]`
+5. **Extensions** loaded into children: `model-tools` (model-specific tool args) and `tool-guard` (strips parent-only tools: `question`, `subagents`, all `async_subagents_*`). `antigravity-auth` is restored after `--no-extensions` only when the effective explicit task/CLI model is `antigravity/<model>`; a model sourced only from `ASYNC_SUBAGENTS_MODEL` / `PI_SUBAGENTS_MODEL` does not opt it in. Later `--model`, `-m`, or `--model=...` extra args override the task model for this decision. `[confirmed by code, spawn.ts; confirmed by tests, core.test.ts]`
 6. **Environment**: child inherits parent env plus `PI_MODEL_SUITABLE_TOOLS_PRESERVE_SELECTION=1`, `PI_TERMINAL_BELL_DISABLED=1`, and `PI_TOOLS_SUITE_DISABLED_MODULES` appended with `async-subagents,coding-discipline,question`. `[confirmed by code, spawn.ts ~230-240]`
 7. **Model selection**: task model → preset-type model → global preset model → profile model; env override `ASYNC_SUBAGENTS_MODEL` / `PI_SUBAGENTS_MODEL`. `[confirmed by code, config.ts resolveAgentTaskConfig]`
 8. **Session persistence**: only when `ASYNC_SUBAGENTS_ENABLE_SESSIONS` is truthy (child gets `--session-dir <agentDir>/sessions`; otherwise `--no-session`). `[confirmed by code]`
@@ -101,6 +101,7 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
 
 ## Edge cases
 - **No runDir**: registry `latestRunDir` → mtime scan → throw if nothing. `[confirmed by code]`
+- **Implicit Antigravity model with isolated extensions**: if Antigravity is selected only through the model environment fallback or pi's persisted default, the child keeps `--no-extensions` and does not load `antigravity-auth`; callers must explicitly select an Antigravity model in task/CLI arguments. `[confirmed by code; confirmed by tests]`
 - **Oversized RPC lines**: agent_end oversized lines still trigger termination with a fallback result; others dropped with a marker. `[confirmed by code]`
 - **Prompt failure without exit_code**: `hasRpcPromptFailure` scans events.jsonl for `success=false`. `[confirmed by code]`
 - **Retry + stop**: `stop_requested` cancels pending retries; stop also deletes `retry_pending`/`next_retry_at`. `[confirmed by code]`

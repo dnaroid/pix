@@ -88,15 +88,18 @@ export function spawnAgent(
 	// detached subprocesses do not depend on persisted local pi settings.
 	const persistSessions = shouldPersistSubagentSessions();
 	const sessionDir = persistSessions ? getAgentSessionDir(agentDir) : undefined;
+	const forwardedExtraArgs = options.isolatedSkills?.length ? withoutSkillArgs(extraArgs) : extraArgs;
 	if (sessionDir) fs.mkdirSync(sessionDir, { recursive: true });
 	const piArgs: string[] = ["--mode", "rpc"];
 	if (sessionDir) piArgs.push("--session-dir", sessionDir);
 	else piArgs.push("--no-session");
 	piArgs.push("--no-extensions");
 	piArgs.push("--extension", getModelToolsExtensionPath());
-	// `--no-extensions` keeps sub-agents isolated, but the suite-owned provider
-	// is infrastructure: always restore it, regardless of the selected model.
-	piArgs.push("--extension", getAntigravityAuthExtensionPath());
+	// Preserve `--no-extensions` unless this invocation explicitly selects an
+	// Antigravity model. Environment/default models do not opt the provider in.
+	if (usesAntigravityModel(task.model, forwardedExtraArgs)) {
+		piArgs.push("--extension", getAntigravityAuthExtensionPath());
+	}
 	if (options.isolatedSkills && options.isolatedSkills.length > 0) {
 		piArgs.push("--no-skills");
 		for (const skillPath of options.isolatedSkills) piArgs.push("--skill", skillPath);
@@ -111,7 +114,7 @@ export function spawnAgent(
 	if (task.thinking) piArgs.push("--thinking", task.thinking);
 
 	// User-supplied extra args (e.g. --thinking high)
-	piArgs.push(...(options.isolatedSkills?.length ? withoutSkillArgs(extraArgs) : extraArgs));
+	piArgs.push(...forwardedExtraArgs);
 	// Keep recursive/interactive parent-only tools disabled even if explicit
 	// sub-agent extraArgs load additional extensions or override --tools.
 	piArgs.push("--extension", getSubagentToolGuardExtensionPath());
@@ -468,6 +471,22 @@ function withoutSkillArgs(args: string[]): string[] {
 		filtered.push(arg);
 	}
 	return filtered;
+}
+
+function usesAntigravityModel(taskModel: string | undefined, extraArgs: string[]): boolean {
+	let model = taskModel?.trim() || undefined;
+	for (let index = 0; index < extraArgs.length; index += 1) {
+		const arg = extraArgs[index];
+		if (arg === "--model" || arg === "-m") {
+			model = extraArgs[index + 1]?.trim() || undefined;
+			index += 1;
+			continue;
+		}
+		if (arg.startsWith("--model=")) {
+			model = arg.slice("--model=".length).trim() || undefined;
+		}
+	}
+	return Boolean(model?.startsWith("antigravity/") && model.length > "antigravity/".length);
 }
 
 function getModelToolsExtensionPath(): string {

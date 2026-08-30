@@ -1105,8 +1105,8 @@ setTimeout(() => {}, 1000);
 		expect(fs.existsSync(path.join(agentDir, "session_dir"))).toBe(false);
 		expect(fs.readFileSync(path.join(agentDir, "pi_args"), "utf-8")).toContain("--extension\n");
 		expect(fs.readFileSync(path.join(agentDir, "pi_args"), "utf-8")).toContain(path.join("model-tools", "index.ts"));
-		// The suite provider is infrastructure and remains loaded for a non-Antigravity model.
-		expect(fs.readFileSync(path.join(agentDir, "pi_args"), "utf-8")).toContain(path.join("antigravity-auth", "index.ts"));
+		// Environment fallback models do not opt provider extensions back in.
+		expect(fs.readFileSync(path.join(agentDir, "pi_args"), "utf-8")).not.toContain(path.join("antigravity-auth", "index.ts"));
 		expect(fs.readFileSync(path.join(agentDir, "pi_args"), "utf-8")).toContain("--model\nzai/glm-5-turbo");
 		expect(fs.readFileSync(path.join(agentDir, "pi_args"), "utf-8")).toContain("--tools\nRead,Grep");
 		expect(fs.readFileSync(path.join(agentDir, "result.md"), "utf-8")).toBe("done result");
@@ -1123,6 +1123,53 @@ setTimeout(() => {}, 1000);
 		if (process.platform !== "win32") {
 			expect(fs.readFileSync(path.join(agentDir, "process_group"), "utf-8")).toMatch(/^\d+$/);
 		}
+	});
+
+	test.serial("loads Antigravity auth only for an explicitly selected Antigravity model", async () => {
+		const cwd = tempDir();
+		const piScript = path.join(tempDir(), "pi.js");
+		writeFile(piScript, `
+process.stdin.on("data", () => {
+  console.log(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "done" }] }] }));
+  setTimeout(() => process.exit(0), 0);
+});
+setTimeout(() => {}, 1000);
+`);
+		process.argv[1] = piScript;
+		process.env.ASYNC_SUBAGENTS_MODEL = "antigravity/gemini-from-env";
+
+		const spawnAndReadArgs = async (id: string, task: AgentTask, extraArgs: string[] = []) => {
+			const runDir = createRunDir(cwd, id);
+			await withTimeout(new Promise<any>((resolve) => {
+				spawnAgent(runDir, task, cwd, extraArgs, undefined, resolve);
+			}), `Timed out waiting for ${id}`);
+			return fs.readFileSync(path.join(runDir, task.id, "pi_args"), "utf-8");
+		};
+
+		const envOnlyArgs = await spawnAndReadArgs("env-only", { id: "env-only", task: "Do work" });
+		expect(envOnlyArgs).toContain("--model\nantigravity/gemini-from-env");
+		expect(envOnlyArgs).not.toContain(path.join("antigravity-auth", "index.ts"));
+
+		const taskModelArgs = await spawnAndReadArgs("task-model", {
+			id: "task-model",
+			task: "Do work",
+			model: "antigravity/gemini-explicit",
+		});
+		expect(taskModelArgs).toContain(path.join("antigravity-auth", "index.ts"));
+
+		const cliModelArgs = await spawnAndReadArgs(
+			"cli-model",
+			{ id: "cli-model", task: "Do work" },
+			["--model=antigravity/gemini-cli"],
+		);
+		expect(cliModelArgs).toContain(path.join("antigravity-auth", "index.ts"));
+
+		const overriddenArgs = await spawnAndReadArgs(
+			"overridden-model",
+			{ id: "overridden-model", task: "Do work", model: "antigravity/gemini-explicit" },
+			["--model", "zai/glm-5-turbo"],
+		);
+		expect(overriddenArgs).not.toContain(path.join("antigravity-auth", "index.ts"));
 	});
 
 	test.serial("notifies completion when the pi process cannot be spawned", async () => {
