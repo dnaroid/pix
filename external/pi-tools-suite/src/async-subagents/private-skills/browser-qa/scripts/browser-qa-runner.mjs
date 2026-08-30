@@ -102,6 +102,10 @@ class QaStatusError extends Error {
 	}
 }
 
+// Declared before the main() dispatch below: main() runs synchronously up to
+// its first await, so module state it touches must already be initialized.
+let runnerMayHaveBrowserChildren = false;
+
 if (!isMainThread && workerData?.operation === "sanitize_trace") {
 	if (process.env.BROWSER_QA_TEST_HANG_STAGE === "trace_sanitize") {
 		setInterval(() => {}, 1000);
@@ -129,6 +133,11 @@ if (!isMainThread && workerData?.operation === "sanitize_trace") {
 });
 
 async function main() {
+	// End the synchronous first tick before running any command handler: the
+	// handler bodies run ahead of later module-level declarations otherwise,
+	// and a synchronous failure (e.g. playwright failing to load) would hit
+	// temporal-dead-zone errors in the catch blocks instead of clean reasons.
+	await null;
 	const [command = "profiles", ...rawArgs] = process.argv.slice(2);
 	const cwd = fs.realpathSync(process.cwd());
 	if (command === "auth") {
@@ -204,6 +213,7 @@ async function runQa({ cwd, agentDir, args, profileId, profile, deadline, progre
 	progress("playwright_load_started");
 	const playwright = loadPlaywright(cwd);
 	progress("playwright_load_finished");
+	runnerMayHaveBrowserChildren = true;
 	const browser = await runStage(progress, "browser_launch", deadline, () => playwright.chromium.launch({ headless: true }), profileId);
 	let context;
 	let page;
@@ -609,6 +619,7 @@ async function runAuthScaffold(cwd, args) {
 	try {
 		progress("auth_scaffold_started", { timeoutMs: timeout });
 		const playwright = loadPlaywright(cwd);
+		runnerMayHaveBrowserChildren = true;
 		browser = await runStage(progress, "auth_scaffold_browser_launch", deadline, () => playwright.chromium.launch({ headless: true }), profileId);
 		context = await runStage(progress, "auth_scaffold_context_create", deadline, () => browser.newContext({
 			...DEFAULT_ENVIRONMENT,
@@ -1929,13 +1940,33 @@ function loadPlaywright(cwd) {
 	if (cliPath) requireCandidates.push(createRequire(findPackageJson(fs.realpathSync(cliPath))));
 	for (const require of requireCandidates) {
 		for (const name of ["playwright", "@playwright/test"]) {
-			try {
-				const module = require(name);
-				if (module.chromium) return module;
-			} catch { /* try next resolution root */ }
+			for (let attempt = 0; ; attempt++) {
+				try {
+					const module = require(name);
+					if (module.chromium) return module;
+					break;
+				} catch (error) {
+					// Windows AV scanners can briefly lock a freshly installed
+					// playwright entrypoint; retry the transient case instead of
+					// falling through to "playwright unavailable".
+					if (attempt < 2 && isTransientFsError(error)) {
+						sleepSync(100);
+						continue;
+					}
+					break;
+				}
+			}
 		}
 	}
 	throw new Error("Playwright is unavailable; install project playwright or @playwright/cli");
+}
+
+function isTransientFsError(error) {
+	return typeof error?.code === "string" && ["EBUSY", "EPERM", "EACCES"].includes(error.code);
+}
+
+function sleepSync(ms) {
+	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 function findExecutable(name) {
@@ -2020,6 +2051,10 @@ function createRunnerProgress(workspaceDir) {
 }
 
 function terminateRunnerDescendants() {
+	// Only a browser launch can leave detached descendants (Playwright spawns
+	// the browser as a child of this process), so config and validation
+	// failures can skip the process-tree walk entirely.
+	if (!runnerMayHaveBrowserChildren) return;
 	if (process.platform === "win32") {
 		// Detached children are not covered by a POSIX process-group kill. Walk
 		// the Windows process tree explicitly so a timed-out Playwright/browser
@@ -2045,7 +2080,10 @@ foreach ($candidatePid in $descendants) {
 `;
 		spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
 			stdio: "ignore",
-			timeout: 2_000,
+			// The first powershell.exe launch on a machine can stall for seconds
+			// in AV scanning; give the tree walk room to complete so detached
+			// browser children cannot outlive the runner and lock the workspace.
+			timeout: 5_000,
 			windowsHide: true,
 		});
 		return;

@@ -13,7 +13,11 @@ const runner = path.resolve(
 const tempDirs: string[] = [];
 
 afterEach(() => {
-	for (const directory of tempDirs.splice(0)) fs.rmSync(directory, { recursive: true, force: true });
+	for (const directory of tempDirs.splice(0)) {
+		// Windows AV scanners can briefly hold freshly written files; Node's
+		// built-in retries ride out the EBUSY/EPERM handle-release lag.
+		fs.rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+	}
 });
 
 function tempProject(): string {
@@ -97,8 +101,18 @@ exports.chromium = {
       if (process.env.BROWSER_QA_TEST_CHILD_PID_FILE) {
         const fs = require("node:fs");
         const { spawn } = require("node:child_process");
-        const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { detached: true, stdio: "ignore" });
-        fs.writeFileSync(process.env.BROWSER_QA_TEST_CHILD_PID_FILE, String(child.pid));
+        // Windows AV scanners can transiently block a fresh spawn or pid-file
+        // write; retry so a fixture hiccup cannot flip the expected timeout.
+        for (let attempt = 0; ; attempt++) {
+          try {
+            const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { detached: true, stdio: "ignore" });
+            fs.writeFileSync(process.env.BROWSER_QA_TEST_CHILD_PID_FILE, String(child.pid));
+            break;
+          } catch (error) {
+            if (attempt >= 2) throw error;
+            Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+          }
+        }
       }
       return new Promise(() => {});
     }
@@ -349,6 +363,10 @@ exports.chromium = {
   },
 };
 `);
+	// Warm the freshly written entrypoint so a Windows AV scanner runs against
+	// it in this process before the runner requires it from a child process.
+	fs.readFileSync(path.join(project, "node_modules", "playwright", "index.cjs"));
+	fs.readFileSync(path.join(project, "node_modules", "playwright", "package.json"));
 }
 
 describe("private browser QA runner", () => {
@@ -398,7 +416,7 @@ describe("private browser QA runner", () => {
 			}
 			throw new Error(`detached browser child ${childPid} survived runner timeout`);
 		}
-	});
+	}, 15_000);
 
 	test("bounds auth scaffold discovery and kills a hung browser child", async () => {
 		const project = tempProject();
@@ -440,7 +458,7 @@ describe("private browser QA runner", () => {
 			}
 			throw new Error(`detached browser child ${childPid} survived auth scaffold timeout`);
 		}
-	});
+	}, 15_000);
 
 	test("terminates hung synchronous trace sanitization in a worker", () => {
 		const project = tempProject();
@@ -700,7 +718,7 @@ describe("private browser QA runner", () => {
 		], controlsAgentDir, { BROWSER_QA_TEST_DISCOVERY: unsafeDiscovery });
 		expect(unsafeSelector).toMatchObject({ code: 1, json: { status: "QA_RUN_FAILED" } });
 		expect(unsafeSelector.stdout).not.toContain("secret");
-	});
+	}, 15_000);
 
 	test("applies viewport and supports safe scrolling, metrics, and retrying assertions", () => {
 		const project = tempProject();
