@@ -41,6 +41,15 @@ Runner interactions inherit Playwright auto-waiting. Usually an action followed
 by an assertion is enough. Use `waitFor` only when the next operation depends on
 a distinct attached/detached/visible/hidden transition.
 
+After navigation and visible interactions, the runner also waits for DOM
+readiness, completion of requests started by that action, disappearance of
+common visible `aria-busy`/progress/loading/spinner/skeleton markers, and a
+500 ms stable interval. If those signals remain busy through the flow timeout,
+the run fails rather than interacting with a loading shell. This is a safe
+baseline, not an application-specific oracle: explicitly wait for a custom
+loader to become hidden and assert the loaded content when the application uses
+different readiness semantics.
+
 `waitForTimeout` is bounded to five seconds and should be exceptional—for a
 known animation, debounce, or externally scheduled transition with no
 observable intermediate state. Sleeping longer hides races instead of proving
@@ -154,6 +163,16 @@ Use evidence by purpose:
 - **Screenshot:** quick review of one meaningful visual state.
 - **Video:** chronological confirmation of the complete user flow.
 - **Trace:** action/DOM timing diagnosis for a failed or flaky interaction.
+
+Videos automatically show a transient cursor and yellow pulse for clicks and
+double-clicks. After a native `dragTo` gesture completes, its resolved
+source-to-target route is replayed over 450 ms with a large orange cursor and
+progressively drawn high-contrast trail, followed by a green drop marker. These
+annotations are
+runner-owned, pointer-transparent, and accessibility-hidden; they cover the main
+page, same-origin frames, declared popups, and form-auth submission. Their
+bounded animations finish within the normal post-action stable interval, so
+they explain the chronology without becoming screenshot or assertion oracles.
 
 Assertions determine pass/fail; evidence explains it. Preserve and link every
 artifact group returned on both passed and failed runs.

@@ -63,7 +63,7 @@ describe("screen openers and platform fallbacks", () => {
 		}
 	});
 
-	it("opens file links in VS Code with --goto when launched from a VS Code terminal", () => {
+	it("uses the system opener for local files outside a Zed terminal", () => {
 		const spawned: Array<{ command: string; args: readonly string[] }> = [];
 		const restore = setFileLinkOpenerTestDeps({
 			env: { PATH: "/mock/bin", TERM_PROGRAM: "vscode" },
@@ -77,16 +77,43 @@ describe("screen openers and platform fallbacks", () => {
 
 		try {
 			assert.equal(openFileLink({ start: 0, end: 1, url: "file:///ignored", filePath: "/workspace/target.ts", line: 12, column: 3 }), true);
-			assert.deepEqual(spawned, [{ command: "code", args: ["--goto", "/workspace/target.ts:12:3"] }]);
+			assert.deepEqual(spawned, [{ command: "xdg-open", args: ["/workspace/target.ts"] }]);
 		} finally {
 			restore();
 		}
 	});
 
-	it("falls back to xdg-open on Linux when the detected editor cli is unavailable", () => {
+	it("uses the system opener for media files inside a Zed terminal", () => {
+		const zedCli = "/mock/bin/zed";
 		const spawned: Array<{ command: string; args: readonly string[] }> = [];
 		const restore = setFileLinkOpenerTestDeps({
-			env: { PATH: "/mock/bin", TERM_PROGRAM: "vscode" },
+			env: { ZED_CLI: zedCli },
+			platform: "darwin",
+			existsSync: (path: Parameters<typeof import("node:fs").existsSync>[0]) => path === zedCli,
+			spawn: ((command: string, args: readonly string[]) => {
+				spawned.push({ command, args });
+				return fakeChildProcess();
+			}) as never,
+		});
+
+		try {
+			for (const filePath of ["/evidence/screenshot.PNG", "/evidence/run.webm", "/evidence/audio.mp3"]) {
+				assert.equal(openFileLink({ start: 0, end: 1, url: "file:///ignored", filePath, line: 12, column: 3 }), true);
+			}
+			assert.deepEqual(spawned, [
+				{ command: "open", args: ["/evidence/screenshot.PNG"] },
+				{ command: "open", args: ["/evidence/run.webm"] },
+				{ command: "open", args: ["/evidence/audio.mp3"] },
+			]);
+		} finally {
+			restore();
+		}
+	});
+
+	it("falls back to xdg-open on Linux when the Zed CLI is unavailable", () => {
+		const spawned: Array<{ command: string; args: readonly string[] }> = [];
+		const restore = setFileLinkOpenerTestDeps({
+			env: { PATH: "/mock/bin", TERM_PROGRAM: "zed" },
 			platform: "linux",
 			existsSync: () => false,
 			spawn: ((command: string, args: readonly string[]) => {
@@ -103,7 +130,7 @@ describe("screen openers and platform fallbacks", () => {
 		}
 	});
 
-	it("falls back to the Windows shell opener when the detected editor cli is unavailable", () => {
+	it("uses the Windows shell opener outside Zed", () => {
 		const spawned: Array<{ command: string; args: readonly string[] }> = [];
 		const restore = setFileLinkOpenerTestDeps({
 			env: { PATH: "C:\\mock\\bin", PATHEXT: ".EXE;.CMD;.BAT;.COM", TERM_PROGRAM: "vscode" },

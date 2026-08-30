@@ -120,7 +120,7 @@
         "research": { "model": "zai/glm-5-turbo", "thinking": "low" },
         "docs": { "model": "zai/glm-4.5-air", "thinking": "low" },
         "frontend": { "model": "zai/glm-5.3-flash", "thinking": "medium" },
-        "browser-qa": { "model": "zai/glm-5.3-flash", "thinking": "low" },
+        "browser-qa": { "model": "zai/glm-5.3-flash", "fallbackModels": ["openai-codex/gpt-5.6-luna"], "thinking": "low" },
         "tests": { "model": "zai/glm-5-turbo", "thinking": "medium" },
         "review": { "model": "zai/glm-5.3", "thinking": "high" },
         "implement": { "model": "zai/glm-5.3", "thinking": "high" },
@@ -136,7 +136,7 @@
         "research": { "model": "openai-codex/gpt-5.6-terra", "fallbackModels": ["zai/glm-5-turbo"], "thinking": "low" },
         "docs": { "model": "openai-codex/gpt-5.6-luna", "fallbackModels": ["zai/glm-4.5-air"], "thinking": "low" },
         "frontend": { "model": "openai-codex/gpt-5.6-terra", "fallbackModels": ["antigravity/gemini-3-flash-preview", "zai/glm-5.3"], "thinking": "medium" },
-        "browser-qa": { "model": "openai-codex/gpt-5.6-luna", "fallbackModels": ["antigravity/gemini-3-flash-preview", "zai/glm-5.3"], "thinking": "low" },
+        "browser-qa": { "model": "zai/glm-5.3-flash", "fallbackModels": ["openai-codex/gpt-5.6-luna"], "thinking": "low" },
         "tests": { "model": "openai-codex/gpt-5.6-terra", "fallbackModels": ["zai/glm-5-turbo"], "thinking": "medium" },
         "review": { "model": "openai-codex/gpt-5.6-sol", "fallbackModels": ["zai/glm-5.3"], "thinking": "high" },
         "implement": { "model": "openai-codex/gpt-5.6-sol", "fallbackModels": ["zai/glm-5.3"], "thinking": "high" },
@@ -152,7 +152,7 @@
         "research": { "model": "antigravity/gemini-3.1-pro-preview", "fallbackModels": ["openai-codex/gpt-5.6-luna", "zai/glm-5-turbo"], "thinking": "medium" },
         "docs": { "model": "antigravity/gemini-2.5-flash", "fallbackModels": ["openai-codex/gpt-5.6-luna", "zai/glm-4.5-air"], "thinking": "medium" },
         "frontend": { "model": "antigravity/gemini-3.1-pro-preview-customtools", "fallbackModels": ["openai-codex/gpt-5.6-luna", "zai/glm-5.3"], "thinking": "low" },
-        "browser-qa": { "model": "openai-codex/gpt-5.6-luna", "fallbackModels": ["antigravity/gemini-3-flash-preview", "zai/glm-5.3"], "thinking": "low" },
+        "browser-qa": { "model": "zai/glm-5.3-flash", "fallbackModels": ["openai-codex/gpt-5.6-luna"], "thinking": "low" },
         "tests": { "model": "antigravity/antigravity-claude-sonnet-4-6", "fallbackModels": ["openai-codex/gpt-5.6-luna", "zai/glm-5-turbo"], "thinking": "high" },
         "review": { "model": "antigravity/antigravity-claude-sonnet-4-6", "fallbackModels": ["openai-codex/gpt-5.6-sol", "zai/glm-5.3"], "thinking": "high" },
         "implement": { "model": "openai-codex/gpt-5.6-sol", "fallbackModels": ["zai/glm-5.3"], "thinking": "high" },
@@ -207,8 +207,8 @@
 
     "browser-qa": {
       "description": "Use for browser-based visual QA: reproduce UI bugs and verify fixes with deterministic assertions, screenshots, video, and traces.",
-      "model": "openai-codex/gpt-5.6-luna",
-      "fallbackModels": ["antigravity/gemini-3-flash-preview", "zai/glm-5.3"],
+      "model": "zai/glm-5.3-flash",
+      "fallbackModels": ["openai-codex/gpt-5.6-luna"],
       "thinking": "low",
       "timeoutMs": 120000,
       "tools": ["read", "grep", "bash"]

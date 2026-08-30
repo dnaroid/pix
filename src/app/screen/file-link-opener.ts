@@ -4,7 +4,11 @@ import { isAbsolute, posix, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { RenderedLink } from "./file-links.js";
 
-type SupportedEditor = "cursor" | "jetbrains" | "vscode" | "windsurf" | "zed";
+const MEDIA_EXTENSIONS = new Set([
+	".3g2", ".3gp", ".aac", ".aiff", ".alac", ".apng", ".avi", ".avif", ".bmp", ".flac", ".gif", ".heic", ".heif",
+	".ico", ".jpeg", ".jpg", ".m4a", ".m4v", ".mkv", ".mov", ".mp3", ".mp4", ".mpeg", ".mpg", ".oga", ".ogg",
+	".ogv", ".opus", ".png", ".svg", ".tif", ".tiff", ".wav", ".webm", ".webp", ".wma", ".wmv",
+]);
 
 type FileLinkOpenerDeps = {
 	existsSync: typeof existsSync;
@@ -29,8 +33,10 @@ export function openFileLink(link: RenderedLink): boolean {
 	const filePath = link.filePath ?? filePathFromUrl(link.url);
 	if (!filePath) return false;
 
-	const editorLaunch = preferredEditorLaunch(filePath, link.line, link.column);
-	if (editorLaunch && trySpawnCandidates(editorLaunch.candidates, editorLaunch.args)) return true;
+	if (isZedTerminal(deps.env) && !isMediaFile(filePath)) {
+		const openedInZed = trySpawnCandidates(zedCommandCandidates(), [zedTarget(filePath, link.line, link.column)]);
+		if (openedInZed) return true;
+	}
 
 	return openPathWithSystemViewer(filePath);
 }
@@ -53,79 +59,19 @@ function zedTarget(filePath: string, line: number | undefined, column: number | 
 	return column === undefined ? `${filePath}:${line}` : `${filePath}:${line}:${column}`;
 }
 
-function gotoTarget(filePath: string, line: number | undefined, column: number | undefined): string {
-	if (line === undefined) return filePath;
-	return column === undefined ? `${filePath}:${line}` : `${filePath}:${line}:${column}`;
+function isZedTerminal(env: NodeJS.ProcessEnv): boolean {
+	return env.TERM_PROGRAM?.trim().toLowerCase() === "zed" || Boolean(env.ZED_CLI);
 }
 
-function preferredEditorLaunch(
-	filePath: string,
-	line: number | undefined,
-	column: number | undefined,
-): { args: string[]; candidates: string[] } | undefined {
-	switch (detectEditor(deps.env)) {
-		case "cursor":
-			return { args: ["--goto", gotoTarget(filePath, line, column)], candidates: commandCandidates(deps.env.CURSOR_CLI, "cursor") };
-		case "jetbrains":
-			return {
-				args: jetbrainsTargetArgs(filePath, line),
-				candidates: commandCandidates(
-					deps.env.JETBRAINS_IDE_CLI,
-					"idea",
-					"idea64",
-					"webstorm",
-					"webstorm64",
-					"pycharm",
-					"pycharm64",
-					"goland",
-					"goland64",
-					"clion",
-					"clion64",
-					"phpstorm",
-					"phpstorm64",
-					"rubymine",
-					"rubymine64",
-					"rider",
-					"rider64",
-				),
-			};
-		case "vscode":
-			return { args: ["--goto", gotoTarget(filePath, line, column)], candidates: commandCandidates(deps.env.VSCODE_CLI, "code", "code-insiders") };
-		case "windsurf":
-			return { args: ["--goto", gotoTarget(filePath, line, column)], candidates: commandCandidates(deps.env.WINDSURF_CLI, "windsurf") };
-		case "zed":
-			return { args: [zedTarget(filePath, line, column)], candidates: zedCommandCandidates() };
-		default:
-			return undefined;
-	}
-}
-
-function detectEditor(env: NodeJS.ProcessEnv): SupportedEditor | undefined {
-	const termProgram = env.TERM_PROGRAM?.trim().toLowerCase();
-	const terminalEmulator = env.TERMINAL_EMULATOR?.trim().toLowerCase();
-	const terminalProvider = env.TERMINAL_PROVIDER?.trim().toLowerCase();
-
-	if (termProgram === "cursor" || env.CURSOR_TRACE_ID || env.CURSOR_TRACE) return "cursor";
-	if (termProgram === "windsurf") return "windsurf";
-	if (termProgram === "zed" || env.ZED_CLI) return "zed";
-	if (termProgram === "vscode" || env.VSCODE_IPC_HOOK_CLI || env.VSCODE_GIT_IPC_HANDLE) return "vscode";
-	if (terminalEmulator?.includes("jetbrains") || terminalProvider === "jetbrains") return "jetbrains";
-	return undefined;
+function isMediaFile(filePath: string): boolean {
+	const pathApi = deps.platform === "win32" ? win32 : posix;
+	return MEDIA_EXTENSIONS.has(pathApi.extname(filePath).toLowerCase());
 }
 
 function zedCommandCandidates(): string[] {
 	const candidates = [deps.env.ZED_CLI, "zed", "zeditor"];
 	if (deps.platform === "darwin") candidates.push("/opt/homebrew/bin/zed", "/usr/local/bin/zed");
 	return candidates.filter((candidate): candidate is string => Boolean(candidate));
-}
-
-function commandCandidates(primary: string | undefined, ...rest: string[]): string[] {
-	return [primary, ...rest].filter((candidate): candidate is string => Boolean(candidate));
-}
-
-function jetbrainsTargetArgs(filePath: string, line: number | undefined): string[] {
-	if (line === undefined) return [filePath];
-	return ["--line", `${line}`, filePath];
 }
 
 function trySpawnCandidates(candidates: readonly string[], args: readonly string[]): boolean {

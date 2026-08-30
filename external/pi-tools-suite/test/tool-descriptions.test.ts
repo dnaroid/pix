@@ -68,6 +68,9 @@ describe("tool descriptions", () => {
 		expect(promptText).toContain("mandatory delegation trigger");
 		expect(promptText).toContain("before checking prerequisites");
 		expect(promptText).toContain("parent must not inspect the project first");
+		expect(promptText).toContain("known target URL/app, user-visible flow, expected observable result, and required artifacts");
+		expect(promptText).toContain("Do not turn it into a repository investigation plan");
+		expect(promptText).toContain("invent a mock/synthetic target");
 	});
 
 	test("subagents prompt prioritizes broad fallback delegation when repo tools are unavailable", () => {

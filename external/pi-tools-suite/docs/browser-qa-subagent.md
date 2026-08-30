@@ -4,8 +4,8 @@
 
 Provide a cheap, fast `browser-qa` async-subagent that reproduces browser bugs
 and proves fixes with deterministic assertions plus screenshot, video, and trace
-evidence. The role uses `openai-codex/gpt-5.6-luna`, falling back to
-`antigravity/gemini-3-flash-preview` and then `zai/glm-5.3`.
+evidence. The role uses `zai/glm-5.3-flash`, falling back to
+`openai-codex/gpt-5.6-luna`.
 
 ## Private skill isolation
 
@@ -73,6 +73,20 @@ evidence. The role uses `openai-codex/gpt-5.6-luna`, falling back to
   screenshots, video finalization, and redacted result output. Before retaining
   a trace it removes network/non-image resource entries, redacts configured and
   runtime storage credentials, and verifies those values are absent.
+- After every navigation or visible interaction, the runner waits for DOM
+  readiness, completion of requests started by the action, and disappearance of
+  common visible busy/spinner/skeleton markers. It requires a 500 ms stable
+  interval before the next action so recordings remain readable; a page that
+  stays busy through the flow timeout fails closed instead of being tested as a
+  loading shell. App-specific readiness still requires an explicit declarative
+  wait/assertion in the authored flow.
+- Before any page is created, the runner installs a context-wide, isolated
+  interaction visualizer. Recorded clicks/double-clicks show a transient cursor
+  and pulse. Native drag/drop is replayed for 450 ms with a large orange cursor,
+  progressively drawn high-contrast path, and green drop marker. It also covers
+  same-origin frames, declared popups, and form-auth submission. The layer is
+  accessibility-hidden, pointer-transparent, never cancels application events,
+  and its bounded animations clear within the post-action stable interval.
 - Success and post-launch failure results include typed artifact groups. Every
   item has an absolute filesystem path and a `file:` URI; the sub-agent must
   present each item as a clickable Markdown link instead of reporting only the
@@ -112,7 +126,7 @@ evidence. The role uses `openai-codex/gpt-5.6-luna`, falling back to
 
 1. `browser-qa` resolves to the intended model/fallback and its self-contained
    private workflow, and its isolated child process can register the configured
-   Antigravity model.
+   model provider.
 2. Spawn args contain `--no-skills` and the mandatory private skill for this
    profile; ordinary profiles retain existing skill discovery behavior.
 3. Auth profile listing and all error output are redacted; model-authored input
@@ -123,12 +137,16 @@ evidence. The role uses `openai-codex/gpt-5.6-luna`, falling back to
    flows, and successful redacted evidence creation.
 5. Browser QA flows/evidence live only inside the owning sub-agent directory;
    deleting the run removes them while persistent auth config/state remains.
-6. Completed test runs report clickable screenshot, video, and trace links
+6. Runner tests prove that network activity and visible loading indicators are
+   awaited, persistent loading fails the flow, visible actions retain a stable
+   500 ms video interval, and context-wide click/drag video visualization is
+   installed with bounded click pacing.
+7. Completed test runs report clickable screenshot, video, and trace links
    whenever those artifacts exist.
-7. Timeout tests identify the last browser stage, launcher progress remains
+8. Timeout tests identify the last browser stage, launcher progress remains
    available when full RPC logging is disabled, and process-tree tests prove a
    descendant is terminated without signalling unrelated processes.
-8. Suite tests/typecheck, host checks, and suite sync pass.
+9. Suite tests/typecheck, host checks, and suite sync pass.
 
 ## Real-browser regression test
 

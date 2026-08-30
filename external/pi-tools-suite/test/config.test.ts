@@ -165,8 +165,8 @@ describe("pi-tools-suite config", () => {
 			fallbackModels: ["zai/glm-5-turbo"],
 		});
 		expect(parsed.asyncSubagents?.types?.["browser-qa"]).toMatchObject({
-			model: "openai-codex/gpt-5.6-luna",
-			fallbackModels: ["antigravity/gemini-3-flash-preview", "zai/glm-5.3"],
+			model: "zai/glm-5.3-flash",
+			fallbackModels: ["openai-codex/gpt-5.6-luna"],
 			thinking: "low",
 			timeoutMs: 120_000,
 		});
@@ -176,6 +176,7 @@ describe("pi-tools-suite config", () => {
 		});
 		expect(parsed.asyncSubagents?.presets?.cheap?.types?.["browser-qa"]).toMatchObject({
 			model: "zai/glm-5.3-flash",
+			fallbackModels: ["openai-codex/gpt-5.6-luna"],
 			thinking: "low",
 		});
 		expect(parsed.lsp?.servers?.map((server) => server.id)).toEqual(["typescript"]);

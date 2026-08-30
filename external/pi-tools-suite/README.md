@@ -247,8 +247,8 @@ For an oh-my-openagent-style workflow, run `/ultrawork` or `/ulw` to ask the par
 
 ### Private browser QA and project auth
 
-The built-in `browser-qa` role runs on `openai-codex/gpt-5.6-luna`, with
-`antigravity/gemini-3-flash-preview` and then `zai/glm-5.3` as fallbacks. Its browser
+The built-in `browser-qa` role runs on `zai/glm-5.3-flash`, with
+`openai-codex/gpt-5.6-luna` as its fallback. Its browser
 workflow is an explicit private skill under `src/async-subagents/private-skills/`,
 outside normal Pi skill discovery. The role's first-class `isolatedSkills` setting launches the child with
 `--no-skills` plus one self-contained private workflow. It bundles the relevant
@@ -316,6 +316,14 @@ parent to ask the user for an update and rerun. See
 for complete profile shapes and `references/qa-flow.example.jsonc` beside it for
 the declarative, non-executable QA action/assertion format.
 
+Browser QA videos automatically visualize pointer interactions. Clicks and
+double-clicks show a transient cursor and pulse. Native drag/drop is replayed
+for 450 ms with a large orange cursor, progressively drawn high-contrast path,
+and green drop marker. The isolated, pointer-transparent layer is installed for
+the whole browser context, including same-origin frames, declared popups, and
+form-auth submission, and clears during the normal post-action stable interval
+so screenshots and assertions remain state-focused.
+
 Async-subagents also injects a lightweight oh-my-openagent-style system-prompt strategy by model: non-GPT parents get `parallel-first`, an orchestration-first hint that favors ultrawork/subagents for broad work, while GPT-like parents get `deep-work`, a direct deep-worker hint that uses subagents only when clearly useful. Explicit custom system prompts (`--system-prompt`, `SYSTEM.md`, custom templates) are respected and skip this injection by default. Disable it with `PI_AGENT_STRATEGY=off`; force a strategy with `PI_AGENT_STRATEGY=parallel-first` or `PI_AGENT_STRATEGY=deep-work`; set `PI_AGENT_STRATEGY_WITH_CUSTOM_PROMPT=1` to append it even when a custom prompt is present.
 
 For blind-model screenshot/image inspection, use the main-session `coding-discipline` lookup tool; the bundled default uses vision-capable `zai/glm-5.3-flash`. Async-subagents still supports `imagePaths` on tasks when a broader delegated track genuinely needs images, but it no longer ships a dedicated `vision` role. Dynamic provider capabilities can be missing or stale after switching models, so blind parent models can still be configured explicitly with case-insensitive `*` masks under `asyncSubagents.vision.blindModelPatterns` in `~/.config/pi/pi-tools-suite.jsonc`; do not include `zai/glm-5.3-flash` because it accepts image input. This keeps guidance honest, not a sub-agent role.
@@ -341,7 +349,7 @@ Example shared async-subagents config section:
         "types": {
           "quick": { "model": "zai/glm-5.3", "thinking": "off" },
           "frontend": { "model": "zai/glm-5.3-flash", "thinking": "medium" },
-          "browser-qa": { "model": "zai/glm-5.3-flash", "thinking": "low" },
+          "browser-qa": { "model": "zai/glm-5.3-flash", "fallbackModels": ["openai-codex/gpt-5.6-luna"], "thinking": "low" },
           "review": { "model": "zai/glm-5.3", "thinking": "high" }
         }
       }

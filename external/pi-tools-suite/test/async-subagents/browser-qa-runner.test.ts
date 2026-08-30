@@ -144,7 +144,10 @@ exports.chromium = {
             });
           },
           async addCookies() {},
-          async addInitScript() {},
+          async addInitScript(script, arg) {
+            fs.appendFileSync(path.join(process.cwd(), "init-scripts"), String(script) + "\\n---\\n");
+            if (arg && typeof arg.dragReplayMs === "number") fs.appendFileSync(path.join(process.cwd(), "init-scripts"), "dragReplayMs:" + arg.dragReplayMs + "\\n---\\n");
+          },
           async storageState(options = {}) {
             const state = { cookies: [{ name: "session", value: "top-secret-cookie", domain: "staging.example.test", path: "/" }], origins: [] };
             if (options.path) fs.writeFileSync(options.path, JSON.stringify(state));
@@ -169,6 +172,7 @@ exports.chromium = {
               for (const listener of [...(listeners.get(event) || [])]) listener(value);
             };
             const assertionPolls = new Map();
+            let busyIndicatorPolls = 0;
             const nextAssertionPoll = (key) => {
               const count = (assertionPolls.get(key) || 0) + 1;
               assertionPolls.set(key, count);
@@ -184,7 +188,10 @@ exports.chromium = {
                 clientHeight: 200,
                 scrollTo(x, y) { this.scrollLeft = Math.max(0, Math.min(x, this.scrollWidth - this.clientWidth)); this.scrollTop = Math.max(0, Math.min(y, this.scrollHeight - this.clientHeight)); },
                 scrollBy(x, y) { this.scrollTo(this.scrollLeft + x, this.scrollTop + y); },
-                getBoundingClientRect() { return { x: 10, y: 20, width: this.clientWidth, height: this.clientHeight }; },
+                getBoundingClientRect() { return { x: 10, y: 20, left: 10, top: 20, width: this.clientWidth, height: this.clientHeight }; },
+                dispatchEvent(event) {
+                  fs.appendFileSync(path.join(process.cwd(), "prepared-drag-events"), event.type + ":" + JSON.stringify(event.detail) + "\\n");
+                },
               });
               return elements.get(selector);
             };
@@ -206,7 +213,11 @@ exports.chromium = {
                 if (options.timeout) fs.appendFileSync(path.join(process.cwd(), "goto-timeouts"), String(options.timeout) + "\\n");
               },
               async reload() {},
-              async waitForTimeout() {},
+              async waitForLoadState() {},
+              async waitForTimeout(value) {
+                fs.appendFileSync(path.join(process.cwd(), "readiness-waits"), String(value) + "\\n");
+                await new Promise((resolve) => setTimeout(resolve, Math.min(value, 1)));
+              },
               async waitForURL() {},
               async evaluate() {
                 return JSON.parse(process.env.BROWSER_QA_TEST_DISCOVERY || JSON.stringify({
@@ -221,16 +232,27 @@ exports.chromium = {
                 const element = elementFor(selector);
                 const locator = {
                   selector,
+                  async count() {
+                    if (!selector.includes('[aria-busy="true"]')) return 1;
+                    const configuredPolls = Number(process.env.BROWSER_QA_TEST_BUSY_POLLS || 0);
+                    const busy = busyIndicatorPolls < configuredPolls;
+                    busyIndicatorPolls += 1;
+                    fs.appendFileSync(path.join(process.cwd(), "readiness-busy"), (busy ? "busy" : "ready") + "\\n");
+                    return busy ? 1 : 0;
+                  },
                   async fill() { fs.appendFileSync(path.join(process.cwd(), "page-actions"), "fill:" + selector + "\\n"); },
-                  async click() {
+                  async click(clickOptions = {}) {
                     fs.appendFileSync(path.join(process.cwd(), "page-actions"), "click:" + selector + "\\n");
+                    fs.appendFileSync(path.join(process.cwd(), "click-options"), selector + ":" + JSON.stringify(clickOptions) + "\\n");
                     if (selector === ".atomic") {
                       const evilRequest = { url() { return "https://evil.example/api/atomic"; }, method() { return "POST"; } };
                       const matchingRequest = { url() { return "https://staging.example.test/api/atomic?secret=hidden"; }, method() { return "POST"; } };
                       emit("request", evilRequest);
                       emit("response", { request() { return evilRequest; }, status() { return 204; } });
+                      emit("requestfinished", evilRequest);
                       emit("request", matchingRequest);
                       emit("response", { request() { return matchingRequest; }, status() { return 204; } });
+                      emit("requestfinished", matchingRequest);
                       emit("dialog", {
                         type() { return "confirm"; },
                         message() { return "Proceed safely?"; },
@@ -248,6 +270,14 @@ exports.chromium = {
                       const request = { url() { return "https://staging.example.test/api/atomic"; }, method() { return "POST"; } };
                       emit("response", { request() { return request; }, status() { return 204; } });
                     }
+                    if (selector === ".loading-action") {
+                      const request = { url() { return "https://staging.example.test/api/loading"; }, method() { return "GET"; } };
+                      emit("request", request);
+                      setTimeout(() => {
+                        emit("response", { request() { return request; }, status() { return 200; } });
+                        emit("requestfinished", request);
+                      }, 3);
+                    }
                     if (selector === ".unexpected-popup") {
                       const unexpectedVideoPath = path.join(options.recordVideo?.dir || process.cwd(), "unexpected.webm");
                       fs.writeFileSync(unexpectedVideoPath, "unexpected-video");
@@ -260,9 +290,12 @@ exports.chromium = {
                       const popupVideoPath = path.join(options.recordVideo?.dir || process.cwd(), "generated-popup.webm");
                       fs.writeFileSync(popupVideoPath, "popup-video");
                       const popup = {
+                        on() {},
+                        off() {},
                         setDefaultTimeout() {},
                         setDefaultNavigationTimeout() {},
                         async waitForLoadState() {},
+                        locator() { return { async count() { return 0; } }; },
                         async bringToFront() { fs.writeFileSync(path.join(process.cwd(), "popup-brought-to-front"), "yes"); },
                         async screenshot() { fs.writeFileSync(path.join(process.cwd(), "popup-repainted"), "yes"); },
                         async waitForTimeout(value) { fs.writeFileSync(path.join(process.cwd(), "popup-video-settle-ms"), String(value)); },
@@ -281,6 +314,10 @@ exports.chromium = {
                       async saveAs(file) { fs.writeFileSync(file, selector === ".secret-download" ? "top-secret-cookie" : "a,b\\n1,2\\n"); },
                       async cancel() {},
                     });
+                  },
+                  async dblclick(clickOptions = {}) {
+                    fs.appendFileSync(path.join(process.cwd(), "page-actions"), "doubleClick:" + selector + "\\n");
+                    fs.appendFileSync(path.join(process.cwd(), "click-options"), selector + ":" + JSON.stringify(clickOptions) + "\\n");
                   },
                   async hover() { hoveredElement = element; fs.appendFileSync(path.join(process.cwd(), "page-actions"), "hover:" + selector + "\\n"); },
                   async evaluate(callback, argument) { return callback(element, argument); },
@@ -698,6 +735,99 @@ describe("private browser QA runner", () => {
 			environment: { locale: "en-US", timezoneId: "UTC", colorScheme: "light", reducedMotion: "reduce" },
 		});
 		expect(fs.readFileSync(path.join(project, "page-actions"), "utf8")).toContain("wheel:0,120");
+	});
+
+	test("waits for network and visible loading UI, then settles recorded actions", () => {
+		const project = tempProject();
+		const agentDir = createBrowserQaAgent(project);
+		installFakePlaywright(project);
+		const flow = writeAgentFlow(agentDir, JSON.stringify({
+			steps: [
+				{ action: "goto", path: "/public" },
+				{ action: "click", locator: { css: ".loading-action" } },
+			],
+		}));
+
+		const result = run(
+			project,
+			["run", "--base-url", "https://staging.example.test", "--flow", flow, "--run-id", "ready"],
+			agentDir,
+			{ BROWSER_QA_TEST_BUSY_POLLS: "2" },
+		);
+
+		expect(result).toMatchObject({ code: 0, json: { status: "QA_PASSED" } });
+		expect(fs.readFileSync(path.join(project, "readiness-busy"), "utf8").trim().split("\n").slice(0, 4)).toEqual([
+			"busy", "busy", "ready", "ready",
+		]);
+		const waits = fs.readFileSync(path.join(project, "readiness-waits"), "utf8").trim().split("\n").map(Number);
+		expect(waits).toContain(100);
+		expect(waits.filter((value) => value === 500).length).toBe(2);
+	});
+
+	test("installs context-wide click visualization and a paced drag replay", () => {
+		const project = tempProject();
+		const agentDir = createBrowserQaAgent(project);
+		installFakePlaywright(project);
+		const flow = writeAgentFlow(agentDir, JSON.stringify({
+			steps: [
+				{ action: "goto", path: "/public" },
+				{ action: "click", locator: { css: ".single" } },
+				{ action: "doubleClick", locator: { css: ".double" } },
+				{ action: "dragTo", locator: { css: ".source" }, dropTarget: { css: ".destination" } },
+			],
+		}));
+
+		const result = run(project, ["run", "--base-url", "https://staging.example.test", "--flow", flow, "--run-id", "visualized"], agentDir);
+
+		expect(result).toMatchObject({ code: 0, json: { status: "QA_PASSED" } });
+		const initScripts = fs.readFileSync(path.join(project, "init-scripts"), "utf8");
+		expect(initScripts).toContain("data-pi-browser-qa-visualizer");
+		expect(initScripts).toContain("new CSSStyleSheet()");
+		expect(initScripts).not.toContain('createElement("style")');
+		expect(initScripts).toContain('document.addEventListener("pointerdown"');
+		expect(initScripts).toContain('document.addEventListener("dragover"');
+		expect(initScripts).toContain('document.addEventListener(dragReplayEvent');
+		expect(initScripts).toContain('document.addEventListener("lostpointercapture"');
+		expect(initScripts).toContain('candidate.matches(":popover-open")');
+		expect(initScripts).toContain('marker("drop"');
+		expect(initScripts).toContain('replayCursor.setAttribute("r", "14")');
+		expect(initScripts).toContain("replayCursor.animate(cursorKeyframes");
+		expect(initScripts).toContain('finishedPath.setAttribute("stroke-dasharray"');
+		expect(initScripts).toContain("strokeDashoffset");
+		expect(initScripts).toContain("setTimeout(finishReplay, replayDuration)");
+		expect(initScripts).toContain("state.preparedPoints ?? [...state.points]");
+		expect(initScripts).toContain("dragReplayMs:450");
+		expect(fs.readFileSync(path.join(project, "prepared-drag-events"), "utf8").trim()).toBe(
+			'pi-browser-qa-drag-replay:{"points":[{"x":160,"y":120},{"x":160,"y":120}]}',
+		);
+		expect(fs.readFileSync(path.join(project, "click-options"), "utf8").trim().split("\n")).toEqual([
+			'.single:{"delay":120}',
+			'.double:{"delay":120}',
+		]);
+		const waits = fs.readFileSync(path.join(project, "readiness-waits"), "utf8").trim().split("\n").map(Number);
+		expect(waits.slice(-2)).toEqual([550, 500]);
+	});
+
+	test("fails instead of interacting while a visible loading indicator persists", () => {
+		const project = tempProject();
+		const agentDir = createBrowserQaAgent(project);
+		installFakePlaywright(project);
+		const flow = writeAgentFlow(agentDir, JSON.stringify({
+			timeoutMs: 5,
+			steps: [{ action: "goto", path: "/public" }],
+		}));
+
+		const result = run(
+			project,
+			["run", "--base-url", "https://staging.example.test", "--flow", flow, "--run-id", "never-ready"],
+			agentDir,
+			{ BROWSER_QA_TEST_BUSY_POLLS: "1000" },
+		);
+
+		expect(result).toMatchObject({
+			code: 1,
+			json: { status: "QA_RUN_FAILED", reason: expect.stringContaining("flow step 1: page did not finish loading") },
+		});
 	});
 
 	test("supports deterministic environment, atomic expectations, drag/drop, memory uploads, and bounded downloads", () => {

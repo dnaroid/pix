@@ -15,8 +15,28 @@ const AUTH_SECRET_PLACEHOLDER = /^__PI_QA_SECRET_[1-9][0-9]*__$/;
 const SUBAGENT_AGENT_DIR_ENV = "PI_SUBAGENT_AGENT_DIR";
 const QA_WORKSPACE_RELATIVE = "browser-qa";
 const EVIDENCE_RELATIVE = "evidence";
-const FORM_VIDEO_STEP_DELAY_MS = 250;
+const UI_READY_SETTLE_MS = 500;
+const UI_READY_POLL_MS = 100;
+const FORM_VIDEO_STEP_DELAY_MS = UI_READY_SETTLE_MS;
 const POPUP_VIDEO_SETTLE_MS = 250;
+const CLICK_VIDEO_DELAY_MS = 120;
+const DRAG_VIDEO_REPLAY_MS = 450;
+const UI_READY_ACTIONS = new Set([
+	"goto", "reload", "click", "doubleClick", "hover", "fill", "press", "check", "uncheck", "selectOption",
+	"dragTo", "uploadFiles", "openPopup", "download", "wheel", "evaluate",
+]);
+const VISIBLE_BUSY_SELECTOR = [
+	'[aria-busy="true"]:visible',
+	'[role="progressbar"]:visible',
+	'[data-loading="true"]:visible',
+	'[data-state="loading"]:visible',
+	'[data-testid*="loading" i]:visible',
+	'[data-testid*="spinner" i]:visible',
+	'[data-testid*="skeleton" i]:visible',
+	'.loading:visible',
+	'[class*="spinner" i]:visible',
+	'[class*="skeleton" i]:visible',
+].join(", ");
 const EXIT_AUTH_UPDATE_REQUIRED = 42;
 const EXIT_RUNNER_TIMEOUT = 124;
 const DEFAULT_RUNNER_TIMEOUT_MS = 90_000;
@@ -203,6 +223,13 @@ async function runQa({ cwd, agentDir, args, profileId, profile, deadline, progre
 			recordVideo: { dir: evidenceDir, size: viewport },
 			viewport,
 		}), profileId);
+		await runStage(
+			progress,
+			"interaction_visualizer_install",
+			deadline,
+			() => context.addInitScript(installInteractionVisualizer, { dragReplayMs: DRAG_VIDEO_REPLAY_MS }),
+			profileId,
+		);
 		await runStage(progress, "origin_guard_install", deadline, () => installOriginGuard(context, allowedOrigins, profile.auth), profileId);
 		await runStage(progress, "context_auth_apply", deadline, () => applyContextAuth(context, profile.auth, allowedOrigins, baseURL, profileId), profileId);
 		page = await runStage(progress, "page_create", deadline, () => context.newPage(), profileId);
@@ -296,6 +323,273 @@ async function runQa({ cwd, agentDir, args, profileId, profile, deadline, progre
 		);
 	}
 	writeStatus({ status: "QA_PASSED", profile: profileId, ...evidenceDetails });
+}
+
+function installInteractionVisualizer({ dragReplayMs } = {}) {
+	const replayDuration = Number.isFinite(dragReplayMs) && dragReplayMs > 0 ? dragReplayMs : 1_000;
+	const state = {
+		host: undefined,
+		root: undefined,
+		svg: undefined,
+		cursor: undefined,
+		cursorTimer: undefined,
+		dragTimer: undefined,
+		pressed: false,
+		dragging: false,
+		points: [],
+		preparedPoints: undefined,
+		path: undefined,
+		replayAnimations: [],
+		replayTimer: undefined,
+		replayPath: undefined,
+		replayCursor: undefined,
+	};
+
+	const topLayerContainer = (event) => {
+		for (const candidate of event?.composedPath?.() ?? []) {
+			if (!(candidate instanceof Element)) continue;
+			if (candidate === document.fullscreenElement) return candidate;
+			if (typeof HTMLDialogElement !== "undefined" && candidate instanceof HTMLDialogElement && candidate.open) return candidate;
+			try {
+				if (candidate.matches(":popover-open")) return candidate;
+			} catch { /* unsupported selector */ }
+		}
+		return document.fullscreenElement ?? document.documentElement;
+	};
+	const ensureRoot = (container = document.documentElement) => {
+		if (state.host?.isConnected && state.root && state.svg && state.cursor) {
+			if (state.host.parentElement !== container) container.appendChild(state.host);
+			return state.svg;
+		}
+		const host = document.createElement("div");
+		host.setAttribute("data-pi-browser-qa-visualizer", "");
+		host.setAttribute("aria-hidden", "true");
+		const root = host.attachShadow({ mode: "closed" });
+		const stylesheet = new CSSStyleSheet();
+		stylesheet.replaceSync(`
+			:host { all: initial; position: fixed !important; inset: 0 !important; width: 100vw !important; height: 100vh !important; overflow: visible !important; pointer-events: none !important; z-index: 2147483647 !important; }
+			svg { position: fixed; inset: 0; width: 100vw; height: 100vh; overflow: visible; pointer-events: none; }
+			.cursor { fill: #0ea5e9; stroke: #fff; stroke-width: 3; filter: drop-shadow(0 0 2px #082f49) drop-shadow(0 2px 4px #000a); opacity: 0; transition: opacity 90ms linear; }
+			.cursor.visible { opacity: 1; }
+			.cursor.dragging { fill: #ff7a00; }
+			.cursor.replay { stroke-width: 4; filter: drop-shadow(0 0 3px #fff) drop-shadow(0 0 10px #ff7a00) drop-shadow(0 3px 5px #000c); transform-box: view-box; transform-origin: 0 0; }
+			.pulse { fill: none; stroke: #fbbf24; stroke-width: 4; filter: drop-shadow(0 0 2px #fff) drop-shadow(0 0 7px #f59e0b); transform-box: fill-box; transform-origin: center; }
+			.drop { fill: none; stroke: #22c55e; stroke-width: 6; filter: drop-shadow(0 0 3px #fff) drop-shadow(0 0 12px #16a34a); transform-box: fill-box; transform-origin: center; }
+			path { fill: none; stroke: #ff7a00; stroke-width: 8; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 0 3px #fff) drop-shadow(0 0 8px #ff7a00) drop-shadow(0 3px 4px #000c); }
+		`);
+		root.adoptedStyleSheets = [stylesheet];
+		const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+		const cursor = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+		cursor.setAttribute("r", "9");
+		cursor.setAttribute("class", "cursor");
+		svg.appendChild(cursor);
+		root.appendChild(svg);
+		container.appendChild(host);
+		state.host = host;
+		state.root = root;
+		state.svg = svg;
+		state.cursor = cursor;
+		return svg;
+	};
+
+	const dragReplayEvent = "pi-browser-qa-drag-replay";
+	const pointFor = (event) => ({ x: event.clientX, y: event.clientY });
+	const position = (element, point) => {
+		element.setAttribute("cx", String(point.x));
+		element.setAttribute("cy", String(point.y));
+	};
+	const showCursor = (point, dragging = state.dragging, container) => {
+		ensureRoot(container);
+		position(state.cursor, point);
+		state.cursor.classList.toggle("dragging", dragging);
+		state.cursor.classList.add("visible");
+		clearTimeout(state.cursorTimer);
+		state.cursorTimer = setTimeout(() => state.cursor?.classList.remove("visible"), 360);
+	};
+	const marker = (className, point, container) => {
+		const element = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+		element.setAttribute("r", className === "drop" ? "17" : "9");
+		element.setAttribute("class", className);
+		position(element, point);
+		ensureRoot(container).appendChild(element);
+		element.animate(
+			className === "drop"
+				? [{ opacity: 1, transform: "scale(.65)" }, { opacity: 0, transform: "scale(2.4)" }]
+				: [{ opacity: 1, transform: "scale(.55)" }, { opacity: 0, transform: "scale(2.8)" }],
+			{ duration: 460, easing: "ease-out", fill: "forwards" },
+		);
+		setTimeout(() => element.remove(), 520);
+	};
+	const clearReplay = () => {
+		clearTimeout(state.replayTimer);
+		for (const animation of state.replayAnimations) animation.cancel();
+		state.replayCursor?.remove();
+		state.replayPath?.remove();
+		state.replayAnimations = [];
+		state.replayTimer = undefined;
+		state.replayCursor = undefined;
+		state.replayPath = undefined;
+	};
+	const replayDrag = (points, finishedPath, container) => {
+		if (!finishedPath || points.length === 0) return;
+		clearReplay();
+		const svg = ensureRoot(container);
+		const replayCursor = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+		replayCursor.setAttribute("r", "14");
+		replayCursor.setAttribute("class", "cursor visible dragging replay");
+		svg.appendChild(replayCursor);
+		state.replayCursor = replayCursor;
+		state.replayPath = finishedPath;
+
+		const cumulative = [0];
+		for (let index = 1; index < points.length; index += 1) {
+			const previous = points[index - 1];
+			const current = points[index];
+			cumulative.push(cumulative[index - 1] + Math.hypot(current.x - previous.x, current.y - previous.y));
+		}
+		const totalLength = cumulative[cumulative.length - 1];
+		const firstPoint = points[0];
+		const finalPoint = points[points.length - 1];
+		const cursorKeyframes = points
+			.map((point, index) => ({
+				offset: totalLength > 0 ? cumulative[index] / totalLength : index / Math.max(points.length - 1, 1),
+				transform: `translate(${point.x}px, ${point.y}px)`,
+			}))
+			.filter((frame, index, frames) => index === 0 || index === frames.length - 1 || frame.offset > frames[index - 1].offset);
+		if (cursorKeyframes.length === 1) cursorKeyframes.push({ ...cursorKeyframes[0], offset: 1 });
+		cursorKeyframes[0].offset = 0;
+		cursorKeyframes[cursorKeyframes.length - 1].offset = 1;
+		const pathLength = Math.max(finishedPath.getTotalLength(), totalLength, 1);
+		finishedPath.setAttribute("stroke-dasharray", `${pathLength} ${pathLength}`);
+		finishedPath.setAttribute("stroke-dashoffset", String(pathLength));
+		replayCursor.setAttribute("cx", "0");
+		replayCursor.setAttribute("cy", "0");
+		replayCursor.setAttribute("transform", `translate(${firstPoint.x} ${firstPoint.y})`);
+		state.replayAnimations = [
+			replayCursor.animate(cursorKeyframes, { duration: replayDuration, easing: "linear", fill: "forwards" }),
+			finishedPath.animate(
+				[{ strokeDashoffset: `${pathLength}px` }, { strokeDashoffset: "0px" }],
+				{ duration: replayDuration, easing: "linear", fill: "forwards" },
+			),
+		];
+		const finishReplay = () => {
+			state.replayAnimations = [];
+			state.replayTimer = undefined;
+			state.replayCursor = undefined;
+			state.replayPath = undefined;
+			replayCursor.remove();
+			marker("drop", finalPoint, container);
+			finishedPath.removeAttribute("stroke-dasharray");
+			finishedPath.removeAttribute("stroke-dashoffset");
+			finishedPath.animate(
+				[{ opacity: 1, offset: 0 }, { opacity: 1, offset: .55 }, { opacity: 0, offset: 1 }],
+				{ duration: 460, easing: "ease-out", fill: "forwards" },
+			);
+			setTimeout(() => finishedPath.remove(), 520);
+		};
+		state.replayTimer = setTimeout(finishReplay, replayDuration);
+	};
+	const scheduleDragCleanup = () => {
+		clearTimeout(state.dragTimer);
+		state.dragTimer = setTimeout(cancelDrag, 5_000);
+	};
+	const updatePath = (point, container) => {
+		if (state.points.length === 0) state.points.push(point);
+		const previous = state.points[state.points.length - 1];
+		if (Math.hypot(point.x - previous.x, point.y - previous.y) >= 3) state.points.push(point);
+		if (state.points.length > 80) state.points.splice(1, state.points.length - 80);
+		if (!state.path) {
+			const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+			ensureRoot(container).appendChild(path);
+			state.path = path;
+		}
+		state.path.setAttribute("d", state.points.map((entry, index) => `${index === 0 ? "M" : "L"}${entry.x} ${entry.y}`).join(" "));
+		scheduleDragCleanup();
+	};
+	const beginDrag = (point, container) => {
+		if (!state.dragging) clearReplay();
+		state.dragging = true;
+		state.points = state.points.length > 0 ? state.points : [point];
+		updatePath(point, container);
+		showCursor(point, true, container);
+	};
+	const finishDrag = (point, container) => {
+		if (!state.dragging) {
+			state.points = [];
+			return;
+		}
+		updatePath(point, container);
+		const finishedPath = state.path;
+		const finishedPoints = state.preparedPoints ?? [...state.points];
+		state.preparedPoints = undefined;
+		if (finishedPath) {
+			finishedPath.setAttribute("d", finishedPoints.map((entry, index) => `${index === 0 ? "M" : "L"}${entry.x} ${entry.y}`).join(" "));
+		}
+		clearTimeout(state.dragTimer);
+		state.dragging = false;
+		state.points = [];
+		state.path = undefined;
+		state.cursor?.classList.remove("visible", "dragging");
+		replayDrag(finishedPoints, finishedPath, container);
+	};
+	function cancelDrag() {
+		clearTimeout(state.dragTimer);
+		state.path?.remove();
+		state.pressed = false;
+		state.dragging = false;
+		state.points = [];
+		state.path = undefined;
+		state.cursor?.classList.remove("dragging");
+	}
+
+	document.addEventListener(dragReplayEvent, (event) => {
+		const points = event.detail?.points;
+		if (!Array.isArray(points) || points.length < 2) return;
+		if (!points.every((point) => Number.isFinite(point?.x) && Number.isFinite(point?.y))) return;
+		state.preparedPoints = points.map(({ x, y }) => ({ x, y }));
+	}, true);
+	document.addEventListener("pointermove", (event) => {
+		const point = pointFor(event);
+		const container = topLayerContainer(event);
+		if (state.pressed && (event.buttons & 1) === 1) {
+			const start = state.points[0] ?? point;
+			if (state.dragging || Math.hypot(point.x - start.x, point.y - start.y) >= 6) beginDrag(point, container);
+			if (state.dragging) updatePath(point, container);
+		}
+		showCursor(point, state.dragging, container);
+	}, true);
+	document.addEventListener("pointerdown", (event) => {
+		if (event.button !== 0) return;
+		const point = pointFor(event);
+		const container = topLayerContainer(event);
+		state.pressed = true;
+		state.points = [point];
+		marker("pulse", point, container);
+		showCursor(point, false, container);
+	}, true);
+	document.addEventListener("pointerup", (event) => {
+		state.pressed = false;
+		finishDrag(pointFor(event), topLayerContainer(event));
+	}, true);
+	document.addEventListener("pointercancel", (event) => {
+		showCursor(pointFor(event), false, topLayerContainer(event));
+		cancelDrag();
+	}, true);
+	document.addEventListener("dragstart", (event) => beginDrag(pointFor(event), topLayerContainer(event)), true);
+	document.addEventListener("dragover", (event) => {
+		const point = pointFor(event);
+		const container = topLayerContainer(event);
+		if (!state.dragging) beginDrag(point, container);
+		updatePath(point, container);
+		showCursor(point, true, container);
+	}, true);
+	document.addEventListener("drop", (event) => finishDrag(pointFor(event), topLayerContainer(event)), true);
+	document.addEventListener("dragend", (event) => finishDrag(pointFor(event), topLayerContainer(event)), true);
+	document.addEventListener("lostpointercapture", cancelDrag, true);
+	document.addEventListener("visibilitychange", () => {
+		if (document.visibilityState === "hidden") cancelDrag();
+	}, true);
+	window.addEventListener("blur", cancelDrag, true);
 }
 
 async function runAuthScaffold(cwd, args) {
@@ -744,9 +1038,16 @@ async function executeFlow({ context, page, baseURL, evidenceDir, flow, allowedO
 	let popupCaptureArmed = false;
 	let capturedPopup;
 	let unexpectedPopupError;
+	const readinessTrackers = new Map();
+	const readinessFor = (candidate) => {
+		if (!readinessTrackers.has(candidate)) readinessTrackers.set(candidate, createPageReadinessTracker(candidate));
+		return readinessTrackers.get(candidate);
+	};
+	readinessFor(page);
 	const onContextPage = (candidate) => {
 		if (candidate === page) return;
 		if (popupCaptureArmed && !capturedPopup) {
+			readinessFor(candidate);
 			capturedPopup = candidate;
 			return;
 		}
@@ -779,8 +1080,8 @@ async function executeFlow({ context, page, baseURL, evidenceDir, flow, allowedO
 				if (scope !== ownerPage) throw flowError(profileId, index, "reload is not supported for frame targets");
 				await ownerPage.reload({ waitUntil: validWaitUntil(step.waitUntil) });
 				break;
-			case "click": await executeExpectedInteraction({ ownerPage, step, allowedOrigins, timeout, profileId, index, action: () => requireLocator(locator, profileId, index).click() }); break;
-			case "doubleClick": await executeExpectedInteraction({ ownerPage, step, allowedOrigins, timeout, profileId, index, action: () => requireLocator(locator, profileId, index).dblclick() }); break;
+			case "click": await executeExpectedInteraction({ ownerPage, step, allowedOrigins, timeout, profileId, index, action: () => requireLocator(locator, profileId, index).click({ delay: CLICK_VIDEO_DELAY_MS }) }); break;
+			case "doubleClick": await executeExpectedInteraction({ ownerPage, step, allowedOrigins, timeout, profileId, index, action: () => requireLocator(locator, profileId, index).dblclick({ delay: CLICK_VIDEO_DELAY_MS }) }); break;
 			case "hover": await requireLocator(locator, profileId, index).hover(); break;
 			case "fill":
 				if (typeof step.value !== "string") throw flowError(profileId, index, "fill requires a string value");
@@ -797,11 +1098,26 @@ async function executeFlow({ context, page, baseURL, evidenceDir, flow, allowedO
 				await executeExpectedInteraction({ ownerPage, step, allowedOrigins, timeout, profileId, index, action: () => requireLocator(locator, profileId, index).selectOption(step.value) });
 				break;
 			case "dragTo": {
+				const source = requireLocator(locator, profileId, index);
 				const destination = resolveLocator(scope, step.dropTarget, profileId, index);
 				const options = {};
 				if (step.sourcePosition !== undefined) options.sourcePosition = resolvePoint(step.sourcePosition, profileId, index, "sourcePosition");
 				if (step.dropPosition !== undefined) options.targetPosition = resolvePoint(step.dropPosition, profileId, index, "dropPosition");
-				await requireLocator(locator, profileId, index).dragTo(destination, options);
+				const replayPoints = await Promise.all([
+					source.evaluate((element, position) => {
+						const rect = element.getBoundingClientRect();
+						return { x: (rect.left ?? rect.x) + (position?.x ?? rect.width / 2), y: (rect.top ?? rect.y) + (position?.y ?? rect.height / 2) };
+					}, options.sourcePosition),
+					destination.evaluate((element, position) => {
+						const rect = element.getBoundingClientRect();
+						return { x: (rect.left ?? rect.x) + (position?.x ?? rect.width / 2), y: (rect.top ?? rect.y) + (position?.y ?? rect.height / 2) };
+					}, options.targetPosition),
+				]);
+				await source.evaluate((element, points) => {
+					element.dispatchEvent(new CustomEvent("pi-browser-qa-drag-replay", { bubbles: true, composed: true, detail: { points } }));
+				}, replayPoints);
+				await source.dragTo(destination, options);
+				await ownerPage.waitForTimeout(DRAG_VIDEO_REPLAY_MS + UI_READY_POLL_MS);
 				break;
 			}
 			case "uploadFiles": {
@@ -819,12 +1135,18 @@ async function executeFlow({ context, page, baseURL, evidenceDir, flow, allowedO
 				let popup;
 				let popupVideo;
 				try {
-					[, popup] = await Promise.all([requireLocator(locator, profileId, index).click(), popupPromise]);
+					[, popup] = await Promise.all([requireLocator(locator, profileId, index).click({ delay: CLICK_VIDEO_DELAY_MS }), popupPromise]);
 					popup.setDefaultTimeout(timeout);
 					popup.setDefaultNavigationTimeout(timeout);
 					popupVideo = { name: `video-popup-${step.name}.webm`, video: popup.video(), discard: false };
 					videos.push(popupVideo);
 					await popup.waitForLoadState("domcontentloaded", { timeout });
+					await waitForUiReady({
+						scope: popup,
+						tracker: readinessFor(popup),
+						timeout,
+						failure: () => flowError(profileId, index, "popup did not finish loading"),
+					});
 					const origin = assertSameOriginPage(popup, ownerPage, allowedOrigins, profileId, index, "popup");
 					await popup.bringToFront();
 					// A static popup may not repaint after Playwright starts its screencast, leaving the video blank.
@@ -971,11 +1293,68 @@ async function executeFlow({ context, page, baseURL, evidenceDir, flow, allowedO
 			}
 			default: throw flowError(profileId, index, `unsupported action: ${step.action}`);
 		}
+		if (UI_READY_ACTIONS.has(step.action)) {
+			await waitForUiReady({
+				scope,
+				tracker: readinessFor(ownerPage),
+				timeout,
+				failure: () => flowError(profileId, index, "page did not finish loading"),
+			});
+		}
 		if (unexpectedPopupError) throw unexpectedPopupError;
 		await assertBrowserDoesNotExposeSecrets(context, page, secrets, profileId);
 	}
 	} finally {
 		context.off("page", onContextPage);
+		for (const tracker of readinessTrackers.values()) tracker.dispose();
+	}
+}
+
+function createPageReadinessTracker(page) {
+	const pendingRequests = new Set();
+	const onRequest = (request) => pendingRequests.add(request);
+	const onRequestDone = (request) => pendingRequests.delete(request);
+	page.on("request", onRequest);
+	page.on("requestfinished", onRequestDone);
+	page.on("requestfailed", onRequestDone);
+	return {
+		page,
+		pendingRequests,
+		dispose() {
+			page.off("request", onRequest);
+			page.off("requestfinished", onRequestDone);
+			page.off("requestfailed", onRequestDone);
+		},
+	};
+}
+
+async function waitForUiReady({ scope, tracker, timeout, failure }) {
+	const deadline = Date.now() + timeout;
+	try {
+		await scope.waitForLoadState("domcontentloaded", { timeout });
+	} catch {
+		throw failure();
+	}
+	while (true) {
+		const remaining = deadline - Date.now();
+		if (remaining <= 0) throw failure();
+		const hasBusyIndicator = await hasVisibleBusyIndicator(scope);
+		if (tracker.pendingRequests.size === 0 && !hasBusyIndicator) {
+			await tracker.page.waitForTimeout(Math.min(UI_READY_SETTLE_MS, remaining));
+			const stillBusy = await hasVisibleBusyIndicator(scope);
+			if (tracker.pendingRequests.size === 0 && !stillBusy) return;
+			continue;
+		}
+		await tracker.page.waitForTimeout(Math.min(UI_READY_POLL_MS, remaining));
+	}
+}
+
+async function hasVisibleBusyIndicator(scope) {
+	try {
+		return await scope.locator(VISIBLE_BUSY_SELECTOR).count() > 0;
+	} catch {
+		// A navigation can replace the execution context between readiness polls.
+		return true;
 	}
 }
 
@@ -1170,7 +1549,7 @@ async function executeDownload({ ownerPage, locator, step, evidenceDir, allowedO
 	const retained = step.retain === true ? path.join(evidenceDir, `download-${step.name}.bin`) : undefined;
 	if (retained && fs.existsSync(retained)) throw flowError(profileId, index, `retained download name is duplicated: ${step.name}`);
 	const downloadPromise = ownerPage.waitForEvent("download", { timeout });
-	const [, download] = await Promise.all([locator.click(), downloadPromise]);
+	const [, download] = await Promise.all([locator.click({ delay: CLICK_VIDEO_DELAY_MS }), downloadPromise]);
 	try {
 		const url = new URL(download.url());
 		if (!allowedOrigins.includes(url.origin)) throw flowError(profileId, index, "download is outside allowedOrigins");
@@ -1418,12 +1797,18 @@ async function applyFormAuth(page, auth, allowedOrigins, profileId) {
 	if (!Array.isArray(auth.fields) || auth.fields.length === 0 || typeof auth.submitSelector !== "string") {
 		throw authError(profileId, "form fields or submitSelector are missing");
 	}
+	const readinessTracker = createPageReadinessTracker(page);
 	try {
 		const timeout = Math.min(finitePositive(auth.timeoutMs) ?? 15_000, 60_000);
 		page.setDefaultTimeout(timeout);
 		page.setDefaultNavigationTimeout(timeout);
 		await page.goto(auth.loginUrl, { timeout });
-		await page.waitForTimeout(FORM_VIDEO_STEP_DELAY_MS);
+		await waitForUiReady({
+			scope: page,
+			tracker: readinessTracker,
+			timeout,
+			failure: () => authError(profileId, "form page did not finish loading"),
+		});
 		for (const field of auth.fields) {
 			if (!isObject(field) || typeof field.selector !== "string" || typeof field.value !== "string") {
 				throw authError(profileId, "form fields must contain selector/value strings");
@@ -1431,7 +1816,7 @@ async function applyFormAuth(page, auth, allowedOrigins, profileId) {
 			await page.locator(field.selector).fill(field.value);
 			await page.waitForTimeout(FORM_VIDEO_STEP_DELAY_MS);
 		}
-		await page.locator(auth.submitSelector).click();
+		await page.locator(auth.submitSelector).click({ delay: CLICK_VIDEO_DELAY_MS });
 		if (isObject(auth.success) && typeof auth.success.url === "string") await page.waitForURL(auth.success.url, { timeout });
 		if (isObject(auth.success) && typeof auth.success.selector === "string") {
 			await page.locator(auth.success.selector).waitFor({ timeout, state: validLocatorState(auth.success.state) });
@@ -1439,9 +1824,17 @@ async function applyFormAuth(page, auth, allowedOrigins, profileId) {
 		if (!isObject(auth.success) || (typeof auth.success.url !== "string" && typeof auth.success.selector !== "string")) {
 			throw authError(profileId, "form success.url or success.selector is required");
 		}
+		await waitForUiReady({
+			scope: page,
+			tracker: readinessTracker,
+			timeout,
+			failure: () => authError(profileId, "authenticated page did not finish loading"),
+		});
 	} catch (error) {
 		if (error instanceof QaStatusError) throw error;
 		throw authError(profileId, "form login was rejected or did not reach the configured success condition");
+	} finally {
+		readinessTracker.dispose();
 	}
 }
 

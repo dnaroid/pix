@@ -466,15 +466,19 @@ describe.serial("subagent type config", () => {
 		}
 		const oracle = resolveAgentTaskConfig({ id: "oracle", task: "oracle", subagentType: "oracle" }, config);
 		expect(oracle.task.thinking).toBe("max");
-		expect(resolved.task.model).toBe("openai-codex/gpt-5.6-luna");
+		expect(resolved.task.model).toBe("zai/glm-5.3-flash");
 		expect(resolved.task.thinking).toBe("low");
-		expect(resolved.fallbackModels).toEqual(["antigravity/gemini-3-flash-preview", "zai/glm-5.3"]);
+		expect(resolved.fallbackModels).toEqual(["openai-codex/gpt-5.6-luna"]);
 		expect(resolved.task.tools).toEqual(["read", "grep", "bash"]);
 		expect(resolved.timeoutMs).toBe(120_000);
 		expect(resolved.isolatedSkills).toEqual([privateSkill]);
 		expect(fs.existsSync(privateSkill)).toBe(true);
 		expect(fs.existsSync(path.join(path.dirname(privateSkill), "references", "qa-design.md"))).toBe(true);
-		expect(fs.readFileSync(privateSkill, "utf-8")).not.toContain("playwright-cli");
+		const privateSkillText = fs.readFileSync(privateSkill, "utf-8");
+		expect(privateSkillText).not.toContain("playwright-cli");
+		expect(privateSkillText).toMatch(/user-visible acceptance contract, not an execution\s+plan/);
+		expect(privateSkillText).toMatch(/Never create,\s+serve, or switch to a mock\/synthetic page/);
+		expect(privateSkillText).toMatch(/report the concrete blocker instead of switching to a\s+mock target/);
 	});
 
 	test.serial("keeps the self-contained browser QA skill mandatory when config adds isolated skills", () => {

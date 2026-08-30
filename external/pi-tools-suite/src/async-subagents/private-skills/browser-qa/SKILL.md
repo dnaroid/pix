@@ -13,6 +13,15 @@ CLI, create shared/default browser sessions, or generate executable browser code
 Never read, print, grep, copy, or edit credential values from
 `.pi/qa_auth.jsonc` yourself.
 
+Treat the launch brief as a user-visible acceptance contract, not an execution
+plan. It should identify the actual target URL/app when known, the user flow,
+the expected observable result, and required evidence. Missing details are
+preflight unknowns, not permission to invent a different target. Never create,
+serve, or switch to a mock/synthetic page, test fixture, or built-in harness
+unless the user explicitly requested that exact target. Source inspection and
+repository tests may support discovery, but they never substitute for testing
+the requested target in the browser.
+
 ## Workflow
 
 Treat target discovery as a 30-second preflight and invoke the runner within 45
@@ -27,9 +36,11 @@ source reading, server polling, capability probing, or retries.
    The launcher creates its private `flows/` directory and the runner rejects
    flows or evidence destinations outside this owning sub-agent directory. Do
    not override `PI_SUBAGENT_AGENT_DIR` or copy evidence to shared project paths.
-3. Discover the requested target, expected behavior, and the smallest scenario
-   that can prove it. If the target cannot be reached or started, report the
-   concrete blocker instead of substituting static checks for browser QA.
+3. Discover the requested actual target, expected behavior, and the smallest
+   scenario that can prove it. Treat parent-supplied repository details as hints
+   unless the user explicitly requested that exact harness. If the target cannot
+   be reached or started, report the concrete blocker instead of switching to a
+   mock target or substituting static checks for browser QA.
 4. If the requested behavior requires authentication, run
    `node <runner> profiles`. A missing auth config is valid and returns an empty
    list without creating `.pi/qa_auth.jsonc`. Otherwise skip profile discovery
@@ -38,7 +49,8 @@ source reading, server polling, capability probing, or retries.
    the requested page requires login. If form authentication is required but
    there is no usable profile, follow **Form-auth scaffolding** below instead of
    asking the user to discover selectors.
-5. Inspect the target code and write a declarative JSONC flow under
+5. Inspect only enough target code to identify a supported launch path or stable
+   locators, then write a declarative JSONC flow under
    `$PI_SUBAGENT_AGENT_DIR/browser-qa/flows/`. Never put credentials or raw
    executable JavaScript in it. The `evaluate` action exposes only the safe
    operations documented below; it does not accept expressions or scripts.
@@ -71,6 +83,23 @@ source reading, server polling, capability probing, or retries.
   and `waitForTimeout` only for short input settling or an unavoidable
   animation/debounce. Set flow `timeoutMs` only as high as the target
   legitimately needs.
+- The runner waits after every visible interaction until the document is ready,
+  requests started by the interaction have finished, and common visible busy
+  markers (including `aria-busy`, progress bars, loading/spinner/skeleton test
+  ids and classes) disappear. It then keeps the stable state on video for 500
+  ms. A busy page that does not settle within `timeoutMs` fails instead of
+  continuing against a skeleton. For an app-specific loader not covered by
+  those conventions, add an explicit `waitFor`/`assertHidden` for that loader
+  and assert the loaded content before interacting with it.
+- Recorded pointer actions are annotated automatically: clicks and double-clicks
+  show a cursor and pulse. After a native `dragTo` completes, the runner visibly
+  replays the resolved source-to-target route for 450 ms with a large orange
+  cursor and progressively drawn high-contrast trail, then shows a green drop
+  marker. The
+  isolated annotation layer applies to the main page, same-origin frames,
+  declared popups, and form-auth submission; it is accessibility-hidden, ignores
+  pointer input, and clears before the runner's post-action stable interval
+  completes.
 - Place `authRejectedIf` immediately after navigation or any transition that
   may reveal expired authentication.
 - Never weaken an assertion merely to make a failing run pass. If the observed
@@ -113,6 +142,13 @@ The top-level `environment` may set `locale`, `timezoneId`, `colorScheme`, and
 `reduce`. Color scheme accepts `light`, `dark`, or `no-preference`; reduced
 motion accepts `reduce` or `no-preference`. The resolved environment is returned
 in the result alongside the viewport.
+
+Navigation and visible interaction actions automatically wait for page
+readiness and a 500 ms stable recording interval. This applies to the main
+page, same-origin frames and declared popups, and to the trusted form-auth
+sequence. An explicit `waitForTimeout` is not extended by another automatic
+delay. Click-like actions use a short bounded press duration so their automatic
+video pulse remains visible even when the click immediately navigates.
 
 Triggering interactions (`click`, `doubleClick`, `press`, `check`, `uncheck`,
 and `selectOption`) may declare race-free expectations that are armed before

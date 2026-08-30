@@ -81,6 +81,7 @@ export function asyncSubagentToolDescriptions(options: ToolDescriptionSetOptions
 			].join(" "),
 			promptSnippet:
 				"For every browser-based visual QA, UI bug reproduction, or real-browser fix-verification request, immediately spawn subagentType='browser-qa' even for a single track and before inspecting files or checking prerequisites. The browser-qa sub-agent must discover the target and report missing prerequisites; do not preflight, perform, or substitute browser QA in the parent agent. " +
+				"Give browser-qa a concise acceptance brief: the known target URL/app, user-visible flow, expected observable result, and required artifacts. Do not prescribe repository files, searches, commands, server setup, or mock/synthetic substitutes; unknown setup belongs to the QA sub-agent's discovery. " +
 				"For other work, use subagents action='spawn' for multiple independent agents, explicit delegate/parallelize/split work requests, or one large review/debug track that should stay out of the parent context. " +
 				"Usually omit subagentType so the router chooses; set it only for user-named roles, deterministic tests, or another concrete override. Avoid trivial reads/edits and do not call status/wait immediately after spawn just for progress. " +
 				(repoDiscovery
@@ -88,6 +89,7 @@ export function asyncSubagentToolDescriptions(options: ToolDescriptionSetOptions
 					: "For one focused code-discovery question, use direct read/grep. Without repo_* tools, spawn several focused scan/quick agents first for broad multi-track discovery, incident triage, release readiness, risk strategy, or parallel reviews. Read result only after completion when findings are needed."),
 			promptGuidelines: [
 				"Treat every real-browser QA request as a mandatory delegation trigger and an explicit exception to the large/parallel threshold: immediately spawn with `subagentType: \"browser-qa\"` before checking prerequisites. The QA sub-agent owns target discovery, feasibility checks, browser automation, evidence, and blocked reports; the parent must not inspect the project first or substitute non-browser checks.",
+				"Keep the browser-qa task payload at the user-visible acceptance level: known target URL/app, actions to perform, expected observable outcome, and requested evidence. Do not turn it into a repository investigation plan, name internal files or commands, dictate server setup, or invent a mock/synthetic target. Leave unknown prerequisites to the QA sub-agent.",
 				"When browser-qa reports missing credentials, relay its explicit request and generated `.pi/qa_auth.jsonc` template path; never inspect, populate, or edit that credential file in the parent.",
 				"After browser-qa completes a test, preserve its clickable screenshot, video, and trace links in the final user-facing response whenever those artifacts exist.",
 				"For non-browser-QA work, use action='spawn' only for LARGE/PARALLEL work: independent investigations, repo-wide sweeps, deep debugging, code review/audit, or explicit delegate/parallelize/split requests; these are spawn triggers unless trivial/single-file.",

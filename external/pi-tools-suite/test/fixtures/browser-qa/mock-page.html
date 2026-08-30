@@ -84,6 +84,7 @@
         setTimeout(() => {
           document.querySelector('[data-testid="private-loading"]').hidden = true;
           document.querySelector('[data-testid="private-content"]').hidden = false;
+          document.querySelector('[data-testid="private-action"]').setAttribute("aria-busy", "false");
         }, 750);
         document.querySelector('[data-testid="private-action"]').addEventListener("click", async () => {
           const response = await fetch("/api/private-action", { method: "POST" });

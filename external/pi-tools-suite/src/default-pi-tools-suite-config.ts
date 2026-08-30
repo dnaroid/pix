@@ -161,7 +161,7 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
             "model": "zai/glm-5.3-flash",
             "thinking": "medium"
           },
-          "browser-qa": { "model": "zai/glm-5.3-flash", "thinking": "low" },
+          "browser-qa": { "model": "zai/glm-5.3-flash", "fallbackModels": ["openai-codex/gpt-5.6-luna"], "thinking": "low" },
           "tests": { "model": "zai/glm-5-turbo", "thinking": "medium" },
           "review": { "model": "zai/glm-5.3", "thinking": "high" },
           "implement": { "model": "zai/glm-5.3", "thinking": "high" },
@@ -305,8 +305,8 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
       },
       "browser-qa": {
         "description": "Use for browser-based visual QA: reproduce UI bugs and verify fixes with deterministic assertions, screenshots, video, and traces.",
-        "model": "openai-codex/gpt-5.6-luna",
-        "fallbackModels": ["antigravity/gemini-3-flash-preview", "zai/glm-5.3"],
+        "model": "zai/glm-5.3-flash",
+        "fallbackModels": ["openai-codex/gpt-5.6-luna"],
         "thinking": "low",
         "timeoutMs": 120000,
         "tools": ["read", "grep", "bash"]
