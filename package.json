@@ -41,7 +41,9 @@
     "external/pi-tools-suite/src",
     "external/pi-tools-suite/docs",
     "external/pi-tools-suite/licenses",
-    "README.md"
+    "README.md",
+    "!**/__pycache__",
+    "!**/*.pyc"
   ],
   "scripts": {
     "predev": "npm run link:pix --silent",

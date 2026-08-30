@@ -17,3 +17,5 @@ TODO.md
 plans/
 .ruby-lsp/
 .tmp-*
+__pycache__/
+*.pyc
