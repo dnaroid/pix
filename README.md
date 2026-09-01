@@ -401,6 +401,27 @@ Configurable areas include:
 
 Use `/settings` to inspect the effective settings summary and `/reload` after changing resources. Some command-driven settings update the relevant config file directly.
 
+### Ignoring legacy context files
+
+If a legacy project already contains an `AGENTS.md` or `CLAUDE.md` that should not be loaded, the simplest project-local workaround for both Pi and Pix is an empty override file in the same directory:
+
+```bash
+touch AGENTS.override.md
+```
+
+Pi and Pix load `AGENTS.override.md` instead of `AGENTS.md`/`CLAUDE.md` from that directory. To keep this local without changing the repository:
+
+```bash
+echo AGENTS.override.md >> .git/info/exclude
+```
+
+To disable discovery of all context files, including files in parent directories:
+
+- start Pi with `pi --no-context-files` (or `pi -nc`);
+- in Pix, run `/no-context-files on`. Pix saves `"ignoreContextFiles": true` to `<workspace>/.pi/pix.jsonc`.
+
+Start a new session or restart Pix after changing this setting. Use `/no-context-files off` to enable context-file loading again.
+
 ## Updates
 
 ```bash
