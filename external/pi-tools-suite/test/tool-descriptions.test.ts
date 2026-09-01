@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
 	CODEX_ALIAS_TOOL_DESCRIPTIONS,
 	COMPRESS_TOOL_DESCRIPTION,
+	SESSION_RECOVERY_TOOL_DESCRIPTIONS,
 	TODO_TOOL_DESCRIPTION,
 	asyncSubagentToolDescriptions,
 } from "../src/tool-descriptions.js";
@@ -52,6 +53,26 @@ describe("tool descriptions", () => {
 		expect(promptText).toContain("Do not finish with stale/duplicate deferred todos");
 		expect(promptText).toContain("exactly one in_progress");
 		expect(promptText).toContain("Never use `clear`, `delete`");
+	});
+
+	test("session recovery prompt guides overview-first raw-history recovery", () => {
+		const tools = Object.values(SESSION_RECOVERY_TOOL_DESCRIPTIONS);
+		const promptText = tools.flatMap((tool) => [
+			tool.description,
+			tool.promptSnippet,
+			...(tool.promptGuidelines ?? []),
+		]).join("\n");
+
+		expect(tools.map((tool) => tool.name)).toEqual([
+			"session_overview",
+			"session_read_section",
+			"session_search",
+			"session_recovery_context",
+		]);
+		expect(promptText).toContain("Use session_overview first");
+		expect(promptText).toContain("raw session history");
+		expect(promptText).toContain("lexical rather than semantic");
+		expect(promptText).toContain("recentErrors as historical evidence");
 	});
 
 	test("subagents prompt keeps explicit delegation triggers in repo-aware mode", () => {

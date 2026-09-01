@@ -16,6 +16,7 @@ export const MODULES: Array<{ name: string; load: () => Promise<ExtensionModule>
 	{ name: "lsp", load: () => import("./lsp/index") },
 	{ name: "comment-checker", load: () => import("./comment-checker/index") },
 	{ name: "session-name", load: () => import("./session-name/index") },
+	{ name: "session-recovery", load: () => import("./session-recovery/index") },
 	{ name: "repo-discovery", load: () => import("./repo-discovery/index") },
 	{ name: "antigravity-auth", load: () => import("./antigravity-auth/index") },
 	{ name: "opencode-import", load: () => import("./opencode-import/index") },

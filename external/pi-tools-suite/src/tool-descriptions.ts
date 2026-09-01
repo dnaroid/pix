@@ -250,6 +250,46 @@ export const SESSION_NAME_TOOL_DESCRIPTION: ToolDescription = {
 	],
 };
 
+export const SESSION_RECOVERY_TOOL_DESCRIPTIONS = {
+	overview: {
+		name: "session_overview",
+		label: "Session Overview",
+		description: "Map raw persisted session history into stable, bounded sections. Defaults to the active branch and can include abandoned branches without applying context compaction.",
+		promptSnippet: "Map raw session history into stable sections before drilling into context lost to compaction.",
+		promptGuidelines: [
+			"Use session_overview first when task context was lost or compressed and no reliable search phrase is known; then inspect relevant section IDs.",
+		],
+	},
+	readSection: {
+		name: "session_read_section",
+		label: "Session Read Section",
+		description: "Read a bounded raw-history section returned by session_overview or session_search, including messages, tool calls/results, and compaction summaries.",
+		promptSnippet: "Read one stable raw-session section by ID after session_overview or session_search.",
+		promptGuidelines: [
+			"Pass a section ID produced with the same active/all scope; keep entry and body limits small unless more detail is necessary.",
+		],
+	},
+	search: {
+		name: "session_search",
+		label: "Session Search",
+		description: "Search raw session messages, summaries, tool results, and serialized tool arguments with a bounded literal substring query.",
+		promptSnippet: "Search raw session history lexically when a concrete phrase, path, symbol, tool, or error is known.",
+		promptGuidelines: [
+			"Use session_search after overview when a concrete query is known; it is lexical rather than semantic, and scope defaults to the active branch.",
+		],
+	},
+	recoveryContext: {
+		name: "session_recovery_context",
+		label: "Session Recovery Context (after overview)",
+		description: "Post-overview convenience tool for summarizing deterministic task signals: user requests, file activity, recent errors, pending tool calls, last action, and compaction references. When the task and search terms are unknown, call session_overview first instead of this tool.",
+		promptSnippet: "Use only after session_overview has mapped the raw history; verify details through section reads or search.",
+		promptGuidelines: [
+			"Do not use session_recovery_context as the first tool when the task and useful search terms are unknown; start with session_overview.",
+			"Use it as a convenience after the overview, but treat recentErrors as historical evidence and verify ambiguous state with session_read_section.",
+		],
+	},
+} satisfies Record<string, ToolDescription>;
+
 export const WEB_SEARCH_TOOL_DESCRIPTIONS = {
 	webSearch: {
 		name: "web_search",

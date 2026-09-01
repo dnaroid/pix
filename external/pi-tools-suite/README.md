@@ -11,6 +11,7 @@ This package keeps shared Pi tools as ordinary source folders under `src/` and r
 - `src/lsp` — shared LSP diagnostics hook/library that enriches mutating tool results with diagnostics and shuts down language servers on session shutdown
 - `src/comment-checker` — AI-slop comment guard that listens to the `tool_result` event for `write` / `edit` / `apply_patch` mutations, extracts net-new code comment lines, classifies them (filler phrasing, restating code, decorative separators, generic paraphrasing, or — under aggressive strictness — any non-valuable comment), and appends a short nudge to the tool result so the agent removes unnecessary comments on its next turn; TODO/FIXME, license headers, docstrings, pragmas, linter directives, shebangs, and decorators are never flagged; language-agnostic across `//` / `/* */` / `#` / `--` / `<!-- -->` / triple-quote comment styles; per-session deduplication (at most one nudge per 30 s) prevents fix/remark loops; configured via the `commentChecker` section (`enabled`, `strictness`: `conservative` | `balanced` | `aggressive`, default `balanced`) or `PI_COMMENT_CHECKER_ENABLED` / `PI_COMMENT_CHECKER_STRICTNESS`
 - `src/session-name` — `session_name` tool for reading or setting the current session title directly from tool calls, without relying on slash-command parsing
+- `src/session-recovery` — branch- and compaction-aware `session_overview`, `session_read_section`, `session_search`, and `session_recovery_context` tools for bounded recovery from Pi's raw append-only session history
 - `src/repo-discovery` — `/idx-init`, `/idx-update`, and indexed-only `repo_architecture` / `repo_structure` / `repo_ast` / `repo_search` / `repo_explain` / `repo_deps`; tools register only when the launch project has `.indexer-cli`
 - `src/antigravity-auth` — `antigravity` custom provider with Google Antigravity OAuth login, startup account list, auth.json-only runtime account loading, `/antigravity-add-account` OAuth append into rotation, `/antigravity-account` status display, account rotation/failover, Antigravity plus Gemini CLI model registration, and streaming through the Cloud Code Assist unified gateway
 - `src/opencode-import` — `/opencode-import` for bounded migration of supported OpenCode OpenAI/Codex, GitHub Copilot, Z.ai, and Antigravity credentials into Pi; existing entries are preserved unless `--force` is passed
@@ -24,7 +25,19 @@ This package keeps shared Pi tools as ordinary source folders under `src/` and r
 
 `index.ts` is intentionally only a thin auto-discovery shim that re-exports `src/index.ts`. There is no `pi.extensions` manifest here, so local Pi auto-discovery loads the suite once via `~/.pi/agent/extensions/pi-tools-suite/index.ts` and does not double-register tools.
 
-Registration order is preserved in `src/index.ts`: coding-discipline, ast-grep, async-subagents, lsp, comment-checker, session-name, repo-discovery command/tool gate, antigravity-auth provider, OpenCode import, todo, model-tools, usage, web-search, dcp, prompt-commands, skill-installer, credential-firewall, then codex-reasoning-fix. Tool metadata and active model-specific tool sets have two modes: standard and repo-aware. When `.indexer-cli` enables `repo_*`, those tools stay active ahead of overlapping lower-level aliases so the indexed discovery surface has priority.
+Registration order is preserved in `src/index.ts`: coding-discipline, ast-grep, async-subagents, lsp, comment-checker, session-name, session-recovery, repo-discovery command/tool gate, antigravity-auth provider, OpenCode import, todo, model-tools, usage, web-search, dcp, prompt-commands, skill-installer, credential-firewall, then codex-reasoning-fix. Tool metadata and active model-specific tool sets have two modes: standard and repo-aware. When `.indexer-cli` enables `repo_*`, those tools stay active ahead of overlapping lower-level aliases so the indexed discovery surface has priority.
+
+## Session recovery
+
+When context compaction obscures the task, start with `session_overview`, inspect a
+relevant ID with `session_read_section`, and use `session_search` once a concrete
+phrase, path, symbol, tool, or error is known. `session_recovery_context` is the
+compact convenience view for original/latest user instructions, file evidence,
+recent errors, pending calls, and the last meaningful action. All four tools read
+through Pi's active `SessionManager`; they do not accept arbitrary session paths.
+They default to the active branch, while `scope: "all"` includes abandoned branches.
+See [`docs/session-recovery.md`](docs/session-recovery.md) for the full contract and
+limits.
 
 ## Disabling modules
 

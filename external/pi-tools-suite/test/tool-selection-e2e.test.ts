@@ -373,6 +373,10 @@ The earlier checkout investigation is closed, and I am about to begin the next i
 
 const TRIVIAL_CHAT_PROMPT = "In one short sentence, what does JSON stand for?";
 
+const SESSION_RECOVERY_PROMPT = `
+My working context was aggressively compressed and I no longer remember the task.
+I do not know a reliable phrase to search for. Use the appropriate raw-session recovery tool first, and stop immediately after that first tool call.`;
+
 describe("repo-aware tool-selection live e2e", () => {
 	for (const variant of FOCUSED_PAYMENT_BEHAVIOR_PROMPTS) {
 		e2eTest(`uses repo_search for a single semantic discovery when repo_* tools are available (${variant.name})`, async () => {
@@ -495,6 +499,13 @@ describe("repo-aware tool-selection live e2e", () => {
 			expect(summary).not.toContain("DISPOSABLE_LOG_LINE_777");
 			expect(summary).not.toContain("Date.now");
 			expect(summary).not.toContain("Math.random");
+		});
+	}, E2E_TIMEOUT_MS);
+
+	e2eTest("starts unknown-query context recovery with session_overview", async () => {
+		await withFixtureProject({ indexed: false }, async (projectDir) => {
+			const result = await runPiToolSelectionE2E(projectDir, SESSION_RECOVERY_PROMPT, "session overview recovery selection");
+			expect(toolCallNames(result.events)[0]).toBe("session_overview");
 		});
 	}, E2E_TIMEOUT_MS);
 

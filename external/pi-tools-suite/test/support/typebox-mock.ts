@@ -11,6 +11,7 @@ export function createTypeboxMock(overrides: Record<string, unknown> = {}) {
 			Unknown: (options?: any) => ({ kind: "unknown", options }),
 			Union: (items: any, options?: any) => ({ kind: "union", items, options }),
 			Literal: (value: any, options?: any) => ({ kind: "literal", value, options }),
+			Unsafe: (schema: any) => ({ kind: "unsafe", ...schema }),
 			...overrides,
 		},
 	};
