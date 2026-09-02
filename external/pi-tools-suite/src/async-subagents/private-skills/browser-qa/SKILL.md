@@ -24,12 +24,18 @@ the requested target in the browser.
 
 ## Workflow
 
-Treat target discovery as a 30-second preflight and invoke the runner within 45
-seconds of starting. Use at most one runner invocation unless the task explicitly
-requests multiple auth profiles. If you cannot identify a reachable target and
-a supported deterministic assertion inside that preflight, return a structured
-`BLOCKED` result immediately. Do not consume the launcher budget on further
-source reading, server polling, capability probing, or retries.
+Treat target discovery as a 30-second preflight and begin browser execution within
+45 seconds of starting. For a verification task, use at most one actual `run`
+browser execution per profile. Metadata/preparation commands such as `profiles`
+and form-auth `scaffold` do not count as browser verification runs. For an
+explicit exploratory/manual-QA task, use at most three `run` rounds, give each a
+unique `--run-id`, bound each with `--runner-timeout-ms 60000`, and let each round
+test one concrete hypothesis learned from the prior evidence. Stop earlier once
+the requested behavior is explained or no new supported hypothesis remains. If
+you cannot identify a reachable target and a supported deterministic assertion
+inside the preflight, return a structured `BLOCKED` result immediately. Do not
+consume the launcher budget on open-ended source reading, server polling,
+capability probing, or retries.
 
 1. Resolve `scripts/browser-qa-runner.mjs` relative to this skill.
 2. Use the launcher-provided `$PI_SUBAGENT_AGENT_DIR/browser-qa/` workspace.
@@ -56,15 +62,27 @@ source reading, server polling, capability probing, or retries.
    operations documented below; it does not accept expressions or scripts.
 6. Run public QA with
    `node <runner> run --base-url <url> --flow <flow.jsonc>`. The URL's exact
-   origin becomes the fail-closed allowlist. Only for authenticated QA, add
-   `--profile <id>`; the selected profile then owns the URL and allowlist.
+   origin becomes the fail-closed allowlist. When the real app requires known
+   API/CDN origins, add repeatable `--allow-origin <exact-origin>` flags. Each
+   value must be an exact `http(s)` origin with no path, credentials, wildcard,
+   or inferred sibling domain; undeclared origins remain blocked. Only for
+   authenticated QA, add `--profile <id>`; the selected profile then owns the
+   URL and allowlist.
    Profile id, URL, and flow path are non-secret; never pass credentials as
    arguments or environment variables.
 7. Report deterministic assertions and every artifact returned by the runner.
-   For each screenshot, video, trace, or retained download, emit a separate clickable Markdown
-   link using its `uri` and also show its absolute `path`. Do this for failed
-   runs too whenever `artifacts` is present; never report only `evidenceDir`.
-   Visual inspection supplements assertions; it does not replace them.
+   For each screenshot, video, trace, or retained download, emit a separate
+   clickable Markdown link using its `uri` and also show its absolute `path`.
+   Do this for failed runs too whenever `artifacts` is present; never report only
+   `evidenceDir`.
+   When screenshots are present, inspect at least one representative meaningful
+   PNG directly with the `read` tool on its absolute path before claiming visual
+   QA. Inspect additional screenshots when they represent materially different
+   states or popups. Record `visualInspection: inspected` plus the inspected
+   paths and concrete findings. If image reading is unavailable in the active
+   model, report `visualInspection: unavailable` and do not claim a visual pass;
+   deterministic assertions may still be reported separately. Visual inspection
+   supplements assertions; it does not replace them.
 
 ## Scenario design
 
@@ -84,11 +102,14 @@ source reading, server polling, capability probing, or retries.
   animation/debounce. Set flow `timeoutMs` only as high as the target
   legitimately needs.
 - The runner waits after every visible interaction until the document is ready,
-  requests started by the interaction have finished, and common visible busy
+  observes requests started by the interaction for a bounded readiness window,
+  and waits for common visible busy
   markers (including `aria-busy`, progress bars, loading/spinner/skeleton test
-  ids and classes) disappear. It then keeps the stable state on video for 500
-  ms. A busy page that does not settle within `timeoutMs` fails instead of
-  continuing against a skeleton. For an app-specific loader not covered by
+  ids and classes) to disappear. EventSource/WebSocket traffic is excluded and
+  a long-poll/background request cannot pin readiness for the full flow timeout;
+  visible busy UI can. It then keeps the stable state on video for 500 ms. A
+  busy page that does not settle within `timeoutMs` fails instead of continuing
+  against a skeleton. For an app-specific loader not covered by
   those conventions, add an explicit `waitFor`/`assertHidden` for that loader
   and assert the loaded content before interacting with it.
 - Recorded pointer actions are annotated automatically: clicks and double-clicks
@@ -101,7 +122,8 @@ source reading, server polling, capability probing, or retries.
   pointer input, and clears before the runner's post-action stable interval
   completes.
 - Place `authRejectedIf` immediately after navigation or any transition that
-  may reveal expired authentication.
+  may reveal expired authentication. It must declare `urlIncludes` or a locator;
+  an empty rejection check is invalid.
 - Never weaken an assertion merely to make a failing run pass. If the observed
   product behavior differs from the expectation, preserve the failure evidence
   and report the mismatch.
@@ -120,7 +142,7 @@ Supported actions:
   `uncheck`, `selectOption`, `wheel`, `evaluate`, `dragTo`, `uploadFiles`,
   `openPopup`, `download`
 - assertions: `assertVisible`, `assertHidden`, `assertEnabled`,
-  `assertDisabled`, `assertChecked`, `assertUnchecked`, `assertText`,
+  `assertDisabled`, `assertChecked`, `assertUnchecked`, `assertText`, `assertTextContent`,
   `assertValue`, `assertAttribute`, `assertCount`, `assertURL`,
   `assertDOMMetric`
 - evidence/auth: `screenshot`, `authRejectedIf`
@@ -128,6 +150,9 @@ Supported actions:
 Locators accept one of `testId`, `role` (plus optional `name`), `label`,
 `placeholder`, `text`, or `css`; add `exact: true` where useful. String
 assertions require exactly one of `equals` or `includes`.
+`assertText` matches visible, user-facing `innerText` and therefore fails for a
+hidden locator. Use `assertTextContent` only when raw DOM text, including hidden
+content, is intentionally the oracle.
 `assertAttribute` additionally requires a bounded `attribute` name and is
 useful for `aria-*`, `data-*`, `href`, and similar observable state. All
 assertions retry until `timeoutMs` and report generic failures without exposing
@@ -208,7 +233,11 @@ oracle. Raw JavaScript remains intentionally unsupported.
 ```jsonc
 {
   "viewport": { "width": 844, "height": 847 },
-  "environment": { "locale": "en-GB", "timezoneId": "Europe/London", "colorScheme": "dark" },
+  "environment": {
+    "locale": "en-GB",
+    "timezoneId": "Europe/London",
+    "colorScheme": "dark"
+  },
   "steps": [
     { "action": "goto", "path": "/settings" },
     { "action": "authRejectedIf", "urlIncludes": "/login" },
@@ -216,7 +245,11 @@ oracle. Raw JavaScript remains intentionally unsupported.
       "action": "assertVisible",
       "locator": { "role": "heading", "name": "Settings", "exact": true }
     },
-    { "action": "wheel", "locator": { "css": ".settings-panel" }, "deltaY": 500 },
+    {
+      "action": "wheel",
+      "locator": { "css": ".settings-panel" },
+      "deltaY": 500
+    },
     {
       "action": "assertDOMMetric",
       "locator": { "css": ".settings-panel" },
@@ -226,9 +259,17 @@ oracle. Raw JavaScript remains intentionally unsupported.
     {
       "action": "click",
       "locator": { "testId": "save-settings" },
-      "expectResponse": { "path": "/api/settings", "method": "PUT", "status": 200 }
+      "expectResponse": {
+        "path": "/api/settings",
+        "method": "PUT",
+        "status": 200
+      }
     },
-    { "action": "assertText", "locator": { "testId": "toast" }, "includes": "Saved" },
+    {
+      "action": "assertText",
+      "locator": { "testId": "toast" },
+      "includes": "Saved"
+    },
     { "action": "screenshot", "name": "settings-saved" }
   ]
 }
@@ -301,6 +342,8 @@ After any runner invocation that actually performed browser testing, include
 all non-empty `artifacts.screenshots`, `artifacts.videos`, and
 `artifacts.traces`, and `artifacts.downloads` groups in the final response.
 These links are mandatory so the user can open the evidence directly.
+Also include `visualInspection` with `inspected` or `unavailable`; never infer a
+visual pass from a successful runner status alone.
 
 See `references/qa-auth.example.jsonc`, `references/qa-flow.example.jsonc`,
 `references/qa-design.md`, and `references/auth-scaffold-spec.md`.

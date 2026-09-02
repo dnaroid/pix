@@ -470,7 +470,7 @@ describe.serial("subagent type config", () => {
 		expect(resolved.task.thinking).toBe("low");
 		expect(resolved.fallbackModels).toEqual(["openai-codex/gpt-5.6-luna"]);
 		expect(resolved.task.tools).toEqual(["read", "grep", "bash"]);
-		expect(resolved.timeoutMs).toBe(120_000);
+		expect(resolved.timeoutMs).toBe(300_000);
 		expect(resolved.isolatedSkills).toEqual([privateSkill]);
 		expect(fs.existsSync(privateSkill)).toBe(true);
 		expect(fs.existsSync(path.join(path.dirname(privateSkill), "references", "qa-design.md"))).toBe(true);

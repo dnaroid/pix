@@ -125,6 +125,7 @@ exports.chromium = {
           environment: { locale: options.locale, timezoneId: options.timezoneId, colorScheme: options.colorScheme, reducedMotion: options.reducedMotion },
         }) + "\\n");
         const videoPath = path.join(options.recordVideo?.dir || process.cwd(), "generated.webm");
+        let storageStateCalls = 0;
         const contextListeners = new Map();
         const onContext = (event, listener) => contextListeners.set(event, [...(contextListeners.get(event) || []), listener]);
         const offContext = (event, listener) => contextListeners.set(event, (contextListeners.get(event) || []).filter((entry) => entry !== listener));
@@ -143,6 +144,11 @@ exports.chromium = {
               request() { return request("https://staging.example.test/api"); },
               async abort() { throw new Error("allowed-origin request was blocked"); },
               async continue({ headers } = {}) { fs.writeFileSync(path.join(process.cwd(), "allowed-route-headers"), JSON.stringify(headers || {})); },
+            });
+            await handler({
+              request() { return request("https://api.example.test/data"); },
+              async abort() { fs.writeFileSync(path.join(process.cwd(), "api-route-blocked"), "yes"); },
+              async continue() { fs.writeFileSync(path.join(process.cwd(), "api-route-allowed"), "yes"); },
             });
           },
           async routeWebSocket(_pattern, handler) {
@@ -163,7 +169,10 @@ exports.chromium = {
             if (arg && typeof arg.dragReplayMs === "number") fs.appendFileSync(path.join(process.cwd(), "init-scripts"), "dragReplayMs:" + arg.dragReplayMs + "\\n---\\n");
           },
           async storageState(options = {}) {
-            const state = { cookies: [{ name: "session", value: "top-secret-cookie", domain: "staging.example.test", path: "/" }], origins: [] };
+            storageStateCalls += 1;
+            const rotateAt = Number(process.env.BROWSER_QA_TEST_ROTATE_SECRET_AT || 0);
+            const value = rotateAt > 0 && storageStateCalls >= rotateAt ? "rotated-secret-cookie" : "top-secret-cookie";
+            const state = { cookies: [{ name: "session", value, domain: "staging.example.test", path: "/" }], origins: [] };
             if (options.path) fs.writeFileSync(options.path, JSON.stringify(state));
             return state;
           },
@@ -241,8 +250,20 @@ exports.chromium = {
                 }));
               },
               url() { return currentUrl; },
-              async content() { return "<html><body><h1>Settings</h1></body></html>"; },
+              async content() {
+                return process.env.BROWSER_QA_TEST_EXPOSE_ROTATED_SECRET === "1"
+                  ? "<html><body><h1>Settings</h1><div>rotated-secret-cookie</div></body></html>"
+                  : "<html><body><h1>Settings</h1></body></html>";
+              },
               locator(selector) {
+                if (selector === ".click-after-background") {
+                  const background = {
+                    url() { return "https://staging.example.test/api/preexisting-background"; },
+                    method() { return "GET"; },
+                    resourceType() { return "fetch"; },
+                  };
+                  emit("request", background);
+                }
                 const element = elementFor(selector);
                 const locator = {
                   selector,
@@ -285,12 +306,20 @@ exports.chromium = {
                       emit("response", { request() { return request; }, status() { return 204; } });
                     }
                     if (selector === ".loading-action") {
-                      const request = { url() { return "https://staging.example.test/api/loading"; }, method() { return "GET"; } };
+                      const request = { url() { return "https://staging.example.test/api/loading"; }, method() { return "GET"; }, resourceType() { return "fetch"; } };
                       emit("request", request);
                       setTimeout(() => {
                         emit("response", { request() { return request; }, status() { return 200; } });
                         emit("requestfinished", request);
                       }, 3);
+                    }
+                    if (selector === ".eventsource-action") {
+                      const request = { url() { return "https://staging.example.test/api/events"; }, method() { return "GET"; }, resourceType() { return "eventsource"; } };
+                      emit("request", request);
+                    }
+                    if (selector === ".never-ending-action") {
+                      const request = { url() { return "https://staging.example.test/api/background"; }, method() { return "GET"; }, resourceType() { return "fetch"; } };
+                      emit("request", request);
                     }
                     if (selector === ".unexpected-popup") {
                       const unexpectedVideoPath = path.join(options.recordVideo?.dir || process.cwd(), "unexpected.webm");
@@ -337,6 +366,8 @@ exports.chromium = {
                   async evaluate(callback, argument) { return callback(element, argument); },
                   async dragTo(destination, options) { fs.appendFileSync(path.join(process.cwd(), "page-actions"), "drag:" + selector + "->" + destination.selector + ":" + JSON.stringify(options) + "\\n"); },
                   async setInputFiles(files) { fs.appendFileSync(path.join(process.cwd(), "page-actions"), "upload:" + selector + ":" + files.map((file) => file.name + "=" + file.buffer.toString("utf8")).join(",") + "\\n"); },
+                  async isVisible() { return selector !== ".hidden-text"; },
+                  async innerText() { return nextAssertionPoll(selector + ":innerText") > 1 ? "ready" : "pending"; },
                   async textContent() { return nextAssertionPoll(selector + ":text") > 1 ? "ready" : "pending"; },
                   async getAttribute(name) { return nextAssertionPoll(selector + ":" + name) > 1 ? "ready" : "pending"; },
                   async waitFor() {},
@@ -521,6 +552,32 @@ describe("private browser QA runner", () => {
 		const missingBaseUrl = run(project, ["run", "--flow", flow], agentDir);
 		expect(missingBaseUrl).toMatchObject({ code: 1, json: { status: "QA_RUN_FAILED", profile: "public" } });
 		expect(missingBaseUrl.json.reason).toContain("--base-url is required");
+	});
+
+	test("supports explicit additional origins for public QA and rejects non-origin values", () => {
+		const project = tempProject();
+		const agentDir = createBrowserQaAgent(project);
+		installFakePlaywright(project);
+		const flow = writeAgentFlow(agentDir, JSON.stringify({ steps: [{ action: "goto", path: "/public" }] }));
+
+		const defaultRun = run(project, ["run", "--base-url", "https://staging.example.test", "--flow", flow, "--run-id", "origin-default"], agentDir);
+		expect(defaultRun).toMatchObject({ code: 0, json: { status: "QA_PASSED" } });
+		expect(fs.existsSync(path.join(project, "api-route-blocked"))).toBe(true);
+
+		fs.rmSync(path.join(project, "api-route-blocked"), { force: true });
+		const allowedRun = run(project, [
+			"run", "--base-url", "https://staging.example.test", "--allow-origin", "https://api.example.test",
+			"--flow", flow, "--run-id", "origin-extra",
+		], agentDir);
+		expect(allowedRun).toMatchObject({ code: 0, json: { status: "QA_PASSED" } });
+		expect(fs.existsSync(path.join(project, "api-route-allowed"))).toBe(true);
+
+		const rejected = run(project, [
+			"run", "--base-url", "https://staging.example.test", "--allow-origin", "https://api.example.test/v1",
+			"--flow", flow, "--run-id", "origin-invalid",
+		], agentDir);
+		expect(rejected).toMatchObject({ code: 1, json: { status: "QA_RUN_FAILED", profile: "public" } });
+		expect(rejected.json.reason).toContain("exact origin");
 	});
 
 	test("scaffolds form auth with private placeholders and blocks use until the user fills them", () => {
@@ -782,6 +839,70 @@ describe("private browser QA runner", () => {
 		expect(waits.filter((value) => value === 500).length).toBe(2);
 	});
 
+	test("does not hang on long-lived or never-ending background requests after an action", () => {
+		const project = tempProject();
+		const agentDir = createBrowserQaAgent(project);
+		installFakePlaywright(project);
+		const flow = writeAgentFlow(agentDir, JSON.stringify({
+			timeoutMs: 900,
+			steps: [
+				{ action: "goto", path: "/public" },
+				{ action: "click", locator: { css: ".eventsource-action" } },
+				{ action: "click", locator: { css: ".never-ending-action" } },
+			],
+		}));
+		const startedAt = Date.now();
+		const result = run(project, ["run", "--base-url", "https://staging.example.test", "--flow", flow, "--run-id", "background-network"], agentDir);
+		expect(result).toMatchObject({ code: 0, json: { status: "QA_PASSED" } });
+		expect(Date.now() - startedAt).toBeLessThan(2_500);
+	});
+
+	test("ignores a preexisting background request when waiting for a later interaction", () => {
+		const project = tempProject();
+		const agentDir = createBrowserQaAgent(project);
+		installFakePlaywright(project);
+		const flow = writeAgentFlow(agentDir, JSON.stringify({
+			timeoutMs: 700,
+			steps: [
+				{ action: "goto", path: "/public" },
+				{ action: "click", locator: { css: ".click-after-background" } },
+			],
+		}));
+		const result = run(project, [
+			"run", "--base-url", "https://staging.example.test", "--flow", flow,
+			"--run-id", "preexisting-background",
+		], agentDir);
+		expect(result).toMatchObject({ code: 0, json: { status: "QA_PASSED" } });
+	});
+
+	test("assertText requires visible rendered text while assertTextContent can inspect hidden DOM text", () => {
+		const project = tempProject();
+		const agentDir = createBrowserQaAgent(project);
+		installFakePlaywright(project);
+		const visibleFlow = writeAgentFlow(agentDir, JSON.stringify({ timeoutMs: 10, steps: [
+			{ action: "assertText", locator: { css: ".hidden-text" }, equals: "ready" },
+		] }), "visible-text.jsonc");
+		const visibleResult = run(project, ["run", "--base-url", "https://staging.example.test", "--flow", visibleFlow, "--run-id", "visible-text"], agentDir);
+		expect(visibleResult).toMatchObject({ code: 1, json: { status: "QA_RUN_FAILED" } });
+		expect(visibleResult.json.reason).toContain("text assertion failed");
+
+		const contentFlow = writeAgentFlow(agentDir, JSON.stringify({ steps: [
+			{ action: "assertTextContent", locator: { css: ".hidden-text" }, equals: "ready" },
+		] }), "text-content.jsonc");
+		const contentResult = run(project, ["run", "--base-url", "https://staging.example.test", "--flow", contentFlow, "--run-id", "text-content"], agentDir);
+		expect(contentResult).toMatchObject({ code: 0, json: { status: "QA_PASSED" } });
+	});
+
+	test("rejects an authRejectedIf step with no rejection condition", () => {
+		const project = tempProject();
+		const agentDir = createBrowserQaAgent(project);
+		installFakePlaywright(project);
+		const flow = writeAgentFlow(agentDir, JSON.stringify({ steps: [{ action: "authRejectedIf" }] }));
+		const result = run(project, ["run", "--base-url", "https://staging.example.test", "--flow", flow, "--run-id", "bad-auth-check"], agentDir);
+		expect(result).toMatchObject({ code: 1, json: { status: "QA_RUN_FAILED" } });
+		expect(result.json.reason).toContain("requires urlIncludes or locator");
+	});
+
 	test("installs context-wide click visualization and a paced drag replay", () => {
 		const project = tempProject();
 		const agentDir = createBrowserQaAgent(project);
@@ -1009,6 +1130,36 @@ describe("private browser QA runner", () => {
 		expect(result.stdout).not.toContain("top-secret-cookie");
 	});
 
+	test("refreshes rotated authentication before evidence and fails closed on late rotation", () => {
+		const exposedProject = tempProject();
+		const exposedAgentDir = createBrowserQaAgent(exposedProject);
+		installFakePlaywright(exposedProject);
+		const exposedFlow = writeAgentFlow(exposedAgentDir, JSON.stringify({ steps: [
+			{ action: "goto", path: "/public" },
+			{ action: "screenshot", name: "unsafe-state" },
+		] }));
+		const exposed = run(exposedProject, [
+			"run", "--base-url", "https://staging.example.test", "--flow", exposedFlow, "--run-id", "rotated-exposed",
+		], exposedAgentDir, {
+			BROWSER_QA_TEST_ROTATE_SECRET_AT: "2",
+			BROWSER_QA_TEST_EXPOSE_ROTATED_SECRET: "1",
+		});
+		expect(exposed).toMatchObject({ code: 1, json: { status: "QA_RUN_FAILED", profile: "public", evidence: [] } });
+		expect(exposed.json.reason).toContain("rendered page content");
+		expect(exposed.stdout).not.toContain("rotated-secret-cookie");
+
+		const lateProject = tempProject();
+		const lateAgentDir = createBrowserQaAgent(lateProject);
+		installFakePlaywright(lateProject);
+		const lateFlow = writeAgentFlow(lateAgentDir, JSON.stringify({ steps: [{ action: "goto", path: "/public" }] }));
+		const late = run(lateProject, [
+			"run", "--base-url", "https://staging.example.test", "--flow", lateFlow, "--run-id", "rotated-late",
+		], lateAgentDir, { BROWSER_QA_TEST_ROTATE_SECRET_AT: "4" });
+		expect(late).toMatchObject({ code: 1, json: { status: "QA_RUN_FAILED", profile: "public", evidence: [] } });
+		expect(late.json.reason).toContain("changed after the final evidence safety check");
+		expect(late.stdout).not.toContain("rotated-secret-cookie");
+	});
+
 	test("rejects unsafe evaluate scripts and out-of-range viewports", () => {
 		const project = tempProject();
 		const agentDir = createBrowserQaAgent(project);
@@ -1128,6 +1279,17 @@ describe("private browser QA runner", () => {
 		const storageFlow = writeAgentFlow(storageAgentDir, JSON.stringify({ steps: [{ action: "goto", path: "/settings" }] }));
 		const storageResult = run(storageProject, ["run", "--profile", "admin", "--flow", storageFlow, "--run-id", "storage"], storageAgentDir);
 		expect(storageResult).toMatchObject({ code: 0, json: { status: "QA_PASSED", profile: "admin" } });
+
+		const parentCookieProject = tempProject();
+		const parentCookieAgentDir = createBrowserQaAgent(parentCookieProject);
+		writeAuth(parentCookieProject, { admin: profile("parent-cookie-secret", {
+			allowedOrigins: ["https://staging.example.test", "https://app.example.test"],
+			auth: { type: "cookie", cookies: [{ name: "session", value: "parent-cookie-secret", domain: ".example.test", path: "/" }] },
+		}) });
+		installFakePlaywright(parentCookieProject);
+		const parentCookieFlow = writeAgentFlow(parentCookieAgentDir, JSON.stringify({ steps: [{ action: "goto", path: "/settings" }] }));
+		const parentCookieResult = run(parentCookieProject, ["run", "--profile", "admin", "--flow", parentCookieFlow, "--run-id", "parent-cookie"], parentCookieAgentDir);
+		expect(parentCookieResult).toMatchObject({ code: 0, json: { status: "QA_PASSED", profile: "admin" } });
 	});
 
 	test("rejects permissive auth files, symlinked flows, and evidence collisions", () => {

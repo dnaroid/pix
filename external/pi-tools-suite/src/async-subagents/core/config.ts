@@ -218,7 +218,7 @@ const BUILTIN_CONFIG: SubagentConfig = {
 			model: "zai/glm-5.3-flash",
 			fallbackModels: ["openai-codex/gpt-5.6-luna"],
 			thinking: "low",
-			timeoutMs: 120_000,
+			timeoutMs: 300_000,
 			tools: ["read", "grep", "bash"],
 			isolatedSkills: [getBrowserQaSkillPath()],
 		},

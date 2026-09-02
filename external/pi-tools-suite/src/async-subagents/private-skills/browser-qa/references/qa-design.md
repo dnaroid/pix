@@ -19,6 +19,12 @@ proof.
 When verifying a fix, prefer a focused regression flow over a broad tour of the
 application. If multiple independent states matter, assert each one explicitly.
 
+For explicit exploratory/manual QA, keep exploration bounded rather than turning
+it into an open-ended crawl. Run at most three minimal rounds. Each round should
+start from one concrete hypothesis, produce a deterministic observation plus a
+meaningful screenshot, and use that evidence to decide whether another round is
+justified. Verification tasks remain one browser run per profile.
+
 ## Choose resilient locators
 
 Prefer locators that match how users and accessibility APIs identify controls:
@@ -42,13 +48,14 @@ by an assertion is enough. Use `waitFor` only when the next operation depends on
 a distinct attached/detached/visible/hidden transition.
 
 After navigation and visible interactions, the runner also waits for DOM
-readiness, completion of requests started by that action, disappearance of
-common visible `aria-busy`/progress/loading/spinner/skeleton markers, and a
-500 ms stable interval. If those signals remain busy through the flow timeout,
-the run fails rather than interacting with a loading shell. This is a safe
-baseline, not an application-specific oracle: explicitly wait for a custom
-loader to become hidden and assert the loaded content when the application uses
-different readiness semantics.
+readiness, tracks requests causally started by that action through a bounded
+readiness window, waits for common visible
+`aria-busy`/progress/loading/spinner/skeleton markers, and keeps a 500 ms stable
+interval. EventSource/WebSocket traffic is ignored, and a long poll is not
+allowed to pin the entire flow timeout. A visible busy indicator may still hold
+readiness until `timeoutMs`. This is a safe baseline, not an application-specific
+oracle: explicitly wait for a custom loader to become hidden and assert the
+loaded content when the application uses different readiness semantics.
 
 `waitForTimeout` is bounded to five seconds and should be exceptional—for a
 known animation, debounce, or externally scheduled transition with no
@@ -58,7 +65,9 @@ behavior. If a normal operation legitimately needs more time, adjust the flow's
 
 All assertion actions retry until that timeout. This makes an action followed
 directly by `assertText`, `assertVisible`, `assertURL`, or another assertion
-safe for asynchronously rendered outcomes. Use `assertAttribute` for
+safe for asynchronously rendered outcomes. `assertText` requires the locator to
+be visible and matches rendered `innerText`; use `assertTextContent` only when
+hidden/raw DOM text is deliberately part of the oracle. Use `assertAttribute` for
 observable state such as `aria-expanded`, `aria-invalid`, or `data-state`
 instead of reading DOM state through executable JavaScript.
 
@@ -176,6 +185,12 @@ they explain the chronology without becoming screenshot or assertion oracles.
 
 Assertions determine pass/fail; evidence explains it. Preserve and link every
 artifact group returned on both passed and failed runs.
+
+For visual QA, do not stop at artifact generation. Open at least one meaningful
+PNG with the model's image-capable `read` path and inspect layout, clipping,
+overlap, state styling, and other visual defects relevant to the scenario. If
+the active model cannot read images, explicitly report visual inspection as
+unavailable rather than treating deterministic assertions as a visual pass.
 
 ## Diagnose failures without weakening the test
 

@@ -17,6 +17,7 @@ const QA_WORKSPACE_RELATIVE = "browser-qa";
 const EVIDENCE_RELATIVE = "evidence";
 const UI_READY_SETTLE_MS = 500;
 const UI_READY_POLL_MS = 100;
+const ACTION_REQUEST_WAIT_MAX_MS = 2_000;
 const FORM_VIDEO_STEP_DELAY_MS = UI_READY_SETTLE_MS;
 const POPUP_VIDEO_SETTLE_MS = 250;
 const CLICK_VIDEO_DELAY_MS = 120;
@@ -160,7 +161,7 @@ async function main() {
 	const args = parseArgs(rawArgs);
 	const selected = args.profile
 		? selectProfile(readAuthConfig(cwd, true, true).profiles, args.profile)
-		: createPublicProfile(args.baseUrl);
+		: createPublicProfile(args.baseUrl, args.allowOrigin);
 	const profileId = selected.id;
 	const profile = selected.profile;
 	const secrets = collectSecrets(profile.auth);
@@ -249,6 +250,9 @@ async function runQa({ cwd, agentDir, args, profileId, profile, deadline, progre
 		runtimeSecrets.push(...collectStorageStateSecrets(initialStorageState));
 		await runStage(progress, "trace_start", deadline, () => context.tracing.start({ screenshots: true, snapshots: true, sources: false }), profileId);
 		await runStage(progress, "flow_execute", deadline, () => executeFlow({ context, page, baseURL, evidenceDir, flow, allowedOrigins, profileId, secrets: runtimeSecrets, observations, videos }), profileId);
+		await runStage(progress, "storage_state_refresh", deadline, async () => {
+			if (await refreshRuntimeSecrets(context, runtimeSecrets)) discardRecordedVideos(videos);
+		}, profileId);
 		await runStage(progress, "secret_exposure_check", deadline, () => assertBrowserDoesNotExposeSecrets(context, page, runtimeSecrets, profileId), profileId);
 		await runStage(progress, "final_screenshot", deadline, () => page.screenshot({ path: path.join(evidenceDir, "final.png"), fullPage: true }), profileId);
 	} catch (error) {
@@ -256,15 +260,25 @@ async function runQa({ cwd, agentDir, args, profileId, profile, deadline, progre
 		failure = error;
 		if (page && !page.isClosed() && !error.suppressEvidence) {
 			try {
+				await runCleanupStage(progress, "failure_storage_state_refresh", async () => {
+					if (await refreshRuntimeSecrets(context, runtimeSecrets)) discardRecordedVideos(videos);
+				});
+				await runCleanupStage(progress, "failure_secret_exposure_check", () => assertBrowserDoesNotExposeSecrets(context, page, runtimeSecrets, profileId));
 				await runCleanupStage(progress, "failure_screenshot", () => page.screenshot({ path: path.join(evidenceDir, "failure.png"), fullPage: true }));
-			} catch { /* best effort */ }
+			} catch (evidenceError) {
+				if (evidenceError instanceof QaStatusError && evidenceError.suppressEvidence) {
+					failure = evidenceError;
+					outcome = evidenceError.status;
+				}
+			}
 		}
 	} finally {
 		const cleanupDeadline = Date.now() + CLEANUP_TIMEOUT_MS;
+		let discoveredLateSecrets = false;
 		if (context) {
 			try {
 				const finalStorageState = await runCleanupStage(progress, "storage_state_finalize", () => context.storageState(), cleanupDeadline);
-				runtimeSecrets.push(...collectStorageStateSecrets(finalStorageState));
+				discoveredLateSecrets = mergeRuntimeSecrets(runtimeSecrets, collectStorageStateSecrets(finalStorageState));
 			} catch { /* best effort */ }
 			try {
 				await runCleanupStage(progress, "trace_stop", () => context.tracing.stop({ path: tracePath }), cleanupDeadline);
@@ -293,6 +307,14 @@ async function runQa({ cwd, agentDir, args, profileId, profile, deadline, progre
 			} catch { /* best effort */ }
 		}
 		await runCleanupStage(progress, "browser_close", () => browser.close(), cleanupDeadline).catch(() => {});
+		if (discoveredLateSecrets) {
+			removeVisualEvidence(evidenceDir);
+			if (!failure) {
+				outcome = "failed";
+				failure = new QaStatusError("QA_RUN_FAILED", "authentication changed after the final evidence safety check; visual evidence was discarded", 1, profileId);
+				failure.suppressEvidence = true;
+			}
+		}
 	}
 	try {
 		for (const name of fs.readdirSync(evidenceDir).filter((name) => /^download-[A-Za-z0-9._-]+\.bin$/.test(name))) {
@@ -886,23 +908,29 @@ function authPlaceholderCount(profile) {
 	)).length;
 }
 
-function createPublicProfile(rawBaseUrl) {
+function createPublicProfile(rawBaseUrl, extraAllowedOrigins = []) {
 	if (typeof rawBaseUrl !== "string") {
 		throw new QaStatusError("QA_RUN_FAILED", "--base-url is required when running without --profile", 1, "public");
 	}
 	try {
 		const url = new URL(rawBaseUrl);
 		if (!/^https?:$/.test(url.protocol) || url.username || url.password) throw new Error();
+		const allowedOrigins = [url.origin];
+		for (const raw of Array.isArray(extraAllowedOrigins) ? extraAllowedOrigins : []) {
+			const extra = new URL(raw);
+			if (!/^https?:$/.test(extra.protocol) || extra.username || extra.password || extra.href !== `${extra.origin}/`) throw new Error();
+			allowedOrigins.push(extra.origin);
+		}
 		return {
 			id: "public",
 			profile: {
 				baseUrl: url.href,
-				allowedOrigins: [url.origin],
+				allowedOrigins: [...new Set(allowedOrigins)],
 				auth: { type: "none" },
 			},
 		};
 	} catch {
-		throw new QaStatusError("QA_RUN_FAILED", "public --base-url must be an http(s) URL without embedded credentials", 1, "public");
+		throw new QaStatusError("QA_RUN_FAILED", "public --base-url and --allow-origin values must be http(s) URLs without credentials; --allow-origin must be an exact origin", 1, "public");
 	}
 }
 
@@ -1050,6 +1078,15 @@ async function executeFlow({ context, page, baseURL, evidenceDir, flow, allowedO
 	let capturedPopup;
 	let unexpectedPopupError;
 	const readinessTrackers = new Map();
+	let discardFutureVideos = false;
+	const refreshSecrets = async () => {
+		const changed = await refreshRuntimeSecrets(context, secrets);
+		if (changed) {
+			discardFutureVideos = true;
+			discardRecordedVideos(videos);
+		}
+		return changed;
+	};
 	const readinessFor = (candidate) => {
 		if (!readinessTrackers.has(candidate)) readinessTrackers.set(candidate, createPageReadinessTracker(candidate));
 		return readinessTrackers.get(candidate);
@@ -1078,6 +1115,9 @@ async function executeFlow({ context, page, baseURL, evidenceDir, flow, allowedO
 		}
 		const { scope, ownerPage } = await resolveStepTarget({ page, popups, step, allowedOrigins, profileId, index });
 		const locator = step.locator === undefined ? undefined : resolveLocator(scope, step.locator, profileId, index);
+		const readinessTracker = readinessFor(ownerPage);
+		const requestScope = UI_READY_ACTIONS.has(step.action) ? readinessTracker.beginActionScope() : undefined;
+		try {
 		switch (step.action) {
 			case "goto": {
 				const target = typeof step.url === "string" ? step.url : step.path;
@@ -1149,7 +1189,7 @@ async function executeFlow({ context, page, baseURL, evidenceDir, flow, allowedO
 					[, popup] = await Promise.all([requireLocator(locator, profileId, index).click({ delay: CLICK_VIDEO_DELAY_MS }), popupPromise]);
 					popup.setDefaultTimeout(timeout);
 					popup.setDefaultNavigationTimeout(timeout);
-					popupVideo = { name: `video-popup-${step.name}.webm`, video: popup.video(), discard: false };
+					popupVideo = { name: `video-popup-${step.name}.webm`, video: popup.video(), discard: discardFutureVideos };
 					videos.push(popupVideo);
 					await popup.waitForLoadState("domcontentloaded", { timeout });
 					await waitForUiReady({
@@ -1234,6 +1274,15 @@ async function executeFlow({ context, page, baseURL, evidenceDir, flow, allowedO
 				const target = requireLocator(locator, profileId, index);
 				await retryAssertion({
 					page: ownerPage, timeout, profileId, index, reason: "text assertion failed",
+					check: async () => (await target.isVisible()) && matches(await target.innerText()),
+				});
+				break;
+			}
+			case "assertTextContent": {
+				const matches = expectedStringMatcher(step, profileId, index, "text content");
+				const target = requireLocator(locator, profileId, index);
+				await retryAssertion({
+					page: ownerPage, timeout, profileId, index, reason: "text content assertion failed",
 					check: async () => matches((await target.textContent()) ?? ""),
 				});
 				break;
@@ -1290,6 +1339,7 @@ async function executeFlow({ context, page, baseURL, evidenceDir, flow, allowedO
 				break;
 			}
 			case "authRejectedIf": {
+				if (typeof step.urlIncludes !== "string" && !locator) throw flowError(profileId, index, "authRejectedIf requires urlIncludes or locator");
 				const urlRejected = typeof step.urlIncludes === "string" && scope.url().includes(step.urlIncludes);
 				const locatorRejected = locator ? await locator.isVisible().catch(() => false) : false;
 				if (!urlRejected && !locatorRejected) break;
@@ -1298,21 +1348,34 @@ async function executeFlow({ context, page, baseURL, evidenceDir, flow, allowedO
 			case "screenshot": {
 				const name = typeof step.name === "string" ? step.name : `step-${index + 1}`;
 				if (!isSafeName(name)) throw flowError(profileId, index, "screenshot name is invalid");
+				await refreshSecrets();
 				await assertBrowserDoesNotExposeSecrets(context, page, secrets, profileId);
 				await ownerPage.screenshot({ path: path.join(evidenceDir, `${name}.png`), fullPage: step.fullPage !== false });
 				break;
 			}
 			default: throw flowError(profileId, index, `unsupported action: ${step.action}`);
 		}
+		} catch (error) {
+			requestScope?.stopCapture();
+			requestScope?.dispose();
+			throw error;
+		}
 		if (UI_READY_ACTIONS.has(step.action)) {
-			await waitForUiReady({
-				scope,
-				tracker: readinessFor(ownerPage),
-				timeout,
-				failure: () => flowError(profileId, index, "page did not finish loading"),
-			});
+			try {
+				await waitForUiReady({
+					scope,
+					tracker: readinessTracker,
+					requestScope,
+					timeout,
+					failure: () => flowError(profileId, index, "page did not finish loading"),
+				});
+			} finally {
+				requestScope?.stopCapture();
+				requestScope?.dispose();
+			}
 		}
 		if (unexpectedPopupError) throw unexpectedPopupError;
+		await refreshSecrets();
 		await assertBrowserDoesNotExposeSecrets(context, page, secrets, profileId);
 	}
 	} finally {
@@ -1323,15 +1386,36 @@ async function executeFlow({ context, page, baseURL, evidenceDir, flow, allowedO
 
 function createPageReadinessTracker(page) {
 	const pendingRequests = new Set();
-	const onRequest = (request) => pendingRequests.add(request);
-	const onRequestDone = (request) => pendingRequests.delete(request);
+	const actionScopes = new Set();
+	const onRequest = (request) => {
+		if (isLongLivedRequest(request)) return;
+		pendingRequests.add(request);
+		for (const scope of actionScopes) {
+			if (scope.capturing) scope.pendingRequests.add(request);
+		}
+	};
+	const onRequestDone = (request) => {
+		pendingRequests.delete(request);
+		for (const scope of actionScopes) scope.pendingRequests.delete(request);
+	};
 	page.on("request", onRequest);
 	page.on("requestfinished", onRequestDone);
 	page.on("requestfailed", onRequestDone);
 	return {
 		page,
 		pendingRequests,
+		beginActionScope() {
+			const scope = {
+				pendingRequests: new Set(),
+				capturing: true,
+				stopCapture() { scope.capturing = false; },
+				dispose() { actionScopes.delete(scope); },
+			};
+			actionScopes.add(scope);
+			return scope;
+		},
 		dispose() {
+			actionScopes.clear();
 			page.off("request", onRequest);
 			page.off("requestfinished", onRequestDone);
 			page.off("requestfailed", onRequestDone);
@@ -1339,8 +1423,18 @@ function createPageReadinessTracker(page) {
 	};
 }
 
-async function waitForUiReady({ scope, tracker, timeout, failure }) {
+function isLongLivedRequest(request) {
+	try {
+		return ["eventsource", "websocket"].includes(request.resourceType?.());
+	} catch {
+		return false;
+	}
+}
+
+async function waitForUiReady({ scope, tracker, requestScope = undefined, timeout, failure }) {
 	const deadline = Date.now() + timeout;
+	const pendingRequests = requestScope?.pendingRequests ?? tracker.pendingRequests;
+	const requestDeadline = Date.now() + Math.min(ACTION_REQUEST_WAIT_MAX_MS, Math.max(0, timeout - UI_READY_SETTLE_MS));
 	try {
 		await scope.waitForLoadState("domcontentloaded", { timeout });
 	} catch {
@@ -1350,10 +1444,12 @@ async function waitForUiReady({ scope, tracker, timeout, failure }) {
 		const remaining = deadline - Date.now();
 		if (remaining <= 0) throw failure();
 		const hasBusyIndicator = await hasVisibleBusyIndicator(scope);
-		if (tracker.pendingRequests.size === 0 && !hasBusyIndicator) {
+		const requestsStillBlock = pendingRequests.size > 0 && Date.now() < requestDeadline;
+		if (!requestsStillBlock && !hasBusyIndicator) {
 			await tracker.page.waitForTimeout(Math.min(UI_READY_SETTLE_MS, remaining));
 			const stillBusy = await hasVisibleBusyIndicator(scope);
-			if (tracker.pendingRequests.size === 0 && !stillBusy) return;
+			const requestsStillBlockAfterSettle = pendingRequests.size > 0 && Date.now() < requestDeadline;
+			if (!requestsStillBlockAfterSettle && !stillBusy) return;
 			continue;
 		}
 		await tracker.page.waitForTimeout(Math.min(UI_READY_POLL_MS, remaining));
@@ -1813,13 +1909,20 @@ async function applyFormAuth(page, auth, allowedOrigins, profileId) {
 		const timeout = Math.min(finitePositive(auth.timeoutMs) ?? 15_000, 60_000);
 		page.setDefaultTimeout(timeout);
 		page.setDefaultNavigationTimeout(timeout);
-		await page.goto(auth.loginUrl, { timeout });
-		await waitForUiReady({
-			scope: page,
-			tracker: readinessTracker,
-			timeout,
-			failure: () => authError(profileId, "form page did not finish loading"),
-		});
+		const loginRequestScope = readinessTracker.beginActionScope();
+		try {
+			await page.goto(auth.loginUrl, { timeout });
+			await waitForUiReady({
+				scope: page,
+				tracker: readinessTracker,
+				requestScope: loginRequestScope,
+				timeout,
+				failure: () => authError(profileId, "form page did not finish loading"),
+			});
+		} finally {
+			loginRequestScope.stopCapture();
+			loginRequestScope.dispose();
+		}
 		for (const field of auth.fields) {
 			if (!isObject(field) || typeof field.selector !== "string" || typeof field.value !== "string") {
 				throw authError(profileId, "form fields must contain selector/value strings");
@@ -1827,20 +1930,27 @@ async function applyFormAuth(page, auth, allowedOrigins, profileId) {
 			await page.locator(field.selector).fill(field.value);
 			await page.waitForTimeout(FORM_VIDEO_STEP_DELAY_MS);
 		}
-		await page.locator(auth.submitSelector).click({ delay: CLICK_VIDEO_DELAY_MS });
-		if (isObject(auth.success) && typeof auth.success.url === "string") await page.waitForURL(auth.success.url, { timeout });
-		if (isObject(auth.success) && typeof auth.success.selector === "string") {
-			await page.locator(auth.success.selector).waitFor({ timeout, state: validLocatorState(auth.success.state) });
+		const submitRequestScope = readinessTracker.beginActionScope();
+		try {
+			await page.locator(auth.submitSelector).click({ delay: CLICK_VIDEO_DELAY_MS });
+			if (isObject(auth.success) && typeof auth.success.url === "string") await page.waitForURL(auth.success.url, { timeout });
+			if (isObject(auth.success) && typeof auth.success.selector === "string") {
+				await page.locator(auth.success.selector).waitFor({ timeout, state: validLocatorState(auth.success.state) });
+			}
+			if (!isObject(auth.success) || (typeof auth.success.url !== "string" && typeof auth.success.selector !== "string")) {
+				throw authError(profileId, "form success.url or success.selector is required");
+			}
+			await waitForUiReady({
+				scope: page,
+				tracker: readinessTracker,
+				requestScope: submitRequestScope,
+				timeout,
+				failure: () => authError(profileId, "authenticated page did not finish loading"),
+			});
+		} finally {
+			submitRequestScope.stopCapture();
+			submitRequestScope.dispose();
 		}
-		if (!isObject(auth.success) || (typeof auth.success.url !== "string" && typeof auth.success.selector !== "string")) {
-			throw authError(profileId, "form success.url or success.selector is required");
-		}
-		await waitForUiReady({
-			scope: page,
-			tracker: readinessTracker,
-			timeout,
-			failure: () => authError(profileId, "authenticated page did not finish loading"),
-		});
 	} catch (error) {
 		if (error instanceof QaStatusError) throw error;
 		throw authError(profileId, "form login was rejected or did not reach the configured success condition");
@@ -1931,7 +2041,10 @@ function cookieAllowed(cookie, allowedOrigins) {
 	if (typeof cookie.url === "string") return isAllowedUrl(cookie.url, allowedOrigins);
 	if (typeof cookie.domain !== "string") return false;
 	const domain = cookie.domain.replace(/^\./, "").toLowerCase();
-	return allowedOrigins.some((origin) => new URL(origin).hostname.toLowerCase() === domain);
+	return allowedOrigins.some((origin) => {
+		const host = new URL(origin).hostname.toLowerCase();
+		return host === domain || (domain.includes(".") && host.endsWith(`.${domain}`));
+	});
 }
 
 function loadPlaywright(cwd) {
@@ -1990,13 +2103,18 @@ function findPackageJson(startFile) {
 }
 
 function parseArgs(values) {
-	const result = {};
+	const result = { allowOrigin: [] };
 	for (let index = 0; index < values.length; index += 2) {
 		const flag = values[index];
 		const value = values[index + 1];
 		if (!flag?.startsWith("--") || value === undefined) throw new QaStatusError("QA_RUN_FAILED", `invalid argument: ${flag ?? "(missing)"}`, 1);
 		const key = flag.slice(2).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
-		if (!["profile", "flow", "baseUrl", "runId", "runnerTimeoutMs"].includes(key)) throw new QaStatusError("QA_RUN_FAILED", `unknown option: ${flag}`, 1);
+		if (!["profile", "flow", "baseUrl", "allowOrigin", "runId", "runnerTimeoutMs"].includes(key)) throw new QaStatusError("QA_RUN_FAILED", `unknown option: ${flag}`, 1);
+		if (key === "allowOrigin") {
+			result.allowOrigin.push(value);
+			continue;
+		}
+		if (result[key] !== undefined) throw new QaStatusError("QA_RUN_FAILED", `duplicate option: ${flag}`, 1);
 		result[key] = value;
 	}
 	return result;
@@ -2249,6 +2367,23 @@ function collectStorageStateSecrets(state) {
 		}
 	}
 	return expandSecretForms(output);
+}
+
+async function refreshRuntimeSecrets(context, runtimeSecrets) {
+	if (!context || typeof context.storageState !== "function") return false;
+	return mergeRuntimeSecrets(runtimeSecrets, collectStorageStateSecrets(await context.storageState()));
+}
+
+function mergeRuntimeSecrets(runtimeSecrets, candidates) {
+	const known = new Set(runtimeSecrets);
+	let added = false;
+	for (const candidate of candidates) {
+		if (!candidate || known.has(candidate)) continue;
+		known.add(candidate);
+		runtimeSecrets.push(candidate);
+		added = true;
+	}
+	return added;
 }
 
 function expandSecretForms(values) {
@@ -2568,6 +2703,10 @@ function removeVisualEvidence(evidenceDir) {
 	for (const name of fs.readdirSync(evidenceDir)) {
 		if (/\.(?:png|webm|zip|bin)$/.test(name)) fs.rmSync(path.join(evidenceDir, name), { force: true });
 	}
+}
+
+function discardRecordedVideos(videos) {
+	for (const entry of videos) entry.discard = true;
 }
 
 function writeJsonPrivate(file, value) {
