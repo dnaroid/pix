@@ -1,5 +1,5 @@
 import { applyOutputFilters, type PixConfig } from "../../config.js";
-import { renderMarkdownTextLines } from "../../markdown-format.js";
+import { renderMarkdownTextLines, type RenderedMarkdownDiagramSegment } from "../../markdown-format.js";
 import type { Theme } from "../../theme.js";
 import { attachImageClickTargets } from "../screen/image-click-targets.js";
 import { APP_ICONS } from "../icons.js";
@@ -61,12 +61,17 @@ export function renderConversationEntry(entry: Entry, width: number, options: Co
 					line.syntaxHighlight,
 					[
 						...(line.segments ?? []),
+						...diagramStyledSegments(line.diagramSegments, options.colors),
 						...(line.links?.map((link) => ({ ...link, foreground: options.colors.info, underline: true })) ?? []),
 					],
 					line.links,
 				),
 				...(line.copyText === undefined ? {} : { copyText: line.copyText }),
 				...(line.continuesOnNextLine ? { continuesOnNextLine: true } : {}),
+				...(line.codeBlock ? {
+					colorOverride: options.colors.codeBlockForeground,
+					backgroundOverride: options.colors.codeBlockBackground,
+				} : {}),
 			}),
 		);
 
@@ -132,17 +137,39 @@ function renderAssistantLines(text: string, width: number, options: Conversation
 		const existingSegments = line.segments?.map((segment) => ({ ...segment, start: segment.start + contentLeft, end: segment.end + contentLeft })) ?? [];
 		const links = line.links?.map((link) => ({ ...link, start: link.start + contentLeft, end: link.end + contentLeft })) ?? [];
 		const linkSegments: StyledSegment[] = links.map((link) => ({ start: link.start, end: link.end, foreground: options.colors.info, underline: true }));
-		const allSegments = headingSegment ? [headingSegment, ...existingSegments, ...linkSegments] : [...existingSegments, ...linkSegments];
+		const diagramSegments = diagramStyledSegments(line.diagramSegments, options.colors, contentLeft);
+		const allSegments = headingSegment
+			? [headingSegment, ...existingSegments, ...diagramSegments, ...linkSegments]
+			: [...existingSegments, ...diagramSegments, ...linkSegments];
 		lines.push({
 			text: padHorizontalText(line.text, width),
 			...(line.copyText === undefined ? {} : { copyText: line.copyText }),
 			...(line.continuesOnNextLine ? { continuesOnNextLine: true } : {}),
-			colorOverride: options.colors.assistantForeground,
-			backgroundOverride: options.colors.assistantMessageBackground,
+			colorOverride: line.codeBlock ? options.colors.codeBlockForeground : options.colors.assistantForeground,
+			backgroundOverride: line.codeBlock ? options.colors.codeBlockBackground : options.colors.assistantMessageBackground,
 			...(allSegments.length > 0 ? { segments: allSegments } : {}),
 			...(links.length > 0 ? { links } : {}),
 			...(line.syntaxHighlight ? { syntaxHighlight: line.syntaxHighlight } : {}),
 		});
 	}
 	return lines;
+}
+
+function diagramStyledSegments(
+	segments: readonly RenderedMarkdownDiagramSegment[] | undefined,
+	colors: Theme["colors"],
+	offset = 0,
+): StyledSegment[] {
+	return (segments ?? []).map((segment): StyledSegment => {
+		const range = { start: segment.start + offset, end: segment.end + offset };
+		switch (segment.class) {
+			case "border":
+			case "edgeLabel":
+				return { ...range, foreground: colors.muted };
+			case "edge":
+				return { ...range, foreground: colors.accent };
+			case "title":
+				return { ...range, foreground: colors.accent, bold: true };
+		}
+	});
 }

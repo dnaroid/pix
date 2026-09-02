@@ -248,6 +248,123 @@ describe("formatMarkdownTables", () => {
 });
 
 describe("renderMarkdownTextLines", () => {
+	it("renders completed Mermaid fences as Unicode diagrams", () => {
+		const lines = renderMarkdownTextLines([
+			"```mermaid",
+			"flowchart LR",
+			"A[Start] --> B[End]",
+			"```",
+		].join("\n"), 80);
+
+		assert.deepEqual(lines.map((line) => line.text), [
+			"┌───────┐    ┌─────┐",
+			"│ Start ├───▶│ End │",
+			"└───────┘    └─────┘",
+		]);
+		assert.deepEqual(lines[0]?.diagramSegments, [
+			{ start: 0, end: 9, class: "border" },
+			{ start: 13, end: 20, class: "border" },
+		]);
+		assert(lines[1]?.diagramSegments?.some((segment) => segment.class === "edge"));
+	});
+
+	it("renders an unclosed Mermaid fence as streaming input", () => {
+		const complete = renderMarkdownTextLines("```mermaid\nflowchart LR\nA --> B\n```", 80);
+		const streaming = renderMarkdownTextLines("```mermaid\nflowchart LR\nA --> B", 80);
+
+		assert.deepEqual(streaming, complete);
+	});
+
+	it("renders best-effort Mermaid art when parsing produces warnings", () => {
+		const lines = renderMarkdownTextLines("```mermaid\nflowchart LR\nA[Start] -->\n```", 80);
+
+		assert.deepEqual(lines.map((line) => line.text), [
+			"┌───────┐",
+			"│ Start │",
+			"└───────┘",
+		]);
+	});
+
+	it("compacts a wide Mermaid sequence diagram within the available width", () => {
+		const lines = renderMarkdownTextLines([
+			"```mermaid",
+			"sequenceDiagram",
+			"  autonumber",
+			"  participant App as Мобильное приложение",
+			"  participant API as Backend API",
+			"  participant Resolver as Audio Resolver",
+			"  participant Storage as Хранилище Opus",
+			"  participant FFmpeg as Decoder / Encoder",
+			"  participant Cache as Bundle Cache",
+			"  participant Player as Мобильный плеер",
+			"  App->>API: POST /audio/bundles<br/>[ser/soy, tener/tengo, ir/voy]",
+			"  API->>Resolver: Найти исходные записи",
+			"  Resolver->>Storage: Получить отдельные .opus-файлы",
+			"  Storage-->>Resolver: soy.opus, tengo.opus, voy.opus",
+			"```",
+		].join("\n"), 70);
+
+		assert(lines.every((line) => stringDisplayWidth(line.text) <= 70));
+		assert.equal(lines.some((line) => line.text.includes("```")), false);
+		assert.equal(lines.some((line) => line.text.includes("<br")), false);
+		assert(lines.some((line) => line.text.includes("Мобильное приложение")));
+		assert(lines.some((line) => line.text.includes("Мобильный плеер")));
+		assert(lines.some((line) => line.text === "P1 (App) — Мобильное приложение"));
+		assert(lines.some((line) => line.text === "Messages"));
+		assert(lines.some((line) => line.text.startsWith("1. POST /audio/bundles")));
+		assert(lines.some((line) => line.diagramSegments?.some((segment) => segment.class === "edge")));
+	});
+
+	it("numbers compacted sequence messages when autonumber is absent", () => {
+		const lines = renderMarkdownTextLines([
+			"```mermaid",
+			"sequenceDiagram",
+			"  participant Client as Very long client display name",
+			"  participant Server as Very long server display name",
+			"  Client->>Server: send request",
+			"```",
+		].join("\n"), 40);
+
+		assert(lines.some((line) => line.text.includes("[1]")));
+		assert(lines.some((line) => line.text === "1. send request"));
+		assert.equal(lines.some((line) => line.text.includes("```")), false);
+	});
+
+	it("paginates a wide Mermaid diagram within the available width", () => {
+		const lines = renderMarkdownTextLines([
+			"```mermaid",
+			"flowchart LR",
+			"A[Authentication] --> B[Authorization] --> C[Persistence] --> D[Notifications]",
+			"```",
+		].join("\n"), 40);
+		const titles = lines.filter((line) => line.text.startsWith("Mermaid ")).map((line) => line.text);
+
+		assert(titles.length > 1);
+		assert(titles[0]?.endsWith("→"));
+		assert(titles[titles.length - 1]?.endsWith("←"));
+		assert.deepEqual(lines.find((line) => line.text === titles[0])?.diagramSegments, [
+			{ start: 0, end: titles[0]?.length, class: "title" },
+		]);
+		assert(lines.every((line) => stringDisplayWidth(line.text) <= 40));
+		assert.equal(lines.some((line) => line.text.includes("```")), false);
+	});
+
+	it("keeps Mermaid source when useful pagination is not possible", () => {
+		const source = "```mermaid\nflowchart LR\nA[Start] --> B[End]\n```";
+		const lines = renderMarkdownTextLines(source, 19);
+
+		assert.deepEqual(lines.map((line) => line.text), ["flowchart LR", "A[Start] --> B[End]"]);
+		assert(lines.every((line) => line.codeBlock));
+	});
+
+	it("keeps unsupported Mermaid source visible", () => {
+		const source = "```mermaid\nnonsense\nA --> B\n```";
+		const lines = renderMarkdownTextLines(source, 80);
+
+		assert.deepEqual(lines.map((line) => line.text), ["nonsense", "A --> B"]);
+		assert(lines.every((line) => line.codeBlock));
+	});
+
 	it("keeps inline markdown highlighting across soft wraps", () => {
 		const samples = [
 			{ text: "prefix `inline code crossing words` suffix", color: THEMES.dark.colors.success },
@@ -291,14 +408,13 @@ describe("renderMarkdownTextLines", () => {
 	});
 
 	it("keeps fenced-code strings and comments highlighted across soft wraps", () => {
-		const [fence, ...bodyAndFence] = renderMarkdownTextLines([
+		const body = renderMarkdownTextLines([
 			"```ts",
 			'const message = "a very long string crossing words"; // trailing comment crossing too',
 			"```",
 		].join("\n"), 14);
-		const body = bodyAndFence.slice(0, -1);
 
-		assert.equal(fence?.text, "```ts");
+		assert(body.every((line) => line.codeBlock));
 		const colors = body.flatMap((line) => syntaxHighlightSegmentsForLine(line.text, line.syntaxHighlight!, THEMES.dark.colors))
 			.map((segment) => segment.foreground);
 		assert(colors.filter((color) => color === THEMES.dark.colors.success).length > 1);
@@ -308,21 +424,44 @@ describe("renderMarkdownTextLines", () => {
 	it("uses the fenced code language for code block contents", () => {
 		const lines = renderMarkdownTextLines("```typescript\nconst answer = true;\n```", 80);
 
-		assert.deepEqual(lines.map((line) => line.syntaxHighlight?.language), ["markdown", "typescript", "markdown"]);
+		assert.deepEqual(lines.map((line) => line.syntaxHighlight?.language), ["typescript"]);
+		assert.deepEqual(lines.map((line) => line.codeBlock), [true]);
 	});
 
 	it("does not render markdown emphasis inside unknown fenced code blocks", () => {
 		const lines = renderMarkdownTextLines("```unknown\n**literal**\n```\n**bold**", 80);
 
-		assert.equal(lines[1]?.text, "**literal**");
-		assert.equal(lines[1]?.syntaxHighlight, undefined);
-		assert.equal(lines[3]?.syntaxHighlight?.language, "markdown");
+		assert.equal(lines[0]?.text, "**literal**");
+		assert.equal(lines[0]?.syntaxHighlight, undefined);
+		assert.equal(lines[0]?.codeBlock, true);
+		assert.equal(lines[1]?.text, "bold");
+		assert.equal(lines[1]?.syntaxHighlight?.language, "markdown");
+		assert.equal(lines[1]?.codeBlock, undefined);
 	});
 
 	it("applies the provided syntax start offset", () => {
-		const [line] = renderMarkdownTextLines("```ts", 80, 2);
+		const [line] = renderMarkdownTextLines("```ts\nconst answer = true;", 80, 2);
 
 		assert.equal(line?.syntaxHighlight?.start, 2);
+	});
+
+	it("hides ordinary fence markers while retaining literal body content", () => {
+		const lines = renderMarkdownTextLines("before\n```text\n?\n```\nafter", 80);
+
+		assert.deepEqual(lines.map((line) => line.text), ["before", "?", "after"]);
+		assert.deepEqual(lines.map((line) => line.codeBlock), [undefined, true, undefined]);
+		assert.equal(lines.some((line) => line.text.includes("```")), false);
+	});
+
+	it("hides tilde fences and preserves their unsupported-language body literally", () => {
+		const lines = renderMarkdownTextLines("~~~unknown\n**literal**\n~~~", 80);
+
+		assert.deepEqual(lines, [{ text: "**literal**", codeBlock: true }]);
+	});
+
+	it("keeps empty and just-opened code blocks visually present", () => {
+		assert.deepEqual(renderMarkdownTextLines("```text\n```", 80), [{ text: "", codeBlock: true }]);
+		assert.deepEqual(renderMarkdownTextLines("```text", 80), [{ text: "", codeBlock: true }]);
 	});
 
 	it("does not render markdown reference metadata", () => {

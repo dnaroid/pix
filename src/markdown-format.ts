@@ -1,3 +1,4 @@
+import { render as renderMermaid, type Cls as MermaidSpanClass, type MermaidArt } from "grok-mermaid";
 import { displayGraphemes, expandTabs, stringDisplayWidth } from "./terminal-width.js";
 import {
 	syntaxHighlightLanguageForMarkdownFence,
@@ -27,10 +28,18 @@ export type RenderedMarkdownTextLine = {
 	text: string;
 	copyText?: string;
 	continuesOnNextLine?: boolean;
+	codeBlock?: true;
 	segments?: readonly { start: number; end: number; bold: true }[] | undefined;
 	links?: readonly RenderedMarkdownLink[] | undefined;
 	syntaxHighlight?: SyntaxLineHighlight | undefined;
+	diagramSegments?: readonly RenderedMarkdownDiagramSegment[] | undefined;
 	heading?: boolean;
+};
+
+export type RenderedMarkdownDiagramSegment = {
+	start: number;
+	end: number;
+	class: Exclude<MermaidSpanClass, "none" | "text">;
 };
 
 export type RenderMarkdownTextLinesOptions = {
@@ -62,6 +71,11 @@ type ActiveMarkdownFence = MarkdownFence & {
 };
 
 const MIN_TRAILING_WORD_WIDTH_TO_REBALANCE = 5;
+const MERMAID_CACHE_LIMIT = 100;
+const MERMAID_MAX_PANELS = 4;
+const MERMAID_MIN_PANEL_WIDTH = 40;
+const MERMAID_SEQUENCE_MESSAGE_OPERATORS = ["-->>", "->>", "--x", "-x", "--)", "-)", "-->", "->"] as const;
+const mermaidRenderCache = new Map<string, MermaidArt | null>();
 
 export function formatMarkdownTables(text: string, maxWidth?: number): string {
 	const lines = text.split("\n");
@@ -160,14 +174,41 @@ export function renderMarkdownLine(text: string, start = 0): RenderedMarkdownLin
 export function renderMarkdownTextLines(text: string, width: number, start = 0, options: RenderMarkdownTextLinesOptions = {}): RenderedMarkdownTextLine[] {
 	const lines: RenderedMarkdownTextLine[] = [];
 	let fence: ActiveMarkdownFence | undefined;
+	let fenceHasBodyLine = false;
 	const formattedText = formatMarkdownTables(sanitizeMarkdownText(text), width);
 	if (formattedText.length === 0) return [];
+	const rawLines = formattedText.split("\n");
 
-	for (const rawLine of formattedText.split("\n")) {
+	for (let lineIndex = 0; lineIndex < rawLines.length;) {
+		const rawLine = rawLines[lineIndex] ?? "";
 		const nextFence = markdownFence(rawLine);
+		if (!fence && nextFence && isMermaidFence(nextFence)) {
+			const diagram = renderMermaidBlock(rawLines, lineIndex, nextFence, width);
+			if (diagram) {
+				lines.push(...diagram.lines);
+				lineIndex = diagram.nextLineIndex;
+				continue;
+			}
+		}
+
 		const closesFence = Boolean(fence && nextFence && fence.marker === nextFence.marker && nextFence.length >= fence.length);
 		const opensFence = !fence && nextFence !== undefined;
-		const syntaxHighlight = markdownLineSyntaxHighlight(fence, Boolean(opensFence || closesFence), start);
+		if (opensFence && nextFence) {
+			fence = { ...nextFence, language: syntaxHighlightLanguageForMarkdownFence(nextFence.info) };
+			fenceHasBodyLine = false;
+			lineIndex += 1;
+			continue;
+		}
+		if (closesFence) {
+			if (!fenceHasBodyLine) lines.push({ text: "", codeBlock: true });
+			fence = undefined;
+			fenceHasBodyLine = false;
+			lineIndex += 1;
+			continue;
+		}
+
+		const syntaxHighlight = markdownLineSyntaxHighlight(fence, false, start);
+		const codeBlock = fence !== undefined;
 
 		const isHeadingLine = !fence && /^\s{0,3}#{1,6}\s/.test(rawLine);
 		const markdownLine = syntaxHighlight?.language === "markdown" || isHeadingLine ? renderMarkdownLine(rawLine) : undefined;
@@ -189,21 +230,267 @@ export function renderMarkdownTextLines(text: string, width: number, start = 0, 
 				text: wrapped.text,
 				...(wrapped.copyText === undefined ? {} : { copyText: wrapped.copyText }),
 				...(wrapped.continuesOnNextLine ? { continuesOnNextLine: true } : {}),
+				...(codeBlock ? { codeBlock: true } : {}),
 				...(wrapped.segments.length > 0 ? { segments: wrapped.segments } : {}),
 				...(wrapped.links && wrapped.links.length > 0 ? { links: wrapped.links } : {}),
 				...(wrappedSyntaxHighlight ? { syntaxHighlight: wrappedSyntaxHighlight } : {}),
 				...(isHeadingLine ? { heading: true } : {}),
 			});
 		}
+		if (codeBlock) fenceHasBodyLine = true;
+		lineIndex += 1;
+	}
+	if (fence && !fenceHasBodyLine) lines.push({ text: "", codeBlock: true });
 
-		if (opensFence && nextFence) {
-			fence = { ...nextFence, language: syntaxHighlightLanguageForMarkdownFence(nextFence.info) };
-		} else if (closesFence) {
-			fence = undefined;
+	return lines;
+}
+
+function renderMermaidBlock(
+	rawLines: readonly string[],
+	openingLineIndex: number,
+	openingFence: MarkdownFence,
+	width: number,
+): { lines: RenderedMarkdownTextLine[]; nextLineIndex: number } | undefined {
+	let closingLineIndex: number | undefined;
+	for (let index = openingLineIndex + 1; index < rawLines.length; index += 1) {
+		const candidate = markdownFence(rawLines[index] ?? "");
+		if (candidate && candidate.marker === openingFence.marker && candidate.length >= openingFence.length) {
+			closingLineIndex = index;
+			break;
 		}
 	}
 
+	const sourceEnd = closingLineIndex ?? rawLines.length;
+	const source = rawLines.slice(openingLineIndex + 1, sourceEnd).join("\n");
+	let art = cachedMermaidRender(source);
+	if (!art) return undefined;
+
+	const availableWidth = Math.max(1, width);
+	let participantLegend: readonly string[] = [];
+	let messageLegend: readonly string[] = [];
+	if (art.width > availableWidth) {
+		const compactSequence = compactMermaidSequence(source);
+		if (compactSequence) {
+			const compactArt = cachedMermaidRender(compactSequence.source);
+			if (compactArt && compactArt.width < art.width) {
+				art = compactArt;
+				participantLegend = compactSequence.participantLegend;
+				messageLegend = compactSequence.messageLegend;
+			}
+		}
+	}
+	const panelStarts = mermaidPanelStarts(art.width, availableWidth);
+	if (panelStarts.length > 1 && (availableWidth < MERMAID_MIN_PANEL_WIDTH || panelStarts.length > MERMAID_MAX_PANELS)) {
+		return undefined;
+	}
+
+	return {
+		lines: [
+			...mermaidArtLines(art, availableWidth, panelStarts),
+			...mermaidLegendLines("Participants", participantLegend, availableWidth),
+			...mermaidLegendLines("Messages", messageLegend, availableWidth),
+		],
+		nextLineIndex: closingLineIndex === undefined ? rawLines.length : closingLineIndex + 1,
+	};
+}
+
+function compactMermaidSequence(
+	source: string,
+): { source: string; participantLegend: readonly string[]; messageLegend: readonly string[] } | undefined {
+	const lines = source.split("\n");
+	const header = lines.find((line) => line.trim().length > 0 && !line.trimStart().startsWith("%%"));
+	if (!header || !/^sequenceDiagram\s*$/iu.test(header.trim())) return undefined;
+
+	const participantLegend: string[] = [];
+	const messageLegend: string[] = [];
+	const autonumber = lines.some((line) => /^\s*autonumber(?:\s|$)/iu.test(line));
+	let participantNumber = 0;
+	let messageNumber = 0;
+	const compactLines = lines.map((line) => {
+		const match = /^(\s*)(participant|actor)\s+(\S+?)(?:\s+as\s+(.+?))?\s*$/iu.exec(line);
+		if (match) {
+			const [, indent = "", declaration = "participant", id = "", rawLabel] = match;
+			participantNumber += 1;
+			const marker = `P${participantNumber}`;
+			const label = rawLabel ? normalizeMermaidLegendLabel(rawLabel) : id;
+			participantLegend.push(`${marker} (${id}) — ${label}`);
+			return `${indent}${declaration} ${id} as ${marker}`;
+		}
+
+		const message = mermaidSequenceMessage(line);
+		if (!message) return line;
+		messageNumber += 1;
+		if (message.label.length === 0) return line;
+		messageLegend.push(`${messageNumber}. ${normalizeMermaidLegendLabel(message.label)}`);
+		return autonumber ? message.prefix : `${message.prefix}: [${messageNumber}]`;
+	});
+
+	return participantLegend.length > 0 || messageLegend.length > 0
+		? { source: compactLines.join("\n"), participantLegend, messageLegend }
+		: undefined;
+}
+
+function mermaidSequenceMessage(line: string): { prefix: string; label: string } | undefined {
+	for (const operator of MERMAID_SEQUENCE_MESSAGE_OPERATORS) {
+		const operatorIndex = line.indexOf(operator);
+		if (operatorIndex < 0) continue;
+		const colonIndex = line.indexOf(":", operatorIndex + operator.length);
+		const targetEnd = colonIndex < 0 ? line.length : colonIndex;
+		const from = line.slice(0, operatorIndex).trim();
+		const to = line.slice(operatorIndex + operator.length, targetEnd).trim();
+		if (!from || !to || /\s/u.test(from) || /\s/u.test(to)) return undefined;
+		return {
+			prefix: line.slice(0, targetEnd).trimEnd(),
+			label: colonIndex < 0 ? "" : line.slice(colonIndex + 1).trim(),
+		};
+	}
+	return undefined;
+}
+
+function normalizeMermaidLegendLabel(label: string): string {
+	const normalized = label
+		.replace(/<br\s*\/?\s*>/giu, " ")
+		.replace(/<\/?[A-Za-z][^>]*>/gu, "")
+		.replace(/^(?:"([\s\S]*)"|'([\s\S]*)')$/u, "$1$2")
+		.trim();
+	return normalized || label.trim();
+}
+
+function mermaidPanelStarts(artWidth: number, panelWidth: number): number[] {
+	if (artWidth <= panelWidth) return [0];
+	const overlap = Math.min(24, Math.max(8, Math.floor(panelWidth / 5)));
+	const stride = Math.max(1, panelWidth - overlap);
+	const panelCount = 1 + Math.ceil((artWidth - panelWidth) / stride);
+	return Array.from({ length: panelCount }, (_, index) => Math.min(index * stride, artWidth - panelWidth));
+}
+
+function mermaidArtLines(art: MermaidArt, width: number, panelStarts: readonly number[]): RenderedMarkdownTextLine[] {
+	if (panelStarts.length === 1) {
+		return art.plain.map((text, rowIndex) => {
+			const diagramSegments = mermaidDiagramSegments(text, art.styled[rowIndex] ?? []);
+			return { text, ...(diagramSegments.length > 0 ? { diagramSegments } : {}) };
+		});
+	}
+
+	const lines: RenderedMarkdownTextLine[] = [];
+	for (const [panelIndex, startColumn] of panelStarts.entries()) {
+		const continuesLeft = startColumn > 0;
+		const continuesRight = startColumn + width < art.width;
+		const title = `Mermaid ${panelIndex + 1}/${panelStarts.length}${continuesLeft ? " ←" : ""}${continuesRight ? " →" : ""}`;
+		lines.push({
+			text: title,
+			diagramSegments: [{ start: 0, end: title.length, class: "title" }],
+		});
+		for (const [rowIndex, text] of art.plain.entries()) {
+			lines.push(sliceMermaidDiagramRow(text, art.styled[rowIndex] ?? [], startColumn, width));
+		}
+	}
 	return lines;
+}
+
+function mermaidLegendLines(title: string, entries: readonly string[], width: number): RenderedMarkdownTextLine[] {
+	if (entries.length === 0) return [];
+	const lines: RenderedMarkdownTextLine[] = [{
+		text: title,
+		diagramSegments: [{ start: 0, end: title.length, class: "title" }],
+	}];
+	for (const entry of entries) {
+		for (const wrapped of wrapRenderedMarkdownLine({ text: entry, segments: [], links: [] }, width, {})) {
+			lines.push({
+				text: wrapped.text,
+				...(wrapped.continuesOnNextLine ? { continuesOnNextLine: true } : {}),
+			});
+		}
+	}
+	return lines;
+}
+
+function sliceMermaidDiagramRow(
+	text: string,
+	spans: MermaidArt["styled"][number],
+	startColumn: number,
+	width: number,
+): RenderedMarkdownTextLine {
+	const endColumn = startColumn + width;
+	const diagramSegments: RenderedMarkdownDiagramSegment[] = [];
+	let result = "";
+	let column = 0;
+	let spanIndex = 0;
+	let spanEnd = spans[0]?.text.length ?? 0;
+
+	for (const grapheme of displayGraphemes(text)) {
+		const nextColumn = column + grapheme.width;
+		if (nextColumn <= startColumn) {
+			column = nextColumn;
+			continue;
+		}
+		if (column >= endColumn) break;
+
+		while (spanIndex < spans.length - 1 && grapheme.start >= spanEnd) {
+			spanIndex += 1;
+			spanEnd += spans[spanIndex]?.text.length ?? 0;
+		}
+
+		const fullyVisible = column >= startColumn && nextColumn <= endColumn;
+		const chunk = fullyVisible
+			? grapheme.text
+			: " ".repeat(Math.max(0, Math.min(nextColumn, endColumn) - Math.max(column, startColumn)));
+		const chunkStart = result.length;
+		result += chunk;
+
+		const spanClass = spans[spanIndex]?.cls;
+		if (fullyVisible && spanClass && spanClass !== "none" && spanClass !== "text") {
+			const previous = diagramSegments.at(-1);
+			if (previous && previous.class === spanClass && previous.end === chunkStart) {
+				previous.end = result.length;
+			} else {
+				diagramSegments.push({ start: chunkStart, end: result.length, class: spanClass });
+			}
+		}
+		column = nextColumn;
+	}
+
+	return { text: result, ...(diagramSegments.length > 0 ? { diagramSegments } : {}) };
+}
+
+function cachedMermaidRender(source: string): MermaidArt | null {
+	if (mermaidRenderCache.has(source)) {
+		const cached = mermaidRenderCache.get(source) ?? null;
+		mermaidRenderCache.delete(source);
+		mermaidRenderCache.set(source, cached);
+		return cached;
+	}
+
+	let art: MermaidArt | null;
+	try {
+		art = renderMermaid(source.replace(/<br\s*\/?\s*>/giu, " "));
+	} catch {
+		art = null;
+	}
+	mermaidRenderCache.set(source, art);
+	if (mermaidRenderCache.size > MERMAID_CACHE_LIMIT) {
+		const oldestKey = mermaidRenderCache.keys().next().value;
+		if (oldestKey !== undefined) mermaidRenderCache.delete(oldestKey);
+	}
+	return art;
+}
+
+function mermaidDiagramSegments(text: string, spans: MermaidArt["styled"][number]): RenderedMarkdownDiagramSegment[] {
+	const segments: RenderedMarkdownDiagramSegment[] = [];
+	let start = 0;
+	for (const span of spans) {
+		const end = start + span.text.length;
+		if (start < text.length && span.cls !== "none" && span.cls !== "text") {
+			segments.push({ start, end: Math.min(end, text.length), class: span.cls });
+		}
+		start = end;
+	}
+	return segments;
+}
+
+function isMermaidFence(fence: MarkdownFence): boolean {
+	const token = fence.info.trim().split(/\s+/, 1)[0]?.toLowerCase().replace(/^[{.]+|[}.]+$/gu, "") ?? "";
+	return token === "mermaid";
 }
 
 export function markdownSyntaxHighlightsForText(text: string, startColumn = 0): ToolBodySyntaxHighlights {

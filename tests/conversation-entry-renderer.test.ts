@@ -111,6 +111,20 @@ describe("renderConversationEntry", () => {
 		assert.deepEqual(lines.map((line) => line.colorOverride), [THEMES.dark.colors.assistantForeground]);
 	});
 
+	it("applies theme colors to Mermaid diagrams in user and assistant messages", () => {
+		const text = "```mermaid\nflowchart LR\nA[Start] --> B[End]\n```";
+
+		for (const kind of ["user", "assistant"] as const) {
+			const lines = renderConversationEntry({ id: `${kind}-mermaid`, kind, text }, 80, renderOptions);
+			const connectorLine = lines.find((line) => line.text.includes("───▶"));
+			const edgeSegment = connectorLine?.segments?.find((segment) => segment.foreground === THEMES.dark.colors.accent);
+			const borderSegment = connectorLine?.segments?.find((segment) => segment.foreground === THEMES.dark.colors.muted);
+
+			assert.equal(connectorLine?.text.slice(edgeSegment?.start, edgeSegment?.end), "───▶");
+			assert.equal(connectorLine?.text.slice(borderSegment?.start, borderSegment?.end), "│");
+		}
+	});
+
 	it("renders long browser QA evidence links as clickable labels", () => {
 		const base = "file:///Volumes/128GBSSD/Projects/llm-wiki/.pi/subagents/a-very-long-browser-qa-run/evidence/public";
 		const lines = renderConversationEntry({
@@ -239,6 +253,21 @@ describe("renderConversationEntry", () => {
 		const lines = renderConversationEntry({ id: "user-1", kind: "user", text: "Use `code`." }, 40, renderOptions);
 
 		assert.deepEqual(lines[0]?.syntaxHighlight, { language: "markdown", start: 0 });
+	});
+
+	it("renders fenced code without markers using a distinct theme background", () => {
+		for (const entry of [
+			{ id: "user-code", kind: "user" as const, text: "```text\nplain user code\n```" },
+			{ id: "assistant-code", kind: "assistant" as const, text: "```text\nplain assistant code\n```" },
+		]) {
+			const lines = renderConversationEntry(entry, 40, renderOptions);
+
+			assert.equal(lines.length, 1);
+			assert.equal(lines[0]?.text.includes("```"), false);
+			assert.equal(lines[0]?.text.includes("plain"), true);
+			assert.equal(lines[0]?.colorOverride, THEMES.dark.colors.codeBlockForeground);
+			assert.equal(lines[0]?.backgroundOverride, THEMES.dark.colors.codeBlockBackground);
+		}
 	});
 
 	it("renders user messages in user color with a bubble background", () => {

@@ -21,6 +21,8 @@ export type Theme = {
 		assistantMessageBackground: string;
 		userMessageBackground: string;
 		thinkingMessageBackground: string;
+		codeBlockForeground: string;
+		codeBlockBackground: string;
 		inputCursorBackground: string;
 		popupForeground: string;
 		popupBackground: string;
@@ -79,6 +81,8 @@ export const THEMES: Record<ThemeName, Theme> = {
 			assistantMessageBackground: "",
 			userMessageBackground: "",
 			thinkingMessageBackground: "",
+			codeBlockForeground: "#e6edf3",
+			codeBlockBackground: "#2a2f36",
 			inputCursorBackground: "#7fb3c8",
 			popupForeground: "#e6edf3",
 			popupBackground: "#1e1e1e",
@@ -135,6 +139,8 @@ export const THEMES: Record<ThemeName, Theme> = {
 			assistantMessageBackground: "",
 			userMessageBackground: "",
 			thinkingMessageBackground: "",
+			codeBlockForeground: "#0f172a",
+			codeBlockBackground: "#f1f5f9",
 			inputCursorBackground: "#0284c7",
 			popupForeground: "#0f172a",
 			popupBackground: "#ffffff",
