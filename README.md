@@ -520,6 +520,7 @@ skills/                      packaged agent skills
 docs/                        release documentation
 tests/                       unit, integration, and PTY tests
 scripts/                     build, release, sync, and capture tooling
+acp/                         pix-acp: ACP adapter embedding pi into editors like Zed (own install; `npm run check:acp`)
 ```
 
 ---

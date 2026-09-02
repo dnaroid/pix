@@ -1,0 +1,37 @@
+{
+	"name": "pix-acp",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"description": "ACP (Agent Client Protocol) adapter that embeds the pix/pi coding agent into editors like Zed. Fork-in-progress of pi-acp with pix-specific integrations.",
+	"keywords": [
+		"agent-client-protocol",
+		"acp",
+		"pi",
+		"zed",
+		"coding-agent"
+	],
+	"license": "MIT",
+	"bin": {
+		"pix-acp": "./dist/main.js"
+	},
+	"engines": {
+		"node": ">=22.19.0"
+	},
+	"scripts": {
+		"dev": "tsx src/main.ts",
+		"build": "tsc -p tsconfig.json",
+		"typecheck": "tsc --noEmit -p tsconfig.json",
+		"test": "node --import tsx --test \"test/**/*.test.ts\"",
+		"check": "npm run typecheck && npm test"
+	},
+	"dependencies": {
+		"@agentclientprotocol/sdk": "1.4.0",
+		"@earendil-works/pi-coding-agent": "0.84.4"
+	},
+	"devDependencies": {
+		"@types/node": "24.12.4",
+		"tsx": "4.22.1",
+		"typescript": "5.9.3"
+	}
+}
