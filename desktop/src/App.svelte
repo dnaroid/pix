@@ -18,6 +18,7 @@
   } from "./lib/transcript";
   import { buildTabSessions, restoredTabSessionIds } from "./lib/session-tabs";
   import { parseElicitation, type ElicitationField } from "./lib/elicitation";
+  import ProjectTitlebar from "./components/ProjectTitlebar.svelte";
   import SessionTabs from "./components/SessionTabs.svelte";
   import SessionSelector from "./components/SessionSelector.svelte";
   import ErrorBanner from "./components/ErrorBanner.svelte";
@@ -421,7 +422,13 @@
 
 <svelte:head><title>Pix Desktop</title></svelte:head>
 
-<div class="grid h-full grid-rows-[54px_minmax(0,1fr)_36px] bg-background text-foreground max-[760px]:grid-rows-[48px_minmax(0,1fr)_32px]">
+<div class="grid h-full grid-rows-[36px_44px_minmax(0,1fr)_36px] bg-background text-foreground max-[760px]:grid-rows-[36px_42px_minmax(0,1fr)_32px]">
+  <ProjectTitlebar
+    {workspace}
+    disabled={promptRunning || operationRunning}
+    onChooseWorkspace={() => void chooseWorkspace()}
+  />
+
   <SessionTabs
     sessions={tabSessions}
     allSessionsCount={sessions.length}
@@ -486,11 +493,8 @@
     {changingConfig}
     {promptRunning}
     canRefresh={canUseSession}
-    {workspace}
-    {operationRunning}
     onSetConfig={(option, value) => void setConfig(option, value)}
     onRefresh={() => void refreshSessions()}
-    onChooseWorkspace={() => void chooseWorkspace()}
   />
 </div>
 

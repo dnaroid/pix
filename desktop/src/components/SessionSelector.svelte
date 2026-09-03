@@ -71,7 +71,7 @@
 <svelte:window onclick={handleWindowClick} onkeydown={handleWindowKeydown} />
 
 <div
-  class="absolute top-[47px] left-[18px] z-20 grid max-h-[min(480px,calc(100%-92px))] w-[min(430px,calc(100%-36px))] grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-md max-[760px]:left-3 max-[760px]:w-[calc(100%-24px)]"
+  class="absolute top-[73px] left-[18px] z-20 grid max-h-[min(480px,calc(100%-118px))] w-[min(430px,calc(100%-36px))] grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-md max-[760px]:top-[71px] max-[760px]:left-3 max-[760px]:w-[calc(100%-24px)]"
   role="dialog"
   aria-label="Select conversation"
   bind:this={selector}

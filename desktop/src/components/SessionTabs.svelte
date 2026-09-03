@@ -32,6 +32,7 @@
     if (Number.isNaN(date.valueOf())) return title;
     return `${title} · ${date.toLocaleString([], { dateStyle: "short", timeStyle: "short" })}`;
   }
+
 </script>
 
 <nav

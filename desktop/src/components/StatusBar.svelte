@@ -10,22 +10,16 @@
     changingConfig,
     promptRunning,
     canRefresh,
-    workspace,
-    operationRunning,
     onSetConfig,
     onRefresh,
-    onChooseWorkspace,
   }: {
     status: ConnectionStatus;
     configOptions: SessionConfigOption[];
     changingConfig: string | null;
     promptRunning: boolean;
     canRefresh: boolean;
-    workspace: string;
-    operationRunning: boolean;
     onSetConfig: (option: SessionConfigOption, value: string | boolean) => void;
     onRefresh: () => void;
-    onChooseWorkspace: () => void;
   } = $props();
 
   function connectionLabel(value: ConnectionStatus): string {
@@ -47,9 +41,6 @@
     return values;
   }
 
-  function workspaceName(path: string): string {
-    return path.split(/[\\/]/).filter(Boolean).at(-1) ?? "workspace";
-  }
 </script>
 
 <footer class="flex min-w-0 items-center gap-3 border-t border-sidebar-border bg-sidebar px-[22px] text-[10px] text-muted-foreground max-[760px]:px-3">
@@ -103,15 +94,4 @@
     onclick={onRefresh}
     disabled={!canRefresh}
   >↻</button>
-  <button
-    class="flex h-6 min-w-0 items-center gap-1.5 bg-transparent p-0 text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
-    title={workspace || "Choose workspace"}
-    onclick={onChooseWorkspace}
-    disabled={promptRunning || operationRunning}
-  >
-    <span>▰</span>
-    <strong class="max-w-[220px] overflow-hidden text-ellipsis whitespace-nowrap font-normal text-foreground max-[760px]:max-w-[130px]">
-      {workspace ? workspaceName(workspace) : "workspace"}
-    </strong>
-  </button>
 </footer>
