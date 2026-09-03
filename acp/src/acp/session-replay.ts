@@ -110,6 +110,7 @@ function toolResultNotification(context: TranslateContext, message: PiAgentMessa
 		toolCallId?: unknown;
 		content?: unknown;
 		details?: unknown;
+		isError?: unknown;
 	};
 	if (typeof record.toolCallId !== "string") return undefined;
 	const parts = (record.content as readonly PiMessagePart[] | undefined) ?? [];
@@ -124,7 +125,7 @@ function toolResultNotification(context: TranslateContext, message: PiAgentMessa
 	const update: Record<string, unknown> = {
 		sessionUpdate: "tool_call_update",
 		toolCallId: record.toolCallId,
-		status: "completed",
+		status: record.isError === true ? "failed" : "completed",
 	};
 	if (content.length > 0) update.content = content;
 	if (record.details !== undefined) update.rawOutput = record.details;

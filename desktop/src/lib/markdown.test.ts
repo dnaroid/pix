@@ -6,7 +6,7 @@ describe("renderMarkdown", () => {
     const html = renderMarkdown([
       "## Result",
       "",
-      "Use **bold**, *emphasis*, ~~old~~, and `code`.",
+      "Use **bold**, *emphasis*, ***both***, ~~old~~, and `code`.",
       "",
       "- first",
       "- [x] done",
@@ -17,6 +17,7 @@ describe("renderMarkdown", () => {
     expect(html).toContain("<h2>Result</h2>");
     expect(html).toContain("<strong>bold</strong>");
     expect(html).toContain("<em>emphasis</em>");
+    expect(html).toContain("<strong><em>both</em></strong>");
     expect(html).toContain("<del>old</del>");
     expect(html).toContain("<code>code</code>");
     expect(html).toContain("<ul><li>first</li><li class=\"task-item\"><input type=\"checkbox\" disabled checked>done</li></ul>");
@@ -44,11 +45,23 @@ describe("renderMarkdown", () => {
     expect(html).not.toContain("<tag>");
   });
 
+  it("emits safe Mermaid render targets with a readable source fallback", () => {
+    const html = renderMarkdown('```mermaid\nflowchart LR\n  A["<Start>"] --> B\n```');
+
+    expect(html).toContain('class="mermaid-diagram"');
+    expect(html).toContain('data-mermaid-source="flowchart LR\n  A[&quot;&lt;Start&gt;&quot;] --&gt; B"');
+    expect(html).toContain('class="mermaid-canvas"');
+    expect(html).toContain('<pre class="mermaid-fallback"><code>flowchart LR\n  A[&quot;&lt;Start&gt;&quot;] --&gt; B</code></pre>');
+    expect(html).not.toContain("highlighted-code");
+    expect(html).not.toContain("<Start>");
+  });
+
   it("renders simple tables with alignment", () => {
-    const html = renderMarkdown("| Name | Value |\n| :--- | ---: |\n| Pix | **fast** |");
+    const html = renderMarkdown("| Name | Status | Example |\n| :-- | :--: | --: |\n| Pix | Ready | **fast** |");
 
     expect(html).toContain('<div class="table-scroll"><table>');
     expect(html).toContain('<th class="align-left">Name</th>');
+    expect(html).toContain('<th class="align-center">Status</th>');
     expect(html).toContain('<td class="align-right"><strong>fast</strong></td>');
   });
 

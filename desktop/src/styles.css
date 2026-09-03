@@ -99,6 +99,7 @@
   --tool-accent: #315f9f;
   --tool-muted: #64748b;
   --tool-title: #5d6978;
+  --tool-error: #a44949;
 
   /* Sugar High syntax roles stay anchored to the active semantic theme. */
   --sh-identifier: var(--foreground);
@@ -154,6 +155,7 @@
     --tool-accent: #7aa2d6;
     --tool-muted: #7d8590;
     --tool-title: #858f99;
+    --tool-error: #c96a67;
   }
 }
 
@@ -182,6 +184,15 @@ html, body, #app { width: 100%; height: 100%; margin: 0; overflow: hidden; }
 button, textarea, select, input { font: inherit; }
 button { color: inherit; }
 button, select, textarea, input { letter-spacing: inherit; }
+:where(
+  button:not(:disabled),
+  select:not(:disabled),
+  input:is([type="checkbox"], [type="radio"]):not(:disabled),
+  a[href],
+  summary
+) {
+  cursor: pointer;
+}
 :focus-visible {
   outline: none;
   --tw-ring-shadow: 0 0 #0000;

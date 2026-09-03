@@ -41,7 +41,18 @@ function renderBlocks(lines: readonly string[], depth: number): string {
         index += 1;
       }
       if (index < lines.length) index += 1;
-      const highlighted = highlightCode(body.join("\n"), fence.language);
+      const source = body.join("\n");
+      if (fence.language.toLowerCase() === "mermaid") {
+        const escapedSource = escapeHtml(source);
+        output.push(
+          `<figure class="mermaid-diagram" data-mermaid-source="${escapeAttribute(source)}">`
+          + '<div class="mermaid-canvas" role="img" aria-label="Mermaid diagram" aria-busy="true"></div>'
+          + `<pre class="mermaid-fallback"><code>${escapedSource}</code></pre>`
+          + "</figure>",
+        );
+        continue;
+      }
+      const highlighted = highlightCode(source, fence.language);
       output.push(`<pre><code class="highlighted-code" data-language="${highlighted.language}">${highlighted.html}</code></pre>`);
       continue;
     }
@@ -161,7 +172,7 @@ function parseTable(lines: readonly string[], start: number): { html: string; li
   const alignments: TableAlignment[] = [];
   for (const cell of delimiter) {
     const marker = cell.trim();
-    if (!/^:?-{3,}:?$/.test(marker)) return undefined;
+    if (!/^:?-+:?$/.test(marker)) return undefined;
     alignments.push(tableAlignment(marker));
   }
 
@@ -301,8 +312,17 @@ function renderInline(text: string, depth = 0, allowLinks = true): string {
     if (delimiter && depth < MAX_BLOCK_DEPTH) {
       const end = text.indexOf(delimiter, index + delimiter.length);
       if (end > index + delimiter.length) {
-        const tag = delimiter === "~~" ? "del" : delimiter.length === 2 ? "strong" : "em";
-        output += `<${tag}>${renderInline(text.slice(index + delimiter.length, end), depth + 1, allowLinks)}</${tag}>`;
+        const content = renderInline(
+          text.slice(index + delimiter.length, end),
+          depth + 1,
+          allowLinks,
+        );
+        if (delimiter.length === 3) {
+          output += `<strong><em>${content}</em></strong>`;
+        } else {
+          const tag = delimiter === "~~" ? "del" : delimiter.length === 2 ? "strong" : "em";
+          output += `<${tag}>${content}</${tag}>`;
+        }
         index = end + delimiter.length;
         continue;
       }
@@ -409,6 +429,9 @@ function trimAutomaticLinkEnd(text: string, start: number, initialEnd: number): 
 }
 
 function inlineDelimiter(text: string, index: number): string {
+  if (text.startsWith("***", index) || text.startsWith("___", index)) {
+    return text.slice(index, index + 3);
+  }
   if (text.startsWith("**", index) || text.startsWith("__", index)) {
     return text.slice(index, index + 2);
   }

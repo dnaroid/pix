@@ -23,7 +23,7 @@
       {#if field.description}<small class="text-muted-foreground">{field.description}</small>{/if}
       {#if field.type === "select"}
         <select
-          class="min-h-[34px] w-full rounded-lg border border-input bg-card px-2.5 py-2 text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
+          class="min-h-[34px] w-full rounded-lg border border-input bg-card px-2.5 py-2 text-foreground transition-colors outline-none hover:border-ring focus:border-ring focus:ring-2 focus:ring-ring/20"
           value={String(field.value)}
           onchange={(event) => onValueChange(event.currentTarget.value)}
         >
@@ -31,7 +31,7 @@
         </select>
       {:else if field.type === "boolean"}
         <input
-          class="h-5 w-5 accent-primary"
+          class="h-5 w-5 accent-primary transition-shadow hover:ring-2 hover:ring-ring/30"
           type="checkbox"
           checked={Boolean(field.value)}
           onchange={(event) => onValueChange(event.currentTarget.checked)}

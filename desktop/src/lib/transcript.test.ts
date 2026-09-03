@@ -66,6 +66,7 @@ describe("transcript reducer", () => {
       toolCallId: "tool-1",
       status: "completed",
       content: [{ type: "content", content: { type: "text", text: "ok" } }],
+      rawOutput: { diff: "-old\n+new" },
     });
 
     expect(state.items).toEqual([
@@ -76,6 +77,7 @@ describe("transcript reducer", () => {
         status: "completed",
         rawInput: { path: "file" },
         content: "ok",
+        rawOutput: { diff: "-old\n+new" },
         path: "/workspace/file.ts",
       }),
     ]);
@@ -139,6 +141,27 @@ describe("transcript reducer", () => {
       type: "tool",
       content: "Updated file",
       diffs: [{ path: "/repo/a.ts", oldText: "old", newText: "new" }],
+    });
+  });
+
+  it("preserves ordered mutation result blocks for LSP and comment-checker output", () => {
+    const state = applySessionUpdate(emptyTranscript, {
+      sessionUpdate: "tool_call_update",
+      toolCallId: "tool-mutation",
+      status: "completed",
+      content: [
+        { type: "content", content: { type: "text", text: "Success. Updated a.ts" } },
+        { type: "content", content: { type: "text", text: "LSP diagnostics:\n\n✅ typescript: no diagnostics" } },
+        { type: "content", content: { type: "text", text: "💬 comment-checker — unnecessary comments\na.ts  4:filler" } },
+      ],
+    });
+
+    expect(state.items[0]).toMatchObject({
+      content: [
+        "Success. Updated a.ts",
+        "LSP diagnostics:\n\n✅ typescript: no diagnostics",
+        "💬 comment-checker — unnecessary comments\na.ts  4:filler",
+      ].join("\n"),
     });
   });
 });

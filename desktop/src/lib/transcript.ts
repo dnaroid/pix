@@ -29,6 +29,7 @@ export interface ToolItem {
   readonly kind: string;
   readonly status: ToolCallStatus;
   readonly rawInput?: unknown;
+  readonly rawOutput?: unknown;
   readonly content: string;
   readonly diffs: readonly ToolDiff[];
   readonly attachments: readonly Attachment[];
@@ -114,6 +115,7 @@ export function applySessionUpdate(state: TranscriptState, update: SessionUpdate
         kind: update.kind ?? "other",
         status: update.status ?? "pending",
         ...(update.rawInput !== undefined ? { rawInput: update.rawInput } : {}),
+        ...(update.rawOutput !== undefined ? { rawOutput: update.rawOutput } : {}),
         content: initialContent.text,
         diffs: initialContent.diffs,
         attachments: initialContent.attachments,
@@ -130,6 +132,7 @@ export function applySessionUpdate(state: TranscriptState, update: SessionUpdate
         ...(update.kind != null ? { kind: update.kind } : {}),
         ...(update.status != null ? { status: update.status } : {}),
         ...(update.rawInput !== undefined ? { rawInput: update.rawInput } : {}),
+        ...(update.rawOutput !== undefined ? { rawOutput: update.rawOutput } : {}),
         ...(nextContent ? {
           content: nextContent.text,
           diffs: nextContent.diffs,
@@ -184,7 +187,7 @@ function appendContentChunk(
 function upsertTool(
   state: TranscriptState,
   toolCallId: string,
-  patch: Partial<Pick<ToolItem, "name" | "title" | "kind" | "status" | "rawInput" | "content" | "diffs" | "attachments" | "path">>,
+  patch: Partial<Pick<ToolItem, "name" | "title" | "kind" | "status" | "rawInput" | "rawOutput" | "content" | "diffs" | "attachments" | "path">>,
 ): TranscriptState {
   const items = [...state.items];
   const index = items.findIndex((item) => item.type === "tool" && item.toolCallId === toolCallId);
@@ -201,6 +204,7 @@ function upsertTool(
       kind: patch.kind ?? "other",
       status: patch.status ?? "pending",
       ...(patch.rawInput !== undefined ? { rawInput: patch.rawInput } : {}),
+      ...(patch.rawOutput !== undefined ? { rawOutput: patch.rawOutput } : {}),
       content: patch.content ?? "",
       diffs: patch.diffs ?? [],
       attachments: patch.attachments ?? [],

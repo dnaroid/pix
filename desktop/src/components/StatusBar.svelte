@@ -62,7 +62,7 @@
         <label class="flex min-w-0 items-center gap-1.5">
           <span class="text-muted-foreground/70 max-[760px]:hidden">{option.name}</span>
           <select
-            class="h-6 max-w-[220px] appearance-none overflow-hidden border-0 bg-transparent py-0 pr-4 pl-0 text-primary outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-40"
+            class="h-6 max-w-[220px] appearance-none overflow-hidden rounded-sm border-0 bg-transparent py-0 pr-4 pl-0 text-primary transition-colors outline-none enabled:hover:bg-sidebar-accent enabled:hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-40"
             aria-label={option.name}
             value={option.currentValue}
             disabled={changingConfig !== null || promptRunning}
@@ -76,7 +76,7 @@
       {:else}
         <label class="flex items-center gap-1.5">
           <input
-            class="accent-primary disabled:cursor-default disabled:opacity-40"
+            class="accent-primary transition-shadow enabled:hover:ring-2 enabled:hover:ring-ring/30 disabled:cursor-default disabled:opacity-40"
             type="checkbox"
             checked={option.currentValue}
             disabled={changingConfig !== null || promptRunning}

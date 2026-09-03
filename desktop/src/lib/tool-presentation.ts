@@ -40,7 +40,7 @@ export function toolPresentation(tool: ToolHeaderSource): ToolPresentation {
 
 export function toolTone(toolName: string): ToolTone {
   const name = normalizedName(toolName);
-  if (["apply_patch", "edit", "write", "ast_apply"].includes(name)) return "mutation";
+  if (["apply_patch", "edit", "multiedit", "write", "ast_apply"].includes(name)) return "mutation";
   if (["bash", "shell", "shell_command"].includes(name) || name.startsWith("repo_")) return "warning";
   if (["read", "ls"].includes(name)) return "success";
   if (
@@ -81,7 +81,8 @@ function headerArgs(name: string, rawInput: unknown): string {
       return `${path}${offset == null ? "" : `:${offset}${limit == null ? "" : `+${limit}`}`}`;
     }
     case "write":
-    case "edit": {
+    case "edit":
+    case "multiedit": {
       const path = stringValue(args, ["path", "file_path", "filePath"]);
       if (path) return path;
       break;

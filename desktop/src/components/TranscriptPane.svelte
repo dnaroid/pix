@@ -3,6 +3,7 @@
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import type { Attachment } from "../lib/attachments";
   import { toolPresentation } from "../lib/tool-presentation";
+  import { toolGroupAttention, toolLspAttention } from "../lib/tool-output";
   import { groupTranscriptItems, type TranscriptState } from "../lib/transcript";
   import AttachmentGrid from "./AttachmentGrid.svelte";
   import MarkdownText from "./MarkdownText.svelte";
@@ -64,8 +65,8 @@
       {#each displayItems as item (item.id)}
         {#if item.type === "message"}
           {#if item.role === "thought"}
-            <details class="group mb-5 max-w-[1120px] px-0.5 text-xs text-muted-foreground">
-              <summary class="flex min-h-5 cursor-pointer list-none items-center gap-2 text-muted-foreground select-none group-open:mb-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+            <details class="group mb-5 w-full min-w-0 px-0.5 text-xs text-muted-foreground">
+              <summary class="flex min-h-5 cursor-pointer list-none items-center gap-2 text-muted-foreground transition-colors select-none hover:text-foreground group-open:mb-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
                 <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
                 <Brain class="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
                 <span>thinking</span>
@@ -82,48 +83,50 @@
               </article>
             </div>
           {:else}
-            <article class="mb-6 max-w-[1120px] text-foreground">
+            <article class="mb-6 w-full min-w-0 text-foreground">
               <div class="mb-1.5 text-[11px] font-semibold text-muted-foreground">Pix</div>
               <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} />
               {#if item.text}<MarkdownText text={item.text} {onOpenProjectFile} />{/if}
             </article>
           {/if}
         {:else}
+          {@const groupAttention = toolGroupAttention(item.tools)}
           <details class={[
-            "group mb-4 max-w-[1120px] overflow-hidden bg-transparent text-muted-foreground",
+            "group mb-4 w-full min-w-0 overflow-hidden bg-transparent text-muted-foreground",
             item.status === "failed" && "text-destructive",
           ]} open={item.active && !operationRunning}>
-            <summary class="grid min-h-5 cursor-pointer list-none grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-2 overflow-hidden select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+            <summary class="grid min-h-5 cursor-pointer list-none grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-1.5 overflow-hidden transition-colors select-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
               <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
-              <ToolStatusIcon status={item.status} />
+              <ToolStatusIcon status={item.status} attention={groupAttention} />
               <strong class="min-w-0 truncate text-xs font-normal text-foreground">
                 {item.tools.length} tool {item.tools.length === 1 ? "call" : "calls"}
               </strong>
             </summary>
-            <div class="mt-2 ml-[7px] space-y-3 border-l border-border pl-3">
+            <div class="mt-2 ml-[7px] space-y-2 border-l border-border pl-2.5">
               {#each item.tools as tool (tool.id)}
                 {@const presentation = toolPresentation(tool)}
+                {@const attention = toolLspAttention(tool)}
                 <section>
                   {#if tool.content || tool.diffs.length > 0 || tool.attachments.length > 0}
                     <details class="group/result">
-                      <summary class="grid min-h-5 cursor-pointer list-none grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-2 overflow-hidden select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+                      <summary class="grid min-h-5 cursor-pointer list-none grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-1.5 overflow-hidden transition-colors select-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
                         <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open/result:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
-                        <ToolStatusIcon status={tool.status} />
-                        <span class="flex min-w-0 items-baseline gap-x-2 overflow-hidden font-mono text-xs">
+                        <ToolStatusIcon status={tool.status} {attention} />
+                        <span class="flex min-w-0 items-baseline gap-x-1.5 overflow-hidden font-mono text-xs">
                           <strong class="tool-name shrink-0 font-bold" data-tool-tone={presentation.tone}>{presentation.name}</strong>
                           {#if presentation.args}<span class="min-w-0 truncate text-muted-foreground">{presentation.args}</span>{/if}
                         </span>
                       </summary>
                       <AttachmentGrid attachments={tool.attachments} variant="tool" onOpen={onOpenAttachment} />
                       {#if tool.content || tool.diffs.length > 0}
-                        <ToolResult content={tool.content} diffs={tool.diffs} kind={tool.kind} title={tool.title} path={tool.path} {onOpenProjectFile} />
+                        <ToolResult {tool} {onOpenProjectFile} />
                       {/if}
                     </details>
                   {:else}
-                    <div class="grid min-h-5 grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-2 overflow-hidden">
+                    <div class="grid min-h-5 grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-1.5 overflow-hidden">
                       <span aria-hidden="true"></span>
-                      <ToolStatusIcon status={tool.status} />
-                      <span class="flex min-w-0 items-baseline gap-x-2 overflow-hidden font-mono text-xs">
+                      <ToolStatusIcon status={tool.status} {attention} />
+                      <span class="flex min-w-0 items-baseline gap-x-1.5 overflow-hidden font-mono text-xs">
                         <strong class="tool-name shrink-0 font-bold" data-tool-tone={presentation.tone}>{presentation.name}</strong>
                         {#if presentation.args}<span class="min-w-0 truncate text-muted-foreground">{presentation.args}</span>{/if}
                       </span>

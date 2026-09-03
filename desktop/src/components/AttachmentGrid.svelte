@@ -79,7 +79,7 @@
         </button>
         {#if onRemove}
           <button
-            class="absolute -top-1.5 -right-1.5 grid h-5 w-5 place-items-center rounded-full border border-border bg-popover text-popover-foreground opacity-0 shadow-xs transition-opacity group-hover/attachment:opacity-100 focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            class="absolute -top-1.5 -right-1.5 grid h-5 w-5 place-items-center rounded-full border border-border bg-popover text-popover-foreground opacity-0 shadow-xs transition hover:bg-accent hover:text-accent-foreground group-hover/attachment:opacity-100 focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
             type="button"
             aria-label={`Remove ${attachment.name}`}
             title={`Remove ${attachment.name}`}

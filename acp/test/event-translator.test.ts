@@ -82,6 +82,18 @@ test("suite-style capitalized tool names map to the same kinds and locations", (
 	assert.deepEqual(update.locations, [{ path: "/work/repo/out.ts" }]);
 });
 
+test("mutation extension tools use the edit kind", () => {
+	for (const toolName of ["apply_patch", "ast_apply", "multiedit"]) {
+		const update = asToolCall(one({
+			type: "tool_execution_start",
+			toolCallId: `tool-${toolName}`,
+			toolName,
+			args: {},
+		})[0]!);
+		assert.equal(update.kind, "edit");
+	}
+});
+
 test("bash titles show the first command line, truncated to 80 chars", () => {
 	const command = `echo ${"x".repeat(200)}`;
 	const update = asToolCall(one({
