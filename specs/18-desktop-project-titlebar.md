@@ -6,12 +6,19 @@ Change
 
 ## Goal
 
-Place the active-project selector in the desktop window title bar instead of the conversation-tab row.
+Provide a compact project switcher in the desktop window title bar instead of the conversation-tab row.
 
 ## Behavior
 
 - On macOS, the webview extends into the native title bar and leaves space for the traffic-light controls.
-- The title bar shows the active workspace name and opens the existing workspace chooser when clicked.
+- The title bar shows the active project name and a deterministic folder color derived from that name.
+- Clicking the project control opens a compact menu of at most 20 recent projects.
+- The active project is identified in the menu; selecting another recent project switches the workspace and moves it to the top of the list.
+- Each recent project uses the same name-derived folder color as it does when active.
+- The menu includes an action that opens the native directory chooser with directory creation enabled where the platform supports it.
+- Recent projects persist locally under `pix.desktop.recentProjects`; malformed, relative, and duplicate entries are ignored.
+- The existing `pix.desktop.workspace` value remains the persisted active project and is folded into the recent list on startup.
+- Escape and outside-click dismiss the menu, and the project and conversation selectors do not remain open together.
 - Empty title-bar space can be used to drag the window.
 - The macOS traffic-light controls are vertically aligned with the project selector.
 - Conversation tabs remain in a separate row below the title bar.
@@ -21,19 +28,23 @@ Place the active-project selector in the desktop window title bar instead of the
 
 - Replacing native window controls on Windows or Linux.
 - Moving conversation tabs into the native title bar.
+- Creating project scaffolding or initializing a repository inside a chosen folder.
 
 ## Related files
 
 - `desktop/src-tauri/tauri.conf.json`
 - `desktop/src/components/ProjectTitlebar.svelte`
+- `desktop/src/components/ProjectFolderIcon.svelte`
+- `desktop/src/lib/recent-projects.ts`
 - `desktop/src/components/SessionTabs.svelte`
 - `desktop/src/App.svelte`
 
 ## Verification
 
-- Run desktop type checks and tests.
+- Run desktop type checks and recent-project unit tests.
 - Build the desktop web frontend.
 - Confirm the selector remains disabled while a prompt or workspace operation is active.
+- Confirm a selected folder can be created from the native chooser on supported platforms.
 
 ## Evidence
 

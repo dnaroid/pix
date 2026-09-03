@@ -16,8 +16,22 @@
     emptyTranscript,
     type TranscriptState,
   } from "./lib/transcript";
-  import { buildTabSessions, restoredTabSessionIds } from "./lib/session-tabs";
+  import {
+    ACTIVE_SESSIONS_STORAGE_KEY,
+    buildTabSessions,
+    parseActiveSessionIds,
+    restoredTabSessionIds,
+    serializeActiveSessionIds,
+    startupSessionId,
+  } from "./lib/session-tabs";
   import { parseElicitation, type ElicitationField } from "./lib/elicitation";
+  import {
+    buildRecentProjects,
+    isAbsoluteProjectPath,
+    parseRecentProjects,
+    RECENT_PROJECTS_STORAGE_KEY,
+    WORKSPACE_STORAGE_KEY,
+  } from "./lib/recent-projects";
   import ProjectTitlebar from "./components/ProjectTitlebar.svelte";
   import SessionTabs from "./components/SessionTabs.svelte";
   import SessionSelector from "./components/SessionSelector.svelte";
@@ -37,7 +51,9 @@
   let client = $state<AcpClient | null>(null);
   let status = $state<ConnectionStatus>("starting");
   let workspace = $state("");
+  let recentProjects = $state<string[]>([]);
   let sessions = $state<SessionInfo[]>([]);
+  let savedActiveSessionIds = new Map<string, string>();
   let restoredSessionTabs = $state<string[] | null>(null);
   let locallyOpenedSessionTabs = $state<string[]>([]);
   let closedSessionTabs = $state<string[]>([]);
@@ -51,6 +67,7 @@
   let errorMessage = $state<string | null>(null);
   let diagnostics = $state<string[]>([]);
   let pendingElicitation = $state<PendingElicitation | null>(null);
+  let projectSelectorOpen = $state(false);
   let sessionSelectorOpen = $state(false);
   let sessionSelectorTrigger = $state<HTMLButtonElement | null>(null);
   let transcriptPane = $state<HTMLDivElement | null>(null);
@@ -72,6 +89,7 @@
 
   onMount(() => {
     let disposed = false;
+    restoreProjects();
     void connect().then(() => {
       if (disposed) void client?.dispose();
     });
@@ -94,6 +112,7 @@
       },
       onExit: (exit) => {
         if (client !== next) return;
+        closeProjectSelector();
         closeSessionSelector();
         pendingElicitation?.resolve({ action: "cancel" });
         pendingElicitation = null;
@@ -117,11 +136,7 @@
         return;
       }
       status = "ready";
-      const saved = localStorage.getItem("pix.desktop.workspace");
-      if (saved && isAbsolutePath(saved)) {
-        workspace = saved;
-        await refreshSessions();
-      }
+      if (workspace) await openWorkspaceSession();
     } catch (error) {
       if (client !== next) return;
       status = "error";
@@ -140,6 +155,7 @@
   async function performReconnect(): Promise<void> {
     const previous = client;
     client = null;
+    closeProjectSelector();
     closeSessionSelector();
     pendingElicitation?.resolve({ action: "cancel" });
     pendingElicitation = null;
@@ -175,23 +191,110 @@
   }
 
   async function chooseWorkspace(): Promise<void> {
-    if (promptRunning) return;
-    const selected = await open({ directory: true, multiple: false, title: "Choose a Pix workspace" });
+    if (promptRunning || operationRunning) return;
+    closeProjectSelector();
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      canCreateDirectories: true,
+      title: "Choose or create a Pix project folder",
+      ...(workspace ? { defaultPath: workspace } : {}),
+    });
     if (typeof selected !== "string") return;
-    if (!isAbsolutePath(selected)) {
-      errorMessage = "The selected workspace path is not absolute.";
+    await selectWorkspace(selected);
+  }
+
+  async function selectWorkspace(selected: string): Promise<void> {
+    if (promptRunning || operationRunning) return;
+    closeProjectSelector();
+    closeSessionSelector();
+    if (!isAbsoluteProjectPath(selected)) {
+      errorMessage = "The selected project path is not absolute.";
+      return;
+    }
+    if (selected === workspace) {
+      rememberProject(selected);
+      return;
+    }
+
+    operationRunning = true;
+    errorMessage = null;
+    sessionRefreshGeneration += 1;
+    try {
+      await closeActiveSession();
+      workspace = selected;
+      sessions = [];
+      restoredSessionTabs = null;
+      locallyOpenedSessionTabs = [];
+      closedSessionTabs = [];
+      transcript = emptyTranscript;
+      configOptions = [];
+      rememberProject(selected);
+      try {
+        localStorage.setItem(WORKSPACE_STORAGE_KEY, selected);
+      } catch {
+        // A storage failure should not prevent opening a project for this run.
+      }
+      await openWorkspaceSession();
+    } catch (error) {
+      reportError(error);
+    } finally {
+      operationRunning = false;
+    }
+  }
+
+  function rememberProject(path: string): void {
+    recentProjects = buildRecentProjects(recentProjects, path);
+    try {
+      localStorage.setItem(RECENT_PROJECTS_STORAGE_KEY, JSON.stringify(recentProjects));
+    } catch {
+      // Keep the in-memory recent list usable when storage is unavailable.
+    }
+  }
+
+  function restoreProjects(): void {
+    try {
+      const saved = localStorage.getItem(WORKSPACE_STORAGE_KEY);
+      const validSaved = saved && isAbsoluteProjectPath(saved) ? saved : undefined;
+      workspace = validSaved ?? "";
+      recentProjects = parseRecentProjects(localStorage.getItem(RECENT_PROJECTS_STORAGE_KEY), validSaved);
+      savedActiveSessionIds = parseActiveSessionIds(localStorage.getItem(ACTIVE_SESSIONS_STORAGE_KEY));
+    } catch {
+      workspace = "";
+      recentProjects = [];
+      savedActiveSessionIds = new Map();
+    }
+  }
+
+  function rememberActiveSession(projectPath: string, sessionId: string): void {
+    savedActiveSessionIds.set(projectPath, sessionId);
+    persistActiveSessionIds();
+  }
+
+  function forgetActiveSession(projectPath: string): void {
+    if (!savedActiveSessionIds.delete(projectPath)) return;
+    persistActiveSessionIds();
+  }
+
+  function persistActiveSessionIds(): void {
+    try {
+      localStorage.setItem(ACTIVE_SESSIONS_STORAGE_KEY, serializeActiveSessionIds(savedActiveSessionIds));
+    } catch {
+      // Persistence failure should not prevent sessions from working for this run.
+    }
+  }
+
+  function toggleProjectSelector(): void {
+    if (projectSelectorOpen) {
+      closeProjectSelector();
       return;
     }
     closeSessionSelector();
-    await closeActiveSession();
-    workspace = selected;
-    restoredSessionTabs = null;
-    locallyOpenedSessionTabs = [];
-    closedSessionTabs = [];
-    localStorage.setItem("pix.desktop.workspace", selected);
-    transcript = emptyTranscript;
-    configOptions = [];
-    await refreshSessions();
+    projectSelectorOpen = true;
+  }
+
+  function closeProjectSelector(): void {
+    projectSelectorOpen = false;
   }
 
   async function refreshSessions(): Promise<void> {
@@ -210,8 +313,56 @@
     }
   }
 
+  async function openWorkspaceSession(): Promise<void> {
+    if (!client || !workspace) return;
+    const requestClient = client;
+    const requestWorkspace = workspace;
+    const generation = ++sessionRefreshGeneration;
+    operationRunning = true;
+    errorMessage = null;
+    try {
+      const response = await requestClient.listSessions(requestWorkspace);
+      if (generation !== sessionRefreshGeneration || client !== requestClient || workspace !== requestWorkspace) return;
+      sessions = response.sessions;
+      restoredSessionTabs = restoredTabSessionIds(response);
+
+      const desktopSessionId = savedActiveSessionIds.get(requestWorkspace) ?? null;
+      const sessionId = startupSessionId(response, desktopSessionId);
+      if (desktopSessionId && desktopSessionId !== sessionId) forgetActiveSession(requestWorkspace);
+
+      transcript = emptyTranscript;
+      configOptions = [];
+      if (sessionId) {
+        activeSessionId = sessionId;
+        const loaded = await requestClient.loadSession(sessionId, requestWorkspace);
+        if (client !== requestClient || workspace !== requestWorkspace) return;
+        configOptions = loaded.configOptions ?? [];
+        showSessionTab(sessionId);
+        rememberActiveSession(requestWorkspace, sessionId);
+        await scrollToLatest();
+        return;
+      }
+
+      const created = await requestClient.newSession(requestWorkspace);
+      if (client !== requestClient || workspace !== requestWorkspace) return;
+      showSessionTab(created.sessionId);
+      activeSessionId = created.sessionId;
+      configOptions = created.configOptions ?? [];
+      rememberActiveSession(requestWorkspace, created.sessionId);
+      await refreshSessions();
+    } catch (error) {
+      if (client !== requestClient || workspace !== requestWorkspace) return;
+      activeSessionId = null;
+      transcript = emptyTranscript;
+      reportError(error);
+    } finally {
+      if (client === requestClient && workspace === requestWorkspace) operationRunning = false;
+    }
+  }
+
   async function createSession(): Promise<void> {
     if (!client || !canUseSession || promptRunning) return;
+    closeProjectSelector();
     closeSessionSelector();
     operationRunning = true;
     errorMessage = null;
@@ -220,6 +371,7 @@
       const response = await client.newSession(workspace);
       showSessionTab(response.sessionId);
       activeSessionId = response.sessionId;
+      rememberActiveSession(workspace, response.sessionId);
       transcript = emptyTranscript;
       configOptions = response.configOptions ?? [];
       await refreshSessions();
@@ -232,6 +384,7 @@
 
   async function loadSession(sessionId: string): Promise<void> {
     if (!client || !canUseSession || promptRunning || sessionId === activeSessionId) return;
+    closeProjectSelector();
     closeSessionSelector();
     operationRunning = true;
     errorMessage = null;
@@ -244,6 +397,7 @@
       const response = await client.loadSession(sessionId, workspace);
       configOptions = response.configOptions ?? [];
       showSessionTab(sessionId);
+      rememberActiveSession(workspace, sessionId);
       await scrollToLatest();
     } catch (error) {
       activeSessionId = null;
@@ -288,7 +442,9 @@
     } finally {
       operationRunning = false;
     }
-    if (closed && nextSessionId) await loadSession(nextSessionId);
+    if (!closed) return;
+    if (nextSessionId) await loadSession(nextSessionId);
+    else await createSession();
   }
 
   function showSessionTab(sessionId: string): void {
@@ -298,6 +454,7 @@
   }
 
   function handleSessionTabClick(event: MouseEvent, sessionId: string): void {
+    closeProjectSelector();
     if (sessionId !== activeSessionId) {
       closeSessionSelector();
       void loadSession(sessionId);
@@ -314,6 +471,7 @@
   }
 
   function handleSessionPickerClick(event: MouseEvent): void {
+    closeProjectSelector();
     if (sessionSelectorOpen) {
       closeSessionSelector();
       return;
@@ -414,10 +572,6 @@
     transcriptPane?.scrollTo({ top: transcriptPane.scrollHeight, behavior: "smooth" });
   }
 
-  function isAbsolutePath(path: string): boolean {
-    return path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("\\\\");
-  }
-
 </script>
 
 <svelte:head><title>Pix Desktop</title></svelte:head>
@@ -429,8 +583,13 @@
   >
     <ProjectTitlebar
       {workspace}
+      {recentProjects}
+      open={projectSelectorOpen}
       disabled={promptRunning || operationRunning}
+      onToggle={toggleProjectSelector}
+      onSelectProject={(path) => void selectWorkspace(path)}
       onChooseWorkspace={() => void chooseWorkspace()}
+      onClose={closeProjectSelector}
     />
 
     <div class="relative flex min-w-0 flex-1" data-tauri-drag-region>
@@ -476,11 +635,9 @@
       {transcript}
       {activeSessionId}
       {workspace}
-      canCreate={canUseSession}
       {promptRunning}
       {operationRunning}
       bind:pane={transcriptPane}
-      onCreate={() => void createSession()}
       onChooseWorkspace={() => void chooseWorkspace()}
     />
 

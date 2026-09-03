@@ -5,21 +5,17 @@
     transcript,
     activeSessionId,
     workspace,
-    canCreate,
     promptRunning,
     operationRunning,
     pane = $bindable(null),
-    onCreate,
     onChooseWorkspace,
   }: {
     transcript: TranscriptState;
     activeSessionId: string | null;
     workspace: string;
-    canCreate: boolean;
     promptRunning: boolean;
     operationRunning: boolean;
     pane?: HTMLDivElement | null;
-    onCreate: () => void;
     onChooseWorkspace: () => void;
   } = $props();
 </script>
@@ -27,20 +23,14 @@
 <div class="row-start-2 min-h-0 overflow-auto scroll-smooth" bind:this={pane} aria-live="polite">
   {#if !activeSessionId}
     <section class="grid h-full place-items-center content-center p-10 text-center">
-      <div class="mb-[18px] grid h-11 w-11 place-items-center rounded-xl bg-primary font-semibold text-primary-foreground shadow-xs">P</div>
-      <h2 class="mb-2 text-lg font-medium text-foreground">
-        {workspace ? "Ready for a new task" : "Open a workspace"}
-      </h2>
-      <p class="mb-5 max-w-[470px] text-[13px] leading-relaxed text-muted-foreground">
-        {workspace ? "Start a project-scoped Pix session." : "Choose a folder to begin a Pix session."}
-      </p>
       {#if workspace}
-        <button
-          class="rounded-lg border border-border bg-secondary px-3.5 py-2 text-secondary-foreground shadow-xs hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
-          onclick={onCreate}
-          disabled={!canCreate}
-        >+ New conversation</button>
+        <p class="text-[13px] text-muted-foreground" role="status">Opening conversation…</p>
       {:else}
+        <div class="mb-[18px] grid h-11 w-11 place-items-center rounded-xl bg-primary font-semibold text-primary-foreground shadow-xs">P</div>
+        <h2 class="mb-2 text-lg font-medium text-foreground">Open a workspace</h2>
+        <p class="mb-5 max-w-[470px] text-[13px] leading-relaxed text-muted-foreground">
+          Choose a folder to begin a Pix session.
+        </p>
         <button
           class="rounded-lg border border-border bg-secondary px-3.5 py-2 text-secondary-foreground shadow-xs hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
           onclick={onChooseWorkspace}

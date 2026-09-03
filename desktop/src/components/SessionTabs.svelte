@@ -54,7 +54,7 @@
       <button
         use:titlebarDrag
         class={[
-          "flex h-full w-full items-center gap-2.5 bg-transparent py-0 pr-9 pl-3.5 text-left text-muted-foreground transition-colors hover:text-sidebar-accent-foreground focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40",
+          "flex h-full w-full items-center gap-2.5 bg-transparent pt-0 pr-9 pb-1.5 pl-3.5 text-left text-muted-foreground transition-colors hover:text-sidebar-accent-foreground focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40",
           active && "font-medium text-foreground",
         ]}
         aria-current={active ? "page" : undefined}
@@ -95,7 +95,7 @@
     <div class="group relative -mb-px h-8 min-w-[140px] max-w-[280px] flex-[0_1_280px] overflow-hidden rounded-t-lg border border-transparent transition-colors hover:bg-sidebar-accent max-[760px]:basis-[230px]">
       <button
         use:titlebarDrag
-        class="flex h-full w-full items-center gap-2.5 bg-transparent px-3.5 text-left text-muted-foreground transition-colors hover:text-sidebar-accent-foreground focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+        class="flex h-full w-full items-center gap-2.5 bg-transparent pt-0 px-3.5 pb-1.5 text-left text-muted-foreground transition-colors hover:text-sidebar-accent-foreground focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
         aria-haspopup="dialog"
         aria-expanded={selectorOpen}
         title="Open a saved conversation"
