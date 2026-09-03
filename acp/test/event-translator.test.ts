@@ -62,6 +62,7 @@ test("tool_execution_start maps metadata, kind, and absolute locations", () => {
 		args: { path: "src/main.ts" },
 	})[0]!);
 	assert.equal(update.toolCallId, "t1");
+	assert.equal(update.name, "read");
 	assert.equal(update.title, "Read src/main.ts");
 	assert.equal(update.kind, "read");
 	assert.equal(update.status, "in_progress");
@@ -75,6 +76,7 @@ test("suite-style capitalized tool names map to the same kinds and locations", (
 		toolName: "Write",
 		args: { file_path: "out.ts", content: "x" },
 	})[0]!);
+	assert.equal(update.name, "Write");
 	assert.equal(update.title, "Write out.ts");
 	assert.equal(update.kind, "edit");
 	assert.deepEqual(update.locations, [{ path: "/work/repo/out.ts" }]);

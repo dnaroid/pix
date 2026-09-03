@@ -526,10 +526,12 @@ test("session/prompt forwards images and maps aborted runs to cancelled", async 
 		const pending = session.prompt([
 			{ type: "text", text: "look" },
 			{ type: "image", data: "aGk=", mimeType: "image/png" },
+			{ type: "resource_link", uri: "file:///tmp/demo.mp4", name: "demo.mp4" },
 		]);
 		const pi = clients[0]!;
 		await waitFor(() => pi.promptCalls.length === 1);
 		assert.deepEqual(pi.promptCalls[0].images, [{ type: "image", data: "aGk=", mimeType: "image/png" }]);
+		assert.equal(pi.promptCalls[0].message, "look\n\n[Pix attachment: file:///tmp/demo.mp4]");
 
 		pi.emit({ type: "agent_start" });
 		pi.emit({
@@ -863,8 +865,15 @@ test("session/load switches the pi session and replays history as chunk updates"
 						{ type: "toolCall", id: "t1", name: "bash", arguments: { command: "echo hi" } },
 					],
 				},
-				{ role: "toolResult", content: [{ type: "text", text: "hi" }], toolCallId: "t1" } as unknown as PiAgentMessage,
-				{ role: "user", content: [{ type: "text", text: "again" }, { type: "image", data: "aGk=" }] },
+				{
+					role: "toolResult",
+					content: [
+						{ type: "text", text: "hi" },
+						{ type: "image", data: "dG9vbA==", mimeType: "image/png" },
+					],
+					toolCallId: "t1",
+				} as unknown as PiAgentMessage,
+				{ role: "user", content: [{ type: "text", text: "again" }, { type: "image", data: "aGk=", mimeType: "image/png" }] },
 			]);
 			await cx.request("session/load", { sessionId: id, cwd: "/tmp/proj", mcpServers: [] });
 			return id;
@@ -878,7 +887,7 @@ test("session/load switches the pi session and replays history as chunk updates"
 
 	assert.deepEqual(harness.clients[1]!.switchSessions, [harness.clients[0]!.state.sessionFile]);
 	// Notifications are delivered asynchronously; poll for the replay to land.
-	await waitFor(() => notifications.length >= 5);
+	await waitFor(() => notifications.length >= 6);
 	const replayed = notifications.map((n) => ({
 		sessionUpdate: n.update.sessionUpdate,
 		text: replayText(n.update as Record<string, unknown>),
@@ -889,15 +898,26 @@ test("session/load switches the pi session and replays history as chunk updates"
 		{ sessionUpdate: "agent_message_chunk", text: "general kenobi", toolCallId: undefined },
 		{ sessionUpdate: "tool_call", text: undefined, toolCallId: "t1" },
 		{ sessionUpdate: "tool_call_update", text: "hi", toolCallId: "t1" },
-		{ sessionUpdate: "user_message_chunk", text: "again\n\n[image]", toolCallId: undefined },
+		{ sessionUpdate: "user_message_chunk", text: "again", toolCallId: undefined },
+		{ sessionUpdate: "user_message_chunk", text: undefined, toolCallId: undefined },
 	]);
+	assert.deepEqual((notifications[notifications.length - 1]!.update as { content: unknown }).content, {
+		type: "image",
+		data: "aGk=",
+		mimeType: "image/png",
+	});
 	const toolCall = notifications.find((n) => n.update.sessionUpdate === "tool_call")!.update as Record<string, unknown>;
+	assert.equal(toolCall.name, "bash");
 	assert.equal(toolCall.title, "Bash: echo hi");
 	assert.equal(toolCall.kind, "execute");
 	assert.equal(toolCall.status, "in_progress");
 	assert.deepEqual(toolCall.rawInput, { command: "echo hi" });
 	const toolUpdate = notifications.find((n) => n.update.sessionUpdate === "tool_call_update")!.update as Record<string, unknown>;
 	assert.equal(toolUpdate.status, "completed");
+	assert.deepEqual(toolUpdate.content, [
+		{ type: "content", content: { type: "text", text: "hi" } },
+		{ type: "content", content: { type: "image", data: "dG9vbA==", mimeType: "image/png" } },
+	]);
 	assert.equal(harness.adapter.getSession(sessionId) !== undefined, true, "loaded session is live");
 });
 

@@ -28,10 +28,23 @@ export async function replaySessionHistory(
 		// narrowing, so read the fields defensively per role at runtime.
 		const content = (message as { content?: unknown }).content;
 		if (message.role === "user") {
-			const text = messageText(content as string | readonly PiMessagePart[] | undefined, {
-				markImages: true,
-			});
-			if (text) await notify(chunk(context.sessionId, messageId, "user_message_chunk", text));
+			if (typeof content === "string") {
+				if (content) {
+					await notify(chunk(context.sessionId, messageId, "user_message_chunk", { type: "text", text: content }));
+				}
+			} else if (Array.isArray(content)) {
+				for (const part of content as readonly PiMessagePart[]) {
+					if (part.type === "text" && typeof part.text === "string" && part.text) {
+						await notify(chunk(context.sessionId, messageId, "user_message_chunk", { type: "text", text: part.text }));
+					} else if (part.type === "image" && typeof part.data === "string" && typeof part.mimeType === "string") {
+						await notify(chunk(context.sessionId, messageId, "user_message_chunk", {
+							type: "image",
+							data: part.data,
+							mimeType: part.mimeType,
+						}));
+					}
+				}
+			}
 		} else if (message.role === "assistant") {
 			for (const notification of assistantPartNotifications(context, index, content as readonly PiMessagePart[] | undefined)) {
 				await notify(notification);
@@ -58,7 +71,9 @@ function assistantPartNotifications(
 	const flushText = () => {
 		const joined = text.join("\n\n").trim();
 		text = [];
-		if (joined) notifications.push(chunk(context.sessionId, `replay-${index}`, "agent_message_chunk", joined));
+		if (joined) {
+			notifications.push(chunk(context.sessionId, `replay-${index}`, "agent_message_chunk", { type: "text", text: joined }));
+		}
 	};
 	for (const part of content) {
 		if (part.type === "text" && typeof part.text === "string") {
@@ -73,11 +88,13 @@ function assistantPartNotifications(
 }
 
 function toolCallNotification(context: TranslateContext, part: PiMessagePart): SessionNotification {
-	const name = (typeof part.name === "string" ? part.name : "").toLowerCase();
+	const originalName = typeof part.name === "string" ? part.name : "";
+	const name = originalName.toLowerCase();
 	const args = (part.arguments ?? undefined) as Record<string, unknown> | undefined;
 	const update = {
 		sessionUpdate: "tool_call",
 		toolCallId: part.id,
+		...(originalName ? { name: originalName } : {}),
 		title: toolTitle(name || "tool", args),
 		kind: toolKind(name || "tool") as ToolKind,
 		status: "in_progress",
@@ -100,8 +117,8 @@ function toolResultNotification(context: TranslateContext, message: PiAgentMessa
 	for (const part of parts) {
 		if (part.type === "text" && typeof part.text === "string") {
 			content.push({ type: "content", content: { type: "text", text: part.text } });
-		} else if (part.type === "image") {
-			content.push({ type: "content", content: { type: "text", text: "[image]" } });
+		} else if (part.type === "image" && typeof part.data === "string" && typeof part.mimeType === "string") {
+			content.push({ type: "content", content: { type: "image", data: part.data, mimeType: part.mimeType } });
 		}
 	}
 	const update: Record<string, unknown> = {
@@ -118,32 +135,14 @@ function chunk(
 	sessionId: string,
 	messageId: string,
 	sessionUpdate: "user_message_chunk" | "agent_message_chunk",
-	text: string,
+	content: import("@agentclientprotocol/sdk").ContentBlock,
 ): SessionNotification {
 	const update: SessionUpdate = {
 		sessionUpdate,
 		messageId,
-		content: { type: "text", text },
+		content,
 	};
 	return { sessionId, update };
-}
-
-/** Concatenate the text parts of a message; non-text parts are skipped. */
-function messageText(
-	content: string | readonly PiMessagePart[] | undefined,
-	options: { markImages: boolean },
-): string {
-	if (typeof content === "string") return content;
-	if (!content) return "";
-	const parts: string[] = [];
-	for (const part of content) {
-		if (part.type === "text" && typeof part.text === "string") {
-			parts.push(part.text);
-		} else if (options.markImages && part.type === "image") {
-			parts.push("[image]");
-		}
-	}
-	return parts.join("\n\n").trim();
 }
 
 /** Exposed for tests. */

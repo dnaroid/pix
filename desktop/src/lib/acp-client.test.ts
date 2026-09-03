@@ -87,9 +87,36 @@ describe("ACP JSON-RPC client", () => {
   it("rejects an active prompt when the adapter exits", async () => {
     const transport = new FakeTransport();
     const client = await startedClient(transport);
-    const prompt = client.prompt("session-1", "hello");
+    const prompt = client.prompt("session-1", [{ type: "text", text: "hello" }]);
     transport.exit({ generation: 1, code: 1, success: false, requested: false, error: null });
 
     await expect(prompt).rejects.toThrow("pix-acp exited with code 1");
+  });
+
+  it("allows a prompt to run longer than the default request timeout", async () => {
+    const transport = new FakeTransport();
+    const client = await startedClient(transport);
+    vi.useFakeTimers();
+
+    try {
+      const prompt = client.prompt("session-1", [{ type: "text", text: "hello" }]);
+      let settled = false;
+      void prompt.finally(() => {
+        settled = true;
+      });
+
+      await vi.advanceTimersByTimeAsync(30_001);
+      expect(settled).toBe(false);
+
+      transport.message({
+        jsonrpc: "2.0",
+        id: requestAt(transport, 1).id,
+        result: { stopReason: "end_turn" },
+      });
+      await expect(prompt).resolves.toEqual({ stopReason: "end_turn" });
+    } finally {
+      vi.useRealTimers();
+      await client.dispose();
+    }
   });
 });

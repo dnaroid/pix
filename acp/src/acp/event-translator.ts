@@ -79,6 +79,7 @@ export class EventTranslator {
 		return {
 			sessionUpdate: "tool_call",
 			toolCallId: event.toolCallId,
+			name: event.toolName,
 			title: toolTitle(name, args),
 			kind: toolKind(name),
 			status: "in_progress",

@@ -1,5 +1,6 @@
 import { PROTOCOL_VERSION } from "@agentclientprotocol/sdk";
 import type {
+  ContentBlock,
   CreateElicitationRequest,
   CreateElicitationResponse,
   InitializeResponse,
@@ -112,11 +113,11 @@ export class AcpClient {
     return this.request("session/close", { sessionId });
   }
 
-  prompt(sessionId: string, text: string): Promise<PromptResponse> {
+  prompt(sessionId: string, prompt: ContentBlock[]): Promise<PromptResponse> {
     return this.request(
       "session/prompt",
-      { sessionId, prompt: [{ type: "text", text }] },
-      undefined,
+      { sessionId, prompt },
+      null,
     );
   }
 
@@ -145,12 +146,12 @@ export class AcpClient {
   private request<Response>(
     method: string,
     params: unknown,
-    timeoutMs: number | undefined = DEFAULT_TIMEOUT_MS,
+    timeoutMs: number | null = DEFAULT_TIMEOUT_MS,
   ): Promise<Response> {
     if (this.disposed) return Promise.reject(new Error("ACP client is disposed"));
     const id = this.nextId++;
     const result = new Promise<Response>((resolve, reject) => {
-      const timer = timeoutMs === undefined
+      const timer = timeoutMs === null
         ? undefined
         : setTimeout(() => {
             this.pending.delete(id);

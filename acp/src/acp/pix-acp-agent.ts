@@ -883,7 +883,9 @@ function collectPromptInput(blocks: readonly ContentBlock[]): { text: string; im
 				images.push({ type: "image", data: block.data, mimeType: block.mimeType });
 				break;
 			case "resource_link":
-				textParts.push(`[resource: ${block.name ?? block.uri}]`);
+				textParts.push(block.uri.startsWith("file://")
+					? `[Pix attachment: ${block.uri}]`
+					: `[resource: ${block.name ?? block.uri}]`);
 				break;
 			case "resource": {
 				const contents = block.resource;

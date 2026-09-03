@@ -1,4 +1,13 @@
 import type { ContentBlock, SessionUpdate, ToolCallContent, ToolCallStatus } from "@agentclientprotocol/sdk";
+import {
+  attachmentFromFile,
+  attachmentFromImage,
+  extractAttachmentMarkers,
+  fileNameFromPath,
+  filePathFromUri,
+  type Attachment,
+} from "./attachments";
+import type { ToolDiff } from "./diff";
 
 export type MessageRole = "user" | "assistant" | "thought";
 
@@ -8,16 +17,22 @@ export interface MessageItem {
   readonly messageId?: string;
   readonly role: MessageRole;
   readonly text: string;
+  readonly attachments: readonly Attachment[];
 }
 
 export interface ToolItem {
   readonly type: "tool";
   readonly id: string;
   readonly toolCallId: string;
+  readonly name?: string;
   readonly title: string;
   readonly kind: string;
   readonly status: ToolCallStatus;
+  readonly rawInput?: unknown;
   readonly content: string;
+  readonly diffs: readonly ToolDiff[];
+  readonly attachments: readonly Attachment[];
+  readonly path?: string;
 }
 
 export type TranscriptItem = MessageItem | ToolItem;
@@ -43,7 +58,7 @@ export function groupTranscriptItems(items: readonly TranscriptItem[]): Transcri
 
   for (const item of items) {
     if (item.type === "message") {
-      grouped.push(item);
+      grouped.push(messageForDisplay(item));
       continue;
     }
 
@@ -59,9 +74,27 @@ export function groupTranscriptItems(items: readonly TranscriptItem[]): Transcri
   return grouped;
 }
 
-export function appendLocalUserMessage(state: TranscriptState, text: string, id: string): TranscriptState {
+function messageForDisplay(item: MessageItem): MessageItem {
+  if (item.role !== "user") return item;
+  const imageCount = item.attachments.filter((attachment) => attachment.kind === "image").length;
+  if (imageCount === 0) return item;
+
+  const text = item.text
+    .replace(/^\[Image (\d+)\][ \t]*\r?$/gm, (marker, index: string) =>
+      Number(index) <= imageCount ? "" : marker)
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return text === item.text ? item : { ...item, text };
+}
+
+export function appendLocalUserMessage(
+  state: TranscriptState,
+  text: string,
+  id: string,
+  attachments: readonly Attachment[] = [],
+): TranscriptState {
   return {
-    items: [...state.items, { type: "message", id, role: "user", text }],
+    items: [...state.items, { type: "message", id, role: "user", text, attachments }],
   };
 }
 
@@ -73,20 +106,38 @@ export function applySessionUpdate(state: TranscriptState, update: SessionUpdate
       return appendContentChunk(state, "assistant", update.messageId ?? undefined, update.content);
     case "agent_thought_chunk":
       return appendContentChunk(state, "thought", update.messageId ?? undefined, update.content);
-    case "tool_call":
+    case "tool_call": {
+      const initialContent = toolContent(update.content, `tool:${update.toolCallId}`);
       return upsertTool(state, update.toolCallId, {
+        ...(update.name != null ? { name: update.name } : {}),
         title: update.title,
         kind: update.kind ?? "other",
         status: update.status ?? "pending",
-        content: toolContentText(update.content),
+        ...(update.rawInput !== undefined ? { rawInput: update.rawInput } : {}),
+        content: initialContent.text,
+        diffs: initialContent.diffs,
+        attachments: initialContent.attachments,
+        path: update.locations?.[0]?.path,
       });
-    case "tool_call_update":
+    }
+    case "tool_call_update": {
+      const nextContent = update.content != null
+        ? toolContent(update.content, `tool:${update.toolCallId}`)
+        : undefined;
       return upsertTool(state, update.toolCallId, {
+        ...(update.name != null ? { name: update.name } : {}),
         ...(update.title != null ? { title: update.title } : {}),
         ...(update.kind != null ? { kind: update.kind } : {}),
         ...(update.status != null ? { status: update.status } : {}),
-        ...(update.content != null ? { content: toolContentText(update.content) } : {}),
+        ...(update.rawInput !== undefined ? { rawInput: update.rawInput } : {}),
+        ...(nextContent ? {
+          content: nextContent.text,
+          diffs: nextContent.diffs,
+          attachments: nextContent.attachments,
+        } : {}),
+        ...(update.locations != null ? { path: update.locations[0]?.path } : {}),
       });
+    }
     default:
       return state;
   }
@@ -98,9 +149,6 @@ function appendContentChunk(
   messageId: string | undefined,
   content: ContentBlock,
 ): TranscriptState {
-  const text = contentBlockText(content);
-  if (!text) return state;
-
   const items = [...state.items];
   const existingIndex = messageId
     ? items.findIndex((item) => item.type === "message" && item.role === role && item.messageId === messageId)
@@ -109,16 +157,25 @@ function appendContentChunk(
   const canAppend = existing?.type === "message"
     && existing.role === role
     && (messageId ? existing.messageId === messageId : existing.messageId === undefined);
+  const id = messageId ? `${role}:${messageId}` : `${role}:chunk:${items.length}`;
+  const attachmentOffset = canAppend ? existing.attachments.length : 0;
+  const chunk = messageContent(content, role, id, attachmentOffset);
+  if (!chunk.text && chunk.attachments.length === 0) return state;
 
   if (canAppend) {
-    items[existingIndex] = { ...existing, text: existing.text + text };
+    items[existingIndex] = {
+      ...existing,
+      text: existing.text + chunk.text,
+      attachments: [...existing.attachments, ...chunk.attachments],
+    };
   } else {
     items.push({
       type: "message",
-      id: messageId ? `${role}:${messageId}` : `${role}:chunk:${items.length}`,
+      id,
       ...(messageId ? { messageId } : {}),
       role,
-      text,
+      text: chunk.text,
+      attachments: chunk.attachments,
     });
   }
   return { items };
@@ -127,7 +184,7 @@ function appendContentChunk(
 function upsertTool(
   state: TranscriptState,
   toolCallId: string,
-  patch: Partial<Pick<ToolItem, "title" | "kind" | "status" | "content">>,
+  patch: Partial<Pick<ToolItem, "name" | "title" | "kind" | "status" | "rawInput" | "content" | "diffs" | "attachments" | "path">>,
 ): TranscriptState {
   const items = [...state.items];
   const index = items.findIndex((item) => item.type === "tool" && item.toolCallId === toolCallId);
@@ -139,10 +196,15 @@ function upsertTool(
       type: "tool",
       id: `tool:${toolCallId}`,
       toolCallId,
+      ...(patch.name ? { name: patch.name } : {}),
       title: patch.title ?? "Tool call",
       kind: patch.kind ?? "other",
       status: patch.status ?? "pending",
+      ...(patch.rawInput !== undefined ? { rawInput: patch.rawInput } : {}),
       content: patch.content ?? "",
+      diffs: patch.diffs ?? [],
+      attachments: patch.attachments ?? [],
+      ...(patch.path ? { path: patch.path } : {}),
     });
   }
   return { items };
@@ -168,26 +230,68 @@ function buildToolGroup(tools: readonly [ToolItem, ...ToolItem[]]): ToolGroupIte
   };
 }
 
-function contentBlockText(content: ContentBlock): string {
+function messageContent(
+  content: ContentBlock,
+  role: MessageRole,
+  idPrefix: string,
+  attachmentOffset: number,
+): { text: string; attachments: Attachment[] } {
   switch (content.type) {
     case "text":
-      return content.text;
+      return role === "user"
+        ? extractAttachmentMarkers(content.text, idPrefix, attachmentOffset)
+        : { text: content.text, attachments: [] };
     case "image":
-      return "[image]";
+      return {
+        text: "",
+        attachments: [attachmentFromImage(
+          content.data,
+          content.mimeType,
+          `${idPrefix}:attachment:${attachmentOffset}`,
+          content.uri,
+        )],
+      };
     case "audio":
-      return "[audio]";
-    case "resource_link":
-      return content.uri;
+      return { text: "[audio]", attachments: [] };
+    case "resource_link": {
+      const path = filePathFromUri(content.uri);
+      if (!path) return { text: content.uri, attachments: [] };
+      const name = content.name || fileNameFromPath(path);
+      return {
+        text: "",
+        attachments: [attachmentFromFile(
+          { path, name, size: content.size ?? 0 },
+          `${idPrefix}:attachment:${attachmentOffset}`,
+        )],
+      };
+    }
     case "resource":
-      return "[resource]";
+      return { text: "[resource]", attachments: [] };
   }
 }
 
-function toolContentText(content: readonly ToolCallContent[] | null | undefined): string {
-  if (!content) return "";
-  return content.map((item) => {
-    if (item.type === "content") return contentBlockText(item.content);
-    if (item.type === "diff") return `${item.path}\n${item.newText}`;
-    return `[terminal ${item.terminalId}]`;
-  }).join("\n");
+function toolContent(
+  content: readonly ToolCallContent[] | null | undefined,
+  idPrefix: string,
+): { text: string; diffs: ToolDiff[]; attachments: Attachment[] } {
+  if (!content) return { text: "", diffs: [], attachments: [] };
+  const text: string[] = [];
+  const diffs: ToolDiff[] = [];
+  const attachments: Attachment[] = [];
+  for (const item of content) {
+    if (item.type === "content") {
+      const next = messageContent(item.content, "assistant", idPrefix, attachments.length);
+      if (next.text) text.push(next.text);
+      attachments.push(...next.attachments);
+    } else if (item.type === "diff") {
+      diffs.push({
+        path: item.path,
+        ...(item.oldText === undefined ? {} : { oldText: item.oldText }),
+        newText: item.newText,
+      });
+    } else {
+      text.push(`[terminal ${item.terminalId}]`);
+    }
+  }
+  return { text: text.join("\n"), diffs, attachments };
 }

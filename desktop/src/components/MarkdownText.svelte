@@ -1,11 +1,49 @@
 <script lang="ts">
+  import { openExternalHref } from "../lib/external-links";
   import { renderMarkdown } from "../lib/markdown";
 
-  let { text, compact = false }: { text: string; compact?: boolean } = $props();
+  let {
+    text,
+    compact = false,
+    onOpenProjectFile,
+  }: {
+    text: string;
+    compact?: boolean;
+    onOpenProjectFile?: (path: string) => void | Promise<void>;
+  } = $props();
   let html = $derived(renderMarkdown(text));
+
+  function linkClicks(node: HTMLElement) {
+    function handleClick(event: MouseEvent) {
+      if (event.defaultPrevented || event.button !== 0 || !(event.target instanceof Element)) return;
+
+      const projectFileLink = event.target.closest("a[data-project-file]");
+      if (projectFileLink && node.contains(projectFileLink)) {
+        event.preventDefault();
+        const path = projectFileLink.getAttribute("data-project-file");
+        if (path) void onOpenProjectFile?.(path);
+        return;
+      }
+
+      const link = event.target.closest("a[data-external-link]");
+      if (!link || !node.contains(link)) return;
+
+      event.preventDefault();
+      void openExternalHref(link.getAttribute("href") ?? "").catch((error: unknown) => {
+        console.error("Failed to open external link", error);
+      });
+    }
+
+    node.addEventListener("click", handleClick);
+    return {
+      destroy() {
+        node.removeEventListener("click", handleClick);
+      },
+    };
+  }
 </script>
 
-<div class:compact class="markdown-text">{@html html}</div>
+<div class:compact class="markdown-text" use:linkClicks>{@html html}</div>
 
 <style>
   .markdown-text {
@@ -78,6 +116,21 @@
     text-underline-offset: 2px;
   }
   .markdown-text :global(a:hover) { text-decoration-color: currentColor; }
+  .markdown-text :global(a[data-project-file]) {
+    border-radius: calc(var(--radius) - 10px);
+    background: var(--muted);
+    box-decoration-break: clone;
+    padding: 0.08em 0.3em;
+    font-family: "Geist Mono", ui-monospace, monospace;
+    font-size: 0.92em;
+    -webkit-box-decoration-break: clone;
+  }
+  .markdown-text :global(a[data-project-file]:hover) { background: var(--accent); }
+  .markdown-text :global(a[data-project-file] > code) {
+    background: transparent;
+    padding: 0;
+    font-size: inherit;
+  }
   .markdown-text :global(a:focus-visible) {
     border-radius: var(--radius-sm);
     outline: 2px solid var(--ring);
@@ -108,6 +161,10 @@
     background: transparent;
     padding: 0;
     white-space: pre;
+  }
+  .markdown-text :global(.highlighted-code .sh__line) {
+    display: block;
+    min-height: 1em;
   }
   .markdown-text :global(.table-scroll) {
     max-width: 100%;

@@ -20,6 +20,8 @@
     "@lucide/svelte": "^1.40.0",
     "@tauri-apps/api": "2.11.1",
     "@tauri-apps/plugin-dialog": "2.7.3",
+    "@tauri-apps/plugin-opener": "^2.5.5",
+    "sugar-high": "2.2.2",
     "svelte": "5.57.0",
     "zod": "^4.0.0"
   },

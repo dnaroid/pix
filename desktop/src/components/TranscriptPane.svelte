@@ -1,8 +1,12 @@
 <script lang="ts">
   import Brain from "@lucide/svelte/icons/brain";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import type { Attachment } from "../lib/attachments";
+  import { toolPresentation } from "../lib/tool-presentation";
   import { groupTranscriptItems, type TranscriptState } from "../lib/transcript";
+  import AttachmentGrid from "./AttachmentGrid.svelte";
   import MarkdownText from "./MarkdownText.svelte";
+  import ToolResult from "./ToolResult.svelte";
   import ToolStatusIcon from "./ToolStatusIcon.svelte";
 
   let {
@@ -13,6 +17,8 @@
     operationRunning,
     pane = $bindable(null),
     onChooseWorkspace,
+    onOpenAttachment,
+    onOpenProjectFile,
   }: {
     transcript: TranscriptState;
     activeSessionId: string | null;
@@ -21,6 +27,8 @@
     operationRunning: boolean;
     pane?: HTMLDivElement | null;
     onChooseWorkspace: () => void;
+    onOpenAttachment: (attachment: Attachment) => void;
+    onOpenProjectFile: (path: string) => void | Promise<void>;
   } = $props();
 
   let displayItems = $derived(groupTranscriptItems(transcript.items));
@@ -57,21 +65,27 @@
         {#if item.type === "message"}
           {#if item.role === "thought"}
             <details class="group mb-5 max-w-[1120px] px-0.5 text-xs text-muted-foreground">
-              <summary class="cursor-pointer text-muted-foreground select-none group-open:mb-2">
-                <Brain class="mr-1 inline-block h-3 w-3 text-primary" aria-hidden="true" />thinking
+              <summary class="flex min-h-5 cursor-pointer list-none items-center gap-2 text-muted-foreground select-none group-open:mb-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+                <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
+                <Brain class="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
+                <span>thinking</span>
               </summary>
               <div class="ml-3.5 border-l border-border pl-2.5 text-muted-foreground">
-                <MarkdownText text={item.text} compact />
+                <MarkdownText text={item.text} compact {onOpenProjectFile} />
               </div>
             </details>
           {:else if item.role === "user"}
-            <article class="mr-0 mb-6 ml-auto w-fit max-w-[min(780px,86%)] rounded-xl rounded-br-md border border-border bg-card px-3.5 py-2.5 text-card-foreground shadow-xs">
-              <MarkdownText text={item.text} />
-            </article>
+            <div class="mb-6 flex justify-end">
+              <article class="w-fit max-w-[min(780px,86%)] rounded-xl rounded-br-md border border-border bg-card px-3.5 pt-3 pb-2 text-card-foreground shadow-xs">
+                <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} />
+                {#if item.text}<MarkdownText text={item.text} {onOpenProjectFile} />{/if}
+              </article>
+            </div>
           {:else}
             <article class="mb-6 max-w-[1120px] text-foreground">
               <div class="mb-1.5 text-[11px] font-semibold text-muted-foreground">Pix</div>
-              <MarkdownText text={item.text} />
+              <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} />
+              {#if item.text}<MarkdownText text={item.text} {onOpenProjectFile} />{/if}
             </article>
           {/if}
         {:else}
@@ -79,27 +93,41 @@
             "group mb-4 max-w-[1120px] overflow-hidden bg-transparent text-muted-foreground",
             item.status === "failed" && "text-destructive",
           ]} open={item.active && !operationRunning}>
-            <summary class="flex min-h-5 cursor-pointer list-none items-center gap-2 overflow-hidden select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+            <summary class="grid min-h-5 cursor-pointer list-none grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-2 overflow-hidden select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
               <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
               <ToolStatusIcon status={item.status} />
               <strong class="min-w-0 truncate text-xs font-normal text-foreground">
                 {item.tools.length} tool {item.tools.length === 1 ? "call" : "calls"}
               </strong>
-              <span class="ml-auto shrink-0 text-[10px] lowercase text-muted-foreground">{item.status.replace("_", " ")}</span>
             </summary>
-            <div class="mt-2 ml-3.5 space-y-3 border-l border-border pl-3">
+            <div class="mt-2 ml-[7px] space-y-3 border-l border-border pl-3">
               {#each item.tools as tool (tool.id)}
+                {@const presentation = toolPresentation(tool)}
                 <section>
-                  <div class="flex min-h-5 items-center gap-2 overflow-hidden">
-                    <ToolStatusIcon status={tool.status} />
-                    {#if tool.kind !== "other"}
-                      <span class="shrink-0 text-xs lowercase">{tool.kind}</span>
-                    {/if}
-                    <strong class="min-w-0 truncate text-xs font-normal text-foreground">{tool.title}</strong>
-                    <span class="ml-auto shrink-0 text-[10px] lowercase text-muted-foreground">{tool.status.replace("_", " ")}</span>
-                  </div>
-                  {#if tool.content}
-                    <pre class="mt-2 max-h-[220px] overflow-auto rounded-lg border border-border bg-muted px-3 py-2.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-foreground">{tool.content}</pre>
+                  {#if tool.content || tool.diffs.length > 0 || tool.attachments.length > 0}
+                    <details class="group/result">
+                      <summary class="grid min-h-5 cursor-pointer list-none grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-2 overflow-hidden select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+                        <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open/result:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
+                        <ToolStatusIcon status={tool.status} />
+                        <span class="flex min-w-0 items-baseline gap-x-2 overflow-hidden font-mono text-xs">
+                          <strong class="tool-name shrink-0 font-bold" data-tool-tone={presentation.tone}>{presentation.name}</strong>
+                          {#if presentation.args}<span class="min-w-0 truncate text-muted-foreground">{presentation.args}</span>{/if}
+                        </span>
+                      </summary>
+                      <AttachmentGrid attachments={tool.attachments} variant="tool" onOpen={onOpenAttachment} />
+                      {#if tool.content || tool.diffs.length > 0}
+                        <ToolResult content={tool.content} diffs={tool.diffs} kind={tool.kind} title={tool.title} path={tool.path} {onOpenProjectFile} />
+                      {/if}
+                    </details>
+                  {:else}
+                    <div class="grid min-h-5 grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-2 overflow-hidden">
+                      <span aria-hidden="true"></span>
+                      <ToolStatusIcon status={tool.status} />
+                      <span class="flex min-w-0 items-baseline gap-x-2 overflow-hidden font-mono text-xs">
+                        <strong class="tool-name shrink-0 font-bold" data-tool-tone={presentation.tone}>{presentation.name}</strong>
+                        {#if presentation.args}<span class="min-w-0 truncate text-muted-foreground">{presentation.args}</span>{/if}
+                      </span>
+                    </div>
                   {/if}
                 </section>
               {/each}
@@ -135,4 +163,13 @@
       transparent 100%
     );
   }
+
+  .tool-name[data-tool-tone="accent"] { color: var(--tool-accent); }
+  .tool-name[data-tool-tone="info"] { color: var(--tool-info); }
+  .tool-name[data-tool-tone="muted"] { color: var(--tool-muted); }
+  .tool-name[data-tool-tone="mutation"] { color: var(--tool-mutation); }
+  .tool-name[data-tool-tone="search"] { color: var(--tool-search); }
+  .tool-name[data-tool-tone="success"] { color: var(--tool-success); }
+  .tool-name[data-tool-tone="title"] { color: var(--tool-title); }
+  .tool-name[data-tool-tone="warning"] { color: var(--tool-warning); }
 </style>

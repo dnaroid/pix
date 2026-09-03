@@ -23,6 +23,7 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-overlay: var(--overlay);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -69,6 +70,7 @@
   --border: #dad9d4;
   --input: #b4b2a7;
   --ring: #c96442;
+  --overlay: rgb(0 0 0 / 0.58);
   --sidebar: #f5f4ee;
   --sidebar-foreground: #3d3d3a;
   --sidebar-primary: #c96442;
@@ -89,6 +91,27 @@
   --prompt: var(--primary);
   --danger: var(--destructive);
   --status: #697655;
+  --tool-warning: #9a631d;
+  --tool-mutation: #8c526a;
+  --tool-search: #68578c;
+  --tool-success: #47794c;
+  --tool-info: #246b8e;
+  --tool-accent: #315f9f;
+  --tool-muted: #64748b;
+  --tool-title: #5d6978;
+
+  /* Sugar High syntax roles stay anchored to the active semantic theme. */
+  --sh-identifier: var(--foreground);
+  --sh-keyword: var(--primary);
+  --sh-string: var(--status);
+  --sh-class: color-mix(in srgb, var(--primary) 72%, var(--foreground));
+  --sh-property: color-mix(in srgb, var(--status) 74%, var(--foreground));
+  --sh-entity: var(--status);
+  --sh-jsxliterals: var(--primary);
+  --sh-sign: var(--muted-foreground);
+  --sh-comment: var(--muted-foreground);
+  --sh-break: inherit;
+  --sh-space: inherit;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -112,6 +135,7 @@
     --border: #3e3e38;
     --input: #52514a;
     --ring: #d97757;
+    --overlay: rgb(0 0 0 / 0.72);
     --sidebar: #1f1e1d;
     --sidebar-foreground: #c3c0b6;
     --sidebar-primary: #343434;
@@ -122,6 +146,14 @@
     --theme-shadow-xs: 0 1px 3px rgb(0 0 0 / 0.22);
     --theme-shadow-md: 0 12px 32px rgb(0 0 0 / 0.24);
     --status: #a5b38c;
+    --tool-warning: #d49a4a;
+    --tool-mutation: #b87f98;
+    --tool-search: #9780bb;
+    --tool-success: #7ca982;
+    --tool-info: #7fb3c8;
+    --tool-accent: #7aa2d6;
+    --tool-muted: #7d8590;
+    --tool-title: #858f99;
   }
 }
 
@@ -150,4 +182,8 @@ html, body, #app { width: 100%; height: 100%; margin: 0; overflow: hidden; }
 button, textarea, select, input { font: inherit; }
 button { color: inherit; }
 button, select, textarea, input { letter-spacing: inherit; }
+:focus-visible {
+  outline: none;
+  --tw-ring-shadow: 0 0 #0000;
+}
 ::selection { color: var(--primary-foreground); background: var(--primary); }

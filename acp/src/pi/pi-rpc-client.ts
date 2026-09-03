@@ -100,6 +100,8 @@ export type PiAgentMessage =
 export interface PiMessagePart {
 	readonly type: string;
 	readonly text?: string | undefined;
+	readonly data?: string | undefined;
+	readonly mimeType?: string | undefined;
 	readonly id?: string | undefined;
 	readonly name?: string | undefined;
 	readonly arguments?: Record<string, unknown> | undefined;

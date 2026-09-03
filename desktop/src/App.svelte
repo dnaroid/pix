@@ -1,7 +1,10 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
+  import { invoke } from "@tauri-apps/api/core";
+  import { getCurrentWindow } from "@tauri-apps/api/window";
   import { open } from "@tauri-apps/plugin-dialog";
   import type {
+    ContentBlock,
     CreateElicitationRequest,
     CreateElicitationResponse,
     SessionConfigOption,
@@ -26,6 +29,17 @@
   } from "./lib/session-tabs";
   import { parseElicitation, type ElicitationField } from "./lib/elicitation";
   import {
+    MAX_ATTACHMENTS,
+    MAX_EMBEDDED_ATTACHMENT_BYTES,
+    MAX_EMBEDDED_PROMPT_BYTES,
+    attachmentFromFile,
+    attachmentKind,
+    fileUriFromPath,
+    mimeTypeForName,
+    type Attachment,
+    type AttachmentFile,
+  } from "./lib/attachments";
+  import {
     buildRecentProjects,
     isAbsoluteProjectPath,
     parseRecentProjects,
@@ -40,6 +54,8 @@
   import PromptComposer from "./components/PromptComposer.svelte";
   import StatusBar from "./components/StatusBar.svelte";
   import ElicitationDialog from "./components/ElicitationDialog.svelte";
+  import PreviewDialog from "./components/PreviewDialog.svelte";
+  import type { ProjectFilePreview } from "./lib/project-files";
 
   type ConnectionStatus = "starting" | "ready" | "error" | "stopped";
   type PendingElicitation = {
@@ -61,6 +77,7 @@
   let transcript = $state<TranscriptState>(emptyTranscript);
   let configOptions = $state<SessionConfigOption[]>([]);
   let promptText = $state("");
+  let promptAttachments = $state<Attachment[]>([]);
   let promptRunning = $state(false);
   let operationRunning = $state(false);
   let changingConfig = $state<string | null>(null);
@@ -70,10 +87,21 @@
   let projectSelectorOpen = $state(false);
   let sessionSelectorOpen = $state(false);
   let sessionSelectorTrigger = $state<HTMLButtonElement | null>(null);
+  let dragActive = $state(false);
+  let mediaPreview = $state<Attachment | null>(null);
+  let projectFilePreview = $state<ProjectFilePreview | null>(null);
+  let imagePromptSupported = false;
   let transcriptPane = $state<HTMLDivElement | null>(null);
   let localMessageId = 0;
   let reconnectPromise: Promise<void> | null = null;
   let sessionRefreshGeneration = 0;
+  let attachmentSequence = 0;
+  let attachmentDraftGeneration = 0;
+  let attachmentAddQueue = Promise.resolve();
+  let sessionUpdateQueue = Promise.resolve();
+  let previousAttachmentDraftKey: string | null = null;
+  let projectFilePreviewGeneration = 0;
+  const registeredAttachmentPaths = new Set<string>();
 
   const canUseSession = $derived(status === "ready" && !!workspace && !operationRunning);
   const activeTitle = $derived(
@@ -86,15 +114,44 @@
     closedSessionTabs,
     activeSessionId,
   ));
+  const attachmentDraftKey = $derived(`${workspace}\0${activeSessionId ?? ""}`);
+
+  $effect(() => {
+    const key = attachmentDraftKey;
+    if (previousAttachmentDraftKey !== null && previousAttachmentDraftKey !== key) {
+      invalidateAttachmentDraft();
+      mediaPreview = null;
+      projectFilePreview = null;
+      projectFilePreviewGeneration += 1;
+    }
+    previousAttachmentDraftKey = key;
+  });
 
   onMount(() => {
     let disposed = false;
+    let unlistenDragDrop: (() => void) | undefined;
     restoreProjects();
+    void getCurrentWindow().onDragDropEvent(({ payload }) => {
+      if (payload.type === "enter" || payload.type === "over") {
+        dragActive = !!activeSessionId && !promptRunning && !operationRunning;
+      } else if (payload.type === "leave") {
+        dragActive = false;
+      } else if (payload.type === "drop") {
+        dragActive = false;
+        if (activeSessionId && !promptRunning && !operationRunning) {
+          void addAttachmentPaths(payload.paths);
+        }
+      }
+    }).then((unlisten) => {
+      if (disposed) unlisten();
+      else unlistenDragDrop = unlisten;
+    }).catch(reportError);
     void connect().then(() => {
       if (disposed) void client?.dispose();
     });
     return () => {
       disposed = true;
+      unlistenDragDrop?.();
       pendingElicitation?.resolve({ action: "cancel" });
       pendingElicitation = null;
       void client?.dispose();
@@ -130,11 +187,12 @@
     });
     client = next;
     try {
-      await next.start();
+      const initialization = await next.start();
       if (client !== next) {
         await next.dispose();
         return;
       }
+      imagePromptSupported = initialization.agentCapabilities?.promptCapabilities?.image === true;
       status = "ready";
       if (workspace) await openWorkspaceSession();
     } catch (error) {
@@ -186,8 +244,25 @@
         : session);
       return;
     }
-    transcript = applySessionUpdate(transcript, update);
-    void scrollToLatest();
+    sessionUpdateQueue = sessionUpdateQueue.then(async () => {
+      if (notification.sessionId !== activeSessionId) return;
+      const nextTranscript = applySessionUpdate(transcript, update);
+      await registerTranscriptAttachments(nextTranscript);
+      if (notification.sessionId !== activeSessionId) return;
+      transcript = nextTranscript;
+      void scrollToLatest();
+    });
+  }
+
+  async function registerTranscriptAttachments(nextTranscript: TranscriptState): Promise<void> {
+    const paths = nextTranscript.items
+      .flatMap((item) => item.attachments)
+      .flatMap((attachment) => attachment.path ? [attachment.path] : [])
+      .filter((path) => !registeredAttachmentPaths.has(path));
+    for (const path of paths) registeredAttachmentPaths.add(path);
+    await Promise.all(paths.map((path) =>
+      invoke<AttachmentFile[]>("inspect_attachments", { paths: [path] }).catch(() => []),
+    ));
   }
 
   async function chooseWorkspace(): Promise<void> {
@@ -499,16 +574,241 @@
     void loadSession(sessionId);
   }
 
+  async function chooseAttachments(): Promise<void> {
+    if (!activeSessionId || promptRunning || operationRunning) return;
+    try {
+      const selected = await open({
+        directory: false,
+        multiple: true,
+        title: "Attach files",
+        ...(workspace ? { defaultPath: workspace } : {}),
+      });
+      if (!selected) return;
+      await addAttachmentPaths(typeof selected === "string" ? [selected] : selected);
+    } catch (error) {
+      reportError(error);
+    }
+  }
+
+  function addAttachmentPaths(paths: readonly string[]): Promise<void> {
+    const key = attachmentDraftKey;
+    const generation = attachmentDraftGeneration;
+    const operation = attachmentAddQueue.then(() => addAttachmentPathsNow(paths, key, generation));
+    attachmentAddQueue = operation.catch(() => {});
+    return operation;
+  }
+
+  async function addAttachmentPathsNow(
+    paths: readonly string[],
+    key: string,
+    generation: number,
+  ): Promise<void> {
+    if (!attachmentDraftIsCurrent(key, generation)) return;
+    const existingPaths = new Set(promptAttachments.flatMap((attachment) => attachment.path ? [attachment.path] : []));
+    const available = MAX_ATTACHMENTS - promptAttachments.length;
+    const candidates = paths.filter((path) => !existingPaths.has(path)).slice(0, Math.max(0, available));
+    if (candidates.length === 0) {
+      if (paths.length > 0 && available <= 0) errorMessage = `Attach at most ${MAX_ATTACHMENTS} files.`;
+      return;
+    }
+    try {
+      const files = await invoke<AttachmentFile[]>("inspect_attachments", { paths: candidates });
+      if (!attachmentDraftIsCurrent(key, generation)) return;
+      const attachments = files.map((file) => attachmentFromFile(file, nextAttachmentId()));
+      promptAttachments = [...promptAttachments, ...attachments];
+      if (candidates.length < paths.length) errorMessage = `Only the first ${MAX_ATTACHMENTS} files were attached.`;
+    } catch (error) {
+      reportError(error);
+    }
+  }
+
+  function addPastedAttachments(files: readonly File[]): Promise<void> {
+    const key = attachmentDraftKey;
+    const generation = attachmentDraftGeneration;
+    const operation = attachmentAddQueue.then(() => addPastedAttachmentsNow(files, key, generation));
+    attachmentAddQueue = operation.catch(() => {});
+    return operation;
+  }
+
+  async function addPastedAttachmentsNow(
+    files: readonly File[],
+    key: string,
+    generation: number,
+  ): Promise<void> {
+    if (!attachmentDraftIsCurrent(key, generation)) return;
+    if (!activeSessionId || promptRunning || operationRunning || files.length === 0) return;
+    const available = MAX_ATTACHMENTS - promptAttachments.length;
+    if (available <= 0) {
+      errorMessage = `Attach at most ${MAX_ATTACHMENTS} files.`;
+      return;
+    }
+    try {
+      const attachments: Attachment[] = [];
+      for (const file of files.slice(0, available)) {
+        if (!attachmentDraftIsCurrent(key, generation)) return;
+        if (file.size > MAX_EMBEDDED_ATTACHMENT_BYTES) {
+          throw new Error(`${file.name} is too large to paste (maximum 25 MB).`);
+        }
+        const data = await fileBase64(file);
+        const cached = await invoke<AttachmentFile>("cache_attachment", { name: file.name, data });
+        if (!attachmentDraftIsCurrent(key, generation)) return;
+        const inferredMimeType = mimeTypeForName(file.name);
+        const mimeType = file.type || inferredMimeType;
+        const kind = attachmentKind(mimeType);
+        const base = attachmentFromFile(cached, nextAttachmentId());
+        attachments.push({
+          ...base,
+          kind,
+          mimeType,
+          ...(kind === "image" ? { dataUrl: `data:${mimeType};base64,${data}` } : {}),
+        });
+      }
+      promptAttachments = [...promptAttachments, ...attachments];
+      if (files.length > available) errorMessage = `Only the first ${MAX_ATTACHMENTS} files were attached.`;
+    } catch (error) {
+      reportError(error);
+    }
+  }
+
+  function attachmentDraftIsCurrent(key: string, generation: number): boolean {
+    return key === attachmentDraftKey
+      && generation === attachmentDraftGeneration
+      && !!activeSessionId
+      && !promptRunning
+      && !operationRunning;
+  }
+
+  function invalidateAttachmentDraft(): void {
+    attachmentDraftGeneration += 1;
+    promptAttachments = [];
+  }
+
+  function removeAttachment(id: string): void {
+    promptAttachments = promptAttachments.filter((attachment) => attachment.id !== id);
+  }
+
+  function nextAttachmentId(): string {
+    attachmentSequence += 1;
+    return `local-attachment:${attachmentSequence}`;
+  }
+
+  async function activateAttachment(attachment: Attachment): Promise<void> {
+    if (attachment.path) {
+      try {
+        await invoke<AttachmentFile[]>("inspect_attachments", { paths: [attachment.path] });
+      } catch (error) {
+        reportError(error);
+        return;
+      }
+    }
+    if (attachment.kind === "image" || attachment.kind === "video") {
+      projectFilePreview = null;
+      mediaPreview = attachment;
+      return;
+    }
+    if (!attachment.path) {
+      errorMessage = `Cannot open ${attachment.name}: no local path is available.`;
+      return;
+    }
+    try {
+      await invoke("open_attachment", { path: attachment.path });
+    } catch (error) {
+      reportError(error);
+    }
+  }
+
+  async function openProjectFile(path: string): Promise<void> {
+    if (!workspace) {
+      errorMessage = "Open a workspace before previewing project files.";
+      return;
+    }
+
+    const requestWorkspace = workspace;
+    const generation = ++projectFilePreviewGeneration;
+    try {
+      const preview = await invoke<ProjectFilePreview>("read_project_file", {
+        workspace: requestWorkspace,
+        path,
+      });
+      if (generation !== projectFilePreviewGeneration || workspace !== requestWorkspace) return;
+      mediaPreview = null;
+      projectFilePreview = preview;
+    } catch (error) {
+      if (generation === projectFilePreviewGeneration) reportError(error);
+    }
+  }
+
+  async function buildPromptBlocks(text: string, attachments: readonly Attachment[]): Promise<ContentBlock[]> {
+    const blocks: ContentBlock[] = [];
+    let embeddedBytes = 0;
+    if (text) blocks.push({ type: "text", text });
+    for (const attachment of attachments) {
+      if (attachment.kind === "image" && imagePromptSupported) {
+        const data = await imageDataForPrompt(attachment);
+        embeddedBytes += Math.floor(data.length * 3 / 4);
+        if (embeddedBytes > MAX_EMBEDDED_PROMPT_BYTES) {
+          throw new Error("Attached images exceed the 50 MB combined prompt limit.");
+        }
+        blocks.push({
+          type: "image",
+          data,
+          mimeType: attachment.mimeType,
+          ...(attachment.path ? { uri: fileUriFromPath(attachment.path) } : {}),
+        });
+        continue;
+      }
+      if (!attachment.path) {
+        throw new Error(`${attachment.name} cannot be sent because it has no local path.`);
+      }
+      blocks.push({
+        type: "resource_link",
+        uri: fileUriFromPath(attachment.path),
+        name: attachment.name,
+        mimeType: attachment.mimeType,
+        ...(attachment.size ? { size: attachment.size } : {}),
+      });
+    }
+    return blocks;
+  }
+
+  async function imageDataForPrompt(attachment: Attachment): Promise<string> {
+    if (attachment.dataUrl) return attachment.dataUrl.slice(attachment.dataUrl.indexOf(",") + 1);
+    if (attachment.path) return invoke<string>("read_attachment_base64", { path: attachment.path });
+    throw new Error(`Cannot read ${attachment.name}.`);
+  }
+
+  async function fileBase64(file: File): Promise<string> {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let binary = "";
+    const chunkSize = 0x8000;
+    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+    }
+    return btoa(binary);
+  }
+
   async function submitPrompt(): Promise<void> {
     const text = promptText.trim();
-    if (!client || !activeSessionId || !text || promptRunning) return;
-    promptText = "";
+    const attachments = promptAttachments;
+    const sessionId = activeSessionId;
+    const draftKey = attachmentDraftKey;
+    const draftGeneration = attachmentDraftGeneration;
+    if (!client || !sessionId || (!text && attachments.length === 0) || promptRunning) return;
     promptRunning = true;
     errorMessage = null;
-    transcript = appendLocalUserMessage(transcript, text, `local:${++localMessageId}`);
-    await scrollToLatest();
     try {
-      await client.prompt(activeSessionId, text);
+      const blocks = await buildPromptBlocks(text, attachments);
+      if (
+        sessionId !== activeSessionId
+        || draftKey !== attachmentDraftKey
+        || draftGeneration !== attachmentDraftGeneration
+        || attachments !== promptAttachments
+      ) return;
+      promptText = "";
+      invalidateAttachmentDraft();
+      transcript = appendLocalUserMessage(transcript, text, `local:${++localMessageId}`, attachments);
+      await scrollToLatest();
+      await client.prompt(sessionId, blocks);
       await refreshSessions();
     } catch (error) {
       reportError(error);
@@ -639,15 +939,23 @@
       {operationRunning}
       bind:pane={transcriptPane}
       onChooseWorkspace={() => void chooseWorkspace()}
+      onOpenAttachment={(attachment) => void activateAttachment(attachment)}
+      onOpenProjectFile={openProjectFile}
     />
 
     <PromptComposer
       bind:promptText
+      attachments={promptAttachments}
       {activeSessionId}
       ready={status === "ready"}
       {promptRunning}
+      {dragActive}
       onSubmit={submitPrompt}
       onCancel={cancelPrompt}
+      onChooseAttachments={chooseAttachments}
+      onPasteAttachments={addPastedAttachments}
+      onRemoveAttachment={removeAttachment}
+      onOpenAttachment={(attachment) => void activateAttachment(attachment)}
     />
   </main>
 
@@ -669,4 +977,10 @@
     onValueChange={updateElicitationValue}
     onAnswer={answerElicitation}
   />
+{/if}
+
+{#if projectFilePreview}
+  <PreviewDialog file={projectFilePreview} onClose={() => projectFilePreview = null} />
+{:else if mediaPreview}
+  <PreviewDialog attachment={mediaPreview} onClose={() => mediaPreview = null} />
 {/if}

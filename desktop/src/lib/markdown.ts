@@ -1,3 +1,5 @@
+import { highlightCode } from "./syntax-highlight";
+
 const MAX_BLOCK_DEPTH = 4;
 const SAFE_LINK_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
 
@@ -11,7 +13,8 @@ type TableAlignment = "center" | "left" | "right" | undefined;
 
 /**
  * Render the deliberately small Markdown subset used by the transcript.
- * All source text is escaped here before the result reaches Svelte's `{@html}`.
+ * All source text is safely escaped here or by the syntax highlighter before
+ * the result reaches Svelte's `{@html}`.
  */
 export function renderMarkdown(text: string): string {
   if (!text) return "";
@@ -38,9 +41,8 @@ function renderBlocks(lines: readonly string[], depth: number): string {
         index += 1;
       }
       if (index < lines.length) index += 1;
-      const language = normalizedLanguage(fence.language);
-      const languageAttribute = language ? ` data-language="${escapeAttribute(language)}"` : "";
-      output.push(`<pre><code${languageAttribute}>${escapeHtml(body.join("\n"))}</code></pre>`);
+      const highlighted = highlightCode(body.join("\n"), fence.language);
+      output.push(`<pre><code class="highlighted-code" data-language="${highlighted.language}">${highlighted.html}</code></pre>`);
       continue;
     }
 
@@ -114,10 +116,6 @@ function isClosingFence(line: string, fence: Fence): boolean {
   let markerCount = 0;
   while (trimmed[markerCount] === fence.marker) markerCount += 1;
   return markerCount >= fence.length && trimmed.slice(markerCount).trim() === "";
-}
-
-function normalizedLanguage(language: string): string {
-  return /^[a-z0-9_+#.-]{1,32}$/i.test(language) ? language.toLowerCase() : "";
 }
 
 function parseList(lines: readonly string[], start: number): { html: string; lineCount: number } | undefined {
@@ -237,7 +235,7 @@ function isBlockStart(lines: readonly string[], index: number): boolean {
   );
 }
 
-function renderInline(text: string, depth = 0): string {
+function renderInline(text: string, depth = 0, allowLinks = true): string {
   let output = "";
   let index = 0;
   let nextLinkLabelEnd = text.indexOf("](");
@@ -257,27 +255,34 @@ function renderInline(text: string, depth = 0): string {
       const marker = "`".repeat(markerLength);
       const end = text.indexOf(marker, index + markerLength);
       if (end >= 0) {
-        output += `<code>${escapeHtml(text.slice(index + markerLength, end).replace(/\n/g, " "))}</code>`;
+        const code = text.slice(index + markerLength, end).replace(/\n/g, " ");
+        const codeLabel = `<code>${escapeHtml(code)}</code>`;
+        const projectPath = allowLinks ? normalizeInlineProjectFilePath(code) : undefined;
+        output += projectPath ? projectFileLink(projectPath, codeLabel) : codeLabel;
         index = end + markerLength;
         continue;
       }
     }
 
-    const linkStart = char === "!" && next === "[" ? index + 1 : char === "[" ? index : -1;
+    let linkStart = -1;
+    if (allowLinks && char === "!" && next === "[") {
+      linkStart = index + 1;
+    } else if (allowLinks && char === "[") {
+      linkStart = index;
+    }
     while (nextLinkLabelEnd >= 0 && nextLinkLabelEnd < linkStart) {
       nextLinkLabelEnd = text.indexOf("](", nextLinkLabelEnd + 2);
     }
     if (linkStart >= 0 && nextLinkLabelEnd >= 0) {
       const link = parseLink(text, linkStart, nextLinkLabelEnd);
       if (link) {
-        const label = depth < MAX_BLOCK_DEPTH ? renderInline(link.label, depth + 1) : escapeHtml(link.label);
+        const label = depth < MAX_BLOCK_DEPTH
+          ? renderInline(link.label, depth + 1, false)
+          : escapeHtml(link.label);
         if (char === "!") {
           output += label;
         } else {
-          const href = safeHref(link.destination);
-          output += href
-            ? `<a href="${escapeAttribute(href)}" target="_blank" rel="noopener noreferrer">${label}</a>`
-            : label;
+          output += linkForDestination(link.destination, label);
         }
         index = link.end;
         continue;
@@ -285,12 +290,19 @@ function renderInline(text: string, depth = 0): string {
       nextLinkLabelEnd = text.indexOf("](", nextLinkLabelEnd + 2);
     }
 
+    const automaticLink = allowLinks ? parseAutomaticLink(text, index) : undefined;
+    if (automaticLink) {
+      output += externalLink(automaticLink.href, escapeHtml(automaticLink.label));
+      index = automaticLink.end;
+      continue;
+    }
+
     const delimiter = inlineDelimiter(text, index);
     if (delimiter && depth < MAX_BLOCK_DEPTH) {
       const end = text.indexOf(delimiter, index + delimiter.length);
       if (end > index + delimiter.length) {
         const tag = delimiter === "~~" ? "del" : delimiter.length === 2 ? "strong" : "em";
-        output += `<${tag}>${renderInline(text.slice(index + delimiter.length, end), depth + 1)}</${tag}>`;
+        output += `<${tag}>${renderInline(text.slice(index + delimiter.length, end), depth + 1, allowLinks)}</${tag}>`;
         index = end + delimiter.length;
         continue;
       }
@@ -303,12 +315,97 @@ function renderInline(text: string, depth = 0): string {
     }
 
     let end = index + 1;
-    while (end < text.length && !/[\\`!*_[\]~\n]/.test(text[end] ?? "")) end += 1;
+    while (
+      end < text.length
+      && !/[\\`!*_[\]~\n]/.test(text[end] ?? "")
+      && !(allowLinks && hasAutomaticLinkPrefix(text, end))
+    ) {
+      end += 1;
+    }
     output += escapeHtml(text.slice(index, end));
     index = end;
   }
 
   return output;
+}
+
+function externalLink(href: string, label: string): string {
+  return `<a href="${escapeAttribute(href)}" data-external-link rel="noopener noreferrer">${label}</a>`;
+}
+
+function linkForDestination(destination: string, label: string): string {
+  const externalHref = normalizeExternalHref(destination);
+  if (externalHref) return externalLink(externalHref, label);
+
+  const projectPath = normalizeProjectFileDestination(destination);
+  if (projectPath) return projectFileLink(projectPath, label);
+
+  return label;
+}
+
+function projectFileLink(path: string, label: string): string {
+  const escapedPath = escapeAttribute(path);
+  return `<a href="#" data-project-file="${escapedPath}" title="Preview ${escapedPath}">${label}</a>`;
+}
+
+function normalizeInlineProjectFilePath(code: string): string | undefined {
+  const candidate = code.trim().replace(/:\d+(?::\d+)?$/, "");
+  const path = normalizeProjectFileDestination(candidate);
+  if (!path) return undefined;
+
+  const fileName = path.split("/").at(-1) ?? "";
+  const hasFileExtension = /\.[A-Za-z\d_-]{1,16}$/.test(fileName);
+  const hasExplicitRelativePrefix = candidate.startsWith("./") || candidate.startsWith(".\\");
+  const isConventionalFileName = /^(?:Dockerfile|Makefile|README|LICENSE|CHANGELOG|Gemfile|Rakefile)$/i.test(fileName);
+  return hasFileExtension || hasExplicitRelativePrefix || isConventionalFileName ? path : undefined;
+}
+
+function parseAutomaticLink(
+  text: string,
+  start: number,
+): { href: string; label: string; end: number } | undefined {
+  if (!hasAutomaticLinkPrefix(text, start) || !isAutomaticLinkBoundary(text, start)) {
+    return undefined;
+  }
+
+  let end = start;
+  while (end < text.length && !/[\s<>"'`]/.test(text[end] ?? "")) end += 1;
+  end = trimAutomaticLinkEnd(text, start, end);
+  const label = text.slice(start, end);
+  const href = normalizeExternalHref(label);
+  return href ? { href, label, end } : undefined;
+}
+
+function hasAutomaticLinkPrefix(text: string, start: number): boolean {
+  const prefix = text.slice(start, start + 8).toLowerCase();
+  return prefix.startsWith("https://")
+    || prefix.startsWith("http://")
+    || prefix.startsWith("mailto:");
+}
+
+function isAutomaticLinkBoundary(text: string, start: number): boolean {
+  if (start === 0) return true;
+  return /[\s([{]/.test(text[start - 1] ?? "");
+}
+
+function trimAutomaticLinkEnd(text: string, start: number, initialEnd: number): number {
+  let end = initialEnd;
+  while (end > start && /[.,!?;:*]/.test(text[end - 1] ?? "")) end -= 1;
+
+  for (const [opening, closing] of [["(", ")"], ["[", "]"], ["{", "}"]] as const) {
+    let openingCount = 0;
+    let closingCount = 0;
+    for (let index = start; index < end; index += 1) {
+      if (text[index] === opening) openingCount += 1;
+      if (text[index] === closing) closingCount += 1;
+    }
+    while (end > start && text[end - 1] === closing && closingCount > openingCount) {
+      end -= 1;
+      closingCount -= 1;
+    }
+  }
+
+  return end;
 }
 
 function inlineDelimiter(text: string, index: number): string {
@@ -349,7 +446,7 @@ function parseLink(
   return undefined;
 }
 
-function safeHref(destination: string): string | undefined {
+export function normalizeExternalHref(destination: string): string | undefined {
   if (!destination || /[\u0000-\u001f\u007f]/.test(destination)) return undefined;
   try {
     const url = new URL(destination);
@@ -357,6 +454,31 @@ function safeHref(destination: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** Normalize a Markdown destination that can safely be resolved inside the active workspace. */
+export function normalizeProjectFileDestination(destination: string): string | undefined {
+  if (!destination || /[\u0000-\u001f\u007f]/.test(destination)) return undefined;
+
+  let value = destination.trim();
+  if (value.startsWith("<") && value.endsWith(">")) value = value.slice(1, -1).trim();
+  value = value.split(/[?#]/, 1)[0] ?? "";
+  try {
+    value = decodeURIComponent(value);
+  } catch {
+    return undefined;
+  }
+
+  if (/[\u0000-\u001f\u007f]/.test(value)) return undefined;
+  value = value.replaceAll("\\", "/");
+  if (!value || value.startsWith("/") || /^[A-Za-z][A-Za-z\d+.-]*:/.test(value)) {
+    return undefined;
+  }
+
+  const segments = value.split("/");
+  if (segments.some((segment) => segment === "..")) return undefined;
+  const normalized = segments.filter((segment) => segment && segment !== ".").join("/");
+  return normalized || undefined;
 }
 
 function countRun(text: string, start: number, marker: string): number {

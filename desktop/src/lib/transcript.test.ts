@@ -54,9 +54,12 @@ describe("transcript reducer", () => {
     let state = applySessionUpdate(emptyTranscript, {
       sessionUpdate: "tool_call",
       toolCallId: "tool-1",
+      name: "Write",
       title: "Write file",
       kind: "edit",
       status: "in_progress",
+      rawInput: { path: "file" },
+      locations: [{ path: "/workspace/file.ts" }],
     });
     state = applySessionUpdate(state, {
       sessionUpdate: "tool_call_update",
@@ -68,11 +71,75 @@ describe("transcript reducer", () => {
     expect(state.items).toEqual([
       expect.objectContaining({
         type: "tool",
+        name: "Write",
         title: "Write file",
         status: "completed",
+        rawInput: { path: "file" },
         content: "ok",
+        path: "/workspace/file.ts",
       }),
     ]);
+  });
+
+  it("keeps image chunks and persisted file markers as message attachments", () => {
+    let state = applySessionUpdate(emptyTranscript, {
+      sessionUpdate: "user_message_chunk",
+      messageId: "message-1",
+      content: { type: "text", text: "Review\n\n[Pix attachment: file:///tmp/demo.mp4]" },
+    });
+    state = applySessionUpdate(state, {
+      sessionUpdate: "user_message_chunk",
+      messageId: "message-1",
+      content: { type: "image", data: "aGk=", mimeType: "image/png" },
+    });
+
+    expect(state.items).toEqual([
+      expect.objectContaining({
+        type: "message",
+        text: "Review",
+        attachments: [
+          expect.objectContaining({ kind: "video", path: "/tmp/demo.mp4" }),
+          expect.objectContaining({ kind: "image", dataUrl: "data:image/png;base64,aGk=" }),
+        ],
+      }),
+    ]);
+  });
+
+  it("keeps image tool output separate from textual output", () => {
+    const state = applySessionUpdate(emptyTranscript, {
+      sessionUpdate: "tool_call",
+      toolCallId: "tool-image",
+      title: "Screenshot",
+      content: [
+        { type: "content", content: { type: "text", text: "captured" } },
+        { type: "content", content: { type: "image", data: "aGk=", mimeType: "image/png" } },
+      ],
+    });
+
+    expect(state.items[0]).toMatchObject({
+      type: "tool",
+      content: "captured",
+      diffs: [],
+      attachments: [{ kind: "image", dataUrl: "data:image/png;base64,aGk=" }],
+    });
+  });
+
+  it("keeps structured edit diffs separate from textual tool output", () => {
+    const state = applySessionUpdate(emptyTranscript, {
+      sessionUpdate: "tool_call_update",
+      toolCallId: "tool-edit",
+      status: "completed",
+      content: [
+        { type: "content", content: { type: "text", text: "Updated file" } },
+        { type: "diff", path: "/repo/a.ts", oldText: "old", newText: "new" },
+      ],
+    });
+
+    expect(state.items[0]).toMatchObject({
+      type: "tool",
+      content: "Updated file",
+      diffs: [{ path: "/repo/a.ts", oldText: "old", newText: "new" }],
+    });
   });
 });
 
@@ -81,7 +148,7 @@ describe("transcript display groups", () => {
     const first = toolItem("one");
     const second = toolItem("two");
     const third = toolItem("three");
-    const message = { type: "message", id: "assistant:1", role: "assistant", text: "Next" } as const;
+    const message = { type: "message", id: "assistant:1", role: "assistant", text: "Next", attachments: [] } as const;
 
     const grouped = groupTranscriptItems([first, second, message, third]);
 
@@ -102,12 +169,12 @@ describe("transcript display groups", () => {
   it("marks pending and running groups active while preserving failures", () => {
     const [pendingGroup, runningGroup, failedGroup, completedGroup] = groupTranscriptItems([
       toolItem("pending", "pending"),
-      { type: "message", id: "break:1", role: "assistant", text: "break" },
+      { type: "message", id: "break:1", role: "assistant", text: "break", attachments: [] },
       toolItem("running", "in_progress"),
-      { type: "message", id: "break:2", role: "assistant", text: "break" },
+      { type: "message", id: "break:2", role: "assistant", text: "break", attachments: [] },
       toolItem("failed", "failed"),
       toolItem("still-pending", "pending"),
-      { type: "message", id: "break:3", role: "assistant", text: "break" },
+      { type: "message", id: "break:3", role: "assistant", text: "break", attachments: [] },
       toolItem("completed", "completed"),
     ]).filter((item) => item.type === "tool-group");
 
@@ -115,6 +182,36 @@ describe("transcript display groups", () => {
     expect(runningGroup).toMatchObject({ status: "in_progress", active: true });
     expect(failedGroup).toMatchObject({ status: "failed", active: true });
     expect(completedGroup).toMatchObject({ status: "completed", active: false });
+  });
+
+  it("hides redundant image labels when previews are present", () => {
+    const message = {
+      type: "message",
+      id: "user:1",
+      role: "user",
+      text: "Check this\n\n[Image 1]",
+      attachments: [{
+        id: "image:1",
+        name: "image.png",
+        kind: "image",
+        mimeType: "image/png",
+        dataUrl: "data:image/png;base64,aGk=",
+      }],
+    } as const;
+
+    expect(groupTranscriptItems([message])[0]).toMatchObject({ text: "Check this" });
+  });
+
+  it("preserves image labels when no matching preview is present", () => {
+    const message = {
+      type: "message",
+      id: "user:1",
+      role: "user",
+      text: "[Image 1]",
+      attachments: [],
+    } as const;
+
+    expect(groupTranscriptItems([message])[0]).toBe(message);
   });
 });
 
@@ -127,5 +224,7 @@ function toolItem(toolCallId: string, status: ToolItem["status"] = "completed"):
     kind: "other",
     status,
     content: "",
+    diffs: [],
+    attachments: [],
   };
 }
