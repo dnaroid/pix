@@ -1,4 +1,7 @@
 <script lang="ts">
+  import Check from "@lucide/svelte/icons/check";
+  import Plus from "@lucide/svelte/icons/plus";
+  import X from "@lucide/svelte/icons/x";
   import { onMount } from "svelte";
   import type { SessionInfo } from "@agentclientprotocol/sdk";
 
@@ -82,11 +85,11 @@
       <strong class="mt-1 block overflow-hidden text-ellipsis whitespace-nowrap text-[13px] font-medium">{activeTitle}</strong>
     </div>
     <button
-      class="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-transparent pb-0.5 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+      class="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
       type="button"
       aria-label="Close session selector"
       onclick={() => onClose(true)}
-    >×</button>
+    ><X class="h-4 w-4" aria-hidden="true" /></button>
   </div>
 
   <label class="px-3 pb-2.5">
@@ -109,7 +112,7 @@
       onclick={onCreate}
       disabled={!canCreate}
     >
-      <span class="text-center text-xs font-semibold text-primary" aria-hidden="true">+</span>
+      <Plus class="h-4 w-4 justify-self-center text-primary" aria-hidden="true" />
       <span class="min-w-0">
         <strong class="block overflow-hidden text-ellipsis whitespace-nowrap text-xs font-medium">New conversation</strong>
         <small class="mt-0.5 block overflow-hidden text-ellipsis whitespace-nowrap text-[10px] text-muted-foreground">Start a fresh session</small>
@@ -128,9 +131,11 @@
         onclick={() => onSelect(session.sessionId)}
         {disabled}
       >
-        <span class="text-center text-xs font-semibold text-primary" aria-hidden="true">
-          {session.sessionId === activeSessionId ? "✓" : ""}
-        </span>
+        {#if session.sessionId === activeSessionId}
+          <Check class="h-4 w-4 text-primary" aria-hidden="true" />
+        {:else}
+          <span aria-hidden="true"></span>
+        {/if}
         <span class="min-w-0">
           <strong class="block overflow-hidden text-ellipsis whitespace-nowrap text-xs font-medium">
             {session.title || "Untitled conversation"}

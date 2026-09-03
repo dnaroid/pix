@@ -1,4 +1,7 @@
 <script lang="ts">
+  import Check from "@lucide/svelte/icons/check";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import FolderPlus from "@lucide/svelte/icons/folder-plus";
   import { titlebarDrag } from "../lib/titlebar-drag";
   import { MAX_RECENT_PROJECTS, projectName } from "../lib/recent-projects";
   import ProjectFolderIcon from "./ProjectFolderIcon.svelte";
@@ -74,7 +77,7 @@
     <strong class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-medium text-foreground">
       {workspace ? projectName(workspace) : "Choose project"}
     </strong>
-    <span class={["shrink-0 text-[10px] transition-transform", open && "rotate-180"]} aria-hidden="true">⌄</span>
+    <ChevronDown class={["h-3.5 w-3.5 shrink-0 transition-transform", open && "rotate-180"]} aria-hidden="true" />
   </button>
 
   {#if open}
@@ -114,9 +117,11 @@
                 {project}
               </small>
             </span>
-            <span class="text-center text-xs font-semibold text-primary" aria-hidden="true">
-              {selected ? "✓" : ""}
-            </span>
+            {#if selected}
+              <Check class="h-4 w-4 text-primary" aria-hidden="true" />
+            {:else}
+              <span aria-hidden="true"></span>
+            {/if}
           </button>
         {:else}
           <p class="mx-2.5 my-4 text-center text-xs text-muted-foreground">No recent projects</p>
@@ -131,7 +136,7 @@
           onclick={onChooseWorkspace}
           {disabled}
         >
-          <span class="text-center text-sm font-semibold text-primary" aria-hidden="true">+</span>
+          <FolderPlus class="h-4 w-4 justify-self-center text-primary" aria-hidden="true" />
           <span class="min-w-0">
             <strong class="block text-xs font-medium">Choose or create project folder…</strong>
             <small class="mt-0.5 block text-[10px] text-muted-foreground">Open the system folder picker</small>

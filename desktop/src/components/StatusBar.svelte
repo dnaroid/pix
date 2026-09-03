@@ -1,4 +1,5 @@
 <script lang="ts">
+  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import type { SessionConfigOption } from "@agentclientprotocol/sdk";
 
   type ConnectionStatus = "starting" | "ready" | "error" | "stopped";
@@ -93,5 +94,5 @@
     title="Refresh sessions"
     onclick={onRefresh}
     disabled={!canRefresh}
-  >↻</button>
+  ><RefreshCw class="h-3.5 w-3.5" aria-hidden="true" /></button>
 </footer>

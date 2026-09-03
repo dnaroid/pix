@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { appendLocalUserMessage, applySessionUpdate, emptyTranscript } from "./transcript";
+import {
+  appendLocalUserMessage,
+  applySessionUpdate,
+  emptyTranscript,
+  groupTranscriptItems,
+  type ToolItem,
+} from "./transcript";
 
 describe("transcript reducer", () => {
   it("coalesces adjacent id-less chunks but starts a message after a tool", () => {
@@ -69,3 +75,57 @@ describe("transcript reducer", () => {
     ]);
   });
 });
+
+describe("transcript display groups", () => {
+  it("groups consecutive tools and starts a new group after a message", () => {
+    const first = toolItem("one");
+    const second = toolItem("two");
+    const third = toolItem("three");
+    const message = { type: "message", id: "assistant:1", role: "assistant", text: "Next" } as const;
+
+    const grouped = groupTranscriptItems([first, second, message, third]);
+
+    expect(grouped).toHaveLength(3);
+    expect(grouped[0]).toMatchObject({
+      type: "tool-group",
+      id: "tool-group:one",
+      tools: [first, second],
+    });
+    expect(grouped[1]).toBe(message);
+    expect(grouped[2]).toMatchObject({
+      type: "tool-group",
+      id: "tool-group:three",
+      tools: [third],
+    });
+  });
+
+  it("marks pending and running groups active while preserving failures", () => {
+    const [pendingGroup, runningGroup, failedGroup, completedGroup] = groupTranscriptItems([
+      toolItem("pending", "pending"),
+      { type: "message", id: "break:1", role: "assistant", text: "break" },
+      toolItem("running", "in_progress"),
+      { type: "message", id: "break:2", role: "assistant", text: "break" },
+      toolItem("failed", "failed"),
+      toolItem("still-pending", "pending"),
+      { type: "message", id: "break:3", role: "assistant", text: "break" },
+      toolItem("completed", "completed"),
+    ]).filter((item) => item.type === "tool-group");
+
+    expect(pendingGroup).toMatchObject({ status: "pending", active: true });
+    expect(runningGroup).toMatchObject({ status: "in_progress", active: true });
+    expect(failedGroup).toMatchObject({ status: "failed", active: true });
+    expect(completedGroup).toMatchObject({ status: "completed", active: false });
+  });
+});
+
+function toolItem(toolCallId: string, status: ToolItem["status"] = "completed"): ToolItem {
+  return {
+    type: "tool",
+    id: `tool:${toolCallId}`,
+    toolCallId,
+    title: toolCallId,
+    kind: "other",
+    status,
+    content: "",
+  };
+}

@@ -1,4 +1,7 @@
 <script lang="ts">
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import Plus from "@lucide/svelte/icons/plus";
+  import X from "@lucide/svelte/icons/x";
   import type { SessionInfo } from "@agentclientprotocol/sdk";
   import { titlebarDrag } from "../lib/titlebar-drag";
 
@@ -74,12 +77,12 @@
         <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
           {session.title || "Untitled conversation"}
         </span>
-        {#if active}<span class="ml-0.5 shrink-0 text-xs text-muted-foreground" aria-hidden="true">⌄</span>{/if}
+        {#if active}<ChevronDown class="ml-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />{/if}
       </button>
       <button
         use:titlebarDrag
         class={[
-          "absolute top-1/2 right-1.5 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-md bg-transparent pb-0.5 text-base leading-none text-muted-foreground opacity-0 transition hover:bg-accent hover:text-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40 group-hover:opacity-100 group-focus-within:opacity-100",
+          "absolute top-1/2 right-1.5 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-md bg-transparent text-muted-foreground opacity-0 transition hover:bg-accent hover:text-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40 group-hover:opacity-100 group-focus-within:opacity-100",
           active && "opacity-100",
         ]}
         type="button"
@@ -87,7 +90,7 @@
         title="Close tab"
         onclick={(event) => onCloseTab(event, session.sessionId)}
         {disabled}
-      >×</button>
+      ><X class="h-3.5 w-3.5" aria-hidden="true" /></button>
     </div>
   {/each}
 
@@ -103,17 +106,17 @@
         {disabled}
       >
         <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">Open conversation</span>
-        <span class="shrink-0 text-xs text-muted-foreground" aria-hidden="true">⌄</span>
+        <ChevronDown class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
       </button>
     </div>
   {/if}
 
   <button
     use:titlebarDrag
-    class="mx-1.5 mb-0.5 grid h-7 min-w-7 shrink-0 place-items-center rounded-lg bg-transparent pb-0.5 text-[17px] leading-none text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+    class="mx-1.5 mb-0.5 grid h-7 min-w-7 shrink-0 place-items-center rounded-lg bg-transparent text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
     title="New conversation"
     aria-label="New conversation"
     onclick={onCreate}
     disabled={!canCreate}
-  >+</button>
+  ><Plus class="h-4 w-4" aria-hidden="true" /></button>
 </nav>

@@ -22,11 +22,42 @@ export interface ToolItem {
 
 export type TranscriptItem = MessageItem | ToolItem;
 
+export interface ToolGroupItem {
+  readonly type: "tool-group";
+  readonly id: string;
+  readonly tools: readonly [ToolItem, ...ToolItem[]];
+  readonly status: ToolCallStatus;
+  readonly active: boolean;
+}
+
+export type TranscriptDisplayItem = MessageItem | ToolGroupItem;
+
 export interface TranscriptState {
   readonly items: readonly TranscriptItem[];
 }
 
 export const emptyTranscript: TranscriptState = { items: [] };
+
+export function groupTranscriptItems(items: readonly TranscriptItem[]): TranscriptDisplayItem[] {
+  const grouped: TranscriptDisplayItem[] = [];
+
+  for (const item of items) {
+    if (item.type === "message") {
+      grouped.push(item);
+      continue;
+    }
+
+    const previous = grouped.at(-1);
+    if (previous?.type === "tool-group") {
+      const tools: [ToolItem, ...ToolItem[]] = [...previous.tools, item];
+      grouped[grouped.length - 1] = buildToolGroup(tools);
+    } else {
+      grouped.push(buildToolGroup([item]));
+    }
+  }
+
+  return grouped;
+}
 
 export function appendLocalUserMessage(state: TranscriptState, text: string, id: string): TranscriptState {
   return {
@@ -115,6 +146,26 @@ function upsertTool(
     });
   }
   return { items };
+}
+
+function buildToolGroup(tools: readonly [ToolItem, ...ToolItem[]]): ToolGroupItem {
+  const active = tools.some((tool) => tool.status === "pending" || tool.status === "in_progress");
+  let status: ToolCallStatus = "completed";
+  if (tools.some((tool) => tool.status === "failed")) {
+    status = "failed";
+  } else if (tools.some((tool) => tool.status === "in_progress")) {
+    status = "in_progress";
+  } else if (tools.some((tool) => tool.status === "pending")) {
+    status = "pending";
+  }
+
+  return {
+    type: "tool-group",
+    id: `tool-group:${tools[0].toolCallId}`,
+    tools,
+    status,
+    active,
+  };
 }
 
 function contentBlockText(content: ContentBlock): string {
