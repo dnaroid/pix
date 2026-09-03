@@ -20,6 +20,9 @@
     onChooseWorkspace,
     onOpenAttachment,
     onOpenProjectFile,
+    onResolveProjectMedia,
+    onOpenLocalFile,
+    onResolveLocalMedia,
   }: {
     transcript: TranscriptState;
     activeSessionId: string | null;
@@ -30,6 +33,9 @@
     onChooseWorkspace: () => void;
     onOpenAttachment: (attachment: Attachment) => void;
     onOpenProjectFile: (path: string) => void | Promise<void>;
+    onResolveProjectMedia: (path: string) => Promise<Attachment | undefined>;
+    onOpenLocalFile: (path: string) => void | Promise<void>;
+    onResolveLocalMedia: (path: string) => Promise<Attachment | undefined>;
   } = $props();
 
   let displayItems = $derived(groupTranscriptItems(transcript.items));
@@ -72,21 +78,21 @@
                 <span>thinking</span>
               </summary>
               <div class="ml-3.5 border-l border-border pl-2.5 text-muted-foreground">
-                <MarkdownText text={item.text} compact {onOpenProjectFile} />
+                <MarkdownText text={item.text} compact {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />
               </div>
             </details>
           {:else if item.role === "user"}
             <div class="mb-6 flex justify-end">
               <article class="w-fit max-w-[min(780px,86%)] rounded-xl rounded-br-md border border-border bg-card px-3.5 pt-3 pb-2 text-card-foreground shadow-xs">
                 <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} />
-                {#if item.text}<MarkdownText text={item.text} {onOpenProjectFile} />{/if}
+                {#if item.text}<MarkdownText text={item.text} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />{/if}
               </article>
             </div>
           {:else}
             <article class="mb-6 w-full min-w-0 text-foreground">
               <div class="mb-1.5 text-[11px] font-semibold text-muted-foreground">Pix</div>
               <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} />
-              {#if item.text}<MarkdownText text={item.text} {onOpenProjectFile} />{/if}
+              {#if item.text}<MarkdownText text={item.text} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />{/if}
             </article>
           {/if}
         {:else}
@@ -119,7 +125,7 @@
                       </summary>
                       <AttachmentGrid attachments={tool.attachments} variant="tool" onOpen={onOpenAttachment} />
                       {#if tool.content || tool.diffs.length > 0}
-                        <ToolResult {tool} {onOpenProjectFile} />
+                        <ToolResult {tool} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />
                       {/if}
                     </details>
                   {:else}

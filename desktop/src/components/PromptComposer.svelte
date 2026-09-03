@@ -1,7 +1,12 @@
 <script lang="ts">
   import Paperclip from "@lucide/svelte/icons/paperclip";
   import Square from "@lucide/svelte/icons/square";
+  import { tick } from "svelte";
   import type { Attachment } from "../lib/attachments";
+  import {
+    PromptAutocompleteController,
+    type PromptAutocompleteState,
+  } from "../lib/autocomplete";
   import AttachmentGrid from "./AttachmentGrid.svelte";
 
   let {
@@ -11,6 +16,9 @@
     ready,
     promptRunning,
     dragActive,
+    autocompleteEnabled,
+    autocompleteDebounceMs,
+    onAutocomplete,
     onSubmit,
     onCancel,
     onChooseAttachments,
@@ -24,6 +32,9 @@
     ready: boolean;
     promptRunning: boolean;
     dragActive: boolean;
+    autocompleteEnabled: boolean;
+    autocompleteDebounceMs: number;
+    onAutocomplete: (draft: string, signal: AbortSignal) => Promise<string>;
     onSubmit: () => void | Promise<void>;
     onCancel: () => void | Promise<void>;
     onChooseAttachments: () => void | Promise<void>;
@@ -34,6 +45,38 @@
 
   let composerForm: HTMLFormElement | undefined;
   let textarea: HTMLTextAreaElement | undefined;
+  let ghostLayer = $state<HTMLDivElement | undefined>();
+  let autocompleteSuggestion = $state("");
+  let composing = $state(false);
+  const autocompleteController = new PromptAutocompleteController({
+    request: (draft, signal) => onAutocomplete(draft, signal),
+    onSuggestion: (suggestion) => {
+      autocompleteSuggestion = suggestion;
+      requestAnimationFrame(syncGhostLayer);
+    },
+  });
+
+  function autocompleteState(target = textarea): PromptAutocompleteState {
+    const text = target?.value ?? promptText;
+    return {
+      contextKey: activeSessionId ?? "",
+      text,
+      selectionStart: target?.selectionStart ?? text.length,
+      selectionEnd: target?.selectionEnd ?? text.length,
+      hasAttachments: attachments.length > 0,
+      enabled: autocompleteEnabled && ready && !!activeSessionId && !composing,
+    };
+  }
+
+  function observeAutocomplete(target = textarea): void {
+    autocompleteController.observe(autocompleteState(target));
+  }
+
+  function syncGhostLayer(): void {
+    if (!textarea || !ghostLayer) return;
+    ghostLayer.style.paddingRight = `${Math.max(2, textarea.offsetWidth - textarea.clientWidth + 2)}px`;
+    ghostLayer.scrollTop = textarea.scrollTop;
+  }
 
   function resizeComposer(): void {
     if (!textarea) return;
@@ -45,15 +88,23 @@
 
     textarea.style.height = `${height}px`;
     textarea.style.overflowY = textarea.scrollHeight > maxTextareaHeight ? "auto" : "hidden";
+    syncGhostLayer();
   }
 
   $effect(() => {
     promptText;
     promptRunning;
     attachments.length;
+    activeSessionId;
+    ready;
+    autocompleteEnabled;
+    autocompleteController.setDebounceMs(autocompleteDebounceMs);
+    observeAutocomplete();
     const frame = requestAnimationFrame(resizeComposer);
     return () => cancelAnimationFrame(frame);
   });
+
+  $effect(() => () => autocompleteController.dispose());
 
   function handleSubmit(event: SubmitEvent): void {
     event.preventDefault();
@@ -61,9 +112,58 @@
   }
 
   function handleKeydown(event: KeyboardEvent): void {
+    if (
+      event.key === "Tab"
+      && !event.shiftKey
+      && !event.ctrlKey
+      && !event.altKey
+      && !event.metaKey
+      && !event.isComposing
+    ) {
+      const accepted = autocompleteController.accept(autocompleteState(event.currentTarget as HTMLTextAreaElement));
+      if (accepted !== undefined) {
+        event.preventDefault();
+        promptText = accepted;
+        void tick().then(() => {
+          textarea?.setSelectionRange(accepted.length, accepted.length);
+          resizeComposer();
+          observeAutocomplete();
+        });
+      }
+      return;
+    }
+    if (event.key === "Escape" && autocompleteSuggestion) {
+      event.preventDefault();
+      autocompleteController.dismiss();
+      return;
+    }
     if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
     event.preventDefault();
     void onSubmit();
+  }
+
+  function handleInput(event: Event): void {
+    resizeComposer();
+    observeAutocomplete(event.currentTarget as HTMLTextAreaElement);
+  }
+
+  function handleKeyup(event: KeyboardEvent): void {
+    if (event.key === "Tab" || event.key === "Escape") return;
+    observeAutocomplete(event.currentTarget as HTMLTextAreaElement);
+  }
+
+  function handleScroll(event: Event): void {
+    if (ghostLayer) ghostLayer.scrollTop = (event.currentTarget as HTMLTextAreaElement).scrollTop;
+  }
+
+  function handleCompositionStart(): void {
+    composing = true;
+    observeAutocomplete();
+  }
+
+  function handleCompositionEnd(event: CompositionEvent): void {
+    composing = false;
+    observeAutocomplete(event.currentTarget as HTMLTextAreaElement);
   }
 
   function handlePaste(event: ClipboardEvent): void {
@@ -91,17 +191,34 @@
     onRemove={onRemoveAttachment}
   />
   <div class="flex items-end gap-1 text-sm">
-    <textarea
-      class="block min-h-6 min-w-0 flex-1 resize-none overflow-y-hidden border-0 bg-transparent px-0.5 leading-relaxed text-foreground outline-none placeholder:text-muted-foreground placeholder:opacity-25 disabled:cursor-default disabled:opacity-40"
-      bind:this={textarea}
-      bind:value={promptText}
-      oninput={resizeComposer}
-      onkeydown={handleKeydown}
-      onpaste={handlePaste}
-      placeholder={activeSessionId ? "Ask Pix to change, explain, or investigate…" : "Start or load a conversation first"}
-      disabled={!activeSessionId || !ready}
-      rows="1"
-    ></textarea>
+    <div class="relative min-w-0 flex-1">
+      {#if autocompleteSuggestion}
+        <div
+          class="pointer-events-none absolute inset-0 overflow-hidden px-0.5 leading-relaxed whitespace-pre-wrap break-words"
+          bind:this={ghostLayer}
+          aria-hidden="true"
+        ><span class="text-transparent">{promptText}</span><span class="text-muted-foreground/45">{autocompleteSuggestion}</span></div>
+      {/if}
+      <textarea
+        class="relative z-10 block min-h-6 w-full resize-none overflow-y-hidden border-0 bg-transparent px-0.5 leading-relaxed text-foreground outline-none placeholder:text-muted-foreground placeholder:opacity-25 disabled:cursor-default disabled:opacity-40"
+        bind:this={textarea}
+        bind:value={promptText}
+        oninput={handleInput}
+        onkeydown={handleKeydown}
+        onkeyup={handleKeyup}
+        onselect={(event) => observeAutocomplete(event.currentTarget as HTMLTextAreaElement)}
+        onclick={(event) => observeAutocomplete(event.currentTarget as HTMLTextAreaElement)}
+        onscroll={handleScroll}
+        oncompositionstart={handleCompositionStart}
+        oncompositionend={handleCompositionEnd}
+        onpaste={handlePaste}
+        aria-label="Message Pix"
+        aria-describedby="prompt-autocomplete-status"
+        placeholder={activeSessionId ? "Ask Pix to change, explain, or investigate…" : "Start or load a conversation first"}
+        disabled={!activeSessionId || !ready}
+        rows="1"
+      ></textarea>
+    </div>
     <button
       class="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
       type="button"
@@ -124,4 +241,7 @@
       </button>
     {/if}
   </div>
+  <p id="prompt-autocomplete-status" class="sr-only" aria-live="polite">
+    {autocompleteSuggestion ? "Autocomplete available. Press Tab to accept or Escape to dismiss." : ""}
+  </p>
 </form>

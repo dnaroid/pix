@@ -1,4 +1,10 @@
 import { highlightCode } from "./syntax-highlight";
+import {
+  attachmentKind,
+  filePathFromUri,
+  mimeTypeForName,
+  type AttachmentKind,
+} from "./attachments";
 
 const MAX_BLOCK_DEPTH = 4;
 const SAFE_LINK_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
@@ -290,7 +296,15 @@ function renderInline(text: string, depth = 0, allowLinks = true): string {
         const label = depth < MAX_BLOCK_DEPTH
           ? renderInline(link.label, depth + 1, false)
           : escapeHtml(link.label);
-        if (char === "!") {
+        const projectPath = normalizeProjectFileDestination(link.destination);
+        const localPath = normalizeLocalFileDestination(link.destination);
+        const projectKind = projectPath ? mediaKindForPath(projectPath) : undefined;
+        const localKind = localPath ? mediaKindForPath(localPath) : undefined;
+        if (projectPath && projectKind) {
+          output += projectMedia(projectPath, label, link.label, projectKind);
+        } else if (localPath && localKind) {
+          output += localMedia(localPath, label, link.label, localKind);
+        } else if (char === "!") {
           output += label;
         } else {
           output += linkForDestination(link.destination, label);
@@ -360,12 +374,61 @@ function linkForDestination(destination: string, label: string): string {
   const projectPath = normalizeProjectFileDestination(destination);
   if (projectPath) return projectFileLink(projectPath, label);
 
+  const localPath = normalizeLocalFileDestination(destination);
+  if (localPath) return localFileLink(localPath, label);
+
   return label;
 }
 
 function projectFileLink(path: string, label: string): string {
   const escapedPath = escapeAttribute(path);
   return `<a href="#" data-project-file="${escapedPath}" title="Preview ${escapedPath}">${label}</a>`;
+}
+
+function localFileLink(path: string, label: string): string {
+  const escapedPath = escapeAttribute(path);
+  return `<a href="#" data-local-file="${escapedPath}" title="Open ${escapedPath}">${label}</a>`;
+}
+
+function mediaKindForPath(path: string): Exclude<AttachmentKind, "file"> | undefined {
+  const kind = attachmentKind(mimeTypeForName(path));
+  return kind === "file" ? undefined : kind;
+}
+
+function projectMedia(
+  path: string,
+  label: string,
+  accessibleLabel: string,
+  kind: Exclude<AttachmentKind, "file">,
+): string {
+  const escapedPath = escapeAttribute(path);
+  const escapedLabel = escapeAttribute(accessibleLabel);
+  const loading = '<span class="markdown-media-status">Loading preview…</span>';
+  const frame = kind === "image"
+    ? `<a href="#" class="markdown-media-frame" data-project-file="${escapedPath}" title="Preview ${escapedPath}" aria-label="Preview ${escapedLabel}">${loading}</a>`
+    : `<span class="markdown-media-frame">${loading}</span>`;
+  return `<span class="markdown-media" data-project-media="${kind}" data-project-file="${escapedPath}" data-project-media-label="${escapedLabel}">`
+    + frame
+    + `<span class="markdown-media-caption">${projectFileLink(path, label)}</span>`
+    + "</span>";
+}
+
+function localMedia(
+  path: string,
+  label: string,
+  accessibleLabel: string,
+  kind: Exclude<AttachmentKind, "file">,
+): string {
+  const escapedPath = escapeAttribute(path);
+  const escapedLabel = escapeAttribute(accessibleLabel);
+  const loading = '<span class="markdown-media-status">Loading preview…</span>';
+  const frame = kind === "image"
+    ? `<a href="#" class="markdown-media-frame" data-local-file="${escapedPath}" title="Preview ${escapedPath}" aria-label="Preview ${escapedLabel}">${loading}</a>`
+    : `<span class="markdown-media-frame">${loading}</span>`;
+  return `<span class="markdown-media" data-local-media="${kind}" data-local-file="${escapedPath}" data-local-media-label="${escapedLabel}">`
+    + frame
+    + `<span class="markdown-media-caption">${localFileLink(path, label)}</span>`
+    + "</span>";
 }
 
 function normalizeInlineProjectFilePath(code: string): string | undefined {
@@ -477,6 +540,28 @@ export function normalizeExternalHref(destination: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** Resolve a file URL to an absolute local path without treating other URL schemes as files. */
+export function normalizeLocalFileDestination(destination: string): string | undefined {
+  if (!destination || /[\u0000-\u001f\u007f]/.test(destination)) return undefined;
+
+  let value = destination.trim();
+  if (value.startsWith("<") && value.endsWith(">")) value = value.slice(1, -1).trim();
+  if (!/^file:\/\//i.test(value)) return undefined;
+
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return undefined;
+  }
+  if (url.protocol !== "file:" || url.username || url.password || url.port) return undefined;
+
+  const path = filePathFromUri(url.href);
+  if (!path || /[\u0000-\u001f\u007f]/.test(path)) return undefined;
+  const absolute = path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("\\\\");
+  return absolute ? path : undefined;
 }
 
 /** Normalize a Markdown destination that can safely be resolved inside the active workspace. */

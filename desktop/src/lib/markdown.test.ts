@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { normalizeProjectFileDestination, renderMarkdown } from "./markdown";
+import {
+  normalizeLocalFileDestination,
+  normalizeProjectFileDestination,
+  renderMarkdown,
+} from "./markdown";
 
 describe("renderMarkdown", () => {
   it("renders the transcript Markdown subset", () => {
@@ -110,6 +114,66 @@ describe("renderMarkdown", () => {
     expect(html).toContain('title="Preview src/App.svelte"');
     expect(html).toContain('data-project-file="docs/guide one.md"');
     expect(html.match(/data-external-link/g)).toBeNull();
+  });
+
+  it("emits inline preview targets for supported project images and videos", () => {
+    const html = renderMarkdown([
+      "[Before and after](.pi/artifacts/result.png)",
+      "[Demo](artifacts/demo.webm)",
+    ].join("\n\n"));
+
+    expect(html).toContain('data-project-media="image"');
+    expect(html).toContain('data-project-file=".pi/artifacts/result.png"');
+    expect(html).toContain('data-project-media-label="Before and after"');
+    expect(html).toContain('data-project-media="video"');
+    expect(html).toContain('data-project-file="artifacts/demo.webm"');
+    expect(html).toContain('class="markdown-media-caption"');
+  });
+
+  it("renders local Markdown image syntax as a preview without embedding remote media", () => {
+    const local = renderMarkdown("![Result](artifacts/result.webp)");
+    const remote = renderMarkdown("![Remote](https://example.com/result.webp)");
+
+    expect(local).toContain('data-project-media="image"');
+    expect(local).toContain('data-project-media-label="Result"');
+    expect(remote).toBe("<p>Remote</p>");
+    expect(remote).not.toContain("<img");
+  });
+
+  it("renders file URL images and videos as local previews with clickable captions", () => {
+    const html = renderMarkdown([
+      "[Light initial](file:///tmp/qa-shots/01-light-initial.png)",
+      "[Demo](file:///tmp/qa-shots/demo%20run.webm)",
+    ].join("\n\n"));
+
+    expect(html).toContain('data-local-media="image"');
+    expect(html).toContain('data-local-file="/tmp/qa-shots/01-light-initial.png"');
+    expect(html).toContain('data-local-media-label="Light initial"');
+    expect(html).toContain('data-local-media="video"');
+    expect(html).toContain('data-local-file="/tmp/qa-shots/demo run.webm"');
+    expect(html).toContain('class="markdown-media-caption"');
+  });
+
+  it("keeps non-media file URLs clickable without weakening project path rules", () => {
+    const html = renderMarkdown("[Trace](file:///tmp/qa-shots/run.trace.zip)");
+
+    expect(html).toContain('data-local-file="/tmp/qa-shots/run.trace.zip"');
+    expect(html).not.toContain("data-local-media");
+    expect(normalizeLocalFileDestination("file:///tmp/result.png")).toBe("/tmp/result.png");
+    expect(normalizeLocalFileDestination("file:///tmp/result%20one.png#preview")).toBe("/tmp/result one.png");
+    expect(normalizeLocalFileDestination("file:relative.png")).toBeUndefined();
+    expect(normalizeLocalFileDestination("file:///tmp/%00result.png")).toBeUndefined();
+    expect(normalizeLocalFileDestination("https://example.com/result.png")).toBeUndefined();
+    expect(normalizeProjectFileDestination("file:///tmp/result.png")).toBeUndefined();
+  });
+
+  it("escapes media labels and does not preview unsupported project files", () => {
+    const media = renderMarkdown('[A & "B"](artifacts/result.png)');
+    const binary = renderMarkdown("[Archive](artifacts/result.zip)");
+
+    expect(media).toContain('data-project-media-label="A &amp; &quot;B&quot;"');
+    expect(binary).not.toContain("data-project-media");
+    expect(binary).toContain('data-project-file="artifacts/result.zip"');
   });
 
   it("turns inline-code project file paths into preview links", () => {

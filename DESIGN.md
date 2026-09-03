@@ -204,6 +204,12 @@ Primary action:
 bg-primary text-primary-foreground
 ```
 
+Treat these as a paired contract. Global element selectors MUST NOT override the
+semantic foreground or background chosen by the component. The enabled action
+should read as crisp and flat: avoid permanent bevels, glossy borders, or shadows
+that make an ordinary control look raised or metallic. Verify the rendered color
+pair, not only the class names.
+
 Secondary actions SHOULD use neutral semantic surfaces or ghost treatment.
 
 Destructive actions MUST be visually distinguishable from primary actions and SHOULD not use primary terracotta as a substitute for destructive semantics.
@@ -213,6 +219,11 @@ Toolbar actions SHOULD generally be quiet until hover/active state.
 ## 11. Inputs and composer UI
 
 Inputs SHOULD use semantic border/input/ring tokens.
+
+Normalize native selects used inside designed application surfaces. A semantic
+background does not remove platform bevels or gradients by itself: use
+`appearance-none`, preserve the native select semantics, reserve space for a
+Lucide chevron, and verify the closed control in light and dark desktop WebViews.
 
 Focused controls MUST have a visible focus state.
 

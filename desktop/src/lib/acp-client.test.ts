@@ -119,4 +119,65 @@ describe("ACP JSON-RPC client", () => {
       await client.dispose();
     }
   });
+
+  it("requests a typed private autocomplete response", async () => {
+    const transport = new FakeTransport();
+    const client = await startedClient(transport);
+    const completion = client.autocomplete("session-1", "implement");
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+
+    expect(requestAt(transport, 1)).toMatchObject({
+      method: "pix/autocomplete",
+      params: { sessionId: "session-1", draft: "implement" },
+    });
+    transport.message({
+      jsonrpc: "2.0",
+      id: requestAt(transport, 1).id,
+      result: { completion: " the rest" },
+    });
+
+    await expect(completion).resolves.toBe(" the rest");
+    await client.dispose();
+  });
+
+  it("loads private autocomplete scheduling settings", async () => {
+    const transport = new FakeTransport();
+    const client = await startedClient(transport);
+    const settings = client.autocompleteSettings("session-1");
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+
+    expect(requestAt(transport, 1)).toMatchObject({
+      method: "pix/autocomplete/config",
+      params: { sessionId: "session-1" },
+    });
+    transport.message({
+      jsonrpc: "2.0",
+      id: requestAt(transport, 1).id,
+      result: { enabled: true, debounceMs: 425 },
+    });
+
+    await expect(settings).resolves.toEqual({ enabled: true, debounceMs: 425 });
+    await client.dispose();
+  });
+
+  it("cancels an aborted autocomplete request over ACP", async () => {
+    const transport = new FakeTransport();
+    const client = await startedClient(transport);
+    const controller = new AbortController();
+    const completion = client.autocomplete("session-1", "implement", controller.signal);
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+
+    const requestId = requestAt(transport, 1).id;
+    controller.abort();
+    await expect(completion).rejects.toMatchObject({ name: "AbortError" });
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(3));
+    expect(requestAt(transport, 2)).toEqual({
+      jsonrpc: "2.0",
+      method: "$/cancel_request",
+      params: { requestId },
+    });
+
+    transport.message({ jsonrpc: "2.0", id: requestId, result: { completion: " stale" } });
+    await client.dispose();
+  });
 });

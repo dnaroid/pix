@@ -55,13 +55,31 @@
   import StatusBar from "./components/StatusBar.svelte";
   import ElicitationDialog from "./components/ElicitationDialog.svelte";
   import PreviewDialog from "./components/PreviewDialog.svelte";
+  import ProjectTaskSidebar from "./components/ProjectTaskSidebar.svelte";
   import type { ProjectFilePreview } from "./lib/project-files";
+  import {
+    buildTaskPrompt,
+    EMPTY_TASK_DOCUMENT,
+    parseTaskDocument,
+    type ProjectTask,
+    type ProjectTaskDocument,
+    type ProjectTaskPriority,
+    type ProjectTaskStatus,
+    type ProjectTaskType,
+  } from "./lib/project-tasks";
 
   type ConnectionStatus = "starting" | "ready" | "error" | "stopped";
   type PendingElicitation = {
     message: string;
     field: ElicitationField;
     resolve: (response: CreateElicitationResponse) => void;
+  };
+  type ProjectTaskDraft = {
+    title: string;
+    description?: string;
+    type: ProjectTaskType;
+    status: ProjectTaskStatus;
+    priority: ProjectTaskPriority;
   };
 
   let client = $state<AcpClient | null>(null);
@@ -78,6 +96,8 @@
   let configOptions = $state<SessionConfigOption[]>([]);
   let promptText = $state("");
   let promptAttachments = $state<Attachment[]>([]);
+  let autocompleteEnabled = $state(false);
+  let autocompleteDebounceMs = $state(350);
   let promptRunning = $state(false);
   let operationRunning = $state(false);
   let changingConfig = $state<string | null>(null);
@@ -90,17 +110,24 @@
   let dragActive = $state(false);
   let mediaPreview = $state<Attachment | null>(null);
   let projectFilePreview = $state<ProjectFilePreview | null>(null);
+  let taskDocument = $state<ProjectTaskDocument>(EMPTY_TASK_DOCUMENT);
+  let tasksLoading = $state(false);
+  let tasksSaving = $state(false);
+  let taskLoadFailed = $state(false);
+  let taskActionId = $state<string | null>(null);
   let imagePromptSupported = false;
   let transcriptPane = $state<HTMLDivElement | null>(null);
   let localMessageId = 0;
   let reconnectPromise: Promise<void> | null = null;
   let sessionRefreshGeneration = 0;
+  let autocompleteSettingsGeneration = 0;
   let attachmentSequence = 0;
   let attachmentDraftGeneration = 0;
   let attachmentAddQueue = Promise.resolve();
   let sessionUpdateQueue = Promise.resolve();
   let previousAttachmentDraftKey: string | null = null;
   let projectFilePreviewGeneration = 0;
+  let taskLoadGeneration = 0;
   const registeredAttachmentPaths = new Set<string>();
 
   const canUseSession = $derived(status === "ready" && !!workspace && !operationRunning);
@@ -127,10 +154,32 @@
     previousAttachmentDraftKey = key;
   });
 
+  $effect(() => {
+    const requestClient = client;
+    const sessionId = activeSessionId;
+    const connectionReady = status === "ready";
+    const generation = ++autocompleteSettingsGeneration;
+    autocompleteEnabled = false;
+    autocompleteDebounceMs = 350;
+    if (!requestClient || !sessionId || !connectionReady) return;
+    void requestClient.autocompleteSettings(sessionId)
+      .then((settings) => {
+        if (
+          generation !== autocompleteSettingsGeneration
+          || requestClient !== client
+          || sessionId !== activeSessionId
+        ) return;
+        autocompleteEnabled = settings.enabled;
+        autocompleteDebounceMs = settings.debounceMs;
+      })
+      .catch(() => {});
+  });
+
   onMount(() => {
     let disposed = false;
     let unlistenDragDrop: (() => void) | undefined;
     restoreProjects();
+    if (workspace) void loadProjectTasks(workspace);
     void getCurrentWindow().onDragDropEvent(({ payload }) => {
       if (payload.type === "enter" || payload.type === "over") {
         dragActive = !!activeSessionId && !promptRunning && !operationRunning;
@@ -266,7 +315,7 @@
   }
 
   async function chooseWorkspace(): Promise<void> {
-    if (promptRunning || operationRunning) return;
+    if (promptRunning || operationRunning || tasksSaving || taskActionId) return;
     closeProjectSelector();
     const selected = await open({
       directory: true,
@@ -280,7 +329,7 @@
   }
 
   async function selectWorkspace(selected: string): Promise<void> {
-    if (promptRunning || operationRunning) return;
+    if (promptRunning || operationRunning || tasksSaving || taskActionId) return;
     closeProjectSelector();
     closeSessionSelector();
     if (!isAbsoluteProjectPath(selected)) {
@@ -299,6 +348,10 @@
       await closeActiveSession();
       workspace = selected;
       sessions = [];
+      taskLoadGeneration += 1;
+      taskDocument = EMPTY_TASK_DOCUMENT;
+      taskActionId = null;
+      taskLoadFailed = false;
       restoredSessionTabs = null;
       locallyOpenedSessionTabs = [];
       closedSessionTabs = [];
@@ -310,7 +363,7 @@
       } catch {
         // A storage failure should not prevent opening a project for this run.
       }
-      await openWorkspaceSession();
+      await Promise.all([openWorkspaceSession(), loadProjectTasks(selected)]);
     } catch (error) {
       reportError(error);
     } finally {
@@ -339,6 +392,97 @@
       recentProjects = [];
       savedActiveSessionIds = new Map();
     }
+  }
+
+  async function loadProjectTasks(projectPath: string): Promise<void> {
+    const generation = ++taskLoadGeneration;
+    tasksLoading = true;
+    taskLoadFailed = false;
+    try {
+      const value = await invoke<unknown>("read_project_tasks", { workspace: projectPath });
+      if (generation !== taskLoadGeneration || workspace !== projectPath) return;
+      taskDocument = parseTaskDocument(value);
+    } catch (error) {
+      if (generation === taskLoadGeneration && workspace === projectPath) {
+        taskLoadFailed = true;
+        reportError(error);
+      }
+    } finally {
+      if (generation === taskLoadGeneration && workspace === projectPath) tasksLoading = false;
+    }
+  }
+
+  async function saveProjectTasks(next: ProjectTaskDocument): Promise<boolean> {
+    if (!workspace || tasksSaving || taskLoadFailed) return false;
+    const requestWorkspace = workspace;
+    const previous = taskDocument;
+    let validated: ProjectTaskDocument;
+    try {
+      validated = parseTaskDocument(next);
+    } catch (error) {
+      reportError(error);
+      return false;
+    }
+    taskDocument = validated;
+    tasksSaving = true;
+    try {
+      await invoke("write_project_tasks", { workspace: requestWorkspace, document: validated });
+      return workspace === requestWorkspace;
+    } catch (error) {
+      if (workspace === requestWorkspace) taskDocument = previous;
+      reportError(error);
+      return false;
+    } finally {
+      tasksSaving = false;
+    }
+  }
+
+  function createProjectTask(draft: ProjectTaskDraft): void {
+    const title = draft.title.trim();
+    if (!title) return;
+    const timestamp = new Date().toISOString();
+    const description = draft.description?.trim();
+    const task: ProjectTask = {
+      id: typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `task-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+      title,
+      ...(description ? { description } : {}),
+      type: draft.type,
+      status: draft.status,
+      priority: draft.priority,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    void saveProjectTasks({ ...taskDocument, tasks: [task, ...taskDocument.tasks] });
+  }
+
+  function updateProjectTask(taskId: string, draft: ProjectTaskDraft): void {
+    const title = draft.title.trim();
+    if (!title) return;
+    const description = draft.description?.trim();
+    const timestamp = new Date().toISOString();
+    void saveProjectTasks({
+      ...taskDocument,
+      tasks: taskDocument.tasks.map((task) => task.id === taskId
+        ? {
+            ...task,
+            title,
+            ...(description ? { description } : { description: undefined }),
+            type: draft.type,
+            status: draft.status,
+            priority: draft.priority,
+            updatedAt: timestamp,
+          }
+        : task),
+    });
+  }
+
+  function deleteProjectTask(taskId: string): void {
+    void saveProjectTasks({
+      ...taskDocument,
+      tasks: taskDocument.tasks.filter((task) => task.id !== taskId),
+    });
   }
 
   function rememberActiveSession(projectPath: string, sessionId: string): void {
@@ -454,6 +598,74 @@
       reportError(error);
     } finally {
       operationRunning = false;
+    }
+  }
+
+  async function runProjectTask(task: ProjectTask): Promise<void> {
+    if (task.sessionId) {
+      await openProjectTaskSession(task);
+      return;
+    }
+    if (!client || !canUseSession || promptRunning || tasksSaving || taskActionId) return;
+    const requestClient = client;
+    const requestWorkspace = workspace;
+    closeProjectSelector();
+    closeSessionSelector();
+    operationRunning = true;
+    taskActionId = task.id;
+    errorMessage = null;
+    try {
+      await closeActiveSession();
+      if (client !== requestClient || workspace !== requestWorkspace) return;
+      const response = await requestClient.newSession(requestWorkspace);
+      if (client !== requestClient || workspace !== requestWorkspace) return;
+      showSessionTab(response.sessionId);
+      activeSessionId = response.sessionId;
+      rememberActiveSession(requestWorkspace, response.sessionId);
+      transcript = emptyTranscript;
+      configOptions = response.configOptions ?? [];
+      await refreshSessions();
+
+      const timestamp = new Date().toISOString();
+      const saved = await saveProjectTasks({
+        ...taskDocument,
+        tasks: taskDocument.tasks.map((candidate) => candidate.id === task.id
+          ? {
+              ...candidate,
+              status: "in-progress",
+              sessionId: response.sessionId,
+              updatedAt: timestamp,
+            }
+          : candidate),
+      });
+      if (!saved || client !== requestClient || workspace !== requestWorkspace) return;
+
+      const prompt = buildTaskPrompt(task);
+      promptRunning = true;
+      operationRunning = false;
+      transcript = appendLocalUserMessage(transcript, prompt, `local:${++localMessageId}`, []);
+      await scrollToLatest();
+      await requestClient.prompt(response.sessionId, [{ type: "text", text: prompt }]);
+      await refreshSessions();
+    } catch (error) {
+      reportError(error);
+    } finally {
+      if (workspace === requestWorkspace) {
+        promptRunning = false;
+        operationRunning = false;
+        taskActionId = null;
+      }
+    }
+  }
+
+  async function openProjectTaskSession(task: ProjectTask): Promise<void> {
+    if (!task.sessionId || taskActionId || promptRunning || operationRunning) return;
+    if (task.sessionId === activeSessionId) return;
+    taskActionId = task.id;
+    try {
+      await loadSession(task.sessionId);
+    } finally {
+      taskActionId = null;
     }
   }
 
@@ -725,7 +937,15 @@
 
     const requestWorkspace = workspace;
     const generation = ++projectFilePreviewGeneration;
+    const mediaKind = attachmentKind(mimeTypeForName(path));
     try {
+      if (mediaKind !== "file") {
+        const attachment = await resolveProjectMedia(path);
+        if (!attachment || generation !== projectFilePreviewGeneration || workspace !== requestWorkspace) return;
+        projectFilePreview = null;
+        mediaPreview = attachment;
+        return;
+      }
       const preview = await invoke<ProjectFilePreview>("read_project_file", {
         workspace: requestWorkspace,
         path,
@@ -736,6 +956,45 @@
     } catch (error) {
       if (generation === projectFilePreviewGeneration) reportError(error);
     }
+  }
+
+  async function resolveProjectMedia(path: string): Promise<Attachment | undefined> {
+    const requestWorkspace = workspace;
+    if (!requestWorkspace || attachmentKind(mimeTypeForName(path)) === "file") return undefined;
+
+    const file = await invoke<AttachmentFile>("resolve_project_media", {
+      workspace: requestWorkspace,
+      path,
+    });
+    if (workspace !== requestWorkspace) return undefined;
+    return attachmentFromFile(file, `project-media:${requestWorkspace}:${path}`);
+  }
+
+  async function openLocalFile(path: string): Promise<void> {
+    const generation = ++projectFilePreviewGeneration;
+    if (attachmentKind(mimeTypeForName(path)) !== "file") {
+      try {
+        const attachment = await resolveLocalMedia(path);
+        if (!attachment || generation !== projectFilePreviewGeneration) return;
+        projectFilePreview = null;
+        mediaPreview = attachment;
+      } catch (error) {
+        if (generation === projectFilePreviewGeneration) reportError(error);
+      }
+      return;
+    }
+
+    try {
+      await invoke("open_local_file", { path });
+    } catch (error) {
+      reportError(error);
+    }
+  }
+
+  async function resolveLocalMedia(path: string): Promise<Attachment | undefined> {
+    if (attachmentKind(mimeTypeForName(path)) === "file") return undefined;
+    const file = await invoke<AttachmentFile>("resolve_local_media", { path });
+    return attachmentFromFile(file, `local-media:${path}`);
   }
 
   async function buildPromptBlocks(text: string, attachments: readonly Attachment[]): Promise<ContentBlock[]> {
@@ -817,6 +1076,13 @@
     }
   }
 
+  function autocompletePrompt(draft: string, signal: AbortSignal): Promise<string> {
+    const requestClient = client;
+    const sessionId = activeSessionId;
+    if (!requestClient || !sessionId || status !== "ready") return Promise.resolve("");
+    return requestClient.autocomplete(sessionId, draft, signal);
+  }
+
   async function cancelPrompt(): Promise<void> {
     if (!client || !activeSessionId || !promptRunning) return;
     try {
@@ -885,7 +1151,7 @@
       {workspace}
       {recentProjects}
       open={projectSelectorOpen}
-      disabled={promptRunning || operationRunning}
+      disabled={promptRunning || operationRunning || tasksSaving || taskActionId !== null}
       onToggle={toggleProjectSelector}
       onSelectProject={(path) => void selectWorkspace(path)}
       onChooseWorkspace={() => void chooseWorkspace()}
@@ -921,43 +1187,67 @@
     </div>
   </header>
 
-  <main class="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)_auto]">
-    {#if errorMessage}
-      <ErrorBanner
-        message={errorMessage}
-        canReconnect={status === "error"}
-        onReconnect={() => void reconnect()}
-        onDismiss={() => errorMessage = null}
-      />
-    {/if}
-
-    <TranscriptPane
-      {transcript}
-      {activeSessionId}
+  <div class="flex min-h-0 min-w-0">
+    <ProjectTaskSidebar
       {workspace}
-      {promptRunning}
-      {operationRunning}
-      bind:pane={transcriptPane}
-      onChooseWorkspace={() => void chooseWorkspace()}
-      onOpenAttachment={(attachment) => void activateAttachment(attachment)}
-      onOpenProjectFile={openProjectFile}
+      tasks={taskDocument.tasks}
+      loading={tasksLoading}
+      saving={tasksSaving}
+      storageError={taskLoadFailed}
+      activeTaskId={taskActionId}
+      sessionReady={canUseSession && !promptRunning}
+      onCreate={createProjectTask}
+      onUpdate={updateProjectTask}
+      onDelete={deleteProjectTask}
+      onRun={(task) => void runProjectTask(task)}
+      onOpenSession={(task) => void openProjectTaskSession(task)}
+      onReload={() => void loadProjectTasks(workspace)}
     />
 
-    <PromptComposer
-      bind:promptText
-      attachments={promptAttachments}
-      {activeSessionId}
-      ready={status === "ready"}
-      {promptRunning}
-      {dragActive}
-      onSubmit={submitPrompt}
-      onCancel={cancelPrompt}
-      onChooseAttachments={chooseAttachments}
-      onPasteAttachments={addPastedAttachments}
-      onRemoveAttachment={removeAttachment}
-      onOpenAttachment={(attachment) => void activateAttachment(attachment)}
-    />
-  </main>
+    <main class="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)_auto]">
+      {#if errorMessage}
+        <ErrorBanner
+          message={errorMessage}
+          canReconnect={status === "error"}
+          onReconnect={() => void reconnect()}
+          onDismiss={() => errorMessage = null}
+        />
+      {/if}
+
+      <TranscriptPane
+        {transcript}
+        {activeSessionId}
+        {workspace}
+        {promptRunning}
+        {operationRunning}
+        bind:pane={transcriptPane}
+        onChooseWorkspace={() => void chooseWorkspace()}
+        onOpenAttachment={(attachment) => void activateAttachment(attachment)}
+        onOpenProjectFile={openProjectFile}
+        onResolveProjectMedia={resolveProjectMedia}
+        onOpenLocalFile={openLocalFile}
+        onResolveLocalMedia={resolveLocalMedia}
+      />
+
+      <PromptComposer
+        bind:promptText
+        attachments={promptAttachments}
+        {activeSessionId}
+        ready={status === "ready"}
+        {promptRunning}
+        {dragActive}
+        {autocompleteEnabled}
+        {autocompleteDebounceMs}
+        onAutocomplete={autocompletePrompt}
+        onSubmit={submitPrompt}
+        onCancel={cancelPrompt}
+        onChooseAttachments={chooseAttachments}
+        onPasteAttachments={addPastedAttachments}
+        onRemoveAttachment={removeAttachment}
+        onOpenAttachment={(attachment) => void activateAttachment(attachment)}
+      />
+    </main>
+  </div>
 
   <StatusBar
     {status}

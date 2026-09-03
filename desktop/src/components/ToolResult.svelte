@@ -9,6 +9,7 @@
     mutationDiffPresentations,
     mutationOutputLines,
   } from "../lib/tool-output";
+  import type { Attachment } from "../lib/attachments";
   import type { ToolItem } from "../lib/transcript";
   import DiffView from "./DiffView.svelte";
   import MarkdownText from "./MarkdownText.svelte";
@@ -16,9 +17,15 @@
   let {
     tool,
     onOpenProjectFile,
+    onResolveProjectMedia,
+    onOpenLocalFile,
+    onResolveLocalMedia,
   }: {
     tool: ToolItem;
     onOpenProjectFile?: (path: string) => void | Promise<void>;
+    onResolveProjectMedia?: (path: string) => Promise<Attachment | undefined>;
+    onOpenLocalFile?: (path: string) => void | Promise<void>;
+    onResolveLocalMedia?: (path: string) => Promise<Attachment | undefined>;
   } = $props();
 
   let language = $derived(languageForReadTool(tool.kind, tool.title, tool.path));
@@ -37,7 +44,7 @@
   <DiffView model={shellDiff} label="git diff" />
 {:else if tool.content}
   {#if renderAsMarkdown}
-    <div class="tool-result markdown-result"><MarkdownText text={tool.content} {onOpenProjectFile} /></div>
+    <div class="tool-result markdown-result"><MarkdownText text={tool.content} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} /></div>
   {:else if highlighted}
     <pre class="tool-result"><code class="highlighted-code" data-language={highlighted.language}>{@html highlighted.html}</code></pre>
   {:else if mutationLines}

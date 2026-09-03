@@ -182,7 +182,6 @@
 }
 html, body, #app { width: 100%; height: 100%; margin: 0; overflow: hidden; }
 button, textarea, select, input { font: inherit; }
-button { color: inherit; }
 button, select, textarea, input { letter-spacing: inherit; }
 :where(
   button:not(:disabled),

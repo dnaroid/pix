@@ -29,6 +29,7 @@
 	"dependencies": {
 		"@agentclientprotocol/sdk": "1.4.0",
 		"@earendil-works/pi-coding-agent": "0.84.4",
+		"jsonc-parser": "3.3.1",
 		"proper-lockfile": "4.1.2"
 	},
 	"devDependencies": {

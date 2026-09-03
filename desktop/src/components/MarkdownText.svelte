@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { convertFileSrc } from "@tauri-apps/api/core";
+  import type { Attachment } from "../lib/attachments";
   import { openExternalHref } from "../lib/external-links";
   import { renderMarkdown } from "../lib/markdown";
   import { renderMermaidDiagram } from "../lib/mermaid";
@@ -7,12 +9,19 @@
     text,
     compact = false,
     onOpenProjectFile,
+    onResolveProjectMedia,
+    onOpenLocalFile,
+    onResolveLocalMedia,
   }: {
     text: string;
     compact?: boolean;
     onOpenProjectFile?: (path: string) => void | Promise<void>;
+    onResolveProjectMedia?: (path: string) => Promise<Attachment | undefined>;
+    onOpenLocalFile?: (path: string) => void | Promise<void>;
+    onResolveLocalMedia?: (path: string) => Promise<Attachment | undefined>;
   } = $props();
   let html = $derived(renderMarkdown(text));
+  const mediaCache = new Map<string, Promise<Attachment | undefined>>();
 
   function markdownContent(node: HTMLElement, _renderedHtml: string) {
     let generation = 0;
@@ -21,7 +30,79 @@
     function scheduleRender() {
       generation += 1;
       const scheduledGeneration = generation;
-      queueMicrotask(() => void renderDiagrams(scheduledGeneration));
+      queueMicrotask(() => {
+        void renderDiagrams(scheduledGeneration);
+        void renderMedia(scheduledGeneration);
+      });
+    }
+
+    async function renderMedia(scheduledGeneration: number) {
+      if (scheduledGeneration !== generation) return;
+
+      const previews = Array.from(node.querySelectorAll<HTMLElement>(
+        ".markdown-media[data-project-media], .markdown-media[data-local-media]",
+      ));
+      for (const preview of previews) {
+        const projectPath = preview.dataset.projectFile;
+        const localPath = preview.dataset.localFile;
+        const path = projectPath ?? localPath;
+        const scope = projectPath ? "project" : "local";
+        const kind = projectPath ? preview.dataset.projectMedia : preview.dataset.localMedia;
+        const resolver = projectPath ? onResolveProjectMedia : onResolveLocalMedia;
+        const frame = preview.querySelector<HTMLElement>(".markdown-media-frame");
+        if (!path || !resolver || (kind !== "image" && kind !== "video") || !frame) continue;
+        const label = projectPath
+          ? preview.dataset.projectMediaLabel || path
+          : preview.dataset.localMediaLabel || path;
+
+        frame.setAttribute("aria-busy", "true");
+        try {
+          const cacheKey = `${scope}:${path}`;
+          let request = mediaCache.get(cacheKey);
+          if (!request) {
+            request = resolver(path);
+            mediaCache.set(cacheKey, request);
+          }
+          const attachment = await request;
+          if (scheduledGeneration !== generation || !node.contains(preview)) return;
+          if (!attachment?.path || attachment.kind !== kind) {
+            showMediaError(frame, preview);
+            continue;
+          }
+
+          let media: HTMLImageElement | HTMLVideoElement;
+          if (kind === "image") {
+            const image = document.createElement("img");
+            image.alt = label;
+            image.loading = "lazy";
+            image.decoding = "async";
+            media = image;
+          } else {
+            const video = document.createElement("video");
+            video.controls = true;
+            video.preload = "metadata";
+            video.playsInline = true;
+            video.setAttribute("aria-label", label);
+            media = video;
+          }
+          media.src = convertFileSrc(attachment.path);
+          media.className = "markdown-media-content";
+          media.addEventListener(
+            "error",
+            () => {
+              if (node.contains(preview)) showMediaError(frame, preview);
+            },
+            { once: true },
+          );
+          frame.replaceChildren(media);
+          frame.removeAttribute("aria-busy");
+          preview.dataset.mediaState = "ready";
+        } catch (error: unknown) {
+          if (scheduledGeneration !== generation || !node.contains(preview)) return;
+          console.warn(`Failed to render ${scope} media ${path}`, error);
+          showMediaError(frame, preview);
+        }
+      }
     }
 
     async function renderDiagrams(scheduledGeneration: number) {
@@ -85,6 +166,15 @@
     diagram.dataset.mermaidState = "error";
   }
 
+  function showMediaError(frame: HTMLElement, preview: HTMLElement) {
+    const message = document.createElement("span");
+    message.className = "markdown-media-status";
+    message.textContent = "Preview unavailable";
+    frame.replaceChildren(message);
+    frame.removeAttribute("aria-busy");
+    preview.dataset.mediaState = "error";
+  }
+
   function linkClicks(node: HTMLElement) {
     function handleClick(event: MouseEvent) {
       if (event.defaultPrevented || event.button !== 0 || !(event.target instanceof Element)) return;
@@ -94,6 +184,14 @@
         event.preventDefault();
         const path = projectFileLink.getAttribute("data-project-file");
         if (path) void onOpenProjectFile?.(path);
+        return;
+      }
+
+      const localFileLink = event.target.closest("a[data-local-file]");
+      if (localFileLink && node.contains(localFileLink)) {
+        event.preventDefault();
+        const path = localFileLink.getAttribute("data-local-file");
+        if (path) void onOpenLocalFile?.(path);
         return;
       }
 
@@ -197,7 +295,8 @@
     text-underline-offset: 2px;
   }
   .markdown-text :global(a:hover) { text-decoration-color: currentColor; }
-  .markdown-text :global(a[data-project-file]) {
+  .markdown-text :global(a[data-project-file]),
+  .markdown-text :global(a[data-local-file]) {
     border-radius: calc(var(--radius) - 10px);
     background: var(--muted);
     box-decoration-break: clone;
@@ -206,8 +305,10 @@
     font-size: 0.92em;
     -webkit-box-decoration-break: clone;
   }
-  .markdown-text :global(a[data-project-file]:hover) { background: var(--accent); }
-  .markdown-text :global(a[data-project-file] > code) {
+  .markdown-text :global(a[data-project-file]:hover),
+  .markdown-text :global(a[data-local-file]:hover) { background: var(--accent); }
+  .markdown-text :global(a[data-project-file] > code),
+  .markdown-text :global(a[data-local-file] > code) {
     background: transparent;
     padding: 0;
     font-size: inherit;
@@ -216,6 +317,63 @@
     border-radius: var(--radius-sm);
     outline: 2px solid var(--ring);
     outline-offset: 2px;
+  }
+  .markdown-text :global(.markdown-media) {
+    display: flex;
+    width: min(100%, 48rem);
+    margin: 0.75rem 0;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.35rem;
+  }
+  .markdown-text :global(.markdown-media-frame) {
+    display: grid;
+    width: fit-content;
+    max-height: 28rem;
+    max-width: 100%;
+    place-items: center;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--muted);
+    color: var(--muted-foreground);
+    text-decoration: none;
+  }
+  .markdown-text :global(a.markdown-media-frame) {
+    cursor: pointer;
+    transition: border-color 120ms ease, background-color 120ms ease;
+  }
+  .markdown-text :global(a.markdown-media-frame:hover) {
+    border-color: var(--input);
+    background: var(--accent);
+  }
+  .markdown-text :global(.markdown-media-content) {
+    display: block;
+    max-width: 100%;
+    max-height: 28rem;
+    object-fit: contain;
+  }
+  .markdown-text :global(video.markdown-media-content) {
+    width: auto;
+    background: var(--background);
+  }
+  .markdown-text :global(.markdown-media-status) {
+    padding: 1rem;
+    font-size: 0.85em;
+  }
+  .markdown-text :global(.markdown-media-caption) {
+    display: block;
+    max-width: 100%;
+    color: var(--muted-foreground);
+    font-size: 0.85em;
+  }
+  .markdown-text :global(.markdown-media-caption a[data-project-file]),
+  .markdown-text :global(.markdown-media-caption a[data-local-file]) {
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .markdown-text :global(code) {
     border-radius: var(--radius-sm);

@@ -40,12 +40,18 @@ export interface AcpClientHandlers {
   readonly onExit?: (exit: AcpExit) => void;
 }
 
+export interface AutocompleteSettings {
+  readonly enabled: boolean;
+  readonly debounceMs: number;
+}
+
 type JsonRpcId = string | number;
 
 interface PendingRequest {
   readonly resolve: (value: unknown) => void;
   readonly reject: (error: Error) => void;
   readonly timer?: ReturnType<typeof setTimeout>;
+  readonly removeAbortListener?: () => void;
 }
 
 interface JsonRpcError {
@@ -121,6 +127,32 @@ export class AcpClient {
     );
   }
 
+  async autocomplete(sessionId: string, draft: string, signal?: AbortSignal): Promise<string> {
+    const response = await this.request<unknown>(
+      "pix/autocomplete",
+      { sessionId, draft },
+      DEFAULT_TIMEOUT_MS,
+      signal,
+    );
+    if (!isRecord(response) || typeof response.completion !== "string") {
+      throw new Error("pix/autocomplete returned an invalid response");
+    }
+    return response.completion;
+  }
+
+  async autocompleteSettings(sessionId: string): Promise<AutocompleteSettings> {
+    const response = await this.request<unknown>("pix/autocomplete/config", { sessionId });
+    if (
+      !isRecord(response)
+      || typeof response.enabled !== "boolean"
+      || typeof response.debounceMs !== "number"
+      || !Number.isFinite(response.debounceMs)
+    ) {
+      throw new Error("pix/autocomplete/config returned an invalid response");
+    }
+    return { enabled: response.enabled, debounceMs: response.debounceMs };
+  }
+
   cancel(sessionId: string): Promise<void> {
     return this.notify("session/cancel", { sessionId });
   }
@@ -147,27 +179,51 @@ export class AcpClient {
     method: string,
     params: unknown,
     timeoutMs: number | null = DEFAULT_TIMEOUT_MS,
+    signal?: AbortSignal,
   ): Promise<Response> {
     if (this.disposed) return Promise.reject(new Error("ACP client is disposed"));
+    if (signal?.aborted) return Promise.reject(abortError(signal));
     const id = this.nextId++;
+    let sent: Promise<void> = Promise.resolve();
+    let removeAbortListener: (() => void) | undefined;
     const result = new Promise<Response>((resolve, reject) => {
       const timer = timeoutMs === null
         ? undefined
         : setTimeout(() => {
-            this.pending.delete(id);
+            if (!this.takePending(id)) return;
             reject(new Error(`${method} timed out after ${timeoutMs}ms`));
+            this.cancelRemoteRequest(id, sent);
           }, timeoutMs);
       this.pending.set(id, {
         resolve: (value) => resolve(value as Response),
         reject,
         ...(timer ? { timer } : {}),
+        ...(signal ? { removeAbortListener: () => removeAbortListener?.() } : {}),
       });
     });
 
-    void this.send({ jsonrpc: "2.0", id, method, params }).catch((error: unknown) => {
+    sent = this.send({ jsonrpc: "2.0", id, method, params });
+    void sent.catch((error: unknown) => {
       this.rejectPending(id, toError(error));
     });
+    if (signal) {
+      const onAbort = (): void => {
+        const pending = this.takePending(id);
+        if (!pending) return;
+        pending.reject(abortError(signal));
+        this.cancelRemoteRequest(id, sent);
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      removeAbortListener = () => signal.removeEventListener("abort", onAbort);
+      if (signal.aborted) onAbort();
+    }
     return result;
+  }
+
+  private cancelRemoteRequest(id: JsonRpcId, sent: Promise<void>): void {
+    void sent
+      .then(() => this.send({ jsonrpc: "2.0", method: "$/cancel_request", params: { requestId: id } }))
+      .catch(() => {});
   }
 
   private notify(method: string, params: unknown): Promise<void> {
@@ -243,6 +299,7 @@ export class AcpClient {
     if (!pending) return undefined;
     this.pending.delete(id);
     if (pending.timer) clearTimeout(pending.timer);
+    pending.removeAbortListener?.();
     return pending;
   }
 
@@ -269,4 +326,9 @@ function isJsonRpcError(value: unknown): value is JsonRpcError {
 
 function toError(value: unknown): Error {
   return value instanceof Error ? value : new Error(String(value));
+}
+
+function abortError(signal: AbortSignal): Error {
+  if (signal.reason instanceof Error) return signal.reason;
+  return new DOMException("The operation was aborted", "AbortError");
 }

@@ -1,5 +1,6 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use serde::Serialize;
+use chrono::DateTime;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     collections::HashSet,
@@ -25,8 +26,10 @@ const MAX_ATTACHMENT_COUNT: usize = 10;
 const MAX_ATTACHMENT_BYTES: u64 = 25 * 1024 * 1024;
 const MAX_ATTACHMENT_CACHE_BYTES: u64 = 250 * 1024 * 1024;
 const MAX_PROJECT_FILE_PREVIEW_BYTES: u64 = 2 * 1024 * 1024;
+const MAX_TASK_DOCUMENT_BYTES: u64 = 1024 * 1024;
 const ATTACHMENT_CACHE_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 static ATTACHMENT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+static TASK_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 type ExitSignal = Arc<(Mutex<bool>, Condvar)>;
 
 #[derive(Default)]
@@ -83,6 +86,56 @@ struct AttachmentFile {
 struct ProjectFilePreview {
     path: String,
     content: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ProjectTaskDocument {
+    version: u8,
+    tasks: Vec<ProjectTask>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ProjectTask {
+    id: String,
+    title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    #[serde(rename = "type")]
+    task_type: ProjectTaskType,
+    status: ProjectTaskStatus,
+    priority: ProjectTaskPriority,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    session_id: Option<String>,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum ProjectTaskType {
+    Bug,
+    Feature,
+    Improvement,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum ProjectTaskStatus {
+    Backlog,
+    Todo,
+    InProgress,
+    Done,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum ProjectTaskPriority {
+    Low,
+    Medium,
+    High,
+    Urgent,
 }
 
 struct AttachmentPathState {
@@ -283,11 +336,123 @@ fn read_project_file(workspace: String, path: String) -> Result<ProjectFilePrevi
     )
 }
 
+#[tauri::command]
+fn resolve_project_media(
+    app: AppHandle,
+    state: State<'_, AttachmentPathState>,
+    workspace: String,
+    path: String,
+) -> Result<AttachmentFile, String> {
+    let file = resolve_project_media_from(Path::new(&workspace), Path::new(&path))?;
+    state.approve(&app, PathBuf::from(&file.path))?;
+    Ok(file)
+}
+
+#[tauri::command]
+fn resolve_local_media(
+    app: AppHandle,
+    state: State<'_, AttachmentPathState>,
+    path: String,
+) -> Result<AttachmentFile, String> {
+    let file = resolve_local_media_from(Path::new(&path))?;
+    state.approve(&app, PathBuf::from(&file.path))?;
+    Ok(file)
+}
+
+#[tauri::command]
+fn open_local_file(app: AppHandle, path: String) -> Result<(), String> {
+    let file_path = resolve_local_file_path(Path::new(&path))?;
+    app.opener()
+        .open_path(file_path.to_string_lossy(), None::<&str>)
+        .map_err(|error| format!("failed to open local file: {error}"))
+}
+
+fn resolve_project_media_from(
+    workspace: &Path,
+    relative_path: &Path,
+) -> Result<AttachmentFile, String> {
+    let (_, file_path) = resolve_project_file_path(workspace, relative_path)?;
+    if !is_supported_project_media(&file_path) {
+        return Err(format!(
+            "{} is not a supported image or video",
+            relative_path.display()
+        ));
+    }
+    attachment_file(&file_path)
+}
+
+fn resolve_local_media_from(path: &Path) -> Result<AttachmentFile, String> {
+    let file_path = resolve_local_file_path(path)?;
+    if !is_supported_project_media(&file_path) {
+        return Err(format!(
+            "{} is not a supported image or video",
+            path.display()
+        ));
+    }
+    attachment_file(&file_path)
+}
+
+fn resolve_local_file_path(path: &Path) -> Result<PathBuf, String> {
+    if !path.is_absolute() {
+        return Err("local file path must be absolute".to_owned());
+    }
+    let canonical = fs::canonicalize(path)
+        .map_err(|error| format!("failed to resolve local file {}: {error}", path.display()))?;
+    let metadata = fs::metadata(&canonical)
+        .map_err(|error| format!("failed to inspect {}: {error}", canonical.display()))?;
+    if !metadata.is_file() {
+        return Err(format!("{} is not a file", canonical.display()));
+    }
+    Ok(canonical)
+}
+
 fn read_project_file_from(
     workspace: &Path,
     relative_path: &Path,
     max_bytes: u64,
 ) -> Result<ProjectFilePreview, String> {
+    let (root, file_path) = resolve_project_file_path(workspace, relative_path)?;
+
+    let metadata = fs::metadata(&file_path)
+        .map_err(|error| format!("failed to inspect {}: {error}", file_path.display()))?;
+    if metadata.len() > max_bytes {
+        return Err(format!(
+            "{} is too large to preview (maximum {} MB)",
+            relative_path.display(),
+            max_bytes / 1024 / 1024,
+        ));
+    }
+
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    fs::File::open(&file_path)
+        .map_err(|error| format!("failed to open {}: {error}", file_path.display()))?
+        .take(max_bytes + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("failed to read {}: {error}", file_path.display()))?;
+    if bytes.len() as u64 > max_bytes {
+        return Err(format!(
+            "{} grew beyond the preview limit",
+            relative_path.display()
+        ));
+    }
+    let content = String::from_utf8(bytes)
+        .map_err(|_| format!("{} is not a UTF-8 text file", relative_path.display()))?;
+    let display_path = file_path
+        .strip_prefix(&root)
+        .unwrap_or(relative_path)
+        .to_string_lossy()
+        .replace('\\', "/");
+
+    Ok(ProjectFilePreview {
+        path: display_path,
+        content,
+    })
+}
+
+fn resolve_project_file_path(
+    workspace: &Path,
+    relative_path: &Path,
+) -> Result<(PathBuf, PathBuf), String> {
     if relative_path.as_os_str().is_empty()
         || relative_path.is_absolute()
         || relative_path.components().any(|component| {
@@ -325,38 +490,253 @@ fn read_project_file_from(
     if !metadata.is_file() {
         return Err(format!("{} is not a file", relative_path.display()));
     }
-    if metadata.len() > max_bytes {
-        return Err(format!(
-            "{} is too large to preview (maximum {} MB)",
-            relative_path.display(),
-            max_bytes / 1024 / 1024,
-        ));
-    }
+    Ok((root, file_path))
+}
 
+fn is_supported_project_media(path: &Path) -> bool {
+    let Some(extension) = path.extension().and_then(|value| value.to_str()) else {
+        return false;
+    };
+    matches!(
+        extension.to_ascii_lowercase().as_str(),
+        "avif"
+            | "bmp"
+            | "gif"
+            | "jpeg"
+            | "jpg"
+            | "png"
+            | "svg"
+            | "webp"
+            | "m4v"
+            | "mov"
+            | "mp4"
+            | "ogv"
+            | "webm"
+    )
+}
+
+#[tauri::command]
+fn read_project_tasks(workspace: String) -> Result<ProjectTaskDocument, String> {
+    read_project_tasks_from(Path::new(&workspace), MAX_TASK_DOCUMENT_BYTES)
+}
+
+#[tauri::command]
+fn write_project_tasks(workspace: String, document: ProjectTaskDocument) -> Result<(), String> {
+    write_project_tasks_to(Path::new(&workspace), &document)
+}
+
+fn read_project_tasks_from(
+    workspace: &Path,
+    max_bytes: u64,
+) -> Result<ProjectTaskDocument, String> {
+    let root = canonical_workspace(workspace)?;
+    let directory = root.join(".pi");
+    if !directory.exists() {
+        return Ok(empty_task_document());
+    }
+    let directory = canonical_project_directory(&root, &directory)?;
+    let path = directory.join("tasks.json");
+    if !path.exists() {
+        return Ok(empty_task_document());
+    }
+    let canonical = fs::canonicalize(&path)
+        .map_err(|error| format!("failed to resolve {}: {error}", path.display()))?;
+    if !canonical.starts_with(&root) {
+        return Err(".pi/tasks.json resolves outside the workspace".to_owned());
+    }
+    let metadata = fs::metadata(&canonical)
+        .map_err(|error| format!("failed to inspect {}: {error}", canonical.display()))?;
+    if !metadata.is_file() {
+        return Err(".pi/tasks.json is not a file".to_owned());
+    }
+    if metadata.len() > max_bytes {
+        return Err(".pi/tasks.json is too large (maximum 1 MB)".to_owned());
+    }
     let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    fs::File::open(&file_path)
-        .map_err(|error| format!("failed to open {}: {error}", file_path.display()))?
+    fs::File::open(&canonical)
+        .map_err(|error| format!("failed to open .pi/tasks.json: {error}"))?
         .take(max_bytes + 1)
         .read_to_end(&mut bytes)
-        .map_err(|error| format!("failed to read {}: {error}", file_path.display()))?;
+        .map_err(|error| format!("failed to read .pi/tasks.json: {error}"))?;
     if bytes.len() as u64 > max_bytes {
+        return Err(".pi/tasks.json grew beyond the 1 MB limit".to_owned());
+    }
+    let document: ProjectTaskDocument = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("invalid .pi/tasks.json: {error}"))?;
+    validate_task_document(&document)?;
+    Ok(document)
+}
+
+fn write_project_tasks_to(workspace: &Path, document: &ProjectTaskDocument) -> Result<(), String> {
+    validate_task_document(document)?;
+    let root = canonical_workspace(workspace)?;
+    let directory_path = root.join(".pi");
+    if !directory_path.exists() {
+        fs::create_dir(&directory_path)
+            .map_err(|error| format!("failed to create {}: {error}", directory_path.display()))?;
+    }
+    let directory = canonical_project_directory(&root, &directory_path)?;
+    let target = directory.join("tasks.json");
+    if target.exists() {
+        let canonical = fs::canonicalize(&target)
+            .map_err(|error| format!("failed to resolve {}: {error}", target.display()))?;
+        if !canonical.starts_with(&root) {
+            return Err(".pi/tasks.json resolves outside the workspace".to_owned());
+        }
+        if !fs::metadata(&canonical)
+            .map_err(|error| format!("failed to inspect {}: {error}", canonical.display()))?
+            .is_file()
+        {
+            return Err(".pi/tasks.json is not a file".to_owned());
+        }
+    }
+
+    let mut serialized = serde_json::to_vec_pretty(document)
+        .map_err(|error| format!("failed to encode .pi/tasks.json: {error}"))?;
+    serialized.push(b'\n');
+    if serialized.len() as u64 > MAX_TASK_DOCUMENT_BYTES {
+        return Err(".pi/tasks.json is too large (maximum 1 MB)".to_owned());
+    }
+
+    let sequence = TASK_WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let temporary = directory.join(format!(
+        ".tasks.json.{}.{}.tmp",
+        std::process::id(),
+        sequence,
+    ));
+    let write_result = (|| {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .map_err(|error| format!("failed to create task document temporary file: {error}"))?;
+        file.write_all(&serialized)
+            .map_err(|error| format!("failed to write task document: {error}"))?;
+        file.sync_all()
+            .map_err(|error| format!("failed to flush task document: {error}"))?;
+        replace_task_file(&temporary, &target)?;
+        sync_directory(&directory)?;
+        Ok(())
+    })();
+    if write_result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    write_result
+}
+
+fn canonical_workspace(workspace: &Path) -> Result<PathBuf, String> {
+    let root = fs::canonicalize(workspace).map_err(|error| {
+        format!(
+            "failed to resolve workspace {}: {error}",
+            workspace.display()
+        )
+    })?;
+    if root.is_dir() {
+        Ok(root)
+    } else {
+        Err(format!("{} is not a workspace directory", root.display()))
+    }
+}
+
+fn canonical_project_directory(root: &Path, directory: &Path) -> Result<PathBuf, String> {
+    let canonical = fs::canonicalize(directory)
+        .map_err(|error| format!("failed to resolve {}: {error}", directory.display()))?;
+    if !canonical.starts_with(root) {
+        return Err(".pi resolves outside the workspace".to_owned());
+    }
+    if !canonical.is_dir() {
+        return Err(".pi is not a directory".to_owned());
+    }
+    Ok(canonical)
+}
+
+fn empty_task_document() -> ProjectTaskDocument {
+    ProjectTaskDocument {
+        version: 1,
+        tasks: Vec::new(),
+    }
+}
+
+fn validate_task_document(document: &ProjectTaskDocument) -> Result<(), String> {
+    if document.version != 1 {
         return Err(format!(
-            "{} grew beyond the preview limit",
-            relative_path.display()
+            "unsupported .pi/tasks.json version {}",
+            document.version
         ));
     }
-    let content = String::from_utf8(bytes)
-        .map_err(|_| format!("{} is not a UTF-8 text file", relative_path.display()))?;
-    let display_path = file_path
-        .strip_prefix(&root)
-        .unwrap_or(relative_path)
-        .to_string_lossy()
-        .replace('\\', "/");
+    if document.tasks.len() > 10_000 {
+        return Err(".pi/tasks.json contains too many tasks".to_owned());
+    }
+    let mut ids = HashSet::new();
+    for task in &document.tasks {
+        if task.id.trim().is_empty() || task.id.chars().count() > 128 {
+            return Err("task id must contain 1 to 128 characters".to_owned());
+        }
+        if !ids.insert(task.id.as_str()) {
+            return Err(format!("duplicate task id: {}", task.id));
+        }
+        if task.title.trim().is_empty() || task.title.chars().count() > 200 {
+            return Err(format!("task {} has an invalid title", task.id));
+        }
+        if task
+            .description
+            .as_ref()
+            .is_some_and(|value| value.chars().count() > 10_000)
+        {
+            return Err(format!("task {} description is too long", task.id));
+        }
+        if task
+            .session_id
+            .as_ref()
+            .is_some_and(|value| value.trim().is_empty() || value.chars().count() > 512)
+        {
+            return Err(format!("task {} has an invalid session id", task.id));
+        }
+        let created = DateTime::parse_from_rfc3339(&task.created_at)
+            .map_err(|_| format!("task {} has an invalid createdAt", task.id))?;
+        let updated = DateTime::parse_from_rfc3339(&task.updated_at)
+            .map_err(|_| format!("task {} has an invalid updatedAt", task.id))?;
+        if updated < created {
+            return Err(format!("task {} updatedAt precedes createdAt", task.id));
+        }
+    }
+    Ok(())
+}
 
-    Ok(ProjectFilePreview {
-        path: display_path,
-        content,
-    })
+#[cfg(not(windows))]
+fn replace_task_file(temporary: &Path, target: &Path) -> Result<(), String> {
+    fs::rename(temporary, target)
+        .map_err(|error| format!("failed to replace .pi/tasks.json: {error}"))
+}
+
+#[cfg(windows)]
+fn replace_task_file(temporary: &Path, target: &Path) -> Result<(), String> {
+    if !target.exists() {
+        return fs::rename(temporary, target)
+            .map_err(|error| format!("failed to install .pi/tasks.json: {error}"));
+    }
+    let backup = target.with_extension("json.bak");
+    let _ = fs::remove_file(&backup);
+    fs::rename(target, &backup)
+        .map_err(|error| format!("failed to prepare .pi/tasks.json replacement: {error}"))?;
+    if let Err(error) = fs::rename(temporary, target) {
+        let _ = fs::rename(&backup, target);
+        return Err(format!("failed to replace .pi/tasks.json: {error}"));
+    }
+    let _ = fs::remove_file(backup);
+    Ok(())
+}
+
+#[cfg(unix)]
+fn sync_directory(directory: &Path) -> Result<(), String> {
+    fs::File::open(directory)
+        .and_then(|file| file.sync_all())
+        .map_err(|error| format!("failed to flush task document directory: {error}"))
+}
+
+#[cfg(not(unix))]
+fn sync_directory(_directory: &Path) -> Result<(), String> {
+    Ok(())
 }
 
 fn attachment_file(path: &Path) -> Result<AttachmentFile, String> {
@@ -680,7 +1060,12 @@ pub fn run() {
             read_attachment_base64,
             cache_attachment,
             open_attachment,
+            open_local_file,
             read_project_file,
+            resolve_project_media,
+            resolve_local_media,
+            read_project_tasks,
+            write_project_tasks,
         ])
         .build(tauri::generate_context!())
         .expect("failed to build Pix Desktop");
@@ -733,5 +1118,130 @@ mod tests {
         assert!(read_project_file_from(&workspace, Path::new("large.txt"), 4).is_err());
         assert!(read_project_file_from(&workspace, Path::new("binary.bin"), 1024).is_err());
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
+    fn resolves_supported_project_media_and_rejects_invalid_paths() {
+        let workspace = temporary_workspace("project-media");
+        fs::create_dir(workspace.join("artifacts")).expect("create artifacts directory");
+        fs::write(
+            workspace.join("artifacts/result.png"),
+            [0x89, b'P', b'N', b'G'],
+        )
+        .expect("write image");
+        fs::write(workspace.join("artifacts/result.bin"), [0xff, 0xfe])
+            .expect("write unsupported file");
+
+        let media = resolve_project_media_from(&workspace, Path::new("artifacts/result.png"))
+            .expect("resolve project media");
+
+        assert_eq!(media.name, "result.png");
+        assert_eq!(
+            PathBuf::from(media.path),
+            fs::canonicalize(workspace.join("artifacts/result.png")).expect("canonical media path")
+        );
+        assert!(resolve_project_media_from(&workspace, Path::new("artifacts/result.bin")).is_err());
+        assert!(resolve_project_media_from(&workspace, Path::new("../outside.png")).is_err());
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
+    fn resolves_supported_absolute_media_and_rejects_relative_or_unsupported_files() {
+        let directory = temporary_workspace("local-media");
+        let image_path = directory.join("result.png");
+        let unsupported_path = directory.join("result.bin");
+        fs::write(&image_path, [0x89, b'P', b'N', b'G']).expect("write local image");
+        fs::write(&unsupported_path, [0xff, 0xfe]).expect("write unsupported local file");
+
+        let media = resolve_local_media_from(&image_path).expect("resolve local media");
+
+        assert_eq!(media.name, "result.png");
+        assert_eq!(
+            PathBuf::from(media.path),
+            fs::canonicalize(&image_path).expect("canonical local media path")
+        );
+        assert!(resolve_local_media_from(Path::new("relative.png")).is_err());
+        assert!(resolve_local_media_from(&unsupported_path).is_err());
+        assert!(resolve_local_media_from(&directory.join("missing.png")).is_err());
+        fs::remove_dir_all(directory).expect("remove temporary workspace");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_project_media_symlinks_outside_the_workspace() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = temporary_workspace("project-media-symlink-workspace");
+        let outside = temporary_workspace("project-media-symlink-outside");
+        fs::write(outside.join("outside.png"), [0x89, b'P', b'N', b'G'])
+            .expect("write outside image");
+        symlink(outside.join("outside.png"), workspace.join("outside.png"))
+            .expect("create media symlink");
+
+        assert!(resolve_project_media_from(&workspace, Path::new("outside.png")).is_err());
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+        fs::remove_dir_all(outside).expect("remove outside directory");
+    }
+
+    fn sample_task_document() -> ProjectTaskDocument {
+        ProjectTaskDocument {
+            version: 1,
+            tasks: vec![ProjectTask {
+                id: "task-1".to_owned(),
+                title: "Repair reconnect".to_owned(),
+                description: Some("Keep the active workspace selected.".to_owned()),
+                task_type: ProjectTaskType::Bug,
+                status: ProjectTaskStatus::Todo,
+                priority: ProjectTaskPriority::High,
+                session_id: None,
+                created_at: "2026-09-03T12:00:00.000Z".to_owned(),
+                updated_at: "2026-09-03T12:00:00.000Z".to_owned(),
+            }],
+        }
+    }
+
+    #[test]
+    fn reads_missing_task_document_as_empty_version_one() {
+        let workspace = temporary_workspace("missing-tasks");
+        let document = read_project_tasks_from(&workspace, 1024).expect("read missing tasks");
+        assert_eq!(document, empty_task_document());
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
+    fn writes_and_reads_a_valid_task_document() {
+        let workspace = temporary_workspace("task-roundtrip");
+        let expected = sample_task_document();
+        write_project_tasks_to(&workspace, &expected).expect("write tasks");
+        let actual = read_project_tasks_from(&workspace, 1024 * 1024).expect("read tasks");
+        assert_eq!(actual, expected);
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
+    fn rejects_malformed_and_duplicate_task_documents() {
+        let workspace = temporary_workspace("invalid-tasks");
+        fs::create_dir(workspace.join(".pi")).expect("create .pi directory");
+        fs::write(workspace.join(".pi/tasks.json"), b"{").expect("write malformed task document");
+        assert!(read_project_tasks_from(&workspace, 1024).is_err());
+
+        let mut duplicate = sample_task_document();
+        duplicate.tasks.push(duplicate.tasks[0].clone());
+        assert!(write_project_tasks_to(&workspace, &duplicate).is_err());
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_task_directory_symlinks_outside_the_workspace() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = temporary_workspace("task-symlink-workspace");
+        let outside = temporary_workspace("task-symlink-outside");
+        symlink(&outside, workspace.join(".pi")).expect("create .pi symlink");
+        assert!(read_project_tasks_from(&workspace, 1024).is_err());
+        assert!(write_project_tasks_to(&workspace, &sample_task_document()).is_err());
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+        fs::remove_dir_all(outside).expect("remove outside directory");
     }
 }

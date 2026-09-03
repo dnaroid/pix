@@ -57,6 +57,19 @@ import {
 import type { Logger } from "../logging.js";
 import { stringifyUnknown } from "../stringify-unknown.js";
 import {
+	createAutocompleteCompleter,
+	autocompleteSettings,
+	loadAutocompleteConfig,
+	parseAutocompleteRequest,
+	parseAutocompleteSettingsRequest,
+	type AutocompleteCompleter,
+	type AutocompleteConfig,
+	type AutocompleteRequest,
+	type AutocompleteResponse,
+	type AutocompleteSettingsRequest,
+	type AutocompleteSettingsResponse,
+} from "./autocomplete.js";
+import {
 	isExtensionUiRequest,
 	type PiClient,
 	type PiEvent,
@@ -119,6 +132,10 @@ export interface PixAcpAgentOptions {
 	readonly listPiSessions?: (cwd?: string) => Promise<readonly PiSessionInfo[]>;
 	/** Reader for the TUI's project tab snapshot (overridable for tests). */
 	readonly loadTuiTabs?: (cwd: string) => Promise<TuiTabSnapshot>;
+	/** Private prompt-completion backend (overridable for hermetic tests). */
+	readonly completeAutocomplete?: AutocompleteCompleter;
+	/** Pix autocomplete config reader (overridable for hermetic tests). */
+	readonly loadAutocompleteConfig?: (cwd: string) => AutocompleteConfig;
 }
 
 export class PixAcpAgent {
@@ -132,6 +149,8 @@ export class PixAcpAgent {
 	private readonly sessionMap: SessionMapStore;
 	private readonly listPiSessions: (cwd?: string) => Promise<readonly PiSessionInfo[]>;
 	private readonly loadTuiTabs: (cwd: string) => Promise<TuiTabSnapshot>;
+	private readonly completeAutocomplete: AutocompleteCompleter;
+	private readonly loadAutocompleteConfig: (cwd: string) => AutocompleteConfig;
 	private disposed = false;
 	/** Advertised by the client during `initialize`; gates dialog bridging. */
 	private clientCapabilities: ClientCapabilities | null | undefined;
@@ -142,6 +161,11 @@ export class PixAcpAgent {
 		this.listPiSessions = options.listPiSessions
 			?? ((cwd) => cwd ? SessionManager.list(cwd) : SessionManager.listAll());
 		this.loadTuiTabs = options.loadTuiTabs ?? ((cwd) => loadTuiTabSnapshot(cwd));
+		this.loadAutocompleteConfig = options.loadAutocompleteConfig ?? loadAutocompleteConfig;
+		this.completeAutocomplete = options.completeAutocomplete ?? createAutocompleteCompleter({
+			logger: options.logger,
+			loadConfig: this.loadAutocompleteConfig,
+		});
 		this.app = agent({ name: "pix-acp" })
 			.onRequest("initialize", (ctx) => {
 				this.clientCapabilities = ctx.params.clientCapabilities;
@@ -180,6 +204,12 @@ export class PixAcpAgent {
 			.onRequest("session/set_config_option", (ctx) => this.setConfigOption(ctx.params))
 			.onRequest("session/set_mode", () => ({}))
 			.onRequest("session/prompt", (ctx) => this.prompt(ctx.params))
+			.onRequest("pix/autocomplete", parseAutocompleteRequest, (ctx) =>
+				this.autocomplete(ctx.params, ctx.signal),
+			)
+			.onRequest("pix/autocomplete/config", parseAutocompleteSettingsRequest, (ctx) =>
+				this.autocompleteConfig(ctx.params),
+			)
 			.onRequest("session/close", (ctx) =>
 				this.withSessionLifecycle(ctx.params.sessionId, () => this.closeSession(ctx.params.sessionId)),
 			)
@@ -213,6 +243,27 @@ export class PixAcpAgent {
 	/** Number of registered sessions (used by tests). */
 	get sessionCount(): number {
 		return this.sessions.size;
+	}
+
+	private async autocomplete(
+		params: AutocompleteRequest,
+		signal: AbortSignal,
+	): Promise<AutocompleteResponse> {
+		const session = this.sessions.get(params.sessionId);
+		if (!session) throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
+		const completion = await this.completeAutocomplete({
+			cwd: session.cwd,
+			draft: params.draft,
+			signal,
+			getMessages: () => session.pi.getMessages(),
+		});
+		return { completion };
+	}
+
+	private autocompleteConfig(params: AutocompleteSettingsRequest): AutocompleteSettingsResponse {
+		const session = this.sessions.get(params.sessionId);
+		if (!session) throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
+		return autocompleteSettings(this.loadAutocompleteConfig(session.cwd));
 	}
 
 	private async newSession(cwd: string, client: ClientCaller): Promise<NewSessionResponse> {

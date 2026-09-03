@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import {
 	client,
+	methods,
 	PROTOCOL_VERSION,
 	type ActiveSessionMessage,
 	type CreateElicitationRequest,
@@ -18,6 +19,10 @@ import type {
 	SessionInfo as PiSessionInfo,
 } from "@earendil-works/pi-coding-agent";
 import { PixAcpAgent } from "../src/acp/pix-acp-agent.js";
+import type {
+	AutocompleteCompleterInput,
+	AutocompleteResponse,
+} from "../src/acp/autocomplete.js";
 import { SessionMapStore } from "../src/acp/session-map.js";
 import type { Logger } from "../src/logging.js";
 import type {
@@ -251,6 +256,14 @@ function createTestAdapter(overrides: Partial<ConstructorParameters<typeof PixAc
 		sessionMapPath,
 		listPiSessions: async () => [],
 		loadTuiTabs: async () => ({ sessionPaths: [] }),
+		loadAutocompleteConfig: () => ({
+			modelRef: "zai/glm-5-turbo",
+			debounceMs: 350,
+			timeoutMs: 3_000,
+			maxTokens: 48,
+			maxPromptTokens: 1_200,
+			includeRecentMessages: 0,
+		}),
 		...overrides,
 	});
 	return { adapter, clients, options, sessionMapPath };
@@ -321,6 +334,78 @@ test("session/new spawns and starts one pi client per session with the cwd", asy
 	assert.ok(clients[1].started, "second pi client started");
 	assert.ok(adapter.getSession(sessionIds[0]!), "first session registered");
 	assert.ok(adapter.getSession(sessionIds[1]!), "second session registered");
+});
+
+test("pix/autocomplete routes the active session without mutating its prompt", async () => {
+	let autocompleteInput: AutocompleteCompleterInput | undefined;
+	const harness = createTestAdapter({
+		completeAutocomplete: async (input) => {
+			autocompleteInput = input;
+			assert.deepEqual(await input.getMessages(), [
+				{ role: "user", content: "previous request" },
+			]);
+			return " the rest";
+		},
+	});
+
+	const response = await connect(harness.adapter, async (cx) => {
+		const session = await cx.buildSession("/tmp/autocomplete-project").start();
+		const pi = harness.clients[0]!;
+		FakePiClient.sessionFiles.set(pi.state.sessionFile!, [
+			{ role: "user", content: "previous request" },
+		]);
+		return cx.request<AutocompleteResponse>("pix/autocomplete", {
+			sessionId: session.sessionId,
+			draft: "implement",
+		});
+	});
+
+	assert.deepEqual(response, { completion: " the rest" });
+	assert.equal(autocompleteInput?.cwd, "/tmp/autocomplete-project");
+	assert.equal(autocompleteInput?.draft, "implement");
+	assert.deepEqual(harness.clients[0]?.promptCalls, []);
+});
+
+test("pix/autocomplete/config exposes project eligibility and debounce", async () => {
+	const harness = createTestAdapter({
+		loadAutocompleteConfig: () => ({
+			modelRef: "",
+			debounceMs: 725,
+			timeoutMs: 3_000,
+			maxTokens: 48,
+			maxPromptTokens: 1_200,
+			includeRecentMessages: 0,
+		}),
+	});
+
+	const response = await connect(harness.adapter, async (cx) => {
+		const session = await cx.buildSession("/tmp/autocomplete-project").start();
+		return cx.request("pix/autocomplete/config", { sessionId: session.sessionId });
+	});
+
+	assert.deepEqual(response, { enabled: false, debounceMs: 725 });
+});
+
+test("pix/autocomplete propagates request cancellation to the completer", async () => {
+	let observedSignal: AbortSignal | undefined;
+	const harness = createTestAdapter({
+		completeAutocomplete: ({ signal }) => new Promise<string>((_resolve, reject) => {
+			observedSignal = signal;
+			signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+		}),
+	});
+
+	await connect(harness.adapter, async (cx) => {
+		const session = await cx.buildSession("/tmp/autocomplete-project").start();
+		const request = cx.request<AutocompleteResponse>(
+			"pix/autocomplete",
+			{ sessionId: session.sessionId, draft: "implement" },
+		);
+		while (!observedSignal) await new Promise<void>((resolve) => setImmediate(resolve));
+		await cx.notify(methods.protocol.cancelRequest, { requestId: 1 });
+		await assert.rejects(request);
+		assert.equal(observedSignal?.aborted, true);
+	});
 });
 
 test("session/new returns config options and persists the session map entry", async () => {
