@@ -422,38 +422,45 @@
 
 <svelte:head><title>Pix Desktop</title></svelte:head>
 
-<div class="grid h-full grid-rows-[36px_44px_minmax(0,1fr)_36px] bg-background text-foreground max-[760px]:grid-rows-[36px_42px_minmax(0,1fr)_32px]">
-  <ProjectTitlebar
-    {workspace}
-    disabled={promptRunning || operationRunning}
-    onChooseWorkspace={() => void chooseWorkspace()}
-  />
-
-  <SessionTabs
-    sessions={tabSessions}
-    allSessionsCount={sessions.length}
-    {activeSessionId}
-    selectorOpen={sessionSelectorOpen}
-    disabled={promptRunning || operationRunning}
-    canCreate={canUseSession && !promptRunning}
-    onTabClick={handleSessionTabClick}
-    onPickerClick={handleSessionPickerClick}
-    onCloseTab={(event, sessionId) => void closeSessionTab(event, sessionId)}
-    onCreate={() => void createSession()}
-  />
-
-  {#if sessionSelectorOpen}
-    <SessionSelector
-      {sessions}
-      {activeSessionId}
-      {activeTitle}
-      canCreate={canUseSession && !promptRunning}
+<div class="grid h-full grid-rows-[36px_minmax(0,1fr)_36px] bg-background text-foreground max-[760px]:grid-rows-[36px_minmax(0,1fr)_32px]">
+  <header
+    class="flex min-w-0 select-none items-stretch border-b border-sidebar-border bg-sidebar"
+    data-tauri-drag-region
+  >
+    <ProjectTitlebar
+      {workspace}
       disabled={promptRunning || operationRunning}
-      onCreate={() => void createSession()}
-      onSelect={selectSession}
-      onClose={closeSessionSelector}
+      onChooseWorkspace={() => void chooseWorkspace()}
     />
-  {/if}
+
+    <div class="relative flex min-w-0 flex-1" data-tauri-drag-region>
+      <SessionTabs
+        sessions={tabSessions}
+        allSessionsCount={sessions.length}
+        {activeSessionId}
+        selectorOpen={sessionSelectorOpen}
+        disabled={promptRunning || operationRunning}
+        canCreate={canUseSession && !promptRunning}
+        onTabClick={handleSessionTabClick}
+        onPickerClick={handleSessionPickerClick}
+        onCloseTab={(event, sessionId) => void closeSessionTab(event, sessionId)}
+        onCreate={() => void createSession()}
+      />
+
+      {#if sessionSelectorOpen}
+        <SessionSelector
+          {sessions}
+          {activeSessionId}
+          {activeTitle}
+          canCreate={canUseSession && !promptRunning}
+          disabled={promptRunning || operationRunning}
+          onCreate={() => void createSession()}
+          onSelect={selectSession}
+          onClose={closeSessionSelector}
+        />
+      {/if}
+    </div>
+  </header>
 
   <main class="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)_auto]">
     {#if errorMessage}

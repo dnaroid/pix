@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { SessionInfo } from "@agentclientprotocol/sdk";
+  import { titlebarDrag } from "../lib/titlebar-drag";
 
   let {
     sessions,
@@ -36,20 +37,22 @@
 </script>
 
 <nav
-  class="flex min-w-0 items-end overflow-x-auto overflow-y-hidden border-b border-sidebar-border bg-sidebar px-[18px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-[760px]:px-3"
+  class="flex min-w-0 flex-1 items-end overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
   aria-label="Saved conversations"
+  data-tauri-drag-region
 >
   {#each sessions as session (session.sessionId)}
     {@const active = session.sessionId === activeSessionId}
     <div
       class={[
-        "group relative -mb-px h-[38px] min-w-[140px] max-w-[280px] flex-[0_1_280px] overflow-hidden rounded-t-lg border transition-colors max-[760px]:basis-[230px]",
+        "group relative -mb-px h-8 min-w-[140px] max-w-[280px] flex-[0_1_280px] overflow-hidden rounded-t-lg border transition-colors max-[760px]:basis-[230px]",
         active
           ? "border-border border-b-background bg-background"
           : "border-transparent hover:bg-sidebar-accent",
       ]}
     >
       <button
+        use:titlebarDrag
         class={[
           "flex h-full w-full items-center gap-2.5 bg-transparent py-0 pr-9 pl-3.5 text-left text-muted-foreground transition-colors hover:text-sidebar-accent-foreground focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40",
           active && "font-medium text-foreground",
@@ -74,6 +77,7 @@
         {#if active}<span class="ml-0.5 shrink-0 text-xs text-muted-foreground" aria-hidden="true">⌄</span>{/if}
       </button>
       <button
+        use:titlebarDrag
         class={[
           "absolute top-1/2 right-1.5 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-md bg-transparent pb-0.5 text-base leading-none text-muted-foreground opacity-0 transition hover:bg-accent hover:text-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40 group-hover:opacity-100 group-focus-within:opacity-100",
           active && "opacity-100",
@@ -88,8 +92,9 @@
   {/each}
 
   {#if sessions.length === 0 && allSessionsCount > 0}
-    <div class="group relative -mb-px h-[38px] min-w-[140px] max-w-[280px] flex-[0_1_280px] overflow-hidden rounded-t-lg border border-transparent transition-colors hover:bg-sidebar-accent max-[760px]:basis-[230px]">
+    <div class="group relative -mb-px h-8 min-w-[140px] max-w-[280px] flex-[0_1_280px] overflow-hidden rounded-t-lg border border-transparent transition-colors hover:bg-sidebar-accent max-[760px]:basis-[230px]">
       <button
+        use:titlebarDrag
         class="flex h-full w-full items-center gap-2.5 bg-transparent px-3.5 text-left text-muted-foreground transition-colors hover:text-sidebar-accent-foreground focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
         aria-haspopup="dialog"
         aria-expanded={selectorOpen}
@@ -104,7 +109,8 @@
   {/if}
 
   <button
-    class="mx-1.5 mb-1 grid h-[30px] min-w-8 shrink-0 place-items-center rounded-lg bg-transparent pb-0.5 text-[17px] leading-none text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+    use:titlebarDrag
+    class="mx-1.5 mb-0.5 grid h-7 min-w-7 shrink-0 place-items-center rounded-lg bg-transparent pb-0.5 text-[17px] leading-none text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
     title="New conversation"
     aria-label="New conversation"
     onclick={onCreate}
