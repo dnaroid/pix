@@ -23,14 +23,17 @@
 		"build": "tsc -p tsconfig.json",
 		"typecheck": "tsc --noEmit -p tsconfig.json",
 		"test": "node --import tsx --test \"test/**/*.test.ts\"",
-		"check": "npm run typecheck && npm test"
+		"test:stdio": "npm run build --silent && node test/stdio-smoke.mjs",
+		"check": "npm run typecheck && npm test && npm run test:stdio"
 	},
 	"dependencies": {
 		"@agentclientprotocol/sdk": "1.4.0",
-		"@earendil-works/pi-coding-agent": "0.84.4"
+		"@earendil-works/pi-coding-agent": "0.84.4",
+		"proper-lockfile": "4.1.2"
 	},
 	"devDependencies": {
 		"@types/node": "24.12.4",
+		"@types/proper-lockfile": "4.1.4",
 		"tsx": "4.22.1",
 		"typescript": "5.9.3"
 	}

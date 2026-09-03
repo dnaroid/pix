@@ -19,7 +19,7 @@ async function main(): Promise<void> {
 
 	const adapter = new PixAcpAgent({
 		createPiClient: (options) => new PiRpcClient(options),
-		piBinary: config.piBinary,
+		piEntry: config.piEntry,
 		logger,
 		sessionMapPath: config.sessionMapPath,
 	});
@@ -29,7 +29,7 @@ async function main(): Promise<void> {
 		Readable.toWeb(process.stdin) as ReadableStream<Uint8Array>,
 	);
 	const connection = adapter.connect(stream);
-	logger.info(`pix-acp ready on stdio (pi binary: ${config.piBinary})`);
+	logger.info(`pix-acp ready on stdio (pi entry: ${config.piEntry})`);
 
 	await connection.closed;
 	await adapter.dispose();

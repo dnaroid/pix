@@ -5,7 +5,7 @@ clients such as the Zed Agent Panel. Fork-in-progress of
 [pi-acp](https://github.com/svkozak/pi-acp) with pix-specific integrations.
 
 **Status: prompt pipeline + extension UI bridge + session management work
-end-to-end.** Each `session/new` spawns a `pi --mode rpc` process;
+end-to-end.** Each `session/new` spawns pi's bundled RPC entry;
 `session/prompt` forwards text/image content, streams
 `agent_message_chunk`/`agent_thought_chunk` and tool calls as
 `session/update` notifications, and resolves with a mapped stop reason;
@@ -22,7 +22,7 @@ extension commands, prompt templates and `/skill:*` pass through to pi.
 ## Architecture
 
 ```
-Zed (Agent Panel)  <--ACP JSON-RPC over stdio-->  pix-acp  <--JSONL RPC over stdio-->  pi --mode rpc
+Zed (Agent Panel)  <--ACP JSON-RPC over stdio-->  pix-acp  <--JSONL RPC over stdio-->  pi RPC entry
 ```
 
 - `src/main.ts` — entry point; wires stdio streams, config, logger.
@@ -52,7 +52,7 @@ Zed (Agent Panel)  <--ACP JSON-RPC over stdio-->  pix-acp  <--JSONL RPC over std
   else starting with `/` (extension commands, templates, `/skill:*`) is
   forwarded to pi unchanged.
 - `src/pi/pi-rpc-client.ts` — thin wrapper around the SDK `RpcClient`
-  (`@earendil-works/pi-coding-agent`) that spawns `pi --mode rpc`.
+  (`@earendil-works/pi-coding-agent`) that spawns its Node-readable RPC entry.
 - `src/config.ts` / `src/logging.ts` — env config and stderr-only logging.
 
 **stdout is reserved for the protocol stream**; all diagnostics go to stderr.
@@ -61,7 +61,8 @@ Zed (Agent Panel)  <--ACP JSON-RPC over stdio-->  pix-acp  <--JSONL RPC over std
 
 | Variable            | Default                                  | Purpose                                             |
 | ------------------- | ---------------------------------------- | --------------------------------------------------- |
-| `PIX_ACP_PI_BIN`    | `pi`                                     | Path to the `pi` CLI to spawn                       |
+| `PIX_ACP_PI_ENTRY`  | bundled `@earendil-works/pi-coding-agent/rpc-entry` | Node-readable pi RPC entry module         |
+| `PIX_ACP_PI_BIN`    | unset                                    | Deprecated alias for `PIX_ACP_PI_ENTRY`             |
 | `PIX_ACP_LOG`       | `info`                                   | Log level: debug, info, warn, error                 |
 | `PIX_ACP_SESSION_MAP` | `~/.pi/agent/pix-acp/sessions.json`    | ACP↔pi session map for list/load/resume/fork        |
 

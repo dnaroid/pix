@@ -1,8 +1,8 @@
 /**
  * Thin wrapper around the pi coding agent JSONL RPC client.
  *
- * The adapter spawns `pi --mode rpc` (one process per ACP session) and talks
- * JSON-RPC over its stdio. This wrapper keeps the rest of the adapter decoupled
+ * The adapter spawns pi's Node-readable RPC entry (one process per ACP
+ * session) and talks JSON-RPC over its stdio. This wrapper keeps the rest of the adapter decoupled
  * from the SDK surface so the event mapping can evolve independently.
  */
 
@@ -44,8 +44,8 @@ export function isExtensionUiRequest(event: PiEvent): event is RpcExtensionUIReq
 }
 
 export interface PiRpcClientOptions {
-	/** Path to the `pi` CLI to spawn (from AdapterConfig.piBinary). */
-	readonly piBinary: string;
+	/** Path to pi's JavaScript RPC entry (from AdapterConfig.piEntry). */
+	readonly piEntry: string;
 	/** Working directory for the agent session (ACP session cwd). */
 	readonly cwd: string;
 	readonly args?: readonly string[] | undefined;
@@ -338,7 +338,7 @@ export class PiRpcClient implements PiClient {
 function toSdkOptions(options: PiRpcClientOptions): RpcClientOptions {
 	// exactOptionalPropertyTypes: never assign explicit undefined.
 	const sdkOptions: RpcClientOptions = {
-		cliPath: options.piBinary,
+		cliPath: options.piEntry,
 		cwd: options.cwd,
 	};
 	if (options.args) sdkOptions.args = [...options.args];

@@ -39,6 +39,13 @@ jobs:
       - uses: jdx/mise-action@v2
       - run: npm ci --ignore-scripts
       - run: npm run check
+      - name: Install and check ACP adapter
+        run: npm ci --prefix acp --ignore-scripts && npm run check:acp
+      - name: Install and check desktop frontend
+        run: npm ci --prefix desktop --ignore-scripts && npm run check:desktop && npm --prefix desktop test
+      - name: Check desktop Rust host
+        if: runner.os == 'macOS'
+        run: cargo fmt --manifest-path desktop/src-tauri/Cargo.toml --check && cargo check --manifest-path desktop/src-tauri/Cargo.toml
       - run: npm run test:tools-suite
       - name: Install Chromium for browser QA E2E
         if: runner.os == 'Linux'

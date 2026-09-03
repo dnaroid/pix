@@ -1,5 +1,8 @@
 node_modules/
 dist/
+desktop/src-tauri/target/
+desktop/src-tauri/gen/schemas/
+desktop/*.tsbuildinfo
 .env
 .DS_Store
 .indexer-cli/

@@ -12,8 +12,13 @@ import {
 	type CreateElicitationResponse,
 	type SessionNotification,
 } from "@agentclientprotocol/sdk";
-import type { JsonAgentSessionEvent, RpcExtensionUIResponse } from "@earendil-works/pi-coding-agent";
+import type {
+	JsonAgentSessionEvent,
+	RpcExtensionUIResponse,
+	SessionInfo as PiSessionInfo,
+} from "@earendil-works/pi-coding-agent";
 import { PixAcpAgent } from "../src/acp/pix-acp-agent.js";
+import { SessionMapStore } from "../src/acp/session-map.js";
 import type { Logger } from "../src/logging.js";
 import type {
 	PiAgentMessage,
@@ -63,6 +68,7 @@ class FakePiClient implements PiClient {
 	aborts = 0;
 	started = false;
 	startError: Error | undefined;
+	startGate: Promise<void> | undefined;
 	state: PiSessionState;
 	private listeners: PiEventListener[] = [];
 	private exitListeners: ((error: Error) => void)[] = [];
@@ -80,6 +86,7 @@ class FakePiClient implements PiClient {
 	}
 
 	async start(): Promise<void> {
+		await this.startGate;
 		if (this.startError) throw this.startError;
 		this.started = true;
 	}
@@ -134,6 +141,14 @@ class FakePiClient implements PiClient {
 
 	async clone(): Promise<{ cancelled: boolean }> {
 		this.clones++;
+		if (!this.cloneCancelled) {
+			const n = ++fakeSessionCounter;
+			this.state = {
+				...this.state,
+				sessionFile: `/tmp/pi-sessions/fake-${n}.jsonl`,
+				sessionId: `pi-fake-${n}`,
+			};
+		}
 		return { cancelled: this.cloneCancelled };
 	}
 
@@ -231,12 +246,28 @@ function createTestAdapter(overrides: Partial<ConstructorParameters<typeof PixAc
 			clients.push(fake);
 			return fake;
 		},
-		piBinary: "/test/pi",
+		piEntry: "/test/pi-rpc-entry.js",
 		logger: TEST_LOGGER,
 		sessionMapPath,
+		listPiSessions: async () => [],
+		loadTuiTabs: async () => ({ sessionPaths: [] }),
 		...overrides,
 	});
 	return { adapter, clients, options, sessionMapPath };
+}
+
+function nativeSession(id: string, overrides: Partial<PiSessionInfo> = {}): PiSessionInfo {
+	return {
+		path: `/tmp/pi-sessions/${id}.jsonl`,
+		id,
+		cwd: "/tmp/proj",
+		created: new Date("2025-01-01T00:00:00.000Z"),
+		modified: new Date("2025-01-02T00:00:00.000Z"),
+		messageCount: 2,
+		firstMessage: `First message for ${id}`,
+		allMessagesText: `First message for ${id}`,
+		...overrides,
+	};
 }
 
 type TestClientContext = Parameters<Parameters<ReturnType<typeof client>["connectWith"]>[1]>[0];
@@ -284,7 +315,7 @@ test("session/new spawns and starts one pi client per session with the cwd", asy
 	assert.equal(sessionIds.length, 2);
 	assert.notEqual(sessionIds[0], sessionIds[1]);
 	assert.deepEqual(options.map((o) => o.cwd), ["/tmp/one", "/tmp/two"]);
-	assert.ok(options.every((o) => o.piBinary === "/test/pi"));
+	assert.ok(options.every((o) => o.piEntry === "/test/pi-rpc-entry.js"));
 	assert.equal(clients.length, 2);
 	assert.ok(clients[0].started, "first pi client started");
 	assert.ok(clients[1].started, "second pi client started");
@@ -306,9 +337,11 @@ test("session/new returns config options and persists the session map entry", as
 	// A fresh adapter over the same map file must list the session (disk round-trip).
 	const reused = new PixAcpAgent({
 		createPiClient: (): PiClient => new FakePiClient(),
-		piBinary: "/test/pi",
+		piEntry: "/test/pi-rpc-entry.js",
 		logger: TEST_LOGGER,
 		sessionMapPath: harness.sessionMapPath,
+		listPiSessions: async () => [],
+		loadTuiTabs: async () => ({ sessionPaths: [] }),
 	});
 	const listed = await connect(reused, (cx) => cx.request("session/list", {}));
 	assert.ok(
@@ -317,6 +350,72 @@ test("session/new returns config options and persists the session map entry", as
 	);
 	const filtered = await connect(reused, (cx) => cx.request("session/list", { cwd: "/tmp/other" }));
 	assert.equal(filtered.sessions.length, 0, "cwd filter excludes other projects");
+});
+
+test("session/list reconciles native Pi sessions and reports ordered TUI tabs", async () => {
+	const firstPath = "/tmp/pi-sessions/native-a.jsonl";
+	const secondPath = "/tmp/pi-sessions/native-b.jsonl";
+	const requestedCwds: (string | undefined)[] = [];
+	const harness = createTestAdapter({
+		listPiSessions: async (cwd) => {
+			requestedCwds.push(cwd);
+			return [
+				nativeSession("native-a", { path: firstPath, name: "Native title" }),
+				nativeSession("native-b", {
+					path: secondPath,
+					modified: new Date("2025-02-01T00:00:00.000Z"),
+				}),
+			];
+		},
+		loadTuiTabs: async () => ({ sessionPaths: [secondPath, firstPath], activeSessionPath: firstPath }),
+	});
+	const map = new SessionMapStore(harness.sessionMapPath, TEST_LOGGER);
+	await map.put({
+		sessionId: "existing-acp-id",
+		piSessionPath: firstPath,
+		piSessionId: "old-pi-id",
+		cwd: "/tmp/proj",
+		title: "Old title",
+		updatedAt: "2024-01-01T00:00:00.000Z",
+	});
+
+	const listed = await connect(harness.adapter, (cx) => cx.request("session/list", { cwd: "/tmp/proj" }));
+	assert.deepEqual(requestedCwds, ["/tmp/proj"]);
+	assert.deepEqual(listed.sessions.map((session) => session.sessionId), ["native-b", "existing-acp-id"]);
+	assert.equal(listed.sessions[1]?.title, "Native title");
+	assert.deepEqual(listed._meta?.["pix.tabs"], {
+		sessionIds: ["native-b", "existing-acp-id"],
+		activeSessionId: "existing-acp-id",
+	});
+
+	assert.equal((await map.get("existing-acp-id"))?.piSessionId, "native-a");
+	assert.equal((await map.get("native-b"))?.piSessionPath, secondPath);
+	await connect(harness.adapter, (cx) => cx.request("session/load", {
+		sessionId: "native-b",
+		cwd: "/tmp/proj",
+		mcpServers: [],
+	}));
+	assert.deepEqual(harness.clients[harness.clients.length - 1]?.switchSessions, [secondPath]);
+});
+
+test("session/list falls back to mapped sessions when native discovery fails", async () => {
+	const harness = createTestAdapter({
+		listPiSessions: async () => {
+			throw new Error("native store unavailable");
+		},
+	});
+	const map = new SessionMapStore(harness.sessionMapPath, TEST_LOGGER);
+	await map.put({
+		sessionId: "mapped",
+		piSessionPath: "/tmp/pi-sessions/mapped.jsonl",
+		piSessionId: "pi-mapped",
+		cwd: "/tmp/proj",
+		updatedAt: "2025-01-01T00:00:00.000Z",
+	});
+
+	const listed = await connect(harness.adapter, (cx) => cx.request("session/list", { cwd: "/tmp/proj" }));
+	assert.deepEqual(listed.sessions.map((session) => session.sessionId), ["mapped"]);
+	assert.deepEqual(listed._meta?.["pix.tabs"], { sessionIds: [] });
 });
 
 test("session/new failure to start pi returns a protocol error and registers nothing", async () => {
@@ -331,6 +430,27 @@ test("session/new failure to start pi returns a protocol error and registers not
 		await assert.rejects(cx.buildSession("/tmp").start(), /failed to start pi[\s\S]*spawn failed/);
 	});
 	assert.equal(adapter.sessionCount, 0);
+});
+
+test("dispose waits for an in-flight session start and stops it before registration", async () => {
+	let releaseStart!: () => void;
+	const startGate = new Promise<void>((resolve) => {
+		releaseStart = resolve;
+	});
+	const fake = new FakePiClient();
+	fake.startGate = startGate;
+	const { adapter } = createTestAdapter({ createPiClient: () => fake });
+
+	await connect(adapter, async (cx) => {
+		const creating = cx.request("session/new", { cwd: "/tmp/project", mcpServers: [] });
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		const disposing = adapter.dispose();
+		releaseStart();
+		await assert.rejects(creating, /adapter is shutting down/);
+		await disposing;
+		assert.equal(fake.started, false);
+		assert.equal(adapter.sessionCount, 0);
+	});
 });
 
 test("session/prompt streams chunks and resolves end_turn when pi settles", async () => {
@@ -444,6 +564,46 @@ test("session/cancel aborts pi and the pending prompt resolves cancelled", async
 	assert.equal(result.stopReason, "cancelled");
 });
 
+test("session/cancel can settle before agent_start", async () => {
+	const { adapter, clients } = createTestAdapter();
+	const result = await connect(adapter, async (cx) => {
+		const session = await cx.buildSession("/tmp").start();
+		const pending = session.prompt("cancel immediately");
+		const pi = clients[0]!;
+		await waitFor(() => pi.promptCalls.length === 1);
+		await cx.notify("session/cancel", { sessionId: session.sessionId });
+		await waitFor(() => pi.aborts === 1);
+		pi.emit({ type: "agent_settled" });
+		return pending;
+	});
+	assert.equal(result.stopReason, "cancelled");
+});
+
+test("session/prompt ignores a duplicate settlement before its agent_start", async () => {
+	const { adapter, clients } = createTestAdapter();
+	await connect(adapter, async (cx) => {
+		const session = await cx.buildSession("/tmp").start();
+		const pi = clients[0]!;
+		const first = session.prompt("first");
+		await waitFor(() => pi.promptCalls.length === 1);
+		pi.emit({ type: "agent_start" });
+		pi.emit({ type: "agent_settled" });
+		await first;
+
+		let secondSettled = false;
+		const second = session.prompt("second").finally(() => {
+			secondSettled = true;
+		});
+		await waitFor(() => pi.promptCalls.length === 2);
+		pi.emit({ type: "agent_settled" });
+		await new Promise((resolve) => setImmediate(resolve));
+		assert.equal(secondSettled, false, "stale settlement must not finish the next prompt");
+		pi.emit({ type: "agent_start" });
+		pi.emit({ type: "agent_settled" });
+		assert.equal((await second).stopReason, "end_turn");
+	});
+});
+
 test("session/prompt rejects for unknown sessions and refuses concurrent prompts", async () => {
 	const { adapter, clients } = createTestAdapter();
 	await connect(adapter, async (cx) => {
@@ -485,6 +645,21 @@ test("session/close stops the pi client and unregisters the session", async () =
 		assert.equal(adapter.sessionCount, 0);
 		assert.equal(clients[0].started, false);
 	});
+});
+
+test("session/close resolves an active prompt as cancelled", async () => {
+	const { adapter, clients } = createTestAdapter();
+	const result = await connect(adapter, async (cx) => {
+		const session = await cx.buildSession("/tmp").start();
+		const pending = session.prompt("still running");
+		const pi = clients[0]!;
+		await waitFor(() => pi.promptCalls.length === 1);
+		await cx.request("session/close", { sessionId: session.sessionId });
+		return { response: await pending, aborts: pi.aborts, started: pi.started };
+	});
+	assert.equal(result.response.stopReason, "cancelled");
+	assert.equal(result.aborts, 1);
+	assert.equal(result.started, false);
 });
 
 test("extension select dialog is bridged to an elicitation and answered", async () => {
@@ -724,6 +899,23 @@ test("session/load switches the pi session and replays history as chunk updates"
 	const toolUpdate = notifications.find((n) => n.update.sessionUpdate === "tool_call_update")!.update as Record<string, unknown>;
 	assert.equal(toolUpdate.status, "completed");
 	assert.equal(harness.adapter.getSession(sessionId) !== undefined, true, "loaded session is live");
+});
+
+test("concurrent loads for one session are serialized and stop the replaced process", async () => {
+	const { adapter, clients } = createTestAdapter();
+	await connect(adapter, async (cx) => {
+		const created = await cx.request("session/new", { cwd: "/tmp/project", mcpServers: [] });
+		await Promise.all([
+			cx.request("session/load", { sessionId: created.sessionId, cwd: "/tmp/project", mcpServers: [] }),
+			cx.request("session/load", { sessionId: created.sessionId, cwd: "/tmp/project", mcpServers: [] }),
+		]);
+
+		assert.equal(clients.length, 3);
+		assert.equal(clients[0]!.started, false, "original process was stopped");
+		assert.equal(clients[1]!.started, false, "first replacement was stopped");
+		assert.equal(clients[2]!.started, true, "last replacement remains live");
+		assert.equal(adapter.getSession(created.sessionId)?.pi, clients[2]);
+	});
 });
 
 test("session map tracks pi-side session file moves after a run", async () => {

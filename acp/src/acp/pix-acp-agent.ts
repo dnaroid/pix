@@ -18,6 +18,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
 import {
 	PROTOCOL_VERSION,
 	RequestError,
@@ -46,7 +47,13 @@ import {
 	type StopReason,
 	type Stream,
 } from "@agentclientprotocol/sdk";
-import type { JsonAgentSessionEvent, RpcExtensionUIRequest, RpcExtensionUIResponse } from "@earendil-works/pi-coding-agent";
+import {
+	SessionManager,
+	type JsonAgentSessionEvent,
+	type RpcExtensionUIRequest,
+	type RpcExtensionUIResponse,
+	type SessionInfo as PiSessionInfo,
+} from "@earendil-works/pi-coding-agent";
 import type { Logger } from "../logging.js";
 import { stringifyUnknown } from "../stringify-unknown.js";
 import {
@@ -64,8 +71,9 @@ import {
 	parseBuiltinCommand,
 	type BuiltinCommand,
 } from "./slash-commands.js";
-import { SessionMapStore } from "./session-map.js";
+import { SessionMapStore, type SessionMapRecord } from "./session-map.js";
 import { replaySessionHistory } from "./session-replay.js";
+import { loadTuiTabSnapshot, type TuiTabSnapshot } from "./tui-tabs.js";
 import { cancelledResponse, fromElicitationResponse, toElicitationRequest } from "./ui-request-bridge.js";
 
 /** Minimal shape of the handler `client` context used for notifications and elicitations. */
@@ -79,7 +87,9 @@ type ClientCaller = {
 const ERROR_SERVER = -32000;
 
 interface ActiveRun {
-	/** Whether an `agent_start` was observed for this run. */
+	/** Whether the client requested cancellation before pi reported its reason. */
+	cancelled: boolean;
+	/** Whether pi emitted agent_start for this run. */
 	started: boolean;
 	/** Stop reason captured from `agent_end`, pending `agent_settled`. */
 	stopReason: StopReason | undefined;
@@ -101,23 +111,37 @@ interface AgentSessionState {
 export interface PixAcpAgentOptions {
 	/** Factory for per-session pi RPC clients (injected for tests). */
 	readonly createPiClient: (options: PiRpcClientOptions) => PiClient;
-	readonly piBinary: string;
+	readonly piEntry: string;
 	readonly logger: Logger;
 	/** Path of the persistent ACP↔pi session map file. */
 	readonly sessionMapPath: string;
+	/** Native Pi-session discovery (overridable for hermetic tests). */
+	readonly listPiSessions?: (cwd?: string) => Promise<readonly PiSessionInfo[]>;
+	/** Reader for the TUI's project tab snapshot (overridable for tests). */
+	readonly loadTuiTabs?: (cwd: string) => Promise<TuiTabSnapshot>;
 }
 
 export class PixAcpAgent {
 	private readonly sessions = new Map<string, AgentSessionState>();
+	/** Starts already accepted by ACP but not yet registered in `sessions`. */
+	private readonly pendingSpawns = new Set<Promise<AgentSessionState>>();
+	/** Serializes load/resume/fork/delete/close operations for the same id. */
+	private readonly sessionLifecycle = new Map<string, Promise<void>>();
 	private readonly app: AgentApp;
 	private readonly options: PixAcpAgentOptions;
 	private readonly sessionMap: SessionMapStore;
+	private readonly listPiSessions: (cwd?: string) => Promise<readonly PiSessionInfo[]>;
+	private readonly loadTuiTabs: (cwd: string) => Promise<TuiTabSnapshot>;
+	private disposed = false;
 	/** Advertised by the client during `initialize`; gates dialog bridging. */
 	private clientCapabilities: ClientCapabilities | null | undefined;
 
 	constructor(options: PixAcpAgentOptions) {
 		this.options = options;
 		this.sessionMap = new SessionMapStore(options.sessionMapPath, options.logger);
+		this.listPiSessions = options.listPiSessions
+			?? ((cwd) => cwd ? SessionManager.list(cwd) : SessionManager.listAll());
+		this.loadTuiTabs = options.loadTuiTabs ?? ((cwd) => loadTuiTabSnapshot(cwd));
 		this.app = agent({ name: "pix-acp" })
 			.onRequest("initialize", (ctx) => {
 				this.clientCapabilities = ctx.params.clientCapabilities;
@@ -140,15 +164,25 @@ export class PixAcpAgent {
 			})
 			.onRequest("authenticate", () => ({}))
 			.onRequest("session/new", (ctx) => this.newSession(ctx.params.cwd, ctx.client))
-			.onRequest("session/load", (ctx) => this.loadSession(ctx.params, ctx.client))
-			.onRequest("session/resume", (ctx) => this.resumeSession(ctx.params, ctx.client))
+			.onRequest("session/load", (ctx) =>
+				this.withSessionLifecycle(ctx.params.sessionId, () => this.loadSession(ctx.params, ctx.client)),
+			)
+			.onRequest("session/resume", (ctx) =>
+				this.withSessionLifecycle(ctx.params.sessionId, () => this.resumeSession(ctx.params, ctx.client)),
+			)
 			.onRequest("session/list", (ctx) => this.listSessions(ctx.params))
-			.onRequest("session/delete", (ctx) => this.deleteSession(ctx.params.sessionId))
-			.onRequest("session/fork", (ctx) => this.forkSession(ctx.params, ctx.client))
+			.onRequest("session/delete", (ctx) =>
+				this.withSessionLifecycle(ctx.params.sessionId, () => this.deleteSession(ctx.params.sessionId)),
+			)
+			.onRequest("session/fork", (ctx) =>
+				this.withSessionLifecycle(ctx.params.sessionId, () => this.forkSession(ctx.params, ctx.client)),
+			)
 			.onRequest("session/set_config_option", (ctx) => this.setConfigOption(ctx.params))
 			.onRequest("session/set_mode", () => ({}))
 			.onRequest("session/prompt", (ctx) => this.prompt(ctx.params))
-			.onRequest("session/close", (ctx) => this.closeSession(ctx.params.sessionId))
+			.onRequest("session/close", (ctx) =>
+				this.withSessionLifecycle(ctx.params.sessionId, () => this.closeSession(ctx.params.sessionId)),
+			)
 			.onNotification("session/cancel", (ctx) => this.cancel(ctx.params.sessionId));
 	}
 
@@ -166,6 +200,9 @@ export class PixAcpAgent {
 	 * orphaned child processes cannot keep the adapter process alive.
 	 */
 	async dispose(): Promise<void> {
+		this.disposed = true;
+		await Promise.allSettled([...this.pendingSpawns]);
+		await Promise.allSettled([...this.sessionLifecycle.values()]);
 		await Promise.all([...this.sessions.values()].map((session) => this.teardownSession(session)));
 	}
 
@@ -244,13 +281,48 @@ export class PixAcpAgent {
 	}
 
 	private async listSessions(params: ListSessionsRequest): Promise<ListSessionsResponse> {
+		try {
+			const nativeSessions = await this.listPiSessions(params.cwd ?? undefined);
+			const discovered = nativeSessions.flatMap((session) => {
+				const record = nativeSessionRecord(session, params.cwd ?? undefined);
+				return record ? [record] : [];
+			});
+			await this.sessionMap.mergeByPiSessionPath(discovered);
+		} catch (error) {
+			this.options.logger.warn(`native session discovery failed: ${stringifyUnknown(error)}`);
+		}
+
 		const records = await this.sessionMap.list(params.cwd ?? undefined);
 		const sessions: SessionInfo[] = records.map((record) => {
 			const info: SessionInfo = { sessionId: record.sessionId, cwd: record.cwd, updatedAt: record.updatedAt };
 			if (record.title !== undefined) info.title = record.title;
 			return info;
 		});
-		return { sessions };
+		if (!params.cwd) return { sessions };
+
+		let tabs: TuiTabSnapshot = { sessionPaths: [] };
+		try {
+			tabs = await this.loadTuiTabs(params.cwd);
+		} catch (error) {
+			this.options.logger.warn(`TUI tab discovery failed: ${stringifyUnknown(error)}`);
+		}
+		const sessionIdByPath = new Map(records.map((record) => [resolve(record.piSessionPath), record.sessionId]));
+		const sessionIds = tabs.sessionPaths.flatMap((path) => {
+			const sessionId = sessionIdByPath.get(resolve(path));
+			return sessionId ? [sessionId] : [];
+		});
+		const activeSessionId = tabs.activeSessionPath
+			? sessionIdByPath.get(resolve(tabs.activeSessionPath))
+			: undefined;
+		return {
+			sessions,
+			_meta: {
+				"pix.tabs": {
+					sessionIds,
+					...(activeSessionId ? { activeSessionId } : {}),
+				},
+			},
+		};
 	}
 
 	private async deleteSession(sessionId: string): Promise<void> {
@@ -311,16 +383,28 @@ export class PixAcpAgent {
 	}
 
 	/** Start a pi process and register it as an ACP session. */
-	private async spawnSession(acpSessionId: string, cwd: string, client: ClientCaller): Promise<AgentSessionState> {
-		const pi = this.options.createPiClient({ piBinary: this.options.piBinary, cwd });
+	private spawnSession(acpSessionId: string, cwd: string, client: ClientCaller): Promise<AgentSessionState> {
+		const pending = this.startSession(acpSessionId, cwd, client);
+		this.pendingSpawns.add(pending);
+		void pending.finally(() => this.pendingSpawns.delete(pending)).catch(() => {});
+		return pending;
+	}
+
+	private async startSession(acpSessionId: string, cwd: string, client: ClientCaller): Promise<AgentSessionState> {
+		if (this.disposed) throw new RequestError(ERROR_SERVER, "adapter is shutting down");
+		const pi = this.options.createPiClient({ piEntry: this.options.piEntry, cwd });
 		try {
 			await pi.start();
 		} catch (error) {
 			void pi.stop().catch(() => {});
 			throw new RequestError(
 				ERROR_SERVER,
-				`failed to start pi (${this.options.piBinary}): ${stringifyUnknown(error)}`,
+				`failed to start pi (${this.options.piEntry}): ${stringifyUnknown(error)}`,
 			);
+		}
+		if (this.disposed) {
+			await pi.stop().catch(() => {});
+			throw new RequestError(ERROR_SERVER, "adapter is shutting down");
 		}
 		const translator = new EventTranslator({ sessionId: acpSessionId, cwd });
 		const session: AgentSessionState = {
@@ -333,7 +417,7 @@ export class PixAcpAgent {
 			pendingDialogIds: new Set(),
 		};
 		this.sessions.set(acpSessionId, session);
-		pi.onEvent((event) => this.onPiEvent(acpSessionId, event));
+		pi.onEvent((event) => this.onPiEvent(session, event));
 		pi.onExit((error) => this.onPiExit(session, error));
 		return session;
 	}
@@ -406,6 +490,17 @@ export class PixAcpAgent {
 		}
 	}
 
+	/**
+	 * Serialize background metadata refreshes with load/delete/close so an old
+	 * pi process cannot recreate a deleted record or overwrite its replacement.
+	 */
+	private async syncLiveSessionRecord(session: AgentSessionState, title?: string | undefined): Promise<void> {
+		await this.withSessionLifecycle(session.acpSessionId, async () => {
+			if (this.sessions.get(session.acpSessionId) !== session) return;
+			await this.syncSessionRecord(session, title);
+		});
+	}
+
 	/** Config options for responses; `undefined` when pi exposes none. */
 	private async safeConfigOptions(pi: PiClient): Promise<SessionConfigOption[] | undefined> {
 		try {
@@ -417,9 +512,10 @@ export class PixAcpAgent {
 		}
 	}
 
-	private onPiEvent(sessionId: string, event: PiEvent): void {
-		const session = this.sessions.get(sessionId);
-		if (!session) return;
+	private onPiEvent(session: AgentSessionState, event: PiEvent): void {
+		// A replaced process may still flush events while it is stopping. Never
+		// route those events into the newer process registered under the same id.
+		if (this.sessions.get(session.acpSessionId) !== session) return;
 
 		if (isExtensionUiRequest(event)) {
 			void this.handleExtensionUiRequest(session, event);
@@ -435,11 +531,10 @@ export class PixAcpAgent {
 	 */
 	private onPiExit(session: AgentSessionState, error: Error): void {
 		if (this.sessions.get(session.acpSessionId) !== session) return;
+		this.sessions.delete(session.acpSessionId);
 		this.options.logger.warn(`session ${session.acpSessionId}: ${error.message}`);
-		const run = session.activeRun;
-		if (!run) return;
-		session.activeRun = undefined;
-		run.reject(error);
+		this.rejectActiveRun(session, error);
+		session.pendingDialogIds.clear();
 	}
 
 	/** Bridges one extension UI request to ACP and answers pi. */
@@ -465,11 +560,11 @@ export class PixAcpAgent {
 		try {
 			const answer = await session.client.request("elicitation/create", elicitation);
 			// The session may have been closed while the user was thinking.
-			if (!this.sessions.has(session.acpSessionId)) return;
+			if (this.sessions.get(session.acpSessionId) !== session) return;
 			this.safeRespond(session.pi, fromElicitationResponse(answer, request));
 		} catch (error) {
 			this.options.logger.warn(`elicitation/create failed: ${stringifyUnknown(error)}`);
-			if (this.sessions.has(session.acpSessionId)) {
+			if (this.sessions.get(session.acpSessionId) === session) {
 				this.safeRespond(session.pi, cancelledResponse(request.id));
 			}
 		} finally {
@@ -502,10 +597,10 @@ export class PixAcpAgent {
 				if (!event.willRetry) run.stopReason = stopReasonFromAgentEnd(event);
 				return;
 			case "agent_settled":
-				if (run.started) {
-					session.activeRun = undefined;
-					run.resolve(run.stopReason ?? "end_turn");
-				}
+				// Ignore a late duplicate settlement from the prior run. An early
+				// cancellation is the only valid run that can settle before start.
+				if (!run.started && !run.cancelled) return;
+				this.resolveActiveRun(session, run.cancelled ? "cancelled" : (run.stopReason ?? "end_turn"));
 				return;
 			default:
 				return;
@@ -537,6 +632,7 @@ export class PixAcpAgent {
 		}
 
 		const run: ActiveRun = {
+			cancelled: false,
 			started: false,
 			stopReason: undefined,
 			resolve: () => {},
@@ -552,7 +648,6 @@ export class PixAcpAgent {
 			await session.pi.prompt(input.text, input.images.length > 0 ? input.images : undefined);
 		} catch (error) {
 			session.activeRun = undefined;
-			run.reject(new Error(stringifyUnknown(error)));
 			throw new RequestError(ERROR_SERVER, `pi prompt failed: ${stringifyUnknown(error)}`);
 		}
 
@@ -563,7 +658,7 @@ export class PixAcpAgent {
 			throw new RequestError(ERROR_SERVER, `pi process died: ${stringifyUnknown(error)}`);
 		}
 		// Refresh the persisted mapping (updatedAt, plus any pi-side rename).
-		void this.syncSessionRecord(session);
+		void this.syncLiveSessionRecord(session);
 		return { stopReason };
 	}
 
@@ -579,7 +674,7 @@ export class PixAcpAgent {
 			}
 			case "name": {
 				await session.pi.setSessionName(command.name);
-				await this.syncSessionRecord(session, command.name);
+				await this.syncLiveSessionRecord(session, command.name);
 				await this.notifySessionInfo(session, { title: command.name });
 				detail = `session renamed to "${command.name}"`;
 				break;
@@ -670,6 +765,7 @@ export class PixAcpAgent {
 	private cancel(sessionId: string): void {
 		const session = this.sessions.get(sessionId);
 		if (!session) return;
+		if (session.activeRun) session.activeRun.cancelled = true;
 		this.options.logger.debug(`session/cancel for ${sessionId}`);
 		void session.pi.abort().catch((error: unknown) => {
 			this.options.logger.warn(`pi abort failed: ${stringifyUnknown(error)}`);
@@ -684,16 +780,71 @@ export class PixAcpAgent {
 	}
 
 	private async teardownSession(session: AgentSessionState): Promise<void> {
-		this.sessions.delete(session.acpSessionId);
+		if (this.sessions.get(session.acpSessionId) === session) {
+			this.sessions.delete(session.acpSessionId);
+		}
+		const hadActiveRun = this.resolveActiveRun(session, "cancelled");
 		// Unblock extensions still waiting on a dialog answer.
 		for (const id of session.pendingDialogIds) {
 			this.safeRespond(session.pi, cancelledResponse(id));
+		}
+		if (hadActiveRun) {
+			await session.pi.abort().catch((error: unknown) => {
+				this.options.logger.warn(`pi abort failed during teardown: ${stringifyUnknown(error)}`);
+			});
 		}
 		await session.pi.stop().catch((error: unknown) => {
 			this.options.logger.warn(`pi stop failed: ${stringifyUnknown(error)}`);
 		});
 	}
 
+	private resolveActiveRun(session: AgentSessionState, stopReason: StopReason): boolean {
+		const run = session.activeRun;
+		if (!run) return false;
+		session.activeRun = undefined;
+		run.resolve(stopReason);
+		return true;
+	}
+
+	private rejectActiveRun(session: AgentSessionState, error: Error): boolean {
+		const run = session.activeRun;
+		if (!run) return false;
+		session.activeRun = undefined;
+		run.reject(error);
+		return true;
+	}
+
+	/** Queue lifecycle mutations so two requests cannot replace one another. */
+	private async withSessionLifecycle<T>(sessionId: string, operation: () => Promise<T>): Promise<T> {
+		const previous = this.sessionLifecycle.get(sessionId) ?? Promise.resolve();
+		const queued = previous.catch(() => {}).then(operation);
+		const tail = queued.then(
+			() => {},
+			() => {},
+		);
+		this.sessionLifecycle.set(sessionId, tail);
+		try {
+			return await queued;
+		} finally {
+			if (this.sessionLifecycle.get(sessionId) === tail) this.sessionLifecycle.delete(sessionId);
+		}
+	}
+
+}
+
+function nativeSessionRecord(session: PiSessionInfo, requestedCwd?: string): SessionMapRecord | undefined {
+	const cwd = requestedCwd ?? session.cwd;
+	if (!cwd || !session.id || !session.path) return undefined;
+	const title = session.name?.trim() || session.firstMessage.trim();
+	const record: SessionMapRecord = {
+		sessionId: session.id,
+		piSessionPath: resolve(session.path),
+		piSessionId: session.id,
+		cwd,
+		updatedAt: session.modified.toISOString(),
+	};
+	if (title) record.title = title;
+	return record;
 }
 
 function stopReasonFromAgentEnd(event: { messages: unknown[] }): StopReason {
