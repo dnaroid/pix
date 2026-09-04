@@ -36,6 +36,7 @@
   } from "../lib/project-tasks";
   import { projectName } from "../lib/recent-projects";
   import { sessionTodoCounts, type SessionTodoSnapshot } from "../lib/session-todos";
+  import { sessionSubagentCount, type SessionSubagentSnapshot } from "../lib/session-subagents";
   import SessionActivityPanel from "./SessionActivityPanel.svelte";
 
   type TaskDraft = {
@@ -60,6 +61,7 @@
     sessionReady,
     activeSessionId,
     todoSnapshot,
+    subagentSnapshot,
     onCreate,
     onUpdate,
     onDelete,
@@ -76,6 +78,7 @@
     sessionReady: boolean;
     activeSessionId: string | null;
     todoSnapshot: SessionTodoSnapshot | undefined;
+    subagentSnapshot: SessionSubagentSnapshot | undefined;
     onCreate: (draft: TaskDraft) => void;
     onUpdate: (taskId: string, draft: TaskDraft) => void;
     onDelete: (taskId: string) => void;
@@ -113,6 +116,7 @@
   const doneCount = $derived(tasks.filter((task) => task.status === "done").length);
   const todoCounts = $derived(sessionTodoCounts(todoSnapshot));
   const openTodoCount = $derived(todoCounts.pending + todoCounts.in_progress + todoCounts.deferred);
+  const activeSubagentCount = $derived(sessionSubagentCount(subagentSnapshot));
 
   onMount(() => {
     try {
@@ -301,11 +305,11 @@
         class={["relative grid h-8 w-8 place-items-center rounded-lg hover:bg-sidebar-accent focus-visible:outline-2 focus-visible:outline-ring", activeTab === "session" ? "bg-sidebar-accent text-foreground" : "text-muted-foreground"]}
         type="button"
         title="Session"
-        aria-label={`Session todos, ${openTodoCount} open`}
+        aria-label={`Session activity, ${openTodoCount} open todos, ${activeSubagentCount} active subagents`}
         onclick={() => selectTab("session")}
       >
         <Activity class="h-4 w-4" aria-hidden="true" />
-        {#if openTodoCount > 0}<span class="absolute top-0.5 right-0.5 h-1.5 w-1.5 rounded-full bg-[var(--tool-warning)]" aria-hidden="true"></span>{/if}
+        {#if openTodoCount > 0 || activeSubagentCount > 0}<span class="absolute top-0.5 right-0.5 h-1.5 w-1.5 rounded-full bg-[var(--tool-warning)]" aria-hidden="true"></span>{/if}
       </button>
     </div>
   {:else}
@@ -477,7 +481,7 @@
         </section>
       {:else}
         <div id="workspace-session-panel" class="grid min-h-0" role="tabpanel" aria-labelledby="workspace-session-tab" tabindex="0">
-          <SessionActivityPanel {activeSessionId} {todoSnapshot} />
+          <SessionActivityPanel {activeSessionId} {todoSnapshot} {subagentSnapshot} />
         </div>
       {/if}
     </div>

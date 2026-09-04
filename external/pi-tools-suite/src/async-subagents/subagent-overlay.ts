@@ -23,7 +23,7 @@ export class SubagentOverlay {
 				if (liveRun.has(agent.id)) continue;
 				const agentDir = path.join(runDir, agent.id);
 				const agentParentSession = readParentSessionLink(agentDir);
-				if (parentSession && agentParentSession && !pathsEqual(parentSession, agentParentSession)) continue;
+				if (parentSession && (!agentParentSession || !pathsEqual(parentSession, agentParentSession))) continue;
 				liveRun.set(agent.id, { runDir, agentId: agent.id, parentSession: agentParentSession, completed: Promise.resolve() });
 			}
 			if (liveRun.size === 0) this.liveAgents.delete(runDir);

@@ -55,6 +55,7 @@ const originalPiSubagentsActivePresetFile = process.env.PI_SUBAGENTS_ACTIVE_PRES
 const originalAgentsPreset = process.env.AGENTS_PRESET;
 const originalUltrawork = process.env.ULTRAWORK;
 const originalUltraworkAuto = process.env.ULTRAWORK_AUTO;
+const originalPixAcpSessionStateBridge = process.env.PIX_ACP_SESSION_STATE_BRIDGE;
 
 function tempDir(): string {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "async-subagents-tools-test-"));
@@ -171,6 +172,8 @@ afterEach(async () => {
 	else process.env.ULTRAWORK = originalUltrawork;
 	if (originalUltraworkAuto === undefined) delete process.env.ULTRAWORK_AUTO;
 	else process.env.ULTRAWORK_AUTO = originalUltraworkAuto;
+	if (originalPixAcpSessionStateBridge === undefined) delete process.env.PIX_ACP_SESSION_STATE_BRIDGE;
+	else process.env.PIX_ACP_SESSION_STATE_BRIDGE = originalPixAcpSessionStateBridge;
 	routerResponseText = '{"routes":[]}';
 	routerCompleteMock.mockClear();
 	for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
@@ -186,6 +189,35 @@ describe.serial("extension entrypoint", () => {
 		expect([...pi.tools.keys()].sort()).toEqual(["subagents"]);
 		expect([...pi.commands.keys()]).toEqual(["subagent-preset", "subagent-preset-config", "ultrawork", "ulw", "hyperplan", "sub-status", "sub-stop"]);
 		expect([...pi.renderers.keys()]).toEqual([]);
+	});
+
+	test.serial("publishes live session state through the opted-in desktop RPC bridge", async () => {
+		const { default: registerExtension } = await import("../../src/async-subagents/index.js");
+		const cwd = tempDir();
+		const parentSession = path.join(cwd, "sessions", "parent.jsonl");
+		const widgets: Array<{ key: string; lines: string[] | undefined }> = [];
+		process.env.PIX_ACP_SESSION_STATE_BRIDGE = "1";
+		const pi = new FakePi();
+		registerExtension(pi as any);
+
+		const sessionStartHandlers = pi.events.get("session_start") ?? [];
+		expect(sessionStartHandlers).toHaveLength(1);
+		await sessionStartHandlers[0]({}, {
+			cwd,
+			mode: "rpc",
+			sessionManager: { getSessionFile: () => parentSession },
+			ui: { setWidget: (key: string, lines: string[] | undefined) => widgets.push({ key, lines }) },
+		});
+
+		expect(widgets).toHaveLength(1);
+		expect(widgets[0]?.key).toBe("pix.session-state");
+		expect(widgets[0]?.lines?.[0]).toBe("pi-tools-suite:async-subagents:live-state");
+		expect(JSON.parse(widgets[0]?.lines?.[1] ?? "null")).toMatchObject({
+			version: 1,
+			count: 0,
+			runs: [],
+			sessionFile: parentSession,
+		});
 	});
 
 	test.serial("injects model-specific parallel-first/deep-work strategy prompts", async () => {

@@ -98,13 +98,23 @@ describe("ACP JSON-RPC client", () => {
     transport.message({
       jsonrpc: "2.0",
       method: PIX_SESSION_STATE_METHOD,
+      params: { sessionId: "session-1", channel: "pi-tools-suite:async-subagents:live-state", data: { version: 1 } },
+    });
+    transport.message({
+      jsonrpc: "2.0",
+      method: PIX_SESSION_STATE_METHOD,
       params: { sessionId: "", channel: "pi-tools-suite:todo:state", data: {} },
     });
 
-    expect(onSessionState).toHaveBeenCalledOnce();
-    expect(onSessionState).toHaveBeenCalledWith({
+    expect(onSessionState).toHaveBeenCalledTimes(2);
+    expect(onSessionState).toHaveBeenNthCalledWith(1, {
       sessionId: "session-1",
       channel: "pi-tools-suite:todo:state",
+      data: { version: 1 },
+    });
+    expect(onSessionState).toHaveBeenNthCalledWith(2, {
+      sessionId: "session-1",
+      channel: "pi-tools-suite:async-subagents:live-state",
       data: { version: 1 },
     });
     await client.dispose();

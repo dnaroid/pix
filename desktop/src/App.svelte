@@ -62,6 +62,11 @@
     updateSessionTodoSnapshots,
     type SessionTodoSnapshot,
   } from "./lib/session-todos";
+  import {
+    sessionSubagentSnapshot,
+    updateSessionSubagentSnapshots,
+    type SessionSubagentSnapshot,
+  } from "./lib/session-subagents";
   import type { ProjectFilePreview } from "./lib/project-files";
   import {
     canMovePreviewHistory,
@@ -140,6 +145,7 @@
   let taskLoadFailed = $state(false);
   let taskActionId = $state<string | null>(null);
   let todoSnapshots = $state<Map<string, SessionTodoSnapshot>>(new Map());
+  let subagentSnapshots = $state<Map<string, SessionSubagentSnapshot>>(new Map());
   let imagePromptSupported = false;
   let transcriptPane = $state<HTMLDivElement | null>(null);
   let localMessageId = 0;
@@ -172,6 +178,7 @@
   const canGoBackInPreview = $derived(canMovePreviewHistory(previewHistory, -1));
   const canGoForwardInPreview = $derived(canMovePreviewHistory(previewHistory, 1));
   const activeTodoSnapshot = $derived(activeSessionId ? todoSnapshots.get(activeSessionId) : undefined);
+  const activeSubagentSnapshot = $derived(activeSessionId ? subagentSnapshots.get(activeSessionId) : undefined);
 
   $effect(() => {
     const key = attachmentDraftKey;
@@ -256,6 +263,7 @@
         pendingElicitation = null;
         activeSessionId = null;
         todoSnapshots = new Map();
+        subagentSnapshots = new Map();
         transcript = emptyTranscript;
         configOptions = [];
         status = exit.requested ? "stopped" : "error";
@@ -301,6 +309,7 @@
     pendingElicitation = null;
     activeSessionId = null;
     todoSnapshots = new Map();
+    subagentSnapshots = new Map();
     transcript = emptyTranscript;
     configOptions = [];
     promptRunning = false;
@@ -338,9 +347,24 @@
   }
 
   function handleSessionState(notification: SessionStateNotification): void {
-    const snapshot = sessionTodoSnapshot(notification);
-    if (!snapshot) return;
-    todoSnapshots = updateSessionTodoSnapshots(todoSnapshots, notification.sessionId, snapshot);
+    const todoSnapshot = sessionTodoSnapshot(notification);
+    if (todoSnapshot) {
+      todoSnapshots = updateSessionTodoSnapshots(todoSnapshots, notification.sessionId, todoSnapshot);
+      return;
+    }
+    const subagentSnapshot = sessionSubagentSnapshot(notification);
+    if (subagentSnapshot) {
+      subagentSnapshots = updateSessionSubagentSnapshots(subagentSnapshots, notification.sessionId, subagentSnapshot);
+    }
+  }
+
+  function clearSessionActivity(sessionId: string): void {
+    const nextTodos = new Map(todoSnapshots);
+    nextTodos.delete(sessionId);
+    todoSnapshots = nextTodos;
+    const nextSubagents = new Map(subagentSnapshots);
+    nextSubagents.delete(sessionId);
+    subagentSnapshots = nextSubagents;
   }
 
   async function registerTranscriptAttachments(nextTranscript: TranscriptState): Promise<void> {
@@ -391,6 +415,7 @@
       taskLoadGeneration += 1;
       taskDocument = EMPTY_TASK_DOCUMENT;
       todoSnapshots = new Map();
+      subagentSnapshots = new Map();
       taskActionId = null;
       taskLoadFailed = false;
       restoredSessionTabs = null;
@@ -719,6 +744,7 @@
     try {
       await closeActiveSession();
       closedSessionTabs = closedSessionTabs.filter((closedId) => closedId !== sessionId);
+      clearSessionActivity(sessionId);
       activeSessionId = sessionId;
       transcript = emptyTranscript;
       configOptions = [];
@@ -739,14 +765,23 @@
   async function closeActiveSession(): Promise<void> {
     const sessionId = activeSessionId;
     activeSessionId = null;
-    if (!client || !sessionId) return;
-    await client.closeSession(sessionId);
+    if (!sessionId) return;
+    if (!client) {
+      clearSessionActivity(sessionId);
+      return;
+    }
+    try {
+      await client.closeSession(sessionId);
+    } finally {
+      clearSessionActivity(sessionId);
+    }
   }
 
   async function closeSessionTab(event: MouseEvent, sessionId: string): Promise<void> {
     event.stopPropagation();
     closeSessionSelector();
     if (sessionId !== activeSessionId) {
+      clearSessionActivity(sessionId);
       closedSessionTabs = [...closedSessionTabs, sessionId];
       locallyOpenedSessionTabs = locallyOpenedSessionTabs.filter((openId) => openId !== sessionId);
       return;
@@ -759,6 +794,7 @@
     errorMessage = null;
     try {
       await client?.closeSession(sessionId);
+      clearSessionActivity(sessionId);
       activeSessionId = null;
       transcript = emptyTranscript;
       configOptions = [];
@@ -1287,6 +1323,7 @@
       sessionReady={canUseSession && !promptRunning}
       {activeSessionId}
       todoSnapshot={activeTodoSnapshot}
+      subagentSnapshot={activeSubagentSnapshot}
       onCreate={createProjectTask}
       onUpdate={updateProjectTask}
       onDelete={deleteProjectTask}

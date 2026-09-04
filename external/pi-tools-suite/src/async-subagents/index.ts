@@ -32,6 +32,7 @@ import { registerSubagentsTool } from "./tools/subagents.js";
 import type { LiveAgent, SubagentsLiveStateEvent } from "./types.js";
 import type { AgentState } from "./core/types.js";
 import { publishStartupSection } from "../startup-section.js";
+import { publishRpcSessionState } from "../lib/rpc-session-state.js";
 
 function isTerminalAgentStatus(status: AgentState["status"]): boolean {
 	return status === "done" || status === "failed" || status === "stopped";
@@ -83,8 +84,8 @@ function createLiveStatePayload(
 }
 
 function agentMatchesSession(agent: LiveAgent, sessionFile: string | undefined): boolean {
-	if (!sessionFile || !agent.parentSession) return true;
-	return pathsEqual(sessionFile, agent.parentSession);
+	if (!sessionFile) return true;
+	return agent.parentSession !== undefined && pathsEqual(sessionFile, agent.parentSession);
 }
 
 function isStaleExtensionContextError(error: unknown): boolean {
@@ -100,6 +101,7 @@ export default function (pi: ExtensionAPI) {
 	const subagentOverlay = new SubagentOverlay(liveAgents);
 	let sawAutoUltraworkCandidate = false;
 	let currentSessionFile: string | undefined;
+	let currentSessionStateContext: Parameters<typeof publishRpcSessionState>[0];
 	let completionWatchTimer: ReturnType<typeof setInterval> | undefined;
 	publishSubagentPresetsStartupSection();
 
@@ -109,6 +111,7 @@ export default function (pi: ExtensionAPI) {
 			const liveState = createLiveStatePayload(liveAgents, currentSessionFile);
 			pi.events?.emit?.(SUBAGENTS_LIVE_COUNT_EVENT, { count: liveState.count });
 			pi.events?.emit?.(SUBAGENTS_LIVE_STATE_EVENT, liveState);
+			publishRpcSessionState(currentSessionStateContext, SUBAGENTS_LIVE_STATE_EVENT, liveState);
 			updateCompletionWatcher();
 		} catch (error) {
 			ignoreStaleExtensionContextError(error);
@@ -168,6 +171,7 @@ export default function (pi: ExtensionAPI) {
 		try {
 			sawAutoUltraworkCandidate = false;
 			currentSessionFile = sessionFileFromContext(ctx);
+			currentSessionStateContext = ctx;
 			subagentOverlay.restoreRunningAgents(ctx.cwd, currentSessionFile);
 			refreshSubagentOverlay();
 		} catch (error) {

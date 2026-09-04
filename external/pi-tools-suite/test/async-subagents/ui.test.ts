@@ -154,6 +154,29 @@ describe.serial("live run tracking", () => {
 		overlay.dispose();
 	});
 
+	test.serial("restores only running agents linked to the active parent session", async () => {
+		const { SubagentOverlay } = await import("../../src/async-subagents/subagent-overlay.js");
+		const cwd = tempDir();
+		const runDir = path.join(cwd, ".pi", "subagents", "restored-run");
+		const parentSession = path.join(cwd, "sessions", "parent.jsonl");
+		createAgent(runDir, "owned", {
+			pid: String(process.pid),
+			parent_session: parentSession,
+		});
+		createAgent(runDir, "sibling", {
+			pid: String(process.pid),
+			parent_session: path.join(cwd, "sessions", "sibling.jsonl"),
+		});
+		createAgent(runDir, "unlinked", { pid: String(process.pid) });
+
+		const liveAgents = new Map<string, Map<string, any>>();
+		const overlay = new SubagentOverlay(liveAgents as any);
+		overlay.restoreRunningAgents(cwd, parentSession);
+
+		expect([...liveAgents.get(runDir)?.keys() ?? []]).toEqual(["owned"]);
+		overlay.dispose();
+	});
+
 	test.serial("keeps queued live agents until they become running", async () => {
 		const { SubagentOverlay } = await import("../../src/async-subagents/subagent-overlay.js");
 		const runDir = tempDir();
