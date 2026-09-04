@@ -141,6 +141,40 @@ describe("renderMarkdown", () => {
     expect(remote).not.toContain("<img");
   });
 
+  it("embeds remote images only when explicitly enabled", () => {
+    const markdown = "![Remote](https://example.com/result.webp)";
+    const preview = renderMarkdown(markdown, { remoteImages: true });
+
+    expect(preview).toContain('<img class="markdown-remote-image"');
+    expect(preview).toContain('src="https://example.com/result.webp"');
+    expect(preview).toContain('alt="Remote"');
+    expect(preview).toContain('referrerpolicy="no-referrer"');
+    expect(renderMarkdown("![Mail](mailto:image@example.com)", { remoteImages: true }))
+      .toBe("<p>Mail</p>");
+  });
+
+  it("renders linked remote images without corrupting their outer destination", () => {
+    const markdown = "[![Version](https://img.shields.io/npm/v/pi-ui-extend)](https://npmjs.com/package/pi-ui-extend)";
+    const transcript = renderMarkdown(markdown);
+    const preview = renderMarkdown(markdown, { remoteImages: true });
+
+    expect(transcript).toContain('href="https://npmjs.com/package/pi-ui-extend"');
+    expect(transcript).toContain(">Version</a>");
+    expect(transcript).not.toContain("![");
+    expect(preview).toContain('href="https://npmjs.com/package/pi-ui-extend"');
+    expect(preview).toContain('src="https://img.shields.io/npm/v/pi-ui-extend"');
+  });
+
+  it("adds heading ids and same-document links only when enabled", () => {
+    const markdown = "[Jump](#requirements)\n\n## Requirements\n\n## Requirements";
+    const preview = renderMarkdown(markdown, { headingAnchors: true });
+
+    expect(preview).toContain('data-markdown-anchor="requirements"');
+    expect(preview).toContain('<h2 id="requirements">Requirements</h2>');
+    expect(preview).toContain('<h2 id="requirements-1">Requirements</h2>');
+    expect(renderMarkdown(markdown)).not.toContain("data-markdown-anchor");
+  });
+
   it("renders file URL images and videos as local previews with clickable captions", () => {
     const html = renderMarkdown([
       "[Light initial](file:///tmp/qa-shots/01-light-initial.png)",

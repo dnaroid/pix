@@ -1,25 +1,52 @@
 <script lang="ts">
   import { convertFileSrc } from "@tauri-apps/api/core";
+  import ArrowLeft from "@lucide/svelte/icons/arrow-left";
+  import ArrowRight from "@lucide/svelte/icons/arrow-right";
   import FileCode from "@lucide/svelte/icons/file-code";
   import MoveDiagonal2 from "@lucide/svelte/icons/move-diagonal-2";
   import WrapText from "@lucide/svelte/icons/wrap-text";
   import X from "@lucide/svelte/icons/x";
   import type { Attachment } from "../lib/attachments";
+  import type { PreviewScrollPosition } from "../lib/preview-history";
   import type { ProjectFilePreview } from "../lib/project-files";
   import { highlightCode, languageForFilePath } from "../lib/syntax-highlight";
+  import MarkdownText from "./MarkdownText.svelte";
 
   let {
     attachment,
     file,
+    previewId,
+    scrollPosition,
+    canGoBack = false,
+    canGoForward = false,
+    onBack,
+    onForward,
+    onOpenProjectFile,
+    onResolveProjectMedia,
+    onOpenLocalFile,
+    onResolveLocalMedia,
+    onScrollPositionChange,
     onClose,
   }: {
     attachment?: Attachment;
     file?: ProjectFilePreview;
+    previewId: number;
+    scrollPosition: PreviewScrollPosition;
+    canGoBack?: boolean;
+    canGoForward?: boolean;
+    onBack?: () => void;
+    onForward?: () => void;
+    onOpenProjectFile?: (path: string) => void | Promise<void>;
+    onResolveProjectMedia?: (path: string) => Promise<Attachment | undefined>;
+    onOpenLocalFile?: (path: string) => void | Promise<void>;
+    onResolveLocalMedia?: (path: string) => Promise<Attachment | undefined>;
+    onScrollPositionChange?: (id: number, position: PreviewScrollPosition) => void;
     onClose: () => void;
   } = $props();
 
   let dialogElement: HTMLDialogElement | undefined;
   let previewElement: HTMLDivElement | undefined;
+  let contentScrollElement = $state<HTMLDivElement | undefined>();
   let closeButton: HTMLButtonElement | undefined;
   let wrapLines = $state(false);
   let resizeStart: {
@@ -34,9 +61,19 @@
   const source = $derived(
     attachment?.dataUrl ?? (attachment?.path ? convertFileSrc(attachment.path) : ""),
   );
+  const language = $derived(file ? languageForFilePath(file.path) : undefined);
+  const renderAsMarkdown = $derived(language === "markdown");
   const highlighted = $derived(
-    file ? highlightCode(file.content, languageForFilePath(file.path)) : undefined,
+    file && !renderAsMarkdown ? highlightCode(file.content, language) : undefined,
   );
+
+  function projectLinkPath(path: string): string {
+    const normalizedFilePath = file?.path.replaceAll("\\", "/");
+    const directory = normalizedFilePath?.includes("/")
+      ? normalizedFilePath.slice(0, normalizedFilePath.lastIndexOf("/"))
+      : "";
+    return directory ? `${directory}/${path}` : path;
+  }
 
   $effect(() => {
     const dialog = dialogElement;
@@ -55,6 +92,62 @@
 
   function handleBackdropClick(event: MouseEvent): void {
     if (event.target === event.currentTarget) onClose();
+  }
+
+  function restoreScroll(
+    node: HTMLElement,
+    initial: { key: number; position: PreviewScrollPosition },
+  ): { update: (next: { key: number; position: PreviewScrollPosition }) => void; destroy: () => void } {
+    let key = initial.key;
+    let frame = 0;
+
+    function schedule(position: PreviewScrollPosition): void {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        node.scrollLeft = position.left;
+        node.scrollTop = position.top;
+      });
+    }
+
+    schedule(initial.position);
+    return {
+      update(next): void {
+        if (next.key === key) return;
+        key = next.key;
+        schedule(next.position);
+      },
+      destroy(): void {
+        cancelAnimationFrame(frame);
+      },
+    };
+  }
+
+  function rememberScroll(): void {
+    if (!contentScrollElement) return;
+    onScrollPositionChange?.(previewId, {
+      left: contentScrollElement.scrollLeft,
+      top: contentScrollElement.scrollTop,
+    });
+  }
+
+  function handleBack(): void {
+    rememberScroll();
+    onBack?.();
+  }
+
+  function handleForward(): void {
+    rememberScroll();
+    onForward?.();
+  }
+
+  function openProjectFromMarkdown(path: string): void | Promise<void> {
+    rememberScroll();
+    return onOpenProjectFile?.(projectLinkPath(path));
+  }
+
+  function openLocalFromMarkdown(path: string): void | Promise<void> {
+    rememberScroll();
+    return onOpenLocalFile?.(path);
   }
 
   function handleCancel(event: Event): void {
@@ -120,16 +213,40 @@
 >
   <div
     bind:this={previewElement}
-    class={file
-      ? "relative flex h-[760px] max-h-[calc(100vh-48px)] min-h-[320px] w-[1120px] max-w-[calc(100vw-48px)] min-w-[480px] flex-col overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-md"
-      : "relative flex max-h-[calc(100vh-48px)] max-w-[calc(100vw-48px)] flex-col overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-md"}
+    class="relative flex h-[760px] max-h-[calc(100vh-48px)] min-h-[320px] w-[1120px] max-w-[calc(100vw-48px)] min-w-[480px] flex-col overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-md"
   >
-    <header class="flex min-h-10 min-w-0 items-center gap-3 border-b border-border px-3 pl-4">
+    <header class="flex min-h-10 min-w-0 items-center gap-2 border-b border-border px-3">
+      <div class="flex shrink-0 items-center gap-0.5" aria-label="Preview history">
+        <button
+          class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:text-muted-foreground/35 disabled:hover:bg-transparent disabled:hover:text-muted-foreground/35"
+          type="button"
+          aria-label="Go back"
+          title="Back"
+          disabled={!canGoBack}
+          onclick={handleBack}
+        >
+          <ArrowLeft class="h-4 w-4" aria-hidden="true" />
+        </button>
+        <button
+          class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:text-muted-foreground/35 disabled:hover:bg-transparent disabled:hover:text-muted-foreground/35"
+          type="button"
+          aria-label="Go forward"
+          title="Forward"
+          disabled={!canGoForward}
+          onclick={handleForward}
+        >
+          <ArrowRight class="h-4 w-4" aria-hidden="true" />
+        </button>
+      </div>
       {#if file}
         <FileCode class="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
       {/if}
       <strong class="min-w-0 flex-1 truncate text-xs font-medium" title={title}>{title}</strong>
-      {#if highlighted}
+      {#if renderAsMarkdown}
+        <span class="rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          Markdown
+        </span>
+      {:else if highlighted}
         <span class="rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
           {highlighted.language}
         </span>
@@ -157,33 +274,51 @@
         <X class="h-4 w-4" aria-hidden="true" />
       </button>
     </header>
-    {#if file && highlighted}
-      <!-- svelte-ignore a11y_no_noninteractive_tabindex Scrollable source needs keyboard focus. -->
-      <div
-        class="min-h-0 min-w-0 flex-1 overflow-auto bg-muted/40 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-        role="region"
-        aria-label={`Source for ${file.path}`}
-        tabindex="0"
-      >
-        <pre class={wrapLines
-          ? "m-0 min-h-full w-full min-w-0 py-3 font-mono text-xs leading-6 text-foreground"
-          : "m-0 min-h-full min-w-full w-max py-3 font-mono text-xs leading-6 text-foreground"}><code class:wrap-lines={wrapLines} class="preview-code">{@html highlighted.html}</code></pre>
-      </div>
-      <button
-        class="absolute right-0 bottom-0 z-20 grid h-8 w-8 touch-none cursor-se-resize place-items-center rounded-tl-md text-muted-foreground transition-colors select-none hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-[-3px] focus-visible:outline-ring"
-        type="button"
-        aria-label="Resize preview"
-        title="Drag to resize preview; arrow keys also work"
-        onpointerdown={handleResizeStart}
-        onpointermove={handleResizeMove}
-        onpointerup={handleResizeEnd}
-        onpointercancel={handleResizeEnd}
-        onkeydown={handleResizeKey}
-      >
-        <MoveDiagonal2 class="h-4 w-4" aria-hidden="true" />
-      </button>
+    {#if file}
+      {#if renderAsMarkdown}
+        {#key previewId}
+          <!-- svelte-ignore a11y_no_noninteractive_tabindex Scrollable preview needs keyboard focus. -->
+          <div
+            bind:this={contentScrollElement}
+            use:restoreScroll={{ key: previewId, position: scrollPosition }}
+            class="min-h-0 min-w-0 flex-1 overflow-auto bg-background outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+            role="region"
+            aria-label={`Rendered Markdown for ${file.path}`}
+            tabindex="0"
+            onscroll={rememberScroll}
+          >
+            <div class="mx-auto w-full max-w-[840px] px-8 py-6 text-sm leading-6">
+              <MarkdownText
+                text={file.content}
+                fitTables
+                remoteImages
+                headingAnchors
+                onOpenProjectFile={openProjectFromMarkdown}
+                onResolveProjectMedia={(path) => onResolveProjectMedia?.(projectLinkPath(path)) ?? Promise.resolve(undefined)}
+                onOpenLocalFile={openLocalFromMarkdown}
+                {onResolveLocalMedia}
+              />
+            </div>
+          </div>
+        {/key}
+      {:else if highlighted}
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex Scrollable source needs keyboard focus. -->
+        <div
+          bind:this={contentScrollElement}
+          use:restoreScroll={{ key: previewId, position: scrollPosition }}
+          class="min-h-0 min-w-0 flex-1 overflow-auto bg-muted/40 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          role="region"
+          aria-label={`Source for ${file.path}`}
+          tabindex="0"
+          onscroll={rememberScroll}
+        >
+          <pre class={wrapLines
+            ? "m-0 min-h-full w-full min-w-0 py-3 font-mono text-xs leading-6 text-foreground"
+            : "m-0 min-h-full min-w-full w-max py-3 font-mono text-xs leading-6 text-foreground"}><code class:wrap-lines={wrapLines} class="preview-code">{@html highlighted.html}</code></pre>
+        </div>
+      {/if}
     {:else if attachment}
-      <div class="grid min-h-0 place-items-center bg-background p-3">
+      <div class="grid min-h-0 min-w-0 flex-1 place-items-center overflow-hidden bg-background p-3">
         {#if attachment.kind === "image"}
           <img class="max-h-[calc(100vh-112px)] max-w-[calc(100vw-72px)] object-contain" src={source} alt={attachment.name} />
         {:else}
@@ -196,6 +331,19 @@
         {/if}
       </div>
     {/if}
+    <button
+      class="absolute right-0 bottom-0 z-20 grid h-8 w-8 touch-none cursor-se-resize place-items-center rounded-tl-md text-muted-foreground transition-colors select-none hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-[-3px] focus-visible:outline-ring"
+      type="button"
+      aria-label="Resize preview"
+      title="Drag to resize preview; arrow keys also work"
+      onpointerdown={handleResizeStart}
+      onpointermove={handleResizeMove}
+      onpointerup={handleResizeEnd}
+      onpointercancel={handleResizeEnd}
+      onkeydown={handleResizeKey}
+    >
+      <MoveDiagonal2 class="h-4 w-4" aria-hidden="true" />
+    </button>
   </div>
 </dialog>
 

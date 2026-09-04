@@ -1,5 +1,6 @@
 <script lang="ts">
   import { convertFileSrc } from "@tauri-apps/api/core";
+  import ExternalLink from "@lucide/svelte/icons/external-link";
   import type { Attachment } from "../lib/attachments";
   import { openExternalHref } from "../lib/external-links";
   import { renderMarkdown } from "../lib/markdown";
@@ -8,6 +9,9 @@
   let {
     text,
     compact = false,
+    fitTables = false,
+    remoteImages = false,
+    headingAnchors = false,
     onOpenProjectFile,
     onResolveProjectMedia,
     onOpenLocalFile,
@@ -15,13 +19,31 @@
   }: {
     text: string;
     compact?: boolean;
+    fitTables?: boolean;
+    remoteImages?: boolean;
+    headingAnchors?: boolean;
     onOpenProjectFile?: (path: string) => void | Promise<void>;
     onResolveProjectMedia?: (path: string) => Promise<Attachment | undefined>;
     onOpenLocalFile?: (path: string) => void | Promise<void>;
     onResolveLocalMedia?: (path: string) => Promise<Attachment | undefined>;
   } = $props();
-  let html = $derived(renderMarkdown(text));
+  let html = $derived(renderMarkdown(text, { remoteImages, headingAnchors }));
+  let externalLinkIconTemplate: HTMLSpanElement | undefined;
   const mediaCache = new Map<string, Promise<Attachment | undefined>>();
+
+  function decorateExternalLinks(node: HTMLElement): void {
+    const template = externalLinkIconTemplate?.querySelector("svg");
+    if (!template) return;
+
+    for (const link of node.querySelectorAll<HTMLAnchorElement>("a[data-external-link]")) {
+      if (link.querySelector(":scope > .markdown-external-link-icon")) continue;
+      if (link.querySelector(":scope > img")) continue;
+      const icon = template.cloneNode(true) as SVGElement;
+      icon.classList.add("markdown-external-link-icon");
+      icon.setAttribute("aria-hidden", "true");
+      link.append(icon);
+    }
+  }
 
   function markdownContent(node: HTMLElement, _renderedHtml: string) {
     let generation = 0;
@@ -31,6 +53,8 @@
       generation += 1;
       const scheduledGeneration = generation;
       queueMicrotask(() => {
+        if (scheduledGeneration !== generation) return;
+        decorateExternalLinks(node);
         void renderDiagrams(scheduledGeneration);
         void renderMedia(scheduledGeneration);
       });
@@ -195,6 +219,17 @@
         return;
       }
 
+      const anchorLink = event.target.closest("a[data-markdown-anchor]");
+      if (anchorLink && node.contains(anchorLink)) {
+        event.preventDefault();
+        const id = anchorLink.getAttribute("data-markdown-anchor");
+        const heading = id
+          ? Array.from(node.querySelectorAll<HTMLElement>("[id]")).find((element) => element.id === id)
+          : undefined;
+        heading?.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
+
       const link = event.target.closest("a[data-external-link]");
       if (!link || !node.contains(link)) return;
 
@@ -213,7 +248,16 @@
   }
 </script>
 
-<div class:compact class="markdown-text" use:linkClicks use:markdownContent={html}>{@html html}</div>
+<span class="external-link-icon-template" aria-hidden="true" bind:this={externalLinkIconTemplate}>
+  <ExternalLink size={14} strokeWidth={2} />
+</span>
+<div
+  class={["markdown-text", compact && "compact", fitTables && "fit-tables"]}
+  use:linkClicks
+  use:markdownContent={html}
+>
+  {@html html}
+</div>
 
 <style>
   .markdown-text {
@@ -295,6 +339,14 @@
     text-underline-offset: 2px;
   }
   .markdown-text :global(a:hover) { text-decoration-color: currentColor; }
+  .external-link-icon-template { display: none; }
+  .markdown-text :global(.markdown-external-link-icon) {
+    display: inline-block;
+    width: 0.82em;
+    height: 0.82em;
+    margin-inline-start: 0.22em;
+    vertical-align: -0.06em;
+  }
   .markdown-text :global(a[data-project-file]),
   .markdown-text :global(a[data-local-file]) {
     border-radius: calc(var(--radius) - 10px);
@@ -353,6 +405,14 @@
     max-height: 28rem;
     object-fit: contain;
   }
+  .markdown-text :global(.markdown-remote-image) {
+    display: block;
+    width: auto;
+    max-width: 100%;
+    max-height: 28rem;
+    object-fit: contain;
+  }
+  .markdown-text :global(a > .markdown-remote-image) { cursor: pointer; }
   .markdown-text :global(video.markdown-media-content) {
     width: auto;
     background: var(--background);
@@ -384,6 +444,7 @@
     font-size: 0.88em;
   }
   .markdown-text :global(pre) {
+    width: fit-content;
     max-width: 100%;
     margin: 0.75rem 0;
     overflow: auto;
@@ -395,7 +456,6 @@
   .markdown-text :global(pre code) {
     display: block;
     width: max-content;
-    min-width: 100%;
     border-radius: 0;
     background: transparent;
     padding: 0;
@@ -417,11 +477,19 @@
     margin: 0.75rem 0;
     overflow-x: auto;
   }
+  .markdown-text.fit-tables :global(.table-scroll) {
+    width: 100%;
+    overflow-x: visible;
+  }
   .markdown-text :global(table) {
     width: max-content;
     border-collapse: collapse;
     border: 1px solid var(--border);
     font-size: 0.94em;
+  }
+  .markdown-text.fit-tables :global(table) {
+    width: 100%;
+    table-layout: fixed;
   }
   .markdown-text :global(th),
   .markdown-text :global(td) {
@@ -430,6 +498,11 @@
     padding: 0.4rem 0.65rem;
     text-align: left;
     vertical-align: top;
+  }
+  .markdown-text.fit-tables :global(th),
+  .markdown-text.fit-tables :global(td) {
+    overflow-wrap: anywhere;
+    white-space: normal;
   }
   .markdown-text :global(th:last-child),
   .markdown-text :global(td:last-child) {

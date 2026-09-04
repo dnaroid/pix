@@ -71,26 +71,25 @@
       {#each displayItems as item (item.id)}
         {#if item.type === "message"}
           {#if item.role === "thought"}
-            <details class="group mb-5 w-full min-w-0 px-0.5 text-xs text-muted-foreground">
-              <summary class="flex min-h-5 cursor-pointer list-none items-center gap-2 text-muted-foreground transition-colors select-none hover:text-foreground group-open:mb-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+            <details class="group mb-5 w-full min-w-0 text-xs text-muted-foreground">
+              <summary class="grid min-h-5 cursor-pointer list-none grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-1.5 text-muted-foreground transition-colors select-none hover:text-foreground group-open:mb-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
                 <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
-                <Brain class="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
+                <Brain class="h-3 w-3 shrink-0 text-primary" aria-hidden="true" />
                 <span>thinking</span>
               </summary>
-              <div class="ml-3.5 border-l border-border pl-2.5 text-muted-foreground">
+              <div class="ml-[7px] border-l border-border pl-2.5 text-muted-foreground">
                 <MarkdownText text={item.text} compact {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />
               </div>
             </details>
           {:else if item.role === "user"}
-            <div class="mb-6 flex justify-end">
-              <article class="w-fit max-w-[min(780px,86%)] rounded-xl rounded-br-md border border-border bg-card px-3.5 pt-3 pb-2 text-card-foreground shadow-xs">
+            <div class="mb-6">
+              <article class="w-full rounded-xl border border-primary/45 bg-primary/15 px-3.5 pt-3 pb-2 text-card-foreground shadow-xs">
                 <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} />
                 {#if item.text}<MarkdownText text={item.text} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />{/if}
               </article>
             </div>
           {:else}
             <article class="mb-6 w-full min-w-0 text-foreground">
-              <div class="mb-1.5 text-[11px] font-semibold text-muted-foreground">Pix</div>
               <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} />
               {#if item.text}<MarkdownText text={item.text} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />{/if}
             </article>

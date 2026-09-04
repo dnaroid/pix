@@ -58,6 +58,17 @@
   import ProjectTaskSidebar from "./components/ProjectTaskSidebar.svelte";
   import type { ProjectFilePreview } from "./lib/project-files";
   import {
+    canMovePreviewHistory,
+    currentPreview,
+    emptyPreviewHistory,
+    movePreviewHistory,
+    pushPreviewHistory,
+    replaceCurrentPreview,
+    resetPreviewHistory,
+    type PreviewHistory,
+    type PreviewScrollPosition,
+  } from "./lib/preview-history";
+  import {
     buildTaskPrompt,
     EMPTY_TASK_DOCUMENT,
     parseTaskDocument,
@@ -81,6 +92,14 @@
     status: ProjectTaskStatus;
     priority: ProjectTaskPriority;
   };
+  type PreviewTarget =
+    | { kind: "file"; file: ProjectFilePreview }
+    | { kind: "attachment"; attachment: Attachment };
+  type PreviewEntry = PreviewTarget & {
+    id: number;
+    scrollPosition: PreviewScrollPosition;
+  };
+  type PreviewNavigation = "replace" | "push";
 
   let client = $state<AcpClient | null>(null);
   let status = $state<ConnectionStatus>("starting");
@@ -108,8 +127,7 @@
   let sessionSelectorOpen = $state(false);
   let sessionSelectorTrigger = $state<HTMLButtonElement | null>(null);
   let dragActive = $state(false);
-  let mediaPreview = $state<Attachment | null>(null);
-  let projectFilePreview = $state<ProjectFilePreview | null>(null);
+  let previewHistory = $state<PreviewHistory<PreviewEntry>>(emptyPreviewHistory());
   let taskDocument = $state<ProjectTaskDocument>(EMPTY_TASK_DOCUMENT);
   let tasksLoading = $state(false);
   let tasksSaving = $state(false);
@@ -122,6 +140,7 @@
   let sessionRefreshGeneration = 0;
   let autocompleteSettingsGeneration = 0;
   let attachmentSequence = 0;
+  let previewSequence = 0;
   let attachmentDraftGeneration = 0;
   let attachmentAddQueue = Promise.resolve();
   let sessionUpdateQueue = Promise.resolve();
@@ -142,13 +161,15 @@
     activeSessionId,
   ));
   const attachmentDraftKey = $derived(`${workspace}\0${activeSessionId ?? ""}`);
+  const activePreview = $derived(currentPreview(previewHistory));
+  const canGoBackInPreview = $derived(canMovePreviewHistory(previewHistory, -1));
+  const canGoForwardInPreview = $derived(canMovePreviewHistory(previewHistory, 1));
 
   $effect(() => {
     const key = attachmentDraftKey;
     if (previousAttachmentDraftKey !== null && previousAttachmentDraftKey !== key) {
       invalidateAttachmentDraft();
-      mediaPreview = null;
-      projectFilePreview = null;
+      previewHistory = emptyPreviewHistory();
       projectFilePreviewGeneration += 1;
     }
     previousAttachmentDraftKey = key;
@@ -906,6 +927,38 @@
     return `local-attachment:${attachmentSequence}`;
   }
 
+  function showPreview(target: PreviewTarget, navigation: PreviewNavigation): void {
+    previewSequence += 1;
+    const entry: PreviewEntry = {
+      ...target,
+      id: previewSequence,
+      scrollPosition: { left: 0, top: 0 },
+    };
+    previewHistory = navigation === "push"
+      ? pushPreviewHistory(previewHistory, entry)
+      : resetPreviewHistory(entry);
+  }
+
+  function rememberPreviewScroll(id: number, scrollPosition: PreviewScrollPosition): void {
+    const entry = currentPreview(previewHistory);
+    if (!entry || entry.id !== id) return;
+    if (
+      entry.scrollPosition.left === scrollPosition.left
+      && entry.scrollPosition.top === scrollPosition.top
+    ) return;
+    previewHistory = replaceCurrentPreview(previewHistory, { ...entry, scrollPosition });
+  }
+
+  function closePreview(): void {
+    projectFilePreviewGeneration += 1;
+    previewHistory = emptyPreviewHistory();
+  }
+
+  function movePreview(offset: -1 | 1): void {
+    projectFilePreviewGeneration += 1;
+    previewHistory = movePreviewHistory(previewHistory, offset);
+  }
+
   async function activateAttachment(attachment: Attachment): Promise<void> {
     if (attachment.path) {
       try {
@@ -916,8 +969,7 @@
       }
     }
     if (attachment.kind === "image" || attachment.kind === "video") {
-      projectFilePreview = null;
-      mediaPreview = attachment;
+      showPreview({ kind: "attachment", attachment }, "replace");
       return;
     }
     if (!attachment.path) {
@@ -931,7 +983,7 @@
     }
   }
 
-  async function openProjectFile(path: string): Promise<void> {
+  async function openProjectFile(path: string, navigation: PreviewNavigation = "replace"): Promise<void> {
     if (!workspace) {
       errorMessage = "Open a workspace before previewing project files.";
       return;
@@ -944,8 +996,7 @@
       if (mediaKind !== "file") {
         const attachment = await resolveProjectMedia(path);
         if (!attachment || generation !== projectFilePreviewGeneration || workspace !== requestWorkspace) return;
-        projectFilePreview = null;
-        mediaPreview = attachment;
+        showPreview({ kind: "attachment", attachment }, navigation);
         return;
       }
       const preview = await invoke<ProjectFilePreview>("read_project_file", {
@@ -953,8 +1004,7 @@
         path,
       });
       if (generation !== projectFilePreviewGeneration || workspace !== requestWorkspace) return;
-      mediaPreview = null;
-      projectFilePreview = preview;
+      showPreview({ kind: "file", file: preview }, navigation);
     } catch (error) {
       if (generation === projectFilePreviewGeneration) reportError(error);
     }
@@ -972,7 +1022,7 @@
     return attachmentFromFile(file, `project-media:${requestWorkspace}:${path}`);
   }
 
-  async function openLocalFile(path: string): Promise<void> {
+  async function openLocalFile(path: string, navigation: PreviewNavigation = "replace"): Promise<void> {
     const generation = ++projectFilePreviewGeneration;
     const isHomePath = path.startsWith("~/");
     if (attachmentKind(mimeTypeForName(path)) !== "file") {
@@ -981,8 +1031,7 @@
           ? await resolveHomeMedia(path)
           : await resolveLocalMedia(path);
         if (!attachment || generation !== projectFilePreviewGeneration) return;
-        projectFilePreview = null;
-        mediaPreview = attachment;
+        showPreview({ kind: "attachment", attachment }, navigation);
       } catch (error) {
         if (generation === projectFilePreviewGeneration) reportError(error);
       }
@@ -993,8 +1042,7 @@
       try {
         const preview = await invoke<ProjectFilePreview>("read_home_file", { path });
         if (generation !== projectFilePreviewGeneration) return;
-        mediaPreview = null;
-        projectFilePreview = preview;
+        showPreview({ kind: "file", file: preview }, navigation);
       } catch (error) {
         if (generation === projectFilePreviewGeneration) reportError(error);
       }
@@ -1292,8 +1340,21 @@
   />
 {/if}
 
-{#if projectFilePreview}
-  <PreviewDialog file={projectFilePreview} onClose={() => projectFilePreview = null} />
-{:else if mediaPreview}
-  <PreviewDialog attachment={mediaPreview} onClose={() => mediaPreview = null} />
+{#if activePreview}
+  <PreviewDialog
+    previewId={activePreview.id}
+    scrollPosition={activePreview.scrollPosition}
+    file={activePreview.kind === "file" ? activePreview.file : undefined}
+    attachment={activePreview.kind === "attachment" ? activePreview.attachment : undefined}
+    canGoBack={canGoBackInPreview}
+    canGoForward={canGoForwardInPreview}
+    onBack={() => movePreview(-1)}
+    onForward={() => movePreview(1)}
+    onOpenProjectFile={(path) => openProjectFile(path, "push")}
+    onResolveProjectMedia={resolveProjectMedia}
+    onOpenLocalFile={(path) => openLocalFile(path, "push")}
+    onResolveLocalMedia={resolveLocalMedia}
+    onScrollPositionChange={rememberPreviewScroll}
+    onClose={closePreview}
+  />
 {/if}

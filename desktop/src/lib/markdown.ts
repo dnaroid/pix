@@ -17,17 +17,41 @@ type Fence = {
 
 type TableAlignment = "center" | "left" | "right" | undefined;
 
+export interface MarkdownRenderOptions {
+  /** Remote network images are opt-in so transcript rendering stays non-fetching. */
+  remoteImages?: boolean;
+  /** Add stable heading ids and render same-document hash links. */
+  headingAnchors?: boolean;
+}
+
+type RenderContext = {
+  remoteImages: boolean;
+  headingAnchors: boolean;
+  headingSlugs: Map<string, number>;
+};
+
+const DEFAULT_RENDER_CONTEXT: RenderContext = {
+  remoteImages: false,
+  headingAnchors: false,
+  headingSlugs: new Map(),
+};
+
 /**
- * Render the deliberately small Markdown subset used by the transcript.
+ * Render the deliberately small Markdown subset used by Desktop.
  * All source text is safely escaped here or by the syntax highlighter before
  * the result reaches Svelte's `{@html}`.
  */
-export function renderMarkdown(text: string): string {
+export function renderMarkdown(text: string, options: MarkdownRenderOptions = {}): string {
   if (!text) return "";
-  return renderBlocks(text.replace(/\r\n?/g, "\n").split("\n"), 0);
+  const context: RenderContext = {
+    remoteImages: options.remoteImages === true,
+    headingAnchors: options.headingAnchors === true,
+    headingSlugs: new Map(),
+  };
+  return renderBlocks(text.replace(/\r\n?/g, "\n").split("\n"), 0, context);
 }
 
-function renderBlocks(lines: readonly string[], depth: number): string {
+function renderBlocks(lines: readonly string[], depth: number, context: RenderContext): string {
   const output: string[] = [];
   let index = 0;
 
@@ -63,7 +87,7 @@ function renderBlocks(lines: readonly string[], depth: number): string {
       continue;
     }
 
-    const table = parseTable(lines, index);
+    const table = parseTable(lines, index, context);
     if (table) {
       output.push(table.html);
       index += table.lineCount;
@@ -73,7 +97,9 @@ function renderBlocks(lines: readonly string[], depth: number): string {
     const heading = line.match(/^ {0,3}(#{1,6})[ \t]+(.+?)\s*#*\s*$/);
     if (heading) {
       const level = heading[1]?.length ?? 1;
-      output.push(`<h${level}>${renderInline(heading[2] ?? "")}</h${level}>`);
+      const source = heading[2] ?? "";
+      const id = context.headingAnchors ? ` id="${escapeAttribute(nextHeadingSlug(source, context))}"` : "";
+      output.push(`<h${level}${id}>${renderInline(source, 0, true, context)}</h${level}>`);
       index += 1;
       continue;
     }
@@ -93,13 +119,13 @@ function renderBlocks(lines: readonly string[], depth: number): string {
         index += 1;
       }
       const quote = depth < MAX_BLOCK_DEPTH
-        ? renderBlocks(quoteLines, depth + 1)
-        : `<p>${renderInline(quoteLines.join("\n"))}</p>`;
+        ? renderBlocks(quoteLines, depth + 1, context)
+        : `<p>${renderInline(quoteLines.join("\n"), 0, true, context)}</p>`;
       output.push(`<blockquote>${quote}</blockquote>`);
       continue;
     }
 
-    const list = parseList(lines, index);
+    const list = parseList(lines, index, context);
     if (list) {
       output.push(list.html);
       index += list.lineCount;
@@ -112,10 +138,25 @@ function renderBlocks(lines: readonly string[], depth: number): string {
       paragraph.push(lines[index] ?? "");
       index += 1;
     }
-    output.push(`<p>${renderInline(paragraph.join("\n"))}</p>`);
+    output.push(`<p>${renderInline(paragraph.join("\n"), 0, true, context)}</p>`);
   }
 
   return output.join("");
+}
+
+function nextHeadingSlug(source: string, context: RenderContext): string {
+  const base = source
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/[`*_~]/g, "")
+    .trim()
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}\s-]/gu, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-") || "section";
+  const count = context.headingSlugs.get(base) ?? 0;
+  context.headingSlugs.set(base, count + 1);
+  return count === 0 ? base : `${base}-${count}`;
 }
 
 function parseFence(line: string): Fence | undefined {
@@ -135,7 +176,11 @@ function isClosingFence(line: string, fence: Fence): boolean {
   return markerCount >= fence.length && trimmed.slice(markerCount).trim() === "";
 }
 
-function parseList(lines: readonly string[], start: number): { html: string; lineCount: number } | undefined {
+function parseList(
+  lines: readonly string[],
+  start: number,
+  context: RenderContext,
+): { html: string; lineCount: number } | undefined {
   const first = listItem(lines[start] ?? "");
   if (!first) return undefined;
 
@@ -150,9 +195,9 @@ function parseList(lines: readonly string[], start: number): { html: string; lin
     const task = item.text.match(/^\[([ xX])\][ \t]+(.*)$/);
     if (task) {
       const checked = task[1]?.toLowerCase() === "x" ? " checked" : "";
-      items.push(`<li class="task-item"><input type="checkbox" disabled${checked}>${renderInline(task[2] ?? "")}</li>`);
+      items.push(`<li class="task-item"><input type="checkbox" disabled${checked}>${renderInline(task[2] ?? "", 0, true, context)}</li>`);
     } else {
-      items.push(`<li>${renderInline(item.text)}</li>`);
+      items.push(`<li>${renderInline(item.text, 0, true, context)}</li>`);
     }
     index += 1;
   }
@@ -169,7 +214,11 @@ function listItem(line: string): { ordered: boolean; number: number; text: strin
   return { ordered: true, number: Number(ordered[1]), text: ordered[2] ?? "" };
 }
 
-function parseTable(lines: readonly string[], start: number): { html: string; lineCount: number } | undefined {
+function parseTable(
+  lines: readonly string[],
+  start: number,
+  context?: RenderContext,
+): { html: string; lineCount: number } | undefined {
   if (start + 1 >= lines.length) return undefined;
   const header = splitTableRow(lines[start] ?? "");
   const delimiter = splitTableRow(lines[start + 1] ?? "");
@@ -194,7 +243,7 @@ function parseTable(lines: readonly string[], start: number): { html: string; li
   const cells = (row: readonly string[], tag: "td" | "th") => row.map((cell, column) => {
     const alignment = alignments[column];
     const className = alignment ? ` class="align-${alignment}"` : "";
-    return `<${tag}${className}>${renderInline(cell.trim())}</${tag}>`;
+    return `<${tag}${className}>${renderInline(cell.trim(), 0, true, context)}</${tag}>`;
   }).join("");
   const body = rows.length > 0
     ? `<tbody>${rows.map((row) => `<tr>${cells(row, "td")}</tr>`).join("")}</tbody>`
@@ -252,7 +301,12 @@ function isBlockStart(lines: readonly string[], index: number): boolean {
   );
 }
 
-function renderInline(text: string, depth = 0, allowLinks = true): string {
+function renderInline(
+  text: string,
+  depth = 0,
+  allowLinks = true,
+  context: RenderContext = DEFAULT_RENDER_CONTEXT,
+): string {
   let output = "";
   let index = 0;
   let nextLinkLabelEnd = text.indexOf("](");
@@ -288,6 +342,21 @@ function renderInline(text: string, depth = 0, allowLinks = true): string {
       }
     }
 
+    const linkedImage = allowLinks && char === "[" && next === "!"
+      ? parseLinkedImage(text, index)
+      : undefined;
+    if (linkedImage) {
+      const source = context.remoteImages
+        ? normalizeRemoteImageHref(linkedImage.image.destination)
+        : undefined;
+      const image = source
+        ? remoteImage(source, linkedImage.image.label)
+        : escapeHtml(linkedImage.image.label);
+      output += linkForDestination(linkedImage.destination, image, context);
+      index = linkedImage.end;
+      continue;
+    }
+
     let linkStart = -1;
     if (allowLinks && char === "!" && next === "[") {
       linkStart = index + 1;
@@ -301,7 +370,7 @@ function renderInline(text: string, depth = 0, allowLinks = true): string {
       const link = parseLink(text, linkStart, nextLinkLabelEnd);
       if (link) {
         const label = depth < MAX_BLOCK_DEPTH
-          ? renderInline(link.label, depth + 1, false)
+          ? renderInline(link.label, depth + 1, false, context)
           : escapeHtml(link.label);
         const homePath = normalizeHomeFileDestination(link.destination);
         const projectPath = homePath ? undefined : normalizeProjectFileDestination(link.destination);
@@ -315,9 +384,10 @@ function renderInline(text: string, depth = 0, allowLinks = true): string {
         } else if (homePath) {
           output += homeFileLink(homePath, label);
         } else if (char === "!") {
-          output += label;
+          const source = context.remoteImages ? normalizeRemoteImageHref(link.destination) : undefined;
+          output += source ? remoteImage(source, link.label) : label;
         } else {
-          output += linkForDestination(link.destination, label);
+          output += linkForDestination(link.destination, label, context);
         }
         index = link.end;
         continue;
@@ -340,6 +410,7 @@ function renderInline(text: string, depth = 0, allowLinks = true): string {
           text.slice(index + delimiter.length, end),
           depth + 1,
           allowLinks,
+          context,
         );
         if (delimiter.length === 3) {
           output += `<strong><em>${content}</em></strong>`;
@@ -377,7 +448,21 @@ function externalLink(href: string, label: string): string {
   return `<a href="${escapeAttribute(href)}" data-external-link rel="noopener noreferrer">${label}</a>`;
 }
 
-function linkForDestination(destination: string, label: string): string {
+function remoteImage(src: string, alt: string): string {
+  return `<img class="markdown-remote-image" src="${escapeAttribute(src)}" alt="${escapeAttribute(alt)}" loading="lazy" decoding="async" referrerpolicy="no-referrer">`;
+}
+
+function linkForDestination(
+  destination: string,
+  label: string,
+  context: RenderContext = DEFAULT_RENDER_CONTEXT,
+): string {
+  const anchor = context.headingAnchors ? normalizeHeadingAnchor(destination) : undefined;
+  if (anchor) {
+    const escaped = escapeAttribute(anchor);
+    return `<a href="#${escaped}" data-markdown-anchor="${escaped}">${label}</a>`;
+  }
+
   const externalHref = normalizeExternalHref(destination);
   if (externalHref) return externalLink(externalHref, label);
 
@@ -557,6 +642,46 @@ function parseLink(
     }
   }
   return undefined;
+}
+
+function parseLinkedImage(
+  text: string,
+  start: number,
+): {
+  image: { label: string; destination: string };
+  destination: string;
+  end: number;
+} | undefined {
+  if (!text.startsWith("[![", start)) return undefined;
+  const imageStart = start + 2;
+  const imageLabelEnd = text.indexOf("](", imageStart + 1);
+  if (imageLabelEnd < 0) return undefined;
+  const image = parseLink(text, imageStart, imageLabelEnd);
+  if (!image || !text.startsWith("](", image.end)) return undefined;
+  const outer = parseLink(text, start, image.end);
+  if (!outer) return undefined;
+  return {
+    image: { label: image.label, destination: image.destination },
+    destination: outer.destination,
+    end: outer.end,
+  };
+}
+
+function normalizeRemoteImageHref(destination: string): string | undefined {
+  const href = normalizeExternalHref(destination);
+  if (!href) return undefined;
+  const protocol = new URL(href).protocol;
+  return protocol === "http:" || protocol === "https:" ? href : undefined;
+}
+
+function normalizeHeadingAnchor(destination: string): string | undefined {
+  if (!destination.startsWith("#") || destination.length === 1) return undefined;
+  try {
+    const anchor = decodeURIComponent(destination.slice(1));
+    return /[\u0000-\u001f\u007f]/.test(anchor) ? undefined : anchor;
+  } catch {
+    return undefined;
+  }
 }
 
 export function normalizeExternalHref(destination: string): string | undefined {

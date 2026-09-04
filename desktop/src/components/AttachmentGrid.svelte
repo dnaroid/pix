@@ -32,7 +32,7 @@
 {#if attachments.length > 0}
   <div class={[
     "flex flex-wrap gap-2",
-    variant === "chat" && "mb-2.5 justify-end",
+    variant === "chat" && "mb-2.5 justify-start",
     variant === "tool" && "mt-2",
     variant === "composer" && "mb-2",
   ]}>
