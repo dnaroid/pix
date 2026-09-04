@@ -234,6 +234,14 @@
       "description": "Use when the sub-agent should make or plan code changes for a feature, bug fix, or refactor.",
       "model": "openai-codex/gpt-5.6-sol",
       "fallbackModels": ["zai/glm-5.3"],
+      // Avoid Sol recursively doing routine implementation work for a Sol parent.
+      // Luna also escalates substantial implementation to Terra. modelByParent
+      // wins over preset role models, so this prevents both Luna -> Sol and
+      // Sol -> Sol for implement tasks under the built-in `gpt` preset.
+      "modelByParent": {
+        "openai-codex/gpt-5.6-luna*": { "model": "openai-codex/gpt-5.6-terra", "fallbackModels": ["zai/glm-5.3"] },
+        "openai-codex/gpt-5.6-sol*": { "model": "openai-codex/gpt-5.6-terra", "fallbackModels": ["zai/glm-5.3"] }
+      },
       "thinking": "high"
     },
 

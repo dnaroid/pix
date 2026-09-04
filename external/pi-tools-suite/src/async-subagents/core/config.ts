@@ -224,6 +224,10 @@ const BUILTIN_CONFIG: SubagentConfig = {
 		},
 		implement: {
 			description: "Use when the sub-agent should make or plan code changes for a feature, bug fix, or refactor.",
+			modelByParent: {
+				"openai-codex/gpt-5.6-luna*": { model: "openai-codex/gpt-5.6-terra", fallbackModels: ["zai/glm-5.3"] },
+				"openai-codex/gpt-5.6-sol*": { model: "openai-codex/gpt-5.6-terra", fallbackModels: ["zai/glm-5.3"] },
+			},
 			thinking: "high",
 		},
 		tests: {
@@ -234,10 +238,18 @@ const BUILTIN_CONFIG: SubagentConfig = {
 		},
 		review: {
 			description: "Use for review/audit of existing code or changes: correctness, security, performance, maintainability, API risks, quality. Do not implement new code.",
+			modelByParent: {
+				"openai-codex/gpt-5.6-luna*": { model: "openai-codex/gpt-5.6-sol", fallbackModels: ["zai/glm-5.3"] },
+				"openai-codex/gpt-5.6-terra*": { model: "openai-codex/gpt-5.6-sol", fallbackModels: ["zai/glm-5.3"] },
+			},
 			thinking: "high",
 		},
 		deep: {
 			description: "Use for broad hard reasoning: architecture, root-cause analysis, cross-module impact, complex debugging or tradeoffs.",
+			modelByParent: {
+				"openai-codex/gpt-5.6-luna*": { model: "openai-codex/gpt-5.6-sol", fallbackModels: ["zai/glm-5.3"] },
+				"openai-codex/gpt-5.6-terra*": { model: "openai-codex/gpt-5.6-sol", fallbackModels: ["zai/glm-5.3"] },
+			},
 			thinking: "high",
 		},
 		oracle: {

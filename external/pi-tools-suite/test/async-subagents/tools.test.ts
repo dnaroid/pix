@@ -220,7 +220,7 @@ describe.serial("extension entrypoint", () => {
 		});
 	});
 
-	test.serial("injects model-specific parallel-first/deep-work strategy prompts", async () => {
+	test.serial("injects model-specific orchestration and escalation strategy prompts", async () => {
 		const { default: registerExtension } = await import("../../src/async-subagents/index.js");
 		const pi = new FakePi();
 		registerExtension(pi as any);
@@ -235,6 +235,18 @@ describe.serial("extension entrypoint", () => {
 		const gptResult = await handler({ systemPrompt: "base" }, { model: { provider: "openai-codex", id: "gpt-5.5" } });
 		expect(gptResult.systemPrompt).toContain('name="deep-work"');
 		expect(gptResult.systemPrompt).toContain("autonomous deep worker");
+
+		const lunaResult = await handler({ systemPrompt: "base" }, { model: { provider: "openai-codex", id: "gpt-5.6-luna" } });
+		expect(lunaResult.systemPrompt).toContain('name="escalation-aware"');
+		expect(lunaResult.systemPrompt).toContain("prefer Terra workers");
+
+		const terraResult = await handler({ systemPrompt: "base" }, { model: { provider: "openai-codex", id: "gpt-5.6-terra" } });
+		expect(terraResult.systemPrompt).toContain('name="escalation-aware"');
+		expect(terraResult.systemPrompt).toContain("escalate deep root-cause analysis");
+
+		const solResult = await handler({ systemPrompt: "base" }, { model: { provider: "openai-codex", id: "gpt-5.6-sol" } });
+		expect(solResult.systemPrompt).toContain('name="cost-aware-orchestrator"');
+		expect(solResult.systemPrompt).toContain("keep the parent session focused on planning");
 
 		const customPromptResult = await handler({ systemPrompt: "base", systemPromptOptions: { customPrompt: "SYSTEM.md" } }, { model: { provider: "zai", id: "glm-5.2" } });
 		expect(customPromptResult?.systemPrompt ?? "base").not.toContain('name="parallel-first"');

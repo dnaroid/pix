@@ -321,15 +321,23 @@ describe.serial("core utils and prompt generation", () => {
 		expect(isRecord("x")).toBe(false);
 	});
 
-	test.serial("selects parallel-first/deep-work agent strategy prompts by model", () => {
+	test.serial("selects parallel-first/deep-work/escalation/cost-aware agent strategy prompts by model", () => {
 		expect(agentStrategyPrompt({ modelRef: "zai/glm-5.2", env: {} })).toContain('name="parallel-first"');
 		expect(agentStrategyPrompt({ modelRef: "antigravity/gemini-3.1-pro", env: {} })).toContain('name="parallel-first"');
 		expect(agentStrategyPrompt({ modelRef: "openai-codex/gpt-5.5", env: {} })).toContain('name="deep-work"');
 		expect(agentStrategyPrompt({ modelRef: "openai/gpt-5.4", env: {} })).toContain('name="deep-work"');
+		expect(agentStrategyPrompt({ modelRef: "openai-codex/gpt-5.6-luna", env: {} })).toContain('name="escalation-aware"');
+		expect(agentStrategyPrompt({ modelRef: "openai-codex/gpt-5.6-luna", env: {} })).toContain("prefer Terra workers");
+		expect(agentStrategyPrompt({ modelRef: "openai-codex/gpt-5.6-terra", env: {} })).toContain('name="escalation-aware"');
+		expect(agentStrategyPrompt({ modelRef: "openai-codex/gpt-5.6-terra", env: {} })).toContain("escalate deep root-cause analysis");
+		expect(agentStrategyPrompt({ modelRef: "openai-codex/gpt-5.6-sol", env: {} })).toContain('name="cost-aware-orchestrator"');
+		expect(agentStrategyPrompt({ modelRef: "openai-codex/gpt-5.6-sol", env: {} })).toContain("prefer focused async subagents");
 		expect(agentStrategyPrompt({ modelRef: "openai/gpt-5.5", customPrompt: true, env: {} })).toBeUndefined();
 		expect(agentStrategyPrompt({ modelRef: "zai/glm-5.2", env: { PI_AGENT_STRATEGY: "off" } })).toBeUndefined();
 		expect(agentStrategyPrompt({ modelRef: "zai/glm-5.2", env: { PI_AGENT_STRATEGY: "deep-work" } })).toContain('name="deep-work"');
 		expect(agentStrategyPrompt({ modelRef: "openai/gpt-5.4", env: { PI_AGENT_STRATEGY: "parallel_first" } })).toContain('name="parallel-first"');
+		expect(agentStrategyPrompt({ modelRef: "openai/gpt-5.4", env: { PI_AGENT_STRATEGY: "escalation" } })).toContain('name="escalation-aware"');
+		expect(agentStrategyPrompt({ modelRef: "openai/gpt-5.4", env: { PI_AGENT_STRATEGY: "cost-aware" } })).toContain('name="cost-aware-orchestrator"');
 		expect(appendAgentStrategyPrompt("base\n", "strategy")).toBe("base\n\nstrategy");
 	});
 
@@ -729,6 +737,65 @@ describe.serial("subagent type config", () => {
 			{ parentModel: "zai/glm-5.2" },
 		);
 		expect(quick.task.model).toBe("zai/glm-4.5-air");
+	});
+
+	test.serial("routes implementation workers by GPT tier even when a preset selects Sol", () => {
+		const cwd = tempDir();
+		const configPath = path.join(cwd, "async-subagents.json");
+		writeFile(configPath, "{}");
+		const config = loadSubagentConfig(cwd, { ASYNC_SUBAGENTS_CONFIG: configPath });
+		const solPreset = {
+			types: {
+				implement: {
+					model: "openai-codex/gpt-5.6-sol",
+					fallbackModels: ["zai/glm-5.3"],
+					thinking: "high",
+				},
+			},
+		};
+
+		const fromSol = resolveAgentTaskConfig(
+			{ id: "impl-sol", task: "implement the change", subagentType: "implement" },
+			config,
+			{ parentModel: "openai-codex/gpt-5.6-sol", preset: solPreset },
+		);
+		expect(fromSol.task.model).toBe("openai-codex/gpt-5.6-terra");
+		expect(fromSol.fallbackModels).toEqual(["zai/glm-5.3"]);
+		expect(fromSol.task.thinking).toBe("high");
+
+		const fromLuna = resolveAgentTaskConfig(
+			{ id: "impl-luna", task: "implement the change", subagentType: "implement" },
+			config,
+			{ parentModel: "openai-codex/gpt-5.6-luna", preset: solPreset },
+		);
+		expect(fromLuna.task.model).toBe("openai-codex/gpt-5.6-terra");
+		expect(fromLuna.fallbackModels).toEqual(["zai/glm-5.3"]);
+
+		const fromTerra = resolveAgentTaskConfig(
+			{ id: "impl-terra", task: "implement the change", subagentType: "implement" },
+			config,
+			{ parentModel: "openai-codex/gpt-5.6-terra", preset: solPreset },
+		);
+		expect(fromTerra.task.model).toBe("openai-codex/gpt-5.6-sol");
+	});
+
+	test.serial("uses Sol for built-in deep and review escalation roles", () => {
+		const cwd = tempDir();
+		const configPath = path.join(cwd, "async-subagents.json");
+		writeFile(configPath, "{}");
+		const config = loadSubagentConfig(cwd, { ASYNC_SUBAGENTS_CONFIG: configPath });
+
+		for (const subagentType of ["review", "deep"] as const) {
+			for (const parentModel of ["openai-codex/gpt-5.6-luna", "openai-codex/gpt-5.6-terra"] as const) {
+				const resolved = resolveAgentTaskConfig(
+					{ id: `${subagentType}-${parentModel}`, task: subagentType, subagentType },
+					config,
+					{ parentModel },
+				);
+				expect(resolved.task.model).toBe("openai-codex/gpt-5.6-sol");
+				expect(resolved.fallbackModels).toEqual(["zai/glm-5.3"]);
+			}
+		}
 	});
 
 	test.serial("detects force-current-model env flags and formats current model refs", () => {
