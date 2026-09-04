@@ -29,6 +29,22 @@
   } from "./lib/session-tabs";
   import { parseElicitation, type ElicitationField } from "./lib/elicitation";
   import {
+    MAX_QUESTION_IMAGE_BYTES,
+    MAX_QUESTION_IMAGE_BYTES_TOTAL,
+    MAX_QUESTION_IMAGES,
+    addQuestionImages,
+    createQuestionAcceptResponse,
+    createQuestionSelections,
+    createQuestionnaireState,
+    parseQuestionElicitation,
+    totalQuestionImageBytes,
+    totalQuestionImageCount,
+    type DesktopQuestion,
+    type QuestionComposerMode,
+    type QuestionImage,
+    type QuestionnaireState,
+  } from "./lib/question";
+  import {
     MAX_ATTACHMENTS,
     MAX_EMBEDDED_ATTACHMENT_BYTES,
     MAX_EMBEDDED_PROMPT_BYTES,
@@ -91,11 +107,21 @@
   } from "./lib/project-tasks";
 
   type ConnectionStatus = "starting" | "ready" | "error" | "stopped";
-  type PendingElicitation = {
+  type PendingFormElicitation = {
+    kind: "form";
     message: string;
     field: ElicitationField;
     resolve: (response: CreateElicitationResponse) => void;
   };
+  type PendingQuestionElicitation = {
+    kind: "question";
+    requestId: number;
+    message: string;
+    questions: DesktopQuestion[];
+    state: QuestionnaireState;
+    resolve: (response: CreateElicitationResponse) => void;
+  };
+  type PendingElicitation = PendingFormElicitation | PendingQuestionElicitation;
   type ProjectTaskDraft = {
     title: string;
     description?: string;
@@ -111,6 +137,12 @@
     scrollPosition: PreviewScrollPosition;
   };
   type PreviewNavigation = "replace" | "push";
+  type QuestionImageCandidate = {
+    name: string;
+    size: number;
+    mimeType: string;
+    readData: () => Promise<string>;
+  };
 
   let client = $state<AcpClient | null>(null);
   let status = $state<ConnectionStatus>("starting");
@@ -134,6 +166,7 @@
   let errorMessage = $state<string | null>(null);
   let diagnostics = $state<string[]>([]);
   let pendingElicitation = $state<PendingElicitation | null>(null);
+  let addingQuestionImages = $state(false);
   let projectSelectorOpen = $state(false);
   let sessionSelectorOpen = $state(false);
   let sessionSelectorTrigger = $state<HTMLButtonElement | null>(null);
@@ -160,6 +193,9 @@
   let previousAttachmentDraftKey: string | null = null;
   let projectFilePreviewGeneration = 0;
   let taskLoadGeneration = 0;
+  let elicitationSequence = 0;
+  let questionImageOperationSequence = 0;
+  let activeQuestionImageOperationId: number | null = null;
   const registeredAttachmentPaths = new Set<string>();
 
   const canUseSession = $derived(status === "ready" && !!workspace && !operationRunning);
@@ -179,6 +215,23 @@
   const canGoForwardInPreview = $derived(canMovePreviewHistory(previewHistory, 1));
   const activeTodoSnapshot = $derived(activeSessionId ? todoSnapshots.get(activeSessionId) : undefined);
   const activeSubagentSnapshot = $derived(activeSessionId ? subagentSnapshots.get(activeSessionId) : undefined);
+  const questionMode = $derived.by<QuestionComposerMode | undefined>(() => {
+    const pending = pendingElicitation;
+    if (!pending || pending.kind !== "question") return undefined;
+    const requestId = pending.requestId;
+    return {
+      message: pending.message,
+      questions: pending.questions,
+      state: pending.state,
+      addingImages: addingQuestionImages,
+      onStateChange: (state) => updateQuestionnaire(state, requestId),
+      onSubmit: (state) => answerQuestion(state, requestId),
+      onCancel: () => cancelElicitation(requestId),
+      onChooseImages: (questionId) => chooseQuestionImages(questionId, requestId),
+      onPasteImages: (questionId, files) => addPastedQuestionImages(questionId, files, requestId),
+      onOpenImage: openQuestionImage,
+    };
+  });
 
   $effect(() => {
     const key = attachmentDraftKey;
@@ -220,12 +273,15 @@
     if (workspace) void loadProjectTasks(workspace);
     void getCurrentWindow().onDragDropEvent(({ payload }) => {
       if (payload.type === "enter" || payload.type === "over") {
-        dragActive = !!activeSessionId && !promptRunning && !operationRunning;
+        dragActive = canAcceptDroppedAttachments();
       } else if (payload.type === "leave") {
         dragActive = false;
       } else if (payload.type === "drop") {
         dragActive = false;
-        if (activeSessionId && !promptRunning && !operationRunning) {
+        const questionId = activeCustomQuestionId();
+        if (questionId) {
+          void addQuestionImagePaths(questionId, payload.paths);
+        } else if (activeSessionId && !promptRunning && !operationRunning && pendingElicitation?.kind !== "question") {
           void addAttachmentPaths(payload.paths);
         }
       }
@@ -241,6 +297,7 @@
       unlistenDragDrop?.();
       pendingElicitation?.resolve({ action: "cancel" });
       pendingElicitation = null;
+      cancelQuestionImageOperation();
       void client?.dispose();
     };
   });
@@ -261,6 +318,7 @@
         closeSessionSelector();
         pendingElicitation?.resolve({ action: "cancel" });
         pendingElicitation = null;
+        cancelQuestionImageOperation();
         activeSessionId = null;
         todoSnapshots = new Map();
         subagentSnapshots = new Map();
@@ -307,6 +365,7 @@
     closeSessionSelector();
     pendingElicitation?.resolve({ action: "cancel" });
     pendingElicitation = null;
+    cancelQuestionImageOperation();
     activeSessionId = null;
     todoSnapshots = new Map();
     subagentSnapshots = new Map();
@@ -863,6 +922,208 @@
     void loadSession(sessionId);
   }
 
+  function activeCustomQuestionId(): string | null {
+    const pending = pendingElicitation;
+    if (!pending || pending.kind !== "question") return null;
+    const question = pending.questions[pending.state.activeTab];
+    if (!question || !pending.state.drafts[question.id]?.customSelected) return null;
+    return question.id;
+  }
+
+  function canAcceptDroppedAttachments(): boolean {
+    if (addingQuestionImages) return false;
+    if (pendingElicitation?.kind === "question") return activeCustomQuestionId() !== null;
+    return !!activeSessionId && !promptRunning && !operationRunning;
+  }
+
+  function questionCanAcceptImages(questionId: string, requestId?: number): boolean {
+    const pending = pendingElicitation;
+    return !!pending
+      && pending.kind === "question"
+      && (requestId === undefined || pending.requestId === requestId)
+      && pending.questions.some((question) => question.id === questionId)
+      && pending.state.drafts[questionId]?.customSelected === true;
+  }
+
+  function questionImageRequestId(questionId: string): number | null {
+    const pending = pendingElicitation;
+    return pending?.kind === "question" && questionCanAcceptImages(questionId)
+      ? pending.requestId
+      : null;
+  }
+
+  function beginQuestionImageOperation(): number | null {
+    if (activeQuestionImageOperationId !== null) return null;
+    const operationId = ++questionImageOperationSequence;
+    activeQuestionImageOperationId = operationId;
+    addingQuestionImages = true;
+    return operationId;
+  }
+
+  function finishQuestionImageOperation(operationId: number): void {
+    if (activeQuestionImageOperationId !== operationId) return;
+    activeQuestionImageOperationId = null;
+    addingQuestionImages = false;
+  }
+
+  function cancelQuestionImageOperation(): void {
+    activeQuestionImageOperationId = null;
+    addingQuestionImages = false;
+  }
+
+  async function chooseQuestionImages(questionId: string, expectedRequestId?: number): Promise<void> {
+    const requestId = questionImageRequestId(questionId);
+    if (requestId === null || (expectedRequestId !== undefined && requestId !== expectedRequestId)) return;
+    const operationId = beginQuestionImageOperation();
+    if (operationId === null) return;
+    try {
+      const selected = await open({
+        directory: false,
+        multiple: true,
+        title: "Attach images to answer",
+        ...(workspace ? { defaultPath: workspace } : {}),
+      });
+      if (!selected) return;
+      await appendQuestionImagePaths(questionId, requestId, typeof selected === "string" ? [selected] : selected);
+    } catch (error) {
+      if (questionCanAcceptImages(questionId, requestId)) reportError(error);
+    } finally {
+      finishQuestionImageOperation(operationId);
+    }
+  }
+
+  async function addQuestionImagePaths(questionId: string, paths: readonly string[]): Promise<void> {
+    const requestId = questionImageRequestId(questionId);
+    if (requestId === null || paths.length === 0) return;
+    const operationId = beginQuestionImageOperation();
+    if (operationId === null) return;
+    try {
+      await appendQuestionImagePaths(questionId, requestId, paths);
+    } catch (error) {
+      if (questionCanAcceptImages(questionId, requestId)) reportError(error);
+    } finally {
+      finishQuestionImageOperation(operationId);
+    }
+  }
+
+  async function appendQuestionImagePaths(
+    questionId: string,
+    requestId: number,
+    paths: readonly string[],
+  ): Promise<void> {
+    const files = await invoke<AttachmentFile[]>("inspect_attachments", { paths });
+    const issue = await appendQuestionImageCandidates(questionId, requestId, files.map((file) => ({
+      name: file.name,
+      size: file.size,
+      mimeType: mimeTypeForName(file.name),
+      readData: () => invoke<string>("read_attachment_base64", { path: file.path }),
+    })));
+    if (issue) errorMessage = issue;
+  }
+
+  async function addPastedQuestionImages(
+    questionId: string,
+    files: readonly File[],
+    expectedRequestId?: number,
+  ): Promise<void> {
+    const requestId = questionImageRequestId(questionId);
+    if (requestId === null || (expectedRequestId !== undefined && requestId !== expectedRequestId) || files.length === 0) return;
+    const operationId = beginQuestionImageOperation();
+    if (operationId === null) return;
+    try {
+      const issue = await appendQuestionImageCandidates(questionId, requestId, files.map((file) => ({
+        name: file.name,
+        size: file.size,
+        mimeType: file.type || mimeTypeForName(file.name),
+        readData: () => fileBase64(file),
+      })));
+      if (issue) errorMessage = issue;
+    } catch (error) {
+      if (questionCanAcceptImages(questionId, requestId)) reportError(error);
+    } finally {
+      finishQuestionImageOperation(operationId);
+    }
+  }
+
+  async function appendQuestionImageCandidates(
+    questionId: string,
+    requestId: number,
+    candidates: readonly QuestionImageCandidate[],
+  ): Promise<string | null> {
+    const images: QuestionImage[] = [];
+    let issue: string | null = null;
+    let queuedBytes = 0;
+    for (const candidate of candidates) {
+      const pending = pendingElicitation;
+      if (!pending || pending.kind !== "question" || !questionCanAcceptImages(questionId, requestId)) return null;
+      if (totalQuestionImageCount(pending.state) + images.length >= MAX_QUESTION_IMAGES) {
+        issue = `Attach at most ${MAX_QUESTION_IMAGES} images to a questionnaire.`;
+        break;
+      }
+      if (attachmentKind(candidate.mimeType) !== "image") {
+        issue = "Only image files can be attached to an answer.";
+        continue;
+      }
+      if (candidate.size <= 0) {
+        issue = `${candidate.name} is empty and could not be attached.`;
+        continue;
+      }
+      if (candidate.size > MAX_QUESTION_IMAGE_BYTES) {
+        issue = `${candidate.name} is too large (maximum 25 MB).`;
+        continue;
+      }
+      const data = await candidate.readData();
+      if (!questionCanAcceptImages(questionId, requestId)) return null;
+      const decodedBytes = decodedQuestionImageBytes(data);
+      if (decodedBytes === null || decodedBytes === 0) {
+        issue = `${candidate.name} is empty or invalid and could not be attached.`;
+        continue;
+      }
+      if (decodedBytes > MAX_QUESTION_IMAGE_BYTES) {
+        issue = `${candidate.name} is too large (maximum 25 MB).`;
+        continue;
+      }
+      if (totalQuestionImageBytes(pending.state) + queuedBytes + decodedBytes > MAX_QUESTION_IMAGE_BYTES_TOTAL) {
+        issue = "Question images can total at most 50 MB.";
+        break;
+      }
+      images.push({
+        type: "image",
+        data,
+        mimeType: candidate.mimeType,
+        name: candidate.name,
+        size: decodedBytes,
+      });
+      queuedBytes += decodedBytes;
+    }
+    appendQuestionImages(questionId, requestId, images);
+    return issue;
+  }
+
+  function appendQuestionImages(questionId: string, requestId: number, images: readonly QuestionImage[]): void {
+    const pending = pendingElicitation;
+    if (
+      !pending
+      || pending.kind !== "question"
+      || !questionCanAcceptImages(questionId, requestId)
+      || images.length === 0
+    ) return;
+    const question = pending.questions.find((candidate) => candidate.id === questionId);
+    if (!question) return;
+    updateQuestionnaire(addQuestionImages(pending.state, questionId, images, question), requestId);
+  }
+
+  function openQuestionImage(image: QuestionImage): void {
+    void activateAttachment({
+      id: nextAttachmentId(),
+      name: image.name,
+      kind: "image",
+      mimeType: image.mimeType,
+      size: image.size,
+      dataUrl: `data:${image.mimeType};base64,${image.data}`,
+    });
+  }
+
   async function chooseAttachments(): Promise<void> {
     if (!activeSessionId || promptRunning || operationRunning) return;
     try {
@@ -1171,6 +1432,12 @@
     return btoa(binary);
   }
 
+  function decodedQuestionImageBytes(value: string): number | null {
+    if (!value || value.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(value)) return null;
+    const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0;
+    return (value.length / 4) * 3 - padding;
+  }
+
   async function submitPrompt(): Promise<void> {
     const text = promptText.trim();
     const attachments = promptAttachments;
@@ -1230,15 +1497,34 @@
   }
 
   function requestElicitation(request: CreateElicitationRequest): Promise<CreateElicitationResponse> {
+    const question = parseQuestionElicitation(request);
     const field = parseElicitation(request);
-    if (!field || pendingElicitation) return Promise.resolve({ action: "cancel" });
+    if ((!question && !field) || pendingElicitation) return Promise.resolve({ action: "cancel" });
     return new Promise((resolve) => {
-      pendingElicitation = { message: request.message, field, resolve };
+      pendingElicitation = question
+        ? {
+            kind: "question",
+            requestId: ++elicitationSequence,
+            message: question.message,
+            questions: question.questions,
+            state: createQuestionnaireState(question.questions),
+            resolve,
+          }
+        : { kind: "form", message: request.message, field: field!, resolve };
     });
   }
 
+  function updateQuestionnaire(state: QuestionnaireState, requestId?: number): void {
+    if (
+      !pendingElicitation
+      || pendingElicitation.kind !== "question"
+      || (requestId !== undefined && pendingElicitation.requestId !== requestId)
+    ) return;
+    pendingElicitation = { ...pendingElicitation, state };
+  }
+
   function updateElicitationValue(value: string | boolean): void {
-    if (!pendingElicitation) return;
+    if (!pendingElicitation || pendingElicitation.kind !== "form") return;
     pendingElicitation = {
       ...pendingElicitation,
       field: { ...pendingElicitation.field, value },
@@ -1247,11 +1533,29 @@
 
   function answerElicitation(accepted: boolean): void {
     const pending = pendingElicitation;
-    if (!pending) return;
+    if (!pending || pending.kind !== "form") return;
     pendingElicitation = null;
     pending.resolve(accepted
       ? { action: "accept", content: { [pending.field.key]: pending.field.value } }
       : { action: "cancel" });
+  }
+
+  function answerQuestion(state: QuestionnaireState, requestId: number): void {
+    const pending = pendingElicitation;
+    if (!pending || pending.kind !== "question" || pending.requestId !== requestId) return;
+    const selections = createQuestionSelections(state, pending.questions);
+    if (!selections) return;
+    pendingElicitation = null;
+    cancelQuestionImageOperation();
+    pending.resolve(createQuestionAcceptResponse(selections));
+  }
+
+  function cancelElicitation(requestId: number): void {
+    const pending = pendingElicitation;
+    if (!pending || pending.kind !== "question" || pending.requestId !== requestId) return;
+    pendingElicitation = null;
+    cancelQuestionImageOperation();
+    pending.resolve({ action: "cancel" });
   }
 
   function reportError(error: unknown): void {
@@ -1366,6 +1670,7 @@
         {dragActive}
         {autocompleteEnabled}
         {autocompleteDebounceMs}
+        {questionMode}
         onAutocomplete={autocompletePrompt}
         onSubmit={submitPrompt}
         onCancel={cancelPrompt}
@@ -1388,7 +1693,7 @@
   />
 </div>
 
-{#if pendingElicitation}
+{#if pendingElicitation?.kind === "form"}
   <ElicitationDialog
     message={pendingElicitation.message}
     field={pendingElicitation.field}

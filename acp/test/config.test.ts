@@ -11,9 +11,14 @@ test("resolveAdapterConfig applies defaults", () => {
 });
 
 test("resolveAdapterConfig trims and keeps explicit values", () => {
-	const config = resolveAdapterConfig({ piEntry: "  /opt/pi/rpc-entry.js  ", logLevel: "debug" });
+	const config = resolveAdapterConfig({
+		piEntry: "  /opt/pi/rpc-entry.js  ",
+		logLevel: "debug",
+		questionExtensionPath: "  /opt/pix/question.js  ",
+	});
 	assert.equal(config.piEntry, "/opt/pi/rpc-entry.js");
 	assert.equal(config.logLevel, "debug");
+	assert.equal(config.questionExtensionPath, "/opt/pix/question.js");
 });
 
 test("resolveAdapterConfig falls back on blank piEntry", () => {
@@ -30,9 +35,11 @@ test("adapterConfigFromEnv reads environment", () => {
 	const config = adapterConfigFromEnv({
 		PIX_ACP_PI_ENTRY: "/opt/pi/rpc-entry.js",
 		PIX_ACP_LOG: "warn",
+		PIX_ACP_QUESTION_EXTENSION: "/opt/pix/question.js",
 	} as NodeJS.ProcessEnv);
 	assert.equal(config.piEntry, "/opt/pi/rpc-entry.js");
 	assert.equal(config.logLevel, "warn");
+	assert.equal(config.questionExtensionPath, "/opt/pix/question.js");
 });
 
 test("adapterConfigFromEnv accepts the deprecated PIX_ACP_PI_BIN alias", () => {

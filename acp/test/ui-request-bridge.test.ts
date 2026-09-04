@@ -5,6 +5,8 @@ import type { RpcExtensionUIRequest } from "@earendil-works/pi-coding-agent";
 import {
 	cancelledResponse,
 	fromElicitationResponse,
+	PIX_QUESTION_EDITOR_TITLE,
+	PIX_QUESTION_ELICITATION_MODE,
 	toElicitationRequest,
 } from "../src/acp/ui-request-bridge.js";
 
@@ -83,7 +85,112 @@ test("editor maps to a string property with the prefill as default", () => {
 		{ type: "extension_ui_request", id: "ui-5", method: "editor", title: "Edit text", prefill: "" },
 		OPTIONS,
 	);
-	assert.equal("default" in (formSchema(emptyPrefill).properties?.value), false);
+	assert.equal("default" in (formSchema(emptyPrefill).properties?.value ?? {}), false);
+});
+
+test("reserved question editor carrier maps to a private structured elicitation", () => {
+	const request: RpcExtensionUIRequest = {
+		type: "extension_ui_request",
+		id: "question-1",
+		method: "editor",
+		title: PIX_QUESTION_EDITOR_TITLE,
+		prefill: JSON.stringify({
+			version: 1,
+			questions: [{
+				id: "scope",
+				label: " Scope ",
+				prompt: " Which scope? ",
+				choices: [
+					{ value: "small", label: "Small", description: "Quick change" },
+					{ value: "large", label: "Large", description: "" },
+				],
+			}],
+		}),
+	};
+	assert.deepEqual(toElicitationRequest(request, OPTIONS), {
+		mode: PIX_QUESTION_ELICITATION_MODE,
+		elicitationId: "el-1",
+		sessionId: "session-1",
+		message: "Answer the agent's question",
+		version: 1,
+		questions: [{
+			id: "scope",
+			label: "Scope",
+			prompt: "Which scope?",
+			choices: [
+				{ value: "small", label: "Small", description: "Quick change" },
+				{ value: "large", label: "Large", description: "" },
+			],
+		}],
+	});
+	assert.deepEqual(
+		fromElicitationResponse({ action: "accept", content: { value: "{\"version\":1}" } }, request),
+		{ type: "extension_ui_response", id: "question-1", value: "{\"version\":1}" },
+	);
+});
+
+test("reserved question carrier preserves normalized multi-select bounds", () => {
+	const request: RpcExtensionUIRequest = {
+		type: "extension_ui_request",
+		id: "question-multiple",
+		method: "editor",
+		title: PIX_QUESTION_EDITOR_TITLE,
+		prefill: JSON.stringify({
+			version: 1,
+			questions: [{
+				id: "areas",
+				label: "Areas",
+				prompt: "Which areas?",
+				choices: [{ value: "api", label: "API" }, { value: "ui", label: "UI" }],
+				multiple: true,
+				minSelections: 2,
+				maxSelections: 3,
+			}],
+		}),
+	};
+	const elicitation = toElicitationRequest(request, OPTIONS) as unknown as Record<string, unknown>;
+	assert.deepEqual(elicitation.questions, [{
+		id: "areas",
+		label: "Areas",
+		prompt: "Which areas?",
+		choices: [{ value: "api", label: "API" }, { value: "ui", label: "UI" }],
+		multiple: true,
+		minSelections: 2,
+		maxSelections: 3,
+	}]);
+});
+
+test("malformed reserved question carriers are rejected instead of shown as editors", () => {
+	const malformed = (prefill: string): RpcExtensionUIRequest => ({
+		type: "extension_ui_request",
+		id: "question-bad",
+		method: "editor",
+		title: PIX_QUESTION_EDITOR_TITLE,
+		prefill,
+	});
+	assert.equal(toElicitationRequest(malformed("not json"), OPTIONS), undefined);
+	assert.equal(toElicitationRequest(malformed(JSON.stringify({ version: 2, questions: [] })), OPTIONS), undefined);
+	assert.equal(toElicitationRequest(malformed(JSON.stringify({
+		version: 1,
+		questions: [{
+			id: "Scope",
+			label: "Scope",
+			prompt: "Choose",
+			choices: [{ value: "same", label: "One" }, { value: "SAME", label: "Two" }],
+		}],
+	})), OPTIONS), undefined);
+	assert.equal(toElicitationRequest(malformed(JSON.stringify({
+		version: 1,
+		questions: [{
+			id: "areas",
+			label: "Areas",
+			prompt: "Choose",
+			choices: [{ value: "api", label: "API" }, { value: "ui", label: "UI" }],
+			multiple: true,
+			minSelections: 3,
+			maxSelections: 2,
+		}],
+	})), OPTIONS), undefined);
 });
 
 test("fire-and-forget UI requests have no elicitation mapping", () => {

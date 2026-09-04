@@ -78,20 +78,20 @@
                 <span>thinking</span>
               </summary>
               <div class="ml-[7px] border-l border-border pl-2.5 text-muted-foreground">
-                <MarkdownText text={item.text} compact {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />
+                <MarkdownText text={item.text} compact dense {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />
               </div>
             </details>
           {:else if item.role === "user"}
             <div class="mb-6">
               <article class="w-full rounded-xl border border-primary/45 bg-primary/15 px-3.5 pt-3 pb-2 text-card-foreground shadow-xs">
                 <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} />
-                {#if item.text}<MarkdownText text={item.text} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />{/if}
+                {#if item.text}<MarkdownText text={item.text} dense {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />{/if}
               </article>
             </div>
           {:else}
             <article class="mb-6 w-full min-w-0 text-foreground">
               <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} />
-              {#if item.text}<MarkdownText text={item.text} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />{/if}
+              {#if item.text}<MarkdownText text={item.text} dense {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />{/if}
             </article>
           {/if}
         {:else}
@@ -107,7 +107,7 @@
                 {item.tools.length} tool {item.tools.length === 1 ? "call" : "calls"}
               </strong>
             </summary>
-            <div class="mt-2 ml-[7px] space-y-2 border-l border-border pl-2.5">
+            <div class="mt-2 ml-[7px] space-y-1 border-l border-border pl-2.5">
               {#each item.tools as tool (tool.id)}
                 {@const presentation = toolPresentation(tool)}
                 {@const attention = toolLspAttention(tool)}

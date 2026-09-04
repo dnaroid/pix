@@ -4,10 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "predev": "npm --prefix ../acp run build",
+    "predev": "npm --prefix .. run build:pix && npm --prefix ../acp run build",
     "dev": "tauri dev",
     "dev:web": "vite --host 127.0.0.1 --port 1420",
-    "prebuild": "npm --prefix ../acp run build",
+    "prebuild": "npm --prefix .. run build:pix && npm --prefix ../acp run build",
     "build": "tauri build",
     "build:web": "vite build",
     "check": "svelte-check --tsconfig ./tsconfig.json && tsc --noEmit -p tsconfig.node.json",

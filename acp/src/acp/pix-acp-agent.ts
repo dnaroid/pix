@@ -132,6 +132,8 @@ export interface PixAcpAgentOptions {
 	/** Factory for per-session pi RPC clients (injected for tests). */
 	readonly createPiClient: (options: PiRpcClientOptions) => PiClient;
 	readonly piEntry: string;
+	/** Explicit bundled question extension path for Desktop-owned sessions. */
+	readonly questionExtensionPath?: string;
 	readonly logger: Logger;
 	/** Path of the persistent ACP↔pi session map file. */
 	readonly sessionMapPath: string;
@@ -470,7 +472,12 @@ export class PixAcpAgent {
 		defaultModel?: PixDefaultModel,
 	): Promise<AgentSessionState> {
 		if (this.disposed) throw new RequestError(ERROR_SERVER, "adapter is shutting down");
-		const pi = this.options.createPiClient(piClientOptions(this.options.piEntry, cwd, defaultModel));
+		const pi = this.options.createPiClient(piClientOptions(
+			this.options.piEntry,
+			cwd,
+			defaultModel,
+			this.options.questionExtensionPath,
+		));
 		const translator = new EventTranslator({ sessionId: acpSessionId, cwd });
 		const session: AgentSessionState = {
 			acpSessionId,
@@ -638,6 +645,11 @@ export class PixAcpAgent {
 			elicitationId: randomUUID(),
 		});
 		if (!elicitation) {
+			if (request.method === "select" || request.method === "confirm" || request.method === "input" || request.method === "editor") {
+				this.options.logger.warn(`invalid blocking extension ui request (${request.method}); cancelling`);
+				this.safeRespond(session.pi, cancelledResponse(request.id));
+				return;
+			}
 			// Fire-and-forget UI updates (notify/setStatus/setWidget/...) have
 			// no ACP counterpart.
 			this.options.logger.debug(`extension ui ${request.method} ignored (no ACP counterpart)`);
@@ -930,11 +942,16 @@ function piClientOptions(
 	piEntry: string,
 	cwd: string,
 	defaultModel?: PixDefaultModel,
+	questionExtensionPath?: string,
 ): PiRpcClientOptions {
 	const base = {
 		piEntry,
 		cwd,
-		env: { PIX_ACP_SESSION_STATE_BRIDGE: "1" },
+		env: {
+			PIX_ACP_SESSION_STATE_BRIDGE: "1",
+			...(questionExtensionPath ? { PIX_QUESTION_RPC_BRIDGE: "1" } : {}),
+		},
+		...(questionExtensionPath ? { args: ["--extension", questionExtensionPath] } : {}),
 	};
 	if (!defaultModel) return base;
 	const selected = {
@@ -943,7 +960,7 @@ function piClientOptions(
 		model: defaultModel.modelId,
 	};
 	if (defaultModel.thinkingLevel === undefined) return selected;
-	return { ...selected, args: ["--thinking", defaultModel.thinkingLevel] };
+	return { ...selected, args: [...(base.args ?? []), "--thinking", defaultModel.thinkingLevel] };
 }
 
 function nativeSessionRecord(session: PiSessionInfo, requestedCwd?: string): SessionMapRecord | undefined {

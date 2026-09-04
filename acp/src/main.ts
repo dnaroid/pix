@@ -22,6 +22,7 @@ async function main(): Promise<void> {
 		piEntry: config.piEntry,
 		logger,
 		sessionMapPath: config.sessionMapPath,
+		...(config.questionExtensionPath ? { questionExtensionPath: config.questionExtensionPath } : {}),
 	});
 
 	const stream = ndJsonStream(

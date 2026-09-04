@@ -9,6 +9,9 @@ export interface QuestionInput {
 	label: string;
 	prompt: string;
 	choices: QuestionChoiceInput[];
+	multiple?: boolean;
+	minSelections?: number;
+	maxSelections?: number;
 }
 
 export interface QuestionToolInput {
@@ -26,6 +29,9 @@ export interface NormalizedQuestion {
 	label: string;
 	prompt: string;
 	choices: NormalizedQuestionChoice[];
+	multiple?: true;
+	minSelections?: number;
+	maxSelections?: number;
 }
 
 export interface PredefinedQuestionSelection {
@@ -39,16 +45,34 @@ export interface CustomQuestionSelection {
 	images?: QuestionImageContent[];
 }
 
-export type QuestionSelection = PredefinedQuestionSelection | CustomQuestionSelection;
-
-export interface QuestionAnswer {
+export interface MultipleQuestionSelection {
 	id: string;
+	choiceValues: string[];
+	customText?: string;
+	images?: QuestionImageContent[];
+}
+
+export type QuestionSelection = PredefinedQuestionSelection | CustomQuestionSelection | MultipleQuestionSelection;
+
+export interface QuestionAnswerSelection {
 	value: string;
 	label: string;
 	wasCustom: boolean;
 	index?: number;
 	imageCount?: number;
 }
+
+export interface SingleQuestionAnswer extends QuestionAnswerSelection {
+	id: string;
+}
+
+export interface MultipleQuestionAnswer {
+	id: string;
+	multiple: true;
+	selections: QuestionAnswerSelection[];
+}
+
+export type QuestionAnswer = SingleQuestionAnswer | MultipleQuestionAnswer;
 
 export interface SuccessfulQuestionResult {
 	answers: QuestionAnswer[];
@@ -89,6 +113,7 @@ export interface QuestionUiContext {
 	hasUI?: boolean;
 	ui: {
 		custom<T>(factory: (tui: QuestionTui, theme: QuestionTheme, keybindings: unknown, done: (value: T) => void) => QuestionComponent): Promise<T | undefined>;
+		editor?(title: string, prefill?: string): Promise<string | undefined>;
 		setEditorText?(text: string): void;
 		getEditorText?(): string;
 		setEditorSnapshot?(snapshot: QuestionEditorSnapshot): void;

@@ -12,6 +12,9 @@ type QuestionItem = {
 	label?: unknown;
 	prompt?: unknown;
 	choices?: unknown;
+	multiple?: unknown;
+	minSelections?: unknown;
+	maxSelections?: unknown;
 };
 
 type QuestionAnswer = {
@@ -19,6 +22,9 @@ type QuestionAnswer = {
 	label?: unknown;
 	wasCustom?: unknown;
 	index?: unknown;
+	imageCount?: unknown;
+	multiple?: unknown;
+	selections?: unknown;
 };
 
 type QuestionDetails = {
@@ -74,6 +80,9 @@ function formatQuestions(questions: readonly QuestionItem[]): string {
 	return questions.map((question, index) => {
 		const title = `◇ ${index + 1}/${questions.length} ${questionLabel(question)}`;
 		const prompt = stringValue(question.prompt) ?? "(no prompt)";
+		const bounds = question.multiple === true
+			? `  Select ${integerValue(question.minSelections) ?? 1} to ${integerValue(question.maxSelections) ?? ((Array.isArray(question.choices) ? question.choices.length : 0) + 1)} answers.`
+			: undefined;
 		const choices = Array.isArray(question.choices)
 			? question.choices.filter(isPlainRecord) as QuestionChoice[]
 			: [];
@@ -83,7 +92,7 @@ function formatQuestions(questions: readonly QuestionItem[]): string {
 			return description ? `  ${choiceIndex + 1}. ${label} — ${description}` : `  ${choiceIndex + 1}. ${label}`;
 		});
 		choiceLines.push(`  ${choices.length + 1}. ${CUSTOM_ANSWER_LABEL} (custom answer)`);
-		return [title, `  ${prompt}`, ...choiceLines].join("\n");
+		return [title, `  ${prompt}`, ...(bounds ? [bounds] : []), ...choiceLines].join("\n");
 	}).join("\n\n");
 }
 
@@ -107,10 +116,24 @@ function formatQuestionResult(details: unknown, questions: readonly QuestionItem
 
 function formatAnswer(answer: QuestionAnswer, questionLabels: ReadonlyMap<string | undefined, string>): string {
 	const label = questionLabels.get(stringValue(answer.id)) ?? stringValue(answer.id) ?? "Question";
+	if (answer.multiple === true && Array.isArray(answer.selections)) {
+		const selections = answer.selections.filter(isPlainRecord).map((selection) => formatAnswerSelection(selection));
+		return `✓ ${label}: ${selections.join(", ") || "(empty)"}`;
+	}
 	const answerLabel = stringValue(answer.label) ?? "(empty)";
 	if (answer.wasCustom === true) return `✓ ${label}: ${answerLabel} (custom answer)`;
 	const index = typeof answer.index === "number" && Number.isFinite(answer.index) ? `choice ${answer.index}` : "choice";
 	return `✓ ${label}: ${answerLabel} (${index})`;
+}
+
+function formatAnswerSelection(answer: QuestionAnswer): string {
+	const label = stringValue(answer.label) ?? "(empty)";
+	if (answer.wasCustom === true) {
+		const imageCount = integerValue(answer.imageCount);
+		return `${label} (custom answer${imageCount ? `; ${imageCount} image${imageCount === 1 ? "" : "s"} attached` : ""})`;
+	}
+	const index = integerValue(answer.index);
+	return `${label} (${index === undefined ? "choice" : `choice ${index}`})`;
 }
 
 function questionLabel(question: QuestionItem): string {
@@ -119,6 +142,10 @@ function questionLabel(question: QuestionItem): string {
 
 function stringValue(value: unknown): string | undefined {
 	return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function integerValue(value: unknown): number | undefined {
+	return typeof value === "number" && Number.isInteger(value) ? value : undefined;
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {

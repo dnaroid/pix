@@ -19,6 +19,7 @@ import type {
 	SessionInfo as PiSessionInfo,
 } from "@earendil-works/pi-coding-agent";
 import { PixAcpAgent } from "../src/acp/pix-acp-agent.js";
+import { PIX_QUESTION_EDITOR_TITLE } from "../src/acp/ui-request-bridge.js";
 import { PIX_SESSION_STATE_METHOD } from "../src/acp/session-state-bridge.js";
 import type {
 	AutocompleteCompleterInput,
@@ -406,6 +407,29 @@ test("session/new starts pi with the cwd Pix default model and thinking level", 
 		provider: "openai-codex",
 		model: "gpt-5.6-sol",
 		args: ["--thinking", "high"],
+	});
+});
+
+test("Desktop sessions explicitly load the bundled question extension", async () => {
+	const { adapter, options } = createTestAdapter({
+		questionExtensionPath: "/opt/pix/question/index.js",
+		loadDefaultModel: () => ({
+			provider: "openai-codex",
+			modelId: "gpt-5.6-sol",
+			thinkingLevel: "high",
+		}),
+	});
+	await connect(adapter, (cx) => cx.buildSession("/tmp/pix-question").start());
+	assert.deepEqual(options[0], {
+		piEntry: "/test/pi-rpc-entry.js",
+		cwd: "/tmp/pix-question",
+		env: {
+			PIX_ACP_SESSION_STATE_BRIDGE: "1",
+			PIX_QUESTION_RPC_BRIDGE: "1",
+		},
+		provider: "openai-codex",
+		model: "gpt-5.6-sol",
+		args: ["--extension", "/opt/pix/question/index.js", "--thinking", "high"],
 	});
 });
 
@@ -905,6 +929,34 @@ test("extension dialogs are cancelled immediately when the client lacks elicitat
 	);
 	assert.equal(elicitationCalls, 0);
 	assert.deepEqual(clients[0]!.uiResponses, [{ type: "extension_ui_response", id: "ui-3", cancelled: true }]);
+});
+
+test("malformed reserved question carriers are cancelled instead of left blocking", async () => {
+	const { adapter, clients } = createTestAdapter();
+	let elicitationCalls = 0;
+	await connect(
+		adapter,
+		async (cx) => {
+			await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, ...ELICITATION_CAPS });
+			await cx.buildSession("/tmp").start();
+			clients[0]!.emit({
+				type: "extension_ui_request",
+				id: "question-malformed",
+				method: "editor",
+				title: PIX_QUESTION_EDITOR_TITLE,
+				prefill: "not json",
+			});
+			await waitFor(() => clients[0]!.uiResponses.length === 1);
+		},
+		(app) => {
+			app.onRequest("elicitation/create", () => {
+				elicitationCalls++;
+				return { action: "cancel" } satisfies CreateElicitationResponse;
+			});
+		},
+	);
+	assert.equal(elicitationCalls, 0);
+	assert.deepEqual(clients[0]!.uiResponses, [{ type: "extension_ui_response", id: "question-malformed", cancelled: true }]);
 });
 
 test("extension dialogs are cancelled when elicitation/create fails", async () => {

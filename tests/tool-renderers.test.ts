@@ -279,6 +279,28 @@ describe("renderToolDisplay", () => {
 		assert.match(answeredQuestion.expandedText, /Something else/u);
 		assert.match(answeredQuestion.collapsedBody, /✓ Scope: Unit \(choice 1\)/u);
 		assert.match(answeredQuestion.collapsedBody, /custom answer/u);
+		const multiAnswer = renderToolDisplay(input({
+			toolName: "question",
+			argsText: JSON.stringify({ questions: [{
+				id: "areas",
+				label: "Areas",
+				prompt: "Which areas?",
+				choices: [{ value: "api", label: "API" }, { value: "ui", label: "UI" }],
+				multiple: true,
+				minSelections: 2,
+				maxSelections: 3,
+			}] }),
+			details: { answers: [{
+				id: "areas",
+				multiple: true,
+				selections: [
+					{ value: "api", label: "API", index: 1, wasCustom: false },
+					{ value: "Docs", label: "Docs", wasCustom: true, imageCount: 1 },
+				],
+			}] },
+		}));
+		assert.match(multiAnswer.expandedText, /Select 2 to 3 answers/u);
+		assert.match(multiAnswer.collapsedBody, /✓ Areas: API \(choice 1\), Docs \(custom answer; 1 image attached\)/u);
 		assert.equal(renderToolDisplay(input({
 			toolName: "question",
 			argsText: JSON.stringify({ questions: [{ id: "q1", prompt: "Continue?", choices: [] }] }),

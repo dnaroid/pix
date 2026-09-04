@@ -17,7 +17,15 @@ import {
 	prioritizeBundledQuestionExtension,
 } from "../src/app/runtime.js";
 import questionExtension from "../src/bundled-extensions/question/index.js";
+import { normalizeQuestionInput } from "../src/bundled-extensions/question/contract.js";
+import {
+	PIX_QUESTION_EDITOR_TITLE,
+	PIX_QUESTION_RPC_ENV,
+	createDesktopQuestionResponse,
+	parseDesktopQuestionResponse,
+} from "../src/bundled-extensions/question/desktop.js";
 import type { QuestionComponent, QuestionTheme, QuestionToolResult } from "../src/bundled-extensions/question/types.js";
+import { createSuccessfulQuestionResult } from "../src/bundled-extensions/question/result.js";
 import { InputEditor } from "../src/input-editor.js";
 
 type RegisteredQuestionTool = {
@@ -25,6 +33,242 @@ type RegisteredQuestionTool = {
 };
 
 describe("bundled extensions", () => {
+	it("normalizes multi-select bounds without changing legacy questions", () => {
+		const legacy = normalizeQuestionInput({
+			questions: [{
+				id: "scope",
+				label: "Scope",
+				prompt: "Which scope?",
+				choices: [{ value: "small", label: "Small" }, { value: "large", label: "Large" }],
+			}],
+		});
+		assert.equal("multiple" in legacy[0]!, false);
+
+		const multiple = normalizeQuestionInput({
+			questions: [{
+				id: "areas",
+				label: "Areas",
+				prompt: "Which areas?",
+				choices: [{ value: "api", label: "API" }, { value: "ui", label: "UI" }],
+				multiple: true,
+				minSelections: 2,
+			}],
+		});
+		assert.deepEqual(multiple[0], {
+			id: "areas",
+			label: "Areas",
+			prompt: "Which areas?",
+			choices: [{ value: "api", label: "API" }, { value: "ui", label: "UI" }],
+			multiple: true,
+			minSelections: 2,
+			maxSelections: 3,
+		});
+
+		assert.throws(() => normalizeQuestionInput({ questions: [{
+			...legacy[0]!,
+			minSelections: 1,
+		}] }), /selection limits without multiple/u);
+		assert.throws(() => normalizeQuestionInput({ questions: [{
+			...legacy[0]!,
+			multiple: true,
+			minSelections: 3,
+			maxSelections: 2,
+		}] }), /minSelections 3 greater than maxSelections 2/u);
+		assert.throws(() => normalizeQuestionInput({ questions: [{
+			...legacy[0]!,
+			multiple: true,
+			maxSelections: 4,
+		}] }), /only 3 answers are available/u);
+	});
+
+	it("creates grouped multi-select results with an additive custom answer", () => {
+		const questions = normalizeQuestionInput({ questions: [{
+			id: "areas",
+			label: "Areas",
+			prompt: "Which areas?",
+			choices: [{ value: "api", label: "API" }, { value: "ui", label: "UI" }],
+			multiple: true,
+			minSelections: 2,
+		}] });
+		assert.deepEqual(createSuccessfulQuestionResult(questions, [{
+			id: "areas",
+			choiceValues: ["ui"],
+			customText: "Docs",
+		}]), {
+			answers: [{
+				id: "areas",
+				multiple: true,
+				selections: [
+					{ value: "ui", label: "UI", wasCustom: false, index: 2 },
+					{ value: "Docs", label: "Docs", wasCustom: true },
+				],
+			}],
+			canceled: false,
+		});
+		assert.throws(() => createSuccessfulQuestionResult(questions, [{ id: "areas", choiceValues: ["api"] }]), /requires 2 to 3 selections/u);
+		assert.throws(() => createSuccessfulQuestionResult(questions, [{ id: "areas", choiceValues: ["api", "api"] }]), /duplicate predefined selections/u);
+	});
+
+	it("uses the blocking editor carrier for Desktop question answers", async () => {
+		let tool: RegisteredQuestionTool | undefined;
+		questionExtension({ registerTool: (registered) => { tool = registered as RegisteredQuestionTool; } });
+		const previous = process.env[PIX_QUESTION_RPC_ENV];
+		process.env[PIX_QUESTION_RPC_ENV] = "1";
+		let customCalled = false;
+		try {
+			const result = await tool!.execute(
+				"desktop-call",
+				{
+					questions: [{
+						id: "scope",
+						label: "Scope",
+						prompt: "Which scope?",
+						choices: [
+							{ value: "small", label: "Small" },
+							{ value: "large", label: "Large" },
+						],
+					}],
+				},
+				undefined,
+				undefined,
+				{
+					hasUI: true,
+					ui: {
+						custom: async () => { customCalled = true; return undefined; },
+						editor: async (title: string, prefill?: string) => {
+							assert.equal(title, PIX_QUESTION_EDITOR_TITLE);
+							assert.deepEqual(JSON.parse(prefill ?? ""), {
+								version: 1,
+								questions: [{
+									id: "scope",
+									label: "Scope",
+									prompt: "Which scope?",
+									choices: [
+										{ value: "small", label: "Small" },
+										{ value: "large", label: "Large" },
+									],
+								}],
+							});
+							return createDesktopQuestionResponse([{ id: "scope", choiceValue: "large" }]);
+						},
+					},
+				},
+			);
+			assert.equal(customCalled, false);
+			assert.deepEqual(result.details, {
+				answers: [{ id: "scope", value: "large", label: "Large", wasCustom: false, index: 2 }],
+				canceled: false,
+			});
+		} finally {
+			if (previous === undefined) delete process.env[PIX_QUESTION_RPC_ENV];
+			else process.env[PIX_QUESTION_RPC_ENV] = previous;
+		}
+	});
+
+	it("rejects malformed Desktop question responses without inventing answers", () => {
+		const questions = [{
+			id: "scope",
+			label: "Scope",
+			prompt: "Which scope?",
+			choices: [
+				{ value: "small", label: "Small" },
+				{ value: "large", label: "Large" },
+			],
+		}];
+		assert.equal(parseDesktopQuestionResponse("not json", questions), null);
+		assert.equal(parseDesktopQuestionResponse(JSON.stringify({
+			version: 1,
+			selections: [{ id: "scope", choiceValue: "invented" }],
+		}), questions), null);
+		assert.equal(parseDesktopQuestionResponse(JSON.stringify({
+			version: 1,
+			selections: [{ id: "scope", customText: "", images: [] }],
+		}), questions), null);
+		assert.deepEqual(parseDesktopQuestionResponse(JSON.stringify({
+			version: 1,
+			selections: [{
+				id: "scope",
+				customText: "Screenshot",
+				images: [{ type: "image", data: "aW1hZ2U=", mimeType: "image/png" }],
+			}],
+		}), questions), [{
+			id: "scope",
+			customText: "Screenshot",
+			images: [{ type: "image", data: "aW1hZ2U=", mimeType: "image/png" }],
+		}]);
+	});
+
+	it("validates grouped Desktop multi-select responses and additive custom images", () => {
+		const questions = normalizeQuestionInput({ questions: [{
+			id: "areas",
+			label: "Areas",
+			prompt: "Which areas?",
+			choices: [{ value: "api", label: "API" }, { value: "ui", label: "UI" }],
+			multiple: true,
+			minSelections: 2,
+			maxSelections: 3,
+		}] });
+		const valid = {
+			version: 1,
+			selections: [{
+				id: "areas",
+				choiceValues: ["ui"],
+				customText: "Docs",
+				images: [{ type: "image", data: "aW1hZ2U=", mimeType: "image/png" }],
+			}],
+		};
+		assert.deepEqual(parseDesktopQuestionResponse(JSON.stringify(valid), questions), valid.selections);
+		assert.equal(parseDesktopQuestionResponse(JSON.stringify({
+			...valid,
+			selections: [{ id: "areas", choiceValues: ["api"] }],
+		}), questions), null);
+		assert.equal(parseDesktopQuestionResponse(JSON.stringify({
+			...valid,
+			selections: [{ id: "areas", choiceValues: ["api", "api"], customText: "Docs" }],
+		}), questions), null);
+		assert.equal(parseDesktopQuestionResponse(JSON.stringify({
+			...valid,
+			selections: [{ id: "areas", choiceValues: ["invented"], customText: "Docs" }],
+		}), questions), null);
+	});
+
+	it("emits images from additive Desktop multi-select custom answers", async () => {
+		let tool: RegisteredQuestionTool | undefined;
+		questionExtension({ registerTool: (registered) => { tool = registered as RegisteredQuestionTool; } });
+		const previous = process.env[PIX_QUESTION_RPC_ENV];
+		process.env[PIX_QUESTION_RPC_ENV] = "1";
+		try {
+			const result = await tool!.execute(
+				"desktop-multiple",
+				{ questions: [{
+					id: "areas",
+					label: "Areas",
+					prompt: "Which areas?",
+					choices: [{ value: "api", label: "API" }, { value: "ui", label: "UI" }],
+					multiple: true,
+					minSelections: 2,
+				}] },
+				undefined,
+				undefined,
+				{ hasUI: true, ui: {
+					custom: async () => undefined,
+					editor: async () => createDesktopQuestionResponse([{
+						id: "areas",
+						choiceValues: ["api"],
+						customText: "Docs",
+						images: [{ type: "image", data: "aW1hZ2U=", mimeType: "image/png" }],
+					}]),
+				} },
+			);
+			assert.equal(result.details.canceled, false);
+			assert.deepEqual(result.content[1], { type: "image", data: "aW1hZ2U=", mimeType: "image/png" });
+			assert.match(result.content[0]?.type === "text" ? result.content[0].text : "", /API \(choice 1\), Docs \(custom answer; 1 image attached\)/u);
+		} finally {
+			if (previous === undefined) delete process.env[PIX_QUESTION_RPC_ENV];
+			else process.env[PIX_QUESTION_RPC_ENV] = previous;
+		}
+	});
+
 	it("treats an unavailable scoped question UI as cancellation", async () => {
 		let tool: { execute(...args: unknown[]): Promise<{ details: { canceled: boolean; reason?: string } }> } | undefined;
 		questionExtension({

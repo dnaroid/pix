@@ -2,6 +2,7 @@ import { QUESTION_TOOL_DESCRIPTION } from "./tool-description.js";
 import { questionParameters, normalizeQuestionInput } from "./contract.js";
 import { renderQuestionCall, renderQuestionResult } from "./render.js";
 import { createCanceledQuestionResult, createQuestionToolResult, createSuccessfulQuestionResult } from "./result.js";
+import { runDesktopQuestionnaire, shouldUseDesktopQuestionBridge } from "./desktop.js";
 import { runQuestionnaire } from "./tui.js";
 import type { QuestionToolInput, QuestionUiContext } from "./types.js";
 
@@ -22,7 +23,9 @@ export default function questionExtension(pi: ExtensionApiLike): void {
 		async execute(_toolCallId: string, params: QuestionToolInput, _signal: AbortSignal | undefined, _onUpdate: unknown, ctx: QuestionUiContext) {
 			const questions = normalizeQuestionInput(params);
 			if (!ctx.hasUI) return createQuestionToolResult(createCanceledQuestionResult("ui_unavailable", questions), questions);
-			const selections = await runQuestionnaire(questions, ctx);
+			const selections = shouldUseDesktopQuestionBridge(ctx)
+				? await runDesktopQuestionnaire(questions, ctx)
+				: await runQuestionnaire(questions, ctx);
 			if (selections == null) return createQuestionToolResult(createCanceledQuestionResult("user_canceled"), questions);
 			const images = selections.flatMap((selection) => "customText" in selection ? selection.images ?? [] : []);
 			return createQuestionToolResult(createSuccessfulQuestionResult(questions, selections), questions, images);
@@ -31,5 +34,6 @@ export default function questionExtension(pi: ExtensionApiLike): void {
 }
 
 export { questionParameters, normalizeQuestionInput } from "./contract.js";
+export { createDesktopQuestionResponse, parseDesktopQuestionResponse } from "./desktop.js";
 export { createCanceledQuestionResult, createFallbackPrompt, createQuestionToolResult, createSuccessfulQuestionResult, summarizeQuestionResult } from "./result.js";
 export type { QuestionResultDetails, QuestionToolInput } from "./types.js";

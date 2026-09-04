@@ -24,6 +24,9 @@ export const questionParameters = Type.Object({
 			maxItems: MAX_CHOICES,
 			description: "Two to five meaningful predefined choices.",
 		}),
+		multiple: Type.Optional(Type.Boolean({ description: "Allow selecting more than one answer for this question." })),
+		minSelections: Type.Optional(Type.Integer({ minimum: 1, description: "Minimum answers required when multiple is true. The custom answer counts as one." })),
+		maxSelections: Type.Optional(Type.Integer({ minimum: 1, description: "Maximum answers allowed when multiple is true. The custom answer counts as one." })),
 	}), {
 		minItems: MIN_QUESTIONS,
 		maxItems: MAX_QUESTIONS,
@@ -59,6 +62,17 @@ export function normalizeQuestionInput(input: QuestionToolInput): NormalizedQues
 
 		const seenChoiceValues = new Set<string>();
 		const seenChoiceLabels = new Set<string>();
+		const multiple = question.multiple ?? false;
+		if (typeof multiple !== "boolean") throwInvalid(`Question "${id}" multiple must be a boolean.`, "Retry with multiple omitted, true, or false.");
+		if (!multiple && (question.minSelections !== undefined || question.maxSelections !== undefined)) {
+			throwInvalid(`Question "${id}" sets selection limits without multiple: true.`, "Remove minSelections/maxSelections or enable multiple selection.");
+		}
+		const maximumAvailable = question.choices.length + 1;
+		const minSelections = multiple ? normalizeSelectionLimit(question.minSelections, 1, `question "${id}" minSelections`) : 1;
+		const maxSelections = multiple ? normalizeSelectionLimit(question.maxSelections, maximumAvailable, `question "${id}" maxSelections`) : 1;
+		if (multiple && minSelections > maxSelections) throwInvalid(`Question "${id}" has minSelections ${minSelections} greater than maxSelections ${maxSelections}.`, "Retry with minSelections less than or equal to maxSelections.");
+		if (multiple && maxSelections > maximumAvailable) throwInvalid(`Question "${id}" has maxSelections ${maxSelections}, but only ${maximumAvailable} answers are available including the custom answer.`, `Retry with maxSelections at most ${maximumAvailable}.`);
+
 		return {
 			id,
 			label,
@@ -81,8 +95,15 @@ export function normalizeQuestionInput(input: QuestionToolInput): NormalizedQues
 
 				return description === undefined ? { value, label: choiceLabel } : { value, label: choiceLabel, description };
 			}),
+			...(multiple ? { multiple: true as const, minSelections, maxSelections } : {}),
 		};
 	});
+}
+
+function normalizeSelectionLimit(value: number | undefined, fallback: number, field: string): number {
+	if (value === undefined) return fallback;
+	if (!Number.isInteger(value) || value < 1) throwInvalid(`${field} must be a positive integer.`, "Retry with a whole number greater than or equal to one.");
+	return value;
 }
 
 export function trimString(value: string, field: string): string {

@@ -928,8 +928,22 @@ fn acp_start(app: AppHandle, state: State<'_, AcpProcessState>) -> Result<u64, S
         ));
     }
 
+    let question_extension = env::var_os("PIX_ACP_QUESTION_EXTENSION")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../dist/bundled-extensions/question/index.js")
+        });
+    if !question_extension.is_file() {
+        return Err(format!(
+            "Pix question extension not found at {} (run `npm run build:pix` first or set PIX_ACP_QUESTION_EXTENSION)",
+            question_extension.display()
+        ));
+    }
+
     let mut child = Command::new(&node)
         .arg(&entry)
+        .env("PIX_ACP_QUESTION_EXTENSION", &question_extension)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

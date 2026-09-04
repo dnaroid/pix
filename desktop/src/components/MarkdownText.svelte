@@ -9,6 +9,7 @@
   let {
     text,
     compact = false,
+    dense = false,
     fitTables = false,
     remoteImages = false,
     headingAnchors = false,
@@ -19,6 +20,7 @@
   }: {
     text: string;
     compact?: boolean;
+    dense?: boolean;
     fitTables?: boolean;
     remoteImages?: boolean;
     headingAnchors?: boolean;
@@ -252,7 +254,7 @@
   <ExternalLink size={14} strokeWidth={2} />
 </span>
 <div
-  class={["markdown-text", compact && "compact", fitTables && "fit-tables"]}
+  class={["markdown-text", compact && "compact", dense && "dense", fitTables && "fit-tables"]}
   use:linkClicks
   use:markdownContent={html}
 >
@@ -265,6 +267,7 @@
     line-height: 1.625;
     overflow-wrap: anywhere;
   }
+  .markdown-text.dense { line-height: 1.5; }
 
   :global(.markdown-text > :first-child) { margin-top: 0; }
   :global(.markdown-text > :last-child) { margin-bottom: 0; }

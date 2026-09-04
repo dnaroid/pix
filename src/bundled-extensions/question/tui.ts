@@ -206,21 +206,47 @@ export async function runQuestionnaire(questions: NormalizedQuestion[], ctx: Que
 
 		function captureCustomDraft(): void {
 			if (mode !== "custom") return;
-			customDrafts.set(currentQuestion().id, sharedEditorSnapshot());
+			const question = currentQuestion();
+			const snapshot = sharedEditorSnapshot();
+			customDrafts.set(question.id, snapshot);
+			if (question.multiple) {
+				const existing = multipleSelection(question);
+				selections.set(question.id, {
+					id: question.id,
+					choiceValues: existing.choiceValues,
+					customText: snapshot.text,
+					...(snapshot.images.length > 0 ? { images: snapshot.images } : {}),
+				});
+			}
+		}
+
+		function multipleSelection(question: NormalizedQuestion): Extract<QuestionSelection, { choiceValues: string[] }> {
+			const existing = selections.get(question.id);
+			return existing && "choiceValues" in existing ? existing : { id: question.id, choiceValues: [] };
+		}
+
+		function selectionIsComplete(question: NormalizedQuestion, selection: QuestionSelection | undefined): boolean {
+			if (!selection) return false;
+			if (!question.multiple) return !("choiceValues" in selection);
+			if (!("choiceValues" in selection)) return false;
+			const hasCustom = selection.customText !== undefined;
+			if (hasCustom && !selection.customText?.trim() && (selection.images?.length ?? 0) === 0) return false;
+			const count = selection.choiceValues.length + (hasCustom ? 1 : 0);
+			return count >= (question.minSelections ?? 1) && count <= (question.maxSelections ?? question.choices.length + 1);
 		}
 
 		function getCompleteSelections(): QuestionSelection[] | undefined {
 			const orderedSelections: QuestionSelection[] = [];
 			for (const question of questions) {
 				const selection = selections.get(question.id);
-				if (!selection) return undefined;
+				if (!selection || !selectionIsComplete(question, selection)) return undefined;
 				orderedSelections.push(selection);
 			}
 			return orderedSelections;
 		}
 
 		function firstUnansweredIndex(): number {
-			return questions.findIndex((question) => !selections.has(question.id));
+			return questions.findIndex((question) => !selectionIsComplete(question, selections.get(question.id)));
 		}
 
 		function submitCompleteSelections(): void {
@@ -238,6 +264,18 @@ export async function runQuestionnaire(questions: NormalizedQuestion[], ctx: Que
 		}
 
 		function formatReviewAnswerLabel(question: NormalizedQuestion, selection: QuestionSelection): string {
+			if ("choiceValues" in selection) {
+				const labels = question.choices
+					.filter((choice) => selection.choiceValues.includes(choice.value))
+					.map((choice) => choice.label);
+				if (selection.customText !== undefined) {
+					const imageCount = selection.images?.length ?? 0;
+					const text = selection.customText.trim() || formatAttachedImages(imageCount);
+					const imageSuffix = selection.customText.trim() && imageCount > 0 ? ` (+${formatAttachedImages(imageCount)})` : "";
+					labels.push(`${CUSTOM_ANSWER_LABEL}: ${text}${imageSuffix}`);
+				}
+				return labels.join(", ") || "Unanswered";
+			}
 			if ("customText" in selection) {
 				const imageCount = selection.images?.length ?? 0;
 				const text = selection.customText || formatAttachedImages(imageCount);
@@ -250,6 +288,11 @@ export async function runQuestionnaire(questions: NormalizedQuestion[], ctx: Que
 		function selectionIndexForQuestion(question: NormalizedQuestion): number {
 			const selection = selections.get(question.id);
 			if (!selection) return 0;
+			if ("choiceValues" in selection) {
+				const firstSelected = question.choices.findIndex((choice) => selection.choiceValues.includes(choice.value));
+				if (firstSelected !== -1) return firstSelected;
+				return selection.customText !== undefined ? customAnswerIndex(question) : 0;
+			}
 			if ("customText" in selection) return customAnswerIndex(question);
 			const choiceIndex = question.choices.findIndex((choice) => choice.value === selection.choiceValue);
 			return choiceIndex === -1 ? 0 : choiceIndex;
@@ -324,9 +367,18 @@ export async function runQuestionnaire(questions: NormalizedQuestion[], ctx: Que
 		function enterCustomMode(): void {
 			const question = currentQuestion();
 			const existing = selections.get(question.id);
-			const prefill = existing && "customText" in existing
+			const prefill = existing && "customText" in existing && existing.customText !== undefined
 				? { text: existing.customText, images: existing.images ?? [] }
 				: customDrafts.get(question.id) ?? { text: "", images: [] };
+			if (question.multiple) {
+				const multi = multipleSelection(question);
+				if (multi.customText === undefined && multi.choiceValues.length >= (question.maxSelections ?? question.choices.length + 1)) {
+					customError = `Choose at most ${question.maxSelections ?? question.choices.length + 1} answers.`;
+					refresh();
+					return;
+				}
+				selections.set(question.id, { ...multi, customText: prefill.text, ...(prefill.images.length > 0 ? { images: prefill.images } : {}) });
+			}
 			mode = "custom";
 			selectedChoiceIndex = customAnswerIndex(question);
 			customError = undefined;
@@ -338,13 +390,43 @@ export async function runQuestionnaire(questions: NormalizedQuestion[], ctx: Que
 			const question = currentQuestion();
 			const choice = question.choices[index];
 			if (choice) {
+				if (question.multiple) {
+					const existing = multipleSelection(question);
+					const selected = existing.choiceValues.includes(choice.value);
+					const selectedCount = existing.choiceValues.length + (existing.customText !== undefined ? 1 : 0);
+					if (!selected && selectedCount >= (question.maxSelections ?? question.choices.length + 1)) {
+						customError = `Choose at most ${question.maxSelections ?? question.choices.length + 1} answers.`;
+						refresh();
+						return;
+					}
+					const choiceValues = selected
+						? existing.choiceValues.filter((value) => value !== choice.value)
+						: question.choices.filter((candidate) => candidate.value === choice.value || existing.choiceValues.includes(candidate.value)).map((candidate) => candidate.value);
+					selections.set(question.id, { ...existing, choiceValues });
+					customError = undefined;
+					refresh();
+					return;
+				}
 				selections.set(question.id, { id: question.id, choiceValue: choice.value });
 				customDrafts.delete(question.id);
 				clearSharedEditorText();
 				advanceAfterAnswer();
 				return;
 			}
-			if (index === question.choices.length) enterCustomMode();
+			if (index === question.choices.length) {
+				if (question.multiple) {
+					const existing = multipleSelection(question);
+					if (existing.customText !== undefined) {
+						customDrafts.set(question.id, { text: existing.customText, images: existing.images ?? [] });
+						const { customText: _customText, images: _images, ...withoutCustom } = existing;
+						selections.set(question.id, withoutCustom);
+						customError = undefined;
+						refresh();
+						return;
+					}
+				}
+				enterCustomMode();
+			}
 		}
 
 		function submitCustomAnswer(): void {
@@ -356,6 +438,22 @@ export async function runQuestionnaire(questions: NormalizedQuestion[], ctx: Que
 				return;
 			}
 			const question = currentQuestion();
+			if (question.multiple) {
+				const existing = multipleSelection(question);
+				selections.set(question.id, {
+					id: question.id,
+					choiceValues: existing.choiceValues,
+					customText: trimmed,
+					...(snapshot.images.length > 0 ? { images: snapshot.images } : {}),
+				});
+				customDrafts.delete(question.id);
+				clearSharedEditorText();
+				mode = "choices";
+				customError = undefined;
+				syncChoiceSelection();
+				refresh();
+				return;
+			}
 			selections.set(question.id, {
 				id: question.id,
 				customText: trimmed,
@@ -501,7 +599,7 @@ export async function runQuestionnaire(questions: NormalizedQuestion[], ctx: Que
 				goBack();
 				return;
 			}
-			if (isKey(data, "enter")) {
+			if (isKey(data, "enter") || data === " ") {
 				selectChoice(selectedChoiceIndex);
 				return;
 			}
@@ -526,7 +624,8 @@ export async function runQuestionnaire(questions: NormalizedQuestion[], ctx: Que
 			const active = activeTab();
 
 			for (let index = 0; index < questions.length; index += 1) {
-				const answered = selections.has(questions[index]!.id);
+				const question = questions[index]!;
+				const answered = selectionIsComplete(question, selections.get(question.id));
 				const label = ` ${index + 1}${answered ? "✓" : "·"} `;
 				const startColumn = visibleLength(plain) + 1;
 				plain += label;
@@ -565,15 +664,16 @@ export async function runQuestionnaire(questions: NormalizedQuestion[], ctx: Que
 			renderSeparator(add, width);
 			questions.forEach((question, index) => {
 				const answer = selections.get(question.id);
+				const complete = selectionIsComplete(question, answer);
 				const label = answer ? formatReviewAnswerLabel(question, answer) : "Unanswered";
-				const status = answer ? "✓" : "·";
+				const status = complete ? "✓" : "·";
 				renderSelectableLine(
 					add,
 					index === selectedReviewIndex,
 					`${status} ${index + 1}. ${question.label}: ${label}`,
 					{ kind: "review", index } as Extract<ClickZone, { kind: "review" }>,
 					width,
-					answer ? "success" : "warning",
+					complete ? "success" : "warning",
 				);
 			});
 
@@ -584,21 +684,27 @@ export async function runQuestionnaire(questions: NormalizedQuestion[], ctx: Que
 
 		function renderQuestion(add: AddLine, addWrapped: AddWrappedLine, width: number): void {
 			const question = currentQuestion();
+			const selection = selections.get(question.id);
+			const multiSelection = selection && "choiceValues" in selection ? selection : undefined;
 			renderHeader(add, `${questionIndex + 1}/${questions.length} ${question.label}`, width);
 			renderTabs(add, width);
 			renderSeparator(add, width);
 			addWrapped(theme.fg("info", ` ${question.prompt}`));
+			if (question.multiple) addWrapped(theme.fg("muted", ` Select ${question.minSelections ?? 1} to ${question.maxSelections ?? question.choices.length + 1} answers.`));
 			question.choices.forEach((choice, index) => {
-				renderSelectableLine(add, mode === "choices" && index === selectedChoiceIndex, `${index + 1}. ${choice.label}`, { kind: "choice", index } as Extract<ClickZone, { kind: "choice" }>, width, "warning");
+				const prefix = question.multiple ? `[${multiSelection?.choiceValues.includes(choice.value) ? "x" : " "}]` : `${index + 1}.`;
+				renderSelectableLine(add, mode === "choices" && index === selectedChoiceIndex, `${prefix} ${choice.label}`, { kind: "choice", index } as Extract<ClickZone, { kind: "choice" }>, width, "warning");
 				if (choice.description) renderMutedLine(add, `    ${choice.description}`, width);
 			});
-			renderSelectableLine(add, mode === "choices" && selectedChoiceIndex === customAnswerIndex(), `${question.choices.length + 1}. ${CUSTOM_ANSWER_LABEL}`, { kind: "custom" }, width, "warning");
+			const customPrefix = question.multiple ? `[${multiSelection?.customText !== undefined ? "x" : " "}]` : `${question.choices.length + 1}.`;
+			renderSelectableLine(add, mode === "choices" && selectedChoiceIndex === customAnswerIndex(), `${customPrefix} ${CUSTOM_ANSWER_LABEL}`, { kind: "custom" }, width, "warning");
 			if (mode === "custom") {
 				if (!usesSharedEditor) {
 					(sharedEditorText() || " ").split("\n").forEach((line) => addWrapped(theme.fg("text", ` ${line}`)));
 				}
 				if (customError && !sharedEditorText().trim()) addWrapped(theme.fg("warning", ` ${customError}`));
 			}
+			if (mode === "choices" && customError) addWrapped(theme.fg("warning", ` ${customError}`));
 		}
 
 		function handleMouse(event: QuestionMouseEvent): boolean {
@@ -619,7 +725,12 @@ export async function runQuestionnaire(questions: NormalizedQuestion[], ctx: Que
 					selectChoice(zone.index);
 					return true;
 				case "custom":
-					enterCustomMode();
+					if (mode === "custom") {
+						captureCustomDraft();
+						mode = "choices";
+					}
+					selectedChoiceIndex = customAnswerIndex();
+					selectChoice(selectedChoiceIndex);
 					return true;
 				case "review":
 					moveToQuestion(zone.index);
