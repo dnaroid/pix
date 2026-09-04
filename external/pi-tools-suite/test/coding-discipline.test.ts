@@ -115,7 +115,7 @@ describe("coding discipline", () => {
 			{ cwd: "/tmp/project", model: { provider: "zai", id: "glm-5.3-flash" } },
 		) as { system: string };
 
-		expect(result.system).toContain("TOOL-ONLY CODING AGENT CONTRACT");
+		expect(result.system).toContain("GLM CODING QUALITY CONTRACT");
 		expect(result.system).not.toContain("Treat the current GLM coding endpoint as text-only");
 		expect(result.system).not.toContain("call the `lookup` tool before making visual claims");
 	});
@@ -320,129 +320,33 @@ describe("coding discipline", () => {
 	});
 });
 
-describe("coding discipline strictness", () => {
-	function assistantToolCallText(text: string): unknown {
-		return {
-			role: "assistant",
-			content: [
-				{ type: "text", text },
-				{ type: "toolCall", toolName: "read", input: {} },
-			],
-		};
-	}
-
-	function assistantToolCallThinking(text: string): unknown {
-		return {
-			role: "assistant",
-			content: [
-				{ type: "thinking", text: "reasoning" },
-				{ type: "text", text },
-				{ type: "toolCall", toolName: "read", input: {} },
-			],
-		};
-	}
-
-	function userTurn(text: string): unknown {
-		return { role: "user", content: [{ type: "text", text }] };
-	}
-
-	// `count` alternating user/assistant turns; every assistant turn is chatty.
-	function chattyTurns(withThinking: boolean, count = 5): unknown[] {
-		const messages: unknown[] = [];
-		for (let i = 0; i < count; i++) {
-			messages.push(userTurn(`turn ${i}`));
-			messages.push(withThinking ? assistantToolCallThinking(`nav ${i}`) : assistantToolCallText(`nav ${i}`));
-		}
-		return messages;
-	}
-
-	function lastMessage(result: unknown): unknown {
-		const messages = (result as { messages: unknown[] }).messages;
-		return messages[messages.length - 1];
-	}
-
-	const glmCtx = { cwd: "/tmp/project", model: { provider: "zai", id: "glm-5.2" } };
-
-	test("lenient ignores reasoning text when no thinking block is present", async () => {
-		setPiConfigDirConfig(`{ "lookupModel": "zai/glm-5.2", "codingDisciplineStrictness": "lenient" }`);
-		const { default: register } = await import("../src/coding-discipline/index.js");
-		const pi = new FakePi();
-		register(pi as any);
-
-		const result = await pi.emit("context", { messages: chattyTurns(false) }, glmCtx);
-		expect(result).toBeUndefined();
-	});
-
-	test("strict flags reasoning text and injects a developer-role reminder", async () => {
-		setPiConfigDirConfig(`{ "lookupModel": "zai/glm-5.2", "codingDisciplineStrictness": "strict" }`);
-		const { default: register } = await import("../src/coding-discipline/index.js");
-		const pi = new FakePi();
-		register(pi as any);
-
-		const result = await pi.emit("context", { messages: chattyTurns(false) }, glmCtx);
-		expect(result).toBeDefined();
-		const reminder = lastMessage(result) as {
-			role: string;
-			content: { type: string; text: string }[];
-		};
-		expect(reminder.role).toBe("developer");
-		expect(reminder.content[0].text).toContain("silence reminder");
-	});
-
-	test("lenient still flags chatter when a thinking block is present", async () => {
-		setPiConfigDirConfig(`{ "lookupModel": "zai/glm-5.2", "codingDisciplineStrictness": "lenient" }`);
-		const { default: register } = await import("../src/coding-discipline/index.js");
-		const pi = new FakePi();
-		register(pi as any);
-
-		const result = await pi.emit("context", { messages: chattyTurns(true) }, glmCtx);
-		expect(result).toBeDefined();
-		const reminder = lastMessage(result) as { role: string };
-		expect(reminder.role).toBe("developer");
-	});
-
-	test("resets the chatter baseline after compaction truncates the history", async () => {
-		setPiConfigDirConfig(`{ "lookupModel": "zai/glm-5.2", "codingDisciplineStrictness": "strict" }`);
-		const { default: register } = await import("../src/coding-discipline/index.js");
-		const pi = new FakePi();
-		register(pi as any);
-
-		// Long history: 10 chatty strict turns -> reminder fires, peak baseline grows to 20.
-		const before = await pi.emit("context", { messages: chattyTurns(false, 10) }, glmCtx);
-		expect(before).toBeDefined();
-
-		// Compaction: history shrinks to 2 chatty turns (4 messages). Without a baseline
-		// reset the stale violation peak (10) would suppress this; the reset lets it fire.
-		const after = await pi.emit("context", { messages: chattyTurns(false, 2) }, glmCtx);
-		expect(after).toBeDefined();
-		const reminder = lastMessage(after) as { role: string };
-		expect(reminder.role).toBe("developer");
-	});
-
-	test("buildCodingDisciplinePrompt differs between lenient and strict", async () => {
+describe("coding discipline quality contract", () => {
+	test("targets evidence, hypothesis management, bounded retries, verification, counterexamples, and escalation", async () => {
 		const { buildCodingDisciplinePrompt } = await import("../src/coding-discipline/index.js");
-		const lenient = buildCodingDisciplinePrompt({ lookupEnabled: true });
-		const strict = buildCodingDisciplinePrompt({ lookupEnabled: true, strictness: "strict" });
-		expect(lenient).toContain("Batch independent calls");
-		expect(lenient).toContain("thinking/reasoning channel is available");
-		expect(lenient).not.toContain("emit exactly one tool call with empty text");
-		expect(lenient).toContain("Treat the current GLM coding endpoint as text-only");
-		expect(strict).toContain("emit exactly one tool call with empty text");
-		expect(strict).toContain("No transition permits commentary between tool calls");
-		expect(strict).not.toContain("Batch independent calls");
+		const prompt = buildCodingDisciplinePrompt({ lookupEnabled: true });
+
+		expect(prompt).toContain("GLM CODING QUALITY CONTRACT");
+		expect(prompt).toContain("at least two plausible hypotheses");
+		expect(prompt).toContain("do not use edits as diagnostic probes");
+		expect(prompt).toContain("information gain");
+		expect(prompt).toContain("execution/data flow");
+		expect(prompt).toContain("after two materially failed fix/verification attempts");
+		expect(prompt).toContain("behavioral claim");
+		expect(prompt).toContain("one likely counterexample");
+		expect(prompt).toContain("independent `oracle`");
+		expect(prompt).toContain("two materially different fixes fail");
+		expect(prompt).toContain("Treat the current GLM coding endpoint as text-only");
+		expect(prompt).not.toContain("TOOL-ONLY CODING AGENT CONTRACT");
+		expect(prompt).not.toContain("emit exactly one tool call with empty text");
+		expect(prompt).not.toContain("silence reminder");
 	});
 
-	test("strictness config flows into the injected system prompt", async () => {
-		setPiConfigDirConfig(`{ "lookupModel": "zai/glm-5.2", "codingDisciplineStrictness": "strict" }`);
+	test("does not register the old chatter-reminder context hook", async () => {
+		setPiConfigDirConfig(`{ "lookupModel": "zai/glm-5.3-flash" }`);
 		const { default: register } = await import("../src/coding-discipline/index.js");
 		const pi = new FakePi();
 		register(pi as any);
 
-		const result = await pi.emit(
-			"before_provider_request",
-			{ payload: { system: "base prompt", model: "zai/glm-5.2" } },
-			glmCtx,
-		);
-		expect((result as { system: string }).system).toContain("emit exactly one tool call with empty text");
+		expect(pi.handlers.has("context")).toBe(false);
 	});
 });

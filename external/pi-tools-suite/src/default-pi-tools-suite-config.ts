@@ -24,12 +24,6 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
   // Vision-capable model used by the coding-discipline lookup tool for blind-model
   // screenshot/image questions. Remove or set to null to disable lookup.
   "lookupModel": "zai/glm-5.3-flash",
-  // coding-discipline working-state strictness.
-  //   "lenient" (default): batch independent read-only tool calls; brief reasoning
-  //     text is acceptable when thinking is off. Text only counts as chatter when a
-  //     thinking/reasoning block already captured the reasoning.
-  //   "strict": one tool call per turn, no assistant text at all (Opus-like).
-  "codingDisciplineStrictness": "lenient",
   "terminalBell": { "sound": true },
   // comment-checker: nudges the agent to remove AI-slop code comments it just
   // added via write/edit/apply_patch. Net-new comments are classified and a

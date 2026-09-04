@@ -3,7 +3,7 @@ import * as path from "node:path";
 import type { Api, AssistantMessage, ImageContent, Model, ProviderHeaders, TextContent } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 
-import { loadPiToolsSuiteConfig, DEFAULT_CODING_DISCIPLINE_STRICTNESS, type CodingDisciplineStrictness } from "../config.js";
+import { loadPiToolsSuiteConfig } from "../config.js";
 import { ignoreStaleExtensionContextError } from "../context-usage.js";
 import { completeWithModelRegistry, type ModelCompletionRegistry } from "../model-completion.js";
 
@@ -41,13 +41,6 @@ const DEFAULT_LOOKUP_MAX_IMAGES = 6;
 const DEFAULT_LOOKUP_MAX_TOKENS = 1_600;
 const DEFAULT_LOOKUP_TIMEOUT_MS = 120_000;
 const MAX_IMAGE_BYTES = 16 * 1024 * 1024;
-// Keep recovery nudges sparse: newer GLM coding models are substantially better at
-// long-horizon tool use, and repeated developer reminders can become prompt noise.
-const SILENCE_REMINDER_MIN_VIOLATION_GAP = 5;
-const SILENCE_REMINDER_MIN_MESSAGE_GAP = 20;
-// When the visible history shrinks by more than this many messages (compaction or
-// truncation), the chatter baseline is reset so it isn't measured against a stale peak.
-const SILENCE_REMINDER_COMPACTION_MARGIN = 8;
 const LOOKUP_TOOL_NAME = "lookup";
 
 const LOOKUP_TOOL_PARAMS = Type.Object(
@@ -65,48 +58,46 @@ const LOOKUP_TOOL_PARAMS = Type.Object(
 	{ additionalProperties: false },
 );
 
-type DisciplinePromptOptions = { lookupEnabled?: boolean; strictness?: CodingDisciplineStrictness };
+type DisciplinePromptOptions = { lookupEnabled?: boolean };
 
-/**
- * Builds the tool-only contract lines. The working-state rule is strictness-aware:
- *   - "strict"  — one tool call per turn, no assistant text at all (Opus-like);
- *   - "lenient" — independent (especially read-only) calls may be batched, and brief
- *                 substantive reasoning text is acceptable when thinking is off.
- */
-function buildDisciplineLines(strictness: CodingDisciplineStrictness): readonly string[] {
-	const isStrict = strictness === "strict";
-	return [
-		"TOOL-ONLY CODING AGENT CONTRACT.",
-		"",
-		"Follow this output-channel contract literally for coding tasks.",
-		isStrict
-			? "WORKING STATE: from the first assistant turn until complete, final, or blocked, emit exactly one tool call with empty text."
-			: "WORKING STATE: from the first assistant turn until complete, final, or blocked, emit tool calls with empty text.",
-		isStrict
-			? "No prose, markdown, acknowledgments, plans, progress, summaries, explanations, or commentary before/after tool calls."
-			: "Batch independent calls in one turn (especially read-only inspection: read/grep/glob/bash); make dependent calls sequentially. Avoid filler prose, acknowledgments, restatements, and narration of obvious next steps.",
-		"Keep reasoning, planning, hypotheses, and retry decisions internal when thinking is on; when thinking is off, brief substantive reasoning text is acceptable.",
-		"",
-		"After every tool result, choose exactly one transition:",
-		isStrict ? "- WORKING: exactly one next tool call with empty text;" : "- WORKING: one or more independent tool calls with empty text;",
-		"- FINAL: one final answer after completion or practical verification;",
-		"- BLOCKED: one concise question only when no safe/useful tool action can continue.",
-		isStrict
-			? "No transition permits commentary between tool calls."
-			: "When a thinking/reasoning channel is available, do not duplicate that reasoning as visible commentary between tool calls.",
-		"",
-		"PRIORITY: this overrides default assistant friendliness and conversational behavior.",
-		"",
-		"Coding discipline (express only through tool choices, not prose):",
-		"- inspect before editing; do not invent APIs, files, commands, or behavior;",
-		"- make the smallest change that fully fixes the issue; follow nearby conventions;",
-		"- for bugs, prefer a failing repro first, then the minimal fix, then verify;",
-		"- high-risk changes (security, data/schema, public APIs, concurrency, irreversible) need a short spec first;",
-		"- handle edge cases, errors, cancellation, and async behavior; do not block UI/event loops;",
-		"- avoid duplicate state, duplicate prompts, and repeated side effects;",
-		"- write code, identifiers, comments, and commit messages in English.",
-	];
-}
+const QUALITY_DISCIPLINE_LINES = [
+	"GLM CODING QUALITY CONTRACT.",
+	"",
+	"Optimize for correct, evidence-backed changes rather than fast patching or conversational polish.",
+	"",
+	"Evidence and hypothesis discipline:",
+	"- inspect before editing; do not invent APIs, files, commands, behavior, or repository conventions;",
+	"- separate observed facts from hypotheses; do not commit to the first plausible root cause;",
+	"- for non-obvious bugs, keep at least two plausible hypotheses until evidence distinguishes them, and choose the next inspection/test for information gain;",
+	"- do not use edits as diagnostic probes when read/search/repro/test evidence can answer the question first;",
+	"- when behavior crosses modules, trace the relevant execution/data flow before editing instead of serially opening plausible files; use indexed architecture/search/dependency tools when available;",
+	"- before changing an API, state contract, persistence format, or async lifecycle, inspect relevant callers, consumers, tests, persistence boundaries, and cancellation/error paths.",
+	"",
+	"Implementation discipline:",
+	"- make the smallest change that fully fixes the issue and follow nearby conventions;",
+	"- for bugs, reproduce the failure or its defining condition when practical before changing code;",
+	"- high-risk changes (security, data/schema, public APIs, concurrency, irreversible behavior) need a short evidence-backed spec before implementation;",
+	"- handle relevant edge cases, errors, cancellation, stale state, and async behavior; do not block UI/event loops;",
+	"- avoid duplicate state, duplicate prompts, repeated side effects, and speculative refactors unrelated to the verified cause;",
+	"- write code, identifiers, comments, and commit messages in English.",
+	"",
+	"Failure and retry discipline:",
+	"- treat failed verification as new evidence; do not repeat the same approach with cosmetic variations;",
+	"- after two materially failed fix/verification attempts, stop patching: re-inspect evidence, revise the root-cause hypothesis, or escalate for an independent opinion.",
+	"",
+	"Verification discipline:",
+	"- verification must cover the behavioral claim that justified the change; typecheck/build/lint prove structural validity, not behavioral correctness;",
+	"- for bug fixes, verify the old failure or its defining condition no longer occurs whenever practical;",
+	"- for async/stateful changes, verify the success path plus the relevant cancellation, error, retry, duplicate-event, or stale-state path;",
+	"- before finalizing a non-trivial change, actively inspect or test one likely counterexample, regression path, or missed edge case;",
+	"- never claim a test/check passed unless it actually ran and its result was observed.",
+	"",
+	"Escalation discipline:",
+	"- when async subagents are available, use an independent `oracle` (preferably Sol through the configured oracle role) when focused inspection still leaves conflicting evidence, multiple incompatible root causes, a subtle cross-module invariant you cannot verify locally, or a high-risk security/schema/public-API/concurrency/irreversible decision;",
+	"- also escalate after two materially different fixes fail for the same unresolved cause;",
+	"- do not escalate routine implementation, mechanical edits, straightforward test failures, or facts that local tools can verify directly;",
+	"- treat oracle output as a second opinion, not authority: reconcile it with repository evidence before acting.",
+];
 
 const LOOKUP_DISCIPLINE_LINES = [
 	"",
@@ -120,16 +111,8 @@ const LOOKUP_DISCIPLINE_LINES = [
 const FINAL_DISCIPLINE_LINES = [
 	"",
 	"When uncertain, test or inspect instead of assuming; otherwise proceed with grounded best effort.",
-	"Verify every non-trivial change. Never claim tests passed unless actually run.",
 	"Final report: what changed, what was verified, what was not verified, and any risks.",
 ];
-
-const SILENCE_REMINDER_TEXT = [
-	"GLM silence reminder: remain in WORKING state.",
-	"Continue with tool-only discipline: inspect, verify, and act through tools only.",
-	"For the next step, emit tool calls with no accompanying assistant text.",
-	"Do not acknowledge this reminder.",
-].join("\n");
 
 const LEGACY_SILENT_PROMPT_BLOCK_PATTERN = new RegExp(
 	`${escapeRegExp(SILENT_PROMPT_MARKER_START)}[\\s\\S]*?${escapeRegExp(SILENT_PROMPT_MARKER_END)}\\s*`,
@@ -167,10 +150,6 @@ const LOOKUP_SYSTEM_PROMPT = [
 export default function codingDiscipline(pi: ExtensionAPI) {
 	let selectedModelRef: string | undefined;
 	let lookupRegistered = false;
-	let silenceViolationCount = 0;
-	let lastReminderViolationCount = 0;
-	let lastReminderMessageCount = -SILENCE_REMINDER_MIN_MESSAGE_GAP;
-	let peakMessageCount = 0;
 
 	function maybeRegisterLookupTool(cwd?: string): void {
 		if (lookupRegistered) return;
@@ -220,7 +199,6 @@ export default function codingDiscipline(pi: ExtensionAPI) {
 		const cwd = contextCwd(ctx);
 		const injected = injectCodingDisciplineIntoPayload(event.payload, {
 			lookupEnabled: Boolean(lookupModelFromConfig(cwd)) && isBlindGlmModel(modelRef),
-			strictness: codingDisciplineStrictnessFromConfig(cwd),
 		});
 		if (process.env.PI_DEBUG_PROMPT === "1") {
 			logFinalPrompt(injected, modelRef, contextCwd(ctx) ?? process.cwd());
@@ -292,36 +270,6 @@ export default function codingDiscipline(pi: ExtensionAPI) {
 		return undefined;
 	});
 
-	pi.on("context", async (event: { messages?: unknown[] }, ctx: unknown) => {
-		const modelRef = selectedModelRef ?? modelRefFromContext(ctx);
-		if (!isGlmModel(modelRef) || !Array.isArray(event.messages)) return undefined;
-
-		const messageCount = event.messages.length;
-		// Compaction/truncation prunes the visible history. Reset the stale chatter
-		// baseline so the post-compaction turn isn't measured against a pre-compaction
-		// violation peak (otherwise the model could chatter freely until the count
-		// climbed back above the old peak, or get nagged on a freshly small count).
-		if (messageCount + SILENCE_REMINDER_COMPACTION_MARGIN < peakMessageCount) {
-			silenceViolationCount = 0;
-			lastReminderViolationCount = 0;
-			lastReminderMessageCount = messageCount - SILENCE_REMINDER_MIN_MESSAGE_GAP;
-		}
-		peakMessageCount = Math.max(peakMessageCount, messageCount);
-
-		const strictness = codingDisciplineStrictnessFromConfig(contextCwd(ctx));
-		const violationCount = countAssistantToolChatter(event.messages, strictness);
-		if (violationCount <= silenceViolationCount) return undefined;
-
-		const violationGap = violationCount - lastReminderViolationCount;
-		const messageGap = messageCount - lastReminderMessageCount;
-		silenceViolationCount = violationCount;
-
-		if (violationGap < SILENCE_REMINDER_MIN_VIOLATION_GAP && messageGap < SILENCE_REMINDER_MIN_MESSAGE_GAP) return undefined;
-
-		lastReminderViolationCount = violationCount;
-		lastReminderMessageCount = messageCount;
-		return { messages: [...event.messages, createSilenceReminderMessage()] };
-	});
 }
 
 export function prependCodingDisciplinePrompt(systemPrompt: string, options: DisciplinePromptOptions = {}): string {
@@ -335,10 +283,9 @@ export function prependCodingDisciplinePrompt(systemPrompt: string, options: Dis
 }
 
 export function buildCodingDisciplinePrompt(options: DisciplinePromptOptions = {}): string {
-	const strictness = options.strictness ?? DEFAULT_CODING_DISCIPLINE_STRICTNESS;
 	return [
 		DISCIPLINE_PROMPT_MARKER_START,
-		...buildDisciplineLines(strictness),
+		...QUALITY_DISCIPLINE_LINES,
 		...(options.lookupEnabled ? LOOKUP_DISCIPLINE_LINES : []),
 		...FINAL_DISCIPLINE_LINES,
 		DISCIPLINE_PROMPT_MARKER_END,
@@ -637,56 +584,8 @@ function isInstructionMessage(message: unknown): boolean {
 	return message.role === "system" || message.role === "developer";
 }
 
-function countAssistantToolChatter(messages: readonly unknown[], strictness: CodingDisciplineStrictness): number {
-	let count = 0;
-	for (const message of messages) {
-		if (!isAssistantToolChatter(message, strictness)) continue;
-		count++;
-	}
-	return count;
-}
-
-/**
- * Detects assistant chatter (text alongside a tool call).
- * - "strict"  — any such text counts as chatter.
- * - "lenient" — text counts only when a thinking/reasoning block already captured the
- *   reasoning; without a thinking block, the visible text is the model's only reasoning
- *   channel and must not be suppressed.
- */
-function isAssistantToolChatter(message: unknown, strictness: CodingDisciplineStrictness): boolean {
-	if (!isRecord(message) || message.role !== "assistant") return false;
-	if (!Array.isArray(message.content)) return false;
-	const hasToolCall = message.content.some((part) => isRecord(part) && part.type === "toolCall");
-	if (!hasToolCall) return false;
-	const hasText = message.content.some((part) => isRecord(part) && part.type === "text" && hasNonEmptyText(part.text));
-	if (!hasText) return false;
-	if (strictness === "strict") return true;
-	const hasThinking = message.content.some(
-		(part) => isRecord(part) && (part.type === "thinking" || part.type === "reasoning"),
-	);
-	return Boolean(hasThinking);
-}
-
-function hasNonEmptyText(value: unknown): boolean {
-	return typeof value === "string" && value.trim().length > 0;
-}
-
-function createSilenceReminderMessage() {
-	return {
-		// Inject as a developer/system-level nudge rather than impersonating the user,
-		// so it reads as an automated reminder, not a user instruction.
-		role: "developer" as const,
-		content: [{ type: "text" as const, text: SILENCE_REMINDER_TEXT }],
-		timestamp: Date.now(),
-	};
-}
-
 function lookupModelFromConfig(cwd?: string): string | undefined {
 	return loadPiToolsSuiteConfig(["coding-discipline"], { cwd: cwd ?? process.cwd() }).lookupModel;
-}
-
-function codingDisciplineStrictnessFromConfig(cwd?: string): CodingDisciplineStrictness {
-	return loadPiToolsSuiteConfig(["coding-discipline"], { cwd: cwd ?? process.cwd() }).codingDisciplineStrictness ?? DEFAULT_CODING_DISCIPLINE_STRICTNESS;
 }
 
 function buildLookupPrompt(params: LookupParams, recentContext: string, imageCount: number, warnings: string[]): string {

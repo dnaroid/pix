@@ -12,14 +12,6 @@ export interface PiToolsSuiteConfig {
 	todoThinkingOverrides: Record<string, TodoThinkingLevel>;
 	/** Vision-capable model used by the coding-discipline lookup tool; unset disables lookup. */
 	lookupModel?: string;
-	/**
-	 * Chatter-detector strictness for the coding-discipline module:
-	 *   "strict"  — any assistant text alongside a tool call is chatter (Opus-like);
-	 *   "lenient" — text is only chatter when a thinking block already captured the
-	 *               reasoning; without thinking, visible text is the reasoning channel.
-	 * Default: "lenient".
-	 */
-	codingDisciplineStrictness?: CodingDisciplineStrictness;
 }
 
 type MutableConfig = {
@@ -28,12 +20,8 @@ type MutableConfig = {
 	todoThinking: boolean;
 	todoThinkingOverrides: Map<string, TodoThinkingLevel>;
 	lookupModel: string | undefined;
-	codingDisciplineStrictness: CodingDisciplineStrictness;
 };
 
-export const CODING_DISCIPLINE_STRICTNESS_VALUES = ["strict", "lenient"] as const;
-export type CodingDisciplineStrictness = (typeof CODING_DISCIPLINE_STRICTNESS_VALUES)[number];
-export const DEFAULT_CODING_DISCIPLINE_STRICTNESS: CodingDisciplineStrictness = "lenient";
 const TODO_THINKING_OVERRIDE_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 export type TodoThinkingLevel = (typeof TODO_THINKING_OVERRIDE_LEVELS)[number];
 
@@ -78,10 +66,6 @@ function normalizeLookupModel(raw: unknown): string | undefined {
 	if (typeof raw !== "string") return undefined;
 	const trimmed = raw.trim();
 	return trimmed ? trimmed : undefined;
-}
-
-function normalizeCodingDisciplineStrictness(raw: unknown): CodingDisciplineStrictness {
-	return raw === "strict" ? "strict" : "lenient";
 }
 
 function isTodoThinkingLevel(raw: unknown): raw is TodoThinkingLevel {
@@ -161,9 +145,6 @@ function mergeConfigLayer(config: MutableConfig, raw: Record<string, unknown>, k
 	if (typeof raw.todoThinking === "boolean") config.todoThinking = raw.todoThinking;
 	mergeTodoThinkingOverrides(config, raw.todoThinkingOverrides);
 	if (Object.prototype.hasOwnProperty.call(raw, "lookupModel")) config.lookupModel = normalizeLookupModel(raw.lookupModel);
-	if (Object.prototype.hasOwnProperty.call(raw, "codingDisciplineStrictness")) {
-		config.codingDisciplineStrictness = normalizeCodingDisciplineStrictness(raw.codingDisciplineStrictness);
-	}
 
 	for (const key of DISABLED_LIST_KEYS) addDisabled(config, raw[key], knownModules);
 	for (const key of ENABLED_LIST_KEYS) removeDisabled(config, raw[key], knownModules);
@@ -222,7 +203,6 @@ export function loadPiToolsSuiteConfig(moduleNames: readonly string[], options: 
 		todoThinking: false,
 		todoThinkingOverrides: new Map(DEFAULT_TODO_THINKING_OVERRIDES),
 		lookupModel: undefined,
-		codingDisciplineStrictness: DEFAULT_CODING_DISCIPLINE_STRICTNESS,
 	};
 	const userConfigPath = getPiToolsSuiteUserConfigPath(options.homeDir);
 
@@ -243,6 +223,5 @@ export function loadPiToolsSuiteConfig(moduleNames: readonly string[], options: 
 		todoThinking: config.todoThinking,
 		todoThinkingOverrides: Object.fromEntries(config.todoThinkingOverrides),
 		...(config.lookupModel ? { lookupModel: config.lookupModel } : {}),
-		codingDisciplineStrictness: config.codingDisciplineStrictness,
 	};
 }
