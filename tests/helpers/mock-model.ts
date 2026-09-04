@@ -169,7 +169,11 @@ export class MockModel {
 		}
 
 		const parsed = parseRequestBody(body);
-		const api = request.url === "/v1/messages" ? "anthropic-messages" : "openai-completions";
+		// Route by pathname only: pi-ai appends query params such as
+		// `?beta=true` to the anthropic-messages endpoint, and an exact-string
+		// match would misroute those requests to the openai-completions stream.
+		const pathname = (request.url ?? "").split("?")[0];
+		const api = pathname === "/v1/messages" ? "anthropic-messages" : "openai-completions";
 		this.requestCount += 1;
 		this.requests.push({ api, model: parsed?.model ?? this.options.modelId, body: parsed });
 

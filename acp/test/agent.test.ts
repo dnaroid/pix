@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { test } from "node:test";
 import {
 	client,
@@ -20,6 +20,16 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { PixAcpAgent } from "../src/acp/pix-acp-agent.js";
 import { PIX_QUESTION_EDITOR_TITLE } from "../src/acp/ui-request-bridge.js";
+
+/**
+ * The session map stores `resolve()`d pi session paths. On Windows a POSIX
+ * literal such as `/tmp/pi-sessions/a.jsonl` resolves to `D:\tmp\...`, so every
+ * fake pi session path (and expectation derived from it) must flow through the
+ * same transform to stay comparable on all platforms.
+ */
+function piSessionPath(literal: string): string {
+	return resolve(literal);
+}
 import { PIX_SESSION_STATE_METHOD } from "../src/acp/session-state-bridge.js";
 import type {
 	AutocompleteCompleterInput,
@@ -102,7 +112,7 @@ class FakePiClient implements PiClient {
 		this.state = {
 			model: { provider: "anthropic", id: "claude-4", name: "Claude 4" },
 			thinkingLevel: "medium",
-			sessionFile: `/tmp/pi-sessions/fake-${n}.jsonl`,
+			sessionFile: piSessionPath(`/tmp/pi-sessions/fake-${n}.jsonl`),
 			sessionId: `pi-fake-${n}`,
 			isStreaming: false,
 			...state,
@@ -184,7 +194,7 @@ class FakePiClient implements PiClient {
 			const n = ++fakeSessionCounter;
 			this.state = {
 				...this.state,
-				sessionFile: `/tmp/pi-sessions/fake-${n}.jsonl`,
+				sessionFile: piSessionPath(`/tmp/pi-sessions/fake-${n}.jsonl`),
 				sessionId: `pi-fake-${n}`,
 			};
 		}
@@ -197,7 +207,7 @@ class FakePiClient implements PiClient {
 			const n = ++fakeSessionCounter;
 			this.state = {
 				...this.state,
-				sessionFile: `/tmp/pi-sessions/fake-${n}.jsonl`,
+				sessionFile: piSessionPath(`/tmp/pi-sessions/fake-${n}.jsonl`),
 				sessionId: `pi-fake-${n}`,
 			};
 		}
@@ -341,7 +351,7 @@ function createTestAdapter(overrides: Partial<ConstructorParameters<typeof PixAc
 
 function nativeSession(id: string, overrides: Partial<PiSessionInfo> = {}): PiSessionInfo {
 	return {
-		path: `/tmp/pi-sessions/${id}.jsonl`,
+		path: piSessionPath(`/tmp/pi-sessions/${id}.jsonl`),
 		id,
 		cwd: "/tmp/proj",
 		created: new Date("2025-01-01T00:00:00.000Z"),
@@ -678,8 +688,8 @@ test("session/new returns config options and persists the session map entry", as
 });
 
 test("session/list reconciles native Pi sessions and reports ordered TUI tabs", async () => {
-	const firstPath = "/tmp/pi-sessions/native-a.jsonl";
-	const secondPath = "/tmp/pi-sessions/native-b.jsonl";
+	const firstPath = piSessionPath("/tmp/pi-sessions/native-a.jsonl");
+	const secondPath = piSessionPath("/tmp/pi-sessions/native-b.jsonl");
 	const requestedCwds: (string | undefined)[] = [];
 	const harness = createTestAdapter({
 		listPiSessions: async (cwd) => {
@@ -732,7 +742,7 @@ test("session/list falls back to mapped sessions when native discovery fails", a
 	const map = new SessionMapStore(harness.sessionMapPath, TEST_LOGGER);
 	await map.put({
 		sessionId: "mapped",
-		piSessionPath: "/tmp/pi-sessions/mapped.jsonl",
+		piSessionPath: piSessionPath("/tmp/pi-sessions/mapped.jsonl"),
 		piSessionId: "pi-mapped",
 		cwd: "/tmp/proj",
 		updatedAt: "2025-01-01T00:00:00.000Z",
@@ -1295,7 +1305,7 @@ test("concurrent loads for one session are serialized and stop the replaced proc
 
 test("session map tracks pi-side session file moves after a run", async () => {
 	const harness = createTestAdapter();
-	const renamedPath = "/tmp/pi-sessions/moved-by-pi.jsonl";
+	const renamedPath = piSessionPath("/tmp/pi-sessions/moved-by-pi.jsonl");
 
 	const sessionId = await connect(harness.adapter, async (cx) => {
 		const session = await cx.buildSession("/tmp").start();

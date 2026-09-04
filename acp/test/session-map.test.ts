@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { SessionMapStore, type SessionMapRecord } from "../src/acp/session-map.js";
 import type { Logger } from "../src/logging.js";
@@ -15,7 +15,10 @@ async function tempMapPath(): Promise<string> {
 function record(sessionId: string, overrides: Partial<SessionMapRecord> = {}): SessionMapRecord {
 	return {
 		sessionId,
-		piSessionPath: `/tmp/pi-sessions/${sessionId}.jsonl`,
+		// The store persists resolve()d pi session paths; apply the same
+		// transform here so records and expectations match on every platform
+		// (Windows resolves /tmp/... literals to <drive>:\tmp\...).
+		piSessionPath: resolve(`/tmp/pi-sessions/${sessionId}.jsonl`),
 		piSessionId: `pi-${sessionId}`,
 		cwd: "/tmp/project",
 		updatedAt: "2025-01-01T00:00:00.000Z",
@@ -30,7 +33,7 @@ test("put/get/delete round-trips through disk", async () => {
 	await store.put(record("b", { cwd: "/tmp/other" }));
 
 	const reloaded = new SessionMapStore(path, LOGGER);
-	assert.equal((await reloaded.get("a"))?.piSessionPath, "/tmp/pi-sessions/a.jsonl");
+	assert.equal((await reloaded.get("a"))?.piSessionPath, resolve("/tmp/pi-sessions/a.jsonl"));
 	assert.deepEqual((await reloaded.list()).map((r) => r.sessionId), ["a", "b"]);
 
 	await reloaded.delete("a");
@@ -40,9 +43,9 @@ test("put/get/delete round-trips through disk", async () => {
 
 test("put atomically replaces another id mapped to the same Pi session path", async () => {
 	const store = new SessionMapStore(await tempMapPath(), LOGGER);
-	await store.mergeByPiSessionPath([record("native-id", { piSessionPath: "/tmp/shared.jsonl" })]);
-	await store.put(record("acp-id", { piSessionPath: "/tmp/shared.jsonl", piSessionId: "native-id" }));
-	await store.mergeByPiSessionPath([record("native-id", { piSessionPath: "/tmp/shared.jsonl" })]);
+	await store.mergeByPiSessionPath([record("native-id", { piSessionPath: resolve("/tmp/shared.jsonl") })]);
+	await store.put(record("acp-id", { piSessionPath: resolve("/tmp/shared.jsonl"), piSessionId: "native-id" }));
+	await store.mergeByPiSessionPath([record("native-id", { piSessionPath: resolve("/tmp/shared.jsonl") })]);
 
 	assert.deepEqual((await store.list()).map((item) => item.sessionId), ["acp-id"]);
 	assert.equal(await store.get("native-id"), undefined);
@@ -102,13 +105,13 @@ test("list filters by cwd and sorts by updatedAt descending", async () => {
 test("native reconciliation deduplicates by path and preserves the existing ACP id", async () => {
 	const store = new SessionMapStore(await tempMapPath(), LOGGER);
 	await store.put(record("acp-existing", {
-		piSessionPath: "/tmp/pi-sessions/native.jsonl",
+		piSessionPath: resolve("/tmp/pi-sessions/native.jsonl"),
 		piSessionId: "old-native-id",
 		title: "Old title",
 	}));
 
 	await store.mergeByPiSessionPath([record("native-id", {
-		piSessionPath: "/tmp/pi-sessions/native.jsonl",
+		piSessionPath: resolve("/tmp/pi-sessions/native.jsonl"),
 		piSessionId: "native-id",
 		title: "Native title",
 		updatedAt: "2025-06-01T00:00:00.000Z",
@@ -117,7 +120,7 @@ test("native reconciliation deduplicates by path and preserves the existing ACP 
 	const records = await store.list();
 	assert.equal(records.length, 1);
 	assert.deepEqual(records[0], record("acp-existing", {
-		piSessionPath: "/tmp/pi-sessions/native.jsonl",
+		piSessionPath: resolve("/tmp/pi-sessions/native.jsonl"),
 		piSessionId: "native-id",
 		title: "Native title",
 		updatedAt: "2025-06-01T00:00:00.000Z",
@@ -126,7 +129,7 @@ test("native reconciliation deduplicates by path and preserves the existing ACP 
 
 test("native reconciliation repairs duplicate paths from an older map", async () => {
 	const path = await tempMapPath();
-	const sharedPath = "/tmp/pi-sessions/duplicate.jsonl";
+	const sharedPath = resolve("/tmp/pi-sessions/duplicate.jsonl");
 	await writeFile(path, JSON.stringify({
 		version: 1,
 		sessions: [
@@ -145,9 +148,9 @@ test("native reconciliation repairs duplicate paths from an older map", async ()
 
 test("native reconciliation assigns a stable fallback when a Pi id collides", async () => {
 	const store = new SessionMapStore(await tempMapPath(), LOGGER);
-	await store.put(record("same-id", { piSessionPath: "/tmp/pi-sessions/first.jsonl" }));
+	await store.put(record("same-id", { piSessionPath: resolve("/tmp/pi-sessions/first.jsonl") }));
 	const discovered = record("same-id", {
-		piSessionPath: "/tmp/pi-sessions/second.jsonl",
+		piSessionPath: resolve("/tmp/pi-sessions/second.jsonl"),
 		piSessionId: "same-id",
 	});
 
