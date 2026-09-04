@@ -157,11 +157,13 @@
   $effect(() => {
     const requestClient = client;
     const sessionId = activeSessionId;
-    const connectionReady = status === "ready";
+    const sessionReady = status === "ready" && !operationRunning;
     const generation = ++autocompleteSettingsGeneration;
     autocompleteEnabled = false;
     autocompleteDebounceMs = 350;
-    if (!requestClient || !sessionId || !connectionReady) return;
+    // session/load exposes the active id before the ACP backend has finished
+    // registering it. Retry when that lifecycle operation settles.
+    if (!requestClient || !sessionId || !sessionReady) return;
     void requestClient.autocompleteSettings(sessionId)
       .then((settings) => {
         if (
@@ -972,12 +974,27 @@
 
   async function openLocalFile(path: string): Promise<void> {
     const generation = ++projectFilePreviewGeneration;
+    const isHomePath = path.startsWith("~/");
     if (attachmentKind(mimeTypeForName(path)) !== "file") {
       try {
-        const attachment = await resolveLocalMedia(path);
+        const attachment = isHomePath
+          ? await resolveHomeMedia(path)
+          : await resolveLocalMedia(path);
         if (!attachment || generation !== projectFilePreviewGeneration) return;
         projectFilePreview = null;
         mediaPreview = attachment;
+      } catch (error) {
+        if (generation === projectFilePreviewGeneration) reportError(error);
+      }
+      return;
+    }
+
+    if (isHomePath) {
+      try {
+        const preview = await invoke<ProjectFilePreview>("read_home_file", { path });
+        if (generation !== projectFilePreviewGeneration) return;
+        mediaPreview = null;
+        projectFilePreview = preview;
       } catch (error) {
         if (generation === projectFilePreviewGeneration) reportError(error);
       }
@@ -989,6 +1006,12 @@
     } catch (error) {
       reportError(error);
     }
+  }
+
+  async function resolveHomeMedia(path: string): Promise<Attachment | undefined> {
+    if (attachmentKind(mimeTypeForName(path)) === "file") return undefined;
+    const file = await invoke<AttachmentFile>("resolve_home_media", { path });
+    return attachmentFromFile(file, `home-media:${path}`);
   }
 
   async function resolveLocalMedia(path: string): Promise<Attachment | undefined> {

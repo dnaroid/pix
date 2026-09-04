@@ -26,10 +26,11 @@ Render Markdown in Desktop user messages, assistant messages, and assistant thou
 - Raw HTML is always escaped; Markdown never injects executable markup.
 - Explicit Markdown links and bare URLs with `http`, `https`, or `mailto` schemes become links.
 - Explicit Markdown links with relative destinations and inline-code values that look like relative file paths become project-file links. Activating one reads the target only when its canonical path remains inside the active workspace, then opens its source in the preview dialog with syntax highlighting and line numbers.
+- Explicit Markdown links and inline-code values beginning with `~/` become home-file links. Activating one expands `~` in the trusted Tauri backend, requires the canonical target to remain inside the user's home directory, and opens text or supported media in the existing preview dialog.
 - Trailing prose punctuation is not included in a bare URL; balanced URL parentheses remain part of it.
 - Activating a link delegates it to Tauri's opener plugin so the operating system opens it in the default browser or mail application.
 - Unsupported destinations render as plain labels and are never passed to the system opener.
-- Absolute paths, URL-like destinations, parent-directory traversal, directories, binary/non-UTF-8 files, and files larger than the preview limit are not previewed.
+- Raw absolute paths, URL-like destinations other than the separately supported `file://` flow, parent-directory traversal, directories, binary/non-UTF-8 text files, and files larger than the preview limit are not previewed.
 - An unclosed fenced code block remains visible while the message streams.
 - Code and tables may scroll horizontally instead of widening the transcript.
 - Markdown parsing uses a small local parser rather than a parser/sanitizer runtime dependency.
@@ -50,7 +51,7 @@ Render Markdown in Desktop user messages, assistant messages, and assistant thou
 ## Verification
 
 - Unit tests cover supported blocks, inline formatting, bare URLs, relative project-file links, unsafe input, system-opener delegation, and incomplete fences.
-- Rust tests cover workspace confinement and preview size/UTF-8 validation.
+- Rust tests cover workspace/home confinement and preview size/UTF-8 validation.
 - `npm run test`, `npm run check`, and `npm run build:web` pass in `desktop/`.
 
 ## Risks / unknowns
@@ -63,3 +64,4 @@ Render Markdown in Desktop user messages, assistant messages, and assistant thou
 - Confirmed by code: Desktop currently interpolates all three message roles as plain text.
 - Confirmed by package manifest: Desktop has no Markdown parser or HTML sanitizer dependency.
 - Confirmed by design contract: assistant content should prioritize readability while thoughts and technical content visually recede.
+- Confirmed by the reported failure: `~/.config/pi/pix.jsonc` was previously passed to the project-file resolver and looked up beneath the workspace without expanding `~`.

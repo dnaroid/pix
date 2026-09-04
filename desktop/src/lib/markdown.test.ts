@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  normalizeHomeFileDestination,
   normalizeLocalFileDestination,
   normalizeProjectFileDestination,
   renderMarkdown,
@@ -188,6 +189,16 @@ describe("renderMarkdown", () => {
     expect(html).toContain('data-project-file="src/App.svelte"');
   });
 
+  it("turns home-relative file paths into local preview links", () => {
+    const html = renderMarkdown(
+      "Open `~/.config/pi/pix.jsonc` or [the config](~/.config/pi/pix.jsonc).",
+    );
+
+    expect(html.match(/data-local-file="~\/.config\/pi\/pix.jsonc"/g)).toHaveLength(2);
+    expect(html).toContain("title=\"Preview ~/.config/pi/pix.jsonc\"");
+    expect(html).not.toContain('data-project-file="~/.config/pi/pix.jsonc"');
+  });
+
   it("keeps ordinary inline code as code", () => {
     const html = renderMarkdown("Run `npm run check` and call `value.toString()`.");
 
@@ -203,8 +214,19 @@ describe("renderMarkdown", () => {
     expect(normalizeProjectFileDestination("%2e%2e/secret.txt")).toBeUndefined();
     expect(normalizeProjectFileDestination("src/%00secret.txt")).toBeUndefined();
     expect(normalizeProjectFileDestination("/tmp/file.txt")).toBeUndefined();
+    expect(normalizeProjectFileDestination("~/.config/pi/pix.jsonc")).toBeUndefined();
     expect(normalizeProjectFileDestination("C:\\tmp\\file.txt")).toBeUndefined();
     expect(normalizeProjectFileDestination("https://example.com/file.ts")).toBeUndefined();
+  });
+
+  it("normalizes confined home-relative destinations", () => {
+    expect(normalizeHomeFileDestination("~/.config/pi/pix.jsonc")).toBe("~/.config/pi/pix.jsonc");
+    expect(normalizeHomeFileDestination("~\\.config\\pi\\pix.jsonc#preview"))
+      .toBe("~/.config/pi/pix.jsonc");
+    expect(normalizeHomeFileDestination("~/../secret.txt")).toBeUndefined();
+    expect(normalizeHomeFileDestination("~/%2e%2e/secret.txt")).toBeUndefined();
+    expect(normalizeHomeFileDestination("/tmp/file.txt")).toBeUndefined();
+    expect(normalizeHomeFileDestination("~other/file.txt")).toBeUndefined();
   });
 
   it("keeps incomplete inline markers readable while chunks stream", () => {

@@ -77,6 +77,7 @@ import {
 	type PiRpcClientOptions,
 } from "../pi/pi-rpc-client.js";
 import { applyConfigOption, buildConfigOptions, parseModelValue } from "./config-options.js";
+import { loadPixDefaultModel, type PixDefaultModel } from "./default-model.js";
 import { EventTranslator } from "./event-translator.js";
 import {
 	builtinFeedback,
@@ -136,6 +137,8 @@ export interface PixAcpAgentOptions {
 	readonly completeAutocomplete?: AutocompleteCompleter;
 	/** Pix autocomplete config reader (overridable for hermetic tests). */
 	readonly loadAutocompleteConfig?: (cwd: string) => AutocompleteConfig;
+	/** Pix default-model reader (overridable for hermetic tests). */
+	readonly loadDefaultModel?: (cwd: string) => PixDefaultModel | undefined;
 }
 
 export class PixAcpAgent {
@@ -151,6 +154,7 @@ export class PixAcpAgent {
 	private readonly loadTuiTabs: (cwd: string) => Promise<TuiTabSnapshot>;
 	private readonly completeAutocomplete: AutocompleteCompleter;
 	private readonly loadAutocompleteConfig: (cwd: string) => AutocompleteConfig;
+	private readonly loadDefaultModel: (cwd: string) => PixDefaultModel | undefined;
 	private disposed = false;
 	/** Advertised by the client during `initialize`; gates dialog bridging. */
 	private clientCapabilities: ClientCapabilities | null | undefined;
@@ -162,6 +166,7 @@ export class PixAcpAgent {
 			?? ((cwd) => cwd ? SessionManager.list(cwd) : SessionManager.listAll());
 		this.loadTuiTabs = options.loadTuiTabs ?? ((cwd) => loadTuiTabSnapshot(cwd));
 		this.loadAutocompleteConfig = options.loadAutocompleteConfig ?? loadAutocompleteConfig;
+		this.loadDefaultModel = options.loadDefaultModel ?? loadPixDefaultModel;
 		this.completeAutocomplete = options.completeAutocomplete ?? createAutocompleteCompleter({
 			logger: options.logger,
 			loadConfig: this.loadAutocompleteConfig,
@@ -268,7 +273,13 @@ export class PixAcpAgent {
 
 	private async newSession(cwd: string, client: ClientCaller): Promise<NewSessionResponse> {
 		const acpSessionId = randomUUID();
-		const session = await this.spawnSession(acpSessionId, cwd, client);
+		let defaultModel: PixDefaultModel | undefined;
+		try {
+			defaultModel = this.loadDefaultModel(cwd);
+		} catch (error) {
+			throw new RequestError(ERROR_SERVER, `failed to resolve Pix default model: ${stringifyUnknown(error)}`);
+		}
+		const session = await this.spawnSession(acpSessionId, cwd, client, defaultModel);
 		this.options.logger.info(`session/new: ${acpSessionId} (cwd: ${cwd})`);
 		await this.registerSessionRecord(acpSessionId, cwd, session.pi);
 		const configOptions = await this.safeConfigOptions(session.pi);
@@ -434,16 +445,26 @@ export class PixAcpAgent {
 	}
 
 	/** Start a pi process and register it as an ACP session. */
-	private spawnSession(acpSessionId: string, cwd: string, client: ClientCaller): Promise<AgentSessionState> {
-		const pending = this.startSession(acpSessionId, cwd, client);
+	private spawnSession(
+		acpSessionId: string,
+		cwd: string,
+		client: ClientCaller,
+		defaultModel?: PixDefaultModel,
+	): Promise<AgentSessionState> {
+		const pending = this.startSession(acpSessionId, cwd, client, defaultModel);
 		this.pendingSpawns.add(pending);
 		void pending.finally(() => this.pendingSpawns.delete(pending)).catch(() => {});
 		return pending;
 	}
 
-	private async startSession(acpSessionId: string, cwd: string, client: ClientCaller): Promise<AgentSessionState> {
+	private async startSession(
+		acpSessionId: string,
+		cwd: string,
+		client: ClientCaller,
+		defaultModel?: PixDefaultModel,
+	): Promise<AgentSessionState> {
 		if (this.disposed) throw new RequestError(ERROR_SERVER, "adapter is shutting down");
-		const pi = this.options.createPiClient({ piEntry: this.options.piEntry, cwd });
+		const pi = this.options.createPiClient(piClientOptions(this.options.piEntry, cwd, defaultModel));
 		try {
 			await pi.start();
 		} catch (error) {
@@ -881,6 +902,22 @@ export class PixAcpAgent {
 		}
 	}
 
+}
+
+function piClientOptions(
+	piEntry: string,
+	cwd: string,
+	defaultModel?: PixDefaultModel,
+): PiRpcClientOptions {
+	if (!defaultModel) return { piEntry, cwd };
+	const selected = {
+		piEntry,
+		cwd,
+		provider: defaultModel.provider,
+		model: defaultModel.modelId,
+	};
+	if (defaultModel.thinkingLevel === undefined) return selected;
+	return { ...selected, args: ["--thinking", defaultModel.thinkingLevel] };
 }
 
 function nativeSessionRecord(session: PiSessionInfo, requestedCwd?: string): SessionMapRecord | undefined {

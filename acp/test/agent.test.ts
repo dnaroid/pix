@@ -264,6 +264,7 @@ function createTestAdapter(overrides: Partial<ConstructorParameters<typeof PixAc
 			maxPromptTokens: 1_200,
 			includeRecentMessages: 0,
 		}),
+		loadDefaultModel: () => undefined,
 		...overrides,
 	});
 	return { adapter, clients, options, sessionMapPath };
@@ -334,6 +335,30 @@ test("session/new spawns and starts one pi client per session with the cwd", asy
 	assert.ok(clients[1].started, "second pi client started");
 	assert.ok(adapter.getSession(sessionIds[0]!), "first session registered");
 	assert.ok(adapter.getSession(sessionIds[1]!), "second session registered");
+});
+
+test("session/new starts pi with the cwd Pix default model and thinking level", async () => {
+	const resolvedCwds: string[] = [];
+	const { adapter, options } = createTestAdapter({
+		loadDefaultModel: (cwd) => {
+			resolvedCwds.push(cwd);
+			return {
+				provider: "openai-codex",
+				modelId: "gpt-5.6-sol",
+				thinkingLevel: "high",
+			};
+		},
+	});
+	await connect(adapter, (cx) => cx.buildSession("/tmp/pix-default").start());
+
+	assert.deepEqual(resolvedCwds, ["/tmp/pix-default"]);
+	assert.deepEqual(options[0], {
+		piEntry: "/test/pi-rpc-entry.js",
+		cwd: "/tmp/pix-default",
+		provider: "openai-codex",
+		model: "gpt-5.6-sol",
+		args: ["--thinking", "high"],
+	});
 });
 
 test("pix/autocomplete routes the active session without mutating its prompt", async () => {
@@ -1061,7 +1086,13 @@ test("session map tracks pi-side session file moves after a run", async () => {
 });
 
 test("session/resume switches without replaying history", async () => {
-	const harness = createTestAdapter();
+	const harness = createTestAdapter({
+		loadDefaultModel: () => ({
+			provider: "openai-codex",
+			modelId: "gpt-5.6-sol",
+			thinkingLevel: "medium",
+		}),
+	});
 	const notifications: SessionNotification[] = [];
 	await connect(
 		harness.adapter,
@@ -1079,6 +1110,10 @@ test("session/resume switches without replaying history", async () => {
 	);
 
 	assert.deepEqual(harness.clients[1]!.switchSessions, [harness.clients[0]!.state.sessionFile]);
+	assert.deepEqual(harness.options[1], {
+		piEntry: "/test/pi-rpc-entry.js",
+		cwd: "/tmp/proj",
+	}, "resumed session history must select its own model and thinking level");
 	assert.equal(notifications.length, 0, "resume replays nothing");
 });
 

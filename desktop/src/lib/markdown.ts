@@ -274,8 +274,15 @@ function renderInline(text: string, depth = 0, allowLinks = true): string {
       if (end >= 0) {
         const code = text.slice(index + markerLength, end).replace(/\n/g, " ");
         const codeLabel = `<code>${escapeHtml(code)}</code>`;
-        const projectPath = allowLinks ? normalizeInlineProjectFilePath(code) : undefined;
-        output += projectPath ? projectFileLink(projectPath, codeLabel) : codeLabel;
+        const homePath = allowLinks ? normalizeInlineHomeFilePath(code) : undefined;
+        const projectPath = allowLinks && !homePath ? normalizeInlineProjectFilePath(code) : undefined;
+        if (homePath) {
+          output += homeFileLink(homePath, codeLabel);
+        } else if (projectPath) {
+          output += projectFileLink(projectPath, codeLabel);
+        } else {
+          output += codeLabel;
+        }
         index = end + markerLength;
         continue;
       }
@@ -296,7 +303,8 @@ function renderInline(text: string, depth = 0, allowLinks = true): string {
         const label = depth < MAX_BLOCK_DEPTH
           ? renderInline(link.label, depth + 1, false)
           : escapeHtml(link.label);
-        const projectPath = normalizeProjectFileDestination(link.destination);
+        const homePath = normalizeHomeFileDestination(link.destination);
+        const projectPath = homePath ? undefined : normalizeProjectFileDestination(link.destination);
         const localPath = normalizeLocalFileDestination(link.destination);
         const projectKind = projectPath ? mediaKindForPath(projectPath) : undefined;
         const localKind = localPath ? mediaKindForPath(localPath) : undefined;
@@ -304,6 +312,8 @@ function renderInline(text: string, depth = 0, allowLinks = true): string {
           output += projectMedia(projectPath, label, link.label, projectKind);
         } else if (localPath && localKind) {
           output += localMedia(localPath, label, link.label, localKind);
+        } else if (homePath) {
+          output += homeFileLink(homePath, label);
         } else if (char === "!") {
           output += label;
         } else {
@@ -371,6 +381,9 @@ function linkForDestination(destination: string, label: string): string {
   const externalHref = normalizeExternalHref(destination);
   if (externalHref) return externalLink(externalHref, label);
 
+  const homePath = normalizeHomeFileDestination(destination);
+  if (homePath) return homeFileLink(homePath, label);
+
   const projectPath = normalizeProjectFileDestination(destination);
   if (projectPath) return projectFileLink(projectPath, label);
 
@@ -388,6 +401,11 @@ function projectFileLink(path: string, label: string): string {
 function localFileLink(path: string, label: string): string {
   const escapedPath = escapeAttribute(path);
   return `<a href="#" data-local-file="${escapedPath}" title="Open ${escapedPath}">${label}</a>`;
+}
+
+function homeFileLink(path: string, label: string): string {
+  const escapedPath = escapeAttribute(path);
+  return `<a href="#" data-local-file="${escapedPath}" title="Preview ${escapedPath}">${label}</a>`;
 }
 
 function mediaKindForPath(path: string): Exclude<AttachmentKind, "file"> | undefined {
@@ -441,6 +459,15 @@ function normalizeInlineProjectFilePath(code: string): string | undefined {
   const hasExplicitRelativePrefix = candidate.startsWith("./") || candidate.startsWith(".\\");
   const isConventionalFileName = /^(?:Dockerfile|Makefile|README|LICENSE|CHANGELOG|Gemfile|Rakefile)$/i.test(fileName);
   return hasFileExtension || hasExplicitRelativePrefix || isConventionalFileName ? path : undefined;
+}
+
+function normalizeInlineHomeFilePath(code: string): string | undefined {
+  const candidate = code.trim().replace(/:\d+(?::\d+)?$/, "");
+  const path = normalizeHomeFileDestination(candidate);
+  if (!path) return undefined;
+
+  const fileName = path.split("/").at(-1) ?? "";
+  return /\.[A-Za-z\d_-]{1,16}$/.test(fileName) ? path : undefined;
 }
 
 function parseAutomaticLink(
@@ -579,7 +606,13 @@ export function normalizeProjectFileDestination(destination: string): string | u
 
   if (/[\u0000-\u001f\u007f]/.test(value)) return undefined;
   value = value.replaceAll("\\", "/");
-  if (!value || value.startsWith("/") || /^[A-Za-z][A-Za-z\d+.-]*:/.test(value)) {
+  if (
+    !value
+    || value.startsWith("/")
+    || value === "~"
+    || value.startsWith("~/")
+    || /^[A-Za-z][A-Za-z\d+.-]*:/.test(value)
+  ) {
     return undefined;
   }
 
@@ -587,6 +620,29 @@ export function normalizeProjectFileDestination(destination: string): string | u
   if (segments.some((segment) => segment === "..")) return undefined;
   const normalized = segments.filter((segment) => segment && segment !== ".").join("/");
   return normalized || undefined;
+}
+
+/** Normalize a user-home path without expanding it in the untrusted renderer. */
+export function normalizeHomeFileDestination(destination: string): string | undefined {
+  if (!destination || /[\u0000-\u001f\u007f]/.test(destination)) return undefined;
+
+  let value = destination.trim();
+  if (value.startsWith("<") && value.endsWith(">")) value = value.slice(1, -1).trim();
+  value = value.split(/[?#]/, 1)[0] ?? "";
+  try {
+    value = decodeURIComponent(value);
+  } catch {
+    return undefined;
+  }
+
+  if (/[\u0000-\u001f\u007f]/.test(value)) return undefined;
+  value = value.replaceAll("\\", "/");
+  if (!value.startsWith("~/")) return undefined;
+
+  const segments = value.slice(2).split("/");
+  if (segments.some((segment) => segment === "..")) return undefined;
+  const normalized = segments.filter((segment) => segment && segment !== ".").join("/");
+  return normalized ? `~/${normalized}` : undefined;
 }
 
 function countRun(text: string, start: number, marker: string): number {

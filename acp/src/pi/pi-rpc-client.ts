@@ -48,6 +48,9 @@ export interface PiRpcClientOptions {
 	readonly piEntry: string;
 	/** Working directory for the agent session (ACP session cwd). */
 	readonly cwd: string;
+	/** Explicit startup model for a brand-new Pix session. */
+	readonly provider?: string | undefined;
+	readonly model?: string | undefined;
 	readonly args?: readonly string[] | undefined;
 	readonly env?: Record<string, string> | undefined;
 }
@@ -343,6 +346,8 @@ function toSdkOptions(options: PiRpcClientOptions): RpcClientOptions {
 		cliPath: options.piEntry,
 		cwd: options.cwd,
 	};
+	if (options.provider) sdkOptions.provider = options.provider;
+	if (options.model) sdkOptions.model = options.model;
 	if (options.args) sdkOptions.args = [...options.args];
 	if (options.env) sdkOptions.env = options.env;
 	return sdkOptions;

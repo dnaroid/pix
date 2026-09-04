@@ -337,6 +337,15 @@ fn read_project_file(workspace: String, path: String) -> Result<ProjectFilePrevi
 }
 
 #[tauri::command]
+fn read_home_file(app: AppHandle, path: String) -> Result<ProjectFilePreview, String> {
+    let home = app
+        .path()
+        .home_dir()
+        .map_err(|error| format!("failed to resolve the home directory: {error}"))?;
+    read_home_file_from(&home, Path::new(&path), MAX_PROJECT_FILE_PREVIEW_BYTES)
+}
+
+#[tauri::command]
 fn resolve_project_media(
     app: AppHandle,
     state: State<'_, AttachmentPathState>,
@@ -345,6 +354,25 @@ fn resolve_project_media(
 ) -> Result<AttachmentFile, String> {
     let file = resolve_project_media_from(Path::new(&workspace), Path::new(&path))?;
     state.approve(&app, PathBuf::from(&file.path))?;
+    Ok(file)
+}
+
+#[tauri::command]
+fn resolve_home_media(
+    app: AppHandle,
+    state: State<'_, AttachmentPathState>,
+    path: String,
+) -> Result<AttachmentFile, String> {
+    let home = app
+        .path()
+        .home_dir()
+        .map_err(|error| format!("failed to resolve the home directory: {error}"))?;
+    let (_, file_path) = resolve_home_file_path(&home, Path::new(&path))?;
+    if !is_supported_project_media(&file_path) {
+        return Err(format!("{path} is not a supported image or video"));
+    }
+    let file = attachment_file(&file_path)?;
+    state.approve(&app, file_path)?;
     Ok(file)
 }
 
@@ -412,41 +440,105 @@ fn read_project_file_from(
     max_bytes: u64,
 ) -> Result<ProjectFilePreview, String> {
     let (root, file_path) = resolve_project_file_path(workspace, relative_path)?;
-
-    let metadata = fs::metadata(&file_path)
-        .map_err(|error| format!("failed to inspect {}: {error}", file_path.display()))?;
-    if metadata.len() > max_bytes {
-        return Err(format!(
-            "{} is too large to preview (maximum {} MB)",
-            relative_path.display(),
-            max_bytes / 1024 / 1024,
-        ));
-    }
-
-    let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    fs::File::open(&file_path)
-        .map_err(|error| format!("failed to open {}: {error}", file_path.display()))?
-        .take(max_bytes + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|error| format!("failed to read {}: {error}", file_path.display()))?;
-    if bytes.len() as u64 > max_bytes {
-        return Err(format!(
-            "{} grew beyond the preview limit",
-            relative_path.display()
-        ));
-    }
-    let content = String::from_utf8(bytes)
-        .map_err(|_| format!("{} is not a UTF-8 text file", relative_path.display()))?;
     let display_path = file_path
         .strip_prefix(&root)
         .unwrap_or(relative_path)
         .to_string_lossy()
         .replace('\\', "/");
+    read_text_file_from(&file_path, display_path, max_bytes)
+}
+
+fn read_home_file_from(
+    home: &Path,
+    home_path: &Path,
+    max_bytes: u64,
+) -> Result<ProjectFilePreview, String> {
+    let (root, file_path) = resolve_home_file_path(home, home_path)?;
+    let relative = file_path
+        .strip_prefix(&root)
+        .map_err(|_| "home file path resolves outside the home directory".to_owned())?;
+    let display_path = format!("~/{}", relative.to_string_lossy().replace('\\', "/"));
+    read_text_file_from(&file_path, display_path, max_bytes)
+}
+
+fn read_text_file_from(
+    file_path: &Path,
+    display_path: String,
+    max_bytes: u64,
+) -> Result<ProjectFilePreview, String> {
+    let metadata = fs::metadata(file_path)
+        .map_err(|error| format!("failed to inspect {}: {error}", file_path.display()))?;
+    if metadata.len() > max_bytes {
+        return Err(format!(
+            "{} is too large to preview (maximum {} MB)",
+            display_path,
+            max_bytes / 1024 / 1024,
+        ));
+    }
+
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    fs::File::open(file_path)
+        .map_err(|error| format!("failed to open {}: {error}", file_path.display()))?
+        .take(max_bytes + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("failed to read {}: {error}", file_path.display()))?;
+    if bytes.len() as u64 > max_bytes {
+        return Err(format!("{display_path} grew beyond the preview limit"));
+    }
+    let content =
+        String::from_utf8(bytes).map_err(|_| format!("{display_path} is not a UTF-8 text file"))?;
 
     Ok(ProjectFilePreview {
         path: display_path,
         content,
     })
+}
+
+fn resolve_home_file_path(home: &Path, home_path: &Path) -> Result<(PathBuf, PathBuf), String> {
+    let mut components = home_path.components();
+    if !matches!(components.next(), Some(Component::Normal(value)) if value == "~") {
+        return Err("home file path must start with ~/".to_owned());
+    }
+
+    let relative_path = components.as_path();
+    if relative_path.as_os_str().is_empty()
+        || relative_path.is_absolute()
+        || relative_path.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+    {
+        return Err("home file path must stay inside the home directory".to_owned());
+    }
+
+    let root = fs::canonicalize(home).map_err(|error| {
+        format!(
+            "failed to resolve home directory {}: {error}",
+            home.display()
+        )
+    })?;
+    if !root.is_dir() {
+        return Err(format!("{} is not a home directory", root.display()));
+    }
+
+    let file_path = fs::canonicalize(root.join(relative_path)).map_err(|error| {
+        format!(
+            "failed to resolve home file {}: {error}",
+            home_path.display()
+        )
+    })?;
+    if !file_path.starts_with(&root) {
+        return Err("home file path resolves outside the home directory".to_owned());
+    }
+
+    let metadata = fs::metadata(&file_path)
+        .map_err(|error| format!("failed to inspect {}: {error}", file_path.display()))?;
+    if !metadata.is_file() {
+        return Err(format!("{} is not a file", home_path.display()));
+    }
+    Ok((root, file_path))
 }
 
 fn resolve_project_file_path(
@@ -1062,7 +1154,9 @@ pub fn run() {
             open_attachment,
             open_local_file,
             read_project_file,
+            read_home_file,
             resolve_project_media,
+            resolve_home_media,
             resolve_local_media,
             read_project_tasks,
             write_project_tasks,
@@ -1118,6 +1212,23 @@ mod tests {
         assert!(read_project_file_from(&workspace, Path::new("large.txt"), 4).is_err());
         assert!(read_project_file_from(&workspace, Path::new("binary.bin"), 1024).is_err());
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
+    fn reads_home_relative_files_without_treating_them_as_project_paths() {
+        let home = temporary_workspace("home-preview");
+        fs::create_dir_all(home.join(".config/pi")).expect("create config directory");
+        fs::write(home.join(".config/pi/pix.jsonc"), "{\n  // Pix config\n}\n")
+            .expect("write config");
+
+        let preview = read_home_file_from(&home, Path::new("~/.config/pi/pix.jsonc"), 1024)
+            .expect("read home file");
+
+        assert_eq!(preview.path, "~/.config/pi/pix.jsonc");
+        assert_eq!(preview.content, "{\n  // Pix config\n}\n");
+        assert!(read_home_file_from(&home, Path::new("~/../secret.txt"), 1024).is_err());
+        assert!(read_home_file_from(&home, Path::new(".config/pi/pix.jsonc"), 1024).is_err());
+        fs::remove_dir_all(home).expect("remove temporary home");
     }
 
     #[test]
