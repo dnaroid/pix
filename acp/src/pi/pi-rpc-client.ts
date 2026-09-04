@@ -12,7 +12,6 @@ import {
 	RpcClient,
 	type JsonAgentSessionEvent,
 	type RpcClientOptions,
-	type RpcEventListener,
 	type RpcExtensionUIRequest,
 	type RpcExtensionUIResponse,
 } from "@earendil-works/pi-coding-agent";
@@ -162,6 +161,8 @@ export interface PiClient {
 export class PiRpcClient implements PiClient {
 	private client: RpcClient | undefined;
 	private readonly options: RpcClientOptions;
+	private readonly eventListeners = new Set<PiEventListener>();
+	private unsubscribeClientEvents: (() => void) | undefined;
 	private readonly exitListeners = new Set<(error: Error) => void>();
 	private exitError: Error | undefined;
 
@@ -177,23 +178,33 @@ export class PiRpcClient implements PiClient {
 		if (this.client) return;
 		const client = new RpcClient(this.options);
 		this.client = client;
-		await client.start();
+		// Subscribe before spawning: extensions can emit session_start UI events
+		// during RpcClient.start(), before the ACP session/new response exists.
+		this.unsubscribeClientEvents = client.onEvent((event) => {
+			for (const listener of this.eventListeners) listener(event as PiEvent);
+		});
+		try {
+			await client.start();
+		} catch (error) {
+			this.unsubscribeClientEvents?.();
+			this.unsubscribeClientEvents = undefined;
+			this.client = undefined;
+			throw error;
+		}
 		this.watchExit(client);
 	}
 
 	async stop(): Promise<void> {
 		const client = this.client;
 		this.client = undefined;
+		this.unsubscribeClientEvents?.();
+		this.unsubscribeClientEvents = undefined;
 		if (client) await client.stop();
 	}
 
 	onEvent(listener: PiEventListener): () => void {
-		const client = this.client;
-		if (!client) throw new Error("PiRpcClient.onEvent called before start()");
-		// A listener accepting the wider PiEvent satisfies RpcEventListener
-		// because JsonAgentSessionEvent is a subset of PiEvent; extension UI
-		// requests arrive through the same stdout line stream.
-		return client.onEvent(listener as RpcEventListener);
+		this.eventListeners.add(listener);
+		return () => this.eventListeners.delete(listener);
 	}
 
 	onExit(listener: (error: Error) => void): () => void {

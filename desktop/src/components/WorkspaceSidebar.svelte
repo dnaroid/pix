@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Activity from "@lucide/svelte/icons/activity";
   import Bug from "@lucide/svelte/icons/bug";
   import CheckCircle2 from "@lucide/svelte/icons/check-circle-2";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
@@ -34,6 +35,8 @@
     type ProjectTaskType,
   } from "../lib/project-tasks";
   import { projectName } from "../lib/recent-projects";
+  import { sessionTodoCounts, type SessionTodoSnapshot } from "../lib/session-todos";
+  import SessionActivityPanel from "./SessionActivityPanel.svelte";
 
   type TaskDraft = {
     title: string;
@@ -43,6 +46,10 @@
     priority: ProjectTaskPriority;
   };
 
+  type SidebarTab = "tasks" | "project" | "session";
+
+  const SIDEBAR_TABS: readonly SidebarTab[] = ["tasks", "project", "session"];
+
   let {
     workspace,
     tasks,
@@ -51,6 +58,8 @@
     storageError,
     activeTaskId,
     sessionReady,
+    activeSessionId,
+    todoSnapshot,
     onCreate,
     onUpdate,
     onDelete,
@@ -65,6 +74,8 @@
     storageError: boolean;
     activeTaskId: string | null;
     sessionReady: boolean;
+    activeSessionId: string | null;
+    todoSnapshot: SessionTodoSnapshot | undefined;
     onCreate: (draft: TaskDraft) => void;
     onUpdate: (taskId: string, draft: TaskDraft) => void;
     onDelete: (taskId: string) => void;
@@ -82,7 +93,7 @@
 
   let collapsed = $state(false);
   let sidebarWidth = $state(DEFAULT_WIDTH);
-  let activeTab = $state<"tasks" | "project">("tasks");
+  let activeTab = $state<SidebarTab>("tasks");
   let filters = $state<ProjectTaskFilters>({ type: "all", status: "all", priority: "all" });
   let editorOpen = $state(false);
   let editingTaskId = $state<string | null>(null);
@@ -100,6 +111,8 @@
   const visibleTasks = $derived(filterProjectTasks(tasks, filters));
   const busy = $derived(loading || saving || storageError || activeTaskId !== null);
   const doneCount = $derived(tasks.filter((task) => task.status === "done").length);
+  const todoCounts = $derived(sessionTodoCounts(todoSnapshot));
+  const openTodoCount = $derived(todoCounts.pending + todoCounts.in_progress + todoCounts.deferred);
 
   onMount(() => {
     try {
@@ -123,9 +136,28 @@
     }
   }
 
-  function selectTab(tab: "tasks" | "project"): void {
+  function selectTab(tab: SidebarTab): void {
     activeTab = tab;
     if (collapsed) setCollapsed(false);
+  }
+
+  function navigateTabs(event: KeyboardEvent, tab: SidebarTab): void {
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
+    const currentIndex = SIDEBAR_TABS.indexOf(tab);
+    let nextIndex: number;
+    if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % SIDEBAR_TABS.length;
+    else if (event.key === "ArrowLeft") nextIndex = (currentIndex - 1 + SIDEBAR_TABS.length) % SIDEBAR_TABS.length;
+    else if (event.key === "Home") nextIndex = 0;
+    else if (event.key === "End") nextIndex = SIDEBAR_TABS.length - 1;
+    else return;
+
+    event.preventDefault();
+    const nextTab = SIDEBAR_TABS[nextIndex];
+    const currentTarget = event.currentTarget as HTMLButtonElement;
+    if (!nextTab) return;
+    activeTab = nextTab;
+    const tabButtons = currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]');
+    tabButtons?.[nextIndex]?.focus();
   }
 
   function startResize(event: PointerEvent): void {
@@ -229,13 +261,14 @@
     if (priority === "medium") return "text-[var(--tool-info)]";
     return "text-[var(--tool-muted)]";
   }
+
 </script>
 
 <aside
   class="relative flex min-h-0 shrink-0 border-r border-sidebar-border bg-sidebar text-sidebar-foreground"
   class:select-none={resizePointerId !== null}
   style:width={`${collapsed ? COLLAPSED_WIDTH : sidebarWidth}px`}
-  aria-label="Project sidebar"
+  aria-label="Workspace sidebar"
 >
   {#if collapsed}
     <div class="flex h-full w-full flex-col items-center gap-1 py-2">
@@ -243,7 +276,7 @@
         class="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
         type="button"
         title="Expand sidebar"
-        aria-label="Expand project sidebar"
+        aria-label="Expand workspace sidebar"
         onclick={() => setCollapsed(false)}
       ><PanelLeftOpen class="h-4 w-4" aria-hidden="true" /></button>
       <div class="my-1 h-px w-6 bg-sidebar-border"></div>
@@ -264,39 +297,68 @@
         aria-label="Project overview"
         onclick={() => selectTab("project")}
       ><Folder class="h-4 w-4" aria-hidden="true" /></button>
+      <button
+        class={["relative grid h-8 w-8 place-items-center rounded-lg hover:bg-sidebar-accent focus-visible:outline-2 focus-visible:outline-ring", activeTab === "session" ? "bg-sidebar-accent text-foreground" : "text-muted-foreground"]}
+        type="button"
+        title="Session"
+        aria-label={`Session todos, ${openTodoCount} open`}
+        onclick={() => selectTab("session")}
+      >
+        <Activity class="h-4 w-4" aria-hidden="true" />
+        {#if openTodoCount > 0}<span class="absolute top-0.5 right-0.5 h-1.5 w-1.5 rounded-full bg-[var(--tool-warning)]" aria-hidden="true"></span>{/if}
+      </button>
     </div>
   {:else}
     <div class="grid min-w-0 flex-1 grid-rows-[40px_auto_minmax(0,1fr)]">
       <div class="flex items-center justify-between border-b border-sidebar-border px-2.5">
-        <strong class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs font-semibold">Project</strong>
+        <strong class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs font-semibold">Workspace</strong>
         <button
           class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
           type="button"
           title="Collapse sidebar"
-          aria-label="Collapse project sidebar"
+          aria-label="Collapse workspace sidebar"
           onclick={() => setCollapsed(true)}
         ><PanelLeftClose class="h-4 w-4" aria-hidden="true" /></button>
       </div>
 
-      <div class="grid grid-cols-2 gap-1 border-b border-sidebar-border p-1.5" role="tablist" aria-label="Project sections">
+      <div class="grid grid-cols-3 gap-1 border-b border-sidebar-border p-1.5" role="tablist" aria-label="Workspace sections">
         <button
+          id="workspace-tasks-tab"
           class={["flex h-7 items-center justify-center gap-1.5 rounded-md text-[11px] font-medium hover:bg-sidebar-accent focus-visible:outline-2 focus-visible:outline-ring", activeTab === "tasks" ? "bg-sidebar-accent text-foreground" : "text-muted-foreground"]}
           type="button"
           role="tab"
           aria-selected={activeTab === "tasks"}
+          aria-controls="workspace-tasks-panel"
+          tabindex={activeTab === "tasks" ? 0 : -1}
           onclick={() => activeTab = "tasks"}
+          onkeydown={(event) => navigateTabs(event, "tasks")}
         ><ListTodo class="h-3.5 w-3.5" aria-hidden="true" />Tasks <span class="text-[10px] opacity-70">{tasks.length}</span></button>
         <button
+          id="workspace-project-tab"
           class={["flex h-7 items-center justify-center gap-1.5 rounded-md text-[11px] font-medium hover:bg-sidebar-accent focus-visible:outline-2 focus-visible:outline-ring", activeTab === "project" ? "bg-sidebar-accent text-foreground" : "text-muted-foreground"]}
           type="button"
           role="tab"
           aria-selected={activeTab === "project"}
+          aria-controls="workspace-project-panel"
+          tabindex={activeTab === "project" ? 0 : -1}
           onclick={() => activeTab = "project"}
+          onkeydown={(event) => navigateTabs(event, "project")}
         ><Folder class="h-3.5 w-3.5" aria-hidden="true" />Project</button>
+        <button
+          id="workspace-session-tab"
+          class={["flex h-7 items-center justify-center gap-1.5 rounded-md text-[11px] font-medium hover:bg-sidebar-accent focus-visible:outline-2 focus-visible:outline-ring", activeTab === "session" ? "bg-sidebar-accent text-foreground" : "text-muted-foreground"]}
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "session"}
+          aria-controls="workspace-session-panel"
+          tabindex={activeTab === "session" ? 0 : -1}
+          onclick={() => activeTab = "session"}
+          onkeydown={(event) => navigateTabs(event, "session")}
+        ><Activity class="h-3.5 w-3.5" aria-hidden="true" />Session</button>
       </div>
 
       {#if activeTab === "tasks"}
-        <section class="grid min-h-0 grid-rows-[auto_minmax(0,1fr)]" aria-label="Project tasks">
+        <section id="workspace-tasks-panel" class="grid min-h-0 grid-rows-[auto_minmax(0,1fr)]" role="tabpanel" aria-labelledby="workspace-tasks-tab" tabindex="0">
           <div class="space-y-2 border-b border-sidebar-border p-2.5">
             <div class="flex items-center justify-between gap-2">
               <span class="text-[10px] text-muted-foreground">{visibleTasks.length} shown · {doneCount} done</span>
@@ -400,8 +462,8 @@
             {/if}
           </div>
         </section>
-      {:else}
-        <section class="min-h-0 overflow-y-auto p-3" aria-label="Project overview">
+      {:else if activeTab === "project"}
+        <section id="workspace-project-panel" class="min-h-0 overflow-y-auto p-3" role="tabpanel" aria-labelledby="workspace-project-tab" tabindex="0">
           <div class="rounded-xl border border-sidebar-border bg-background/55 p-3 shadow-xs">
             <Folder class="mb-3 h-5 w-5 text-primary" aria-hidden="true" />
             <h2 class="break-words text-sm font-semibold text-foreground">{workspace ? projectName(workspace) : "No project selected"}</h2>
@@ -413,6 +475,10 @@
           </dl>
           <p class="mt-3 text-[10px] leading-4 text-muted-foreground">Project tasks are shared through <code class="rounded bg-muted px-1 py-0.5 font-mono">.pi/tasks.json</code>.</p>
         </section>
+      {:else}
+        <div id="workspace-session-panel" class="grid min-h-0" role="tabpanel" aria-labelledby="workspace-session-tab" tabindex="0">
+          <SessionActivityPanel {activeSessionId} {todoSnapshot} />
+        </div>
       {/if}
     </div>
 
@@ -421,7 +487,7 @@
     <div
       class="absolute inset-y-0 -right-[3px] z-10 w-[6px] cursor-col-resize touch-none after:absolute after:inset-y-0 after:left-[2px] after:w-px hover:after:bg-primary"
       role="separator"
-      aria-label="Resize project sidebar"
+      aria-label="Resize workspace sidebar"
       aria-orientation="vertical"
       aria-valuemin={MIN_WIDTH}
       aria-valuemax={MAX_WIDTH}

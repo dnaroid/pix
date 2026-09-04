@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { AcpClient, type AcpExit, type AcpTransport, type AcpTransportHandlers } from "./acp-client";
+import { PIX_SESSION_STATE_METHOD } from "./session-state";
 
 class FakeTransport implements AcpTransport {
   handlers?: AcpTransportHandlers;
@@ -80,6 +81,31 @@ describe("ACP JSON-RPC client", () => {
       jsonrpc: "2.0",
       id: "dialog-1",
       result: { action: "accept", content: { value: "yes" } },
+    });
+    await client.dispose();
+  });
+
+  it("validates and dispatches private session-state notifications", async () => {
+    const transport = new FakeTransport();
+    const onSessionState = vi.fn();
+    const client = await startedClient(transport, { onSessionState });
+
+    transport.message({
+      jsonrpc: "2.0",
+      method: PIX_SESSION_STATE_METHOD,
+      params: { sessionId: "session-1", channel: "pi-tools-suite:todo:state", data: { version: 1 } },
+    });
+    transport.message({
+      jsonrpc: "2.0",
+      method: PIX_SESSION_STATE_METHOD,
+      params: { sessionId: "", channel: "pi-tools-suite:todo:state", data: {} },
+    });
+
+    expect(onSessionState).toHaveBeenCalledOnce();
+    expect(onSessionState).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      channel: "pi-tools-suite:todo:state",
+      data: { version: 1 },
     });
     await client.dispose();
   });

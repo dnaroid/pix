@@ -67,6 +67,16 @@ try {
 	const created = await withTimeout(waitForMessage((message) => message.id === 2), 5_000, "session/new response");
 	assert.equal(created.error, undefined, JSON.stringify(created.error));
 	assert.equal(typeof created.result?.sessionId, "string");
+	assert.ok(
+		messages.some(
+			(message) =>
+				message.method === "pix/session-state" &&
+				message.params?.sessionId === created.result.sessionId &&
+				message.params?.channel === "fixture:startup" &&
+				message.params?.data?.ready === true,
+		),
+		"session/new forwarded extension state emitted during pi startup",
+	);
 
 	send({
 		jsonrpc: "2.0",

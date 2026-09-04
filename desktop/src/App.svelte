@@ -55,7 +55,13 @@
   import StatusBar from "./components/StatusBar.svelte";
   import ElicitationDialog from "./components/ElicitationDialog.svelte";
   import PreviewDialog from "./components/PreviewDialog.svelte";
-  import ProjectTaskSidebar from "./components/ProjectTaskSidebar.svelte";
+  import WorkspaceSidebar from "./components/WorkspaceSidebar.svelte";
+  import type { SessionStateNotification } from "./lib/session-state";
+  import {
+    sessionTodoSnapshot,
+    updateSessionTodoSnapshots,
+    type SessionTodoSnapshot,
+  } from "./lib/session-todos";
   import type { ProjectFilePreview } from "./lib/project-files";
   import {
     canMovePreviewHistory,
@@ -133,6 +139,7 @@
   let tasksSaving = $state(false);
   let taskLoadFailed = $state(false);
   let taskActionId = $state<string | null>(null);
+  let todoSnapshots = $state<Map<string, SessionTodoSnapshot>>(new Map());
   let imagePromptSupported = false;
   let transcriptPane = $state<HTMLDivElement | null>(null);
   let localMessageId = 0;
@@ -164,6 +171,7 @@
   const activePreview = $derived(currentPreview(previewHistory));
   const canGoBackInPreview = $derived(canMovePreviewHistory(previewHistory, -1));
   const canGoForwardInPreview = $derived(canMovePreviewHistory(previewHistory, 1));
+  const activeTodoSnapshot = $derived(activeSessionId ? todoSnapshots.get(activeSessionId) : undefined);
 
   $effect(() => {
     const key = attachmentDraftKey;
@@ -235,6 +243,7 @@
     errorMessage = null;
     const next = new AcpClient(new TauriAcpTransport(), {
       onSessionUpdate: handleSessionUpdate,
+      onSessionState: handleSessionState,
       onElicitation: requestElicitation,
       onDiagnostic: (line) => {
         diagnostics = [...diagnostics.slice(-49), line];
@@ -246,6 +255,7 @@
         pendingElicitation?.resolve({ action: "cancel" });
         pendingElicitation = null;
         activeSessionId = null;
+        todoSnapshots = new Map();
         transcript = emptyTranscript;
         configOptions = [];
         status = exit.requested ? "stopped" : "error";
@@ -290,6 +300,7 @@
     pendingElicitation?.resolve({ action: "cancel" });
     pendingElicitation = null;
     activeSessionId = null;
+    todoSnapshots = new Map();
     transcript = emptyTranscript;
     configOptions = [];
     promptRunning = false;
@@ -324,6 +335,12 @@
       transcript = nextTranscript;
       void scrollToLatest();
     });
+  }
+
+  function handleSessionState(notification: SessionStateNotification): void {
+    const snapshot = sessionTodoSnapshot(notification);
+    if (!snapshot) return;
+    todoSnapshots = updateSessionTodoSnapshots(todoSnapshots, notification.sessionId, snapshot);
   }
 
   async function registerTranscriptAttachments(nextTranscript: TranscriptState): Promise<void> {
@@ -373,6 +390,7 @@
       sessions = [];
       taskLoadGeneration += 1;
       taskDocument = EMPTY_TASK_DOCUMENT;
+      todoSnapshots = new Map();
       taskActionId = null;
       taskLoadFailed = false;
       restoredSessionTabs = null;
@@ -1259,7 +1277,7 @@
   </header>
 
   <div class="flex min-h-0 min-w-0">
-    <ProjectTaskSidebar
+    <WorkspaceSidebar
       {workspace}
       tasks={taskDocument.tasks}
       loading={tasksLoading}
@@ -1267,6 +1285,8 @@
       storageError={taskLoadFailed}
       activeTaskId={taskActionId}
       sessionReady={canUseSession && !promptRunning}
+      {activeSessionId}
+      todoSnapshot={activeTodoSnapshot}
       onCreate={createProjectTask}
       onUpdate={updateProjectTask}
       onDelete={deleteProjectTask}

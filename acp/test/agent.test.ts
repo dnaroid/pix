@@ -19,6 +19,7 @@ import type {
 	SessionInfo as PiSessionInfo,
 } from "@earendil-works/pi-coding-agent";
 import { PixAcpAgent } from "../src/acp/pix-acp-agent.js";
+import { PIX_SESSION_STATE_METHOD } from "../src/acp/session-state-bridge.js";
 import type {
 	AutocompleteCompleterInput,
 	AutocompleteResponse,
@@ -74,6 +75,7 @@ class FakePiClient implements PiClient {
 	started = false;
 	startError: Error | undefined;
 	startGate: Promise<void> | undefined;
+	readonly eventsOnStart: PiEvent[] = [];
 	state: PiSessionState;
 	private listeners: PiEventListener[] = [];
 	private exitListeners: ((error: Error) => void)[] = [];
@@ -94,6 +96,7 @@ class FakePiClient implements PiClient {
 		await this.startGate;
 		if (this.startError) throw this.startError;
 		this.started = true;
+		for (const event of this.eventsOnStart) this.emit(event);
 	}
 
 	async stop(): Promise<void> {
@@ -330,11 +333,55 @@ test("session/new spawns and starts one pi client per session with the cwd", asy
 	assert.notEqual(sessionIds[0], sessionIds[1]);
 	assert.deepEqual(options.map((o) => o.cwd), ["/tmp/one", "/tmp/two"]);
 	assert.ok(options.every((o) => o.piEntry === "/test/pi-rpc-entry.js"));
+	assert.ok(options.every((o) => o.env?.PIX_ACP_SESSION_STATE_BRIDGE === "1"));
 	assert.equal(clients.length, 2);
 	assert.ok(clients[0].started, "first pi client started");
 	assert.ok(clients[1].started, "second pi client started");
 	assert.ok(adapter.getSession(sessionIds[0]!), "first session registered");
 	assert.ok(adapter.getSession(sessionIds[1]!), "second session registered");
+});
+
+test("session/new forwards structured extension state emitted during pi startup", async () => {
+	let fake: FakePiClient | undefined;
+	const notifications: Array<{ sessionId: string; channel: string; data: unknown }> = [];
+	const { adapter } = createTestAdapter({
+		createPiClient: () => {
+			fake = new FakePiClient();
+			fake.eventsOnStart.push({
+				type: "extension_ui_request",
+				id: "startup-state",
+				method: "setWidget",
+				widgetKey: "pix.session-state",
+				widgetLines: ["pi-tools-suite:todo:state", JSON.stringify({ version: 1, checkedAt: 10 })],
+			});
+			return fake;
+		},
+	});
+
+	const sessionId = await connect(
+		adapter,
+		async (cx) => (await cx.buildSession("/tmp/startup-state").start()).sessionId,
+		(app) => {
+			const customNotifications = app as unknown as {
+				onNotification(
+					method: string,
+					parser: (params: unknown) => typeof notifications[number],
+					handler: (ctx: { params: typeof notifications[number] }) => void,
+				): void;
+			};
+			customNotifications.onNotification(PIX_SESSION_STATE_METHOD, (params) => params as typeof notifications[number], (ctx) => {
+				notifications.push(ctx.params);
+			});
+		},
+	);
+	await waitFor(() => notifications.length === 1);
+
+	assert.equal(fake?.started, true);
+	assert.deepEqual(notifications, [{
+		sessionId,
+		channel: "pi-tools-suite:todo:state",
+		data: { version: 1, checkedAt: 10 },
+	}]);
 });
 
 test("session/new starts pi with the cwd Pix default model and thinking level", async () => {
@@ -355,6 +402,7 @@ test("session/new starts pi with the cwd Pix default model and thinking level", 
 	assert.deepEqual(options[0], {
 		piEntry: "/test/pi-rpc-entry.js",
 		cwd: "/tmp/pix-default",
+		env: { PIX_ACP_SESSION_STATE_BRIDGE: "1" },
 		provider: "openai-codex",
 		model: "gpt-5.6-sol",
 		args: ["--thinking", "high"],
@@ -1113,6 +1161,7 @@ test("session/resume switches without replaying history", async () => {
 	assert.deepEqual(harness.options[1], {
 		piEntry: "/test/pi-rpc-entry.js",
 		cwd: "/tmp/proj",
+		env: { PIX_ACP_SESSION_STATE_BRIDGE: "1" },
 	}, "resumed session history must select its own model and thinking level");
 	assert.equal(notifications.length, 0, "resume replays nothing");
 });

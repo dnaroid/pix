@@ -89,10 +89,16 @@ import { SessionMapStore, type SessionMapRecord } from "./session-map.js";
 import { replaySessionHistory } from "./session-replay.js";
 import { loadTuiTabSnapshot, type TuiTabSnapshot } from "./tui-tabs.js";
 import { cancelledResponse, fromElicitationResponse, toElicitationRequest } from "./ui-request-bridge.js";
+import {
+	PIX_SESSION_STATE_METHOD,
+	sessionStateEnvelopeFromUiRequest,
+	type PixSessionStateNotification,
+} from "./session-state-bridge.js";
 
 /** Minimal shape of the handler `client` context used for notifications and elicitations. */
 type ClientCaller = {
 	notify(method: "session/update", params: SessionNotification): Promise<void>;
+	notify(method: typeof PIX_SESSION_STATE_METHOD, params: PixSessionStateNotification): Promise<void>;
 	request(method: "elicitation/create", params: CreateElicitationRequest): Promise<CreateElicitationResponse>;
 };
 
@@ -465,19 +471,6 @@ export class PixAcpAgent {
 	): Promise<AgentSessionState> {
 		if (this.disposed) throw new RequestError(ERROR_SERVER, "adapter is shutting down");
 		const pi = this.options.createPiClient(piClientOptions(this.options.piEntry, cwd, defaultModel));
-		try {
-			await pi.start();
-		} catch (error) {
-			void pi.stop().catch(() => {});
-			throw new RequestError(
-				ERROR_SERVER,
-				`failed to start pi (${this.options.piEntry}): ${stringifyUnknown(error)}`,
-			);
-		}
-		if (this.disposed) {
-			await pi.stop().catch(() => {});
-			throw new RequestError(ERROR_SERVER, "adapter is shutting down");
-		}
 		const translator = new EventTranslator({ sessionId: acpSessionId, cwd });
 		const session: AgentSessionState = {
 			acpSessionId,
@@ -488,8 +481,27 @@ export class PixAcpAgent {
 			activeRun: undefined,
 			pendingDialogIds: new Set(),
 		};
+		// Register routing before start so session_start extension state emitted
+		// during RPC startup is delivered instead of being dropped.
 		this.sessions.set(acpSessionId, session);
-		pi.onEvent((event) => this.onPiEvent(session, event));
+		const unsubscribeEvents = pi.onEvent((event) => this.onPiEvent(session, event));
+		try {
+			await pi.start();
+		} catch (error) {
+			unsubscribeEvents();
+			if (this.sessions.get(acpSessionId) === session) this.sessions.delete(acpSessionId);
+			void pi.stop().catch(() => {});
+			throw new RequestError(
+				ERROR_SERVER,
+				`failed to start pi (${this.options.piEntry}): ${stringifyUnknown(error)}`,
+			);
+		}
+		if (this.disposed) {
+			unsubscribeEvents();
+			if (this.sessions.get(acpSessionId) === session) this.sessions.delete(acpSessionId);
+			await pi.stop().catch(() => {});
+			throw new RequestError(ERROR_SERVER, "adapter is shutting down");
+		}
 		pi.onExit((error) => this.onPiExit(session, error));
 		return session;
 	}
@@ -611,6 +623,16 @@ export class PixAcpAgent {
 
 	/** Bridges one extension UI request to ACP and answers pi. */
 	private async handleExtensionUiRequest(session: AgentSessionState, request: RpcExtensionUIRequest): Promise<void> {
+		const state = sessionStateEnvelopeFromUiRequest(request);
+		if (state) {
+			await session.client.notify(PIX_SESSION_STATE_METHOD, {
+				sessionId: session.acpSessionId,
+				...state,
+			}).catch((error: unknown) => {
+				this.options.logger.warn(`${PIX_SESSION_STATE_METHOD} failed: ${stringifyUnknown(error)}`);
+			});
+			return;
+		}
 		const elicitation = toElicitationRequest(request, {
 			sessionId: session.acpSessionId,
 			elicitationId: randomUUID(),
@@ -909,10 +931,14 @@ function piClientOptions(
 	cwd: string,
 	defaultModel?: PixDefaultModel,
 ): PiRpcClientOptions {
-	if (!defaultModel) return { piEntry, cwd };
-	const selected = {
+	const base = {
 		piEntry,
 		cwd,
+		env: { PIX_ACP_SESSION_STATE_BRIDGE: "1" },
+	};
+	if (!defaultModel) return base;
+	const selected = {
+		...base,
 		provider: defaultModel.provider,
 		model: defaultModel.modelId,
 	};

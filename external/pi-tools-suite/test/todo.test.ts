@@ -240,6 +240,63 @@ describe.serial("todo tool", () => {
 		expect(typeof emitted[0].data.checkedAt).toBe("number");
 	});
 
+	test.serial("mirrors live todo state through the reserved RPC widget envelope", async () => {
+		const { registerTodoTool, TODO_STATE_EVENT } = await loadTodoModule();
+		const pi = new FakePi();
+		const widgets: Array<{ key: string; lines: string[] | undefined }> = [];
+		registerTodoTool(pi as any);
+
+		const previousBridge = process.env.PIX_ACP_SESSION_STATE_BRIDGE;
+		process.env.PIX_ACP_SESSION_STATE_BRIDGE = "1";
+		try {
+			await pi.tools.get("todo").execute(
+				"call",
+				{ action: "create", subject: "Desktop state" },
+				undefined,
+				undefined,
+				{
+					mode: "rpc",
+					ui: { setWidget: (key: string, lines: string[] | undefined) => widgets.push({ key, lines }) },
+					sessionManager: { getSessionId: () => "pi-session" },
+				},
+			);
+		} finally {
+			if (previousBridge === undefined) delete process.env.PIX_ACP_SESSION_STATE_BRIDGE;
+			else process.env.PIX_ACP_SESSION_STATE_BRIDGE = previousBridge;
+		}
+
+		expect(widgets).toHaveLength(1);
+		expect(widgets[0]?.key).toBe("pix.session-state");
+		expect(widgets[0]?.lines?.[0]).toBe(TODO_STATE_EVENT);
+		expect(JSON.parse(widgets[0]?.lines?.[1] ?? "null")).toMatchObject({
+			version: 1,
+			sessionId: "pi-session",
+			details: { tasks: [{ subject: "Desktop state", status: "pending" }] },
+		});
+	});
+
+	test.serial("does not expose the private state widget to other RPC hosts", async () => {
+		const { registerTodoTool } = await loadTodoModule();
+		const pi = new FakePi();
+		const widgets: unknown[] = [];
+		registerTodoTool(pi as any);
+		const previousBridge = process.env.PIX_ACP_SESSION_STATE_BRIDGE;
+		delete process.env.PIX_ACP_SESSION_STATE_BRIDGE;
+		try {
+			await pi.tools.get("todo").execute(
+				"call",
+				{ action: "create", subject: "Private state" },
+				undefined,
+				undefined,
+				{ mode: "rpc", ui: { setWidget: (...args: unknown[]) => widgets.push(args) } },
+			);
+		} finally {
+			if (previousBridge !== undefined) process.env.PIX_ACP_SESSION_STATE_BRIDGE = previousBridge;
+		}
+
+		expect(widgets).toEqual([]);
+	});
+
 	test.serial("throws Pi tool errors without committing invalid mutations", async () => {
 		const { registerTodoTool, getTodos } = await loadTodoModule();
 		const pi = new FakePi();

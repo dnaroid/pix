@@ -4,6 +4,13 @@ const output = (value) => process.stdout.write(`${JSON.stringify(value)}\n`);
 const respond = (command, data = {}) => output({ type: "response", id: command.id, success: true, data });
 
 const input = createInterface({ input: process.stdin });
+output({
+	type: "extension_ui_request",
+	id: "startup-state",
+	method: "setWidget",
+	widgetKey: "pix.session-state",
+	widgetLines: ["fixture:startup", JSON.stringify({ version: 1, ready: true })],
+});
 input.on("line", (line) => {
 	const command = JSON.parse(line);
 	switch (command.type) {

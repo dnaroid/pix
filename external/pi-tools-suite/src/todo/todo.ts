@@ -42,6 +42,7 @@ import {
 } from "./tool/types.js";
 import { formatCommandTaskLine } from "./view/format.js";
 import { formatStatusLabel } from "./view/labels.js";
+import { publishRpcSessionState, type RpcSessionStateContext } from "../lib/rpc-session-state.js";
 
 const SECTION_PENDING = "── Pending ──";
 const SECTION_IN_PROGRESS = "── In Progress ──";
@@ -96,7 +97,9 @@ interface TodoToolRegistrationOptions extends TodoToolHooks {
 	parameters?: typeof TodoParamsSchema;
 }
 
-type TodoStateEventContext = { sessionManager?: { getSessionFile?: () => unknown; getSessionId?: () => unknown } };
+type TodoStateEventContext = RpcSessionStateContext & {
+	sessionManager?: { getSessionFile?: () => unknown; getSessionId?: () => unknown };
+};
 type TodoStateEventEmitter = { events?: { emit?: (channel: string, data: unknown) => void } };
 type TodoStateEntryWriter = { appendEntry<T = unknown>(customType: string, data?: T): void };
 
@@ -225,7 +228,7 @@ export function publishTodoState(
 	const state = getState();
 	const sessionFile = sessionFileFromContext(ctx);
 	const sessionId = sessionIdFromContext(ctx);
-	pi.events?.emit?.(TODO_STATE_EVENT, {
+	const snapshot = {
 		version: 1,
 		details: {
 			action,
@@ -236,7 +239,9 @@ export function publishTodoState(
 		...(sessionFile ? { sessionFile } : {}),
 		...(sessionId ? { sessionId } : {}),
 		checkedAt: Date.now(),
-	});
+	};
+	pi.events?.emit?.(TODO_STATE_EVENT, snapshot);
+	publishRpcSessionState(ctx as TodoStateEventContext | undefined, TODO_STATE_EVENT, snapshot);
 }
 
 function appendTodoStateSnapshot(

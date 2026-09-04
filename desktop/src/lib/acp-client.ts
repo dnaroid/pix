@@ -12,6 +12,11 @@ import type {
   SessionNotification,
   SetSessionConfigOptionResponse,
 } from "@agentclientprotocol/sdk";
+import {
+  PIX_SESSION_STATE_METHOD,
+  parseSessionStateNotification,
+  type SessionStateNotification,
+} from "./session-state";
 
 export interface AcpExit {
   readonly generation: number;
@@ -35,6 +40,7 @@ export interface AcpTransport {
 
 export interface AcpClientHandlers {
   readonly onSessionUpdate: (notification: SessionNotification) => void;
+  readonly onSessionState?: (notification: SessionStateNotification) => void;
   readonly onElicitation: (request: CreateElicitationRequest) => Promise<CreateElicitationResponse>;
   readonly onDiagnostic?: (message: string) => void;
   readonly onExit?: (exit: AcpExit) => void;
@@ -258,6 +264,9 @@ export class AcpClient {
         await this.handleIncomingRequest(message);
       } else if (message.method === "session/update" && isRecord(message.params)) {
         this.handlers.onSessionUpdate(message.params as SessionNotification);
+      } else if (message.method === PIX_SESSION_STATE_METHOD) {
+        const notification = parseSessionStateNotification(message.params);
+        if (notification) this.handlers.onSessionState?.(notification);
       }
       return;
     }
