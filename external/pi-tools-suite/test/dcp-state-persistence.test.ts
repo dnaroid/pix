@@ -85,6 +85,10 @@ describe("DCP sidecar state persistence", () => {
     state.manualMode = true;
     state.nudgeCounter = 7;
     state.consecutiveIgnoredStrongNudges = 3;
+    state.messageIdsByStableId.set("id:user-1", "m009");
+    state.nextMessageId = 10;
+    state.lastAutomaticPruneTurn = 6;
+    state.lastAutomaticPruneBlockId = 2;
     state.toolCalls.set("provider-seen", {
       toolCallId: "provider-seen",
       toolName: "read",
@@ -105,6 +109,10 @@ describe("DCP sidecar state persistence", () => {
     expect(restored.manualMode).toBe(true);
     expect(restored.nudgeCounter).toBe(7);
     expect(restored.consecutiveIgnoredStrongNudges).toBe(3);
+    expect(restored.messageIdsByStableId).toEqual(new Map([["id:user-1", "m009"]]));
+    expect(restored.nextMessageId).toBe(10);
+    expect(restored.lastAutomaticPruneTurn).toBe(6);
+    expect(restored.lastAutomaticPruneBlockId).toBe(2);
     expect(restored.providerSeenToolIds).toEqual(new Set(["provider-seen"]));
   });
 

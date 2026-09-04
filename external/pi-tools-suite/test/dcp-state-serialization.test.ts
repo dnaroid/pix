@@ -303,6 +303,10 @@ describe("serializeState", () => {
     state.lastNudgeTurn = 38;
     state.lastContextWindow = 372_000;
     state.consecutiveIgnoredStrongNudges = 4;
+    state.messageIdsByStableId.set("id:user-1", "m041");
+    state.nextMessageId = 42;
+    state.lastAutomaticPruneTurn = 40;
+    state.lastAutomaticPruneBlockId = 4;
     state.toolCalls.set("seen-tool", makeToolRecord("seen-tool"));
     state.providerSeenToolIds.add("seen-tool");
     state.tokensSaved = 5000;
@@ -315,6 +319,7 @@ describe("serializeState", () => {
         anchorTimestamp: 100,
         anchorRole: "assistant",
         turnIndex: 3,
+        renderedReminder: "<dcp-system-reminder>frozen</dcp-system-reminder>",
         createdAt: 200,
         updatedAt: 200,
       },
@@ -334,11 +339,16 @@ describe("serializeState", () => {
     expect(serialized.lastNudgeTurn).toBe(38);
     expect(serialized.lastContextWindow).toBe(372_000);
     expect(serialized.consecutiveIgnoredStrongNudges).toBe(4);
+    expect(serialized.messageIdsByStableId).toEqual([["id:user-1", "m041"]]);
+    expect(serialized.nextMessageId).toBe(42);
+    expect(serialized.lastAutomaticPruneTurn).toBe(40);
+    expect(serialized.lastAutomaticPruneBlockId).toBe(4);
     expect(serialized.providerSeenToolIds).toEqual(["seen-tool"]);
     expect(serialized.tokensSaved).toBe(5000);
     expect(serialized.totalPruneCount).toBe(12);
     expect(serialized.nextBlockId).toBe(5);
     expect(serialized.nudgeAnchors).toHaveLength(1);
+    expect(serialized.nudgeAnchors?.[0]?.renderedReminder).toContain("frozen");
     expect(serialized.lastNudge).toBeDefined();
   });
 });
@@ -537,6 +547,26 @@ describe("restoreState", () => {
     expect(state.compressionBlocks).toHaveLength(0);
     expect(state.manualMode).toBe(false);
   });
+
+  test("repairs malformed or duplicate persistent message-ID assignments", () => {
+    const state = createState();
+    restoreState(state, {
+      messageIdsByStableId: [
+        ["id:first", "m009"],
+        ["id:duplicate", "m009"],
+        ["id:invalid", "not-an-id"],
+        ["id:older", "m003"],
+        ["id:older", "m010"],
+      ],
+      nextMessageId: 2,
+    });
+
+    expect(state.messageIdsByStableId).toEqual(new Map([
+      ["id:first", "m009"],
+      ["id:older", "m003"],
+    ]));
+    expect(state.nextMessageId).toBe(10);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -568,6 +598,10 @@ describe("serialize → restore round trip", () => {
     original.lastNudgeTurn = 6;
     original.lastContextWindow = 372_000;
     original.consecutiveIgnoredStrongNudges = 3;
+    original.messageIdsByStableId.set("id:user-1", "m021");
+    original.nextMessageId = 22;
+    original.lastAutomaticPruneTurn = 7;
+    original.lastAutomaticPruneBlockId = 1;
     original.providerSeenToolIds.add("tc-1");
     original.providerSeenToolIds.add("tc-9");
     original.totalToolCallCount = 10;
@@ -589,6 +623,10 @@ describe("serialize → restore round trip", () => {
     expect(restored.lastNudgeTurn).toBe(6);
     expect(restored.lastContextWindow).toBe(372_000);
     expect(restored.consecutiveIgnoredStrongNudges).toBe(3);
+    expect(restored.messageIdsByStableId).toEqual(original.messageIdsByStableId);
+    expect(restored.nextMessageId).toBe(22);
+    expect(restored.lastAutomaticPruneTurn).toBe(7);
+    expect(restored.lastAutomaticPruneBlockId).toBe(1);
     expect(restored.providerSeenToolIds).toEqual(original.providerSeenToolIds);
 
     // Tool records survive but without heavy fields

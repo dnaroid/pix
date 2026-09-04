@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -37,9 +38,7 @@ import {
   type CompressionBlock,
   type ToolRecord,
 } from "../src/dcp/state.js";
-import {
-  buildMessageIdControlText,
-} from "../src/dcp/pruner-message-ids.js";
+import { stableMessageKeys } from "../src/dcp/pruner-message-ids.js";
 import {
   stripStaleDcpMetadataFromAssistantMessage,
 } from "../src/dcp/pruner-metadata.js";
@@ -295,6 +294,49 @@ describe("DCP pruning effectiveness", () => {
     expect(JSON.stringify(twice)).toContain("duplicate tool call");
   });
 
+  test("automatic duplicate pruning waits for a user-turn checkpoint", () => {
+    const state = createState();
+    state.toolCalls.set("call-1", toolRecord("call-1", "read", "same", 120, 1));
+    state.toolCalls.set("call-2", toolRecord("call-2", "read", "same", 140, 1));
+    const cfg = config({
+      strategies: {
+        deduplication: { enabled: true, protectedTools: [] },
+        purgeErrors: { enabled: false, turns: 4, protectedTools: [] },
+        autoToolPruning: {
+          enabled: false,
+          maxOutputTokens: 2000,
+          keepRecentTurns: 2,
+          readLikeTools: [],
+          readLikeTurns: 3,
+          protectedTools: [],
+        },
+      },
+    });
+    const firstPair = [
+      textMessage("user", "active", 1),
+      assistantToolCall("call-1", 2),
+      toolResult("call-1", "read", "first", 3),
+    ];
+
+    applyPruning(firstPair, state, cfg);
+    const sameTurn = applyPruning([
+      ...firstPair,
+      assistantToolCall("call-2", 4),
+      toolResult("call-2", "read", "second", 5),
+    ], state, cfg);
+    expect(state.prunedToolIds).toEqual(new Set());
+    expect(JSON.stringify(sameTurn)).toContain("first");
+
+    const nextTurn = applyPruning([
+      ...firstPair,
+      assistantToolCall("call-2", 4),
+      toolResult("call-2", "read", "second", 5),
+      textMessage("user", "continue", 6),
+    ], state, cfg);
+    expect(state.prunedToolIds).toEqual(new Set(["call-1"]));
+    expect(JSON.stringify(nextTurn)).toContain("duplicate tool call");
+  });
+
   test("auto-prunes large old tool outputs without LLM compression", () => {
     const state = createState();
     state.toolCalls.set(
@@ -455,7 +497,40 @@ describe("DCP pruning effectiveness", () => {
     expect(state.lastNudge).toBeUndefined();
   });
 
-  test("moving nudge targets replace the previous anchor", () => {
+  test("anchored nudge rendering stays frozen until a priority upgrade", () => {
+    const state = createState();
+    const raw = [textMessage("user", "request", 1), textMessage("assistant", "answer", 2)];
+
+    upsertNudgeAnchor(raw, state, "turn", {
+      contextPercent: 0.5,
+      renderedReminder: "<dcp-system-reminder>first candidate m001</dcp-system-reminder>",
+    });
+    const firstPass = raw.map((message) => ({ ...message, content: [...message.content] }));
+    applyAnchoredNudges(firstPass, state, () => "must not render");
+
+    const repeated = upsertNudgeAnchor(raw, state, "turn", {
+      contextPercent: 0.55,
+      renderedReminder: "<dcp-system-reminder>changed candidate m999</dcp-system-reminder>",
+    });
+    const secondPass = raw.map((message) => ({ ...message, content: [...message.content] }));
+    applyAnchoredNudges(secondPass, state, () => "must not render");
+
+    expect(repeated.updated).toBe(false);
+    expect(contentText(secondPass[0])).toBe(contentText(firstPass[0]));
+    expect(contentText(secondPass[0])).not.toContain("m999");
+
+    const upgraded = upsertNudgeAnchor(raw, state, "context-strong", {
+      contextPercent: 0.9,
+      renderedReminder: "<dcp-system-reminder>upgraded once</dcp-system-reminder>",
+    });
+    const upgradedPass = raw.map((message) => ({ ...message, content: [...message.content] }));
+    applyAnchoredNudges(upgradedPass, state, () => "must not render");
+
+    expect(upgraded.updated).toBe(true);
+    expect(contentText(upgradedPass[0])).toContain("upgraded once");
+  });
+
+  test("nudge anchors stay on their original carrier until cleared", () => {
     const state = createState();
     const firstMessages = [
       textMessage("user", "first request", 1),
@@ -474,13 +549,14 @@ describe("DCP pruning effectiveness", () => {
     ];
     const moved = upsertNudgeAnchor(nextMessages, state, "iteration");
 
-    expect(moved.created).toBe(true);
+    expect(moved.created).toBe(false);
+    expect(moved.updated).toBe(true);
     expect(state.nudgeAnchors).toHaveLength(1);
-    expect(state.nudgeAnchors[0]?.anchorTimestamp).toBe(3);
+    expect(state.nudgeAnchors[0]?.anchorTimestamp).toBe(1);
     expect(state.nudgeAnchors[0]?.type).toBe("iteration");
   });
 
-  test("assistant fallback targets move without accumulating reminders", () => {
+  test("assistant fallback uses one stable synthetic user carrier", () => {
     const state = createState();
     upsertNudgeAnchor([textMessage("assistant", "first response", 1)], state, "iteration");
 
@@ -494,10 +570,12 @@ describe("DCP pruning effectiveness", () => {
     );
 
     expect(state.nudgeAnchors).toHaveLength(1);
-    expect(state.nudgeAnchors[0]?.anchorTimestamp).toBe(2);
+    expect(state.nudgeAnchors[0]?.anchorTimestamp).toBe(1);
     expect(JSON.stringify(messages).match(/<dcp-system-reminder>/g)).toHaveLength(1);
     expect(contentText(messages[0])).not.toContain("singleton reminder");
+    expect(messages[1]?.role).toBe("user");
     expect(contentText(messages[1])).toContain("singleton reminder");
+    expect(contentText(messages[2])).toBe("second response");
   });
 
   test("literal reminder tags in user text do not force assistant fallback", () => {
@@ -591,7 +669,9 @@ describe("DCP pruning effectiveness", () => {
     expect(state.nudgeAnchors[0]?.id).toBe(2);
     expect(JSON.stringify(messages).match(/<dcp-system-reminder>/g)).toHaveLength(1);
     expect(contentText(messages[0])).not.toContain("anchor 1");
-    expect(contentText(messages[1])).toContain("anchor 2");
+    expect(contentText(messages[1])).not.toContain("anchor 2");
+    expect(messages[2]?.role).toBe("user");
+    expect(contentText(messages[2])).toContain("anchor 2");
   });
 
   test("nudge guidance includes concrete ranges, priority messages, and active blocks", () => {
@@ -755,7 +835,7 @@ describe("DCP pruning effectiveness", () => {
     expect(candidate?.endId).toBe("m002");
   });
 
-  test("strips assistant-echoed DCP metadata before injecting fresh ids", () => {
+  test("preserves signed assistant content even when it contains DCP-like text", () => {
     const state = createState();
 
     const pruned = applyPruning(
@@ -778,17 +858,17 @@ describe("DCP pruning effectiveness", () => {
 
     const asJson = JSON.stringify(pruned);
     expect(asJson).toContain("I will inspect that now.");
-    expect(asJson).not.toContain("m999");
-    expect(asJson).not.toContain("hidden nudge");
+    expect(asJson).toContain("m999");
+    expect(asJson).toContain("hidden nudge");
     expect(asJson).not.toContain("[dcp-id]");
-    expect(state.messageMetaSnapshot.get("m002")?.text).toBe("I will inspect that now.");
+    expect(state.messageMetaSnapshot.get("m002")?.text).toContain("m999");
 
-    const assistantTextBlock = (pruned[1].content as any[]).find((block) => block.text === "I will inspect that now.");
-    expect(assistantTextBlock?.textSignature).toBeUndefined();
+    const assistantTextBlock = (pruned[1].content as any[])[0];
+    expect(assistantTextBlock?.textSignature).toBe("signed-original-text");
   });
 
-  test("sanitizes finalized assistant messages before stale DCP metadata can persist", () => {
-    const sanitized = stripStaleDcpMetadataFromAssistantMessage({
+  test("assistant metadata sanitizer is identity-only for signed provider content", () => {
+    const assistant = {
       role: "assistant",
       content: [
         {
@@ -804,16 +884,18 @@ describe("DCP pruning effectiveness", () => {
         },
       ],
       timestamp: 2,
-    });
+    };
+    const sanitized = stripStaleDcpMetadataFromAssistantMessage(assistant);
 
+    expect(sanitized).toBe(assistant);
     const blocks = sanitized.content as any[];
-    expect(blocks[0]?.text).toBe("Done.");
-    expect(blocks[0]?.textSignature).toBeUndefined();
+    expect(blocks[0]?.text).toContain("hidden nudge");
+    expect(blocks[0]?.textSignature).toBe("signed-original-text");
     expect(blocks[1]?.text).toContain("[dcp-id]: # (m123)");
     expect(blocks[1]?.textSignature).toBe("signed-code-example");
   });
 
-  test("keeps user, tool, and assistant code-block DCP examples intact", () => {
+  test("strips stale user/tool markers while preserving fenced DCP examples", () => {
     const state = createState();
     const candidateConfig = config({
       compress: {
@@ -840,16 +922,16 @@ describe("DCP pruning effectiveness", () => {
     );
 
     const asJson = JSON.stringify(pruned);
-    expect(asJson).toContain("m999");
+    expect(asJson).not.toContain("m999");
     expect(asJson).toContain("m777");
-    expect(asJson).toContain("m888");
+    expect(asJson).not.toContain("m888");
 
     const candidate = detectCompressionCandidate(pruned, state, candidateConfig, 0.5);
 
     expect(candidate?.startId).toBe("m001");
   });
 
-  test("compression candidates use current addressable ids when stale ids appear later in message text", () => {
+  test("compression candidates use current addressable ids when source text contains stale ids", () => {
     const state = createState();
     const candidateConfig = config({
       compress: {
@@ -873,16 +955,13 @@ describe("DCP pruning effectiveness", () => {
 
     const pruned = applyPruning(
       [
-        textMessage("user", "old user", 1),
-        textMessage("assistant", "old assistant " + "a".repeat(80), 2),
+        textMessage("user", "old user\n[dcp-id]: # (m999)", 1),
+        textMessage("assistant", "old assistant " + "a".repeat(80) + "\n[dcp-id]: # (m998)", 2),
         textMessage("user", "recent", 3),
       ],
       state,
       candidateConfig,
     );
-
-    pruned[0].content += "\n[dcp-id]: # (m999)";
-    (pruned[1].content as any[]).push({ type: "text", text: "\n[dcp-id]: # (m998)" });
 
     const rangeCandidate = detectCompressionCandidate(pruned, state, candidateConfig, 0.5);
     const messageCandidates = detectMessageCompressionCandidates(pruned, state, candidateConfig, 0.5);
@@ -1005,7 +1084,7 @@ describe("DCP pruning effectiveness", () => {
     expect(state.compressionBlocks).toHaveLength(1);
   });
 
-  test("compress tool clamps stale out-of-range mNNN IDs to nearest valid ID", async () => {
+  test("compress tool rejects unknown stable mNNN IDs instead of clamping", async () => {
     const state = createState();
     state.messageIdSnapshot.set("m001", 1);
     state.messageIdSnapshot.set("m002", 2);
@@ -1017,17 +1096,15 @@ describe("DCP pruning effectiveness", () => {
     let registeredTool: any;
     registerCompressTool({ registerTool: (tool: any) => { registeredTool = tool } } as any, state, config());
 
-    // m010 doesn't exist (only m001-m003) but should clamp to m003 for endId
-    const result = await registeredTool.execute(
+    await expect(registeredTool.execute(
       "tool-call",
-      { topic: "Clamped", ranges: [{ startId: "m001", endId: "m010", summary: "clamped summary" }] },
+      { topic: "Unknown", ranges: [{ startId: "m001", endId: "m010", summary: "must not land" }] },
       undefined,
       undefined,
       { ui: { notify() {} } },
-    );
+    )).rejects.toThrow(/Unknown message ID: m010/);
 
-    expect(result.details.blockIds).toHaveLength(1);
-    expect(result.content[0].text).toContain("Clamped");
+    expect(state.compressionBlocks).toHaveLength(0);
   });
 
   test("compress tool rejects when a stale startId has no valid forward clamp target", async () => {
@@ -1042,9 +1119,8 @@ describe("DCP pruning effectiveness", () => {
     let registeredTool: any;
     registerCompressTool({ registerTool: (tool: any) => { registeredTool = tool } } as any, state, config());
 
-    // m010 is stale and above the highest valid ID (m003). A start boundary
-    // must only clamp upward, so there is no safe target — the call must
-    // reject without mutating state or creating a block over the wrong content.
+    // Stable IDs never renumber, so an unknown boundary cannot be safely
+    // inferred from its numeric suffix.
     await expect(registeredTool.execute(
       "tool-call",
       { topic: "Bad", ranges: [{ startId: "m010", endId: "m010", summary: "should not land" }] },
@@ -1264,7 +1340,8 @@ describe("DCP pruning effectiveness", () => {
 
     expect(JSON.stringify(visible)).not.toContain("[dcp-id]");
     expect(state.messageIdSnapshot.has("m001")).toBe(true);
-    expect(JSON.stringify(buildMessageIdControlText(state))).toContain("m001");
+    expect(JSON.stringify(visible)).toContain("Stable DCP IDs");
+    expect(JSON.stringify(visible)).toContain("m001=this user message");
 
     let registeredTool: any;
     registerCompressTool({ registerTool: (tool: any) => { registeredTool = tool } } as any, state, cfg);
@@ -1393,7 +1470,7 @@ describe("DCP pruning effectiveness", () => {
     expect(candidates[0]?.priority).toBe("high");
     expect(candidates[1]?.priority).toBe("medium");
     expect(JSON.stringify(pruned)).not.toContain("[dcp-id]");
-    expect(JSON.stringify(buildMessageIdControlText(state))).toContain("m002");
+    expect(JSON.stringify(pruned)).toContain("m002=preceding assistant message");
     expect(state.messageMetaSnapshot.get("m002")?.priority).toBe("high");
   });
 
@@ -1495,7 +1572,12 @@ describe("DCP pruning effectiveness", () => {
     )).toBe(true);
     expect(providerPayloadIncludesToolResult(
       collectProviderToolResultEvidence({
-        contents: [{ parts: [{ functionResponse: { name: "read", response: { output: record.outputText } } }] }],
+        contents: [{ parts: [{ functionResponse: {
+          name: "read",
+          response: {
+            output: `${record.outputText}\n\n<dcp-message-ids>\nStable DCP IDs: m001\n</dcp-message-ids>`,
+          },
+        } }] }],
       }),
       record,
     )).toBe(true);
@@ -1910,7 +1992,7 @@ describe("DCP pruning effectiveness", () => {
     expect(rendered).not.toContain("DCP Session Statistics");
   });
 
-  test("DCP context transform keeps message-id control out of transcript messages", async () => {
+  test("DCP distributes stable IDs over user carriers without touching assistant messages", async () => {
     const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
     const pi = {
       on(event: string, handler: (event: any, ctx: any) => unknown) {
@@ -1932,6 +2014,7 @@ describe("DCP pruning effectiveness", () => {
         messages: [
           textMessage("user", "visible user content", 1),
           textMessage("assistant", "visible assistant content", 2),
+          textMessage("user", "next user content", 3),
         ],
       },
       {
@@ -1942,13 +2025,14 @@ describe("DCP pruning effectiveness", () => {
     ) as { messages: any[] } | undefined;
 
     const messages = result?.messages ?? [];
-    const normalMessages = messages.filter((message) => message.role !== "custom");
-    expect(JSON.stringify(normalMessages)).not.toContain("[dcp-id]");
-    expect(JSON.stringify(messages)).not.toContain("<dcp-message-ids>");
-    expect(buildMessageIdControlText(createState())).toBeUndefined();
+    expect(contentText(messages[0])).toContain("m001=this user message");
+    expect(contentText(messages[1])).toBe("visible assistant content");
+    expect(contentText(messages[1])).not.toContain("<dcp-message-ids>");
+    expect(contentText(messages[2])).toContain("m002=preceding assistant message");
+    expect(contentText(messages[2])).toContain("m003=this user message");
   });
 
-  test("DCP injects compact message-id control at the provider payload tail", async () => {
+  test("DCP provider hook does not move message-ID metadata to the payload tail", async () => {
     const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
     const pi = {
       on(event: string, handler: (event: any, ctx: any) => unknown) {
@@ -1981,28 +2065,23 @@ describe("DCP pruning effectiveness", () => {
       },
     );
 
+    const originalPayload = {
+      messages: [
+        { role: "system", content: "base system" },
+        { role: "user", content: "visible user content" },
+      ],
+    };
     const payload = await providerHandler?.(
-      {
-        type: "before_provider_request",
-        payload: {
-          messages: [
-            { role: "system", content: "base system" },
-            { role: "user", content: "visible user content" },
-          ],
-        },
-      },
+      { type: "before_provider_request", payload: originalPayload },
       { hasUI: false, sessionManager: { getBranch: () => [] } },
     ) as any;
 
-    expect(payload?.messages).toHaveLength(2);
-    expect(payload?.messages[0]?.role).toBe("system");
-    expect(payload?.messages[0]?.content).toContain("base system");
-    expect(payload?.messages[0]?.content).not.toContain("<dcp-message-ids>");
-    expect(payload?.messages[1]?.content).toContain("visible user content");
-    expect(payload?.messages[1]?.content).toContain("Current raw message IDs: m001, m002");
+    expect(payload).toBeUndefined();
+    expect(originalPayload.messages[0]?.content).toBe("base system");
+    expect(originalPayload.messages[1]?.content).toBe("visible user content");
   });
 
-  test("DCP keeps Responses function_call_output schema-valid", async () => {
+  test("DCP leaves Responses function_call_output payload items unchanged", async () => {
     const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
     const pi = {
       on(event: string, handler: (event: any, ctx: any) => unknown) {
@@ -2029,42 +2108,284 @@ describe("DCP pruning effectiveness", () => {
       },
     );
 
+    const originalPayload = {
+      input: [
+        { type: "message", role: "user", content: [{ type: "input_text", text: "inspect" }] },
+        { type: "function_call", call_id: "c1", name: "read", arguments: "{}" },
+        { type: "function_call_output", call_id: "c1", output: "tool result" },
+      ],
+    };
     const payload = await providerHandler?.(
-      {
-        type: "before_provider_request",
-        payload: {
-          input: [
-            { type: "message", role: "user", content: [{ type: "input_text", text: "inspect" }] },
-            { type: "function_call", call_id: "c1", name: "read", arguments: "{}" },
-            { type: "function_call_output", call_id: "c1", output: "tool result" },
-          ],
-        },
-      },
+      { type: "before_provider_request", payload: originalPayload },
       { hasUI: false, sessionManager: { getBranch: () => [] } },
     ) as any;
 
-    expect(payload.input[2]).not.toHaveProperty("content");
-    expect(payload.input[2].output).toContain("tool result");
-    expect(payload.input[2].output).toContain("Current raw message IDs: m001, m002");
+    expect(payload).toBeUndefined();
+    expect(originalPayload.input[2]).toEqual({
+      type: "function_call_output",
+      call_id: "c1",
+      output: "tool result",
+    });
   });
 
-  test("DCP compacts long message-id control maps to protect provider cache", () => {
+  test("DCP keeps persistent IDs stable, monotonic, and collision-safe", () => {
     const state = createState();
-    for (let i = 1; i <= 25; i++) {
-      const id = `m${String(i).padStart(3, "0")}`;
-      state.messageIdSnapshot.set(id, i);
+    const firstMessages = [
+      textMessage("user", "first", 1),
+      textMessage("assistant", "answer", 2),
+      textMessage("user", "second", 3),
+    ];
+    const first = applyPruning(firstMessages, state, config());
+    const firstSecondCarrier = contentText(first[2]);
+
+    const second = applyPruning([
+      textMessage("assistant", "answer", 2),
+      textMessage("user", "second", 3),
+      textMessage("user", "third", 4),
+    ], state, config());
+
+    expect([...state.messageIdSnapshot.keys()]).toEqual(["m002", "m003", "m004"]);
+    expect(contentText(second[1])).toBe(firstSecondCarrier);
+    expect(contentText(second[2])).toContain("m004=this user message");
+
+    const collisions = [textMessage("user", "a", 9), textMessage("user", "b", 9)];
+    const collisionKeys = stableMessageKeys(collisions);
+    expect(collisionKeys[0]).toStartWith("ts:9:");
+    expect(collisionKeys[1]).toStartWith("ts:9:");
+    expect(collisionKeys[0]).not.toBe(collisionKeys[1]);
+    applyPruning(collisions, state, config());
+    const secondCollisionId = state.messageIdsByStableId.get(collisionKeys[1]!);
+    expect(state.messageIdsByStableId.get(collisionKeys[0]!)).not.toBe(secondCollisionId);
+
+    applyPruning([textMessage("user", "b", 9)], state, config());
+    expect(state.messageIdsByStableId.get(stableMessageKeys([textMessage("user", "b", 9)])[0]!))
+      .toBe(secondCollisionId);
+  });
+
+  test("same-timestamp messages resolve to distinct compression candidates", () => {
+    const state = createState();
+    const cfg = config({
+      compress: {
+        messageMode: {
+          enabled: true,
+          minContextPercent: 0.1,
+          keepRecentTurns: 1,
+          mediumTokens: 1,
+          highTokens: 5000,
+          maxSuggestions: 10,
+        },
+      } as any,
+    });
+    const messages = [
+      textMessage("user", "inspect", 1),
+      assistantToolCall("parallel-a", 2),
+      toolResult("parallel-a", "read", "first parallel result", 9),
+      assistantToolCall("parallel-b", 3),
+      toolResult("parallel-b", "read", "second parallel result", 9),
+      textMessage("user", "recent", 10),
+    ];
+
+    const pruned = applyPruning(messages, state, cfg);
+    const resultIds = detectMessageCompressionCandidates(pruned, state, cfg, 0.5)
+      .filter((candidate) => candidate.role === "toolResult")
+      .map((candidate) => candidate.messageId);
+    const expectedIds = [...state.messageMetaSnapshot]
+      .filter(([, meta]) => meta.role === "toolResult")
+      .map(([id]) => id);
+
+    expect(new Set(resultIds)).toEqual(new Set(expectedIds));
+    expect(new Set(resultIds).size).toBe(2);
+  });
+
+  test("modern candidate snapshots never timestamp-match an unpublished assistant", () => {
+    const state = createState();
+    const cfg = config({
+      compress: {
+        messageMode: {
+          enabled: true,
+          minContextPercent: 0.1,
+          keepRecentTurns: 1,
+          mediumTokens: 1,
+          highTokens: 5000,
+          maxSuggestions: 10,
+        },
+      } as any,
+    });
+    const messages = [
+      textMessage("user", "old request", 1),
+      toolResult("published-result", "read", "published output", 9),
+      textMessage("assistant", "unpublished assistant output", 9),
+      textMessage("user", "recent request", 10),
+    ];
+    const stableKeys = stableMessageKeys(messages);
+    for (const [id, index] of [["m001", 0], ["m002", 1], ["m003", 3]] as const) {
+      const message = messages[index];
+      state.messageIdSnapshot.set(id, message.timestamp);
       state.messageMetaSnapshot.set(id, {
-        timestamp: i,
-        role: i % 2 === 0 ? "assistant" : "user",
-        priority: i === 7 ? "high" : i === 12 ? "medium" : "low",
+        timestamp: message.timestamp,
+        stableId: stableKeys[index],
+        role: message.role,
+        toolCallId: message.toolCallId,
+        tokenEstimate: 10,
       });
     }
 
-    const rendered = buildMessageIdControlText(state) ?? "";
-    expect(rendered).toContain("Current raw message IDs: m001..m025 (25 messages)");
-    expect(rendered).toContain("Hints: high=m007; medium=m012");
-    expect(rendered).not.toContain("- m001:");
-    expect(rendered.length).toBeLessThan(360);
+    const candidates = detectMessageCompressionCandidates(messages, state, cfg, 0.5);
+
+    expect(candidates).toContainEqual(
+      expect.objectContaining({ messageId: "m002", role: "toolResult" }),
+    );
+    expect(candidates.some((candidate) => candidate.role === "assistant")).toBe(false);
+    expect(new Set(candidates.map((candidate) => candidate.messageId)).size).toBe(candidates.length);
+  });
+
+  test("DCP context transforms preserve strict append-only continuation", () => {
+    const state = createState();
+    const cfg = config();
+    const user = textMessage("user", "inspect", 1);
+    const responseOne = {
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "signed reasoning one", thinkingSignature: "sig-one" },
+        { type: "toolCall", id: "c1", name: "read", input: { path: "a.ts" } },
+      ],
+      timestamp: 2,
+    };
+    const resultOne = toolResult("c1", "read", "result one", 3);
+
+    const requestOne = applyPruning([user], state, cfg);
+    expect([...state.messageIdSnapshot.keys()]).toEqual(["m001"]);
+    const requestTwo = applyPruning([user, responseOne, resultOne], state, cfg);
+    expect([...state.messageIdSnapshot.keys()]).toEqual(["m001", "m002", "m003"]);
+    expect(JSON.stringify(requestTwo.slice(0, 2))).toBe(
+      JSON.stringify([...requestOne, responseOne]),
+    );
+    expect(contentText(requestTwo[1])).not.toContain("<dcp-message-ids>");
+
+    const responseTwo = {
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "signed reasoning two", thinkingSignature: "sig-two" },
+        { type: "toolCall", id: "c2", name: "read", input: { path: "b.ts" } },
+      ],
+      timestamp: 4,
+    };
+    const resultTwo = toolResult("c2", "read", "result two", 5);
+    const requestThree = applyPruning(
+      [user, responseOne, resultOne, responseTwo, resultTwo],
+      state,
+      cfg,
+    );
+
+    expect(JSON.stringify(requestThree.slice(0, 4))).toBe(
+      JSON.stringify([...requestTwo, responseTwo]),
+    );
+    expect(requestThree[1]?.content[0]?.thinkingSignature).toBe("sig-one");
+    expect(requestThree[3]?.content[0]?.thinkingSignature).toBe("sig-two");
+  });
+
+  test("OpenAI Responses payload conversion preserves the append-only prefix", () => {
+    const state = createState();
+    const cfg = config();
+    const model = {
+      id: "gpt-5.6-sol",
+      provider: "openai-codex",
+      api: "openai-codex-responses",
+      input: ["text"],
+      reasoning: true,
+      compat: {},
+    } as any;
+    const toResponsesInput = (messages: any[]) => convertResponsesMessages(
+      model,
+      { systemPrompt: "", messages, tools: [] } as any,
+      new Set(["openai-codex"]),
+    );
+    const user = textMessage("user", "inspect", 1);
+    const responseOne = {
+      role: "assistant",
+      provider: model.provider,
+      api: model.api,
+      model: model.id,
+      stopReason: "toolUse",
+      usage: {},
+      content: [
+        {
+          type: "thinking",
+          thinking: "signed reasoning",
+          thinkingSignature: JSON.stringify({
+            type: "reasoning",
+            id: "rs_1",
+            summary: [],
+            encrypted_content: "encrypted-reasoning",
+          }),
+        },
+        { type: "toolCall", id: "call_1|fc_1", name: "read", arguments: { path: "a.ts" } },
+      ],
+      timestamp: 2,
+    };
+    const resultOne = toolResult("call_1|fc_1", "read", "result one", 3);
+
+    const requestOne = toResponsesInput(applyPruning([user], state, cfg));
+    const requestTwo = toResponsesInput(applyPruning([user, responseOne, resultOne], state, cfg));
+
+    expect(requestTwo.slice(0, requestOne.length)).toEqual(requestOne);
+    expect(requestTwo[requestOne.length]).toEqual(JSON.parse(responseOne.content[0].thinkingSignature!));
+
+    const responseTwo = {
+      ...responseOne,
+      content: [{
+        type: "text",
+        text: "done",
+        textSignature: JSON.stringify({ v: 1, id: "msg_2", phase: "final_answer" }),
+      }],
+      stopReason: "stop",
+      timestamp: 4,
+    };
+    const requestThree = toResponsesInput(
+      applyPruning([user, responseOne, resultOne, responseTwo], state, cfg),
+    );
+
+    expect(requestThree.slice(0, requestTwo.length)).toEqual(requestTwo);
+    expect(requestThree[requestThree.length - 1]).toMatchObject({
+      type: "message",
+      role: "assistant",
+      id: "msg_2",
+      phase: "final_answer",
+    });
+  });
+
+  test("reapplying DCP to transformed context does not duplicate carriers", () => {
+    const state = createState();
+    const raw = [
+      textMessage("user", "inspect", 1),
+      assistantToolCall("c1", 2),
+      toolResult("c1", "read", "result", 3),
+    ];
+
+    const once = applyPruning(raw, state, config());
+    const twice = applyPruning(once, state, config());
+
+    expect(JSON.stringify(twice)).toBe(JSON.stringify(once));
+    expect(JSON.stringify(twice).match(/<dcp-message-ids>/g)).toHaveLength(2);
+  });
+
+  test("assistant metadata sanitizer is an identity fast path for signed content", () => {
+    const assistant = {
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "unchanged", thinkingSignature: "signed" },
+        { type: "text", text: "answer", textSignature: "text-signed" },
+      ],
+      timestamp: 10,
+    };
+
+    const sanitized = stripStaleDcpMetadataFromAssistantMessage(assistant);
+    expect(sanitized).toBe(assistant);
+    expect(sanitized.content[0]).toBe(assistant.content[0]);
+    expect(sanitized.content[1]).toBe(assistant.content[1]);
+
+    const transformed = applyPruning([assistant], createState(), config());
+    expect(JSON.stringify(transformed[0])).toBe(JSON.stringify(assistant));
   });
 
   test("DCP context transform stays quiet below routine context pressure and clears stale anchors", async () => {
@@ -2724,7 +3045,8 @@ describe("DCP pruning effectiveness", () => {
     expect(rendered).toMatch(/ACTION REQUIRED: Context usage is high\.|CRITICAL WARNING: MAX CONTEXT LIMIT REACHED/);
     expect(rendered).toContain("Recommended range candidate: m001..m006");
     expect(JSON.stringify(normalMessages)).not.toContain("[dcp-id]");
-    expect(JSON.stringify(messages)).not.toContain("<dcp-message-ids>");
+    expect(JSON.stringify(messages)).toContain("Stable DCP IDs");
+    expect(contentText(messages.find((message) => message.role === "assistant"))).not.toContain("<dcp-message-ids>");
   });
 
   test("DCP context transform strips leaked message-id control blocks from prior transcript", async () => {
@@ -2762,7 +3084,8 @@ describe("DCP pruning effectiveness", () => {
     expect(rendered).toContain("before");
     expect(rendered).toContain("after");
     expect(rendered).not.toContain("secret ids");
-    expect(rendered).not.toContain("dcp-message-ids");
+    expect(rendered.match(/<dcp-message-ids>/g)).toHaveLength(1);
+    expect(rendered).toContain("Stable DCP IDs");
   });
 
   test("DCP context transform hides persisted control-plane custom entries from the model", async () => {
@@ -2841,7 +3164,7 @@ describe("DCP pruning effectiveness", () => {
     expect(events).not.toContain("message_start");
     expect(events).not.toContain("message_update");
     expect(events).not.toContain("turn_end");
-    expect(events).toContain("message_end");
+    expect(events).not.toContain("message_end");
   });
 
   test("serialized state preserves tool fingerprints and accounting across reload", () => {

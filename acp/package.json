@@ -28,7 +28,8 @@
 	},
 	"dependencies": {
 		"@agentclientprotocol/sdk": "1.4.0",
-		"@earendil-works/pi-coding-agent": "0.84.4",
+		"@earendil-works/pi-coding-agent": "0.85.0",
+		"@mariozechner/clipboard": "0.3.9",
 		"jsonc-parser": "3.3.1",
 		"proper-lockfile": "4.1.2"
 	},

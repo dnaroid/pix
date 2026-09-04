@@ -45,13 +45,7 @@ import {
 	resolveContextThresholds,
 	estimateTokens,
 } from "./pruner.js"
-import {
-	stripStaleDcpMetadataFromAssistantMessage,
-	stripStaleDcpMetadataFromMessage,
-} from "./pruner-metadata.js"
-import {
-	buildMessageIdControlText,
-} from "./pruner-message-ids.js"
+import { stripStaleDcpMetadataFromMessage } from "./pruner-metadata.js"
 import { summarizeDcpState, writeDcpDebugLog } from "./debug-log.js"
 import type { DcpNudgeType } from "./pruner-types.js"
 import { registerCompressTool } from "./compress-tool.js"
@@ -117,104 +111,6 @@ const SUMMARY_BUFFER_MAX_CONTEXT_BONUS = 0.05
 
 function isDcpControlPlaneMessage(message: any): boolean {
 	return message?.role === "custom" && DCP_CONTROL_PLANE_CUSTOM_TYPES.has(message.customType)
-}
-
-const DCP_PROVIDER_CONTROL_HEADER = "DCP message ID control data (do not quote or output):"
-
-function appendTextToContent(content: unknown, text: string): unknown {
-	if (typeof content === "string") return `${content}\n\n${text}`
-	if (Array.isArray(content)) {
-		const textType = content.some((part: any) => part?.type === "input_text") ? "input_text" : "text"
-		return [...content, { type: textType, text }]
-	}
-	return text
-}
-
-function appendDcpControlToMessages(messages: unknown, text: string): unknown {
-	if (!Array.isArray(messages)) return messages
-	const block = `${DCP_PROVIDER_CONTROL_HEADER}\n${text}`
-
-	// Keep DCP's volatile ID map at the tail of the provider context instead of
-	// mutating the stable system/developer prefix. Prefix cache reuse is much
-	// better when only the newest transcript item changes on each request.
-	let targetIndex = -1
-	for (let index = messages.length - 1; index >= 0; index--) {
-		const message = messages[index] as any
-		if (!message || typeof message !== "object") continue
-		// Responses items such as reasoning/function_call_output do not accept a
-		// `content` field. Keep a function output at the tail by appending to its
-		// valid `output` string; otherwise scan back to an actual message item.
-		if (typeof message.type === "string" && message.type !== "message" && message.role === undefined) {
-			if (message.type === "function_call_output" && typeof message.output === "string") {
-				return messages.map((candidate: any, candidateIndex) => candidateIndex === index
-					? { ...candidate, output: `${candidate.output}\n\n${block}` }
-					: candidate)
-			}
-			continue
-		}
-		if (message.role === "system" || message.role === "developer") continue
-		targetIndex = index
-		break
-	}
-
-	if (targetIndex < 0) {
-		targetIndex = messages.findIndex((message: any) =>
-			message?.role === "system" || message?.role === "developer"
-		)
-	}
-
-	if (targetIndex >= 0) {
-		return messages.map((message: any, index) => index === targetIndex
-			? { ...message, content: appendTextToContent(message.content, block) }
-			: message)
-	}
-	return [{ role: "system", content: block }, ...messages]
-}
-
-function appendDcpControlToAnthropicSystem(system: unknown, text: string): unknown {
-	const block = `${DCP_PROVIDER_CONTROL_HEADER}\n${text}`
-	if (typeof system === "string") return `${system}\n\n${block}`
-	if (Array.isArray(system)) return [...system, { type: "text", text: block }]
-	if (system === undefined || system === null) return [{ type: "text", text: block }]
-	return system
-}
-
-function appendDcpControlToGoogleSystemInstruction(systemInstruction: unknown, text: string): unknown {
-	const block = `${DCP_PROVIDER_CONTROL_HEADER}\n${text}`
-	if (typeof systemInstruction === "string") return `${systemInstruction}\n\n${block}`
-	if (systemInstruction === undefined || systemInstruction === null) return block
-	return systemInstruction
-}
-
-function appendDcpControlToProviderPayload(payload: unknown, text: string): unknown {
-	if (Array.isArray(payload)) return appendDcpControlToMessages(payload, text)
-	if (!payload || typeof payload !== "object") return payload
-	const record = payload as Record<string, unknown>
-
-	if (Array.isArray(record.input)) {
-		return { ...record, input: appendDcpControlToMessages(record.input, text) }
-	}
-
-	if (Array.isArray(record.messages)) {
-		return { ...record, messages: appendDcpControlToMessages(record.messages, text) }
-	}
-
-	if ("system" in record) {
-		return { ...record, system: appendDcpControlToAnthropicSystem(record.system, text) }
-	}
-
-	if (record.config && typeof record.config === "object") {
-		const config = record.config as Record<string, unknown>
-		return {
-			...record,
-			config: {
-				...config,
-				systemInstruction: appendDcpControlToGoogleSystemInstruction(config.systemInstruction, text),
-			},
-		}
-	}
-
-	return payload
 }
 
 // ---------------------------------------------------------------------------
@@ -344,15 +240,6 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 		}
 	})
 
-	// ── 7b. message_end: never persist provider-echoed DCP control markers ─────
-	pi.on("message_end", async (event, ctx) => {
-		const effectiveConfig = configForContext(ctx)
-		if (!effectiveConfig.enabled || event.message?.role !== "assistant") return undefined
-
-		const sanitized = stripStaleDcpMetadataFromAssistantMessage(event.message)
-		return { message: sanitized }
-	})
-
 	// ── 8. tool_call: record input args for dedup / purge fingerprinting ───────
 	pi.on("tool_call", async (event, _ctx) => {
 		if (!state.toolCalls.has(event.toolCallId)) {
@@ -418,7 +305,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 				inputMessages: event.messages.length,
 				filteredMessages: contextMessages.length,
 				outputMessages: messages.length,
-				messageIdControl: "provider-payload",
+				messageIdControl: "distributed-carriers",
 				state: summarizeDcpState(state),
 				...details,
 			}, ctx)
@@ -454,7 +341,20 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 				await saveDcpState(ctx, state)
 			}
 		}
+		const prunedToolCountBeforeCheckpoint = state.prunedToolIds.size
 		let prunedMessages = applyPruning(contextMessages, state, effectiveConfig)
+		const automaticPrunesCommitted = state.prunedToolIds.size - prunedToolCountBeforeCheckpoint
+		if (automaticPrunesCommitted > 0) {
+			const clearedAnchors = clearDcpNudgeAnchors(state)
+			await saveDcpState(ctx, state)
+			writeDcpDebugLog(effectiveConfig, "prune.tool_checkpoint", {
+				committed: automaticPrunesCommitted,
+				clearedAnchors,
+				turn: state.currentTurn,
+				blockId: state.lastAutomaticPruneBlockId,
+				state: summarizeDcpState(state),
+			}, ctx)
+		}
 		let candidate = null as ReturnType<typeof detectCompressionCandidate>
 		let messageCandidates = [] as ReturnType<typeof detectMessageCompressionCandidates>
 		let emergencySelection = null as ReturnType<typeof analyzeEmergencyCurrentTurn> | null
@@ -746,6 +646,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 				)
 				if (emergencyPruneResult.prunedToolCallIds.length > 0) {
 					prunedMessages = applyPruning(contextMessages, state, effectiveConfig)
+					const clearedAnchors = clearDcpNudgeAnchors(state)
 					state.consecutiveIgnoredStrongNudges = 0
 					emergencySelection = analyzeEmergencyCurrentTurn(prunedMessages, state, effectiveConfig)
 					messageCandidates = emergencyCurrentTurnMessageCandidates(emergencySelection, effectiveConfig)
@@ -758,6 +659,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 						targetContextPercent,
 						targetRecoveryTokens,
 						prunedOutputs: emergencyPruneResult.prunedToolCallIds.length,
+						clearedAnchors,
 						estimatedTokensRecovered: emergencyPruneResult.estimatedTokensRecovered,
 						estimatedContextPercentAfter: Math.max(
 							0,
@@ -786,7 +688,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 					prunedMessages,
 					state,
 					nudgeType,
-					{ contextPercent },
+					{ contextPercent, renderedReminder: nudgeText },
 				)
 				if (anchorResult.anchor) {
 					if (anchorResult.updated) {
@@ -836,10 +738,10 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 				anchor.type === "context-strong" || anchor.type === "context-soft",
 			)
 		}
-		applyAnchoredNudges(prunedMessages, state, (anchor) =>
+		const nudgeApplication = applyAnchoredNudges(prunedMessages, state, (anchor) =>
 			appendConcreteNudgeGuidance(baseNudgeText(anchor.type), candidate, messageCandidates, state),
 		)
-		if (state.nudgeAnchors.length !== anchorsBeforeFinalization) {
+		if (state.nudgeAnchors.length !== anchorsBeforeFinalization || nudgeApplication.stateChanged) {
 			await saveDcpState(ctx, state)
 		}
 
@@ -851,7 +753,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 		})
 	})
 
-	// ── 10b. before_provider_request: inject DCP IDs outside transcript ────────
+	// ── 10b. before_provider_request: observe accepted tool-result payloads ────
 	pi.on("before_provider_request", async (event, ctx) => {
 		const effectiveConfig = configForContext(ctx)
 		pendingProviderToolIds.clear()
@@ -868,16 +770,16 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 			}
 		}
 
-		const controlText = buildMessageIdControlText(state)
-		if (!controlText) return undefined
-
-		const payload = appendDcpControlToProviderPayload(event.payload, controlText)
 		writeDcpDebugLog(effectiveConfig, "provider_payload.message_ids", {
-			injected: payload !== event.payload,
+			injected: false,
+			delivery: "distributed-carriers",
 			pendingToolResults: pendingProviderToolIds.size,
 			state: summarizeDcpState(state),
 		}, ctx)
-		return payload === event.payload ? undefined : payload
+		// IDs are already attached to deterministic user/tool-result context
+		// carriers. Replacing the payload here would move metadata from the old
+		// tail to the new one and break strict append-only Responses continuation.
+		return undefined
 	})
 
 	// Promote pending IDs only after the provider accepted the exact payload.

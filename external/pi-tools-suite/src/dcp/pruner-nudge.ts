@@ -7,7 +7,7 @@ import type {
   NudgeThresholds,
 } from "./pruner-types.js";
 import { extractBlockId, messageText } from "./pruner-metadata.js";
-import { stableMessageId } from "./pruner-message-ids.js";
+import { stableMessageKeys } from "./pruner-message-ids.js";
 
 function coercePercentThreshold(value: number | string | undefined, fallback: number): number {
   if (typeof value === "number") return Number.isFinite(value) ? value : fallback;
@@ -56,6 +56,7 @@ function isRealAnchorCandidate(msg: any): boolean {
 }
 
 function findAnchorMessage(messages: any[]): { msg: any; index: number; stableId: string; timestamp: number; role: string } | null {
+  const stableKeys = stableMessageKeys(messages);
   // Prefer the latest real user message: it gives the reminder direct user-like
   // salience without creating a new synthetic message at the end of context.
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -65,7 +66,7 @@ function findAnchorMessage(messages: any[]): { msg: any; index: number; stableId
     return {
       msg,
       index: i,
-      stableId: stableMessageId(msg, i),
+      stableId: stableKeys[i]!,
       timestamp: msg.timestamp,
       role: msg.role,
     };
@@ -79,7 +80,7 @@ function findAnchorMessage(messages: any[]): { msg: any; index: number; stableId
     return {
       msg,
       index: i,
-      stableId: stableMessageId(msg, i),
+      stableId: stableKeys[i]!,
       timestamp: msg.timestamp,
       role: msg.role,
     };
@@ -88,8 +89,8 @@ function findAnchorMessage(messages: any[]): { msg: any; index: number; stableId
   return null;
 }
 
-function anchorMatchesMessage(anchor: DcpNudgeAnchor, msg: any, index: number): boolean {
-  if (anchor.anchorStableId && stableMessageId(msg, index) === anchor.anchorStableId) return true;
+function anchorMatchesMessage(anchor: DcpNudgeAnchor, msg: any, stableKey: string): boolean {
+  if (anchor.anchorStableId && stableKey === anchor.anchorStableId) return true;
   return msg?.timestamp === anchor.anchorTimestamp;
 }
 
@@ -207,34 +208,33 @@ export function upsertNudgeAnchor(
   messages: any[],
   state: DcpState,
   type: DcpNudgeType,
-  options: { contextPercent?: number } = {},
+  options: { contextPercent?: number; renderedReminder?: string } = {},
 ): { anchor: DcpNudgeAnchor | null; created: boolean; updated: boolean } {
-  const target = findAnchorMessage(messages);
-  if (!target) {
-    // The caller will append one synthetic tail reminder. Drop persisted
-    // anchors first so applyAnchoredNudges cannot render a second reminder.
-    state.nudgeAnchors = [];
-    state.lastNudge = undefined;
-    return { anchor: null, created: false, updated: false };
-  }
-
-  const key = `${target.stableId}|${target.timestamp}`;
+  const stableKeys = stableMessageKeys(messages);
   let existing: DcpNudgeAnchor | null = null;
   for (const anchor of state.nudgeAnchors) {
-    const anchorKey = `${anchor.anchorStableId ?? ""}|${anchor.anchorTimestamp}`;
-    if (anchorKey !== key) continue;
+    const stillPresent = messages.some((message, index) =>
+      isRealAnchorCandidate(message) && anchorMatchesMessage(anchor, message, stableKeys[index]!),
+    );
+    if (!stillPresent) continue;
     if (!existing || isNewerAnchor(anchor, existing)) existing = anchor;
   }
 
   const now = Date.now();
   if (existing) {
-    // Older sidecars may contain several anchors. Keep only the anchor for the
-    // current target so every subsequent context pass has singleton state.
+    // Keep the original carrier and frozen text. Moving a reminder to the
+    // newest user message would remove bytes from an old provider-cache prefix.
     state.nudgeAnchors = [existing];
     const shouldUpgrade = typePriority(type) > typePriority(existing.type);
-    if (shouldUpgrade) existing.type = type;
-    existing.updatedAt = now;
-    existing.contextPercent = options.contextPercent ?? existing.contextPercent;
+    if (shouldUpgrade) {
+      existing.type = type;
+      existing.contextPercent = options.contextPercent ?? existing.contextPercent;
+      existing.renderedReminder = options.renderedReminder ?? existing.renderedReminder;
+      existing.updatedAt = now;
+    } else if (!existing.renderedReminder && options.renderedReminder) {
+      // One-time migration for anchors persisted before frozen rendering.
+      existing.renderedReminder = options.renderedReminder;
+    }
     state.lastNudge = {
       type: existing.type,
       anchorId: existing.id,
@@ -246,6 +246,15 @@ export function upsertNudgeAnchor(
     return { anchor: existing, created: false, updated: shouldUpgrade };
   }
 
+  const target = findAnchorMessage(messages);
+  if (!target) {
+    // The caller will append one synthetic tail reminder. Drop persisted
+    // anchors first so applyAnchoredNudges cannot render a second reminder.
+    state.nudgeAnchors = [];
+    state.lastNudge = undefined;
+    return { anchor: null, created: false, updated: false };
+  }
+
   const anchor: DcpNudgeAnchor = {
     id: state.nextNudgeAnchorId++,
     type,
@@ -254,6 +263,7 @@ export function upsertNudgeAnchor(
     anchorRole: target.role,
     turnIndex: state.currentTurn,
     contextPercent: options.contextPercent,
+    renderedReminder: options.renderedReminder,
     createdAt: now,
     updatedAt: now,
   };
@@ -275,12 +285,16 @@ export function applyAnchoredNudges(
   messages: any[],
   state: DcpState,
   render: (anchor: DcpNudgeAnchor) => string,
-): void {
-  if (state.nudgeAnchors.length === 0) return;
+): { rendered: boolean; stateChanged: boolean } {
+  if (state.nudgeAnchors.length === 0) return { rendered: false, stateChanged: false };
 
+  const stableKeys = stableMessageKeys(messages);
+  const priorAnchors = state.nudgeAnchors;
   let selected: { anchor: DcpNudgeAnchor; index: number } | null = null;
   for (const anchor of state.nudgeAnchors) {
-    const index = messages.findIndex((msg, messageIndex) => anchorMatchesMessage(anchor, msg, messageIndex));
+    const index = messages.findIndex((msg, messageIndex) =>
+      anchorMatchesMessage(anchor, msg, stableKeys[messageIndex]!),
+    );
     if (index === -1) continue;
     if (!selected || isNewerAnchor(anchor, selected.anchor)) {
       selected = { anchor, index };
@@ -290,7 +304,27 @@ export function applyAnchoredNudges(
   // Defensive migration for persisted pre-singleton state: render only the
   // newest valid anchor and discard every stale predecessor.
   state.nudgeAnchors = selected ? [selected.anchor] : [];
-  if (selected) appendTextToMessage(messages[selected.index], render(selected.anchor));
+  const anchorSetChanged = state.nudgeAnchors.length !== priorAnchors.length ||
+    state.nudgeAnchors.some((anchor, index) => anchor !== priorAnchors[index]);
+  if (!selected) return { rendered: false, stateChanged: anchorSetChanged };
+
+  const materializedReminder = selected.anchor.renderedReminder === undefined;
+  const reminder = selected.anchor.renderedReminder ?? render(selected.anchor);
+  if (materializedReminder) selected.anchor.renderedReminder = reminder;
+  const anchorMessage = messages[selected.index];
+  if (anchorMessage?.role === "assistant") {
+    messages.splice(selected.index + 1, 0, {
+      role: "user",
+      content: reminder,
+      timestamp: selected.anchor.createdAt,
+    });
+  } else {
+    appendTextToMessage(anchorMessage, reminder);
+  }
+  return {
+    rendered: true,
+    stateChanged: anchorSetChanged || materializedReminder,
+  };
 }
 
 export function clearDcpNudgeAnchors(state: DcpState): number {

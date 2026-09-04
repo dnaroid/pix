@@ -4,6 +4,7 @@
   import X from "@lucide/svelte/icons/x";
   import { onMount } from "svelte";
   import type { SessionInfo } from "@agentclientprotocol/sdk";
+  import { fuzzySearch } from "../lib/fuzzy";
 
   let {
     sessions,
@@ -29,12 +30,15 @@
   let selector = $state<HTMLElement | null>(null);
   let search = $state<HTMLInputElement | null>(null);
   const filteredSessions = $derived.by(() => {
-    const normalizedQuery = query.trim().toLocaleLowerCase();
-    if (!normalizedQuery) return sessions;
-    return sessions.filter((session) => {
-      const searchable = `${session.title ?? "Untitled conversation"} ${session.sessionId} ${displayDate(session.updatedAt)}`;
-      return searchable.toLocaleLowerCase().includes(normalizedQuery);
-    });
+    return fuzzySearch(
+      sessions.map((session) => ({
+        value: session,
+        label: session.title ?? "Untitled conversation",
+        aliases: [session.sessionId],
+        keywords: [displayDate(session.updatedAt)],
+      })),
+      query,
+    ).map((match) => match.value);
   });
 
   onMount(() => search?.focus());

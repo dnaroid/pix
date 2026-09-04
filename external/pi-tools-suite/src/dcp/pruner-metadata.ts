@@ -182,7 +182,7 @@ export function extractMessageId(text: string): string | undefined {
   )?.[1];
 }
 
-function stripStaleDcpMetadataLines(text: string): string {
+export function stripStaleDcpMetadataLines(text: string): string {
   if (!text.includes("<dcp-") && !text.includes("[dcp-")) return text;
 
   const lines = text.split("\n");
@@ -238,21 +238,29 @@ function stripStaleDcpMetadataLines(text: string): string {
 
 function stripStaleDcpMetadataFromAssistantBlock(block: any): any | undefined {
   if (!block || typeof block !== "object") return block;
-  const next = { ...block };
+  const textCanChange = typeof block.text === "string" &&
+    (block.text.includes("<dcp-") || block.text.includes("[dcp-"));
+  const thinkingCanChange = typeof block.thinking === "string" &&
+    (block.thinking.includes("<dcp-") || block.thinking.includes("[dcp-"));
+  if (!textCanChange && !thinkingCanChange) return block;
+
+  let next = block;
   let touched = false;
 
-  if (typeof next.text === "string") {
-    const stripped = stripStaleDcpMetadataLines(next.text);
-    if (stripped !== next.text) {
+  if (typeof block.text === "string") {
+    const stripped = stripStaleDcpMetadataLines(block.text);
+    if (stripped !== block.text) {
+      next = { ...next };
       touched = true;
       next.text = stripped;
       delete next.textSignature;
     }
   }
 
-  if (typeof next.thinking === "string") {
-    const stripped = stripStaleDcpMetadataLines(next.thinking);
-    if (stripped !== next.thinking) {
+  if (typeof block.thinking === "string") {
+    const stripped = stripStaleDcpMetadataLines(block.thinking);
+    if (stripped !== block.thinking) {
+      if (!touched) next = { ...next };
       touched = true;
       next.thinking = stripped;
       delete next.thinkingSignature;
@@ -265,20 +273,23 @@ function stripStaleDcpMetadataFromAssistantBlock(block: any): any | undefined {
 }
 
 export function stripStaleDcpMetadataFromAssistantMessage(message: any): any {
-  if (!message || typeof message !== "object" || message.role !== "assistant") return message;
-  return stripStaleDcpMetadataFromMessage(message);
+  return message;
 }
 
 export function stripStaleDcpMetadataFromMessage(message: any): any {
   if (!message || typeof message !== "object") return message;
+  // Assistant content may contain provider-signed reasoning, text, or tool-call
+  // items. Even DCP-looking text must replay byte-for-byte once persisted.
+  if (message.role === "assistant") return message;
   if (typeof message.content === "string") {
-    return { ...message, content: stripStaleDcpMetadataLines(message.content) };
+    const stripped = stripStaleDcpMetadataLines(message.content);
+    return stripped === message.content ? message : { ...message, content: stripped };
   }
   if (!Array.isArray(message.content)) return message;
-  return {
-    ...message,
-    content: message.content
-      .map(stripStaleDcpMetadataFromAssistantBlock)
-      .filter((block: any) => block !== undefined),
-  };
+  const content = message.content
+    .map(stripStaleDcpMetadataFromAssistantBlock)
+    .filter((block: any) => block !== undefined);
+  const unchanged = content.length === message.content.length &&
+    content.every((block: any, index: number) => block === message.content[index]);
+  return unchanged ? message : { ...message, content };
 }

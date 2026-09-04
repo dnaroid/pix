@@ -119,6 +119,8 @@ export interface DcpNudgeAnchor {
   turnIndex: number
   /** Approximate context usage that triggered the reminder, as a 0-1 fraction. */
   contextPercent?: number
+  /** Frozen provider-visible reminder text for cache-stable reapplication. */
+  renderedReminder?: string
   /** Wall-clock creation time. */
   createdAt: number
   /** Wall-clock time of the latest re-application/update. */
@@ -166,6 +168,10 @@ export interface DcpState {
   messageIdSnapshot: Map<string, number>
   /** Extra metadata for the model-visible DCP message IDs in messageIdSnapshot. */
   messageMetaSnapshot: Map<string, MessageIdMeta>
+  /** Stable message identity → persistent model-visible mNNN assignment. */
+  messageIdsByStableId: Map<string, string>
+  /** Monotonic counter for persistent message IDs. */
+  nextMessageId: number
 
   // ── Turn tracking ──────────────────────────────────────────────────────────
   /**
@@ -174,6 +180,10 @@ export interface DcpState {
    * context array in the `context` event handler.
    */
   currentTurn: number
+  /** Last user-turn count at which automatic prune discovery ran. */
+  lastAutomaticPruneTurn: number
+  /** Highest created block ID at the last automatic-prune checkpoint. */
+  lastAutomaticPruneBlockId: number
 
   // ── Statistics ─────────────────────────────────────────────────────────────
   /** Running total of tokens estimated to have been saved by pruning/compression */
@@ -253,7 +263,11 @@ export function createState(): DcpState {
     nextBlockId: 1,
     messageIdSnapshot: new Map(),
     messageMetaSnapshot: new Map(),
+    messageIdsByStableId: new Map(),
+    nextMessageId: 1,
     currentTurn: 0,
+    lastAutomaticPruneTurn: -1,
+    lastAutomaticPruneBlockId: 0,
     tokensSaved: 0,
     totalPruneCount: 0,
     totalToolCallCount: 0,
@@ -285,7 +299,11 @@ export function resetState(state: DcpState): void {
   state.nextBlockId = 1
   state.messageIdSnapshot.clear()
   state.messageMetaSnapshot.clear()
+  state.messageIdsByStableId.clear()
+  state.nextMessageId = 1
   state.currentTurn = 0
+  state.lastAutomaticPruneTurn = -1
+  state.lastAutomaticPruneBlockId = 0
   state.tokensSaved = 0
   state.totalPruneCount = 0
   state.totalToolCallCount = 0
@@ -424,12 +442,18 @@ export interface SerializedDcpState {
   nudgeAnchors?: DcpNudgeAnchor[]
   nextNudgeAnchorId?: number
   lastNudge?: DcpLastNudge
+  /** Persistent stable-identity → mNNN assignments. */
+  messageIdsByStableId?: Array<[string, string]>
+  nextMessageId?: number
   /**
    * Persisted since v??. `context` events re-seed currentTurn from raw
    * messages, but keeping it across session restarts gives diagnostics and
    * telemetry a contiguous turn counter instead of resetting to 0.
    */
   currentTurn?: number
+  /** Automatic pruning runs only when one of these checkpoints changes. */
+  lastAutomaticPruneTurn?: number
+  lastAutomaticPruneBlockId?: number
   /**
    * Persisted since v?.?. Without persistence a pi process restart silently
    * reset the nudge cadence counter to 0, which could suppress the next
@@ -622,7 +646,11 @@ export function serializeState(state: DcpState): SerializedDcpState {
     nudgeAnchors: state.nudgeAnchors,
     nextNudgeAnchorId: state.nextNudgeAnchorId,
     lastNudge: state.lastNudge,
+    messageIdsByStableId: Array.from(state.messageIdsByStableId.entries()),
+    nextMessageId: state.nextMessageId,
     currentTurn: state.currentTurn,
+    lastAutomaticPruneTurn: state.lastAutomaticPruneTurn,
+    lastAutomaticPruneBlockId: state.lastAutomaticPruneBlockId,
     nudgeCounter: state.nudgeCounter,
     lastNudgeTurn: state.lastNudgeTurn,
     lastContextWindow: state.lastContextWindow,
@@ -776,6 +804,31 @@ export function restoreState(state: DcpState, data: unknown): void {
     state.lastNudge = saved.lastNudge
   }
 
+  if (Array.isArray(saved.messageIdsByStableId)) {
+    const usedIds = new Set<string>()
+    const usedStableKeys = new Set<string>()
+    state.messageIdsByStableId = new Map(
+      saved.messageIdsByStableId.filter(
+        (entry): entry is [string, string] => {
+          if (!Array.isArray(entry) || typeof entry[0] !== "string" || typeof entry[1] !== "string") return false
+          if (!entry[0] || !/^m\d+$/.test(entry[1]) || usedIds.has(entry[1]) || usedStableKeys.has(entry[0])) return false
+          usedIds.add(entry[1])
+          usedStableKeys.add(entry[0])
+          return true
+        },
+      ),
+    )
+  }
+  const highestRestoredMessageId = Math.max(
+    0,
+    ...Array.from(state.messageIdsByStableId.values()).map((id) => Number.parseInt(id.slice(1), 10) || 0),
+  )
+  if (typeof saved.nextMessageId === "number" && Number.isFinite(saved.nextMessageId) && saved.nextMessageId > 0) {
+    state.nextMessageId = Math.max(Math.floor(saved.nextMessageId), highestRestoredMessageId + 1)
+  } else {
+    state.nextMessageId = highestRestoredMessageId + 1
+  }
+
   // nudgeCounter: clamp to a non-negative integer so a corrupted payload
   // cannot stall reminders by going negative. Default 0 keeps older sessions
   // behaving like a fresh cadence on first post-restart context event.
@@ -792,6 +845,12 @@ export function restoreState(state: DcpState, data: unknown): void {
   }
   if (typeof saved.currentTurn === "number" && Number.isFinite(saved.currentTurn) && saved.currentTurn >= 0) {
     state.currentTurn = Math.floor(saved.currentTurn)
+  }
+  if (typeof saved.lastAutomaticPruneTurn === "number" && Number.isFinite(saved.lastAutomaticPruneTurn)) {
+    state.lastAutomaticPruneTurn = Math.floor(saved.lastAutomaticPruneTurn)
+  }
+  if (typeof saved.lastAutomaticPruneBlockId === "number" && Number.isFinite(saved.lastAutomaticPruneBlockId) && saved.lastAutomaticPruneBlockId >= 0) {
+    state.lastAutomaticPruneBlockId = Math.floor(saved.lastAutomaticPruneBlockId)
   }
   if (typeof saved.lastContextWindow === "number" && Number.isFinite(saved.lastContextWindow) && saved.lastContextWindow > 0) {
     state.lastContextWindow = saved.lastContextWindow

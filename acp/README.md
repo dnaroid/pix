@@ -138,7 +138,7 @@ Port order follows the mapping layers proven by upstream `pi-acp`
 5. **pix extras** — done where the protocol allows: client image attach is
    forwarded through `session/prompt`, and `export_html` is exposed via the
    `/export` slash command (see step 4). Usage/`model-usage-status`
-   surfacing is **deferred upstream**: pi 0.84.4's RPC protocol emits no
+   surfacing is **deferred upstream**: pi 0.85.0's RPC protocol emits no
    usage events, so there is nothing to translate until the SDK grows one.
 
 ## Known limitations
@@ -166,7 +166,7 @@ Also compare with the advanced fork
 
 ## Constraints
 
-- `@earendil-works/pi-coding-agent` is pinned **exactly** (currently `0.84.4`)
+- `@earendil-works/pi-coding-agent` is pinned **exactly** (currently `0.85.0`)
   to match the repo-wide SDK pin; bumps go through the `pi-sdk-update` skill.
   The RPC protocol of the spawned `pi` binary must stay in sync with this pin.
 - This package is intentionally NOT part of the root `npm run check`

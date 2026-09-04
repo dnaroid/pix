@@ -99,6 +99,12 @@ export function appendLocalUserMessage(
   };
 }
 
+export function appendLocalAssistantMessage(state: TranscriptState, text: string, id: string): TranscriptState {
+  return {
+    items: [...state.items, { type: "message", id, role: "assistant", text, attachments: [] }],
+  };
+}
+
 export function applySessionUpdate(state: TranscriptState, update: SessionUpdate): TranscriptState {
   switch (update.sessionUpdate) {
     case "user_message_chunk":

@@ -58,5 +58,7 @@ describe("DCP prompt contracts", () => {
 		expect(COMPRESS_RANGE_DESCRIPTION).toContain("Do not copy long raw code, JSON, diffs, logs");
 		expect(COMPRESS_RANGE_DESCRIPTION).toContain("Use `messages` for a single large stale message");
 		expect(COMPRESS_RANGE_DESCRIPTION).toContain("Do not invent IDs");
+		expect(COMPRESS_RANGE_DESCRIPTION).toContain("attached to stable user/tool-result carriers");
+		expect(COMPRESS_RANGE_DESCRIPTION).toContain("IDs may be sparse");
 	});
 });

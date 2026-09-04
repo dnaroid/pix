@@ -51,6 +51,17 @@ export interface AutocompleteSettings {
   readonly debounceMs: number;
 }
 
+export interface ForkMessage {
+  readonly entryId: string;
+  readonly text: string;
+}
+
+export interface ForkSessionResult {
+  readonly sessionId: string;
+  readonly configOptions: SessionConfigOption[];
+  readonly selectedText?: string;
+}
+
 type JsonRpcId = string | number;
 
 interface PendingRequest {
@@ -119,6 +130,51 @@ export class AcpClient {
 
   loadSession(sessionId: string, cwd: string): Promise<LoadSessionResponse> {
     return this.request("session/load", { sessionId, cwd, mcpServers: [] });
+  }
+
+  async forkMessages(sessionId: string): Promise<ForkMessage[]> {
+    const response = await this.request<unknown>("pix/session/fork_messages", { sessionId });
+    if (!isRecord(response) || !Array.isArray(response.messages)) {
+      throw new Error("pix/session/fork_messages returned an invalid response");
+    }
+    const messages: ForkMessage[] = [];
+    for (const message of response.messages) {
+      if (!isRecord(message) || typeof message.entryId !== "string" || typeof message.text !== "string") {
+        throw new Error("pix/session/fork_messages returned an invalid response");
+      }
+      messages.push({ entryId: message.entryId, text: message.text });
+    }
+    return messages;
+  }
+
+  async forkSession(sessionId: string, cwd: string, entryId: string): Promise<ForkSessionResult> {
+    const response = await this.request<unknown>("session/fork", {
+      sessionId,
+      cwd,
+      mcpServers: [],
+      _meta: { "pix.entryId": entryId },
+    });
+    if (!isRecord(response) || typeof response.sessionId !== "string") {
+      throw new Error("session/fork returned an invalid response");
+    }
+    const configOptions = Array.isArray(response.configOptions)
+      ? response.configOptions as SessionConfigOption[]
+      : [];
+    const meta = isRecord(response._meta) ? response._meta : undefined;
+    const selectedText = typeof meta?.["pix.selectedText"] === "string"
+      ? meta["pix.selectedText"]
+      : undefined;
+    return { sessionId: response.sessionId, configOptions, ...(selectedText === undefined ? {} : { selectedText }) };
+  }
+
+  async reloadSession(sessionId: string): Promise<{ configOptions: SessionConfigOption[] }> {
+    const response = await this.request<unknown>("pix/session/reload", { sessionId }, null);
+    if (!isRecord(response)) throw new Error("pix/session/reload returned an invalid response");
+    return {
+      configOptions: Array.isArray(response.configOptions)
+        ? response.configOptions as SessionConfigOption[]
+        : [],
+    };
   }
 
   closeSession(sessionId: string): Promise<Record<string, never>> {

@@ -1,7 +1,7 @@
 import type { DcpConfig } from "./config.js";
 import type { DcpState } from "./state.js";
 import { applyCompressionBlocks, repairOrphanedToolPairs, syncCompressionBlocks } from "./pruner-compression-blocks.js";
-import { stripStaleDcpMetadataFromAssistantMessage } from "./pruner-metadata.js";
+import { stripStaleDcpMetadataFromMessage } from "./pruner-metadata.js";
 import { injectMessageIds } from "./pruner-message-ids.js";
 import {
   applyAutoToolOutputPruning,
@@ -63,7 +63,7 @@ export function applyPruning(
         typeof contentBlock === "object" && contentBlock !== null ? { ...contentBlock } : contentBlock,
       );
     }
-    return stripStaleDcpMetadataFromAssistantMessage(clone);
+    return stripStaleDcpMetadataFromMessage(clone);
   });
 
   // 1. Count user turns → update state.currentTurn. Do this before inserting
@@ -79,21 +79,29 @@ export function applyPruning(
   // expansion logic could not catch (e.g. multi-block interactions, pre-broken state).
   repairOrphanedToolPairs(msgs);
 
-  // 3. Apply deduplication
-  applyDeduplication(msgs, state, config);
-
-  // 4. Apply error purging
-  applyErrorPurging(msgs, state, config);
-
-  // 5. Apply autonomous policy pruning for old/large/stale tool outputs
-  applyAutoToolOutputPruning(msgs, state, config);
+  // 3-5. Discover new automatic pruning decisions only at stable checkpoints.
+  // Rewriting an old result after every same-turn duplicate breaks provider
+  // continuation repeatedly. A new user turn or compression block already
+  // establishes a natural history boundary where one prefix rebuild is
+  // acceptable. Branches that move the turn count backwards also reopen the
+  // checkpoint instead of suppressing pruning indefinitely.
+  const newestBlockId = Math.max(0, state.nextBlockId - 1);
+  const automaticPruneCheckpoint =
+    state.currentTurn !== state.lastAutomaticPruneTurn ||
+    newestBlockId !== state.lastAutomaticPruneBlockId;
+  if (automaticPruneCheckpoint) {
+    applyDeduplication(msgs, state, config);
+    applyErrorPurging(msgs, state, config);
+    applyAutoToolOutputPruning(msgs, state, config);
+    state.lastAutomaticPruneTurn = state.currentTurn;
+    state.lastAutomaticPruneBlockId = newestBlockId;
+  }
 
   // 6. Apply explicit tool output pruning (prunedToolIds)
   applyToolOutputPruning(msgs, state);
 
-  // 7. Refresh message ID snapshots used by the compress tool. Markers are
-  // never injected into provider-visible content; the before_provider_request
-  // hook delivers the id map as a hidden control payload.
+  // 7. Refresh message ID snapshots and append stable distributed metadata to
+  // user/tool-result carriers. Assistant items remain byte-stable.
   injectMessageIds(msgs, state, { config });
 
   // 8. state.messageIdSnapshot/messageMetaSnapshot are already updated by injectMessageIds

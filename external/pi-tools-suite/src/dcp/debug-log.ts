@@ -127,7 +127,13 @@ export function summarizeDcpState(state: DcpState): Record<string, unknown> {
       nextBlockId: state.nextBlockId,
     },
     inactiveBlocksTail: inactiveBlocks,
+    persistentMessageIds: state.messageIdsByStableId.size,
+    nextMessageId: state.nextMessageId,
     prunedTools: state.prunedToolIds.size,
+    automaticPruneCheckpoint: {
+      turn: state.lastAutomaticPruneTurn,
+      blockId: state.lastAutomaticPruneBlockId,
+    },
     providerSeenTools: state.providerSeenToolIds.size,
     consecutiveEmergencyPasses: state.consecutiveIgnoredStrongNudges,
     nudgeAnchors: state.nudgeAnchors.map((anchor) => ({

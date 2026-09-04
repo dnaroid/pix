@@ -74,6 +74,7 @@ export interface PiSessionState {
 	readonly sessionId: string;
 	readonly sessionName?: string | undefined;
 	readonly isStreaming: boolean;
+	readonly isCompacting?: boolean | undefined;
 }
 
 /**
@@ -84,6 +85,17 @@ export interface PiCompactionResult {
 	readonly tokensBefore: number;
 	readonly estimatedTokensAfter?: number | undefined;
 }
+
+/** Runtime slash command discovered by pi (extension, prompt, or skill). */
+export interface PiSlashCommand {
+	readonly name: string;
+	readonly description?: string | undefined;
+	readonly source: "extension" | "prompt" | "skill";
+	readonly sourceInfo: unknown;
+}
+
+/** Session statistics exposed by pi's public RPC client. */
+export type PiSessionStats = Awaited<ReturnType<RpcClient["getSessionStats"]>>;
 
 /**
  * Structural subset of pi `AgentMessage` used for session history replay.
@@ -140,8 +152,18 @@ export interface PiClient {
 	switchSession(sessionPath: string): Promise<{ cancelled: boolean }>;
 	/** Clone the current active branch into a new session. */
 	clone(): Promise<{ cancelled: boolean }>;
+	/** Fork into a new session before a specific user-message entry. */
+	fork(entryId: string): Promise<{ text: string; cancelled: boolean }>;
+	/** User messages that may be used as fork points. */
+	getForkMessages(): Promise<Array<{ entryId: string; text: string }>>;
+	/** Plain text of the latest assistant message, if one exists. */
+	getLastAssistantText(): Promise<string | null>;
 	/** Messages of the active branch, oldest first. */
 	getMessages(): Promise<PiAgentMessage[]>;
+	/** Aggregate message, token, and cost statistics for the active session. */
+	getSessionStats(): Promise<PiSessionStats>;
+	/** Extension commands, prompt templates, and skills available to this process. */
+	getCommands(): Promise<PiSlashCommand[]>;
 	/** Set the session display name. */
 	setSessionName(name: string): Promise<void>;
 
@@ -224,12 +246,12 @@ export class PiRpcClient implements PiClient {
 	/**
 	 * Fail in-flight work when the pi child process dies.
 	 *
-	 * The SDK `RpcClient` (pinned 0.84.4) rejects pending requests on exit
+	 * The SDK `RpcClient` (pinned 0.85.0) rejects pending requests on exit
 	 * but exposes no disconnect event, so the exit is observed on the private
 	 * child process handle — the same handle `respondToExtensionUi` uses.
 	 */
 	private watchExit(client: RpcClient): void {
-		// Double cast: `process` is private on RpcClient (pinned 0.84.4), and
+		// Double cast: `process` is private on RpcClient (pinned 0.85.0), and
 		// an intersection with a private property collapses to `never`.
 		const child = (client as unknown as { process?: ChildProcess | null }).process;
 		if (!child) return;
@@ -263,11 +285,11 @@ export class PiRpcClient implements PiClient {
 	 * Answer a dialog `extension_ui_request`.
 	 *
 	 * The pi RPC protocol accepts `extension_ui_response` lines on stdin, but
-	 * `RpcClient` (pinned 0.84.4) has no public API for them, so this writes
+	 * `RpcClient` (pinned 0.85.0) has no public API for them, so this writes
 	 * directly to the child process stdin. Unknown ids are ignored by pi.
 	 */
 	respondToExtensionUi(response: RpcExtensionUIResponse): void {
-		// Double cast: `process` is private on RpcClient (pinned 0.84.4), and
+		// Double cast: `process` is private on RpcClient (pinned 0.85.0), and
 		// an intersection with a private property collapses to `never`.
 		const client = this.requireClient() as unknown as {
 			process?: { stdin?: Writable | null } | null;
@@ -291,10 +313,30 @@ export class PiRpcClient implements PiClient {
 		return this.requireClient().clone();
 	}
 
+	fork(entryId: string): Promise<{ text: string; cancelled: boolean }> {
+		return this.requireClient().fork(entryId);
+	}
+
+	getForkMessages(): Promise<Array<{ entryId: string; text: string }>> {
+		return this.requireClient().getForkMessages();
+	}
+
+	getLastAssistantText(): Promise<string | null> {
+		return this.requireClient().getLastAssistantText();
+	}
+
 	async getMessages(): Promise<PiAgentMessage[]> {
 		// Cast through unknown: pi's AgentMessage union includes custom
 		// message types this adapter intentionally models loosely.
 		return (await this.requireClient().getMessages()) as unknown as PiAgentMessage[];
+	}
+
+	getSessionStats(): Promise<PiSessionStats> {
+		return this.requireClient().getSessionStats();
+	}
+
+	async getCommands(): Promise<PiSlashCommand[]> {
+		return this.requireClient().getCommands();
 	}
 
 	setSessionName(name: string): Promise<void> {

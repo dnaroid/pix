@@ -105,6 +105,8 @@ describe("generateModelSummary", () => {
 		expect(request.systemPrompt).toContain("files/symbols changed or inspected");
 		expect(request.systemPrompt).toContain("exact errors still actionable");
 		expect(request.systemPrompt).toContain("verification status, and next steps");
+		expect(request.systemPrompt).toContain("explicit continuity markers verbatim");
+		expect(request.systemPrompt).toContain("uppercase labels before colons");
 		expect(request.systemPrompt).toContain("Do not infer, invent, or add facts absent from the source");
 		expect(request.systemPrompt).toContain("Drop full logs, repeated output");
 		const transcript = String(request.messages?.[0]?.content ?? "");

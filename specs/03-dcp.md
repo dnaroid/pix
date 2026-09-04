@@ -20,9 +20,8 @@ a `compress` tool so the LLM can summarise conversation ranges/messages. `[confi
 3. **before_agent_start** — appends DCP system prompt (manual-mode variant when enabled) to `event.systemPrompt`. `[confirmed by code]`
 4. **tool_call** — records input args + fingerprint into `state.toolCalls`. `[confirmed by code]`
 5. **tool_result** — finalises the tool record with `outputText`, `outputDetails`, `tokenEstimate`. `[confirmed by code]`
-6. **message_end** — strips DCP metadata from assistant messages before persistence. `[confirmed by code]`
-7. **context** — deep-clones messages, applies the pruning pipeline, manages nudge injection. `[confirmed by code]`
-8. **before_provider_request** — injects the `<dcp-message-ids>` control block into the provider payload (Anthropic `system`, Google `config.systemInstruction`, OpenAI-style `messages`, or raw array) — **not** into the transcript. `[confirmed by code: index.ts 43-78, 313-330]`
+6. **context** — deep-clones messages, applies the pruning pipeline, distributes stable ID metadata over user/tool-result carriers, and manages nudge injection. Provider-signed assistant content is replayed unchanged, even when it contains DCP-like text. `[confirmed by code]`
+7. **before_provider_request** — observes which tool results reached the final provider payload for emergency-pruning safety, but does not mutate the payload for DCP IDs. `[confirmed by code]`
 9. **agent_end** — saves state to sidecar. `[confirmed by code]`
 
 ### Pruning pipeline (`pruner.ts`), applied every `context` event, in order
@@ -30,19 +29,17 @@ a `compress` tool so the LLM can summarise conversation ranges/messages. `[confi
 2. `syncCompressionBlocks` — deactivate blocks whose origin compress `toolCallId` is gone or whose boundary messages disappeared. `[confirmed by code]`
 3. `applyCompressionBlocks` — remove ranges covered by active blocks, insert synthetic `[Compressed section: …]` user messages with summaries, re-sort by timestamp; expands ranges to include preceding assistant messages whose toolCall ids are inside. `[confirmed by code]`
 4. `repairOrphanedToolPairs` — remove toolResult/bashExecution whose assistant toolCall was removed; strip orphaned toolCall blocks from assistant messages. `[confirmed by code]`
-5. `applyDeduplication` — for duplicate fingerprints, prune all but the last tool output. `[confirmed by code]`
-6. `applyErrorPurging` — prune error tool results older than N user turns. `[confirmed by code]`
-7. `applyAutoToolOutputPruning` — prune large old tool outputs (> `maxOutputTokens`, older than `keepRecentTurns`) and stale read-like tools (older than `readLikeTurns`). `[confirmed by code]`
+5. At a new user-turn or compression-block checkpoint, run deduplication, error purging, and automatic tool-output pruning as one discovery batch. Repeated same-turn passes do not add new retroactive prunes. `[confirmed by code]`
 8. `applyToolOutputPruning` — replace content of all `state.prunedToolIds` tool results with a placeholder. `[confirmed by code]`
-9. `injectMessageIds` — rebuild `messageIdSnapshot`/`messageMetaSnapshot` with short ids `m001`,`m002`,… (ids are delivered via `before_provider_request`, not embedded in messages). `[confirmed by code]`
+9. `injectMessageIds` — rebuild the current published snapshots while preserving stable, monotonic `mNNN` assignments. Metadata is attached only to user/tool-result/bash-result context clones; assistant IDs are published by the next client-originated carrier. `[confirmed by code]`
 
 ### Message IDs (`pruner-message-ids.ts`)
 - Eligible roles: `user`, `assistant`, `toolResult`, `bashExecution`. Passthrough: `compaction`, `branch_summary`, `custom_message`. `[confirmed by code: pruner-metadata.ts]`
-- 3-digit zero-padded, sequential. Stable ids derived from `msg.id`/`entryId`/`messageId`/`_dcpEntryId`/`metadata.*`, then `toolCallId`, then `ts:<timestamp>`, then `idx:<i>`. `[confirmed by code]`
+- Minimum 3-digit zero-padded and monotonically allocated. Existing stable identities keep their assignment when older messages disappear, so current IDs may be sparse. Stable identities derive from session/message IDs, tool-call IDs, compression blocks, or timestamp plus a canonical content fingerprint; byte-identical collisions receive deterministic occurrence suffixes. `[confirmed by code]`
 
 ### Nudges (`pruner-nudge.ts`)
 - `getNudgeType`: `context-strong`/`context-soft` when `contextPercent > maxContextPercent`; `iteration` when `toolCallsSinceLastUser >= iterationNudgeThreshold`; `turn` when `nudgeCounter+1 >= nudgeFrequency` and `contextPercent > minContextPercent`. `[confirmed by code]`
-- Nudges are **anchored** to the latest real user message (or assistant fallback) and mutated in-place each context event; anchors upgrade (low→high) but never downgrade. Cleared after a successful `compress`. `[confirmed by code; confirmed by tests]`
+- Nudges are **anchored** to one stable real user message. Their complete rendered text is frozen and re-applied verbatim; it changes only on a strict priority upgrade and does not move before compression clears it. Assistant fallback uses a synthetic user carrier rather than modifying signed assistant content. `[confirmed by code; confirmed by tests]`
 - Manual mode: only `context-strong`/`context-soft` nudges; routine `turn`/`iteration` suppressed; non-emergency anchors filtered each event. `[confirmed by code]`
 
 ### Metadata stripping (`pruner-metadata.ts`)
@@ -62,7 +59,7 @@ Key fields and defaults: `enabled:true`, `debug:false`, `manualMode.enabled:fals
 
 ### Persisted state (`state-persistence.ts`, `state.ts`)
 - Path `<sessionDir>/dcp-state/<sanitizedSessionId>.json` (non-`[a-zA-Z0-9._-]` → `_`). Overwrite semantics; deduped by DJB2 hash of serialized content (unchanged state skips write). `[confirmed by code]`
-- Fields (`SerializedDcpState`): `compressionBlocks`, `nextBlockId`, `prunedToolIds`, `prunedToolReasons`, `compactToolCalls`, `totalToolCallCount`, `tokensSaved`, `totalPruneCount`, `accountedCompressionBlockIds`, `compressionTokenSavings`, `accountedPrunedToolIds`, `manualMode`, `nudgeAnchors`, `nextNudgeAnchorId`, `lastNudge`, `currentTurn`, `nudgeCounter`, `lastNudgeTurn`, `_stateHash`. `[confirmed by code: state.ts 211-262]`
+- Fields (`SerializedDcpState`) additionally include persistent `messageIdsByStableId`/`nextMessageId`, frozen reminder text inside `nudgeAnchors`, and `lastAutomaticPruneTurn`/`lastAutomaticPruneBlockId` checkpoints. New fields are optional on restore for legacy sidecars. `[confirmed by code]`
 - `CompactToolRecord` strips heavy fields (`outputText`/`outputDetails`/full `inputArgs`); caps string values at 512 chars / 20 per record; keeps ≤200 recent + all referenced-by-block/pruned/accounted. `[confirmed by code]`
 - Save triggers: `agent_end`, successful `compress`, `session_shutdown` (force). `[confirmed by code]`
 - `cleanupStaleDcpStateFiles` deletes sidecars for non-existent sessions or older than 7 days. `[confirmed by code; confirmed by tests]`
@@ -74,7 +71,8 @@ A session starting with zero blocks and a `previousSessionFile` loads the prior 
 - `state.compressionBlocks` is the single source of truth; active blocks are applied every `context` event. `[confirmed by code]`
 - `state.prunedToolIds` is monotonic for the session lifetime. `[confirmed by code]`
 - Token accounting is idempotent (re-pruning/re-applying does not double-count). `[confirmed by code; confirmed by tests]`
-- Message-id snapshot is rebuilt from scratch every `context` event. `[confirmed by code]`
+- The current published message-id snapshot is rebuilt every `context` event, while stable identity→ID allocation is monotonic and persisted. `[confirmed by code]`
+- Repeating a context transform over unchanged history does not rewrite old provider items; assistant content is never a DCP carrier. `[confirmed by code; confirmed by tests]`
 - `currentTurn` is re-derived from raw user-message count each event. `[confirmed by code]`
 
 ## Edge cases
@@ -89,7 +87,7 @@ A session starting with zero blocks and a `previousSessionFile` loads the prior 
 - **Sidecar writes** on `agent_end`, successful compress, `session_shutdown`. `[confirmed by code]`
 - **Debug log** `~/.pi/agent/dcp-debug.jsonl` (or `PI_DCP_DEBUG_LOG`), rotated at `maxBytes` with `maxBackups`. `[confirmed by code]`
 - **Stale-sidecar cleanup** on `session_start`. `[confirmed by code]`
-- **Context mutations (several irreversible — see Gaps)**: tool results replaced with placeholders; compressed ranges removed and replaced with synthetic summary user messages; DCP metadata stripped from assistant text; nudge text appended in-place to real user/assistant anchor messages (re-applied every event, not once). `[confirmed by code]`
+- **Context mutations (several irreversible — see Gaps)**: tool results replaced with placeholders; compressed ranges removed and replaced with synthetic summary user messages; stable DCP metadata added to client-originated context clones; frozen nudges re-applied to one stable user carrier. `[confirmed by code]`
 - Appends `dcp-nudge` custom session entries (telemetry). `[confirmed by code]`
 
 ## Related files
@@ -110,7 +108,7 @@ A session starting with zero blocks and a `previousSessionFile` loads the prior 
 3. **Protected outputs after restart**: `appendProtectedToolOutputs` reads live `outputText`; after restart it is `undefined`, so future rollups would not preserve them. `[confirmed by code]`
 4. **Subagent result artifacts** read synchronously at compress time; deleting the run dir before a rollup loses that content. `[confirmed by code]`
 5. **Message-text metadata** (`messageMetaSnapshot.text`) used for candidate detection and protect-tag extraction is **not persisted**; protect-tag recovery fails silently after restart. `[inferred]`
-6. **Nudge-anchor mutation**: real user/assistant messages are mutated every context event, not once. `[confirmed by code]`
+6. **Intentional cache rebuilds remain**: compression, decompression, a committed prune batch, or a strict nudge-priority upgrade rewrites history and can require one full provider request. Ordinary subsequent turns must restore append-only continuation. `[confirmed by code; confirmed by tests]`
 
 ### State consistency
 7. **Sidecar dedup bypass**: if the in-memory hash gets out of sync (e.g. after a write failure resets it), an identical-state write can be suppressed. `[confirmed by code]`

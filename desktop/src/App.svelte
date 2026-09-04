@@ -4,6 +4,7 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { open } from "@tauri-apps/plugin-dialog";
   import type {
+    AvailableCommand,
     ContentBlock,
     CreateElicitationRequest,
     CreateElicitationResponse,
@@ -14,11 +15,21 @@
   import { AcpClient } from "./lib/acp-client";
   import { TauriAcpTransport } from "./lib/tauri-transport";
   import {
+    appendLocalAssistantMessage,
     appendLocalUserMessage,
     applySessionUpdate,
     emptyTranscript,
     type TranscriptState,
   } from "./lib/transcript";
+  import {
+    DESKTOP_SLASH_COMMANDS,
+    mergeSlashCommands,
+    parseDesktopSlashCommand,
+  } from "./lib/slash-commands";
+  import {
+    commandPickerState,
+    type CommandPickerState,
+  } from "./lib/command-interactions";
   import {
     ACTIVE_SESSIONS_STORAGE_KEY,
     buildTabSessions,
@@ -70,6 +81,7 @@
   import PromptComposer from "./components/PromptComposer.svelte";
   import StatusBar from "./components/StatusBar.svelte";
   import ElicitationDialog from "./components/ElicitationDialog.svelte";
+  import CommandPicker from "./components/CommandPicker.svelte";
   import PreviewDialog from "./components/PreviewDialog.svelte";
   import WorkspaceSidebar from "./components/WorkspaceSidebar.svelte";
   import type { SessionStateNotification } from "./lib/session-state";
@@ -166,6 +178,7 @@
   let errorMessage = $state<string | null>(null);
   let diagnostics = $state<string[]>([]);
   let pendingElicitation = $state<PendingElicitation | null>(null);
+  let commandPicker = $state<CommandPickerState | null>(null);
   let addingQuestionImages = $state(false);
   let projectSelectorOpen = $state(false);
   let sessionSelectorOpen = $state(false);
@@ -179,6 +192,7 @@
   let taskActionId = $state<string | null>(null);
   let todoSnapshots = $state<Map<string, SessionTodoSnapshot>>(new Map());
   let subagentSnapshots = $state<Map<string, SessionSubagentSnapshot>>(new Map());
+  let slashCommandsBySession = $state<Map<string, AvailableCommand[]>>(new Map());
   let imagePromptSupported = false;
   let transcriptPane = $state<HTMLDivElement | null>(null);
   let localMessageId = 0;
@@ -215,6 +229,12 @@
   const canGoForwardInPreview = $derived(canMovePreviewHistory(previewHistory, 1));
   const activeTodoSnapshot = $derived(activeSessionId ? todoSnapshots.get(activeSessionId) : undefined);
   const activeSubagentSnapshot = $derived(activeSessionId ? subagentSnapshots.get(activeSessionId) : undefined);
+  const activeSlashCommands = $derived(
+    mergeSlashCommands(
+      DESKTOP_SLASH_COMMANDS,
+      activeSessionId ? (slashCommandsBySession.get(activeSessionId) ?? []) : [],
+    ),
+  );
   const questionMode = $derived.by<QuestionComposerMode | undefined>(() => {
     const pending = pendingElicitation;
     if (!pending || pending.kind !== "question") return undefined;
@@ -316,12 +336,14 @@
         if (client !== next) return;
         closeProjectSelector();
         closeSessionSelector();
+        commandPicker = null;
         pendingElicitation?.resolve({ action: "cancel" });
         pendingElicitation = null;
         cancelQuestionImageOperation();
         activeSessionId = null;
         todoSnapshots = new Map();
         subagentSnapshots = new Map();
+        slashCommandsBySession = new Map();
         transcript = emptyTranscript;
         configOptions = [];
         status = exit.requested ? "stopped" : "error";
@@ -363,12 +385,14 @@
     client = null;
     closeProjectSelector();
     closeSessionSelector();
+    commandPicker = null;
     pendingElicitation?.resolve({ action: "cancel" });
     pendingElicitation = null;
     cancelQuestionImageOperation();
     activeSessionId = null;
     todoSnapshots = new Map();
     subagentSnapshots = new Map();
+    slashCommandsBySession = new Map();
     transcript = emptyTranscript;
     configOptions = [];
     promptRunning = false;
@@ -379,8 +403,14 @@
   }
 
   function handleSessionUpdate(notification: SessionNotification): void {
-    if (notification.sessionId !== activeSessionId) return;
     const update = notification.update;
+    if (update.sessionUpdate === "available_commands_update") {
+      const next = new Map(slashCommandsBySession);
+      next.set(notification.sessionId, update.availableCommands);
+      slashCommandsBySession = next;
+      return;
+    }
+    if (notification.sessionId !== activeSessionId) return;
     if (update.sessionUpdate === "config_option_update") {
       configOptions = update.configOptions;
       return;
@@ -424,6 +454,9 @@
     const nextSubagents = new Map(subagentSnapshots);
     nextSubagents.delete(sessionId);
     subagentSnapshots = nextSubagents;
+    const nextCommands = new Map(slashCommandsBySession);
+    nextCommands.delete(sessionId);
+    slashCommandsBySession = nextCommands;
   }
 
   async function registerTranscriptAttachments(nextTranscript: TranscriptState): Promise<void> {
@@ -475,6 +508,7 @@
       taskDocument = EMPTY_TASK_DOCUMENT;
       todoSnapshots = new Map();
       subagentSnapshots = new Map();
+      slashCommandsBySession = new Map();
       taskActionId = null;
       taskLoadFailed = false;
       restoredSessionTabs = null;
@@ -1444,7 +1478,32 @@
     const sessionId = activeSessionId;
     const draftKey = attachmentDraftKey;
     const draftGeneration = attachmentDraftGeneration;
-    if (!client || !sessionId || (!text && attachments.length === 0) || promptRunning) return;
+    if (!client || !sessionId || (!text && attachments.length === 0) || promptRunning || operationRunning) return;
+    const desktopCommand = parseDesktopSlashCommand(text, attachments.length > 0);
+    if (desktopCommand) {
+      promptText = "";
+      switch (desktopCommand.kind) {
+        case "new":
+          await createSession();
+          break;
+        case "resume":
+          openSessionSelector();
+          break;
+        case "reload":
+          await reloadResources();
+          break;
+        case "fork":
+          await forkConversation(desktopCommand.entryId);
+          break;
+        case "model":
+        case "thinking":
+          closeProjectSelector();
+          closeSessionSelector();
+          commandPicker = commandPickerState(desktopCommand.kind, configOptions);
+          break;
+      }
+      return;
+    }
     promptRunning = true;
     errorMessage = null;
     try {
@@ -1465,6 +1524,109 @@
       reportError(error);
     } finally {
       promptRunning = false;
+    }
+  }
+
+  async function selectCommandOption(value: string): Promise<void> {
+    const picker = commandPicker;
+    if (!picker) return;
+    commandPicker = null;
+    promptText = `/${picker.command} ${value}`;
+    await submitPrompt();
+  }
+
+  async function reloadResources(): Promise<void> {
+    const requestClient = client;
+    const sessionId = activeSessionId;
+    if (!requestClient || !sessionId || operationRunning || promptRunning) return;
+    closeProjectSelector();
+    closeSessionSelector();
+    commandPicker = null;
+    operationRunning = true;
+    errorMessage = null;
+    transcript = appendLocalUserMessage(transcript, "/reload", `local:${++localMessageId}`);
+    await scrollToLatest();
+    try {
+      const response = await requestClient.reloadSession(sessionId);
+      if (requestClient !== client || sessionId !== activeSessionId) return;
+      configOptions = response.configOptions;
+      await refreshSessions();
+    } catch (error) {
+      if (requestClient === client && sessionId === activeSessionId) reportError(error);
+    } finally {
+      if (requestClient === client && sessionId === activeSessionId) operationRunning = false;
+    }
+  }
+
+  async function forkConversation(requestedEntryId?: string): Promise<void> {
+    const requestClient = client;
+    const sourceSessionId = activeSessionId;
+    const requestWorkspace = workspace;
+    if (!requestClient || !sourceSessionId || operationRunning || promptRunning) return;
+    closeProjectSelector();
+    closeSessionSelector();
+    commandPicker = null;
+    operationRunning = true;
+    errorMessage = null;
+    let forkedSessionId: string | undefined;
+    let sourceClosed = false;
+    try {
+      let entryId = requestedEntryId;
+      if (!entryId) {
+        const messages = await requestClient.forkMessages(sourceSessionId);
+        entryId = messages.at(-1)?.entryId;
+      }
+      if (!entryId) throw new Error("No user messages to fork from.");
+
+      const forked = await requestClient.forkSession(sourceSessionId, requestWorkspace, entryId);
+      forkedSessionId = forked.sessionId;
+      if (requestClient !== client || sourceSessionId !== activeSessionId || requestWorkspace !== workspace) return;
+
+      await requestClient.closeSession(sourceSessionId);
+      sourceClosed = true;
+      clearSessionActivity(sourceSessionId);
+      clearSessionActivity(forked.sessionId);
+      activeSessionId = forked.sessionId;
+      transcript = emptyTranscript;
+      configOptions = forked.configOptions;
+
+      const loaded = await requestClient.loadSession(forked.sessionId, requestWorkspace);
+      if (requestClient !== client || activeSessionId !== forked.sessionId || requestWorkspace !== workspace) return;
+      configOptions = loaded.configOptions ?? forked.configOptions;
+      closedSessionTabs = [...new Set([...closedSessionTabs, sourceSessionId])];
+      locallyOpenedSessionTabs = locallyOpenedSessionTabs.filter((id) => id !== sourceSessionId);
+      showSessionTab(forked.sessionId);
+      rememberActiveSession(requestWorkspace, forked.sessionId);
+      transcript = appendLocalAssistantMessage(
+        transcript,
+        `Forked from entry ${entryId}.`,
+        `local:${++localMessageId}`,
+      );
+      promptText = forked.selectedText ?? "";
+      await refreshSessions();
+      await scrollToLatest();
+    } catch (error) {
+      if (requestClient !== client || requestWorkspace !== workspace) return;
+      if (sourceClosed) {
+        if (forkedSessionId) await requestClient.closeSession(forkedSessionId).catch(() => {});
+        activeSessionId = sourceSessionId;
+        transcript = emptyTranscript;
+        configOptions = [];
+        try {
+          const restored = await requestClient.loadSession(sourceSessionId, requestWorkspace);
+          configOptions = restored.configOptions ?? [];
+          rememberActiveSession(requestWorkspace, sourceSessionId);
+        } catch (restoreError) {
+          activeSessionId = null;
+          reportError(new Error(
+            `${error instanceof Error ? error.message : String(error)}; source conversation restore failed: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
+          ));
+          return;
+        }
+      }
+      reportError(error);
+    } finally {
+      if (requestClient === client && requestWorkspace === workspace) operationRunning = false;
     }
   }
 
@@ -1664,6 +1826,7 @@
       <PromptComposer
         bind:promptText
         attachments={promptAttachments}
+        availableCommands={activeSlashCommands}
         {activeSessionId}
         ready={status === "ready"}
         {promptRunning}
@@ -1699,6 +1862,14 @@
     field={pendingElicitation.field}
     onValueChange={updateElicitationValue}
     onAnswer={answerElicitation}
+  />
+{/if}
+
+{#if commandPicker}
+  <CommandPicker
+    picker={commandPicker}
+    onSelect={(value) => void selectCommandOption(value)}
+    onClose={() => commandPicker = null}
   />
 {/if}
 

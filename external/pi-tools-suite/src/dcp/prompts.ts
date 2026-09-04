@@ -118,9 +118,9 @@ You specify boundaries by ID using the injected metadata IDs present in the conv
 - \`mNNN\` IDs identify raw messages (3 digits, zero-padded, e.g. \`m001\`, \`m042\`)
 - \`bN\` IDs identify previously compressed blocks
 
-Current raw message IDs are provided in hidden DCP control metadata at the end of the model context.
+Raw message IDs are provided in hidden DCP control metadata attached to stable user/tool-result carriers. IDs may be sparse; determine range order from where their carriers appear in context, not from the numeric suffix.
 Some message-compression candidate hints include a low/medium/high priority; prefer high-priority stale message IDs for message-mode compression when a full range would be too broad.
-The ID reference line appears at the end of the message it belongs to — it identifies the message above it, not the one below it.
+Each carrier's metadata labels that carrier and any immediately preceding assistant message(s).
 Treat these reference lines as boundary metadata only, not as tool result content.
 
 Rules:

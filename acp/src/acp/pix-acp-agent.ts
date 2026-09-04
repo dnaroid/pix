@@ -19,12 +19,14 @@
 
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
+import { setText as copyTextToClipboard } from "@mariozechner/clipboard";
 import {
 	PROTOCOL_VERSION,
 	RequestError,
 	agent,
 	type AgentApp,
 	type AgentConnection,
+	type AvailableCommand,
 	type ClientCapabilities,
 	type ContentBlock,
 	type CreateElicitationRequest,
@@ -75,14 +77,25 @@ import {
 	type PiEvent,
 	type PiImageContent,
 	type PiRpcClientOptions,
+	type PiSessionState,
+	type PiSessionStats,
 } from "../pi/pi-rpc-client.js";
 import { applyConfigOption, buildConfigOptions, parseModelValue } from "./config-options.js";
+import {
+	PIX_FORK_MESSAGES_METHOD,
+	PIX_RELOAD_SESSION_METHOD,
+	parseDesktopSessionRequest,
+	type DesktopSessionRequest,
+	type ForkMessagesResponse,
+} from "./desktop-commands.js";
 import { loadPixDefaultModel, type PixDefaultModel } from "./default-model.js";
 import { EventTranslator } from "./event-translator.js";
 import {
+	BUILTIN_SLASH_COMMANDS,
 	builtinFeedback,
 	builtinUsageError,
 	parseBuiltinCommand,
+	rendererCommandName,
 	type BuiltinCommand,
 } from "./slash-commands.js";
 import { SessionMapStore, type SessionMapRecord } from "./session-map.js";
@@ -124,6 +137,7 @@ interface AgentSessionState {
 	readonly client: ClientCaller;
 	readonly translator: EventTranslator;
 	activeRun: ActiveRun | undefined;
+	builtinRunning: boolean;
 	/** Dialog extension UI requests awaiting an ACP elicitation answer. */
 	readonly pendingDialogIds: Set<string>;
 }
@@ -147,6 +161,8 @@ export interface PixAcpAgentOptions {
 	readonly loadAutocompleteConfig?: (cwd: string) => AutocompleteConfig;
 	/** Pix default-model reader (overridable for hermetic tests). */
 	readonly loadDefaultModel?: (cwd: string) => PixDefaultModel | undefined;
+	/** Clipboard writer (overridable for hermetic tests). */
+	readonly copyText?: (text: string) => Promise<void>;
 }
 
 export class PixAcpAgent {
@@ -163,6 +179,7 @@ export class PixAcpAgent {
 	private readonly completeAutocomplete: AutocompleteCompleter;
 	private readonly loadAutocompleteConfig: (cwd: string) => AutocompleteConfig;
 	private readonly loadDefaultModel: (cwd: string) => PixDefaultModel | undefined;
+	private readonly copyText: (text: string) => Promise<void>;
 	private disposed = false;
 	/** Advertised by the client during `initialize`; gates dialog bridging. */
 	private clientCapabilities: ClientCapabilities | null | undefined;
@@ -175,6 +192,7 @@ export class PixAcpAgent {
 		this.loadTuiTabs = options.loadTuiTabs ?? ((cwd) => loadTuiTabSnapshot(cwd));
 		this.loadAutocompleteConfig = options.loadAutocompleteConfig ?? loadAutocompleteConfig;
 		this.loadDefaultModel = options.loadDefaultModel ?? loadPixDefaultModel;
+		this.copyText = options.copyText ?? copyTextToClipboard;
 		this.completeAutocomplete = options.completeAutocomplete ?? createAutocompleteCompleter({
 			logger: options.logger,
 			loadConfig: this.loadAutocompleteConfig,
@@ -222,6 +240,12 @@ export class PixAcpAgent {
 			)
 			.onRequest("pix/autocomplete/config", parseAutocompleteSettingsRequest, (ctx) =>
 				this.autocompleteConfig(ctx.params),
+			)
+			.onRequest(PIX_FORK_MESSAGES_METHOD, parseDesktopSessionRequest, (ctx) =>
+				this.forkMessages(ctx.params),
+			)
+			.onRequest(PIX_RELOAD_SESSION_METHOD, parseDesktopSessionRequest, (ctx) =>
+				this.withSessionLifecycle(ctx.params.sessionId, () => this.reloadSession(ctx.params, ctx.client)),
 			)
 			.onRequest("session/close", (ctx) =>
 				this.withSessionLifecycle(ctx.params.sessionId, () => this.closeSession(ctx.params.sessionId)),
@@ -279,6 +303,44 @@ export class PixAcpAgent {
 		return autocompleteSettings(this.loadAutocompleteConfig(session.cwd));
 	}
 
+	private async forkMessages(params: DesktopSessionRequest): Promise<ForkMessagesResponse> {
+		const session = this.sessions.get(params.sessionId);
+		if (!session) throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
+		if (session.activeRun || session.builtinRunning) {
+			throw new RequestError(ERROR_SERVER, "fork is unavailable while the agent is running");
+		}
+		return { messages: await session.pi.getForkMessages() };
+	}
+
+	private async reloadSession(
+		params: DesktopSessionRequest,
+		client: ClientCaller,
+	): Promise<{ configOptions?: SessionConfigOption[] }> {
+		const current = this.sessions.get(params.sessionId);
+		if (!current) throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
+		if (current.activeRun || current.builtinRunning) {
+			throw new RequestError(ERROR_SERVER, "reload is unavailable while the agent is running");
+		}
+		const state = await current.pi.getState();
+		if (state.isStreaming || state.isCompacting) {
+			throw new RequestError(ERROR_SERVER, "reload is unavailable while the session is busy");
+		}
+
+		const response = await this.loadOrResumeSession(
+			{ sessionId: params.sessionId, cwd: current.cwd },
+			client,
+			{ replay: false },
+		);
+		const replacement = this.sessions.get(params.sessionId);
+		if (replacement) {
+			await this.notifyAgentMessage(
+				replacement,
+				"/reload — reloaded extensions, skills, prompts, and context files",
+			);
+		}
+		return response;
+	}
+
 	private async newSession(cwd: string, client: ClientCaller): Promise<NewSessionResponse> {
 		const acpSessionId = randomUUID();
 		let defaultModel: PixDefaultModel | undefined;
@@ -291,6 +353,7 @@ export class PixAcpAgent {
 		this.options.logger.info(`session/new: ${acpSessionId} (cwd: ${cwd})`);
 		await this.registerSessionRecord(acpSessionId, cwd, session.pi);
 		const configOptions = await this.safeConfigOptions(session.pi);
+		this.scheduleAvailableCommands(session);
 		return configOptions ? { sessionId: acpSessionId, configOptions } : { sessionId: acpSessionId };
 	}
 
@@ -347,6 +410,7 @@ export class PixAcpAgent {
 		await this.syncSessionRecord(session);
 
 		const configOptions = await this.safeConfigOptions(session.pi);
+		this.scheduleAvailableCommands(session);
 		return configOptions ? { configOptions } : {};
 	}
 
@@ -401,7 +465,7 @@ export class PixAcpAgent {
 		this.options.logger.info(`session/delete: ${sessionId}`);
 	}
 
-	private async forkSession(params: ForkSessionRequest, client: ClientCaller): Promise<{ sessionId: string; configOptions?: SessionConfigOption[] }> {
+	private async forkSession(params: ForkSessionRequest, client: ClientCaller): Promise<{ sessionId: string; configOptions?: SessionConfigOption[]; _meta?: Record<string, unknown> }> {
 		const record = await this.sessionMap.get(params.sessionId);
 		if (!record?.piSessionPath) {
 			throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
@@ -409,15 +473,27 @@ export class PixAcpAgent {
 		const acpSessionId = randomUUID();
 		const cwd = params.cwd || record.cwd;
 		const session = await this.spawnSession(acpSessionId, cwd, client);
+		let selectedText: string | undefined;
 		this.options.logger.info(`session/fork: ${params.sessionId} → ${acpSessionId}`);
 		try {
 			const switched = await session.pi.switchSession(record.piSessionPath);
 			if (switched.cancelled) {
 				throw new RequestError(ERROR_SERVER, "session switch cancelled by an extension");
 			}
-			const cloned = await session.pi.clone();
-			if (cloned.cancelled) {
-				throw new RequestError(ERROR_SERVER, "session clone cancelled by an extension");
+			const entryId = typeof params._meta?.["pix.entryId"] === "string"
+				? params._meta["pix.entryId"].trim()
+				: "";
+			if (entryId) {
+				const forked = await session.pi.fork(entryId);
+				if (forked.cancelled) {
+					throw new RequestError(ERROR_SERVER, "session fork cancelled by an extension");
+				}
+				selectedText = forked.text;
+			} else {
+				const cloned = await session.pi.clone();
+				if (cloned.cancelled) {
+					throw new RequestError(ERROR_SERVER, "session clone cancelled by an extension");
+				}
 			}
 		} catch (error) {
 			await this.teardownSession(session);
@@ -426,7 +502,12 @@ export class PixAcpAgent {
 		}
 		await this.registerSessionRecord(acpSessionId, cwd, session.pi, record.title);
 		const configOptions = await this.safeConfigOptions(session.pi);
-		return configOptions ? { sessionId: acpSessionId, configOptions } : { sessionId: acpSessionId };
+		this.scheduleAvailableCommands(session);
+		return {
+			sessionId: acpSessionId,
+			...(configOptions ? { configOptions } : {}),
+			...(selectedText !== undefined ? { _meta: { "pix.selectedText": selectedText } } : {}),
+		};
 	}
 
 	private async setConfigOption(params: SetSessionConfigOptionRequest): Promise<SetSessionConfigOptionResponse> {
@@ -486,6 +567,7 @@ export class PixAcpAgent {
 			client,
 			translator,
 			activeRun: undefined,
+			builtinRunning: false,
 			pendingDialogIds: new Set(),
 		};
 		// Register routing before start so session_start extension state emitted
@@ -718,23 +800,37 @@ export class PixAcpAgent {
 		if (!session) {
 			throw new RequestError(ERROR_SERVER, `session ${params.sessionId} not found`);
 		}
-		if (session.activeRun) {
+		if (session.activeRun || session.builtinRunning) {
 			throw new RequestError(ERROR_SERVER, "a prompt is already in progress for this session");
 		}
 
 		const input = collectPromptInput(params.prompt);
+		const isSlashPrompt = input.images.length === 0 && /^\/\S/.test(input.text);
 
 		// pi TUI built-ins (/compact, /name, /model, ...) have no RPC-side
 		// handling; intercept them here. Everything else starting with "/"
 		// (extension commands, prompt templates, /skill:*) is forwarded to
 		// pi, which expands them natively.
-		if (input.images.length === 0) {
-			const builtin = parseBuiltinCommand(input.text);
-			if (builtin) {
-				const usageError = builtinUsageError(builtin);
-				if (usageError) throw new RequestError(ERROR_SERVER, usageError);
-				return this.executeBuiltin(session, builtin);
+		const builtin = parseBuiltinCommand(input.text);
+		if (builtin) {
+			if (input.images.length > 0) {
+				throw new RequestError(ERROR_SERVER, `/${builtin.kind} does not accept attachments`);
 			}
+			const usageError = builtinUsageError(builtin);
+			if (usageError) throw new RequestError(ERROR_SERVER, usageError);
+			session.builtinRunning = true;
+			try {
+				return await this.executeBuiltin(session, builtin);
+			} finally {
+				session.builtinRunning = false;
+			}
+		}
+		const rendererCommand = rendererCommandName(input.text);
+		if (rendererCommand) {
+			throw new RequestError(
+				ERROR_SERVER,
+				`/${rendererCommand} requires Pix renderer UI and is not available as an ACP prompt command`,
+			);
 		}
 
 		const run: ActiveRun = {
@@ -757,6 +853,24 @@ export class PixAcpAgent {
 			throw new RequestError(ERROR_SERVER, `pi prompt failed: ${stringifyUnknown(error)}`);
 		}
 
+		// RPC prompt acknowledgement happens after extension/input-hook preflight.
+		// Input handled there starts no agent run and therefore emits no
+		// agent_settled event; resolve it here instead of leaving ACP clients
+		// waiting forever. Normal agent prompts are already streaming by now.
+		if (session.activeRun === run && !run.started) {
+			try {
+				const state = await session.pi.getState();
+				if (!state.isStreaming && session.activeRun === run && !run.started) {
+					this.resolveActiveRun(session, "end_turn");
+				}
+			} catch (error) {
+				const detail = error instanceof Error ? error.message : stringifyUnknown(error);
+				const stateError = new Error(`prompt state inspection failed: ${detail}`);
+				this.options.logger.warn(stateError.message);
+				this.rejectActiveRun(session, stateError);
+			}
+		}
+
 		let stopReason: StopReason;
 		try {
 			stopReason = await settled;
@@ -765,6 +879,7 @@ export class PixAcpAgent {
 		}
 		// Refresh the persisted mapping (updatedAt, plus any pi-side rename).
 		void this.syncLiveSessionRecord(session);
+		if (isSlashPrompt) await this.notifyAvailableCommands(session);
 		return { stopReason };
 	}
 
@@ -779,6 +894,11 @@ export class PixAcpAgent {
 				break;
 			}
 			case "name": {
+				if (command.name === undefined) {
+					const state = await session.pi.getState();
+					detail = state.sessionName ? `current name: "${state.sessionName}"` : "session has no name";
+					break;
+				}
 				await session.pi.setSessionName(command.name);
 				await this.syncLiveSessionRecord(session, command.name);
 				await this.notifySessionInfo(session, { title: command.name });
@@ -833,10 +953,86 @@ export class PixAcpAgent {
 				detail = `thought level: ${command.level}`;
 				break;
 			}
+			case "session": {
+				const [state, stats] = await Promise.all([
+					session.pi.getState(),
+					session.pi.getSessionStats(),
+				]);
+				detail = formatSessionStats(state, stats);
+				break;
+			}
+			case "clone": {
+				const result = await session.pi.clone();
+				if (result.cancelled) {
+					throw new RequestError(ERROR_SERVER, "session clone cancelled by an extension");
+				}
+				await this.syncLiveSessionRecord(session);
+				detail = "session duplicated at the current position";
+				break;
+			}
+			case "copy": {
+				const text = await session.pi.getLastAssistantText();
+				if (!text) throw new RequestError(ERROR_SERVER, "no assistant messages to copy yet");
+				await this.copyText(text);
+				detail = "copied the last assistant message to the clipboard";
+				break;
+			}
 		}
 		await this.notifyAgentMessage(session, builtinFeedback(command, detail ?? "done"));
 		await this.sessionMap.touch(session.acpSessionId);
+		await this.notifyAvailableCommands(session);
 		return { stopReason: "end_turn" };
+	}
+
+	/** Defer initial discovery until the session response has attached client-side update routing. */
+	private scheduleAvailableCommands(session: AgentSessionState): void {
+		setTimeout(() => {
+			void this.notifyAvailableCommands(session);
+		}, 0);
+	}
+
+	private async notifyAvailableCommands(session: AgentSessionState): Promise<void> {
+		if (this.sessions.get(session.acpSessionId) !== session) return;
+		const availableCommands: AvailableCommand[] = BUILTIN_SLASH_COMMANDS.map((command) => ({
+			name: command.name,
+			description: command.description,
+			...(command.inputRequired && command.inputHint ? { input: { hint: command.inputHint } } : {}),
+			_meta: {
+				"pix.commandSource": "builtin",
+				...(command.inputHint ? { "pix.inputHint": command.inputHint } : {}),
+				...(command.aliases ? { "pix.aliases": command.aliases } : {}),
+			},
+		}));
+		const names = new Set(
+			BUILTIN_SLASH_COMMANDS.flatMap((command) => [command.name, ...(command.aliases ?? [])])
+				.map((name) => name.toLocaleLowerCase()),
+		);
+
+		try {
+			for (const command of await session.pi.getCommands()) {
+				if (this.sessions.get(session.acpSessionId) !== session) return;
+				const name = command.name.replace(/^\/+/, "");
+				const key = name.toLocaleLowerCase();
+				if (!name || names.has(key) || rendererCommandName(`/${name}`)) continue;
+				names.add(key);
+				availableCommands.push({
+					name,
+					description: command.description ?? runtimeCommandDescription(command.source),
+					_meta: { "pix.commandSource": command.source },
+				});
+			}
+		} catch (error) {
+			this.options.logger.warn(`failed to discover slash commands: ${stringifyUnknown(error)}`);
+		}
+		if (this.sessions.get(session.acpSessionId) !== session) return;
+
+		const notification: SessionNotification = {
+			sessionId: session.acpSessionId,
+			update: { sessionUpdate: "available_commands_update", availableCommands },
+		};
+		await session.client.notify("session/update", notification).catch((error: unknown) => {
+			this.options.logger.warn(`session/update failed: ${stringifyUnknown(error)}`);
+		});
 	}
 
 	/** Emit one agent_message_chunk update (used for built-in feedback). */
@@ -1000,6 +1196,32 @@ function stopReasonFromAgentEnd(event: { messages: unknown[] }): StopReason {
 		}
 	}
 	return "end_turn";
+}
+
+function runtimeCommandDescription(source: "extension" | "prompt" | "skill"): string {
+	switch (source) {
+		case "extension":
+			return "Extension command";
+		case "prompt":
+			return "Prompt template";
+		case "skill":
+			return "Skill";
+	}
+}
+
+function formatSessionStats(state: PiSessionState, stats: PiSessionStats): string {
+	const promptTokens = stats.tokens.input + stats.tokens.cacheRead + stats.tokens.cacheWrite;
+	const lines = [
+		"**Session info**",
+		...(state.sessionName ? [`- Name: ${state.sessionName}`] : []),
+		`- File: ${stats.sessionFile ?? "In-memory"}`,
+		`- ID: ${stats.sessionId}`,
+		`- Messages: ${stats.totalMessages} total (${stats.userMessages} user, ${stats.assistantMessages} assistant)`,
+		`- Tools: ${stats.toolCalls} calls, ${stats.toolResults} results`,
+		`- Tokens: ${promptTokens} input, ${stats.tokens.output} output, ${stats.tokens.total} total`,
+	];
+	if (stats.cost > 0) lines.push(`- Cost: $${stats.cost.toFixed(3)}`);
+	return lines.join("\n");
 }
 
 function collectPromptInput(blocks: readonly ContentBlock[]): { text: string; images: PiImageContent[] } {

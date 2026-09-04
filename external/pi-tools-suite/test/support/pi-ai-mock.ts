@@ -1,4 +1,5 @@
 import { mock } from "bun:test";
+import * as piAi from "@earendil-works/pi-ai";
 
 type StreamEvent = Record<string, any>;
 
@@ -41,6 +42,7 @@ export function createPiAiMock(overrides: Record<string, unknown> = {}) {
 	const defaultComplete = mock(async () => ({ content: [{ type: "text", text: "{}" }] }));
 	const complete = overrides.complete ?? defaultComplete;
 	return {
+		...piAi,
 		Type: {
 			Object: (properties: any, options?: any) => ({ kind: "object", properties, options }),
 			Optional: (schema: any) => ({ kind: "optional", schema }),
@@ -54,6 +56,7 @@ export function createPiAiMock(overrides: Record<string, unknown> = {}) {
 			Literal: (value: any, options?: any) => ({ kind: "literal", value, options }),
 		},
 		StringEnum: (values: readonly string[], options?: any) => ({ kind: "stringEnum", values, options }),
+		validateToolArguments: (_tool: unknown, toolCall: { arguments: unknown }) => toolCall.arguments,
 		calculateCost: (_model: unknown, usage: any) => {
 			usage.cost ??= { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
 			return usage.cost;

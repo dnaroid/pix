@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ToolRecord } from "./state.js";
+import { stripStaleDcpMetadataLines } from "./pruner-metadata.js";
 
 export interface ProviderToolResultEvidence {
   ids: Set<string>;
@@ -19,7 +20,7 @@ function signature(toolName: string, outputText: string): string {
   return createHash("sha256")
     .update(toolName)
     .update("\u0000")
-    .update(outputText)
+    .update(stripStaleDcpMetadataLines(outputText))
     .digest("hex");
 }
 

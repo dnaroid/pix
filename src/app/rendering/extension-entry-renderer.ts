@@ -99,6 +99,8 @@ function extensionRendererTheme(theme: PixTheme): PiTheme {
 		thinkingXhigh: colors.thinkingXHigh,
 		thinkingMax: colors.thinkingMax,
 		bashMode: colors.toolBash,
+		scrollbarTrack: colors.muted,
+		scrollbarThumb: colors.foreground,
 	} satisfies Record<ThemeColor, string>;
 	const backgrounds: ConstructorParameters<typeof PiTheme>[1] = {
 		selectedBg: colors.popupSelectedBackground,

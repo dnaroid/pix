@@ -314,7 +314,10 @@ export class ExtensionUiController {
 				process.title = title;
 				renderIfRunning();
 			},
-			custom: (async <T,>(factory: CustomUiFactory<T>) => await this.showCustomUi(factory, { scopeKey: contextScopeKey })) as PixExtensionUIContext["custom"],
+			// pi-tui 0.85 declares Component.handleMouse(TuiMouseEvent), while pix's
+			// input pipeline delivers its own ExtensionInputMouseEvent shape; the
+			// double cast bridges the two contracts at this adapter boundary.
+			custom: (async <T,>(factory: CustomUiFactory<T>) => await this.showCustomUi(factory, { scopeKey: contextScopeKey })) as unknown as PixExtensionUIContext["custom"],
 			pasteToEditor: (text) => {
 				if (!this.isScopeActive(contextScopeKey)) return;
 				this.host.setInputState({ text, cursor: text.length });

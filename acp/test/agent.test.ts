@@ -37,6 +37,8 @@ import type {
 	PiModel,
 	PiRpcClientOptions,
 	PiSessionState,
+	PiSessionStats,
+	PiSlashCommand,
 } from "../src/pi/pi-rpc-client.js";
 
 const TEST_LOGGER: Logger = {
@@ -68,10 +70,24 @@ class FakePiClient implements PiClient {
 	readonly thinkingLevels: string[] = [];
 	readonly modelSets: { provider: string; modelId: string }[] = [];
 	readonly exportCalls: (string | undefined)[] = [];
+	readonly commands: PiSlashCommand[] = [];
+	readonly sessionStats: PiSessionStats;
+	getCommandsCalls = 0;
+	commandsGate: Promise<void> | undefined;
+	readonly forkCalls: string[] = [];
+	readonly forkMessagesCalls: number[] = [];
+	readonly lastAssistantTextCalls: number[] = [];
+	forkMessagesList: Array<{ entryId: string; text: string }> = [];
+	forkCancelled = false;
+	forkText = "forked selection";
+	lastAssistantText: string | null = null;
 	clones = 0;
 	modelCycles = 0;
 	cloneCancelled = false;
+	cloneGate: Promise<void> | undefined;
 	switchCancelled = false;
+	promptHandledWithoutRun = false;
+	stateError: Error | undefined;
 	aborts = 0;
 	started = false;
 	startError: Error | undefined;
@@ -90,6 +106,17 @@ class FakePiClient implements PiClient {
 			sessionId: `pi-fake-${n}`,
 			isStreaming: false,
 			...state,
+		};
+		this.sessionStats = {
+			sessionFile: this.state.sessionFile,
+			sessionId: this.state.sessionId,
+			userMessages: 2,
+			assistantMessages: 2,
+			toolCalls: 1,
+			toolResults: 1,
+			totalMessages: 6,
+			tokens: { input: 100, output: 50, cacheRead: 25, cacheWrite: 5, total: 180 },
+			cost: 0.012,
 		};
 	}
 
@@ -120,6 +147,7 @@ class FakePiClient implements PiClient {
 
 	async prompt(message: string, images?: PiImageContent[]): Promise<void> {
 		this.promptCalls.push({ message, images });
+		if (!this.promptHandledWithoutRun) this.state = { ...this.state, isStreaming: true };
 	}
 
 	async steer(message: string): Promise<void> {
@@ -139,6 +167,7 @@ class FakePiClient implements PiClient {
 	}
 
 	async getState(): Promise<PiSessionState> {
+		if (this.stateError) throw this.stateError;
 		return this.state;
 	}
 
@@ -150,6 +179,7 @@ class FakePiClient implements PiClient {
 
 	async clone(): Promise<{ cancelled: boolean }> {
 		this.clones++;
+		await this.cloneGate;
 		if (!this.cloneCancelled) {
 			const n = ++fakeSessionCounter;
 			this.state = {
@@ -161,8 +191,41 @@ class FakePiClient implements PiClient {
 		return { cancelled: this.cloneCancelled };
 	}
 
+	async fork(entryId: string): Promise<{ text: string; cancelled: boolean }> {
+		this.forkCalls.push(entryId);
+		if (!this.forkCancelled) {
+			const n = ++fakeSessionCounter;
+			this.state = {
+				...this.state,
+				sessionFile: `/tmp/pi-sessions/fake-${n}.jsonl`,
+				sessionId: `pi-fake-${n}`,
+			};
+		}
+		return { text: this.forkText, cancelled: this.forkCancelled };
+	}
+
+	async getForkMessages(): Promise<Array<{ entryId: string; text: string }>> {
+		this.forkMessagesCalls.push(this.forkMessagesCalls.length);
+		return this.forkMessagesList;
+	}
+
+	async getLastAssistantText(): Promise<string | null> {
+		this.lastAssistantTextCalls.push(this.lastAssistantTextCalls.length);
+		return this.lastAssistantText;
+	}
+
 	async getMessages(): Promise<PiAgentMessage[]> {
 		return FakePiClient.sessionFiles.get(this.state.sessionFile ?? "") ?? [];
+	}
+
+	async getSessionStats(): Promise<PiSessionStats> {
+		return this.sessionStats;
+	}
+
+	async getCommands(): Promise<PiSlashCommand[]> {
+		this.getCommandsCalls += 1;
+		await this.commandsGate;
+		return this.commands;
 	}
 
 	async setSessionName(name: string): Promise<void> {
@@ -225,6 +288,8 @@ class FakePiClient implements PiClient {
 
 	/** Simulate pi emitting an RPC event or extension UI request. */
 	emit(event: PiEvent): void {
+		if (event.type === "agent_start") this.state = { ...this.state, isStreaming: true };
+		if (event.type === "agent_settled") this.state = { ...this.state, isStreaming: false };
 		for (const listener of [...this.listeners]) listener(event);
 	}
 
@@ -340,6 +405,84 @@ test("session/new spawns and starts one pi client per session with the cwd", asy
 	assert.ok(clients[1].started, "second pi client started");
 	assert.ok(adapter.getSession(sessionIds[0]!), "first session registered");
 	assert.ok(adapter.getSession(sessionIds[1]!), "second session registered");
+});
+
+test("session/new advertises supported built-ins and pi runtime slash commands", async () => {
+	const harness = createTestAdapter({
+		createPiClient: () => {
+			const fake = new FakePiClient();
+			fake.commands.push(
+				{ name: "compact", description: "Must not replace the built-in", source: "extension", sourceInfo: {} },
+				{ name: "settings", description: "Must not replace a Pix renderer command", source: "extension", sourceInfo: {} },
+				{ name: "followup", description: "Must not replace a built-in alias", source: "extension", sourceInfo: {} },
+				{ name: "thought", description: "Must not replace a built-in alias", source: "extension", sourceInfo: {} },
+				{ name: "/skill:pix", description: "Use Pix project guidance", source: "skill", sourceInfo: {} },
+				{ name: "review", source: "prompt", sourceInfo: {} },
+			);
+			return fake;
+		},
+	});
+
+	const message = await connect(
+		harness.adapter,
+		async (cx) => {
+			const session = await cx.buildSession("/tmp").start();
+			return session.nextUpdate();
+		},
+	);
+
+	assert.equal(message.kind, "session_update", "catalog arrives after ActiveSession is ready");
+	const commands = ((message as { update: SessionNotification["update"] }).update as {
+		availableCommands: Array<{
+			name: string;
+			description: string;
+			input?: { hint: string };
+			_meta?: Record<string, unknown>;
+		}>;
+	}).availableCommands;
+	assert.deepEqual(commands.slice(0, 3).map((command) => command.name), ["compact", "name", "export"]);
+	assert.ok(commands.some((command) => command.name === "session"));
+	assert.ok(commands.some((command) => command.name === "clone"));
+	assert.equal(commands.filter((command) => command.name === "compact").length, 1, "built-ins win collisions");
+	assert.equal(commands.some((command) => command.name === "followup"), false, "built-in aliases win collisions");
+	assert.equal(commands.some((command) => command.name === "thought"), false, "built-in aliases win collisions");
+	assert.equal(commands.some((command) => command.name === "settings"), false, "Pix renderer commands win collisions");
+	assert.equal(commands.find((command) => command.name === "compact")?.input, undefined);
+	assert.equal(commands.find((command) => command.name === "compact")?._meta?.["pix.inputHint"], "[instructions]");
+	assert.equal(commands.find((command) => command.name === "name")?.input, undefined);
+	assert.equal(commands.find((command) => command.name === "name")?._meta?.["pix.inputHint"], "[conversation name]");
+	assert.equal(commands.find((command) => command.name === "compact")?._meta?.["pix.commandSource"], "builtin");
+	assert.equal(commands.find((command) => command.name === "skill:pix")?.description, "Use Pix project guidance");
+	assert.equal(commands.find((command) => command.name === "review")?.description, "Prompt template");
+});
+
+test("command discovery drops updates after the session is closed", async () => {
+	const notifications: SessionNotification[] = [];
+	let releaseCommands!: () => void;
+	let pi!: FakePiClient;
+	const harness = createTestAdapter({
+		createPiClient: () => {
+			pi = new FakePiClient();
+			pi.commandsGate = new Promise<void>((resolve) => { releaseCommands = resolve; });
+			return pi;
+		},
+	});
+
+	await connect(
+		harness.adapter,
+		async (cx) => {
+			const created = await cx.request("session/new", { cwd: "/tmp", mcpServers: [] }) as { sessionId: string };
+			await waitFor(() => pi.getCommandsCalls === 1);
+			await cx.request("session/close", { sessionId: created.sessionId });
+			releaseCommands();
+			await new Promise((resolve) => setTimeout(resolve, 10));
+		},
+		(app) => {
+			app.onNotification("session/update", (ctx) => { notifications.push(ctx.params); });
+		},
+	);
+
+	assert.equal(notifications.some((item) => item.update.sessionUpdate === "available_commands_update"), false);
 });
 
 test("session/new forwards structured extension state emitted during pi startup", async () => {
@@ -676,7 +819,8 @@ test("session/prompt streams chunks and resolves end_turn when pi settles", asyn
 	assert.equal(messages.stopReason, "end_turn");
 	const chunks = messages.collected
 		.filter((m) => m.kind === "session_update")
-		.map((m) => (m as { update: { sessionUpdate: string; content?: unknown } }).update);
+		.map((m) => (m as { update: { sessionUpdate: string; content?: unknown } }).update)
+		.filter((update) => update.sessionUpdate === "agent_message_chunk");
 	assert.equal(chunks[0].sessionUpdate, "agent_message_chunk");
 	assert.deepEqual(chunks[0].content, { type: "text", text: "Hi " });
 	assert.equal(chunks[1].sessionUpdate, "agent_message_chunk");
@@ -1097,8 +1241,9 @@ test("session/load switches the pi session and replays history as chunk updates"
 
 	assert.deepEqual(harness.clients[1]!.switchSessions, [harness.clients[0]!.state.sessionFile]);
 	// Notifications are delivered asynchronously; poll for the replay to land.
-	await waitFor(() => notifications.length >= 6);
-	const replayed = notifications.map((n) => ({
+	await waitFor(() => notifications.filter((n) => n.update.sessionUpdate !== "available_commands_update").length >= 6);
+	const replayNotifications = notifications.filter((n) => n.update.sessionUpdate !== "available_commands_update");
+	const replayed = replayNotifications.map((n) => ({
 		sessionUpdate: n.update.sessionUpdate,
 		text: replayText(n.update as Record<string, unknown>),
 		toolCallId: (n.update as { toolCallId?: string }).toolCallId,
@@ -1111,7 +1256,7 @@ test("session/load switches the pi session and replays history as chunk updates"
 		{ sessionUpdate: "user_message_chunk", text: "again", toolCallId: undefined },
 		{ sessionUpdate: "user_message_chunk", text: undefined, toolCallId: undefined },
 	]);
-	assert.deepEqual((notifications[notifications.length - 1]!.update as { content: unknown }).content, {
+	assert.deepEqual((replayNotifications[replayNotifications.length - 1]!.update as { content: unknown }).content, {
 		type: "image",
 		data: "aGk=",
 		mimeType: "image/png",
@@ -1215,7 +1360,11 @@ test("session/resume switches without replaying history", async () => {
 		cwd: "/tmp/proj",
 		env: { PIX_ACP_SESSION_STATE_BRIDGE: "1" },
 	}, "resumed session history must select its own model and thinking level");
-	assert.equal(notifications.length, 0, "resume replays nothing");
+	assert.equal(
+		notifications.filter((notification) => notification.update.sessionUpdate !== "available_commands_update").length,
+		0,
+		"resume replays nothing except command discovery",
+	);
 });
 
 test("session/load rejects unknown sessions", async () => {
@@ -1263,6 +1412,135 @@ test("session/fork clone cancelled tears down and reports an error", async () =>
 		),
 	);
 	assert.equal(harness.adapter.sessionCount, 1, "only the source session stays live");
+});
+
+test("session/fork with pix.entryId forks at the entry and returns the selected text", async () => {
+	const harness = createTestAdapter();
+	const created = await connect(harness.adapter, (cx) => cx.request("session/new", { cwd: "/tmp/proj", mcpServers: [] }));
+	const sourceId = (created as { sessionId: string }).sessionId;
+
+	const forked = await connect(harness.adapter, (cx) =>
+		cx.request("session/fork", {
+			sessionId: sourceId,
+			cwd: "/tmp/proj",
+			mcpServers: [],
+			_meta: { "pix.entryId": "entry-7" },
+		}),
+	) as { sessionId: string; _meta?: Record<string, unknown> };
+	assert.notEqual(forked.sessionId, sourceId);
+	assert.deepEqual(harness.clients[1]!.forkCalls, ["entry-7"], "forks at the requested entry");
+	assert.equal(harness.clients[1]!.clones, 0, "entry fork must not fall back to clone");
+	assert.equal(forked._meta?.["pix.selectedText"], "forked selection");
+	assert.equal(harness.adapter.getSession(forked.sessionId) !== undefined, true);
+});
+
+test("session/fork with pix.entryId reports extension cancellation", async () => {
+	const harness = createTestAdapter({
+		createPiClient: (): PiClient => {
+			const fake = new FakePiClient();
+			fake.forkCancelled = true;
+			return fake;
+		},
+	});
+	const created = await connect(harness.adapter, (cx) => cx.request("session/new", { cwd: "/tmp/proj", mcpServers: [] }));
+	const sourceId = (created as { sessionId: string }).sessionId;
+
+	await connect(harness.adapter, (cx) =>
+		assert.rejects(
+			cx.request("session/fork", {
+				sessionId: sourceId,
+				cwd: "/tmp/proj",
+				mcpServers: [],
+				_meta: { "pix.entryId": "entry-7" },
+			}),
+			/fork cancelled/,
+		),
+	);
+	assert.equal(harness.adapter.sessionCount, 1, "only the source session stays live");
+});
+
+test("pix/session/fork_messages returns forkable user messages when idle", async () => {
+	const harness = createTestAdapter();
+	await connect(harness.adapter, async (cx) => {
+		const created = await cx.request("session/new", { cwd: "/tmp/proj", mcpServers: [] });
+		const sessionId = (created as { sessionId: string }).sessionId;
+
+		const empty = await cx.request<{ messages: Array<{ entryId: string; text: string }> }>(
+			"pix/session/fork_messages",
+			{ sessionId },
+		);
+		assert.deepEqual(empty.messages, []);
+
+		harness.clients[0]!.forkMessagesList = [
+			{ entryId: "e1", text: "first question" },
+			{ entryId: "e2", text: "second question" },
+		];
+		const populated = await cx.request<{ messages: Array<{ entryId: string; text: string }> }>(
+			"pix/session/fork_messages",
+			{ sessionId },
+		);
+		assert.deepEqual(populated.messages, [
+			{ entryId: "e1", text: "first question" },
+			{ entryId: "e2", text: "second question" },
+		]);
+
+		await assert.rejects(
+			cx.request("pix/session/fork_messages", { sessionId: "" }),
+			/non-empty string sessionId/,
+		);
+		await assert.rejects(
+			cx.request("pix/session/fork_messages", { sessionId: "missing" }),
+			/unknown session missing/,
+		);
+	});
+});
+
+test("pix/session/reload respawns the pi client and reports the reload", async () => {
+	const harness = createTestAdapter();
+	const notifications: SessionNotification[] = [];
+	await connect(
+		harness.adapter,
+		async (cx) => {
+			const created = await cx.request("session/new", { cwd: "/tmp/proj", mcpServers: [] });
+			const sessionId = (created as { sessionId: string }).sessionId;
+			const first = harness.clients[0]!;
+
+			const response = await cx.request("pix/session/reload", { sessionId });
+			assert.equal(typeof response, "object");
+
+			assert.equal(first.started, false, "the old pi client is stopped");
+			assert.equal(harness.adapter.sessionCount, 1, "the ACP session id stays the same");
+			assert.equal(harness.clients.length, 2, "a fresh pi client is spawned");
+			assert.equal(harness.clients[1]!.switchSessions.length, 1, "the replacement loads the same pi session");
+		},
+		(app) => {
+			app.onNotification("session/update", (ctx) => {
+				notifications.push(ctx.params);
+			});
+		},
+	);
+	const reloaded = notifications.map((n) => (n.update as { content?: { text?: string } }).content?.text ?? "");
+	assert.equal(
+		reloaded.some((text) => text.includes("/reload — reloaded extensions, skills, prompts, and context files")),
+		true,
+		"the reload status message is delivered",
+	);
+});
+
+test("pix/session/reload rejects while the session is streaming", async () => {
+	const harness = createTestAdapter();
+	await connect(harness.adapter, async (cx) => {
+		const created = await cx.request("session/new", { cwd: "/tmp/proj", mcpServers: [] });
+		const sessionId = (created as { sessionId: string }).sessionId;
+		harness.clients[0]!.state = { ...harness.clients[0]!.state, isStreaming: true };
+
+		await assert.rejects(
+			cx.request("pix/session/reload", { sessionId }),
+			/reload is unavailable while the session is busy/,
+		);
+		assert.equal(harness.clients.length, 1, "no replacement client is spawned");
+		assert.equal(harness.adapter.sessionCount, 1);
+	});
 });
 
 test("session/delete removes the mapping and closes a live session", async () => {
@@ -1336,6 +1614,26 @@ test("built-in slash commands run pi-side actions and answer end_turn", async ()
 			assert.equal(named.stopReason, "end_turn");
 			assert.deepEqual(harness.clients[0]!.nameCalls, ["Research"]);
 
+			const currentName = await cx.request("session/prompt", {
+				sessionId,
+				prompt: [{ type: "text", text: "/name" }],
+			}) as { stopReason: string };
+			assert.equal(currentName.stopReason, "end_turn");
+			assert.deepEqual(harness.clients[0]!.nameCalls, ["Research"], "querying the name does not rename");
+
+			const sessionInfo = await cx.request("session/prompt", {
+				sessionId,
+				prompt: [{ type: "text", text: "/session" }],
+			}) as { stopReason: string };
+			assert.equal(sessionInfo.stopReason, "end_turn");
+
+			const cloned = await cx.request("session/prompt", {
+				sessionId,
+				prompt: [{ type: "text", text: "/clone" }],
+			}) as { stopReason: string };
+			assert.equal(cloned.stopReason, "end_turn");
+			assert.equal(harness.clients[0]!.clones, 1);
+
 			const model = await cx.request("session/prompt", {
 				sessionId,
 				prompt: [{ type: "text", text: "/model openai/gpt-5" }],
@@ -1346,10 +1644,6 @@ test("built-in slash commands run pi-side actions and answer end_turn", async ()
 			await assert.rejects(
 				cx.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "/thinking warp" }] }),
 				/unknown thought level/,
-			);
-			await assert.rejects(
-				cx.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "/name" }] }),
-				/usage: \/name/,
 			);
 		},
 		(app) => {
@@ -1362,8 +1656,53 @@ test("built-in slash commands run pi-side actions and answer end_turn", async ()
 	const texts = notifications.map((n) => (n.update as { content?: { text?: string } }).content?.text ?? "");
 	assert.ok(texts.some((t) => t.includes("compacted")), "compact feedback reported");
 	assert.ok(texts.some((t) => t.includes("Research")), "rename feedback reported");
+	assert.ok(texts.some((t) => t.includes("Session info") && t.includes("180 total")), "session stats reported");
+	assert.ok(texts.some((t) => t.includes("session duplicated")), "clone feedback reported");
 	const info = notifications.find((n) => n.update.sessionUpdate === "session_info_update");
 	assert.equal((info?.update as { title?: string }).title, "Research");
+});
+
+test("/copy copies the last assistant message and reports when there is none", async () => {
+	const copied: string[] = [];
+	const harness = createTestAdapter({
+		copyText: async (text) => {
+			copied.push(text);
+		},
+	});
+	const notifications: SessionNotification[] = [];
+	await connect(
+		harness.adapter,
+		async (cx) => {
+			const created = await cx.request("session/new", { cwd: "/tmp", mcpServers: [] });
+			const sessionId = (created as { sessionId: string }).sessionId;
+			const pi = harness.clients[0]!;
+
+			await assert.rejects(
+				cx.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "/copy" }] }),
+				/no assistant messages to copy yet/,
+			);
+			assert.deepEqual(copied, [], "nothing is copied without an assistant message");
+
+			pi.lastAssistantText = "the answer text";
+			const copy = await cx.request("session/prompt", {
+				sessionId,
+				prompt: [{ type: "text", text: "/copy" }],
+			}) as { stopReason: string };
+			assert.equal(copy.stopReason, "end_turn");
+			assert.deepEqual(copied, ["the answer text"]);
+			assert.equal(pi.promptCalls.length, 0, "/copy never reaches pi.prompt()");
+		},
+		(app) => {
+			app.onNotification("session/update", (ctx) => {
+				notifications.push(ctx.params);
+			});
+		},
+	);
+	await waitFor(() =>
+		notifications.some((n) =>
+			((n.update as { content?: { text?: string } }).content?.text ?? "").includes("copied the last assistant message"),
+		),
+	);
 });
 
 test("unknown slash commands pass through to pi for native handling", async () => {
@@ -1386,6 +1725,91 @@ test("unknown slash commands pass through to pi for native handling", async () =
 	});
 });
 
+test("Pix renderer commands are not forwarded to the model", async () => {
+	const harness = createTestAdapter();
+	const created = await connect(harness.adapter, (cx) => cx.request("session/new", { cwd: "/tmp", mcpServers: [] }));
+	const sessionId = (created as { sessionId: string }).sessionId;
+
+	await assert.rejects(
+		connect(harness.adapter, (cx) => cx.request("session/prompt", {
+			sessionId,
+			prompt: [{ type: "text", text: "/settings" }],
+		})),
+		/requires Pix renderer UI/,
+	);
+	assert.equal(harness.clients[0]!.promptCalls.length, 0);
+});
+
+test("extension-handled slash commands finish without an agent run", async () => {
+	const harness = createTestAdapter();
+	const created = await connect(harness.adapter, (cx) => cx.request("session/new", { cwd: "/tmp", mcpServers: [] }));
+	const sessionId = (created as { sessionId: string }).sessionId;
+	const pi = harness.clients[0]!;
+	pi.promptHandledWithoutRun = true;
+
+	const response = await connect(harness.adapter, (cx) => cx.request("session/prompt", {
+		sessionId,
+		prompt: [{ type: "text", text: "/extension-action" }],
+	})) as { stopReason: string };
+
+	assert.equal(response.stopReason, "end_turn");
+	assert.deepEqual(pi.promptCalls, [{ message: "/extension-action", images: undefined }]);
+});
+
+test("extension-handled commands with attachments finish without an agent run", async () => {
+	const harness = createTestAdapter();
+	const created = await connect(harness.adapter, (cx) => cx.request("session/new", { cwd: "/tmp", mcpServers: [] }));
+	const sessionId = (created as { sessionId: string }).sessionId;
+	const pi = harness.clients[0]!;
+	pi.promptHandledWithoutRun = true;
+
+	const response = await connect(harness.adapter, (cx) => cx.request("session/prompt", {
+		sessionId,
+		prompt: [
+			{ type: "text", text: "/extension-action" },
+			{ type: "image", data: "aGVsbG8=", mimeType: "image/png" },
+		],
+	})) as { stopReason: string };
+
+	assert.equal(response.stopReason, "end_turn");
+	assert.equal(pi.promptCalls.length, 1);
+	assert.equal(pi.promptCalls[0]?.images?.length, 1);
+});
+
+test("input-hook-handled plain prompts finish without an agent run", async () => {
+	const harness = createTestAdapter();
+	const created = await connect(harness.adapter, (cx) => cx.request("session/new", { cwd: "/tmp", mcpServers: [] }));
+	const sessionId = (created as { sessionId: string }).sessionId;
+	const pi = harness.clients[0]!;
+	pi.promptHandledWithoutRun = true;
+
+	const response = await connect(harness.adapter, (cx) => cx.request("session/prompt", {
+		sessionId,
+		prompt: [{ type: "text", text: "handled by an input hook" }],
+	})) as { stopReason: string };
+
+	assert.equal(response.stopReason, "end_turn");
+	assert.deepEqual(pi.promptCalls, [{ message: "handled by an input hook", images: undefined }]);
+});
+
+test("slash command state inspection failures reject instead of hanging", async () => {
+	const harness = createTestAdapter();
+	const created = await connect(harness.adapter, (cx) => cx.request("session/new", { cwd: "/tmp", mcpServers: [] }));
+	const sessionId = (created as { sessionId: string }).sessionId;
+	const pi = harness.clients[0]!;
+	pi.promptHandledWithoutRun = true;
+	pi.stateError = new Error("state unavailable");
+
+	await assert.rejects(
+		connect(harness.adapter, (cx) => cx.request("session/prompt", {
+			sessionId,
+			prompt: [{ type: "text", text: "/extension-action" }],
+		})),
+		/prompt state inspection failed: state unavailable/,
+	);
+	assert.equal(harness.adapter.getSession(sessionId)?.activeRun, undefined);
+});
+
 test("built-in slash commands are refused while a run is active", async () => {
 	const harness = createTestAdapter();
 	const created = await connect(harness.adapter, (cx) => cx.request("session/new", { cwd: "/tmp", mcpServers: [] }));
@@ -1405,6 +1829,29 @@ test("built-in slash commands are refused while a run is active", async () => {
 		);
 		pi.emit({ type: "agent_settled" });
 		await pending;
+	});
+});
+
+test("normal prompts are refused while a built-in mutates the session", async () => {
+	const harness = createTestAdapter();
+	const created = await connect(harness.adapter, (cx) => cx.request("session/new", { cwd: "/tmp", mcpServers: [] }));
+	const sessionId = (created as { sessionId: string }).sessionId;
+	const pi = harness.clients[0]!;
+	let releaseClone!: () => void;
+	pi.cloneGate = new Promise<void>((resolve) => { releaseClone = resolve; });
+
+	await connect(harness.adapter, async (cx) => {
+		const cloning = cx.request("session/prompt", {
+			sessionId,
+			prompt: [{ type: "text", text: "/clone" }],
+		});
+		await waitFor(() => pi.clones === 1);
+		await assert.rejects(
+			cx.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "overlapping work" }] }),
+			/already in progress/,
+		);
+		releaseClone();
+		await cloning;
 	});
 });
 

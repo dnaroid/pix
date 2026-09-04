@@ -6,6 +6,7 @@
   import Square from "@lucide/svelte/icons/square";
   import X from "@lucide/svelte/icons/x";
   import { tick } from "svelte";
+  import type { AvailableCommand } from "@agentclientprotocol/sdk";
   import type { Attachment } from "../lib/attachments";
   import {
     advanceQuestionnaire,
@@ -28,11 +29,19 @@
     PromptAutocompleteController,
     type PromptAutocompleteState,
   } from "../lib/autocomplete";
+  import {
+    matchSlashCommands,
+    shouldSubmitAcceptedSlashCommand,
+    slashCommandInsertion,
+    slashCommandQuery,
+    type SlashCommandMatch,
+  } from "../lib/slash-commands";
   import AttachmentGrid from "./AttachmentGrid.svelte";
 
   let {
     promptText = $bindable(""),
     attachments,
+    availableCommands = [],
     activeSessionId,
     ready,
     promptRunning,
@@ -50,6 +59,7 @@
   }: {
     promptText?: string;
     attachments: readonly Attachment[];
+    availableCommands?: readonly AvailableCommand[];
     activeSessionId: string | null;
     ready: boolean;
     promptRunning: boolean;
@@ -69,8 +79,14 @@
   let composerForm: HTMLFormElement | undefined;
   let textarea = $state<HTMLTextAreaElement | undefined>();
   let ghostLayer = $state<HTMLDivElement | undefined>();
+  let slashListbox = $state<HTMLDivElement | undefined>();
   let autocompleteSuggestion = $state("");
   let composing = $state(false);
+  let selectionStart = $state(0);
+  let selectionEnd = $state(0);
+  let selectedSlashCommand = $state(0);
+  let dismissedSlashDraft = $state<string | null>(null);
+  let slashMenuKey = "";
   let questionModeActive = false;
   let restoreFocusElement: HTMLElement | null = null;
   const autocompleteController = new PromptAutocompleteController({
@@ -99,6 +115,28 @@
   const currentSelectionCount = $derived(questionDraftSelectionCount(currentDraft));
   const displayedAttachments = $derived(questionMode ? questionAttachments : attachments);
   const textareaValue = $derived(composerText());
+  const slashQuery = $derived.by(() => {
+    if (!ready || !activeSessionId || promptRunning || questionMode || composing || attachments.length > 0) {
+      return undefined;
+    }
+    if (dismissedSlashDraft === promptText) return undefined;
+    return slashCommandQuery(promptText, selectionStart, selectionEnd);
+  });
+  const slashMatches = $derived.by(() => (
+    slashQuery === undefined ? [] : matchSlashCommands(availableCommands, slashQuery)
+  ));
+  const slashMenuOpen = $derived(slashMatches.length > 0);
+  const activeSlashMatch = $derived(slashMatches[selectedSlashCommand]);
+  const promptAssistiveStatus = $derived.by(() => {
+    if (slashMenuOpen) {
+      return `${slashMatches.length} slash commands available. Use arrow keys to navigate, then Tab or Enter to choose.`;
+    }
+    if (!questionMode && autocompleteSuggestion) {
+      return "Autocomplete available. Press Tab to accept or Escape to dismiss.";
+    }
+    return "";
+  });
+  const slashListboxId = "prompt-slash-command-listbox";
 
   function composerText(): string {
     if (!questionMode) return promptText;
@@ -165,6 +203,34 @@
     return () => cancelAnimationFrame(frame);
   });
 
+  $effect(() => {
+    if (dismissedSlashDraft !== null && dismissedSlashDraft !== promptText) dismissedSlashDraft = null;
+  });
+
+  $effect(() => {
+    const key = slashQuery === undefined
+      ? ""
+      : `${slashQuery}\0${slashMatches.map(({ command }) => command.name).join("\0")}`;
+    if (key !== slashMenuKey) {
+      slashMenuKey = key;
+      selectedSlashCommand = 0;
+    } else if (selectedSlashCommand >= slashMatches.length) {
+      selectedSlashCommand = Math.max(0, slashMatches.length - 1);
+    }
+    if (slashMenuOpen) autocompleteController.dismiss();
+  });
+
+  $effect(() => {
+    if (!slashMenuOpen || !slashListbox) return;
+    const index = selectedSlashCommand;
+    const frame = requestAnimationFrame(() => {
+      slashListbox
+        ?.querySelector<HTMLElement>(`[data-slash-command-index="${index}"]`)
+        ?.scrollIntoView({ block: "nearest" });
+    });
+    return () => cancelAnimationFrame(frame);
+  });
+
   $effect(() => () => autocompleteController.dispose());
 
   $effect(() => {
@@ -209,6 +275,33 @@
   }
 
   function handleKeydown(event: KeyboardEvent): void {
+    if (!questionMode && slashMenuOpen) {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const direction = event.key === "ArrowDown" ? 1 : -1;
+        selectedSlashCommand = (selectedSlashCommand + direction + slashMatches.length) % slashMatches.length;
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        dismissedSlashDraft = promptText;
+        autocompleteController.dismiss();
+        return;
+      }
+      if (
+        (event.key === "Tab" || event.key === "Enter")
+        && !event.shiftKey
+        && !event.ctrlKey
+        && !event.altKey
+        && !event.metaKey
+        && !event.isComposing
+        && activeSlashMatch
+      ) {
+        event.preventDefault();
+        void acceptSlashCommand(activeSlashMatch, event.key === "Enter");
+        return;
+      }
+    }
     if (
       !questionMode
       && event.key === "Tab"
@@ -241,19 +334,47 @@
   }
 
   function handleInput(event: Event): void {
-    const value = (event.currentTarget as HTMLTextAreaElement).value;
+    const target = event.currentTarget as HTMLTextAreaElement;
+    const value = target.value;
     if (questionMode && currentQuestion) {
       updateQuestionState(updateCustomAnswer(questionMode.state, currentQuestion.id, value, currentQuestion));
     } else {
       promptText = value;
     }
+    updateSelection(target);
     resizeComposer();
-    observeAutocomplete(event.currentTarget as HTMLTextAreaElement);
+    observeAutocomplete(target);
   }
 
   function handleKeyup(event: KeyboardEvent): void {
+    updateSelection(event.currentTarget as HTMLTextAreaElement);
     if (event.key === "Tab" || event.key === "Escape") return;
     observeAutocomplete(event.currentTarget as HTMLTextAreaElement);
+  }
+
+  function handleSelection(event: Event): void {
+    const target = event.currentTarget as HTMLTextAreaElement;
+    updateSelection(target);
+    observeAutocomplete(target);
+  }
+
+  function updateSelection(target: HTMLTextAreaElement): void {
+    selectionStart = target.selectionStart;
+    selectionEnd = target.selectionEnd;
+  }
+
+  async function acceptSlashCommand(match: SlashCommandMatch, submit: boolean): Promise<void> {
+    promptText = slashCommandInsertion(match.command);
+    dismissedSlashDraft = submit ? null : promptText;
+    autocompleteController.dismiss();
+    await tick();
+    if (!textarea) return;
+    textarea.focus();
+    textarea.setSelectionRange(promptText.length, promptText.length);
+    updateSelection(textarea);
+    resizeComposer();
+    observeAutocomplete(textarea);
+    if (submit && shouldSubmitAcceptedSlashCommand(match)) await onSubmit();
   }
 
   function handleScroll(event: Event): void {
@@ -267,7 +388,9 @@
 
   function handleCompositionEnd(event: CompositionEvent): void {
     composing = false;
-    observeAutocomplete(event.currentTarget as HTMLTextAreaElement);
+    const target = event.currentTarget as HTMLTextAreaElement;
+    updateSelection(target);
+    observeAutocomplete(target);
   }
 
   function handlePaste(event: ClipboardEvent): void {
@@ -442,9 +565,51 @@
 
 <svelte:window onresize={resizeComposer} onkeydown={handleQuestionEscape} />
 
+<div class="relative row-start-3 mx-2 mb-2">
+{#if slashMenuOpen}
+  <div
+    bind:this={slashListbox}
+    class="absolute right-0 bottom-[calc(100%+0.375rem)] left-0 z-30 max-h-72 overflow-y-auto rounded-xl border border-border bg-popover p-1.5 text-popover-foreground shadow-lg"
+    id={slashListboxId}
+    role="listbox"
+    aria-label="Slash commands"
+  >
+    {#each slashMatches as match, index (`${match.command.name}:${index}`)}
+      <button
+        class={[
+          "flex w-full items-start gap-3 rounded-lg px-2.5 py-2 text-left transition-colors",
+          index === selectedSlashCommand ? "bg-accent text-accent-foreground" : "hover:bg-accent/60",
+        ]}
+        type="button"
+        id={`prompt-slash-command-${index}`}
+        data-slash-command-index={index}
+        role="option"
+        aria-selected={index === selectedSlashCommand}
+        tabindex="-1"
+        onmousedown={(event) => event.preventDefault()}
+        onmouseenter={() => selectedSlashCommand = index}
+        onclick={() => void acceptSlashCommand(match, false)}
+      >
+        <span class="min-w-0 flex-1">
+          <span class="flex min-w-0 items-baseline gap-2">
+            <span class="shrink-0 font-mono text-xs font-semibold text-foreground">/{match.command.name}</span>
+            {#if match.inputHint}
+              <span class="truncate font-mono text-[10px] text-muted-foreground">{match.inputHint}</span>
+            {/if}
+          </span>
+          <span class="mt-0.5 block truncate text-[11px] text-muted-foreground">{match.command.description}</span>
+        </span>
+        {#if match.source}
+          <span class="mt-0.5 shrink-0 rounded border border-border/80 px-1.5 py-0.5 text-[9px] font-medium tracking-wide text-muted-foreground uppercase">{match.source}</span>
+        {/if}
+      </button>
+    {/each}
+  </div>
+{/if}
+
 <form
   class={[
-    "row-start-3 mx-2 mb-2 overflow-hidden rounded-xl border bg-background shadow-xs focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20",
+    "overflow-hidden rounded-xl border bg-background shadow-xs focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20",
     dragActive ? "border-ring ring-2 ring-ring/30" : "border-input",
   ]}
   bind:this={composerForm}
@@ -651,14 +816,19 @@
             oninput={handleInput}
             onkeydown={handleKeydown}
             onkeyup={handleKeyup}
-            onselect={(event) => observeAutocomplete(event.currentTarget as HTMLTextAreaElement)}
-            onclick={(event) => observeAutocomplete(event.currentTarget as HTMLTextAreaElement)}
+            onselect={handleSelection}
+            onclick={handleSelection}
             onscroll={handleScroll}
             oncompositionstart={handleCompositionStart}
             oncompositionend={handleCompositionEnd}
             onpaste={handlePaste}
             aria-label={questionMode ? `Custom answer for ${currentQuestion?.label ?? "question"}` : "Message Pix"}
             aria-describedby="prompt-autocomplete-status"
+            role={!questionMode ? "combobox" : undefined}
+            aria-autocomplete={!questionMode ? "list" : undefined}
+            aria-expanded={!questionMode ? slashMenuOpen : undefined}
+            aria-controls={!questionMode && slashMenuOpen ? slashListboxId : undefined}
+            aria-activedescendant={!questionMode && slashMenuOpen ? `prompt-slash-command-${selectedSlashCommand}` : undefined}
             placeholder={composerPlaceholder()}
             disabled={questionMode ? !currentQuestion : !activeSessionId || !ready}
             rows="1"
@@ -716,6 +886,7 @@
     {/if}
   </div>
   <p id="prompt-autocomplete-status" class="sr-only" aria-live="polite">
-    {!questionMode && autocompleteSuggestion ? "Autocomplete available. Press Tab to accept or Escape to dismiss." : ""}
+    {promptAssistiveStatus}
   </p>
 </form>
+</div>

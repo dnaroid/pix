@@ -6,6 +6,7 @@ import {
   extractBlockId,
   messageText,
 } from "./pruner-metadata.js";
+import { stableMessageKeys } from "./pruner-message-ids.js";
 
 interface CandidateBoundary {
   id: string;
@@ -24,13 +25,27 @@ function isActiveBlockId(blockId: number, state: DcpState): boolean {
   return state.compressionBlocks.some((block) => block.id === blockId && block.active);
 }
 
-function findCurrentMessageId(msg: any, state: DcpState): string | undefined {
+function findCurrentMessageId(msg: any, stableKey: string, state: DcpState): string | undefined {
   const role = msg?.role ?? "";
   const timestamp = msg?.timestamp;
   if (!Number.isFinite(timestamp)) return undefined;
 
   for (const [id, meta] of state.messageMetaSnapshot) {
-    if (meta.timestamp === timestamp && meta.role === role && meta.blockId === undefined) return id;
+    if (meta.stableId === stableKey) return id;
+  }
+
+  // Backward compatibility for snapshots created before stable IDs were
+  // recorded. Never mix timestamp fallback with a modern stable-ID snapshot.
+  const isLegacySnapshot = [...state.messageMetaSnapshot.values()]
+    .every((meta) => meta.stableId === undefined);
+  if (!isLegacySnapshot) return undefined;
+
+  for (const [id, meta] of state.messageMetaSnapshot) {
+    if (
+      meta.timestamp === timestamp &&
+      meta.role === role &&
+      meta.blockId === undefined
+    ) return id;
   }
 
   for (const [id, ts] of state.messageIdSnapshot) {
@@ -42,6 +57,7 @@ function findCurrentMessageId(msg: any, state: DcpState): string | undefined {
 
 function resolveAddressableBoundaryId(
   msg: any,
+  stableKey: string,
   state: DcpState,
   options: { allowBlocks: boolean },
 ): { id: string; blockId?: number; text: string } | null {
@@ -55,8 +71,9 @@ function resolveAddressableBoundaryId(
 
   // Inline [dcp-id] markers are no longer injected into message content; the
   // snapshot rebuilt by injectMessageIds() is the sole addressability source.
-  // Resolve the message id by matching its (timestamp, role) in the snapshot.
-  const currentId = findCurrentMessageId(msg, state);
+  // Resolve the message ID by its persistent stable identity. Timestamp/role
+  // matching is retained only for legacy snapshots without stable IDs.
+  const currentId = findCurrentMessageId(msg, stableKey, state);
   if (currentId) return { id: currentId, text };
 
   return null;
@@ -73,15 +90,17 @@ export function detectCompressionCandidate(
   if (contextPercent < settings.minContextPercent) return null;
 
   const boundaries: CandidateBoundary[] = [];
-  for (const msg of messages) {
-    const boundary = resolveAddressableBoundaryId(msg, _state, { allowBlocks: true });
+  const stableKeys = stableMessageKeys(messages);
+  for (let index = 0; index < messages.length; index++) {
+    const msg = messages[index];
+    const boundary = resolveAddressableBoundaryId(msg, stableKeys[index]!, _state, { allowBlocks: true });
     if (!boundary) continue;
     if (!Number.isFinite(msg.timestamp)) continue;
     boundaries.push({
       id: boundary.id,
       role: msg.role ?? "",
       timestamp: msg.timestamp,
-      tokenEstimate: estimateMessageTokens(msg),
+      tokenEstimate: _state.messageMetaSnapshot.get(boundary.id)?.tokenEstimate ?? estimateMessageTokens(msg),
       blockId: boundary.blockId,
       isSystemReminder: boundary.text.includes("<dcp-system-reminder>"),
     });
@@ -153,15 +172,17 @@ export function detectMessageCompressionCandidates(
   if (contextPercent < settings.minContextPercent) return [];
 
   const boundaries: CandidateBoundary[] = [];
-  for (const msg of messages) {
-    const boundary = resolveAddressableBoundaryId(msg, state, { allowBlocks: false });
+  const stableKeys = stableMessageKeys(messages);
+  for (let index = 0; index < messages.length; index++) {
+    const msg = messages[index];
+    const boundary = resolveAddressableBoundaryId(msg, stableKeys[index]!, state, { allowBlocks: false });
     if (!boundary || boundary.blockId !== undefined) continue;
     if (!Number.isFinite(msg.timestamp)) continue;
     boundaries.push({
       id: boundary.id,
       role: msg.role ?? "",
       timestamp: msg.timestamp,
-      tokenEstimate: estimateMessageTokens(msg),
+      tokenEstimate: state.messageMetaSnapshot.get(boundary.id)?.tokenEstimate ?? estimateMessageTokens(msg),
       isSystemReminder: boundary.text.includes("<dcp-system-reminder>"),
     });
   }

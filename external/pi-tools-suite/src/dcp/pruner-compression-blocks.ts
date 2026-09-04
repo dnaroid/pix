@@ -1,16 +1,15 @@
 import type { DcpConfig } from "./config.js";
 import type { DcpState } from "./state.js";
 import { PASSTHROUGH_ROLES, estimateMessageTokens } from "./pruner-metadata.js";
-import { stableMessageId } from "./pruner-message-ids.js";
+import { stableMessageKeys } from "./pruner-message-ids.js";
 import { writeDcpDebugLog } from "./debug-log.js";
 
-function messageMatchesBoundary(msg: any, messageIndex: number, stableId: string | undefined, timestamp: number): boolean {
-  if (stableId && stableMessageId(msg, messageIndex) === stableId) return true;
-  return msg.timestamp === timestamp;
-}
-
 function findBoundaryIndex(messages: any[], stableId: string | undefined, timestamp: number): number {
-  return messages.findIndex((m, index) => messageMatchesBoundary(m, index, stableId, timestamp));
+  const stableKeys = stableId ? stableMessageKeys(messages) : [];
+  return messages.findIndex((message, index) => {
+    if (stableId && stableKeys[index] === stableId) return true;
+    return message.timestamp === timestamp;
+  });
 }
 
 export interface ReconcileInheritedBlocksResult {
