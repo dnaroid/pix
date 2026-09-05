@@ -105,12 +105,33 @@ export async function runEvalCase(evalCase: EvalCase, model: string, options: Ru
 }
 
 export function parseEvalModels(value: string = process.env.PI_TOOLS_SUITE_EVAL_MODELS ?? ""): string[] {
-	const models = value.split(/[;,\n]/).map((item: string) => item.trim()).filter((item: string): item is string => Boolean(item));
-	return Array.from(new Set<string>(models));
+	return Array.from(new Set<string>(parseList(value)));
 }
 
 export function caseAppliesToModel(evalCase: EvalCase, model: string): boolean {
 	return !evalCase.models?.length || evalCase.models.some((pattern) => pattern.test(model));
+}
+
+export type EvalSelection = {
+	ids: Set<string>;
+	categories: Set<string>;
+};
+
+export function parseEvalSelection(): EvalSelection {
+	return {
+		ids: new Set(parseList(process.env.PI_TOOLS_SUITE_EVAL_CASES)),
+		categories: new Set(parseList(process.env.PI_TOOLS_SUITE_EVAL_CATEGORIES)),
+	};
+}
+
+export function caseIsSelected(evalCase: EvalCase, selection: EvalSelection): boolean {
+	if (selection.ids.size > 0 && !selection.ids.has(evalCase.id)) return false;
+	if (selection.categories.size > 0 && !selection.categories.has(evalCase.category)) return false;
+	return true;
+}
+
+function parseList(value: string | undefined): string[] {
+	return (value ?? "").split(/[;,\n]/).map((item) => item.trim()).filter(Boolean);
 }
 
 function makeFixtureProject(fixture: EvalCase["fixture"]): string {

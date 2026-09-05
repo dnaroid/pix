@@ -39,10 +39,11 @@ export function astGrepToolDescriptions(maxLines: number, maxBytesLabel: string)
 		astGrep: {
 			name: "ast_grep",
 			label: "ast-grep",
-			description: `Read-only AST structural search/scan. Use for language-aware patterns, sgconfig/rule scans, JSON matches, and rewrite previews. Use text search for plain strings and ast_apply for mutations. Output truncates at ${maxLines} lines or ${maxBytesLabel} with full output saved to a temp file.`,
-			promptSnippet: "Use ast_grep for AST/structural code search, not plain text search. It previews rewrites only; use ast_apply to mutate files.",
+			description: `Read-only AST structural search/scan. MANDATORY ROUTING: for structural, syntax-aware, AST, language-aware, or code-shape matching, ast_grep must be the FIRST tool call. Never preflight with Glob, Grep, Read, or shell even when files are unknown; omit paths to scan the current project. Use for sgconfig/rule scans, JSON matches, and rewrite previews. Use Grep for exact literals/regex, Glob only for filename/path-only requests, and ast_apply for mutations. Output truncates at ${maxLines} lines or ${maxBytesLabel} with full output saved to a temp file.`,
+			promptSnippet: "MANDATORY: structural/syntax-aware/AST/code-shape matching => call ast_grep FIRST. Do not call Glob, Grep, Read, or shell before it; unknown files are not a reason to pre-search because ast_grep scans the project by default. Exact literal/regex only => Grep; filename/path only => Glob. Use ast_apply for mutations.",
 			promptGuidelines: [
-				"Use ast_grep when syntax/AST structure matters; use text search for exact strings/regex. Keep paths/globs narrow and set lang for ambiguous snippets.",
+				"The first tool for syntax relationships or code-shape matching must be ast_grep, even when the file or language is unknown. Do not make a preliminary Glob/Grep/Read/shell call; start at the current project and narrow within ast_grep when needed.",
+				"Use Grep/Read directly for exact literal or regex lookups and Glob only for filename/path-only discovery; those text-only tasks must not trigger ast_grep.",
 				"ast_grep is read-only: use rewrite to preview only; use ast_apply for mutations or command=scan fixes.",
 			],
 		},

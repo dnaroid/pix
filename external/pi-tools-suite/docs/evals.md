@@ -453,6 +453,9 @@ PI_TOOLS_SUITE_EVAL_MODELS="$MODELS" \
 Cases with model filters only run for matching models. For example, Sol-specific
 orchestration cases do not run against GLM.
 
+`PI_TOOLS_SUITE_EVAL_CASES` and `PI_TOOLS_SUITE_EVAL_CATEGORIES` (documented
+below) filter the Bun live matrix the same way they filter the report runner.
+
 ### Comparative report runner
 
 For model comparison, prefer the report runner:

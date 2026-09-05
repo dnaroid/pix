@@ -2,9 +2,9 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { EVAL_CASES } from "./cases.js";
-import { caseAppliesToModel, parseEvalModels, runEvalCase } from "./harness/runner.js";
+import { caseAppliesToModel, caseIsSelected, parseEvalModels, parseEvalSelection, runEvalCase } from "./harness/runner.js";
 import { writeEvalReport } from "./harness/report.js";
-import type { EvalReport } from "./harness/types.js";
+import type { EvalReport, EvalRunResult } from "./harness/types.js";
 
 const models = parseEvalModels();
 if (models.length === 0) {
@@ -12,8 +12,7 @@ if (models.length === 0) {
 	process.exit(2);
 }
 
-const selectedIds = new Set((process.env.PI_TOOLS_SUITE_EVAL_CASES ?? "").split(/[;,\n]/).map((value) => value.trim()).filter(Boolean));
-const selectedCategories = new Set((process.env.PI_TOOLS_SUITE_EVAL_CATEGORIES ?? "").split(/[;,\n]/).map((value) => value.trim()).filter(Boolean));
+const selection = parseEvalSelection();
 const timeoutMs = Number(process.env.PI_TOOLS_SUITE_EVAL_TIMEOUT_MS ?? 240_000);
 const keepProject = /^(1|true|yes)$/i.test(process.env.PI_TOOLS_SUITE_EVAL_KEEP ?? "");
 const streamIo = /^(1|true|yes)$/i.test(process.env.PI_TOOLS_SUITE_EVAL_STREAM_IO ?? "");
@@ -22,12 +21,11 @@ const outputDir = process.env.PI_TOOLS_SUITE_EVAL_OUTPUT_DIR
 	: path.resolve(path.dirname(fileURLToPath(import.meta.url)), "artifacts", new Date().toISOString().replace(/[:.]/g, "-"));
 
 const startedAt = new Date().toISOString();
-const results = [];
+const results: EvalRunResult[] = [];
 for (const model of models) {
 	for (const evalCase of EVAL_CASES) {
 		if (!caseAppliesToModel(evalCase, model)) continue;
-		if (selectedIds.size > 0 && !selectedIds.has(evalCase.id)) continue;
-		if (selectedCategories.size > 0 && !selectedCategories.has(evalCase.category)) continue;
+		if (!caseIsSelected(evalCase, selection)) continue;
 		process.stderr.write(`[eval] ${model} :: ${evalCase.id}\n`);
 		const result = await runEvalCase(evalCase, model, { timeoutMs, keepProject, streamIo });
 		results.push(result);
