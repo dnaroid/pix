@@ -1,0 +1,1 @@
+{"name":"coding-regression-eval","private":true,"type":"module","scripts":{"test":"node test/run-tests.js"}}

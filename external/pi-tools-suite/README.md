@@ -188,8 +188,27 @@ Install the language servers used by the bundled example config. The commands be
 # TypeScript / JavaScript
 npm install -g typescript typescript-language-server
 
+# Svelte
+npm install -g svelte-language-server
+
+# Vue
+npm install -g @vue/language-server
+
 # Python
 python3 -m pip install --user python-lsp-server
+
+# Go
+go install golang.org/x/tools/gopls@latest
+
+# C / C++ (clangd)
+brew install llvm
+# or use your distro's clangd package: apt install clangd, dnf install clang-tools-extra, ...
+
+# Lua
+brew install lua-language-server
+
+# Bash
+npm install -g bash-language-server
 
 # C# / Unity
 dotnet tool install -g Microsoft.CodeAnalysis.LanguageServer
@@ -251,6 +270,160 @@ Minimal shared config shape:
 ```
 
 Project-local overrides can be added in `.pi/pi-tools-suite.jsonc`; pi-tools-suite asks for trust before using project-local LSP binaries.
+
+### Popular language-server examples
+
+Copy the entries you need into `lsp.servers` of the shared config. Values mirror the commented templates shipped in the generated config file; where they disagree, the generated file is authoritative. Both diagnostics modes are on by default: servers that support pull diagnostics (`textDocument/diagnostic`) are queried directly, and push diagnostics (`publishDiagnostics`) are awaited for every server — `pullDiagnostics: false` / `waitForPublishDiagnostics: false` disable either side explicitly. Servers start lazily: one spawns only after a mutating tool (Edit/Write/ast-grep/apply_patch) touches a file matching `include`, and diagnostics land in that tool's result.
+
+```jsonc
+{
+  "lsp": {
+    "servers": [
+      // Svelte (verified with svelte-language-server): compiler + embedded TS/JS diagnostics
+      {
+        "id": "svelte",
+        "include": ["**/*.svelte"],
+        "exclude": ["**/node_modules/**"],
+        "rootMarkers": ["svelte.config.js", "package.json"],
+        "bin": "svelteserver",
+        "args": ["--stdio"],
+        "startupTimeoutMs": 30000,
+        "diagnosticsWaitMs": 8000,
+        "languageIdByExtension": { ".svelte": "svelte" }
+      },
+      // Vue (Volar)
+      {
+        "id": "vue",
+        "include": ["**/*.vue"],
+        "exclude": ["**/node_modules/**"],
+        "rootMarkers": ["package.json"],
+        "bin": "vue-language-server",
+        "args": ["--stdio"],
+        "startupTimeoutMs": 30000,
+        "diagnosticsWaitMs": 8000,
+        "languageIdByExtension": { ".vue": "vue" }
+      },
+      // Python (python-lsp-server)
+      {
+        "id": "python",
+        "include": ["**/*.py", "**/*.pyi"],
+        "exclude": ["**/.git/**", "**/node_modules/**", "**/__pycache__/**", "**/.venv/**", "**/venv/**", "**/.tox/**", "**/.mypy_cache/**", "**/.ruff_cache/**"],
+        "rootMarkers": ["pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "Pipfile", "poetry.lock", ".git"],
+        "bin": "pylsp",
+        "args": [],
+        "languageIdByExtension": { ".py": "python", ".pyi": "python" }
+      },
+      // Go (gopls, push diagnostics)
+      {
+        "id": "go",
+        "include": ["**/*.go"],
+        "exclude": ["**/.git/**", "**/vendor/**"],
+        "rootMarkers": ["go.mod", ".git"],
+        "bin": "gopls",
+        "args": [],
+        "startupTimeoutMs": 20000,
+        "diagnosticsWaitMs": 8000,
+        "languageIdByExtension": { ".go": "go" }
+      },
+      // Rust (rust-analyzer, push diagnostics)
+      {
+        "id": "rust",
+        "include": ["**/*.rs"],
+        "exclude": ["**/.git/**", "**/node_modules/**", "**/target/**"],
+        "rootMarkers": ["Cargo.toml", "rust-project.json", ".git"],
+        "bin": "rust-analyzer",
+        "args": [],
+        "startupTimeoutMs": 20000,
+        "diagnosticsWaitMs": 20000,
+        "pullDiagnostics": false,
+        "waitForPublishDiagnostics": true,
+        "languageIdByExtension": { ".rs": "rust" }
+      },
+      // C / C++ (clangd, push diagnostics)
+      {
+        "id": "clangd",
+        "include": ["**/*.c", "**/*.cc", "**/*.cpp", "**/*.cxx", "**/*.h", "**/*.hh", "**/*.hpp"],
+        "exclude": ["**/.git/**", "**/node_modules/**"],
+        "rootMarkers": ["compile_commands.json", "CMakeLists.txt", "Makefile", ".clang-format", ".git"],
+        "bin": "clangd",
+        "args": [],
+        "startupTimeoutMs": 20000,
+        "diagnosticsWaitMs": 8000,
+        "languageIdByExtension": {
+          ".c": "c", ".cc": "cpp", ".cpp": "cpp", ".cxx": "cpp",
+          ".h": "c", ".hh": "cpp", ".hpp": "cpp"
+        }
+      },
+      // C# / Unity (Roslyn)
+      {
+        "id": "csharp",
+        "include": ["**/*.cs", "**/*.csx"],
+        "exclude": ["**/.git/**", "**/node_modules/**", "**/bin/**", "**/obj/**", "**/.vs/**", "**/Library/**", "**/Temp/**", "**/Logs/**"],
+        "rootMarkers": ["*.sln", "*.csproj", "global.json", "Directory.Build.props", "Directory.Packages.props", "Packages/manifest.json", "ProjectSettings/ProjectVersion.txt", ".git"],
+        "bin": "~/.dotnet/tools/roslyn-language-server",
+        "args": ["--stdio", "--autoLoadProjects", "--logLevel", "Error"],
+        "startupTimeoutMs": 30000,
+        "diagnosticsWaitMs": 15000,
+        "languageIdByExtension": { ".cs": "csharp", ".csx": "csharp" }
+      },
+      // Ruby
+      {
+        "id": "ruby",
+        "include": ["**/*.rb", "**/*.rake", "**/Gemfile", "**/Rakefile", "**/*.gemspec"],
+        "exclude": ["**/.git/**", "**/node_modules/**", "**/vendor/bundle/**", "**/.bundle/**", "**/tmp/**", "**/log/**"],
+        "rootMarkers": ["Gemfile.lock", "*.gemspec", "Rakefile", ".ruby-version", ".git"],
+        "bin": "ruby-lsp",
+        "args": [],
+        "startupTimeoutMs": 60000,
+        "diagnosticsWaitMs": 10000,
+        "languageIdByExtension": { ".rb": "ruby", ".rake": "ruby", ".gemspec": "ruby" }
+      },
+      // Lua (lua-language-server)
+      {
+        "id": "lua",
+        "include": ["**/*.lua"],
+        "exclude": ["**/.git/**", "**/node_modules/**"],
+        "rootMarkers": [".luarc.json", ".git"],
+        "bin": "lua-language-server",
+        "args": [],
+        "startupTimeoutMs": 30000,
+        "diagnosticsWaitMs": 6000,
+        "languageIdByExtension": { ".lua": "lua" }
+      },
+      // Bash
+      {
+        "id": "bash",
+        "include": ["**/*.sh", "**/*.bash"],
+        "exclude": ["**/.git/**", "**/node_modules/**"],
+        "rootMarkers": [".git"],
+        "bin": "bash-language-server",
+        "args": ["start"],
+        "startupTimeoutMs": 15000,
+        "diagnosticsWaitMs": 5000,
+        "languageIdByExtension": { ".sh": "shellscript", ".bash": "shellscript" }
+      },
+      // Markdown (link validation settings ship in the generated config template)
+      {
+        "id": "markdown",
+        "include": ["**/*.md", "**/*.markdown", "**/*.mdown", "**/*.mkd", "**/*.mmd"],
+        "exclude": ["**/.git/**", "**/node_modules/**"],
+        "rootMarkers": [".git", "package.json", "README.md"],
+        "bin": "vscode-markdown-language-server",
+        "args": ["--stdio"],
+        "startupTimeoutMs": 15000,
+        "diagnosticsWaitMs": 5000,
+        "languageIdByExtension": { ".md": "markdown", ".markdown": "markdown", ".mdown": "markdown", ".mkd": "markdown", ".mmd": "markdown" }
+      }
+    ]
+  }
+}
+```
+
+Notes:
+
+- Svelte resolves `svelte` and `typescript` from the workspace `node_modules`, so project-local versions win; `.svelte.js`/`.svelte.ts` runes modules are not covered because their extensions collide with the TypeScript server.
+- Vue requires `@vue/language-server` v2+ (the `vue-language-server` binary) plus the workspace's `vue` package for template type-checking.
+- The full commented templates (including GDScript via a headless Godot wrapper and the complete Markdown link-validation `settings`) are written to the shared config file on first run.
 
 ## Async sub-agents
 
@@ -519,6 +692,40 @@ npm run test:prompt-evals:dcp
 ```
 
 The default live model is `zai/glm-5-turbo`. Override it for the whole suite with `PI_TOOLS_SUITE_E2E_MODEL=provider/model`, or use the existing component variables such as `TOOL_SELECTION_E2E_MODEL`, `ASYNC_SUBAGENTS_MODEL`, `ASYNC_SUBAGENTS_ROUTING_E2E_MODEL`, and `DCP_SUMMARY_E2E_MODEL`. The normal deterministic coverage remains `npm test`; run prompt evals after changing tool descriptions, routing/classifier prompts, DCP summary prompts, or the default evaluation model.
+
+### Unified eval harness
+
+`test/evals/` adds a shared deterministic + live-model eval layer. The coverage
+gate requires every registered extension and model-facing tool to have a
+deterministic contract. The initial live corpus contains 20 cases across tool
+selection, coding quality, orchestration/escalation, and negative overuse
+controls. Coding-quality fixtures use executable behavioral checks rather than
+an LLM judge, while reports compare parent/worker tokens, provider-reported cost,
+tool calls, changed files, and elapsed time.
+
+```bash
+# Deterministic coverage/contract gate only
+npm run test:evals:contracts
+
+# Live matrix as Bun tests. Models are comma/semicolon separated.
+PI_TOOLS_SUITE_EVAL_MODELS='zai/glm-5.3,openai-codex/gpt-5.6-luna,openai-codex/gpt-5.6-terra,openai-codex/gpt-5.6-sol' \
+  npm run test:evals:live
+
+# Produce JSON + Markdown comparison artifacts.
+PI_TOOLS_SUITE_EVAL_MODELS='zai/glm-5.3,openai-codex/gpt-5.6-terra,openai-codex/gpt-5.6-sol' \
+  npm run evals:report
+
+# Focus the report runner when iterating
+PI_TOOLS_SUITE_EVAL_MODELS='zai/glm-5.3' \
+PI_TOOLS_SUITE_EVAL_CATEGORIES='coding-quality,negative' \
+  npm run evals:report
+```
+
+Live evals are opt-in. The deterministic coverage registry is part of normal
+tests, so adding an extension or tool without eval coverage fails the gate. See
+[`docs/evals.md`](docs/evals.md) for the architecture, complete 20-case catalog,
+fixtures, assertions, metrics, model matrix, report format, environment
+variables, CI recommendations, and the procedure for adding new evals.
 
 Supporting docs and historical standalone README content are kept in `docs/`; third-party license texts are kept in `licenses/`.
 

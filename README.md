@@ -140,7 +140,7 @@ Optional:
 - an audio recorder for dictation: SoX (`rec`/`sox`), `ffmpeg`, or `arecord` on Linux
 - `tmux` and `rsvg-convert` only if you want to regenerate README screenshots
 - Ollama with web search enabled for the bundled `web_search` and `web_fetch` tools
-- language servers for the LSP module
+- language servers for the LSP module (see [LSP setup](external/pi-tools-suite/README.md#lsp-setup) for install commands and ready-to-paste configs for popular servers, including Svelte, Vue, Go, clangd, Lua, and bash)
 
 ### One-shot use
 

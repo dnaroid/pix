@@ -392,6 +392,29 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
       }
       // ,
       // {
+      //   "id": "svelte",
+      //   "include": [
+      //     "**/*.svelte"
+      //   ],
+      //   "exclude": [
+      //     "**/node_modules/**"
+      //   ],
+      //   "rootMarkers": [
+      //     "svelte.config.js",
+      //     "package.json"
+      //   ],
+      //   "bin": "svelteserver",
+      //   "args": [
+      //     "--stdio"
+      //   ],
+      //   "startupTimeoutMs": 30000,
+      //   "diagnosticsWaitMs": 8000,
+      //   "languageIdByExtension": {
+      //     ".svelte": "svelte"
+      //   }
+      // }
+      // ,
+      // {
       //   "id": "python",
       //   "include": [
       //     "**/*.py",
