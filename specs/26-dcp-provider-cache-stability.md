@@ -139,6 +139,16 @@ must become a byte-stable prefix again on the following request.
 
 ## Evidence
 
+Review hardening after `7a8042e` preserves this cache contract through exact
+source/mutation membership, recognition of SDK `textSignature`, and a single
+prepared auto-compression projection including checkpoint and nudge changes.
+Cancellation or a stale plan is checked before primary publication. The
+full-lifecycle marathon test drives request, HTTP-response and finalized
+assistant events without manually populating provider exposure; critical facts
+inside retired ranges survive repeated compression and restart. See
+[review remediation](./27-dcp-review-remediation.md) for the precise verification
+scope, live-eval limitations and deployment state.
+
 - Confirmed before this change: DCP rebuilt a full ID map and appended it to the
   latest provider payload item on every request.
 - Confirmed by provider implementation: Codex Responses continuation requires

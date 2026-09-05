@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, test } from "bun:test";
@@ -48,6 +48,10 @@ async function readEnvelope(statePath: string): Promise<any> {
 async function readPersistedPayload(statePath: string): Promise<any> {
   const doc = await readEnvelope(statePath);
   return doc?.kind === "dcp-state" ? doc.payload : doc;
+}
+
+function recoveryMarkerPath(statePath: string): string {
+  return `${statePath}.recovery-required`;
 }
 
 describe("DCP sidecar state persistence", () => {
@@ -373,7 +377,7 @@ describe("DCP sidecar state persistence", () => {
     expect(restored.manualMode).toBe(false);
   });
 
-  test("quarantines a corrupt primary and recovers the last valid generation", async () => {
+  test("recovers a valid .prev without publishing a repair during load", async () => {
     const sessionDir = await makeTempDir();
     const ctx = fakeContext(sessionDir, "recover-session");
     const state = createState();
@@ -389,6 +393,8 @@ describe("DCP sidecar state persistence", () => {
     expect(recovered?.tokensSaved).toBe(10);
     const names = await readdir(join(sessionDir, "dcp-state"));
     expect(names.some((name) => name.startsWith("recover-session.json.corrupt-"))).toBe(true);
+    await expect(readFile(statePath, "utf8")).rejects.toThrow();
+    await expect(readFile(recoveryMarkerPath(statePath), "utf8")).rejects.toThrow();
 
     const restored = createState();
     restoreState(restored, recovered);
@@ -399,7 +405,7 @@ describe("DCP sidecar state persistence", () => {
     expect(repaired.payload.tokensSaved).toBe(15);
   });
 
-  test("does not overwrite unrecoverable corrupt state with an empty generation", async () => {
+  test("persists an unrecoverable-corruption marker across a restart", async () => {
     const sessionDir = await makeTempDir();
     const ctx = fakeContext(sessionDir, "unrecoverable-session");
     const statePath = resolveDcpStatePath(ctx)!;
@@ -407,10 +413,89 @@ describe("DCP sidecar state persistence", () => {
     await writeFile(statePath, "not-json", "utf8");
 
     await expect(loadDcpState(ctx)).resolves.toBeUndefined();
+    const markerPath = recoveryMarkerPath(statePath);
+    expect(JSON.parse(await readFile(markerPath, "utf8"))).toMatchObject({
+      kind: "dcp-state-recovery-required",
+      sessionId: "unrecoverable-session",
+    });
+    const quarantined = (await readdir(join(sessionDir, "dcp-state")))
+      .find((name) => name.startsWith("unrecoverable-session.json.corrupt-"));
+    expect(quarantined).toBeDefined();
+    expect(await readFile(join(sessionDir, "dcp-state", quarantined!), "utf8")).toBe("not-json");
+
+    // Simulate a new pi process: in-memory maps are empty, but the durable
+    // marker must still prevent a fresh empty sidecar from replacing history.
+    resetDcpPersistenceDedup();
     const fresh = createState();
     await expect(saveDcpState(ctx, fresh)).rejects.toThrow(/recovery is blocked|unrecovered generation/i);
     const names = await readdir(join(sessionDir, "dcp-state"));
     expect(names.some((name) => name.startsWith("unrecoverable-session.json.corrupt-"))).toBe(true);
+    expect(names).toContain("unrecoverable-session.json.recovery-required");
+    await expect(readFile(statePath, "utf8")).rejects.toThrow();
+  });
+
+  test("marks malformed primary and .prev generations unrecoverable without a restart repair", async () => {
+    const sessionDir = await makeTempDir();
+    const ctx = fakeContext(sessionDir, "malformed-prev-session");
+    const statePath = resolveDcpStatePath(ctx)!;
+    await mkdir(join(sessionDir, "dcp-state"), { recursive: true });
+    await writeFile(statePath, "{primary-corrupt", "utf8");
+    await writeFile(`${statePath}.prev`, "{previous-corrupt", "utf8");
+
+    await expect(loadDcpState(ctx)).resolves.toBeUndefined();
+    await expect(readFile(recoveryMarkerPath(statePath), "utf8")).resolves.toContain("dcp-state-recovery-required");
+
+    resetDcpPersistenceDedup();
+    await expect(saveDcpState(ctx, createState())).rejects.toThrow(/recovery is blocked|unrecovered generation/i);
+    const names = await readdir(join(sessionDir, "dcp-state"));
+    expect(names.some((name) => name.startsWith("malformed-prev-session.json.corrupt-"))).toBe(true);
+    expect(names.some((name) => name.startsWith("malformed-prev-session.json.prev.corrupt-"))).toBe(true);
+    await expect(readFile(statePath, "utf8")).rejects.toThrow();
+    await expect(readFile(`${statePath}.prev`, "utf8")).rejects.toThrow();
+  });
+
+  test("recovers from a bounded oversized primary using a valid .prev generation", async () => {
+    const sessionDir = await makeTempDir();
+    const ctx = fakeContext(sessionDir, "oversized-session");
+    const state = createState();
+    state.tokensSaved = 10;
+    await saveDcpState(ctx, state);
+    state.tokensSaved = 20;
+    await saveDcpState(ctx, state);
+    const statePath = resolveDcpStatePath(ctx)!;
+
+    await writeFile(statePath, "x".repeat(8 * 1024 * 1024 + 1), "utf8");
+    resetDcpPersistenceDedup();
+
+    const recovered = await loadDcpState(ctx);
+    expect(recovered?.tokensSaved).toBe(10);
+    const names = await readdir(join(sessionDir, "dcp-state"));
+    expect(names.some((name) => name.startsWith("oversized-session.json.corrupt-"))).toBe(true);
+    await expect(readFile(recoveryMarkerPath(statePath), "utf8")).rejects.toThrow();
+  });
+
+  test("propagates sidecar I/O errors instead of misclassifying them as corruption", async () => {
+    // chmod permission semantics are not portable to Windows or root runners.
+    if (process.platform === "win32" || process.getuid?.() === 0) return;
+
+    const sessionDir = await makeTempDir();
+    const ctx = fakeContext(sessionDir, "io-error-session");
+    const state = createState();
+    await saveDcpState(ctx, state);
+    const statePath = resolveDcpStatePath(ctx)!;
+    const before = await readFile(statePath, "utf8");
+    await chmod(statePath, 0o000);
+
+    try {
+      await expect(loadDcpState(ctx)).rejects.toMatchObject({ code: "EACCES" });
+    } finally {
+      await chmod(statePath, 0o600);
+    }
+
+    expect(await readFile(statePath, "utf8")).toBe(before);
+    const names = await readdir(join(sessionDir, "dcp-state"));
+    expect(names.some((name) => name.includes(".corrupt-"))).toBe(false);
+    expect(names).not.toContain("io-error-session.json.recovery-required");
   });
 
   test("rejects an envelope owned by a different session identity", async () => {

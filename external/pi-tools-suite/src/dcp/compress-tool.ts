@@ -7,6 +7,8 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
 import type { DcpState } from "./state.js"
 import { modelKeysFromContext, resolveModelConfig, type DcpConfig } from "./config.js"
 import { captureDcpPersistenceTarget, saveDcpStateToTarget } from "./state-persistence.js"
+import { captureDcpTransactionGuard, cloneDcpTransactionState, runDcpStateTransaction } from "./state-transaction.js"
+import { createHash } from "node:crypto"
 import { clearDcpNudgeAnchors } from "./pruner.js"
 import type { DcpCompressionVisualDetails } from "./ui.js"
 import { normalizeDcpContextUsage } from "./ui.js"
@@ -152,15 +154,7 @@ function formatSkippedMessages(issues: MessageSkipIssue[]): string[] {
 }
 
 function createCompressionWorkingState(state: DcpState): DcpState {
-  return {
-    ...state,
-    compressionBlocks: state.compressionBlocks.map((block) => ({
-      ...block,
-      coveredBlockIds: block.coveredBlockIds ? [...block.coveredBlockIds] : undefined,
-    })),
-    nudgeAnchors: state.nudgeAnchors.map((anchor) => ({ ...anchor })),
-    lastNudge: state.lastNudge ? { ...state.lastNudge } : undefined,
-  }
+  return cloneDcpTransactionState(state)
 }
 
 function commitCompressionWorkingState(state: DcpState, workingState: DcpState): void {
@@ -233,6 +227,11 @@ export function registerCompressTool(
     }),
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      _signal?.throwIfAborted()
+      const assertCurrent = captureDcpTransactionGuard(state, config, _signal, ctx)
+      const requestHash = createHash("sha256").update(JSON.stringify(params)).digest("hex")
+      return runDcpStateTransaction(state, async () => {
+      assertCurrent()
       const operationEpoch = state.sessionEpoch
       const persistenceTarget = capturePersistence(ctx)
       const effectiveConfig = resolveModelConfig(config, modelKeysFromContext(ctx))
@@ -261,6 +260,9 @@ export function registerCompressTool(
 
       const replayBlocks = state.compressionBlocks.filter((block) => block.createdByToolCallId === _toolCallId)
       if (replayBlocks.length > 0) {
+        if (replayBlocks.some((block) => block.operationRequestHash !== requestHash)) {
+          throw new Error("Compression operation identity conflict: tool call was reused with different or unverifiable parameters")
+        }
         const replayBlockIds = replayBlocks.map((block) => block.id)
         const usage = normalizeDcpContextUsage(safeGetContextUsage(ctx))
         const visualDetails: DcpCompressionVisualDetails = {
@@ -522,15 +524,21 @@ export function registerCompressTool(
 
       const clearedNudgeAnchors = newBlockIds.length > 0 ? clearDcpNudgeAnchors(workingState) : 0
       if (newBlockIds.length > 0) {
-        workingState.consecutiveIgnoredStrongNudges = 0
-        if (persistenceTarget) await persistToTarget(persistenceTarget, workingState)
-        if (state.sessionEpoch !== operationEpoch) {
-          throw new Error("Compression result became stale because the active session changed before commit")
+        for (const block of workingState.compressionBlocks) {
+          if (newBlockIds.includes(block.id)) block.operationRequestHash = requestHash
         }
-        commitCompressionWorkingState(state, workingState)
+        workingState.consecutiveIgnoredStrongNudges = 0
+        assertCurrent()
+        let published = false
+        if (persistenceTarget) await persistToTarget(persistenceTarget, workingState, {
+          beforePublish: assertCurrent,
+          onPublished: () => { published = true },
+        })
+        if (!published) assertCurrent()
+        if (state.sessionEpoch === operationEpoch) commitCompressionWorkingState(state, workingState)
         for (const details of committedRangeLogs) log("compress.range_created", details)
       }
-      if (clearedNudgeAnchors > 0) {
+      if (clearedNudgeAnchors > 0 && state.sessionEpoch === operationEpoch) {
         try {
           pi.appendEntry("dcp-nudge", {
             event: "cleared",
@@ -551,11 +559,11 @@ export function registerCompressTool(
         state: summarizeDcpState(state, effectiveConfig),
       })
 
-      const usage = normalizeDcpContextUsage(safeGetContextUsage(ctx))
+      const usage = state.sessionEpoch === operationEpoch ? normalizeDcpContextUsage(safeGetContextUsage(ctx)) : undefined
       const operationTokensSaved = Math.max(0, operationRemovedTokens - operationSummaryTokens)
       const itemCount = ranges.length + messages.length
       const totalSummaryTokens = newBlockIds.reduce((sum, id) => {
-        const b = state.compressionBlocks.find((block) => block.id === id)
+        const b = workingState.compressionBlocks.find((block) => block.id === id)
         return sum + (b?.summaryTokenEstimate ?? 0)
       }, 0)
       const visualDetails: DcpCompressionVisualDetails = {
@@ -577,6 +585,8 @@ export function registerCompressTool(
       }
       const resultDetails = {
         ...visualDetails,
+        committed: true,
+        ownerChangedAfterPublication: state.sessionEpoch !== operationEpoch,
         outputFormat: "json" as const,
       }
 
@@ -590,6 +600,7 @@ export function registerCompressTool(
         ],
         details: resultDetails,
       }
+      })
     },
   })
 }

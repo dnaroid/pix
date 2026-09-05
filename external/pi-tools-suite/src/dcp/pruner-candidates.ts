@@ -3,8 +3,6 @@ import type { DcpState } from "./state.js";
 import type { CompressionCandidate, MessageCompressionCandidate } from "./pruner-types.js";
 import {
   estimateMessageTokens,
-  extractBlockId,
-  messageText,
 } from "./pruner-metadata.js";
 import { stableMessageKeys } from "./pruner-message-ids.js";
 import { detectToolGroupSpans, findConversationIndexEntry } from "./conversation-index.js";
@@ -55,12 +53,20 @@ function buildCandidateBoundaries(
   return boundaries;
 }
 
-function hasAddressableSnapshot(state: DcpState): boolean {
-  return state.messageMetaSnapshot.size > 0 || state.messageIdSnapshot.size > 0;
-}
-
 function isActiveBlockId(blockId: number, state: DcpState): boolean {
   return state.compressionBlocks.some((block) => block.id === blockId && block.active);
+}
+
+/**
+ * Compression-block identity is internal projection provenance, never a
+ * provider-visible text convention. A raw message may quote a DCP block tag
+ * verbatim (including in a fenced example), so parsing its content would let
+ * untrusted text impersonate a generated summary.
+ */
+function projectedBlockId(msg: any): number | undefined {
+  if (msg?._dcpOrigin !== "block") return undefined;
+  const blockId = msg?._dcpBlockId;
+  return Number.isInteger(blockId) && blockId > 0 ? blockId : undefined;
 }
 
 function findCurrentMessageId(msg: any, stableKey: string, state: DcpState): string | undefined {
@@ -98,12 +104,10 @@ function resolveAddressableBoundaryId(
   stableKey: string,
   state: DcpState,
   options: { allowBlocks: boolean },
-): { id: string; blockId?: number; text: string } | null {
-  const text = messageText(msg);
-  const blockId = extractBlockId(text);
+): { id: string; blockId?: number } | null {
+  const blockId = projectedBlockId(msg);
   if (blockId !== undefined) {
-    if (options.allowBlocks && isActiveBlockId(blockId, state)) return { id: `b${blockId}`, blockId, text };
-    if (!hasAddressableSnapshot(state) && options.allowBlocks) return { id: `b${blockId}`, blockId, text };
+    if (options.allowBlocks && isActiveBlockId(blockId, state)) return { id: `b${blockId}`, blockId };
     return null;
   }
 
@@ -112,7 +116,7 @@ function resolveAddressableBoundaryId(
   // Resolve the message ID by its persistent stable identity. Timestamp/role
   // matching is retained only for legacy snapshots without stable IDs.
   const currentId = findCurrentMessageId(msg, stableKey, state);
-  if (currentId) return { id: currentId, text };
+  if (currentId) return { id: currentId };
 
   return null;
 }

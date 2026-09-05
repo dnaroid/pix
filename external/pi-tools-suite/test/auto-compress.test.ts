@@ -18,7 +18,9 @@ mock.module("@earendil-works/pi-ai", () => piAiMock);
 mock.module("@earendil-works/pi-ai/compat", () => piAiMock);
 
 function textMessage(role: string, text: string, timestamp: number) {
-	return { role, content: [{ type: "text", text }], timestamp };
+  return { role, content: [{ type: "text", text }], timestamp,
+    ...(timestamp === 1000 ? { id: "start" } : timestamp === 2000 ? { id: "end" } : {}),
+  };
 }
 
 function makeRegistry(opts: {

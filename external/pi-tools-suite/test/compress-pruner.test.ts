@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig, type DcpConfig } from "../src/dcp/config.js";
 import dcpModule from "../src/dcp/index.js";
-import { registerCompressTool } from "../src/dcp/compress-tool.js";
+import { registerCompressTool as registerRuntimeCompressTool } from "../src/dcp/compress-tool.js";
+import { seedCanonicalFixture } from "./support/dcp-canonical-fixture.js";
 import { registerCommands } from "../src/dcp/commands.js";
 import {
   applyPruning,
@@ -45,7 +46,7 @@ import {
 } from "../src/dcp/state.js";
 import { stableMessageKeys } from "../src/dcp/pruner-message-ids.js";
 import { applyCompressionBlocks } from "../src/dcp/pruner-compression-blocks.js";
-import { createRangeCompressionBlock } from "../src/dcp/compression-blocks.js";
+import { createRangeCompressionBlock as createRuntimeRangeCompressionBlock } from "../src/dcp/compression-blocks.js";
 import {
   stripStaleDcpMetadataFromAssistantMessage,
 } from "../src/dcp/pruner-metadata.js";
@@ -55,6 +56,23 @@ import {
   createAutoCompressionBlock,
 } from "../src/dcp/auto-compress.js";
 import type { CompressionCandidate } from "../src/dcp/pruner-types.js";
+
+function registerCompressTool(...args: Parameters<typeof registerRuntimeCompressTool>): void {
+  seedCanonicalFixture(args[1]);
+  registerRuntimeCompressTool(...args);
+}
+
+function createRangeCompressionBlock(options: Parameters<typeof createRuntimeRangeCompressionBlock>[0]) {
+  if (options.version === 2) {
+    seedCanonicalFixture(options.state);
+    const entries = options.state.conversationIndexSnapshot;
+    options = { ...options,
+      startMessageId: options.startMessageId ?? entries.find((entry) => entry.timestamp === options.startTimestamp)?.stableId,
+      endMessageId: options.endMessageId ?? [...entries].reverse().find((entry) => entry.timestamp === options.endTimestamp)?.stableId,
+    };
+  }
+  return createRuntimeRangeCompressionBlock(options);
+}
 
 function config(overrides: any = {}): DcpConfig {
   const base: DcpConfig = {
@@ -1609,6 +1627,11 @@ describe("DCP pruning effectiveness", () => {
         role: "assistant",
         tokenEstimate: 900,
       });
+      seedCanonicalFixture(state, [
+        { id: "171", role: "assistant", content: "adjacent start", timestamp: 10 },
+        { id: "172", role: "assistant", content: "adjacent end", timestamp: 11 },
+        { id: "173", role: "assistant", content: "live head must survive", timestamp: 11 },
+      ]);
       return state;
     };
 
@@ -2631,6 +2654,7 @@ describe("DCP pruning effectiveness", () => {
 
     state.messageIdSnapshot.clear();
     state.messageMetaSnapshot.clear();
+    state.conversationIndexSnapshot = [];
     const second = createRangeCompressionBlock({
       topic: "Second",
       summary: "Decision: retained meaning from the prior block.",
@@ -4342,8 +4366,8 @@ describe("DCP pruning effectiveness", () => {
     });
     const state = createState();
     const messages = [
-      textMessage("user", "older research " + "a".repeat(2000), 1000),
-      textMessage("assistant", "older result " + "b".repeat(2000), 2000),
+      { ...textMessage("user", "older research " + "a".repeat(2000), 1000), id: "start" },
+      { ...textMessage("assistant", "older result " + "b".repeat(2000), 2000), id: "end" },
       textMessage("user", "current request", 3000),
     ];
     // Seed the message-id snapshot so the candidate's start/end resolve.
@@ -4649,8 +4673,12 @@ describe("DCP pruning effectiveness", () => {
     });
     const state = createState();
     const messages = [
-      { id: "171", role: "assistant", content: [{ type: "toolCall", id: "a", name: "range_start", input: { payload: "a".repeat(1600) } }], timestamp: 10 },
-      { id: "172", role: "assistant", content: [{ type: "toolCall", id: "b", name: "range_end", input: { payload: "b".repeat(1600) } }], timestamp: 11 },
+      { id: "171", role: "assistant", content: [
+        { type: "toolCall", id: "a", name: "range_start", input: { path: "a.txt" } },
+        { type: "toolCall", id: "b", name: "range_end", input: { path: "b.txt" } },
+      ], timestamp: 10 },
+      { id: "result-a", role: "toolResult", toolCallId: "a", toolName: "range_start", isError: false, content: [{ type: "text", text: "a".repeat(4000) }], timestamp: 10 },
+      { id: "172", role: "toolResult", toolCallId: "b", toolName: "range_end", isError: false, content: [{ type: "text", text: "b".repeat(4000) }], timestamp: 11 },
       { id: "173", role: "assistant", content: [{ type: "toolCall", id: "c", name: "LIVE_HEAD_TOOL", input: { payload: "live" } }], timestamp: 11 },
     ];
     for (const [stableId, visibleId, timestamp] of [

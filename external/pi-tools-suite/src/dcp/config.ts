@@ -431,7 +431,7 @@ export interface LoadConfigOptions {
  */
 export function loadConfig(options: LoadConfigOptions = {}): DcpConfig {
   // Layer 1: defaults (deep clone so we never mutate the constant)
-  let config: DcpConfig = deepMerge(DEFAULT_CONFIG, {})
+  let config: DcpConfig = structuredClone(DEFAULT_CONFIG)
 
   const homeDir = options.homeDir ?? os.homedir()
   config = mergeSuiteDcpConfig(config, path.join(homeDir, ".config", "pi", "pi-tools-suite.jsonc"))

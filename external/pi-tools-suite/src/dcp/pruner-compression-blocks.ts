@@ -1,16 +1,38 @@
 import type { DcpConfig } from "./config.js";
-import type { CompressionBlock, DcpState } from "./state.js";
+import { hasExactCompressionMembership, type CompressionBlock, type CompressionMember, type DcpState } from "./state.js";
 import { PASSTHROUGH_ROLES, estimateMessageTokens } from "./pruner-metadata.js";
 import { stableMessageKeys } from "./pruner-message-ids.js";
 import { writeDcpDebugLog } from "./debug-log.js";
+import { canonicalMessageHash } from "./conversation-index.js";
 
 function findBoundaryIndex(messages: any[], stableId: string | undefined, timestamp: number): number {
   if (stableId) {
     const stableKeys = stableMessageKeys(messages);
-    const exactIndex = stableKeys.indexOf(stableId);
-    if (exactIndex !== -1) return exactIndex;
+    return stableKeys.indexOf(stableId);
   }
-  return messages.findIndex((message) => message.timestamp === timestamp);
+  const matches = messages.flatMap((message, index) => message.timestamp === timestamp ? [index] : []);
+  return matches.length === 1 ? matches[0]! : -1;
+}
+
+function exactMemberSpan(messages: any[], members: CompressionMember[]): { lo: number; hi: number } | undefined {
+  const keys = stableMessageKeys(messages);
+  const lo = keys.indexOf(members[0]!.stableId);
+  if (lo < 0 || lo + members.length > messages.length) return undefined;
+  for (let offset = 0; offset < members.length; offset++) {
+    const member = members[offset]!;
+    if (keys[lo + offset] !== member.stableId || canonicalMessageHash(messages[lo + offset]) !== member.hash) return undefined;
+  }
+  return { lo, hi: lo + members.length - 1 };
+}
+
+function exactBlockSpan(messages: any[], block: CompressionBlock): { lo: number; hi: number } | undefined {
+  if (hasExactCompressionMembership(block)) {
+    return exactMemberSpan(messages, block.mutationMembers!) ?? exactMemberSpan(messages, block.sourceMembers!);
+  }
+  if (!block.legacySourceMembership) return undefined;
+  const lo = findBoundaryIndex(messages, block.startMessageId, block.startTimestamp);
+  const hi = findBoundaryIndex(messages, block.endMessageId, block.endTimestamp);
+  return lo >= 0 && hi >= lo ? { lo, hi } : undefined;
 }
 
 export interface ReconcileInheritedBlocksResult {
@@ -243,8 +265,9 @@ function markProjectedOrigin(message: any, origin: "block" | "dcp-control", bloc
 }
 
 function applyExactMessageBodyBlock(messages: any[], block: CompressionBlock, state: DcpState): boolean {
-  const targetIndex = findBoundaryIndex(messages, block.startMessageId, block.startTimestamp);
-  if (targetIndex === -1) return false;
+  const span = exactBlockSpan(messages, block);
+  if (!span || span.lo !== span.hi) return false;
+  const targetIndex = span.lo;
   const target = messages[targetIndex];
   const removedTokens = estimateMessageTokens(target);
   const text = compressedBlockText(block, "section");
@@ -260,12 +283,9 @@ function applyExactMessageBodyBlock(messages: any[], block: CompressionBlock, st
 }
 
 function applyExactRangeBlock(messages: any[], block: CompressionBlock, state: DcpState): boolean {
-  const startIdx = findBoundaryIndex(messages, block.startMessageId, block.startTimestamp);
-  const endIdx = findBoundaryIndex(messages, block.endMessageId, block.endTimestamp);
-  if (startIdx === -1 || endIdx === -1) return false;
-
-  const lo = Math.min(startIdx, endIdx);
-  const hi = Math.max(startIdx, endIdx);
+  const span = exactBlockSpan(messages, block);
+  if (!span) return false;
+  const { lo, hi } = span;
   let removedTokens = 0;
   for (let i = lo; i <= hi; i++) removedTokens += estimateMessageTokens(messages[i]);
 

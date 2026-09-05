@@ -8,7 +8,7 @@ import {
   messageText,
   stripStaleDcpMetadataLines,
 } from "./pruner-metadata.js";
-import { buildConversationIndex } from "./conversation-index.js";
+import { buildConversationIndex, canonicalMessageHash } from "./conversation-index.js";
 
 export interface InjectMessageIdsOptions {
   /** Config enables priority markers for message-mode candidates. */
@@ -186,6 +186,7 @@ export function injectMessageIds(
     assignedMeta.set(messageIndex, {
       timestamp: msg.timestamp,
       stableId: stableKey,
+      contentHash: canonicalMessageHash(msg),
       role,
       blockId,
       toolCallId: typeof msg.toolCallId === "string" ? msg.toolCallId : undefined,

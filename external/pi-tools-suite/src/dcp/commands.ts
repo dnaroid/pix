@@ -6,6 +6,8 @@ import type { DcpNudgeType } from "./pruner-types.js"
 import { isToolRecordProtected, markToolPruned } from "./pruner.js"
 import { ignoreStaleExtensionContextError, safeGetContextUsage } from "../context-usage.js"
 import { stableMessageId } from "./pruner-message-ids.js"
+import { captureDcpTransactionGuard, cloneDcpTransactionState, runDcpStateTransaction } from "./state-transaction.js"
+import { captureDcpPersistenceTarget, saveDcpStateToTarget } from "./state-persistence.js"
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -602,8 +604,7 @@ export function registerCommands(
       const parts = args.trim().split(/\s+/).filter(Boolean)
       const sub = parts[0] ?? ""
       const effectiveConfig = resolveModelConfig(config, modelKeysFromContext(ctx))
-
-      try {
+      const execute = async (state: DcpState, ctx: ExtensionCommandContext): Promise<void> => {
         switch (sub) {
           case "":
           case "help":
@@ -647,6 +648,41 @@ export function registerCommands(
               "error",
             )
             break
+        }
+      }
+
+      try {
+        if (["sweep", "manual", "decompress", "recompress"].includes(sub)) {
+          // Wait outside the commit queue: the active run may need that same
+          // queue to complete provider evidence or a compression transaction.
+          if (sub === "sweep") await ctx.waitForIdle()
+          const assertCurrent = captureDcpTransactionGuard(state, effectiveConfig, undefined, ctx)
+          const epoch = state.sessionEpoch
+          const target = captureDcpPersistenceTarget(ctx)
+          await runDcpStateTransaction(state, async () => {
+            assertCurrent()
+            const working = cloneDcpTransactionState(state)
+            const notifications: Array<Parameters<typeof ctx.ui.notify>> = []
+            const stagedContext = {
+              ...ctx,
+              waitForIdle: async () => {},
+              ui: { ...ctx.ui, notify: (...args: Parameters<typeof ctx.ui.notify>) => { notifications.push(args) } },
+            } as ExtensionCommandContext
+            await execute(working, stagedContext)
+            assertCurrent()
+            let published = false
+            if (target) await saveDcpStateToTarget(target, working, {
+              beforePublish: assertCurrent,
+              onPublished: () => { published = true },
+            })
+            if (!published) assertCurrent()
+            if (state.sessionEpoch === epoch) {
+              Object.assign(state, working)
+              for (const notification of notifications) await staleSafe(() => ctx.ui.notify(...notification))
+            }
+          })
+        } else {
+          await execute(state, ctx)
         }
       } finally {
         await staleSafe(() => {

@@ -41,6 +41,16 @@ actual projected branch. Ordering and tool-group closure use branch index, not
 timestamp sorting. Timestamps remain legacy boundary metadata only; equal
 timestamps are resolved by stable identity/current `mNNN` order.
 
+New v2 blocks store ordered `sourceMembers` and `mutationMembers`, including
+canonical content hashes. Summary input, tool-group closure and replacement use
+that selection; timestamp drift does not drop an interior source message.
+Applying a block requires a matching contiguous membership in either the raw
+branch or its previously projected source. Missing modern identities, changed
+content or newly inserted interior messages are not repaired by guessing a
+same-timestamp neighbour. Restored pre-membership v2 blocks have an explicit
+legacy compatibility marker. New blocks cannot opt into that path implicitly.
+The SDK's `textSignature` and `thinkingSignature` both protect assistant bodies.
+
 Generated DCP provenance is carried out-of-band with non-enumerable internal
 properties. Literal `<dcp-system-reminder>`, `[dcp-block-id]`, or similar text in
 raw user content never grants synthetic/control-plane authority.
@@ -123,6 +133,13 @@ call id, tool name, necessary non-secret arguments/path, result linkage,
 outcome, error state and exit code when available. Credential/header-like
 fields and provider signatures are excluded/redacted.
 
+Visible text and non-secret arguments are no longer truncated to head/tail
+excerpts before chunking. The complete selected representation is capped at
+4 Mi characters; exceeding that limit refuses the plan. The source hash covers
+the complete retained representation, so changing its middle changes the hash.
+DCP carrier/control metadata is removed from non-assistant summary input so it
+does not accumulate as fictional user constraints in successive rollups.
+
 Configured summarizer models share one total deadline that includes auth,
 fallback models and completions that ignore `AbortSignal`. Oversized sources are
 chunked only on complete tool-group boundaries and merged with explicit source
@@ -135,6 +152,15 @@ errors/verification failures, next steps and tool metadata; large successful raw
 logs are not copied wholesale. New blocks store source hash/coverage,
 representation mode and a deduplicated protected-fragment ledger so repeated
 rollups do not recursively embed old summaries.
+
+Recognized explicit checkpoints are not limited to six head/tail examples.
+The extractive fallback refuses when its continuity representation exceeds
+8192 estimated tokens. Routine read metadata may be sampled; this is not a
+claim that every possible semantic fact survives lossy summarization.
+When the minimal prefix cannot provide the required net gain, the runtime may
+try the largest prefix allowed by the same retention/evidence policy. At most
+two attempts share one deadline. Repeated identical rejected plans are cached;
+the configured protection and evidence rules are not relaxed for a retry.
 
 ## Protected data and recovery
 
@@ -204,7 +230,23 @@ file/directory sync where supported, atomic rename, and a per-sidecar
 cross-process exclusive lock. A concurrent writer receives an explicit conflict
 instead of silent last-writer-wins. The previous valid generation is retained
 as `.prev`; corrupt primaries are quarantined and recovery tries `.prev`.
-Unrecoverable corrupt state blocks a subsequent empty overwrite.
+Each in-memory owner tracks its observed generation and payload hash. Saving
+compares that expected revision with the current file under the lock; a writer
+with an old snapshot conflicts even after another process has released its
+lock. Restoring one payload twice creates independent optimistic owners.
+Unrecoverable corrupt state creates a durable `.recovery-required` marker, so
+subsequent empty overwrites remain blocked across restart. Ordinary filesystem
+permission/IO failures are not automatically classified as corrupt JSON.
+
+Manual compression, automatic compression, provider-evidence commits and
+mutating `/dcp` commands share a per-state transaction queue. Preparation uses
+detached state. Cancellation and session/source/config/model guards run before
+publication, including the primary rename boundary. A confirmed rename followed
+by a failing notification/directory sync is reconciled against the published
+generation instead of being reported as an ordinary uncommitted failure.
+An owner change after publication is reported as committed without copying old
+memory into the replacement session. Auto projection/checkpoints/nudge clearing
+are prepared before the same durable publication rather than a second save.
 
 Cleanup deletes only proven orphan primary sidecars after a complete session
 ownership scan. A malformed/transient session header makes cleanup fail closed.

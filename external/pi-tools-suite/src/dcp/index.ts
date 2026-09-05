@@ -69,6 +69,8 @@ import {
 import { reconcileInheritedCompressionBlocks } from "./pruner-compression-blocks.js"
 import { rehydrateToolRecordsFromMessages } from "./recovery.js"
 import { inferDcpBlockedReason, planDcpBudget } from "./progress-controller.js"
+import { createBudgetedAutoCompressionBlock } from "./auto-compress-budget.js"
+import { captureDcpTransactionGuard, cloneDcpTransactionState, runDcpStateTransaction, invalidateDcpStateOwner } from "./state-transaction.js"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -128,9 +130,9 @@ function isDcpControlPlaneMessage(message: any): boolean {
 // Module export
 // ---------------------------------------------------------------------------
 
-export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
+export default async function dcpModule(pi: ExtensionAPI, dependencies: { config?: ReturnType<typeof loadConfig>; state?: ReturnType<typeof createState> } = {}): Promise<void> {
 	// ── 1. Load config ────────────────────────────────────────────────────────
-	const config = loadConfig()
+	const config = dependencies.config ?? loadConfig()
 	const configForContext = (ctx: unknown) => resolveModelConfig(config, modelKeysFromContext(ctx))
 	const hasEnabledModelOverride = Object.values(config.modelOverrides).some(
 		(override) => override.enabled === true,
@@ -139,11 +141,19 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 	if (!config.enabled && !hasEnabledModelOverride) return
 
 	// ── 2. Create state ───────────────────────────────────────────────────────
-	const state = createState()
+	const state = dependencies.state ?? createState()
 	let pendingInheritedBlockReconciliation = false
 	const providerEvidenceTracker = new ProviderEvidenceTracker()
 	let providerEvidenceCommitQueue = Promise.resolve()
 	let latestProviderOpportunityAvailable = false
+	const invalidateOwner = () => {
+			invalidateDcpStateOwner(state)
+			providerEvidenceTracker.reset()
+			latestProviderOpportunityAvailable = false
+	}
+	pi.on("model_select", invalidateOwner)
+	pi.on("session_tree", invalidateOwner)
+	pi.on("session_compact", invalidateOwner)
 	const appendNudgeTelemetry = (
 		event: "emitted" | "upgraded" | "reapplied",
 		type: DcpNudgeType,
@@ -314,6 +324,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 
 	// ── 10. context: apply pruning and inject nudges ──────────────────────────
 	pi.on("context", async (event, ctx) => {
+		const contextEpoch = state.sessionEpoch
 		const effectiveConfig = configForContext(ctx)
 		const contextMessages = event.messages
 			.filter((message: any) => !isUserVisibleOnlyMessage(message) && !isDcpControlPlaneMessage(message))
@@ -688,7 +699,11 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 					try {
 						const autoOperationEpoch = state.sessionEpoch
 						const autoPersistenceTarget = captureDcpPersistenceTarget(ctx)
-						const autoResult = await createAutoCompressionBlock({
+						const largestSafeCandidate = candidate
+							? detectCompressionCandidate(prunedMessages, state, effectiveConfig, contextPercent)
+							: detectEmergencyCompressionCandidate(prunedMessages, state, effectiveConfig, contextPercent, thresholds.maxContextPercent)
+						let preparedProjection: any[] | undefined
+						const autoResult = await createBudgetedAutoCompressionBlock({
 							candidate: autoCandidate,
 							topic: "Auto-compressed slice",
 							state,
@@ -699,24 +714,27 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 							cwd: (ctx as any).cwd,
 							requiredGainTokens: budget.requiredSavingsTokens,
 							persistState: autoPersistenceTarget
-								? (preparedState) => saveDcpStateToTarget(autoPersistenceTarget, preparedState)
+								? (preparedState, publication) => saveDcpStateToTarget(autoPersistenceTarget, preparedState, publication)
 								: undefined,
-						})
-						if (state.sessionEpoch !== autoOperationEpoch) {
-							throw new Error("Auto-compression result became stale because the active session changed after commit")
+							prepareProjection: (preparedState) => {
+								clearDcpNudgeAnchors(preparedState)
+								preparedState.consecutiveIgnoredStrongNudges = 0
+								preparedState.progressRecovery = undefined
+								preparedProjection = applyPruning(contextMessages, preparedState, effectiveConfig)
+								return preparedProjection
+							},
+						}, largestSafeCandidate)
+						if (autoResult.ownerChangedAfterPublication || state.sessionEpoch !== autoOperationEpoch) {
+							// The captured owner was durably committed; do not label it
+							// failed or mutate/nudge the replacement session.
+							return { messages: contextMessages }
 						}
 						// Re-apply pruning so the new block takes effect on this
 						// same context pass instead of the next one.
-						prunedMessages = applyPruning(prunedMessages, state, effectiveConfig)
+						prunedMessages = preparedProjection ?? applyPruning(contextMessages, state, effectiveConfig)
 						const clearedAnchors = clearDcpNudgeAnchors(state)
 						state.consecutiveIgnoredStrongNudges = 0
 						state.progressRecovery = undefined
-						if (autoPersistenceTarget) {
-							await saveDcpStateToTarget(autoPersistenceTarget, state)
-						}
-						if (state.sessionEpoch !== autoOperationEpoch) {
-							throw new Error("Auto-compression final publication became stale because the active session changed")
-						}
 						writeDcpDebugLog(effectiveConfig, "compress.auto", {
 							trigger: autoDecision.reason,
 							blockId: `b${autoResult.blockId}`,
@@ -725,18 +743,19 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 							summarizerAttempts: autoResult.summarizerAttempts,
 							summaryTokens: autoResult.summaryTokens,
 							removedTokenEstimate: autoResult.removedTokenEstimate,
-							candidate: autoCandidate,
+							candidate: autoResult.effectiveCandidate,
 							clearedAnchors,
 							state: summarizeDcpState(state, effectiveConfig),
 						}, ctx)
 						return finishContext("compress.auto", prunedMessages, {
-							candidate: autoCandidate,
+							candidate: autoResult.effectiveCandidate,
 							messageCandidates,
 							contextPercent,
 							thresholds,
 							clearedAnchors,
 						})
 					} catch (error) {
+						if (state.sessionEpoch !== contextEpoch || ctx.signal?.aborted) return { messages: contextMessages }
 						const autoBlockedReason = error instanceof AutoCompressionBlockedError
 							? error.blockedReason
 							: undefined
@@ -1030,7 +1049,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 			.catch(() => {
 				// Keep later evidence commits moving after a persistence failure.
 			})
-			.then(async () => {
+			.then(() => runDcpStateTransaction(state, async () => {
 				if (state.sessionEpoch !== completion.sessionEpoch) {
 					writeDcpDebugLog(effectiveConfig, "provider_payload.tool_results_not_promoted", {
 						reason: "stale-session",
@@ -1042,10 +1061,8 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 
 				const newlySeen = [...completion.toolIds].filter((toolCallId) => !state.providerSeenToolIds.has(toolCallId))
 				if (newlySeen.length === 0 && !ignoredCompressionOpportunity) return
-				const workingState = {
-					...state,
-					providerSeenToolIds: new Set(state.providerSeenToolIds),
-				}
+				const assertCurrent = captureDcpTransactionGuard(state, effectiveConfig, undefined, ctx)
+				const workingState = cloneDcpTransactionState(state)
 				for (const toolCallId of newlySeen) workingState.providerSeenToolIds.add(toolCallId)
 				if (ignoredCompressionOpportunity) {
 					workingState.consecutiveIgnoredStrongNudges = state.consecutiveIgnoredStrongNudges + 1
@@ -1053,7 +1070,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 
 				try {
 					if (completion.statePath) {
-						await saveDcpStateToTarget({ statePath: completion.statePath, sessionId: completion.sessionId }, workingState)
+						await saveDcpStateToTarget({ statePath: completion.statePath, sessionId: completion.sessionId }, workingState, { beforePublish: assertCurrent })
 					}
 				} catch (error) {
 					writeDcpDebugLog(effectiveConfig, "provider_payload.tool_results_not_promoted", {
@@ -1083,7 +1100,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 					ignoredOpportunities: state.consecutiveIgnoredStrongNudges,
 					state: summarizeDcpState(state, effectiveConfig),
 				}, ctx)
-			})
+			}))
 		providerEvidenceCommitQueue = commit
 		await commit
 	})

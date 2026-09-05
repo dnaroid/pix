@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { createHash } from "node:crypto"
+import { resetDcpDiskRevisions, restoreDcpDiskRevisions } from "./persistence-ownership.js"
 import type { DcpNudgeType } from "./pruner-types.js"
 import type { DcpBlockedReason } from "./progress-controller.js"
 
@@ -44,6 +45,8 @@ export interface MessageIdMeta {
   timestamp: number
   /** Stable raw message key when available; falls back to timestamp-derived key. */
   stableId?: string
+  /** SHA-256 of canonical provider-visible content at snapshot publication. */
+  contentHash?: string
   /** The message role at the time the id was injected. */
   role: string
   /** Present when this addressable message represents an active compression block. */
@@ -66,6 +69,8 @@ export interface ConversationIndexEntry {
   index: number
   /** Stable identity of this projected message. */
   stableId: string
+  /** SHA-256 of the canonical provider-visible message content. */
+  contentHash: string
   /** Persistent mNNN identifier when the message is addressable as raw content. */
   visibleId?: string
   /** Message role in the current projection. */
@@ -94,6 +99,19 @@ export interface CompressionProtectedFragment {
   hash: string
   /** Exact text that must survive rollups. */
   text: string
+}
+
+/**
+ * An immutable source/mutation member recorded by modern compression blocks.
+ *
+ * `stableId` identifies one occurrence in the canonical branch sequence and
+ * `hash` binds that identity to its original provider-visible content. The
+ * timestamp is deliberately not part of this record: host imports/reloads can
+ * normalize timestamps without changing the actual message.
+ */
+export interface CompressionMember {
+  stableId: string
+  hash: string
 }
 
 /**
@@ -126,6 +144,8 @@ export interface CompressionBlock {
   anchorMessageId?: string
   /** Tool call ID of the compress invocation that created this block. */
   createdByToolCallId?: string
+  /** Binds idempotent manual replay to the exact requested parameters. */
+  operationRequestHash?: string
   /** Whether this block is still being applied (false = soft-deleted) */
   active: boolean
   /** Token estimate for the summary text itself */
@@ -144,6 +164,24 @@ export interface CompressionBlock {
   version?: 2
   /** Exact v2 materialization behavior. */
   replacementMode?: "range" | "message-body"
+  /**
+   * Exact provider-projection entries that supplied this summary. For a
+   * roll-up this can contain a synthetic block placeholder while
+   * `mutationMembers` contains that placeholder's canonical raw provenance.
+   */
+  sourceMembers?: CompressionMember[]
+  /**
+   * Exact canonical raw entries that a v2 application is allowed to replace.
+   * The apply path requires every member, in this order and with this hash, to
+   * be present contiguously before it mutates the projection.
+   */
+  mutationMembers?: CompressionMember[]
+  /**
+   * Compatibility marker installed only while restoring pre-membership v2
+   * sidecars. New writers must always persist exact membership; an unmarked v2
+   * block without it is malformed and fails closed.
+   */
+  legacySourceMembership?: true
   /** E06 provenance for automatically prepared summaries. */
   autoSummaryRepresentation?: "model" | "extractive" | "extractive-fallback"
   /** SHA-256 of the bounded source manifest used by the auto summary. */
@@ -367,6 +405,7 @@ export function createState(): DcpState {
  * reset immediately.
  */
 export function resetState(state: DcpState): void {
+  resetDcpDiskRevisions(state)
   state.sessionEpoch = Math.max(1, Math.floor(state.sessionEpoch || 0) + 1)
   state.toolCalls.clear()
   state.prunedToolIds.clear()
@@ -425,7 +464,8 @@ export function inheritCompressionBlocks(state: DcpState, data: unknown): number
       anchorTimestamp: Number.isFinite(b.anchorTimestamp)
         ? b.anchorTimestamp
         : b.endTimestamp + 1,
-    })) as CompressionBlock[]
+    }))
+    .map((block) => normalizeRestoredCompressionBlock(block as CompressionBlock))
 
   const toAdd = validBlocks.filter((b) => !existingIds.has(b.id))
   if (toAdd.length === 0) return 0
@@ -602,6 +642,67 @@ function isLastNudge(value: unknown): value is DcpLastNudge {
   )
 }
 
+const COMPRESSION_MEMBER_HASH_RE = /^[a-f0-9]{64}$/i
+
+function isCompressionMember(value: unknown): value is CompressionMember {
+  if (!value || typeof value !== "object") return false
+  const member = value as Partial<CompressionMember>
+  return (
+    typeof member.stableId === "string" &&
+    member.stableId.length > 0 &&
+    typeof member.hash === "string" &&
+    COMPRESSION_MEMBER_HASH_RE.test(member.hash)
+  )
+}
+
+function isCompressionMemberList(value: unknown): value is CompressionMember[] {
+  if (!Array.isArray(value) || value.length === 0 || !value.every(isCompressionMember)) return false
+  return new Set(value.map((member) => member.stableId)).size === value.length
+}
+
+/** True only for a complete, unambiguous modern v2 membership record. */
+export function hasExactCompressionMembership(block: Pick<CompressionBlock, "sourceMembers" | "mutationMembers">): boolean {
+  return isCompressionMemberList(block.sourceMembers) && isCompressionMemberList(block.mutationMembers)
+}
+
+/** Copy validated membership so restored state cannot alias untrusted payload arrays. */
+function cloneCompressionMembers(members: CompressionMember[]): CompressionMember[] {
+  return members.map((member) => ({ stableId: member.stableId, hash: member.hash.toLowerCase() }))
+}
+
+/**
+ * Mark historic v2 blocks written before exact membership existed as explicit
+ * compatibility blocks. A newly malformed v2 payload that contains partial or
+ * invalid membership is deliberately *not* granted this marker and therefore
+ * fails closed at application time.
+ */
+function normalizeRestoredCompressionBlock(block: CompressionBlock): CompressionBlock {
+  if (block.version !== 2) return block
+
+  const normalized = { ...block }
+  if (hasExactCompressionMembership(normalized)) {
+    normalized.sourceMembers = cloneCompressionMembers(normalized.sourceMembers!)
+    normalized.mutationMembers = cloneCompressionMembers(normalized.mutationMembers!)
+    delete normalized.legacySourceMembership
+    return normalized
+  }
+
+  const hasPersistedMembership =
+    Object.prototype.hasOwnProperty.call(block, "sourceMembers") ||
+    Object.prototype.hasOwnProperty.call(block, "mutationMembers")
+  if (!hasPersistedMembership) {
+    // This is a known pre-membership format, not a modern block with a missing
+    // field. Preserve the historical v2 projection behavior explicitly.
+    normalized.legacySourceMembership = true
+    return normalized
+  }
+
+  // A current-format partial/corrupt membership is ambiguous. Do not let an
+  // attacker/corrupt sidecar smuggle it into the legacy fallback path.
+  delete normalized.legacySourceMembership
+  return normalized
+}
+
 // ---------------------------------------------------------------------------
 // Compact tool-record helpers
 // ---------------------------------------------------------------------------
@@ -746,6 +847,7 @@ export function serializeState(state: DcpState): SerializedDcpState {
  */
 export function restoreState(state: DcpState, data: unknown): void {
   if (!data || typeof data !== "object") return
+  restoreDcpDiskRevisions(data, state)
   const saved = data as Partial<SerializedDcpState>
 
   if (Array.isArray(saved.compressionBlocks)) {
@@ -756,7 +858,8 @@ export function restoreState(state: DcpState, data: unknown): void {
         anchorTimestamp: Number.isFinite(b.anchorTimestamp)
           ? b.anchorTimestamp
           : b.endTimestamp + 1,
-      })) as CompressionBlock[]
+      }))
+      .map((block) => normalizeRestoredCompressionBlock(block as CompressionBlock))
     state.compressionBlocks = validBlocks
     state.nextBlockId =
       typeof saved.nextBlockId === "number"

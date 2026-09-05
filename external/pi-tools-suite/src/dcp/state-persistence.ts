@@ -4,9 +4,11 @@ import type { Dirent } from "node:fs"
 import { basename, dirname, join } from "node:path"
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent"
 import { hashSerializedState, serializeState, type DcpState, type SerializedDcpState } from "./state.js"
+import { dcpDiskRevisions } from "./persistence-ownership.js"
 
 const DCP_STATE_DIR = "dcp-state"
 const DCP_STATE_EXT = ".json"
+const DCP_STATE_RECOVERY_MARKER_SUFFIX = ".recovery-required"
 const DCP_STATE_SCHEMA_VERSION = 1
 const DCP_STATE_MAX_BYTES = 8 * 1024 * 1024
 const MAX_SESSION_HEADER_BYTES = 64 * 1024
@@ -24,6 +26,20 @@ export class DcpPersistenceConflictError extends Error {
 		super(message)
 		this.name = "DcpPersistenceConflictError"
 	}
+}
+
+/** Content/shape failures are recoverable from a valid previous generation. */
+class DcpStateCorruptionError extends Error {
+	constructor(message: string) {
+		super(message)
+		this.name = "DcpStateCorruptionError"
+	}
+}
+
+interface StateDocumentRead {
+	status: "valid" | "missing" | "corrupt"
+	decoded?: DecodedStateDocument
+	error?: DcpStateCorruptionError
 }
 
 
@@ -55,6 +71,10 @@ function safeSessionFileName(sessionId: string): string {
 
 function previousStatePath(statePath: string): string {
 	return `${statePath}.prev`
+}
+
+function recoveryMarkerPath(statePath: string): string {
+	return `${statePath}${DCP_STATE_RECOVERY_MARKER_SUFFIX}`
 }
 
 function fallbackSessionIdFromPath(statePath: string): string {
@@ -92,7 +112,7 @@ function validateCompressionBlockGraph(blocks: unknown[]): void {
 		if (!Number.isFinite(block.startTimestamp) || !Number.isFinite(block.endTimestamp)) {
 			throw new Error(`DCP compression block b${block.id} has invalid boundaries`)
 		}
-		if (block.startTimestamp > block.endTimestamp) {
+		if (block.startTimestamp > block.endTimestamp && !Array.isArray(block.mutationMembers)) {
 			throw new Error(`DCP compression block b${block.id} has reversed boundaries`)
 		}
 		if (typeof block.active !== "boolean" || !finiteNonNegative(block.summaryTokenEstimate)) {
@@ -180,32 +200,74 @@ export function validateSerializedDcpState(
 }
 
 function decodeStateDocument(text: string, expectedSessionId?: string): DecodedStateDocument {
-	const raw = JSON.parse(text) as unknown
-	if (raw && typeof raw === "object" && !Array.isArray(raw) && (raw as any).kind === "dcp-state") {
-		const envelope = raw as Partial<DcpStateEnvelope>
-		if (envelope.schemaVersion !== DCP_STATE_SCHEMA_VERSION) throw new Error(`Unsupported DCP state schema version: ${String(envelope.schemaVersion)}`)
-		if (typeof envelope.sessionId !== "string" || envelope.sessionId.length === 0) throw new Error("DCP state envelope has no session identity")
-		if (expectedSessionId && envelope.sessionId !== expectedSessionId) throw new Error(`DCP state session mismatch: expected ${expectedSessionId}, got ${envelope.sessionId}`)
-		if (!Number.isInteger(envelope.generation) || (envelope.generation ?? 0) <= 0) throw new Error("DCP state generation is invalid")
-		if (typeof envelope.payloadHash !== "string" || !/^[a-f0-9]{64}$/.test(envelope.payloadHash)) throw new Error("DCP state payload hash is invalid")
-		if (typeof envelope.revision !== "string" || envelope.revision !== envelope.payloadHash) throw new Error("DCP state revision is invalid")
-		validateSerializedDcpState(envelope.payload)
-		const actualHash = payloadSha256(envelope.payload)
-		if (actualHash !== envelope.payloadHash) throw new Error("DCP state payload hash mismatch")
-		return { payload: envelope.payload, generation: envelope.generation!, envelope: true }
-	}
+	try {
+		const raw = JSON.parse(text) as unknown
+		if (raw && typeof raw === "object" && !Array.isArray(raw) && (raw as any).kind === "dcp-state") {
+			const envelope = raw as Partial<DcpStateEnvelope>
+			if (envelope.schemaVersion !== DCP_STATE_SCHEMA_VERSION) throw new Error(`Unsupported DCP state schema version: ${String(envelope.schemaVersion)}`)
+			if (typeof envelope.sessionId !== "string" || envelope.sessionId.length === 0) throw new Error("DCP state envelope has no session identity")
+			if (expectedSessionId && envelope.sessionId !== expectedSessionId) throw new Error(`DCP state session mismatch: expected ${expectedSessionId}, got ${envelope.sessionId}`)
+			if (!Number.isInteger(envelope.generation) || (envelope.generation ?? 0) <= 0) throw new Error("DCP state generation is invalid")
+			if (typeof envelope.payloadHash !== "string" || !/^[a-f0-9]{64}$/.test(envelope.payloadHash)) throw new Error("DCP state payload hash is invalid")
+			if (typeof envelope.revision !== "string" || envelope.revision !== envelope.payloadHash) throw new Error("DCP state revision is invalid")
+			validateSerializedDcpState(envelope.payload)
+			const actualHash = payloadSha256(envelope.payload)
+			if (actualHash !== envelope.payloadHash) throw new Error("DCP state payload hash mismatch")
+			return { payload: envelope.payload, generation: envelope.generation!, envelope: true }
+		}
 
-	// Legacy migration adapter: pre-E07 writers persisted SerializedDcpState
-	// directly and older generations legitimately lack later accounting fields.
-	validateSerializedDcpState(raw, { legacy: true })
-	return { payload: raw, generation: 0, envelope: false }
+		// Legacy migration adapter: pre-E07 writers persisted SerializedDcpState
+		// directly and older generations legitimately lack later accounting fields.
+		validateSerializedDcpState(raw, { legacy: true })
+		return { payload: raw, generation: 0, envelope: false }
+	} catch (error) {
+		if (error instanceof DcpStateCorruptionError) throw error
+		throw new DcpStateCorruptionError(
+			error instanceof Error ? error.message : `Invalid DCP state document: ${String(error)}`,
+		)
+	}
 }
 
 async function readBoundedStateText(statePath: string): Promise<string> {
 	const info = await stat(statePath)
-	if (!info.isFile()) throw new Error(`DCP state path is not a regular file: ${statePath}`)
-	if (info.size > DCP_STATE_MAX_BYTES) throw new Error(`DCP state file exceeds ${DCP_STATE_MAX_BYTES} bytes`)
+	if (!info.isFile()) throw new DcpStateCorruptionError(`DCP state path is not a regular file: ${statePath}`)
+	if (info.size > DCP_STATE_MAX_BYTES) throw new DcpStateCorruptionError(`DCP state file exceeds ${DCP_STATE_MAX_BYTES} bytes`)
 	return readFile(statePath, "utf8")
+}
+
+function errorCode(error: unknown): string | undefined {
+	const code = (error as NodeJS.ErrnoException | undefined)?.code
+	return typeof code === "string" ? code : undefined
+}
+
+function isMissingStateError(error: unknown): boolean {
+	return errorCode(error) === "ENOENT"
+}
+
+/** Node filesystem errors are operational failures, not proof of corruption. */
+function isFilesystemError(error: unknown): boolean {
+	return errorCode(error) !== undefined
+}
+
+async function readStateDocument(
+	statePath: string,
+	expectedSessionId?: string,
+): Promise<StateDocumentRead> {
+	try {
+		return {
+			status: "valid",
+			decoded: decodeStateDocument(await readBoundedStateText(statePath), expectedSessionId),
+		}
+	} catch (error) {
+		if (isMissingStateError(error)) return { status: "missing" }
+		if (error instanceof DcpStateCorruptionError || !isFilesystemError(error)) {
+			const corruption = error instanceof DcpStateCorruptionError
+				? error
+				: new DcpStateCorruptionError(error instanceof Error ? error.message : String(error))
+			return { status: "corrupt", error: corruption }
+		}
+		throw error
+	}
 }
 
 export async function readSessionIdFromFile(sessionPath: string): Promise<string | undefined> {
@@ -281,7 +343,7 @@ export function captureDcpPersistenceTarget(ctx: ExtensionContext): DcpPersisten
 export function resetDcpPersistenceDedup(): void {
 	lastPersistedStateHashByPath.clear()
 	lastPersistedGenerationByPath.clear()
-	saveQueueByPath.clear()
+	// An unrelated session startup must not let an in-flight writer escape its queue.
 	recoveryBlockedPaths.clear()
 }
 
@@ -302,11 +364,19 @@ async function syncDirectory(directory: string): Promise<void> {
 	}
 }
 
-async function atomicWriteStateFile(statePath: string, serializedText: string): Promise<void> {
+export interface DcpPublicationOptions {
+	/** Synchronous cancellation/owner/source guard, checked again at the rename boundary. */
+	beforePublish?: () => void
+	/** Non-throwing notification that the primary generation is now published. */
+	onPublished?: () => void
+}
+
+async function atomicWriteStateFile(statePath: string, serializedText: string, publication?: DcpPublicationOptions): Promise<void> {
 	const directory = dirname(statePath)
 	await mkdir(directory, { recursive: true })
 	const tempPath = `${statePath}.tmp-${Date.now()}-${++tempFileCounter}`
 	let handle: Awaited<ReturnType<typeof open>> | undefined
+	let published = false
 
 	try {
 		handle = await open(tempPath, "w", 0o600)
@@ -314,64 +384,123 @@ async function atomicWriteStateFile(statePath: string, serializedText: string): 
 		await handle.sync()
 		await handle.close()
 		handle = undefined
+		publication?.beforePublish?.()
 		await rename(tempPath, statePath)
+		published = true
+		publication?.onPublished?.()
 		await syncDirectory(directory)
 	} catch (error) {
 		await handle?.close().catch(() => {})
 		await unlink(tempPath).catch(() => {})
+		// Rename is the point of no return. A later directory-sync/notification
+		// failure cannot be reported as an ordinary failed, uncommitted operation.
+		if (published && publication && await readFile(statePath, "utf8").then((text) => text === serializedText, () => false)) return
 		throw error
 	}
+}
+
+function recoveryBlockedError(statePath: string): Error {
+	return new Error(
+		`DCP state recovery is blocked for ${statePath}; refusing to overwrite an unrecovered generation`,
+	)
+}
+
+async function hasRecoveryMarker(statePath: string): Promise<boolean> {
+	try {
+		await stat(recoveryMarkerPath(statePath))
+		// The marker is deliberately fail-closed even when it was manually
+		// replaced with a bad object. It exists solely to prevent a later process
+		// from mistaking an unrecoverable sidecar for a new one.
+		return true
+	} catch (error) {
+		if (isMissingStateError(error)) return false
+		throw error
+	}
+}
+
+async function markRecoveryBlocked(statePath: string, sessionId?: string): Promise<void> {
+	const marker = {
+		kind: "dcp-state-recovery-required",
+		schemaVersion: 1,
+		sessionId,
+		createdAt: Date.now(),
+	}
+	await atomicWriteStateFile(recoveryMarkerPath(statePath), JSON.stringify(marker))
+	recoveryBlockedPaths.add(statePath)
+}
+
+async function clearRecoveryBlocked(statePath: string): Promise<void> {
+	recoveryBlockedPaths.delete(statePath)
+	try {
+		await unlink(recoveryMarkerPath(statePath))
+		await syncDirectory(dirname(statePath))
+	} catch (error) {
+		if (isMissingStateError(error)) return
+		throw error
+	}
+}
+
+async function assertRecoveryIsNotBlocked(statePath: string): Promise<void> {
+	if (recoveryBlockedPaths.has(statePath) || await hasRecoveryMarker(statePath)) {
+		recoveryBlockedPaths.add(statePath)
+		throw recoveryBlockedError(statePath)
+	}
+}
+
+async function acceptLoadedState(
+	statePath: string,
+	decoded: DecodedStateDocument,
+): Promise<SerializedDcpState> {
+	lastPersistedStateHashByPath.set(statePath, hashSerializedState(decoded.payload))
+	lastPersistedGenerationByPath.set(statePath, decoded.generation)
+	// A manually restored primary or valid .prev is the only thing that clears
+	// a durable recovery marker. Loading never synthesizes a replacement file.
+	await clearRecoveryBlocked(statePath)
+	dcpDiskRevisions(decoded.payload).set(statePath, {
+		generation: decoded.generation,
+		payloadHash: payloadSha256(decoded.payload),
+	})
+	return decoded.payload
 }
 
 async function quarantineCorruptState(statePath: string): Promise<string | undefined> {
 	const quarantinePath = `${statePath}.corrupt-${Date.now()}-${++tempFileCounter}`
 	try {
+		const info = await stat(statePath)
+		if (!info.isFile()) return undefined
 		await rename(statePath, quarantinePath)
 		await syncDirectory(dirname(statePath))
 		return quarantinePath
 	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined
+		if (isMissingStateError(error)) return undefined
 		throw error
 	}
 }
 
 async function loadStatePath(statePath: string, expectedSessionId?: string): Promise<SerializedDcpState | undefined> {
-	let primaryError: unknown
-	try {
-		const text = await readBoundedStateText(statePath)
-		const decoded = decodeStateDocument(text, expectedSessionId)
-		lastPersistedStateHashByPath.set(statePath, hashSerializedState(decoded.payload))
-		lastPersistedGenerationByPath.set(statePath, decoded.generation)
-		recoveryBlockedPaths.delete(statePath)
-		return decoded.payload
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-			primaryError = undefined
-		} else {
-			primaryError = error
-			await quarantineCorruptState(statePath)
-		}
+	const primary = await readStateDocument(statePath, expectedSessionId)
+	if (primary.status === "valid") return acceptLoadedState(statePath, primary.decoded!)
+
+	const previousPath = previousStatePath(statePath)
+	const previous = await readStateDocument(previousPath, expectedSessionId)
+	if (previous.status === "valid") {
+		// Preserve the bad primary for inspection before a later normal save can
+		// publish a new generation. Recovery itself never rewrites a sidecar.
+		if (primary.status === "corrupt") await quarantineCorruptState(statePath)
+		return acceptLoadedState(statePath, previous.decoded!)
 	}
 
-	try {
-		const previousPath = previousStatePath(statePath)
-		const text = await readBoundedStateText(previousPath)
-		const decoded = decodeStateDocument(text, expectedSessionId)
-		lastPersistedStateHashByPath.set(statePath, hashSerializedState(decoded.payload))
-		lastPersistedGenerationByPath.set(statePath, decoded.generation)
-		recoveryBlockedPaths.delete(statePath)
-		return decoded.payload
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-			await quarantineCorruptState(previousStatePath(statePath)).catch(() => {})
-		}
+	if (primary.status === "corrupt" || previous.status === "corrupt") {
+		// Persist this before moving corrupt files aside. The marker survives a
+		// process restart, so an absent primary cannot be mistaken for a fresh
+		// session and overwritten with empty state.
+		await markRecoveryBlocked(statePath, expectedSessionId)
+		if (primary.status === "corrupt") await quarantineCorruptState(statePath)
+		if (previous.status === "corrupt") await quarantineCorruptState(previousPath)
+		return undefined
 	}
 
-	if (primaryError) {
-		// Keep startup usable from raw history, but make subsequent writes fail
-		// closed until a valid generation is recovered/explicitly repaired.
-		recoveryBlockedPaths.add(statePath)
-	}
+	if (await hasRecoveryMarker(statePath)) recoveryBlockedPaths.add(statePath)
 	return undefined
 }
 
@@ -393,16 +522,18 @@ export async function loadDcpStateFromSessionFile(
 ): Promise<SerializedDcpState | undefined> {
 	if (!sessionFile) return undefined
 
+	let sessionId: string | undefined
 	try {
-		const sessionId = await readSessionIdFromFile(sessionFile)
-		if (!sessionId) return undefined
-		const stateDir = join(dirname(sessionFile), DCP_STATE_DIR)
-		const statePath = join(stateDir, safeSessionFileName(sessionId))
-		return await loadStatePath(statePath, sessionId)
+		sessionId = await readSessionIdFromFile(sessionFile)
 	} catch {
 		// A missing/unreadable previous session means there is nothing safe to inherit.
 		return undefined
 	}
+	if (!sessionId) return undefined
+
+	const stateDir = join(dirname(sessionFile), DCP_STATE_DIR)
+	const statePath = join(stateDir, safeSessionFileName(sessionId))
+	return loadStatePath(statePath, sessionId)
 }
 
 export async function cleanupStaleDcpStateFiles(ctx: ExtensionContext): Promise<number> {
@@ -436,6 +567,7 @@ export async function cleanupStaleDcpStateFiles(ctx: ExtensionContext): Promise<
 		const statePath = join(stateDir, entry.name)
 		await unlink(statePath)
 		await unlink(previousStatePath(statePath)).catch(() => {})
+		await unlink(recoveryMarkerPath(statePath)).catch(() => {})
 		deleted++
 	}
 
@@ -470,33 +602,33 @@ async function withInterprocessStateLock<T>(statePath: string, action: () => Pro
 }
 
 async function currentGenerationForSave(statePath: string, sessionId: string): Promise<number> {
+	await assertRecoveryIsNotBlocked(statePath)
 	const cached = lastPersistedGenerationByPath.get(statePath)
 	if (cached !== undefined) return cached
-	if (recoveryBlockedPaths.has(statePath)) throw new Error(`DCP state recovery is blocked for ${statePath}; refusing to overwrite an unrecovered generation`)
 
-	try {
-		const text = await readBoundedStateText(statePath)
-		const decoded = decodeStateDocument(text, sessionId)
+	const primary = await readStateDocument(statePath, sessionId)
+	if (primary.status === "valid") {
+		const decoded = primary.decoded!
 		lastPersistedGenerationByPath.set(statePath, decoded.generation)
 		lastPersistedStateHashByPath.set(statePath, hashSerializedState(decoded.payload))
 		return decoded.generation
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-			recoveryBlockedPaths.add(statePath)
-			throw new Error(`Refusing to overwrite unreadable DCP state at ${statePath}: ${error instanceof Error ? error.message : String(error)}`)
-		}
+	}
+	if (primary.status === "corrupt") {
+		// save() is not a recovery operation. Refuse rather than silently using a
+		// backup to overwrite a real corrupt primary that load() has not recovered.
+		await markRecoveryBlocked(statePath, sessionId)
+		throw recoveryBlockedError(statePath)
 	}
 
-	try {
-		const text = await readBoundedStateText(previousStatePath(statePath))
-		const decoded = decodeStateDocument(text, sessionId)
+	const previous = await readStateDocument(previousStatePath(statePath), sessionId)
+	if (previous.status === "valid") {
+		const decoded = previous.decoded!
 		lastPersistedGenerationByPath.set(statePath, decoded.generation)
 		return decoded.generation
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-			recoveryBlockedPaths.add(statePath)
-			throw new Error(`Refusing to overwrite unreadable previous DCP state at ${statePath}: ${error instanceof Error ? error.message : String(error)}`)
-		}
+	}
+	if (previous.status === "corrupt") {
+		await markRecoveryBlocked(statePath, sessionId)
+		throw recoveryBlockedError(statePath)
 	}
 	return 0
 }
@@ -507,20 +639,27 @@ async function backupCurrentGeneration(statePath: string, sessionId: string): Pr
 		decodeStateDocument(text, sessionId)
 		await atomicWriteStateFile(previousStatePath(statePath), text)
 	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") return
+		if (isMissingStateError(error)) return
+		if (error instanceof DcpStateCorruptionError) {
+			await markRecoveryBlocked(statePath, sessionId)
+			throw recoveryBlockedError(statePath)
+		}
 		throw error
 	}
 }
 
-export async function saveDcpStateToTarget(target: DcpPersistenceTarget, state: DcpState): Promise<void> {
+export async function saveDcpStateToTarget(target: DcpPersistenceTarget, state: DcpState, publication: DcpPublicationOptions = {}): Promise<void> {
 	const statePath = target.statePath
 	const sessionId = target.sessionId || fallbackSessionIdFromPath(statePath)
+	publication.beforePublish?.()
+	// Snapshot before the first await: later changes to live maps/arrays must
+	// not leak into this generation or disagree with its payload hash.
 	const serialized = serializeState(state)
 	validateSerializedDcpState(serialized)
 	const hash = hashSerializedState(serialized)
-	if (hash === lastPersistedStateHashByPath.get(statePath)) return
 	const immutablePayload = JSON.parse(JSON.stringify(serialized)) as SerializedDcpState
 	const payloadHash = payloadSha256(immutablePayload)
+	const knownRevisions = dcpDiskRevisions(state)
 
 	const previous = saveQueueByPath.get(statePath) ?? Promise.resolve()
 	const saveQueue = previous
@@ -528,15 +667,29 @@ export async function saveDcpStateToTarget(target: DcpPersistenceTarget, state: 
 			// Keep later saves moving even if an earlier write failed.
 		})
 		.then(async () => withInterprocessStateLock(statePath, async () => {
-			if (recoveryBlockedPaths.has(statePath)) {
-				throw new Error(`DCP state recovery is blocked for ${statePath}; refusing to overwrite an unrecovered generation`)
+			publication.beforePublish?.()
+			await assertRecoveryIsNotBlocked(statePath)
+			const primary = await readStateDocument(statePath, sessionId)
+			if (primary.status === "corrupt") {
+				await markRecoveryBlocked(statePath, sessionId)
+				throw recoveryBlockedError(statePath)
 			}
-			// The in-memory generation cache is only authoritative inside this
-			// process. Re-read the on-disk generation while holding the cross-process
-			// lock so a writer that committed before us cannot be overwritten from a
-			// stale cached revision.
-			lastPersistedGenerationByPath.delete(statePath)
-			const generation = (await currentGenerationForSave(statePath, sessionId)) + 1
+			const current = primary.status === "valid" ? primary : await readStateDocument(previousStatePath(statePath), sessionId)
+			if (current.status === "corrupt") {
+				await markRecoveryBlocked(statePath, sessionId)
+				throw recoveryBlockedError(statePath)
+			}
+			const diskGeneration = current.decoded?.generation ?? 0
+			const diskHash = current.decoded ? payloadSha256(current.decoded.payload) : ""
+			const expected = knownRevisions.get(statePath)
+			if (expected ? expected.generation !== diskGeneration || expected.payloadHash !== diskHash : diskGeneration !== 0 || diskHash !== "") {
+				throw new DcpPersistenceConflictError(
+					`Stale DCP state revision at ${statePath}: expected generation ${expected?.generation ?? "unobserved"}, found ${diskGeneration}; reload before retry`,
+				)
+			}
+			publication.beforePublish?.()
+			if (payloadHash === diskHash && primary.status === "valid") return
+			const generation = diskGeneration + 1
 			const envelope: DcpStateEnvelope = {
 				kind: "dcp-state",
 				schemaVersion: DCP_STATE_SCHEMA_VERSION,
@@ -547,7 +700,9 @@ export async function saveDcpStateToTarget(target: DcpPersistenceTarget, state: 
 				payload: immutablePayload,
 			}
 			await backupCurrentGeneration(statePath, sessionId)
-			await atomicWriteStateFile(statePath, JSON.stringify(envelope))
+			publication.beforePublish?.()
+			await atomicWriteStateFile(statePath, JSON.stringify(envelope), publication)
+			knownRevisions.set(statePath, { generation, payloadHash })
 			lastPersistedStateHashByPath.set(statePath, hash)
 			lastPersistedGenerationByPath.set(statePath, generation)
 		}))

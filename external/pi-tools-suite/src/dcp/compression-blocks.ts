@@ -1,7 +1,14 @@
-import type { CompressionBlock, CompressionProtectedFragment, DcpState, MessageIdMeta } from "./state.js"
+import type {
+  CompressionBlock,
+  CompressionMember,
+  CompressionProtectedFragment,
+  DcpState,
+  MessageIdMeta,
+} from "./state.js"
 import type { DcpConfig } from "./config.js"
 import { estimateTokens } from "./pruner-metadata.js"
 import { isToolRecordProtected } from "./pruner-tools.js"
+import { compareConversationStableIds, buildExactRangeMembership } from "./conversation-index.js"
 import { createHash } from "node:crypto"
 import { open, realpath } from "node:fs/promises"
 import { isAbsolute, resolve, sep } from "node:path"
@@ -34,6 +41,12 @@ export interface CreateRangeCompressionBlockOptions {
   expandPlaceholders?: boolean
   /** E07 protected fragments prepared with bounded async artifact reads. */
   preparedProtectedFragments?: CompressionProtectedFragment[]
+  /** Exact current-projection source membership prepared before summary generation. */
+  sourceMembers?: CompressionMember[]
+  /** Exact canonical raw mutation membership prepared with sourceMembers. */
+  mutationMembers?: CompressionMember[]
+  /** Explicit compatibility path for snapshots that predate exact membership. */
+  legacySourceMembership?: true
 }
 
 export interface ResolvedCompressionBoundary {
@@ -42,6 +55,52 @@ export interface ResolvedCompressionBoundary {
 }
 
 export interface ResolvedCompressionAnchor extends ResolvedCompressionBoundary {}
+
+/**
+ * Resolve a model-visible range against the exact latest projection. New
+ * callers must persist this plan with their block instead of reconstructing a
+ * timestamp interval during a later context pass.
+ */
+export function resolveExactRangeMembership(
+  startId: string,
+  endId: string,
+  state: DcpState,
+  messageBody = false,
+): { sourceMembers: CompressionMember[]; mutationMembers: CompressionMember[] } | undefined {
+  const plan = buildExactRangeMembership(
+    state.conversationIndexSnapshot,
+    startId,
+    endId,
+    state,
+    messageBody,
+  )
+  if (!plan) return undefined
+  return {
+    sourceMembers: plan.sourceMembers,
+    mutationMembers: plan.mutationMembers,
+  }
+}
+
+function hasExactMembers(
+  sourceMembers: CompressionMember[] | undefined,
+  mutationMembers: CompressionMember[] | undefined,
+): boolean {
+  const valid = (members: CompressionMember[] | undefined): members is CompressionMember[] =>
+    Array.isArray(members) &&
+    members.length > 0 &&
+    members.every((member) =>
+      typeof member?.stableId === "string" &&
+      member.stableId.length > 0 &&
+      typeof member.hash === "string" &&
+      /^[a-f0-9]{64}$/i.test(member.hash),
+    ) &&
+    new Set(members.map((member) => member.stableId)).size === members.length
+  return valid(sourceMembers) && valid(mutationMembers)
+}
+
+function copyMembers(members: CompressionMember[]): CompressionMember[] {
+  return members.map((member) => ({ stableId: member.stableId, hash: member.hash.toLowerCase() }))
+}
 
 function messageOrdinal(stableId: string | undefined, state: DcpState): number | undefined {
   if (!stableId) return undefined
@@ -54,15 +113,22 @@ function messageOrdinal(stableId: string | undefined, state: DcpState): number |
 }
 
 /**
- * Compare two raw conversation boundaries. Timestamps remain the primary
- * ordering key for legacy state, while persistent mNNN order breaks ties for
- * modern snapshots where multiple adjacent messages can share a timestamp.
+ * Compare two conversation boundaries. Current canonical branch order wins
+ * whenever both stable identities resolve; timestamps are a legacy fallback
+ * only when that exact order is unavailable.
  */
 export function compareCompressionBoundaries(
   left: ResolvedCompressionBoundary,
   right: ResolvedCompressionBoundary,
   state: DcpState,
 ): number {
+  const canonicalOrder = compareConversationStableIds(
+    state.conversationIndexSnapshot,
+    left.stableId,
+    right.stableId,
+    state,
+  )
+  if (canonicalOrder !== undefined) return canonicalOrder
   if (left.timestamp !== right.timestamp) return left.timestamp - right.timestamp
   const leftOrdinal = messageOrdinal(left.stableId, state)
   const rightOrdinal = messageOrdinal(right.stableId, state)
@@ -91,6 +157,31 @@ function rangeBoundaries(
     start: { timestamp: startTimestamp, stableId: ids.startMessageId },
     end: { timestamp: endTimestamp, stableId: ids.endMessageId },
   }
+}
+
+function inferExactMembershipFromBoundaries(
+  startMessageId: string | undefined,
+  endMessageId: string | undefined,
+  state: DcpState,
+  messageBody = false,
+): { sourceMembers: CompressionMember[]; mutationMembers: CompressionMember[] } | undefined {
+  if (!startMessageId || !endMessageId) return undefined
+  const entries = state.conversationIndexSnapshot
+  const aliasFor = (stableId: string): string | undefined => {
+    const direct = entries.find((entry) => entry.stableId === stableId)
+    if (direct?.visibleId) return direct.visibleId
+    if (direct?.blockId !== undefined) return `b${direct.blockId}`
+
+    const block = state.compressionBlocks.find((candidate) =>
+      candidate.active && (candidate.startMessageId === stableId || candidate.endMessageId === stableId),
+    )
+    if (!block) return undefined
+    return entries.some((entry) => entry.blockId === block.id) ? `b${block.id}` : undefined
+  }
+
+  const startId = aliasFor(startMessageId)
+  const endId = aliasFor(endMessageId)
+  return startId && endId ? resolveExactRangeMembership(startId, endId, state, messageBody) : undefined
 }
 
 const BLOCK_PLACEHOLDER_RE = /\(b(\d+)\)|\{block_(\d+)\}/gi
@@ -736,11 +827,19 @@ export function createRangeCompressionBlock(
     validatePlaceholders = true,
     expandPlaceholders = true,
     preparedProtectedFragments = [],
+    sourceMembers: requestedSourceMembers,
+    mutationMembers: requestedMutationMembers,
+    legacySourceMembership,
   } = options
   const defaultAnchor = resolveAnchorBoundary(endTimestamp, state, endMessageId)
   const anchorTimestamp = requestedAnchorTimestamp ?? defaultAnchor.timestamp
   const anchorMessageId = requestedAnchorMessageId ?? defaultAnchor.stableId
   const ids = { startMessageId, endMessageId }
+  const inferredMembership = !requestedSourceMembers && !requestedMutationMembers
+    ? inferExactMembershipFromBoundaries(startMessageId, endMessageId, state, replacementMode === "message-body")
+    : undefined
+  const sourceMembers = requestedSourceMembers ?? inferredMembership?.sourceMembers
+  const mutationMembers = requestedMutationMembers ?? inferredMembership?.mutationMembers
 
   if (compareCompressionBoundaries(
     { timestamp: startTimestamp, stableId: startMessageId },
@@ -776,6 +875,13 @@ export function createRangeCompressionBlock(
     throw new Error(
       `Compression range partially overlaps existing block(s): ${blockList}. ` +
       `Select the whole block or choose non-overlapping boundaries.${freeHint}`,
+    )
+  }
+
+  if (version === 2 && !legacySourceMembership && !hasExactMembers(sourceMembers, mutationMembers)) {
+    throw new Error(
+      "Modern compression requires exact canonical source and mutation membership. " +
+      "Refresh the current DCP snapshot and retry with visible IDs.",
     )
   }
 
@@ -839,6 +945,9 @@ export function createRangeCompressionBlock(
     mode,
     version,
     replacementMode,
+    sourceMembers: hasExactMembers(sourceMembers, mutationMembers) ? copyMembers(sourceMembers!) : undefined,
+    mutationMembers: hasExactMembers(sourceMembers, mutationMembers) ? copyMembers(mutationMembers!) : undefined,
+    legacySourceMembership,
     protectedFragments,
   }
 
