@@ -123,6 +123,11 @@ must become a byte-stable prefix again on the following request.
 - Any other extension that rewrites old provider payload items can still break
   continuation independently of DCP.
 - Intentional DCP history rewrites still incur one provider-cache rebuild.
+- Emergency mid-turn compression is such an intentional rewrite. To avoid
+  touching the in-flight head, its range candidate excludes the current user
+  request and retains the newest assistant group plus the configured recent
+  complete tool pairs; a later assistant response is used as evidence that the
+  older selected prefix belonged to an already-completed provider transaction.
 
 ## Evidence
 

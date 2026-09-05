@@ -37,6 +37,56 @@ export interface ResolvedCompressionBoundary {
 
 export interface ResolvedCompressionAnchor extends ResolvedCompressionBoundary {}
 
+function messageOrdinal(stableId: string | undefined, state: DcpState): number | undefined {
+  if (!stableId) return undefined
+  const visibleId = state.messageIdsByStableId.get(stableId) ??
+    [...state.messageMetaSnapshot.entries()].find(([, meta]) => meta.stableId === stableId)?.[0]
+  const match = visibleId?.match(/^m(\d+)$/i)
+  if (!match) return undefined
+  const ordinal = Number.parseInt(match[1]!, 10)
+  return Number.isFinite(ordinal) ? ordinal : undefined
+}
+
+/**
+ * Compare two raw conversation boundaries. Timestamps remain the primary
+ * ordering key for legacy state, while persistent mNNN order breaks ties for
+ * modern snapshots where multiple adjacent messages can share a timestamp.
+ */
+export function compareCompressionBoundaries(
+  left: ResolvedCompressionBoundary,
+  right: ResolvedCompressionBoundary,
+  state: DcpState,
+): number {
+  if (left.timestamp !== right.timestamp) return left.timestamp - right.timestamp
+  const leftOrdinal = messageOrdinal(left.stableId, state)
+  const rightOrdinal = messageOrdinal(right.stableId, state)
+  if (leftOrdinal !== undefined && rightOrdinal !== undefined && leftOrdinal !== rightOrdinal) {
+    return leftOrdinal - rightOrdinal
+  }
+  return 0
+}
+
+export function isCompressionBoundaryWithinRange(
+  boundary: ResolvedCompressionBoundary,
+  start: ResolvedCompressionBoundary,
+  end: ResolvedCompressionBoundary,
+  state: DcpState,
+): boolean {
+  return compareCompressionBoundaries(boundary, start, state) >= 0 &&
+    compareCompressionBoundaries(boundary, end, state) <= 0
+}
+
+function rangeBoundaries(
+  startTimestamp: number,
+  endTimestamp: number,
+  ids: { startMessageId?: string; endMessageId?: string } = {},
+): { start: ResolvedCompressionBoundary; end: ResolvedCompressionBoundary } {
+  return {
+    start: { timestamp: startTimestamp, stableId: ids.startMessageId },
+    end: { timestamp: endTimestamp, stableId: ids.endMessageId },
+  }
+}
+
 const BLOCK_PLACEHOLDER_RE = /\(b(\d+)\)|\{block_(\d+)\}/gi
 const MAX_DIAGNOSTIC_IDS = 24
 
@@ -164,28 +214,50 @@ export function findCoveredAndPartialBlocks(
   startTimestamp: number,
   endTimestamp: number,
   state: DcpState,
+  boundaries: { startMessageId?: string; endMessageId?: string } = {},
 ): { coveredBlocks: CompressionBlock[]; partialBlocks: CompressionBlock[] } {
   const coveredBlocks: CompressionBlock[] = []
   const partialBlocks: CompressionBlock[] = []
+  const requestedStart = { timestamp: startTimestamp, stableId: boundaries.startMessageId }
+  const requestedEnd = { timestamp: endTimestamp, stableId: boundaries.endMessageId }
 
   for (const existing of state.compressionBlocks) {
     if (!existing.active) continue
     if (!Number.isFinite(existing.startTimestamp) || !Number.isFinite(existing.endTimestamp)) continue
 
+    const existingStart = { timestamp: existing.startTimestamp, stableId: existing.startMessageId }
+    const existingEnd = { timestamp: existing.endTimestamp, stableId: existing.endMessageId }
+
     const overlaps =
-      startTimestamp <= existing.endTimestamp &&
-      existing.startTimestamp <= endTimestamp
+      compareCompressionBoundaries(requestedStart, existingEnd, state) <= 0 &&
+      compareCompressionBoundaries(existingStart, requestedEnd, state) <= 0
     if (!overlaps) continue
 
     const fullyCovered =
-      startTimestamp <= existing.startTimestamp &&
-      existing.endTimestamp <= endTimestamp
+      compareCompressionBoundaries(requestedStart, existingStart, state) <= 0 &&
+      compareCompressionBoundaries(existingEnd, requestedEnd, state) <= 0
 
     if (fullyCovered) coveredBlocks.push(existing)
     else partialBlocks.push(existing)
   }
 
   return { coveredBlocks, partialBlocks }
+}
+
+function firstAddressableRawIdAfterBlock(block: CompressionBlock, state: DcpState): string | undefined {
+  const endOrdinal = messageOrdinal(block.endMessageId, state)
+  if (endOrdinal === undefined) return undefined
+
+  let best: { id: string; ordinal: number } | undefined
+  for (const [id, meta] of state.messageMetaSnapshot) {
+    if (meta.blockId !== undefined) continue
+    const match = id.match(/^m(\d+)$/i)
+    if (!match) continue
+    const ordinal = Number.parseInt(match[1]!, 10)
+    if (!Number.isFinite(ordinal) || ordinal <= endOrdinal) continue
+    if (!best || ordinal < best.ordinal) best = { id, ordinal }
+  }
+  return best?.id
 }
 
 export function getMessageMeta(id: string, state: DcpState): MessageIdMeta | undefined {
@@ -207,17 +279,24 @@ export function appendProtectedPromptInfo(
   endTimestamp: number,
   state: DcpState,
   config: DcpConfig,
+  ids: { startMessageId?: string; endMessageId?: string } = {},
 ): string {
   if (!config.compress.protectTags) return summary
 
   const protectedTexts: string[] = []
   const seen = new Set<string>()
+  const boundaries = rangeBoundaries(startTimestamp, endTimestamp, ids)
 
   for (const meta of state.messageMetaSnapshot.values()) {
     if (meta.role !== "user") continue
     if (meta.blockId !== undefined) continue
     if (!Number.isFinite(meta.timestamp)) continue
-    if (meta.timestamp < startTimestamp || meta.timestamp > endTimestamp) continue
+    if (!isCompressionBoundaryWithinRange(
+      { timestamp: meta.timestamp, stableId: meta.stableId },
+      boundaries.start,
+      boundaries.end,
+      state,
+    )) continue
 
     for (const text of extractProtectTagTexts(meta.text ?? "")) {
       if (seen.has(text)) continue
@@ -238,17 +317,24 @@ export function appendProtectedUserMessages(
   endTimestamp: number,
   state: DcpState,
   enabled: boolean,
+  ids: { startMessageId?: string; endMessageId?: string } = {},
 ): string {
   if (!enabled) return summary
 
   const userTexts: string[] = []
   const seen = new Set<string>()
+  const boundaries = rangeBoundaries(startTimestamp, endTimestamp, ids)
 
   for (const meta of state.messageMetaSnapshot.values()) {
     if (meta.role !== "user") continue
     if (meta.blockId !== undefined) continue
     if (!Number.isFinite(meta.timestamp)) continue
-    if (meta.timestamp < startTimestamp || meta.timestamp > endTimestamp) continue
+    if (!isCompressionBoundaryWithinRange(
+      { timestamp: meta.timestamp, stableId: meta.stableId },
+      boundaries.start,
+      boundaries.end,
+      state,
+    )) continue
 
     const text = meta.text?.trim()
     if (!text || seen.has(text)) continue
@@ -297,14 +383,21 @@ function appendProtectedToolOutputs(
   endTimestamp: number,
   state: DcpState,
   config: DcpConfig,
+  ids: { startMessageId?: string; endMessageId?: string } = {},
 ): string {
   const protectedOutputs: string[] = []
   const seenToolCallIds = new Set<string>()
+  const boundaries = rangeBoundaries(startTimestamp, endTimestamp, ids)
 
   for (const meta of state.messageMetaSnapshot.values()) {
     if (meta.blockId !== undefined) continue
     if (!Number.isFinite(meta.timestamp)) continue
-    if (meta.timestamp < startTimestamp || meta.timestamp > endTimestamp) continue
+    if (!isCompressionBoundaryWithinRange(
+      { timestamp: meta.timestamp, stableId: meta.stableId },
+      boundaries.start,
+      boundaries.end,
+      state,
+    )) continue
     if (meta.role !== "toolResult" && meta.role !== "bashExecution") continue
 
     const toolCallId = meta.toolCallId
@@ -338,12 +431,19 @@ export function estimateVisibleRangeTokens(
   endTimestamp: number,
   coveredBlocks: CompressionBlock[],
   state: DcpState,
+  ids: { startMessageId?: string; endMessageId?: string } = {},
 ): number {
   let total = 0
+  const boundaries = rangeBoundaries(startTimestamp, endTimestamp, ids)
   for (const meta of state.messageMetaSnapshot.values()) {
     if (meta.blockId !== undefined) continue
     if (!Number.isFinite(meta.timestamp)) continue
-    if (meta.timestamp < startTimestamp || meta.timestamp > endTimestamp) continue
+    if (!isCompressionBoundaryWithinRange(
+      { timestamp: meta.timestamp, stableId: meta.stableId },
+      boundaries.start,
+      boundaries.end,
+      state,
+    )) continue
     total += Math.max(0, Math.round(meta.tokenEstimate ?? 0))
   }
   for (const block of coveredBlocks) {
@@ -423,22 +523,25 @@ export function resolveAnchorTimestamp(endTimestamp: number, state: DcpState): n
   return resolveAnchorBoundary(endTimestamp, state).timestamp
 }
 
-export function resolveAnchorBoundary(endTimestamp: number, state: DcpState): ResolvedCompressionAnchor {
-  let anchor: number | null = null
-  let stableId: string | undefined
+export function resolveAnchorBoundary(
+  endTimestamp: number,
+  state: DcpState,
+  endMessageId?: string,
+): ResolvedCompressionAnchor {
+  const endBoundary = { timestamp: endTimestamp, stableId: endMessageId }
+  let anchor: ResolvedCompressionAnchor | null = null
   for (const meta of state.messageMetaSnapshot.values()) {
-    const ts = meta.timestamp
-    if (ts > endTimestamp && (anchor === null || ts < anchor)) {
-      anchor = ts
-      stableId = meta.stableId
-    }
+    if (meta.blockId !== undefined || !Number.isFinite(meta.timestamp)) continue
+    const candidate = { timestamp: meta.timestamp, stableId: meta.stableId }
+    if (compareCompressionBoundaries(candidate, endBoundary, state) <= 0) continue
+    if (anchor === null || compareCompressionBoundaries(candidate, anchor, state) < 0) anchor = candidate
   }
   if (anchor === null) {
     for (const ts of state.messageIdSnapshot.values()) {
-      if (ts > endTimestamp && (anchor === null || ts < anchor)) anchor = ts
+      if (ts > endTimestamp && (anchor === null || ts < anchor.timestamp)) anchor = { timestamp: ts }
     }
   }
-  return { timestamp: anchor ?? endTimestamp + 1, stableId }
+  return anchor ?? { timestamp: endTimestamp + 1 }
 }
 
 export function createRangeCompressionBlock(
@@ -453,15 +556,23 @@ export function createRangeCompressionBlock(
     endMessageId,
     state,
     config,
-    anchorTimestamp = resolveAnchorBoundary(endTimestamp, state).timestamp,
-    anchorMessageId,
+    anchorTimestamp: requestedAnchorTimestamp,
+    anchorMessageId: requestedAnchorMessageId,
     createdByToolCallId,
     mode = "range",
     validatePlaceholders = true,
     expandPlaceholders = true,
   } = options
+  const defaultAnchor = resolveAnchorBoundary(endTimestamp, state, endMessageId)
+  const anchorTimestamp = requestedAnchorTimestamp ?? defaultAnchor.timestamp
+  const anchorMessageId = requestedAnchorMessageId ?? defaultAnchor.stableId
+  const ids = { startMessageId, endMessageId }
 
-  if (startTimestamp > endTimestamp) {
+  if (compareCompressionBoundaries(
+    { timestamp: startTimestamp, stableId: startMessageId },
+    { timestamp: endTimestamp, stableId: endMessageId },
+    state,
+  ) > 0) {
     throw new Error("Compression range start must appear before end in the conversation")
   }
 
@@ -476,13 +587,21 @@ export function createRangeCompressionBlock(
     startTimestamp,
     endTimestamp,
     state,
+    { startMessageId, endMessageId },
   )
 
   if (partialBlocks.length > 0) {
     const blockList = partialBlocks.map((block) => `b${block.id} "${block.topic}"`).join(", ")
+    const freeHints = partialBlocks
+      .map((block) => {
+        const firstFreeId = firstAddressableRawIdAfterBlock(block, state)
+        return firstFreeId ? `first raw ID after b${block.id} is ${firstFreeId}` : undefined
+      })
+      .filter((hint): hint is string => typeof hint === "string")
+    const freeHint = freeHints.length > 0 ? ` ${freeHints.join("; ")}.` : ""
     throw new Error(
       `Compression range partially overlaps existing block(s): ${blockList}. ` +
-      "Select the whole block or choose non-overlapping boundaries.",
+      `Select the whole block or choose non-overlapping boundaries.${freeHint}`,
     )
   }
 
@@ -500,6 +619,7 @@ export function createRangeCompressionBlock(
       endTimestamp,
       state,
       config.compress.protectUserMessages,
+      ids,
     )
     : placeholderSummary
 
@@ -509,6 +629,7 @@ export function createRangeCompressionBlock(
     endTimestamp,
     state,
     config,
+    ids,
   )
 
   const expandedSummary = appendProtectedToolOutputs(
@@ -517,6 +638,7 @@ export function createRangeCompressionBlock(
     endTimestamp,
     state,
     config,
+    ids,
   )
 
   const block: CompressionBlock = {
@@ -544,7 +666,7 @@ export function createRangeCompressionBlock(
 
   return {
     block,
-    removedTokenEstimate: estimateVisibleRangeTokens(startTimestamp, endTimestamp, coveredBlocks, state),
+    removedTokenEstimate: estimateVisibleRangeTokens(startTimestamp, endTimestamp, coveredBlocks, state, ids),
     summaryTokenEstimate: Math.max(0, Math.round(block.summaryTokenEstimate ?? 0)),
   }
 }

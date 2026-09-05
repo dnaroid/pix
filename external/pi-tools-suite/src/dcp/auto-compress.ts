@@ -20,8 +20,11 @@ import type { DcpConfig } from "./config.js"
 import type { CompressionCandidate } from "./pruner-types.js"
 import {
 	createRangeCompressionBlock,
+	isCompressionBoundaryWithinRange,
 	resolveAnchorBoundary,
+	resolveIdToBoundary,
 } from "./compression-blocks.js"
+import { stableMessageKeys } from "./pruner-message-ids.js"
 
 /**
  * Pure decision: should the auto-compress fallback fire this pass?
@@ -32,7 +35,8 @@ import {
  *    nudges (`consecutiveIgnoredStrongNudges > patience` — the model gets
  *    `patience` genuine strong chances before DCP takes over),
  *  - context is still above the emergency threshold (maxContextPercent),
- *  - a safe compression candidate exists outside the recent turns.
+ *  - a safe compression candidate exists, either outside the recent user
+ *    turns or as an emergency committed prefix inside a marathon turn.
  */
 export function decideAutoCompress(
 	state: DcpState,
@@ -297,23 +301,25 @@ export async function createAutoCompressionBlock(
 	const { candidate, topic, state, config, messages, modelRegistry, signal } = options
 	const settings = config.compress.autoCompress
 
-	// Resolve candidate message IDs (mNNN) to timestamps via the snapshot.
-	const startMeta = state.messageMetaSnapshot.get(candidate.startId)
-	const endMeta = state.messageMetaSnapshot.get(candidate.endId)
-	const rawStart = startMeta?.timestamp ?? state.messageIdSnapshot.get(candidate.startId)
-	const rawEnd = endMeta?.timestamp ?? state.messageIdSnapshot.get(candidate.endId)
-
-	if (!Number.isFinite(rawStart) || !Number.isFinite(rawEnd)) {
+	const startBoundary = resolveIdToBoundary(candidate.startId, "startTimestamp", state)
+	const endBoundary = resolveIdToBoundary(candidate.endId, "endTimestamp", state)
+	if (!Number.isFinite(startBoundary.timestamp) || !Number.isFinite(endBoundary.timestamp)) {
 		throw new Error(
 			`Auto-compress candidate ${candidate.startId}..${candidate.endId} did not resolve to finite timestamps`,
 		)
 	}
-	const startTimestamp: number = rawStart as number
-	const endTimestamp: number = rawEnd as number
+	const startTimestamp = startBoundary.timestamp
+	const endTimestamp = endBoundary.timestamp
 
-	const messagesInRange = messages.filter(
-		(msg) =>
-			Number.isFinite(msg?.timestamp) && msg.timestamp >= startTimestamp && msg.timestamp <= endTimestamp,
+	const stableKeys = stableMessageKeys(messages)
+	const messagesInRange = messages.filter((msg, index) =>
+		Number.isFinite(msg?.timestamp) &&
+		isCompressionBoundaryWithinRange(
+			{ timestamp: msg.timestamp, stableId: stableKeys[index] },
+			startBoundary,
+			endBoundary,
+			state,
+		),
 	)
 
 	// Summary source selection. `summaryMode` distinguishes three cases so the
@@ -350,14 +356,14 @@ export async function createAutoCompressionBlock(
 		}
 	}
 
-	const anchor = resolveAnchorBoundary(endTimestamp, state)
+	const anchor = resolveAnchorBoundary(endTimestamp, state, endBoundary.stableId)
 	const created = createRangeCompressionBlock({
 		topic,
 		summary,
 		startTimestamp,
 		endTimestamp,
-		startMessageId: startMeta?.stableId,
-		endMessageId: endMeta?.stableId,
+		startMessageId: startBoundary.stableId,
+		endMessageId: endBoundary.stableId,
 		anchorTimestamp: anchor.timestamp,
 		anchorMessageId: anchor.stableId,
 		createdByToolCallId: undefined,

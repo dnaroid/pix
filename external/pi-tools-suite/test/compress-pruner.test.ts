@@ -14,6 +14,7 @@ import {
   applyAnchoredNudges,
   clearDcpNudgeAnchors,
   detectCompressionCandidate,
+  detectEmergencyCompressionCandidate,
   detectMessageCompressionCandidates,
   emergencyCurrentTurnMessageCandidates,
   emergencyPressureState,
@@ -39,6 +40,7 @@ import {
   type ToolRecord,
 } from "../src/dcp/state.js";
 import { stableMessageKeys } from "../src/dcp/pruner-message-ids.js";
+import { applyCompressionBlocks } from "../src/dcp/pruner-compression-blocks.js";
 import {
   stripStaleDcpMetadataFromAssistantMessage,
 } from "../src/dcp/pruner-metadata.js";
@@ -1324,6 +1326,113 @@ describe("DCP pruning effectiveness", () => {
     expect(protectedState.compressionBlocks[0]?.summary).toContain("critical user intent");
   });
 
+  test("range and message compression accept the first raw ID after a block with the same timestamp", async () => {
+    const makeAdjacentState = () => {
+      const state = createState();
+      const existing = block(1, 1, 10);
+      existing.startMessageId = "id:001";
+      existing.endMessageId = "id:170";
+      existing.anchorTimestamp = 10;
+      existing.anchorMessageId = "id:171";
+      state.compressionBlocks = [existing];
+      state.nextBlockId = 2;
+
+      for (const [stableId, visibleId] of [
+        ["id:001", "m001"],
+        ["id:170", "m170"],
+        ["id:171", "m171"],
+        ["id:172", "m172"],
+        ["id:173", "m173"],
+      ] as const) {
+        state.messageIdsByStableId.set(stableId, visibleId);
+      }
+      state.messageIdSnapshot.set("m171", 10);
+      state.messageIdSnapshot.set("m172", 11);
+      state.messageIdSnapshot.set("m173", 11);
+      state.messageMetaSnapshot.set("m171", {
+        timestamp: 10,
+        stableId: "id:171",
+        role: "assistant",
+        tokenEstimate: 100,
+      });
+      state.messageMetaSnapshot.set("m172", {
+        timestamp: 11,
+        stableId: "id:172",
+        role: "assistant",
+        tokenEstimate: 100,
+      });
+      state.messageMetaSnapshot.set("m173", {
+        timestamp: 11,
+        stableId: "id:173",
+        role: "assistant",
+        tokenEstimate: 900,
+      });
+      return state;
+    };
+
+    const rangeState = makeAdjacentState();
+    let rangeTool: any;
+    registerCompressTool(
+      { registerTool: (tool: any) => { rangeTool = tool } } as any,
+      rangeState,
+      config(),
+    );
+    await rangeTool.execute(
+      "range-after-block",
+      {
+        topic: "Adjacent range",
+        ranges: [{ startId: "m171", endId: "m172", summary: "new adjacent work" }],
+      },
+      undefined,
+      undefined,
+      { ui: { notify() {} } },
+    );
+    expect(rangeState.compressionBlocks.find((entry) => entry.id === 1)?.active).toBe(true);
+    expect(rangeState.compressionBlocks.find((entry) => entry.id === 2)).toMatchObject({
+      startMessageId: "id:171",
+      endMessageId: "id:172",
+      anchorMessageId: "id:173",
+      active: true,
+    });
+
+    const materialized = applyCompressionBlocks([
+      { id: "001", role: "assistant", content: "old start", timestamp: 1 },
+      { id: "170", role: "assistant", content: "old end", timestamp: 10 },
+      { id: "171", role: "assistant", content: "adjacent start", timestamp: 10 },
+      { id: "172", role: "assistant", content: "adjacent end", timestamp: 11 },
+      { id: "173", role: "assistant", content: "live head must survive", timestamp: 11 },
+    ], rangeState);
+    expect(materialized.map(contentText)).toEqual([
+      expect.stringContaining("[Compressed section: Block 1]"),
+      expect.stringContaining("[Compressed section: Adjacent range]"),
+      "live head must survive",
+    ]);
+
+    const messageState = makeAdjacentState();
+    let messageTool: any;
+    registerCompressTool(
+      { registerTool: (tool: any) => { messageTool = tool } } as any,
+      messageState,
+      config(),
+    );
+    await messageTool.execute(
+      "message-after-block",
+      {
+        topic: "Adjacent message",
+        messages: [{ messageId: "m171", summary: "first free raw message" }],
+      },
+      undefined,
+      undefined,
+      { ui: { notify() {} } },
+    );
+    expect(messageState.compressionBlocks.find((entry) => entry.id === 2)).toMatchObject({
+      startMessageId: "id:171",
+      endMessageId: "id:171",
+      mode: "message",
+      active: true,
+    });
+  });
+
   test("compress tool supports individual message compression and protect tags", async () => {
     const state = createState();
     const cfg = config({ compress: { protectTags: true } as any });
@@ -1525,6 +1634,88 @@ describe("DCP pruning effectiveness", () => {
     expect(state.prunedToolIds).toEqual(new Set(["eligible"]));
     expect(state.prunedToolIds.has("unseen")).toBe(false);
     expect(providerMessages.map(contentText).join("\n")).toContain("active request");
+  });
+
+  test("emergency range candidate unblocks auto-compress inside a single marathon user turn", async () => {
+    const state = createState();
+    const cfg = config({
+      compress: {
+        maxContextPercent: 0.65,
+        autoCandidates: {
+          keepRecentTurns: 1,
+          minMessages: 6,
+          minTokens: 100,
+        },
+        autoCompress: {
+          enabled: true,
+          patience: 2,
+          summarizerModel: [],
+        },
+      } as any,
+      strategies: {
+        emergencyCurrentTurnPruning: {
+          keepRecentToolPairs: 8,
+          minOutputTokens: 500,
+        },
+      },
+    });
+    const messages = [textMessage("user", "single autonomous task " + "u".repeat(11_000), 1)];
+    for (let index = 0; index < 100; index++) {
+      const id = `marathon-${index}`;
+      const timestamp = 10 + index * 2;
+      messages.push(assistantToolCall(id, timestamp));
+      messages.push(toolResult(id, "read", `raw-${id}-` + "x".repeat(4_000), timestamp + 1));
+      state.toolCalls.set(id, toolRecord(id, "read", `read::${id}`, 1_000, 1));
+    }
+
+    const providerMessages = applyPruning(messages, state, cfg);
+    expect(state.providerSeenToolIds.size).toBe(0);
+    expect(detectCompressionCandidate(providerMessages, state, cfg, 0.90)).toBe(null);
+
+    const outputSelection = analyzeEmergencyCurrentTurn(providerMessages, state, cfg);
+    expect(outputSelection.stats.totalPairs).toBe(100);
+    expect(outputSelection.stats.eligiblePairs).toBe(0);
+    expect(outputSelection.stats.preservedUnseenPairs).toBeGreaterThan(90);
+
+    expect(detectEmergencyCompressionCandidate(
+      providerMessages,
+      state,
+      cfg,
+      0.65,
+      0.65,
+    )).toBe(null);
+    const emergencyCandidate = detectEmergencyCompressionCandidate(
+      providerMessages,
+      state,
+      cfg,
+      0.90,
+      0.65,
+    );
+    expect(emergencyCandidate).not.toBe(null);
+    expect(emergencyCandidate?.messageCount).toBeGreaterThan(0);
+    expect(emergencyCandidate?.estimatedTokens).toBeGreaterThan(0);
+    expect(emergencyCandidate?.reason).toContain("emergency same-turn committed prefix");
+    expect(state.messageMetaSnapshot.get(emergencyCandidate!.startId)?.role).not.toBe("user");
+
+    state.consecutiveIgnoredStrongNudges = 3;
+    expect(decideAutoCompress(state, cfg, 0.90, 0.65, emergencyCandidate)).toEqual({
+      shouldFire: true,
+      reason: "ignored-strongs",
+    });
+
+    const autoResult = await createAutoCompressionBlock({
+      candidate: emergencyCandidate!,
+      topic: "Marathon fallback",
+      state,
+      config: cfg,
+      messages: providerMessages,
+    });
+    expect(autoResult.summaryMode).toBe("programmatic");
+    expect(autoResult.removedTokenEstimate).toBeGreaterThan(0);
+    expect(state.compressionBlocks.find((entry) => entry.id === autoResult.blockId)).toMatchObject({
+      active: true,
+      topic: "Marathon fallback",
+    });
   });
 
   test("emergency hard pressure is independent of a higher model threshold", () => {
@@ -2686,8 +2877,9 @@ describe("DCP pruning effectiveness", () => {
         .split("\n")
         .map((line) => JSON.parse(line));
       const events = debugEntries.map((entry) => entry.event);
-      expect(events).toContain("context.strong_nudge_without_candidate");
-      expect(events).toContain("compress.auto_blocked_no_candidate");
+      expect(events).toContain("context.emergency_compression_candidate");
+      expect(events).not.toContain("context.strong_nudge_without_candidate");
+      expect(events).not.toContain("compress.auto_blocked_no_candidate");
       expect(events).toContain("prune.emergency_current_turn");
       const pruneEvent = debugEntries.find((entry) => entry.event === "prune.emergency_current_turn");
       expect(pruneEvent.targetMet || pruneEvent.eligibleExhausted).toBe(true);
@@ -2999,6 +3191,55 @@ describe("DCP pruning effectiveness", () => {
     expect(state.compressionBlocks[0]?.active).toBe(true);
     expect(state.compressionBlocks[0]?.summary).toContain("Earlier work");
     expect(state.compressionBlocks[0]?.summary).toContain("Auto-compressed by DCP");
+  });
+
+  test("DCP auto-compress excludes a same-timestamp live head from its summary input", async () => {
+    const cfg = config({
+      compress: {
+        autoCompress: { enabled: true, patience: 2, summarizerModel: [], timeoutMs: 1000 },
+      } as any,
+    });
+    const state = createState();
+    const messages = [
+      { id: "171", role: "assistant", content: [{ type: "toolCall", id: "a", name: "range_start", input: {} }], timestamp: 10 },
+      { id: "172", role: "assistant", content: [{ type: "toolCall", id: "b", name: "range_end", input: {} }], timestamp: 11 },
+      { id: "173", role: "assistant", content: [{ type: "toolCall", id: "c", name: "LIVE_HEAD_TOOL", input: {} }], timestamp: 11 },
+    ];
+    for (const [stableId, visibleId, timestamp] of [
+      ["id:171", "m171", 10],
+      ["id:172", "m172", 11],
+      ["id:173", "m173", 11],
+    ] as const) {
+      state.messageIdsByStableId.set(stableId, visibleId);
+      state.messageIdSnapshot.set(visibleId, timestamp);
+      state.messageMetaSnapshot.set(visibleId, {
+        timestamp,
+        stableId,
+        role: "assistant",
+        tokenEstimate: 100,
+      });
+    }
+
+    const result = await createAutoCompressionBlock({
+      candidate: {
+        startId: "m171",
+        endId: "m172",
+        messageCount: 2,
+        estimatedTokens: 200,
+        includedBlockIds: [],
+        reason: "same timestamp boundary regression",
+      },
+      topic: "Stable boundary summary",
+      state,
+      config: cfg,
+      messages,
+    });
+
+    expect(result.summaryMode).toBe("programmatic");
+    expect(state.compressionBlocks[0]?.summary).toContain("range_start×1");
+    expect(state.compressionBlocks[0]?.summary).toContain("range_end×1");
+    expect(state.compressionBlocks[0]?.summary).not.toContain("LIVE_HEAD_TOOL");
+    expect(state.compressionBlocks[0]?.anchorMessageId).toBe("id:173");
   });
 
   test("DCP context transform emits context-limit nudges with concrete candidates", async () => {

@@ -5,11 +5,12 @@ import { stableMessageKeys } from "./pruner-message-ids.js";
 import { writeDcpDebugLog } from "./debug-log.js";
 
 function findBoundaryIndex(messages: any[], stableId: string | undefined, timestamp: number): number {
-  const stableKeys = stableId ? stableMessageKeys(messages) : [];
-  return messages.findIndex((message, index) => {
-    if (stableId && stableKeys[index] === stableId) return true;
-    return message.timestamp === timestamp;
-  });
+  if (stableId) {
+    const stableKeys = stableMessageKeys(messages);
+    const exactIndex = stableKeys.indexOf(stableId);
+    if (exactIndex !== -1) return exactIndex;
+  }
+  return messages.findIndex((message) => message.timestamp === timestamp);
 }
 
 export interface ReconcileInheritedBlocksResult {
@@ -302,11 +303,17 @@ export function applyCompressionBlocks(messages: any[], state: DcpState): any[] 
     // Estimate tokens added by the summary
     const addedTokens = estimateMessageTokens(syntheticMsg);
 
-    // Insert the synthetic message
-    messages.push(syntheticMsg);
-
-    // Re-sort by timestamp
-    messages.sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
+    // Insert structurally before the first raw message after the compressed
+    // range. Stable anchor identity wins over timestamp equality; timestamp is
+    // retained only as the legacy fallback for older persisted blocks.
+    let insertIndex = findBoundaryIndex(messages, block.anchorMessageId, block.anchorTimestamp);
+    if (insertIndex === -1) {
+      insertIndex = messages.findIndex((message) =>
+        Number.isFinite(message?.timestamp) && message.timestamp >= block.anchorTimestamp,
+      );
+    }
+    if (insertIndex === -1) messages.push(syntheticMsg);
+    else messages.splice(insertIndex, 0, syntheticMsg);
 
     // Update tokens saved exactly once per compression block.
     if (!state.accountedCompressionBlockIds.has(block.id)) {

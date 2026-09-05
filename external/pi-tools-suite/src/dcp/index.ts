@@ -31,6 +31,7 @@ import {
 	injectNudge,
 	getNudgeType,
 	detectCompressionCandidate,
+	detectEmergencyCompressionCandidate,
 	detectMessageCompressionCandidates,
 	analyzeEmergencyCurrentTurn,
 	emergencyPressureState,
@@ -356,6 +357,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 			}, ctx)
 		}
 		let candidate = null as ReturnType<typeof detectCompressionCandidate>
+		let emergencyCompressionCandidate = null as ReturnType<typeof detectEmergencyCompressionCandidate>
 		let messageCandidates = [] as ReturnType<typeof detectMessageCompressionCandidates>
 		let emergencySelection = null as ReturnType<typeof analyzeEmergencyCurrentTurn> | null
 		let emergencyPruneResult = null as ReturnType<typeof pruneEmergencyCurrentTurn> | null
@@ -513,6 +515,32 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 					emergencySelection,
 					effectiveConfig,
 				)
+			}
+
+			if (contextLimitReached && !manualEmergencyOnly && candidate === null) {
+				emergencyCompressionCandidate = detectEmergencyCompressionCandidate(
+					prunedMessages,
+					state,
+					effectiveConfig,
+					contextPercent,
+					thresholds.maxContextPercent,
+				)
+				if (emergencyCompressionCandidate) {
+					writeDcpDebugLog(effectiveConfig, "context.emergency_compression_candidate", {
+						contextPercent,
+						thresholds,
+						candidate: emergencyCompressionCandidate,
+						...(emergencySelection?.stats ?? {}),
+						state: summarizeDcpState(state),
+					}, ctx)
+				}
+			}
+
+			if (
+				emergencySelection &&
+				candidate === null &&
+				emergencyCompressionCandidate === null
+			) {
 				writeDcpDebugLog(effectiveConfig, "context.strong_nudge_without_candidate", {
 					contextPercent,
 					thresholds,
@@ -524,7 +552,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 			}
 
 			let hasCompressionSuggestion =
-				candidate !== null || messageCandidates.length > 0
+				candidate !== null || emergencyCompressionCandidate !== null || messageCandidates.length > 0
 			if (!manualEmergencyOnly && !emergencyPressureReached && !hasCompressionSuggestion) {
 				const clearedAnchors = clearDcpNudgeAnchors(state)
 				if (clearedAnchors > 0) await saveDcpState(ctx, state)
@@ -551,14 +579,15 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 			// nudges while above the emergency threshold, DCP creates a
 			// compression block itself instead of nudging again.
 			if (!manualEmergencyOnly) {
+				const autoCandidate = candidate ?? emergencyCompressionCandidate
 				const autoDecision = decideAutoCompress(
 					state,
 					effectiveConfig,
 					contextPercent,
 					thresholds.maxContextPercent,
-					candidate,
+					autoCandidate,
 				)
-				if (contextLimitReached && candidate === null) {
+				if (contextLimitReached && autoCandidate === null) {
 					writeDcpDebugLog(effectiveConfig, "compress.auto_blocked_no_candidate", {
 						autoCompressEnabled: effectiveConfig.compress.autoCompress.enabled,
 						decisionReason: autoDecision.reason,
@@ -569,10 +598,10 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 						state: summarizeDcpState(state),
 					}, ctx)
 				}
-				if (autoDecision.shouldFire && candidate) {
+				if (autoDecision.shouldFire && autoCandidate) {
 					try {
 						const autoResult = await createAutoCompressionBlock({
-							candidate,
+							candidate: autoCandidate,
 							topic: "Auto-compressed slice",
 							state,
 							config: effectiveConfig,
@@ -594,12 +623,12 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 							summarizerAttempts: autoResult.summarizerAttempts,
 							summaryTokens: autoResult.summaryTokens,
 							removedTokenEstimate: autoResult.removedTokenEstimate,
-							candidate,
+							candidate: autoCandidate,
 							clearedAnchors,
 							state: summarizeDcpState(state),
 						}, ctx)
 						return finishContext("compress.auto", prunedMessages, {
-							candidate,
+							candidate: autoCandidate,
 							messageCandidates,
 							contextPercent,
 							thresholds,
@@ -609,7 +638,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 						writeDcpDebugLog(effectiveConfig, "compress.auto_failed", {
 							trigger: autoDecision.reason,
 							error: error instanceof Error ? error.message : String(error),
-							candidate,
+							candidate: autoCandidate,
 							state: summarizeDcpState(state),
 						}, ctx)
 						// Fall through to normal nudge emission on failure.
@@ -650,7 +679,15 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 					state.consecutiveIgnoredStrongNudges = 0
 					emergencySelection = analyzeEmergencyCurrentTurn(prunedMessages, state, effectiveConfig)
 					messageCandidates = emergencyCurrentTurnMessageCandidates(emergencySelection, effectiveConfig)
-					hasCompressionSuggestion = candidate !== null || messageCandidates.length > 0
+					emergencyCompressionCandidate = detectEmergencyCompressionCandidate(
+						prunedMessages,
+						state,
+						effectiveConfig,
+						contextPercent,
+						thresholds.maxContextPercent,
+					)
+					hasCompressionSuggestion =
+						candidate !== null || emergencyCompressionCandidate !== null || messageCandidates.length > 0
 					await saveDcpState(ctx, state)
 					writeDcpDebugLog(effectiveConfig, "prune.emergency_current_turn", {
 						trigger: hardEmergencyReached ? "hard-context-percent" : "ignored-emergency-reminders",
@@ -679,7 +716,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 			if (nudgeType && !manualEmergencyOnly && (hasCompressionSuggestion || emergencyPressureReached)) {
 				const nudgeText = appendConcreteNudgeGuidance(
 					baseNudgeText(nudgeType),
-					candidate,
+					candidate ?? emergencyCompressionCandidate,
 					messageCandidates,
 					state,
 				)
@@ -739,7 +776,12 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 			)
 		}
 		const nudgeApplication = applyAnchoredNudges(prunedMessages, state, (anchor) =>
-			appendConcreteNudgeGuidance(baseNudgeText(anchor.type), candidate, messageCandidates, state),
+			appendConcreteNudgeGuidance(
+				baseNudgeText(anchor.type),
+				candidate ?? emergencyCompressionCandidate,
+				messageCandidates,
+				state,
+			),
 		)
 		if (state.nudgeAnchors.length !== anchorsBeforeFinalization || nudgeApplication.stateChanged) {
 			await saveDcpState(ctx, state)

@@ -14,6 +14,7 @@ import { COMPRESS_TOOL_DESCRIPTION } from "../tool-descriptions.js"
 import { safeGetContextUsage } from "../context-usage.js"
 import { summarizeDcpState, writeDcpDebugLog } from "./debug-log.js"
 import {
+  compareCompressionBoundaries,
   createRangeCompressionBlock,
   findCoveredAndPartialBlocks,
   formatCompressionIdDiagnostics,
@@ -46,17 +47,29 @@ interface ResolvedRangePlan {
   endMessageId?: string
 }
 
-function validateNonOverlappingRanges(plans: ResolvedRangePlan[]): void {
+function validateNonOverlappingRanges(plans: ResolvedRangePlan[], state: DcpState): void {
   const sorted = [...plans].sort((a, b) =>
-    a.startTimestamp - b.startTimestamp ||
-    a.endTimestamp - b.endTimestamp,
+    compareCompressionBoundaries(
+      { timestamp: a.startTimestamp, stableId: a.startMessageId },
+      { timestamp: b.startTimestamp, stableId: b.startMessageId },
+      state,
+    ) ||
+    compareCompressionBoundaries(
+      { timestamp: a.endTimestamp, stableId: a.endMessageId },
+      { timestamp: b.endTimestamp, stableId: b.endMessageId },
+      state,
+    ),
   )
   const issues: string[] = []
 
   for (let i = 1; i < sorted.length; i++) {
     const previous = sorted[i - 1]!
     const current = sorted[i]!
-    if (current.startTimestamp > previous.endTimestamp) continue
+    if (compareCompressionBoundaries(
+      { timestamp: current.startTimestamp, stableId: current.startMessageId },
+      { timestamp: previous.endTimestamp, stableId: previous.endMessageId },
+      state,
+    ) > 0) continue
     issues.push(
       `${previous.startId}..${previous.endId} overlaps ${current.startId}..${current.endId}`,
     )
@@ -188,7 +201,7 @@ export function registerCompressTool(
           const startTimestamp = startBoundary.timestamp
           const endTimestamp = endBoundary.timestamp
 
-          if (startTimestamp > endTimestamp) {
+          if (compareCompressionBoundaries(startBoundary, endBoundary, state) > 0) {
             throw new Error(
               `Range start "${startId}" must appear before end "${endId}" in the conversation`,
             )
@@ -219,7 +232,7 @@ export function registerCompressTool(
           }
         })
 
-        validateNonOverlappingRanges(rangePlans)
+        validateNonOverlappingRanges(rangePlans, state)
       } catch (error) {
         log("compress.resolve_failed", {
           toolCallId: _toolCallId,
@@ -231,7 +244,7 @@ export function registerCompressTool(
 
       for (const range of rangePlans) {
         try {
-          const anchor = resolveAnchorBoundary(range.endTimestamp, state)
+          const anchor = resolveAnchorBoundary(range.endTimestamp, state, range.endMessageId)
 
           const created = createRangeCompressionBlock({
             topic: params.topic,
@@ -314,6 +327,7 @@ export function registerCompressTool(
           meta.timestamp,
           meta.timestamp,
           state,
+          { startMessageId: meta.stableId, endMessageId: meta.stableId },
         )
         if (coveredBlocks.length > 0 || partialBlocks.length > 0) {
           const blockList = [...coveredBlocks, ...partialBlocks]
@@ -323,7 +337,7 @@ export function registerCompressTool(
           continue
         }
 
-        const anchor = resolveAnchorBoundary(meta.timestamp, state)
+        const anchor = resolveAnchorBoundary(meta.timestamp, state, meta.stableId)
 
         const created = createRangeCompressionBlock({
           topic: entry.topic ?? params.topic,

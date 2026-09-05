@@ -35,6 +35,7 @@ export {
 } from "./pruner-tools.js";
 export {
   detectCompressionCandidate,
+  detectEmergencyCompressionCandidate,
   detectMessageCompressionCandidates,
   formatCompressionCandidateHint,
   formatMessageCompressionCandidateHint,
