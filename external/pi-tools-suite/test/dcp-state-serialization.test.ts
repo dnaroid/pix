@@ -12,6 +12,7 @@ import {
   type ToolRecord,
   type SerializedDcpState,
 } from "../src/dcp/state.js";
+import { rehydrateToolRecordsFromMessages } from "../src/dcp/recovery.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -282,17 +283,33 @@ describe("serializeState", () => {
     );
   });
 
-  test("preserves totalToolCallCount", () => {
+  test("preserves monotonic lifetime totalToolCallCount", () => {
     const state = createState();
     state.totalToolCallCount = 1234;
     for (let i = 0; i < 3; i++) {
       state.toolCalls.set(`tc-${i}`, makeToolRecord(`tc-${i}`));
     }
     const serialized = serializeState(state);
-    // totalToolCallCount in serialized should equal number of records in the
-    // map, not the state's totalToolCallCount. The field captures the map
-    // size at serialization time.
-    expect(serialized.totalToolCallCount).toBe(3);
+    // The runtime map is a bounded cache. Persistence must retain the lifetime
+    // count rather than collapse it to the currently cached records.
+    expect(serialized.totalToolCallCount).toBe(1234);
+  });
+
+  test("lifetime tool-call count remains stable across serialize restore serialize", () => {
+    const original = createState();
+    original.totalToolCallCount = 4321;
+    original.toolCalls.set("recent-1", makeToolRecord("recent-1"));
+    original.toolCalls.set("recent-2", makeToolRecord("recent-2"));
+
+    const first = serializeState(original);
+    const restored = createState();
+    restoreState(restored, first);
+    const second = serializeState(restored);
+
+    expect(first.totalToolCallCount).toBe(4321);
+    expect(restored.totalToolCallCount).toBe(4321);
+    expect(second.totalToolCallCount).toBe(4321);
+    expect(restored.toolCalls.size).toBeLessThan(restored.totalToolCallCount);
   });
 
   test("persists all critical state fields", () => {
@@ -637,6 +654,81 @@ describe("serialize → restore round trip", () => {
       expect(record.outputText).toBeUndefined();
       expect(record.outputDetails).toBeUndefined();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// restart rehydration
+// ---------------------------------------------------------------------------
+
+describe("rehydrateToolRecordsFromMessages", () => {
+  test("restores exact args and output from raw context without persisting heavy fields", () => {
+    const original = createState();
+    original.toolCalls.set("call-1", makeToolRecord("call-1", {
+      toolName: "read",
+      inputArgs: { path: "/src/recover.ts", offset: 12 },
+      inputFingerprint: createInputFingerprint("read", { path: "/src/recover.ts", offset: 12 }),
+      outputText: "EXACT_RECOVERED_OUTPUT",
+      tokenEstimate: 100,
+      timestamp: 2,
+    }));
+
+    const restored = createState();
+    restoreState(restored, serializeState(original));
+    expect(restored.toolCalls.get("call-1")?.outputText).toBeUndefined();
+    expect(restored.toolCalls.get("call-1")?.inputArgs).not.toEqual({ path: "/src/recover.ts", offset: 12 });
+
+    const result = rehydrateToolRecordsFromMessages([
+      {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "call-1", name: "read", input: { path: "/src/recover.ts", offset: 12 } }],
+        timestamp: 1,
+      },
+      {
+        role: "toolResult",
+        toolCallId: "call-1",
+        toolName: "read",
+        content: [{ type: "text", text: "EXACT_RECOVERED_OUTPUT" }],
+        isError: false,
+        timestamp: 2,
+      },
+    ], restored);
+
+    expect(result).toEqual({ recordsUpdated: 1, exactArgsRestored: 1, exactOutputsRestored: 1 });
+    expect(restored.toolCalls.get("call-1")?.inputArgs).toEqual({ path: "/src/recover.ts", offset: 12 });
+    expect(restored.toolCalls.get("call-1")?.outputText).toBe("EXACT_RECOVERED_OUTPUT");
+    expect(restored.toolCalls.get("call-1")?.inputFingerprint).toBe(
+      createInputFingerprint("read", { path: "/src/recover.ts", offset: 12 }),
+    );
+
+    const compactAgain = serializeState(restored);
+    const persisted = compactAgain.compactToolCalls?.find((record) => record.toolCallId === "call-1");
+    expect(persisted).not.toHaveProperty("outputText");
+    expect(persisted).not.toHaveProperty("inputArgs");
+  });
+
+  test("does not create evidence-bearing records for IDs absent from the compact cache", () => {
+    const state = createState();
+    state.providerSeenToolIds.add("known-seen");
+    const result = rehydrateToolRecordsFromMessages([
+      {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "trimmed-call", name: "read", input: { path: "/src/trimmed.ts" } }],
+        timestamp: 1,
+      },
+      {
+        role: "toolResult",
+        toolCallId: "trimmed-call",
+        toolName: "read",
+        content: [{ type: "text", text: "raw output" }],
+        timestamp: 2,
+      },
+    ], state);
+
+    expect(result.recordsUpdated).toBe(0);
+    expect(state.toolCalls.has("trimmed-call")).toBe(false);
+    expect(state.providerSeenToolIds.has("trimmed-call")).toBe(false);
+    expect(state.providerSeenToolIds.has("known-seen")).toBe(true);
   });
 });
 

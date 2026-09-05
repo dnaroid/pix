@@ -4,6 +4,7 @@
 
 import { createHash } from "node:crypto"
 import type { DcpNudgeType } from "./pruner-types.js"
+import type { DcpBlockedReason } from "./progress-controller.js"
 
 /**
  * A record of a single tool call, keyed by toolCallId in DcpState.toolCalls.
@@ -50,12 +51,49 @@ export interface MessageIdMeta {
   /** Tool call metadata for tool-result-like messages. */
   toolCallId?: string
   toolName?: string
+  /** Tool calls emitted by an assistant message; these messages are structurally coupled to their results. */
+  toolCallIds?: string[]
   /** Plain text extracted from the message when the id was injected. */
   text?: string
   /** Rough token estimate for priority/candidate guidance. */
   tokenEstimate?: number
   /** Optional compression priority marker exposed with the model-visible message ID. */
   priority?: "low" | "medium" | "high"
+}
+
+export interface ConversationIndexEntry {
+  /** Position in the current projected branch before DCP metadata carriers. */
+  index: number
+  /** Stable identity of this projected message. */
+  stableId: string
+  /** Persistent mNNN identifier when the message is addressable as raw content. */
+  visibleId?: string
+  /** Message role in the current projection. */
+  role: string
+  /** Message timestamp when finite. */
+  timestamp?: number
+  /** Active block represented by this projected placeholder, when any. */
+  blockId?: number
+  /** Tool result identity for result-like messages. */
+  toolCallId?: string
+  /** Tool calls emitted by an assistant message. */
+  toolCallIds?: string[]
+  /** PI-internal entries are not directly addressable but remain part of range closure. */
+  passthrough: boolean
+  /** Provenance of this projected entry; never inferred from model-visible text. */
+  origin: "raw" | "block" | "dcp-control"
+  /** Signed assistant content must never be edited in place. */
+  signedAssistant: boolean
+}
+
+export interface CompressionProtectedFragment {
+  kind: "user" | "prompt" | "tool"
+  /** Stable provenance key; not rendered into provider-visible context. */
+  origin: string
+  /** SHA-256 of the exact protected text. */
+  hash: string
+  /** Exact text that must survive rollups. */
+  text: string
 }
 
 /**
@@ -98,6 +136,27 @@ export interface CompressionBlock {
   coveredBlockIds?: number[]
   /** Whether this block was created from a range or a single raw message. */
   mode?: "range" | "message"
+  /**
+   * Versioned projection semantics. Undefined means the legacy splice/repair
+   * behavior. Version 2 blocks are planned before commit and never widen their
+   * mutation set during materialization.
+   */
+  version?: 2
+  /** Exact v2 materialization behavior. */
+  replacementMode?: "range" | "message-body"
+  /** E06 provenance for automatically prepared summaries. */
+  autoSummaryRepresentation?: "model" | "extractive" | "extractive-fallback"
+  /** SHA-256 of the bounded source manifest used by the auto summary. */
+  sourceHash?: string
+  /** Bounded source-manifest coverage recorded at auto-summary commit. */
+  sourceCoverage?: {
+    itemCount: number
+    truncatedItems: number
+    toolCallCount: number
+    toolResultCount: number
+  }
+  /** Exact protected continuity fragments carried across rollups. */
+  protectedFragments?: CompressionProtectedFragment[]
   /** Set when a user explicitly decompressed this block via /dcp decompress. */
   deactivatedByUser?: boolean
   /** Internal reason for automatic soft-deactivation. */
@@ -139,7 +198,18 @@ export interface DcpLastNudge {
 /**
  * Full runtime state for the DCP extension.
  */
+export interface DcpProgressRecovery {
+  blockedReason: DcpBlockedReason
+  projectedBeforeTokens: number
+  inputCapacityTokens: number
+  requiredSavingsTokens: number
+  contextWindow: number
+  createdAt: number
+}
+
 export interface DcpState {
+  /** Runtime-only owner epoch. Incremented whenever the active session state is replaced. */
+  sessionEpoch: number
   // ── Tool tracking ──────────────────────────────────────────────────────────
   /** toolCallId → ToolRecord, populated when a tool_result event fires */
   toolCalls: Map<string, ToolRecord>
@@ -147,7 +217,7 @@ export interface DcpState {
   prunedToolIds: Set<string>
   /** toolCallId → reason used for human-readable pruning placeholders/stats. */
   prunedToolReasons: Map<string, string>
-  /** Tool results included in at least one provider request. */
+  /** Tool results consumed by at least one successfully completed provider response stream. */
   providerSeenToolIds: Set<string>
 
   // ── Compression ────────────────────────────────────────────────────────────
@@ -168,6 +238,8 @@ export interface DcpState {
   messageIdSnapshot: Map<string, number>
   /** Extra metadata for the model-visible DCP message IDs in messageIdSnapshot. */
   messageMetaSnapshot: Map<string, MessageIdMeta>
+  /** Ephemeral canonical projection index from the latest context pass. */
+  conversationIndexSnapshot: ConversationIndexEntry[]
   /** Stable message identity → persistent model-visible mNNN assignment. */
   messageIdsByStableId: Map<string, string>
   /** Monotonic counter for persistent message IDs. */
@@ -240,12 +312,13 @@ export interface DcpState {
    */
   lastContextWindow?: number
   /**
-   * How many consecutive emergency context reminders have been delivered
-   * without a successful compression or emergency prune. This advances even
-   * when no normal compression candidate exists so current-turn fallback
-   * patience cannot be reset by the exact condition it is designed to handle.
+   * How many completed, correlated main-provider opportunities contained an
+   * emergency DCP reminder without a successful compression or emergency prune.
+   * Repeated `context` transforms and retries do not advance this counter.
    */
   consecutiveIgnoredStrongNudges: number
+  /** Last terminal E05 handoff, persisted so restart does not hide why progress stopped. */
+  progressRecovery?: DcpProgressRecovery
 }
 
 // ---------------------------------------------------------------------------
@@ -255,6 +328,7 @@ export interface DcpState {
 /** Create a fresh, zeroed DcpState instance. */
 export function createState(): DcpState {
   return {
+    sessionEpoch: 1,
     toolCalls: new Map(),
     prunedToolIds: new Set(),
     prunedToolReasons: new Map(),
@@ -263,6 +337,7 @@ export function createState(): DcpState {
     nextBlockId: 1,
     messageIdSnapshot: new Map(),
     messageMetaSnapshot: new Map(),
+    conversationIndexSnapshot: [],
     messageIdsByStableId: new Map(),
     nextMessageId: 1,
     currentTurn: 0,
@@ -282,6 +357,7 @@ export function createState(): DcpState {
     lastNudge: undefined,
     lastContextWindow: undefined,
     consecutiveIgnoredStrongNudges: 0,
+    progressRecovery: undefined,
   }
 }
 
@@ -291,6 +367,7 @@ export function createState(): DcpState {
  * reset immediately.
  */
 export function resetState(state: DcpState): void {
+  state.sessionEpoch = Math.max(1, Math.floor(state.sessionEpoch || 0) + 1)
   state.toolCalls.clear()
   state.prunedToolIds.clear()
   state.prunedToolReasons.clear()
@@ -299,6 +376,7 @@ export function resetState(state: DcpState): void {
   state.nextBlockId = 1
   state.messageIdSnapshot.clear()
   state.messageMetaSnapshot.clear()
+  state.conversationIndexSnapshot = []
   state.messageIdsByStableId.clear()
   state.nextMessageId = 1
   state.currentTurn = 0
@@ -318,6 +396,7 @@ export function resetState(state: DcpState): void {
   state.lastNudge = undefined
   state.lastContextWindow = undefined
   state.consecutiveIgnoredStrongNudges = 0
+  state.progressRecovery = undefined
 }
 
 /**
@@ -468,11 +547,12 @@ export interface SerializedDcpState {
    */
   lastContextWindow?: number
   /**
-   * Persisted so the auto-compress fallback's patience counter survives a pi
-   * process restart / resume, preventing a stuck "model ignores strong nudges"
-   * state from being silently cleared by a reload.
+   * Persisted so the auto-compress fallback's completed-opportunity patience
+   * counter survives a pi process restart / resume.
    */
   consecutiveIgnoredStrongNudges?: number
+  /** Last terminal E05 blocked/handoff state. */
+  progressRecovery?: DcpProgressRecovery
   /** Hash of the last persisted serialized state, used for dedup. */
   _stateHash?: string
 }
@@ -636,7 +716,7 @@ export function serializeState(state: DcpState): SerializedDcpState {
     prunedToolReasons: Array.from(state.prunedToolReasons.entries()),
     providerSeenToolIds,
     compactToolCalls,
-    totalToolCallCount: allRecords.length,
+    totalToolCallCount: Math.max(state.totalToolCallCount, allRecords.length),
     tokensSaved: state.tokensSaved,
     totalPruneCount: state.totalPruneCount,
     accountedCompressionBlockIds: Array.from(state.accountedCompressionBlockIds),
@@ -655,6 +735,7 @@ export function serializeState(state: DcpState): SerializedDcpState {
     lastNudgeTurn: state.lastNudgeTurn,
     lastContextWindow: state.lastContextWindow,
     consecutiveIgnoredStrongNudges: state.consecutiveIgnoredStrongNudges,
+    progressRecovery: state.progressRecovery,
   }
 }
 
@@ -857,6 +938,26 @@ export function restoreState(state: DcpState, data: unknown): void {
   }
   if (typeof saved.consecutiveIgnoredStrongNudges === "number" && Number.isFinite(saved.consecutiveIgnoredStrongNudges) && saved.consecutiveIgnoredStrongNudges >= 0) {
     state.consecutiveIgnoredStrongNudges = Math.floor(saved.consecutiveIgnoredStrongNudges)
+  }
+  const recovery = saved.progressRecovery as any
+  if (
+    recovery &&
+    typeof recovery === "object" &&
+    typeof recovery.blockedReason === "string" &&
+    Number.isFinite(recovery.projectedBeforeTokens) && recovery.projectedBeforeTokens >= 0 &&
+    Number.isFinite(recovery.inputCapacityTokens) && recovery.inputCapacityTokens >= 0 &&
+    Number.isFinite(recovery.requiredSavingsTokens) && recovery.requiredSavingsTokens >= 0 &&
+    Number.isFinite(recovery.contextWindow) && recovery.contextWindow > 0 &&
+    Number.isFinite(recovery.createdAt) && recovery.createdAt >= 0
+  ) {
+    state.progressRecovery = {
+      blockedReason: recovery.blockedReason as DcpBlockedReason,
+      projectedBeforeTokens: Math.floor(recovery.projectedBeforeTokens),
+      inputCapacityTokens: Math.floor(recovery.inputCapacityTokens),
+      requiredSavingsTokens: Math.floor(recovery.requiredSavingsTokens),
+      contextWindow: Math.floor(recovery.contextWindow),
+      createdAt: Math.floor(recovery.createdAt),
+    }
   }
 }
 

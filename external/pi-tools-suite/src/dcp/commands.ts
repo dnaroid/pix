@@ -5,6 +5,7 @@ import { modelKeysFromContext, resolveModelConfig, type DcpConfig } from "./conf
 import type { DcpNudgeType } from "./pruner-types.js"
 import { isToolRecordProtected, markToolPruned } from "./pruner.js"
 import { ignoreStaleExtensionContextError, safeGetContextUsage } from "../context-usage.js"
+import { stableMessageId } from "./pruner-message-ids.js"
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -383,6 +384,41 @@ function handleManual(
   }
 }
 
+interface DecompressionSourceCheck {
+  available: boolean
+  reason?: string
+}
+
+function checkDecompressionSource(
+  ctx: ExtensionCommandContext,
+  block: DcpState["compressionBlocks"][number],
+): DecompressionSourceCheck {
+  // Legacy blocks predate exact source manifests/identity. Preserve their old
+  // decompression semantics rather than pretending a stronger guarantee.
+  if (block.version !== 2) return { available: true }
+  if (!block.startMessageId || !block.endMessageId) {
+    return { available: false, reason: "exact raw boundaries were not recorded for this modern block" }
+  }
+
+  const stableIds = new Set<string>()
+  const branch = branchEntries(ctx)
+  let messageIndex = 0
+  for (const entry of branch) {
+    if (entry?.type !== "message" || !entry.message) continue
+    const message = { ...entry.message, _dcpEntryId: entry.id }
+    stableIds.add(stableMessageId(message, messageIndex++))
+  }
+
+  const missing = [block.startMessageId, block.endMessageId].filter((id) => !stableIds.has(id))
+  if (missing.length > 0) {
+    return {
+      available: false,
+      reason: `raw source boundary ${missing.join(", ")} is no longer present in the active branch`,
+    }
+  }
+  return { available: true }
+}
+
 // ---------------------------------------------------------------------------
 // Decompress
 // ---------------------------------------------------------------------------
@@ -435,8 +471,19 @@ function handleDecompress(
       return
     }
 
+    const source = checkDecompressionSource(ctx, block)
+    if (!source.available) {
+      ctx.ui.notify(
+        `Cannot decompress block b${id}: raw source is unavailable (${source.reason}). ` +
+        "The block remains active; DCP will not guess or re-run mutating tools to recreate it.",
+        "error",
+      )
+      return
+    }
+
     block.active = false
     block.deactivatedByUser = true
+    block.deactivatedReason = "user"
     ctx.ui.notify(`Decompressed block b${id}: "${block.topic}"`, "info")
   }
 }
@@ -496,6 +543,7 @@ function handleRecompress(
   }
   block.active = true
   block.deactivatedByUser = false
+  block.deactivatedReason = undefined
   ctx.ui.notify(`Recompressed block b${id}: "${block.topic}"`, "info")
 }
 

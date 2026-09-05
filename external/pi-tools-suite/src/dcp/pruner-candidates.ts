@@ -7,6 +7,7 @@ import {
   messageText,
 } from "./pruner-metadata.js";
 import { stableMessageKeys } from "./pruner-message-ids.js";
+import { detectToolGroupSpans, findConversationIndexEntry } from "./conversation-index.js";
 
 interface CandidateBoundary {
   id: string;
@@ -48,7 +49,7 @@ function buildCandidateBoundaries(
       timestamp: msg.timestamp,
       tokenEstimate: state.messageMetaSnapshot.get(boundary.id)?.tokenEstimate ?? estimateMessageTokens(msg),
       blockId: boundary.blockId,
-      isSystemReminder: boundary.text.includes("<dcp-system-reminder>"),
+      isSystemReminder: msg?._dcpOrigin === "dcp-control",
     });
   }
   return boundaries;
@@ -116,11 +117,80 @@ function resolveAddressableBoundaryId(
   return null;
 }
 
+export interface CompressionCandidateSelectionOptions {
+  /** Net projected savings required to restore the current budget. */
+  requiredSavingsTokens?: number;
+  /** Conservative estimator margin added to the required source size. */
+  estimatorMarginTokens?: number;
+}
+
+function selectOldestSafePrefix(
+  boundaries: CandidateBoundary[],
+  state: DcpState,
+  settings: { minMessages: number; minTokens: number },
+  maxSafeMessageIndex: number,
+  options?: CompressionCandidateSelectionOptions,
+): CandidateBoundary[] | null {
+  if (boundaries.length === 0) return null;
+  if (!options || options.requiredSavingsTokens === undefined) {
+    let full = boundaries.slice();
+    while (full.length > 0 && full[0]!.isSystemReminder) full = full.slice(1);
+    while (full.length > 0 && full[full.length - 1]!.isSystemReminder) full = full.slice(0, -1);
+    if (full.length < Math.max(1, settings.minMessages)) return null;
+    if (full.reduce((sum, boundary) => sum + boundary.tokenEstimate, 0) < settings.minTokens) return null;
+    return full;
+  }
+  const requiredSavings = Math.max(0, Math.floor(options.requiredSavingsTokens));
+  const estimatorMargin = Math.max(0, Math.floor(options?.estimatorMarginTokens ?? 0));
+  const targetSourceTokens = Math.max(settings.minTokens, requiredSavings + estimatorMargin);
+  const minMessages = Math.max(1, settings.minMessages);
+
+  let selectedEnd = -1;
+  let selectedTokens = 0;
+  for (let index = 0; index < boundaries.length; index++) {
+    selectedTokens += boundaries[index]!.tokenEstimate;
+    if (index + 1 >= minMessages && selectedTokens >= targetSourceTokens) {
+      selectedEnd = index;
+      break;
+    }
+  }
+  if (selectedEnd < 0) selectedEnd = boundaries.length - 1;
+
+  let selected = boundaries.slice(0, selectedEnd + 1);
+  if (state.conversationIndexSnapshot.length > 0) {
+    const groups = detectToolGroupSpans(state.conversationIndexSnapshot);
+    const startMessageIndex = selected[0]!.messageIndex;
+    let endMessageIndex = selected[selected.length - 1]!.messageIndex;
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const group of groups) {
+        const overlaps = group.startIndex <= endMessageIndex && group.endIndex >= startMessageIndex;
+        if (!overlaps) continue;
+        if (!group.complete) return null;
+        if (group.endIndex > endMessageIndex) {
+          if (group.endIndex > maxSafeMessageIndex) return null;
+          endMessageIndex = group.endIndex;
+          changed = true;
+        }
+      }
+    }
+    selected = boundaries.filter((boundary) => boundary.messageIndex <= endMessageIndex);
+  }
+
+  while (selected.length > 0 && selected[0]!.isSystemReminder) selected = selected.slice(1);
+  while (selected.length > 0 && selected[selected.length - 1]!.isSystemReminder) selected = selected.slice(0, -1);
+  if (selected.length < minMessages) return null;
+  if (selected.reduce((sum, boundary) => sum + boundary.tokenEstimate, 0) < settings.minTokens) return null;
+  return selected;
+}
+
 export function detectCompressionCandidate(
   messages: any[],
   _state: DcpState,
   config: DcpConfig,
   contextPercent: number,
+  options?: CompressionCandidateSelectionOptions,
 ): CompressionCandidate | null {
   const settings = config.compress.autoCandidates;
   if (!settings.enabled) return null;
@@ -146,16 +216,17 @@ export function detectCompressionCandidate(
 
   if (cutoffIndex < 0) return null;
 
-  let candidate = boundaries.slice(0, cutoffIndex + 1);
-  while (candidate.length > 0 && candidate[0]!.isSystemReminder) candidate = candidate.slice(1);
-  while (candidate.length > 0 && candidate[candidate.length - 1]!.isSystemReminder) {
-    candidate = candidate.slice(0, -1);
-  }
-
-  if (candidate.length < settings.minMessages) return null;
+  const eligible = boundaries.slice(0, cutoffIndex + 1);
+  const candidate = selectOldestSafePrefix(
+    eligible,
+    _state,
+    settings,
+    eligible[eligible.length - 1]?.messageIndex ?? -1,
+    options,
+  );
+  if (!candidate) return null;
 
   const estimatedTokens = candidate.reduce((sum, item) => sum + item.tokenEstimate, 0);
-  if (estimatedTokens < settings.minTokens) return null;
 
   const includedBlockIds = Array.from(
     new Set(candidate.map((item) => item.blockId).filter((id): id is number => id !== undefined)),
@@ -167,7 +238,9 @@ export function detectCompressionCandidate(
     messageCount: candidate.length,
     estimatedTokens,
     includedBlockIds,
-    reason: `older than the most recent ${keepRecentTurns} user turn(s)`,
+    reason: options?.requiredSavingsTokens
+      ? `minimal oldest protocol-safe prefix restoring ~${Math.max(0, Math.floor(options.requiredSavingsTokens))} budget tokens; older than the most recent ${keepRecentTurns} user turn(s)`
+      : `older than the most recent ${keepRecentTurns} user turn(s)`,
   };
 }
 
@@ -180,10 +253,11 @@ export function detectCompressionCandidate(
  * this detector instead keeps the user request plus a live tail of recent tool
  * transactions and exposes only the older, provider-committed prefix.
  *
- * A later assistant message is the commit witness: everything before that
- * assistant was necessarily part of an earlier provider request. The newest
- * assistant group is always retained, even when keepRecentToolPairs=0, so the
- * in-flight request/result head is never selected.
+ * The newest assistant group is always retained, even when
+ * keepRecentToolPairs=0, so the in-flight request/result head is never selected.
+ * For older tool groups, a later assistant is only structural ordering evidence:
+ * every tool result selected for compression must also have completed provider
+ * evidence in `providerSeenToolIds`. Unknown evidence truncates the safe prefix.
  */
 export function detectEmergencyCompressionCandidate(
   messages: any[],
@@ -191,10 +265,16 @@ export function detectEmergencyCompressionCandidate(
   config: DcpConfig,
   contextPercent: number,
   maxContextPercent: number,
+  options?: CompressionCandidateSelectionOptions,
 ): CompressionCandidate | null {
   const settings = config.compress.autoCandidates;
   const emergencySettings = config.strategies.emergencyCurrentTurnPruning;
-  if (!settings.enabled || !emergencySettings.enabled) return null;
+  // `autoCandidates.enabled` controls routine advisory suggestions only. The
+  // emergency planner is a safety path and is gated by its own destructive
+  // policy (`emergencyCurrentTurnPruning.enabled` / autoCompress at commit).
+  // Reuse autoCandidates sizing knobs without letting its advisory toggle
+  // silently disable emergency range planning.
+  if (!emergencySettings.enabled) return null;
   if (contextPercent <= maxContextPercent) return null;
 
   const boundaries = buildCandidateBoundaries(messages, state, { allowBlocks: true });
@@ -244,18 +324,50 @@ export function detectEmergencyCompressionCandidate(
     if (preservedPairs >= keepRecentPairs) break;
   }
 
-  let candidate = boundaries.filter((boundary) =>
-    boundary.messageIndex > latestUserIndex &&
-    boundary.messageIndex < preservedHeadStart,
-  );
-  while (candidate.length > 0 && candidate[0]!.isSystemReminder) candidate = candidate.slice(1);
-  while (candidate.length > 0 && candidate[candidate.length - 1]!.isSystemReminder) {
-    candidate = candidate.slice(0, -1);
+  // F09: provider completion evidence is authoritative for tool-result
+  // eligibility in both emergency range and output-pruning paths. A later
+  // assistant establishes ordering only; it cannot prove that an earlier tool
+  // result survived serialization + stream completion. Stop before the first
+  // group whose evidence is incomplete/unknown rather than silently spanning it.
+  let evidenceSafeEnd = preservedHeadStart - 1;
+  const groups = detectToolGroupSpans(state.conversationIndexSnapshot);
+  for (const group of groups) {
+    if (group.endIndex <= latestUserIndex) continue;
+    if (group.startIndex >= preservedHeadStart) break;
+    if (!group.complete || group.toolCallIds.some((id) => !state.providerSeenToolIds.has(id))) {
+      evidenceSafeEnd = Math.min(evidenceSafeEnd, group.startIndex - 1);
+      break;
+    }
   }
-  if (candidate.length < settings.minMessages) return null;
+
+  const eligible = boundaries.filter((boundary) =>
+    boundary.messageIndex > latestUserIndex &&
+    boundary.messageIndex <= evidenceSafeEnd,
+  );
+  const candidate = selectOldestSafePrefix(
+    eligible,
+    state,
+    settings,
+    preservedHeadStart - 1,
+    options,
+  );
+  if (!candidate) return null;
+
+  // Independent fail-closed guard for legacy/partial snapshots where the
+  // canonical group index may be unavailable. Structural ordering is never
+  // enough to authorize deletion of an unseen tool result.
+  const selectedStart = candidate[0]!.messageIndex;
+  const selectedEnd = candidate[candidate.length - 1]!.messageIndex;
+  for (let index = selectedStart; index <= selectedEnd; index++) {
+    const message = messages[index];
+    if (
+      (message?.role === "toolResult" || message?.role === "bashExecution") &&
+      typeof message.toolCallId === "string" &&
+      !state.providerSeenToolIds.has(message.toolCallId)
+    ) return null;
+  }
 
   const estimatedTokens = candidate.reduce((sum, item) => sum + item.tokenEstimate, 0);
-  if (estimatedTokens < settings.minTokens) return null;
 
   const includedBlockIds = Array.from(
     new Set(candidate.map((item) => item.blockId).filter((id): id is number => id !== undefined)),
@@ -267,7 +379,9 @@ export function detectEmergencyCompressionCandidate(
     messageCount: candidate.length,
     estimatedTokens,
     includedBlockIds,
-    reason: `emergency same-turn committed prefix; preserves newest ${keepRecentPairs} tool pair(s) plus the live assistant head`,
+    reason: options?.requiredSavingsTokens
+      ? `minimal emergency same-turn provider-evidenced prefix restoring ~${Math.max(0, Math.floor(options.requiredSavingsTokens))} budget tokens; preserves newest ${keepRecentPairs} tool pair(s) plus the live assistant head`
+      : `emergency same-turn provider-evidenced prefix; preserves newest ${keepRecentPairs} tool pair(s) plus the live assistant head`,
   };
 }
 
@@ -309,7 +423,10 @@ export function detectMessageCompressionCandidates(
     }
   }
 
-  if (cutoffIndex < 0) return [];
+  // If the transcript does not yet contain enough complete user turns to
+  // satisfy the retention policy, every message belongs to the protected
+  // recent window. Do not reinterpret the live head as stale history.
+  if (recentUserTurns < keepRecentTurns || cutoffIndex < 0) return [];
 
   const mediumTokens = Math.max(1, settings.mediumTokens ?? 500);
   const highTokens = Math.max(mediumTokens, settings.highTokens ?? 5000);
@@ -319,6 +436,23 @@ export function detectMessageCompressionCandidates(
     .slice(0, cutoffIndex + 1)
     .filter((candidate) => !candidate.isSystemReminder)
     .filter((candidate) => candidate.role !== "user" || !config.compress.protectUserMessages)
+    // V2 message mode replaces only the selected body, so completed tool
+    // results are safe surgical candidates. Signed assistants and assistants
+    // carrying tool calls remain structurally immutable, and an incomplete
+    // tool group is still in-flight even if it appears in an unusual snapshot.
+    .filter((candidate) => {
+      const message = messages[candidate.messageIndex];
+      if (candidate.role === "assistant" && assistantToolCallIds(message).length > 0) return false;
+      const indexEntry = findConversationIndexEntry(state.conversationIndexSnapshot, candidate.id);
+      if (candidate.role === "assistant" && indexEntry?.signedAssistant) return false;
+      if (indexEntry) {
+        const incompleteGroup = detectToolGroupSpans(state.conversationIndexSnapshot).some((group) =>
+          !group.complete && indexEntry.index >= group.startIndex && indexEntry.index <= group.endIndex,
+        );
+        if (incompleteGroup) return false;
+      }
+      return true;
+    })
     .filter((candidate) => candidate.tokenEstimate >= mediumTokens)
     .map((candidate): MessageCompressionCandidate => ({
       messageId: candidate.id,

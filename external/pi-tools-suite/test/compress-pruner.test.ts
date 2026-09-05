@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig, type DcpConfig } from "../src/dcp/config.js";
@@ -29,11 +29,15 @@ import {
 import {
   collectProviderToolResultEvidence,
   providerPayloadIncludesToolResult,
+  providerPayloadRevision,
+  ProviderEvidenceTracker,
 } from "../src/dcp/provider-tool-results.js";
+import { decideDcpProgress, inferDcpBlockedReason, planDcpBudget } from "../src/dcp/progress-controller.js";
 import { dcpDebugLogDrain } from "../src/dcp/debug-log.js";
 import {
   createState,
   createInputFingerprint,
+  resetState,
   restoreState,
   serializeState,
   type CompressionBlock,
@@ -41,10 +45,12 @@ import {
 } from "../src/dcp/state.js";
 import { stableMessageKeys } from "../src/dcp/pruner-message-ids.js";
 import { applyCompressionBlocks } from "../src/dcp/pruner-compression-blocks.js";
+import { createRangeCompressionBlock } from "../src/dcp/compression-blocks.js";
 import {
   stripStaleDcpMetadataFromAssistantMessage,
 } from "../src/dcp/pruner-metadata.js";
 import {
+  AutoCompressionBlockedError,
   decideAutoCompress,
   createAutoCompressionBlock,
 } from "../src/dcp/auto-compress.js";
@@ -206,6 +212,11 @@ function toolRecord(
   };
 }
 
+function readPersistedDcpPayloadSync(path: string): any {
+  const document = JSON.parse(readFileSync(path, "utf8"));
+  return document?.kind === "dcp-state" ? document.payload : document;
+}
+
 function contentText(msg: any): string {
   if (typeof msg.content === "string") return msg.content;
   if (!Array.isArray(msg.content)) return "";
@@ -275,9 +286,9 @@ describe("DCP pruning effectiveness", () => {
     const messages = [
       textMessage("user", "start", 1),
       assistantToolCall("call-1", 2),
-      toolResult("call-1", "read", "first output", 3),
+      toolResult("call-1", "read", "same output", 3),
       assistantToolCall("call-2", 4),
-      toolResult("call-2", "read", "second output", 5),
+      toolResult("call-2", "read", "same output", 5),
       textMessage("user", "next", 6),
     ];
 
@@ -294,6 +305,32 @@ describe("DCP pruning effectiveness", () => {
     expect(state.tokensSaved).toBe(savedAfterOnce);
     expect(JSON.stringify(once)).toContain("duplicate tool call");
     expect(JSON.stringify(twice)).toContain("duplicate tool call");
+  });
+
+  test("same input with changed output is not treated as an exact duplicate", () => {
+    const state = createState();
+    state.toolCalls.set("read-before", toolRecord("read-before", "read", "read::{path:a}", 120));
+    state.toolCalls.set("read-after", toolRecord("read-after", "read", "read::{path:a}", 120));
+    const cfg = config({
+      strategies: {
+        deduplication: { enabled: true, protectedTools: [] },
+        purgeErrors: { enabled: false, turns: 4, protectedTools: [] },
+        autoToolPruning: { enabled: false, maxOutputTokens: 2000, keepRecentTurns: 2, readLikeTools: [], readLikeTurns: 3, protectedTools: [] },
+      },
+    });
+    const messages = [
+      textMessage("user", "inspect", 1),
+      assistantToolCall("read-before", 2),
+      toolResult("read-before", "read", "version one", 3),
+      assistantToolCall("read-after", 4),
+      toolResult("read-after", "read", "version two after file changed", 5),
+      textMessage("user", "continue", 6),
+    ];
+
+    const projected = applyPruning(messages, state, cfg);
+    expect(state.prunedToolIds).toEqual(new Set());
+    expect(JSON.stringify(projected)).toContain("version one");
+    expect(JSON.stringify(projected)).toContain("version two after file changed");
   });
 
   test("automatic duplicate pruning waits for a user-turn checkpoint", () => {
@@ -317,22 +354,22 @@ describe("DCP pruning effectiveness", () => {
     const firstPair = [
       textMessage("user", "active", 1),
       assistantToolCall("call-1", 2),
-      toolResult("call-1", "read", "first", 3),
+      toolResult("call-1", "read", "same", 3),
     ];
 
     applyPruning(firstPair, state, cfg);
     const sameTurn = applyPruning([
       ...firstPair,
       assistantToolCall("call-2", 4),
-      toolResult("call-2", "read", "second", 5),
+      toolResult("call-2", "read", "same", 5),
     ], state, cfg);
     expect(state.prunedToolIds).toEqual(new Set());
-    expect(JSON.stringify(sameTurn)).toContain("first");
+    expect(JSON.stringify(sameTurn)).toContain("same");
 
     const nextTurn = applyPruning([
       ...firstPair,
       assistantToolCall("call-2", 4),
-      toolResult("call-2", "read", "second", 5),
+      toolResult("call-2", "read", "same", 5),
       textMessage("user", "continue", 6),
     ], state, cfg);
     expect(state.prunedToolIds).toEqual(new Set(["call-1"]));
@@ -343,7 +380,7 @@ describe("DCP pruning effectiveness", () => {
     const state = createState();
     state.toolCalls.set(
       "call-1",
-      toolRecord("call-1", "bash", "bash::{cmd:big}", 500, 1, { command: "make noisy" }),
+      toolRecord("call-1", "read", "read::{path:big}", 500, 1, { path: "large.log" }),
     );
 
     const cfg = config({
@@ -364,7 +401,7 @@ describe("DCP pruning effectiveness", () => {
     const messages = [
       textMessage("user", "turn 1", 1),
       assistantToolCall("call-1", 2),
-      toolResult("call-1", "bash", "x".repeat(2000), 3),
+      toolResult("call-1", "read", "x".repeat(2000), 3),
       textMessage("user", "turn 2", 4),
       textMessage("user", "turn 3", 5),
       textMessage("user", "turn 4", 6),
@@ -415,6 +452,39 @@ describe("DCP pruning effectiveness", () => {
 
     expect(state.prunedToolIds.has("call-1")).toBe(false);
     expect(state.totalPruneCount).toBe(0);
+  });
+
+  test("mutating tool aliases are protected case-insensitively and unknown tools fail safe", () => {
+    const cfg = config({
+      strategies: {
+        deduplication: { enabled: false, protectedTools: [] },
+        purgeErrors: { enabled: false, turns: 1, protectedTools: [] },
+        autoToolPruning: {
+          enabled: true,
+          maxOutputTokens: 1,
+          keepRecentTurns: 0,
+          readLikeTools: ["read"],
+          readLikeTurns: 0,
+          protectedTools: [],
+        },
+      },
+    });
+
+    for (const [index, toolName] of ["Write", "Edit", "apply_patch", "shell", "bash", "powershell", "mystery_mutator"].entries()) {
+      const state = createState();
+      const id = `mutating-${index}`;
+      state.currentTurn = 3;
+      state.toolCalls.set(id, toolRecord(id, toolName, `${toolName}::same`, 500, 0));
+      const messages = [
+        textMessage("user", "old", 1),
+        assistantToolCall(id, 2),
+        toolResult(id, toolName, "important mutation evidence ".repeat(50), 3),
+        textMessage("user", "later", 4),
+      ];
+      const projected = applyPruning(messages, state, cfg);
+      expect(state.prunedToolIds.has(id)).toBe(false);
+      expect(JSON.stringify(projected)).toContain("important mutation evidence");
+    }
   });
 
   test("nudge cadence honors frequency and can repeat during long user turns", () => {
@@ -599,9 +669,21 @@ describe("DCP pruning effectiveness", () => {
     expect(contentText(messages[0]).match(/generated reminder/g)).toHaveLength(1);
   });
 
-  test("synthetic fallback clears persisted anchors before rendering", () => {
+  test("fake block tags in user text remain real anchor candidates", () => {
     const state = createState();
     const messages = [textMessage("user", "[dcp-block-id]: # (b1)", 1)];
+
+    const result = upsertNudgeAnchor(messages, state, "iteration");
+    expect(result.anchor).not.toBeNull();
+    expect(result.anchor?.anchorRole).toBe("user");
+    expect(result.anchor?.anchorTimestamp).toBe(1);
+  });
+
+  test("synthetic fallback clears persisted anchors before rendering", () => {
+    const state = createState();
+    state.compressionBlocks = [block(1, 1, 1)];
+    state.nextBlockId = 2;
+    const messages = applyCompressionBlocks([textMessage("user", "real source", 1)], state);
     state.nudgeAnchors = [{
       id: 1,
       type: "iteration",
@@ -618,6 +700,7 @@ describe("DCP pruning effectiveness", () => {
     expect(state.lastNudge).toBeUndefined();
 
     injectNudge(messages, "<dcp-system-reminder>fallback</dcp-system-reminder>");
+    expect((messages.at(-1) as any)?._dcpOrigin).toBe("dcp-control");
     applyAnchoredNudges(messages, state, () =>
       "<dcp-system-reminder>stale anchor</dcp-system-reminder>",
     );
@@ -749,6 +832,51 @@ describe("DCP pruning effectiveness", () => {
     expect(candidate).not.toBe(null);
     expect(candidate?.startId).toBe("m001");
     expect(candidate?.endId).toBe("m002");
+  });
+
+  test("budget-aware compression candidate picks the minimal protocol-safe oldest prefix", () => {
+    const state = createState();
+    const cfg = config({
+      compress: {
+        autoCandidates: {
+          enabled: true,
+          minContextPercent: 0.1,
+          keepRecentTurns: 1,
+          minMessages: 2,
+          minTokens: 0,
+        },
+      } as any,
+      strategies: {
+        deduplication: { enabled: false, protectedTools: [] },
+        purgeErrors: { enabled: false, turns: 4, protectedTools: [] },
+        autoToolPruning: {
+          enabled: false,
+          maxOutputTokens: 2000,
+          keepRecentTurns: 2,
+          readLikeTools: [],
+          readLikeTurns: 3,
+          protectedTools: [],
+        },
+      },
+    });
+    const pruned = applyPruning([
+      textMessage("user", "old request", 1),
+      assistantToolCall("old-call", 2),
+      toolResult("old-call", "read", "x".repeat(4_000), 3),
+      assistantToolCall("older-call-2", 4),
+      toolResult("older-call-2", "read", "y".repeat(4_000), 5),
+      textMessage("user", "recent protected request", 6),
+      textMessage("assistant", "live head", 7),
+    ], state, cfg);
+
+    const full = detectCompressionCandidate(pruned, state, cfg, 0.9);
+    const minimal = detectCompressionCandidate(pruned, state, cfg, 0.9, { requiredSavingsTokens: 10 });
+
+    expect(full).not.toBe(null);
+    expect(minimal).not.toBe(null);
+    expect(minimal!.messageCount).toBeLessThan(full!.messageCount);
+    expect(state.messageMetaSnapshot.get(minimal!.endId)?.toolCallId).toBe("old-call");
+    expect(minimal!.reason).toContain("minimal oldest protocol-safe prefix");
   });
 
   test("compression candidates are suppressed below configured context pressure", () => {
@@ -1066,6 +1194,48 @@ describe("DCP pruning effectiveness", () => {
     expect(state.compressionBlocks).toHaveLength(0);
   });
 
+  test("compress tool keeps multi-range failures atomic when a later range hits an active block", async () => {
+    const state = createState();
+    const existing = block(1, 10, 20);
+    state.compressionBlocks = [existing];
+    state.nextBlockId = 2;
+    for (const [id, timestamp] of [
+      ["m001", 1],
+      ["m002", 5],
+      ["m003", 15],
+      ["m004", 25],
+    ] as const) {
+      state.messageIdSnapshot.set(id, timestamp);
+      state.messageMetaSnapshot.set(id, {
+        timestamp,
+        stableId: `id:${id}`,
+        role: "assistant",
+        tokenEstimate: 100,
+      });
+      state.messageIdsByStableId.set(`id:${id}`, id);
+    }
+
+    let registeredTool: any;
+    registerCompressTool({ registerTool: (tool: any) => { registeredTool = tool } } as any, state, config());
+
+    await expect(registeredTool.execute(
+      "tool-call",
+      {
+        topic: "Atomic ranges",
+        ranges: [
+          { startId: "m001", endId: "m002", summary: "first valid range" },
+          { startId: "m003", endId: "m004", summary: "later partial overlap" },
+        ],
+      },
+      undefined,
+      undefined,
+      { ui: { notify() {} } },
+    )).rejects.toThrow(/partially overlaps/);
+
+    expect(state.compressionBlocks).toEqual([existing]);
+    expect(state.nextBlockId).toBe(2);
+  });
+
   test("compress tool explains unknown non-mNNN IDs with current ID diagnostics", async () => {
     const state = createState();
     state.messageIdSnapshot.set("m001", 1);
@@ -1266,7 +1436,7 @@ describe("DCP pruning effectiveness", () => {
       ctx,
     );
 
-    const persisted = JSON.parse(readFileSync(join(sessionDir, "dcp-state", "sidecar-session.json"), "utf8"));
+    const persisted = readPersistedDcpPayloadSync(join(sessionDir, "dcp-state", "sidecar-session.json"));
     expect(persisted.compressionBlocks).toHaveLength(1);
     expect(persisted.compressionBlocks[0]).toMatchObject({
       id: 1,
@@ -1275,6 +1445,78 @@ describe("DCP pruning effectiveness", () => {
       active: true,
     });
     expect(persisted.nextBlockId).toBe(2);
+  });
+
+  test("compress tool retries with the same tool call id idempotently", async () => {
+    const state = createState();
+    state.messageIdSnapshot.set("m001", 1);
+    state.messageIdSnapshot.set("m002", 2);
+    state.messageMetaSnapshot.set("m001", { timestamp: 1, role: "assistant", tokenEstimate: 300 });
+    state.messageMetaSnapshot.set("m002", { timestamp: 2, role: "assistant", tokenEstimate: 300 });
+
+    let registeredTool: any;
+    registerCompressTool({ registerTool: (tool: any) => { registeredTool = tool } } as any, state, config());
+    const params = {
+      topic: "Retry-safe",
+      ranges: [{ startId: "m001", endId: "m002", summary: "one durable result" }],
+    };
+
+    const first = await registeredTool.execute(
+      "same-tool-call",
+      params,
+      undefined,
+      undefined,
+      { ui: { notify() {} } },
+    );
+    const nextBlockIdAfterFirst = state.nextBlockId;
+    const second = await registeredTool.execute(
+      "same-tool-call",
+      params,
+      undefined,
+      undefined,
+      { ui: { notify() {} } },
+    );
+
+    expect(first.details.blockIds).toEqual([1]);
+    expect(second.details.blockIds).toEqual([1]);
+    expect(second.details.idempotentReplay).toBe(true);
+    expect(state.compressionBlocks).toHaveLength(1);
+    expect(state.nextBlockId).toBe(nextBlockIdAfterFirst);
+    expect(state.compressionBlocks[0]?.createdByToolCallId).toBe("same-tool-call");
+  });
+
+  test("compress tool does not publish a late result after the session epoch changes", async () => {
+    const state = createState();
+    state.messageIdSnapshot.set("m001", 1);
+    state.messageIdSnapshot.set("m002", 2);
+    state.messageMetaSnapshot.set("m001", { timestamp: 1, role: "assistant", tokenEstimate: 300 });
+    state.messageMetaSnapshot.set("m002", { timestamp: 2, role: "assistant", tokenEstimate: 300 });
+
+    let registeredTool: any;
+    registerCompressTool(
+      { registerTool: (tool: any) => { registeredTool = tool } } as any,
+      state,
+      config(),
+      {
+        capturePersistenceTarget: () => ({ statePath: "/captured/old-session.json" }),
+        saveStateToTarget: async () => {
+          resetState(state);
+        },
+      },
+    );
+    const startingEpoch = state.sessionEpoch;
+
+    await expect(registeredTool.execute(
+      "late-tool-call",
+      { topic: "Late", ranges: [{ startId: "m001", endId: "m002", summary: "must stay old" }] },
+      undefined,
+      undefined,
+      { ui: { notify() {} } },
+    )).rejects.toThrow(/stale|session changed/i);
+
+    expect(state.sessionEpoch).toBe(startingEpoch + 1);
+    expect(state.compressionBlocks).toHaveLength(0);
+    expect(state.nextBlockId).toBe(1);
   });
 
   test("compress tool rejects partial overlap and preserves protected raw user messages", async () => {
@@ -1492,6 +1734,152 @@ describe("DCP pruning effectiveness", () => {
     expect(asJson).toContain("still useful");
   });
 
+  test("message compression replaces only one tool-result body in a parallel group", async () => {
+    const state = createState();
+    const cfg = config();
+    const assistant = {
+      role: "assistant",
+      content: [
+        { type: "toolCall", id: "parallel-a", name: "read", input: { path: "a.ts" } },
+        { type: "toolCall", id: "parallel-b", name: "read", input: { path: "b.ts" } },
+      ],
+      timestamp: 2,
+    };
+    const rawMessages = [
+      textMessage("user", "inspect both files", 1),
+      assistant,
+      toolResult("parallel-a", "read", "result a " + "a".repeat(200), 3),
+      toolResult("parallel-b", "read", "SIBLING_FACT_B " + "b".repeat(200), 4),
+      textMessage("user", "continue", 5),
+    ];
+    applyPruning(rawMessages, state, cfg);
+    const resultId = [...state.messageMetaSnapshot.entries()]
+      .find(([, meta]) => meta.toolCallId === "parallel-a")?.[0];
+    expect(resultId).toBeDefined();
+
+    let registeredTool: any;
+    registerCompressTool({ registerTool: (tool: any) => { registeredTool = tool } } as any, state, cfg);
+
+    await registeredTool.execute(
+      "tool-call",
+      {
+        topic: "One tool result",
+        messages: [{ messageId: resultId!, summary: "only result a" }],
+      },
+      undefined,
+      undefined,
+      { ui: { notify() {} } },
+    );
+
+    expect(state.compressionBlocks).toHaveLength(1);
+    expect(state.compressionBlocks[0]).toMatchObject({
+      mode: "message",
+      version: 2,
+      replacementMode: "message-body",
+    });
+
+    const projected = applyPruning(rawMessages, state, cfg);
+    expect(projected.find((message) => message.role === "assistant")).toEqual(assistant);
+    const results = projected.filter((message) => message.role === "toolResult");
+    expect(results).toHaveLength(2);
+    expect(results.find((message) => message.toolCallId === "parallel-a")?.toolCallId).toBe("parallel-a");
+    expect(contentText(results.find((message) => message.toolCallId === "parallel-a"))).toContain("only result a");
+    expect(contentText(results.find((message) => message.toolCallId === "parallel-a"))).not.toContain("a".repeat(80));
+    expect(contentText(results.find((message) => message.toolCallId === "parallel-b"))).toContain("SIBLING_FACT_B");
+    expect([...state.messageMetaSnapshot.entries()].find(([, meta]) => meta.toolCallId === "parallel-a")?.[0]).toBe(resultId);
+
+    applyPruning(rawMessages, state, cfg);
+    expect([...state.messageMetaSnapshot.entries()].find(([, meta]) => meta.toolCallId === "parallel-a")?.[0]).toBe(resultId);
+  });
+
+  test("range compression rejects a selection that cuts through a parallel tool group", async () => {
+    const state = createState();
+    const cfg = config();
+    applyPruning(
+      [
+        textMessage("user", "inspect both files", 1),
+        {
+          role: "assistant",
+          content: [
+            { type: "toolCall", id: "parallel-a", name: "read", input: { path: "a.ts" } },
+            { type: "toolCall", id: "parallel-b", name: "read", input: { path: "b.ts" } },
+          ],
+          timestamp: 2,
+        },
+        toolResult("parallel-a", "read", "result a", 3),
+        toolResult("parallel-b", "read", "result b", 4),
+        textMessage("user", "continue", 5),
+      ],
+      state,
+      cfg,
+    );
+    const assistantId = [...state.messageMetaSnapshot.entries()]
+      .find(([, meta]) => meta.role === "assistant" && meta.toolCallIds?.includes("parallel-a"))?.[0];
+    const resultAId = [...state.messageMetaSnapshot.entries()]
+      .find(([, meta]) => meta.toolCallId === "parallel-a")?.[0];
+    const resultBId = [...state.messageMetaSnapshot.entries()]
+      .find(([, meta]) => meta.toolCallId === "parallel-b")?.[0];
+    expect(assistantId).toBeDefined();
+    expect(resultAId).toBeDefined();
+    expect(resultBId).toBeDefined();
+
+    let registeredTool: any;
+    registerCompressTool({ registerTool: (tool: any) => { registeredTool = tool } } as any, state, cfg);
+    const nextBlockIdBefore = state.nextBlockId;
+
+    await expect(registeredTool.execute(
+      "tool-call",
+      {
+        topic: "Partial group",
+        ranges: [{ startId: resultAId!, endId: resultAId!, summary: "too narrow" }],
+      },
+      undefined,
+      undefined,
+      { ui: { notify() {} } },
+    )).rejects.toThrow(new RegExp(`protocol-safe closed range is ${assistantId}\\.\\.${resultBId}`, "i"));
+
+    expect(state.compressionBlocks).toHaveLength(0);
+    expect(state.nextBlockId).toBe(nextBlockIdBefore);
+  });
+
+  test("message compression refuses to edit signed assistant content in place", async () => {
+    const state = createState();
+    const cfg = config();
+    const signedAssistant = {
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "provider reasoning", thinkingSignature: "sig-keep-exact" },
+        { type: "text", text: "signed checkpoint" },
+      ],
+      timestamp: 2,
+    };
+    applyPruning(
+      [
+        textMessage("user", "older request", 1),
+        signedAssistant,
+        textMessage("user", "active request", 3),
+      ],
+      state,
+      cfg,
+    );
+    const signedId = [...state.messageMetaSnapshot.entries()]
+      .find(([, meta]) => meta.role === "assistant")?.[0];
+    expect(signedId).toBeDefined();
+
+    let registeredTool: any;
+    registerCompressTool({ registerTool: (tool: any) => { registeredTool = tool } } as any, state, cfg);
+    await expect(registeredTool.execute(
+      "tool-call",
+      { topic: "Signed", messages: [{ messageId: signedId!, summary: "must not replace signature" }] },
+      undefined,
+      undefined,
+      { ui: { notify() {} } },
+    )).rejects.toThrow(/signed assistant|cannot be edited/i);
+
+    expect(state.compressionBlocks).toHaveLength(0);
+    expect(state.nextBlockId).toBe(1);
+  });
+
   test("message compression soft-skips invalid entries and reports grouped diagnostics", async () => {
     const state = createState();
     state.messageIdSnapshot.set("m001", 1);
@@ -1581,6 +1969,64 @@ describe("DCP pruning effectiveness", () => {
     expect(JSON.stringify(pruned)).not.toContain("[dcp-id]");
     expect(JSON.stringify(pruned)).toContain("m002=preceding assistant message");
     expect(state.messageMetaSnapshot.get("m002")?.priority).toBe("high");
+  });
+
+  test("message compression candidates preserve the active turn when there are fewer turns than keepRecentTurns", () => {
+    const state = createState();
+    const cfg = config({
+      compress: {
+        messageMode: {
+          enabled: true,
+          minContextPercent: 0.1,
+          keepRecentTurns: 2,
+          mediumTokens: 20,
+          highTokens: 100,
+          maxSuggestions: 5,
+        },
+      } as any,
+    });
+    const pruned = applyPruning(
+      [
+        textMessage("user", "active request", 1),
+        assistantToolCall("active-read", 2),
+        toolResult("active-read", "read", "live output " + "x".repeat(800), 3),
+      ],
+      state,
+      cfg,
+    );
+
+    expect(detectMessageCompressionCandidates(pruned, state, cfg, 0.8)).toEqual([]);
+  });
+
+  test("message compression candidates suggest completed tool-result bodies but not tool-call assistants", () => {
+    const state = createState();
+    const cfg = config({
+      compress: {
+        messageMode: {
+          enabled: true,
+          minContextPercent: 0.1,
+          keepRecentTurns: 1,
+          mediumTokens: 20,
+          highTokens: 100,
+          maxSuggestions: 5,
+        },
+      } as any,
+    });
+    const pruned = applyPruning(
+      [
+        textMessage("user", "old request", 1),
+        assistantToolCall("old-read", 2),
+        toolResult("old-read", "read", "old output " + "x".repeat(800), 3),
+        textMessage("user", "active request", 4),
+      ],
+      state,
+      cfg,
+    );
+
+    const candidates = detectMessageCompressionCandidates(pruned, state, cfg, 0.8);
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toMatchObject({ role: "toolResult", priority: "high" });
+    expect(state.messageMetaSnapshot.get(candidates[0]!.messageId)?.toolCallId).toBe("old-read");
   });
 
   test("emergency same-turn candidates preserve recent, unseen, user, and protected outputs", () => {
@@ -1684,6 +2130,17 @@ describe("DCP pruning effectiveness", () => {
       0.65,
       0.65,
     )).toBe(null);
+    expect(detectEmergencyCompressionCandidate(
+      providerMessages,
+      state,
+      cfg,
+      0.90,
+      0.65,
+    )).toBe(null);
+    // The newest eight groups remain protected. Earlier groups become eligible
+    // only after completed provider evidence, not merely because a later
+    // assistant exists in the transcript.
+    for (let index = 0; index < 92; index++) state.providerSeenToolIds.add(`marathon-${index}`);
     const emergencyCandidate = detectEmergencyCompressionCandidate(
       providerMessages,
       state,
@@ -1694,13 +2151,13 @@ describe("DCP pruning effectiveness", () => {
     expect(emergencyCandidate).not.toBe(null);
     expect(emergencyCandidate?.messageCount).toBeGreaterThan(0);
     expect(emergencyCandidate?.estimatedTokens).toBeGreaterThan(0);
-    expect(emergencyCandidate?.reason).toContain("emergency same-turn committed prefix");
+    expect(emergencyCandidate?.reason).toContain("emergency same-turn provider-evidenced prefix");
     expect(state.messageMetaSnapshot.get(emergencyCandidate!.startId)?.role).not.toBe("user");
 
     state.consecutiveIgnoredStrongNudges = 3;
     expect(decideAutoCompress(state, cfg, 0.90, 0.65, emergencyCandidate)).toEqual({
       shouldFire: true,
-      reason: "ignored-strongs",
+      reason: "ignored-opportunities",
     });
 
     const autoResult = await createAutoCompressionBlock({
@@ -1716,6 +2173,61 @@ describe("DCP pruning effectiveness", () => {
       active: true,
       topic: "Marathon fallback",
     });
+  });
+
+  test("disabled routine autoCandidates does not disable the emergency range safety planner", () => {
+    const state = createState();
+    const cfg = config({
+      compress: {
+        autoCandidates: {
+          enabled: false, minContextPercent: 0.4, keepRecentTurns: 1, minMessages: 1, minTokens: 1,
+        },
+        autoCompress: { enabled: true, patience: 1, summarizerModel: [], timeoutMs: 1000 },
+      } as any,
+      strategies: {
+        emergencyCurrentTurnPruning: {
+          enabled: true, hardContextPercent: 0.82, targetContextPercent: 0.70, patience: 1,
+          keepRecentToolPairs: 0, minOutputTokens: 1, maxSuggestions: 8, protectedTools: [],
+        },
+      },
+    });
+    const messages = [
+      textMessage("user", "single task", 1),
+      assistantToolCall("safe-1", 2),
+      toolResult("safe-1", "read", "a".repeat(1000), 3),
+      assistantToolCall("safe-2", 4),
+      toolResult("safe-2", "read", "b".repeat(1000), 5),
+      assistantToolCall("safe-3", 6),
+      toolResult("safe-3", "read", "c".repeat(1000), 7),
+    ];
+    const projected = applyPruning(messages, state, cfg);
+    state.providerSeenToolIds.add("safe-1");
+    state.providerSeenToolIds.add("safe-2");
+
+    expect(detectCompressionCandidate(projected, state, cfg, 0.9)).toBe(null);
+    expect(detectEmergencyCompressionCandidate(projected, state, cfg, 0.9, 0.65)).not.toBe(null);
+  });
+
+  test("emergency range does not treat a later assistant as provider evidence for unseen results", () => {
+    const state = createState();
+    const cfg = config({
+      compress: { autoCandidates: { enabled: true, minContextPercent: 0.1, keepRecentTurns: 1, minMessages: 1, minTokens: 1 } } as any,
+      strategies: { emergencyCurrentTurnPruning: { enabled: true, keepRecentToolPairs: 0, minOutputTokens: 1 } as any },
+    });
+    const messages = [
+      textMessage("user", "single task", 1),
+      assistantToolCall("unseen-old", 2),
+      toolResult("unseen-old", "read", "old result", 3),
+      assistantToolCall("live-head", 4),
+      toolResult("live-head", "read", "new result", 5),
+    ];
+    state.toolCalls.set("unseen-old", toolRecord("unseen-old", "read", "read::old", 100, 1));
+    state.toolCalls.set("live-head", toolRecord("live-head", "read", "read::new", 100, 1));
+    const projected = applyPruning(messages, state, cfg);
+
+    expect(detectEmergencyCompressionCandidate(projected, state, cfg, 0.9, 0.65)).toBe(null);
+    state.providerSeenToolIds.add("unseen-old");
+    expect(detectEmergencyCompressionCandidate(projected, state, cfg, 0.9, 0.65)).not.toBe(null);
   });
 
   test("emergency hard pressure is independent of a higher model threshold", () => {
@@ -1776,6 +2288,232 @@ describe("DCP pruning effectiveness", () => {
       collectProviderToolResultEvidence({ messages: [{ role: "user", content: "continue" }] }),
       record,
     )).toBe(false);
+  });
+
+  test("budget planner floors stale provider usage with the fresh repo projection", () => {
+    const plan = planDcpBudget({
+      providerUsageTokens: 30_000,
+      repoProjectedTokens: 90_000,
+      contextWindow: 100_000,
+      reservedOutputTokens: 10_000,
+      maxContextPercent: 0.65,
+      hardContextPercent: 0.82,
+      targetContextPercent: 0.60,
+    });
+
+    expect(plan.projectedBeforeTokens).toBe(90_000);
+    expect(plan.projectionOrigin).toBe("repo-over-provider");
+    expect(plan.inputCapacityTokens).toBe(90_000);
+    expect(plan.hardPressure).toBe(true);
+    expect(plan.requiredSavingsTokens).toBe(30_000);
+  });
+
+  test("budget planner falls back to repo projection and clips summaryBuffer to capacity", () => {
+    const plan = planDcpBudget({
+      providerUsageTokens: null,
+      repoProjectedTokens: 70_000,
+      contextWindow: 100_000,
+      reservedOutputTokens: 30_000,
+      reservedToolTokens: 5_000,
+      maxContextPercent: 0.64,
+      hardContextPercent: 0.90,
+      targetContextPercent: 0.60,
+      summaryBufferEnabled: true,
+      activeSummaryTokens: 20_000,
+      summaryBufferMaxBonusRatio: 0.10,
+    });
+
+    expect(plan.projectionOrigin).toBe("repo-fallback");
+    expect(plan.inputCapacityTokens).toBe(65_000);
+    expect(plan.summaryBufferTokensApplied).toBe(1_000);
+    expect(plan.softHeadroomTokens).toBe(65_000);
+    expect(plan.softHeadroomTokens).toBeLessThanOrEqual(plan.inputCapacityTokens);
+    expect(plan.hardPressure).toBe(true);
+  });
+
+  test("blocked reason classifier distinguishes live head, unknown evidence, protected minimum, and exhausted budget", () => {
+    const base = {
+      pressured: true,
+      candidateAvailable: false,
+      messageCandidateCount: 0,
+      requiredSavingsTokens: 2_000,
+      capacityExceeded: true,
+    };
+
+    expect(inferDcpBlockedReason(base)).toBe("live-head-only");
+    expect(inferDcpBlockedReason({ ...base, messageCandidateCount: 1 })).toBeUndefined();
+    expect(inferDcpBlockedReason({
+      ...base,
+      emergencyStats: {
+        totalPairs: 4, eligiblePairs: 0, eligibleRecoverableTokens: 0,
+        preservedRecentPairs: 1, preservedUnseenPairs: 3, preservedProtectedPairs: 0,
+      },
+    })).toBe("evidence-unknown");
+    expect(inferDcpBlockedReason({
+      ...base,
+      emergencyStats: {
+        totalPairs: 4, eligiblePairs: 0, eligibleRecoverableTokens: 0,
+        preservedRecentPairs: 1, preservedUnseenPairs: 0, preservedProtectedPairs: 3,
+      },
+    })).toBe("protected-budget-exceeded");
+    expect(inferDcpBlockedReason({
+      ...base,
+      emergencyStats: {
+        totalPairs: 4, eligiblePairs: 2, eligibleRecoverableTokens: 1_000,
+        preservedRecentPairs: 2, preservedUnseenPairs: 0, preservedProtectedPairs: 0,
+      },
+    })).toBe("budget-exhausted");
+  });
+
+  test("progress controller exposes explicit normal, pressure, waiting, preparing, and blocked phases", () => {
+    const base = {
+      enabled: true,
+      autoEnabled: true,
+      pressure: true,
+      candidateAvailable: true,
+      ignoredOpportunities: 0,
+      patience: 1,
+    };
+
+    expect(decideDcpProgress({ ...base, pressure: false })).toEqual({
+      phase: "normal", shouldPrepare: false, reason: "below-pressure",
+    });
+    expect(decideDcpProgress({ ...base, autoEnabled: false })).toEqual({
+      phase: "pressure", shouldPrepare: false, reason: "auto-disabled",
+    });
+    expect(decideDcpProgress({ ...base, candidateAvailable: false })).toEqual({
+      phase: "awaiting_opportunity", shouldPrepare: false, reason: "no-candidate",
+    });
+    expect(decideDcpProgress({ ...base, ignoredOpportunities: 1 })).toEqual({
+      phase: "awaiting_opportunity", shouldPrepare: false, reason: "below-patience",
+    });
+    expect(decideDcpProgress({ ...base, ignoredOpportunities: 2 })).toEqual({
+      phase: "preparing", shouldPrepare: true, reason: "ignored-opportunities",
+    });
+    expect(decideDcpProgress({ ...base, blockedReason: "protected-budget-exceeded" })).toEqual({
+      phase: "blocked",
+      shouldPrepare: false,
+      reason: "protected-budget-exceeded",
+      blockedReason: "protected-budget-exceeded",
+    });
+  });
+
+  test("progress controller exposes committed, cooldown, and degraded terminal phases", () => {
+    const base = {
+      enabled: true,
+      autoEnabled: true,
+      pressure: true,
+      candidateAvailable: true,
+      ignoredOpportunities: 5,
+      patience: 1,
+    };
+    expect(decideDcpProgress({ ...base, justCommitted: true }).phase).toBe("committed");
+    expect(decideDcpProgress({ ...base, cooldown: true }).phase).toBe("cooldown");
+    expect(decideDcpProgress({ ...base, degradedReason: "evidence unavailable" })).toEqual({
+      phase: "degraded", shouldPrepare: false, reason: "evidence unavailable",
+    });
+  });
+
+  test("provider evidence tracker promotes identical retries only after a successful terminal message", () => {
+    const tracker = new ProviderEvidenceTracker();
+    const payload = { messages: [{ role: "tool", tool_call_id: "retry-pair", content: "visible" }] };
+    const attempt = {
+      sessionEpoch: 7,
+      provider: "test-provider",
+      model: "test-model",
+      contentRevision: providerPayloadRevision(payload),
+      statePath: "/tmp/retry-state.json",
+      toolIds: new Set(["retry-pair"]),
+      opportunityAvailable: true,
+    };
+
+    expect(tracker.begin(attempt).attempts).toBe(1);
+    expect(tracker.begin(attempt).attempts).toBe(2);
+    const completion = tracker.complete({
+      sessionEpoch: 7,
+      provider: "test-provider",
+      model: "test-model",
+      stopReason: "stop",
+    });
+
+    expect(completion.status).toBe("promote");
+    if (completion.status === "promote") {
+      expect(completion.attempts).toBe(2);
+      expect([...completion.toolIds]).toEqual(["retry-pair"]);
+      expect(completion.statePath).toBe("/tmp/retry-state.json");
+      expect(completion.opportunityAvailable).toBe(true);
+    }
+  });
+
+  test("provider evidence tracker refuses aborted streams and consumes the pending attempt", () => {
+    const tracker = new ProviderEvidenceTracker();
+    tracker.begin({
+      sessionEpoch: 3,
+      provider: "test-provider",
+      model: "test-model",
+      contentRevision: providerPayloadRevision({ input: "request" }),
+      toolIds: new Set(["abort-pair"]),
+    });
+
+    expect(tracker.complete({
+      sessionEpoch: 3,
+      provider: "test-provider",
+      model: "test-model",
+      stopReason: "aborted",
+    })).toEqual({ status: "refused", reason: "terminal-failure", attempts: 1 });
+    expect(tracker.complete({
+      sessionEpoch: 3,
+      provider: "test-provider",
+      model: "test-model",
+      stopReason: "stop",
+    })).toEqual({ status: "refused", reason: "no-pending", attempts: 0 });
+  });
+
+  test("provider evidence tracker refuses interleaved main and summarizer-shaped requests without a request id", () => {
+    const tracker = new ProviderEvidenceTracker();
+    tracker.begin({
+      sessionEpoch: 11,
+      provider: "main-provider",
+      model: "main-model",
+      contentRevision: providerPayloadRevision({ messages: [{ role: "tool", tool_call_id: "main-pair" }] }),
+      statePath: "/tmp/main-state.json",
+      toolIds: new Set(["main-pair"]),
+    });
+    const pending = tracker.begin({
+      sessionEpoch: 11,
+      provider: "summary-provider",
+      model: "summary-model",
+      contentRevision: providerPayloadRevision({ messages: [{ role: "user", content: "summarize" }] }),
+      statePath: "/tmp/main-state.json",
+      toolIds: new Set(),
+    });
+
+    expect(pending.ambiguous).toBe(true);
+    expect(tracker.complete({
+      sessionEpoch: 11,
+      provider: "main-provider",
+      model: "main-model",
+      stopReason: "toolUse",
+    })).toEqual({ status: "refused", reason: "ambiguous", attempts: 2 });
+  });
+
+  test("provider evidence tracker treats changed content on the same model as ambiguous interleaving", () => {
+    const tracker = new ProviderEvidenceTracker();
+    const base = {
+      sessionEpoch: 5,
+      provider: "test-provider",
+      model: "test-model",
+      toolIds: new Set(["pair"]),
+    };
+    tracker.begin({ ...base, contentRevision: providerPayloadRevision({ input: "first" }) });
+    tracker.begin({ ...base, contentRevision: providerPayloadRevision({ input: "second" }) });
+
+    expect(tracker.complete({
+      sessionEpoch: 5,
+      provider: "test-provider",
+      model: "test-model",
+      stopReason: "stop",
+    })).toEqual({ status: "refused", reason: "ambiguous", attempts: 2 });
   });
 
   test("emergency analysis excludes bashExecution messages that cannot be placeholder-pruned", () => {
@@ -1860,6 +2598,82 @@ describe("DCP pruning effectiveness", () => {
       .filter((message) => message.role === "toolResult")
       .map((message) => message.toolCallId));
     expect(assistantIds).toEqual(resultIds);
+  });
+
+  test("new rollups carry protected fragments once without recursively expanding the old summary", () => {
+    const state = createState();
+    const cfg = config({ compress: { protectUserMessages: true } as any });
+    state.messageIdSnapshot.set("m001", 1);
+    state.messageMetaSnapshot.set("m001", {
+      timestamp: 1,
+      stableId: "id:protected-user",
+      role: "user",
+      text: "MUST_KEEP_EXACT_CONSTRAINT",
+      tokenEstimate: 20,
+    });
+
+    const first = createRangeCompressionBlock({
+      topic: "First",
+      summary: "OLD_VERBATIM_SUMMARY_BODY " + "x".repeat(500),
+      startTimestamp: 1,
+      endTimestamp: 1,
+      startMessageId: "id:protected-user",
+      endMessageId: "id:protected-user",
+      anchorTimestamp: 2,
+      state,
+      config: cfg,
+      version: 2,
+      replacementMode: "range",
+    }).block;
+    expect(first.protectedFragments).toHaveLength(1);
+    expect(first.protectedFragments?.[0]?.text).toBe("MUST_KEEP_EXACT_CONSTRAINT");
+    expect(first.protectedFragments?.[0]?.hash).toMatch(/^[0-9a-f]{64}$/);
+
+    state.messageIdSnapshot.clear();
+    state.messageMetaSnapshot.clear();
+    const second = createRangeCompressionBlock({
+      topic: "Second",
+      summary: "Decision: retained meaning from the prior block.",
+      startTimestamp: 1,
+      endTimestamp: 1,
+      anchorTimestamp: 2,
+      state,
+      config: cfg,
+      version: 2,
+      replacementMode: "range",
+      validatePlaceholders: false,
+      expandPlaceholders: false,
+    }).block;
+
+    expect(second.coveredBlockIds).toEqual([first.id]);
+    expect(second.summary).toContain("MUST_KEEP_EXACT_CONSTRAINT");
+    expect(second.summary).not.toContain("OLD_VERBATIM_SUMMARY_BODY");
+    expect(second.summary.match(/MUST_KEEP_EXACT_CONSTRAINT/g)).toHaveLength(1);
+    expect(second.protectedFragments).toHaveLength(1);
+    expect(second.protectedFragments?.[0]?.origin).toBe(first.protectedFragments?.[0]?.origin);
+  });
+
+  test("legacy rollups without a protected-fragment ledger retain verbatim expansion", () => {
+    const state = createState();
+    const legacy = block(1, 1, 1);
+    legacy.summary = "LEGACY_SUMMARY_MUST_NOT_DISAPPEAR";
+    legacy.protectedFragments = undefined;
+    state.compressionBlocks = [legacy];
+    state.nextBlockId = 2;
+
+    const rolled = createRangeCompressionBlock({
+      topic: "Legacy rollup",
+      summary: "new summary without explicit placeholder",
+      startTimestamp: 1,
+      endTimestamp: 1,
+      anchorTimestamp: 2,
+      state,
+      config: config(),
+      version: 2,
+      replacementMode: "range",
+    }).block;
+
+    expect(rolled.summary).toContain("LEGACY_SUMMARY_MUST_NOT_DISAPPEAR");
   });
 
   test("compression blocks prefer stable raw message IDs over changed timestamps", async () => {
@@ -1967,7 +2781,7 @@ describe("DCP pruning effectiveness", () => {
         { topic: "Protected Tool", ranges: [{ startId: "m001", endId: "m001", summary: "tool summary" }] },
         undefined,
         undefined,
-        { ui: { notify() {} } },
+        { cwd, ui: { notify() {} } },
       );
     } finally {
       process.chdir(previousCwd);
@@ -1976,6 +2790,85 @@ describe("DCP pruning effectiveness", () => {
     const summary = state.compressionBlocks[0]?.summary ?? "";
     expect(summary).toContain("compact subagent summary");
     expect(summary).toContain("full subagent result body");
+  });
+
+  test("protected subagent artifact recovery rejects symlinks outside the session cwd atomically", async () => {
+    const state = createState();
+    const cwd = mkdtempSync(join(tmpdir(), "dcp-subagent-symlink-root-"));
+    const outside = mkdtempSync(join(tmpdir(), "dcp-subagent-symlink-outside-"));
+    const agentDir = join(cwd, ".pi", "subagents", "run", "agent-1");
+    mkdirSync(agentDir, { recursive: true });
+    const outsideFile = join(outside, "result.md");
+    writeFileSync(outsideFile, "outside secret body");
+    symlinkSync(outsideFile, join(agentDir, "result.md"));
+
+    state.messageIdSnapshot.set("m001", 1);
+    state.messageMetaSnapshot.set("m001", {
+      timestamp: 1,
+      role: "toolResult",
+      toolCallId: "call-sub-symlink",
+      toolName: "subagents",
+      text: "compact result",
+      tokenEstimate: 50,
+    });
+    state.toolCalls.set("call-sub-symlink", {
+      ...toolRecord("call-sub-symlink", "subagents", "subagents::{}", 50),
+      outputText: "compact result\nFull result: .pi/subagents/run/agent-1/result.md",
+      outputDetails: { artifacts: { resultMd: ".pi/subagents/run/agent-1/result.md" } },
+    });
+
+    let registeredTool: any;
+    registerCompressTool(
+      { registerTool: (tool: any) => { registeredTool = tool } } as any,
+      state,
+      config({ compress: { protectedTools: ["subagents"] } as any }),
+    );
+    await expect(registeredTool.execute(
+      "tool-call",
+      { topic: "Protected Tool", ranges: [{ startId: "m001", endId: "m001", summary: "tool summary" }] },
+      undefined,
+      undefined,
+      { cwd, ui: { notify() {} } },
+    )).rejects.toThrow(/outside the session cwd/i);
+    expect(state.compressionBlocks).toHaveLength(0);
+  });
+
+  test("protected subagent artifact recovery refuses oversized files instead of truncating them", async () => {
+    const state = createState();
+    const cwd = mkdtempSync(join(tmpdir(), "dcp-subagent-large-"));
+    const agentDir = join(cwd, ".pi", "subagents", "run", "agent-1");
+    mkdirSync(agentDir, { recursive: true });
+    writeFileSync(join(agentDir, "result.md"), "x".repeat(60_000));
+
+    state.messageIdSnapshot.set("m001", 1);
+    state.messageMetaSnapshot.set("m001", {
+      timestamp: 1,
+      role: "toolResult",
+      toolCallId: "call-sub-large",
+      toolName: "subagents",
+      text: "compact result",
+      tokenEstimate: 50,
+    });
+    state.toolCalls.set("call-sub-large", {
+      ...toolRecord("call-sub-large", "subagents", "subagents::{}", 50),
+      outputText: "compact result\nFull result: .pi/subagents/run/agent-1/result.md",
+      outputDetails: { artifacts: { resultMd: ".pi/subagents/run/agent-1/result.md" } },
+    });
+
+    let registeredTool: any;
+    registerCompressTool(
+      { registerTool: (tool: any) => { registeredTool = tool } } as any,
+      state,
+      config({ compress: { protectedTools: ["subagents"] } as any }),
+    );
+    await expect(registeredTool.execute(
+      "tool-call",
+      { topic: "Protected Tool", ranges: [{ startId: "m001", endId: "m001", summary: "tool summary" }] },
+      undefined,
+      undefined,
+      { cwd, ui: { notify() {} } },
+    )).rejects.toThrow(/artifact exceeds|recovery budget/i);
+    expect(state.compressionBlocks).toHaveLength(0);
   });
 
   test("per-model thresholds and summaryBuffer adjust nudge decisions", () => {
@@ -2049,6 +2942,58 @@ describe("DCP pruning effectiveness", () => {
     expect(state.compressionBlocks[0]?.active).toBe(true);
     expect(state.compressionBlocks[0]?.deactivatedByUser).toBe(false);
     expect(notifications.join("\n")).toContain("Recompressed block b1");
+  });
+
+  test("/dcp decompress refuses a modern block when exact raw source boundaries are unavailable", async () => {
+    const state = createState();
+    state.compressionBlocks = [{
+      ...block(1, 10, 20),
+      version: 2,
+      replacementMode: "range",
+      startMessageId: "id:source-a",
+      endMessageId: "id:source-b",
+    }];
+
+    let command: any;
+    const pi = { registerCommand(_name: string, registered: any) { command = registered }, sendMessage() {} } as any;
+    const notifications: string[] = [];
+    const ctx = {
+      ui: { notify(message: string) { notifications.push(message) } },
+      sessionManager: { getBranch: () => [{ type: "message", id: "source-a", message: textMessage("user", "only start survives", 10) }] },
+    } as any;
+    registerCommands(pi, state, config());
+
+    await command.handler("decompress 1", ctx);
+    expect(state.compressionBlocks[0]?.active).toBe(true);
+    expect(state.compressionBlocks[0]?.deactivatedByUser).not.toBe(true);
+    expect(notifications.join("\n")).toContain("raw source is unavailable");
+  });
+
+  test("/dcp decompress and recompress preserve inactive rollup descendants when exact raw source exists", async () => {
+    const state = createState();
+    state.compressionBlocks = [
+      { ...block(1, 10, 20), active: false, version: 2, replacementMode: "range", startMessageId: "id:a", endMessageId: "id:b" },
+      { ...block(2, 10, 40), version: 2, replacementMode: "range", startMessageId: "id:a", endMessageId: "id:d", coveredBlockIds: [1] },
+    ];
+    let command: any;
+    const pi = { registerCommand(_name: string, registered: any) { command = registered }, sendMessage() {} } as any;
+    const notifications: string[] = [];
+    const branch = [
+      { type: "message", id: "a", message: textMessage("user", "a", 10) },
+      { type: "message", id: "b", message: textMessage("assistant", "b", 20) },
+      { type: "message", id: "d", message: textMessage("assistant", "d", 40) },
+    ];
+    const ctx = { ui: { notify(message: string) { notifications.push(message) } }, sessionManager: { getBranch: () => branch } } as any;
+    registerCommands(pi, state, config());
+
+    await command.handler("decompress 2", ctx);
+    expect(state.compressionBlocks.map((item) => item.active)).toEqual([false, false]);
+    expect(state.compressionBlocks[1]?.deactivatedReason).toBe("user");
+
+    await command.handler("recompress 2", ctx);
+    expect(state.compressionBlocks.map((item) => item.active)).toEqual([false, true]);
+    expect(state.compressionBlocks[1]?.deactivatedByUser).toBe(false);
+    expect(state.compressionBlocks[1]?.deactivatedReason).toBeUndefined();
   });
 
   test("/dcp stats reports nudge telemetry from session entries and active anchors", async () => {
@@ -2369,19 +3314,17 @@ describe("DCP pruning effectiveness", () => {
     });
     const messages = [
       textMessage("user", "inspect", 1),
-      assistantToolCall("parallel-a", 2),
-      toolResult("parallel-a", "read", "first parallel result", 9),
-      assistantToolCall("parallel-b", 3),
-      toolResult("parallel-b", "read", "second parallel result", 9),
+      textMessage("assistant", "first same-time answer", 9),
+      textMessage("assistant", "second same-time answer", 9),
       textMessage("user", "recent", 10),
     ];
 
     const pruned = applyPruning(messages, state, cfg);
     const resultIds = detectMessageCompressionCandidates(pruned, state, cfg, 0.5)
-      .filter((candidate) => candidate.role === "toolResult")
+      .filter((candidate) => candidate.role === "assistant")
       .map((candidate) => candidate.messageId);
     const expectedIds = [...state.messageMetaSnapshot]
-      .filter(([, meta]) => meta.role === "toolResult")
+      .filter(([, meta]) => meta.role === "assistant")
       .map(([id]) => id);
 
     expect(new Set(resultIds)).toEqual(new Set(expectedIds));
@@ -2404,7 +3347,7 @@ describe("DCP pruning effectiveness", () => {
     });
     const messages = [
       textMessage("user", "old request", 1),
-      toolResult("published-result", "read", "published output", 9),
+      textMessage("assistant", "published assistant output", 9),
       textMessage("assistant", "unpublished assistant output", 9),
       textMessage("user", "recent request", 10),
     ];
@@ -2416,7 +3359,6 @@ describe("DCP pruning effectiveness", () => {
         timestamp: message.timestamp,
         stableId: stableKeys[index],
         role: message.role,
-        toolCallId: message.toolCallId,
         tokenEstimate: 10,
       });
     }
@@ -2424,9 +3366,9 @@ describe("DCP pruning effectiveness", () => {
     const candidates = detectMessageCompressionCandidates(messages, state, cfg, 0.5);
 
     expect(candidates).toContainEqual(
-      expect.objectContaining({ messageId: "m002", role: "toolResult" }),
+      expect.objectContaining({ messageId: "m002", role: "assistant" }),
     );
-    expect(candidates.some((candidate) => candidate.role === "assistant")).toBe(false);
+    expect(candidates.filter((candidate) => candidate.role === "assistant")).toHaveLength(1);
     expect(new Set(candidates.map((candidate) => candidate.messageId)).size).toBe(candidates.length);
   });
 
@@ -2473,6 +3415,90 @@ describe("DCP pruning effectiveness", () => {
     );
     expect(requestThree[1]?.content[0]?.thinkingSignature).toBe("sig-one");
     expect(requestThree[3]?.content[0]?.thinkingSignature).toBe("sig-two");
+  });
+
+  test("two continuations after an intentional v2 rewrite preserve the rewritten prefix and assistant bytes", () => {
+    const state = createState();
+    const cfg = config({
+      strategies: {
+        deduplication: { enabled: false, protectedTools: [] },
+        purgeErrors: { enabled: false, turns: 4, protectedTools: [] },
+        autoToolPruning: { enabled: false, maxOutputTokens: 2000, keepRecentTurns: 2, readLikeTools: [], readLikeTurns: 3, protectedTools: [] },
+      },
+    });
+    const model = {
+      id: "gpt-5.6-sol",
+      provider: "openai-codex",
+      api: "openai-codex-responses",
+      input: ["text"],
+      reasoning: true,
+      compat: {},
+    } as any;
+    const toResponsesInput = (messages: any[]) => convertResponsesMessages(
+      model,
+      { systemPrompt: "", messages, tools: [] } as any,
+      new Set(["openai-codex"]),
+    );
+
+    const rawBase = [
+      textMessage("user", "older request", 1),
+      assistantToolCall("old-read", 2),
+      toolResult("old-read", "read", "old raw output", 3),
+      textMessage("user", "active request", 4),
+    ];
+    applyPruning(rawBase, state, cfg);
+    const startMeta = state.messageMetaSnapshot.get("m002")!;
+    const endMeta = state.messageMetaSnapshot.get("m003")!;
+    createRangeCompressionBlock({
+      topic: "Intentional rewrite",
+      summary: "Old read was completed and is no longer needed verbatim.",
+      startTimestamp: startMeta.timestamp,
+      endTimestamp: endMeta.timestamp,
+      startMessageId: startMeta.stableId,
+      endMessageId: endMeta.stableId,
+      state,
+      config: cfg,
+      mode: "range",
+      version: 2,
+      replacementMode: "range",
+    });
+
+    const rewritten = applyPruning(rawBase, state, cfg);
+    expect(JSON.stringify(rewritten)).toContain("Intentional rewrite");
+    expect(JSON.stringify(rewritten)).not.toContain("old raw output");
+    const rewrittenPayload = toResponsesInput(rewritten);
+
+    const responseOne = {
+      role: "assistant",
+      provider: model.provider,
+      api: model.api,
+      model: model.id,
+      stopReason: "stop",
+      usage: {},
+      content: [{ type: "text", text: "first continuation", textSignature: "sig-cont-1" }],
+      timestamp: 5,
+    };
+    const passOne = applyPruning([...rawBase, responseOne], state, cfg);
+    expect(JSON.stringify(passOne.slice(0, rewritten.length))).toBe(JSON.stringify(rewritten));
+    expect(JSON.stringify(passOne[passOne.length - 1])).toBe(JSON.stringify(responseOne));
+    const payloadOne = toResponsesInput(passOne);
+    expect(JSON.stringify(payloadOne.slice(0, rewrittenPayload.length))).toBe(JSON.stringify(rewrittenPayload));
+
+    const responseTwo = {
+      role: "assistant",
+      provider: model.provider,
+      api: model.api,
+      model: model.id,
+      stopReason: "stop",
+      usage: {},
+      content: [{ type: "text", text: "second continuation", textSignature: "sig-cont-2" }],
+      timestamp: 6,
+    };
+    const passTwo = applyPruning([...rawBase, responseOne, responseTwo], state, cfg);
+    expect(JSON.stringify(passTwo.slice(0, passOne.length))).toBe(JSON.stringify(passOne));
+    expect(JSON.stringify(passTwo[passTwo.length - 1])).toBe(JSON.stringify(responseTwo));
+    const payloadTwo = toResponsesInput(passTwo);
+    expect(JSON.stringify(payloadTwo.slice(0, payloadOne.length))).toBe(JSON.stringify(payloadOne));
   });
 
   test("OpenAI Responses payload conversion preserves the append-only prefix", () => {
@@ -2624,6 +3650,45 @@ describe("DCP pruning effectiveness", () => {
     expect(nudgeEvents.map((event) => event.event)).toEqual(["emitted", "emitted"]);
   });
 
+  test("DCP fresh projection overrides stale-low native usage and aborts an unshrinkable huge paste", async () => {
+    const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
+    const nudgeEvents: any[] = [];
+    let aborts = 0;
+    const pi = {
+      on(event: string, handler: (event: any, ctx: any) => unknown) {
+        handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+      },
+      registerTool() {},
+      registerCommand() {},
+      appendEntry(type: string, data: any) {
+        if (type === "dcp-nudge") nudgeEvents.push(data);
+      },
+      sendMessage() {},
+    } as any;
+    await dcpModule(pi);
+    const contextHandler = handlers.get("context")?.[0];
+    expect(contextHandler).toBeDefined();
+
+    const messages = [textMessage("user", "fresh huge paste " + "x".repeat(50_000), 1)];
+    const staleLowCtx = {
+      hasUI: false,
+      sessionManager: { getBranch: () => [] },
+      getContextUsage: () => ({ tokens: 1_000, contextWindow: 10_000, percent: 10 }),
+      abort() { aborts++; },
+    };
+
+    const result = await contextHandler?.(
+      { type: "context", messages },
+      staleLowCtx,
+    ) as { messages: any[] } | undefined;
+    const rendered = result?.messages.map(contentText).join("\n") ?? "";
+
+    expect(rendered).toContain("fresh huge paste");
+    expect(rendered).not.toContain("<dcp-system-reminder>");
+    expect(nudgeEvents).toHaveLength(0);
+    expect(aborts).toBe(1);
+  });
+
   test("DCP does not spam routine reminders when no candidate exists below emergency pressure", async () => {
     const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
     const nudgeEvents: any[] = [];
@@ -2674,6 +3739,9 @@ describe("DCP pruning effectiveness", () => {
 
     await dcpModule(pi);
     const contextHandler = handlers.get("context")?.[0];
+    const providerHandler = handlers.get("before_provider_request")?.[0];
+    const afterProviderHandler = handlers.get("after_provider_response")?.[0];
+    const messageEndHandler = handlers.get("message_end")?.[0];
     const toolCallHandler = handlers.get("tool_call")?.[0];
     const toolResultHandler = handlers.get("tool_result")?.[0];
     expect(contextHandler).toBeDefined();
@@ -2686,15 +3754,15 @@ describe("DCP pruning effectiveness", () => {
     ];
     const lowPressureCtx = {
       hasUI: false,
+      model: { provider: "test-provider", id: "test-model" },
       sessionManager: { getBranch: () => [] },
-      getContextUsage: () => ({ tokens: 1_000, contextWindow: 10_000, percent: 10 }),
+      getContextUsage: () => ({ tokens: 1_000, contextWindow: 100_000, percent: 1 }),
       ui: { notify() {} },
+      abort() {},
     };
     const highPressureCtx = {
-      hasUI: false,
-      sessionManager: { getBranch: () => [] },
+      ...lowPressureCtx,
       getContextUsage: () => ({ tokens: 9_000, contextWindow: 10_000, percent: 90 }),
-      ui: { notify() {} },
     };
 
     // Seed addressable IDs, then cover every message before the latest user
@@ -2753,6 +3821,26 @@ describe("DCP pruning effectiveness", () => {
     expect(detectCompressionCandidate(candidateMessages, candidateState, normalCandidateConfig, 0.9)).toBe(null);
     expect(detectMessageCompressionCandidates(candidateMessages, candidateState, normalCandidateConfig, 0.9)).toEqual([]);
 
+    // Publish the completed same-turn results through the real provider lifecycle.
+    // A later assistant alone is not evidence after F09.
+    await contextHandler?.({ type: "context", messages }, lowPressureCtx);
+    await providerHandler?.({
+      type: "before_provider_request",
+      payload: {
+        messages: messages
+          .filter((message) => message.role === "toolResult")
+          .map((message) => ({ role: "tool", tool_call_id: message.toolCallId, content: contentText(message) })),
+      },
+    }, lowPressureCtx);
+    await afterProviderHandler?.({ type: "after_provider_response", status: 200, headers: {} }, lowPressureCtx);
+    await messageEndHandler?.({
+      type: "message_end",
+      message: {
+        role: "assistant", provider: "test-provider", model: "test-model",
+        content: [{ type: "text", text: "completed provider pass" }], stopReason: "stop", timestamp: 100,
+      },
+    }, lowPressureCtx);
+
     const result = await contextHandler?.({ type: "context", messages }, highPressureCtx) as { messages: any[] } | undefined;
     const rendered = result?.messages.map(contentText).join("\n") ?? "";
 
@@ -2788,10 +3876,12 @@ describe("DCP pruning effectiveness", () => {
       const contextHandler = handlers.get("context")?.[0];
       const providerHandler = handlers.get("before_provider_request")?.[0];
       const afterProviderHandler = handlers.get("after_provider_response")?.[0];
+      const messageEndHandler = handlers.get("message_end")?.[0];
       const toolCallHandler = handlers.get("tool_call")?.[0];
       const toolResultHandler = handlers.get("tool_result")?.[0];
       const lowPressureCtx = {
         hasUI: false,
+        model: { provider: "test-provider", id: "test-model" },
         sessionManager: { getBranch: () => [] },
         getContextUsage: () => ({ tokens: 1_000, contextWindow: 10_000, percent: 10 }),
         ui: { notify() {} },
@@ -2855,6 +3945,17 @@ describe("DCP pruning effectiveness", () => {
         { type: "after_provider_response", status: 200, headers: {} },
         lowPressureCtx,
       );
+      await messageEndHandler?.({
+        type: "message_end",
+        message: {
+          role: "assistant",
+          provider: "test-provider",
+          model: "test-model",
+          content: [{ type: "text", text: "provider pass complete" }],
+          stopReason: "stop",
+          timestamp: 100,
+        },
+      }, lowPressureCtx);
       await addPair(12);
 
       const beforeTokens = messages.reduce((sum, message) => sum + estimateTokens(contentText(message)), 0);
@@ -2878,9 +3979,16 @@ describe("DCP pruning effectiveness", () => {
         .map((line) => JSON.parse(line));
       const events = debugEntries.map((entry) => entry.event);
       expect(events).toContain("context.emergency_compression_candidate");
-      expect(events).not.toContain("context.strong_nudge_without_candidate");
+      expect(events).toContain("context.strong_nudge_without_candidate");
+      expect(events).toContain("context.progress_blocked");
       expect(events).not.toContain("compress.auto_blocked_no_candidate");
       expect(events).toContain("prune.emergency_current_turn");
+      const blockedIndex = events.indexOf("context.progress_blocked");
+      const seenIndex = events.indexOf("provider_payload.tool_results_seen");
+      const candidateIndex = events.lastIndexOf("context.emergency_compression_candidate");
+      expect(blockedIndex).toBeGreaterThanOrEqual(0);
+      expect(seenIndex).toBeGreaterThan(blockedIndex);
+      expect(candidateIndex).toBeGreaterThan(seenIndex);
       const pruneEvent = debugEntries.find((entry) => entry.event === "prune.emergency_current_turn");
       expect(pruneEvent.targetMet || pruneEvent.eligibleExhausted).toBe(true);
       expect(pruneEvent.prunedOutputs).toBeLessThan(pruneEvent.totalPairs);
@@ -2894,9 +4002,9 @@ describe("DCP pruning effectiveness", () => {
     }
   });
 
-  test.serial("DCP emergency no-candidate counter advances and persists across sidecar restore", async () => {
-    const sessionDir = mkdtempSync(join(tmpdir(), "dcp-emergency-counter-"));
-    const sessionId = "emergency-counter";
+  test.serial("DCP emergency patience advances only on completed provider opportunities and persists across sidecar restore", async () => {
+    const sessionDir = mkdtempSync(join(tmpdir(), "dcp-emergency-opportunity-"));
+    const sessionId = "emergency-opportunity";
     const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
     const pi = {
       on(event: string, handler: (event: any, ctx: any) => unknown) {
@@ -2908,9 +4016,22 @@ describe("DCP pruning effectiveness", () => {
       sendMessage() {},
     } as any;
     await dcpModule(pi);
-    let usagePercent = 70;
+
+    const runtimeConfig = loadConfig();
+    const thresholds = resolveContextThresholds(
+      runtimeConfig,
+      ["test-provider/test-model", "test-model"],
+      10_000,
+    );
+    const hardContextPercent = runtimeConfig.strategies.emergencyCurrentTurnPruning.hardContextPercent;
+    let usagePercent = 100 * Math.max(
+      0.90,
+      thresholds.maxContextPercent + 0.05,
+      hardContextPercent + 0.01,
+    );
     const ctx = {
       hasUI: false,
+      model: { provider: "test-provider", id: "test-model" },
       sessionManager: {
         getBranch: () => [],
         getSessionId: () => sessionId,
@@ -2918,7 +4039,7 @@ describe("DCP pruning effectiveness", () => {
         getHeader: () => ({ id: sessionId, cwd: "/tmp" }),
       },
       getContextUsage: () => ({
-        tokens: usagePercent * 100,
+        tokens: Math.round(usagePercent * 100),
         contextWindow: 10_000,
         percent: usagePercent,
       }),
@@ -2926,25 +4047,65 @@ describe("DCP pruning effectiveness", () => {
     await handlers.get("session_start")?.[0]?.({ type: "session_start", reason: "startup" }, ctx);
 
     const messages = [textMessage("user", "active request", 1), textMessage("assistant", "working", 2)];
-    await handlers.get("context")?.[0]?.({ type: "context", messages }, ctx);
-    await handlers.get("context")?.[0]?.({ type: "context", messages }, ctx);
+    const statePath = join(sessionDir, "dcp-state", `${sessionId}.json`);
 
-    const serialized = JSON.parse(readFileSync(
-      join(sessionDir, "dcp-state", `${sessionId}.json`),
-      "utf8",
-    ));
+    // Repeated projection/context passes do not consume patience.
+    await handlers.get("context")?.[0]?.({ type: "context", messages }, ctx);
+    await handlers.get("context")?.[0]?.({ type: "context", messages }, ctx);
+    expect(readPersistedDcpPayloadSync(statePath).consecutiveIgnoredStrongNudges).toBe(0);
+
+    const providerEvent = {
+      type: "before_provider_request",
+      payload: { messages: [{ role: "user", content: "active request" }] },
+    };
+
+    // One completed provider response with the emergency reminder available
+    // consumes exactly one opportunity. HTTP acceptance alone consumes none.
+    await handlers.get("before_provider_request")?.[0]?.(providerEvent, ctx);
+    await handlers.get("after_provider_response")?.[0]?.(
+      { type: "after_provider_response", status: 200, headers: {} },
+      ctx,
+    );
+    expect(readPersistedDcpPayloadSync(statePath).consecutiveIgnoredStrongNudges).toBe(0);
+    await handlers.get("message_end")?.[0]?.({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        provider: "test-provider",
+        model: "test-model",
+        content: [{ type: "text", text: "still working" }],
+        stopReason: "stop",
+        timestamp: 3,
+      },
+    }, ctx);
+    expect(readPersistedDcpPayloadSync(statePath).consecutiveIgnoredStrongNudges).toBe(1);
+
+    // A transport/provider retry of the identical logical request is still one
+    // model opportunity, not two patience ticks.
+    await handlers.get("context")?.[0]?.({ type: "context", messages }, ctx);
+    await handlers.get("before_provider_request")?.[0]?.(providerEvent, ctx);
+    await handlers.get("before_provider_request")?.[0]?.(providerEvent, ctx);
+    await handlers.get("message_end")?.[0]?.({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        provider: "test-provider",
+        model: "test-model",
+        content: [{ type: "text", text: "still working after retry" }],
+        stopReason: "stop",
+        timestamp: 4,
+      },
+    }, ctx);
+    const serialized = readPersistedDcpPayloadSync(statePath);
     expect(serialized.consecutiveIgnoredStrongNudges).toBe(2);
 
     const restored = createState();
     restoreState(restored, serialized);
     expect(restored.consecutiveIgnoredStrongNudges).toBe(2);
 
-    usagePercent = 30;
+    usagePercent = Math.max(1, Math.max(0, thresholds.minContextPercent - 0.05) * 100);
     await handlers.get("context")?.[0]?.({ type: "context", messages }, ctx);
-    const afterRelief = JSON.parse(readFileSync(
-      join(sessionDir, "dcp-state", `${sessionId}.json`),
-      "utf8",
-    ));
+    const afterRelief = readPersistedDcpPayloadSync(statePath);
     expect(afterRelief.consecutiveIgnoredStrongNudges).toBe(0);
   });
 
@@ -2964,6 +4125,7 @@ describe("DCP pruning effectiveness", () => {
     await dcpModule(pi);
     const ctx = {
       hasUI: false,
+      model: { provider: "test-provider", id: "test-model" },
       sessionManager: {
         getBranch: () => [],
         getSessionId: () => sessionId,
@@ -3002,14 +4164,35 @@ describe("DCP pruning effectiveness", () => {
     );
     await handlers.get("agent_end")?.[0]?.({ type: "agent_end" }, ctx);
     const statePath = join(sessionDir, "dcp-state", `${sessionId}.json`);
-    expect(JSON.parse(readFileSync(statePath, "utf8")).providerSeenToolIds).toEqual([]);
+    expect(readPersistedDcpPayloadSync(statePath).providerSeenToolIds).toEqual([]);
 
     await handlers.get("before_provider_request")?.[0]?.(providerEvent, ctx);
     await handlers.get("after_provider_response")?.[0]?.(
       { type: "after_provider_response", status: 200, headers: {} },
       ctx,
     );
-    expect(JSON.parse(readFileSync(statePath, "utf8")).providerSeenToolIds).toEqual(["provider-pair"]);
+    expect(readPersistedDcpPayloadSync(statePath).providerSeenToolIds).toEqual([]);
+
+    // Non-assistant message_end events are unrelated to provider completion and
+    // must not consume the pending request evidence.
+    await handlers.get("message_end")?.[0]?.({
+      type: "message_end",
+      message: { role: "user", content: [{ type: "text", text: "follow-up" }], timestamp: 4 },
+    }, ctx);
+    expect(readPersistedDcpPayloadSync(statePath).providerSeenToolIds).toEqual([]);
+
+    await handlers.get("message_end")?.[0]?.({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        provider: "test-provider",
+        model: "test-model",
+        content: [{ type: "text", text: "done" }],
+        stopReason: "stop",
+        timestamp: 4,
+      },
+    }, ctx);
+    expect(readPersistedDcpPayloadSync(statePath).providerSeenToolIds).toEqual(["provider-pair"]);
   });
 
   test("DCP context transform forces a strong nudge on context-window downgrade", async () => {
@@ -3117,6 +4300,23 @@ describe("DCP pruning effectiveness", () => {
     expect(decideAutoCompress(state, cfg, 0.80, 0.65, null).shouldFire).toBe(false);
   });
 
+  test("DCP manual mode cannot be widened into autonomous summary creation", () => {
+    const state = createState();
+    state.manualMode = true;
+    state.consecutiveIgnoredStrongNudges = 99;
+    const cfg = config({
+      compress: { autoCompress: { enabled: true, patience: 0, summarizerModel: [], timeoutMs: 1000 } } as any,
+    });
+    const candidate: CompressionCandidate = {
+      startId: "m001", endId: "m002", messageCount: 2, estimatedTokens: 5000, includedBlockIds: [], reason: "test",
+    };
+
+    expect(decideAutoCompress(state, cfg, 0.9, 0.65, candidate)).toEqual({
+      shouldFire: false,
+      reason: "auto-disabled",
+    });
+  });
+
   test("DCP auto-compress decision is disabled when autoCompress.enabled=false", () => {
     const cfg = config(); // autoCompress.enabled defaults to false
     const state = createState();
@@ -3193,6 +4393,254 @@ describe("DCP pruning effectiveness", () => {
     expect(state.compressionBlocks[0]?.summary).toContain("Auto-compressed by DCP");
   });
 
+  test("DCP auto-compress rejects a non-positive gain without mutating state", async () => {
+    const cfg = config({
+      compress: {
+        autoCompress: { enabled: true, patience: 2, summarizerModel: [], timeoutMs: 1000 },
+      } as any,
+    });
+    const state = createState();
+    const messages = [textMessage("assistant", "tiny source", 10)];
+    const stableId = stableMessageKeys(messages)[0]!;
+    state.messageIdsByStableId.set(stableId, "m001");
+    state.messageIdSnapshot.set("m001", 10);
+    state.messageMetaSnapshot.set("m001", {
+      timestamp: 10,
+      stableId,
+      role: "assistant",
+      tokenEstimate: 3,
+    });
+
+    await expect(createAutoCompressionBlock({
+      candidate: {
+        startId: "m001",
+        endId: "m001",
+        messageCount: 1,
+        estimatedTokens: 3,
+        includedBlockIds: [],
+        reason: "non-positive gain regression",
+      },
+      topic: "Tiny source",
+      state,
+      config: cfg,
+      messages,
+    })).rejects.toThrow(/non-positive|positive gain/i);
+
+    expect(state.compressionBlocks).toHaveLength(0);
+    expect(state.nextBlockId).toBe(1);
+  });
+
+  test("DCP auto-compress rejects positive gain below required budget recovery atomically", async () => {
+    const cfg = config({
+      compress: {
+        autoCompress: { enabled: true, patience: 2, summarizerModel: [], timeoutMs: 1000 },
+      } as any,
+    });
+    const state = createState();
+    const messages = [
+      textMessage("assistant", "a".repeat(4_000), 10),
+      textMessage("assistant", "b".repeat(4_000), 11),
+    ];
+    const stableKeys = stableMessageKeys(messages);
+    for (const [visibleId, index] of [["m001", 0], ["m002", 1]] as const) {
+      state.messageIdsByStableId.set(stableKeys[index]!, visibleId);
+      state.messageIdSnapshot.set(visibleId, messages[index]!.timestamp);
+      state.messageMetaSnapshot.set(visibleId, {
+        timestamp: messages[index]!.timestamp,
+        stableId: stableKeys[index]!,
+        role: "assistant",
+        tokenEstimate: estimateTokens(contentText(messages[index])),
+      });
+    }
+
+    let blocked: unknown;
+    try {
+      await createAutoCompressionBlock({
+        candidate: {
+          startId: "m001",
+          endId: "m002",
+          messageCount: 2,
+          estimatedTokens: messages.reduce((sum, message) => sum + estimateTokens(contentText(message)), 0),
+          includedBlockIds: [],
+          reason: "budget recovery regression",
+        },
+        topic: "Budget recovery",
+        state,
+        config: cfg,
+        messages,
+        requiredGainTokens: 100_000,
+      });
+    } catch (error) {
+      blocked = error;
+    }
+    expect(blocked).toBeInstanceOf(AutoCompressionBlockedError);
+    expect((blocked as AutoCompressionBlockedError).blockedReason).toBe("budget-exhausted");
+    expect((blocked as Error).message).toMatch(/required budget recovery|below required/i);
+
+    expect(state.compressionBlocks).toHaveLength(0);
+    expect(state.nextBlockId).toBe(1);
+  });
+
+  test("DCP auto-compress does not publish live state when durable publication fails", async () => {
+    const cfg = config({
+      compress: {
+        autoCompress: { enabled: true, patience: 2, summarizerModel: [], timeoutMs: 1000 },
+      } as any,
+    });
+    const state = createState();
+    const messages = [
+      { id: "persist-start", role: "assistant", content: [{ type: "text", text: "a".repeat(2400) }], timestamp: 10 },
+      { id: "persist-end", role: "assistant", content: [{ type: "text", text: "b".repeat(2400) }], timestamp: 11 },
+    ];
+    const stableKeys = stableMessageKeys(messages);
+    for (const [visibleId, index] of [["m001", 0], ["m002", 1]] as const) {
+      const message = messages[index];
+      state.messageIdsByStableId.set(stableKeys[index]!, visibleId);
+      state.messageIdSnapshot.set(visibleId, message.timestamp);
+      state.messageMetaSnapshot.set(visibleId, {
+        timestamp: message.timestamp,
+        stableId: stableKeys[index],
+        role: message.role,
+        tokenEstimate: 600,
+      });
+    }
+    let persistAttempts = 0;
+
+    await expect(createAutoCompressionBlock({
+      candidate: {
+        startId: "m001",
+        endId: "m002",
+        messageCount: 2,
+        estimatedTokens: 1200,
+        includedBlockIds: [],
+        reason: "durability failure",
+      },
+      topic: "Durable first",
+      state,
+      config: cfg,
+      messages,
+      persistState: async () => {
+        persistAttempts++;
+        throw new Error("simulated disk full");
+      },
+    })).rejects.toThrow(/simulated disk full/);
+
+    expect(persistAttempts).toBe(1);
+    expect(state.compressionBlocks).toHaveLength(0);
+    expect(state.nextBlockId).toBe(1);
+  });
+
+  test("DCP auto-compress rejects a late summary after the session epoch changes", async () => {
+    const cfg = config({
+      compress: {
+        autoCompress: { enabled: true, patience: 2, summarizerModel: [], timeoutMs: 1000 },
+      } as any,
+    });
+    const state = createState();
+    const messages = [
+      { id: "late-start", role: "assistant", content: [{ type: "text", text: "a".repeat(2400) }], timestamp: 10 },
+      { id: "late-end", role: "assistant", content: [{ type: "text", text: "b".repeat(2400) }], timestamp: 11 },
+    ];
+    const stableKeys = stableMessageKeys(messages);
+    for (const [visibleId, index] of [["m001", 0], ["m002", 1]] as const) {
+      const message = messages[index];
+      state.messageIdsByStableId.set(stableKeys[index]!, visibleId);
+      state.messageIdSnapshot.set(visibleId, message.timestamp);
+      state.messageMetaSnapshot.set(visibleId, {
+        timestamp: message.timestamp,
+        stableId: stableKeys[index],
+        role: message.role,
+        tokenEstimate: 600,
+      });
+    }
+    const startingEpoch = state.sessionEpoch;
+
+    await expect(createAutoCompressionBlock({
+      candidate: {
+        startId: "m001",
+        endId: "m002",
+        messageCount: 2,
+        estimatedTokens: 1200,
+        includedBlockIds: [],
+        reason: "late auto result",
+      },
+      topic: "Stale auto",
+      state,
+      config: cfg,
+      messages,
+      persistState: async () => {
+        resetState(state);
+      },
+    })).rejects.toThrow(/stale|session changed/i);
+
+    expect(state.sessionEpoch).toBe(startingEpoch + 1);
+    expect(state.compressionBlocks).toHaveLength(0);
+    expect(state.nextBlockId).toBe(1);
+  });
+
+  test("DCP auto-compress closes a partial parallel group before building its summary", async () => {
+    const cfg = config({
+      compress: {
+        autoCompress: { enabled: true, patience: 2, summarizerModel: [], timeoutMs: 1000 },
+      } as any,
+    });
+    const state = createState();
+    const rawMessages = [
+      textMessage("user", "older request", 1),
+      {
+        role: "assistant",
+        content: [
+          { type: "toolCall", id: "auto-a", name: "read", input: { path: "a.ts" } },
+          { type: "toolCall", id: "auto-b", name: "read", input: { path: "b.ts" } },
+        ],
+        timestamp: 2,
+      },
+      toolResult("auto-a", "read", "AUTO_A " + "a".repeat(1200), 3),
+      toolResult("auto-b", "read", "AUTO_B_UNIQUE " + "b".repeat(1200), 4),
+      textMessage("user", "active request", 5),
+    ];
+    const projectedBefore = applyPruning(rawMessages, state, cfg);
+    const resultAId = [...state.messageMetaSnapshot.entries()]
+      .find(([, meta]) => meta.toolCallId === "auto-a")?.[0];
+    const assistantStableId = [...state.messageMetaSnapshot.values()]
+      .find((meta) => meta.role === "assistant" && meta.toolCallIds?.includes("auto-a"))?.stableId;
+    const resultBStableId = [...state.messageMetaSnapshot.values()]
+      .find((meta) => meta.toolCallId === "auto-b")?.stableId;
+    expect(resultAId).toBeDefined();
+
+    const result = await createAutoCompressionBlock({
+      candidate: {
+        startId: resultAId!,
+        endId: resultAId!,
+        messageCount: 1,
+        estimatedTokens: 300,
+        includedBlockIds: [],
+        reason: "partial parallel group",
+      },
+      topic: "Closed auto group",
+      state,
+      config: cfg,
+      messages: projectedBefore,
+    });
+
+    expect(result.summaryMode).toBe("programmatic");
+    expect(state.compressionBlocks[0]).toMatchObject({
+      version: 2,
+      replacementMode: "range",
+      startMessageId: assistantStableId,
+      endMessageId: resultBStableId,
+    });
+    expect(state.compressionBlocks[0]?.summary).toContain("read×2");
+
+    const projectedAfter = applyPruning(rawMessages, state, cfg);
+    const asJson = JSON.stringify(projectedAfter);
+    expect(asJson).toContain("Compressed section: Closed auto group");
+    expect(asJson).not.toContain("AUTO_A");
+    expect(asJson).not.toContain("AUTO_B_UNIQUE");
+    expect(asJson).toContain("older request");
+    expect(asJson).toContain("active request");
+  });
+
   test("DCP auto-compress excludes a same-timestamp live head from its summary input", async () => {
     const cfg = config({
       compress: {
@@ -3201,9 +4649,9 @@ describe("DCP pruning effectiveness", () => {
     });
     const state = createState();
     const messages = [
-      { id: "171", role: "assistant", content: [{ type: "toolCall", id: "a", name: "range_start", input: {} }], timestamp: 10 },
-      { id: "172", role: "assistant", content: [{ type: "toolCall", id: "b", name: "range_end", input: {} }], timestamp: 11 },
-      { id: "173", role: "assistant", content: [{ type: "toolCall", id: "c", name: "LIVE_HEAD_TOOL", input: {} }], timestamp: 11 },
+      { id: "171", role: "assistant", content: [{ type: "toolCall", id: "a", name: "range_start", input: { payload: "a".repeat(1600) } }], timestamp: 10 },
+      { id: "172", role: "assistant", content: [{ type: "toolCall", id: "b", name: "range_end", input: { payload: "b".repeat(1600) } }], timestamp: 11 },
+      { id: "173", role: "assistant", content: [{ type: "toolCall", id: "c", name: "LIVE_HEAD_TOOL", input: { payload: "live" } }], timestamp: 11 },
     ];
     for (const [stableId, visibleId, timestamp] of [
       ["id:171", "m171", 10],
@@ -3405,7 +4853,7 @@ describe("DCP pruning effectiveness", () => {
     expect(events).not.toContain("message_start");
     expect(events).not.toContain("message_update");
     expect(events).not.toContain("turn_end");
-    expect(events).not.toContain("message_end");
+    expect(events).toContain("message_end");
   });
 
   test("serialized state preserves tool fingerprints and accounting across reload", () => {
@@ -3437,6 +4885,14 @@ describe("DCP pruning effectiveness", () => {
       contextPercent: 0.61,
       createdAt: 456,
     };
+    state.progressRecovery = {
+      blockedReason: "protected-budget-exceeded",
+      projectedBeforeTokens: 12_000,
+      inputCapacityTokens: 10_000,
+      requiredSavingsTokens: 2_500,
+      contextWindow: 16_000,
+      createdAt: 789,
+    };
 
     const restored = createState();
     restoreState(restored, serializeState(state));
@@ -3451,5 +4907,6 @@ describe("DCP pruning effectiveness", () => {
     expect(restored.nudgeAnchors[0]?.anchorStableId).toBe("id:entry-42");
     expect(restored.nextNudgeAnchorId).toBe(4);
     expect(restored.lastNudge?.type).toBe("iteration");
+    expect(restored.progressRecovery).toEqual(state.progressRecovery);
   });
 });

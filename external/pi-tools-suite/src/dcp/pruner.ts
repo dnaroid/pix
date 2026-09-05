@@ -59,6 +59,27 @@ export function applyPruning(
   // affecting the original objects across context events.
   const msgs: any[] = messages.map((m: any) => {
     const clone = { ...m };
+    if (typeof m?._dcpOrigin === "string") {
+      Object.defineProperty(clone, "_dcpOrigin", {
+        value: m._dcpOrigin,
+        enumerable: false,
+        configurable: true,
+      });
+    }
+    if (Number.isInteger(m?._dcpBlockId)) {
+      Object.defineProperty(clone, "_dcpBlockId", {
+        value: m._dcpBlockId,
+        enumerable: false,
+        configurable: true,
+      });
+    }
+    if (typeof m?._dcpStableId === "string") {
+      Object.defineProperty(clone, "_dcpStableId", {
+        value: m._dcpStableId,
+        enumerable: false,
+        configurable: true,
+      });
+    }
     if (Array.isArray(clone.content)) {
       clone.content = clone.content.map((contentBlock: any) =>
         typeof contentBlock === "object" && contentBlock !== null ? { ...contentBlock } : contentBlock,
@@ -78,7 +99,9 @@ export function applyPruning(
 
   // 2b. Post-compression safety net: remove any orphaned tool pairs that the
   // expansion logic could not catch (e.g. multi-block interactions, pre-broken state).
-  repairOrphanedToolPairs(msgs);
+  if (state.compressionBlocks.some((block) => block.active && block.version !== 2)) {
+    repairOrphanedToolPairs(msgs);
+  }
 
   // 3-5. Discover new automatic pruning decisions only at stable checkpoints.
   // Rewriting an old result after every same-turn duplicate breaks provider

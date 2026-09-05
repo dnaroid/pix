@@ -6,7 +6,7 @@ import { Type } from "typebox"
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
 import type { DcpState } from "./state.js"
 import { modelKeysFromContext, resolveModelConfig, type DcpConfig } from "./config.js"
-import { saveDcpState } from "./state-persistence.js"
+import { captureDcpPersistenceTarget, saveDcpStateToTarget } from "./state-persistence.js"
 import { clearDcpNudgeAnchors } from "./pruner.js"
 import type { DcpCompressionVisualDetails } from "./ui.js"
 import { normalizeDcpContextUsage } from "./ui.js"
@@ -19,9 +19,15 @@ import {
   findCoveredAndPartialBlocks,
   formatCompressionIdDiagnostics,
   getMessageMeta,
+  prepareCompressionProtectedFragments,
   resolveAnchorBoundary,
   resolveIdToBoundary,
 } from "./compression-blocks.js"
+import {
+  closeConversationRange,
+  detectToolGroupSpans,
+  findConversationIndexEntry,
+} from "./conversation-index.js"
 
 type MessageSkipKind =
   | "duplicate"
@@ -30,6 +36,7 @@ type MessageSkipKind =
   | "non-finite"
   | "protected-user"
   | "already-compressed"
+  | "tool-group"
 
 interface MessageSkipIssue {
   kind: MessageSkipKind
@@ -82,6 +89,38 @@ function validateNonOverlappingRanges(plans: ResolvedRangePlan[], state: DcpStat
   }
 }
 
+function validateProtocolClosedRanges(plans: ResolvedRangePlan[], state: DcpState): void {
+  if (state.conversationIndexSnapshot.length === 0) return
+
+  for (const plan of plans) {
+    const closure = closeConversationRange(state.conversationIndexSnapshot, plan.startId, plan.endId)
+    if (!closure) continue
+    if (closure.incompleteToolGroup) {
+      throw new Error(
+        `Compression range ${plan.startId}..${plan.endId} intersects an incomplete tool group. ` +
+        "Wait until the complete assistant/tool-result group is present or choose another closed range.",
+      )
+    }
+    if (closure.expanded) {
+      const safeStart = closure.startId ?? plan.startId
+      const safeEnd = closure.endId ?? plan.endId
+      throw new Error(
+        `Compression range ${plan.startId}..${plan.endId} cuts through a tool group. ` +
+        `The protocol-safe closed range is ${safeStart}..${safeEnd}. ` +
+        "Retry with the complete range so the supplied summary covers every message that will be removed.",
+      )
+    }
+  }
+}
+
+function messageTouchesIncompleteToolGroup(messageId: string, state: DcpState): boolean {
+  const entry = findConversationIndexEntry(state.conversationIndexSnapshot, messageId)
+  if (!entry) return false
+  return detectToolGroupSpans(state.conversationIndexSnapshot).some((group) =>
+    !group.complete && entry.index >= group.startIndex && entry.index <= group.endIndex,
+  )
+}
+
 function formatSkippedMessages(issues: MessageSkipIssue[]): string[] {
   const grouped = new Map<MessageSkipKind, string[]>()
   for (const issue of issues) {
@@ -95,6 +134,7 @@ function formatSkippedMessages(issues: MessageSkipIssue[]): string[] {
     "non-finite": "resolved to a corrupted non-finite timestamp",
     "protected-user": "is a raw user message protected by compress.protectUserMessages",
     "already-compressed": "already belongs to an active compression block",
+    "tool-group": "belongs to a structurally coupled tool group and cannot be replaced as one isolated message",
   }
 
   return Array.from(grouped.entries()).map(([kind, ids]) => {
@@ -111,15 +151,44 @@ function formatSkippedMessages(issues: MessageSkipIssue[]): string[] {
   })
 }
 
+function createCompressionWorkingState(state: DcpState): DcpState {
+  return {
+    ...state,
+    compressionBlocks: state.compressionBlocks.map((block) => ({
+      ...block,
+      coveredBlockIds: block.coveredBlockIds ? [...block.coveredBlockIds] : undefined,
+    })),
+    nudgeAnchors: state.nudgeAnchors.map((anchor) => ({ ...anchor })),
+    lastNudge: state.lastNudge ? { ...state.lastNudge } : undefined,
+  }
+}
+
+function commitCompressionWorkingState(state: DcpState, workingState: DcpState): void {
+  state.compressionBlocks = workingState.compressionBlocks
+  state.nextBlockId = workingState.nextBlockId
+  state.nudgeAnchors = workingState.nudgeAnchors
+  state.nudgeCounter = workingState.nudgeCounter
+  state.lastNudge = workingState.lastNudge
+  state.consecutiveIgnoredStrongNudges = workingState.consecutiveIgnoredStrongNudges
+}
+
 // ---------------------------------------------------------------------------
 // Tool registration
 // ---------------------------------------------------------------------------
+
+export interface CompressToolDependencies {
+  capturePersistenceTarget?: typeof captureDcpPersistenceTarget
+  saveStateToTarget?: typeof saveDcpStateToTarget
+}
 
 export function registerCompressTool(
   pi: ExtensionAPI,
   state: DcpState,
   config: DcpConfig,
+  dependencies: CompressToolDependencies = {},
 ): void {
+  const capturePersistence = dependencies.capturePersistenceTarget ?? captureDcpPersistenceTarget
+  const persistToTarget = dependencies.saveStateToTarget ?? saveDcpStateToTarget
   pi.registerTool({
     name: "compress",
     label: COMPRESS_TOOL_DESCRIPTION.label,
@@ -164,6 +233,8 @@ export function registerCompressTool(
     }),
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const operationEpoch = state.sessionEpoch
+      const persistenceTarget = capturePersistence(ctx)
       const effectiveConfig = resolveModelConfig(config, modelKeysFromContext(ctx))
       if (!effectiveConfig.enabled) {
         throw new Error("DCP is disabled for the active model")
@@ -172,6 +243,8 @@ export function registerCompressTool(
       const newBlockIds: number[] = []
       const ranges = Array.isArray(params.ranges) ? params.ranges : []
       const messages = Array.isArray(params.messages) ? params.messages : []
+      const workingState = createCompressionWorkingState(state)
+      const committedRangeLogs: Array<Record<string, unknown>> = []
       let operationRemovedTokens = 0
       let operationSummaryTokens = 0
 
@@ -183,8 +256,42 @@ export function registerCompressTool(
         topic: params.topic,
         ranges: ranges.map((range) => ({ startId: range.startId, endId: range.endId })),
         messages: messages.map((entry) => ({ messageId: entry.messageId, topic: entry.topic })),
-        state: summarizeDcpState(state),
+        state: summarizeDcpState(state, effectiveConfig),
       })
+
+      const replayBlocks = state.compressionBlocks.filter((block) => block.createdByToolCallId === _toolCallId)
+      if (replayBlocks.length > 0) {
+        const replayBlockIds = replayBlocks.map((block) => block.id)
+        const usage = normalizeDcpContextUsage(safeGetContextUsage(ctx))
+        const visualDetails: DcpCompressionVisualDetails = {
+          blockIds: replayBlockIds,
+          topic: params.topic,
+          ranges: ranges.length,
+          messages: messages.length,
+          itemCount: ranges.length + messages.length,
+          totalSummaryTokens: replayBlocks.reduce((sum, block) => sum + (block.summaryTokenEstimate ?? 0), 0),
+          activeBlocks: state.compressionBlocks.filter((block) => block.active).length,
+          totalBlocks: state.compressionBlocks.length,
+          prunedTools: state.prunedToolIds.size,
+          tokensSaved: replayBlockIds.reduce((sum, id) => sum + (state.compressionTokenSavings.get(id) ?? 0), 0),
+          contextTokens: usage?.tokens,
+          contextWindow: usage?.contextWindow,
+          contextPercent: usage?.percent,
+          skippedMessages: 0,
+          skippedMessageIssues: [],
+          idempotentReplay: true,
+        }
+        const resultDetails = { ...visualDetails, outputFormat: "json" as const }
+        log("compress.idempotent_replay", {
+          toolCallId: _toolCallId,
+          blockIds: replayBlockIds.map((id) => `b${id}`),
+          state: summarizeDcpState(state, effectiveConfig),
+        })
+        return {
+          content: [{ type: "text", text: JSON.stringify(resultDetails, null, 2) }],
+          details: resultDetails,
+        }
+      }
 
       if (ranges.length === 0 && messages.length === 0) {
         throw new Error("compress requires at least one ranges[] or messages[] entry")
@@ -233,18 +340,29 @@ export function registerCompressTool(
         })
 
         validateNonOverlappingRanges(rangePlans, state)
+        validateProtocolClosedRanges(rangePlans, state)
       } catch (error) {
         log("compress.resolve_failed", {
           toolCallId: _toolCallId,
           error: error instanceof Error ? error.message : String(error),
-          state: summarizeDcpState(state),
+          state: summarizeDcpState(state, effectiveConfig),
         })
         throw error
       }
 
       for (const range of rangePlans) {
         try {
-          const anchor = resolveAnchorBoundary(range.endTimestamp, state, range.endMessageId)
+          const anchor = resolveAnchorBoundary(range.endTimestamp, workingState, range.endMessageId)
+          const preparedProtectedFragments = await prepareCompressionProtectedFragments({
+            startTimestamp: range.startTimestamp,
+            endTimestamp: range.endTimestamp,
+            startMessageId: range.startMessageId,
+            endMessageId: range.endMessageId,
+            state: workingState,
+            config: effectiveConfig,
+            mode: "range",
+            cwd: (ctx as any).cwd,
+          })
 
           const created = createRangeCompressionBlock({
             topic: params.topic,
@@ -256,15 +374,18 @@ export function registerCompressTool(
             anchorTimestamp: anchor.timestamp,
             anchorMessageId: anchor.stableId,
             createdByToolCallId: _toolCallId,
-            state,
+            state: workingState,
             config: effectiveConfig,
             mode: "range",
+            version: 2,
+            replacementMode: "range",
+            preparedProtectedFragments,
           })
           const block = created.block
           newBlockIds.push(block.id)
           operationRemovedTokens += created.removedTokenEstimate
           operationSummaryTokens += created.summaryTokenEstimate
-          log("compress.range_created", {
+          committedRangeLogs.push({
             toolCallId: _toolCallId,
             range: { startId: range.startId, endId: range.endId },
             blockId: `b${block.id}`,
@@ -276,7 +397,7 @@ export function registerCompressTool(
             toolCallId: _toolCallId,
             range: { startId: range.startId, endId: range.endId },
             error: error instanceof Error ? error.message : String(error),
-            state: summarizeDcpState(state),
+            state: summarizeDcpState(state, effectiveConfig),
           })
           throw error
         }
@@ -299,14 +420,14 @@ export function registerCompressTool(
           continue
         }
 
-        const meta = getMessageMeta(messageId, state)
+        const meta = getMessageMeta(messageId, workingState)
         if (!meta) {
           skippedMessageIssues.push({
             kind: "unknown",
             messageId,
             detail:
               "The ID is not present in the current DCP snapshot; it may be stale after compression, pruning, reload, or session switching.\n" +
-              formatCompressionIdDiagnostics(state),
+              formatCompressionIdDiagnostics(workingState),
           })
           continue
         }
@@ -322,11 +443,29 @@ export function registerCompressTool(
           skippedMessageIssues.push({ kind: "protected-user", messageId })
           continue
         }
+        const indexEntry = findConversationIndexEntry(workingState.conversationIndexSnapshot, messageId)
+        if (meta.role === "assistant" && ((meta.toolCallIds?.length ?? 0) > 0 || indexEntry?.signedAssistant)) {
+          skippedMessageIssues.push({
+            kind: "tool-group",
+            messageId,
+            detail:
+              "Signed assistant content and assistants containing tool calls cannot be edited in place; use ranges[] with a complete protocol-safe group.",
+          })
+          continue
+        }
+        if (messageTouchesIncompleteToolGroup(messageId, workingState)) {
+          skippedMessageIssues.push({
+            kind: "tool-group",
+            messageId,
+            detail: "The selected message belongs to an incomplete in-flight tool group and is not safe to replace yet.",
+          })
+          continue
+        }
 
         const { coveredBlocks, partialBlocks } = findCoveredAndPartialBlocks(
           meta.timestamp,
           meta.timestamp,
-          state,
+          workingState,
           { startMessageId: meta.stableId, endMessageId: meta.stableId },
         )
         if (coveredBlocks.length > 0 || partialBlocks.length > 0) {
@@ -337,7 +476,17 @@ export function registerCompressTool(
           continue
         }
 
-        const anchor = resolveAnchorBoundary(meta.timestamp, state, meta.stableId)
+        const anchor = resolveAnchorBoundary(meta.timestamp, workingState, meta.stableId)
+        const preparedProtectedFragments = await prepareCompressionProtectedFragments({
+          startTimestamp: meta.timestamp,
+          endTimestamp: meta.timestamp,
+          startMessageId: meta.stableId,
+          endMessageId: meta.stableId,
+          state: workingState,
+          config: effectiveConfig,
+          mode: "message",
+          cwd: (ctx as any).cwd,
+        })
 
         const created = createRangeCompressionBlock({
           topic: entry.topic ?? params.topic,
@@ -349,11 +498,14 @@ export function registerCompressTool(
           anchorTimestamp: anchor.timestamp,
           anchorMessageId: anchor.stableId,
           createdByToolCallId: _toolCallId,
-          state,
+          state: workingState,
           config: effectiveConfig,
           mode: "message",
+          version: 2,
+          replacementMode: "message-body",
           validatePlaceholders: false,
           expandPlaceholders: false,
+          preparedProtectedFragments,
         })
         const block = created.block
         newBlockIds.push(block.id)
@@ -368,9 +520,15 @@ export function registerCompressTool(
         )
       }
 
-      const clearedNudgeAnchors = newBlockIds.length > 0 ? clearDcpNudgeAnchors(state) : 0
+      const clearedNudgeAnchors = newBlockIds.length > 0 ? clearDcpNudgeAnchors(workingState) : 0
       if (newBlockIds.length > 0) {
-        state.consecutiveIgnoredStrongNudges = 0
+        workingState.consecutiveIgnoredStrongNudges = 0
+        if (persistenceTarget) await persistToTarget(persistenceTarget, workingState)
+        if (state.sessionEpoch !== operationEpoch) {
+          throw new Error("Compression result became stale because the active session changed before commit")
+        }
+        commitCompressionWorkingState(state, workingState)
+        for (const details of committedRangeLogs) log("compress.range_created", details)
       }
       if (clearedNudgeAnchors > 0) {
         try {
@@ -386,15 +544,11 @@ export function registerCompressTool(
         }
       }
 
-      if (newBlockIds.length > 0) {
-        await saveDcpState(ctx, state)
-      }
-
       log("compress.success", {
         toolCallId: _toolCallId,
         newBlockIds: newBlockIds.map((id) => `b${id}`),
         skippedMessages: skippedMessageIssues.length,
-        state: summarizeDcpState(state),
+        state: summarizeDcpState(state, effectiveConfig),
       })
 
       const usage = normalizeDcpContextUsage(safeGetContextUsage(ctx))

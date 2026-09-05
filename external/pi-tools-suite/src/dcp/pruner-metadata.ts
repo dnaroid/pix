@@ -76,7 +76,17 @@ export function estimateMessageTokens(msg: any): number {
       if (part && typeof part === "object") {
         if (typeof part.text === "string") total += estimateTokens(part.text);
         else if (typeof part.thinking === "string") total += estimateTokens(part.thinking);
-        else if (part.type === "image") total += 500; // rough estimate for images
+        else if (part.type === "toolCall") {
+          try {
+            // Tool calls are provider-visible context too. Counting the full
+            // serialized block keeps range-before and replacement-after on the
+            // same estimator and includes IDs, names, arguments/input, and any
+            // provider replay metadata without guessing field-by-field.
+            total += estimateTokens(JSON.stringify(part) ?? "");
+          } catch {
+            total += estimateTokens(`${part.name ?? "tool"}:${part.id ?? ""}`);
+          }
+        } else if (part.type === "image") total += 500; // rough estimate for images
       }
     }
     return total;

@@ -1,131 +1,249 @@
 # 04 — dcp: dynamic context pruning (as-is spec)
 
-> Risk classes: **data / cross-cutting / irreversible context mutation**.
-> Autonomous context-window management: monitors usage, prunes tool outputs,
-> injects compression nudges, and provides the `compress` tool for LLM-driven
-> summarisation. Headless (no TUI widgets).
->
-> _Investigated by a read-only sub-agent; re-verify against current code.
-> Line numbers are approximate._
+> Risk classes: **data / cross-cutting / provider-context mutation**. DCP is
+> headless. The raw Pi session branch remains the recovery source; DCP mutates
+> only the projected provider context and its session-private sidecar.
 
 ## Purpose
-Monitor context usage, prune tool outputs, inject compression nudges, and expose
-a `compress` tool so the LLM can summarise conversation ranges/messages. `[confirmed by code: index.ts:1-4; confirmed by docs: CLAUDE.md]`
 
-## Current behavior
+DCP monitors projected context pressure, removes proven redundant/eligible tool
+output from the provider projection, exposes the `compress` tool, and can
+produce bounded continuation summaries when explicitly enabled. It preserves
+provider-signed assistant objects and uses stable `mNNN`/`bN` addressing.
 
-### Lifecycle events (`index.ts`)
-1. **session_start** — `resetState()` then `restoreState()` from sidecar; if no blocks and a `previousSessionFile` exists, inherits compression blocks from the prior session (`loadDcpStateFromSessionFile` + `inheritCompressionBlocks`). `[confirmed by code: index.ts 101-138]`
-2. **session_shutdown** — force-flush sidecar (bypasses dedup hash). `[confirmed by code: index.ts 140-145]`
-3. **before_agent_start** — appends DCP system prompt (manual-mode variant when enabled) to `event.systemPrompt`. `[confirmed by code]`
-4. **tool_call** — records input args + fingerprint into `state.toolCalls`. `[confirmed by code]`
-5. **tool_result** — finalises the tool record with `outputText`, `outputDetails`, `tokenEstimate`. `[confirmed by code]`
-6. **context** — deep-clones messages, applies the pruning pipeline, distributes stable ID metadata over user/tool-result carriers, and manages nudge injection. Provider-signed assistant content is replayed unchanged, even when it contains DCP-like text. `[confirmed by code]`
-7. **before_provider_request** — observes which tool results reached the final provider payload for emergency-pruning safety, but does not mutate the payload for DCP IDs. `[confirmed by code]`
-9. **agent_end** — saves state to sidecar. `[confirmed by code]`
+## Current lifecycle
 
-### Pruning pipeline (`pruner.ts`), applied every `context` event, in order
-1. Count user turns → `state.currentTurn`. `[confirmed by code]`
-2. `syncCompressionBlocks` — deactivate blocks whose origin compress `toolCallId` is gone or whose boundary messages disappeared. `[confirmed by code]`
-3. `applyCompressionBlocks` — remove ranges covered by active blocks, insert synthetic `[Compressed section: …]` user messages with summaries, re-sort by timestamp; expands ranges to include preceding assistant messages whose toolCall ids are inside. `[confirmed by code]`
-4. `repairOrphanedToolPairs` — remove toolResult/bashExecution whose assistant toolCall was removed; strip orphaned toolCall blocks from assistant messages. `[confirmed by code]`
-5. At a new user-turn or compression-block checkpoint, run deduplication, error purging, and automatic tool-output pruning as one discovery batch. Repeated same-turn passes do not add new retroactive prunes. `[confirmed by code]`
-8. `applyToolOutputPruning` — replace content of all `state.prunedToolIds` tool results with a placeholder. `[confirmed by code]`
-9. `injectMessageIds` — rebuild the current published snapshots while preserving stable, monotonic `mNNN` assignments. Metadata is attached only to user/tool-result/bash-result context clones; assistant IDs are published by the next client-originated carrier. `[confirmed by code]`
+1. `session_start` resets the runtime epoch, cleans only proven orphan sidecars,
+   loads a validated sidecar generation, and may inherit fitting compression
+   state from `previousSessionFile`. Late loads from a replaced session epoch
+   are discarded.
+2. `tool_call`/`tool_result` maintain runtime tool records. The persisted cache
+   is compact; exact args/output are rehydrated from the raw branch after a
+   restart for records still represented in the compact cache.
+3. `context` builds the projection, maintains stable IDs, evaluates budget and
+   compression candidates, applies existing blocks/prune decisions, and manages
+   nudge/progress state.
+4. `before_provider_request` records an immutable attempt envelope containing
+   session epoch, provider/model, payload revision and the tool results actually
+   serialized in that request. It does **not** mark those results completed.
+5. `after_provider_response` records HTTP acceptance only. HTTP 2xx is not a
+   completion witness because the SDK fires this hook before the response
+   stream is consumed.
+6. A successful finalized assistant `message_end` may promote provider evidence
+   only when the pending attempt can be correlated unambiguously. Abort/error or
+   interleaving ambiguity is fail-closed and does not make tool outputs eligible.
+7. `agent_end`/`session_shutdown` persist state through the versioned sidecar.
 
-### Message IDs (`pruner-message-ids.ts`)
-- Eligible roles: `user`, `assistant`, `toolResult`, `bashExecution`. Passthrough: `compaction`, `branch_summary`, `custom_message`. `[confirmed by code: pruner-metadata.ts]`
-- Minimum 3-digit zero-padded and monotonically allocated. Existing stable identities keep their assignment when older messages disappear, so current IDs may be sparse. Stable identities derive from session/message IDs, tool-call IDs, compression blocks, or timestamp plus a canonical content fingerprint; byte-identical collisions receive deterministic occurrence suffixes. `[confirmed by code]`
+## Canonical identity and projection
 
-### Nudges (`pruner-nudge.ts`)
-- `getNudgeType`: `context-strong`/`context-soft` when `contextPercent > maxContextPercent`; `iteration` when `toolCallsSinceLastUser >= iterationNudgeThreshold`; `turn` when `nudgeCounter+1 >= nudgeFrequency` and `contextPercent > minContextPercent`. `[confirmed by code]`
-- Nudges are **anchored** to one stable real user message. Their complete rendered text is frozen and re-applied verbatim; it changes only on a strict priority upgrade and does not move before compression clears it. Assistant fallback uses a synthetic user carrier rather than modifying signed assistant content. `[confirmed by code; confirmed by tests]`
-- Manual mode: only `context-strong`/`context-soft` nudges; routine `turn`/`iteration` suppressed; non-emergency anchors filtered each event. `[confirmed by code]`
-- Above `maxContextPercent`, if normal `keepRecentTurns` gating leaves no range candidate, DCP may expose an **emergency same-turn committed-prefix candidate**. It preserves the current user request, the newest assistant group, and at least `emergencyCurrentTurnPruning.keepRecentToolPairs` newest complete tool pairs; only the older prefix before a later assistant response (the provider-commit witness) is eligible. `autoCompress` may consume this candidate after its normal patience threshold, so a marathon one-user-turn session no longer has to wait for a second user message. The resulting compression is an intentional history rewrite/cache rebuild. `[confirmed by code; confirmed by tests]`
+`conversation-index.ts` builds the current ordered conversation index from the
+actual projected branch. Ordering and tool-group closure use branch index, not
+timestamp sorting. Timestamps remain legacy boundary metadata only; equal
+timestamps are resolved by stable identity/current `mNNN` order.
 
-### Metadata stripping (`pruner-metadata.ts`)
-- Removes `<dcp-id>`, `[dcp-id]:`, `<dcp-block-id>`, `[dcp-block-id]:`, `<dcp-message-ids>`, `<dcp-system-reminder>` from text/thinking; **preserves** content inside markdown fences. Empty blocks dropped; signatures removed when text is modified. `[confirmed by code; confirmed by tests]`
+Generated DCP provenance is carried out-of-band with non-enumerable internal
+properties. Literal `<dcp-system-reminder>`, `[dcp-block-id]`, or similar text in
+raw user content never grants synthetic/control-plane authority.
 
-### Compress tool (`compress-tool.ts`)
-- Params: `topic` (string), `ranges[]` (`startId`,`endId`,`summary`), `messages[]` (`messageId`,`topic?`,`summary`). Range ids may be `mNNN` or `bN`; message ids must be raw `mNNN`. `[confirmed by code]`
-- Overlapping ranges in one call rejected; partial overlap with an existing active block throws; fully-covered blocks are rolled up; missing/duplicate placeholders auto-recovered. For equal timestamps, stable `mNNN` order breaks ties, so the first raw ID immediately after a block end is not treated as overlapping; range and message mode use the same boundary semantics. `[confirmed by code; confirmed by tests]`
-- Protected tool outputs (`protectedTools` ∪ `{compress,write,edit}`) appended verbatim to summaries. `<protect>…</protect>` extracted when `compress.protectTags`. `compress.protectUserMessages` appends user text verbatim and rejects per-message compression of user messages. `[confirmed by code; confirmed by tests]`
-- Subagent result artifacts (`.pi/subagents/run/*/result.md`) read synchronously from disk and appended for `subagents`/`async_subagents_result` tools, capped at 50,000 chars. `[confirmed by code]`
-- On success: clears nudge anchors, persists sidecar immediately, returns JSON with `tokensSaved` (per-op delta), context usage, skipped-message diagnostics. `[confirmed by code]`
+Stable `mNNN` allocation is monotonic and persisted. Assistant content is never
+used as a DCP carrier. Distributed ID metadata is attached to client-originated
+user/tool-result/bash-result clones; repeating an unchanged transform preserves
+already-published provider items.
 
-## Public contracts / inputs / outputs
+## Compression blocks
 
-### Config (`config.ts`) — loaded from `~/.config/pi/pi-tools-suite.jsonc` under `"dcp"` only
-Key fields and defaults: `enabled:true`, `debug:false`, `manualMode.enabled:false` (`.automaticStrategies:true`); `compress.maxContextPercent:0.65`, `minContextPercent:0.40`, `nudgeFrequency:2`, `iterationNudgeThreshold:8`, `nudgeForce:"soft"`, `protectedTools:["compress","write","edit"]`, `protectTags:false`, `protectUserMessages:false`, `summaryBuffer:true`; `compress.autoCandidates.{enabled:true, minContextPercent:0.40, keepRecentTurns:1, minMessages:6, minTokens:1500}`; `compress.messageMode.{enabled:true, minContextPercent:0.40, keepRecentTurns:1, mediumTokens:500, highTokens:5000, maxSuggestions:5}`; `strategies.deduplication.enabled:true`; `strategies.purgeErrors.{enabled:true, turns:4}`; `strategies.autoToolPruning.{enabled:true, maxOutputTokens:1200, keepRecentTurns:1, readLikeTurns:3}`; `protectedFilePatterns:[]`; per-model `modelOverrides`/`modelMaxContextPercent`/`modelMinContextPercent` with wildcard support. Env: `PI_DCP_DEBUG`, `PI_TOOLS_SUITE_DCP_DEBUG`, `PI_DCP_DEBUG_LOG`, `PI_DCP_DEBUG_MAX_BYTES`, `PI_DCP_DEBUG_MAX_BACKUPS`. `[confirmed by code: config.ts; confirmed by tests: dcp-config.test.ts]`
+### Version 2 writer semantics
 
-### Persisted state (`state-persistence.ts`, `state.ts`)
-- Path `<sessionDir>/dcp-state/<sanitizedSessionId>.json` (non-`[a-zA-Z0-9._-]` → `_`). Overwrite semantics; deduped by DJB2 hash of serialized content (unchanged state skips write). `[confirmed by code]`
-- Fields (`SerializedDcpState`) additionally include persistent `messageIdsByStableId`/`nextMessageId`, frozen reminder text inside `nudgeAnchors`, and `lastAutomaticPruneTurn`/`lastAutomaticPruneBlockId` checkpoints. New fields are optional on restore for legacy sidecars. `[confirmed by code]`
-- `CompactToolRecord` strips heavy fields (`outputText`/`outputDetails`/full `inputArgs`); caps string values at 512 chars / 20 per record; keeps ≤200 recent + all referenced-by-block/pruned/accounted. `[confirmed by code]`
-- Save triggers: `agent_end`, successful `compress`, `session_shutdown` (force). `[confirmed by code]`
-- `cleanupStaleDcpStateFiles` deletes sidecars for non-existent sessions or older than 7 days. `[confirmed by code; confirmed by tests]`
+New blocks use `version: 2` and one of two exact replacement modes:
 
-### Inheritance across fork/resume/new (`state.ts`, `state-persistence.ts`)
-A session starting with zero blocks and a `previousSessionFile` loads the prior sidecar and merges blocks + accounting via `inheritCompressionBlocks`, then persists into its own sidecar. `[confirmed by code]`
+- `range`: replace exactly the preflighted closed range with one synthetic
+  summary message. The apply path does not widen the range around tool groups.
+- `message-body`: replace only the selected tool-result/body content while
+  preserving role, call id, tool name, error status, position, and sibling
+  results. Signed assistant content is not editable by message mode.
 
-## Invariants
-- `state.compressionBlocks` is the single source of truth; active blocks are applied every `context` event. `[confirmed by code]`
-- `state.prunedToolIds` is monotonic for the session lifetime. `[confirmed by code]`
-- Token accounting is idempotent (re-pruning/re-applying does not double-count). `[confirmed by code; confirmed by tests]`
-- The current published message-id snapshot is rebuilt every `context` event, while stable identity→ID allocation is monotonic and persisted. `[confirmed by code]`
-- Repeating a context transform over unchanged history does not rewrite old provider items; assistant content is never a DCP carrier. `[confirmed by code; confirmed by tests]`
-- `currentTurn` is re-derived from raw user-message count each event. `[confirmed by code]`
+Manual range preflight rejects a selection that cuts a parallel/in-flight tool
+group and reports the protocol-safe boundaries. Auto range planning closes the
+range before summarization. New v2 plans do not rely on orphan repair;
+`repairOrphanedToolPairs` remains only for legacy block compatibility.
 
-## Edge cases
-- **Unknown compress ids**: throws with a diagnostic listing valid ids + active blocks. `[confirmed by code; confirmed by tests]`
-- **Partial block overlap**: throws, no mutation. `[confirmed by code; confirmed by tests]`
-- **Missing boundary messages / missing origin compress call**: block auto-deactivated with `deactivatedReason`. `[confirmed by code]`
-- **Non-finite timestamps**: blocks skipped during application; restored `anchorTimestamp` defaults to `endTimestamp + 1`. `[confirmed by code]`
-- **Negative `nudgeCounter`**: clamped to 0 on restore. `[confirmed by code]`
-- **Empty/corrupt sidecar**: `restoreState` tolerates null/`{}`/wrong types → defaults. `[confirmed by code; confirmed by tests]`
+Multiple operations in one `compress` invocation are staged on a working state.
+Fatal preflight/prepare/persistence failures publish none of the staged blocks.
+Retries with the same compress tool-call id are idempotent.
 
-## Side effects
-- **Sidecar writes** on `agent_end`, successful compress, `session_shutdown`. `[confirmed by code]`
-- **Debug log** `~/.pi/agent/dcp-debug.jsonl` (or `PI_DCP_DEBUG_LOG`), rotated at `maxBytes` with `maxBackups`. `[confirmed by code]`
-- **Stale-sidecar cleanup** on `session_start`. `[confirmed by code]`
-- **Context mutations (several irreversible — see Gaps)**: tool results replaced with placeholders; compressed ranges removed and replaced with synthetic summary user messages; stable DCP metadata added to client-originated context clones; frozen nudges re-applied to one stable user carrier. `[confirmed by code]`
-- Appends `dcp-nudge` custom session entries (telemetry). `[confirmed by code]`
+Legacy blocks without `version: 2` retain their historical projection semantics
+for backward compatibility and are not silently reinterpreted as v2 blocks.
 
-## Related files
-`external/pi-tools-suite/src/dcp/`: `index.ts`, `pruner.ts`, `pruner-tools.ts`, `pruner-compression-blocks.ts`, `pruner-message-ids.ts`, `pruner-metadata.ts`, `pruner-nudge.ts`, `pruner-types.ts`, `pruner-candidates.ts`, `state.ts`, `state-persistence.ts`, `config.ts`, `debug-log.ts`, `compress-tool.ts`, `compression-blocks.ts`, `prompts.ts`, `commands.ts`, `ui.ts`, `tool-descriptions.ts`.
+## Pressure, progress and autonomous policy
 
-## Existing tests
-- `compress-pruner.test.ts` (27): pruning effectiveness, dedup idempotency, auto-pruning, `protectedFilePatterns`, nudge cadence, anchored nudges, candidate detection, metadata stripping, compress tool (rollup, recovery, overlap rejection, stale ids, per-op savings, sidecar persistence, `protectUserMessages`, message-mode, protect tags, skipped diagnostics), `/dcp` recompress, `/dcp` stats, context-transform integration. `[confirmed by tests]`
-- `dcp-state-persistence.test.ts` (5): save/load, overwrite, missing file, stale-session cleanup, 7-day age cleanup. `[confirmed by tests]`
-- `dcp-state-serialization.test.ts` (14): `compactifyToolRecord`, `createInputFingerprint`, `serializeState` (bounded <1MB for 500 records), `restoreState` (compact + legacy + graceful), round-trip, `hashSerializedState`. `[confirmed by tests]`
-- `dcp-config.test.ts` (6): defaults, user config, model overrides, wildcard precedence, `modelKeysFromContext`, ignores legacy/project config files. `[confirmed by tests]`
-- `dcp-debug-log.test.ts` (4): rotation, backup content, env/config resolution, disabled=no-write. `[confirmed by tests]`
-- `compress-ui.test.ts` (1): `normalizeDcpContextUsage`. `[confirmed by tests]`
+The E05 controller separates provider-native usage from the fresh repository
+projection. Effective pressure uses the larger value, so a stale low provider
+usage sample cannot hide a large paste or newly appended tool output.
 
-## Gaps / risks
-### Data loss (irreversible)
-1. **Tool-output pruning**: pruned result content is replaced with a placeholder; the original `outputText` is kept only in the **live** `ToolRecord` and is **not persisted** (`compactifyToolRecord` strips it). After a session restart, the pruned output is gone. `[confirmed by code]`
-2. **Compression blocks**: messages in a compressed range are removed; only the LLM-generated summary survives. `[confirmed by code]`
-3. **Protected outputs after restart**: `appendProtectedToolOutputs` reads live `outputText`; after restart it is `undefined`, so future rollups would not preserve them. `[confirmed by code]`
-4. **Subagent result artifacts** read synchronously at compress time; deleting the run dir before a rollup loses that content. `[confirmed by code]`
-5. **Message-text metadata** (`messageMetaSnapshot.text`) used for candidate detection and protect-tag extraction is **not persisted**; protect-tag recovery fails silently after restart. `[inferred]`
-6. **Intentional cache rebuilds remain**: compression, decompression, a committed prune batch, or a strict nudge-priority upgrade rewrites history and can require one full provider request. Ordinary subsequent turns must restore append-only continuation. `[confirmed by code; confirmed by tests]`
+Capacity is distinct from policy thresholds: output/tool reserve is removed
+first, `summaryBuffer` is bounded by remaining capacity, and hard emergency is
+not disabled by a model-specific soft threshold. Auto planning chooses the
+oldest protocol-safe prefix needed for the current recovery target; if the full
+target cannot be met it may expose the largest safe partial candidate rather
+than pretending no safe material exists.
 
-### State consistency
-7. **Sidecar dedup bypass**: if the in-memory hash gets out of sync (e.g. after a write failure resets it), an identical-state write can be suppressed. `[confirmed by code]`
-8. **Save-queue error swallowing**: failed writes reset `lastPersistedStateHash` to undefined but swallow the error. `[confirmed by code]`
-9. **Fork-inheritance race**: inheriting during `session_start` while the source sidecar is being written can read partial JSON (handled by try/catch → `undefined`). `[confirmed by code]`
-10. **`currentTurn` re-derivation**: persisted value is overwritten on the first context event. `[confirmed by code]`
+`patience` advances only on completed correlated main-provider opportunities in
+which the reminder was available. Repeated `context` transforms and identical
+request retries do not consume patience.
 
-### Operational
-11. **No config reload** — `loadConfig()` runs once at module init; changes need a pi restart. `[confirmed by code]`
-12. **Debug log uses async `fs.appendFile`** (serialized via chain) — may be incomplete on crash. `[confirmed by code]`
+Terminal blocked reasons include `live-head-only`,
+`protected-budget-exceeded`, `evidence-unknown`, `summarizer-unavailable`,
+`non-positive-gain`, `missing-source`, and `budget-exhausted`. If the protected
+minimum itself exceeds hard capacity and no safe shrink exists, DCP records the
+recovery state and uses the SDK headless `ctx.abort()` path rather than sending
+the same oversized request indefinitely or invoking destructive native
+compaction implicitly.
 
-## Suggested verification
-1. **Restart data loss**: prune tool outputs, restart, confirm `/dcp stats` shows pruned ids but original output is gone (roll up a covering block → protected-output section absent). `[addresses #3]`
-2. **Compress-then-reload roundtrip**: compress a range, restart, confirm the synthetic summary appears on the next context event. `[addresses #2]`
-3. **Protect-tag survival**: `<protect>` a message, compress, restart, compress a covering range — confirm protected text is absent (metaSnapshot.text lost). `[addresses #5]`
-4. **Fork inheritance**: fork a session with active blocks; confirm the new session inherits and persists them. `[addresses #9]`
-5. **Bounded state at scale**: 500+ large tool calls; confirm serialized state <1MB and `totalToolCallCount` survives reload. `[addresses serialization tests]`
-6. **Manual-mode nudge suppression**: drive context above `maxContextPercent` in manual mode; confirm only context-limit nudges fire. `[addresses nudge behavior]`
-7. **Stale-sidecar cleanup**: create a sidecar for a non-existent session, trigger `session_start`; confirm deletion. `[addresses persistence tests]`
+`compress.autoCompress.enabled` is **false by default**. Manual mode cannot be
+widened into autonomous summary creation. Disabling routine `autoCandidates`
+does not silently disable the separately configured emergency safety planner.
+
+## Provider evidence and emergency eligibility
+
+Tool-result deletion/range compression requires completed provider evidence.
+A later assistant message is structural ordering evidence only; it is not proof
+that every preceding tool result was serialized and consumed. Emergency range
+planning and emergency body pruning use the same completed-evidence set and
+fail closed on unknown/incomplete groups.
+
+The newest assistant/tool group, current user request, configured recent tool
+pairs, protected tools/files/tags, and unseen results remain outside emergency
+mutation. An intentional emergency compression or prune is a provider-history
+rewrite; ordinary continuations after that transition must again be byte-stable.
+
+## Summary source and fallback
+
+Auto summary preparation builds a bounded source manifest. Tool entries include
+call id, tool name, necessary non-secret arguments/path, result linkage,
+outcome, error state and exit code when available. Credential/header-like
+fields and provider signatures are excluded/redacted.
+
+Configured summarizer models share one total deadline that includes auth,
+fallback models and completions that ignore `AbortSignal`. Oversized sources are
+chunked only on complete tool-group boundaries and merged with explicit source
+coverage; a single group that cannot fit is refused rather than silently split.
+
+Fallback order is model summary → bounded extractive continuation record →
+refusal when the replacement cannot meet the positive/full-budget gain gate.
+The extractive record keeps explicit user constraints, decisions/checkpoints,
+errors/verification failures, next steps and tool metadata; large successful raw
+logs are not copied wholesale. New blocks store source hash/coverage,
+representation mode and a deduplicated protected-fragment ledger so repeated
+rollups do not recursively embed old summaries.
+
+## Protected data and recovery
+
+Protected user/tag/tool fragments are copied deterministically into the block
+ledger. Subagent `result.md` is optional recovery material, not the primary
+source. Artifact reads are asynchronous, bounded, rooted at the session
+`ctx.cwd`, resolved through `realpath`, restricted to regular files, and reject
+symlinks escaping the session cwd. An oversized protected artifact blocks the
+operation instead of being silently truncated.
+
+`/dcp decompress` for a modern v2 block requires both exact raw source boundary
+identities still present in the active branch. If host compaction or user
+history deletion removed them, the command reports unavailable source and
+leaves the block active; DCP does not guess boundaries or re-run mutating tools.
+Legacy blocks retain legacy decompression compatibility.
+
+## Tool-output pruning policy
+
+Exact dedup requires the same input fingerprint **and** the same output identity
+(SHA-256 text identity plus success/error semantics). Re-running the same read
+after a file/environment change therefore is not an exact duplicate.
+
+Autonomous generic output pruning is restricted to known/configured read-like
+tools. Mutating aliases are normalized case-insensitively and protected,
+including `write`, `edit`, `apply_patch`, `patch`, `bash`, `shell`,
+`powershell`, `exec`, and `execute`; unknown tools are not assumed safe for
+autonomous deletion.
+
+## Configuration
+
+DCP config is read only from `dcp` in
+`~/.config/pi/pi-tools-suite.jsonc`; legacy standalone/project DCP config is
+ignored. Important defaults are:
+
+- `enabled: true`, `manualMode.enabled: false`,
+  `manualMode.automaticStrategies: true`;
+- `compress.minContextPercent: 0.40`, `maxContextPercent: 0.65`,
+  `summaryBuffer: true`;
+- `compress.autoCandidates.enabled: true`;
+- `compress.messageMode.enabled: true`;
+- `compress.autoCompress: { enabled: false, patience: 2,
+  summarizerModel: [], timeoutMs: 20000 }`;
+- `strategies.emergencyCurrentTurnPruning.enabled: true`, hard/target defaults
+  remain defined in `config.ts`;
+- per-model limits/overrides support exact keys and `*`/`?` patterns.
+
+No new user-facing E05/E06 knobs were added by the reliability implementation;
+budget margins, source-manifest caps and artifact caps are internal safety
+limits.
+
+## Persisted state
+
+The sidecar path remains
+`<sessionDir>/dcp-state/<sanitizedSessionId>.json`, but new writes are a
+versioned envelope:
+
+```text
+{ kind, schemaVersion, sessionId, generation, revision, payloadHash, payload }
+```
+
+The payload is validated before restore: bounded sizes, compression-block ids,
+boundaries, references and acyclic block graph. Legacy flat
+`SerializedDcpState` files are accepted through a migration adapter.
+
+Writes serialize immutable bytes before queueing, use private `0600` temp files,
+file/directory sync where supported, atomic rename, and a per-sidecar
+cross-process exclusive lock. A concurrent writer receives an explicit conflict
+instead of silent last-writer-wins. The previous valid generation is retained
+as `.prev`; corrupt primaries are quarantined and recovery tries `.prev`.
+Unrecoverable corrupt state blocks a subsequent empty overwrite.
+
+Cleanup deletes only proven orphan primary sidecars after a complete session
+ownership scan. A malformed/transient session header makes cleanup fail closed.
+A live paused session is retained regardless of sidecar age.
+
+Compact tool records still omit large output/full args. On context rebuild,
+records retained in the compact cache can rehydrate exact args/output from the
+raw session branch; trimmed unknown IDs are not reconstructed as evidence.
+Lifetime tool-call count remains monotonic across serialize/restore cycles.
+
+## Cache stability invariants
+
+- Provider-signed assistant bytes are unchanged by DCP.
+- One intentional rewrite may rebuild provider cache; the next ordinary
+  continuations must preserve the rewritten prefix.
+- The installed OpenAI Responses converter is covered by a regression that
+  checks two successive continuations after a v2 rewrite.
+- Frozen nudge carriers do not churn because candidate IDs/counts changed.
+- Debug-disabled state snapshots return before scanning the state.
+
+## Current limitations / release hold
+
+- `autoCompress.enabled` remains false by default. Deterministic correctness,
+  replay, seeded generative and local performance gates are not a substitute
+  for production continuation-quality evaluation.
+- No live model/provider canary was executed for this implementation pass.
+- Cross-process locking is fail-closed; a stale lock left by a killed writer
+  requires operational cleanup rather than unsafe lock stealing.
+- Provider completion evidence is only as strong as the installed SDK lifecycle
+  and unambiguous local correlation. With no request id, ambiguous interleaving
+  is deliberately `evidence-unknown`.
+- Native host compaction that removes modern raw source boundaries makes exact
+  decompression unavailable; the block stays active rather than guessing.
+
+## Verification
+
+Deterministic coverage includes focused DCP suites, a 1000-tool-group one-user
+replay with 10 rollups + restart + fork, seeded independent-reference
+conversation-index properties, real SDK Responses conversion, persistence fault
+fixtures and an in-repo performance benchmark (`scripts/dcp-benchmark.ts`). See
+`specs/27-dcp-reliability-evidence.md` for the measured gate snapshot and
+remaining rollout work.

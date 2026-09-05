@@ -1,5 +1,5 @@
 import type { DcpConfig } from "./config.js";
-import { estimateMessageTokens, extractBlockId, messageText } from "./pruner-metadata.js";
+import { estimateMessageTokens, messageText } from "./pruner-metadata.js";
 import type {
   EmergencyCurrentTurnOutput,
   EmergencyCurrentTurnSelection,
@@ -48,9 +48,7 @@ export function emergencyPressureState(
 }
 
 function isRealUserMessage(message: any): boolean {
-  if (message?.role !== "user") return false;
-  const text = messageText(message);
-  return !text.includes("<dcp-system-reminder>") && extractBlockId(text) === undefined;
+  return message?.role === "user" && message?._dcpOrigin !== "block" && message?._dcpOrigin !== "dcp-control";
 }
 
 function assistantToolCallIds(message: any): string[] {

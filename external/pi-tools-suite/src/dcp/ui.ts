@@ -14,6 +14,7 @@ export interface DcpCompressionVisualDetails {
 	contextPercent?: number | null
 	skippedMessages?: number
 	skippedMessageIssues?: string[]
+	idempotentReplay?: boolean
 }
 
 export interface DcpContextUsage {

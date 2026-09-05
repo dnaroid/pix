@@ -13,27 +13,44 @@
 // automatic fallback to the programmatic digest on any failure/timeout.
 // ---------------------------------------------------------------------------
 
+import { createHash } from "node:crypto"
 import type { Model, Api, ProviderHeaders } from "@earendil-works/pi-ai"
 import { completeWithModelRegistry, type ModelCompletionRegistry } from "../model-completion.js"
 import type { DcpState } from "./state.js"
 import type { DcpConfig } from "./config.js"
 import type { CompressionCandidate } from "./pruner-types.js"
+import { estimateMessageTokens, estimateTokens } from "./pruner-metadata.js"
 import {
 	createRangeCompressionBlock,
+	findCoveredAndPartialBlocks,
+	prepareCompressionProtectedFragments,
 	isCompressionBoundaryWithinRange,
 	resolveAnchorBoundary,
 	resolveIdToBoundary,
 } from "./compression-blocks.js"
+import { estimateCompressionBlockReplacementTokens } from "./pruner-compression-blocks.js"
 import { stableMessageKeys } from "./pruner-message-ids.js"
+import { closeConversationRange } from "./conversation-index.js"
+import { decideDcpProgress, type DcpBlockedReason } from "./progress-controller.js"
+
+export class AutoCompressionBlockedError extends Error {
+	readonly blockedReason: DcpBlockedReason
+
+	constructor(blockedReason: DcpBlockedReason, message: string) {
+		super(message)
+		this.name = "AutoCompressionBlockedError"
+		this.blockedReason = blockedReason
+	}
+}
 
 /**
  * Pure decision: should the auto-compress fallback fire this pass?
  *
  * Fires when ALL hold:
- *  - the master switch `autoCompress.enabled` is on,
- *  - the model has ignored at least `patience` consecutive context-strong
- *    nudges (`consecutiveIgnoredStrongNudges > patience` — the model gets
- *    `patience` genuine strong chances before DCP takes over),
+ *  - the master switch `autoCompress.enabled` is on and runtime manual mode is off,
+ *  - the main provider has completed more than `patience` correlated requests
+ *    that actually contained an emergency DCP reminder without committing a
+ *    compression (`consecutiveIgnoredStrongNudges > patience`),
  *  - context is still above the emergency threshold (maxContextPercent),
  *  - a safe compression candidate exists, either outside the recent user
  *    turns or as an emergency committed prefix inside a marathon turn.
@@ -46,19 +63,106 @@ export function decideAutoCompress(
 	candidate: CompressionCandidate | null,
 ): { shouldFire: boolean; reason: string } {
 	const settings = config.compress.autoCompress
-	if (!settings?.enabled) return { shouldFire: false, reason: "disabled" }
-	if (state.consecutiveIgnoredStrongNudges <= settings.patience) {
-		return { shouldFire: false, reason: "below-patience" }
-	}
-	if (!(contextPercent > maxContextPercent)) {
-		return { shouldFire: false, reason: "below-emergency-threshold" }
-	}
-	if (!candidate) return { shouldFire: false, reason: "no-candidate" }
-	return { shouldFire: true, reason: "ignored-strongs" }
+	const decision = decideDcpProgress({
+		enabled: config.enabled,
+		autoEnabled: Boolean(settings?.enabled) && !state.manualMode,
+		pressure: contextPercent > maxContextPercent,
+		candidateAvailable: candidate !== null,
+		ignoredOpportunities: state.consecutiveIgnoredStrongNudges,
+		patience: settings?.patience ?? 0,
+	})
+	return { shouldFire: decision.shouldPrepare, reason: decision.reason }
 }
 
-/** Flatten a single message's content blocks into plain text. */
-function messageToText(message: any): string {
+const SUMMARY_SOURCE_TEXT_MAX_CHARS = 4_000
+const SUMMARY_SOURCE_ARG_STRING_MAX_CHARS = 1_000
+const SUMMARY_SOURCE_MAX_ARRAY_ITEMS = 20
+const SUMMARY_SOURCE_MAX_OBJECT_KEYS = 40
+const SUMMARY_EXTRACT_SECTION_ITEMS = 6
+const SUMMARY_EXTRACT_TOOL_ITEMS = 12
+const SUMMARY_MODEL_MAX_INPUT_TOKENS = 24_000
+const SUMMARY_MODEL_MAX_OUTPUT_TOKENS = 4_096
+const SUMMARY_MODEL_CHUNK_OUTPUT_TOKENS = 2_048
+const SUMMARY_MODEL_MAX_CHUNKS = 8
+const SUMMARY_MODEL_MAX_REFS = 4
+const SUMMARY_MODEL_PROMPT_OVERHEAD_TOKENS = 512
+const SENSITIVE_SUMMARY_KEY = /(?:authorization|api[-_]?key|access[-_]?token|refresh[-_]?token|password|passwd|secret|cookie|headers?)/i
+
+export interface SummarySourceToolCall {
+	id?: string
+	name: string
+	arguments?: unknown
+}
+
+export interface SummarySourceItem {
+	sourceId: string
+	role: string
+	timestamp?: number
+	text?: string
+	textTruncated?: boolean
+	toolCalls?: SummarySourceToolCall[]
+	toolCallId?: string
+	toolName?: string
+	outcome?: "success" | "error" | "unknown"
+	exitCode?: number
+}
+
+export interface SummarySourceCoverage {
+	itemCount: number
+	truncatedItems: number
+	toolCallCount: number
+	toolResultCount: number
+}
+
+function boundedSourceText(text: string, maxChars = SUMMARY_SOURCE_TEXT_MAX_CHARS): { text: string; truncated: boolean } {
+	const trimmed = text.trim()
+	if (trimmed.length <= maxChars) return { text: trimmed, truncated: false }
+	const markerBudget = 64
+	const keep = Math.max(1, maxChars - markerBudget)
+	const head = Math.ceil(keep / 2)
+	const tail = Math.floor(keep / 2)
+	const omitted = trimmed.length - head - tail
+	return {
+		text: `${trimmed.slice(0, head)}\n[... ${omitted} source chars omitted ...]\n${trimmed.slice(trimmed.length - tail)}`,
+		truncated: true,
+	}
+}
+
+function sanitizeSummaryValue(value: unknown, depth = 0): unknown {
+	if (depth >= 5) return "[depth-limited]"
+	if (value === null || typeof value === "number" || typeof value === "boolean") return value
+	if (typeof value === "string") return boundedSourceText(value, SUMMARY_SOURCE_ARG_STRING_MAX_CHARS).text
+	if (Array.isArray(value)) {
+		const selected = value.slice(0, SUMMARY_SOURCE_MAX_ARRAY_ITEMS).map((item) => sanitizeSummaryValue(item, depth + 1))
+		if (value.length > selected.length) selected.push(`[... ${value.length - selected.length} items omitted ...]`)
+		return selected
+	}
+	if (typeof value === "object") {
+		const output: Record<string, unknown> = {}
+		const entries = Object.entries(value as Record<string, unknown>)
+		for (const [key, nested] of entries.slice(0, SUMMARY_SOURCE_MAX_OBJECT_KEYS)) {
+			output[key] = SENSITIVE_SUMMARY_KEY.test(key) ? "[redacted]" : sanitizeSummaryValue(nested, depth + 1)
+		}
+		if (entries.length > SUMMARY_SOURCE_MAX_OBJECT_KEYS) {
+			output.__omittedKeys = entries.length - SUMMARY_SOURCE_MAX_OBJECT_KEYS
+		}
+		return output
+	}
+	return String(value)
+}
+
+function parseToolArguments(value: unknown): unknown {
+	if (typeof value !== "string") return sanitizeSummaryValue(value)
+	const trimmed = value.trim()
+	if (!trimmed) return undefined
+	try {
+		return sanitizeSummaryValue(JSON.parse(trimmed))
+	} catch {
+		return sanitizeSummaryValue(trimmed)
+	}
+}
+
+function messageVisibleText(message: any): string {
 	const content = message?.content
 	if (typeof content === "string") return content
 	if (!Array.isArray(content)) return ""
@@ -66,58 +170,303 @@ function messageToText(message: any): string {
 		.map((block: any) => {
 			if (typeof block === "string") return block
 			if (block?.type === "text") return block.text ?? ""
-			if (block?.type === "toolCall") {
-				const name = block.name ?? block.function?.name ?? "tool"
-				return `[tool call: ${name}]`
-			}
-			if (block?.type === "toolResult" || block?.role === "toolResult") {
-				return block.text ?? ""
-			}
+			if (block?.type === "toolResult") return block.text ?? block.output ?? ""
 			return ""
 		})
+		.filter(Boolean)
 		.join("\n")
 		.trim()
 }
 
-/** Extract a short tool-usage digest from messages in the range. */
-function toolUsageDigest(messages: any[]): string {
-	const counts = new Map<string, number>()
-	for (const msg of messages) {
-		const content = msg?.content
-		if (!Array.isArray(content)) continue
-		for (const block of content) {
-			if (block?.type === "toolCall" && typeof block.name === "string") {
-				counts.set(block.name, (counts.get(block.name) ?? 0) + 1)
+function sourceToolCalls(message: any): SummarySourceToolCall[] {
+	if (!Array.isArray(message?.content)) return []
+	const calls: SummarySourceToolCall[] = []
+	for (const block of message.content) {
+		if (block?.type !== "toolCall") continue
+		const name = block.name ?? block.function?.name
+		if (typeof name !== "string" || name.length === 0) continue
+		const id = typeof block.id === "string"
+			? block.id
+			: typeof block.toolCallId === "string"
+				? block.toolCallId
+				: undefined
+		const args = block.input ?? block.arguments ?? block.function?.arguments
+		calls.push({ id, name, arguments: parseToolArguments(args) })
+	}
+	return calls
+}
+
+function sourceExitCode(message: any): number | undefined {
+	const candidates = [message?.exitCode, message?.details?.exitCode, message?.details?.result?.exitCode]
+	return candidates.find((value) => typeof value === "number" && Number.isFinite(value))
+}
+
+/** Build the single bounded source-of-truth representation used by all E06 summary paths. */
+export function buildSummarySourceManifest(messages: any[]): SummarySourceItem[] {
+	return messages.map((message, index) => {
+		const visible = boundedSourceText(messageVisibleText(message))
+		const toolCalls = sourceToolCalls(message)
+		const exitCode = sourceExitCode(message)
+		const isToolResult = message?.role === "toolResult" || message?.role === "bashExecution"
+		const explicitError = message?.isError === true || (typeof exitCode === "number" && exitCode !== 0)
+		const explicitSuccess = message?.isError === false || (typeof exitCode === "number" && exitCode === 0)
+		return {
+			sourceId: `src-${String(index + 1).padStart(4, "0")}`,
+			role: typeof message?.role === "string" ? message.role : "message",
+			timestamp: Number.isFinite(message?.timestamp) ? message.timestamp : undefined,
+			text: visible.text || undefined,
+			textTruncated: visible.truncated || undefined,
+			toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+			toolCallId: typeof message?.toolCallId === "string" ? message.toolCallId : undefined,
+			toolName: typeof message?.toolName === "string" ? message.toolName : undefined,
+			outcome: isToolResult ? (explicitError ? "error" : explicitSuccess ? "success" : "unknown") : undefined,
+			exitCode,
+		}
+	})
+}
+
+export function summarySourceCoverage(manifest: SummarySourceItem[]): SummarySourceCoverage {
+	return {
+		itemCount: manifest.length,
+		truncatedItems: manifest.filter((item) => item.textTruncated).length,
+		toolCallCount: manifest.reduce((sum, item) => sum + (item.toolCalls?.length ?? 0), 0),
+		toolResultCount: manifest.filter((item) => item.toolCallId || item.role === "toolResult" || item.role === "bashExecution").length,
+	}
+}
+
+export function hashSummarySourceManifest(manifest: SummarySourceItem[]): string {
+	return createHash("sha256").update(JSON.stringify(manifest)).digest("hex")
+}
+
+function renderSummarySourceTranscript(manifest: SummarySourceItem[]): string {
+	return manifest.map((item) => {
+		const header = [`### ${item.sourceId}`, `role=${item.role}`]
+		if (item.timestamp !== undefined) header.push(`timestamp=${item.timestamp}`)
+		const lines = [header.join(" ")]
+		if (item.text) lines.push(`text:\n${item.text}`)
+		for (const call of item.toolCalls ?? []) {
+			const args = call.arguments === undefined ? "" : ` args=${JSON.stringify(call.arguments)}`
+			lines.push(`tool_call: call_id=${call.id ?? "unknown"} name=${call.name}${args}`)
+		}
+		if (item.toolCallId || item.role === "toolResult" || item.role === "bashExecution") {
+			lines.push(
+				`tool_result: call_id=${item.toolCallId ?? "unknown"} tool=${item.toolName ?? "unknown"} ` +
+				`outcome=${item.outcome ?? "unknown"}${item.exitCode === undefined ? "" : ` exit_code=${item.exitCode}`}`,
+			)
+		}
+		if (item.textTruncated) lines.push("source_note: text was bounded with an explicit omission marker")
+		return lines.join("\n")
+	}).join("\n\n")
+}
+
+export interface SummaryManifestChunkPlan {
+	chunks: SummarySourceItem[][]
+	inputBudgetTokens: number
+	oversizedGroup?: { sourceIds: string[]; estimatedTokens: number }
+	incompleteToolGroup?: { sourceIds: string[]; pendingToolCallIds: string[] }
+}
+
+function summaryModelOutputTokens(model: Model<Api>, chunk = false): number {
+	const configured = typeof (model as any)?.maxTokens === "number" && Number.isFinite((model as any).maxTokens) && (model as any).maxTokens > 0
+		? Math.floor((model as any).maxTokens)
+		: SUMMARY_MODEL_MAX_OUTPUT_TOKENS
+	return Math.max(1, Math.min(configured, chunk ? SUMMARY_MODEL_CHUNK_OUTPUT_TOKENS : SUMMARY_MODEL_MAX_OUTPUT_TOKENS))
+}
+
+function summaryModelInputBudgetTokens(model: Model<Api>): number {
+	const contextWindow = typeof (model as any)?.contextWindow === "number" && Number.isFinite((model as any).contextWindow) && (model as any).contextWindow > 0
+		? Math.floor((model as any).contextWindow)
+		: 128_000
+	const outputReserve = summaryModelOutputTokens(model, false)
+	const promptReserve = estimateTokens(SUMMARIZER_SYSTEM_PROMPT) + SUMMARY_MODEL_PROMPT_OVERHEAD_TOKENS
+	return Math.max(256, Math.min(SUMMARY_MODEL_MAX_INPUT_TOKENS, contextWindow - outputReserve - promptReserve))
+}
+
+function summaryManifestAtomicGroups(manifest: SummarySourceItem[]): {
+	groups: SummarySourceItem[][]
+	incompleteToolGroup?: { sourceIds: string[]; pendingToolCallIds: string[] }
+} {
+	const groups: SummarySourceItem[][] = []
+	for (let index = 0; index < manifest.length;) {
+		const first = manifest[index]!
+		const group = [first]
+		const pending = new Set((first.toolCalls ?? []).map((call) => call.id).filter((id): id is string => Boolean(id)))
+		if (pending.size === 0) {
+			groups.push(group)
+			index++
+			continue
+		}
+
+		let cursor = index + 1
+		for (; cursor < manifest.length && pending.size > 0; cursor++) {
+			const item = manifest[cursor]!
+			group.push(item)
+			if (item.toolCallId && pending.has(item.toolCallId)) pending.delete(item.toolCallId)
+		}
+		if (pending.size > 0) {
+			return {
+				groups,
+				incompleteToolGroup: {
+					sourceIds: group.map((item) => item.sourceId),
+					pendingToolCallIds: [...pending],
+				},
 			}
 		}
+		groups.push(group)
+		index = cursor
+	}
+	return { groups }
+}
+
+/** Partition the source only between complete protocol groups; never split a tool group. */
+export function partitionSummarySourceManifest(
+	manifest: SummarySourceItem[],
+	inputBudgetTokens: number,
+): SummaryManifestChunkPlan {
+	const budget = Math.max(1, Math.floor(inputBudgetTokens))
+	const atomic = summaryManifestAtomicGroups(manifest)
+	if (atomic.incompleteToolGroup) {
+		return { chunks: [], inputBudgetTokens: budget, incompleteToolGroup: atomic.incompleteToolGroup }
+	}
+
+	const chunks: SummarySourceItem[][] = []
+	let current: SummarySourceItem[] = []
+	let currentTokens = 0
+	for (const group of atomic.groups) {
+		const groupTokens = estimateTokens(renderSummarySourceTranscript(group))
+		if (groupTokens > budget) {
+			return {
+				chunks,
+				inputBudgetTokens: budget,
+				oversizedGroup: { sourceIds: group.map((item) => item.sourceId), estimatedTokens: groupTokens },
+			}
+		}
+		if (current.length > 0 && currentTokens + groupTokens > budget) {
+			chunks.push(current)
+			current = []
+			currentTokens = 0
+		}
+		current.push(...group)
+		currentTokens += groupTokens
+	}
+	if (current.length > 0) chunks.push(current)
+	return { chunks, inputBudgetTokens: budget }
+}
+
+function selectEdgeItems<T>(items: T[], maxItems: number): T[] {
+	if (items.length <= maxItems) return items
+	const head = Math.floor(maxItems / 3)
+	const tail = maxItems - head
+	return [...items.slice(0, head), ...items.slice(items.length - tail)]
+}
+
+function explicitSourceLines(
+	manifest: SummarySourceItem[],
+	pattern: RegExp,
+	maxItems = SUMMARY_EXTRACT_SECTION_ITEMS,
+): string[] {
+	const matches: string[] = []
+	const seen = new Set<string>()
+	for (const item of manifest) {
+		for (const rawLine of item.text?.split(/\r?\n/) ?? []) {
+			const line = rawLine.trim()
+			if (!line || !pattern.test(line)) continue
+			const bounded = boundedSourceText(line, 600).text
+			const rendered = `[${item.sourceId}] ${bounded}`
+			if (seen.has(rendered)) continue
+			seen.add(rendered)
+			matches.push(rendered)
+		}
+	}
+	return selectEdgeItems(matches, maxItems)
+}
+
+function toolEvidenceLines(manifest: SummarySourceItem[]): string[] {
+	const lines: string[] = []
+	for (const item of manifest) {
+		for (const call of item.toolCalls ?? []) {
+			lines.push(
+				`[${item.sourceId}] call ${call.id ?? "unknown"} ${call.name}` +
+				(call.arguments === undefined ? "" : ` args=${JSON.stringify(call.arguments)}`),
+			)
+		}
+		if (item.toolCallId || item.role === "toolResult" || item.role === "bashExecution") {
+			// Large successful outputs are exactly the material DCP is trying to
+			// retire; repeating an arbitrary head/tail excerpt defeats compression
+			// and can resurrect incidental log noise. Keep exact excerpts for
+			// actionable errors and already-small results only.
+			const includeExcerpt = Boolean(item.text) && (item.outcome === "error" || item.text!.length <= 300)
+			const excerpt = includeExcerpt ? ` excerpt=${JSON.stringify(boundedSourceText(item.text!, 300).text)}` : ""
+			lines.push(
+				`[${item.sourceId}] result ${item.toolCallId ?? "unknown"} ${item.toolName ?? "unknown"} ` +
+				`outcome=${item.outcome ?? "unknown"}${item.exitCode === undefined ? "" : ` exit_code=${item.exitCode}`}${excerpt}`,
+			)
+		}
+	}
+	return selectEdgeItems(lines, SUMMARY_EXTRACT_TOOL_ITEMS)
+}
+
+/** Extract a short tool-usage digest from a source manifest. */
+function toolUsageDigest(manifest: SummarySourceItem[]): string {
+	const counts = new Map<string, number>()
+	for (const item of manifest) {
+		for (const call of item.toolCalls ?? []) counts.set(call.name, (counts.get(call.name) ?? 0) + 1)
 	}
 	if (counts.size === 0) return ""
-	const entries = [...counts.entries()].sort((a, b) => b[1] - a[1])
-	return entries.map(([name, n]) => `${name}×${n}`).join(", ")
+	return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([name, n]) => `${name}×${n}`).join(", ")
+}
+
+function appendExtractiveSection(lines: string[], heading: string, items: string[]): void {
+	if (items.length === 0) return
+	lines.push(`${heading}:`)
+	for (const item of items) lines.push(`- ${item}`)
 }
 
 /**
- * Deterministic, model-free summary of the compressed range. Deliberately
- * short: `createRangeCompressionBlock` appends protected user messages and
- * protected tool outputs on top of this, so the digest itself only needs to
- * label the slice and record the tool-call shape.
+ * Bounded deterministic continuation record used when no verified model
+ * summary is available. Categories are based only on explicit source wording;
+ * they are not claimed to be exhaustive semantic understanding.
  */
+export function buildExtractiveSummary(
+	topic: string,
+	candidate: CompressionCandidate,
+	manifest: SummarySourceItem[],
+): string {
+	const coverage = summarySourceCoverage(manifest)
+	const lines = [
+		`[Auto-compressed by DCP — extractive continuation record]`,
+		`Topic: ${topic}`,
+		`Range: ${candidate.startId}..${candidate.endId} (${candidate.messageCount} messages, ~${candidate.estimatedTokens} tokens)`,
+		`Source coverage: ${coverage.itemCount} items; ${coverage.truncatedItems} item(s) contain explicit bounded-text markers.`,
+		`The sections below preserve source excerpts and metadata; category labels reflect explicit wording only and are not exhaustive semantic claims.`,
+	]
+	const digest = toolUsageDigest(manifest)
+	if (digest) lines.push(`Tool calls in range: ${digest}`)
+
+	appendExtractiveSection(
+		lines,
+		"User constraints / requests (source excerpts)",
+		selectEdgeItems(
+			manifest.filter((item) => item.role === "user" && item.text).map((item) => `[${item.sourceId}] ${boundedSourceText(item.text!, 1_200).text}`),
+			SUMMARY_EXTRACT_SECTION_ITEMS,
+		),
+	)
+	appendExtractiveSection(lines, "Explicit decisions", explicitSourceLines(manifest, /\b(?:decision|decided|chosen|selected|we will|will use)\b/i))
+	appendExtractiveSection(lines, "Explicit hypotheses / uncertainty", explicitSourceLines(manifest, /\b(?:hypothesis|suspect|possibly|maybe|likely|unverified|not verified|uncertain)\b/i))
+	appendExtractiveSection(lines, "Reported changes", explicitSourceLines(manifest, /\b(?:changed|updated|modified|implemented|patched|created|deleted|renamed|wrote)\b/i))
+	appendExtractiveSection(lines, "Verification / errors", explicitSourceLines(manifest, /\b(?:test|tests|verified|verification|passed|failed|failure|error|exit code|status)\b/i))
+	appendExtractiveSection(lines, "Pending / next steps", explicitSourceLines(manifest, /\b(?:next step|next:|todo|pending|remaining|still need|must still|follow[- ]?up)\b/i))
+	appendExtractiveSection(lines, "Tool evidence", toolEvidenceLines(manifest))
+	return lines.join("\n")
+}
+
+/** Backward-compatible export name; implementation is now extractive rather than frequency-only. */
 export function buildProgrammaticSummary(
 	topic: string,
 	candidate: CompressionCandidate,
 	messagesInRange: any[],
 ): string {
-	const toolDigest = toolUsageDigest(messagesInRange)
-	const lines = [
-		`[Auto-compressed by DCP — model did not compress after repeated context-strong nudges]`,
-		`Topic: ${topic}`,
-		`Range: ${candidate.startId}..${candidate.endId} (${candidate.messageCount} messages, ~${candidate.estimatedTokens} tokens)`,
-	]
-	if (toolDigest) lines.push(`Tool calls in range: ${toolDigest}`)
-	lines.push(
-		`This slice was summarized automatically to protect the context window. Protected user messages and tool outputs are preserved below by the compression block.`,
-	)
-	return lines.join("\n")
+	return buildExtractiveSummary(topic, candidate, buildSummarySourceManifest(messagesInRange))
 }
 
 const SUMMARIZER_SYSTEM_PROMPT = `You summarize a slice of a coding agent's conversation so it can replace the raw messages in context. Produce a dense, continuation-focused summary: preserve user intent, decisions made, files/symbols changed or inspected, exact errors still actionable, verification status, and next steps. Preserve exact identifiers and explicit continuity markers verbatim, including uppercase labels before colons; never paraphrase or omit those labels. Do not infer, invent, or add facts absent from the source; preserve uncertainty instead of filling gaps. Drop full logs, repeated output, and incidental detail without quoting or naming the discarded log lines or their markers. Be concise (roughly 4-10 bullets). Output ONLY the summary text, no preamble.`
@@ -138,6 +487,35 @@ export interface ModelSummaryResult {
 	attempts: ModelSummaryAttempt[]
 }
 
+async function awaitSummaryDeadline<T>(
+	promise: Promise<T>,
+	deadline: number,
+	parentSignal?: AbortSignal,
+): Promise<T> {
+	const remaining = deadline - Date.now()
+	if (remaining <= 0) throw new Error("summarizer operation deadline exceeded")
+	return await new Promise<T>((resolve, reject) => {
+		let settled = false
+		const finish = (fn: () => void) => {
+			if (settled) return
+			settled = true
+			clearTimeout(timer)
+			if (parentSignal) parentSignal.removeEventListener("abort", onAbort)
+			fn()
+		}
+		const timer = setTimeout(() => finish(() => reject(new Error("summarizer operation deadline exceeded"))), remaining)
+		const onAbort = () => finish(() => reject(new Error("summarizer operation aborted")))
+		if (parentSignal) {
+			if (parentSignal.aborted) return onAbort()
+			parentSignal.addEventListener("abort", onAbort, { once: true })
+		}
+		promise.then(
+			(value) => finish(() => resolve(value)),
+			(error) => finish(() => reject(error)),
+		)
+	})
+}
+
 type ModelSummaryRegistry = ModelCompletionRegistry & {
 	find(provider: string, modelId: string): Model<Api> | undefined
 	getApiKeyAndHeaders(model: Model<Api>): Promise<
@@ -156,6 +534,68 @@ type ModelSummaryRegistry = ModelCompletionRegistry & {
  * Never throws: a summarizer failure must never block the agent — the
  * programmatic digest is always available as a floor.
  */
+function summaryPromptForManifest(topic: string, manifest: SummarySourceItem[], prefix = "Summarize this conversation slice"): string {
+	const transcript = renderSummarySourceTranscript(manifest)
+	const coverage = summarySourceCoverage(manifest)
+	return (
+		`${prefix} (topic: ${topic}).\n` +
+		`Source manifest coverage: ${coverage.itemCount} items, ${coverage.truncatedItems} bounded-text item(s), ` +
+		`${coverage.toolCallCount} tool call(s), ${coverage.toolResultCount} tool result(s).\n\n` +
+		`Transcript from the bounded source manifest:\n${transcript}`
+	)
+}
+
+async function completeSummaryPrompt(
+	modelRegistry: ModelSummaryRegistry,
+	model: Model<Api>,
+	auth: { apiKey?: string; headers?: ProviderHeaders; env?: Record<string, string> },
+	prompt: string,
+	deadline: number,
+	parentSignal: AbortSignal | undefined,
+	maxTokens: number,
+): Promise<string | undefined> {
+	const controller = new AbortController()
+	const remainingMs = Math.max(0, deadline - Date.now())
+	if (remainingMs <= 0) throw new Error("summarizer operation deadline exceeded")
+	const timer = setTimeout(() => controller.abort(), remainingMs)
+	const onParentAbort = () => controller.abort()
+	if (parentSignal) {
+		if (parentSignal.aborted) controller.abort()
+		else parentSignal.addEventListener("abort", onParentAbort, { once: true })
+	}
+	try {
+		const completion = completeWithModelRegistry(
+			modelRegistry,
+			model,
+			{ systemPrompt: SUMMARIZER_SYSTEM_PROMPT, messages: [{ role: "user", content: prompt, timestamp: Date.now() }] },
+			{
+				apiKey: auth.apiKey,
+				headers: auth.headers,
+				env: auth.env,
+				signal: controller.signal,
+				maxRetries: 0,
+				maxTokens,
+			} as any,
+		)
+		const result = await awaitSummaryDeadline(completion, deadline, controller.signal)
+		return extractAssistantText(result)
+	} finally {
+		clearTimeout(timer)
+		if (parentSignal) parentSignal.removeEventListener("abort", onParentAbort)
+	}
+}
+
+function mergeChunkPrompt(topic: string, chunkSummaries: Array<{ sourceIds: string[]; text: string }>): string {
+	const body = chunkSummaries.map((chunk, index) =>
+		`### Chunk ${index + 1} sources ${chunk.sourceIds[0]}..${chunk.sourceIds[chunk.sourceIds.length - 1]}\n${chunk.text}`,
+	).join("\n\n")
+	return (
+		`Merge these independently produced summaries for one conversation slice (topic: ${topic}). ` +
+		`Preserve explicit user constraints, decisions, exact errors, verification status, paths/identifiers, tool outcomes, uncertainty, and pending next steps. ` +
+		`Do not invent facts or drop a chunk. Output only the merged continuation summary.\n\n${body}`
+	)
+}
+
 export async function generateModelSummary(
 	modelRefs: string[],
 	modelRegistry: ModelSummaryRegistry | undefined,
@@ -163,6 +603,7 @@ export async function generateModelSummary(
 	topic: string,
 	messagesInRange: any[],
 	timeoutMs: number,
+	sourceManifest?: SummarySourceItem[],
 ): Promise<ModelSummaryResult> {
 	const attempts: ModelSummaryAttempt[] = []
 	if (!modelRefs || modelRefs.length === 0) return { attempts }
@@ -170,18 +611,12 @@ export async function generateModelSummary(
 		return { attempts }
 	}
 
-	// Build a compact transcript from the range. Cap token budget so the
-	// summarizer call stays cheap and bounded.
-	const transcript = messagesInRange
-		.map((msg, i) => {
-			const role = msg?.role ?? "message"
-			return `### ${role} #${i + 1}\n${messageToText(msg)}`
-		})
-		.join("\n\n")
-	const userPrompt = `Summarize this conversation slice (topic: ${topic}).\n\nTranscript:\n${transcript}`
+	const manifest = sourceManifest ?? buildSummarySourceManifest(messagesInRange)
 
+	const operationTimeoutMs = Math.max(1, Math.floor(Number.isFinite(timeoutMs) ? timeoutMs : 1))
+	const deadline = Date.now() + operationTimeoutMs
 	let lastError: unknown
-	for (const ref of modelRefs) {
+	for (const ref of modelRefs.slice(0, SUMMARY_MODEL_MAX_REFS)) {
 		const parsed = parseModelRef(ref)
 		if (!parsed) continue
 		const model: Model<Api> | undefined = modelRegistry.find(parsed.provider, parsed.id)
@@ -192,7 +627,7 @@ export async function generateModelSummary(
 
 		let auth: Awaited<ReturnType<ModelSummaryRegistry["getApiKeyAndHeaders"]>>
 		try {
-			auth = await modelRegistry.getApiKeyAndHeaders(model)
+			auth = await awaitSummaryDeadline(modelRegistry.getApiKeyAndHeaders(model), deadline, signal)
 		} catch (error) {
 			lastError = error
 			attempts.push({ ref, outcome: "no-auth", error: error instanceof Error ? error.message : String(error) })
@@ -203,30 +638,83 @@ export async function generateModelSummary(
 			continue
 		}
 
-		// Combine the agent signal with a local timeout so a slow summarizer
-		// cannot stall the context event indefinitely.
-		const controller = new AbortController()
-		const timer = setTimeout(() => controller.abort(), Math.max(1000, timeoutMs))
-		const onParentAbort = () => controller.abort()
-		if (signal) {
-			if (signal.aborted) controller.abort()
-			else signal.addEventListener("abort", onParentAbort, { once: true })
+		const inputBudgetTokens = summaryModelInputBudgetTokens(model)
+		const chunkPlan = partitionSummarySourceManifest(manifest, inputBudgetTokens)
+		if (chunkPlan.incompleteToolGroup) {
+			attempts.push({
+				ref,
+				outcome: "error",
+				error: `source manifest contains incomplete tool group: ${chunkPlan.incompleteToolGroup.pendingToolCallIds.join(",")}`,
+			})
+			continue
+		}
+		if (chunkPlan.oversizedGroup) {
+			attempts.push({
+				ref,
+				outcome: "error",
+				error: `protocol group exceeds summarizer input budget (${chunkPlan.oversizedGroup.estimatedTokens} > ${inputBudgetTokens})`,
+			})
+			continue
+		}
+		if (chunkPlan.chunks.length === 0) {
+			attempts.push({ ref, outcome: "empty" })
+			continue
+		}
+		if (chunkPlan.chunks.length > SUMMARY_MODEL_MAX_CHUNKS) {
+			attempts.push({
+				ref,
+				outcome: "error",
+				error: `source requires ${chunkPlan.chunks.length} summarizer chunks; max is ${SUMMARY_MODEL_MAX_CHUNKS}`,
+			})
+			continue
 		}
 
 		try {
-			const result = await completeWithModelRegistry(
-				modelRegistry,
-				model,
-				{ systemPrompt: SUMMARIZER_SYSTEM_PROMPT, messages: [{ role: "user", content: userPrompt, timestamp: Date.now() }] },
-				{
-					apiKey: auth.apiKey,
-					headers: auth.headers,
-					env: auth.env,
-					signal: controller.signal,
-					maxRetries: 0,
-				} as any,
-			)
-			const text = extractAssistantText(result)
+			let text: string | undefined
+			if (chunkPlan.chunks.length === 1) {
+				text = await completeSummaryPrompt(
+					modelRegistry,
+					model,
+					auth,
+					summaryPromptForManifest(topic, chunkPlan.chunks[0]!),
+					deadline,
+					signal,
+					summaryModelOutputTokens(model, false),
+				)
+			} else {
+				const chunkSummaries: Array<{ sourceIds: string[]; text: string }> = []
+				for (let chunkIndex = 0; chunkIndex < chunkPlan.chunks.length; chunkIndex++) {
+					const chunk = chunkPlan.chunks[chunkIndex]!
+					const chunkText = await completeSummaryPrompt(
+						modelRegistry,
+						model,
+						auth,
+						summaryPromptForManifest(
+							topic,
+							chunk,
+							`Summarize source chunk ${chunkIndex + 1}/${chunkPlan.chunks.length} without dropping any source item`,
+						),
+						deadline,
+						signal,
+						summaryModelOutputTokens(model, true),
+					)
+					if (!chunkText) throw new Error(`summarizer chunk ${chunkIndex + 1}/${chunkPlan.chunks.length} returned empty`)
+					chunkSummaries.push({ sourceIds: chunk.map((item) => item.sourceId), text: chunkText })
+				}
+				const mergePrompt = mergeChunkPrompt(topic, chunkSummaries)
+				if (estimateTokens(mergePrompt) > inputBudgetTokens) {
+					throw new Error(`chunk merge exceeds summarizer input budget (${estimateTokens(mergePrompt)} > ${inputBudgetTokens})`)
+				}
+				text = await completeSummaryPrompt(
+					modelRegistry,
+					model,
+					auth,
+					mergePrompt,
+					deadline,
+					signal,
+					summaryModelOutputTokens(model, false),
+				)
+			}
 			if (text) {
 				attempts.push({ ref, outcome: "ok" })
 				return { text, usedModelRef: ref, attempts }
@@ -235,10 +723,6 @@ export async function generateModelSummary(
 		} catch (error) {
 			lastError = error
 			attempts.push({ ref, outcome: "error", error: error instanceof Error ? error.message : String(error) })
-			// try next model in the fallback list
-		} finally {
-			clearTimeout(timer)
-			if (signal) signal.removeEventListener("abort", onParentAbort)
 		}
 	}
 
@@ -274,6 +758,12 @@ export interface CreateAutoCompressionBlockOptions {
 	messages: any[]
 	modelRegistry?: any
 	signal?: AbortSignal
+	/** Session cwd used for bounded E07 artifact recovery. */
+	cwd?: string
+	/** Minimum full-projection gain required by the current E05 budget plan. */
+	requiredGainTokens?: number
+	/** Optional durable publication hook. Live state is not changed unless it succeeds. */
+	persistState?: (preparedState: DcpState) => Promise<void>
 }
 
 export interface AutoCompressionResult {
@@ -281,10 +771,28 @@ export interface AutoCompressionResult {
 	summaryMode: "programmatic" | "model" | "programmatic_fallback"
 	summaryTokens: number
 	removedTokenEstimate: number
+	/** Full-projection estimator values using the same message estimator before/after. */
+	sourceExactEstimate: number
+	replacementExactEstimate: number
+	projectedGain: number
+	/** Stable E06 representation semantics independent of legacy summaryMode names. */
+	summaryRepresentation: "model" | "extractive" | "extractive-fallback"
+	sourceHash: string
+	sourceCoverage: SummarySourceCoverage
 	/** Model ref that produced the summary; set only when `summaryMode === "model"`. */
 	summarizerModelRef?: string
 	/** Per-model attempts, surfaced for DCP debug visibility on fallback. */
 	summarizerAttempts?: ModelSummaryAttempt[]
+}
+
+function createAutoCompressionWorkingState(state: DcpState): DcpState {
+	return {
+		...state,
+		compressionBlocks: state.compressionBlocks.map((block) => ({
+			...block,
+			coveredBlockIds: block.coveredBlockIds ? [...block.coveredBlockIds] : undefined,
+		})),
+	}
 }
 
 /**
@@ -299,13 +807,29 @@ export async function createAutoCompressionBlock(
 	options: CreateAutoCompressionBlockOptions,
 ): Promise<AutoCompressionResult> {
 	const { candidate, topic, state, config, messages, modelRegistry, signal } = options
+	const operationEpoch = state.sessionEpoch
 	const settings = config.compress.autoCompress
-
-	const startBoundary = resolveIdToBoundary(candidate.startId, "startTimestamp", state)
-	const endBoundary = resolveIdToBoundary(candidate.endId, "endTimestamp", state)
-	if (!Number.isFinite(startBoundary.timestamp) || !Number.isFinite(endBoundary.timestamp)) {
+	const closure = closeConversationRange(state.conversationIndexSnapshot, candidate.startId, candidate.endId)
+	if (closure?.incompleteToolGroup) {
 		throw new Error(
-			`Auto-compress candidate ${candidate.startId}..${candidate.endId} did not resolve to finite timestamps`,
+			`Auto-compress candidate ${candidate.startId}..${candidate.endId} intersects an incomplete tool group`,
+		)
+	}
+	let effectiveCandidate: CompressionCandidate = closure?.expanded
+		? {
+			...candidate,
+			startId: closure.startId ?? candidate.startId,
+			endId: closure.endId ?? candidate.endId,
+			reason: `${candidate.reason}; protocol-closed tool group`,
+		}
+		: candidate
+
+	const startBoundary = resolveIdToBoundary(effectiveCandidate.startId, "startTimestamp", state)
+	const endBoundary = resolveIdToBoundary(effectiveCandidate.endId, "endTimestamp", state)
+	if (!Number.isFinite(startBoundary.timestamp) || !Number.isFinite(endBoundary.timestamp)) {
+		throw new AutoCompressionBlockedError(
+			"missing-source",
+			`Auto-compress candidate ${effectiveCandidate.startId}..${effectiveCandidate.endId} did not resolve to finite timestamps`,
 		)
 	}
 	const startTimestamp = startBoundary.timestamp
@@ -321,6 +845,13 @@ export async function createAutoCompressionBlock(
 			state,
 		),
 	)
+	if (closure?.expanded) {
+		effectiveCandidate = {
+			...effectiveCandidate,
+			messageCount: messagesInRange.length,
+			estimatedTokens: messagesInRange.reduce((sum, message) => sum + estimateMessageTokens(message), 0),
+		}
+	}
 
 	// Summary source selection. `summaryMode` distinguishes three cases so the
 	// DCP debug log can tell a real model summary from a programmatic fallback
@@ -328,7 +859,8 @@ export async function createAutoCompressionBlock(
 	//   - "model": a configured model produced the summary.
 	//   - "programmatic": no summarizer models configured (floor by design).
 	//   - "programmatic_fallback": models were configured but all failed/empty.
-	let summary = buildProgrammaticSummary(topic, candidate, messagesInRange)
+	const sourceManifest = buildSummarySourceManifest(messagesInRange)
+	let summary = buildExtractiveSummary(topic, effectiveCandidate, sourceManifest)
 	let summaryMode: "programmatic" | "model" | "programmatic_fallback" = "programmatic"
 	let summarizerModelRef: string | undefined
 	let summarizerAttempts: ModelSummaryAttempt[] | undefined
@@ -342,6 +874,7 @@ export async function createAutoCompressionBlock(
 			topic,
 			messagesInRange,
 			settings.timeoutMs,
+			sourceManifest,
 		)
 		summarizerAttempts = modelResult.attempts.length > 0 ? modelResult.attempts : undefined
 		if (modelResult.text) {
@@ -356,7 +889,28 @@ export async function createAutoCompressionBlock(
 		}
 	}
 
-	const anchor = resolveAnchorBoundary(endTimestamp, state, endBoundary.stableId)
+	const workingState = createAutoCompressionWorkingState(state)
+	const anchor = resolveAnchorBoundary(endTimestamp, workingState, endBoundary.stableId)
+	const coveredBeforeCreate = findCoveredAndPartialBlocks(
+		startTimestamp, endTimestamp, workingState,
+		{ startMessageId: startBoundary.stableId, endMessageId: endBoundary.stableId },
+	).coveredBlocks
+	const preparedProtectedFragments = await prepareCompressionProtectedFragments({
+		startTimestamp,
+		endTimestamp,
+		startMessageId: startBoundary.stableId,
+		endMessageId: endBoundary.stableId,
+		state: workingState,
+		config,
+		mode: "range",
+		cwd: options.cwd,
+	})
+	// New blocks have an explicit protected-fragment ledger, so auto rollups can
+	// summarize the old synthetic block instead of recursively expanding its
+	// entire summary verbatim. Legacy blocks without a ledger keep the old
+	// expansion path for compatibility and loss-avoidance.
+	const canCompactCoveredSummaries =
+		coveredBeforeCreate.length > 0 && coveredBeforeCreate.every((block) => block.protectedFragments !== undefined)
 	const created = createRangeCompressionBlock({
 		topic,
 		summary,
@@ -367,16 +921,64 @@ export async function createAutoCompressionBlock(
 		anchorTimestamp: anchor.timestamp,
 		anchorMessageId: anchor.stableId,
 		createdByToolCallId: undefined,
-		state,
+		state: workingState,
 		config,
 		mode: "range",
+		version: 2,
+		replacementMode: "range",
+		validatePlaceholders: !canCompactCoveredSummaries,
+		expandPlaceholders: !canCompactCoveredSummaries,
+		preparedProtectedFragments,
 	})
+
+	const summaryRepresentation: "model" | "extractive" | "extractive-fallback" = summaryMode === "model"
+		? "model"
+		: summaryMode === "programmatic_fallback"
+			? "extractive-fallback"
+			: "extractive"
+	const sourceHash = hashSummarySourceManifest(sourceManifest)
+	const sourceCoverage = summarySourceCoverage(sourceManifest)
+	created.block.autoSummaryRepresentation = summaryRepresentation
+	created.block.sourceHash = sourceHash
+	created.block.sourceCoverage = sourceCoverage
+
+	const sourceExactEstimate = messagesInRange.reduce((sum, message) => sum + estimateMessageTokens(message), 0)
+	const replacementExactEstimate = estimateCompressionBlockReplacementTokens(created.block)
+	const projectedGain = sourceExactEstimate - replacementExactEstimate
+	if (projectedGain <= 0) {
+		throw new AutoCompressionBlockedError(
+			"non-positive-gain",
+			`Auto-compress rejected non-positive full-projection gain for ${effectiveCandidate.startId}..${effectiveCandidate.endId}: ` +
+			`source ${sourceExactEstimate} tokens, replacement ${replacementExactEstimate} tokens`,
+		)
+	}
+	const requiredGainTokens = Math.max(0, Math.floor(options.requiredGainTokens ?? 0))
+	if (projectedGain < requiredGainTokens) {
+		throw new AutoCompressionBlockedError(
+			"budget-exhausted",
+			`Auto-compress projected gain for ${effectiveCandidate.startId}..${effectiveCandidate.endId} is below required budget recovery: ` +
+			`${projectedGain} < ${requiredGainTokens} tokens`,
+		)
+	}
+
+	if (options.persistState) await options.persistState(workingState)
+	if (state.sessionEpoch !== operationEpoch) {
+		throw new Error("Auto-compression result became stale because the active session changed before commit")
+	}
+	state.compressionBlocks = workingState.compressionBlocks
+	state.nextBlockId = workingState.nextBlockId
 
 	return {
 		blockId: created.block.id,
 		summaryMode,
 		summaryTokens: created.summaryTokenEstimate,
 		removedTokenEstimate: created.removedTokenEstimate,
+		sourceExactEstimate,
+		replacementExactEstimate,
+		projectedGain,
+		summaryRepresentation,
+		sourceHash,
+		sourceCoverage,
 		summarizerModelRef,
 		summarizerAttempts,
 	}

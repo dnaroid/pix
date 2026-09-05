@@ -13,10 +13,12 @@ import {
 } from "./state.js"
 import {
 	cleanupStaleDcpStateFiles,
+	captureDcpPersistenceTarget,
 	loadDcpState,
 	loadDcpStateFromSessionFile,
 	resetDcpPersistenceDedup,
 	saveDcpState,
+	saveDcpStateToTarget,
 } from "./state-persistence.js"
 import {
 	SYSTEM_PROMPT,
@@ -46,19 +48,27 @@ import {
 	resolveContextThresholds,
 	estimateTokens,
 } from "./pruner.js"
-import { stripStaleDcpMetadataFromMessage } from "./pruner-metadata.js"
+import { estimateMessageTokens, stripStaleDcpMetadataFromMessage } from "./pruner-metadata.js"
 import { summarizeDcpState, writeDcpDebugLog } from "./debug-log.js"
 import type { DcpNudgeType } from "./pruner-types.js"
 import { registerCompressTool } from "./compress-tool.js"
-import { decideAutoCompress, createAutoCompressionBlock } from "./auto-compress.js"
+import {
+	AutoCompressionBlockedError,
+	decideAutoCompress,
+	createAutoCompressionBlock,
+} from "./auto-compress.js"
 import { DCP_STATS_MESSAGE_TYPE, registerCommands } from "./commands.js"
 import { normalizeDcpContextUsage } from "./ui.js"
 import { safeGetContextUsage } from "../context-usage.js"
 import {
 	collectProviderToolResultEvidence,
 	providerPayloadIncludesToolResult,
+	providerPayloadRevision,
+	ProviderEvidenceTracker,
 } from "./provider-tool-results.js"
 import { reconcileInheritedCompressionBlocks } from "./pruner-compression-blocks.js"
+import { rehydrateToolRecordsFromMessages } from "./recovery.js"
+import { inferDcpBlockedReason, planDcpBudget } from "./progress-controller.js"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -131,7 +141,9 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 	// ── 2. Create state ───────────────────────────────────────────────────────
 	const state = createState()
 	let pendingInheritedBlockReconciliation = false
-	const pendingProviderToolIds = new Set<string>()
+	const providerEvidenceTracker = new ProviderEvidenceTracker()
+	let providerEvidenceCommitQueue = Promise.resolve()
+	let latestProviderOpportunityAvailable = false
 	const appendNudgeTelemetry = (
 		event: "emitted" | "upgraded" | "reapplied",
 		type: DcpNudgeType,
@@ -174,6 +186,9 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 	pi.on("session_start", async (event, ctx) => {
 		// Reset to a clean slate first.
 		resetState(state)
+		providerEvidenceTracker.reset()
+		latestProviderOpportunityAvailable = false
+		const sessionStartEpoch = state.sessionEpoch
 		pendingInheritedBlockReconciliation = false
 
 		// Reset dedup hash before loading the sidecar state for this session.
@@ -189,7 +204,9 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 		void cleanupStaleDcpStateFiles(ctx).catch(() => {
 			// Cleanup is opportunistic; stale sidecars must not block session startup.
 		})
-		restoreState(state, await loadDcpState(ctx))
+		const loadedState = await loadDcpState(ctx)
+		if (state.sessionEpoch !== sessionStartEpoch) return
+		restoreState(state, loadedState)
 		pendingInheritedBlockReconciliation = state.compressionBlocks.length > 0
 
 		// fork/resume/new sessions inherit the source conversation but get a fresh
@@ -198,6 +215,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 		if (state.compressionBlocks.length === 0 && event.previousSessionFile) {
 			try {
 				const inherited = await loadDcpStateFromSessionFile(event.previousSessionFile)
+				if (state.sessionEpoch !== sessionStartEpoch) return
 				const added = inheritCompressionBlocks(state, inherited)
 				if (added > 0) {
 					pendingInheritedBlockReconciliation = true
@@ -307,7 +325,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 				filteredMessages: contextMessages.length,
 				outputMessages: messages.length,
 				messageIdControl: "distributed-carriers",
-				state: summarizeDcpState(state),
+				state: summarizeDcpState(state, effectiveConfig),
 				...details,
 			}, ctx)
 			return { messages }
@@ -318,6 +336,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 			filteredMessages: contextMessages.length,
 			filteredDcpControlPlaneMessages: event.messages.length - contextMessages.length,
 		}, ctx)
+		latestProviderOpportunityAvailable = false
 		if (!effectiveConfig.enabled) {
 			writeDcpDebugLog(effectiveConfig, "context.disabled", {
 				inputMessages: event.messages.length,
@@ -326,6 +345,10 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 			return { messages: contextMessages }
 		}
 		annotateMessagesWithBranchEntryIds(contextMessages, ctx)
+		const rehydration = rehydrateToolRecordsFromMessages(contextMessages, state)
+		if (rehydration.recordsUpdated > 0) {
+			writeDcpDebugLog(effectiveConfig, "context.rehydrated_tool_records", { ...rehydration }, ctx)
+		}
 		if (pendingInheritedBlockReconciliation) {
 			pendingInheritedBlockReconciliation = false
 			const reconciliation = reconcileInheritedCompressionBlocks(contextMessages, state)
@@ -353,7 +376,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 				clearedAnchors,
 				turn: state.currentTurn,
 				blockId: state.lastAutomaticPruneBlockId,
-				state: summarizeDcpState(state),
+				state: summarizeDcpState(state, effectiveConfig),
 			}, ctx)
 		}
 		let candidate = null as ReturnType<typeof detectCompressionCandidate>
@@ -365,20 +388,21 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 		// In manual mode we still apply pruning strategies (if
 		// automaticStrategies is on) but skip routine autonomous nudges. Emergency
 		// max-context nudges are still allowed, matching the manual-mode prompt.
-		const usage = normalizeDcpContextUsage(safeGetContextUsage(ctx))
+		const nativeUsage = normalizeDcpContextUsage(safeGetContextUsage(ctx))
+		const ctxModel = (ctx as any).model
+		const fallbackContextWindow = nativeUsage?.contextWindow ?? (
+			typeof ctxModel?.contextWindow === "number" && Number.isFinite(ctxModel.contextWindow) && ctxModel.contextWindow > 0
+				? ctxModel.contextWindow
+				: undefined
+		)
+		const repoProjectedTokens = prunedMessages.reduce(
+			(sum, message) => sum + estimateMessageTokens(message),
+			0,
+		)
+		const usage = nativeUsage ?? (fallbackContextWindow
+			? { tokens: null, contextWindow: fallbackContextWindow, percent: null }
+			: undefined)
 		if (usage) {
-			const contextPercent = typeof usage.percent === "number" && Number.isFinite(usage.percent)
-				? usage.percent / 100
-				: typeof usage.tokens === "number"
-					? usage.tokens / usage.contextWindow
-					: undefined
-
-			if (contextPercent === undefined) {
-				const clearedAnchors = clearDcpNudgeAnchors(state)
-				if (clearedAnchors > 0) await saveDcpState(ctx, state)
-				return finishContext("unknown-context-percent", prunedMessages, { clearedAnchors })
-			}
-
 			// Record the observed context window on EVERY context event (before
 			// any early return) so a mid-session model/window downgrade is
 			// detectable even when earlier passes were below threshold. We
@@ -394,29 +418,43 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 				state.lastContextWindow = currentContextWindow
 			}
 
-			const ctxModel = (ctx as any).model
 			const provider = ctxModel?.provider ?? ctxModel?.providerId ?? ctxModel?.providerID
 			const model = ctxModel?.id ?? ctxModel?.model ?? ctxModel?.modelId ?? ctxModel?.modelID
 			const thresholds = resolveContextThresholds(effectiveConfig, [
 				provider && model ? `${provider}/${model}` : undefined,
 				model,
 			], usage.contextWindow)
-			if (effectiveConfig.compress.summaryBuffer) {
-				const summaryBonus = getActiveSummaryTokenEstimate(state) / usage.contextWindow
-				thresholds.maxContextPercent += Math.min(summaryBonus, SUMMARY_BUFFER_MAX_CONTEXT_BONUS)
-			}
-
 			const emergencySettings = effectiveConfig.strategies.emergencyCurrentTurnPruning
-			const {
-				hardEmergencyReached,
-				contextLimitReached,
-				emergencyPressureReached,
-			} = emergencyPressureState(
+			const estimatorMarginTokens = Math.max(256, Math.ceil(usage.contextWindow * 0.0025))
+			const budget = planDcpBudget({
+				providerUsageTokens: nativeUsage?.tokens,
+				repoProjectedTokens,
+				contextWindow: usage.contextWindow,
+				reservedOutputTokens: typeof ctxModel?.maxTokens === "number" ? ctxModel.maxTokens : 0,
+				reservedToolTokens: 0,
+				maxContextPercent: thresholds.maxContextPercent,
+				hardContextPercent: emergencySettings.hardContextPercent,
+				targetContextPercent: Math.min(
+					Math.max(0, emergencySettings.targetContextPercent),
+					Math.max(0, thresholds.maxContextPercent * 0.9),
+				),
+				summaryBufferEnabled: effectiveConfig.compress.summaryBuffer,
+				activeSummaryTokens: getActiveSummaryTokenEstimate(state),
+				summaryBufferMaxBonusRatio: SUMMARY_BUFFER_MAX_CONTEXT_BONUS,
+				estimatorMarginTokens,
+			})
+			thresholds.maxContextPercent = budget.softHeadroomTokens / usage.contextWindow
+			const contextPercent = budget.projectedBeforeTokens / usage.contextWindow
+			const nativePressure = emergencyPressureState(
 				contextPercent,
 				thresholds.maxContextPercent,
 				emergencySettings.hardContextPercent,
 			)
+			const hardEmergencyReached = nativePressure.hardEmergencyReached || budget.hardPressure
+			const contextLimitReached = nativePressure.contextLimitReached || budget.pressured
+			const emergencyPressureReached = nativePressure.emergencyPressureReached || budget.pressured
 			const routineNudgesAllowed = contextPercent > thresholds.minContextPercent
+			if (!budget.capacityExceeded && state.progressRecovery) state.progressRecovery = undefined
 			if (!emergencyPressureReached && !routineNudgesAllowed) {
 				const clearedAnchors = clearDcpNudgeAnchors(state)
 				const resetEmergencyPasses = state.consecutiveIgnoredStrongNudges > 0
@@ -481,6 +519,9 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 					state,
 					effectiveConfig,
 					contextPercent,
+					budget.pressured
+						? { requiredSavingsTokens: budget.requiredSavingsTokens }
+						: undefined,
 				)
 				messageCandidates = detectMessageCompressionCandidates(
 					prunedMessages,
@@ -491,10 +532,11 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 				writeDcpDebugLog(effectiveConfig, "context.candidates", {
 					contextPercent,
 					thresholds,
+					budget,
 					nudgeType,
 					candidate,
 					messageCandidates,
-					state: summarizeDcpState(state),
+					state: summarizeDcpState(state, effectiveConfig),
 				}, ctx)
 			}
 
@@ -524,6 +566,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 					effectiveConfig,
 					contextPercent,
 					thresholds.maxContextPercent,
+					{ requiredSavingsTokens: budget.requiredSavingsTokens },
 				)
 				if (emergencyCompressionCandidate) {
 					writeDcpDebugLog(effectiveConfig, "context.emergency_compression_candidate", {
@@ -531,7 +574,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 						thresholds,
 						candidate: emergencyCompressionCandidate,
 						...(emergencySelection?.stats ?? {}),
-						state: summarizeDcpState(state),
+						state: summarizeDcpState(state, effectiveConfig),
 					}, ctx)
 				}
 			}
@@ -547,12 +590,57 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 					nudgeType,
 					emergencyCandidates: messageCandidates.length,
 					...emergencySelection.stats,
-					state: summarizeDcpState(state),
+					state: summarizeDcpState(state, effectiveConfig),
 				}, ctx)
 			}
 
 			let hasCompressionSuggestion =
 				candidate !== null || emergencyCompressionCandidate !== null || messageCandidates.length > 0
+			const blockedReason = inferDcpBlockedReason({
+				pressured: emergencyPressureReached,
+				candidateAvailable: candidate !== null || emergencyCompressionCandidate !== null,
+				messageCandidateCount: messageCandidates.length,
+				requiredSavingsTokens: budget.requiredSavingsTokens,
+				capacityExceeded: budget.capacityExceeded,
+				emergencyStats: emergencySelection?.stats,
+			})
+			if (blockedReason) {
+				writeDcpDebugLog(effectiveConfig, "context.progress_blocked", {
+					phase: "blocked",
+					blocked_reason: blockedReason,
+					contextPercent,
+					thresholds,
+					budget,
+					...(emergencySelection?.stats ?? {}),
+					state: summarizeDcpState(state, effectiveConfig),
+				}, ctx)
+			}
+			if (blockedReason && budget.capacityExceeded) {
+				state.progressRecovery = {
+					blockedReason,
+					projectedBeforeTokens: budget.projectedBeforeTokens,
+					inputCapacityTokens: budget.inputCapacityTokens,
+					requiredSavingsTokens: budget.requiredSavingsTokens,
+					contextWindow: budget.contextWindow,
+					createdAt: Date.now(),
+				}
+				clearDcpNudgeAnchors(state)
+				await saveDcpState(ctx, state)
+				const abortSupported = typeof (ctx as any).abort === "function"
+				if (abortSupported) (ctx as any).abort()
+				writeDcpDebugLog(effectiveConfig, "context.progress_handoff", {
+					phase: "blocked",
+					blocked_reason: blockedReason,
+					handoff: abortSupported ? "abort-current-agent-operation" : "abort-unavailable",
+					budget,
+					state: summarizeDcpState(state, effectiveConfig),
+				}, ctx)
+				return finishContext("progress.blocked_handoff", prunedMessages, {
+					blocked_reason: blockedReason,
+					handoff: abortSupported ? "abort-current-agent-operation" : "abort-unavailable",
+					budget,
+				})
+			}
 			if (!manualEmergencyOnly && !emergencyPressureReached && !hasCompressionSuggestion) {
 				const clearedAnchors = clearDcpNudgeAnchors(state)
 				if (clearedAnchors > 0) await saveDcpState(ctx, state)
@@ -562,18 +650,15 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 						thresholds,
 						nudgeType,
 						clearedAnchors,
-						state: summarizeDcpState(state),
+						state: summarizeDcpState(state, effectiveConfig),
 					}, ctx)
 				}
 			}
 
-			// Emergency pressure must advance even when normal candidates are
-			// absent; otherwise the current-turn fallback can never reach patience.
-			if (emergencyPressureReached) {
-				state.consecutiveIgnoredStrongNudges += 1
-			} else {
-				state.consecutiveIgnoredStrongNudges = 0
-			}
+			// E05 patience advances only after a correlated main-provider response
+			// completes. Repeated context transforms merely make the reminder
+			// available; they do not consume another model opportunity.
+			if (!emergencyPressureReached) state.consecutiveIgnoredStrongNudges = 0
 
 			// Auto-compress fallback: if the model has ignored enough strong
 			// nudges while above the emergency threshold, DCP creates a
@@ -591,15 +676,18 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 					writeDcpDebugLog(effectiveConfig, "compress.auto_blocked_no_candidate", {
 						autoCompressEnabled: effectiveConfig.compress.autoCompress.enabled,
 						decisionReason: autoDecision.reason,
+						blocked_reason: blockedReason,
 						contextPercent,
 						thresholds,
 						consecutiveEmergencyPasses: state.consecutiveIgnoredStrongNudges,
 						...(emergencySelection?.stats ?? {}),
-						state: summarizeDcpState(state),
+						state: summarizeDcpState(state, effectiveConfig),
 					}, ctx)
 				}
 				if (autoDecision.shouldFire && autoCandidate) {
 					try {
+						const autoOperationEpoch = state.sessionEpoch
+						const autoPersistenceTarget = captureDcpPersistenceTarget(ctx)
 						const autoResult = await createAutoCompressionBlock({
 							candidate: autoCandidate,
 							topic: "Auto-compressed slice",
@@ -608,13 +696,27 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 							messages: prunedMessages,
 							modelRegistry: (ctx as any).modelRegistry,
 							signal: (ctx as any).signal,
+							cwd: (ctx as any).cwd,
+							requiredGainTokens: budget.requiredSavingsTokens,
+							persistState: autoPersistenceTarget
+								? (preparedState) => saveDcpStateToTarget(autoPersistenceTarget, preparedState)
+								: undefined,
 						})
+						if (state.sessionEpoch !== autoOperationEpoch) {
+							throw new Error("Auto-compression result became stale because the active session changed after commit")
+						}
 						// Re-apply pruning so the new block takes effect on this
 						// same context pass instead of the next one.
 						prunedMessages = applyPruning(prunedMessages, state, effectiveConfig)
 						const clearedAnchors = clearDcpNudgeAnchors(state)
 						state.consecutiveIgnoredStrongNudges = 0
-						await saveDcpState(ctx, state)
+						state.progressRecovery = undefined
+						if (autoPersistenceTarget) {
+							await saveDcpStateToTarget(autoPersistenceTarget, state)
+						}
+						if (state.sessionEpoch !== autoOperationEpoch) {
+							throw new Error("Auto-compression final publication became stale because the active session changed")
+						}
 						writeDcpDebugLog(effectiveConfig, "compress.auto", {
 							trigger: autoDecision.reason,
 							blockId: `b${autoResult.blockId}`,
@@ -625,7 +727,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 							removedTokenEstimate: autoResult.removedTokenEstimate,
 							candidate: autoCandidate,
 							clearedAnchors,
-							state: summarizeDcpState(state),
+							state: summarizeDcpState(state, effectiveConfig),
 						}, ctx)
 						return finishContext("compress.auto", prunedMessages, {
 							candidate: autoCandidate,
@@ -635,13 +737,37 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 							clearedAnchors,
 						})
 					} catch (error) {
+						const autoBlockedReason = error instanceof AutoCompressionBlockedError
+							? error.blockedReason
+							: undefined
 						writeDcpDebugLog(effectiveConfig, "compress.auto_failed", {
 							trigger: autoDecision.reason,
+							phase: autoBlockedReason ? "blocked" : "degraded",
+							blocked_reason: autoBlockedReason,
 							error: error instanceof Error ? error.message : String(error),
 							candidate: autoCandidate,
-							state: summarizeDcpState(state),
+							state: summarizeDcpState(state, effectiveConfig),
 						}, ctx)
-						// Fall through to normal nudge emission on failure.
+						if (autoBlockedReason && budget.capacityExceeded) {
+							state.progressRecovery = {
+								blockedReason: autoBlockedReason,
+								projectedBeforeTokens: budget.projectedBeforeTokens,
+								inputCapacityTokens: budget.inputCapacityTokens,
+								requiredSavingsTokens: budget.requiredSavingsTokens,
+								contextWindow: budget.contextWindow,
+								createdAt: Date.now(),
+							}
+							clearDcpNudgeAnchors(state)
+							await saveDcpState(ctx, state)
+							const abortSupported = typeof (ctx as any).abort === "function"
+							if (abortSupported) (ctx as any).abort()
+							return finishContext("progress.blocked_handoff", prunedMessages, {
+								blocked_reason: autoBlockedReason,
+								handoff: abortSupported ? "abort-current-agent-operation" : "abort-unavailable",
+								budget,
+							})
+						}
+						// Recoverable failures fall through to normal nudge emission.
 					}
 				}
 			}
@@ -677,6 +803,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 					prunedMessages = applyPruning(contextMessages, state, effectiveConfig)
 					const clearedAnchors = clearDcpNudgeAnchors(state)
 					state.consecutiveIgnoredStrongNudges = 0
+					state.progressRecovery = undefined
 					emergencySelection = analyzeEmergencyCurrentTurn(prunedMessages, state, effectiveConfig)
 					messageCandidates = emergencyCurrentTurnMessageCandidates(emergencySelection, effectiveConfig)
 					emergencyCompressionCandidate = detectEmergencyCompressionCandidate(
@@ -685,6 +812,7 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 						effectiveConfig,
 						contextPercent,
 						thresholds.maxContextPercent,
+						{ requiredSavingsTokens: budget.requiredSavingsTokens },
 					)
 					hasCompressionSuggestion =
 						candidate !== null || emergencyCompressionCandidate !== null || messageCandidates.length > 0
@@ -708,12 +836,13 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 						eligibleExhausted:
 							emergencyPruneResult.prunedToolCallIds.length >= selectionStatsBeforePrune.eligiblePairs,
 						...selectionStatsBeforePrune,
-						state: summarizeDcpState(state),
+						state: summarizeDcpState(state, effectiveConfig),
 					}, ctx)
 				}
 			}
 
 			if (nudgeType && !manualEmergencyOnly && (hasCompressionSuggestion || emergencyPressureReached)) {
+				latestProviderOpportunityAvailable = emergencyPressureReached
 				const nudgeText = appendConcreteNudgeGuidance(
 					baseNudgeText(nudgeType),
 					candidate ?? emergencyCompressionCandidate,
@@ -795,28 +924,49 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 		})
 	})
 
-	// ── 10b. before_provider_request: observe accepted tool-result payloads ────
+	// ── 10b. provider lifecycle evidence ─────────────────────────────────────
 	pi.on("before_provider_request", async (event, ctx) => {
 		const effectiveConfig = configForContext(ctx)
-		pendingProviderToolIds.clear()
-		if (!effectiveConfig.enabled) return undefined
+		if (!effectiveConfig.enabled) {
+			providerEvidenceTracker.reset()
+			return undefined
+		}
 
 		const providerEvidence = collectProviderToolResultEvidence(event.payload)
+		const pendingToolIds = new Set<string>()
 		for (const meta of state.messageMetaSnapshot.values()) {
 			if (meta.role !== "toolResult") continue
 			if (!meta.toolCallId || state.prunedToolIds.has(meta.toolCallId)) continue
 			if (state.providerSeenToolIds.has(meta.toolCallId)) continue
 			const record = state.toolCalls.get(meta.toolCallId)
 			if (record && providerPayloadIncludesToolResult(providerEvidence, record)) {
-				pendingProviderToolIds.add(meta.toolCallId)
+				pendingToolIds.add(meta.toolCallId)
 			}
 		}
+
+		const model = (ctx as any)?.model
+		const target = captureDcpPersistenceTarget(ctx)
+		const pending = providerEvidenceTracker.begin({
+			sessionEpoch: state.sessionEpoch,
+			provider: typeof model?.provider === "string" ? model.provider : undefined,
+			model: typeof model?.id === "string" ? model.id : undefined,
+			contentRevision: providerPayloadRevision(event.payload),
+			statePath: target?.statePath,
+			sessionId: target?.sessionId,
+			toolIds: pendingToolIds,
+			opportunityAvailable: latestProviderOpportunityAvailable,
+		})
 
 		writeDcpDebugLog(effectiveConfig, "provider_payload.message_ids", {
 			injected: false,
 			delivery: "distributed-carriers",
-			pendingToolResults: pendingProviderToolIds.size,
-			state: summarizeDcpState(state),
+			pendingToolResults: pendingToolIds.size,
+			attempts: pending.attempts,
+			ambiguous: pending.ambiguous,
+			opportunityAvailable: pending.opportunityAvailable,
+			provider: pending.provider,
+			model: pending.model,
+			state: summarizeDcpState(state, effectiveConfig),
 		}, ctx)
 		// IDs are already attached to deterministic user/tool-result context
 		// carriers. Replacing the payload here would move metadata from the old
@@ -824,29 +974,118 @@ export default async function dcpModule(pi: ExtensionAPI): Promise<void> {
 		return undefined
 	})
 
-	// Promote pending IDs only after the provider accepted the exact payload.
-	// Failed/aborted requests leave results fresh and therefore ineligible.
+	// HTTP acceptance is deliberately diagnostic only. The SDK fires this hook
+	// before consuming the response body, so 2xx cannot prove that the provider
+	// actually completed the assistant stream.
 	pi.on("after_provider_response", async (event, ctx) => {
 		const effectiveConfig = configForContext(ctx)
-		const accepted = event.status >= 200 && event.status < 300
-		let newlySeenToolResults = 0
-		if (effectiveConfig.enabled && accepted) {
-			for (const toolCallId of pendingProviderToolIds) {
-				if (!state.providerSeenToolIds.has(toolCallId)) {
-					state.providerSeenToolIds.add(toolCallId)
-					newlySeenToolResults++
-				}
-			}
-			if (newlySeenToolResults > 0) await saveDcpState(ctx, state)
-		}
-		writeDcpDebugLog(effectiveConfig, "provider_payload.tool_results_seen", {
+		const pending = providerEvidenceTracker.snapshot()
+		writeDcpDebugLog(effectiveConfig, "provider_payload.http_response", {
 			status: event.status,
-			accepted,
-			pendingToolResults: pendingProviderToolIds.size,
-			newlySeenToolResults,
-			state: summarizeDcpState(state),
+			accepted: event.status >= 200 && event.status < 300,
+			pendingToolResults: pending?.toolIds.size ?? 0,
+			attempts: pending?.attempts ?? 0,
+			ambiguous: pending?.ambiguous ?? false,
+			state: summarizeDcpState(state, effectiveConfig),
 		}, ctx)
-		pendingProviderToolIds.clear()
+	})
+
+	// message_end is emitted for the finalized assistant message after the
+	// response stream settles. Without a provider request ID in SDK 0.85.1, only
+	// one unambiguous request shape (or identical retries) is safe to promote.
+	pi.on("message_end", async (event, ctx) => {
+		if (event.message?.role !== "assistant") return
+		const effectiveConfig = configForContext(ctx)
+		if (!effectiveConfig.enabled) {
+			providerEvidenceTracker.reset()
+			return
+		}
+
+		const message = event.message as any
+		const completion = providerEvidenceTracker.complete({
+			sessionEpoch: state.sessionEpoch,
+			provider: typeof message.provider === "string" ? message.provider : undefined,
+			model: typeof message.model === "string" ? message.model : undefined,
+			stopReason: typeof message.stopReason === "string" ? message.stopReason : undefined,
+		})
+		latestProviderOpportunityAvailable = false
+
+		if (completion.status !== "promote") {
+			writeDcpDebugLog(effectiveConfig, "provider_payload.tool_results_not_promoted", {
+				reason: completion.reason,
+				attempts: completion.attempts,
+				stopReason: message.stopReason,
+				state: summarizeDcpState(state, effectiveConfig),
+			}, ctx)
+			return
+		}
+
+		const assistantInvokedCompress = Array.isArray(message.content) && message.content.some(
+			(part: any) => part?.type === "toolCall" && part?.name === "compress",
+		)
+		const ignoredCompressionOpportunity =
+			completion.opportunityAvailable && message.stopReason !== "deferred" && !assistantInvokedCompress
+
+		const commit = providerEvidenceCommitQueue
+			.catch(() => {
+				// Keep later evidence commits moving after a persistence failure.
+			})
+			.then(async () => {
+				if (state.sessionEpoch !== completion.sessionEpoch) {
+					writeDcpDebugLog(effectiveConfig, "provider_payload.tool_results_not_promoted", {
+						reason: "stale-session",
+						attempts: completion.attempts,
+						state: summarizeDcpState(state, effectiveConfig),
+					}, ctx)
+					return
+				}
+
+				const newlySeen = [...completion.toolIds].filter((toolCallId) => !state.providerSeenToolIds.has(toolCallId))
+				if (newlySeen.length === 0 && !ignoredCompressionOpportunity) return
+				const workingState = {
+					...state,
+					providerSeenToolIds: new Set(state.providerSeenToolIds),
+				}
+				for (const toolCallId of newlySeen) workingState.providerSeenToolIds.add(toolCallId)
+				if (ignoredCompressionOpportunity) {
+					workingState.consecutiveIgnoredStrongNudges = state.consecutiveIgnoredStrongNudges + 1
+				}
+
+				try {
+					if (completion.statePath) {
+						await saveDcpStateToTarget({ statePath: completion.statePath, sessionId: completion.sessionId }, workingState)
+					}
+				} catch (error) {
+					writeDcpDebugLog(effectiveConfig, "provider_payload.tool_results_not_promoted", {
+						reason: "persistence-failed",
+						attempts: completion.attempts,
+						error: error instanceof Error ? error.message : String(error),
+						state: summarizeDcpState(state, effectiveConfig),
+					}, ctx)
+					return
+				}
+
+				if (state.sessionEpoch !== completion.sessionEpoch) {
+					writeDcpDebugLog(effectiveConfig, "provider_payload.tool_results_not_promoted", {
+						reason: "stale-session",
+						attempts: completion.attempts,
+						state: summarizeDcpState(state, effectiveConfig),
+					}, ctx)
+					return
+				}
+
+				state.providerSeenToolIds = workingState.providerSeenToolIds
+				state.consecutiveIgnoredStrongNudges = workingState.consecutiveIgnoredStrongNudges
+				writeDcpDebugLog(effectiveConfig, "provider_payload.tool_results_seen", {
+					attempts: completion.attempts,
+					newlySeenToolResults: newlySeen.length,
+					ignoredCompressionOpportunity,
+					ignoredOpportunities: state.consecutiveIgnoredStrongNudges,
+					state: summarizeDcpState(state, effectiveConfig),
+				}, ctx)
+			})
+		providerEvidenceCommitQueue = commit
+		await commit
 	})
 
 	// ── 11. agent_end: persist state after each agent run ────────────────────

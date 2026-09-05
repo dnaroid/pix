@@ -1,11 +1,13 @@
-import type { CompressionBlock, DcpState, MessageIdMeta } from "./state.js"
+import type { CompressionBlock, CompressionProtectedFragment, DcpState, MessageIdMeta } from "./state.js"
 import type { DcpConfig } from "./config.js"
 import { estimateTokens } from "./pruner-metadata.js"
 import { isToolRecordProtected } from "./pruner-tools.js"
-import * as fs from "node:fs"
-import * as path from "node:path"
+import { createHash } from "node:crypto"
+import { open, realpath } from "node:fs/promises"
+import { isAbsolute, resolve, sep } from "node:path"
 
-const MAX_PROTECTED_SUBAGENT_RESULT_CHARS = 50_000
+const MAX_PROTECTED_ARTIFACT_BYTES = 50_000
+const MAX_PROTECTED_ARTIFACT_TOTAL_BYTES = 200_000
 
 export interface CompressionBlockCreationResult {
   block: CompressionBlock
@@ -26,8 +28,12 @@ export interface CreateRangeCompressionBlockOptions {
   anchorMessageId?: string
   createdByToolCallId?: string
   mode?: "range" | "message"
+  version?: 2
+  replacementMode?: "range" | "message-body"
   validatePlaceholders?: boolean
   expandPlaceholders?: boolean
+  /** E07 protected fragments prepared with bounded async artifact reads. */
+  preparedProtectedFragments?: CompressionProtectedFragment[]
 }
 
 export interface ResolvedCompressionBoundary {
@@ -348,33 +354,202 @@ export function appendProtectedUserMessages(
   return summary + heading + userTexts.map((text) => `\n${text}`).join("")
 }
 
-function truncateProtectedOutput(text: string, maxChars: number): string {
-  if (text.length <= maxChars) return text
-  const omitted = text.length - maxChars
-  return text.slice(0, maxChars) + `\n[Protected output truncated; ${omitted} characters omitted]`
-}
-
-function resolveArtifactPath(filePath: string): string {
-  return path.isAbsolute(filePath) ? filePath : path.resolve(process.cwd(), filePath)
-}
-
-function readProtectedSubagentResult(details: unknown, fallbackText: string): string | undefined {
-  if (!details || typeof details !== "object") return undefined
+async function readBoundedProtectedSubagentArtifact(
+  details: unknown,
+  fallbackText: string,
+  cwd: string | undefined,
+): Promise<{ artifactPath: string; text: string } | undefined> {
+  if (!cwd || !details || typeof details !== "object") return undefined
   const record = details as any
-  const artifactPath = record.artifacts?.resultMd
-  if (typeof artifactPath !== "string" || artifactPath.trim().length === 0) return undefined
+  const rawArtifactPath = record.artifacts?.resultMd
+  if (typeof rawArtifactPath !== "string" || rawArtifactPath.trim().length === 0) return undefined
+  const artifactPath = rawArtifactPath.trim()
 
-  const absolutePath = resolveArtifactPath(artifactPath.trim())
-  let text: string
+  let root: string
+  let candidate: string
   try {
-    text = fs.readFileSync(absolutePath, "utf8")
+    root = await realpath(cwd)
+    const requested = isAbsolute(artifactPath) ? artifactPath : resolve(root, artifactPath)
+    candidate = await realpath(requested)
   } catch {
+    // Missing artifacts are optional recovery material when the tool result text
+    // itself is still available. Do not invent a replacement source.
     return undefined
   }
 
-  const trimmed = text.trim()
-  if (!trimmed || fallbackText.includes(trimmed)) return undefined
-  return `\n### Expanded subagent result: ${artifactPath}\n${truncateProtectedOutput(trimmed, MAX_PROTECTED_SUBAGENT_RESULT_CHARS)}`
+  if (candidate !== root && !candidate.startsWith(root + sep)) {
+    throw new Error(`Protected artifact resolves outside the session cwd: ${artifactPath}`)
+  }
+
+  const handle = await open(candidate, "r")
+  try {
+    const info = await handle.stat()
+    if (!info.isFile()) throw new Error(`Protected artifact is not a regular file: ${artifactPath}`)
+    if (info.size > MAX_PROTECTED_ARTIFACT_BYTES) {
+      throw new Error(
+        `Protected artifact exceeds the ${MAX_PROTECTED_ARTIFACT_BYTES}-byte recovery budget: ${artifactPath}`,
+      )
+    }
+    const buffer = Buffer.alloc(MAX_PROTECTED_ARTIFACT_BYTES + 1)
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
+    if (bytesRead > MAX_PROTECTED_ARTIFACT_BYTES) {
+      throw new Error(
+        `Protected artifact grew beyond the ${MAX_PROTECTED_ARTIFACT_BYTES}-byte recovery budget: ${artifactPath}`,
+      )
+    }
+    const text = buffer.subarray(0, bytesRead).toString("utf8").trim()
+    if (!text || fallbackText.includes(text)) return undefined
+    return { artifactPath, text }
+  } finally {
+    await handle.close()
+  }
+}
+
+function compressionProtectedFragment(
+	kind: CompressionProtectedFragment["kind"],
+	origin: string,
+	text: string,
+): CompressionProtectedFragment {
+	return {
+		kind,
+		origin,
+		hash: createHash("sha256").update(text).digest("hex"),
+		text,
+	}
+}
+
+function mergeProtectedFragments(...groups: CompressionProtectedFragment[][]): CompressionProtectedFragment[] {
+	const merged: CompressionProtectedFragment[] = []
+	const seen = new Set<string>()
+	for (const fragment of groups.flat()) {
+		const key = `${fragment.origin}:${fragment.hash}`
+		if (seen.has(key)) continue
+		seen.add(key)
+		merged.push(fragment)
+	}
+	return merged
+}
+
+function collectCurrentProtectedFragments(
+	startTimestamp: number,
+	endTimestamp: number,
+	state: DcpState,
+	config: DcpConfig,
+	mode: "range" | "message",
+	ids: { startMessageId?: string; endMessageId?: string },
+): CompressionProtectedFragment[] {
+	const fragments: CompressionProtectedFragment[] = []
+	const boundaries = rangeBoundaries(startTimestamp, endTimestamp, ids)
+
+	for (const [visibleId, meta] of state.messageMetaSnapshot) {
+		if (meta.blockId !== undefined || !Number.isFinite(meta.timestamp)) continue
+		if (!isCompressionBoundaryWithinRange(
+			{ timestamp: meta.timestamp, stableId: meta.stableId },
+			boundaries.start,
+			boundaries.end,
+			state,
+		)) continue
+
+		const originBase = meta.stableId ?? visibleId ?? String(meta.timestamp)
+		if (mode === "range" && config.compress.protectUserMessages && meta.role === "user") {
+			const text = meta.text?.trim()
+			if (text) fragments.push(compressionProtectedFragment("user", `user:${originBase}`, text))
+		}
+		if (config.compress.protectTags && meta.role === "user") {
+			for (const [index, text] of extractProtectTagTexts(meta.text ?? "").entries()) {
+				fragments.push(compressionProtectedFragment("prompt", `prompt:${originBase}:${index}`, text))
+			}
+		}
+		if (meta.role !== "toolResult" && meta.role !== "bashExecution") continue
+		const toolCallId = meta.toolCallId
+		if (!toolCallId) continue
+		const record = state.toolCalls.get(toolCallId)
+		if (!record || record.toolName === "compress" || !isToolRecordProtected(record, config)) continue
+		const output = (record.outputText ?? meta.text ?? "").trim()
+		if (!output) continue
+		const exact = `### Tool: ${record.toolName}\n${output}`
+		fragments.push(compressionProtectedFragment("tool", `tool:${toolCallId}`, exact))
+	}
+	return mergeProtectedFragments(fragments)
+}
+
+export interface PrepareCompressionProtectedFragmentsOptions {
+  startTimestamp: number
+  endTimestamp: number
+  startMessageId?: string
+  endMessageId?: string
+  state: DcpState
+  config: DcpConfig
+  mode: "range" | "message"
+  cwd?: string
+}
+
+/**
+ * Prepare protected continuity fragments before the synchronous block commit.
+ * Raw transcript/state remains the primary source. Optional subagent artifacts
+ * are read only through bounded async I/O rooted at the session cwd.
+ */
+export async function prepareCompressionProtectedFragments(
+  options: PrepareCompressionProtectedFragmentsOptions,
+): Promise<CompressionProtectedFragment[]> {
+  const { startTimestamp, endTimestamp, startMessageId, endMessageId, state, config, mode, cwd } = options
+  const ids = { startMessageId, endMessageId }
+  const { coveredBlocks } = findCoveredAndPartialBlocks(startTimestamp, endTimestamp, state, ids)
+  const fragments = mergeProtectedFragments(
+    collectInheritedProtectedFragments(coveredBlocks),
+    collectCurrentProtectedFragments(startTimestamp, endTimestamp, state, config, mode, ids),
+  )
+  if (!cwd) return fragments
+
+  const boundaries = rangeBoundaries(startTimestamp, endTimestamp, ids)
+  let totalArtifactBytes = 0
+  for (const meta of state.messageMetaSnapshot.values()) {
+    if (meta.blockId !== undefined || !Number.isFinite(meta.timestamp)) continue
+    if (!isCompressionBoundaryWithinRange(
+      { timestamp: meta.timestamp, stableId: meta.stableId },
+      boundaries.start,
+      boundaries.end,
+      state,
+    )) continue
+    if (meta.role !== "toolResult" && meta.role !== "bashExecution") continue
+    const toolCallId = meta.toolCallId
+    if (!toolCallId) continue
+    const record = state.toolCalls.get(toolCallId)
+    if (!record || !isToolRecordProtected(record, config)) continue
+    if (record.toolName !== "subagents" && record.toolName !== "async_subagents_result") continue
+    const output = (record.outputText ?? meta.text ?? "").trim()
+    if (!output) continue
+
+    const artifact = await readBoundedProtectedSubagentArtifact(record.outputDetails, output, cwd)
+    if (!artifact) continue
+    const artifactBytes = Buffer.byteLength(artifact.text, "utf8")
+    totalArtifactBytes += artifactBytes
+    if (totalArtifactBytes > MAX_PROTECTED_ARTIFACT_TOTAL_BYTES) {
+      throw new Error(
+        `Protected artifacts exceed the ${MAX_PROTECTED_ARTIFACT_TOTAL_BYTES}-byte total recovery budget`,
+      )
+    }
+    fragments.push(compressionProtectedFragment(
+      "tool",
+      `artifact:${toolCallId}:${artifact.artifactPath}`,
+      `### Expanded subagent result: ${artifact.artifactPath}\n${artifact.text}`,
+    ))
+  }
+  return mergeProtectedFragments(fragments)
+}
+
+function collectInheritedProtectedFragments(coveredBlocks: CompressionBlock[]): CompressionProtectedFragment[] {
+	return mergeProtectedFragments(
+		...coveredBlocks.map((block) => block.protectedFragments ?? []),
+	)
+}
+
+function appendProtectedFragmentLedger(summary: string, fragments: CompressionProtectedFragment[]): string {
+	const missing = fragments.filter((fragment) => !summary.includes(fragment.text))
+	if (missing.length === 0) return summary
+	return summary +
+		"\n\nThe following protected continuity fragments were preserved verbatim:" +
+		missing.map((fragment) => `\n\n${fragment.text}`).join("")
 }
 
 function appendProtectedToolOutputs(
@@ -414,11 +589,7 @@ function appendProtectedToolOutputs(
     if (!output) continue
 
     seenToolCallIds.add(toolCallId)
-    const expandedSubagentResult =
-      record.toolName === "subagents" || record.toolName === "async_subagents_result"
-        ? readProtectedSubagentResult(record.outputDetails, output)
-        : undefined
-    protectedOutputs.push(`\n### Tool: ${record.toolName}\n${output}${expandedSubagentResult ?? ""}`)
+    protectedOutputs.push(`\n### Tool: ${record.toolName}\n${output}`)
   }
 
   if (protectedOutputs.length === 0) return summary
@@ -560,8 +731,11 @@ export function createRangeCompressionBlock(
     anchorMessageId: requestedAnchorMessageId,
     createdByToolCallId,
     mode = "range",
+    version,
+    replacementMode,
     validatePlaceholders = true,
     expandPlaceholders = true,
+    preparedProtectedFragments = [],
   } = options
   const defaultAnchor = resolveAnchorBoundary(endTimestamp, state, endMessageId)
   const anchorTimestamp = requestedAnchorTimestamp ?? defaultAnchor.timestamp
@@ -640,11 +814,17 @@ export function createRangeCompressionBlock(
     config,
     ids,
   )
+  const protectedFragments = mergeProtectedFragments(
+    collectInheritedProtectedFragments(coveredBlocks),
+    collectCurrentProtectedFragments(startTimestamp, endTimestamp, state, config, mode, ids),
+    preparedProtectedFragments,
+  )
+  const ledgerPreservedSummary = appendProtectedFragmentLedger(expandedSummary, protectedFragments)
 
   const block: CompressionBlock = {
     id: state.nextBlockId++,
     topic,
-    summary: expandedSummary,
+    summary: ledgerPreservedSummary,
     startTimestamp,
     endTimestamp,
     startMessageId,
@@ -653,10 +833,13 @@ export function createRangeCompressionBlock(
     anchorMessageId,
     createdByToolCallId,
     active: true,
-    summaryTokenEstimate: estimateTokens(expandedSummary),
+    summaryTokenEstimate: estimateTokens(ledgerPreservedSummary),
     createdAt: Date.now(),
     coveredBlockIds: coveredBlocks.map((covered) => covered.id),
     mode,
+    version,
+    replacementMode,
+    protectedFragments,
   }
 
   state.compressionBlocks.push(block)

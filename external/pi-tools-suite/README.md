@@ -100,7 +100,13 @@ DCP settings are stored only under `dcp` in the user shared config file `~/.conf
       "nudgeFrequency": 1,
       "iterationNudgeThreshold": 6,
       "nudgeForce": "strong",
-      "protectedTools": ["compress", "write", "edit", "subagents"]
+      "protectedTools": ["compress", "write", "edit", "subagents"],
+      "autoCompress": {
+        "enabled": false,
+        "patience": 2,
+        "summarizerModel": [],
+        "timeoutMs": 20000
+      }
     },
     "strategies": {
       "emergencyCurrentTurnPruning": {
@@ -170,7 +176,11 @@ DCP settings are stored only under `dcp` in the user shared config file `~/.conf
 
 `minContextPercent` / `maxContextPercent` accept legacy fractions (`0.25`), percent strings (`"25%"`), or absolute token counts when Pi knows the current model context window. `minContextLimit` / `maxContextLimit` and `modelMinContextLimits` / `modelMaxContextLimits` are explicit absolute-or-percent aliases. `modelOverrides` and the `modelMin*` / `modelMax*` maps support exact model keys plus `*` / `?` wildcard patterns; matching is applied from generic to specific so exact bare-model matches override bare wildcards, and exact `provider/model` matches override provider wildcards. Array fields are union-merged, so model-specific `protectedTools` extend the defaults instead of replacing them. If `compress.protectUserMessages` is enabled, range compression appends selected user messages verbatim instead of rejecting the range; individual message compression still skips protected raw user messages. Protected tool outputs are copied into summaries for tools protected by name or `protectedFilePatterns`; protected `subagents` result reads also try to include the saved `result.md` artifact when available.
 
-`strategies.emergencyCurrentTurnPruning` is the default-enabled lossy safety floor for a single unfinished turn that has no normal compression candidate. DCP first emits emergency reminders and offers only safe old same-turn tool-result candidates. After `patience` ignored reminders, or at the model-independent `hardContextPercent`, it replaces eligible oldest result bodies until the estimated provider context reaches `targetContextPercent` or a margin below the model emergency threshold. User messages, configured/protected data, the newest `keepRecentToolPairs`, and results not present in an accepted provider request are never selected. The raw session transcript is unchanged. Setting `enabled` to `false` disables same-turn candidates and lossy pruning, but keeps the non-destructive emergency reminder.
+`compress.autoCompress.enabled` is `false` by default. When explicitly enabled, its `patience` counts completed correlated main-provider opportunities, not repeated context transforms; `summarizerModel: []` uses the bounded extractive fallback without a model call, while configured models share the single `timeoutMs` operation deadline. Auto commit is accepted only when the full projected replacement has positive gain and meets the current budget-recovery target.
+
+`strategies.emergencyCurrentTurnPruning` is the default-enabled lossy safety floor for a single unfinished turn that has no normal compression candidate. DCP first emits emergency reminders and offers only safe old same-turn tool-result candidates. After `patience` completed ignored opportunities, or at the model-independent `hardContextPercent`, it replaces eligible oldest result bodies until the estimated provider context reaches `targetContextPercent` or a margin below the model emergency threshold. User messages, configured/protected data, the newest `keepRecentToolPairs`, and results without **completed** provider evidence are never selected. HTTP 2xx alone is not evidence; DCP promotes eligibility only after an unambiguously correlated successful finalized assistant response, and ambiguous retries/interleaving fail closed. The raw session transcript is unchanged. Setting `enabled` to `false` disables same-turn candidates and lossy pruning, but keeps the non-destructive emergency reminder.
+
+DCP sidecars are session-private versioned generation envelopes under `<sessionDir>/dcp-state/`. Saves use private atomic files, retain a last-valid `.prev` generation, validate payload/block-graph integrity on load, quarantine corrupt primaries, and use a cross-process exclusive lock rather than silent last-writer-wins. Live paused sessions are not deleted merely for age. Protected subagent artifacts are optional bounded recovery input: reads are async, rooted at the session cwd, reject symlink escapes and oversized files, and never silently truncate a required protected artifact.
 
 Set `dcp.debug: true` to write a JSONL debug log of DCP context/prune/compress events to `~/.pi/agent/dcp-debug.jsonl` (override the path with `PI_DCP_DEBUG_LOG`, or enable without config via `PI_DCP_DEBUG=1`); off by default. The log is size-limited and rotated: once it reaches `dcp.debugLog.maxBytes` (default `5242880` = 5 MB) it is renamed to `.1`, older backups shift down (`.1`→`.2`, …) and the oldest beyond `dcp.debugLog.maxBackups` (default `3`, minimum `1`) is dropped; override either with `PI_DCP_DEBUG_MAX_BYTES` / `PI_DCP_DEBUG_MAX_BACKUPS`.
 

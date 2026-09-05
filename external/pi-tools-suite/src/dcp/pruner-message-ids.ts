@@ -5,10 +5,10 @@ import {
   ID_ELIGIBLE_ROLES,
   PASSTHROUGH_ROLES,
   estimateMessageTokens,
-  extractBlockId,
   messageText,
   stripStaleDcpMetadataLines,
 } from "./pruner-metadata.js";
+import { buildConversationIndex } from "./conversation-index.js";
 
 export interface InjectMessageIdsOptions {
   /** Config enables priority markers for message-mode candidates. */
@@ -49,6 +49,9 @@ function fallbackContentFingerprint(msg: any): string {
 }
 
 export function stableMessageId(msg: any, fallbackIndex = 0): string {
+  if (typeof msg?._dcpStableId === "string" && msg._dcpStableId.length > 0) {
+    return msg._dcpStableId;
+  }
   const candidates = [
     msg?.id,
     msg?.entryId,
@@ -67,8 +70,7 @@ export function stableMessageId(msg: any, fallbackIndex = 0): string {
     return `tool:${msg.toolCallId.trim()}`;
   }
 
-  const blockId = extractBlockId(messageText(msg));
-  if (blockId !== undefined) return `block:${blockId}`;
+  if (Number.isInteger(msg?._dcpBlockId)) return `block:${msg._dcpBlockId}`;
   if (Number.isFinite(msg?.timestamp)) {
     return `ts:${msg.timestamp}:${fallbackContentFingerprint(msg)}`;
   }
@@ -172,8 +174,13 @@ export function injectMessageIds(
     const stableKey = stableKeys[messageIndex]!;
     const id = persistentMessageId(stableKey, state);
     const originalText = messageText(msg);
-    const blockId = extractBlockId(originalText);
+    const blockId = Number.isInteger(msg?._dcpBlockId) ? msg._dcpBlockId as number : undefined;
     const tokenEstimate = estimateMessageTokens(msg);
+    const toolCallIds = role === "assistant" && Array.isArray(msg.content)
+      ? msg.content
+        .filter((part: any) => part?.type === "toolCall" && typeof part.id === "string")
+        .map((part: any) => part.id as string)
+      : [];
 
     assignedIds.set(messageIndex, id);
     assignedMeta.set(messageIndex, {
@@ -183,6 +190,7 @@ export function injectMessageIds(
       blockId,
       toolCallId: typeof msg.toolCallId === "string" ? msg.toolCallId : undefined,
       toolName: typeof msg.toolName === "string" ? msg.toolName : undefined,
+      toolCallIds: toolCallIds.length > 0 ? toolCallIds : undefined,
       text: originalText,
       tokenEstimate,
       priority: priorityForMessage(tokenEstimate, options.config),
@@ -224,4 +232,5 @@ export function injectMessageIds(
 
   state.messageIdSnapshot = nextIdSnapshot;
   state.messageMetaSnapshot = nextMetaSnapshot;
+  state.conversationIndexSnapshot = buildConversationIndex(messages, stableKeys, state);
 }

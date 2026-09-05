@@ -1,5 +1,5 @@
 import type { DcpConfig } from "./config.js";
-import type { DcpState } from "./state.js";
+import type { CompressionBlock, DcpState } from "./state.js";
 import { PASSTHROUGH_ROLES, estimateMessageTokens } from "./pruner-metadata.js";
 import { stableMessageKeys } from "./pruner-message-ids.js";
 import { writeDcpDebugLog } from "./debug-log.js";
@@ -179,6 +179,109 @@ export function syncCompressionBlocks(messages: any[], state: DcpState, config: 
   }
 }
 
+function compressedBlockText(block: CompressionBlock, label: "section" | "message"): string {
+  return [
+    `[Compressed ${label}: ${block.topic}]`,
+    "",
+    block.summary,
+    "",
+    `[dcp-block-id]: # (b${block.id})`,
+  ].join("\n");
+}
+
+/** Exact estimator cost of the synthetic v2 range replacement, including the
+ * DCP wrapper/carrier text that is not part of block.summaryTokenEstimate. */
+export function estimateCompressionBlockReplacementTokens(block: CompressionBlock): number {
+  return estimateMessageTokens({
+    role: "user",
+    content: [{ type: "text", text: compressedBlockText(block, "section") }],
+    timestamp: block.startTimestamp,
+  });
+}
+
+function accountCompressionBlock(
+  block: CompressionBlock,
+  removedTokens: number,
+  addedTokens: number,
+  state: DcpState,
+): void {
+  if (state.accountedCompressionBlockIds.has(block.id)) return;
+  state.accountedCompressionBlockIds.add(block.id);
+  state.totalPruneCount++;
+  const rawSaved = Math.max(0, removedTokens - addedTokens);
+  const coveredSavings = (block.coveredBlockIds ?? []).reduce(
+    (sum, id) => sum + (state.compressionTokenSavings.get(id) ?? 0),
+    0,
+  );
+  state.tokensSaved = Math.max(0, state.tokensSaved + rawSaved - coveredSavings);
+  state.compressionTokenSavings.set(block.id, rawSaved);
+}
+
+function preserveProjectedStableId(message: any, stableId: string | undefined): void {
+  if (!stableId || !message || typeof message !== "object") return;
+  Object.defineProperty(message, "_dcpStableId", {
+    value: stableId,
+    enumerable: false,
+    configurable: true,
+  });
+}
+
+function markProjectedOrigin(message: any, origin: "block" | "dcp-control", blockId?: number): void {
+  if (!message || typeof message !== "object") return;
+  Object.defineProperty(message, "_dcpOrigin", {
+    value: origin,
+    enumerable: false,
+    configurable: true,
+  });
+  if (blockId !== undefined) {
+    Object.defineProperty(message, "_dcpBlockId", {
+      value: blockId,
+      enumerable: false,
+      configurable: true,
+    });
+  }
+}
+
+function applyExactMessageBodyBlock(messages: any[], block: CompressionBlock, state: DcpState): boolean {
+  const targetIndex = findBoundaryIndex(messages, block.startMessageId, block.startTimestamp);
+  if (targetIndex === -1) return false;
+  const target = messages[targetIndex];
+  const removedTokens = estimateMessageTokens(target);
+  const text = compressedBlockText(block, "section");
+
+  if (typeof target?.content === "string") target.content = text;
+  else target.content = [{ type: "text", text }];
+  preserveProjectedStableId(target, block.startMessageId);
+  markProjectedOrigin(target, "block", block.id);
+
+  const addedTokens = estimateMessageTokens(target);
+  accountCompressionBlock(block, removedTokens, addedTokens, state);
+  return true;
+}
+
+function applyExactRangeBlock(messages: any[], block: CompressionBlock, state: DcpState): boolean {
+  const startIdx = findBoundaryIndex(messages, block.startMessageId, block.startTimestamp);
+  const endIdx = findBoundaryIndex(messages, block.endMessageId, block.endTimestamp);
+  if (startIdx === -1 || endIdx === -1) return false;
+
+  const lo = Math.min(startIdx, endIdx);
+  const hi = Math.max(startIdx, endIdx);
+  let removedTokens = 0;
+  for (let i = lo; i <= hi; i++) removedTokens += estimateMessageTokens(messages[i]);
+
+  const syntheticMsg = {
+    role: "user",
+    content: [{ type: "text", text: compressedBlockText(block, "section") }],
+    timestamp: block.startTimestamp,
+  };
+  markProjectedOrigin(syntheticMsg, "block", block.id);
+  messages.splice(lo, hi - lo + 1, syntheticMsg);
+
+  const addedTokens = estimateMessageTokens(syntheticMsg);
+  accountCompressionBlock(block, removedTokens, addedTokens, state);
+  return true;
+}
+
 export function applyCompressionBlocks(messages: any[], state: DcpState): any[] {
   const activeBlocks = state.compressionBlocks
     .filter((b) => b.active)
@@ -188,6 +291,15 @@ export function applyCompressionBlocks(messages: any[], state: DcpState): any[] 
   for (const block of activeBlocks) {
     // Skip blocks with corrupted timestamps (from pre-fix sessions)
     if (!Number.isFinite(block.startTimestamp) || !Number.isFinite(block.endTimestamp)) continue;
+
+    if (block.version === 2 && block.replacementMode === "message-body") {
+      applyExactMessageBodyBlock(messages, block, state);
+      continue;
+    }
+    if (block.version === 2 && block.replacementMode === "range") {
+      applyExactRangeBlock(messages, block, state);
+      continue;
+    }
 
     // Find start and end indices by timestamp
     const startIdx = findBoundaryIndex(messages, block.startMessageId, block.startTimestamp);
@@ -299,6 +411,7 @@ export function applyCompressionBlocks(messages: any[], state: DcpState): any[] 
       // state from older sessions where Infinity/null could leak in.
       timestamp: Number.isFinite(block.anchorTimestamp) ? block.anchorTimestamp - 0.5 : block.endTimestamp + 0.5,
     };
+    markProjectedOrigin(syntheticMsg, "block", block.id);
 
     // Estimate tokens added by the summary
     const addedTokens = estimateMessageTokens(syntheticMsg);
@@ -315,19 +428,7 @@ export function applyCompressionBlocks(messages: any[], state: DcpState): any[] 
     if (insertIndex === -1) messages.push(syntheticMsg);
     else messages.splice(insertIndex, 0, syntheticMsg);
 
-    // Update tokens saved exactly once per compression block.
-    if (!state.accountedCompressionBlockIds.has(block.id)) {
-      state.accountedCompressionBlockIds.add(block.id);
-      state.totalPruneCount++;
-      const rawSaved = Math.max(0, removedTokens - addedTokens);
-      const coveredSavings = (block.coveredBlockIds ?? []).reduce(
-        (sum, id) => sum + (state.compressionTokenSavings.get(id) ?? 0),
-        0,
-      );
-      const adjustment = rawSaved - coveredSavings;
-      state.tokensSaved = Math.max(0, state.tokensSaved + adjustment);
-      state.compressionTokenSavings.set(block.id, rawSaved);
-    }
+    accountCompressionBlock(block, removedTokens, addedTokens, state);
   }
 
   return messages;

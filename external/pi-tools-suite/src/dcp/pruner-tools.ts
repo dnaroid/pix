@@ -1,19 +1,29 @@
+import { createHash } from "node:crypto";
 import type { DcpConfig } from "./config.js";
 import type { DcpState, ToolRecord } from "./state.js";
-import { estimateMessageTokens } from "./pruner-metadata.js";
+import { estimateMessageTokens, messageText } from "./pruner-metadata.js";
 
 export const EMERGENCY_CURRENT_TURN_PLACEHOLDER =
   "[Older tool output removed during current-turn context emergency; re-run the tool if exact content is needed]";
 
-// Tool outputs that must never be auto-pruned unless a future explicit user
-// action intentionally changes that policy. They mutate state or control DCP.
-const ALWAYS_PROTECTED_TOOLS = new Set(["compress", "write", "edit"]);
+// Tool outputs whose effects may mutate the workspace/process or control DCP.
+// Normalize names so provider/extension casing and aliases cannot bypass the
+// safety policy. Unknown tools are handled conservatively by autonomous
+// supersession below rather than assumed read-only.
+const ALWAYS_PROTECTED_TOOLS = new Set([
+  "compress", "write", "edit", "apply_patch", "patch",
+  "bash", "shell", "powershell", "exec", "execute",
+]);
+
+function normalizeToolName(name: string | undefined): string {
+  return (name ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
 
 function buildProtectedTools(config: DcpConfig, extra: string[] = []): Set<string> {
   return new Set([
     ...ALWAYS_PROTECTED_TOOLS,
-    ...(config.compress.protectedTools ?? []),
-    ...extra,
+    ...(config.compress.protectedTools ?? []).map(normalizeToolName),
+    ...extra.map(normalizeToolName),
   ]);
 }
 
@@ -102,7 +112,7 @@ function toolResultIsProtected(
   extraProtectedTools: string[] = [],
 ): boolean {
   const protectedTools = buildProtectedTools(config, extraProtectedTools);
-  const toolName = toolNameForResult(msg, record);
+  const toolName = normalizeToolName(toolNameForResult(msg, record));
   if (protectedTools.has(toolName)) return true;
   return isProtectedByFilePattern(record, config);
 }
@@ -113,7 +123,7 @@ export function isToolRecordProtected(
   extraProtectedTools: string[] = [],
 ): boolean {
   const protectedTools = buildProtectedTools(config, extraProtectedTools);
-  if (protectedTools.has(record.toolName)) return true;
+  if (protectedTools.has(normalizeToolName(record.toolName))) return true;
   return isProtectedByFilePattern(record, config);
 }
 
@@ -138,12 +148,20 @@ export function markToolPruned(
   return !wasAlreadyPruned;
 }
 
+function toolOutputIdentity(msg: any, record: ToolRecord): string {
+  const text = messageText(msg);
+  const digest = createHash("sha256").update(text).digest("hex");
+  return `${record.toolName}\u0000${record.isError || msg?.isError === true ? "error" : "ok"}\u0000${digest}`;
+}
+
 export function applyDeduplication(messages: any[], state: DcpState, config: DcpConfig): void {
   if (!config.strategies.deduplication.enabled) return;
   if (state.manualMode && !config.manualMode.automaticStrategies) return;
 
-  // fingerprint → array of toolCallIds in timestamp order
-  const fingerprintMap = new Map<string, Array<{ id: string; tokens: number }>>();
+  // input fingerprint + exact output identity + error/success semantics →
+  // toolCallIds in transcript order. Same input alone is never proof of a
+  // duplicate because files, environment and mutable tools can change.
+  const duplicateMap = new Map<string, Array<{ id: string; tokens: number }>>();
 
   for (const msg of messages) {
     if (msg.role !== "toolResult") continue;
@@ -151,15 +169,13 @@ export function applyDeduplication(messages: any[], state: DcpState, config: Dcp
     if (!record) continue;
     if (toolResultIsProtected(msg, record, config, config.strategies.deduplication.protectedTools ?? [])) continue;
 
-    const fp = record.inputFingerprint;
-    if (!fingerprintMap.has(fp)) {
-      fingerprintMap.set(fp, []);
-    }
-    fingerprintMap.get(fp)!.push({ id: msg.toolCallId, tokens: estimateToolResultTokens(msg, record) });
+    const identity = `${record.inputFingerprint}\u001f${toolOutputIdentity(msg, record)}`;
+    if (!duplicateMap.has(identity)) duplicateMap.set(identity, []);
+    duplicateMap.get(identity)!.push({ id: msg.toolCallId, tokens: estimateToolResultTokens(msg, record) });
   }
 
-  // For each fingerprint with duplicates, prune all but the last
-  for (const [, ids] of fingerprintMap) {
+  // For each proven exact duplicate set, prune all but the last.
+  for (const [, ids] of duplicateMap) {
     if (ids.length <= 1) continue;
     // Keep the last one; prune the rest
     for (let i = 0; i < ids.length - 1; i++) {
@@ -197,6 +213,15 @@ export function applyErrorPurging(messages: any[], state: DcpState, config: DcpC
  * DCP: large, old, repeated, or stale discovery outputs can be replaced with
  * placeholders without waiting for the model to call `compress`.
  */
+const BUILTIN_READ_ONLY_TOOLS = new Set([
+  "read", "grep", "find", "ls", "search", "web_search", "websearch", "fetch", "glob",
+]);
+
+function isKnownReadOnlyTool(toolName: string, configuredReadLike: Set<string>): boolean {
+  const normalized = normalizeToolName(toolName);
+  return BUILTIN_READ_ONLY_TOOLS.has(normalized) || configuredReadLike.has(normalized);
+}
+
 export function applyAutoToolOutputPruning(messages: any[], state: DcpState, config: DcpConfig): void {
   const strategy = config.strategies.autoToolPruning;
   if (!strategy.enabled) return;
@@ -205,7 +230,7 @@ export function applyAutoToolOutputPruning(messages: any[], state: DcpState, con
   const maxOutputTokens = Math.max(1, strategy.maxOutputTokens ?? 2000);
   const keepRecentTurns = Math.max(0, strategy.keepRecentTurns ?? 2);
   const readLikeTurns = Math.max(0, strategy.readLikeTurns ?? 3);
-  const readLikeTools = new Set(strategy.readLikeTools ?? []);
+  const readLikeTools = new Set((strategy.readLikeTools ?? []).map(normalizeToolName));
 
   for (const msg of messages) {
     if (msg.role !== "toolResult") continue;
@@ -217,7 +242,10 @@ export function applyAutoToolOutputPruning(messages: any[], state: DcpState, con
 
     const ageTurns = Math.max(0, state.currentTurn - record.turnIndex);
     const tokenEstimate = estimateToolResultTokens(msg, record);
-    const toolName = toolNameForResult(msg, record);
+    const toolName = normalizeToolName(toolNameForResult(msg, record));
+    // Unknown tools are not assumed safe for autonomous deletion. Extensions
+    // can opt known read-like tools into the strategy explicitly.
+    if (!isKnownReadOnlyTool(toolName, readLikeTools)) continue;
 
     if (tokenEstimate > maxOutputTokens && ageTurns >= keepRecentTurns) {
       markToolPruned(state, msg.toolCallId, "large-output", tokenEstimate);

@@ -8,6 +8,7 @@ import {
 	dcpDebugLogDrain,
 	dcpDebugLogMaxBackups,
 	dcpDebugLogMaxBytes,
+	summarizeDcpState,
 	writeDcpDebugLog,
 } from "../src/dcp/debug-log.js";
 
@@ -44,6 +45,15 @@ function withCleanEnv<T>(fn: () => Promise<T> | T): Promise<T> {
 }
 
 describe("DCP debug log", () => {
+	test("disabled debug state summary is an O(1) no-op", () => {
+		const config = loadConfig({ homeDir: tempDir() });
+		config.debug = false;
+		const throwingState = new Proxy({}, {
+			get() { throw new Error("state should not be scanned when debug is disabled") },
+		}) as any;
+
+		expect(summarizeDcpState(throwingState, config)).toEqual({});
+	});
 	test("rotates the active file when it reaches maxBytes and keeps maxBackups copies", async () => {
 		await withCleanEnv(async () => {
 			const dir = tempDir();

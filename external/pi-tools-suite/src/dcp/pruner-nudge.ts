@@ -6,7 +6,7 @@ import type {
   MessageCompressionCandidate,
   NudgeThresholds,
 } from "./pruner-types.js";
-import { extractBlockId, messageText } from "./pruner-metadata.js";
+import { messageText } from "./pruner-metadata.js";
 import { stableMessageKeys } from "./pruner-message-ids.js";
 
 function coercePercentThreshold(value: number | string | undefined, fallback: number): number {
@@ -22,11 +22,17 @@ function coercePercentThreshold(value: number | string | undefined, fallback: nu
 }
 
 export function injectNudge(messages: any[], nudgeText: string): void {
-  messages.push({
+  const message = {
     role: "user",
     content: nudgeText,
     timestamp: Date.now(),
+  };
+  Object.defineProperty(message, "_dcpOrigin", {
+    value: "dcp-control",
+    enumerable: false,
+    configurable: true,
   });
+  messages.push(message);
 }
 
 function typePriority(type: DcpNudgeType): number {
@@ -50,9 +56,7 @@ function nudgeTypeLabel(type: DcpNudgeType): string {
 function isRealAnchorCandidate(msg: any): boolean {
   const role = msg?.role ?? "";
   if (role !== "user" && role !== "assistant") return false;
-  const text = messageText(msg);
-  if (extractBlockId(text) !== undefined) return false;
-  return true;
+  return msg?._dcpOrigin !== "block" && msg?._dcpOrigin !== "dcp-control";
 }
 
 function findAnchorMessage(messages: any[]): { msg: any; index: number; stableId: string; timestamp: number; role: string } | null {
@@ -313,11 +317,17 @@ export function applyAnchoredNudges(
   if (materializedReminder) selected.anchor.renderedReminder = reminder;
   const anchorMessage = messages[selected.index];
   if (anchorMessage?.role === "assistant") {
-    messages.splice(selected.index + 1, 0, {
+    const syntheticReminder = {
       role: "user",
       content: reminder,
       timestamp: selected.anchor.createdAt,
+    };
+    Object.defineProperty(syntheticReminder, "_dcpOrigin", {
+      value: "dcp-control",
+      enumerable: false,
+      configurable: true,
     });
+    messages.splice(selected.index + 1, 0, syntheticReminder);
   } else {
     appendTextToMessage(anchorMessage, reminder);
   }

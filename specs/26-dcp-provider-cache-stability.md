@@ -47,8 +47,12 @@ must become a byte-stable prefix again on the following request.
    carrier. Rendering the same carrier again produces identical text.
 3. Assistant messages and their content blocks retain their original text,
    signatures, ordering, and provider item shape.
-4. `before_provider_request` may inspect the final payload to track tool-result
-   exposure, but returns no replacement payload solely for DCP IDs.
+4. `before_provider_request` records which tool results were serialized into a
+   specific local attempt envelope, but does not mark them completed and returns
+   no replacement payload solely for DCP IDs. `after_provider_response` HTTP
+   2xx is acceptance-only. Completed exposure is promoted only after an
+   unambiguously correlated successful finalized assistant `message_end`;
+   abort/error/interleaving ambiguity fails closed.
 5. A nudge anchored to an existing user message stores the complete rendered
    reminder. Candidate counts or ID snapshots changing later do not rewrite
    that reminder. A higher-priority nudge may replace it once. If no user
@@ -61,11 +65,10 @@ must become a byte-stable prefix again on the following request.
 ## Contracts
 
 - `compress` continues accepting raw `mNNN` and active `bN` IDs.
-- Sidecar state gains backward-compatible optional fields for persistent
-  message-ID assignments, the next message-ID counter, frozen reminder text,
-  and automatic-pruning checkpoint counters.
-- Legacy sidecars without those fields restore with safe defaults and assign
-  stable IDs on their first transformed context.
+- New sidecar writes use a versioned generation envelope with exact session
+  identity and payload hash; legacy flat sidecars remain readable through the
+  migration adapter. Stable message-ID assignments, frozen reminder text and
+  automatic-pruning checkpoints remain inside the serialized payload.
 - Debug output identifies distributed-carrier delivery rather than a moving
   provider-payload map.
 
@@ -126,8 +129,13 @@ must become a byte-stable prefix again on the following request.
 - Emergency mid-turn compression is such an intentional rewrite. To avoid
   touching the in-flight head, its range candidate excludes the current user
   request and retains the newest assistant group plus the configured recent
-  complete tool pairs; a later assistant response is used as evidence that the
-  older selected prefix belonged to an already-completed provider transaction.
+  complete tool pairs. A later assistant response establishes ordering only;
+  every selected tool result must have separately promoted completed-provider
+  evidence. Without request identity, ambiguous interleaving remains
+  `evidence-unknown` and is not eligible.
+- The completion witness proves the installed SDK lifecycle reached a successful
+  finalized assistant message for one locally correlated attempt. It is not a
+  universal network-delivery/retention guarantee for every provider backend.
 
 ## Evidence
 
@@ -137,6 +145,9 @@ must become a byte-stable prefix again on the following request.
   the new input to begin byte-for-byte with the prior input plus response items.
 - Confirmed by session diagnostics: exact retries hit the full cache, while the
   next normally advanced request falls back to the static prompt-only cache.
-- Confirmed by tests: current DCP tests cover message IDs, anchored nudges,
-  pruning, provider exposure, and state persistence, providing regression
-  extension points.
+- Confirmed by deterministic tests: HTTP 2xx followed by abort/error does not
+  promote evidence; identical retries coalesce; ambiguous interleaving fails
+  closed; a v2 rewrite followed by two ordinary continuations preserves both
+  DCP projection and installed OpenAI Responses serialization prefixes.
+- Production cache-hit rates and provider-specific continuation quality remain a
+  live-canary concern; no live provider canary is claimed by this spec update.

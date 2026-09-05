@@ -88,7 +88,11 @@ function sessionInfo(ctx: ExtensionContext | undefined): Record<string, unknown>
   return info
 }
 
-export function summarizeDcpState(state: DcpState): Record<string, unknown> {
+export function summarizeDcpState(state: DcpState, config?: DcpConfig): Record<string, unknown> {
+  // Call sites often construct debug detail objects before writeDcpDebugLog can
+  // early-return. Passing config lets this potentially O(n) snapshot stay an
+  // O(1) no-op when debug logging is disabled.
+  if (config && !dcpDebugEnabled(config)) return {}
   const rawIds = [...new Set([
     ...state.messageIdSnapshot.keys(),
     ...state.messageMetaSnapshot.keys(),
