@@ -178,7 +178,7 @@
   let promptAttachments = $state<Attachment[]>([]);
   let autocompleteEnabled = $state(false);
   let autocompleteDebounceMs = $state(350);
-  let promptRunning = $state(false);
+  let runningSessionIds = $state<Set<string>>(new Set());
   let operationRunning = $state(false);
   let sessionHistoryLoading = $state(false);
   let activeSessionRuntimeReady = $state(false);
@@ -232,6 +232,8 @@
   const configOptionsBySessionId = new Map<string, SessionConfigOption[]>();
 
   const canUseSession = $derived(status === "ready" && !!workspace && !operationRunning);
+  const promptRunning = $derived(activeSessionId ? runningSessionIds.has(activeSessionId) : false);
+  const anyPromptRunning = $derived(runningSessionIds.size > 0);
   const activeTitle = $derived(
     sessions.find((session) => session.sessionId === activeSessionId)?.title ?? "New conversation",
   );
@@ -381,7 +383,7 @@
         if (!exit.requested) {
           errorMessage = exit.error ?? `pix-acp exited${exit.code === null ? "" : ` with code ${exit.code}`}`;
         }
-        promptRunning = false;
+        runningSessionIds = new Set();
         operationRunning = false;
         changingConfig = null;
       },
@@ -432,7 +434,7 @@
     slashCommandsBySession = new Map();
     transcript = emptyTranscript;
     configOptions = [];
-    promptRunning = false;
+    runningSessionIds = new Set();
     operationRunning = false;
     changingConfig = null;
     await previous?.dispose().catch(() => {});
@@ -462,7 +464,6 @@
         : session);
       return;
     }
-    if (notification.sessionId !== activeSessionId) return;
     pendingSessionUpdates.push({ sessionId: notification.sessionId, update });
     if (sessionUpdateFrame) return;
     sessionUpdateFrame = requestAnimationFrame(flushSessionUpdates);
@@ -470,20 +471,28 @@
 
   function flushSessionUpdates(): void {
     sessionUpdateFrame = 0;
-    const sessionId = activeSessionId;
     const queued = pendingSessionUpdates;
     pendingSessionUpdates = [];
-    if (!sessionId || queued.length === 0) return;
-    const updates = queued
-      .filter((entry) => entry.sessionId === sessionId)
-      .map((entry) => entry.update);
-    if (updates.length === 0) return;
+    if (queued.length === 0) return;
 
-    const followLatest = transcriptIsNearBottom();
-    const nextTranscript = applySessionUpdates(transcript, updates);
-    transcript = nextTranscript;
-    transcriptBySessionId.set(sessionId, nextTranscript);
-    if (followLatest) scheduleScrollToLatest();
+    const activeId = activeSessionId;
+    const followLatest = activeId ? transcriptIsNearBottom() : false;
+    const updatesBySession = new Map<string, SessionUpdate[]>();
+    for (const entry of queued) {
+      const updates = updatesBySession.get(entry.sessionId);
+      if (updates) updates.push(entry.update);
+      else updatesBySession.set(entry.sessionId, [entry.update]);
+    }
+
+    for (const [sessionId, updates] of updatesBySession) {
+      const current = sessionId === activeId
+        ? transcript
+        : transcriptBySessionId.get(sessionId) ?? emptyTranscript;
+      const nextTranscript = applySessionUpdates(current, updates);
+      transcriptBySessionId.set(sessionId, nextTranscript);
+      if (sessionId === activeId) transcript = nextTranscript;
+    }
+    if (activeId && followLatest) scheduleScrollToLatest();
   }
 
   function transcriptIsNearBottom(): boolean {
@@ -523,6 +532,13 @@
     const nextCommands = new Map(slashCommandsBySession);
     nextCommands.delete(sessionId);
     slashCommandsBySession = nextCommands;
+  }
+
+  function setSessionPromptRunning(sessionId: string, running: boolean): void {
+    const next = new Set(runningSessionIds);
+    if (running) next.add(sessionId);
+    else next.delete(sessionId);
+    runningSessionIds = next;
   }
 
   function prepareTranscriptAttachment(attachment: Attachment): Promise<void> {
@@ -699,7 +715,7 @@
   }
 
   async function chooseWorkspace(): Promise<void> {
-    if (promptRunning || operationRunning || tasksSaving || taskActionId) return;
+    if (anyPromptRunning || operationRunning || tasksSaving || taskActionId) return;
     closeProjectSelector();
     const selected = await open({
       directory: true,
@@ -713,7 +729,7 @@
   }
 
   async function selectWorkspace(selected: string): Promise<void> {
-    if (promptRunning || operationRunning || tasksSaving || taskActionId) return;
+    if (anyPromptRunning || operationRunning || tasksSaving || taskActionId) return;
     closeProjectSelector();
     closeSessionSelector();
     if (!isAbsoluteProjectPath(selected)) {
@@ -978,12 +994,17 @@
 
       const created = await requestClient.newSession(requestWorkspace);
       if (client !== requestClient || workspace !== requestWorkspace) return;
+      ensureProvisionalSession(created.sessionId, requestWorkspace);
       showSessionTab(created.sessionId);
       activeSessionId = created.sessionId;
-      configOptions = created.configOptions ?? [];
-      markSessionRuntimeReady(created.sessionId, configOptions);
+      transcript = emptyTranscript;
+      transcriptBySessionId.set(created.sessionId, transcript);
+      configOptions = [];
+      activeSessionRuntimeReady = false;
       rememberActiveSession(requestWorkspace, created.sessionId);
-      void refreshSessions();
+      void ensureSessionRuntime(requestClient, created.sessionId, requestWorkspace).then(() => {
+        if (runtimeReadySessionIds.has(created.sessionId)) void refreshSessions();
+      });
     } catch (error) {
       if (client !== requestClient || workspace !== requestWorkspace) return;
       cancelSessionHistoryLoad();
@@ -996,20 +1017,28 @@
   }
 
   async function createSession(): Promise<void> {
-    if (!client || !canUseSession || promptRunning) return;
+    if (!client || !canUseSession) return;
+    const requestClient = client;
+    const requestWorkspace = workspace;
     closeProjectSelector();
     closeSessionSelector();
     operationRunning = true;
     errorMessage = null;
     try {
-      const response = await client.newSession(workspace);
+      const response = await requestClient.newSession(requestWorkspace);
+      if (requestClient !== client || requestWorkspace !== workspace) return;
+      if (activeSessionId) transcriptBySessionId.set(activeSessionId, transcript);
+      ensureProvisionalSession(response.sessionId, requestWorkspace);
       showSessionTab(response.sessionId);
       activeSessionId = response.sessionId;
-      rememberActiveSession(workspace, response.sessionId);
+      rememberActiveSession(requestWorkspace, response.sessionId);
       transcript = emptyTranscript;
-      configOptions = response.configOptions ?? [];
-      markSessionRuntimeReady(response.sessionId, configOptions);
-      void refreshSessions();
+      transcriptBySessionId.set(response.sessionId, transcript);
+      configOptions = [];
+      activeSessionRuntimeReady = false;
+      void ensureSessionRuntime(requestClient, response.sessionId, requestWorkspace).then(() => {
+        if (runtimeReadySessionIds.has(response.sessionId)) void refreshSessions();
+      });
     } catch (error) {
       reportError(error);
     } finally {
@@ -1022,7 +1051,7 @@
       await openProjectTaskSession(task);
       return;
     }
-    if (!client || !canUseSession || promptRunning || tasksSaving || taskActionId) return;
+    if (!client || !canUseSession || tasksSaving || taskActionId) return;
     const requestClient = client;
     const requestWorkspace = workspace;
     closeProjectSelector();
@@ -1030,16 +1059,22 @@
     operationRunning = true;
     taskActionId = task.id;
     errorMessage = null;
+    let taskSessionId: string | undefined;
     try {
       if (client !== requestClient || workspace !== requestWorkspace) return;
       const response = await requestClient.newSession(requestWorkspace);
+      taskSessionId = response.sessionId;
       if (client !== requestClient || workspace !== requestWorkspace) return;
+      ensureProvisionalSession(response.sessionId, requestWorkspace);
       showSessionTab(response.sessionId);
       activeSessionId = response.sessionId;
       rememberActiveSession(requestWorkspace, response.sessionId);
       transcript = emptyTranscript;
-      configOptions = response.configOptions ?? [];
-      markSessionRuntimeReady(response.sessionId, configOptions);
+      transcriptBySessionId.set(response.sessionId, transcript);
+      configOptions = [];
+      activeSessionRuntimeReady = false;
+      await ensureSessionRuntime(requestClient, response.sessionId, requestWorkspace);
+      if (!runtimeReadySessionIds.has(response.sessionId)) return;
       void refreshSessions();
 
       const timestamp = new Date().toISOString();
@@ -1057,7 +1092,7 @@
       if (!saved || client !== requestClient || workspace !== requestWorkspace) return;
 
       const prompt = buildTaskPrompt(task);
-      promptRunning = true;
+      setSessionPromptRunning(response.sessionId, true);
       operationRunning = false;
       transcript = appendLocalUserMessage(transcript, prompt, `local:${++localMessageId}`, []);
       transcriptBySessionId.set(response.sessionId, transcript);
@@ -1068,7 +1103,7 @@
       reportError(error);
     } finally {
       if (workspace === requestWorkspace) {
-        promptRunning = false;
+        if (taskSessionId) setSessionPromptRunning(taskSessionId, false);
         operationRunning = false;
         taskActionId = null;
       }
@@ -1076,7 +1111,7 @@
   }
 
   async function openProjectTaskSession(task: ProjectTask): Promise<void> {
-    if (!task.sessionId || taskActionId || promptRunning || operationRunning) return;
+    if (!task.sessionId || taskActionId || operationRunning) return;
     if (task.sessionId === activeSessionId) return;
     taskActionId = task.id;
     try {
@@ -1087,7 +1122,7 @@
   }
 
   async function loadSession(sessionId: string): Promise<void> {
-    if (!client || !canUseSession || promptRunning || sessionId === activeSessionId) return;
+    if (!client || !canUseSession || sessionId === activeSessionId) return;
     const requestClient = client;
     const requestWorkspace = workspace;
     closeProjectSelector();
@@ -1152,7 +1187,7 @@
     closeSessionSelector();
     sessionPrewarmGeneration += 1;
     if (sessionId !== activeSessionId) {
-      if (promptRunning || operationRunning) return;
+      if (runningSessionIds.has(sessionId) || operationRunning) return;
       operationRunning = true;
       errorMessage = null;
       try {
@@ -1169,7 +1204,7 @@
       }
       return;
     }
-    if (promptRunning || operationRunning) return;
+    if (runningSessionIds.has(sessionId) || operationRunning) return;
 
     const nextSessionId = tabSessions.find((session) => session.sessionId !== sessionId)?.sessionId;
     let closed = false;
@@ -1202,6 +1237,11 @@
     closedSessionTabs = closedSessionTabs.filter((closedId) => closedId !== sessionId);
     if (restoredSessionTabs?.includes(sessionId) || locallyOpenedSessionTabs.includes(sessionId)) return;
     locallyOpenedSessionTabs = [...locallyOpenedSessionTabs, sessionId];
+  }
+
+  function ensureProvisionalSession(sessionId: string, cwd: string): void {
+    if (sessions.some((session) => session.sessionId === sessionId)) return;
+    sessions = [{ sessionId, cwd, updatedAt: new Date().toISOString() }, ...sessions];
   }
 
   function handleSessionTabClick(event: MouseEvent, sessionId: string): void {
@@ -1813,7 +1853,7 @@
       }
       return;
     }
-    promptRunning = true;
+    setSessionPromptRunning(sessionId, true);
     errorMessage = null;
     try {
       const blocks = await buildPromptBlocks(text, attachments);
@@ -1833,7 +1873,7 @@
     } catch (error) {
       reportError(error);
     } finally {
-      promptRunning = false;
+      setSessionPromptRunning(sessionId, false);
     }
   }
 
@@ -2072,7 +2112,7 @@
       {workspace}
       {recentProjects}
       open={projectSelectorOpen}
-      disabled={promptRunning || operationRunning || tasksSaving || taskActionId !== null}
+      disabled={anyPromptRunning || operationRunning || tasksSaving || taskActionId !== null}
       onToggle={toggleProjectSelector}
       onSelectProject={(path) => void selectWorkspace(path)}
       onChooseWorkspace={() => void chooseWorkspace()}
@@ -2084,9 +2124,10 @@
         sessions={tabSessions}
         allSessionsCount={sessions.length}
         {activeSessionId}
+        {runningSessionIds}
         selectorOpen={sessionSelectorOpen}
-        disabled={promptRunning || operationRunning}
-        canCreate={canUseSession && !promptRunning}
+        disabled={operationRunning}
+        canCreate={canUseSession}
         onTabClick={handleSessionTabClick}
         onPickerClick={handleSessionPickerClick}
         onCloseTab={(event, sessionId) => void closeSessionTab(event, sessionId)}
@@ -2098,8 +2139,8 @@
           {sessions}
           {activeSessionId}
           {activeTitle}
-          canCreate={canUseSession && !promptRunning}
-          disabled={promptRunning || operationRunning}
+          canCreate={canUseSession}
+          disabled={operationRunning}
           onCreate={() => void createSession()}
           onSelect={selectSession}
           onClose={closeSessionSelector}
@@ -2116,7 +2157,7 @@
       saving={tasksSaving}
       storageError={taskLoadFailed}
       activeTaskId={taskActionId}
-      sessionReady={canUseSession && !promptRunning}
+      sessionReady={canUseSession}
       {activeSessionId}
       todoSnapshot={activeTodoSnapshot}
       subagentSnapshot={activeSubagentSnapshot}

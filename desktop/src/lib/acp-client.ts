@@ -131,7 +131,11 @@ export class AcpClient {
   }
 
   newSession(cwd: string): Promise<NewSessionResponse> {
-    return this.request("session/new", { cwd, mcpServers: [] });
+    return this.request("session/new", {
+      cwd,
+      mcpServers: [],
+      _meta: { "pix.lazyRuntime": true },
+    });
   }
 
   loadSession(sessionId: string, cwd: string): Promise<LoadSessionResponse> {

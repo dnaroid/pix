@@ -159,6 +159,10 @@ interface AgentSessionState {
 	readonly pendingDialogIds: Set<string>;
 }
 
+interface PendingDesktopNewSession {
+	readonly promise: Promise<{ session: AgentSessionState; configOptions?: SessionConfigOption[] }>;
+}
+
 interface DesktopDeferredToolResult {
 	readonly result: DeferredToolResult;
 	readonly persistedRef?: PersistedToolResultRef;
@@ -189,6 +193,8 @@ export interface PixAcpAgentOptions {
 
 export class PixAcpAgent {
 	private readonly sessions = new Map<string, AgentSessionState>();
+	/** Desktop may reserve a tab id before its expensive pi runtime has finished starting. */
+	private readonly pendingDesktopNewSessions = new Map<string, PendingDesktopNewSession>();
 	/** Lazy Desktop tool bodies are cached independently of a live pi runtime. */
 	private readonly desktopDeferredToolResults = new Map<string, Map<string, DesktopDeferredToolResult>>();
 	/** Starts already accepted by ACP but not yet registered in `sessions`. */
@@ -242,7 +248,7 @@ export class PixAcpAgent {
 				};
 			})
 			.onRequest("authenticate", () => ({}))
-			.onRequest("session/new", (ctx) => this.newSession(ctx.params.cwd, ctx.client))
+			.onRequest("session/new", (ctx) => this.newSession(ctx.params, ctx.client))
 			.onRequest("session/load", (ctx) =>
 				this.withSessionLifecycle(ctx.params.sessionId, () => this.loadSession(ctx.params, ctx.client)),
 			)
@@ -432,8 +438,34 @@ export class PixAcpAgent {
 		return response;
 	}
 
-	private async newSession(cwd: string, client: ClientCaller): Promise<NewSessionResponse> {
+	private async newSession(
+		params: { cwd: string; _meta?: Record<string, unknown> | null },
+		client: ClientCaller,
+	): Promise<NewSessionResponse> {
 		const acpSessionId = randomUUID();
+		const lazyRuntime = params._meta?.["pix.lazyRuntime"] === true;
+		const pending = lazyRuntime
+			? Promise.resolve().then(() => this.startNewSession(acpSessionId, params.cwd, client))
+			: this.startNewSession(acpSessionId, params.cwd, client);
+		if (lazyRuntime) {
+			this.pendingDesktopNewSessions.set(acpSessionId, { promise: pending });
+			void pending.catch((error: unknown) => {
+				this.options.logger.warn(`background session/new failed for ${acpSessionId}: ${stringifyUnknown(error)}`);
+			});
+			return { sessionId: acpSessionId };
+		}
+
+		const ready = await pending;
+		return ready.configOptions
+			? { sessionId: acpSessionId, configOptions: ready.configOptions }
+			: { sessionId: acpSessionId };
+	}
+
+	private async startNewSession(
+		acpSessionId: string,
+		cwd: string,
+		client: ClientCaller,
+	): Promise<{ session: AgentSessionState; configOptions?: SessionConfigOption[] }> {
 		let defaultModel: PixDefaultModel | undefined;
 		try {
 			defaultModel = this.loadDefaultModel(cwd);
@@ -445,12 +477,21 @@ export class PixAcpAgent {
 		await this.registerSessionRecord(acpSessionId, cwd, session.pi);
 		const configOptions = await this.safeConfigOptions(session.pi);
 		this.scheduleAvailableCommands(session);
-		return configOptions ? { sessionId: acpSessionId, configOptions } : { sessionId: acpSessionId };
+		return configOptions ? { session, configOptions } : { session };
 	}
 
 	private async loadSession(params: LoadSessionRequest, client: ClientCaller): Promise<LoadSessionResponse> {
 		const lazyHistory = (params as { _meta?: Record<string, unknown> })._meta?.["pix.lazyHistory"] === true;
 		if (lazyHistory) {
+			const pendingNew = this.pendingDesktopNewSessions.get(params.sessionId);
+			if (pendingNew) {
+				try {
+					const ready = await pendingNew.promise;
+					return ready.configOptions ? { configOptions: ready.configOptions } : {};
+				} finally {
+					this.pendingDesktopNewSessions.delete(params.sessionId);
+				}
+			}
 			const existing = this.sessions.get(params.sessionId);
 			if (existing) {
 				const configOptions = await this.safeConfigOptions(existing.pi);
@@ -560,8 +601,10 @@ export class PixAcpAgent {
 
 	private async deleteSession(sessionId: string): Promise<void> {
 		this.desktopDeferredToolResults.delete(sessionId);
+		if (this.pendingDesktopNewSessions.has(sessionId) || this.sessions.has(sessionId)) {
+			await this.closeSession(sessionId);
+		}
 		await this.sessionMap.delete(sessionId);
-		if (this.sessions.has(sessionId)) await this.closeSession(sessionId);
 		this.options.logger.info(`session/delete: ${sessionId}`);
 	}
 
@@ -1176,6 +1219,11 @@ export class PixAcpAgent {
 
 	private async closeSession(sessionId: string): Promise<void> {
 		this.desktopDeferredToolResults.delete(sessionId);
+		const pendingNew = this.pendingDesktopNewSessions.get(sessionId);
+		if (pendingNew) {
+			this.pendingDesktopNewSessions.delete(sessionId);
+			await pendingNew.promise.catch(() => undefined);
+		}
 		const session = this.sessions.get(sessionId);
 		if (!session) return;
 		this.options.logger.info(`session/close: ${sessionId}`);

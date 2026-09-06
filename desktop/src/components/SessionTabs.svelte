@@ -9,6 +9,7 @@
     sessions,
     allSessionsCount,
     activeSessionId,
+    runningSessionIds,
     selectorOpen,
     disabled,
     canCreate,
@@ -20,6 +21,7 @@
     sessions: SessionInfo[];
     allSessionsCount: number;
     activeSessionId: string | null;
+    runningSessionIds: ReadonlySet<string>;
     selectorOpen: boolean;
     disabled: boolean;
     canCreate: boolean;
@@ -46,6 +48,7 @@
 >
   {#each sessions as session (session.sessionId)}
     {@const active = session.sessionId === activeSessionId}
+    {@const running = runningSessionIds.has(session.sessionId)}
     <div
       class={[
         "group relative -mb-px h-8 min-w-[140px] max-w-[280px] flex-[0_1_280px] overflow-hidden rounded-t-lg border transition-colors max-[760px]:basis-[230px]",
@@ -63,14 +66,16 @@
         aria-current={active ? "page" : undefined}
         aria-haspopup={active ? "dialog" : undefined}
         aria-expanded={active ? selectorOpen : undefined}
-        title={sessionTitle(session)}
+        title={`${sessionTitle(session)}${running ? " · Running" : ""}`}
         onclick={(event) => onTabClick(event, session.sessionId)}
         {disabled}
       >
         <span
           class={[
             "h-[7px] w-[7px] shrink-0 rounded-full border opacity-70",
-            active ? "border-primary bg-primary opacity-100" : "border-muted-foreground",
+            running
+              ? "animate-pulse border-primary bg-primary opacity-100 motion-reduce:animate-none"
+              : active ? "border-primary bg-primary opacity-100" : "border-muted-foreground",
           ]}
           aria-hidden="true"
         ></span>

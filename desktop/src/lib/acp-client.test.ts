@@ -56,6 +56,25 @@ describe("ACP JSON-RPC client", () => {
     await client.dispose();
   });
 
+  it("requests Desktop new sessions with lazy runtime startup", async () => {
+    const transport = new FakeTransport();
+    const client = await startedClient(transport);
+    const creating = client.newSession("/workspace");
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+
+    expect(requestAt(transport, 1)).toMatchObject({
+      method: "session/new",
+      params: {
+        cwd: "/workspace",
+        mcpServers: [],
+        _meta: { "pix.lazyRuntime": true },
+      },
+    });
+    transport.message({ jsonrpc: "2.0", id: requestAt(transport, 1).id, result: { sessionId: "new-1" } });
+    await expect(creating).resolves.toEqual({ sessionId: "new-1" });
+    await client.dispose();
+  });
+
   it("handles streamed updates and form elicitation requests", async () => {
     const transport = new FakeTransport();
     const onSessionUpdate = vi.fn();

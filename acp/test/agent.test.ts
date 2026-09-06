@@ -418,6 +418,50 @@ test("session/new spawns and starts one pi client per session with the cwd", asy
 	assert.ok(adapter.getSession(sessionIds[1]!), "second session registered");
 });
 
+test("desktop lazy session/new returns before pi startup and session/load joins the same runtime", async () => {
+	let releaseStart!: () => void;
+	const startGate = new Promise<void>((resolve) => { releaseStart = resolve; });
+	const lazyClients: FakePiClient[] = [];
+	const harness = createTestAdapter({
+		createPiClient: () => {
+			const fake = new FakePiClient();
+			fake.startGate = startGate;
+			lazyClients.push(fake);
+			return fake;
+		},
+	});
+
+	await connect(harness.adapter, async (cx) => {
+		const created = await Promise.race([
+			cx.request("session/new", {
+				cwd: "/tmp/lazy-new",
+				mcpServers: [],
+				_meta: { "pix.lazyRuntime": true },
+			}),
+			new Promise<never>((_, reject) => setTimeout(() => reject(new Error("lazy session/new blocked on pi startup")), 250)),
+		]) as { sessionId: string };
+
+		assert.equal(lazyClients.length, 1);
+		assert.equal(lazyClients[0]!.started, false, "pi startup is still gated after the tab id is returned");
+
+		let loadSettled = false;
+		const loading = cx.request("session/load", {
+			sessionId: created.sessionId,
+			cwd: "/tmp/lazy-new",
+			mcpServers: [],
+			_meta: { "pix.lazyHistory": true },
+		}).finally(() => { loadSettled = true; });
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		assert.equal(loadSettled, false, "runtime readiness still waits for the gated pi startup");
+
+		releaseStart();
+		await loading;
+		assert.equal(lazyClients.length, 1, "session/load must join the pending new-session runtime instead of spawning again");
+		assert.equal(lazyClients[0]!.started, true);
+		assert.equal(harness.adapter.getSession(created.sessionId)?.pi, lazyClients[0]);
+	});
+});
+
 test("session/new advertises supported built-ins and pi runtime slash commands", async () => {
 	const harness = createTestAdapter({
 		createPiClient: () => {
