@@ -109,7 +109,8 @@ describe("DCP sidecar state persistence", () => {
     const statePath = resolveDcpStatePath(ctx)!;
     expect((await readPersistedPayload(statePath)).tokensSaved).toBe(10);
     const info = await stat(statePath);
-    expect(info.mode & 0o777).toBe(0o600);
+    // Windows stat always reports 0o666 for regular files; POSIX permission bits are unverifiable there.
+    if (process.platform !== "win32") expect(info.mode & 0o777).toBe(0o600);
     expect((await readdir(join(sessionDir, "dcp-state"))).some((name) => name.includes(".tmp-"))).toBe(false);
 
     await saveDcpState(ctx, state);
