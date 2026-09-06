@@ -441,6 +441,31 @@ Sub-agent model routing normally follows task overrides, subagent type config, t
 
 For an oh-my-openagent-style workflow, run `/ultrawork` or `/ulw` to ask the parent agent to split broad work into configured async-subagents roles (`quick`, `scan`, `research`, `docs`, `frontend`, `browser-qa`, `implement`, `tests`, `review`, `deep`, `oracle`). Set `ULTRAWORK=1` before launching Pi to apply that compact routing prompt to normal non-slash user inputs automatically. Set `ULTRAWORK_AUTO=1` to ask the lightweight router model to classify only the first normal user input on non-GPT parent models: clear broad/parallel work is transformed into ultrawork, vague potentially-complex work gets a soft delegation hint, and narrow work is left unchanged. GPT-like parent models skip only this automatic transform; they can still use `/ultrawork` and `subagents` normally. `frontend` is for UI/UX, styling, layout, responsive behavior, and visual component polish; `browser-qa` reproduces browser bugs and proves fixes with deterministic assertions plus screenshot/video/trace evidence; `review` covers security/performance/audit tracks; `implement` covers refactors; `deep` covers debugging/root-cause; `oracle` is for sparse cross-provider second opinions on high-stakes uncertainty. Run `/hyperplan` to pressure-test a plan before implementation.
 
+### Parent-first role selection
+
+The parent normally selects an explicit `subagentType` from the effective
+system-prompt catalog, preferring a matching project-local specialist. Valid
+explicit types bypass the LLM router entirely; presets, model selection, tools,
+skills, and role instructions are still applied by the normal config resolver.
+Model/thinking overrides are not substitutes for selecting a role.
+
+The router remains enabled as a fallback for omitted types: use it when the role
+is unclear or the user explicitly requests automatic routing. Only omitted
+tasks are classified, in one batch; the parent's explicit choices are preserved.
+Real-browser QA still requires explicit `subagentType: "browser-qa"`.
+
+Unknown explicit types and failed/incomplete automatic routing reject the
+**entire spawn batch before run state or child processes are created**. The tool
+returns an error with affected task IDs and available types; the parent should
+correct the roles and resubmit the whole batch. Provider error responses are
+failures too, not successful routes. Configured fallback router models may be
+tried, but missing routes are never silently replaced with `quick`/`defaultType`.
+
+With `routing.enabled: false`, every spawn task must supply a valid explicit
+type. `defaultType` remains a preference for genuinely ambiguous LLM choices
+and a legacy config-resolver default, not a spawn error fallback. Existing
+callers relying on an implicit default must now choose a type explicitly.
+
 ### Project-local agents (`.pi/agents/*.md`)
 
 A project can ship its own sub-agent roles as individual Markdown files (Claude Code `.claude/agents` style) in `<project>/.pi/agents/`. The first `.pi/agents` directory found walking up from the session cwd is used; each top-level `*.md` file becomes a `subagentType` named after the file (without `.md`). Project agents behave exactly like types declared in `asyncSubagents.types`: the LLM router sees their `description`, `/subagent-preset` per-type overrides apply, and `subagentType: "<name>"` selects them explicitly. The parent system prompt also receives the effective role catalog (built-ins + config overrides + project-local agents), so custom role names and descriptions are visible before it decides whether to set `subagentType` explicitly.
@@ -554,7 +579,7 @@ Async-subagents also injects a lightweight oh-my-openagent-style system-prompt s
 
 For blind-model screenshot/image inspection, use the main-session `coding-discipline` lookup tool; the bundled default uses vision-capable `zai/glm-5.3-flash`. Async-subagents still supports `imagePaths` on tasks when a broader delegated track genuinely needs images, but it no longer ships a dedicated `vision` role. Dynamic provider capabilities can be missing or stale after switching models, so blind parent models can still be configured explicitly with case-insensitive `*` masks under `asyncSubagents.vision.blindModelPatterns` in `~/.config/pi/pi-tools-suite.jsonc`; do not include `zai/glm-5.3-flash` because it accepts image input. This keeps guidance honest, not a sub-agent role.
 
-When a task omits `subagentType`, async-subagents asks a lightweight router model to choose one configured type for each task from the task text/scope and the `types.<name>.description` metadata. Explicit task `subagentType` still wins. Keep type descriptions short, literal, and distinct because they are inserted into the router prompt for a small model. Router settings live under `asyncSubagents.routing` (`enabled`, `model`, `maxTaskChars`, `maxTokens`, `maxRetries`, `timeoutMs`, `debug`); the default router model is `zai/glm-4.5-air`. If the router is disabled, unavailable, aborted, or returns invalid JSON, omitted types fall back to `defaultType`.
+When a task omits `subagentType`, async-subagents asks a lightweight router model to choose one configured type for each task from the task text/scope and the `types.<name>.description` metadata. Explicit task `subagentType` still wins. Keep type descriptions short, literal, and distinct because they are inserted into the router prompt for a small model. Router settings live under `asyncSubagents.routing` (`enabled`, `model`, `maxTaskChars`, `maxTokens`, `maxRetries`, `timeoutMs`, `debug`); the default router model is `zai/glm-5-turbo`. If the router is disabled, unavailable, aborted, or returns invalid JSON, omitted types fall back to `defaultType`.
 
 Define optional `presets` under `asyncSubagents` in `~/.config/pi/pi-tools-suite.jsonc`, `$PI_CONFIG_DIR/pi-tools-suite.jsonc`, or project `.pi/pi-tools-suite.jsonc`, then use `/subagent-preset` or `/subagent-preset-config` to pick one persistent active preset for future spawns across all sessions. Set `AGENTS_PRESET=<name>` before launching Pi to override the saved preset for only the current process/session without changing the saved selection. If Pi is already running, use `/subagent-preset session <name>` for the same process-only override, and `/subagent-preset session-clear` to remove that runtime override. The TUI only selects presets already present in config; it does not edit JSON. If no `asyncSubagents` section exists, run `/subagent-preset init` to insert the bundled sample from `src/async-subagents/async-subagents.sample.jsonc` into the shared config (or to copy a standalone override file when `ASYNC_SUBAGENTS_CONFIG` / `PI_SUBAGENTS_CONFIG` is set). Existing config sections/files are never overwritten. Presets select an agent/model configuration: they can provide global fallback `model`/`thinking`/`extraArgs` and per-role overrides under `asyncSubagents.presets.<name>.types.<subagentType>`. They can also provide ordered `fallbackModels` globally or per-role; when a sub-agent fails with quota/rate-limit errors such as 429, async-subagents immediately tries the next fallback model and remembers the exhausted provider for the current Pi process/session, so later spawns skip that provider until Pi exits. This is intended for provider-level fallback chains such as `antigravity/* → openai-codex/* → zai/*` or `openai-codex/* → zai/*`; omit fallbacks for effectively unlimited providers. Antigravity account rotation has priority over preset fallback: async-subagents only falls back after Antigravity reports that all configured accounts are exhausted for that model. Explicit task model overrides and force-current-model disable preset fallback for that task. The active preset name is stored separately in `~/.pi/agent/subagent-preset-selection.json`.
 
@@ -566,7 +591,7 @@ Example shared async-subagents config section:
     "defaultType": "quick",
     "routing": {
       "enabled": true,
-      "model": "zai/glm-4.5-air",
+      "model": "zai/glm-5-turbo",
       "timeoutMs": 12000
     },
     "presets": {

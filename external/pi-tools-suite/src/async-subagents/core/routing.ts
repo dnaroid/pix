@@ -29,6 +29,19 @@ export interface RoutedSubagentTasks {
 	warnings: string[];
 }
 
+/** A recoverable selection error: the parent must correct the batch before spawn. */
+export class SubagentRoutingError extends Error {
+	constructor(reason: string, readonly taskIds: string[], readonly allowedTypes: string[]) {
+		super([
+			reason,
+			`Tasks requiring a valid role: ${taskIds.join(", ")}.`,
+			"Set an explicit valid subagentType for these tasks and retry; defaultType is not an error fallback.",
+			`Available types: ${allowedTypes.join(", ") || "(none configured)"}.`,
+		].join("\n"));
+		this.name = "SubagentRoutingError";
+	}
+}
+
 const ROUTER_SYSTEM_PROMPT = [
 	"You route Pi async sub-agent tasks to the best configured subagentType.",
 	"Choose exactly one allowed type for each task. Use the allowed type descriptions as the source of truth.",
@@ -43,31 +56,37 @@ export async function routeSubagentTasks(
 	ctx: SubagentRoutingContext,
 	signal?: AbortSignal,
 ): Promise<RoutedSubagentTasks> {
-	const fallbackTasks = () => tasks.map((task) => withFallbackType(task, config));
+	if (signal?.aborted) throw new Error("Aborted");
+	// Validate even the fast path: an explicit typo must not bypass profiles.
+	tasks = tasks.map((task) => hasText(task.subagentType) && task.subagentType !== task.subagentType.trim()
+		? { ...task, subagentType: task.subagentType.trim() }
+		: task);
+	const invalidTasks = tasks.filter((task) => hasText(task.subagentType)
+		&& !Object.prototype.hasOwnProperty.call(config.types, task.subagentType));
+	if (invalidTasks.length > 0) {
+		throw routingError(`Unknown subagentType: ${invalidTasks.map((task) => `${task.id}=${JSON.stringify(task.subagentType)}`).join(", ")}.`, invalidTasks, config);
+	}
 	const autoTasks = tasks.filter((task) => !hasText(task.subagentType));
 	if (autoTasks.length === 0) return { tasks, usedLlm: false, routes: {}, warnings: [] };
 
 	const routing = resolveSubagentRoutingConfig(config);
 	if (!routing.enabled) {
-		return { tasks: fallbackTasks(), usedLlm: false, routes: {}, warnings: ["LLM sub-agent routing is disabled; used defaultType fallback."] };
+		throw routingError("LLM sub-agent routing is disabled.", autoTasks, config);
 	}
-	if (signal?.aborted) throw new Error("Aborted");
+	if (Object.keys(config.types).length === 0) throw routingError("No sub-agent types are configured.", autoTasks, config);
 
 	try {
 		const candidates = await resolveRoutingModels(ctx, routing);
 		if (candidates.length === 0) {
-			const warning = `LLM sub-agent routing model unavailable (${routing.model}); used defaultType fallback.`;
-			notifyRoutingWarning(ctx, routing, warning);
-			return { tasks: fallbackTasks(), usedLlm: false, routes: {}, warnings: [warning] };
+			throw routingError(`LLM sub-agent routing model unavailable (${routing.model}).`, autoTasks, config);
 		}
 
 		const prompt = buildRoutingPrompt(autoTasks, config, routing);
 		const failures: string[] = [];
-		let response: RoutingResponse | undefined;
 		for (const candidate of candidates) {
 			if (signal?.aborted) throw new Error("Aborted");
 			try {
-				response = await completeWithModelRegistry(
+				const response = await completeWithModelRegistry(
 					ctx.modelRegistry,
 					candidate.model,
 					{
@@ -91,48 +110,38 @@ export async function routeSubagentTasks(
 						timeoutMs: routing.timeoutMs,
 					},
 				);
-				break;
+				if (signal?.aborted || response.stopReason === "aborted") throw new Error("Aborted");
+				if (response.stopReason === "error") throw new Error(response.errorMessage || "Router provider returned an error.");
+				const routes = parseRoutingResponse(responseText(response), config, autoTasks);
+				const missingTasks = autoTasks.filter((task) => !Object.prototype.hasOwnProperty.call(routes, task.id));
+				if (missingTasks.length > 0) {
+					throw new Error(`Returned ${Object.keys(routes).length}/${autoTasks.length} valid route(s); missing: ${missingTasks.map((task) => task.id).join(", ")}.`);
+				}
+				return {
+					usedLlm: true,
+					routes,
+					warnings: [],
+					tasks: tasks.map((task) => hasText(task.subagentType) ? task : { ...task, subagentType: routes[task.id] }),
+				};
 			} catch (error) {
 				if (signal?.aborted || isAbortError(error)) throw error;
 				failures.push(`${currentModelRef(candidate.model) ?? "(unknown)"}: ${errorMessage(error)}`);
 			}
 		}
 
-		if (!response) {
-			const warning = `LLM sub-agent routing failed (${failures.join("; ")}); used defaultType fallback.`;
-			notifyRoutingWarning(ctx, routing, warning);
-			return { tasks: fallbackTasks(), usedLlm: false, routes: {}, warnings: [warning] };
-		}
-
-		const routes = parseRoutingResponse(responseText(response), config, autoTasks);
-		const warnings = Object.keys(routes).length === autoTasks.length
-			? []
-			: [`LLM sub-agent routing returned ${Object.keys(routes).length}/${autoTasks.length} valid route(s); missing tasks used defaultType fallback.`];
-		for (const warning of warnings) notifyRoutingWarning(ctx, routing, warning);
-		return {
-			usedLlm: true,
-			routes,
-			warnings,
-			tasks: tasks.map((task) => applyRoute(task, config, routes)),
-		};
+		throw routingError(`LLM sub-agent routing failed (${failures.join("; ")}).`, autoTasks, config);
 	} catch (error) {
 		if (signal?.aborted || isAbortError(error)) throw error;
-		const warning = `LLM sub-agent routing failed (${errorMessage(error)}); used defaultType fallback.`;
-		notifyRoutingWarning(ctx, routing, warning);
-		return { tasks: fallbackTasks(), usedLlm: false, routes: {}, warnings: [warning] };
+		const failure = error instanceof SubagentRoutingError
+			? error
+			: routingError(`LLM sub-agent routing failed (${errorMessage(error)}).`, autoTasks, config);
+		notifyRoutingWarning(ctx, routing, failure.message);
+		throw failure;
 	}
 }
 
-function applyRoute(task: AgentTask, config: SubagentConfig, routes: Record<string, string>): AgentTask {
-	if (hasText(task.subagentType)) return task;
-	const fallback = withFallbackType(task, config);
-	return routes[task.id] ? { ...fallback, subagentType: routes[task.id] } : fallback;
-}
-
-function withFallbackType(task: AgentTask, config: SubagentConfig): AgentTask {
-	if (hasText(task.subagentType)) return task;
-	const fallback = defaultSubagentType(config);
-	return fallback ? { ...task, subagentType: fallback } : task;
+function routingError(reason: string, tasks: AgentTask[], config: SubagentConfig): SubagentRoutingError {
+	return new SubagentRoutingError(reason, tasks.map((task) => task.id), Object.keys(config.types).sort());
 }
 
 function buildRoutingPrompt(tasks: AgentTask[], config: SubagentConfig, routing: ResolvedSubagentRoutingConfig): string {
@@ -144,7 +153,7 @@ function buildRoutingPrompt(tasks: AgentTask[], config: SubagentConfig, routing:
 			return `- ${name}: ${profile.description ?? "No description; use only when the task explicitly names this type."}`;
 		}),
 		"",
-		`Default fallback if genuinely ambiguous: ${defaultSubagentType(config) ?? "none"}`,
+		`Preferred type only for genuinely ambiguous tasks: ${defaultSubagentType(config) ?? "none"}`,
 		"",
 		"Tasks:",
 		JSON.stringify(tasks.map((task) => ({
@@ -184,8 +193,6 @@ interface RoutingCandidate {
 	env?: Record<string, string>;
 }
 
-type RoutingResponse = Awaited<ReturnType<typeof completeWithModelRegistry>>;
-
 async function resolveModelRef(ctx: SubagentRoutingContext, modelRef: string): Promise<{
 	model: Model<Api>;
 	apiKey?: string;
@@ -212,7 +219,7 @@ function parseRoutingResponse(raw: string, config: SubagentConfig, tasks: AgentT
 	const parsed = parseJsonObject(raw);
 	const allowedTypes = new Map(Object.keys(config.types).map((name) => [name.toLowerCase(), name]));
 	const taskIds = new Set(tasks.map((task) => task.id));
-	const routes: Record<string, string> = {};
+	const routes: Record<string, string> = Object.create(null);
 	if (Array.isArray(parsed)) collectRouteArray(parsed, taskIds, allowedTypes, routes);
 	else if (typeof parsed === "string" && tasks.length === 1) addRoute(routes, taskIds, allowedTypes, tasks[0]!.id, parsed);
 	else if (isRecord(parsed)) {
@@ -289,7 +296,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isAbortError(error: unknown): boolean {
-	return error instanceof Error && /abort/i.test(error.name || error.message);
+	return error instanceof Error && (/abort/i.test(error.name) || /^aborted$/i.test(error.message));
 }
 
 function errorMessage(error: unknown): string {

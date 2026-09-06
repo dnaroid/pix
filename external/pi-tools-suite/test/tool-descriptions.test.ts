@@ -7,8 +7,25 @@ import {
 	asyncSubagentToolDescriptions,
 } from "../src/tool-descriptions.js";
 import { COMPRESS_RANGE_DESCRIPTION } from "../src/dcp/prompts.js";
+import { buildSubagentCatalogPrompt, SUBAGENT_TYPE_SELECTION_GUIDANCE } from "../src/async-subagents/core/agent-catalog.js";
 
 describe("tool descriptions", () => {
+	test("subagents descriptions and parent catalog agree on parent-first role selection", () => {
+		for (const repoAware of [true, false]) {
+			const tool = asyncSubagentToolDescriptions(repoAware).subagents;
+			expect(tool.description).toContain(SUBAGENT_TYPE_SELECTION_GUIDANCE);
+			expect(tool.promptSnippet).toContain(SUBAGENT_TYPE_SELECTION_GUIDANCE);
+			const text = [tool.description, tool.promptSnippet, ...tool.promptGuidelines].join("\n");
+			expect(text).not.toContain("Usually omit subagentType");
+			expect(text).not.toContain("omit subagentType unless user-named/deterministic");
+			expect(text).toContain("resubmit the whole batch");
+			expect(text).toContain("subagentType: \"browser-qa\"");
+		}
+		const catalog = buildSubagentCatalogPrompt({ types: { review: { description: "Review code." } } });
+		expect(catalog).toContain(SUBAGENT_TYPE_SELECTION_GUIDANCE);
+		expect(catalog).toContain("- review: Review code.");
+	});
+
 	test("apply_patch prompt documents begin-patch and unified diff support", () => {
 		const promptText = CODEX_ALIAS_TOOL_DESCRIPTIONS.applyPatch.description;
 

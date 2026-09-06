@@ -1,4 +1,5 @@
 import { COMPRESS_RANGE_DESCRIPTION } from "./dcp/prompts.js";
+import { SUBAGENT_TYPE_SELECTION_GUIDANCE } from "./async-subagents/core/agent-catalog.js";
 
 export type ToolDescription = {
 	name: string;
@@ -73,7 +74,7 @@ export function asyncSubagentToolDescriptions(options: ToolDescriptionSetOptions
 				"After browser testing, browser-qa must return clickable links for every available screenshot, video, and trace; the parent must preserve those links in its user-facing report.",
 				"Otherwise, manage isolated async sub-agents for large, parallel, context-heavy work.",
 				"Presets from async-subagents config and /subagent-preset choose role model/thinking/args; AGENTS_PRESET or /subagent-preset session <name> overrides the current session; /subagent-preset init creates a sample config.",
-				"Omit subagentType so the router chooses a configured role unless the user or task requires a role or deterministic override.",
+				SUBAGENT_TYPE_SELECTION_GUIDANCE,
 				repoDiscovery
 					? "Use for broad independent tracks, review axes, or hypotheses even though repo_* tools are available."
 					: "Use first for broad codebase discovery split into tracks, review axes, or incident-triage hypotheses when repo_* tools are unavailable.",
@@ -84,7 +85,7 @@ export function asyncSubagentToolDescriptions(options: ToolDescriptionSetOptions
 				"For every browser-based visual QA, UI bug reproduction, or real-browser fix-verification request, immediately spawn subagentType='browser-qa' even for a single track and before inspecting files or checking prerequisites. The browser-qa sub-agent must discover the target and report missing prerequisites; do not preflight, perform, or substitute browser QA in the parent agent. " +
 				"Give browser-qa a concise acceptance brief: the known target URL/app, user-visible flow, expected observable result, and required artifacts. Do not prescribe repository files, searches, commands, server setup, or mock/synthetic substitutes; unknown setup belongs to the QA sub-agent's discovery. " +
 				"For other work, use subagents action='spawn' for multiple independent agents, explicit delegate/parallelize/split work requests, or one large review/debug track that should stay out of the parent context. " +
-				"Usually omit subagentType so the router chooses; set it only for user-named roles, deterministic tests, or another concrete override. Avoid trivial reads/edits and do not call status/wait immediately after spawn just for progress. " +
+				SUBAGENT_TYPE_SELECTION_GUIDANCE + " Avoid trivial reads/edits and do not call status/wait immediately after spawn just for progress. " +
 				(repoDiscovery
 					? "For one semantic code-discovery question, use repo_search; for independent tracks/hypotheses/review axes, delegate even when repo_* tools exist. Read result only after completion when findings are needed."
 					: "For one focused code-discovery question, use direct read/grep. Without repo_* tools, spawn several focused scan/quick agents first for broad multi-track discovery, incident triage, release readiness, risk strategy, or parallel reviews. Read result only after completion when findings are needed."),
@@ -101,7 +102,8 @@ export function asyncSubagentToolDescriptions(options: ToolDescriptionSetOptions
 					? "For incident triage, release readiness, or risk/test strategy with separate hypotheses/review tracks, prefer focused agents over serial parent-context work."
 					: "For incident triage, release readiness, or risk/test strategy with separate hypotheses/review tracks and no repo_* tools, call action='spawn' as the first discovery step; direct read/grep can follow.",
 				"Do not use subagents for exact-string lookups, known-file edits, typo/text replacements, obvious one-file changes, or interactive user input; use the cheapest direct path.",
-				"Spawn multiple focused agents in one action='spawn' call for independent questions; for bounded probes set timeoutSeconds; omit subagentType unless user-named/deterministic, and use oracle sparingly for high-stakes uncertainty/final checks.",
+				"Spawn multiple focused agents in one action='spawn' call for independent questions; set subagentType for clear role matches, timeoutSeconds for bounded probes, and use oracle sparingly for high-stakes uncertainty/final checks.",
+				"If spawn reports a routing error, no agents from that batch were launched. Correct the invalid or unresolved subagentType values using the available catalog and resubmit the whole batch; do not blindly retry omitted types or substitute quick to suppress the error.",
 				"For screenshot/image inspection by blind models, use lookup; subagents only receive imagePaths when a broader delegated track genuinely needs them.",
 				"If asked to start/run/launch/test parallel sub-agents, spawn and stop; do not status/wait just for progress. Use status for recovery, wait only when needed/requested, result only after completion; compact results include artifact links.",
 				"Use action='stop' for stop/cancel/kill requests and action='cleanup' with delete=true only after collecting results.",

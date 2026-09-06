@@ -420,7 +420,7 @@ Check the project conventions before approving changes.
 			cwd,
 			model,
 			modelRegistry: {
-				find: mock((provider: string, modelId: string) => provider === "zai" && modelId === "glm-4.5-air" ? model : undefined),
+				find: mock((provider: string, modelId: string) => provider === "zai" && modelId === "glm-5-turbo" ? model : undefined),
 				getApiKeyAndHeaders: mock(async () => ({ ok: true as const, apiKey: "test-key" })),
 			},
 		};
@@ -539,7 +539,7 @@ Check the project conventions before approving changes.
 		expect(JSON.parse(fs.readFileSync(process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE!, "utf-8")).activePreset).toBe("fast");
 		let result = await pi.tools.get("subagents").execute("call", {
 			action: "spawn",
-			tasks: [{ id: "agent-1", task: "Run with session preset" }],
+			tasks: [{ id: "agent-1", task: "Run with session preset", subagentType: "quick" }],
 			slug: "session-preset-spawn",
 			watchSeconds: 0,
 		}, undefined, undefined, { cwd, sessionManager: { getSessionFile: () => undefined } });
@@ -552,7 +552,7 @@ Check the project conventions before approving changes.
 		expect(notifications[1]).toContain("Runtime session sub-agent preset override cleared");
 		result = await pi.tools.get("subagents").execute("call", {
 			action: "spawn",
-			tasks: [{ id: "agent-1", task: "Run with saved preset" }],
+			tasks: [{ id: "agent-1", task: "Run with saved preset", subagentType: "quick" }],
 			slug: "saved-preset-spawn",
 			watchSeconds: 0,
 		}, undefined, undefined, { cwd, sessionManager: { getSessionFile: () => undefined } });
@@ -613,7 +613,7 @@ setTimeout(() => {}, 1000);
 
 		const result = await pi.tools.get("subagents").execute("call", {
 			action: "spawn",
-			tasks: [{ id: "agent-1", task: "Run through entrypoint" }],
+			tasks: [{ id: "agent-1", task: "Run through entrypoint", subagentType: "quick" }],
 			slug: "entrypoint-spawn",
 			watchSeconds: 1,
 		}, undefined, undefined, { cwd });
@@ -881,6 +881,55 @@ describe.serial("cleanup tool", () => {
 });
 
 describe.serial("spawn tool", () => {
+	for (const toolName of ["subagents", "async_subagents_spawn"]) {
+		test.serial(`${toolName} rejects invalid or unresolved batches before creating run state`, async () => {
+			const { registerSubagentsTool } = await import("../../src/async-subagents/tools/subagents.js");
+			const { registerSpawnTool } = await import("../../src/async-subagents/tools/spawn.js");
+			const { SUBAGENT_TYPE_SELECTION_GUIDANCE } = await import("../../src/async-subagents/core/agent-catalog.js");
+			for (const failure of ["unknown", "unavailable", "disabled", "partial"]) {
+				const cwd = tempDir();
+				isolateSubagentConfig(cwd);
+				if (failure === "disabled") {
+					writeFile(process.env.ASYNC_SUBAGENTS_CONFIG!, JSON.stringify({ types: {}, routing: { enabled: false } }));
+				}
+				const pi = new FakePi();
+				const liveAgents = new Map<string, Map<string, any>>();
+				const complete = mock(async () => ({
+					content: [{ type: "text", text: '{"routes":[{"id":"auto","subagentType":"review"}]}' }],
+					stopReason: "stop",
+				}));
+				const modelRegistry = {
+					find: (provider: string, id: string) => ({ provider, id }),
+					getApiKeyAndHeaders: async () => ({ ok: true }),
+					complete,
+				};
+				const register = toolName === "subagents" ? registerSubagentsTool : registerSpawnTool;
+				register(pi as any, liveAgents, () => {});
+				const tool = pi.tools.get(toolName);
+				expect(JSON.stringify(tool.parameters)).toContain(SUBAGENT_TYPE_SELECTION_GUIDANCE);
+				const result = await tool.execute("call", {
+					action: "spawn",
+					watchSeconds: 0,
+					tasks: [
+						{ id: "explicit", task: "Known role", subagentType: "review" },
+						{ id: "auto", task: "Independent audit", ...(failure === "unknown" ? { subagentType: "rewiev" } : {}) },
+						...(failure === "partial" ? [{ id: "missing", task: "Root cause" }] : []),
+					],
+				}, undefined, undefined, { cwd, ...(failure === "unavailable" ? {} : { modelRegistry }) });
+				expect(result.isError).toBe(true);
+				expect(result.content[0].text).toContain("No agents were launched");
+				expect(result.content[0].text).toContain("resubmit the whole batch");
+				expect(result.details.error).toBe("subagent_routing");
+				expect(result.details.taskIds).toContain("auto");
+				expect(result.details.allowedTypes).toContain("review");
+				expect(liveAgents.size).toBe(0);
+				expect(fs.existsSync(path.join(cwd, ".pi", "subagents"))).toBe(false);
+				expect(tool.renderResult(result, {}, {}).text).toContain("No agents were launched");
+				if (failure !== "partial") expect(complete).not.toHaveBeenCalled();
+			}
+		});
+	}
+
 		test.serial("validates tasks, spawns agents, streams updates, renders results, and cleans live tracking", async () => {
 		const { registerSpawnTool } = await import("../../src/async-subagents/tools/spawn.js");
 		const pi = new FakePi();
@@ -897,12 +946,13 @@ describe.serial("spawn tool", () => {
 
 		const invalid = await tool.execute("call", { tasks: [] }, undefined, undefined, { cwd });
 		expect(invalid).toEqual({ content: [{ type: "text", text: "spawn requires at least one task in the tasks array." }], details: {}, isError: true });
+		writeFile(process.env.ASYNC_SUBAGENTS_CONFIG!, JSON.stringify({ types: {}, routing: { enabled: false } }));
 
 		const blockedRunDir = path.join(cwd, "blocked-run");
 		writeFile(blockedRunDir, "not a directory");
 		let blockedRunError: unknown;
 		try {
-			await tool.execute("call", { tasks: [{ id: "agent-1", task: "will fail" }], runDir: "blocked-run" }, undefined, undefined, { cwd });
+			await tool.execute("call", { tasks: [{ id: "agent-1", task: "will fail", subagentType: "quick" }], runDir: "blocked-run" }, undefined, undefined, { cwd });
 		} catch (error) {
 			blockedRunError = error;
 		}
@@ -922,7 +972,7 @@ setTimeout(() => {}, 1000);
 		process.argv[1] = piScript;
 		const updates: any[] = [];
 		const result = await tool.execute("call", {
-			tasks: [{ id: "agent-1", task: "Run fake agent", scope: "test scope", tools: ["read"] }],
+			tasks: [{ id: "agent-1", task: "Run fake agent", subagentType: "quick", scope: "test scope", tools: ["read"] }],
 			slug: "tool-spawn",
 			thinking: "low",
 			extraArgs: ["--some-flag"],
@@ -930,6 +980,7 @@ setTimeout(() => {}, 1000);
 		}, undefined, (update: any) => updates.push(update), { cwd });
 
 		expect(result.content[0].text).toContain("Scheduled 1 agent(s) in");
+		expect(routerCompleteMock).not.toHaveBeenCalled();
 		expect(result.content[0].text).toContain("Started 1 agent(s) so far; maxConcurrent=5 (project-wide).");
 		expect(result.content[0].text).toContain("All scheduled agents are no longer running or queued.");
 		expect(result.details.mode).toBe("spawn");
@@ -979,7 +1030,7 @@ setTimeout(() => {}, 1000);
 		process.argv[1] = piScript;
 
 		const result = await tool.execute("call", {
-			tasks: [{ id: "agent-1", task: "Return long result" }],
+			tasks: [{ id: "agent-1", task: "Return long result", subagentType: "quick" }],
 			slug: "structured-max-bytes",
 			watchSeconds: 1,
 		}, undefined, undefined, { cwd });
@@ -1075,8 +1126,8 @@ setTimeout(() => {}, 2000);
 		const startedAt = Date.now();
 		const result = await tool.execute("call", {
 			tasks: [
-				{ id: "agent-1", task: "First queued task" },
-				{ id: "agent-2", task: "Second queued task" },
+				{ id: "agent-1", task: "First queued task", subagentType: "quick" },
+				{ id: "agent-2", task: "Second queued task", subagentType: "quick" },
 			],
 			slug: "queued-spawn",
 			watchSeconds: 0,
@@ -1125,8 +1176,8 @@ setInterval(() => {}, 1000);
 
 		const result = await spawnTool.execute("call", {
 			tasks: [
-				{ id: "agent-1", task: "Hold the slot" },
-				{ id: "agent-2", task: "Queued task" },
+				{ id: "agent-1", task: "Hold the slot", subagentType: "quick" },
+				{ id: "agent-2", task: "Queued task", subagentType: "quick" },
 			],
 			slug: "queued-stop",
 			watchSeconds: 0,
@@ -1170,7 +1221,7 @@ setTimeout(() => {}, 1000);
 		process.argv[1] = piScript;
 
 		const result = await tool.execute("call", {
-			tasks: [{ id: "agent-1", task: "Run with active preset" }],
+			tasks: [{ id: "agent-1", task: "Run with active preset", subagentType: "quick" }],
 			slug: "preset-spawn",
 			watchSeconds: 1,
 		}, undefined, undefined, { cwd });
@@ -1224,7 +1275,7 @@ setTimeout(() => {}, 1000);
 		process.argv[1] = piScript;
 
 		const first = await tool.execute("call", {
-			tasks: [{ id: "agent-1", task: "Quick fallback check" }],
+			tasks: [{ id: "agent-1", task: "Quick fallback check", subagentType: "quick" }],
 			slug: "preset-fallback-first",
 			watchSeconds: 1,
 		}, undefined, undefined, { cwd });
@@ -1233,7 +1284,7 @@ setTimeout(() => {}, 1000);
 		expect(fs.readFileSync(path.join(first.details.runDir, "agent-1", "model_fallback_to"), "utf-8")).toBe("fallback/quick");
 
 		const second = await tool.execute("call", {
-			tasks: [{ id: "agent-2", task: "Quick fallback check again" }],
+			tasks: [{ id: "agent-2", task: "Quick fallback check again", subagentType: "quick" }],
 			slug: "preset-fallback-second",
 			watchSeconds: 1,
 		}, undefined, undefined, { cwd });
@@ -1254,7 +1305,7 @@ setTimeout(() => {}, 1000);
 		process.env.AGENTS_PRESET = "missing";
 
 		const result = await tool.execute("call", {
-			tasks: [{ id: "agent-1", task: "Run with active preset" }],
+			tasks: [{ id: "agent-1", task: "Run with active preset", subagentType: "quick" }],
 			slug: "missing-preset-spawn",
 			watchSeconds: 0,
 		}, undefined, undefined, { cwd });
@@ -1294,7 +1345,7 @@ setTimeout(() => {}, 1000);
 		process.argv[1] = piScript;
 
 		const result = await tool.execute("call", {
-			tasks: [{ id: "agent-1", task: "Run fake retrying agent" }],
+			tasks: [{ id: "agent-1", task: "Run fake retrying agent", subagentType: "quick" }],
 			slug: "tool-spawn-retry",
 			watchSeconds: 1,
 		}, undefined, undefined, { cwd });

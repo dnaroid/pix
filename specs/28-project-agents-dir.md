@@ -106,8 +106,9 @@ control).
   `src/async-subagents/agents/*.md` and are parsed by the same
   `readAgentDefinitionsFromDir` + `normalizeSubagentTypeProfile` path as project
   agents.
-- `defaultType` remains explicitly `quick`; this preserves the historic fallback
-  while allowing bundled files to be loaded in deterministic filename order.
+- `defaultType` remains explicitly `quick` while bundled files are loaded in
+  deterministic filename order. Spec 29 supersedes silent spawn-error fallback
+  with parent-first role selection and recoverable routing errors.
 - Runtime-only invariants stay in runtime code. In particular, selecting
   `browser-qa` still injects the package-private browser QA skill even though its
   normal model/thinking/tools/timeout profile lives in `agents/browser-qa.md`.

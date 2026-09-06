@@ -4,6 +4,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
 import { ASYNC_SUBAGENT_TOOL_DESCRIPTIONS } from "../../tool-descriptions.js";
+import { SUBAGENT_TYPE_SELECTION_GUIDANCE } from "../core/agent-catalog.js";
 import type { AgentCompletionHandler, AgentTask, ResolvedAgentTaskConfig, Semaphore, SpawnedAgent } from "../lib.js";
 import {
 	createRunDir,
@@ -19,6 +20,7 @@ import {
 	resolveAgentTaskConfig,
 	resolveRunDir,
 	routeSubagentTasks,
+	SubagentRoutingError,
 	selectSessionModelWithFallback,
 	shouldForceCurrentSubagentModel,
 	spawnAgent,
@@ -172,7 +174,7 @@ const AgentTaskSchema = Type.Object({
 	id: Type.Optional(Type.String({ description: "Short identifier for this agent (used as directory name). If omitted, the spawn action assigns agent-1, agent-2, etc." })),
 	task: Type.String({ description: "Focused task description for the sub-agent" }),
 	scope: Type.Optional(Type.String({ description: "Relevant files/areas for this task" })),
-	subagentType: Type.Optional(Type.String({ description: "Logical sub-agent type/profile from config. Usually omit this so the router selects from the current config; set only for an explicit user-requested role, deterministic tests, or another concrete override." })),
+	subagentType: Type.Optional(Type.String({ description: SUBAGENT_TYPE_SELECTION_GUIDANCE })),
 	model: Type.Optional(Type.String({ description: "Explicit model override for this sub-agent. Prefer subagentType for reusable routing." })),
 	thinking: Type.Optional(Type.String({ description: "Per-agent thinking level override (off, minimal, low, medium, high, xhigh, max)." })),
 	promptAppend: Type.Optional(Type.String({ description: "Extra prompt instructions appended after the generated/type prompt." })),
@@ -209,10 +211,6 @@ export function registerSpawnTool(
 			const parentSession = typeof ctx.sessionManager?.getSessionFile === "function"
 				? ctx.sessionManager.getSessionFile()
 				: undefined;
-			const runDir = params.runDir
-				? resolveRunDir(ctx.cwd, params.runDir)
-				: createRunDir(ctx.cwd, params.slug);
-
 			const normalized = normalizeAgentTasks(params.tasks);
 			if (normalized.error) {
 				return {
@@ -240,7 +238,17 @@ export function registerSpawnTool(
 					isError: true,
 				};
 			}
-			const routed = await routeSubagentTasks(normalized.tasks ?? [], config, ctx as any, signal ?? undefined);
+			let routed: Awaited<ReturnType<typeof routeSubagentTasks>>;
+			try {
+				routed = await routeSubagentTasks(normalized.tasks ?? [], config, ctx as any, signal ?? undefined);
+			} catch (error) {
+				if (!(error instanceof SubagentRoutingError)) throw error;
+				return {
+					content: [{ type: "text", text: `No agents were launched. Correct the roles and resubmit the whole batch.\n${error.message}` }],
+					details: { error: "subagent_routing", taskIds: error.taskIds, allowedTypes: error.allowedTypes },
+					isError: true,
+				};
+			}
 			const timeoutMs = timeoutMsFromSeconds(params.timeoutSeconds);
 			const parentModel = currentModelRef((ctx as { model?: unknown }).model);
 			const resolvedTasks = routed.tasks.map((task) => applySessionModelFallback(
@@ -254,6 +262,10 @@ export function registerSpawnTool(
 				}),
 			));
 			const tasks: AgentTask[] = resolvedTasks.map((resolved) => resolved.task);
+			// Resolve the entire batch before creating run state or launching children.
+			const runDir = params.runDir
+				? resolveRunDir(ctx.cwd, params.runDir)
+				: createRunDir(ctx.cwd, params.slug);
 			const taskPreviews = toTaskPreviews(tasks);
 			const results: { id: string; pid: number; agentDir: string }[] = [];
 			const maxConcurrent = config.maxConcurrent ?? DEFAULT_MAX_CONCURRENT;
@@ -365,7 +377,7 @@ export function registerSpawnTool(
 
 		renderResult(result, opts, theme) {
 			const details = result.details as SubagentRunRenderDetails | undefined;
-			if (!details) {
+			if (!details || ("isError" in result && result.isError === true)) {
 				const fallback = result.content[0] && result.content[0].type === "text" ? result.content[0].text : "(no output)";
 				return new Text(fallback, 0, 0);
 			}

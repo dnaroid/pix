@@ -135,22 +135,22 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
       "autoCompress": {
         "enabled": false,
         "patience": 2,
-        "summarizerModel": ["zai/glm-5.3", "zai/glm-4.5-air"],
+        "summarizerModel": ["zai/glm-5.3", "zai/glm-5-turbo"],
         "timeoutMs": 20000
       }
     }
   },
   "asyncSubagents": {
     "defaultType": "quick",
-    "routing": { "enabled": true, "model": "zai/glm-4.5-air", "fallbackModels": ["openai-codex/gpt-5.6-luna"], "maxTaskChars": 1200, "maxTokens": 512, "maxRetries": 1, "timeoutMs": 12000, "debug": false },
+    "routing": { "enabled": true, "model": "zai/glm-5-turbo", "fallbackModels": ["openai-codex/gpt-5.6-luna"], "maxTaskChars": 1200, "maxTokens": 512, "maxRetries": 1, "timeoutMs": 12000, "debug": false },
     "presets": {
       "cheap": {
         "description": "Use GLM models by role, including GLM-5.3 Flash for multimodal work.",
         "types": {
-          "quick": { "model": "zai/glm-4.5-air", "thinking": "off" },
-          "scan": { "model": "zai/glm-4.5-air", "thinking": "off" },
+          "quick": { "model": "zai/glm-5-turbo", "thinking": "off" },
+          "scan": { "model": "zai/glm-5-turbo", "thinking": "off" },
           "research": { "model": "zai/glm-5-turbo", "thinking": "low" },
-          "docs": { "model": "zai/glm-4.5-air", "thinking": "low" },
+          "docs": { "model": "zai/glm-5-turbo", "thinking": "low" },
           "frontend": {
             "model": "zai/glm-5.3-flash",
             "thinking": "medium"
@@ -167,12 +167,12 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
         "types": {
           "quick": {
             "model": "openai-codex/gpt-5.6-luna",
-            "fallbackModels": ["zai/glm-4.5-air"],
+            "fallbackModels": ["zai/glm-5-turbo"],
             "thinking": "off"
           },
           "scan": {
             "model": "openai-codex/gpt-5.6-luna",
-            "fallbackModels": ["zai/glm-4.5-air"],
+            "fallbackModels": ["zai/glm-5-turbo"],
             "thinking": "off"
           },
           "research": {
@@ -182,7 +182,7 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
           },
           "docs": {
             "model": "openai-codex/gpt-5.6-luna",
-            "fallbackModels": ["zai/glm-4.5-air"],
+            "fallbackModels": ["zai/glm-5-turbo"],
             "thinking": "low"
           },
           "frontend": {
@@ -217,12 +217,12 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
         "types": {
           "quick": {
             "model": "openai-codex/gpt-5.6-luna",
-            "fallbackModels": ["zai/glm-4.5-air"],
+            "fallbackModels": ["zai/glm-5-turbo"],
             "thinking": "low"
           },
           "scan": {
             "model": "antigravity/gemini-3-flash-preview",
-            "fallbackModels": ["openai-codex/gpt-5.6-luna", "zai/glm-4.5-air"],
+            "fallbackModels": ["openai-codex/gpt-5.6-luna", "zai/glm-5-turbo"],
             "thinking": "off"
           },
           "research": {
@@ -232,7 +232,7 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
           },
           "docs": {
             "model": "antigravity/gemini-2.5-flash",
-            "fallbackModels": ["openai-codex/gpt-5.6-luna", "zai/glm-4.5-air"],
+            "fallbackModels": ["openai-codex/gpt-5.6-luna", "zai/glm-5-turbo"],
             "thinking": "medium"
           },
           "frontend": {
@@ -267,13 +267,13 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
       "quick": {
         "description": "Use for tiny cheap tasks: answer a simple question, inspect one known file, or verify one fact. Not for broad repo search.",
         "model": "openai-codex/gpt-5.6-luna",
-        "fallbackModels": ["zai/glm-4.5-air"],
+        "fallbackModels": ["zai/glm-5-turbo"],
         "thinking": "off"
       },
       "scan": {
         "description": "Use for finding files, symbols, text, or inventory across a repo. Return paths/facts; do not judge code quality.",
         "model": "openai-codex/gpt-5.6-luna",
-        "fallbackModels": ["zai/glm-4.5-air"],
+        "fallbackModels": ["zai/glm-5-turbo"],
         "thinking": "off",
         "tools": ["read", "grep"]
       },
@@ -284,7 +284,7 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
         "thinking": "low",
         "tools": ["read", "grep"]
       },
-      "docs": { "description": "Use for documentation work: README/API docs review, docs gaps, changelog, migration notes, examples.", "model": "openai-codex/gpt-5.6-luna", "fallbackModels": ["zai/glm-4.5-air"], "thinking": "low" },
+      "docs": { "description": "Use for documentation work: README/API docs review, docs gaps, changelog, migration notes, examples.", "model": "openai-codex/gpt-5.6-luna", "fallbackModels": ["zai/glm-5-turbo"], "thinking": "low" },
       "frontend": {
         "description": "Use for frontend UI/UX visual work: styling, layout, typography, animation, responsive states, component polish, accessibility. Avoid backend/business logic unless needed for UI behavior.",
         "model": "antigravity/gemini-3-flash-preview",

@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { routeSubagentTasks, type SubagentConfig } from "../../src/async-subagents/lib.js";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { loadSubagentConfig, routeSubagentTasks, type SubagentConfig } from "../../src/async-subagents/lib.js";
 import { decideUltraworkAuto } from "../../src/async-subagents/core/ultrawork-auto.js";
 import { withE2ERetry } from "../e2e-retry.js";
 import { createLiveModelContext, resolveLiveModelRef } from "../support/live-model.js";
@@ -34,6 +37,36 @@ function routingConfig(): SubagentConfig {
 }
 
 describe("async-subagents direct live prompt evals", () => {
+	e2eTest("routes an omitted type to a project-local Markdown specialist alongside built-in roles", async () => {
+		const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "subagent-routing-eval-"));
+		try {
+			const dir = path.join(cwd, ".pi", "agents");
+			fs.mkdirSync(dir, { recursive: true });
+			fs.writeFileSync(path.join(dir, "house-review.md"), `---
+description: Review changes specifically against this project's house rules and repository conventions, not a general security audit.
+thinking: high
+---
+
+Apply the project's house checklist before approving changes.
+`);
+			const cfg = loadSubagentConfig(cwd, {});
+			cfg.routing = routingConfig().routing;
+			const result = await withE2ERetry("project-local fallback router", async () => {
+				const live = await createLiveModelContext(E2E_MODEL);
+				return routeSubagentTasks([
+					{ id: "project-check", task: "Review this project's diff specifically against its house rules and repository conventions." },
+					{ id: "explicit", task: "Keep the parent's explicit choice.", subagentType: "quick" },
+				], cfg, { model: live.model, modelRegistry: live.modelRegistry });
+			});
+			expect(result.usedLlm).toBe(true);
+			expect(result.routes).toEqual({ "project-check": "house-review" });
+			expect(result.tasks.map((task) => task.subagentType)).toEqual(["house-review", "quick"]);
+			expect(result.warnings).toEqual([]);
+		} finally {
+			fs.rmSync(cwd, { recursive: true, force: true });
+		}
+	}, E2E_TIMEOUT_MS);
+
 	e2eTest("routes omitted subagent types from task semantics while preserving explicit overrides", async () => {
 		const result = await withE2ERetry("direct subagent router", async () => {
 			const live = await createLiveModelContext(E2E_MODEL);

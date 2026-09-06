@@ -2,6 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
 import { asyncSubagentToolDescriptions } from "../../tool-descriptions.js";
+import { SUBAGENT_TYPE_SELECTION_GUIDANCE } from "../core/agent-catalog.js";
 import { hasIndexedProjectRoot } from "../../lib/project.js";
 import type { AgentCompletionHandler } from "../lib.js";
 import { DEFAULT_SPAWN_WATCH_SECONDS, INLINE_RENDERING } from "../constants.js";
@@ -19,7 +20,7 @@ const AgentTaskSchema = Type.Object({
 	id: Type.Optional(Type.String({ description: "Short identifier for this agent (used as directory name). If omitted, assigns agent-1, agent-2, etc." })),
 	task: Type.String({ description: "Focused task description for the sub-agent" }),
 	scope: Type.Optional(Type.String({ description: "Relevant files/areas for this task" })),
-	subagentType: Type.Optional(Type.String({ description: "Logical sub-agent type/profile from config. Usually omit this so the router selects from the current config; set only for an explicit user-requested role, deterministic tests, or another concrete override." })),
+	subagentType: Type.Optional(Type.String({ description: SUBAGENT_TYPE_SELECTION_GUIDANCE })),
 	model: Type.Optional(Type.String({ description: "Explicit model override for this sub-agent. Prefer subagentType for reusable routing." })),
 	thinking: Type.Optional(Type.String({ description: "Per-agent thinking level override (off, minimal, low, medium, high, xhigh, max)." })),
 	promptAppend: Type.Optional(Type.String({ description: "Extra prompt instructions appended after the generated/type prompt." })),
@@ -141,7 +142,7 @@ export function registerSubagentsTool(
 
 		renderResult(result, _opts, theme) {
 			const details = result.details as SubagentRunRenderDetails | undefined;
-			if (!details) return new Text(firstText(result), 0, 0);
+			if (!details || ("isError" in result && result.isError === true)) return new Text(firstText(result), 0, 0);
 			if (details.mode === "spawn" && Array.isArray(details.agents) && theme) {
 				return renderSubagentSpawnPrompts(details, _opts, theme);
 			}

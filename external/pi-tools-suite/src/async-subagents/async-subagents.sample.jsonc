@@ -8,6 +8,7 @@
   // - GLM-5.3 Flash: frontend/UI/UX, visual/product polish, and multimodal-heavy analysis.
   // - GPT/Claude: review/audit, deep reasoning, tests, and implementation/refactoring.
   // Override exact model IDs here if your pi provider uses different names.
+  // Router preference for genuinely ambiguous tasks, not a routing-error fallback.
   "defaultType": "quick",
 
   // Maximum concurrent sub-agent processes for this project/session.
@@ -65,14 +66,15 @@
   //   "antigravity/*": { "model": "zai/glm-5.3", "fallbackModels": ["openai-codex/gpt-5.6-sol"] }
   // }
 
-  // Role auto-selection when subagentType is omitted is handled by a small LLM
-  // router request. The router receives each task plus the configured type
-  // descriptions, then returns one allowed subagentType per task. Explicit
-  // task subagentType still wins. If the router model is unavailable or returns
-  // invalid JSON, async-subagents falls back to defaultType.
+  // The parent normally sets subagentType from the effective role catalog.
+  // Only omitted types go to the LLM router (uncertainty or an explicit request
+  // for automatic routing). Explicit valid roles bypass the router entirely.
+  // Unknown roles or failed/incomplete routing reject the entire spawn batch
+  // before any agents start; the parent must correct the roles and resubmit.
+  // With enabled=false, every task must supply a valid explicit subagentType.
   "routing": {
     "enabled": true,
-    "model": "zai/glm-4.5-air",
+    "model": "zai/glm-5-turbo",
     // Ordered router model fallbacks tried when the primary routing model is
     // unavailable or fails. The current parent model is always tried last.
     "fallbackModels": ["openai-codex/gpt-5.6-luna"],
@@ -115,10 +117,10 @@
     "cheap": {
       "description": "Use GLM models by role, including GLM-5.3 Flash for multimodal work.",
       "types": {
-        "quick": { "model": "zai/glm-4.5-air", "thinking": "off" },
-        "scan": { "model": "zai/glm-4.5-air", "thinking": "off" },
+        "quick": { "model": "zai/glm-5-turbo", "thinking": "off" },
+        "scan": { "model": "zai/glm-5-turbo", "thinking": "off" },
         "research": { "model": "zai/glm-5-turbo", "thinking": "low" },
-        "docs": { "model": "zai/glm-4.5-air", "thinking": "low" },
+        "docs": { "model": "zai/glm-5-turbo", "thinking": "low" },
         "frontend": { "model": "zai/glm-5.3-flash", "thinking": "medium" },
         "browser-qa": { "model": "zai/glm-5.3-flash", "fallbackModels": ["openai-codex/gpt-5.6-luna"], "thinking": "low" },
         "tests": { "model": "zai/glm-5-turbo", "thinking": "medium" },
@@ -131,10 +133,10 @@
     "gpt": {
       "description": "Use the GPT-5.6 family by role: luna for fast tasks, terra for balanced work, and sol for heavy reasoning; fallback cross-provider on quota.",
       "types": {
-        "quick": { "model": "openai-codex/gpt-5.6-luna", "fallbackModels": ["zai/glm-4.5-air"], "thinking": "off" },
-        "scan": { "model": "openai-codex/gpt-5.6-luna", "fallbackModels": ["zai/glm-4.5-air"], "thinking": "off" },
+        "quick": { "model": "openai-codex/gpt-5.6-luna", "fallbackModels": ["zai/glm-5-turbo"], "thinking": "off" },
+        "scan": { "model": "openai-codex/gpt-5.6-luna", "fallbackModels": ["zai/glm-5-turbo"], "thinking": "off" },
         "research": { "model": "openai-codex/gpt-5.6-terra", "fallbackModels": ["zai/glm-5-turbo"], "thinking": "low" },
-        "docs": { "model": "openai-codex/gpt-5.6-luna", "fallbackModels": ["zai/glm-4.5-air"], "thinking": "low" },
+        "docs": { "model": "openai-codex/gpt-5.6-luna", "fallbackModels": ["zai/glm-5-turbo"], "thinking": "low" },
         "frontend": { "model": "openai-codex/gpt-5.6-terra", "fallbackModels": ["antigravity/gemini-3-flash-preview", "zai/glm-5.3"], "thinking": "medium" },
         "browser-qa": { "model": "zai/glm-5.3-flash", "fallbackModels": ["openai-codex/gpt-5.6-luna"], "thinking": "low" },
         "tests": { "model": "openai-codex/gpt-5.6-terra", "fallbackModels": ["zai/glm-5-turbo"], "thinking": "medium" },
@@ -147,10 +149,10 @@
     "deep": {
       "description": "Use only enabled strong models, mixing GPT, Claude, and Gemini by role.",
       "types": {
-        "quick": { "model": "openai-codex/gpt-5.6-luna", "fallbackModels": ["zai/glm-4.5-air"], "thinking": "low" },
-        "scan": { "model": "antigravity/gemini-3-flash-preview", "fallbackModels": ["openai-codex/gpt-5.6-luna", "zai/glm-4.5-air"], "thinking": "off" },
+        "quick": { "model": "openai-codex/gpt-5.6-luna", "fallbackModels": ["zai/glm-5-turbo"], "thinking": "low" },
+        "scan": { "model": "antigravity/gemini-3-flash-preview", "fallbackModels": ["openai-codex/gpt-5.6-luna", "zai/glm-5-turbo"], "thinking": "off" },
         "research": { "model": "antigravity/gemini-3.1-pro-preview", "fallbackModels": ["openai-codex/gpt-5.6-luna", "zai/glm-5-turbo"], "thinking": "medium" },
-        "docs": { "model": "antigravity/gemini-2.5-flash", "fallbackModels": ["openai-codex/gpt-5.6-luna", "zai/glm-4.5-air"], "thinking": "medium" },
+        "docs": { "model": "antigravity/gemini-2.5-flash", "fallbackModels": ["openai-codex/gpt-5.6-luna", "zai/glm-5-turbo"], "thinking": "medium" },
         "frontend": { "model": "antigravity/gemini-3.1-pro-preview-customtools", "fallbackModels": ["openai-codex/gpt-5.6-luna", "zai/glm-5.3"], "thinking": "low" },
         "browser-qa": { "model": "zai/glm-5.3-flash", "fallbackModels": ["openai-codex/gpt-5.6-luna"], "thinking": "low" },
         "tests": { "model": "antigravity/antigravity-claude-sonnet-4-6", "fallbackModels": ["openai-codex/gpt-5.6-luna", "zai/glm-5-turbo"], "thinking": "high" },
@@ -172,13 +174,13 @@
   "types": {
     "quick": {
       "model": "openai-codex/gpt-5.6-luna",
-      "fallbackModels": ["zai/glm-4.5-air"],
+      "fallbackModels": ["zai/glm-5-turbo"],
       "thinking": "off"
     },
 
     "scan": {
       "model": "openai-codex/gpt-5.6-luna",
-      "fallbackModels": ["zai/glm-4.5-air"],
+      "fallbackModels": ["zai/glm-5-turbo"],
       "thinking": "off",
       "tools": ["read", "grep"]
     },
@@ -192,7 +194,7 @@
 
     "docs": {
       "model": "openai-codex/gpt-5.6-luna",
-      "fallbackModels": ["zai/glm-4.5-air"],
+      "fallbackModels": ["zai/glm-5-turbo"],
       "thinking": "low"
     },
 

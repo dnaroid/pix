@@ -35,7 +35,7 @@ export {
 	selectSubagentType,
 	shouldForceCurrentSubagentModel,
 } from "./core/config.js";
-export { routeSubagentTasks } from "./core/routing.js";
+export { routeSubagentTasks, SubagentRoutingError } from "./core/routing.js";
 export type { RoutedSubagentTasks, SubagentRoutingContext } from "./core/routing.js";
 export { agentDefinitionFiles, agentNameFromFilename, parseAgentMarkdown, projectAgentDefinitionFiles, readAgentDefinitionsFromDir, readProjectAgentDefinitions } from "./core/agents-dir.js";
 export type { AgentDefinition, ProjectAgentDefinition } from "./core/agents-dir.js";

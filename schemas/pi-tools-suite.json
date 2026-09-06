@@ -478,14 +478,14 @@
       "properties": {
         "defaultType": {
           "type": "string",
-          "description": "Default sub-agent type when not specified."
+          "description": "Preferred role for genuinely ambiguous router tasks and legacy resolver default. Not used as a spawn fallback for missing/invalid routes."
         },
         "routing": {
           "type": "object",
           "properties": {
             "enabled": {
               "type": "boolean",
-              "description": "Enable LLM-based automatic role routing."
+              "description": "Enable fallback LLM selection for omitted subagentType values. Explicit valid types bypass the router; when disabled, every spawn task must specify a valid type."
             },
             "model": {
               "type": "string",
@@ -524,7 +524,7 @@
               "description": "Show routing debug warnings."
             }
           },
-          "description": "LLM-based role routing configuration."
+          "description": "Fallback role routing for omitted types. Unknown explicit types or failed/incomplete routing reject the entire batch before any agents launch."
         },
         "vision": {
           "type": "object",

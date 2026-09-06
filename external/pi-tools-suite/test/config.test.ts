@@ -149,12 +149,12 @@ describe("pi-tools-suite config", () => {
 		};
 		expect(parsed.$schema).toBe(PI_TOOLS_SUITE_SCHEMA_URL);
 		expect(parsed.asyncSubagents?.routing).toMatchObject({
-			model: "zai/glm-4.5-air",
+			model: "zai/glm-5-turbo",
 			fallbackModels: ["openai-codex/gpt-5.6-luna"],
 		});
 		expect(parsed.asyncSubagents?.types?.quick).toMatchObject({
 			model: "openai-codex/gpt-5.6-luna",
-			fallbackModels: ["zai/glm-4.5-air"],
+			fallbackModels: ["zai/glm-5-turbo"],
 		});
 		expect(parsed.asyncSubagents?.types?.research).toMatchObject({
 			model: "openai-codex/gpt-5.6-terra",

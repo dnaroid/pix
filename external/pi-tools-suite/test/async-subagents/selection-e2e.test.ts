@@ -245,15 +245,33 @@ Verify in a real browser at http://127.0.0.1:4173/cart that clicking the Add to 
 		});
 	}, E2E_TIMEOUT_MS);
 
-	e2eTest("omits optional routing overrides for a normal delegated task and does not poll", async () => {
+	e2eTest("parent explicitly selects the obvious review role without model overrides or polling", async () => {
 		await withFixtureProject(async (projectDir) => {
 			const prompt = `
 Delegate one independent payment-flow review now using the agent id payment-check, then stop immediately after the spawn call.
-Let the configured router choose the helper profile. Do not inspect files in the parent, do not wait for results, and do not check progress.`;
+Do not inspect files in the parent, do not wait for results, and do not check progress.`;
 
-			const result = await runPiSubagentSelectionE2E(projectDir, prompt, "default router omission");
+			const result = await runPiSubagentSelectionE2E(projectDir, prompt, "parent-first review selection");
 			const subagentCalls = result.events.filter((event) => event.type === "tool_call" && event.toolName === "subagents");
 			expect(subagentCalls).toHaveLength(1);
+			const input = firstSpawnInput(result.events);
+			expect(input.tasks).toHaveLength(1);
+			const task = input.tasks![0]!;
+			expect(task.id).toBe("payment-check");
+			expect(task.subagentType).toBe("review");
+			expect(task.model).toBeUndefined();
+			expect(task.thinking).toBeUndefined();
+		});
+	}, E2E_TIMEOUT_MS);
+
+	e2eTest("omits the role when the user explicitly requests the automatic router", async () => {
+		await withFixtureProject(async (projectDir) => {
+			const prompt = `
+Delegate one independent payment-flow review now using the agent id payment-check, then stop immediately after the spawn call.
+Let the configured router choose the helper profile: leave subagentType unset. Do not inspect files in the parent, do not wait for results, and do not check progress.`;
+
+			const result = await runPiSubagentSelectionE2E(projectDir, prompt, "requested automatic routing");
+			expect(result.events.filter((event) => event.type === "tool_call" && event.toolName === "subagents")).toHaveLength(1);
 			const input = firstSpawnInput(result.events);
 			expect(input.tasks).toHaveLength(1);
 			const task = input.tasks![0]!;

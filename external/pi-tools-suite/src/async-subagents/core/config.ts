@@ -93,9 +93,10 @@ export interface SubagentPresetTypeOverride {
 }
 
 export interface SubagentConfig {
+	/** Ambiguous-task router hint and legacy resolver default; never a spawn error fallback. */
 	defaultType?: string;
 	types: Record<string, SubagentTypeConfig>;
-	/** LLM-based role routing for tasks that omit subagentType. */
+	/** Fallback LLM role selection for omitted types; explicit valid types bypass it. */
 	routing?: SubagentRoutingConfig;
 	/** Vision capability overrides for parent-model guidance. */
 	vision?: SubagentVisionConfig;
@@ -167,7 +168,7 @@ export const DEFAULT_MAX_CONCURRENT = 5;
 /** Default lightweight LLM router used when subagentType is omitted. */
 export const DEFAULT_ROUTING_CONFIG: ResolvedSubagentRoutingConfig = {
 	enabled: true,
-	model: "zai/glm-4.5-air",
+	model: "zai/glm-5-turbo",
 	fallbackModels: ["openai-codex/gpt-5.6-luna"],
 	maxTaskChars: 1200,
 	maxTokens: 512,

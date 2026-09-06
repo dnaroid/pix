@@ -188,7 +188,7 @@ const RetryConfig = Type.Object(
 
 const SubagentRoutingConfig = Type.Object(
 	{
-		enabled: Type.Optional(Type.Boolean({ description: "Enable LLM-based automatic role routing." })),
+		enabled: Type.Optional(Type.Boolean({ description: "Enable fallback LLM selection for omitted subagentType values. Explicit valid types bypass the router; when disabled, every spawn task must specify a valid type." })),
 		model: Type.Optional(Type.String({ description: "Router model in provider/model form." })),
 		fallbackModels: Type.Optional(Type.Array(Type.String(), { uniqueItems: true, description: "Ordered router model fallbacks tried when the primary routing model is unavailable or fails. The current parent model is always tried last." })),
 		maxTaskChars: Type.Optional(Type.Number({ description: "Max task/scope characters sent to router.", minimum: 100 })),
@@ -197,7 +197,7 @@ const SubagentRoutingConfig = Type.Object(
 		timeoutMs: Type.Optional(Type.Number({ description: "Router request timeout in ms.", minimum: 1000 })),
 		debug: Type.Optional(Type.Boolean({ description: "Show routing debug warnings." })),
 	},
-	{ description: "LLM-based role routing configuration." },
+	{ description: "Fallback role routing for omitted types. Unknown explicit types or failed/incomplete routing reject the entire batch before any agents launch." },
 );
 
 const SubagentVisionConfig = Type.Object(
@@ -251,7 +251,7 @@ const SubagentTypeConfig = Type.Object(
 
 const AsyncSubagentsConfig = Type.Object(
 	{
-		defaultType: Type.Optional(Type.String({ description: "Default sub-agent type when not specified." })),
+		defaultType: Type.Optional(Type.String({ description: "Preferred role for genuinely ambiguous router tasks and legacy resolver default. Not used as a spawn fallback for missing/invalid routes." })),
 		routing: Type.Optional(SubagentRoutingConfig),
 		vision: Type.Optional(SubagentVisionConfig),
 		presets: Type.Optional(Type.Record(Type.String(), SubagentPreset, { description: "Named spawn presets." })),

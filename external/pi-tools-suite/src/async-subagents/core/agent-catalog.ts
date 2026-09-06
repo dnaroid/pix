@@ -1,5 +1,7 @@
 import type { SubagentConfig } from "./config.js";
 
+export const SUBAGENT_TYPE_SELECTION_GUIDANCE = "Choose and set subagentType from the available catalog when a role clearly matches, preferring a matching project-local specialist. Preserve a user-requested role. Omit subagentType only when unsure or when the user explicitly requests automatic routing; the LLM router handles omissions only. Model/thinking overrides are not substitutes for choosing a role.";
+
 const MAX_DESCRIPTION_CHARS = 500;
 
 /**
@@ -14,7 +16,8 @@ export function buildSubagentCatalogPrompt(config: SubagentConfig): string | und
 	return [
 		'<available_subagent_types>',
 		"Effective sub-agent types available to the `subagents` tool for this project.",
-		"These names are valid explicit `subagentType` values. Project-local `.pi/agents/*.md` roles are included when enabled by the current config; omitting `subagentType` still lets the configured router choose.",
+		"These names are valid explicit `subagentType` values. Project-local `.pi/agents/*.md` roles are included when enabled by the current config.",
+		SUBAGENT_TYPE_SELECTION_GUIDANCE,
 		...entries.map(([name, profile]) => `- ${escapePromptText(name)}: ${catalogDescription(profile.description)}`),
 		'</available_subagent_types>',
 	].join("\n");

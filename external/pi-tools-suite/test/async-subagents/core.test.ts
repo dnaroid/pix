@@ -462,14 +462,14 @@ describe.serial("subagent type config", () => {
 		const privateSkill = getBrowserQaSkillPath();
 
 		expect(config.routing).toMatchObject({
-			model: "zai/glm-4.5-air",
+			model: "zai/glm-5-turbo",
 			fallbackModels: ["openai-codex/gpt-5.6-luna"],
 		});
 		for (const [subagentType, model, fallbackModels] of [
-			["quick", "openai-codex/gpt-5.6-luna", ["zai/glm-4.5-air"]],
-			["scan", "openai-codex/gpt-5.6-luna", ["zai/glm-4.5-air"]],
+			["quick", "openai-codex/gpt-5.6-luna", ["zai/glm-5-turbo"]],
+			["scan", "openai-codex/gpt-5.6-luna", ["zai/glm-5-turbo"]],
 			["research", "openai-codex/gpt-5.6-terra", ["zai/glm-5-turbo"]],
-			["docs", "openai-codex/gpt-5.6-luna", ["zai/glm-4.5-air"]],
+			["docs", "openai-codex/gpt-5.6-luna", ["zai/glm-5-turbo"]],
 			["tests", "openai-codex/gpt-5.6-terra", ["zai/glm-5-turbo"]],
 		] as const) {
 			const role = resolveAgentTaskConfig({ id: subagentType, task: subagentType, subagentType }, config);
@@ -576,7 +576,7 @@ describe.serial("subagent type config", () => {
 			preset: activePreset,
 		});
 		expect(resolved.task.model).toBe("zai/fast");
-		expect(resolved.fallbackModels).toEqual(["zai/backup", "openai/backup", "zai/glm-4.5-air"]);
+		expect(resolved.fallbackModels).toEqual(["zai/backup", "openai/backup", "zai/glm-5-turbo"]);
 		expect(resolved.task.thinking).toBe("off");
 		expect(resolved.extraArgs).toEqual(["--temperature", "0"]);
 
