@@ -160,6 +160,8 @@
     readData: () => Promise<string>;
   };
 
+  const SESSION_PREWARM_LIMIT = 2;
+
   let client = $state<AcpClient | null>(null);
   let status = $state<ConnectionStatus>("starting");
   let workspace = $state("");
@@ -203,7 +205,9 @@
   let transcriptPane = $state<HTMLDivElement | null>(null);
   let localMessageId = 0;
   let reconnectPromise: Promise<void> | null = null;
+  let sessionRefreshRequest: { client: AcpClient; workspace: string; promise: Promise<void> } | null = null;
   let sessionRefreshGeneration = 0;
+  let sessionPrewarmGeneration = 0;
   let autocompleteSettingsGeneration = 0;
   let attachmentSequence = 0;
   let previewSequence = 0;
@@ -333,6 +337,9 @@
     return () => {
       disposed = true;
       unlistenDragDrop?.();
+      if (sessionUpdateFrame) cancelAnimationFrame(sessionUpdateFrame);
+      if (transcriptScrollFrame) cancelAnimationFrame(transcriptScrollFrame);
+      pendingSessionUpdates = [];
       pendingElicitation?.resolve({ action: "cancel" });
       pendingElicitation = null;
       cancelQuestionImageOperation();
@@ -363,6 +370,8 @@
         runtimeReadySessionIds.clear();
         runtimeLoadsBySessionId.clear();
         configOptionsBySessionId.clear();
+        transcriptBySessionId.clear();
+        sessionPrewarmGeneration += 1;
         todoSnapshots = new Map();
         subagentSnapshots = new Map();
         slashCommandsBySession = new Map();
@@ -416,6 +425,8 @@
     runtimeReadySessionIds.clear();
     runtimeLoadsBySessionId.clear();
     configOptionsBySessionId.clear();
+    transcriptBySessionId.clear();
+    sessionPrewarmGeneration += 1;
     todoSnapshots = new Map();
     subagentSnapshots = new Map();
     slashCommandsBySession = new Map();
@@ -579,6 +590,30 @@
     if (sessionId === activeSessionId) activeSessionRuntimeReady = false;
   }
 
+  function scheduleSessionPrewarm(
+    requestClient: AcpClient,
+    requestWorkspace: string,
+    sessionIds: readonly string[],
+  ): void {
+    const generation = ++sessionPrewarmGeneration;
+    setTimeout(() => {
+      void (async () => {
+        let warmed = 0;
+        for (const sessionId of sessionIds) {
+          if (
+            generation !== sessionPrewarmGeneration
+            || requestClient !== client
+            || requestWorkspace !== workspace
+            || warmed >= SESSION_PREWARM_LIMIT
+          ) return;
+          if (runtimeReadySessionIds.has(sessionId) || runtimeLoadsBySessionId.has(sessionId)) continue;
+          await ensureSessionRuntime(requestClient, sessionId, requestWorkspace);
+          if (runtimeReadySessionIds.has(sessionId)) warmed += 1;
+        }
+      })();
+    }, 0);
+  }
+
   function beginSessionHistoryLoad(): number {
     sessionHistoryLoading = true;
     return ++sessionHistoryGeneration;
@@ -623,7 +658,7 @@
         : { items: [...loadedTranscript.items, ...currentItems] };
       transcript = nextTranscript;
       transcriptBySessionId.set(sessionId, nextTranscript);
-      void scrollToLatest();
+      scheduleScrollToLatest();
     } catch (error) {
       if (sessionHistoryIsCurrent(requestClient, sessionId, requestWorkspace, generation)) reportError(error);
     } finally {
@@ -712,6 +747,7 @@
       runtimeReadySessionIds.clear();
       runtimeLoadsBySessionId.clear();
       configOptionsBySessionId.clear();
+      sessionPrewarmGeneration += 1;
       activeSessionRuntimeReady = false;
       configOptions = [];
       rememberProject(selected);
@@ -877,16 +913,26 @@
     if (!client || !workspace) return;
     const requestClient = client;
     const requestWorkspace = workspace;
-    const generation = ++sessionRefreshGeneration;
-    try {
-      const response = await requestClient.listSessions(requestWorkspace);
-      if (generation !== sessionRefreshGeneration || client !== requestClient || workspace !== requestWorkspace) return;
-      sessions = response.sessions;
-      restoredSessionTabs = restoredTabSessionIds(response);
-    } catch (error) {
-      if (generation !== sessionRefreshGeneration || client !== requestClient || workspace !== requestWorkspace) return;
-      reportError(error);
+    const existing = sessionRefreshRequest;
+    if (existing?.client === requestClient && existing.workspace === requestWorkspace) {
+      return existing.promise;
     }
+    const generation = ++sessionRefreshGeneration;
+    const promise = requestClient.listSessions(requestWorkspace)
+      .then((response) => {
+        if (generation !== sessionRefreshGeneration || client !== requestClient || workspace !== requestWorkspace) return;
+        sessions = response.sessions;
+        restoredSessionTabs = restoredTabSessionIds(response);
+      })
+      .catch((error) => {
+        if (generation !== sessionRefreshGeneration || client !== requestClient || workspace !== requestWorkspace) return;
+        reportError(error);
+      })
+      .finally(() => {
+        if (sessionRefreshRequest?.promise === promise) sessionRefreshRequest = null;
+      });
+    sessionRefreshRequest = { client: requestClient, workspace: requestWorkspace, promise };
+    return promise;
   }
 
   async function openWorkspaceSession(): Promise<void> {
@@ -917,7 +963,16 @@
         void hydrateSessionHistory(requestClient, sessionId, requestWorkspace, historyGeneration);
         showSessionTab(sessionId);
         rememberActiveSession(requestWorkspace, sessionId);
-        void ensureSessionRuntime(requestClient, sessionId, requestWorkspace);
+        const runtime = ensureSessionRuntime(requestClient, sessionId, requestWorkspace);
+        void runtime.then(() => {
+          if (runtimeReadySessionIds.has(sessionId)) {
+            scheduleSessionPrewarm(
+              requestClient,
+              requestWorkspace,
+              restoredSessionTabs ?? response.sessions.map((session) => session.sessionId),
+            );
+          }
+        });
         return;
       }
 
@@ -1053,10 +1108,20 @@
     }
     showSessionTab(sessionId);
     rememberActiveSession(requestWorkspace, sessionId);
-    void ensureSessionRuntime(requestClient, sessionId, requestWorkspace);
+    const runtime = ensureSessionRuntime(requestClient, sessionId, requestWorkspace);
+    void runtime.then(() => {
+      if (runtimeReadySessionIds.has(sessionId)) {
+        scheduleSessionPrewarm(
+          requestClient,
+          requestWorkspace,
+          tabSessions.map((session) => session.sessionId),
+        );
+      }
+    });
   }
 
   async function closeWorkspaceSessions(): Promise<void> {
+    sessionPrewarmGeneration += 1;
     const sessionIds = [...new Set([
       ...tabSessions.map((session) => session.sessionId),
       ...(activeSessionId ? [activeSessionId] : []),
@@ -1085,6 +1150,7 @@
   async function closeSessionTab(event: MouseEvent, sessionId: string): Promise<void> {
     event.stopPropagation();
     closeSessionSelector();
+    sessionPrewarmGeneration += 1;
     if (sessionId !== activeSessionId) {
       if (promptRunning || operationRunning) return;
       operationRunning = true;
@@ -1537,9 +1603,9 @@
   }
 
   async function activateAttachment(attachment: Attachment): Promise<void> {
-    if (attachment.path) {
+    if (attachment.path && !registeredAttachmentPaths.has(attachment.path)) {
       try {
-        await invoke<AttachmentFile[]>("inspect_attachments", { paths: [attachment.path] });
+        await prepareTranscriptAttachment(attachment);
       } catch (error) {
         reportError(error);
         return;
@@ -1685,13 +1751,20 @@
   }
 
   async function fileBase64(file: File): Promise<string> {
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    let binary = "";
-    const chunkSize = 0x8000;
-    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-      binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
-    }
-    return btoa(binary);
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(reader.error ?? new Error(`Failed to read ${file.name}.`));
+      reader.onload = () => {
+        const value = typeof reader.result === "string" ? reader.result : "";
+        const separator = value.indexOf(",");
+        if (separator < 0) {
+          reject(new Error(`Failed to encode ${file.name}.`));
+          return;
+        }
+        resolve(value.slice(separator + 1));
+      };
+      reader.readAsDataURL(file);
+    });
   }
 
   function decodedQuestionImageBytes(value: string): number | null {

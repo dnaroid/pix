@@ -94,7 +94,7 @@
       {#each displayItems as item (item.id)}
         {#if item.type === "message"}
           {#if item.role === "thought"}
-            <details class="group mb-5 w-full min-w-0 text-xs text-muted-foreground">
+            <details class="transcript-entry group mb-5 w-full min-w-0 text-xs text-muted-foreground">
               <summary class="grid min-h-5 cursor-pointer list-none grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-1.5 text-muted-foreground transition-colors select-none hover:text-foreground group-open:mb-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
                 <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
                 <Brain class="h-3 w-3 shrink-0 text-primary" aria-hidden="true" />
@@ -105,14 +105,14 @@
               </div>
             </details>
           {:else if item.role === "user"}
-            <div class="mb-6">
+            <div class="transcript-entry mb-6">
               <article class="w-full rounded-xl border border-primary/45 bg-primary/15 px-3.5 pt-3 pb-2 text-card-foreground shadow-xs">
                 <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} onPrepare={onPrepareAttachment} />
                 {#if item.text}<MarkdownText text={item.text} dense {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />{/if}
               </article>
             </div>
           {:else}
-            <article class="mb-6 w-full min-w-0 text-foreground">
+            <article class="transcript-entry mb-6 w-full min-w-0 text-foreground">
               <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} onPrepare={onPrepareAttachment} />
               {#if item.text}<MarkdownText text={item.text} dense {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />{/if}
             </article>
@@ -120,7 +120,7 @@
         {:else}
           {@const groupAttention = toolGroupAttention(item.tools)}
           <details class={[
-            "group mb-4 w-full min-w-0 overflow-hidden bg-transparent text-muted-foreground",
+            "transcript-entry group mb-4 w-full min-w-0 overflow-hidden bg-transparent text-muted-foreground",
             item.status === "failed" && "text-destructive",
           ]} ontoggle={(event) => handleToolGroupToggle(event, item.tools)}>
             <summary class="grid min-h-5 cursor-pointer list-none grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-1.5 overflow-hidden transition-colors select-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
@@ -198,6 +198,11 @@
       black calc(100% - 48px),
       transparent 100%
     );
+  }
+
+  .transcript-entry {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 120px;
   }
 
   .tool-name[data-tool-tone="accent"] { color: var(--tool-accent); }

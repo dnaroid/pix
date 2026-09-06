@@ -181,6 +181,27 @@ describe("transcript reducer", () => {
     expect(state.items[1]).toMatchObject({ type: "tool", toolCallId: "t1" });
   });
 
+  it("applies a live batch to an existing transcript without losing tool UI state", () => {
+    let state = applySessionUpdates(emptyTranscript, [
+      { sessionUpdate: "agent_message_chunk", messageId: "a1", content: { type: "text", text: "before" } },
+      { sessionUpdate: "tool_call", toolCallId: "t1", title: "Read", status: "in_progress" },
+    ]);
+    state = markDeferredToolResults(state, ["t1"]);
+
+    state = applySessionUpdates(state, [
+      { sessionUpdate: "agent_message_chunk", messageId: "a1", content: { type: "text", text: " after" } },
+      { sessionUpdate: "tool_call_update", toolCallId: "t1", status: "completed" },
+    ]);
+
+    expect(state.items[0]).toMatchObject({ type: "message", messageId: "a1", text: "before after" });
+    expect(state.items[1]).toMatchObject({
+      type: "tool",
+      toolCallId: "t1",
+      status: "completed",
+      deferredResult: true,
+    });
+  });
+
   it("hydrates deferred tool results only when the full update arrives", () => {
     let state = applySessionUpdates(emptyTranscript, [
       {

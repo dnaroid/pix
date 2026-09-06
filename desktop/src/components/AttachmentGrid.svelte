@@ -57,6 +57,7 @@
 
     const observe = (): void => {
       observer?.disconnect();
+      if (current.kind === "file") return;
       if (previewReady(current) || failedPreviews.has(current.id)) return;
       if (typeof IntersectionObserver === "undefined") {
         void prepare();
