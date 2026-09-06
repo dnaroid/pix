@@ -227,8 +227,7 @@ impl AttachmentPathState {
         let canonical = paths
             .iter()
             .map(|path| {
-                fs::canonicalize(path)
-                    .map_err(|error| format!("failed to resolve {path}: {error}"))
+                fs::canonicalize(path).map_err(|error| format!("failed to resolve {path}: {error}"))
             })
             .collect::<Result<Vec<_>, _>>()?;
         {
@@ -469,10 +468,7 @@ async fn resolve_project_media(
 }
 
 #[tauri::command]
-async fn resolve_home_media(
-    app: AppHandle,
-    path: String,
-) -> Result<AttachmentFile, String> {
+async fn resolve_home_media(app: AppHandle, path: String) -> Result<AttachmentFile, String> {
     run_blocking(move || {
         let home = app
             .path()
@@ -483,17 +479,15 @@ async fn resolve_home_media(
             return Err(format!("{path} is not a supported image or video"));
         }
         let file = attachment_file(&file_path)?;
-        app.state::<AttachmentPathState>().approve(&app, file_path)?;
+        app.state::<AttachmentPathState>()
+            .approve(&app, file_path)?;
         Ok(file)
     })
     .await
 }
 
 #[tauri::command]
-async fn resolve_local_media(
-    app: AppHandle,
-    path: String,
-) -> Result<AttachmentFile, String> {
+async fn resolve_local_media(app: AppHandle, path: String) -> Result<AttachmentFile, String> {
     run_blocking(move || {
         let file = resolve_local_media_from(Path::new(&path))?;
         app.state::<AttachmentPathState>()
@@ -728,11 +722,15 @@ fn is_supported_project_media(path: &Path) -> bool {
 
 #[tauri::command]
 async fn read_project_tasks(workspace: String) -> Result<ProjectTaskDocument, String> {
-    run_blocking(move || read_project_tasks_from(Path::new(&workspace), MAX_TASK_DOCUMENT_BYTES)).await
+    run_blocking(move || read_project_tasks_from(Path::new(&workspace), MAX_TASK_DOCUMENT_BYTES))
+        .await
 }
 
 #[tauri::command]
-async fn write_project_tasks(workspace: String, document: ProjectTaskDocument) -> Result<(), String> {
+async fn write_project_tasks(
+    workspace: String,
+    document: ProjectTaskDocument,
+) -> Result<(), String> {
     run_blocking(move || write_project_tasks_to(Path::new(&workspace), &document)).await
 }
 
@@ -1102,11 +1100,7 @@ fn start_process(app: AppHandle) -> Result<u64, String> {
 }
 
 #[tauri::command]
-async fn acp_send(
-    app: AppHandle,
-    generation: u64,
-    line: String,
-) -> Result<(), String> {
+async fn acp_send(app: AppHandle, generation: u64, line: String) -> Result<(), String> {
     if line.contains('\r') || line.contains('\n') {
         return Err("ACP payload must be one newline-free JSON object".to_owned());
     }
@@ -1158,10 +1152,7 @@ fn validate_json_object(line: &str) -> Result<(), String> {
         where
             M: MapAccess<'de>,
         {
-            while map
-                .next_entry::<IgnoredAny, IgnoredAny>()?
-                .is_some()
-            {}
+            while map.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
             Ok(())
         }
     }
@@ -1430,7 +1421,9 @@ mod tests {
 
     #[test]
     fn validates_acp_payloads_without_materializing_the_json_object() {
-        assert!(validate_json_object(r#"{"jsonrpc":"2.0","id":1,"params":{"blob":"abc"}}"#).is_ok());
+        assert!(
+            validate_json_object(r#"{"jsonrpc":"2.0","id":1,"params":{"blob":"abc"}}"#).is_ok()
+        );
         assert!(validate_json_object("[]").is_err());
         assert!(validate_json_object("null").is_err());
         assert!(validate_json_object(r#"{"jsonrpc":"2.0"} trailing"#).is_err());
