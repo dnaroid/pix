@@ -42,6 +42,8 @@ export interface AcpTransport {
 export interface AcpClientHandlers {
   readonly onSessionUpdate: (notification: SessionNotification) => void;
   readonly onSessionState?: (notification: SessionStateNotification) => void;
+  readonly onQueueState?: (state: QueueState) => void;
+  readonly onQueueConsumed?: (sessionId: string, message: QueuedUserMessage) => void;
   readonly onElicitation: (request: CreateElicitationRequest) => Promise<CreateElicitationResponse>;
   readonly onDiagnostic?: (message: string) => void;
   readonly onExit?: (exit: AcpExit) => void;
@@ -73,6 +75,36 @@ export interface PromptFileImage {
   readonly mimeType: string;
   readonly size?: number;
   readonly name?: string;
+}
+
+export type QueueSource = "sdk-steering" | "sdk-follow-up" | "auto" | "deferred";
+export type QueueAction = "cancel" | "edit" | "send-now";
+
+export interface QueuedImage {
+  readonly type: "image";
+  readonly data: string;
+  readonly mimeType: string;
+}
+
+export interface QueuedUserMessage {
+  readonly id: string;
+  readonly promptText: string;
+  readonly displayText: string;
+  readonly images: readonly QueuedImage[];
+}
+
+export interface QueueItem {
+  readonly id: string;
+  readonly source: QueueSource;
+  readonly mode: "steering" | "follow-up";
+  readonly index: number;
+  readonly text: string;
+  readonly message?: QueuedUserMessage;
+}
+
+export interface QueueState {
+  readonly sessionId: string;
+  readonly items: QueueItem[];
 }
 
 export interface LazySessionHistory {
@@ -159,8 +191,12 @@ export class AcpClient {
     });
   }
 
-  async sessionHistory(sessionId: string): Promise<LazySessionHistory> {
-    const response = await this.request<unknown>("pix/session/history", { sessionId }, null);
+  async sessionHistory(sessionId: string, full = false): Promise<LazySessionHistory> {
+    const response = await this.request<unknown>(
+      "pix/session/history",
+      full ? { sessionId, full: true } : { sessionId },
+      null,
+    );
     if (!isRecord(response) || !Array.isArray(response.updates) || !Array.isArray(response.deferredToolCallIds)) {
       throw new Error("pix/session/history returned an invalid response");
     }
@@ -240,6 +276,115 @@ export class AcpClient {
         ? response.configOptions as SessionConfigOption[]
         : [],
     };
+  }
+
+  async enhancePrompt(sessionId: string, draft: string): Promise<string> {
+    const response = await this.request<unknown>("pix/prompt/enhance", { sessionId, draft }, null);
+    if (!isRecord(response) || typeof response.prompt !== "string" || response.prompt.trim().length === 0) {
+      throw new Error("pix/prompt/enhance returned an invalid response");
+    }
+    return response.prompt;
+  }
+
+  async importSession(sessionId: string, path: string): Promise<{ configOptions: SessionConfigOption[] }> {
+    const response = await this.request<unknown>("pix/session/import", { sessionId, path }, null);
+    if (!isRecord(response)) throw new Error("pix/session/import returned an invalid response");
+    return {
+      configOptions: Array.isArray(response.configOptions)
+        ? response.configOptions as SessionConfigOption[]
+        : [],
+    };
+  }
+
+  async requestHistory(sessionId: string): Promise<string[]> {
+    const response = await this.request<unknown>("pix/request-history", { sessionId }, null);
+    if (!isRecord(response) || !Array.isArray(response.entries) || response.entries.some((entry) => typeof entry !== "string")) {
+      throw new Error("pix/request-history returned an invalid response");
+    }
+    return response.entries as string[];
+  }
+
+  async queueState(sessionId: string): Promise<QueueState> {
+    return parseQueueState(await this.request<unknown>("pix/session/queue_state", { sessionId }, null));
+  }
+
+  async queueMessage(
+    sessionId: string,
+    prompt: readonly ContentBlock[],
+    displayText: string,
+    fileImages: readonly PromptFileImage[] = [],
+  ): Promise<{ disposition: "steering" | "auto"; itemId: string }> {
+    const response = await this.request<unknown>("pix/session/queue_message", {
+      sessionId,
+      prompt,
+      displayText,
+      ...(fileImages.length > 0 ? { _meta: { "pix.fileImages": fileImages } } : {}),
+    }, null);
+    if (!isRecord(response) || !["steering", "auto"].includes(String(response.disposition)) || typeof response.itemId !== "string") {
+      throw new Error("pix/session/queue_message returned an invalid response");
+    }
+    return { disposition: response.disposition as "steering" | "auto", itemId: response.itemId };
+  }
+
+  async deferMessage(
+    sessionId: string,
+    prompt: readonly ContentBlock[],
+    displayText: string,
+    fileImages: readonly PromptFileImage[] = [],
+  ): Promise<{ itemId: string }> {
+    const response = await this.request<unknown>("pix/session/defer_message", {
+      sessionId,
+      prompt,
+      displayText,
+      ...(fileImages.length > 0 ? { _meta: { "pix.fileImages": fileImages } } : {}),
+    }, null);
+    if (!isRecord(response) || response.disposition !== "deferred" || typeof response.itemId !== "string") {
+      throw new Error("pix/session/defer_message returned an invalid response");
+    }
+    return { itemId: response.itemId };
+  }
+
+  async queueAction(sessionId: string, item: QueueItem, action: QueueAction): Promise<{
+    message?: QueuedUserMessage;
+    interruptRequired: boolean;
+  }> {
+    const response = await this.request<unknown>("pix/session/queue_action", {
+      sessionId,
+      source: item.source,
+      index: item.index,
+      text: item.text,
+      action,
+    }, null);
+    if (!isRecord(response)) throw new Error("pix/session/queue_action returned an invalid response");
+    const queued = response.message === undefined ? undefined : parseQueuedUserMessage(response.message);
+    if (response.message !== undefined && !queued) throw new Error("pix/session/queue_action returned an invalid message");
+    return {
+      ...(queued ? { message: queued } : {}),
+      interruptRequired: response.interruptRequired === true,
+    };
+  }
+
+  async takeAutoMessage(sessionId: string): Promise<QueuedUserMessage | undefined> {
+    const response = await this.request<unknown>("pix/session/take_auto_message", { sessionId }, null);
+    if (!isRecord(response)) throw new Error("pix/session/take_auto_message returned an invalid response");
+    if (response.message === undefined) return undefined;
+    const queued = parseQueuedUserMessage(response.message);
+    if (!queued) throw new Error("pix/session/take_auto_message returned an invalid message");
+    return queued;
+  }
+
+  async resumeSessionPath(sessionId: string, path: string): Promise<{ configOptions: SessionConfigOption[] }> {
+    const response = await this.request<unknown>("pix/session/resume_path", { sessionId, path }, null);
+    if (!isRecord(response)) throw new Error("pix/session/resume_path returned an invalid response");
+    return {
+      configOptions: Array.isArray(response.configOptions)
+        ? response.configOptions as SessionConfigOption[]
+        : [],
+    };
+  }
+
+  deleteSession(sessionId: string): Promise<Record<string, never>> {
+    return this.request("session/delete", { sessionId });
   }
 
   closeSession(sessionId: string): Promise<Record<string, never>> {
@@ -396,6 +541,17 @@ export class AcpClient {
       } else if (message.method === PIX_SESSION_STATE_METHOD) {
         const notification = parseSessionStateNotification(message.params);
         if (notification) this.handlers.onSessionState?.(notification);
+      } else if (message.method === "pix/session/queue_state") {
+        try {
+          this.handlers.onQueueState?.(parseQueueState(message.params));
+        } catch (error) {
+          this.handlers.onDiagnostic?.(`ignored invalid queue state: ${toError(error).message}`);
+        }
+      } else if (message.method === "pix/session/queue_consumed" && isRecord(message.params)) {
+        const queued = parseQueuedUserMessage(message.params.message);
+        if (typeof message.params.sessionId === "string" && queued) {
+          this.handlers.onQueueConsumed?.(message.params.sessionId, queued);
+        }
       }
       return;
     }
@@ -452,6 +608,50 @@ export class AcpClient {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseQueueState(value: unknown): QueueState {
+  if (!isRecord(value) || typeof value.sessionId !== "string" || !Array.isArray(value.items)) {
+    throw new Error("invalid Pix queue state");
+  }
+  const items: QueueItem[] = [];
+  for (const candidate of value.items) {
+    if (
+      !isRecord(candidate)
+      || typeof candidate.id !== "string"
+      || !["sdk-steering", "sdk-follow-up", "auto", "deferred"].includes(String(candidate.source))
+      || !["steering", "follow-up"].includes(String(candidate.mode))
+      || !Number.isSafeInteger(candidate.index)
+      || typeof candidate.text !== "string"
+    ) throw new Error("invalid Pix queue item");
+    const queued = candidate.message === undefined ? undefined : parseQueuedUserMessage(candidate.message);
+    if (candidate.message !== undefined && !queued) throw new Error("invalid Pix queued message");
+    items.push({
+      id: candidate.id,
+      source: candidate.source as QueueSource,
+      mode: candidate.mode as "steering" | "follow-up",
+      index: Number(candidate.index),
+      text: candidate.text,
+      ...(queued ? { message: queued } : {}),
+    });
+  }
+  return { sessionId: value.sessionId, items };
+}
+
+function parseQueuedUserMessage(value: unknown): QueuedUserMessage | undefined {
+  if (
+    !isRecord(value)
+    || typeof value.id !== "string"
+    || typeof value.promptText !== "string"
+    || typeof value.displayText !== "string"
+    || !Array.isArray(value.images)
+  ) return undefined;
+  const images: QueuedImage[] = [];
+  for (const image of value.images) {
+    if (!isRecord(image) || image.type !== "image" || typeof image.data !== "string" || typeof image.mimeType !== "string") return undefined;
+    images.push({ type: "image", data: image.data, mimeType: image.mimeType });
+  }
+  return { id: value.id, promptText: value.promptText, displayText: value.displayText, images };
 }
 
 function isJsonRpcId(value: unknown): value is JsonRpcId {

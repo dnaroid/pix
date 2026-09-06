@@ -1,6 +1,6 @@
 import type { SessionConfigOption } from "@agentclientprotocol/sdk";
 import { describe, expect, it } from "vitest";
-import { commandPickerState } from "./command-interactions";
+import { commandPickerState, listCommandPickerState } from "./command-interactions";
 
 const configOptions: SessionConfigOption[] = [
   {
@@ -86,5 +86,25 @@ describe("commandPickerState", () => {
       type: "boolean",
       currentValue: true,
     }]).items).toEqual([]);
+  });
+
+  it("builds searchable jump and history pickers with an initial query", () => {
+    const jump = listCommandPickerState("jump", [
+      { id: "entry-1", value: "user:1", label: "Fix the parser", description: "abc123" },
+    ], "parser");
+    expect(jump).toMatchObject({
+      command: "jump",
+      title: "Jump to user message",
+      initialQuery: "parser",
+    });
+
+    const history = listCommandPickerState("history", [
+      { id: "history:0", value: "Run tests", label: "Run tests" },
+    ]);
+    expect(history).toMatchObject({
+      command: "history",
+      title: "Prompt history",
+      items: [{ id: "history:0", value: "Run tests", label: "Run tests" }],
+    });
   });
 });

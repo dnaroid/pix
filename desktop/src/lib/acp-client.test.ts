@@ -75,6 +75,58 @@ describe("ACP JSON-RPC client", () => {
     await client.dispose();
   });
 
+  it("routes Desktop enhance, import, and request-history helpers through private ACP methods", async () => {
+    const transport = new FakeTransport();
+    const client = await startedClient(transport);
+
+    const enhancing = client.enhancePrompt("session-1", "make this clearer");
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+    expect(requestAt(transport, 1)).toMatchObject({
+      method: "pix/prompt/enhance",
+      params: { sessionId: "session-1", draft: "make this clearer" },
+    });
+    transport.message({ jsonrpc: "2.0", id: requestAt(transport, 1).id, result: { prompt: "Clearer prompt" } });
+    await expect(enhancing).resolves.toBe("Clearer prompt");
+
+    const importing = client.importSession("session-1", "/tmp/import.jsonl");
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(3));
+    expect(requestAt(transport, 2)).toMatchObject({
+      method: "pix/session/import",
+      params: { sessionId: "session-1", path: "/tmp/import.jsonl" },
+    });
+    transport.message({ jsonrpc: "2.0", id: requestAt(transport, 2).id, result: { configOptions: [] } });
+    await expect(importing).resolves.toEqual({ configOptions: [] });
+
+    const history = client.requestHistory("session-1");
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(4));
+    expect(requestAt(transport, 3)).toMatchObject({
+      method: "pix/request-history",
+      params: { sessionId: "session-1" },
+    });
+    transport.message({ jsonrpc: "2.0", id: requestAt(transport, 3).id, result: { entries: ["one", "two"] } });
+    await expect(history).resolves.toEqual(["one", "two"]);
+
+    await client.dispose();
+  });
+
+  it("can request full session history explicitly for interactive jump", async () => {
+    const transport = new FakeTransport();
+    const client = await startedClient(transport);
+    const history = client.sessionHistory("session-1", true);
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+    expect(requestAt(transport, 1)).toMatchObject({
+      method: "pix/session/history",
+      params: { sessionId: "session-1", full: true },
+    });
+    transport.message({
+      jsonrpc: "2.0",
+      id: requestAt(transport, 1).id,
+      result: { updates: [], deferredToolCallIds: [] },
+    });
+    await expect(history).resolves.toEqual({ updates: [], deferredToolCallIds: [] });
+    await client.dispose();
+  });
+
   it("handles streamed updates and form elicitation requests", async () => {
     const transport = new FakeTransport();
     const onSessionUpdate = vi.fn();

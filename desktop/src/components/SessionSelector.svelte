@@ -10,6 +10,8 @@
     sessions,
     activeSessionId,
     activeTitle,
+    initialQuery = "",
+    mode = "open",
     canCreate,
     disabled,
     onCreate,
@@ -19,6 +21,8 @@
     sessions: SessionInfo[];
     activeSessionId: string | null;
     activeTitle: string;
+    initialQuery?: string;
+    mode?: "open" | "delete";
     canCreate: boolean;
     disabled: boolean;
     onCreate: () => void;
@@ -39,6 +43,10 @@
       })),
       query,
     ).map((match) => match.value);
+  });
+
+  $effect(() => {
+    query = initialQuery;
   });
 
   onMount(() => search?.focus());
@@ -85,8 +93,12 @@
 >
   <div class="flex items-start justify-between gap-3 px-3.5 pt-3.5 pb-2.5">
     <div class="min-w-0">
-      <span class="text-[10px] font-semibold tracking-[0.08em] text-primary uppercase">Current conversation</span>
-      <strong class="mt-1 block overflow-hidden text-ellipsis whitespace-nowrap text-[13px] font-medium">{activeTitle}</strong>
+      <span class="text-[10px] font-semibold tracking-[0.08em] text-primary uppercase">
+        {mode === "delete" ? "Delete conversation" : "Current conversation"}
+      </span>
+      <strong class="mt-1 block overflow-hidden text-ellipsis whitespace-nowrap text-[13px] font-medium">
+        {mode === "delete" ? "Choose a saved conversation to remove" : activeTitle}
+      </strong>
     </div>
     <button
       class="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
@@ -103,39 +115,42 @@
       bind:this={search}
       bind:value={query}
       type="search"
-      placeholder="Search conversations…"
+      placeholder={mode === "delete" ? "Search conversations to delete…" : "Search conversations…"}
       onkeydown={handleSearchKeydown}
     />
   </label>
 
   <div class="min-h-0 overflow-y-auto border-t border-border/60 px-1.5 pt-1 pb-2" aria-label="Conversations">
-    <button
-      class="mb-1 grid w-full grid-cols-[22px_minmax(0,1fr)] gap-2 rounded-t-md border-b border-border/60 bg-transparent px-2 py-2 text-left text-popover-foreground hover:bg-accent focus-visible:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
-      data-session-option
-      type="button"
-      onclick={onCreate}
-      disabled={!canCreate}
-    >
-      <Plus class="h-4 w-4 justify-self-center text-primary" aria-hidden="true" />
-      <span class="min-w-0">
-        <strong class="block overflow-hidden text-ellipsis whitespace-nowrap text-xs font-medium">New conversation</strong>
-        <small class="mt-0.5 block overflow-hidden text-ellipsis whitespace-nowrap text-[10px] text-muted-foreground">Start a fresh session</small>
-      </span>
-    </button>
+    {#if mode === "open"}
+      <button
+        class="mb-1 grid w-full grid-cols-[22px_minmax(0,1fr)] gap-2 rounded-t-md border-b border-border/60 bg-transparent px-2 py-2 text-left text-popover-foreground hover:bg-accent focus-visible:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+        data-session-option
+        type="button"
+        onclick={onCreate}
+        disabled={!canCreate}
+      >
+        <Plus class="h-4 w-4 justify-self-center text-primary" aria-hidden="true" />
+        <span class="min-w-0">
+          <strong class="block overflow-hidden text-ellipsis whitespace-nowrap text-xs font-medium">New conversation</strong>
+          <small class="mt-0.5 block overflow-hidden text-ellipsis whitespace-nowrap text-[10px] text-muted-foreground">Start a fresh session</small>
+        </span>
+      </button>
+    {/if}
 
     {#each filteredSessions as session (session.sessionId)}
       <button
         class={[
           "grid w-full grid-cols-[22px_minmax(0,1fr)] gap-2 rounded-md bg-transparent px-2 py-2 text-left text-popover-foreground hover:bg-accent focus-visible:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40",
-          session.sessionId === activeSessionId && "bg-accent",
+          session.sessionId === activeSessionId && mode === "open" && "bg-accent",
+          mode === "delete" && "hover:text-destructive focus-visible:text-destructive",
         ]}
         data-session-option
         type="button"
-        aria-current={session.sessionId === activeSessionId ? "true" : undefined}
+        aria-current={mode === "open" && session.sessionId === activeSessionId ? "true" : undefined}
         onclick={() => onSelect(session.sessionId)}
         {disabled}
       >
-        {#if session.sessionId === activeSessionId}
+        {#if mode === "open" && session.sessionId === activeSessionId}
           <Check class="h-4 w-4 text-primary" aria-hidden="true" />
         {:else}
           <span aria-hidden="true"></span>

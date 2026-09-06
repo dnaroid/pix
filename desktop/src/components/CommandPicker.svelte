@@ -39,13 +39,14 @@
     const item = filteredItems[selectedIndex];
     if (!item) return;
     void tick().then(() => {
-      panel?.querySelector<HTMLElement>(`[data-command-value="${CSS.escape(item.value)}"]`)
+      panel?.querySelector<HTMLElement>(`[data-command-value="${CSS.escape(item.id ?? item.value)}"]`)
         ?.scrollIntoView({ block: "nearest" });
     });
   });
 
   onMount(() => {
     previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    query = picker.initialQuery ?? "";
     search?.focus();
     return () => previousFocus?.focus();
   });
@@ -119,7 +120,7 @@
     </label>
 
     <div id="command-picker-options" class="min-h-0 overflow-y-auto border-t border-border/60 p-1.5" role="listbox" aria-label={picker.title}>
-      {#each filteredItems as item, index (item.value)}
+      {#each filteredItems as item, index (item.id ?? `${index}:${item.value}`)}
         <button
           class={[
             "grid w-full cursor-pointer grid-cols-[22px_minmax(0,1fr)] gap-2 rounded-md px-2 py-2 text-left hover:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
@@ -128,7 +129,7 @@
           type="button"
           role="option"
           aria-selected={index === selectedIndex}
-          data-command-value={item.value}
+          data-command-value={item.id ?? item.value}
           onmouseenter={() => selectedIndex = index}
           onclick={() => onSelect(item.value)}
         >

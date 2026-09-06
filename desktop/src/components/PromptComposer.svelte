@@ -3,6 +3,7 @@
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import Eye from "@lucide/svelte/icons/eye";
   import Paperclip from "@lucide/svelte/icons/paperclip";
+  import Pause from "@lucide/svelte/icons/pause";
   import Square from "@lucide/svelte/icons/square";
   import X from "@lucide/svelte/icons/x";
   import { tick } from "svelte";
@@ -51,6 +52,7 @@
     questionMode,
     onAutocomplete,
     onSubmit,
+    onDefer,
     onCancel,
     onChooseAttachments,
     onPasteAttachments,
@@ -69,6 +71,7 @@
     questionMode?: QuestionComposerMode;
     onAutocomplete: (draft: string, signal: AbortSignal) => Promise<string>;
     onSubmit: () => void | Promise<void>;
+    onDefer: () => void | Promise<void>;
     onCancel: () => void | Promise<void>;
     onChooseAttachments: () => void | Promise<void>;
     onPasteAttachments: (files: readonly File[]) => void | Promise<void>;
@@ -115,6 +118,7 @@
   const currentSelectionCount = $derived(questionDraftSelectionCount(currentDraft));
   const displayedAttachments = $derived(questionMode ? questionAttachments : attachments);
   const textareaValue = $derived(composerText());
+  const hasQueueableDraft = $derived(!questionMode && (promptText.trim().length > 0 || attachments.length > 0));
   const slashQuery = $derived.by(() => {
     if (!ready || !activeSessionId || promptRunning || questionMode || composing || attachments.length > 0) {
       return undefined;
@@ -183,6 +187,19 @@
     textarea.style.height = `${height}px`;
     textarea.style.overflowY = textarea.scrollHeight > maxTextareaHeight ? "auto" : "hidden";
     syncGhostLayer();
+  }
+
+  /** Focus the normal prompt editor after an external action restores a draft. */
+  export async function focus(): Promise<void> {
+    if (questionMode) return;
+    await tick();
+    if (!textarea) return;
+    textarea.focus();
+    const end = promptText.length;
+    textarea.setSelectionRange(end, end);
+    updateSelection(textarea);
+    resizeComposer();
+    observeAutocomplete(textarea);
   }
 
   $effect(() => {
@@ -565,7 +582,7 @@
 
 <svelte:window onresize={resizeComposer} onkeydown={handleQuestionEscape} />
 
-<div class="relative row-start-3 mx-2 mb-2">
+<div class="relative mx-2 mb-2">
 {#if slashMenuOpen}
   <div
     bind:this={slashListbox}
@@ -839,7 +856,7 @@
           type="button"
           aria-label={questionMode ? "Attach images" : "Attach files"}
           title={questionMode ? "Attach images" : "Attach files"}
-          disabled={questionMode ? questionMode.addingImages : !activeSessionId || !ready || promptRunning}
+          disabled={questionMode ? questionMode.addingImages : !activeSessionId || !ready}
           onclick={() => {
             if (questionMode && currentQuestion) void questionMode.onChooseImages(currentQuestion.id);
             else void onChooseAttachments();
@@ -847,6 +864,18 @@
         >
           <Paperclip class="h-4 w-4" aria-hidden="true" />
         </button>
+        {#if !questionMode}
+          <button
+            class="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+            type="button"
+            aria-label="Pause message for later"
+            title="Pause message for later"
+            disabled={!activeSessionId || !ready || !hasQueueableDraft}
+            onclick={onDefer}
+          >
+            <Pause class="h-4 w-4" aria-hidden="true" />
+          </button>
+        {/if}
         {#if promptRunning && !questionMode}
           <button
             class="grid h-6 w-6 shrink-0 place-items-center rounded-md border border-border bg-transparent text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"

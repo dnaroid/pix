@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -20,7 +20,20 @@ import type {
 	SessionInfo as PiSessionInfo,
 } from "@earendil-works/pi-coding-agent";
 import { PixAcpAgent } from "../src/acp/pix-acp-agent.js";
-import { PIX_SESSION_HISTORY_METHOD, PIX_SESSION_IMAGE_METHOD, PIX_TOOL_RESULT_METHOD } from "../src/acp/desktop-commands.js";
+import {
+	PIX_DEFER_MESSAGE_METHOD,
+	PIX_QUEUE_ACTION_METHOD,
+	PIX_QUEUE_CONSUMED_METHOD,
+	PIX_QUEUE_MESSAGE_METHOD,
+	PIX_QUEUE_STATE_METHOD,
+	PIX_TAKE_AUTO_MESSAGE_METHOD,
+	PIX_RESUME_PATH_METHOD,
+	PIX_SESSION_HISTORY_METHOD,
+	PIX_SESSION_IMAGE_METHOD,
+	PIX_TOOL_RESULT_METHOD,
+	type DesktopQueueStateResponse,
+	type DesktopQueuedUserMessage,
+} from "../src/acp/desktop-commands.js";
 import { PIX_QUESTION_EDITOR_TITLE } from "../src/acp/ui-request-bridge.js";
 
 /**
@@ -72,6 +85,8 @@ class FakePiClient implements PiClient {
 	readonly promptCalls: { message: string; images?: PiImageContent[] }[] = [];
 	readonly steerCalls: string[] = [];
 	readonly followUpCalls: string[] = [];
+	readonly queuedSteering: string[] = [];
+	readonly queuedFollowUp: string[] = [];
 	readonly uiResponses: RpcExtensionUIResponse[] = [];
 	readonly switchSessions: string[] = [];
 	readonly nameCalls: string[] = [];
@@ -101,6 +116,7 @@ class FakePiClient implements PiClient {
 	promptHandledWithoutRun = false;
 	stateError: Error | undefined;
 	aborts = 0;
+	abortSettles = false;
 	started = false;
 	startError: Error | undefined;
 	startGate: Promise<void> | undefined;
@@ -164,14 +180,33 @@ class FakePiClient implements PiClient {
 
 	async steer(message: string): Promise<void> {
 		this.steerCalls.push(message);
+		this.queuedSteering.push(message);
+		this.emitQueueUpdate();
 	}
 
 	async followUp(message: string): Promise<void> {
 		this.followUpCalls.push(message);
+		this.queuedFollowUp.push(message);
+		this.emitQueueUpdate();
+	}
+
+	async clearQueue(): Promise<{ steering: string[]; followUp: string[] }> {
+		const result = {
+			steering: [...this.queuedSteering],
+			followUp: [...this.queuedFollowUp],
+		};
+		this.queuedSteering.length = 0;
+		this.queuedFollowUp.length = 0;
+		this.emitQueueUpdate();
+		return result;
 	}
 
 	async abort(): Promise<void> {
 		this.aborts++;
+		if (this.abortSettles) {
+			this.state = { ...this.state, isStreaming: false, isCompacting: false };
+			this.emit({ type: "agent_settled" } as PiEvent);
+		}
 	}
 
 	respondToExtensionUi(response: RpcExtensionUIResponse): void {
@@ -219,6 +254,10 @@ class FakePiClient implements PiClient {
 	async getForkMessages(): Promise<Array<{ entryId: string; text: string }>> {
 		this.forkMessagesCalls.push(this.forkMessagesCalls.length);
 		return this.forkMessagesList;
+	}
+
+	async getTree(): Promise<{ tree: []; leafId: null }> {
+		return { tree: [], leafId: null };
 	}
 
 	async getLastAssistantText(): Promise<string | null> {
@@ -305,6 +344,14 @@ class FakePiClient implements PiClient {
 		for (const listener of [...this.listeners]) listener(event);
 	}
 
+	private emitQueueUpdate(): void {
+		this.emit({
+			type: "queue_update",
+			steering: [...this.queuedSteering],
+			followUp: [...this.queuedFollowUp],
+		} as PiEvent);
+	}
+
 	/** Simulate the pi process dying; fires onExit listeners once. */
 	emitExit(error: Error): void {
 		const listeners = this.exitListeners;
@@ -346,6 +393,7 @@ function createTestAdapter(overrides: Partial<ConstructorParameters<typeof PixAc
 			includeRecentMessages: 0,
 		}),
 		loadDefaultModel: () => undefined,
+		loadIgnoreContextFiles: () => false,
 		...overrides,
 	});
 	return { adapter, clients, options, sessionMapPath };
@@ -505,13 +553,13 @@ test("session/new advertises supported built-ins and pi runtime slash commands",
 			_meta?: Record<string, unknown>;
 		}>;
 	}).availableCommands;
-	assert.deepEqual(commands.slice(0, 3).map((command) => command.name), ["compact", "name", "export"]);
+	assert.deepEqual(commands.slice(0, 4).map((command) => command.name), ["settings", "compact", "name", "export"]);
 	assert.ok(commands.some((command) => command.name === "session"));
 	assert.ok(commands.some((command) => command.name === "clone"));
 	assert.equal(commands.filter((command) => command.name === "compact").length, 1, "built-ins win collisions");
 	assert.equal(commands.some((command) => command.name === "followup"), false, "built-in aliases win collisions");
 	assert.equal(commands.some((command) => command.name === "thought"), false, "built-in aliases win collisions");
-	assert.equal(commands.some((command) => command.name === "settings"), false, "Pix renderer commands win collisions");
+	assert.equal(commands.filter((command) => command.name === "settings").length, 1, "ACP built-ins win runtime collisions");
 	assert.equal(commands.find((command) => command.name === "compact")?.input, undefined);
 	assert.equal(commands.find((command) => command.name === "compact")?._meta?.["pix.inputHint"], "[instructions]");
 	assert.equal(commands.find((command) => command.name === "name")?.input, undefined);
@@ -618,6 +666,20 @@ test("session/new starts pi with the cwd Pix default model and thinking level", 
 	});
 });
 
+test("session/new applies the Pix no-context-files setting to the Pi RPC process", async () => {
+	const resolvedCwds: string[] = [];
+	const { adapter, options } = createTestAdapter({
+		loadIgnoreContextFiles: (cwd) => {
+			resolvedCwds.push(cwd);
+			return true;
+		},
+	});
+	await connect(adapter, (cx) => cx.buildSession("/tmp/no-context-project").start());
+
+	assert.deepEqual(resolvedCwds, ["/tmp/no-context-project"]);
+	assert.deepEqual(options[0]?.args, ["--no-context-files"]);
+});
+
 test("Desktop sessions explicitly load the bundled question extension", async () => {
 	const { adapter, options } = createTestAdapter({
 		questionExtensionPath: "/opt/pix/question/index.js",
@@ -668,6 +730,28 @@ test("pix/autocomplete routes the active session without mutating its prompt", a
 	assert.deepEqual(response, { completion: " the rest" });
 	assert.equal(autocompleteInput?.cwd, "/tmp/autocomplete-project");
 	assert.equal(autocompleteInput?.draft, "implement");
+	assert.deepEqual(harness.clients[0]?.promptCalls, []);
+});
+
+test("pix/prompt/enhance uses the dedicated enhancer without sending a session prompt", async () => {
+	let observed: { cwd: string; draft: string } | undefined;
+	const harness = createTestAdapter({
+		enhancePrompt: async ({ cwd, draft }) => {
+			observed = { cwd, draft };
+			return "Improved prompt";
+		},
+	});
+
+	const response = await connect(harness.adapter, async (cx) => {
+		const session = await cx.buildSession("/tmp/enhance-project").start();
+		return cx.request("pix/prompt/enhance", {
+			sessionId: session.sessionId,
+			draft: "make tests better",
+		});
+	});
+
+	assert.deepEqual(response, { prompt: "Improved prompt" });
+	assert.deepEqual(observed, { cwd: "/tmp/enhance-project", draft: "make tests better" });
 	assert.deepEqual(harness.clients[0]?.promptCalls, []);
 });
 
@@ -1755,6 +1839,167 @@ test("pix/session/fork_messages returns forkable user messages when idle", async
 	});
 });
 
+test("Pix Desktop deferred queue persists and edit returns the paused message", async () => {
+	let persisted: { auto: DesktopQueuedUserMessage[]; deferred: DesktopQueuedUserMessage[] } = {
+		auto: [],
+		deferred: [],
+	};
+	const harness = createTestAdapter({
+		loadDesktopQueues: async () => ({
+			auto: persisted.auto.map((message) => ({ ...message, images: message.images.map((image) => ({ ...image })) })),
+			deferred: persisted.deferred.map((message) => ({ ...message, images: message.images.map((image) => ({ ...image })) })),
+		}),
+		saveDesktopQueues: async (_cwd, _sessionPath, queues) => {
+			persisted = {
+				auto: queues.auto.map((message) => ({ ...message, images: message.images.map((image) => ({ ...image })) })),
+				deferred: queues.deferred.map((message) => ({ ...message, images: message.images.map((image) => ({ ...image })) })),
+			};
+		},
+	});
+
+	await connectAs(harness.adapter, "pix-desktop", async (cx) => {
+		const created = await cx.request("session/new", { cwd: "/tmp/queue-deferred", mcpServers: [] }) as { sessionId: string };
+		const queued = await cx.request(PIX_DEFER_MESSAGE_METHOD, {
+			sessionId: created.sessionId,
+			prompt: [{ type: "text", text: "send this later" }],
+			displayText: "send this later",
+		}) as { disposition: string; itemId: string };
+		assert.equal(queued.disposition, "deferred");
+		assert.equal(persisted.deferred.length, 1);
+
+		const state = await cx.request(PIX_QUEUE_STATE_METHOD, { sessionId: created.sessionId }) as DesktopQueueStateResponse;
+		assert.equal(state.items.length, 1);
+		assert.equal(state.items[0]?.source, "deferred");
+		assert.equal(state.items[0]?.text, "send this later");
+
+		const edited = await cx.request(PIX_QUEUE_ACTION_METHOD, {
+			sessionId: created.sessionId,
+			source: "deferred",
+			index: 0,
+			text: "send this later",
+			action: "edit",
+		}) as { message?: DesktopQueuedUserMessage };
+		assert.equal(edited.message?.promptText, "send this later");
+		assert.deepEqual(persisted.deferred, []);
+	});
+});
+
+test("Pix Desktop queues Enter during streaming as Pi steering and reports consumption", async () => {
+	const harness = createTestAdapter({
+		loadDesktopQueues: async () => ({ auto: [], deferred: [] }),
+		saveDesktopQueues: async () => {},
+	});
+	const consumed: Array<{ sessionId: string; message: DesktopQueuedUserMessage }> = [];
+
+	await connectAs(
+		harness.adapter,
+		"pix-desktop",
+		async (cx) => {
+			const created = await cx.request("session/new", { cwd: "/tmp/queue-steering", mcpServers: [] }) as { sessionId: string };
+			const pi = harness.clients[0]!;
+			pi.state = { ...pi.state, isStreaming: true };
+
+			const queued = await cx.request(PIX_QUEUE_MESSAGE_METHOD, {
+				sessionId: created.sessionId,
+				prompt: [{ type: "text", text: "steer me next" }],
+				displayText: "steer me next",
+			}) as { disposition: string };
+			assert.equal(queued.disposition, "steering");
+			assert.deepEqual(pi.steerCalls, ["steer me next"]);
+
+			const state = await cx.request(PIX_QUEUE_STATE_METHOD, { sessionId: created.sessionId }) as DesktopQueueStateResponse;
+			assert.equal(state.items[0]?.source, "sdk-steering");
+			assert.equal(state.items[0]?.message?.displayText, "steer me next");
+
+			await pi.clearQueue();
+			pi.emit({ type: "message_start", message: { role: "user", content: "steer me next" } } as PiEvent);
+			await waitFor(() => consumed.length === 1);
+			assert.equal(consumed[0]?.sessionId, created.sessionId);
+			assert.equal(consumed[0]?.message.displayText, "steer me next");
+		},
+		(app) => {
+			const customNotifications = app as unknown as {
+				onNotification(
+					method: string,
+					parser: (params: unknown) => typeof consumed[number],
+					handler: (ctx: { params: typeof consumed[number] }) => void,
+				): void;
+			};
+			customNotifications.onNotification(
+				PIX_QUEUE_CONSUMED_METHOD,
+				(params) => params as typeof consumed[number],
+				(ctx) => consumed.push(ctx.params),
+			);
+		},
+	);
+});
+
+test("Pix Desktop auto queue waits while Pi is idle-but-admitted and can be taken for the next turn", async () => {
+	let persisted: { auto: DesktopQueuedUserMessage[]; deferred: DesktopQueuedUserMessage[] } = { auto: [], deferred: [] };
+	const harness = createTestAdapter({
+		loadDesktopQueues: async () => persisted,
+		saveDesktopQueues: async (_cwd, _sessionPath, queues) => {
+			persisted = {
+				auto: queues.auto.map((message) => ({ ...message, images: message.images.map((image) => ({ ...image })) })),
+				deferred: queues.deferred.map((message) => ({ ...message, images: message.images.map((image) => ({ ...image })) })),
+			};
+		},
+	});
+
+	await connectAs(harness.adapter, "pix-desktop", async (cx) => {
+		const created = await cx.request("session/new", { cwd: "/tmp/queue-auto", mcpServers: [] }) as { sessionId: string };
+		const queued = await cx.request(PIX_QUEUE_MESSAGE_METHOD, {
+			sessionId: created.sessionId,
+			prompt: [{ type: "text", text: "after current turn" }],
+			displayText: "after current turn",
+		}) as { disposition: string };
+		assert.equal(queued.disposition, "auto");
+		assert.equal(persisted.auto.length, 1);
+
+		const taken = await cx.request(PIX_TAKE_AUTO_MESSAGE_METHOD, { sessionId: created.sessionId }) as {
+			message?: DesktopQueuedUserMessage;
+		};
+		assert.equal(taken.message?.displayText, "after current turn");
+		assert.deepEqual(persisted.auto, []);
+	});
+});
+
+test("Pix Desktop send-now interrupts the active run before returning the selected paused message", async () => {
+	const harness = createTestAdapter({
+		loadDesktopQueues: async () => ({ auto: [], deferred: [] }),
+		saveDesktopQueues: async () => {},
+	});
+
+	await connectAs(harness.adapter, "pix-desktop", async (cx) => {
+		const created = await cx.request("session/new", { cwd: "/tmp/queue-send-now", mcpServers: [] }) as { sessionId: string };
+		const pi = harness.clients[0]!;
+		const running = cx.request("session/prompt", {
+			sessionId: created.sessionId,
+			prompt: [{ type: "text", text: "long running turn" }],
+		});
+		await waitFor(() => pi.promptCalls.length === 1);
+		pi.emit({ type: "agent_start" } as PiEvent);
+		pi.abortSettles = true;
+
+		await cx.request(PIX_DEFER_MESSAGE_METHOD, {
+			sessionId: created.sessionId,
+			prompt: [{ type: "text", text: "send this now" }],
+			displayText: "send this now",
+		});
+		const result = await cx.request(PIX_QUEUE_ACTION_METHOD, {
+			sessionId: created.sessionId,
+			source: "deferred",
+			index: 0,
+			text: "send this now",
+			action: "send-now",
+		}) as { message?: DesktopQueuedUserMessage };
+
+		assert.equal(pi.aborts, 1);
+		assert.equal(result.message?.displayText, "send this now");
+		assert.equal((await running).stopReason, "end_turn");
+	});
+});
+
 test("pix/session/reload respawns the pi client and reports the reload", async () => {
 	const harness = createTestAdapter();
 	const notifications: SessionNotification[] = [];
@@ -1800,6 +2045,48 @@ test("pix/session/reload rejects while the session is streaming", async () => {
 		);
 		assert.equal(harness.clients.length, 1, "no replacement client is spawned");
 		assert.equal(harness.adapter.sessionCount, 1);
+	});
+});
+
+test("pix/session/resume_path switches the live session to an explicit path", async () => {
+	const harness = createTestAdapter();
+	await connect(harness.adapter, async (cx) => {
+		const created = await cx.request("session/new", { cwd: "/tmp/proj", mcpServers: [] });
+		const sessionId = (created as { sessionId: string }).sessionId;
+		const response = await cx.request(PIX_RESUME_PATH_METHOD, {
+			sessionId,
+			path: "saved/session.jsonl",
+		}) as { configOptions?: unknown[] };
+
+		assert.equal(harness.clients[0]!.switchSessions.at(-1), resolve("/tmp/proj/saved/session.jsonl"));
+		assert.ok(Array.isArray(response.configOptions));
+	});
+});
+
+test("pix/session/import copies an external JSONL into the current session dir and switches to it", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "pix-acp-import-"));
+	const sessionDir = join(cwd, "sessions");
+	const externalDir = join(cwd, "external");
+	await mkdir(sessionDir, { recursive: true });
+	await mkdir(externalDir, { recursive: true });
+	const currentPath = join(sessionDir, "current.jsonl");
+	const importPath = join(externalDir, "imported.jsonl");
+	const currentJsonl = `${JSON.stringify({ type: "session", version: 3, id: "current", timestamp: "2026-09-06T00:00:00.000Z", cwd })}\n`;
+	const importedJsonl = `${JSON.stringify({ type: "session", version: 3, id: "imported", timestamp: "2026-09-06T00:00:00.000Z", cwd })}\n`;
+	await writeFile(currentPath, currentJsonl, "utf8");
+	await writeFile(importPath, importedJsonl, "utf8");
+
+	const harness = createTestAdapter();
+	await connect(harness.adapter, async (cx) => {
+		const created = await cx.request("session/new", { cwd, mcpServers: [] });
+		const sessionId = (created as { sessionId: string }).sessionId;
+		const pi = harness.clients[0]!;
+		pi.state = { ...pi.state, sessionFile: currentPath, sessionId: "current" };
+
+		await cx.request("pix/session/import", { sessionId, path: importPath });
+		const destination = join(sessionDir, "imported.jsonl");
+		assert.deepEqual(pi.switchSessions, [destination]);
+		assert.equal(await readFile(destination, "utf8"), importedJsonl);
 	});
 });
 
@@ -1896,10 +2183,11 @@ test("built-in slash commands run pi-side actions and answer end_turn", async ()
 
 			const model = await cx.request("session/prompt", {
 				sessionId,
-				prompt: [{ type: "text", text: "/model openai/gpt-5" }],
+				prompt: [{ type: "text", text: "/model openai/gpt-5:high" }],
 			}) as { stopReason: string };
 			assert.equal(model.stopReason, "end_turn");
 			assert.deepEqual(harness.clients[0]!.modelSets, [{ provider: "openai", modelId: "gpt-5" }]);
+			assert.deepEqual(harness.clients[0]!.thinkingLevels, ["high"]);
 
 			await assert.rejects(
 				cx.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "/thinking warp" }] }),
@@ -1920,6 +2208,66 @@ test("built-in slash commands run pi-side actions and answer end_turn", async ()
 	assert.ok(texts.some((t) => t.includes("session duplicated")), "clone feedback reported");
 	const info = notifications.find((n) => n.update.sessionUpdate === "session_info_update");
 	assert.equal((info?.update as { title?: string }).title, "Research");
+});
+
+test("no-argument Pix config commands elicit a choice instead of guessing", async () => {
+	const harness = createTestAdapter();
+	const requests: CreateElicitationRequest[] = [];
+
+	await connect(
+		harness.adapter,
+		async (cx) => {
+			await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, ...ELICITATION_CAPS });
+			const created = await cx.request("session/new", { cwd: "/tmp", mcpServers: [] });
+			const sessionId = (created as { sessionId: string }).sessionId;
+			const response = await cx.request("session/prompt", {
+				sessionId,
+				prompt: [{ type: "text", text: "/default-model" }],
+			}) as { stopReason: string };
+			assert.equal(response.stopReason, "cancelled");
+		},
+		(app) => {
+			app.onRequest("elicitation/create", (ctx) => {
+				requests.push(ctx.params);
+				return { action: "cancel" } satisfies CreateElicitationResponse;
+			});
+		},
+	);
+
+	assert.equal(requests.length, 1);
+	const schema = (requests[0] as { requestedSchema?: { properties?: { value?: { enum?: string[] } } } }).requestedSchema;
+	assert.deepEqual(schema?.properties?.value?.enum, [
+		"anthropic/claude-4",
+		"anthropic/claude-3",
+		"openai/gpt-5",
+	]);
+});
+
+test("/export preserves TUI HTML-vs-JSONL semantics", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "pix-acp-export-"));
+	const source = join(cwd, "source.jsonl");
+	await writeFile(source, "session-jsonl\n", "utf8");
+	const harness = createTestAdapter();
+
+	await connect(harness.adapter, async (cx) => {
+		const created = await cx.request("session/new", { cwd, mcpServers: [] });
+		const sessionId = (created as { sessionId: string }).sessionId;
+		const pi = harness.clients[0]!;
+		pi.state = { ...pi.state, sessionFile: source };
+
+		await cx.request("session/prompt", {
+			sessionId,
+			prompt: [{ type: "text", text: "/export 'exports/copy.jsonl'" }],
+		});
+		assert.equal(await readFile(join(cwd, "exports", "copy.jsonl"), "utf8"), "session-jsonl\n");
+		assert.deepEqual(pi.exportCalls, [], "JSONL export copies the native session rather than invoking the HTML exporter");
+
+		await cx.request("session/prompt", {
+			sessionId,
+			prompt: [{ type: "text", text: "/export exports/copy.html" }],
+		});
+		assert.deepEqual(pi.exportCalls, [join(cwd, "exports", "copy.html")]);
+	});
 });
 
 test("/copy copies the last assistant message and reports when there is none", async () => {
@@ -1985,7 +2333,7 @@ test("unknown slash commands pass through to pi for native handling", async () =
 	});
 });
 
-test("Pix renderer commands are not forwarded to the model", async () => {
+test("remaining Pix renderer commands are not forwarded to the model", async () => {
 	const harness = createTestAdapter();
 	const created = await connect(harness.adapter, (cx) => cx.request("session/new", { cwd: "/tmp", mcpServers: [] }));
 	const sessionId = (created as { sessionId: string }).sessionId;
@@ -1993,9 +2341,24 @@ test("Pix renderer commands are not forwarded to the model", async () => {
 	await assert.rejects(
 		connect(harness.adapter, (cx) => cx.request("session/prompt", {
 			sessionId,
-			prompt: [{ type: "text", text: "/settings" }],
+			prompt: [{ type: "text", text: "/queue send this later" }],
 		})),
 		/requires Pix renderer UI/,
+	);
+	assert.equal(harness.clients[0]!.promptCalls.length, 0);
+});
+
+test("intentionally unsupported Pix commands are rejected explicitly and not forwarded", async () => {
+	const harness = createTestAdapter();
+	const created = await connect(harness.adapter, (cx) => cx.request("session/new", { cwd: "/tmp", mcpServers: [] }));
+	const sessionId = (created as { sessionId: string }).sessionId;
+
+	await assert.rejects(
+		connect(harness.adapter, (cx) => cx.request("session/prompt", {
+			sessionId,
+			prompt: [{ type: "text", text: "/trust" }],
+		})),
+		/intentionally not supported in Pix Desktop/,
 	);
 	assert.equal(harness.clients[0]!.promptCalls.length, 0);
 });

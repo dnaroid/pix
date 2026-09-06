@@ -75,6 +75,11 @@ export interface PiSessionState {
 	readonly sessionName?: string | undefined;
 	readonly isStreaming: boolean;
 	readonly isCompacting?: boolean | undefined;
+	readonly autoCompactionEnabled?: boolean | undefined;
+	readonly steeringMode?: "all" | "one-at-a-time" | undefined;
+	readonly followUpMode?: "all" | "one-at-a-time" | undefined;
+	readonly messageCount?: number | undefined;
+	readonly pendingMessageCount?: number | undefined;
 }
 
 /**
@@ -92,6 +97,12 @@ export interface PiSlashCommand {
 	readonly description?: string | undefined;
 	readonly source: "extension" | "prompt" | "skill";
 	readonly sourceInfo: unknown;
+}
+
+export interface PiSessionTreeNode {
+	readonly entry: Record<string, unknown> & { readonly id?: string; readonly type?: string };
+	readonly children: readonly PiSessionTreeNode[];
+	readonly label?: string | undefined;
 }
 
 /** Session statistics exposed by pi's public RPC client. */
@@ -141,6 +152,7 @@ export interface PiClient {
 	prompt(message: string, images?: PiImageContent[]): Promise<void>;
 	steer(message: string, images?: PiImageContent[]): Promise<void>;
 	followUp(message: string, images?: PiImageContent[]): Promise<void>;
+	clearQueue(): Promise<{ steering: string[]; followUp: string[] }>;
 	abort(): Promise<void>;
 	/** Answer a dialog `extension_ui_request` (select/confirm/input/editor). */
 	respondToExtensionUi(response: RpcExtensionUIResponse): void;
@@ -156,6 +168,8 @@ export interface PiClient {
 	fork(entryId: string): Promise<{ text: string; cancelled: boolean }>;
 	/** User messages that may be used as fork points. */
 	getForkMessages(): Promise<Array<{ entryId: string; text: string }>>;
+	/** Current session entry tree and active leaf. */
+	getTree(): Promise<{ tree: PiSessionTreeNode[]; leafId: string | null }>;
 	/** Plain text of the latest assistant message, if one exists. */
 	getLastAssistantText(): Promise<string | null>;
 	/** Messages of the active branch, oldest first. */
@@ -277,6 +291,10 @@ export class PiRpcClient implements PiClient {
 		return this.requireClient().followUp(message, images);
 	}
 
+	clearQueue(): Promise<{ steering: string[]; followUp: string[] }> {
+		return this.requireClient().clearQueue();
+	}
+
 	abort(): Promise<void> {
 		return this.requireClient().abort();
 	}
@@ -319,6 +337,10 @@ export class PiRpcClient implements PiClient {
 
 	getForkMessages(): Promise<Array<{ entryId: string; text: string }>> {
 		return this.requireClient().getForkMessages();
+	}
+
+	async getTree(): Promise<{ tree: PiSessionTreeNode[]; leafId: string | null }> {
+		return await this.requireClient().getTree() as unknown as { tree: PiSessionTreeNode[]; leafId: string | null };
 	}
 
 	getLastAssistantText(): Promise<string | null> {

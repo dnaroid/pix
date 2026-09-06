@@ -8,12 +8,16 @@ export interface TuiTabSnapshot {
 	readonly activeSessionPath?: string;
 }
 
-/** Read the project tab snapshot written by Pix TUI. Invalid state is non-fatal. */
-export async function loadTuiTabSnapshot(cwd: string, agentDir = getAgentDir()): Promise<TuiTabSnapshot> {
+export function tuiTabSnapshotPath(cwd: string, agentDir = getAgentDir()): string {
 	const projectPath = resolve(cwd);
 	const key = createHash("sha256").update(projectPath).digest("hex").slice(0, 24);
+	return join(agentDir, "pix", "tabs", `${key}.json`);
+}
+
+/** Read the project tab snapshot written by Pix TUI. Invalid state is non-fatal. */
+export async function loadTuiTabSnapshot(cwd: string, agentDir = getAgentDir()): Promise<TuiTabSnapshot> {
 	try {
-		const parsed: unknown = JSON.parse(await readFile(join(agentDir, "pix", "tabs", `${key}.json`), "utf8"));
+		const parsed: unknown = JSON.parse(await readFile(tuiTabSnapshotPath(cwd, agentDir), "utf8"));
 		if (
 			!isRecord(parsed)
 			|| (parsed.version !== 1 && parsed.version !== 2 && parsed.version !== 3 && parsed.version !== 4)

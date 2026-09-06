@@ -13,6 +13,16 @@ import {
 } from "./transcript";
 
 describe("transcript reducer", () => {
+  it("marks Pix system feedback as a system message without affecting normal assistant messages", () => {
+    const state = applySessionUpdates(emptyTranscript, [
+      { sessionUpdate: "agent_message_chunk", messageId: "pix-system:one", content: { type: "text", text: "Reloaded resources" } },
+      { sessionUpdate: "agent_message_chunk", messageId: "assistant-one", content: { type: "text", text: "Normal answer" } },
+    ]);
+
+    expect(state.items[0]).toMatchObject({ type: "message", role: "system", text: "Reloaded resources" });
+    expect(state.items[1]).toMatchObject({ type: "message", role: "assistant", text: "Normal answer" });
+  });
+
   it("coalesces adjacent id-less chunks but starts a message after a tool", () => {
     let state = applySessionUpdate(emptyTranscript, {
       sessionUpdate: "agent_message_chunk",

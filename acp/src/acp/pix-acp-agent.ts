@@ -17,9 +17,10 @@
  *   inside `session/prompt`.
  */
 
-import { randomUUID } from "node:crypto";
-import { readFile, stat } from "node:fs/promises";
-import { resolve } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
+import { copyFile, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { basename, dirname, join, parse, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setText as copyTextToClipboard } from "@mariozechner/clipboard";
 import {
@@ -52,7 +53,10 @@ import {
 	type Stream,
 } from "@agentclientprotocol/sdk";
 import {
+	getAgentDir,
+	getPackageDir,
 	SessionManager,
+	SettingsManager,
 	type JsonAgentSessionEvent,
 	type RpcExtensionUIRequest,
 	type RpcExtensionUIResponse,
@@ -84,23 +88,54 @@ import {
 	type PiEvent,
 	type PiImageContent,
 	type PiRpcClientOptions,
+	type PiSessionTreeNode,
 	type PiSessionState,
 	type PiSessionStats,
 } from "../pi/pi-rpc-client.js";
 import { applyConfigOption, buildConfigOptions, parseModelValue } from "./config-options.js";
 import {
+	PIX_ENHANCE_PROMPT_METHOD,
+	PIX_DEFER_MESSAGE_METHOD,
 	PIX_FORK_MESSAGES_METHOD,
+	PIX_IMPORT_SESSION_METHOD,
+	PIX_QUEUE_ACTION_METHOD,
+	PIX_QUEUE_CONSUMED_METHOD,
+	PIX_QUEUE_MESSAGE_METHOD,
+	PIX_QUEUE_STATE_METHOD,
 	PIX_RELOAD_SESSION_METHOD,
+	PIX_REQUEST_HISTORY_METHOD,
+	PIX_RESUME_PATH_METHOD,
 	PIX_SESSION_IMAGE_METHOD,
 	PIX_SESSION_HISTORY_METHOD,
+	PIX_TAKE_AUTO_MESSAGE_METHOD,
 	PIX_TOOL_RESULT_METHOD,
+	parseDesktopEnhancePromptRequest,
+	parseDesktopImportSessionRequest,
+	parseDesktopQueueActionRequest,
+	parseDesktopQueueSubmitRequest,
+	parseDesktopResumePathRequest,
 	parseDesktopSessionImageRequest,
+	parseDesktopSessionHistoryRequest,
 	parseDesktopSessionRequest,
 	parseDesktopToolResultRequest,
+	type DesktopEnhancePromptRequest,
+	type DesktopEnhancePromptResponse,
+	type DesktopImportSessionRequest,
+	type DesktopQueueActionRequest,
+	type DesktopQueueActionResponse,
+	type DesktopQueueConsumedNotification,
+	type DesktopQueueItem,
+	type DesktopQueueStateResponse,
+	type DesktopQueueSubmitRequest,
+	type DesktopQueueSubmitResponse,
+	type DesktopQueuedUserMessage,
+	type DesktopRequestHistoryResponse,
+	type DesktopSessionHistoryRequest,
 	type DesktopSessionHistoryResponse,
 	type DesktopSessionImageRequest,
 	type DesktopSessionImageResponse,
 	type DesktopSessionRequest,
+	type DesktopResumePathRequest,
 	type DesktopToolResultRequest,
 	type DesktopToolResultResponse,
 	type ForkMessagesResponse,
@@ -108,11 +143,28 @@ import {
 import { loadPixDefaultModel, type PixDefaultModel } from "./default-model.js";
 import { EventTranslator } from "./event-translator.js";
 import {
+	isThinkingLevel,
+	loadPixIgnoreContextFiles,
+	loadPixCommandSettings,
+	parseModelRef as parsePixModelRef,
+	savePixAutocompleteModel,
+	savePixDefaultModel,
+	savePixDefaultThinking,
+	saveProjectPixIgnoreContextFiles,
+} from "./pix-settings.js";
+import { createPromptEnhancer, type PromptEnhancer } from "./prompt-enhancer.js";
+import {
+	loadDesktopQueues,
+	saveDesktopQueues,
+	type PersistedDesktopQueues,
+} from "./queue-store.js";
+import {
 	BUILTIN_SLASH_COMMANDS,
 	builtinFeedback,
 	builtinUsageError,
 	parseBuiltinCommand,
 	rendererCommandName,
+	unsupportedCommandName,
 	type BuiltinCommand,
 } from "./slash-commands.js";
 import { SessionMapStore, type SessionMapRecord } from "./session-map.js";
@@ -143,12 +195,15 @@ import {
 type ClientCaller = {
 	notify(method: "session/update", params: SessionNotification): Promise<void>;
 	notify(method: typeof PIX_SESSION_STATE_METHOD, params: PixSessionStateNotification): Promise<void>;
+	notify(method: typeof PIX_QUEUE_STATE_METHOD, params: DesktopQueueStateResponse): Promise<void>;
+	notify(method: typeof PIX_QUEUE_CONSUMED_METHOD, params: DesktopQueueConsumedNotification): Promise<void>;
 	request(method: "elicitation/create", params: CreateElicitationRequest): Promise<CreateElicitationResponse>;
 };
 
 // JSON-RPC server-error range; plain `throw new Error(...)` would surface
 // to the client as an opaque "Internal error".
 const ERROR_SERVER = -32000;
+let requestHistorySaveChain: Promise<void> = Promise.resolve();
 
 interface ActiveRun {
 	/** Whether the client requested cancellation before pi reported its reason. */
@@ -169,6 +224,14 @@ interface AgentSessionState {
 	readonly translator: EventTranslator;
 	activeRun: ActiveRun | undefined;
 	builtinRunning: boolean;
+	queueSessionPath: string | undefined;
+	queueRevision: number;
+	steeringQueue: string[];
+	followUpQueue: string[];
+	autoUserMessages: DesktopQueuedUserMessage[];
+	deferredUserMessages: DesktopQueuedUserMessage[];
+	trackedSteeringMessages: DesktopQueuedUserMessage[];
+	sdkQueueRestoreAfterInterrupt: { steering: string[]; followUp: string[] } | undefined;
 	/** Dialog extension UI requests awaiting an ACP elicitation answer. */
 	readonly pendingDialogIds: Set<string>;
 }
@@ -209,10 +272,17 @@ export interface PixAcpAgentOptions {
 	readonly loadTuiTabs?: (cwd: string) => Promise<TuiTabSnapshot>;
 	/** Private prompt-completion backend (overridable for hermetic tests). */
 	readonly completeAutocomplete?: AutocompleteCompleter;
+	/** Prompt enhancer backend (overridable for hermetic tests). */
+	readonly enhancePrompt?: PromptEnhancer;
 	/** Pix autocomplete config reader (overridable for hermetic tests). */
 	readonly loadAutocompleteConfig?: (cwd: string) => AutocompleteConfig;
 	/** Pix default-model reader (overridable for hermetic tests). */
 	readonly loadDefaultModel?: (cwd: string) => PixDefaultModel | undefined;
+	/** Effective Pix project-context setting (overridable for hermetic tests). */
+	readonly loadIgnoreContextFiles?: (cwd: string) => boolean;
+	/** Shared Pix queue persistence readers/writers (overridable for hermetic tests). */
+	readonly loadDesktopQueues?: (cwd: string, sessionPath: string | undefined) => Promise<PersistedDesktopQueues>;
+	readonly saveDesktopQueues?: (cwd: string, sessionPath: string | undefined, queues: PersistedDesktopQueues) => Promise<void>;
 	/** Clipboard writer (overridable for hermetic tests). */
 	readonly copyText?: (text: string) => Promise<void>;
 }
@@ -234,8 +304,12 @@ export class PixAcpAgent {
 	private readonly listPiSessions: (cwd?: string) => Promise<readonly PiSessionInfo[]>;
 	private readonly loadTuiTabs: (cwd: string) => Promise<TuiTabSnapshot>;
 	private readonly completeAutocomplete: AutocompleteCompleter;
+	private readonly enhancePrompt: PromptEnhancer;
 	private readonly loadAutocompleteConfig: (cwd: string) => AutocompleteConfig;
 	private readonly loadDefaultModel: (cwd: string) => PixDefaultModel | undefined;
+	private readonly loadIgnoreContextFiles: (cwd: string) => boolean;
+	private readonly loadDesktopQueues: (cwd: string, sessionPath: string | undefined) => Promise<PersistedDesktopQueues>;
+	private readonly saveDesktopQueues: (cwd: string, sessionPath: string | undefined, queues: PersistedDesktopQueues) => Promise<void>;
 	private readonly copyText: (text: string) => Promise<void>;
 	private disposed = false;
 	/** Advertised by the client during `initialize`; gates dialog bridging. */
@@ -250,11 +324,15 @@ export class PixAcpAgent {
 		this.loadTuiTabs = options.loadTuiTabs ?? ((cwd) => loadTuiTabSnapshot(cwd));
 		this.loadAutocompleteConfig = options.loadAutocompleteConfig ?? loadAutocompleteConfig;
 		this.loadDefaultModel = options.loadDefaultModel ?? loadPixDefaultModel;
+		this.loadIgnoreContextFiles = options.loadIgnoreContextFiles ?? loadPixIgnoreContextFiles;
+		this.loadDesktopQueues = options.loadDesktopQueues ?? ((cwd, sessionPath) => loadDesktopQueues(cwd, sessionPath));
+		this.saveDesktopQueues = options.saveDesktopQueues ?? ((cwd, sessionPath, queues) => saveDesktopQueues(cwd, sessionPath, queues));
 		this.copyText = options.copyText ?? copyTextToClipboard;
 		this.completeAutocomplete = options.completeAutocomplete ?? createAutocompleteCompleter({
 			logger: options.logger,
 			loadConfig: this.loadAutocompleteConfig,
 		});
+		this.enhancePrompt = options.enhancePrompt ?? createPromptEnhancer();
 		this.app = agent({ name: "pix-acp" })
 			.onRequest("initialize", (ctx) => {
 				this.clientCapabilities = ctx.params.clientCapabilities;
@@ -302,13 +380,40 @@ export class PixAcpAgent {
 			.onRequest("pix/autocomplete/config", parseAutocompleteSettingsRequest, (ctx) =>
 				this.autocompleteConfig(ctx.params),
 			)
+			.onRequest(PIX_ENHANCE_PROMPT_METHOD, parseDesktopEnhancePromptRequest, (ctx) =>
+				this.desktopEnhancePrompt(ctx.params, ctx.signal),
+			)
 			.onRequest(PIX_FORK_MESSAGES_METHOD, parseDesktopSessionRequest, (ctx) =>
 				this.forkMessages(ctx.params),
+			)
+			.onRequest(PIX_IMPORT_SESSION_METHOD, parseDesktopImportSessionRequest, (ctx) =>
+				this.withSessionLifecycle(ctx.params.sessionId, () => this.importSession(ctx.params)),
+			)
+			.onRequest(PIX_QUEUE_STATE_METHOD, parseDesktopSessionRequest, (ctx) =>
+				this.desktopQueueState(ctx.params),
+			)
+			.onRequest(PIX_QUEUE_MESSAGE_METHOD, parseDesktopQueueSubmitRequest, (ctx) =>
+				this.desktopQueueMessage(ctx.params),
+			)
+			.onRequest(PIX_DEFER_MESSAGE_METHOD, parseDesktopQueueSubmitRequest, (ctx) =>
+				this.desktopDeferMessage(ctx.params),
+			)
+			.onRequest(PIX_QUEUE_ACTION_METHOD, parseDesktopQueueActionRequest, (ctx) =>
+				this.desktopQueueAction(ctx.params),
+			)
+			.onRequest(PIX_TAKE_AUTO_MESSAGE_METHOD, parseDesktopSessionRequest, (ctx) =>
+				this.desktopTakeAutoMessage(ctx.params),
 			)
 			.onRequest(PIX_RELOAD_SESSION_METHOD, parseDesktopSessionRequest, (ctx) =>
 				this.withSessionLifecycle(ctx.params.sessionId, () => this.reloadSession(ctx.params, ctx.client)),
 			)
-			.onRequest(PIX_SESSION_HISTORY_METHOD, parseDesktopSessionRequest, (ctx) =>
+			.onRequest(PIX_REQUEST_HISTORY_METHOD, parseDesktopSessionRequest, (ctx) =>
+				this.desktopRequestHistory(ctx.params),
+			)
+			.onRequest(PIX_RESUME_PATH_METHOD, parseDesktopResumePathRequest, (ctx) =>
+				this.withSessionLifecycle(ctx.params.sessionId, () => this.resumePath(ctx.params)),
+			)
+			.onRequest(PIX_SESSION_HISTORY_METHOD, parseDesktopSessionHistoryRequest, (ctx) =>
 				this.desktopSessionHistory(ctx.params),
 			)
 			.onRequest(PIX_TOOL_RESULT_METHOD, parseDesktopToolResultRequest, (ctx) =>
@@ -373,6 +478,19 @@ export class PixAcpAgent {
 		return autocompleteSettings(this.loadAutocompleteConfig(session.cwd));
 	}
 
+	private async desktopEnhancePrompt(
+		params: DesktopEnhancePromptRequest,
+		signal: AbortSignal,
+	): Promise<DesktopEnhancePromptResponse> {
+		const session = this.sessions.get(params.sessionId);
+		if (!session) throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
+		if (session.activeRun || session.builtinRunning) {
+			throw new RequestError(ERROR_SERVER, "prompt enhancement is unavailable while the agent is running");
+		}
+		const prompt = await this.enhancePrompt({ cwd: session.cwd, draft: params.draft, signal });
+		return { prompt };
+	}
+
 	private async forkMessages(params: DesktopSessionRequest): Promise<ForkMessagesResponse> {
 		const session = this.sessions.get(params.sessionId);
 		if (!session) throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
@@ -382,7 +500,253 @@ export class PixAcpAgent {
 		return { messages: await session.pi.getForkMessages() };
 	}
 
-	private async desktopSessionHistory(params: DesktopSessionRequest): Promise<DesktopSessionHistoryResponse> {
+	private async desktopRequestHistory(params: DesktopSessionRequest): Promise<DesktopRequestHistoryResponse> {
+		if (!this.sessions.has(params.sessionId)) throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
+		return { entries: await readRequestHistoryEntries() };
+	}
+
+	private async desktopQueueState(params: DesktopSessionRequest): Promise<DesktopQueueStateResponse> {
+		const session = this.requireDesktopSession(params.sessionId);
+		await this.ensureDesktopQueuesLoaded(session);
+		return this.desktopQueueSnapshot(session);
+	}
+
+	private async desktopQueueMessage(params: DesktopQueueSubmitRequest): Promise<DesktopQueueSubmitResponse> {
+		const session = this.requireDesktopSession(params.sessionId);
+		await this.ensureDesktopQueuesLoaded(session);
+		const message = await this.desktopQueuedMessage(params);
+		if (this.clientName === "pix-desktop" && message.displayText.trim()) {
+			void queueRequestHistoryEntry(message.displayText).catch(() => undefined);
+		}
+		const state = await session.pi.getState();
+		if (state.isStreaming && !state.isCompacting) {
+			const revision = session.queueRevision;
+			await session.pi.steer(message.promptText, queueMessageImages(message));
+			session.trackedSteeringMessages.push(cloneQueuedUserMessage(message));
+			// queue_update normally arrives before the RPC response. Keep an
+			// optimistic copy only when it did not, so the Desktop never shows a
+			// missing row after Enter during streaming.
+			if (session.queueRevision === revision) {
+				session.steeringQueue.push(message.promptText);
+				session.queueRevision += 1;
+			}
+			await this.notifyDesktopQueueState(session);
+			return { disposition: "steering", itemId: message.id };
+		}
+
+		// This is the same local race/compaction queue as Pix TUI. It covers the
+		// short window where an ACP prompt is admitted but Pi has not started
+		// streaming yet, plus explicit compaction periods.
+		session.autoUserMessages.push(cloneQueuedUserMessage(message));
+		await this.persistDesktopQueues(session);
+		await this.notifyDesktopQueueState(session);
+		return { disposition: "auto", itemId: message.id };
+	}
+
+	private async desktopDeferMessage(params: DesktopQueueSubmitRequest): Promise<DesktopQueueSubmitResponse> {
+		const session = this.requireDesktopSession(params.sessionId);
+		await this.ensureDesktopQueuesLoaded(session);
+		const message = await this.desktopQueuedMessage(params);
+		if (this.clientName === "pix-desktop" && message.displayText.trim()) {
+			void queueRequestHistoryEntry(message.displayText).catch(() => undefined);
+		}
+		session.deferredUserMessages.push(cloneQueuedUserMessage(message));
+		await this.persistDesktopQueues(session);
+		await this.notifyDesktopQueueState(session);
+		return { disposition: "deferred", itemId: message.id };
+	}
+
+	private async desktopTakeAutoMessage(params: DesktopSessionRequest): Promise<DesktopQueueActionResponse> {
+		const session = this.requireDesktopSession(params.sessionId);
+		await this.ensureDesktopQueuesLoaded(session);
+		const state = await session.pi.getState();
+		if (session.activeRun || session.builtinRunning || state.isStreaming || state.isCompacting) return {};
+		const message = session.autoUserMessages.shift();
+		if (!message) return {};
+		await this.persistDesktopQueues(session);
+		await this.notifyDesktopQueueState(session);
+		return { message: cloneQueuedUserMessage(message) };
+	}
+
+	private async desktopQueueAction(params: DesktopQueueActionRequest): Promise<DesktopQueueActionResponse> {
+		const session = this.requireDesktopSession(params.sessionId);
+		await this.ensureDesktopQueuesLoaded(session);
+		const state = await session.pi.getState();
+		const interruptRequired = params.action === "send-now"
+			&& (Boolean(session.activeRun) || state.isStreaming || state.isCompacting === true);
+
+		let removed: DesktopQueuedUserMessage;
+		if (params.source === "auto" || params.source === "deferred") {
+			const source = params.source === "auto" ? session.autoUserMessages : session.deferredUserMessages;
+			const candidate = source[params.index];
+			if (!candidate || candidate.displayText !== params.text) throw queueItemMissingError();
+			removed = source.splice(params.index, 1)[0]!;
+			await this.persistDesktopQueues(session);
+			if (interruptRequired) {
+				const queued = await session.pi.clearQueue();
+				session.sdkQueueRestoreAfterInterrupt = {
+					steering: [...queued.steering],
+					followUp: [...queued.followUp],
+				};
+				session.steeringQueue = [];
+				session.followUpQueue = [];
+			}
+		} else {
+			const sdk = await session.pi.clearQueue();
+			const steering = [...sdk.steering];
+			const followUp = [...sdk.followUp];
+			const messages = params.source === "sdk-steering" ? steering : followUp;
+			if (messages[params.index] !== params.text) {
+				await this.restoreSdkQueues(session, sdk).catch(() => undefined);
+				throw queueItemMissingError();
+			}
+			messages.splice(params.index, 1);
+			const tracked = params.source === "sdk-steering"
+				? takeTrackedSteeringMessage(session.trackedSteeringMessages, sdk.steering, params.index)
+				: undefined;
+			removed = tracked ?? textOnlyQueuedMessage(params.text);
+
+			if (interruptRequired) {
+				session.sdkQueueRestoreAfterInterrupt = { steering, followUp };
+				session.steeringQueue = [];
+				session.followUpQueue = [];
+			} else {
+				await this.restoreSdkQueues(session, { steering, followUp });
+			}
+		}
+
+		await this.notifyDesktopQueueState(session);
+		if (params.action === "cancel") return {};
+		if (params.action === "send-now" && interruptRequired) {
+			await this.interruptForQueuedSend(session);
+		}
+		return {
+			message: cloneQueuedUserMessage(removed),
+		};
+	}
+
+	private async interruptForQueuedSend(session: AgentSessionState): Promise<void> {
+		const hadActiveRun = Boolean(session.activeRun);
+		await session.pi.abort();
+		const deadline = Date.now() + 5_000;
+		while (Date.now() < deadline) {
+			const state = await session.pi.getState();
+			if (!state.isStreaming && !state.isCompacting) break;
+			await new Promise<void>((resolveWait) => setTimeout(resolveWait, 25));
+		}
+		const state = await session.pi.getState();
+		if (state.isStreaming || state.isCompacting) {
+			throw new RequestError(ERROR_SERVER, "timed out interrupting the current work before sending the queued message");
+		}
+
+		// `agent_settled` restores the remaining SDK queue for an active prompt.
+		// Compaction can be busy without an ACP active run, so restore it here.
+		if (!hadActiveRun && session.sdkQueueRestoreAfterInterrupt) {
+			const queues = session.sdkQueueRestoreAfterInterrupt;
+			session.sdkQueueRestoreAfterInterrupt = undefined;
+			await this.restoreSdkQueues(session, queues);
+		}
+
+		while (hadActiveRun && (session.activeRun || session.sdkQueueRestoreAfterInterrupt) && Date.now() < deadline) {
+			await new Promise<void>((resolveWait) => setTimeout(resolveWait, 25));
+		}
+		if (session.activeRun || session.sdkQueueRestoreAfterInterrupt) {
+			throw new RequestError(ERROR_SERVER, "current prompt did not settle after interruption");
+		}
+	}
+
+	private requireDesktopSession(sessionId: string): AgentSessionState {
+		const session = this.sessions.get(sessionId);
+		if (!session) throw new RequestError(ERROR_SERVER, `unknown session ${sessionId}`);
+		return session;
+	}
+
+	private async desktopQueuedMessage(params: DesktopQueueSubmitRequest): Promise<DesktopQueuedUserMessage> {
+		const fileImages = desktopPromptFileImages(params as unknown as PromptRequest);
+		const input = await collectPromptInput(params.prompt, fileImages);
+		return {
+			id: randomUUID(),
+			promptText: input.text,
+			displayText: params.displayText.trimEnd() || input.text,
+			images: input.images.map((image) => ({ ...image })),
+		};
+	}
+
+	private async ensureDesktopQueuesLoaded(session: AgentSessionState): Promise<void> {
+		const state = await session.pi.getState();
+		const sessionPath = state.sessionFile ? resolve(state.sessionFile) : undefined;
+		if (session.queueSessionPath === sessionPath) return;
+		const persisted = await this.loadDesktopQueues(session.cwd, sessionPath);
+		session.queueSessionPath = sessionPath;
+		session.autoUserMessages = persisted.auto.map(cloneQueuedUserMessage);
+		session.deferredUserMessages = persisted.deferred.map(cloneQueuedUserMessage);
+	}
+
+	private async persistDesktopQueues(session: AgentSessionState): Promise<void> {
+		await this.ensureDesktopQueuesLoaded(session);
+		await this.saveDesktopQueues(session.cwd, session.queueSessionPath, {
+			auto: session.autoUserMessages,
+			deferred: session.deferredUserMessages,
+		});
+	}
+
+	private desktopQueueSnapshot(session: AgentSessionState): DesktopQueueStateResponse {
+		const steering = session.steeringQueue.map((text, index): DesktopQueueItem => ({
+			id: queueSdkItemId("sdk-steering", index, text),
+			source: "sdk-steering",
+			mode: "steering",
+			index,
+			text,
+			...(trackedSteeringMessageAt(session.trackedSteeringMessages, session.steeringQueue, index)
+				? { message: trackedSteeringMessageAt(session.trackedSteeringMessages, session.steeringQueue, index)! }
+				: {}),
+		}));
+		const followUp = session.followUpQueue.map((text, index): DesktopQueueItem => ({
+			id: queueSdkItemId("sdk-follow-up", index, text),
+			source: "sdk-follow-up",
+			mode: "follow-up",
+			index,
+			text,
+		}));
+		const auto = session.autoUserMessages.map((message, index): DesktopQueueItem => ({
+			id: `auto:${message.id}`,
+			source: "auto",
+			mode: "steering",
+			index,
+			text: message.displayText,
+			message: cloneQueuedUserMessage(message),
+		}));
+		const deferred = session.deferredUserMessages.map((message, index): DesktopQueueItem => ({
+			id: `deferred:${message.id}`,
+			source: "deferred",
+			mode: "steering",
+			index,
+			text: message.displayText,
+			message: cloneQueuedUserMessage(message),
+		}));
+		return { sessionId: session.acpSessionId, items: [...steering, ...followUp, ...auto, ...deferred] };
+	}
+
+	private async notifyDesktopQueueState(session: AgentSessionState): Promise<void> {
+		if (this.sessions.get(session.acpSessionId) !== session) return;
+		await session.client.notify(PIX_QUEUE_STATE_METHOD, this.desktopQueueSnapshot(session)).catch((error: unknown) => {
+			this.options.logger.warn(`${PIX_QUEUE_STATE_METHOD} failed: ${stringifyUnknown(error)}`);
+		});
+	}
+
+	private async restoreSdkQueues(
+		session: AgentSessionState,
+		queues: { steering: readonly string[]; followUp: readonly string[] },
+	): Promise<void> {
+		for (const text of queues.steering) await session.pi.steer(text);
+		for (const text of queues.followUp) await session.pi.followUp(text);
+		session.steeringQueue = [...queues.steering];
+		session.followUpQueue = [...queues.followUp];
+		session.queueRevision += 1;
+		await this.notifyDesktopQueueState(session);
+	}
+
+	private async desktopSessionHistory(params: DesktopSessionHistoryRequest): Promise<DesktopSessionHistoryResponse> {
 		const [record, session] = await Promise.all([
 			this.sessionMap.get(params.sessionId),
 			Promise.resolve(this.sessions.get(params.sessionId)),
@@ -390,7 +754,7 @@ export class PixAcpAgent {
 		if (!record?.piSessionPath && !session) throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
 		const cwd = session?.cwd ?? record!.cwd;
 		const context = { sessionId: params.sessionId, cwd };
-		const persisted = record?.piSessionPath
+		const persisted = !params.full && record?.piSessionPath
 			? await readPersistedHistoryTail(record.piSessionPath)
 			: undefined;
 		const history = persisted
@@ -491,6 +855,74 @@ export class PixAcpAgent {
 			);
 		}
 		return response;
+	}
+
+	private async resumePath(params: DesktopResumePathRequest): Promise<{ configOptions?: SessionConfigOption[] }> {
+		const session = this.sessions.get(params.sessionId);
+		if (!session) throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
+		if (session.activeRun || session.builtinRunning) {
+			throw new RequestError(ERROR_SERVER, "resume is unavailable while the agent is running");
+		}
+		const state = await session.pi.getState();
+		if (state.isStreaming || state.isCompacting) {
+			throw new RequestError(ERROR_SERVER, "resume is unavailable while the session is busy");
+		}
+
+		const sessionPath = resolve(session.cwd, commandPathArgument(params.path) ?? params.path);
+		const switched = await session.pi.switchSession(sessionPath);
+		if (switched.cancelled) {
+			throw new RequestError(ERROR_SERVER, "session switch cancelled by an extension");
+		}
+		await this.syncSessionRecord(session);
+		const configOptions = await this.safeConfigOptions(session.pi);
+		this.scheduleAvailableCommands(session);
+		return configOptions ? { configOptions } : {};
+	}
+
+	private async importSession(params: DesktopImportSessionRequest): Promise<{ configOptions?: SessionConfigOption[] }> {
+		const session = this.sessions.get(params.sessionId);
+		if (!session) throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
+		if (session.activeRun || session.builtinRunning) {
+			throw new RequestError(ERROR_SERVER, "import is unavailable while the agent is running");
+		}
+		const state = await session.pi.getState();
+		if (state.isStreaming || state.isCompacting) {
+			throw new RequestError(ERROR_SERVER, "import is unavailable while the session is busy");
+		}
+		if (!state.sessionFile) throw new RequestError(ERROR_SERVER, "current session has no persisted session file");
+
+		const sourcePath = resolve(session.cwd, commandPathArgument(params.path) ?? params.path);
+		const sourceStat = await stat(sourcePath).catch(() => undefined);
+		if (!sourceStat?.isFile()) throw new RequestError(ERROR_SERVER, `import file not found: ${sourcePath}`);
+
+		const sessionDir = SessionManager.open(state.sessionFile).getSessionDir();
+		await mkdir(sessionDir, { recursive: true });
+		let destinationPath = join(sessionDir, basename(sourcePath));
+		const sourceAlreadyStored = resolve(destinationPath) === sourcePath;
+		if (!sourceAlreadyStored) {
+			const parsed = parse(destinationPath);
+			let suffix = 1;
+			while (await pathExists(destinationPath)) {
+				destinationPath = join(sessionDir, `${parsed.name}-${suffix++}${parsed.ext}`);
+			}
+			await copyFile(sourcePath, destinationPath);
+		}
+
+		try {
+			const switched = await session.pi.switchSession(destinationPath);
+			if (switched.cancelled) {
+				if (!sourceAlreadyStored) await rm(destinationPath, { force: true }).catch(() => undefined);
+				throw new RequestError(ERROR_SERVER, "session import cancelled by an extension");
+			}
+		} catch (error) {
+			if (!sourceAlreadyStored) await rm(destinationPath, { force: true }).catch(() => undefined);
+			throw error;
+		}
+
+		await this.syncSessionRecord(session);
+		const configOptions = await this.safeConfigOptions(session.pi);
+		this.scheduleAvailableCommands(session);
+		return configOptions ? { configOptions } : {};
 	}
 
 	private async newSession(
@@ -655,10 +1087,17 @@ export class PixAcpAgent {
 	}
 
 	private async deleteSession(sessionId: string): Promise<void> {
+		const record = await this.sessionMap.get(sessionId);
 		this.desktopDeferredToolResults.delete(sessionId);
 		this.desktopDeferredImages.delete(sessionId);
 		if (this.pendingDesktopNewSessions.has(sessionId) || this.sessions.has(sessionId)) {
 			await this.closeSession(sessionId);
+		}
+		if (record?.piSessionPath) {
+			await rm(record.piSessionPath, { force: true }).catch((error: unknown) => {
+				throw new RequestError(ERROR_SERVER, `failed to delete session file: ${stringifyUnknown(error)}`);
+			});
+			if (record.piSessionId) await removeSessionSidecarState(record.piSessionPath, record.piSessionId);
 		}
 		await this.sessionMap.delete(sessionId);
 		this.options.logger.info(`session/delete: ${sessionId}`);
@@ -757,6 +1196,7 @@ export class PixAcpAgent {
 			cwd,
 			defaultModel,
 			this.options.questionExtensionPath,
+			this.loadIgnoreContextFiles(cwd),
 		));
 		const translator = new EventTranslator({ sessionId: acpSessionId, cwd });
 		const session: AgentSessionState = {
@@ -767,6 +1207,14 @@ export class PixAcpAgent {
 			translator,
 			activeRun: undefined,
 			builtinRunning: false,
+			queueSessionPath: undefined,
+			queueRevision: 0,
+			steeringQueue: [],
+			followUpQueue: [],
+			autoUserMessages: [],
+			deferredUserMessages: [],
+			trackedSteeringMessages: [],
+			sdkQueueRestoreAfterInterrupt: undefined,
 			pendingDialogIds: new Set(),
 		};
 		// Register routing before start so session_start extension state emitted
@@ -791,6 +1239,7 @@ export class PixAcpAgent {
 			throw new RequestError(ERROR_SERVER, "adapter is shutting down");
 		}
 		pi.onExit((error) => this.onPiExit(session, error));
+		await this.ensureDesktopQueuesLoaded(session);
 		return session;
 	}
 
@@ -893,6 +1342,27 @@ export class PixAcpAgent {
 			void this.handleExtensionUiRequest(session, event);
 			return;
 		}
+		if (event.type === "queue_update") {
+			session.steeringQueue = [...event.steering];
+			session.followUpQueue = [...event.followUp];
+			session.queueRevision += 1;
+			void this.notifyDesktopQueueState(session);
+		}
+		if (event.type === "message_start" && isRecord(event.message) && event.message.role === "user") {
+			const text = queuedUserMessageText(event.message);
+			const index = session.trackedSteeringMessages.findIndex((message) => message.promptText === text);
+			if (index >= 0) {
+				const [message] = session.trackedSteeringMessages.splice(index, 1);
+				if (message) {
+					void session.client.notify(PIX_QUEUE_CONSUMED_METHOD, {
+						sessionId: session.acpSessionId,
+						message: cloneQueuedUserMessage(message),
+					}).catch((error: unknown) => {
+						this.options.logger.warn(`${PIX_QUEUE_CONSUMED_METHOD} failed: ${stringifyUnknown(error)}`);
+					});
+				}
+			}
+		}
 		this.dispatchSessionEvent(session, event);
 	}
 
@@ -987,6 +1457,17 @@ export class PixAcpAgent {
 				// Ignore a late duplicate settlement from the prior run. An early
 				// cancellation is the only valid run that can settle before start.
 				if (!run.started && !run.cancelled) return;
+				if (session.sdkQueueRestoreAfterInterrupt) {
+					const queues = session.sdkQueueRestoreAfterInterrupt;
+					session.sdkQueueRestoreAfterInterrupt = undefined;
+					void this.restoreSdkQueues(session, queues)
+						.then(() => this.resolveActiveRun(session, run.cancelled ? "cancelled" : (run.stopReason ?? "end_turn")))
+						.catch((error: unknown) => this.rejectActiveRun(
+							session,
+							error instanceof Error ? error : new Error(stringifyUnknown(error)),
+						));
+					return;
+				}
 				this.resolveActiveRun(session, run.cancelled ? "cancelled" : (run.stopReason ?? "end_turn"));
 				return;
 			default:
@@ -1034,6 +1515,18 @@ export class PixAcpAgent {
 				ERROR_SERVER,
 				`/${rendererCommand} requires Pix renderer UI and is not available as an ACP prompt command`,
 			);
+		}
+		const unsupportedCommand = unsupportedCommandName(input.text);
+		if (unsupportedCommand) {
+			throw new RequestError(
+				ERROR_SERVER,
+				`/${unsupportedCommand} is intentionally not supported in Pix Desktop`,
+			);
+		}
+		if (this.clientName === "pix-desktop" && !isSlashPrompt && input.text.trim()) {
+			void queueRequestHistoryEntry(input.text).catch((error: unknown) => {
+				this.options.logger.debug(`request history save failed: ${stringifyUnknown(error)}`);
+			});
 		}
 
 		const run: ActiveRun = {
@@ -1090,6 +1583,23 @@ export class PixAcpAgent {
 	private async executeBuiltin(session: AgentSessionState, command: BuiltinCommand): Promise<PromptResponse> {
 		let detail: string | undefined;
 		switch (command.kind) {
+			case "settings": {
+				const [state, levels] = await Promise.all([
+					session.pi.getState(),
+					session.pi.getAvailableThinkingLevels(),
+				]);
+				const pix = loadPixCommandSettings();
+				const settings = SettingsManager.create(session.cwd);
+				detail = formatSettingsSummary(
+					state,
+					pix,
+					settings.getEnabledModels(),
+					levels,
+					settings.getTheme(),
+					settings.getEnableSkillCommands(),
+				);
+				break;
+			}
 			case "compact": {
 				const result = await session.pi.compact(command.instructions);
 				const after = result.estimatedTokensAfter === undefined ? "?" : String(result.estimatedTokensAfter);
@@ -1109,8 +1619,151 @@ export class PixAcpAgent {
 				break;
 			}
 			case "export": {
-				const result = await session.pi.exportHtml(command.outputPath);
-				detail = `exported to ${result.path}`;
+				const outputPath = commandPathArgument(command.outputPath);
+				if (outputPath?.toLowerCase().endsWith(".jsonl")) {
+					const state = await session.pi.getState();
+					if (!state.sessionFile) throw new RequestError(ERROR_SERVER, "session has no JSONL file to export");
+					const destination = resolve(session.cwd, outputPath);
+					if (resolve(state.sessionFile) === destination) {
+						throw new RequestError(ERROR_SERVER, "export destination is the active session file");
+					}
+					await mkdir(dirname(destination), { recursive: true });
+					await copyFile(state.sessionFile, destination);
+					detail = `exported JSONL to ${destination}`;
+				} else {
+					const destination = outputPath ? resolve(session.cwd, outputPath) : undefined;
+					const result = await session.pi.exportHtml(destination);
+					detail = `exported HTML to ${result.path}`;
+				}
+				break;
+			}
+			case "default-model": {
+				const models = await session.pi.getAvailableModels();
+				let value = command.value;
+				if (value === undefined) {
+					value = await this.elicitBuiltinString(session, {
+						title: "Default model",
+						message: "Choose the model used for new Pix sessions.",
+						options: models.map((model) => `${model.provider}/${model.id}`),
+					});
+					if (value === undefined) return { stopReason: "cancelled" };
+				}
+				const parsed = parsePixModelRef(value);
+				if (!parsed || !models.some((model) => model.provider === parsed.provider && model.id === parsed.modelId)) {
+					throw new RequestError(ERROR_SERVER, `unknown model "${value}"`);
+				}
+				const saved = savePixDefaultModel(value);
+				detail = `default model: ${saved}`;
+				break;
+			}
+			case "autocomplete": {
+				const models = await session.pi.getAvailableModels();
+				let value = command.value;
+				if (value === undefined) {
+					const disabled = "Disabled";
+					const selected = await this.elicitBuiltinString(session, {
+						title: "Inline autocomplete",
+						message: "Choose an autocomplete model, or disable inline autocomplete.",
+						options: [disabled, ...models.map((model) => `${model.provider}/${model.id}`)],
+					});
+					if (selected === undefined) return { stopReason: "cancelled" };
+					value = selected === disabled ? "off" : selected;
+				}
+				if (["off", "disable", "disabled"].includes(value.toLowerCase())) {
+					savePixAutocompleteModel("");
+					detail = "inline autocomplete disabled";
+					break;
+				}
+				const parsed = parsePixModelRef(value);
+				if (!parsed || !models.some((model) => model.provider === parsed.provider && model.id === parsed.modelId)) {
+					throw new RequestError(ERROR_SERVER, `unknown autocomplete model "${value}"`);
+				}
+				const saved = savePixAutocompleteModel(value);
+				detail = `autocomplete model: ${saved}`;
+				break;
+			}
+			case "no-context-files": {
+				let value = command.value;
+				if (value === undefined) {
+					value = await this.elicitBuiltinString(session, {
+						title: "Project context files",
+						message: [
+							`Context file loading is currently ${loadPixIgnoreContextFiles(session.cwd) ? "disabled" : "enabled"}.`,
+							"Choose on to disable AGENTS.md/CLAUDE.md loading, or off to enable it.",
+						].join("\n"),
+						options: ["on", "off"],
+					});
+					if (value === undefined) return { stopReason: "cancelled" };
+				}
+				const disabled = value.toLowerCase() === "on";
+				saveProjectPixIgnoreContextFiles(session.cwd, disabled);
+				detail = `project context files ${disabled ? "disabled" : "enabled"}; reloading the session applies the change`;
+				break;
+			}
+			case "scoped-models": {
+				const models = await session.pi.getAvailableModels();
+				const settings = SettingsManager.create(session.cwd);
+				let value = command.value;
+				if (value === undefined) {
+					const current = settings.getEnabledModels() ?? [];
+					value = await this.elicitBuiltinString(session, {
+						title: "Scoped models",
+						message: [
+							"Enter one or more provider/model[:thinking] references separated by spaces or commas.",
+							"Enter reset to use all available models.",
+							`Available: ${models.map((model) => `${model.provider}/${model.id}`).join(", ")}`,
+						].join("\n"),
+						defaultValue: current.join(" "),
+					});
+					if (value === undefined) return { stopReason: "cancelled" };
+				}
+				if (["reset", "default", "clear"].includes(value.trim().toLowerCase())) {
+					settings.setEnabledModels(undefined);
+					detail = "model scope reset to all available models; reload the session to apply it to cycling";
+					break;
+				}
+				const refs = value.split(/[,\s]+/u).map((ref) => ref.trim()).filter(Boolean);
+				if (refs.length === 0) throw new RequestError(ERROR_SERVER, "no model references provided");
+				for (const ref of refs) {
+					const parsed = parsePixModelRef(ref);
+					if (!parsed || !models.some((model) => model.provider === parsed.provider && model.id === parsed.modelId)) {
+						throw new RequestError(ERROR_SERVER, `unknown model reference "${ref}"`);
+					}
+				}
+				settings.setEnabledModels(refs);
+				detail = `scoped models saved: ${refs.join(", ")}; reload the session to apply them to cycling`;
+				break;
+			}
+			case "default-thinking": {
+				const state = await session.pi.getState();
+				const levels = await session.pi.getAvailableThinkingLevels();
+				let level = command.level;
+				if (level === undefined) {
+					level = await this.elicitBuiltinString(session, {
+						title: "Default thinking",
+						message: "Choose the thinking level used for new Pix sessions.",
+						options: levels,
+					});
+					if (level === undefined) return { stopReason: "cancelled" };
+				}
+				if (!isThinkingLevel(level) || !levels.includes(level)) {
+					throw new RequestError(ERROR_SERVER, `unknown thought level "${level}"; available: ${levels.join(", ")}`);
+				}
+				const fallbackModel = state.model ? `${state.model.provider}/${state.model.id}` : undefined;
+				const saved = savePixDefaultThinking(level, fallbackModel);
+				detail = `default thinking: ${saved}`;
+				break;
+			}
+			case "share": {
+				detail = await shareSessionAsGist(session);
+				break;
+			}
+			case "changelog": {
+				detail = await readPiChangelog();
+				break;
+			}
+			case "update": {
+				detail = await formatPixUpdateReport(command.argumentsText);
 				break;
 			}
 			case "autocompact": {
@@ -1135,12 +1788,22 @@ export class PixAcpAgent {
 						? `switched to ${cycled.model.provider}/${cycled.model.id}`
 						: "no other model available";
 				} else {
-					const parsed = parseModelValue(command.value);
+					const parsed = parsePixModelRef(command.value);
 					if (!parsed) {
-						throw new RequestError(ERROR_SERVER, `invalid model "${command.value}"; expected provider/modelId`);
+						throw new RequestError(ERROR_SERVER, `invalid model "${command.value}"; expected provider/modelId[:thinking]`);
 					}
 					const model = await session.pi.setModel(parsed.provider, parsed.modelId);
-					detail = `switched to ${model.provider}/${model.id}`;
+					if (parsed.thinkingLevel !== undefined) {
+						const levels = await session.pi.getAvailableThinkingLevels();
+						if (!levels.includes(parsed.thinkingLevel)) {
+							throw new RequestError(
+								ERROR_SERVER,
+								`unknown thought level "${parsed.thinkingLevel}"; available: ${levels.join(", ")}`,
+							);
+						}
+						await session.pi.setThinkingLevel(parsed.thinkingLevel);
+					}
+					detail = `switched to ${model.provider}/${model.id}${parsed.thinkingLevel ? `:${parsed.thinkingLevel}` : ""}`;
 				}
 				break;
 			}
@@ -1164,6 +1827,22 @@ export class PixAcpAgent {
 				detail = formatSessionStats(state, stats);
 				break;
 			}
+			case "usage": {
+				detail = await formatPixAccountUsage();
+				if (!detail) detail = formatUsageStats(await session.pi.getSessionStats());
+				break;
+			}
+			case "tree": {
+				if (command.targetId) {
+					throw new RequestError(
+						ERROR_SERVER,
+						"/tree navigation is not exposed by Pi RPC 0.85.1; run /tree without an entry id to inspect the tree",
+					);
+				}
+				const tree = await session.pi.getTree();
+				detail = formatSessionTree(tree.tree, tree.leafId);
+				break;
+			}
 			case "clone": {
 				const result = await session.pi.clone();
 				if (result.cancelled) {
@@ -1185,6 +1864,42 @@ export class PixAcpAgent {
 		await this.sessionMap.touch(session.acpSessionId);
 		await this.notifyAvailableCommands(session);
 		return { stopReason: "end_turn" };
+	}
+
+	private async elicitBuiltinString(
+		session: AgentSessionState,
+		options: {
+			readonly title: string;
+			readonly message: string;
+			readonly options?: readonly string[];
+			readonly defaultValue?: string;
+		},
+	): Promise<string | undefined> {
+		if (this.clientCapabilities?.elicitation?.form == null) {
+			throw new RequestError(ERROR_SERVER, "this command requires interactive form support or an explicit argument");
+		}
+		const property: Record<string, unknown> = {
+			type: "string",
+			title: options.title,
+			...(options.options && options.options.length > 0 ? { enum: [...options.options] } : {}),
+			...(options.defaultValue !== undefined ? { default: options.defaultValue } : {}),
+		};
+		const request = {
+			mode: "form",
+			elicitationId: randomUUID(),
+			sessionId: session.acpSessionId,
+			message: options.message,
+			requestedSchema: {
+				type: "object",
+				title: options.title,
+				properties: { value: property },
+				required: ["value"],
+			},
+		} as CreateElicitationRequest;
+		const response = await session.client.request("elicitation/create", request);
+		if (response.action !== "accept") return undefined;
+		const content = (response as { content?: Record<string, unknown> | null }).content;
+		return typeof content?.value === "string" ? content.value.trim() : undefined;
 	}
 
 	/** Defer initial discovery until the session response has attached client-side update routing. */
@@ -1244,7 +1959,7 @@ export class PixAcpAgent {
 			sessionId: session.acpSessionId,
 			update: {
 				sessionUpdate: "agent_message_chunk",
-				messageId: randomUUID(),
+				messageId: `pix-system:${randomUUID()}`,
 				content: { type: "text", text },
 			},
 		};
@@ -1349,7 +2064,12 @@ function piClientOptions(
 	cwd: string,
 	defaultModel?: PixDefaultModel,
 	questionExtensionPath?: string,
+	ignoreContextFiles = false,
 ): PiRpcClientOptions {
+	const args = [
+		...(questionExtensionPath ? ["--extension", questionExtensionPath] : []),
+		...(ignoreContextFiles ? ["--no-context-files"] : []),
+	];
 	const base = {
 		piEntry,
 		cwd,
@@ -1357,7 +2077,7 @@ function piClientOptions(
 			PIX_ACP_SESSION_STATE_BRIDGE: "1",
 			...(questionExtensionPath ? { PIX_QUESTION_RPC_BRIDGE: "1" } : {}),
 		},
-		...(questionExtensionPath ? { args: ["--extension", questionExtensionPath] } : {}),
+		...(args.length > 0 ? { args } : {}),
 	};
 	if (!defaultModel) return base;
 	const selected = {
@@ -1432,6 +2152,336 @@ function formatSessionStats(state: PiSessionState, stats: PiSessionStats): strin
 	];
 	if (stats.cost > 0) lines.push(`- Cost: $${stats.cost.toFixed(3)}`);
 	return lines.join("\n");
+}
+
+function formatUsageStats(stats: PiSessionStats): string {
+	return [
+		"**Usage**",
+		`- Input: ${stats.tokens.input}`,
+		`- Output: ${stats.tokens.output}`,
+		`- Cache read: ${stats.tokens.cacheRead}`,
+		`- Cache write: ${stats.tokens.cacheWrite}`,
+		`- Total: ${stats.tokens.total}`,
+		...(stats.cost > 0 ? [`- Cost: $${stats.cost.toFixed(4)}`] : []),
+	].join("\n");
+}
+
+async function formatPixAccountUsage(): Promise<string | undefined> {
+	type AccountUsageModule = {
+		queryAccountUsageReport?: () => Promise<unknown>;
+		formatAccountUsageReport?: (report: unknown) => string;
+	};
+	try {
+		// Pix Desktop builds the shared TUI package before pix-acp. Reuse the
+		// exact account-quota implementation rather than duplicating provider
+		// auth/refresh logic here. Standalone ACP builds safely fall back to
+		// session token stats when the sibling Pix dist is unavailable.
+		const moduleUrl = new URL("../../../dist/app/model/model-usage-status.js", import.meta.url).href;
+		const usage = await import(moduleUrl) as AccountUsageModule;
+		if (!usage.queryAccountUsageReport || !usage.formatAccountUsageReport) return undefined;
+		const report = await usage.queryAccountUsageReport();
+		const text = usage.formatAccountUsageReport(report).trim();
+		return text || undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+function formatSettingsSummary(
+	state: PiSessionState,
+	pix: ReturnType<typeof loadPixCommandSettings>,
+	enabledModels: readonly string[] | undefined,
+	levels: readonly string[],
+	theme: string | undefined,
+	skillCommandsEnabled: boolean,
+): string {
+	const currentModel = state.model ? `${state.model.provider}/${state.model.id}` : "not selected";
+	const defaultModel = pix.defaultModel
+		? `${pix.defaultModel.provider}/${pix.defaultModel.modelId}${pix.defaultModel.thinkingLevel ? `:${pix.defaultModel.thinkingLevel}` : ""}`
+		: "Pi default";
+	return [
+		"**Settings**",
+		`- Model: ${currentModel}`,
+		`- Thinking: ${state.thinkingLevel}`,
+		`- Available thinking: ${levels.join(", ") || "none"}`,
+		`- Default model: ${defaultModel}`,
+		`- Autocomplete: ${pix.autocompleteModelRef || "disabled"}`,
+		`- Scoped models: ${enabledModels?.length ? enabledModels.join(", ") : "all available models"}`,
+		`- Theme: ${theme ?? "default"}`,
+		`- Skill commands: ${skillCommandsEnabled ? "enabled" : "disabled"}`,
+		`- Auto compaction: ${state.autoCompactionEnabled === undefined ? "unknown" : state.autoCompactionEnabled ? "enabled" : "disabled"}`,
+		`- Steering mode: ${state.steeringMode ?? "unknown"}`,
+		`- Follow-up mode: ${state.followUpMode ?? "unknown"}`,
+	].join("\n");
+}
+
+function formatSessionTree(tree: readonly PiSessionTreeNode[], leafId: string | null): string {
+	if (tree.length === 0) return "**Session tree**\n(empty)";
+	const lines = ["**Session tree**"];
+	const visit = (nodes: readonly PiSessionTreeNode[], depth: number): void => {
+		for (const node of nodes) {
+			const id = typeof node.entry.id === "string" ? node.entry.id : "?";
+			const type = typeof node.entry.type === "string" ? node.entry.type : "entry";
+			const active = id === leafId ? "→" : "•";
+			const label = node.label?.trim();
+			lines.push(`${"  ".repeat(depth)}${active} ${id} · ${label || treeEntrySummary(node.entry, type)}`);
+			visit(node.children, depth + 1);
+		}
+	};
+	visit(tree, 0);
+	return lines.join("\n");
+}
+
+function treeEntrySummary(entry: Record<string, unknown>, type: string): string {
+	if (type !== "message") return type;
+	const message = isRecord(entry.message) ? entry.message : undefined;
+	const role = typeof message?.role === "string" ? message.role : "message";
+	const content = message?.content;
+	let text = "";
+	if (typeof content === "string") text = content;
+	else if (Array.isArray(content)) {
+		text = content.flatMap((part) => isRecord(part) && part.type === "text" && typeof part.text === "string" ? [part.text] : []).join(" ");
+	}
+	const compact = text.replace(/\s+/gu, " ").trim();
+	return compact ? `${role}: ${compact.slice(0, 90)}${compact.length > 90 ? "…" : ""}` : role;
+}
+
+function commandPathArgument(value: string | undefined): string | undefined {
+	const trimmed = value?.trim();
+	if (!trimmed) return undefined;
+	const quote = trimmed[0];
+	if (quote === "\"" || quote === "'") {
+		const end = trimmed.indexOf(quote, 1);
+		return end < 0 ? trimmed.slice(1) : trimmed.slice(1, end);
+	}
+	return trimmed.split(/\s+/u)[0];
+}
+
+function cloneQueuedUserMessage(message: DesktopQueuedUserMessage): DesktopQueuedUserMessage {
+	return {
+		id: message.id,
+		promptText: message.promptText,
+		displayText: message.displayText,
+		images: message.images.map((image) => ({ ...image })),
+	};
+}
+
+function queueMessageImages(message: DesktopQueuedUserMessage): PiImageContent[] | undefined {
+	return message.images.length > 0
+		? message.images.map((image) => ({ type: "image", data: image.data, mimeType: image.mimeType }))
+		: undefined;
+}
+
+function textOnlyQueuedMessage(text: string): DesktopQueuedUserMessage {
+	return { id: randomUUID(), promptText: text, displayText: text, images: [] };
+}
+
+function queueItemMissingError(): RequestError {
+	return new RequestError(ERROR_SERVER, "queued message is no longer available");
+}
+
+function queueSdkItemId(source: "sdk-steering" | "sdk-follow-up", index: number, text: string): string {
+	const digest = createHash("sha256").update(text).digest("hex").slice(0, 10);
+	return `${source}:${index}:${digest}`;
+}
+
+function trackedSteeringMessageAt(
+	tracked: readonly DesktopQueuedUserMessage[],
+	queue: readonly string[],
+	index: number,
+): DesktopQueuedUserMessage | undefined {
+	const text = queue[index];
+	if (text === undefined) return undefined;
+	const occurrence = queue.slice(0, index).filter((candidate) => candidate === text).length;
+	return tracked.filter((message) => message.promptText === text)[occurrence];
+}
+
+function takeTrackedSteeringMessage(
+	tracked: DesktopQueuedUserMessage[],
+	queue: readonly string[],
+	index: number,
+): DesktopQueuedUserMessage | undefined {
+	const target = trackedSteeringMessageAt(tracked, queue, index);
+	if (!target) return undefined;
+	const targetIndex = tracked.indexOf(target);
+	if (targetIndex < 0) return undefined;
+	return tracked.splice(targetIndex, 1)[0];
+}
+
+function queuedUserMessageText(message: Record<string, unknown>): string {
+	const content = message.content;
+	if (typeof content === "string") return content;
+	if (!Array.isArray(content)) return "";
+	return content.flatMap((part) => (
+		isRecord(part) && part.type === "text" && typeof part.text === "string" ? [part.text] : []
+	)).join("");
+}
+
+async function removeSessionSidecarState(sessionPath: string, sessionId: string): Promise<void> {
+	const safeId = sessionId.replace(/[^a-zA-Z0-9._-]/gu, "_");
+	const base = join(dirname(sessionPath), "dcp-state", `${safeId}.json`);
+	await Promise.all([
+		base,
+		`${base}.prev`,
+		`${base}.recovery-required`,
+		`${base}.fence`,
+	].map((path) => rm(path, { force: true }).catch(() => undefined)));
+}
+
+async function pathExists(path: string): Promise<boolean> {
+	return await stat(path).then(() => true, () => false);
+}
+
+async function readRequestHistoryEntries(): Promise<string[]> {
+	const path = join(getAgentDir(), "pix", "request-history.json");
+	try {
+		const parsed = JSON.parse(await readFile(path, "utf8")) as unknown;
+		const entries = Array.isArray(parsed)
+			? parsed
+			: isRecord(parsed) && Array.isArray(parsed.entries)
+				? parsed.entries
+				: [];
+		return entries
+			.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+			.slice(-500)
+			.reverse();
+	} catch {
+		return [];
+	}
+}
+
+async function saveRequestHistoryEntry(text: string): Promise<void> {
+	const normalized = text.trimEnd();
+	if (!normalized.trim() || Buffer.byteLength(normalized, "utf8") > 16 * 1024) return;
+	const path = join(getAgentDir(), "pix", "request-history.json");
+	const current = (await readRequestHistoryEntries()).reverse();
+	const withoutDuplicate = current.filter((entry) => entry !== normalized);
+	let entries = [...withoutDuplicate, normalized].slice(-200);
+	let payload = JSON.stringify({ version: 1, entries }, null, 2);
+	while (entries.length > 0 && Buffer.byteLength(payload, "utf8") > 128 * 1024) {
+		entries = entries.slice(1);
+		payload = JSON.stringify({ version: 1, entries }, null, 2);
+	}
+	await mkdir(dirname(path), { recursive: true });
+	const tempPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
+	try {
+		await writeFile(tempPath, payload, "utf8");
+		await rename(tempPath, path);
+	} finally {
+		await rm(tempPath, { force: true }).catch(() => undefined);
+	}
+}
+
+function queueRequestHistoryEntry(text: string): Promise<void> {
+	const pending = requestHistorySaveChain
+		.catch(() => undefined)
+		.then(() => saveRequestHistoryEntry(text));
+	requestHistorySaveChain = pending.catch(() => undefined);
+	return pending;
+}
+
+async function shareSessionAsGist(session: AgentSessionState): Promise<string> {
+	const auth = await runExternalCommand("gh", ["auth", "status"], 32 * 1024);
+	if (auth.status !== 0) {
+		throw new RequestError(
+			ERROR_SERVER,
+			"GitHub CLI is not installed or is not logged in. Run `gh auth login` first.",
+		);
+	}
+
+	const shareDir = join(getAgentDir(), "pix");
+	await mkdir(shareDir, { recursive: true });
+	const tmpFile = join(shareDir, `session-share-${randomUUID()}.html`);
+	try {
+		await session.pi.exportHtml(tmpFile);
+		const gist = await runExternalCommand("gh", ["gist", "create", "--public=false", tmpFile], 64 * 1024);
+		if (gist.status !== 0) {
+			throw new RequestError(ERROR_SERVER, gist.stderr.trim() || gist.error || "Failed to create gist");
+		}
+		const url = gist.stdout.trim();
+		if (!url) throw new RequestError(ERROR_SERVER, "GitHub CLI returned no gist URL");
+		return `Shared session gist: ${url}`;
+	} finally {
+		await rm(tmpFile, { force: true }).catch(() => undefined);
+	}
+}
+
+async function readPiChangelog(): Promise<string> {
+	const path = join(getPackageDir(), "CHANGELOG.md");
+	const raw = await readFile(path, "utf8");
+	return raw.trim().split(/\r?\n/u).slice(0, 140).join("\n");
+}
+
+async function formatPixUpdateReport(argumentsText: string): Promise<string> {
+	const moduleUrl = new URL("../../../dist/app/cli/update.js", import.meta.url);
+	let update: {
+		parsePixUpdateArgs(argv: readonly string[]): { help: boolean; force: boolean };
+		pixUpdateUsage(): string;
+		checkPixUpdate(): Promise<{ packageRoot: string }>;
+		checkGlobalPiInstall(packageRoot: string): unknown;
+		formatPixUpdateCheck(result: unknown): string;
+		formatGlobalPiCheck(result: unknown): string;
+	};
+	try {
+		update = await import(moduleUrl.href) as typeof update;
+	} catch (error) {
+		throw new RequestError(ERROR_SERVER, `Pix update checker is unavailable: ${stringifyUnknown(error)}`);
+	}
+	const args = argumentsText.trim() ? argumentsText.trim().split(/\s+/u) : [];
+	let options: { help: boolean; force: boolean };
+	try {
+		options = update.parsePixUpdateArgs(args);
+	} catch (error) {
+		throw new RequestError(ERROR_SERVER, stringifyUnknown(error));
+	}
+	if (options.help) return update.pixUpdateUsage();
+	const result = await update.checkPixUpdate();
+	const globalPi = update.checkGlobalPiInstall(result.packageRoot);
+	const forceHint = options.force
+		? "\n\n/update is check-only. To force a reinstall, run `pix update --force` in your shell and restart Pix."
+		: "";
+	return `${update.formatPixUpdateCheck(result)}\n\n${update.formatGlobalPiCheck(globalPi)}${forceHint}`;
+}
+
+interface ExternalCommandResult {
+	readonly status: number | null;
+	readonly stdout: string;
+	readonly stderr: string;
+	readonly error?: string;
+}
+
+function runExternalCommand(command: string, args: readonly string[], maxBytes: number): Promise<ExternalCommandResult> {
+	return new Promise((resolveCommand) => {
+		let stdout = "";
+		let stderr = "";
+		let settled = false;
+		const finish = (result: ExternalCommandResult): void => {
+			if (settled) return;
+			settled = true;
+			resolveCommand(result);
+		};
+		let child: ReturnType<typeof spawn>;
+		try {
+			child = spawn(command, [...args], { stdio: ["ignore", "pipe", "pipe"] });
+		} catch (error) {
+			finish({ status: null, stdout, stderr, error: stringifyUnknown(error) });
+			return;
+		}
+		child.stdout?.setEncoding("utf8");
+		child.stderr?.setEncoding("utf8");
+		child.stdout?.on("data", (chunk: string) => {
+			if (stdout.length < maxBytes) stdout = `${stdout}${chunk}`.slice(0, maxBytes);
+		});
+		child.stderr?.on("data", (chunk: string) => {
+			if (stderr.length < maxBytes) stderr = `${stderr}${chunk}`.slice(0, maxBytes);
+		});
+		child.on("error", (error) => finish({ status: null, stdout, stderr, error: error.message }));
+		child.on("close", (status) => finish({ status, stdout, stderr }));
+	});
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function desktopPromptFileImages(params: PromptRequest): DesktopPromptFileImage[] {

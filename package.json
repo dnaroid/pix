@@ -54,6 +54,7 @@
     "prelink:pix": "npm run build:pix --silent",
     "link:pix": "mise exec node@24.16.0 -- npm link --silent",
     "watch:pix": "npm run link:pix --silent && mise exec node@24.16.0 -- tsc -p tsconfig.json --watch --preserveWatchOutput --noEmitOnError",
+    "rebuild:all": "npm run build:desktop",
     "check": "mise exec node@24.16.0 -- npm run check:inner",
     "precheck:inner": "npm run generate-schemas --silent",
     "check:inner": "npm run sync:sdk-pin:check --silent && tsc --noEmit && npm run test:inner",

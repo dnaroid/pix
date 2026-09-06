@@ -94,7 +94,7 @@
       {#each displayItems as item (item.id)}
         {#if item.type === "message"}
           {#if item.role === "thought"}
-            <details class="transcript-entry group mb-5 w-full min-w-0 text-xs text-muted-foreground">
+            <details class="transcript-entry group mb-5 w-full min-w-0 text-xs text-muted-foreground" data-transcript-entry-id={item.id}>
               <summary class="grid min-h-5 cursor-pointer list-none grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-1.5 text-muted-foreground transition-colors select-none hover:text-foreground group-open:mb-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
                 <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
                 <Brain class="h-3 w-3 shrink-0 text-primary" aria-hidden="true" />
@@ -105,14 +105,19 @@
               </div>
             </details>
           {:else if item.role === "user"}
-            <div class="transcript-entry mb-6">
+            <div class="transcript-entry mb-6" data-transcript-entry-id={item.id}>
               <article class="w-full rounded-xl border border-primary/45 bg-primary/15 px-3.5 pt-3 pb-2 text-card-foreground shadow-xs">
                 <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} onPrepare={onPrepareAttachment} />
                 {#if item.text}<MarkdownText text={item.text} dense {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />{/if}
               </article>
             </div>
+          {:else if item.role === "system"}
+            <article class="transcript-entry mb-5 w-full min-w-0 font-mono text-xs text-muted-foreground" data-transcript-entry-id={item.id}>
+              <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} onPrepare={onPrepareAttachment} />
+              {#if item.text}<MarkdownText text={item.text} compact dense {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />{/if}
+            </article>
           {:else}
-            <article class="transcript-entry mb-6 w-full min-w-0 text-foreground">
+            <article class="transcript-entry mb-6 w-full min-w-0 text-foreground" data-transcript-entry-id={item.id}>
               <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} onPrepare={onPrepareAttachment} />
               {#if item.text}<MarkdownText text={item.text} dense {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />{/if}
             </article>

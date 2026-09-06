@@ -13,10 +13,17 @@
     SessionNotification,
     SessionUpdate,
   } from "@agentclientprotocol/sdk";
-  import { AcpClient, type PromptFileImage } from "./lib/acp-client";
+  import {
+    AcpClient,
+    type PromptFileImage,
+    type QueueAction,
+    type QueueItem,
+    type QueueState,
+    type QueuedUserMessage,
+  } from "./lib/acp-client";
   import { TauriAcpTransport } from "./lib/tauri-transport";
   import {
-    appendLocalAssistantMessage,
+    appendLocalSystemMessage,
     appendLocalUserMessage,
     applyDeferredToolResult,
     applySessionUpdates,
@@ -24,6 +31,7 @@
     hydrateTranscriptAttachment,
     markDeferredToolResults,
     setToolResultLoading,
+    type MessageItem,
     type TranscriptState,
   } from "./lib/transcript";
   import {
@@ -33,6 +41,8 @@
   } from "./lib/slash-commands";
   import {
     commandPickerState,
+    listCommandPickerState,
+    type CommandPickerItem,
     type CommandPickerState,
   } from "./lib/command-interactions";
   import {
@@ -65,7 +75,9 @@
     MAX_EMBEDDED_ATTACHMENT_BYTES,
     MAX_EMBEDDED_PROMPT_BYTES,
     attachmentFromFile,
+    attachmentFromImage,
     attachmentKind,
+    extractAttachmentMarkers,
     fileUriFromPath,
     mimeTypeForName,
     type Attachment,
@@ -84,6 +96,7 @@
   import ErrorBanner from "./components/ErrorBanner.svelte";
   import TranscriptPane from "./components/TranscriptPane.svelte";
   import PromptComposer from "./components/PromptComposer.svelte";
+  import QueuedMessagesPanel from "./components/QueuedMessagesPanel.svelte";
   import StatusBar from "./components/StatusBar.svelte";
   import ElicitationDialog from "./components/ElicitationDialog.svelte";
   import CommandPicker from "./components/CommandPicker.svelte";
@@ -191,6 +204,8 @@
   let addingQuestionImages = $state(false);
   let projectSelectorOpen = $state(false);
   let sessionSelectorOpen = $state(false);
+  let sessionSelectorQuery = $state("");
+  let sessionSelectorMode = $state<"open" | "delete">("open");
   let sessionSelectorTrigger = $state<HTMLButtonElement | null>(null);
   let dragActive = $state(false);
   let previewHistory = $state<PreviewHistory<PreviewEntry>>(emptyPreviewHistory());
@@ -202,8 +217,11 @@
   let todoSnapshots = $state<Map<string, SessionTodoSnapshot>>(new Map());
   let subagentSnapshots = $state<Map<string, SessionSubagentSnapshot>>(new Map());
   let slashCommandsBySession = $state<Map<string, AvailableCommand[]>>(new Map());
+  let queueItemsBySession = $state<Map<string, QueueItem[]>>(new Map());
+  let queueActionRunning = $state(false);
   let imagePromptSupported = false;
   let transcriptPane = $state<HTMLDivElement | null>(null);
+  let promptComposer = $state<{ focus: () => Promise<void> } | null>(null);
   let localMessageId = 0;
   let reconnectPromise: Promise<void> | null = null;
   let sessionRefreshRequest: { client: AcpClient; workspace: string; promise: Promise<void> } | null = null;
@@ -232,6 +250,8 @@
   const runtimeReadySessionIds = new Set<string>();
   const runtimeLoadsBySessionId = new Map<string, Promise<void>>();
   const configOptionsBySessionId = new Map<string, SessionConfigOption[]>();
+  const promptRunsBySessionId = new Map<string, Promise<void>>();
+  const autoFlushInProgress = new Set<string>();
 
   const canUseSession = $derived(status === "ready" && !!workspace && !operationRunning);
   const promptRunning = $derived(activeSessionId ? runningSessionIds.has(activeSessionId) : false);
@@ -252,6 +272,7 @@
   const canGoForwardInPreview = $derived(canMovePreviewHistory(previewHistory, 1));
   const activeTodoSnapshot = $derived(activeSessionId ? todoSnapshots.get(activeSessionId) : undefined);
   const activeSubagentSnapshot = $derived(activeSessionId ? subagentSnapshots.get(activeSessionId) : undefined);
+  const activeQueueItems = $derived(activeSessionId ? (queueItemsBySession.get(activeSessionId) ?? []) : []);
   const activeSlashCommands = $derived(
     mergeSlashCommands(
       DESKTOP_SLASH_COMMANDS,
@@ -327,7 +348,7 @@
         const questionId = activeCustomQuestionId();
         if (questionId) {
           void addQuestionImagePaths(questionId, payload.paths);
-        } else if (activeSessionId && !promptRunning && !operationRunning && pendingElicitation?.kind !== "question") {
+        } else if (activeSessionId && !operationRunning && pendingElicitation?.kind !== "question") {
           void addAttachmentPaths(payload.paths);
         }
       }
@@ -357,6 +378,8 @@
     const next = new AcpClient(new TauriAcpTransport(), {
       onSessionUpdate: handleSessionUpdate,
       onSessionState: handleSessionState,
+      onQueueState: handleQueueState,
+      onQueueConsumed: handleQueueConsumed,
       onElicitation: requestElicitation,
       onDiagnostic: (line) => {
         diagnostics = [...diagnostics.slice(-49), line];
@@ -379,6 +402,7 @@
         todoSnapshots = new Map();
         subagentSnapshots = new Map();
         slashCommandsBySession = new Map();
+        queueItemsBySession = new Map();
         transcript = emptyTranscript;
         configOptions = [];
         status = exit.requested ? "stopped" : "error";
@@ -434,6 +458,7 @@
     todoSnapshots = new Map();
     subagentSnapshots = new Map();
     slashCommandsBySession = new Map();
+    queueItemsBySession = new Map();
     transcript = emptyTranscript;
     configOptions = [];
     runningSessionIds = new Set();
@@ -524,6 +549,29 @@
     }
   }
 
+  function handleQueueState(state: QueueState): void {
+    const next = new Map(queueItemsBySession);
+    next.set(state.sessionId, [...state.items]);
+    queueItemsBySession = next;
+    if (!runningSessionIds.has(state.sessionId)) void flushAutoQueue(state.sessionId);
+  }
+
+  function handleQueueConsumed(sessionId: string, message: QueuedUserMessage): void {
+    appendQueuedMessageToTranscript(sessionId, message);
+  }
+
+  async function refreshQueueState(sessionId: string): Promise<void> {
+    const requestClient = client;
+    if (!requestClient || !runtimeReadySessionIds.has(sessionId)) return;
+    try {
+      const state = await requestClient.queueState(sessionId);
+      if (requestClient !== client) return;
+      handleQueueState(state);
+    } catch (error) {
+      if (requestClient === client && sessionId === activeSessionId) reportError(error);
+    }
+  }
+
   function clearSessionActivity(sessionId: string): void {
     const nextTodos = new Map(todoSnapshots);
     nextTodos.delete(sessionId);
@@ -534,6 +582,11 @@
     const nextCommands = new Map(slashCommandsBySession);
     nextCommands.delete(sessionId);
     slashCommandsBySession = nextCommands;
+    const nextQueue = new Map(queueItemsBySession);
+    nextQueue.delete(sessionId);
+    queueItemsBySession = nextQueue;
+    promptRunsBySessionId.delete(sessionId);
+    autoFlushInProgress.delete(sessionId);
   }
 
   function setSessionPromptRunning(sessionId: string, running: boolean): void {
@@ -541,6 +594,113 @@
     if (running) next.add(sessionId);
     else next.delete(sessionId);
     runningSessionIds = next;
+  }
+
+  function runPromptRequest(
+    requestClient: AcpClient,
+    sessionId: string,
+    blocks: ContentBlock[],
+    fileImages: readonly PromptFileImage[] = [],
+  ): Promise<void> {
+    if (promptRunsBySessionId.has(sessionId)) {
+      return Promise.reject(new Error("A prompt is already running for this conversation."));
+    }
+    setSessionPromptRunning(sessionId, true);
+    let tracked!: Promise<void>;
+    tracked = requestClient.prompt(sessionId, blocks, fileImages)
+      .then(() => undefined)
+      .finally(() => {
+        if (promptRunsBySessionId.get(sessionId) !== tracked) return;
+        promptRunsBySessionId.delete(sessionId);
+        setSessionPromptRunning(sessionId, false);
+        queueMicrotask(() => void flushAutoQueue(sessionId));
+      });
+    promptRunsBySessionId.set(sessionId, tracked);
+    return tracked;
+  }
+
+  async function flushAutoQueue(sessionId: string): Promise<void> {
+    const requestClient = client;
+    if (
+      !requestClient
+      || !runtimeReadySessionIds.has(sessionId)
+      || runningSessionIds.has(sessionId)
+      || promptRunsBySessionId.has(sessionId)
+      || autoFlushInProgress.has(sessionId)
+    ) return;
+
+    autoFlushInProgress.add(sessionId);
+    try {
+      while (
+        requestClient === client
+        && runtimeReadySessionIds.has(sessionId)
+        && !runningSessionIds.has(sessionId)
+      ) {
+        const message = await requestClient.takeAutoMessage(sessionId);
+        if (!message) return;
+        appendQueuedMessageToTranscript(sessionId, message);
+        try {
+          await runPromptRequest(requestClient, sessionId, queuedMessageBlocks(message));
+        } catch (error) {
+          // Do not drop a message that lost a race with another prompt. Put it
+          // back into Pix's auto/steering path; queue state remains visible.
+          await requestClient.queueMessage(
+            sessionId,
+            queuedMessageBlocks(message),
+            message.displayText,
+          ).catch(() => undefined);
+          throw error;
+        }
+      }
+    } catch (error) {
+      if (requestClient === client && sessionId === activeSessionId) reportError(error);
+    } finally {
+      autoFlushInProgress.delete(sessionId);
+    }
+  }
+
+  function queuedMessageBlocks(message: QueuedUserMessage): ContentBlock[] {
+    return [
+      ...(message.promptText ? [{ type: "text" as const, text: message.promptText }] : []),
+      ...message.images.map((image) => ({
+        type: "image" as const,
+        data: image.data,
+        mimeType: image.mimeType,
+      })),
+    ];
+  }
+
+  function queuedMessageDraft(message: QueuedUserMessage): { text: string; attachments: Attachment[] } {
+    const parsed = extractAttachmentMarkers(message.promptText, `queue:${message.id}`);
+    const images = message.images.map((image) =>
+      attachmentFromImage(image.data, image.mimeType, nextAttachmentId()));
+    return {
+      text: parsed.text || message.displayText,
+      attachments: [...parsed.attachments, ...images],
+    };
+  }
+
+  function appendQueuedMessageToTranscript(sessionId: string, message: QueuedUserMessage): void {
+    const messageId = `queued:${message.id}`;
+    const current = sessionId === activeSessionId
+      ? transcript
+      : transcriptBySessionId.get(sessionId) ?? emptyTranscript;
+    if (current.items.some((item) => item.type === "message" && item.id === messageId)) return;
+    const draft = queuedMessageDraft(message);
+    const next = appendLocalUserMessage(current, message.displayText || draft.text, messageId, draft.attachments);
+    transcriptBySessionId.set(sessionId, next);
+    if (sessionId === activeSessionId) {
+      const followLatest = transcriptIsNearBottom();
+      transcript = next;
+      if (followLatest) scheduleScrollToLatest();
+    }
+  }
+
+  function restoreQueuedMessageToComposer(message: QueuedUserMessage): void {
+    const draft = queuedMessageDraft(message);
+    attachmentDraftGeneration += 1;
+    promptText = draft.text;
+    promptAttachments = draft.attachments;
   }
 
   function prepareTranscriptAttachment(attachment: Attachment): Promise<void> {
@@ -593,6 +753,7 @@
   ): Promise<void> {
     if (runtimeReadySessionIds.has(sessionId)) {
       if (sessionId === activeSessionId) activeSessionRuntimeReady = true;
+      if (!queueItemsBySession.has(sessionId)) void refreshQueueState(sessionId);
       return Promise.resolve();
     }
     const existing = runtimeLoadsBySessionId.get(sessionId);
@@ -604,6 +765,7 @@
         const options = response.configOptions ?? [];
         runtimeReadySessionIds.add(sessionId);
         configOptionsBySessionId.set(sessionId, options);
+        void refreshQueueState(sessionId);
         if (sessionId === activeSessionId) {
           configOptions = options;
           activeSessionRuntimeReady = true;
@@ -625,6 +787,7 @@
   function markSessionRuntimeReady(sessionId: string, options: SessionConfigOption[]): void {
     runtimeReadySessionIds.add(sessionId);
     configOptionsBySessionId.set(sessionId, options);
+    void refreshQueueState(sessionId);
     if (sessionId === activeSessionId) activeSessionRuntimeReady = true;
   }
 
@@ -1121,18 +1284,16 @@
       if (!saved || client !== requestClient || workspace !== requestWorkspace) return;
 
       const prompt = buildTaskPrompt(task);
-      setSessionPromptRunning(response.sessionId, true);
       operationRunning = false;
       transcript = appendLocalUserMessage(transcript, prompt, `local:${++localMessageId}`, []);
       transcriptBySessionId.set(response.sessionId, transcript);
       await scrollToLatest();
-      await requestClient.prompt(response.sessionId, [{ type: "text", text: prompt }]);
+      await runPromptRequest(requestClient, response.sessionId, [{ type: "text", text: prompt }]);
       void refreshSessions();
     } catch (error) {
       reportError(error);
     } finally {
       if (workspace === requestWorkspace) {
-        if (taskSessionId) setSessionPromptRunning(taskSessionId, false);
         operationRunning = false;
         taskActionId = null;
       }
@@ -1300,14 +1461,18 @@
     openSessionSelector();
   }
 
-  function openSessionSelector(): void {
+  function openSessionSelector(query = "", mode: "open" | "delete" = "open"): void {
     if (!workspace || status !== "ready") return;
+    sessionSelectorQuery = query;
+    sessionSelectorMode = mode;
     sessionSelectorOpen = true;
     void refreshSessions();
   }
 
   function closeSessionSelector(restoreFocus = false): void {
     sessionSelectorOpen = false;
+    sessionSelectorQuery = "";
+    sessionSelectorMode = "open";
     if (restoreFocus) sessionSelectorTrigger?.focus();
   }
 
@@ -1317,6 +1482,53 @@
       return;
     }
     void loadSession(sessionId);
+  }
+
+  async function deleteSelectedSession(sessionId: string): Promise<void> {
+    const requestClient = client;
+    if (!requestClient || operationRunning || runningSessionIds.has(sessionId)) return;
+    const session = sessions.find((candidate) => candidate.sessionId === sessionId);
+    const title = session?.title || "Untitled conversation";
+    if (!window.confirm(`Permanently delete “${title}”?\n\nThis removes the Pi session file and its DCP sidecar state.`)) return;
+
+    closeSessionSelector();
+    const deletingActive = sessionId === activeSessionId;
+    const nextSessionId = deletingActive
+      ? sessions.find((candidate) => candidate.sessionId !== sessionId)?.sessionId
+      : undefined;
+    operationRunning = true;
+    errorMessage = null;
+    try {
+      await requestClient.deleteSession(sessionId);
+      forgetSessionRuntime(sessionId);
+      clearSessionActivity(sessionId);
+      transcriptBySessionId.delete(sessionId);
+      configOptionsBySessionId.delete(sessionId);
+      runtimeReadySessionIds.delete(sessionId);
+      runtimeLoadsBySessionId.delete(sessionId);
+      sessions = sessions.filter((candidate) => candidate.sessionId !== sessionId);
+      restoredSessionTabs = restoredSessionTabs?.filter((id) => id !== sessionId) ?? restoredSessionTabs;
+      locallyOpenedSessionTabs = locallyOpenedSessionTabs.filter((id) => id !== sessionId);
+      closedSessionTabs = [...new Set([...closedSessionTabs, sessionId])];
+      if (deletingActive) {
+        cancelSessionHistoryLoad();
+        activeSessionId = null;
+        activeSessionRuntimeReady = false;
+        transcript = emptyTranscript;
+        configOptions = [];
+        forgetActiveSession(workspace);
+      }
+      await refreshSessions();
+    } catch (error) {
+      reportError(error);
+      return;
+    } finally {
+      operationRunning = false;
+    }
+
+    if (!deletingActive) return;
+    if (nextSessionId && sessions.some((candidate) => candidate.sessionId === nextSessionId)) await loadSession(nextSessionId);
+    else await createSession();
   }
 
   function activeCustomQuestionId(): string | null {
@@ -1330,7 +1542,7 @@
   function canAcceptDroppedAttachments(): boolean {
     if (addingQuestionImages) return false;
     if (pendingElicitation?.kind === "question") return activeCustomQuestionId() !== null;
-    return !!activeSessionId && !promptRunning && !operationRunning;
+    return !!activeSessionId && !operationRunning;
   }
 
   function questionCanAcceptImages(questionId: string, requestId?: number): boolean {
@@ -1522,7 +1734,7 @@
   }
 
   async function chooseAttachments(): Promise<void> {
-    if (!activeSessionId || promptRunning || operationRunning) return;
+    if (!activeSessionId || operationRunning) return;
     try {
       const selected = await open({
         directory: false,
@@ -1583,7 +1795,7 @@
     generation: number,
   ): Promise<void> {
     if (!attachmentDraftIsCurrent(key, generation)) return;
-    if (!activeSessionId || promptRunning || operationRunning || files.length === 0) return;
+    if (!activeSessionId || operationRunning || files.length === 0) return;
     const available = MAX_ATTACHMENTS - promptAttachments.length;
     if (available <= 0) {
       errorMessage = `Attach at most ${MAX_ATTACHMENTS} files.`;
@@ -1619,7 +1831,6 @@
     return key === attachmentDraftKey
       && generation === attachmentDraftGeneration
       && !!activeSessionId
-      && !promptRunning
       && !operationRunning;
   }
 
@@ -1895,36 +2106,109 @@
       || !sessionId
       || !activeSessionRuntimeReady
       || (!text && attachments.length === 0)
-      || promptRunning
       || operationRunning
       || sessionHistoryLoading
     ) return;
     const desktopCommand = parseDesktopSlashCommand(text, attachments.length > 0);
     if (desktopCommand) {
-      promptText = "";
       switch (desktopCommand.kind) {
         case "new":
+        case "new_tab":
+          if (promptRunning) return;
+          promptText = "";
           await createSession();
           break;
+        case "enhance":
+          if (promptRunning) return;
+          promptText = "";
+          await enhancePromptDraft(desktopCommand.draft);
+          break;
+        case "import":
+          if (promptRunning) return;
+          promptText = "";
+          if (desktopCommand.path) await importConversationPath(desktopCommand.path);
+          else await chooseImportSession();
+          break;
+        case "queue": {
+          let message = desktopCommand.message;
+          if (!message && attachments.length === 0) {
+            message = await requestLocalTextInput("Enter the message to pause and send later.", "Queued message") ?? "";
+          }
+          if (!message && attachments.length === 0) return;
+          await deferDraft(message, attachments, { clearComposer: true });
+          break;
+        }
         case "resume":
-          openSessionSelector();
+          if (promptRunning) return;
+          promptText = "";
+          if (desktopCommand.path) await resumeConversationPath(desktopCommand.path);
+          else openSessionSelector();
+          break;
+        case "search":
+          promptText = "";
+          openSessionSelector(desktopCommand.query, "open");
+          break;
+        case "delete":
+          if (promptRunning) return;
+          promptText = "";
+          openSessionSelector(desktopCommand.query, "delete");
+          break;
+        case "jump":
+          promptText = "";
+          await openJumpPicker(desktopCommand.query);
+          break;
+        case "history":
+          promptText = "";
+          await openHistoryPicker(desktopCommand.query);
+          break;
+        case "hotkeys":
+          promptText = "";
+          showDesktopHotkeys();
+          break;
+        case "quit":
+          promptText = "";
+          await getCurrentWindow().close();
           break;
         case "reload":
+          if (promptRunning) return;
+          promptText = "";
           await reloadResources();
           break;
         case "fork":
+          if (promptRunning) return;
+          promptText = "";
           await forkConversation(desktopCommand.entryId);
           break;
         case "model":
-        case "thinking":
+          if (promptRunning) return;
+          promptText = "";
           closeProjectSelector();
           closeSessionSelector();
-          commandPicker = commandPickerState(desktopCommand.kind, configOptions);
+          if (desktopCommand.value) await applyModelSlashCommand(desktopCommand.value);
+          else commandPicker = commandPickerState("model", configOptions);
+          break;
+        case "thinking":
+          if (promptRunning) return;
+          promptText = "";
+          closeProjectSelector();
+          closeSessionSelector();
+          if (desktopCommand.level) await applyThinkingSlashCommand(desktopCommand.level);
+          else commandPicker = commandPickerState("thinking", configOptions);
           break;
       }
       return;
     }
-    setSessionPromptRunning(sessionId, true);
+
+    if (promptRunning) {
+      if (text.startsWith("/")) {
+        reportError(new Error("Slash commands cannot run while the agent is responding. Use /queue to pause a message for later."));
+        return;
+      }
+      await queueDraftForCurrentRun(text, attachments, draftKey, draftGeneration);
+      return;
+    }
+
+    let reloadAfterSlash = false;
     errorMessage = null;
     try {
       const { blocks, fileImages } = await buildPromptPayload(text, attachments);
@@ -1939,12 +2223,113 @@
       transcript = appendLocalUserMessage(transcript, text, `local:${++localMessageId}`, attachments);
       transcriptBySessionId.set(sessionId, transcript);
       await scrollToLatest();
-      await client.prompt(sessionId, blocks, fileImages);
+      await runPromptRequest(client, sessionId, blocks, fileImages);
+      if (text.startsWith("/")) await refreshAutocompleteSettings(sessionId);
+      reloadAfterSlash = /^\/(?:scoped-models|no-context-files)(?:\s|$)/i.test(text);
       void refreshSessions();
     } catch (error) {
       reportError(error);
+    }
+    if (reloadAfterSlash && sessionId === activeSessionId) await reloadResources({ echo: false });
+  }
+
+  async function queueDraftForCurrentRun(
+    text: string,
+    attachments: readonly Attachment[],
+    draftKey: string,
+    draftGeneration: number,
+  ): Promise<void> {
+    const requestClient = client;
+    const sessionId = activeSessionId;
+    if (!requestClient || !sessionId) return;
+    try {
+      const { blocks, fileImages } = await buildPromptPayload(text, attachments);
+      if (
+        requestClient !== client
+        || sessionId !== activeSessionId
+        || draftKey !== attachmentDraftKey
+        || draftGeneration !== attachmentDraftGeneration
+        || attachments !== promptAttachments
+      ) return;
+      promptText = "";
+      invalidateAttachmentDraft();
+      await requestClient.queueMessage(sessionId, blocks, text, fileImages);
+      void refreshQueueState(sessionId);
+    } catch (error) {
+      if (requestClient === client && sessionId === activeSessionId) {
+        if (!promptText && promptAttachments.length === 0) {
+          attachmentDraftGeneration += 1;
+          promptText = text;
+          promptAttachments = [...attachments];
+        }
+        reportError(error);
+      }
+    }
+  }
+
+  async function deferCurrentDraft(): Promise<void> {
+    await deferDraft(promptText.trim(), promptAttachments, { clearComposer: true });
+  }
+
+  async function deferDraft(
+    text: string,
+    attachments: readonly Attachment[],
+    options: { clearComposer: boolean },
+  ): Promise<void> {
+    const requestClient = client;
+    const sessionId = activeSessionId;
+    if (!requestClient || !sessionId || (!text && attachments.length === 0)) return;
+    const draftKey = attachmentDraftKey;
+    const draftGeneration = attachmentDraftGeneration;
+    try {
+      const { blocks, fileImages } = await buildPromptPayload(text, attachments);
+      if (
+        requestClient !== client
+        || sessionId !== activeSessionId
+        || draftKey !== attachmentDraftKey
+        || draftGeneration !== attachmentDraftGeneration
+        || attachments !== promptAttachments
+      ) return;
+      await requestClient.deferMessage(sessionId, blocks, text, fileImages);
+      if (options.clearComposer) {
+        promptText = "";
+        invalidateAttachmentDraft();
+      }
+      void refreshQueueState(sessionId);
+    } catch (error) {
+      if (requestClient === client && sessionId === activeSessionId) reportError(error);
+    }
+  }
+
+  async function actOnQueuedMessage(item: QueueItem, action: QueueAction): Promise<void> {
+    const requestClient = client;
+    const sessionId = activeSessionId;
+    if (!requestClient || !sessionId || queueActionRunning) return;
+    queueActionRunning = true;
+    errorMessage = null;
+    try {
+      const result = await requestClient.queueAction(sessionId, item, action);
+      if (requestClient !== client || sessionId !== activeSessionId) return;
+      if (action === "edit") {
+        if (!result.message) throw new Error("Queued message is no longer available.");
+        restoreQueuedMessageToComposer(result.message);
+        await promptComposer?.focus();
+        return;
+      }
+      if (action !== "send-now") return;
+      if (!result.message) throw new Error("Queued message is no longer available.");
+
+      // Send-now can abort a currently running prompt inside ACP. Wait for the
+      // old Desktop request promise to observe that settlement before opening
+      // the next run, avoiding a client-side overlap race.
+      await promptRunsBySessionId.get(sessionId)?.catch(() => undefined);
+      appendQueuedMessageToTranscript(sessionId, result.message);
+      await runPromptRequest(requestClient, sessionId, queuedMessageBlocks(result.message));
+      void refreshSessions();
+    } catch (error) {
+      if (requestClient === client && sessionId === activeSessionId) reportError(error);
     } finally {
-      setSessionPromptRunning(sessionId, false);
+      queueActionRunning = false;
     }
   }
 
@@ -1952,11 +2337,231 @@
     const picker = commandPicker;
     if (!picker) return;
     commandPicker = null;
+    if (picker.command === "history") {
+      promptText = value;
+      return;
+    }
+    if (picker.command === "jump") {
+      await jumpToUserMessage(value);
+      return;
+    }
     promptText = `/${picker.command} ${value}`;
     await submitPrompt();
   }
 
-  async function reloadResources(): Promise<void> {
+  async function enhancePromptDraft(initialDraft: string): Promise<void> {
+    const requestClient = client;
+    const sessionId = activeSessionId;
+    if (!requestClient || !sessionId || !activeSessionRuntimeReady) return;
+
+    let draft = initialDraft.trim();
+    if (!draft) {
+      draft = await requestLocalTextInput(
+        "Enter the prompt draft to improve. The enhanced text will be returned to the composer without sending it.",
+        "Prompt draft",
+      ) ?? "";
+    }
+    if (!draft) return;
+
+    operationRunning = true;
+    errorMessage = null;
+    try {
+      const enhanced = await requestClient.enhancePrompt(sessionId, draft);
+      if (requestClient !== client || sessionId !== activeSessionId) return;
+      promptText = enhanced;
+    } catch (error) {
+      reportError(error);
+    } finally {
+      if (requestClient === client && sessionId === activeSessionId) operationRunning = false;
+    }
+  }
+
+  async function chooseImportSession(): Promise<void> {
+    const selected = await open({
+      directory: false,
+      multiple: false,
+      title: "Import Pix session",
+      filters: [{ name: "Pix session", extensions: ["jsonl"] }],
+      ...(workspace ? { defaultPath: workspace } : {}),
+    });
+    if (typeof selected === "string") await importConversationPath(selected);
+  }
+
+  async function importConversationPath(path: string): Promise<void> {
+    const requestClient = client;
+    const sessionId = activeSessionId;
+    const requestWorkspace = workspace;
+    if (!requestClient || !sessionId || !activeSessionRuntimeReady || operationRunning || promptRunning) return;
+    operationRunning = true;
+    errorMessage = null;
+    try {
+      const response = await requestClient.importSession(sessionId, path);
+      if (requestClient !== client || sessionId !== activeSessionId || requestWorkspace !== workspace) return;
+      transcript = emptyTranscript;
+      transcriptBySessionId.delete(sessionId);
+      configOptions = response.configOptions;
+      markSessionRuntimeReady(sessionId, response.configOptions);
+      const generation = beginSessionHistoryLoad();
+      await hydrateSessionHistory(requestClient, sessionId, requestWorkspace, generation);
+      if (requestClient !== client || sessionId !== activeSessionId) return;
+      transcript = appendLocalSystemMessage(transcript, `Imported session from ${path}`, `local:${++localMessageId}`);
+      transcriptBySessionId.set(sessionId, transcript);
+      void refreshSessions();
+    } catch (error) {
+      reportError(error);
+    } finally {
+      if (requestClient === client && sessionId === activeSessionId) operationRunning = false;
+    }
+  }
+
+  async function openJumpPicker(query: string): Promise<void> {
+    const requestClient = client;
+    const sessionId = activeSessionId;
+    if (!requestClient || !sessionId || !activeSessionRuntimeReady) return;
+    try {
+      const messages = await requestClient.forkMessages(sessionId);
+      if (requestClient !== client || sessionId !== activeSessionId) return;
+      const items: CommandPickerItem[] = messages.map((message) => ({
+          id: `jump:${message.entryId}`,
+          value: message.entryId,
+          label: compactPickerText(message.text, 110),
+          description: message.entryId,
+        }));
+      commandPicker = listCommandPickerState("jump", items.reverse(), query);
+    } catch (error) {
+      reportError(error);
+    }
+  }
+
+  async function jumpToUserMessage(entryId: string): Promise<void> {
+    const requestClient = client;
+    const sessionId = activeSessionId;
+    const requestWorkspace = workspace;
+    if (!requestClient || !sessionId || !activeSessionRuntimeReady) return;
+    try {
+      const messages = await requestClient.forkMessages(sessionId);
+      if (requestClient !== client || sessionId !== activeSessionId) return;
+      let visibleId = transcriptUserEntryId(messages, entryId, transcript);
+      if (!visibleId) {
+        const history = await requestClient.sessionHistory(sessionId, true);
+        if (requestClient !== client || sessionId !== activeSessionId || requestWorkspace !== workspace) return;
+        let loaded = applySessionUpdates(emptyTranscript, history.updates);
+        loaded = markDeferredToolResults(loaded, history.deferredToolCallIds);
+        const systemItems = transcript.items.filter((item) => item.type === "message" && item.role === "system");
+        transcript = systemItems.length > 0 ? { items: [...loaded.items, ...systemItems] } : loaded;
+        transcriptBySessionId.set(sessionId, transcript);
+        visibleId = transcriptUserEntryId(messages, entryId, transcript);
+      }
+      if (!visibleId) throw new Error("Could not locate that user message in the loaded session history.");
+      await tick();
+      scrollToTranscriptEntry(visibleId);
+    } catch (error) {
+      reportError(error);
+    }
+  }
+
+  function transcriptUserEntryId(
+    messages: readonly { entryId: string; text: string }[],
+    targetEntryId: string,
+    state: TranscriptState,
+  ): string | undefined {
+    const users = state.items.filter((item): item is MessageItem => item.type === "message" && item.role === "user");
+    const targetIndex = messages.findIndex((message) => message.entryId === targetEntryId);
+    if (targetIndex >= 0 && users.length === messages.length) return users[targetIndex]?.id;
+    let userIndex = 0;
+    for (const message of messages) {
+      const target = normalizedPromptText(message.text);
+      let matchIndex = -1;
+      for (let index = userIndex; index < users.length; index += 1) {
+        if (normalizedPromptText(users[index]!.text) === target) {
+          matchIndex = index;
+          break;
+        }
+      }
+      if (matchIndex < 0) continue;
+      const visible = users[matchIndex]!;
+      userIndex = matchIndex + 1;
+      if (message.entryId === targetEntryId) return visible.id;
+    }
+    return undefined;
+  }
+
+  async function openHistoryPicker(query: string): Promise<void> {
+    const requestClient = client;
+    const sessionId = activeSessionId;
+    if (!requestClient || !sessionId || !activeSessionRuntimeReady) return;
+    try {
+      const entries = await requestClient.requestHistory(sessionId);
+      if (requestClient !== client || sessionId !== activeSessionId) return;
+      const items: CommandPickerItem[] = entries.map((entry, index) => ({
+        id: `history:${index}`,
+        value: entry,
+        label: compactPickerText(entry, 120),
+        description: entry.includes("\n") ? compactPickerText(entry.replace(/\n+/gu, " ↵ "), 180) : undefined,
+      }));
+      commandPicker = listCommandPickerState("history", items, query);
+    } catch (error) {
+      reportError(error);
+    }
+  }
+
+  function showDesktopHotkeys(): void {
+    const sessionId = activeSessionId;
+    if (!sessionId) return;
+    transcript = appendLocalSystemMessage(
+      transcript,
+      [
+        "Keyboard shortcuts",
+        "Enter: send message / accept selected slash command",
+        "Shift+Enter: insert a newline",
+        "While Pix is responding, Enter queues the draft as steering for the next turn",
+        "Pause button or /queue <message>: hold a message until you send it from the queue panel",
+        "Tab: accept the selected slash command or inline autocomplete",
+        "Esc: close the active slash menu, picker, or dialog",
+        "Up/Down: move through slash-command and picker results",
+        "/new_tab: open a fresh conversation tab",
+        "/search: search saved conversations",
+        "/jump: jump to a visible previous user message",
+        "/history: restore a previous prompt into the composer",
+      ].join("\n"),
+      `local:${++localMessageId}`,
+    );
+    transcriptBySessionId.set(sessionId, transcript);
+    scheduleScrollToLatest();
+  }
+
+  async function requestLocalTextInput(message: string, title: string): Promise<string | undefined> {
+    const response = await requestElicitation({
+      mode: "form",
+      sessionId: activeSessionId ?? "local",
+      message,
+      requestedSchema: {
+        type: "object",
+        properties: { value: { type: "string", title } },
+        required: ["value"],
+      },
+    } as unknown as CreateElicitationRequest);
+    if (response.action !== "accept") return undefined;
+    const content = (response as { content?: Record<string, unknown> | null }).content;
+    const value = content?.value;
+    return typeof value === "string" && value.trim() ? value.trim() : undefined;
+  }
+
+  function scrollToTranscriptEntry(entryId: string): void {
+    const target = transcriptPane?.querySelector<HTMLElement>(`[data-transcript-entry-id="${CSS.escape(entryId)}"]`);
+    target?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  function normalizedPromptText(value: string): string {
+    return value.replace(/\s+/gu, " ").trim();
+  }
+
+  function compactPickerText(value: string, maxLength: number): string {
+    const compact = normalizedPromptText(value);
+    return compact.length <= maxLength ? compact : `${compact.slice(0, Math.max(1, maxLength - 1))}…`;
+  }
+
+  async function reloadResources(options: { echo?: boolean } = {}): Promise<void> {
     const requestClient = client;
     const sessionId = activeSessionId;
     if (!requestClient || !sessionId || !activeSessionRuntimeReady || operationRunning || promptRunning || sessionHistoryLoading) return;
@@ -1966,9 +2571,11 @@
     operationRunning = true;
     activeSessionRuntimeReady = false;
     errorMessage = null;
-    transcript = appendLocalUserMessage(transcript, "/reload", `local:${++localMessageId}`);
-    transcriptBySessionId.set(sessionId, transcript);
-    await scrollToLatest();
+    if (options.echo !== false) {
+      transcript = appendLocalUserMessage(transcript, "/reload", `local:${++localMessageId}`);
+      transcriptBySessionId.set(sessionId, transcript);
+      await scrollToLatest();
+    }
     try {
       const response = await requestClient.reloadSession(sessionId);
       if (requestClient !== client || sessionId !== activeSessionId) return;
@@ -1983,6 +2590,93 @@
     } finally {
       if (requestClient === client && sessionId === activeSessionId) operationRunning = false;
     }
+  }
+
+  async function resumeConversationPath(path: string): Promise<void> {
+    const requestClient = client;
+    const sessionId = activeSessionId;
+    const requestWorkspace = workspace;
+    if (!requestClient || !sessionId || !activeSessionRuntimeReady || operationRunning || promptRunning) return;
+    operationRunning = true;
+    errorMessage = null;
+    try {
+      const response = await requestClient.resumeSessionPath(sessionId, path);
+      if (requestClient !== client || sessionId !== activeSessionId || requestWorkspace !== workspace) return;
+      transcript = emptyTranscript;
+      transcriptBySessionId.delete(sessionId);
+      configOptions = response.configOptions;
+      markSessionRuntimeReady(sessionId, response.configOptions);
+      const generation = beginSessionHistoryLoad();
+      await hydrateSessionHistory(requestClient, sessionId, requestWorkspace, generation);
+      if (requestClient !== client || sessionId !== activeSessionId) return;
+      transcript = appendLocalSystemMessage(transcript, `Resumed session ${path}`, `local:${++localMessageId}`);
+      transcriptBySessionId.set(sessionId, transcript);
+      void refreshSessions();
+    } catch (error) {
+      reportError(error);
+    } finally {
+      if (requestClient === client && sessionId === activeSessionId) operationRunning = false;
+    }
+  }
+
+  async function applyModelSlashCommand(value: string): Promise<void> {
+    const parsed = parseDesktopModelRef(value);
+    if (!parsed) {
+      reportError(new Error("Model must use provider/model[:thinking] format."));
+      return;
+    }
+    try {
+      await setConfigValue("model", parsed.modelRef);
+      if (parsed.thinking) await setConfigValue("thought_level", parsed.thinking);
+      await reloadResources({ echo: false });
+    } catch (error) {
+      reportError(error);
+    }
+  }
+
+  async function applyThinkingSlashCommand(level: string): Promise<void> {
+    try {
+      await setConfigValue("thought_level", level);
+    } catch (error) {
+      reportError(error);
+    }
+  }
+
+  async function setConfigValue(configId: string, value: string): Promise<void> {
+    const requestClient = client;
+    const sessionId = activeSessionId;
+    const option = configOptions.find((candidate) => candidate.id === configId);
+    if (!requestClient || !sessionId || !option) throw new Error(`/${configId === "model" ? "model" : "thinking"} is unavailable.`);
+    const validValues = option.type === "select"
+      ? option.options.flatMap((entry) => "options" in entry ? entry.options.map((item) => item.value) : [entry.value])
+      : [];
+    if (option.type !== "select" || !validValues.includes(value)) {
+      throw new Error(`Unknown ${configId === "model" ? "model" : "thinking level"}: ${value}`);
+    }
+    const options = (await requestClient.setConfigOption(sessionId, option, value)).configOptions;
+    configOptionsBySessionId.set(sessionId, options);
+    if (requestClient === client && sessionId === activeSessionId) configOptions = options;
+  }
+
+  async function refreshAutocompleteSettings(sessionId: string): Promise<void> {
+    const requestClient = client;
+    if (!requestClient || sessionId !== activeSessionId) return;
+    const settings = await requestClient.autocompleteSettings(sessionId).catch(() => undefined);
+    if (!settings || requestClient !== client || sessionId !== activeSessionId) return;
+    autocompleteEnabled = settings.enabled;
+    autocompleteDebounceMs = settings.debounceMs;
+  }
+
+  function parseDesktopModelRef(value: string): { modelRef: string; thinking?: string } | null {
+    const trimmed = value.trim();
+    const slash = trimmed.indexOf("/");
+    if (slash <= 0 || slash === trimmed.length - 1) return null;
+    const thinkingLevels = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+    const colon = trimmed.lastIndexOf(":");
+    if (colon <= slash) return { modelRef: trimmed };
+    const suffix = trimmed.slice(colon + 1).toLowerCase();
+    if (!thinkingLevels.has(suffix)) return null;
+    return { modelRef: trimmed.slice(0, colon), thinking: suffix };
   }
 
   async function forkConversation(requestedEntryId?: string): Promise<void> {
@@ -2025,7 +2719,7 @@
       locallyOpenedSessionTabs = locallyOpenedSessionTabs.filter((id) => id !== sourceSessionId);
       showSessionTab(forked.sessionId);
       rememberActiveSession(requestWorkspace, forked.sessionId);
-      transcript = appendLocalAssistantMessage(
+      transcript = appendLocalSystemMessage(
         transcript,
         `Forked from entry ${entryId}.`,
         `local:${++localMessageId}`,
@@ -2210,10 +2904,12 @@
           {sessions}
           {activeSessionId}
           {activeTitle}
-          canCreate={canUseSession}
+          initialQuery={sessionSelectorQuery}
+          mode={sessionSelectorMode}
+          canCreate={sessionSelectorMode === "open" && canUseSession}
           disabled={operationRunning}
           onCreate={() => void createSession()}
-          onSelect={selectSession}
+          onSelect={sessionSelectorMode === "delete" ? (sessionId) => void deleteSelectedSession(sessionId) : selectSession}
           onClose={closeSessionSelector}
         />
       {/if}
@@ -2268,25 +2964,34 @@
         onLoadToolResult={(toolCallId) => void loadDeferredToolResult(toolCallId)}
       />
 
+      <div class="row-start-3 min-w-0">
+        <QueuedMessagesPanel
+          items={activeQueueItems}
+          disabled={operationRunning || queueActionRunning}
+          onAction={(item, action) => void actOnQueuedMessage(item, action)}
+        />
       <PromptComposer
+        bind:this={promptComposer}
         bind:promptText
-        attachments={promptAttachments}
-        availableCommands={activeSlashCommands}
-        {activeSessionId}
-        ready={status === "ready" && activeSessionRuntimeReady && !operationRunning && !sessionHistoryLoading}
-        {promptRunning}
-        {dragActive}
-        {autocompleteEnabled}
-        {autocompleteDebounceMs}
-        {questionMode}
-        onAutocomplete={autocompletePrompt}
-        onSubmit={submitPrompt}
-        onCancel={cancelPrompt}
-        onChooseAttachments={chooseAttachments}
-        onPasteAttachments={addPastedAttachments}
-        onRemoveAttachment={removeAttachment}
-        onOpenAttachment={(attachment) => void activateAttachment(attachment)}
-      />
+          attachments={promptAttachments}
+          availableCommands={activeSlashCommands}
+          {activeSessionId}
+          ready={status === "ready" && activeSessionRuntimeReady && !operationRunning && !sessionHistoryLoading}
+          {promptRunning}
+          {dragActive}
+          {autocompleteEnabled}
+          {autocompleteDebounceMs}
+          {questionMode}
+          onAutocomplete={autocompletePrompt}
+          onSubmit={submitPrompt}
+          onDefer={deferCurrentDraft}
+          onCancel={cancelPrompt}
+          onChooseAttachments={chooseAttachments}
+          onPasteAttachments={addPastedAttachments}
+          onRemoveAttachment={removeAttachment}
+          onOpenAttachment={(attachment) => void activateAttachment(attachment)}
+        />
+      </div>
     </main>
   </div>
 

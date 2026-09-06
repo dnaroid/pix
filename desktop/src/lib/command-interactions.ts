@@ -1,8 +1,10 @@
 import type { SessionConfigOption } from "@agentclientprotocol/sdk";
 
-export type InteractiveSlashCommand = "model" | "thinking";
+export type InteractiveSlashCommand = "model" | "thinking" | "jump" | "history";
+type ConfigSlashCommand = Extract<InteractiveSlashCommand, "model" | "thinking">;
 
 export interface CommandPickerItem {
+  readonly id?: string;
   readonly value: string;
   readonly label: string;
   readonly description?: string;
@@ -14,11 +16,12 @@ export interface CommandPickerState {
   readonly title: string;
   readonly placeholder: string;
   readonly emptyText: string;
+  readonly initialQuery?: string;
   readonly items: readonly CommandPickerItem[];
 }
 
 export function commandPickerState(
-  command: InteractiveSlashCommand,
+  command: ConfigSlashCommand,
   configOptions: readonly SessionConfigOption[],
 ): CommandPickerState {
   const optionId = command === "model" ? "model" : "thought_level";
@@ -52,6 +55,30 @@ export function commandPickerState(
         title: "Select thinking level",
         placeholder: "Search thinking levels…",
         emptyText: "No matching thinking levels",
+        items,
+      };
+}
+
+export function listCommandPickerState(
+  command: Extract<InteractiveSlashCommand, "jump" | "history">,
+  items: readonly CommandPickerItem[],
+  initialQuery = "",
+): CommandPickerState {
+  return command === "jump"
+    ? {
+        command,
+        title: "Jump to user message",
+        placeholder: "Search messages…",
+        emptyText: "No matching user messages",
+        ...(initialQuery ? { initialQuery } : {}),
+        items,
+      }
+    : {
+        command,
+        title: "Prompt history",
+        placeholder: "Search prompt history…",
+        emptyText: "Prompt history is empty",
+        ...(initialQuery ? { initialQuery } : {}),
         items,
       };
 }

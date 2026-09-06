@@ -10,7 +10,7 @@ import {
 } from "./attachments";
 import type { ToolDiff } from "./diff";
 
-export type MessageRole = "user" | "assistant" | "thought";
+export type MessageRole = "user" | "assistant" | "thought" | "system";
 
 export interface MessageItem {
   readonly type: "message";
@@ -122,9 +122,9 @@ export function appendLocalUserMessage(
   };
 }
 
-export function appendLocalAssistantMessage(state: TranscriptState, text: string, id: string): TranscriptState {
+export function appendLocalSystemMessage(state: TranscriptState, text: string, id: string): TranscriptState {
   return {
-    items: [...state.items, { type: "message", id, role: "assistant", text, attachments: [] }],
+    items: [...state.items, { type: "message", id, role: "system", text, attachments: [] }],
   };
 }
 
@@ -133,7 +133,7 @@ export function applySessionUpdate(state: TranscriptState, update: SessionUpdate
     case "user_message_chunk":
       return appendContentChunk(state, "user", update.messageId ?? undefined, update.content);
     case "agent_message_chunk":
-      return appendContentChunk(state, "assistant", update.messageId ?? undefined, update.content);
+      return appendContentChunk(state, agentMessageRole(update.messageId ?? undefined), update.messageId ?? undefined, update.content);
     case "agent_thought_chunk":
       return appendContentChunk(state, "thought", update.messageId ?? undefined, update.content);
     case "tool_call": {
@@ -196,7 +196,13 @@ export function applySessionUpdates(state: TranscriptState, updates: readonly Se
         appendHistoryContentChunk(items, messageIndexes, "user", update.messageId ?? undefined, update.content);
         break;
       case "agent_message_chunk":
-        appendHistoryContentChunk(items, messageIndexes, "assistant", update.messageId ?? undefined, update.content);
+        appendHistoryContentChunk(
+          items,
+          messageIndexes,
+          agentMessageRole(update.messageId ?? undefined),
+          update.messageId ?? undefined,
+          update.content,
+        );
         break;
       case "agent_thought_chunk":
         appendHistoryContentChunk(items, messageIndexes, "thought", update.messageId ?? undefined, update.content);
@@ -250,7 +256,13 @@ export function transcriptFromSessionUpdates(updates: readonly SessionUpdate[]):
         appendHistoryContentChunk(items, messageIndexes, "user", update.messageId ?? undefined, update.content);
         break;
       case "agent_message_chunk":
-        appendHistoryContentChunk(items, messageIndexes, "assistant", update.messageId ?? undefined, update.content);
+        appendHistoryContentChunk(
+          items,
+          messageIndexes,
+          agentMessageRole(update.messageId ?? undefined),
+          update.messageId ?? undefined,
+          update.content,
+        );
         break;
       case "agent_thought_chunk":
         appendHistoryContentChunk(items, messageIndexes, "thought", update.messageId ?? undefined, update.content);
@@ -367,6 +379,10 @@ function appendContentChunk(
     });
   }
   return { items };
+}
+
+function agentMessageRole(messageId: string | undefined): Extract<MessageRole, "assistant" | "system"> {
+  return messageId?.startsWith("pix-system:") ? "system" : "assistant";
 }
 
 function appendHistoryContentChunk(
