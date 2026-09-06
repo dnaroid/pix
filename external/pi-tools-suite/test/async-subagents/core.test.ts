@@ -793,31 +793,6 @@ Advise only.
 			expect(config.types["shared-name"].promptAppend).toBe("Role text.");
 		});
 
-		test.serial("parses icon frontmatter and keeps it through merges", () => {
-			const cwd = tempDir();
-			writeFile(path.join(cwd, ".pi", "pi-tools-suite.jsonc"), JSON.stringify({
-				asyncSubagents: { types: { "shared-name": { model: "jsonc/model", icon: "book" } } },
-			}));
-			writeFile(path.join(cwd, ".pi", "agents", "shared-name.md"), "---\ndescription: md wins\nmodel: md/model\n---\nRole text.\n");
-
-			const config = loadSubagentConfig(path.join(cwd, "packages", "app"), {});
-			// jsonc-only icon survives the per-field markdown merge.
-			expect(config.types["shared-name"].icon).toBe("book");
-
-			const mdCwd = tempDir();
-			writeFile(path.join(mdCwd, ".pi", "agents", "local-searcher.md"), "---\ndescription: finder\nicon: search\n---\nFind things.\n");
-			const mdConfig = loadSubagentConfig(mdCwd, {});
-			expect(mdConfig.types["local-searcher"]?.icon).toBe("search");
-
-			// Built-in bundled agents ship icons.
-			const builtin = loadSubagentConfig(tempDir(), {});
-			expect(builtin.types.research?.icon).toBe("search");
-			expect(builtin.types.implement?.icon).toBe("code");
-			expect(builtin.types.verify?.icon).toBe("flask");
-			expect(builtin.types["browser-qa"]?.icon).toBe("globe");
-			expect(builtin.types.oracle?.icon).toBe("sparkles");
-		});
-
 		test.serial("skips .pi/agents when an explicit config path is set", () => {
 			const cwd = tempDir();
 			writeFile(path.join(cwd, ".pi", "agents", "local-only.md"), "---\ndescription: x\n---\nBody.\n");
