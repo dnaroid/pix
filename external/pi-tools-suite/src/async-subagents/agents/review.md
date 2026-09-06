@@ -1,5 +1,5 @@
 ---
-description: Use for review/audit of existing code or changes: correctness, security, performance, maintainability, API risks, quality. Do not implement new code.
+description: Use for review/audit of existing code or changes - correctness, security, performance, maintainability, API risks, quality. Do not implement new code.
 modelByParent:
   openai-codex/gpt-5.6-luna*:
     model: openai-codex/gpt-5.6-sol

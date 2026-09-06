@@ -88,9 +88,12 @@ REQUIRED_FILES=(
 	"$PKG_ROOT/external/pi-tools-suite/index.ts"
 	"$PKG_ROOT/external/pi-tools-suite/src/index.ts"
 	"$PKG_ROOT/external/pi-tools-suite/package.json"
-	"$PKG_ROOT/external/pi-tools-suite/src/async-subagents/private-skills/browser-qa/SKILL.md"
-	"$PKG_ROOT/external/pi-tools-suite/src/async-subagents/private-skills/browser-qa/references/qa-design.md"
-	"$PKG_ROOT/external/pi-tools-suite/src/async-subagents/private-skills/browser-qa/scripts/browser-qa-runner.mjs"
+	"$PKG_ROOT/external/pi-tools-suite/src/async-subagents/agents/browser-qa.md"
+	"$PKG_ROOT/external/pi-tools-suite/src/async-subagents/agents/browser-qa/scripts/browser-qa-runner.mjs"
+	"$PKG_ROOT/external/pi-tools-suite/src/async-subagents/agents/browser-qa/vendor/fflate.mjs"
+	"$PKG_ROOT/external/pi-tools-suite/src/async-subagents/agents/browser-qa/vendor/fflate.LICENSE"
+	"$PKG_ROOT/external/pi-tools-suite/src/async-subagents/agents/browser-qa/examples/qa-auth.example.jsonc"
+	"$PKG_ROOT/external/pi-tools-suite/src/async-subagents/agents/browser-qa/examples/qa-flow.example.jsonc"
 )
 
 for required_file in "${REQUIRED_FILES[@]}"; do
@@ -99,7 +102,7 @@ for required_file in "${REQUIRED_FILES[@]}"; do
 		exit 1
 	fi
 done
-pass "Renderer extensions, pi-tools-suite payload, and self-contained browser QA skill are present"
+pass "Renderer extensions, pi-tools-suite payload, and inline browser QA agent/resources are present"
 
 banner "Step 5/5: Running non-interactive Pix commands..."
 ERRORS=0

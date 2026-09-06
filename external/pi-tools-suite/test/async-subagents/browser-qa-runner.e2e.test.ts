@@ -6,7 +6,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { AddressInfo } from "node:net";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { unzipSync } from "../../src/async-subagents/private-skills/browser-qa/vendor/fflate.mjs";
+import { unzipSync } from "../../src/async-subagents/agents/browser-qa/vendor/fflate.mjs";
 
 const RUN_E2E = /^(?:1|true|yes)$/i.test(process.env.BROWSER_QA_RUNNER_E2E ?? "");
 const KEEP_EVIDENCE = !/^(?:0|false|no)$/i.test(process.env.BROWSER_QA_KEEP_EVIDENCE ?? "");
@@ -18,7 +18,7 @@ const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(testDirectory, "../../../..");
 const runner = path.resolve(
 	testDirectory,
-	"../../src/async-subagents/private-skills/browser-qa/scripts/browser-qa-runner.mjs",
+	"../../src/async-subagents/agents/browser-qa/scripts/browser-qa-runner.mjs",
 );
 const mockPage = fs.readFileSync(path.resolve(testDirectory, "../fixtures/browser-qa/mock-page.html"), "utf8");
 

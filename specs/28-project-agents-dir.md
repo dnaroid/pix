@@ -109,9 +109,10 @@ control).
 - `defaultType` remains explicitly `quick` while bundled files are loaded in
   deterministic filename order. Spec 29 supersedes silent spawn-error fallback
   with parent-first role selection and recoverable routing errors.
-- Runtime-only invariants stay in runtime code. In particular, selecting
-  `browser-qa` still injects the package-private browser QA skill even though its
-  normal model/thinking/tools/timeout profile lives in `agents/browser-qa.md`.
+- Runtime-only invariants stay in runtime code. As extended by
+  `30-browser-qa-inline-agent.md`, `browser-qa` disables ordinary skill discovery
+  and receives launcher-owned runner/workspace paths, while the complete QA
+  workflow lives in the body of `agents/browser-qa.md` without a separate skill.
 
 ## Non-goals
 

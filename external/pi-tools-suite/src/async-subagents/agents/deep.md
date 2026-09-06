@@ -1,5 +1,5 @@
 ---
-description: Use for broad hard reasoning: architecture, root-cause analysis, cross-module impact, complex debugging or tradeoffs.
+description: Use for broad hard reasoning - architecture, root-cause analysis, cross-module impact, complex debugging or tradeoffs.
 modelByParent:
   openai-codex/gpt-5.6-luna*:
     model: openai-codex/gpt-5.6-sol

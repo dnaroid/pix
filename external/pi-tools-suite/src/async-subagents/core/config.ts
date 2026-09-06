@@ -234,10 +234,6 @@ export function getBuiltinSubagentDefinitionsDir(): string {
 	return BUILTIN_AGENTS_DIR;
 }
 
-export function getBrowserQaSkillPath(): string {
-	return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "private-skills", "browser-qa", "SKILL.md");
-}
-
 export function getSubagentConfigInitTargetPath(cwd: string, env: NodeJS.ProcessEnv = process.env): string {
 	return explicitSubagentConfigPath(cwd, env) ?? getDefaultSubagentConfigPath();
 }
@@ -347,7 +343,7 @@ export function resolveAgentTaskConfig(
 	return {
 		profile,
 		extraArgs,
-		isolatedSkills: resolveIsolatedSkills(selectedType, profile),
+		isolatedSkills: arrayOfStrings(profile?.isolatedSkills) ?? [],
 		fallbackModels,
 		retry: resolveRetryConfig(config.retry, profile?.retry),
 		maxResultBytes: profile?.maxResultBytes ?? config.maxResultBytes,
@@ -363,12 +359,6 @@ export function resolveAgentTaskConfig(
 			extraArgs: taskExtraArgs.length > 0 ? taskExtraArgs : undefined,
 		},
 	};
-}
-
-function resolveIsolatedSkills(selectedType: string | undefined, profile: SubagentTypeConfig | undefined): string[] {
-	const configured = arrayOfStrings(profile?.isolatedSkills) ?? [];
-	if (selectedType !== "browser-qa") return configured;
-	return [...new Set([getBrowserQaSkillPath(), ...configured])];
 }
 
 export function resolveSubagentRoutingConfig(config: SubagentConfig): ResolvedSubagentRoutingConfig {

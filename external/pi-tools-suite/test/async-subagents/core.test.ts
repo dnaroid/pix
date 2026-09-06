@@ -4,6 +4,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
+	buildSubagentCatalogPrompt,
 	createRunDir,
 	createSemaphore,
 	copySubagentConfigSample,
@@ -20,7 +21,7 @@ import {
 	getAgentState,
 	getActiveSubagentPresetName,
 	getBuiltinSubagentDefinitionsDir,
-	getBrowserQaSkillPath,
+	getBrowserQaRunnerPath,
 	getSubagentRegistryPath,
 	getSubagentConfigSamplePath,
 	getPiInvocation,
@@ -459,7 +460,7 @@ describe.serial("subagent type config", () => {
 		writeFile(configPath, "{}");
 		const config = loadSubagentConfig(cwd, { ASYNC_SUBAGENTS_CONFIG: configPath });
 		const resolved = resolveAgentTaskConfig({ id: "qa", task: "verify the browser bug", subagentType: "browser-qa" }, config);
-		const privateSkill = getBrowserQaSkillPath();
+		const runner = getBrowserQaRunnerPath();
 
 		expect(config.routing).toMatchObject({
 			model: "zai/glm-5-turbo",
@@ -483,14 +484,26 @@ describe.serial("subagent type config", () => {
 		expect(resolved.fallbackModels).toEqual(["openai-codex/gpt-5.6-luna"]);
 		expect(resolved.task.tools).toEqual(["read", "grep", "bash"]);
 		expect(resolved.timeoutMs).toBe(300_000);
-		expect(resolved.isolatedSkills).toEqual([privateSkill]);
-		expect(fs.existsSync(privateSkill)).toBe(true);
-		expect(fs.existsSync(path.join(path.dirname(privateSkill), "references", "qa-design.md"))).toBe(true);
-		const privateSkillText = fs.readFileSync(privateSkill, "utf-8");
-		expect(privateSkillText).not.toContain("playwright-cli");
-		expect(privateSkillText).toMatch(/user-visible acceptance contract, not an execution\s+plan/);
-		expect(privateSkillText).toMatch(/Never create,\s+serve, or switch to a mock\/synthetic page/);
-		expect(privateSkillText).toMatch(/report the concrete blocker instead of switching to a\s+mock target/);
+		expect(resolved.isolatedSkills).toEqual([]);
+		expect(fs.existsSync(runner)).toBe(true);
+		expect(path.isAbsolute(runner)).toBe(true);
+		const instructions = config.types["browser-qa"].promptAppend!;
+		expect(instructions).not.toContain("playwright-cli");
+		expect(instructions).not.toMatch(/SKILL\.md|references\//);
+		expect(instructions).toMatch(/user-visible acceptance contract, not an execution\s+plan/);
+		expect(instructions).toMatch(/Never create,\s+serve, or switch to a mock\/synthetic page/);
+		expect(instructions).toMatch(/report the concrete blocker instead of switching to a\s+mock target/);
+		for (const section of ["## Flow contract", "### Form-auth scaffolding", "### Scaffold safety and edge cases", "### Choose resilient locators", "### Diagnose failures without weakening the test", "visualInspection", "PI_BROWSER_QA_RUNNER"]) {
+			expect(instructions).toContain(section);
+		}
+		expect(generatePrompt(resolved.task)).toContain(instructions);
+		expect(generatePrompt(resolved.task)).toContain("verify the browser bug");
+		const parentCatalog = buildSubagentCatalogPrompt(config)!;
+		expect(parentCatalog).toContain(config.types["browser-qa"].description!);
+		expect(parentCatalog).not.toContain("## Flow contract");
+		expect(parentCatalog).not.toContain("PI_BROWSER_QA_RUNNER");
+		const ordinary = resolveAgentTaskConfig({ id: "ordinary", task: "Review", subagentType: "review" }, config);
+		expect(generatePrompt(ordinary.task)).not.toContain("PI_BROWSER_QA_RUNNER");
 	});
 
 	test.serial("defines bundled sub-agent roles as individual markdown agent files", () => {
@@ -516,16 +529,26 @@ describe.serial("subagent type config", () => {
 		expect(definitions["browser-qa"]?.raw.tools).toEqual(["read", "grep", "bash"]);
 	});
 
-	test.serial("keeps the self-contained browser QA skill mandatory when config adds isolated skills", () => {
-		const customSkill = path.join(tempDir(), "custom", "SKILL.md");
-		const config = {
+	test.serial("inherits QA instructions with model overrides and only adds explicitly configured skills", () => {
+		const cwd = tempDir();
+		const customSkill = path.join(cwd, "custom", "SKILL.md");
+		const configPath = path.join(cwd, "async-subagents.json");
+		writeFile(configPath, JSON.stringify({
 			types: {
-				"browser-qa": { isolatedSkills: [customSkill] },
+				"browser-qa": { model: "custom/qa", isolatedSkills: [customSkill] },
 			},
-		};
-		const resolved = resolveAgentTaskConfig({ id: "qa", task: "verify the browser bug", subagentType: "browser-qa" }, config);
+		}));
+		const config = loadSubagentConfig(cwd, { ASYNC_SUBAGENTS_CONFIG: configPath });
+		const resolved = resolveAgentTaskConfig({
+			id: "qa", task: "verify the browser bug", subagentType: "browser-qa",
+			promptOverride: "Custom brief: {task}", promptAppend: "Check the mobile layout too.",
+		}, config);
 
-		expect(resolved.isolatedSkills).toEqual([getBrowserQaSkillPath(), customSkill]);
+		expect(resolved.isolatedSkills).toEqual([customSkill]);
+		expect(resolved.task.model).toBe("custom/qa");
+		expect(generatePrompt(resolved.task)).toStartWith("Custom brief: verify the browser bug");
+		expect(generatePrompt(resolved.task)).toContain("## Flow contract");
+		expect(generatePrompt(resolved.task)).toContain("Check the mobile layout too.");
 	});
 
 	test.serial("selects explicit roles or falls back to the configured default", () => {
@@ -1242,6 +1265,86 @@ describe.serial("cleanup candidates", () => {
 });
 
 describe.serial("spawning agents", () => {
+	test.serial("delivers the inline QA workflow and a package-relative runner without loading a skill", async () => {
+		const cwd = path.join(tempDir(), "project with spaces");
+		const configPath = path.join(cwd, "async-subagents.json");
+		writeFile(configPath, "{}");
+		const config = loadSubagentConfig(cwd, { ASYNC_SUBAGENTS_CONFIG: configPath });
+		const runDir = createRunDir(cwd, "inline-qa");
+		const captured = path.join(cwd, "captured-prompt.json");
+		const piScript = path.join(tempDir(), "pi.js");
+		const extraSkill = path.join(cwd, "optional", "SKILL.md");
+		writeFile(extraSkill, "---\nname: optional-test\ndescription: test\n---\n");
+		writeFile(piScript, `
+const fs = require("node:fs");
+const { spawnSync } = require("node:child_process");
+const lines = require("node:readline").createInterface({ input: process.stdin });
+lines.on("line", (line) => {
+  const request = JSON.parse(line);
+  if (request.type !== "prompt") return;
+  const runner = process.env.PI_BROWSER_QA_RUNNER;
+  const probe = runner ? spawnSync(process.execPath, [runner, "profiles"], { encoding: "utf8" }) : undefined;
+  fs.writeFileSync(${JSON.stringify(captured)}, JSON.stringify({
+    message: request.message,
+    runner: runner ?? null,
+    agentDir: process.env.PI_SUBAGENT_AGENT_DIR ?? null,
+    probeExit: probe?.status,
+    probeOutput: probe?.stdout,
+  }));
+  console.log(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "done" }] }] }));
+  console.log(JSON.stringify({ type: "agent_settled" }));
+});
+setTimeout(() => {}, 2000);
+`);
+		process.argv[1] = piScript;
+		const oldRunner = process.env.PI_BROWSER_QA_RUNNER;
+		const oldAgentDir = process.env.PI_SUBAGENT_AGENT_DIR;
+		try {
+			// The launcher must replace inherited QA paths, and strip them for other roles.
+			process.env.PI_BROWSER_QA_RUNNER = path.join(cwd, "wrong-runner.mjs");
+			process.env.PI_SUBAGENT_AGENT_DIR = path.join(cwd, "wrong-agent");
+			for (const id of ["qa-default", "qa-extra-skill", "ordinary"]) {
+				const qa = id !== "ordinary";
+				const resolved = resolveAgentTaskConfig({ id, task: "Check the requested target", subagentType: qa ? "browser-qa" : "review" }, config);
+				const skills = id === "qa-extra-skill" ? [extraSkill] : resolved.isolatedSkills;
+				await withTimeout(new Promise<any>((resolve) => {
+					spawnAgent(runDir, resolved.task, cwd,
+						qa ? ["--skill", "injected.md", "--skill=injected-inline.md", "--no-skills", "--thinking", "high"] : [],
+						undefined, resolve, { isolatedSkills: skills });
+				}), `Timed out waiting for ${id}`);
+				const payload = JSON.parse(fs.readFileSync(captured, "utf8"));
+				const args = fs.readFileSync(path.join(runDir, id, "pi_args"), "utf8").split("\n");
+				expect(payload.message).toBe(generatePrompt(resolved.task));
+				if (qa) {
+					expect(payload.message).toContain('node "$PI_BROWSER_QA_RUNNER"');
+					expect(payload.message).toContain("## Detailed scenario-design guidance");
+					expect(payload.runner).toBe(getBrowserQaRunnerPath());
+					expect(payload.agentDir).toBe(fs.realpathSync(path.join(runDir, id)));
+					expect(payload.probeExit).toBe(0);
+					expect(JSON.parse(payload.probeOutput).profiles).toEqual([]);
+					expect(args.filter((arg) => arg === "--no-skills")).toHaveLength(1);
+					expect(args).not.toContain("injected.md");
+					expect(args).not.toContain("--skill=injected-inline.md");
+					expect(args).toContain("--thinking");
+					expect(args).toContain("high");
+				} else {
+					expect(payload.runner).toBeNull();
+					expect(payload.agentDir).toBeNull();
+					expect(payload.message).not.toContain("PI_BROWSER_QA_RUNNER");
+					expect(args).not.toContain("--no-skills");
+				}
+				expect(args.filter((arg) => arg === "--skill")).toHaveLength(skills.length);
+				if (skills.length > 0) expect(args).toContain(extraSkill);
+			}
+			expect(fs.existsSync(path.join(cwd, ".pi", "qa_auth.jsonc"))).toBe(false);
+		} finally {
+			if (oldRunner === undefined) delete process.env.PI_BROWSER_QA_RUNNER;
+			else process.env.PI_BROWSER_QA_RUNNER = oldRunner;
+			if (oldAgentDir === undefined) delete process.env.PI_SUBAGENT_AGENT_DIR;
+			else process.env.PI_SUBAGENT_AGENT_DIR = oldAgentDir;
+		}
+	});
+
 	test.serial("provides browser QA with an agent-local workspace and clears stale evidence on reuse", async () => {
 		const cwd = tempDir();
 		const runDir = createRunDir(cwd, "browser-qa-workspace");

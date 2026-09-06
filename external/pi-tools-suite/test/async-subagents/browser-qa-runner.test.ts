@@ -4,11 +4,11 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { strFromU8, strToU8, unzipSync, zipSync } from "../../src/async-subagents/private-skills/browser-qa/vendor/fflate.mjs";
+import { strFromU8, strToU8, unzipSync, zipSync } from "../../src/async-subagents/agents/browser-qa/vendor/fflate.mjs";
 
 const runner = path.resolve(
 	path.dirname(fileURLToPath(import.meta.url)),
-	"../../src/async-subagents/private-skills/browser-qa/scripts/browser-qa-runner.mjs",
+	"../../src/async-subagents/agents/browser-qa/scripts/browser-qa-runner.mjs",
 );
 const tempDirs: string[] = [];
 

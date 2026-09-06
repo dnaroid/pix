@@ -7,22 +7,28 @@ and proves fixes with deterministic assertions plus screenshot, video, and trace
 evidence. The role uses `zai/glm-5.3-flash`, falling back to
 `openai-codex/gpt-5.6-luna`.
 
-## Private skill isolation
+## Inline agent workflow and skill isolation
 
-- The browser QA skill lives under `src/async-subagents/private-skills/`, outside
-  Pi's normal skill discovery roots.
+- All operating instructions, flow contracts, scenario-design guidance, and
+  auth-scaffolding rules live in `src/async-subagents/agents/browser-qa.md`.
+  Its body becomes the QA child's `promptAppend` through the shared agent
+  loader. Parent and router catalogs include only its short `description`.
+- Runner code, vendor dependencies/licenses, and optional JSONC examples live
+  under `src/async-subagents/agents/browser-qa/`; none is a discoverable skill.
 - Sub-agent processes disable normal extension discovery, then always load the
-  suite's model-tools and Antigravity provider extensions explicitly, regardless
-  of the selected model. This keeps the process isolated without making any
-  Antigravity-backed role unavailable.
+  suite's model-tools extension. They load the Antigravity provider extension
+  only when an Antigravity model is explicitly selected.
 - A type profile may declare `isolatedSkills`. Spawning that profile adds
   `--no-skills` followed by one explicit `--skill` per configured path.
-- The `browser-qa` profile always loads one self-contained private workflow.
-  Relevant browser-test design guidance is bundled beside its trusted runner;
-  no separately discovered skill or browser CLI is required. Configuration may
-  append isolated skills but cannot remove the mandatory private workflow.
-- Other sub-agent profiles and the parent session must not discover the private
-  skill automatically.
+- `browser-qa` always disables normal skill discovery and filters skill flags
+  out of `extraArgs`, even without configured skills. It no longer injects a
+  mandatory QA skill. Explicitly configured skills are optional additions.
+- The launcher sets `PI_BROWSER_QA_RUNNER` to the absolute installed runner path,
+  replacing inherited values, and strips it from ordinary child environments.
+  QA invokes `node "$PI_BROWSER_QA_RUNNER"` without guessing paths from cwd.
+- Model-only profile overrides inherit the workflow. An explicit profile
+  `promptAppend` replaces the body like any other agent profile; it is not an
+  immutable security boundary. Runtime protections remain in the runner.
 
 ## Authentication contract
 
@@ -98,7 +104,7 @@ evidence. The role uses `zai/glm-5.3-flash`, falling back to
 
 ## Reliability and shutdown contract
 
-- The built-in `browser-qa` profile has a 120-second wall-clock budget unless
+- The built-in `browser-qa` profile has a 300-second wall-clock budget unless
   the caller explicitly supplies a task or spawn timeout. This bounds model
   stalls as well as browser work.
 - The trusted runner has its own bounded lifecycle. Browser launch, context
@@ -124,11 +130,14 @@ evidence. The role uses `zai/glm-5.3-flash`, falling back to
 
 ## Acceptance criteria
 
-1. `browser-qa` resolves to the intended model/fallback and its self-contained
-   private workflow, and its isolated child process can register the configured
+1. `browser-qa` resolves to the intended model/fallback and its inline Markdown
+   workflow, and its isolated child process can register the configured
    model provider.
-2. Spawn args contain `--no-skills` and the mandatory private skill for this
-   profile; ordinary profiles retain existing skill discovery behavior.
+2. Default QA spawn args contain `--no-skills` but no `--skill`. The child
+   receives the full workflow in its initial prompt and can invoke the bundled
+   runner through `PI_BROWSER_QA_RUNNER` from an unrelated project directory.
+   Optional configured skills still load; ordinary profiles retain existing
+   skill discovery behavior and do not receive QA-only environment paths.
 3. Auth profile listing and all error output are redacted; model-authored input
    cannot execute code in the credential-bearing process.
 4. Runner tests cover public execution without an auth file, explicit profile

@@ -1,5 +1,5 @@
 ---
-description: Use for frontend UI/UX visual work: styling, layout, typography, animation, responsive states, component polish, and accessibility. Avoid backend/business logic unless needed for UI behavior.
+description: Use for frontend UI/UX visual work - styling, layout, typography, animation, responsive states, component polish, and accessibility. Avoid backend/business logic unless needed for UI behavior.
 thinking: medium
 ---
 

@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { selectSuitableToolsForModel } from "../../lib/tool-args.js";
+import { BROWSER_QA_RUNNER_ENV, getBrowserQaRunnerPath } from "./browser-qa.js";
 import { validateBasename } from "./paths.js";
 import { getPiInvocation } from "./pi-invocation.js";
 import { writePromptFile } from "./prompt.js";
@@ -88,7 +89,10 @@ export function spawnAgent(
 	// detached subprocesses do not depend on persisted local pi settings.
 	const persistSessions = shouldPersistSubagentSessions();
 	const sessionDir = persistSessions ? getAgentSessionDir(agentDir) : undefined;
-	const forwardedExtraArgs = options.isolatedSkills?.length ? withoutSkillArgs(extraArgs) : extraArgs;
+	// QA instructions now live in the agent prompt, but normal skill discovery
+	// must stay disabled even when no additional skill is configured.
+	const isolateSkills = task.subagentType === "browser-qa" || Boolean(options.isolatedSkills?.length);
+	const forwardedExtraArgs = isolateSkills ? withoutSkillArgs(extraArgs) : extraArgs;
 	if (sessionDir) fs.mkdirSync(sessionDir, { recursive: true });
 	const piArgs: string[] = ["--mode", "rpc"];
 	if (sessionDir) piArgs.push("--session-dir", sessionDir);
@@ -100,9 +104,9 @@ export function spawnAgent(
 	if (usesAntigravityModel(task.model, forwardedExtraArgs)) {
 		piArgs.push("--extension", getAntigravityAuthExtensionPath());
 	}
-	if (options.isolatedSkills && options.isolatedSkills.length > 0) {
+	if (isolateSkills) {
 		piArgs.push("--no-skills");
-		for (const skillPath of options.isolatedSkills) piArgs.push("--skill", skillPath);
+		for (const skillPath of options.isolatedSkills ?? []) piArgs.push("--skill", skillPath);
 	}
 	const envModel = task.model || getEnvModel();
 	if (envModel) piArgs.push("--model", envModel);
@@ -812,7 +816,11 @@ function subagentEnvironment(env: NodeJS.ProcessEnv, agentDir?: string): NodeJS.
 		]),
 	};
 	delete result[SUBAGENT_AGENT_DIR_ENV];
-	if (agentDir) result[SUBAGENT_AGENT_DIR_ENV] = fs.realpathSync(agentDir);
+	delete result[BROWSER_QA_RUNNER_ENV];
+	if (agentDir) {
+		result[SUBAGENT_AGENT_DIR_ENV] = fs.realpathSync(agentDir);
+		result[BROWSER_QA_RUNNER_ENV] = getBrowserQaRunnerPath();
+	}
 	return result;
 }
 

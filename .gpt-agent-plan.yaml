@@ -1,0 +1,10 @@
+version: 1
+revision: 1
+goal: "Review subagent profiles against cost reduction and parent-context isolation; identify redundant discipline-only roles and concrete migration requirements without overwriting concurrent changes."
+steps:
+  - step: "Inspect model routing, presets, role descriptions, and delegation policies."
+    status: in_progress
+  - step: "Check context/result boundaries and existing eval coverage; distinguish proven behavior from pricing assumptions."
+    status: pending
+  - step: "Produce a concrete simplified role design and migration recommendations."
+    status: pending

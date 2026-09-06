@@ -499,14 +499,26 @@ AGENTS.md before approving anything; cite file paths first.
 ### Private browser QA and project auth
 
 The built-in `browser-qa` role runs on `zai/glm-5.3-flash`, with
-`openai-codex/gpt-5.6-luna` as its fallback. Its browser
-workflow is an explicit private skill under `src/async-subagents/private-skills/`,
-outside normal Pi skill discovery. The role's first-class `isolatedSkills` setting launches the child with
-`--no-skills` plus one self-contained private workflow. It bundles the relevant
-scenario-design, locator, waiting, assertion, evidence, and cleanup guidance next
-to its trusted runner, so browser QA does not depend on a separately installed
-skill or CLI. The private workflow remains mandatory when configuration appends
-other isolated skills; parent and ordinary sub-agent sessions do not discover it.
+`openai-codex/gpt-5.6-luna` as its fallback. Its complete workflow and detailed
+scenario-design guidance live in the Markdown body of
+`src/async-subagents/agents/browser-qa.md`. The normal profile loader appends
+that body to the QA child's task prompt; the parent and LLM router receive only
+the short `description`. There is no additional QA skill to discover or read.
+
+Executable resources live under `src/async-subagents/agents/browser-qa/`.
+The launcher supplies the installed runner's absolute path in
+`PI_BROWSER_QA_RUNNER`; the child invokes `node "$PI_BROWSER_QA_RUNNER"` from
+the delegated project's cwd. This non-secret path is set only for QA children.
+QA always launches with `--no-skills`, even when `isolatedSkills` is empty,
+and skill flags in `extraArgs` cannot bypass that isolation. Explicitly
+configured `isolatedSkills` remain supported as optional additions; no built-in
+QA `--skill` is injected. Other roles retain their normal discovery behavior.
+
+Model/thinking/tool-only profile overrides inherit the Markdown workflow.
+An explicit profile `promptAppend` replaces the inherited body under the usual
+field-level merge rules; custom QA instructions must preserve the runner-only,
+credential, target, and evidence contracts. Runner-enforced isolation and
+credential handling remain in code, not in the prompt.
 
 Public browser QA does not require an auth profile or `.pi/qa_auth.jsonc`: run it
 with an explicit base URL, whose exact origin becomes the fail-closed allowlist.
@@ -563,8 +575,8 @@ creating a template. Only an explicit authenticated request may create the
 private template. Missing, rejected, or expired selected auth returns
 `QA_AUTH_UPDATE_REQUIRED`, naming only the profile/file/reason needed for the
 parent to ask the user for an update and rerun. See
-`src/async-subagents/private-skills/browser-qa/references/qa-auth.example.jsonc`
-for complete profile shapes and `references/qa-flow.example.jsonc` beside it for
+`src/async-subagents/agents/browser-qa/examples/qa-auth.example.jsonc`
+for complete profile shapes and `examples/qa-flow.example.jsonc` beside it for
 the declarative, non-executable QA action/assertion format.
 
 Browser QA videos automatically visualize pointer interactions. Clicks and
