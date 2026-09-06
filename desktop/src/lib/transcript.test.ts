@@ -6,6 +6,7 @@ import {
   applySessionUpdates,
   emptyTranscript,
   groupTranscriptItems,
+  hydrateTranscriptAttachment,
   markDeferredToolResults,
   setToolResultLoading,
   type ToolItem,
@@ -109,6 +110,32 @@ describe("transcript reducer", () => {
         ],
       }),
     ]);
+  });
+
+  it("keeps deferred history images lightweight until hydrated", () => {
+    let state = applySessionUpdate(emptyTranscript, {
+      sessionUpdate: "user_message_chunk",
+      messageId: "message-1",
+      content: {
+        type: "resource_link",
+        uri: "pix-deferred-image:replay-1%3Aimage%3A0",
+        name: "image-1.png",
+        mimeType: "image/png",
+      },
+    });
+
+    const attachment = state.items[0]?.attachments[0];
+    expect(attachment).toMatchObject({
+      kind: "image",
+      deferredImageId: "replay-1:image:0",
+    });
+    expect(attachment?.dataUrl).toBeUndefined();
+
+    state = hydrateTranscriptAttachment(state, attachment!.id, "data:image/png;base64,aGk=", "image/png");
+    expect(state.items[0]?.attachments[0]).toMatchObject({
+      deferredImageId: "replay-1:image:0",
+      dataUrl: "data:image/png;base64,aGk=",
+    });
   });
 
   it("keeps image tool output separate from textual output", () => {

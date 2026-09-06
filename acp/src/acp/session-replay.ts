@@ -15,15 +15,25 @@
 import type { SessionNotification, SessionUpdate, ToolCallContent, ToolKind } from "@agentclientprotocol/sdk";
 import { toolKind, toolLocations, toolTitle, type TranslateContext } from "./event-translator.js";
 import type { PiAgentMessage, PiClient, PiMessagePart } from "../pi/pi-rpc-client.js";
+import { DEFERRED_PERSISTED_IMAGE_PREFIX } from "./session-history-file.js";
+
+export const DEFERRED_IMAGE_URI_PREFIX = "pix-deferred-image:";
 
 export interface DeferredSessionHistory {
 	readonly updates: readonly SessionUpdate[];
 	readonly toolResults: ReadonlyMap<string, DeferredToolResult>;
+	readonly images: ReadonlyMap<string, DeferredImageResult>;
 }
 
 export interface DeferredToolResult {
 	readonly message: PiAgentMessage;
 	readonly rawInput?: unknown;
+}
+
+export interface DeferredImageResult {
+	readonly mimeType: string;
+	readonly data?: string;
+	readonly persistedImageId?: string;
 }
 
 export async function replaySessionHistory(
@@ -85,6 +95,7 @@ export function deferredSessionHistoryFromMessages(
 	const updates: SessionUpdate[] = [];
 	const toolInputs = new Map<string, unknown>();
 	const toolResults = new Map<string, DeferredToolResult>();
+	const images = new Map<string, DeferredImageResult>();
 
 	for (const [index, message] of messages.entries()) {
 		const messageId = `replay-${index}`;
@@ -93,15 +104,23 @@ export function deferredSessionHistoryFromMessages(
 			if (typeof content === "string") {
 				if (content) updates.push(chunk(context.sessionId, messageId, "user_message_chunk", { type: "text", text: content }).update);
 			} else if (Array.isArray(content)) {
+				let imageIndex = 0;
 				for (const part of content as readonly PiMessagePart[]) {
 					if (part.type === "text" && typeof part.text === "string" && part.text) {
 						updates.push(chunk(context.sessionId, messageId, "user_message_chunk", { type: "text", text: part.text }).update);
 					} else if (part.type === "image" && typeof part.data === "string" && typeof part.mimeType === "string") {
+						const persistedImageId = part.data.startsWith(DEFERRED_PERSISTED_IMAGE_PREFIX) ? part.data : undefined;
+						const imageId = persistedImageId ?? `${messageId}:image:${imageIndex}`;
+						images.set(imageId, persistedImageId
+							? { mimeType: part.mimeType, persistedImageId }
+							: { mimeType: part.mimeType, data: part.data });
 						updates.push(chunk(context.sessionId, messageId, "user_message_chunk", {
-							type: "image",
-							data: part.data,
+							type: "resource_link",
+							uri: `${DEFERRED_IMAGE_URI_PREFIX}${encodeURIComponent(imageId)}`,
+							name: imageFileName(part.mimeType, imageIndex),
 							mimeType: part.mimeType,
 						}).update);
+						imageIndex += 1;
 					}
 				}
 			}
@@ -135,7 +154,12 @@ export function deferredSessionHistoryFromMessages(
 		}
 	}
 
-	return { updates, toolResults };
+	return { updates, toolResults, images };
+}
+
+function imageFileName(mimeType: string, index: number): string {
+	const subtype = mimeType.split("/").at(-1)?.replace("jpeg", "jpg") || "bin";
+	return `image-${index + 1}.${subtype}`;
 }
 
 /** Materialize the heavy ACP tool payload only when Desktop expands it. */

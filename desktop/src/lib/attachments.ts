@@ -13,6 +13,7 @@ export interface Attachment {
   readonly size?: number;
   readonly path?: string;
   readonly dataUrl?: string;
+  readonly deferredImageId?: string;
 }
 
 export interface AttachmentFile {
@@ -74,6 +75,21 @@ export function attachmentFromImage(
     mimeType,
     ...(path ? { path } : {}),
     dataUrl: `data:${mimeType};base64,${data}`,
+  };
+}
+
+export function attachmentFromDeferredImage(
+  imageId: string,
+  mimeType: string,
+  id: string,
+  name?: string,
+): Attachment {
+  return {
+    id,
+    name: name || `image.${extensionForMimeType(mimeType)}`,
+    kind: "image",
+    mimeType,
+    deferredImageId: imageId,
   };
 }
 

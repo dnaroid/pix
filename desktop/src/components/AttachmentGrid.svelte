@@ -23,7 +23,12 @@
   let preparedPreviews = $state(new Set<string>());
 
   function previewReady(attachment: Attachment): boolean {
-    return Boolean(attachment.dataUrl || !attachment.path || !onPrepare || preparedPreviews.has(attachment.id));
+    return Boolean(
+      attachment.dataUrl
+      || (!attachment.path && !attachment.deferredImageId)
+      || !onPrepare
+      || preparedPreviews.has(attachment.id),
+    );
   }
 
   function previewUrl(attachment: Attachment): string | undefined {

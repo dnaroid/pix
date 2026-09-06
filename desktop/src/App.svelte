@@ -21,6 +21,7 @@
     applyDeferredToolResult,
     applySessionUpdates,
     emptyTranscript,
+    hydrateTranscriptAttachment,
     markDeferredToolResults,
     setToolResultLoading,
     type TranscriptState,
@@ -225,6 +226,7 @@
   let activeQuestionImageOperationId: number | null = null;
   const registeredAttachmentPaths = new Set<string>();
   const preparingAttachmentPaths = new Map<string, Promise<void>>();
+  const preparingDeferredImages = new Map<string, Promise<void>>();
   const loadingToolResults = new Set<string>();
   const transcriptBySessionId = new Map<string, TranscriptState>();
   const runtimeReadySessionIds = new Set<string>();
@@ -542,6 +544,33 @@
   }
 
   function prepareTranscriptAttachment(attachment: Attachment): Promise<void> {
+    if (attachment.deferredImageId && !attachment.dataUrl) {
+      const requestClient = client;
+      const sessionId = activeSessionId;
+      if (!requestClient || !sessionId) return Promise.resolve();
+      const key = `${sessionId}\0${attachment.deferredImageId}`;
+      const existingImage = preparingDeferredImages.get(key);
+      if (existingImage) return existingImage;
+      const pendingImage = requestClient.sessionImage(sessionId, attachment.deferredImageId)
+        .then((image) => {
+          if (requestClient !== client) return;
+          const current = transcriptBySessionId.get(sessionId) ?? (sessionId === activeSessionId ? transcript : undefined);
+          if (!current) return;
+          const hydrated = hydrateTranscriptAttachment(
+            current,
+            attachment.id,
+            `data:${image.mimeType};base64,${image.data}`,
+            image.mimeType,
+          );
+          transcriptBySessionId.set(sessionId, hydrated);
+          if (sessionId === activeSessionId) transcript = hydrated;
+        })
+        .finally(() => {
+          if (preparingDeferredImages.get(key) === pendingImage) preparingDeferredImages.delete(key);
+        });
+      preparingDeferredImages.set(key, pendingImage);
+      return pendingImage;
+    }
     const path = attachment.path;
     if (!path || attachment.dataUrl || registeredAttachmentPaths.has(path)) return Promise.resolve();
     const existing = preparingAttachmentPaths.get(path);
@@ -1641,7 +1670,8 @@
   }
 
   async function activateAttachment(attachment: Attachment): Promise<void> {
-    if (attachment.path && !registeredAttachmentPaths.has(attachment.path)) {
+    if ((attachment.deferredImageId && !attachment.dataUrl)
+      || (attachment.path && !registeredAttachmentPaths.has(attachment.path))) {
       try {
         await prepareTranscriptAttachment(attachment);
       } catch (error) {
@@ -1649,16 +1679,19 @@
         return;
       }
     }
-    if (attachment.kind === "image" || attachment.kind === "video") {
-      showPreview({ kind: "attachment", attachment }, "replace");
+    const preparedAttachment = transcript.items
+      .flatMap((item) => item.attachments)
+      .find((candidate) => candidate.id === attachment.id) ?? attachment;
+    if (preparedAttachment.kind === "image" || preparedAttachment.kind === "video") {
+      showPreview({ kind: "attachment", attachment: preparedAttachment }, "replace");
       return;
     }
-    if (!attachment.path) {
-      errorMessage = `Cannot open ${attachment.name}: no local path is available.`;
+    if (!preparedAttachment.path) {
+      errorMessage = `Cannot open ${preparedAttachment.name}: no local path is available.`;
       return;
     }
     try {
-      await invoke("open_attachment", { path: attachment.path });
+      await invoke("open_attachment", { path: preparedAttachment.path });
     } catch (error) {
       reportError(error);
     }

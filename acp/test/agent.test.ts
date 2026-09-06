@@ -20,7 +20,7 @@ import type {
 	SessionInfo as PiSessionInfo,
 } from "@earendil-works/pi-coding-agent";
 import { PixAcpAgent } from "../src/acp/pix-acp-agent.js";
-import { PIX_SESSION_HISTORY_METHOD, PIX_TOOL_RESULT_METHOD } from "../src/acp/desktop-commands.js";
+import { PIX_SESSION_HISTORY_METHOD, PIX_SESSION_IMAGE_METHOD, PIX_TOOL_RESULT_METHOD } from "../src/acp/desktop-commands.js";
 import { PIX_QUESTION_EDITOR_TITLE } from "../src/acp/ui-request-bridge.js";
 
 /**
@@ -1401,8 +1401,15 @@ test("desktop lazy session/load omits tool bodies and retrieves them on demand",
 		async (cx) => {
 			const created = await cx.request("session/new", { cwd: "/tmp/proj", mcpServers: [] });
 			const sessionId = (created as { sessionId: string }).sessionId;
+			const lazyImageData = "aGk=";
 			FakePiClient.sessionFiles.set(harness.clients[0]!.state.sessionFile ?? "", [
-				{ role: "user", content: "inspect it" },
+				{
+					role: "user",
+					content: [
+						{ type: "text", text: "inspect it" },
+						{ type: "image", data: lazyImageData, mimeType: "image/png" },
+					],
+				} as unknown as PiAgentMessage,
 				{
 					role: "assistant",
 					content: [
@@ -1436,6 +1443,20 @@ test("desktop lazy session/load omits tool bodies and retrieves them on demand",
 				deferredToolCallIds: string[];
 			};
 			assert.deepEqual(history.deferredToolCallIds, ["lazy-tool"]);
+			assert.equal(JSON.stringify(history).includes(lazyImageData), false, "initial history must omit image data");
+			const imageUpdate = history.updates.find((update) => {
+				if (update.sessionUpdate !== "user_message_chunk") return false;
+				const content = update.content as { type?: string; uri?: string } | undefined;
+				return content?.type === "resource_link" && content.uri?.startsWith("pix-deferred-image:");
+			});
+			const imageContent = imageUpdate?.content as { uri?: string } | undefined;
+			assert.ok(imageContent?.uri);
+			const imageId = decodeURIComponent(imageContent.uri.slice("pix-deferred-image:".length));
+			const hydratedImage = await cx.request(PIX_SESSION_IMAGE_METHOD, { sessionId, imageId }) as {
+				data: string;
+				mimeType: string;
+			};
+			assert.deepEqual(hydratedImage, { data: lazyImageData, mimeType: "image/png" });
 			const toolCall = history.updates.find((update) => update.sessionUpdate === "tool_call");
 			assert.equal(toolCall?.name, "read");
 			assert.equal("rawInput" in (toolCall ?? {}), false, "tool input is deferred");

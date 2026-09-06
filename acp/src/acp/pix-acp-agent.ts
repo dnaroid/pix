@@ -91,11 +91,15 @@ import { applyConfigOption, buildConfigOptions, parseModelValue } from "./config
 import {
 	PIX_FORK_MESSAGES_METHOD,
 	PIX_RELOAD_SESSION_METHOD,
+	PIX_SESSION_IMAGE_METHOD,
 	PIX_SESSION_HISTORY_METHOD,
 	PIX_TOOL_RESULT_METHOD,
+	parseDesktopSessionImageRequest,
 	parseDesktopSessionRequest,
 	parseDesktopToolResultRequest,
 	type DesktopSessionHistoryResponse,
+	type DesktopSessionImageRequest,
+	type DesktopSessionImageResponse,
 	type DesktopSessionRequest,
 	type DesktopToolResultRequest,
 	type DesktopToolResultResponse,
@@ -114,7 +118,9 @@ import {
 import { SessionMapStore, type SessionMapRecord } from "./session-map.js";
 import {
 	readPersistedHistoryTail,
+	readPersistedImage,
 	readPersistedToolResult,
+	type PersistedImageRef,
 	type PersistedToolResultRef,
 } from "./session-history-file.js";
 import {
@@ -122,6 +128,7 @@ import {
 	deferredSessionHistoryFromMessages,
 	deferredToolResultUpdate,
 	replaySessionHistory,
+	type DeferredImageResult,
 	type DeferredToolResult,
 } from "./session-replay.js";
 import { loadTuiTabSnapshot, type TuiTabSnapshot } from "./tui-tabs.js";
@@ -175,6 +182,11 @@ interface DesktopDeferredToolResult {
 	readonly persistedRef?: PersistedToolResultRef;
 }
 
+interface DesktopDeferredImage {
+	readonly result: DeferredImageResult;
+	readonly persistedRef?: PersistedImageRef;
+}
+
 interface DesktopPromptFileImage {
 	readonly uri: string;
 	readonly mimeType: string;
@@ -211,6 +223,7 @@ export class PixAcpAgent {
 	private readonly pendingDesktopNewSessions = new Map<string, PendingDesktopNewSession>();
 	/** Lazy Desktop tool bodies are cached independently of a live pi runtime. */
 	private readonly desktopDeferredToolResults = new Map<string, Map<string, DesktopDeferredToolResult>>();
+	private readonly desktopDeferredImages = new Map<string, Map<string, DesktopDeferredImage>>();
 	/** Starts already accepted by ACP but not yet registered in `sessions`. */
 	private readonly pendingSpawns = new Set<Promise<AgentSessionState>>();
 	/** Serializes load/resume/fork/delete/close operations for the same id. */
@@ -300,6 +313,9 @@ export class PixAcpAgent {
 			)
 			.onRequest(PIX_TOOL_RESULT_METHOD, parseDesktopToolResultRequest, (ctx) =>
 				this.desktopToolResult(ctx.params),
+			)
+			.onRequest(PIX_SESSION_IMAGE_METHOD, parseDesktopSessionImageRequest, (ctx) =>
+				this.desktopSessionImage(ctx.params),
 			)
 			.onRequest("session/close", (ctx) =>
 				this.withSessionLifecycle(ctx.params.sessionId, () => this.closeSession(ctx.params.sessionId)),
@@ -393,10 +409,31 @@ export class PixAcpAgent {
 			});
 		}
 		this.desktopDeferredToolResults.set(params.sessionId, deferred);
+		const deferredImages = new Map<string, DesktopDeferredImage>();
+		for (const [imageId, result] of history.images) {
+			const persistedRef = result.persistedImageId
+				? persisted?.imageRefs.get(result.persistedImageId)
+				: undefined;
+			deferredImages.set(imageId, { result, ...(persistedRef ? { persistedRef } : {}) });
+		}
+		this.desktopDeferredImages.set(params.sessionId, deferredImages);
 		return {
 			updates: history.updates,
 			deferredToolCallIds: [...history.toolResults.keys()],
 		};
+	}
+
+	private async desktopSessionImage(params: DesktopSessionImageRequest): Promise<DesktopSessionImageResponse> {
+		const cached = this.desktopDeferredImages.get(params.sessionId)?.get(params.imageId);
+		if (!cached) throw new RequestError(ERROR_SERVER, `image ${params.imageId} is not available for lazy loading`);
+		const materialized = cached.persistedRef
+			? await readPersistedImage(cached.persistedRef)
+			: cached.result.data
+				? { data: cached.result.data, mimeType: cached.result.mimeType }
+				: undefined;
+		if (!materialized) throw new RequestError(ERROR_SERVER, `image ${params.imageId} could not be materialized`);
+		this.desktopDeferredImages.get(params.sessionId)?.delete(params.imageId);
+		return materialized;
 	}
 
 	private async desktopToolResult(params: DesktopToolResultRequest): Promise<DesktopToolResultResponse> {
@@ -619,6 +656,7 @@ export class PixAcpAgent {
 
 	private async deleteSession(sessionId: string): Promise<void> {
 		this.desktopDeferredToolResults.delete(sessionId);
+		this.desktopDeferredImages.delete(sessionId);
 		if (this.pendingDesktopNewSessions.has(sessionId) || this.sessions.has(sessionId)) {
 			await this.closeSession(sessionId);
 		}
@@ -1241,6 +1279,7 @@ export class PixAcpAgent {
 
 	private async closeSession(sessionId: string): Promise<void> {
 		this.desktopDeferredToolResults.delete(sessionId);
+		this.desktopDeferredImages.delete(sessionId);
 		const pendingNew = this.pendingDesktopNewSessions.get(sessionId);
 		if (pendingNew) {
 			this.pendingDesktopNewSessions.delete(sessionId);

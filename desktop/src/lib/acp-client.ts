@@ -63,6 +63,11 @@ export interface ForkSessionResult {
   readonly selectedText?: string;
 }
 
+export interface LazySessionImage {
+  readonly data: string;
+  readonly mimeType: string;
+}
+
 export interface PromptFileImage {
   readonly uri: string;
   readonly mimeType: string;
@@ -182,6 +187,14 @@ export class AcpClient {
       throw new Error("pix/session/tool_result returned an invalid response");
     }
     return response.update as unknown as SessionUpdate;
+  }
+
+  async sessionImage(sessionId: string, imageId: string): Promise<LazySessionImage> {
+    const response = await this.request<unknown>("pix/session/image", { sessionId, imageId }, null);
+    if (!isRecord(response) || typeof response.data !== "string" || typeof response.mimeType !== "string") {
+      throw new Error("pix/session/image returned an invalid response");
+    }
+    return { data: response.data, mimeType: response.mimeType };
   }
 
   async forkMessages(sessionId: string): Promise<ForkMessage[]> {

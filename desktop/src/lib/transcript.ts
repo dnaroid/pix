@@ -1,5 +1,6 @@
 import type { ContentBlock, SessionUpdate, ToolCallContent, ToolCallStatus } from "@agentclientprotocol/sdk";
 import {
+  attachmentFromDeferredImage,
   attachmentFromFile,
   attachmentFromImage,
   extractAttachmentMarkers,
@@ -56,6 +57,25 @@ export interface TranscriptState {
 }
 
 export const emptyTranscript: TranscriptState = { items: [] };
+
+export function hydrateTranscriptAttachment(
+  state: TranscriptState,
+  attachmentId: string,
+  dataUrl: string,
+  mimeType?: string,
+): TranscriptState {
+  let changed = false;
+  const items = state.items.map((item) => {
+    if (!item.attachments.some((attachment) => attachment.id === attachmentId)) return item;
+    const attachments = item.attachments.map((attachment) => {
+      if (attachment.id !== attachmentId) return attachment;
+      changed = true;
+      return { ...attachment, dataUrl, ...(mimeType ? { mimeType } : {}) };
+    });
+    return { ...item, attachments };
+  });
+  return changed ? { items } : state;
+}
 
 export function groupTranscriptItems(items: readonly TranscriptItem[]): TranscriptDisplayItem[] {
   const grouped: TranscriptDisplayItem[] = [];
@@ -504,6 +524,24 @@ function messageContent(
     case "audio":
       return { text: "[audio]", attachments: [] };
     case "resource_link": {
+      if (content.uri.startsWith("pix-deferred-image:")) {
+        const encoded = content.uri.slice("pix-deferred-image:".length);
+        let imageId: string;
+        try {
+          imageId = decodeURIComponent(encoded);
+        } catch {
+          imageId = encoded;
+        }
+        return {
+          text: "",
+          attachments: [attachmentFromDeferredImage(
+            imageId,
+            content.mimeType ?? "image/png",
+            `${idPrefix}:attachment:${attachmentOffset}`,
+            content.name ?? undefined,
+          )],
+        };
+      }
       const path = filePathFromUri(content.uri);
       if (!path) return { text: content.uri, attachments: [] };
       const name = content.name || fileNameFromPath(path);
