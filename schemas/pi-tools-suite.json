@@ -549,16 +549,27 @@
                   "type": "string",
                   "description": "Preset description."
                 },
+                "models": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[^\\s/*]+/[^\\s*]+$"
+                  },
+                  "uniqueItems": true,
+                  "description": "Available model pool. Filter the agent's ordered models by membership; pool order is ignored. Empty intersection rejects spawn. Oracle also respects this pool."
+                },
                 "model": {
                   "type": "string",
-                  "description": "Default model for this preset."
+                  "description": "Legacy default model. Ignored when models is set.",
+                  "deprecated": true
                 },
                 "fallbackModels": {
                   "type": "array",
                   "items": {
                     "type": "string"
                   },
-                  "description": "Global fallback models for this preset."
+                  "description": "Legacy fallback list. Ignored when models is set.",
+                  "deprecated": true
                 },
                 "thinking": {
                   "type": "string",
@@ -616,7 +627,7 @@
                   "description": "Per-type overrides."
                 }
               },
-              "description": "Named spawn preset."
+              "description": "Named available-model pool. Legacy model/types overrides remain supported; prefer models for new presets."
             }
           },
           "description": "Named spawn presets."
@@ -631,16 +642,27 @@
                   "type": "string",
                   "description": "Role description for routing."
                 },
+                "models": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[^\\s/*]+/[^\\s*]+$"
+                  },
+                  "uniqueItems": true,
+                  "description": "Ordered model candidates. First usable member of the preset pool runs; only remaining compatible members can be used on quota failure. Replaces legacy model/fallbackModels/modelByParent selection."
+                },
                 "model": {
                   "type": "string",
-                  "description": "Model for this sub-agent type."
+                  "description": "Legacy primary model; use models for new profiles.",
+                  "deprecated": true
                 },
                 "fallbackModels": {
                   "type": "array",
                   "items": {
                     "type": "string"
                   },
-                  "description": "Ordered model fallbacks."
+                  "description": "Legacy candidates after model; use models for a complete ranked list.",
+                  "deprecated": true
                 },
                 "thinking": {
                   "type": "string",

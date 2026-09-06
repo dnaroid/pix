@@ -41,6 +41,7 @@ export type ProjectAgentDefinition = AgentDefinition;
 const KNOWN_FRONTMATTER_KEYS = new Set([
 	"name",
 	"description",
+	"models",
 	"model",
 	"fallbackModels",
 	"modelByParent",
@@ -58,6 +59,7 @@ const KNOWN_FRONTMATTER_KEYS = new Set([
 /** String fields whose comma-separated form expands to an array. */
 const COMMA_SEPARATED_ARRAY_KEYS = new Set([
 	"tools",
+	"models",
 	"fallbackModels",
 	"isolatedSkills",
 	"extraArgs",

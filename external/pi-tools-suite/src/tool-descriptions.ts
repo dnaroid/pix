@@ -1,5 +1,6 @@
 import { COMPRESS_RANGE_DESCRIPTION } from "./dcp/prompts.js";
 import { SUBAGENT_TYPE_SELECTION_GUIDANCE } from "./async-subagents/core/agent-catalog.js";
+import { SUBAGENT_DELEGATION_GUIDANCE } from "./async-subagents/core/agent-strategy.js";
 
 export type ToolDescription = {
 	name: string;
@@ -72,8 +73,8 @@ export function asyncSubagentToolDescriptions(options: ToolDescriptionSetOptions
 				"For every real-browser QA request, immediately spawn subagentType='browser-qa' before checking files, URLs, servers, or other prerequisites; the QA sub-agent owns feasibility checks and blocked reports, so the parent must not attempt browser QA itself.",
 				"If browser-qa reports that credentials are required, it must identify the generated project-local template and explicitly ask the user to fill it; the parent relays that request without reading or editing the credential file.",
 				"After browser testing, browser-qa must return clickable links for every available screenshot, video, and trace; the parent must preserve those links in its user-facing report.",
-				"Otherwise, manage isolated async sub-agents for large, parallel, context-heavy work.",
-				"Presets from async-subagents config and /subagent-preset choose role model/thinking/args; AGENTS_PRESET or /subagent-preset session <name> overrides the current session; /subagent-preset init creates a sample config.",
+				SUBAGENT_DELEGATION_GUIDANCE,
+				"Presets declare available models; each agent's ordered models selects the first usable model in that pool. AGENTS_PRESET or /subagent-preset session <name> selects the current session pool; /subagent-preset init creates a sample config. Do not override the model merely to choose a role.",
 				SUBAGENT_TYPE_SELECTION_GUIDANCE,
 				repoDiscovery
 					? "Use for broad independent tracks, review axes, or hypotheses even though repo_* tools are available."
@@ -84,26 +85,26 @@ export function asyncSubagentToolDescriptions(options: ToolDescriptionSetOptions
 			promptSnippet:
 				"For every browser-based visual QA, UI bug reproduction, or real-browser fix-verification request, immediately spawn subagentType='browser-qa' even for a single track and before inspecting files or checking prerequisites. The browser-qa sub-agent must discover the target and report missing prerequisites; do not preflight, perform, or substitute browser QA in the parent agent. " +
 				"Give browser-qa a concise acceptance brief: the known target URL/app, user-visible flow, expected observable result, and required artifacts. Do not prescribe repository files, searches, commands, server setup, or mock/synthetic substitutes; unknown setup belongs to the QA sub-agent's discovery. " +
-				"For other work, use subagents action='spawn' for multiple independent agents, explicit delegate/parallelize/split work requests, or one large review/debug track that should stay out of the parent context. " +
+				"For other work, use subagents action='spawn' for economical execution or context isolation, including one bounded sequential task or explicit delegate/parallelize/split work requests. " +
 				SUBAGENT_TYPE_SELECTION_GUIDANCE + " Avoid trivial reads/edits and do not call status/wait immediately after spawn just for progress. " +
 				(repoDiscovery
 					? "For one semantic code-discovery question, use repo_search; for independent tracks/hypotheses/review axes, delegate even when repo_* tools exist. Read result only after completion when findings are needed."
-					: "For one focused code-discovery question, use direct read/grep. Without repo_* tools, spawn several focused scan/quick agents first for broad multi-track discovery, incident triage, release readiness, risk strategy, or parallel reviews. Read result only after completion when findings are needed."),
+					: "For one focused code-discovery question, use direct read/grep. Without repo_* tools, delegate bounded research tracks for broad discovery rather than flooding parent context. Read result only after completion when findings are needed."),
 			promptGuidelines: [
 				"Treat every real-browser QA request as a mandatory delegation trigger and an explicit exception to the large/parallel threshold: immediately spawn with `subagentType: \"browser-qa\"` before checking prerequisites. The QA sub-agent owns target discovery, feasibility checks, browser automation, evidence, and blocked reports; the parent must not inspect the project first or substitute non-browser checks.",
 				"Keep the browser-qa task payload at the user-visible acceptance level: known target URL/app, actions to perform, expected observable outcome, and requested evidence. Do not turn it into a repository investigation plan, name internal files or commands, dictate server setup, or invent a mock/synthetic target. Leave unknown prerequisites to the QA sub-agent.",
 				"When browser-qa reports missing credentials, relay its explicit request and generated `.pi/qa_auth.jsonc` template path; never inspect, populate, or edit that credential file in the parent.",
 				"After browser-qa completes a test, preserve its clickable screenshot, video, and trace links in the final user-facing response whenever those artifacts exist.",
-				"For non-browser-QA work, use action='spawn' only for LARGE/PARALLEL work: independent investigations, repo-wide sweeps, deep debugging, code review/audit, or explicit delegate/parallelize/split requests; these are spawn triggers unless trivial/single-file.",
+				SUBAGENT_DELEGATION_GUIDANCE,
 				repoDiscovery
 					? "For one discovery question, use repo_search; spawn for independent tracks/hypotheses/review axes, and do not let repo_* availability suppress delegation."
-					: "For one discovery question, use direct read/grep; when repo_* tools are unavailable, spawn several focused scan/quick agents first for broad multi-file/module/hypothesis work.",
+					: "For one small discovery question, use direct read/grep; when repo_* tools are unavailable, delegate scoped research to keep broad search output outside the parent context.",
 				repoDiscovery
 					? "For incident triage, release readiness, or risk/test strategy with separate hypotheses/review tracks, prefer focused agents over serial parent-context work."
 					: "For incident triage, release readiness, or risk/test strategy with separate hypotheses/review tracks and no repo_* tools, call action='spawn' as the first discovery step; direct read/grep can follow.",
-				"Do not use subagents for exact-string lookups, known-file edits, typo/text replacements, obvious one-file changes, or interactive user input; use the cheapest direct path.",
+				"Do not use subagents for trivial exact-string lookups, typo replacements, or interactive user input; use the cheapest direct path. A substantive bounded edit can be delegated even in one file.",
 				"Spawn multiple focused agents in one action='spawn' call for independent questions; set subagentType for clear role matches, timeoutSeconds for bounded probes, and use oracle sparingly for high-stakes uncertainty/final checks.",
-				"If spawn reports a routing error, no agents from that batch were launched. Correct the invalid or unresolved subagentType values using the available catalog and resubmit the whole batch; do not blindly retry omitted types or substitute quick to suppress the error.",
+				"If spawn reports a routing error, no agents from that batch were launched. Correct the invalid or unresolved subagentType values using the available catalog and resubmit the whole batch; do not blindly retry omitted types or substitute an unsuitable role to suppress the error.",
 				"For screenshot/image inspection by blind models, use lookup; subagents only receive imagePaths when a broader delegated track genuinely needs them.",
 				"If asked to start/run/launch/test parallel sub-agents, spawn and stop; do not status/wait just for progress. Use status for recovery, wait only when needed/requested, result only after completion; compact results include artifact links.",
 				"Use action='stop' for stop/cancel/kill requests and action='cleanup' with delete=true only after collecting results.",

@@ -4,8 +4,9 @@
 
 Provide a cheap, fast `browser-qa` async-subagent that reproduces browser bugs
 and proves fixes with deterministic assertions plus screenshot, video, and trace
-evidence. The role uses `zai/glm-5.3-flash`, falling back to
-`openai-codex/gpt-5.6-luna`.
+evidence. Its ranked `models` list prefers `zai/glm-5.3-flash`, then
+`openai-codex/gpt-5.6-luna`, filtered by the active preset's model pool and
+confirmed runtime image support.
 
 ## Inline agent workflow and skill isolation
 

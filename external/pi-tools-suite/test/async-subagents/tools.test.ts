@@ -229,27 +229,27 @@ describe.serial("extension entrypoint", () => {
 
 		const handler = beforeStartHandlers[0]!;
 		const glmResult = await handler({ systemPrompt: "base" }, { model: { provider: "zai", id: "glm-5.2" } });
-		expect(glmResult.systemPrompt).toContain('name="parallel-first"');
-		expect(glmResult.systemPrompt).toContain("prefer ultrawork:");
+		expect(glmResult.systemPrompt).toContain('name="cost-aware-orchestrator"');
+		expect(glmResult.systemPrompt).toContain("one sequential task can qualify");
 
 		const gptResult = await handler({ systemPrompt: "base" }, { model: { provider: "openai-codex", id: "gpt-5.5" } });
-		expect(gptResult.systemPrompt).toContain('name="deep-work"');
-		expect(gptResult.systemPrompt).toContain("autonomous deep worker");
+		expect(gptResult.systemPrompt).toContain('name="cost-aware-orchestrator"');
+		expect(gptResult.systemPrompt).toContain("lower-cost worker");
 
 		const lunaResult = await handler({ systemPrompt: "base" }, { model: { provider: "openai-codex", id: "gpt-5.6-luna" } });
-		expect(lunaResult.systemPrompt).toContain('name="escalation-aware"');
-		expect(lunaResult.systemPrompt).toContain("prefer Terra workers");
+		expect(lunaResult.systemPrompt).toContain('name="cost-aware-orchestrator"');
+		expect(lunaResult.systemPrompt).not.toContain("prefer Terra workers");
 
 		const terraResult = await handler({ systemPrompt: "base" }, { model: { provider: "openai-codex", id: "gpt-5.6-terra" } });
-		expect(terraResult.systemPrompt).toContain('name="escalation-aware"');
-		expect(terraResult.systemPrompt).toContain("escalate deep root-cause analysis");
+		expect(terraResult.systemPrompt).toContain('name="cost-aware-orchestrator"');
+		expect(terraResult.systemPrompt).not.toContain("escalate deep root-cause analysis");
 
 		const solResult = await handler({ systemPrompt: "base" }, { model: { provider: "openai-codex", id: "gpt-5.6-sol" } });
 		expect(solResult.systemPrompt).toContain('name="cost-aware-orchestrator"');
-		expect(solResult.systemPrompt).toContain("keep the parent session focused on planning");
+		expect(solResult.systemPrompt).toContain("Keep planning, decisions, integration");
 
 		const customPromptResult = await handler({ systemPrompt: "base", systemPromptOptions: { customPrompt: "SYSTEM.md" } }, { model: { provider: "zai", id: "glm-5.2" } });
-		expect(customPromptResult?.systemPrompt ?? "base").not.toContain('name="parallel-first"');
+		expect(customPromptResult?.systemPrompt ?? "base").not.toContain('<agent_strategy');
 		expect(customPromptResult?.systemPrompt ?? "base").not.toContain('name="deep-work"');
 	});
 
@@ -278,7 +278,7 @@ Check the project conventions before approving changes.
 		);
 		expect(result.systemPrompt).toContain("<available_subagent_types>");
 		expect(result.systemPrompt).toContain("- house-review: Review changes using this project's house rules.");
-		expect(result.systemPrompt).toContain("- quick: Use for tiny cheap tasks");
+		expect(result.systemPrompt).toContain("- research: Read-only evidence gathering");
 		expect(result.systemPrompt).toContain("Project-local `.pi/agents/*.md` roles are included");
 
 		const withoutSubagents = await handler(
@@ -383,7 +383,7 @@ Check the project conventions before approving changes.
 
 		await pi.commands.get("hyperplan").handler("", ctx);
 		expect(pi.userMessages[1]).toContain("Run hyperplan mode");
-		expect(pi.userMessages[1]).toContain("deep, implement, frontend, tests, review, and docs");
+		expect(pi.userMessages[1]).toContain("bounded research tasks");
 	});
 
 	test.serial("ULTRAWORK env transforms normal input into ultrawork mode", async () => {
@@ -882,6 +882,47 @@ describe.serial("cleanup tool", () => {
 
 describe.serial("spawn tool", () => {
 	for (const toolName of ["subagents", "async_subagents_spawn"]) {
+		test.serial(`${toolName} rejects model pool/capability failures before launching any task`, async () => {
+			const { registerSubagentsTool } = await import("../../src/async-subagents/tools/subagents.js");
+			const { registerSpawnTool } = await import("../../src/async-subagents/tools/spawn.js");
+			for (const failure of ["pool", "auth", "image"]) {
+				const cwd = tempDir();
+				isolateSubagentConfig(cwd);
+				process.env.AGENTS_PRESET = "limited";
+				writeFile(process.env.ASYNC_SUBAGENTS_CONFIG!, JSON.stringify({
+					presets: { limited: { models: ["test/allowed"] } },
+					types: {
+						research: { models: ["test/allowed"] },
+						implement: { models: [failure === "pool" ? "test/excluded" : "test/allowed"] },
+					},
+				}));
+				const pi = new FakePi();
+				const liveAgents = new Map<string, Map<string, any>>();
+				const complete = mock(() => { throw new Error("Explicit roles must not call a router"); });
+				const register = toolName === "subagents" ? registerSubagentsTool : registerSpawnTool;
+				register(pi as any, liveAgents, () => {});
+				const tool = pi.tools.get(toolName);
+				const result = await tool.execute("call", {
+					action: "spawn", watchSeconds: 0,
+					tasks: [
+						{ id: "valid", task: "Read facts", subagentType: "research" },
+						{ id: "invalid", task: "Make the change", subagentType: "implement", ...(failure === "image" ? { imagePaths: ["screen.png"] } : {}) },
+					],
+				}, undefined, undefined, { cwd, modelRegistry: {
+					find: (provider: string, id: string) => ({ provider, id, input: ["text"] }),
+					getApiKeyAndHeaders: async () => ({ ok: failure !== "auth" }), complete,
+				} });
+				expect(result.isError).toBe(true);
+				expect(result.details.error).toBe("subagent_model_selection");
+				expect(result.content[0].text).toContain("No agents were launched");
+				expect(liveAgents.size).toBe(0);
+				expect(fs.existsSync(path.join(cwd, ".pi", "subagents"))).toBe(false);
+				expect(complete).not.toHaveBeenCalled();
+			}
+		});
+	}
+
+	for (const toolName of ["subagents", "async_subagents_spawn"]) {
 		test.serial(`${toolName} rejects invalid or unresolved batches before creating run state`, async () => {
 			const { registerSubagentsTool } = await import("../../src/async-subagents/tools/subagents.js");
 			const { registerSpawnTool } = await import("../../src/async-subagents/tools/spawn.js");
@@ -895,7 +936,7 @@ describe.serial("spawn tool", () => {
 				const pi = new FakePi();
 				const liveAgents = new Map<string, Map<string, any>>();
 				const complete = mock(async () => ({
-					content: [{ type: "text", text: '{"routes":[{"id":"auto","subagentType":"review"}]}' }],
+					content: [{ type: "text", text: '{"routes":[{"id":"auto","subagentType":"research"}]}' }],
 					stopReason: "stop",
 				}));
 				const modelRegistry = {
@@ -921,7 +962,7 @@ describe.serial("spawn tool", () => {
 				expect(result.content[0].text).toContain("resubmit the whole batch");
 				expect(result.details.error).toBe("subagent_routing");
 				expect(result.details.taskIds).toContain("auto");
-				expect(result.details.allowedTypes).toContain("review");
+				expect(result.details.allowedTypes).toContain("research");
 				expect(liveAgents.size).toBe(0);
 				expect(fs.existsSync(path.join(cwd, ".pi", "subagents"))).toBe(false);
 				expect(tool.renderResult(result, {}, {}).text).toContain("No agents were launched");
@@ -984,7 +1025,7 @@ setTimeout(() => {}, 1000);
 		expect(result.content[0].text).toContain("Started 1 agent(s) so far; maxConcurrent=5 (project-wide).");
 		expect(result.content[0].text).toContain("All scheduled agents are no longer running or queued.");
 		expect(result.details.mode).toBe("spawn");
-		expect(result.details.tasks).toEqual([{ id: "agent-1", task: "Run fake agent", scope: "test scope", model: "openai-codex/gpt-5.6-luna" }]);
+		expect(result.details.tasks).toEqual([{ id: "agent-1", task: "Run fake agent", scope: "test scope", model: "zai/glm-5-turbo" }]);
 		expect(updates.length).toBeGreaterThan(0);
 		const runDir = result.details.runDir;
 		const registry = JSON.parse(fs.readFileSync(path.join(cwd, ".pi", "subagents", "registry.json"), "utf-8"));
@@ -1414,7 +1455,7 @@ setTimeout(() => {}, 1000);
 		expect(routerCompleteMock).toHaveBeenCalled();
 		expect(fs.readFileSync(path.join(runDir, "scan-agent", "pi_args"), "utf-8")).toContain("--model\nfast/scan\n--tools\nRead,Grep\n--thinking\noff");
 		expect(fs.readFileSync(path.join(runDir, "scan-agent", "subagent_type"), "utf-8")).toBe("scan");
-		expect(fs.readFileSync(path.join(runDir, "review-agent", "pi_args"), "utf-8")).toContain("--model\nsmart/review\n--thinking\nhigh\n--temperature\n0.1");
+		expect(fs.readFileSync(path.join(runDir, "review-agent", "pi_args"), "utf-8")).toContain("--model\nsmart/review\n--tools\nRead,Grep\n--thinking\nhigh\n--temperature\n0.1");
 		expect(fs.readFileSync(path.join(runDir, "review-agent", "subagent_type"), "utf-8")).toBe("review");
 		expect(fs.readFileSync(path.join(runDir, "review-agent", "prompt.md"), "utf-8")).toContain("Additional instructions from sub-agent profile:\nReview-only instruction for Code review payment module");
 		await waitUntil(() => liveAgents.size === 0);

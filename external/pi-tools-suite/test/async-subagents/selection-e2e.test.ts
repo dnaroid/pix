@@ -245,7 +245,7 @@ Verify in a real browser at http://127.0.0.1:4173/cart that clicking the Add to 
 		});
 	}, E2E_TIMEOUT_MS);
 
-	e2eTest("parent explicitly selects the obvious review role without model overrides or polling", async () => {
+	e2eTest("parent selects research for independent review without model overrides or polling", async () => {
 		await withFixtureProject(async (projectDir) => {
 			const prompt = `
 Delegate one independent payment-flow review now using the agent id payment-check, then stop immediately after the spawn call.
@@ -258,7 +258,7 @@ Do not inspect files in the parent, do not wait for results, and do not check pr
 			expect(input.tasks).toHaveLength(1);
 			const task = input.tasks![0]!;
 			expect(task.id).toBe("payment-check");
-			expect(task.subagentType).toBe("review");
+			expect(task.subagentType).toBe("research");
 			expect(task.model).toBeUndefined();
 			expect(task.thinking).toBeUndefined();
 		});
@@ -282,40 +282,40 @@ Let the configured router choose the helper profile: leave subagentType unset. D
 		});
 	}, E2E_TIMEOUT_MS);
 
-	e2eTest("selects quick, scan, and review profiles for mixed explicit launch tracks", async () => {
+	e2eTest("selects research, implement, and verify by execution mode rather than discipline", async () => {
 		await withFixtureProject(async (projectDir) => {
 			const prompt = `
 Launch exactly three sub-agents now and then stop after the spawn call; do not wait for results and do not inspect files first.
 Use exactly these agent ids and choose the appropriate logical sub-agent profile for each track:
-- quick-lookup: a cheap README/package lookup to summarize what this fixture project is.
-- repo-scan: a repo-wide file/search sweep to locate the checkout modules and test files.
-- payment-review: an independent code quality and security review of the payment flow.
+- payment-review: an independent code quality and security review of the payment flow; read evidence without running checks or editing.
+- docs-update: update the API documentation to describe the specified checkout behavior and add examples.
+- test-run: run the targeted payment tests, diagnose the logs and report outcomes without fixing files.
 The goal is to route each track to the right kind of helper, not to complete the investigation in the parent.`;
 
 			const result = await runPiSubagentSelectionE2E(projectDir, prompt, "mixed profile launch");
 			const input = firstSpawnInput(result.events);
 			expectResolvedTaskTypes(input, {
-				"quick-lookup": "quick",
-				"repo-scan": "scan",
-				"payment-review": "review",
+				"payment-review": "research",
+				"docs-update": "implement",
+				"test-run": "verify",
 			});
 		});
 	}, E2E_TIMEOUT_MS);
 
-	e2eTest("selects deep profiles for root-cause and change-impact sub-agents", async () => {
+	e2eTest("uses research for complex evidence gathering instead of automatically escalating to oracle", async () => {
 		await withFixtureProject(async (projectDir) => {
 			const prompt = `
 Launch exactly two sub-agents now and then stop after the spawn call; do not wait for results and do not inspect files first.
 Use exactly these agent ids and choose the appropriate logical sub-agent profile for hard reasoning work. These are not code-review, audit, security, or quality-review tracks:
 - incident-root-cause: deep root cause analysis of duplicate checkout charges after retries, including complex debugging hypotheses across payments and observability signals.
 - coupon-impact: deep architecture and broad impact analysis of changing coupon expiry handling from string comparison to Date parsing, including downstream design consequences.
-The goal is correct sub-agent routing for complex debugging, architecture, and impact analysis.`;
+Collect evidence by reading the relevant code only; do not execute tests or edit. The parent owns the final diagnosis and design decision, and is not asking for a flagship second opinion.`;
 
 			const result = await runPiSubagentSelectionE2E(projectDir, prompt, "deep profile launch");
 			const input = firstSpawnInput(result.events);
 			expectResolvedTaskTypes(input, {
-				"incident-root-cause": "deep",
-				"coupon-impact": "deep",
+				"incident-root-cause": "research",
+				"coupon-impact": "research",
 			});
 		});
 	}, E2E_TIMEOUT_MS);

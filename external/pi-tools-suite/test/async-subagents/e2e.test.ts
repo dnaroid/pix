@@ -242,14 +242,14 @@ function readRunText(runDir: string): string {
 }
 
 describe("async-subagents live e2e orchestration", () => {
-	e2eTest("delegates screenshot inspection to an image-capable frontend profile", async () => {
+	e2eTest("delegates visual investigation to an image-capable research model", async () => {
 		await withFixtureProject(async (projectDir) => {
 			if (!VISION_E2E_MODEL) throw new Error("ASYNC_SUBAGENTS_VISION_E2E_MODEL resolved to an empty model");
 			const prompt = `
 Launch exactly one sub-agent now to inspect this screenshot as a broader delegated frontend/UI track.
 Use the subagents tool with action=spawn and exactly these task fields:
 - id: image-screenshot
-- subagentType: frontend
+- subagentType: research
 - imagePaths: ["@${VISION_E2E_IMAGE}"]
 - focus: Describe the visible UI text, form values, and the discard confirmation dialog.
 Do not inspect files or images in the parent. After spawning, you may finish; the test will collect the sub-agent result.`;
@@ -257,8 +257,8 @@ Do not inspect files or images in the parent. After spawning, you may finish; th
 			await runPiE2E(projectDir, prompt, "vision screenshot inspection", {
 				subagentConfig: {
 					types: {
-						frontend: {
-							model: VISION_E2E_MODEL,
+						research: {
+							models: [VISION_E2E_MODEL],
 						},
 					},
 				},
@@ -269,7 +269,7 @@ Do not inspect files or images in the parent. After spawning, you may finish; th
 			expect(state.agents.map((agent) => agent.id)).toEqual(["image-screenshot"]);
 
 			const agentDir = path.join(runDir, "image-screenshot");
-			expect(readOptionalFile(path.join(agentDir, "subagent_type")).trim()).toBe("frontend");
+			expect(readOptionalFile(path.join(agentDir, "subagent_type")).trim()).toBe("research");
 			expect(readOptionalFile(path.join(agentDir, "model")).trim()).toBe(VISION_E2E_MODEL);
 			expect(readOptionalFile(path.join(agentDir, "image_paths")).trim()).toBe(`@${VISION_E2E_IMAGE}`);
 			expect(readOptionalFile(path.join(agentDir, "prompt.md"))).toContain("Visual focus / attention instructions");

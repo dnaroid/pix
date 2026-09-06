@@ -54,7 +54,7 @@ You are a ... role prompt (markdown body).
 
 - Frontmatter keys: `name` (must match the filename if present; mismatch is an
   error), plus every `SubagentTypeConfig` field (`description`, `model`,
-  `fallbackModels`, `modelByParent`, `thinking`, `tools`, `isolatedSkills`,
+  `models`, legacy `fallbackModels`/`modelByParent`, `thinking`, `tools`, `isolatedSkills`,
   `extraArgs`, `promptAppend`, `promptOverride`, `retry`, `maxResultBytes`,
   `timeoutMs`). Unknown keys are rejected (typo safety; the JSONC config path
   stays lenient).
@@ -106,7 +106,7 @@ control).
   `src/async-subagents/agents/*.md` and are parsed by the same
   `readAgentDefinitionsFromDir` + `normalizeSubagentTypeProfile` path as project
   agents.
-- `defaultType` remains explicitly `quick` while bundled files are loaded in
+- `defaultType` is now `research` while bundled files are loaded in
   deterministic filename order. Spec 29 supersedes silent spawn-error fallback
   with parent-first role selection and recoverable routing errors.
 - Runtime-only invariants stay in runtime code. As extended by

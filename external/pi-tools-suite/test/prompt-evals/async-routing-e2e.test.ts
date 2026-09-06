@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { loadSubagentConfig, routeSubagentTasks, type SubagentConfig } from "../../src/async-subagents/lib.js";
+import { getSubagentConfigSamplePath, loadSubagentConfig, routeSubagentTasks, type SubagentConfig } from "../../src/async-subagents/lib.js";
 import { decideUltraworkAuto } from "../../src/async-subagents/core/ultrawork-auto.js";
 import { withE2ERetry } from "../e2e-retry.js";
 import { createLiveModelContext, resolveLiveModelRef } from "../support/live-model.js";
@@ -15,8 +15,9 @@ const E2E_TIMEOUT_MS = Number(process.env.ASYNC_SUBAGENTS_ROUTING_E2E_TIMEOUT_MS
 const e2eTest = RUN_E2E ? test : test.skip;
 
 function routingConfig(): SubagentConfig {
+	const config = loadSubagentConfig(process.cwd(), { ASYNC_SUBAGENTS_CONFIG: getSubagentConfigSamplePath() });
 	return {
-		defaultType: "deep",
+		...config,
 		routing: {
 			enabled: true,
 			model: E2E_MODEL,
@@ -25,13 +26,6 @@ function routingConfig(): SubagentConfig {
 			maxTokens: 512,
 			maxRetries: 0,
 			timeoutMs: 60_000,
-		},
-		types: {
-			quick: { description: "Tiny cheap lookup in one known file or verification of one simple fact; never a repo-wide search." },
-			scan: { description: "Repository-wide file and symbol discovery or broad search sweep; locate code, do not review its quality." },
-			review: { description: "Independent code quality, security, correctness, or maintainability review with prioritized findings." },
-			deep: { description: "Hard cross-module root-cause debugging, architecture reasoning, or broad change-impact analysis." },
-			frontend: { description: "UI/UX implementation, responsive layout, accessibility, or visual frontend polish." },
 		},
 	};
 }
@@ -55,12 +49,12 @@ Apply the project's house checklist before approving changes.
 				const live = await createLiveModelContext(E2E_MODEL);
 				return routeSubagentTasks([
 					{ id: "project-check", task: "Review this project's diff specifically against its house rules and repository conventions." },
-					{ id: "explicit", task: "Keep the parent's explicit choice.", subagentType: "quick" },
+					{ id: "explicit", task: "Keep the parent's explicit choice.", subagentType: "research" },
 				], cfg, { model: live.model, modelRegistry: live.modelRegistry });
 			});
 			expect(result.usedLlm).toBe(true);
 			expect(result.routes).toEqual({ "project-check": "house-review" });
-			expect(result.tasks.map((task) => task.subagentType)).toEqual(["house-review", "quick"]);
+			expect(result.tasks.map((task) => task.subagentType)).toEqual(["house-review", "research"]);
 			expect(result.warnings).toEqual([]);
 		} finally {
 			fs.rmSync(cwd, { recursive: true, force: true });
@@ -74,8 +68,11 @@ Apply the project's house checklist before approving changes.
 				{ id: "known-file", task: "Read package.json and report the package version only.", scope: "package.json" },
 				{ id: "repo-sweep", task: "Search the entire repository and inventory every authentication entrypoint and related test file." },
 				{ id: "security-review", task: "Perform an independent security and correctness review of the payment flow; return prioritized findings." },
-				{ id: "race-root-cause", task: "Develop and test cross-module root-cause hypotheses for an intermittent checkout race involving retries, persistence, and observability." },
-				{ id: "explicit-override", task: "Keep this deterministic override unchanged.", subagentType: "quick" },
+				{ id: "race-root-cause", task: "Read retry, persistence, and observability code and collect evidence for root-cause hypotheses. Do not edit or execute tests; the parent will decide the fix." },
+				{ id: "write-docs", task: "Update the API documentation and examples for the already specified pagination contract. Make the required file changes." },
+				{ id: "test-run", task: "Run the targeted payment tests, inspect their failure logs, and report pass/fail without changing any files." },
+				{ id: "browser-check", task: "Verify Add to cart in the real browser with screenshots, video, trace and deterministic assertions." },
+				{ id: "explicit-override", task: "Give the requested independent strong second opinion.", subagentType: "oracle" },
 			], routingConfig(), {
 				model: live.model,
 				modelRegistry: live.modelRegistry,
@@ -84,12 +81,15 @@ Apply the project's house checklist before approving changes.
 
 		expect(result.usedLlm).toBe(true);
 		expect(result.routes).toEqual({
-			"known-file": "quick",
-			"repo-sweep": "scan",
-			"security-review": "review",
-			"race-root-cause": "deep",
+			"known-file": "research",
+			"repo-sweep": "research",
+			"security-review": "research",
+			"race-root-cause": "research",
+			"write-docs": "implement",
+			"test-run": "verify",
+			"browser-check": "browser-qa",
 		});
-		expect(result.tasks.find((task) => task.id === "explicit-override")?.subagentType).toBe("quick");
+		expect(result.tasks.find((task) => task.id === "explicit-override")?.subagentType).toBe("oracle");
 		expect(result.routes["explicit-override"]).toBeUndefined();
 	}, E2E_TIMEOUT_MS);
 

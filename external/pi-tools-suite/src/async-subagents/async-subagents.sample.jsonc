@@ -1,39 +1,10 @@
 {
-  // This sample is the value for `asyncSubagents` in ~/.config/pi/pi-tools-suite.jsonc.
+  // Value of asyncSubagents in pi-tools-suite.jsonc.
+  // Bundled role definitions and ordered models live in agents/*.md.
   // Full config schema: https://unpkg.com/pi-ui-extend/schemas/pi-tools-suite.json
-
-  // Global async-subagents routing.
-  // Rule of thumb:
-  // - GLM: cheap/fast discovery, grep-style scanning, docs/test inventory.
-  // - GLM-5.3 Flash: frontend/UI/UX, visual/product polish, and multimodal-heavy analysis.
-  // - GPT/Claude: review/audit, deep reasoning, tests, and implementation/refactoring.
-  // Override exact model IDs here if your pi provider uses different names.
-  // Router preference for genuinely ambiguous tasks, not a routing-error fallback.
-  "defaultType": "quick",
-
-  // Maximum concurrent sub-agent processes for this project/session.
-  // 0 means unlimited. Excess agents stay queued as planned until a slot opens.
+  "defaultType": "research",
   "maxConcurrent": 5,
-
-  // Optional global retry defaults. Per-type `retry` overrides these values.
-  // `retryableExitCodes` omitted = retry any non-zero exit; [] = disable retry by exit-code filter.
-  // "retry": { "maxRetries": 1, "backoffMs": 2000, "retryableExitCodes": [1, 124] },
-
-  // Maximum bytes copied from raw result.md into result.json's `resultText`.
-  // result.md itself remains the full raw sub-agent output.
   "maxResultBytes": 100000,
-
-  // Optional wall-clock timeout for each spawned agent in milliseconds.
-  // The built-in default is 30 minutes when this is omitted. You can also set
-  // `timeoutMs` per type/preset, or pass `timeoutSeconds` to a spawn call/task
-  // for short synthetic tests.
-  // "timeoutMs": 1800000,
-
-  // Parent-model image-capability overrides. Pi provider metadata can be missing
-  // or stale after switching models, so async-subagents treats these glob-like
-  // model refs as text-only when dynamic detection is inconclusive. Blind-model
-  // screenshot inspection should use lookup; this only keeps guidance honest.
-  // Matching is case-insensitive and supports `*` wildcards.
   "vision": {
     "blindModelPatterns": [
       "zai/glm-4.5*", "glm-4.5*", "*/glm-4.5*",
@@ -41,222 +12,41 @@
       "zai/glm-5.3", "glm-5.3", "*/glm-5.3"
     ]
   },
-
-  // Optional per-type prompt customization (leave commented until needed):
-  // - promptAppend: append extra instructions after the generated prompt.
-  // - promptOverride: replace the generated prompt entirely.
-  // Supports placeholders: {id}, {task}, {scope}, {parentObjective}, {subagentType}, {model}, {thinking}.
-  // Example inside any type profile:
-  // "promptAppend": [
-  //   "Use this role-specific checklist.",
-  //   "Return file paths before conclusions."
-  // ],
-  // "promptOverride": "You are a specialized {subagentType} sub-agent.\nParent: {parentObjective}\nTask: {task}\nScope: {scope}",
-
-  // Parent-model-aware model selection (optional, any type profile).
-  // modelByParent maps glob model refs (matched against the current parent
-  // model, e.g. "zai/*") to a model for this role. The first matching key wins.
-  // Values may be a model string or { model, fallbackModels? }. It is resolved
-  // after an explicit task.model / forcedModel, but before the preset/static
-  // profile model, so a role like an "oracle" can always pick a flagship from a
-  // DIFFERENT provider than the parent. Example:
-  // "modelByParent": {
-  //   "zai/*": { "model": "openai-codex/gpt-5.6-sol", "fallbackModels": ["zai/glm-5.3"] },
-  //   "openai-codex/*": "zai/glm-5.3",
-  //   "antigravity/*": { "model": "zai/glm-5.3", "fallbackModels": ["openai-codex/gpt-5.6-sol"] }
-  // }
-
-  // The parent normally sets subagentType from the effective role catalog.
-  // Only omitted types go to the LLM router (uncertainty or an explicit request
-  // for automatic routing). Explicit valid roles bypass the router entirely.
-  // Unknown roles or failed/incomplete routing reject the entire spawn batch
-  // before any agents start; the parent must correct the roles and resubmit.
-  // With enabled=false, every task must supply a valid explicit subagentType.
+  // Only omitted roles use the LLM router. Model selection itself is deterministic.
   "routing": {
     "enabled": true,
     "model": "zai/glm-5-turbo",
-    // Ordered router model fallbacks tried when the primary routing model is
-    // unavailable or fails. The current parent model is always tried last.
     "fallbackModels": ["openai-codex/gpt-5.6-luna"],
     "maxTaskChars": 1200,
     "maxTokens": 512,
-    "maxRetries": 3,
-    "timeoutMs": 10000,
+    "maxRetries": 1,
+    "timeoutMs": 12000,
     "debug": false
   },
-
-  // Presets are named agent/model configurations selected with /subagent-preset.
-  // They do not replace role routing below: `types` still defines what each role means.
-  // A preset overrides the models/thinking used by roles.
-  // Set AGENTS_PRESET=<name> before launching Pi to override the saved
-  // /subagent-preset selection for only the current process/session without
-  // modifying the saved selection file. If Pi is already running, use
-  // /subagent-preset session <name> and /subagent-preset session-clear instead.
-  // Shape:
-  // "presets": {
-  //   "name": {
-  //     "description": "shown in the selector",
-  //     "model": "optional fallback model for roles not listed in types",
-  //     "fallbackModels": ["optional/session fallback when model quota is exhausted"],
-  //     "thinking": "optional fallback thinking level",
-  //     "extraArgs": ["optional", "global", "pi", "args"],
-  //     "timeoutMs": 1800000,
-  //     "types": {
-  //       "roleName": { "model": "provider/model", "fallbackModels": ["provider/backup"], "thinking": "off|low|medium|high|xhigh|max", "timeoutMs": 1800000 }
-  //     }
-  //   }
-  // }
-  // Fallbacks are intended to cross provider boundaries: zai/* roles usually omit
-  // fallbackModels when that provider is effectively unlimited. If GPT/openai-codex
-  // is exhausted, use the matching zai/* role model. If Antigravity is exhausted,
-  // use the matching GPT/openai-codex role model, then matching zai/*. Exhausted
-  // providers are skipped for the current Pi process/session.
-  // Explicit task model/thinking and FORCE_CURRENT_MODEL still take precedence.
-
+  // A preset is an available model pool, NOT a role-to-model mapping.
+  // Choose the first usable entry in each agent's models that is in
+  // this pool. Pool order does not reorder agent preferences. The remaining
+  // matching candidates are the only quota fallbacks; never leave the pool.
+  // Oracle uses its strong candidate list, preferring another provider when
+  // possible, but also respects this pool. An empty intersection is an error.
+  // Explicit task.model, CLI --model, and FORCE_CURRENT_MODEL remain overrides.
+  // Legacy preset model/types/fallbackModels fields still load for compatibility.
   "presets": {
     "cheap": {
-      "description": "Use GLM models by role, including GLM-5.3 Flash for multimodal work.",
-      "types": {
-        "quick": { "model": "zai/glm-5-turbo", "thinking": "off" },
-        "scan": { "model": "zai/glm-5-turbo", "thinking": "off" },
-        "research": { "model": "zai/glm-5-turbo", "thinking": "low" },
-        "docs": { "model": "zai/glm-5-turbo", "thinking": "low" },
-        "frontend": { "model": "zai/glm-5.3-flash", "thinking": "medium" },
-        "browser-qa": { "model": "zai/glm-5.3-flash", "fallbackModels": ["openai-codex/gpt-5.6-luna"], "thinking": "low" },
-        "tests": { "model": "zai/glm-5-turbo", "thinking": "medium" },
-        "review": { "model": "zai/glm-5.3", "thinking": "high" },
-        "implement": { "model": "zai/glm-5.3", "thinking": "high" },
-        "deep": { "model": "zai/glm-5.3", "thinking": "high" }
-      }
+      "description": "GLM pool: economical workers plus GLM-5.3 for oracle.",
+      "models": ["zai/glm-5-turbo", "zai/glm-5.3-flash", "zai/glm-5.3"]
     },
-
     "gpt": {
-      "description": "Use the GPT-5.6 family by role: luna for fast tasks, terra for balanced work, and sol for heavy reasoning; fallback cross-provider on quota.",
-      "types": {
-        "quick": { "model": "openai-codex/gpt-5.6-luna", "fallbackModels": ["zai/glm-5-turbo"], "thinking": "off" },
-        "scan": { "model": "openai-codex/gpt-5.6-luna", "fallbackModels": ["zai/glm-5-turbo"], "thinking": "off" },
-        "research": { "model": "openai-codex/gpt-5.6-terra", "fallbackModels": ["zai/glm-5-turbo"], "thinking": "low" },
-        "docs": { "model": "openai-codex/gpt-5.6-luna", "fallbackModels": ["zai/glm-5-turbo"], "thinking": "low" },
-        "frontend": { "model": "openai-codex/gpt-5.6-terra", "fallbackModels": ["antigravity/gemini-3-flash-preview", "zai/glm-5.3"], "thinking": "medium" },
-        "browser-qa": { "model": "zai/glm-5.3-flash", "fallbackModels": ["openai-codex/gpt-5.6-luna"], "thinking": "low" },
-        "tests": { "model": "openai-codex/gpt-5.6-terra", "fallbackModels": ["zai/glm-5-turbo"], "thinking": "medium" },
-        "review": { "model": "openai-codex/gpt-5.6-sol", "fallbackModels": ["zai/glm-5.3"], "thinking": "high" },
-        "implement": { "model": "openai-codex/gpt-5.6-sol", "fallbackModels": ["zai/glm-5.3"], "thinking": "high" },
-        "deep": { "model": "openai-codex/gpt-5.6-sol", "fallbackModels": ["zai/glm-5.3"], "thinking": "high" }
-      }
+      "description": "GPT pool: Luna/Terra workers; Sol is available to oracle.",
+      "models": ["openai-codex/gpt-5.6-luna", "openai-codex/gpt-5.6-terra", "openai-codex/gpt-5.6-sol"]
     },
-
     "deep": {
-      "description": "Use only enabled strong models, mixing GPT, Claude, and Gemini by role.",
-      "types": {
-        "quick": { "model": "openai-codex/gpt-5.6-luna", "fallbackModels": ["zai/glm-5-turbo"], "thinking": "low" },
-        "scan": { "model": "antigravity/gemini-3-flash-preview", "fallbackModels": ["openai-codex/gpt-5.6-luna", "zai/glm-5-turbo"], "thinking": "off" },
-        "research": { "model": "antigravity/gemini-3.1-pro-preview", "fallbackModels": ["openai-codex/gpt-5.6-luna", "zai/glm-5-turbo"], "thinking": "medium" },
-        "docs": { "model": "antigravity/gemini-2.5-flash", "fallbackModels": ["openai-codex/gpt-5.6-luna", "zai/glm-5-turbo"], "thinking": "medium" },
-        "frontend": { "model": "antigravity/gemini-3.1-pro-preview-customtools", "fallbackModels": ["openai-codex/gpt-5.6-luna", "zai/glm-5.3"], "thinking": "low" },
-        "browser-qa": { "model": "zai/glm-5.3-flash", "fallbackModels": ["openai-codex/gpt-5.6-luna"], "thinking": "low" },
-        "tests": { "model": "antigravity/antigravity-claude-sonnet-4-6", "fallbackModels": ["openai-codex/gpt-5.6-luna", "zai/glm-5-turbo"], "thinking": "high" },
-        "review": { "model": "antigravity/antigravity-claude-sonnet-4-6", "fallbackModels": ["openai-codex/gpt-5.6-sol", "zai/glm-5.3"], "thinking": "high" },
-        "implement": { "model": "openai-codex/gpt-5.6-sol", "fallbackModels": ["zai/glm-5.3"], "thinking": "high" },
-        "deep": { "model": "antigravity/antigravity-claude-opus-4-6-thinking", "fallbackModels": ["openai-codex/gpt-5.6-sol", "zai/glm-5.3"], "thinking": "high" }
-      }
+      "description": "Legacy preset name for the mixed pool; workers retain economical candidate order, oracle uses strong models.",
+      "models": ["zai/glm-5-turbo", "zai/glm-5.3-flash", "openai-codex/gpt-5.6-luna", "openai-codex/gpt-5.6-terra", "openai-codex/gpt-5.6-sol", "zai/glm-5.3"]
     }
   },
-
-  // Role routing overrides. Bundled role descriptions and role-specific prompt
-  // instructions live in src/async-subagents/agents/*.md and are inherited when
-  // a field is omitted here. Besides these profiles, a project can ship roles as
-  // markdown files in <project>/.pi/agents/*.md (one file = one subagentType,
-  // named after the file; YAML frontmatter for the fields below plus a markdown
-  // body that becomes promptAppend). Project agent fields override same-named
-  // types defined here. Their names/descriptions are also included in the
-  // parent's effective sub-agent catalog; see README "Project-local agents".
-  "types": {
-    "quick": {
-      "model": "openai-codex/gpt-5.6-luna",
-      "fallbackModels": ["zai/glm-5-turbo"],
-      "thinking": "off"
-    },
-
-    "scan": {
-      "model": "openai-codex/gpt-5.6-luna",
-      "fallbackModels": ["zai/glm-5-turbo"],
-      "thinking": "off",
-      "tools": ["read", "grep"]
-    },
-
-    "research": {
-      "model": "openai-codex/gpt-5.6-terra",
-      "fallbackModels": ["zai/glm-5-turbo"],
-      "thinking": "low",
-      "tools": ["read", "grep"]
-    },
-
-    "docs": {
-      "model": "openai-codex/gpt-5.6-luna",
-      "fallbackModels": ["zai/glm-5-turbo"],
-      "thinking": "low"
-    },
-
-    "frontend": {
-      "model": "antigravity/gemini-3-flash-preview",
-      "fallbackModels": ["openai-codex/gpt-5.6-luna", "zai/glm-5.3"],
-      "thinking": "medium"
-    },
-
-    "browser-qa": {
-      "model": "zai/glm-5.3-flash",
-      "fallbackModels": ["openai-codex/gpt-5.6-luna"],
-      "thinking": "low",
-      "timeoutMs": 300000,
-      "tools": ["read", "grep", "bash"]
-    },
-
-    "tests": {
-      "model": "openai-codex/gpt-5.6-terra",
-      "fallbackModels": ["zai/glm-5-turbo"],
-      "thinking": "medium",
-      "tools": ["read", "grep", "bash"]
-    },
-
-    "review": {
-      "model": "openai-codex/gpt-5.6-sol",
-      "fallbackModels": ["zai/glm-5.3"],
-      "thinking": "high",
-      "tools": ["read", "grep"]
-    },
-
-    "implement": {
-      "model": "openai-codex/gpt-5.6-sol",
-      "fallbackModels": ["zai/glm-5.3"],
-      // Avoid Sol recursively doing routine implementation work for a Sol parent.
-      // Luna also escalates substantial implementation to Terra. modelByParent
-      // wins over preset role models, so this prevents both Luna -> Sol and
-      // Sol -> Sol for implement tasks under the built-in `gpt` preset.
-      "modelByParent": {
-        "openai-codex/gpt-5.6-luna*": { "model": "openai-codex/gpt-5.6-terra", "fallbackModels": ["zai/glm-5.3"] },
-        "openai-codex/gpt-5.6-sol*": { "model": "openai-codex/gpt-5.6-terra", "fallbackModels": ["zai/glm-5.3"] }
-      },
-      "thinking": "high"
-    },
-
-    "deep": {
-      "model": "openai-codex/gpt-5.6-sol",
-      "fallbackModels": ["zai/glm-5.3"],
-      "thinking": "high"
-    },
-
-    "oracle": {
-      "model": "openai-codex/gpt-5.6-sol",
-      "fallbackModels": ["zai/glm-5.3"],
-      "thinking": "max",
-      "tools": ["read", "grep", "bash"],
-      "modelByParent": {
-        "zai/*": { "model": "openai-codex/gpt-5.6-sol", "fallbackModels": ["zai/glm-5.3"] },
-        "openai-codex/*": { "model": "zai/glm-5.3", "fallbackModels": ["openai-codex/gpt-5.6-sol"] },
-        "antigravity/*": { "model": "zai/glm-5.3", "fallbackModels": ["openai-codex/gpt-5.6-sol"] },
-        "anthropic/*": { "model": "openai-codex/gpt-5.6-sol", "fallbackModels": ["zai/glm-5.3"] }
-      }
-    }
-  }
+  // Override role behavior here or define project specialists in .pi/agents/.
+  // Old names resolve as aliases unless explicitly defined in config/Markdown.
+  // Do not merge distinct old profiles onto one name: their overrides survive.
+  "types": {}
 }

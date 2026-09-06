@@ -221,21 +221,23 @@ const SubagentPresetTypeOverride = Type.Object(
 const SubagentPreset = Type.Object(
 	{
 		description: Type.Optional(Type.String({ description: "Preset description." })),
-		model: Type.Optional(Type.String({ description: "Default model for this preset." })),
-		fallbackModels: Type.Optional(Type.Array(Type.String(), { description: "Global fallback models for this preset." })),
+		models: Type.Optional(Type.Array(Type.String({ pattern: "^[^\\s/*]+/[^\\s*]+$" }), { uniqueItems: true, description: "Available model pool. Filter the agent's ordered models by membership; pool order is ignored. Empty intersection rejects spawn. Oracle also respects this pool." })),
+		model: Type.Optional(Type.String({ description: "Legacy default model. Ignored when models is set.", deprecated: true })),
+		fallbackModels: Type.Optional(Type.Array(Type.String(), { description: "Legacy fallback list. Ignored when models is set.", deprecated: true })),
 		thinking: Type.Optional(Type.String({ description: "Default thinking level." })),
 		extraArgs: Type.Optional(Type.Array(Type.String(), { description: "Extra CLI arguments." })),
 		timeoutMs: Type.Optional(Type.Number({ description: "Per-agent wall-clock timeout in ms.", minimum: 1 })),
 		types: Type.Optional(Type.Record(Type.String(), SubagentPresetTypeOverride, { description: "Per-type overrides." })),
 	},
-	{ description: "Named spawn preset." },
+	{ description: "Named available-model pool. Legacy model/types overrides remain supported; prefer models for new presets." },
 );
 
 const SubagentTypeConfig = Type.Object(
 	{
 		description: Type.Optional(Type.String({ description: "Role description for routing." })),
-		model: Type.Optional(Type.String({ description: "Model for this sub-agent type." })),
-		fallbackModels: Type.Optional(Type.Array(Type.String(), { description: "Ordered model fallbacks." })),
+		models: Type.Optional(Type.Array(Type.String({ pattern: "^[^\\s/*]+/[^\\s*]+$" }), { uniqueItems: true, description: "Ordered model candidates. First usable member of the preset pool runs; only remaining compatible members can be used on quota failure. Replaces legacy model/fallbackModels/modelByParent selection." })),
+		model: Type.Optional(Type.String({ description: "Legacy primary model; use models for new profiles.", deprecated: true })),
+		fallbackModels: Type.Optional(Type.Array(Type.String(), { description: "Legacy candidates after model; use models for a complete ranked list.", deprecated: true })),
 		thinking: Type.Optional(Type.String({ description: "Thinking level." })),
 		tools: Type.Optional(Type.Array(Type.String(), { description: "Enabled tools for this type." })),
 		isolatedSkills: Type.Optional(Type.Array(Type.String(), { description: "Explicit skill files loaded after disabling normal skill discovery for this type." })),

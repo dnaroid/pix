@@ -4,6 +4,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyEdits, modify, parse as parseJsonc } from "jsonc-parser";
 import { readAgentDefinitionsFromDir, readProjectAgentDefinitions, type AgentDefinition } from "./agents-dir.js";
+import { LEGACY_SUBAGENT_TYPES, legacySubagentTarget, resolveSubagentTypeName } from "./agent-aliases.js";
 import { ensurePiToolsSuiteUserConfig, getPiToolsSuiteUserConfigPath } from "../../config.js";
 import type { AgentTask, RetryConfig } from "./types.js";
 
@@ -16,14 +17,18 @@ export interface ModelByParentEntry {
 
 export interface SubagentTypeConfig {
 	description?: string;
+	/** Ranked candidates. The preset filters availability, never changes this order. */
+	models?: string[];
+	/** Legacy primary candidate; new profiles use models. */
 	model?: string;
-	/** Ordered model fallbacks used when the selected model hits quota/rate limits. */
+	/** Legacy candidates after model; new profiles use one ordered models list. */
 	fallbackModels?: string[];
 	/**
 	 * Parent-model-aware model selection. Keys are glob model refs (e.g. "zai/*")
 	 * matched against the current parent model; the first matching key wins.
 	 * Values may be a model ref string or { model, fallbackModels? }.
-	 * Resolved after explicit task.model / forcedModel, before preset/static model.
+	 * Ordinary roles: explicit task/forced model and preset models take priority.
+	 * Oracle alone keeps parent-aware selection ahead of presets.
 	 */
 	modelByParent?: Record<string, ModelByParentEntry>;
 	thinking?: string;
@@ -71,6 +76,9 @@ export interface SubagentVisionConfig {
 
 export interface SubagentPreset {
 	description?: string;
+	/** Available model pool. Agent candidate order wins; [] allows no models. */
+	models?: string[];
+	/** Legacy default model; prefer models for new presets. */
 	model?: string;
 	/** Ordered global model fallbacks used when this preset's selected model hits quota/rate limits. */
 	fallbackModels?: string[];
@@ -135,6 +143,13 @@ export interface ResolvedAgentTaskConfig {
 	timeoutMs?: number;
 }
 
+export class SubagentModelSelectionError extends Error {
+	constructor(taskId: string, message: string) {
+		super(`Task ${taskId}: ${message} No agents were launched. Configure a compatible model pool/candidate list or provide an explicit model override.`);
+		this.name = "SubagentModelSelectionError";
+	}
+}
+
 export interface ResolveAgentTaskOptions {
 	/** Default model for spawned sub-agents when task/profile do not specify one. */
 	model?: string;
@@ -180,9 +195,7 @@ export const DEFAULT_ROUTING_CONFIG: ResolvedSubagentRoutingConfig = {
 const BUILTIN_AGENTS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "agents");
 
 const BUILTIN_CONFIG: SubagentConfig = {
-	// Keep the historical fallback deterministic now that bundled agent files are
-	// loaded in filename order rather than object-literal insertion order.
-	defaultType: "quick",
+	defaultType: "research",
 	maxConcurrent: DEFAULT_MAX_CONCURRENT,
 	routing: { ...DEFAULT_ROUTING_CONFIG },
 	types: normalizeAgentDefinitions(readAgentDefinitionsFromDir(BUILTIN_AGENTS_DIR)),
@@ -312,12 +325,20 @@ export function resolveAgentTaskConfig(
 	const selectedType = selectSubagentType(task, config);
 	const profile = selectedType ? config.types[selectedType] : undefined;
 	const preset = globalOptions.preset;
-	const presetType = selectedType ? preset?.types?.[selectedType] : undefined;
+	// A new pool preset has no per-role policy. Ignore any inherited legacy
+	// matrix/defaults so changing the pool cannot resurrect an expensive model.
+	const legacyPreset = preset?.models === undefined ? preset : undefined;
 	const explicitType = trimString(task.subagentType);
+	const requestedType = explicitType || trimString(config.defaultType);
+	// Old preset keys apply only to requests using that name, avoiding lossy
+	// many-to-one migration (e.g. scan/review/deep all alias research).
+	const presetType = (requestedType ? legacyPreset?.types?.[requestedType] : undefined)
+		?? (selectedType ? legacyPreset?.types?.[selectedType] : undefined)
+		?? (selectedType && legacySubagentTarget(selectedType) ? legacyPreset?.types?.[legacySubagentTarget(selectedType)!] : undefined);
 	const taskExtraArgs = arrayOfStrings(task.extraArgs) ?? [];
 	const profileExtraArgs = arrayOfStrings(profile?.extraArgs) ?? [];
 	const presetTypeExtraArgs = arrayOfStrings(presetType?.extraArgs) ?? [];
-	const presetExtraArgs = arrayOfStrings(preset?.extraArgs) ?? [];
+	const presetExtraArgs = arrayOfStrings(legacyPreset?.extraArgs) ?? [];
 	const globalExtraArgs = arrayOfStrings(globalOptions.extraArgs) ?? [];
 	const promptAppend = joinTextBlocks(profile?.promptAppend, task.promptAppend);
 	const forcedModel = trimString(globalOptions.forcedModel);
@@ -326,19 +347,46 @@ export function resolveAgentTaskConfig(
 	const parentMatchModel = trimString(parentMatch?.model);
 	const presetTypeModel = trimString(presetType?.model);
 	const globalModel = trimString(globalOptions.model);
-	const presetModel = trimString(preset?.model);
-	const profileModel = trimString(profile?.model);
-	const model = forcedModel || taskModel || parentMatchModel || presetTypeModel || globalModel || presetModel || profileModel;
-	const usedParentMatch = Boolean(parentMatchModel) && model === parentMatchModel;
-	const fallbackModels = forcedModel || taskModel
+	const presetModel = trimString(legacyPreset?.model);
+	const profileModels = profile?.models ?? modelList(profile?.model, profile?.fallbackModels) ?? [];
+	const profileModel = profileModels[0];
+	const usedParentMatch = Boolean(parentMatchModel) && !forcedModel && !taskModel
+		&& (selectedType === "oracle" || !(presetTypeModel || globalModel || presetModel));
+	const primaryModel = forcedModel || taskModel || (usedParentMatch ? parentMatchModel : undefined)
+		|| presetTypeModel || globalModel || presetModel || profileModel;
+	const configuredFallbacks = forcedModel || taskModel
 		? []
-		: usedParentMatch && parentMatch?.fallbackModels && parentMatch.fallbackModels.length > 0
+		: usedParentMatch && parentMatch?.fallbackModels !== undefined
 			? parentMatch.fallbackModels
-			: resolveFallbackModels({ model, presetType, preset, profile });
+			: resolveFallbackModels({ model: primaryModel, presetType, preset: legacyPreset, profileModels, profile });
 	const extraArgs = forcedModel
 		? stripModelArgs([...profileExtraArgs, ...presetTypeExtraArgs, ...taskExtraArgs, ...presetExtraArgs, ...globalExtraArgs])
 		: [...profileExtraArgs, ...presetTypeExtraArgs, ...taskExtraArgs, ...presetExtraArgs, ...globalExtraArgs];
-	const timeoutMs = task.timeoutMs ?? globalOptions.timeoutMs ?? presetType?.timeoutMs ?? preset?.timeoutMs ?? profile?.timeoutMs ?? config.timeoutMs;
+	const cliModel = modelFromArgs(extraArgs);
+	const explicitModel = forcedModel || cliModel || taskModel;
+	let candidates = modelList(explicitModel || primaryModel, explicitModel ? [] : configuredFallbacks) ?? [];
+	if (!explicitModel) {
+		if (selectedType === "oracle" && globalOptions.parentModel && !usedParentMatch
+			&& !presetTypeModel && !presetModel && !globalModel && !profile?.model) {
+			const parentProvider = globalOptions.parentModel.split("/")[0];
+			candidates = [
+				...candidates.filter((ref) => ref.split("/")[0] !== parentProvider),
+				...candidates.filter((ref) => ref.split("/")[0] === parentProvider),
+			];
+		}
+		if (preset?.models !== undefined) {
+			const available = new Set(preset.models);
+			candidates = candidates.filter((ref) => available.has(ref));
+			if (candidates.length === 0) {
+				throw new SubagentModelSelectionError(task.id, "No ranked candidate is in the active preset's models pool.");
+			}
+		}
+	}
+	if (candidates.length === 0) {
+		throw new SubagentModelSelectionError(task.id, "No model candidates are configured; set models on the agent profile.");
+	}
+	const [model, ...fallbackModels] = candidates;
+	const timeoutMs = task.timeoutMs ?? globalOptions.timeoutMs ?? presetType?.timeoutMs ?? legacyPreset?.timeoutMs ?? profile?.timeoutMs ?? config.timeoutMs;
 
 	return {
 		profile,
@@ -350,9 +398,9 @@ export function resolveAgentTaskConfig(
 		timeoutMs,
 		task: {
 			...task,
-			subagentType: explicitType || selectedType,
+			subagentType: selectedType,
 			model,
-			thinking: trimString(globalOptions.thinking) || trimString(task.thinking) || trimString(presetType?.thinking) || trimString(globalOptions.defaultThinking) || trimString(preset?.thinking) || trimString(profile?.thinking),
+			thinking: trimString(globalOptions.thinking) || trimString(task.thinking) || trimString(presetType?.thinking) || trimString(globalOptions.defaultThinking) || trimString(legacyPreset?.thinking) || trimString(profile?.thinking),
 			promptAppend,
 			promptOverride: trimString(task.promptOverride) || trimString(profile?.promptOverride),
 			tools: task.tools && task.tools.length > 0 ? task.tools : arrayOfStrings(profile?.tools),
@@ -366,7 +414,8 @@ export function resolveSubagentRoutingConfig(config: SubagentConfig): ResolvedSu
 }
 
 export function defaultSubagentType(config: SubagentConfig): string | undefined {
-	return trimString(config.defaultType) || Object.keys(config.types).find((name) => trimString(name));
+	const name = trimString(config.defaultType) || Object.keys(config.types).find((name) => trimString(name));
+	return name ? resolveSubagentTypeName(name, config) : undefined;
 }
 
 /** Merge global and per-type retry partials into a fully resolved RetryConfig. Per-type wins. */
@@ -405,7 +454,7 @@ export function isBlindModelRef(modelRef: string | undefined, config: SubagentCo
 
 export function selectSubagentType(task: AgentTask, config: SubagentConfig): string | undefined {
 	const explicit = trimString(task.subagentType);
-	if (explicit) return explicit;
+	if (explicit) return resolveSubagentTypeName(explicit, config);
 	return defaultSubagentType(config);
 }
 
@@ -463,6 +512,7 @@ function normalizeConfig(value: Record<string, unknown>, file: string): Partial<
 			if (!isRecord(rawPreset)) throw new Error(`Subagent preset "${name}" must be an object: ${file}`);
 			presets[name] = {
 				description: trimString(rawPreset.description),
+				models: normalizeModels(rawPreset.models, `preset "${name}"`, file),
 				model: trimString(rawPreset.model),
 				fallbackModels: modelList(rawPreset.fallbackModels, rawPreset.fallbackModel),
 				thinking: trimString(rawPreset.thinking),
@@ -495,11 +545,13 @@ export function normalizeSubagentTypeProfile(
 	name: string,
 	file: string,
 ): SubagentTypeConfig {
+	const models = normalizeModels(rawProfile.models, `type "${name}"`, file);
 	return {
 		description: trimString(rawProfile.description),
-		model: trimString(rawProfile.model),
-		fallbackModels: modelList(rawProfile.fallbackModels, rawProfile.fallbackModel),
-		modelByParent: normalizeModelByParent(rawProfile.modelByParent, name, file),
+		models,
+		model: models === undefined ? trimString(rawProfile.model) : undefined,
+		fallbackModels: models === undefined ? modelList(rawProfile.fallbackModels, rawProfile.fallbackModel) : undefined,
+		modelByParent: models === undefined ? normalizeModelByParent(rawProfile.modelByParent, name, file) : undefined,
 		thinking: trimString(rawProfile.thinking),
 		tools: arrayOfStrings(rawProfile.tools),
 		isolatedSkills: arrayOfStrings(rawProfile.isolatedSkills),
@@ -521,12 +573,47 @@ function mergeConfig(target: SubagentConfig, source: Partial<SubagentConfig>): v
 	if (source.timeoutMs !== undefined) target.timeoutMs = source.timeoutMs;
 	if (source.retry) target.retry = { ...(target.retry ?? {}), ...source.retry };
 	for (const [name, profile] of Object.entries(source.types ?? {})) {
-		target.types[name] = { ...(target.types[name] ?? {}), ...compactProfile(profile) };
+		// Old custom profiles keep their own name/overrides and inherit only the
+		// canonical behavior; never collapse several old profiles onto one role.
+		const alias = legacySubagentTarget(name);
+		const base = target.types[name] ?? (alias ? target.types[alias] : undefined) ?? {};
+		target.types[name] = mergeTypeProfile(base, profile);
 	}
 	for (const [name, preset] of Object.entries(source.presets ?? {})) {
 		target.presets = target.presets ?? {};
-		target.presets[name] = { ...(target.presets[name] ?? {}), ...compactPreset(preset) };
+		const previous = target.presets[name] ?? {};
+		const merged = { ...previous, ...compactPreset(preset) };
+		// The explicit selector form in the later config wins in both directions.
+		if (preset.models !== undefined) {
+			delete merged.model;
+			delete merged.fallbackModels;
+			delete merged.types;
+			delete merged.thinking;
+			delete merged.extraArgs;
+			delete merged.timeoutMs;
+		} else if (preset.model || preset.fallbackModels !== undefined || preset.types) {
+			delete merged.models;
+		}
+		target.presets[name] = merged;
 	}
+}
+
+/** Preserve legacy field overrides without allowing inherited primary models
+ * to win over a newly supplied candidate list (or the reverse). */
+function mergeTypeProfile(base: SubagentTypeConfig, source: SubagentTypeConfig): SubagentTypeConfig {
+	const merged = { ...compactProfile(base), ...compactProfile(source) };
+	if (source.models !== undefined) {
+		merged.models = [...source.models];
+		delete merged.model;
+		delete merged.fallbackModels;
+		delete merged.modelByParent;
+	} else if (source.model || source.fallbackModels !== undefined) {
+		const previous = base.models ?? modelList(base.model, base.fallbackModels) ?? [];
+		delete merged.models;
+		merged.model = source.model ?? previous[0];
+		merged.fallbackModels = source.fallbackModels ?? base.fallbackModels ?? previous.slice(1);
+	}
+	return merged;
 }
 
 function normalizeRoutingConfig(value: Record<string, unknown>): SubagentRoutingConfig {
@@ -571,8 +658,9 @@ function modelPatternRegExp(pattern: string): RegExp {
 function compactProfile(profile: SubagentTypeConfig): SubagentTypeConfig {
 	const compact: SubagentTypeConfig = {};
 	if (profile.description) compact.description = profile.description;
+	if (profile.models !== undefined) compact.models = profile.models;
 	if (profile.model) compact.model = profile.model;
-	if (profile.fallbackModels && profile.fallbackModels.length > 0) compact.fallbackModels = profile.fallbackModels;
+	if (profile.fallbackModels) compact.fallbackModels = profile.fallbackModels;
 	if (profile.modelByParent) compact.modelByParent = profile.modelByParent;
 	if (profile.thinking) compact.thinking = profile.thinking;
 	if (profile.tools && profile.tools.length > 0) compact.tools = profile.tools;
@@ -589,8 +677,9 @@ function compactProfile(profile: SubagentTypeConfig): SubagentTypeConfig {
 function compactPreset(preset: SubagentPreset): SubagentPreset {
 	const compact: SubagentPreset = {};
 	if (preset.description) compact.description = preset.description;
+	if (preset.models !== undefined) compact.models = preset.models;
 	if (preset.model) compact.model = preset.model;
-	if (preset.fallbackModels && preset.fallbackModels.length > 0) compact.fallbackModels = preset.fallbackModels;
+	if (preset.fallbackModels) compact.fallbackModels = preset.fallbackModels;
 	if (preset.thinking) compact.thinking = preset.thinking;
 	if (preset.extraArgs && preset.extraArgs.length > 0) compact.extraArgs = preset.extraArgs;
 	if (preset.timeoutMs !== undefined) compact.timeoutMs = preset.timeoutMs;
@@ -617,13 +706,21 @@ function normalizePresetTypeOverrides(value: unknown, file: string, presetName: 
 		const extraArgs = arrayOfStrings(rawOverride.extraArgs);
 		const timeoutMs = positiveMilliseconds(rawOverride.timeoutMs);
 		if (model) override.model = model;
-		if (fallbackModels && fallbackModels.length > 0) override.fallbackModels = fallbackModels;
+		if (fallbackModels) override.fallbackModels = fallbackModels;
 		if (thinking) override.thinking = thinking;
 		if (extraArgs && extraArgs.length > 0) override.extraArgs = extraArgs;
 		if (timeoutMs !== undefined) override.timeoutMs = timeoutMs;
 		if (override.model || override.fallbackModels || override.thinking || override.extraArgs || override.timeoutMs !== undefined) types[name] = override;
 	}
 	return Object.keys(types).length > 0 ? types : undefined;
+}
+
+function normalizeModels(value: unknown, owner: string, file: string): string[] | undefined {
+	if (value === undefined) return undefined;
+	if (!Array.isArray(value) || value.some((ref) => typeof ref !== "string" || !/^[^\s/*]+\/[^\s*]+$/.test(ref.trim()))) {
+		throw new Error(`Subagent ${owner} models must be an array of provider/model references: ${file}`);
+	}
+	return [...new Set(value.map((ref: string) => ref.trim()))];
 }
 
 function normalizeModelByParent(value: unknown, typeName: string, file: string): Record<string, ModelByParentEntry> | undefined {
@@ -662,13 +759,12 @@ function resolveFallbackModels(options: {
 	model?: string;
 	presetType?: SubagentPresetTypeOverride;
 	preset?: SubagentPreset;
+	profileModels: string[];
 	profile?: SubagentTypeConfig;
 }): string[] {
-	const fallbacks = [
-		...(options.presetType?.fallbackModels ?? []),
-		...(options.preset?.fallbackModels ?? []),
-		...(options.profile?.fallbackModels ?? []),
-	];
+	// A selected budget's fallback list is authoritative, including [] (none).
+	const fallbacks = options.presetType?.fallbackModels
+		?? options.preset?.fallbackModels ?? options.profile?.fallbackModels ?? options.profileModels.slice(1);
 	const seen = new Set<string>();
 	if (options.model) seen.add(options.model);
 	const result: string[] = [];
@@ -682,10 +778,14 @@ function resolveFallbackModels(options: {
 }
 
 function applyEnvModelOverrides(config: SubagentConfig, env: NodeJS.ProcessEnv): void {
-	for (const [name, profile] of Object.entries(config.types)) {
+	for (const name of new Set([...Object.keys(config.types), ...Object.keys(LEGACY_SUBAGENT_TYPES)])) {
 		const key = typeEnvKey(name);
 		const model = trimString(env[`ASYNC_SUBAGENTS_${key}_MODEL`] || env[`PI_SUBAGENTS_${key}_MODEL`]);
-		if (model) profile.model = model;
+		if (model) {
+			const target = legacySubagentTarget(name);
+			const profile = config.types[name] ?? (target ? { ...config.types[target] } : {});
+			config.types[name] = mergeTypeProfile(profile, { model });
+		}
 	}
 }
 
@@ -795,7 +895,7 @@ function modelList(...values: unknown[]): string[] | undefined {
 			models.push(model);
 		}
 	}
-	return models.length > 0 ? models : undefined;
+	return models.length > 0 || values.some(Array.isArray) ? models : undefined;
 }
 
 function patternList(...values: unknown[]): string[] | undefined {
@@ -861,6 +961,16 @@ function stripModelArgs(args: string[]): string[] {
 		output.push(arg);
 	}
 	return output;
+}
+
+/** CLI overrides are explicit, too; retain the final flag's actual model. */
+function modelFromArgs(args: string[]): string | undefined {
+	let model: string | undefined;
+	for (let i = 0; i < args.length; i++) {
+		if (args[i] === "--model" || args[i] === "-m") model = trimString(args[++i]);
+		else if (args[i].startsWith("--model=")) model = trimString(args[i].slice("--model=".length));
+	}
+	return model;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

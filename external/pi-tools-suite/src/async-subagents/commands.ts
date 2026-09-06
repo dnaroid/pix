@@ -53,13 +53,13 @@ const COPY_SAMPLE_CONFIG_LABEL = "Copy sample asyncSubagents config";
 
 export const ULTRAWORK_PROMPT = `Run ultrawork mode for the current objective.
 
-Use subagents when independent parallel tracks help. Pick subagentType from the effective role catalog, including project-local specialists. Built-in examples: quick, scan, research, docs, frontend, browser-qa, implement, tests, review, deep, oracle. Use review for security/performance/audit tracks, implement for refactors, deep for debugging/root-cause. Use frontend for UI/UX and visual frontend implementation; use oracle sparingly for cross-provider second opinions on high-stakes uncertainty.
+Use subagents when a lower-cost worker or isolation of noisy evidence helps, including one bounded sequential task. Pick subagentType from the effective catalog: research for reading/review, implement for code/docs/tests/UI changes, verify for running checks, browser-qa for real-browser testing, and oracle only for a deliberate strong independent opinion. Prefer an appropriate project-local specialist. Keep decisions and integration in the parent; do not create agents just to assign a discipline.
 
 Keep parent context lean: spawn for broad parallel work, read results only when needed, and finish unless genuinely blocked.`;
 
 const HYPERPLAN_PROMPT = `Run hyperplan mode for the current objective.
 
-Before implementation, use subagents to pressure-test the plan with configured roles such as deep, implement, frontend, tests, review, and docs. Synthesize the strongest objections into a revised plan before editing.`;
+Before implementation, use bounded research tasks to gather constraints and independently pressure-test the plan. Use oracle only when a strong second opinion is justified. Synthesize the evidence and objections in the parent before editing.`;
 
 export function buildUltraworkPrompt(objective: string): string {
 	const trimmed = objective.trim();
@@ -368,6 +368,10 @@ function sortedPresetNames(presets: Record<string, SubagentPreset>, activePreset
 function subagentPresetDescription(preset: SubagentPreset): string {
 	const parts: string[] = [];
 	if (preset.description) parts.push(preset.description);
+	if (preset.models !== undefined) {
+		parts.push(`models:${preset.models.join(",") || "(none)"}`);
+		return parts.join(", ");
+	}
 	if (preset.model) parts.push(`model:${preset.model}`);
 	if (preset.fallbackModels && preset.fallbackModels.length > 0) parts.push(`fallbacks:${preset.fallbackModels.join(",")}`);
 	if (preset.thinking) parts.push(`thinking:${preset.thinking}`);

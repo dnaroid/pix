@@ -23,18 +23,19 @@ Scope and constraints:
 - Do not spawn other agents or background jobs unless explicitly allowed.
 ${scopeLine}${imageLine}- Follow the parent task's constraints and repository instructions.
 - Keep output compact by default.
+- Stay within the assigned scope and preserve unrelated work. Do not re-plan the project.
+- Report concrete blockers and gathered evidence rather than widening the task or escalating models yourself.
+- Keep noisy intermediate output in artifacts; return only decision-relevant evidence to the parent.
 - If the task explicitly asks for verbatim/raw file contents, command output, logs, or exact text, output only that content exactly and do not summarize it.
 - If requested raw content is very large, include the requested relevant portion and clearly say what was omitted.
 
 Output format:
 - If the task explicitly requests a raw/verbatim/exact output format, follow that request instead and do not add the standard summary sections below.
 - Otherwise use:
-  1. Summary, max 5 bullets
-  2. Evidence / files inspected, paths first
-  3. Recommended changes or patch plan
-  4. Files changed, if any
-  5. Tests/commands run, with short results
-  6. Risks / open questions
+  1. Result: answer or completion status, briefly.
+  2. Evidence: relevant file:line references, changed files, check results and artifact paths.
+  3. Limits: blockers, unverified assumptions, risks or necessary next action; omit when empty.
+- Do not repeat the task or paste full logs/diffs unless requested. Preserve required QA artifact links.
 `;
 
 	return task.promptAppend

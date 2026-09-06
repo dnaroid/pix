@@ -142,7 +142,7 @@ describe("pi-tools-suite config", () => {
 			$schema?: string;
 			asyncSubagents?: {
 				routing?: { model?: string; fallbackModels?: string[] };
-				presets?: Record<string, { types?: Record<string, { model?: string; thinking?: string }> }>;
+				presets?: Record<string, { models?: string[]; types?: Record<string, { model?: string; thinking?: string }> }>;
 				types?: Record<string, { model?: string; fallbackModels?: string[]; thinking?: string; timeoutMs?: number }>;
 			};
 			lsp?: { servers?: Array<{ id?: string }> };
@@ -152,33 +152,10 @@ describe("pi-tools-suite config", () => {
 			model: "zai/glm-5-turbo",
 			fallbackModels: ["openai-codex/gpt-5.6-luna"],
 		});
-		expect(parsed.asyncSubagents?.types?.quick).toMatchObject({
-			model: "openai-codex/gpt-5.6-luna",
-			fallbackModels: ["zai/glm-5-turbo"],
-		});
-		expect(parsed.asyncSubagents?.types?.research).toMatchObject({
-			model: "openai-codex/gpt-5.6-terra",
-			fallbackModels: ["zai/glm-5-turbo"],
-		});
-		expect(parsed.asyncSubagents?.types?.tests).toMatchObject({
-			model: "openai-codex/gpt-5.6-terra",
-			fallbackModels: ["zai/glm-5-turbo"],
-		});
-		expect(parsed.asyncSubagents?.types?.["browser-qa"]).toMatchObject({
-			model: "zai/glm-5.3-flash",
-			fallbackModels: ["openai-codex/gpt-5.6-luna"],
-			thinking: "low",
-			timeoutMs: 120_000,
-		});
-		expect(parsed.asyncSubagents?.presets?.cheap?.types?.frontend).toMatchObject({
-			model: "zai/glm-5.3-flash",
-			thinking: "medium",
-		});
-		expect(parsed.asyncSubagents?.presets?.cheap?.types?.["browser-qa"]).toMatchObject({
-			model: "zai/glm-5.3-flash",
-			fallbackModels: ["openai-codex/gpt-5.6-luna"],
-			thinking: "low",
-		});
+		expect(parsed.asyncSubagents?.types).toEqual({});
+		expect(parsed.asyncSubagents?.presets?.cheap?.models).toEqual(["zai/glm-5-turbo", "zai/glm-5.3-flash", "zai/glm-5.3"]);
+		expect(parsed.asyncSubagents?.presets?.gpt?.models).toEqual(["openai-codex/gpt-5.6-luna", "openai-codex/gpt-5.6-terra", "openai-codex/gpt-5.6-sol"]);
+		expect(parsed.asyncSubagents?.presets?.cheap?.types).toBeUndefined();
 		expect(parsed.lsp?.servers?.map((server) => server.id)).toEqual(["typescript"]);
 		expect(content).toContain('//   "id": "python"');
 		expect(content).toContain('//   "id": "markdown"');

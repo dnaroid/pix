@@ -326,22 +326,19 @@ describe.serial("core utils and prompt generation", () => {
 		expect(isRecord("x")).toBe(false);
 	});
 
-	test.serial("selects parallel-first/deep-work/escalation/cost-aware agent strategy prompts by model", () => {
-		expect(agentStrategyPrompt({ modelRef: "zai/glm-5.2", env: {} })).toContain('name="parallel-first"');
-		expect(agentStrategyPrompt({ modelRef: "antigravity/gemini-3.1-pro", env: {} })).toContain('name="parallel-first"');
-		expect(agentStrategyPrompt({ modelRef: "openai-codex/gpt-5.5", env: {} })).toContain('name="deep-work"');
-		expect(agentStrategyPrompt({ modelRef: "openai/gpt-5.4", env: {} })).toContain('name="deep-work"');
-		expect(agentStrategyPrompt({ modelRef: "openai-codex/gpt-5.6-luna", env: {} })).toContain('name="escalation-aware"');
-		expect(agentStrategyPrompt({ modelRef: "openai-codex/gpt-5.6-luna", env: {} })).toContain("prefer Terra workers");
-		expect(agentStrategyPrompt({ modelRef: "openai-codex/gpt-5.6-terra", env: {} })).toContain('name="escalation-aware"');
-		expect(agentStrategyPrompt({ modelRef: "openai-codex/gpt-5.6-terra", env: {} })).toContain("escalate deep root-cause analysis");
-		expect(agentStrategyPrompt({ modelRef: "openai-codex/gpt-5.6-sol", env: {} })).toContain('name="cost-aware-orchestrator"');
-		expect(agentStrategyPrompt({ modelRef: "openai-codex/gpt-5.6-sol", env: {} })).toContain("prefer focused async subagents");
+	test.serial("uses economical context-aware orchestration regardless of parent tier", () => {
+		for (const modelRef of ["zai/glm-5-turbo", "openai/gpt-5.4", "openai-codex/gpt-5.6-luna", "openai-codex/gpt-5.6-terra", "openai-codex/gpt-5.6-sol"]) {
+			const prompt = agentStrategyPrompt({ modelRef, env: {} })!;
+			expect(prompt).toContain('name="cost-aware-orchestrator"');
+			expect(prompt).toContain("one sequential task can qualify");
+			expect(prompt).toContain("Reserve oracle");
+			expect(prompt).not.toContain("escalate deep");
+		}
 		expect(agentStrategyPrompt({ modelRef: "openai/gpt-5.5", customPrompt: true, env: {} })).toBeUndefined();
 		expect(agentStrategyPrompt({ modelRef: "zai/glm-5.2", env: { PI_AGENT_STRATEGY: "off" } })).toBeUndefined();
-		expect(agentStrategyPrompt({ modelRef: "zai/glm-5.2", env: { PI_AGENT_STRATEGY: "deep-work" } })).toContain('name="deep-work"');
-		expect(agentStrategyPrompt({ modelRef: "openai/gpt-5.4", env: { PI_AGENT_STRATEGY: "parallel_first" } })).toContain('name="parallel-first"');
-		expect(agentStrategyPrompt({ modelRef: "openai/gpt-5.4", env: { PI_AGENT_STRATEGY: "escalation" } })).toContain('name="escalation-aware"');
+		for (const strategy of ["deep-work", "parallel_first", "escalation"]) {
+			expect(agentStrategyPrompt({ env: { PI_AGENT_STRATEGY: strategy } })).toContain('name="cost-aware-orchestrator"');
+		}
 		expect(agentStrategyPrompt({ modelRef: "openai/gpt-5.4", env: { PI_AGENT_STRATEGY: "cost-aware" } })).toContain('name="cost-aware-orchestrator"');
 		expect(appendAgentStrategyPrompt("base\n", "strategy")).toBe("base\n\nstrategy");
 	});
@@ -440,13 +437,13 @@ describe.serial("subagent type config", () => {
 		expect(fs.readFileSync(targetPath, "utf-8")).toContain("Full config schema: https://unpkg.com/pi-ui-extend/schemas/pi-tools-suite.json");
 		const config = loadSubagentConfig(cwd, env);
 		expect(Object.keys(config.presets ?? {}).sort()).toEqual(["cheap", "deep", "gpt"]);
-		expect(config.presets?.cheap?.types?.frontend).toMatchObject({ model: "zai/glm-5.3-flash", thinking: "medium" });
-		expect(config.presets?.cheap?.types?.["browser-qa"]).toMatchObject({ model: "zai/glm-5.3-flash", thinking: "low" });
+		expect(config.presets?.cheap?.models).toEqual(["zai/glm-5-turbo", "zai/glm-5.3-flash", "zai/glm-5.3"]);
+		expect(config.presets?.cheap?.types).toBeUndefined();
 		expect(isBlindModelRef("zai/glm-5.3", config)).toBe(true);
 		expect(isBlindModelRef("zai/glm-5.3-flash", config)).toBe(false);
-		expect(Object.keys(config.types).sort()).toEqual(["browser-qa", "deep", "docs", "frontend", "implement", "oracle", "quick", "research", "review", "scan", "tests"]);
-		expect(config.types.review.description).toContain("security");
-		expect(selectSubagentType({ id: "s", task: "vulnerability secret token" }, config)).toBe("quick");
+		expect(Object.keys(config.types).sort()).toEqual(["browser-qa", "implement", "oracle", "research", "verify"]);
+		expect(config.types.research.description).toContain("review");
+		expect(selectSubagentType({ id: "s", task: "vulnerability secret token" }, config)).toBe("research");
 
 		const before = fs.readFileSync(targetPath, "utf-8");
 		const skipped = copySubagentConfigSample(cwd, env);
@@ -467,11 +464,9 @@ describe.serial("subagent type config", () => {
 			fallbackModels: ["openai-codex/gpt-5.6-luna"],
 		});
 		for (const [subagentType, model, fallbackModels] of [
-			["quick", "openai-codex/gpt-5.6-luna", ["zai/glm-5-turbo"]],
-			["scan", "openai-codex/gpt-5.6-luna", ["zai/glm-5-turbo"]],
-			["research", "openai-codex/gpt-5.6-terra", ["zai/glm-5-turbo"]],
-			["docs", "openai-codex/gpt-5.6-luna", ["zai/glm-5-turbo"]],
-			["tests", "openai-codex/gpt-5.6-terra", ["zai/glm-5-turbo"]],
+			["research", "zai/glm-5-turbo", ["openai-codex/gpt-5.6-luna"]],
+			["implement", "zai/glm-5.3-flash", ["openai-codex/gpt-5.6-terra", "openai-codex/gpt-5.6-luna"]],
+			["verify", "zai/glm-5-turbo", ["openai-codex/gpt-5.6-luna"]],
 		] as const) {
 			const role = resolveAgentTaskConfig({ id: subagentType, task: subagentType, subagentType }, config);
 			expect(role.task.model).toBe(model);
@@ -512,19 +507,13 @@ describe.serial("subagent type config", () => {
 
 		expect(Object.keys(definitions).sort()).toEqual([
 			"browser-qa",
-			"deep",
-			"docs",
-			"frontend",
 			"implement",
 			"oracle",
-			"quick",
 			"research",
-			"review",
-			"scan",
-			"tests",
+			"verify",
 		]);
-		expect(definitions.frontend?.raw.description).toContain("frontend UI/UX visual work");
-		expect(definitions.frontend?.raw.promptAppend).toContain("# Frontend agent");
+		expect(definitions.implement?.raw.description).toContain("code, docs, tests, or UI");
+		expect(definitions.implement?.raw.promptAppend).toContain("For UI work");
 		expect(definitions.oracle?.raw.promptAppend).toContain("# Oracle agent");
 		expect(definitions["browser-qa"]?.raw.tools).toEqual(["read", "grep", "bash"]);
 	});
@@ -599,13 +588,13 @@ describe.serial("subagent type config", () => {
 			preset: activePreset,
 		});
 		expect(resolved.task.model).toBe("zai/fast");
-		expect(resolved.fallbackModels).toEqual(["zai/backup", "openai/backup", "zai/glm-5-turbo"]);
+		expect(resolved.fallbackModels).toEqual(["zai/backup", "openai/backup"]);
 		expect(resolved.task.thinking).toBe("off");
 		expect(resolved.extraArgs).toEqual(["--temperature", "0"]);
 
 		const perType = resolveAgentTaskConfig({ id: "r", task: "Review", subagentType: "review" }, config, { preset: activePreset });
 		expect(perType.task.model).toBe("openai/review-fast");
-		expect(perType.fallbackModels).toEqual(["openai/review-backup", "zai/backup", "openai/backup"]);
+		expect(perType.fallbackModels).toEqual(["openai/review-backup"]);
 		expect(perType.task.thinking).toBe("medium");
 		expect(perType.isolatedSkills).toEqual(["private/review.md"]);
 		expect(perType.extraArgs).toEqual(["--review-fast", "--temperature", "0"]);
@@ -683,9 +672,9 @@ describe.serial("subagent type config", () => {
 
 		expect(config.defaultType).toBe("quick");
 		expect(config.types.scan.model).toBe("env/fast-scan");
-		expect(selectSubagentType({ id: "a", task: "Do a repo-wide scan for auth files" }, config)).toBe("quick");
+		expect(selectSubagentType({ id: "a", task: "Do a repo-wide scan for auth files" }, config)).toBe("research");
 		expect(selectSubagentType({ id: "b", task: "Careful code review", subagentType: "review" }, config)).toBe("review");
-		expect(selectSubagentType({ id: "c", task: "Read this note" }, config)).toBe("quick");
+		expect(selectSubagentType({ id: "c", task: "Read this note" }, config)).toBe("research");
 
 		const scan = resolveAgentTaskConfig({ id: "a", task: "Scan files for auth", subagentType: "scan" }, config);
 		expect(scan.task).toMatchObject({ subagentType: "scan", model: "env/fast-scan", thinking: "off", tools: ["read", "grep"] });
@@ -694,7 +683,8 @@ describe.serial("subagent type config", () => {
 
 		const review = resolveAgentTaskConfig({ id: "r", task: "review payments", subagentType: "review", promptAppend: "Task-specific note." }, config);
 		expect(review.task.promptOverride).toBe("Review prompt for {task}");
-		expect(review.task.promptAppend).toBe("Task-specific note.");
+		expect(review.task.promptAppend).toContain("Task-specific note.");
+		expect(generatePrompt(review.task)).toStartWith("Review prompt for review payments");
 
 		const explicit = resolveAgentTaskConfig(
 			{ id: "b", task: "review", subagentType: "review", model: "manual/model", thinking: "minimal", extraArgs: ["--foo"] },
@@ -932,7 +922,7 @@ Advise only.
 		expect(quick.task.model).toBe("zai/glm-4.5-air");
 	});
 
-	test.serial("routes implementation workers by GPT tier even when a preset selects Sol", () => {
+	test.serial("honors an explicitly configured legacy preset rather than overriding it by parent tier", () => {
 		const cwd = tempDir();
 		const configPath = path.join(cwd, "async-subagents.json");
 		writeFile(configPath, "{}");
@@ -952,7 +942,7 @@ Advise only.
 			config,
 			{ parentModel: "openai-codex/gpt-5.6-sol", preset: solPreset },
 		);
-		expect(fromSol.task.model).toBe("openai-codex/gpt-5.6-terra");
+		expect(fromSol.task.model).toBe("openai-codex/gpt-5.6-sol");
 		expect(fromSol.fallbackModels).toEqual(["zai/glm-5.3"]);
 		expect(fromSol.task.thinking).toBe("high");
 
@@ -961,7 +951,7 @@ Advise only.
 			config,
 			{ parentModel: "openai-codex/gpt-5.6-luna", preset: solPreset },
 		);
-		expect(fromLuna.task.model).toBe("openai-codex/gpt-5.6-terra");
+		expect(fromLuna.task.model).toBe("openai-codex/gpt-5.6-sol");
 		expect(fromLuna.fallbackModels).toEqual(["zai/glm-5.3"]);
 
 		const fromTerra = resolveAgentTaskConfig(
@@ -972,7 +962,7 @@ Advise only.
 		expect(fromTerra.task.model).toBe("openai-codex/gpt-5.6-sol");
 	});
 
-	test.serial("uses Sol for built-in deep and review escalation roles", () => {
+	test.serial("maps unconfigured deep/review names to economical research without escalation", () => {
 		const cwd = tempDir();
 		const configPath = path.join(cwd, "async-subagents.json");
 		writeFile(configPath, "{}");
@@ -985,8 +975,9 @@ Advise only.
 					config,
 					{ parentModel },
 				);
-				expect(resolved.task.model).toBe("openai-codex/gpt-5.6-sol");
-				expect(resolved.fallbackModels).toEqual(["zai/glm-5.3"]);
+				expect(resolved.task.subagentType).toBe("research");
+				expect(resolved.task.model).toBe("zai/glm-5-turbo");
+				expect(resolved.fallbackModels).toEqual(["openai-codex/gpt-5.6-luna"]);
 			}
 		}
 	});

@@ -5,6 +5,8 @@ import { Type } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
 import { ASYNC_SUBAGENT_TOOL_DESCRIPTIONS } from "../../tool-descriptions.js";
 import { SUBAGENT_TYPE_SELECTION_GUIDANCE } from "../core/agent-catalog.js";
+import { selectAvailableAgentModels } from "../core/model-selection.js";
+import { SubagentModelSelectionError } from "../core/config.js";
 import type { AgentCompletionHandler, AgentTask, ResolvedAgentTaskConfig, Semaphore, SpawnedAgent } from "../lib.js";
 import {
 	createRunDir,
@@ -251,17 +253,25 @@ export function registerSpawnTool(
 			}
 			const timeoutMs = timeoutMsFromSeconds(params.timeoutSeconds);
 			const parentModel = currentModelRef((ctx as { model?: unknown }).model);
-			const resolvedTasks = routed.tasks.map((task) => applySessionModelFallback(
-				resolveAgentTaskConfig(task, config, {
-					preset: activePreset,
-					thinking: params.thinking,
-					extraArgs: Array.isArray(params.extraArgs) ? params.extraArgs : [],
-					forcedModel,
-					parentModel,
-					timeoutMs,
-				}),
-			));
+			let resolvedTasks: ResolvedAgentTaskConfig[];
+			try {
+				resolvedTasks = await Promise.all(routed.tasks.map(async (task) => applySessionModelFallback(await selectAvailableAgentModels(
+					resolveAgentTaskConfig(task, config, {
+						preset: activePreset,
+						thinking: params.thinking,
+						extraArgs: Array.isArray(params.extraArgs) ? params.extraArgs : [],
+						forcedModel,
+						parentModel,
+						timeoutMs,
+					}), config, ctx.modelRegistry, signal,
+				))));
+			} catch (error) {
+				if (!(error instanceof SubagentModelSelectionError)) throw error;
+				return { content: [{ type: "text", text: error.message }], details: { error: "subagent_model_selection" }, isError: true };
+			}
 			const tasks: AgentTask[] = resolvedTasks.map((resolved) => resolved.task);
+			if (signal?.aborted) throw new Error("Aborted");
+			if (signal?.aborted) throw new Error("Aborted");
 			// Resolve the entire batch before creating run state or launching children.
 			const runDir = params.runDir
 				? resolveRunDir(ctx.cwd, params.runDir)

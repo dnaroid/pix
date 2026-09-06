@@ -437,9 +437,36 @@ Notes:
 
 ## Async sub-agents
 
-Sub-agent model routing normally follows task overrides, subagent type config, then `ASYNC_SUBAGENTS_MODEL` / `PI_SUBAGENTS_MODEL` fallbacks. Set `ASYNC_SUBAGENTS_FORCE_CURRENT_MODEL=1` (or `PI_SUBAGENTS_FORCE_CURRENT_MODEL=1`) to ignore task/config/env model choices and launch every sub-agent with the current parent session model. When this flag is enabled, any `--model` entries in sub-agent extra args are stripped so they cannot override the current model.
+Model selection uses the ordered candidates from each agent's Markdown file,
+filtered by the selected preset's available models and runtime capabilities.
+Explicit task/CLI model overrides bypass the pool. Setting
+`ASYNC_SUBAGENTS_FORCE_CURRENT_MODEL=1` (or
+`PI_SUBAGENTS_FORCE_CURRENT_MODEL=1`) deliberately selects the parent model and
+strips conflicting model arguments; this is not the economical default.
 
-For an oh-my-openagent-style workflow, run `/ultrawork` or `/ulw` to ask the parent agent to split broad work into configured async-subagents roles (`quick`, `scan`, `research`, `docs`, `frontend`, `browser-qa`, `implement`, `tests`, `review`, `deep`, `oracle`). Set `ULTRAWORK=1` before launching Pi to apply that compact routing prompt to normal non-slash user inputs automatically. Set `ULTRAWORK_AUTO=1` to ask the lightweight router model to classify only the first normal user input on non-GPT parent models: clear broad/parallel work is transformed into ultrawork, vague potentially-complex work gets a soft delegation hint, and narrow work is left unchanged. GPT-like parent models skip only this automatic transform; they can still use `/ultrawork` and `subagents` normally. `frontend` is for UI/UX, styling, layout, responsive behavior, and visual component polish; `browser-qa` reproduces browser bugs and proves fixes with deterministic assertions plus screenshot/video/trace evidence; `review` covers security/performance/audit tracks; `implement` covers refactors; `deep` covers debugging/root-cause; `oracle` is for sparse cross-provider second opinions on high-stakes uncertainty. Run `/hyperplan` to pressure-test a plan before implementation.
+The five built-in modes are `research` (read-only evidence and independent
+review), `implement` (bounded code, docs, tests, or UI changes), `verify`
+(run checks and diagnose logs without fixing files), `browser-qa` (trusted
+browser workflow), and `oracle` (deliberate strong second opinion).
+Ordinary workers use economical model candidates; no built-in parent-tier
+rule promotes them to a flagship. Oracle is the exception, not an automatic
+retry for difficult work. Task-specific discipline belongs in the brief.
+
+Delegate when a suitable lower-cost worker can handle bounded work or noisy
+intermediate evidence should stay outside the parent context. One sequential
+task can qualify. Keep decisions and integration in the parent; read compact
+results and verify selectively rather than repeating the worker's investigation.
+Do trivial reads/edits directly. Redirect a noisy command to a log without an
+extra LLM when no interpretation is needed. `verify`'s no-edit instruction is
+a behavioral contract, not a read-only filesystem sandbox for its shell.
+
+Run `/ultrawork` or `/ulw` for orchestration, `/hyperplan` to pressure-test a
+plan, or set `ULTRAWORK=1` to apply the orchestration prompt to normal inputs.
+`ULTRAWORK_AUTO=1` classifies only the first normal input on non-GPT parents;
+GPT-like parents skip that automatic transform, not ordinary delegation.
+
+See [Model pools and migration](docs/subagent-model-pools.md) for the selection
+contract, configuration examples, override rules and legacy compatibility.
 
 ### Parent-first role selection
 
@@ -468,18 +495,21 @@ callers relying on an implicit default must now choose a type explicitly.
 
 ### Project-local agents (`.pi/agents/*.md`)
 
-A project can ship its own sub-agent roles as individual Markdown files (Claude Code `.claude/agents` style) in `<project>/.pi/agents/`. The first `.pi/agents` directory found walking up from the session cwd is used; each top-level `*.md` file becomes a `subagentType` named after the file (without `.md`). Project agents behave exactly like types declared in `asyncSubagents.types`: the LLM router sees their `description`, `/subagent-preset` per-type overrides apply, and `subagentType: "<name>"` selects them explicitly. The parent system prompt also receives the effective role catalog (built-ins + config overrides + project-local agents), so custom role names and descriptions are visible before it decides whether to set `subagentType` explicitly.
+A project can ship sub-agent roles as individual Markdown files in
+`<project>/.pi/agents/`. The first such directory found walking up from the
+session cwd is used; each top-level `*.md` file becomes a `subagentType` named
+after the file. Parent and router see the short `description`; only the child
+receives the Markdown body. A project's ordered `models` are filtered through
+the same active preset pool as built-in agents.
 
 ```markdown
 ---
 description: Use for reviewing this repo's diff — knows the house rules.
-model: zai/glm-5.3
-thinking: high
-tools: read, grep, bash
-fallbackModels:
+models:
+  - zai/glm-5-turbo
   - openai-codex/gpt-5.6-luna
-modelByParent:
-  zai/*: zai/glm-5.3
+thinking: low
+tools: read, grep
 retry:
   maxRetries: 1
   backoffMs: 2000
@@ -489,7 +519,7 @@ You are this project's staff reviewer. Apply the repo rules from
 AGENTS.md before approving anything; cite file paths first.
 ```
 
-- Frontmatter keys: `name` (must match the filename), plus every type-profile field: `description`, `model`, `fallbackModels`, `modelByParent`, `thinking`, `tools`, `isolatedSkills`, `extraArgs`, `promptAppend`, `promptOverride`, `retry`, `maxResultBytes`, `timeoutMs`. Unknown keys are rejected with an error naming the file.
+- Frontmatter keys: `name` (must match the filename), `description`, `models`, `thinking`, `tools`, `isolatedSkills`, `extraArgs`, `promptAppend`, `promptOverride`, `retry`, `maxResultBytes`, `timeoutMs`. Legacy `model`, `fallbackModels`, and `modelByParent` still load. Unknown keys are rejected with an error naming the file.
 - Array fields accept block lists (`- item`), inline arrays (`[a, b]`), or comma-separated strings (`tools: read, grep, bash`). The frontmatter YAML subset is intentionally small: scalars, quoted strings, numbers, comments, lists, and nested maps for `modelByParent`/`retry`. Tabs, block scalars (`|`/`>`), anchors/aliases, and flow maps are hard errors naming file and line.
 - The markdown body becomes `promptAppend`: it is appended after the standard generated prompt (parent objective + task + output format), so the agent still receives its task in the usual structure. Use frontmatter `promptOverride` for full prompt replacement.
 - Precedence: project agent fields override same-named types from user/project JSONC config (field-level; other fields are kept), which in turn override built-ins. Setting `ASYNC_SUBAGENTS_CONFIG` / `PI_SUBAGENTS_CONFIG` disables the directory (explicit config = full control).
@@ -591,16 +621,52 @@ Async-subagents also injects a lightweight oh-my-openagent-style system-prompt s
 
 For blind-model screenshot/image inspection, use the main-session `coding-discipline` lookup tool; the bundled default uses vision-capable `zai/glm-5.3-flash`. Async-subagents still supports `imagePaths` on tasks when a broader delegated track genuinely needs images, but it no longer ships a dedicated `vision` role. Dynamic provider capabilities can be missing or stale after switching models, so blind parent models can still be configured explicitly with case-insensitive `*` masks under `asyncSubagents.vision.blindModelPatterns` in `~/.config/pi/pi-tools-suite.jsonc`; do not include `zai/glm-5.3-flash` because it accepts image input. This keeps guidance honest, not a sub-agent role.
 
-When a task omits `subagentType`, async-subagents asks a lightweight router model to choose one configured type for each task from the task text/scope and the `types.<name>.description` metadata. Explicit task `subagentType` still wins. Keep type descriptions short, literal, and distinct because they are inserted into the router prompt for a small model. Router settings live under `asyncSubagents.routing` (`enabled`, `model`, `maxTaskChars`, `maxTokens`, `maxRetries`, `timeoutMs`, `debug`); the default router model is `zai/glm-5-turbo`. If the router is disabled, unavailable, aborted, or returns invalid JSON, omitted types fall back to `defaultType`.
+When `subagentType` is omitted, the lightweight role router classifies the task
+using the descriptions. Explicit types bypass it. Unknown types or failed
+routing reject the batch, never substitute `defaultType`. Choosing a worker
+model from its candidate list does not involve an LLM call.
 
-Define optional `presets` under `asyncSubagents` in `~/.config/pi/pi-tools-suite.jsonc`, `$PI_CONFIG_DIR/pi-tools-suite.jsonc`, or project `.pi/pi-tools-suite.jsonc`, then use `/subagent-preset` or `/subagent-preset-config` to pick one persistent active preset for future spawns across all sessions. Set `AGENTS_PRESET=<name>` before launching Pi to override the saved preset for only the current process/session without changing the saved selection. If Pi is already running, use `/subagent-preset session <name>` for the same process-only override, and `/subagent-preset session-clear` to remove that runtime override. The TUI only selects presets already present in config; it does not edit JSON. If no `asyncSubagents` section exists, run `/subagent-preset init` to insert the bundled sample from `src/async-subagents/async-subagents.sample.jsonc` into the shared config (or to copy a standalone override file when `ASYNC_SUBAGENTS_CONFIG` / `PI_SUBAGENTS_CONFIG` is set). Existing config sections/files are never overwritten. Presets select an agent/model configuration: they can provide global fallback `model`/`thinking`/`extraArgs` and per-role overrides under `asyncSubagents.presets.<name>.types.<subagentType>`. They can also provide ordered `fallbackModels` globally or per-role; when a sub-agent fails with quota/rate-limit errors such as 429, async-subagents immediately tries the next fallback model and remembers the exhausted provider for the current Pi process/session, so later spawns skip that provider until Pi exits. This is intended for provider-level fallback chains such as `antigravity/* → openai-codex/* → zai/*` or `openai-codex/* → zai/*`; omit fallbacks for effectively unlimited providers. Antigravity account rotation has priority over preset fallback: async-subagents only falls back after Antigravity reports that all configured accounts are exhausted for that model. Explicit task model overrides and force-current-model disable preset fallback for that task. The active preset name is stored separately in `~/.pi/agent/subagent-preset-selection.json`.
+### Presets are available-model pools
+
+Each agent declares an ordered `models` list in Markdown. A preset declares
+which model references may be used, not another role/model/thinking matrix.
+Selection preserves agent order, intersects it with `preset.models`, checks
+runtime registration/auth availability, and takes the first usable candidate.
+Pool order does not change preference and pool-only models are never appended.
+Without a preset, the full agent list is eligible. Candidate order expresses
+the configured budget preference; runtime does not infer current API prices.
+
+Image-bearing tasks and `browser-qa` require confirmed image support; configured
+blind-model masks override runtime image metadata. Remaining eligible models
+form the quota fallback chain, so neither quota history nor image fallback can
+escape the pool. Antigravity account rotation still happens before provider
+fallback. No match, no usable model, or an explicitly empty list rejects the
+whole batch before run directories or child processes are created. A new custom
+agent must supply candidates instead of silently inheriting the parent model.
+
+Oracle uses its separate strong-model list and prefers another provider when
+available, but also respects the pool. A same-provider choice is allowed when
+the pool offers no alternative; cross-provider independence is not guaranteed.
+Explicit task/CLI model overrides and `FORCE_CURRENT_MODEL` remain deliberate
+escape hatches and disable automatic model fallback for that task. They do not
+bypass the image-capability check.
+
+Define pools in the shared or project `pi-tools-suite.jsonc`. Select a saved
+pool with `/subagent-preset`; use `AGENTS_PRESET=<name>` or
+`/subagent-preset session <name>` for a process-only override and
+`/subagent-preset session-clear` to remove it. The saved selection lives in
+`~/.pi/agent/subagent-preset-selection.json`. `/subagent-preset init` inserts the
+sample only when config is missing. The shipped pools are `cheap` (GLM), `gpt`,
+and `deep` (the retained legacy name for the mixed pool, not worker escalation).
+Initial user config and the sample share one source; descriptions and worker
+model order exist only in the agent files. Existing user files are not rewritten.
 
 Example shared async-subagents config section:
 
 ```jsonc
 {
   "asyncSubagents": {
-    "defaultType": "quick",
+    "defaultType": "research",
     "routing": {
       "enabled": true,
       "model": "zai/glm-5-turbo",
@@ -608,51 +674,42 @@ Example shared async-subagents config section:
     },
     "presets": {
       "cheap": {
-        "description": "Use GLM by role, including GLM-5.3 Flash for multimodal work.",
-        "types": {
-          "quick": { "model": "zai/glm-5.3", "thinking": "off" },
-          "frontend": { "model": "zai/glm-5.3-flash", "thinking": "medium" },
-          "browser-qa": { "model": "zai/glm-5.3-flash", "fallbackModels": ["openai-codex/gpt-5.6-luna"], "thinking": "low" },
-          "review": { "model": "zai/glm-5.3", "thinking": "high" }
-        }
+        "description": "GLM workers with a strong oracle candidate.",
+        "models": ["zai/glm-5-turbo", "zai/glm-5.3-flash", "zai/glm-5.3"]
       }
     },
     "types": {
-      "frontend": {
-        "description": "Use for frontend UI/UX visual work: styling, layout, typography, animation, responsive states, component polish, accessibility. Avoid backend/business logic unless needed for UI behavior.",
-        "thinking": "medium"
-      },
-      "review": {
-        "description": "Use for review/audit of existing code or changes: correctness, security, performance, maintainability, API risks, quality. Do not implement new code.",
-        "thinking": "high"
+      "research": {
+        "models": ["zai/glm-5-turbo", "openai-codex/gpt-5.6-luna"],
+        "thinking": "low"
       }
     }
   }
 }
 ```
 
-### Parent-model-aware model selection (`modelByParent`)
+### Legacy configuration compatibility
 
-Any type profile can carry `modelByParent`: a map from glob model refs (matched against the **current parent model**, e.g. `"zai/*"`) to a model for that role. The first matching key wins. Values may be a model string or `{ "model": "...", "fallbackModels": [...] }`. It is resolved after an explicit task `model` / `forcedModel`, but **before** the preset/static profile `model`, so a role can always pick a model based on who the parent is — independent of the active preset.
+Unconfigured old names are aliases: `quick`, `scan`, `review`, and `deep` map
+to `research`; `docs` and `frontend` map to `implement`; `tests` maps to
+`verify`. They are not advertised as additional built-ins. An explicitly
+configured type or project Markdown file with an old name wins over the alias
+and keeps its own settings. Distinct old overrides are never collapsed onto
+one shared role. Old preset per-role keys still apply to requests using the
+corresponding old name.
 
-The canonical use case is an **`oracle`** role that consults a flagship model from a *different* provider than the parent for a second opinion:
+Legacy `model` plus `fallbackModels` remains readable. `models` is a complete
+replacement list: it clears inherited legacy model/fallback/parent routing.
+A later old-format model override still replaces the primary candidate, and a
+later `fallbackModels` replaces the remaining candidates; `[]` disables them.
+Old `modelByParent` configs remain supported, but ordinary roles give legacy
+preset models precedence. New built-ins contain no parent-tier escalation maps.
 
-```jsonc
-"oracle": {
-  "description": "Cross-provider second opinion: consult a flagship from a different provider than the parent to pressure-test a hard decision. Read-only; advise, do not edit.",
-  "model": "openai-codex/gpt-5.6-sol",
-  "fallbackModels": ["zai/glm-5.3"],
-  "thinking": "max",
-  "modelByParent": {
-    "zai/*":         { "model": "openai-codex/gpt-5.6-sol", "fallbackModels": ["zai/glm-5.3"] },
-    "openai-codex/*": "zai/glm-5.3",
-    "antigravity/*": { "model": "zai/glm-5.3", "fallbackModels": ["openai-codex/gpt-5.6-sol"] },
-    "anthropic/*":   { "model": "openai-codex/gpt-5.6-sol", "fallbackModels": ["zai/glm-5.3"] }
-  }
-}
-```
-
-With this config a GLM parent (`zai/*`) spawns the oracle on `gpt-5.6-sol`, a GPT parent (`openai-codex/*`) spawns it on `glm-5.3`, and so on — automatically, at spawn time, with no `task.model` needed. The parent model ref is read from the spawn context (`ctx.model`) and passed into resolution. Pattern matching is case-insensitive `*` glob (same engine as `vision.blindModelPatterns`). When no key matches (or no parent model is known), the role falls back to its static `model` + `fallbackModels`. An explicit `task.model` or `ASYNC_SUBAGENTS_FORCE_CURRENT_MODEL=1` still overrides the match.
+When a preset specifies `models`, it is exclusively a pool; inherited legacy
+`model`, `types`, thinking, arguments and timeout overrides do not run. A later
+explicit old-format preset selector can still replace a pool for compatibility.
+Runtime retry structures and the separate role router continue to use the
+term `fallbackModels` for actual fallback-only lists, not agent candidates.
 
 Sub-agents run with `--no-session` by default to avoid writing duplicate Pi session JSONL files for fire-and-forget background work. Set `ASYNC_SUBAGENTS_ENABLE_SESSIONS=1` to restore persisted per-agent sessions under each agent's `sessions/` directory; this also registers the session-navigation slash commands (`/sub-open`, `/sub-back`, `/sub-where`) needed for switching and deeper post-mortem navigation.
 

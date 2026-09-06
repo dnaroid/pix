@@ -104,7 +104,7 @@ function firstAvailableFallback(failedModel: string, fallbackModels: string[]): 
 	return candidates.find((candidate) => modelProvider(candidate) !== failedProvider && !isSessionModelUnavailable(candidate));
 }
 
-function isSessionModelUnavailable(model: string): boolean {
+export function isSessionModelUnavailable(model: string): boolean {
 	return exhaustedModels.has(model) || exhaustedProviders.has(modelProvider(model));
 }
 

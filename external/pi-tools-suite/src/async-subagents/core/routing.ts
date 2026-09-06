@@ -1,6 +1,7 @@
 import type { Api, Model, ProviderHeaders } from "@earendil-works/pi-ai";
 import { completeWithModelRegistry, type ModelCompletionRegistry } from "../../model-completion.js";
 import type { AgentTask } from "./types.js";
+import { resolveSubagentTypeName } from "./agent-aliases.js";
 import {
 	currentModelRef,
 	defaultSubagentType,
@@ -45,7 +46,7 @@ export class SubagentRoutingError extends Error {
 const ROUTER_SYSTEM_PROMPT = [
 	"You route Pi async sub-agent tasks to the best configured subagentType.",
 	"Choose exactly one allowed type for each task. Use the allowed type descriptions as the source of truth.",
-	"Prefer the most specific matching type over generic quick/deep. Use frontend for UI/UX implementation or visual frontend polish. For pure image inspection, use the lookup tool rather than subagents.",
+	"Prefer a matching project specialist. Otherwise use research for reading/review and evidence, implement for code/docs/tests/UI changes, verify for running checks, browser-qa for real-browser testing. Oracle is a deliberate strong second opinion, not the default for difficult work.",
 	"Return only strict JSON with this shape: {\"routes\":[{\"id\":\"task-id\",\"subagentType\":\"type\"}]}",
 	"Do not include markdown, comments, explanations, or unknown types.",
 ].join("\n");
@@ -62,7 +63,7 @@ export async function routeSubagentTasks(
 		? { ...task, subagentType: task.subagentType.trim() }
 		: task);
 	const invalidTasks = tasks.filter((task) => hasText(task.subagentType)
-		&& !Object.prototype.hasOwnProperty.call(config.types, task.subagentType));
+		&& !Object.prototype.hasOwnProperty.call(config.types, resolveSubagentTypeName(task.subagentType, config)));
 	if (invalidTasks.length > 0) {
 		throw routingError(`Unknown subagentType: ${invalidTasks.map((task) => `${task.id}=${JSON.stringify(task.subagentType)}`).join(", ")}.`, invalidTasks, config);
 	}

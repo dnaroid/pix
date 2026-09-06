@@ -97,7 +97,7 @@ describe("tool descriptions", () => {
 		const promptText = [tool.description, tool.promptSnippet, ...tool.promptGuidelines].join("\n");
 
 		expect(promptText).toContain("delegate/parallelize/split work");
-		expect(promptText).toContain("spawn triggers");
+		expect(promptText).toContain("one sequential task can qualify");
 		expect(promptText).toContain("do not let repo_* availability suppress delegation");
 		expect(promptText).toContain("one discovery question");
 		expect(promptText).toContain("subagentType: \"browser-qa\"");
@@ -117,7 +117,7 @@ describe("tool descriptions", () => {
 
 		expect(promptText).toContain("repo_* tools are unavailable");
 		expect(promptText).toContain("incident-triage hypotheses");
-		expect(promptText).toContain("spawn several focused scan/quick agents first");
+		expect(promptText).toContain("delegate bounded research tracks");
 		expect(promptText).toContain("call action='spawn' as the first discovery step");
 	});
 });
