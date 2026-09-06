@@ -24,6 +24,7 @@ export {
 	existingSubagentConfigFiles,
 	getDefaultSubagentConfigPath,
 	getBrowserQaSkillPath,
+	getBuiltinSubagentDefinitionsDir,
 	getSubagentConfigInitTargetPath,
 	getSubagentConfigSamplePath,
 	isBlindModelRef,
@@ -36,6 +37,9 @@ export {
 } from "./core/config.js";
 export { routeSubagentTasks } from "./core/routing.js";
 export type { RoutedSubagentTasks, SubagentRoutingContext } from "./core/routing.js";
+export { agentDefinitionFiles, agentNameFromFilename, parseAgentMarkdown, projectAgentDefinitionFiles, readAgentDefinitionsFromDir, readProjectAgentDefinitions } from "./core/agents-dir.js";
+export type { AgentDefinition, ProjectAgentDefinition } from "./core/agents-dir.js";
+export { buildSubagentCatalogPrompt } from "./core/agent-catalog.js";
 export type { SubagentPresetSelectionState } from "./core/presets.js";
 export { getActiveSubagentPresetName, getSessionSubagentPresetOverride, getSubagentPresetSelectionPath, loadSubagentPresetSelection, saveSubagentPresetSelection, setActiveSubagentPreset, setSessionSubagentPresetOverride } from "./core/presets.js";
 export { isQuotaLimitCompletion, nextFallbackModel, rememberSessionModelFallback, resetSessionModelFallbacks, selectSessionModelWithFallback } from "./core/model-fallback.js";

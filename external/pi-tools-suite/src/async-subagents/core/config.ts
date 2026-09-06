@@ -3,6 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyEdits, modify, parse as parseJsonc } from "jsonc-parser";
+import { readAgentDefinitionsFromDir, readProjectAgentDefinitions, type AgentDefinition } from "./agents-dir.js";
 import { ensurePiToolsSuiteUserConfig, getPiToolsSuiteUserConfigPath } from "../../config.js";
 import type { AgentTask, RetryConfig } from "./types.js";
 
@@ -175,98 +176,15 @@ export const DEFAULT_ROUTING_CONFIG: ResolvedSubagentRoutingConfig = {
 	debug: false,
 };
 
+const BUILTIN_AGENTS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "agents");
+
 const BUILTIN_CONFIG: SubagentConfig = {
+	// Keep the historical fallback deterministic now that bundled agent files are
+	// loaded in filename order rather than object-literal insertion order.
+	defaultType: "quick",
 	maxConcurrent: DEFAULT_MAX_CONCURRENT,
 	routing: { ...DEFAULT_ROUTING_CONFIG },
-	types: {
-		quick: {
-			description: "Use for tiny cheap tasks: answer a simple question, inspect one known file, or verify one fact. Not for broad repo search.",
-			model: "openai-codex/gpt-5.6-luna",
-			fallbackModels: ["zai/glm-4.5-air"],
-			thinking: "off",
-		},
-		scan: {
-			description: "Use for finding files, symbols, text, or inventory across a repo. Return paths/facts; do not judge code quality.",
-			model: "openai-codex/gpt-5.6-luna",
-			fallbackModels: ["zai/glm-4.5-air"],
-			thinking: "off",
-		},
-		research: {
-			description: "Use for multi-file codebase research: read several files and explain how something works. No edits.",
-			model: "openai-codex/gpt-5.6-terra",
-			fallbackModels: ["zai/glm-5-turbo"],
-			thinking: "low",
-		},
-		docs: {
-			description: "Use for documentation work: README/API docs review, docs gaps, changelog, migration notes, examples.",
-			model: "openai-codex/gpt-5.6-luna",
-			fallbackModels: ["zai/glm-4.5-air"],
-			thinking: "low",
-		},
-		frontend: {
-			description: "Use for frontend UI/UX visual work: styling, layout, typography, animation, responsive states, component polish, and accessibility. Avoid backend/business logic unless needed for UI behavior.",
-			thinking: "medium",
-			promptAppend: [
-				"Act as a frontend UI/UX engineer for visual and product-facing work.",
-				"Prioritize layout, typography, spacing, color, motion, responsive states, accessibility, and consistency with the existing design system.",
-				"Before editing, inspect nearby components/styles and infer the project's design language. Avoid backend/business-logic changes unless required for UI behavior.",
-				"When no mockup exists, choose a clear aesthetic direction and explain it briefly. Verify with targeted build/lint/tests or screenshot-relevant checks when possible.",
-			].join("\n"),
-		},
-		"browser-qa": {
-			description: "Use for browser-based visual QA: reproduce UI bugs and verify fixes with deterministic assertions, screenshots, video, and traces.",
-			model: "zai/glm-5.3-flash",
-			fallbackModels: ["openai-codex/gpt-5.6-luna"],
-			thinking: "low",
-			timeoutMs: 300_000,
-			tools: ["read", "grep", "bash"],
-			isolatedSkills: [getBrowserQaSkillPath()],
-		},
-		implement: {
-			description: "Use when the sub-agent should make or plan code changes for a feature, bug fix, or refactor.",
-			modelByParent: {
-				"openai-codex/gpt-5.6-luna*": { model: "openai-codex/gpt-5.6-terra", fallbackModels: ["zai/glm-5.3"] },
-				"openai-codex/gpt-5.6-sol*": { model: "openai-codex/gpt-5.6-terra", fallbackModels: ["zai/glm-5.3"] },
-			},
-			thinking: "high",
-		},
-		tests: {
-			description: "Use for tests: locate coverage, find gaps, run/check targeted test commands, diagnose failing tests.",
-			model: "openai-codex/gpt-5.6-terra",
-			fallbackModels: ["zai/glm-5-turbo"],
-			thinking: "medium",
-		},
-		review: {
-			description: "Use for review/audit of existing code or changes: correctness, security, performance, maintainability, API risks, quality. Do not implement new code.",
-			modelByParent: {
-				"openai-codex/gpt-5.6-luna*": { model: "openai-codex/gpt-5.6-sol", fallbackModels: ["zai/glm-5.3"] },
-				"openai-codex/gpt-5.6-terra*": { model: "openai-codex/gpt-5.6-sol", fallbackModels: ["zai/glm-5.3"] },
-			},
-			thinking: "high",
-		},
-		deep: {
-			description: "Use for broad hard reasoning: architecture, root-cause analysis, cross-module impact, complex debugging or tradeoffs.",
-			modelByParent: {
-				"openai-codex/gpt-5.6-luna*": { model: "openai-codex/gpt-5.6-sol", fallbackModels: ["zai/glm-5.3"] },
-				"openai-codex/gpt-5.6-terra*": { model: "openai-codex/gpt-5.6-sol", fallbackModels: ["zai/glm-5.3"] },
-			},
-			thinking: "high",
-		},
-		oracle: {
-			description: "Oracle: cross-provider flagship second opinion for hard or high-stakes uncertainty. Use sparingly to pressure-test architecture, plans, root-cause hypotheses, risk/security calls, or final recommendations when independent disagreement is valuable. Read-only; advise, do not edit.",
-			model: "openai-codex/gpt-5.6-sol",
-			fallbackModels: ["zai/glm-5.3"],
-			modelByParent: {
-				"zai/*": { model: "openai-codex/gpt-5.6-sol", fallbackModels: ["zai/glm-5.3"] },
-				"openai-codex/*": { model: "zai/glm-5.3", fallbackModels: ["openai-codex/gpt-5.6-sol"] },
-				"antigravity/*": { model: "zai/glm-5.3", fallbackModels: ["openai-codex/gpt-5.6-sol"] },
-				"anthropic/*": { model: "openai-codex/gpt-5.6-sol", fallbackModels: ["zai/glm-5.3"] },
-			},
-			thinking: "max",
-			tools: ["read", "grep", "bash"],
-			promptAppend: "You are an oracle: a flagship model from a different provider giving a second opinion to the parent agent. Give a concise, decisive recommendation with key tradeoffs and risks. Disagree when warranted; do not rubber-stamp. Do not edit unless explicitly asked.",
-		},
-	},
+	types: normalizeAgentDefinitions(readAgentDefinitionsFromDir(BUILTIN_AGENTS_DIR)),
 };
 
 export function loadSubagentConfig(cwd: string, env: NodeJS.ProcessEnv = process.env): SubagentConfig {
@@ -275,6 +193,10 @@ export function loadSubagentConfig(cwd: string, env: NodeJS.ProcessEnv = process
 		for (const file of piToolsSuiteConfigFiles(cwd, env)) {
 			mergeConfig(config, readPiToolsSuiteSubagentConfig(file));
 		}
+		// Project-local agent definitions (.pi/agents/*.md) win name collisions
+		// over user/project JSONC config; loaded fresh on every call so edits and
+		// /reload are respected without a restart.
+		mergeConfig(config, projectAgentTypes(cwd));
 	}
 	for (const file of configFiles(cwd, env)) {
 		mergeConfig(config, readConfigFile(file));
@@ -307,6 +229,10 @@ export function getSubagentConfigSamplePath(): string {
 	return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "async-subagents.sample.jsonc");
 }
 
+export function getBuiltinSubagentDefinitionsDir(): string {
+	return BUILTIN_AGENTS_DIR;
+}
+
 export function getBrowserQaSkillPath(): string {
 	return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "private-skills", "browser-qa", "SKILL.md");
 }
@@ -327,6 +253,22 @@ function piToolsSuiteConfigFiles(cwd: string, env: NodeJS.ProcessEnv): string[] 
 		env.PI_CONFIG_DIR ? path.join(env.PI_CONFIG_DIR, "pi-tools-suite.jsonc") : undefined,
 		findProjectPiToolsSuiteConfig(cwd),
 	].filter((file): file is string => typeof file === "string" && fs.existsSync(file));
+}
+
+/** Normalize `.pi/agents/*.md` definitions through the shared type-profile path. */
+function projectAgentTypes(cwd: string): Partial<SubagentConfig> {
+	const definitions = readProjectAgentDefinitions(cwd);
+	const types = normalizeAgentDefinitions(definitions);
+	if (Object.keys(types).length === 0) return {};
+	return { types };
+}
+
+function normalizeAgentDefinitions(definitions: Record<string, AgentDefinition>): Record<string, SubagentTypeConfig> {
+	const types: Record<string, SubagentTypeConfig> = {};
+	for (const [name, definition] of Object.entries(definitions)) {
+		types[name] = normalizeSubagentTypeProfile(definition.raw, name, definition.file);
+	}
+	return types;
 }
 
 function findProjectPiToolsSuiteConfig(startDir: string): string | undefined {
@@ -546,24 +488,37 @@ function normalizeConfig(value: Record<string, unknown>, file: string): Partial<
 	const types: Record<string, SubagentTypeConfig> = {};
 	for (const [name, rawProfile] of Object.entries(value.types)) {
 		if (!isRecord(rawProfile)) throw new Error(`Subagent type "${name}" must be an object: ${file}`);
-		types[name] = {
-			description: trimString(rawProfile.description),
-			model: trimString(rawProfile.model),
-			fallbackModels: modelList(rawProfile.fallbackModels, rawProfile.fallbackModel),
-			modelByParent: normalizeModelByParent(rawProfile.modelByParent, name, file),
-			thinking: trimString(rawProfile.thinking),
-			tools: arrayOfStrings(rawProfile.tools),
-			isolatedSkills: arrayOfStrings(rawProfile.isolatedSkills),
-			extraArgs: arrayOfStrings(rawProfile.extraArgs),
-			promptAppend: textBlock(rawProfile.promptAppend),
-			promptOverride: textBlock(rawProfile.promptOverride),
-			retry: isRecord(rawProfile.retry) ? normalizeRetryConfig(rawProfile.retry) : undefined,
-			maxResultBytes: finiteNumber(rawProfile.maxResultBytes) !== undefined ? Math.max(0, Math.round(finiteNumber(rawProfile.maxResultBytes)!)) : undefined,
-			timeoutMs: positiveMilliseconds(rawProfile.timeoutMs),
-		};
+		types[name] = normalizeSubagentTypeProfile(rawProfile, name, file);
 	}
 	output.types = types;
 	return output;
+}
+
+/**
+ * Normalize one raw sub-agent type profile (`SubagentTypeConfig` shape) from
+ * any source (JSONC config files or project agent definitions). Shared so all
+ * sources apply identical field validation and trimming.
+ */
+export function normalizeSubagentTypeProfile(
+	rawProfile: Record<string, unknown>,
+	name: string,
+	file: string,
+): SubagentTypeConfig {
+	return {
+		description: trimString(rawProfile.description),
+		model: trimString(rawProfile.model),
+		fallbackModels: modelList(rawProfile.fallbackModels, rawProfile.fallbackModel),
+		modelByParent: normalizeModelByParent(rawProfile.modelByParent, name, file),
+		thinking: trimString(rawProfile.thinking),
+		tools: arrayOfStrings(rawProfile.tools),
+		isolatedSkills: arrayOfStrings(rawProfile.isolatedSkills),
+		extraArgs: arrayOfStrings(rawProfile.extraArgs),
+		promptAppend: textBlock(rawProfile.promptAppend),
+		promptOverride: textBlock(rawProfile.promptOverride),
+		retry: isRecord(rawProfile.retry) ? normalizeRetryConfig(rawProfile.retry) : undefined,
+		maxResultBytes: finiteNumber(rawProfile.maxResultBytes) !== undefined ? Math.max(0, Math.round(finiteNumber(rawProfile.maxResultBytes)!)) : undefined,
+		timeoutMs: positiveMilliseconds(rawProfile.timeoutMs),
+	};
 }
 
 function mergeConfig(target: SubagentConfig, source: Partial<SubagentConfig>): void {

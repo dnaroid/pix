@@ -19,6 +19,7 @@ import {
 } from "./lib.js";
 import { buildUltraworkPrompt, isUltraworkEnvEnabled, registerCommands } from "./commands.js";
 import { agentStrategyPrompt, appendAgentStrategyPrompt } from "./core/agent-strategy.js";
+import { buildSubagentCatalogPrompt } from "./core/agent-catalog.js";
 import {
 	bridgeImageAttachments,
 	removeImageAttachmentBridgeState,
@@ -190,9 +191,13 @@ export default function (pi: ExtensionAPI) {
 			customPrompt: Boolean(event?.systemPromptOptions?.customPrompt),
 		});
 		const visionPrompt = visionCapabilityPrompt(event, ctx);
-		if (!strategyPrompt && !visionPrompt) return undefined;
+		const catalogPrompt = selectedToolsInclude(event, "subagents")
+			? subagentCatalogPrompt((ctx as { cwd?: string } | undefined)?.cwd ?? process.cwd())
+			: undefined;
+		if (!strategyPrompt && !visionPrompt && !catalogPrompt) return undefined;
 		let systemPrompt = event.systemPrompt ?? "";
 		if (strategyPrompt) systemPrompt = appendAgentStrategyPrompt(systemPrompt, strategyPrompt);
+		if (catalogPrompt) systemPrompt = appendAgentStrategyPrompt(systemPrompt, catalogPrompt);
 		if (visionPrompt) systemPrompt = appendAgentStrategyPrompt(systemPrompt, visionPrompt);
 		return { systemPrompt };
 	});
@@ -279,6 +284,11 @@ function safeLoadSubagentConfig(cwd: string) {
 	} catch {
 		return undefined;
 	}
+}
+
+function subagentCatalogPrompt(cwd: string): string | undefined {
+	const config = safeLoadSubagentConfig(cwd);
+	return config ? buildSubagentCatalogPrompt(config) : undefined;
 }
 
 function startupSubagentPresetList(cwd = process.cwd()): string {

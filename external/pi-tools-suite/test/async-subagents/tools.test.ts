@@ -253,6 +253,41 @@ describe.serial("extension entrypoint", () => {
 		expect(customPromptResult?.systemPrompt ?? "base").not.toContain('name="deep-work"');
 	});
 
+	test.serial("injects the effective project-local sub-agent catalog into the parent system prompt", async () => {
+		const { default: registerExtension } = await import("../../src/async-subagents/index.js");
+		const cwd = tempDir();
+		delete process.env.ASYNC_SUBAGENTS_CONFIG;
+		delete process.env.PI_SUBAGENTS_CONFIG;
+		writeFile(path.join(cwd, ".pi", "agents", "house-review.md"), `---
+description: Review changes using this project's house rules.
+thinking: high
+---
+
+Check the project conventions before approving changes.
+`);
+
+		const pi = new FakePi();
+		registerExtension(pi as any);
+		const beforeStartHandlers = pi.events.get("before_agent_start") ?? [];
+		expect(beforeStartHandlers).toHaveLength(1);
+
+		const handler = beforeStartHandlers[0]!;
+		const result = await handler(
+			{ systemPrompt: "base", systemPromptOptions: { selectedTools: ["subagents"] } },
+			{ cwd, model: { provider: "zai", id: "glm-5.2" } },
+		);
+		expect(result.systemPrompt).toContain("<available_subagent_types>");
+		expect(result.systemPrompt).toContain("- house-review: Review changes using this project's house rules.");
+		expect(result.systemPrompt).toContain("- quick: Use for tiny cheap tasks");
+		expect(result.systemPrompt).toContain("Project-local `.pi/agents/*.md` roles are included");
+
+		const withoutSubagents = await handler(
+			{ systemPrompt: "base", systemPromptOptions: { selectedTools: ["read"] } },
+			{ cwd, model: { provider: "zai", id: "glm-5.2" } },
+		);
+		expect(withoutSubagents.systemPrompt).not.toContain("<available_subagent_types>");
+	});
+
 	test.serial("registers session navigation commands when sub-agent sessions are enabled", async () => {
 		const { default: registerExtension } = await import("../../src/async-subagents/index.js");
 		process.env.ASYNC_SUBAGENTS_ENABLE_SESSIONS = "1";

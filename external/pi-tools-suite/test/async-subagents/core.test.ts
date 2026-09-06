@@ -19,6 +19,7 @@ import {
 	generatePrompt,
 	getAgentState,
 	getActiveSubagentPresetName,
+	getBuiltinSubagentDefinitionsDir,
 	getBrowserQaSkillPath,
 	getSubagentRegistryPath,
 	getSubagentConfigSamplePath,
@@ -34,6 +35,9 @@ import {
 	loadSubagentConfig,
 	loadSubagentPresetSelection,
 	loadSubagentRegistry,
+	projectAgentDefinitionFiles,
+	readAgentDefinitionsFromDir,
+	readProjectAgentDefinitions,
 	readResult,
 	recordSubagentRun,
 	removeSubagentRunsFromRegistry,
@@ -489,6 +493,29 @@ describe.serial("subagent type config", () => {
 		expect(privateSkillText).toMatch(/report the concrete blocker instead of switching to a\s+mock target/);
 	});
 
+	test.serial("defines bundled sub-agent roles as individual markdown agent files", () => {
+		const definitionsDir = getBuiltinSubagentDefinitionsDir();
+		const definitions = readAgentDefinitionsFromDir(definitionsDir);
+
+		expect(Object.keys(definitions).sort()).toEqual([
+			"browser-qa",
+			"deep",
+			"docs",
+			"frontend",
+			"implement",
+			"oracle",
+			"quick",
+			"research",
+			"review",
+			"scan",
+			"tests",
+		]);
+		expect(definitions.frontend?.raw.description).toContain("frontend UI/UX visual work");
+		expect(definitions.frontend?.raw.promptAppend).toContain("# Frontend agent");
+		expect(definitions.oracle?.raw.promptAppend).toContain("# Oracle agent");
+		expect(definitions["browser-qa"]?.raw.tools).toEqual(["read", "grep", "bash"]);
+	});
+
 	test.serial("keeps the self-contained browser QA skill mandatory when config adds isolated skills", () => {
 		const customSkill = path.join(tempDir(), "custom", "SKILL.md");
 		const config = {
@@ -661,6 +688,149 @@ describe.serial("subagent type config", () => {
 		);
 		expect(forced.task.model).toBe("parent/current-model");
 		expect(forced.extraArgs).toEqual(["--temperature", "0", "--foo", "--bar"]);
+	});
+
+	describe("project agent definitions (.pi/agents)", () => {
+		test.serial("loads .pi/agents/*.md as local sub-agent types", () => {
+			const cwd = tempDir();
+			writeFile(path.join(cwd, ".pi", "agents", "local-reviewer.md"), `---
+name: local-reviewer
+description: Use for reviewing this project's code.
+model: zai/glm-5.3
+thinking: high
+tools: read, grep, bash
+fallbackModels:
+  - openai-codex/gpt-5.6-luna
+---
+
+You are the project's staff reviewer.
+Check repo rules before approving.
+`);
+			writeFile(path.join(cwd, ".pi", "agents", "README.md"), "# Notes\n\nNot an agent.\n");
+
+			const files = projectAgentDefinitionFiles(cwd);
+			expect(files.map((file) => path.basename(file))).toEqual(["README.md", "local-reviewer.md"]);
+			expect(Object.keys(readProjectAgentDefinitions(cwd))).toEqual(["local-reviewer"]);
+
+			const config = loadSubagentConfig(cwd, {});
+			const profile = config.types["local-reviewer"];
+			expect(profile?.description).toBe("Use for reviewing this project's code.");
+			expect(profile?.model).toBe("zai/glm-5.3");
+			expect(profile?.thinking).toBe("high");
+			expect(profile?.tools).toEqual(["read", "grep", "bash"]);
+			expect(profile?.fallbackModels).toEqual(["openai-codex/gpt-5.6-luna"]);
+			expect(profile?.promptAppend).toBe("You are the project's staff reviewer.\nCheck repo rules before approving.");
+
+			const resolved = resolveAgentTaskConfig({ id: "r", task: "Review the diff", subagentType: "local-reviewer" }, config);
+			expect(resolved.task.model).toBe("zai/glm-5.3");
+			expect(resolved.task.thinking).toBe("high");
+			expect(resolved.task.tools).toEqual(["read", "grep", "bash"]);
+			expect(generatePrompt(resolved.task)).toContain("Additional instructions from sub-agent profile:\nYou are the project's staff reviewer.");
+			expect(generatePrompt(resolved.task)).toContain("Review the diff");
+		});
+
+		test.serial("parses nested modelByParent and retry from frontmatter", () => {
+			const cwd = tempDir();
+			writeFile(path.join(cwd, ".pi", "agents", "local-oracle.md"), `---
+description: Second opinion.
+modelByParent:
+  zai/*: zai/glm-5.3
+  openai-codex/*:
+    model: openai-codex/gpt-5.6-sol
+    fallbackModels: [zai/glm-5.3]
+retry:
+  maxRetries: 2
+  backoffMs: 250
+  retryableExitCodes: [1, 124]
+timeoutMs: 600000
+---
+
+Advise only.
+`);
+			const config = loadSubagentConfig(cwd, {});
+			const profile = config.types["local-oracle"];
+			expect(profile?.modelByParent).toEqual({
+				"zai/*": { model: "zai/glm-5.3" },
+				"openai-codex/*": { model: "openai-codex/gpt-5.6-sol", fallbackModels: ["zai/glm-5.3"] },
+			});
+			expect(profile?.retry).toEqual({ maxRetries: 2, backoffMs: 250, retryableExitCodes: [1, 124] });
+			expect(profile?.timeoutMs).toBe(600000);
+
+			const resolved = resolveAgentTaskConfig(
+				{ id: "o", task: "Sanity check the plan", subagentType: "local-oracle" },
+				config,
+				{ parentModel: "openai-codex/gpt-5.6-luna" },
+			);
+			expect(resolved.task.model).toBe("openai-codex/gpt-5.6-sol");
+			expect(resolved.fallbackModels).toEqual(["zai/glm-5.3"]);
+		});
+
+		test.serial("walks up to find .pi/agents and overrides project config type fields", () => {
+			const cwd = tempDir();
+			writeFile(path.join(cwd, ".pi", "pi-tools-suite.jsonc"), JSON.stringify({
+				asyncSubagents: { types: { "shared-name": { model: "jsonc/model", thinking: "low" } } },
+			}));
+			writeFile(path.join(cwd, ".pi", "agents", "shared-name.md"), "---\ndescription: md wins\nmodel: md/model\n---\nRole text.\n");
+
+			const config = loadSubagentConfig(path.join(cwd, "packages", "app"), {});
+			expect(config.types["shared-name"].model).toBe("md/model");
+			expect(config.types["shared-name"].description).toBe("md wins");
+			// Existing mergeConfig semantics: per-field override, jsonc-only fields survive.
+			expect(config.types["shared-name"].thinking).toBe("low");
+			expect(config.types["shared-name"].promptAppend).toBe("Role text.");
+		});
+
+		test.serial("skips .pi/agents when an explicit config path is set", () => {
+			const cwd = tempDir();
+			writeFile(path.join(cwd, ".pi", "agents", "local-only.md"), "---\ndescription: x\n---\nBody.\n");
+			const explicit = path.join(cwd, "explicit.json");
+			writeFile(explicit, JSON.stringify({ types: {} }));
+
+			const config = loadSubagentConfig(cwd, { ASYNC_SUBAGENTS_CONFIG: explicit });
+			expect(config.types["local-only"]).toBeUndefined();
+		});
+
+		test.serial("rejects name mismatch, invalid names, and unsupported YAML", () => {
+			const cwd = tempDir();
+			const agentsDir = path.join(cwd, ".pi", "agents");
+
+			writeFile(path.join(agentsDir, "foo.md"), "---\nname: bar\ndescription: x\n---\n");
+			expect(() => loadSubagentConfig(cwd, {})).toThrow(/does not match the file name/);
+			fs.rmSync(agentsDir, { recursive: true });
+
+			writeFile(path.join(agentsDir, "bad name.md"), "---\ndescription: x\n---\n");
+			expect(() => readProjectAgentDefinitions(cwd)).toThrow(/not a valid sub-agent type name/);
+			fs.rmSync(agentsDir, { recursive: true });
+
+			writeFile(path.join(agentsDir, "flow.md"), "---\ndescription: {a: b}\n---\n");
+			expect(() => loadSubagentConfig(cwd, {})).toThrow(/Flow maps/);
+			fs.rmSync(agentsDir, { recursive: true });
+
+			writeFile(path.join(agentsDir, "tabs.md"), "---\nmodel: x\n\ttools: read\n---\n");
+			expect(() => loadSubagentConfig(cwd, {})).toThrow(/Tabs are not allowed/);
+			fs.rmSync(agentsDir, { recursive: true });
+
+			writeFile(path.join(agentsDir, "unknown.md"), "---\ntool: read\n---\n");
+			expect(() => loadSubagentConfig(cwd, {})).toThrow(/Unknown agent frontmatter key "tool"/);
+		});
+
+		test.serial("reloads .pi/agents without caching (respects /reload and live edits)", () => {
+			const cwd = tempDir();
+			const agentFile = path.join(cwd, ".pi", "agents", "live.md");
+			writeFile(agentFile, "---\ndescription: first\nmodel: first/model\n---\nFirst body.\n");
+			const before = loadSubagentConfig(cwd, {});
+			expect(before.types.live?.model).toBe("first/model");
+			expect(before.types.live?.promptAppend).toBe("First body.");
+
+			writeFile(agentFile, "---\ndescription: second\nmodel: second/model\n---\nSecond body.\n");
+			const after = loadSubagentConfig(cwd, {});
+			expect(after.types.live?.model).toBe("second/model");
+			expect(after.types.live?.promptAppend).toBe("Second body.");
+
+			fs.rmSync(agentFile);
+			const gone = loadSubagentConfig(cwd, {});
+			expect(gone.types.live).toBeUndefined();
+		});
 	});
 
 	test.serial("resolves modelByParent from the current parent model", () => {

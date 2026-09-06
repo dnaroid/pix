@@ -441,6 +441,36 @@ Sub-agent model routing normally follows task overrides, subagent type config, t
 
 For an oh-my-openagent-style workflow, run `/ultrawork` or `/ulw` to ask the parent agent to split broad work into configured async-subagents roles (`quick`, `scan`, `research`, `docs`, `frontend`, `browser-qa`, `implement`, `tests`, `review`, `deep`, `oracle`). Set `ULTRAWORK=1` before launching Pi to apply that compact routing prompt to normal non-slash user inputs automatically. Set `ULTRAWORK_AUTO=1` to ask the lightweight router model to classify only the first normal user input on non-GPT parent models: clear broad/parallel work is transformed into ultrawork, vague potentially-complex work gets a soft delegation hint, and narrow work is left unchanged. GPT-like parent models skip only this automatic transform; they can still use `/ultrawork` and `subagents` normally. `frontend` is for UI/UX, styling, layout, responsive behavior, and visual component polish; `browser-qa` reproduces browser bugs and proves fixes with deterministic assertions plus screenshot/video/trace evidence; `review` covers security/performance/audit tracks; `implement` covers refactors; `deep` covers debugging/root-cause; `oracle` is for sparse cross-provider second opinions on high-stakes uncertainty. Run `/hyperplan` to pressure-test a plan before implementation.
 
+### Project-local agents (`.pi/agents/*.md`)
+
+A project can ship its own sub-agent roles as individual Markdown files (Claude Code `.claude/agents` style) in `<project>/.pi/agents/`. The first `.pi/agents` directory found walking up from the session cwd is used; each top-level `*.md` file becomes a `subagentType` named after the file (without `.md`). Project agents behave exactly like types declared in `asyncSubagents.types`: the LLM router sees their `description`, `/subagent-preset` per-type overrides apply, and `subagentType: "<name>"` selects them explicitly. The parent system prompt also receives the effective role catalog (built-ins + config overrides + project-local agents), so custom role names and descriptions are visible before it decides whether to set `subagentType` explicitly.
+
+```markdown
+---
+description: Use for reviewing this repo's diff — knows the house rules.
+model: zai/glm-5.3
+thinking: high
+tools: read, grep, bash
+fallbackModels:
+  - openai-codex/gpt-5.6-luna
+modelByParent:
+  zai/*: zai/glm-5.3
+retry:
+  maxRetries: 1
+  backoffMs: 2000
+---
+
+You are this project's staff reviewer. Apply the repo rules from
+AGENTS.md before approving anything; cite file paths first.
+```
+
+- Frontmatter keys: `name` (must match the filename), plus every type-profile field: `description`, `model`, `fallbackModels`, `modelByParent`, `thinking`, `tools`, `isolatedSkills`, `extraArgs`, `promptAppend`, `promptOverride`, `retry`, `maxResultBytes`, `timeoutMs`. Unknown keys are rejected with an error naming the file.
+- Array fields accept block lists (`- item`), inline arrays (`[a, b]`), or comma-separated strings (`tools: read, grep, bash`). The frontmatter YAML subset is intentionally small: scalars, quoted strings, numbers, comments, lists, and nested maps for `modelByParent`/`retry`. Tabs, block scalars (`|`/`>`), anchors/aliases, and flow maps are hard errors naming file and line.
+- The markdown body becomes `promptAppend`: it is appended after the standard generated prompt (parent objective + task + output format), so the agent still receives its task in the usual structure. Use frontmatter `promptOverride` for full prompt replacement.
+- Precedence: project agent fields override same-named types from user/project JSONC config (field-level; other fields are kept), which in turn override built-ins. Setting `ASYNC_SUBAGENTS_CONFIG` / `PI_SUBAGENTS_CONFIG` disables the directory (explicit config = full control).
+- Files without frontmatter are skipped (a `README.md` there is fine). Definition loading is uncached: edits apply on the next config read/spawn without a restart, and the effective system-prompt catalog is rebuilt at parent-agent start.
+- Bundled roles use the same format internally under `src/async-subagents/agents/*.md`; built-in and project-local profiles therefore share one parser and normalization path instead of maintaining a second role-description schema in TypeScript.
+
 ### Private browser QA and project auth
 
 The built-in `browser-qa` role runs on `zai/glm-5.3-flash`, with

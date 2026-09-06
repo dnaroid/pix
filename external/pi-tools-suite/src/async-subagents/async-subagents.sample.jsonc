@@ -161,16 +161,22 @@
     }
   },
 
+  // Role routing overrides. Bundled role descriptions and role-specific prompt
+  // instructions live in src/async-subagents/agents/*.md and are inherited when
+  // a field is omitted here. Besides these profiles, a project can ship roles as
+  // markdown files in <project>/.pi/agents/*.md (one file = one subagentType,
+  // named after the file; YAML frontmatter for the fields below plus a markdown
+  // body that becomes promptAppend). Project agent fields override same-named
+  // types defined here. Their names/descriptions are also included in the
+  // parent's effective sub-agent catalog; see README "Project-local agents".
   "types": {
     "quick": {
-      "description": "Use for tiny cheap tasks: answer a simple question, inspect one known file, or verify one fact. Not for broad repo search.",
       "model": "openai-codex/gpt-5.6-luna",
       "fallbackModels": ["zai/glm-4.5-air"],
       "thinking": "off"
     },
 
     "scan": {
-      "description": "Use for finding files, symbols, text, or inventory across a repo. Return paths/facts; do not judge code quality.",
       "model": "openai-codex/gpt-5.6-luna",
       "fallbackModels": ["zai/glm-4.5-air"],
       "thinking": "off",
@@ -178,7 +184,6 @@
     },
 
     "research": {
-      "description": "Use for multi-file codebase research: read several files and explain how something works. No edits.",
       "model": "openai-codex/gpt-5.6-terra",
       "fallbackModels": ["zai/glm-5-turbo"],
       "thinking": "low",
@@ -186,27 +191,18 @@
     },
 
     "docs": {
-      "description": "Use for documentation work: README/API docs review, docs gaps, changelog, migration notes, examples.",
       "model": "openai-codex/gpt-5.6-luna",
       "fallbackModels": ["zai/glm-4.5-air"],
       "thinking": "low"
     },
 
     "frontend": {
-      "description": "Use for frontend UI/UX visual work: styling, layout, typography, animation, responsive states, component polish, accessibility. Avoid backend/business logic unless needed for UI behavior.",
       "model": "antigravity/gemini-3-flash-preview",
       "fallbackModels": ["openai-codex/gpt-5.6-luna", "zai/glm-5.3"],
-      "thinking": "medium",
-      "promptAppend": [
-        "Act as a frontend UI/UX engineer for visual and product-facing work.",
-        "Prioritize layout, typography, spacing, color, motion, responsive states, accessibility, and consistency with the existing design system.",
-        "Before editing, inspect nearby components/styles and infer the project's design language. Avoid backend/business-logic changes unless required for UI behavior.",
-        "When no mockup exists, choose a clear aesthetic direction and explain it briefly. Verify with targeted build/lint/tests or screenshot-relevant checks when possible."
-      ]
+      "thinking": "medium"
     },
 
     "browser-qa": {
-      "description": "Use for browser-based visual QA: reproduce UI bugs and verify fixes with deterministic assertions, screenshots, video, and traces.",
       "model": "zai/glm-5.3-flash",
       "fallbackModels": ["openai-codex/gpt-5.6-luna"],
       "thinking": "low",
@@ -215,7 +211,6 @@
     },
 
     "tests": {
-      "description": "Use for tests: locate coverage, find gaps, run/check targeted test commands, diagnose failing tests.",
       "model": "openai-codex/gpt-5.6-terra",
       "fallbackModels": ["zai/glm-5-turbo"],
       "thinking": "medium",
@@ -223,7 +218,6 @@
     },
 
     "review": {
-      "description": "Use for review/audit of existing code or changes: correctness, security, performance, maintainability, API risks, quality. Do not implement new code.",
       "model": "openai-codex/gpt-5.6-sol",
       "fallbackModels": ["zai/glm-5.3"],
       "thinking": "high",
@@ -231,7 +225,6 @@
     },
 
     "implement": {
-      "description": "Use when the sub-agent should make or plan code changes for a feature, bug fix, or refactor.",
       "model": "openai-codex/gpt-5.6-sol",
       "fallbackModels": ["zai/glm-5.3"],
       // Avoid Sol recursively doing routine implementation work for a Sol parent.
@@ -246,14 +239,12 @@
     },
 
     "deep": {
-      "description": "Use for broad hard reasoning: architecture, system design, cross-module impact, complex tradeoffs.",
       "model": "openai-codex/gpt-5.6-sol",
       "fallbackModels": ["zai/glm-5.3"],
       "thinking": "high"
     },
 
     "oracle": {
-      "description": "Oracle: cross-provider flagship second opinion for hard or high-stakes uncertainty. Use sparingly to pressure-test architecture, plans, root-cause hypotheses, risk/security calls, or final recommendations when independent disagreement is valuable. Read-only; advise, do not edit.",
       "model": "openai-codex/gpt-5.6-sol",
       "fallbackModels": ["zai/glm-5.3"],
       "thinking": "max",
@@ -263,8 +254,7 @@
         "openai-codex/*": { "model": "zai/glm-5.3", "fallbackModels": ["openai-codex/gpt-5.6-sol"] },
         "antigravity/*": { "model": "zai/glm-5.3", "fallbackModels": ["openai-codex/gpt-5.6-sol"] },
         "anthropic/*": { "model": "openai-codex/gpt-5.6-sol", "fallbackModels": ["zai/glm-5.3"] }
-      },
-      "promptAppend": "You are an oracle: a flagship model from a different provider giving a second opinion to the parent agent. Give a concise, decisive recommendation with key tradeoffs and risks. Disagree when warranted; do not rubber-stamp. Do not edit unless explicitly asked."
+      }
     }
   }
 }
