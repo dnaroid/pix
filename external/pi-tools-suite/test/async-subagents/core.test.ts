@@ -793,6 +793,31 @@ Advise only.
 			expect(config.types["shared-name"].promptAppend).toBe("Role text.");
 		});
 
+		test.serial("parses icon frontmatter and keeps it through merges", () => {
+			const cwd = tempDir();
+			writeFile(path.join(cwd, ".pi", "pi-tools-suite.jsonc"), JSON.stringify({
+				asyncSubagents: { types: { "shared-name": { model: "jsonc/model", icon: "book" } } },
+			}));
+			writeFile(path.join(cwd, ".pi", "agents", "shared-name.md"), "---\ndescription: md wins\nmodel: md/model\n---\nRole text.\n");
+
+			const config = loadSubagentConfig(path.join(cwd, "packages", "app"), {});
+			// jsonc-only icon survives the per-field markdown merge.
+			expect(config.types["shared-name"].icon).toBe("book");
+
+			const mdCwd = tempDir();
+			writeFile(path.join(mdCwd, ".pi", "agents", "local-searcher.md"), "---\ndescription: finder\nicon: search\n---\nFind things.\n");
+			const mdConfig = loadSubagentConfig(mdCwd, {});
+			expect(mdConfig.types["local-searcher"]?.icon).toBe("search");
+
+			// Built-in bundled agents ship icons.
+			const builtin = loadSubagentConfig(tempDir(), {});
+			expect(builtin.types.research?.icon).toBe("search");
+			expect(builtin.types.implement?.icon).toBe("code");
+			expect(builtin.types.verify?.icon).toBe("flask");
+			expect(builtin.types["browser-qa"]?.icon).toBe("globe");
+			expect(builtin.types.oracle?.icon).toBe("sparkles");
+		});
+
 		test.serial("skips .pi/agents when an explicit config path is set", () => {
 			const cwd = tempDir();
 			writeFile(path.join(cwd, ".pi", "agents", "local-only.md"), "---\ndescription: x\n---\nBody.\n");
@@ -1779,7 +1804,7 @@ setTimeout(() => {}, 1000);
 		await waitUntil(() => getAgentState(runDir, "agent-1")?.status === "retrying", 500);
 		expect(getAgentState(runDir, "agent-1")).toMatchObject({ status: "retrying", retryCount: 1 });
 		expect(fs.existsSync(path.join(runDir, "agent-1", "next_retry_at"))).toBe(true);
-		await retry.done;
+		await withTimeout(retry.done, "Timed out waiting for retrying agent completion", 15000);
 		expect(completed).toMatchObject({ exitCode: 0, state: { status: "done", retryCount: 1 } });
 		expect(fs.readFileSync(path.join(runDir, "agent-1", "result.md"), "utf-8")).toBe("retry ok");
 		expect(fs.existsSync(path.join(runDir, "agent-1", "retry_pending"))).toBe(false);
@@ -1815,7 +1840,7 @@ setTimeout(() => {}, 1000);
 		const first = spawnAgentWithRetry(runDir, { id: "agent-1", task: "Fallback", model: "primary/model" }, cwd, (completion) => {
 			firstCompletion = completion;
 		}, { retry: { maxRetries: 0, backoffMs: 10 }, extraArgs: ["--skill", "injected-skill.md"], fallbackModels: ["fallback/model"], isolatedSkills: [fallbackSkill] });
-		await first.done;
+		await withTimeout(first.done, "Timed out waiting for model-fallback first completion", 15000);
 
 		expect(firstCompletion).toMatchObject({ exitCode: 0, state: { status: "done" } });
 		expect(JSON.parse(fs.readFileSync(attemptFile, "utf-8"))).toEqual(["primary/model", "fallback/model"]);
@@ -1832,7 +1857,7 @@ setTimeout(() => {}, 1000);
 		const second = spawnAgentWithRetry(secondRun, { id: "agent-2", task: "Fallback again", model: "primary/model" }, cwd, (completion) => {
 			secondCompletion = completion;
 		}, { retry: { maxRetries: 0, backoffMs: 10 }, extraArgs: [], fallbackModels: ["fallback/model"] });
-		await second.done;
+		await withTimeout(second.done, "Timed out waiting for model-fallback second completion", 15000);
 
 		expect(secondCompletion).toMatchObject({ exitCode: 0, state: { status: "done" } });
 		expect(JSON.parse(fs.readFileSync(attemptFile, "utf-8"))).toEqual(["primary/model", "fallback/model", "fallback/model"]);
@@ -1843,7 +1868,7 @@ setTimeout(() => {}, 1000);
 		const third = spawnAgentWithRetry(thirdRun, { id: "agent-3", task: "Same provider again", model: "primary/other" }, cwd, (completion) => {
 			thirdCompletion = completion;
 		}, { retry: { maxRetries: 0, backoffMs: 10 }, extraArgs: [], fallbackModels: ["fallback/other"] });
-		await third.done;
+		await withTimeout(third.done, "Timed out waiting for model-fallback third completion", 15000);
 
 		expect(thirdCompletion).toMatchObject({ exitCode: 0, state: { status: "done" } });
 		expect(JSON.parse(fs.readFileSync(attemptFile, "utf-8"))).toEqual(["primary/model", "fallback/model", "fallback/model", "fallback/other"]);
@@ -1902,7 +1927,7 @@ setTimeout(() => {}, 1000);
 		await waitUntil(() => getAgentState(stoppedRun, "agent-stopped")?.status === "retrying", 500);
 		const [stoppedResult] = stopAgents(stoppedRun, ["agent-stopped"], { signal: "SIGTERM" });
 		expect(stoppedResult).toMatchObject({ id: "agent-stopped", stopped: true, previousStatus: "retrying" });
-		await stopped.done;
+		await withTimeout(stopped.done, "Timed out waiting for stopped agent completion", 15000);
 		expect(stoppedCompletion.state.status).toBe("stopped");
 		expect(fs.readFileSync(stoppedAttemptFile, "utf-8")).toBe("1");
 		expect(fs.existsSync(path.join(stoppedRun, "agent-stopped", "retry_pending"))).toBe(false);
@@ -1927,7 +1952,7 @@ setTimeout(() => {}, 1000);
 		const disabled = spawnAgentWithRetry(runDir, { id: "agent-1", task: "No retry" }, cwd, (completion) => {
 			disabledCompletion = completion;
 		}, { retry: { maxRetries: 2, backoffMs: 10, retryableExitCodes: [] }, extraArgs: [] });
-		await disabled.done;
+		await withTimeout(disabled.done, "Timed out waiting for no-retry completion", 15000);
 		expect(disabledCompletion).toMatchObject({ exitCode: 1, state: { status: "failed" } });
 		expect(fs.readFileSync(attemptFile, "utf-8")).toBe("1");
 		expect(fs.existsSync(path.join(runDir, "agent-1", "retry_pending"))).toBe(false);
