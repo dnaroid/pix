@@ -15,14 +15,21 @@ export class TauriAcpTransport implements AcpTransport {
       else if (this.generation === null) earlyEvents.push({ generation, deliver: callback });
     };
     try {
-      this.unlisten.push(
-        await listen<AcpLine>("acp://stdout", (event) =>
-          deliver(event.payload.generation, () => handlers.onLine(event.payload.line))),
-        await listen<AcpLine>("acp://stderr", (event) =>
-          deliver(event.payload.generation, () => handlers.onStderr(event.payload.line))),
-        await listen<AcpExit>("acp://exit", (event) =>
+      const [stdoutUnlisten, stderrUnlisten, exitUnlisten] = await Promise.all([
+        listen<AcpLines>("acp://stdout", (event) => {
+          for (const line of payloadLines(event.payload)) {
+            deliver(event.payload.generation, () => handlers.onLine(line));
+          }
+        }),
+        listen<AcpLines>("acp://stderr", (event) => {
+          for (const line of payloadLines(event.payload)) {
+            deliver(event.payload.generation, () => handlers.onStderr(line));
+          }
+        }),
+        listen<AcpExit>("acp://exit", (event) =>
           deliver(event.payload.generation, () => handlers.onExit(event.payload))),
-      );
+      ]);
+      this.unlisten.push(stdoutUnlisten, stderrUnlisten, exitUnlisten);
       this.generation = await invoke<number>("acp_start");
       this.started = true;
       for (const event of earlyEvents) {
@@ -56,7 +63,13 @@ export class TauriAcpTransport implements AcpTransport {
   }
 }
 
-interface AcpLine {
+interface AcpLines {
   readonly generation: number;
-  readonly line: string;
+  readonly lines?: readonly string[];
+  readonly line?: string;
+}
+
+function payloadLines(payload: AcpLines): readonly string[] {
+  if (Array.isArray(payload.lines)) return payload.lines.filter((line): line is string => typeof line === "string");
+  return typeof payload.line === "string" ? [payload.line] : [];
 }

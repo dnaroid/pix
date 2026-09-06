@@ -31,12 +31,12 @@ describe("TauriAcpTransport", () => {
       onExit: () => {},
     });
 
-    tauri.listeners.get("acp://stdout")?.({ payload: { generation: 6, line: "stale" } });
-    tauri.listeners.get("acp://stdout")?.({ payload: { generation: 7, line: "current" } });
+    tauri.listeners.get("acp://stdout")?.({ payload: { generation: 6, lines: ["stale"] } });
+    tauri.listeners.get("acp://stdout")?.({ payload: { generation: 7, lines: ["current", "next"] } });
     await transport.send("{}");
     await transport.stop();
 
-    expect(lines).toEqual(["current"]);
+    expect(lines).toEqual(["current", "next"]);
     expect(tauri.invoke).toHaveBeenCalledWith("acp_send", { generation: 7, line: "{}" });
     expect(tauri.invoke).toHaveBeenCalledWith("acp_stop", { generation: 7 });
     await expect(transport.send("{}")).rejects.toThrow("not started");

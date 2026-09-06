@@ -1,27 +1,31 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use chrono::DateTime;
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde::{
+    de::{IgnoredAny, MapAccess, Visitor},
+    Deserialize, Serialize,
+};
 use std::{
     collections::HashSet,
-    env, fs,
+    env, fmt, fs,
     io::{BufRead, BufReader, Read, Write},
     path::{Component, Path, PathBuf},
     process::{Child, ChildStdin, Command, ExitStatus, Stdio},
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc, Arc, Condvar, Mutex,
     },
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_window_state::StateFlags;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(40);
 const GRACEFUL_STOP_TIMEOUT: Duration = Duration::from_secs(2);
 const STOP_TIMEOUT: Duration = Duration::from_secs(5);
+const ACP_EVENT_BATCH_LATENCY: Duration = Duration::from_millis(4);
+const ACP_EVENT_BATCH_MAX_LINES: usize = 64;
 const MAX_ATTACHMENT_COUNT: usize = 10;
 const MAX_ATTACHMENT_BYTES: u64 = 25 * 1024 * 1024;
 const MAX_ATTACHMENT_CACHE_BYTES: u64 = 250 * 1024 * 1024;
@@ -35,6 +39,7 @@ type ExitSignal = Arc<(Mutex<bool>, Condvar)>;
 #[derive(Default)]
 struct AcpProcessState {
     slot: Mutex<ProcessSlot>,
+    exiting: AtomicBool,
 }
 
 #[derive(Default)]
@@ -45,15 +50,26 @@ struct ProcessSlot {
 
 struct RunningProcess {
     generation: u64,
-    stdin: Option<ChildStdin>,
+    stdin_tx: Option<mpsc::Sender<StdinCommand>>,
     stop_tx: mpsc::Sender<()>,
     exited: ExitSignal,
 }
 
 impl Drop for RunningProcess {
     fn drop(&mut self) {
+        if let Some(stdin_tx) = self.stdin_tx.take() {
+            let _ = stdin_tx.send(StdinCommand::Close);
+        }
         let _ = self.stop_tx.send(());
     }
+}
+
+enum StdinCommand {
+    Write {
+        line: String,
+        ack: mpsc::SyncSender<Result<(), String>>,
+    },
+    Close,
 }
 
 #[derive(Clone, Serialize)]
@@ -68,9 +84,19 @@ struct ExitPayload {
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct LinePayload {
+struct LinesPayload {
     generation: u64,
-    line: String,
+    lines: Vec<String>,
+}
+
+async fn run_blocking<T, F>(operation: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(operation)
+        .await
+        .map_err(|error| format!("background task failed: {error}"))?
 }
 
 #[derive(Clone, Serialize)]
@@ -141,46 +167,82 @@ enum ProjectTaskPriority {
 struct AttachmentPathState {
     approved: Mutex<HashSet<PathBuf>>,
     cache_lock: Mutex<()>,
+    registry_lock: Mutex<()>,
+    registry_loaded: AtomicBool,
     registry_path: PathBuf,
 }
 
 impl AttachmentPathState {
-    fn load(app: &AppHandle) -> Self {
+    fn new(app: &AppHandle) -> Self {
         let cache_dir = app
             .path()
             .app_cache_dir()
             .unwrap_or_else(|_| env::temp_dir());
-        let registry_path = cache_dir.join("approved-attachments.json");
-        let mut approved = HashSet::new();
-        if let Ok(raw) = fs::read_to_string(&registry_path) {
+        Self {
+            approved: Mutex::new(HashSet::new()),
+            cache_lock: Mutex::new(()),
+            registry_lock: Mutex::new(()),
+            registry_loaded: AtomicBool::new(false),
+            registry_path: cache_dir.join("approved-attachments.json"),
+        }
+    }
+
+    fn ensure_registry_loaded(&self, app: &AppHandle) -> Result<(), String> {
+        if self.registry_loaded.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        let _registry_guard = self
+            .registry_lock
+            .lock()
+            .map_err(|_| "attachment registry state is poisoned".to_owned())?;
+        if self.registry_loaded.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+
+        let mut restored = HashSet::new();
+        if let Ok(raw) = fs::read_to_string(&self.registry_path) {
             if let Ok(paths) = serde_json::from_str::<Vec<String>>(&raw) {
                 for path in paths {
                     if let Ok(canonical) = fs::canonicalize(path) {
                         let _ = app.asset_protocol_scope().allow_file(&canonical);
-                        approved.insert(canonical);
+                        restored.insert(canonical);
                     }
                 }
             }
         }
-        Self {
-            approved: Mutex::new(approved),
-            cache_lock: Mutex::new(()),
-            registry_path,
-        }
-    }
-
-    fn approve_selected(&self, app: &AppHandle, path: &Path) -> Result<PathBuf, String> {
-        let canonical = fs::canonicalize(path)
-            .map_err(|error| format!("failed to resolve {}: {error}", path.display()))?;
-        let already_approved = self
-            .approved
+        self.approved
             .lock()
             .map_err(|_| "attachment path state is poisoned".to_owned())?
-            .contains(&canonical);
-        if !already_approved && !app.asset_protocol_scope().is_allowed(&canonical) {
-            return Err(format!("{} was not selected by the user", path.display()));
+            .extend(restored);
+        self.registry_loaded.store(true, Ordering::Release);
+        Ok(())
+    }
+
+    fn approve_selected_batch(
+        &self,
+        app: &AppHandle,
+        paths: &[String],
+    ) -> Result<Vec<PathBuf>, String> {
+        self.ensure_registry_loaded(app)?;
+        let canonical = paths
+            .iter()
+            .map(|path| {
+                fs::canonicalize(path)
+                    .map_err(|error| format!("failed to resolve {path}: {error}"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        {
+            let approved = self
+                .approved
+                .lock()
+                .map_err(|_| "attachment path state is poisoned".to_owned())?;
+            for (source, path) in paths.iter().zip(&canonical) {
+                if !approved.contains(path) && !app.asset_protocol_scope().is_allowed(path) {
+                    return Err(format!("{source} was not selected by the user"));
+                }
+            }
         }
-        self.approve(app, canonical.clone())?;
+        self.approve_paths(app, canonical.iter().cloned())?;
         Ok(canonical)
     }
 
@@ -191,7 +253,8 @@ impl AttachmentPathState {
         Ok(canonical)
     }
 
-    fn approved_path(&self, path: &Path) -> Result<PathBuf, String> {
+    fn approved_path(&self, app: &AppHandle, path: &Path) -> Result<PathBuf, String> {
+        self.ensure_registry_loaded(app)?;
         let canonical = fs::canonicalize(path)
             .map_err(|error| format!("failed to resolve {}: {error}", path.display()))?;
         let approved = self
@@ -206,21 +269,44 @@ impl AttachmentPathState {
     }
 
     fn approve(&self, app: &AppHandle, path: PathBuf) -> Result<(), String> {
-        app.asset_protocol_scope()
-            .allow_file(&path)
-            .map_err(|error| format!("failed to allow attachment preview: {error}"))?;
-        let mut approved = self
-            .approved
-            .lock()
-            .map_err(|_| "attachment path state is poisoned".to_owned())?;
-        if approved.contains(&path) {
-            return Ok(());
+        self.approve_paths(app, std::iter::once(path))
+    }
+
+    fn approve_paths(
+        &self,
+        app: &AppHandle,
+        paths: impl IntoIterator<Item = PathBuf>,
+    ) -> Result<(), String> {
+        self.ensure_registry_loaded(app)?;
+        let paths = paths.into_iter().collect::<HashSet<_>>();
+        for path in &paths {
+            app.asset_protocol_scope()
+                .allow_file(path)
+                .map_err(|error| format!("failed to allow attachment preview: {error}"))?;
         }
-        let snapshot = approved
-            .iter()
-            .map(|value| value.to_string_lossy().into_owned())
-            .chain(std::iter::once(path.to_string_lossy().into_owned()))
-            .collect::<Vec<_>>();
+        let _registry_guard = self
+            .registry_lock
+            .lock()
+            .map_err(|_| "attachment registry state is poisoned".to_owned())?;
+        let (new_paths, snapshot) = {
+            let approved = self
+                .approved
+                .lock()
+                .map_err(|_| "attachment path state is poisoned".to_owned())?;
+            let new_paths = paths
+                .into_iter()
+                .filter(|path| !approved.contains(path))
+                .collect::<Vec<_>>();
+            if new_paths.is_empty() {
+                return Ok(());
+            }
+            let snapshot = approved
+                .iter()
+                .chain(new_paths.iter())
+                .map(|value| value.to_string_lossy().into_owned())
+                .collect::<Vec<_>>();
+            (new_paths, snapshot)
+        };
         if let Some(parent) = self.registry_path.parent() {
             fs::create_dir_all(parent).map_err(|error| {
                 format!("failed to create the attachment registry directory: {error}")
@@ -230,169 +316,194 @@ impl AttachmentPathState {
             .map_err(|error| format!("failed to encode the attachment registry: {error}"))?;
         fs::write(&self.registry_path, serialized)
             .map_err(|error| format!("failed to save the attachment registry: {error}"))?;
-        approved.insert(path);
+        self.approved
+            .lock()
+            .map_err(|_| "attachment path state is poisoned".to_owned())?
+            .extend(new_paths);
         Ok(())
     }
 }
 
 #[tauri::command]
-fn inspect_attachments(
+async fn inspect_attachments(
     app: AppHandle,
-    state: State<'_, AttachmentPathState>,
     paths: Vec<String>,
 ) -> Result<Vec<AttachmentFile>, String> {
     if paths.len() > MAX_ATTACHMENT_COUNT {
         return Err(format!("select at most {MAX_ATTACHMENT_COUNT} attachments"));
     }
-
-    paths
-        .into_iter()
-        .map(|path| {
-            let canonical = state.approve_selected(&app, Path::new(&path))?;
-            attachment_file(&canonical)
-        })
-        .collect()
+    run_blocking(move || {
+        let state = app.state::<AttachmentPathState>();
+        state
+            .approve_selected_batch(&app, &paths)?
+            .into_iter()
+            .map(|canonical| attachment_file(&canonical))
+            .collect()
+    })
+    .await
 }
 
 #[tauri::command]
-fn read_attachment_base64(
-    state: State<'_, AttachmentPathState>,
-    path: String,
-) -> Result<String, String> {
-    let approved = state.approved_path(Path::new(&path))?;
-    let file = attachment_file(&approved)?;
-    if file.size > MAX_ATTACHMENT_BYTES {
-        return Err(format!(
-            "{} is too large to send as an image (maximum 25 MB)",
-            file.name,
-        ));
-    }
-    let bytes =
-        fs::read(&file.path).map_err(|error| format!("failed to read {}: {error}", file.name))?;
-    if bytes.len() as u64 > MAX_ATTACHMENT_BYTES {
-        return Err(format!("{} grew beyond the 25 MB image limit", file.name));
-    }
-    Ok(BASE64.encode(bytes))
+async fn read_attachment_base64(app: AppHandle, path: String) -> Result<String, String> {
+    run_blocking(move || {
+        let state = app.state::<AttachmentPathState>();
+        let approved = state.approved_path(&app, Path::new(&path))?;
+        let file = attachment_file(&approved)?;
+        if file.size > MAX_ATTACHMENT_BYTES {
+            return Err(format!(
+                "{} is too large to send as an image (maximum 25 MB)",
+                file.name,
+            ));
+        }
+        let bytes = fs::read(&file.path)
+            .map_err(|error| format!("failed to read {}: {error}", file.name))?;
+        if bytes.len() as u64 > MAX_ATTACHMENT_BYTES {
+            return Err(format!("{} grew beyond the 25 MB image limit", file.name));
+        }
+        Ok(BASE64.encode(bytes))
+    })
+    .await
 }
 
 #[tauri::command]
-fn cache_attachment(
+async fn cache_attachment(
     app: AppHandle,
-    state: State<'_, AttachmentPathState>,
     name: String,
     data: String,
 ) -> Result<AttachmentFile, String> {
-    if data.len() as u64 > (MAX_ATTACHMENT_BYTES * 4 / 3) + 8 {
-        return Err("pasted attachment is too large (maximum 25 MB)".to_owned());
-    }
-    let bytes = BASE64
-        .decode(data)
-        .map_err(|error| format!("invalid pasted attachment data: {error}"))?;
-    if bytes.len() as u64 > MAX_ATTACHMENT_BYTES {
-        return Err("pasted attachment is too large (maximum 25 MB)".to_owned());
-    }
-    let _cache_guard = state
-        .cache_lock
-        .lock()
-        .map_err(|_| "attachment cache state is poisoned".to_owned())?;
+    run_blocking(move || {
+        if data.len() as u64 > (MAX_ATTACHMENT_BYTES * 4 / 3) + 8 {
+            return Err("pasted attachment is too large (maximum 25 MB)".to_owned());
+        }
+        let bytes = BASE64
+            .decode(data)
+            .map_err(|error| format!("invalid pasted attachment data: {error}"))?;
+        if bytes.len() as u64 > MAX_ATTACHMENT_BYTES {
+            return Err("pasted attachment is too large (maximum 25 MB)".to_owned());
+        }
+        let state = app.state::<AttachmentPathState>();
+        let _cache_guard = state
+            .cache_lock
+            .lock()
+            .map_err(|_| "attachment cache state is poisoned".to_owned())?;
 
-    let directory = app
-        .path()
-        .app_cache_dir()
-        .map_err(|error| format!("failed to resolve the Pix cache directory: {error}"))?
-        .join("attachments");
-    fs::create_dir_all(&directory)
-        .map_err(|error| format!("failed to create the attachment cache: {error}"))?;
-    prune_attachment_cache(&directory, bytes.len() as u64)?;
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let sequence = ATTACHMENT_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    let path = directory.join(format!("{stamp}-{sequence}-{}", safe_file_name(&name)));
-    fs::write(&path, bytes).map_err(|error| format!("failed to cache {name}: {error}"))?;
-    let canonical = state.approve_cached(&app, &path)?;
-    attachment_file(&canonical)
+        let directory = app
+            .path()
+            .app_cache_dir()
+            .map_err(|error| format!("failed to resolve the Pix cache directory: {error}"))?
+            .join("attachments");
+        fs::create_dir_all(&directory)
+            .map_err(|error| format!("failed to create the attachment cache: {error}"))?;
+        prune_attachment_cache(&directory, bytes.len() as u64)?;
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let sequence = ATTACHMENT_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let path = directory.join(format!("{stamp}-{sequence}-{}", safe_file_name(&name)));
+        fs::write(&path, bytes).map_err(|error| format!("failed to cache {name}: {error}"))?;
+        let canonical = state.approve_cached(&app, &path)?;
+        attachment_file(&canonical)
+    })
+    .await
 }
 
 #[tauri::command]
-fn open_attachment(
+async fn open_attachment(app: AppHandle, path: String) -> Result<(), String> {
+    run_blocking(move || {
+        let approved = app
+            .state::<AttachmentPathState>()
+            .approved_path(&app, Path::new(&path))?;
+        app.opener()
+            .open_path(approved.to_string_lossy(), None::<&str>)
+            .map_err(|error| format!("failed to open attachment: {error}"))
+    })
+    .await
+}
+
+#[tauri::command]
+async fn read_project_file(workspace: String, path: String) -> Result<ProjectFilePreview, String> {
+    run_blocking(move || {
+        read_project_file_from(
+            Path::new(&workspace),
+            Path::new(&path),
+            MAX_PROJECT_FILE_PREVIEW_BYTES,
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+async fn read_home_file(app: AppHandle, path: String) -> Result<ProjectFilePreview, String> {
+    run_blocking(move || {
+        let home = app
+            .path()
+            .home_dir()
+            .map_err(|error| format!("failed to resolve the home directory: {error}"))?;
+        read_home_file_from(&home, Path::new(&path), MAX_PROJECT_FILE_PREVIEW_BYTES)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn resolve_project_media(
     app: AppHandle,
-    state: State<'_, AttachmentPathState>,
-    path: String,
-) -> Result<(), String> {
-    let approved = state.approved_path(Path::new(&path))?;
-    app.opener()
-        .open_path(approved.to_string_lossy(), None::<&str>)
-        .map_err(|error| format!("failed to open attachment: {error}"))
-}
-
-#[tauri::command]
-fn read_project_file(workspace: String, path: String) -> Result<ProjectFilePreview, String> {
-    read_project_file_from(
-        Path::new(&workspace),
-        Path::new(&path),
-        MAX_PROJECT_FILE_PREVIEW_BYTES,
-    )
-}
-
-#[tauri::command]
-fn read_home_file(app: AppHandle, path: String) -> Result<ProjectFilePreview, String> {
-    let home = app
-        .path()
-        .home_dir()
-        .map_err(|error| format!("failed to resolve the home directory: {error}"))?;
-    read_home_file_from(&home, Path::new(&path), MAX_PROJECT_FILE_PREVIEW_BYTES)
-}
-
-#[tauri::command]
-fn resolve_project_media(
-    app: AppHandle,
-    state: State<'_, AttachmentPathState>,
     workspace: String,
     path: String,
 ) -> Result<AttachmentFile, String> {
-    let file = resolve_project_media_from(Path::new(&workspace), Path::new(&path))?;
-    state.approve(&app, PathBuf::from(&file.path))?;
-    Ok(file)
+    run_blocking(move || {
+        let file = resolve_project_media_from(Path::new(&workspace), Path::new(&path))?;
+        app.state::<AttachmentPathState>()
+            .approve(&app, PathBuf::from(&file.path))?;
+        Ok(file)
+    })
+    .await
 }
 
 #[tauri::command]
-fn resolve_home_media(
+async fn resolve_home_media(
     app: AppHandle,
-    state: State<'_, AttachmentPathState>,
     path: String,
 ) -> Result<AttachmentFile, String> {
-    let home = app
-        .path()
-        .home_dir()
-        .map_err(|error| format!("failed to resolve the home directory: {error}"))?;
-    let (_, file_path) = resolve_home_file_path(&home, Path::new(&path))?;
-    if !is_supported_project_media(&file_path) {
-        return Err(format!("{path} is not a supported image or video"));
-    }
-    let file = attachment_file(&file_path)?;
-    state.approve(&app, file_path)?;
-    Ok(file)
+    run_blocking(move || {
+        let home = app
+            .path()
+            .home_dir()
+            .map_err(|error| format!("failed to resolve the home directory: {error}"))?;
+        let (_, file_path) = resolve_home_file_path(&home, Path::new(&path))?;
+        if !is_supported_project_media(&file_path) {
+            return Err(format!("{path} is not a supported image or video"));
+        }
+        let file = attachment_file(&file_path)?;
+        app.state::<AttachmentPathState>().approve(&app, file_path)?;
+        Ok(file)
+    })
+    .await
 }
 
 #[tauri::command]
-fn resolve_local_media(
+async fn resolve_local_media(
     app: AppHandle,
-    state: State<'_, AttachmentPathState>,
     path: String,
 ) -> Result<AttachmentFile, String> {
-    let file = resolve_local_media_from(Path::new(&path))?;
-    state.approve(&app, PathBuf::from(&file.path))?;
-    Ok(file)
+    run_blocking(move || {
+        let file = resolve_local_media_from(Path::new(&path))?;
+        app.state::<AttachmentPathState>()
+            .approve(&app, PathBuf::from(&file.path))?;
+        Ok(file)
+    })
+    .await
 }
 
 #[tauri::command]
-fn open_local_file(app: AppHandle, path: String) -> Result<(), String> {
-    let file_path = resolve_local_file_path(Path::new(&path))?;
-    app.opener()
-        .open_path(file_path.to_string_lossy(), None::<&str>)
-        .map_err(|error| format!("failed to open local file: {error}"))
+async fn open_local_file(app: AppHandle, path: String) -> Result<(), String> {
+    run_blocking(move || {
+        let file_path = resolve_local_file_path(Path::new(&path))?;
+        app.opener()
+            .open_path(file_path.to_string_lossy(), None::<&str>)
+            .map_err(|error| format!("failed to open local file: {error}"))
+    })
+    .await
 }
 
 fn resolve_project_media_from(
@@ -608,13 +719,13 @@ fn is_supported_project_media(path: &Path) -> bool {
 }
 
 #[tauri::command]
-fn read_project_tasks(workspace: String) -> Result<ProjectTaskDocument, String> {
-    read_project_tasks_from(Path::new(&workspace), MAX_TASK_DOCUMENT_BYTES)
+async fn read_project_tasks(workspace: String) -> Result<ProjectTaskDocument, String> {
+    run_blocking(move || read_project_tasks_from(Path::new(&workspace), MAX_TASK_DOCUMENT_BYTES)).await
 }
 
 #[tauri::command]
-fn write_project_tasks(workspace: String, document: ProjectTaskDocument) -> Result<(), String> {
-    write_project_tasks_to(Path::new(&workspace), &document)
+async fn write_project_tasks(workspace: String, document: ProjectTaskDocument) -> Result<(), String> {
+    run_blocking(move || write_project_tasks_to(Path::new(&workspace), &document)).await
 }
 
 fn read_project_tasks_from(
@@ -906,7 +1017,12 @@ fn safe_file_name(name: &str) -> String {
 }
 
 #[tauri::command]
-fn acp_start(app: AppHandle, state: State<'_, AcpProcessState>) -> Result<u64, String> {
+async fn acp_start(app: AppHandle) -> Result<u64, String> {
+    run_blocking(move || start_process(app)).await
+}
+
+fn start_process(app: AppHandle) -> Result<u64, String> {
+    let state = app.state::<AcpProcessState>();
     let mut slot = state
         .slot
         .lock()
@@ -956,6 +1072,8 @@ fn acp_start(app: AppHandle, state: State<'_, AcpProcessState>) -> Result<u64, S
         let _ = child.wait();
         return Err("pix-acp did not expose all stdio pipes".to_owned());
     };
+    let (stdin_tx, stdin_rx) = mpsc::channel();
+    forward_stdin(stdin, stdin_rx);
 
     slot.next_generation = slot.next_generation.wrapping_add(1);
     let generation = slot.next_generation;
@@ -963,7 +1081,7 @@ fn acp_start(app: AppHandle, state: State<'_, AcpProcessState>) -> Result<u64, S
     let exited = Arc::new((Mutex::new(false), Condvar::new()));
     slot.running = Some(RunningProcess {
         generation,
-        stdin: Some(stdin),
+        stdin_tx: Some(stdin_tx),
         stop_tx,
         exited: exited.clone(),
     });
@@ -976,47 +1094,83 @@ fn acp_start(app: AppHandle, state: State<'_, AcpProcessState>) -> Result<u64, S
 }
 
 #[tauri::command]
-fn acp_send(
+async fn acp_send(
+    app: AppHandle,
     generation: u64,
     line: String,
-    state: State<'_, AcpProcessState>,
 ) -> Result<(), String> {
     if line.contains('\r') || line.contains('\n') {
         return Err("ACP payload must be one newline-free JSON object".to_owned());
     }
-    let value: Value = serde_json::from_str(&line)
-        .map_err(|error| format!("ACP payload is not valid JSON: {error}"))?;
-    if !value.is_object() {
-        return Err("ACP payload must be a JSON object".to_owned());
+    let stdin_tx = {
+        let state = app.state::<AcpProcessState>();
+        let slot = state
+            .slot
+            .lock()
+            .map_err(|_| "ACP process state is poisoned".to_owned())?;
+        let running = slot
+            .running
+            .as_ref()
+            .ok_or_else(|| "pix-acp is not running".to_owned())?;
+        if running.generation != generation {
+            return Err(format!(
+                "stale pix-acp generation {generation}; current generation is {}",
+                running.generation
+            ));
+        }
+        running
+            .stdin_tx
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| "pix-acp stdin is closed".to_owned())?
+    };
+    let (ack_tx, ack_rx) = mpsc::sync_channel(1);
+    stdin_tx
+        .send(StdinCommand::Write { line, ack: ack_tx })
+        .map_err(|_| "pix-acp stdin writer is closed".to_owned())?;
+    run_blocking(move || {
+        ack_rx
+            .recv()
+            .map_err(|_| "pix-acp stdin writer stopped before acknowledging the write".to_owned())?
+    })
+    .await
+}
+
+fn validate_json_object(line: &str) -> Result<(), String> {
+    struct ObjectVisitor;
+
+    impl<'de> Visitor<'de> for ObjectVisitor {
+        type Value = ();
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("a JSON object")
+        }
+
+        fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
+        where
+            M: MapAccess<'de>,
+        {
+            while map
+                .next_entry::<IgnoredAny, IgnoredAny>()?
+                .is_some()
+            {}
+            Ok(())
+        }
     }
 
-    let mut slot = state
-        .slot
-        .lock()
-        .map_err(|_| "ACP process state is poisoned".to_owned())?;
-    let running = slot
-        .running
-        .as_mut()
-        .ok_or_else(|| "pix-acp is not running".to_owned())?;
-    if running.generation != generation {
-        return Err(format!(
-            "stale pix-acp generation {generation}; current generation is {}",
-            running.generation
-        ));
-    }
-    let stdin = running
-        .stdin
-        .as_mut()
-        .ok_or_else(|| "pix-acp stdin is closed".to_owned())?;
-    stdin
-        .write_all(format!("{line}\n").as_bytes())
-        .and_then(|_| stdin.flush())
-        .map_err(|error| format!("failed to write to pix-acp: {error}"))
+    let mut deserializer = serde_json::Deserializer::from_str(line);
+    serde::de::Deserializer::deserialize_map(&mut deserializer, ObjectVisitor)
+        .and_then(|()| deserializer.end())
+        .map_err(|error| format!("ACP payload is not a valid JSON object: {error}"))
 }
 
 #[tauri::command]
-fn acp_stop(generation: u64, state: State<'_, AcpProcessState>) -> Result<(), String> {
-    stop_process(&state, Some(generation))
+async fn acp_stop(app: AppHandle, generation: u64) -> Result<(), String> {
+    run_blocking(move || {
+        let state = app.state::<AcpProcessState>();
+        stop_process(&state, Some(generation))
+    })
+    .await
 }
 
 fn stop_process(state: &AcpProcessState, expected_generation: Option<u64>) -> Result<(), String> {
@@ -1031,14 +1185,20 @@ fn stop_process(state: &AcpProcessState, expected_generation: Option<u64>) -> Re
             }
             // Closing stdin lets pix-acp finish its ACP connection and
             // dispose every nested pi RPC process before we use signals.
-            running.stdin.take();
-            Some((running.stop_tx.clone(), running.exited.clone()))
+            Some((
+                running.stdin_tx.take(),
+                running.stop_tx.clone(),
+                running.exited.clone(),
+            ))
         })
     };
-    let Some((stop_tx, exited)) = process else {
+    let Some((stdin_tx, stop_tx, exited)) = process else {
         return Ok(());
     };
 
+    if let Some(stdin_tx) = stdin_tx {
+        let _ = stdin_tx.send(StdinCommand::Close);
+    }
     let _ = stop_tx.send(());
     let (lock, wake) = &*exited;
     let exited = lock
@@ -1053,22 +1213,50 @@ fn stop_process(state: &AcpProcessState, expected_generation: Option<u64>) -> Re
     Ok(())
 }
 
+fn forward_stdin(mut stdin: ChildStdin, receiver: mpsc::Receiver<StdinCommand>) {
+    thread::spawn(move || {
+        for command in receiver {
+            match command {
+                StdinCommand::Write { line, ack } => {
+                    let result = validate_json_object(&line).and_then(|()| {
+                        stdin
+                            .write_all(line.as_bytes())
+                            .and_then(|_| stdin.write_all(b"\n"))
+                            .and_then(|_| stdin.flush())
+                            .map_err(|error| format!("failed to write to pix-acp: {error}"))
+                    });
+                    let failed = result.is_err();
+                    let _ = ack.send(result);
+                    if failed {
+                        break;
+                    }
+                }
+                StdinCommand::Close => break,
+            }
+        }
+    });
+}
+
 fn forward_lines<R>(reader: R, app: AppHandle, event: &'static str, generation: u64)
 where
     R: Read + Send + 'static,
 {
+    let (line_tx, line_rx) = mpsc::channel();
+    let error_app = app.clone();
     thread::spawn(move || {
         for line in BufReader::new(reader).lines() {
             match line {
                 Ok(line) => {
-                    let _ = app.emit(event, LinePayload { generation, line });
+                    if line_tx.send(line).is_err() {
+                        break;
+                    }
                 }
                 Err(error) => {
-                    let _ = app.emit(
+                    let _ = error_app.emit(
                         "acp://stderr",
-                        LinePayload {
+                        LinesPayload {
                             generation,
-                            line: format!("failed to read {event}: {error}"),
+                            lines: vec![format!("failed to read {event}: {error}")],
                         },
                     );
                     break;
@@ -1076,6 +1264,39 @@ where
             }
         }
     });
+    thread::spawn(move || batch_forwarded_lines(line_rx, app, event, generation));
+}
+
+fn batch_forwarded_lines(
+    receiver: mpsc::Receiver<String>,
+    app: AppHandle,
+    event: &'static str,
+    generation: u64,
+) {
+    while let Ok(first) = receiver.recv() {
+        let mut lines = Vec::with_capacity(ACP_EVENT_BATCH_MAX_LINES);
+        lines.push(first);
+        let deadline = Instant::now() + ACP_EVENT_BATCH_LATENCY;
+        let mut disconnected = false;
+        while lines.len() < ACP_EVENT_BATCH_MAX_LINES {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            match receiver.recv_timeout(remaining) {
+                Ok(line) => lines.push(line),
+                Err(mpsc::RecvTimeoutError::Timeout) => break,
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    disconnected = true;
+                    break;
+                }
+            }
+        }
+        let _ = app.emit(event, LinesPayload { generation, lines });
+        if disconnected {
+            break;
+        }
+    }
 }
 
 fn supervise_child(
@@ -1148,7 +1369,7 @@ pub fn run() {
     let app = tauri::Builder::default()
         .manage(AcpProcessState::default())
         .setup(|app| {
-            app.manage(AttachmentPathState::load(app.handle()));
+            app.manage(AttachmentPathState::new(app.handle()));
             Ok(())
         })
         .plugin(
@@ -1178,10 +1399,18 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("failed to build Pix Desktop");
     app.run(|handle, event| {
-        if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
+        if let tauri::RunEvent::ExitRequested { code, api, .. } = event {
             let state = handle.state::<AcpProcessState>();
-            if let Err(error) = stop_process(&state, None) {
-                eprintln!("failed to stop pix-acp during exit: {error}");
+            if !state.exiting.swap(true, Ordering::AcqRel) {
+                api.prevent_exit();
+                let handle = handle.clone();
+                thread::spawn(move || {
+                    let state = handle.state::<AcpProcessState>();
+                    if let Err(error) = stop_process(&state, None) {
+                        eprintln!("failed to stop pix-acp during exit: {error}");
+                    }
+                    handle.exit(code.unwrap_or(0));
+                });
             }
         }
     });
@@ -1190,6 +1419,14 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn validates_acp_payloads_without_materializing_the_json_object() {
+        assert!(validate_json_object(r#"{"jsonrpc":"2.0","id":1,"params":{"blob":"abc"}}"#).is_ok());
+        assert!(validate_json_object("[]").is_err());
+        assert!(validate_json_object("null").is_err());
+        assert!(validate_json_object(r#"{"jsonrpc":"2.0"} trailing"#).is_err());
+    }
 
     fn temporary_workspace(name: &str) -> PathBuf {
         let stamp = SystemTime::now()
