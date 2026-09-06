@@ -148,6 +148,44 @@ describe("ACP JSON-RPC client", () => {
     await expect(prompt).rejects.toThrow("pix-acp exited with code 1");
   });
 
+  it("sends file-backed images as Pix metadata instead of embedding base64", async () => {
+    const transport = new FakeTransport();
+    const client = await startedClient(transport);
+    const prompt = client.prompt(
+      "session-1",
+      [{
+        type: "resource_link",
+        uri: "file:///tmp/clipboard.png",
+        name: "clipboard.png",
+        mimeType: "image/png",
+        size: 1024,
+      }],
+      [{
+        uri: "file:///tmp/clipboard.png",
+        mimeType: "image/png",
+        size: 1024,
+        name: "clipboard.png",
+      }],
+    );
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+
+    const request = requestAt(transport, 1);
+    expect(request).toMatchObject({
+      method: "session/prompt",
+      params: {
+        sessionId: "session-1",
+        prompt: [{ type: "resource_link", uri: "file:///tmp/clipboard.png" }],
+        _meta: {
+          "pix.fileImages": [{ uri: "file:///tmp/clipboard.png", mimeType: "image/png", size: 1024 }],
+        },
+      },
+    });
+    expect(transport.sent[1]).not.toContain("base64");
+    transport.message({ jsonrpc: "2.0", id: request.id, result: { stopReason: "end_turn" } });
+    await expect(prompt).resolves.toEqual({ stopReason: "end_turn" });
+    await client.dispose();
+  });
+
   it("allows a prompt to run longer than the default request timeout", async () => {
     const transport = new FakeTransport();
     const client = await startedClient(transport);

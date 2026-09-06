@@ -3,6 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { test } from "node:test";
 import {
 	client,
@@ -371,7 +372,16 @@ async function connect<T>(
 	op: (cx: TestClientContext) => Promise<T>,
 	setup?: (app: ReturnType<typeof client>) => void,
 ): Promise<T> {
-	const app = client({ name: "pix-acp-test" });
+	return connectAs(adapter, "pix-acp-test", op, setup);
+}
+
+async function connectAs<T>(
+	adapter: PixAcpAgent,
+	name: string,
+	op: (cx: TestClientContext) => Promise<T>,
+	setup?: (app: ReturnType<typeof client>) => void,
+): Promise<T> {
+	const app = client({ name });
 	setup?.(app);
 	return app.connectWith(adapter.acpApp, op);
 }
@@ -924,6 +934,58 @@ test("session/prompt forwards images and maps aborted runs to cancelled", async 
 		return pending;
 	});
 	assert.equal(result.stopReason, "cancelled");
+});
+
+test("Pix Desktop file-backed prompt images are materialized server-side", async () => {
+	const directory = mkdtempSync(join(tmpdir(), "pix-acp-file-image-"));
+	const imagePath = join(directory, "clipboard.png");
+	await writeFile(imagePath, Buffer.from("hello image"));
+	const uri = pathToFileURL(imagePath).href;
+	const { adapter, clients } = createTestAdapter();
+
+	const result = await connect(adapter, async (cx) => {
+		await cx.request("initialize", {
+			protocolVersion: PROTOCOL_VERSION,
+			clientCapabilities: { elicitation: { form: {} } },
+			clientInfo: { name: "pix-desktop", version: "0.1.0" },
+		});
+		const created = await cx.request("session/new", { cwd: directory, mcpServers: [] });
+		const pending = cx.request("session/prompt", {
+			sessionId: created.sessionId,
+			prompt: [
+				{ type: "text", text: "inspect this" },
+				{ type: "resource_link", uri, name: "clipboard.png", mimeType: "image/png", size: 11 },
+			],
+			_meta: {
+				"pix.fileImages": [{ uri, mimeType: "image/png", size: 11, name: "clipboard.png" }],
+			},
+		});
+		const pi = clients[0]!;
+		await Promise.race([
+			waitFor(() => pi.promptCalls.length === 1),
+			pending.then(
+				() => Promise.reject(new Error("prompt resolved before reaching pi")),
+				(error: unknown) => Promise.reject(error),
+			),
+		]);
+		assert.equal(pi.promptCalls[0].message, "inspect this");
+		assert.deepEqual(pi.promptCalls[0].images, [{
+			type: "image",
+			data: Buffer.from("hello image").toString("base64"),
+			mimeType: "image/png",
+		}]);
+
+		pi.emit({ type: "agent_start" });
+		pi.emit({
+			type: "agent_end",
+			messages: [{ role: "assistant", content: [], stopReason: "stop" }],
+			willRetry: false,
+		} as unknown as JsonAgentSessionEvent);
+		pi.emit({ type: "agent_settled" });
+		return pending;
+	});
+
+	assert.equal((result as { stopReason: string }).stopReason, "end_turn");
 });
 
 test("session/cancel aborts pi and the pending prompt resolves cancelled", async () => {

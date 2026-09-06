@@ -13,7 +13,7 @@
     SessionNotification,
     SessionUpdate,
   } from "@agentclientprotocol/sdk";
-  import { AcpClient } from "./lib/acp-client";
+  import { AcpClient, type PromptFileImage } from "./lib/acp-client";
   import { TauriAcpTransport } from "./lib/tauri-transport";
   import {
     appendLocalAssistantMessage,
@@ -1567,8 +1567,7 @@
         if (file.size > MAX_EMBEDDED_ATTACHMENT_BYTES) {
           throw new Error(`${file.name} is too large to paste (maximum 25 MB).`);
         }
-        const data = await fileBase64(file);
-        const cached = await invoke<AttachmentFile>("cache_attachment", { name: file.name, data });
+        const cached = await cachePastedAttachment(file);
         if (!attachmentDraftIsCurrent(key, generation)) return;
         const inferredMimeType = mimeTypeForName(file.name);
         const mimeType = file.type || inferredMimeType;
@@ -1578,7 +1577,6 @@
           ...base,
           kind,
           mimeType,
-          ...(kind === "image" ? { dataUrl: `data:${mimeType};base64,${data}` } : {}),
         });
       }
       promptAttachments = [...promptAttachments, ...attachments];
@@ -1751,13 +1749,46 @@
     return attachmentFromFile(file, `local-media:${path}`);
   }
 
-  async function buildPromptBlocks(text: string, attachments: readonly Attachment[]): Promise<ContentBlock[]> {
+  async function buildPromptPayload(
+    text: string,
+    attachments: readonly Attachment[],
+  ): Promise<{ blocks: ContentBlock[]; fileImages: PromptFileImage[] }> {
     const blocks: ContentBlock[] = [];
+    const fileImages: PromptFileImage[] = [];
     let embeddedBytes = 0;
     if (text) blocks.push({ type: "text", text });
     for (const attachment of attachments) {
       if (attachment.kind === "image" && imagePromptSupported) {
-        const data = await imageDataForPrompt(attachment);
+        if (attachment.path) {
+          if ((attachment.size ?? 0) > MAX_EMBEDDED_ATTACHMENT_BYTES) {
+            throw new Error(`${attachment.name} is too large to send as an image (maximum 25 MB).`);
+          }
+          embeddedBytes += attachment.size ?? 0;
+          if (embeddedBytes > MAX_EMBEDDED_PROMPT_BYTES) {
+            throw new Error("Attached images exceed the 50 MB combined prompt limit.");
+          }
+          const uri = fileUriFromPath(attachment.path);
+          blocks.push({
+            type: "resource_link",
+            uri,
+            name: attachment.name,
+            mimeType: attachment.mimeType,
+            ...(attachment.size ? { size: attachment.size } : {}),
+          });
+          fileImages.push({
+            uri,
+            mimeType: attachment.mimeType,
+            ...(attachment.size === undefined ? {} : { size: attachment.size }),
+            name: attachment.name,
+          });
+          continue;
+        }
+
+        const dataUrl = attachment.dataUrl;
+        if (!dataUrl) throw new Error(`Cannot read ${attachment.name}.`);
+        const separator = dataUrl.indexOf(",");
+        if (separator < 0) throw new Error(`Cannot decode ${attachment.name}.`);
+        const data = dataUrl.slice(separator + 1);
         embeddedBytes += Math.floor(data.length * 3 / 4);
         if (embeddedBytes > MAX_EMBEDDED_PROMPT_BYTES) {
           throw new Error("Attached images exceed the 50 MB combined prompt limit.");
@@ -1766,7 +1797,6 @@
           type: "image",
           data,
           mimeType: attachment.mimeType,
-          ...(attachment.path ? { uri: fileUriFromPath(attachment.path) } : {}),
         });
         continue;
       }
@@ -1781,13 +1811,7 @@
         ...(attachment.size ? { size: attachment.size } : {}),
       });
     }
-    return blocks;
-  }
-
-  async function imageDataForPrompt(attachment: Attachment): Promise<string> {
-    if (attachment.dataUrl) return attachment.dataUrl.slice(attachment.dataUrl.indexOf(",") + 1);
-    if (attachment.path) return invoke<string>("read_attachment_base64", { path: attachment.path });
-    throw new Error(`Cannot read ${attachment.name}.`);
+    return { blocks, fileImages };
   }
 
   async function fileBase64(file: File): Promise<string> {
@@ -1805,6 +1829,20 @@
       };
       reader.readAsDataURL(file);
     });
+  }
+
+  async function cachePastedAttachment(file: File): Promise<AttachmentFile> {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    return invoke<AttachmentFile>("cache_attachment", bytes, {
+      headers: { "x-pix-attachment-name": utf8Base64(file.name) },
+    });
+  }
+
+  function utf8Base64(value: string): string {
+    const bytes = new TextEncoder().encode(value);
+    let binary = "";
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    return btoa(binary);
   }
 
   function decodedQuestionImageBytes(value: string): number | null {
@@ -1856,7 +1894,7 @@
     setSessionPromptRunning(sessionId, true);
     errorMessage = null;
     try {
-      const blocks = await buildPromptBlocks(text, attachments);
+      const { blocks, fileImages } = await buildPromptPayload(text, attachments);
       if (
         sessionId !== activeSessionId
         || draftKey !== attachmentDraftKey
@@ -1868,7 +1906,7 @@
       transcript = appendLocalUserMessage(transcript, text, `local:${++localMessageId}`, attachments);
       transcriptBySessionId.set(sessionId, transcript);
       await scrollToLatest();
-      await client.prompt(sessionId, blocks);
+      await client.prompt(sessionId, blocks, fileImages);
       void refreshSessions();
     } catch (error) {
       reportError(error);

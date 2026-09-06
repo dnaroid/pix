@@ -63,6 +63,13 @@ export interface ForkSessionResult {
   readonly selectedText?: string;
 }
 
+export interface PromptFileImage {
+  readonly uri: string;
+  readonly mimeType: string;
+  readonly size?: number;
+  readonly name?: string;
+}
+
 export interface LazySessionHistory {
   readonly updates: readonly SessionUpdate[];
   readonly deferredToolCallIds: readonly string[];
@@ -226,10 +233,18 @@ export class AcpClient {
     return this.request("session/close", { sessionId });
   }
 
-  prompt(sessionId: string, prompt: ContentBlock[]): Promise<PromptResponse> {
+  prompt(
+    sessionId: string,
+    prompt: ContentBlock[],
+    fileImages: readonly PromptFileImage[] = [],
+  ): Promise<PromptResponse> {
     return this.request(
       "session/prompt",
-      { sessionId, prompt },
+      {
+        sessionId,
+        prompt,
+        ...(fileImages.length > 0 ? { _meta: { "pix.fileImages": fileImages } } : {}),
+      },
       null,
     );
   }

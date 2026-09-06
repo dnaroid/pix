@@ -368,19 +368,27 @@ async fn read_attachment_base64(app: AppHandle, path: String) -> Result<String, 
 #[tauri::command]
 async fn cache_attachment(
     app: AppHandle,
-    name: String,
-    data: String,
+    request: tauri::ipc::Request<'_>,
 ) -> Result<AttachmentFile, String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("pasted attachment body must be binary".to_owned());
+    };
+    if bytes.len() as u64 > MAX_ATTACHMENT_BYTES {
+        return Err("pasted attachment is too large (maximum 25 MB)".to_owned());
+    }
+    let encoded_name = request
+        .headers()
+        .get("x-pix-attachment-name")
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| "missing pasted attachment name".to_owned())?;
+    let name = String::from_utf8(
+        BASE64
+            .decode(encoded_name)
+            .map_err(|error| format!("invalid pasted attachment name: {error}"))?,
+    )
+    .map_err(|_| "pasted attachment name is not valid UTF-8".to_owned())?;
+    let bytes = bytes.clone();
     run_blocking(move || {
-        if data.len() as u64 > (MAX_ATTACHMENT_BYTES * 4 / 3) + 8 {
-            return Err("pasted attachment is too large (maximum 25 MB)".to_owned());
-        }
-        let bytes = BASE64
-            .decode(data)
-            .map_err(|error| format!("invalid pasted attachment data: {error}"))?;
-        if bytes.len() as u64 > MAX_ATTACHMENT_BYTES {
-            return Err("pasted attachment is too large (maximum 25 MB)".to_owned());
-        }
         let state = app.state::<AttachmentPathState>();
         let _cache_guard = state
             .cache_lock

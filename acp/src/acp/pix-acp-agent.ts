@@ -18,7 +18,9 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { readFile, stat } from "node:fs/promises";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { setText as copyTextToClipboard } from "@mariozechner/clipboard";
 import {
 	PROTOCOL_VERSION,
@@ -71,6 +73,11 @@ import {
 	type AutocompleteSettingsRequest,
 	type AutocompleteSettingsResponse,
 } from "./autocomplete.js";
+
+const PIX_FILE_IMAGES_META_KEY = "pix.fileImages";
+const MAX_PROMPT_FILE_IMAGE_COUNT = 10;
+const MAX_PROMPT_FILE_IMAGE_BYTES = 25 * 1024 * 1024;
+const MAX_PROMPT_FILE_IMAGES_TOTAL_BYTES = 50 * 1024 * 1024;
 import {
 	isExtensionUiRequest,
 	type PiClient,
@@ -168,6 +175,13 @@ interface DesktopDeferredToolResult {
 	readonly persistedRef?: PersistedToolResultRef;
 }
 
+interface DesktopPromptFileImage {
+	readonly uri: string;
+	readonly mimeType: string;
+	readonly size?: number;
+	readonly name?: string;
+}
+
 export interface PixAcpAgentOptions {
 	/** Factory for per-session pi RPC clients (injected for tests). */
 	readonly createPiClient: (options: PiRpcClientOptions) => PiClient;
@@ -213,6 +227,7 @@ export class PixAcpAgent {
 	private disposed = false;
 	/** Advertised by the client during `initialize`; gates dialog bridging. */
 	private clientCapabilities: ClientCapabilities | null | undefined;
+	private clientName: string | undefined;
 
 	constructor(options: PixAcpAgentOptions) {
 		this.options = options;
@@ -230,6 +245,9 @@ export class PixAcpAgent {
 		this.app = agent({ name: "pix-acp" })
 			.onRequest("initialize", (ctx) => {
 				this.clientCapabilities = ctx.params.clientCapabilities;
+				this.clientName = typeof ctx.params.clientInfo?.name === "string"
+					? ctx.params.clientInfo.name
+					: undefined;
 				return {
 					protocolVersion: PROTOCOL_VERSION,
 					agentCapabilities: {
@@ -947,7 +965,11 @@ export class PixAcpAgent {
 			throw new RequestError(ERROR_SERVER, "a prompt is already in progress for this session");
 		}
 
-		const input = collectPromptInput(params.prompt);
+		const fileImages = desktopPromptFileImages(params);
+		if (fileImages.length > 0 && this.clientName !== "pix-desktop") {
+			throw new RequestError(ERROR_SERVER, `${PIX_FILE_IMAGES_META_KEY} is reserved for Pix Desktop`);
+		}
+		const input = await collectPromptInput(params.prompt, fileImages);
 		const isSlashPrompt = input.images.length === 0 && /^\/\S/.test(input.text);
 
 		// pi TUI built-ins (/compact, /name, /model, ...) have no RPC-side
@@ -1373,9 +1395,115 @@ function formatSessionStats(state: PiSessionState, stats: PiSessionStats): strin
 	return lines.join("\n");
 }
 
-function collectPromptInput(blocks: readonly ContentBlock[]): { text: string; images: PiImageContent[] } {
+function desktopPromptFileImages(params: PromptRequest): DesktopPromptFileImage[] {
+	const meta = (params as { _meta?: Record<string, unknown> | null })._meta;
+	const value = meta?.[PIX_FILE_IMAGES_META_KEY];
+	if (value === undefined) return [];
+	if (!Array.isArray(value) || value.length > MAX_PROMPT_FILE_IMAGE_COUNT) {
+		throw new RequestError(ERROR_SERVER, `${PIX_FILE_IMAGES_META_KEY} must contain at most ${MAX_PROMPT_FILE_IMAGE_COUNT} images`);
+	}
+
+	const images: DesktopPromptFileImage[] = [];
+	const seen = new Set<string>();
+	for (const [index, candidate] of value.entries()) {
+		if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+			throw new RequestError(ERROR_SERVER, `${PIX_FILE_IMAGES_META_KEY}[${index}] is invalid`);
+		}
+		const record = candidate as Record<string, unknown>;
+		const uri = typeof record.uri === "string" ? record.uri : "";
+		const mimeType = typeof record.mimeType === "string" ? record.mimeType.toLowerCase() : "";
+		if (!uri.startsWith("file://") || !mimeType.startsWith("image/")) {
+			throw new RequestError(ERROR_SERVER, `${PIX_FILE_IMAGES_META_KEY}[${index}] must be a local image resource`);
+		}
+		if (seen.has(uri)) {
+			throw new RequestError(ERROR_SERVER, `${PIX_FILE_IMAGES_META_KEY} contains a duplicate URI`);
+		}
+		seen.add(uri);
+		const size = record.size;
+		if (size !== undefined && (typeof size !== "number" || !Number.isFinite(size) || size < 0)) {
+			throw new RequestError(ERROR_SERVER, `${PIX_FILE_IMAGES_META_KEY}[${index}].size is invalid`);
+		}
+		const name = record.name;
+		if (name !== undefined && typeof name !== "string") {
+			throw new RequestError(ERROR_SERVER, `${PIX_FILE_IMAGES_META_KEY}[${index}].name is invalid`);
+		}
+		images.push({
+			uri,
+			mimeType,
+			...(size === undefined ? {} : { size }),
+			...(name === undefined ? {} : { name }),
+		});
+	}
+	return images;
+}
+
+async function materializePromptFileImages(
+	blocks: readonly ContentBlock[],
+	descriptors: readonly DesktopPromptFileImage[],
+): Promise<Map<string, PiImageContent>> {
+	if (descriptors.length === 0) return new Map();
+	const resources = new Map<string, Extract<ContentBlock, { type: "resource_link" }>>();
+	for (const block of blocks) {
+		if (block.type === "resource_link") resources.set(block.uri, block);
+	}
+
+	const images = new Map<string, PiImageContent>();
+	let totalBytes = 0;
+	for (const descriptor of descriptors) {
+		const resource = resources.get(descriptor.uri);
+		if (!resource) {
+			throw new RequestError(ERROR_SERVER, `${PIX_FILE_IMAGES_META_KEY} references a resource that is not in the prompt`);
+		}
+		if (resource.mimeType && resource.mimeType.toLowerCase() !== descriptor.mimeType) {
+			throw new RequestError(ERROR_SERVER, `${PIX_FILE_IMAGES_META_KEY} mime type does not match its prompt resource`);
+		}
+
+		let path: string;
+		try {
+			path = fileURLToPath(descriptor.uri);
+		} catch {
+			throw new RequestError(ERROR_SERVER, `${PIX_FILE_IMAGES_META_KEY} contains an invalid file URI`);
+		}
+		let info: Awaited<ReturnType<typeof stat>>;
+		try {
+			info = await stat(path);
+		} catch (error) {
+			throw new RequestError(ERROR_SERVER, `failed to inspect attached image: ${stringifyUnknown(error)}`);
+		}
+		if (!info.isFile()) throw new RequestError(ERROR_SERVER, "attached image is not a regular file");
+		if (info.size > MAX_PROMPT_FILE_IMAGE_BYTES) {
+			throw new RequestError(ERROR_SERVER, "attached image is larger than 25 MB");
+		}
+
+		let bytes: Buffer;
+		try {
+			bytes = await readFile(path);
+		} catch (error) {
+			throw new RequestError(ERROR_SERVER, `failed to read attached image: ${stringifyUnknown(error)}`);
+		}
+		if (bytes.length > MAX_PROMPT_FILE_IMAGE_BYTES) {
+			throw new RequestError(ERROR_SERVER, "attached image grew beyond the 25 MB limit");
+		}
+		totalBytes += bytes.length;
+		if (totalBytes > MAX_PROMPT_FILE_IMAGES_TOTAL_BYTES) {
+			throw new RequestError(ERROR_SERVER, "attached images exceed the 50 MB combined prompt limit");
+		}
+		images.set(descriptor.uri, {
+			type: "image",
+			data: bytes.toString("base64"),
+			mimeType: descriptor.mimeType,
+		});
+	}
+	return images;
+}
+
+async function collectPromptInput(
+	blocks: readonly ContentBlock[],
+	descriptors: readonly DesktopPromptFileImage[] = [],
+): Promise<{ text: string; images: PiImageContent[] }> {
 	const textParts: string[] = [];
 	const images: PiImageContent[] = [];
+	const fileImages = await materializePromptFileImages(blocks, descriptors);
 	for (const block of blocks) {
 		switch (block.type) {
 			case "text":
@@ -1384,11 +1512,17 @@ function collectPromptInput(blocks: readonly ContentBlock[]): { text: string; im
 			case "image":
 				images.push({ type: "image", data: block.data, mimeType: block.mimeType });
 				break;
-			case "resource_link":
+			case "resource_link": {
+				const image = fileImages.get(block.uri);
+				if (image) {
+					images.push(image);
+					break;
+				}
 				textParts.push(block.uri.startsWith("file://")
 					? `[Pix attachment: ${block.uri}]`
 					: `[resource: ${block.name ?? block.uri}]`);
 				break;
+			}
 			case "resource": {
 				const contents = block.resource;
 				if ("text" in contents && typeof contents.text === "string") {
