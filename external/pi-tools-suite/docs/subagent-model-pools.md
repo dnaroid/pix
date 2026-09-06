@@ -84,10 +84,9 @@ without a pool filter. The shipped names remain compatible with saved choices:
 `cheap` is the GLM pool, `gpt` the GPT pool, and `deep` the mixed pool. The last
 name no longer means that ordinary workers should escalate to flagship models.
 
-Old role names remain aliases only when no explicit profile has that name:
-`quick`, `scan`, `review`, `deep` map to `research`; `docs`, `frontend` map to
-`implement`; `tests` maps to `verify`. Existing independently configured
-profiles are not collapsed or overwritten.
+Old role names are not implicit aliases. `quick`, `scan`, `review`, `deep`,
+`docs`, `frontend`, and `tests` work only when explicitly defined as ordinary
+custom/project types. This keeps the effective catalog and accepted names exact.
 
 Legacy `model` plus `fallbackModels` and `modelByParent` still load. New profile
 `models` replaces inherited legacy selection fields; an explicit legacy model

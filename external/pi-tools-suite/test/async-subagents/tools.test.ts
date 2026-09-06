@@ -539,7 +539,7 @@ Check the project conventions before approving changes.
 		expect(JSON.parse(fs.readFileSync(process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE!, "utf-8")).activePreset).toBe("fast");
 		let result = await pi.tools.get("subagents").execute("call", {
 			action: "spawn",
-			tasks: [{ id: "agent-1", task: "Run with session preset", subagentType: "quick" }],
+			tasks: [{ id: "agent-1", task: "Run with session preset", subagentType: "research" }],
 			slug: "session-preset-spawn",
 			watchSeconds: 0,
 		}, undefined, undefined, { cwd, sessionManager: { getSessionFile: () => undefined } });
@@ -552,7 +552,7 @@ Check the project conventions before approving changes.
 		expect(notifications[1]).toContain("Runtime session sub-agent preset override cleared");
 		result = await pi.tools.get("subagents").execute("call", {
 			action: "spawn",
-			tasks: [{ id: "agent-1", task: "Run with saved preset", subagentType: "quick" }],
+			tasks: [{ id: "agent-1", task: "Run with saved preset", subagentType: "research" }],
 			slug: "saved-preset-spawn",
 			watchSeconds: 0,
 		}, undefined, undefined, { cwd, sessionManager: { getSessionFile: () => undefined } });
@@ -613,7 +613,7 @@ setTimeout(() => {}, 1000);
 
 		const result = await pi.tools.get("subagents").execute("call", {
 			action: "spawn",
-			tasks: [{ id: "agent-1", task: "Run through entrypoint", subagentType: "quick" }],
+			tasks: [{ id: "agent-1", task: "Run through entrypoint", subagentType: "research" }],
 			slug: "entrypoint-spawn",
 			watchSeconds: 1,
 		}, undefined, undefined, { cwd });
@@ -952,7 +952,7 @@ describe.serial("spawn tool", () => {
 					action: "spawn",
 					watchSeconds: 0,
 					tasks: [
-						{ id: "explicit", task: "Known role", subagentType: "review" },
+						{ id: "explicit", task: "Known role", subagentType: "research" },
 						{ id: "auto", task: "Independent audit", ...(failure === "unknown" ? { subagentType: "rewiev" } : {}) },
 						...(failure === "partial" ? [{ id: "missing", task: "Root cause" }] : []),
 					],
@@ -993,7 +993,7 @@ describe.serial("spawn tool", () => {
 		writeFile(blockedRunDir, "not a directory");
 		let blockedRunError: unknown;
 		try {
-			await tool.execute("call", { tasks: [{ id: "agent-1", task: "will fail", subagentType: "quick" }], runDir: "blocked-run" }, undefined, undefined, { cwd });
+			await tool.execute("call", { tasks: [{ id: "agent-1", task: "will fail", subagentType: "research" }], runDir: "blocked-run" }, undefined, undefined, { cwd });
 		} catch (error) {
 			blockedRunError = error;
 		}
@@ -1013,7 +1013,7 @@ setTimeout(() => {}, 1000);
 		process.argv[1] = piScript;
 		const updates: any[] = [];
 		const result = await tool.execute("call", {
-			tasks: [{ id: "agent-1", task: "Run fake agent", subagentType: "quick", scope: "test scope", tools: ["read"] }],
+			tasks: [{ id: "agent-1", task: "Run fake agent", subagentType: "research", scope: "test scope", tools: ["read"] }],
 			slug: "tool-spawn",
 			thinking: "low",
 			extraArgs: ["--some-flag"],
@@ -1025,7 +1025,7 @@ setTimeout(() => {}, 1000);
 		expect(result.content[0].text).toContain("Started 1 agent(s) so far; maxConcurrent=5 (project-wide).");
 		expect(result.content[0].text).toContain("All scheduled agents are no longer running or queued.");
 		expect(result.details.mode).toBe("spawn");
-		expect(result.details.tasks).toEqual([{ id: "agent-1", task: "Run fake agent", scope: "test scope", model: "zai/glm-5-turbo" }]);
+		expect(result.details.tasks).toEqual([{ id: "agent-1", task: "Run fake agent", scope: "test scope", model: "zai/glm-5-turbo", icon: "search" }]);
 		expect(updates.length).toBeGreaterThan(0);
 		const runDir = result.details.runDir;
 		const registry = JSON.parse(fs.readFileSync(path.join(cwd, ".pi", "subagents", "registry.json"), "utf-8"));
@@ -1044,6 +1044,51 @@ setTimeout(() => {}, 1000);
 		expect(rendered).toContain("agent-1:");
 		expect(rendered).toContain("Run fake agent");
 		expect(tool.renderResult({ content: [{ type: "text", text: "fallback" }] }, {}, {}).text).toBe("fallback");
+	});
+
+	test.serial("propagates type icon into task previews only when configured", async () => {
+		const { registerSpawnTool } = await import("../../src/async-subagents/tools/spawn.js");
+		const pi = new FakePi();
+		const liveAgents = new Map<string, Map<string, any>>();
+		registerSpawnTool(pi as any, liveAgents, ({ runDir, agentId }: any) => {
+			const liveRun = liveAgents.get(runDir);
+			liveRun?.delete(agentId);
+			if (liveRun?.size === 0) liveAgents.delete(runDir);
+		});
+		const tool = pi.tools.get("async_subagents_spawn");
+		const cwd = tempDir();
+		process.env.ASYNC_SUBAGENTS_CONFIG = path.join(cwd, "async-subagents-test-config.json");
+		writeFile(process.env.ASYNC_SUBAGENTS_CONFIG, JSON.stringify({
+			types: {
+				"wrench-agent": { model: "zai/glm-5-turbo", icon: "wrench" },
+				"plain-agent": { model: "zai/glm-5-turbo" },
+			},
+		}));
+
+		const piScript = path.join(tempDir(), "pi.js");
+		writeFile(piScript, `
+process.stdin.on("data", () => {
+  console.log(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "ok" }] }] }));
+  console.log(JSON.stringify({ type: "agent_settled" }));
+});
+setTimeout(() => {}, 1000);
+`);
+		process.argv[1] = piScript;
+
+		const result = await tool.execute("call", {
+			tasks: [
+				{ id: "w-1", task: "Tighten bolts", subagentType: "wrench-agent" },
+				{ id: "p-1", task: "No icon configured", subagentType: "plain-agent" },
+			],
+			slug: "icon-previews",
+			watchSeconds: 1,
+		}, undefined, undefined, { cwd });
+
+		const previewsById = new Map((result.details.tasks as any[]).map((preview) => [preview.id, preview]));
+		expect(previewsById.get("w-1")).toMatchObject({ id: "w-1", icon: "wrench" });
+		expect(previewsById.get("p-1")?.icon).toBeUndefined();
+		expect(previewsById.get("p-1")).not.toHaveProperty("icon");
+		await waitUntil(() => liveAgents.size === 0);
 	});
 
 	test.serial("writes structured result.json with configured maxResultBytes from spawn", async () => {
@@ -1071,7 +1116,7 @@ setTimeout(() => {}, 1000);
 		process.argv[1] = piScript;
 
 		const result = await tool.execute("call", {
-			tasks: [{ id: "agent-1", task: "Return long result", subagentType: "quick" }],
+			tasks: [{ id: "agent-1", task: "Return long result", subagentType: "research" }],
 			slug: "structured-max-bytes",
 			watchSeconds: 1,
 		}, undefined, undefined, { cwd });
@@ -1167,8 +1212,8 @@ setTimeout(() => {}, 2000);
 		const startedAt = Date.now();
 		const result = await tool.execute("call", {
 			tasks: [
-				{ id: "agent-1", task: "First queued task", subagentType: "quick" },
-				{ id: "agent-2", task: "Second queued task", subagentType: "quick" },
+				{ id: "agent-1", task: "First queued task", subagentType: "research" },
+				{ id: "agent-2", task: "Second queued task", subagentType: "research" },
 			],
 			slug: "queued-spawn",
 			watchSeconds: 0,
@@ -1217,8 +1262,8 @@ setInterval(() => {}, 1000);
 
 		const result = await spawnTool.execute("call", {
 			tasks: [
-				{ id: "agent-1", task: "Hold the slot", subagentType: "quick" },
-				{ id: "agent-2", task: "Queued task", subagentType: "quick" },
+				{ id: "agent-1", task: "Hold the slot", subagentType: "research" },
+				{ id: "agent-2", task: "Queued task", subagentType: "research" },
 			],
 			slug: "queued-stop",
 			watchSeconds: 0,
@@ -1262,7 +1307,7 @@ setTimeout(() => {}, 1000);
 		process.argv[1] = piScript;
 
 		const result = await tool.execute("call", {
-			tasks: [{ id: "agent-1", task: "Run with active preset", subagentType: "quick" }],
+			tasks: [{ id: "agent-1", task: "Run with active preset", subagentType: "research" }],
 			slug: "preset-spawn",
 			watchSeconds: 1,
 		}, undefined, undefined, { cwd });
@@ -1346,7 +1391,7 @@ setTimeout(() => {}, 1000);
 		process.env.AGENTS_PRESET = "missing";
 
 		const result = await tool.execute("call", {
-			tasks: [{ id: "agent-1", task: "Run with active preset", subagentType: "quick" }],
+			tasks: [{ id: "agent-1", task: "Run with active preset", subagentType: "research" }],
 			slug: "missing-preset-spawn",
 			watchSeconds: 0,
 		}, undefined, undefined, { cwd });
@@ -1386,7 +1431,7 @@ setTimeout(() => {}, 1000);
 		process.argv[1] = piScript;
 
 		const result = await tool.execute("call", {
-			tasks: [{ id: "agent-1", task: "Run fake retrying agent", subagentType: "quick" }],
+			tasks: [{ id: "agent-1", task: "Run fake retrying agent", subagentType: "research" }],
 			slug: "tool-spawn-retry",
 			watchSeconds: 1,
 		}, undefined, undefined, { cwd });
@@ -1414,7 +1459,7 @@ setTimeout(() => {}, 1000);
 		writeFile(process.env.ASYNC_SUBAGENTS_CONFIG, JSON.stringify({
 			types: {
 				scan: { model: "fast/scan", thinking: "off", tools: ["read", "grep"] },
-				review: { model: "smart/review", thinking: "high", extraArgs: ["--temperature", "0.1"], promptAppend: "Review-only instruction for {task}" },
+				review: { model: "smart/review", thinking: "high", tools: ["read", "grep"], extraArgs: ["--temperature", "0.1"], promptAppend: "Review-only instruction for {task}" },
 			},
 		}));
 		routerResponseText = JSON.stringify({

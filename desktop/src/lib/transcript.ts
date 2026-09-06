@@ -34,6 +34,9 @@ export interface ToolItem {
   readonly diffs: readonly ToolDiff[];
   readonly attachments: readonly Attachment[];
   readonly path?: string;
+  readonly deferredResult?: boolean;
+  readonly resultLoading?: boolean;
+  readonly resultError?: string;
 }
 
 export type TranscriptItem = MessageItem | ToolItem;
@@ -152,6 +155,162 @@ export function applySessionUpdate(state: TranscriptState, update: SessionUpdate
   }
 }
 
+export function applySessionUpdates(state: TranscriptState, updates: readonly SessionUpdate[]): TranscriptState {
+  if (updates.length === 0) return state;
+  if (state.items.length === 0) return transcriptFromSessionUpdates(updates);
+
+  const items: TranscriptItem[] = [...state.items];
+  const messageIndexes = new Map<string, number>();
+  const toolIndexes = new Map<string, number>();
+  for (const [index, item] of items.entries()) {
+    if (item.type === "message" && item.messageId) {
+      messageIndexes.set(`${item.role}\0${item.messageId}`, index);
+    } else if (item.type === "tool") {
+      toolIndexes.set(item.toolCallId, index);
+    }
+  }
+
+  for (const update of updates) {
+    switch (update.sessionUpdate) {
+      case "user_message_chunk":
+        appendHistoryContentChunk(items, messageIndexes, "user", update.messageId ?? undefined, update.content);
+        break;
+      case "agent_message_chunk":
+        appendHistoryContentChunk(items, messageIndexes, "assistant", update.messageId ?? undefined, update.content);
+        break;
+      case "agent_thought_chunk":
+        appendHistoryContentChunk(items, messageIndexes, "thought", update.messageId ?? undefined, update.content);
+        break;
+      case "tool_call": {
+        const initialContent = toolContent(update.content, `tool:${update.toolCallId}`);
+        upsertHistoryTool(items, toolIndexes, update.toolCallId, {
+          ...(update.name != null ? { name: update.name } : {}),
+          title: update.title,
+          kind: update.kind ?? "other",
+          status: update.status ?? "pending",
+          ...(update.rawInput !== undefined ? { rawInput: update.rawInput } : {}),
+          ...(update.rawOutput !== undefined ? { rawOutput: update.rawOutput } : {}),
+          content: initialContent.text,
+          diffs: initialContent.diffs,
+          attachments: initialContent.attachments,
+          path: update.locations?.[0]?.path,
+        });
+        break;
+      }
+      case "tool_call_update": {
+        const nextContent = update.content != null ? toolContent(update.content, `tool:${update.toolCallId}`) : undefined;
+        upsertHistoryTool(items, toolIndexes, update.toolCallId, {
+          ...(update.name != null ? { name: update.name } : {}),
+          ...(update.title != null ? { title: update.title } : {}),
+          ...(update.kind != null ? { kind: update.kind } : {}),
+          ...(update.status != null ? { status: update.status } : {}),
+          ...(update.rawInput !== undefined ? { rawInput: update.rawInput } : {}),
+          ...(update.rawOutput !== undefined ? { rawOutput: update.rawOutput } : {}),
+          ...(nextContent ? { content: nextContent.text, diffs: nextContent.diffs, attachments: nextContent.attachments } : {}),
+          ...(update.locations != null ? { path: update.locations[0]?.path } : {}),
+        });
+        break;
+      }
+      default:
+        break;
+    }
+  }
+  return { items };
+}
+
+/** Build persisted history in one pass instead of replaying immutable live updates quadratically. */
+export function transcriptFromSessionUpdates(updates: readonly SessionUpdate[]): TranscriptState {
+  const items: TranscriptItem[] = [];
+  const messageIndexes = new Map<string, number>();
+  const toolIndexes = new Map<string, number>();
+
+  for (const update of updates) {
+    switch (update.sessionUpdate) {
+      case "user_message_chunk":
+        appendHistoryContentChunk(items, messageIndexes, "user", update.messageId ?? undefined, update.content);
+        break;
+      case "agent_message_chunk":
+        appendHistoryContentChunk(items, messageIndexes, "assistant", update.messageId ?? undefined, update.content);
+        break;
+      case "agent_thought_chunk":
+        appendHistoryContentChunk(items, messageIndexes, "thought", update.messageId ?? undefined, update.content);
+        break;
+      case "tool_call": {
+        const initialContent = toolContent(update.content, `tool:${update.toolCallId}`);
+        upsertHistoryTool(items, toolIndexes, update.toolCallId, {
+          ...(update.name != null ? { name: update.name } : {}),
+          title: update.title,
+          kind: update.kind ?? "other",
+          status: update.status ?? "pending",
+          ...(update.rawInput !== undefined ? { rawInput: update.rawInput } : {}),
+          ...(update.rawOutput !== undefined ? { rawOutput: update.rawOutput } : {}),
+          content: initialContent.text,
+          diffs: initialContent.diffs,
+          attachments: initialContent.attachments,
+          path: update.locations?.[0]?.path,
+        });
+        break;
+      }
+      case "tool_call_update": {
+        const nextContent = update.content != null ? toolContent(update.content, `tool:${update.toolCallId}`) : undefined;
+        upsertHistoryTool(items, toolIndexes, update.toolCallId, {
+          ...(update.name != null ? { name: update.name } : {}),
+          ...(update.title != null ? { title: update.title } : {}),
+          ...(update.kind != null ? { kind: update.kind } : {}),
+          ...(update.status != null ? { status: update.status } : {}),
+          ...(update.rawInput !== undefined ? { rawInput: update.rawInput } : {}),
+          ...(update.rawOutput !== undefined ? { rawOutput: update.rawOutput } : {}),
+          ...(nextContent ? { content: nextContent.text, diffs: nextContent.diffs, attachments: nextContent.attachments } : {}),
+          ...(update.locations != null ? { path: update.locations[0]?.path } : {}),
+        });
+        break;
+      }
+      default:
+        break;
+    }
+  }
+  return { items };
+}
+
+export function markDeferredToolResults(
+  state: TranscriptState,
+  toolCallIds: readonly string[],
+): TranscriptState {
+  if (toolCallIds.length === 0) return state;
+  const deferred = new Set(toolCallIds);
+  let changed = false;
+  const items = state.items.map((item) => {
+    if (item.type !== "tool" || !deferred.has(item.toolCallId) || item.deferredResult) return item;
+    changed = true;
+    return { ...item, deferredResult: true };
+  });
+  return changed ? { items } : state;
+}
+
+export function setToolResultLoading(
+  state: TranscriptState,
+  toolCallId: string,
+  loading: boolean,
+  error?: string,
+): TranscriptState {
+  return patchToolUiState(state, toolCallId, {
+    resultLoading: loading,
+    resultError: error,
+  });
+}
+
+export function applyDeferredToolResult(
+  state: TranscriptState,
+  update: SessionUpdate,
+): TranscriptState {
+  if (update.sessionUpdate !== "tool_call_update") return state;
+  return patchToolUiState(applySessionUpdate(state, update), update.toolCallId, {
+    deferredResult: false,
+    resultLoading: false,
+    resultError: undefined,
+  });
+}
+
 function appendContentChunk(
   state: TranscriptState,
   role: MessageRole,
@@ -190,10 +349,50 @@ function appendContentChunk(
   return { items };
 }
 
+function appendHistoryContentChunk(
+  items: TranscriptItem[],
+  messageIndexes: Map<string, number>,
+  role: MessageRole,
+  messageId: string | undefined,
+  content: ContentBlock,
+): void {
+  const key = messageId ? `${role}\0${messageId}` : undefined;
+  const mappedIndex = key ? messageIndexes.get(key) : undefined;
+  const existingIndex = mappedIndex ?? items.length - 1;
+  const existing = items[existingIndex];
+  const canAppend = existing?.type === "message"
+    && existing.role === role
+    && (messageId ? existing.messageId === messageId : existing.messageId === undefined);
+  const id = messageId ? `${role}:${messageId}` : `${role}:chunk:${items.length}`;
+  const attachmentOffset = canAppend ? existing.attachments.length : 0;
+  const chunk = messageContent(content, role, id, attachmentOffset);
+  if (!chunk.text && chunk.attachments.length === 0) return;
+
+  if (canAppend) {
+    items[existingIndex] = {
+      ...existing,
+      text: existing.text + chunk.text,
+      attachments: [...existing.attachments, ...chunk.attachments],
+    };
+    return;
+  }
+
+  const index = items.length;
+  items.push({
+    type: "message",
+    id,
+    ...(messageId ? { messageId } : {}),
+    role,
+    text: chunk.text,
+    attachments: chunk.attachments,
+  });
+  if (key) messageIndexes.set(key, index);
+}
+
 function upsertTool(
   state: TranscriptState,
   toolCallId: string,
-  patch: Partial<Pick<ToolItem, "name" | "title" | "kind" | "status" | "rawInput" | "rawOutput" | "content" | "diffs" | "attachments" | "path">>,
+  patch: Partial<Pick<ToolItem, "name" | "title" | "kind" | "status" | "rawInput" | "rawOutput" | "content" | "diffs" | "attachments" | "path" | "deferredResult" | "resultLoading" | "resultError">>,
 ): TranscriptState {
   const items = [...state.items];
   const index = items.findIndex((item) => item.type === "tool" && item.toolCallId === toolCallId);
@@ -217,6 +416,47 @@ function upsertTool(
       ...(patch.path ? { path: patch.path } : {}),
     });
   }
+  return { items };
+}
+
+function upsertHistoryTool(
+  items: TranscriptItem[],
+  toolIndexes: Map<string, number>,
+  toolCallId: string,
+  patch: Partial<Pick<ToolItem, "name" | "title" | "kind" | "status" | "rawInput" | "rawOutput" | "content" | "diffs" | "attachments" | "path">>,
+): void {
+  const index = toolIndexes.get(toolCallId);
+  if (index !== undefined) {
+    items[index] = { ...(items[index] as ToolItem), ...patch };
+    return;
+  }
+  toolIndexes.set(toolCallId, items.length);
+  items.push({
+    type: "tool",
+    id: `tool:${toolCallId}`,
+    toolCallId,
+    ...(patch.name ? { name: patch.name } : {}),
+    title: patch.title ?? "Tool call",
+    kind: patch.kind ?? "other",
+    status: patch.status ?? "pending",
+    ...(patch.rawInput !== undefined ? { rawInput: patch.rawInput } : {}),
+    ...(patch.rawOutput !== undefined ? { rawOutput: patch.rawOutput } : {}),
+    content: patch.content ?? "",
+    diffs: patch.diffs ?? [],
+    attachments: patch.attachments ?? [],
+    ...(patch.path ? { path: patch.path } : {}),
+  });
+}
+
+function patchToolUiState(
+  state: TranscriptState,
+  toolCallId: string,
+  patch: Pick<Partial<ToolItem>, "deferredResult" | "resultLoading" | "resultError">,
+): TranscriptState {
+  const index = state.items.findIndex((item) => item.type === "tool" && item.toolCallId === toolCallId);
+  if (index < 0) return state;
+  const items = [...state.items];
+  items[index] = { ...(items[index] as ToolItem), ...patch };
   return { items };
 }
 

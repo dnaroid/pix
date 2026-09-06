@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import {
 	client,
@@ -19,6 +19,7 @@ import type {
 	SessionInfo as PiSessionInfo,
 } from "@earendil-works/pi-coding-agent";
 import { PixAcpAgent } from "../src/acp/pix-acp-agent.js";
+import { PIX_SESSION_HISTORY_METHOD, PIX_TOOL_RESULT_METHOD } from "../src/acp/desktop-commands.js";
 import { PIX_QUESTION_EDITOR_TITLE } from "../src/acp/ui-request-bridge.js";
 
 /**
@@ -1284,6 +1285,128 @@ test("session/load switches the pi session and replays history as chunk updates"
 		{ type: "content", content: { type: "image", data: "dG9vbA==", mimeType: "image/png" } },
 	]);
 	assert.equal(harness.adapter.getSession(sessionId) !== undefined, true, "loaded session is live");
+});
+
+test("desktop lazy session/load omits tool bodies and retrieves them on demand", async () => {
+	const harness = createTestAdapter();
+	const notifications: SessionNotification[] = [];
+	await connect(
+		harness.adapter,
+		async (cx) => {
+			const created = await cx.request("session/new", { cwd: "/tmp/proj", mcpServers: [] });
+			const sessionId = (created as { sessionId: string }).sessionId;
+			FakePiClient.sessionFiles.set(harness.clients[0]!.state.sessionFile ?? "", [
+				{ role: "user", content: "inspect it" },
+				{
+					role: "assistant",
+					content: [
+						{ type: "text", text: "checking" },
+						{ type: "toolCall", id: "lazy-tool", name: "read", arguments: { path: "/tmp/proj/big.log" } },
+					],
+				},
+				{
+					role: "toolResult",
+					toolCallId: "lazy-tool",
+					content: [{ type: "text", text: "very large output" }],
+					details: { bytes: 1_000_000 },
+				} as unknown as PiAgentMessage,
+			]);
+
+			await cx.request("session/load", {
+				sessionId,
+				cwd: "/tmp/proj",
+				mcpServers: [],
+				_meta: { "pix.lazyHistory": true },
+			});
+			await new Promise((resolve) => setTimeout(resolve, 10));
+			assert.equal(
+				notifications.filter((notification) => notification.update.sessionUpdate !== "available_commands_update").length,
+				0,
+				"lazy load must not replay persisted messages through session/update",
+			);
+
+			const history = await cx.request(PIX_SESSION_HISTORY_METHOD, { sessionId }) as {
+				updates: Array<Record<string, unknown>>;
+				deferredToolCallIds: string[];
+			};
+			assert.deepEqual(history.deferredToolCallIds, ["lazy-tool"]);
+			const toolCall = history.updates.find((update) => update.sessionUpdate === "tool_call");
+			assert.equal(toolCall?.name, "read");
+			assert.equal("rawInput" in (toolCall ?? {}), false, "tool input is deferred");
+			const lightResult = history.updates.find((update) => update.sessionUpdate === "tool_call_update");
+			assert.equal(lightResult?.status, "completed");
+			assert.equal("content" in (lightResult ?? {}), false, "tool output content is deferred");
+			assert.equal("rawOutput" in (lightResult ?? {}), false, "tool raw output is deferred");
+
+			const hydrated = await cx.request(PIX_TOOL_RESULT_METHOD, {
+				sessionId,
+				toolCallId: "lazy-tool",
+			}) as { update: Record<string, unknown> };
+			assert.deepEqual(hydrated.update.rawInput, { path: "/tmp/proj/big.log" });
+			assert.deepEqual(hydrated.update.rawOutput, { bytes: 1_000_000 });
+			assert.deepEqual(hydrated.update.content, [
+				{ type: "content", content: { type: "text", text: "very large output" } },
+			]);
+		},
+		(app) => {
+			app.onNotification("session/update", (ctx) => { notifications.push(ctx.params); });
+		},
+	);
+});
+
+test("desktop lazy session/load reuses an already-live tab runtime", async () => {
+	const harness = createTestAdapter();
+	await connect(harness.adapter, async (cx) => {
+		const created = await cx.request("session/new", { cwd: "/tmp/proj", mcpServers: [] });
+		const sessionId = (created as { sessionId: string }).sessionId;
+		const original = harness.clients[0]!;
+
+		await cx.request("session/load", {
+			sessionId,
+			cwd: "/tmp/proj",
+			mcpServers: [],
+			_meta: { "pix.lazyHistory": true },
+		});
+
+		assert.equal(harness.clients.length, 1, "tab switch must not spawn another pi runtime");
+		assert.equal(original.started, true, "the cached runtime remains alive");
+		assert.deepEqual(original.switchSessions, [], "an already-live tab does not switch its session file again");
+	});
+});
+
+test("desktop history is readable directly from JSONL while the pi runtime is closed", async () => {
+	const harness = createTestAdapter();
+	await connect(harness.adapter, async (cx) => {
+		const created = await cx.request("session/new", { cwd: "/tmp/proj", mcpServers: [] });
+		const sessionId = (created as { sessionId: string }).sessionId;
+		const store = new SessionMapStore(harness.sessionMapPath, TEST_LOGGER);
+		const record = await store.get(sessionId);
+		assert.ok(record);
+		const sessionPath = join(dirname(harness.sessionMapPath), "direct-history.jsonl");
+		await writeFile(sessionPath, [
+			JSON.stringify({ type: "session", version: 3, id: "pi-direct", timestamp: "2026-09-06T00:00:00.000Z", cwd: "/tmp/proj" }),
+			JSON.stringify({
+				type: "message",
+				id: "u1",
+				parentId: null,
+				timestamp: "2026-09-06T00:00:01.000Z",
+				message: { role: "user", content: "direct history" },
+			}),
+		].join("\n") + "\n", "utf8");
+		await store.put({ ...record, piSessionPath: sessionPath, piSessionId: "pi-direct" });
+		await cx.request("session/close", { sessionId });
+		assert.equal(harness.adapter.getSession(sessionId), undefined, "test requires no live pi runtime");
+
+		const history = await cx.request(PIX_SESSION_HISTORY_METHOD, { sessionId }) as {
+			updates: Array<Record<string, unknown>>;
+		};
+		assert.deepEqual(history.updates, [{
+			sessionUpdate: "user_message_chunk",
+			messageId: "replay-0",
+			content: { type: "text", text: "direct history" },
+		}]);
+		assert.equal(harness.clients.length, 1, "reading history must not spawn pi");
+	});
 });
 
 test("concurrent loads for one session are serialized and stop the replaced process", async () => {

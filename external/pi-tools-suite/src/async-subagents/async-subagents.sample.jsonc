@@ -46,7 +46,9 @@
     }
   },
   // Override role behavior here or define project specialists in .pi/agents/.
-  // Old names resolve as aliases unless explicitly defined in config/Markdown.
-  // Do not merge distinct old profiles onto one name: their overrides survive.
+  // Old builtin names are not aliases; define them explicitly only when you
+  // intentionally want custom types with those exact names.
+  // Per-type "icon" names the agent glyph for UI widgets (agent, search, code,
+  // flask, globe, sparkles, brain, wrench, terminal, bug, book, eye, zap, rocket).
   "types": {}
 }

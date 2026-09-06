@@ -4,7 +4,7 @@
   import type { Attachment } from "../lib/attachments";
   import { toolPresentation } from "../lib/tool-presentation";
   import { toolGroupAttention, toolLspAttention } from "../lib/tool-output";
-  import { groupTranscriptItems, type TranscriptState } from "../lib/transcript";
+  import { groupTranscriptItems, type ToolItem, type TranscriptState } from "../lib/transcript";
   import AttachmentGrid from "./AttachmentGrid.svelte";
   import MarkdownText from "./MarkdownText.svelte";
   import ToolResult from "./ToolResult.svelte";
@@ -16,29 +16,48 @@
     workspace,
     promptRunning,
     operationRunning,
+    historyLoading,
     pane = $bindable(null),
     onChooseWorkspace,
     onOpenAttachment,
+    onPrepareAttachment,
     onOpenProjectFile,
     onResolveProjectMedia,
     onOpenLocalFile,
     onResolveLocalMedia,
+    onLoadToolResult,
   }: {
     transcript: TranscriptState;
     activeSessionId: string | null;
     workspace: string;
     promptRunning: boolean;
     operationRunning: boolean;
+    historyLoading: boolean;
     pane?: HTMLDivElement | null;
     onChooseWorkspace: () => void;
     onOpenAttachment: (attachment: Attachment) => void;
+    onPrepareAttachment: (attachment: Attachment) => Promise<void>;
     onOpenProjectFile: (path: string) => void | Promise<void>;
     onResolveProjectMedia: (path: string) => Promise<Attachment | undefined>;
     onOpenLocalFile: (path: string) => void | Promise<void>;
     onResolveLocalMedia: (path: string) => Promise<Attachment | undefined>;
+    onLoadToolResult: (toolCallId: string) => void;
   } = $props();
 
   let displayItems = $derived(groupTranscriptItems(transcript.items));
+
+  function handleToolResultToggle(event: Event, tool: ToolItem): void {
+    const details = event.currentTarget as HTMLDetailsElement;
+    if (details.open && tool.deferredResult && !tool.resultLoading) onLoadToolResult(tool.toolCallId);
+  }
+
+  function handleToolGroupToggle(event: Event, tools: readonly ToolItem[]): void {
+    const details = event.currentTarget as HTMLDetailsElement;
+    if (!details.open) return;
+    for (const tool of tools) {
+      if (tool.deferredResult && !tool.resultLoading) onLoadToolResult(tool.toolCallId);
+    }
+  }
 </script>
 
 <div class="transcript-pane row-start-2 min-h-0 overflow-auto scroll-smooth" bind:this={pane} aria-live="polite">
@@ -58,6 +77,10 @@
           disabled={promptRunning || operationRunning}
         >Choose workspace</button>
       {/if}
+    </section>
+  {:else if transcript.items.length === 0 && historyLoading}
+    <section class="grid min-h-[220px] place-items-center content-center p-10 text-center">
+      <p class="text-[13px] text-muted-foreground" role="status">Loading conversation…</p>
     </section>
   {:else if transcript.items.length === 0}
     <section class="grid min-h-[220px] place-items-center content-center p-10 text-center">
@@ -84,13 +107,13 @@
           {:else if item.role === "user"}
             <div class="mb-6">
               <article class="w-full rounded-xl border border-primary/45 bg-primary/15 px-3.5 pt-3 pb-2 text-card-foreground shadow-xs">
-                <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} />
+                <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} onPrepare={onPrepareAttachment} />
                 {#if item.text}<MarkdownText text={item.text} dense {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />{/if}
               </article>
             </div>
           {:else}
             <article class="mb-6 w-full min-w-0 text-foreground">
-              <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} />
+              <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} onPrepare={onPrepareAttachment} />
               {#if item.text}<MarkdownText text={item.text} dense {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />{/if}
             </article>
           {/if}
@@ -99,7 +122,7 @@
           <details class={[
             "group mb-4 w-full min-w-0 overflow-hidden bg-transparent text-muted-foreground",
             item.status === "failed" && "text-destructive",
-          ]} open={item.active && !operationRunning}>
+          ]} ontoggle={(event) => handleToolGroupToggle(event, item.tools)}>
             <summary class="grid min-h-5 cursor-pointer list-none grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-1.5 overflow-hidden transition-colors select-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
               <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
               <ToolStatusIcon status={item.status} attention={groupAttention} />
@@ -112,8 +135,8 @@
                 {@const presentation = toolPresentation(tool)}
                 {@const attention = toolLspAttention(tool)}
                 <section>
-                  {#if tool.content || tool.diffs.length > 0 || tool.attachments.length > 0}
-                    <details class="group/result">
+                  {#if tool.deferredResult || tool.content || tool.diffs.length > 0 || tool.attachments.length > 0}
+                    <details class="group/result" ontoggle={(event) => handleToolResultToggle(event, tool)}>
                       <summary class="grid min-h-5 cursor-pointer list-none grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-1.5 overflow-hidden transition-colors select-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
                         <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open/result:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
                         <ToolStatusIcon status={tool.status} {attention} />
@@ -122,8 +145,13 @@
                           {#if presentation.args}<span class="min-w-0 truncate text-muted-foreground">{presentation.args}</span>{/if}
                         </span>
                       </summary>
-                      <AttachmentGrid attachments={tool.attachments} variant="tool" onOpen={onOpenAttachment} />
-                      {#if tool.content || tool.diffs.length > 0}
+                      {#if tool.resultLoading}
+                        <div class="py-1 pl-8 text-xs text-muted-foreground" role="status">Loading tool result…</div>
+                      {:else if tool.resultError}
+                        <div class="py-1 pl-8 text-xs text-destructive" role="status">{tool.resultError}</div>
+                      {/if}
+                      <AttachmentGrid attachments={tool.attachments} variant="tool" onOpen={onOpenAttachment} onPrepare={onPrepareAttachment} />
+                      {#if !tool.resultLoading && (tool.content || tool.diffs.length > 0)}
                         <ToolResult {tool} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />
                       {/if}
                     </details>

@@ -2757,6 +2757,114 @@ describe("AppTabsController", () => {
 		assert.equal(remainingSidecars.includes("session-25.json"), true);
 	});
 
+	it("keeps DCP sidecar state when retention cannot unlink the owning JSONL", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "pix-tabs-retention-unlink-failure-"));
+		const sessionDir = join(dir, "sessions");
+		const dcpStateDir = join(sessionDir, "dcp-state");
+		const sessionPath = join(sessionDir, "old-session.jsonl");
+		const sidecarPath = join(dcpStateDir, "old-session.json");
+		await mkdir(dcpStateDir, { recursive: true });
+		await writeFile(sessionPath, JSON.stringify({ type: "session", id: "old-session" }) + "\n", "utf8");
+		await writeFile(sidecarPath, "{}", "utf8");
+
+		const activeRuntime = fakeRuntime("active", join(sessionDir, "active.jsonl"));
+		const controller = new AppTabsController({
+			options: { cwd: dir, themeName: "dark", noSession: false } satisfies AppOptions,
+			maxProjectSessions: 20,
+			blinkController: fakeBlinkController(),
+			runtime: () => activeRuntime,
+			createRuntimeForNewSession: async () => fakeRuntime("new", join(dir, "new.jsonl")),
+			createRuntimeForSession: async (path) => fakeRuntime("session", path),
+			activateRuntime: async () => {},
+			disposeRuntime: async () => {},
+			isRunning: () => true,
+			setStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			resetSessionView: () => {},
+			loadSessionHistory: () => {},
+			loadSessionHistoryAsync: async () => true,
+			syncUserSessionEntryMetadata: () => {},
+			captureInputState: () => ({ text: "", cursor: 0 }),
+			restoreInputState: () => {},
+			addEntry: () => {},
+			showToast: () => {},
+			render: () => {},
+		});
+		const tabs = controller as unknown as {
+			unlinkSessionAndDcpSidecar: (
+				sessionPath: string,
+				unlinkFile: (path: string) => Promise<void>,
+			) => Promise<void>;
+		};
+		const unlinkAttempts: string[] = [];
+
+		await tabs.unlinkSessionAndDcpSidecar(sessionPath, async (path) => {
+			unlinkAttempts.push(path);
+			const error = new Error("fixture unlink failure") as NodeJS.ErrnoException;
+			error.code = "EACCES";
+			throw error;
+		});
+
+		assert.deepEqual(unlinkAttempts, [sessionPath]);
+		assert.equal((await stat(sessionPath)).isFile(), true);
+		assert.equal((await stat(sidecarPath)).isFile(), true);
+	});
+
+	it("rechecks preserved sessions before retention unlinks a candidate", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "pix-tabs-retention-live-race-"));
+		const sessionDir = join(dir, "sessions");
+		const oldSession = join(sessionDir, "old.jsonl");
+		const newSession = join(sessionDir, "new.jsonl");
+		await mkdir(sessionDir, { recursive: true });
+		await writeFile(oldSession, "", "utf8");
+		await writeFile(newSession, "", "utf8");
+		await utimes(oldSession, new Date(1_700_000_000_000), new Date(1_700_000_000_000));
+		await utimes(newSession, new Date(1_700_000_001_000), new Date(1_700_000_001_000));
+
+		const activeRuntime = fakeRuntime("active", "/not/in/project/active.jsonl");
+		const controller = new AppTabsController({
+			options: { cwd: dir, themeName: "dark", noSession: false } satisfies AppOptions,
+			maxProjectSessions: 1,
+			blinkController: fakeBlinkController(),
+			runtime: () => activeRuntime,
+			createRuntimeForNewSession: async () => fakeRuntime("new", join(dir, "new-runtime.jsonl")),
+			createRuntimeForSession: async (path) => fakeRuntime("session", path),
+			activateRuntime: async () => {},
+			disposeRuntime: async () => {},
+			isRunning: () => true,
+			setStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			resetSessionView: () => {},
+			loadSessionHistory: () => {},
+			loadSessionHistoryAsync: async () => true,
+			syncUserSessionEntryMetadata: () => {},
+			captureInputState: () => ({ text: "", cursor: 0 }),
+			restoreInputState: () => {},
+			addEntry: () => {},
+			showToast: () => {},
+			render: () => {},
+		});
+		const tabs = controller as unknown as {
+			sessionDir: () => string;
+			cleanupOldProjectSessions: () => Promise<void>;
+			preservedSessionPaths: () => Set<string>;
+		};
+		tabs.sessionDir = () => sessionDir;
+		let snapshotCount = 0;
+		tabs.preservedSessionPaths = () => {
+			snapshotCount++;
+			return snapshotCount === 1 ? new Set() : new Set([resolve(oldSession)]);
+		};
+
+		await tabs.cleanupOldProjectSessions();
+
+		assert.equal((await stat(oldSession)).isFile(), true);
+		assert.equal((await stat(newSession)).isFile(), true);
+		assert.ok(snapshotCount >= 2);
+	});
+
 	it("does not delete project sessions when retention is disabled", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "pix-tabs-retention-disabled-"));
 		const sessionDir = join(dir, "sessions");

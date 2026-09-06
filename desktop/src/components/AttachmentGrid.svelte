@@ -10,22 +10,78 @@
     variant = "chat",
     onOpen,
     onRemove,
+    onPrepare,
   }: {
     attachments: readonly Attachment[];
     variant?: "composer" | "chat" | "tool";
     onOpen: (attachment: Attachment) => void;
     onRemove?: (id: string) => void;
+    onPrepare?: (attachment: Attachment) => Promise<void>;
   } = $props();
 
   let failedPreviews = $state(new Set<string>());
+  let preparedPreviews = $state(new Set<string>());
+
+  function previewReady(attachment: Attachment): boolean {
+    return Boolean(attachment.dataUrl || !attachment.path || !onPrepare || preparedPreviews.has(attachment.id));
+  }
 
   function previewUrl(attachment: Attachment): string | undefined {
+    if (!previewReady(attachment)) return undefined;
     if (attachment.dataUrl) return attachment.dataUrl;
     return attachment.path ? convertFileSrc(attachment.path) : undefined;
   }
 
   function markPreviewFailed(id: string): void {
     failedPreviews = new Set([...failedPreviews, id]);
+  }
+
+  function lazyPrepare(node: HTMLElement, attachment: Attachment) {
+    let current = attachment;
+    let observer: IntersectionObserver | undefined;
+    let generation = 0;
+
+    const prepare = async (): Promise<void> => {
+      const target = current;
+      const scheduledGeneration = ++generation;
+      if (previewReady(target) || failedPreviews.has(target.id)) return;
+      try {
+        await onPrepare?.(target);
+        if (scheduledGeneration !== generation || current.id !== target.id) return;
+        preparedPreviews = new Set([...preparedPreviews, target.id]);
+      } catch {
+        if (scheduledGeneration !== generation || current.id !== target.id) return;
+        markPreviewFailed(target.id);
+      }
+    };
+
+    const observe = (): void => {
+      observer?.disconnect();
+      if (previewReady(current) || failedPreviews.has(current.id)) return;
+      if (typeof IntersectionObserver === "undefined") {
+        void prepare();
+        return;
+      }
+      observer = new IntersectionObserver((entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        observer?.disconnect();
+        void prepare();
+      }, { rootMargin: "320px 0px" });
+      observer.observe(node);
+    };
+
+    observe();
+    return {
+      update(next: Attachment): void {
+        generation += 1;
+        current = next;
+        observe();
+      },
+      destroy(): void {
+        generation += 1;
+        observer?.disconnect();
+      },
+    };
   }
 </script>
 
@@ -40,7 +96,7 @@
       <div class={[
         "group/attachment relative",
         variant === "chat" && attachment.kind === "image" && "max-w-full",
-      ]}>
+      ]} use:lazyPrepare={attachment}>
         <button
           class={[
             "relative grid overflow-hidden rounded-lg border border-border bg-muted text-left text-muted-foreground transition-colors hover:border-input hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",

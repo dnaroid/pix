@@ -7,6 +7,7 @@ import {
 	activeSubagentStates,
 	formatElapsedSince,
 	formatSubagentsPanelStats,
+	subagentIcon,
 	subagentModelThinkingLabel,
 	subagentRunName,
 	subagentStatusIcon,
@@ -131,9 +132,10 @@ export function renderSubagentsPanel(state: SubagentsWidgetState | undefined, ex
 		const { agent, preview } = visibleRun;
 		const model = subagentModelThinkingLabel(preview);
 		const task = preview?.task?.trim() || preview?.scope?.trim() || "task unavailable";
-		const icon = subagentStatusIcon(agent.status);
+		const icon = subagentIcon(preview);
+		const statusIcon = subagentStatusIcon(agent.status);
 		const runLabel = visibleRun.showRunLabel ? `${subagentRunName(visibleRun.runDir)} ` : "";
-		const prefix = `${runLabel}${icon} ${agent.id} ${model} `;
+		const prefix = `${runLabel}${icon}${statusIcon} ${agent.id} ${model} `;
 		const suffix = ` ${formatElapsedSince(agent.startedAt, now)}`;
 		const taskWidth = Math.max(8, rowWidth - stringDisplayWidth(prefix) - stringDisplayWidth(suffix));
 		const taskText = ellipsizeDisplay(task, taskWidth);
@@ -141,7 +143,7 @@ export function renderSubagentsPanel(state: SubagentsWidgetState | undefined, ex
 		lines.push({
 			text: padOrTrimPlain(text, width),
 			colorOverride: colors.muted,
-			segments: subagentPanelLineSegments({ text, icon, agentId: agent.id, model, taskText, prefix, runLabel, status: agent.status }, colors),
+			segments: subagentPanelLineSegments({ text, icon, statusIcon, agentId: agent.id, model, taskText, prefix, runLabel, status: agent.status }, colors),
 			target,
 		});
 	}
@@ -154,6 +156,7 @@ export function renderSubagentsPanel(state: SubagentsWidgetState | undefined, ex
 function subagentPanelLineSegments(input: {
 	text: string;
 	icon: string;
+	statusIcon: string;
 	agentId: string;
 	model: string;
 	taskText: string;
@@ -162,14 +165,16 @@ function subagentPanelLineSegments(input: {
 	status: SubagentStatus;
 }, colors: Theme["colors"]): StyledSegment[] {
 	const iconStart = input.text.indexOf(input.icon);
+	const statusIconStart = input.text.indexOf(input.statusIcon, iconStart + input.icon.length);
 	const runLabelStart = input.runLabel ? input.text.indexOf(input.runLabel) : -1;
-	const nameStart = input.text.indexOf(input.agentId, iconStart + input.icon.length);
+	const nameStart = input.text.indexOf(input.agentId, statusIconStart + input.statusIcon.length);
 	const modelStart = input.text.indexOf(input.model, nameStart + input.agentId.length);
 	const taskStart = input.prefix.length;
 	const suffixStart = taskStart + input.taskText.length;
 	return [
 		...(runLabelStart >= 0 ? [{ start: runLabelStart, end: runLabelStart + input.runLabel.length, foreground: colors.warning }] : []),
-		{ start: iconStart, end: iconStart + input.icon.length, foreground: subagentStatusColor(input.status, colors), bold: true },
+		{ start: iconStart, end: iconStart + input.icon.length, foreground: colors.accent, bold: true },
+		{ start: statusIconStart, end: statusIconStart + input.statusIcon.length, foreground: subagentStatusColor(input.status, colors), bold: true },
 		{ start: nameStart, end: nameStart + input.agentId.length, foreground: colors.accent, bold: true },
 		{ start: modelStart, end: modelStart + input.model.length, foreground: colors.info },
 		{ start: taskStart, end: suffixStart, foreground: colors.muted },

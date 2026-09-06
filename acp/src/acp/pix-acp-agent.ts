@@ -84,8 +84,14 @@ import { applyConfigOption, buildConfigOptions, parseModelValue } from "./config
 import {
 	PIX_FORK_MESSAGES_METHOD,
 	PIX_RELOAD_SESSION_METHOD,
+	PIX_SESSION_HISTORY_METHOD,
+	PIX_TOOL_RESULT_METHOD,
 	parseDesktopSessionRequest,
+	parseDesktopToolResultRequest,
+	type DesktopSessionHistoryResponse,
 	type DesktopSessionRequest,
+	type DesktopToolResultRequest,
+	type DesktopToolResultResponse,
 	type ForkMessagesResponse,
 } from "./desktop-commands.js";
 import { loadPixDefaultModel, type PixDefaultModel } from "./default-model.js";
@@ -99,7 +105,18 @@ import {
 	type BuiltinCommand,
 } from "./slash-commands.js";
 import { SessionMapStore, type SessionMapRecord } from "./session-map.js";
-import { replaySessionHistory } from "./session-replay.js";
+import {
+	readPersistedHistoryTail,
+	readPersistedToolResult,
+	type PersistedToolResultRef,
+} from "./session-history-file.js";
+import {
+	deferredSessionHistory,
+	deferredSessionHistoryFromMessages,
+	deferredToolResultUpdate,
+	replaySessionHistory,
+	type DeferredToolResult,
+} from "./session-replay.js";
 import { loadTuiTabSnapshot, type TuiTabSnapshot } from "./tui-tabs.js";
 import { cancelledResponse, fromElicitationResponse, toElicitationRequest } from "./ui-request-bridge.js";
 import {
@@ -142,6 +159,11 @@ interface AgentSessionState {
 	readonly pendingDialogIds: Set<string>;
 }
 
+interface DesktopDeferredToolResult {
+	readonly result: DeferredToolResult;
+	readonly persistedRef?: PersistedToolResultRef;
+}
+
 export interface PixAcpAgentOptions {
 	/** Factory for per-session pi RPC clients (injected for tests). */
 	readonly createPiClient: (options: PiRpcClientOptions) => PiClient;
@@ -167,6 +189,8 @@ export interface PixAcpAgentOptions {
 
 export class PixAcpAgent {
 	private readonly sessions = new Map<string, AgentSessionState>();
+	/** Lazy Desktop tool bodies are cached independently of a live pi runtime. */
+	private readonly desktopDeferredToolResults = new Map<string, Map<string, DesktopDeferredToolResult>>();
 	/** Starts already accepted by ACP but not yet registered in `sessions`. */
 	private readonly pendingSpawns = new Set<Promise<AgentSessionState>>();
 	/** Serializes load/resume/fork/delete/close operations for the same id. */
@@ -247,6 +271,12 @@ export class PixAcpAgent {
 			.onRequest(PIX_RELOAD_SESSION_METHOD, parseDesktopSessionRequest, (ctx) =>
 				this.withSessionLifecycle(ctx.params.sessionId, () => this.reloadSession(ctx.params, ctx.client)),
 			)
+			.onRequest(PIX_SESSION_HISTORY_METHOD, parseDesktopSessionRequest, (ctx) =>
+				this.desktopSessionHistory(ctx.params),
+			)
+			.onRequest(PIX_TOOL_RESULT_METHOD, parseDesktopToolResultRequest, (ctx) =>
+				this.desktopToolResult(ctx.params),
+			)
 			.onRequest("session/close", (ctx) =>
 				this.withSessionLifecycle(ctx.params.sessionId, () => this.closeSession(ctx.params.sessionId)),
 			)
@@ -312,6 +342,67 @@ export class PixAcpAgent {
 		return { messages: await session.pi.getForkMessages() };
 	}
 
+	private async desktopSessionHistory(params: DesktopSessionRequest): Promise<DesktopSessionHistoryResponse> {
+		const [record, session] = await Promise.all([
+			this.sessionMap.get(params.sessionId),
+			Promise.resolve(this.sessions.get(params.sessionId)),
+		]);
+		if (!record?.piSessionPath && !session) throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
+		const cwd = session?.cwd ?? record!.cwd;
+		const context = { sessionId: params.sessionId, cwd };
+		const persisted = record?.piSessionPath
+			? await readPersistedHistoryTail(record.piSessionPath)
+			: undefined;
+		const history = persisted
+			? deferredSessionHistoryFromMessages(persisted.messages, context)
+			: session
+				? await deferredSessionHistory(session.pi, context)
+				: undefined;
+		if (!history) throw new RequestError(ERROR_SERVER, `session history ${params.sessionId} is unavailable`);
+
+		const deferred = new Map<string, DesktopDeferredToolResult>();
+		for (const [toolCallId, result] of history.toolResults) {
+			const persistedRef = persisted?.toolResultRefs.get(toolCallId);
+			deferred.set(toolCallId, {
+				result,
+				...(persistedRef ? { persistedRef } : {}),
+			});
+		}
+		this.desktopDeferredToolResults.set(params.sessionId, deferred);
+		return {
+			updates: history.updates,
+			deferredToolCallIds: [...history.toolResults.keys()],
+		};
+	}
+
+	private async desktopToolResult(params: DesktopToolResultRequest): Promise<DesktopToolResultResponse> {
+		const cached = this.desktopDeferredToolResults.get(params.sessionId)?.get(params.toolCallId);
+		if (!cached) {
+			throw new RequestError(ERROR_SERVER, `tool result ${params.toolCallId} is not available for lazy loading`);
+		}
+		const [record, persistedMessage] = await Promise.all([
+			this.sessionMap.get(params.sessionId),
+			cached.persistedRef ? readPersistedToolResult(cached.persistedRef) : Promise.resolve(undefined),
+		]);
+		const session = this.sessions.get(params.sessionId);
+		const cwd = session?.cwd ?? record?.cwd;
+		if (!cwd) throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
+		const deferred: DeferredToolResult = persistedMessage
+			? { message: persistedMessage, ...(cached.result.rawInput !== undefined ? { rawInput: cached.result.rawInput } : {}) }
+			: cached.result;
+		const update = deferredToolResultUpdate(
+			{ sessionId: params.sessionId, cwd },
+			deferred,
+		);
+		if (!update) {
+			throw new RequestError(ERROR_SERVER, `tool result ${params.toolCallId} could not be materialized`);
+		}
+		// The Desktop keeps the hydrated result in its transcript, so free the
+		// duplicate backend copy as soon as it has been requested once.
+		this.desktopDeferredToolResults.get(params.sessionId)?.delete(params.toolCallId);
+		return { update };
+	}
+
 	private async reloadSession(
 		params: DesktopSessionRequest,
 		client: ClientCaller,
@@ -358,7 +449,15 @@ export class PixAcpAgent {
 	}
 
 	private async loadSession(params: LoadSessionRequest, client: ClientCaller): Promise<LoadSessionResponse> {
-		return this.loadOrResumeSession(params, client, { replay: true });
+		const lazyHistory = (params as { _meta?: Record<string, unknown> })._meta?.["pix.lazyHistory"] === true;
+		if (lazyHistory) {
+			const existing = this.sessions.get(params.sessionId);
+			if (existing) {
+				const configOptions = await this.safeConfigOptions(existing.pi);
+				return configOptions ? { configOptions } : {};
+			}
+		}
+		return this.loadOrResumeSession(params, client, { replay: !lazyHistory });
 	}
 
 	private async resumeSession(params: ResumeSessionRequest, client: ClientCaller): Promise<ResumeSessionResponse> {
@@ -460,6 +559,7 @@ export class PixAcpAgent {
 	}
 
 	private async deleteSession(sessionId: string): Promise<void> {
+		this.desktopDeferredToolResults.delete(sessionId);
 		await this.sessionMap.delete(sessionId);
 		if (this.sessions.has(sessionId)) await this.closeSession(sessionId);
 		this.options.logger.info(`session/delete: ${sessionId}`);
@@ -1075,6 +1175,7 @@ export class PixAcpAgent {
 	}
 
 	private async closeSession(sessionId: string): Promise<void> {
+		this.desktopDeferredToolResults.delete(sessionId);
 		const session = this.sessions.get(sessionId);
 		if (!session) return;
 		this.options.logger.info(`session/close: ${sessionId}`);

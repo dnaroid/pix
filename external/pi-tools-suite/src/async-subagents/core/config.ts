@@ -4,7 +4,6 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyEdits, modify, parse as parseJsonc } from "jsonc-parser";
 import { readAgentDefinitionsFromDir, readProjectAgentDefinitions, type AgentDefinition } from "./agents-dir.js";
-import { LEGACY_SUBAGENT_TYPES, legacySubagentTarget, resolveSubagentTypeName } from "./agent-aliases.js";
 import { ensurePiToolsSuiteUserConfig, getPiToolsSuiteUserConfigPath } from "../../config.js";
 import type { AgentTask, RetryConfig } from "./types.js";
 
@@ -17,6 +16,12 @@ export interface ModelByParentEntry {
 
 export interface SubagentTypeConfig {
 	description?: string;
+	/**
+	 * Agent icon name resolved by UIs (pix TUI icon themes, Pix Desktop lucide
+	 * icons). Opaque pass-through here: unknown names render as the neutral
+	 * default agent icon.
+	 */
+	icon?: string;
 	/** Ranked candidates. The preset filters availability, never changes this order. */
 	models?: string[];
 	/** Legacy primary candidate; new profiles use models. */
@@ -330,11 +335,10 @@ export function resolveAgentTaskConfig(
 	const legacyPreset = preset?.models === undefined ? preset : undefined;
 	const explicitType = trimString(task.subagentType);
 	const requestedType = explicitType || trimString(config.defaultType);
-	// Old preset keys apply only to requests using that name, avoiding lossy
-	// many-to-one migration (e.g. scan/review/deep all alias research).
+	// Legacy preset matrices still apply to an explicitly configured type with
+	// the same name. There are no implicit aliases between type names.
 	const presetType = (requestedType ? legacyPreset?.types?.[requestedType] : undefined)
-		?? (selectedType ? legacyPreset?.types?.[selectedType] : undefined)
-		?? (selectedType && legacySubagentTarget(selectedType) ? legacyPreset?.types?.[legacySubagentTarget(selectedType)!] : undefined);
+		?? (selectedType ? legacyPreset?.types?.[selectedType] : undefined);
 	const taskExtraArgs = arrayOfStrings(task.extraArgs) ?? [];
 	const profileExtraArgs = arrayOfStrings(profile?.extraArgs) ?? [];
 	const presetTypeExtraArgs = arrayOfStrings(presetType?.extraArgs) ?? [];
@@ -414,8 +418,9 @@ export function resolveSubagentRoutingConfig(config: SubagentConfig): ResolvedSu
 }
 
 export function defaultSubagentType(config: SubagentConfig): string | undefined {
-	const name = trimString(config.defaultType) || Object.keys(config.types).find((name) => trimString(name));
-	return name ? resolveSubagentTypeName(name, config) : undefined;
+	const configured = trimString(config.defaultType);
+	if (configured) return Object.prototype.hasOwnProperty.call(config.types, configured) ? configured : undefined;
+	return Object.keys(config.types).find((name) => trimString(name));
 }
 
 /** Merge global and per-type retry partials into a fully resolved RetryConfig. Per-type wins. */
@@ -454,7 +459,7 @@ export function isBlindModelRef(modelRef: string | undefined, config: SubagentCo
 
 export function selectSubagentType(task: AgentTask, config: SubagentConfig): string | undefined {
 	const explicit = trimString(task.subagentType);
-	if (explicit) return resolveSubagentTypeName(explicit, config);
+	if (explicit) return explicit;
 	return defaultSubagentType(config);
 }
 
@@ -548,6 +553,7 @@ export function normalizeSubagentTypeProfile(
 	const models = normalizeModels(rawProfile.models, `type "${name}"`, file);
 	return {
 		description: trimString(rawProfile.description),
+		icon: trimString(rawProfile.icon),
 		models,
 		model: models === undefined ? trimString(rawProfile.model) : undefined,
 		fallbackModels: models === undefined ? modelList(rawProfile.fallbackModels, rawProfile.fallbackModel) : undefined,
@@ -573,11 +579,7 @@ function mergeConfig(target: SubagentConfig, source: Partial<SubagentConfig>): v
 	if (source.timeoutMs !== undefined) target.timeoutMs = source.timeoutMs;
 	if (source.retry) target.retry = { ...(target.retry ?? {}), ...source.retry };
 	for (const [name, profile] of Object.entries(source.types ?? {})) {
-		// Old custom profiles keep their own name/overrides and inherit only the
-		// canonical behavior; never collapse several old profiles onto one role.
-		const alias = legacySubagentTarget(name);
-		const base = target.types[name] ?? (alias ? target.types[alias] : undefined) ?? {};
-		target.types[name] = mergeTypeProfile(base, profile);
+		target.types[name] = mergeTypeProfile(target.types[name] ?? {}, profile);
 	}
 	for (const [name, preset] of Object.entries(source.presets ?? {})) {
 		target.presets = target.presets ?? {};
@@ -658,6 +660,7 @@ function modelPatternRegExp(pattern: string): RegExp {
 function compactProfile(profile: SubagentTypeConfig): SubagentTypeConfig {
 	const compact: SubagentTypeConfig = {};
 	if (profile.description) compact.description = profile.description;
+	if (profile.icon) compact.icon = profile.icon;
 	if (profile.models !== undefined) compact.models = profile.models;
 	if (profile.model) compact.model = profile.model;
 	if (profile.fallbackModels) compact.fallbackModels = profile.fallbackModels;
@@ -778,13 +781,11 @@ function resolveFallbackModels(options: {
 }
 
 function applyEnvModelOverrides(config: SubagentConfig, env: NodeJS.ProcessEnv): void {
-	for (const name of new Set([...Object.keys(config.types), ...Object.keys(LEGACY_SUBAGENT_TYPES)])) {
+	for (const name of Object.keys(config.types)) {
 		const key = typeEnvKey(name);
 		const model = trimString(env[`ASYNC_SUBAGENTS_${key}_MODEL`] || env[`PI_SUBAGENTS_${key}_MODEL`]);
 		if (model) {
-			const target = legacySubagentTarget(name);
-			const profile = config.types[name] ?? (target ? { ...config.types[target] } : {});
-			config.types[name] = mergeTypeProfile(profile, { model });
+			config.types[name] = mergeTypeProfile(config.types[name] ?? {}, { model });
 		}
 	}
 }

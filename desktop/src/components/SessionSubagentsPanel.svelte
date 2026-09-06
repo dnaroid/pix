@@ -3,6 +3,7 @@
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
   import Workflow from "@lucide/svelte/icons/workflow";
+  import { agentIcon } from "../lib/agent-icons";
   import {
     formatSessionSubagentElapsed,
     sessionSubagentCount,
@@ -62,8 +63,12 @@
               {#each run.agents as agent (`${run.runDir}\0${agent.id}`)}
                 {@const preview = sessionSubagentTaskPreview(run, agent.id)}
                 {@const task = preview?.task?.trim() || preview?.scope?.trim() || "Task unavailable"}
+                {@const AgentIcon = agentIcon(preview?.icon)}
                 <article class="rounded-lg border border-sidebar-border bg-background/55 p-2.5 shadow-xs" aria-label={`Subagent ${agent.id}: ${statusLabel(agent.status)}`}>
                   <div class="flex items-start gap-2">
+                    <span class="mt-0.5 shrink-0 text-foreground" title={`Agent type: ${preview?.icon?.trim() || "agent"}`}>
+                      <AgentIcon class="h-4 w-4" aria-hidden="true" />
+                    </span>
                     <span class={["mt-0.5 shrink-0", statusTone(agent.status)]} title={statusLabel(agent.status)}>
                       {#if agent.status === "running"}
                         <LoaderCircle class="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />

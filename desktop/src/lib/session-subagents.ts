@@ -23,6 +23,8 @@ export interface SessionSubagentTaskPreview {
   readonly task?: string;
   readonly scope?: string;
   readonly model?: string;
+  /** Agent icon name from the subagentType profile; resolved via agent-icons. */
+  readonly icon?: string;
 }
 
 export interface SessionSubagentRun {
@@ -151,7 +153,8 @@ function isSessionSubagentTaskPreview(value: unknown): value is SessionSubagentT
   if (!isRecord(value) || typeof value.id !== "string" || !value.id.trim()) return false;
   if (value.task !== undefined && typeof value.task !== "string") return false;
   if (value.scope !== undefined && typeof value.scope !== "string") return false;
-  return value.model === undefined || typeof value.model === "string";
+  if (value.model !== undefined && typeof value.model !== "string") return false;
+  return value.icon === undefined || typeof value.icon === "string";
 }
 
 function isNonNegativeInteger(value: unknown): value is number {

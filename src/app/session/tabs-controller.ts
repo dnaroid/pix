@@ -2057,6 +2057,10 @@ export class AppTabsController {
 
 			for (const session of sessions) {
 				if (keep.has(session.path)) continue;
+				// Lifecycle state can change while retention is scanning. Re-check the
+				// current runtime/open tabs immediately before destructive work so a
+				// session that became live after the initial snapshot is not removed.
+				if (this.preservedSessionPaths().has(resolve(session.path))) continue;
 				await this.unlinkSessionAndDcpSidecar(session.path);
 			}
 		} catch {
@@ -2073,22 +2077,36 @@ export class AppTabsController {
 	 * never leaves orphan sidecars behind. Everything here is best-effort:
 	 * session retention must never interrupt the terminal UI.
 	 */
-	private async unlinkSessionAndDcpSidecar(sessionPath: string): Promise<void> {
+	private async unlinkSessionAndDcpSidecar(
+		sessionPath: string,
+		unlinkFile: typeof unlink = unlink,
+	): Promise<void> {
+		if (this.preservedSessionPaths().has(resolve(sessionPath))) return;
 		let sidecarPath: string | undefined;
 		const header = await readSessionHeader(sessionPath);
 		if (header?.type === "session" && typeof header.id === "string" && header.id) {
 			sidecarPath = join(dirname(sessionPath), "dcp-state", header.id.replace(/[^a-zA-Z0-9._-]/g, "_") + ".json");
 		}
 		try {
-			await unlink(sessionPath);
+			await unlinkFile(sessionPath);
 		} catch {
-			// Session retention must never interrupt the terminal UI.
+			// The JSONL remains the ownership root. Never delete its DCP state when
+			// removing the session itself failed, otherwise a live/retryable session
+			// is left with an unexplained missing sidecar.
+			return;
 		}
 		if (sidecarPath) {
-			try {
-				await unlink(sidecarPath);
-			} catch {
-				// Sidecar removal is best-effort; never interrupt the terminal UI.
+			for (const artifactPath of [
+				sidecarPath,
+				`${sidecarPath}.prev`,
+				`${sidecarPath}.recovery-required`,
+				`${sidecarPath}.fence`,
+			]) {
+				try {
+					await unlinkFile(artifactPath);
+				} catch {
+					// Sidecar removal is best-effort; never interrupt the terminal UI.
+				}
 			}
 		}
 	}

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared";
-import { mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig, type DcpConfig } from "../src/dcp/config.js";
@@ -4217,6 +4217,58 @@ describe("DCP pruning effectiveness", () => {
       },
     }, ctx);
     expect(readPersistedDcpPayloadSync(statePath).providerSeenToolIds).toEqual(["provider-pair"]);
+  });
+
+  test.serial("DCP agent_end reports a persistence conflict as a warning instead of an extension failure", async () => {
+    const sessionDir = mkdtempSync(join(tmpdir(), "dcp-agent-end-conflict-"));
+    const sessionId = "agent-end-conflict";
+    const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
+    const pi = {
+      on(event: string, handler: (event: any, ctx: any) => unknown) {
+        handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+      },
+      registerTool() {},
+      registerCommand() {},
+      appendEntry() {},
+      sendMessage() {},
+    } as any;
+    await dcpModule(pi);
+
+    const notifications: Array<{ message: string; level: string }> = [];
+    const ctx = {
+      hasUI: true,
+      model: { provider: "test-provider", id: "test-model" },
+      sessionManager: {
+        getBranch: () => [],
+        getSessionId: () => sessionId,
+        getSessionDir: () => sessionDir,
+      },
+      ui: {
+        notify(message: string, level: string) {
+          notifications.push({ message, level });
+        },
+      },
+      getContextUsage: () => ({ tokens: 1_000, contextWindow: 10_000, percent: 10 }),
+    };
+    await handlers.get("session_start")?.[0]?.({ type: "session_start", reason: "startup" }, ctx);
+
+    // First agent_end establishes generation 1 and its owner token. Then remove
+    // every durable revision artifact to reproduce the legacy/unrecoverable
+    // expected=1, found=0 condition from the runtime incident.
+    await expect(handlers.get("agent_end")?.[0]?.({ type: "agent_end" }, ctx)).resolves.toBeUndefined();
+    const statePath = join(sessionDir, "dcp-state", `${sessionId}.json`);
+    rmSync(statePath, { force: true });
+    rmSync(`${statePath}.prev`, { force: true });
+    rmSync(`${statePath}.fence`, { force: true });
+
+    await expect(handlers.get("agent_end")?.[0]?.({ type: "agent_end" }, ctx)).resolves.toBeUndefined();
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0]).toMatchObject({ level: "warning" });
+    expect(notifications[0]?.message).toMatch(/not persisted|reload/i);
+    expect(JSON.parse(readFileSync(`${statePath}.recovery-required`, "utf8"))).toMatchObject({
+      kind: "dcp-state-recovery-required",
+      sessionId,
+    });
   });
 
   test("DCP context transform forces a strong nudge on context-window downgrade", async () => {

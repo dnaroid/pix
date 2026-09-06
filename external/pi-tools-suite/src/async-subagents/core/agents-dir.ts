@@ -41,6 +41,7 @@ export type ProjectAgentDefinition = AgentDefinition;
 const KNOWN_FRONTMATTER_KEYS = new Set([
 	"name",
 	"description",
+	"icon",
 	"models",
 	"model",
 	"fallbackModels",

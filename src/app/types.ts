@@ -157,6 +157,8 @@ export type SubagentTaskPreview = {
 	model?: string;
 	thinking?: string;
 	thinkingLevel?: string;
+	/** Agent icon name from the subagentType profile; resolved via APP_ICONS. */
+	icon?: string;
 };
 
 export type SubagentRunRenderDetails = {

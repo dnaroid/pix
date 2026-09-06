@@ -46,6 +46,7 @@ import {
 	rememberSessionModelFallback,
 	resetSessionModelFallbacks,
 	resolveAgentTaskConfig,
+	routeSubagentTasks,
 	resolveSubagentAgentRunDir,
 	resolveSubagentRunDir,
 	resolveRunDir,
@@ -497,7 +498,7 @@ describe.serial("subagent type config", () => {
 		expect(parentCatalog).toContain(config.types["browser-qa"].description!);
 		expect(parentCatalog).not.toContain("## Flow contract");
 		expect(parentCatalog).not.toContain("PI_BROWSER_QA_RUNNER");
-		const ordinary = resolveAgentTaskConfig({ id: "ordinary", task: "Review", subagentType: "review" }, config);
+		const ordinary = resolveAgentTaskConfig({ id: "ordinary", task: "Review", subagentType: "research" }, config);
 		expect(generatePrompt(ordinary.task)).not.toContain("PI_BROWSER_QA_RUNNER");
 	});
 
@@ -626,7 +627,7 @@ describe.serial("subagent type config", () => {
 			maxResultBytes: 10,
 			retry: { maxRetries: 1, backoffMs: 5, retryableExitCodes: [1] },
 			types: {
-				review: {
+				research: {
 					maxResultBytes: 3,
 					retry: { maxRetries: 2, retryableExitCodes: [] },
 				},
@@ -635,12 +636,12 @@ describe.serial("subagent type config", () => {
 
 		const config = loadSubagentConfig(cwd, { ASYNC_SUBAGENTS_CONFIG: configPath });
 		expect(config.maxConcurrent).toBe(2);
-		const base = resolveAgentTaskConfig({ id: "a", task: "base" }, config);
+		const base = resolveAgentTaskConfig({ id: "a", task: "base", subagentType: "implement" }, config);
 		expect(base.retry).toEqual({ maxRetries: 1, backoffMs: 5, retryableExitCodes: [1] });
 		expect(base.maxResultBytes).toBe(10);
-		const review = resolveAgentTaskConfig({ id: "r", task: "review", subagentType: "review" }, config);
-		expect(review.retry).toEqual({ maxRetries: 2, backoffMs: 5, retryableExitCodes: [] });
-		expect(review.maxResultBytes).toBe(3);
+		const research = resolveAgentTaskConfig({ id: "r", task: "review", subagentType: "research" }, config);
+		expect(research.retry).toEqual({ maxRetries: 2, backoffMs: 5, retryableExitCodes: [] });
+		expect(research.maxResultBytes).toBe(3);
 	});
 
 	test.serial("loads JSONC type profiles and resolves model/thinking/tools", () => {
@@ -672,9 +673,9 @@ describe.serial("subagent type config", () => {
 
 		expect(config.defaultType).toBe("quick");
 		expect(config.types.scan.model).toBe("env/fast-scan");
-		expect(selectSubagentType({ id: "a", task: "Do a repo-wide scan for auth files" }, config)).toBe("research");
+		expect(selectSubagentType({ id: "a", task: "Do a repo-wide scan for auth files" }, config)).toBeUndefined();
 		expect(selectSubagentType({ id: "b", task: "Careful code review", subagentType: "review" }, config)).toBe("review");
-		expect(selectSubagentType({ id: "c", task: "Read this note" }, config)).toBe("research");
+		expect(selectSubagentType({ id: "c", task: "Read this note" }, config)).toBeUndefined();
 
 		const scan = resolveAgentTaskConfig({ id: "a", task: "Scan files for auth", subagentType: "scan" }, config);
 		expect(scan.task).toMatchObject({ subagentType: "scan", model: "env/fast-scan", thinking: "off", tools: ["read", "grep"] });
@@ -791,6 +792,31 @@ Advise only.
 			// Existing mergeConfig semantics: per-field override, jsonc-only fields survive.
 			expect(config.types["shared-name"].thinking).toBe("low");
 			expect(config.types["shared-name"].promptAppend).toBe("Role text.");
+		});
+
+		test.serial("parses icon frontmatter and keeps it through merges", () => {
+			const cwd = tempDir();
+			writeFile(path.join(cwd, ".pi", "pi-tools-suite.jsonc"), JSON.stringify({
+				asyncSubagents: { types: { "shared-name": { model: "jsonc/model", icon: "book" } } },
+			}));
+			writeFile(path.join(cwd, ".pi", "agents", "shared-name.md"), "---\ndescription: md wins\nmodel: md/model\n---\nRole text.\n");
+
+			const config = loadSubagentConfig(path.join(cwd, "packages", "app"), {});
+			// jsonc-only icon survives the per-field markdown merge.
+			expect(config.types["shared-name"].icon).toBe("book");
+
+			const mdCwd = tempDir();
+			writeFile(path.join(mdCwd, ".pi", "agents", "local-searcher.md"), "---\ndescription: finder\nicon: search\n---\nFind things.\n");
+			const mdConfig = loadSubagentConfig(mdCwd, {});
+			expect(mdConfig.types["local-searcher"]?.icon).toBe("search");
+
+			// Built-in bundled agents ship icons.
+			const builtin = loadSubagentConfig(tempDir(), {});
+			expect(builtin.types.research?.icon).toBe("search");
+			expect(builtin.types.implement?.icon).toBe("code");
+			expect(builtin.types.verify?.icon).toBe("flask");
+			expect(builtin.types["browser-qa"]?.icon).toBe("globe");
+			expect(builtin.types.oracle?.icon).toBe("sparkles");
 		});
 
 		test.serial("skips .pi/agents when an explicit config path is set", () => {
@@ -962,23 +988,16 @@ Advise only.
 		expect(fromTerra.task.model).toBe("openai-codex/gpt-5.6-sol");
 	});
 
-	test.serial("maps unconfigured deep/review names to economical research without escalation", () => {
+	test.serial("does not map removed builtin role names onto canonical roles", async () => {
 		const cwd = tempDir();
 		const configPath = path.join(cwd, "async-subagents.json");
 		writeFile(configPath, "{}");
 		const config = loadSubagentConfig(cwd, { ASYNC_SUBAGENTS_CONFIG: configPath });
 
 		for (const subagentType of ["review", "deep"] as const) {
-			for (const parentModel of ["openai-codex/gpt-5.6-luna", "openai-codex/gpt-5.6-terra"] as const) {
-				const resolved = resolveAgentTaskConfig(
-					{ id: `${subagentType}-${parentModel}`, task: subagentType, subagentType },
-					config,
-					{ parentModel },
-				);
-				expect(resolved.task.subagentType).toBe("research");
-				expect(resolved.task.model).toBe("zai/glm-5-turbo");
-				expect(resolved.fallbackModels).toEqual(["openai-codex/gpt-5.6-luna"]);
-			}
+			await expect(routeSubagentTasks([
+				{ id: subagentType, task: subagentType, subagentType },
+			], config, {})).rejects.toThrow(/Unknown subagentType/);
 		}
 	});
 
@@ -1296,7 +1315,7 @@ setTimeout(() => {}, 2000);
 			process.env.PI_SUBAGENT_AGENT_DIR = path.join(cwd, "wrong-agent");
 			for (const id of ["qa-default", "qa-extra-skill", "ordinary"]) {
 				const qa = id !== "ordinary";
-				const resolved = resolveAgentTaskConfig({ id, task: "Check the requested target", subagentType: qa ? "browser-qa" : "review" }, config);
+				const resolved = resolveAgentTaskConfig({ id, task: "Check the requested target", subagentType: qa ? "browser-qa" : "research" }, config);
 				const skills = id === "qa-extra-skill" ? [extraSkill] : resolved.isolatedSkills;
 				await withTimeout(new Promise<any>((resolve) => {
 					spawnAgent(runDir, resolved.task, cwd,

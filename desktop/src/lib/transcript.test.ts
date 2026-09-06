@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   appendLocalUserMessage,
+  applyDeferredToolResult,
   applySessionUpdate,
+  applySessionUpdates,
   emptyTranscript,
   groupTranscriptItems,
+  markDeferredToolResults,
+  setToolResultLoading,
   type ToolItem,
 } from "./transcript";
 
@@ -162,6 +166,61 @@ describe("transcript reducer", () => {
         "LSP diagnostics:\n\n✅ typescript: no diagnostics",
         "💬 comment-checker — unnecessary comments\na.ts  4:filler",
       ].join("\n"),
+    });
+  });
+
+  it("builds history batches in order while coalescing stable message ids", () => {
+    const state = applySessionUpdates(emptyTranscript, [
+      { sessionUpdate: "agent_message_chunk", messageId: "a1", content: { type: "text", text: "one" } },
+      { sessionUpdate: "tool_call", toolCallId: "t1", title: "Read", status: "completed" },
+      { sessionUpdate: "agent_message_chunk", messageId: "a1", content: { type: "text", text: " two" } },
+    ]);
+
+    expect(state.items).toHaveLength(2);
+    expect(state.items[0]).toMatchObject({ type: "message", messageId: "a1", text: "one two" });
+    expect(state.items[1]).toMatchObject({ type: "tool", toolCallId: "t1" });
+  });
+
+  it("hydrates deferred tool results only when the full update arrives", () => {
+    let state = applySessionUpdates(emptyTranscript, [
+      {
+        sessionUpdate: "tool_call",
+        toolCallId: "lazy-1",
+        name: "Edit",
+        title: "Edit file.ts",
+        kind: "edit",
+        status: "in_progress",
+      },
+      { sessionUpdate: "tool_call_update", toolCallId: "lazy-1", status: "completed" },
+    ]);
+    state = markDeferredToolResults(state, ["lazy-1"]);
+
+    expect(state.items[0]).toMatchObject({
+      type: "tool",
+      toolCallId: "lazy-1",
+      status: "completed",
+      deferredResult: true,
+      content: "",
+    });
+    expect((state.items[0] as ToolItem).rawInput).toBeUndefined();
+
+    state = setToolResultLoading(state, "lazy-1", true);
+    expect(state.items[0]).toMatchObject({ resultLoading: true });
+
+    state = applyDeferredToolResult(state, {
+      sessionUpdate: "tool_call_update",
+      toolCallId: "lazy-1",
+      status: "completed",
+      rawInput: { path: "file.ts" },
+      rawOutput: { changed: true },
+      content: [{ type: "content", content: { type: "text", text: "updated" } }],
+    });
+    expect(state.items[0]).toMatchObject({
+      deferredResult: false,
+      resultLoading: false,
+      rawInput: { path: "file.ts" },
+      rawOutput: { changed: true },
+      content: "updated",
     });
   });
 });

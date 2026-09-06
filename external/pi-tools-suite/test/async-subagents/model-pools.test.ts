@@ -10,7 +10,6 @@ import {
 	type SubagentConfig,
 } from "../../src/async-subagents/core/config.js";
 import { buildSubagentCatalogPrompt } from "../../src/async-subagents/core/agent-catalog.js";
-import { LEGACY_SUBAGENT_TYPES } from "../../src/async-subagents/core/agent-aliases.js";
 import { routeSubagentTasks } from "../../src/async-subagents/core/routing.js";
 import { selectAvailableAgentModels } from "../../src/async-subagents/core/model-selection.js";
 import { rememberSessionModelFallback, resetSessionModelFallbacks, selectSessionModelWithFallback } from "../../src/async-subagents/core/model-fallback.js";
@@ -184,18 +183,14 @@ describe("ordered agent models and preset pools", () => {
 		expect(resolveAgentTaskConfig(task(), noFallback).fallbackModels).toEqual([]);
 	});
 
-	test("old role names alias without becoming new catalog entries", async () => {
+	test("old builtin role names are rejected unless explicitly configured", async () => {
 		const cfg = configFile({});
-		const catalog = buildSubagentCatalogPrompt(cfg)!;
-		for (const [oldName, canonical] of Object.entries(LEGACY_SUBAGENT_TYPES)) {
-			const routed = await routeSubagentTasks([task(oldName)], cfg, {});
-			expect(routed.usedLlm).toBe(false);
-			expect(resolveAgentTaskConfig(routed.tasks[0], cfg).task.subagentType).toBe(canonical);
-			expect(catalog).not.toContain(`- ${oldName}:`);
+		for (const oldName of ["quick", "scan", "review", "deep", "docs", "frontend", "tests"]) {
+			await expect(routeSubagentTasks([task(oldName)], cfg, {})).rejects.toThrow(/Unknown subagentType/);
 		}
 	});
 
-	test("distinct legacy/custom overrides never collapse onto the same canonical role", () => {
+	test("explicit custom types keep their own names and settings", () => {
 		const cfg = configFile({ types: {
 			scan: { model: "custom/scan", thinking: "off" },
 			review: { model: "custom/review", promptAppend: "A private checklist." },
@@ -206,8 +201,11 @@ describe("ordered agent models and preset pools", () => {
 		expect(buildSubagentCatalogPrompt(cfg)).toContain("- review:");
 	});
 
-	test("legacy preset role overrides apply to old requests, not unrelated canonical tasks", async () => {
-		const cfg = configFile({});
+	test("legacy preset role overrides apply only to explicitly configured matching types", async () => {
+		const cfg = configFile({ types: {
+			scan: { model: "custom/scan" },
+			review: { model: "custom/review" },
+		} });
 		const preset = { types: { scan: { model: "old/scanner" }, review: { model: "old/reviewer" } } };
 		const routed = await routeSubagentTasks([task("scan")], cfg, {});
 		expect(resolveAgentTaskConfig(routed.tasks[0], cfg, { preset }).task.model).toBe("old/scanner");

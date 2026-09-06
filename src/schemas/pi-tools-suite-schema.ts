@@ -235,6 +235,7 @@ const SubagentPreset = Type.Object(
 const SubagentTypeConfig = Type.Object(
 	{
 		description: Type.Optional(Type.String({ description: "Role description for routing." })),
+		icon: Type.Optional(Type.String({ description: "Agent icon name rendered by UIs (pix TUI icon themes and Pix Desktop lucide icons): agent, search, code, flask, globe, sparkles, brain, wrench, terminal, bug, book, eye, zap, rocket. Unknown names render as the neutral agent icon." })),
 		models: Type.Optional(Type.Array(Type.String({ pattern: "^[^\\s/*]+/[^\\s*]+$" }), { uniqueItems: true, description: "Ordered model candidates. First usable member of the preset pool runs; only remaining compatible members can be used on quota failure. Replaces legacy model/fallbackModels/modelByParent selection." })),
 		model: Type.Optional(Type.String({ description: "Legacy primary model; use models for new profiles.", deprecated: true })),
 		fallbackModels: Type.Optional(Type.Array(Type.String(), { description: "Legacy candidates after model; use models for a complete ranked list.", deprecated: true })),

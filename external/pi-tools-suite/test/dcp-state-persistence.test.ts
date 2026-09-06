@@ -54,6 +54,10 @@ function recoveryMarkerPath(statePath: string): string {
   return `${statePath}.recovery-required`;
 }
 
+function revisionFencePath(statePath: string): string {
+  return `${statePath}.fence`;
+}
+
 describe("DCP sidecar state persistence", () => {
   test("reads only the bounded header of a session file", async () => {
     const sessionDir = await makeTempDir();
@@ -258,6 +262,8 @@ describe("DCP sidecar state persistence", () => {
 
     const stalePath = resolveDcpStatePath(fakeContext(sessionDir, "stale-session"))!;
     const livePath = resolveDcpStatePath(fakeContext(sessionDir, "live-session"))!;
+    const oldDate = new Date(Date.now() - 5_000);
+    await utimes(stalePath, oldDate, oldDate);
 
     await expect(readFile(stalePath, "utf8")).resolves.toBeTruthy();
 
@@ -319,6 +325,12 @@ describe("DCP sidecar state persistence", () => {
     expect(first.revision).toBe(first.payloadHash);
     expect(first.payloadHash).toMatch(/^[a-f0-9]{64}$/);
     expect(first.payload.tokensSaved).toBe(11);
+    expect(JSON.parse(await readFile(revisionFencePath(statePath), "utf8"))).toMatchObject({
+      kind: "dcp-state-fence",
+      sessionId: "generation-session",
+      generation: 1,
+      payloadHash: first.payloadHash,
+    });
 
     state.tokensSaved = 12;
     await saveDcpState(ctx, state);
@@ -328,6 +340,151 @@ describe("DCP sidecar state persistence", () => {
     const previous = await readEnvelope(`${statePath}.prev`);
     expect(previous.generation).toBe(1);
     expect(previous.payload.tokensSaved).toBe(11);
+  });
+
+  test("recovers a missing primary and .prev only for the owner matching the durable revision fence", async () => {
+    const sessionDir = await makeTempDir();
+    const ctx = fakeContext(sessionDir, "missing-sidecar-session");
+    const state = createState();
+    state.tokensSaved = 10;
+    await saveDcpState(ctx, state);
+    const statePath = resolveDcpStatePath(ctx)!;
+
+    await rm(statePath, { force: true });
+    await rm(`${statePath}.prev`, { force: true });
+    expect(JSON.parse(await readFile(revisionFencePath(statePath), "utf8"))).toMatchObject({ generation: 1 });
+
+    state.tokensSaved = 20;
+    await expect(saveDcpState(ctx, state)).resolves.toBeUndefined();
+    const recovered = await readEnvelope(statePath);
+    expect(recovered.generation).toBe(2);
+    expect(recovered.payload.tokensSaved).toBe(20);
+    expect(JSON.parse(await readFile(revisionFencePath(statePath), "utf8"))).toMatchObject({
+      generation: 2,
+      payloadHash: recovered.payloadHash,
+    });
+  });
+
+  test("does not let a stale owner resurrect state after newer primary and .prev generations are deleted", async () => {
+    const sessionDir = await makeTempDir();
+    const ctx = fakeContext(sessionDir, "missing-newer-session");
+    const staleOwner = createState();
+    staleOwner.tokensSaved = 1;
+    await saveDcpState(ctx, staleOwner);
+
+    const newerOwner = createState();
+    restoreState(newerOwner, await loadDcpState(ctx));
+    newerOwner.tokensSaved = 2;
+    await saveDcpState(ctx, newerOwner);
+    const statePath = resolveDcpStatePath(ctx)!;
+    expect((await readEnvelope(statePath)).generation).toBe(2);
+
+    await rm(statePath, { force: true });
+    await rm(`${statePath}.prev`, { force: true });
+    expect(JSON.parse(await readFile(revisionFencePath(statePath), "utf8"))).toMatchObject({ generation: 2 });
+
+    staleOwner.tokensSaved = 99;
+    await expect(saveDcpState(ctx, staleOwner)).rejects.toThrow(/expected generation 1, found 2/i);
+    await expect(readFile(statePath, "utf8")).rejects.toThrow();
+
+    newerOwner.tokensSaved = 3;
+    await expect(saveDcpState(ctx, newerOwner)).resolves.toBeUndefined();
+    const recovered = await readEnvelope(statePath);
+    expect(recovered.generation).toBe(3);
+    expect(recovered.payload.tokensSaved).toBe(3);
+  });
+
+  test("a fresh owner fails closed when only a durable revision fence survives", async () => {
+    const sessionDir = await makeTempDir();
+    const ctx = fakeContext(sessionDir, "fenced-restart-session");
+    const original = createState();
+    original.tokensSaved = 7;
+    await saveDcpState(ctx, original);
+    const statePath = resolveDcpStatePath(ctx)!;
+    await rm(statePath, { force: true });
+    await rm(`${statePath}.prev`, { force: true });
+
+    resetDcpPersistenceDedup();
+    const fresh = createState();
+    fresh.tokensSaved = 100;
+    await expect(saveDcpState(ctx, fresh)).rejects.toThrow(/expected generation unobserved, found 1/i);
+    await expect(readFile(statePath, "utf8")).rejects.toThrow();
+  });
+
+  test("a vanished known revision leaves a durable recovery marker before restart", async () => {
+    const sessionDir = await makeTempDir();
+    const ctx = fakeContext(sessionDir, "legacy-missing-revision-session");
+    const owner = createState();
+    owner.tokensSaved = 7;
+    await saveDcpState(ctx, owner);
+    const statePath = resolveDcpStatePath(ctx)!;
+    await rm(statePath, { force: true });
+    await rm(`${statePath}.prev`, { force: true });
+    await rm(revisionFencePath(statePath), { force: true });
+
+    owner.tokensSaved = 8;
+    await expect(saveDcpState(ctx, owner)).rejects.toThrow(/expected generation 1, found 0/i);
+    expect(JSON.parse(await readFile(recoveryMarkerPath(statePath), "utf8"))).toMatchObject({
+      kind: "dcp-state-recovery-required",
+      sessionId: "legacy-missing-revision-session",
+    });
+
+    resetDcpPersistenceDedup();
+    const fresh = createState();
+    await expect(saveDcpState(ctx, fresh)).rejects.toThrow(/recovery is blocked|unrecovered generation/i);
+    await expect(readFile(statePath, "utf8")).rejects.toThrow();
+  });
+
+  test("does not restore an older .prev when the revision fence proves a newer generation existed", async () => {
+    const sessionDir = await makeTempDir();
+    const ctx = fakeContext(sessionDir, "fenced-prev-session");
+    const state = createState();
+    state.tokensSaved = 1;
+    await saveDcpState(ctx, state);
+    state.tokensSaved = 2;
+    await saveDcpState(ctx, state);
+    const statePath = resolveDcpStatePath(ctx)!;
+    await rm(statePath, { force: true });
+
+    resetDcpPersistenceDedup();
+    await expect(loadDcpState(ctx)).resolves.toBeUndefined();
+    expect((await readEnvelope(`${statePath}.prev`)).generation).toBe(1);
+    expect(JSON.parse(await readFile(revisionFencePath(statePath), "utf8"))).toMatchObject({ generation: 2 });
+  });
+
+  test("cleanup leaves a fresh unowned sidecar alone at the session-snapshot boundary", async () => {
+    const sessionDir = await makeTempDir();
+    const orphanCtx = fakeContext(sessionDir, "fresh-orphan-session");
+    const state = createState();
+    await saveDcpState(orphanCtx, state);
+    const orphanPath = resolveDcpStatePath(orphanCtx)!;
+
+    await expect(cleanupStaleDcpStateFiles(fakeContext(sessionDir, "current-session"))).resolves.toBe(0);
+    await expect(readFile(orphanPath, "utf8")).resolves.toBeTruthy();
+
+    const oldDate = new Date(Date.now() - 5_000);
+    await utimes(orphanPath, oldDate, oldDate);
+    await expect(cleanupStaleDcpStateFiles(fakeContext(sessionDir, "current-session"))).resolves.toBe(1);
+    await expect(readFile(orphanPath, "utf8")).rejects.toThrow();
+    await expect(readFile(revisionFencePath(orphanPath), "utf8")).rejects.toThrow();
+  });
+
+  test("cleanup skips an old orphan while a writer owns its interprocess lock", async () => {
+    const sessionDir = await makeTempDir();
+    const orphanCtx = fakeContext(sessionDir, "locked-orphan-session");
+    const state = createState();
+    await saveDcpState(orphanCtx, state);
+    const orphanPath = resolveDcpStatePath(orphanCtx)!;
+    const oldDate = new Date(Date.now() - 5_000);
+    await utimes(orphanPath, oldDate, oldDate);
+    await writeFile(`${orphanPath}.lock`, "fixture live writer", "utf8");
+
+    await expect(cleanupStaleDcpStateFiles(fakeContext(sessionDir, "current-session"))).resolves.toBe(0);
+    await expect(readFile(orphanPath, "utf8")).resolves.toBeTruthy();
+
+    await rm(`${orphanPath}.lock`, { force: true });
+    await expect(cleanupStaleDcpStateFiles(fakeContext(sessionDir, "current-session"))).resolves.toBe(1);
+    await expect(readFile(orphanPath, "utf8")).rejects.toThrow();
   });
 
   test("loads legacy flat sidecars through the migration adapter", async () => {
@@ -402,7 +559,10 @@ describe("DCP sidecar state persistence", () => {
     restored.tokensSaved = 15;
     await saveDcpState(ctx, restored);
     const repaired = await readEnvelope(statePath);
-    expect(repaired.generation).toBe(2);
+    // Generation 2 really existed before it became corrupt. Recovery uses the
+    // valid generation-1 payload, but the durable fence keeps the high-water
+    // mark so the repair advances monotonically instead of reusing generation 2.
+    expect(repaired.generation).toBe(3);
     expect(repaired.payload.tokensSaved).toBe(15);
   });
 

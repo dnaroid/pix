@@ -53,7 +53,7 @@ You are a ... role prompt (markdown body).
 ```
 
 - Frontmatter keys: `name` (must match the filename if present; mismatch is an
-  error), plus every `SubagentTypeConfig` field (`description`, `model`,
+  error), plus every `SubagentTypeConfig` field (`description`, `icon`, `model`,
   `models`, legacy `fallbackModels`/`modelByParent`, `thinking`, `tools`, `isolatedSkills`,
   `extraArgs`, `promptAppend`, `promptOverride`, `retry`, `maxResultBytes`,
   `timeoutMs`). Unknown keys are rejected (typo safety; the JSONC config path

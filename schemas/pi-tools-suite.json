@@ -642,6 +642,10 @@
                   "type": "string",
                   "description": "Role description for routing."
                 },
+                "icon": {
+                  "type": "string",
+                  "description": "Agent icon name rendered by UIs (pix TUI icon themes and Pix Desktop lucide icons): agent, search, code, flask, globe, sparkles, brain, wrench, terminal, bug, book, eye, zap, rocket. Unknown names render as the neutral agent icon."
+                },
                 "models": {
                   "type": "array",
                   "items": {

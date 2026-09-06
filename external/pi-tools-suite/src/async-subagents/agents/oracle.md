@@ -1,5 +1,6 @@
 ---
 description: Strong independent second opinion for hard or high-stakes uncertainty. Use sparingly to challenge architecture, plans, root-cause hypotheses, or risk decisions. Prefer another provider within the available pool; read-only advice, not routine execution.
+icon: sparkles
 models: [openai-codex/gpt-5.6-sol, zai/glm-5.3]
 thinking: max
 tools: [read, grep, bash]

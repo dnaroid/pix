@@ -505,6 +505,7 @@ the same active preset pool as built-in agents.
 ```markdown
 ---
 description: Use for reviewing this repo's diff — knows the house rules.
+icon: eye
 models:
   - zai/glm-5-turbo
   - openai-codex/gpt-5.6-luna
@@ -519,12 +520,13 @@ You are this project's staff reviewer. Apply the repo rules from
 AGENTS.md before approving anything; cite file paths first.
 ```
 
-- Frontmatter keys: `name` (must match the filename), `description`, `models`, `thinking`, `tools`, `isolatedSkills`, `extraArgs`, `promptAppend`, `promptOverride`, `retry`, `maxResultBytes`, `timeoutMs`. Legacy `model`, `fallbackModels`, and `modelByParent` still load. Unknown keys are rejected with an error naming the file.
+- Frontmatter keys: `name` (must match the filename), `description`, `icon`, `models`, `thinking`, `tools`, `isolatedSkills`, `extraArgs`, `promptAppend`, `promptOverride`, `retry`, `maxResultBytes`, `timeoutMs`. Legacy `model`, `fallbackModels`, and `modelByParent` still load. Unknown keys are rejected with an error naming the file.
 - Array fields accept block lists (`- item`), inline arrays (`[a, b]`), or comma-separated strings (`tools: read, grep, bash`). The frontmatter YAML subset is intentionally small: scalars, quoted strings, numbers, comments, lists, and nested maps for `modelByParent`/`retry`. Tabs, block scalars (`|`/`>`), anchors/aliases, and flow maps are hard errors naming file and line.
 - The markdown body becomes `promptAppend`: it is appended after the standard generated prompt (parent objective + task + output format), so the agent still receives its task in the usual structure. Use frontmatter `promptOverride` for full prompt replacement.
 - Precedence: project agent fields override same-named types from user/project JSONC config (field-level; other fields are kept), which in turn override built-ins. Setting `ASYNC_SUBAGENTS_CONFIG` / `PI_SUBAGENTS_CONFIG` disables the directory (explicit config = full control).
 - Files without frontmatter are skipped (a `README.md` there is fine). Definition loading is uncached: edits apply on the next config read/spawn without a restart, and the effective system-prompt catalog is rebuilt at parent-agent start.
 - Bundled roles use the same format internally under `src/async-subagents/agents/*.md`; built-in and project-local profiles therefore share one parser and normalization path instead of maintaining a second role-description schema in TypeScript.
+- `icon` names an agent glyph for UIs that render sub-agent widgets (pix TUI panel, Pix Desktop subagents panel): `agent` (neutral default), `search`, `code`, `flask`, `globe`, `sparkles`, `brain`, `wrench`, `terminal`, `bug`, `book`, `eye`, `zap`, `rocket`. The value is passed through opaquely; unknown names render as the neutral agent icon, and status stays color-coded next to it.
 
 ### Private browser QA and project auth
 
@@ -690,13 +692,10 @@ Example shared async-subagents config section:
 
 ### Legacy configuration compatibility
 
-Unconfigured old names are aliases: `quick`, `scan`, `review`, and `deep` map
-to `research`; `docs` and `frontend` map to `implement`; `tests` maps to
-`verify`. They are not advertised as additional built-ins. An explicitly
-configured type or project Markdown file with an old name wins over the alias
-and keeps its own settings. Distinct old overrides are never collapsed onto
-one shared role. Old preset per-role keys still apply to requests using the
-corresponding old name.
+Old built-in role names are no longer implicit aliases. `quick`, `scan`,
+`review`, `deep`, `docs`, `frontend`, and `tests` are valid only when explicitly
+defined as ordinary custom/project types. Old preset per-role keys likewise
+apply only when a type with that exact name exists.
 
 Legacy `model` plus `fallbackModels` remains readable. `models` is a complete
 replacement list: it clears inherited legacy model/fallback/parent routing.

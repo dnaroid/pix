@@ -1,5 +1,6 @@
 ---
 description: Read-only evidence gathering - search files, trace behavior, investigate hypotheses, or independently review a diff. Return findings with paths, not raw source. Use verify for running checks and implement for changes.
+icon: search
 models: [zai/glm-5-turbo, openai-codex/gpt-5.6-luna]
 thinking: low
 tools: [read, grep]

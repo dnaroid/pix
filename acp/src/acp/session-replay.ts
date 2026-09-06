@@ -16,6 +16,16 @@ import type { SessionNotification, SessionUpdate, ToolCallContent, ToolKind } fr
 import { toolKind, toolLocations, toolTitle, type TranslateContext } from "./event-translator.js";
 import type { PiAgentMessage, PiClient, PiMessagePart } from "../pi/pi-rpc-client.js";
 
+export interface DeferredSessionHistory {
+	readonly updates: readonly SessionUpdate[];
+	readonly toolResults: ReadonlyMap<string, DeferredToolResult>;
+}
+
+export interface DeferredToolResult {
+	readonly message: PiAgentMessage;
+	readonly rawInput?: unknown;
+}
+
 export async function replaySessionHistory(
 	pi: PiClient,
 	context: TranslateContext,
@@ -57,6 +67,91 @@ export async function replaySessionHistory(
 }
 
 /**
+ * Build the Desktop history payload without embedding tool inputs/results.
+ * Tool rows stay fully identifiable and keep their final status, while their
+ * heavy payload is retained separately for lazy retrieval when expanded.
+ */
+export async function deferredSessionHistory(
+	pi: PiClient,
+	context: TranslateContext,
+): Promise<DeferredSessionHistory> {
+	return deferredSessionHistoryFromMessages(await pi.getMessages(), context);
+}
+
+export function deferredSessionHistoryFromMessages(
+	messages: readonly PiAgentMessage[],
+	context: TranslateContext,
+): DeferredSessionHistory {
+	const updates: SessionUpdate[] = [];
+	const toolInputs = new Map<string, unknown>();
+	const toolResults = new Map<string, DeferredToolResult>();
+
+	for (const [index, message] of messages.entries()) {
+		const messageId = `replay-${index}`;
+		const content = (message as { content?: unknown }).content;
+		if (message.role === "user") {
+			if (typeof content === "string") {
+				if (content) updates.push(chunk(context.sessionId, messageId, "user_message_chunk", { type: "text", text: content }).update);
+			} else if (Array.isArray(content)) {
+				for (const part of content as readonly PiMessagePart[]) {
+					if (part.type === "text" && typeof part.text === "string" && part.text) {
+						updates.push(chunk(context.sessionId, messageId, "user_message_chunk", { type: "text", text: part.text }).update);
+					} else if (part.type === "image" && typeof part.data === "string" && typeof part.mimeType === "string") {
+						updates.push(chunk(context.sessionId, messageId, "user_message_chunk", {
+							type: "image",
+							data: part.data,
+							mimeType: part.mimeType,
+						}).update);
+					}
+				}
+			}
+		} else if (message.role === "assistant") {
+			for (const notification of assistantPartNotifications(context, index, content as readonly PiMessagePart[] | undefined, false)) {
+				const update = notification.update;
+				updates.push(update);
+				if (update.sessionUpdate === "tool_call" && update.toolCallId) {
+					const toolCallId = update.toolCallId;
+					const part = (content as readonly PiMessagePart[] | undefined)?.find(
+						(candidate) => candidate.type === "toolCall" && candidate.id === toolCallId,
+					);
+					if (part?.type === "toolCall" && part.arguments !== undefined) {
+						toolInputs.set(toolCallId, part.arguments);
+					}
+				}
+			}
+		} else if (message.role === "toolResult") {
+			const record = message as { toolCallId?: unknown; isError?: unknown };
+			if (typeof record.toolCallId !== "string") continue;
+			const toolCallId = record.toolCallId;
+			updates.push({
+				sessionUpdate: "tool_call_update",
+				toolCallId,
+				status: record.isError === true ? "failed" : "completed",
+			});
+			toolResults.set(toolCallId, {
+				message,
+				...(toolInputs.has(toolCallId) ? { rawInput: toolInputs.get(toolCallId) } : {}),
+			});
+		}
+	}
+
+	return { updates, toolResults };
+}
+
+/** Materialize the heavy ACP tool payload only when Desktop expands it. */
+export function deferredToolResultUpdate(
+	context: TranslateContext,
+	result: DeferredToolResult,
+): SessionUpdate | undefined {
+	const notification = toolResultNotification(context, result.message);
+	if (!notification || notification.update.sessionUpdate !== "tool_call_update") return undefined;
+	return {
+		...notification.update,
+		...(result.rawInput !== undefined ? { rawInput: result.rawInput } : {}),
+	};
+}
+
+/**
  * Assistant history in part order: runs of text parts become one
  * `agent_message_chunk`, tool-call parts become `tool_call` notifications.
  */
@@ -64,6 +159,7 @@ function assistantPartNotifications(
 	context: TranslateContext,
 	index: number,
 	content: readonly PiMessagePart[] | undefined,
+	includeRawInput = true,
 ): SessionNotification[] {
 	const notifications: SessionNotification[] = [];
 	if (!content) return notifications;
@@ -80,14 +176,14 @@ function assistantPartNotifications(
 			text.push(part.text);
 		} else if (part.type === "toolCall" && typeof part.id === "string") {
 			flushText();
-			notifications.push(toolCallNotification(context, part));
+			notifications.push(toolCallNotification(context, part, includeRawInput));
 		}
 	}
 	flushText();
 	return notifications;
 }
 
-function toolCallNotification(context: TranslateContext, part: PiMessagePart): SessionNotification {
+function toolCallNotification(context: TranslateContext, part: PiMessagePart, includeRawInput = true): SessionNotification {
 	const originalName = typeof part.name === "string" ? part.name : "";
 	const name = originalName.toLowerCase();
 	const args = (part.arguments ?? undefined) as Record<string, unknown> | undefined;
@@ -98,7 +194,7 @@ function toolCallNotification(context: TranslateContext, part: PiMessagePart): S
 		title: toolTitle(name || "tool", args),
 		kind: toolKind(name || "tool") as ToolKind,
 		status: "in_progress",
-		rawInput: args,
+		...(includeRawInput ? { rawInput: args } : {}),
 		locations: toolLocations(context, name, args),
 	} as SessionUpdate;
 	return { sessionId: context.sessionId, update };

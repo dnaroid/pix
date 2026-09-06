@@ -123,13 +123,11 @@ describe.serial("model-pool selection contract", () => {
 		expect(() => resolveAgentTaskConfig(task, config, { preset: { models: ["zai/glm-5-turbo"] } })).toThrow(/pool/i);
 	});
 
-	test("keeps old names routable without advertising duplicate builtin profiles", async () => {
+	test("rejects removed builtin role names unless explicitly configured", async () => {
 		const { config } = fixture();
-		for (const [old, canonical] of Object.entries({ quick: "research", scan: "research", review: "research", deep: "research", docs: "implement", frontend: "implement", tests: "verify" })) {
-			const result = await routeSubagentTasks([{ id: "r", task: "Bounded work", subagentType: old }], config, {});
-			expect(result.usedLlm).toBe(false);
-			expect(resolveAgentTaskConfig(result.tasks[0], config).task.subagentType).toBe(canonical);
-			expect(config.types[old]).toBeUndefined();
+		for (const old of ["quick", "scan", "review", "deep", "docs", "frontend", "tests"]) {
+			await expect(routeSubagentTasks([{ id: "r", task: "Bounded work", subagentType: old }], config, {}))
+				.rejects.toThrow(/Unknown subagentType/);
 		}
 	});
 

@@ -8,6 +8,7 @@ import {
 	formatSubagentTimestamp,
 	isSubagentRunRenderDetails,
 	isSubagentsToolName,
+	subagentIcon,
 	subagentRunName,
 	subagentStatusIcon,
 	taskPreviewMap,
@@ -251,7 +252,7 @@ function subagentsDetailsText(details: SubagentRunRenderDetails): string {
 }
 
 function formatSubagentToolLine(agent: SubagentAgentState, preview: SubagentTaskPreview | undefined): string {
-	const parts = [subagentStatusIcon(agent.status), agent.status, agent.id];
+	const parts = [subagentIcon(preview), subagentStatusIcon(agent.status), agent.status, agent.id];
 	if (preview?.model) parts.push(`model:${preview.model}`);
 	if (preview?.task) parts.push(`task:${preview.task}`);
 	else if (preview?.scope) parts.push(`scope:${preview.scope}`);

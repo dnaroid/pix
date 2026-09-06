@@ -14,6 +14,7 @@ import {
 import {
 	cleanupStaleDcpStateFiles,
 	captureDcpPersistenceTarget,
+	DcpPersistenceConflictError,
 	loadDcpState,
 	loadDcpStateFromSessionFile,
 	resetDcpPersistenceDedup,
@@ -1107,6 +1108,24 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 
 	// ── 11. agent_end: persist state after each agent run ────────────────────
 	pi.on("agent_end", async (_event, ctx) => {
-		await saveDcpState(ctx, state)
+		try {
+			await saveDcpState(ctx, state)
+		} catch (error) {
+			if (!(error instanceof DcpPersistenceConflictError)) throw error
+			writeDcpDebugLog(configForContext(ctx), "persistence.conflict", {
+				event: "agent_end",
+				error: error.message,
+				state: summarizeDcpState(state, configForContext(ctx)),
+			}, ctx)
+			try {
+				ctx.ui.notify(
+					"DCP state was not persisted because a stale or concurrent revision was detected. Reload the session before continuing.",
+					"warning",
+				)
+			} catch {
+				// The persistence conflict is already durable-safe and debug-logged;
+				// notification failure must not turn it back into a runtime extension error.
+			}
+		}
 	})
 }

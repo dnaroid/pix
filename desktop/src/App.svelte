@@ -11,14 +11,18 @@
     SessionConfigOption,
     SessionInfo,
     SessionNotification,
+    SessionUpdate,
   } from "@agentclientprotocol/sdk";
   import { AcpClient } from "./lib/acp-client";
   import { TauriAcpTransport } from "./lib/tauri-transport";
   import {
     appendLocalAssistantMessage,
     appendLocalUserMessage,
-    applySessionUpdate,
+    applyDeferredToolResult,
+    applySessionUpdates,
     emptyTranscript,
+    markDeferredToolResults,
+    setToolResultLoading,
     type TranscriptState,
   } from "./lib/transcript";
   import {
@@ -174,6 +178,8 @@
   let autocompleteDebounceMs = $state(350);
   let promptRunning = $state(false);
   let operationRunning = $state(false);
+  let sessionHistoryLoading = $state(false);
+  let activeSessionRuntimeReady = $state(false);
   let changingConfig = $state<string | null>(null);
   let errorMessage = $state<string | null>(null);
   let diagnostics = $state<string[]>([]);
@@ -203,7 +209,10 @@
   let previewSequence = 0;
   let attachmentDraftGeneration = 0;
   let attachmentAddQueue = Promise.resolve();
-  let sessionUpdateQueue = Promise.resolve();
+  let pendingSessionUpdates: Array<{ sessionId: string; update: SessionUpdate }> = [];
+  let sessionUpdateFrame = 0;
+  let transcriptScrollFrame = 0;
+  let sessionHistoryGeneration = 0;
   let previousAttachmentDraftKey: string | null = null;
   let projectFilePreviewGeneration = 0;
   let taskLoadGeneration = 0;
@@ -211,6 +220,12 @@
   let questionImageOperationSequence = 0;
   let activeQuestionImageOperationId: number | null = null;
   const registeredAttachmentPaths = new Set<string>();
+  const preparingAttachmentPaths = new Map<string, Promise<void>>();
+  const loadingToolResults = new Set<string>();
+  const transcriptBySessionId = new Map<string, TranscriptState>();
+  const runtimeReadySessionIds = new Set<string>();
+  const runtimeLoadsBySessionId = new Map<string, Promise<void>>();
+  const configOptionsBySessionId = new Map<string, SessionConfigOption[]>();
 
   const canUseSession = $derived(status === "ready" && !!workspace && !operationRunning);
   const activeTitle = $derived(
@@ -266,7 +281,10 @@
   $effect(() => {
     const requestClient = client;
     const sessionId = activeSessionId;
-    const sessionReady = status === "ready" && !operationRunning;
+    const sessionReady = status === "ready"
+      && activeSessionRuntimeReady
+      && !operationRunning
+      && !sessionHistoryLoading;
     const generation = ++autocompleteSettingsGeneration;
     autocompleteEnabled = false;
     autocompleteDebounceMs = 350;
@@ -341,6 +359,10 @@
         pendingElicitation = null;
         cancelQuestionImageOperation();
         activeSessionId = null;
+        activeSessionRuntimeReady = false;
+        runtimeReadySessionIds.clear();
+        runtimeLoadsBySessionId.clear();
+        configOptionsBySessionId.clear();
         todoSnapshots = new Map();
         subagentSnapshots = new Map();
         slashCommandsBySession = new Map();
@@ -390,6 +412,10 @@
     pendingElicitation = null;
     cancelQuestionImageOperation();
     activeSessionId = null;
+    activeSessionRuntimeReady = false;
+    runtimeReadySessionIds.clear();
+    runtimeLoadsBySessionId.clear();
+    configOptionsBySessionId.clear();
     todoSnapshots = new Map();
     subagentSnapshots = new Map();
     slashCommandsBySession = new Map();
@@ -410,9 +436,9 @@
       slashCommandsBySession = next;
       return;
     }
-    if (notification.sessionId !== activeSessionId) return;
     if (update.sessionUpdate === "config_option_update") {
-      configOptions = update.configOptions;
+      configOptionsBySessionId.set(notification.sessionId, update.configOptions);
+      if (notification.sessionId === activeSessionId) configOptions = update.configOptions;
       return;
     }
     if (update.sessionUpdate === "session_info_update") {
@@ -425,13 +451,42 @@
         : session);
       return;
     }
-    sessionUpdateQueue = sessionUpdateQueue.then(async () => {
-      if (notification.sessionId !== activeSessionId) return;
-      const nextTranscript = applySessionUpdate(transcript, update);
-      await registerTranscriptAttachments(nextTranscript);
-      if (notification.sessionId !== activeSessionId) return;
-      transcript = nextTranscript;
-      void scrollToLatest();
+    if (notification.sessionId !== activeSessionId) return;
+    pendingSessionUpdates.push({ sessionId: notification.sessionId, update });
+    if (sessionUpdateFrame) return;
+    sessionUpdateFrame = requestAnimationFrame(flushSessionUpdates);
+  }
+
+  function flushSessionUpdates(): void {
+    sessionUpdateFrame = 0;
+    const sessionId = activeSessionId;
+    const queued = pendingSessionUpdates;
+    pendingSessionUpdates = [];
+    if (!sessionId || queued.length === 0) return;
+    const updates = queued
+      .filter((entry) => entry.sessionId === sessionId)
+      .map((entry) => entry.update);
+    if (updates.length === 0) return;
+
+    const followLatest = transcriptIsNearBottom();
+    const nextTranscript = applySessionUpdates(transcript, updates);
+    transcript = nextTranscript;
+    transcriptBySessionId.set(sessionId, nextTranscript);
+    if (followLatest) scheduleScrollToLatest();
+  }
+
+  function transcriptIsNearBottom(): boolean {
+    const pane = transcriptPane;
+    if (!pane) return true;
+    return pane.scrollHeight - pane.scrollTop - pane.clientHeight < 160;
+  }
+
+  function scheduleScrollToLatest(): void {
+    if (transcriptScrollFrame) return;
+    transcriptScrollFrame = requestAnimationFrame(() => {
+      transcriptScrollFrame = 0;
+      const pane = transcriptPane;
+      if (pane) pane.scrollTop = pane.scrollHeight;
     });
   }
 
@@ -459,15 +514,153 @@
     slashCommandsBySession = nextCommands;
   }
 
-  async function registerTranscriptAttachments(nextTranscript: TranscriptState): Promise<void> {
-    const paths = nextTranscript.items
-      .flatMap((item) => item.attachments)
-      .flatMap((attachment) => attachment.path ? [attachment.path] : [])
-      .filter((path) => !registeredAttachmentPaths.has(path));
-    for (const path of paths) registeredAttachmentPaths.add(path);
-    await Promise.all(paths.map((path) =>
-      invoke<AttachmentFile[]>("inspect_attachments", { paths: [path] }).catch(() => []),
-    ));
+  function prepareTranscriptAttachment(attachment: Attachment): Promise<void> {
+    const path = attachment.path;
+    if (!path || attachment.dataUrl || registeredAttachmentPaths.has(path)) return Promise.resolve();
+    const existing = preparingAttachmentPaths.get(path);
+    if (existing) return existing;
+    const pending = invoke<AttachmentFile[]>("inspect_attachments", { paths: [path] })
+      .then(() => {
+        registeredAttachmentPaths.add(path);
+      })
+      .finally(() => {
+        if (preparingAttachmentPaths.get(path) === pending) preparingAttachmentPaths.delete(path);
+      });
+    preparingAttachmentPaths.set(path, pending);
+    return pending;
+  }
+
+  function ensureSessionRuntime(
+    requestClient: AcpClient,
+    sessionId: string,
+    requestWorkspace: string,
+  ): Promise<void> {
+    if (runtimeReadySessionIds.has(sessionId)) {
+      if (sessionId === activeSessionId) activeSessionRuntimeReady = true;
+      return Promise.resolve();
+    }
+    const existing = runtimeLoadsBySessionId.get(sessionId);
+    if (existing) return existing;
+
+    const pending = requestClient.loadSession(sessionId, requestWorkspace)
+      .then((response) => {
+        if (requestClient !== client || requestWorkspace !== workspace) return;
+        const options = response.configOptions ?? [];
+        runtimeReadySessionIds.add(sessionId);
+        configOptionsBySessionId.set(sessionId, options);
+        if (sessionId === activeSessionId) {
+          configOptions = options;
+          activeSessionRuntimeReady = true;
+        }
+      })
+      .catch((error) => {
+        if (requestClient === client && requestWorkspace === workspace && sessionId === activeSessionId) {
+          activeSessionRuntimeReady = false;
+          reportError(error);
+        }
+      })
+      .finally(() => {
+        if (runtimeLoadsBySessionId.get(sessionId) === pending) runtimeLoadsBySessionId.delete(sessionId);
+      });
+    runtimeLoadsBySessionId.set(sessionId, pending);
+    return pending;
+  }
+
+  function markSessionRuntimeReady(sessionId: string, options: SessionConfigOption[]): void {
+    runtimeReadySessionIds.add(sessionId);
+    configOptionsBySessionId.set(sessionId, options);
+    if (sessionId === activeSessionId) activeSessionRuntimeReady = true;
+  }
+
+  function forgetSessionRuntime(sessionId: string): void {
+    runtimeReadySessionIds.delete(sessionId);
+    runtimeLoadsBySessionId.delete(sessionId);
+    configOptionsBySessionId.delete(sessionId);
+    if (sessionId === activeSessionId) activeSessionRuntimeReady = false;
+  }
+
+  function beginSessionHistoryLoad(): number {
+    sessionHistoryLoading = true;
+    return ++sessionHistoryGeneration;
+  }
+
+  function cancelSessionHistoryLoad(): void {
+    sessionHistoryGeneration += 1;
+    sessionHistoryLoading = false;
+    loadingToolResults.clear();
+  }
+
+  function sessionHistoryIsCurrent(
+    requestClient: AcpClient,
+    sessionId: string,
+    requestWorkspace: string,
+    generation: number,
+  ): boolean {
+    return requestClient === client
+      && sessionId === activeSessionId
+      && requestWorkspace === workspace
+      && generation === sessionHistoryGeneration;
+  }
+
+  async function hydrateSessionHistory(
+    requestClient: AcpClient,
+    sessionId: string,
+    requestWorkspace: string,
+    generation: number,
+  ): Promise<void> {
+    try {
+      const history = await requestClient.sessionHistory(sessionId);
+      if (!sessionHistoryIsCurrent(requestClient, sessionId, requestWorkspace, generation)) return;
+      let loadedTranscript = applySessionUpdates(emptyTranscript, history.updates);
+      loadedTranscript = markDeferredToolResults(loadedTranscript, history.deferredToolCallIds);
+
+      // A tiny amount of live/local state can be appended while persisted
+      // history is loading (notably the local "Forked…" marker). Preserve it
+      // behind the hydrated history rather than replacing the whole transcript.
+      const currentItems = transcript.items;
+      const nextTranscript = currentItems.length === 0
+        ? loadedTranscript
+        : { items: [...loadedTranscript.items, ...currentItems] };
+      transcript = nextTranscript;
+      transcriptBySessionId.set(sessionId, nextTranscript);
+      void scrollToLatest();
+    } catch (error) {
+      if (sessionHistoryIsCurrent(requestClient, sessionId, requestWorkspace, generation)) reportError(error);
+    } finally {
+      if (sessionHistoryIsCurrent(requestClient, sessionId, requestWorkspace, generation)) {
+        sessionHistoryLoading = false;
+      }
+    }
+  }
+
+  async function loadDeferredToolResult(toolCallId: string): Promise<void> {
+    const requestClient = client;
+    const sessionId = activeSessionId;
+    const requestWorkspace = workspace;
+    const historyGeneration = sessionHistoryGeneration;
+    if (!requestClient || !sessionId) return;
+    const key = `${sessionId}\0${toolCallId}`;
+    if (loadingToolResults.has(key)) return;
+    loadingToolResults.add(key);
+    transcript = setToolResultLoading(transcript, toolCallId, true);
+    try {
+      const update = await requestClient.toolResult(sessionId, toolCallId);
+      if (!sessionHistoryIsCurrent(requestClient, sessionId, requestWorkspace, historyGeneration)) return;
+      const nextTranscript = applyDeferredToolResult(transcript, update);
+      transcript = nextTranscript;
+      transcriptBySessionId.set(sessionId, nextTranscript);
+    } catch (error) {
+      if (sessionHistoryIsCurrent(requestClient, sessionId, requestWorkspace, historyGeneration)) {
+        transcript = setToolResultLoading(
+          transcript,
+          toolCallId,
+          false,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    } finally {
+      loadingToolResults.delete(key);
+    }
   }
 
   async function chooseWorkspace(): Promise<void> {
@@ -501,7 +694,7 @@
     errorMessage = null;
     sessionRefreshGeneration += 1;
     try {
-      await closeActiveSession();
+      await closeWorkspaceSessions();
       workspace = selected;
       sessions = [];
       taskLoadGeneration += 1;
@@ -515,6 +708,11 @@
       locallyOpenedSessionTabs = [];
       closedSessionTabs = [];
       transcript = emptyTranscript;
+      transcriptBySessionId.clear();
+      runtimeReadySessionIds.clear();
+      runtimeLoadsBySessionId.clear();
+      configOptionsBySessionId.clear();
+      activeSessionRuntimeReady = false;
       configOptions = [];
       rememberProject(selected);
       try {
@@ -710,14 +908,16 @@
 
       transcript = emptyTranscript;
       configOptions = [];
+      activeSessionRuntimeReady = false;
       if (sessionId) {
         activeSessionId = sessionId;
-        const loaded = await requestClient.loadSession(sessionId, requestWorkspace);
-        if (client !== requestClient || workspace !== requestWorkspace) return;
-        configOptions = loaded.configOptions ?? [];
+        configOptions = configOptionsBySessionId.get(sessionId) ?? [];
+        activeSessionRuntimeReady = runtimeReadySessionIds.has(sessionId);
+        const historyGeneration = beginSessionHistoryLoad();
+        void hydrateSessionHistory(requestClient, sessionId, requestWorkspace, historyGeneration);
         showSessionTab(sessionId);
         rememberActiveSession(requestWorkspace, sessionId);
-        await scrollToLatest();
+        void ensureSessionRuntime(requestClient, sessionId, requestWorkspace);
         return;
       }
 
@@ -726,10 +926,12 @@
       showSessionTab(created.sessionId);
       activeSessionId = created.sessionId;
       configOptions = created.configOptions ?? [];
+      markSessionRuntimeReady(created.sessionId, configOptions);
       rememberActiveSession(requestWorkspace, created.sessionId);
-      await refreshSessions();
+      void refreshSessions();
     } catch (error) {
       if (client !== requestClient || workspace !== requestWorkspace) return;
+      cancelSessionHistoryLoad();
       activeSessionId = null;
       transcript = emptyTranscript;
       reportError(error);
@@ -745,14 +947,14 @@
     operationRunning = true;
     errorMessage = null;
     try {
-      await closeActiveSession();
       const response = await client.newSession(workspace);
       showSessionTab(response.sessionId);
       activeSessionId = response.sessionId;
       rememberActiveSession(workspace, response.sessionId);
       transcript = emptyTranscript;
       configOptions = response.configOptions ?? [];
-      await refreshSessions();
+      markSessionRuntimeReady(response.sessionId, configOptions);
+      void refreshSessions();
     } catch (error) {
       reportError(error);
     } finally {
@@ -774,7 +976,6 @@
     taskActionId = task.id;
     errorMessage = null;
     try {
-      await closeActiveSession();
       if (client !== requestClient || workspace !== requestWorkspace) return;
       const response = await requestClient.newSession(requestWorkspace);
       if (client !== requestClient || workspace !== requestWorkspace) return;
@@ -783,7 +984,8 @@
       rememberActiveSession(requestWorkspace, response.sessionId);
       transcript = emptyTranscript;
       configOptions = response.configOptions ?? [];
-      await refreshSessions();
+      markSessionRuntimeReady(response.sessionId, configOptions);
+      void refreshSessions();
 
       const timestamp = new Date().toISOString();
       const saved = await saveProjectTasks({
@@ -803,9 +1005,10 @@
       promptRunning = true;
       operationRunning = false;
       transcript = appendLocalUserMessage(transcript, prompt, `local:${++localMessageId}`, []);
+      transcriptBySessionId.set(response.sessionId, transcript);
       await scrollToLatest();
       await requestClient.prompt(response.sessionId, [{ type: "text", text: prompt }]);
-      await refreshSessions();
+      void refreshSessions();
     } catch (error) {
       reportError(error);
     } finally {
@@ -830,53 +1033,74 @@
 
   async function loadSession(sessionId: string): Promise<void> {
     if (!client || !canUseSession || promptRunning || sessionId === activeSessionId) return;
+    const requestClient = client;
+    const requestWorkspace = workspace;
     closeProjectSelector();
     closeSessionSelector();
-    operationRunning = true;
     errorMessage = null;
-    try {
-      await closeActiveSession();
-      closedSessionTabs = closedSessionTabs.filter((closedId) => closedId !== sessionId);
-      clearSessionActivity(sessionId);
-      activeSessionId = sessionId;
-      transcript = emptyTranscript;
-      configOptions = [];
-      const response = await client.loadSession(sessionId, workspace);
-      configOptions = response.configOptions ?? [];
-      showSessionTab(sessionId);
-      rememberActiveSession(workspace, sessionId);
-      await scrollToLatest();
-    } catch (error) {
-      activeSessionId = null;
-      transcript = emptyTranscript;
-      reportError(error);
-    } finally {
-      operationRunning = false;
+    if (activeSessionId) transcriptBySessionId.set(activeSessionId, transcript);
+    closedSessionTabs = closedSessionTabs.filter((closedId) => closedId !== sessionId);
+    activeSessionId = sessionId;
+    const cachedTranscript = transcriptBySessionId.get(sessionId);
+    transcript = cachedTranscript ?? emptyTranscript;
+    configOptions = configOptionsBySessionId.get(sessionId) ?? [];
+    activeSessionRuntimeReady = runtimeReadySessionIds.has(sessionId);
+    if (cachedTranscript) {
+      cancelSessionHistoryLoad();
+    } else {
+      const historyGeneration = beginSessionHistoryLoad();
+      void hydrateSessionHistory(requestClient, sessionId, requestWorkspace, historyGeneration);
     }
+    showSessionTab(sessionId);
+    rememberActiveSession(requestWorkspace, sessionId);
+    void ensureSessionRuntime(requestClient, sessionId, requestWorkspace);
   }
 
-  async function closeActiveSession(): Promise<void> {
-    const sessionId = activeSessionId;
+  async function closeWorkspaceSessions(): Promise<void> {
+    const sessionIds = [...new Set([
+      ...tabSessions.map((session) => session.sessionId),
+      ...(activeSessionId ? [activeSessionId] : []),
+    ])];
+    cancelSessionHistoryLoad();
     activeSessionId = null;
-    if (!sessionId) return;
+    activeSessionRuntimeReady = false;
+    transcriptBySessionId.clear();
     if (!client) {
-      clearSessionActivity(sessionId);
+      for (const sessionId of sessionIds) clearSessionActivity(sessionId);
       return;
     }
-    try {
-      await client.closeSession(sessionId);
-    } finally {
-      clearSessionActivity(sessionId);
-    }
+    await Promise.allSettled(sessionIds.map(async (sessionId) => {
+      try {
+        await client!.closeSession(sessionId);
+      } finally {
+        forgetSessionRuntime(sessionId);
+        clearSessionActivity(sessionId);
+      }
+    }));
+    runtimeReadySessionIds.clear();
+    runtimeLoadsBySessionId.clear();
+    configOptionsBySessionId.clear();
   }
 
   async function closeSessionTab(event: MouseEvent, sessionId: string): Promise<void> {
     event.stopPropagation();
     closeSessionSelector();
     if (sessionId !== activeSessionId) {
-      clearSessionActivity(sessionId);
-      closedSessionTabs = [...closedSessionTabs, sessionId];
-      locallyOpenedSessionTabs = locallyOpenedSessionTabs.filter((openId) => openId !== sessionId);
+      if (promptRunning || operationRunning) return;
+      operationRunning = true;
+      errorMessage = null;
+      try {
+        await client?.closeSession(sessionId);
+        forgetSessionRuntime(sessionId);
+        clearSessionActivity(sessionId);
+        transcriptBySessionId.delete(sessionId);
+        closedSessionTabs = [...closedSessionTabs, sessionId];
+        locallyOpenedSessionTabs = locallyOpenedSessionTabs.filter((openId) => openId !== sessionId);
+      } catch (error) {
+        reportError(error);
+      } finally {
+        operationRunning = false;
+      }
       return;
     }
     if (promptRunning || operationRunning) return;
@@ -887,8 +1111,12 @@
     errorMessage = null;
     try {
       await client?.closeSession(sessionId);
+      forgetSessionRuntime(sessionId);
       clearSessionActivity(sessionId);
+      transcriptBySessionId.delete(sessionId);
+      cancelSessionHistoryLoad();
       activeSessionId = null;
+      activeSessionRuntimeReady = false;
       transcript = emptyTranscript;
       configOptions = [];
       closedSessionTabs = [...closedSessionTabs, sessionId];
@@ -1478,7 +1706,15 @@
     const sessionId = activeSessionId;
     const draftKey = attachmentDraftKey;
     const draftGeneration = attachmentDraftGeneration;
-    if (!client || !sessionId || (!text && attachments.length === 0) || promptRunning || operationRunning) return;
+    if (
+      !client
+      || !sessionId
+      || !activeSessionRuntimeReady
+      || (!text && attachments.length === 0)
+      || promptRunning
+      || operationRunning
+      || sessionHistoryLoading
+    ) return;
     const desktopCommand = parseDesktopSlashCommand(text, attachments.length > 0);
     if (desktopCommand) {
       promptText = "";
@@ -1517,9 +1753,10 @@
       promptText = "";
       invalidateAttachmentDraft();
       transcript = appendLocalUserMessage(transcript, text, `local:${++localMessageId}`, attachments);
+      transcriptBySessionId.set(sessionId, transcript);
       await scrollToLatest();
       await client.prompt(sessionId, blocks);
-      await refreshSessions();
+      void refreshSessions();
     } catch (error) {
       reportError(error);
     } finally {
@@ -1538,21 +1775,27 @@
   async function reloadResources(): Promise<void> {
     const requestClient = client;
     const sessionId = activeSessionId;
-    if (!requestClient || !sessionId || operationRunning || promptRunning) return;
+    if (!requestClient || !sessionId || !activeSessionRuntimeReady || operationRunning || promptRunning || sessionHistoryLoading) return;
     closeProjectSelector();
     closeSessionSelector();
     commandPicker = null;
     operationRunning = true;
+    activeSessionRuntimeReady = false;
     errorMessage = null;
     transcript = appendLocalUserMessage(transcript, "/reload", `local:${++localMessageId}`);
+    transcriptBySessionId.set(sessionId, transcript);
     await scrollToLatest();
     try {
       const response = await requestClient.reloadSession(sessionId);
       if (requestClient !== client || sessionId !== activeSessionId) return;
       configOptions = response.configOptions;
-      await refreshSessions();
+      markSessionRuntimeReady(sessionId, response.configOptions);
+      void refreshSessions();
     } catch (error) {
-      if (requestClient === client && sessionId === activeSessionId) reportError(error);
+      if (requestClient === client && sessionId === activeSessionId) {
+        forgetSessionRuntime(sessionId);
+        reportError(error);
+      }
     } finally {
       if (requestClient === client && sessionId === activeSessionId) operationRunning = false;
     }
@@ -1562,7 +1805,7 @@
     const requestClient = client;
     const sourceSessionId = activeSessionId;
     const requestWorkspace = workspace;
-    if (!requestClient || !sourceSessionId || operationRunning || promptRunning) return;
+    if (!requestClient || !sourceSessionId || !activeSessionRuntimeReady || operationRunning || promptRunning || sessionHistoryLoading) return;
     closeProjectSelector();
     closeSessionSelector();
     commandPicker = null;
@@ -1584,15 +1827,16 @@
 
       await requestClient.closeSession(sourceSessionId);
       sourceClosed = true;
+      forgetSessionRuntime(sourceSessionId);
       clearSessionActivity(sourceSessionId);
       clearSessionActivity(forked.sessionId);
       activeSessionId = forked.sessionId;
       transcript = emptyTranscript;
       configOptions = forked.configOptions;
+      markSessionRuntimeReady(forked.sessionId, forked.configOptions);
 
-      const loaded = await requestClient.loadSession(forked.sessionId, requestWorkspace);
-      if (requestClient !== client || activeSessionId !== forked.sessionId || requestWorkspace !== workspace) return;
-      configOptions = loaded.configOptions ?? forked.configOptions;
+      const historyGeneration = beginSessionHistoryLoad();
+      void hydrateSessionHistory(requestClient, forked.sessionId, requestWorkspace, historyGeneration);
       closedSessionTabs = [...new Set([...closedSessionTabs, sourceSessionId])];
       locallyOpenedSessionTabs = locallyOpenedSessionTabs.filter((id) => id !== sourceSessionId);
       showSessionTab(forked.sessionId);
@@ -1602,21 +1846,30 @@
         `Forked from entry ${entryId}.`,
         `local:${++localMessageId}`,
       );
+      transcriptBySessionId.set(forked.sessionId, transcript);
       promptText = forked.selectedText ?? "";
-      await refreshSessions();
+      void refreshSessions();
       await scrollToLatest();
     } catch (error) {
       if (requestClient !== client || requestWorkspace !== workspace) return;
       if (sourceClosed) {
-        if (forkedSessionId) await requestClient.closeSession(forkedSessionId).catch(() => {});
+        if (forkedSessionId) {
+          await requestClient.closeSession(forkedSessionId).catch(() => {});
+          forgetSessionRuntime(forkedSessionId);
+        }
         activeSessionId = sourceSessionId;
+        activeSessionRuntimeReady = false;
         transcript = emptyTranscript;
         configOptions = [];
         try {
+          const historyGeneration = beginSessionHistoryLoad();
+          void hydrateSessionHistory(requestClient, sourceSessionId, requestWorkspace, historyGeneration);
           const restored = await requestClient.loadSession(sourceSessionId, requestWorkspace);
           configOptions = restored.configOptions ?? [];
+          markSessionRuntimeReady(sourceSessionId, configOptions);
           rememberActiveSession(requestWorkspace, sourceSessionId);
         } catch (restoreError) {
+          cancelSessionHistoryLoad();
           activeSessionId = null;
           reportError(new Error(
             `${error instanceof Error ? error.message : String(error)}; source conversation restore failed: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
@@ -1633,7 +1886,7 @@
   function autocompletePrompt(draft: string, signal: AbortSignal): Promise<string> {
     const requestClient = client;
     const sessionId = activeSessionId;
-    if (!requestClient || !sessionId || status !== "ready") return Promise.resolve("");
+    if (!requestClient || !sessionId || status !== "ready" || !activeSessionRuntimeReady) return Promise.resolve("");
     return requestClient.autocomplete(sessionId, draft, signal);
   }
 
@@ -1647,10 +1900,14 @@
   }
 
   async function setConfig(option: SessionConfigOption, value: string | boolean): Promise<void> {
-    if (!client || !activeSessionId || changingConfig) return;
+    const requestClient = client;
+    const sessionId = activeSessionId;
+    if (!requestClient || !sessionId || !activeSessionRuntimeReady || changingConfig) return;
     changingConfig = option.id;
     try {
-      configOptions = (await client.setConfigOption(activeSessionId, option, value)).configOptions;
+      const options = (await requestClient.setConfigOption(sessionId, option, value)).configOptions;
+      configOptionsBySessionId.set(sessionId, options);
+      if (requestClient === client && sessionId === activeSessionId) configOptions = options;
     } catch (error) {
       reportError(error);
     } finally {
@@ -1814,13 +2071,16 @@
         {workspace}
         {promptRunning}
         {operationRunning}
+        historyLoading={sessionHistoryLoading}
         bind:pane={transcriptPane}
         onChooseWorkspace={() => void chooseWorkspace()}
         onOpenAttachment={(attachment) => void activateAttachment(attachment)}
+        onPrepareAttachment={prepareTranscriptAttachment}
         onOpenProjectFile={openProjectFile}
         onResolveProjectMedia={resolveProjectMedia}
         onOpenLocalFile={openLocalFile}
         onResolveLocalMedia={resolveLocalMedia}
+        onLoadToolResult={(toolCallId) => void loadDeferredToolResult(toolCallId)}
       />
 
       <PromptComposer
@@ -1828,7 +2088,7 @@
         attachments={promptAttachments}
         availableCommands={activeSlashCommands}
         {activeSessionId}
-        ready={status === "ready"}
+        ready={status === "ready" && activeSessionRuntimeReady && !operationRunning && !sessionHistoryLoading}
         {promptRunning}
         {dragActive}
         {autocompleteEnabled}

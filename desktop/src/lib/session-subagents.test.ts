@@ -71,6 +71,23 @@ describe("desktop session subagents", () => {
     expect(sessionSubagentModelLabel(preview)).toBe("model-a");
   });
 
+  it("accepts the icon field on task previews and rejects non-string icons", () => {
+    const valid = snapshot([{
+      runDir: "/run",
+      agents: [{ id: "agent-1", status: "running" }],
+      tasks: [{ id: "agent-1", task: "Inspect API", icon: "search" }],
+    }]);
+    expect(sessionSubagentSnapshot(notification(valid))).toEqual(valid);
+    expect(sessionSubagentTaskPreview(visibleSessionSubagentRuns(valid)[0]!, "agent-1")?.icon).toBe("search");
+
+    const invalid = snapshot([{
+      runDir: "/run",
+      agents: [{ id: "agent-1", status: "running" }],
+      tasks: [{ id: "agent-1", icon: 7 } as unknown as { id: string; icon: string }],
+    }]);
+    expect(sessionSubagentSnapshot(notification(invalid))).toBeUndefined();
+  });
+
   it("formats queued, seconds, minutes, hours, and invalid elapsed states", () => {
     const now = Date.parse("2026-01-01T02:03:05Z");
     expect(formatSessionSubagentElapsed(undefined, now)).toBe("queued");

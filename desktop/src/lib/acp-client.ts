@@ -10,6 +10,7 @@ import type {
   PromptResponse,
   SessionConfigOption,
   SessionNotification,
+  SessionUpdate,
   SetSessionConfigOptionResponse,
 } from "@agentclientprotocol/sdk";
 import {
@@ -60,6 +61,11 @@ export interface ForkSessionResult {
   readonly sessionId: string;
   readonly configOptions: SessionConfigOption[];
   readonly selectedText?: string;
+}
+
+export interface LazySessionHistory {
+  readonly updates: readonly SessionUpdate[];
+  readonly deferredToolCallIds: readonly string[];
 }
 
 type JsonRpcId = string | number;
@@ -129,7 +135,42 @@ export class AcpClient {
   }
 
   loadSession(sessionId: string, cwd: string): Promise<LoadSessionResponse> {
-    return this.request("session/load", { sessionId, cwd, mcpServers: [] });
+    return this.request("session/load", {
+      sessionId,
+      cwd,
+      mcpServers: [],
+      _meta: { "pix.lazyHistory": true },
+    });
+  }
+
+  async sessionHistory(sessionId: string): Promise<LazySessionHistory> {
+    const response = await this.request<unknown>("pix/session/history", { sessionId }, null);
+    if (!isRecord(response) || !Array.isArray(response.updates) || !Array.isArray(response.deferredToolCallIds)) {
+      throw new Error("pix/session/history returned an invalid response");
+    }
+    const updates: SessionUpdate[] = [];
+    for (const update of response.updates) {
+      if (!isRecord(update) || typeof update.sessionUpdate !== "string") {
+        throw new Error("pix/session/history returned an invalid update");
+      }
+      updates.push(update as unknown as SessionUpdate);
+    }
+    const deferredToolCallIds: string[] = [];
+    for (const toolCallId of response.deferredToolCallIds) {
+      if (typeof toolCallId !== "string") {
+        throw new Error("pix/session/history returned an invalid deferred tool id");
+      }
+      deferredToolCallIds.push(toolCallId);
+    }
+    return { updates, deferredToolCallIds };
+  }
+
+  async toolResult(sessionId: string, toolCallId: string): Promise<SessionUpdate> {
+    const response = await this.request<unknown>("pix/session/tool_result", { sessionId, toolCallId }, null);
+    if (!isRecord(response) || !isRecord(response.update) || typeof response.update.sessionUpdate !== "string") {
+      throw new Error("pix/session/tool_result returned an invalid response");
+    }
+    return response.update as unknown as SessionUpdate;
   }
 
   async forkMessages(sessionId: string): Promise<ForkMessage[]> {

@@ -102,11 +102,42 @@ describe("todo panel", () => {
 		const lines = renderSubagentsPanel(state, true, 80, THEMES.dark.colors);
 
 		assert.equal(lines.length, 1);
-		assert.ok(lines[0]?.text.startsWith(APP_ICONS.timerSand));
+		// No preview icon -> neutral agent glyph; execution state stays explicit.
+		assert.ok(lines[0]?.text.startsWith(`${APP_ICONS.agent}${APP_ICONS.timerSand}`));
 		assert.ok(lines[0]?.text.endsWith(" "));
 		assert.equal(stringDisplayWidth(lines[0]?.text ?? ""), 80);
 		assert.equal(lines[0]?.colorOverride, THEMES.dark.colors.muted);
 		assert.equal(lines[0]?.backgroundOverride, undefined);
+	});
+
+	it("renders the per-agent icon alongside a separate status glyph", () => {
+		const state: SubagentsWidgetState = {
+			runDir: "/tmp/subagents/run-1",
+			agents: [
+				{ id: "agent-1", status: "running", startedAt: new Date().toISOString() },
+				{ id: "agent-2", status: "planned" },
+			],
+			tasks: [
+				{ id: "agent-1", task: "Investigate icons", icon: "search" },
+				{ id: "agent-2", task: "Unknown icon name", icon: "does-not-exist" },
+			],
+			live: true,
+			snapshotOnly: false,
+			checkedAt: Date.now(),
+		};
+
+		const lines = renderSubagentsPanel(state, true, 80, THEMES.dark.colors);
+
+		assert.equal(lines.length, 2);
+		assert.ok(lines[0]?.text.startsWith(`${APP_ICONS.search}${APP_ICONS.timerSand}`));
+		assert.ok(lines[1]?.text.startsWith(`${APP_ICONS.agent}${APP_ICONS.circleOutline}`));
+		const roleIconSegment = lines[0]?.segments?.find((segment) => segment.start === 0 && segment.end === APP_ICONS.search.length);
+		assert.equal(roleIconSegment?.foreground, THEMES.dark.colors.accent);
+		assert.equal(roleIconSegment?.bold, true);
+		const statusStart = APP_ICONS.search.length;
+		const statusSegment = lines[0]?.segments?.find((segment) => segment.start === statusStart && segment.end === statusStart + APP_ICONS.timerSand.length);
+		assert.equal(statusSegment?.foreground, THEMES.dark.colors.info);
+		assert.equal(statusSegment?.bold, true);
 	});
 });
 

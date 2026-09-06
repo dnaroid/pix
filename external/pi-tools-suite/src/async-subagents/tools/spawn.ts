@@ -276,7 +276,13 @@ export function registerSpawnTool(
 			const runDir = params.runDir
 				? resolveRunDir(ctx.cwd, params.runDir)
 				: createRunDir(ctx.cwd, params.slug);
-			const taskPreviews = toTaskPreviews(tasks);
+			const taskPreviews = toTaskPreviews(tasks).map((preview, index) => {
+				// tasks[i] === resolvedTasks[i].task (positional), so the resolved
+				// profile's icon rides along into every preview consumer (tool render
+				// details, live-state events, and the desktop subagents panel).
+				const icon = resolvedTasks[index]?.profile?.icon;
+				return icon ? { ...preview, icon } : preview;
+			});
 			const results: { id: string; pid: number; agentDir: string }[] = [];
 			const maxConcurrent = config.maxConcurrent ?? DEFAULT_MAX_CONCURRENT;
 			const semaphore = getProjectSemaphore(ctx.cwd, maxConcurrent);

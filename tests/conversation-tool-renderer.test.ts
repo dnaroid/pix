@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import type { PixConfig } from "../src/config.js";
+import { APP_ICONS } from "../src/app/icons.js";
 import { renderConversationToolEntry } from "../src/app/rendering/conversation-tool-renderer.js";
 import { THEMES } from "../src/theme.js";
 
@@ -72,6 +73,7 @@ describe("renderConversationToolEntry", () => {
 
 		assert.match(lines[0]?.text ?? "", /started=1\/1/u);
 		assert.match(lines[0]?.text ?? "", /run=build-123/u);
+		assert.ok(lines.some((line) => line.text.includes(APP_ICONS.timerSand)));
 		assert.ok(lines.some((line) => line.text.includes("task:Build docs")));
 	});
 });

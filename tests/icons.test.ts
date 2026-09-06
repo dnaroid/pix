@@ -39,4 +39,32 @@ describe("app icon themes", () => {
 		assert.equal(resolveAppIconThemeNameFromEnv({ PIX_ICON_THEME: "plain" }), "fallback");
 		assert.equal(resolveAppIconThemeNameFromEnv({}), "nerdFont");
 	});
+
+	it("defines sub-agent icons in both themes", () => {
+		const agentIcons = [
+			"agent",
+			"search",
+			"code",
+			"flask",
+			"globe",
+			"sparkles",
+			"brain",
+			"wrench",
+			"terminal",
+			"bug",
+			"book",
+			"eye",
+			"zap",
+			"rocket",
+		] as const;
+
+		for (const name of agentIcons) {
+			setAppIconTheme("nerdFont");
+			assert.ok(/^[\u{F0000}-\u{FFFFD}]$/u.test(APP_ICONS[name]), `nerdFont private-use glyph for ${name}`);
+			setAppIconTheme("fallback");
+			assert.ok(APP_ICONS[name].length > 0, `fallback glyph for ${name}`);
+		}
+
+		setAppIconTheme("nerdFont");
+	});
 });

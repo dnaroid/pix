@@ -14,6 +14,8 @@ export interface AgentTaskPreview {
 	task?: string;
 	scope?: string;
 	model?: string;
+	/** Agent icon name from the resolved subagentType profile; rendered by UIs. */
+	icon?: string;
 }
 
 export interface SubagentRunRenderDetails {

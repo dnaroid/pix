@@ -388,12 +388,30 @@ export class SessionCommandActions {
 		this.host.setStatus("deleting session");
 		this.host.render();
 
-		const sidecarRemoved = await this.removeDcpSidecarState(dirname(targetSessionFile), targetSessionId).catch(() => false);
-		await rm(targetSessionFile, { force: true }).catch(() => undefined);
-
 		const deleteCurrent = isCurrent || targetSessionFile === currentSessionFile;
 		if (deleteCurrent) {
+			// Do not race a final extension persistence operation with destructive
+			// session cleanup. The JSONL remains the ownership root for sidecar data.
 			await this.host.awaitCurrentSessionExtensions(runtime);
+			if (!isCommandRuntimeActive(this.host, runtime)) return;
+		}
+
+		try {
+			await rm(targetSessionFile, { force: true });
+		} catch (error) {
+			this.host.addEntry({
+				id: createId("system"),
+				kind: "system",
+				text: `Could not delete session file ${targetSessionFile}: ${error instanceof Error ? error.message : String(error)}`,
+			});
+			this.host.toast.error("Session deletion failed");
+			this.host.setSessionStatus(runtime.session);
+			return;
+		}
+
+		const sidecarRemoved = await this.removeDcpSidecarState(dirname(targetSessionFile), targetSessionId).catch(() => false);
+
+		if (deleteCurrent) {
 			const result = await runtime.newSession();
 			if (!isCommandRuntimeActive(this.host, runtime)) return;
 			if (result.cancelled) {
@@ -427,7 +445,14 @@ export class SessionCommandActions {
 		if (!sessionId) return false;
 		const safeName = `${sessionId.replace(/[^a-zA-Z0-9._-]/g, "_")}.json`;
 		const statePath = join(sessionDir, "dcp-state", safeName);
-		await rm(statePath, { force: true });
+		for (const artifactPath of [
+			statePath,
+			`${statePath}.prev`,
+			`${statePath}.recovery-required`,
+			`${statePath}.fence`,
+		]) {
+			await rm(artifactPath, { force: true });
+		}
 		return true;
 	}
 

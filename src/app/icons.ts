@@ -58,6 +58,22 @@ const NERD_FONT_ICONS = {
 	toolPreviewTruncated: "⊞",
 	up: "↑",
 	down: "↓",
+	// Sub-agent icons (agent .md frontmatter `icon:` names). Values are shared
+	// with the Pix Desktop lucide mapping in desktop/src/lib/agent-icons.ts.
+	agent: "\u{f06a9}", // nf-md-robot
+	search: "\u{f0349}", // nf-md-magnify
+	code: "\u{f0174}", // nf-md-code_tags
+	flask: "\u{f0093}", // nf-md-flask
+	globe: "\u{f01e7}", // nf-md-earth
+	sparkles: "\u{f0ae2}", // nf-md-star_four_points
+	brain: "\u{f09d1}", // nf-md-brain
+	wrench: "\u{f05b7}", // nf-md-wrench
+	terminal: "\u{f018d}", // nf-md-console
+	bug: "\u{f00e4}", // nf-md-bug
+	book: "\u{f00ba}", // nf-md-book
+	eye: "\u{f0208}", // nf-md-eye
+	zap: "\u{f0241}", // nf-md-flash
+	rocket: "\u{f0463}", // nf-md-rocket
 } as const;
 
 export type AppIconName = keyof typeof NERD_FONT_ICONS;
@@ -96,6 +112,23 @@ const FALLBACK_ICONS: AppIconMap = {
 	toolPreviewTruncated: "+",
 	up: "↑",
 	down: "↓",
+	// Sub-agent icon fallbacks (no icon-font codepoints; readable when the
+	// terminal font lacks Nerd Font glyphs). Emoji follow the existing fallback
+	// precedent (lightbulb, timerSand).
+	agent: "◇",
+	search: "⌕",
+	code: "{}",
+	flask: "∆",
+	globe: "⊕",
+	sparkles: "✦",
+	brain: "∞",
+	wrench: "⚙",
+	terminal: ">_",
+	bug: "🐛",
+	book: "▤",
+	eye: "◉",
+	zap: "↯",
+	rocket: "🚀",
 };
 
 export const APP_ICON_THEMES: Record<AppIconThemeName, AppIconMap> = {

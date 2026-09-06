@@ -1,7 +1,6 @@
 import type { Api, Model, ProviderHeaders } from "@earendil-works/pi-ai";
 import { completeWithModelRegistry, type ModelCompletionRegistry } from "../../model-completion.js";
 import type { AgentTask } from "./types.js";
-import { resolveSubagentTypeName } from "./agent-aliases.js";
 import {
 	currentModelRef,
 	defaultSubagentType,
@@ -63,7 +62,7 @@ export async function routeSubagentTasks(
 		? { ...task, subagentType: task.subagentType.trim() }
 		: task);
 	const invalidTasks = tasks.filter((task) => hasText(task.subagentType)
-		&& !Object.prototype.hasOwnProperty.call(config.types, resolveSubagentTypeName(task.subagentType, config)));
+		&& !Object.prototype.hasOwnProperty.call(config.types, task.subagentType));
 	if (invalidTasks.length > 0) {
 		throw routingError(`Unknown subagentType: ${invalidTasks.map((task) => `${task.id}=${JSON.stringify(task.subagentType)}`).join(", ")}.`, invalidTasks, config);
 	}

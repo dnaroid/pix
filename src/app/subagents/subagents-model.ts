@@ -68,6 +68,7 @@ export function isSubagentTaskPreview(value: unknown): value is SubagentTaskPrev
 	if (value.model !== undefined && typeof value.model !== "string") return false;
 	if (value.thinking !== undefined && typeof value.thinking !== "string") return false;
 	if (value.thinkingLevel !== undefined && typeof value.thinkingLevel !== "string") return false;
+	if (value.icon !== undefined && typeof value.icon !== "string") return false;
 	return true;
 }
 
@@ -129,6 +130,45 @@ export function isSubagentRegistry(value: unknown): value is SubagentRegistry {
 		&& Object.entries(value.agents).every(([agentId, agent]) => isSubagentRegistryAgent(agentId, agent));
 }
 
+/**
+ * Agent icon names accepted in sub-agent `icon:` frontmatter (both bundled
+ * agents and `.pi/agents/*.md`). Keys mirror APP_ICONS entries and the Pix
+ * Desktop lucide mapping (desktop/src/lib/agent-icons.ts); status is conveyed
+ * by color, not by the glyph.
+ */
+export const SUBAGENT_ICON_NAMES = [
+	"agent",
+	"search",
+	"code",
+	"flask",
+	"globe",
+	"sparkles",
+	"brain",
+	"wrench",
+	"terminal",
+	"bug",
+	"book",
+	"eye",
+	"zap",
+	"rocket",
+] as const;
+
+export type SubagentIconName = (typeof SUBAGENT_ICON_NAMES)[number];
+
+export function isSubagentIconName(value: string): value is SubagentIconName {
+	return (SUBAGENT_ICON_NAMES as readonly string[]).includes(value);
+}
+
+/**
+ * Resolve the per-agent icon glyph from the task preview. Unknown or missing
+ * icon names fall back to the neutral agent glyph.
+ */
+export function subagentIcon(preview: SubagentTaskPreview | undefined): string {
+	const name = preview?.icon?.trim();
+	return name && isSubagentIconName(name) ? APP_ICONS[name] : APP_ICONS.agent;
+}
+
+/** Keep execution state visible independently from the semantic agent icon. */
 export function subagentStatusIcon(status: SubagentStatus): string {
 	switch (status) {
 		case "planned":
