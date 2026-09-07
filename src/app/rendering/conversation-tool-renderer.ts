@@ -10,7 +10,6 @@ import {
 	isSubagentsToolName,
 	subagentIcon,
 	subagentRunName,
-	subagentStatusIcon,
 	taskPreviewMap,
 } from "../subagents/subagents-model.js";
 import { formatTodoTaskLine, isTodoDetails, visibleTodoTasks } from "../todo/todo-model.js";
@@ -252,7 +251,7 @@ function subagentsDetailsText(details: SubagentRunRenderDetails): string {
 }
 
 function formatSubagentToolLine(agent: SubagentAgentState, preview: SubagentTaskPreview | undefined): string {
-	const parts = [subagentIcon(preview), subagentStatusIcon(agent.status), agent.status, agent.id];
+	const parts = [subagentIcon(preview), agent.status, agent.id];
 	if (preview?.model) parts.push(`model:${preview.model}`);
 	if (preview?.task) parts.push(`task:${preview.task}`);
 	else if (preview?.scope) parts.push(`scope:${preview.scope}`);

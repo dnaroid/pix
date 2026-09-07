@@ -168,24 +168,6 @@ export function subagentIcon(preview: SubagentTaskPreview | undefined): string {
 	return name && isSubagentIconName(name) ? APP_ICONS[name] : APP_ICONS.agent;
 }
 
-/** Keep execution state visible independently from the semantic agent icon. */
-export function subagentStatusIcon(status: SubagentStatus): string {
-	switch (status) {
-		case "planned":
-			return APP_ICONS.circleOutline;
-		case "running":
-			return APP_ICONS.timerSand;
-		case "retrying":
-			return APP_ICONS.refresh;
-		case "done":
-			return APP_ICONS.checkCircle;
-		case "failed":
-			return APP_ICONS.closeCircle;
-		case "stopped":
-			return APP_ICONS.stopCircle;
-	}
-}
-
 export function formatSubagentsPanelStats(agents: readonly SubagentAgentState[]): string {
 	const stats = [
 		{ count: agents.filter((agent) => agent.status === "planned").length, label: "planned" },

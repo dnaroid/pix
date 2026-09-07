@@ -73,7 +73,8 @@ describe("renderConversationToolEntry", () => {
 
 		assert.match(lines[0]?.text ?? "", /started=1\/1/u);
 		assert.match(lines[0]?.text ?? "", /run=build-123/u);
-		assert.ok(lines.some((line) => line.text.includes(APP_ICONS.timerSand)));
+		assert.ok(lines.some((line) => line.text.includes(APP_ICONS.agent)));
+		assert.equal(lines.some((line) => line.text.includes(APP_ICONS.timerSand)), false);
 		assert.ok(lines.some((line) => line.text.includes("task:Build docs")));
 	});
 });

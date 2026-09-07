@@ -1,7 +1,4 @@
 <script lang="ts">
-  import CircleDashed from "@lucide/svelte/icons/circle-dashed";
-  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
-  import RotateCw from "@lucide/svelte/icons/rotate-cw";
   import Workflow from "@lucide/svelte/icons/workflow";
   import { agentIcon } from "../lib/agent-icons";
   import {
@@ -21,12 +18,19 @@
   const activeCount = $derived(sessionSubagentCount(snapshot));
 
   function statusTone(status: SessionSubagentStatus): string {
-    return status === "planned" ? "text-[var(--tool-info)]" : "text-[var(--tool-warning)]";
+    if (status === "running") return "text-[var(--tool-info)]";
+    if (status === "retrying") return "text-[var(--tool-warning)]";
+    if (status === "done") return "text-[var(--tool-success)]";
+    if (status === "failed") return "text-[var(--tool-error)]";
+    return "text-muted-foreground";
   }
 
   function statusLabel(status: SessionSubagentStatus): string {
     if (status === "retrying") return "Retrying";
     if (status === "running") return "Running";
+    if (status === "done") return "Done";
+    if (status === "failed") return "Failed";
+    if (status === "stopped") return "Stopped";
     return "Planned";
   }
 </script>
@@ -66,17 +70,8 @@
                 {@const AgentIcon = agentIcon(preview?.icon)}
                 <article class="rounded-lg border border-sidebar-border bg-background/55 p-2.5 shadow-xs" aria-label={`Subagent ${agent.id}: ${statusLabel(agent.status)}`}>
                   <div class="flex items-start gap-2">
-                    <span class="mt-0.5 shrink-0 text-foreground" title={`Agent type: ${preview?.icon?.trim() || "agent"}`}>
+                    <span class={["mt-0.5 shrink-0", statusTone(agent.status)]} title={`Agent type: ${preview?.icon?.trim() || "agent"} · ${statusLabel(agent.status)}`}>
                       <AgentIcon class="h-4 w-4" aria-hidden="true" />
-                    </span>
-                    <span class={["mt-0.5 shrink-0", statusTone(agent.status)]} title={statusLabel(agent.status)}>
-                      {#if agent.status === "running"}
-                        <LoaderCircle class="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
-                      {:else if agent.status === "retrying"}
-                        <RotateCw class="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
-                      {:else}
-                        <CircleDashed class="h-4 w-4" aria-hidden="true" />
-                      {/if}
                     </span>
                     <div class="min-w-0 flex-1">
                       <h4 class="break-words font-mono text-[10px] font-semibold leading-4 text-foreground">{agent.id}</h4>

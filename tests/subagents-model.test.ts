@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { APP_ICONS, setAppIconTheme } from "../src/app/icons.js";
-import { isSubagentTaskPreview, subagentIcon, subagentStatusIcon } from "../src/app/subagents/subagents-model.js";
+import { isSubagentTaskPreview, subagentIcon } from "../src/app/subagents/subagents-model.js";
 
 describe("subagent model icons", () => {
 	it("resolves known icon names through the active icon theme", () => {
@@ -29,14 +29,5 @@ describe("subagent model icons", () => {
 		assert.equal(isSubagentTaskPreview({ id: "a", icon: "wrench" }), true);
 		assert.equal(isSubagentTaskPreview({ id: "a", icon: "" }), true);
 		assert.equal(isSubagentTaskPreview({ id: "a", icon: 3 }), false);
-	});
-
-	it("keeps execution status as a separate glyph from the agent icon", () => {
-		assert.equal(subagentStatusIcon("planned"), APP_ICONS.circleOutline);
-		assert.equal(subagentStatusIcon("running"), APP_ICONS.timerSand);
-		assert.equal(subagentStatusIcon("retrying"), APP_ICONS.refresh);
-		assert.equal(subagentStatusIcon("done"), APP_ICONS.checkCircle);
-		assert.equal(subagentStatusIcon("failed"), APP_ICONS.closeCircle);
-		assert.equal(subagentStatusIcon("stopped"), APP_ICONS.stopCircle);
 	});
 });
