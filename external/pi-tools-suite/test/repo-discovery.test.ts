@@ -15,8 +15,13 @@ type RegisteredTool = {
 		args: { description: string };
 		maxLines: { description: string; default: number };
 		maxBytes: { description: string; default: number };
+		outputMode?: { description: string; default: string; enum: string[] };
 	} };
-	execute: (toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: { cwd: string }) => Promise<{ content: Array<{ text: string }> }>;
+	execute: (toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: { cwd: string }) => Promise<{
+		content: Array<{ text: string }>;
+		isError?: boolean;
+		details?: Record<string, unknown>;
+	}>;
 };
 
 type RegisteredCommand = {
@@ -26,13 +31,11 @@ type RegisteredCommand = {
 
 describe("repo discovery output truncation", () => {
 	test("registered repo tools expose economy guidance without changing execution defaults", async () => {
-		const previousCwd = process.cwd();
 		const projectRoot = mkdtempSync(path.join(tmpdir(), "repo-discovery-guidance-"));
 		mkdirSync(path.join(projectRoot, ".indexer-cli"));
 		const tools: RegisteredTool[] = [];
 		const calls: Array<{ command: string; args: string[] }> = [];
 		try {
-			process.chdir(projectRoot);
 			repoDiscoveryExtension({
 				registerCommand: () => undefined,
 				registerTool: (tool: RegisteredTool) => tools.push(tool),
@@ -40,7 +43,7 @@ describe("repo discovery output truncation", () => {
 					calls.push({ command, args });
 					return { stdout: "fixture result", stderr: "", code: 0 };
 				},
-			} as never);
+			} as never, { profile: "baseline", cwd: projectRoot });
 			expect(tools).toHaveLength(REPO_DISCOVERY_TOOLS.length);
 			for (const description of REPO_DISCOVERY_TOOLS) {
 				const tool = tools.find((entry) => entry.name === description.name)!;
@@ -51,6 +54,7 @@ describe("repo discovery output truncation", () => {
 				});
 				expect(tool.parameters.properties.maxLines.default).toBe(2000);
 				expect(tool.parameters.properties.maxBytes.default).toBe(50000);
+				expect(tool.parameters.properties.outputMode).toBeUndefined();
 				expect(tool.parameters.properties.maxLines.description).toContain("Prefer native limits/cursors");
 			}
 			const search = tools.find((tool) => tool.name === "repo_search")!;
@@ -65,7 +69,6 @@ describe("repo discovery output truncation", () => {
 				{ command: "idx", args: ["search", "session persistence", "--include-content", "--max-files", "1"] },
 			]);
 		} finally {
-			process.chdir(previousCwd);
 			rmSync(projectRoot, { recursive: true, force: true });
 		}
 	});
@@ -99,19 +102,16 @@ describe("repo discovery output truncation", () => {
 	});
 
 	test("repo_* tool results keep top lines when truncated", async () => {
-		const previousCwd = process.cwd();
 		const projectRoot = mkdtempSync(path.join(tmpdir(), "repo-discovery-test-"));
 		mkdirSync(path.join(projectRoot, ".indexer-cli"));
 
 		try {
-			process.chdir(projectRoot);
-
 			const tools: RegisteredTool[] = [];
 			repoDiscoveryExtension({
 				registerCommand: () => undefined,
 				registerTool: (tool: RegisteredTool) => tools.push(tool),
 				exec: async () => ({ stdout: "top\nmiddle\nbottom", stderr: "", code: 0 }),
-			} as never);
+			} as never, { profile: "baseline", cwd: projectRoot });
 
 			const repoStructure = tools.find((tool) => tool.name === "repo_structure");
 			expect(repoStructure).toBeDefined();
@@ -122,7 +122,6 @@ describe("repo discovery output truncation", () => {
 			expect(text).toContain("top\nmiddle\n\n[Output truncated from the bottom:");
 			expect(text).not.toContain("\nbottom");
 		} finally {
-			process.chdir(previousCwd);
 			rmSync(projectRoot, { recursive: true, force: true });
 		}
 	});
@@ -145,7 +144,7 @@ describe("repo discovery output truncation", () => {
 					if (command === "idx" && args[0] === "init") return { stdout: "initialized project", stderr: "", code: 0 };
 					return { stdout: "", stderr: `unexpected ${command}`, code: 1 };
 				},
-			} as never);
+			} as never, { profile: "baseline" });
 
 			await commands.get("idx-init")!.handler("", { cwd: projectRoot, hasUI: false, ui: { notify: () => undefined } });
 
@@ -177,7 +176,7 @@ describe("repo discovery output truncation", () => {
 					if (command === "idx" && args[0] === "init") return { stdout: "initialized project", stderr: "", code: 0 };
 					return { stdout: "", stderr: `unexpected ${command}`, code: 1 };
 				},
-			} as never);
+			} as never, { profile: "baseline" });
 
 			await commands.get("idx-init")!.handler("", { cwd: projectRoot, hasUI: false, ui: { notify: () => undefined } });
 

@@ -132,8 +132,12 @@ describe("pi-tools-suite config", () => {
 		expect(content).toContain('"todoThinkingOverrides"');
 		expect(content).toContain('"zai/glm-5.3": "max"');
 		expect(content).toContain('"lookupModel": "zai/glm-5.3-flash"');
-		expect(content).toContain('"modules": { "credential-firewall": false }');
+		expect(content).toContain('"credential-firewall": false');
+		expect(content).toContain('"truncation-metadata-normalizer": false');
 		expect(content).toContain('"secretFirewall"');
+		expect(content).toContain('"contextGateway"');
+		expect(content).toContain('"repoDiscovery"');
+		expect(content).toContain('"profile": "baseline"');
 		expect(content).toContain('// "ast-grep",');
 		expect(content).toContain('// "dcp"');
 		expect(content).toContain('"asyncSubagents"');
@@ -146,6 +150,7 @@ describe("pi-tools-suite config", () => {
 				types?: Record<string, { model?: string; fallbackModels?: string[]; thinking?: string; timeoutMs?: number }>;
 			};
 			lsp?: { servers?: Array<{ id?: string }> };
+			repoDiscovery?: { profile?: string };
 		};
 		expect(parsed.$schema).toBe(PI_TOOLS_SUITE_SCHEMA_URL);
 		expect(parsed.asyncSubagents?.routing).toMatchObject({
@@ -157,6 +162,7 @@ describe("pi-tools-suite config", () => {
 		expect(parsed.asyncSubagents?.presets?.gpt?.models).toEqual(["openai-codex/gpt-5.6-luna", "openai-codex/gpt-5.6-terra", "openai-codex/gpt-5.6-sol"]);
 		expect(parsed.asyncSubagents?.presets?.cheap?.types).toBeUndefined();
 		expect(parsed.lsp?.servers?.map((server) => server.id)).toEqual(["typescript"]);
+		expect(parsed.repoDiscovery?.profile).toBe("baseline");
 		expect(content).toContain('//   "id": "python"');
 		expect(content).toContain('//   "id": "markdown"');
 	});
@@ -185,6 +191,22 @@ describe("pi-tools-suite config", () => {
 			`{ "modules": { "credential-firewall": true } }`,
 		);
 		config = loadPiToolsSuiteConfig(["credential-firewall", "usage"], { cwd, homeDir, env: {} });
+		expect(config.disabledModules).toEqual([]);
+	});
+
+	test("truncation metadata normalizer is disabled by default and requires explicit opt-in", () => {
+		const homeDir = tempDir();
+		const cwd = tempDir();
+		mkdirSync(join(homeDir, ".config", "pi"), { recursive: true });
+
+		let config = loadPiToolsSuiteConfig(["truncation-metadata-normalizer", "usage"], { cwd, homeDir, env: {} });
+		expect(config.disabledModules).toEqual(["truncation-metadata-normalizer"]);
+
+		writeFileSync(
+			join(homeDir, ".config", "pi", "pi-tools-suite.jsonc"),
+			`{ "modules": { "truncation-metadata-normalizer": true } }`,
+		);
+		config = loadPiToolsSuiteConfig(["truncation-metadata-normalizer", "usage"], { cwd, homeDir, env: {} });
 		expect(config.disabledModules).toEqual([]);
 	});
 

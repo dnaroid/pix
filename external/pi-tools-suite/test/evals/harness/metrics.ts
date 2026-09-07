@@ -40,6 +40,11 @@ export function deriveMetrics(options: {
 	sessionDir: string;
 }): EvalMetrics {
 	const toolCalls = options.events.filter((event) => event.type === "tool_call").map((event) => event.toolName ?? "unknown");
+	const toolResults = options.events.filter((event) => event.type === "tool_result");
+	const nativePolicyResults = toolResults.filter((event) => event.nativePolicy !== undefined);
+	const contextGateway = [...options.events].reverse()
+		.find((event) => event.type === "agent_end" && event.contextGatewayTelemetry !== undefined)
+		?.contextGatewayTelemetry;
 	const eventUsage = emptyUsage();
 	for (const event of options.events) if (event.type === "agent_end") addUsage(eventUsage, event.usage);
 	const parentUsage = eventUsage.totalTokens > 0 || eventUsage.cost > 0 ? eventUsage : readUsageFromTree(options.sessionDir);
@@ -48,7 +53,17 @@ export function deriveMetrics(options: {
 		elapsedMs: options.elapsedMs,
 		toolCallCount: toolCalls.length,
 		toolCalls,
-		failedToolResults: options.events.filter((event) => event.type === "tool_result" && event.isError).length,
+		failedToolResults: toolResults.filter((event) => event.isError).length,
+		toolResultContentBytes: toolResults.reduce((sum, event) => sum + finite(event.contentBytes), 0),
+		toolResultTextBytes: toolResults.reduce((sum, event) => sum + finite(event.textBytes), 0),
+		repoResultContentBytes: toolResults
+			.filter((event) => event.toolName?.startsWith("repo_"))
+			.reduce((sum, event) => sum + finite(event.contentBytes), 0),
+		nativePolicyResults: nativePolicyResults.length,
+		nativePolicyRefusals: nativePolicyResults.filter((event) => event.nativePolicy?.refused === true).length,
+		nativePolicyFullOverrides: nativePolicyResults.filter((event) => event.nativePolicy?.outputMode === "full").length,
+		retryAfterNativeRefusalCount: retryAfterNativeRefusalCount(options.events),
+		...(contextGateway ? { contextGateway } : {}),
 		mutationCount: options.events.filter((event) => event.type === "tool_call" && isMutationTool(event.toolName)).length,
 		verificationCount: options.events.filter(isVerificationCall).length,
 		changedFiles: options.changedFiles,
@@ -56,6 +71,22 @@ export function deriveMetrics(options: {
 		subagentUsage: subagent.usage,
 		subagentCount: subagent.count,
 	};
+}
+
+function retryAfterNativeRefusalCount(events: EvalEvent[]): number {
+	let count = 0;
+	for (let index = 0; index < events.length; index++) {
+		const event = events[index]!;
+		if (event.type !== "tool_result" || event.nativePolicy?.refused !== true || !event.toolName) continue;
+		for (let next = index + 1; next < events.length; next++) {
+			const candidate = events[next]!;
+			if (candidate.type === "agent_end") break;
+			if (candidate.type !== "tool_call") continue;
+			if (candidate.toolName === event.toolName) count += 1;
+			break;
+		}
+	}
+	return count;
 }
 
 function readSubagentUsage(projectDir: string): { usage: EvalUsage; count: number } {

@@ -1553,11 +1553,22 @@ test("desktop lazy session/load omits tool bodies and retrieves them on demand",
 				sessionId,
 				toolCallId: "lazy-tool",
 			}) as { update: Record<string, unknown> };
+			assert.equal(
+				notifications.filter((notification) => notification.update.sessionUpdate !== "available_commands_update").length,
+				0,
+				"lazy tool-result hydration must not replay or append a session/update",
+			);
 			assert.deepEqual(hydrated.update.rawInput, { path: "/tmp/proj/big.log" });
 			assert.deepEqual(hydrated.update.rawOutput, { bytes: 1_000_000 });
 			assert.deepEqual(hydrated.update.content, [
 				{ type: "content", content: { type: "text", text: "very large output" } },
 			]);
+
+			const other = await cx.request("session/new", { cwd: "/tmp/other", mcpServers: [] }) as { sessionId: string };
+			await assert.rejects(
+				() => cx.request(PIX_TOOL_RESULT_METHOD, { sessionId: other.sessionId, toolCallId: "lazy-tool" }),
+				/tool result lazy-tool is not available for lazy loading/,
+			);
 		},
 		(app) => {
 			app.onNotification("session/update", (ctx) => { notifications.push(ctx.params); });

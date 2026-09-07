@@ -12,10 +12,33 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
   ],
   // Secret firewall is deliberately opt-in for now. Flip this to true to enable
   // high-confidence outbound redaction plus session-history hygiene.
-  "modules": { "credential-firewall": false },
+  "modules": {
+    "credential-firewall": false,
+    // Optional non-store cleanup: removes only SDK truncation metadata text
+    // proven to duplicate the already-visible result. Context Gateway observe
+    // remains passive because this module is separate and disabled by default.
+    "truncation-metadata-normalizer": false
+  },
   "secretFirewall": {
     "sessionHygiene": true,
     "notify": true
+  },
+  // Context Gateway is passive/off by default. P01 supports off/observe only;
+  // enforce is explicitly refused until capture/store/reader integration lands.
+  "contextGateway": {
+    "mode": "off",
+    "budgets": {
+      "maxInlineBytes": 8192,
+      "maxResultBytes": 8192,
+      "maxExactReadBytes": 32768,
+      "maxSearchBytes": 8192,
+      "maxSearchMatches": 12
+    }
+  },
+  // Baseline preserves the historical repo_* argv/defaults. Native Compact is
+  // an explicit experimental arm with bounded native flags/cursors/output.
+  "repoDiscovery": {
+    "profile": "baseline"
   },
   // When true, todo items may carry a per-task thinking level and the todo
   // module will switch/restore Pi's thinking level as in-progress tasks change.

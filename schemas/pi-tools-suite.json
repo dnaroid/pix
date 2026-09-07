@@ -916,6 +916,84 @@
       },
       "description": "Settings for the opt-in credential-firewall module."
     },
+    "contextGateway": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "off"
+            },
+            {
+              "type": "string",
+              "const": "observe"
+            },
+            {
+              "type": "string",
+              "const": "enforce"
+            }
+          ],
+          "description": "Context Gateway mode. P01 implements off/observe; enforce is parsed but explicitly refused until later integration gates."
+        },
+        "budgets": {
+          "type": "object",
+          "properties": {
+            "maxInlineBytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 67108864,
+              "description": "Initial inline byte budget used by Context Gateway policy experiments. Default 8192."
+            },
+            "maxResultBytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 67108864,
+              "description": "Experimental delivered-result byte budget. P01 observe measures the available tool-result content boundary; later shaping must account for the final provider-visible serialization. Default 8192."
+            },
+            "maxExactReadBytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 67108864,
+              "description": "Future exact-read byte budget. Default 32768."
+            },
+            "maxSearchBytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 67108864,
+              "description": "Future search-delivery byte budget. Default 8192."
+            },
+            "maxSearchMatches": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "description": "Future search match budget. Default 12."
+            }
+          },
+          "description": "Context Gateway delivery budgets. In P01 only maxResultBytes is used for passive observe accounting."
+        }
+      },
+      "description": "Context Gateway configuration. Default mode is off."
+    },
+    "repoDiscovery": {
+      "type": "object",
+      "properties": {
+        "profile": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "baseline"
+            },
+            {
+              "type": "string",
+              "const": "native-compact"
+            }
+          ],
+          "description": "repo_* runtime profile. baseline preserves historical argv/defaults; native-compact enables bounded native flags, cursors, validation, and an explicit per-call full override."
+        }
+      },
+      "description": "Repository discovery runtime policy. Default profile is baseline."
+    },
     "lsp": {
       "type": "object",
       "properties": {

@@ -24,6 +24,15 @@ export const MODULES: Array<{ name: string; load: () => Promise<ExtensionModule>
 	{ name: "model-tools", load: () => import("./model-tools/index") },
 	{ name: "usage", load: () => import("./usage/index") },
 	{ name: "web-search", load: () => import("./web-search/index") },
+	// Observe-only Context Gateway currently runs after result enrichers. P01-R
+	// keeps this independent result chain; a coordinator is conditional future
+	// enforce work only if a concrete ordering conflict is proven.
+	{ name: "context-gateway", load: () => import("./context-gateway/index") },
+	// Explicit opt-in, non-store cleanup. Keep after Gateway observe so passive
+	// telemetry measures the original boundary, and before downstream result
+	// observers. This ordering does not depend on any particular DCP persistence
+	// design; DCP is scheduled for a separate redesign.
+	{ name: "truncation-metadata-normalizer", load: () => import("./truncation-metadata-normalizer/index") },
 	{ name: "dcp", load: () => import("./dcp/index") },
 	{ name: "prompt-commands", load: () => import("./prompt-commands/index") },
 	{ name: "skill-installer", load: () => import("./skill-installer/index") },

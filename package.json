@@ -53,7 +53,7 @@
     "build:pix": "mise exec node@24.16.0 -- tsc -p tsconfig.json",
     "prelink:pix": "npm run build:pix --silent",
     "link:pix": "mise exec node@24.16.0 -- npm link --silent",
-    "watch:pix": "npm run link:pix --silent && mise exec node@24.16.0 -- tsc -p tsconfig.json --watch --preserveWatchOutput --noEmitOnError",
+    "watch:pix": "npm run link:pix --silent && mise exec node@24.16.0 -- node scripts/watch-pix.mjs",
     "rebuild:all": "npm run build:desktop",
     "check": "mise exec node@24.16.0 -- npm run check:inner",
     "precheck:inner": "npm run generate-schemas --silent",

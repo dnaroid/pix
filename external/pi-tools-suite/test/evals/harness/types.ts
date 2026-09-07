@@ -1,10 +1,27 @@
+import type { ContextGatewayTelemetrySnapshot } from "../../../src/context-gateway/types.js";
+
 export type EvalCategory = "tool-selection" | "coding-quality" | "orchestration" | "negative";
+
+export type EvalContextGatewayTelemetry = {
+	mode: "observe";
+	maxResultBytes: number;
+	snapshot: ContextGatewayTelemetrySnapshot;
+};
 
 export type EvalEvent = {
 	type: "tool_call" | "tool_result" | "agent_end";
+	toolCallId?: string;
 	toolName?: string;
 	input?: unknown;
 	isError?: boolean;
+	contentBytes?: number;
+	textBytes?: number;
+	nativePolicy?: {
+		refused: boolean;
+		outputMode?: "compact" | "full";
+		reason?: string;
+	};
+	contextGatewayTelemetry?: EvalContextGatewayTelemetry;
 	usage?: EvalUsage;
 };
 
@@ -22,6 +39,14 @@ export type EvalMetrics = {
 	toolCallCount: number;
 	toolCalls: string[];
 	failedToolResults: number;
+	toolResultContentBytes: number;
+	toolResultTextBytes: number;
+	repoResultContentBytes: number;
+	nativePolicyResults: number;
+	nativePolicyRefusals: number;
+	nativePolicyFullOverrides: number;
+	retryAfterNativeRefusalCount: number;
+	contextGateway?: EvalContextGatewayTelemetry;
 	mutationCount: number;
 	verificationCount: number;
 	changedFiles: string[];

@@ -33,7 +33,7 @@ const FALSE_VALUES = new Set(["0", "false", "off", "no"]);
 const DISABLED_LIST_KEYS = ["disabledModules", "disabledExtensions"];
 const ENABLED_LIST_KEYS = ["enabledModules", "enabledExtensions"];
 const MODULE_MAP_KEYS = ["modules", "extensions"];
-const DEFAULT_DISABLED_MODULES = new Set<string>(["credential-firewall"]);
+const DEFAULT_DISABLED_MODULES = new Set<string>(["credential-firewall", "truncation-metadata-normalizer"]);
 const DEFAULT_TODO_THINKING_OVERRIDES = new Map<string, TodoThinkingLevel>([["zai/glm-5.3", "max"]]);
 
 export function getPiToolsSuiteUserConfigPath(homeDir = homedir()): string {

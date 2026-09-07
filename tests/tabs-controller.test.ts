@@ -352,6 +352,81 @@ describe("AppTabsController", () => {
 		assert.equal(resetCount, 1);
 	});
 
+	it("binds a late tool result to its original inactive tab after switching away", async () => {
+		const originRuntime = fakeRuntime("origin", "/tmp/origin.jsonl") as FakeAgentSessionRuntime;
+		const targetRuntime = fakeRuntime("target", "/tmp/target.jsonl") as FakeAgentSessionRuntime;
+		let currentRuntime: AgentSessionRuntime = originRuntime;
+		let historyLoadCount = 0;
+		const controller = new AppTabsController({
+			options: { cwd: "/tmp", themeName: "dark", noSession: true } satisfies AppOptions,
+			blinkController: fakeBlinkController(),
+			runtime: () => currentRuntime,
+			createRuntimeForNewSession: async () => fakeRuntime("new", "/tmp/new.jsonl"),
+			createRuntimeForSession: async (sessionPath) => sessionPath === "/tmp/origin.jsonl" ? originRuntime : targetRuntime,
+			activateRuntime: async (runtime) => {
+				currentRuntime = runtime;
+			},
+			disposeRuntime: async () => {},
+			isRunning: () => true,
+			setStatus: () => {},
+			setSessionStatus: () => {},
+			setSessionActivity: () => {},
+			resetSessionView: () => {},
+			loadSessionHistory: () => {},
+			loadSessionHistoryAsync: async () => {
+				historyLoadCount += 1;
+				return true;
+			},
+			syncUserSessionEntryMetadata: () => {},
+			captureSessionView: () => fakeSessionView(),
+			restoreSessionView: () => {},
+			captureInputState: () => ({ text: "", cursor: 0 }),
+			restoreInputState: () => {},
+			addEntry: () => {},
+			showToast: () => {},
+			render: () => {},
+		});
+		const tabs = controller as unknown as {
+			tabItems: SessionTab[];
+			activeTabId: string | undefined;
+			tabIdsNeedingHistoryReload: Set<string>;
+			setRuntimeForTab(tabId: string, runtime: AgentSessionRuntime): void;
+		};
+		tabs.tabItems.push(
+			{ id: "tab-origin", title: "origin", status: "active", sessionPath: "/tmp/origin.jsonl" },
+			{ id: "tab-target", title: "target", status: "waiting", sessionPath: "/tmp/target.jsonl" },
+		);
+		tabs.activeTabId = "tab-origin";
+		tabs.setRuntimeForTab("tab-origin", originRuntime);
+		tabs.setRuntimeForTab("tab-target", targetRuntime);
+
+		await controller.switchToTab("tab-target");
+		assert.equal(currentRuntime, targetRuntime);
+		const historyLoadsBeforeLateResult = historyLoadCount;
+
+		originRuntime.emitSessionEvent({
+			type: "message_end",
+			message: {
+				role: "toolResult",
+				toolCallId: "late-call",
+				toolName: "bash",
+				content: [{ type: "text", text: "late origin result" }],
+				details: {},
+				isError: false,
+				timestamp: Date.now(),
+			},
+		} as AgentSessionEvent);
+
+		assert.equal(currentRuntime, targetRuntime);
+		assert.equal(tabs.activeTabId, "tab-target");
+		assert.equal(tabs.tabIdsNeedingHistoryReload.has("tab-origin"), true);
+		assert.equal(tabs.tabIdsNeedingHistoryReload.has("tab-target"), false);
+
+		await controller.switchToTab("tab-origin");
+		assert.equal(currentRuntime, originRuntime);
+		assert.equal(historyLoadCount, historyLoadsBeforeLateResult + 1);
+	});
+
 	it("preserves draft input text and cursor per tab", async () => {
 		const activeRuntime = fakeRuntime("one", "/tmp/one.jsonl");
 		const targetRuntime = fakeRuntime("two", "/tmp/two.jsonl");

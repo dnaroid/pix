@@ -19,17 +19,17 @@ export function renderEvalReportMarkdown(report: EvalReport): string {
 		`Finished: ${report.finishedAt}`,
 		`Models: ${report.models.join(", ") || "none"}`,
 		"",
-		"| Model | Pass | Cases | Parent tokens | Worker tokens | Cost | Tool calls | Time |",
-		"| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+		"| Model | Pass | Cases | Parent tokens | Worker tokens | Cost | Tool calls | Tool-result bytes | Native refusals | Time |",
+		"| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
 	];
 	for (const model of report.models) {
 		const results = report.results.filter((result) => result.model === model);
 		const passed = results.filter((result) => result.passed).length;
-		lines.push(`| ${escapeCell(model)} | ${passed} | ${results.length} | ${sum(results, "parentTokens")} | ${sum(results, "workerTokens")} | $${sumCost(results).toFixed(4)} | ${sum(results, "toolCalls")} | ${formatMs(sum(results, "elapsed"))} |`);
+		lines.push(`| ${escapeCell(model)} | ${passed} | ${results.length} | ${sum(results, "parentTokens")} | ${sum(results, "workerTokens")} | $${sumCost(results).toFixed(4)} | ${sum(results, "toolCalls")} | ${sum(results, "resultBytes")} | ${sum(results, "nativeRefusals")} | ${formatMs(sum(results, "elapsed"))} |`);
 	}
-	lines.push("", "## Cases", "", "| Case | Model | Result | Tools | Files | Tokens (parent/worker) | Time |", "| --- | --- | --- | --- | --- | ---: | ---: |");
+	lines.push("", "## Cases", "", "| Case | Model | Result | Tools | Files | Tokens (parent/worker) | Result bytes | Native policy (results/refusals/full/retries) | Time |", "| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: |");
 	for (const result of report.results) {
-		lines.push(`| ${escapeCell(result.caseId)} | ${escapeCell(result.model)} | ${result.passed ? "PASS" : "FAIL"} | ${escapeCell(result.metrics.toolCalls.join(" → "))} | ${escapeCell(result.metrics.changedFiles.join(", "))} | ${result.metrics.parentUsage.totalTokens}/${result.metrics.subagentUsage.totalTokens} | ${formatMs(result.metrics.elapsedMs)} |`);
+		lines.push(`| ${escapeCell(result.caseId)} | ${escapeCell(result.model)} | ${result.passed ? "PASS" : "FAIL"} | ${escapeCell(result.metrics.toolCalls.join(" → "))} | ${escapeCell(result.metrics.changedFiles.join(", "))} | ${result.metrics.parentUsage.totalTokens}/${result.metrics.subagentUsage.totalTokens} | ${result.metrics.toolResultContentBytes} | ${result.metrics.nativePolicyResults}/${result.metrics.nativePolicyRefusals}/${result.metrics.nativePolicyFullOverrides}/${result.metrics.retryAfterNativeRefusalCount} | ${formatMs(result.metrics.elapsedMs)} |`);
 	}
 	const failures = report.results.filter((result) => !result.passed);
 	if (failures.length > 0) {
@@ -43,13 +43,15 @@ export function renderEvalReportMarkdown(report: EvalReport): string {
 	return lines.join("\n") + "\n";
 }
 
-type SumMetric = "parentTokens" | "workerTokens" | "toolCalls" | "elapsed";
+type SumMetric = "parentTokens" | "workerTokens" | "toolCalls" | "resultBytes" | "nativeRefusals" | "elapsed";
 function sum(results: EvalRunResult[], metric: SumMetric): number {
 	return results.reduce((total, result) => total + (
 		metric === "parentTokens" ? result.metrics.parentUsage.totalTokens
 			: metric === "workerTokens" ? result.metrics.subagentUsage.totalTokens
 				: metric === "toolCalls" ? result.metrics.toolCallCount
-					: result.metrics.elapsedMs
+					: metric === "resultBytes" ? result.metrics.toolResultContentBytes
+						: metric === "nativeRefusals" ? result.metrics.nativePolicyRefusals
+							: result.metrics.elapsedMs
 	), 0);
 }
 function sumCost(results: EvalRunResult[]): number { return results.reduce((total, result) => total + result.metrics.parentUsage.cost + result.metrics.subagentUsage.cost, 0); }

@@ -1,6 +1,15 @@
 import path from "node:path";
 import { REPO_DISCOVERY_TOOLS } from "../tool-descriptions";
 import { directoryExists, findIndexedProjectRoot, findProjectRoot } from "../lib/project.js";
+import {
+	applyNativeCompactPolicy,
+	describeNativeCompactArgs,
+	loadRepoDiscoveryProfile,
+	truncateNativeCompactOutput,
+	type NativePolicyOutcome,
+	type RepoDiscoveryOutputMode,
+	type RepoDiscoveryProfile,
+} from "./native-compact.js";
 
 const IDX_COMMANDS = ["architecture", "structure", "ast", "search", "explain", "deps"] as const;
 const TARGET_COMMANDS = new Set<string>(["ast", "search", "explain", "deps"]);
@@ -20,6 +29,7 @@ type RepoDiscoveryParams = {
 	args?: string[];
 	maxLines?: number;
 	maxBytes?: number;
+	outputMode?: RepoDiscoveryOutputMode;
 };
 
 type RepoDiscoveryWrapperParams = Omit<RepoDiscoveryParams, "command">;
@@ -80,6 +90,10 @@ function stringSchema(description: string) {
 
 function numberSchema(description: string, defaultValue: number) {
 	return { type: "number", description, default: defaultValue };
+}
+
+function boundedIntegerSchema(description: string, defaultValue: number, maximum: number) {
+	return { type: "integer", minimum: 1, maximum, description, default: defaultValue };
 }
 
 function validateCommand(command: string): command is IdxCommand {
@@ -263,10 +277,26 @@ async function executeRepoDiscovery(
 	signal: AbortSignal | undefined,
 	ctx: ToolContext,
 	toolName: string,
+	profile: RepoDiscoveryProfile,
 ) {
 	if (signal?.aborted) return textResult(`${toolName} cancelled`);
 
-	const idxArgs = buildIdxArgs(params, toolName);
+	let policyOutcome: NativePolicyOutcome | undefined;
+	let effectiveParams = params;
+	if (profile === "native-compact") {
+		const policy = applyNativeCompactPolicy({
+			command: params.command,
+			args: params.args,
+			maxLines: params.maxLines,
+			maxBytes: params.maxBytes,
+			outputMode: params.outputMode,
+		});
+		policyOutcome = policy.outcome;
+		if (policy.ok === false) return textResult(`Native Compact refused ${toolName}: ${policy.message}`, true, { nativePolicy: policy.outcome });
+		effectiveParams = { ...params, args: policy.args, maxLines: policy.maxLines, maxBytes: policy.maxBytes };
+	}
+
+	const idxArgs = buildIdxArgs(effectiveParams, toolName);
 	if (typeof idxArgs === "string") return textResult(idxArgs, true);
 
 	const indexedProject = ensureIndexedProject(ctx.cwd, toolName);
@@ -276,9 +306,11 @@ async function executeRepoDiscovery(
 	const exitCode = result.code ?? 0;
 	const combined = [result.stdout, result.stderr].filter(Boolean).join(result.stdout && result.stderr ? "\n" : "");
 	const output = combined.trim() ? combined : "No output";
-	const maxLines = positiveInteger(params.maxLines, DEFAULT_MAX_LINES);
-	const maxBytes = positiveInteger(params.maxBytes, DEFAULT_MAX_BYTES);
-	const truncated = truncateOutput(output, maxLines, maxBytes);
+	const maxLines = positiveInteger(effectiveParams.maxLines, DEFAULT_MAX_LINES);
+	const maxBytes = positiveInteger(effectiveParams.maxBytes, DEFAULT_MAX_BYTES);
+	const truncated = profile === "native-compact"
+		? truncateNativeCompactOutput(output, maxLines, maxBytes, effectiveParams.outputMode ?? "compact")
+		: truncateOutput(output, maxLines, maxBytes);
 
 	return textResult(truncated.text, exitCode !== 0, {
 		command: ["idx", ...idxArgs],
@@ -286,12 +318,18 @@ async function executeRepoDiscovery(
 		initializedProject: indexedProject.initialized,
 		exitCode,
 		truncation: truncated.truncation,
+		...(policyOutcome ? { nativePolicy: policyOutcome } : {}),
 	});
 }
 
-const COMMON_REPO_TOOL_PROPERTIES = {
+const BASELINE_REPO_TOOL_PROPERTIES = {
 	maxLines: numberSchema("Returned line cap, keeps top lines (default 2000). Prefer native limits/cursors before raising.", DEFAULT_MAX_LINES),
 	maxBytes: numberSchema("Returned byte cap, keeps top bytes (default 50000). Narrow the query before raising.", DEFAULT_MAX_BYTES),
+};
+
+const NATIVE_COMPACT_REPO_TOOL_PROPERTIES = {
+	maxLines: boundedIntegerSchema("Final delivered line cap. compact default/max 400; outputMode=full permits up to 2000.", 400, 2_000),
+	maxBytes: boundedIntegerSchema("Final delivered byte cap. compact default/max 12000; outputMode=full permits up to 50000.", 12_000, 50_000),
 };
 
 const IDX_ARG_DESCRIPTIONS: Record<IdxCommand, string> = {
@@ -306,16 +344,35 @@ const IDX_ARG_DESCRIPTIONS: Record<IdxCommand, string> = {
 	deps: "idx deps flags: [--mode modules|module-imports|calls|call-graph] [--direction callers|callees|both] [--depth <n>] [--show-edges] [--tests].",
 };
 
-function argsSchema(command: IdxCommand) {
+function argsSchema(command: IdxCommand, profile: RepoDiscoveryProfile) {
+	const baseDescription = IDX_ARG_DESCRIPTIONS[command];
 	return {
 		type: "array",
-		items: stringSchema("idx argv token; pass flags and values as separate items"),
-		description: IDX_ARG_DESCRIPTIONS[command],
+		items: profile === "native-compact"
+			? { type: "string", minLength: 1, description: "idx argv token; --flag=value is normalized and revalidated by Native Compact" }
+			: stringSchema("idx argv token; pass flags and values as separate items"),
+		description: profile === "native-compact"
+			? `${baseDescription} ${describeNativeCompactArgs(command)}`
+			: baseDescription,
 	};
 }
 
-function repoToolParameters(command: IdxCommand, targetDescription?: string) {
-	const properties = { args: argsSchema(command), ...COMMON_REPO_TOOL_PROPERTIES };
+function repoToolParameters(command: IdxCommand, targetDescription: string | undefined, profile: RepoDiscoveryProfile) {
+	const outputProperties = profile === "native-compact"
+		? NATIVE_COMPACT_REPO_TOOL_PROPERTIES
+		: BASELINE_REPO_TOOL_PROPERTIES;
+	const properties = {
+		args: argsSchema(command, profile),
+		...outputProperties,
+		...(profile === "native-compact" ? {
+			outputMode: {
+				type: "string",
+				enum: ["compact", "full"],
+				default: "compact",
+				description: "Native Compact delivery: compact by default. Use full only on this same tool call when broader output is intentional or its compact result was actually truncated; do not switch an unrelated repo tool to full after a policy refusal.",
+			},
+		} : {}),
+	};
 
 	return {
 		type: "object",
@@ -336,6 +393,7 @@ function registerRepoCommandTool(
 		promptGuidelines: string[];
 		targetDescription?: string;
 	},
+	profile: RepoDiscoveryProfile,
 ) {
 	pi.registerTool({
 		name: options.name,
@@ -343,15 +401,23 @@ function registerRepoCommandTool(
 		description: options.description,
 		promptSnippet: options.promptSnippet,
 		promptGuidelines: options.promptGuidelines,
-		parameters: repoToolParameters(options.command, options.targetDescription),
+		parameters: repoToolParameters(options.command, options.targetDescription, profile),
 
 		async execute(_toolCallId: string, params: RepoDiscoveryWrapperParams, signal: AbortSignal | undefined, _onUpdate: unknown, ctx: ToolContext) {
-			return executeRepoDiscovery(pi, { ...params, command: options.command }, signal, ctx, options.name);
+			return executeRepoDiscovery(pi, { ...params, command: options.command }, signal, ctx, options.name, profile);
 		},
 	});
 }
 
-export default function repoDiscoveryExtension(pi: ExtensionAPI) {
+export type RepoDiscoveryExtensionOptions = {
+	profile?: RepoDiscoveryProfile;
+	cwd?: string;
+};
+
+export default function repoDiscoveryExtension(pi: ExtensionAPI, options: RepoDiscoveryExtensionOptions = {}) {
+	const registrationCwd = options.cwd ?? process.cwd();
+	const profileConfig = options.profile ? { profile: options.profile, issues: [] } : loadRepoDiscoveryProfile(registrationCwd);
+	const profile = profileConfig.profile;
 	pi.registerCommand(INIT_COMMAND_NAME, {
 		description: "Initialize idx repository discovery for this project, then reload Pi to expose repo_* tools",
 		handler: async (_args: string, ctx: CommandContext) => {
@@ -424,8 +490,8 @@ export default function repoDiscoveryExtension(pi: ExtensionAPI) {
 		},
 	});
 
-	if (!findIndexedProjectRoot(process.cwd())) return;
+	if (!findIndexedProjectRoot(registrationCwd)) return;
 
-	for (const tool of REPO_DISCOVERY_TOOLS) registerRepoCommandTool(pi, tool);
+	for (const tool of REPO_DISCOVERY_TOOLS) registerRepoCommandTool(pi, tool, profile);
 
 }

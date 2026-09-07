@@ -102,12 +102,14 @@ async function walkFiles(absolutePath) {
 }
 
 async function computeSyncPlan(sourceRoot, targetRoot) {
-	const changes = []; // { rel, status: "add"|"update"|"same" }
+	const changes = []; // { rel, status: "add"|"update"|"delete"|"same" }
+	const sourceFiles = new Set();
 	const sourceEntries = collectSourceFiles(sourceRoot);
 	for (const entry of sourceEntries) {
 		const files = await walkFiles(entry.absolutePath);
 		for (const file of files) {
 			const rel = relative(sourceRoot, file);
+			sourceFiles.add(rel);
 			const targetFile = join(targetRoot, rel);
 			let sourceHash;
 			try {
@@ -128,6 +130,13 @@ async function computeSyncPlan(sourceRoot, targetRoot) {
 				status = targetHash === sourceHash ? "same" : "update";
 			}
 			changes.push({ rel, status });
+		}
+	}
+	for (const name of MIRROR_ENTRIES) {
+		const targetFiles = await walkFiles(join(targetRoot, name));
+		for (const file of targetFiles) {
+			const rel = relative(targetRoot, file);
+			if (!sourceFiles.has(rel)) changes.push({ rel, status: "delete" });
 		}
 	}
 	return changes;
@@ -157,11 +166,12 @@ async function main() {
 	const plan = await computeSyncPlan(options.source, options.target);
 	const additions = plan.filter((c) => c.status === "add");
 	const updates = plan.filter((c) => c.status === "update");
+	const deletions = plan.filter((c) => c.status === "delete");
 	const same = plan.filter((c) => c.status === "same");
 
 	console.error(`[sync-pi-tools-suite] source: ${options.source}`);
 	console.error(`[sync-pi-tools-suite] target: ${options.target}`);
-	console.error(`[sync-pi-tools-suite] same:${same.length} add:${additions.length} update:${updates.length}`);
+	console.error(`[sync-pi-tools-suite] same:${same.length} add:${additions.length} update:${updates.length} delete:${deletions.length}`);
 
 	if (additions.length > 0) {
 		console.error("[sync-pi-tools-suite] new files:");
@@ -171,14 +181,18 @@ async function main() {
 		console.error("[sync-pi-tools-suite] changed files:");
 		for (const change of updates) console.error(`  ~ ${change.rel}`);
 	}
+	if (deletions.length > 0) {
+		console.error("[sync-pi-tools-suite] deleted files:");
+		for (const change of deletions) console.error(`  - ${change.rel}`);
+	}
 
 	if (options.check) {
 		// Non-zero exit when drift exists, for use in CI / pre-flight checks.
-		if (additions.length > 0 || updates.length > 0) process.exitCode = 3;
+		if (additions.length > 0 || updates.length > 0 || deletions.length > 0) process.exitCode = 3;
 		return;
 	}
 
-	if (additions.length === 0 && updates.length === 0) {
+	if (additions.length === 0 && updates.length === 0 && deletions.length === 0) {
 		console.error("[sync-pi-tools-suite] already in sync");
 		return;
 	}

@@ -294,6 +294,38 @@ const SecretFirewallConfig = Type.Object(
 	{ description: "Settings for the opt-in credential-firewall module." },
 );
 
+const ContextGatewayBudgetsConfig = Type.Object(
+	{
+		maxInlineBytes: Type.Optional(Type.Integer({ minimum: 1, maximum: 67108864, description: "Initial inline byte budget used by Context Gateway policy experiments. Default 8192." })),
+		maxResultBytes: Type.Optional(Type.Integer({ minimum: 1, maximum: 67108864, description: "Experimental delivered-result byte budget. P01 observe measures the available tool-result content boundary; later shaping must account for the final provider-visible serialization. Default 8192." })),
+		maxExactReadBytes: Type.Optional(Type.Integer({ minimum: 1, maximum: 67108864, description: "Future exact-read byte budget. Default 32768." })),
+		maxSearchBytes: Type.Optional(Type.Integer({ minimum: 1, maximum: 67108864, description: "Future search-delivery byte budget. Default 8192." })),
+		maxSearchMatches: Type.Optional(Type.Integer({ minimum: 1, maximum: 1000, description: "Future search match budget. Default 12." })),
+	},
+	{ description: "Context Gateway delivery budgets. In P01 only maxResultBytes is used for passive observe accounting." },
+);
+
+const ContextGatewayConfig = Type.Object(
+	{
+		mode: Type.Optional(Type.Union(
+			[Type.Literal("off"), Type.Literal("observe"), Type.Literal("enforce")],
+			{ description: "Context Gateway mode. P01 implements off/observe; enforce is parsed but explicitly refused until later integration gates." },
+		)),
+		budgets: Type.Optional(ContextGatewayBudgetsConfig),
+	},
+	{ description: "Context Gateway configuration. Default mode is off." },
+);
+
+const RepoDiscoveryConfig = Type.Object(
+	{
+		profile: Type.Optional(Type.Union(
+			[Type.Literal("baseline"), Type.Literal("native-compact")],
+			{ description: "repo_* runtime profile. baseline preserves historical argv/defaults; native-compact enables bounded native flags, cursors, validation, and an explicit per-call full override." },
+		)),
+	},
+	{ description: "Repository discovery runtime policy. Default profile is baseline." },
+);
+
 // ---------------------------------------------------------------------------
 // LSP
 // ---------------------------------------------------------------------------
@@ -362,6 +394,8 @@ export const PiToolsSuiteConfigSchema = Type.Object(
 		toolRenderer: Type.Optional(ToolRendererConfig),
 		promptCommands: Type.Optional(PromptCommandsConfig),
 		secretFirewall: Type.Optional(SecretFirewallConfig),
+		contextGateway: Type.Optional(ContextGatewayConfig),
+		repoDiscovery: Type.Optional(RepoDiscoveryConfig),
 		lsp: Type.Optional(LspConfig),
 	},
 	{
