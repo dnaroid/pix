@@ -1,7 +1,7 @@
 import { stringDisplayWidth } from "../../terminal-width.js";
 import type { Theme } from "../../theme.js";
 import { SUBAGENTS_WIDGET_MAX_ROWS } from "../constants.js";
-import { ellipsizeDisplay, padOrTrimPlain, wrapLine } from "./render-text.js";
+import { ellipsizeDisplay, padOrTrimPlain, sanitizeText, wrapLine } from "./render-text.js";
 import { thinkingLevelThemeColor } from "./status-line-renderer.js";
 import {
 	activeSubagentStates,
@@ -130,7 +130,7 @@ export function renderSubagentsPanel(state: SubagentsWidgetState | undefined, ex
 	for (const visibleRun of visibleAgents) {
 		const { agent, preview } = visibleRun;
 		const model = subagentModelThinkingLabel(preview);
-		const task = preview?.task?.trim() || preview?.scope?.trim() || "task unavailable";
+		const task = singleLinePreview(preview?.task) || singleLinePreview(preview?.scope) || "task unavailable";
 		const icon = subagentIcon(preview);
 		const runLabel = visibleRun.showRunLabel ? `${subagentRunName(visibleRun.runDir)} ` : "";
 		const prefix = `${runLabel}${icon} ${agent.id} ${model} `;
@@ -149,6 +149,10 @@ export function renderSubagentsPanel(state: SubagentsWidgetState | undefined, ex
 	const hidden = flattenedRuns.length - visibleAgents.length;
 	if (hidden > 0) lines.push({ text: padOrTrimPlain(`+${hidden} more`, width), variant: "muted", target });
 	return lines;
+}
+
+function singleLinePreview(value: string | undefined): string {
+	return value ? sanitizeText(value).replace(/\s+/gu, " ").trim() : "";
 }
 
 function subagentPanelLineSegments(input: {

@@ -142,6 +142,28 @@ describe("todo panel", () => {
 		assert.equal(plannedIcon?.foreground, THEMES.dark.colors.muted);
 		assert.equal(plannedIcon?.bold, true);
 	});
+
+	it("keeps multiline subagent prompts on one widget row", () => {
+		const state: SubagentsWidgetState = {
+			runDir: "/tmp/subagents/run-1",
+			agents: [{ id: "spec-contradictions", status: "running" }],
+			tasks: [{
+				id: "spec-contradictions",
+				task: "Read these docs:\n1. docs/architecture/calibration.md\t(read-only)",
+				icon: "search",
+			}],
+			live: true,
+			snapshotOnly: false,
+			checkedAt: Date.now(),
+		};
+
+		const lines = renderSubagentsPanel(state, true, 120, THEMES.dark.colors);
+
+		assert.equal(lines.length, 1);
+		assert.doesNotMatch(lines[0]?.text ?? "", /[\r\n\t]/u);
+		assert.match(lines[0]?.text ?? "", /Read these docs: 1\. docs\/architecture\/calibration\.md \(read-only\)/u);
+		assert.equal(stringDisplayWidth(lines[0]?.text ?? ""), 120);
+	});
 });
 
 function assertThinkingSegmentColor(line: { text: string; segments?: readonly { start: number; end: number; foreground?: string }[] }, label: string, color: string): void {
