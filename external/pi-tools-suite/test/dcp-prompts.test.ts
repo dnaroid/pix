@@ -61,4 +61,13 @@ describe("DCP prompt contracts", () => {
 		expect(COMPRESS_RANGE_DESCRIPTION).toContain("attached to stable user/tool-result carriers");
 		expect(COMPRESS_RANGE_DESCRIPTION).toContain("IDs may be sparse");
 	});
+
+	test("rollup guidance does not require recursive summaries or mistake a partial commit for relief", () => {
+		expect(COMPRESS_RANGE_DESCRIPTION).toContain("Placeholders are optional");
+		expect(COMPRESS_RANGE_DESCRIPTION).toContain("summarize their continuation-relevant meaning");
+		expect(COMPRESS_RANGE_DESCRIPTION).not.toContain("Include every required block placeholder exactly once");
+		expect(COMPRESS_RANGE_DESCRIPTION).toContain("non-positive full-projection gain");
+		expect(COMPRESS_RANGE_DESCRIPTION).toContain("remainingRecoveryTokens");
+		expect(COMPRESS_RANGE_DESCRIPTION).toContain("An unsuccessful call does not satisfy the reminder");
+	});
 });

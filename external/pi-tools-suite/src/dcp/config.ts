@@ -50,15 +50,16 @@ export interface DcpConfig {
       maxSuggestions: number
     }
     /**
-     * Auto-compress fallback: when the model ignores repeated context-strong
-     * nudges above the emergency threshold, DCP creates a compression block
-     * itself (without waiting for the model). Lossy and irreversible within a
+     * Auto-compress fallback: after completed actionable provider opportunities
+     * fail to meet the recovery goal, DCP can create a safe compression block,
+     * including after routine-reminder escalation. Lossy within a
      * session — disabled by default; opt in via config.
      */
     autoCompress: {
       enabled: boolean
-      /** Number of context-strong nudges emitted (and ignored) before DCP
-       * auto-compresses. The model gets `patience` genuine strong chances. */
+      /** Auto fallback is eligible after more than this many completed,
+       * correlated opportunities with a delivered actionable reminder.
+       * Failed calls and insufficient commits do not reset patience. */
       patience: number
       /** Models to try, in order, when producing a model-generated summary.
        * Empty array → deterministic programmatic digest (no model call). */

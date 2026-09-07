@@ -140,6 +140,8 @@ export function summarizeDcpState(state: DcpState, config?: DcpConfig): Record<s
     },
     providerSeenTools: state.providerSeenToolIds.size,
     consecutiveEmergencyPasses: state.consecutiveIgnoredStrongNudges,
+    consecutiveActionableOpportunities: state.consecutiveIgnoredNudges,
+    compressionProgress: state.compressionProgress,
     nudgeAnchors: state.nudgeAnchors.map((anchor) => ({
       id: anchor.id,
       type: anchor.type,

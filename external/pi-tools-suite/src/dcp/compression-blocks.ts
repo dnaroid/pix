@@ -256,9 +256,12 @@ function formatRestoredBlock(block: CompressionBlock): string {
  * placeholders are left as-is for backwards compatibility.
  */
 export function expandBlockPlaceholders(summary: string, state: DcpState): string {
+  const consumed = new Set<number>()
   return summary.replace(BLOCK_PLACEHOLDER_RE, (match, idStr, legacyIdStr) => {
     const id = parseInt(idStr ?? legacyIdStr, 10)
     const block = state.compressionBlocks.find((b) => b.id === id)
+    if (block && consumed.has(id)) return ""
+    if (block) consumed.add(id)
     return block ? formatRestoredBlock(block) : match
   })
 }
@@ -292,6 +295,20 @@ function expandBlockPlaceholdersWithRecovery(
     .join("")
 
   return expanded + recoveryHeading + recovery
+}
+
+function assertVerifiableBlockPlaceholders(summary: string, state: DcpState): void {
+  const unknown = new Set<number>()
+  for (const match of summary.matchAll(BLOCK_PLACEHOLDER_RE)) {
+    const id = Number.parseInt(match[1] ?? match[2] ?? "", 10)
+    if (!Number.isInteger(id) || !state.compressionBlocks.some((block) => block.id === id)) unknown.add(id)
+  }
+  if (unknown.size > 0) {
+    throw new Error(
+      `Compression summary contains unverifiable block placeholder(s): ${[...unknown].map((id) => `b${id}`).join(", ")}. ` +
+      "Expand the referenced content explicitly or retry with current block IDs.",
+    )
+  }
 }
 
 function preparePlaceholderSummary(
@@ -885,11 +902,30 @@ export function createRangeCompressionBlock(
     )
   }
 
+  // A modern block has an explicit protected-fragment ledger. During a
+  // roll-up, the new summary may therefore replace old prose while the ledger
+  // carries the inherited verbatim continuity fragments exactly once. Older
+  // blocks have no such proof, so retain the historical loss-avoidance path.
+  const modernLedgerRollup = coveredBlocks.length > 0 && coveredBlocks.every((block) =>
+    block.version === 2 && block.protectedFragments !== undefined,
+  )
+  const hasExplicitBlockReferences = [...summary.matchAll(BLOCK_PLACEHOLDER_RE)].length > 0
+  if (modernLedgerRollup) assertVerifiableBlockPlaceholders(summary, state)
+
   const placeholderSummary = preparePlaceholderSummary(
     summary,
     coveredBlocks,
     state,
-    { validatePlaceholders, expandPlaceholders },
+    {
+      validatePlaceholders: modernLedgerRollup ? false : validatePlaceholders,
+      // Explicit references are deliberately expanded once, never left to
+      // dangle after their source blocks are deactivated. Otherwise modern
+      // ledger roll-ups replace old summary prose instead of recursively
+      // appending it.
+      expandPlaceholders: modernLedgerRollup
+        ? hasExplicitBlockReferences
+        : expandPlaceholders,
+    },
   )
 
   const userPreservedSummary = mode === "range"

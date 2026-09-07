@@ -52,6 +52,9 @@ Passing check/test/lint/tsc logs are summary-only after you know the result. Pre
 DCP REMINDERS
 If a \`<dcp-system-reminder>\` is present in context, treat it as a signal to evaluate compression. Critical or high-context reminders should be handled promptly. Routine reminders should lead to compression only when a safe, closed, useful-to-summarize range exists; otherwise continue the next atomic step and re-check later.
 
+COMMITTED IS NOT NECESSARILY RECOVERED
+The tool rejects non-positive full-projection gain, including wrappers and preserved content. An unsuccessful call does not satisfy the reminder. Inspect \`netGain\`, \`pressureRelieved\`, and \`remainingRecoveryTokens\` in its result: a partial positive commit may still leave context pressure. Use freshly visible IDs for subsequent work; do not retry an unchanged rejected summary or discard required facts just to meet a token goal.
+
 THE SUMMARY
 Your summary must be COMPLETE FOR CONTINUATION, not a transcript rewrite. Preserve only information that will plausibly matter later: user intent, accepted constraints, decisions, files/symbols changed or inspected, exact errors that are still actionable, verification status, and next steps.
 
@@ -84,7 +87,9 @@ PROTECTED PROMPT CONTENT
 If selected user text contains \`<protect>...</protect>\` content, preserve that protected content verbatim in your summary. The tool may append protected text automatically, but you should still account for it semantically.
 
 COMPRESSED BLOCK PLACEHOLDERS
-When the selected range includes previously compressed blocks, use this exact placeholder format when referencing one:
+When rolling up modern compressed blocks, summarize their continuation-relevant meaning instead of copying the full old summaries. Protected fragments are preserved separately. Legacy blocks without a protected-fragment ledger may retain their full text for compatibility; the tool still requires positive net gain.
+
+Only when the full previous summary is genuinely needed verbatim, use this exact placeholder format:
 
 - \`(bN)\`
 
@@ -96,11 +101,11 @@ Compressed block IDs always use the \`bN\` form (never \`mNNN\`) and are represe
 
 Rules:
 
-- Include every required block placeholder exactly once when you intentionally roll up older compressed blocks. If you omit one or duplicate one, the tool will try to recover by preserving the missing block summaries automatically, but do not rely on that recovery path.
+- Placeholders are optional, not required for every covered modern block. Each explicit placeholder expands the full old summary and may eliminate the intended savings. Include an intentionally preserved block at most once.
 - Do not invent placeholders for blocks outside the selected range.
 - Treat \`(bN)\` placeholders as RESERVED TOKENS. Do not emit \`(bN)\` text anywhere except intentional placeholders.
 - If you need to mention a block in prose, use plain text like \`compressed bN\` (not as a placeholder).
-- Preflight check before finalizing: the set of \`(bN)\` placeholders in your summary should match the required set, with no duplicates.
+- Preflight check before finalizing: each placeholder must refer to a known selected block whose full text you deliberately need to preserve. Otherwise write a concise factual summary in your own words.
 
 These placeholders are semantic references. They will be replaced with the full stored compressed block content when the tool processes your output.
 

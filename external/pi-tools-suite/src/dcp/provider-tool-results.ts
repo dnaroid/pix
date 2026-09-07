@@ -95,6 +95,17 @@ export function providerPayloadRevision(payload: unknown): string | undefined {
   }
 }
 
+/** Verify delivery of the exact trusted reminder, not just a context callback. */
+export function providerPayloadIncludesReminder(payload: unknown, reminder: string | undefined): boolean {
+  if (!reminder) return false;
+  try {
+    const serialized = JSON.stringify(payload);
+    return typeof serialized === "string" && serialized.includes(JSON.stringify(reminder).slice(1, -1));
+  } catch {
+    return false;
+  }
+}
+
 export interface ProviderEvidenceAttempt {
   sessionEpoch: number;
   provider?: string;
@@ -104,6 +115,7 @@ export interface ProviderEvidenceAttempt {
   sessionId?: string;
   toolIds: ReadonlySet<string>;
   opportunityAvailable?: boolean;
+  opportunityKind?: "routine" | "emergency";
 }
 
 export interface ProviderEvidenceFinalMessage {
@@ -125,6 +137,7 @@ export interface ProviderEvidencePendingSnapshot {
   sessionId?: string;
   toolIds: Set<string>;
   opportunityAvailable: boolean;
+  opportunityKind?: "routine" | "emergency";
   ambiguous: boolean;
 }
 
@@ -139,6 +152,7 @@ export type ProviderEvidenceCompletion =
       sessionId?: string;
       toolIds: Set<string>;
       opportunityAvailable: boolean;
+      opportunityKind?: "routine" | "emergency";
     }
   | {
       status: "refused";
@@ -190,6 +204,7 @@ export class ProviderEvidenceTracker {
         sessionId: attempt.sessionId,
         toolIds,
         opportunityAvailable: Boolean(attempt.opportunityAvailable),
+        opportunityKind: attempt.opportunityKind,
         ambiguous: !attemptHasIdentity(attempt),
       };
       return this.snapshot()!;
@@ -204,6 +219,7 @@ export class ProviderEvidenceTracker {
       pending.statePath === attempt.statePath &&
       pending.sessionId === attempt.sessionId &&
       pending.opportunityAvailable === Boolean(attempt.opportunityAvailable) &&
+      pending.opportunityKind === attempt.opportunityKind &&
       sameStringSet(pending.toolIds, toolIds);
 
     pending.lastAttemptId = attemptId;
@@ -244,6 +260,7 @@ export class ProviderEvidenceTracker {
       sessionId: pending.sessionId,
       toolIds: new Set(pending.toolIds),
       opportunityAvailable: pending.opportunityAvailable,
+      opportunityKind: pending.opportunityKind,
     };
   }
 

@@ -81,6 +81,14 @@ Multiple operations in one `compress` invocation are staged on a working state.
 Fatal preflight/prepare/persistence failures publish none of the staged blocks.
 Retries with the same compress tool-call id are idempotent.
 
+Manual compression must prove positive **full-projection** gain before publication.
+A runtime-only immutable snapshot is tied to the exact conversation index. The
+preview applies only the new blocks, verifies that every block materializes,
+and includes replacement wrappers, protected fragments and regenerated ID carriers
+on the same estimator. Unrelated automatic pruning cannot subsidize a bad summary.
+Missing snapshots and overlapping range/message selections fail closed. Failed
+preparation or persistence leaves the live blocks, patience and recovery goal intact.
+
 Legacy blocks without `version: 2` retain their historical projection semantics
 for backward compatibility and are not silently reinterpreted as v2 blocks.
 
@@ -98,8 +106,28 @@ target cannot be met it may expose the largest safe partial candidate rather
 than pretending no safe material exists.
 
 `patience` advances only on completed correlated main-provider opportunities in
-which the reminder was available. Repeated `context` transforms and identical
-request retries do not consume patience.
+which the exact trusted reminder is present in the outgoing payload. Repeated
+`context` transforms, identical request retries, failed streams, deferred responses
+and payloads without that reminder do not consume patience. A response containing
+a `compress` call does consume an opportunity: a failed call is not progress.
+
+Actionable routine reminders have the same bounded opportunity accounting, separate
+from the legacy emergency-only counter. After more than `autoCompress.patience`
+completed opportunities (three at the default value of two), the reminder escalates
+and the opt-in automatic fallback may prepare a safe block even below the emergency
+threshold. The routine savings goal is up to five percentage points of the window,
+bounded by the distance to `minContextPercent`. A closed, provider-seen same-turn
+prefix can be offered before escalation; the live request and recent pairs remain
+protected. Crossing into emergency pressure does not grant another patience window.
+
+The outstanding goal and opportunity counter survive serialization. A partial
+positive manual commit reduces the remaining goal but does not reset patience.
+Its old boundary reminder may be invalidated once as `compress-partial`, then
+refreshed against current IDs. Result/debug fields distinguish `committed` from
+`pressureRelieved`, with `projectedBeforeTokens`, `projectedAfterTokens`, `netGain`
+and `remainingRecoveryTokens`. An unchanged native usage sample from before that
+commit must not charge the recovered tokens again. New input growth and stricter
+capacity targets can increase the remaining goal.
 
 Terminal blocked reasons include `live-head-only`,
 `protected-budget-exceeded`, `evidence-unknown`, `summarizer-unavailable`,
@@ -112,6 +140,9 @@ compaction implicitly.
 `compress.autoCompress.enabled` is **false by default**. Manual mode cannot be
 widened into autonomous summary creation. Disabling routine `autoCandidates`
 does not silently disable the separately configured emergency safety planner.
+An exhausted routine opportunity budget with auto disabled, or an unsuccessful
+automatic preparation, emits a deduplicated warning and a `dcp-nudge`
+`progress-blocked` diagnostic rather than silently enabling lossy processing.
 
 ## Provider evidence and emergency eligibility
 
@@ -152,6 +183,16 @@ errors/verification failures, next steps and tool metadata; large successful raw
 logs are not copied wholesale. New blocks store source hash/coverage,
 representation mode and a deduplicated protected-fragment ledger so repeated
 rollups do not recursively embed old summaries.
+This ledger rule applies to both manual and automatic modern rollups. An explicit
+`(bN)` placeholder still requests the full referenced summary (once); it is not
+mandatory for every covered block. Unknown modern references are rejected. Legacy
+blocks without the ledger retain their loss-avoidance path and remain subject to
+the manual positive-gain check.
+
+Regression coverage for these boundaries is in `dcp-manual-progress.test.ts` and
+`dcp-progress-opportunities.test.ts`, including 132-response routine replay,
+single-user-turn recovery, unsuccessful compress calls, protected-fragment and
+carrier overhead, rollback, partial progress, and unchanged provider usage.
 
 Recognized explicit checkpoints are not limited to six head/tail examples.
 The extractive fallback refuses when its continuity representation exceeds

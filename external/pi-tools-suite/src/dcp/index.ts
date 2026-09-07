@@ -64,6 +64,7 @@ import { safeGetContextUsage } from "../context-usage.js"
 import {
 	collectProviderToolResultEvidence,
 	providerPayloadIncludesToolResult,
+	providerPayloadIncludesReminder,
 	providerPayloadRevision,
 	ProviderEvidenceTracker,
 } from "./provider-tool-results.js"
@@ -71,6 +72,7 @@ import { reconcileInheritedCompressionBlocks } from "./pruner-compression-blocks
 import { rehydrateToolRecordsFromMessages } from "./recovery.js"
 import { inferDcpBlockedReason, planDcpBudget } from "./progress-controller.js"
 import { createBudgetedAutoCompressionBlock } from "./auto-compress-budget.js"
+import { outstandingCompressionTokens, resetCompressionProgress, routineRecoveryTokens, trackCompressionProgress } from "./compression-progress.js"
 import { captureDcpTransactionGuard, cloneDcpTransactionState, runDcpStateTransaction, invalidateDcpStateOwner } from "./state-transaction.js"
 
 // ---------------------------------------------------------------------------
@@ -147,10 +149,32 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 	const providerEvidenceTracker = new ProviderEvidenceTracker()
 	let providerEvidenceCommitQueue = Promise.resolve()
 	let latestProviderOpportunityAvailable = false
+	let latestProviderOpportunityKind: "routine" | "emergency" | undefined
+	let latestProviderReminder: string | undefined
+	const warnedProgress = new Set<string>()
+	const warnProgress = (ctx: ExtensionContext, reason: string, message: string) => {
+		const key = `${state.sessionEpoch}:${reason}`
+		if (warnedProgress.has(key)) return
+		warnedProgress.add(key)
+		writeDcpDebugLog(configForContext(ctx), "context.progress_warning", { reason, message }, ctx)
+		try {
+			pi.appendEntry("dcp-nudge", {
+				event: "progress-blocked", reason, message,
+				ignoredOpportunities: state.consecutiveIgnoredNudges,
+				remainingRecoveryTokens: state.compressionProgress?.remainingTokens,
+				createdAt: Date.now(),
+			})
+		} catch { /* Diagnostic only; do not turn an explicit blocked state into an extension failure. */ }
+		try { ctx.ui.notify(message, "warning") } catch { /* Headless/notification failure is not a persistence failure. */ }
+	}
 	const invalidateOwner = () => {
 			invalidateDcpStateOwner(state)
 			providerEvidenceTracker.reset()
 			latestProviderOpportunityAvailable = false
+			latestProviderOpportunityKind = undefined
+			latestProviderReminder = undefined
+			resetCompressionProgress(state)
+			warnedProgress.clear()
 	}
 	pi.on("model_select", invalidateOwner)
 	pi.on("session_tree", invalidateOwner)
@@ -199,6 +223,9 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 		resetState(state)
 		providerEvidenceTracker.reset()
 		latestProviderOpportunityAvailable = false
+		latestProviderOpportunityKind = undefined
+		latestProviderReminder = undefined
+		warnedProgress.clear()
 		const sessionStartEpoch = state.sessionEpoch
 		pendingInheritedBlockReconciliation = false
 
@@ -356,6 +383,8 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 			}, ctx)
 			return { messages: contextMessages }
 		}
+		latestProviderOpportunityKind = undefined
+		latestProviderReminder = undefined
 		annotateMessagesWithBranchEntryIds(contextMessages, ctx)
 		const rehydration = rehydrateToolRecordsFromMessages(contextMessages, state)
 		if (rehydration.recordsUpdated > 0) {
@@ -469,8 +498,9 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 			if (!budget.capacityExceeded && state.progressRecovery) state.progressRecovery = undefined
 			if (!emergencyPressureReached && !routineNudgesAllowed) {
 				const clearedAnchors = clearDcpNudgeAnchors(state)
-				const resetEmergencyPasses = state.consecutiveIgnoredStrongNudges > 0
-				state.consecutiveIgnoredStrongNudges = 0
+				const resetEmergencyPasses = state.consecutiveIgnoredStrongNudges > 0 || state.consecutiveIgnoredNudges > 0 || !!state.compressionProgress
+				resetCompressionProgress(state)
+				warnedProgress.clear()
 				if (clearedAnchors > 0 || resetEmergencyPasses) await saveDcpState(ctx, state)
 				return finishContext("below-threshold", prunedMessages, {
 					contextPercent,
@@ -507,9 +537,40 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 				typeof currentContextWindow === "number" &&
 				Number.isFinite(currentContextWindow) &&
 				currentContextWindow !== previousContextWindow
-			if (contextWindowChanged) state.consecutiveIgnoredStrongNudges = 0
+			if (contextWindowChanged) resetCompressionProgress(state)
 
-			const nudgeType = hardEmergencyReached && !contextLimitReached
+			const requestedRecoveryTokens = emergencyPressureReached
+				? budget.requiredSavingsTokens
+				: routineRecoveryTokens(budget.projectedBeforeTokens, usage.contextWindow, thresholds.minContextPercent)
+			const progressInput = {
+				projectedTokens: repoProjectedTokens,
+				observedTokens: budget.projectedBeforeTokens,
+				contextWindow: usage.contextWindow,
+				requiredTokens: requestedRecoveryTokens,
+				kind: emergencyPressureReached ? "emergency" as const : "routine" as const,
+				targetHeadroomTokens: emergencyPressureReached ? budget.targetHeadroomTokens : undefined,
+			}
+			const remainingRecoveryTokens = outstandingCompressionTokens(state, progressInput)
+			if (remainingRecoveryTokens === 0) {
+				resetCompressionProgress(state)
+				warnedProgress.clear()
+			}
+			const planningRecoveryTokens = remainingRecoveryTokens !== undefined && remainingRecoveryTokens > 0
+				? state.compressionProgress?.kind === progressInput.kind ? remainingRecoveryTokens : Math.max(remainingRecoveryTokens, requestedRecoveryTokens)
+				: requestedRecoveryTokens
+			const routineEscalated = !state.manualMode && routineNudgesAllowed &&
+				state.consecutiveIgnoredNudges > Math.max(0, Math.floor(effectiveConfig.compress.autoCompress.patience))
+			const progressPressureReached = emergencyPressureReached || routineEscalated
+			// A marathon's first useful reminder must not depend on already having
+			// ignored a reminder. Plan a closed, provider-seen same-turn prefix in
+			// the routine zone too; only automatic publication waits for patience.
+			const routineSameTurnPlanning = !state.manualMode && routineNudgesAllowed && effectiveConfig.compress.autoCandidates.enabled
+			const sameTurnPlanningAllowed = emergencyPressureReached || routineSameTurnPlanning
+			const planningThreshold = emergencyPressureReached
+				? Math.min(thresholds.maxContextPercent, emergencySettings.hardContextPercent)
+				: thresholds.minContextPercent
+
+			const nudgeType = routineEscalated || (hardEmergencyReached && !contextLimitReached)
 				? "context-strong"
 				: windowDowngraded
 				? "context-strong"
@@ -531,8 +592,8 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 					state,
 					effectiveConfig,
 					contextPercent,
-					budget.pressured
-						? { requiredSavingsTokens: budget.requiredSavingsTokens }
+					progressPressureReached
+						? { requiredSavingsTokens: planningRecoveryTokens }
 						: undefined,
 				)
 				messageCandidates = detectMessageCompressionCandidates(
@@ -556,7 +617,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 				candidate !== null || messageCandidates.length > 0
 			if (
 				emergencySettings.enabled &&
-				emergencyPressureReached &&
+				sameTurnPlanningAllowed &&
 				!manualEmergencyOnly &&
 				!hasNormalCompressionSuggestion
 			) {
@@ -571,14 +632,14 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 				)
 			}
 
-			if (contextLimitReached && !manualEmergencyOnly && candidate === null) {
+			if (sameTurnPlanningAllowed && !manualEmergencyOnly && candidate === null) {
 				emergencyCompressionCandidate = detectEmergencyCompressionCandidate(
 					prunedMessages,
 					state,
 					effectiveConfig,
 					contextPercent,
-					thresholds.maxContextPercent,
-					{ requiredSavingsTokens: budget.requiredSavingsTokens },
+					planningThreshold,
+					{ requiredSavingsTokens: planningRecoveryTokens },
 				)
 				if (emergencyCompressionCandidate) {
 					writeDcpDebugLog(effectiveConfig, "context.emergency_compression_candidate", {
@@ -608,11 +669,15 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 
 			let hasCompressionSuggestion =
 				candidate !== null || emergencyCompressionCandidate !== null || messageCandidates.length > 0
+			if (!manualEmergencyOnly && (hasCompressionSuggestion || emergencyPressureReached)) {
+				trackCompressionProgress(state, progressInput)
+				latestProviderOpportunityKind = emergencyPressureReached ? "emergency" : !state.manualMode ? "routine" : undefined
+			}
 			const blockedReason = inferDcpBlockedReason({
-				pressured: emergencyPressureReached,
+				pressured: progressPressureReached,
 				candidateAvailable: candidate !== null || emergencyCompressionCandidate !== null,
 				messageCandidateCount: messageCandidates.length,
-				requiredSavingsTokens: budget.requiredSavingsTokens,
+				requiredSavingsTokens: planningRecoveryTokens,
 				capacityExceeded: budget.capacityExceeded,
 				emergencyStats: emergencySelection?.stats,
 			})
@@ -626,6 +691,8 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 					...(emergencySelection?.stats ?? {}),
 					state: summarizeDcpState(state, effectiveConfig),
 				}, ctx)
+				if (routineEscalated) warnProgress(ctx, blockedReason,
+					`DCP cannot safely meet its compression goal: ${blockedReason}. Context has not been recovered.`)
 			}
 			if (blockedReason && budget.capacityExceeded) {
 				state.progressRecovery = {
@@ -672,9 +739,11 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 			// available; they do not consume another model opportunity.
 			if (!emergencyPressureReached) state.consecutiveIgnoredStrongNudges = 0
 
-			// Auto-compress fallback: if the model has ignored enough strong
-			// nudges while above the emergency threshold, DCP creates a
-			// compression block itself instead of nudging again.
+			// Completed actionable routine opportunities also have a bound. Never
+			// silently enable automatic summarization when the user disabled it.
+			if (routineEscalated && !effectiveConfig.compress.autoCompress.enabled) {
+				warnProgress(ctx, "auto-disabled", "DCP compression has not made enough progress. Automatic compression is disabled; use compress or enable compress.autoCompress explicitly.")
+			}
 			if (!manualEmergencyOnly) {
 				const autoCandidate = candidate ?? emergencyCompressionCandidate
 				const autoDecision = decideAutoCompress(
@@ -683,6 +752,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 					contextPercent,
 					thresholds.maxContextPercent,
 					autoCandidate,
+					{ routinePressure: routineEscalated },
 				)
 				if (contextLimitReached && autoCandidate === null) {
 					writeDcpDebugLog(effectiveConfig, "compress.auto_blocked_no_candidate", {
@@ -702,7 +772,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 						const autoPersistenceTarget = captureDcpPersistenceTarget(ctx)
 						const largestSafeCandidate = candidate
 							? detectCompressionCandidate(prunedMessages, state, effectiveConfig, contextPercent)
-							: detectEmergencyCompressionCandidate(prunedMessages, state, effectiveConfig, contextPercent, thresholds.maxContextPercent)
+							: detectEmergencyCompressionCandidate(prunedMessages, state, effectiveConfig, contextPercent, planningThreshold)
 						let preparedProjection: any[] | undefined
 						const autoResult = await createBudgetedAutoCompressionBlock({
 							candidate: autoCandidate,
@@ -713,13 +783,13 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 							modelRegistry: (ctx as any).modelRegistry,
 							signal: (ctx as any).signal,
 							cwd: (ctx as any).cwd,
-							requiredGainTokens: budget.requiredSavingsTokens,
+							requiredGainTokens: state.compressionProgress?.remainingTokens ?? planningRecoveryTokens,
 							persistState: autoPersistenceTarget
 								? (preparedState, publication) => saveDcpStateToTarget(autoPersistenceTarget, preparedState, publication)
 								: undefined,
 							prepareProjection: (preparedState) => {
 								clearDcpNudgeAnchors(preparedState)
-								preparedState.consecutiveIgnoredStrongNudges = 0
+								resetCompressionProgress(preparedState)
 								preparedState.progressRecovery = undefined
 								preparedProjection = applyPruning(contextMessages, preparedState, effectiveConfig)
 								return preparedProjection
@@ -734,7 +804,8 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 						// same context pass instead of the next one.
 						prunedMessages = preparedProjection ?? applyPruning(contextMessages, state, effectiveConfig)
 						const clearedAnchors = clearDcpNudgeAnchors(state)
-						state.consecutiveIgnoredStrongNudges = 0
+						resetCompressionProgress(state)
+						warnedProgress.clear()
 						state.progressRecovery = undefined
 						writeDcpDebugLog(effectiveConfig, "compress.auto", {
 							trigger: autoDecision.reason,
@@ -768,6 +839,8 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 							candidate: autoCandidate,
 							state: summarizeDcpState(state, effectiveConfig),
 						}, ctx)
+						if (routineEscalated) warnProgress(ctx, autoBlockedReason ?? "auto-failed",
+							`DCP automatic compression did not recover the context: ${autoBlockedReason ?? "preparation failed"}. The existing context was preserved.`)
 						if (autoBlockedReason && budget.capacityExceeded) {
 							state.progressRecovery = {
 								blockedReason: autoBlockedReason,
@@ -862,7 +935,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 			}
 
 			if (nudgeType && !manualEmergencyOnly && (hasCompressionSuggestion || emergencyPressureReached)) {
-				latestProviderOpportunityAvailable = emergencyPressureReached
+				latestProviderOpportunityAvailable = latestProviderOpportunityKind !== undefined
 				const nudgeText = appendConcreteNudgeGuidance(
 					baseNudgeText(nudgeType),
 					candidate ?? emergencyCompressionCandidate,
@@ -906,6 +979,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 					// No safe existing message could be anchored (rare); keep the older
 					// synthetic reminder fallback so DCP never silently drops a nudge.
 					injectNudge(prunedMessages, nudgeText)
+					latestProviderReminder = nudgeText
 				}
 				state.nudgeCounter = 0
 				state.lastNudgeTurn = state.currentTurn
@@ -932,6 +1006,10 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 				state,
 			),
 		)
+		if (nudgeApplication.rendered && latestProviderOpportunityKind) {
+			latestProviderOpportunityAvailable = true
+			latestProviderReminder = state.nudgeAnchors[0]?.renderedReminder
+		}
 		if (state.nudgeAnchors.length !== anchorsBeforeFinalization || nudgeApplication.stateChanged) {
 			await saveDcpState(ctx, state)
 		}
@@ -966,6 +1044,8 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 
 		const model = (ctx as any)?.model
 		const target = captureDcpPersistenceTarget(ctx)
+		const reminderDelivered = latestProviderOpportunityAvailable &&
+			providerPayloadIncludesReminder(event.payload, latestProviderReminder)
 		const pending = providerEvidenceTracker.begin({
 			sessionEpoch: state.sessionEpoch,
 			provider: typeof model?.provider === "string" ? model.provider : undefined,
@@ -974,7 +1054,8 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 			statePath: target?.statePath,
 			sessionId: target?.sessionId,
 			toolIds: pendingToolIds,
-			opportunityAvailable: latestProviderOpportunityAvailable,
+			opportunityAvailable: reminderDelivered,
+			opportunityKind: reminderDelivered ? latestProviderOpportunityKind : undefined,
 		})
 
 		writeDcpDebugLog(effectiveConfig, "provider_payload.message_ids", {
@@ -984,6 +1065,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 			attempts: pending.attempts,
 			ambiguous: pending.ambiguous,
 			opportunityAvailable: pending.opportunityAvailable,
+			opportunityKind: pending.opportunityKind,
 			provider: pending.provider,
 			model: pending.model,
 			state: summarizeDcpState(state, effectiveConfig),
@@ -1040,11 +1122,11 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 			return
 		}
 
-		const assistantInvokedCompress = Array.isArray(message.content) && message.content.some(
-			(part: any) => part?.type === "toolCall" && part?.name === "compress",
-		)
+		// Charge the completed opportunity before tool execution. A failed or
+		// insufficient compress call cannot erase it; only a sufficient durable
+		// commit settles the savings goal and resets patience.
 		const ignoredCompressionOpportunity =
-			completion.opportunityAvailable && message.stopReason !== "deferred" && !assistantInvokedCompress
+			completion.opportunityAvailable && message.stopReason !== "deferred"
 
 		const commit = providerEvidenceCommitQueue
 			.catch(() => {
@@ -1066,7 +1148,10 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 				const workingState = cloneDcpTransactionState(state)
 				for (const toolCallId of newlySeen) workingState.providerSeenToolIds.add(toolCallId)
 				if (ignoredCompressionOpportunity) {
-					workingState.consecutiveIgnoredStrongNudges = state.consecutiveIgnoredStrongNudges + 1
+					workingState.consecutiveIgnoredNudges = state.consecutiveIgnoredNudges + 1
+					if (completion.opportunityKind !== "routine") {
+						workingState.consecutiveIgnoredStrongNudges = state.consecutiveIgnoredStrongNudges + 1
+					}
 				}
 
 				try {
@@ -1094,11 +1179,13 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 
 				state.providerSeenToolIds = workingState.providerSeenToolIds
 				state.consecutiveIgnoredStrongNudges = workingState.consecutiveIgnoredStrongNudges
+				state.consecutiveIgnoredNudges = workingState.consecutiveIgnoredNudges
 				writeDcpDebugLog(effectiveConfig, "provider_payload.tool_results_seen", {
 					attempts: completion.attempts,
 					newlySeenToolResults: newlySeen.length,
 					ignoredCompressionOpportunity,
 					ignoredOpportunities: state.consecutiveIgnoredStrongNudges,
+					allIgnoredOpportunities: state.consecutiveIgnoredNudges,
 					state: summarizeDcpState(state, effectiveConfig),
 				}, ctx)
 			}))

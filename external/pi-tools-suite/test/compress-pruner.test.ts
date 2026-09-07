@@ -1124,6 +1124,9 @@ describe("DCP pruning effectiveness", () => {
     const state = createState();
     state.compressionBlocks = [block(1, 1, 3), block(2, 4, 6)];
     state.nextBlockId = 3;
+    // Legacy summaries must be preserved; actual savings come from the raw
+    // diagnostic slice between them, not from pretending wrappers are free.
+    state.messageMetaSnapshot.set("m010", { timestamp: 3.5, role: "assistant", text: "Repeated interim diagnostic output", tokenEstimate: 1000 });
 
     let registeredTool: any;
     registerCompressTool({ registerTool: (tool: any) => { registeredTool = tool } } as any, state, config());
@@ -1158,6 +1161,7 @@ describe("DCP pruning effectiveness", () => {
     const state = createState();
     state.compressionBlocks = [block(1, 1, 3), block(2, 4, 6)];
     state.nextBlockId = 3;
+    state.messageMetaSnapshot.set("m010", { timestamp: 3.5, role: "assistant", text: "Repeated interim diagnostic output", tokenEstimate: 1000 });
 
     let registeredTool: any;
     registerCompressTool({ registerTool: (tool: any) => { registeredTool = tool } } as any, state, config());
@@ -1340,7 +1344,7 @@ describe("DCP pruning effectiveness", () => {
       blockId: 1,
     });
     state.messageIdSnapshot.set("m002", 20);
-    state.messageMetaSnapshot.set("m002", { timestamp: 20, role: "assistant", text: "later", tokenEstimate: 50 });
+    state.messageMetaSnapshot.set("m002", { timestamp: 20, role: "assistant", text: "later", tokenEstimate: 500 });
 
     let registeredTool: any;
     registerCompressTool({ registerTool: (tool: any) => { registeredTool = tool } } as any, state, config());
@@ -1410,7 +1414,10 @@ describe("DCP pruning effectiveness", () => {
       { getContextUsage: () => ({ tokens: 1_500, contextWindow: 2_000, percent: 50 }), ui: { notify() {} } },
     );
 
-    const expectedDelta = Math.max(0, 700 - estimateTokens(summary));
+    const expectedDelta = result.details.projectedBeforeTokens - result.details.projectedAfterTokens;
+    expect(result.details.projectedBeforeTokens).toBe(700);
+    expect(expectedDelta).toBeGreaterThan(0);
+    expect(expectedDelta).toBeLessThan(700 - estimateTokens(summary)); // wrapper + ID carriers count too
     expect(result.details.tokensSaved).toBe(expectedDelta);
     expect(result.details.tokensSaved).not.toBe(state.tokensSaved);
     expect(result.details.contextTokens).toBe(1_000);
@@ -1565,7 +1572,7 @@ describe("DCP pruning effectiveness", () => {
     protectedState.messageIdSnapshot.set("m001", 1);
     protectedState.messageIdSnapshot.set("m002", 2);
     protectedState.messageMetaSnapshot.set("m001", { timestamp: 1, role: "user", text: "critical user intent" });
-    protectedState.messageMetaSnapshot.set("m002", { timestamp: 2, role: "assistant" });
+    protectedState.messageMetaSnapshot.set("m002", { timestamp: 2, role: "assistant", tokenEstimate: 500 });
 
     let protectedTool: any;
     registerCompressTool(
@@ -1628,8 +1635,8 @@ describe("DCP pruning effectiveness", () => {
         tokenEstimate: 900,
       });
       seedCanonicalFixture(state, [
-        { id: "171", role: "assistant", content: "adjacent start", timestamp: 10 },
-        { id: "172", role: "assistant", content: "adjacent end", timestamp: 11 },
+        { id: "171", role: "assistant", content: "adjacent start ".repeat(100), timestamp: 10 },
+        { id: "172", role: "assistant", content: "adjacent end ".repeat(100), timestamp: 11 },
         { id: "173", role: "assistant", content: "live head must survive", timestamp: 11 },
       ]);
       return state;
@@ -1663,8 +1670,8 @@ describe("DCP pruning effectiveness", () => {
     const materialized = applyCompressionBlocks([
       { id: "001", role: "assistant", content: "old start", timestamp: 1 },
       { id: "170", role: "assistant", content: "old end", timestamp: 10 },
-      { id: "171", role: "assistant", content: "adjacent start", timestamp: 10 },
-      { id: "172", role: "assistant", content: "adjacent end", timestamp: 11 },
+      { id: "171", role: "assistant", content: "adjacent start ".repeat(100), timestamp: 10 },
+      { id: "172", role: "assistant", content: "adjacent end ".repeat(100), timestamp: 11 },
       { id: "173", role: "assistant", content: "live head must survive", timestamp: 11 },
     ], rangeState);
     expect(materialized.map(contentText)).toEqual([
@@ -1704,7 +1711,7 @@ describe("DCP pruning effectiveness", () => {
 
     const visible = applyPruning(
       [
-        textMessage("user", "old <protect>exact requirement</protect> " + "x".repeat(200), 1),
+        textMessage("user", "old <protect>exact requirement</protect> " + "x".repeat(2000), 1),
         textMessage("assistant", "still useful", 2),
         textMessage("user", "active", 3),
       ],
@@ -1744,7 +1751,7 @@ describe("DCP pruning effectiveness", () => {
 
     const pruned = applyPruning(
       [
-        textMessage("user", "old <protect>exact requirement</protect> " + "x".repeat(200), 1),
+        textMessage("user", "old <protect>exact requirement</protect> " + "x".repeat(2000), 1),
         textMessage("assistant", "still useful", 2),
         textMessage("user", "active", 3),
       ],
@@ -2705,7 +2712,7 @@ describe("DCP pruning effectiveness", () => {
     const cfg = config();
     applyPruning(
       [
-        { ...textMessage("assistant", "old stable", 100), _dcpEntryId: "entry-a" },
+        { ...textMessage("assistant", "old stable ".repeat(100), 100), _dcpEntryId: "entry-a" },
         { ...textMessage("user", "recent", 200), _dcpEntryId: "entry-b" },
       ],
       state,
@@ -2726,7 +2733,7 @@ describe("DCP pruning effectiveness", () => {
 
     const pruned = applyPruning(
       [
-        { ...textMessage("assistant", "old stable", 999), _dcpEntryId: "entry-a" },
+        { ...textMessage("assistant", "old stable ".repeat(100), 999), _dcpEntryId: "entry-a" },
         { ...textMessage("user", "recent", 1000), _dcpEntryId: "entry-b" },
       ],
       state,
@@ -2769,6 +2776,7 @@ describe("DCP pruning effectiveness", () => {
 
   test("protected tool outputs and subagent result artifacts are appended to summaries", async () => {
     const state = createState();
+    state.messageMetaSnapshot.set("m000", { timestamp: 0, role: "assistant", text: "Unprotected investigation details", tokenEstimate: 1000 });
     const cwd = mkdtempSync(join(tmpdir(), "dcp-subagent-result-"));
     const agentDir = join(cwd, ".pi", "subagents", "run", "agent-1");
     mkdirSync(agentDir, { recursive: true });
@@ -2802,7 +2810,7 @@ describe("DCP pruning effectiveness", () => {
       );
       await registeredTool.execute(
         "tool-call",
-        { topic: "Protected Tool", ranges: [{ startId: "m001", endId: "m001", summary: "tool summary" }] },
+        { topic: "Protected Tool", ranges: [{ startId: "m000", endId: "m001", summary: "tool summary" }] },
         undefined,
         undefined,
         { cwd, ui: { notify() {} } },
@@ -4075,12 +4083,14 @@ describe("DCP pruning effectiveness", () => {
 
     // Repeated projection/context passes do not consume patience.
     await handlers.get("context")?.[0]?.({ type: "context", messages }, ctx);
-    await handlers.get("context")?.[0]?.({ type: "context", messages }, ctx);
+    const providerProjection = await handlers.get("context")?.[0]?.({ type: "context", messages }, ctx) as { messages: any[] };
     expect(readPersistedDcpPayloadSync(statePath).consecutiveIgnoredStrongNudges).toBe(0);
 
     const providerEvent = {
       type: "before_provider_request",
-      payload: { messages: [{ role: "user", content: "active request" }] },
+      // Patience requires the reminder in the actual outgoing payload, not
+      // merely a preceding context event which happened to emit one.
+      payload: { messages: providerProjection.messages },
     };
 
     // One completed provider response with the emergency reminder available

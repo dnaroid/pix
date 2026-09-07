@@ -4,7 +4,7 @@
 
 import { Type } from "typebox"
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
-import type { DcpState } from "./state.js"
+import type { CompressionMember, DcpState } from "./state.js"
 import { modelKeysFromContext, resolveModelConfig, type DcpConfig } from "./config.js"
 import { captureDcpPersistenceTarget, saveDcpStateToTarget } from "./state-persistence.js"
 import { captureDcpTransactionGuard, cloneDcpTransactionState, runDcpStateTransaction } from "./state-transaction.js"
@@ -23,6 +23,7 @@ import {
   getMessageMeta,
   prepareCompressionProtectedFragments,
   resolveAnchorBoundary,
+  resolveExactRangeMembership,
   resolveIdToBoundary,
 } from "./compression-blocks.js"
 import {
@@ -30,6 +31,8 @@ import {
   detectToolGroupSpans,
   findConversationIndexEntry,
 } from "./conversation-index.js"
+import { previewManualCompressionProjection } from "./compression-preview.js"
+import { settleCompressionProgress } from "./compression-progress.js"
 
 type MessageSkipKind =
   | "duplicate"
@@ -54,9 +57,23 @@ interface ResolvedRangePlan {
   endTimestamp: number
   startMessageId?: string
   endMessageId?: string
+  sourceMembers: CompressionMember[]
+  mutationMembers: CompressionMember[]
 }
 
-function validateNonOverlappingRanges(plans: ResolvedRangePlan[], state: DcpState): void {
+interface ResolvedMessagePlan {
+  messageId: string
+  topic: string
+  summary: string
+  timestamp: number
+  stableId?: string
+  sourceMembers: CompressionMember[]
+  mutationMembers: CompressionMember[]
+}
+
+type ResolvedRangeBoundaries = Omit<ResolvedRangePlan, "sourceMembers" | "mutationMembers">
+
+function validateNonOverlappingRanges(plans: ResolvedRangeBoundaries[], state: DcpState): void {
   const sorted = [...plans].sort((a, b) =>
     compareCompressionBoundaries(
       { timestamp: a.startTimestamp, stableId: a.startMessageId },
@@ -91,7 +108,7 @@ function validateNonOverlappingRanges(plans: ResolvedRangePlan[], state: DcpStat
   }
 }
 
-function validateProtocolClosedRanges(plans: ResolvedRangePlan[], state: DcpState): void {
+function validateProtocolClosedRanges(plans: ResolvedRangeBoundaries[], state: DcpState): void {
   if (state.conversationIndexSnapshot.length === 0) return
 
   for (const plan of plans) {
@@ -111,6 +128,35 @@ function validateProtocolClosedRanges(plans: ResolvedRangePlan[], state: DcpStat
         `The protocol-safe closed range is ${safeStart}..${safeEnd}. ` +
         "Retry with the complete range so the supplied summary covers every message that will be removed.",
       )
+    }
+  }
+}
+
+function selectionMemberKeys(membership: Pick<ResolvedRangePlan | ResolvedMessagePlan, "sourceMembers" | "mutationMembers">): Set<string> {
+  return new Set(
+    [...membership.sourceMembers, ...membership.mutationMembers]
+      .map((member) => `${member.stableId}:${member.hash}`),
+  )
+}
+
+function assertDisjointSelections(
+  ranges: ResolvedRangePlan[],
+  messages: ResolvedMessagePlan[],
+): void {
+  const selections = [
+    ...ranges.map((range) => ({ label: `${range.startId}..${range.endId}`, membership: range })),
+    ...messages.map((message) => ({ label: message.messageId, membership: message })),
+  ]
+  for (let leftIndex = 0; leftIndex < selections.length; leftIndex++) {
+    const left = selections[leftIndex]!
+    const leftKeys = selectionMemberKeys(left.membership)
+    for (let rightIndex = leftIndex + 1; rightIndex < selections.length; rightIndex++) {
+      const right = selections[rightIndex]!
+      if ([...selectionMemberKeys(right.membership)].some((key) => leftKeys.has(key))) {
+        throw new Error(
+          `Overlapping compression selections cannot be committed in the same call: ${left.label} overlaps ${right.label}.`,
+        )
+      }
     }
   }
 }
@@ -164,6 +210,8 @@ function commitCompressionWorkingState(state: DcpState, workingState: DcpState):
   state.nudgeCounter = workingState.nudgeCounter
   state.lastNudge = workingState.lastNudge
   state.consecutiveIgnoredStrongNudges = workingState.consecutiveIgnoredStrongNudges
+  state.consecutiveIgnoredNudges = workingState.consecutiveIgnoredNudges
+  state.compressionProgress = workingState.compressionProgress
 }
 
 // ---------------------------------------------------------------------------
@@ -301,7 +349,7 @@ export function registerCompressTool(
 
       let rangePlans: ResolvedRangePlan[]
       try {
-        rangePlans = ranges.map((range) => {
+        const boundaryPlans: ResolvedRangeBoundaries[] = ranges.map((range) => {
           const { startId, endId, summary } = range
 
           // ── Resolve boundary timestamps ──────────────────────────────────
@@ -341,8 +389,24 @@ export function registerCompressTool(
           }
         })
 
-        validateNonOverlappingRanges(rangePlans, state)
-        validateProtocolClosedRanges(rangePlans, state)
+        validateNonOverlappingRanges(boundaryPlans, state)
+        validateProtocolClosedRanges(boundaryPlans, state)
+        rangePlans = boundaryPlans.map((range) => {
+          const { partialBlocks } = findCoveredAndPartialBlocks(range.startTimestamp, range.endTimestamp, state, range)
+          if (partialBlocks.length > 0) {
+            throw new Error(
+              `Compression range partially overlaps existing block(s): ${partialBlocks.map((block) => `b${block.id}`).join(", ")}. ` +
+              `Select the whole block or non-overlapping boundaries.\n${formatCompressionIdDiagnostics(state)}`,
+            )
+          }
+          const membership = resolveExactRangeMembership(range.startId, range.endId, state)
+          if (!membership) {
+            throw new Error(
+              `Manual compression requires exact source membership for ${range.startId}..${range.endId}; refresh the current DCP context and retry.`,
+            )
+          }
+          return { ...range, ...membership }
+        })
       } catch (error) {
         log("compress.resolve_failed", {
           toolCallId: _toolCallId,
@@ -351,6 +415,40 @@ export function registerCompressTool(
         })
         throw error
       }
+
+      // Reject a batch that would claim the same provider-visible source more
+      // than once before any detached block is created. Invalid message-mode
+      // entries retain their established soft-skip behavior below.
+      const preflightMessages: ResolvedMessagePlan[] = []
+      const preflightSeenMessageIds = new Set<string>()
+      for (const entry of messages) {
+        const messageId = typeof entry.messageId === "string" ? entry.messageId.trim() : ""
+        if (preflightSeenMessageIds.has(messageId)) continue
+        preflightSeenMessageIds.add(messageId)
+        if (/^b\d+$/i.test(messageId)) continue
+        const meta = getMessageMeta(messageId, state)
+        const indexEntry = findConversationIndexEntry(state.conversationIndexSnapshot, messageId)
+        if (!meta || meta.blockId !== undefined || !Number.isFinite(meta.timestamp) ||
+          (effectiveConfig.compress.protectUserMessages && meta.role === "user") ||
+          (meta.role === "assistant" && ((meta.toolCallIds?.length ?? 0) > 0 || indexEntry?.signedAssistant)) ||
+          messageTouchesIncompleteToolGroup(messageId, state)) continue
+        const membership = resolveExactRangeMembership(messageId, messageId, state, true)
+        if (!membership) {
+          throw new Error(
+            `Manual message compression requires exact source membership for ${messageId}; refresh the current DCP context and retry.`,
+          )
+        }
+        preflightMessages.push({
+          messageId,
+          topic: entry.topic ?? params.topic,
+          summary: entry.summary,
+          timestamp: meta.timestamp,
+          stableId: meta.stableId,
+          sourceMembers: membership.sourceMembers,
+          mutationMembers: membership.mutationMembers,
+        })
+      }
+      assertDisjointSelections(rangePlans, preflightMessages)
 
       for (const range of rangePlans) {
         try {
@@ -382,6 +480,8 @@ export function registerCompressTool(
             version: 2,
             replacementMode: "range",
             preparedProtectedFragments,
+            sourceMembers: range.sourceMembers,
+            mutationMembers: range.mutationMembers,
           })
           const block = created.block
           newBlockIds.push(block.id)
@@ -508,6 +608,8 @@ export function registerCompressTool(
           validatePlaceholders: false,
           expandPlaceholders: false,
           preparedProtectedFragments,
+          sourceMembers: preflightMessages.find((plan) => plan.messageId === messageId)?.sourceMembers,
+          mutationMembers: preflightMessages.find((plan) => plan.messageId === messageId)?.mutationMembers,
         })
         const block = created.block
         newBlockIds.push(block.id)
@@ -522,12 +624,41 @@ export function registerCompressTool(
         )
       }
 
-      const clearedNudgeAnchors = newBlockIds.length > 0 ? clearDcpNudgeAnchors(workingState) : 0
+      let projection: ReturnType<typeof previewManualCompressionProjection> | undefined
+      let pressureRelieved = false
+      let clearedNudgeAnchors = 0
       if (newBlockIds.length > 0) {
+        const newBlocks = workingState.compressionBlocks.filter((block) => newBlockIds.includes(block.id))
+        projection = previewManualCompressionProjection(state, effectiveConfig, newBlocks)
+        if (projection.netGain <= 0) {
+          log("compress.projection_rejected", {
+            toolCallId: _toolCallId,
+            projectedBeforeTokens: projection.projectedBeforeTokens,
+            projectedAfterTokens: projection.projectedAfterTokens,
+            netGain: projection.netGain,
+            state: summarizeDcpState(state, effectiveConfig),
+          })
+          throw new Error(
+            `Manual compression rejected non-positive full-projection gain: ` +
+            `${projection.projectedBeforeTokens} before, ${projection.projectedAfterTokens} after, ${projection.netGain} net. ` +
+            "No DCP state was published.",
+          )
+        }
+        // This is deliberately after the full projection proof. Partial
+        // progress retains its outstanding recovery debt and patience.
+        pressureRelieved = settleCompressionProgress(
+          workingState,
+          projection.netGain,
+          projection.projectedAfterTokens,
+        )
+        // The selected IDs may have been replaced, so one old reminder may be
+        // invalidated at this rewrite boundary. The next context pass will
+        // render a fresh anchor without erasing the patience counters above.
+        clearedNudgeAnchors = clearDcpNudgeAnchors(workingState)
+        if (!pressureRelieved) workingState.nudgeCounter = Math.max(1, effectiveConfig.compress.nudgeFrequency)
         for (const block of workingState.compressionBlocks) {
           if (newBlockIds.includes(block.id)) block.operationRequestHash = requestHash
         }
-        workingState.consecutiveIgnoredStrongNudges = 0
         assertCurrent()
         let published = false
         if (persistenceTarget) await persistToTarget(persistenceTarget, workingState, {
@@ -542,7 +673,9 @@ export function registerCompressTool(
         try {
           pi.appendEntry("dcp-nudge", {
             event: "cleared",
-            reason: "compress",
+            reason: pressureRelieved ? "compress" : "compress-partial",
+            pressureRelieved,
+            remainingRecoveryTokens: workingState.compressionProgress?.remainingTokens ?? 0,
             clearedAnchors: clearedNudgeAnchors,
             blockIds: newBlockIds,
             createdAt: Date.now(),
@@ -556,11 +689,16 @@ export function registerCompressTool(
         toolCallId: _toolCallId,
         newBlockIds: newBlockIds.map((id) => `b${id}`),
         skippedMessages: skippedMessageIssues.length,
+        projectedBeforeTokens: projection?.projectedBeforeTokens,
+        projectedAfterTokens: projection?.projectedAfterTokens,
+        netGain: projection?.netGain,
+        pressureRelieved,
+        remainingRecoveryTokens: workingState.compressionProgress?.remainingTokens ?? 0,
         state: summarizeDcpState(state, effectiveConfig),
       })
 
       const usage = state.sessionEpoch === operationEpoch ? normalizeDcpContextUsage(safeGetContextUsage(ctx)) : undefined
-      const operationTokensSaved = Math.max(0, operationRemovedTokens - operationSummaryTokens)
+      const operationTokensSaved = Math.max(0, projection?.netGain ?? operationRemovedTokens - operationSummaryTokens)
       const itemCount = ranges.length + messages.length
       const totalSummaryTokens = newBlockIds.reduce((sum, id) => {
         const b = workingState.compressionBlocks.find((block) => block.id === id)
@@ -585,6 +723,11 @@ export function registerCompressTool(
       }
       const resultDetails = {
         ...visualDetails,
+        projectedBeforeTokens: projection?.projectedBeforeTokens,
+        projectedAfterTokens: projection?.projectedAfterTokens,
+        netGain: projection?.netGain,
+        pressureRelieved,
+        remainingRecoveryTokens: workingState.compressionProgress?.remainingTokens ?? 0,
         committed: true,
         ownerChangedAfterPublication: state.sessionEpoch !== operationEpoch,
         outputFormat: "json" as const,

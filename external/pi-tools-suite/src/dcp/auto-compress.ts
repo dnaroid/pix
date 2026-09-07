@@ -1,13 +1,12 @@
 // ---------------------------------------------------------------------------
 // Dynamic Context Pruning (DCP) — auto-compress fallback
 //
-// When a model ignores repeated context-strong nudges above the emergency
-// threshold (observed with gpt-5.5 in session 019edfe3: 59 strong nudges,
-// 0 compress calls), DCP creates a compression block itself instead of
-// waiting for the model. This is the model-independent safety net.
+// When completed provider opportunities do not produce enough compression,
+// DCP can create a block instead of waiting indefinitely for the model.
+// This also covers actionable routine reminders below emergency pressure.
 //
 // Lossy and irreversible within a session; disabled by default and gated by a
-// patience counter + the emergency threshold. The summary can be produced
+// completed-opportunity patience + a safe, useful candidate. The summary can be produced
 // either by a deterministic programmatic digest (default) or by a configured
 // list of summarizer models (e.g. a cheap model like zai/glm-5.3), with
 // automatic fallback to the programmatic digest on any failure/timeout.
@@ -51,9 +50,10 @@ export class AutoCompressionBlockedError extends Error {
  * Fires when ALL hold:
  *  - the master switch `autoCompress.enabled` is on and runtime manual mode is off,
  *  - the main provider has completed more than `patience` correlated requests
- *    that actually contained an emergency DCP reminder without committing a
- *    compression (`consecutiveIgnoredStrongNudges > patience`),
- *  - context is still above the emergency threshold (maxContextPercent),
+ *    that actually contained an actionable DCP reminder without sufficient
+ *    committed savings (merely calling compress is not progress),
+ *  - context is above emergency pressure or an actionable routine reminder
+ *    has exhausted its completed-opportunity patience,
  *  - a safe compression candidate exists, either outside the recent user
  *    turns or as an emergency committed prefix inside a marathon turn.
  */
@@ -63,14 +63,21 @@ export function decideAutoCompress(
 	contextPercent: number,
 	maxContextPercent: number,
 	candidate: CompressionCandidate | null,
+	options: { routinePressure?: boolean } = {},
 ): { shouldFire: boolean; reason: string } {
 	const settings = config.compress.autoCompress
+	const emergency = contextPercent > maxContextPercent
 	const decision = decideDcpProgress({
 		enabled: config.enabled,
 		autoEnabled: Boolean(settings?.enabled) && !state.manualMode,
-		pressure: contextPercent > maxContextPercent,
+		pressure: emergency || options.routinePressure === true,
 		candidateAvailable: candidate !== null,
-		ignoredOpportunities: state.consecutiveIgnoredStrongNudges,
+		// Crossing the emergency threshold does not grant another patience window
+		// after already ignoring actionable routine reminders. The legacy counter
+		// remains a fallback for state written before the all-opportunities field.
+		ignoredOpportunities: emergency
+			? Math.max(state.consecutiveIgnoredStrongNudges, state.consecutiveIgnoredNudges)
+			: state.consecutiveIgnoredNudges,
 		patience: settings?.patience ?? 0,
 	})
 	return { shouldFire: decision.shouldPrepare, reason: decision.reason }

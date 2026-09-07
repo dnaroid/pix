@@ -9,6 +9,7 @@ import {
   stripStaleDcpMetadataLines,
 } from "./pruner-metadata.js";
 import { buildConversationIndex, canonicalMessageHash } from "./conversation-index.js";
+import { recordCompressionProjection } from "./compression-preview.js";
 
 export interface InjectMessageIdsOptions {
   /** Config enables priority markers for message-mode candidates. */
@@ -234,4 +235,5 @@ export function injectMessageIds(
   state.messageIdSnapshot = nextIdSnapshot;
   state.messageMetaSnapshot = nextMetaSnapshot;
   state.conversationIndexSnapshot = buildConversationIndex(messages, stableKeys, state);
+  recordCompressionProjection(state.conversationIndexSnapshot, messages);
 }

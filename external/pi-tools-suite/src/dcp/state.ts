@@ -245,6 +245,17 @@ export interface DcpProgressRecovery {
   createdAt: number
 }
 
+/** Outstanding net savings goal; a small successful block is not necessarily relief. */
+export interface DcpCompressionProgress {
+  remainingTokens: number
+  projectedTokens: number
+  contextWindow: number
+  kind: "routine" | "emergency"
+  /** Last budget observation; unchanged native usage must not undo partial savings. */
+  observedTokens?: number
+  targetHeadroomTokens?: number
+}
+
 export interface DcpState {
   /** Runtime-only owner epoch. Incremented whenever the active session state is replaced. */
   sessionEpoch: number
@@ -351,10 +362,13 @@ export interface DcpState {
   lastContextWindow?: number
   /**
    * How many completed, correlated main-provider opportunities contained an
-   * emergency DCP reminder without a successful compression or emergency prune.
+   * emergency DCP reminder without sufficient committed compression/pruning gain.
    * Repeated `context` transforms and retries do not advance this counter.
    */
   consecutiveIgnoredStrongNudges: number
+  /** Completed provider opportunities with any actionable reminder, including failed compress attempts. */
+  consecutiveIgnoredNudges: number
+  compressionProgress?: DcpCompressionProgress
   /** Last terminal E05 handoff, persisted so restart does not hide why progress stopped. */
   progressRecovery?: DcpProgressRecovery
 }
@@ -395,6 +409,8 @@ export function createState(): DcpState {
     lastNudge: undefined,
     lastContextWindow: undefined,
     consecutiveIgnoredStrongNudges: 0,
+    consecutiveIgnoredNudges: 0,
+    compressionProgress: undefined,
     progressRecovery: undefined,
   }
 }
@@ -435,6 +451,8 @@ export function resetState(state: DcpState): void {
   state.lastNudge = undefined
   state.lastContextWindow = undefined
   state.consecutiveIgnoredStrongNudges = 0
+  state.consecutiveIgnoredNudges = 0
+  state.compressionProgress = undefined
   state.progressRecovery = undefined
 }
 
@@ -591,6 +609,8 @@ export interface SerializedDcpState {
    * counter survives a pi process restart / resume.
    */
   consecutiveIgnoredStrongNudges?: number
+  consecutiveIgnoredNudges?: number
+  compressionProgress?: DcpCompressionProgress
   /** Last terminal E05 blocked/handoff state. */
   progressRecovery?: DcpProgressRecovery
   /** Hash of the last persisted serialized state, used for dedup. */
@@ -836,6 +856,8 @@ export function serializeState(state: DcpState): SerializedDcpState {
     lastNudgeTurn: state.lastNudgeTurn,
     lastContextWindow: state.lastContextWindow,
     consecutiveIgnoredStrongNudges: state.consecutiveIgnoredStrongNudges,
+    consecutiveIgnoredNudges: state.consecutiveIgnoredNudges,
+    compressionProgress: state.compressionProgress,
     progressRecovery: state.progressRecovery,
   }
 }
@@ -1041,6 +1063,18 @@ export function restoreState(state: DcpState, data: unknown): void {
   }
   if (typeof saved.consecutiveIgnoredStrongNudges === "number" && Number.isFinite(saved.consecutiveIgnoredStrongNudges) && saved.consecutiveIgnoredStrongNudges >= 0) {
     state.consecutiveIgnoredStrongNudges = Math.floor(saved.consecutiveIgnoredStrongNudges)
+  }
+  state.consecutiveIgnoredNudges = typeof saved.consecutiveIgnoredNudges === "number" &&
+    Number.isFinite(saved.consecutiveIgnoredNudges) && saved.consecutiveIgnoredNudges >= 0
+    ? Math.floor(saved.consecutiveIgnoredNudges) : state.consecutiveIgnoredStrongNudges
+  const progress = saved.compressionProgress
+  if (progress && (progress.kind === "routine" || progress.kind === "emergency") &&
+    Number.isFinite(progress.remainingTokens) && progress.remainingTokens > 0 &&
+    Number.isFinite(progress.projectedTokens) && progress.projectedTokens >= 0 &&
+    Number.isFinite(progress.contextWindow) && progress.contextWindow > 0 &&
+    (progress.observedTokens === undefined || (Number.isFinite(progress.observedTokens) && progress.observedTokens >= 0)) &&
+    (progress.targetHeadroomTokens === undefined || (Number.isFinite(progress.targetHeadroomTokens) && progress.targetHeadroomTokens >= 0))) {
+    state.compressionProgress = { ...progress }
   }
   const recovery = saved.progressRecovery as any
   if (

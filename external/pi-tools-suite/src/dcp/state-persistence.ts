@@ -208,6 +208,19 @@ export function validateSerializedDcpState(
 	if (state.compactToolCalls !== undefined && !boundedArray(state.compactToolCalls)) throw new Error("DCP state compactToolCalls is invalid")
 	if (state.toolCalls !== undefined && !boundedArray(state.toolCalls)) throw new Error("DCP state legacy toolCalls is invalid")
 	if (state.providerSeenToolIds !== undefined && (!boundedArray(state.providerSeenToolIds) || state.providerSeenToolIds.some((id: unknown) => typeof id !== "string"))) throw new Error("DCP state providerSeenToolIds is invalid")
+	if (state.consecutiveIgnoredNudges !== undefined && (!Number.isSafeInteger(state.consecutiveIgnoredNudges) || state.consecutiveIgnoredNudges < 0)) throw new Error("DCP state consecutiveIgnoredNudges is invalid")
+	if (state.compressionProgress !== undefined) {
+		const progress = state.compressionProgress
+		if (!progress || typeof progress !== "object" ||
+			(progress.kind !== "routine" && progress.kind !== "emergency") ||
+			!finiteNonNegative(progress.remainingTokens) || progress.remainingTokens <= 0 ||
+			!finiteNonNegative(progress.projectedTokens) ||
+			!finiteNonNegative(progress.contextWindow) || progress.contextWindow <= 0 ||
+			(progress.observedTokens !== undefined && !finiteNonNegative(progress.observedTokens)) ||
+			(progress.targetHeadroomTokens !== undefined && !finiteNonNegative(progress.targetHeadroomTokens))) {
+			throw new Error("DCP state compressionProgress is invalid")
+		}
+	}
 	if (state.messageIdsByStableId !== undefined && (!boundedArray(state.messageIdsByStableId) || state.messageIdsByStableId.some((entry: unknown) => !Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== "string" || typeof entry[1] !== "string"))) throw new Error("DCP state messageIdsByStableId is invalid")
 }
 
