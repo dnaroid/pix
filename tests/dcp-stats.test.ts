@@ -125,6 +125,46 @@ describe("formatDcpStatsToast", () => {
 		}
 	});
 
+	it("unwraps the dcp-state envelope sidecar written by the suite", () => {
+		const sessionDir = mkdtempSync(join(tmpdir(), "pi-dcp-stats-"));
+		try {
+			mkdirSync(join(sessionDir, "dcp-state"));
+			writeFileSync(join(sessionDir, "dcp-state", "session_1.json"), JSON.stringify({
+				kind: "dcp-state",
+				schemaVersion: 1,
+				sessionId: "session/1",
+				generation: 3,
+				revision: "a".repeat(64),
+				payloadHash: "a".repeat(64),
+				payload: {
+					tokensSaved: 7_890,
+					totalPruneCount: 11,
+					compressionBlocks: [{ active: true }, { active: false }],
+					prunedToolIds: ["tool-a"],
+					manualMode: false,
+					nudgeAnchors: [],
+				},
+			}));
+
+			const session = fakeSession({
+				usage: { tokens: 20_000, contextWindow: 100_000, percent: 20 },
+				sessionDir,
+				sessionId: "session/1",
+				branch: [],
+			});
+
+			const output = formatDcpStatsToast(session as never);
+
+			assert.match(output, /Tokens saved \(estimated\): 7,890/u);
+			assert.match(output, /Total pruning operations: 11/u);
+			assert.match(output, /Compression blocks active: 1 \/ 2 total/u);
+			assert.match(output, /Manual mode: off/u);
+			assert.match(output, /State source: dcp-state sidecar/u);
+		} finally {
+			rmSync(sessionDir, { recursive: true, force: true });
+		}
+	});
+
 	it("ignores legacy dcp-state entries when no sidecar exists", () => {
 		const session = fakeSession({
 			usage: { tokens: 12_000, contextWindow: 100_000, percent: 12 },

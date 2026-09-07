@@ -290,8 +290,8 @@ async function executeRepoDiscovery(
 }
 
 const COMMON_REPO_TOOL_PROPERTIES = {
-	maxLines: numberSchema("Maximum output lines to return before truncating from the bottom (keeps the first/top lines; default 2000).", DEFAULT_MAX_LINES),
-	maxBytes: numberSchema("Maximum output bytes to return before truncating from the bottom (keeps the first/top lines; default 50000).", DEFAULT_MAX_BYTES),
+	maxLines: numberSchema("Returned line cap, keeps top lines (default 2000). Prefer native limits/cursors before raising.", DEFAULT_MAX_LINES),
+	maxBytes: numberSchema("Returned byte cap, keeps top bytes (default 50000). Narrow the query before raising.", DEFAULT_MAX_BYTES),
 };
 
 const IDX_ARG_DESCRIPTIONS: Record<IdxCommand, string> = {
@@ -300,7 +300,7 @@ const IDX_ARG_DESCRIPTIONS: Record<IdxCommand, string> = {
 		"idx structure flags: [--path-prefix <area>] [--kind <kind>] [--max-depth <n>] [--max-files <n>] [--cursor <n>] [--include-internal] [--no-tests] [--include-tests-summary].",
 	ast: "idx ast flags: [--max-depth <n>] [--max-nodes <n>] [--cursor <n>] [--no-include-text].",
 	search:
-		"idx search flags: [--max-files <n>] [--path-prefix <area>] [--chunk-types <types|api|impl|tests|imports>] [--mode hybrid|semantic|lexical|symbol] [--min-score <score>] [--include-content] [--include-imports] [--dedupe-file] [--dedupe-symbol] [--cluster] [--exclude-tests] [--include-tests].",
+		"idx search: default 3 results without code; --include-content only for narrow follow-up. Flags: [--max-files <n>] [--path-prefix <area>] [--chunk-types <types|api|impl|tests|imports>] [--mode hybrid|semantic|lexical|symbol] [--min-score <score>] [--include-content] [--include-imports] [--dedupe-file] [--dedupe-symbol] [--cluster] [--exclude-tests] [--include-tests].",
 	explain:
 		"idx explain flags: [--path-prefix <area>] [--include-body] [--body-lines <n>] [--signature-only].",
 	deps: "idx deps flags: [--mode modules|module-imports|calls|call-graph] [--direction callers|callees|both] [--depth <n>] [--show-edges] [--tests].",

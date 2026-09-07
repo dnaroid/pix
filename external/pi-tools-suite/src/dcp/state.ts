@@ -71,6 +71,14 @@ export interface ConversationIndexEntry {
   stableId: string
   /** SHA-256 of the canonical provider-visible message content. */
   contentHash: string
+  /**
+   * Canonical hash of the raw session message before DCP rewrote this
+   * projection entry's body (e.g. a tool-output placeholder). Equals
+   * `contentHash` for untouched entries. Runtime-only; exact mutation
+   * membership binds to this so a later raw pass still materializes the block.
+   * Omitted when the raw and projected hashes are identical.
+   */
+  rawContentHash?: string
   /** Persistent mNNN identifier when the message is addressable as raw content. */
   visibleId?: string
   /** Message role in the current projection. */

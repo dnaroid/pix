@@ -4,9 +4,18 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import repoDiscoveryExtension, { truncateOutput } from "../src/repo-discovery/index.js";
+import { REPO_DISCOVERY_TOOLS } from "../src/tool-descriptions.js";
 
 type RegisteredTool = {
 	name: string;
+	description: string;
+	promptSnippet: string;
+	promptGuidelines: string[];
+	parameters: { properties: {
+		args: { description: string };
+		maxLines: { description: string; default: number };
+		maxBytes: { description: string; default: number };
+	} };
 	execute: (toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: { cwd: string }) => Promise<{ content: Array<{ text: string }> }>;
 };
 
@@ -16,6 +25,51 @@ type RegisteredCommand = {
 };
 
 describe("repo discovery output truncation", () => {
+	test("registered repo tools expose economy guidance without changing execution defaults", async () => {
+		const previousCwd = process.cwd();
+		const projectRoot = mkdtempSync(path.join(tmpdir(), "repo-discovery-guidance-"));
+		mkdirSync(path.join(projectRoot, ".indexer-cli"));
+		const tools: RegisteredTool[] = [];
+		const calls: Array<{ command: string; args: string[] }> = [];
+		try {
+			process.chdir(projectRoot);
+			repoDiscoveryExtension({
+				registerCommand: () => undefined,
+				registerTool: (tool: RegisteredTool) => tools.push(tool),
+				exec: async (command: string, args: string[]) => {
+					calls.push({ command, args });
+					return { stdout: "fixture result", stderr: "", code: 0 };
+				},
+			} as never);
+			expect(tools).toHaveLength(REPO_DISCOVERY_TOOLS.length);
+			for (const description of REPO_DISCOVERY_TOOLS) {
+				const tool = tools.find((entry) => entry.name === description.name)!;
+				expect(tool).toMatchObject({
+					description: description.description,
+					promptSnippet: description.promptSnippet,
+					promptGuidelines: description.promptGuidelines,
+				});
+				expect(tool.parameters.properties.maxLines.default).toBe(2000);
+				expect(tool.parameters.properties.maxBytes.default).toBe(50000);
+				expect(tool.parameters.properties.maxLines.description).toContain("Prefer native limits/cursors");
+			}
+			const search = tools.find((tool) => tool.name === "repo_search")!;
+			expect(search.parameters.properties.args.description).toContain("default 3 results without code");
+			expect(search.parameters.properties.args.description).toContain("--include-content only for narrow follow-up");
+			await search.execute("first-pass", { target: "session persistence" }, undefined, undefined, { cwd: projectRoot });
+			await search.execute("follow-up", {
+				target: "session persistence", args: ["--include-content", "--max-files", "1"],
+			}, undefined, undefined, { cwd: projectRoot });
+			expect(calls).toEqual([
+				{ command: "idx", args: ["search", "session persistence"] },
+				{ command: "idx", args: ["search", "session persistence", "--include-content", "--max-files", "1"] },
+			]);
+		} finally {
+			process.chdir(previousCwd);
+			rmSync(projectRoot, { recursive: true, force: true });
+		}
+	});
+
 	test("keeps top lines when the line limit is exceeded", () => {
 		const result = truncateOutput("one\ntwo\nthree", 2, 1_000);
 

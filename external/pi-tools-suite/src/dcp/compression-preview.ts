@@ -1,5 +1,5 @@
 import type { DcpConfig } from "./config.js"
-import { canonicalMessageHash } from "./conversation-index.js"
+import { canonicalMessageHash, copyRawMutationHash } from "./conversation-index.js"
 import { cloneDcpTransactionState } from "./state-transaction.js"
 import type { CompressionBlock, ConversationIndexEntry, DcpState } from "./state.js"
 import { stripStaleDcpMetadataFromMessage, estimateMessageTokens } from "./pruner-metadata.js"
@@ -17,6 +17,7 @@ function copyDcpProvenance(source: any, target: any): any {
     const descriptor = Object.getOwnPropertyDescriptor(source, key)
     if (descriptor) Object.defineProperty(target, key, descriptor)
   }
+  copyRawMutationHash(source, target)
   return target
 }
 

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { DcpConfig } from "./config.js";
 import type { DcpState, ToolRecord } from "./state.js";
 import { estimateMessageTokens, messageText } from "./pruner-metadata.js";
+import { preserveRawMutationHash } from "./conversation-index.js";
 
 export const EMERGENCY_CURRENT_TURN_PLACEHOLDER =
   "[Older tool output removed during current-turn context emergency; re-run the tool if exact content is needed]";
@@ -281,12 +282,18 @@ function placeholderForPrunedTool(msg: any, state: DcpState): string {
 /**
  * Apply explicit tool output pruning from state.prunedToolIds.
  * Replaces content of matching toolResult messages in place.
+ *
+ * The canonical hash of the un-pruned raw message is preserved on the
+ * projection entry (runtime-only) before the body is replaced: exact mutation
+ * membership for compression blocks must bind to the raw content a later
+ * materialization pass will actually see, not to this placeholder.
  */
 export function applyToolOutputPruning(messages: any[], state: DcpState): void {
   for (const msg of messages) {
     if (msg.role !== "toolResult") continue;
     if (!state.prunedToolIds.has(msg.toolCallId)) continue;
 
+    preserveRawMutationHash(msg);
     msg.content = [
       {
         type: "text",

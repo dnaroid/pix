@@ -158,11 +158,10 @@ export const REPO_DISCOVERY_TOOLS: RepoDiscoveryToolDescription[] = [
 		name: "repo_architecture",
 		label: "Repo Architecture",
 		command: "architecture",
-		description: "Indexed repo architecture map: entrypoints, module boundaries, cycles, and unresolved dependency classes. Use before broad reads in unfamiliar codebases; skip for exact-string lookups, known-file edits, or other trivial changes.",
-		promptSnippet: "Use repo_architecture for a compact indexed architecture overview before broad multi-file reads, not for simple literal searches or small known-scope edits.",
+		description: "Indexed entrypoints, module boundaries, cycles and unresolved dependencies for broad, unfamiliar code.",
+		promptSnippet: "Map an unfamiliar area once; skip repo_architecture for known paths or exact lookups.",
 		promptGuidelines: [
-			"Exact strings, filenames, known symbols, typo/text replacements, or obvious one-file edits: skip repo_architecture and use direct text search/read/edit.",
-			"Broad unfamiliar codebase: make one narrow repo_architecture call first, add --path-prefix when a subsystem is known, then use repo_structure for files/symbols and repo_search for behavior.",
+			"Scope with --path-prefix; then use repo_structure or repo_search only for remaining gaps.",
 		],
 	},
 	{
@@ -170,19 +169,19 @@ export const REPO_DISCOVERY_TOOLS: RepoDiscoveryToolDescription[] = [
 		label: "Repo Structure",
 		command: "structure",
 		description: "Indexed file tree and exported-symbol view for a directory/module. Use to choose files/ranges without dumping source.",
-		promptSnippet: "Use repo_structure for file trees, module contents, and exported symbols; narrow with idx flags.",
+		promptSnippet: "List one area with --max-files 20 --max-depth 2; continue with --cursor.",
 		promptGuidelines: [
-			"Pass --path-prefix, --kind, --max-files, or --max-depth when useful; use repo_ast for one large file's syntax map and repo_search for semantic behavior discovery.",
+			"Narrow with --path-prefix/--kind. Add --include-internal or --include-tests-summary only for a named gap; page instead of listing hundreds of files.",
 		],
 	},
 	{
 		name: "repo_ast",
 		label: "Repo AST",
 		command: "ast",
-		description: "Indexed AST map for one file. Use before repeated reads of a large file or when parent syntax structure matters.",
-		promptSnippet: "Use repo_ast with target=<file> to map one large file before choosing exact ranges to read.",
+		description: "Indexed AST outline for one known large file; locate exact ranges before reading source.",
+		promptSnippet: "Start --max-depth 3 --max-nodes 40 --no-include-text; read needed ranges with offset/limit.",
 		promptGuidelines: [
-			"Use for one known file, not repo-wide search; pass --max-depth or --max-nodes to keep output compact.",
+			"Continue with --cursor; include snippets only when the outline cannot answer the question.",
 		],
 		targetDescription: "File path to map, e.g. src/api/client.ts.",
 	},
@@ -190,12 +189,12 @@ export const REPO_DISCOVERY_TOOLS: RepoDiscoveryToolDescription[] = [
 		name: "repo_search",
 		label: "Repo Search",
 		command: "search",
-		description: "Indexed hybrid/semantic repository search for behavior questions when exact identifiers or files are unknown. Use natural-language behavior queries, not synonym dumps. Defaults to hybrid ranking; read returned ranges next.",
-		promptSnippet: "Use repo_search for conceptual codebase questions; query for behavior, not a bag of synonyms. Leave default hybrid ranking for first-pass searches and use Grep/read when exact names or positions are known.",
+		description: "Indexed hybrid search for behavior when files or symbols are unknown. First pass: at most 3 results, no --include-content.",
+		promptSnippet: "Search behavior, not synonyms; keep hybrid unless lexical matches mislead. Read best returned ranges with offset/limit, not whole files.",
 		promptGuidelines: [
-			"Phrase target as behavior, not synonym dumps; keep exact identifiers only as anchors. Prefer default hybrid first, using --mode semantic only when lexical/symbol terms mislead.",
-			"Make one targeted search, narrow with --path-prefix/--max-files/--dedupe-file/--exclude-tests when useful, read best ranges, then refine only for a named gap; avoid duplicate broad searches.",
-			"For bug/cause questions, stop when a read range shows the causal assignment/write/branch/call; continue only for named gaps such as callers, persistence, tests, or requested impact.",
+			"Use --path-prefix/--dedupe-file when appropriate. Expand only for a named gap; use Grep for exact identifiers.",
+			"--include-content only for a narrow follow-up needing inline code, with --max-files 1; otherwise use read.",
+			"After finding the causal code, stop broad search; inspect callers, persistence or tests only for a named gap.",
 		],
 		targetDescription: "Natural-language behavior query, e.g. auth session token validation.",
 	},
@@ -204,9 +203,9 @@ export const REPO_DISCOVERY_TOOLS: RepoDiscoveryToolDescription[] = [
 		label: "Repo Explain",
 		command: "explain",
 		description: "Indexed explanation for a known symbol. Prefer file::symbol when the name may be ambiguous.",
-		promptSnippet: "Use repo_explain for a known symbol after you already know its name or file scope.",
+		promptSnippet: "Use file::symbol; start --signature-only when signatures suffice.",
 		promptGuidelines: [
-			"Prefer target=file::symbol for ambiguous names; use repo_search instead when the relevant symbol is still unknown.",
+			"Add --include-body --body-lines 20 only for implementation details; use repo_search when the symbol is unknown.",
 		],
 		targetDescription: "Symbol or file-scoped symbol, e.g. createClient or src/api/client.ts::createClient.",
 	},
@@ -214,10 +213,10 @@ export const REPO_DISCOVERY_TOOLS: RepoDiscoveryToolDescription[] = [
 		name: "repo_deps",
 		label: "Repo Deps",
 		command: "deps",
-		description: "Indexed dependency/caller tracing for a known path or symbol. Use for import impact and first-hop call/dependency analysis.",
-		promptSnippet: "Use repo_deps with target=<path|path::symbol> to trace imports, imported-by, callers, or callees.",
+		description: "Indexed import/call dependencies for a known path or file::symbol.",
+		promptSnippet: "Start --depth 1 and choose --direction callers or callees for the question.",
 		promptGuidelines: [
-			"Use repo_search first when path/symbol is unknown. Otherwise start --depth 1; add --direction, --mode calls, or --show-edges only when needed.",
+			"Use --mode calls for call relationships. Add --show-edges/--tests or deeper traversal only for a named impact-analysis gap.",
 		],
 		targetDescription: "Path or file-scoped symbol, e.g. src/api/client.ts or src/api/client.ts::createClient.",
 	},
@@ -318,6 +317,8 @@ export const WEB_SEARCH_TOOL_DESCRIPTIONS = {
 	},
 } satisfies Record<string, ToolDescription>;
 
+const SHELL_TEST_OUTPUT_GUIDANCE = "Tests: save full stdout/stderr to a unique log; emit only TEST_RESULT (passed/failed/incomplete), command, original exit code, verified counts (or unknown), and log path. Omit per-test PASS lines; show bounded exact failure diagnostics and flag omissions. Read only needed log ranges, never dump it. Preserve test exit status; timeout/abort is incomplete. Prefer supported compact reporters; do not alter tests/config just to shorten output.";
+
 export function claudeAliasToolDescriptions(options: ToolDescriptionSetOptions | boolean = false) {
 	const repoDiscovery = hasRepoDiscovery(options);
 
@@ -342,7 +343,7 @@ export function claudeAliasToolDescriptions(options: ToolDescriptionSetOptions |
 		Bash: {
 			name: "Bash",
 			label: "Bash",
-			description: "Run shell commands for builds, tests, package managers, git, and project CLIs. Prefer Read/Edit/Write/Grep/Glob for file operations.",
+			description: `Run shell commands for builds, tests, package managers, git, and project CLIs. Prefer Read/Edit/Write/Grep/Glob for file operations. ${SHELL_TEST_OUTPUT_GUIDANCE}`,
 		},
 		Grep: {
 			name: "Grep",
@@ -368,7 +369,7 @@ export const CODEX_ALIAS_TOOL_DESCRIPTIONS = {
 	shellCommand: {
 		name: "shell",
 		label: "shell",
-		description: "Run shell commands for builds, tests, package managers, git, and project CLIs. For long/verification output, redirect to a log and show only bounded tail on failure; summarize passing logs. Set workdir/cwd instead of cd; prefer read for simple file reads.",
+		description: `Run shell commands for builds, tests, package managers, git, and project CLIs. Set workdir/cwd instead of cd; prefer read for simple file reads. ${SHELL_TEST_OUTPUT_GUIDANCE}`,
 	},
 	applyPatch: {
 		name: "apply_patch",

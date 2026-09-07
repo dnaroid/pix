@@ -3,7 +3,7 @@ import { hasExactCompressionMembership, type CompressionBlock, type CompressionM
 import { PASSTHROUGH_ROLES, estimateMessageTokens } from "./pruner-metadata.js";
 import { stableMessageKeys } from "./pruner-message-ids.js";
 import { writeDcpDebugLog } from "./debug-log.js";
-import { canonicalMessageHash } from "./conversation-index.js";
+import { canonicalMessageHash, rawMutationHashOf } from "./conversation-index.js";
 
 function findBoundaryIndex(messages: any[], stableId: string | undefined, timestamp: number): number {
   if (stableId) {
@@ -14,13 +14,35 @@ function findBoundaryIndex(messages: any[], stableId: string | undefined, timest
   return matches.length === 1 ? matches[0]! : -1;
 }
 
+/**
+ * Mutation identity of one message occurrence. A projection entry whose body
+ * DCP replaced (tool-output placeholder) legitimately stands in for its
+ * preserved raw content, so its identity is that recorded raw hash; every
+ * other message is identified by its own canonical hash. Exactness is not
+ * relaxed: the member hash must still match this identity, in order,
+ * contiguously, and any changed raw content still fails closed.
+ */
+function mutationIdentity(message: any): string {
+  return rawMutationHashOf(message) ?? canonicalMessageHash(message);
+}
+
 function exactMemberSpan(messages: any[], members: CompressionMember[]): { lo: number; hi: number } | undefined {
   const keys = stableMessageKeys(messages);
   const lo = keys.indexOf(members[0]!.stableId);
   if (lo < 0 || lo + members.length > messages.length) return undefined;
   for (let offset = 0; offset < members.length; offset++) {
     const member = members[offset]!;
-    if (keys[lo + offset] !== member.stableId || canonicalMessageHash(messages[lo + offset]) !== member.hash) return undefined;
+    if (keys[lo + offset] !== member.stableId || mutationIdentity(messages[lo + offset]) !== member.hash) return undefined;
+  }
+  return { lo, hi: lo + members.length - 1 };
+}
+
+function exactStableIdSpan(messages: any[], members: CompressionMember[]): { lo: number; hi: number } | undefined {
+  const keys = stableMessageKeys(messages);
+  const lo = keys.indexOf(members[0]!.stableId);
+  if (lo < 0 || lo + members.length > messages.length) return undefined;
+  for (let offset = 0; offset < members.length; offset++) {
+    if (keys[lo + offset] !== members[offset]!.stableId) return undefined;
   }
   return { lo, hi: lo + members.length - 1 };
 }
@@ -147,6 +169,28 @@ export function syncCompressionBlocks(messages: any[], state: DcpState, config: 
 
   for (const block of state.compressionBlocks) {
     if (!block.active || block.deactivatedByUser) continue;
+
+    // A modern block whose exact stable sequence is present but whose hashes
+    // match neither raw mutation membership nor its recorded projection can
+    // never be applied safely. Older DCP versions could create this state by
+    // storing a pruned tool-result hash as mutation membership. Fail closed by
+    // retiring the unusable block so candidate selection can create a fresh
+    // exact block instead of repeatedly selecting a partial overlap.
+    if (
+      hasExactCompressionMembership(block) &&
+      exactStableIdSpan(messages, block.mutationMembers!) &&
+      !exactMemberSpan(messages, block.mutationMembers!) &&
+      !exactMemberSpan(messages, block.sourceMembers!)
+    ) {
+      block.active = false;
+      block.deactivatedReason = "exact-membership-mismatch";
+      writeDcpDebugLog(config, "block.auto_deactivated", {
+        blockId: `b${block.id}`,
+        reason: block.deactivatedReason,
+        topic: block.topic,
+      });
+      continue;
+    }
 
     // ── Skip the missing-origin-compress-call check ────────────────────
     // The compress tool-call that *created* this block is not the block's

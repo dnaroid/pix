@@ -230,7 +230,13 @@ function loadSidecarDcpState(session: AgentSession): Record<string, unknown> | u
 	try {
 		const statePath = join(sessionDir, "dcp-state", safeSessionFileName(sessionId));
 		const parsed = JSON.parse(readFileSync(statePath, "utf8"));
-		return isRecord(parsed) ? parsed : undefined;
+		if (!isRecord(parsed)) return undefined;
+		// The suite persists an envelope { kind: "dcp-state", payload: {...} };
+		// pre-envelope sidecars stored the state payload directly.
+		if (parsed.kind === "dcp-state") {
+			return isRecord(parsed.payload) ? parsed.payload : undefined;
+		}
+		return parsed;
 	} catch {
 		return undefined;
 	}

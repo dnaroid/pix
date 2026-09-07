@@ -116,6 +116,40 @@ export function canonicalMessageHash(message: any): string {
   return createHash("sha256").update(JSON.stringify(canonicalHashValue(canonical))).digest("hex")
 }
 
+const CANONICAL_HASH_RE = /^[a-f0-9]{64}$/i
+const rawMutationHashes = new WeakMap<object, string>()
+
+/**
+ * Record the canonical hash of a raw message immediately before DCP rewrites
+ * its projection body (tool-output placeholder). The module-owned WeakMap is
+ * runtime-only and cannot leak into provider serialization or be spoofed by a
+ * message field. Provenance travels on the exact message occurrence, never
+ * keyed by a stable identity: fallback identities derived from projected
+ * content would not be stable across the rewrite.
+ *
+ * Without this, exact mutation membership binds to the pruned projection hash,
+ * the next raw context pass can never match the span, and the block silently
+ * fails to materialize while candidate selection keeps re-selecting the range.
+ */
+export function preserveRawMutationHash(message: any): void {
+  if (!message || typeof message !== "object") return
+  if (!rawMutationHashes.has(message)) rawMutationHashes.set(message, canonicalMessageHash(message))
+}
+
+/** Canonical raw (pre-prune) hash preserved on a projected message, if any. */
+export function rawMutationHashOf(message: any): string | undefined {
+  if (!message || typeof message !== "object") return undefined
+  const preserved = rawMutationHashes.get(message)
+  return typeof preserved === "string" && CANONICAL_HASH_RE.test(preserved) ? preserved : undefined
+}
+
+/** Transfer module-owned raw provenance when DCP clones a projection message. */
+export function copyRawMutationHash(source: any, target: any): void {
+  if (!source || typeof source !== "object" || !target || typeof target !== "object") return
+  const preserved = rawMutationHashOf(source)
+  if (preserved) rawMutationHashes.set(target, preserved)
+}
+
 function hasAssistantSignature(message: any): boolean {
   if (message?.role !== "assistant" || !Array.isArray(message.content)) return false
   return message.content.some((part: any) =>
@@ -145,10 +179,13 @@ export function buildConversationIndex(
     const stableId = stableKeys[index]!
     const visibleId = visibleByStableId.get(stableId)
     const meta = visibleId ? state.messageMetaSnapshot.get(visibleId) : undefined
+    const contentHash = canonicalMessageHash(message)
+    const rawContentHash = rawMutationHashOf(message)
     return {
       index,
       stableId,
-      contentHash: canonicalMessageHash(message),
+      contentHash,
+      ...(rawContentHash && rawContentHash !== contentHash ? { rawContentHash } : {}),
       visibleId,
       role: message?.role ?? "",
       timestamp: Number.isFinite(message?.timestamp) ? message.timestamp : undefined,
@@ -267,7 +304,12 @@ export function buildExactRangeMembership(
     sourceIndexes.push(entry.index)
 
     if (entry.origin === "raw") {
-      if (!appendUniqueMembers(mutationMembers, [{ stableId: entry.stableId, hash: entry.contentHash }])) {
+      // Mutation membership binds to the canonical RAW content (pre-prune):
+      // materialization always runs against the raw session history before
+      // DCP rewrites tool-result bodies. sourceMembers keeps the projected
+      // hash because that is exactly what the summarizer inspected.
+      const rawHash = entry.rawContentHash ?? entry.contentHash
+      if (!appendUniqueMembers(mutationMembers, [{ stableId: entry.stableId, hash: rawHash }])) {
         return undefined
       }
       continue

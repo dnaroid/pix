@@ -11,6 +11,7 @@ import type { CompressionCandidate } from "./pruner-types.js";
 import type { DcpState } from "./state.js";
 
 const rejectedSources = new WeakMap<DcpState, { key: string; error: AutoCompressionBlockedError }>();
+const FINALIZATION_GRACE_MS = 1_000;
 
 /**
  * A source-size estimate is not a net-savings estimate. Try the economical
@@ -39,7 +40,34 @@ export async function createBudgetedAutoCompressionBlock(
   const onAbort = () => controller.abort(options.signal?.reason);
   options.signal?.addEventListener("abort", onAbort, { once: true });
   const timeout = Math.max(1, options.config.compress.autoCompress.timeoutMs);
-  const timer = setTimeout(() => controller.abort(new Error("DCP compression operation deadline exceeded")), timeout);
+  // generateModelSummary owns the configured summarizer deadline and can
+  // deliberately recover from it with the deterministic extractive fallback.
+  // Keep a small bounded tail for that fallback and durable publication;
+  // aborting at exactly `timeout` races the fallback and turns every slow model
+  // into a generic preparation failure instead of a successful compression.
+  const operationDeadline = timeout + FINALIZATION_GRACE_MS;
+  let internalDeadlineExceeded = false;
+  const timer = setTimeout(() => {
+    internalDeadlineExceeded = true;
+    controller.abort(new Error("DCP compression operation deadline exceeded"));
+  }, operationDeadline);
+  // A parent cancellation is passed through untouched and never becomes a
+  // blocked reason. Only the internal whole-operation deadline is classified:
+  // otherwise callers surface a generic preparation failure and keep retrying
+  // an operation that can no longer make progress within its budget.
+  const operationAbortError = (): unknown => {
+    if (options.signal?.aborted) {
+      return options.signal.reason ?? controller.signal.reason ?? new Error("DCP compression operation aborted");
+    }
+    if (internalDeadlineExceeded) {
+      return new AutoCompressionBlockedError(
+        "summarizer-unavailable",
+        `Auto-compression preparation exceeded its whole-operation deadline of ${operationDeadline}ms ` +
+          "(DCP compression operation deadline exceeded) and was stopped without publishing state",
+      );
+    }
+    return controller.signal.reason ?? new Error("DCP compression operation aborted");
+  };
   const candidates = [options.candidate];
   if (largestSafeCandidate && (
     largestSafeCandidate.startId !== options.candidate.startId ||
@@ -48,7 +76,7 @@ export async function createBudgetedAutoCompressionBlock(
 
   try {
     for (let attempt = 0; attempt < candidates.length; attempt++) {
-      controller.signal.throwIfAborted();
+      if (controller.signal.aborted) throw operationAbortError();
       if (options.state.sessionEpoch !== epoch) throw new Error("stale_plan: DCP owner changed before budget replan");
       try {
         const result = await createAutoCompressionBlock({
@@ -59,7 +87,7 @@ export async function createBudgetedAutoCompressionBlock(
         rejectedSources.delete(options.state);
         return result;
       } catch (error) {
-        if (controller.signal.aborted) throw controller.signal.reason;
+        if (controller.signal.aborted) throw operationAbortError();
         const insufficient = error instanceof AutoCompressionBlockedError &&
           (error.blockedReason === "budget-exhausted" || error.blockedReason === "non-positive-gain");
         if (!insufficient) throw error;

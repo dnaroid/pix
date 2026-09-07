@@ -3,6 +3,7 @@ import type { DcpState } from "./state.js";
 import { applyCompressionBlocks, repairOrphanedToolPairs, syncCompressionBlocks } from "./pruner-compression-blocks.js";
 import { stripStaleDcpMetadataFromMessage } from "./pruner-metadata.js";
 import { injectMessageIds } from "./pruner-message-ids.js";
+import { copyRawMutationHash } from "./conversation-index.js";
 import {
   applyAutoToolOutputPruning,
   applyDeduplication,
@@ -59,33 +60,18 @@ export function applyPruning(
   // affecting the original objects across context events.
   const msgs: any[] = messages.map((m: any) => {
     const clone = { ...m };
-    if (typeof m?._dcpOrigin === "string") {
-      Object.defineProperty(clone, "_dcpOrigin", {
-        value: m._dcpOrigin,
-        enumerable: false,
-        configurable: true,
-      });
-    }
-    if (Number.isInteger(m?._dcpBlockId)) {
-      Object.defineProperty(clone, "_dcpBlockId", {
-        value: m._dcpBlockId,
-        enumerable: false,
-        configurable: true,
-      });
-    }
-    if (typeof m?._dcpStableId === "string") {
-      Object.defineProperty(clone, "_dcpStableId", {
-        value: m._dcpStableId,
-        enumerable: false,
-        configurable: true,
-      });
-    }
     if (Array.isArray(clone.content)) {
       clone.content = clone.content.map((contentBlock: any) =>
         typeof contentBlock === "object" && contentBlock !== null ? { ...contentBlock } : contentBlock,
       );
     }
-    return stripStaleDcpMetadataFromMessage(clone);
+    const stripped = stripStaleDcpMetadataFromMessage(clone);
+    for (const key of ["_dcpOrigin", "_dcpBlockId", "_dcpStableId"] as const) {
+      const descriptor = Object.getOwnPropertyDescriptor(m, key);
+      if (descriptor) Object.defineProperty(stripped, key, descriptor);
+    }
+    copyRawMutationHash(m, stripped);
+    return stripped;
   });
 
   // 1. Count user turns → update state.currentTurn. Do this before inserting
