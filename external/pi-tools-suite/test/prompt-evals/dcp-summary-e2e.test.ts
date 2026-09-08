@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { generateModelSummary } from "../../src/dcp/auto-compress.js";
+import { registerCompressTool } from "../../src/dcp/compress-tool.js";
+import { loadConfig } from "../../src/dcp/config.js";
+import { createState } from "../../src/dcp/state.js";
 import { completeWithModelRegistry } from "../../src/model-completion.js";
 import { withE2ERetry } from "../e2e-retry.js";
 import { createLiveModelContext, resolveLiveModelRef } from "../support/live-model.js";
@@ -17,6 +20,24 @@ function textMessage(role: string, text: string, timestamp: number): {
 	timestamp: number;
 } {
 	return { role, content: [{ type: "text", text }], timestamp };
+}
+
+function registeredCompressContract(): string {
+	let tool: any;
+	registerCompressTool(
+		{ registerTool(value: any) { tool = value; } } as any,
+		createState(),
+		loadConfig({ homeDir: "/__dcp_boundary_prompt_eval__" }),
+	);
+	if (!tool) throw new Error("compress tool was not registered");
+	return `${tool.description}\n\nPARAMETERS\n${JSON.stringify(tool.parameters)}`;
+}
+
+function parseSingleJsonObject(text: string): Record<string, any> {
+	const start = text.indexOf("{");
+	const end = text.lastIndexOf("}");
+	if (start < 0 || end < start) throw new Error(`Model returned no JSON object: ${text.slice(0, 1000)}`);
+	return JSON.parse(text.slice(start, end + 1));
 }
 
 describe("DCP direct live summary prompt eval", () => {
@@ -92,5 +113,26 @@ describe("DCP direct live summary prompt eval", () => {
 		expect(summary).toContain("src/payments.ts");
 		expect(summary).toContain("test/payments.test.ts");
 		expect(summary.match(/DISPOSABLE_LOG_LINE_777/g) ?? []).toHaveLength(0);
+	}, E2E_TIMEOUT_MS);
+
+	e2eTest("selects protocol-closed range boundaries around parallel tool groups", async () => {
+		const answer = await withE2ERetry("DCP live boundary selection", async () => {
+			const live = await createLiveModelContext(E2E_MODEL);
+			const auth = await live.modelRegistry.getApiKeyAndHeaders(live.model);
+			if (auth.ok === false) throw new Error(`Boundary eval auth unavailable: ${auth.error}`);
+			const result = await completeWithModelRegistry(live.modelRegistry, live.model, {
+				systemPrompt: `${registeredCompressContract()}\n\nChoose compression boundaries using only this contract. Return one JSON object and no prose.`,
+				messages: [{ role: "user", timestamp: 1, content: [{ type: "text", text: [
+					"Return exactly: {\"startCut\":{\"startId\":\"...\",\"endId\":\"...\"},\"endCut\":{\"startId\":\"...\",\"endId\":\"...\"}}.",
+					"startCut: m004 is one assistant message that calls todo, session_overview, and read in parallel; m005, m006, m007 are those three results. Older stale evidence of interest starts at m006 and continues through m058. Select the protocol-safe compression range that covers that evidence.",
+					"endCut: stale history starts at m010. m020 is one assistant message that calls read A and read B in parallel; m021 and m022 are those two results. The desired stale slice reaches m020. Select the protocol-safe compression range that covers that slice.",
+				].join("\n") }] }],
+			}, { apiKey: auth.apiKey, headers: auth.headers, env: auth.env, signal: AbortSignal.timeout(60_000), maxTokens: 1024 } as any);
+			const output = result.content.filter((part: any) => part.type === "text").map((part: any) => part.text).join("\n").trim();
+			return parseSingleJsonObject(output);
+		});
+
+		expect(answer.startCut).toEqual({ startId: "m004", endId: "m058" });
+		expect(answer.endCut).toEqual({ startId: "m010", endId: "m022" });
 	}, E2E_TIMEOUT_MS);
 });

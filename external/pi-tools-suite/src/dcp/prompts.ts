@@ -130,10 +130,8 @@ Treat these reference lines as boundary metadata only, not as tool result conten
 
 Rules:
 
-- Pick \`startId\` and \`endId\` directly from injected IDs in context.
-- IDs must exist in the current conversation context.
-- \`startId\` must appear before \`endId\`.
-- Do not invent IDs. Use only IDs that are present in context.
+- Use only injected IDs in current context; \`startId\` must precede \`endId\`. Do not invent IDs.
+- For \`ranges\`, never split a tool group: include the calling assistant and all its tool results, including parallel calls.
 - If \`compress\` fails with \`Unknown message ID\`, treat those IDs as stale; retry at most once using only the error's listed current raw IDs or eligible \`bN\` blocks, or skip if no closed range is safe.
 
 BATCHING

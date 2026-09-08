@@ -1723,6 +1723,19 @@ describe("DCP pruning effectiveness", () => {
     expect([...state.messageMetaSnapshot.entries()].find(([, meta]) => meta.toolCallId === "parallel-a")?.[0]).toBe(resultId);
   });
 
+  test("compress advertises compact tool-group boundary rules before execution", () => {
+    let registeredTool: any;
+    registerRuntimeCompressTool({ registerTool: (tool: any) => { registeredTool = tool } } as any, createState(), config());
+
+    const ranges = JSON.parse(JSON.stringify(registeredTool.parameters)).properties.ranges;
+    expect(ranges.description).toContain("each tool-calling assistant and all its results, including parallel calls");
+    expect(ranges.items.properties.startId.description).toContain("never start inside a tool group");
+    expect(ranges.items.properties.endId.description).toContain("final tool group's last result");
+    expect(registeredTool.description).toContain("For `ranges`, never split a tool group");
+    const boundaryGuidance = [ranges.description, ranges.items.properties.startId.description, ranges.items.properties.endId.description].join("\n");
+    expect(boundaryGuidance.length).toBeLessThanOrEqual(220);
+  });
+
   test("range compression rejects a selection that cuts through a parallel tool group", async () => {
     const state = createState();
     const cfg = config();
