@@ -6,6 +6,7 @@ const tauri = vi.hoisted(() => ({
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: tauri.invoke }));
+vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => ({ label: "project-one" }) }));
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn(async (event: string, listener: (event: { payload: unknown }) => void) => {
     tauri.listeners.set(event, listener);
@@ -24,21 +25,35 @@ describe("TauriAcpTransport", () => {
 
   it("filters stale events and generation-guards sends and stops", async () => {
     const lines: string[] = [];
+    const exits: unknown[] = [];
     const transport = new TauriAcpTransport();
     await transport.start({
       onLine: (line) => lines.push(line),
       onStderr: () => {},
-      onExit: () => {},
+      onExit: (exit) => exits.push(exit),
     });
 
-    tauri.listeners.get("acp://stdout")?.({ payload: { generation: 6, lines: ["stale"] } });
-    tauri.listeners.get("acp://stdout")?.({ payload: { generation: 7, lines: ["current", "next"] } });
+    tauri.listeners.get("acp://stdout")?.({ payload: { windowLabel: "project-one", generation: 6, lines: ["stale"] } });
+    tauri.listeners.get("acp://stdout")?.({ payload: { windowLabel: "project-two", generation: 7, lines: ["other-window"] } });
+    tauri.listeners.get("acp://stdout")?.({ payload: { windowLabel: "project-one", generation: 7, lines: ["current", "next"] } });
+    tauri.listeners.get("acp://exit")?.({
+      payload: {
+        windowLabel: "project-two",
+        generation: 7,
+        code: 0,
+        success: true,
+        requested: true,
+        error: null,
+      },
+    });
     await transport.send("{}");
     await transport.stop();
 
     expect(lines).toEqual(["current", "next"]);
-    expect(tauri.invoke).toHaveBeenCalledWith("acp_send", { generation: 7, line: "{}" });
-    expect(tauri.invoke).toHaveBeenCalledWith("acp_stop", { generation: 7 });
+    expect(exits).toEqual([]);
+    expect(tauri.invoke).toHaveBeenCalledWith("acp_start", { windowLabel: "project-one" });
+    expect(tauri.invoke).toHaveBeenCalledWith("acp_send", { windowLabel: "project-one", generation: 7, line: "{}" });
+    expect(tauri.invoke).toHaveBeenCalledWith("acp_stop", { windowLabel: "project-one", generation: 7 });
     await expect(transport.send("{}")).rejects.toThrow("not started");
   });
 });

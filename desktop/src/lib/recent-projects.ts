@@ -1,5 +1,6 @@
 export const RECENT_PROJECTS_STORAGE_KEY = "pix.desktop.recentProjects";
 export const WORKSPACE_STORAGE_KEY = "pix.desktop.workspace";
+export const WORKSPACE_QUERY_PARAM = "workspace";
 export const MAX_RECENT_PROJECTS = 20;
 
 export function projectName(path: string): string {
@@ -8,6 +9,29 @@ export function projectName(path: string): string {
 
 export function isAbsoluteProjectPath(path: string): boolean {
   return path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("\\\\");
+}
+
+export function workspaceFromLocation(url: string): string | undefined {
+  try {
+    const workspace = new URL(url).searchParams.get(WORKSPACE_QUERY_PARAM)?.trim();
+    return workspace && isAbsoluteProjectPath(workspace) ? workspace : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function projectWindowUrl(currentUrl: string, workspace: string): string {
+  if (!isAbsoluteProjectPath(workspace)) throw new Error("Project path must be absolute.");
+  const url = new URL(currentUrl);
+  url.searchParams.set(WORKSPACE_QUERY_PARAM, workspace);
+  url.hash = "";
+  return url.toString();
+}
+
+/** Local app route for a new Tauri webview window, preserving non-workspace query state. */
+export function projectWindowRoute(currentUrl: string, workspace: string): string {
+  const url = new URL(projectWindowUrl(currentUrl, workspace));
+  return `${url.pathname}${url.search}`;
 }
 
 export function buildRecentProjects(paths: readonly string[], selectedPath?: string): string[] {

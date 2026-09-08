@@ -1,11 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { AcpExit, AcpTransport, AcpTransportHandlers } from "./acp-client";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import type { AcpTransport, AcpTransportHandlers } from "./acp-client";
 
 export class TauriAcpTransport implements AcpTransport {
   private unlisten: UnlistenFn[] = [];
   private started = false;
   private generation: number | null = null;
+  private readonly windowLabel = getCurrentWindow().label;
 
   async start(handlers: AcpTransportHandlers): Promise<void> {
     if (this.started) return;
@@ -17,20 +19,24 @@ export class TauriAcpTransport implements AcpTransport {
     try {
       const [stdoutUnlisten, stderrUnlisten, exitUnlisten] = await Promise.all([
         listen<AcpLines>("acp://stdout", (event) => {
+          if (event.payload.windowLabel !== this.windowLabel) return;
           for (const line of payloadLines(event.payload)) {
             deliver(event.payload.generation, () => handlers.onLine(line));
           }
         }),
         listen<AcpLines>("acp://stderr", (event) => {
+          if (event.payload.windowLabel !== this.windowLabel) return;
           for (const line of payloadLines(event.payload)) {
             deliver(event.payload.generation, () => handlers.onStderr(line));
           }
         }),
-        listen<AcpExit>("acp://exit", (event) =>
-          deliver(event.payload.generation, () => handlers.onExit(event.payload))),
+        listen<AcpExitPayload>("acp://exit", (event) => {
+          if (event.payload.windowLabel !== this.windowLabel) return;
+          deliver(event.payload.generation, () => handlers.onExit(event.payload));
+        }),
       ]);
       this.unlisten.push(stdoutUnlisten, stderrUnlisten, exitUnlisten);
-      this.generation = await invoke<number>("acp_start");
+      this.generation = await invoke<number>("acp_start", { windowLabel: this.windowLabel });
       this.started = true;
       for (const event of earlyEvents) {
         if (event.generation === this.generation) event.deliver();
@@ -46,7 +52,7 @@ export class TauriAcpTransport implements AcpTransport {
     if (!this.started || this.generation === null) {
       return Promise.reject(new Error("pix-acp transport is not started"));
     }
-    return invoke("acp_send", { generation: this.generation, line });
+    return invoke("acp_send", { windowLabel: this.windowLabel, generation: this.generation, line });
   }
 
   async stop(): Promise<void> {
@@ -55,7 +61,7 @@ export class TauriAcpTransport implements AcpTransport {
     const generation = this.generation;
     this.started = false;
     this.generation = null;
-    await invoke("acp_stop", { generation });
+    await invoke("acp_stop", { windowLabel: this.windowLabel, generation });
   }
 
   private removeListeners(): void {
@@ -64,9 +70,19 @@ export class TauriAcpTransport implements AcpTransport {
 }
 
 interface AcpLines {
+  readonly windowLabel: string;
   readonly generation: number;
   readonly lines?: readonly string[];
   readonly line?: string;
+}
+
+interface AcpExitPayload {
+  readonly windowLabel: string;
+  readonly generation: number;
+  readonly code: number | null;
+  readonly success: boolean;
+  readonly requested: boolean;
+  readonly error: string | null;
 }
 
 function payloadLines(payload: AcpLines): readonly string[] {

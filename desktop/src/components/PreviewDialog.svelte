@@ -2,8 +2,10 @@
   import { convertFileSrc } from "@tauri-apps/api/core";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import ArrowRight from "@lucide/svelte/icons/arrow-right";
+  import Check from "@lucide/svelte/icons/check";
   import FileCode from "@lucide/svelte/icons/file-code";
   import MoveDiagonal2 from "@lucide/svelte/icons/move-diagonal-2";
+  import Pencil from "@lucide/svelte/icons/pencil";
   import WrapText from "@lucide/svelte/icons/wrap-text";
   import X from "@lucide/svelte/icons/x";
   import type { Attachment } from "../lib/attachments";
@@ -19,12 +21,14 @@
     scrollPosition,
     canGoBack = false,
     canGoForward = false,
+    editable = false,
     onBack,
     onForward,
     onOpenProjectFile,
     onResolveProjectMedia,
     onOpenLocalFile,
     onResolveLocalMedia,
+    onSaveProjectFile,
     onScrollPositionChange,
     onClose,
   }: {
@@ -34,12 +38,14 @@
     scrollPosition: PreviewScrollPosition;
     canGoBack?: boolean;
     canGoForward?: boolean;
+    editable?: boolean;
     onBack?: () => void;
     onForward?: () => void;
     onOpenProjectFile?: (path: string) => void | Promise<void>;
     onResolveProjectMedia?: (path: string) => Promise<Attachment | undefined>;
     onOpenLocalFile?: (path: string) => void | Promise<void>;
     onResolveLocalMedia?: (path: string) => Promise<Attachment | undefined>;
+    onSaveProjectFile?: (path: string, content: string) => Promise<boolean>;
     onScrollPositionChange?: (id: number, position: PreviewScrollPosition) => void;
     onClose: () => void;
   } = $props();
@@ -49,6 +55,9 @@
   let contentScrollElement = $state<HTMLDivElement | undefined>();
   let closeButton: HTMLButtonElement | undefined;
   let wrapLines = $state(false);
+  let editing = $state(false);
+  let draft = $state("");
+  let saving = $state(false);
   let resizeStart: {
     pointerId: number;
     x: number;
@@ -63,6 +72,8 @@
   );
   const language = $derived(file ? languageForFilePath(file.path) : undefined);
   const renderAsMarkdown = $derived(language === "markdown");
+  const canEdit = $derived(Boolean(file && renderAsMarkdown && editable && onSaveProjectFile));
+  const dirty = $derived(Boolean(file && draft !== file.content));
   const highlighted = $derived(
     file && !renderAsMarkdown ? highlightCode(file.content, language) : undefined,
   );
@@ -74,6 +85,13 @@
       : "";
     return directory ? `${directory}/${path}` : path;
   }
+
+  $effect(() => {
+    previewId;
+    draft = file?.content ?? "";
+    editing = false;
+    saving = false;
+  });
 
   $effect(() => {
     const dialog = dialogElement;
@@ -90,8 +108,13 @@
     };
   });
 
+  function requestClose(): void {
+    if (editing && dirty && !window.confirm("Discard unsaved changes?")) return;
+    onClose();
+  }
+
   function handleBackdropClick(event: MouseEvent): void {
-    if (event.target === event.currentTarget) onClose();
+    if (event.target === event.currentTarget) requestClose();
   }
 
   function restoreScroll(
@@ -131,11 +154,13 @@
   }
 
   function handleBack(): void {
+    if (editing) return;
     rememberScroll();
     onBack?.();
   }
 
   function handleForward(): void {
+    if (editing) return;
     rememberScroll();
     onForward?.();
   }
@@ -152,7 +177,30 @@
 
   function handleCancel(event: Event): void {
     event.preventDefault();
-    onClose();
+    if (editing) {
+      draft = file?.content ?? "";
+      editing = false;
+      return;
+    }
+    requestClose();
+  }
+
+  async function saveEdit(): Promise<void> {
+    if (!file || !canEdit || !onSaveProjectFile || saving || !dirty) return;
+    saving = true;
+    try {
+      const saved = await onSaveProjectFile(file.path, draft);
+      if (saved) editing = false;
+    } finally {
+      saving = false;
+    }
+  }
+
+  function handleEditorKeydown(event: KeyboardEvent): void {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+      event.preventDefault();
+      void saveEdit();
+    }
   }
 
   function setPreviewSize(width: number, height: number): void {
@@ -222,7 +270,7 @@
           type="button"
           aria-label="Go back"
           title="Back"
-          disabled={!canGoBack}
+          disabled={!canGoBack || editing}
           onclick={handleBack}
         >
           <ArrowLeft class="h-4 w-4" aria-hidden="true" />
@@ -232,7 +280,7 @@
           type="button"
           aria-label="Go forward"
           title="Forward"
-          disabled={!canGoForward}
+          disabled={!canGoForward || editing}
           onclick={handleForward}
         >
           <ArrowRight class="h-4 w-4" aria-hidden="true" />
@@ -263,19 +311,55 @@
           <WrapText class="h-4 w-4" aria-hidden="true" />
         </button>
       {/if}
+      {#if canEdit}
+        {#if editing}
+          <button
+            class="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            type="button"
+            disabled={saving}
+            onclick={() => {
+              draft = file?.content ?? "";
+              editing = false;
+            }}
+          >Cancel</button>
+          <button
+            class="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-40"
+            type="button"
+            disabled={saving || !dirty}
+            onclick={() => void saveEdit()}
+          ><Check class="h-3.5 w-3.5" aria-hidden="true" />{saving ? "Saving…" : "Save"}</button>
+        {:else}
+          <button
+            class="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            type="button"
+            onclick={() => {
+              draft = file?.content ?? "";
+              editing = true;
+            }}
+          ><Pencil class="h-3.5 w-3.5" aria-hidden="true" />Edit</button>
+        {/if}
+      {/if}
       <button
         class="grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
         type="button"
         aria-label="Close preview"
         title="Close preview"
         bind:this={closeButton}
-        onclick={onClose}
+        onclick={requestClose}
       >
         <X class="h-4 w-4" aria-hidden="true" />
       </button>
     </header>
     {#if file}
-      {#if renderAsMarkdown}
+      {#if renderAsMarkdown && editing}
+        <textarea
+          class="min-h-0 min-w-0 flex-1 resize-none bg-background p-5 font-mono text-sm leading-6 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          bind:value={draft}
+          aria-label={`Edit ${file.path}`}
+          spellcheck="false"
+          onkeydown={handleEditorKeydown}
+        ></textarea>
+      {:else if renderAsMarkdown}
         {#key previewId}
           <!-- svelte-ignore a11y_no_noninteractive_tabindex Scrollable preview needs keyboard focus. -->
           <div

@@ -191,6 +191,12 @@ function projectScope(value: string | undefined): ProjectScope | undefined {
 	return undefined;
 }
 
+type ProjectContext = ExtensionContext | string;
+
+function projectCwd(project: ProjectContext): string {
+	return typeof project === "string" ? project : project.cwd;
+}
+
 function validateName(name: string): void {
 	if (!SAFE_NAME.test(name) || name === "." || name === ".." || name.includes("..")) {
 		throw new Error(`Invalid resource name "${name}". Use letters, digits, dot, underscore, or dash.`);
@@ -296,8 +302,8 @@ function projectKeyFromGitRemote(remote: string): string | undefined {
 	return key && SAFE_NAME.test(key) && !key.includes("..") ? key : undefined;
 }
 
-function provenancePath(ctx: ExtensionContext): string {
-	return join(ctx.cwd, PROJECT_DIR, PROVENANCE_FILE);
+function provenancePath(project: ProjectContext): string {
+	return join(projectCwd(project), PROJECT_DIR, PROVENANCE_FILE);
 }
 
 function cacheRoot(): string {
@@ -314,6 +320,29 @@ function registryUiCacheRoot(): string {
 }
 
 const registryUiCacheQueues = new Map<string, Promise<void>>();
+const registryUiSnapshotsByProject = new Map<string, RegistryUiSnapshot>();
+const registryUiSnapshotGenerations = new Map<string, number>();
+const registryUiSnapshotLoadsByProject = new Map<string, {
+	generation: number;
+	promise: Promise<RegistryUiSnapshot>;
+}>();
+
+function invalidateRegistryUiSnapshot(cwd: string): void {
+	registryUiSnapshotsByProject.delete(cwd);
+	registryUiSnapshotGenerations.set(cwd, (registryUiSnapshotGenerations.get(cwd) ?? 0) + 1);
+}
+
+function invalidateAllRegistryUiSnapshots(): void {
+	const projects = new Set([
+		...registryUiSnapshotsByProject.keys(),
+		...registryUiSnapshotLoadsByProject.keys(),
+		...registryUiSnapshotGenerations.keys(),
+	]);
+	registryUiSnapshotsByProject.clear();
+	for (const cwd of projects) {
+		registryUiSnapshotGenerations.set(cwd, (registryUiSnapshotGenerations.get(cwd) ?? 0) + 1);
+	}
+}
 
 async function withRegistryUiCache<T>(cacheDir: string, task: () => Promise<T>): Promise<T> {
 	const previous = registryUiCacheQueues.get(cacheDir) ?? Promise.resolve();
@@ -367,6 +396,7 @@ async function saveRegistryConfig(remote: string, branch: string): Promise<void>
 	});
 	source = applyEdits(source, edits);
 	await fs.writeFile(filePath, source.endsWith("\n") ? source : `${source}\n`, "utf8");
+	invalidateAllRegistryUiSnapshots();
 }
 
 async function saveProjectKeyConfig(cwd: string, projectKey: string | undefined): Promise<void> {
@@ -384,6 +414,7 @@ async function saveProjectKeyConfig(cwd: string, projectKey: string | undefined)
 	});
 	source = applyEdits(source, edits);
 	await fs.writeFile(filePath, source.endsWith("\n") ? source : `${source}\n`, "utf8");
+	invalidateRegistryUiSnapshot(cwd);
 }
 
 async function pathExists(path: string): Promise<boolean> {
@@ -584,10 +615,11 @@ async function scanRegistry(runtime: RegistryRuntime): Promise<ResourceEntry[]> 
 	];
 }
 
-async function scanProject(ctx: ExtensionContext): Promise<ResourceEntry[]> {
+async function scanProject(project: ProjectContext): Promise<ResourceEntry[]> {
+	const cwd = projectCwd(project);
 	return [
-		...(await scanSkills(join(ctx.cwd, PROJECT_DIR, PROJECT_SKILLS_DIR))),
-		...(await scanAgents(join(ctx.cwd, PROJECT_DIR, PROJECT_AGENTS_DIR))),
+		...(await scanSkills(join(cwd, PROJECT_DIR, PROJECT_SKILLS_DIR))),
+		...(await scanAgents(join(cwd, PROJECT_DIR, PROJECT_AGENTS_DIR))),
 	];
 }
 
@@ -634,9 +666,9 @@ async function hashPath(path: string): Promise<string> {
 	return hash.digest("hex");
 }
 
-async function readProvenance(ctx: ExtensionContext): Promise<Provenance> {
+async function readProvenance(project: ProjectContext): Promise<Provenance> {
 	try {
-		const parsed = JSON.parse(await fs.readFile(provenancePath(ctx), "utf8")) as Partial<Provenance>;
+		const parsed = JSON.parse(await fs.readFile(provenancePath(project), "utf8")) as Partial<Provenance>;
 		if (parsed.version !== PROVENANCE_VERSION || !parsed.resources || typeof parsed.resources !== "object") {
 			return { version: PROVENANCE_VERSION, resources: {}, projectResources: {} };
 		}
@@ -728,11 +760,11 @@ async function recordProjectProvenance(
 	await writeProvenance(ctx, provenance);
 }
 
-async function collectStatuses(pi: ExtensionAPI, ctx: ExtensionContext, runtime: RegistryRuntime): Promise<RegistryStatus[]> {
+async function collectStatuses(pi: ExtensionAPI, project: ProjectContext, runtime: RegistryRuntime): Promise<RegistryStatus[]> {
 	const [remoteResources, localResources, provenance] = await Promise.all([
 		scanRegistry(runtime),
-		scanProject(ctx),
-		readProvenance(ctx),
+		scanProject(project),
+		readProvenance(project),
 	]);
 	const remoteMap = new Map(remoteResources.map((entry) => [resourceKey(entry.type, entry.name), entry]));
 	const localMap = new Map(localResources.map((entry) => [resourceKey(entry.type, entry.name), entry]));
@@ -795,19 +827,20 @@ function projectArtifacts(scope: ProjectScope): ProjectArtifact[] {
 
 async function collectProjectStatuses(
 	pi: ExtensionAPI,
-	ctx: ExtensionContext,
+	project: ProjectContext,
 	runtime: RegistryRuntime,
 ): Promise<ProjectStatusBundle> {
+	const cwd = projectCwd(project);
 	let projectKey: string;
 	try {
-		projectKey = await resolveProjectKey(pi, ctx.cwd);
+		projectKey = await resolveProjectKey(pi, cwd);
 	} catch (error) {
 		return { statuses: [], issue: error instanceof Error ? error.message : String(error) };
 	}
-	const provenance = await readProvenance(ctx);
+	const provenance = await readProvenance(cwd);
 	const statuses: ProjectArtifactStatus[] = [];
 	for (const artifact of ["tasks", "plans", "todo"] as const) {
-		const localPath = projectArtifactLocalPath(ctx.cwd, artifact);
+		const localPath = projectArtifactLocalPath(cwd, artifact);
 		const remotePath = projectArtifactRegistryPath(runtime.cacheDir, projectKey, artifact);
 		const [localPathExists, remoteExists] = await Promise.all([pathExists(localPath), pathExists(remotePath)]);
 		const tracked = provenance.projectResources[artifact];
@@ -998,10 +1031,11 @@ function registryUiItems(statuses: RegistryStatus[], projectStatus?: ProjectStat
 
 async function collectRegistryUiSnapshot(
 	pi: ExtensionAPI,
-	ctx: ExtensionContext,
+	project: ProjectContext,
 	error?: string,
 ): Promise<RegistryUiSnapshot> {
-	const config = loadPiToolsSuiteConfig([], { cwd: ctx.cwd }).resourceRegistry;
+	const cwd = projectCwd(project);
+	const config = loadPiToolsSuiteConfig([], { cwd }).resourceRegistry;
 	const checkedAt = new Date().toISOString();
 	if (!config.remote) {
 		return {
@@ -1013,13 +1047,13 @@ async function collectRegistryUiSnapshot(
 			...(error ? { error } : {}),
 		};
 	}
-	const configuredRuntime = loadRuntimeConfig(ctx.cwd);
+	const configuredRuntime = loadRuntimeConfig(cwd);
 	const runtime: RegistryRuntime = { ...configuredRuntime, cacheDir: registryUiCacheRoot() };
 	return withRegistryUiCache(runtime.cacheDir, async () => {
 		await ensureRegistryCache(pi, runtime);
 		const [statuses, projectStatus] = await Promise.all([
-			collectStatuses(pi, ctx, runtime),
-			collectProjectStatuses(pi, ctx, runtime),
+			collectStatuses(pi, cwd, runtime),
+			collectProjectStatuses(pi, cwd, runtime),
 		]);
 		return {
 			version: 1,
@@ -1035,16 +1069,47 @@ async function collectRegistryUiSnapshot(
 	});
 }
 
+async function registryUiSnapshotForProject(
+	pi: ExtensionAPI,
+	cwd: string,
+	error?: string,
+): Promise<RegistryUiSnapshot> {
+	const generation = registryUiSnapshotGenerations.get(cwd) ?? 0;
+	if (!error) {
+		const cached = registryUiSnapshotsByProject.get(cwd);
+		if (cached) return cached;
+		const existing = registryUiSnapshotLoadsByProject.get(cwd);
+		if (existing?.generation === generation) return existing.promise;
+	}
+
+	const pending = collectRegistryUiSnapshot(pi, cwd, error)
+		.then((snapshot) => {
+			if ((registryUiSnapshotGenerations.get(cwd) ?? 0) === generation) {
+				registryUiSnapshotsByProject.set(cwd, snapshot);
+			}
+			return snapshot;
+		})
+		.finally(() => {
+			if (registryUiSnapshotLoadsByProject.get(cwd)?.promise === pending) {
+				registryUiSnapshotLoadsByProject.delete(cwd);
+			}
+		});
+	registryUiSnapshotLoadsByProject.set(cwd, { generation, promise: pending });
+	return pending;
+}
+
 async function publishRegistryUiSnapshot(
 	pi: ExtensionAPI,
 	ctx: ExtensionContext,
 	error?: string,
 ): Promise<void> {
 	let config: ResourceRegistryConfig | undefined;
+	let cwd: string | undefined;
 	try {
 		if (!registryRpcBridgeEnabled(ctx)) return;
-		config = loadPiToolsSuiteConfig([], { cwd: ctx.cwd }).resourceRegistry;
-		publishRpcSessionState(ctx, REGISTRY_STATE_EVENT, await collectRegistryUiSnapshot(pi, ctx, error));
+		cwd = ctx.cwd;
+		config = loadPiToolsSuiteConfig([], { cwd }).resourceRegistry;
+		publishRpcSessionState(ctx, REGISTRY_STATE_EVENT, await registryUiSnapshotForProject(pi, cwd, error));
 	} catch (snapshotError) {
 		// Session replacement invalidates the old extension context while this
 		// best-effort background snapshot may still be awaiting Git/filesystem
@@ -1053,8 +1118,9 @@ async function publishRegistryUiSnapshot(
 		if (isStaleExtensionContextError(snapshotError)) return;
 		try {
 			if (!registryRpcBridgeEnabled(ctx)) return;
-			config ??= loadPiToolsSuiteConfig([], { cwd: ctx.cwd }).resourceRegistry;
-			publishRpcSessionState(ctx, REGISTRY_STATE_EVENT, {
+			cwd ??= ctx.cwd;
+			config ??= loadPiToolsSuiteConfig([], { cwd }).resourceRegistry;
+			const fallback = {
 				version: 1,
 				configured: Boolean(config.remote),
 				...(config.remote ? { remote: config.remote } : {}),
@@ -1062,7 +1128,11 @@ async function publishRegistryUiSnapshot(
 				items: [],
 				checkedAt: new Date().toISOString(),
 				error: error ?? (snapshotError instanceof Error ? snapshotError.message : String(snapshotError)),
-			} satisfies RegistryUiSnapshot);
+			} satisfies RegistryUiSnapshot;
+			if (!registryUiSnapshotsByProject.has(cwd) && !registryUiSnapshotLoadsByProject.has(cwd)) {
+				registryUiSnapshotsByProject.set(cwd, fallback);
+			}
+			publishRpcSessionState(ctx, REGISTRY_STATE_EVENT, fallback);
 		} catch (fallbackError) {
 			if (isStaleExtensionContextError(fallbackError)) return;
 			// Structured Desktop state is advisory. A failed fallback publication
@@ -1190,6 +1260,13 @@ async function confirmOverwrite(ctx: ExtensionCommandContext, title: string, mes
 }
 
 async function reloadAfterResourceChange(ctx: ExtensionCommandContext): Promise<void> {
+	let cwd: string | undefined;
+	try {
+		cwd = ctx.cwd;
+		invalidateRegistryUiSnapshot(cwd);
+	} catch (error) {
+		if (!isStaleExtensionContextError(error)) throw error;
+	}
 	try {
 		await ctx.reload();
 	} catch (error) {
@@ -2000,6 +2077,7 @@ async function handleRpcCommand(
 ): Promise<void> {
 	const [action] = parts;
 	if (!action || action === "refresh") {
+		invalidateRegistryUiSnapshot(ctx.cwd);
 		await publishRegistryUiSnapshot(pi, ctx);
 		return;
 	}
@@ -2034,6 +2112,8 @@ async function handleCommand(pi: ExtensionAPI, args: string, ctx: ExtensionComma
 	}
 	const action = parseAction(parts[0]);
 	if (!action) throw new Error(registryUsage());
+	if (action === "configure") invalidateAllRegistryUiSnapshots();
+	else if (!["status", "remote"].includes(action)) invalidateRegistryUiSnapshot(ctx.cwd);
 
 	if (action === "configure") {
 		const remote = parts[1];

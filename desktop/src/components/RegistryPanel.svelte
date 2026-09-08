@@ -1,19 +1,35 @@
 <script lang="ts">
   import Database from "@lucide/svelte/icons/database";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import CircleArrowDown from "@lucide/svelte/icons/circle-arrow-down";
+  import CircleArrowUp from "@lucide/svelte/icons/circle-arrow-up";
+  import CircleX from "@lucide/svelte/icons/circle-x";
+  import CloudOff from "@lucide/svelte/icons/cloud-off";
   import Download from "@lucide/svelte/icons/download";
-  import MoreHorizontal from "@lucide/svelte/icons/ellipsis";
+  import GitCompareArrows from "@lucide/svelte/icons/git-compare-arrows";
   import KeyRound from "@lucide/svelte/icons/key-round";
+  import Link2Off from "@lucide/svelte/icons/link-2-off";
+  import PackageMinus from "@lucide/svelte/icons/package-minus";
+  import PackagePlus from "@lucide/svelte/icons/package-plus";
+  import Pencil from "@lucide/svelte/icons/pencil";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
+  import Search from "@lucide/svelte/icons/search";
   import Settings from "@lucide/svelte/icons/settings";
   import Trash2 from "@lucide/svelte/icons/trash-2";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import Upload from "@lucide/svelte/icons/upload";
   import X from "@lucide/svelte/icons/x";
+  import CheckCircle2 from "@lucide/svelte/icons/check-circle-2";
   import {
-    registryActionLabel,
+    registryFriendlyActionLabel,
+    registryFriendlyStatusDescription,
+    registryFriendlyStatusLabel,
     registryPrimaryAction,
+    searchRegistryItems,
     type RegistryActionRequest,
     type RegistryItem,
     type RegistryItemAction,
+    type RegistryProjectArtifact,
     type RegistryResourceType,
     type RegistrySnapshot,
     type RegistryStatus,
@@ -28,6 +44,7 @@
     actionId,
     onRefresh,
     onAction,
+    onOpenProjectArtifact,
   }: {
     snapshot: RegistrySnapshot | undefined;
     loading: boolean;
@@ -35,21 +52,21 @@
     actionId: string | null;
     onRefresh: () => void;
     onAction: (request: RegistryActionRequest, actionId: string) => void;
+    onOpenProjectArtifact: (artifact: RegistryProjectArtifact) => void;
   } = $props();
 
   let filter = $state<RegistryFilter>("all");
-  let menuId = $state<string | null>(null);
-  const visibleItems = $derived((snapshot?.items ?? []).filter((item) => filter === "all" || item.type === filter));
+  let query = $state("");
+  let projectReviewOpen = $state(false);
+  const projectItems = $derived((snapshot?.items ?? []).filter((item) => item.type === "project"));
+  const projectPendingItems = $derived(projectItems.filter((item) => item.status !== "up-to-date"));
+  const projectConflictCount = $derived(projectItems.filter((item) => item.status === "diverged" || item.status === "registry-changed" || item.status === "untracked-local").length);
+  const visibleItems = $derived.by(() => {
+    const filtered = (snapshot?.items ?? [])
+      .filter((item) => filter === "all" || item.type === filter);
+    return searchRegistryItems(filtered, query);
+  });
   const busy = $derived(disabled || actionId !== null);
-
-  function statusTone(status: RegistryStatus): string {
-    if (status === "up-to-date") return "border-[var(--tool-success)]/35 bg-[var(--tool-success)]/10 text-[var(--tool-success)]";
-    if (status === "update-available" || status === "missing-local") return "border-[var(--tool-warning)]/35 bg-[var(--tool-warning)]/10 text-[var(--tool-warning)]";
-    if (status === "diverged" || status === "registry-changed") return "border-[var(--tool-error)]/35 bg-[var(--tool-error)]/10 text-[var(--tool-error)]";
-    if (status === "local-changes" || status === "local-only" || status === "untracked-local") return "border-[var(--tool-info)]/35 bg-[var(--tool-info)]/10 text-[var(--tool-info)]";
-    if (status === "removed-remote") return "border-[var(--tool-error)]/25 bg-[var(--tool-error)]/5 text-[var(--tool-error)]";
-    return "border-border bg-muted text-muted-foreground";
-  }
 
   function iconTone(status: RegistryStatus): string {
     if (status === "up-to-date") return "text-[var(--tool-success)]";
@@ -59,10 +76,33 @@
     return "text-muted-foreground";
   }
 
+  function actionTone(item: RegistryItem, action: RegistryItemAction): string {
+    if (action === "remove") {
+      return "text-[var(--tool-error)] hover:bg-[var(--tool-error)]/10 hover:text-[var(--tool-error)]";
+    }
+    if (action === "uninstall") {
+      return "text-[var(--tool-warning)] hover:bg-[var(--tool-warning)]/10 hover:text-[var(--tool-warning)]";
+    }
+    if (item.status === "untracked-local" && (action === "push" || action === "pull")) {
+      return "text-[var(--tool-warning)] hover:bg-[var(--tool-warning)]/10 hover:text-[var(--tool-warning)]";
+    }
+    return "text-muted-foreground hover:bg-accent hover:text-foreground";
+  }
+
   function typeLabel(type: RegistryResourceType): string {
     if (type === "skill") return "SKILL";
     if (type === "agent") return "AGENT";
     return "PROJECT";
+  }
+
+  function typeTone(type: RegistryResourceType): string {
+    if (type === "skill") {
+      return "border-cyan-500/20 bg-cyan-500/5 text-cyan-500";
+    }
+    if (type === "agent") {
+      return "border-violet-500/20 bg-violet-500/5 text-violet-500";
+    }
+    return "border-slate-400/25 bg-slate-400/5 text-slate-400";
   }
 
   function requestFor(item: RegistryItem, action: RegistryItemAction): RegistryActionRequest | undefined {
@@ -80,76 +120,116 @@
   function runItemAction(item: RegistryItem, action: RegistryItemAction): void {
     const request = requestFor(item, action);
     if (!request) return;
-    menuId = null;
     onAction(request, `${item.id}:${action}`);
   }
 
-  function runProjectAction(action: "push-project" | "pull-project"): void {
-    onAction({ action, scope: "project" }, `project:${action}`);
+  function statusTitle(item: RegistryItem): string {
+    return `${registryFriendlyStatusLabel(item)} — ${registryFriendlyStatusDescription(item)}`;
   }
 
-  function destructiveActions(item: RegistryItem): RegistryItemAction[] {
-    return item.actions.filter((action) => action === "uninstall" || action === "remove");
-  }
-
-  function statusHint(item: RegistryItem): string | undefined {
-    if (item.status === "diverged") return "Local and registry copies both changed. Resolve the conflict before syncing.";
-    if (item.status === "registry-changed") return "This local copy is tracked from a different registry, branch, or project key.";
-    return undefined;
+  function projectEditTitle(item: RegistryItem): string {
+    if (item.artifact === "todo") return "Open/edit TODO.md";
+    if (item.artifact === "plans") return "Choose plan to preview/edit";
+    return "Open project tasks";
   }
 </script>
 
 <section class="flex min-h-0 min-w-0 w-full flex-col overflow-hidden" aria-label="Resource registry">
   <div class="min-w-0 space-y-2 border-b border-sidebar-border p-2.5">
-    <div class="flex min-w-0 items-center gap-2">
-      <div class="grid h-7 w-7 shrink-0 place-items-center rounded-md border border-sidebar-border bg-background/60">
-        <Database class="h-3.5 w-3.5 text-primary" aria-hidden="true" />
-      </div>
-      <div class="min-w-0 flex-1">
-        <div class="text-[11px] font-semibold text-foreground">Resource registry</div>
-        {#if snapshot?.remote}
-          <div class="truncate font-mono text-[9px] text-muted-foreground" title={snapshot.remote}>{snapshot.remote}</div>
-        {:else}
-          <div class="text-[9px] text-muted-foreground">Private Git-backed resources</div>
-        {/if}
-      </div>
-      <button
-        class="grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
-        type="button"
-        title="Configure registry"
-        aria-label="Configure registry"
-        onclick={() => onAction({ action: "configure" }, "configure")}
-        disabled={busy}
-      ><Settings class="h-3.5 w-3.5" aria-hidden="true" /></button>
-      <button
-        class="grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
-        type="button"
-        title="Refresh registry"
-        aria-label="Refresh registry"
-        onclick={onRefresh}
-        disabled={busy}
-      ><RefreshCw class={["h-3.5 w-3.5", loading || actionId === "refresh" ? "animate-spin" : ""]} aria-hidden="true" /></button>
-    </div>
-
     {#if snapshot?.configured}
-      <div class="rounded-lg border border-sidebar-border bg-background/45 px-2.5 py-2 text-[9px] leading-3.5 text-muted-foreground">
-        <div class="flex gap-1.5"><span class="shrink-0">Branch</span><strong class="min-w-0 truncate font-mono font-medium text-foreground">{snapshot.branch}</strong></div>
-        <div class="mt-0.5 flex gap-1.5"><span class="shrink-0">Project</span><strong class="min-w-0 truncate font-mono font-medium text-foreground">{snapshot.projectKey ?? "unavailable"}</strong></div>
-      </div>
-      <div class="grid min-w-0 grid-cols-2 gap-1.5">
-        <button class="flex h-7 min-w-0 items-center justify-center gap-1.5 rounded-md border border-border bg-card px-1 text-[10px] font-medium hover:bg-accent disabled:opacity-40" type="button" disabled={busy || !snapshot.projectKey} onclick={() => runProjectAction("push-project")}><Upload class="h-3 w-3 shrink-0" aria-hidden="true" /><span class="truncate">Push project</span></button>
-        <button class="flex h-7 min-w-0 items-center justify-center gap-1.5 rounded-md border border-border bg-card px-1 text-[10px] font-medium hover:bg-accent disabled:opacity-40" type="button" disabled={busy || !snapshot.projectKey} onclick={() => runProjectAction("pull-project")}><Download class="h-3 w-3 shrink-0" aria-hidden="true" /><span class="truncate">Pull project</span></button>
+      <div class="rounded-lg border border-sidebar-border bg-background/45 p-1.5">
+        <button
+          class="flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
+          type="button"
+          disabled={busy || !snapshot.projectKey || projectItems.length === 0}
+          aria-expanded={projectReviewOpen}
+          onclick={() => projectReviewOpen = !projectReviewOpen}
+        >
+          <span class={["grid h-5 w-5 shrink-0 place-items-center rounded-full text-[10px] font-bold", projectConflictCount > 0 ? "bg-[var(--tool-error)]/10 text-[var(--tool-error)]" : projectPendingItems.length > 0 ? "bg-[var(--tool-warning)]/10 text-[var(--tool-warning)]" : "bg-[var(--tool-success)]/10 text-[var(--tool-success)]"]}>
+            {projectConflictCount > 0 ? "!" : projectPendingItems.length}
+          </span>
+          <span class="min-w-0 flex-1">
+            <span class="block truncate text-[10px] font-semibold text-foreground">{projectPendingItems.length === 0 ? "Project synced" : "Review project sync"}</span>
+            <span class="block truncate text-[9px] text-muted-foreground">{projectConflictCount > 0 ? `${projectConflictCount} ${projectConflictCount === 1 ? "item needs" : "items need"} review` : projectPendingItems.length > 0 ? `${projectPendingItems.length} ${projectPendingItems.length === 1 ? "change" : "changes"} to sync` : "Tasks, plans and TODO are up to date"}</span>
+          </span>
+          <ChevronDown class={["h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform", projectReviewOpen ? "rotate-180" : ""]} aria-hidden="true" />
+        </button>
+
+        {#if projectReviewOpen}
+          <div class="mt-1 space-y-0.5 border-t border-sidebar-border pt-1.5">
+            {#each projectItems as item (item.id)}
+              {@const projectPrimary = registryPrimaryAction(item)}
+              <div class="flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5">
+                <span class={["grid h-5 w-5 shrink-0 place-items-center", iconTone(item.status)]} title={statusTitle(item)} aria-label={statusTitle(item)} role="img">
+                  {#if item.status === "up-to-date"}<CheckCircle2 class="h-3.5 w-3.5" aria-hidden="true" />
+                  {:else if item.status === "update-available" || item.status === "missing-local" || item.status === "not-installed"}<CircleArrowDown class="h-3.5 w-3.5" aria-hidden="true" />
+                  {:else if item.status === "local-changes" || item.status === "local-only"}<CircleArrowUp class="h-3.5 w-3.5" aria-hidden="true" />
+                  {:else if item.status === "diverged"}<TriangleAlert class="h-3.5 w-3.5" aria-hidden="true" />
+                  {:else if item.status === "untracked-local"}<GitCompareArrows class="h-3.5 w-3.5" aria-hidden="true" />
+                  {:else if item.status === "removed-remote"}<CloudOff class="h-3.5 w-3.5" aria-hidden="true" />
+                  {:else if item.status === "registry-changed"}<Link2Off class="h-3.5 w-3.5" aria-hidden="true" />
+                  {:else}<CircleX class="h-3.5 w-3.5" aria-hidden="true" />{/if}
+                </span>
+                <span class="min-w-0 flex-1">
+                  <span class="block truncate text-[10px] font-medium text-foreground">{item.name}</span>
+                  <span class="block truncate text-[9px] text-muted-foreground">{registryFriendlyStatusLabel(item)}</span>
+                </span>
+                {#if projectPrimary}
+                  <button
+                    class={[
+                      "grid h-6 w-6 shrink-0 place-items-center rounded-md transition-colors disabled:opacity-40",
+                      actionTone(item, projectPrimary),
+                    ]}
+                    type="button"
+                    disabled={busy}
+                    title={registryFriendlyActionLabel(item, projectPrimary)}
+                    aria-label={registryFriendlyActionLabel(item, projectPrimary)}
+                    onclick={() => runItemAction(item, projectPrimary)}
+                  >
+                    {#if projectPrimary === "pull" || projectPrimary === "update"}
+                      <Download class="h-3.5 w-3.5" aria-hidden="true" />
+                    {:else}
+                      <Upload class="h-3.5 w-3.5" aria-hidden="true" />
+                    {/if}
+                  </button>
+                {:else if item.status !== "up-to-date"}
+                  <span class="shrink-0 text-[9px] font-medium text-[var(--tool-warning)]">Review</span>
+                {/if}
+              </div>
+            {/each}
+          </div>
+        {/if}
       </div>
     {/if}
 
-    <div class="grid min-w-0 grid-cols-4 gap-1" aria-label="Registry filter">
-      {#each [["all", "All"], ["skill", "Skills"], ["agent", "Agents"], ["project", "Project"]] as option}
-        <button
-          class={["h-6 rounded-md px-1 text-[9px] font-medium focus-visible:outline-2 focus-visible:outline-ring", filter === option[0] ? "bg-sidebar-accent text-foreground" : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground"]}
-          type="button"
-          onclick={() => filter = option[0] as RegistryFilter}
-        >{option[1]}</button>
-      {/each}
+    <div class="grid min-w-0 grid-cols-2 gap-1.5">
+      <div class="relative min-w-0">
+        <label class="sr-only" for="registry-search">Search registry resources</label>
+        <Search class="pointer-events-none absolute top-1/2 left-2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+        <input
+          id="registry-search"
+          class="h-7 w-full min-w-0 rounded-md border border-input bg-background py-0 pr-2 pl-7 text-[10px] text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/30"
+          type="search"
+          placeholder="Search names…"
+          bind:value={query}
+          autocomplete="off"
+          spellcheck="false"
+        />
+      </div>
+      <div class="relative min-w-0">
+        <label class="sr-only" for="registry-filter">Registry filter</label>
+        <select
+          id="registry-filter"
+          class="h-7 w-full appearance-none rounded-md border border-input bg-background py-0 pr-7 pl-2.5 text-[10px] font-medium text-foreground shadow-none hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+          bind:value={filter}
+        >
+          <option value="all">All resources</option>
+          <option value="skill">Skills</option>
+          <option value="agent">Agents</option>
+          <option value="project">Project</option>
+        </select>
+        <ChevronDown class="pointer-events-none absolute top-1/2 right-2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+      </div>
     </div>
   </div>
 
@@ -180,58 +260,80 @@
       {:else}
         <div class="min-w-0 space-y-1.5">
           {#each visibleItems as item (item.id)}
-            {@const primary = registryPrimaryAction(item)}
-            {@const destructive = destructiveActions(item)}
-            {@const hint = statusHint(item)}
-            {@const itemBusy = actionId?.startsWith(`${item.id}:`) === true}
-            <article class="relative min-w-0 rounded-lg border border-sidebar-border bg-background/55 p-2.5 shadow-xs">
+            <article class="relative min-w-0 rounded-lg border border-sidebar-border bg-background/55 p-2 shadow-xs">
               <div class="flex min-w-0 items-start gap-2">
-                <span class={["mt-0.5 w-3 shrink-0 text-center font-mono text-xs font-bold", iconTone(item.status)]} aria-hidden="true">{item.icon}</span>
+                <span
+                  class={["mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-md bg-muted/50", iconTone(item.status)]}
+                  title={statusTitle(item)}
+                  aria-label={statusTitle(item)}
+                  role="img"
+                >
+                  {#if item.status === "up-to-date"}<CheckCircle2 class="h-4 w-4" aria-hidden="true" />
+                  {:else if item.status === "update-available" || item.status === "missing-local" || item.status === "not-installed"}<CircleArrowDown class="h-4 w-4" aria-hidden="true" />
+                  {:else if item.status === "local-changes" || item.status === "local-only"}<CircleArrowUp class="h-4 w-4" aria-hidden="true" />
+                  {:else if item.status === "diverged"}<TriangleAlert class="h-4 w-4" aria-hidden="true" />
+                  {:else if item.status === "untracked-local"}<GitCompareArrows class="h-4 w-4" aria-hidden="true" />
+                  {:else if item.status === "removed-remote"}<CloudOff class="h-4 w-4" aria-hidden="true" />
+                  {:else if item.status === "registry-changed"}<Link2Off class="h-4 w-4" aria-hidden="true" />
+                  {:else}<CircleX class="h-4 w-4" aria-hidden="true" />{/if}
+                </span>
                 <div class="min-w-0 flex-1">
-                  <div class="flex min-w-0 flex-wrap items-center gap-1.5">
+                  <div class="flex min-w-0 items-center gap-1.5">
                     <strong class="min-w-0 max-w-full truncate text-[11px] font-medium text-foreground" title={item.name}>{item.name}</strong>
-                    <span class="whitespace-nowrap rounded border border-border bg-muted px-1 py-px font-mono text-[8px] font-semibold tracking-wide text-muted-foreground">{typeLabel(item.type)}</span>
-                    <span class={["whitespace-nowrap rounded border px-1 py-px text-[8px] font-bold tracking-wide", statusTone(item.status)]}>{item.statusLabel}</span>
+                    <span class={[
+                      "whitespace-nowrap rounded border px-1 py-px font-mono text-[8px] font-semibold tracking-wide",
+                      typeTone(item.type),
+                    ]}>{typeLabel(item.type)}</span>
                   </div>
-                  {#if item.description}<p class="mt-1 line-clamp-2 text-[9px] leading-3.5 text-muted-foreground">{item.description}</p>{/if}
-                  {#if hint}<p class="mt-1 text-[9px] leading-3.5 text-[var(--tool-warning)]">{hint}</p>{/if}
+                  <p class={["mt-0.5 text-[9px] font-semibold leading-3.5", iconTone(item.status)]} title={statusTitle(item)}>{registryFriendlyStatusLabel(item)}</p>
+                  {#if item.description}<p class="line-clamp-1 text-[9px] leading-3.5 text-muted-foreground/80" title={item.description}>{item.description}</p>{/if}
                 </div>
-                <div class="flex shrink-0 items-center gap-0.5">
-                  {#if primary}
-                    <button
-                      class="h-6 rounded-md border border-border bg-card px-2 text-[9px] font-medium text-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
-                      type="button"
-                      disabled={busy}
-                      onclick={() => runItemAction(item, primary)}
-                    >
-                      {#if itemBusy}<RefreshCw class="mr-1 inline h-2.5 w-2.5 animate-spin" aria-hidden="true" />{/if}{registryActionLabel(primary)}
-                    </button>
-                  {/if}
-                  {#if destructive.length > 0}
-                    <button
-                      class="grid h-6 w-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
-                      type="button"
-                      aria-label={`More actions for ${item.name}`}
-                      title="More actions"
-                      disabled={busy}
-                      onclick={() => menuId = menuId === item.id ? null : item.id}
-                    ><MoreHorizontal class="h-3.5 w-3.5" aria-hidden="true" /></button>
-                  {/if}
-                </div>
+                {#if item.actions.length > 0 || (item.type === "project" && item.local && item.artifact)}
+                  <div class="flex shrink-0 items-center gap-0.5">
+                    {#if item.type === "project" && item.local && item.artifact}
+                      <button
+                        class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
+                        type="button"
+                        disabled={busy}
+                        title={projectEditTitle(item)}
+                        aria-label={`${projectEditTitle(item)}: ${item.name}`}
+                        onclick={() => item.artifact && onOpenProjectArtifact(item.artifact)}
+                      >
+                        <Pencil class="h-3.5 w-3.5" aria-hidden="true" />
+                      </button>
+                    {/if}
+                    {#each item.actions as action}
+                      {@const actionBusy = actionId === `${item.id}:${action}`}
+                      {@const actionLabel = registryFriendlyActionLabel(item, action)}
+                      <button
+                        class={[
+                          "grid h-7 w-7 place-items-center rounded-md transition-colors focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40",
+                          actionTone(item, action),
+                        ]}
+                        type="button"
+                        disabled={busy}
+                        title={actionLabel}
+                        aria-label={`${actionLabel}: ${item.name}`}
+                        onclick={() => runItemAction(item, action)}
+                      >
+                        {#if actionBusy}
+                          <RefreshCw class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                        {:else if action === "install"}
+                          <PackagePlus class="h-3.5 w-3.5" aria-hidden="true" />
+                        {:else if action === "pull" || action === "update"}
+                          <Download class="h-3.5 w-3.5" aria-hidden="true" />
+                        {:else if action === "push"}
+                          <Upload class="h-3.5 w-3.5" aria-hidden="true" />
+                        {:else if action === "uninstall"}
+                          <PackageMinus class="h-3.5 w-3.5" aria-hidden="true" />
+                        {:else}
+                          <Trash2 class="h-3.5 w-3.5" aria-hidden="true" />
+                        {/if}
+                      </button>
+                    {/each}
+                  </div>
+                {/if}
               </div>
-
-              {#if menuId === item.id && destructive.length > 0}
-                <div class="absolute top-9 right-2 z-20 min-w-36 overflow-hidden rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-md">
-                  {#each destructive as action}
-                    <button
-                      class="flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-[10px] hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
-                      class:text-[var(--tool-error)]={action === "remove"}
-                      type="button"
-                      onclick={() => runItemAction(item, action)}
-                    ><Trash2 class="h-3 w-3" aria-hidden="true" />{registryActionLabel(action)}</button>
-                  {/each}
-                </div>
-              {/if}
             </article>
           {/each}
         </div>

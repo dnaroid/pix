@@ -5,7 +5,7 @@ use serde::{
     Deserialize, Serialize,
 };
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     env, fmt, fs,
     io::{BufRead, BufReader, Read, Write},
     path::{Component, Path, PathBuf},
@@ -30,6 +30,7 @@ const MAX_ATTACHMENT_COUNT: usize = 10;
 const MAX_ATTACHMENT_BYTES: u64 = 25 * 1024 * 1024;
 const MAX_ATTACHMENT_CACHE_BYTES: u64 = 250 * 1024 * 1024;
 const MAX_PROJECT_FILE_PREVIEW_BYTES: u64 = 2 * 1024 * 1024;
+const MAX_PROJECT_MARKDOWN_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_TASK_DOCUMENT_BYTES: u64 = 1024 * 1024;
 const PROJECT_TASKS_SCHEMA_URL: &str = "https://unpkg.com/pi-ui-extend/schemas/tasks.json";
 const ATTACHMENT_CACHE_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
@@ -39,13 +40,13 @@ type ExitSignal = Arc<(Mutex<bool>, Condvar)>;
 
 #[derive(Default)]
 struct AcpProcessState {
-    slot: Mutex<ProcessSlot>,
+    slots: Mutex<HashMap<String, ProcessSlot>>,
+    next_generation: AtomicU64,
     exiting: AtomicBool,
 }
 
 #[derive(Default)]
 struct ProcessSlot {
-    next_generation: u64,
     running: Option<RunningProcess>,
 }
 
@@ -76,6 +77,7 @@ enum StdinCommand {
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ExitPayload {
+    window_label: String,
     generation: u64,
     code: Option<i32>,
     success: bool,
@@ -86,6 +88,7 @@ struct ExitPayload {
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct LinesPayload {
+    window_label: String,
     generation: u64,
     lines: Vec<String>,
 }
@@ -113,6 +116,13 @@ struct AttachmentFile {
 struct ProjectFilePreview {
     path: String,
     content: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectDocumentsSnapshot {
+    plans: Vec<String>,
+    todo_exists: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -507,6 +517,23 @@ async fn read_project_file(workspace: String, path: String) -> Result<ProjectFil
 }
 
 #[tauri::command]
+async fn list_project_documents(workspace: String) -> Result<ProjectDocumentsSnapshot, String> {
+    run_blocking(move || list_project_documents_from(Path::new(&workspace))).await
+}
+
+#[tauri::command]
+async fn write_project_markdown(
+    workspace: String,
+    path: String,
+    content: String,
+) -> Result<ProjectFilePreview, String> {
+    run_blocking(move || {
+        write_project_markdown_from(Path::new(&workspace), Path::new(&path), &content)
+    })
+    .await
+}
+
+#[tauri::command]
 async fn read_home_file(app: AppHandle, path: String) -> Result<ProjectFilePreview, String> {
     run_blocking(move || {
         let home = app
@@ -611,6 +638,191 @@ fn resolve_local_file_path(path: &Path) -> Result<PathBuf, String> {
         return Err(format!("{} is not a file", canonical.display()));
     }
     Ok(canonical)
+}
+
+fn list_project_documents_from(workspace: &Path) -> Result<ProjectDocumentsSnapshot, String> {
+    let root = canonical_workspace(workspace)?;
+    let project_dir = root.join(".pi");
+    if !project_dir.exists() {
+        return Ok(ProjectDocumentsSnapshot {
+            plans: Vec::new(),
+            todo_exists: false,
+        });
+    }
+    let project_dir = canonical_project_directory(&root, &project_dir)?;
+
+    let todo_path = project_dir.join("TODO.md");
+    let todo_exists = if todo_path.exists() {
+        let canonical = fs::canonicalize(&todo_path)
+            .map_err(|error| format!("failed to resolve {}: {error}", todo_path.display()))?;
+        if !canonical.starts_with(&project_dir) {
+            return Err(".pi/TODO.md resolves outside the workspace".to_owned());
+        }
+        fs::metadata(&canonical)
+            .map_err(|error| format!("failed to inspect {}: {error}", canonical.display()))?
+            .is_file()
+    } else {
+        false
+    };
+
+    let plans_dir = project_dir.join("plans");
+    let mut plans = Vec::new();
+    if plans_dir.exists() {
+        let canonical_plans = fs::canonicalize(&plans_dir)
+            .map_err(|error| format!("failed to resolve {}: {error}", plans_dir.display()))?;
+        if !canonical_plans.starts_with(&project_dir) || !canonical_plans.is_dir() {
+            return Err(".pi/plans must be a directory inside the workspace".to_owned());
+        }
+        collect_project_plan_files(&root, &canonical_plans, &mut plans)?;
+        plans.sort();
+    }
+
+    Ok(ProjectDocumentsSnapshot { plans, todo_exists })
+}
+
+fn collect_project_plan_files(
+    root: &Path,
+    directory: &Path,
+    output: &mut Vec<String>,
+) -> Result<(), String> {
+    if output.len() >= 500 {
+        return Err(".pi/plans contains too many Markdown files (maximum 500)".to_owned());
+    }
+    let mut entries = fs::read_dir(directory)
+        .map_err(|error| format!("failed to read {}: {error}", directory.display()))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("failed to inspect {}: {error}", directory.display()))?;
+    entries.sort_by_key(|entry| entry.file_name());
+    for entry in entries {
+        let file_type = entry
+            .file_type()
+            .map_err(|error| format!("failed to inspect {}: {error}", entry.path().display()))?;
+        if file_type.is_symlink() {
+            return Err(format!(
+                "plan paths cannot contain symbolic links: {}",
+                entry.path().display()
+            ));
+        }
+        if file_type.is_dir() {
+            collect_project_plan_files(root, &entry.path(), output)?;
+            continue;
+        }
+        if !file_type.is_file()
+            || !entry
+                .path()
+                .extension()
+                .and_then(|value| value.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
+        {
+            continue;
+        }
+        let relative = entry
+            .path()
+            .strip_prefix(root)
+            .map_err(|_| "plan path resolves outside the workspace".to_owned())?
+            .to_string_lossy()
+            .replace('\\', "/");
+        output.push(relative);
+        if output.len() >= 500 {
+            return Err(".pi/plans contains too many Markdown files (maximum 500)".to_owned());
+        }
+    }
+    Ok(())
+}
+
+fn write_project_markdown_from(
+    workspace: &Path,
+    relative_path: &Path,
+    content: &str,
+) -> Result<ProjectFilePreview, String> {
+    if content.len() as u64 > MAX_PROJECT_MARKDOWN_BYTES {
+        return Err("project Markdown is too large to save (maximum 2 MB)".to_owned());
+    }
+    if relative_path.as_os_str().is_empty()
+        || relative_path.is_absolute()
+        || relative_path.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+    {
+        return Err("editable project Markdown path must stay inside the workspace".to_owned());
+    }
+    let normalized = relative_path.to_string_lossy().replace('\\', "/");
+    let editable = normalized == ".pi/TODO.md"
+        || (normalized.starts_with(".pi/plans/")
+            && normalized.to_ascii_lowercase().ends_with(".md"));
+    if !editable {
+        return Err("only .pi/TODO.md and Markdown files under .pi/plans/ can be edited".to_owned());
+    }
+
+    let root = canonical_workspace(workspace)?;
+    let project_dir_path = root.join(".pi");
+    if !project_dir_path.exists() {
+        fs::create_dir(&project_dir_path)
+            .map_err(|error| format!("failed to create {}: {error}", project_dir_path.display()))?;
+    }
+    let project_dir = canonical_project_directory(&root, &project_dir_path)?;
+
+    let target = if normalized == ".pi/TODO.md" {
+        project_dir.join("TODO.md")
+    } else {
+        let plans_dir_path = project_dir.join("plans");
+        if !plans_dir_path.exists() {
+            fs::create_dir(&plans_dir_path)
+                .map_err(|error| format!("failed to create {}: {error}", plans_dir_path.display()))?;
+        }
+        let plans_dir = fs::canonicalize(&plans_dir_path)
+            .map_err(|error| format!("failed to resolve {}: {error}", plans_dir_path.display()))?;
+        if !plans_dir.starts_with(&project_dir) || !plans_dir.is_dir() {
+            return Err(".pi/plans must stay inside the workspace".to_owned());
+        }
+        let plan_relative = Path::new(&normalized)
+            .strip_prefix(Path::new(".pi/plans"))
+            .map_err(|_| "invalid plan path".to_owned())?;
+        let target = plans_dir.join(plan_relative);
+        let parent = target
+            .parent()
+            .ok_or_else(|| "plan path has no parent directory".to_owned())?;
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
+        let canonical_parent = fs::canonicalize(parent)
+            .map_err(|error| format!("failed to resolve {}: {error}", parent.display()))?;
+        if !canonical_parent.starts_with(&plans_dir) {
+            return Err("plan path resolves outside .pi/plans".to_owned());
+        }
+        canonical_parent.join(
+            target
+                .file_name()
+                .ok_or_else(|| "plan path has no file name".to_owned())?,
+        )
+    };
+
+    if target.exists() {
+        if fs::symlink_metadata(&target)
+            .map_err(|error| format!("failed to inspect {}: {error}", target.display()))?
+            .file_type()
+            .is_symlink()
+        {
+            return Err(format!("{} cannot be a symbolic link", normalized));
+        }
+        let canonical = fs::canonicalize(&target)
+            .map_err(|error| format!("failed to resolve {}: {error}", target.display()))?;
+        if !canonical.starts_with(&project_dir) {
+            return Err("project Markdown resolves outside the workspace".to_owned());
+        }
+        if !fs::metadata(&canonical)
+            .map_err(|error| format!("failed to inspect {}: {error}", canonical.display()))?
+            .is_file()
+        {
+            return Err(format!("{} is not a file", normalized));
+        }
+    }
+
+    fs::write(&target, content.as_bytes())
+        .map_err(|error| format!("failed to save {normalized}: {error}"))?;
+    read_project_file_from(&root, relative_path, MAX_PROJECT_MARKDOWN_BYTES)
 }
 
 fn read_project_file_from(
@@ -1228,16 +1440,17 @@ fn safe_file_name(name: &str) -> String {
 }
 
 #[tauri::command]
-async fn acp_start(app: AppHandle) -> Result<u64, String> {
-    run_blocking(move || start_process(app)).await
+async fn acp_start(app: AppHandle, window_label: String) -> Result<u64, String> {
+    run_blocking(move || start_process(app, window_label)).await
 }
 
-fn start_process(app: AppHandle) -> Result<u64, String> {
+fn start_process(app: AppHandle, window_label: String) -> Result<u64, String> {
     let state = app.state::<AcpProcessState>();
-    let mut slot = state
-        .slot
+    let mut slots = state
+        .slots
         .lock()
         .map_err(|_| "ACP process state is poisoned".to_owned())?;
+    let slot = slots.entry(window_label.clone()).or_default();
     if let Some(running) = &slot.running {
         return Ok(running.generation);
     }
@@ -1286,8 +1499,10 @@ fn start_process(app: AppHandle) -> Result<u64, String> {
     let (stdin_tx, stdin_rx) = mpsc::channel();
     forward_stdin(stdin, stdin_rx);
 
-    slot.next_generation = slot.next_generation.wrapping_add(1);
-    let generation = slot.next_generation;
+    let generation = state
+        .next_generation
+        .fetch_add(1, Ordering::AcqRel)
+        .wrapping_add(1);
     let (stop_tx, stop_rx) = mpsc::channel();
     let exited = Arc::new((Mutex::new(false), Condvar::new()));
     slot.running = Some(RunningProcess {
@@ -1296,25 +1511,47 @@ fn start_process(app: AppHandle) -> Result<u64, String> {
         stop_tx,
         exited: exited.clone(),
     });
-    drop(slot);
+    drop(slots);
 
-    forward_lines(stdout, app.clone(), "acp://stdout", generation);
-    forward_lines(stderr, app.clone(), "acp://stderr", generation);
-    thread::spawn(move || supervise_child(child, stop_rx, app, generation, exited));
+    forward_lines(
+        stdout,
+        app.clone(),
+        window_label.clone(),
+        "acp://stdout",
+        generation,
+    );
+    forward_lines(
+        stderr,
+        app.clone(),
+        window_label.clone(),
+        "acp://stderr",
+        generation,
+    );
+    thread::spawn(move || {
+        supervise_child(child, stop_rx, app, window_label, generation, exited)
+    });
     Ok(generation)
 }
 
 #[tauri::command]
-async fn acp_send(app: AppHandle, generation: u64, line: String) -> Result<(), String> {
+async fn acp_send(
+    app: AppHandle,
+    window_label: String,
+    generation: u64,
+    line: String,
+) -> Result<(), String> {
     if line.contains('\r') || line.contains('\n') {
         return Err("ACP payload must be one newline-free JSON object".to_owned());
     }
     let stdin_tx = {
         let state = app.state::<AcpProcessState>();
-        let slot = state
-            .slot
+        let slots = state
+            .slots
             .lock()
             .map_err(|_| "ACP process state is poisoned".to_owned())?;
+        let slot = slots
+            .get(&window_label)
+            .ok_or_else(|| format!("pix-acp is not running for window {window_label}"))?;
         let running = slot
             .running
             .as_ref()
@@ -1369,20 +1606,27 @@ fn validate_json_object(line: &str) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn acp_stop(app: AppHandle, generation: u64) -> Result<(), String> {
+async fn acp_stop(app: AppHandle, window_label: String, generation: u64) -> Result<(), String> {
     run_blocking(move || {
         let state = app.state::<AcpProcessState>();
-        stop_process(&state, Some(generation))
+        stop_process(&state, &window_label, Some(generation))
     })
     .await
 }
 
-fn stop_process(state: &AcpProcessState, expected_generation: Option<u64>) -> Result<(), String> {
+fn stop_process(
+    state: &AcpProcessState,
+    window_label: &str,
+    expected_generation: Option<u64>,
+) -> Result<(), String> {
     let process = {
-        let mut slot = state
-            .slot
+        let mut slots = state
+            .slots
             .lock()
             .map_err(|_| "ACP process state is poisoned".to_owned())?;
+        let Some(slot) = slots.get_mut(window_label) else {
+            return Ok(());
+        };
         slot.running.as_mut().and_then(|running| {
             if expected_generation.is_some_and(|expected| expected != running.generation) {
                 return None;
@@ -1441,12 +1685,19 @@ fn forward_stdin(mut stdin: ChildStdin, receiver: mpsc::Receiver<StdinCommand>) 
     });
 }
 
-fn forward_lines<R>(reader: R, app: AppHandle, event: &'static str, generation: u64)
+fn forward_lines<R>(
+    reader: R,
+    app: AppHandle,
+    window_label: String,
+    event: &'static str,
+    generation: u64,
+)
 where
     R: Read + Send + 'static,
 {
     let (line_tx, line_rx) = mpsc::channel();
     let error_app = app.clone();
+    let error_window_label = window_label.clone();
     thread::spawn(move || {
         for line in BufReader::new(reader).lines() {
             match line {
@@ -1456,9 +1707,11 @@ where
                     }
                 }
                 Err(error) => {
-                    let _ = error_app.emit(
+                    let _ = error_app.emit_to(
+                        &error_window_label,
                         "acp://stderr",
                         LinesPayload {
+                            window_label: error_window_label.clone(),
                             generation,
                             lines: vec![format!("failed to read {event}: {error}")],
                         },
@@ -1468,12 +1721,15 @@ where
             }
         }
     });
-    thread::spawn(move || batch_forwarded_lines(line_rx, app, event, generation));
+    thread::spawn(move || {
+        batch_forwarded_lines(line_rx, app, window_label, event, generation)
+    });
 }
 
 fn batch_forwarded_lines(
     receiver: mpsc::Receiver<String>,
     app: AppHandle,
+    window_label: String,
     event: &'static str,
     generation: u64,
 ) {
@@ -1496,7 +1752,15 @@ fn batch_forwarded_lines(
                 }
             }
         }
-        let _ = app.emit(event, LinesPayload { generation, lines });
+        let _ = app.emit_to(
+            &window_label,
+            event,
+            LinesPayload {
+                window_label: window_label.clone(),
+                generation,
+                lines,
+            },
+        );
         if disconnected {
             break;
         }
@@ -1507,6 +1771,7 @@ fn supervise_child(
     mut child: Child,
     stop_rx: mpsc::Receiver<()>,
     app: AppHandle,
+    window_label: String,
     generation: u64,
     exited: ExitSignal,
 ) {
@@ -1534,9 +1799,9 @@ fn supervise_child(
         }
     };
 
-    clear_generation(&app, generation);
-    let payload = exit_payload(generation, status, requested, error);
-    let _ = app.emit("acp://exit", payload);
+    clear_generation(&app, &window_label, generation);
+    let payload = exit_payload(window_label.clone(), generation, status, requested, error);
+    let _ = app.emit_to(&window_label, "acp://exit", payload);
     let (lock, wake) = &*exited;
     if let Ok(mut exited) = lock.lock() {
         *exited = true;
@@ -1544,22 +1809,32 @@ fn supervise_child(
     }
 }
 
-fn clear_generation(app: &AppHandle, generation: u64) {
+fn clear_generation(app: &AppHandle, window_label: &str, generation: u64) {
     let state = app.state::<AcpProcessState>();
-    if let Ok(mut slot) = state.slot.lock() {
-        if slot.running.as_ref().map(|process| process.generation) == Some(generation) {
-            slot.running = None;
+    if let Ok(mut slots) = state.slots.lock() {
+        if let Some(slot) = slots.get_mut(window_label) {
+            if slot.running.as_ref().map(|process| process.generation) == Some(generation) {
+                slot.running = None;
+            }
         }
     };
 }
 
+fn remove_process_slot(state: &AcpProcessState, window_label: &str) {
+    if let Ok(mut slots) = state.slots.lock() {
+        slots.remove(window_label);
+    }
+}
+
 fn exit_payload(
+    window_label: String,
     generation: u64,
     status: Option<ExitStatus>,
     requested: bool,
     error: Option<String>,
 ) -> ExitPayload {
     ExitPayload {
+        window_label,
         generation,
         code: status.as_ref().and_then(ExitStatus::code),
         success: status.as_ref().is_some_and(ExitStatus::success),
@@ -1594,6 +1869,8 @@ pub fn run() {
             open_attachment,
             open_local_file,
             read_project_file,
+            list_project_documents,
+            write_project_markdown,
             read_home_file,
             resolve_project_media,
             resolve_home_media,
@@ -1604,6 +1881,22 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("failed to build Pix Desktop");
     app.run(|handle, event| {
+        if let tauri::RunEvent::WindowEvent {
+            label,
+            event: tauri::WindowEvent::Destroyed,
+            ..
+        } = &event
+        {
+            let handle = handle.clone();
+            let window_label = label.clone();
+            thread::spawn(move || {
+                let state = handle.state::<AcpProcessState>();
+                if let Err(error) = stop_process(&state, &window_label, None) {
+                    eprintln!("failed to stop pix-acp for closed window {window_label}: {error}");
+                }
+                remove_process_slot(&state, &window_label);
+            });
+        }
         if let tauri::RunEvent::ExitRequested { code, api, .. } = event {
             let state = handle.state::<AcpProcessState>();
             if !state.exiting.swap(true, Ordering::AcqRel) {
@@ -1611,8 +1904,17 @@ pub fn run() {
                 let handle = handle.clone();
                 thread::spawn(move || {
                     let state = handle.state::<AcpProcessState>();
-                    if let Err(error) = stop_process(&state, None) {
-                        eprintln!("failed to stop pix-acp during exit: {error}");
+                    let window_labels = state
+                        .slots
+                        .lock()
+                        .map(|slots| slots.keys().cloned().collect::<Vec<_>>())
+                        .unwrap_or_default();
+                    for window_label in window_labels {
+                        if let Err(error) = stop_process(&state, &window_label, None) {
+                            eprintln!(
+                                "failed to stop pix-acp for window {window_label} during exit: {error}"
+                            );
+                        }
                     }
                     handle.exit(code.unwrap_or(0));
                 });
@@ -1633,6 +1935,29 @@ mod tests {
         assert!(validate_json_object("[]").is_err());
         assert!(validate_json_object("null").is_err());
         assert!(validate_json_object(r#"{"jsonrpc":"2.0"} trailing"#).is_err());
+    }
+
+    #[test]
+    fn acp_event_payloads_include_the_owning_window_label() {
+        let lines = serde_json::to_value(LinesPayload {
+            window_label: "project-one".to_owned(),
+            generation: 7,
+            lines: vec!["message".to_owned()],
+        })
+        .expect("serialize lines payload");
+        let exit = serde_json::to_value(exit_payload(
+            "project-two".to_owned(),
+            8,
+            None,
+            true,
+            None,
+        ))
+        .expect("serialize exit payload");
+
+        assert_eq!(lines["windowLabel"], "project-one");
+        assert_eq!(lines["generation"], 7);
+        assert_eq!(exit["windowLabel"], "project-two");
+        assert_eq!(exit["generation"], 8);
     }
 
     fn temporary_workspace(name: &str) -> PathBuf {
@@ -1657,6 +1982,48 @@ mod tests {
 
         assert_eq!(preview.path, "src/main.ts");
         assert_eq!(preview.content, "const ready = true;\n");
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
+    fn lists_and_edits_project_markdown_documents() {
+        let workspace = temporary_workspace("project-documents");
+        fs::create_dir_all(workspace.join(".pi/plans/releases")).expect("create plans directory");
+        fs::write(workspace.join(".pi/plans/alpha.md"), "# Alpha\n").expect("write plan");
+        fs::write(workspace.join(".pi/plans/releases/v2.md"), "# V2\n").expect("write nested plan");
+        fs::write(workspace.join(".pi/plans/notes.txt"), "ignore\n").expect("write non-markdown plan");
+
+        let before = list_project_documents_from(&workspace).expect("list project documents");
+        assert_eq!(
+            before.plans,
+            vec![
+                ".pi/plans/alpha.md".to_owned(),
+                ".pi/plans/releases/v2.md".to_owned(),
+            ]
+        );
+        assert!(!before.todo_exists);
+
+        let todo = write_project_markdown_from(
+            &workspace,
+            Path::new(".pi/TODO.md"),
+            "# TODO\n- [ ] Ship\n",
+        )
+        .expect("write TODO");
+        assert_eq!(todo.path, ".pi/TODO.md");
+        assert!(todo.content.contains("Ship"));
+
+        let plan = write_project_markdown_from(
+            &workspace,
+            Path::new(".pi/plans/releases/v2.md"),
+            "# V2\nUpdated\n",
+        )
+        .expect("update plan");
+        assert!(plan.content.contains("Updated"));
+
+        let after = list_project_documents_from(&workspace).expect("list project documents again");
+        assert!(after.todo_exists);
+        assert!(write_project_markdown_from(&workspace, Path::new("README.md"), "nope").is_err());
+        assert!(write_project_markdown_from(&workspace, Path::new(".pi/plans/../secret.md"), "nope").is_err());
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
     }
 

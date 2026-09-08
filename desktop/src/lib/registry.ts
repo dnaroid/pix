@@ -1,4 +1,5 @@
 import type { SessionStateNotification } from "./session-state";
+import { fuzzySearch } from "./fuzzy";
 
 export const REGISTRY_STATE_CHANNEL = "pi-tools-suite:resource-registry:state";
 
@@ -101,6 +102,95 @@ export function registryActionLabel(action: RegistryItemAction): string {
     case "pull": return "Pull";
     case "uninstall": return "Uninstall local";
     case "remove": return "Remove from registry";
+  }
+}
+
+export function registryFriendlyStatusLabel(item: RegistryItem): string {
+  switch (item.status) {
+    case "up-to-date": return "Synced";
+    case "update-available": return "Update available";
+    case "local-changes": return "Local changes";
+    case "diverged": return "Conflict";
+    case "not-installed": return item.type === "project" ? "Remote only" : "Available";
+    case "local-only": return "Local only";
+    case "untracked-local": return "Needs review";
+    case "missing-local": return "Missing locally";
+    case "removed-remote": return "Not in registry";
+    case "registry-changed": return "Different registry";
+  }
+}
+
+export function registryFriendlyStatusDescription(item: RegistryItem): string {
+  switch (item.status) {
+    case "up-to-date": return "Installed here and matches the registry.";
+    case "update-available": return "Installed here; a newer registry version is available.";
+    case "local-changes": return "Installed here; local changes are not in the registry yet.";
+    case "diverged": return "Local and registry copies both changed.";
+    case "not-installed": return item.type === "project"
+      ? "Exists in the registry, but not in this project."
+      : "Available in the registry, but not installed in this project.";
+    case "local-only": return "Only in this project; it has not been added to the registry.";
+    case "untracked-local": return "Exists both here and in the registry, but the copies are not linked.";
+    case "missing-local": return "Tracked for this project, but the local copy is missing.";
+    case "removed-remote": return "Installed here, but its registry copy was removed.";
+    case "registry-changed": return "This local copy is linked to a different registry or project key.";
+  }
+}
+
+export function registryFriendlyActionLabel(item: RegistryItem, action: RegistryItemAction): string {
+  if (item.status === "untracked-local" && action === "push") return "Keep local version";
+  if (item.status === "untracked-local" && action === "pull") return "Keep registry version";
+  if (item.status === "removed-remote" && action === "push") return "Restore in registry";
+  if (item.status === "local-only" && action === "push") return "Add to registry";
+  if (item.status === "local-changes" && action === "push") return "Sync to registry";
+  if (action === "install") return "Install here";
+  if (action === "update" || action === "pull") return "Update local";
+  if (action === "push") return item.remote ? "Sync to registry" : "Add to registry";
+  return registryActionLabel(action);
+}
+
+export function compareRegistryItems(left: RegistryItem, right: RegistryItem): number {
+  if (left.type === "project" && right.type !== "project") return 1;
+  if (right.type === "project" && left.type !== "project") return -1;
+  if (left.type !== "project" && right.type !== "project" && left.local !== right.local) {
+    return left.local ? -1 : 1;
+  }
+  const byAttention = registryStatusRank(left.status) - registryStatusRank(right.status);
+  if (byAttention !== 0) return byAttention;
+  const byType = left.type.localeCompare(right.type);
+  return byType !== 0 ? byType : left.name.localeCompare(right.name);
+}
+
+export function searchRegistryItems(items: readonly RegistryItem[], query: string): RegistryItem[] {
+  const ordered = [...items].sort(compareRegistryItems);
+  if (!query.trim()) return ordered;
+
+  return fuzzySearch(
+    ordered.map((item) => ({
+      value: item,
+      label: item.name,
+      ...(item.description ? { aliases: [item.description] } : {}),
+    })),
+    query,
+    {
+      includeEmptyQuery: false,
+      minScorePerCharacter: 14,
+    },
+  ).map((match) => match.value);
+}
+
+function registryStatusRank(status: RegistryStatus): number {
+  switch (status) {
+    case "diverged": return 0;
+    case "registry-changed": return 1;
+    case "untracked-local": return 2;
+    case "local-changes": return 3;
+    case "update-available": return 4;
+    case "missing-local": return 5;
+    case "removed-remote": return 6;
+    case "local-only": return 7;
+    case "up-to-date": return 8;
+    case "not-installed": return 9;
   }
 }
 

@@ -6,13 +6,17 @@
   import CircleDashed from "@lucide/svelte/icons/circle-dashed";
   import Clock3 from "@lucide/svelte/icons/clock-3";
   import Database from "@lucide/svelte/icons/database";
+  import FileText from "@lucide/svelte/icons/file-text";
   import Folder from "@lucide/svelte/icons/folder";
   import GripVertical from "@lucide/svelte/icons/grip-vertical";
   import ListTodo from "@lucide/svelte/icons/list-todo";
   import Pencil from "@lucide/svelte/icons/pencil";
   import Play from "@lucide/svelte/icons/play";
   import Plus from "@lucide/svelte/icons/plus";
+  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
+  import Search from "@lucide/svelte/icons/search";
+  import Settings from "@lucide/svelte/icons/settings";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import X from "@lucide/svelte/icons/x";
   import { onMount, tick } from "svelte";
@@ -31,9 +35,16 @@
     type ProjectTaskType,
   } from "../lib/project-tasks";
   import { projectName } from "../lib/recent-projects";
+  import { fuzzySearch } from "../lib/fuzzy";
+  import {
+    PROJECT_TODO_PATH,
+    projectDocumentLabel,
+    type ProjectDocumentsSnapshot,
+  } from "../lib/project-documents";
   import {
     registryHasAttention,
     type RegistryActionRequest,
+    type RegistryProjectArtifact,
     type RegistrySnapshot,
   } from "../lib/registry";
   import { sessionTodoCounts, type SessionTodoSnapshot } from "../lib/session-todos";
@@ -83,6 +94,8 @@
     registrySnapshot,
     registryLoading,
     registryActionId,
+    projectDocuments,
+    projectDocumentsLoading,
     onCreate,
     onUpdate,
     onStatusChange,
@@ -93,6 +106,7 @@
     onReorder,
     onRun,
     onOpenSession,
+    onOpenProjectDocument,
     onReload,
     onRegistryRefresh,
     onRegistryAction,
@@ -110,6 +124,8 @@
     registrySnapshot: RegistrySnapshot | undefined;
     registryLoading: boolean;
     registryActionId: string | null;
+    projectDocuments: ProjectDocumentsSnapshot;
+    projectDocumentsLoading: boolean;
     onCreate: (draft: TaskDraft) => void;
     onUpdate: (taskId: string, draft: TaskDraft) => void;
     onStatusChange: (taskId: string, status: ProjectTaskStatus) => void;
@@ -125,6 +141,7 @@
     ) => void;
     onRun: (task: ProjectTask) => void;
     onOpenSession: (task: ProjectTask) => void;
+    onOpenProjectDocument: (path: string, exists?: boolean) => void;
     onReload: () => void;
     onRegistryRefresh: () => void;
     onRegistryAction: (request: RegistryActionRequest, actionId: string) => void;
@@ -149,6 +166,9 @@
   let editorAttachments = $state<Attachment[]>([]);
   let taskType = $state<ProjectTaskType>("feature");
   let statusMenuTaskId = $state<string | null>(null);
+  let planSelectorOpen = $state(false);
+  let planSelectorQuery = $state("");
+  let planSearchInput = $state<HTMLInputElement | null>(null);
   let draggedTaskId = $state<string | null>(null);
   let taskDropTarget = $state<TaskDropTarget | null>(null);
   let draggedTaskHeight = $state(44);
@@ -178,6 +198,42 @@
   const renderedSidebarWidth = $derived(ACTIVITY_BAR_WIDTH + (collapsed ? 0 : expandedSidebarWidth));
   const activeTabTitle = $derived(SIDEBAR_LABELS[activeTab]);
   const draggedTask = $derived(draggedTaskId ? tasks.find((task) => task.id === draggedTaskId) : undefined);
+  const visiblePlanChoices = $derived.by(() => {
+    if (!planSelectorQuery.trim()) return projectDocuments.plans;
+    return fuzzySearch(
+      projectDocuments.plans.map((plan) => ({
+        value: plan,
+        label: projectDocumentLabel(plan),
+        aliases: [plan],
+      })),
+      planSelectorQuery,
+      { minScorePerCharacter: 4 },
+    ).map((match) => match.value);
+  });
+
+  function openRegistryProjectArtifact(artifact: RegistryProjectArtifact): void {
+    if (artifact === "todo") {
+      onOpenProjectDocument(PROJECT_TODO_PATH, projectDocuments.todoExists);
+      return;
+    }
+    if (artifact === "plans") {
+      if (projectDocuments.plans.length === 0) {
+        activeTab = "project";
+        return;
+      }
+      planSelectorQuery = "";
+      planSelectorOpen = true;
+      void tick().then(() => planSearchInput?.focus());
+      return;
+    }
+    activeTab = "tasks";
+  }
+
+  function choosePlan(plan: string): void {
+    planSelectorOpen = false;
+    planSelectorQuery = "";
+    onOpenProjectDocument(plan);
+  }
 
   onMount(() => {
     try {
@@ -208,6 +264,8 @@
 
   function selectTab(tab: SidebarTab): void {
     statusMenuTaskId = null;
+    planSelectorOpen = false;
+    planSelectorQuery = "";
     if (activeTab === tab && !collapsed) {
       editorOpen = false;
       deleteTaskId = null;
@@ -559,6 +617,25 @@
             onclick={openCreate}
             disabled={!workspace || busy}
           ><Plus class="h-3 w-3" aria-hidden="true" />Add</button>
+        {:else if activeTab === "registry"}
+          <div class="ml-auto flex shrink-0 items-center gap-0.5">
+            <button
+              class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
+              type="button"
+              title="Configure registry"
+              aria-label="Configure registry"
+              onclick={() => onRegistryAction({ action: "configure" }, "configure")}
+              disabled={!sessionReady || registryActionId !== null}
+            ><Settings class="h-3.5 w-3.5" aria-hidden="true" /></button>
+            <button
+              class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
+              type="button"
+              title="Refresh registry"
+              aria-label="Refresh registry"
+              onclick={onRegistryRefresh}
+              disabled={!sessionReady || registryActionId !== null}
+            ><RefreshCw class={["h-3.5 w-3.5", registryLoading || registryActionId === "refresh" ? "animate-spin" : ""]} aria-hidden="true" /></button>
+          </div>
         {/if}
       </div>
 
@@ -729,17 +806,61 @@
           </div>
         </section>
       {:else if activeTab === "project"}
-        <section id="workspace-project-panel" class="min-h-0 overflow-y-auto p-3" aria-label="Project">
-          <div class="rounded-xl border border-sidebar-border bg-background/55 p-3 shadow-xs">
-            <Folder class="mb-3 h-5 w-5 text-primary" aria-hidden="true" />
-            <h2 class="break-words text-sm font-semibold text-foreground">{workspace ? projectName(workspace) : "No project selected"}</h2>
-            {#if workspace}<p class="mt-1 break-all font-mono text-[9px] leading-3.5 text-muted-foreground">{workspace}</p>{/if}
-          </div>
-          <dl class="mt-3 grid grid-cols-2 gap-2 text-center">
-            <div class="rounded-lg border border-sidebar-border bg-background/55 p-2"><dt class="text-[9px] text-muted-foreground">Tasks</dt><dd class="mt-0.5 text-sm font-semibold text-foreground">{tasks.length}</dd></div>
-            <div class="rounded-lg border border-sidebar-border bg-background/55 p-2"><dt class="text-[9px] text-muted-foreground">Done</dt><dd class="mt-0.5 text-sm font-semibold text-[var(--tool-success)]">{doneCount}</dd></div>
-          </dl>
-          <p class="mt-3 text-[10px] leading-4 text-muted-foreground">Project tasks are shared through <code class="rounded bg-muted px-1 py-0.5 font-mono">.pi/tasks.jsonc</code>.</p>
+        <section id="workspace-project-panel" class="min-h-0 overflow-y-auto p-2" aria-label="Project">
+          {#if !workspace}
+            <div class="px-4 py-8 text-center"><Folder class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" /><p class="text-xs font-medium">Choose a project</p></div>
+          {:else}
+            <div class="rounded-lg border border-sidebar-border bg-background/45 px-2.5 py-2">
+              <div class="flex min-w-0 items-center gap-2">
+                <Folder class="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+                <h2 class="min-w-0 flex-1 truncate text-xs font-semibold text-foreground">{projectName(workspace)}</h2>
+                <span class="shrink-0 text-[9px] text-muted-foreground">{tasks.length} tasks · {doneCount} done</span>
+              </div>
+              <p class="mt-1 truncate font-mono text-[9px] text-muted-foreground" title={workspace}>{workspace}</p>
+            </div>
+
+            <div class="mt-3">
+              <div class="mb-1 flex h-5 items-center justify-between px-1">
+                <span class="text-[9px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Documents</span>
+              </div>
+              <button
+                class="group flex h-9 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left hover:bg-sidebar-accent focus-visible:outline-2 focus-visible:outline-ring"
+                type="button"
+                onclick={() => onOpenProjectDocument(PROJECT_TODO_PATH, projectDocuments.todoExists)}
+              >
+                <FileText class="h-3.5 w-3.5 shrink-0 text-muted-foreground group-hover:text-foreground" aria-hidden="true" />
+                <span class="min-w-0 flex-1 truncate text-[11px] font-medium text-foreground">TODO.md</span>
+                <span class="shrink-0 text-[9px] text-muted-foreground">{projectDocuments.todoExists ? "Open" : "Create"}</span>
+              </button>
+            </div>
+
+            <div class="mt-2">
+              <div class="mb-1 flex h-5 items-center justify-between px-1">
+                <span class="text-[9px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Plans</span>
+                <span class="font-mono text-[8px] text-muted-foreground/70">{projectDocuments.plans.length}</span>
+              </div>
+              {#if projectDocumentsLoading}
+                <div class="flex h-9 items-center justify-center gap-1.5 text-[10px] text-muted-foreground"><RotateCw class="h-3 w-3 animate-spin" aria-hidden="true" />Loading plans…</div>
+              {:else if projectDocuments.plans.length === 0}
+                <div class="rounded-md border border-dashed border-sidebar-border/70 px-2 py-3 text-center text-[9px] text-muted-foreground/70">No Markdown plans in .pi/plans</div>
+              {:else}
+                <div class="space-y-0.5">
+                  {#each projectDocuments.plans as plan (plan)}
+                    <button
+                      class="group flex h-9 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left hover:bg-sidebar-accent focus-visible:outline-2 focus-visible:outline-ring"
+                      type="button"
+                      title={plan}
+                      onclick={() => onOpenProjectDocument(plan)}
+                    >
+                      <FileText class="h-3.5 w-3.5 shrink-0 text-muted-foreground group-hover:text-foreground" aria-hidden="true" />
+                      <span class="min-w-0 flex-1 truncate text-[11px] text-foreground">{projectDocumentLabel(plan)}</span>
+                      <span class="shrink-0 text-[9px] text-muted-foreground">Open</span>
+                    </button>
+                  {/each}
+                </div>
+              {/if}
+            </div>
+          {/if}
         </section>
       {:else if activeTab === "registry"}
         <div id="workspace-registry-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Registry">
@@ -750,6 +871,7 @@
             actionId={registryActionId}
             onRefresh={onRegistryRefresh}
             onAction={onRegistryAction}
+            onOpenProjectArtifact={openRegistryProjectArtifact}
           />
         </div>
       {:else}
@@ -758,6 +880,61 @@
         </div>
       {/if}
     </div>
+
+    {#if planSelectorOpen}
+      <div
+        class="absolute top-12 right-2 left-14 z-40 overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-xl"
+        role="dialog"
+        aria-label="Choose plan"
+      >
+        <div class="flex h-9 items-center gap-2 border-b border-border px-2.5">
+          <strong class="min-w-0 flex-1 truncate text-[11px] font-semibold">Choose plan</strong>
+          <button
+            class="grid h-6 w-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+            type="button"
+            title="Close plan selector"
+            aria-label="Close plan selector"
+            onclick={() => {
+              planSelectorOpen = false;
+              planSelectorQuery = "";
+            }}
+          ><X class="h-3.5 w-3.5" aria-hidden="true" /></button>
+        </div>
+
+        <div class="border-b border-border p-2">
+          <div class="relative">
+            <Search class="pointer-events-none absolute top-1/2 left-2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+            <input
+              bind:this={planSearchInput}
+              class="h-7 w-full rounded-md border border-input bg-background pr-2 pl-7 text-[10px] text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/30"
+              type="search"
+              placeholder="Find plan…"
+              bind:value={planSelectorQuery}
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </div>
+        </div>
+
+        <div class="max-h-72 overflow-y-auto p-1.5">
+          {#if visiblePlanChoices.length === 0}
+            <div class="px-2 py-5 text-center text-[10px] text-muted-foreground">No matching plans</div>
+          {:else}
+            {#each visiblePlanChoices as plan (plan)}
+              <button
+                class="flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left hover:bg-accent focus-visible:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+                type="button"
+                title={plan}
+                onclick={() => choosePlan(plan)}
+              >
+                <FileText class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <span class="min-w-0 flex-1 truncate text-[10px] font-medium">{projectDocumentLabel(plan)}</span>
+              </button>
+            {/each}
+          {/if}
+        </div>
+      </div>
+    {/if}
 
     <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->

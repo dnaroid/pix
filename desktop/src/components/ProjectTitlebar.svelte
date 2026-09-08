@@ -1,6 +1,7 @@
 <script lang="ts">
   import Check from "@lucide/svelte/icons/check";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import ExternalLink from "@lucide/svelte/icons/external-link";
   import FolderPlus from "@lucide/svelte/icons/folder-plus";
   import { titlebarDrag } from "../lib/titlebar-drag";
   import { MAX_RECENT_PROJECTS, projectName } from "../lib/recent-projects";
@@ -13,7 +14,9 @@
     disabled,
     onToggle,
     onSelectProject,
+    onOpenProjectInNewWindow,
     onChooseWorkspace,
+    onChooseWorkspaceInNewWindow,
     onClose,
   }: {
     workspace: string;
@@ -22,7 +25,9 @@
     disabled: boolean;
     onToggle: () => void;
     onSelectProject: (path: string) => void;
+    onOpenProjectInNewWindow: (path: string) => void;
     onChooseWorkspace: () => void;
+    onChooseWorkspaceInNewWindow: () => void;
     onClose: () => void;
   } = $props();
 
@@ -97,32 +102,47 @@
       <div class="min-h-0 overflow-y-auto px-1.5 py-1.5" aria-label="Recent projects">
         {#each recentProjects as project (project)}
           {@const selected = project === workspace}
-          <button
+          <div
             class={[
-              "grid w-full grid-cols-[24px_minmax(0,1fr)_16px] items-center gap-2 rounded-md bg-transparent px-2 py-2 text-left hover:bg-accent focus-visible:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40",
+              "grid w-full grid-cols-[minmax(0,1fr)_32px] items-stretch rounded-md",
               selected && "bg-accent",
             ]}
-            data-project-option
-            type="button"
-            aria-current={selected ? "true" : undefined}
-            onclick={() => onSelectProject(project)}
-            {disabled}
           >
-            <ProjectFolderIcon {project} class="h-[18px] w-[18px] justify-self-center" />
-            <span class="min-w-0">
-              <strong class="block overflow-hidden text-ellipsis whitespace-nowrap text-xs font-medium">
-                {projectName(project)}
-              </strong>
-              <small class="mt-0.5 block overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10px] text-muted-foreground">
-                {project}
-              </small>
-            </span>
-            {#if selected}
-              <Check class="h-4 w-4 text-primary" aria-hidden="true" />
-            {:else}
-              <span aria-hidden="true"></span>
-            {/if}
-          </button>
+            <button
+              class="grid min-w-0 grid-cols-[24px_minmax(0,1fr)_16px] items-center gap-2 rounded-md bg-transparent px-2 py-2 text-left hover:bg-accent focus-visible:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+              data-project-option
+              type="button"
+              aria-current={selected ? "true" : undefined}
+              onclick={() => onSelectProject(project)}
+              {disabled}
+            >
+              <ProjectFolderIcon {project} class="h-[18px] w-[18px] justify-self-center" />
+              <span class="min-w-0">
+                <strong class="block overflow-hidden text-ellipsis whitespace-nowrap text-xs font-medium">
+                  {projectName(project)}
+                </strong>
+                <small class="mt-0.5 block overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10px] text-muted-foreground">
+                  {project}
+                </small>
+              </span>
+              {#if selected}
+                <Check class="h-4 w-4 text-primary" aria-hidden="true" />
+              {:else}
+                <span aria-hidden="true"></span>
+              {/if}
+            </button>
+            <button
+              class="m-1 flex items-center justify-center rounded-md bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+              data-project-option
+              type="button"
+              title={`Open ${projectName(project)} in a new window`}
+              aria-label={`Open ${projectName(project)} in a new window`}
+              onclick={() => onOpenProjectInNewWindow(project)}
+              {disabled}
+            >
+              <ExternalLink class="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+          </div>
         {:else}
           <p class="mx-2.5 my-4 text-center text-xs text-muted-foreground">No recent projects</p>
         {/each}
@@ -140,6 +160,19 @@
           <span class="min-w-0">
             <strong class="block text-xs font-medium">Choose or create project folder…</strong>
             <small class="mt-0.5 block text-[10px] text-muted-foreground">Open the system folder picker</small>
+          </span>
+        </button>
+        <button
+          class="grid w-full grid-cols-[24px_minmax(0,1fr)] items-center gap-2 rounded-md bg-transparent px-2 py-2 text-left hover:bg-accent focus-visible:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+          data-project-option
+          type="button"
+          onclick={onChooseWorkspaceInNewWindow}
+          {disabled}
+        >
+          <ExternalLink class="h-4 w-4 justify-self-center text-primary" aria-hidden="true" />
+          <span class="min-w-0">
+            <strong class="block text-xs font-medium">Choose project folder in new window…</strong>
+            <small class="mt-0.5 block text-[10px] text-muted-foreground">Keep this window on the current project</small>
           </span>
         </button>
       </div>

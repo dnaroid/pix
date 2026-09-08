@@ -1,7 +1,9 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
+  import { LogicalPosition } from "@tauri-apps/api/dpi";
   import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
   import { open } from "@tauri-apps/plugin-dialog";
   import type {
     AvailableCommand,
@@ -48,7 +50,9 @@
   import {
     ACTIVE_SESSIONS_STORAGE_KEY,
     buildTabSessions,
+    mergeRestoredSessionTabs,
     parseActiveSessionIds,
+    replaceSessionTab,
     restoredTabSessionIds,
     serializeActiveSessionIds,
     startupSessionId,
@@ -87,7 +91,11 @@
     buildRecentProjects,
     isAbsoluteProjectPath,
     parseRecentProjects,
+    projectName,
+    projectWindowRoute,
+    projectWindowUrl,
     RECENT_PROJECTS_STORAGE_KEY,
+    workspaceFromLocation,
     WORKSPACE_STORAGE_KEY,
   } from "./lib/recent-projects";
   import ProjectTitlebar from "./components/ProjectTitlebar.svelte";
@@ -119,6 +127,12 @@
     type SessionSubagentSnapshot,
   } from "./lib/session-subagents";
   import type { ProjectFilePreview } from "./lib/project-files";
+  import {
+    EMPTY_PROJECT_DOCUMENTS,
+    PROJECT_TODO_PATH,
+    isEditableProjectMarkdown,
+    type ProjectDocumentsSnapshot,
+  } from "./lib/project-documents";
   import {
     canMovePreviewHistory,
     currentPreview,
@@ -218,9 +232,12 @@
   let tasksSaving = $state(false);
   let taskLoadFailed = $state(false);
   let taskActionId = $state<string | null>(null);
+  let projectDocuments = $state<ProjectDocumentsSnapshot>(EMPTY_PROJECT_DOCUMENTS);
+  let projectDocumentsLoading = $state(false);
+  let projectDocumentsGeneration = 0;
   let todoSnapshots = $state<Map<string, SessionTodoSnapshot>>(new Map());
   let subagentSnapshots = $state<Map<string, SessionSubagentSnapshot>>(new Map());
-  let registrySnapshots = $state<Map<string, RegistrySnapshot>>(new Map());
+  let registrySnapshot = $state<RegistrySnapshot | undefined>(undefined);
   let registryActionId = $state<string | null>(null);
   let slashCommandsBySession = $state<Map<string, AvailableCommand[]>>(new Map());
   let queueItemsBySession = $state<Map<string, QueueItem[]>>(new Map());
@@ -278,7 +295,7 @@
   const canGoForwardInPreview = $derived(canMovePreviewHistory(previewHistory, 1));
   const activeTodoSnapshot = $derived(activeSessionId ? todoSnapshots.get(activeSessionId) : undefined);
   const activeSubagentSnapshot = $derived(activeSessionId ? subagentSnapshots.get(activeSessionId) : undefined);
-  const activeRegistrySnapshot = $derived(activeSessionId ? registrySnapshots.get(activeSessionId) : undefined);
+  const activeRegistrySnapshot = $derived(registrySnapshot);
   const registryLoading = $derived(registryActionId === "refresh");
   const activeQueueItems = $derived(activeSessionId ? (queueItemsBySession.get(activeSessionId) ?? []) : []);
   const activeSlashCommands = $derived(
@@ -345,7 +362,10 @@
     let disposed = false;
     let unlistenDragDrop: (() => void) | undefined;
     restoreProjects();
-    if (workspace) void loadProjectTasks(workspace);
+    if (workspace) {
+      void loadProjectTasks(workspace);
+      void loadProjectDocuments(workspace);
+    }
     void getCurrentWindow().onDragDropEvent(({ payload }) => {
       if (payload.type === "enter" || payload.type === "over") {
         dragActive = canAcceptDroppedAttachments();
@@ -409,7 +429,7 @@
         sessionPrewarmGeneration += 1;
         todoSnapshots = new Map();
         subagentSnapshots = new Map();
-        registrySnapshots = new Map();
+        registrySnapshot = undefined;
         registryActionId = null;
         slashCommandsBySession = new Map();
         queueItemsBySession = new Map();
@@ -467,7 +487,7 @@
     sessionPrewarmGeneration += 1;
     todoSnapshots = new Map();
     subagentSnapshots = new Map();
-    registrySnapshots = new Map();
+    registrySnapshot = undefined;
     registryActionId = null;
     slashCommandsBySession = new Map();
     queueItemsBySession = new Map();
@@ -550,11 +570,11 @@
   }
 
   function handleSessionState(notification: SessionStateNotification): void {
-    const registrySnapshot = registrySnapshotFromSessionState(notification);
-    if (registrySnapshot) {
-      const next = new Map(registrySnapshots);
-      next.set(notification.sessionId, registrySnapshot);
-      registrySnapshots = next;
+    const nextRegistrySnapshot = registrySnapshotFromSessionState(notification);
+    if (nextRegistrySnapshot) {
+      const sourceSession = sessions.find((session) => session.sessionId === notification.sessionId);
+      if (sourceSession && sourceSession.cwd !== workspace) return;
+      registrySnapshot = nextRegistrySnapshot;
       return;
     }
     const todoSnapshot = sessionTodoSnapshot(notification);
@@ -597,6 +617,11 @@
     errorMessage = null;
     try {
       await requestClient.registryAction(sessionId, request);
+      if (requestClient !== client || sessionId !== activeSessionId) return;
+      if (request.action === "pull-project") {
+        if (request.scope === "tasks" || request.scope === "project") void loadProjectTasks(workspace);
+        if (request.scope === "plans" || request.scope === "todo" || request.scope === "project") void loadProjectDocuments(workspace);
+      }
     } catch (error) {
       if (requestClient === client && sessionId === activeSessionId) reportError(error);
     } finally {
@@ -846,11 +871,6 @@
     runtimeReadySessionIds.delete(sessionId);
     runtimeLoadsBySessionId.delete(sessionId);
     configOptionsBySessionId.delete(sessionId);
-    if (registrySnapshots.has(sessionId)) {
-      const next = new Map(registrySnapshots);
-      next.delete(sessionId);
-      registrySnapshots = next;
-    }
     if (sessionId === activeSessionId) activeSessionRuntimeReady = false;
   }
 
@@ -976,6 +996,58 @@
     await selectWorkspace(selected);
   }
 
+  async function chooseWorkspaceInNewWindow(): Promise<void> {
+    if (anyPromptRunning || operationRunning || tasksSaving || taskActionId) return;
+    closeProjectSelector();
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      canCreateDirectories: true,
+      title: "Choose or create a Pix project folder for a new window",
+      ...(workspace ? { defaultPath: workspace } : {}),
+    });
+    if (typeof selected !== "string") return;
+    openWorkspaceInNewWindow(selected);
+  }
+
+  function persistWindowWorkspace(selected: string): void {
+    try {
+      if (workspaceFromLocation(window.location.href)) {
+        window.history.replaceState(null, "", projectWindowUrl(window.location.href, selected));
+      } else {
+        localStorage.setItem(WORKSPACE_STORAGE_KEY, selected);
+      }
+    } catch {
+      // A storage or history failure should not prevent opening the project for this run.
+    }
+  }
+
+  function openWorkspaceInNewWindow(selected: string): void {
+    if (anyPromptRunning || operationRunning || tasksSaving || taskActionId || !isAbsoluteProjectPath(selected)) return;
+    closeProjectSelector();
+    rememberProject(selected);
+    const label = `project-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    try {
+      const projectWindow = new WebviewWindow(label, {
+        url: projectWindowRoute(window.location.href, selected),
+        title: `Pix Desktop — ${projectName(selected)}`,
+        width: 1240,
+        height: 820,
+        minWidth: 860,
+        minHeight: 620,
+        resizable: true,
+        titleBarStyle: "overlay",
+        hiddenTitle: true,
+        trafficLightPosition: new LogicalPosition(8, 16),
+      });
+      void projectWindow.once("tauri://error", (event) => {
+        reportError(new Error(`Could not open project window: ${String(event.payload)}`));
+      }).catch(reportError);
+    } catch (error) {
+      reportError(error);
+    }
+  }
+
   async function selectWorkspace(selected: string): Promise<void> {
     if (anyPromptRunning || operationRunning || tasksSaving || taskActionId) return;
     closeProjectSelector();
@@ -998,9 +1070,12 @@
       sessions = [];
       taskLoadGeneration += 1;
       taskDocument = EMPTY_TASK_DOCUMENT;
+      projectDocumentsGeneration += 1;
+      projectDocuments = EMPTY_PROJECT_DOCUMENTS;
+      projectDocumentsLoading = false;
       todoSnapshots = new Map();
       subagentSnapshots = new Map();
-      registrySnapshots = new Map();
+      registrySnapshot = undefined;
       registryActionId = null;
       slashCommandsBySession = new Map();
       taskActionId = null;
@@ -1017,12 +1092,12 @@
       activeSessionRuntimeReady = false;
       configOptions = [];
       rememberProject(selected);
-      try {
-        localStorage.setItem(WORKSPACE_STORAGE_KEY, selected);
-      } catch {
-        // A storage failure should not prevent opening a project for this run.
-      }
-      await Promise.all([openWorkspaceSession(), loadProjectTasks(selected)]);
+      persistWindowWorkspace(selected);
+      await Promise.all([
+        openWorkspaceSession(),
+        loadProjectTasks(selected),
+        loadProjectDocuments(selected),
+      ]);
     } catch (error) {
       reportError(error);
     } finally {
@@ -1043,13 +1118,66 @@
     try {
       const saved = localStorage.getItem(WORKSPACE_STORAGE_KEY);
       const validSaved = saved && isAbsoluteProjectPath(saved) ? saved : undefined;
-      workspace = validSaved ?? "";
-      recentProjects = parseRecentProjects(localStorage.getItem(RECENT_PROJECTS_STORAGE_KEY), validSaved);
+      const windowWorkspace = workspaceFromLocation(window.location.href);
+      const initialWorkspace = windowWorkspace ?? validSaved;
+      workspace = initialWorkspace ?? "";
+      recentProjects = parseRecentProjects(localStorage.getItem(RECENT_PROJECTS_STORAGE_KEY), initialWorkspace);
       savedActiveSessionIds = parseActiveSessionIds(localStorage.getItem(ACTIVE_SESSIONS_STORAGE_KEY));
     } catch {
       workspace = "";
       recentProjects = [];
       savedActiveSessionIds = new Map();
+    }
+  }
+
+  async function loadProjectDocuments(projectPath: string): Promise<void> {
+    const generation = ++projectDocumentsGeneration;
+    projectDocumentsLoading = true;
+    try {
+      const snapshot = await invoke<ProjectDocumentsSnapshot>("list_project_documents", {
+        workspace: projectPath,
+      });
+      if (generation !== projectDocumentsGeneration || workspace !== projectPath) return;
+      projectDocuments = snapshot;
+    } catch (error) {
+      if (generation === projectDocumentsGeneration && workspace === projectPath) reportError(error);
+    } finally {
+      if (generation === projectDocumentsGeneration && workspace === projectPath) projectDocumentsLoading = false;
+    }
+  }
+
+  function openProjectDocument(path: string, exists = true): void {
+    if (!workspace || !isEditableProjectMarkdown(path)) return;
+    if (exists) {
+      void openProjectFile(path);
+      return;
+    }
+    if (path === PROJECT_TODO_PATH) {
+      showPreview({ kind: "file", file: { path, content: "" } }, "replace");
+    }
+  }
+
+  async function saveProjectMarkdown(path: string, content: string): Promise<boolean> {
+    if (!workspace || !isEditableProjectMarkdown(path)) return false;
+    const requestWorkspace = workspace;
+    errorMessage = null;
+    try {
+      const saved = await invoke<ProjectFilePreview>("write_project_markdown", {
+        workspace: requestWorkspace,
+        path,
+        content,
+      });
+      if (workspace !== requestWorkspace) return false;
+      const current = currentPreview(previewHistory);
+      if (current?.kind === "file" && current.file.path === path) {
+        previewHistory = replaceCurrentPreview(previewHistory, { ...current, file: saved });
+      }
+      void loadProjectDocuments(requestWorkspace);
+      if (registrySnapshot && activeSessionRuntimeReady && !operationRunning) refreshRegistry();
+      return true;
+    } catch (error) {
+      if (workspace === requestWorkspace) reportError(error);
+      return false;
     }
   }
 
@@ -1216,7 +1344,12 @@
       .then((response) => {
         if (generation !== sessionRefreshGeneration || client !== requestClient || workspace !== requestWorkspace) return;
         sessions = response.sessions;
-        restoredSessionTabs = restoredTabSessionIds(response);
+        restoredSessionTabs = mergeRestoredSessionTabs(
+          restoredSessionTabs,
+          restoredTabSessionIds(response),
+          locallyOpenedSessionTabs,
+          closedSessionTabs,
+        );
       })
       .catch((error) => {
         if (generation !== sessionRefreshGeneration || client !== requestClient || workspace !== requestWorkspace) return;
@@ -1240,7 +1373,12 @@
       const response = await requestClient.listSessions(requestWorkspace);
       if (generation !== sessionRefreshGeneration || client !== requestClient || workspace !== requestWorkspace) return;
       sessions = response.sessions;
-      restoredSessionTabs = restoredTabSessionIds(response);
+      restoredSessionTabs = mergeRestoredSessionTabs(
+        restoredSessionTabs,
+        restoredTabSessionIds(response),
+        locallyOpenedSessionTabs,
+        closedSessionTabs,
+      );
 
       const desktopSessionId = savedActiveSessionIds.get(requestWorkspace) ?? null;
       const sessionId = startupSessionId(response, desktopSessionId);
@@ -1438,6 +1576,81 @@
     });
   }
 
+  async function replaceCurrentTabWithSession(sessionId: string): Promise<void> {
+    const requestClient = client;
+    const requestWorkspace = workspace;
+    const sourceSessionId = activeSessionId;
+    if (!requestClient || !requestWorkspace || status !== "ready" || operationRunning || sessionId === sourceSessionId) {
+      if (sessionId === sourceSessionId) closeSessionSelector();
+      return;
+    }
+    if (sourceSessionId && runningSessionIds.has(sourceSessionId)) {
+      reportError(new Error("Cannot replace the current tab while its session is running."));
+      return;
+    }
+
+    closeProjectSelector();
+    closeSessionSelector();
+    sessionPrewarmGeneration += 1;
+    operationRunning = true;
+    errorMessage = null;
+    try {
+      await ensureSessionRuntime(requestClient, sessionId, requestWorkspace);
+      if (
+        requestClient !== client
+        || requestWorkspace !== workspace
+        || !runtimeReadySessionIds.has(sessionId)
+      ) {
+        if (requestClient === client && requestWorkspace === workspace) {
+          throw new Error("Could not load the selected session.");
+        }
+        return;
+      }
+
+      if (sourceSessionId) {
+        transcriptBySessionId.set(sourceSessionId, transcript);
+        await requestClient.closeSession(sourceSessionId);
+        if (requestClient !== client || requestWorkspace !== workspace || activeSessionId !== sourceSessionId) return;
+        forgetSessionRuntime(sourceSessionId);
+        clearSessionActivity(sourceSessionId);
+      }
+
+      const nextTabs = replaceSessionTab(
+        restoredSessionTabs,
+        locallyOpenedSessionTabs,
+        closedSessionTabs,
+        sourceSessionId,
+        sessionId,
+      );
+      restoredSessionTabs = nextTabs.restoredIds;
+      locallyOpenedSessionTabs = nextTabs.locallyOpenedIds;
+      closedSessionTabs = nextTabs.closedIds;
+
+      cancelSessionHistoryLoad();
+      activeSessionId = sessionId;
+      const cachedTranscript = transcriptBySessionId.get(sessionId);
+      transcript = cachedTranscript ?? emptyTranscript;
+      configOptions = configOptionsBySessionId.get(sessionId) ?? [];
+      activeSessionRuntimeReady = true;
+      if (!cachedTranscript) {
+        const historyGeneration = beginSessionHistoryLoad();
+        void hydrateSessionHistory(requestClient, sessionId, requestWorkspace, historyGeneration);
+      }
+      rememberActiveSession(requestWorkspace, sessionId);
+      void refreshQueueState(sessionId);
+      void refreshSessions();
+      scheduleSessionPrewarm(
+        requestClient,
+        requestWorkspace,
+        tabSessions.map((session) => session.sessionId),
+      );
+    } catch (error) {
+      if (requestClient === client && requestWorkspace === workspace) reportError(error);
+    } finally {
+      if (requestClient === client && requestWorkspace === workspace) operationRunning = false;
+    }
+  }
+
   async function closeWorkspaceSessions(): Promise<void> {
     sessionPrewarmGeneration += 1;
     const sessionIds = [...new Set([
@@ -1574,7 +1787,7 @@
       closeSessionSelector();
       return;
     }
-    void loadSession(sessionId);
+    void replaceCurrentTabWithSession(sessionId);
   }
 
   async function deleteSelectedSession(sessionId: string): Promise<void> {
@@ -3058,7 +3271,9 @@
       disabled={anyPromptRunning || operationRunning || tasksSaving || taskActionId !== null}
       onToggle={toggleProjectSelector}
       onSelectProject={(path) => void selectWorkspace(path)}
+      onOpenProjectInNewWindow={openWorkspaceInNewWindow}
       onChooseWorkspace={() => void chooseWorkspace()}
+      onChooseWorkspaceInNewWindow={() => void chooseWorkspaceInNewWindow()}
       onClose={closeProjectSelector}
     />
 
@@ -3109,6 +3324,8 @@
       registrySnapshot={activeRegistrySnapshot}
       {registryLoading}
       {registryActionId}
+      {projectDocuments}
+      {projectDocumentsLoading}
       onCreate={createProjectTask}
       onUpdate={updateProjectTask}
       onStatusChange={updateProjectTaskStatus}
@@ -3119,6 +3336,7 @@
       onReorder={reorderProjectTask}
       onRun={(task) => void runProjectTask(task)}
       onOpenSession={(task) => void openProjectTaskSession(task)}
+      onOpenProjectDocument={openProjectDocument}
       onReload={() => void loadProjectTasks(workspace)}
       onRegistryRefresh={refreshRegistry}
       onRegistryAction={(request, actionId) => void runRegistryAction(request, actionId)}
@@ -3219,12 +3437,14 @@
     attachment={activePreview.kind === "attachment" ? activePreview.attachment : undefined}
     canGoBack={canGoBackInPreview}
     canGoForward={canGoForwardInPreview}
+    editable={activePreview.kind === "file" && isEditableProjectMarkdown(activePreview.file.path)}
     onBack={() => movePreview(-1)}
     onForward={() => movePreview(1)}
     onOpenProjectFile={(path) => openProjectFile(path, "push")}
     onResolveProjectMedia={resolveProjectMedia}
     onOpenLocalFile={(path) => openLocalFile(path, "push")}
     onResolveLocalMedia={resolveLocalMedia}
+    onSaveProjectFile={saveProjectMarkdown}
     onScrollPositionChange={rememberPreviewScroll}
     onClose={closePreview}
   />

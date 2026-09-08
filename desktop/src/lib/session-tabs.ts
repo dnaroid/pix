@@ -73,6 +73,101 @@ export function buildTabSessions(
   return result;
 }
 
+/** Keep Desktop-owned replacements in their current slots while accepting TUI tab changes. */
+export function mergeRestoredSessionTabs(
+  currentIds: readonly string[] | null,
+  incomingIds: readonly string[] | null,
+  locallyOpenedIds: readonly string[],
+  closedIds: readonly string[],
+): string[] | null {
+  if (currentIds === null) return incomingIds === null ? null : [...incomingIds];
+  if (incomingIds === null) return [...currentIds];
+  const incoming = new Set(incomingIds);
+  const local = new Set(locallyOpenedIds);
+  const closed = new Set(closedIds);
+  const merged = currentIds.filter((sessionId) => (
+    !closed.has(sessionId) && (incoming.has(sessionId) || local.has(sessionId))
+  ));
+  const seen = new Set([...merged, ...locallyOpenedIds, ...closedIds]);
+  for (const sessionId of incomingIds) {
+    if (seen.has(sessionId)) continue;
+    seen.add(sessionId);
+    merged.push(sessionId);
+  }
+  return merged;
+}
+
+export interface ReplacedSessionTabState {
+  readonly restoredIds: string[] | null;
+  readonly locallyOpenedIds: string[];
+  readonly closedIds: string[];
+}
+
+/**
+ * Replace the current tab's session identity without opening an additional tab.
+ * If the target is already represented by another tab, the source tab simply
+ * disappears and the existing target tab becomes the selected one.
+ */
+export function replaceSessionTab(
+  restoredIds: readonly string[] | null,
+  locallyOpenedIds: readonly string[],
+  closedIds: readonly string[],
+  sourceSessionId: string | null,
+  targetSessionId: string,
+): ReplacedSessionTabState {
+  if (!sourceSessionId) {
+    const targetRepresented = (restoredIds?.includes(targetSessionId) ?? false)
+      || locallyOpenedIds.includes(targetSessionId);
+    return {
+      restoredIds: restoredIds === null ? null : [...restoredIds],
+      locallyOpenedIds: restoredIds !== null && !targetRepresented
+        ? [...locallyOpenedIds, targetSessionId]
+        : [...locallyOpenedIds],
+      closedIds: closedIds.filter((sessionId) => sessionId !== targetSessionId),
+    };
+  }
+  if (sourceSessionId === targetSessionId) {
+    return {
+      restoredIds: restoredIds === null ? null : [...restoredIds],
+      locallyOpenedIds: [...locallyOpenedIds],
+      closedIds: closedIds.filter((sessionId) => sessionId !== targetSessionId),
+    };
+  }
+
+  const replaceStable = (ids: readonly string[]): { ids: string[]; replaced: boolean } => {
+    const next: string[] = [];
+    const seen = new Set<string>();
+    let replaced = false;
+    for (const sessionId of ids) {
+      const value = sessionId === sourceSessionId ? targetSessionId : sessionId;
+      if (sessionId === sourceSessionId) replaced = true;
+      if (seen.has(value)) continue;
+      seen.add(value);
+      next.push(value);
+    }
+    return { ids: next, replaced };
+  };
+
+  const targetWasRepresented = (restoredIds?.includes(targetSessionId) ?? false)
+    || locallyOpenedIds.includes(targetSessionId);
+  const restored = restoredIds === null
+    ? { ids: [] as string[], replaced: false }
+    : replaceStable(restoredIds);
+  const local = replaceStable(locallyOpenedIds);
+  if (restoredIds !== null && !targetWasRepresented && !local.ids.includes(targetSessionId)) {
+    local.ids.push(targetSessionId);
+  }
+
+  return {
+    restoredIds: restoredIds === null ? null : restored.ids,
+    locallyOpenedIds: local.ids,
+    closedIds: [...new Set([
+      ...closedIds.filter((sessionId) => sessionId !== targetSessionId),
+      sourceSessionId,
+    ])],
+  };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

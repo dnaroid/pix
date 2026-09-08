@@ -118,7 +118,39 @@ test("the production completer streams a non-session suffix with TUI limits", as
 		timeoutMs: 1_250,
 	});
 	const context = captured?.context as { systemPrompt?: string; messages?: Array<{ content?: string }> } | undefined;
-	assert.match(context?.systemPrompt ?? "", /inline autocomplete engine/u);
+	assert.match(context?.systemPrompt ?? "", /text predictor for inline autocomplete/u);
+	assert.match(context?.systemPrompt ?? "", /one message currently being typed by the human user/u);
+	assert.match(context?.systemPrompt ?? "", /Never switch to the assistant\/agent's voice/u);
 	assert.match(context?.messages?.[0]?.content ?? "", /Use the safe API\./u);
+	assert.match(context?.messages?.[0]?.content ?? "", /Do not answer the draft or start a new conversation turn/u);
 	assert.match(context?.messages?.[0]?.content ?? "", /<draft>\nimplement\n<cursor>/u);
+});
+
+test("the production completer turns the explicit empty sentinel into no suggestion", async () => {
+	const runtime = {
+		getModel: (provider: string, modelId: string) => ({ provider, id: modelId, maxTokens: 4_096 }),
+		refresh: async () => {},
+		streamSimple: () => (async function* () {
+			yield { type: "text_delta", delta: "<EMPTY>" };
+		})(),
+	} as unknown as ModelRuntime;
+	const complete = createAutocompleteCompleter({
+		logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
+		loadConfig: () => ({
+			modelRef: "zai/glm-5-turbo",
+			debounceMs: 350,
+			timeoutMs: 1_250,
+			maxTokens: 48,
+			maxPromptTokens: 1_200,
+			includeRecentMessages: 0,
+		}),
+		createModelRuntime: async () => runtime,
+	});
+
+	assert.equal(await complete({
+		cwd: "/tmp/project",
+		draft: "проверь промпт",
+		signal: new AbortController().signal,
+		getMessages: async () => [],
+	}), "");
 });

@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { ListSessionsResponse, SessionInfo } from "@agentclientprotocol/sdk";
 import {
   buildTabSessions,
+  mergeRestoredSessionTabs,
   parseActiveSessionIds,
+  replaceSessionTab,
   restoredTabSessionIds,
   serializeActiveSessionIds,
   startupSessionId,
@@ -82,5 +84,56 @@ describe("buildTabSessions", () => {
 
   it("falls back to all sessions for an older adapter", () => {
     expect(buildTabSessions(sessions, null, [], [], null)).toEqual(sessions);
+  });
+});
+
+describe("replaceSessionTab", () => {
+  it("replaces the current restored tab instead of appending another tab", () => {
+    const state = replaceSessionTab(["a", "b", "c"], [], [], "b", "history");
+    expect(state).toEqual({
+      restoredIds: ["a", "history", "c"],
+      locallyOpenedIds: ["history"],
+      closedIds: ["b"],
+    });
+  });
+
+  it("collapses the source tab when the target is already open", () => {
+    const state = replaceSessionTab(["a", "b", "target"], ["local"], ["target"], "b", "target");
+    expect(state).toEqual({
+      restoredIds: ["a", "target"],
+      locallyOpenedIds: ["local"],
+      closedIds: ["b"],
+    });
+  });
+
+  it("keeps legacy all-session adapters working by hiding only the replaced source", () => {
+    expect(replaceSessionTab(null, [], [], "a", "b")).toEqual({
+      restoredIds: null,
+      locallyOpenedIds: [],
+      closedIds: ["a"],
+    });
+  });
+
+  it("opens the target persistently when there is no current tab to replace", () => {
+    expect(replaceSessionTab(["a"], [], ["history"], null, "history")).toEqual({
+      restoredIds: ["a"],
+      locallyOpenedIds: ["history"],
+      closedIds: [],
+    });
+  });
+});
+
+describe("mergeRestoredSessionTabs", () => {
+  it("keeps a Desktop replacement in the original slot across backend refreshes", () => {
+    expect(mergeRestoredSessionTabs(
+      ["a", "history", "c"],
+      ["a", "source", "c"],
+      ["history"],
+      ["source"],
+    )).toEqual(["a", "history", "c"]);
+  });
+
+  it("drops TUI tabs that disappeared and appends newly opened TUI tabs", () => {
+    expect(mergeRestoredSessionTabs(["a", "b"], ["a", "c"], [], [])).toEqual(["a", "c"]);
   });
 });

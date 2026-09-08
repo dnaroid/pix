@@ -14,6 +14,7 @@ const AUTOCOMPLETE_MAX_SUFFIX_LENGTH = 320;
 const AUTOCOMPLETE_HISTORY_MESSAGE_MAX_CHARS = 700;
 const AUTOCOMPLETE_HISTORY_CONTEXT_MAX_CHARS = 3_600;
 const AUTOCOMPLETE_TOKEN_CHARS = 4;
+const AUTOCOMPLETE_EMPTY_SENTINEL = "<EMPTY>";
 const DEFAULT_AUTOCOMPLETE_CONFIG: AutocompleteConfig = {
 	modelRef: "zai/glm-5-turbo",
 	debounceMs: 350,
@@ -32,13 +33,16 @@ const THINKING_LEVELS = new Set<ThinkingLevel>([
 	"max",
 ]);
 
-const AUTOCOMPLETE_SYSTEM_PROMPT = `You are an inline autocomplete engine for pix, a terminal UI for a coding agent.
-Use provided recent active-session messages only as optional context; the current draft is the source of truth.
-Continue only the user's current draft at the cursor.
-Output only the exact suffix to append after the draft.
-Do not repeat the draft. Do not answer the user. Do not explain.
-If the draft already looks complete or the continuation is uncertain, output an empty string.
-Keep the suffix short, in the user's language/style, and stop at a natural boundary.`;
+const AUTOCOMPLETE_SYSTEM_PROMPT = `You are a text predictor for inline autocomplete in pix.
+The text inside <draft> is a prefix of one message currently being typed by the human user. It is not a request for you to answer or execute.
+Predict only what that same user would type next at <cursor>.
+Never switch to the assistant/agent's voice, never reply to the draft, and never acknowledge or promise actions on behalf of the agent.
+Preserve the draft author's grammatical person, intent, language, and style. For a request or imperative addressed to the agent, continue the requester's instruction rather than writing the agent's response.
+Use provided recent active-session messages only to disambiguate the user's intended text; never continue a recent message directly.
+Return exactly one of:
+- the raw suffix to append after the draft, with no quotes, labels, Markdown, or explanation; or
+- ${AUTOCOMPLETE_EMPTY_SENTINEL} when the draft is already complete, the next text is uncertain, or the likely next turn would be the assistant's reply.
+Do not repeat any part of the draft. Keep non-empty suffixes short and stop at the first natural boundary.`;
 
 export interface AutocompleteRequest {
 	readonly sessionId: string;
@@ -251,7 +255,7 @@ function autocompleteHistoryFromMessages(
 
 function renderAutocompletePrompt(cwd: string, draft: string, history: readonly AutocompleteHistoryMessage[]): string {
 	const lines = [
-		"Complete the current terminal input for the active pix/pi coding-agent session.",
+		"Predict the suffix of this user-authored draft. Do not answer the draft or start a new conversation turn.",
 		`cwd: ${cwd}`,
 	];
 	if (history.length > 0) {
@@ -270,7 +274,7 @@ function renderAutocompletePrompt(cwd: string, draft: string, history: readonly 
 	return [
 		...lines,
 		"",
-		"Return only the suffix to append after <cursor>. Return nothing if unsure.",
+		`Return only the suffix to append after <cursor>, or ${AUTOCOMPLETE_EMPTY_SENTINEL} if there is no high-confidence same-user continuation.`,
 		"<draft>",
 		draft,
 		"<cursor>",
@@ -292,6 +296,7 @@ function cleanCompletion(raw: string, draft: string, maxTokens: number): string 
 		.replace(/^<cursor>/iu, "")
 		.replace(/^\s*(?:completion|suffix|autocomplete|продолжение)\s*:\s*/iu, "")
 		.replace(/^\n+/u, "");
+	if (/^["']?<EMPTY>["']?$/iu.test(value.trim())) return "";
 	if (!value.trim()) return "";
 	return value.slice(0, Math.min(AUTOCOMPLETE_MAX_SUFFIX_LENGTH, maxTokens * 8));
 }

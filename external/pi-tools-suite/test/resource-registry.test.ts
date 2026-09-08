@@ -236,6 +236,46 @@ describe("resource registry", () => {
 		expect(snapshots.every((snapshot) => snapshot?.configured === true && snapshot?.error === undefined)).toBe(true);
 	});
 
+	test("reuses the project registry snapshot across session starts", async () => {
+		const root = tempRoot();
+		const home = path.join(root, "home");
+		const project = path.join(root, "project");
+		fs.mkdirSync(home, { recursive: true });
+		fs.mkdirSync(project, { recursive: true });
+		process.env.HOME = home;
+		process.env.XDG_CACHE_HOME = path.join(root, "cache");
+		process.env.PIX_ACP_SESSION_STATE_BRIDGE = "1";
+		const { remote } = createRegistry(root);
+		const h = harness(project);
+		const command = h.commands.get("registry");
+		const exec = h.pi.exec.bind(h.pi);
+		let fetches = 0;
+
+		h.pi.exec = async (gitCommand: string, args: string[], options: { cwd?: string } = {}) => {
+			if (gitCommand === "git" && args[0] === "fetch") fetches += 1;
+			return exec(gitCommand, args, options);
+		};
+
+		await command.handler(`configure ${remote} main`, h.ctx);
+		await command.handler("rpc refresh", h.ctx);
+		const fetchesAfterRefresh = fetches;
+		expect(fetchesAfterRefresh).toBeGreaterThan(0);
+
+		const startupHandler = h.handlers.get("session_start")?.[0];
+		expect(startupHandler).toBeDefined();
+		const widgetCount = h.widgets.length;
+		startupHandler?.({ type: "session_start", reason: "reload" }, h.ctx);
+		startupHandler?.({ type: "session_start", reason: "reload" }, h.ctx);
+		await waitFor(() => h.widgets.length >= widgetCount + 2);
+
+		expect(fetches).toBe(fetchesAfterRefresh);
+		const latest = JSON.parse(h.widgets.at(-1)?.lines?.[1] ?? "null");
+		expect(latest).toMatchObject({ configured: true, remote, branch: "main" });
+
+		await command.handler("rpc refresh", h.ctx);
+		expect(fetches).toBeGreaterThan(fetchesAfterRefresh);
+	});
+
 	test("drops a deferred Desktop registry snapshot after its session context becomes stale", async () => {
 		const root = tempRoot();
 		const project = path.join(root, "project");
