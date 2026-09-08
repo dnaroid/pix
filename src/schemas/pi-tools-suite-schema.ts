@@ -61,6 +61,7 @@ const TerminalBellConfig = Type.Object(
 const DcpManualModeConfig = Type.Object(
 	{
 		enabled: Type.Optional(Type.Boolean({ description: "Enable manual DCP mode." })),
+		automaticStrategies: Type.Optional(Type.Never({ description: "Removed legacy key. Manual mode now has only the explicit enabled flag." })),
 	},
 	{ description: "Manual mode configuration." },
 );
@@ -90,10 +91,10 @@ const DcpMessageModeConfig = Type.Object(
 
 const DcpAutoCompressConfig = Type.Object(
 	{
-		enabled: Type.Optional(Type.Boolean({ description: "Allow bounded automatic summary creation after pressure/opportunity gates." })),
+		enabled: Type.Optional(Type.Boolean({ description: "Allow autonomous compression after pressure/opportunity gates. Explicit compress calls can still use summarizerModel when summary is omitted." })),
 		patience: Type.Optional(Type.Number({ description: "Completed actionable opportunities allowed before automatic compression.", minimum: 0 })),
-		summarizerModel: Type.Optional(Type.Array(Type.String(), { description: "Ordered summarizer model refs; empty uses the deterministic extractive summary." })),
-		timeoutMs: Type.Optional(Type.Number({ description: "Per-summarizer deadline in milliseconds.", minimum: 1 })),
+		summarizerModel: Type.Optional(Type.Array(Type.String(), { description: "Ordered model refs used by auto-compress and explicit compress when summary is omitted; empty uses the deterministic extractive summary." })),
+		timeoutMs: Type.Optional(Type.Number({ description: "Per-summarizer deadline in milliseconds for automatic and explicit generated summaries.", minimum: 1 })),
 	},
 	{ description: "Bounded automatic compression fallback." },
 );
@@ -102,8 +103,8 @@ const DcpCompressConfig = Type.Object(
 	{
 		maxContextPercent: Type.Optional(Type.Union([Type.Number(), Type.String()], { description: "Maximum context percent (0–1 or '80%') before compression triggers." })),
 		minContextPercent: Type.Optional(Type.Union([Type.Number(), Type.String()], { description: "Target context percent after compression." })),
-		modelMaxContextPercent: Type.Optional(Type.Record(Type.String(), Type.Number(), { description: "Per-model max context percent overrides." })),
-		modelMinContextPercent: Type.Optional(Type.Record(Type.String(), Type.Number(), { description: "Per-model min context percent overrides." })),
+		modelMaxContextPercent: Type.Optional(Type.Record(Type.String(), Type.Union([Type.Number(), Type.String()]), { description: "Per-model max context overrides using the same fraction/token/percent formats." })),
+		modelMinContextPercent: Type.Optional(Type.Record(Type.String(), Type.Union([Type.Number(), Type.String()]), { description: "Per-model min context overrides using the same fraction/token/percent formats." })),
 		maxContextLimit: Type.Optional(Type.Union([Type.Number(), Type.String()], { description: "Absolute max context tokens or '200k'." })),
 		minContextLimit: Type.Optional(Type.Union([Type.Number(), Type.String()], { description: "Absolute min context tokens." })),
 		modelMaxContextLimits: Type.Optional(Type.Record(Type.String(), Type.Union([Type.Number(), Type.String()]), { description: "Per-model max context limit overrides." })),
@@ -139,8 +140,28 @@ const DcpEmergencyCurrentTurnPruningConfig = Type.Object(
 const DcpStrategiesConfig = Type.Object(
 	{
 		emergencyCurrentTurnPruning: Type.Optional(DcpEmergencyCurrentTurnPruningConfig),
+		deduplication: Type.Optional(Type.Never({ description: "Removed legacy key; no automatic replacement policy maps to it." })),
+		purgeErrors: Type.Optional(Type.Never({ description: "Removed legacy key; no automatic replacement policy maps to it." })),
+		autoToolPruning: Type.Optional(Type.Never({ description: "Removed legacy key. Use explicit /dcp sweep or DCP compression/emergency policies instead." })),
 	},
 	{ description: "Bounded DCP emergency strategy." },
+);
+
+const DcpConfigOverride = Type.Object(
+	{
+		enabled: Type.Optional(Type.Boolean()),
+		debug: Type.Optional(Type.Boolean()),
+		debugLog: Type.Optional(Type.Object({
+			maxBytes: Type.Optional(Type.Number({ minimum: 1024 })),
+			maxBackups: Type.Optional(Type.Number({ minimum: 1 })),
+		})),
+		manualMode: Type.Optional(DcpManualModeConfig),
+		compress: Type.Optional(DcpCompressConfig),
+		strategies: Type.Optional(DcpStrategiesConfig),
+		protectedFilePatterns: Type.Optional(Type.Array(Type.String())),
+		pruneNotification: Type.Optional(Type.Never({ description: "Removed legacy key; pruning notifications are no longer configurable." })),
+	},
+	{ description: "Partial DCP override applied to a matching provider/model or bare-model key. Keys support * and ? wildcards." },
 );
 
 const DcpConfig = Type.Object(
@@ -158,6 +179,8 @@ const DcpConfig = Type.Object(
 		compress: Type.Optional(DcpCompressConfig),
 		strategies: Type.Optional(DcpStrategiesConfig),
 		protectedFilePatterns: Type.Optional(Type.Array(Type.String(), { description: "File path glob patterns whose content is protected from pruning." })),
+		modelOverrides: Type.Optional(Type.Record(Type.String(), DcpConfigOverride, { description: "Per-model partial DCP overrides. Exact keys take precedence over matching wildcards." })),
+		pruneNotification: Type.Optional(Type.Never({ description: "Removed legacy key; pruning notifications are no longer configurable." })),
 	},
 	{ description: "DCP (Dynamic Context Pruning) configuration." },
 );
@@ -189,22 +212,33 @@ const SecretFirewallConfig = Type.Object(
 	{ description: "Settings for the opt-in credential-firewall module." },
 );
 
+const CommentCheckerConfig = Type.Object(
+	{
+		enabled: Type.Optional(Type.Boolean({ description: "Enable or disable comment-checker without disabling the whole module." })),
+		strictness: Type.Optional(Type.Union(
+			[Type.Literal("conservative"), Type.Literal("balanced"), Type.Literal("aggressive")],
+			{ description: "Comment classification strictness. Defaults to balanced." },
+		)),
+	},
+	{ description: "Settings for the comment-checker module." },
+);
+
 const ContextGatewayBudgetsConfig = Type.Object(
 	{
-		maxInlineBytes: Type.Optional(Type.Integer({ minimum: 1, maximum: 67108864, description: "Initial inline byte budget used by Context Gateway policy experiments. Default 8192." })),
-		maxResultBytes: Type.Optional(Type.Integer({ minimum: 1, maximum: 67108864, description: "Experimental delivered-result byte budget. P01 observe measures the available tool-result content boundary; later shaping must account for the final provider-visible serialization. Default 8192." })),
-		maxExactReadBytes: Type.Optional(Type.Integer({ minimum: 1, maximum: 67108864, description: "Future exact-read byte budget. Default 32768." })),
-		maxSearchBytes: Type.Optional(Type.Integer({ minimum: 1, maximum: 67108864, description: "Future search-delivery byte budget. Default 8192." })),
-		maxSearchMatches: Type.Optional(Type.Integer({ minimum: 1, maximum: 1000, description: "Future search match budget. Default 12." })),
+		maxInlineBytes: Type.Optional(Type.Integer({ minimum: 1, maximum: 67108864, description: "Maximum inline size for a proven compact representation. Default 8192." })),
+		maxResultBytes: Type.Optional(Type.Integer({ minimum: 1, maximum: 67108864, description: "Budget for shell/other result classes. Selective enforce currently compacts only recognised complete simple test/build output. Default 8192." })),
+		maxExactReadBytes: Type.Optional(Type.Integer({ minimum: 1, maximum: 67108864, description: "Read-class observation budget. Reads remain passthrough because snapshot-safe recovery is not available. Default 32768." })),
+		maxSearchBytes: Type.Optional(Type.Integer({ minimum: 1, maximum: 67108864, description: "Repo-search/AST/structure observation budget. Gateway does not post-hoc truncate producer output. Default 8192." })),
+		maxSearchMatches: Type.Optional(Type.Integer({ minimum: 1, maximum: 1000, description: "Reserved search-match policy budget. Default 12." })),
 	},
-	{ description: "Context Gateway delivery budgets. In P01 only maxResultBytes is used for passive observe accounting." },
+	{ description: "Context Gateway class-specific observation and selective-enforcement budgets." },
 );
 
 const ContextGatewayConfig = Type.Object(
 	{
 		mode: Type.Optional(Type.Union(
 			[Type.Literal("off"), Type.Literal("observe"), Type.Literal("enforce")],
-			{ description: "Context Gateway mode. P01 implements off/observe; enforce is parsed but explicitly refused until later integration gates." },
+			{ description: "Context Gateway mode. observe is passive; enforce only compacts proven complete simple test/build output and otherwise passes results through." },
 		)),
 		budgets: Type.Optional(ContextGatewayBudgetsConfig),
 	},
@@ -293,6 +327,7 @@ export const PiToolsSuiteConfigSchema = Type.Object(
 		)),
 		lookupModel: Type.Optional(Type.Union([Type.String(), Type.Null()], { description: "Vision-capable provider/model used by GLM's lookup tool; unset or null disables lookup." })),
 		terminalBell: Type.Optional(TerminalBellConfig),
+		commentChecker: Type.Optional(CommentCheckerConfig),
 		dcp: Type.Optional(DcpConfig),
 		toolRenderer: Type.Optional(ToolRendererConfig),
 		promptCommands: Type.Optional(PromptCommandsConfig),
@@ -301,6 +336,7 @@ export const PiToolsSuiteConfigSchema = Type.Object(
 		repoDiscovery: Type.Optional(RepoDiscoveryConfig),
 		resourceRegistry: Type.Optional(ResourceRegistryConfig),
 		lsp: Type.Optional(LspConfig),
+		asyncSubagents: Type.Optional(Type.Never({ description: "Removed legacy key. Configure sub-agents in .pi/agents/*.md and model pools in .pi/agents/presets.jsonc." })),
 	},
 	{
 		$id: "https://unpkg.com/pi-ui-extend/schemas/pi-tools-suite.json",

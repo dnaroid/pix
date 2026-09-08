@@ -112,6 +112,33 @@
       },
       "description": "Terminal bell configuration."
     },
+    "commentChecker": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable or disable comment-checker without disabling the whole module."
+        },
+        "strictness": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "conservative"
+            },
+            {
+              "type": "string",
+              "const": "balanced"
+            },
+            {
+              "type": "string",
+              "const": "aggressive"
+            }
+          ],
+          "description": "Comment classification strictness. Defaults to balanced."
+        }
+      },
+      "description": "Settings for the comment-checker module."
+    },
     "dcp": {
       "type": "object",
       "properties": {
@@ -145,6 +172,10 @@
             "enabled": {
               "type": "boolean",
               "description": "Enable manual DCP mode."
+            },
+            "automaticStrategies": {
+              "not": {},
+              "description": "Removed legacy key. Manual mode now has only the explicit enabled flag."
             }
           },
           "description": "Manual mode configuration."
@@ -178,19 +209,33 @@
               "type": "object",
               "patternProperties": {
                 "^.*$": {
-                  "type": "number"
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
                 }
               },
-              "description": "Per-model max context percent overrides."
+              "description": "Per-model max context overrides using the same fraction/token/percent formats."
             },
             "modelMinContextPercent": {
               "type": "object",
               "patternProperties": {
                 "^.*$": {
-                  "type": "number"
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
                 }
               },
-              "description": "Per-model min context percent overrides."
+              "description": "Per-model min context overrides using the same fraction/token/percent formats."
             },
             "maxContextLimit": {
               "anyOf": [
@@ -360,7 +405,7 @@
               "properties": {
                 "enabled": {
                   "type": "boolean",
-                  "description": "Allow bounded automatic summary creation after pressure/opportunity gates."
+                  "description": "Allow autonomous compression after pressure/opportunity gates. Explicit compress calls can still use summarizerModel when summary is omitted."
                 },
                 "patience": {
                   "type": "number",
@@ -372,11 +417,11 @@
                   "items": {
                     "type": "string"
                   },
-                  "description": "Ordered summarizer model refs; empty uses the deterministic extractive summary."
+                  "description": "Ordered model refs used by auto-compress and explicit compress when summary is omitted; empty uses the deterministic extractive summary."
                 },
                 "timeoutMs": {
                   "type": "number",
-                  "description": "Per-summarizer deadline in milliseconds.",
+                  "description": "Per-summarizer deadline in milliseconds for automatic and explicit generated summaries.",
                   "minimum": 1
                 }
               },
@@ -436,6 +481,18 @@
                 }
               },
               "description": "Single bounded emergency cleanup strategy."
+            },
+            "deduplication": {
+              "not": {},
+              "description": "Removed legacy key; no automatic replacement policy maps to it."
+            },
+            "purgeErrors": {
+              "not": {},
+              "description": "Removed legacy key; no automatic replacement policy maps to it."
+            },
+            "autoToolPruning": {
+              "not": {},
+              "description": "Removed legacy key. Use explicit /dcp sweep or DCP compression/emergency policies instead."
             }
           },
           "description": "Bounded DCP emergency strategy."
@@ -446,6 +503,382 @@
             "type": "string"
           },
           "description": "File path glob patterns whose content is protected from pruning."
+        },
+        "modelOverrides": {
+          "type": "object",
+          "patternProperties": {
+            "^.*$": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "debug": {
+                  "type": "boolean"
+                },
+                "debugLog": {
+                  "type": "object",
+                  "properties": {
+                    "maxBytes": {
+                      "type": "number",
+                      "minimum": 1024
+                    },
+                    "maxBackups": {
+                      "type": "number",
+                      "minimum": 1
+                    }
+                  }
+                },
+                "manualMode": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean",
+                      "description": "Enable manual DCP mode."
+                    },
+                    "automaticStrategies": {
+                      "not": {},
+                      "description": "Removed legacy key. Manual mode now has only the explicit enabled flag."
+                    }
+                  },
+                  "description": "Manual mode configuration."
+                },
+                "compress": {
+                  "type": "object",
+                  "properties": {
+                    "maxContextPercent": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ],
+                      "description": "Maximum context percent (0–1 or '80%') before compression triggers."
+                    },
+                    "minContextPercent": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ],
+                      "description": "Target context percent after compression."
+                    },
+                    "modelMaxContextPercent": {
+                      "type": "object",
+                      "patternProperties": {
+                        "^.*$": {
+                          "anyOf": [
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "string"
+                            }
+                          ]
+                        }
+                      },
+                      "description": "Per-model max context overrides using the same fraction/token/percent formats."
+                    },
+                    "modelMinContextPercent": {
+                      "type": "object",
+                      "patternProperties": {
+                        "^.*$": {
+                          "anyOf": [
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "string"
+                            }
+                          ]
+                        }
+                      },
+                      "description": "Per-model min context overrides using the same fraction/token/percent formats."
+                    },
+                    "maxContextLimit": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ],
+                      "description": "Absolute max context tokens or '200k'."
+                    },
+                    "minContextLimit": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ],
+                      "description": "Absolute min context tokens."
+                    },
+                    "modelMaxContextLimits": {
+                      "type": "object",
+                      "patternProperties": {
+                        "^.*$": {
+                          "anyOf": [
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "string"
+                            }
+                          ]
+                        }
+                      },
+                      "description": "Per-model max context limit overrides."
+                    },
+                    "modelMinContextLimits": {
+                      "type": "object",
+                      "patternProperties": {
+                        "^.*$": {
+                          "anyOf": [
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "string"
+                            }
+                          ]
+                        }
+                      },
+                      "description": "Per-model min context limit overrides."
+                    },
+                    "summaryBuffer": {
+                      "type": "boolean",
+                      "description": "Buffer summary output."
+                    },
+                    "nudgeFrequency": {
+                      "type": "number",
+                      "description": "Inject nudge every N context events.",
+                      "minimum": 1
+                    },
+                    "iterationNudgeThreshold": {
+                      "type": "number",
+                      "description": "Nudge after N tool calls since last user message.",
+                      "minimum": 1
+                    },
+                    "nudgeForce": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "strong"
+                        },
+                        {
+                          "type": "string",
+                          "const": "soft"
+                        }
+                      ],
+                      "description": "Nudge intensity."
+                    },
+                    "protectedTools": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Tool outputs protected from pruning."
+                    },
+                    "protectTags": {
+                      "type": "boolean",
+                      "description": "Protect XML-like tags from pruning."
+                    },
+                    "protectUserMessages": {
+                      "type": "boolean",
+                      "description": "Protect user messages from pruning."
+                    },
+                    "autoCandidates": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean",
+                          "description": "Enable auto candidate selection for compression."
+                        },
+                        "minContextPercent": {
+                          "type": "number",
+                          "description": "Minimum context usage to trigger auto-candidates.",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "keepRecentTurns": {
+                          "type": "number",
+                          "description": "Number of recent turns to keep.",
+                          "minimum": 0
+                        },
+                        "minMessages": {
+                          "type": "number",
+                          "description": "Minimum messages before auto-candidate selection.",
+                          "minimum": 0
+                        },
+                        "minTokens": {
+                          "type": "number",
+                          "description": "Minimum tokens for auto-candidate selection.",
+                          "minimum": 0
+                        }
+                      },
+                      "description": "Auto-candidate selection for compression."
+                    },
+                    "messageMode": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean",
+                          "description": "Enable message-mode compression suggestions."
+                        },
+                        "minContextPercent": {
+                          "type": "number",
+                          "description": "Minimum context usage to trigger message mode.",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "keepRecentTurns": {
+                          "type": "number",
+                          "description": "Recent turns to keep.",
+                          "minimum": 0
+                        },
+                        "mediumTokens": {
+                          "type": "number",
+                          "description": "Token threshold for medium-quality summary.",
+                          "minimum": 0
+                        },
+                        "highTokens": {
+                          "type": "number",
+                          "description": "Token threshold for high-quality summary.",
+                          "minimum": 0
+                        },
+                        "maxSuggestions": {
+                          "type": "number",
+                          "description": "Maximum compression suggestions.",
+                          "minimum": 0
+                        }
+                      },
+                      "description": "Message-mode compression configuration."
+                    },
+                    "autoCompress": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean",
+                          "description": "Allow autonomous compression after pressure/opportunity gates. Explicit compress calls can still use summarizerModel when summary is omitted."
+                        },
+                        "patience": {
+                          "type": "number",
+                          "description": "Completed actionable opportunities allowed before automatic compression.",
+                          "minimum": 0
+                        },
+                        "summarizerModel": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Ordered model refs used by auto-compress and explicit compress when summary is omitted; empty uses the deterministic extractive summary."
+                        },
+                        "timeoutMs": {
+                          "type": "number",
+                          "description": "Per-summarizer deadline in milliseconds for automatic and explicit generated summaries.",
+                          "minimum": 1
+                        }
+                      },
+                      "description": "Bounded automatic compression fallback."
+                    }
+                  },
+                  "description": "Compression trigger and behavior configuration."
+                },
+                "strategies": {
+                  "type": "object",
+                  "properties": {
+                    "emergencyCurrentTurnPruning": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean",
+                          "description": "Enable bounded same-turn emergency planning and last-resort output pruning."
+                        },
+                        "hardContextPercent": {
+                          "type": "number",
+                          "description": "Context fraction that activates hard emergency pressure.",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "targetContextPercent": {
+                          "type": "number",
+                          "description": "Context fraction the emergency path attempts to recover toward.",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "patience": {
+                          "type": "number",
+                          "description": "Completed emergency opportunities allowed before last-resort pruning.",
+                          "minimum": 0
+                        },
+                        "keepRecentToolPairs": {
+                          "type": "number",
+                          "description": "Newest complete tool-call/result pairs never selected by emergency cleanup.",
+                          "minimum": 0
+                        },
+                        "minOutputTokens": {
+                          "type": "number",
+                          "description": "Minimum tool-result size eligible for emergency pruning.",
+                          "minimum": 0
+                        },
+                        "maxSuggestions": {
+                          "type": "number",
+                          "description": "Maximum emergency message candidates shown in a reminder.",
+                          "minimum": 0
+                        },
+                        "protectedTools": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Additional tools protected from emergency pruning and manual sweep."
+                        }
+                      },
+                      "description": "Single bounded emergency cleanup strategy."
+                    },
+                    "deduplication": {
+                      "not": {},
+                      "description": "Removed legacy key; no automatic replacement policy maps to it."
+                    },
+                    "purgeErrors": {
+                      "not": {},
+                      "description": "Removed legacy key; no automatic replacement policy maps to it."
+                    },
+                    "autoToolPruning": {
+                      "not": {},
+                      "description": "Removed legacy key. Use explicit /dcp sweep or DCP compression/emergency policies instead."
+                    }
+                  },
+                  "description": "Bounded DCP emergency strategy."
+                },
+                "protectedFilePatterns": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "pruneNotification": {
+                  "not": {},
+                  "description": "Removed legacy key; pruning notifications are no longer configurable."
+                }
+              },
+              "description": "Partial DCP override applied to a matching provider/model or bare-model key. Keys support * and ? wildcards."
+            }
+          },
+          "description": "Per-model partial DCP overrides. Exact keys take precedence over matching wildcards."
+        },
+        "pruneNotification": {
+          "not": {},
+          "description": "Removed legacy key; pruning notifications are no longer configurable."
         }
       },
       "description": "DCP (Dynamic Context Pruning) configuration."
@@ -603,7 +1036,7 @@
               "const": "enforce"
             }
           ],
-          "description": "Context Gateway mode. P01 implements off/observe; enforce is parsed but explicitly refused until later integration gates."
+          "description": "Context Gateway mode. observe is passive; enforce only compacts proven complete simple test/build output and otherwise passes results through."
         },
         "budgets": {
           "type": "object",
@@ -612,34 +1045,34 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 67108864,
-              "description": "Initial inline byte budget used by Context Gateway policy experiments. Default 8192."
+              "description": "Maximum inline size for a proven compact representation. Default 8192."
             },
             "maxResultBytes": {
               "type": "integer",
               "minimum": 1,
               "maximum": 67108864,
-              "description": "Experimental delivered-result byte budget. P01 observe measures the available tool-result content boundary; later shaping must account for the final provider-visible serialization. Default 8192."
+              "description": "Budget for shell/other result classes. Selective enforce currently compacts only recognised complete simple test/build output. Default 8192."
             },
             "maxExactReadBytes": {
               "type": "integer",
               "minimum": 1,
               "maximum": 67108864,
-              "description": "Future exact-read byte budget. Default 32768."
+              "description": "Read-class observation budget. Reads remain passthrough because snapshot-safe recovery is not available. Default 32768."
             },
             "maxSearchBytes": {
               "type": "integer",
               "minimum": 1,
               "maximum": 67108864,
-              "description": "Future search-delivery byte budget. Default 8192."
+              "description": "Repo-search/AST/structure observation budget. Gateway does not post-hoc truncate producer output. Default 8192."
             },
             "maxSearchMatches": {
               "type": "integer",
               "minimum": 1,
               "maximum": 1000,
-              "description": "Future search match budget. Default 12."
+              "description": "Reserved search-match policy budget. Default 12."
             }
           },
-          "description": "Context Gateway delivery budgets. In P01 only maxResultBytes is used for passive observe accounting."
+          "description": "Context Gateway class-specific observation and selective-enforcement budgets."
         }
       },
       "description": "Context Gateway configuration. Default mode is off."
@@ -795,6 +1228,10 @@
         }
       },
       "description": "Language Server Protocol configuration."
+    },
+    "asyncSubagents": {
+      "not": {},
+      "description": "Removed legacy key. Configure sub-agents in .pi/agents/*.md and model pools in .pi/agents/presets.jsonc."
     }
   },
   "$id": "https://unpkg.com/pi-ui-extend/schemas/pi-tools-suite.json",

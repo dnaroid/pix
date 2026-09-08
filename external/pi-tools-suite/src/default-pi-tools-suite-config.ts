@@ -18,8 +18,9 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
     "sessionHygiene": true,
     "notify": true
   },
-  // Context Gateway is passive/off by default. P01 supports off/observe only;
-  // enforce is explicitly refused until capture/store/reader integration lands.
+  // Context Gateway is off by default. observe is passive telemetry; enforce
+  // selectively compacts only recognised complete simple test/build output.
+  // Reads and repo results remain producer-owned passthrough/native-compact.
   "contextGateway": {
     "mode": "off",
     "budgets": {
