@@ -255,18 +255,18 @@ export function registerCompressTool(
         Type.Object({
           startId: Type.String({
             description:
-              "First ID (mNNN/bN); never start inside a tool group.",
+              "First ID (mNNN/bN); never start inside a tool group—include its calling assistant.",
           }),
           endId: Type.String({
             description:
-              "Last ID (mNNN/bN); include the final tool group's last result.",
+              "Last ID (mNNN/bN); include all results of the final tool group, including parallel calls.",
           }),
           summary: Type.String({
             description:
               "Continuation-focused technical summary; avoid raw JSON/code/diffs unless a short literal is required",
           }),
         }),
-        { description: "Contiguous ranges; include each tool-calling assistant and all its results, including parallel calls." },
+        { description: "One or more ranges to compress" },
       )),
       messages: Type.Optional(Type.Array(
         Type.Object({

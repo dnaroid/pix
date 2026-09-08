@@ -1727,13 +1727,13 @@ describe("DCP pruning effectiveness", () => {
     let registeredTool: any;
     registerRuntimeCompressTool({ registerTool: (tool: any) => { registeredTool = tool } } as any, createState(), config());
 
-    const ranges = JSON.parse(JSON.stringify(registeredTool.parameters)).properties.ranges;
-    expect(ranges.description).toContain("each tool-calling assistant and all its results, including parallel calls");
-    expect(ranges.items.properties.startId.description).toContain("never start inside a tool group");
-    expect(ranges.items.properties.endId.description).toContain("final tool group's last result");
+    const parameterContract = JSON.stringify(registeredTool.parameters);
+    expect(parameterContract).toContain("never start inside a tool group");
+    expect(parameterContract).toContain("calling assistant");
+    expect(parameterContract).toContain("all results of the final tool group");
+    expect(parameterContract).toContain("parallel calls");
     expect(registeredTool.description).toContain("For `ranges`, never split a tool group");
-    const boundaryGuidance = [ranges.description, ranges.items.properties.startId.description, ranges.items.properties.endId.description].join("\n");
-    expect(boundaryGuidance.length).toBeLessThanOrEqual(220);
+    expect(parameterContract.length).toBeLessThanOrEqual(1400);
   });
 
   test("range compression rejects a selection that cuts through a parallel tool group", async () => {
