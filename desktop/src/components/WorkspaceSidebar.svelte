@@ -17,6 +17,11 @@
   import X from "@lucide/svelte/icons/x";
   import { onMount, tick } from "svelte";
   import {
+    extractAttachmentMarkers,
+    textWithAttachmentMarkers,
+    type Attachment,
+  } from "../lib/attachments";
+  import {
     TASK_STATUSES,
     TASK_TYPES,
     taskStatusLabel,
@@ -34,6 +39,7 @@
   import { sessionTodoCounts, type SessionTodoSnapshot } from "../lib/session-todos";
   import { sessionSubagentCount, type SessionSubagentSnapshot } from "../lib/session-subagents";
   import RegistryPanel from "./RegistryPanel.svelte";
+  import PromptComposer from "./PromptComposer.svelte";
   import SessionActivityPanel from "./SessionActivityPanel.svelte";
 
   type TaskDraft = {
@@ -80,6 +86,9 @@
     onCreate,
     onUpdate,
     onStatusChange,
+    onChooseTaskAttachments,
+    onPasteTaskAttachments,
+    onOpenTaskAttachment,
     onDelete,
     onReorder,
     onRun,
@@ -104,6 +113,9 @@
     onCreate: (draft: TaskDraft) => void;
     onUpdate: (taskId: string, draft: TaskDraft) => void;
     onStatusChange: (taskId: string, status: ProjectTaskStatus) => void;
+    onChooseTaskAttachments: (current: readonly Attachment[]) => Promise<Attachment[]>;
+    onPasteTaskAttachments: (files: readonly File[], current: readonly Attachment[]) => Promise<Attachment[]>;
+    onOpenTaskAttachment: (attachment: Attachment) => void;
     onDelete: (taskId: string) => void;
     onReorder: (
       taskId: string,
@@ -134,6 +146,7 @@
   let deleteTaskId = $state<string | null>(null);
   let title = $state("");
   let description = $state("");
+  let editorAttachments = $state<Attachment[]>([]);
   let taskType = $state<ProjectTaskType>("feature");
   let statusMenuTaskId = $state<string | null>(null);
   let draggedTaskId = $state<string | null>(null);
@@ -289,6 +302,7 @@
     editingTaskId = null;
     title = "";
     description = "";
+    editorAttachments = [];
     taskType = "feature";
     editorOpen = true;
     void focusEditorTitle();
@@ -298,7 +312,9 @@
     statusMenuTaskId = null;
     editingTaskId = task.id;
     title = task.title;
-    description = task.description ?? "";
+    const parsedDescription = extractAttachmentMarkers(task.description ?? "", `task-editor:${task.id}`);
+    description = parsedDescription.text;
+    editorAttachments = parsedDescription.attachments;
     taskType = task.type;
     editorOpen = true;
     void focusEditorTitle();
@@ -309,18 +325,34 @@
     titleInput?.focus();
   }
 
-  function submitEditor(event: SubmitEvent): void {
-    event.preventDefault();
+  function submitEditor(): void {
     const trimmedTitle = title.trim();
     if (!trimmedTitle || busy) return;
+    const storedDescription = textWithAttachmentMarkers(description, editorAttachments);
     const draft: TaskDraft = {
       title: trimmedTitle,
-      ...(description.trim() ? { description: description.trim() } : {}),
+      ...(storedDescription ? { description: storedDescription } : {}),
       type: taskType,
     };
     if (editingTaskId) onUpdate(editingTaskId, draft);
     else onCreate(draft);
     editorOpen = false;
+  }
+
+  async function chooseEditorAttachments(): Promise<void> {
+    const current = editorAttachments;
+    const next = await onChooseTaskAttachments(current);
+    if (editorOpen && editorAttachments === current) editorAttachments = next;
+  }
+
+  async function pasteEditorAttachments(files: readonly File[]): Promise<void> {
+    const current = editorAttachments;
+    const next = await onPasteTaskAttachments(files, current);
+    if (editorOpen && editorAttachments === current) editorAttachments = next;
+  }
+
+  function removeEditorAttachment(id: string): void {
+    editorAttachments = editorAttachments.filter((attachment) => attachment.id !== id);
   }
 
   function confirmDelete(): void {
@@ -776,18 +808,41 @@
       aria-label={editingTaskId ? "Edit task" : "Add task"}
     >
       <div class="flex items-center justify-between border-b border-sidebar-border px-3">
-        <strong class="text-xs font-semibold">{editingTaskId ? "Edit task" : "Add task"}</strong>
+        <strong class="text-sm font-semibold">{editingTaskId ? "Edit task" : "Add task"}</strong>
         <button class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring" type="button" aria-label="Close task editor" onclick={() => editorOpen = false}><X class="h-4 w-4" aria-hidden="true" /></button>
       </div>
-      <form class="min-h-0 space-y-3 overflow-y-auto p-3" onsubmit={submitEditor}>
-        <label class="block text-[10px] font-medium text-muted-foreground">Title<input class="mt-1 h-8 w-full rounded-md border border-input bg-background px-2.5 text-xs text-foreground focus-visible:outline-2 focus-visible:outline-ring" bind:this={titleInput} bind:value={title} maxlength="200" required /></label>
-        <label class="block text-[10px] font-medium text-muted-foreground">Description<textarea class="mt-1 min-h-20 w-full resize-y rounded-md border border-input bg-background px-2.5 py-2 text-xs text-foreground focus-visible:outline-2 focus-visible:outline-ring" bind:value={description} maxlength="10000" rows="4"></textarea></label>
-        <label class="block text-[10px] font-medium text-muted-foreground">Type<span class="relative mt-1 block"><select class="h-8 w-full appearance-none rounded-md border border-input bg-background py-0 pr-7 pl-2 text-xs text-foreground shadow-none hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring" bind:value={taskType}>{#each TASK_TYPES as type}<option value={type}>{taskTypeLabel(type)}</option>{/each}</select><ChevronDown class="pointer-events-none absolute top-1/2 right-2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /></span></label>
-        <div class="flex justify-end gap-2 pt-1">
-          <button class="h-8 rounded-md px-3 text-xs text-muted-foreground hover:bg-sidebar-accent focus-visible:outline-2 focus-visible:outline-ring" type="button" onclick={() => editorOpen = false}>Cancel</button>
-          <button class="h-8 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="submit" disabled={!title.trim() || busy}>{editingTaskId ? "Save" : "Add task"}</button>
+      <div class="min-h-0 space-y-3 overflow-y-auto p-3">
+        <label class="block text-xs font-medium text-muted-foreground">Title<input class="mt-1 h-9 w-full rounded-md border border-input bg-background px-2.5 text-sm text-foreground focus-visible:outline-2 focus-visible:outline-ring" bind:this={titleInput} bind:value={title} maxlength="200" required /></label>
+        <div class="space-y-1">
+          <span class="block text-xs font-medium text-muted-foreground">Description</span>
+          <PromptComposer
+            bind:promptText={description}
+            attachments={editorAttachments}
+            variant="editor"
+            placeholder="Describe the task…"
+            ariaLabel="Task description"
+            activeSessionId={null}
+            ready={!busy}
+            promptRunning={false}
+            dragActive={false}
+            autocompleteEnabled={false}
+            autocompleteDebounceMs={0}
+            onAutocomplete={async () => ""}
+            onSubmit={() => {}}
+            onDefer={() => {}}
+            onCancel={() => {}}
+            onChooseAttachments={chooseEditorAttachments}
+            onPasteAttachments={pasteEditorAttachments}
+            onRemoveAttachment={removeEditorAttachment}
+            onOpenAttachment={onOpenTaskAttachment}
+          />
         </div>
-      </form>
+        <label class="block text-xs font-medium text-muted-foreground">Type<span class="relative mt-1 block"><select class="h-9 w-full appearance-none rounded-md border border-input bg-background py-0 pr-8 pl-2.5 text-sm text-foreground shadow-none hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring" bind:value={taskType}>{#each TASK_TYPES as type}<option value={type}>{taskTypeLabel(type)}</option>{/each}</select><ChevronDown class="pointer-events-none absolute top-1/2 right-2.5 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /></span></label>
+        <div class="flex justify-end gap-2 pt-1">
+          <button class="h-9 rounded-md px-3 text-sm text-muted-foreground hover:bg-sidebar-accent focus-visible:outline-2 focus-visible:outline-ring" type="button" onclick={() => editorOpen = false}>Cancel</button>
+          <button class="h-9 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" onclick={submitEditor} disabled={!title.trim() || busy}>{editingTaskId ? "Save" : "Add task"}</button>
+        </div>
+      </div>
     </div>
   {/if}
 

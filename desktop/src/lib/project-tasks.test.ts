@@ -4,8 +4,10 @@ import {
   filterProjectTasks,
   moveProjectTask,
   parseTaskDocument,
+  projectTaskPromptDraft,
   type ProjectTask,
 } from "./project-tasks";
+import { attachmentMarker } from "./attachments";
 
 const task: ProjectTask = {
   id: "task-1",
@@ -35,6 +37,20 @@ describe("task list helpers", () => {
     expect(buildTaskPrompt(task)).toContain("Type: Bug");
     expect(buildTaskPrompt(task)).not.toContain("Priority:");
     expect(buildTaskPrompt(task)).toContain("Description:\nKeep the active workspace selected.");
+  });
+
+  it("separates persisted task attachments from prompt text", () => {
+    const withAttachment = {
+      ...task,
+      description: `Review the screenshot\n\n${attachmentMarker("/tmp/task-shot.png")}`,
+    };
+    const draft = projectTaskPromptDraft(withAttachment);
+
+    expect(draft.text).toContain("Description:\nReview the screenshot");
+    expect(draft.text).not.toContain("Pix attachment");
+    expect(draft.attachments).toEqual([
+      expect.objectContaining({ name: "task-shot.png", kind: "image", path: "/tmp/task-shot.png" }),
+    ]);
   });
 
   it("filters without changing source order", () => {

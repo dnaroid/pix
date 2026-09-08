@@ -122,6 +122,16 @@ export function attachmentMarker(path: string): string {
   return `${PIX_ATTACHMENT_MARKER_PREFIX}${fileUriFromPath(path)}]`;
 }
 
+export function textWithAttachmentMarkers(
+  text: string,
+  attachments: readonly Attachment[],
+): string {
+  const markers = [...new Set(
+    attachments.flatMap((attachment) => attachment.path ? [attachmentMarker(attachment.path)] : []),
+  )];
+  return [text.trim(), markers.join("\n")].filter(Boolean).join("\n\n");
+}
+
 export function extractAttachmentMarkers(
   text: string,
   idPrefix: string,

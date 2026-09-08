@@ -131,10 +131,10 @@
     type PreviewScrollPosition,
   } from "./lib/preview-history";
   import {
-    buildTaskPrompt,
     EMPTY_TASK_DOCUMENT,
     moveProjectTask,
     parseTaskDocument,
+    projectTaskPromptDraft,
     type ProjectTask,
     type ProjectTaskDocument,
     type ProjectTaskDropPosition,
@@ -1339,6 +1339,9 @@
     errorMessage = null;
     let taskSessionId: string | undefined;
     try {
+      const taskPrompt = projectTaskPromptDraft(task);
+      await Promise.all(taskPrompt.attachments.map((attachment) => prepareTranscriptAttachment(attachment)));
+      const payload = await buildPromptPayload(taskPrompt.text, taskPrompt.attachments);
       if (client !== requestClient || workspace !== requestWorkspace) return;
       const response = await requestClient.newSession(requestWorkspace);
       taskSessionId = response.sessionId;
@@ -1369,12 +1372,16 @@
       });
       if (!saved || client !== requestClient || workspace !== requestWorkspace) return;
 
-      const prompt = buildTaskPrompt(task);
       operationRunning = false;
-      transcript = appendLocalUserMessage(transcript, prompt, `local:${++localMessageId}`, []);
+      transcript = appendLocalUserMessage(
+        transcript,
+        taskPrompt.text,
+        `local:${++localMessageId}`,
+        taskPrompt.attachments,
+      );
       transcriptBySessionId.set(response.sessionId, transcript);
       await scrollToLatest();
-      await runPromptRequest(requestClient, response.sessionId, [{ type: "text", text: prompt }]);
+      await runPromptRequest(requestClient, response.sessionId, payload.blocks, payload.fileImages);
       void refreshSessions();
     } catch (error) {
       reportError(error);
@@ -1819,6 +1826,78 @@
     });
   }
 
+  async function chooseTaskAttachments(current: readonly Attachment[]): Promise<Attachment[]> {
+    if (!workspace || operationRunning) return [...current];
+    try {
+      const selected = await open({
+        directory: false,
+        multiple: true,
+        title: "Attach files to task",
+        defaultPath: workspace,
+      });
+      if (!selected) return [...current];
+      return await addTaskAttachmentPaths(current, typeof selected === "string" ? [selected] : selected);
+    } catch (error) {
+      reportError(error);
+      return [...current];
+    }
+  }
+
+  async function addTaskAttachmentPaths(
+    current: readonly Attachment[],
+    paths: readonly string[],
+  ): Promise<Attachment[]> {
+    const existingPaths = new Set(current.flatMap((attachment) => attachment.path ? [attachment.path] : []));
+    const available = MAX_ATTACHMENTS - current.length;
+    if (available <= 0) {
+      if (paths.length > 0) errorMessage = `Attach at most ${MAX_ATTACHMENTS} files.`;
+      return [...current];
+    }
+    const candidates = paths.filter((path) => !existingPaths.has(path)).slice(0, available);
+    if (candidates.length === 0) return [...current];
+    try {
+      const files = await invoke<AttachmentFile[]>("inspect_attachments", { paths: candidates });
+      const additions = files.map((file) => attachmentFromFile(file, nextAttachmentId()));
+      if (candidates.length < paths.length) errorMessage = `Only the first ${MAX_ATTACHMENTS} files were attached.`;
+      return [...current, ...additions];
+    } catch (error) {
+      reportError(error);
+      return [...current];
+    }
+  }
+
+  async function pasteTaskAttachments(
+    files: readonly File[],
+    current: readonly Attachment[],
+  ): Promise<Attachment[]> {
+    if (!workspace || operationRunning || files.length === 0) return [...current];
+    const requestWorkspace = workspace;
+    const available = MAX_ATTACHMENTS - current.length;
+    if (available <= 0) {
+      errorMessage = `Attach at most ${MAX_ATTACHMENTS} files.`;
+      return [...current];
+    }
+    try {
+      const additions: Attachment[] = [];
+      for (const file of files.slice(0, available)) {
+        if (file.size > MAX_EMBEDDED_ATTACHMENT_BYTES) {
+          throw new Error(`${file.name} is too large to paste (maximum 25 MB).`);
+        }
+        const cached = await cachePastedTaskAttachment(file, requestWorkspace);
+        if (workspace !== requestWorkspace) return [...current];
+        const inferredMimeType = mimeTypeForName(file.name);
+        const mimeType = file.type || inferredMimeType;
+        const base = attachmentFromFile(cached, nextAttachmentId());
+        additions.push({ ...base, kind: attachmentKind(mimeType), mimeType });
+      }
+      if (files.length > available) errorMessage = `Only the first ${MAX_ATTACHMENTS} files were attached.`;
+      return [...current, ...additions];
+    } catch (error) {
+      reportError(error);
+      return [...current];
+    }
+  }
+
   async function chooseAttachments(): Promise<void> {
     if (!activeSessionId || operationRunning) return;
     try {
@@ -2165,6 +2244,19 @@
     const bytes = new Uint8Array(await file.arrayBuffer());
     return invoke<AttachmentFile>("cache_attachment", bytes, {
       headers: { "x-pix-attachment-name": utf8Base64(file.name) },
+    });
+  }
+
+  async function cachePastedTaskAttachment(
+    file: File,
+    requestWorkspace: string,
+  ): Promise<AttachmentFile> {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    return invoke<AttachmentFile>("cache_task_attachment", bytes, {
+      headers: {
+        "x-pix-attachment-name": utf8Base64(file.name),
+        "x-pix-workspace": utf8Base64(requestWorkspace),
+      },
     });
   }
 
@@ -3020,6 +3112,9 @@
       onCreate={createProjectTask}
       onUpdate={updateProjectTask}
       onStatusChange={updateProjectTaskStatus}
+      onChooseTaskAttachments={chooseTaskAttachments}
+      onPasteTaskAttachments={pasteTaskAttachments}
+      onOpenTaskAttachment={(attachment) => void activateAttachment(attachment)}
       onDelete={deleteProjectTask}
       onReorder={reorderProjectTask}
       onRun={(task) => void runProjectTask(task)}

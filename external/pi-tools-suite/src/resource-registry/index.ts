@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { promises as fs } from "node:fs";
+import { existsSync, promises as fs } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join, relative } from "node:path";
+import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { applyEdits, modify } from "jsonc-parser";
 
@@ -335,6 +335,12 @@ function loadRuntimeConfig(cwd: string): RegistryRuntime {
 	const config = loadPiToolsSuiteConfig([], { cwd }).resourceRegistry;
 	if (!config.remote) {
 		throw new Error(`Resource registry is not configured. Run /${COMMAND} configure <git-url> [branch].`);
+	}
+	if (isAbsolute(config.remote) && !existsSync(config.remote)) {
+		throw new Error(
+			`Configured resource registry remote does not exist: ${config.remote}. `
+			+ `Run /${COMMAND} configure <git-url> [branch] to replace it.`,
+		);
 	}
 	validateBranch(config.branch);
 	return { remote: config.remote, branch: config.branch, cacheDir: cacheRoot() };

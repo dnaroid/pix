@@ -20,6 +20,18 @@ describe("pi-tools-suite config", () => {
 		expect(getPiToolsSuiteUserConfigPath(homeDir)).toBe(join(homeDir, ".config", "pi", "pi-tools-suite.jsonc"));
 	});
 
+	test("uses HOME for the default user config path even when the runtime homedir is cached", () => {
+		const originalHome = process.env.HOME;
+		const homeDir = tempDir();
+		try {
+			process.env.HOME = homeDir;
+			expect(getPiToolsSuiteUserConfigPath()).toBe(join(homeDir, ".config", "pi", "pi-tools-suite.jsonc"));
+		} finally {
+			if (originalHome === undefined) delete process.env.HOME;
+			else process.env.HOME = originalHome;
+		}
+	});
+
 	test("disables modules from config lists and maps", () => {
 		const homeDir = tempDir();
 		const cwd = tempDir();

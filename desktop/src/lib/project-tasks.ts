@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { extractAttachmentMarkers, type Attachment } from "./attachments";
 
 export const TASK_DOCUMENT_VERSION = 1 as const;
 export const TASK_SCHEMA_URL = "https://unpkg.com/pi-ui-extend/schemas/tasks.json";
@@ -85,17 +86,25 @@ export function parseTaskDocument(value: unknown): ProjectTaskDocument {
   throw new Error(`Invalid .pi/tasks.jsonc${path}: ${issue?.message ?? "unknown error"}`);
 }
 
-export function buildTaskPrompt(task: ProjectTask): string {
+export function projectTaskPromptDraft(task: ProjectTask): {
+  text: string;
+  attachments: Attachment[];
+} {
+  const parsedDescription = extractAttachmentMarkers(task.description ?? "", `task:${task.id}`);
   const lines = [
     "Work on this project task.",
     "",
     `Type: ${taskTypeLabel(task.type)}`,
     `Task: ${task.title}`,
   ];
-  const description = task.description?.trim();
+  const description = parsedDescription.text.trim();
   if (description) lines.push("", "Description:", description);
   lines.push("", "Inspect the existing implementation, make the changes, and verify the result.");
-  return lines.join("\n");
+  return { text: lines.join("\n"), attachments: parsedDescription.attachments };
+}
+
+export function buildTaskPrompt(task: ProjectTask): string {
+  return projectTaskPromptDraft(task).text;
 }
 
 export function filterProjectTasks(

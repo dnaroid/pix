@@ -48,7 +48,7 @@ const DEFAULT_DISABLED_MODULES = new Set<string>(["credential-firewall", "trunca
 const DEFAULT_TODO_THINKING_OVERRIDES = new Map<string, TodoThinkingLevel>([["zai/glm-5.3", "max"]]);
 const DEFAULT_RESOURCE_REGISTRY_BRANCH = "main";
 
-export function getPiToolsSuiteUserConfigPath(homeDir = homedir()): string {
+export function getPiToolsSuiteUserConfigPath(homeDir = process.env.HOME?.trim() || homedir()): string {
 	return join(homeDir, ".config", "pi", "pi-tools-suite.jsonc");
 }
 

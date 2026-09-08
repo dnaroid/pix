@@ -131,6 +131,24 @@ describe("resource registry", () => {
 		expect([...commands.keys()]).toEqual(["registry"]);
 	});
 
+	test("reports an actionable error for a configured local registry that no longer exists", () => {
+		const root = tempRoot();
+		const home = path.join(root, "home");
+		const project = path.join(root, "project");
+		fs.mkdirSync(path.join(home, ".config", "pi"), { recursive: true });
+		fs.mkdirSync(project, { recursive: true });
+		process.env.HOME = home;
+		const missingRemote = path.join(root, "deleted-registry.git");
+		fs.writeFileSync(
+			path.join(home, ".config", "pi", "pi-tools-suite.jsonc"),
+			JSON.stringify({ resourceRegistry: { remote: missingRemote, branch: "main" } }),
+		);
+
+		expect(() => __test.loadRuntimeConfig(project)).toThrow(
+			`Configured resource registry remote does not exist: ${missingRemote}. Run /registry configure <git-url> [branch] to replace it.`,
+		);
+	});
+
 	test("publishes structured registry snapshots for the Desktop RPC manager", async () => {
 		const root = tempRoot();
 		const home = path.join(root, "home");
@@ -145,6 +163,7 @@ describe("resource registry", () => {
 		const command = h.commands.get("registry");
 
 		await command.handler(`configure ${remote} main`, h.ctx);
+		expect(fs.readFileSync(path.join(home, ".config", "pi", "pi-tools-suite.jsonc"), "utf8")).toContain(remote);
 		await command.handler("rpc refresh", h.ctx);
 
 		const refreshWidget = h.widgets.at(-1);

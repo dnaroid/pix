@@ -419,6 +419,69 @@ async fn cache_attachment(
 }
 
 #[tauri::command]
+async fn cache_task_attachment(
+    app: AppHandle,
+    request: tauri::ipc::Request<'_>,
+) -> Result<AttachmentFile, String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("pasted task attachment body must be binary".to_owned());
+    };
+    if bytes.len() as u64 > MAX_ATTACHMENT_BYTES {
+        return Err("pasted task attachment is too large (maximum 25 MB)".to_owned());
+    }
+    let encoded_name = request
+        .headers()
+        .get("x-pix-attachment-name")
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| "missing pasted task attachment name".to_owned())?;
+    let encoded_workspace = request
+        .headers()
+        .get("x-pix-workspace")
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| "missing task attachment workspace".to_owned())?;
+    let name = String::from_utf8(
+        BASE64
+            .decode(encoded_name)
+            .map_err(|error| format!("invalid pasted task attachment name: {error}"))?,
+    )
+    .map_err(|_| "pasted task attachment name is not valid UTF-8".to_owned())?;
+    let workspace = String::from_utf8(
+        BASE64
+            .decode(encoded_workspace)
+            .map_err(|error| format!("invalid task attachment workspace: {error}"))?,
+    )
+    .map_err(|_| "task attachment workspace is not valid UTF-8".to_owned())?;
+    let bytes = bytes.clone();
+    run_blocking(move || {
+        let root = canonical_workspace(Path::new(&workspace))?;
+        let project_dir = root.join(".pi");
+        if !project_dir.exists() {
+            fs::create_dir(&project_dir)
+                .map_err(|error| format!("failed to create {}: {error}", project_dir.display()))?;
+        }
+        let project_dir = canonical_project_directory(&root, &project_dir)?;
+        let directory = project_dir.join("task-attachments");
+        if !directory.exists() {
+            fs::create_dir(&directory)
+                .map_err(|error| format!("failed to create {}: {error}", directory.display()))?;
+        }
+        let directory = canonical_project_directory(&root, &directory)?;
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let sequence = ATTACHMENT_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let path = directory.join(format!("{stamp}-{sequence}-{}", safe_file_name(&name)));
+        fs::write(&path, bytes)
+            .map_err(|error| format!("failed to persist task attachment {name}: {error}"))?;
+        let state = app.state::<AttachmentPathState>();
+        let canonical = state.approve_cached(&app, &path)?;
+        attachment_file(&canonical)
+    })
+    .await
+}
+
+#[tauri::command]
 async fn open_attachment(app: AppHandle, path: String) -> Result<(), String> {
     run_blocking(move || {
         let approved = app
@@ -1527,6 +1590,7 @@ pub fn run() {
             inspect_attachments,
             read_attachment_base64,
             cache_attachment,
+            cache_task_attachment,
             open_attachment,
             open_local_file,
             read_project_file,

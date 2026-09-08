@@ -6,6 +6,7 @@ import {
   filePathFromUri,
   fileUriFromPath,
   mimeTypeForName,
+  textWithAttachmentMarkers,
 } from "./attachments";
 
 describe("attachments", () => {
@@ -39,6 +40,24 @@ describe("attachments", () => {
         kind: "video",
         path: "/tmp/demo.webm",
       }),
+    ]);
+  });
+
+  it("persists attachment paths alongside editable text", () => {
+    const stored = textWithAttachmentMarkers("Task details", [
+      {
+        id: "a1",
+        name: "spec.png",
+        kind: "image",
+        mimeType: "image/png",
+        path: "/tmp/spec.png",
+      },
+    ]);
+    const parsed = extractAttachmentMarkers(stored, "task:1");
+
+    expect(parsed.text).toBe("Task details");
+    expect(parsed.attachments).toEqual([
+      expect.objectContaining({ name: "spec.png", path: "/tmp/spec.png", kind: "image" }),
     ]);
   });
 });

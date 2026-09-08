@@ -42,6 +42,9 @@
   let {
     promptText = $bindable(""),
     attachments,
+    variant = "prompt",
+    placeholder,
+    ariaLabel,
     availableCommands = [],
     activeSessionId,
     ready,
@@ -61,6 +64,9 @@
   }: {
     promptText?: string;
     attachments: readonly Attachment[];
+    variant?: "prompt" | "editor";
+    placeholder?: string;
+    ariaLabel?: string;
     availableCommands?: readonly AvailableCommand[];
     activeSessionId: string | null;
     ready: boolean;
@@ -101,6 +107,7 @@
   });
 
   const previewing = $derived(!!questionMode && questionMode.state.activeTab === questionMode.questions.length);
+  const editorMode = $derived(variant === "editor" && !questionMode);
   const currentQuestion = $derived(
     questionMode && !previewing ? questionMode.questions[questionMode.state.activeTab] : undefined,
   );
@@ -120,7 +127,7 @@
   const textareaValue = $derived(composerText());
   const hasQueueableDraft = $derived(!questionMode && (promptText.trim().length > 0 || attachments.length > 0));
   const slashQuery = $derived.by(() => {
-    if (!ready || !activeSessionId || promptRunning || questionMode || composing || attachments.length > 0) {
+    if (editorMode || !ready || !activeSessionId || promptRunning || questionMode || composing || attachments.length > 0) {
       return undefined;
     }
     if (dismissedSlashDraft === promptText) return undefined;
@@ -148,6 +155,7 @@
   }
 
   function composerPlaceholder(): string {
+    if (placeholder) return placeholder;
     if (questionMode) return "Type a custom answer or paste an image…";
     return activeSessionId
       ? "Ask Pix to change, explain, or investigate…"
@@ -162,7 +170,7 @@
       selectionStart: target?.selectionStart ?? text.length,
       selectionEnd: target?.selectionEnd ?? text.length,
       hasAttachments: attachments.length > 0,
-      enabled: !questionMode && autocompleteEnabled && ready && !!activeSessionId && !composing,
+      enabled: !editorMode && !questionMode && autocompleteEnabled && ready && !!activeSessionId && !composing,
     };
   }
 
@@ -292,7 +300,7 @@
   }
 
   function handleKeydown(event: KeyboardEvent): void {
-    if (!questionMode && slashMenuOpen) {
+    if (!editorMode && !questionMode && slashMenuOpen) {
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault();
         const direction = event.key === "ArrowDown" ? 1 : -1;
@@ -320,7 +328,8 @@
       }
     }
     if (
-      !questionMode
+      !editorMode
+      && !questionMode
       && event.key === "Tab"
       && !event.shiftKey
       && !event.ctrlKey
@@ -340,11 +349,12 @@
       }
       return;
     }
-    if (!questionMode && event.key === "Escape" && autocompleteSuggestion) {
+    if (!editorMode && !questionMode && event.key === "Escape" && autocompleteSuggestion) {
       event.preventDefault();
       autocompleteController.dismiss();
       return;
     }
+    if (editorMode) return;
     if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
     event.preventDefault();
     composerForm?.requestSubmit();
@@ -582,7 +592,7 @@
 
 <svelte:window onresize={resizeComposer} onkeydown={handleQuestionEscape} />
 
-<div class="relative mx-2 mb-2">
+<div class={editorMode ? "relative" : "relative mx-2 mb-2"}>
 {#if slashMenuOpen}
   <div
     bind:this={slashListbox}
@@ -819,7 +829,7 @@
       />
       <div class="flex items-end gap-1 text-sm">
         <div class="relative min-w-0 flex-1">
-          {#if autocompleteSuggestion && !questionMode}
+          {#if autocompleteSuggestion && !editorMode && !questionMode}
             <div
               class="pointer-events-none absolute inset-0 overflow-hidden px-0.5 leading-relaxed whitespace-pre-wrap break-words"
               bind:this={ghostLayer}
@@ -839,15 +849,15 @@
             oncompositionstart={handleCompositionStart}
             oncompositionend={handleCompositionEnd}
             onpaste={handlePaste}
-            aria-label={questionMode ? `Custom answer for ${currentQuestion?.label ?? "question"}` : "Message Pix"}
+            aria-label={ariaLabel ?? (questionMode ? `Custom answer for ${currentQuestion?.label ?? "question"}` : editorMode ? "Editor" : "Message Pix")}
             aria-describedby="prompt-autocomplete-status"
-            role={!questionMode ? "combobox" : undefined}
-            aria-autocomplete={!questionMode ? "list" : undefined}
-            aria-expanded={!questionMode ? slashMenuOpen : undefined}
-            aria-controls={!questionMode && slashMenuOpen ? slashListboxId : undefined}
-            aria-activedescendant={!questionMode && slashMenuOpen ? `prompt-slash-command-${selectedSlashCommand}` : undefined}
+            role={!editorMode && !questionMode ? "combobox" : undefined}
+            aria-autocomplete={!editorMode && !questionMode ? "list" : undefined}
+            aria-expanded={!editorMode && !questionMode ? slashMenuOpen : undefined}
+            aria-controls={!editorMode && !questionMode && slashMenuOpen ? slashListboxId : undefined}
+            aria-activedescendant={!editorMode && !questionMode && slashMenuOpen ? `prompt-slash-command-${selectedSlashCommand}` : undefined}
             placeholder={composerPlaceholder()}
-            disabled={questionMode ? !currentQuestion : !activeSessionId || !ready}
+            disabled={questionMode ? !currentQuestion : editorMode ? !ready : !activeSessionId || !ready}
             rows="1"
           ></textarea>
         </div>
@@ -856,7 +866,7 @@
           type="button"
           aria-label={questionMode ? "Attach images" : "Attach files"}
           title={questionMode ? "Attach images" : "Attach files"}
-          disabled={questionMode ? questionMode.addingImages : !activeSessionId || !ready}
+          disabled={questionMode ? questionMode.addingImages : editorMode ? !ready : !activeSessionId || !ready}
           onclick={() => {
             if (questionMode && currentQuestion) void questionMode.onChooseImages(currentQuestion.id);
             else void onChooseAttachments();
@@ -864,7 +874,7 @@
         >
           <Paperclip class="h-4 w-4" aria-hidden="true" />
         </button>
-        {#if !questionMode}
+        {#if !editorMode && !questionMode}
           <button
             class="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
             type="button"
@@ -876,7 +886,7 @@
             <Pause class="h-4 w-4" aria-hidden="true" />
           </button>
         {/if}
-        {#if promptRunning && !questionMode}
+        {#if promptRunning && !editorMode && !questionMode}
           <button
             class="grid h-6 w-6 shrink-0 place-items-center rounded-md border border-border bg-transparent text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
             type="button"
