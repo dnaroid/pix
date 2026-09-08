@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import { formatDcpStatsToast } from "../src/app/rendering/dcp-stats.js";
@@ -34,7 +37,7 @@ describe("formatDcpStatsToast", () => {
 		assert.match(output, /Compression blocks active: 12 \/ 25 total/);
 		assert.match(output, /Manual mode: off/);
 		assert.match(output, /State source: session journal/);
-		assert.match(output, /Sent: 1 emitted, 0 upgraded/);
+		assert.match(output, /Sent: 1 emitted, 0 reapplied, 0 upgraded/);
 		assert.match(output, /Active anchors: 1 \(turn=1, iteration=0, context-soft=0, context-strong=0\)/);
 		assert.match(output, /Context: 75\.8% \(206\.1K\/272K\)/);
 	});
@@ -82,6 +85,78 @@ describe("formatDcpStatsToast", () => {
 		assert.match(output, /State source: compress tool results/u);
 	});
 
+	it("uses the configured manual-mode baseline for an init-only journal and lets a journal delta override it", () => {
+		const initOnly = fakeSession({
+			usage: { tokens: 96_100, contextWindow: 272_000, percent: 35.3 },
+			branch: [journalInit("init-1")],
+		});
+		assert.match(formatDcpStatsToast(initOnly as never, { manualModeBaseline: true }), /Manual mode: on/u);
+
+		const overridden = fakeSession({
+			usage: { tokens: 96_100, contextWindow: 272_000, percent: 35.3 },
+			branch: [
+				journalInit("init-1"),
+				journalDelta("delta-1", "init-1", { manualMode: false }),
+			],
+		});
+		assert.match(formatDcpStatsToast(overridden as never, { manualModeBaseline: true }), /Manual mode: off/u);
+	});
+
+	it("reads the manual-mode baseline from JSONC and applies matching model overrides", () => {
+		const dir = mkdtempSync(join(tmpdir(), "pix-dcp-stats-config-"));
+		try {
+			const configPath = join(dir, "pi-tools-suite.jsonc");
+			writeFileSync(configPath, `{
+				"dcp": {
+					"manualMode": { "enabled": false },
+					"modelOverrides": {
+						"fixture/*": { "manualMode": { "enabled": true } },
+						"fixture/model-exact": { "manualMode": { "enabled": false } }
+					}
+				}
+			}\n`, "utf8");
+
+			const wildcard = fakeSession({
+				usage: { tokens: 1_000, contextWindow: 10_000, percent: 10 },
+				branch: [journalInit("init-1")],
+				model: { provider: "fixture", id: "model-wildcard" },
+			});
+			assert.match(formatDcpStatsToast(wildcard as never, { configPath }), /Manual mode: on/u);
+
+			const exact = fakeSession({
+				usage: { tokens: 1_000, contextWindow: 10_000, percent: 10 },
+				branch: [journalInit("init-2")],
+				model: { provider: "fixture", id: "model-exact" },
+			});
+			assert.match(formatDcpStatsToast(exact as never, { configPath }), /Manual mode: off/u);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("counts reapplied reminder deliveries and excludes idempotent compression replays from savings", () => {
+		const session = fakeSession({
+			usage: { tokens: 40_000, contextWindow: 100_000, percent: 40 },
+			branch: [
+				journalInit("init-1"),
+				journalDelta("delta-1", "init-1", { blocks: [{ id: 1, active: true }], manualMode: false }),
+				compressResult({ tokensSaved: 120, activeBlocks: 1, totalBlocks: 1 }),
+				compressResult({ tokensSaved: 120, activeBlocks: 1, totalBlocks: 1, idempotentReplay: true }),
+				{ type: "custom", customType: "dcp-nudge", data: { event: "emitted", type: "turn", createdAt: 1 } },
+				{ type: "custom", customType: "dcp-nudge", data: { event: "reapplied", type: "turn", createdAt: 2 } },
+				{ type: "custom", customType: "dcp-nudge", data: { event: "upgraded", type: "context-soft", createdAt: 3 } },
+			],
+		});
+
+		const output = formatDcpStatsToast(session as never, { manualModeBaseline: false });
+		assert.match(output, /Tokens saved \(estimated\): 120/u);
+		assert.match(output, /Compression blocks active: 1 \/ 1 total/u);
+		assert.match(output, /Sent: 1 emitted, 1 reapplied, 1 upgraded/u);
+		assert.match(output, /By type: turn=2, iteration=0, context-soft=1, context-strong=0/u);
+		assert.match(output, /Compliance proxy: 0 compress-after-nudge \/ 3 nudge events \(0\.0%\)/u);
+		assert.match(output, /Last nudge: context-soft upgraded/u);
+	});
+
 	it("uses the explicit full branch when a lazy tail no longer contains journal init", () => {
 		const fullBranch = [
 			journalInit("init-1"),
@@ -105,9 +180,10 @@ describe("formatDcpStatsToast", () => {
 	});
 });
 
-function fakeSession(options: { usage: unknown; branch: unknown[]; fullBranch?: unknown[] }) {
+function fakeSession(options: { usage: unknown; branch: unknown[]; fullBranch?: unknown[]; model?: unknown }) {
 	return {
 		getContextUsage: () => options.usage,
+		...(options.model ? { model: options.model } : {}),
 		sessionManager: {
 			getBranch: () => options.branch,
 			...(options.fullBranch ? { readFullBranchEntriesSync: () => options.fullBranch } : {}),

@@ -2916,6 +2916,16 @@ describe("DCP pruning effectiveness", () => {
             type: "custom",
             customType: "dcp-nudge",
             data: {
+              event: "reapplied",
+              type: "iteration",
+              contextPercent: 66.1,
+              createdAt: 2500,
+            },
+          },
+          {
+            type: "custom",
+            customType: "dcp-nudge",
+            data: {
               event: "cleared",
               clearedAnchors: 2,
               createdAt: 3000,
@@ -2936,13 +2946,13 @@ describe("DCP pruning effectiveness", () => {
     expect(sentMessages[0]?.details?.userVisibleOnly).toBe(true);
     const output = sentMessages[0]?.content ?? "";
     expect(output).toContain("Nudge telemetry:");
-    expect(output).toContain("Sent: 1 emitted, 1 upgraded");
+    expect(output).toContain("Sent: 1 emitted, 1 reapplied, 1 upgraded");
     expect(output).toContain("turn=1");
-    expect(output).toContain("iteration=1");
+    expect(output).toContain("iteration=2");
     expect(output).toContain("Active anchors: 1");
     expect(output).toContain("Cleared after compress: 1 time (2 anchors)");
-    expect(output).toContain("Compliance proxy: 1 compress-after-nudge / 2 nudge events (50.0%)");
-    expect(output).toContain("Last nudge: iteration upgraded");
+    expect(output).toContain("Compliance proxy: 1 compress-after-nudge / 3 nudge events (33.3%)");
+    expect(output).toContain("Last nudge: iteration reapplied");
   });
 
   test("DCP context transform hides /dcp stats custom messages from the model", async () => {

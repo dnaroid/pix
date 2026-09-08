@@ -1,4 +1,8 @@
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import { parse as parseJsonc } from "jsonc-parser";
 import { normalizeToolName, parseArgsText } from "../../tool-renderers/utils.js";
 
 type CompressResult = {
@@ -14,6 +18,7 @@ type CompressResult = {
 	activeBlocks?: unknown;
 	totalBlocks?: unknown;
 	prunedTools?: unknown;
+	idempotentReplay?: unknown;
 };
 
 type DcpSessionStats = {
@@ -37,6 +42,7 @@ type DcpNudgeType = (typeof NUDGE_TYPES)[number];
 
 type DcpNudgeStats = {
 	emitted: number;
+	reapplied: number;
 	upgraded: number;
 	clearedEvents: number;
 	clearedAnchors: number;
@@ -44,20 +50,26 @@ type DcpNudgeStats = {
 	activeByType: Record<DcpNudgeType, number>;
 	last?: {
 		type: DcpNudgeType;
-		event: "emitted" | "upgraded";
+		event: "emitted" | "reapplied" | "upgraded";
 		createdAt?: number;
 		contextPercent?: number | null;
 	};
 };
 
-export function formatDcpStatsToast(session: AgentSession): string {
+type FormatDcpStatsOptions = {
+	manualModeBaseline?: boolean;
+	configPath?: string;
+};
+
+export function formatDcpStatsToast(session: AgentSession, options: FormatDcpStatsOptions = {}): string {
 	const branch = dcpStatsBranch(session);
 	const latestState = resolveJournalDcpState(branch);
-	const stats = collectDcpSessionStats(session, latestState, branch);
+	const manualModeBaseline = options.manualModeBaseline ?? readDcpManualModeBaseline(session, options.configPath);
+	const stats = collectDcpSessionStats(session, latestState, branch, manualModeBaseline);
 	const nudgeStats = collectDcpNudgeStats(branch, latestState?.data);
 	const activeBlocks = stats.activeBlocks ?? 0;
 	const totalBlocks = stats.totalBlocks ?? stats.activeBlocks ?? 0;
-	const totalNudgeEvents = nudgeStats.emitted + nudgeStats.upgraded;
+	const totalNudgeEvents = nudgeStats.emitted + nudgeStats.reapplied + nudgeStats.upgraded;
 	const activeAnchors = NUDGE_TYPES.reduce((sum, type) => sum + nudgeStats.activeByType[type], 0);
 
 	const lines = [
@@ -69,7 +81,7 @@ export function formatDcpStatsToast(session: AgentSession): string {
 		`  State source: ${formatStateSource(stats.stateSource)}`,
 		"",
 		"Nudge telemetry:",
-		`  Sent: ${fmt(nudgeStats.emitted)} emitted, ${fmt(nudgeStats.upgraded)} upgraded`,
+		`  Sent: ${fmt(nudgeStats.emitted)} emitted, ${fmt(nudgeStats.reapplied)} reapplied, ${fmt(nudgeStats.upgraded)} upgraded`,
 		`  By type: ${NUDGE_TYPES.map((type) => `${type}=${fmt(nudgeStats.byType[type])}`).join(", ")}`,
 		`  Active anchors: ${fmt(activeAnchors)}${activeAnchors > 0 ? ` (${NUDGE_TYPES.map((type) => `${type}=${fmt(nudgeStats.activeByType[type])}`).join(", ")})` : ""}`,
 		`  Cleared after compress: ${fmt(nudgeStats.clearedEvents)} time${nudgeStats.clearedEvents === 1 ? "" : "s"} (${fmt(nudgeStats.clearedAnchors)} anchor${nudgeStats.clearedAnchors === 1 ? "" : "s"})`,
@@ -88,6 +100,7 @@ function collectDcpSessionStats(
 	session: AgentSession,
 	latestState: { data: Record<string, unknown>; source: DcpSessionStats["stateSource"] } | undefined,
 	branch: readonly any[],
+	manualModeBaseline: boolean,
 ): DcpSessionStats {
 	const usage = session.getContextUsage();
 	const stats: DcpSessionStats = {
@@ -98,6 +111,7 @@ function collectDcpSessionStats(
 		summaryTokens: 0,
 		prunedTools: 0,
 		stateSource: latestState?.source ?? "tool-results",
+		...(latestState ? { manualMode: manualModeBaseline } : {}),
 		...(usage?.tokens != null ? { contextTokens: usage.tokens } : {}),
 		...(usage?.contextWindow != null ? { contextWindow: usage.contextWindow } : {}),
 		...(usage?.percent != null ? { contextPercent: usage.percent } : {}),
@@ -115,17 +129,22 @@ function collectDcpSessionStats(
 		const result = parseToolResultText(message.content);
 		if (!result) continue;
 
-		stats.runs += 1;
-		stats.tokensSaved += numberValue(result.tokensSaved) ?? 0;
-		stats.totalPruneCount = Math.max(stats.totalPruneCount, numberValue(result.totalPruneCount) ?? 0);
-		stats.items += numberValue(result.itemCount) ?? sumDefined(numberValue(result.ranges), numberValue(result.messages)) ?? 0;
-		stats.summaryTokens += numberValue(result.totalSummaryTokens) ?? 0;
-		stats.prunedTools += numberValue(result.prunedTools) ?? 0;
+		if (result.idempotentReplay !== true) {
+			stats.runs += 1;
+			stats.tokensSaved += numberValue(result.tokensSaved) ?? 0;
+			stats.items += numberValue(result.itemCount) ?? sumDefined(numberValue(result.ranges), numberValue(result.messages)) ?? 0;
+			stats.summaryTokens += numberValue(result.totalSummaryTokens) ?? 0;
+		}
 
-		const activeBlocks = numberValue(result.activeBlocks);
-		const totalBlocks = numberValue(result.totalBlocks);
-		if (activeBlocks != null) stats.activeBlocks = activeBlocks;
-		if (totalBlocks != null) stats.totalBlocks = totalBlocks;
+		if (!latestState) {
+			stats.totalPruneCount = Math.max(stats.totalPruneCount, numberValue(result.totalPruneCount) ?? 0);
+			const prunedTools = numberValue(result.prunedTools);
+			if (prunedTools != null) stats.prunedTools = prunedTools;
+			const activeBlocks = numberValue(result.activeBlocks);
+			const totalBlocks = numberValue(result.totalBlocks);
+			if (activeBlocks != null) stats.activeBlocks = activeBlocks;
+			if (totalBlocks != null) stats.totalBlocks = totalBlocks;
+		}
 
 		const contextTokens = numberValue(result.contextTokens);
 		const contextWindow = numberValue(result.contextWindow);
@@ -160,6 +179,7 @@ function applyDcpStateStats(stats: DcpSessionStats, data: Record<string, unknown
 function collectDcpNudgeStats(branch: readonly any[], latestState: Record<string, unknown> | undefined): DcpNudgeStats {
 	const stats: DcpNudgeStats = {
 		emitted: 0,
+		reapplied: 0,
 		upgraded: 0,
 		clearedEvents: 0,
 		clearedAnchors: 0,
@@ -173,8 +193,9 @@ function collectDcpNudgeStats(branch: readonly any[], latestState: Record<string
 		const data = customEntryData(entry, "dcp-nudge");
 		if (!data) continue;
 		const event = data.event;
-		if ((event === "emitted" || event === "upgraded") && isNudgeType(data.type)) {
+		if ((event === "emitted" || event === "reapplied" || event === "upgraded") && isNudgeType(data.type)) {
 			if (event === "emitted") stats.emitted += 1;
+			else if (event === "reapplied") stats.reapplied += 1;
 			else stats.upgraded += 1;
 			stats.byType[data.type] += 1;
 			const createdAt = numberValue(data.createdAt);
@@ -194,6 +215,74 @@ function collectDcpNudgeStats(branch: readonly any[], latestState: Record<string
 	}
 
 	return stats;
+}
+
+function readDcpManualModeBaseline(session: AgentSession, configPath = join(homedir(), ".config", "pi", "pi-tools-suite.jsonc")): boolean {
+	let enabled = false;
+	if (!existsSync(configPath)) return enabled;
+	try {
+		const parsed = parseJsonc(readFileSync(configPath, "utf8")) as unknown;
+		if (!isRecord(parsed)) return enabled;
+		const dcp = parsed.dcp;
+		if (!isRecord(dcp)) return enabled;
+		const manualMode = dcp.manualMode;
+		if (isRecord(manualMode) && typeof manualMode.enabled === "boolean") enabled = manualMode.enabled;
+
+		const overrides = dcp.modelOverrides;
+		if (!isRecord(overrides)) return enabled;
+		for (const override of matchingModelOverrides(overrides, dcpModelKeys(session))) {
+			const overrideManualMode = override.manualMode;
+			if (isRecord(overrideManualMode) && typeof overrideManualMode.enabled === "boolean") {
+				enabled = overrideManualMode.enabled;
+			}
+		}
+	} catch {
+		return false;
+	}
+	return enabled;
+}
+
+function dcpModelKeys(session: AgentSession): string[] {
+	const model = (session as AgentSession & { model?: { provider?: unknown; id?: unknown } }).model;
+	const provider = normalizeModelKey(model?.provider);
+	const id = normalizeModelKey(model?.id);
+	return [provider && id ? `${provider}/${id}` : undefined, id].filter((key): key is string => key !== undefined);
+}
+
+function matchingModelOverrides(overrides: Record<string, unknown>, modelKeys: string[]): Record<string, unknown>[] {
+	const candidates = modelKeys.map(normalizeModelKey).filter((key, index, all): key is string => key !== undefined && all.indexOf(key) === index);
+	const exact = new Map<string, Record<string, unknown>>();
+	const wildcard: Array<[string, Record<string, unknown>]> = [];
+	for (const [rawKey, value] of Object.entries(overrides)) {
+		const key = normalizeModelKey(rawKey);
+		if (!key || !isRecord(value)) continue;
+		if (key.includes("*") || key.includes("?")) wildcard.push([key, value]);
+		else exact.set(key, value);
+	}
+	const bare = candidates.filter((candidate) => !candidate.includes("/"));
+	const full = candidates.filter((candidate) => candidate.includes("/"));
+	const matches: Record<string, unknown>[] = [];
+	for (const candidate of bare) for (const [pattern, value] of wildcard) if (!pattern.includes("/") && globMatches(pattern, candidate)) matches.push(value);
+	for (const candidate of bare) { const value = exact.get(candidate); if (value) matches.push(value); }
+	for (const candidate of full) for (const [pattern, value] of wildcard) if (pattern.includes("/") && globMatches(pattern, candidate)) matches.push(value);
+	for (const candidate of full) { const value = exact.get(candidate); if (value) matches.push(value); }
+	return matches;
+}
+
+function normalizeModelKey(value: unknown): string | undefined {
+	if (typeof value !== "string") return undefined;
+	const trimmed = value.trim();
+	return trimmed || undefined;
+}
+
+function globMatches(pattern: string, candidate: string): boolean {
+	let source = "^";
+	for (const char of pattern) {
+		if (char === "*") source += ".*";
+		else if (char === "?") source += ".";
+		else source += char.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
+	}
+	return new RegExp(`${source}$`).test(candidate);
 }
 
 function applyActiveAnchorStats(stats: DcpNudgeStats, data: Record<string, unknown>): void {

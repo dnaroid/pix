@@ -80,6 +80,7 @@ async function staleSafe(action: () => void | Promise<void>): Promise<void> {
 
 interface DcpNudgeStats {
   emitted: number
+  reapplied: number
   upgraded: number
   clearedEvents: number
   clearedAnchors: number
@@ -87,7 +88,7 @@ interface DcpNudgeStats {
   activeByType: Record<DcpNudgeType, number>
   last?: {
     type: DcpNudgeType
-    event: "emitted" | "upgraded"
+    event: "emitted" | "reapplied" | "upgraded"
     createdAt?: number
     contextPercent?: number | null
   }
@@ -96,6 +97,7 @@ interface DcpNudgeStats {
 function collectNudgeStats(ctx: ExtensionCommandContext, state: DcpState): DcpNudgeStats {
   const stats: DcpNudgeStats = {
     emitted: 0,
+    reapplied: 0,
     upgraded: 0,
     clearedEvents: 0,
     clearedAnchors: 0,
@@ -111,8 +113,9 @@ function collectNudgeStats(ctx: ExtensionCommandContext, state: DcpState): DcpNu
     const data = customEntryData(entry, "dcp-nudge")
     if (!data) continue
     const event = data.event
-    if ((event === "emitted" || event === "upgraded") && isNudgeType(data.type)) {
+    if ((event === "emitted" || event === "reapplied" || event === "upgraded") && isNudgeType(data.type)) {
       if (event === "emitted") stats.emitted++
+      else if (event === "reapplied") stats.reapplied++
       else stats.upgraded++
       stats.byType[data.type]++
       const createdAt = typeof data.createdAt === "number" ? data.createdAt : undefined
@@ -226,7 +229,7 @@ function handleStats(pi: ExtensionAPI, ctx: ExtensionCommandContext, state: DcpS
   const activeBlocks = state.compressionBlocks.filter((b) => b.active).length
   const totalBlocks = state.compressionBlocks.length
   const nudgeStats = collectNudgeStats(ctx, state)
-  const totalNudgeEvents = nudgeStats.emitted + nudgeStats.upgraded
+  const totalNudgeEvents = nudgeStats.emitted + nudgeStats.reapplied + nudgeStats.upgraded
   const activeAnchors = state.nudgeAnchors.length
   const lines: string[] = []
   lines.push("DCP Session Statistics:")
@@ -236,7 +239,7 @@ function handleStats(pi: ExtensionAPI, ctx: ExtensionCommandContext, state: DcpS
   lines.push(`  Manual mode: ${state.manualMode ? "on" : "off"}`)
   lines.push("")
   lines.push("Nudge telemetry:")
-  lines.push(`  Sent: ${fmt(nudgeStats.emitted)} emitted, ${fmt(nudgeStats.upgraded)} upgraded`)
+  lines.push(`  Sent: ${fmt(nudgeStats.emitted)} emitted, ${fmt(nudgeStats.reapplied)} reapplied, ${fmt(nudgeStats.upgraded)} upgraded`)
   lines.push(
     `  By type: ${NUDGE_TYPES.map((type) => `${nudgeLabel(type)}=${fmt(nudgeStats.byType[type])}`).join(", ")}`,
   )
