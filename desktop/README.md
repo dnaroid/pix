@@ -22,6 +22,11 @@ npm --prefix desktop install
 npm run dev:desktop
 ```
 
+For repository-wide development, run `npm run watch:all` from the repository
+root instead. It watches Pix, pix-acp, the bundled tool suite, and both Desktop
+layers. Desktop is restarted only after a successful build; on a build error,
+the last working process stays open.
+
 `dev` and `build` compile `acp/dist/main.js` before Tauri starts. The current
 MVP expects `node` to be available on `PATH`; pix-acp resolves pi's bundled RPC
 entry from its pinned npm dependency. Packaging Node and pix-acp as a signed

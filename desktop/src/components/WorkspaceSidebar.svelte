@@ -6,6 +6,7 @@
   import Circle from "@lucide/svelte/icons/circle";
   import CircleDashed from "@lucide/svelte/icons/circle-dashed";
   import Clock3 from "@lucide/svelte/icons/clock-3";
+  import Database from "@lucide/svelte/icons/database";
   import Folder from "@lucide/svelte/icons/folder";
   import Gauge from "@lucide/svelte/icons/gauge";
   import ListTodo from "@lucide/svelte/icons/list-todo";
@@ -35,8 +36,14 @@
     type ProjectTaskType,
   } from "../lib/project-tasks";
   import { projectName } from "../lib/recent-projects";
+  import {
+    registryHasAttention,
+    type RegistryActionRequest,
+    type RegistrySnapshot,
+  } from "../lib/registry";
   import { sessionTodoCounts, type SessionTodoSnapshot } from "../lib/session-todos";
   import { sessionSubagentCount, type SessionSubagentSnapshot } from "../lib/session-subagents";
+  import RegistryPanel from "./RegistryPanel.svelte";
   import SessionActivityPanel from "./SessionActivityPanel.svelte";
 
   type TaskDraft = {
@@ -47,9 +54,9 @@
     priority: ProjectTaskPriority;
   };
 
-  type SidebarTab = "tasks" | "project" | "session";
+  type SidebarTab = "tasks" | "project" | "registry" | "session";
 
-  const SIDEBAR_TABS: readonly SidebarTab[] = ["tasks", "project", "session"];
+  const SIDEBAR_TABS: readonly SidebarTab[] = ["tasks", "project", "registry", "session"];
 
   let {
     workspace,
@@ -62,12 +69,17 @@
     activeSessionId,
     todoSnapshot,
     subagentSnapshot,
+    registrySnapshot,
+    registryLoading,
+    registryActionId,
     onCreate,
     onUpdate,
     onDelete,
     onRun,
     onOpenSession,
     onReload,
+    onRegistryRefresh,
+    onRegistryAction,
   }: {
     workspace: string;
     tasks: ProjectTask[];
@@ -79,17 +91,23 @@
     activeSessionId: string | null;
     todoSnapshot: SessionTodoSnapshot | undefined;
     subagentSnapshot: SessionSubagentSnapshot | undefined;
+    registrySnapshot: RegistrySnapshot | undefined;
+    registryLoading: boolean;
+    registryActionId: string | null;
     onCreate: (draft: TaskDraft) => void;
     onUpdate: (taskId: string, draft: TaskDraft) => void;
     onDelete: (taskId: string) => void;
     onRun: (task: ProjectTask) => void;
     onOpenSession: (task: ProjectTask) => void;
     onReload: () => void;
+    onRegistryRefresh: () => void;
+    onRegistryAction: (request: RegistryActionRequest, actionId: string) => void;
   } = $props();
 
   const COLLAPSED_WIDTH = 48;
   const DEFAULT_WIDTH = 296;
   const MIN_WIDTH = 236;
+  const REGISTRY_MIN_WIDTH = 344;
   const MAX_WIDTH = 420;
   const WIDTH_KEY = "pix.desktop.taskSidebarWidth";
   const COLLAPSED_KEY = "pix.desktop.taskSidebarCollapsed";
@@ -117,6 +135,10 @@
   const todoCounts = $derived(sessionTodoCounts(todoSnapshot));
   const openTodoCount = $derived(todoCounts.pending + todoCounts.in_progress + todoCounts.deferred);
   const activeSubagentCount = $derived(sessionSubagentCount(subagentSnapshot));
+  const registryAttention = $derived(registryHasAttention(registrySnapshot));
+  const activeMinWidth = $derived(sidebarMinWidth(activeTab));
+  const expandedSidebarWidth = $derived(Math.max(sidebarWidth, activeMinWidth));
+  const renderedSidebarWidth = $derived(collapsed ? COLLAPSED_WIDTH : expandedSidebarWidth);
 
   onMount(() => {
     try {
@@ -168,13 +190,15 @@
     if (collapsed || event.button !== 0) return;
     resizePointerId = event.pointerId;
     resizeStartX = event.clientX;
-    resizeStartWidth = sidebarWidth;
+    resizeStartWidth = expandedSidebarWidth;
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
   }
 
   function resize(event: PointerEvent): void {
     if (event.pointerId !== resizePointerId) return;
-    sidebarWidth = clampWidth(resizeStartWidth + event.clientX - resizeStartX);
+    const candidate = resizeStartWidth + event.clientX - resizeStartX;
+    if (candidate <= activeMinWidth && sidebarWidth < activeMinWidth) return;
+    sidebarWidth = clampWidth(candidate, activeMinWidth);
   }
 
   function finishResize(event: PointerEvent): void {
@@ -190,9 +214,14 @@
   function resizeWithKeyboard(event: KeyboardEvent): void {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight" && event.key !== "Home") return;
     event.preventDefault();
-    sidebarWidth = event.key === "Home"
-      ? DEFAULT_WIDTH
-      : clampWidth(sidebarWidth + (event.key === "ArrowLeft" ? -12 : 12));
+    if (event.key === "Home") {
+      sidebarWidth = DEFAULT_WIDTH;
+    } else if (event.key === "ArrowLeft" && sidebarWidth < activeMinWidth) {
+      return;
+    } else {
+      const baseWidth = Math.max(sidebarWidth, activeMinWidth);
+      sidebarWidth = clampWidth(baseWidth + (event.key === "ArrowLeft" ? -12 : 12), activeMinWidth);
+    }
     try {
       localStorage.setItem(WIDTH_KEY, String(sidebarWidth));
     } catch {
@@ -200,8 +229,12 @@
     }
   }
 
-  function clampWidth(width: number): number {
-    return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, width));
+  function sidebarMinWidth(tab: SidebarTab): number {
+    return tab === "registry" ? REGISTRY_MIN_WIDTH : MIN_WIDTH;
+  }
+
+  function clampWidth(width: number, minimum = MIN_WIDTH): number {
+    return Math.min(MAX_WIDTH, Math.max(minimum, width));
   }
 
   function openCreate(): void {
@@ -271,7 +304,8 @@
 <aside
   class="relative flex min-h-0 shrink-0 border-r border-sidebar-border bg-sidebar text-sidebar-foreground"
   class:select-none={resizePointerId !== null}
-  style:width={`${collapsed ? COLLAPSED_WIDTH : sidebarWidth}px`}
+  style:width={`${renderedSidebarWidth}px`}
+  style:max-width="100vw"
   aria-label="Workspace sidebar"
 >
   {#if collapsed}
@@ -302,6 +336,16 @@
         onclick={() => selectTab("project")}
       ><Folder class="h-4 w-4" aria-hidden="true" /></button>
       <button
+        class={["relative grid h-8 w-8 place-items-center rounded-lg hover:bg-sidebar-accent focus-visible:outline-2 focus-visible:outline-ring", activeTab === "registry" ? "bg-sidebar-accent text-foreground" : "text-muted-foreground"]}
+        type="button"
+        title="Registry"
+        aria-label={`Resource registry${registryAttention ? ", attention needed" : ""}`}
+        onclick={() => selectTab("registry")}
+      >
+        <Database class="h-4 w-4" aria-hidden="true" />
+        {#if registryAttention}<span class="absolute top-0.5 right-0.5 h-1.5 w-1.5 rounded-full bg-[var(--tool-warning)]" aria-hidden="true"></span>{/if}
+      </button>
+      <button
         class={["relative grid h-8 w-8 place-items-center rounded-lg hover:bg-sidebar-accent focus-visible:outline-2 focus-visible:outline-ring", activeTab === "session" ? "bg-sidebar-accent text-foreground" : "text-muted-foreground"]}
         type="button"
         title="Session"
@@ -313,7 +357,7 @@
       </button>
     </div>
   {:else}
-    <div class="grid min-w-0 flex-1 grid-rows-[40px_auto_minmax(0,1fr)]">
+    <div class="grid min-w-0 flex-1 grid-rows-[40px_auto_minmax(0,1fr)] overflow-hidden">
       <div class="flex items-center justify-between border-b border-sidebar-border px-2.5">
         <strong class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs font-semibold">Workspace</strong>
         <button
@@ -325,7 +369,7 @@
         ><PanelLeftClose class="h-4 w-4" aria-hidden="true" /></button>
       </div>
 
-      <div class="grid grid-cols-3 gap-1 border-b border-sidebar-border p-1.5" role="tablist" aria-label="Workspace sections">
+      <div class="grid grid-cols-4 gap-1 border-b border-sidebar-border p-1.5" role="tablist" aria-label="Workspace sections">
         <button
           id="workspace-tasks-tab"
           class={["flex h-7 items-center justify-center gap-1.5 rounded-md text-[11px] font-medium hover:bg-sidebar-accent focus-visible:outline-2 focus-visible:outline-ring", activeTab === "tasks" ? "bg-sidebar-accent text-foreground" : "text-muted-foreground"]}
@@ -348,6 +392,20 @@
           onclick={() => activeTab = "project"}
           onkeydown={(event) => navigateTabs(event, "project")}
         ><Folder class="h-3.5 w-3.5" aria-hidden="true" />Project</button>
+        <button
+          id="workspace-registry-tab"
+          class={["relative flex h-7 items-center justify-center gap-1 rounded-md text-[10px] font-medium hover:bg-sidebar-accent focus-visible:outline-2 focus-visible:outline-ring", activeTab === "registry" ? "bg-sidebar-accent text-foreground" : "text-muted-foreground"]}
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "registry"}
+          aria-controls="workspace-registry-panel"
+          tabindex={activeTab === "registry" ? 0 : -1}
+          onclick={() => activeTab = "registry"}
+          onkeydown={(event) => navigateTabs(event, "registry")}
+        >
+          <Database class="h-3.5 w-3.5" aria-hidden="true" />Registry
+          {#if registryAttention}<span class="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-[var(--tool-warning)]" aria-hidden="true"></span>{/if}
+        </button>
         <button
           id="workspace-session-tab"
           class={["flex h-7 items-center justify-center gap-1.5 rounded-md text-[11px] font-medium hover:bg-sidebar-accent focus-visible:outline-2 focus-visible:outline-ring", activeTab === "session" ? "bg-sidebar-accent text-foreground" : "text-muted-foreground"]}
@@ -479,6 +537,17 @@
           </dl>
           <p class="mt-3 text-[10px] leading-4 text-muted-foreground">Project tasks are shared through <code class="rounded bg-muted px-1 py-0.5 font-mono">.pi/tasks.jsonc</code>.</p>
         </section>
+      {:else if activeTab === "registry"}
+        <div id="workspace-registry-panel" class="grid min-h-0 min-w-0 overflow-hidden" role="tabpanel" aria-labelledby="workspace-registry-tab" tabindex="0">
+          <RegistryPanel
+            snapshot={registrySnapshot}
+            loading={registryLoading}
+            disabled={!sessionReady}
+            actionId={registryActionId}
+            onRefresh={onRegistryRefresh}
+            onAction={onRegistryAction}
+          />
+        </div>
       {:else}
         <div id="workspace-session-panel" class="grid min-h-0" role="tabpanel" aria-labelledby="workspace-session-tab" tabindex="0">
           <SessionActivityPanel {activeSessionId} {todoSnapshot} {subagentSnapshot} />
@@ -493,9 +562,9 @@
       role="separator"
       aria-label="Resize workspace sidebar"
       aria-orientation="vertical"
-      aria-valuemin={MIN_WIDTH}
+      aria-valuemin={activeMinWidth}
       aria-valuemax={MAX_WIDTH}
-      aria-valuenow={sidebarWidth}
+      aria-valuenow={expandedSidebarWidth}
       tabindex="0"
       onpointerdown={startResize}
       onpointermove={resize}

@@ -26,6 +26,7 @@ import {
 	PIX_QUEUE_CONSUMED_METHOD,
 	PIX_QUEUE_MESSAGE_METHOD,
 	PIX_QUEUE_STATE_METHOD,
+	PIX_REGISTRY_ACTION_METHOD,
 	PIX_TAKE_AUTO_MESSAGE_METHOD,
 	PIX_RESUME_PATH_METHOD,
 	PIX_SESSION_HISTORY_METHOD,
@@ -1475,6 +1476,46 @@ test("session/load switches the pi session and replays history as chunk updates"
 		{ type: "content", content: { type: "image", data: "dG9vbA==", mimeType: "image/png" } },
 	]);
 	assert.equal(harness.adapter.getSession(sessionId) !== undefined, true, "loaded session is live");
+});
+
+test("Pix Desktop registry actions forward only to the extension-owned private registry RPC command", async () => {
+	const harness = createTestAdapter();
+	await connectAs(harness.adapter, "pix-desktop", async (cx) => {
+		const created = await cx.request("session/new", { cwd: "/tmp/registry-gui", mcpServers: [] }) as { sessionId: string };
+		const pi = harness.clients[0]!;
+
+		await assert.rejects(
+			cx.request(PIX_REGISTRY_ACTION_METHOD, { sessionId: created.sessionId, action: "refresh" }),
+			/resource registry extension is unavailable/,
+		);
+
+		pi.commands.push({
+			name: "registry",
+			description: "Manage registry",
+			source: "extension",
+			sourceInfo: {},
+		});
+		pi.promptHandledWithoutRun = true;
+
+		await cx.request(PIX_REGISTRY_ACTION_METHOD, { sessionId: created.sessionId, action: "refresh" });
+		await cx.request(PIX_REGISTRY_ACTION_METHOD, {
+			sessionId: created.sessionId,
+			action: "update",
+			type: "skill",
+			name: "pdf",
+		});
+		await cx.request(PIX_REGISTRY_ACTION_METHOD, {
+			sessionId: created.sessionId,
+			action: "pull-project",
+			scope: "todo",
+		});
+
+		assert.deepEqual(pi.promptCalls.slice(-3), [
+			{ message: "/registry rpc refresh", images: undefined },
+			{ message: "/registry rpc update skill pdf", images: undefined },
+			{ message: "/registry rpc pull todo", images: undefined },
+		]);
+	});
 });
 
 test("desktop lazy session/load omits tool bodies and retrieves them on demand", async () => {

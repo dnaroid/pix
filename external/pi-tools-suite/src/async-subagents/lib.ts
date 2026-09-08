@@ -1,4 +1,5 @@
 export type {
+	AgentActivity,
 	AgentCompletionHandler,
 	AgentResult,
 	AgentState,

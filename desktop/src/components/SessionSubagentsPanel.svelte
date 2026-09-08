@@ -2,6 +2,7 @@
   import Workflow from "@lucide/svelte/icons/workflow";
   import { agentIcon } from "../lib/agent-icons";
   import {
+    formatSessionSubagentActivity,
     formatSessionSubagentElapsed,
     sessionSubagentCount,
     sessionSubagentModelLabel,
@@ -83,6 +84,11 @@
                     <span class="font-mono">{sessionSubagentModelLabel(preview)}</span>
                     <span>{formatSessionSubagentElapsed(agent.startedAt, snapshot?.checkedAt ?? Date.now())}</span>
                     {#if agent.retryCount}<span>retry {agent.retryCount}</span>{/if}
+                    {#if agent.lastActivity}
+                      <span class="rounded bg-sidebar-accent px-1.5 py-0.5 font-mono text-foreground">
+                        {formatSessionSubagentActivity(agent.lastActivity, snapshot?.checkedAt ?? Date.now())}
+                      </span>
+                    {/if}
                   </div>
                 </article>
               {/each}

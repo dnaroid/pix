@@ -67,6 +67,7 @@ import {
 } from "../../src/async-subagents/lib.js";
 import { isRecord, isoNow, serializeJsonLine } from "../../src/async-subagents/core/utils.js";
 import { agentStrategyPrompt, appendAgentStrategyPrompt } from "../../src/async-subagents/core/agent-strategy.js";
+import { activityFromRpcEvent } from "../../src/async-subagents/core/activity.js";
 import { buildAgentCompletionNotification, isTerminalAgentStatus } from "../../src/async-subagents/core/notifications.js";
 import type { AgentTask } from "../../src/async-subagents/lib.js";
 
@@ -986,6 +987,43 @@ Give a second opinion.
 });
 
 describe.serial("run and agent state", () => {
+	test.serial("maps only user-visible RPC activity in memory", () => {
+		const at = "2026-09-08T12:00:00.000Z";
+		expect(activityFromRpcEvent({ type: "tool_execution_start", toolName: "Grep" }, at)).toEqual({ label: "Grep", at });
+		expect(activityFromRpcEvent({ type: "tool_execution_end", toolName: "Grep" }, at)).toBeUndefined();
+		expect(activityFromRpcEvent({ type: "message_start", message: { role: "assistant" } }, at)).toEqual({ label: "Thinking", at });
+		expect(activityFromRpcEvent({ type: "message_end", role: "assistant" }, at)).toEqual({ label: "Thinking", at });
+		expect(activityFromRpcEvent({ type: "message_start", message: { role: "user" } }, at)).toBeUndefined();
+		expect(activityFromRpcEvent({ type: "turn_start" }, at)).toBeUndefined();
+	});
+
+	test.serial("restores the latest activity from progress.jsonl without debug logs", () => {
+		const runDir = tempDir();
+		createAgent(runDir, "tool-latest", {
+			"progress.jsonl": [
+				{ at: "2026-09-08T12:00:00.000Z", stage: "rpc_event", type: "message_start", role: "assistant" },
+				{ at: "2026-09-08T12:00:01.000Z", stage: "rpc_event", type: "tool_execution_start", toolName: "Read" },
+				{ at: "2026-09-08T12:00:02.000Z", stage: "rpc_event", type: "turn_end" },
+			].map((record) => JSON.stringify(record)).join("\n") + "\n",
+		});
+		createAgent(runDir, "thinking-latest", {
+			"progress.jsonl": [
+				JSON.stringify({ at: "2026-09-08T12:01:00.000Z", stage: "rpc_event", type: "tool_execution_end", toolName: "Bash" }),
+				JSON.stringify({ at: "2026-09-08T12:01:03.000Z", stage: "rpc_event", type: "message_end", role: "assistant" }),
+				"{partially-written",
+			].join("\n"),
+		});
+
+		expect(getAgentState(runDir, "tool-latest")?.lastActivity).toEqual({
+			label: "Read",
+			at: "2026-09-08T12:00:01.000Z",
+		});
+		expect(getRunState(runDir, ["thinking-latest"]).agents[0]?.lastActivity).toEqual({
+			label: "Thinking",
+			at: "2026-09-08T12:01:03.000Z",
+		});
+	});
+
 		test.serial("detects planned, running, done, failed, stopped, and RPC prompt failures", () => {
 		const runDir = tempDir();
 		writeFile(path.join(runDir, "prompts", "planned.md"), "planned prompt");

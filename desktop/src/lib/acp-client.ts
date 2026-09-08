@@ -18,6 +18,7 @@ import {
   parseSessionStateNotification,
   type SessionStateNotification,
 } from "./session-state";
+import type { RegistryActionRequest } from "./registry";
 
 export interface AcpExit {
   readonly generation: number;
@@ -306,6 +307,11 @@ export class AcpClient {
 
   async queueState(sessionId: string): Promise<QueueState> {
     return parseQueueState(await this.request<unknown>("pix/session/queue_state", { sessionId }, null));
+  }
+
+  async registryAction(sessionId: string, action: RegistryActionRequest): Promise<void> {
+    const response = await this.request<unknown>("pix/registry/action", { sessionId, ...action }, null);
+    if (!isRecord(response)) throw new Error("pix/registry/action returned an invalid response");
   }
 
   async queueMessage(

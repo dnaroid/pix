@@ -4,6 +4,11 @@ export const SUBAGENTS_LIVE_STATE_CHANNEL = "pi-tools-suite:async-subagents:live
 
 export type SessionSubagentStatus = "planned" | "running" | "retrying" | "done" | "failed" | "stopped";
 
+export interface SessionSubagentActivity {
+  readonly label: string;
+  readonly at: string;
+}
+
 export interface SessionSubagentAgent {
   readonly id: string;
   readonly status: SessionSubagentStatus;
@@ -16,6 +21,7 @@ export interface SessionSubagentAgent {
   readonly stderrLines?: number;
   readonly eventLines?: number;
   readonly retryCount?: number;
+  readonly lastActivity?: SessionSubagentActivity;
 }
 
 export interface SessionSubagentTaskPreview {
@@ -101,8 +107,20 @@ export function sessionSubagentModelLabel(preview: SessionSubagentTaskPreview | 
 
 export function formatSessionSubagentElapsed(startedAt: string | undefined, now: number): string {
   if (!startedAt) return "queued";
-  const started = Date.parse(startedAt);
-  if (!Number.isFinite(started)) return "elapsed unknown";
+  return formatSessionSubagentDurationSince(startedAt, now) ?? "elapsed unknown";
+}
+
+export function formatSessionSubagentActivity(
+  activity: SessionSubagentActivity | undefined,
+  now: number,
+): string | undefined {
+  if (!activity) return undefined;
+  return `${activity.label} · ${formatSessionSubagentDurationSince(activity.at, now) ?? "—"}`;
+}
+
+function formatSessionSubagentDurationSince(value: string, now: number): string | undefined {
+  const started = Date.parse(value);
+  if (!Number.isFinite(started)) return undefined;
   const seconds = Math.max(0, Math.floor((now - started) / 1000));
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
@@ -145,6 +163,11 @@ function isSessionSubagentAgent(value: unknown): value is SessionSubagentAgent {
   if (value.pid !== undefined && (typeof value.pid !== "number" || !Number.isInteger(value.pid) || value.pid <= 0)) return false;
   for (const field of ["resultLines", "stderrLines", "eventLines", "retryCount"] as const) {
     if (value[field] !== undefined && !isNonNegativeInteger(value[field])) return false;
+  }
+  if (value.lastActivity !== undefined) {
+    if (!isRecord(value.lastActivity)) return false;
+    if (typeof value.lastActivity.label !== "string" || !value.lastActivity.label.trim()) return false;
+    if (typeof value.lastActivity.at !== "string" || !value.lastActivity.at.trim()) return false;
   }
   return true;
 }

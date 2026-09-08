@@ -1,10 +1,12 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { activityFromProgressRecord } from "./activity.js";
 import { hasLaunchedAgentPrompt, isDir } from "./paths.js";
 import { readStructuredResult } from "./structured-result.js";
 import type { AgentResult, AgentState, RpcEventRecord, RunState } from "./types.js";
 
 const MAX_RPC_EVENT_LINE_CHARS = 1024 * 1024;
+const LAST_ACTIVITY_TAIL_BYTES = 64 * 1024;
 
 interface AgentStateReadOptions {
 	includeLineCounts?: boolean;
@@ -67,6 +69,9 @@ export function getAgentState(
 		state.finishedAt = fs.readFileSync(finishedAtFile, "utf-8").trim();
 	}
 
+	const lastActivity = readLastActivity(path.join(agentDir, "progress.jsonl"));
+	if (lastActivity) state.lastActivity = lastActivity;
+
 	const retryPendingFile = path.join(agentDir, "retry_pending");
 	const stopRequestedFile = path.join(agentDir, "stop_requested");
 	if (fs.existsSync(retryPendingFile) && !fs.existsSync(stopRequestedFile) && state.status !== "running" && state.status !== "done") {
@@ -107,6 +112,41 @@ function readPid(pidFile: string): number | undefined {
 	if (!fs.existsSync(pidFile)) return undefined;
 	const pid = parseInt(fs.readFileSync(pidFile, "utf-8").trim(), 10);
 	return isNaN(pid) ? undefined : pid;
+}
+
+function readLastActivity(filePath: string): AgentState["lastActivity"] | undefined {
+	if (!fs.existsSync(filePath)) return undefined;
+	let fd: number | undefined;
+	try {
+		fd = fs.openSync(filePath, "r");
+		const size = fs.fstatSync(fd).size;
+		if (size <= 0) return undefined;
+		const start = Math.max(0, size - LAST_ACTIVITY_TAIL_BYTES);
+		const buffer = Buffer.allocUnsafe(size - start);
+		const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, start);
+		if (bytesRead <= 0) return undefined;
+		const lines = buffer.toString("utf-8", 0, bytesRead).split(/\r?\n/);
+		if (start > 0) {
+			const previousByte = Buffer.allocUnsafe(1);
+			const previousBytesRead = fs.readSync(fd, previousByte, 0, 1, start - 1);
+			if (previousBytesRead === 1 && previousByte[0] !== 0x0a) lines.shift();
+		}
+		for (let index = lines.length - 1; index >= 0; index--) {
+			const line = lines[index]?.trim();
+			if (!line) continue;
+			try {
+				const activity = activityFromProgressRecord(JSON.parse(line) as unknown);
+				if (activity) return activity;
+			} catch {
+				// Ignore malformed or partially written tail lines and keep scanning.
+			}
+		}
+	} catch {
+		return undefined;
+	} finally {
+		if (fd !== undefined) fs.closeSync(fd);
+	}
+	return undefined;
 }
 
 function hasRpcPromptFailure(eventsFile: string): boolean {

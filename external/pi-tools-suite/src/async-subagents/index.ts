@@ -14,9 +14,11 @@ import {
 	removeSubagentRunsFromRegistry,
 	stopAgents,
 	type AgentCompletionHandler,
+	type RpcEventRecord,
 	type StopSignal,
 	type SubagentSessionRecord,
 } from "./lib.js";
+import { activityFromRpcEvent } from "./core/activity.js";
 import { buildUltraworkPrompt, isUltraworkEnvEnabled, registerCommands } from "./commands.js";
 import { agentStrategyPrompt, appendAgentStrategyPrompt } from "./core/agent-strategy.js";
 import { buildSubagentCatalogPrompt } from "./core/agent-catalog.js";
@@ -65,7 +67,13 @@ function createLiveStatePayload(
 		if (matchingLiveAgents.length === 0) continue;
 		const agentIds = matchingLiveAgents.map((agent) => agent.agentId);
 		const state = getRunState(runDir, agentIds, { includeLineCounts: false, checkRpcPromptFailure: false });
-		const activeAgents = state.agents.filter((agent) => !isTerminalAgentStatus(agent.status));
+		const liveAgentsById = new Map(matchingLiveAgents.map((agent) => [agent.agentId, agent]));
+		const activeAgents = state.agents
+			.filter((agent) => !isTerminalAgentStatus(agent.status))
+			.map((agent) => {
+				const lastActivity = liveAgentsById.get(agent.id)?.lastActivity;
+				return lastActivity ? { ...agent, lastActivity } : agent;
+			});
 		if (activeAgents.length === 0) continue;
 		count += activeAgents.length;
 		const tasks = matchingLiveAgents.map((agent) => agent.preview).filter((preview): preview is NonNullable<typeof preview> => Boolean(preview));
@@ -165,7 +173,16 @@ export default function (pi: ExtensionAPI) {
 		refreshSubagentOverlay();
 	};
 
-	registerSubagentsTool(pi, liveAgents, handleAgentCompletion, refreshSubagentOverlay);
+	function handleAgentRpcEvent(runDir: string, agentId: string, event: RpcEventRecord): void {
+		const activity = activityFromRpcEvent(event);
+		if (!activity) return;
+		const liveAgent = liveAgents.get(runDir)?.get(agentId);
+		if (!liveAgent) return;
+		liveAgent.lastActivity = activity;
+		refreshSubagentOverlay();
+	}
+
+	registerSubagentsTool(pi, liveAgents, handleAgentCompletion, refreshSubagentOverlay, handleAgentRpcEvent);
 	registerCommands(pi);
 
 	pi.on("session_start", async (_event, ctx) => {

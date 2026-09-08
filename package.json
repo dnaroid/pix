@@ -55,6 +55,7 @@
     "prelink:pix": "npm run build:pix --silent",
     "link:pix": "mise exec node@24.16.0 -- npm link --silent",
     "watch:pix": "npm run link:pix --silent && mise exec node@24.16.0 -- node scripts/watch-pix.mjs",
+    "watch:all": "mise exec node@24.16.0 -- node scripts/watch-all.mjs",
     "rebuild:all": "npm run build:desktop",
     "check": "mise exec node@24.16.0 -- npm run check:inner",
     "precheck:inner": "npm run generate-schemas --silent",

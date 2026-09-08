@@ -136,6 +136,11 @@ export type SubagentActiveStatus = (typeof SUBAGENT_ACTIVE_STATUSES)[number];
 export type SubagentTerminalStatus = (typeof SUBAGENT_TERMINAL_STATUSES)[number];
 export type SubagentRenderMode = (typeof SUBAGENT_RENDER_MODES)[number];
 
+export type SubagentActivity = {
+	label: string;
+	at: string;
+};
+
 export type SubagentAgentState = {
 	id: string;
 	status: SubagentStatus;
@@ -148,6 +153,7 @@ export type SubagentAgentState = {
 	stderrLines?: number;
 	eventLines?: number;
 	retryCount?: number;
+	lastActivity?: SubagentActivity;
 };
 
 export type SubagentTaskPreview = {

@@ -7,7 +7,7 @@ import { ASYNC_SUBAGENT_TOOL_DESCRIPTIONS } from "../../tool-descriptions.js";
 import { SUBAGENT_TYPE_SELECTION_GUIDANCE } from "../core/agent-catalog.js";
 import { selectAvailableAgentModels } from "../core/model-selection.js";
 import { SubagentModelSelectionError } from "../core/config.js";
-import type { AgentCompletionHandler, AgentTask, ResolvedAgentTaskConfig, Semaphore, SpawnedAgent } from "../lib.js";
+import type { AgentCompletionHandler, AgentTask, ResolvedAgentTaskConfig, RpcEventRecord, Semaphore, SpawnedAgent } from "../lib.js";
 import {
 	createRunDir,
 	createSemaphore,
@@ -52,6 +52,7 @@ interface LaunchQueuedAgentOptions {
 	onCancelled: (reason: string) => void;
 	onLaunchError: (error: unknown) => void;
 	onUpdate: () => void;
+	onRpcEvent?: (event: RpcEventRecord) => void;
 }
 
 const PROJECT_SEMAPHORES = new Map<string, Semaphore>();
@@ -71,7 +72,7 @@ function normalizedLimit(limit: number): number {
 }
 
 async function launchQueuedAgent(options: LaunchQueuedAgentOptions): Promise<void> {
-	const { resolved, runDir, cwd, parentSession, semaphore, signal, onResult, onComplete, onCancelled, onLaunchError, onUpdate } = options;
+	const { resolved, runDir, cwd, parentSession, semaphore, signal, onResult, onComplete, onCancelled, onLaunchError, onUpdate, onRpcEvent } = options;
 	let slotAcquired = false;
 	try {
 		await semaphore.acquire(signal);
@@ -111,13 +112,14 @@ async function launchQueuedAgent(options: LaunchQueuedAgentOptions): Promise<voi
 					extraArgs: resolved.extraArgs,
 					fallbackModels: resolved.fallbackModels,
 					signal,
+					onRpcEvent,
 					...spawnOptions,
 				},
 			);
 			onResult(retryResult.initial);
 			retryResult.done.catch(onLaunchError);
 		} else {
-			const result = spawnAgent(runDir, resolved.task, cwd, resolved.extraArgs, undefined, completionHandler, spawnOptions);
+			const result = spawnAgent(runDir, resolved.task, cwd, resolved.extraArgs, onRpcEvent, completionHandler, spawnOptions);
 			onResult(result);
 		}
 		onUpdate();
@@ -195,6 +197,7 @@ export function registerSpawnTool(
 	liveAgents: Map<string, Map<string, LiveAgent>>,
 	handleAgentCompletion: AgentCompletionHandler,
 	onLiveAgentsChange?: () => void,
+	onAgentRpcEvent?: (runDir: string, agentId: string, event: RpcEventRecord) => void,
 ): void {
 	pi.registerTool({
 		...ASYNC_SUBAGENT_TOOL_DESCRIPTIONS.spawnAction,
@@ -342,6 +345,7 @@ export function registerSpawnTool(
 							details: partialDetails,
 						});
 					},
+					onRpcEvent: (event) => onAgentRpcEvent?.(runDir, task.id, event),
 				});
 			}
 

@@ -1,8 +1,10 @@
-import { readFile, readdir, realpath, stat } from "node:fs/promises";
+import { open, readFile, readdir, realpath, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { SUBAGENT_PARENT_SESSION_FILE, SUBAGENTS_REGISTRY_FILE, SUBAGENTS_RUN_ROOT } from "../constants.js";
 import { isSubagentRegistry } from "./subagents-model.js";
 import type { SubagentAgentState, SubagentRegistry } from "../types.js";
+
+const LAST_ACTIVITY_TAIL_BYTES = 64 * 1024;
 
 export function subagentsRegistryPath(cwd: string): string {
 	return join(cwd, SUBAGENTS_RUN_ROOT, SUBAGENTS_REGISTRY_FILE);
@@ -112,6 +114,8 @@ async function readSubagentAgentState(
 	if (startedAt) state.startedAt = startedAt;
 	const finishedAt = await readTrimmedFile(join(agentDir, "finished_at"));
 	if (finishedAt) state.finishedAt = finishedAt;
+	const lastActivity = await readLastActivity(join(agentDir, "progress.jsonl"));
+	if (lastActivity) state.lastActivity = lastActivity;
 
 	const retryPending = await fileExists(join(agentDir, "retry_pending"));
 	const stopRequested = await fileExists(join(agentDir, "stop_requested"));
@@ -180,6 +184,52 @@ async function readNumberFile(filePath: string): Promise<number | undefined> {
 	if (!raw) return undefined;
 	const value = Number.parseInt(raw, 10);
 	return Number.isFinite(value) ? value : undefined;
+}
+
+async function readLastActivity(filePath: string): Promise<SubagentAgentState["lastActivity"] | undefined> {
+	let handle: Awaited<ReturnType<typeof open>> | undefined;
+	try {
+		handle = await open(filePath, "r");
+		const size = (await handle.stat()).size;
+		if (size <= 0) return undefined;
+		const start = Math.max(0, size - LAST_ACTIVITY_TAIL_BYTES);
+		const buffer = Buffer.allocUnsafe(size - start);
+		const { bytesRead } = await handle.read(buffer, 0, buffer.length, start);
+		if (bytesRead <= 0) return undefined;
+		const lines = buffer.toString("utf8", 0, bytesRead).split(/\r?\n/);
+		if (start > 0) {
+			const previousByte = Buffer.allocUnsafe(1);
+			const previousRead = await handle.read(previousByte, 0, 1, start - 1);
+			if (previousRead.bytesRead === 1 && previousByte[0] !== 0x0a) lines.shift();
+		}
+		for (let index = lines.length - 1; index >= 0; index--) {
+			const line = lines[index]?.trim();
+			if (!line) continue;
+			try {
+				const value: unknown = JSON.parse(line);
+				if (!isProgressActivityRecord(value)) continue;
+				const toolName = typeof value.toolName === "string" ? value.toolName.trim() : "";
+				if (toolName) return { label: toolName, at: value.at };
+				if (value.type === "message_start" || value.type === "message_end") return { label: "Thinking", at: value.at };
+			} catch {
+				// Ignore malformed or partially written tail lines and keep scanning.
+			}
+		}
+	} catch {
+		return undefined;
+	} finally {
+		await handle?.close().catch(() => undefined);
+	}
+	return undefined;
+}
+
+function isProgressActivityRecord(value: unknown): value is Record<string, unknown> & { at: string; stage: "rpc_event"; type: string } {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+	const record = value as Record<string, unknown>;
+	return record.stage === "rpc_event"
+		&& typeof record.at === "string"
+		&& record.at.trim().length > 0
+		&& typeof record.type === "string";
 }
 
 async function countFileLines(filePath: string): Promise<number | undefined> {

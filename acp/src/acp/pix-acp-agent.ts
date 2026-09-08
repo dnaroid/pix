@@ -102,6 +102,7 @@ import {
 	PIX_QUEUE_CONSUMED_METHOD,
 	PIX_QUEUE_MESSAGE_METHOD,
 	PIX_QUEUE_STATE_METHOD,
+	PIX_REGISTRY_ACTION_METHOD,
 	PIX_RELOAD_SESSION_METHOD,
 	PIX_REQUEST_HISTORY_METHOD,
 	PIX_RESUME_PATH_METHOD,
@@ -113,6 +114,7 @@ import {
 	parseDesktopImportSessionRequest,
 	parseDesktopQueueActionRequest,
 	parseDesktopQueueSubmitRequest,
+	parseDesktopRegistryActionRequest,
 	parseDesktopResumePathRequest,
 	parseDesktopSessionImageRequest,
 	parseDesktopSessionHistoryRequest,
@@ -129,6 +131,7 @@ import {
 	type DesktopQueueSubmitRequest,
 	type DesktopQueueSubmitResponse,
 	type DesktopQueuedUserMessage,
+	type DesktopRegistryActionRequest,
 	type DesktopRequestHistoryResponse,
 	type DesktopSessionHistoryRequest,
 	type DesktopSessionHistoryResponse,
@@ -401,6 +404,9 @@ export class PixAcpAgent {
 			.onRequest(PIX_QUEUE_ACTION_METHOD, parseDesktopQueueActionRequest, (ctx) =>
 				this.desktopQueueAction(ctx.params),
 			)
+			.onRequest(PIX_REGISTRY_ACTION_METHOD, parseDesktopRegistryActionRequest, (ctx) =>
+				this.desktopRegistryAction(ctx.params),
+			)
 			.onRequest(PIX_TAKE_AUTO_MESSAGE_METHOD, parseDesktopSessionRequest, (ctx) =>
 				this.desktopTakeAutoMessage(ctx.params),
 			)
@@ -489,6 +495,29 @@ export class PixAcpAgent {
 		}
 		const prompt = await this.enhancePrompt({ cwd: session.cwd, draft: params.draft, signal });
 		return { prompt };
+	}
+
+	private async desktopRegistryAction(params: DesktopRegistryActionRequest): Promise<Record<string, never>> {
+		const session = this.requireDesktopSession(params.sessionId);
+		if (session.activeRun || session.builtinRunning) {
+			throw new RequestError(ERROR_SERVER, "registry actions are unavailable while the agent is running");
+		}
+		const state = await session.pi.getState();
+		if (state.isStreaming || state.isCompacting) {
+			throw new RequestError(ERROR_SERVER, "registry actions are unavailable while the session is busy");
+		}
+		const commands = await session.pi.getCommands();
+		if (!commands.some((command) => command.name.replace(/^\/+/, "") === "registry")) {
+			throw new RequestError(ERROR_SERVER, "resource registry extension is unavailable in this session");
+		}
+
+		session.builtinRunning = true;
+		try {
+			await session.pi.prompt(registryRpcCommand(params));
+			return {};
+		} finally {
+			session.builtinRunning = false;
+		}
 	}
 
 	private async forkMessages(params: DesktopSessionRequest): Promise<ForkMessagesResponse> {
@@ -2256,6 +2285,19 @@ function commandPathArgument(value: string | undefined): string | undefined {
 		return end < 0 ? trimmed.slice(1) : trimmed.slice(1, end);
 	}
 	return trimmed.split(/\s+/u)[0];
+}
+
+function registryRpcCommand(params: DesktopRegistryActionRequest): string {
+	if (params.action === "refresh") return "/registry rpc refresh";
+	if (params.action === "configure") return "/registry rpc configure";
+	if (params.action === "project-key") return "/registry rpc project-key";
+	if ("scope" in params) {
+		return `/registry rpc ${params.action === "push-project" ? "push" : "pull"} ${params.scope}`;
+	}
+	if (!("type" in params) || !("name" in params)) {
+		throw new RequestError(ERROR_SERVER, "invalid registry action request");
+	}
+	return `/registry rpc ${params.action} ${params.type} ${params.name}`;
 }
 
 function cloneQueuedUserMessage(message: DesktopQueuedUserMessage): DesktopQueuedUserMessage {

@@ -17,6 +17,7 @@ export const PIX_DEFER_MESSAGE_METHOD = "pix/session/defer_message";
 export const PIX_QUEUE_ACTION_METHOD = "pix/session/queue_action";
 export const PIX_TAKE_AUTO_MESSAGE_METHOD = "pix/session/take_auto_message";
 export const PIX_QUEUE_CONSUMED_METHOD = "pix/session/queue_consumed";
+export const PIX_REGISTRY_ACTION_METHOD = "pix/registry/action";
 
 export interface DesktopSessionRequest {
 	readonly sessionId: string;
@@ -135,6 +136,22 @@ export interface DesktopQueueConsumedNotification {
 	readonly message: DesktopQueuedUserMessage;
 }
 
+export type DesktopRegistryResourceType = "skill" | "agent";
+export type DesktopRegistryProjectScope = "tasks" | "plans" | "todo" | "project";
+
+export type DesktopRegistryActionRequest = DesktopSessionRequest & (
+	| { readonly action: "refresh" | "configure" | "project-key" }
+	| {
+		readonly action: "install" | "update" | "push" | "uninstall" | "remove";
+		readonly type: DesktopRegistryResourceType;
+		readonly name: string;
+	}
+	| {
+		readonly action: "push-project" | "pull-project";
+		readonly scope: DesktopRegistryProjectScope;
+	}
+);
+
 export function parseDesktopSessionRequest(value: unknown): DesktopSessionRequest {
 	if (!isRecord(value) || typeof value.sessionId !== "string" || value.sessionId.length === 0) {
 		throw new RequestError(ERROR_INVALID_PARAMS, "request requires a non-empty string sessionId field");
@@ -222,6 +239,43 @@ export function parseDesktopQueueActionRequest(value: unknown): DesktopQueueActi
 		text: value.text,
 		action: value.action as DesktopQueueAction,
 	};
+}
+
+export function parseDesktopRegistryActionRequest(value: unknown): DesktopRegistryActionRequest {
+	const session = parseDesktopSessionRequest(value);
+	if (!isRecord(value) || typeof value.action !== "string") {
+		throw new RequestError(ERROR_INVALID_PARAMS, "registry action request requires an action");
+	}
+	if (value.action === "refresh" || value.action === "configure" || value.action === "project-key") {
+		return { ...session, action: value.action };
+	}
+	if (["install", "update", "push", "uninstall", "remove"].includes(value.action)) {
+		if (
+			(value.type !== "skill" && value.type !== "agent")
+			|| typeof value.name !== "string"
+			|| !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value.name)
+			|| value.name.includes("..")
+		) {
+			throw new RequestError(ERROR_INVALID_PARAMS, "invalid registry resource action request");
+		}
+		return {
+			...session,
+			action: value.action as "install" | "update" | "push" | "uninstall" | "remove",
+			type: value.type,
+			name: value.name,
+		};
+	}
+	if (value.action === "push-project" || value.action === "pull-project") {
+		if (!["tasks", "plans", "todo", "project"].includes(String(value.scope))) {
+			throw new RequestError(ERROR_INVALID_PARAMS, "invalid registry project scope");
+		}
+		return {
+			...session,
+			action: value.action,
+			scope: value.scope as DesktopRegistryProjectScope,
+		};
+	}
+	throw new RequestError(ERROR_INVALID_PARAMS, `unsupported registry action: ${value.action}`);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

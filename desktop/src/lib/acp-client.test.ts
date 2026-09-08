@@ -109,6 +109,31 @@ describe("ACP JSON-RPC client", () => {
     await client.dispose();
   });
 
+  it("routes registry GUI actions through the private ACP registry method", async () => {
+    const transport = new FakeTransport();
+    const client = await startedClient(transport);
+
+    const refreshing = client.registryAction("session-1", { action: "refresh" });
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+    expect(requestAt(transport, 1)).toMatchObject({
+      method: "pix/registry/action",
+      params: { sessionId: "session-1", action: "refresh" },
+    });
+    transport.message({ jsonrpc: "2.0", id: requestAt(transport, 1).id, result: {} });
+    await expect(refreshing).resolves.toBeUndefined();
+
+    const updating = client.registryAction("session-1", { action: "update", type: "skill", name: "pdf" });
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(3));
+    expect(requestAt(transport, 2)).toMatchObject({
+      method: "pix/registry/action",
+      params: { sessionId: "session-1", action: "update", type: "skill", name: "pdf" },
+    });
+    transport.message({ jsonrpc: "2.0", id: requestAt(transport, 2).id, result: {} });
+    await expect(updating).resolves.toBeUndefined();
+
+    await client.dispose();
+  });
+
   it("can request full session history explicitly for interactive jump", async () => {
     const transport = new FakeTransport();
     const client = await startedClient(transport);

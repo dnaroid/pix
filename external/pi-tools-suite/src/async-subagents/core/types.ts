@@ -39,6 +39,13 @@ export interface AgentState {
 	eventLines?: number;
 	/** How many times this agent has been retried (0 = first attempt). */
 	retryCount?: number;
+	/** Most recent user-visible activity observed from the sub-agent RPC stream. */
+	lastActivity?: AgentActivity;
+}
+
+export interface AgentActivity {
+	label: string;
+	at: string;
 }
 
 /** Retry configuration for failed agents. */

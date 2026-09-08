@@ -696,10 +696,14 @@ function compactRpcEventForProgress(event: RpcEventRecord): Record<string, unkno
 			toolName: typeof event.toolName === "string" ? event.toolName : undefined,
 		});
 	}
-	if (event.type === "message_end") {
+	if (event.type === "message_start" || event.type === "message_end") {
 		return stripUndefined({
 			type: event.type,
-			role: isRecord(event.message) && typeof event.message.role === "string" ? event.message.role : undefined,
+			role: typeof event.role === "string"
+				? event.role
+				: isRecord(event.message) && typeof event.message.role === "string"
+					? event.message.role
+					: undefined,
 			stopReason: isRecord(event.message) && typeof event.message.stopReason === "string" ? event.message.stopReason : undefined,
 		});
 	}

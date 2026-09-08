@@ -57,6 +57,11 @@ export function isSubagentAgentState(value: unknown): value is SubagentAgentStat
 	if (value.stderrLines !== undefined && typeof value.stderrLines !== "number") return false;
 	if (value.eventLines !== undefined && typeof value.eventLines !== "number") return false;
 	if (value.retryCount !== undefined && typeof value.retryCount !== "number") return false;
+	if (value.lastActivity !== undefined) {
+		if (!isRecord(value.lastActivity)) return false;
+		if (typeof value.lastActivity.label !== "string" || !value.lastActivity.label.trim()) return false;
+		if (typeof value.lastActivity.at !== "string" || !value.lastActivity.at.trim()) return false;
+	}
 	return true;
 }
 
@@ -208,9 +213,21 @@ export function formatSubagentTimestamp(value: string | undefined): string | und
 }
 
 export function formatElapsedSince(value: string | undefined, now = Date.now()): string {
-	if (!value) return "elapsed:—";
+	return formatDurationSince(value, now) ?? "elapsed:—";
+}
+
+export function formatSubagentLastActivity(
+	activity: SubagentAgentState["lastActivity"],
+	now = Date.now(),
+): string | undefined {
+	if (!activity) return undefined;
+	return `${activity.label} · ${formatDurationSince(activity.at, now) ?? "—"}`;
+}
+
+function formatDurationSince(value: string | undefined, now: number): string | undefined {
+	if (!value) return undefined;
 	const started = Date.parse(value);
-	if (!Number.isFinite(started)) return "elapsed:—";
+	if (!Number.isFinite(started)) return undefined;
 	const seconds = Math.max(0, Math.floor((now - started) / 1000));
 	if (seconds < 60) return `${seconds}s`;
 	const minutes = Math.floor(seconds / 60);

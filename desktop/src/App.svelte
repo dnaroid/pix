@@ -104,6 +104,11 @@
   import WorkspaceSidebar from "./components/WorkspaceSidebar.svelte";
   import type { SessionStateNotification } from "./lib/session-state";
   import {
+    registrySnapshotFromSessionState,
+    type RegistryActionRequest,
+    type RegistrySnapshot,
+  } from "./lib/registry";
+  import {
     sessionTodoSnapshot,
     updateSessionTodoSnapshots,
     type SessionTodoSnapshot,
@@ -216,6 +221,8 @@
   let taskActionId = $state<string | null>(null);
   let todoSnapshots = $state<Map<string, SessionTodoSnapshot>>(new Map());
   let subagentSnapshots = $state<Map<string, SessionSubagentSnapshot>>(new Map());
+  let registrySnapshots = $state<Map<string, RegistrySnapshot>>(new Map());
+  let registryActionId = $state<string | null>(null);
   let slashCommandsBySession = $state<Map<string, AvailableCommand[]>>(new Map());
   let queueItemsBySession = $state<Map<string, QueueItem[]>>(new Map());
   let queueActionRunning = $state(false);
@@ -272,6 +279,8 @@
   const canGoForwardInPreview = $derived(canMovePreviewHistory(previewHistory, 1));
   const activeTodoSnapshot = $derived(activeSessionId ? todoSnapshots.get(activeSessionId) : undefined);
   const activeSubagentSnapshot = $derived(activeSessionId ? subagentSnapshots.get(activeSessionId) : undefined);
+  const activeRegistrySnapshot = $derived(activeSessionId ? registrySnapshots.get(activeSessionId) : undefined);
+  const registryLoading = $derived(registryActionId === "refresh");
   const activeQueueItems = $derived(activeSessionId ? (queueItemsBySession.get(activeSessionId) ?? []) : []);
   const activeSlashCommands = $derived(
     mergeSlashCommands(
@@ -401,6 +410,8 @@
         sessionPrewarmGeneration += 1;
         todoSnapshots = new Map();
         subagentSnapshots = new Map();
+        registrySnapshots = new Map();
+        registryActionId = null;
         slashCommandsBySession = new Map();
         queueItemsBySession = new Map();
         transcript = emptyTranscript;
@@ -457,6 +468,8 @@
     sessionPrewarmGeneration += 1;
     todoSnapshots = new Map();
     subagentSnapshots = new Map();
+    registrySnapshots = new Map();
+    registryActionId = null;
     slashCommandsBySession = new Map();
     queueItemsBySession = new Map();
     transcript = emptyTranscript;
@@ -538,6 +551,13 @@
   }
 
   function handleSessionState(notification: SessionStateNotification): void {
+    const registrySnapshot = registrySnapshotFromSessionState(notification);
+    if (registrySnapshot) {
+      const next = new Map(registrySnapshots);
+      next.set(notification.sessionId, registrySnapshot);
+      registrySnapshots = next;
+      return;
+    }
     const todoSnapshot = sessionTodoSnapshot(notification);
     if (todoSnapshot) {
       todoSnapshots = updateSessionTodoSnapshots(todoSnapshots, notification.sessionId, todoSnapshot);
@@ -558,6 +578,38 @@
 
   function handleQueueConsumed(sessionId: string, message: QueuedUserMessage): void {
     appendQueuedMessageToTranscript(sessionId, message);
+  }
+
+  async function runRegistryAction(request: RegistryActionRequest, actionId: string): Promise<void> {
+    const requestClient = client;
+    const sessionId = activeSessionId;
+    if (
+      !requestClient
+      || !sessionId
+      || !activeSessionRuntimeReady
+      || operationRunning
+      || promptRunning
+      || sessionHistoryLoading
+      || registryActionId !== null
+    ) return;
+
+    registryActionId = actionId;
+    operationRunning = true;
+    errorMessage = null;
+    try {
+      await requestClient.registryAction(sessionId, request);
+    } catch (error) {
+      if (requestClient === client && sessionId === activeSessionId) reportError(error);
+    } finally {
+      if (requestClient === client && sessionId === activeSessionId) {
+        registryActionId = null;
+        operationRunning = false;
+      }
+    }
+  }
+
+  function refreshRegistry(): void {
+    void runRegistryAction({ action: "refresh" }, "refresh");
   }
 
   async function refreshQueueState(sessionId: string): Promise<void> {
@@ -795,6 +847,11 @@
     runtimeReadySessionIds.delete(sessionId);
     runtimeLoadsBySessionId.delete(sessionId);
     configOptionsBySessionId.delete(sessionId);
+    if (registrySnapshots.has(sessionId)) {
+      const next = new Map(registrySnapshots);
+      next.delete(sessionId);
+      registrySnapshots = next;
+    }
     if (sessionId === activeSessionId) activeSessionRuntimeReady = false;
   }
 
@@ -944,6 +1001,8 @@
       taskDocument = EMPTY_TASK_DOCUMENT;
       todoSnapshots = new Map();
       subagentSnapshots = new Map();
+      registrySnapshots = new Map();
+      registryActionId = null;
       slashCommandsBySession = new Map();
       taskActionId = null;
       taskLoadFailed = false;
@@ -2928,12 +2987,17 @@
       {activeSessionId}
       todoSnapshot={activeTodoSnapshot}
       subagentSnapshot={activeSubagentSnapshot}
+      registrySnapshot={activeRegistrySnapshot}
+      {registryLoading}
+      {registryActionId}
       onCreate={createProjectTask}
       onUpdate={updateProjectTask}
       onDelete={deleteProjectTask}
       onRun={(task) => void runProjectTask(task)}
       onOpenSession={(task) => void openProjectTaskSession(task)}
       onReload={() => void loadProjectTasks(workspace)}
+      onRegistryRefresh={refreshRegistry}
+      onRegistryAction={(request, actionId) => void runRegistryAction(request, actionId)}
     />
 
     <main class="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)_auto]">

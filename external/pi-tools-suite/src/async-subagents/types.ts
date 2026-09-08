@@ -6,6 +6,7 @@ export interface LiveAgent {
 	preview?: AgentTaskPreview;
 	/** Parent pi session that spawned/adopted this sub-agent, when known. */
 	parentSession?: string;
+	lastActivity?: AgentState["lastActivity"];
 	completed: Promise<void>;
 }
 

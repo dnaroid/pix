@@ -78,6 +78,33 @@ describe("subagents widget controller", () => {
 		}
 	});
 
+	it("restores the latest activity from progress.jsonl on file refresh", async () => {
+		const cwd = await mkdtemp(join(tmpdir(), "pix-subagents-"));
+		try {
+			const currentSession = join(cwd, "current.jsonl");
+			const runDir = await writeRun(cwd, "owned-run", "owned-agent", currentSession);
+			const agentDir = join(runDir, "owned-agent");
+			await writeFile(join(agentDir, "pid"), String(process.pid), "utf8");
+			await writeFile(join(agentDir, "progress.jsonl"), [
+				JSON.stringify({ at: "2026-09-08T12:00:00.000Z", stage: "rpc_event", type: "message_start", role: "assistant" }),
+				JSON.stringify({ at: "2026-09-08T12:00:03.000Z", stage: "rpc_event", type: "tool_execution_start", toolName: "Grep" }),
+				JSON.stringify({ at: "2026-09-08T12:00:04.000Z", stage: "rpc_event", type: "turn_end" }),
+				"{partially-written",
+			].join("\n"), "utf8");
+			await writeRegistry(cwd, [registryRun("owned-run", runDir, "owned-agent", "2026-09-08T12:00:04.000Z")], "owned-run");
+
+			const controller = newController(cwd, currentSession);
+			await (controller as unknown as RefreshableController).refreshFromFiles();
+
+			const agent = controller.widgetState?.agents.find((item) => item.id === "owned-agent");
+			assert.equal(agent?.status, "running");
+			assert.deepEqual(agent?.lastActivity, { label: "Grep", at: "2026-09-08T12:00:03.000Z" });
+			controller.stopPolling();
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	});
+
 	it("clears current-session subagents on reset", () => {
 		const controller = newController("/tmp/project", "/tmp/project/current.jsonl", false);
 

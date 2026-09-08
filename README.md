@@ -95,7 +95,7 @@ On startup, Pix tries to link the bundled suite into the active Pi agent directo
 | Context control | `dcp` | Explicit compression and context pruning for long sessions, including sidecar state. |
 | Local web access | `web-search` | Web search and page extraction through a local Ollama instance. |
 | Providers and quotas | `antigravity-auth`, `opencode-import`, `usage` | Antigravity OAuth/account failover, OpenCode credential import, and multi-provider usage views. |
-| Reusable workflows | `prompt-commands`, `resource-registry`, `session-name` | Prompt-command CRUD, private Git-backed skill/agent install/update/push/remove, project-scoped `.pi/tasks.jsonc` + `.pi/plans/` + `.pi/TODO.md` push/pull, and session naming. |
+| Reusable workflows | `prompt-commands`, `resource-registry`, `session-name` | Prompt-command CRUD, private Git-backed skill/agent install/update/push/remote-remove/local-uninstall with reload-on-change, project-scoped `.pi/tasks.jsonc` + `.pi/plans/` + `.pi/TODO.md` sync, a Desktop Registry sidebar for status/actions/configuration, and session naming. |
 | Model compatibility | `coding-discipline`, `model-tools`, `codex-reasoning-fix` | Model-specific discipline and vision lookup, compatibility aliases, and a Codex reasoning payload workaround. |
 
 Every module can be disabled. Optional integrations only activate when their requirements are available — for example, repository tools require an index, web tools require local Ollama web search, and LSP servers must be configured and trusted.
@@ -500,7 +500,15 @@ npm run test:tools-suite
 
 # Build the publishable renderer
 npm run build:pix
+
+# Watch Pix, ACP, the bundled suite, and Desktop
+npm run watch:all
 ```
+
+`watch:all` rebuilds only the affected project parts. It keeps the last working
+Desktop process alive while changes compile, then replaces it only after the
+entire queued build succeeds. A failed build is reported without replacing the
+running Desktop.
 
 Regenerate the README screenshots without accounts or live model traffic:
 

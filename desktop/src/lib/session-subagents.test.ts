@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SessionStateNotification } from "./session-state";
 import {
+  formatSessionSubagentActivity,
   formatSessionSubagentElapsed,
   sessionSubagentCount,
   sessionSubagentModelLabel,
@@ -30,7 +31,12 @@ describe("desktop session subagents", () => {
   it("validates the channel and versioned live-state snapshot", () => {
     const valid = snapshot([{
       runDir: "/work/.pi/subagents/review-run",
-      agents: [{ id: "review", status: "running", pid: 42 }],
+      agents: [{
+        id: "review",
+        status: "running",
+        pid: 42,
+        lastActivity: { label: "Grep", at: "2026-01-01T00:01:02Z" },
+      }],
       tasks: [{ id: "review", task: "Review transport", model: "openai/gpt-5" }],
     }]);
     expect(sessionSubagentSnapshot(notification(valid))).toEqual(valid);
@@ -43,6 +49,12 @@ describe("desktop session subagents", () => {
     ])))).toBeUndefined();
     expect(sessionSubagentSnapshot(notification(snapshot([
       { runDir: "/run", agents: [{ id: "agent", status: "running" }], tasks: [{ id: "agent" }, { id: "agent" }] },
+    ])))).toBeUndefined();
+    expect(sessionSubagentSnapshot(notification(snapshot([
+      { runDir: "/run", agents: [{ id: "agent", status: "running", lastActivity: { label: "", at: "2026-01-01T00:00:00Z" } }] },
+    ])))).toBeUndefined();
+    expect(sessionSubagentSnapshot(notification(snapshot([
+      { runDir: "/run", agents: [{ id: "agent", status: "running", lastActivity: { label: "Read", at: 1 } as never }] },
     ])))).toBeUndefined();
   });
 
@@ -95,6 +107,13 @@ describe("desktop session subagents", () => {
     expect(formatSessionSubagentElapsed("2026-01-01T02:02:30Z", now)).toBe("35s");
     expect(formatSessionSubagentElapsed("2026-01-01T02:01:30Z", now)).toBe("1m35s");
     expect(formatSessionSubagentElapsed("2025-12-31T23:59:00Z", now)).toBe("2h04m");
+  });
+
+  it("formats the latest activity label with its age", () => {
+    const now = Date.parse("2026-01-01T00:01:05Z");
+    expect(formatSessionSubagentActivity({ label: "Grep", at: "2026-01-01T00:01:02Z" }, now)).toBe("Grep · 3s");
+    expect(formatSessionSubagentActivity({ label: "Thinking", at: "invalid" }, now)).toBe("Thinking · —");
+    expect(formatSessionSubagentActivity(undefined, now)).toBeUndefined();
   });
 
   it("keeps the newest snapshot independently for each ACP session", () => {

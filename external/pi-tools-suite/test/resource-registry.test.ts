@@ -7,6 +7,7 @@ import resourceRegistry, { __test } from "../src/resource-registry/index.js";
 
 const originalHome = process.env.HOME;
 const originalCache = process.env.XDG_CACHE_HOME;
+const originalRpcStateBridge = process.env.PIX_ACP_SESSION_STATE_BRIDGE;
 const roots: string[] = [];
 
 afterEach(() => {
@@ -14,6 +15,8 @@ afterEach(() => {
 	else process.env.HOME = originalHome;
 	if (originalCache === undefined) delete process.env.XDG_CACHE_HOME;
 	else process.env.XDG_CACHE_HOME = originalCache;
+	if (originalRpcStateBridge === undefined) delete process.env.PIX_ACP_SESSION_STATE_BRIDGE;
+	else process.env.PIX_ACP_SESSION_STATE_BRIDGE = originalRpcStateBridge;
 	for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -62,6 +65,7 @@ function harness(project: string) {
 	const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
 	const notices: Array<{ message: string; type?: string }> = [];
 	const messages: any[] = [];
+	const widgets: Array<{ key: string; lines: string[] | undefined }> = [];
 	let reloads = 0;
 	const pi = {
 		on(name: string, handler: (event: any, ctx: any) => unknown) {
@@ -94,15 +98,17 @@ function harness(project: string) {
 	const ctx = {
 		cwd: project,
 		hasUI: true,
+		mode: "rpc",
 		ui: {
 			notify(message: string, type?: string) { notices.push({ message, type }); },
+			setWidget(key: string, lines: string[] | undefined) { widgets.push({ key, lines }); },
 			confirm: async () => true,
 			select: async () => undefined,
 			input: async () => undefined,
 		},
 		reload: async () => { reloads += 1; },
 	} as any;
-	return { commands, handlers, messages, notices, ctx, get reloads() { return reloads; } };
+	return { commands, handlers, messages, notices, widgets, ctx, get reloads() { return reloads; } };
 }
 
 async function waitFor(predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
@@ -123,6 +129,86 @@ describe("resource registry", () => {
 		const project = tempRoot();
 		const { commands } = harness(project);
 		expect([...commands.keys()]).toEqual(["registry"]);
+	});
+
+	test("publishes structured registry snapshots for the Desktop RPC manager", async () => {
+		const root = tempRoot();
+		const home = path.join(root, "home");
+		const project = path.join(root, "project");
+		fs.mkdirSync(home, { recursive: true });
+		fs.mkdirSync(project, { recursive: true });
+		process.env.HOME = home;
+		process.env.XDG_CACHE_HOME = path.join(root, "cache");
+		process.env.PIX_ACP_SESSION_STATE_BRIDGE = "1";
+		const { remote } = createRegistry(root);
+		const h = harness(project);
+		const command = h.commands.get("registry");
+
+		await command.handler(`configure ${remote} main`, h.ctx);
+		await command.handler("rpc refresh", h.ctx);
+
+		const refreshWidget = h.widgets.at(-1);
+		expect(refreshWidget?.key).toBe("pix.session-state");
+		expect(refreshWidget?.lines?.[0]).toBe("pi-tools-suite:resource-registry:state");
+		const refresh = JSON.parse(refreshWidget?.lines?.[1] ?? "null");
+		expect(refresh).toMatchObject({ configured: true, remote, branch: "main" });
+		expect(refresh.items.find((item: any) => item.id === "skill:demo")).toMatchObject({
+			type: "skill",
+			status: "not-installed",
+			statusLabel: "NOT INSTALLED",
+			local: false,
+			remote: true,
+			actions: ["install", "remove"],
+		});
+
+		await command.handler("rpc install skill demo", h.ctx);
+		const installed = JSON.parse(h.widgets.at(-1)?.lines?.[1] ?? "null");
+		expect(installed.items.find((item: any) => item.id === "skill:demo")).toMatchObject({
+			status: "up-to-date",
+			statusLabel: "UP TO DATE",
+			local: true,
+			remote: true,
+			actions: ["uninstall", "remove"],
+		});
+		expect(h.reloads).toBe(1);
+	});
+
+	test("drops a deferred Desktop registry snapshot after its session context becomes stale", async () => {
+		const root = tempRoot();
+		const project = path.join(root, "project");
+		fs.mkdirSync(project, { recursive: true });
+		process.env.PIX_ACP_SESSION_STATE_BRIDGE = "1";
+		const h = harness(project);
+		const ui = h.ctx.ui;
+		let stale = false;
+		const staleError = () => new Error(
+			"This extension ctx is stale after session replacement or reload.",
+		);
+		const ctx = {
+			get cwd() {
+				if (stale) throw staleError();
+				return project;
+			},
+			get mode() {
+				if (stale) throw staleError();
+				return "rpc";
+			},
+			get ui() {
+				if (stale) throw staleError();
+				return ui;
+			},
+			get hasUI() {
+				if (stale) throw staleError();
+				return true;
+			},
+		} as any;
+
+		const startupHandler = h.handlers.get("session_start")?.[0];
+		expect(startupHandler).toBeDefined();
+		startupHandler?.({ type: "session_start", reason: "reload" }, ctx);
+		stale = true;
+		await Bun.sleep(50);
+		expect(h.widgets).toHaveLength(0);
 	});
 
 	test("installs, detects updates, updates, and pushes skills/agents through Git", async () => {
@@ -159,7 +245,8 @@ describe("resource registry", () => {
 			display: true,
 			details: { kind: "resource-registry-status", userVisibleOnly: true },
 		});
-		expect(h.messages.at(-1)?.content).toContain("↓ demo — update available");
+		expect(h.messages.at(-1)?.content).toContain("↓ demo  [SKILL]  **OUTDATED**");
+		expect(h.messages.at(-1)?.content).toContain("✓ reviewer  [AGENT]  **UP TO DATE**");
 
 		await command.handler("update skill demo", h.ctx);
 		expect(fs.readFileSync(path.join(project, ".pi", "skills", "demo", "SKILL.md"), "utf8")).toContain("v2");
@@ -175,9 +262,10 @@ describe("resource registry", () => {
 		expect(git(seed, ["pull", "--ff-only", "origin", "main"])).toContain("Updating");
 		expect(fs.readFileSync(path.join(seed, "agents", "architect.md"), "utf8")).toContain("Architecture review");
 		expect(h.notices.at(-1)?.message).toContain("Pushed agent \"architect\"");
+		expect(h.reloads).toBe(4);
 	});
 
-	test("supports all for bulk install, update, push, and remove across skills and agents", async () => {
+	test("supports all for bulk install, update, push, remote remove, and local uninstall across skills and agents", async () => {
 		const root = tempRoot();
 		const home = path.join(root, "home");
 		const project = path.join(root, "project");
@@ -217,6 +305,7 @@ describe("resource registry", () => {
 		expect(fs.readFileSync(path.join(seed, "skills", "local-skill", "SKILL.md"), "utf8")).toContain("Local skill body");
 		expect(fs.readFileSync(path.join(seed, "agents", "local-agent.md"), "utf8")).toContain("Local agent body");
 		expect(h.notices.at(-1)?.message).toContain("2 pushed, 2 unchanged, 0 failed");
+		expect(h.reloads).toBe(3);
 
 		await command.handler("remove all", h.ctx);
 		git(seed, ["pull", "--ff-only", "origin", "main"]);
@@ -230,6 +319,15 @@ describe("resource registry", () => {
 		expect(fs.existsSync(path.join(project, ".pi", "skills", "local-skill", "SKILL.md"))).toBe(true);
 		expect(fs.existsSync(path.join(project, ".pi", "agents", "local-agent.md"))).toBe(true);
 		expect(h.notices.at(-1)?.message).toContain("Removed 4 registry resources");
+		expect(h.reloads).toBe(4);
+
+		await command.handler("uninstall all", h.ctx);
+		expect(fs.existsSync(path.join(project, ".pi", "skills", "demo"))).toBe(false);
+		expect(fs.existsSync(path.join(project, ".pi", "skills", "local-skill"))).toBe(false);
+		expect(fs.existsSync(path.join(project, ".pi", "agents", "reviewer.md"))).toBe(false);
+		expect(fs.existsSync(path.join(project, ".pi", "agents", "local-agent.md"))).toBe(false);
+		expect(h.notices.at(-1)?.message).toContain("Uninstalled 4 local resources");
+		expect(h.reloads).toBe(5);
 	});
 
 	test("pushes, reports, and pulls project-scoped tasks, plans, and TODO without mixing them with reusable resources", async () => {
@@ -265,10 +363,17 @@ describe("resource registry", () => {
 		git(seed, ["push", "origin", "main"]);
 
 		await command.handler("status", h.ctx);
-		expect(h.messages.at(-1)?.content).toContain("key: project-alpha");
-		expect(h.messages.at(-1)?.content).toContain("↓ tasks.jsonc — update available");
-		expect(h.messages.at(-1)?.content).toContain("↓ plans/ — update available");
-		expect(h.messages.at(-1)?.content).toContain("↓ TODO.md — update available");
+		const updateStatus = h.messages.at(-1)?.content as string;
+		expect(updateStatus).toContain("Project: project-alpha");
+		expect(updateStatus).toContain("↓ tasks.jsonc  [PROJECT]  **OUTDATED**");
+		expect(updateStatus).toContain("↓ plans/  [PROJECT]  **OUTDATED**");
+		expect(updateStatus).toContain("↓ TODO.md  [PROJECT]  **OUTDATED**");
+		const updateLines = updateStatus.split("\n").filter((line) => line.startsWith("↓ "));
+		expect(updateLines).toEqual([...updateLines].sort((left, right) => {
+			const leftName = left.split(" ")[1] ?? "";
+			const rightName = right.split(" ")[1] ?? "";
+			return leftName.localeCompare(rightName);
+		}));
 
 		const reloadsBeforePull = h.reloads;
 		await command.handler("pull project", h.ctx);
@@ -284,7 +389,7 @@ describe("resource registry", () => {
 		git(seed, ["push", "origin", "main"]);
 
 		await command.handler("status", h.ctx);
-		expect(h.messages.at(-1)?.content).toContain("↕ tasks.jsonc — local + remote changes");
+		expect(h.messages.at(-1)?.content).toContain("↕ tasks.jsonc  [PROJECT]  **CONFLICT**");
 		await command.handler("pull tasks", h.ctx);
 		expect(h.notices.at(-1)).toMatchObject({ type: "error" });
 		expect(h.notices.at(-1)?.message).toContain("has local changes");
@@ -339,9 +444,39 @@ describe("resource registry", () => {
 		expect(fs.existsSync(path.join(seed, "skills", "demo"))).toBe(false);
 		expect(fs.existsSync(projectSkill)).toBe(true);
 		expect(h.notices.at(-1)?.message).toContain("Project copies were kept");
+		expect(h.reloads).toBe(2);
 
 		await command.handler("status", h.ctx);
-		expect(h.messages.at(-1)?.content).toContain("× demo — removed from registry");
+		expect(h.messages.at(-1)?.content).toContain("× demo  [SKILL]  **REMOVED FROM REGISTRY**");
+	});
+
+	test("uninstalls a local resource, keeps the registry copy, clears provenance, and reloads", async () => {
+		const root = tempRoot();
+		const home = path.join(root, "home");
+		const project = path.join(root, "project");
+		fs.mkdirSync(home, { recursive: true });
+		fs.mkdirSync(project, { recursive: true });
+		process.env.HOME = home;
+		process.env.XDG_CACHE_HOME = path.join(root, "cache");
+		const { remote, seed } = createRegistry(root);
+		const h = harness(project);
+		const command = h.commands.get("registry");
+
+		await command.handler(`configure ${remote} main`, h.ctx);
+		await command.handler("install skill demo", h.ctx);
+		expect(h.reloads).toBe(1);
+
+		await command.handler("uninstall skill demo", h.ctx);
+		expect(fs.existsSync(path.join(project, ".pi", "skills", "demo"))).toBe(false);
+		expect(fs.existsSync(path.join(seed, "skills", "demo", "SKILL.md"))).toBe(true);
+		expect(h.notices.at(-1)?.message).toContain("Registry copy was kept");
+		expect(h.reloads).toBe(2);
+
+		const provenance = JSON.parse(fs.readFileSync(path.join(project, ".pi", "registry.json"), "utf8"));
+		expect(provenance.resources["skill:demo"]).toBeUndefined();
+
+		await command.handler("status", h.ctx);
+		expect(h.messages.at(-1)?.content).toContain("· demo  [SKILL]  **NOT INSTALLED**");
 	});
 
 	test("supports scoped bulk removal through the rm alias", async () => {
@@ -386,6 +521,7 @@ describe("resource registry", () => {
 		expect(selections).toHaveLength(0);
 		expect(fs.existsSync(path.join(seed, "skills", "demo"))).toBe(false);
 		expect(fs.existsSync(path.join(seed, "agents", "reviewer.md"))).toBe(true);
+		expect(h.reloads).toBe(1);
 	});
 
 	test("offers project-state push and pull through the registry TUI", async () => {
@@ -528,7 +664,7 @@ describe("resource registry", () => {
 		const noticeCountBeforeStatus = h.notices.length;
 		await command.handler("status", h.ctx);
 		expect(h.notices).toHaveLength(noticeCountBeforeStatus);
-		expect(h.messages.at(-1)?.content).toContain("↕ demo — local + remote changes");
+		expect(h.messages.at(-1)?.content).toContain("↕ demo  [SKILL]  **CONFLICT**");
 		await command.handler("update skill demo", h.ctx);
 		expect(h.notices.at(-1)).toMatchObject({ type: "error" });
 		expect(h.notices.at(-1)?.message).toContain("has local changes");

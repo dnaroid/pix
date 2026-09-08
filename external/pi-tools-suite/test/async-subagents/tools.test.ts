@@ -995,7 +995,8 @@ describe.serial("spawn tool", () => {
 			liveRun?.delete(agentId);
 			if (liveRun?.size === 0) liveAgents.delete(runDir);
 		};
-		registerSpawnTool(pi as any, liveAgents, handleCompletion);
+		const rpcEvents: any[] = [];
+		registerSpawnTool(pi as any, liveAgents, handleCompletion, undefined, (_runDir, _agentId, event) => rpcEvents.push(event));
 		const tool = pi.tools.get("async_subagents_spawn");
 		const cwd = tempDir();
 		isolateSubagentConfig(cwd);
@@ -1020,6 +1021,8 @@ describe.serial("spawn tool", () => {
 process.stdin.on("data", () => {
   console.error("stderr from fake pi");
   console.log(JSON.stringify({ type: "response", command: "get_state", success: true, data: { sessionFile: "/tmp/fake-sub-session.jsonl" } }));
+  console.log(JSON.stringify({ type: "message_start", message: { role: "assistant" } }));
+  console.log(JSON.stringify({ type: "tool_execution_start", toolName: "Grep", toolCallId: "grep-1" }));
   console.log(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "spawned ok" }] }] }));
   console.log(JSON.stringify({ type: "agent_settled" }));
 });
@@ -1042,6 +1045,10 @@ setTimeout(() => {}, 1000);
 		expect(result.details.mode).toBe("spawn");
 		expect(result.details.tasks).toEqual([{ id: "agent-1", task: "Run fake agent", scope: "test scope", model: "zai/glm-5-turbo", icon: "search" }]);
 		expect(updates.length).toBeGreaterThan(0);
+		expect(rpcEvents).toEqual(expect.arrayContaining([
+			expect.objectContaining({ type: "message_start" }),
+			expect.objectContaining({ type: "tool_execution_start", toolName: "Grep" }),
+		]));
 		const runDir = result.details.runDir;
 		const registry = JSON.parse(fs.readFileSync(path.join(cwd, ".pi", "subagents", "registry.json"), "utf-8"));
 		expect(registry.latestRunDir).toBe(runDir);

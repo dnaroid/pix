@@ -7,7 +7,8 @@ import { applyEdits, modify } from "jsonc-parser";
 
 import { parseAgentMarkdown } from "../async-subagents/core/agents-dir.js";
 import { getPiToolsSuiteUserConfigPath, loadPiToolsSuiteConfig, type ResourceRegistryConfig } from "../config.js";
-import { ignoreStaleExtensionContextError } from "../context-usage.js";
+import { ignoreStaleExtensionContextError, isStaleExtensionContextError } from "../context-usage.js";
+import { publishRpcSessionState, RPC_SESSION_STATE_ENV } from "../lib/rpc-session-state.js";
 
 const COMMAND = "registry";
 const PROJECT_DIR = ".pi";
@@ -24,16 +25,17 @@ const PROVENANCE_FILE = "registry.json";
 const PROVENANCE_VERSION = 1;
 const SYSTEM_CUSTOM_MESSAGE_TYPE = "pix-system";
 const STATUS_MESSAGE_KIND = "resource-registry-status";
+export const REGISTRY_STATE_EVENT = "pi-tools-suite:resource-registry:state";
 const DESC_MAX = 90;
 const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const SAFE_BRANCH = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 const SKIP_NAMES = new Set([".DS_Store"]);
 
-type ResourceType = "skill" | "agent";
+export type ResourceType = "skill" | "agent";
 type ResourceScope = ResourceType | "all";
-type ProjectArtifact = "tasks" | "plans" | "todo";
+export type ProjectArtifact = "tasks" | "plans" | "todo";
 type ProjectScope = ProjectArtifact | "project";
-type RegistryAction = "install" | "push" | "pull" | "remove" | "status" | "update" | "configure" | "remote" | "project-key";
+type RegistryAction = "install" | "push" | "pull" | "remove" | "uninstall" | "status" | "update" | "configure" | "remote" | "project-key";
 
 type ResourceEntry = {
 	type: ResourceType;
@@ -66,7 +68,7 @@ type ProjectProvenanceEntry = {
 	hash: string;
 };
 
-type RegistryStatusKind =
+export type RegistryStatusKind =
 	| "up-to-date"
 	| "update-available"
 	| "local-changes"
@@ -108,6 +110,34 @@ type ProjectStatusBundle = {
 	statuses: ProjectArtifactStatus[];
 	issue?: string;
 };
+
+export type RegistryUiAction = "install" | "update" | "push" | "pull" | "uninstall" | "remove";
+
+export interface RegistryUiItem {
+	readonly id: string;
+	readonly type: ResourceType | "project";
+	readonly name: string;
+	readonly artifact?: ProjectArtifact;
+	readonly status: RegistryStatusKind;
+	readonly statusLabel: string;
+	readonly icon: string;
+	readonly description?: string;
+	readonly local: boolean;
+	readonly remote: boolean;
+	readonly actions: readonly RegistryUiAction[];
+}
+
+export interface RegistryUiSnapshot {
+	readonly version: 1;
+	readonly configured: boolean;
+	readonly remote?: string;
+	readonly branch: string;
+	readonly projectKey?: string;
+	readonly projectIssue?: string;
+	readonly items: readonly RegistryUiItem[];
+	readonly checkedAt: string;
+	readonly error?: string;
+}
 
 function notify(ctx: ExtensionContext, message: string, type: "info" | "warning" | "error" = "info"): void {
 	if (ctx.hasUI) ctx.ui.notify(message, type);
@@ -277,6 +307,10 @@ function cacheRoot(): string {
 
 function startupCheckCacheRoot(): string {
 	return `${cacheRoot()}-startup-check`;
+}
+
+function registryUiCacheRoot(): string {
+	return `${cacheRoot()}-desktop-${process.pid}`;
 }
 
 function loadRuntimeConfig(cwd: string): RegistryRuntime {
@@ -618,6 +652,26 @@ async function recordProvenance(
 	await writeProvenance(ctx, provenance);
 }
 
+async function clearResourceProvenance(ctx: ExtensionContext, type: ResourceType, name: string): Promise<void> {
+	const provenance = await readProvenance(ctx);
+	const key = resourceKey(type, name);
+	if (!(key in provenance.resources)) return;
+	delete provenance.resources[key];
+	await writeProvenance(ctx, provenance);
+}
+
+async function clearResourceProvenanceEntries(ctx: ExtensionContext, entries: ResourceEntry[]): Promise<void> {
+	const provenance = await readProvenance(ctx);
+	let changed = false;
+	for (const entry of entries) {
+		const key = resourceKey(entry.type, entry.name);
+		if (!(key in provenance.resources)) continue;
+		delete provenance.resources[key];
+		changed = true;
+	}
+	if (changed) await writeProvenance(ctx, provenance);
+}
+
 async function recordProjectProvenance(
 	ctx: ExtensionContext,
 	runtime: RegistryRuntime,
@@ -779,44 +833,262 @@ function statusIcon(kind: RegistryStatusKind): string {
 
 function statusLabel(kind: RegistryStatusKind): string {
 	switch (kind) {
-		case "up-to-date": return "up to date";
-		case "update-available": return "update available";
-		case "local-changes": return "local changes";
-		case "diverged": return "local + remote changes";
-		case "not-installed": return "not installed";
-		case "local-only": return "local only";
-		case "untracked-local": return "local, not tracked";
-		case "missing-local": return "missing locally";
-		case "removed-remote": return "removed from registry";
-		case "registry-changed": return "installed from another registry/branch";
+		case "up-to-date": return "UP TO DATE";
+		case "update-available": return "OUTDATED";
+		case "local-changes": return "LOCAL CHANGES";
+		case "diverged": return "CONFLICT";
+		case "not-installed": return "NOT INSTALLED";
+		case "local-only": return "LOCAL ONLY";
+		case "untracked-local": return "UNTRACKED LOCAL";
+		case "missing-local": return "MISSING LOCALLY";
+		case "removed-remote": return "REMOVED FROM REGISTRY";
+		case "registry-changed": return "OTHER REGISTRY";
 	}
 }
 
-function projectStatusLabel(status: ProjectArtifactStatus): string {
-	if (status.kind === "not-installed") return "remote only";
-	if (status.kind === "untracked-local") return status.remoteExists ? "local + remote, not tracked" : "local, not tracked";
-	return statusLabel(status.kind);
+function resourceTypeBadge(type: ResourceType | "project"): string {
+	switch (type) {
+		case "skill": return "[SKILL]";
+		case "agent": return "[AGENT]";
+		case "project": return "[PROJECT]";
+	}
+}
+
+const STATUS_GROUP_ORDER: readonly RegistryStatusKind[] = [
+	"diverged",
+	"update-available",
+	"local-changes",
+	"missing-local",
+	"registry-changed",
+	"removed-remote",
+	"untracked-local",
+	"local-only",
+	"not-installed",
+	"up-to-date",
+];
+
+function registryStatusRank(kind: RegistryStatusKind): number {
+	const index = STATUS_GROUP_ORDER.indexOf(kind);
+	return index < 0 ? Number.MAX_SAFE_INTEGER : index;
+}
+
+function reusableUiActions(status: RegistryStatus): RegistryUiAction[] {
+	const actions: RegistryUiAction[] = [];
+	switch (status.kind) {
+		case "not-installed":
+			actions.push("install");
+			break;
+		case "update-available":
+		case "missing-local":
+			actions.push("update");
+			break;
+		case "local-changes":
+		case "local-only":
+		case "untracked-local":
+		case "removed-remote":
+			actions.push("push");
+			break;
+		case "up-to-date":
+		case "diverged":
+		case "registry-changed":
+			break;
+	}
+	if (status.local) actions.push("uninstall");
+	if (status.remote) actions.push("remove");
+	return actions;
+}
+
+function projectUiActions(status: ProjectArtifactStatus): RegistryUiAction[] {
+	switch (status.kind) {
+		case "not-installed":
+		case "update-available":
+		case "missing-local":
+			return ["pull"];
+		case "local-changes":
+		case "local-only":
+		case "removed-remote":
+			return ["push"];
+		case "untracked-local":
+			return status.remoteExists ? ["push", "pull"] : ["push"];
+		case "up-to-date":
+		case "diverged":
+		case "registry-changed":
+			return [];
+	}
+}
+
+function registryUiItems(statuses: RegistryStatus[], projectStatus?: ProjectStatusBundle): RegistryUiItem[] {
+	const items: RegistryUiItem[] = [
+		...statuses.map((status): RegistryUiItem => ({
+			id: `${status.type}:${status.name}`,
+			type: status.type,
+			name: status.name,
+			status: status.kind,
+			statusLabel: statusLabel(status.kind),
+			icon: statusIcon(status.kind),
+			...(status.local?.description || status.remote?.description
+				? { description: status.local?.description || status.remote?.description }
+				: {}),
+			local: Boolean(status.local),
+			remote: Boolean(status.remote),
+			actions: reusableUiActions(status),
+		})),
+		...(projectStatus?.statuses ?? []).map((status): RegistryUiItem => ({
+			id: `project:${status.artifact}`,
+			type: "project",
+			name: projectArtifactDisplayName(status.artifact),
+			artifact: status.artifact,
+			status: status.kind,
+			statusLabel: statusLabel(status.kind),
+			icon: statusIcon(status.kind),
+			local: status.localExists,
+			remote: status.remoteExists,
+			actions: projectUiActions(status),
+		})),
+	];
+	return items.sort((left, right) => {
+		const byStatus = registryStatusRank(left.status) - registryStatusRank(right.status);
+		if (byStatus !== 0) return byStatus;
+		const byName = left.name.localeCompare(right.name);
+		return byName !== 0 ? byName : left.id.localeCompare(right.id);
+	});
+}
+
+async function collectRegistryUiSnapshot(
+	pi: ExtensionAPI,
+	ctx: ExtensionContext,
+	error?: string,
+): Promise<RegistryUiSnapshot> {
+	const config = loadPiToolsSuiteConfig([], { cwd: ctx.cwd }).resourceRegistry;
+	const checkedAt = new Date().toISOString();
+	if (!config.remote) {
+		return {
+			version: 1,
+			configured: false,
+			branch: config.branch,
+			items: [],
+			checkedAt,
+			...(error ? { error } : {}),
+		};
+	}
+	const configuredRuntime = loadRuntimeConfig(ctx.cwd);
+	const runtime: RegistryRuntime = { ...configuredRuntime, cacheDir: registryUiCacheRoot() };
+	await ensureRegistryCache(pi, runtime);
+	const [statuses, projectStatus] = await Promise.all([
+		collectStatuses(pi, ctx, runtime),
+		collectProjectStatuses(pi, ctx, runtime),
+	]);
+	return {
+		version: 1,
+		configured: true,
+		remote: runtime.remote,
+		branch: runtime.branch,
+		...(projectStatus.projectKey ? { projectKey: projectStatus.projectKey } : {}),
+		...(projectStatus.issue ? { projectIssue: projectStatus.issue } : {}),
+		items: registryUiItems(statuses, projectStatus),
+		checkedAt,
+		...(error ? { error } : {}),
+	};
+}
+
+async function publishRegistryUiSnapshot(
+	pi: ExtensionAPI,
+	ctx: ExtensionContext,
+	error?: string,
+): Promise<void> {
+	let config: ResourceRegistryConfig | undefined;
+	try {
+		if (!registryRpcBridgeEnabled(ctx)) return;
+		config = loadPiToolsSuiteConfig([], { cwd: ctx.cwd }).resourceRegistry;
+		publishRpcSessionState(ctx, REGISTRY_STATE_EVENT, await collectRegistryUiSnapshot(pi, ctx, error));
+	} catch (snapshotError) {
+		// Session replacement invalidates the old extension context while this
+		// best-effort background snapshot may still be awaiting Git/filesystem
+		// work. Never let that expected race escape the detached callback and
+		// terminate the Pi RPC subprocess.
+		if (isStaleExtensionContextError(snapshotError)) return;
+		try {
+			if (!registryRpcBridgeEnabled(ctx)) return;
+			config ??= loadPiToolsSuiteConfig([], { cwd: ctx.cwd }).resourceRegistry;
+			publishRpcSessionState(ctx, REGISTRY_STATE_EVENT, {
+				version: 1,
+				configured: Boolean(config.remote),
+				...(config.remote ? { remote: config.remote } : {}),
+				branch: config.branch,
+				items: [],
+				checkedAt: new Date().toISOString(),
+				error: error ?? (snapshotError instanceof Error ? snapshotError.message : String(snapshotError)),
+			} satisfies RegistryUiSnapshot);
+		} catch (fallbackError) {
+			if (isStaleExtensionContextError(fallbackError)) return;
+			// Structured Desktop state is advisory. A failed fallback publication
+			// must not make session startup/replacement fatal.
+		}
+	}
+}
+
+function registryRpcBridgeEnabled(ctx: ExtensionContext): boolean {
+	return process.env[RPC_SESSION_STATE_ENV] === "1"
+		&& (ctx as ExtensionContext & { mode?: unknown }).mode === "rpc"
+		&& typeof (ctx.ui as unknown as { setWidget?: unknown }).setWidget === "function";
+}
+
+function scheduleRegistryUiSnapshot(pi: ExtensionAPI, ctx: ExtensionContext): void {
+	try {
+		if (!registryRpcBridgeEnabled(ctx)) return;
+	} catch (error) {
+		if (isStaleExtensionContextError(error)) return;
+		throw error;
+	}
+	const timer = setTimeout(() => {
+		void publishRegistryUiSnapshot(pi, ctx).catch(() => undefined);
+	}, 0);
+	timer.unref?.();
 }
 
 function formatStatuses(statuses: RegistryStatus[], runtime: RegistryRuntime, projectStatus?: ProjectStatusBundle): string {
 	const lines = [`Registry: ${runtime.remote} (${runtime.branch})`];
-	for (const type of ["skill", "agent"] as const) {
-		const group = statuses.filter((status) => status.type === type);
-		if (group.length === 0) continue;
-		lines.push("", type === "skill" ? "Skills" : "Agents");
-		for (const status of group) lines.push(`  ${statusIcon(status.kind)} ${status.name} — ${statusLabel(status.kind)}`);
-	}
-	if (statuses.length === 0) lines.push("", "Registry and project contain no skills or agents yet.");
 	if (projectStatus) {
-		lines.push("", "Project state");
-		if (projectStatus.projectKey) lines.push(`  key: ${projectStatus.projectKey}`);
-		if (projectStatus.issue) lines.push(`  ! ${projectStatus.issue}`);
-		else if (projectStatus.statuses.length === 0) lines.push(`  · no ${PROJECT_TASKS_FILE}, ${PROJECT_PLANS_DIR}/, or ${PROJECT_TODO_FILE} state locally or remotely`);
-		else {
-			for (const status of projectStatus.statuses) {
-				lines.push(`  ${statusIcon(status.kind)} ${projectArtifactDisplayName(status.artifact)} — ${projectStatusLabel(status)}`);
-			}
+		if (projectStatus.projectKey) lines.push(`Project: ${projectStatus.projectKey}`);
+		if (projectStatus.issue) lines.push(`Project state: ! ${projectStatus.issue}`);
+	}
+
+	type StatusLine = {
+		kind: RegistryStatusKind;
+		name: string;
+		type: ResourceType | "project";
+		tieBreaker: string;
+	};
+	const rows: StatusLine[] = [
+		...statuses.map((status) => ({
+			kind: status.kind,
+			name: status.name,
+			type: status.type,
+			tieBreaker: status.type,
+		})),
+		...(projectStatus?.statuses ?? []).map((status) => ({
+			kind: status.kind,
+			name: projectArtifactDisplayName(status.artifact),
+			type: "project" as const,
+			tieBreaker: `project:${status.artifact}`,
+		})),
+	];
+	const statusRank = new Map(STATUS_GROUP_ORDER.map((kind, index) => [kind, index]));
+	rows.sort((left, right) => {
+		const byStatus = (statusRank.get(left.kind) ?? Number.MAX_SAFE_INTEGER)
+			- (statusRank.get(right.kind) ?? Number.MAX_SAFE_INTEGER);
+		if (byStatus !== 0) return byStatus;
+		const byName = left.name.localeCompare(right.name);
+		return byName !== 0 ? byName : left.tieBreaker.localeCompare(right.tieBreaker);
+	});
+
+	if (rows.length > 0) {
+		lines.push("");
+		for (const row of rows) {
+			lines.push(`${statusIcon(row.kind)} ${row.name}  ${resourceTypeBadge(row.type)}  **${statusLabel(row.kind)}**`);
 		}
+	} else if (!projectStatus?.issue) {
+		lines.push("", `No skills, agents, ${PROJECT_TASKS_FILE}, ${PROJECT_PLANS_DIR}/, or ${PROJECT_TODO_FILE} state found locally or remotely.`);
 	}
 	return lines.join("\n");
 }
@@ -1013,7 +1285,8 @@ async function pushResource(pi: ExtensionAPI, ctx: ExtensionCommandContext, type
 	}
 	const revision = result.revision;
 	if (!revision) throw new Error(`Cannot determine pushed registry revision for ${type} "${name}".`);
-	notify(ctx, `Pushed ${type} "${name}" to ${runtime.remote} (${runtime.branch}) at ${revision.slice(0, 8)}.`);
+	notify(ctx, `Pushed ${type} "${name}" to ${runtime.remote} (${runtime.branch}) at ${revision.slice(0, 8)}. Reloading resources…`);
+	await reloadAfterResourceChange(ctx);
 }
 
 async function removeResourceWithRuntime(
@@ -1054,7 +1327,31 @@ async function removeResource(pi: ExtensionAPI, ctx: ExtensionCommandContext, ty
 	const runtime = loadRuntimeConfig(ctx.cwd);
 	await ensureRegistryCache(pi, runtime);
 	const revision = await removeResourceWithRuntime(pi, ctx, runtime, type, name);
-	notify(ctx, `Removed ${type} "${name}" from ${runtime.remote} (${runtime.branch}) at ${revision.slice(0, 8)}. Project copies were kept.`);
+	notify(ctx, `Removed ${type} "${name}" from ${runtime.remote} (${runtime.branch}) at ${revision.slice(0, 8)}. Project copies were kept. Reloading resources…`);
+	await reloadAfterResourceChange(ctx);
+}
+
+async function uninstallResource(
+	ctx: ExtensionCommandContext,
+	type: ResourceType,
+	name: string,
+	options: { confirm?: boolean } = {},
+): Promise<void> {
+	validateName(name);
+	const target = projectResourcePath(ctx, type, name);
+	if (!(await pathExists(target))) throw new Error(`Project ${type} "${name}" is not installed locally.`);
+	if (options.confirm !== false && ctx.hasUI) {
+		const confirmed = await confirmOverwrite(
+			ctx,
+			"Uninstall local resource",
+			`Remove local ${type} "${name}" from ${relative(ctx.cwd, target)}? The registry copy will be kept.`,
+		);
+		if (!confirmed) throw new Error(`Local ${type} "${name}" uninstall cancelled.`);
+	}
+	await fs.rm(target, { recursive: type === "skill", force: false });
+	await clearResourceProvenance(ctx, type, name);
+	notify(ctx, `Uninstalled local ${type} "${name}". Registry copy was kept. Reloading resources…`);
+	await reloadAfterResourceChange(ctx);
 }
 
 async function pushProjectState(pi: ExtensionAPI, ctx: ExtensionCommandContext, scope: ProjectScope): Promise<void> {
@@ -1256,7 +1553,8 @@ async function pushAll(pi: ExtensionAPI, ctx: ExtensionCommandContext, scope: Re
 	}
 	const summary = `Registry push all: ${changed} pushed, ${unchanged} unchanged, ${failures.length} failed.`;
 	if (failures.length === 0) {
-		notify(ctx, summary);
+		notify(ctx, changed > 0 ? `${summary} Reloading resources…` : summary);
+		if (changed > 0) await reloadAfterResourceChange(ctx);
 		return;
 	}
 	pi.sendMessage({
@@ -1266,6 +1564,7 @@ async function pushAll(pi: ExtensionAPI, ctx: ExtensionCommandContext, scope: Re
 		details: { kind: "resource-registry-bulk-push", userVisibleOnly: true },
 	});
 	notify(ctx, summary, "warning");
+	if (changed > 0) await reloadAfterResourceChange(ctx);
 }
 
 async function removeAll(pi: ExtensionAPI, ctx: ExtensionCommandContext, scope: ResourceScope): Promise<void> {
@@ -1306,7 +1605,34 @@ async function removeAll(pi: ExtensionAPI, ctx: ExtensionCommandContext, scope: 
 		throw new Error(`Bulk registry removal commit was created in the disposable cache but push failed; the remote registry is unchanged. ${error instanceof Error ? error.message : String(error)}`);
 	}
 	const revision = (await runGit(pi, runtime.cacheDir, ["rev-parse", "HEAD"])).stdout.trim();
-	notify(ctx, `Removed ${targets.length} registry resource${targets.length === 1 ? "" : "s"} at ${revision.slice(0, 8)}. Project copies were kept.`);
+	notify(ctx, `Removed ${targets.length} registry resource${targets.length === 1 ? "" : "s"} at ${revision.slice(0, 8)}. Project copies were kept. Reloading resources…`);
+	await reloadAfterResourceChange(ctx);
+}
+
+async function uninstallAll(ctx: ExtensionCommandContext, scope: ResourceScope): Promise<void> {
+	const targets = (await scanProject(ctx)).filter((entry) => matchesScope(entry.type, scope));
+	if (targets.length === 0) {
+		notify(ctx, `No local project ${scope === "all" ? "resources" : `${scope}s`} found to uninstall.`);
+		return;
+	}
+	if (!ctx.hasUI) {
+		throw new Error(`Bulk local uninstall requires interactive confirmation. Run /${COMMAND} uninstall ${scope === "all" ? "all" : `${scope}s all`} in the UI.`);
+	}
+	const confirmed = await confirmOverwrite(
+		ctx,
+		"Uninstall local resources",
+		`Remove ${targets.length} local ${scope === "all" ? "resources" : `${scope}${targets.length === 1 ? "" : "s"}`}? Registry copies will be kept.`,
+	);
+	if (!confirmed) {
+		notify(ctx, "Bulk local uninstall cancelled.");
+		return;
+	}
+	for (const entry of targets) {
+		await fs.rm(entry.path, { recursive: entry.type === "skill", force: false });
+	}
+	await clearResourceProvenanceEntries(ctx, targets);
+	notify(ctx, `Uninstalled ${targets.length} local resource${targets.length === 1 ? "" : "s"}. Registry copies were kept. Reloading resources…`);
+	await reloadAfterResourceChange(ctx);
 }
 
 function resourceLabel(entry: ResourceEntry): string {
@@ -1419,7 +1745,16 @@ async function interactiveRemove(pi: ExtensionAPI, ctx: ExtensionCommandContext,
 	const selected = await selectResource(ctx, `Remove registry ${type}`, entries);
 	if (!selected) return;
 	const revision = await removeResourceWithRuntime(pi, ctx, runtime, type, selected.name);
-	notify(ctx, `Removed ${type} "${selected.name}" from the registry at ${revision.slice(0, 8)}. Project copies were kept.`);
+	notify(ctx, `Removed ${type} "${selected.name}" from the registry at ${revision.slice(0, 8)}. Project copies were kept. Reloading resources…`);
+	await reloadAfterResourceChange(ctx);
+}
+
+async function interactiveUninstall(ctx: ExtensionCommandContext, forcedType?: ResourceType): Promise<void> {
+	const type = forcedType ?? await chooseType(ctx, "Uninstall local resource");
+	if (!type) return;
+	const entries = (await scanProject(ctx)).filter((entry) => entry.type === type);
+	const selected = await selectResource(ctx, `Uninstall local ${type}`, entries);
+	if (selected) await uninstallResource(ctx, type, selected.name);
 }
 
 async function interactiveUpdate(pi: ExtensionAPI, ctx: ExtensionCommandContext): Promise<void> {
@@ -1482,6 +1817,7 @@ async function showMainMenu(pi: ExtensionAPI, ctx: ExtensionCommandContext): Pro
 			"Install",
 			"Update",
 			"Push",
+			"Uninstall local",
 			"Push project state",
 			"Pull project state",
 			"Remove",
@@ -1503,6 +1839,10 @@ async function showMainMenu(pi: ExtensionAPI, ctx: ExtensionCommandContext): Pro
 	}
 	if (choice === "Push") {
 		await interactivePush(pi, ctx);
+		return;
+	}
+	if (choice === "Uninstall local") {
+		await interactiveUninstall(ctx);
 		return;
 	}
 	if (choice === "Push project state") {
@@ -1538,7 +1878,7 @@ function registryUsage(): string {
 	return [
 		"Resource registry",
 		`/${COMMAND}                         open TUI`,
-		`/${COMMAND} status                  fetch and show skill/agent update state`,
+		`/${COMMAND} status                  fetch and show grouped reusable + project state`,
 		`/${COMMAND} install skill <name>    install registry skill into .pi/skills`,
 		`/${COMMAND} install agent <name>    install registry agent into .pi/agents`,
 		`/${COMMAND} install all             install all missing skills and agents`,
@@ -1567,6 +1907,11 @@ function registryUsage(): string {
 		`/${COMMAND} remove all              remove all registry skills and agents (confirmation required)`,
 		`/${COMMAND} remove skills all       remove all registry skills (confirmation required)`,
 		`/${COMMAND} remove agents all       remove all registry agents (confirmation required)`,
+		`/${COMMAND} uninstall skill <name>  remove a local .pi/skills copy only`,
+		`/${COMMAND} uninstall agent <name>  remove a local .pi/agents copy only`,
+		`/${COMMAND} uninstall all           remove all local skills and agents (confirmation required)`,
+		`/${COMMAND} uninstall skills all    remove all local skills (confirmation required)`,
+		`/${COMMAND} uninstall agents all    remove all local agents (confirmation required)`,
 		`/${COMMAND} configure <url> [branch]`,
 		`/${COMMAND} project-key [key|auto]  show/set project-scoped registry key`,
 		`/${COMMAND} remote                  show configured remote`,
@@ -1577,14 +1922,44 @@ function parseAction(value: string | undefined): RegistryAction | undefined {
 	if (value === "check") return "status";
 	if (value === "config") return "configure";
 	if (value === "delete" || value === "rm") return "remove";
-	if (["install", "push", "pull", "remove", "status", "update", "configure", "remote", "project-key"].includes(value ?? "")) return value as RegistryAction;
+	if (value === "remove-local" || value === "local-remove") return "uninstall";
+	if (["install", "push", "pull", "remove", "uninstall", "status", "update", "configure", "remote", "project-key"].includes(value ?? "")) return value as RegistryAction;
 	return undefined;
+}
+
+async function handleRpcCommand(
+	pi: ExtensionAPI,
+	parts: string[],
+	ctx: ExtensionCommandContext,
+): Promise<void> {
+	const [action] = parts;
+	if (!action || action === "refresh") {
+		await publishRegistryUiSnapshot(pi, ctx);
+		return;
+	}
+	if (!["install", "update", "push", "pull", "remove", "uninstall", "configure", "project-key"].includes(action)) {
+		await publishRegistryUiSnapshot(pi, ctx, `Unsupported registry GUI action: ${action}`);
+		return;
+	}
+	let error: string | undefined;
+	try {
+		if (action === "project-key" && parts.length === 1) await configureProjectKeyInteractive(pi, ctx);
+		else await handleCommand(pi, parts.join(" "), ctx);
+	} catch (actionError) {
+		const message = actionError instanceof Error ? actionError.message : String(actionError);
+		if (!/cancelled\.?$/i.test(message)) error = message;
+	}
+	await publishRegistryUiSnapshot(pi, ctx, error);
 }
 
 async function handleCommand(pi: ExtensionAPI, args: string, ctx: ExtensionCommandContext): Promise<void> {
 	const parts = args.trim().split(/\s+/).filter(Boolean);
 	if (parts.length === 0) {
 		await showMainMenu(pi, ctx);
+		return;
+	}
+	if (parts[0] === "rpc") {
+		await handleRpcCommand(pi, parts.slice(1), ctx);
 		return;
 	}
 	if (parts[0] === "help" || parts[0] === "--help" || parts[0] === "-h") {
@@ -1665,7 +2040,7 @@ async function handleCommand(pi: ExtensionAPI, args: string, ctx: ExtensionComma
 		}
 	}
 
-	if (action === "install" || action === "update" || action === "push" || action === "remove") {
+	if (action === "install" || action === "update" || action === "push" || action === "remove" || action === "uninstall") {
 		const scope: ResourceScope | undefined = parts[1] === "all"
 			? "all"
 			: parts[2] === "all"
@@ -1675,7 +2050,8 @@ async function handleCommand(pi: ExtensionAPI, args: string, ctx: ExtensionComma
 			if (action === "install") await installAll(pi, ctx, scope);
 			else if (action === "update") await updateAll(pi, ctx, scope);
 			else if (action === "push") await pushAll(pi, ctx, scope);
-			else await removeAll(pi, ctx, scope);
+			else if (action === "remove") await removeAll(pi, ctx, scope);
+			else await uninstallAll(ctx, scope);
 			return;
 		}
 	}
@@ -1693,6 +2069,10 @@ async function handleCommand(pi: ExtensionAPI, args: string, ctx: ExtensionComma
 		}
 		if (action === "remove") {
 			await interactiveRemove(pi, ctx, type);
+			return;
+		}
+		if (action === "uninstall") {
+			await interactiveUninstall(ctx, type);
 			return;
 		}
 		if (action === "update") {
@@ -1714,6 +2094,10 @@ async function handleCommand(pi: ExtensionAPI, args: string, ctx: ExtensionComma
 		await removeResource(pi, ctx, type, name);
 		return;
 	}
+	if (action === "uninstall") {
+		await uninstallResource(ctx, type, name);
+		return;
+	}
 	const result = await updateResource(pi, ctx, type, name);
 	if (result === "current") {
 		notify(ctx, `${type} "${name}" is already up to date.`);
@@ -1725,11 +2109,12 @@ async function handleCommand(pi: ExtensionAPI, args: string, ctx: ExtensionComma
 
 export default function resourceRegistry(pi: ExtensionAPI): void {
 	pi.on("session_start", (event, ctx) => {
+		scheduleRegistryUiSnapshot(pi, ctx);
 		if (event.reason === "startup") scheduleStartupUpdateCheck(pi, ctx);
 	});
 
 	pi.registerCommand(COMMAND, {
-		description: "Install, update, push, pull, and remove reusable skills/agents plus project-scoped tasks/plans/TODO through a private Git registry",
+		description: "Install, update, push, uninstall locally, and remove remotely reusable skills/agents plus sync project-scoped tasks/plans/TODO through a private Git registry",
 		handler: async (args: string, ctx) => {
 			try {
 				await handleCommand(pi, args, ctx);
@@ -1745,6 +2130,7 @@ export default function resourceRegistry(pi: ExtensionAPI): void {
 }
 
 export const __test = {
+	collectRegistryUiSnapshot,
 	collectStatuses,
 	hashPath,
 	loadRuntimeConfig,

@@ -6,6 +6,7 @@ import { thinkingLevelThemeColor } from "./status-line-renderer.js";
 import {
 	activeSubagentStates,
 	formatElapsedSince,
+	formatSubagentLastActivity,
 	formatSubagentsPanelStats,
 	subagentIcon,
 	subagentModelThinkingLabel,
@@ -134,14 +135,16 @@ export function renderSubagentsPanel(state: SubagentsWidgetState | undefined, ex
 		const icon = subagentIcon(preview);
 		const runLabel = visibleRun.showRunLabel ? `${subagentRunName(visibleRun.runDir)} ` : "";
 		const prefix = `${runLabel}${icon} ${agent.id} ${model} `;
-		const suffix = ` ${formatElapsedSince(agent.startedAt, now)}`;
+		const activity = formatSubagentLastActivity(agent.lastActivity, now);
+		const activitySuffix = activity ? ` · ${activity}` : "";
+		const suffix = ` ${formatElapsedSince(agent.startedAt, now)}${activitySuffix}`;
 		const taskWidth = Math.max(8, rowWidth - stringDisplayWidth(prefix) - stringDisplayWidth(suffix));
 		const taskText = ellipsizeDisplay(task, taskWidth);
 		const text = `${prefix}${taskText}${suffix}`;
 		lines.push({
 			text: padOrTrimPlain(text, width),
 			colorOverride: colors.muted,
-			segments: subagentPanelLineSegments({ text, icon, agentId: agent.id, model, taskText, prefix, runLabel, status: agent.status }, colors),
+			segments: subagentPanelLineSegments({ text, icon, agentId: agent.id, model, taskText, prefix, runLabel, activitySuffix, status: agent.status }, colors),
 			target,
 		});
 	}
@@ -163,6 +166,7 @@ function subagentPanelLineSegments(input: {
 	taskText: string;
 	prefix: string;
 	runLabel: string;
+	activitySuffix: string;
 	status: SubagentStatus;
 }, colors: Theme["colors"]): StyledSegment[] {
 	const runLabelStart = input.runLabel ? input.text.indexOf(input.runLabel) : -1;
@@ -171,13 +175,15 @@ function subagentPanelLineSegments(input: {
 	const modelStart = input.text.indexOf(input.model, nameStart + input.agentId.length);
 	const taskStart = input.prefix.length;
 	const suffixStart = taskStart + input.taskText.length;
+	const activityStart = input.activitySuffix ? input.text.length - input.activitySuffix.length : input.text.length;
 	return [
 		...(runLabelStart >= 0 ? [{ start: runLabelStart, end: runLabelStart + input.runLabel.length, foreground: colors.warning }] : []),
 		{ start: iconStart, end: iconStart + input.icon.length, foreground: subagentStatusColor(input.status, colors), bold: true },
 		{ start: nameStart, end: nameStart + input.agentId.length, foreground: colors.accent, bold: true },
 		{ start: modelStart, end: modelStart + input.model.length, foreground: colors.info },
 		{ start: taskStart, end: suffixStart, foreground: colors.muted },
-		{ start: suffixStart, end: input.text.length, foreground: colors.muted },
+		{ start: suffixStart, end: activityStart, foreground: colors.muted },
+		...(input.activitySuffix ? [{ start: activityStart, end: input.text.length, foreground: colors.info }] : []),
 	].filter((segment) => segment.start >= 0 && segment.end > segment.start);
 }
 
