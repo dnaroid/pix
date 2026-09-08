@@ -24,6 +24,7 @@ import {
 	pixUpdateUsage,
 } from "../cli/update.js";
 import { createStartupInfoMessage } from "../cli/startup-info.js";
+import { createReloadContextInventory, formatReloadContextInventory } from "./reload-context-inventory.js";
 import { getCompleteSessionStats } from "../session/session-stats.js";
 import { loadSessionTitleConfig } from "../../bundled-extensions/session-title/config.js";
 import {
@@ -334,7 +335,8 @@ export class SessionCommandActions {
 			await runtime.session.reload();
 			if (!isCommandScopeActive(this.host, scope)) return;
 			this.host.setSessionStatus(runtime.session);
-			this.host.addEntry({ id: createId("system"), kind: "system", text: "Reloaded keybindings, extensions, skills, prompts, themes" });
+			const inventory = createReloadContextInventory(runtime, this.host.subagentTypes?.(runtime));
+			this.host.addEntry({ id: createId("system"), kind: "system", text: formatReloadContextInventory(inventory) });
 			this.host.toast.success("Reloaded resources");
 		} catch (error) {
 			if (!isCommandScopeActive(this.host, scope)) return;
@@ -423,7 +425,10 @@ export class SessionCommandActions {
 			this.host.addEntry({
 				id: createId("system"),
 				kind: "system",
-				text: `Deleted session ${targetSessionId}. Started a new session. cwd=${runtime.cwd}`,
+				text: formatReloadContextInventory(
+					createReloadContextInventory(runtime, this.host.subagentTypes?.(runtime)),
+					`Deleted session ${targetSessionId}. Started a new session. cwd=${runtime.cwd}`,
+				),
 			});
 			if (runtime.modelFallbackMessage) this.host.addEntry({ id: createId("system"), kind: "system", text: runtime.modelFallbackMessage });
 			this.host.setSessionStatus(runtime.session);
@@ -456,7 +461,14 @@ export class SessionCommandActions {
 		}
 
 		this.host.resetSessionView();
-		this.host.addEntry({ id: createId("system"), kind: "system", text: `Started a new session. cwd=${runtime.cwd}` });
+		this.host.addEntry({
+			id: createId("system"),
+			kind: "system",
+			text: formatReloadContextInventory(
+				createReloadContextInventory(runtime, this.host.subagentTypes?.(runtime)),
+				`Started a new session. cwd=${runtime.cwd}`,
+			),
+		});
 		if (runtime.modelFallbackMessage) this.host.addEntry({ id: createId("system"), kind: "system", text: runtime.modelFallbackMessage });
 		for (const diag of runtime.diagnostics ?? []) {
 			const kind = diag.type === "error" ? "error" as const : "system" as const;

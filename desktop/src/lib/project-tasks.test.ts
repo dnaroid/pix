@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildTaskPrompt,
   filterProjectTasks,
+  moveProjectTask,
   parseTaskDocument,
   type ProjectTask,
 } from "./project-tasks";
@@ -32,7 +33,7 @@ describe("project task documents", () => {
 describe("task list helpers", () => {
   it("builds an execution prompt with the optional description", () => {
     expect(buildTaskPrompt(task)).toContain("Type: Bug");
-    expect(buildTaskPrompt(task)).toContain("Priority: High");
+    expect(buildTaskPrompt(task)).not.toContain("Priority:");
     expect(buildTaskPrompt(task)).toContain("Description:\nKeep the active workspace selected.");
   });
 
@@ -42,5 +43,36 @@ describe("task list helpers", () => {
     expect(filterProjectTasks(tasks, { type: "feature", status: "all", priority: "low" }))
       .toEqual([feature]);
     expect(tasks).toEqual([task, feature]);
+  });
+
+  it("moves tasks between type groups while preserving the requested position", () => {
+    const bug2 = { ...task, id: "bug-2", title: "Second bug" };
+    const feature = { ...task, id: "feature-1", type: "feature" as const, title: "Feature" };
+    const moved = moveProjectTask(
+      [task, bug2, feature],
+      feature.id,
+      "bug",
+      bug2.id,
+      "before",
+      "2026-09-08T20:00:00.000Z",
+    );
+    expect(moved?.map((item: ProjectTask) => [item.id, item.type])).toEqual([
+      [task.id, "bug"],
+      [feature.id, "bug"],
+      [bug2.id, "bug"],
+    ]);
+    expect(moved?.[1]?.updatedAt).toBe("2026-09-08T20:00:00.000Z");
+  });
+
+  it("can append a task into an empty type group", () => {
+    const moved = moveProjectTask(
+      [task],
+      task.id,
+      "improvement",
+      null,
+      "after",
+      "2026-09-08T20:00:00.000Z",
+    );
+    expect(moved?.[0]?.type).toBe("improvement");
   });
 });

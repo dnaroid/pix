@@ -11,6 +11,7 @@ import { createId } from "../id.js";
 import { isThinkingLevel, parseScopedModelRef } from "../model/model-ref.js";
 import { appendPixSystemDisplayEntry } from "../session/pix-system-message.js";
 import type { ScopedSessionModel, SessionModel, ThinkingLevel } from "../types.js";
+import { createReloadContextInventory, formatReloadContextInventory } from "./reload-context-inventory.js";
 
 export class ModelCommandActions {
 	constructor(private readonly host: CommandControllerHost) {}
@@ -346,10 +347,17 @@ export class ModelCommandActions {
 		try {
 			await session.reload();
 			if (!isCommandScopeActive(this.host, scope)) return;
+			const runtime = scope.runtime;
+			const text = runtime
+				? formatReloadContextInventory(
+					createReloadContextInventory(runtime, this.host.subagentTypes?.(runtime)),
+					`Reloaded resources after model change to ${ref}`,
+				)
+				: `Reloaded resources after model change to ${ref}`;
 			this.host.addEntry({
 				id: createId("system"),
 				kind: "system",
-				text: `Reloaded resources after model change to ${ref}`,
+				text,
 			});
 			this.host.toast.success("Model changed and resources reloaded");
 		} catch (error) {

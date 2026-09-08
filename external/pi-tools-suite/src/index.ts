@@ -1,4 +1,5 @@
 import { loadPiToolsSuiteConfig } from "./config";
+import { publishContextInventoryState } from "./context-inventory";
 import { publishStartupModuleList } from "./startup-section";
 
 type ExtensionAPI = any;
@@ -60,6 +61,11 @@ export default async function piToolsSuite(pi: ExtensionAPI) {
 			throw new Error(`Failed to load pi-tools-suite module ${module.name}: ${message}`);
 		}
 	}
+
+	// Register last so the snapshot observes model-specific tool selection after
+	// every module's session/model hooks have run.
+	pi.on("session_start", (event: any, ctx: any) => publishContextInventoryState(pi, ctx, event?.reason));
+	pi.on("model_select", (_event: unknown, ctx: any) => publishContextInventoryState(pi, ctx, "model_select"));
 
 	await publishStartupModuleList(loadedModuleNames);
 }

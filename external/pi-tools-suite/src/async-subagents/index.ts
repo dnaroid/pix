@@ -7,6 +7,7 @@ import {
 	getRunState,
 	getRunRoot,
 	getSubagentRegistryPath,
+	filterSubagentConfigForParentModel,
 	isBlindModelRef,
 	loadSubagentConfig,
 	listSubagentSessionRecords,
@@ -43,6 +44,7 @@ function isTerminalAgentStatus(status: AgentState["status"]): boolean {
 
 const SUBAGENTS_LIVE_COUNT_EVENT = "pi-tools-suite:async-subagents:live-count";
 const SUBAGENTS_LIVE_STATE_EVENT = "pi-tools-suite:async-subagents:live-state";
+export const SUBAGENTS_CATALOG_STATE_EVENT = "pi-tools-suite:async-subagents:catalog";
 const SESSION_SHUTDOWN_KILL_GRACE_MS = 500;
 const COMPLETION_WATCH_INTERVAL_MS = 2_000;
 
@@ -54,6 +56,14 @@ interface ShutdownTarget {
 interface ShutdownPlan {
 	targets: ShutdownTarget[];
 	runDirsToDelete: string[];
+}
+
+interface SubagentCatalogStateEvent {
+	version: 1;
+	sessionId?: string;
+	sessionFile?: string;
+	model?: string;
+	types: string[];
 }
 
 function createLiveStatePayload(
@@ -92,6 +102,25 @@ function createLiveStatePayload(
 	};
 }
 
+function createSubagentCatalogState(ctx: unknown): SubagentCatalogStateEvent {
+	const cwd = (ctx as { cwd?: string } | undefined)?.cwd ?? process.cwd();
+	const model = modelRefFromContext(ctx);
+	const config = safeLoadSubagentConfig(cwd);
+	const effective = config ? filterSubagentConfigForParentModel(config, model) : undefined;
+	const sessionManager = (ctx as {
+		sessionManager?: { getSessionId?: () => string; getSessionFile?: () => string | undefined };
+	} | undefined)?.sessionManager;
+	const sessionId = typeof sessionManager?.getSessionId === "function" ? sessionManager.getSessionId() : undefined;
+	const sessionFile = typeof sessionManager?.getSessionFile === "function" ? sessionManager.getSessionFile() : undefined;
+	return {
+		version: 1,
+		...(sessionId ? { sessionId } : {}),
+		...(sessionFile ? { sessionFile } : {}),
+		...(model ? { model } : {}),
+		types: Object.keys(effective?.types ?? {}).sort(),
+	};
+}
+
 function agentMatchesSession(agent: LiveAgent, sessionFile: string | undefined): boolean {
 	if (!sessionFile) return true;
 	return agent.parentSession !== undefined && pathsEqual(sessionFile, agent.parentSession);
@@ -113,6 +142,12 @@ export default function (pi: ExtensionAPI) {
 	let currentSessionStateContext: Parameters<typeof publishRpcSessionState>[0];
 	let completionWatchTimer: ReturnType<typeof setInterval> | undefined;
 	publishSubagentPresetsStartupSection();
+
+	function publishSubagentCatalogState(ctx: unknown): void {
+		const state = createSubagentCatalogState(ctx);
+		pi.events?.emit?.(SUBAGENTS_CATALOG_STATE_EVENT, state);
+		publishRpcSessionState(ctx as Parameters<typeof publishRpcSessionState>[0], SUBAGENTS_CATALOG_STATE_EVENT, state);
+	}
 
 	function refreshSubagentOverlay(): void {
 		try {
@@ -190,8 +225,17 @@ export default function (pi: ExtensionAPI) {
 			sawAutoUltraworkCandidate = false;
 			currentSessionFile = sessionFileFromContext(ctx);
 			currentSessionStateContext = ctx;
+			publishSubagentCatalogState(ctx);
 			subagentOverlay.restoreRunningAgents(ctx.cwd, currentSessionFile);
 			refreshSubagentOverlay();
+		} catch (error) {
+			ignoreStaleExtensionContextError(error);
+		}
+	});
+
+	pi.on("model_select", (_event, ctx) => {
+		try {
+			publishSubagentCatalogState(ctx);
 		} catch (error) {
 			ignoreStaleExtensionContextError(error);
 		}

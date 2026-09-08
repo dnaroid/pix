@@ -440,7 +440,7 @@ describe("resource registry", () => {
 		expect(fs.readFileSync(path.join(project, ".pi", "tasks.jsonc"), "utf8")).toContain("local change");
 	});
 
-	test("skips an empty plans directory for push project and explains why push plans cannot store it", async () => {
+	test("treats an empty plans directory as removal of registry plans", async () => {
 		const root = tempRoot();
 		const home = path.join(root, "home");
 		const project = path.join(root, "project");
@@ -461,8 +461,25 @@ describe("resource registry", () => {
 		expect(fs.existsSync(path.join(seed, "projects", "empty-plans", "plans"))).toBe(false);
 
 		await command.handler("push plans", h.ctx);
-		expect(h.notices.at(-1)).toMatchObject({ type: "error" });
-		expect(h.notices.at(-1)?.message).toContain("Git cannot store an empty directory");
+		expect(h.notices.at(-1)?.type).not.toBe("error");
+		expect(h.notices.at(-1)?.message).toContain("already has no plans/");
+
+		const localPlan = path.join(project, ".pi", "plans", "roadmap.md");
+		fs.writeFileSync(localPlan, "roadmap v1\n");
+		await command.handler("push plans", h.ctx);
+		git(seed, ["pull", "--ff-only", "origin", "main"]);
+		expect(fs.readFileSync(path.join(seed, "projects", "empty-plans", "plans", "roadmap.md"), "utf8")).toBe("roadmap v1\n");
+
+		fs.rmSync(localPlan);
+		await command.handler("push plans", h.ctx);
+		git(seed, ["pull", "--ff-only", "origin", "main"]);
+		expect(fs.existsSync(path.join(seed, "projects", "empty-plans", "plans"))).toBe(false);
+		expect(h.notices.at(-1)?.type).not.toBe("error");
+
+		const provenance = JSON.parse(fs.readFileSync(path.join(project, ".pi", "registry.json"), "utf8"));
+		expect(provenance.projectResources.plans).toBeUndefined();
+		await command.handler("status", h.ctx);
+		expect(h.messages.at(-1)?.content).not.toContain("plans/");
 	});
 
 	test("removes a single remote resource, keeps the project copy, and reports removed-remote status", async () => {

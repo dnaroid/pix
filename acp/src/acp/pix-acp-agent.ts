@@ -92,7 +92,7 @@ import {
 	type PiSessionState,
 	type PiSessionStats,
 } from "../pi/pi-rpc-client.js";
-import { applyConfigOption, buildConfigOptions, parseModelValue } from "./config-options.js";
+import { applyConfigOption, buildConfigOptions, CONFIG_ID_MODEL, parseModelValue } from "./config-options.js";
 import {
 	PIX_ENHANCE_PROMPT_METHOD,
 	PIX_DEFER_MESSAGE_METHOD,
@@ -193,6 +193,13 @@ import {
 	sessionStateEnvelopeFromUiRequest,
 	type PixSessionStateNotification,
 } from "./session-state-bridge.js";
+import {
+	CONTEXT_INVENTORY_EVENT,
+	formatReloadContextInventory,
+	parseContextInventoryState,
+	withFinalSkillCommands,
+	type ContextInventoryState,
+} from "./context-inventory.js";
 
 /** Minimal shape of the handler `client` context used for notifications and elicitations. */
 type ClientCaller = {
@@ -237,6 +244,8 @@ interface AgentSessionState {
 	sdkQueueRestoreAfterInterrupt: { steering: string[]; followUp: string[] } | undefined;
 	/** Dialog extension UI requests awaiting an ACP elicitation answer. */
 	readonly pendingDialogIds: Set<string>;
+	contextInventory: ContextInventoryState | undefined;
+	contextInventoryNoticeReason: "reload" | "model_select" | undefined;
 }
 
 interface PendingDesktopNewSession {
@@ -514,6 +523,8 @@ export class PixAcpAgent {
 		session.builtinRunning = true;
 		try {
 			await session.pi.prompt(registryRpcCommand(params));
+			await new Promise<void>((resolve) => setTimeout(resolve, 0));
+			await this.consumeContextInventoryNotice(session, { reason: "reload" });
 			return {};
 		} finally {
 			session.builtinRunning = false;
@@ -878,9 +889,19 @@ export class PixAcpAgent {
 		);
 		const replacement = this.sessions.get(params.sessionId);
 		if (replacement) {
+			let inventory = replacement.contextInventory;
+			if (inventory) {
+				try {
+					inventory = withFinalSkillCommands(inventory, await replacement.pi.getCommands());
+					replacement.contextInventory = inventory;
+				} catch {
+					// The session-start snapshot still provides model/tools/agents; if
+					// command discovery fails, keep its conservative skills list.
+				}
+			}
 			await this.notifyAgentMessage(
 				replacement,
-				"/reload — reloaded extensions, skills, prompts, and context files",
+				formatReloadContextInventory(inventory),
 			);
 		}
 		return response;
@@ -1189,6 +1210,16 @@ export class PixAcpAgent {
 		} catch (error) {
 			throw new RequestError(ERROR_SERVER, stringifyUnknown(error));
 		}
+		if (params.configId === CONFIG_ID_MODEL) {
+			// Model selection emits extension model_select hooks before set_model
+			// returns. Yield once so the structured inventory event can be consumed
+			// by this adapter before we render the post-change status message.
+			await new Promise<void>((resolve) => setTimeout(resolve, 0));
+			await this.consumeContextInventoryNotice(session, {
+				reason: "model_select",
+				model: params.value,
+			});
+		}
 		let configOptions: SessionConfigOption[];
 		try {
 			configOptions = await buildConfigOptions(session.pi);
@@ -1244,6 +1275,8 @@ export class PixAcpAgent {
 			trackedSteeringMessages: [],
 			sdkQueueRestoreAfterInterrupt: undefined,
 			pendingDialogIds: new Set(),
+			contextInventory: undefined,
+			contextInventoryNoticeReason: undefined,
 		};
 		// Register routing before start so session_start extension state emitted
 		// during RPC startup is delivered instead of being dropped.
@@ -1361,6 +1394,34 @@ export class PixAcpAgent {
 		}
 	}
 
+	private async consumeContextInventoryNotice(
+		session: AgentSessionState,
+		expected: { reason?: "reload" | "model_select"; model?: string } = {},
+	): Promise<void> {
+		const reason = session.contextInventoryNoticeReason;
+		const inventory = session.contextInventory;
+		if (!reason || !inventory) return;
+		if (expected.reason && reason !== expected.reason) return;
+		if (expected.model && inventory.model !== expected.model) return;
+
+		// Clear before awaits so a second event that arrives while command
+		// discovery runs remains pending for the next operation instead of being
+		// accidentally consumed by this one.
+		session.contextInventoryNoticeReason = undefined;
+		let finalInventory = inventory;
+		try {
+			finalInventory = withFinalSkillCommands(finalInventory, await session.pi.getCommands()) ?? finalInventory;
+			session.contextInventory = finalInventory;
+		} catch {
+			// Keep the event snapshot when final command discovery is unavailable.
+		}
+
+		const heading = reason === "reload"
+			? "Reloaded resources"
+			: `Model changed to ${finalInventory.model ?? expected.model ?? "unknown"}`;
+		await this.notifyAgentMessage(session, formatReloadContextInventory(finalInventory, heading));
+	}
+
 	private onPiEvent(session: AgentSessionState, event: PiEvent): void {
 		// A replaced process may still flush events while it is stopping. Never
 		// route those events into the newer process registered under the same id.
@@ -1411,6 +1472,15 @@ export class PixAcpAgent {
 	private async handleExtensionUiRequest(session: AgentSessionState, request: RpcExtensionUIRequest): Promise<void> {
 		const state = sessionStateEnvelopeFromUiRequest(request);
 		if (state) {
+			if (state.channel === CONTEXT_INVENTORY_EVENT) {
+				const inventory = parseContextInventoryState(state.data);
+				if (inventory) {
+					session.contextInventory = inventory;
+					if (inventory.reason === "reload" || inventory.reason === "model_select") {
+						session.contextInventoryNoticeReason = inventory.reason;
+					}
+				}
+			}
 			await session.client.notify(PIX_SESSION_STATE_METHOD, {
 				sessionId: session.acpSessionId,
 				...state,
@@ -1605,7 +1675,15 @@ export class PixAcpAgent {
 		// before the ACP prompt resolves. A later resume must never observe the
 		// stale path just because the post-settle write was still in flight.
 		await this.syncLiveSessionRecord(session);
-		if (isSlashPrompt) await this.notifyAvailableCommands(session);
+		if (isSlashPrompt) {
+			// Extension commands such as /registry can reload the Pi runtime from
+			// inside the RPC process. Their context-inventory event arrives during
+			// the command; consume it only after the prompt has settled so resource
+			// discovery and skill command registration are final.
+			await new Promise<void>((resolve) => setTimeout(resolve, 0));
+			await this.consumeContextInventoryNotice(session);
+			await this.notifyAvailableCommands(session);
+		}
 		return { stopReason };
 	}
 

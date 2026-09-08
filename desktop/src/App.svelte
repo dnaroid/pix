@@ -133,10 +133,11 @@
   import {
     buildTaskPrompt,
     EMPTY_TASK_DOCUMENT,
+    moveProjectTask,
     parseTaskDocument,
     type ProjectTask,
     type ProjectTaskDocument,
-    type ProjectTaskPriority,
+    type ProjectTaskDropPosition,
     type ProjectTaskStatus,
     type ProjectTaskType,
   } from "./lib/project-tasks";
@@ -161,8 +162,6 @@
     title: string;
     description?: string;
     type: ProjectTaskType;
-    status: ProjectTaskStatus;
-    priority: ProjectTaskPriority;
   };
   type PreviewTarget =
     | { kind: "file"; file: ProjectFilePreview }
@@ -1109,8 +1108,8 @@
       title,
       ...(description ? { description } : {}),
       type: draft.type,
-      status: draft.status,
-      priority: draft.priority,
+      status: "todo",
+      priority: "medium",
       createdAt: timestamp,
       updatedAt: timestamp,
     };
@@ -1130,12 +1129,40 @@
             title,
             ...(description ? { description } : { description: undefined }),
             type: draft.type,
-            status: draft.status,
-            priority: draft.priority,
             updatedAt: timestamp,
           }
         : task),
     });
+  }
+
+  function updateProjectTaskStatus(taskId: string, status: ProjectTaskStatus): void {
+    if (tasksSaving || taskLoadFailed) return;
+    const timestamp = new Date().toISOString();
+    void saveProjectTasks({
+      ...taskDocument,
+      tasks: taskDocument.tasks.map((task) => task.id === taskId
+        ? { ...task, status, updatedAt: timestamp }
+        : task),
+    });
+  }
+
+  function reorderProjectTask(
+    taskId: string,
+    targetType: ProjectTaskType,
+    targetTaskId: string | null,
+    position: ProjectTaskDropPosition,
+  ): void {
+    if (tasksSaving || taskLoadFailed) return;
+    const nextTasks = moveProjectTask(
+      taskDocument.tasks,
+      taskId,
+      targetType,
+      targetTaskId,
+      position,
+      new Date().toISOString(),
+    );
+    if (!nextTasks) return;
+    void saveProjectTasks({ ...taskDocument, tasks: nextTasks });
   }
 
   function deleteProjectTask(taskId: string): void {
@@ -1334,7 +1361,7 @@
         tasks: taskDocument.tasks.map((candidate) => candidate.id === task.id
           ? {
               ...candidate,
-              status: "in-progress",
+              status: candidate.status === "done" ? "done" : "in-progress",
               sessionId: response.sessionId,
               updatedAt: timestamp,
             }
@@ -2992,7 +3019,9 @@
       {registryActionId}
       onCreate={createProjectTask}
       onUpdate={updateProjectTask}
+      onStatusChange={updateProjectTaskStatus}
       onDelete={deleteProjectTask}
+      onReorder={reorderProjectTask}
       onRun={(task) => void runProjectTask(task)}
       onOpenSession={(task) => void openProjectTaskSession(task)}
       onReload={() => void loadProjectTasks(workspace)}

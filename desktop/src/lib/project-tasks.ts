@@ -9,6 +9,7 @@ export const TASK_PRIORITIES = ["low", "medium", "high", "urgent"] as const;
 export type ProjectTaskType = (typeof TASK_TYPES)[number];
 export type ProjectTaskStatus = (typeof TASK_STATUSES)[number];
 export type ProjectTaskPriority = (typeof TASK_PRIORITIES)[number];
+export type ProjectTaskDropPosition = "before" | "after";
 
 export interface ProjectTask {
   id: string;
@@ -89,7 +90,6 @@ export function buildTaskPrompt(task: ProjectTask): string {
     "Work on this project task.",
     "",
     `Type: ${taskTypeLabel(task.type)}`,
-    `Priority: ${taskPriorityLabel(task.priority)}`,
     `Task: ${task.title}`,
   ];
   const description = task.description?.trim();
@@ -107,6 +107,47 @@ export function filterProjectTasks(
     && (filters.status === "all" || task.status === filters.status)
     && (filters.priority === "all" || task.priority === filters.priority)
   );
+}
+
+export function moveProjectTask(
+  tasks: readonly ProjectTask[],
+  taskId: string,
+  targetType: ProjectTaskType,
+  targetTaskId: string | null,
+  position: ProjectTaskDropPosition,
+  updatedAt: string,
+): ProjectTask[] | undefined {
+  const source = tasks.find((task) => task.id === taskId);
+  if (!source || targetTaskId === taskId) return undefined;
+
+  const typeOrder: readonly ProjectTaskType[] = ["bug", "feature", "improvement"];
+  const grouped = new Map<ProjectTaskType, ProjectTask[]>(
+    typeOrder.map((type) => [
+      type,
+      tasks.filter((task) => task.id !== taskId && task.type === type),
+    ]),
+  );
+  const targetGroup = grouped.get(targetType);
+  if (!targetGroup) return undefined;
+
+  let insertIndex = targetGroup.length;
+  if (targetTaskId !== null) {
+    const targetIndex = targetGroup.findIndex((task) => task.id === targetTaskId);
+    if (targetIndex < 0) return undefined;
+    insertIndex = targetIndex + (position === "after" ? 1 : 0);
+  }
+
+  const movedTask = source.type === targetType
+    ? source
+    : { ...source, type: targetType, updatedAt };
+  targetGroup.splice(insertIndex, 0, movedTask);
+  const nextTasks = typeOrder.flatMap((type) => grouped.get(type) ?? []);
+  const unchanged = nextTasks.length === tasks.length
+    && nextTasks.every((task, index) => {
+      const previous = tasks[index];
+      return previous?.id === task.id && previous.type === task.type;
+    });
+  return unchanged ? undefined : nextTasks;
 }
 
 export function taskTypeLabel(type: ProjectTaskType): string {

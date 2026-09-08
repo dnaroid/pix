@@ -160,6 +160,32 @@ describe("AppExtensionActionsController", () => {
 		assert.deepEqual(await replacing, { cancelled: true });
 		assert.equal(replacements, 0);
 	});
+
+	it("reports the effective context after an extension-triggered reload", async () => {
+		const entries: Entry[] = [];
+		const session = {
+			model: { provider: "openai-codex", id: "gpt-5.6-luna" },
+			thinkingLevel: "medium",
+			getActiveToolNames: () => ["read", "subagents"],
+			resourceLoader: { getSkills: () => ({ skills: [{ name: "frontier-model-rollover" }] }) },
+			async reload() {},
+		};
+		const runtime = { session } as unknown as AgentSessionRuntime;
+		const controller = new AppExtensionActionsController(createHost({
+			isRunning: () => true,
+			runtime: () => runtime,
+			subagentTypes: () => ["research", "frontier-review"],
+			addEntry: (entry) => entries.push(entry),
+		}));
+
+		await controller.createCommandContextActions(runtime).reload();
+
+		assert.equal(entries.length, 1);
+		const text = entries[0]?.kind === "system" ? entries[0].text : "";
+		assert.match(text, /^Reloaded resources\n\nModel: openai-codex\/gpt-5\.6-luna:medium/);
+		assert.match(text, /\n\nSkills \(in context\): frontier-model-rollover\n\n/);
+		assert.match(text, /Agents \(available\): frontier-review, research/);
+	});
 });
 
 function createHost(overrides: Partial<AppExtensionActionsHost>): AppExtensionActionsHost {

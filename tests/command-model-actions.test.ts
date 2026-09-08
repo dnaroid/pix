@@ -21,7 +21,7 @@ describe("ModelCommandActions.runModelCommand", () => {
 
 		await new ModelCommandActions(host).runModelCommand(model("openai", "gpt-5"));
 
-		assert.deepEqual(events, [
+		assert.deepEqual(events.slice(0, 7), [
 			"status:selecting model openai/gpt-5",
 			"render",
 			"setModel:openai/gpt-5",
@@ -29,7 +29,9 @@ describe("ModelCommandActions.runModelCommand", () => {
 			"status:reloading resources for openai/gpt-5",
 			"render",
 			"reload",
-			"entry:Reloaded resources after model change to openai/gpt-5",
+		]);
+		assert.match(events[7] ?? "", /^entry:Reloaded resources after model change to openai\/gpt-5\n\nModel: openai\/gpt-5/);
+		assert.deepEqual(events.slice(8), [
 			"toast:success:Model changed and resources reloaded",
 			"session-status",
 		]);
@@ -160,7 +162,13 @@ describe("ModelCommandActions.runScopedModelsCommand", () => {
 });
 
 function createHost(session: { isStreaming: boolean; setModel(model: SessionModel): Promise<void>; reload(): Promise<void> }, events: string[]): CommandControllerHost {
-	const runtime = { session };
+	const decoratedSession = Object.assign(session, {
+		model: { provider: "openai", id: "gpt-5" },
+		thinkingLevel: "off",
+		getActiveToolNames: () => ["read"],
+		resourceLoader: { getSkills: () => ({ skills: [] }) },
+	});
+	const runtime = { session: decoratedSession };
 	return ({
 		runtime: () => runtime,
 		isRunning: () => true,

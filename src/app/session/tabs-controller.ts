@@ -88,6 +88,7 @@ export type AppTabsControllerHost = {
 	restoreAutoUserMessages?(messages: readonly SubmittedUserMessage[]): void;
 	captureDeferredUserMessages?(): readonly SubmittedUserMessage[];
 	restoreDeferredUserMessages?(messages: readonly SubmittedUserMessage[]): void;
+	contextInventoryText?(runtime: AgentSessionRuntime, heading: string): string;
 	addEntry(entry: Entry): void;
 	showToast(message: string, kind: "success" | "error" | "warning" | "info"): void;
 	render(): void;
@@ -431,6 +432,11 @@ export class AppTabsController {
 		this.scheduleProjectSessionRetention();
 		this.scheduleTabPrewarm();
 		await this.loadActiveSessionHistory(restoredRuntime, generation);
+		if (restoredRuntime.session.messages.length === 0) {
+			await this.host.awaitCurrentSessionExtensions?.(restoredRuntime);
+			const text = this.host.contextInventoryText?.(restoredRuntime, `Opened an empty tab. cwd=${restoredRuntime.cwd}`);
+			if (text) this.host.addEntry({ id: createId("system"), kind: "system", text });
+		}
 		this.scheduleRestoredTabTitleRefresh(restoredSessionPaths, generation);
 	}
 
@@ -515,6 +521,7 @@ export class AppTabsController {
 		this.host.render();
 		try {
 			await this.host.activateRuntime(newRuntime, { awaitExtensions: false });
+			await this.host.awaitCurrentSessionExtensions?.(newRuntime);
 		} catch (error) {
 			if (this.pendingActiveTabId === targetTab.id) this.pendingActiveTabId = undefined;
 			if (targetTab === tab) this.removeTab(tab.id);
@@ -549,7 +556,12 @@ export class AppTabsController {
 		this.scheduleProjectSessionRetention();
 		this.host.resetSessionView();
 		this.restoreDeferredUserMessages(targetTab.id);
-		this.host.addEntry({ id: createId("system"), kind: "system", text: `Opened a new tab. cwd=${newRuntime.cwd}` });
+		this.host.addEntry({
+			id: createId("system"),
+			kind: "system",
+			text: this.host.contextInventoryText?.(newRuntime, `Opened a new tab. cwd=${newRuntime.cwd}`)
+				?? `Opened a new tab. cwd=${newRuntime.cwd}`,
+		});
 		if (newRuntime.modelFallbackMessage) this.host.addEntry({ id: createId("system"), kind: "system", text: newRuntime.modelFallbackMessage });
 		for (const diag of newRuntime.diagnostics ?? []) {
 			const kind = diag.type === "error" ? "error" as const : "system" as const;
@@ -646,6 +658,7 @@ export class AppTabsController {
 
 		try {
 			await this.host.activateRuntime(newRuntime, { awaitExtensions: false });
+			await this.host.awaitCurrentSessionExtensions?.(newRuntime);
 		} catch {
 			this.pendingActiveTabId = undefined;
 			this.removeTab(tab.id);
@@ -686,6 +699,10 @@ export class AppTabsController {
 		void this.saveTabs();
 		this.scheduleTabPrewarm();
 		await this.loadActiveSessionHistory(newRuntime, generation);
+		if (newRuntime.session.messages.length === 0) {
+			const text = this.host.contextInventoryText?.(newRuntime, `Opened an empty tab. cwd=${newRuntime.cwd}`);
+			if (text) this.host.addEntry({ id: createId("system"), kind: "system", text });
+		}
 		return true;
 	}
 

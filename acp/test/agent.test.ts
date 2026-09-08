@@ -1480,6 +1480,7 @@ test("session/load switches the pi session and replays history as chunk updates"
 
 test("Pix Desktop registry actions forward only to the extension-owned private registry RPC command", async () => {
 	const harness = createTestAdapter();
+	const notifications: SessionNotification[] = [];
 	await connectAs(harness.adapter, "pix-desktop", async (cx) => {
 		const created = await cx.request("session/new", { cwd: "/tmp/registry-gui", mcpServers: [] }) as { sessionId: string };
 		const pi = harness.clients[0]!;
@@ -1495,7 +1496,31 @@ test("Pix Desktop registry actions forward only to the extension-owned private r
 			source: "extension",
 			sourceInfo: {},
 		});
+		pi.commands.push({ name: "skill:frontier-model-rollover", source: "skill", sourceInfo: {} });
 		pi.promptHandledWithoutRun = true;
+		const originalPrompt = pi.prompt.bind(pi);
+		pi.prompt = async (message: string, images?: PiImageContent[]) => {
+			await originalPrompt(message, images);
+			if (message !== "/registry rpc update skill pdf") return;
+			pi.emit({
+				type: "extension_ui_request",
+				id: "registry-reload-context-inventory",
+				method: "setWidget",
+				widgetKey: "pix.session-state",
+				widgetLines: [
+					"pi-tools-suite:context-inventory",
+					JSON.stringify({
+						version: 1,
+						reason: "reload",
+						model: "anthropic/claude-4",
+						thinking: "medium",
+						tools: ["read", "subagents"],
+						skills: [],
+						agents: ["research"],
+					}),
+				],
+			});
+		};
 
 		await cx.request(PIX_REGISTRY_ACTION_METHOD, { sessionId: created.sessionId, action: "refresh" });
 		await cx.request(PIX_REGISTRY_ACTION_METHOD, {
@@ -1515,7 +1540,14 @@ test("Pix Desktop registry actions forward only to the extension-owned private r
 			{ message: "/registry rpc update skill pdf", images: undefined },
 			{ message: "/registry rpc pull todo", images: undefined },
 		]);
+	}, (app) => {
+		app.onNotification("session/update", (ctx) => {
+			notifications.push(ctx.params);
+		});
 	});
+	const text = notifications.map((item) => (item.update as { content?: { text?: string } }).content?.text ?? "").join("\n");
+	assert.match(text, /Reloaded resources\n\nModel: anthropic\/claude-4:medium/);
+	assert.match(text, /Skills \(in context\): frontier-model-rollover/);
 });
 
 test("desktop lazy session/load omits tool bodies and retrieves them on demand", async () => {
@@ -2084,6 +2116,61 @@ test("pix/session/reload respawns the pi client and reports the reload", async (
 	);
 });
 
+test("pix/session/reload reports model-available skills, tools, and agents from the replacement", async () => {
+	const fakes: FakePiClient[] = [];
+	const { adapter } = createTestAdapter({
+		createPiClient: () => {
+			const fake = new FakePiClient();
+			fakes.push(fake);
+			if (fakes.length === 2) {
+				fake.commands.push(
+					{ name: "skill:frontier-model-rollover", source: "skill", sourceInfo: {} },
+					{ name: "skill:project-agent-creator", source: "skill", sourceInfo: {} },
+				);
+				fake.eventsOnStart.push({
+					type: "extension_ui_request",
+					id: "reload-context-inventory",
+					method: "setWidget",
+					widgetKey: "pix.session-state",
+					widgetLines: [
+						"pi-tools-suite:context-inventory",
+						JSON.stringify({
+							version: 1,
+							model: "openai-codex/gpt-5.6-luna",
+							thinking: "medium",
+							tools: ["repo_search", "read", "subagents"],
+							skills: ["frontier-model-rollover", "project-agent-creator"],
+							agents: ["frontier-review", "research"],
+						}),
+					],
+				});
+			}
+			return fake;
+		},
+	});
+	const notifications: SessionNotification[] = [];
+
+	await connect(
+		adapter,
+		async (cx) => {
+			const created = await cx.request("session/new", { cwd: "/tmp/proj", mcpServers: [] });
+			const sessionId = (created as { sessionId: string }).sessionId;
+			await cx.request("pix/session/reload", { sessionId });
+		},
+		(app) => {
+			app.onNotification("session/update", (ctx) => {
+				notifications.push(ctx.params);
+			});
+		},
+	);
+
+	const text = notifications.map((item) => (item.update as { content?: { text?: string } }).content?.text ?? "").join("\n");
+	assert.match(text, /Model: openai-codex\/gpt-5\.6-luna:medium/);
+	assert.match(text, /Skills \(in context\): frontier-model-rollover, project-agent-creator/);
+	assert.match(text, /Tools \(active\): repo_search, read, subagents/);
+	assert.match(text, /Agents \(available\): frontier-review, research/);
+});
+
 test("pix/session/reload rejects while the session is streaming", async () => {
 	const harness = createTestAdapter();
 	await connect(harness.adapter, async (cx) => {
@@ -2186,6 +2273,59 @@ test("session/set_config_option applies model and thought level and returns fres
 			/unknown thought level/,
 		);
 	});
+});
+
+test("session/set_config_option reports the effective context after a model change", async () => {
+	const harness = createTestAdapter();
+	const notifications: SessionNotification[] = [];
+	await connect(
+		harness.adapter,
+		async (cx) => {
+			const created = await cx.request("session/new", { cwd: "/tmp", mcpServers: [] });
+			const sessionId = (created as { sessionId: string }).sessionId;
+			const pi = harness.clients[0]!;
+			pi.commands.push({ name: "skill:frontier-model-rollover", source: "skill", sourceInfo: {} });
+			const originalSetModel = pi.setModel.bind(pi);
+			pi.setModel = async (provider: string, modelId: string) => {
+				const model = await originalSetModel(provider, modelId);
+				pi.emit({
+					type: "extension_ui_request",
+					id: "model-context-inventory",
+					method: "setWidget",
+					widgetKey: "pix.session-state",
+					widgetLines: [
+						"pi-tools-suite:context-inventory",
+						JSON.stringify({
+							version: 1,
+							reason: "model_select",
+							model: `${provider}/${modelId}`,
+							thinking: "medium",
+							tools: ["read", "subagents"],
+							skills: ["frontier-model-rollover"],
+							agents: ["frontier-review", "research"],
+						}),
+					],
+				});
+				return model;
+			};
+
+			await cx.request("session/set_config_option", {
+				sessionId,
+				configId: "model",
+				value: "openai/gpt-5",
+			});
+		},
+		(app) => {
+			app.onNotification("session/update", (ctx) => {
+				notifications.push(ctx.params);
+			});
+		},
+	);
+
+	const text = notifications.map((item) => (item.update as { content?: { text?: string } }).content?.text ?? "").join("\n");
+	assert.match(text, /Model changed to openai\/gpt-5\n\nModel: openai\/gpt-5:medium/);
+	assert.match(text, /Skills \(in context\): frontier-model-rollover/);
+	assert.match(text, /Agents \(available\): frontier-review, research/);
 });
 
 test("built-in slash commands run pi-side actions and answer end_turn", async () => {
@@ -2429,6 +2569,60 @@ test("extension-handled slash commands finish without an agent run", async () =>
 
 	assert.equal(response.stopReason, "end_turn");
 	assert.deepEqual(pi.promptCalls, [{ message: "/extension-action", images: undefined }]);
+});
+
+test("extension-handled reload commands report the final effective context", async () => {
+	const harness = createTestAdapter();
+	const notifications: SessionNotification[] = [];
+	await connect(
+		harness.adapter,
+		async (cx) => {
+			const created = await cx.request("session/new", { cwd: "/tmp", mcpServers: [] });
+			const sessionId = (created as { sessionId: string }).sessionId;
+			const pi = harness.clients[0]!;
+			pi.promptHandledWithoutRun = true;
+			pi.commands.push({ name: "skill:frontier-model-rollover", source: "skill", sourceInfo: {} });
+			const originalPrompt = pi.prompt.bind(pi);
+			pi.prompt = async (message: string, images?: PiImageContent[]) => {
+				await originalPrompt(message, images);
+				pi.emit({
+					type: "extension_ui_request",
+					id: "extension-reload-context-inventory",
+					method: "setWidget",
+					widgetKey: "pix.session-state",
+					widgetLines: [
+						"pi-tools-suite:context-inventory",
+						JSON.stringify({
+							version: 1,
+							reason: "reload",
+							model: "anthropic/claude-4",
+							thinking: "medium",
+							tools: ["read", "subagents"],
+							skills: [],
+							agents: ["research"],
+						}),
+					],
+				});
+			};
+
+			const response = await cx.request("session/prompt", {
+				sessionId,
+				prompt: [{ type: "text", text: "/registry install helper" }],
+			}) as { stopReason: string };
+			assert.equal(response.stopReason, "end_turn");
+		},
+		(app) => {
+			app.onNotification("session/update", (ctx) => {
+				notifications.push(ctx.params);
+			});
+		},
+	);
+
+	const text = notifications.map((item) => (item.update as { content?: { text?: string } }).content?.text ?? "").join("\n");
+	assert.match(text, /Reloaded resources\n\nModel: anthropic\/claude-4:medium/);
+	assert.match(text, /Skills \(in context\): frontier-model-rollover/);
+	assert.match(text, /Tools \(active\): read, subagents/);
+	assert.match(text, /Agents \(available\): research/);
 });
 
 test("extension-handled commands with attachments finish without an agent run", async () => {

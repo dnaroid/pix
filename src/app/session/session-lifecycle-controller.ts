@@ -35,6 +35,7 @@ export type AppSessionLifecycleHost = {
 	handleExtensionError(error: ExtensionError): void;
 	handleSessionEvent(event: AgentSessionEvent): void;
 	bindAgentPause(session: AgentSession): void;
+	contextInventoryText?(runtime: AgentSessionRuntime, heading: string): string;
 	addEntry(entry: Entry): void;
 	setStatus(status: string): void;
 	showToast(message: string, kind: "success" | "error" | "warning" | "info"): void;
@@ -102,6 +103,11 @@ export class AppSessionLifecycleController {
 				await this.bindCurrentSession({ awaitExtensions: false });
 			});
 			await this.bindCurrentSession({ awaitExtensions: false });
+			if (runtime.session.messages.length === 0) {
+				await this.awaitCurrentSessionExtensions(runtime);
+				const text = this.host.contextInventoryText?.(runtime, `Empty tab ready. cwd=${runtime.cwd}`);
+				if (text) this.host.addEntry({ id: createId("system"), kind: "system", text });
+			}
 			if (runtime.modelFallbackMessage) {
 				this.host.addEntry({ id: createId("system"), kind: "system", text: runtime.modelFallbackMessage });
 			}

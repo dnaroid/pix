@@ -3,10 +3,12 @@ import type { AgentSessionRuntime, ExtensionCommandContextActions, ExtensionErro
 import { createId } from "../id.js";
 import { logPixEvent, type PixLogDetails, type PixLogLevel } from "../logger.js";
 import type { Entry } from "../types.js";
+import { createReloadContextInventory, formatReloadContextInventory } from "../commands/reload-context-inventory.js";
 
 export type AppExtensionActionsHost = {
 	isRunning(): boolean;
 	runtime(): AgentSessionRuntime | undefined;
+	subagentTypes?(runtime: AgentSessionRuntime): readonly string[] | undefined;
 	getInput(): string;
 	setInput(value: string): void;
 	awaitCurrentSessionExtensions(runtime?: AgentSessionRuntime): Promise<void>;
@@ -71,6 +73,14 @@ export class AppExtensionActionsController {
 				await session.reload();
 				if (!this.isSessionActive(runtime, session)) return;
 				this.host.setSessionStatus(session);
+				this.host.addEntry({
+					id: createId("system"),
+					kind: "system",
+					text: formatReloadContextInventory(
+						createReloadContextInventory(runtime, this.host.subagentTypes?.(runtime)),
+						"Reloaded resources",
+					),
+				});
 				this.host.showToast("Reloaded resources", "success");
 				this.host.render();
 			},

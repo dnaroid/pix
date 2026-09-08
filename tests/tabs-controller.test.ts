@@ -483,6 +483,7 @@ describe("AppTabsController", () => {
 		const activeRuntime = fakeRuntime("one", "/tmp/one.jsonl");
 		const newRuntime = fakeRuntime("two", "/tmp/two.jsonl");
 		let currentRuntime = activeRuntime;
+		const entries: string[] = [];
 		const capturedView = fakeSessionView({ scrollState: { scrollFromBottom: 9, detachedScrollStart: 23 } });
 		const controller = new AppTabsController({
 			options: { cwd: "/tmp", themeName: "dark", noSession: false } satisfies AppOptions,
@@ -505,7 +506,10 @@ describe("AppTabsController", () => {
 			captureSessionView: () => capturedView,
 			captureInputState: () => ({ text: "", cursor: 0 }),
 			restoreInputState: () => {},
-			addEntry: () => {},
+			contextInventoryText: (_runtime, heading) => `${heading}\n\nModel: test/model`,
+			addEntry: (entry) => {
+				if (entry.kind === "system") entries.push(entry.text);
+			},
 			showToast: () => {},
 			render: () => {},
 		});
@@ -524,6 +528,7 @@ describe("AppTabsController", () => {
 		await controller.openNewTab();
 
 		assert.deepEqual(tabs.sessionViewsByTabId.get("tab-1"), capturedView);
+		assert.deepEqual(entries, ["Opened a new tab. cwd=/tmp\n\nModel: test/model"]);
 	});
 
 	it("restores the cached scroll position when switching back to a tab", async () => {
@@ -2895,6 +2900,7 @@ function fakeRuntime(
 			},
 			isStreaming: options.isStreaming === true,
 			isCompacting: false,
+			messages: [],
 			subscribe: (listener: (event: AgentSessionEvent) => void) => {
 				listeners.push(listener);
 				return () => {

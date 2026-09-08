@@ -257,7 +257,7 @@ export function createSlashCommands(actions: CommandRegistryActions, host: Comma
 		},
 		{
 			name: "reload",
-			description: "Reload keybindings, extensions, skills, prompts, and themes",
+			description: "Reload resources and show model-available skills, tools, and agents",
 			kind: "builtin",
 			keywords: ["restart", "refresh", "resources", "extensions", "skills", "prompts"],
 			run: () => actions.runReloadCommand(),

@@ -690,6 +690,18 @@ async function clearResourceProvenanceEntries(ctx: ExtensionContext, entries: Re
 	if (changed) await writeProvenance(ctx, provenance);
 }
 
+async function clearProjectProvenanceEntries(ctx: ExtensionContext, artifacts: ProjectArtifact[]): Promise<void> {
+	if (artifacts.length === 0) return;
+	const provenance = await readProvenance(ctx);
+	let changed = false;
+	for (const artifact of artifacts) {
+		if (!(artifact in provenance.projectResources)) continue;
+		delete provenance.projectResources[artifact];
+		changed = true;
+	}
+	if (changed) await writeProvenance(ctx, provenance);
+}
+
 async function recordProjectProvenance(
 	ctx: ExtensionContext,
 	runtime: RegistryRuntime,
@@ -791,8 +803,14 @@ async function collectProjectStatuses(
 	for (const artifact of ["tasks", "plans", "todo"] as const) {
 		const localPath = projectArtifactLocalPath(ctx.cwd, artifact);
 		const remotePath = projectArtifactRegistryPath(runtime.cacheDir, projectKey, artifact);
-		const [localExists, remoteExists] = await Promise.all([pathExists(localPath), pathExists(remotePath)]);
+		const [localPathExists, remoteExists] = await Promise.all([pathExists(localPath), pathExists(remotePath)]);
 		const tracked = provenance.projectResources[artifact];
+		const localExists = localPathExists && (
+			artifact !== "plans"
+			|| await hasTrackableFiles(localPath)
+			|| remoteExists
+			|| Boolean(tracked)
+		);
 		if (!localExists && !remoteExists && !tracked) continue;
 		if (tracked && (tracked.remote !== runtime.remote || tracked.branch !== runtime.branch || tracked.projectKey !== projectKey)) {
 			statuses.push({ artifact, kind: "registry-changed", localExists, remoteExists, provenance: tracked });
@@ -1379,28 +1397,42 @@ async function pushProjectState(pi: ExtensionAPI, ctx: ExtensionCommandContext, 
 	await ensureRegistryCache(pi, runtime);
 	const projectKey = await resolveProjectKey(pi, ctx.cwd);
 	const requested = projectArtifacts(scope);
-	const targets: ProjectArtifact[] = [];
+	const provenance = await readProvenance(ctx);
+	const targets: Array<{ artifact: ProjectArtifact; deleteRemote: boolean }> = [];
+	const alreadyAbsent: ProjectArtifact[] = [];
 	for (const artifact of requested) {
 		const localPath = projectArtifactLocalPath(ctx.cwd, artifact);
 		if (await pathExists(localPath)) {
 			if (artifact === "plans" && !(await hasTrackableFiles(localPath))) {
-				if (scope !== "project") throw new Error(`Project .pi/${PROJECT_PLANS_DIR}/ contains no files; Git cannot store an empty directory.`);
+				const tracked = provenance.projectResources[artifact];
+				if (tracked && (tracked.remote !== runtime.remote || tracked.branch !== runtime.branch || tracked.projectKey !== projectKey)) {
+					throw new Error(`${artifact} state is tracked under another registry/branch/project key. Run /${COMMAND} status before pushing.`);
+				}
+				if (await pathExists(projectArtifactRegistryPath(runtime.cacheDir, projectKey, artifact))) {
+					targets.push({ artifact, deleteRemote: true });
+				} else {
+					alreadyAbsent.push(artifact);
+				}
 				continue;
 			}
-			targets.push(artifact);
+			targets.push({ artifact, deleteRemote: false });
 		} else if (scope !== "project") {
 			throw new Error(`Project .pi/${projectArtifactDisplayName(artifact)} does not exist.`);
 		}
 	}
 	if (targets.length === 0) {
-		notify(ctx, `No .pi/${PROJECT_TASKS_FILE}, .pi/${PROJECT_PLANS_DIR}/, or .pi/${PROJECT_TODO_FILE} state exists to push.`);
+		await clearProjectProvenanceEntries(ctx, alreadyAbsent);
+		if (scope === "plans" && alreadyAbsent.includes("plans")) {
+			notify(ctx, `Project registry already has no ${PROJECT_PLANS_DIR}/ state for ${projectKey}.`);
+		} else {
+			notify(ctx, `No .pi/${PROJECT_TASKS_FILE}, .pi/${PROJECT_PLANS_DIR}/, or .pi/${PROJECT_TODO_FILE} state exists to push.`);
+		}
 		return;
 	}
 
-	const provenance = await readProvenance(ctx);
-	const metadata = new Map<ProjectArtifact, { localHash: string; remoteRevision?: string; remoteExists: boolean }>();
+	const localHashes = new Map<ProjectArtifact, string>();
 	const overwriteConflicts: ProjectArtifact[] = [];
-	for (const artifact of targets) {
+	for (const { artifact, deleteRemote } of targets) {
 		const localPath = projectArtifactLocalPath(ctx.cwd, artifact);
 		const remotePath = projectArtifactRegistryPath(runtime.cacheDir, projectKey, artifact);
 		const rel = projectArtifactRelativePath(projectKey, artifact);
@@ -1414,8 +1446,8 @@ async function pushProjectState(pi: ExtensionAPI, ctx: ExtensionCommandContext, 
 			throw new Error(`${artifact} state changed in the registry since revision ${tracked.revision.slice(0, 8)}. Pull or resolve it before pushing.`);
 		}
 		const localHash = await hashPath(localPath);
-		if (!tracked && remoteExists && await hashPath(remotePath) !== localHash) overwriteConflicts.push(artifact);
-		metadata.set(artifact, { localHash, remoteRevision, remoteExists });
+		if (!tracked && remoteExists && (deleteRemote || await hashPath(remotePath) !== localHash)) overwriteConflicts.push(artifact);
+		localHashes.set(artifact, localHash);
 	}
 
 	if (overwriteConflicts.length > 0) {
@@ -1429,13 +1461,14 @@ async function pushProjectState(pi: ExtensionAPI, ctx: ExtensionCommandContext, 
 	}
 
 	const rels: string[] = [];
-	for (const artifact of targets) {
+	for (const { artifact, deleteRemote } of targets) {
 		const localPath = projectArtifactLocalPath(ctx.cwd, artifact);
 		const remotePath = projectArtifactRegistryPath(runtime.cacheDir, projectKey, artifact);
-		await replaceResource(localPath, remotePath);
+		if (deleteRemote) await fs.rm(remotePath, { recursive: true, force: true });
+		else await replaceResource(localPath, remotePath);
 		rels.push(projectArtifactRelativePath(projectKey, artifact));
 	}
-	await runGit(pi, runtime.cacheDir, ["add", "--", ...rels]);
+	await runGit(pi, runtime.cacheDir, ["add", "-A", "--", ...rels]);
 	const changed = (await runGit(pi, runtime.cacheDir, ["status", "--porcelain", "--", ...rels])).stdout.trim();
 	if (changed) {
 		await runGit(pi, runtime.cacheDir, ["commit", "-m", `Sync project state ${projectKey}`, "--", ...rels]);
@@ -1446,13 +1479,20 @@ async function pushProjectState(pi: ExtensionAPI, ctx: ExtensionCommandContext, 
 		}
 	}
 
-	for (const artifact of targets) {
+	const removedArtifacts = [...alreadyAbsent];
+	for (const { artifact, deleteRemote } of targets) {
+		if (deleteRemote) {
+			removedArtifacts.push(artifact);
+			continue;
+		}
 		const rel = projectArtifactRelativePath(projectKey, artifact);
 		const revision = await pathRevision(pi, runtime, rel);
 		if (!revision) throw new Error(`Cannot determine registry revision for project ${artifact} state.`);
-		await recordProjectProvenance(ctx, runtime, projectKey, artifact, revision, metadata.get(artifact)!.localHash);
+		await recordProjectProvenance(ctx, runtime, projectKey, artifact, revision, localHashes.get(artifact)!);
 	}
-	notify(ctx, `${changed ? "Pushed" : "Project registry already matches"} ${targets.join(" + ")} for ${projectKey}.`);
+	await clearProjectProvenanceEntries(ctx, removedArtifacts);
+	const targetNames = targets.map(({ artifact }) => artifact);
+	notify(ctx, `${changed ? "Pushed" : "Project registry already matches"} ${targetNames.join(" + ")} for ${projectKey}.`);
 }
 
 async function pullProjectState(pi: ExtensionAPI, ctx: ExtensionCommandContext, scope: ProjectScope): Promise<void> {

@@ -62,6 +62,12 @@ import { checkPiUpdate, checkPixUpdate, formatPixStartupUpdateDialog, formatPiSt
 import { checkAndUpdateIdxOnStartup, formatIdxStartupUpdateNotice } from "./cli/startup-checks.js";
 import { AppVoiceController } from "./input/voice-controller.js";
 import { createIsolatedExtensionEventBus } from "./extensions/extension-event-bus.js";
+import {
+	parseSubagentCatalogState,
+	SUBAGENTS_CATALOG_STATE_EVENT,
+	type SubagentCatalogState,
+} from "./extensions/subagent-catalog-state.js";
+import { createReloadContextInventory, formatReloadContextInventory } from "./commands/reload-context-inventory.js";
 import { setAppIconTheme } from "./icons.js";
 import {
 	type AgentSession,
@@ -156,6 +162,7 @@ export class PiUiExtendApp {
 	 * for one tab never reaches another tab's extensions.
 	 */
 	private readonly extensionEventBusByRuntime = new WeakMap<AgentSessionRuntime, EventBus>();
+	private readonly subagentCatalogBySessionId = new Map<string, SubagentCatalogState>();
 	private readonly inputEditor = new InputEditor();
 	private lastInputEditorContentVersion = this.inputEditor.contentVersion;
 	private readonly requestHistory: AppRequestHistory;
@@ -256,6 +263,7 @@ export class PiUiExtendApp {
 			restoreAutoUserMessages: (messages) => this.queuedMessages.restoreAutoUserMessages(messages),
 			captureDeferredUserMessages: () => this.queuedMessages.captureDeferredUserMessages(),
 			restoreDeferredUserMessages: (messages) => this.queuedMessages.restoreDeferredUserMessages(messages),
+			contextInventoryText: (runtime, heading) => this.contextInventoryText(runtime, heading),
 			addEntry: (entry) => this.addEntry(entry),
 			showToast: (message, kind) => this.showToast(message, kind),
 			render: () => this.render(),
@@ -393,6 +401,7 @@ export class PiUiExtendApp {
 		this.extensionActions = new AppExtensionActionsController({
 			isRunning: () => this.running,
 			runtime: () => this.runtime,
+			subagentTypes: (runtime) => this.subagentTypesForRuntime(runtime),
 			getInput: () => this.input,
 			setInput: (value) => this.setInput(value),
 			awaitCurrentSessionExtensions: (runtime) => this.awaitCurrentSessionExtensions(runtime),
@@ -547,6 +556,7 @@ export class PiUiExtendApp {
 		this.commandController = new AppCommandController({
 			options: this.options,
 			runtime: () => this.runtime,
+			subagentTypes: (runtime) => this.subagentTypesForRuntime(runtime),
 			requestHistory: () => this.requestHistory,
 			getInput: () => this.input,
 			setInput: (value) => this.setInput(value),
@@ -863,6 +873,7 @@ export class PiUiExtendApp {
 			handleExtensionError: (error) => this.extensionActions.handleExtensionError(error),
 			handleSessionEvent: (event) => this.handleSessionEvent(event),
 			bindAgentPause: (session) => this.agentPauseController.bind(session),
+			contextInventoryText: (runtime, heading) => this.contextInventoryText(runtime, heading),
 			addEntry: (entry) => this.addEntry(entry),
 			setStatus: (status) => this.setStatus(status),
 			showToast: (message, kind) => this.showToast(message, kind),
@@ -1010,8 +1021,29 @@ export class PiUiExtendApp {
 		return createIsolatedExtensionEventBus((channel, data) => {
 			if (channel === TERMINAL_BELL_ATTENTION_EVENT) this.handleTerminalBellAttention(data);
 			if (channel === SUBAGENTS_LIVE_STATE_EVENT) this.subagentsWidgetController.observeLiveState(data);
+			if (channel === SUBAGENTS_CATALOG_STATE_EVENT) {
+				const catalog = parseSubagentCatalogState(data);
+				if (catalog?.sessionId) this.subagentCatalogBySessionId.set(catalog.sessionId, catalog);
+			}
 			if (channel === TODO_STATE_EVENT) this.todoWidgetController.observeLiveState(data);
 		});
+	}
+
+	private subagentTypesForRuntime(runtime: AgentSessionRuntime): readonly string[] | undefined {
+		const sessionId = runtime.session.sessionManager.getSessionId();
+		const catalog = this.subagentCatalogBySessionId.get(sessionId);
+		if (!catalog) return undefined;
+		const model = runtime.session.model;
+		const currentModelRef = model ? `${model.provider}/${model.id}` : undefined;
+		if (catalog.model && currentModelRef && catalog.model !== currentModelRef) return undefined;
+		return catalog.types;
+	}
+
+	private contextInventoryText(runtime: AgentSessionRuntime, heading: string): string {
+		return formatReloadContextInventory(
+			createReloadContextInventory(runtime, this.subagentTypesForRuntime(runtime)),
+			heading,
+		);
 	}
 
 	private handleTerminalBellAttention(data: unknown): void {

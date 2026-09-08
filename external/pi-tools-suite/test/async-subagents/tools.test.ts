@@ -235,10 +235,16 @@ describe.serial("extension entrypoint", () => {
 			ui: { setWidget: (key: string, lines: string[] | undefined) => widgets.push({ key, lines }) },
 		});
 
-		expect(widgets).toHaveLength(1);
+		expect(widgets).toHaveLength(2);
 		expect(widgets[0]?.key).toBe("pix.session-state");
-		expect(widgets[0]?.lines?.[0]).toBe("pi-tools-suite:async-subagents:live-state");
+		expect(widgets[0]?.lines?.[0]).toBe("pi-tools-suite:async-subagents:catalog");
 		expect(JSON.parse(widgets[0]?.lines?.[1] ?? "null")).toMatchObject({
+			version: 1,
+			types: expect.arrayContaining(["frontier-review", "research"]),
+		});
+		expect(widgets[1]?.key).toBe("pix.session-state");
+		expect(widgets[1]?.lines?.[0]).toBe("pi-tools-suite:async-subagents:live-state");
+		expect(JSON.parse(widgets[1]?.lines?.[1] ?? "null")).toMatchObject({
 			version: 1,
 			count: 0,
 			runs: [],

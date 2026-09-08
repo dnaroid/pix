@@ -27,6 +27,7 @@ const APP_PID_CLEANUP_TIMEOUT_MS = 1_000;
 const APP_EXIT_WAIT_MS = 2_000;
 const APP_KILL_WAIT_MS = 500;
 const DEBOUNCE_MS = 200;
+const RESTART_DEBOUNCE_MS = 750;
 const STARTUP_GRACE_MS = 800;
 const NATIVE_ICON_PATH = "desktop/src-tauri/icons";
 
@@ -381,6 +382,7 @@ class WatchAllSupervisor {
 		this.hasNativeBuild = false;
 		this.restartPending = false;
 		this.buildTimer = undefined;
+		this.restartTimer = undefined;
 		this.activeCommand = undefined;
 		this.desktopProcess = undefined;
 		this.desktopAppPid = undefined;
@@ -457,6 +459,8 @@ class WatchAllSupervisor {
 
 	queueParts(parts, reason, options = {}) {
 		if (this.stopping) return;
+		clearTimeout(this.restartTimer);
+		this.restartTimer = undefined;
 		for (const part of this.blockedParts) this.pendingParts.add(part);
 		this.blockedParts.clear();
 		for (const part of parts) this.pendingParts.add(part);
@@ -499,18 +503,38 @@ class WatchAllSupervisor {
 			if (this.restartPending) {
 				console.error("[watch:all] desktop restart deferred until queued changes build successfully");
 			}
-		} else if (succeeded && this.restartPending && !this.stopping) {
-			try {
-				const restarted = await this.restartDesktop();
-				if (restarted) this.restartPending = false;
-			} catch (error) {
-				console.error(`[watch:all] desktop restart failed: ${error instanceof Error ? error.message : String(error)}`);
-			}
 		}
 
 		this.building = false;
 		if (this.pendingParts.size > 0 && !this.stopping) {
 			this.buildTimer = setTimeout(() => void this.runQueuedBuild(), DEBOUNCE_MS);
+		} else if (succeeded && this.restartPending && !this.stopping) {
+			this.scheduleDesktopRestart();
+		}
+	}
+
+	scheduleDesktopRestart() {
+		if (this.stopping || this.building || this.pendingParts.size > 0 || !this.restartPending) return;
+		clearTimeout(this.restartTimer);
+		// The first launch can happen immediately. Once Desktop is running, wait for a quiet period so
+		// agent-driven bursts of edits/builds collapse into one visible application restart.
+		const delayMs = this.desktopProcess ? RESTART_DEBOUNCE_MS : 0;
+		if (delayMs > 0) {
+			console.error(`[watch:all] desktop restart waiting for ${delayMs}ms of quiet`);
+		}
+		this.restartTimer = setTimeout(() => {
+			this.restartTimer = undefined;
+			void this.runDesktopRestart();
+		}, delayMs);
+	}
+
+	async runDesktopRestart() {
+		if (this.stopping || this.building || this.pendingParts.size > 0 || !this.restartPending) return;
+		try {
+			const restarted = await this.restartDesktop();
+			if (restarted) this.restartPending = false;
+		} catch (error) {
+			console.error(`[watch:all] desktop restart failed: ${error instanceof Error ? error.message : String(error)}`);
 		}
 	}
 
@@ -739,6 +763,7 @@ class WatchAllSupervisor {
 		if (this.stopping) return;
 		this.stopping = true;
 		clearTimeout(this.buildTimer);
+		clearTimeout(this.restartTimer);
 		for (const watcher of this.watchers) watcher.close();
 		if (this.activeCommand) await stopProcessTree(this.activeCommand);
 		if (this.candidateProcess) {
