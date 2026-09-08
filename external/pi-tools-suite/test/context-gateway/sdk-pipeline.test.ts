@@ -3,14 +3,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 
-import { AgentSession } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/agent-session.js";
-import { createAgentSession } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.js";
-import { createExtensionRuntime } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/loader.js";
-import { ExtensionRunner } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/runner.js";
-import type { Extension, ToolResultEvent } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/types.js";
-import { SessionManager } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/session-manager.js";
-import { SettingsManager } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/settings-manager.js";
-import { createBashToolDefinition } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/tools/bash.js";
+import {
+	AgentSession,
+	createAgentSession,
+	createBashToolDefinition,
+	createExtensionRuntime,
+	ExtensionRunner,
+	SessionManager,
+	SettingsManager,
+	type Extension,
+	type ToolResultEvent,
+} from "@earendil-works/pi-coding-agent";
 import {
 	createAssistantMessageEventStream,
 	fauxAssistantMessage,

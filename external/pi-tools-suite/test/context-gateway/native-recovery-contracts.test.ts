@@ -3,8 +3,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
 
-import { createBashToolDefinition } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/tools/bash.js";
-import { createReadToolDefinition } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/tools/read.js";
+import {
+	createBashToolDefinition,
+	createReadToolDefinition,
+} from "@earendil-works/pi-coding-agent";
 import { registerAstGrepTool } from "../../src/ast-grep/tool.js";
 import repoDiscoveryExtension from "../../src/repo-discovery/index.js";
 import { applyNativeCompactPolicy } from "../../src/repo-discovery/native-compact.js";

@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { RECOVERY_CORPUS_VERSION } from "./recovery-corpus.js";
 import { RECOVERY_VALIDATOR_VERSION } from "./recovery-validation.js";
@@ -95,8 +96,11 @@ function gitText(repoRoot: string, args: string[]): string | null {
 
 function sdkVersion(packageRoot: string): string | null {
 	try {
+		void packageRoot;
+		const sdkEntrypoint = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
+		const sdkPackageJson = path.resolve(path.dirname(sdkEntrypoint), "..", "package.json");
 		const parsed = JSON.parse(fs.readFileSync(
-			path.join(packageRoot, "node_modules", "@earendil-works", "pi-coding-agent", "package.json"),
+			sdkPackageJson,
 			"utf8",
 		)) as { version?: unknown };
 		return typeof parsed.version === "string" ? parsed.version : null;

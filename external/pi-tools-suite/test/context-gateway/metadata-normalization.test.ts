@@ -5,10 +5,12 @@ import { describe, expect, test } from "bun:test";
 
 import { stream as streamOpenAiCompletions } from "@earendil-works/pi-ai/api/openai-completions";
 
-import { SessionManager } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/session-manager.js";
-import { createBashToolDefinition } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/tools/bash.js";
-import { createReadToolDefinition } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/tools/read.js";
-import { initTheme } from "../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
+import {
+	createBashToolDefinition,
+	createReadToolDefinition,
+	initTheme,
+	SessionManager,
+} from "@earendil-works/pi-coding-agent";
 import { registerAstGrepTool } from "../../src/ast-grep/tool.js";
 import dcpModule from "../../src/dcp/index.js";
 import { loadConfig as loadDcpConfig } from "../../src/dcp/config.js";

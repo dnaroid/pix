@@ -1572,8 +1572,10 @@ export class PixAcpAgent {
 		} catch (error) {
 			throw new RequestError(ERROR_SERVER, `pi process died: ${stringifyUnknown(error)}`);
 		}
-		// Refresh the persisted mapping (updatedAt, plus any pi-side rename).
-		void this.syncLiveSessionRecord(session);
+		// Refresh the persisted mapping (updatedAt, plus any pi-side rename)
+		// before the ACP prompt resolves. A later resume must never observe the
+		// stale path just because the post-settle write was still in flight.
+		await this.syncLiveSessionRecord(session);
 		if (isSlashPrompt) await this.notifyAvailableCommands(session);
 		return { stopReason };
 	}

@@ -5,9 +5,11 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "bun:test";
 
-import { createBashToolDefinition } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/tools/bash.js";
-import { createReadToolDefinition } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/tools/read.js";
-import { DEFAULT_MAX_BYTES } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/tools/truncate.js";
+import {
+	createBashToolDefinition,
+	createReadToolDefinition,
+	DEFAULT_MAX_BYTES,
+} from "@earendil-works/pi-coding-agent";
 
 import repoDiscoveryExtension from "../../src/repo-discovery/index.js";
 
