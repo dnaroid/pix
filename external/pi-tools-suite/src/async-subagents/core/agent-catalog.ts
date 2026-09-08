@@ -1,7 +1,7 @@
-import type { SubagentConfig } from "./config.js";
+import { filterSubagentConfigForParentModel, type SubagentConfig } from "./config.js";
 import { SUBAGENT_DELEGATION_GUIDANCE } from "./agent-strategy.js";
 
-export const SUBAGENT_TYPE_SELECTION_GUIDANCE = "Choose and set subagentType from the available catalog when a role clearly matches, preferring a matching project-local specialist. Preserve a user-requested role. Omit subagentType only when unsure or when the user explicitly requests automatic routing; the LLM router handles omissions only. Model/thinking overrides are not substitutes for choosing a role.";
+export const SUBAGENT_TYPE_SELECTION_GUIDANCE = "Choose and set subagentType from the available catalog when a role clearly matches, preferring a matching project-local specialist. Preserve a user-requested role when it is available in the current catalog. Omit subagentType only when unsure or when the user explicitly requests automatic routing; the LLM router handles omissions only. Model/thinking overrides are not substitutes for choosing a role.";
 
 const MAX_DESCRIPTION_CHARS = 500;
 
@@ -10,8 +10,9 @@ const MAX_DESCRIPTION_CHARS = 500;
  * The config has already merged built-ins, config files, and project-local
  * `.pi/agents/*.md`, so this stays aligned with what spawn/routing can use.
  */
-export function buildSubagentCatalogPrompt(config: SubagentConfig): string | undefined {
-	const entries = Object.entries(config.types).sort(([left], [right]) => left.localeCompare(right));
+export function buildSubagentCatalogPrompt(config: SubagentConfig, parentModelRef?: string): string | undefined {
+	const effectiveConfig = filterSubagentConfigForParentModel(config, parentModelRef);
+	const entries = Object.entries(effectiveConfig.types).sort(([left], [right]) => left.localeCompare(right));
 	if (entries.length === 0) return undefined;
 
 	return [

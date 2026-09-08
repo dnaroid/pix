@@ -15,6 +15,7 @@ import {
 	DEFAULT_STDERR_LOG_MAX_BYTES,
 	findCleanupCandidates,
 	findLatestSubagentRunDir,
+	filterSubagentConfigForParentModel,
 	generatePrompt,
 	getAgentState,
 	getActiveSubagentPresetName,
@@ -31,6 +32,7 @@ import {
 	hasQueuedAgentPrompt,
 	isBlindModelRef,
 	isQuotaLimitCompletion,
+	isSubagentTypeAvailableForParent,
 	loadSubagentConfig,
 	loadSubagentPresetSelection,
 	loadSubagentRegistry,
@@ -429,9 +431,31 @@ describe.serial("subagent type config", () => {
 		expect(config.routing).toMatchObject({ maxRetries: 1, timeoutMs: 12_000 });
 		expect(isBlindModelRef("zai/glm-5.3", config)).toBe(true);
 		expect(isBlindModelRef("zai/glm-5.3-flash", config)).toBe(false);
-		expect(Object.keys(config.types).sort()).toEqual(["browser-qa", "implement", "oracle", "research", "verify"]);
+		expect(Object.keys(config.types).sort()).toEqual(["browser-qa", "frontier-review", "implement", "oracle", "research", "verify"]);
 		expect(config.types.research.description).toContain("review");
+		expect(config.types["frontier-review"].models).toEqual(["openai-codex/gpt-5.6-sol", "zai/glm-5.3"]);
+		expect(config.types["frontier-review"].notForParentModels).toEqual(["openai-codex/gpt-5.6-sol*", "zai/glm-5.3"]);
+		expect(buildSubagentCatalogPrompt(config, "openai-codex/gpt-5.6-luna")).toContain("- frontier-review:");
+		expect(buildSubagentCatalogPrompt(config, "openai-codex/gpt-5.6-sol")).not.toContain("- frontier-review:");
+		expect(buildSubagentCatalogPrompt(config, "zai/glm-5.3")).not.toContain("- frontier-review:");
 		expect(selectSubagentType({ id: "s", task: "vulnerability secret token" }, config)).toBe("research");
+	});
+
+	test.serial("filters roles by parent model with deny taking precedence over allow", () => {
+		const profile = {
+			forParentModels: ["openai-codex/*", "zai/*"],
+			notForParentModels: ["openai-codex/gpt-5.6-sol*"],
+		};
+		expect(isSubagentTypeAvailableForParent(profile, "openai-codex/gpt-5.6-luna")).toBe(true);
+		expect(isSubagentTypeAvailableForParent(profile, "openai-codex/gpt-5.6-sol")).toBe(false);
+		expect(isSubagentTypeAvailableForParent(profile, "anthropic/claude-opus")).toBe(false);
+		expect(isSubagentTypeAvailableForParent(profile, undefined)).toBe(false);
+		expect(isSubagentTypeAvailableForParent({ notForParentModels: ["zai/glm-5.3"] }, undefined)).toBe(true);
+
+		const config = loadSubagentConfig(tempDir(), {});
+		expect(filterSubagentConfigForParentModel(config, "openai-codex/gpt-5.6-luna").types["frontier-review"]).toBeDefined();
+		expect(filterSubagentConfigForParentModel(config, "openai-codex/gpt-5.6-sol").types["frontier-review"]).toBeUndefined();
+		expect(filterSubagentConfigForParentModel(config, "zai/glm-5.3").types["frontier-review"]).toBeUndefined();
 	});
 
 	test.serial("resolves the built-in balanced role models and browser QA profile", () => {
@@ -488,12 +512,14 @@ describe.serial("subagent type config", () => {
 
 		expect(Object.keys(definitions).sort()).toEqual([
 			"browser-qa",
+			"frontier-review",
 			"implement",
 			"oracle",
 			"research",
 			"verify",
 		]);
 		expect(definitions.implement?.raw.description).toContain("code, docs, tests, or UI");
+		expect(definitions["frontier-review"]?.raw.notForParentModels).toEqual(["openai-codex/gpt-5.6-sol*", "zai/glm-5.3"]);
 		expect(definitions.implement?.raw.promptAppend).toContain("For UI work");
 		expect(definitions.oracle?.raw.promptAppend).toContain("# Oracle agent");
 		expect(definitions["browser-qa"]?.raw.tools).toEqual(["read", "grep", "bash"]);
@@ -722,6 +748,8 @@ Check repo rules before approving.
 			const cwd = tempDir();
 			writeFile(path.join(cwd, ".pi", "agents", "local-oracle.md"), `---
 description: Second opinion.
+forParentModels: openai-codex/*, zai/*
+notForParentModels: [openai-codex/gpt-5.6-sol*]
 modelByParent:
   zai/*: zai/glm-5.3
   openai-codex/*:
@@ -742,6 +770,8 @@ Advise only.
 				"zai/*": { model: "zai/glm-5.3" },
 				"openai-codex/*": { model: "openai-codex/gpt-5.6-sol", fallbackModels: ["zai/glm-5.3"] },
 			});
+			expect(profile?.forParentModels).toEqual(["openai-codex/*", "zai/*"]);
+			expect(profile?.notForParentModels).toEqual(["openai-codex/gpt-5.6-sol*"]);
 			expect(profile?.retry).toEqual({ maxRetries: 2, backoffMs: 250, retryableExitCodes: [1, 124] });
 			expect(profile?.timeoutMs).toBe(600000);
 
@@ -789,6 +819,7 @@ Advise only.
 			expect(builtin.types.implement?.icon).toBe("code");
 			expect(builtin.types.verify?.icon).toBe("flask");
 			expect(builtin.types["browser-qa"]?.icon).toBe("globe");
+			expect(builtin.types["frontier-review"]?.icon).toBe("eye");
 			expect(builtin.types.oracle?.icon).toBe("sparkles");
 		});
 
@@ -981,6 +1012,8 @@ Give a second opinion.
 		expect(shouldForceCurrentSubagentModel({ ASYNC_SUBAGENTS_USE_CURRENT_MODEL: "on" })).toBe(true);
 		expect(currentModelRef({ provider: "zai", id: "glm-5-turbo" })).toBe("zai/glm-5-turbo");
 		expect(currentModelRef({ provider: "zai", id: "zai/glm-5-turbo" })).toBe("zai/glm-5-turbo");
+		expect(currentModelRef({ providerId: "openai-codex", modelId: "gpt-5.6-sol" })).toBe("openai-codex/gpt-5.6-sol");
+		expect(currentModelRef("openai-codex/gpt-5.6-luna")).toBe("openai-codex/gpt-5.6-luna");
 		expect(currentModelRef({ id: "openai/gpt-5" })).toBe("openai/gpt-5");
 		expect(currentModelRef(undefined)).toBeUndefined();
 	});

@@ -71,6 +71,51 @@ describe("parent-first sub-agent routing", () => {
 		expect(live.complete).toHaveBeenCalledTimes(1);
 	});
 
+	test("treats parent-model-gated roles as unavailable for explicit and automatic routing", async () => {
+		const cfg = config();
+		cfg.types.review = {
+			forParentModels: ["test/*"],
+			notForParentModels: ["test/frontier"],
+		};
+		const blocked = context(async () => { throw new Error("must not call the router"); });
+		blocked.ctx.model = { provider: "test", id: "frontier" };
+		await expect(routeSubagentTasks([
+			{ id: "explicit", task: "Review changes", subagentType: "review" },
+		], cfg, blocked.ctx)).rejects.toThrow(/subagentType unavailable for parent model test\/frontier/);
+		expect(blocked.complete).not.toHaveBeenCalled();
+
+		const auto = context(async (_model, prompt) => {
+			const text = JSON.stringify(prompt.messages);
+			expect(text).not.toContain("review:");
+			return response('{"routes":[{"id":"auto","subagentType":"deep"}]}');
+		});
+		auto.ctx.model = { provider: "test", id: "frontier" };
+		const result = await routeSubagentTasks([{ id: "auto", task: "Investigate the race" }], cfg, auto.ctx);
+		expect(result.routes).toEqual({ auto: "deep" });
+	});
+
+	test("frontier-review is routable for a non-frontier parent and rejected for a frontier parent", async () => {
+		const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "subagent-frontier-review-test-"));
+		tempDirs.push(cwd);
+		const cfg = loadSubagentConfig(cwd, {});
+		cfg.routing = config().routing;
+
+		const nonFrontier = context(async (_model, prompt) => {
+			expect(JSON.stringify(prompt.messages)).toContain("frontier-review:");
+			return response('{"routes":[{"id":"review","subagentType":"frontier-review"}]}');
+		});
+		nonFrontier.ctx.model = { provider: "openai-codex", id: "gpt-5.6-luna" };
+		const routed = await routeSubagentTasks([{ id: "review", task: "Review the implementation" }], cfg, nonFrontier.ctx);
+		expect(routed.tasks[0]?.subagentType).toBe("frontier-review");
+
+		const frontier = context(async () => { throw new Error("must not call the router"); });
+		frontier.ctx.model = { provider: "openai-codex", id: "gpt-5.6-sol" };
+		await expect(routeSubagentTasks([
+			{ id: "review", task: "Review the implementation", subagentType: "frontier-review" },
+		], cfg, frontier.ctx)).rejects.toThrow(/subagentType unavailable for parent model openai-codex\/gpt-5\.6-sol/);
+		expect(frontier.complete).not.toHaveBeenCalled();
+	});
+
 	test("errors on omitted roles with no runtime rather than silently choosing quick", async () => {
 		await expect(routeSubagentTasks([{ id: "audit", task: "Audit the payment flow" }], config(), {}))
 			.rejects.toThrow(/Set an explicit valid subagentType/);

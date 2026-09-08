@@ -504,7 +504,7 @@ class WatchAllSupervisor {
 				const restarted = await this.restartDesktop();
 				if (restarted) this.restartPending = false;
 			} catch (error) {
-				console.error(`[watch:all] desktop restart failed; keeping the previous process: ${error instanceof Error ? error.message : String(error)}`);
+				console.error(`[watch:all] desktop restart failed: ${error instanceof Error ? error.message : String(error)}`);
 			}
 		}
 
@@ -662,7 +662,25 @@ class WatchAllSupervisor {
 
 	async restartDesktop() {
 		if (!this.desktopExecutable) throw new Error("no successfully built desktop executable is available");
-		console.error("[watch:all] starting the newly built desktop before replacing the current process");
+		const previous = this.desktopProcess
+			? { process: this.desktopProcess, appPid: this.desktopAppPid }
+			: undefined;
+		if (previous) {
+			console.error("[watch:all] stopping the previous desktop before starting the newly built desktop");
+			// Clear the tracked instance before signalling it so its exit listener cannot race with
+			// assignment of the replacement process and clear the newly accepted instance.
+			this.desktopProcess = undefined;
+			this.desktopAppPid = undefined;
+			await this.stopDesktopInstance(previous);
+			if (this.stopping || this.pendingParts.size > 0) {
+				if (!this.stopping) {
+					console.error("[watch:all] desktop restart deferred because newer changes were queued while stopping the previous process");
+				}
+				return false;
+			}
+		} else {
+			console.error("[watch:all] starting the newly built desktop");
+		}
 		const candidate = this.spawnDesktopCandidate();
 		this.candidateProcess = candidate.process;
 		this.candidateAppPid = candidate.appPid;
@@ -704,9 +722,6 @@ class WatchAllSupervisor {
 			if (this.candidateProcess === candidate.process) this.candidateProcess = undefined;
 		}
 
-		const previous = this.desktopProcess
-			? { process: this.desktopProcess, appPid: this.desktopAppPid }
-			: undefined;
 		this.desktopProcess = candidate.process;
 		this.desktopAppPid = candidate.appPid;
 		candidate.process.once("exit", (code, signal) => {
@@ -716,7 +731,6 @@ class WatchAllSupervisor {
 				this.desktopAppPid = undefined;
 			}
 		});
-		if (previous) await this.stopDesktopInstance(previous);
 		console.error("[watch:all] desktop is running the latest successful build");
 		return true;
 	}

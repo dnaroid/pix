@@ -6,12 +6,15 @@ integration, decisions and the final answer. Actual savings depend on worker
 quality, retries and how much work the parent repeats; the configuration is
 not a price oracle.
 
-## Five execution modes
+## Six execution modes
 
-- `research`: read-only evidence gathering, searches and independent diff review.
+- `research`: read-only evidence gathering, searches and focused review questions.
 - `implement`: bounded code, documentation, test and frontend changes.
 - `verify`: run checks and interpret logs, without fixing source or tests.
 - `browser-qa`: isolated browser workflow with assertions and visual artifacts.
+- `frontier-review`: independent post-implementation code review on a strong
+  model; hidden when the current parent model matches the role's availability
+  gate.
 - `oracle`: a deliberate strong second opinion, not automatic worker escalation.
 
 Task-specific discipline belongs in the brief or `promptAppend`. A new project
@@ -53,8 +56,9 @@ pools live in `.pi/agents/presets.jsonc`:
 
 The example agent selects Terra, not Luna: the agent's order wins. Sol is
 available in the pool but absent from this worker's chain, so it cannot become
-an automatic implementation fallback. The oracle can declare Sol in its own
-chain. Model references must be exact `provider/model` values, not wildcards.
+an automatic implementation fallback. The oracle and frontier-review can
+declare Sol in their own chains. Model references in `models` must be exact
+`provider/model` values, not wildcards.
 
 The resolver intersects the agent chain with the selected pool. Runtime
 selection then skips unregistered, unauthenticated or session-exhausted models.
@@ -88,6 +92,13 @@ Old role names are not implicit aliases. `quick`, `scan`, `review`, `deep`,
 `docs`, `frontend`, and `tests` work only when explicitly defined as ordinary
 custom/project types. This keeps the effective catalog and accepted names exact.
 
+Agent frontmatter can gate whether a role exists for the current parent model:
+`forParentModels` is an optional allow-list and `notForParentModels` is an
+optional deny-list; deny wins when both match. These fields accept model
+patterns such as `zai/*` and affect the parent catalog, explicit role
+validation, and automatic routing. They do not change which model the child
+runs on; `models` / legacy model selectors still own child model selection.
+
 Legacy `model` plus `fallbackModels` and `modelByParent` still load when they are
 declared in an agent Markdown file. New profile `models` replaces inherited
 legacy selection fields. Empty `models` means no candidates, not permission to
@@ -105,4 +116,5 @@ Give workers a scope, acceptance criteria and the evidence needed to start.
 Read compact results first and inspect raw artifacts selectively. One noisy
 sequential investigation can justify a worker; a command whose exit status is
 sufficient usually only needs a saved log, not another LLM. Independent review
-uses a fresh `research` invocation, not a separate built-in persona.
+of substantive code changes uses `frontier-review` when it is present in the
+current parent catalog; use `research` for focused evidence/review questions.

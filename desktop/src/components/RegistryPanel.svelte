@@ -8,7 +8,6 @@
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import Upload from "@lucide/svelte/icons/upload";
   import X from "@lucide/svelte/icons/x";
-  import { onMount } from "svelte";
   import {
     registryActionLabel,
     registryPrimaryAction,
@@ -42,8 +41,6 @@
   let menuId = $state<string | null>(null);
   const visibleItems = $derived((snapshot?.items ?? []).filter((item) => filter === "all" || item.type === filter));
   const busy = $derived(disabled || actionId !== null);
-
-  onMount(() => onRefresh());
 
   function statusTone(status: RegistryStatus): string {
     if (status === "up-to-date") return "border-[var(--tool-success)]/35 bg-[var(--tool-success)]/10 text-[var(--tool-success)]";

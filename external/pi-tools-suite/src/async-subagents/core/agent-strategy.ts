@@ -7,7 +7,7 @@ export interface AgentStrategyOptions {
 }
 
 /** Shared by the strategy, tool description and role catalog. */
-export const SUBAGENT_DELEGATION_GUIDANCE = "Delegate bounded work when a lower-cost worker can do it or noisy intermediate evidence should stay out of the parent context; one sequential task can qualify. Keep planning, decisions, integration and the final answer in the parent. Use research for evidence/review, implement for code/docs/tests/UI changes, verify for running checks, browser-qa for browser testing. Reserve oracle for a deliberate strong independent opinion, not automatic escalation. Do trivial lookups/edits directly; redirect a noisy command to a log instead of spawning an LLM when no interpretation is needed.";
+export const SUBAGENT_DELEGATION_GUIDANCE = "Delegate bounded work when a lower-cost worker can do it or noisy intermediate evidence should stay out of the parent context; one sequential task can qualify. Keep planning, decisions, integration and the final answer in the parent. Use research for evidence/focused review questions, implement for code/docs/tests/UI changes, verify for running checks, browser-qa for browser testing. When frontier-review is present in the current role catalog and substantive code changed, use it as the independent post-implementation review gate before finalizing; it is intentionally hidden for parent models excluded by its profile. Reserve oracle for a deliberate strong independent opinion, not routine code review. Do trivial lookups/edits directly; redirect a noisy command to a log instead of spawning an LLM when no interpretation is needed.";
 
 export function agentStrategyPrompt(options: AgentStrategyOptions = {}): string | undefined {
 	const env = options.env ?? process.env;

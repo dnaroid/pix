@@ -52,15 +52,15 @@ afterEach(() => {
 });
 
 describe("ordered agent models and preset pools", () => {
-	test("ships five Markdown modes and pool-only presets from a single defaults source", () => {
+	test("ships six Markdown modes and pool-only presets from a single defaults source", () => {
 		const cfg = loadSubagentConfig(temp(), {});
-		expect(Object.keys(cfg.types).sort()).toEqual(["browser-qa", "implement", "oracle", "research", "verify"]);
+		expect(Object.keys(cfg.types).sort()).toEqual(["browser-qa", "frontier-review", "implement", "oracle", "research", "verify"]);
 		for (const [name, profile] of Object.entries(cfg.types)) {
 			expect(profile.models?.length).toBeGreaterThan(0);
 			expect(profile.model).toBeUndefined();
 			expect(profile.fallbackModels).toBeUndefined();
 			expect(profile.modelByParent).toBeUndefined();
-			if (name !== "oracle") expect(profile.models?.join(",")).not.toContain("gpt-5.6-sol");
+			if (name !== "oracle" && name !== "frontier-review") expect(profile.models?.join(",")).not.toContain("gpt-5.6-sol");
 		}
 		for (const preset of Object.values(cfg.presets ?? {})) {
 			expect(preset.models?.length).toBeGreaterThan(0);

@@ -47,6 +47,8 @@ modelByParent:
   openai-codex/*:
     model: openai-codex/gpt-5.6-sol
     fallbackModels: [zai/glm-5.3]
+forParentModels: [zai/*, openai-codex/*]
+notForParentModels: [openai-codex/gpt-5.6-sol*]
 ---
 
 You are a ... role prompt (markdown body).
@@ -54,10 +56,14 @@ You are a ... role prompt (markdown body).
 
 - Frontmatter keys: `name` (must match the filename if present; mismatch is an
   error), plus every `SubagentTypeConfig` field (`description`, `icon`, `model`,
-  `models`, legacy `fallbackModels`/`modelByParent`, `thinking`, `tools`, `isolatedSkills`,
-  `extraArgs`, `promptAppend`, `promptOverride`, `retry`, `maxResultBytes`,
-  `timeoutMs`). Unknown keys are rejected (typo safety; the JSONC config path
-  stays lenient).
+  `models`, legacy `fallbackModels`/`modelByParent`, `forParentModels`,
+  `notForParentModels`, `thinking`, `tools`, `isolatedSkills`, `extraArgs`,
+  `promptAppend`, `promptOverride`, `retry`, `maxResultBytes`, `timeoutMs`).
+  Unknown keys are rejected (typo safety; the JSONC config path stays lenient).
+- `forParentModels` is an optional parent-model allow-list;
+  `notForParentModels` is an optional deny-list and wins on overlap. These gates
+  filter the role from the parent catalog and router/explicit-role validation;
+  they do not select the child model.
 - Supported YAML subset (bounded, dependency-free parser): plain/quoted scalars,
   numbers, booleans, `#` comments (full-line and trailing), inline arrays
   `[a, b]`, block lists `- item`, and exactly one level of nested maps for
@@ -96,8 +102,9 @@ control).
   spawn **without** any reload.
 - `before_agent_start` also rebuilds an `<available_subagent_types>` system
   prompt section from the fully merged config whenever the `subagents` tool is
-  available. It contains type names plus bounded `description` text, so the
-  parent sees project-local roles without a restart. `/reload` still refreshes
+  available. Parent-model gates are applied before rendering. It contains type
+  names plus bounded `description` text, so the parent sees project-local roles
+  valid for its current model without a restart. `/reload` still refreshes
   ordinary extension registration state.
 
 ### Built-in definition source

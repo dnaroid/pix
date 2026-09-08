@@ -34,6 +34,16 @@ export interface SubagentTypeConfig {
 	 * Oracle alone keeps parent-aware selection ahead of presets.
 	 */
 	modelByParent?: Record<string, ModelByParentEntry>;
+	/**
+	 * Optional parent-model allow-list. When present, this role is exposed only
+	 * when the current parent model matches at least one pattern.
+	 */
+	forParentModels?: string[];
+	/**
+	 * Optional parent-model deny-list. A match hides the role even when
+	 * forParentModels also matches.
+	 */
+	notForParentModels?: string[];
 	thinking?: string;
 	tools?: string[];
 	/** Explicit skill files loaded after disabling normal skill discovery. */
@@ -376,16 +386,46 @@ export function shouldForceCurrentSubagentModel(env: NodeJS.ProcessEnv = process
 }
 
 export function currentModelRef(model: unknown): string | undefined {
+	if (typeof model === "string") return trimString(model);
 	if (!isRecord(model)) return undefined;
-	const id = trimString(model.id);
+	const id = trimString(model.modelId) || trimString(model.id) || trimString(model.model) || trimString(model.name);
 	if (!id) return undefined;
-	const provider = trimString(model.provider);
+	const provider = trimString(model.provider) || trimString(model.providerId);
 	return provider && !id.includes("/") ? `${provider}/${id}` : id;
 }
 
 export function isBlindModelRef(modelRef: string | undefined, config: SubagentConfig): boolean {
 	if (!modelRef) return false;
 	return matchesAnyModelPattern(modelRef, config.vision?.blindModelPatterns ?? []);
+}
+
+/** Whether one role is available to the current parent model. Deny wins. */
+export function isSubagentTypeAvailableForParent(
+	profile: SubagentTypeConfig,
+	parentModelRef: string | undefined,
+): boolean {
+	const included = profile.forParentModels;
+	if (included !== undefined) {
+		if (!parentModelRef || !matchesAnyModelPattern(parentModelRef, included)) return false;
+	}
+	const excluded = profile.notForParentModels;
+	if (parentModelRef && excluded !== undefined && matchesAnyModelPattern(parentModelRef, excluded)) return false;
+	return true;
+}
+
+/**
+ * Return the effective config visible to a particular parent model. Only the
+ * role catalog is filtered; presets, routing policy, retry defaults, etc. are
+ * preserved unchanged.
+ */
+export function filterSubagentConfigForParentModel(
+	config: SubagentConfig,
+	parentModelRef: string | undefined,
+): SubagentConfig {
+	const types = Object.fromEntries(
+		Object.entries(config.types).filter(([, profile]) => isSubagentTypeAvailableForParent(profile, parentModelRef)),
+	);
+	return Object.keys(types).length === Object.keys(config.types).length ? config : { ...config, types };
 }
 
 export function selectSubagentType(task: AgentTask, config: SubagentConfig): string | undefined {
@@ -434,6 +474,8 @@ export function normalizeSubagentTypeProfile(
 		model: models === undefined ? trimString(rawProfile.model) : undefined,
 		fallbackModels: models === undefined ? modelList(rawProfile.fallbackModels, rawProfile.fallbackModel) : undefined,
 		modelByParent: models === undefined ? normalizeModelByParent(rawProfile.modelByParent, name, file) : undefined,
+		forParentModels: normalizeParentModelPatterns(rawProfile.forParentModels, "forParentModels", name, file),
+		notForParentModels: normalizeParentModelPatterns(rawProfile.notForParentModels, "notForParentModels", name, file),
 		thinking: trimString(rawProfile.thinking),
 		tools: arrayOfStrings(rawProfile.tools),
 		isolatedSkills: arrayOfStrings(rawProfile.isolatedSkills),
@@ -499,6 +541,8 @@ function compactProfile(profile: SubagentTypeConfig): SubagentTypeConfig {
 	if (profile.model) compact.model = profile.model;
 	if (profile.fallbackModels) compact.fallbackModels = profile.fallbackModels;
 	if (profile.modelByParent) compact.modelByParent = profile.modelByParent;
+	if (profile.forParentModels !== undefined) compact.forParentModels = profile.forParentModels;
+	if (profile.notForParentModels !== undefined) compact.notForParentModels = profile.notForParentModels;
 	if (profile.thinking) compact.thinking = profile.thinking;
 	if (profile.tools && profile.tools.length > 0) compact.tools = profile.tools;
 	if (profile.isolatedSkills && profile.isolatedSkills.length > 0) compact.isolatedSkills = profile.isolatedSkills;
@@ -530,6 +574,19 @@ function normalizeModels(value: unknown, owner: string, file: string): string[] 
 		throw new Error(`Subagent ${owner} models must be an array of provider/model references: ${file}`);
 	}
 	return [...new Set(value.map((ref: string) => ref.trim()))];
+}
+
+function normalizeParentModelPatterns(
+	value: unknown,
+	field: "forParentModels" | "notForParentModels",
+	typeName: string,
+	file: string,
+): string[] | undefined {
+	if (value === undefined) return undefined;
+	if (!Array.isArray(value) || value.some((pattern) => typeof pattern !== "string" || !pattern.trim())) {
+		throw new Error(`Subagent type "${typeName}" ${field} must be an array of non-empty model patterns: ${file}`);
+	}
+	return [...new Set(value.map((pattern: string) => pattern.trim()))];
 }
 
 function normalizeModelByParent(value: unknown, typeName: string, file: string): Record<string, ModelByParentEntry> | undefined {

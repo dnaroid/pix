@@ -11,7 +11,9 @@ This delta supersedes the old silent `defaultType` fallback at the spawn boundar
 1. Parent prompts and both task schemas share one selection guideline: set a
    clearly matching role, prefer a matching project specialist, and preserve a
    user-requested role. Omission is allowed for uncertainty or a user request for
-   automatic routing. Browser QA retains its explicit `browser-qa` requirement.
+   automatic routing. Before prompt/routing, `forParentModels` /
+   `notForParentModels` gates remove roles that are unavailable to the current
+   parent model. Browser QA retains its explicit `browser-qa` requirement.
 2. Explicit names are validated against the effective config before any router
    request. Unknown names are errors, not unconfigured/ad-hoc agent profiles.
    Valid names bypass routing and its provider/auth calls, even when disabled.

@@ -209,7 +209,10 @@ export default function (pi: ExtensionAPI) {
 		});
 		const visionPrompt = visionCapabilityPrompt(event, ctx);
 		const catalogPrompt = selectedToolsInclude(event, "subagents")
-			? subagentCatalogPrompt((ctx as { cwd?: string } | undefined)?.cwd ?? process.cwd())
+			? subagentCatalogPrompt(
+				(ctx as { cwd?: string } | undefined)?.cwd ?? process.cwd(),
+				modelRefFromContext(ctx),
+			)
 			: undefined;
 		if (!strategyPrompt && !visionPrompt && !catalogPrompt) return undefined;
 		let systemPrompt = event.systemPrompt ?? "";
@@ -303,9 +306,9 @@ function safeLoadSubagentConfig(cwd: string) {
 	}
 }
 
-function subagentCatalogPrompt(cwd: string): string | undefined {
+function subagentCatalogPrompt(cwd: string, parentModelRef?: string): string | undefined {
 	const config = safeLoadSubagentConfig(cwd);
-	return config ? buildSubagentCatalogPrompt(config) : undefined;
+	return config ? buildSubagentCatalogPrompt(config, parentModelRef) : undefined;
 }
 
 function startupSubagentPresetList(cwd = process.cwd()): string {
