@@ -218,10 +218,9 @@ export function formatElapsedSince(value: string | undefined, now = Date.now()):
 
 export function formatSubagentLastActivity(
 	activity: SubagentAgentState["lastActivity"],
-	now = Date.now(),
 ): string | undefined {
 	if (!activity) return undefined;
-	return `${activity.label} · ${formatDurationSince(activity.at, now) ?? "—"}`;
+	return activity.label.trim() || undefined;
 }
 
 function formatDurationSince(value: string | undefined, now: number): string | undefined {

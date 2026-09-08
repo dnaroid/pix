@@ -109,11 +109,10 @@ describe("desktop session subagents", () => {
     expect(formatSessionSubagentElapsed("2025-12-31T23:59:00Z", now)).toBe("2h04m");
   });
 
-  it("formats the latest activity label with its age", () => {
-    const now = Date.parse("2026-01-01T00:01:05Z");
-    expect(formatSessionSubagentActivity({ label: "Grep", at: "2026-01-01T00:01:02Z" }, now)).toBe("Grep · 3s");
-    expect(formatSessionSubagentActivity({ label: "Thinking", at: "invalid" }, now)).toBe("Thinking · —");
-    expect(formatSessionSubagentActivity(undefined, now)).toBeUndefined();
+  it("formats only the latest activity label", () => {
+    expect(formatSessionSubagentActivity({ label: "Grep", at: "2026-01-01T00:01:02Z" })).toBe("Grep");
+    expect(formatSessionSubagentActivity({ label: " Thinking ", at: "invalid" })).toBe("Thinking");
+    expect(formatSessionSubagentActivity(undefined)).toBeUndefined();
   });
 
   it("keeps the newest snapshot independently for each ACP session", () => {

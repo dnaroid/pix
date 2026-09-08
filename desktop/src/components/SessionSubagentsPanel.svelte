@@ -82,13 +82,13 @@
                   <div class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[9px] text-muted-foreground">
                     <span class={["font-medium", statusTone(agent.status)]}>{statusLabel(agent.status)}</span>
                     <span class="font-mono">{sessionSubagentModelLabel(preview)}</span>
-                    <span>{formatSessionSubagentElapsed(agent.startedAt, snapshot?.checkedAt ?? Date.now())}</span>
                     {#if agent.retryCount}<span>retry {agent.retryCount}</span>{/if}
                     {#if agent.lastActivity}
                       <span class="rounded bg-sidebar-accent px-1.5 py-0.5 font-mono text-foreground">
-                        {formatSessionSubagentActivity(agent.lastActivity, snapshot?.checkedAt ?? Date.now())}
+                        {formatSessionSubagentActivity(agent.lastActivity)}
                       </span>
                     {/if}
+                    <span>{formatSessionSubagentElapsed(agent.startedAt, snapshot?.checkedAt ?? Date.now())}</span>
                   </div>
                 </article>
               {/each}

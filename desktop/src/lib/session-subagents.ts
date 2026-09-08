@@ -112,10 +112,9 @@ export function formatSessionSubagentElapsed(startedAt: string | undefined, now:
 
 export function formatSessionSubagentActivity(
   activity: SessionSubagentActivity | undefined,
-  now: number,
 ): string | undefined {
   if (!activity) return undefined;
-  return `${activity.label} · ${formatSessionSubagentDurationSince(activity.at, now) ?? "—"}`;
+  return activity.label.trim() || undefined;
 }
 
 function formatSessionSubagentDurationSince(value: string, now: number): string | undefined {

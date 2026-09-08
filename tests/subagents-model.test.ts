@@ -46,14 +46,13 @@ describe("subagent activity", () => {
 		assert.equal(isSubagentAgentState({ id: "a", status: "running", lastActivity: { label: "Grep", at: 1 } }), false);
 	});
 
-	it("formats activity label and age", () => {
-		const now = Date.parse("2026-09-08T12:00:03.500Z");
-		assert.equal(formatSubagentLastActivity({ label: "Grep", at: "2026-09-08T12:00:00.000Z" }, now), "Grep · 3s");
-		assert.equal(formatSubagentLastActivity({ label: "Thinking", at: "invalid" }, now), "Thinking · —");
-		assert.equal(formatSubagentLastActivity(undefined, now), undefined);
+	it("formats only the activity label", () => {
+		assert.equal(formatSubagentLastActivity({ label: "Grep", at: "2026-09-08T12:00:00.000Z" }), "Grep");
+		assert.equal(formatSubagentLastActivity({ label: " Thinking ", at: "invalid" }), "Thinking");
+		assert.equal(formatSubagentLastActivity(undefined), undefined);
 	});
 
-	it("renders last activity at the end of an active agent row", () => {
+	it("renders task, activity, then total elapsed time", () => {
 		const now = Date.now();
 		const [line] = renderSubagentsPanel({
 			runDir: "/tmp/run",
@@ -68,6 +67,7 @@ describe("subagent activity", () => {
 			snapshotOnly: false,
 			checkedAt: now,
 		}, true, 120, THEMES.dark.colors);
-		assert.ok(line?.text.includes("· Grep ·"));
+		assert.match(line?.text.trimEnd() ?? "", /Inspect code Grep \d+s$/);
+		assert.equal(line?.text.includes("Grep ·"), false);
 	});
 });
