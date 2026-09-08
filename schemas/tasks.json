@@ -1,0 +1,132 @@
+{
+  "type": "object",
+  "required": [
+    "version",
+    "tasks"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema URL used by editors for validation and autocomplete."
+    },
+    "version": {
+      "type": "number",
+      "const": 1,
+      "description": "Task document format version."
+    },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "type",
+          "status",
+          "priority",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "description": "Stable unique task id."
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Short task title."
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 10000,
+            "description": "Optional detailed task description."
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "bug"
+              },
+              {
+                "type": "string",
+                "const": "feature"
+              },
+              {
+                "type": "string",
+                "const": "improvement"
+              }
+            ]
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "backlog"
+              },
+              {
+                "type": "string",
+                "const": "todo"
+              },
+              {
+                "type": "string",
+                "const": "in-progress"
+              },
+              {
+                "type": "string",
+                "const": "done"
+              }
+            ]
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "low"
+              },
+              {
+                "type": "string",
+                "const": "medium"
+              },
+              {
+                "type": "string",
+                "const": "high"
+              },
+              {
+                "type": "string",
+                "const": "urgent"
+              }
+            ]
+          },
+          "sessionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "description": "Optional Pi session associated with this task."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "RFC 3339 creation timestamp."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "RFC 3339 last-update timestamp."
+          }
+        },
+        "additionalProperties": false
+      },
+      "maxItems": 10000,
+      "description": "Project tasks. Task ids must be unique."
+    }
+  },
+  "$id": "https://unpkg.com/pi-ui-extend/schemas/tasks.json",
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "Pix Project Tasks",
+  "description": "Project-scoped task document stored in <cwd>/.pi/tasks.jsonc.",
+  "additionalProperties": false
+}

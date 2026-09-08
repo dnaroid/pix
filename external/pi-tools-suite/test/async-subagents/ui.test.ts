@@ -25,7 +25,6 @@ mock.module("@earendil-works/pi-tui", () => ({
 const tempDirs: string[] = [];
 const originalAsyncSubagentsEnableSessions = process.env.ASYNC_SUBAGENTS_ENABLE_SESSIONS;
 const originalAsyncSubagentsActivePresetFile = process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE;
-const originalAsyncSubagentsConfig = process.env.ASYNC_SUBAGENTS_CONFIG;
 
 function tempDir(): string {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "async-subagents-ui-test-"));
@@ -55,8 +54,6 @@ afterEach(() => {
 	else process.env.ASYNC_SUBAGENTS_ENABLE_SESSIONS = originalAsyncSubagentsEnableSessions;
 	if (originalAsyncSubagentsActivePresetFile === undefined) delete process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE;
 	else process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE = originalAsyncSubagentsActivePresetFile;
-	if (originalAsyncSubagentsConfig === undefined) delete process.env.ASYNC_SUBAGENTS_CONFIG;
-	else process.env.ASYNC_SUBAGENTS_CONFIG = originalAsyncSubagentsConfig;
 	for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -360,7 +357,7 @@ describe.serial("polling", () => {
 });
 
 describe.serial("slash command registration", () => {
-	test.serial("selects config-defined sub-agent presets without editing config", async () => {
+	test.serial("selects project model-pool presets without editing them", async () => {
 		const { loadSubagentPresetSelection } = await import("../../src/async-subagents/core/presets.js");
 		const { registerCommands } = await import("../../src/async-subagents/commands.js");
 		const registered = new Map<string, any>();
@@ -369,13 +366,9 @@ describe.serial("slash command registration", () => {
 
 		const cwd = tempDir();
 		process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE = path.join(cwd, "active-preset.json");
-		process.env.ASYNC_SUBAGENTS_CONFIG = path.join(cwd, "async-subagents.jsonc");
-		writeFile(process.env.ASYNC_SUBAGENTS_CONFIG, `{
-			"presets": {
-				"fast": { "description": "cheap", "model": "zai/fast", "thinking": "off" },
-				"deep": { "model": "openai/deep", "thinking": "high", "extraArgs": ["--temperature", "0"] }
-			},
-			"types": {}
+		writeFile(path.join(cwd, ".pi", "agents", "presets.jsonc"), `{
+			"fast": { "description": "cheap", "models": ["zai/fast"] },
+			"deep": { "description": "deep pool", "models": ["openai/deep"] }
 		}`);
 
 		const notifications: any[] = [];
@@ -392,8 +385,8 @@ describe.serial("slash command registration", () => {
 			},
 		};
 
-		await registered.get("subagent-preset-config").handler("", ctx);
-		expect(selections[0]).toEqual(expect.arrayContaining([expect.stringContaining("fast — cheap"), expect.stringContaining("deep — model:openai/deep")]));
+		await registered.get("subagent-preset").handler("", ctx);
+		expect(selections[0]).toEqual(expect.arrayContaining([expect.stringContaining("fast — cheap"), expect.stringContaining("deep — deep pool")]));
 		expect(loadSubagentPresetSelection().activePreset).toBe("fast");
 		expect(notifications.pop()[0]).toContain('Active sub-agent preset "fast"');
 
@@ -407,7 +400,7 @@ describe.serial("slash command registration", () => {
 		const registered = new Map<string, any>();
 		const pi = { registerCommand: (name: string, command: any) => { registered.set(name, command); } };
 		registerCommands(pi as any);
-		expect([...registered.keys()]).toEqual(["subagent-preset", "subagent-preset-config", "ultrawork", "ulw", "hyperplan", "sub-status", "sub-stop"]);
+		expect([...registered.keys()]).toEqual(["subagent-preset", "ultrawork", "ulw", "hyperplan", "sub-status", "sub-stop"]);
 		const command = registered.get("sub-status");
 
 		const cwd = tempDir();
@@ -434,7 +427,7 @@ describe.serial("slash command registration", () => {
 		const registered = new Map<string, any>();
 		const pi = { registerCommand: (name: string, command: any) => { registered.set(name, command); } };
 		registerCommands(pi as any);
-		expect([...registered.keys()]).toEqual(["subagent-preset", "subagent-preset-config", "ultrawork", "ulw", "hyperplan", "sub-status", "sub-open", "sub-back", "sub-where", "sub-stop"]);
+		expect([...registered.keys()]).toEqual(["subagent-preset", "ultrawork", "ulw", "hyperplan", "sub-status", "sub-open", "sub-back", "sub-where", "sub-stop"]);
 
 		const cwd = tempDir();
 		const parentSession = path.join(cwd, "parent.jsonl");

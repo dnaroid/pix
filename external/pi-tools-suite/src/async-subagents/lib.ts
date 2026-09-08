@@ -12,20 +12,16 @@ export type {
 } from "./core/types.js";
 
 export { createRunDir, getRunRoot, hasAgentPrompt, hasLaunchedAgentPrompt, hasQueuedAgentPrompt, resolveRunDir, validateBasename } from "./core/paths.js";
-export type { CopySubagentConfigSampleResult, ModelByParentEntry, ResolvedAgentTaskConfig, ResolvedSubagentRoutingConfig, ResolveAgentTaskOptions, SubagentConfig, SubagentPreset, SubagentRoutingConfig, SubagentTypeConfig, SubagentVisionConfig } from "./core/config.js";
+export type { ModelByParentEntry, ResolvedAgentTaskConfig, ResolvedSubagentRoutingConfig, ResolveAgentTaskOptions, SubagentConfig, SubagentPreset, SubagentRoutingConfig, SubagentTypeConfig, SubagentVisionConfig } from "./core/config.js";
 export {
-	configFiles,
-	copySubagentConfigSample,
 	currentModelRef,
 	defaultSubagentType,
 	DEFAULT_MAX_CONCURRENT,
 	DEFAULT_RETRY_CONFIG,
 	DEFAULT_ROUTING_CONFIG,
-	existingSubagentConfigFiles,
-	getDefaultSubagentConfigPath,
 	getBuiltinSubagentDefinitionsDir,
-	getSubagentConfigInitTargetPath,
-	getSubagentConfigSamplePath,
+	getBuiltinSubagentPresetsPath,
+	getProjectSubagentPresetsPath,
 	isBlindModelRef,
 	loadSubagentConfig,
 	resolveAgentTaskConfig,
@@ -37,7 +33,7 @@ export {
 export { routeSubagentTasks, SubagentRoutingError } from "./core/routing.js";
 export { BROWSER_QA_RUNNER_ENV, getBrowserQaRunnerPath } from "./core/browser-qa.js";
 export type { RoutedSubagentTasks, SubagentRoutingContext } from "./core/routing.js";
-export { agentDefinitionFiles, agentNameFromFilename, parseAgentMarkdown, projectAgentDefinitionFiles, readAgentDefinitionsFromDir, readProjectAgentDefinitions } from "./core/agents-dir.js";
+export { agentDefinitionFiles, agentNameFromFilename, parseAgentMarkdown, projectAgentDefinitionFiles, projectAgentsDir, readAgentDefinitionsFromDir, readProjectAgentDefinitions } from "./core/agents-dir.js";
 export type { AgentDefinition, ProjectAgentDefinition } from "./core/agents-dir.js";
 export { buildSubagentCatalogPrompt } from "./core/agent-catalog.js";
 export type { SubagentPresetSelectionState } from "./core/presets.js";

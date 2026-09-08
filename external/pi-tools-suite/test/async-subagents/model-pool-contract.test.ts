@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
-	loadSubagentConfig, resolveAgentTaskConfig, getSubagentConfigSamplePath,
+	loadSubagentConfig, resolveAgentTaskConfig,
 	type SubagentConfig, type SubagentPreset,
 } from "../../src/async-subagents/core/config.js";
 import { selectAvailableAgentModels, type SubagentModelRegistry } from "../../src/async-subagents/core/model-selection.js";
@@ -17,6 +17,16 @@ function fixture(value: object = {}): { cwd: string; file: string; config: Subag
 	const file = path.join(cwd, "config.json");
 	fs.writeFileSync(file, JSON.stringify(value));
 	return { cwd, file, config: loadSubagentConfig(cwd, { ASYNC_SUBAGENTS_CONFIG: file }) };
+}
+function writeAgent(cwd: string, name: string, frontmatter: string, body = "Agent body."): void {
+	const file = path.join(cwd, ".pi", "agents", `${name}.md`);
+	fs.mkdirSync(path.dirname(file), { recursive: true });
+	fs.writeFileSync(file, `---\n${frontmatter}\n---\n${body}\n`);
+}
+function writePresets(cwd: string, presets: object): void {
+	const file = path.join(cwd, ".pi", "agents", "presets.jsonc");
+	fs.mkdirSync(path.dirname(file), { recursive: true });
+	fs.writeFileSync(file, JSON.stringify(presets));
 }
 function resolve(config: SubagentConfig, preset?: SubagentPreset, type = "research") {
 	return resolveAgentTaskConfig({ id: "worker", task: "Investigate the assigned question", subagentType: type }, config, { preset });
@@ -93,7 +103,7 @@ describe.serial("model-pool selection contract", () => {
 
 	test("new-install pools do not redefine agents or change worker instructions", () => {
 		const { cwd } = fixture();
-		const config = loadSubagentConfig(cwd, { ASYNC_SUBAGENTS_CONFIG: getSubagentConfigSamplePath() });
+		const config = loadSubagentConfig(cwd, {});
 		expect(Object.keys(config.types).sort()).toEqual(["browser-qa", "implement", "oracle", "research", "verify"]);
 		for (const preset of Object.values(config.presets ?? {})) {
 			expect(preset.models?.length).toBeGreaterThan(0);
@@ -131,34 +141,33 @@ describe.serial("model-pool selection contract", () => {
 		}
 	});
 
-	test("preserves distinct old user overrides without rewriting the file", () => {
+	test("ignores legacy asyncSubagents type overrides without rewriting the file", () => {
 		const input = { types: { scan: { model: "old/scan" }, review: { model: "old/review", promptAppend: "Audit carefully." } } };
 		const { config, file } = fixture(input);
-		expect(resolve(config, undefined, "scan").task.model).toBe("old/scan");
-		expect(resolve(config, undefined, "review").task.model).toBe("old/review");
-		expect(resolve(config, undefined, "review").task.promptAppend).toBe("Audit carefully.");
+		expect(config.types.scan).toBeUndefined();
+		expect(config.types.review).toBeUndefined();
 		expect(fs.readFileSync(file, "utf8")).toBe(JSON.stringify(input));
 	});
 
-	test("legacy preset overrides and explicit empty fallbacks remain supported", () => {
-		const { config } = fixture({ presets: { old: { types: { research: { model: "legacy/model", fallbackModels: [] } } } } });
-		const selected = resolve(config, config.presets!.old);
-		expect(selected.task.model).toBe("legacy/model");
-		expect(selected.fallbackModels).toEqual([]);
+	test("project preset files override bundled pools without redefining agents", () => {
+		const { cwd } = fixture();
+		writePresets(cwd, { cheap: { description: "project cheap", models: ["zai/glm-5-turbo"] } });
+		const config = loadSubagentConfig(cwd, {});
+		expect(config.presets?.cheap).toEqual({ description: "project cheap", models: ["zai/glm-5-turbo"] });
+		expect(Object.keys(config.types).sort()).toEqual(["browser-qa", "implement", "oracle", "research", "verify"]);
+		expect(resolve(config, config.presets!.cheap).task.model).toBe("zai/glm-5-turbo");
 	});
 
-	test("a new pool replaces an inherited legacy role matrix instead of retaining its thinking/model overrides", () => {
+	test("a project pool replaces a legacy pool and agent Markdown remains authoritative", () => {
 		const { cwd } = fixture();
 		const configDir = path.join(cwd, "global");
 		fs.mkdirSync(configDir);
-		fs.mkdirSync(path.join(cwd, ".pi"));
+		fs.mkdirSync(path.join(cwd, ".pi"), { recursive: true });
 		fs.writeFileSync(path.join(configDir, "pi-tools-suite.jsonc"), JSON.stringify({ asyncSubagents: {
-			types: { "pool-worker": { fallbackModels: ["a/small", "b/medium"], thinking: "low" } },
-			presets: { "pool-contract": { model: "legacy/large", types: { "pool-worker": { model: "legacy/large", thinking: "high" } } } },
+			presets: { "pool-contract": { models: ["legacy/large"] } },
 		} }));
-		fs.writeFileSync(path.join(cwd, ".pi", "pi-tools-suite.jsonc"), JSON.stringify({ asyncSubagents: {
-			presets: { "pool-contract": { models: ["a/small", "b/medium"] } },
-		} }));
+		writeAgent(cwd, "pool-worker", "models: [a/small, b/medium]\nthinking: low", "Pool worker.");
+		writePresets(cwd, { "pool-contract": { models: ["a/small", "b/medium"] } });
 		const config = loadSubagentConfig(cwd, { PI_CONFIG_DIR: configDir });
 		const pool = config.presets!["pool-contract"];
 		expect(pool.model).toBeUndefined();
@@ -168,28 +177,20 @@ describe.serial("model-pool selection contract", () => {
 		expect(selected.task.thinking).toBe("low");
 	});
 
-	test("an explicit legacy preset replaces an inherited pool without a hidden filter", () => {
+	test("project preset files can add a custom pool", () => {
 		const { cwd } = fixture();
-		const configDir = path.join(cwd, "global");
-		fs.mkdirSync(configDir);
-		fs.mkdirSync(path.join(cwd, ".pi"));
-		fs.writeFileSync(path.join(configDir, "pi-tools-suite.jsonc"), JSON.stringify({ asyncSubagents: {
-			presets: { "pool-contract": { models: ["a/small"] } },
-		} }));
-		fs.writeFileSync(path.join(cwd, ".pi", "pi-tools-suite.jsonc"), JSON.stringify({ asyncSubagents: {
-			presets: { "pool-contract": { model: "legacy/chosen", fallbackModels: [] } },
-		} }));
-		const config = loadSubagentConfig(cwd, { PI_CONFIG_DIR: configDir });
-		const legacy = config.presets!["pool-contract"];
-		expect(legacy.models).toBeUndefined();
-		expect(resolve(config, legacy).task.model).toBe("legacy/chosen");
+		writeAgent(cwd, "pool-worker", "models: [custom/a, custom/b]", "Pool worker.");
+		writePresets(cwd, { custom: { description: "custom pool", models: ["custom/b"] } });
+		const config = loadSubagentConfig(cwd, {});
+		expect(config.presets?.custom?.description).toBe("custom pool");
+		expect(resolve(config, config.presets!.custom, "pool-worker").task.model).toBe("custom/b");
 	});
 
-	test("an explicit models pool takes precedence over stale legacy fields in the same preset", () => {
-		const { config } = fixture({
-			types: { "pool-worker": { models: ["a/small", "b/medium"], thinking: "low" } },
-			presets: { migrated: { models: ["a/small"], thinking: "high", types: { "pool-worker": { model: "b/medium" } } } },
-		});
+	test("a model pool filters an agent without changing its thinking", () => {
+		const { cwd } = fixture();
+		writeAgent(cwd, "pool-worker", "models: [a/small, b/medium]\nthinking: low", "Pool worker.");
+		writePresets(cwd, { migrated: { models: ["a/small"] } });
+		const config = loadSubagentConfig(cwd, {});
 		const selected = resolve(config, config.presets!.migrated, "pool-worker");
 		expect(selected.task.model).toBe("a/small");
 		expect(selected.task.thinking).toBe("low");
@@ -197,12 +198,16 @@ describe.serial("model-pool selection contract", () => {
 	});
 
 	test("an explicit empty agent.models does not revive inherited candidates or parent escalation", () => {
-		const { config } = fixture({ types: { research: { models: [] } } });
+		const { cwd } = fixture();
+		writeAgent(cwd, "research", "models: []", "Research.");
+		const config = loadSubagentConfig(cwd, {});
 		expect(() => resolve(config)).toThrow(/No model candidates/);
 	});
 
-	test("legacy model overrides still replace a shipped agent.models primary", () => {
-		const { config } = fixture({ types: { research: { model: "custom/research", fallbackModels: [] } } });
+	test("legacy model fields in an agent file still replace the shipped agent.models primary", () => {
+		const { cwd } = fixture();
+		writeAgent(cwd, "research", "model: custom/research\nfallbackModels: []", "Research.");
+		const config = loadSubagentConfig(cwd, {});
 		const selected = resolve(config);
 		expect(selected.task.model).toBe("custom/research");
 		expect(selected.fallbackModels).toEqual([]);

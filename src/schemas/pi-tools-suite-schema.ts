@@ -163,100 +163,6 @@ const DcpConfig = Type.Object(
 );
 
 // ---------------------------------------------------------------------------
-// Async subagents
-// ---------------------------------------------------------------------------
-
-const RetryConfig = Type.Object(
-	{
-		maxRetries: Type.Optional(Type.Number({ description: "Maximum retry attempts.", minimum: 0 })),
-		backoffMs: Type.Optional(Type.Number({ description: "Base delay in ms before first retry.", minimum: 0 })),
-		retryableExitCodes: Type.Optional(Type.Array(Type.Number(), { description: "Exit codes eligible for retry. Empty array disables retry." })),
-	},
-	{ description: "Retry configuration for sub-agents." },
-);
-
-const SubagentRoutingConfig = Type.Object(
-	{
-		enabled: Type.Optional(Type.Boolean({ description: "Enable fallback LLM selection for omitted subagentType values. Explicit valid types bypass the router; when disabled, every spawn task must specify a valid type." })),
-		model: Type.Optional(Type.String({ description: "Router model in provider/model form." })),
-		fallbackModels: Type.Optional(Type.Array(Type.String(), { uniqueItems: true, description: "Ordered router model fallbacks tried when the primary routing model is unavailable or fails. The current parent model is always tried last." })),
-		maxTaskChars: Type.Optional(Type.Number({ description: "Max task/scope characters sent to router.", minimum: 100 })),
-		maxTokens: Type.Optional(Type.Number({ description: "Max router response tokens.", minimum: 8 })),
-		maxRetries: Type.Optional(Type.Number({ description: "Router request retries.", minimum: 0 })),
-		timeoutMs: Type.Optional(Type.Number({ description: "Router request timeout in ms.", minimum: 1000 })),
-		debug: Type.Optional(Type.Boolean({ description: "Show routing debug warnings." })),
-	},
-	{ description: "Fallback role routing for omitted types. Unknown explicit types or failed/incomplete routing reject the entire batch before any agents launch." },
-);
-
-const SubagentVisionConfig = Type.Object(
-	{
-		blindModelPatterns: Type.Optional(Type.Array(Type.String(), { description: "Glob-like model refs treated as unable to inspect images." })),
-	},
-	{ description: "Vision capability overrides." },
-);
-
-const SubagentPresetTypeOverride = Type.Object(
-	{
-		model: Type.Optional(Type.String({ description: "Model override for this type within the preset." })),
-		fallbackModels: Type.Optional(Type.Array(Type.String(), { description: "Per-role fallback models." })),
-		thinking: Type.Optional(Type.String({ description: "Thinking level override." })),
-		extraArgs: Type.Optional(Type.Array(Type.String(), { description: "Extra CLI arguments." })),
-		timeoutMs: Type.Optional(Type.Number({ description: "Per-agent wall-clock timeout in ms.", minimum: 1 })),
-	},
-	{ description: "Per-type override within a preset." },
-);
-
-const SubagentPreset = Type.Object(
-	{
-		description: Type.Optional(Type.String({ description: "Preset description." })),
-		models: Type.Optional(Type.Array(Type.String({ pattern: "^[^\\s/*]+/[^\\s*]+$" }), { uniqueItems: true, description: "Available model pool. Filter the agent's ordered models by membership; pool order is ignored. Empty intersection rejects spawn. Oracle also respects this pool." })),
-		model: Type.Optional(Type.String({ description: "Legacy default model. Ignored when models is set.", deprecated: true })),
-		fallbackModels: Type.Optional(Type.Array(Type.String(), { description: "Legacy fallback list. Ignored when models is set.", deprecated: true })),
-		thinking: Type.Optional(Type.String({ description: "Default thinking level." })),
-		extraArgs: Type.Optional(Type.Array(Type.String(), { description: "Extra CLI arguments." })),
-		timeoutMs: Type.Optional(Type.Number({ description: "Per-agent wall-clock timeout in ms.", minimum: 1 })),
-		types: Type.Optional(Type.Record(Type.String(), SubagentPresetTypeOverride, { description: "Per-type overrides." })),
-	},
-	{ description: "Named available-model pool. Legacy model/types overrides remain supported; prefer models for new presets." },
-);
-
-const SubagentTypeConfig = Type.Object(
-	{
-		description: Type.Optional(Type.String({ description: "Role description for routing." })),
-		icon: Type.Optional(Type.String({ description: "Agent icon name rendered by UIs (pix TUI icon themes and Pix Desktop lucide icons): agent, search, code, flask, globe, sparkles, brain, wrench, terminal, bug, book, eye, zap, rocket. Unknown names render as the neutral agent icon." })),
-		models: Type.Optional(Type.Array(Type.String({ pattern: "^[^\\s/*]+/[^\\s*]+$" }), { uniqueItems: true, description: "Ordered model candidates. First usable member of the preset pool runs; only remaining compatible members can be used on quota failure. Replaces legacy model/fallbackModels/modelByParent selection." })),
-		model: Type.Optional(Type.String({ description: "Legacy primary model; use models for new profiles.", deprecated: true })),
-		fallbackModels: Type.Optional(Type.Array(Type.String(), { description: "Legacy candidates after model; use models for a complete ranked list.", deprecated: true })),
-		thinking: Type.Optional(Type.String({ description: "Thinking level." })),
-		tools: Type.Optional(Type.Array(Type.String(), { description: "Enabled tools for this type." })),
-		isolatedSkills: Type.Optional(Type.Array(Type.String(), { description: "Explicit skill files loaded after disabling normal skill discovery for this type." })),
-		extraArgs: Type.Optional(Type.Array(Type.String(), { description: "Extra CLI arguments." })),
-		promptAppend: Type.Optional(Type.String({ description: "Extra prompt text appended after generated prompt." })),
-		promptOverride: Type.Optional(Type.String({ description: "Full prompt replacement." })),
-		retry: Type.Optional(RetryConfig),
-		maxResultBytes: Type.Optional(Type.Number({ description: "Max bytes in result summary.", minimum: 0 })),
-		timeoutMs: Type.Optional(Type.Number({ description: "Per-agent wall-clock timeout in ms.", minimum: 1 })),
-	},
-	{ description: "Configuration for a sub-agent type/role." },
-);
-
-const AsyncSubagentsConfig = Type.Object(
-	{
-		defaultType: Type.Optional(Type.String({ description: "Preferred role for genuinely ambiguous router tasks and legacy resolver default. Not used as a spawn fallback for missing/invalid routes." })),
-		routing: Type.Optional(SubagentRoutingConfig),
-		vision: Type.Optional(SubagentVisionConfig),
-		presets: Type.Optional(Type.Record(Type.String(), SubagentPreset, { description: "Named spawn presets." })),
-		types: Type.Optional(Type.Record(Type.String(), SubagentTypeConfig, { description: "Sub-agent type definitions." })),
-		maxConcurrent: Type.Optional(Type.Number({ description: "Max concurrent agents per spawn batch (0 = unlimited).", minimum: 0 })),
-		retry: Type.Optional(RetryConfig),
-		maxResultBytes: Type.Optional(Type.Number({ description: "Global max bytes in result summary.", minimum: 0 })),
-		timeoutMs: Type.Optional(Type.Number({ description: "Global per-agent wall-clock timeout in ms.", minimum: 1 })),
-	},
-	{ description: "Async sub-agent configuration." },
-);
-
-// ---------------------------------------------------------------------------
 // Prompt commands
 // ---------------------------------------------------------------------------
 
@@ -313,6 +219,15 @@ const RepoDiscoveryConfig = Type.Object(
 		)),
 	},
 	{ description: "Repository discovery runtime policy. Default profile is baseline." },
+);
+
+const ResourceRegistryConfig = Type.Object(
+	{
+		remote: Type.Optional(Type.String({ description: "Git remote URL for the private registry. The repository contains reusable top-level skills/ and agents/ plus project-scoped state under projects/." })),
+		branch: Type.Optional(Type.String({ description: "Registry branch used for install/update/push/pull. Defaults to main." })),
+		projectKey: Type.Optional(Type.String({ description: "Optional explicit key for this project's projects/<key>/tasks.jsonc, plans/, and TODO.md state. Normally derived from the current Git origin." })),
+	},
+	{ description: "Private Git-backed registry for reusable skills/agents and project-scoped tasks/plans state." },
 );
 
 // ---------------------------------------------------------------------------
@@ -379,12 +294,12 @@ export const PiToolsSuiteConfigSchema = Type.Object(
 		lookupModel: Type.Optional(Type.Union([Type.String(), Type.Null()], { description: "Vision-capable provider/model used by GLM's lookup tool; unset or null disables lookup." })),
 		terminalBell: Type.Optional(TerminalBellConfig),
 		dcp: Type.Optional(DcpConfig),
-		asyncSubagents: Type.Optional(AsyncSubagentsConfig),
 		toolRenderer: Type.Optional(ToolRendererConfig),
 		promptCommands: Type.Optional(PromptCommandsConfig),
 		secretFirewall: Type.Optional(SecretFirewallConfig),
 		contextGateway: Type.Optional(ContextGatewayConfig),
 		repoDiscovery: Type.Optional(RepoDiscoveryConfig),
+		resourceRegistry: Type.Optional(ResourceRegistryConfig),
 		lsp: Type.Optional(LspConfig),
 	},
 	{

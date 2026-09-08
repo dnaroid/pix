@@ -3,3 +3,4 @@
  */
 export { PixConfigSchema } from "./pix-schema.js";
 export { PiToolsSuiteConfigSchema } from "./pi-tools-suite-schema.js";
+export { ProjectTasksSchema } from "./tasks-schema.js";

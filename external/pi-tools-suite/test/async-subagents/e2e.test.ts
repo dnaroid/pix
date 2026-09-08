@@ -56,15 +56,18 @@ async function runPiE2E(
 	projectDir: string,
 	prompt: string,
 	label: string,
-	options: { subagentConfig?: Record<string, unknown> } = {},
+	options: { agentModels?: Record<string, string[]> } = {},
 ): Promise<{ stdout: string; stderr: string }> {
 	if (!E2E_MODEL) throw new Error("ASYNC_SUBAGENTS_MODEL/ASYNC_SUBAGENTS_E2E_MODEL resolved to an empty model");
 
 	return withE2ERetry(label, async (attempt) => {
 		const sessionDir = path.join(projectDir, ".pi", `e2e-session-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		fs.mkdirSync(sessionDir, { recursive: true });
-		const subagentConfig = path.join(sessionDir, "async-subagents.json");
-		fs.writeFileSync(subagentConfig, JSON.stringify(options.subagentConfig ?? { types: {} }), "utf-8");
+		for (const [name, models] of Object.entries(options.agentModels ?? {})) {
+			const agentFile = path.join(projectDir, ".pi", "agents", `${name}.md`);
+			fs.mkdirSync(path.dirname(agentFile), { recursive: true });
+			fs.writeFileSync(agentFile, `---\nmodels: ${JSON.stringify(models)}\n---\n`, "utf-8");
+		}
 		const startedAt = Date.now();
 		e2eLog(`start ${label}; attempt=${attempt}; model=${E2E_MODEL}; project=${projectDir}`);
 		const args = [
@@ -85,8 +88,6 @@ async function runPiE2E(
 				...e2eChildEnv(),
 				ASYNC_SUBAGENTS_MODEL: E2E_MODEL,
 				PI_SUBAGENTS_MODEL: E2E_MODEL,
-				ASYNC_SUBAGENTS_CONFIG: subagentConfig,
-				PI_SUBAGENTS_CONFIG: subagentConfig,
 				PI_CODING_AGENT_SESSION_DIR: sessionDir,
 				PI_OFFLINE: "1",
 				NO_COLOR: "1",
@@ -255,13 +256,7 @@ Use the subagents tool with action=spawn and exactly these task fields:
 Do not inspect files or images in the parent. After spawning, you may finish; the test will collect the sub-agent result.`;
 
 			await runPiE2E(projectDir, prompt, "vision screenshot inspection", {
-				subagentConfig: {
-					types: {
-						research: {
-							models: [VISION_E2E_MODEL],
-						},
-					},
-				},
+				agentModels: { research: [VISION_E2E_MODEL] },
 			});
 			const runDir = findLatestRun(projectDir);
 			await expectCompletedDelegatedRun(runDir, 1, { expectedModel: VISION_E2E_MODEL });

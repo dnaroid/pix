@@ -7,23 +7,21 @@ import {
 	buildSubagentCatalogPrompt,
 	createRunDir,
 	createSemaphore,
-	copySubagentConfigSample,
 	currentModelRef,
 	DEFAULT_AGENT_TIMEOUT_MS,
 	DEFAULT_DEBUG_EVENTS_LOG_MAX_BYTES,
 	DEFAULT_EVENTS_LOG_MAX_BYTES,
 	DEFAULT_RPC_EVENT_LINE_MAX_CHARS,
 	DEFAULT_STDERR_LOG_MAX_BYTES,
-	existingSubagentConfigFiles,
 	findCleanupCandidates,
 	findLatestSubagentRunDir,
 	generatePrompt,
 	getAgentState,
 	getActiveSubagentPresetName,
 	getBuiltinSubagentDefinitionsDir,
+	getBuiltinSubagentPresetsPath,
 	getBrowserQaRunnerPath,
 	getSubagentRegistryPath,
-	getSubagentConfigSamplePath,
 	getPiInvocation,
 	getRunRoot,
 	getRunState,
@@ -79,8 +77,6 @@ const originalPiSubagentsModel = process.env.PI_SUBAGENTS_MODEL;
 const originalAsyncSubagentsForceCurrentModel = process.env.ASYNC_SUBAGENTS_FORCE_CURRENT_MODEL;
 const originalPiSubagentsForceCurrentModel = process.env.PI_SUBAGENTS_FORCE_CURRENT_MODEL;
 const originalAsyncSubagentsEnableSessions = process.env.ASYNC_SUBAGENTS_ENABLE_SESSIONS;
-const originalAsyncSubagentsConfig = process.env.ASYNC_SUBAGENTS_CONFIG;
-const originalPiSubagentsConfig = process.env.PI_SUBAGENTS_CONFIG;
 const originalAsyncSubagentsActivePresetFile = process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE;
 const originalPiSubagentsActivePresetFile = process.env.PI_SUBAGENTS_ACTIVE_PRESET_FILE;
 const originalAgentsPreset = process.env.AGENTS_PRESET;
@@ -140,10 +136,6 @@ afterEach(() => {
 	else process.env.PI_SUBAGENTS_FORCE_CURRENT_MODEL = originalPiSubagentsForceCurrentModel;
 	if (originalAsyncSubagentsEnableSessions === undefined) delete process.env.ASYNC_SUBAGENTS_ENABLE_SESSIONS;
 	else process.env.ASYNC_SUBAGENTS_ENABLE_SESSIONS = originalAsyncSubagentsEnableSessions;
-	if (originalAsyncSubagentsConfig === undefined) delete process.env.ASYNC_SUBAGENTS_CONFIG;
-	else process.env.ASYNC_SUBAGENTS_CONFIG = originalAsyncSubagentsConfig;
-	if (originalPiSubagentsConfig === undefined) delete process.env.PI_SUBAGENTS_CONFIG;
-	else process.env.PI_SUBAGENTS_CONFIG = originalPiSubagentsConfig;
 	if (originalAsyncSubagentsActivePresetFile === undefined) delete process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE;
 	else process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE = originalAsyncSubagentsActivePresetFile;
 	if (originalPiSubagentsActivePresetFile === undefined) delete process.env.PI_SUBAGENTS_ACTIVE_PRESET_FILE;
@@ -424,39 +416,26 @@ describe.serial("subagent type config", () => {
 		expect(hasAgentPrompt(runDir, "missing")).toBe(false);
 	});
 
-	test.serial("copies bundled sample config only when no config exists", () => {
+	test.serial("loads bundled presets and runtime defaults without public sub-agent config", () => {
 		const cwd = tempDir();
-		const targetPath = path.join(cwd, "custom", "async-subagents.jsonc");
-		const env = { ASYNC_SUBAGENTS_CONFIG: targetPath };
-
-		expect(fs.existsSync(getSubagentConfigSamplePath())).toBe(true);
-		expect(existingSubagentConfigFiles(cwd, env)).toEqual([]);
-
-		const copied = copySubagentConfigSample(cwd, env);
-		expect(copied).toMatchObject({ copied: true, targetPath, existingFiles: [] });
-		expect(fs.existsSync(targetPath)).toBe(true);
-		expect(fs.readFileSync(targetPath, "utf-8")).toContain("Full config schema: https://unpkg.com/pi-ui-extend/schemas/pi-tools-suite.json");
-		const config = loadSubagentConfig(cwd, env);
+		expect(fs.existsSync(getBuiltinSubagentPresetsPath())).toBe(true);
+		const config = loadSubagentConfig(cwd, {});
 		expect(Object.keys(config.presets ?? {}).sort()).toEqual(["cheap", "deep", "gpt"]);
 		expect(config.presets?.cheap?.models).toEqual(["zai/glm-5-turbo", "zai/glm-5.3-flash", "zai/glm-5.3"]);
 		expect(config.presets?.cheap?.types).toBeUndefined();
+		expect(config.maxConcurrent).toBe(5);
+		expect(config.maxResultBytes).toBe(100_000);
+		expect(config.routing).toMatchObject({ maxRetries: 1, timeoutMs: 12_000 });
 		expect(isBlindModelRef("zai/glm-5.3", config)).toBe(true);
 		expect(isBlindModelRef("zai/glm-5.3-flash", config)).toBe(false);
 		expect(Object.keys(config.types).sort()).toEqual(["browser-qa", "implement", "oracle", "research", "verify"]);
 		expect(config.types.research.description).toContain("review");
 		expect(selectSubagentType({ id: "s", task: "vulnerability secret token" }, config)).toBe("research");
-
-		const before = fs.readFileSync(targetPath, "utf-8");
-		const skipped = copySubagentConfigSample(cwd, env);
-		expect(skipped).toMatchObject({ copied: false, targetPath, existingFiles: [targetPath] });
-		expect(fs.readFileSync(targetPath, "utf-8")).toBe(before);
 	});
 
 	test.serial("resolves the built-in balanced role models and browser QA profile", () => {
 		const cwd = tempDir();
-		const configPath = path.join(cwd, "async-subagents.json");
-		writeFile(configPath, "{}");
-		const config = loadSubagentConfig(cwd, { ASYNC_SUBAGENTS_CONFIG: configPath });
+		const config = loadSubagentConfig(cwd, {});
 		const resolved = resolveAgentTaskConfig({ id: "qa", task: "verify the browser bug", subagentType: "browser-qa" }, config);
 		const runner = getBrowserQaRunnerPath();
 
@@ -522,13 +501,12 @@ describe.serial("subagent type config", () => {
 	test.serial("inherits QA instructions with model overrides and only adds explicitly configured skills", () => {
 		const cwd = tempDir();
 		const customSkill = path.join(cwd, "custom", "SKILL.md");
-		const configPath = path.join(cwd, "async-subagents.json");
-		writeFile(configPath, JSON.stringify({
-			types: {
-				"browser-qa": { model: "custom/qa", isolatedSkills: [customSkill] },
-			},
-		}));
-		const config = loadSubagentConfig(cwd, { ASYNC_SUBAGENTS_CONFIG: configPath });
+		writeFile(path.join(cwd, ".pi", "agents", "browser-qa.md"), `---
+model: custom/qa
+isolatedSkills: ${customSkill}
+---
+`);
+		const config = loadSubagentConfig(cwd, {});
 		const resolved = resolveAgentTaskConfig({
 			id: "qa", task: "verify the browser bug", subagentType: "browser-qa",
 			promptOverride: "Custom brief: {task}", promptAppend: "Check the mobile layout too.",
@@ -557,30 +535,35 @@ describe.serial("subagent type config", () => {
 		expect(selectSubagentType({ id: "e", task: "security review", subagentType: "manual" }, config)).toBe("manual");
 	});
 
-	test.serial("loads config presets, persists active preset selection, and resolves spawn defaults", () => {
+	test.serial("loads project preset pools, persists active selection, and resolves agent-file defaults", () => {
 		const cwd = tempDir();
 		const selectionPath = path.join(cwd, "subagent-preset-selection.json");
 		process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE = selectionPath;
-		const configPath = path.join(cwd, "async-subagents.json");
-		writeFile(configPath, JSON.stringify({
-			types: { review: { isolatedSkills: ["private/review.md"] } },
-			presets: {
-				fast: {
-					model: "zai/fast",
-					fallbackModels: ["zai/backup", "openai/backup"],
-					thinking: "off",
-					extraArgs: ["--temperature", "0"],
-					types: { review: { model: "openai/review-fast", fallbackModels: ["openai/review-backup"], thinking: "medium", extraArgs: ["--review-fast"] } },
-				},
-				deep: { description: "careful", model: "openai/deep", thinking: "high" },
-			},
+		writeFile(path.join(cwd, ".pi", "agents", "presets.jsonc"), JSON.stringify({
+			fast: { description: "fast pool", models: ["zai/fast", "zai/backup", "openai/backup", "openai/review-fast", "openai/review-backup"] },
+			deep: { description: "careful", models: ["openai/deep"] },
 		}));
+		writeFile(path.join(cwd, ".pi", "agents", "research.md"), `---
+models: zai/fast, zai/backup, openai/backup
+thinking: off
+extraArgs: --temperature, 0
+---
+Research quickly.
+`);
+		writeFile(path.join(cwd, ".pi", "agents", "review.md"), `---
+models: openai/review-fast, openai/review-backup
+thinking: medium
+isolatedSkills: private/review.md
+extraArgs: --review-fast
+---
+Review carefully.
+`);
 
 		expect(getSubagentPresetSelectionPath()).toBe(selectionPath);
 		expect(loadSubagentPresetSelection()).toEqual({});
 		saveSubagentPresetSelection({ activePreset: "fast" });
 
-		const config = loadSubagentConfig(cwd, { ASYNC_SUBAGENTS_CONFIG: configPath });
+		const config = loadSubagentConfig(cwd, {});
 		expect(config.presets?.deep.description).toBe("careful");
 		const activePresetName = loadSubagentPresetSelection().activePreset;
 		expect(activePresetName).toBe("fast");
@@ -598,7 +581,7 @@ describe.serial("subagent type config", () => {
 		expect(perType.fallbackModels).toEqual(["openai/review-backup"]);
 		expect(perType.task.thinking).toBe("medium");
 		expect(perType.isolatedSkills).toEqual(["private/review.md"]);
-		expect(perType.extraArgs).toEqual(["--review-fast", "--temperature", "0"]);
+		expect(perType.extraArgs).toEqual(["--review-fast"]);
 
 		const explicit = resolveAgentTaskConfig({ id: "b", task: "Review", model: "manual/model", thinking: "minimal" }, config, { preset: activePreset });
 		expect(explicit.task.model).toBe("manual/model");
@@ -619,63 +602,54 @@ describe.serial("subagent type config", () => {
 		expect(getActiveSubagentPresetName()).toBe("fast");
 	});
 
-	test.serial("resolves retry and max result config", () => {
+	test.serial("uses internal runtime defaults plus per-agent retry and max result config", () => {
 		const cwd = tempDir();
-		const configPath = path.join(cwd, "async-subagents.json");
-		writeFile(configPath, JSON.stringify({
-			maxConcurrent: 2,
-			maxResultBytes: 10,
-			retry: { maxRetries: 1, backoffMs: 5, retryableExitCodes: [1] },
-			types: {
-				research: {
-					maxResultBytes: 3,
-					retry: { maxRetries: 2, retryableExitCodes: [] },
-				},
-			},
-		}));
+		writeFile(path.join(cwd, ".pi", "agents", "research.md"), `---
+maxResultBytes: 3
+retry:
+  maxRetries: 2
+  retryableExitCodes: []
+---
+Research with stricter result bounds.
+`);
 
-		const config = loadSubagentConfig(cwd, { ASYNC_SUBAGENTS_CONFIG: configPath });
-		expect(config.maxConcurrent).toBe(2);
+		const config = loadSubagentConfig(cwd, {});
+		expect(config.maxConcurrent).toBe(5);
 		const base = resolveAgentTaskConfig({ id: "a", task: "base", subagentType: "implement" }, config);
-		expect(base.retry).toEqual({ maxRetries: 1, backoffMs: 5, retryableExitCodes: [1] });
-		expect(base.maxResultBytes).toBe(10);
+		expect(base.retry).toEqual({ maxRetries: 0, backoffMs: 2000 });
+		expect(base.maxResultBytes).toBe(100_000);
 		const research = resolveAgentTaskConfig({ id: "r", task: "review", subagentType: "research" }, config);
-		expect(research.retry).toEqual({ maxRetries: 2, backoffMs: 5, retryableExitCodes: [] });
+		expect(research.retry).toEqual({ maxRetries: 2, backoffMs: 2000, retryableExitCodes: [] });
 		expect(research.maxResultBytes).toBe(3);
 	});
 
-	test.serial("loads JSONC type profiles and resolves model/thinking/tools", () => {
+	test.serial("loads Markdown type profiles and resolves model/thinking/tools", () => {
 		const cwd = tempDir();
-		const configPath = path.join(cwd, ".pi", "async-subagents.jsonc");
-		writeFile(configPath, `{
-			// project-level routing profiles
-			"defaultType": "quick",
-			"types": {
-				"scan": {
-					"model": "fast/file-model",
-					"thinking": "off",
-					"tools": ["read", "grep"],
-					"extraArgs": ["--temperature", "0"],
-					"promptAppend": ["Use grep first.", "Return paths before findings."],
-				},
-				"review": {
-					"model": "smart/review-model",
-					"thinking": "high",
-					"promptOverride": "Review prompt for {task}"
-				}
-			}
-		}`);
+		writeFile(path.join(cwd, ".pi", "agents", "scan.md"), `---
+model: fast/file-model
+thinking: off
+tools: read, grep
+extraArgs: --temperature, 0
+---
+Use grep first.
+Return paths before findings.
+`);
+		writeFile(path.join(cwd, ".pi", "agents", "review.md"), `---
+model: smart/review-model
+thinking: high
+promptOverride: Review prompt for {task}
+---
+`);
 
 		const config = loadSubagentConfig(cwd, {
-			ASYNC_SUBAGENTS_CONFIG: configPath,
 			ASYNC_SUBAGENTS_SCAN_MODEL: "env/fast-scan",
 		});
 
-		expect(config.defaultType).toBe("quick");
+		expect(config.defaultType).toBe("research");
 		expect(config.types.scan.model).toBe("env/fast-scan");
-		expect(selectSubagentType({ id: "a", task: "Do a repo-wide scan for auth files" }, config)).toBeUndefined();
+		expect(selectSubagentType({ id: "a", task: "Do a repo-wide scan for auth files" }, config)).toBe("research");
 		expect(selectSubagentType({ id: "b", task: "Careful code review", subagentType: "review" }, config)).toBe("review");
-		expect(selectSubagentType({ id: "c", task: "Read this note" }, config)).toBeUndefined();
+		expect(selectSubagentType({ id: "c", task: "Read this note" }, config)).toBe("research");
 
 		const scan = resolveAgentTaskConfig({ id: "a", task: "Scan files for auth", subagentType: "scan" }, config);
 		expect(scan.task).toMatchObject({ subagentType: "scan", model: "env/fast-scan", thinking: "off", tools: ["read", "grep"] });
@@ -779,7 +753,7 @@ Advise only.
 			expect(resolved.fallbackModels).toEqual(["zai/glm-5.3"]);
 		});
 
-		test.serial("walks up to find .pi/agents and overrides project config type fields", () => {
+		test.serial("walks up to find .pi/agents and ignores legacy project config type fields", () => {
 			const cwd = tempDir();
 			writeFile(path.join(cwd, ".pi", "pi-tools-suite.jsonc"), JSON.stringify({
 				asyncSubagents: { types: { "shared-name": { model: "jsonc/model", thinking: "low" } } },
@@ -789,12 +763,11 @@ Advise only.
 			const config = loadSubagentConfig(path.join(cwd, "packages", "app"), {});
 			expect(config.types["shared-name"].model).toBe("md/model");
 			expect(config.types["shared-name"].description).toBe("md wins");
-			// Existing mergeConfig semantics: per-field override, jsonc-only fields survive.
-			expect(config.types["shared-name"].thinking).toBe("low");
+			expect(config.types["shared-name"].thinking).toBeUndefined();
 			expect(config.types["shared-name"].promptAppend).toBe("Role text.");
 		});
 
-		test.serial("parses icon frontmatter and keeps it through merges", () => {
+		test.serial("parses icon frontmatter and does not inherit legacy JSONC type fields", () => {
 			const cwd = tempDir();
 			writeFile(path.join(cwd, ".pi", "pi-tools-suite.jsonc"), JSON.stringify({
 				asyncSubagents: { types: { "shared-name": { model: "jsonc/model", icon: "book" } } },
@@ -802,8 +775,7 @@ Advise only.
 			writeFile(path.join(cwd, ".pi", "agents", "shared-name.md"), "---\ndescription: md wins\nmodel: md/model\n---\nRole text.\n");
 
 			const config = loadSubagentConfig(path.join(cwd, "packages", "app"), {});
-			// jsonc-only icon survives the per-field markdown merge.
-			expect(config.types["shared-name"].icon).toBe("book");
+			expect(config.types["shared-name"].icon).toBeUndefined();
 
 			const mdCwd = tempDir();
 			writeFile(path.join(mdCwd, ".pi", "agents", "local-searcher.md"), "---\ndescription: finder\nicon: search\n---\nFind things.\n");
@@ -819,14 +791,15 @@ Advise only.
 			expect(builtin.types.oracle?.icon).toBe("sparkles");
 		});
 
-		test.serial("skips .pi/agents when an explicit config path is set", () => {
+		test.serial("ignores removed ASYNC_SUBAGENTS_CONFIG while keeping .pi/agents authoritative", () => {
 			const cwd = tempDir();
 			writeFile(path.join(cwd, ".pi", "agents", "local-only.md"), "---\ndescription: x\n---\nBody.\n");
 			const explicit = path.join(cwd, "explicit.json");
-			writeFile(explicit, JSON.stringify({ types: {} }));
+			writeFile(explicit, "{ this is intentionally invalid legacy config");
 
 			const config = loadSubagentConfig(cwd, { ASYNC_SUBAGENTS_CONFIG: explicit });
-			expect(config.types["local-only"]).toBeUndefined();
+			expect(config.types["local-only"]?.description).toBe("x");
+			expect(config.types["local-only"]?.model).toBeUndefined();
 		});
 
 		test.serial("rejects name mismatch, invalid names, and unsupported YAML", () => {
@@ -874,26 +847,29 @@ Advise only.
 
 	test.serial("resolves modelByParent from the current parent model", () => {
 		const cwd = tempDir();
-		const configPath = path.join(cwd, "async-subagents.json");
-		writeFile(configPath, JSON.stringify({
-			defaultType: "quick",
-			types: {
-				quick: { model: "zai/glm-4.5-air", thinking: "off" },
-				oracle: {
-					description: "Cross-provider second opinion.",
-					model: "openai-codex/gpt-5.5",
-					fallbackModels: ["zai/glm-5.2", "openai-codex/gpt-5.5"],
-					thinking: "xhigh",
-					modelByParent: {
-						"zai/*": { model: "openai-codex/gpt-5.5", fallbackModels: ["zai/glm-5.2"] },
-						"openai-codex/*": "zai/glm-5.2",
-						"antigravity/*": { model: "zai/glm-5.2", fallbackModels: ["openai-codex/gpt-5.5"] },
-					},
-				},
-			},
-		}));
-
-		const config = loadSubagentConfig(cwd, { ASYNC_SUBAGENTS_CONFIG: configPath });
+		writeFile(path.join(cwd, ".pi", "agents", "quick.md"), `---
+model: zai/glm-4.5-air
+thinking: off
+---
+Quick work.
+`);
+		writeFile(path.join(cwd, ".pi", "agents", "oracle.md"), `---
+description: Cross-provider second opinion.
+model: openai-codex/gpt-5.5
+fallbackModels: zai/glm-5.2, openai-codex/gpt-5.5
+thinking: xhigh
+modelByParent:
+  zai/*:
+    model: openai-codex/gpt-5.5
+    fallbackModels: zai/glm-5.2
+  openai-codex/*: zai/glm-5.2
+  antigravity/*:
+    model: zai/glm-5.2
+    fallbackModels: openai-codex/gpt-5.5
+---
+Give a second opinion.
+`);
+		const config = loadSubagentConfig(cwd, {});
 
 		// GLM parent -> GPT oracle, with entry-specific fallbacks.
 		const fromGlm = resolveAgentTaskConfig(
@@ -941,18 +917,16 @@ Advise only.
 
 		// Non-oracle types are unaffected when no parent match exists.
 		const quick = resolveAgentTaskConfig(
-			{ id: "f", task: "tiny" },
+			{ id: "f", task: "tiny", subagentType: "quick" },
 			config,
 			{ parentModel: "zai/glm-5.2" },
 		);
 		expect(quick.task.model).toBe("zai/glm-4.5-air");
 	});
 
-	test.serial("honors an explicitly configured legacy preset rather than overriding it by parent tier", () => {
+	test.serial("honors an explicitly passed legacy preset object rather than overriding it by parent tier", () => {
 		const cwd = tempDir();
-		const configPath = path.join(cwd, "async-subagents.json");
-		writeFile(configPath, "{}");
-		const config = loadSubagentConfig(cwd, { ASYNC_SUBAGENTS_CONFIG: configPath });
+		const config = loadSubagentConfig(cwd, {});
 		const solPreset = {
 			types: {
 				implement: {
@@ -990,9 +964,7 @@ Advise only.
 
 	test.serial("does not map removed builtin role names onto canonical roles", async () => {
 		const cwd = tempDir();
-		const configPath = path.join(cwd, "async-subagents.json");
-		writeFile(configPath, "{}");
-		const config = loadSubagentConfig(cwd, { ASYNC_SUBAGENTS_CONFIG: configPath });
+		const config = loadSubagentConfig(cwd, {});
 
 		for (const subagentType of ["review", "deep"] as const) {
 			await expect(routeSubagentTasks([
@@ -1277,9 +1249,7 @@ describe.serial("cleanup candidates", () => {
 describe.serial("spawning agents", () => {
 	test.serial("delivers the inline QA workflow and a package-relative runner without loading a skill", async () => {
 		const cwd = path.join(tempDir(), "project with spaces");
-		const configPath = path.join(cwd, "async-subagents.json");
-		writeFile(configPath, "{}");
-		const config = loadSubagentConfig(cwd, { ASYNC_SUBAGENTS_CONFIG: configPath });
+		const config = loadSubagentConfig(cwd, {});
 		const runDir = createRunDir(cwd, "inline-qa");
 		const captured = path.join(cwd, "captured-prompt.json");
 		const piScript = path.join(tempDir(), "pi.js");

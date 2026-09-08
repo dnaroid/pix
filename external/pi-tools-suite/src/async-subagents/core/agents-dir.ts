@@ -72,7 +72,7 @@ const NUMERIC_PATTERN = /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/;
 
 /** Discover and parse `.pi/agents/*.md` for the project containing `cwd`. */
 export function readProjectAgentDefinitions(cwd: string): Record<string, ProjectAgentDefinition> {
-	const dir = findProjectAgentsDir(cwd);
+	const dir = projectAgentsDir(cwd);
 	return dir ? readAgentDefinitionsFromDir(dir) : {};
 }
 
@@ -94,7 +94,7 @@ export function readAgentDefinitionsFromDir(dir: string): Record<string, AgentDe
  * deterministic merge order.
  */
 export function projectAgentDefinitionFiles(cwd: string): string[] {
-	const dir = findProjectAgentsDir(cwd);
+	const dir = projectAgentsDir(cwd);
 	return dir ? agentDefinitionFiles(dir) : [];
 }
 
@@ -108,7 +108,8 @@ export function agentDefinitionFiles(dir: string): string[] {
 		.sort();
 }
 
-function findProjectAgentsDir(startDir: string): string | undefined {
+/** First project `.pi/agents` directory found walking up from cwd. */
+export function projectAgentsDir(startDir: string): string | undefined {
 	let dir = path.resolve(startDir);
 	const root = path.parse(dir).root;
 	while (true) {

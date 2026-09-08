@@ -7,7 +7,7 @@ This package keeps shared Pi tools as ordinary source folders under `src/` and r
 - `src/coding-discipline` — injects a deduplicated silent-mode and quality-discipline block at the very top of the main-session per-turn system prompt for GLM main-session models only (`isGlmModel`) immediately before the LLM request; text-only GLM models get the `lookup` bridge while vision-capable `zai/glm-5.3-flash` inspects images directly; non-GLM models are left untouched; disabled for async sub-agents
 - `src/credential-firewall` — opt-in secret firewall for high-confidence outbound/session credential redaction; disabled by default
 - `src/ast-grep` — `ast_grep` / `ast_apply`
-- `src/async-subagents` — `subagents` tool and sub-agent slash commands, including oh-my-openagent-style `/ultrawork` (`/ulw`) and `/hyperplan` orchestration prompts, plus config-defined sub-agent model/thinking/args presets selected via `/subagent-preset` from `asyncSubagents` in `~/.config/pi/pi-tools-suite.jsonc`; includes the `frontend` profile for Gemini-friendly UI/UX and visual frontend work and the `oracle` profile for cross-provider second opinions; enforces a 30-minute per-agent execution timeout, project-wide `maxConcurrent` queueing, optional retry/backoff, and `result.json` structured metadata/chaining fields next to raw `result.md`; stores project-local run files and a registry under `.pi/subagents/` so result/status collection can recover after compaction or reload while the main session remains alive
+- `src/async-subagents` — `subagents` tool and sub-agent slash commands, including oh-my-openagent-style `/ultrawork` (`/ulw`) and `/hyperplan` orchestration prompts; agent roles are Markdown files under `src/async-subagents/agents/*.md` plus project `.pi/agents/*.md`, while `/subagent-preset` selects model-pool presets from the bundled/project `agents/presets.jsonc`; includes the `oracle` profile for strong second opinions; enforces a 30-minute per-agent execution timeout, project-wide concurrency queueing, optional per-agent retry/backoff, and `result.json` structured metadata/chaining fields next to raw `result.md`; stores project-local run files and a registry under `.pi/subagents/` so result/status collection can recover after compaction or reload while the main session remains alive
 - `src/lsp` — shared LSP diagnostics hook/library that enriches mutating tool results with diagnostics and shuts down language servers on session shutdown
 - `src/comment-checker` — AI-slop comment guard that listens to the `tool_result` event for `write` / `edit` / `apply_patch` mutations, extracts net-new code comment lines, classifies them (filler phrasing, restating code, decorative separators, generic paraphrasing, or — under aggressive strictness — any non-valuable comment), and appends a short nudge to the tool result so the agent removes unnecessary comments on its next turn; TODO/FIXME, license headers, docstrings, pragmas, linter directives, shebangs, and decorators are never flagged; language-agnostic across `//` / `/* */` / `#` / `--` / `<!-- -->` / triple-quote comment styles; per-session deduplication (at most one nudge per 30 s) prevents fix/remark loops; configured via the `commentChecker` section (`enabled`, `strictness`: `conservative` | `balanced` | `aggressive`, default `balanced`) or `PI_COMMENT_CHECKER_ENABLED` / `PI_COMMENT_CHECKER_STRICTNESS`
 - `src/session-name` — `session_name` tool for reading or setting the current session title directly from tool calls, without relying on slash-command parsing
@@ -21,11 +21,11 @@ This package keeps shared Pi tools as ordinary source folders under `src/` and r
 - `src/web-search` — `web_search` and `web_fetch` tools migrated from `@ollama/pi-web-search`; uses local Ollama by default or the official Ollama cloud API when an API key is configured, supports Tavily Search/Extract fallback, provides `/web-credentials` for secure user-level key storage, honors `OLLAMA_HOST`, supports request timeouts via `timeout_ms` / `PI_WEB_SEARCH_TIMEOUT_MS`, and reports provider-specific errors
 - `src/dcp` — headless Dynamic Context Pruning ported from `opencode-dynamic-context-pruning` for the Pi SDK: explicit `compress` tool with range and message modes, `/dcp` commands (context, stats, sweep, manual, decompress, recompress, compress), same-call overlap validation, recoverable compressed-block rollups, grouped message-mode skip diagnostics, stable raw-message anchors when available, protected user/tool preservation, deduplication, error purging, and context nudges; visualization is left to `compress` tool responses and the renderer-owned context-percent click dialog
 - `src/prompt-commands` — user slash-command builder: `/prompt-commands` opens a CRUD menu for saved prompt-backed slash commands, stores them under `promptCommands` in `~/.config/pi/pi-tools-suite.jsonc`, reloads after edits, and runs each saved prompt as a normal user message
-- `src/skill-installer` — `/install-skill [name]` installs a personal skill folder from `~/.agents/local_skills` into the current project's `.pi/skills/` so it activates as a project-local skill, then automatically runs `/reload` so the new skill is picked up without a manual step; `/export-skill [name]` does the reverse, copying a project-local skill back to `~/.agents/local_skills/` for reuse in other projects (no reload, since the library lives outside the project); with no argument either command shows an interactive menu of available skills (folders containing `SKILL.md`), and the `<name>` form installs/exports it directly (headless-safe); existing destinations prompt to overwrite in the UI and are refused in headless mode; `.DS_Store` files are skipped
+- `src/resource-registry` — `/registry` manages one private Git registry with global reusable `skills/` and `agents/` plus project-scoped `projects/<project-key>/tasks.jsonc`, `projects/<project-key>/plans/`, and `projects/<project-key>/TODO.md`; skills install into `.pi/skills/<name>/`, agents into `.pi/agents/<name>.md`, while `push tasks|plans|todo|project` and `pull tasks|plans|todo|project` synchronize `.pi/tasks.jsonc`, `.pi/plans/`, and `.pi/TODO.md` only for the current project; the project key is normally derived from Git `origin` (SSH and HTTPS forms normalize to the same key) and can be overridden per project with `/registry project-key <key>` in `.pi/pi-tools-suite.jsonc`; `status` fetches and reports reusable-resource state and project-state updates/local edits/divergence using `.pi/registry.json` provenance; reusable `install`, `update`, `push`, and remote-only `remove` support TUI flows and bulk `all` forms, removing from the registry never deletes the project copy, `delete`/`rm` alias `remove`, and bulk removal requires interactive confirmation; `/registry configure <git-url> [branch]` stores the registry remote in the user config; Git authentication is delegated to the user's normal Git/SSH credential setup and the local clone is only a disposable cache
 
 `index.ts` is intentionally only a thin auto-discovery shim that re-exports `src/index.ts`. There is no `pi.extensions` manifest here, so local Pi auto-discovery loads the suite once via `~/.pi/agent/extensions/pi-tools-suite/index.ts` and does not double-register tools.
 
-Registration order is preserved in `src/index.ts`: coding-discipline, ast-grep, async-subagents, lsp, comment-checker, session-name, session-recovery, repo-discovery command/tool gate, antigravity-auth provider, OpenCode import, todo, model-tools, usage, web-search, dcp, prompt-commands, skill-installer, credential-firewall, then codex-reasoning-fix. Tool metadata and active model-specific tool sets have two modes: standard and repo-aware. When `.indexer-cli` enables `repo_*`, those tools stay active ahead of overlapping lower-level aliases so the indexed discovery surface has priority.
+Registration order is preserved in `src/index.ts`: coding-discipline, ast-grep, async-subagents, lsp, comment-checker, session-name, session-recovery, repo-discovery command/tool gate, antigravity-auth provider, OpenCode import, todo, model-tools, usage, web-search, dcp, prompt-commands, resource-registry, credential-firewall, then codex-reasoning-fix. Tool metadata and active model-specific tool sets have two modes: standard and repo-aware. When `.indexer-cli` enables `repo_*`, those tools stay active ahead of overlapping lower-level aliases so the indexed discovery surface has priority.
 
 ## Session recovery
 
@@ -523,7 +523,7 @@ AGENTS.md before approving anything; cite file paths first.
 - Frontmatter keys: `name` (must match the filename), `description`, `icon`, `models`, `thinking`, `tools`, `isolatedSkills`, `extraArgs`, `promptAppend`, `promptOverride`, `retry`, `maxResultBytes`, `timeoutMs`. Legacy `model`, `fallbackModels`, and `modelByParent` still load. Unknown keys are rejected with an error naming the file.
 - Array fields accept block lists (`- item`), inline arrays (`[a, b]`), or comma-separated strings (`tools: read, grep, bash`). The frontmatter YAML subset is intentionally small: scalars, quoted strings, numbers, comments, lists, and nested maps for `modelByParent`/`retry`. Tabs, block scalars (`|`/`>`), anchors/aliases, and flow maps are hard errors naming file and line.
 - The markdown body becomes `promptAppend`: it is appended after the standard generated prompt (parent objective + task + output format), so the agent still receives its task in the usual structure. Use frontmatter `promptOverride` for full prompt replacement.
-- Precedence: project agent fields override same-named types from user/project JSONC config (field-level; other fields are kept), which in turn override built-ins. Setting `ASYNC_SUBAGENTS_CONFIG` / `PI_SUBAGENTS_CONFIG` disables the directory (explicit config = full control).
+- Precedence: bundled Markdown defines the built-ins, then the nearest project `.pi/agents/*.md` file overrides the same-named built-in field-by-field. Markdown is the only source of agent role/profile definitions. The removed `asyncSubagents` section and old standalone config-path variables are not read.
 - Files without frontmatter are skipped (a `README.md` there is fine). Definition loading is uncached: edits apply on the next config read/spawn without a restart, and the effective system-prompt catalog is rebuilt at parent-agent start.
 - Bundled roles use the same format internally under `src/async-subagents/agents/*.md`; built-in and project-local profiles therefore share one parser and normalization path instead of maintaining a second role-description schema in TypeScript.
 - `icon` names an agent glyph for UIs that render sub-agent widgets (pix TUI panel, Pix Desktop subagents panel): `agent` (neutral default), `search`, `code`, `flask`, `globe`, `sparkles`, `brain`, `wrench`, `terminal`, `bug`, `book`, `eye`, `zap`, `rocket`. The value is passed through opaquely; unknown names render as the neutral agent icon, and status stays color-coded next to it.
@@ -546,9 +546,9 @@ and skill flags in `extraArgs` cannot bypass that isolation. Explicitly
 configured `isolatedSkills` remain supported as optional additions; no built-in
 QA `--skill` is injected. Other roles retain their normal discovery behavior.
 
-Model/thinking/tool-only profile overrides inherit the Markdown workflow.
-An explicit profile `promptAppend` replaces the inherited body under the usual
-field-level merge rules; custom QA instructions must preserve the runner-only,
+Model/thinking/tool-only overrides in a project `browser-qa.md` inherit the
+bundled Markdown workflow. A project Markdown body replaces the inherited
+`promptAppend` under the usual field-level merge rules; custom QA instructions must preserve the runner-only,
 credential, target, and evidence contracts. Runner-enforced isolation and
 credential handling remain in code, not in the prompt.
 
@@ -621,7 +621,7 @@ so screenshots and assertions remain state-focused.
 
 Async-subagents also injects a lightweight oh-my-openagent-style system-prompt strategy by model: non-GPT parents get `parallel-first`, an orchestration-first hint that favors ultrawork/subagents for broad work, while GPT-like parents get `deep-work`, a direct deep-worker hint that uses subagents only when clearly useful. Explicit custom system prompts (`--system-prompt`, `SYSTEM.md`, custom templates) are respected and skip this injection by default. Disable it with `PI_AGENT_STRATEGY=off`; force a strategy with `PI_AGENT_STRATEGY=parallel-first` or `PI_AGENT_STRATEGY=deep-work`; set `PI_AGENT_STRATEGY_WITH_CUSTOM_PROMPT=1` to append it even when a custom prompt is present.
 
-For blind-model screenshot/image inspection, use the main-session `coding-discipline` lookup tool; the bundled default uses vision-capable `zai/glm-5.3-flash`. Async-subagents still supports `imagePaths` on tasks when a broader delegated track genuinely needs images, but it no longer ships a dedicated `vision` role. Dynamic provider capabilities can be missing or stale after switching models, so blind parent models can still be configured explicitly with case-insensitive `*` masks under `asyncSubagents.vision.blindModelPatterns` in `~/.config/pi/pi-tools-suite.jsonc`; do not include `zai/glm-5.3-flash` because it accepts image input. This keeps guidance honest, not a sub-agent role.
+For blind-model screenshot/image inspection, use the main-session `coding-discipline` lookup tool; the bundled default uses vision-capable `zai/glm-5.3-flash`. Async-subagents still supports `imagePaths` on tasks when a broader delegated track genuinely needs images, but it no longer ships a dedicated `vision` role. Provider image metadata is supplemented by an internal compatibility list for known blind models so the parent does not falsely claim visual access; this is runtime capability policy, not agent configuration.
 
 When `subagentType` is omitted, the lightweight role router classifies the task
 using the descriptions. Explicit types bypass it. Unknown types or failed
@@ -653,39 +653,28 @@ Explicit task/CLI model overrides and `FORCE_CURRENT_MODEL` remain deliberate
 escape hatches and disable automatic model fallback for that task. They do not
 bypass the image-capability check.
 
-Define pools in the shared or project `pi-tools-suite.jsonc`. Select a saved
-pool with `/subagent-preset`; use `AGENTS_PRESET=<name>` or
+Bundled pools live in `src/async-subagents/agents/presets.jsonc`. Add or override
+project pools in the nearest `.pi/agents/presets.jsonc`. Select a saved pool
+with `/subagent-preset`; use `AGENTS_PRESET=<name>` or
 `/subagent-preset session <name>` for a process-only override and
 `/subagent-preset session-clear` to remove it. The saved selection lives in
-`~/.pi/agent/subagent-preset-selection.json`. `/subagent-preset init` inserts the
-sample only when config is missing. The shipped pools are `cheap` (GLM), `gpt`,
+`~/.pi/agent/subagent-preset-selection.json`. `/subagent-preset path` shows the
+bundled and project preset paths. The shipped pools are `cheap` (GLM), `gpt`,
 and `deep` (the retained legacy name for the mixed pool, not worker escalation).
-Initial user config and the sample share one source; descriptions and worker
-model order exist only in the agent files. Existing user files are not rewritten.
+Agent descriptions, instructions, model order, thinking, tools, retry, and
+timeouts remain in agent Markdown; selecting a pool never changes them.
 
-Example shared async-subagents config section:
+Example project `.pi/agents/presets.jsonc`:
 
 ```jsonc
 {
-  "asyncSubagents": {
-    "defaultType": "research",
-    "routing": {
-      "enabled": true,
-      "model": "zai/glm-5-turbo",
-      "timeoutMs": 12000
-    },
-    "presets": {
-      "cheap": {
-        "description": "GLM workers with a strong oracle candidate.",
-        "models": ["zai/glm-5-turbo", "zai/glm-5.3-flash", "zai/glm-5.3"]
-      }
-    },
-    "types": {
-      "research": {
-        "models": ["zai/glm-5-turbo", "openai-codex/gpt-5.6-luna"],
-        "thinking": "low"
-      }
-    }
+  "cheap": {
+    "description": "GLM workers with a strong oracle candidate.",
+    "models": ["zai/glm-5-turbo", "zai/glm-5.3-flash", "zai/glm-5.3"]
+  },
+  "project-gpt": {
+    "description": "GPT models approved for this project.",
+    "models": ["openai-codex/gpt-5.6-luna", "openai-codex/gpt-5.6-terra"]
   }
 }
 ```
@@ -694,21 +683,19 @@ Example shared async-subagents config section:
 
 Old built-in role names are no longer implicit aliases. `quick`, `scan`,
 `review`, `deep`, `docs`, `frontend`, and `tests` are valid only when explicitly
-defined as ordinary custom/project types. Old preset per-role keys likewise
-apply only when a type with that exact name exists.
+defined as ordinary project `.pi/agents/<name>.md` files.
 
-Legacy `model` plus `fallbackModels` remains readable. `models` is a complete
-replacement list: it clears inherited legacy model/fallback/parent routing.
-A later old-format model override still replaces the primary candidate, and a
-later `fallbackModels` replaces the remaining candidates; `[]` disables them.
-Old `modelByParent` configs remain supported, but ordinary roles give legacy
-preset models precedence. New built-ins contain no parent-tier escalation maps.
+Within an agent Markdown file, legacy `model` plus `fallbackModels` and
+`modelByParent` remain readable. `models` is a complete replacement list: it
+clears inherited legacy model/fallback/parent routing. New built-ins use ordered
+`models` lists and contain no parent-tier escalation maps.
 
-When a preset specifies `models`, it is exclusively a pool; inherited legacy
-`model`, `types`, thinking, arguments and timeout overrides do not run. A later
-explicit old-format preset selector can still replace a pool for compatibility.
-Runtime retry structures and the separate role router continue to use the
-term `fallbackModels` for actual fallback-only lists, not agent candidates.
+The removed `asyncSubagents` section is not part of the public schema or generated
+user config and is no longer read at runtime. Existing files can remain on disk
+without being rewritten, but they have no effect: migrate role definitions to
+`.pi/agents/*.md` and custom model pools to `.pi/agents/presets.jsonc`. Runtime
+retry structures and the separate role router continue to use the term
+`fallbackModels` for actual fallback-only lists, not agent candidates.
 
 Sub-agents run with `--no-session` by default to avoid writing duplicate Pi session JSONL files for fire-and-forget background work. Set `ASYNC_SUBAGENTS_ENABLE_SESSIONS=1` to restore persisted per-agent sessions under each agent's `sessions/` directory; this also registers the session-navigation slash commands (`/sub-open`, `/sub-back`, `/sub-where`) needed for switching and deeper post-mortem navigation.
 
@@ -716,7 +703,7 @@ Sub-agent runs are stored in the current project's `.pi/subagents/` directory wh
 
 Runtime logs are minimized by default: successful agents do not keep `events.jsonl`, and `stderr.log` is discarded unless the agent fails. Set `ASYNC_SUBAGENTS_DEBUG_LOGS=1` / `PI_SUBAGENTS_DEBUG_LOGS=1` to keep diagnostic logs for successful agents too; debug event logs store a compact RPC event summary instead of the full streaming transcript. Defaults are 0 bytes for `events.jsonl` without debug, 32 MiB for debug `events.jsonl`, 8 MiB for retained `stderr.log`, and 8 MiB for a single RPC JSON line; override with `ASYNC_SUBAGENTS_MAX_EVENTS_BYTES` / `PI_SUBAGENTS_MAX_EVENTS_BYTES`, `ASYNC_SUBAGENTS_MAX_STDERR_BYTES` / `PI_SUBAGENTS_MAX_STDERR_BYTES`, and `ASYNC_SUBAGENTS_MAX_RPC_LINE_CHARS` / `PI_SUBAGENTS_MAX_RPC_LINE_CHARS`.
 
-`asyncSubagents` config also supports `maxConcurrent` (default 5, project-wide; `0` means unlimited), global/per-type `retry` with exponential backoff, global/per-type `maxResultBytes` for bounding `result.json.resultText` while keeping raw `result.md` intact, and global/per-type/preset `timeoutMs` for wall-clock agent watchdogs. Spawn calls and individual task objects can pass `timeoutSeconds` to shorten the watchdog for synthetic tests or bounded probes. Stop requests mark running, queued planned, and retry-pending agents as `stopped` so queued work is not launched later. Completed agents write `result.json` with status/duration/model/retry metadata plus best-effort `summary`, `findings`, `files`, `risks`, `nextActions`, and `confidence` fields for parent-agent chaining.
+Runtime concurrency defaults to 5 agents per project and the global result summary bound defaults to 100000 bytes. These are internal engine defaults rather than normal user configuration. Per-agent `retry`, `maxResultBytes`, and `timeoutMs` belong in agent Markdown; spawn calls and individual task objects can pass `timeoutSeconds` to shorten the watchdog for synthetic tests or bounded probes. Stop requests mark running, queued planned, and retry-pending agents as `stopped` so queued work is not launched later. Completed agents write `result.json` with status/duration/model/retry metadata plus best-effort `summary`, `findings`, `files`, `risks`, `nextActions`, and `confidence` fields for parent-agent chaining.
 
 ## OpenCode credential import
 

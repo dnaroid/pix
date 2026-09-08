@@ -137,7 +137,7 @@ The current extension registry covers all 19 modules:
 | `web-search` | web-search tests | deterministic only |
 | `dcp` | DCP prompt/pruning/state tests | existing prompt evals |
 | `prompt-commands` | eval extension contracts | deterministic only |
-| `skill-installer` | eval extension contracts | deterministic only |
+| `resource-registry` | resource-registry integration + eval extension contracts | deterministic only |
 | `credential-firewall` | firewall tests | deterministic only |
 | `codex-reasoning-fix` | reasoning-fix tests | deterministic only |
 

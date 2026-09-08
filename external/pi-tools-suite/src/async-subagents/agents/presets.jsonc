@@ -1,0 +1,16 @@
+{
+  // Presets are available-model pools. Agent candidate order still comes from
+  // each agent's Markdown frontmatter; pool order never reorders candidates.
+  "cheap": {
+    "description": "GLM pool: economical workers plus GLM-5.3 for oracle.",
+    "models": ["zai/glm-5-turbo", "zai/glm-5.3-flash", "zai/glm-5.3"]
+  },
+  "gpt": {
+    "description": "GPT pool: Luna/Terra workers; Sol is available to oracle.",
+    "models": ["openai-codex/gpt-5.6-luna", "openai-codex/gpt-5.6-terra", "openai-codex/gpt-5.6-sol"]
+  },
+  "deep": {
+    "description": "Mixed pool; workers retain economical candidate order and oracle uses strong models.",
+    "models": ["zai/glm-5-turbo", "zai/glm-5.3-flash", "openai-codex/gpt-5.6-luna", "openai-codex/gpt-5.6-terra", "openai-codex/gpt-5.6-sol", "zai/glm-5.3"]
+  }
+}

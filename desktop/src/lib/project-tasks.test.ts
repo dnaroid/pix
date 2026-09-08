@@ -23,7 +23,7 @@ describe("project task documents", () => {
   });
 
   it("rejects unsupported versions, invalid enums, and duplicate ids", () => {
-    expect(() => parseTaskDocument({ version: 2, tasks: [] })).toThrow("Invalid .pi/tasks.json");
+    expect(() => parseTaskDocument({ version: 2, tasks: [] })).toThrow("Invalid .pi/tasks.jsonc");
     expect(() => parseTaskDocument({ version: 1, tasks: [{ ...task, type: "chore" }] })).toThrow();
     expect(() => parseTaskDocument({ version: 1, tasks: [task, task] })).toThrow("Duplicate task id");
   });

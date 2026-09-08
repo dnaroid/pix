@@ -31,6 +31,7 @@ const MAX_ATTACHMENT_BYTES: u64 = 25 * 1024 * 1024;
 const MAX_ATTACHMENT_CACHE_BYTES: u64 = 250 * 1024 * 1024;
 const MAX_PROJECT_FILE_PREVIEW_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_TASK_DOCUMENT_BYTES: u64 = 1024 * 1024;
+const PROJECT_TASKS_SCHEMA_URL: &str = "https://unpkg.com/pi-ui-extend/schemas/tasks.json";
 const ATTACHMENT_CACHE_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 static ATTACHMENT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static TASK_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -117,6 +118,8 @@ struct ProjectFilePreview {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ProjectTaskDocument {
+    #[serde(rename = "$schema", skip_serializing_if = "Option::is_none")]
+    schema: Option<String>,
     version: u8,
     tasks: Vec<ProjectTask>,
 }
@@ -744,36 +747,172 @@ fn read_project_tasks_from(
         return Ok(empty_task_document());
     }
     let directory = canonical_project_directory(&root, &directory)?;
-    let path = directory.join("tasks.json");
-    if !path.exists() {
-        return Ok(empty_task_document());
+    let path = directory.join("tasks.jsonc");
+    if path.exists() {
+        return read_task_document_path(&root, &path, max_bytes, true);
     }
+
+    // One-time migration from the original strict-JSON desktop task file.
+    let legacy = directory.join("tasks.json");
+    if legacy.exists() {
+        let mut document = read_task_document_path(&root, &legacy, max_bytes, false)?;
+        document.schema = Some(PROJECT_TASKS_SCHEMA_URL.to_owned());
+        write_project_tasks_to(workspace, &document)?;
+        fs::remove_file(&legacy)
+            .map_err(|error| format!("failed to remove migrated .pi/tasks.json: {error}"))?;
+        return Ok(document);
+    }
+
+    Ok(empty_task_document())
+}
+
+fn read_task_document_path(
+    root: &Path,
+    path: &Path,
+    max_bytes: u64,
+    jsonc: bool,
+) -> Result<ProjectTaskDocument, String> {
     let canonical = fs::canonicalize(&path)
         .map_err(|error| format!("failed to resolve {}: {error}", path.display()))?;
     if !canonical.starts_with(&root) {
-        return Err(".pi/tasks.json resolves outside the workspace".to_owned());
+        return Err(format!("{} resolves outside the workspace", task_file_label(jsonc)));
     }
     let metadata = fs::metadata(&canonical)
         .map_err(|error| format!("failed to inspect {}: {error}", canonical.display()))?;
     if !metadata.is_file() {
-        return Err(".pi/tasks.json is not a file".to_owned());
+        return Err(format!("{} is not a file", task_file_label(jsonc)));
     }
     if metadata.len() > max_bytes {
-        return Err(".pi/tasks.json is too large (maximum 1 MB)".to_owned());
+        return Err(format!("{} is too large (maximum 1 MB)", task_file_label(jsonc)));
     }
     let mut bytes = Vec::with_capacity(metadata.len() as usize);
     fs::File::open(&canonical)
-        .map_err(|error| format!("failed to open .pi/tasks.json: {error}"))?
+        .map_err(|error| format!("failed to open {}: {error}", task_file_label(jsonc)))?
         .take(max_bytes + 1)
         .read_to_end(&mut bytes)
-        .map_err(|error| format!("failed to read .pi/tasks.json: {error}"))?;
+        .map_err(|error| format!("failed to read {}: {error}", task_file_label(jsonc)))?;
     if bytes.len() as u64 > max_bytes {
-        return Err(".pi/tasks.json grew beyond the 1 MB limit".to_owned());
+        return Err(format!("{} grew beyond the 1 MB limit", task_file_label(jsonc)));
     }
-    let document: ProjectTaskDocument = serde_json::from_slice(&bytes)
-        .map_err(|error| format!("invalid .pi/tasks.json: {error}"))?;
+    let mut document: ProjectTaskDocument = if jsonc {
+        let source = std::str::from_utf8(&bytes)
+            .map_err(|error| format!("invalid .pi/tasks.jsonc UTF-8: {error}"))?;
+        let normalized = normalize_jsonc(source)?;
+        serde_json::from_str(&normalized)
+            .map_err(|error| format!("invalid .pi/tasks.jsonc: {error}"))?
+    } else {
+        serde_json::from_slice(&bytes)
+            .map_err(|error| format!("invalid .pi/tasks.json: {error}"))?
+    };
+    if document.schema.is_none() {
+        document.schema = Some(PROJECT_TASKS_SCHEMA_URL.to_owned());
+    }
     validate_task_document(&document)?;
     Ok(document)
+}
+
+fn task_file_label(jsonc: bool) -> &'static str {
+    if jsonc { ".pi/tasks.jsonc" } else { ".pi/tasks.json" }
+}
+
+fn normalize_jsonc(source: &str) -> Result<String, String> {
+    let bytes = source.as_bytes();
+    let mut output = bytes.to_vec();
+    let mut index = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+
+    // Replace comments with spaces while preserving line breaks and byte offsets.
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                in_string = false;
+            }
+            index += 1;
+            continue;
+        }
+        if byte == b'"' {
+            in_string = true;
+            index += 1;
+            continue;
+        }
+        if byte == b'/' && index + 1 < bytes.len() && bytes[index + 1] == b'/' {
+            output[index] = b' ';
+            output[index + 1] = b' ';
+            index += 2;
+            while index < bytes.len() && bytes[index] != b'\n' && bytes[index] != b'\r' {
+                output[index] = b' ';
+                index += 1;
+            }
+            continue;
+        }
+        if byte == b'/' && index + 1 < bytes.len() && bytes[index + 1] == b'*' {
+            output[index] = b' ';
+            output[index + 1] = b' ';
+            index += 2;
+            let mut closed = false;
+            while index < bytes.len() {
+                if index + 1 < bytes.len() && bytes[index] == b'*' && bytes[index + 1] == b'/' {
+                    output[index] = b' ';
+                    output[index + 1] = b' ';
+                    index += 2;
+                    closed = true;
+                    break;
+                }
+                if bytes[index] != b'\n' && bytes[index] != b'\r' {
+                    output[index] = b' ';
+                }
+                index += 1;
+            }
+            if !closed {
+                return Err("invalid .pi/tasks.jsonc: unterminated block comment".to_owned());
+            }
+            continue;
+        }
+        index += 1;
+    }
+
+    // JSONC permits trailing commas; blank only commas followed by ] or }.
+    index = 0;
+    in_string = false;
+    escaped = false;
+    while index < output.len() {
+        let byte = output[index];
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                in_string = false;
+            }
+            index += 1;
+            continue;
+        }
+        if byte == b'"' {
+            in_string = true;
+            index += 1;
+            continue;
+        }
+        if byte == b',' {
+            let mut next = index + 1;
+            while next < output.len() && output[next].is_ascii_whitespace() {
+                next += 1;
+            }
+            if next < output.len() && (output[next] == b']' || output[next] == b'}') {
+                output[index] = b' ';
+            }
+        }
+        index += 1;
+    }
+
+    String::from_utf8(output)
+        .map_err(|error| format!("invalid .pi/tasks.jsonc UTF-8: {error}"))
 }
 
 fn write_project_tasks_to(workspace: &Path, document: &ProjectTaskDocument) -> Result<(), String> {
@@ -785,31 +924,33 @@ fn write_project_tasks_to(workspace: &Path, document: &ProjectTaskDocument) -> R
             .map_err(|error| format!("failed to create {}: {error}", directory_path.display()))?;
     }
     let directory = canonical_project_directory(&root, &directory_path)?;
-    let target = directory.join("tasks.json");
+    let target = directory.join("tasks.jsonc");
     if target.exists() {
         let canonical = fs::canonicalize(&target)
             .map_err(|error| format!("failed to resolve {}: {error}", target.display()))?;
         if !canonical.starts_with(&root) {
-            return Err(".pi/tasks.json resolves outside the workspace".to_owned());
+            return Err(".pi/tasks.jsonc resolves outside the workspace".to_owned());
         }
         if !fs::metadata(&canonical)
             .map_err(|error| format!("failed to inspect {}: {error}", canonical.display()))?
             .is_file()
         {
-            return Err(".pi/tasks.json is not a file".to_owned());
+            return Err(".pi/tasks.jsonc is not a file".to_owned());
         }
     }
 
-    let mut serialized = serde_json::to_vec_pretty(document)
-        .map_err(|error| format!("failed to encode .pi/tasks.json: {error}"))?;
+    let mut document = document.clone();
+    document.schema = Some(PROJECT_TASKS_SCHEMA_URL.to_owned());
+    let mut serialized = serde_json::to_vec_pretty(&document)
+        .map_err(|error| format!("failed to encode .pi/tasks.jsonc: {error}"))?;
     serialized.push(b'\n');
     if serialized.len() as u64 > MAX_TASK_DOCUMENT_BYTES {
-        return Err(".pi/tasks.json is too large (maximum 1 MB)".to_owned());
+        return Err(".pi/tasks.jsonc is too large (maximum 1 MB)".to_owned());
     }
 
     let sequence = TASK_WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let temporary = directory.join(format!(
-        ".tasks.json.{}.{}.tmp",
+        ".tasks.jsonc.{}.{}.tmp",
         std::process::id(),
         sequence,
     ));
@@ -861,6 +1002,7 @@ fn canonical_project_directory(root: &Path, directory: &Path) -> Result<PathBuf,
 
 fn empty_task_document() -> ProjectTaskDocument {
     ProjectTaskDocument {
+        schema: Some(PROJECT_TASKS_SCHEMA_URL.to_owned()),
         version: 1,
         tasks: Vec::new(),
     }
@@ -869,12 +1011,12 @@ fn empty_task_document() -> ProjectTaskDocument {
 fn validate_task_document(document: &ProjectTaskDocument) -> Result<(), String> {
     if document.version != 1 {
         return Err(format!(
-            "unsupported .pi/tasks.json version {}",
+            "unsupported .pi/tasks.jsonc version {}",
             document.version
         ));
     }
     if document.tasks.len() > 10_000 {
-        return Err(".pi/tasks.json contains too many tasks".to_owned());
+        return Err(".pi/tasks.jsonc contains too many tasks".to_owned());
     }
     let mut ids = HashSet::new();
     for task in &document.tasks {
@@ -915,22 +1057,22 @@ fn validate_task_document(document: &ProjectTaskDocument) -> Result<(), String> 
 #[cfg(not(windows))]
 fn replace_task_file(temporary: &Path, target: &Path) -> Result<(), String> {
     fs::rename(temporary, target)
-        .map_err(|error| format!("failed to replace .pi/tasks.json: {error}"))
+        .map_err(|error| format!("failed to replace .pi/tasks.jsonc: {error}"))
 }
 
 #[cfg(windows)]
 fn replace_task_file(temporary: &Path, target: &Path) -> Result<(), String> {
     if !target.exists() {
         return fs::rename(temporary, target)
-            .map_err(|error| format!("failed to install .pi/tasks.json: {error}"));
+            .map_err(|error| format!("failed to install .pi/tasks.jsonc: {error}"));
     }
-    let backup = target.with_extension("json.bak");
+    let backup = target.with_extension("jsonc.bak");
     let _ = fs::remove_file(&backup);
     fs::rename(target, &backup)
-        .map_err(|error| format!("failed to prepare .pi/tasks.json replacement: {error}"))?;
+        .map_err(|error| format!("failed to prepare .pi/tasks.jsonc replacement: {error}"))?;
     if let Err(error) = fs::rename(temporary, target) {
         let _ = fs::rename(&backup, target);
-        return Err(format!("failed to replace .pi/tasks.json: {error}"));
+        return Err(format!("failed to replace .pi/tasks.jsonc: {error}"));
     }
     let _ = fs::remove_file(backup);
     Ok(())
@@ -1548,6 +1690,7 @@ mod tests {
 
     fn sample_task_document() -> ProjectTaskDocument {
         ProjectTaskDocument {
+            schema: Some(PROJECT_TASKS_SCHEMA_URL.to_owned()),
             version: 1,
             tasks: vec![ProjectTask {
                 id: "task-1".to_owned(),
@@ -1576,6 +1719,8 @@ mod tests {
         let workspace = temporary_workspace("task-roundtrip");
         let expected = sample_task_document();
         write_project_tasks_to(&workspace, &expected).expect("write tasks");
+        assert!(workspace.join(".pi/tasks.jsonc").is_file());
+        assert!(!workspace.join(".pi/tasks.json").exists());
         let actual = read_project_tasks_from(&workspace, 1024 * 1024).expect("read tasks");
         assert_eq!(actual, expected);
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
@@ -1585,12 +1730,61 @@ mod tests {
     fn rejects_malformed_and_duplicate_task_documents() {
         let workspace = temporary_workspace("invalid-tasks");
         fs::create_dir(workspace.join(".pi")).expect("create .pi directory");
-        fs::write(workspace.join(".pi/tasks.json"), b"{").expect("write malformed task document");
+        fs::write(workspace.join(".pi/tasks.jsonc"), b"{").expect("write malformed task document");
         assert!(read_project_tasks_from(&workspace, 1024).is_err());
 
         let mut duplicate = sample_task_document();
         duplicate.tasks.push(duplicate.tasks[0].clone());
         assert!(write_project_tasks_to(&workspace, &duplicate).is_err());
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
+    fn reads_jsonc_comments_and_trailing_commas() {
+        let workspace = temporary_workspace("jsonc-tasks");
+        fs::create_dir(workspace.join(".pi")).expect("create .pi directory");
+        let source = r#"{
+          // Project tasks may be hand-edited.
+          "version": 1,
+          "tasks": [
+            {
+              "id": "task-1",
+              "title": "Repair reconnect",
+              "type": "bug",
+              "status": "todo",
+              "priority": "high",
+              "createdAt": "2026-09-03T12:00:00.000Z",
+              "updatedAt": "2026-09-03T12:00:00.000Z",
+            },
+          ],
+        }"#;
+        fs::write(workspace.join(".pi/tasks.jsonc"), source).expect("write jsonc task document");
+        let document = read_project_tasks_from(&workspace, 1024 * 1024).expect("read jsonc tasks");
+        assert_eq!(document.tasks.len(), 1);
+        assert_eq!(document.schema.as_deref(), Some(PROJECT_TASKS_SCHEMA_URL));
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
+    fn migrates_legacy_tasks_json_to_jsonc_once() {
+        let workspace = temporary_workspace("legacy-task-migration");
+        fs::create_dir(workspace.join(".pi")).expect("create .pi directory");
+        let mut legacy = sample_task_document();
+        legacy.schema = None;
+        fs::write(
+            workspace.join(".pi/tasks.json"),
+            serde_json::to_vec_pretty(&legacy).expect("encode legacy task document"),
+        )
+        .expect("write legacy task document");
+
+        let document = read_project_tasks_from(&workspace, 1024 * 1024).expect("migrate tasks");
+        assert_eq!(document.tasks, legacy.tasks);
+        assert_eq!(document.schema.as_deref(), Some(PROJECT_TASKS_SCHEMA_URL));
+        assert!(!workspace.join(".pi/tasks.json").exists());
+        let migrated = workspace.join(".pi/tasks.jsonc");
+        assert!(migrated.is_file());
+        let migrated_text = fs::read_to_string(migrated).expect("read migrated task document");
+        assert!(migrated_text.contains(PROJECT_TASKS_SCHEMA_URL));
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
     }
 

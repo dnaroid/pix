@@ -22,7 +22,7 @@ export const EXTENSION_EVAL_COVERAGE: Record<string, EvalCoverageEntry> = {
 	"truncation-metadata-normalizer": { deterministic: ["test/context-gateway/metadata-normalization.test.ts", "test/config.test.ts"] },
 	"dcp": { deterministic: ["test/dcp-prompts.test.ts", "test/compress-pruner.test.ts", "test/dcp-journal.test.ts", "test/dcp-journal-lifecycle.test.ts"] },
 	"prompt-commands": { deterministic: ["test/evals/extension-contracts.test.ts"] },
-	"skill-installer": { deterministic: ["test/evals/extension-contracts.test.ts"] },
+	"resource-registry": { deterministic: ["test/resource-registry.test.ts", "test/evals/extension-contracts.test.ts"] },
 	"credential-firewall": { deterministic: ["test/credential-firewall.test.ts"] },
 	"codex-reasoning-fix": { deterministic: ["test/codex-reasoning-fix.test.ts"] },
 };

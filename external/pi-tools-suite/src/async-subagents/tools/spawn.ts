@@ -226,7 +226,7 @@ export function registerSpawnTool(
 			const activePreset = activePresetName ? config.presets?.[activePresetName] : undefined;
 			if (getSessionSubagentPresetOverride() && !activePreset) {
 				return {
-					content: [{ type: "text", text: `AGENTS_PRESET=${activePresetName} does not match any preset in asyncSubagents config.` }],
+					content: [{ type: "text", text: `AGENTS_PRESET=${activePresetName} does not match any available sub-agent preset.` }],
 					details: {},
 					isError: true,
 				};

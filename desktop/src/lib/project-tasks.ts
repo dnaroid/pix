@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const TASK_DOCUMENT_VERSION = 1 as const;
+export const TASK_SCHEMA_URL = "https://unpkg.com/pi-ui-extend/schemas/tasks.json";
 export const TASK_TYPES = ["bug", "feature", "improvement"] as const;
 export const TASK_STATUSES = ["backlog", "todo", "in-progress", "done"] as const;
 export const TASK_PRIORITIES = ["low", "medium", "high", "urgent"] as const;
@@ -22,6 +23,7 @@ export interface ProjectTask {
 }
 
 export interface ProjectTaskDocument {
+  $schema?: string;
   version: typeof TASK_DOCUMENT_VERSION;
   tasks: ProjectTask[];
 }
@@ -50,6 +52,7 @@ const projectTaskSchema = z.object({
 }).strict();
 
 const taskDocumentSchema = z.object({
+  $schema: z.string().min(1).max(2_048).optional(),
   version: z.literal(TASK_DOCUMENT_VERSION),
   tasks: z.array(projectTaskSchema).max(10_000),
 }).strict().superRefine((document, context) => {
@@ -68,6 +71,7 @@ const taskDocumentSchema = z.object({
 });
 
 export const EMPTY_TASK_DOCUMENT: ProjectTaskDocument = {
+  $schema: TASK_SCHEMA_URL,
   version: TASK_DOCUMENT_VERSION,
   tasks: [],
 };
@@ -77,7 +81,7 @@ export function parseTaskDocument(value: unknown): ProjectTaskDocument {
   if (parsed.success) return parsed.data;
   const issue = parsed.error.issues[0];
   const path = issue?.path.length ? ` at ${issue.path.join(".")}` : "";
-  throw new Error(`Invalid .pi/tasks.json${path}: ${issue?.message ?? "unknown error"}`);
+  throw new Error(`Invalid .pi/tasks.jsonc${path}: ${issue?.message ?? "unknown error"}`);
 }
 
 export function buildTaskPrompt(task: ProjectTask): string {

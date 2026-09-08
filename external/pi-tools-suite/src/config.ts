@@ -12,6 +12,16 @@ export interface PiToolsSuiteConfig {
 	todoThinkingOverrides: Record<string, TodoThinkingLevel>;
 	/** Vision-capable model used by the coding-discipline lookup tool; unset disables lookup. */
 	lookupModel?: string;
+	resourceRegistry: ResourceRegistryConfig;
+}
+
+export interface ResourceRegistryConfig {
+	/** Git remote containing reusable skills/agents and project-scoped state under projects/. */
+	remote?: string;
+	/** Branch used for installs, updates, and pushes. */
+	branch: string;
+	/** Optional explicit project key for project-scoped registry state when Git remote discovery is unavailable or should be overridden. */
+	projectKey?: string;
 }
 
 type MutableConfig = {
@@ -20,6 +30,7 @@ type MutableConfig = {
 	todoThinking: boolean;
 	todoThinkingOverrides: Map<string, TodoThinkingLevel>;
 	lookupModel: string | undefined;
+	resourceRegistry: ResourceRegistryConfig;
 };
 
 const TODO_THINKING_OVERRIDE_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
@@ -35,6 +46,7 @@ const ENABLED_LIST_KEYS = ["enabledModules", "enabledExtensions"];
 const MODULE_MAP_KEYS = ["modules", "extensions"];
 const DEFAULT_DISABLED_MODULES = new Set<string>(["credential-firewall", "truncation-metadata-normalizer"]);
 const DEFAULT_TODO_THINKING_OVERRIDES = new Map<string, TodoThinkingLevel>([["zai/glm-5.3", "max"]]);
+const DEFAULT_RESOURCE_REGISTRY_BRANCH = "main";
 
 export function getPiToolsSuiteUserConfigPath(homeDir = homedir()): string {
 	return join(homeDir, ".config", "pi", "pi-tools-suite.jsonc");
@@ -66,6 +78,24 @@ function normalizeLookupModel(raw: unknown): string | undefined {
 	if (typeof raw !== "string") return undefined;
 	const trimmed = raw.trim();
 	return trimmed ? trimmed : undefined;
+}
+
+function normalizeNonEmptyString(raw: unknown): string | undefined {
+	if (typeof raw !== "string") return undefined;
+	const trimmed = raw.trim();
+	return trimmed ? trimmed : undefined;
+}
+
+function mergeResourceRegistry(config: MutableConfig, raw: unknown): void {
+	if (!isRecord(raw)) return;
+	if (Object.prototype.hasOwnProperty.call(raw, "remote")) {
+		config.resourceRegistry.remote = normalizeNonEmptyString(raw.remote);
+	}
+	const branch = normalizeNonEmptyString(raw.branch);
+	if (branch) config.resourceRegistry.branch = branch;
+	if (Object.prototype.hasOwnProperty.call(raw, "projectKey")) {
+		config.resourceRegistry.projectKey = normalizeNonEmptyString(raw.projectKey);
+	}
 }
 
 function isTodoThinkingLevel(raw: unknown): raw is TodoThinkingLevel {
@@ -145,6 +175,7 @@ function mergeConfigLayer(config: MutableConfig, raw: Record<string, unknown>, k
 	if (typeof raw.todoThinking === "boolean") config.todoThinking = raw.todoThinking;
 	mergeTodoThinkingOverrides(config, raw.todoThinkingOverrides);
 	if (Object.prototype.hasOwnProperty.call(raw, "lookupModel")) config.lookupModel = normalizeLookupModel(raw.lookupModel);
+	mergeResourceRegistry(config, raw.resourceRegistry);
 
 	for (const key of DISABLED_LIST_KEYS) addDisabled(config, raw[key], knownModules);
 	for (const key of ENABLED_LIST_KEYS) removeDisabled(config, raw[key], knownModules);
@@ -191,6 +222,13 @@ function applyEnv(config: MutableConfig, env: Env, knownModules: ReadonlySet<str
 	const todoThinking = boolFromEnv(env.PI_TOOLS_SUITE_TODO_THINKING);
 	if (todoThinking !== undefined) config.todoThinking = todoThinking;
 
+	const registryRemote = normalizeNonEmptyString(env.PI_RESOURCE_REGISTRY_REMOTE);
+	if (registryRemote) config.resourceRegistry.remote = registryRemote;
+	const registryBranch = normalizeNonEmptyString(env.PI_RESOURCE_REGISTRY_BRANCH);
+	if (registryBranch) config.resourceRegistry.branch = registryBranch;
+	const registryProjectKey = normalizeNonEmptyString(env.PI_RESOURCE_REGISTRY_PROJECT_KEY);
+	if (registryProjectKey) config.resourceRegistry.projectKey = registryProjectKey;
+
 	return config;
 }
 
@@ -203,6 +241,7 @@ export function loadPiToolsSuiteConfig(moduleNames: readonly string[], options: 
 		todoThinking: false,
 		todoThinkingOverrides: new Map(DEFAULT_TODO_THINKING_OVERRIDES),
 		lookupModel: undefined,
+		resourceRegistry: { branch: DEFAULT_RESOURCE_REGISTRY_BRANCH },
 	};
 	const userConfigPath = getPiToolsSuiteUserConfigPath(options.homeDir);
 
@@ -223,5 +262,6 @@ export function loadPiToolsSuiteConfig(moduleNames: readonly string[], options: 
 		todoThinking: config.todoThinking,
 		todoThinkingOverrides: Object.fromEntries(config.todoThinkingOverrides),
 		...(config.lookupModel ? { lookupModel: config.lookupModel } : {}),
+		resourceRegistry: { ...config.resourceRegistry },
 	};
 }

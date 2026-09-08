@@ -408,7 +408,7 @@
               <div class="px-4 py-8 text-center">
                 <ListTodo class="mx-auto mb-2 h-5 w-5 text-[var(--tool-error)]" aria-hidden="true" />
                 <p class="text-xs font-medium">Task file needs attention</p>
-                <p class="mt-1 text-[10px] leading-4 text-muted-foreground">Fix <code class="font-mono">.pi/tasks.json</code>, then try again. Its contents were not replaced.</p>
+                <p class="mt-1 text-[10px] leading-4 text-muted-foreground">Fix <code class="font-mono">.pi/tasks.jsonc</code>, then try again. Its contents were not replaced.</p>
                 <button class="mt-3 inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-card px-2.5 text-[10px] font-medium hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring" type="button" onclick={onReload}><RotateCw class="h-3 w-3" aria-hidden="true" />Retry</button>
               </div>
             {:else if !workspace}
@@ -477,7 +477,7 @@
             <div class="rounded-lg border border-sidebar-border bg-background/55 p-2"><dt class="text-[9px] text-muted-foreground">Tasks</dt><dd class="mt-0.5 text-sm font-semibold text-foreground">{tasks.length}</dd></div>
             <div class="rounded-lg border border-sidebar-border bg-background/55 p-2"><dt class="text-[9px] text-muted-foreground">Done</dt><dd class="mt-0.5 text-sm font-semibold text-[var(--tool-success)]">{doneCount}</dd></div>
           </dl>
-          <p class="mt-3 text-[10px] leading-4 text-muted-foreground">Project tasks are shared through <code class="rounded bg-muted px-1 py-0.5 font-mono">.pi/tasks.json</code>.</p>
+          <p class="mt-3 text-[10px] leading-4 text-muted-foreground">Project tasks are shared through <code class="rounded bg-muted px-1 py-0.5 font-mono">.pi/tasks.jsonc</code>.</p>
         </section>
       {:else}
         <div id="workspace-session-panel" class="grid min-h-0" role="tabpanel" aria-labelledby="workspace-session-tab" tabindex="0">

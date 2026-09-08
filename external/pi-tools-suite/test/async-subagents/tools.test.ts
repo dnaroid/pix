@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { spawn as spawnChild } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -42,14 +42,19 @@ mock.module("@earendil-works/pi-ai", () => piAiMock);
 mock.module("@earendil-works/pi-ai/compat", () => piAiMock);
 
 const tempDirs: string[] = [];
+const defaultActivePreset = path.join(os.tmpdir(), `async-subagents-tools-preset-${process.pid}.json`);
 let originalArgv1 = process.argv[1];
 const originalAsyncSubagentsModel = process.env.ASYNC_SUBAGENTS_MODEL;
 const originalPiSubagentsModel = process.env.PI_SUBAGENTS_MODEL;
 const originalAsyncSubagentsForceCurrentModel = process.env.ASYNC_SUBAGENTS_FORCE_CURRENT_MODEL;
 const originalPiSubagentsForceCurrentModel = process.env.PI_SUBAGENTS_FORCE_CURRENT_MODEL;
 const originalAsyncSubagentsEnableSessions = process.env.ASYNC_SUBAGENTS_ENABLE_SESSIONS;
-const originalAsyncSubagentsConfig = process.env.ASYNC_SUBAGENTS_CONFIG;
-const originalPiSubagentsConfig = process.env.PI_SUBAGENTS_CONFIG;
+const originalAsyncSubagentsRouting = process.env.ASYNC_SUBAGENTS_ROUTING;
+const originalPiSubagentsRouting = process.env.PI_SUBAGENTS_ROUTING;
+const originalAsyncSubagentsMaxConcurrent = process.env.ASYNC_SUBAGENTS_MAX_CONCURRENT;
+const originalPiSubagentsMaxConcurrent = process.env.PI_SUBAGENTS_MAX_CONCURRENT;
+const originalAsyncSubagentsMaxResultBytes = process.env.ASYNC_SUBAGENTS_MAX_RESULT_BYTES;
+const originalPiSubagentsMaxResultBytes = process.env.PI_SUBAGENTS_MAX_RESULT_BYTES;
 const originalAsyncSubagentsActivePresetFile = process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE;
 const originalPiSubagentsActivePresetFile = process.env.PI_SUBAGENTS_ACTIVE_PRESET_FILE;
 const originalAgentsPreset = process.env.AGENTS_PRESET;
@@ -68,6 +73,17 @@ function writeFile(filePath: string, content = ""): void {
 	fs.writeFileSync(filePath, content, "utf-8");
 }
 
+beforeEach(() => {
+	process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE = defaultActivePreset;
+	delete process.env.ASYNC_SUBAGENTS_ROUTING;
+	delete process.env.PI_SUBAGENTS_ROUTING;
+	delete process.env.ASYNC_SUBAGENTS_MAX_CONCURRENT;
+	delete process.env.PI_SUBAGENTS_MAX_CONCURRENT;
+	delete process.env.ASYNC_SUBAGENTS_MAX_RESULT_BYTES;
+	delete process.env.PI_SUBAGENTS_MAX_RESULT_BYTES;
+	fs.rmSync(defaultActivePreset, { force: true });
+});
+
 function createAgent(runDir: string, id: string, files: Record<string, string> = {}): string {
 	const agentDir = path.join(runDir, id);
 	writeFile(path.join(agentDir, "prompt.md"), `prompt for ${id}`);
@@ -76,24 +92,26 @@ function createAgent(runDir: string, id: string, files: Record<string, string> =
 }
 
 function isolateSubagentConfig(cwd: string): void {
+	void cwd;
 	delete process.env.ASYNC_SUBAGENTS_MODEL;
 	delete process.env.PI_SUBAGENTS_MODEL;
-	process.env.ASYNC_SUBAGENTS_CONFIG = path.join(cwd, "async-subagents-test-config.json");
-	writeFile(process.env.ASYNC_SUBAGENTS_CONFIG, JSON.stringify({ types: {} }));
+	delete process.env.ASYNC_SUBAGENTS_ROUTING;
+	delete process.env.PI_SUBAGENTS_ROUTING;
+	delete process.env.ASYNC_SUBAGENTS_MAX_CONCURRENT;
+	delete process.env.PI_SUBAGENTS_MAX_CONCURRENT;
+	delete process.env.ASYNC_SUBAGENTS_MAX_RESULT_BYTES;
+	delete process.env.PI_SUBAGENTS_MAX_RESULT_BYTES;
 }
 
 function isolateSubagentConfigWithPresets(cwd: string): void {
 	delete process.env.ASYNC_SUBAGENTS_MODEL;
 	delete process.env.PI_SUBAGENTS_MODEL;
-	process.env.ASYNC_SUBAGENTS_CONFIG = path.join(cwd, "async-subagents-test-config.json");
 	process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE = path.join(cwd, "active-subagent-preset.json");
-	writeFile(process.env.ASYNC_SUBAGENTS_CONFIG, JSON.stringify({
-		types: {},
-		presets: {
-			fast: { model: "preset/fast", thinking: "minimal", extraArgs: ["--temperature", "0"] },
-			deep: { model: "preset/deep", thinking: "high" },
-		},
+	writeFile(path.join(cwd, ".pi", "agents", "presets.jsonc"), JSON.stringify({
+		fast: { description: "fast pool", models: ["preset/fast"] },
+		deep: { description: "deep pool", models: ["preset/deep"] },
 	}));
+	writeFile(path.join(cwd, ".pi", "agents", "research.md"), "---\nmodels: preset/fast, preset/deep\n---\nResearch the task.\n");
 }
 
 class FakePi {
@@ -158,10 +176,18 @@ afterEach(async () => {
 	else process.env.PI_SUBAGENTS_FORCE_CURRENT_MODEL = originalPiSubagentsForceCurrentModel;
 	if (originalAsyncSubagentsEnableSessions === undefined) delete process.env.ASYNC_SUBAGENTS_ENABLE_SESSIONS;
 	else process.env.ASYNC_SUBAGENTS_ENABLE_SESSIONS = originalAsyncSubagentsEnableSessions;
-	if (originalAsyncSubagentsConfig === undefined) delete process.env.ASYNC_SUBAGENTS_CONFIG;
-	else process.env.ASYNC_SUBAGENTS_CONFIG = originalAsyncSubagentsConfig;
-	if (originalPiSubagentsConfig === undefined) delete process.env.PI_SUBAGENTS_CONFIG;
-	else process.env.PI_SUBAGENTS_CONFIG = originalPiSubagentsConfig;
+	if (originalAsyncSubagentsRouting === undefined) delete process.env.ASYNC_SUBAGENTS_ROUTING;
+	else process.env.ASYNC_SUBAGENTS_ROUTING = originalAsyncSubagentsRouting;
+	if (originalPiSubagentsRouting === undefined) delete process.env.PI_SUBAGENTS_ROUTING;
+	else process.env.PI_SUBAGENTS_ROUTING = originalPiSubagentsRouting;
+	if (originalAsyncSubagentsMaxConcurrent === undefined) delete process.env.ASYNC_SUBAGENTS_MAX_CONCURRENT;
+	else process.env.ASYNC_SUBAGENTS_MAX_CONCURRENT = originalAsyncSubagentsMaxConcurrent;
+	if (originalPiSubagentsMaxConcurrent === undefined) delete process.env.PI_SUBAGENTS_MAX_CONCURRENT;
+	else process.env.PI_SUBAGENTS_MAX_CONCURRENT = originalPiSubagentsMaxConcurrent;
+	if (originalAsyncSubagentsMaxResultBytes === undefined) delete process.env.ASYNC_SUBAGENTS_MAX_RESULT_BYTES;
+	else process.env.ASYNC_SUBAGENTS_MAX_RESULT_BYTES = originalAsyncSubagentsMaxResultBytes;
+	if (originalPiSubagentsMaxResultBytes === undefined) delete process.env.PI_SUBAGENTS_MAX_RESULT_BYTES;
+	else process.env.PI_SUBAGENTS_MAX_RESULT_BYTES = originalPiSubagentsMaxResultBytes;
 	if (originalAsyncSubagentsActivePresetFile === undefined) delete process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE;
 	else process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE = originalAsyncSubagentsActivePresetFile;
 	if (originalPiSubagentsActivePresetFile === undefined) delete process.env.PI_SUBAGENTS_ACTIVE_PRESET_FILE;
@@ -187,7 +213,7 @@ describe.serial("extension entrypoint", () => {
 		registerExtension(pi as any);
 
 		expect([...pi.tools.keys()].sort()).toEqual(["subagents"]);
-		expect([...pi.commands.keys()]).toEqual(["subagent-preset", "subagent-preset-config", "ultrawork", "ulw", "hyperplan", "sub-status", "sub-stop"]);
+		expect([...pi.commands.keys()]).toEqual(["subagent-preset", "ultrawork", "ulw", "hyperplan", "sub-status", "sub-stop"]);
 		expect([...pi.renderers.keys()]).toEqual([]);
 	});
 
@@ -256,8 +282,6 @@ describe.serial("extension entrypoint", () => {
 	test.serial("injects the effective project-local sub-agent catalog into the parent system prompt", async () => {
 		const { default: registerExtension } = await import("../../src/async-subagents/index.js");
 		const cwd = tempDir();
-		delete process.env.ASYNC_SUBAGENTS_CONFIG;
-		delete process.env.PI_SUBAGENTS_CONFIG;
 		writeFile(path.join(cwd, ".pi", "agents", "house-review.md"), `---
 description: Review changes using this project's house rules.
 thinking: high
@@ -294,7 +318,7 @@ Check the project conventions before approving changes.
 		const pi = new FakePi();
 		registerExtension(pi as any);
 
-		expect([...pi.commands.keys()]).toEqual(["subagent-preset", "subagent-preset-config", "ultrawork", "ulw", "hyperplan", "sub-status", "sub-open", "sub-back", "sub-where", "sub-stop"]);
+		expect([...pi.commands.keys()]).toEqual(["subagent-preset", "ultrawork", "ulw", "hyperplan", "sub-status", "sub-open", "sub-back", "sub-where", "sub-stop"]);
 	});
 
 	test.serial("session shutdown kills running sub-agent processes before deleting run state", async () => {
@@ -510,7 +534,7 @@ Check the project conventions before approving changes.
 
 		await pi.commands.get("subagent-preset").handler("", ctx);
 		expect(selects[0].title).toBe("Select active sub-agent preset");
-		expect(selects[0].labels).toEqual(expect.arrayContaining([expect.stringContaining("deep — model:preset/deep"), expect.stringContaining("fast — model:preset/fast")]));
+		expect(selects[0].labels).toEqual(expect.arrayContaining([expect.stringContaining("deep — deep pool"), expect.stringContaining("fast — fast pool")]));
 		expect(notifications[0]).toContain('Active sub-agent preset "deep"');
 		expect(JSON.parse(fs.readFileSync(process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE!, "utf-8")).activePreset).toBe("deep");
 	});
@@ -545,7 +569,6 @@ Check the project conventions before approving changes.
 		}, undefined, undefined, { cwd, sessionManager: { getSessionFile: () => undefined } });
 		let piArgs = fs.readFileSync(path.join(result.details.runDir, "agent-1", "pi_args"), "utf-8");
 		expect(piArgs).toContain("--model\npreset/deep");
-		expect(piArgs).toContain("--thinking\nhigh");
 		await waitUntil(() => fs.existsSync(path.join(result.details.runDir, "agent-1", "exit_code")));
 
 		await pi.commands.get("subagent-preset").handler("session-clear", ctx);
@@ -558,18 +581,14 @@ Check the project conventions before approving changes.
 		}, undefined, undefined, { cwd, sessionManager: { getSessionFile: () => undefined } });
 		piArgs = fs.readFileSync(path.join(result.details.runDir, "agent-1", "pi_args"), "utf-8");
 		expect(piArgs).toContain("--model\npreset/fast");
-		expect(piArgs).toContain("--thinking\nminimal");
 		await waitUntil(() => fs.existsSync(path.join(result.details.runDir, "agent-1", "exit_code")));
 	});
 
-	test.serial("sub-agent preset command copies bundled sample when config is missing", async () => {
+	test.serial("sub-agent preset command exposes bundled model pools", async () => {
 		const { default: registerExtension } = await import("../../src/async-subagents/index.js");
 		const cwd = tempDir();
-		const targetPath = path.join(cwd, "config", "async-subagents.jsonc");
-		process.env.ASYNC_SUBAGENTS_CONFIG = targetPath;
 		const pi = new FakePi();
 		registerExtension(pi as any);
-		const notifications: string[] = [];
 		const selects: any[] = [];
 		const ctx = {
 			cwd,
@@ -577,22 +596,21 @@ Check the project conventions before approving changes.
 			ui: {
 				async select(title: string, labels: string[]) {
 					selects.push({ title, labels });
-					return "Copy sample asyncSubagents config";
+					return labels.find((label) => label.startsWith("cheap —"));
 				},
-				notify(message: string) { notifications.push(message); },
+				notify() {},
 			},
 			sessionManager: { getSessionFile: () => undefined },
 			switchSession: async () => ({ cancelled: false }),
 		};
 
 		await pi.commands.get("subagent-preset").handler("", ctx);
-		expect(selects[0]).toEqual({ title: "No asyncSubagents config found", labels: ["Copy sample asyncSubagents config"] });
-		expect(notifications[0]).toContain("Copied sample asyncSubagents config");
-		expect(fs.existsSync(targetPath)).toBe(true);
-		expect(fs.readFileSync(targetPath, "utf-8")).toContain('"presets"');
-
-		await pi.commands.get("subagent-preset").handler("init", ctx);
-		expect(notifications[1]).toContain("already exists; not overwriting");
+		expect(selects[0].title).toBe("Select active sub-agent preset");
+		expect(selects[0].labels).toEqual(expect.arrayContaining([
+			expect.stringContaining("cheap —"),
+			expect.stringContaining("deep —"),
+			expect.stringContaining("gpt —"),
+		]));
 	});
 
 	test.serial("cleans entrypoint live tracking when a registered spawn completes", async () => {
@@ -889,13 +907,10 @@ describe.serial("spawn tool", () => {
 				const cwd = tempDir();
 				isolateSubagentConfig(cwd);
 				process.env.AGENTS_PRESET = "limited";
-				writeFile(process.env.ASYNC_SUBAGENTS_CONFIG!, JSON.stringify({
-					presets: { limited: { models: ["test/allowed"] } },
-					types: {
-						research: { models: ["test/allowed"] },
-						implement: { models: [failure === "pool" ? "test/excluded" : "test/allowed"] },
-					},
+				writeFile(path.join(cwd, ".pi", "agents", "presets.jsonc"), JSON.stringify({
+					limited: { description: "test pool", models: ["test/allowed"] },
 				}));
+				writeFile(path.join(cwd, ".pi", "agents", "implement.md"), `---\nmodels: ${failure === "pool" ? "test/excluded" : "test/allowed"}\n---\nImplement the requested change.\n`);
 				const pi = new FakePi();
 				const liveAgents = new Map<string, Map<string, any>>();
 				const complete = mock(() => { throw new Error("Explicit roles must not call a router"); });
@@ -931,7 +946,7 @@ describe.serial("spawn tool", () => {
 				const cwd = tempDir();
 				isolateSubagentConfig(cwd);
 				if (failure === "disabled") {
-					writeFile(process.env.ASYNC_SUBAGENTS_CONFIG!, JSON.stringify({ types: {}, routing: { enabled: false } }));
+					process.env.ASYNC_SUBAGENTS_ROUTING = "0";
 				}
 				const pi = new FakePi();
 				const liveAgents = new Map<string, Map<string, any>>();
@@ -987,7 +1002,7 @@ describe.serial("spawn tool", () => {
 
 		const invalid = await tool.execute("call", { tasks: [] }, undefined, undefined, { cwd });
 		expect(invalid).toEqual({ content: [{ type: "text", text: "spawn requires at least one task in the tasks array." }], details: {}, isError: true });
-		writeFile(process.env.ASYNC_SUBAGENTS_CONFIG!, JSON.stringify({ types: {}, routing: { enabled: false } }));
+		process.env.ASYNC_SUBAGENTS_ROUTING = "0";
 
 		const blockedRunDir = path.join(cwd, "blocked-run");
 		writeFile(blockedRunDir, "not a directory");
@@ -1057,13 +1072,8 @@ setTimeout(() => {}, 1000);
 		});
 		const tool = pi.tools.get("async_subagents_spawn");
 		const cwd = tempDir();
-		process.env.ASYNC_SUBAGENTS_CONFIG = path.join(cwd, "async-subagents-test-config.json");
-		writeFile(process.env.ASYNC_SUBAGENTS_CONFIG, JSON.stringify({
-			types: {
-				"wrench-agent": { model: "zai/glm-5-turbo", icon: "wrench" },
-				"plain-agent": { model: "zai/glm-5-turbo" },
-			},
-		}));
+		writeFile(path.join(cwd, ".pi", "agents", "wrench-agent.md"), "---\nmodel: zai/glm-5-turbo\nicon: wrench\n---\nTighten bolts.\n");
+		writeFile(path.join(cwd, ".pi", "agents", "plain-agent.md"), "---\nmodel: zai/glm-5-turbo\n---\nWork without an icon.\n");
 
 		const piScript = path.join(tempDir(), "pi.js");
 		writeFile(piScript, `
@@ -1102,8 +1112,7 @@ setTimeout(() => {}, 1000);
 		});
 		const tool = pi.tools.get("async_subagents_spawn");
 		const cwd = tempDir();
-		process.env.ASYNC_SUBAGENTS_CONFIG = path.join(cwd, "async-subagents-test-config.json");
-		writeFile(process.env.ASYNC_SUBAGENTS_CONFIG, JSON.stringify({ maxResultBytes: 3, types: {} }));
+		process.env.ASYNC_SUBAGENTS_MAX_RESULT_BYTES = "3";
 
 		const piScript = path.join(tempDir(), "pi.js");
 		writeFile(piScript, `
@@ -1194,8 +1203,7 @@ setTimeout(() => {}, 1000);
 		});
 		const tool = pi.tools.get("async_subagents_spawn");
 		const cwd = tempDir();
-		process.env.ASYNC_SUBAGENTS_CONFIG = path.join(cwd, "async-subagents-test-config.json");
-		writeFile(process.env.ASYNC_SUBAGENTS_CONFIG, JSON.stringify({ maxConcurrent: 1, types: {} }));
+		process.env.ASYNC_SUBAGENTS_MAX_CONCURRENT = "1";
 
 		const piScript = path.join(tempDir(), "pi.js");
 		writeFile(piScript, `
@@ -1250,8 +1258,7 @@ setTimeout(() => {}, 2000);
 		const spawnTool = pi.tools.get("async_subagents_spawn");
 		const stopTool = pi.tools.get("async_subagents_stop");
 		const cwd = tempDir();
-		process.env.ASYNC_SUBAGENTS_CONFIG = path.join(cwd, "async-subagents-test-config.json");
-		writeFile(process.env.ASYNC_SUBAGENTS_CONFIG, JSON.stringify({ maxConcurrent: 1, types: {} }));
+		process.env.ASYNC_SUBAGENTS_MAX_CONCURRENT = "1";
 
 		const piScript = path.join(tempDir(), "pi.js");
 		writeFile(piScript, `
@@ -1314,7 +1321,6 @@ setTimeout(() => {}, 1000);
 
 		const piArgs = fs.readFileSync(path.join(result.details.runDir, "agent-1", "pi_args"), "utf-8");
 		expect(piArgs).toContain("--model\npreset/deep");
-		expect(piArgs).toContain("--thinking\nhigh");
 		expect(piArgs).not.toContain("--temperature\n0");
 		expect(JSON.parse(fs.readFileSync(process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE!, "utf-8")).activePreset).toBe("fast");
 		await waitUntil(() => liveAgents.size === 0);
@@ -1332,11 +1338,10 @@ setTimeout(() => {}, 1000);
 		const tool = pi.tools.get("async_subagents_spawn");
 		const cwd = tempDir();
 		const attemptFile = path.join(cwd, "models.json");
-		process.env.ASYNC_SUBAGENTS_CONFIG = path.join(cwd, "async-subagents-test-config.json");
 		process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE = path.join(cwd, "active-subagent-preset.json");
-		writeFile(process.env.ASYNC_SUBAGENTS_CONFIG, JSON.stringify({
-			types: { quick: {} },
-			presets: { fast: { types: { quick: { model: "preset/primary", fallbackModels: ["fallback/quick"], thinking: "off" } } } },
+		writeFile(path.join(cwd, ".pi", "agents", "quick.md"), "---\nmodels: preset/primary, fallback/quick\nthinking: off\n---\nQuick work.\n");
+		writeFile(path.join(cwd, ".pi", "agents", "presets.jsonc"), JSON.stringify({
+			fast: { description: "fast pool", models: ["preset/primary", "fallback/quick"] },
 		}));
 		writeFile(process.env.ASYNC_SUBAGENTS_ACTIVE_PRESET_FILE, JSON.stringify({ activePreset: "fast" }));
 
@@ -1397,7 +1402,7 @@ setTimeout(() => {}, 1000);
 		}, undefined, undefined, { cwd });
 
 		expect(result.isError).toBe(true);
-		expect(result.content[0].text).toContain("AGENTS_PRESET=missing does not match any preset");
+		expect(result.content[0].text).toContain("AGENTS_PRESET=missing does not match any available sub-agent preset");
 	});
 
 	test.serial("does not terminate sub-agent auto-retries after an error agent_end", async () => {
@@ -1453,15 +1458,10 @@ setTimeout(() => {}, 1000);
 		});
 		const tool = pi.tools.get("async_subagents_spawn");
 		const cwd = tempDir();
-		process.env.ASYNC_SUBAGENTS_CONFIG = path.join(cwd, ".pi", "async-subagents.json");
 		delete process.env.ASYNC_SUBAGENTS_MODEL;
 		delete process.env.PI_SUBAGENTS_MODEL;
-		writeFile(process.env.ASYNC_SUBAGENTS_CONFIG, JSON.stringify({
-			types: {
-				scan: { model: "fast/scan", thinking: "off", tools: ["read", "grep"] },
-				review: { model: "smart/review", thinking: "high", tools: ["read", "grep"], extraArgs: ["--temperature", "0.1"], promptAppend: "Review-only instruction for {task}" },
-			},
-		}));
+		writeFile(path.join(cwd, ".pi", "agents", "scan.md"), "---\nmodel: fast/scan\nthinking: off\ntools: read, grep\n---\nScan the requested files.\n");
+		writeFile(path.join(cwd, ".pi", "agents", "review.md"), "---\nmodel: smart/review\nthinking: high\ntools: read, grep\nextraArgs: --temperature, 0.1\n---\nReview-only instruction for {task}\n");
 		routerResponseText = JSON.stringify({
 			routes: [
 				{ id: "scan-agent", subagentType: "scan" },
@@ -1519,12 +1519,7 @@ setTimeout(() => {}, 1000);
 		const cwd = tempDir();
 		process.env.ASYNC_SUBAGENTS_FORCE_CURRENT_MODEL = "1";
 		process.env.ASYNC_SUBAGENTS_MODEL = "env/fallback-model";
-		process.env.ASYNC_SUBAGENTS_CONFIG = path.join(cwd, ".pi", "async-subagents.json");
-		writeFile(process.env.ASYNC_SUBAGENTS_CONFIG, JSON.stringify({
-			types: {
-				scan: { model: "config/scan", extraArgs: ["--model", "config/arg-model", "--temperature", "0"] },
-			},
-		}));
+		writeFile(path.join(cwd, ".pi", "agents", "scan.md"), "---\nmodel: config/scan\nextraArgs: --model, config/arg-model, --temperature, 0\n---\nScan files.\n");
 
 		const piScript = path.join(tempDir(), "pi.js");
 		writeFile(piScript, `

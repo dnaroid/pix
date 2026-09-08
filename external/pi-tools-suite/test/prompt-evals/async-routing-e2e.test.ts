@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { getSubagentConfigSamplePath, loadSubagentConfig, routeSubagentTasks, type SubagentConfig } from "../../src/async-subagents/lib.js";
+import { loadSubagentConfig, routeSubagentTasks, type SubagentConfig } from "../../src/async-subagents/lib.js";
 import { decideUltraworkAuto } from "../../src/async-subagents/core/ultrawork-auto.js";
 import { withE2ERetry } from "../e2e-retry.js";
 import { createLiveModelContext, resolveLiveModelRef } from "../support/live-model.js";
@@ -15,7 +15,7 @@ const E2E_TIMEOUT_MS = Number(process.env.ASYNC_SUBAGENTS_ROUTING_E2E_TIMEOUT_MS
 const e2eTest = RUN_E2E ? test : test.skip;
 
 function routingConfig(): SubagentConfig {
-	const config = loadSubagentConfig(process.cwd(), { ASYNC_SUBAGENTS_CONFIG: getSubagentConfigSamplePath() });
+	const config = loadSubagentConfig(process.cwd(), {});
 	return {
 		...config,
 		routing: {

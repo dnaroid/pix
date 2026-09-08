@@ -55,6 +55,33 @@ describe("pi-tools-suite config", () => {
 		expect(loadPiToolsSuiteConfig(MODULES, { cwd, homeDir, env: {} }).lookupModel).toBeUndefined();
 	});
 
+	test("loads resource registry remote/branch/projectKey from layered config and environment", () => {
+		const homeDir = tempDir();
+		const cwd = tempDir();
+		mkdirSync(join(homeDir, ".config", "pi"), { recursive: true });
+		mkdirSync(join(cwd, ".pi"), { recursive: true });
+		writeFileSync(
+			join(homeDir, ".config", "pi", "pi-tools-suite.jsonc"),
+			`{ "resourceRegistry": { "remote": "git@example.com:user/resources.git", "branch": "main" } }`,
+		);
+		writeFileSync(join(cwd, ".pi", "pi-tools-suite.jsonc"), `{ "resourceRegistry": { "branch": "work", "projectKey": "project-one" } }`);
+
+			expect(loadPiToolsSuiteConfig(MODULES, { cwd, homeDir, env: {} }).resourceRegistry).toEqual({
+			remote: "git@example.com:user/resources.git",
+			branch: "work",
+			projectKey: "project-one",
+		});
+		expect(loadPiToolsSuiteConfig(MODULES, {
+			cwd,
+			homeDir,
+			env: {
+				PI_RESOURCE_REGISTRY_REMOTE: "/tmp/registry.git",
+				PI_RESOURCE_REGISTRY_BRANCH: "main",
+				PI_RESOURCE_REGISTRY_PROJECT_KEY: "env-project",
+			},
+		}).resourceRegistry).toEqual({ remote: "/tmp/registry.git", branch: "main", projectKey: "env-project" });
+	});
+
 	test("loads todoThinking from config and environment", () => {
 		const homeDir = tempDir();
 		const cwd = tempDir();
@@ -138,31 +165,22 @@ describe("pi-tools-suite config", () => {
 		expect(content).toContain('"contextGateway"');
 		expect(content).toContain('"repoDiscovery"');
 		expect(content).toContain('"profile": "baseline"');
+		expect(content).toContain('"resourceRegistry"');
+		expect(content).toContain('"branch": "main"');
 		expect(content).toContain('// "ast-grep",');
 		expect(content).toContain('// "dcp"');
-		expect(content).toContain('"asyncSubagents"');
+		expect(content).not.toContain('"asyncSubagents"');
 		expect(content).toContain('"promptCommands"');
 		const parsed = parse(content) as {
 			$schema?: string;
-			asyncSubagents?: {
-				routing?: { model?: string; fallbackModels?: string[] };
-				presets?: Record<string, { models?: string[]; types?: Record<string, { model?: string; thinking?: string }> }>;
-				types?: Record<string, { model?: string; fallbackModels?: string[]; thinking?: string; timeoutMs?: number }>;
-			};
 			lsp?: { servers?: Array<{ id?: string }> };
 			repoDiscovery?: { profile?: string };
+			resourceRegistry?: { remote?: string; branch?: string; projectKey?: string };
 		};
 		expect(parsed.$schema).toBe(PI_TOOLS_SUITE_SCHEMA_URL);
-		expect(parsed.asyncSubagents?.routing).toMatchObject({
-			model: "zai/glm-5-turbo",
-			fallbackModels: ["openai-codex/gpt-5.6-luna"],
-		});
-		expect(parsed.asyncSubagents?.types).toEqual({});
-		expect(parsed.asyncSubagents?.presets?.cheap?.models).toEqual(["zai/glm-5-turbo", "zai/glm-5.3-flash", "zai/glm-5.3"]);
-		expect(parsed.asyncSubagents?.presets?.gpt?.models).toEqual(["openai-codex/gpt-5.6-luna", "openai-codex/gpt-5.6-terra", "openai-codex/gpt-5.6-sol"]);
-		expect(parsed.asyncSubagents?.presets?.cheap?.types).toBeUndefined();
 		expect(parsed.lsp?.servers?.map((server) => server.id)).toEqual(["typescript"]);
 		expect(parsed.repoDiscovery?.profile).toBe("baseline");
+		expect(parsed.resourceRegistry).toEqual({ branch: "main" });
 		expect(content).toContain('//   "id": "python"');
 		expect(content).toContain('//   "id": "markdown"');
 	});

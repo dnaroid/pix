@@ -1,10 +1,8 @@
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { applyEdits, modify, parse as parseJsonc } from "jsonc-parser";
-import { readAgentDefinitionsFromDir, readProjectAgentDefinitions, type AgentDefinition } from "./agents-dir.js";
-import { ensurePiToolsSuiteUserConfig, getPiToolsSuiteUserConfigPath } from "../../config.js";
+import { parse as parseJsonc } from "jsonc-parser";
+import { projectAgentsDir, readAgentDefinitionsFromDir, readProjectAgentDefinitions, type AgentDefinition } from "./agents-dir.js";
 import type { AgentTask, RetryConfig } from "./types.js";
 
 export interface ModelByParentEntry {
@@ -125,13 +123,6 @@ export interface SubagentConfig {
 	timeoutMs?: number;
 }
 
-export interface CopySubagentConfigSampleResult {
-	copied: boolean;
-	targetPath: string;
-	samplePath: string;
-	existingFiles: string[];
-}
-
 export interface ResolvedAgentTaskConfig {
 	task: AgentTask;
 	extraArgs: string[];
@@ -192,82 +183,51 @@ export const DEFAULT_ROUTING_CONFIG: ResolvedSubagentRoutingConfig = {
 	fallbackModels: ["openai-codex/gpt-5.6-luna"],
 	maxTaskChars: 1200,
 	maxTokens: 512,
-	maxRetries: 3,
-	timeoutMs: 10_000,
+	maxRetries: 1,
+	timeoutMs: 12_000,
 	debug: false,
 };
 
 const BUILTIN_AGENTS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "agents");
+const BUILTIN_PRESETS_FILE = path.join(BUILTIN_AGENTS_DIR, "presets.jsonc");
+const DEFAULT_BLIND_MODEL_PATTERNS = [
+	"zai/glm-4.5*", "glm-4.5*", "*/glm-4.5*",
+	"zai/glm-5-turbo*", "glm-5-turbo*", "*/glm-5-turbo*",
+	"zai/glm-5.3", "glm-5.3", "*/glm-5.3",
+];
 
 const BUILTIN_CONFIG: SubagentConfig = {
 	defaultType: "research",
 	maxConcurrent: DEFAULT_MAX_CONCURRENT,
+	maxResultBytes: 100_000,
 	routing: { ...DEFAULT_ROUTING_CONFIG },
+	vision: { blindModelPatterns: DEFAULT_BLIND_MODEL_PATTERNS },
+	presets: readPresetConfigFile(BUILTIN_PRESETS_FILE).presets,
 	types: normalizeAgentDefinitions(readAgentDefinitionsFromDir(BUILTIN_AGENTS_DIR)),
 };
 
 export function loadSubagentConfig(cwd: string, env: NodeJS.ProcessEnv = process.env): SubagentConfig {
 	const config = cloneConfig(BUILTIN_CONFIG);
-	if (!explicitSubagentConfigPath(cwd, env)) {
-		for (const file of piToolsSuiteConfigFiles(cwd, env)) {
-			mergeConfig(config, readPiToolsSuiteSubagentConfig(file));
-		}
-		// Project-local agent definitions (.pi/agents/*.md) win name collisions
-		// over user/project JSONC config; loaded fresh on every call so edits and
-		// /reload are respected without a restart.
-		mergeConfig(config, projectAgentTypes(cwd));
-	}
-	for (const file of configFiles(cwd, env)) {
-		mergeConfig(config, readConfigFile(file));
-	}
+	mergeConfig(config, projectPresetConfig(cwd));
+	// Project-local agent definitions (.pi/agents/*.md) are the only project
+	// source of role/profile configuration and are loaded fresh on every call.
+	mergeConfig(config, projectAgentTypes(cwd));
 	applyEnvModelOverrides(config, env);
 	applyEnvRoutingOverrides(config, env);
+	applyEnvRuntimeOverrides(config, env);
 	return config;
-}
-
-export function configFiles(cwd: string, env: NodeJS.ProcessEnv = process.env): string[] {
-	const explicit = explicitSubagentConfigPath(cwd, env);
-	if (explicit) {
-		if (!fs.existsSync(explicit)) throw new Error(`Subagent config not found: ${explicit}`);
-		return [explicit];
-	}
-
-	return existingSubagentConfigFiles(cwd, env);
-}
-
-function explicitSubagentConfigPath(cwd: string, env: NodeJS.ProcessEnv): string | undefined {
-	const explicit = trimString(env.ASYNC_SUBAGENTS_CONFIG || env.PI_SUBAGENTS_CONFIG);
-	return explicit ? path.resolve(cwd, expandHome(explicit)) : undefined;
-}
-
-export function getDefaultSubagentConfigPath(): string {
-	return getPiToolsSuiteUserConfigPath();
-}
-
-export function getSubagentConfigSamplePath(): string {
-	return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "async-subagents.sample.jsonc");
 }
 
 export function getBuiltinSubagentDefinitionsDir(): string {
 	return BUILTIN_AGENTS_DIR;
 }
 
-export function getSubagentConfigInitTargetPath(cwd: string, env: NodeJS.ProcessEnv = process.env): string {
-	return explicitSubagentConfigPath(cwd, env) ?? getDefaultSubagentConfigPath();
+export function getBuiltinSubagentPresetsPath(): string {
+	return BUILTIN_PRESETS_FILE;
 }
 
-export function existingSubagentConfigFiles(cwd: string, env: NodeJS.ProcessEnv = process.env): string[] {
-	const explicit = explicitSubagentConfigPath(cwd, env);
-	if (explicit) return fs.existsSync(explicit) ? [explicit] : [];
-	return piToolsSuiteConfigFiles(cwd, env).filter(hasPiToolsSuiteSubagentConfig);
-}
-
-function piToolsSuiteConfigFiles(cwd: string, env: NodeJS.ProcessEnv): string[] {
-	return [
-		getPiToolsSuiteUserConfigPath(),
-		env.PI_CONFIG_DIR ? path.join(env.PI_CONFIG_DIR, "pi-tools-suite.jsonc") : undefined,
-		findProjectPiToolsSuiteConfig(cwd),
-	].filter((file): file is string => typeof file === "string" && fs.existsSync(file));
+export function getProjectSubagentPresetsPath(cwd: string): string {
+	return path.join(projectAgentsDir(cwd) ?? path.join(path.resolve(cwd), ".pi", "agents"), "presets.jsonc");
 }
 
 /** Normalize `.pi/agents/*.md` definitions through the shared type-profile path. */
@@ -278,48 +238,19 @@ function projectAgentTypes(cwd: string): Partial<SubagentConfig> {
 	return { types };
 }
 
+function projectPresetConfig(cwd: string): Partial<SubagentConfig> {
+	const dir = projectAgentsDir(cwd);
+	if (!dir) return {};
+	const file = path.join(dir, "presets.jsonc");
+	return fs.existsSync(file) ? readPresetConfigFile(file) : {};
+}
+
 function normalizeAgentDefinitions(definitions: Record<string, AgentDefinition>): Record<string, SubagentTypeConfig> {
 	const types: Record<string, SubagentTypeConfig> = {};
 	for (const [name, definition] of Object.entries(definitions)) {
 		types[name] = normalizeSubagentTypeProfile(definition.raw, name, definition.file);
 	}
 	return types;
-}
-
-function findProjectPiToolsSuiteConfig(startDir: string): string | undefined {
-	let dir = path.resolve(startDir);
-	const root = path.parse(dir).root;
-	while (true) {
-		const candidate = path.join(dir, ".pi", "pi-tools-suite.jsonc");
-		if (fs.existsSync(candidate)) return candidate;
-		if (dir === root) return undefined;
-		const parent = path.dirname(dir);
-		if (parent === dir) return undefined;
-		dir = parent;
-	}
-}
-
-export function copySubagentConfigSample(cwd: string, env: NodeJS.ProcessEnv = process.env): CopySubagentConfigSampleResult {
-	const samplePath = getSubagentConfigSamplePath();
-	const existingFiles = existingSubagentConfigFiles(cwd, env);
-	if (existingFiles.length > 0) return { copied: false, targetPath: existingFiles[0], samplePath, existingFiles };
-
-	const explicit = explicitSubagentConfigPath(cwd, env);
-	const targetPath = getSubagentConfigInitTargetPath(cwd, env);
-	if (explicit) {
-		fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-		try {
-			fs.copyFileSync(samplePath, targetPath, fs.constants.COPYFILE_EXCL);
-		} catch (error) {
-			if (isNodeError(error) && error.code === "EEXIST") {
-				return { copied: false, targetPath, samplePath, existingFiles: [targetPath] };
-			}
-			throw error;
-		}
-	} else {
-		writePiToolsSuiteSubagentConfig(targetPath, readConfigFile(samplePath));
-	}
-	return { copied: true, targetPath, samplePath, existingFiles: [] };
 }
 
 export function resolveAgentTaskConfig(
@@ -463,87 +394,32 @@ export function selectSubagentType(task: AgentTask, config: SubagentConfig): str
 	return defaultSubagentType(config);
 }
 
-function readConfigFile(file: string): Partial<SubagentConfig> {
-	const raw = fs.readFileSync(file, "utf-8");
-	const parsed = JSON.parse(stripJsonComments(raw)) as unknown;
-	if (!isRecord(parsed)) throw new Error(`Subagent config must be an object: ${file}`);
-	return normalizeConfig(parsed, file);
-}
-
-function readPiToolsSuiteSubagentConfig(file: string): Partial<SubagentConfig> {
+function readPresetConfigFile(file: string): Partial<SubagentConfig> {
 	const raw = fs.readFileSync(file, "utf-8");
 	const parsed = parseJsonc(raw) as unknown;
-	if (!isRecord(parsed)) return {};
-	const section = parsed.asyncSubagents ?? parsed["async-subagents"] ?? parsed.subagents;
-	return isRecord(section) ? normalizeConfig(section, file) : {};
+	if (!isRecord(parsed)) throw new Error(`Subagent presets file must contain an object: ${file}`);
+	return { presets: normalizePresetMap(parsed, file, "preset file") };
 }
 
-function hasPiToolsSuiteSubagentConfig(file: string): boolean {
-	const raw = fs.readFileSync(file, "utf-8");
-	const parsed = parseJsonc(raw) as unknown;
-	if (!isRecord(parsed)) return false;
-	return isRecord(parsed.asyncSubagents ?? parsed["async-subagents"] ?? parsed.subagents);
-}
-
-function writePiToolsSuiteSubagentConfig(file: string, config: Partial<SubagentConfig>): void {
-	ensurePiToolsSuiteUserConfig();
-	const original = fs.existsSync(file) ? fs.readFileSync(file, "utf-8") : "{}\n";
-	const edits = modify(original, ["asyncSubagents"], config, {
-		formattingOptions: { insertSpaces: true, tabSize: 2, eol: "\n" },
-	});
-	const updated = applyEdits(original, edits);
-	fs.mkdirSync(path.dirname(file), { recursive: true });
-	fs.writeFileSync(file, updated.endsWith("\n") ? updated : `${updated}\n`, "utf-8");
-}
-
-function normalizeConfig(value: Record<string, unknown>, file: string): Partial<SubagentConfig> {
-	const output: Partial<SubagentConfig> = {};
-	if (typeof value.defaultType === "string") output.defaultType = value.defaultType.trim();
-	if (typeof value.routing === "boolean") output.routing = { enabled: value.routing };
-	else if (isRecord(value.routing)) output.routing = normalizeRoutingConfig(value.routing);
-	const vision = normalizeVisionConfig(value);
-	if (vision) output.vision = vision;
-	const maxConcurrent = finiteNumber(value.maxConcurrent);
-	if (maxConcurrent !== undefined) output.maxConcurrent = Math.max(0, Math.round(maxConcurrent));
-	const maxResultBytes = finiteNumber(value.maxResultBytes);
-	if (maxResultBytes !== undefined) output.maxResultBytes = Math.max(0, Math.round(maxResultBytes));
-	const timeoutMs = positiveMilliseconds(value.timeoutMs);
-	if (timeoutMs !== undefined) output.timeoutMs = timeoutMs;
-	if (isRecord(value.retry)) output.retry = normalizeRetryConfig(value.retry);
-	if (value.presets !== undefined) {
-		if (!isRecord(value.presets)) throw new Error(`Subagent config "presets" must be an object: ${file}`);
-		const presets: Record<string, SubagentPreset> = {};
-		for (const [name, rawPreset] of Object.entries(value.presets)) {
-			if (!isRecord(rawPreset)) throw new Error(`Subagent preset "${name}" must be an object: ${file}`);
-			presets[name] = {
-				description: trimString(rawPreset.description),
-				models: normalizeModels(rawPreset.models, `preset "${name}"`, file),
-				model: trimString(rawPreset.model),
-				fallbackModels: modelList(rawPreset.fallbackModels, rawPreset.fallbackModel),
-				thinking: trimString(rawPreset.thinking),
-				extraArgs: arrayOfStrings(rawPreset.extraArgs),
-				timeoutMs: positiveMilliseconds(rawPreset.timeoutMs),
-				types: normalizePresetTypeOverrides(rawPreset.types, file, name),
-			};
-		}
-		output.presets = presets;
+function normalizePresetMap(value: unknown, file: string, owner: string): Record<string, SubagentPreset> {
+	if (!isRecord(value)) throw new Error(`Subagent ${owner} must be an object: ${file}`);
+	const presets: Record<string, SubagentPreset> = {};
+	for (const [name, rawPreset] of Object.entries(value)) {
+		if (!isRecord(rawPreset)) throw new Error(`Subagent preset "${name}" must be an object: ${file}`);
+		const models = normalizeModels(rawPreset.models, `preset "${name}"`, file);
+		if (models === undefined) throw new Error(`Subagent preset "${name}" must define models: ${file}`);
+		presets[name] = {
+			description: trimString(rawPreset.description),
+			models,
+		};
 	}
-	if (value.types === undefined) return output;
-	if (!isRecord(value.types)) throw new Error(`Subagent config "types" must be an object: ${file}`);
-
-	const types: Record<string, SubagentTypeConfig> = {};
-	for (const [name, rawProfile] of Object.entries(value.types)) {
-		if (!isRecord(rawProfile)) throw new Error(`Subagent type "${name}" must be an object: ${file}`);
-		types[name] = normalizeSubagentTypeProfile(rawProfile, name, file);
-	}
-	output.types = types;
-	return output;
+	return presets;
 }
 
 /**
  * Normalize one raw sub-agent type profile (`SubagentTypeConfig` shape) from
- * any source (JSONC config files or project agent definitions). Shared so all
- * sources apply identical field validation and trimming.
+ * an agent Markdown definition. Bundled and project files share the same
+ * validation and trimming path.
  */
 export function normalizeSubagentTypeProfile(
 	rawProfile: Record<string, unknown>,
@@ -571,13 +447,6 @@ export function normalizeSubagentTypeProfile(
 }
 
 function mergeConfig(target: SubagentConfig, source: Partial<SubagentConfig>): void {
-	if (source.defaultType) target.defaultType = source.defaultType;
-	if (source.routing) target.routing = { ...(target.routing ?? {}), ...source.routing };
-	if (source.vision) target.vision = { ...(target.vision ?? {}), ...compactVisionConfig(source.vision) };
-	if (source.maxConcurrent !== undefined) target.maxConcurrent = source.maxConcurrent;
-	if (source.maxResultBytes !== undefined) target.maxResultBytes = source.maxResultBytes;
-	if (source.timeoutMs !== undefined) target.timeoutMs = source.timeoutMs;
-	if (source.retry) target.retry = { ...(target.retry ?? {}), ...source.retry };
 	for (const [name, profile] of Object.entries(source.types ?? {})) {
 		target.types[name] = mergeTypeProfile(target.types[name] ?? {}, profile);
 	}
@@ -585,17 +454,12 @@ function mergeConfig(target: SubagentConfig, source: Partial<SubagentConfig>): v
 		target.presets = target.presets ?? {};
 		const previous = target.presets[name] ?? {};
 		const merged = { ...previous, ...compactPreset(preset) };
-		// The explicit selector form in the later config wins in both directions.
-		if (preset.models !== undefined) {
-			delete merged.model;
-			delete merged.fallbackModels;
-			delete merged.types;
-			delete merged.thinking;
-			delete merged.extraArgs;
-			delete merged.timeoutMs;
-		} else if (preset.model || preset.fallbackModels !== undefined || preset.types) {
-			delete merged.models;
-		}
+		delete merged.model;
+		delete merged.fallbackModels;
+		delete merged.types;
+		delete merged.thinking;
+		delete merged.extraArgs;
+		delete merged.timeoutMs;
 		target.presets[name] = merged;
 	}
 }
@@ -616,36 +480,6 @@ function mergeTypeProfile(base: SubagentTypeConfig, source: SubagentTypeConfig):
 		merged.fallbackModels = source.fallbackModels ?? base.fallbackModels ?? previous.slice(1);
 	}
 	return merged;
-}
-
-function normalizeRoutingConfig(value: Record<string, unknown>): SubagentRoutingConfig {
-	const routing: SubagentRoutingConfig = {};
-	if (typeof value.enabled === "boolean") routing.enabled = value.enabled;
-	if (typeof value.model === "string" && value.model.trim()) routing.model = value.model.trim();
-	const fallbackModels = modelList(value.fallbackModels, value.fallbackModel);
-	if (fallbackModels) routing.fallbackModels = fallbackModels;
-	if (typeof value.debug === "boolean") routing.debug = value.debug;
-	const maxTaskChars = finiteNumber(value.maxTaskChars);
-	if (maxTaskChars !== undefined) routing.maxTaskChars = Math.max(100, Math.round(maxTaskChars));
-	const maxTokens = finiteNumber(value.maxTokens);
-	if (maxTokens !== undefined) routing.maxTokens = Math.max(8, Math.round(maxTokens));
-	const maxRetries = finiteNumber(value.maxRetries);
-	if (maxRetries !== undefined) routing.maxRetries = Math.max(0, Math.round(maxRetries));
-	const timeoutMs = finiteNumber(value.timeoutMs);
-	if (timeoutMs !== undefined) routing.timeoutMs = Math.max(1000, Math.round(timeoutMs));
-	return routing;
-}
-
-function normalizeVisionConfig(value: Record<string, unknown>): SubagentVisionConfig | undefined {
-	const rawVision = value.vision;
-	const output: SubagentVisionConfig = {};
-	if (isRecord(rawVision)) {
-		const patterns = patternList(rawVision.blindModelPatterns, rawVision.blindModelPattern, rawVision.blindModels, rawVision.blindModelMasks, rawVision.blindModelMask);
-		if (patterns) output.blindModelPatterns = patterns;
-	}
-	const topLevelPatterns = patternList(value.blindModelPatterns, value.blindModelPattern, value.blindModels, value.blindModelMasks, value.blindModelMask);
-	if (topLevelPatterns) output.blindModelPatterns = topLevelPatterns;
-	return output.blindModelPatterns !== undefined ? output : undefined;
 }
 
 function matchesAnyModelPattern(modelRef: string, patterns: string[]): boolean {
@@ -688,34 +522,6 @@ function compactPreset(preset: SubagentPreset): SubagentPreset {
 	if (preset.timeoutMs !== undefined) compact.timeoutMs = preset.timeoutMs;
 	if (preset.types && Object.keys(preset.types).length > 0) compact.types = preset.types;
 	return compact;
-}
-
-function compactVisionConfig(vision: SubagentVisionConfig): SubagentVisionConfig {
-	const compact: SubagentVisionConfig = {};
-	if (vision.blindModelPatterns) compact.blindModelPatterns = vision.blindModelPatterns;
-	return compact;
-}
-
-function normalizePresetTypeOverrides(value: unknown, file: string, presetName: string): Record<string, SubagentPresetTypeOverride> | undefined {
-	if (value === undefined) return undefined;
-	if (!isRecord(value)) throw new Error(`Subagent preset "${presetName}" types must be an object: ${file}`);
-	const types: Record<string, SubagentPresetTypeOverride> = {};
-	for (const [name, rawOverride] of Object.entries(value)) {
-		if (!isRecord(rawOverride)) throw new Error(`Subagent preset "${presetName}" type override "${name}" must be an object: ${file}`);
-		const override: SubagentPresetTypeOverride = {};
-		const model = trimString(rawOverride.model);
-		const fallbackModels = modelList(rawOverride.fallbackModels, rawOverride.fallbackModel);
-		const thinking = trimString(rawOverride.thinking);
-		const extraArgs = arrayOfStrings(rawOverride.extraArgs);
-		const timeoutMs = positiveMilliseconds(rawOverride.timeoutMs);
-		if (model) override.model = model;
-		if (fallbackModels) override.fallbackModels = fallbackModels;
-		if (thinking) override.thinking = thinking;
-		if (extraArgs && extraArgs.length > 0) override.extraArgs = extraArgs;
-		if (timeoutMs !== undefined) override.timeoutMs = timeoutMs;
-		if (override.model || override.fallbackModels || override.thinking || override.extraArgs || override.timeoutMs !== undefined) types[name] = override;
-	}
-	return Object.keys(types).length > 0 ? types : undefined;
 }
 
 function normalizeModels(value: unknown, owner: string, file: string): string[] | undefined {
@@ -806,53 +612,21 @@ function applyEnvRoutingOverrides(config: SubagentConfig, env: NodeJS.ProcessEnv
 	config.routing = routing;
 }
 
+function applyEnvRuntimeOverrides(config: SubagentConfig, env: NodeJS.ProcessEnv): void {
+	const maxConcurrent = finiteEnvNumber(env.PI_SUBAGENTS_MAX_CONCURRENT || env.ASYNC_SUBAGENTS_MAX_CONCURRENT);
+	if (maxConcurrent !== undefined) config.maxConcurrent = Math.max(0, Math.round(maxConcurrent));
+	const maxResultBytes = finiteEnvNumber(env.PI_SUBAGENTS_MAX_RESULT_BYTES || env.ASYNC_SUBAGENTS_MAX_RESULT_BYTES);
+	if (maxResultBytes !== undefined) config.maxResultBytes = Math.max(0, Math.round(maxResultBytes));
+	const timeoutMs = finiteEnvNumber(env.PI_SUBAGENTS_TIMEOUT_MS || env.ASYNC_SUBAGENTS_TIMEOUT_MS);
+	if (timeoutMs !== undefined) config.timeoutMs = Math.max(1, Math.round(timeoutMs));
+}
+
 function typeEnvKey(typeName: string): string {
 	return typeName.replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_+|_+$/g, "").toUpperCase();
 }
 
-function stripJsonComments(input: string): string {
-	let output = "";
-	let inString = false;
-	let quote = "";
-	let escaped = false;
-	for (let i = 0; i < input.length; i++) {
-		const ch = input[i];
-		const next = input[i + 1];
-		if (inString) {
-			output += ch;
-			if (escaped) escaped = false;
-			else if (ch === "\\") escaped = true;
-			else if (ch === quote) inString = false;
-			continue;
-		}
-		if (ch === '"' || ch === "'") {
-			inString = true;
-			quote = ch;
-			output += ch;
-			continue;
-		}
-		if (ch === "/" && next === "/") {
-			while (i < input.length && input[i] !== "\n") i++;
-			output += "\n";
-			continue;
-		}
-		if (ch === "/" && next === "*") {
-			i += 2;
-			while (i < input.length && !(input[i] === "*" && input[i + 1] === "/")) i++;
-			i++;
-			continue;
-		}
-		output += ch;
-	}
-	return output.replace(/,\s*([}\]])/g, "$1");
-}
-
 function cloneConfig(config: SubagentConfig): SubagentConfig {
 	return JSON.parse(JSON.stringify(config)) as SubagentConfig;
-}
-
-function expandHome(value: string): string {
-	return value === "~" || value.startsWith("~/") ? path.join(os.homedir(), value.slice(2)) : value;
 }
 
 function trimString(value: unknown): string | undefined {
@@ -874,10 +648,6 @@ function finiteEnvNumber(value: unknown): number | undefined {
 	return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-function isNodeError(error: unknown): error is NodeJS.ErrnoException {
-	return error instanceof Error && "code" in error;
-}
-
 function arrayOfStrings(value: unknown): string[] | undefined {
 	if (!Array.isArray(value)) return undefined;
 	const items = value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim());
@@ -897,23 +667,6 @@ function modelList(...values: unknown[]): string[] | undefined {
 		}
 	}
 	return models.length > 0 || values.some(Array.isArray) ? models : undefined;
-}
-
-function patternList(...values: unknown[]): string[] | undefined {
-	let sawArray = false;
-	const seen = new Set<string>();
-	const patterns: string[] = [];
-	for (const value of values) {
-		if (Array.isArray(value)) sawArray = true;
-		const items = Array.isArray(value) ? value : [value];
-		for (const item of items) {
-			const pattern = trimString(item);
-			if (!pattern || seen.has(pattern)) continue;
-			seen.add(pattern);
-			patterns.push(pattern);
-		}
-	}
-	return sawArray || patterns.length > 0 ? patterns : undefined;
 }
 
 function textBlock(value: unknown): string | undefined {

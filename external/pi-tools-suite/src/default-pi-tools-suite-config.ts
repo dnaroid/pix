@@ -1,8 +1,3 @@
-import { readFileSync } from "node:fs";
-
-// Reuse the shipped sample instead of copying role descriptions/model defaults.
-const subagentDefaults = readFileSync(new URL("./async-subagents/async-subagents.sample.jsonc", import.meta.url), "utf8").trim();
-
 // Default user config written when pi-tools-suite.jsonc is missing.
 export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
   "$schema": "https://unpkg.com/pi-ui-extend/schemas/pi-tools-suite.json",
@@ -39,6 +34,15 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
   // an explicit experimental arm with bounded native flags/cursors/output.
   "repoDiscovery": {
     "profile": "baseline"
+  },
+  // Private Git repository used as the reusable resource registry. Create the
+  // repo first, then set remote with /registry configure <git-url>.
+  "resourceRegistry": {
+    // "remote": "git@github.com:you/pix-resources.git",
+    "branch": "main"
+    // Optional per-project override. Normally the project key is derived from
+    // the current repository's Git origin and stored under registry/projects/.
+    // "projectKey": "github.com__you__my-project"
   },
   // When true, todo items may carry a per-task thinking level and the todo
   // module will switch/restore Pi's thinking level as in-progress tasks change.
@@ -168,7 +172,6 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
       }
     }
   },
-  "asyncSubagents": ${subagentDefaults},
   "toolRenderer": {},
   "promptCommands": {
     "commands": {

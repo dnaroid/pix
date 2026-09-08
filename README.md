@@ -95,7 +95,7 @@ On startup, Pix tries to link the bundled suite into the active Pi agent directo
 | Context control | `dcp` | Explicit compression and context pruning for long sessions, including sidecar state. |
 | Local web access | `web-search` | Web search and page extraction through a local Ollama instance. |
 | Providers and quotas | `antigravity-auth`, `opencode-import`, `usage` | Antigravity OAuth/account failover, OpenCode credential import, and multi-provider usage views. |
-| Reusable workflows | `prompt-commands`, `skill-installer`, `session-name` | Prompt-command CRUD, skill installation/export, and session naming. |
+| Reusable workflows | `prompt-commands`, `resource-registry`, `session-name` | Prompt-command CRUD, private Git-backed skill/agent install/update/push/remove, project-scoped `.pi/tasks.jsonc` + `.pi/plans/` + `.pi/TODO.md` push/pull, and session naming. |
 | Model compatibility | `coding-discipline`, `model-tools`, `codex-reasoning-fix` | Model-specific discipline and vision lookup, compatibility aliases, and a Codex reasoning payload workaround. |
 
 Every module can be disabled. Optional integrations only activate when their requirements are available — for example, repository tools require an index, web tools require local Ollama web search, and LSP servers must be configured and trusted.
@@ -317,7 +317,7 @@ Type `/` for the live, searchable list. Extensions can add more commands than th
 | Status | `/usage` |
 | Process | `/quit`, `/exit` |
 
-Useful suite commands include `/todos`, `/todos-persist`, `/todos-scope`, `/sub-status`, `/sub-stop`, `/ultrawork`, `/hyperplan`, `/subagent-preset`, `/usage`, `/dcp`, `/idx-init`, `/idx-update`, `/opencode-import`, `/antigravity-add-account`, `/install-skill`, and `/export-skill`.
+Useful suite commands include `/todos`, `/todos-persist`, `/todos-scope`, `/sub-status`, `/sub-stop`, `/ultrawork`, `/hyperplan`, `/subagent-preset`, `/usage`, `/dcp`, `/idx-init`, `/idx-update`, `/opencode-import`, `/antigravity-add-account`, and `/registry`.
 
 ### Keyboard and mouse
 

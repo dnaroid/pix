@@ -6,6 +6,7 @@
  * Outputs:
  *   schemas/pix.json
  *   schemas/pi-tools-suite.json
+ *   schemas/tasks.json
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { resolve, dirname } from "node:path";
@@ -13,6 +14,7 @@ import { fileURLToPath } from "node:url";
 
 import { PixConfigSchema } from "../src/schemas/pix-schema.js";
 import { PiToolsSuiteConfigSchema } from "../src/schemas/pi-tools-suite-schema.js";
+import { ProjectTasksSchema } from "../src/schemas/tasks-schema.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const outDir = resolve(__dirname, "..", "schemas");
@@ -24,6 +26,7 @@ const checkOnly = process.argv.includes("--check");
 const schemas = [
 	{ name: "pix.json", schema: PixConfigSchema },
 	{ name: "pi-tools-suite.json", schema: PiToolsSuiteConfigSchema },
+	{ name: "tasks.json", schema: ProjectTasksSchema },
 ];
 
 let changed = false;

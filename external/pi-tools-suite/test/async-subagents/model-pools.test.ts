@@ -4,7 +4,6 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import {
-	getSubagentConfigSamplePath,
 	loadSubagentConfig,
 	resolveAgentTaskConfig,
 	type SubagentConfig,
@@ -20,11 +19,12 @@ function temp(): string {
 	dirs.push(dir);
 	return dir;
 }
-function configFile(value: unknown): SubagentConfig {
+function agentConfig(name: string, frontmatter: string, body = "Agent body."): SubagentConfig {
 	const cwd = temp();
-	const file = path.join(cwd, "config.json");
-	fs.writeFileSync(file, JSON.stringify(value));
-	return loadSubagentConfig(cwd, { ASYNC_SUBAGENTS_CONFIG: file });
+	const file = path.join(cwd, ".pi", "agents", `${name}.md`);
+	fs.mkdirSync(path.dirname(file), { recursive: true });
+	fs.writeFileSync(file, `---\n${frontmatter}\n---\n${body}\n`);
+	return loadSubagentConfig(cwd, {});
 }
 function task(subagentType = "research") {
 	return { id: "worker", task: "Perform the bounded task", subagentType };
@@ -53,7 +53,7 @@ afterEach(() => {
 
 describe("ordered agent models and preset pools", () => {
 	test("ships five Markdown modes and pool-only presets from a single defaults source", () => {
-		const cfg = loadSubagentConfig(temp(), { ASYNC_SUBAGENTS_CONFIG: getSubagentConfigSamplePath() });
+		const cfg = loadSubagentConfig(temp(), {});
 		expect(Object.keys(cfg.types).sort()).toEqual(["browser-qa", "implement", "oracle", "research", "verify"]);
 		for (const [name, profile] of Object.entries(cfg.types)) {
 			expect(profile.models?.length).toBeGreaterThan(0);
@@ -94,7 +94,7 @@ describe("ordered agent models and preset pools", () => {
 	}
 
 	test("empty candidate lists do not inherit the parent, even without a preset", () => {
-		const cfg = configFile({ types: { research: { models: [] } } });
+		const cfg = agentConfig("research", "models: []");
 		expect(cfg.types.research.models).toEqual([]);
 		expect(() => resolveAgentTaskConfig(task(), cfg, { parentModel: "expensive/parent" })).toThrow(/No model candidates/);
 	});
@@ -138,27 +138,33 @@ describe("ordered agent models and preset pools", () => {
 	});
 
 	test("validates models and deduplicates candidates in stable order", () => {
-		const cfg = configFile({ types: { custom: { models: [" a/first ", "b/second", "a/first"] } } });
+		const cfg = agentConfig("custom", 'models: [" a/first ", b/second, a/first]');
 		expect(cfg.types.custom.models).toEqual(["a/first", "b/second"]);
+		expect(agentConfig("custom", "models: a/first").types.custom.models).toEqual(["a/first"]);
+		for (const modelsSource of ["[unqualified]", "[a/]", "[a/*]", "[null]", "[1]"]) {
+			expect(() => agentConfig("custom", `models: ${modelsSource}`)).toThrow(/models must be an array/);
+		}
 		for (const models of ["a/first", ["unqualified"], ["a/"], ["a/*"], [null], [1]]) {
-			expect(() => configFile({ types: { custom: { models } } })).toThrow(/models must be an array/);
-			expect(() => configFile({ presets: { custom: { models } } })).toThrow(/models must be an array/);
+			const cwd = temp();
+			const file = path.join(cwd, ".pi", "agents", "presets.jsonc");
+			fs.mkdirSync(path.dirname(file), { recursive: true });
+			fs.writeFileSync(file, JSON.stringify({ custom: { models } }));
+			expect(() => loadSubagentConfig(cwd, {})).toThrow(/models must be an array/);
 		}
 	});
 
-	test("Markdown models replace old JSONC model/fallback/parent routing while inheriting unrelated fields", () => {
+	test("Markdown models ignore old JSONC type fields and retain bundled unrelated fields", () => {
 		const cwd = temp();
 		const dir = path.join(cwd, ".pi", "agents");
 		fs.mkdirSync(dir, { recursive: true });
 		fs.writeFileSync(path.join(cwd, ".pi", "pi-tools-suite.jsonc"), JSON.stringify({ asyncSubagents: {
 			types: { research: { model: "old/main", fallbackModels: ["old/backup"], thinking: "high",
 				modelByParent: { "parent/*": "old/escalation" } } },
-			presets: { privatePool: { model: "old/preset", types: { research: { model: "old/role" } } } },
 		} }));
 		fs.writeFileSync(path.join(dir, "research.md"), "---\nmodels:\n  - new/first\n  - new/second\n---\nRead only.\n");
 		const cfg = loadSubagentConfig(cwd, {});
 		expect(cfg.types.research.models).toEqual(["new/first", "new/second"]);
-		expect(cfg.types.research.thinking).toBe("high");
+		expect(cfg.types.research.thinking).toBe("low");
 		expect(cfg.types.research.model).toBeUndefined();
 		expect(cfg.types.research.modelByParent).toBeUndefined();
 		expect(resolveAgentTaskConfig(task(), cfg, { parentModel: "parent/model" }).task.model).toBe("new/first");
@@ -166,35 +172,40 @@ describe("ordered agent models and preset pools", () => {
 		expect(loadSubagentConfig(cwd, {}).types.research.models).toEqual(["new/third", "new/second"]);
 	});
 
-	test("new models wins over legacy fields in one profile", () => {
-		const cfg = configFile({ types: { research: { models: ["new/only"], model: "old/main", fallbackModels: ["old/backup"],
-			modelByParent: { "parent/*": "old/escalation" } } } });
+	test("new models wins over legacy fields in one Markdown profile", () => {
+		const cfg = agentConfig("research", `models: [new/only]
+model: old/main
+fallbackModels: [old/backup]
+modelByParent:
+  parent/*: old/escalation`);
 		const result = resolveAgentTaskConfig(task(), cfg, { parentModel: "parent/model" });
 		expect(result.task.model).toBe("new/only");
 		expect(result.fallbackModels).toEqual([]);
 	});
 
-	test("legacy model and fallbackModels overrides still work on a new builtin", () => {
-		const cfg = configFile({ types: { research: { model: "legacy/main", fallbackModels: ["legacy/backup"] } } });
+	test("legacy model and fallbackModels fields still work inside an agent file", () => {
+		const cfg = agentConfig("research", "model: legacy/main\nfallbackModels: [legacy/backup]");
 		const result = resolveAgentTaskConfig(task(), cfg);
 		expect(result.task.model).toBe("legacy/main");
 		expect(result.fallbackModels).toEqual(["legacy/backup"]);
-		const noFallback = configFile({ types: { research: { model: "legacy/main", fallbackModels: [] } } });
+		const noFallback = agentConfig("research", "model: legacy/main\nfallbackModels: []");
 		expect(resolveAgentTaskConfig(task(), noFallback).fallbackModels).toEqual([]);
 	});
 
 	test("old builtin role names are rejected unless explicitly configured", async () => {
-		const cfg = configFile({});
+		const cfg = loadSubagentConfig(temp(), {});
 		for (const oldName of ["quick", "scan", "review", "deep", "docs", "frontend", "tests"]) {
 			await expect(routeSubagentTasks([task(oldName)], cfg, {})).rejects.toThrow(/Unknown subagentType/);
 		}
 	});
 
-	test("explicit custom types keep their own names and settings", () => {
-		const cfg = configFile({ types: {
-			scan: { model: "custom/scan", thinking: "off" },
-			review: { model: "custom/review", promptAppend: "A private checklist." },
-		} });
+	test("explicit custom Markdown types keep their own names and settings", () => {
+		const cwd = temp();
+		const dir = path.join(cwd, ".pi", "agents");
+		fs.mkdirSync(dir, { recursive: true });
+		fs.writeFileSync(path.join(dir, "scan.md"), "---\nmodel: custom/scan\nthinking: off\n---\nScan.\n");
+		fs.writeFileSync(path.join(dir, "review.md"), "---\nmodel: custom/review\n---\nA private checklist.\n");
+		const cfg = loadSubagentConfig(cwd, {});
 		expect(resolveAgentTaskConfig(task("scan"), cfg).task).toMatchObject({ subagentType: "scan", model: "custom/scan" });
 		expect(resolveAgentTaskConfig(task("review"), cfg).task).toMatchObject({ subagentType: "review", model: "custom/review" });
 		expect(resolveAgentTaskConfig(task(), cfg).task.model).toBe("zai/glm-5-turbo");
@@ -202,10 +213,12 @@ describe("ordered agent models and preset pools", () => {
 	});
 
 	test("legacy preset role overrides apply only to explicitly configured matching types", async () => {
-		const cfg = configFile({ types: {
-			scan: { model: "custom/scan" },
-			review: { model: "custom/review" },
-		} });
+		const cwd = temp();
+		const dir = path.join(cwd, ".pi", "agents");
+		fs.mkdirSync(dir, { recursive: true });
+		fs.writeFileSync(path.join(dir, "scan.md"), "---\nmodel: custom/scan\n---\nScan.\n");
+		fs.writeFileSync(path.join(dir, "review.md"), "---\nmodel: custom/review\n---\nReview.\n");
+		const cfg = loadSubagentConfig(cwd, {});
 		const preset = { types: { scan: { model: "old/scanner" }, review: { model: "old/reviewer" } } };
 		const routed = await routeSubagentTasks([task("scan")], cfg, {});
 		expect(resolveAgentTaskConfig(routed.tasks[0], cfg, { preset }).task.model).toBe("old/scanner");

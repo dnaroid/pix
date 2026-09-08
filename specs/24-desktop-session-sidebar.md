@@ -22,7 +22,7 @@ Add read-only, live views of the active session's Todos and Subagents to Pix Des
 
 - Creating, editing, deleting, or reordering todos from Desktop.
 - Starting, stopping, opening, waiting for, or reading Subagent results from Desktop.
-- Moving or changing project tasks stored in `.pi/tasks.json`.
+- Moving or changing project tasks stored in `.pi/tasks.jsonc`.
 - Showing historical completed, failed, or stopped Subagents after they leave the live widget.
 - Persisting a second Desktop-owned copy of extension state.
 

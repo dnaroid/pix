@@ -35,21 +35,18 @@ thinking: medium
 ---
 ```
 
-A preset contains a set of available models, not a per-agent matrix:
+A preset contains a set of available models, not a per-agent matrix. Project
+pools live in `.pi/agents/presets.jsonc`:
 
 ```jsonc
 {
-  "asyncSubagents": {
-    "presets": {
-      "gpt": {
-        "description": "Models available for this session",
-        "models": [
-          "openai-codex/gpt-5.6-luna",
-          "openai-codex/gpt-5.6-terra",
-          "openai-codex/gpt-5.6-sol"
-        ]
-      }
-    }
+  "gpt": {
+    "description": "Models available for this project",
+    "models": [
+      "openai-codex/gpt-5.6-luna",
+      "openai-codex/gpt-5.6-terra",
+      "openai-codex/gpt-5.6-sol"
+    ]
   }
 }
 ```
@@ -83,22 +80,24 @@ Use `/subagent-preset <name>`, `AGENTS_PRESET=<name>` or
 without a pool filter. The shipped names remain compatible with saved choices:
 `cheap` is the GLM pool, `gpt` the GPT pool, and `deep` the mixed pool. The last
 name no longer means that ordinary workers should escalate to flagship models.
+Bundled definitions live beside the built-in agents in
+`src/async-subagents/agents/presets.jsonc`; a project file with the same preset
+name overrides that pool.
 
 Old role names are not implicit aliases. `quick`, `scan`, `review`, `deep`,
 `docs`, `frontend`, and `tests` work only when explicitly defined as ordinary
 custom/project types. This keeps the effective catalog and accepted names exact.
 
-Legacy `model` plus `fallbackModels` and `modelByParent` still load. New profile
-`models` replaces inherited legacy selection fields; an explicit legacy model
-override can still replace an inherited new list. Empty `models` means no
-candidates, not permission to inherit the parent model. Model-less project
-specialists must declare candidates or receive an explicit model override.
+Legacy `model` plus `fallbackModels` and `modelByParent` still load when they are
+declared in an agent Markdown file. New profile `models` replaces inherited
+legacy selection fields. Empty `models` means no candidates, not permission to
+inherit the parent model. Model-less project specialists must declare candidates
+or receive an explicit model override.
 
-Legacy preset role matrices remain readable. A preset with `models` uses only
-the pool contract, dropping stale legacy model/thinking/type overrides. Switching
-a higher-priority config layer back to a legacy preset removes the inherited
-pool. Configuration loading never rewrites user files; review old overrides
-when migrating, since explicitly saved profiles can retain expensive models.
+The removed `asyncSubagents` section is no longer part of the public config
+schema and is not read at runtime. Existing legacy files are left untouched but
+have no effect. Migrate role definitions to `.pi/agents/*.md` and custom pools to
+`.pi/agents/presets.jsonc`.
 
 ## Compact handoff
 

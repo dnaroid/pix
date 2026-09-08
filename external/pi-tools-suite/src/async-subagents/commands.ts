@@ -3,15 +3,12 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { ignoreStaleExtensionContextError } from "../context-usage.js";
 import {
-	copySubagentConfigSample,
 	ensureSessionFileLink,
-	existingSubagentConfigFiles,
 	findSubagentSessionByFile,
 	getActiveSubagentPresetName,
-	getDefaultSubagentConfigPath,
+	getBuiltinSubagentPresetsPath,
+	getProjectSubagentPresetsPath,
 	getSessionSubagentPresetOverride,
-	getSubagentConfigInitTargetPath,
-	getSubagentConfigSamplePath,
 	getSubagentPresetSelectionPath,
 	getRunState,
 	listRunDirs,
@@ -49,7 +46,6 @@ type MessageSender = ExtensionAPI & {
 };
 
 const CLEAR_ACTIVE_PRESET_LABEL = "Use no active preset";
-const COPY_SAMPLE_CONFIG_LABEL = "Copy sample asyncSubagents config";
 
 export const ULTRAWORK_PROMPT = `Run ultrawork mode for the current objective.
 
@@ -192,12 +188,10 @@ async function triggerOrchestrationPrompt(
 
 function registerPresetCommands(pi: ExtensionAPI): void {
 	pi.registerCommand("subagent-preset", {
-		description: "Select a sub-agent preset defined in asyncSubagents config, run session <name> for a process override, or init to copy the sample config",
+		description: "Select a sub-agent model-pool preset, or run session <name> for a process-only override",
 		getArgumentCompletions: (prefix: string) => {
-			const names = existingSubagentConfigFiles(process.cwd()).length > 0
-				? sortedPresetNames(loadSubagentConfig(process.cwd()).presets ?? {}, getActiveSubagentPresetName())
-				: [];
-			return [...names, ...names.map((name) => `session ${name}`), "list", "path", "config", "init", "clear", "session", "session-clear"]
+			const names = sortedPresetNames(loadSubagentConfig(process.cwd()).presets ?? {}, getActiveSubagentPresetName());
+			return [...names, ...names.map((name) => `session ${name}`), "list", "path", "clear", "session", "session-clear"]
 				.filter((name) => name.startsWith(prefix))
 				.map((name) => ({ value: name, label: name }));
 		},
@@ -209,28 +203,19 @@ function registerPresetCommands(pi: ExtensionAPI): void {
 			if (name === "session-clear") return clearSessionActiveSubagentPreset(ctx);
 			if (name === "list") return listSubagentPresets(ctx);
 			if (name === "path") return showSubagentPresetPaths(ctx);
-			if (name === "config") return showSubagentPresetConfigurator(ctx);
-			if (name === "init") return initSubagentConfigSample(ctx);
 			if (name === "clear") return clearActiveSubagentPreset(ctx);
-			if (existingSubagentConfigFiles(ctx.cwd).length === 0) return ctx.ui.notify(missingSubagentConfigMessage(ctx), "warning");
 
 			const config = loadSubagentConfig(ctx.cwd);
 			const preset = config.presets?.[name];
-			if (!preset) return ctx.ui.notify(`Unknown sub-agent preset "${name}". Define it in asyncSubagents config or run /subagent-preset list.`, "error");
+			if (!preset) return ctx.ui.notify(`Unknown sub-agent preset "${name}". Run /subagent-preset list to see available pools.`, "error");
 			setActiveSubagentPreset(name);
 			notifyActiveSubagentPreset(ctx, name, preset);
 		},
-	});
-
-	pi.registerCommand("subagent-preset-config", {
-		description: "Select sub-agent presets defined in asyncSubagents config",
-		handler: async (_args: string, ctx: CommandContext) => showSubagentPresetConfigurator(ctx),
 	});
 }
 
 async function showSubagentPresetSelector(ctx: CommandContext): Promise<void> {
 	if (!ctx.hasUI) return ctx.ui.notify("Sub-agent preset selector requires interactive UI. Use /subagent-preset <name>.", "warning");
-	if (existingSubagentConfigFiles(ctx.cwd).length === 0) return showMissingSubagentConfigSelector(ctx);
 
 	const config = loadSubagentConfig(ctx.cwd);
 	const activePreset = getActiveSubagentPresetName();
@@ -240,12 +225,12 @@ async function showSubagentPresetSelector(ctx: CommandContext): Promise<void> {
 	const labels = [...presetLabels];
 	if (activePreset) labels.push(CLEAR_ACTIVE_PRESET_LABEL);
 	if (labels.length === 0) {
-		ctx.ui.notify("No sub-agent presets are defined in asyncSubagents config.", "warning");
+		ctx.ui.notify("No sub-agent model-pool presets are available.", "warning");
 		showSubagentPresetPaths(ctx);
 		return;
 	}
 	const labelToName = new Map(presetLabels.map((label, index) => [label, names[index]]));
-	const selected = await ctx.ui.select(names.length > 0 ? "Select active sub-agent preset" : "No sub-agent presets in asyncSubagents config", labels);
+	const selected = await ctx.ui.select("Select active sub-agent preset", labels);
 	if (!selected) return;
 	if (selected === CLEAR_ACTIVE_PRESET_LABEL) return clearActiveSubagentPreset(ctx);
 
@@ -254,67 +239,27 @@ async function showSubagentPresetSelector(ctx: CommandContext): Promise<void> {
 	setActiveSubagentPreset(name);
 	notifyActiveSubagentPreset(ctx, name, presets[name]);
 }
-
-async function showSubagentPresetConfigurator(ctx: CommandContext): Promise<void> {
-	if (!ctx.hasUI) return ctx.ui.notify("Sub-agent preset selector requires interactive UI.", "warning");
-	return showSubagentPresetSelector(ctx);
-}
-
-async function showMissingSubagentConfigSelector(ctx: CommandContext): Promise<void> {
-	const selected = await ctx.ui.select("No asyncSubagents config found", [COPY_SAMPLE_CONFIG_LABEL]);
-	if (selected === COPY_SAMPLE_CONFIG_LABEL) initSubagentConfigSample(ctx);
-}
-
 function listSubagentPresets(ctx: CommandContext): void {
-	if (existingSubagentConfigFiles(ctx.cwd).length === 0) {
-		ctx.ui.notify(missingSubagentConfigMessage(ctx), "warning");
-		return;
-	}
 	const config = loadSubagentConfig(ctx.cwd);
 	const activePreset = getActiveSubagentPresetName();
 	const presets = config.presets ?? {};
 	const names = sortedPresetNames(presets, activePreset);
-	if (names.length === 0) return ctx.ui.notify("No sub-agent presets are defined in asyncSubagents config.", "warning");
+	if (names.length === 0) return ctx.ui.notify("No sub-agent model-pool presets are available.", "warning");
 	ctx.ui.notify([
-		"Sub-agent presets from asyncSubagents config:",
+		"Sub-agent model-pool presets:",
 		...names.map((name) => `- ${subagentPresetLabel(name, presets[name], activePreset)}`),
 	].join("\n"), "info");
 }
 
 function showSubagentPresetPaths(ctx: CommandContext): void {
 	ctx.ui.notify([
-		"Preset definitions: asyncSubagents in ~/.config/pi/pi-tools-suite.jsonc, $PI_CONFIG_DIR/pi-tools-suite.jsonc, or project .pi/pi-tools-suite.jsonc",
-		"Explicit override files are still supported via ASYNC_SUBAGENTS_CONFIG / PI_SUBAGENTS_CONFIG.",
-		`Default config target: ${getDefaultSubagentConfigPath()}`,
-		`Sample config: ${getSubagentConfigSamplePath()}`,
-		`Copy sample target: ${getSubagentConfigInitTargetPath(ctx.cwd)}`,
+		`Bundled presets: ${getBuiltinSubagentPresetsPath()}`,
+		`Project preset override: ${getProjectSubagentPresetsPath(ctx.cwd)}`,
+		"Project presets are defined as model pools in .pi/agents/presets.jsonc; agent behavior stays in .pi/agents/*.md.",
 		`Active selection state: ${getSubagentPresetSelectionPath()}`,
 		`Session override: ${formatSessionPresetOverride()}`,
 		"Use /subagent-preset session <name> to override only the current Pi process; use /subagent-preset session-clear to clear that runtime override.",
-		"Run /subagent-preset init to copy the bundled sample only when no config exists.",
 	].join("\n"), "info");
-}
-
-function initSubagentConfigSample(ctx: CommandContext): void {
-	try {
-		const result = copySubagentConfigSample(ctx.cwd);
-		if (result.copied) {
-			ctx.ui.notify(`Copied sample asyncSubagents config:\n${result.samplePath}\n→ ${result.targetPath}`, "info");
-			return;
-		}
-		ctx.ui.notify(`AsyncSubagents config already exists; not overwriting:\n${result.existingFiles.join("\n") || result.targetPath}`, "warning");
-	} catch (error) {
-		ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
-	}
-}
-
-function missingSubagentConfigMessage(ctx: CommandContext): string {
-	return [
-		"No asyncSubagents config found in pi-tools-suite config.",
-		`Sample config: ${getSubagentConfigSamplePath()}`,
-		`Copy target: ${getSubagentConfigInitTargetPath(ctx.cwd)}`,
-		"Run /subagent-preset init to copy the bundled sample into the shared config.",
-	].join("\n");
 }
 
 function clearActiveSubagentPreset(ctx: CommandContext): void {
@@ -327,10 +272,9 @@ function clearActiveSubagentPreset(ctx: CommandContext): void {
 
 function setSessionActiveSubagentPreset(ctx: CommandContext, name: string): void {
 	if (!name) return ctx.ui.notify("Usage: /subagent-preset session <name>", "warning");
-	if (existingSubagentConfigFiles(ctx.cwd).length === 0) return ctx.ui.notify(missingSubagentConfigMessage(ctx), "warning");
 	const config = loadSubagentConfig(ctx.cwd);
 	const preset = config.presets?.[name];
-	if (!preset) return ctx.ui.notify(`Unknown sub-agent preset "${name}". Define it in asyncSubagents config or run /subagent-preset list.`, "error");
+	if (!preset) return ctx.ui.notify(`Unknown sub-agent preset "${name}". Run /subagent-preset list to see available pools.`, "error");
 	setSessionSubagentPresetOverride(name);
 	ctx.ui.notify(`Session-only sub-agent preset "${name}": ${subagentPresetDescription(preset)}\nApplies to future sub-agent spawns only until this Pi process exits or /subagent-preset session-clear is run. Saved preset selection is unchanged.`, "info");
 }

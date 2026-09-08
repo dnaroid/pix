@@ -88,18 +88,11 @@ export default function recorder(pi: any) {
 	return { extensionPath, logPath };
 }
 
-function writeIsolatedSubagentConfig(projectDir: string): string {
-	const configPath = path.join(projectDir, ".pi", "async-subagents-selection.json");
-	fs.mkdirSync(path.dirname(configPath), { recursive: true });
-	fs.writeFileSync(configPath, JSON.stringify({ types: {} }), "utf-8");
-	return configPath;
-}
-
 async function runPiSubagentSelectionE2E(
 	projectDir: string,
 	prompt: string,
 	label: string,
-): Promise<{ stdout: string; stderr: string; events: ToolEvent[]; configPath: string }> {
+): Promise<{ stdout: string; stderr: string; events: ToolEvent[] }> {
 	if (!E2E_MODEL) throw new Error("ASYNC_SUBAGENTS_MODEL/ASYNC_SUBAGENTS_SELECTION_E2E_MODEL resolved to an empty model");
 
 	return withE2ERetry(label, async () => {
@@ -107,7 +100,6 @@ async function runPiSubagentSelectionE2E(
 		fs.mkdirSync(sessionDir, { recursive: true });
 		const recorder = writeToolRecorderExtension(projectDir);
 		fs.rmSync(recorder.logPath, { force: true });
-		const configPath = writeIsolatedSubagentConfig(projectDir);
 		const args = [
 			"--model", E2E_MODEL,
 			"--extension", EXTENSION_ENTRYPOINT,
@@ -126,8 +118,6 @@ async function runPiSubagentSelectionE2E(
 			cwd: projectDir,
 			env: {
 				...e2eChildEnv(),
-				ASYNC_SUBAGENTS_CONFIG: configPath,
-				PI_SUBAGENTS_CONFIG: configPath,
 				ASYNC_SUBAGENTS_MODEL: E2E_MODEL,
 				PI_SUBAGENTS_MODEL: E2E_MODEL,
 				PI_OFFLINE: "1",
@@ -169,7 +159,7 @@ async function runPiSubagentSelectionE2E(
 			throw new Error(`pi subagent-selection e2e (${label}) exited with ${exitCode}\nSTDOUT:\n${stdout}\nSTDERR:\n${stderr}\nEVENTS:\n${readOptionalFile(recorder.logPath)}`);
 		}
 
-		return { stdout, stderr, events: readToolEvents(recorder.logPath), configPath };
+		return { stdout, stderr, events: readToolEvents(recorder.logPath) };
 	}, {
 		onRetry: ({ attempt, maxAttempts, delayMs, error }) => {
 			if (E2E_STREAM_IO) console.error(
