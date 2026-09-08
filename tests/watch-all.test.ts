@@ -12,6 +12,7 @@ import {
 	desktopBuildArguments,
 	desktopLaunchExecutable,
 	findProcessByExecutablePath,
+	macOSCodeSignArguments,
 	macOSOpenArguments,
 	npmInvocation,
 	parseProcessList,
@@ -157,6 +158,21 @@ describe("watch:all macOS launch identity", () => {
 		const executable = desktopLaunchExecutable(bundle, "darwin");
 		assert.equal(desktopAppBundlePath(executable), bundle);
 		assert.deepEqual(macOSOpenArguments(bundle), ["-n", "-W", bundle]);
+	});
+
+	it("ad-hoc signs every macOS dev bundle with one stable TCC identity", () => {
+		const bundle = "/tmp/run/pix-desktop-3/Pix Desktop.app";
+		assert.deepEqual(macOSCodeSignArguments(bundle), [
+			"--force",
+			"--deep",
+			"--sign",
+			"-",
+			"--identifier",
+			"dev.pix.desktop",
+			"--requirements",
+			'=designated => identifier "dev.pix.desktop"',
+			bundle,
+		]);
 	});
 
 	it("parses ps output into pid/command records", () => {

@@ -17,6 +17,8 @@ const SYNC_SCRIPT = resolve(SCRIPT_DIR, "sync-pi-tools-suite.mjs");
 const DESKTOP_BINARY_NAME = process.platform === "win32" ? "pix-desktop.exe" : "pix-desktop";
 const DESKTOP_BINARY = resolve(CARGO_TARGET_DIR, "debug", DESKTOP_BINARY_NAME);
 const MACOS_OPEN_PATH = "/usr/bin/open";
+const MACOS_CODESIGN_PATH = "/usr/bin/codesign";
+const MACOS_DEV_BUNDLE_IDENTIFIER = "dev.pix.desktop";
 const PS_COMMAND = "/bin/ps";
 const PS_ARGUMENTS = ["-axo", "pid=,command="];
 const APP_PID_POLL_MS = 100;
@@ -200,6 +202,29 @@ export function desktopAppBundlePath(executablePath) {
 /** Arguments that make /usr/bin/open launch a fresh app instance and wait until it exits. */
 export function macOSOpenArguments(bundlePath) {
 	return ["-n", "-W", bundlePath];
+}
+
+/**
+ * Re-sign a watch:all debug bundle with a stable designated requirement.
+ *
+ * Tauri's linker-produced ad-hoc signature defaults to a CDHash requirement,
+ * which changes on every native/web rebuild. macOS TCC then treats each build
+ * as a different application and asks for Home-folder access again. An
+ * explicit identifier-only designated requirement keeps the development app's
+ * identity stable without requiring a developer certificate.
+ */
+export function macOSCodeSignArguments(bundlePath, identifier = MACOS_DEV_BUNDLE_IDENTIFIER) {
+	return [
+		"--force",
+		"--deep",
+		"--sign",
+		"-",
+		"--identifier",
+		identifier,
+		"--requirements",
+		`=designated => identifier "${identifier}"`,
+		bundlePath,
+	];
 }
 
 /** Parse `ps -axo pid=,command=` output into `{ pid, command }` records. */
@@ -581,6 +606,14 @@ class WatchAllSupervisor {
 		const destination = desktopArtifactDestination(this.tempDirectory, this.executableSequence, source, process.platform);
 		if (isBundle) {
 			await cp(source, destination, { recursive: true, errorOnExist: true, force: false });
+			if (usesDesktopAppBundle()) {
+				await this.runCommand(
+					"sign desktop bundle for stable macOS permissions",
+					MACOS_CODESIGN_PATH,
+					macOSCodeSignArguments(destination),
+					REPO_ROOT,
+				);
+			}
 		} else {
 			await copyFile(source, destination, fsConstants.COPYFILE_FICLONE);
 		}
