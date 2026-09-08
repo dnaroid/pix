@@ -30,8 +30,18 @@ import {
   detectToolGroupSpans,
   findConversationIndexEntry,
 } from "./conversation-index.js"
-import { previewManualCompressionProjection } from "./compression-preview.js"
+import {
+  previewManualCompressionProjection,
+  verifiedManualCompressionMessages,
+} from "./compression-preview.js"
 import { settleCompressionProgress } from "./compression-progress.js"
+import { estimateMessageTokens } from "./pruner-metadata.js"
+import {
+  buildSummarySourceManifest,
+  hashSummarySourceManifest,
+  prepareCompressionSummary,
+  type ModelSummaryAttempt,
+} from "./auto-compress.js"
 
 export const COMPRESS_TOOL_PARAMETERS = Type.Object({
   topic: Type.String({
@@ -48,10 +58,9 @@ export const COMPRESS_TOOL_PARAMETERS = Type.Object({
         description:
           "Last ID (mNNN/bN); include all results of the final tool group, including parallel calls.",
       }),
-      summary: Type.String({
-        description:
-          "Continuation-focused technical summary; avoid raw JSON/code/diffs unless a short literal is required",
-      }),
+      summary: Type.Optional(Type.String({
+        description: "Optional; omit to use the configured DCP summarizer.",
+      })),
     }),
     { description: "One or more ranges to compress" },
   )),
@@ -63,9 +72,9 @@ export const COMPRESS_TOOL_PARAMETERS = Type.Object({
       topic: Type.Optional(Type.String({
         description: "Short label for this one-message summary; defaults to top-level topic",
       })),
-      summary: Type.String({
-        description: "Continuation-focused technical summary replacing this raw message; avoid raw JSON/code/diffs unless required",
-      }),
+      summary: Type.Optional(Type.String({
+        description: "Optional; omit to use the configured DCP summarizer.",
+      })),
     }),
     { description: "Individual raw messages to compress surgically" },
   )),
@@ -89,7 +98,7 @@ interface MessageSkipIssue {
 interface ResolvedRangePlan {
   startId: string
   endId: string
-  summary: string
+  summary?: string
   startTimestamp: number
   endTimestamp: number
   startMessageId?: string
@@ -101,7 +110,7 @@ interface ResolvedRangePlan {
 interface ResolvedMessagePlan {
   messageId: string
   topic: string
-  summary: string
+  summary?: string
   timestamp: number
   stableId?: string
   sourceMembers: CompressionMember[]
@@ -109,6 +118,33 @@ interface ResolvedMessagePlan {
 }
 
 type ResolvedRangeBoundaries = Omit<ResolvedRangePlan, "sourceMembers" | "mutationMembers">
+
+type ManualSummaryMode = "explicit" | "model" | "extractive" | "extractive-fallback"
+
+function verifiedSelectionMessages(
+  state: DcpState,
+  sourceMembers: CompressionMember[],
+): any[] {
+  const projection = verifiedManualCompressionMessages(state)
+  const byStableId = new Map(
+    state.conversationIndexSnapshot.map((entry) => [entry.stableId, entry] as const),
+  )
+  return sourceMembers.map((member) => {
+    const entry = byStableId.get(member.stableId)
+    if (!entry || entry.contentHash !== member.hash || !Number.isSafeInteger(entry.index)) {
+      throw new Error(
+        `Manual compression summary source ${member.stableId} no longer matches the verified provider projection; refresh context and retry.`,
+      )
+    }
+    const message = projection[entry.index]
+    if (!message) {
+      throw new Error(
+        `Manual compression summary source ${member.stableId} is missing from the verified provider projection; refresh context and retry.`,
+      )
+    }
+    return message
+  })
+}
 
 function validateNonOverlappingRanges(plans: ResolvedRangeBoundaries[], state: DcpState): void {
   const sorted = [...plans].sort((a, b) =>
@@ -464,6 +500,93 @@ export function registerCompressTool(
       }
       assertDisjointSelections(rangePlans, preflightMessages)
 
+      const summaryPreparations: Array<{
+        selection: string
+        mode: ManualSummaryMode
+        summarizerModelRef?: string
+        attempts?: Array<{ ref: string; outcome: ModelSummaryAttempt["outcome"] }>
+      }> = []
+      const resolveSummary = async (input: {
+        startId: string
+        endId: string
+        topic: string
+        sourceMembers: CompressionMember[]
+        explicitSummary?: string
+      }): Promise<string> => {
+        const selection = input.startId === input.endId
+          ? input.startId
+          : `${input.startId}..${input.endId}`
+        if (typeof input.explicitSummary === "string") {
+          summaryPreparations.push({ selection, mode: "explicit" })
+          return input.explicitSummary
+        }
+        const sourceMessages = verifiedSelectionMessages(state, input.sourceMembers)
+        const sourceManifest = buildSummarySourceManifest(sourceMessages)
+        const sourceHash = hashSummarySourceManifest(sourceManifest)
+        const prepared = await prepareCompressionSummary({
+          topic: input.topic,
+          messages: sourceMessages,
+          candidate: {
+            startId: input.startId,
+            endId: input.endId,
+            messageCount: sourceMessages.length,
+            estimatedTokens: sourceMessages.reduce((sum, message) => sum + estimateMessageTokens(message), 0),
+            includedBlockIds: [],
+            reason: "manual delegated summary",
+          },
+          modelRefs: effectiveConfig.compress.autoCompress.summarizerModel,
+          timeoutMs: effectiveConfig.compress.autoCompress.timeoutMs,
+          modelRegistry: (ctx as any).modelRegistry,
+          signal: _signal,
+          sourceManifest,
+        })
+        assertCurrent()
+        const refreshedMessages = verifiedSelectionMessages(state, input.sourceMembers)
+        const refreshedHash = hashSummarySourceManifest(buildSummarySourceManifest(refreshedMessages))
+        if (refreshedHash !== sourceHash || prepared.sourceHash !== sourceHash) {
+          throw new Error(
+            `stale_plan: manual compression summary source changed while preparing ${selection}`,
+          )
+        }
+        const attempts = prepared.summarizerAttempts?.map(({ ref, outcome }) => ({ ref, outcome }))
+        summaryPreparations.push({
+          selection,
+          mode: prepared.representation,
+          summarizerModelRef: prepared.summarizerModelRef,
+          attempts,
+        })
+        log("compress.summary_prepared", {
+          toolCallId: _toolCallId,
+          selection,
+          mode: prepared.representation,
+          summarizerModelRef: prepared.summarizerModelRef,
+          summarizerAttempts: prepared.summarizerAttempts,
+          sourceHash: prepared.sourceHash,
+          sourceCoverage: prepared.sourceCoverage,
+        })
+        return prepared.text
+      }
+
+      for (const range of rangePlans) {
+        range.summary = await resolveSummary({
+          startId: range.startId,
+          endId: range.endId,
+          topic: params.topic,
+          sourceMembers: range.sourceMembers,
+          explicitSummary: range.summary,
+        })
+      }
+      for (const plan of preflightMessages) {
+        plan.summary = await resolveSummary({
+          startId: plan.messageId,
+          endId: plan.messageId,
+          topic: plan.topic,
+          sourceMembers: plan.sourceMembers,
+          explicitSummary: plan.summary,
+        })
+      }
+      const preflightMessageById = new Map(preflightMessages.map((plan) => [plan.messageId, plan] as const))
+
       for (const range of rangePlans) {
         try {
           const anchor = resolveAnchorBoundary(range.endTimestamp, workingState, range.endMessageId)
@@ -480,7 +603,7 @@ export function registerCompressTool(
 
           const created = createRangeCompressionBlock({
             topic: params.topic,
-            summary: range.summary,
+            summary: range.summary!,
             startTimestamp: range.startTimestamp,
             endTimestamp: range.endTimestamp,
             startMessageId: range.startMessageId,
@@ -523,7 +646,6 @@ export function registerCompressTool(
       const seenMessageIds = new Set<string>()
 
       for (const entry of messages) {
-        const { summary } = entry
         const messageId = typeof entry.messageId === "string" ? entry.messageId.trim() : ""
         if (seenMessageIds.has(messageId)) {
           skippedMessageIssues.push({ kind: "duplicate", messageId })
@@ -606,7 +728,7 @@ export function registerCompressTool(
 
         const created = createRangeCompressionBlock({
           topic: entry.topic ?? params.topic,
-          summary,
+          summary: preflightMessageById.get(messageId)?.summary!,
           startTimestamp: meta.timestamp,
           endTimestamp: meta.timestamp,
           startMessageId: meta.stableId,
@@ -622,8 +744,8 @@ export function registerCompressTool(
           validatePlaceholders: false,
           expandPlaceholders: false,
           preparedProtectedFragments,
-          sourceMembers: preflightMessages.find((plan) => plan.messageId === messageId)?.sourceMembers,
-          mutationMembers: preflightMessages.find((plan) => plan.messageId === messageId)?.mutationMembers,
+          sourceMembers: preflightMessageById.get(messageId)?.sourceMembers,
+          mutationMembers: preflightMessageById.get(messageId)?.mutationMembers,
         })
         const block = created.block
         newBlockIds.push(block.id)
@@ -737,6 +859,7 @@ export function registerCompressTool(
       }
       const resultDetails = {
         ...visualDetails,
+        summaryPreparations,
         projectedBeforeTokens: projection?.projectedBeforeTokens,
         projectedAfterTokens: projection?.projectedAfterTokens,
         netGain: projection?.netGain,

@@ -75,6 +75,16 @@ export interface SessionTokenEfficiencyReport {
 		blocks: SessionDcpBlockMetrics[];
 		compressResults: SessionCompressMetrics[];
 		totalProtectedFragmentChars: number;
+		manualSummaryDelegation: {
+			compressCalls: number;
+			compressAssistantCalls: number;
+			compressAssistantOutputTokens: number;
+			summaryArgumentChars: number;
+			summaryArgumentEstimatedTokens: number;
+			argumentEstimatedTokensBefore: number;
+			argumentEstimatedTokensWithoutSummaries: number;
+			estimatedArgumentTokenReduction: number;
+		};
 		continuityProjection?: {
 			baselineProtectedChars: number;
 			projectedProtectedChars: number;
@@ -173,6 +183,27 @@ function textMeasure(text: string): TextMeasurement {
 		bytes: Buffer.byteLength(text, "utf8"),
 		estimatedTokens: estimateTokens(text),
 	};
+}
+
+function withoutCompressSummaries(input: Record<string, unknown>): {
+	value: Record<string, unknown>;
+	summaryChars: number;
+	summaryEstimatedTokens: number;
+} {
+	const value = structuredClone(input);
+	let summaryChars = 0;
+	let summaryEstimatedTokens = 0;
+	for (const key of ["ranges", "messages"] as const) {
+		const entries = value[key];
+		if (!Array.isArray(entries)) continue;
+		for (const raw of entries) {
+			if (!isRecord(raw) || typeof raw.summary !== "string") continue;
+			summaryChars += raw.summary.length;
+			summaryEstimatedTokens += estimateTokens(raw.summary);
+			delete raw.summary;
+		}
+	}
+	return { value, summaryChars, summaryEstimatedTokens };
 }
 
 function toolEnvelopeText(): string {
@@ -316,6 +347,16 @@ export function analyzeSessionJsonlText(
 	const readCalls: Array<{ entryIndex: number; exact?: string; source?: string }> = [];
 	const contextReductionIndexes: number[] = [];
 	let ingressAvoidedBytes = 0;
+	const manualSummaryDelegation = {
+		compressCalls: 0,
+		compressAssistantCalls: 0,
+		compressAssistantOutputTokens: 0,
+		summaryArgumentChars: 0,
+		summaryArgumentEstimatedTokens: 0,
+		argumentEstimatedTokensBefore: 0,
+		argumentEstimatedTokensWithoutSummaries: 0,
+		estimatedArgumentTokenReduction: 0,
+	};
 
 	for (const [entryIndex, entry] of entries.entries()) {
 		if (entry.type === "custom" && entry.customType === "dcp-journal" && isRecord(entry.data)) {
@@ -337,6 +378,12 @@ export function analyzeSessionJsonlText(
 		else if (!firstCompressSeen) preCompressionMessages.push(structuredClone(message));
 		if (message.role === "assistant") {
 			usage.assistantCalls += 1;
+			if (startsCompression) {
+				manualSummaryDelegation.compressAssistantCalls += 1;
+				manualSummaryDelegation.compressAssistantOutputTokens += isRecord(message.usage)
+					? finiteNumber(message.usage.output)
+					: 0;
+			}
 			if (isRecord(message.usage)) {
 				const item = message.usage;
 				usage.input += finiteNumber(item.input);
@@ -361,6 +408,17 @@ export function analyzeSessionJsonlText(
 					const toolCallId = typeof part.id === "string" ? part.id : `missing-${toolCalls}`;
 					const toolName = typeof part.name === "string" ? part.name : "unknown";
 					const rawInput = isRecord(part.arguments) ? part.arguments : isRecord(part.input) ? part.input : {};
+					if (toolName === "compress") {
+						manualSummaryDelegation.compressCalls += 1;
+						const stripped = withoutCompressSummaries(rawInput);
+						const beforeTokens = estimateTokens(JSON.stringify(rawInput));
+						const afterTokens = estimateTokens(JSON.stringify(stripped.value));
+						manualSummaryDelegation.summaryArgumentChars += stripped.summaryChars;
+						manualSummaryDelegation.summaryArgumentEstimatedTokens += stripped.summaryEstimatedTokens;
+						manualSummaryDelegation.argumentEstimatedTokensBefore += beforeTokens;
+						manualSummaryDelegation.argumentEstimatedTokensWithoutSummaries += afterTokens;
+						manualSummaryDelegation.estimatedArgumentTokenReduction += Math.max(0, beforeTokens - afterTokens);
+					}
 					calls.set(toolCallId, { toolName, input: rawInput, entryIndex });
 					if (toolName.trim().toLowerCase() === "read") {
 						const identity = contextGatewayReadIdentity(rawInput);
@@ -553,6 +611,7 @@ export function analyzeSessionJsonlText(
 			blocks,
 			compressResults,
 			totalProtectedFragmentChars: blocks.reduce((sum, block) => sum + block.protectedFragmentChars, 0),
+			manualSummaryDelegation,
 			...(continuityProjection ? { continuityProjection } : {}),
 			...(preCompressionMessages.length > 0
 				? { carrierProjection: measureDcpCarrierOverhead(preCompressionMessages) }
@@ -595,6 +654,7 @@ export function renderSessionEfficiencySummary(report: SessionTokenEfficiencyRep
 		...(report.dcp.carrierProjection ? [
 			`carrierOverhead=${report.dcp.carrierProjection.legacyEquivalentOverheadEstimatedTokens}->${report.dcp.carrierProjection.overheadEstimatedTokens} tokens (${report.dcp.carrierProjection.reductionVsLegacyPercent.toFixed(1)}% reduction) across ${report.dcp.carrierProjection.carriers} carriers`,
 		] : []),
+		`manualSummaryOpportunity calls=${report.dcp.manualSummaryDelegation.compressCalls} parentOutput=${report.dcp.manualSummaryDelegation.compressAssistantOutputTokens} summaryChars=${report.dcp.manualSummaryDelegation.summaryArgumentChars} summaryTokens=${report.dcp.manualSummaryDelegation.summaryArgumentEstimatedTokens} argumentReduction=${report.dcp.manualSummaryDelegation.estimatedArgumentTokenReduction}`,
 		`compressGain=${latestCompress?.netGain ?? 0} projectedBefore=${latestCompress?.projectedBeforeTokens ?? 0} projectedAfter=${latestCompress?.projectedAfterTokens ?? 0}`,
 		`gatewayResults=${report.contextGateway.results} gatewayOverBudget=${report.contextGateway.overBudgetResults} gatewayPotentialBytes=${report.contextGateway.potentialBytesOverBudget} repeatedReads=${report.contextGateway.repeatCandidateCount}`,
 		`accounting ingressAvoidedBytes=${report.accounting.ingressAvoidedBytes} historyCompressionGainTokens=${report.accounting.historyCompressionGainTokens} recoveryCandidates=${report.accounting.recoveryTax.unattributedCandidates} likelyRecoveryTaxReads=${report.accounting.recoveryTax.likelyRecoveryTaxReads}`,

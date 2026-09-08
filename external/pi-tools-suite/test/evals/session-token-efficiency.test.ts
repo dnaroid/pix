@@ -95,6 +95,10 @@ describe("session token-efficiency analysis", () => {
 		expect(measured.components.systemPrompt.estimatedTokens).toBeLessThanOrEqual(325);
 		expect(measured.components.compressDescription.estimatedTokens).toBeLessThanOrEqual(1203);
 		expect(measured.staticSystemPlusToolEnvelope.estimatedTokens).toBeLessThanOrEqual(1990);
+		// Cheap explicit-summary delegation must not reintroduce a permanent
+		// control-plane tax. Pre-follow-up envelope after the main optimization
+		// was 1,284 estimated tokens.
+		expect(measured.staticSystemPlusToolEnvelope.estimatedTokens).toBeLessThanOrEqual(1284);
 		expect(measured.components.turnNudge.estimatedTokens).toBeLessThanOrEqual(205);
 		expect(measured.components.iterationNudge.estimatedTokens).toBeLessThanOrEqual(176);
 	});
@@ -111,6 +115,40 @@ describe("session token-efficiency analysis", () => {
 		expect(measured.withCarrierEstimatedTokens).toBeGreaterThan(measured.rawEstimatedTokens);
 		expect(measured.legacyEquivalentOverheadEstimatedTokens).toBeGreaterThan(measured.overheadEstimatedTokens);
 		expect(measured.reductionVsLegacyPercent).toBeGreaterThan(50);
+	});
+
+	test("measures parent-output opportunity from historical explicit compress summaries", () => {
+		const summary = "continuation fact ".repeat(240);
+		const fixture = [
+			line({
+				type: "message",
+				message: {
+					role: "assistant",
+					usage: { input: 10, cacheRead: 20, cacheWrite: 0, output: 1200, totalTokens: 1230, cost: { total: 0.1 } },
+					content: [{
+						type: "toolCall",
+						id: "compress-1",
+						name: "compress",
+						arguments: {
+							topic: "old work",
+							ranges: [{ startId: "m001", endId: "m050", summary }],
+						},
+					}],
+				},
+			}),
+		].join("\n");
+
+		const report = analyzeSessionJsonlText(fixture);
+		expect(report.dcp.manualSummaryDelegation).toMatchObject({
+			compressCalls: 1,
+			compressAssistantCalls: 1,
+			compressAssistantOutputTokens: 1200,
+			summaryArgumentChars: summary.length,
+		});
+		expect(report.dcp.manualSummaryDelegation.summaryArgumentEstimatedTokens).toBeGreaterThan(0);
+		expect(report.dcp.manualSummaryDelegation.estimatedArgumentTokenReduction).toBeGreaterThan(0);
+		expect(report.dcp.manualSummaryDelegation.argumentEstimatedTokensWithoutSummaries)
+			.toBeLessThan(report.dcp.manualSummaryDelegation.argumentEstimatedTokensBefore);
 	});
 
 	test("separates ingress savings, DCP history gain, and unattributed post-reduction read candidates", () => {

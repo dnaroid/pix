@@ -453,5 +453,5 @@ export function formatMessageCompressionCandidateHint(candidates: MessageCompres
   const entries = candidates
     .map((candidate) => `${candidate.messageId} (${candidate.priority}, ${candidate.role}, ~${candidate.estimatedTokens} tokens)`)
     .join(", ");
-  return `\n\nSuggested individual message compression candidates: ${entries}. To compress individual messages, call \`compress\` with a \`messages\` array: { messageId, topic, summary }. Use this for large stale messages when a full range would be too broad.`;
+  return `\n\nSuggested individual message compression candidates: ${entries}. To compress individual messages, call \`compress\` with a \`messages\` array: { messageId, topic }. Omit \`summary\` to use the configured DCP summarizer; provide it only when parent-authored wording is required. Use message mode when a full range would be too broad.`;
 }

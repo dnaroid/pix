@@ -29,7 +29,7 @@ export const COMPRESS_TOOL_DESCRIPTION: ToolDescription = {
 	name: "compress",
 	label: "Compress Context",
 	description: COMPRESS_RANGE_DESCRIPTION,
-	promptSnippet: "Compress only closed, high-yield stale context when pressure/reminders justify it; keep active or still-needed raw context.",
+	promptSnippet: "Compress only closed, high-yield stale context when pressure/reminders justify it; keep active or still-needed raw context. Omit summary for DCP summarizer.",
 	promptGuidelines: [
 		"Prefer completed work and understood large tool/log output; low context alone is not a trigger.",
 	],

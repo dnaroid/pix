@@ -35,7 +35,7 @@ routine reminders may be skipped when no safe useful slice exists.
  *     ranges: Array<{
  *       startId: string        // mNNN or bN
  *       endId:   string        // mNNN or bN
- *       summary: string        // continuation-focused technical summary
+ *       summary?: string       // optional parent-authored summary
  *     }>
  *   }
  */
@@ -52,7 +52,8 @@ errors that are still actionable, verification state, unresolved blockers, and
 next steps. If work remains unfinished include \`Active objective\` and \`Next
 step\`. Do not infer, invent, or add facts. Preserve uncertainty. Do not copy long
 raw code, JSON, diffs, logs, or tool output; use short literals only when needed.
-Keep summary arguments quote-light so they remain valid JSON tool arguments.
+Normally omit \`summary\`: DCP generates it. An explicit \`summary\` overrides
+generation when parent-authored continuation wording is genuinely required.
 
 MODES:
 - \`ranges\`: contiguous \`startId..endId\` spans.

@@ -2,7 +2,7 @@
 
 # DCP + Context Gateway: план снижения token/context overhead
 
-Status: **completed — deterministic implementation/verification complete**
+Status: **completed — cheap explicit-compress summarizer follow-up verified**
 
 Last updated: **2026-09-08**
 
@@ -988,6 +988,63 @@ Notes:
 
 ### Entries
 
+2026-09-08 18:55 — H1-H5 cheap explicit-compress summarizer implementation
+
+Status: completed
+
+Changed:
+
+- `src/dcp/auto-compress.ts` — summary preparation вынесена в shared
+  `prepareCompressionSummary`; auto и explicit paths используют один manifest,
+  chunking, auth/model fallback и extractive safety floor.
+- `src/dcp/compression-preview.ts` — exposed detached verified manual provider
+  projection для generated summaries.
+- `src/dcp/compress-tool.ts` — `ranges[].summary`/`messages[].summary` optional;
+  omission delegates to configured `autoCompress.summarizerModel` даже при
+  `autoCompress.enabled=false`; explicit summaries bypass model calls.
+- `src/dcp/prompts.ts`, `src/tool-descriptions.ts`, `src/dcp/pruner-candidates.ts`
+  — compact guidance для нового optional-summary contract.
+- `test/dcp-manual-cheap-summary.test.ts` — range/message success, explicit
+  bypass, unavailable/timeout fallback, abort и stale-source atomicity.
+- `test/evals/session-token-efficiency.ts` — historical parent-summary
+  opportunity accounting.
+
+Verification:
+
+- Dedicated cheap-summary + prompt/accounting tests — **18 pass / 0 fail**.
+- Full DCP regression suite including new tests — **196 pass / 0 fail /
+  46,142 expect calls**.
+- Extractive fallback сохраняет реальные selected IDs и проходит existing
+  full-projection positive-gain guard; oversized/unsafe minimum по-прежнему
+  fail-closed.
+
+Metrics:
+
+- Reference historical `compress`: parent output **1,345 tokens**.
+- Historical summary argument: **5,555 chars / ~1,389 estimator tokens**.
+- Serialized args without explicit summary fields: **~1,396 estimator tokens
+  меньше**.
+- Follow-up static system+tool envelope: **1,280 tokens** vs **1,284** до H
+  (`−4`, то есть feature не добавляет permanent prompt tax).
+- Compress schema: **1,130 chars / ~283 tokens**, ниже pre-follow-up ~314-token
+  schema за счёт короткого optional-summary contract.
+
+Final deterministic gates so far:
+
+- `npm run typecheck` — **PASS**.
+- `npm test` — **796 pass / 63 opt-in skip / 0 fail / 49,776 expect calls**,
+  859 tests across 75 files.
+- `git diff --check` — **PASS**.
+- Host `npm run smoke` — **PASS**, including `smoke:explicit`, `smoke:auto`,
+  and `smoke:tools`.
+
+Decision:
+
+- `summaryHint` был прототипирован и удалён до finalization: он добавлял
+  постоянные schema/prompt tokens и отдельный канал неподтверждённых claims.
+  Selection IDs уже выражают scope; если parent-модели нужен особый wording,
+  она может использовать backward-compatible explicit `summary`.
+
 2026-09-08 18:45 — host smoke verification
 
 Status: completed
@@ -1263,3 +1320,90 @@ Evidence baseline:
    snapshot/cursor producer contract.
 3. Расширять test/build parser только новыми deterministic format contracts;
    не добавлять generic head/tail truncation.
+
+---
+
+## 18. Cheap summarizer for explicit/manual `compress`
+
+Goal: parent-модель по-прежнему выбирает protocol-safe IDs/ranges, но не тратит
+дорогие output tokens на длинный continuation `summary`, если его может построить
+настроенная дешёвая summarizer-модель через существующий DCP pipeline.
+
+### H1. Backward-compatible tool contract
+
+- [x] Сделать `ranges[].summary` и `messages[].summary` optional.
+- [x] Existing explicit `summary` должен полностью сохранять текущий path и не
+  запускать дополнительную модель.
+- [-] `summaryHint` сознательно исключён после прототипа: scope уже задаётся
+  selected IDs, а hint добавляет permanent schema tokens и дополнительный канал
+  неподтверждённых claims. Для особого wording остаётся explicit `summary`.
+- [x] Если `summary` отсутствует, использовать
+  `compress.autoCompress.summarizerModel` + `timeoutMs` независимо от
+  `autoCompress.enabled`; `enabled` управляет только autonomous firing.
+
+### H2. Shared source/summarizer pipeline
+
+- [x] Переиспользовать `buildSummarySourceManifest`, complete-tool-group
+  chunking, auth/model fallback и `generateModelSummary`; второго summarizer
+  pipeline не создавать.
+- [x] Source брать только из current verified provider projection, который уже
+  используется manual full-projection proof.
+- [x] После model await повторно доказать owner/source freshness до создания
+  block и persistence.
+- [x] Model failure/timeout/empty → bounded deterministic extractive fallback;
+  parent abort/session change/source change → no commit.
+
+### H3. Observability and economics
+
+- [x] `compress` result/debug показывает summary mode,
+  `summarizerModelRef` и safe attempt outcomes.
+- [x] Reference-session analyzer показывает historical parent `summary` argument
+  chars/tokens и parent output opportunity при delegated-summary path.
+- [x] Provider-dollar savings не заявлять без pricing/real run: отдельно
+  показывать shifted parent-output work и summarizer work.
+
+### H4. Verification
+
+- [x] Generated range summary success.
+- [x] Generated message summary success.
+- [x] Explicit summary compatibility: summarizer не вызывается.
+- [x] Missing/unavailable summarizer → extractive fallback.
+- [x] Timeout/abort/source-change atomicity; session-owner coverage остаётся в
+  shared DCP transaction regression suite.
+- [x] Chunking reuse не split'ит complete tool groups; shared auto-compress
+  chunking/protocol tests остаются зелёными.
+- [x] Manual projection gain remains positive and journal replay-compatible;
+  dedicated gain checks + full DCP/journal suite прошли.
+- [x] Focused DCP suite, typecheck and relevant full tests pass: DCP `196/196`,
+  full repo `796 pass / 63 skip / 0 fail`, typecheck PASS; host smoke PASS.
+
+### H5. Acceptance
+
+- [x] Reference historical compress call демонстрирует измеримый parent output
+  opportunity: большая часть старого tool-call argument была summary.
+- [x] Generated path не ухудшает protected-continuity/full-projection guarantees;
+  dedicated tests и full DCP regression suite зелёные.
+- [x] Изменения идут отдельным commit поверх `44d1fe4`.
+
+Measured reference opportunity:
+
+- historical explicit `compress`: **1,345 provider-reported output tokens**;
+- summary arguments: **5,555 chars / ~1,389 estimator tokens**;
+- serialized tool arguments without summary fields: примерно **1,396 estimator
+  tokens меньше**;
+- это accounting opportunity, не прямое обещание `−1,396` billed tokens: работа
+  переносится с parent output на выбранный cheap summarizer и должна считаться
+  отдельно.
+
+Final verification for H:
+
+- dedicated manual cheap-summary tests: **7 pass / 0 fail**;
+- full DCP regression suite: **196 pass / 0 fail**;
+- final targeted compatibility regression: **17 pass / 0 fail**;
+- `npm run typecheck`: **PASS**;
+- full repository suite: **796 pass / 63 opt-in skip / 0 fail**;
+- host `npm run smoke`: **PASS** (`smoke:explicit`, `smoke:auto`, `smoke:tools`);
+- static DCP system+tool envelope: **1,280 estimated tokens**, slightly below
+  pre-follow-up **1,284**, so generated summaries add no permanent prompt tax;
+- explicit `summary`, including an explicitly empty string, remains the legacy
+  parent-authored path; generation occurs only when the field is omitted.

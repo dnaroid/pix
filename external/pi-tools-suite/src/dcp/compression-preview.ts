@@ -58,6 +58,15 @@ function verifiedSnapshot(state: DcpState): any[] {
   return snapshot
 }
 
+/**
+ * Return a detached, verified copy of the exact provider projection used by
+ * manual compression. Generated summaries must use this source rather than
+ * reconstructing history from timestamps or persisted session entries.
+ */
+export function verifiedManualCompressionMessages(state: DcpState): any[] {
+  return cloneProjectionMessages(verifiedSnapshot(state))
+}
+
 function stripProjectionMetadata(message: any): any {
   const stripped = stripStaleDcpMetadataFromMessage(message)
   return copyDcpProvenance(message, stripped)

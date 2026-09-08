@@ -775,6 +775,80 @@ export async function generateModelSummary(
 	return { attempts }
 }
 
+export interface PreparedCompressionSummary {
+	text: string
+	representation: "model" | "extractive" | "extractive-fallback"
+	sourceManifest: SummarySourceItem[]
+	sourceHash: string
+	sourceCoverage: SummarySourceCoverage
+	summarizerModelRef?: string
+	summarizerAttempts?: ModelSummaryAttempt[]
+}
+
+/**
+ * Shared summary preparation for automatic and explicit compression. The
+ * configured model chain is attempted first; if it is absent/unavailable the
+ * deterministic extractive continuation record is the safety floor.
+ */
+export async function prepareCompressionSummary(options: {
+	topic: string
+	messages: any[]
+	candidate?: CompressionCandidate
+	modelRefs: string[]
+	timeoutMs: number
+	modelRegistry?: ModelSummaryRegistry
+	signal?: AbortSignal
+	sourceManifest?: SummarySourceItem[]
+}): Promise<PreparedCompressionSummary> {
+	options.signal?.throwIfAborted()
+	const sourceManifest = options.sourceManifest ?? buildSummarySourceManifest(options.messages)
+	let modelResult: ModelSummaryResult | undefined
+	if (options.modelRefs.length > 0) {
+		modelResult = await generateModelSummary(
+			options.modelRefs,
+			options.modelRegistry,
+			options.signal,
+			options.topic,
+			options.messages,
+			options.timeoutMs,
+			sourceManifest,
+		)
+		options.signal?.throwIfAborted()
+	}
+	const fallbackCandidate = options.candidate ?? {
+		startId: "generated",
+		endId: "generated",
+		messageCount: sourceManifest.length,
+		estimatedTokens: options.messages.reduce((sum, message) => sum + estimateMessageTokens(message), 0),
+		includedBlockIds: [],
+		reason: "explicit/generated summary source",
+	}
+	const text = modelResult?.text ?? buildExtractiveSummary(
+		options.topic,
+		fallbackCandidate,
+		sourceManifest,
+	)
+	if (!modelResult?.text && estimateTokens(text) > 8192) {
+		throw new AutoCompressionBlockedError(
+			"budget-exhausted",
+			"Extractive continuity minimum exceeds its 8192-token budget; no checkpoints were silently dropped",
+		)
+	}
+	return {
+		text,
+		representation: modelResult?.text
+			? "model"
+			: options.modelRefs.length > 0
+				? "extractive-fallback"
+				: "extractive",
+		sourceManifest,
+		sourceHash: hashSummarySourceManifest(sourceManifest),
+		sourceCoverage: summarySourceCoverage(sourceManifest),
+		summarizerModelRef: modelResult?.usedModelRef,
+		summarizerAttempts: modelResult?.attempts.length ? modelResult.attempts : undefined,
+	}
+}
+
 function extractAssistantText(result: any): string | undefined {
 	const content = result?.content
 	if (!Array.isArray(content)) return undefined
@@ -913,48 +987,26 @@ export async function createAutoCompressionBlock(
 		}
 	}
 
-	// Summary source selection. `summaryMode` distinguishes three cases so the
-	// DCP debug log can tell a real model summary from a programmatic fallback
-	// caused by summarizer failure:
-	//   - "model": a configured model produced the summary.
-	//   - "programmatic": no summarizer models configured (floor by design).
-	//   - "programmatic_fallback": models were configured but all failed/empty.
-	const sourceManifest = buildSummarySourceManifest(messagesInRange)
-	let summary = ""
-	let summaryMode: "programmatic" | "model" | "programmatic_fallback" = "programmatic"
-	let summarizerModelRef: string | undefined
-	let summarizerAttempts: ModelSummaryAttempt[] | undefined
-
-	const modelRefs = settings.summarizerModel
-	if (modelRefs.length > 0) {
-		const modelResult = await generateModelSummary(
-			modelRefs,
-			modelRegistry,
-			signal,
-			topic,
-			messagesInRange,
-			settings.timeoutMs,
-			sourceManifest,
-		)
-		assertCurrent()
-		summarizerAttempts = modelResult.attempts.length > 0 ? modelResult.attempts : undefined
-		if (modelResult.text) {
-			summary = modelResult.text
-			summaryMode = "model"
-			summarizerModelRef = modelResult.usedModelRef
-		} else {
-			// All configured models failed or returned empty — fall back to the
-			// programmatic digest, but mark the mode distinctly so the fallback
-			// is visible in DCP debug logs.
-			summaryMode = "programmatic_fallback"
-		}
-	}
-	if (!summary) {
-		summary = buildExtractiveSummary(topic, effectiveCandidate, sourceManifest)
-		if (estimateTokens(summary) > 8192) {
-			throw new AutoCompressionBlockedError("budget-exhausted", "Extractive continuity minimum exceeds its 8192-token budget; no checkpoints were silently dropped")
-		}
-	}
+	const preparedSummary = await prepareCompressionSummary({
+		topic,
+		messages: messagesInRange,
+		candidate: effectiveCandidate,
+		modelRefs: settings.summarizerModel,
+		timeoutMs: settings.timeoutMs,
+		modelRegistry,
+		signal,
+	})
+	assertCurrent()
+	const summary = preparedSummary.text
+	const sourceManifest = preparedSummary.sourceManifest
+	const summaryMode: "programmatic" | "model" | "programmatic_fallback" =
+		preparedSummary.representation === "model"
+			? "model"
+			: preparedSummary.representation === "extractive-fallback"
+				? "programmatic_fallback"
+				: "programmatic"
+	const summarizerModelRef = preparedSummary.summarizerModelRef
+	const summarizerAttempts = preparedSummary.summarizerAttempts
 
 	const workingState = createAutoCompressionWorkingState(state)
 	const anchor = resolveAnchorBoundary(endTimestamp, workingState, endBoundary.stableId)
@@ -1004,8 +1056,8 @@ export async function createAutoCompressionBlock(
 		: summaryMode === "programmatic_fallback"
 			? "extractive-fallback"
 			: "extractive"
-	const sourceHash = hashSummarySourceManifest(sourceManifest)
-	const sourceCoverage = summarySourceCoverage(sourceManifest)
+	const sourceHash = preparedSummary.sourceHash
+	const sourceCoverage = preparedSummary.sourceCoverage
 	created.block.autoSummaryRepresentation = summaryRepresentation
 	created.block.sourceHash = sourceHash
 	created.block.sourceCoverage = sourceCoverage

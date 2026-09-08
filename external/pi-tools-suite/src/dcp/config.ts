@@ -57,15 +57,17 @@ export interface DcpConfig {
      * session — disabled by default; opt in via config.
      */
     autoCompress: {
+      /** Gates autonomous firing only. Explicit `compress` calls may still use
+       * the summarizer settings below when their per-selection summary is omitted. */
       enabled: boolean
       /** Auto fallback is eligible after more than this many completed,
        * correlated opportunities with a delivered actionable reminder.
        * Failed calls and insufficient commits do not reset patience. */
       patience: number
-      /** Models to try, in order, when producing a model-generated summary.
+      /** Models to try, in order, for auto-compress and explicit generated summaries.
        * Empty array → deterministic programmatic digest (no model call). */
       summarizerModel: string[]
-      /** Hard ceiling in ms for a single summarizer model call. */
+      /** Hard ceiling in ms for a summarizer model call on either path. */
       timeoutMs: number
     }
   }
