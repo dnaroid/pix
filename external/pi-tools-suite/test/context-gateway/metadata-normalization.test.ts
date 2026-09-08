@@ -418,7 +418,7 @@ describe("context gateway non-store experiment: truncation metadata normalizatio
 					theme,
 					{} as any,
 				) as any;
-				return component.render(120);
+				return component.text;
 			};
 			expect(renderAst(normalized.details, false)).toEqual(renderAst(result.details, false));
 			expect(renderAst(normalized.details, true)).toEqual(renderAst(result.details, true));
@@ -511,7 +511,7 @@ describe("context gateway non-store experiment: truncation metadata normalizatio
 					theme,
 					{} as any,
 				) as any;
-				return component.render(120);
+				return component.text;
 			};
 			expect(render(normalized.details, false)).toEqual(render(result.details, false));
 			expect(render(normalized.details, true)).toEqual(render(result.details, true));
