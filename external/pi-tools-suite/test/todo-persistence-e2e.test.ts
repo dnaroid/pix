@@ -10,8 +10,12 @@ const EXTENSION_ENTRYPOINT = path.resolve(path.dirname(fileURLToPath(import.meta
 const E2E_TIMEOUT_MS = Number(process.env.TODO_PERSISTENCE_E2E_TIMEOUT_MS ?? 45_000);
 const KEEP_E2E_DIRS = /^(1|true|yes)$/i.test(process.env.TODO_PERSISTENCE_E2E_KEEP ?? "");
 const STREAM_IO = /^(1|true|yes)$/i.test(process.env.TODO_PERSISTENCE_E2E_STREAM_IO ?? "");
+// Live E2E: the resume step calls a real model, so keep the deterministic
+// default suite offline and require the same explicit opt-in used by the other
+// model-backed E2E tests.
+const RUN_E2E = /^(1|true|yes)$/i.test(process.env.TODO_PERSISTENCE_E2E ?? "");
 const RUN_IN_CI = /^(1|true|yes)$/i.test(process.env.TODO_PERSISTENCE_E2E_CI ?? "");
-const TODO_PERSISTENCE_TEST = process.env.CI && !RUN_IN_CI ? test.skip : test;
+const TODO_PERSISTENCE_TEST = RUN_E2E || (Boolean(process.env.CI) && RUN_IN_CI) ? test : test.skip;
 
 type PiRun = {
 	stdout: string;

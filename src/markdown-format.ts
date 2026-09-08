@@ -1149,24 +1149,42 @@ export function stripDcpControlMetadata(text: string): string {
 
 	const lines = text.split("\n");
 	const kept: string[] = [];
-	let inMessageIds = false;
+	let candidate: string[] | undefined;
+	let inFence: { marker: "`" | "~"; length: number } | undefined;
 	let touched = false;
 
 	for (const line of lines) {
-		if (inMessageIds) {
-			touched = true;
-			if (/<\/dcp-message-ids>\s*$/i.test(line)) inMessageIds = false;
+		if (candidate) {
+			candidate.push(line);
+			if (/<\/dcp-message-ids>\s*$/i.test(line)) {
+				candidate = undefined;
+				touched = true;
+			}
 			continue;
 		}
 
-		if (/^\s*<dcp-message-ids>/i.test(line)) {
-			touched = true;
-			if (!/<\/dcp-message-ids>\s*$/i.test(line)) inMessageIds = true;
+		const quoteLine = /^\s{0,3}>/.test(line);
+		if (!quoteLine) {
+			const fence = markdownFence(line);
+			if (fence) {
+				if (!inFence) inFence = { marker: fence.marker, length: fence.length };
+				else if (fence.marker === inFence.marker && fence.length >= inFence.length) inFence = undefined;
+			}
+		}
+
+		if (!inFence && !quoteLine && /^\s*<dcp-message-ids>/i.test(line)) {
+			if (/<\/dcp-message-ids>\s*$/i.test(line)) {
+				touched = true;
+			} else {
+				candidate = [line];
+			}
 			continue;
 		}
 
 		kept.push(line);
 	}
+
+	if (candidate) kept.push(...candidate);
 
 	return touched ? kept.join("\n").trimEnd() : text;
 }

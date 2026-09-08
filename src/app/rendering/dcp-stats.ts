@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import { normalizeToolName, parseArgsText } from "../../tool-renderers/utils.js";
 
@@ -25,7 +23,7 @@ type DcpSessionStats = {
 	items: number;
 	summaryTokens: number;
 	prunedTools: number;
-	stateSource: "sidecar" | "tool-results";
+	stateSource: "journal" | "tool-results";
 	manualMode?: boolean;
 	activeBlocks?: number;
 	totalBlocks?: number;
@@ -53,9 +51,10 @@ type DcpNudgeStats = {
 };
 
 export function formatDcpStatsToast(session: AgentSession): string {
-	const latestState = resolveLatestDcpState(session);
-	const stats = collectDcpSessionStats(session, latestState);
-	const nudgeStats = collectDcpNudgeStats(session, latestState?.data);
+	const branch = dcpStatsBranch(session);
+	const latestState = resolveJournalDcpState(branch);
+	const stats = collectDcpSessionStats(session, latestState, branch);
+	const nudgeStats = collectDcpNudgeStats(branch, latestState?.data);
 	const activeBlocks = stats.activeBlocks ?? 0;
 	const totalBlocks = stats.totalBlocks ?? stats.activeBlocks ?? 0;
 	const totalNudgeEvents = nudgeStats.emitted + nudgeStats.upgraded;
@@ -88,6 +87,7 @@ export function formatDcpStatsToast(session: AgentSession): string {
 function collectDcpSessionStats(
 	session: AgentSession,
 	latestState: { data: Record<string, unknown>; source: DcpSessionStats["stateSource"] } | undefined,
+	branch: readonly any[],
 ): DcpSessionStats {
 	const usage = session.getContextUsage();
 	const stats: DcpSessionStats = {
@@ -103,12 +103,10 @@ function collectDcpSessionStats(
 		...(usage?.percent != null ? { contextPercent: usage.percent } : {}),
 	};
 
-	const branch = session.sessionManager.getBranch();
 	if (latestState) applyDcpStateStats(stats, latestState.data);
 
 	for (const entry of branch) {
 		if (entry.type !== "message") continue;
-		if (latestState) continue;
 		const message = entry.message;
 		if (message.role !== "toolResult") continue;
 		if (normalizeToolName(message.toolName) !== "compress") continue;
@@ -136,12 +134,19 @@ function collectDcpSessionStats(
 		if (stats.contextWindow == null && contextWindow != null) stats.contextWindow = contextWindow;
 		if (stats.contextPercent == null && contextPercent != null) stats.contextPercent = contextPercent;
 	}
+	if (latestState) {
+		// Journal state owns durable block/prune counts; successful compress tool
+		// results own operation gain because the journal intentionally stores only
+		// projection decisions rather than derived accounting snapshots.
+		stats.totalPruneCount = Math.max(stats.totalPruneCount, (stats.totalBlocks ?? 0) + stats.prunedTools);
+	}
 
 	return stats;
 }
 
 function applyDcpStateStats(stats: DcpSessionStats, data: Record<string, unknown>): void {
 	stats.tokensSaved = numberValue(data.tokensSaved) ?? stats.tokensSaved;
+	stats.tokensSaved += numberValue(data.prunedTokensSaved) ?? 0;
 	stats.totalPruneCount = numberValue(data.totalPruneCount) ?? stats.totalPruneCount;
 	const blocks = Array.isArray(data.compressionBlocks) ? data.compressionBlocks : undefined;
 	if (blocks) {
@@ -152,7 +157,7 @@ function applyDcpStateStats(stats: DcpSessionStats, data: Record<string, unknown
 	if (typeof data.manualMode === "boolean") stats.manualMode = data.manualMode;
 }
 
-function collectDcpNudgeStats(session: AgentSession, latestState: Record<string, unknown> | undefined): DcpNudgeStats {
+function collectDcpNudgeStats(branch: readonly any[], latestState: Record<string, unknown> | undefined): DcpNudgeStats {
 	const stats: DcpNudgeStats = {
 		emitted: 0,
 		upgraded: 0,
@@ -162,7 +167,6 @@ function collectDcpNudgeStats(session: AgentSession, latestState: Record<string,
 		activeByType: { "turn": 0, "iteration": 0, "context-soft": 0, "context-strong": 0 },
 	};
 
-	const branch = session.sessionManager.getBranch();
 	if (latestState) applyActiveAnchorStats(stats, latestState);
 
 	for (const entry of branch) {
@@ -211,43 +215,85 @@ function applyActiveAnchorStats(stats: DcpNudgeStats, data: Record<string, unkno
 	}
 }
 
-function resolveLatestDcpState(session: AgentSession): { data: Record<string, unknown>; source: DcpSessionStats["stateSource"] } | undefined {
-	const sidecar = loadSidecarDcpState(session);
-	if (sidecar) return { data: sidecar, source: "sidecar" };
+function resolveJournalDcpState(branch: readonly any[]): { data: Record<string, unknown>; source: DcpSessionStats["stateSource"] } | undefined {
+	const blocks = new Map<number, Record<string, unknown>>();
+	const pruned = new Map<string, { reason?: string; tokenEstimate: number }>();
+	let initialized = false;
+	let manualMode: boolean | undefined;
+	let nudgeAnchors: unknown[] = [];
+	let lastNudge: unknown;
 
-	return undefined;
+	for (const entry of branch) {
+		const operation = customEntryData(entry, "dcp-journal");
+		if (!operation || operation.schemaVersion !== 1) continue;
+		if (operation.kind === "init") {
+			initialized = true;
+			continue;
+		}
+		if (!initialized || operation.kind !== "delta") continue;
+		if (Array.isArray(operation.blocks)) {
+			for (const raw of operation.blocks) {
+				if (!isRecord(raw) || typeof raw.id !== "number") continue;
+				blocks.set(raw.id, { ...raw });
+			}
+		}
+		if (Array.isArray(operation.blockStates)) {
+			for (const raw of operation.blockStates) {
+				if (!isRecord(raw) || typeof raw.id !== "number") continue;
+				const block = blocks.get(raw.id);
+				if (!block) continue;
+				if (typeof raw.active === "boolean") block.active = raw.active;
+				if (typeof raw.deactivatedReason === "string") block.deactivatedReason = raw.deactivatedReason;
+			}
+		}
+		if (Array.isArray(operation.prunedTools)) {
+			for (const raw of operation.prunedTools) {
+				if (!isRecord(raw) || typeof raw.toolCallId !== "string") continue;
+				pruned.set(raw.toolCallId, {
+					...(typeof raw.reason === "string" ? { reason: raw.reason } : {}),
+					tokenEstimate: Math.max(0, numberValue(raw.tokenEstimate) ?? 0),
+				});
+			}
+		}
+		if (typeof operation.manualMode === "boolean") manualMode = operation.manualMode;
+		if (Array.isArray(operation.nudgeAnchors)) nudgeAnchors = operation.nudgeAnchors;
+		if (Object.prototype.hasOwnProperty.call(operation, "lastNudge")) lastNudge = operation.lastNudge ?? undefined;
+	}
+
+	if (!initialized) return undefined;
+	return {
+		source: "journal",
+		data: {
+			compressionBlocks: [...blocks.values()],
+			prunedToolIds: [...pruned.keys()],
+			prunedTokensSaved: [...pruned.values()].reduce((sum, item) => sum + item.tokenEstimate, 0),
+			manualMode,
+			nudgeAnchors,
+			lastNudge,
+		},
+	};
 }
 
-function loadSidecarDcpState(session: AgentSession): Record<string, unknown> | undefined {
-	const sessionManager = session.sessionManager as AgentSession["sessionManager"] & {
-		getSessionDir?: () => string | undefined;
-		getSessionId?: () => string | undefined;
+function dcpStatsBranch(session: AgentSession): readonly any[] {
+	const manager = session.sessionManager as AgentSession["sessionManager"] & {
+		readFullBranchEntriesSync?: () => readonly any[];
 	};
-	const sessionDir = sessionManager.getSessionDir?.();
-	const sessionId = sessionManager.getSessionId?.();
-	if (!sessionDir || !sessionId) return undefined;
-
 	try {
-		const statePath = join(sessionDir, "dcp-state", safeSessionFileName(sessionId));
-		const parsed = JSON.parse(readFileSync(statePath, "utf8"));
-		if (!isRecord(parsed)) return undefined;
-		// The suite persists an envelope { kind: "dcp-state", payload: {...} };
-		// pre-envelope sidecars stored the state payload directly.
-		if (parsed.kind === "dcp-state") {
-			return isRecord(parsed.payload) ? parsed.payload : undefined;
-		}
-		return parsed;
+		const full = manager.readFullBranchEntriesSync?.();
+		if (Array.isArray(full)) return full;
 	} catch {
-		return undefined;
+		// Fall back to the manager's currently materialized branch below.
+	}
+	try {
+		const branch = manager.getBranch();
+		return Array.isArray(branch) ? branch : [];
+	} catch {
+		return [];
 	}
 }
 
-function safeSessionFileName(sessionId: string): string {
-	return `${sessionId.replace(/[^a-zA-Z0-9._-]/g, "_")}.json`;
-}
-
 function formatStateSource(source: DcpSessionStats["stateSource"]): string {
-	if (source === "sidecar") return "dcp-state sidecar";
+	if (source === "journal") return "session journal";
 	return "compress tool results";
 }
 

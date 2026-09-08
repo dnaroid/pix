@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { loadConfig } from "../src/dcp/config.js";
 import dcpModule from "../src/dcp/index.js";
-import { createState, restoreState, serializeState } from "../src/dcp/state.js";
+import { createState } from "../src/dcp/state.js";
 import { resetCompressionProgress, settleCompressionProgress, trackCompressionProgress } from "../src/dcp/compression-progress.js";
 import { providerPayloadIncludesReminder } from "../src/dcp/provider-tool-results.js";
 import { decideAutoCompress } from "../src/dcp/auto-compress.js";
@@ -16,9 +16,6 @@ async function fixture(options: { auto?: boolean; tokens?: number; manual?: bool
   config.compress.autoCandidates.minContextPercent = 0.25;
   config.compress.messageMode.minContextPercent = 0.25;
   config.compress.autoCompress = { enabled: options.auto ?? true, patience: 2, summarizerModel: [], timeoutMs: 5000 };
-  config.strategies.deduplication.enabled = false;
-  config.strategies.purgeErrors.enabled = false;
-  config.strategies.autoToolPruning.enabled = false;
   config.manualMode.enabled = options.manual ?? false;
   const state = createState();
   const handlers = new Map<string, Array<(event: any, ctx: any) => any>>();
@@ -108,7 +105,7 @@ describe("DCP bounded actionable opportunities", () => {
     expect(f.state.consecutiveIgnoredNudges).toBe(0);
   });
 
-  test("a single long user turn gets a useful routine reminder and bounded same-turn recovery", async () => {
+  test("a single long user turn does not rewrite its old user carrier under routine pressure", async () => {
     const f = await fixture();
     f.messages.splice(0, f.messages.length, { id: "only-user", role: "user", timestamp: 1, content: "ACTIVE_USER_REQUEST" });
     await f.context();
@@ -129,14 +126,14 @@ describe("DCP bounded actionable opportunities", () => {
     expect(f.state.consecutiveIgnoredNudges).toBe(0);
     for (let response = 0; response < 3; response++) {
       const projected = await f.context();
-      expect(f.state.nudgeAnchors.length).toBe(1);
+      expect(f.state.nudgeAnchors.length).toBe(0);
       await f.request(projected);
       await f.complete();
     }
     const result = await f.context();
-    expect(f.state.compressionBlocks.length).toBeGreaterThan(0);
+    expect(f.state.compressionBlocks).toHaveLength(0);
+    expect(f.state.consecutiveIgnoredNudges).toBe(0);
     expect(JSON.stringify(result.messages)).toContain("ACTIVE_USER_REQUEST");
-    expect(f.state.compressionBlocks.every((block) => block.mutationMembers?.every((member) => member.stableId !== "id:only-user"))).toBe(true);
     for (let i = 22; i < 30; i++) expect(result.messages.some((message: any) => message.toolCallId === `read-${i}`)).toBe(true);
   });
 
@@ -169,7 +166,9 @@ describe("DCP bounded actionable opportunities", () => {
     }
     expect(f.state.consecutiveIgnoredNudges).toBe(132);
     expect(f.state.consecutiveIgnoredStrongNudges).toBe(0);
-    expect(f.state.nudgeAnchors[0]?.type).toBe("context-strong");
+    // The original carrier is immutable; escalation is diagnostic/automatic
+    // policy state, not an in-place rewrite of previously delivered bytes.
+    expect(f.state.nudgeAnchors[0]?.type).toBe("turn");
     expect(f.state.compressionBlocks).toHaveLength(0);
     expect(f.warnings).toHaveLength(1);
     expect(f.warnings[0]).toContain("Automatic compression is disabled");
@@ -199,7 +198,7 @@ describe("DCP bounded actionable opportunities", () => {
     expect(decision.shouldFire).toBe(true);
   });
 
-  test("partial savings retain a stable remaining goal across callbacks and serialization", () => {
+  test("partial savings retain a stable remaining goal across callbacks", () => {
     const state = createState();
     state.consecutiveIgnoredNudges = 4;
     state.consecutiveIgnoredStrongNudges = 3;
@@ -210,14 +209,10 @@ describe("DCP bounded actionable opportunities", () => {
       trackCompressionProgress(state, { projectedTokens: 99_400, contextWindow: 272_000, requiredTokens: 13_600, kind: "routine" });
     }
     expect(state.compressionProgress?.remainingTokens).toBe(13_000);
-    const restored = createState();
-    restoreState(restored, serializeState(state));
-    expect(restored.compressionProgress).toEqual(state.compressionProgress);
-    expect(restored.consecutiveIgnoredNudges).toBe(4);
-    expect(settleCompressionProgress(restored, 13_000, 86_400)).toBe(true);
-    expect(restored.consecutiveIgnoredNudges).toBe(0);
-    expect(restored.consecutiveIgnoredStrongNudges).toBe(0);
-    expect(restored.compressionProgress).toBeUndefined();
+    expect(settleCompressionProgress(state, 13_000, 86_400)).toBe(true);
+    expect(state.consecutiveIgnoredNudges).toBe(0);
+    expect(state.consecutiveIgnoredStrongNudges).toBe(0);
+    expect(state.compressionProgress).toBeUndefined();
     resetCompressionProgress(state);
     expect(state.compressionProgress).toBeUndefined();
   });

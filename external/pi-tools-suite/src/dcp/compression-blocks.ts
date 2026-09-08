@@ -45,8 +45,6 @@ export interface CreateRangeCompressionBlockOptions {
   sourceMembers?: CompressionMember[]
   /** Exact canonical raw mutation membership prepared with sourceMembers. */
   mutationMembers?: CompressionMember[]
-  /** Explicit compatibility path for snapshots that predate exact membership. */
-  legacySourceMembership?: true
 }
 
 export interface ResolvedCompressionBoundary {
@@ -114,8 +112,8 @@ function messageOrdinal(stableId: string | undefined, state: DcpState): number |
 
 /**
  * Compare two conversation boundaries. Current canonical branch order wins
- * whenever both stable identities resolve; timestamps are a legacy fallback
- * only when that exact order is unavailable.
+ * whenever both stable identities resolve; timestamps are used only for
+ * transient in-memory inputs that have not received stable identities yet.
  */
 export function compareCompressionBoundaries(
   left: ResolvedCompressionBoundary,
@@ -184,7 +182,7 @@ function inferExactMembershipFromBoundaries(
   return startId && endId ? resolveExactRangeMembership(startId, endId, state, messageBody) : undefined
 }
 
-const BLOCK_PLACEHOLDER_RE = /\(b(\d+)\)|\{block_(\d+)\}/gi
+const BLOCK_PLACEHOLDER_RE = /\(b(\d+)\)/gi
 const MAX_DIAGNOSTIC_IDS = 24
 
 function idSortKey(id: string): [number, string] {
@@ -251,14 +249,13 @@ function formatRestoredBlock(block: CompressionBlock): string {
 }
 
 /**
- * Replace `(bN)` / legacy `{block_N}` placeholders in a summary with the
- * stored content of the referenced compression block. Unrecognised
- * placeholders are left as-is for backwards compatibility.
+ * Replace `(bN)` placeholders in a summary with the stored content of the
+ * referenced compression block. Unrecognised placeholders are left as-is.
  */
 export function expandBlockPlaceholders(summary: string, state: DcpState): string {
   const consumed = new Set<number>()
-  return summary.replace(BLOCK_PLACEHOLDER_RE, (match, idStr, legacyIdStr) => {
-    const id = parseInt(idStr ?? legacyIdStr, 10)
+  return summary.replace(BLOCK_PLACEHOLDER_RE, (match, idStr) => {
+    const id = parseInt(idStr, 10)
     const block = state.compressionBlocks.find((b) => b.id === id)
     if (block && consumed.has(id)) return ""
     if (block) consumed.add(id)
@@ -274,8 +271,8 @@ function expandBlockPlaceholdersWithRecovery(
   const coveredIds = new Set(coveredBlocks.map((block) => block.id))
   const consumed = new Set<number>()
 
-  const expanded = summary.replace(BLOCK_PLACEHOLDER_RE, (_match, idStr, legacyIdStr) => {
-    const id = parseInt(idStr ?? legacyIdStr, 10)
+  const expanded = summary.replace(BLOCK_PLACEHOLDER_RE, (_match, idStr) => {
+    const id = parseInt(idStr, 10)
     if (!coveredIds.has(id) || consumed.has(id)) return ""
 
     const block = state.compressionBlocks.find((b) => b.id === id)
@@ -300,7 +297,7 @@ function expandBlockPlaceholdersWithRecovery(
 function assertVerifiableBlockPlaceholders(summary: string, state: DcpState): void {
   const unknown = new Set<number>()
   for (const match of summary.matchAll(BLOCK_PLACEHOLDER_RE)) {
-    const id = Number.parseInt(match[1] ?? match[2] ?? "", 10)
+    const id = Number.parseInt(match[1] ?? "", 10)
     if (!Number.isInteger(id) || !state.compressionBlocks.some((block) => block.id === id)) unknown.add(id)
   }
   if (unknown.size > 0) {
@@ -839,14 +836,13 @@ export function createRangeCompressionBlock(
     anchorMessageId: requestedAnchorMessageId,
     createdByToolCallId,
     mode = "range",
-    version,
+    version = 2,
     replacementMode,
     validatePlaceholders = true,
     expandPlaceholders = true,
     preparedProtectedFragments = [],
     sourceMembers: requestedSourceMembers,
     mutationMembers: requestedMutationMembers,
-    legacySourceMembership,
   } = options
   const defaultAnchor = resolveAnchorBoundary(endTimestamp, state, endMessageId)
   const anchorTimestamp = requestedAnchorTimestamp ?? defaultAnchor.timestamp
@@ -895,34 +891,35 @@ export function createRangeCompressionBlock(
     )
   }
 
-  if (version === 2 && !legacySourceMembership && !hasExactMembers(sourceMembers, mutationMembers)) {
+  if (version !== 2 || !hasExactMembers(sourceMembers, mutationMembers)) {
     throw new Error(
-      "Modern compression requires exact canonical source and mutation membership. " +
+      "Compression requires exact canonical source and mutation membership. " +
       "Refresh the current DCP snapshot and retry with visible IDs.",
     )
   }
 
-  // A modern block has an explicit protected-fragment ledger. During a
-  // roll-up, the new summary may therefore replace old prose while the ledger
-  // carries the inherited verbatim continuity fragments exactly once. Older
-  // blocks have no such proof, so retain the historical loss-avoidance path.
-  const modernLedgerRollup = coveredBlocks.length > 0 && coveredBlocks.every((block) =>
-    block.version === 2 && block.protectedFragments !== undefined,
-  )
+  // Every block in the new format carries a protected-fragment ledger. Do not
+  // silently fall back to the old recursive-summary behavior: a missing ledger
+  // means the in-memory state violates the journal contract and the roll-up
+  // must fail closed.
+  if (coveredBlocks.some((block) => block.version !== 2 || block.protectedFragments === undefined)) {
+    throw new Error("Compression roll-up requires exact v2 blocks with protected-fragment ledgers")
+  }
+  const ledgerRollup = coveredBlocks.length > 0
   const hasExplicitBlockReferences = [...summary.matchAll(BLOCK_PLACEHOLDER_RE)].length > 0
-  if (modernLedgerRollup) assertVerifiableBlockPlaceholders(summary, state)
+  if (ledgerRollup) assertVerifiableBlockPlaceholders(summary, state)
 
   const placeholderSummary = preparePlaceholderSummary(
     summary,
     coveredBlocks,
     state,
     {
-      validatePlaceholders: modernLedgerRollup ? false : validatePlaceholders,
+      validatePlaceholders: ledgerRollup ? false : validatePlaceholders,
       // Explicit references are deliberately expanded once, never left to
       // dangle after their source blocks are deactivated. Otherwise modern
       // ledger roll-ups replace old summary prose instead of recursively
       // appending it.
-      expandPlaceholders: modernLedgerRollup
+      expandPlaceholders: ledgerRollup
         ? hasExplicitBlockReferences
         : expandPlaceholders,
     },
@@ -979,11 +976,10 @@ export function createRangeCompressionBlock(
     createdAt: Date.now(),
     coveredBlockIds: coveredBlocks.map((covered) => covered.id),
     mode,
-    version,
+    version: 2,
     replacementMode,
-    sourceMembers: hasExactMembers(sourceMembers, mutationMembers) ? copyMembers(sourceMembers!) : undefined,
-    mutationMembers: hasExactMembers(sourceMembers, mutationMembers) ? copyMembers(mutationMembers!) : undefined,
-    legacySourceMembership,
+    sourceMembers: copyMembers(sourceMembers!),
+    mutationMembers: copyMembers(mutationMembers!),
     protectedFragments,
   }
 

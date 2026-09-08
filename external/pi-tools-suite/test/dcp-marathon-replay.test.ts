@@ -2,15 +2,15 @@ import { describe, expect, test } from "bun:test";
 import type { DcpConfig } from "../src/dcp/config.js";
 import { createAutoCompressionBlock } from "../src/dcp/auto-compress.js";
 import { applyPruning, detectEmergencyCompressionCandidate } from "../src/dcp/pruner.js";
-import { createState, restoreState, serializeState } from "../src/dcp/state.js";
+import { createState } from "../src/dcp/state.js";
+import { buildDcpJournalDelta, createDcpJournalInit, createDcpJournalMirror, replayDcpJournal } from "../src/dcp/journal.js";
 import { estimateMessageTokens } from "../src/dcp/pruner-metadata.js";
-import { reconcileInheritedCompressionBlocks } from "../src/dcp/pruner-compression-blocks.js";
 
 function replayConfig(): DcpConfig {
   return {
     enabled: true,
     debug: false,
-    manualMode: { enabled: false, automaticStrategies: true },
+    manualMode: { enabled: false },
     compress: {
       maxContextPercent: 0.65,
       minContextPercent: 0.4,
@@ -46,16 +46,6 @@ function replayConfig(): DcpConfig {
       },
     },
     strategies: {
-      deduplication: { enabled: false, protectedTools: [] },
-      purgeErrors: { enabled: false, turns: 4, protectedTools: [] },
-      autoToolPruning: {
-        enabled: false,
-        maxOutputTokens: 1200,
-        keepRecentTurns: 1,
-        readLikeTools: ["read"],
-        readLikeTurns: 3,
-        protectedTools: [],
-      },
       emergencyCurrentTurnPruning: {
         enabled: true,
         hardContextPercent: 0.82,
@@ -68,7 +58,6 @@ function replayConfig(): DcpConfig {
       },
     },
     protectedFilePatterns: [],
-    pruneNotification: "off",
     modelOverrides: {},
   };
 }
@@ -191,9 +180,15 @@ describe("DCP marathon replay", () => {
     // the 1000 raw outputs or the number of rollups.
     expect(Math.max(...summarySizes)).toBeLessThan(20_000);
 
-    const serialized = serializeState(state);
+    const init = createDcpJournalInit("marathon-replay-init", 1);
+    const mirror = createDcpJournalMirror(createState(), init.operationId);
+    const delta = buildDcpJournalDelta(state, mirror, "marathon-replay-final", 2);
+    expect(delta).toBeDefined();
     const restored = createState();
-    restoreState(restored, serialized);
+    replayDcpJournal([
+      { type: "custom", customType: "dcp-journal", data: init },
+      { type: "custom", customType: "dcp-journal", data: delta },
+    ], restored);
     const afterRestart = applyPruning(raw, restored, cfg);
     const restartText = renderedText(afterRestart);
 
@@ -204,21 +199,5 @@ describe("DCP marathon replay", () => {
     expect(restartText).toContain("RAW_GROUP_999");
     expect(restartText).not.toContain("RAW_GROUP_0\n");
     expect(projectedTokens(afterRestart)).toBe(previousProjectedTokens);
-
-    // Fork inside the final rollup: the newest block no longer fits, so the
-    // deepest ancestor whose exact raw boundaries are present must reactivate.
-    const forkAncestor = restored.compressionBlocks[4]!;
-    const forkRaw = raw.filter((message) => message.timestamp <= forkAncestor.endTimestamp);
-    const reconciliation = reconcileInheritedCompressionBlocks(forkRaw, restored);
-    expect(reconciliation.fittingBlockIds).toContain(forkAncestor.id);
-    expect(restored.compressionBlocks.find((block) => block.id === forkAncestor.id)?.active).toBe(true);
-    expect(restored.compressionBlocks.slice(5).every((block) => !block.active)).toBe(true);
-
-    const forkProjection = applyPruning(forkRaw, restored, cfg);
-    const forkText = renderedText(forkProjection);
-    expect(forkText).toContain("ACTIVE_CONSTRAINT_KEEP_API_STABLE");
-    expect(forkText).toContain("DO_NOT_CHANGE_PUBLIC_API");
-    expect(forkText).not.toContain("RAW_GROUP_0\n");
-    expect(restored.compressionBlocks.filter((block) => block.active).map((block) => block.id)).toEqual([forkAncestor.id]);
   }, 30_000);
 });

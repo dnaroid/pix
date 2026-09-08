@@ -61,6 +61,19 @@ type ShellAliasInput = {
 type BashToolDefinition = ReturnType<typeof createBashToolDefinition>;
 type AnyToolDefinition = ToolDefinition<any, any, any>;
 type BuiltinToolName = (typeof BUILTIN_TOOLS)[number];
+export interface ModelToolsDependencies {
+  createReadToolDefinition: (cwd: string, options?: any) => AnyToolDefinition;
+  createEditToolDefinition: (cwd: string, options?: any) => AnyToolDefinition;
+  createWriteToolDefinition: (cwd: string, options?: any) => AnyToolDefinition;
+  createBashToolDefinition: (cwd: string, options?: any) => AnyToolDefinition;
+  createGrepToolDefinition: (cwd: string, options?: any) => AnyToolDefinition;
+  createFindToolDefinition: (cwd: string, options?: any) => AnyToolDefinition;
+  createLsToolDefinition: (cwd: string, options?: any) => AnyToolDefinition;
+}
+type ModelToolsRuntime = {
+  dependencies: ModelToolsDependencies;
+  builtinDefinitions: Map<string, AnyToolDefinition>;
+};
 type RenderContext = {
   args: any;
   cwd: string;
@@ -68,7 +81,22 @@ type RenderContext = {
 };
 type RenderTheme = Parameters<NonNullable<BashToolDefinition["renderCall"]>>[1];
 
-const builtinDefinitions = new Map<string, AnyToolDefinition>();
+const DEFAULT_MODEL_TOOLS_DEPENDENCIES: ModelToolsDependencies = {
+  createReadToolDefinition,
+  createEditToolDefinition,
+  createWriteToolDefinition,
+  createBashToolDefinition,
+  createGrepToolDefinition,
+  createFindToolDefinition,
+  createLsToolDefinition,
+};
+
+function createModelToolsRuntime(overrides: Partial<ModelToolsDependencies> = {}): ModelToolsRuntime {
+  return {
+    dependencies: { ...DEFAULT_MODEL_TOOLS_DEPENDENCIES, ...overrides },
+    builtinDefinitions: new Map(),
+  };
+}
 
 function timeoutSeconds(input: { timeout?: number; timeout_ms?: number }): number | undefined {
   if (typeof input.timeout === "number") return input.timeout;
@@ -76,39 +104,40 @@ function timeoutSeconds(input: { timeout?: number; timeout_ms?: number }): numbe
   return undefined;
 }
 
-function createBuiltinDefinition(name: BuiltinToolName, cwd: string): AnyToolDefinition {
+function createBuiltinDefinition(runtime: ModelToolsRuntime, name: BuiltinToolName, cwd: string): AnyToolDefinition {
+  const dependencies = runtime.dependencies;
   switch (name) {
     case "read":
-      return createReadToolDefinition(cwd);
+      return dependencies.createReadToolDefinition(cwd);
     case "edit":
-      return createEditToolDefinition(cwd);
+      return dependencies.createEditToolDefinition(cwd);
     case "write":
-      return createWriteToolDefinition(cwd);
+      return dependencies.createWriteToolDefinition(cwd);
     case "bash":
-      return createBashToolDefinition(cwd);
+      return dependencies.createBashToolDefinition(cwd);
     case "grep":
-      return createGrepToolDefinition(cwd);
+      return dependencies.createGrepToolDefinition(cwd);
     case "find":
-      return createFindToolDefinition(cwd);
+      return dependencies.createFindToolDefinition(cwd);
     case "ls":
-      return createLsToolDefinition(cwd);
+      return dependencies.createLsToolDefinition(cwd);
   }
 }
 
-function getRenderDefinition(name: BuiltinToolName, cwd: string): AnyToolDefinition {
+function getRenderDefinition(runtime: ModelToolsRuntime, name: BuiltinToolName, cwd: string): AnyToolDefinition {
   const key = `${name}:${cwd}`;
-  const existing = builtinDefinitions.get(key);
+  const existing = runtime.builtinDefinitions.get(key);
   if (existing) {
-    builtinDefinitions.delete(key);
-    builtinDefinitions.set(key, existing);
+    runtime.builtinDefinitions.delete(key);
+    runtime.builtinDefinitions.set(key, existing);
     return existing;
   }
-  const definition = createBuiltinDefinition(name, cwd);
-  if (builtinDefinitions.size >= MAX_BUILTIN_DEFINITIONS) {
-    const oldestKey = builtinDefinitions.keys().next().value;
-    if (oldestKey) builtinDefinitions.delete(oldestKey);
+  const definition = createBuiltinDefinition(runtime, name, cwd);
+  if (runtime.builtinDefinitions.size >= MAX_BUILTIN_DEFINITIONS) {
+    const oldestKey = runtime.builtinDefinitions.keys().next().value;
+    if (oldestKey) runtime.builtinDefinitions.delete(oldestKey);
   }
-  builtinDefinitions.set(key, definition);
+  runtime.builtinDefinitions.set(key, definition);
   return definition;
 }
 
@@ -143,6 +172,7 @@ function applyAliasToolTitle(component: unknown, builtinName: BuiltinToolName, a
 }
 
 function renderAliasCall(
+  runtime: ModelToolsRuntime,
   name: BuiltinToolName,
   args: unknown,
   theme: RenderTheme,
@@ -150,7 +180,7 @@ function renderAliasCall(
   aliasLabel: string = name,
 ) {
   const renderContext = context as RenderContext;
-  const renderCall = getRenderDefinition(name, renderContext.cwd).renderCall;
+  const renderCall = getRenderDefinition(runtime, name, renderContext.cwd).renderCall;
   if (!renderCall) throw new Error(`${name} renderer is unavailable`);
   const component = renderCall(args, theme, withRenderArgs(renderContext, args) as any);
   applyAliasToolTitle(component, name, aliasLabel);
@@ -158,6 +188,7 @@ function renderAliasCall(
 }
 
 function renderAliasResult(
+  runtime: ModelToolsRuntime,
   name: BuiltinToolName,
   args: unknown,
   result: unknown,
@@ -167,7 +198,7 @@ function renderAliasResult(
   aliasLabel: string = name,
 ) {
   const renderContext = context as RenderContext;
-  const renderResult = getRenderDefinition(name, renderContext.cwd).renderResult;
+  const renderResult = getRenderDefinition(runtime, name, renderContext.cwd).renderResult;
   if (!renderResult) throw new Error(`${name} renderer is unavailable`);
   const component = renderResult(
     result as Parameters<NonNullable<AnyToolDefinition["renderResult"]>>[0],
@@ -180,13 +211,13 @@ function renderAliasResult(
   return component;
 }
 
-function renderShellAliasCall(args: ShellAliasInput, theme: RenderTheme, context: unknown) {
-  return renderAliasCall("bash", toBashRenderArgs(args), theme, context, "shell");
+function renderShellAliasCall(runtime: ModelToolsRuntime, args: ShellAliasInput, theme: RenderTheme, context: unknown) {
+  return renderAliasCall(runtime, "bash", toBashRenderArgs(args), theme, context, "shell");
 }
 
-function renderShellAliasResult(result: unknown, options: ToolRenderResultOptions, theme: RenderTheme, context: unknown) {
+function renderShellAliasResult(runtime: ModelToolsRuntime, result: unknown, options: ToolRenderResultOptions, theme: RenderTheme, context: unknown) {
   const args = toBashRenderArgs((context as RenderContext).args as ShellAliasInput);
-  return renderAliasResult("bash", args, result, options, theme, context, "shell");
+  return renderAliasResult(runtime, "bash", args, result, options, theme, context, "shell");
 }
 
 async function resolveWorkdir(ctx: ExtensionContext, workdir: string | undefined): Promise<string | undefined> {
@@ -209,7 +240,7 @@ type BuiltinAliasOptions<Input> = {
   validate?: (params: Input) => void;
 };
 
-function registerBuiltinAlias<Input>(pi: ExtensionAPI, options: BuiltinAliasOptions<Input>): void {
+function registerBuiltinAlias<Input>(runtime: ModelToolsRuntime, pi: ExtensionAPI, options: BuiltinAliasOptions<Input>): void {
   pi.registerTool(
     defineTool({
       name: options.name,
@@ -218,9 +249,10 @@ function registerBuiltinAlias<Input>(pi: ExtensionAPI, options: BuiltinAliasOpti
       parameters: options.parameters,
       renderShell: options.renderShell,
       renderCall: (params, theme, context) =>
-        renderAliasCall(options.builtinName, options.toArgs(params as Input), theme, context, options.label),
+        renderAliasCall(runtime, options.builtinName, options.toArgs(params as Input), theme, context, options.label),
       renderResult: (result, renderOptions, theme, context) =>
         renderAliasResult(
+          runtime,
           options.builtinName,
           options.toArgs((context as RenderContext).args as Input),
           result,
@@ -232,7 +264,7 @@ function registerBuiltinAlias<Input>(pi: ExtensionAPI, options: BuiltinAliasOpti
       async execute(id, params, signal, onUpdate, ctx) {
         const input = params as Input;
         options.validate?.(input);
-        return createBuiltinDefinition(options.builtinName, ctx.cwd).execute(
+        return createBuiltinDefinition(runtime, options.builtinName, ctx.cwd).execute(
           id,
           options.toArgs(input),
           signal,
@@ -244,10 +276,10 @@ function registerBuiltinAlias<Input>(pi: ExtensionAPI, options: BuiltinAliasOpti
   );
 }
 
-function registerClaudeAliases(pi: ExtensionAPI, repoDiscovery: boolean): void {
+function registerClaudeAliases(runtime: ModelToolsRuntime, pi: ExtensionAPI, repoDiscovery: boolean): void {
   const descriptions = claudeAliasToolDescriptions(repoDiscovery);
 
-  registerBuiltinAlias(pi, {
+  registerBuiltinAlias(runtime, pi, {
     ...descriptions.Read,
     builtinName: "read",
     parameters: Type.Object({
@@ -258,7 +290,7 @@ function registerClaudeAliases(pi: ExtensionAPI, repoDiscovery: boolean): void {
     toArgs: toReadArgs,
   });
 
-  registerBuiltinAlias(pi, {
+  registerBuiltinAlias(runtime, pi, {
     ...descriptions.Edit,
     builtinName: "edit",
     parameters: Type.Object({
@@ -274,7 +306,7 @@ function registerClaudeAliases(pi: ExtensionAPI, repoDiscovery: boolean): void {
     },
   });
 
-  registerBuiltinAlias(pi, {
+  registerBuiltinAlias(runtime, pi, {
     ...descriptions.Write,
     builtinName: "write",
     parameters: Type.Object({
@@ -284,7 +316,7 @@ function registerClaudeAliases(pi: ExtensionAPI, repoDiscovery: boolean): void {
     toArgs: toWriteArgs,
   });
 
-  registerBuiltinAlias(pi, {
+  registerBuiltinAlias(runtime, pi, {
     ...descriptions.Bash,
     builtinName: "bash",
     parameters: Type.Object({
@@ -299,7 +331,7 @@ function registerClaudeAliases(pi: ExtensionAPI, repoDiscovery: boolean): void {
     },
   });
 
-  registerBuiltinAlias(pi, {
+  registerBuiltinAlias(runtime, pi, {
     ...descriptions.Grep,
     builtinName: "grep",
     parameters: Type.Object({
@@ -317,7 +349,7 @@ function registerClaudeAliases(pi: ExtensionAPI, repoDiscovery: boolean): void {
     toArgs: toGrepArgs,
   });
 
-  registerBuiltinAlias(pi, {
+  registerBuiltinAlias(runtime, pi, {
     ...descriptions.Glob,
     builtinName: "find",
     parameters: Type.Object({
@@ -330,6 +362,7 @@ function registerClaudeAliases(pi: ExtensionAPI, repoDiscovery: boolean): void {
 }
 
 async function runShellAlias(
+  runtime: ModelToolsRuntime,
   id: string,
   input: ShellAliasInput,
   signal: AbortSignal | undefined,
@@ -339,14 +372,14 @@ async function runShellAlias(
   const command = toShellCommand(input);
   if (!command) throw new Error("Missing shell command");
   const workdir = await resolveWorkdir(ctx, input.cwd ?? input.workdir);
-  const tool = createBashToolDefinition(
+  const tool = runtime.dependencies.createBashToolDefinition(
     ctx.cwd,
     workdir ? { spawnHook: (spawnContext) => ({ ...spawnContext, cwd: workdir }) } : undefined,
   );
   return tool.execute(id, { command, timeout: timeoutSeconds(input) }, signal, onUpdate, ctx);
 }
 
-function registerCodexAliases(pi: ExtensionAPI): void {
+function registerCodexAliases(runtime: ModelToolsRuntime, pi: ExtensionAPI): void {
   const shellParameters = Type.Object({
     command: Type.String({ description: "The shell script to execute in the user's default shell" }),
     workdir: Type.Optional(Type.String({ description: "Working directory" })),
@@ -359,10 +392,10 @@ function registerCodexAliases(pi: ExtensionAPI): void {
     defineTool({
       ...CODEX_ALIAS_TOOL_DESCRIPTIONS.shellCommand,
       parameters: shellParameters,
-      renderCall: renderShellAliasCall,
-      renderResult: renderShellAliasResult,
+      renderCall: (args, theme, context) => renderShellAliasCall(runtime, args, theme, context),
+      renderResult: (result, options, theme, context) => renderShellAliasResult(runtime, result, options, theme, context),
       async execute(id, params, signal, onUpdate, ctx) {
-        return runShellAlias(id, params, signal, onUpdate, ctx);
+        return runShellAlias(runtime, id, params, signal, onUpdate, ctx);
       },
     }),
   );
@@ -422,9 +455,10 @@ function shouldPreserveSelection(env: NodeJS.ProcessEnv = process.env): boolean 
 		.some((value) => typeof value === "string" && /^(1|true|yes|on)$/i.test(value.trim()));
 }
 
-export default function modelTools(pi: ExtensionAPI): void {
-  registerClaudeAliases(pi, hasIndexedProjectRoot());
-  registerCodexAliases(pi);
+export default function modelTools(pi: ExtensionAPI, dependencies: Partial<ModelToolsDependencies> = {}): void {
+  const runtime = createModelToolsRuntime(dependencies);
+  registerClaudeAliases(runtime, pi, hasIndexedProjectRoot());
+  registerCodexAliases(runtime, pi);
 
   let baseTools: string[] = [];
 

@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import dcpModule from "../src/dcp/index.js";
 import { loadConfig } from "../src/dcp/config.js";
-import { createState, restoreState, serializeState } from "../src/dcp/state.js";
+import { createState } from "../src/dcp/state.js";
+import { buildDcpJournalDelta, createDcpJournalInit, createDcpJournalMirror, replayDcpJournal } from "../src/dcp/journal.js";
 import { applyPruning } from "../src/dcp/pruner.js";
 import { estimateMessageTokens } from "../src/dcp/pruner-metadata.js";
 
@@ -15,9 +16,6 @@ describe("DCP full lifecycle marathon", () => {
     config.compress.autoCompress = { enabled: true, patience: 0, summarizerModel: [], timeoutMs: 10000 };
     config.compress.autoCandidates.minMessages = 2;
     config.compress.autoCandidates.minTokens = 100;
-    config.strategies.deduplication.enabled = false;
-    config.strategies.purgeErrors.enabled = false;
-    config.strategies.autoToolPruning.enabled = false;
     config.strategies.emergencyCurrentTurnPruning.keepRecentToolPairs = 2;
     config.strategies.emergencyCurrentTurnPruning.patience = 10000;
     const state = createState();
@@ -28,9 +26,17 @@ describe("DCP full lifecycle marathon", () => {
     };
     let nativeTokens = 0;
     let aborted = false;
+    const raw: any[] = [];
     const context: any = {
       model: { provider: "fixture", id: "main", contextWindow: 16000, maxTokens: 1000 },
-      sessionManager: { getBranch: () => [] },
+      sessionManager: {
+        getBranch: () => raw.map((message, index) => ({
+          type: "message",
+          id: message.id ?? `entry-${index}`,
+          parentId: index === 0 ? null : (raw[index - 1]?.id ?? `entry-${index - 1}`),
+          message,
+        })),
+      },
       getContextUsage: () => ({ tokens: nativeTokens, contextWindow: 16000 }),
       abort() { aborted = true; },
       ui: { notify() {} },
@@ -41,7 +47,8 @@ describe("DCP full lifecycle marathon", () => {
       return result;
     };
     await dcpModule(pi, { config, state });
-    const raw: any[] = [{ id: "task", role: "user", timestamp: 1, content: "Keep the public API unchanged." }];
+    await emit("session_start", { type: "session_start", reason: "new" });
+    raw.push({ id: "task", role: "user", timestamp: 1, content: "Keep the public API unchanged." });
     const facts: string[] = [];
     let committed = 0;
     for (let index = 0; index < 160; index++) {
@@ -76,8 +83,15 @@ describe("DCP full lifecycle marathon", () => {
     }
     expect(committed).toBeGreaterThanOrEqual(10);
     expect(state.providerSeenToolIds.size).toBeGreaterThan(100);
+    const init = createDcpJournalInit("marathon-init", 1);
+    const mirror = createDcpJournalMirror(createState(), init.operationId);
+    const delta = buildDcpJournalDelta(state, mirror, "marathon-final", 2);
+    expect(delta).toBeDefined();
     const restored = createState();
-    restoreState(restored, serializeState(state));
+    replayDcpJournal([
+      { type: "custom", customType: "dcp-journal", data: init },
+      { type: "custom", customType: "dcp-journal", data: delta },
+    ], restored);
     const afterRestart = applyPruning(raw, restored, config);
     for (const fact of facts) expect(JSON.stringify(afterRestart)).toContain(fact);
     expect(raw.filter((message) => message.role === "user")).toHaveLength(1);

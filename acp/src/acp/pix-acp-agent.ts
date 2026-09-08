@@ -1097,7 +1097,6 @@ export class PixAcpAgent {
 			await rm(record.piSessionPath, { force: true }).catch((error: unknown) => {
 				throw new RequestError(ERROR_SERVER, `failed to delete session file: ${stringifyUnknown(error)}`);
 			});
-			if (record.piSessionId) await removeSessionSidecarState(record.piSessionPath, record.piSessionId);
 		}
 		await this.sessionMap.delete(sessionId);
 		this.options.logger.info(`session/delete: ${sessionId}`);
@@ -2315,17 +2314,6 @@ function queuedUserMessageText(message: Record<string, unknown>): string {
 	return content.flatMap((part) => (
 		isRecord(part) && part.type === "text" && typeof part.text === "string" ? [part.text] : []
 	)).join("");
-}
-
-async function removeSessionSidecarState(sessionPath: string, sessionId: string): Promise<void> {
-	const safeId = sessionId.replace(/[^a-zA-Z0-9._-]/gu, "_");
-	const base = join(dirname(sessionPath), "dcp-state", `${safeId}.json`);
-	await Promise.all([
-		base,
-		`${base}.prev`,
-		`${base}.recovery-required`,
-		`${base}.fence`,
-	].map((path) => rm(path, { force: true }).catch(() => undefined)));
 }
 
 async function pathExists(path: string): Promise<boolean> {

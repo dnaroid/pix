@@ -494,6 +494,30 @@ describe("renderMarkdownTextLines", () => {
 		assert.deepEqual(renderMarkdownTextLines(text, 80).map((line) => line.text), ["before", "after"]);
 		assert.equal(stripDcpControlMetadata(text), "before\nafter");
 	});
+
+	it("preserves literal DCP marker examples in fenced code and block quotes", () => {
+		const fenced = [
+			"Example:",
+			"```xml",
+			"<dcp-message-ids>",
+			"m001",
+			"</dcp-message-ids>",
+			"```",
+		].join("\n");
+		assert.equal(stripDcpControlMetadata(fenced), fenced);
+
+		const quoted = [
+			"> <dcp-message-ids>",
+			"> m001",
+			"> </dcp-message-ids>",
+		].join("\n");
+		assert.equal(stripDcpControlMetadata(quoted), quoted);
+	});
+
+	it("fails open for incomplete DCP control blocks instead of hiding the tail", () => {
+		const incomplete = "answer\n<dcp-message-ids>\nm001\nstill visible";
+		assert.equal(stripDcpControlMetadata(incomplete), incomplete);
+	});
 });
 
 describe("isOnlyHiddenMetadata", () => {

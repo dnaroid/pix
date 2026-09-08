@@ -87,7 +87,7 @@ PROTECTED PROMPT CONTENT
 If selected user text contains \`<protect>...</protect>\` content, preserve that protected content verbatim in your summary. The tool may append protected text automatically, but you should still account for it semantically.
 
 COMPRESSED BLOCK PLACEHOLDERS
-When rolling up modern compressed blocks, summarize their continuation-relevant meaning instead of copying the full old summaries. Protected fragments are preserved separately. Legacy blocks without a protected-fragment ledger may retain their full text for compatibility; the tool still requires positive net gain.
+When rolling up compressed blocks, summarize their continuation-relevant meaning instead of copying the full old summaries. Every block carries a protected-fragment ledger, and those fragments are preserved separately. A block missing that ledger is invalid and must not be rolled up.
 
 Only when the full previous summary is genuinely needed verbatim, use this exact placeholder format:
 

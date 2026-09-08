@@ -1,15 +1,10 @@
 import type { DcpConfig } from "./config.js";
 import type { DcpState } from "./state.js";
-import { applyCompressionBlocks, repairOrphanedToolPairs, syncCompressionBlocks } from "./pruner-compression-blocks.js";
+import { applyCompressionBlocks, syncCompressionBlocks } from "./pruner-compression-blocks.js";
 import { stripStaleDcpMetadataFromMessage } from "./pruner-metadata.js";
 import { injectMessageIds } from "./pruner-message-ids.js";
 import { copyRawMutationHash } from "./conversation-index.js";
-import {
-  applyAutoToolOutputPruning,
-  applyDeduplication,
-  applyErrorPurging,
-  applyToolOutputPruning,
-} from "./pruner-tools.js";
+import { applyToolOutputPruning } from "./pruner-tools.js";
 
 export type {
   CompressionCandidate,
@@ -46,7 +41,7 @@ export {
   applyAnchoredNudges,
   clearDcpNudgeAnchors,
   getNudgeType,
-  injectNudge,
+  hasCacheSafeNudgeCarrier,
   nudgeTypeLabel,
   upsertNudgeAnchor,
 } from "./pruner-nudge.js";
@@ -83,34 +78,14 @@ export function applyPruning(
   syncCompressionBlocks(msgs, state, config);
   applyCompressionBlocks(msgs, state);
 
-  // 2b. Post-compression safety net: remove any orphaned tool pairs that the
-  // expansion logic could not catch (e.g. multi-block interactions, pre-broken state).
-  if (state.compressionBlocks.some((block) => block.active && block.version !== 2)) {
-    repairOrphanedToolPairs(msgs);
-  }
-
-  // 3-5. Discover new automatic pruning decisions only at stable checkpoints.
-  // Rewriting an old result after every same-turn duplicate breaks provider
-  // continuation repeatedly. A new user turn or compression block already
-  // establishes a natural history boundary where one prefix rebuild is
-  // acceptable. Branches that move the turn count backwards also reopen the
-  // checkpoint instead of suppressing pruning indefinitely.
-  const newestBlockId = Math.max(0, state.nextBlockId - 1);
-  const automaticPruneCheckpoint =
-    state.currentTurn !== state.lastAutomaticPruneTurn ||
-    newestBlockId !== state.lastAutomaticPruneBlockId;
-  if (automaticPruneCheckpoint) {
-    applyDeduplication(msgs, state, config);
-    applyErrorPurging(msgs, state, config);
-    applyAutoToolOutputPruning(msgs, state, config);
-    state.lastAutomaticPruneTurn = state.currentTurn;
-    state.lastAutomaticPruneBlockId = newestBlockId;
-  }
-
-  // 6. Apply explicit tool output pruning (prunedToolIds)
+  // Existing explicit/emergency pruning decisions are replayed, but routine
+  // context construction never discovers new retroactive deletions. A new user
+  // turn must remain append-only for provider prefix caching; destructive
+  // rewrites happen only through an explicit compress/sweep boundary or the
+  // bounded emergency path.
   applyToolOutputPruning(msgs, state);
 
-  // 7. Refresh message ID snapshots and append stable distributed metadata to
+  // Refresh message ID snapshots and append stable distributed metadata to
   // user/tool-result carriers. Assistant items remain byte-stable.
   injectMessageIds(msgs, state, { config });
 

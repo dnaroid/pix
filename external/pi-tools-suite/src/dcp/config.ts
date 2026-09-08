@@ -16,7 +16,6 @@ export interface DcpConfig {
   }
   manualMode: {
     enabled: boolean
-    automaticStrategies: boolean // run dedup/purge even in manual mode
   }
   compress: {
     maxContextPercent: number | string // accepts a 0-1 fraction, absolute tokens, or a percent string like "80%"
@@ -69,23 +68,6 @@ export interface DcpConfig {
     }
   }
   strategies: {
-    deduplication: {
-      enabled: boolean
-      protectedTools: string[]
-    }
-    purgeErrors: {
-      enabled: boolean
-      turns: number // prune error inputs after N user turns (default: 4)
-      protectedTools: string[]
-    }
-    autoToolPruning: {
-      enabled: boolean
-      maxOutputTokens: number
-      keepRecentTurns: number
-      readLikeTools: string[]
-      readLikeTurns: number
-      protectedTools: string[]
-    }
     emergencyCurrentTurnPruning: {
       /** Enable same-turn candidates and lossy fallback pruning; emergency reminders remain active. */
       enabled: boolean
@@ -105,7 +87,6 @@ export interface DcpConfig {
     }
   }
   protectedFilePatterns: string[]
-  pruneNotification: "off" | "minimal" | "detailed"
   modelOverrides: Record<string, DcpConfigOverride>
 }
 
@@ -126,7 +107,6 @@ const DEFAULT_CONFIG: DcpConfig = {
   debug: false,
   manualMode: {
     enabled: false,
-    automaticStrategies: true,
   },
   compress: {
     maxContextPercent: 0.65,
@@ -163,39 +143,6 @@ const DEFAULT_CONFIG: DcpConfig = {
     },
   },
   strategies: {
-    deduplication: {
-      enabled: true,
-      protectedTools: [],
-    },
-    purgeErrors: {
-      enabled: true,
-      turns: 4,
-      protectedTools: [],
-    },
-    autoToolPruning: {
-      enabled: true,
-      maxOutputTokens: 1200,
-      keepRecentTurns: 1,
-      readLikeTools: [
-        "read",
-        "shell",
-        "bash",
-        "grep",
-        "find",
-        "ls",
-        "web_search",
-        "web_fetch",
-        "repo_architecture",
-        "repo_structure",
-        "repo_ast",
-        "repo_search",
-        "repo_explain",
-        "repo_deps",
-        "ast_grep",
-      ],
-      readLikeTurns: 3,
-      protectedTools: [],
-    },
     emergencyCurrentTurnPruning: {
       enabled: true,
       hardContextPercent: 0.82,
@@ -208,7 +155,6 @@ const DEFAULT_CONFIG: DcpConfig = {
     },
   },
   protectedFilePatterns: [],
-  pruneNotification: "detailed",
   modelOverrides: {},
 }
 
@@ -286,7 +232,35 @@ function readDcpFromSuiteConfig(filePath: string): Record<string, unknown> {
   const raw = readJsoncFile(filePath)
   const dcp = raw["dcp"]
   if (dcp === null || typeof dcp !== "object" || Array.isArray(dcp)) return {}
-  return dcp as Record<string, unknown>
+  return stripRemovedDcpKeys(dcp as Record<string, unknown>)
+}
+
+function stripRemovedDcpKeys(raw: Record<string, unknown>): Record<string, unknown> {
+  const cleaned = structuredClone(raw)
+  delete cleaned.pruneNotification
+
+  const manualMode = cleaned.manualMode
+  if (manualMode && typeof manualMode === "object" && !Array.isArray(manualMode)) {
+    delete (manualMode as Record<string, unknown>).automaticStrategies
+  }
+
+  const strategies = cleaned.strategies
+  if (strategies && typeof strategies === "object" && !Array.isArray(strategies)) {
+    const record = strategies as Record<string, unknown>
+    delete record.deduplication
+    delete record.purgeErrors
+    delete record.autoToolPruning
+  }
+
+  const modelOverrides = cleaned.modelOverrides
+  if (modelOverrides && typeof modelOverrides === "object" && !Array.isArray(modelOverrides)) {
+    for (const [key, override] of Object.entries(modelOverrides as Record<string, unknown>)) {
+      if (!override || typeof override !== "object" || Array.isArray(override)) continue
+      ;(modelOverrides as Record<string, unknown>)[key] = stripRemovedDcpKeys(override as Record<string, unknown>)
+    }
+  }
+
+  return cleaned
 }
 
 function mergeSuiteDcpConfig(config: DcpConfig, filePath: string): DcpConfig {

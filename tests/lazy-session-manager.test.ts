@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -138,4 +138,27 @@ test("lazy session manager preserves summary usage added by SDK 0.81", async (t)
 	const branchSummaryId = manager.branchWithSummary("user-1", "branch", undefined, false, usage);
 	const branchSummary = manager.getEntry(branchSummaryId);
 	assert.deepEqual(branchSummary?.type === "branch_summary" ? branchSummary.usage : undefined, usage);
+});
+
+test("lazy session manager does not publish a phantom in-memory entry when append persistence fails", async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "pix-lazy-session-append-fail-"));
+	t.after(async () => {
+		await rm(dir, { force: true, recursive: true });
+	});
+
+	const sessionPath = join(dir, "session.jsonl");
+	await writeFile(sessionPath, [
+		JSON.stringify({ type: "session", version: 3, id: "session-1", timestamp: "2026-01-01T00:00:00.000Z", cwd: dir }),
+		JSON.stringify({ type: "message", id: "user-1", parentId: null, timestamp: "2026-01-01T00:00:01.000Z", message: { role: "user", content: "first" } }),
+		"",
+	].join("\n"), "utf8");
+
+	const manager = await openLazySessionManager(sessionPath, { cwdOverride: dir, tailEntryCount: 10 });
+	const beforeIds = manager.getBranch().map((entry) => entry.id);
+	await rm(sessionPath);
+	await mkdir(sessionPath);
+
+	assert.throws(() => manager.appendCustomEntry("dcp-journal", { operationId: "should-not-stick" }));
+	assert.deepEqual(manager.getBranch().map((entry) => entry.id), beforeIds);
+	assert.equal(manager.getEntries().some((entry) => entry.type === "custom" && entry.customType === "dcp-journal"), false);
 });

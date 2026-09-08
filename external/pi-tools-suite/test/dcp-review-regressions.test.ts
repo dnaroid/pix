@@ -1,9 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { loadConfig } from "../src/dcp/config.js";
-import { createState, resetState, restoreState } from "../src/dcp/state.js";
+import { createState } from "../src/dcp/state.js";
 import { applyPruning, detectEmergencyCompressionCandidate } from "../src/dcp/pruner.js";
 import { registerCompressTool } from "../src/dcp/compress-tool.js";
 import {
@@ -11,14 +8,10 @@ import {
 } from "../src/dcp/auto-compress.js";
 import { applyCompressionBlocks } from "../src/dcp/pruner-compression-blocks.js";
 import { createBudgetedAutoCompressionBlock } from "../src/dcp/auto-compress-budget.js";
-import { loadDcpState, saveDcpState, resetDcpPersistenceDedup } from "../src/dcp/state-persistence.js";
 
 function fixture() {
   const config = loadConfig({ homeDir: "/__dcp_review_no_config__" });
   config.debug = false;
-  config.strategies.deduplication.enabled = false;
-  config.strategies.autoToolPruning.enabled = false;
-  config.strategies.purgeErrors.enabled = false;
   config.compress.autoCompress = { enabled: true, patience: 0, summarizerModel: [], timeoutMs: 1000 };
   config.compress.autoCandidates.minMessages = 2;
   config.compress.autoCandidates.minTokens = 100;
@@ -110,7 +103,7 @@ describe("DCP independent review regressions", () => {
       let writes = 0;
       const operation = mode === "auto"
         ? createAutoCompressionBlock({ state, config, candidate: selection, messages: projected, signal: abort.signal, topic: "cancel", persistState: async () => { writes++; } })
-        : toolFor(state, config, { capturePersistenceTarget: () => ({ statePath: "/not-used" }), saveStateToTarget: async () => { writes++; } })
+        : toolFor(state, config, { persistState: async () => { writes++; } })
           .execute("cancel-op", { topic: "cancel", ranges: [{ ...selection, summary: "summary" }] }, abort.signal, undefined, ctx);
       await expect(operation).rejects.toThrow();
       expect(writes).toBe(0);
@@ -141,34 +134,4 @@ describe("DCP independent review regressions", () => {
     expect(hashSummarySourceManifest(left)).not.toBe(hashSummarySourceManifest(right));
   });
 
-  test("quarantine blocks empty overwrite across a restart", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "dcp-corrupt-review-"));
-    const context: any = { sessionManager: { getSessionDir: () => dir, getSessionId: () => "broken" } };
-    try {
-      await mkdir(join(dir, "dcp-state"));
-      await writeFile(join(dir, "dcp-state/broken.json"), "broken-json");
-      resetDcpPersistenceDedup();
-      await loadDcpState(context);
-      await expect(saveDcpState(context, createState())).rejects.toThrow();
-      resetDcpPersistenceDedup();
-      await loadDcpState(context);
-      await expect(saveDcpState(context, createState())).rejects.toThrow();
-    } finally { resetDcpPersistenceDedup(); await rm(dir, { recursive: true, force: true }); }
-  });
-
-  test("independent stale state owner cannot overwrite a newer durable revision", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "dcp-cas-review-"));
-    const context: any = { sessionManager: { getSessionDir: () => dir, getSessionId: () => "cas" } };
-    try {
-      resetDcpPersistenceDedup();
-      const initial = createState(); await saveDcpState(context, initial);
-      const a = createState(); restoreState(a, await loadDcpState(context));
-      const b = createState(); restoreState(b, await loadDcpState(context));
-      b.totalPruneCount = 42; await saveDcpState(context, b);
-      a.nudgeCounter = 7;
-      await expect(saveDcpState(context, a)).rejects.toThrow(/conflict|stale|revision/i);
-      const document = JSON.parse(await readFile(join(dir, "dcp-state/cas.json"), "utf8"));
-      expect(document.payload.totalPruneCount).toBe(42);
-    } finally { resetDcpPersistenceDedup(); await rm(dir, { recursive: true, force: true }); }
-  });
 });

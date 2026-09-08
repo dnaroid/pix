@@ -2061,7 +2061,7 @@ export class AppTabsController {
 				// current runtime/open tabs immediately before destructive work so a
 				// session that became live after the initial snapshot is not removed.
 				if (this.preservedSessionPaths().has(resolve(session.path))) continue;
-				await this.unlinkSessionAndDcpSidecar(session.path);
+				await this.unlinkSessionFile(session.path);
 			}
 		} catch {
 			// Session retention must never interrupt the terminal UI.
@@ -2071,43 +2071,18 @@ export class AppTabsController {
 	}
 
 	/**
-	 * Unlink a project session file and, best-effort, its DCP sidecar state.
-	 * The sidecar path is derived from the session id in the first line of the
-	 * `.jsonl` (mirrors the DCP module's `safeSessionFileName`), so retention
-	 * never leaves orphan sidecars behind. Everything here is best-effort:
+	 * Unlink a project session file. Everything here is best-effort:
 	 * session retention must never interrupt the terminal UI.
 	 */
-	private async unlinkSessionAndDcpSidecar(
+	private async unlinkSessionFile(
 		sessionPath: string,
 		unlinkFile: typeof unlink = unlink,
 	): Promise<void> {
 		if (this.preservedSessionPaths().has(resolve(sessionPath))) return;
-		let sidecarPath: string | undefined;
-		const header = await readSessionHeader(sessionPath);
-		if (header?.type === "session" && typeof header.id === "string" && header.id) {
-			sidecarPath = join(dirname(sessionPath), "dcp-state", header.id.replace(/[^a-zA-Z0-9._-]/g, "_") + ".json");
-		}
 		try {
 			await unlinkFile(sessionPath);
 		} catch {
-			// The JSONL remains the ownership root. Never delete its DCP state when
-			// removing the session itself failed, otherwise a live/retryable session
-			// is left with an unexplained missing sidecar.
 			return;
-		}
-		if (sidecarPath) {
-			for (const artifactPath of [
-				sidecarPath,
-				`${sidecarPath}.prev`,
-				`${sidecarPath}.recovery-required`,
-				`${sidecarPath}.fence`,
-			]) {
-				try {
-					await unlinkFile(artifactPath);
-				} catch {
-					// Sidecar removal is best-effort; never interrupt the terminal UI.
-				}
-			}
 		}
 	}
 

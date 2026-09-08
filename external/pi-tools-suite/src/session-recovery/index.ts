@@ -43,6 +43,11 @@ type Section = {
 	label: string;
 };
 
+type RecoveryCursor =
+	| { version: 1; kind: "overview"; scope: Scope; afterSectionId: string }
+	| { version: 1; kind: "search"; scope: Scope; query: string; caseSensitive: boolean; afterEntryId: string }
+	| { version: 1; kind: "read"; scope: Scope; sectionId?: string; entryId: string; offset: number };
+
 const SCOPE_SCHEMA = StringEnum(["active", "all"] as const, {
 	description: "Raw session scope. Defaults to the active root-to-leaf branch; all includes abandoned branches.",
 });
@@ -61,6 +66,8 @@ const MAX_RECENT_ERRORS = 20;
 const MAX_RECOVERY_FILES = 200;
 const MAX_PENDING_TOOL_CALLS = 50;
 const MAX_SEARCH_QUERY_CHARS = 500;
+const CURSOR_VERSION = 1;
+const DCP_CONTROL_CUSTOM_TYPES = new Set(["dcp-journal", "dcp-nudge"]);
 
 const READ_TOOL_NAMES = new Set([
 	"read",
@@ -86,6 +93,10 @@ function isRecord(value: unknown): value is UnknownRecord {
 function isEntry(value: unknown): value is EntryLike {
 	return isRecord(value) && typeof value.id === "string" && value.id.length > 0
 		&& typeof value.type === "string" && value.type.length > 0;
+}
+
+function isDcpControlEntry(entry: EntryLike): boolean {
+	return entry.type === "custom" && typeof entry.customType === "string" && DCP_CONTROL_CUSTOM_TYPES.has(entry.customType);
 }
 
 function clampInteger(value: unknown, fallback: number, minimum: number, maximum: number): number {
@@ -119,7 +130,39 @@ function entriesFor(manager: SessionManagerLike | undefined, scope: Scope): Entr
 			: () => manager.getBranch?.(),
 		[],
 	);
-	return Array.isArray(raw) ? raw.filter(isEntry) : [];
+	return Array.isArray(raw) ? raw.filter(isEntry).filter((entry) => !isDcpControlEntry(entry)) : [];
+}
+
+function encodeCursor(cursor: RecoveryCursor): string {
+	return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
+function decodeCursor(value: unknown): RecoveryCursor | undefined {
+	if (typeof value !== "string" || value.length === 0 || value.length > 2_000) return undefined;
+	try {
+		const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
+		if (!isRecord(parsed) || parsed.version !== CURSOR_VERSION || typeof parsed.kind !== "string") return undefined;
+		if (parsed.scope !== "active" && parsed.scope !== "all") return undefined;
+		if (parsed.kind === "overview" && typeof parsed.afterSectionId === "string") {
+			return parsed as RecoveryCursor;
+		}
+		if (
+			parsed.kind === "search" && typeof parsed.query === "string" && typeof parsed.caseSensitive === "boolean"
+			&& typeof parsed.afterEntryId === "string"
+		) {
+			return parsed as RecoveryCursor;
+		}
+		if (
+			parsed.kind === "read" && typeof parsed.entryId === "string" && typeof parsed.offset === "number"
+			&& Number.isInteger(parsed.offset) && parsed.offset >= 0
+			&& (parsed.sectionId === undefined || typeof parsed.sectionId === "string")
+		) {
+			return parsed as RecoveryCursor;
+		}
+	} catch {
+		return undefined;
+	}
+	return undefined;
 }
 
 function messageFrom(entry: EntryLike): UnknownRecord | undefined {
@@ -358,16 +401,16 @@ function leafCount(entries: EntryLike[]): number {
 	return entries.reduce((count, entry) => count + (parents.has(entry.id) ? 0 : 1), 0);
 }
 
-function renderEntry(entry: EntryLike, bodyChars: number): string {
+function renderEntryFull(entry: EntryLike): string {
 	const heading = [`[${entry.id}]`, entry.timestamp, entry.type, messageRole(entry)].filter(Boolean).join(" ");
 	const lines = [heading];
 	const message = messageFrom(entry);
 
 	if (message) {
 		const text = textFromContent(message.content);
-		if (text) lines.push(truncate(text, bodyChars));
+		if (text) lines.push(text);
 		for (const call of toolCallsFrom(entry)) {
-			lines.push(`tool_call ${call.name}#${call.id} ${safeJson(call.arguments, bodyChars)}`);
+			lines.push(`tool_call ${call.name}#${call.id} ${serializeJson(call.arguments)}`);
 		}
 		if (message.role === "toolResult") {
 			const toolName = typeof message.toolName === "string" ? message.toolName : "unknown";
@@ -375,23 +418,37 @@ function renderEntry(entry: EntryLike, bodyChars: number): string {
 			lines.push(`tool_result ${toolName}#${callId}${message.isError === true ? " error" : ""}`);
 		}
 	} else if (entry.type === "compaction") {
-		lines.push(truncate(summaryFrom(entry), bodyChars));
+		lines.push(summaryFrom(entry));
 		if (typeof entry.firstKeptEntryId === "string") lines.push(`firstKeptEntryId: ${entry.firstKeptEntryId}`);
 		if (typeof entry.tokensBefore === "number") lines.push(`tokensBefore: ${entry.tokensBefore}`);
 	} else if (entry.type === "branch_summary") {
-		lines.push(truncate(summaryFrom(entry), bodyChars));
+		lines.push(summaryFrom(entry));
 		if (typeof entry.fromId === "string") lines.push(`fromId: ${entry.fromId}`);
 	} else if (entry.type === "custom_message") {
 		const text = textFromContent(entry.content);
-		if (text) lines.push(truncate(text, bodyChars));
+		if (text) lines.push(text);
 	} else {
 		const fields = Object.fromEntries(
 			Object.entries(entry).filter(([key]) => !["id", "parentId", "timestamp", "type"].includes(key)),
 		);
-		if (Object.keys(fields).length > 0) lines.push(safeJson(fields, bodyChars));
+		if (Object.keys(fields).length > 0) lines.push(safeJson(fields, MAX_BODY_CHARS));
 	}
 
 	return lines.join("\n");
+}
+
+function renderEntry(entry: EntryLike, bodyChars: number): string {
+	return truncate(renderEntryFull(entry), bodyChars);
+}
+
+function readEntryChunk(entry: EntryLike, offset: number, bodyChars: number): { text: string; nextOffset?: number } {
+	const rendered = renderEntryFull(entry);
+	const start = Math.min(Math.max(0, offset), rendered.length);
+	const end = Math.min(rendered.length, start + bodyChars);
+	return {
+		text: rendered.slice(start, end),
+		...(end < rendered.length ? { nextOffset: end } : {}),
+	};
 }
 
 function contentResult(payload: unknown, details: UnknownRecord): { content: Array<{ type: "text"; text: string }>; details: UnknownRecord } {
@@ -448,14 +505,19 @@ export default function sessionRecovery(pi: ExtensionAPI): void {
 		...SESSION_RECOVERY_TOOL_DESCRIPTIONS.overview,
 		parameters: Type.Object({
 			scope: Type.Optional(SCOPE_SCHEMA),
+			cursor: Type.Optional(Type.String({ description: "Opaque continuation cursor returned by a previous session_overview call.", maxLength: 2_000 })),
 			max_sections: Type.Optional(Type.Number({
-				description: "Maximum section summaries to return, split between the head and tail.",
+				description: "Maximum consecutive section summaries to return.",
 				minimum: 1,
 				maximum: MAX_OVERVIEW_SECTIONS,
 			})),
 		}, { additionalProperties: false }),
-		async execute(_toolCallId: string, params: { scope?: Scope; max_sections?: number }, _signal: AbortSignal, _onUpdate: unknown, ctx: unknown) {
+		async execute(_toolCallId: string, params: { scope?: Scope; cursor?: string; max_sections?: number }, _signal: AbortSignal, _onUpdate: unknown, ctx: unknown) {
 			const scope = scopeFrom(params.scope);
+			const cursor = params.cursor ? decodeCursor(params.cursor) : undefined;
+			if (params.cursor && (!cursor || cursor.kind !== "overview" || cursor.scope !== scope)) {
+				return contentResult("Invalid or stale session_overview cursor for this scope.", { scope, cursorValid: false });
+			}
 			const manager = sessionManagerFrom(ctx);
 			const entries = entriesFor(manager, scope);
 			if (entries.length === 0) return emptyResult(scope);
@@ -464,7 +526,19 @@ export default function sessionRecovery(pi: ExtensionAPI): void {
 			const allEntries = entriesFor(manager, "all");
 			const sections = buildSections(entries);
 			const maximum = clampInteger(params.max_sections, DEFAULT_OVERVIEW_SECTIONS, 1, MAX_OVERVIEW_SECTIONS);
-			const selected = boundedHeadAndTail(sections, maximum);
+			let startIndex = 0;
+			if (cursor?.kind === "overview") {
+				const index = sections.findIndex((section) => section.id === cursor.afterSectionId);
+				if (index < 0) {
+					return contentResult("The session changed and the overview cursor no longer resolves on this branch.", { scope, cursorValid: false });
+				}
+				startIndex = index + 1;
+			}
+			const selected = sections.slice(startIndex, startIndex + maximum);
+			const hasMore = startIndex + selected.length < sections.length;
+			const nextCursor = hasMore && selected.length > 0
+				? encodeCursor({ version: CURSOR_VERSION, kind: "overview", scope, afterSectionId: selected[selected.length - 1]!.id })
+				: undefined;
 			const allLeaves = leafCount(allEntries);
 			const header = callSafely<unknown>(() => manager?.getHeader?.(), undefined);
 			const sessionId = callSafely<unknown>(() => manager?.getSessionId?.(), undefined);
@@ -487,57 +561,101 @@ export default function sessionRecovery(pi: ExtensionAPI): void {
 					leaves: allLeaves,
 					otherBranches: Math.max(0, allLeaves - (activeEntries.length > 0 ? 1 : 0)),
 				},
-				sections: selected.values.map(sectionSummary),
-				omittedSections: selected.omitted,
+				sections: selected.map(sectionSummary),
+				hasMore,
+				nextCursor: nextCursor ?? null,
 			};
-			return contentResult(payload, { scope, entryCount: entries.length, sectionCount: sections.length, omittedSections: selected.omitted });
+			return contentResult(payload, { scope, entryCount: entries.length, sectionCount: sections.length, returnedSections: selected.length, hasMore, nextCursor });
 		},
 	});
 
 	pi.registerTool({
 		...SESSION_RECOVERY_TOOL_DESCRIPTIONS.readSection,
 		parameters: Type.Object({
-			section_id: Type.String({ description: "Stable section ID returned by session_overview or session_search.", maxLength: 200 }),
+			section_id: Type.Optional(Type.String({ description: "Stable section ID returned by session_overview or session_search.", maxLength: 200 })),
+			entry_id: Type.Optional(Type.String({ description: "Read one exact raw session entry by ID without scanning from the start of its section.", maxLength: 200 })),
+			cursor: Type.Optional(Type.String({ description: "Opaque continuation cursor returned by a previous session_read_section call.", maxLength: 2_000 })),
 			scope: Type.Optional(SCOPE_SCHEMA),
 			max_entries: Type.Optional(Type.Number({ description: "Maximum entries to render from the section.", minimum: 1, maximum: MAX_SECTION_ENTRIES })),
-			max_body_chars: Type.Optional(Type.Number({ description: "Maximum rendered body characters per entry.", minimum: 100, maximum: MAX_BODY_CHARS })),
+			max_body_chars: Type.Optional(Type.Number({ description: "Maximum rendered characters per entry page. Use the returned cursor to continue long entries.", minimum: 100, maximum: MAX_BODY_CHARS })),
 		}, { additionalProperties: false }),
-		async execute(_toolCallId: string, params: { section_id: string; scope?: Scope; max_entries?: number; max_body_chars?: number }, _signal: AbortSignal, _onUpdate: unknown, ctx: unknown) {
+		async execute(_toolCallId: string, params: { section_id?: string; entry_id?: string; cursor?: string; scope?: Scope; max_entries?: number; max_body_chars?: number }, _signal: AbortSignal, _onUpdate: unknown, ctx: unknown) {
 			const scope = scopeFrom(params.scope);
+			if (!params.cursor && Boolean(params.section_id) === Boolean(params.entry_id)) {
+				return contentResult("Pass exactly one of section_id or entry_id, or continue with cursor.", { scope, found: false });
+			}
+			const cursor = params.cursor ? decodeCursor(params.cursor) : undefined;
+			if (params.cursor && (!cursor || cursor.kind !== "read" || cursor.scope !== scope)) {
+				return contentResult("Invalid or stale session_read_section cursor for this scope.", { scope, cursorValid: false, sourceAvailable: false });
+			}
 			const entries = entriesFor(sessionManagerFrom(ctx), scope);
 			if (entries.length === 0) return emptyResult(scope);
-			const section = buildSections(entries).find((candidate) => candidate.id === params.section_id);
-			if (!section) {
+			const sections = buildSections(entries);
+			const requestedSectionId = cursor?.kind === "read" ? cursor.sectionId : params.section_id;
+			const requestedEntryId = cursor?.kind === "read" ? cursor.entryId : params.entry_id;
+			const offset = cursor?.kind === "read" ? cursor.offset : 0;
+			const section = requestedSectionId ? sections.find((candidate) => candidate.id === requestedSectionId) : undefined;
+			if (requestedSectionId && !section) {
 				return contentResult(
-					`Section ${params.section_id} was not found in scope ${scope}. Run session_overview with the same scope to refresh section IDs.`,
-					{ scope, sectionId: params.section_id, found: false },
+					`Section ${requestedSectionId} was not found in scope ${scope}. Run session_overview with the same scope to refresh section IDs.`,
+					{ scope, sectionId: requestedSectionId, found: false, sourceAvailable: false },
 				);
 			}
 
 			const maximum = clampInteger(params.max_entries, DEFAULT_SECTION_ENTRIES, 1, MAX_SECTION_ENTRIES);
 			const bodyChars = clampInteger(params.max_body_chars, DEFAULT_BODY_CHARS, 100, MAX_BODY_CHARS);
+			const candidates = section ? section.entries : entries;
+			let startIndex = requestedEntryId ? candidates.findIndex((entry) => entry.id === requestedEntryId) : 0;
+			if (startIndex < 0) {
+				return contentResult(
+					`Entry ${requestedEntryId} was not found in scope ${scope}${section ? ` within ${section.id}` : ""}.`,
+					{ scope, sectionId: section?.id, entryId: requestedEntryId, found: false, sourceAvailable: false },
+				);
+			}
 			const rendered: string[] = [];
 			let renderedChars = 0;
-			let truncatedOutput = false;
-			for (const entry of section.entries.slice(0, maximum)) {
-				const next = renderEntry(entry, bodyChars);
-				if (renderedChars + next.length + 2 > MAX_OUTPUT_CHARS - 500) {
-					truncatedOutput = true;
-					break;
-				}
+			let nextCursor: string | undefined;
+			let renderedCount = 0;
+			for (let index = startIndex; index < candidates.length && renderedCount < maximum; index += 1) {
+				const entry = candidates[index]!;
+				const entryOffset = index === startIndex ? offset : 0;
+				const chunk = readEntryChunk(entry, entryOffset, bodyChars);
+				const heading = entryOffset > 0 ? `[${entry.id}] continuation @${entryOffset}` : undefined;
+				const next = [heading, chunk.text].filter(Boolean).join("\n");
+				if (renderedChars + next.length + 2 > MAX_OUTPUT_CHARS - 1_000) break;
 				rendered.push(next);
 				renderedChars += next.length + 2;
+				renderedCount += 1;
+				if (chunk.nextOffset !== undefined) {
+					nextCursor = encodeCursor({ version: CURSOR_VERSION, kind: "read", scope, sectionId: section?.id, entryId: entry.id, offset: chunk.nextOffset });
+					break;
+				}
+				const nextEntry = candidates[index + 1];
+				if (nextEntry && (renderedCount >= maximum || renderedChars >= MAX_OUTPUT_CHARS - 1_000)) {
+					nextCursor = encodeCursor({ version: CURSOR_VERSION, kind: "read", scope, sectionId: section?.id, entryId: nextEntry.id, offset: 0 });
+					break;
+				}
 			}
-			const omittedEntries = section.entries.length - rendered.length;
+			if (!nextCursor) {
+				const lastRendered = renderedCount > 0 ? startIndex + renderedCount - 1 : startIndex - 1;
+				const nextEntry = candidates[lastRendered + 1];
+				if (nextEntry) nextCursor = encodeCursor({ version: CURSOR_VERSION, kind: "read", scope, sectionId: section?.id, entryId: nextEntry.id, offset: 0 });
+			}
+			const hasMore = nextCursor !== undefined;
+			const title = section ? `Section ${section.id}: ${section.label}` : `Entry ${requestedEntryId}`;
 			return contentResult(
-				[`Section ${section.id}: ${section.label}`, ...rendered, omittedEntries > 0 ? `… ${omittedEntries} entries omitted` : ""].filter(Boolean).join("\n\n"),
+				[title, ...rendered, hasMore ? "… more available; continue with next_cursor" : ""].filter(Boolean).join("\n\n"),
 				{
 					scope,
-					sectionId: section.id,
-					entryCount: section.entries.length,
-					renderedCount: rendered.length,
-					omittedEntries,
-					truncated: truncatedOutput || omittedEntries > 0,
+					sectionId: section?.id,
+					entryId: requestedEntryId,
+					entryCount: candidates.length,
+					renderedCount,
+					found: true,
+					sourceAvailable: true,
+					hasMore,
+					truncated: hasMore,
+					nextCursor,
 				},
 			);
 		},
@@ -552,10 +670,11 @@ export default function sessionRecovery(pi: ExtensionAPI): void {
 				maxLength: MAX_SEARCH_QUERY_CHARS,
 			}),
 			scope: Type.Optional(SCOPE_SCHEMA),
+			cursor: Type.Optional(Type.String({ description: "Opaque continuation cursor returned by a previous session_search call.", maxLength: 2_000 })),
 			case_sensitive: Type.Optional(Type.Boolean({ description: "Use exact case matching. Defaults to false." })),
 			limit: Type.Optional(Type.Number({ description: "Maximum matches to return.", minimum: 1, maximum: MAX_SEARCH_RESULTS })),
 		}, { additionalProperties: false }),
-		async execute(_toolCallId: string, params: { query: string; scope?: Scope; case_sensitive?: boolean; limit?: number }, _signal: AbortSignal, _onUpdate: unknown, ctx: unknown) {
+		async execute(_toolCallId: string, params: { query: string; scope?: Scope; cursor?: string; case_sensitive?: boolean; limit?: number }, _signal: AbortSignal, _onUpdate: unknown, ctx: unknown) {
 			const scope = scopeFrom(params.scope);
 			const entries = entriesFor(sessionManagerFrom(ctx), scope);
 			if (entries.length === 0) return emptyResult(scope);
@@ -563,20 +682,24 @@ export default function sessionRecovery(pi: ExtensionAPI): void {
 			if (!query) return contentResult("Search query must not be empty.", { scope, query, matchCount: 0 });
 
 			const caseSensitive = params.case_sensitive === true;
+			const cursor = params.cursor ? decodeCursor(params.cursor) : undefined;
+			if (
+				params.cursor && (!cursor || cursor.kind !== "search" || cursor.scope !== scope
+					|| cursor.query !== query || cursor.caseSensitive !== caseSensitive)
+			) {
+				return contentResult("Invalid or stale session_search cursor for this scope/query.", { scope, query, cursorValid: false });
+			}
 			const needle = caseSensitive ? query : query.toLocaleLowerCase();
 			const limit = clampInteger(params.limit, DEFAULT_SEARCH_RESULTS, 1, MAX_SEARCH_RESULTS);
 			const sections = buildSections(entries);
 			const entrySections = sectionIdByEntry(sections);
-			const matches: UnknownRecord[] = [];
-			let totalMatches = 0;
+			const allMatches: UnknownRecord[] = [];
 
 			for (const entry of entries) {
 				const text = entryText(entry);
 				const haystack = caseSensitive ? text : text.toLocaleLowerCase();
 				if (!text || !haystack.includes(needle)) continue;
-				totalMatches += 1;
-				if (matches.length >= limit) continue;
-				matches.push({
+				allMatches.push({
 					entryId: entry.id,
 					sectionId: entrySections.get(entry.id),
 					type: entry.type,
@@ -586,8 +709,31 @@ export default function sessionRecovery(pi: ExtensionAPI): void {
 				});
 			}
 
-			const payload = { scope, query, caseSensitive, totalMatches, returnedMatches: matches.length, matches };
-			return contentResult(payload, { scope, query, matchCount: totalMatches, returnedCount: matches.length, truncated: totalMatches > matches.length });
+			let startIndex = 0;
+			if (cursor?.kind === "search") {
+				const index = allMatches.findIndex((match) => match.entryId === cursor.afterEntryId);
+				if (index < 0) {
+					return contentResult("The session changed and the search cursor no longer resolves on this branch.", { scope, query, cursorValid: false });
+				}
+				startIndex = index + 1;
+			}
+			const matches = allMatches.slice(startIndex, startIndex + limit);
+			const hasMore = startIndex + matches.length < allMatches.length;
+			const lastEntryId = matches.at(-1)?.entryId;
+			const nextCursor = hasMore && typeof lastEntryId === "string"
+				? encodeCursor({ version: CURSOR_VERSION, kind: "search", scope, query, caseSensitive, afterEntryId: lastEntryId })
+				: undefined;
+			const payload = {
+				scope,
+				query,
+				caseSensitive,
+				totalMatches: allMatches.length,
+				returnedMatches: matches.length,
+				hasMore,
+				nextCursor: nextCursor ?? null,
+				matches,
+			};
+			return contentResult(payload, { scope, query, matchCount: allMatches.length, returnedCount: matches.length, hasMore, truncated: hasMore, nextCursor });
 		},
 	});
 

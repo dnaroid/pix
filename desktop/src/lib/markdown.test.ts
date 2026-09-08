@@ -4,6 +4,7 @@ import {
   normalizeLocalFileDestination,
   normalizeProjectFileDestination,
   renderMarkdown,
+  stripDcpControlMetadata,
 } from "./markdown";
 
 describe("renderMarkdown", () => {
@@ -40,6 +41,38 @@ describe("renderMarkdown", () => {
     expect(streaming).toContain('<code class="highlighted-code" data-language="typescript">');
     expect(streaming).toContain("&lt;script&gt;");
     expect(streaming).not.toContain("```");
+  });
+
+  it("hides complete DCP control blocks while preserving literal examples", () => {
+    const leaked = [
+      "before",
+      "<dcp-message-ids>",
+      "Stable DCP IDs: m001=this message",
+      "</dcp-message-ids>",
+      "after",
+    ].join("\n");
+    const literal = [
+      "```xml",
+      "<dcp-message-ids>",
+      "example",
+      "</dcp-message-ids>",
+      "```",
+      "> <dcp-message-ids>",
+      "> quoted example",
+      "> </dcp-message-ids>",
+    ].join("\n");
+
+    expect(stripDcpControlMetadata(leaked)).toBe("before\nafter");
+    expect(renderMarkdown(leaked)).not.toContain("Stable DCP IDs");
+    expect(stripDcpControlMetadata(literal)).toBe(literal);
+    expect(renderMarkdown(literal)).toContain("example");
+    expect(renderMarkdown(literal)).toContain("quoted example");
+  });
+
+  it("fails open for an incomplete DCP control block", () => {
+    const incomplete = "answer\n<dcp-message-ids>\nstill streaming";
+    expect(stripDcpControlMetadata(incomplete)).toBe(incomplete);
+    expect(renderMarkdown(incomplete)).toContain("still streaming");
   });
 
   it("uses plaintext highlighting for unknown fence languages", () => {

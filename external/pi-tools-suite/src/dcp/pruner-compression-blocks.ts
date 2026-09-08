@@ -1,6 +1,6 @@
 import type { DcpConfig } from "./config.js";
 import { hasExactCompressionMembership, type CompressionBlock, type CompressionMember, type DcpState } from "./state.js";
-import { PASSTHROUGH_ROLES, estimateMessageTokens } from "./pruner-metadata.js";
+import { estimateMessageTokens } from "./pruner-metadata.js";
 import { stableMessageKeys } from "./pruner-message-ids.js";
 import { writeDcpDebugLog } from "./debug-log.js";
 import { canonicalMessageHash, rawMutationHashOf } from "./conversation-index.js";
@@ -48,105 +48,8 @@ function exactStableIdSpan(messages: any[], members: CompressionMember[]): { lo:
 }
 
 function exactBlockSpan(messages: any[], block: CompressionBlock): { lo: number; hi: number } | undefined {
-  if (hasExactCompressionMembership(block)) {
-    return exactMemberSpan(messages, block.mutationMembers!) ?? exactMemberSpan(messages, block.sourceMembers!);
-  }
-  if (!block.legacySourceMembership) return undefined;
-  const lo = findBoundaryIndex(messages, block.startMessageId, block.startTimestamp);
-  const hi = findBoundaryIndex(messages, block.endMessageId, block.endTimestamp);
-  return lo >= 0 && hi >= lo ? { lo, hi } : undefined;
-}
-
-export interface ReconcileInheritedBlocksResult {
-  fittingBlockIds: number[];
-  activatedBlockIds: number[];
-  deactivatedBlockIds: number[];
-}
-
-/**
- * Reconcile inherited compression state with the branch that is actually
- * being sent to the provider.
- *
- * A fork can branch before the source session's newest roll-up block ends.
- * That roll-up remains active in the source sidecar, while the older block it
- * covered is inactive. Since the roll-up's end boundary is absent on the
- * fork, neither block would otherwise be applied and the whole history would
- * be sent raw. Select the widest fitting block(s) instead, while preserving an
- * explicit user decompression for the block and its covered descendants.
- */
-export function reconcileInheritedCompressionBlocks(
-  messages: any[],
-  state: DcpState,
-): ReconcileInheritedBlocksResult {
-  const byId = new Map(state.compressionBlocks.map((block) => [block.id, block]));
-  const fittingBlockIds = new Set<number>();
-  const descendantCache = new Map<number, Set<number>>();
-
-  for (const block of state.compressionBlocks) {
-    if (!Number.isFinite(block.startTimestamp) || !Number.isFinite(block.endTimestamp)) continue;
-    const startFound = findBoundaryIndex(messages, block.startMessageId, block.startTimestamp) !== -1;
-    const endFound = findBoundaryIndex(messages, block.endMessageId, block.endTimestamp) !== -1;
-    if (startFound && endFound) fittingBlockIds.add(block.id);
-  }
-
-  function descendantsOf(rootId: number): Set<number> {
-    const cached = descendantCache.get(rootId);
-    if (cached) return cached;
-
-    const descendants = new Set<number>();
-    const pending = [...(byId.get(rootId)?.coveredBlockIds ?? [])];
-    while (pending.length > 0) {
-      const id = pending.pop()!;
-      if (id === rootId || descendants.has(id)) continue;
-      descendants.add(id);
-      pending.push(...(byId.get(id)?.coveredBlockIds ?? []));
-    }
-    descendantCache.set(rootId, descendants);
-    return descendants;
-  }
-
-  // Decompressing a roll-up intentionally exposes its whole range. Do not
-  // unexpectedly reactivate one of its older nested summaries after a fork.
-  const suppressedByUser = new Set<number>();
-  for (const block of state.compressionBlocks) {
-    if (!block.deactivatedByUser) continue;
-    suppressedByUser.add(block.id);
-    for (const id of descendantsOf(block.id)) suppressedByUser.add(id);
-  }
-
-  const eligibleBlockIds = new Set(
-    [...fittingBlockIds].filter((id) => !suppressedByUser.has(id)),
-  );
-  const coveredByFittingBlock = new Set<number>();
-  for (const id of eligibleBlockIds) {
-    for (const coveredId of descendantsOf(id)) coveredByFittingBlock.add(coveredId);
-  }
-
-  const activeBlockIds = new Set(
-    [...eligibleBlockIds].filter((id) => !coveredByFittingBlock.has(id)),
-  );
-  const activatedBlockIds: number[] = [];
-  const deactivatedBlockIds: number[] = [];
-
-  for (const block of state.compressionBlocks) {
-    const shouldBeActive = activeBlockIds.has(block.id);
-    if (block.active !== shouldBeActive) {
-      if (shouldBeActive) activatedBlockIds.push(block.id);
-      else deactivatedBlockIds.push(block.id);
-    }
-    block.active = shouldBeActive;
-
-    if (block.deactivatedByUser) continue;
-    block.deactivatedReason = fittingBlockIds.has(block.id)
-      ? undefined
-      : "outside-inherited-branch";
-  }
-
-  return {
-    fittingBlockIds: [...fittingBlockIds].sort((a, b) => a - b),
-    activatedBlockIds: activatedBlockIds.sort((a, b) => a - b),
-    deactivatedBlockIds: deactivatedBlockIds.sort((a, b) => a - b),
-  };
+  if (!hasExactCompressionMembership(block)) return undefined;
+  return exactMemberSpan(messages, block.mutationMembers!) ?? exactMemberSpan(messages, block.sourceMembers!);
 }
 
 
@@ -168,16 +71,22 @@ export function syncCompressionBlocks(messages: any[], state: DcpState, config: 
   }
 
   for (const block of state.compressionBlocks) {
-    if (!block.active || block.deactivatedByUser) continue;
+    if (!block.active) continue;
 
-    // A modern block whose exact stable sequence is present but whose hashes
-    // match neither raw mutation membership nor its recorded projection can
-    // never be applied safely. Older DCP versions could create this state by
-    // storing a pruned tool-result hash as mutation membership. Fail closed by
-    // retiring the unusable block so candidate selection can create a fresh
-    // exact block instead of repeatedly selecting a partial overlap.
+    if (!hasExactCompressionMembership(block)) {
+      block.active = false;
+      block.deactivatedReason = "invalid-exact-membership";
+      writeDcpDebugLog(config, "block.auto_deactivated", {
+        blockId: `b${block.id}`,
+        reason: block.deactivatedReason,
+        topic: block.topic,
+      });
+      continue;
+    }
+
+    // If the same exact stable sequence still exists but the recorded source
+    // and raw hashes no longer match, never widen or guess a replacement.
     if (
-      hasExactCompressionMembership(block) &&
       exactStableIdSpan(messages, block.mutationMembers!) &&
       !exactMemberSpan(messages, block.mutationMembers!) &&
       !exactMemberSpan(messages, block.sourceMembers!)
@@ -353,8 +262,7 @@ export function applyCompressionBlocks(messages: any[], state: DcpState): any[] 
   if (activeBlocks.length === 0) return messages;
 
   for (const block of activeBlocks) {
-    // Skip blocks with corrupted timestamps (from pre-fix sessions)
-    if (!Number.isFinite(block.startTimestamp) || !Number.isFinite(block.endTimestamp)) continue;
+    if (!hasExactCompressionMembership(block)) continue;
 
     if (block.version === 2 && block.replacementMode === "message-body") {
       applyExactMessageBodyBlock(messages, block, state);
@@ -362,196 +270,8 @@ export function applyCompressionBlocks(messages: any[], state: DcpState): any[] 
     }
     if (block.version === 2 && block.replacementMode === "range") {
       applyExactRangeBlock(messages, block, state);
-      continue;
     }
-
-    // Find start and end indices by timestamp
-    const startIdx = findBoundaryIndex(messages, block.startMessageId, block.startTimestamp);
-    const endIdx = findBoundaryIndex(messages, block.endMessageId, block.endTimestamp);
-
-    if (startIdx === -1 || endIdx === -1) continue;
-
-    let lo = Math.min(startIdx, endIdx);
-    let hi = Math.max(startIdx, endIdx);
-
-    // Expand lo backward: if there is an assistant before lo whose tool_use
-    // blocks have matching tool_results inside [lo..hi], pull the entire
-    // assistant + any intermediate result messages into the range so the
-    // group is always removed atomically.
-    //
-    // Critically we must skip backward past any toolResult / bashExecution
-    // messages before lo, because an assistant with multiple tool_calls emits
-    // N consecutive result messages — the assistant itself sits further back.
-    while (lo > 0) {
-      // Walk backward past tool-result messages to find the preceding assistant
-      let scanIdx = lo - 1;
-      while (scanIdx >= 0) {
-        const r = (messages[scanIdx] as any).role as string;
-        if (r !== "toolResult" && r !== "bashExecution" && !PASSTHROUGH_ROLES.has(r)) break;
-        scanIdx--;
-      }
-      if (scanIdx < 0 || (messages[scanIdx] as any).role !== "assistant") break;
-
-      const prev = messages[scanIdx] as any;
-      const toolCallIdsInRange = new Set<string>();
-      for (let i = lo; i <= hi; i++) {
-        const m = messages[i] as any;
-        if (
-          (m.role === "toolResult" || m.role === "bashExecution") &&
-          typeof m.toolCallId === "string"
-        ) {
-          toolCallIdsInRange.add(m.toolCallId);
-        }
-      }
-      const prevContent: any[] = Array.isArray(prev.content) ? prev.content : [];
-      const hasMatchingToolCalls = prevContent.some(
-        (contentBlock: any) => contentBlock.type === "toolCall" && toolCallIdsInRange.has(contentBlock.id),
-      );
-      if (!hasMatchingToolCalls) break;
-      // Pull assistant + all intermediate result messages into the range
-      lo = scanIdx;
-    }
-
-    // Expand hi forward: for every assistant message in [lo..hi] that has
-    // tool_use blocks, include any immediately-following tool_result messages
-    // that correspond to those blocks. Loop to fixed point because expanding
-    // hi could expose more assistants in theory.
-    let prevHi: number;
-    do {
-      prevHi = hi;
-      const assistantToolCallIds = new Set<string>();
-      for (let i = lo; i <= hi; i++) {
-        const m = messages[i] as any;
-        if (m.role !== "assistant") continue;
-        const content: any[] = Array.isArray(m.content) ? m.content : [];
-        for (const contentBlock of content) {
-          if (contentBlock.type === "toolCall" && typeof contentBlock.id === "string") {
-            assistantToolCallIds.add(contentBlock.id);
-          }
-        }
-      }
-      while (hi + 1 < messages.length) {
-        const next = messages[hi + 1] as any;
-        if (
-          (next.role === "toolResult" || next.role === "bashExecution") &&
-          assistantToolCallIds.has(next.toolCallId)
-        ) {
-          hi++;
-        } else if (PASSTHROUGH_ROLES.has(next.role)) {
-          hi++;
-        } else {
-          break;
-        }
-      }
-    } while (hi !== prevHi);
-
-    // Estimate tokens removed
-    let removedTokens = 0;
-    for (let i = lo; i <= hi; i++) {
-      removedTokens += estimateMessageTokens(messages[i]);
-    }
-
-    // Remove the range (inclusive)
-    messages.splice(lo, hi - lo + 1);
-
-    // Build synthetic user message for the compressed block
-    const syntheticMsg = {
-      role: "user",
-      content: [
-        {
-          type: "text",
-          text:
-            "[Compressed section: " +
-            block.topic +
-            "]\n\n" +
-            block.summary +
-            "\n\n[dcp-block-id]: # (b" +
-            block.id +
-            ")",
-        },
-      ],
-      // anchorTimestamp is always finite (resolveAnchorTimestamp returns
-      // endTimestamp + 1 instead of Infinity), but guard against corrupted
-      // state from older sessions where Infinity/null could leak in.
-      timestamp: Number.isFinite(block.anchorTimestamp) ? block.anchorTimestamp - 0.5 : block.endTimestamp + 0.5,
-    };
-    markProjectedOrigin(syntheticMsg, "block", block.id);
-
-    // Estimate tokens added by the summary
-    const addedTokens = estimateMessageTokens(syntheticMsg);
-
-    // Insert structurally before the first raw message after the compressed
-    // range. Stable anchor identity wins over timestamp equality; timestamp is
-    // retained only as the legacy fallback for older persisted blocks.
-    let insertIndex = findBoundaryIndex(messages, block.anchorMessageId, block.anchorTimestamp);
-    if (insertIndex === -1) {
-      insertIndex = messages.findIndex((message) =>
-        Number.isFinite(message?.timestamp) && message.timestamp >= block.anchorTimestamp,
-      );
-    }
-    if (insertIndex === -1) messages.push(syntheticMsg);
-    else messages.splice(insertIndex, 0, syntheticMsg);
-
-    accountCompressionBlock(block, removedTokens, addedTokens, state);
   }
 
   return messages;
-}
-
-/**
- * Remove orphaned toolResult/bashExecution messages whose corresponding
- * assistant toolCall was removed, and strip orphaned toolCall blocks from
- * assistant messages whose toolResult was removed.
- *
- * This is a safety net that runs after all compression blocks are applied.
- */
-export function repairOrphanedToolPairs(messages: any[]): void {
-  // 1. Build set of all toolCall IDs present in assistant messages
-  const assistantToolCallIds = new Set<string>();
-  for (const msg of messages) {
-    if (msg.role !== "assistant") continue;
-    const content: any[] = Array.isArray(msg.content) ? msg.content : [];
-    for (const contentBlock of content) {
-      if (contentBlock.type === "toolCall" && typeof contentBlock.id === "string") {
-        assistantToolCallIds.add(contentBlock.id);
-      }
-    }
-  }
-
-  // 2. Build set of all toolCallIds present in toolResult/bashExecution messages
-  const resultToolCallIds = new Set<string>();
-  for (const msg of messages) {
-    if (msg.role !== "toolResult" && msg.role !== "bashExecution") continue;
-    if (typeof msg.toolCallId === "string") {
-      resultToolCallIds.add(msg.toolCallId);
-    }
-  }
-
-  // 3. Remove orphaned toolResult/bashExecution messages (no matching assistant toolCall)
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i];
-    if (msg.role !== "toolResult" && msg.role !== "bashExecution") continue;
-    if (typeof msg.toolCallId === "string" && !assistantToolCallIds.has(msg.toolCallId)) {
-      messages.splice(i, 1);
-    }
-  }
-
-  // 4. Strip orphaned toolCall blocks from assistant messages (no matching toolResult)
-  for (const msg of messages) {
-    if (msg.role !== "assistant") continue;
-    const content: any[] = Array.isArray(msg.content) ? msg.content : [];
-    const hasToolCalls = content.some((b: any) => b.type === "toolCall");
-    if (!hasToolCalls) continue;
-
-    const filtered = content.filter((contentBlock: any) => {
-      if (contentBlock.type !== "toolCall") return true;
-      return typeof contentBlock.id === "string" && resultToolCallIds.has(contentBlock.id);
-    });
-
-    // Only update if we actually removed something
-    if (filtered.length !== content.length) {
-      // If the assistant has no content left at all, keep at least an empty array
-      msg.content = filtered.length > 0 ? filtered : [];
-    }
-  }
 }

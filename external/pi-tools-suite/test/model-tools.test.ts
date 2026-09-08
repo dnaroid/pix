@@ -1,10 +1,7 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { createTypeboxMock } from "./support/typebox-mock.js";
-
-mock.module("typebox", () => createTypeboxMock());
 
 const builtinExecutions: Array<{ name: string; args: any; cwd: string }> = [];
 
@@ -19,21 +16,7 @@ function builtin(name: string) {
 	});
 }
 
-mock.module("@earendil-works/pi-coding-agent", () => ({
-	DEFAULT_MAX_BYTES: 1024 * 1024,
-	DEFAULT_MAX_LINES: 1000,
-	defineTool: (tool: any) => tool,
-	formatSize: (bytes: number) => `${bytes}B`,
-	getAgentDir: () => process.env.PI_CODING_AGENT_DIR ?? path.join(os.tmpdir(), "pi-tools-suite-test-agent"),
-	truncateHead: (content: string) => ({
-		content,
-		truncated: false,
-		totalLines: content.split("\n").length,
-		outputLines: content.split("\n").length,
-		totalBytes: Buffer.byteLength(content),
-		outputBytes: Buffer.byteLength(content),
-	}),
-	withFileMutationQueue: async (_key: string, fn: () => Promise<unknown>) => fn(),
+const MODEL_TOOL_TEST_DEPENDENCIES = {
 	createReadToolDefinition: builtin("read"),
 	createEditToolDefinition: builtin("edit"),
 	createWriteToolDefinition: builtin("write"),
@@ -41,7 +24,7 @@ mock.module("@earendil-works/pi-coding-agent", () => ({
 	createGrepToolDefinition: builtin("grep"),
 	createFindToolDefinition: builtin("find"),
 	createLsToolDefinition: builtin("ls"),
-}));
+};
 
 class FakePi {
 	tools = new Map<string, any>();
@@ -99,7 +82,7 @@ describe.serial("model tools", () => {
 	test.serial("registers aliases, adapts executions, and switches active tools by model", async () => {
 		const { default: register } = await import("../src/model-tools/index.js");
 		const pi = new FakePi();
-		register(pi as any);
+		register(pi as any, MODEL_TOOL_TEST_DEPENDENCIES as any);
 		expect([...pi.tools.keys()].sort()).toEqual(["Bash", "Edit", "Glob", "Grep", "Read", "Write", "apply_patch", "shell"]);
 
 		const cwd = tempDir();
@@ -128,7 +111,7 @@ describe.serial("model tools", () => {
 		const pi = new FakePi();
 		pi.activeTools = ["read", "custom", ...REPO_DISCOVERY_TOOL_NAMES, "bash"];
 
-		register(pi as any);
+		register(pi as any, MODEL_TOOL_TEST_DEPENDENCIES as any);
 		pi.handlers.get("session_start")({}, { model: { id: "claude-sonnet" } });
 		expect(pi.activeTools).toEqual([...REPO_DISCOVERY_TOOL_NAMES, "custom", "Read", "Edit", "Write", "Bash", "Grep", "Glob"]);
 
@@ -147,7 +130,7 @@ describe.serial("model tools", () => {
 		const { default: register } = await import("../src/model-tools/index.js");
 		const pi = new FakePi();
 		pi.activeTools = ["read", "grep", "custom"];
-		register(pi as any);
+		register(pi as any, MODEL_TOOL_TEST_DEPENDENCIES as any);
 
 		pi.handlers.get("session_start")({}, { model: { provider: "zai", id: "glm-5-turbo" } });
 		expect(pi.activeTools).toEqual(["custom", "Read", "Grep"]);

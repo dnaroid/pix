@@ -5,9 +5,7 @@ import { modelKeysFromContext, resolveModelConfig, type DcpConfig } from "./conf
 import type { DcpNudgeType } from "./pruner-types.js"
 import { isToolRecordProtected, markToolPruned } from "./pruner.js"
 import { ignoreStaleExtensionContextError, safeGetContextUsage } from "../context-usage.js"
-import { stableMessageId } from "./pruner-message-ids.js"
 import { captureDcpTransactionGuard, cloneDcpTransactionState, runDcpStateTransaction } from "./state-transaction.js"
-import { captureDcpPersistenceTarget, saveDcpStateToTarget } from "./state-persistence.js"
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -20,6 +18,12 @@ const DCP_STATS_DETAILS_KIND = "dcp-stats"
 
 export interface DcpCommandHooks {
   onStateChanged?: (ctx: ExtensionCommandContext) => void
+  persistState?: (
+    ctx: ExtensionCommandContext,
+    state: DcpState,
+    publication?: { beforePublish?: () => void; onPublished?: () => void },
+  ) => Promise<void> | void
+  isSessionSupported?: () => boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -176,10 +180,6 @@ Commands:
   /dcp manual       — Show manual mode status
   /dcp manual on    — Enable manual mode (disable autonomous compression nudges)
   /dcp manual off   — Disable manual mode (enable autonomous compression nudges)
-  /dcp decompress   — List active compression blocks
-  /dcp decompress N — Restore compression block N
-  /dcp recompress    — List blocks restored by /dcp decompress
-  /dcp recompress N  — Re-apply a user-restored compression block
   /dcp compress     — Trigger compression (sends compress tool invocation to LLM)`
 
 function handleHelp(ctx: ExtensionCommandContext): void {
@@ -280,9 +280,7 @@ async function handleSweep(
   const protectedTools = new Set<string>([
     ...ALWAYS_PROTECTED_TOOLS,
     ...config.compress.protectedTools,
-    ...config.strategies.deduplication.protectedTools,
-    ...config.strategies.purgeErrors.protectedTools,
-    ...config.strategies.autoToolPruning.protectedTools,
+    ...config.strategies.emergencyCurrentTurnPruning.protectedTools,
   ])
 
   // Walk the branch (root → leaf) collecting toolCallIds in encounter order,
@@ -386,169 +384,6 @@ function handleManual(
   }
 }
 
-interface DecompressionSourceCheck {
-  available: boolean
-  reason?: string
-}
-
-function checkDecompressionSource(
-  ctx: ExtensionCommandContext,
-  block: DcpState["compressionBlocks"][number],
-): DecompressionSourceCheck {
-  // Legacy blocks predate exact source manifests/identity. Preserve their old
-  // decompression semantics rather than pretending a stronger guarantee.
-  if (block.version !== 2) return { available: true }
-  if (!block.startMessageId || !block.endMessageId) {
-    return { available: false, reason: "exact raw boundaries were not recorded for this modern block" }
-  }
-
-  const stableIds = new Set<string>()
-  const branch = branchEntries(ctx)
-  let messageIndex = 0
-  for (const entry of branch) {
-    if (entry?.type !== "message" || !entry.message) continue
-    const message = { ...entry.message, _dcpEntryId: entry.id }
-    stableIds.add(stableMessageId(message, messageIndex++))
-  }
-
-  const missing = [block.startMessageId, block.endMessageId].filter((id) => !stableIds.has(id))
-  if (missing.length > 0) {
-    return {
-      available: false,
-      reason: `raw source boundary ${missing.join(", ")} is no longer present in the active branch`,
-    }
-  }
-  return { available: true }
-}
-
-// ---------------------------------------------------------------------------
-// Decompress
-// ---------------------------------------------------------------------------
-
-function handleDecompress(
-  ctx: ExtensionCommandContext,
-  state: DcpState,
-  nArg: string | undefined,
-): void {
-  if (nArg === undefined) {
-    // List all active compression blocks.
-    const activeBlocks = state.compressionBlocks.filter((b) => b.active)
-
-    if (activeBlocks.length === 0) {
-      ctx.ui.notify("No active compression blocks.", "info")
-      return
-    }
-
-    const lines: string[] = ["Active compression blocks:"]
-    for (const block of activeBlocks) {
-      lines.push(
-        `  b${block.id} — "${block.topic}" (est. ${fmt(block.summaryTokenEstimate)} tokens)`,
-      )
-    }
-    lines.push("")
-    lines.push("Run /dcp decompress N to restore a block.")
-
-    ctx.ui.notify(lines.join("\n"), "info")
-  } else {
-    // Restore block N.
-    const id = parseInt(nArg, 10)
-
-    if (isNaN(id)) {
-      ctx.ui.notify(
-        `Invalid block ID: "${nArg}". Usage: /dcp decompress N`,
-        "error",
-      )
-      return
-    }
-
-    const block = state.compressionBlocks.find((b) => b.id === id)
-
-    if (!block) {
-      ctx.ui.notify(`No compression block found with id ${id}.`, "error")
-      return
-    }
-
-    if (!block.active) {
-      ctx.ui.notify(`Compression block b${id} is already decompressed.`, "info")
-      return
-    }
-
-    const source = checkDecompressionSource(ctx, block)
-    if (!source.available) {
-      ctx.ui.notify(
-        `Cannot decompress block b${id}: raw source is unavailable (${source.reason}). ` +
-        "The block remains active; DCP will not guess or re-run mutating tools to recreate it.",
-        "error",
-      )
-      return
-    }
-
-    block.active = false
-    block.deactivatedByUser = true
-    block.deactivatedReason = "user"
-    ctx.ui.notify(`Decompressed block b${id}: "${block.topic}"`, "info")
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Recompress
-// ---------------------------------------------------------------------------
-
-function handleRecompress(
-  ctx: ExtensionCommandContext,
-  state: DcpState,
-  nArg: string | undefined,
-): void {
-  const recompressible = state.compressionBlocks.filter((b) => !b.active && b.deactivatedByUser)
-
-  if (nArg === undefined) {
-    if (recompressible.length === 0) {
-      ctx.ui.notify("No user-decompressed compression blocks are available to recompress.", "info")
-      return
-    }
-
-    const lines: string[] = ["Recompressible blocks:"]
-    for (const block of recompressible) {
-      lines.push(
-        `  b${block.id} — "${block.topic}" (est. ${fmt(block.summaryTokenEstimate)} tokens)`,
-      )
-    }
-    lines.push("")
-    lines.push("Run /dcp recompress N to re-apply a block.")
-    ctx.ui.notify(lines.join("\n"), "info")
-    return
-  }
-
-  const id = parseInt(nArg, 10)
-  if (isNaN(id)) {
-    ctx.ui.notify(`Invalid block ID: "${nArg}". Usage: /dcp recompress N`, "error")
-    return
-  }
-
-  const block = state.compressionBlocks.find((b) => b.id === id)
-  if (!block) {
-    ctx.ui.notify(`No compression block found with id ${id}.`, "error")
-    return
-  }
-  if (block.active) {
-    ctx.ui.notify(`Compression block b${id} is already active.`, "info")
-    return
-  }
-  if (!block.deactivatedByUser) {
-    ctx.ui.notify(`Compression block b${id} was superseded by another block and cannot be recompressed directly.`, "error")
-    return
-  }
-
-  for (const coveredId of block.coveredBlockIds ?? []) {
-    const covered = state.compressionBlocks.find((candidate) => candidate.id === coveredId)
-    if (covered) covered.active = false
-  }
-  block.active = true
-  block.deactivatedByUser = false
-  block.deactivatedReason = undefined
-  ctx.ui.notify(`Recompressed block b${id}: "${block.topic}"`, "info")
-}
-
 // ---------------------------------------------------------------------------
 // Compress (trigger)
 // ---------------------------------------------------------------------------
@@ -581,6 +416,15 @@ export function registerCommands(
   config: DcpConfig,
   hooks: DcpCommandHooks = {},
 ): void {
+  const persistState = hooks.persistState ?? (async (
+    _ctx: ExtensionCommandContext,
+    _state: DcpState,
+    publication?: { beforePublish?: () => void; onPublished?: () => void },
+  ) => {
+    publication?.beforePublish?.()
+    publication?.onPublished?.()
+  })
+  const isSessionSupported = hooks.isSessionSupported ?? (() => true)
   pi.registerCommand("dcp", {
     description: "Dynamic Context Pruning — manage context window usage",
     getArgumentCompletions(prefix: string): AutocompleteItem[] | null {
@@ -589,8 +433,6 @@ export function registerCommands(
         { value: "stats", label: "stats", description: "Show pruning statistics" },
         { value: "sweep", label: "sweep", description: "Prune tool outputs" },
         { value: "manual", label: "manual", description: "Toggle manual mode" },
-        { value: "decompress", label: "decompress", description: "List or restore compression blocks" },
-        { value: "recompress", label: "recompress", description: "Re-apply a decompressed block" },
         { value: "compress", label: "compress", description: "Trigger LLM compression" },
         { value: "help", label: "help", description: "Show help" },
       ]
@@ -604,6 +446,11 @@ export function registerCommands(
       const parts = args.trim().split(/\s+/).filter(Boolean)
       const sub = parts[0] ?? ""
       const effectiveConfig = resolveModelConfig(config, modelKeysFromContext(ctx))
+      const mutating = sub === "sweep" || sub === "manual" || sub === "compress"
+      if (mutating && !isSessionSupported()) {
+        ctx.ui.notify("DCP is unavailable in this session. Start a new session to use the current DCP journal format.", "error")
+        return
+      }
       const execute = async (state: DcpState, ctx: ExtensionCommandContext): Promise<void> => {
         switch (sub) {
           case "":
@@ -630,14 +477,6 @@ export function registerCommands(
             handleManual(ctx, state, parts[1])
             break
 
-          case "decompress":
-            handleDecompress(ctx, state, parts[1])
-            break
-
-          case "recompress":
-            handleRecompress(ctx, state, parts[1])
-            break
-
           case "compress":
             await handleCompress(pi, ctx)
             break
@@ -652,13 +491,12 @@ export function registerCommands(
       }
 
       try {
-        if (["sweep", "manual", "decompress", "recompress"].includes(sub)) {
+        if (["sweep", "manual"].includes(sub)) {
           // Wait outside the commit queue: the active run may need that same
           // queue to complete provider evidence or a compression transaction.
           if (sub === "sweep") await ctx.waitForIdle()
           const assertCurrent = captureDcpTransactionGuard(state, effectiveConfig, undefined, ctx)
           const epoch = state.sessionEpoch
-          const target = captureDcpPersistenceTarget(ctx)
           await runDcpStateTransaction(state, async () => {
             assertCurrent()
             const working = cloneDcpTransactionState(state)
@@ -671,7 +509,7 @@ export function registerCommands(
             await execute(working, stagedContext)
             assertCurrent()
             let published = false
-            if (target) await saveDcpStateToTarget(target, working, {
+            await persistState(ctx, working, {
               beforePublish: assertCurrent,
               onPublished: () => { published = true },
             })

@@ -32,7 +32,8 @@ import { stableMessageKeys } from "./pruner-message-ids.js"
 import { buildConversationIndex, buildExactRangeMembership, canonicalMessageHash, closeConversationRange } from "./conversation-index.js"
 import { decideDcpProgress, type DcpBlockedReason } from "./progress-controller.js"
 import { captureDcpTransactionGuard, cloneDcpTransactionState, runDcpStateTransaction } from "./state-transaction.js"
-import type { DcpPublicationOptions } from "./state-persistence.js"
+import type { DcpJournalPublicationOptions } from "./journal.js"
+import { settleCompressionProgress } from "./compression-progress.js"
 
 export class AutoCompressionBlockedError extends Error {
 	readonly blockedReason: DcpBlockedReason
@@ -63,17 +64,31 @@ export function decideAutoCompress(
 	contextPercent: number,
 	maxContextPercent: number,
 	candidate: CompressionCandidate | null,
-	options: { routinePressure?: boolean } = {},
+	options: { routinePressure?: boolean; hardPressure?: boolean; reminderUnavailable?: boolean } = {},
 ): { shouldFire: boolean; reason: string } {
 	const settings = config.compress.autoCompress
+	const autoEnabled = Boolean(settings?.enabled) && !state.manualMode
 	const emergency = contextPercent > maxContextPercent
+	if (config.enabled && autoEnabled && candidate !== null && (
+		options.hardPressure === true || (emergency && options.reminderUnavailable === true)
+	)) {
+		// At the hard safety boundary there may be no cache-safe place left to
+		// introduce a fresh reminder inside a long single user turn. The same is
+		// true once ordinary compression pressure is reached after the user tail has
+		// already been consumed by assistant/tool traffic. If the user explicitly
+		// enabled auto-compression and an exact provider-evidenced candidate exists,
+		// prefer one bounded summary rewrite over destructive body pruning or a
+		// cache-breaking edit of an old carrier. Routine pressure with a fresh
+		// reminder carrier still obeys completed-opportunity patience.
+		return { shouldFire: true, reason: options.hardPressure === true ? "hard-pressure" : "cache-safe-reminder-unavailable" }
+	}
 	const decision = decideDcpProgress({
 		enabled: config.enabled,
-		autoEnabled: Boolean(settings?.enabled) && !state.manualMode,
+		autoEnabled,
 		pressure: emergency || options.routinePressure === true,
 		candidateAvailable: candidate !== null,
 		// Crossing the emergency threshold does not grant another patience window
-		// after already ignoring actionable routine reminders. The legacy counter
+		// after already ignoring actionable routine reminders. The emergency counter
 		// remains a fallback for state written before the all-opportunities field.
 		ignoredOpportunities: emergency
 			? Math.max(state.consecutiveIgnoredStrongNudges, state.consecutiveIgnoredNudges)
@@ -790,8 +805,10 @@ export interface CreateAutoCompressionBlockOptions {
 	cwd?: string
 	/** Minimum full-projection gain required by the current E05 budget plan. */
 	requiredGainTokens?: number
+	/** Allow a positive safe commit that reduces, but does not fully settle, the current recovery debt. */
+	allowPartialGain?: boolean
 	/** Optional durable publication hook. Live state is not changed unless it succeeds. */
-	persistState?: (preparedState: DcpState, publication?: DcpPublicationOptions) => Promise<void>
+  persistState?: (preparedState: DcpState, publication?: DcpJournalPublicationOptions) => Promise<void>
 	/** Optional pure projection preparation; included in the same durable generation. */
 	prepareProjection?: (preparedState: DcpState) => any[] | void
 }
@@ -808,7 +825,11 @@ export interface AutoCompressionResult {
 	sourceExactEstimate: number
 	replacementExactEstimate: number
 	projectedGain: number
-	/** Stable E06 representation semantics independent of legacy summaryMode names. */
+	/** Full provider-projection gain after all same-operation cleanup. */
+	fullProjectionGain: number
+	/** Whether the current recovery debt was fully settled by this commit. */
+	pressureRelieved: boolean
+	/** Stable E06 representation semantics independent of diagnostic summaryMode names. */
 	summaryRepresentation: "model" | "extractive" | "extractive-fallback"
 	sourceHash: string
 	sourceCoverage: SummarySourceCoverage
@@ -952,12 +973,10 @@ export async function createAutoCompressionBlock(
 		cwd: options.cwd,
 	})
 	assertCurrent()
-	// New blocks have an explicit protected-fragment ledger, so auto rollups can
-	// summarize the old synthetic block instead of recursively expanding its
-	// entire summary verbatim. Legacy blocks without a ledger keep the old
-	// expansion path for compatibility and loss-avoidance.
-	const canCompactCoveredSummaries =
-		coveredBeforeCreate.length > 0 && coveredBeforeCreate.every((block) => block.protectedFragments !== undefined)
+	// Every block in the new format has an explicit protected-fragment ledger,
+	// so auto rollups summarize old synthetic prose instead of recursively
+	// expanding it. Missing ledgers fail closed in createRangeCompressionBlock.
+	const canCompactCoveredSummaries = coveredBeforeCreate.length > 0
 	const created = createRangeCompressionBlock({
 		topic,
 		summary,
@@ -1002,7 +1021,7 @@ export async function createAutoCompressionBlock(
 		)
 	}
 	const requiredGainTokens = Math.max(0, Math.floor(options.requiredGainTokens ?? 0))
-	if (projectedGain < requiredGainTokens) {
+	if (projectedGain < requiredGainTokens && !options.allowPartialGain) {
 		throw new AutoCompressionBlockedError(
 			"budget-exhausted",
 			`Auto-compress projected gain for ${effectiveCandidate.startId}..${effectiveCandidate.endId} is below required budget recovery: ` +
@@ -1011,13 +1030,19 @@ export async function createAutoCompressionBlock(
 	}
 
 	const finalProjection = options.prepareProjection?.(workingState)
+	let fullProjectionGain = projectedGain
+	let fullProjectedAfterTokens = Math.max(0, messages.reduce((sum, message) => sum + estimateMessageTokens(message), 0) - projectedGain)
 	if (Array.isArray(finalProjection)) {
-		const fullGain = messages.reduce((sum, message) => sum + estimateMessageTokens(message), 0) -
-			finalProjection.reduce((sum, message) => sum + estimateMessageTokens(message), 0)
-		if (fullGain <= 0 || fullGain < requiredGainTokens) {
-			throw new AutoCompressionBlockedError("budget-exhausted", `Final provider projection saves ${fullGain}, below required ${requiredGainTokens}; no state published`)
+		const fullBefore = messages.reduce((sum, message) => sum + estimateMessageTokens(message), 0)
+		fullProjectedAfterTokens = finalProjection.reduce((sum, message) => sum + estimateMessageTokens(message), 0)
+		fullProjectionGain = fullBefore - fullProjectedAfterTokens
+		if (fullProjectionGain <= 0 || (fullProjectionGain < requiredGainTokens && !options.allowPartialGain)) {
+			throw new AutoCompressionBlockedError("budget-exhausted", `Final provider projection saves ${fullProjectionGain}, below required ${requiredGainTokens}; no state published`)
 		}
 	}
+	const pressureRelieved = workingState.compressionProgress
+		? settleCompressionProgress(workingState, fullProjectionGain, fullProjectedAfterTokens)
+		: true
 	assertCurrent()
 	let published = false
 	if (options.persistState) await options.persistState(workingState, {
@@ -1044,6 +1069,8 @@ export async function createAutoCompressionBlock(
 		sourceExactEstimate,
 		replacementExactEstimate,
 		projectedGain,
+		fullProjectionGain,
+		pressureRelieved,
 		summaryRepresentation,
 		sourceHash,
 		sourceCoverage,

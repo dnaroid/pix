@@ -1,7 +1,5 @@
 import type { DcpState } from "./state.js"
-import { serializeState } from "./state.js"
 import { createHash } from "node:crypto"
-import { shareDcpDiskRevisions } from "./persistence-ownership.js"
 
 /**
  * Serialize all stateful DCP publications which share one live state object.
@@ -42,16 +40,39 @@ export function invalidateDcpStateOwner(state: DcpState): number {
 }
 
 export function cloneDcpTransactionState(state: DcpState): DcpState {
-  const clone = structuredClone(state)
-  shareDcpDiskRevisions(state, clone)
-  return clone
+  return structuredClone(state)
+}
+
+function canonicalRuntimeValue(value: unknown, seen = new WeakSet<object>()): unknown {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return value
+  if (typeof value === "number") return Number.isFinite(value) ? value : String(value)
+  if (typeof value === "bigint") return `${value}n`
+  if (typeof value === "undefined") return "[undefined]"
+  if (Array.isArray(value)) return value.map((item) => canonicalRuntimeValue(item, seen))
+  if (value instanceof Map) {
+    return [...value.entries()]
+      .map(([key, item]) => [canonicalRuntimeValue(key, seen), canonicalRuntimeValue(item, seen)] as const)
+      .sort(([a], [b]) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
+  }
+  if (value instanceof Set) {
+    return [...value.values()]
+      .map((item) => canonicalRuntimeValue(item, seen))
+      .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
+  }
+  if (typeof value === "object") {
+    if (seen.has(value as object)) return "[cycle]"
+    seen.add(value as object)
+    const record = value as Record<string, unknown>
+    const result: Record<string, unknown> = {}
+    for (const key of Object.keys(record).sort()) result[key] = canonicalRuntimeValue(record[key], seen)
+    seen.delete(value as object)
+    return result
+  }
+  return String(value)
 }
 
 function transactionRevision(state: DcpState): string {
-  return createHash("sha256").update(JSON.stringify({
-    persisted: serializeState(state),
-    source: state.conversationIndexSnapshot,
-  })).digest("hex")
+  return createHash("sha256").update(JSON.stringify(canonicalRuntimeValue(state))).digest("hex")
 }
 
 /** Capture ownership before queuing, never after a long await. */

@@ -371,7 +371,7 @@ export class SessionCommandActions {
 				{
 					value: true,
 					label: `Yes, delete ${isCurrent ? "the current session" : basename(targetSessionFile)}`,
-					description: "This permanently removes the session file and any sidecar data. This cannot be undone.",
+					description: "This permanently removes the session file. This cannot be undone.",
 					variant: "error",
 				},
 				{ value: false, label: "Cancel" },
@@ -391,7 +391,7 @@ export class SessionCommandActions {
 		const deleteCurrent = isCurrent || targetSessionFile === currentSessionFile;
 		if (deleteCurrent) {
 			// Do not race a final extension persistence operation with destructive
-			// session cleanup. The JSONL remains the ownership root for sidecar data.
+			// session cleanup.
 			await this.host.awaitCurrentSessionExtensions(runtime);
 			if (!isCommandRuntimeActive(this.host, runtime)) return;
 		}
@@ -409,8 +409,6 @@ export class SessionCommandActions {
 			return;
 		}
 
-		const sidecarRemoved = await this.removeDcpSidecarState(dirname(targetSessionFile), targetSessionId).catch(() => false);
-
 		if (deleteCurrent) {
 			const result = await runtime.newSession();
 			if (!isCommandRuntimeActive(this.host, runtime)) return;
@@ -425,7 +423,7 @@ export class SessionCommandActions {
 			this.host.addEntry({
 				id: createId("system"),
 				kind: "system",
-				text: `Deleted session ${targetSessionId}. ${sidecarRemoved ? "Sidecar DCP state removed. " : ""}Started a new session. cwd=${runtime.cwd}`,
+				text: `Deleted session ${targetSessionId}. Started a new session. cwd=${runtime.cwd}`,
 			});
 			if (runtime.modelFallbackMessage) this.host.addEntry({ id: createId("system"), kind: "system", text: runtime.modelFallbackMessage });
 			this.host.setSessionStatus(runtime.session);
@@ -434,26 +432,11 @@ export class SessionCommandActions {
 			this.host.addEntry({
 				id: createId("system"),
 				kind: "system",
-				text: `Deleted session file ${targetSessionFile}${sidecarRemoved ? " and its sidecar DCP state" : ""}.`,
+				text: `Deleted session file ${targetSessionFile}.`,
 			});
 			this.host.setSessionStatus(runtime.session);
 		}
 		this.host.toast.success("Session deleted");
-	}
-
-	private async removeDcpSidecarState(sessionDir: string, sessionId: string): Promise<boolean> {
-		if (!sessionId) return false;
-		const safeName = `${sessionId.replace(/[^a-zA-Z0-9._-]/g, "_")}.json`;
-		const statePath = join(sessionDir, "dcp-state", safeName);
-		for (const artifactPath of [
-			statePath,
-			`${statePath}.prev`,
-			`${statePath}.recovery-required`,
-			`${statePath}.fence`,
-		]) {
-			await rm(artifactPath, { force: true });
-		}
-		return true;
 	}
 
 	async runNewSessionCommand(): Promise<void> {

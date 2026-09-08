@@ -6,6 +6,11 @@ This report records the local, headless implementation state for
 `specs/27-dcp-reliability-roadmap.md`. It deliberately separates deterministic
 engineering evidence from live provider/model rollout evidence.
 
+> Historical evidence: this file describes the earlier sidecar-based reliability
+> pass and is intentionally not rewritten to look like evidence for the current
+> journal-only implementation. For current behavior use `03-dcp.md`,
+> `26-dcp-provider-cache-stability.md`, and plan 32.
+
 ## Scope and release state
 
 - Source of truth changed only under `external/pi-tools-suite/` plus host specs.

@@ -186,6 +186,15 @@ class LazySessionManager implements SessionManagerFacade {
 		return branchEntries(entries, this.leafId ?? entries.at(-1)?.id);
 	}
 
+	/**
+	 * Explicit synchronous full-branch escape hatch for user-triggered diagnostics
+	 * such as DCP statistics. Normal transcript rendering stays lazy; callers that
+	 * opt into this method accept one full session hydration for exact branch data.
+	 */
+	readFullBranchEntriesSync(): SessionEntry[] {
+		return this.hydrate().getBranch();
+	}
+
 	async readFullSessionEntries(): Promise<SessionEntry[]> {
 		if (this.hydrated) return this.hydrated.getEntries();
 		return readAllSessionEntries(this.sessionFilePath);
@@ -365,10 +374,13 @@ class LazySessionManager implements SessionManagerFacade {
 	}
 
 	private appendEntry(entry: SessionEntry): string {
+		// Persist first. If the append fails, the in-memory branch must remain
+		// unchanged; otherwise extensions that treat append success as a commit
+		// boundary can observe a phantom entry that never reached the JSONL file.
+		appendFileSync(this.sessionFilePath, `${JSON.stringify(entry)}\n`, "utf8");
 		this.entries.push(entry);
 		this.byId.set(entry.id, entry);
 		this.leafId = entry.id;
-		appendFileSync(this.sessionFilePath, `${JSON.stringify(entry)}\n`, "utf8");
 		return entry.id;
 	}
 

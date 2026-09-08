@@ -22,8 +22,12 @@ describe("DCP config", () => {
 		expect(config.compress.autoCandidates.keepRecentTurns).toBe(1);
 		expect(config.compress.messageMode.minContextPercent).toBe(0.40);
 		expect(config.compress.messageMode.keepRecentTurns).toBe(1);
-		expect(config.strategies.autoToolPruning.maxOutputTokens).toBe(1200);
-		expect(config.strategies.autoToolPruning.keepRecentTurns).toBe(1);
+		expect(config.compress.autoCompress).toEqual({
+			enabled: false,
+			patience: 2,
+			summarizerModel: [],
+			timeoutMs: 20000,
+		});
 		expect(config.strategies.emergencyCurrentTurnPruning).toEqual({
 			enabled: true,
 			hardContextPercent: 0.82,
@@ -34,9 +38,6 @@ describe("DCP config", () => {
 			maxSuggestions: 8,
 			protectedTools: [],
 		});
-		expect(config.strategies.autoToolPruning.readLikeTools).toEqual(
-			expect.arrayContaining(["read", "shell", "bash", "repo_search", "web_search", "web_fetch"]),
-		);
 	});
 
 	test("reads DCP settings from the user pi-tools-suite config", () => {
@@ -60,7 +61,6 @@ describe("DCP config", () => {
 
 		expect(config.enabled).toBe(false);
 		expect(config.manualMode.enabled).toBe(true);
-		expect(config.manualMode.automaticStrategies).toBe(true);
 		expect(config.compress.minContextPercent).toBe(0.25);
 		expect(config.compress.nudgeFrequency).toBe(1);
 		expect(config.compress.maxContextPercent).toBe(0.65);
@@ -80,7 +80,7 @@ describe("DCP config", () => {
 					"modelOverrides": {
 						"openai/gpt-5": {
 							"compress": { "nudgeFrequency": 3, "protectedTools": ["read"] },
-							"strategies": { "autoToolPruning": { "enabled": false } }
+							"strategies": { "emergencyCurrentTurnPruning": { "keepRecentToolPairs": 2 } }
 						}
 					}
 				}
@@ -92,7 +92,7 @@ describe("DCP config", () => {
 
 		expect(resolved.compress.nudgeFrequency).toBe(3);
 		expect(resolved.compress.protectedTools).toEqual(["compress", "write", "edit", "read"]);
-		expect(resolved.strategies.autoToolPruning.enabled).toBe(false);
+		expect(resolved.strategies.emergencyCurrentTurnPruning.keepRecentToolPairs).toBe(2);
 		expect(config.compress.nudgeFrequency).toBe(1);
 	});
 
@@ -131,6 +131,44 @@ describe("DCP config", () => {
 			"grep",
 			"find",
 		]);
+	});
+
+	test("drops removed DCP policy keys instead of retaining compatibility state", () => {
+		const homeDir = tempDir();
+		mkdirSync(join(homeDir, ".config", "pi"), { recursive: true });
+		writeFileSync(
+			join(homeDir, ".config", "pi", "pi-tools-suite.jsonc"),
+			`{
+				"dcp": {
+					"pruneNotification": "detailed",
+					"manualMode": { "enabled": true, "automaticStrategies": true },
+					"strategies": {
+						"deduplication": { "enabled": true },
+						"purgeErrors": { "enabled": true },
+						"autoToolPruning": { "enabled": true },
+						"emergencyCurrentTurnPruning": { "patience": 5 }
+					},
+					"modelOverrides": {
+						"openai/*": {
+							"pruneNotification": "off",
+							"strategies": { "autoToolPruning": { "enabled": false } }
+						}
+					}
+				}
+			}`,
+		);
+
+		const config = loadConfig({ homeDir }) as any;
+		expect(config.pruneNotification).toBeUndefined();
+		expect(config.manualMode.automaticStrategies).toBeUndefined();
+		expect(config.strategies.deduplication).toBeUndefined();
+		expect(config.strategies.purgeErrors).toBeUndefined();
+		expect(config.strategies.autoToolPruning).toBeUndefined();
+		expect(config.strategies.emergencyCurrentTurnPruning.patience).toBe(5);
+
+		const resolved = resolveModelConfig(config, ["openai/gpt-5"] as string[]) as any;
+		expect(resolved.pruneNotification).toBeUndefined();
+		expect(resolved.strategies.autoToolPruning).toBeUndefined();
 	});
 
 	test("extracts provider/model and model-only keys from context", () => {

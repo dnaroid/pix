@@ -31,9 +31,6 @@ function fixture(messageCount: number, totalTextBytes: number): any[] {
 function benchmark(messageCount: number, totalTextBytes: number, repetitions: number): BenchmarkResult {
   const config = loadConfig({ homeDir: "/tmp/dcp-benchmark-no-config" });
   config.debug = false;
-  config.strategies.deduplication.enabled = false;
-  config.strategies.purgeErrors.enabled = false;
-  config.strategies.autoToolPruning.enabled = false;
   config.strategies.emergencyCurrentTurnPruning.enabled = false;
   const state = createState();
   const messages = fixture(messageCount, totalTextBytes);

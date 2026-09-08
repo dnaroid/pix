@@ -8,19 +8,18 @@ import {
 	createState,
 	resetState,
 	createInputFingerprint,
-	restoreState,
-	inheritCompressionBlocks,
 } from "./state.js"
 import {
-	cleanupStaleDcpStateFiles,
-	captureDcpPersistenceTarget,
-	DcpPersistenceConflictError,
-	loadDcpState,
-	loadDcpStateFromSessionFile,
-	resetDcpPersistenceDedup,
-	saveDcpState,
-	saveDcpStateToTarget,
-} from "./state-persistence.js"
+	appendDcpJournalDelta,
+	appendDcpJournalOperation,
+	buildDcpJournalDelta,
+	createDcpJournalInit,
+	createDcpJournalMirror,
+	DcpJournalError,
+	readDcpJournalBranch,
+	replayDcpJournal,
+	type DcpJournalMirror,
+} from "./journal.js"
 import {
 	SYSTEM_PROMPT,
 	MANUAL_MODE_SYSTEM_PROMPT,
@@ -31,7 +30,6 @@ import {
 } from "./prompts.js"
 import {
 	applyPruning,
-	injectNudge,
 	getNudgeType,
 	detectCompressionCandidate,
 	detectEmergencyCompressionCandidate,
@@ -43,6 +41,7 @@ import {
 	appendConcreteNudgeGuidance,
 	applyAnchoredNudges,
 	clearDcpNudgeAnchors,
+	hasCacheSafeNudgeCarrier,
 	nudgeTypeLabel,
 	upsertNudgeAnchor,
 	getActiveSummaryTokenEstimate,
@@ -68,7 +67,6 @@ import {
 	providerPayloadRevision,
 	ProviderEvidenceTracker,
 } from "./provider-tool-results.js"
-import { reconcileInheritedCompressionBlocks } from "./pruner-compression-blocks.js"
 import { rehydrateToolRecordsFromMessages } from "./recovery.js"
 import { inferDcpBlockedReason, planDcpBudget } from "./progress-controller.js"
 import { createBudgetedAutoCompressionBlock } from "./auto-compress-budget.js"
@@ -119,10 +117,8 @@ function isUserVisibleOnlyMessage(message: any): boolean {
 	return message.details?.userVisibleOnly === true
 }
 
-// Control-plane custom message types filtered out of the transcript.
-// `dcp-message-ids` is retained only for backward-compat with logs written by
-// the removed inline control-message path.
-const DCP_CONTROL_PLANE_CUSTOM_TYPES = new Set(["dcp-state", "dcp-nudge", "dcp-message-ids"])
+// Diagnostic DCP custom messages are never provider context.
+const DCP_CONTROL_PLANE_CUSTOM_TYPES = new Set(["dcp-nudge"])
 const SUMMARY_BUFFER_MAX_CONTEXT_BONUS = 0.05
 
 function isDcpControlPlaneMessage(message: any): boolean {
@@ -145,13 +141,90 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 
 	// ── 2. Create state ───────────────────────────────────────────────────────
 	const state = dependencies.state ?? createState()
-	let pendingInheritedBlockReconciliation = false
+	let journalMirror: DcpJournalMirror | undefined
+	let journalSupported = false
+	let journalBlockedReason: string | undefined
+	let journalPersistent = false
 	const providerEvidenceTracker = new ProviderEvidenceTracker()
 	let providerEvidenceCommitQueue = Promise.resolve()
 	let latestProviderOpportunityAvailable = false
 	let latestProviderOpportunityKind: "routine" | "emergency" | undefined
 	let latestProviderReminder: string | undefined
 	const warnedProgress = new Set<string>()
+	const isJournalSessionSupported = () => journalSupported && journalBlockedReason === undefined
+	const persistJournalState = async (
+		ctx: ExtensionContext,
+		targetState: ReturnType<typeof createState>,
+		publication: { beforePublish?: () => void; onPublished?: () => void } = {},
+	): Promise<void> => {
+		if (!isJournalSessionSupported() || !journalMirror) {
+			throw new DcpJournalError(journalBlockedReason ?? "DCP journal is not initialized for this session")
+		}
+		if (!journalPersistent) {
+			const delta = buildDcpJournalDelta(targetState, journalMirror)
+			if (!delta) return
+			publication.beforePublish?.()
+			journalMirror = createDcpJournalMirror(targetState, delta.operationId)
+			publication.onPublished?.()
+			return
+		}
+		journalMirror = appendDcpJournalDelta(pi, ctx, targetState, journalMirror, publication)
+	}
+	const branchHasConversation = (branch: readonly any[]): boolean => branch.some((entry) =>
+		entry?.type === "message" || entry?.type === "custom_message" || entry?.type === "compaction" || entry?.type === "branch_summary",
+	)
+	const loadJournalState = async (ctx: ExtensionContext, allowInitialize: boolean): Promise<void> => {
+		journalMirror = undefined
+		journalSupported = false
+		journalBlockedReason = undefined
+		journalPersistent = false
+		const branch = await readDcpJournalBranch(ctx)
+		const manager = ctx.sessionManager as any
+		const persistentSession = (typeof manager.isPersisted === "function" && manager.isPersisted())
+			|| (typeof manager.getSessionFile === "function" && Boolean(manager.getSessionFile()))
+		try {
+			const replay = replayDcpJournal(branch, state)
+			if (replay.initialized && replay.lastOperationId) {
+				journalSupported = true
+				journalPersistent = persistentSession
+				journalMirror = createDcpJournalMirror(state, replay.lastOperationId)
+				return
+			}
+			if (allowInitialize && !branchHasConversation(branch)) {
+				const init = createDcpJournalInit()
+				if (persistentSession) appendDcpJournalOperation(pi, ctx, init)
+				journalSupported = true
+				journalPersistent = persistentSession
+				journalMirror = createDcpJournalMirror(state, init.operationId)
+				return
+			}
+			// Clean break: a pre-journal conversation is deliberately unsupported.
+			// Do not inspect external state, infer prior blocks, or create a
+			// compatibility checkpoint from existing history.
+			journalSupported = false
+		} catch (error) {
+			journalBlockedReason = error instanceof Error ? error.message : String(error)
+			journalSupported = false
+			journalMirror = undefined
+		}
+	}
+	const ensureEphemeralJournal = (ctx: ExtensionContext): void => {
+		if (journalSupported || journalBlockedReason) return
+		const manager = ctx.sessionManager as any
+		const persisted = typeof manager.isPersisted === "function" ? manager.isPersisted() : false
+		const sessionFile = typeof manager.getSessionFile === "function" ? manager.getSessionFile() : undefined
+		if (persisted || sessionFile) return
+		let branch: unknown[] = []
+		try {
+			const current = manager.getBranch?.()
+			branch = Array.isArray(current) ? current : []
+		} catch { return }
+		if (branch.length > 0) return
+		const init = createDcpJournalInit()
+		journalSupported = true
+		journalPersistent = false
+		journalMirror = createDcpJournalMirror(state, init.operationId)
+	}
 	const warnProgress = (ctx: ExtensionContext, reason: string, message: string) => {
 		const key = `${state.sessionEpoch}:${reason}`
 		if (warnedProgress.has(key)) return
@@ -177,7 +250,12 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 			warnedProgress.clear()
 	}
 	pi.on("model_select", invalidateOwner)
-	pi.on("session_tree", invalidateOwner)
+	pi.on("session_tree", async (_event, ctx) => {
+		invalidateOwner()
+		resetState(state)
+		if (config.manualMode.enabled) state.manualMode = true
+		await loadJournalState(ctx, false)
+	})
 	pi.on("session_compact", invalidateOwner)
 	const appendNudgeTelemetry = (
 		event: "emitted" | "upgraded" | "reapplied",
@@ -212,81 +290,59 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 	}
 
 	// ── 3. Register compress tool ─────────────────────────────────────────────
-	registerCompressTool(pi, state, config)
+	registerCompressTool(pi, state, config, {
+		persistState: persistJournalState,
+		isSessionSupported: isJournalSessionSupported,
+	})
 
 	// ── 4. Register /dcp commands ─────────────────────────────────────────────
-	registerCommands(pi, state, config)
+	registerCommands(pi, state, config, {
+		persistState: persistJournalState,
+		isSessionSupported: isJournalSessionSupported,
+	})
 
 	// ── 5. session_start: restore state from session entries ──────────────────
 	pi.on("session_start", async (event, ctx) => {
-		// Reset to a clean slate first.
 		resetState(state)
 		providerEvidenceTracker.reset()
 		latestProviderOpportunityAvailable = false
 		latestProviderOpportunityKind = undefined
 		latestProviderReminder = undefined
 		warnedProgress.clear()
-		const sessionStartEpoch = state.sessionEpoch
-		pendingInheritedBlockReconciliation = false
-
-		// Reset dedup hash before loading the sidecar state for this session.
-		resetDcpPersistenceDedup()
-
-		// Re-apply config baseline so manual mode survives a session_start reset.
-		if (config.manualMode.enabled) {
-			state.manualMode = true
-		}
-
-		// Restore from an overwrite sidecar file keyed by session id. Legacy
-		// append-only custom `dcp-state` entries are intentionally ignored.
-		void cleanupStaleDcpStateFiles(ctx).catch(() => {
-			// Cleanup is opportunistic; stale sidecars must not block session startup.
-		})
-		const loadedState = await loadDcpState(ctx)
-		if (state.sessionEpoch !== sessionStartEpoch) return
-		restoreState(state, loadedState)
-		pendingInheritedBlockReconciliation = state.compressionBlocks.length > 0
-
-		// fork/resume/new sessions inherit the source conversation but get a fresh
-		// sidecar; inherit the previous session's compression blocks so they are
-		// not silently lost (which previously forced re-compressing all history).
-		if (state.compressionBlocks.length === 0 && event.previousSessionFile) {
+		if (config.manualMode.enabled) state.manualMode = true
+		await loadJournalState(ctx, event.reason === "new" || event.reason === "startup")
+		writeDcpDebugLog(configForContext(ctx), "session_start.journal", {
+			reason: event.reason,
+			supported: journalSupported,
+			blockedReason: journalBlockedReason,
+			operations: journalMirror ? "replayed" : "none",
+		}, ctx)
+		if (!journalSupported && !journalBlockedReason) {
 			try {
-				const inherited = await loadDcpStateFromSessionFile(event.previousSessionFile)
-				if (state.sessionEpoch !== sessionStartEpoch) return
-				const added = inheritCompressionBlocks(state, inherited)
-				if (added > 0) {
-					pendingInheritedBlockReconciliation = true
-					writeDcpDebugLog(configForContext(ctx), "session_start.inherited_blocks", {
-						reason: event.reason,
-						previousSessionFile: event.previousSessionFile,
-						added,
-						totalBlocks: state.compressionBlocks.length,
-					}, ctx)
-					// Persist inherited state into this session's own sidecar so a later
-					// reload restores it directly.
-					await saveDcpState(ctx, state)
-				}
-			} catch {
-				// Inheritance is best-effort; never block session startup.
-			}
+				ctx.ui.notify(
+					"DCP is disabled for this pre-journal session. Start a new session to use the current DCP implementation.",
+					"warning",
+				)
+			} catch { /* Headless mode. */ }
 		}
-
-		// Headless by design: no extension status/footer/widgets are rendered.
 	})
 
-	// ── 6. session_shutdown: save state ───────────────────────────────────────
-	pi.on("session_shutdown", async (_event, ctx) => {
-		// Force-flush: bypass the dedup hash so the final snapshot is always
-		// written, guaranteeing the next session_start can restore it.
-		resetDcpPersistenceDedup()
-		await saveDcpState(ctx, state)
+	// Journal operations are committed at the mutation boundary; shutdown does
+	// not write a full runtime snapshot.
+	pi.on("session_shutdown", async () => {
+		journalMirror = undefined
+		journalSupported = false
+		journalBlockedReason = undefined
+		journalPersistent = false
 	})
 
 	// ── 7. before_agent_start: inject system prompt ───────────────────────────
 	pi.on("before_agent_start", async (event, _ctx) => {
 		const effectiveConfig = configForContext(_ctx)
 		if (!effectiveConfig.enabled) return { systemPrompt: event.systemPrompt }
+		ensureEphemeralJournal(_ctx)
+		if (journalBlockedReason) throw new DcpJournalError(`DCP journal is blocked: ${journalBlockedReason}`)
+		if (!journalSupported) return { systemPrompt: event.systemPrompt }
 
 		const promptAddition = state.manualMode
 			? MANUAL_MODE_SYSTEM_PROMPT
@@ -354,6 +410,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 	pi.on("context", async (event, ctx) => {
 		const contextEpoch = state.sessionEpoch
 		const effectiveConfig = configForContext(ctx)
+		ensureEphemeralJournal(ctx)
 		const contextMessages = event.messages
 			.filter((message: any) => !isUserVisibleOnlyMessage(message) && !isDcpControlPlaneMessage(message))
 			.map((message: any) => stripStaleDcpMetadataFromMessage(message))
@@ -383,6 +440,12 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 			}, ctx)
 			return { messages: contextMessages }
 		}
+		if (journalBlockedReason) {
+			throw new DcpJournalError(`DCP journal is blocked: ${journalBlockedReason}`)
+		}
+		if (!journalSupported) {
+			return { messages: event.messages.filter((message: any) => !isUserVisibleOnlyMessage(message)) }
+		}
 		latestProviderOpportunityKind = undefined
 		latestProviderReminder = undefined
 		annotateMessagesWithBranchEntryIds(contextMessages, ctx)
@@ -390,45 +453,19 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 		if (rehydration.recordsUpdated > 0) {
 			writeDcpDebugLog(effectiveConfig, "context.rehydrated_tool_records", { ...rehydration }, ctx)
 		}
-		if (pendingInheritedBlockReconciliation) {
-			pendingInheritedBlockReconciliation = false
-			const reconciliation = reconcileInheritedCompressionBlocks(contextMessages, state)
-			writeDcpDebugLog(
-				effectiveConfig,
-				"context.reconciled_inherited_blocks",
-				{ ...reconciliation },
-				ctx,
-			)
-			if (
-				reconciliation.activatedBlockIds.length > 0 ||
-				reconciliation.deactivatedBlockIds.length > 0
-			) {
-				await saveDcpState(ctx, state)
-			}
-		}
-		const prunedToolCountBeforeCheckpoint = state.prunedToolIds.size
 		let prunedMessages = applyPruning(contextMessages, state, effectiveConfig)
-		const automaticPrunesCommitted = state.prunedToolIds.size - prunedToolCountBeforeCheckpoint
-		if (automaticPrunesCommitted > 0) {
-			const clearedAnchors = clearDcpNudgeAnchors(state)
-			await saveDcpState(ctx, state)
-			writeDcpDebugLog(effectiveConfig, "prune.tool_checkpoint", {
-				committed: automaticPrunesCommitted,
-				clearedAnchors,
-				turn: state.currentTurn,
-				blockId: state.lastAutomaticPruneBlockId,
-				state: summarizeDcpState(state, effectiveConfig),
-			}, ctx)
-		}
+		// Stable IDs and any pruning decisions that affect this provider-visible
+		// projection must be committed before the request can use them.
+		await persistJournalState(ctx, state)
 		let candidate = null as ReturnType<typeof detectCompressionCandidate>
 		let emergencyCompressionCandidate = null as ReturnType<typeof detectEmergencyCompressionCandidate>
 		let messageCandidates = [] as ReturnType<typeof detectMessageCompressionCandidates>
 		let emergencySelection = null as ReturnType<typeof analyzeEmergencyCurrentTurn> | null
 		let emergencyPruneResult = null as ReturnType<typeof pruneEmergencyCurrentTurn> | null
 
-		// In manual mode we still apply pruning strategies (if
-		// automaticStrategies is on) but skip routine autonomous nudges. Emergency
-		// max-context nudges are still allowed, matching the manual-mode prompt.
+		// Manual mode skips routine autonomous nudges and automatic summary
+		// creation. The bounded emergency safety path remains separate, matching
+		// the manual-mode prompt.
 		const nativeUsage = normalizeDcpContextUsage(safeGetContextUsage(ctx))
 		const ctxModel = (ctx as any).model
 		const fallbackContextWindow = nativeUsage?.contextWindow ?? (
@@ -501,7 +538,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 				const resetEmergencyPasses = state.consecutiveIgnoredStrongNudges > 0 || state.consecutiveIgnoredNudges > 0 || !!state.compressionProgress
 				resetCompressionProgress(state)
 				warnedProgress.clear()
-				if (clearedAnchors > 0 || resetEmergencyPasses) await saveDcpState(ctx, state)
+				if (clearedAnchors > 0) await persistJournalState(ctx, state)
 				return finishContext("below-threshold", prunedMessages, {
 					contextPercent,
 					thresholds,
@@ -704,7 +741,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 					createdAt: Date.now(),
 				}
 				clearDcpNudgeAnchors(state)
-				await saveDcpState(ctx, state)
+				await persistJournalState(ctx, state)
 				const abortSupported = typeof (ctx as any).abort === "function"
 				if (abortSupported) (ctx as any).abort()
 				writeDcpDebugLog(effectiveConfig, "context.progress_handoff", {
@@ -722,7 +759,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 			}
 			if (!manualEmergencyOnly && !emergencyPressureReached && !hasCompressionSuggestion) {
 				const clearedAnchors = clearDcpNudgeAnchors(state)
-				if (clearedAnchors > 0) await saveDcpState(ctx, state)
+				if (clearedAnchors > 0) await persistJournalState(ctx, state)
 				if (nudgeType || clearedAnchors > 0) {
 					writeDcpDebugLog(effectiveConfig, "context.no_compression_candidate", {
 						contextPercent,
@@ -746,13 +783,18 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 			}
 			if (!manualEmergencyOnly) {
 				const autoCandidate = candidate ?? emergencyCompressionCandidate
+				const cacheSafeReminderAvailable = hasCacheSafeNudgeCarrier(prunedMessages)
 				const autoDecision = decideAutoCompress(
 					state,
 					effectiveConfig,
 					contextPercent,
 					thresholds.maxContextPercent,
 					autoCandidate,
-					{ routinePressure: routineEscalated },
+					{
+						routinePressure: routineEscalated,
+						hardPressure: hardEmergencyReached,
+						reminderUnavailable: !cacheSafeReminderAvailable,
+					},
 				)
 				if (contextLimitReached && autoCandidate === null) {
 					writeDcpDebugLog(effectiveConfig, "compress.auto_blocked_no_candidate", {
@@ -769,7 +811,6 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 				if (autoDecision.shouldFire && autoCandidate) {
 					try {
 						const autoOperationEpoch = state.sessionEpoch
-						const autoPersistenceTarget = captureDcpPersistenceTarget(ctx)
 						const largestSafeCandidate = candidate
 							? detectCompressionCandidate(prunedMessages, state, effectiveConfig, contextPercent)
 							: detectEmergencyCompressionCandidate(prunedMessages, state, effectiveConfig, contextPercent, planningThreshold)
@@ -784,12 +825,10 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 							signal: (ctx as any).signal,
 							cwd: (ctx as any).cwd,
 							requiredGainTokens: state.compressionProgress?.remainingTokens ?? planningRecoveryTokens,
-							persistState: autoPersistenceTarget
-								? (preparedState, publication) => saveDcpStateToTarget(autoPersistenceTarget, preparedState, publication)
-								: undefined,
+							allowPartialGain: true,
+							persistState: (preparedState, publication) => persistJournalState(ctx, preparedState, publication),
 							prepareProjection: (preparedState) => {
 								clearDcpNudgeAnchors(preparedState)
-								resetCompressionProgress(preparedState)
 								preparedState.progressRecovery = undefined
 								preparedProjection = applyPruning(contextMessages, preparedState, effectiveConfig)
 								return preparedProjection
@@ -804,7 +843,6 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 						// same context pass instead of the next one.
 						prunedMessages = preparedProjection ?? applyPruning(contextMessages, state, effectiveConfig)
 						const clearedAnchors = clearDcpNudgeAnchors(state)
-						resetCompressionProgress(state)
 						warnedProgress.clear()
 						state.progressRecovery = undefined
 						writeDcpDebugLog(effectiveConfig, "compress.auto", {
@@ -815,6 +853,8 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 							summarizerAttempts: autoResult.summarizerAttempts,
 							summaryTokens: autoResult.summaryTokens,
 							removedTokenEstimate: autoResult.removedTokenEstimate,
+							fullProjectionGain: autoResult.fullProjectionGain,
+							pressureRelieved: autoResult.pressureRelieved,
 							candidate: autoResult.effectiveCandidate,
 							clearedAnchors,
 							state: summarizeDcpState(state, effectiveConfig),
@@ -851,7 +891,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 								createdAt: Date.now(),
 							}
 							clearDcpNudgeAnchors(state)
-							await saveDcpState(ctx, state)
+							await persistJournalState(ctx, state)
 							const abortSupported = typeof (ctx as any).abort === "function"
 							if (abortSupported) (ctx as any).abort()
 							return finishContext("progress.blocked_handoff", prunedMessages, {
@@ -909,7 +949,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 					)
 					hasCompressionSuggestion =
 						candidate !== null || emergencyCompressionCandidate !== null || messageCandidates.length > 0
-					await saveDcpState(ctx, state)
+					await persistJournalState(ctx, state)
 					writeDcpDebugLog(effectiveConfig, "prune.emergency_current_turn", {
 						trigger: hardEmergencyReached ? "hard-context-percent" : "ignored-emergency-reminders",
 						contextPercent,
@@ -958,7 +998,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 							usage,
 							toolCallsSinceLastUser,
 						)
-						await saveDcpState(ctx, state)
+						await persistJournalState(ctx, state)
 					} else {
 						// Anchor already exists at >= priority; the reminder text is
 						// re-applied below via applyAnchoredNudges on every context
@@ -976,10 +1016,15 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 						)
 					}
 				} else {
-					// No safe existing message could be anchored (rare); keep the older
-					// synthetic reminder fallback so DCP never silently drops a nudge.
-					injectNudge(prunedMessages, nudgeText)
-					latestProviderReminder = nudgeText
+					// Do not rewrite an already-sent user message and do not create an
+					// ephemeral synthetic tail that disappears from the next provider
+					// continuation. The reminder is deferred until a fresh user tail; hard
+					// pressure is handled by the bounded emergency path above.
+					writeDcpDebugLog(effectiveConfig, "nudge.deferred_for_cache", {
+						type: nudgeType,
+						contextPercent,
+						toolCallsSinceLastUser,
+					}, ctx)
 				}
 				state.nudgeCounter = 0
 				state.lastNudgeTurn = state.currentTurn
@@ -989,7 +1034,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 
 			// Persist patience/window changes even when an existing anchor was only
 			// re-applied (that path intentionally emits telemetry without updating it).
-			await saveDcpState(ctx, state)
+			await persistJournalState(ctx, state)
 		}
 
 		const anchorsBeforeFinalization = state.nudgeAnchors.length
@@ -1011,7 +1056,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 			latestProviderReminder = state.nudgeAnchors[0]?.renderedReminder
 		}
 		if (state.nudgeAnchors.length !== anchorsBeforeFinalization || nudgeApplication.stateChanged) {
-			await saveDcpState(ctx, state)
+			await persistJournalState(ctx, state)
 		}
 
 		return finishContext("complete", prunedMessages, {
@@ -1043,7 +1088,6 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 		}
 
 		const model = (ctx as any)?.model
-		const target = captureDcpPersistenceTarget(ctx)
 		const reminderDelivered = latestProviderOpportunityAvailable &&
 			providerPayloadIncludesReminder(event.payload, latestProviderReminder)
 		const pending = providerEvidenceTracker.begin({
@@ -1051,8 +1095,6 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 			provider: typeof model?.provider === "string" ? model.provider : undefined,
 			model: typeof model?.id === "string" ? model.id : undefined,
 			contentRevision: providerPayloadRevision(event.payload),
-			statePath: target?.statePath,
-			sessionId: target?.sessionId,
 			toolIds: pendingToolIds,
 			opportunityAvailable: reminderDelivered,
 			opportunityKind: reminderDelivered ? latestProviderOpportunityKind : undefined,
@@ -1130,7 +1172,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 
 		const commit = providerEvidenceCommitQueue
 			.catch(() => {
-				// Keep later evidence commits moving after a persistence failure.
+				// Keep later evidence commits moving after a prior transaction failure.
 			})
 			.then(() => runDcpStateTransaction(state, async () => {
 				if (state.sessionEpoch !== completion.sessionEpoch) {
@@ -1154,19 +1196,10 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 					}
 				}
 
-				try {
-					if (completion.statePath) {
-						await saveDcpStateToTarget({ statePath: completion.statePath, sessionId: completion.sessionId }, workingState, { beforePublish: assertCurrent })
-					}
-				} catch (error) {
-					writeDcpDebugLog(effectiveConfig, "provider_payload.tool_results_not_promoted", {
-						reason: "persistence-failed",
-						attempts: completion.attempts,
-						error: error instanceof Error ? error.message : String(error),
-						state: summarizeDcpState(state, effectiveConfig),
-					}, ctx)
-					return
-				}
+				// Provider-delivery evidence is intentionally runtime-only. After a
+				// restart absence means unknown, never "seen". Persisting it would add
+				// high-frequency journal churn without changing the durable projection.
+				assertCurrent()
 
 				if (state.sessionEpoch !== completion.sessionEpoch) {
 					writeDcpDebugLog(effectiveConfig, "provider_payload.tool_results_not_promoted", {
@@ -1191,28 +1224,5 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 			}))
 		providerEvidenceCommitQueue = commit
 		await commit
-	})
-
-	// ── 11. agent_end: persist state after each agent run ────────────────────
-	pi.on("agent_end", async (_event, ctx) => {
-		try {
-			await saveDcpState(ctx, state)
-		} catch (error) {
-			if (!(error instanceof DcpPersistenceConflictError)) throw error
-			writeDcpDebugLog(configForContext(ctx), "persistence.conflict", {
-				event: "agent_end",
-				error: error.message,
-				state: summarizeDcpState(state, configForContext(ctx)),
-			}, ctx)
-			try {
-				ctx.ui.notify(
-					"DCP state was not persisted because a stale or concurrent revision was detected. Reload the session before continuing.",
-					"warning",
-				)
-			} catch {
-				// The persistence conflict is already durable-safe and debug-logged;
-				// notification failure must not turn it back into a runtime extension error.
-			}
-		}
 	})
 }

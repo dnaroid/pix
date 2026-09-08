@@ -3,14 +3,11 @@ import { loadConfig } from "../src/dcp/config.js";
 import { registerCompressTool, type CompressToolDependencies } from "../src/dcp/compress-tool.js";
 import { applyPruning, upsertNudgeAnchor } from "../src/dcp/pruner.js";
 import { estimateMessageTokens } from "../src/dcp/pruner-metadata.js";
-import { createState, serializeState } from "../src/dcp/state.js";
+import { createState } from "../src/dcp/state.js";
 
 function fixture(options: { text?: string; protectUser?: boolean; protectTags?: boolean; dependencies?: CompressToolDependencies } = {}) {
   const config = loadConfig({ homeDir: "/__dcp_manual_progress_fixture__" });
   config.debug = false;
-  config.strategies.autoToolPruning.enabled = false;
-  config.strategies.deduplication.enabled = false;
-  config.strategies.purgeErrors.enabled = false;
   config.compress.protectUserMessages = options.protectUser ?? false;
   config.compress.protectTags = options.protectTags ?? false;
   const state = createState();
@@ -38,7 +35,11 @@ function fixture(options: { text?: string; protectUser?: boolean; protectTags?: 
   return { config, state, messages, context, visibleId, execute, telemetry };
 }
 
-const stateBytes = (state: ReturnType<typeof createState>) => JSON.stringify(serializeState(state));
+const stateBytes = (state: ReturnType<typeof createState>) => JSON.stringify(state, (_key, value) => {
+  if (value instanceof Map) return { map: [...value.entries()] };
+  if (value instanceof Set) return { set: [...value.values()] };
+  return value;
+});
 
 describe("DCP manual compression progress", () => {
   test("modern rollup replaces old summary prose while retaining protected fragments exactly once", async () => {
@@ -74,23 +75,14 @@ describe("DCP manual compression progress", () => {
     expect(summary).not.toContain("(b1)");
   });
 
-  test("legacy rollup retains old summary instead of silently losing it", async () => {
-    const f = fixture();
-    const oldSummary = "LEGACY_FACTS_MUST_SURVIVE ".repeat(40);
-    await f.execute({ topic: "Legacy", ranges: [{ startId: f.visibleId("old-user"), endId: f.visibleId("old-assistant"), summary: oldSummary }] });
-    delete f.state.compressionBlocks[0]!.protectedFragments;
-    f.messages.splice(2, 0, { id: "extra", role: "assistant", timestamp: 3, content: "Uncompressed work to summarize.\n".repeat(1000) });
-    f.context();
-    const result = await f.execute({ topic: "Safe legacy rollup", ranges: [{ startId: "b1", endId: f.visibleId("extra"), summary: "Extra work is complete." }] });
-    expect(f.state.compressionBlocks.at(-1)!.summary).toContain(oldSummary);
-    expect(result.details.netGain).toBeGreaterThan(0);
-  });
-
   test("a longer summary cannot publish state, clear reminders or erase patience", async () => {
     let writes = 0;
     const f = fixture({ text: "tiny source", dependencies: {
-      capturePersistenceTarget: () => ({ statePath: "/never-written", sessionId: "fixture" }),
-      saveStateToTarget: async () => { writes++; },
+      persistState: async (_ctx, _state, publication) => {
+        publication?.beforePublish?.();
+        writes++;
+        publication?.onPublished?.();
+      },
     } });
     f.state.consecutiveIgnoredNudges = 4;
     f.state.consecutiveIgnoredStrongNudges = 3;
@@ -165,8 +157,7 @@ describe("DCP manual compression progress", () => {
 
   test("persistence failure rolls back a positive preparation including progress state", async () => {
     const f = fixture({ dependencies: {
-      capturePersistenceTarget: () => ({ statePath: "/never-written", sessionId: "fixture" }),
-      saveStateToTarget: async () => { throw new Error("fixture persistence failure"); },
+      persistState: async () => { throw new Error("fixture persistence failure"); },
     } });
     f.state.consecutiveIgnoredNudges = 4;
     f.state.compressionProgress = { remainingTokens: 4000, projectedTokens: 10_000, contextWindow: 272_000, kind: "routine" };

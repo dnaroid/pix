@@ -2206,12 +2206,60 @@ foreach ($candidatePid in $descendants) {
 		});
 		return;
 	}
+
+	// Prefer parent-based enumeration when available. macOS sandboxed hosts can
+	// deny `ps` while still allowing pgrep(1); relying only on `ps` leaves a
+	// detached Playwright/browser process alive after a timeout. Collect the
+	// whole tree before killing anything so descendants cannot be re-parented
+	// out of reach, then terminate deepest-first. A detached child is normally a
+	// process-group leader, so also try its negative PID before the individual
+	// PID; non-group-leaders simply yield ESRCH and fall through safely.
+	const pgrepDescendants = [];
+	const pgrepPendingParents = [process.pid];
+	let pgrepAvailable = true;
+	for (let index = 0; index < pgrepPendingParents.length; index += 1) {
+		const parentPid = pgrepPendingParents[index];
+		const result = spawnSync("pgrep", ["-P", String(parentPid)], {
+			encoding: "utf8",
+			timeout: 1000,
+			maxBuffer: 256 * 1024,
+		});
+		if (result.error?.code === "ENOENT") {
+			pgrepAvailable = false;
+			break;
+		}
+		if (result.status !== 0 && result.status !== 1) {
+			pgrepAvailable = false;
+			break;
+		}
+		for (const line of (result.stdout ?? "").split("\n")) {
+			const pid = Number(line.trim());
+			if (!Number.isInteger(pid) || pid <= 0 || pgrepDescendants.includes(pid)) continue;
+			pgrepDescendants.push(pid);
+			pgrepPendingParents.push(pid);
+		}
+	}
+	if (pgrepAvailable) {
+		for (const pid of [...pgrepDescendants].reverse()) {
+			try { process.kill(-pid, "SIGKILL"); } catch { /* not a group leader or already gone */ }
+			try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
+		}
+		return;
+	}
+
 	const snapshot = spawnSync("ps", ["-axo", "pid=,ppid=,pgid="], {
 		encoding: "utf8",
 		timeout: 1000,
 		maxBuffer: 2 * 1024 * 1024,
 	});
-	if (snapshot.status !== 0 || !snapshot.stdout) return;
+	if (snapshot.status !== 0 || !snapshot.stdout) {
+		// Sandboxed macOS hosts can deny `ps` process enumeration while still
+		// allowing parent-scoped `pgrep -P`. Fall back to a bounded recursive
+		// parent walk so a detached browser process is not left behind merely
+		// because the broader process snapshot is unavailable.
+		terminateRunnerDescendantsWithPgrep(process.pid);
+		return;
+	}
 	const processes = snapshot.stdout
 		.split("\n")
 		.map((line) => line.trim().split(/\s+/).map(Number))
@@ -2237,6 +2285,39 @@ foreach ($candidatePid in $descendants) {
 	for (const { pid } of descendants) {
 		try {
 			process.kill(pid, "SIGKILL");
+		} catch { /* already gone */ }
+	}
+}
+
+function terminateRunnerDescendantsWithPgrep(rootPid) {
+	const descendants = [];
+	const seen = new Set([rootPid]);
+	const pendingParents = [rootPid];
+	for (let index = 0; index < pendingParents.length && descendants.length < 4096; index += 1) {
+		const parentPid = pendingParents[index];
+		const result = spawnSync("pgrep", ["-P", String(parentPid)], {
+			encoding: "utf8",
+			timeout: 500,
+			maxBuffer: 256 * 1024,
+		});
+		// pgrep exits 1 when there are no matching children. Any other failure is
+		// fail-closed for this fallback; callers still terminate the runner itself.
+		if (result.status !== 0 && result.status !== 1) continue;
+		for (const line of (result.stdout ?? "").split("\n")) {
+			const pid = Number.parseInt(line.trim(), 10);
+			if (!Number.isInteger(pid) || pid <= 0 || seen.has(pid)) continue;
+			seen.add(pid);
+			descendants.push(pid);
+			pendingParents.push(pid);
+		}
+	}
+
+	// Kill leaves before their parents so descendants cannot be reparented
+	// before we have sent them a signal. Detached children are killed by PID;
+	// unlike the primary `ps` path this fallback does not need their PGID.
+	for (let index = descendants.length - 1; index >= 0; index -= 1) {
+		try {
+			process.kill(descendants[index], "SIGKILL");
 		} catch { /* already gone */ }
 	}
 }

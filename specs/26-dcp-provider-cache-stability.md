@@ -2,162 +2,161 @@
 
 ## Type
 
-Change
+Change / invariant
 
 ## Goal
 
-Keep DCP message addressing, reminders, and automatic pruning compatible with
-append-only provider continuation, especially OpenAI Codex Responses. After an
-intentional history rewrite, one full request is acceptable; unchanged history
-must become a byte-stable prefix again on the following request.
+Keep DCP message addressing, reminders, persistence replay, and compression
+compatible with append-only provider continuation. An intentional exact history
+rewrite may require one rebuilt request; after it, unchanged history must again
+be a byte-stable prefix on ordinary continuations.
 
 ## Scope
 
-- Replace the moving full-history `<dcp-message-ids>` provider-tail block with
-  stable, distributed message-ID metadata on user/tool-result carriers.
-- Persist stable-message-to-`mNNN` assignments across context passes and
-  session reloads.
-- Never add DCP metadata or reminders to assistant messages, because reasoning
-  and function-call items may be provider-signed.
-- Freeze an anchored reminder's rendered text until its priority is upgraded or
-  the anchor is cleared by compression.
-- Discover new automatic tool-pruning decisions only at user-turn or
-  compression checkpoints; continue applying already-recorded decisions on
-  every context pass.
-- Preserve provider-exposure tracking for emergency pruning without mutating
-  the outgoing provider payload.
+- Stable distributed `mNNN` metadata on deterministic user/tool-result carriers.
+- Stable IDs and frozen control text across context passes and journal replay.
+- No DCP mutation of assistant messages or provider-signed reasoning/tool-call
+  items.
+- No routine retroactive pruning merely because a new user turn arrived.
+- Exact rewrite boundaries with provider evidence for destructive emergency
+  decisions.
+- Session-journal persistence without a second provider-tail metadata map.
 
 ## Non-goals
 
-- Enabling provider-side `store` mode or changing provider cache TTLs.
-- Eliminating the unavoidable cache miss caused by an actual compression,
-  decompression, or already-committed tool-output prune.
-- Changing the public `compress` tool schema or `bN` compression-block IDs.
+- Enabling provider-side `store` mode or changing cache TTL/routing.
+- Avoiding the expected cache rebuild caused by an intentional compression or
+  explicitly committed prune.
+- Proving a server-side cache hit solely from local input equality.
+- Supporting pre-journal sessions or old DCP persistence formats.
 
 ## Behavior
 
-1. Every addressable message receives one persistent `mNNN` assignment keyed
-   by its stable session identity. If no durable session ID exists, the fallback
-   includes timestamp and canonical content so distinct timestamp collisions
-   remain stable when an earlier message disappears. IDs are monotonic and are
-   not renumbered when older messages disappear.
-2. Provider-visible ID metadata is appended only to context clones of user,
-   tool-result, or bash-result carriers. A carrier contains its own ID and IDs
-   for immediately preceding assistant messages not covered by an earlier
-   carrier. Rendering the same carrier again produces identical text.
-3. Assistant messages and their content blocks retain their original text,
-   signatures, ordering, and provider item shape.
-4. `before_provider_request` records which tool results were serialized into a
-   specific local attempt envelope, but does not mark them completed and returns
-   no replacement payload solely for DCP IDs. `after_provider_response` HTTP
-   2xx is acceptance-only. Completed exposure is promoted only after an
-   unambiguously correlated successful finalized assistant `message_end`;
-   abort/error/interleaving ambiguity fails closed.
-5. A nudge anchored to an existing user message stores the complete rendered
-   reminder. Candidate counts or ID snapshots changing later do not rewrite
-   that reminder. A higher-priority nudge may replace it once. If no user
-   carrier exists, DCP appends a synthetic user reminder instead of modifying
-   an assistant message.
-6. Deduplication, old-error discovery, and policy auto-pruning run once per new
-   user-turn checkpoint and once after creation of a new compression block.
-   Known `prunedToolIds` are still rendered as placeholders on every pass.
+1. Every addressable raw message receives one monotonic `mNNN` assignment keyed
+   by stable session identity. Equal timestamps do not cause renumbering or ID
+   reuse; deterministic occurrence identity resolves otherwise identical
+   fallbacks.
+2. Provider-visible ID metadata is attached only to cloned user, tool-result, or
+   bash-result carriers. A carrier publishes its own address and any immediately
+   preceding assistant addresses that cannot safely be written into those
+   assistant items. Rendering the same committed carrier again produces the same
+   bytes.
+3. Assistant messages preserve original text, reasoning/signatures, content
+   block order, tool-call IDs, and provider item shape.
+4. `before_provider_request` records tool results actually present in the
+   outgoing payload. HTTP acceptance alone is not completion evidence. Only an
+   unambiguously correlated successful finalized assistant response can promote
+   the attempt. Provider evidence is transient and returns to unknown on
+   restart.
+5. A reminder can be introduced only on a fresh trailing user carrier. Once
+   published, both its carrier and rendered text are frozen. Later candidate
+   counts, IDs, or higher urgency do not rewrite that old item. Without a safe
+   carrier, reminder creation is deferred.
+6. Ordinary context construction replays already committed pruning but does not
+   discover new dedup/error/age deletions at each user-turn boundary. Explicit
+   sweep/compression or the bounded emergency route are intentional rewrite
+   boundaries.
+7. Durable addressing/rewrite decisions are appended as structured
+   `dcp-journal` custom entries in the session. Replaying the journal must yield
+   the same IDs, summary bytes, active exact blocks, and frozen reminder data
+   without a model call.
 
-## Contracts
+## Journal contracts relevant to cache stability
 
-- `compress` continues accepting raw `mNNN` and active `bN` IDs.
-- New sidecar writes use a versioned generation envelope with exact session
-  identity and payload hash; legacy flat sidecars remain readable through the
-  migration adapter. Stable message-ID assignments, frozen reminder text and
-  automatic-pruning checkpoints remain inside the serialized payload.
-- Debug output identifies distributed-carrier delivery rather than a moving
-  provider-payload map.
+- Only journal schema v1 created by the current implementation is supported.
+- `init` establishes a new-format session; deltas publish only newly durable
+  projection decisions. Identical no-op context passes do not append snapshots.
+- Existing `mNNN` assignments are never changed or reused.
+- New v2 blocks are exact and immutable in content. Supersession creates/activates
+  newer decisions rather than editing summary prose already sent to the provider.
+- Provider-seen evidence, request-attempt state, and pressure counters are not
+  durable cache authority.
+- A pre-journal non-empty session is not silently initialized or restored from a
+  side store.
 
 ## Invariants
 
-- Existing stable identities never change their assigned `mNNN` within a
-  session or after sidecar restore.
 - No DCP transform mutates provider-signed assistant content.
-- Re-running the context transform over unchanged raw history and unchanged DCP
-  state yields byte-equivalent provider-visible messages.
-- Automatic pruning does not introduce repeated mid-turn retroactive prefix
-  rewrites.
+- Re-running the transform over unchanged raw history plus unchanged committed
+  journal state yields byte-equivalent provider-visible messages.
+- Adding a normal new user/tool tail does not modify an earlier DCP carrier.
+- A summary rewrite changes only the exact selected provider-history region and
+  required deterministic control representation.
+- The first ordinary continuation after an intentional rewrite establishes the
+  new prefix; subsequent unchanged continuations preserve it.
+- Restart/fork of a supported journal session reuses committed summary and ID
+  bytes rather than regenerating them.
+- UI filtering is outside this contract: display cleanup cannot alter the next
+  provider request.
+
+## Emergency behavior
+
+The newest live group, current request, protected content, recent pairs, and
+tool results without completed provider evidence cannot be selected merely to
+save cache or context.
+
+When `autoCompress` is explicitly enabled and hard pressure has a safe exact
+candidate, DCP prefers a summary rewrite. Positive partial recovery may commit
+while retaining remaining recovery debt; it is not rejected solely because one
+block cannot satisfy the whole budget. If no safe summary can be committed, the
+bounded emergency body-prune floor can remove only eligible provider-seen old
+results. Both are intentional history rewrites and must return to stable-prefix
+behavior afterward.
+
+If protected/live content itself cannot fit, DCP aborts/hands off rather than
+inventing a cache-preserving unsafe deletion.
 
 ## Edge cases
 
-- Parallel tool results may each carry their own ID; the first carrier after an
-  assistant response also carries that assistant's ID.
-- Compression-summary user messages remain addressable and may also expose the
-  corresponding active `bN` marker.
-- Distinct same-timestamp messages use canonical content fingerprints. Truly
-  byte-identical fallback collisions are resolved deterministically per
-  occurrence so two current messages never share one raw ID.
-- A legacy nudge anchor without frozen text renders once, stores that rendering,
-  and then remains stable.
-- Branches whose user-turn count moves backwards reopen an automatic-pruning
-  checkpoint instead of suppressing pruning indefinitely.
+- Parallel tool results keep structural grouping and stable tool-call IDs.
+- Compression-summary messages remain addressable through active `bN` identity.
+- Same-timestamp messages remain distinct through stable branch identity.
+- A mid-turn pressure increase cannot synthesize a temporary reminder carrier
+  that disappears on the next continuation.
+- Restart does not claim old tool results are provider-seen; this may delay an
+  emergency deletion but avoids false evidence.
+- Fork replay is branch-scoped: journal operations outside the selected ancestry
+  do not leak into the forked projection.
 
 ## Related files
 
+- `external/pi-tools-suite/src/dcp/journal.ts`
+- `external/pi-tools-suite/src/dcp/index.ts`
 - `external/pi-tools-suite/src/dcp/pruner-message-ids.ts`
 - `external/pi-tools-suite/src/dcp/pruner-nudge.ts`
-- `external/pi-tools-suite/src/dcp/pruner-tools.ts`
-- `external/pi-tools-suite/src/dcp/pruner-metadata.ts`
 - `external/pi-tools-suite/src/dcp/pruner.ts`
-- `external/pi-tools-suite/src/dcp/state.ts`
-- `external/pi-tools-suite/src/dcp/index.ts`
+- `external/pi-tools-suite/src/dcp/conversation-index.ts`
+- `external/pi-tools-suite/src/dcp/compress-tool.ts`
+- `external/pi-tools-suite/src/dcp/auto-compress.ts`
+- `external/pi-tools-suite/test/dcp-journal-lifecycle.test.ts`
+- `external/pi-tools-suite/test/dcp-marathon-replay.test.ts`
 - `external/pi-tools-suite/test/compress-pruner.test.ts`
-- `external/pi-tools-suite/test/dcp-state-serialization.test.ts`
 
 ## Verification
 
-- Unit-test stable ID assignment and sidecar round-trips.
-- Convert consecutive contexts with the SDK's OpenAI Responses converter and
-  assert the second input starts with the prior input plus untouched assistant
-  response items.
-- Assert signed reasoning/tool-call assistant blocks are byte-equivalent after
-  repeated context transforms.
-- Assert same-priority nudge reapplication is frozen and an upgrade changes it
-  once.
-- Assert duplicate/auto-prune discovery waits for the next user-turn checkpoint.
-- Run `npm --prefix external/pi-tools-suite run check` and root `npm run check`.
+Deterministic tests must cover:
+
+- stable monotonic ID assignment and journal replay;
+- repeated no-op transforms and ordinary append-only continuations;
+- exact rewrite followed by at least two stable continuations;
+- installed OpenAI Responses conversion preserving the rewritten prefix;
+- byte-equivalent signed assistant reasoning/tool-call content;
+- frozen reminder carrier/text and deferral when no safe carrier exists;
+- restart/fork of a journal session without regenerating summaries;
+- hard-pressure marathon behavior and partial positive recovery;
+- cancellation/stale owner/source/config/model faults before publication.
+
+The implementation pass reached a green deterministic DCP suite and green
+repository/host test gates. A live provider cache/quality canary has **not** been
+run and is not implied by those results.
 
 ## Risks / unknowns
 
-- Any other extension that rewrites old provider payload items can still break
-  continuation independently of DCP.
-- Intentional DCP history rewrites still incur one provider-cache rebuild.
-- Emergency mid-turn compression is such an intentional rewrite. To avoid
-  touching the in-flight head, its range candidate excludes the current user
-  request and retains the newest assistant group plus the configured recent
-  complete tool pairs. A later assistant response establishes ordering only;
-  every selected tool result must have separately promoted completed-provider
-  evidence. Without request identity, ambiguous interleaving remains
-  `evidence-unknown` and is not eligible.
-- The completion witness proves the installed SDK lifecycle reached a successful
-  finalized assistant message for one locally correlated attempt. It is not a
-  universal network-delivery/retention guarantee for every provider backend.
-
-## Evidence
-
-Review hardening after `7a8042e` preserves this cache contract through exact
-source/mutation membership, recognition of SDK `textSignature`, and a single
-prepared auto-compression projection including checkpoint and nudge changes.
-Cancellation or a stale plan is checked before primary publication. The
-full-lifecycle marathon test drives request, HTTP-response and finalized
-assistant events without manually populating provider exposure; critical facts
-inside retired ranges survive repeated compression and restart. See
-[review remediation](./27-dcp-review-remediation.md) for the precise verification
-scope, live-eval limitations and deployment state.
-
-- Confirmed before this change: DCP rebuilt a full ID map and appended it to the
-  latest provider payload item on every request.
-- Confirmed by provider implementation: Codex Responses continuation requires
-  the new input to begin byte-for-byte with the prior input plus response items.
-- Confirmed by session diagnostics: exact retries hit the full cache, while the
-  next normally advanced request falls back to the static prompt-only cache.
-- Confirmed by deterministic tests: HTTP 2xx followed by abort/error does not
-  promote evidence; identical retries coalesce; ambiguous interleaving fails
-  closed; a v2 rewrite followed by two ordinary continuations preserves both
-  DCP projection and installed OpenAI Responses serialization prefixes.
-- Production cache-hit rates and provider-specific continuation quality remain a
-  live-canary concern; no live provider canary is claimed by this spec update.
+- Other extensions may independently change an old provider item.
+- Provider TTL/routing can miss the cache even for byte-identical inputs.
+- The installed SDK has no universal provider request identity, so ambiguous
+  interleaving remains fail-closed.
+- Session-manager persistence determines crash/power-loss durability of journal
+  entries; the DCP journal does not add its own fsync/WAL layer.
+- Lossy summary quality still requires task-level/live evaluation; local prefix
+  equality proves a cache invariant, not semantic quality.

@@ -61,7 +61,6 @@ const TerminalBellConfig = Type.Object(
 const DcpManualModeConfig = Type.Object(
 	{
 		enabled: Type.Optional(Type.Boolean({ description: "Enable manual DCP mode." })),
-		automaticStrategies: Type.Optional(Type.Boolean({ description: "Run dedup/purge even in manual mode." })),
 	},
 	{ description: "Manual mode configuration." },
 );
@@ -89,6 +88,16 @@ const DcpMessageModeConfig = Type.Object(
 	{ description: "Message-mode compression configuration." },
 );
 
+const DcpAutoCompressConfig = Type.Object(
+	{
+		enabled: Type.Optional(Type.Boolean({ description: "Allow bounded automatic summary creation after pressure/opportunity gates." })),
+		patience: Type.Optional(Type.Number({ description: "Completed actionable opportunities allowed before automatic compression.", minimum: 0 })),
+		summarizerModel: Type.Optional(Type.Array(Type.String(), { description: "Ordered summarizer model refs; empty uses the deterministic extractive summary." })),
+		timeoutMs: Type.Optional(Type.Number({ description: "Per-summarizer deadline in milliseconds.", minimum: 1 })),
+	},
+	{ description: "Bounded automatic compression fallback." },
+);
+
 const DcpCompressConfig = Type.Object(
 	{
 		maxContextPercent: Type.Optional(Type.Union([Type.Number(), Type.String()], { description: "Maximum context percent (0–1 or '80%') before compression triggers." })),
@@ -108,46 +117,30 @@ const DcpCompressConfig = Type.Object(
 		protectUserMessages: Type.Optional(Type.Boolean({ description: "Protect user messages from pruning." })),
 		autoCandidates: Type.Optional(DcpAutoCandidatesConfig),
 		messageMode: Type.Optional(DcpMessageModeConfig),
+		autoCompress: Type.Optional(DcpAutoCompressConfig),
 	},
 	{ description: "Compression trigger and behavior configuration." },
 );
 
-const DcpDeduplicationConfig = Type.Object(
+const DcpEmergencyCurrentTurnPruningConfig = Type.Object(
 	{
-		enabled: Type.Optional(Type.Boolean({ description: "Enable duplicate content deduplication." })),
-		protectedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool outputs protected from dedup." })),
+		enabled: Type.Optional(Type.Boolean({ description: "Enable bounded same-turn emergency planning and last-resort output pruning." })),
+		hardContextPercent: Type.Optional(Type.Number({ description: "Context fraction that activates hard emergency pressure.", minimum: 0, maximum: 1 })),
+		targetContextPercent: Type.Optional(Type.Number({ description: "Context fraction the emergency path attempts to recover toward.", minimum: 0, maximum: 1 })),
+		patience: Type.Optional(Type.Number({ description: "Completed emergency opportunities allowed before last-resort pruning.", minimum: 0 })),
+		keepRecentToolPairs: Type.Optional(Type.Number({ description: "Newest complete tool-call/result pairs never selected by emergency cleanup.", minimum: 0 })),
+		minOutputTokens: Type.Optional(Type.Number({ description: "Minimum tool-result size eligible for emergency pruning.", minimum: 0 })),
+		maxSuggestions: Type.Optional(Type.Number({ description: "Maximum emergency message candidates shown in a reminder.", minimum: 0 })),
+		protectedTools: Type.Optional(Type.Array(Type.String(), { description: "Additional tools protected from emergency pruning and manual sweep." })),
 	},
-	{ description: "Deduplication strategy configuration." },
-);
-
-const DcpPurgeErrorsConfig = Type.Object(
-	{
-		enabled: Type.Optional(Type.Boolean({ description: "Enable error input purging." })),
-		turns: Type.Optional(Type.Number({ description: "Prune error inputs after N user turns.", minimum: 1 })),
-		protectedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool outputs protected from error purge." })),
-	},
-	{ description: "Error purging strategy configuration." },
-);
-
-const DcpAutoToolPruningConfig = Type.Object(
-	{
-		enabled: Type.Optional(Type.Boolean({ description: "Enable automatic tool output pruning." })),
-		maxOutputTokens: Type.Optional(Type.Number({ description: "Maximum output tokens before truncation.", minimum: 0 })),
-		keepRecentTurns: Type.Optional(Type.Number({ description: "Recent turns to keep.", minimum: 0 })),
-		readLikeTools: Type.Optional(Type.Array(Type.String(), { description: "Tools treated as read-like (aggressively pruned)." })),
-		readLikeTurns: Type.Optional(Type.Number({ description: "Turns threshold for read-like tool pruning.", minimum: 0 })),
-		protectedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool outputs protected from auto-pruning." })),
-	},
-	{ description: "Auto tool pruning strategy configuration." },
+	{ description: "Single bounded emergency cleanup strategy." },
 );
 
 const DcpStrategiesConfig = Type.Object(
 	{
-		deduplication: Type.Optional(DcpDeduplicationConfig),
-		purgeErrors: Type.Optional(DcpPurgeErrorsConfig),
-		autoToolPruning: Type.Optional(DcpAutoToolPruningConfig),
+		emergencyCurrentTurnPruning: Type.Optional(DcpEmergencyCurrentTurnPruningConfig),
 	},
-	{ description: "DCP pruning strategies." },
+	{ description: "Bounded DCP emergency strategy." },
 );
 
 const DcpConfig = Type.Object(
@@ -165,10 +158,6 @@ const DcpConfig = Type.Object(
 		compress: Type.Optional(DcpCompressConfig),
 		strategies: Type.Optional(DcpStrategiesConfig),
 		protectedFilePatterns: Type.Optional(Type.Array(Type.String(), { description: "File path glob patterns whose content is protected from pruning." })),
-		pruneNotification: Type.Optional(Type.Union(
-			[Type.Literal("off"), Type.Literal("minimal"), Type.Literal("detailed")],
-			{ description: "Notification level when pruning occurs." },
-		)),
 	},
 	{ description: "DCP (Dynamic Context Pruning) configuration." },
 );

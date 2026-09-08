@@ -134,10 +134,6 @@ export function summarizeDcpState(state: DcpState, config?: DcpConfig): Record<s
     persistentMessageIds: state.messageIdsByStableId.size,
     nextMessageId: state.nextMessageId,
     prunedTools: state.prunedToolIds.size,
-    automaticPruneCheckpoint: {
-      turn: state.lastAutomaticPruneTurn,
-      blockId: state.lastAutomaticPruneBlockId,
-    },
     providerSeenTools: state.providerSeenToolIds.size,
     consecutiveEmergencyPasses: state.consecutiveIgnoredStrongNudges,
     consecutiveActionableOpportunities: state.consecutiveIgnoredNudges,

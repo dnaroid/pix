@@ -69,33 +69,10 @@ function projectedBlockId(msg: any): number | undefined {
   return Number.isInteger(blockId) && blockId > 0 ? blockId : undefined;
 }
 
-function findCurrentMessageId(msg: any, stableKey: string, state: DcpState): string | undefined {
-  const role = msg?.role ?? "";
-  const timestamp = msg?.timestamp;
-  if (!Number.isFinite(timestamp)) return undefined;
-
+function findCurrentMessageId(stableKey: string, state: DcpState): string | undefined {
   for (const [id, meta] of state.messageMetaSnapshot) {
     if (meta.stableId === stableKey) return id;
   }
-
-  // Backward compatibility for snapshots created before stable IDs were
-  // recorded. Never mix timestamp fallback with a modern stable-ID snapshot.
-  const isLegacySnapshot = [...state.messageMetaSnapshot.values()]
-    .every((meta) => meta.stableId === undefined);
-  if (!isLegacySnapshot) return undefined;
-
-  for (const [id, meta] of state.messageMetaSnapshot) {
-    if (
-      meta.timestamp === timestamp &&
-      meta.role === role &&
-      meta.blockId === undefined
-    ) return id;
-  }
-
-  for (const [id, ts] of state.messageIdSnapshot) {
-    if (ts === timestamp) return id;
-  }
-
   return undefined;
 }
 
@@ -113,9 +90,8 @@ function resolveAddressableBoundaryId(
 
   // Inline [dcp-id] markers are no longer injected into message content; the
   // snapshot rebuilt by injectMessageIds() is the sole addressability source.
-  // Resolve the message ID by its persistent stable identity. Timestamp/role
-  // matching is retained only for legacy snapshots without stable IDs.
-  const currentId = findCurrentMessageId(msg, stableKey, state);
+  // Resolve the message ID only by its persistent stable identity.
+  const currentId = findCurrentMessageId(stableKey, state);
   if (currentId) return { id: currentId };
 
   return null;
@@ -357,9 +333,8 @@ export function detectEmergencyCompressionCandidate(
   );
   if (!candidate) return null;
 
-  // Independent fail-closed guard for legacy/partial snapshots where the
-  // canonical group index may be unavailable. Structural ordering is never
-  // enough to authorize deletion of an unseen tool result.
+  // Independent fail-closed guard: structural ordering is never enough to
+  // authorize deletion of an unseen tool result.
   const selectedStart = candidate[0]!.messageIndex;
   const selectedEnd = candidate[candidate.length - 1]!.messageIndex;
   for (let index = selectedStart; index <= selectedEnd; index++) {

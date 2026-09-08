@@ -1,54 +1,7 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { createPiAiMock } from "./support/pi-ai-mock.js";
-import { createTypeboxMock } from "./support/typebox-mock.js";
-
-mock.module("typebox", () => createTypeboxMock());
-
-mock.module("@earendil-works/pi-ai", () => createPiAiMock());
-
-function builtinTool(name: string) {
-	return (cwd: string) => ({
-		name,
-		execute: async () => ({ content: [{ type: "text", text: `${name} ok` }], details: undefined }),
-		renderResult: (result: any, _options: any, _theme: any, _context: any) => {
-			return { render: () => [`expanded ${name}: ${result.content?.[0]?.text ?? ""} cwd=${cwd}`], invalidate() {} };
-		},
-	});
-}
-
-mock.module("@earendil-works/pi-coding-agent", () => ({
-	DEFAULT_MAX_BYTES: 1024 * 1024,
-	DEFAULT_MAX_LINES: 1000,
-	defineTool: (tool: any) => tool,
-	formatSize: (bytes: number) => `${bytes}B`,
-	getAgentDir: () => process.env.PI_CODING_AGENT_DIR ?? path.join(os.tmpdir(), "pi-tools-suite-test-agent"),
-	truncateHead: (content: string) => ({ content, truncated: false, totalLines: content.split("\n").length, outputLines: content.split("\n").length, totalBytes: Buffer.byteLength(content), outputBytes: Buffer.byteLength(content) }),
-	withFileMutationQueue: async (_key: string, fn: () => Promise<unknown>) => fn(),
-	createReadToolDefinition: builtinTool("read"),
-	createBashToolDefinition: builtinTool("bash"),
-	createEditToolDefinition: builtinTool("edit"),
-	createWriteToolDefinition: builtinTool("write"),
-	createGrepToolDefinition: builtinTool("grep"),
-	createFindToolDefinition: builtinTool("find"),
-	createLsToolDefinition: builtinTool("ls"),
-}));
-
-mock.module("@earendil-works/pi-tui", () => ({
-	Container: class Container { children: any[] = []; addChild(child: any) { this.children.push(child); } },
-	Text: class Text { constructor(public text: string, public x = 0, public y = 0) {} },
-	Box: class Box { children: any[] = []; addChild(child: any) { this.children.push(child); } },
-	Spacer: class Spacer { constructor(public width = 0, public height = 0) {} },
-	visibleWidth: (text: string) => text.replace(/<[^>]+>/g, "").length,
-	truncateToWidth: (text: string, width: number, ellipsis = "…") => {
-		const visible = text.replace(/<[^>]+>/g, "");
-		if (visible.length <= width) return text;
-		if (width <= ellipsis.length) return ellipsis.slice(0, Math.max(0, width));
-		return visible.slice(0, width - ellipsis.length) + ellipsis;
-	},
-}));
 
 class FakePi {
 	tools = new Map<string, any>();

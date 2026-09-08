@@ -73,7 +73,7 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
     // dropping the oldest past debugLog.maxBackups (default 3).
     "debug": false,
     "debugLog": { "maxBytes": 5242880, "maxBackups": 3 },
-    "manualMode": { "enabled": false, "automaticStrategies": true },
+    "manualMode": { "enabled": false },
     "strategies": {
       "emergencyCurrentTurnPruning": {
         // Disabling this turns off same-turn candidates and lossy pruning;

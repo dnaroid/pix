@@ -81,7 +81,7 @@ export function stableMessageId(msg: any, fallbackIndex = 0): string {
 /**
  * Return deterministic per-occurrence identities for a message sequence.
  * Session entry IDs and content-fingerprinted fallbacks are normally unique;
- * the suffix keeps byte-identical legacy messages from sharing one mNNN ID.
+ * the suffix keeps byte-identical fallback identities from sharing one mNNN ID.
  */
 export function stableMessageKeys(messages: any[]): string[] {
   const occurrences = new Map<string, number>();

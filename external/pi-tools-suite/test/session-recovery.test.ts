@@ -197,10 +197,90 @@ describe("session recovery tools", () => {
 		}, ctx);
 
 		expect(readResult.content[0].text).toContain("Fix ФАЙЛ alpha");
-		expect(readResult.details).toMatchObject({ sectionId: "section:u1", entryCount: 3, renderedCount: 2, omittedEntries: 1, truncated: true });
+		expect(readResult.details).toMatchObject({ sectionId: "section:u1", entryCount: 3, renderedCount: 2, hasMore: true, truncated: true, sourceAvailable: true });
+		expect(typeof readResult.details.nextCursor).toBe("string");
 
 		const missing = await execute(pi.tools.get("session_read_section"), "read-section", { section_id: "section:nope" }, ctx);
-		expect(missing.details).toMatchObject({ found: false, sectionId: "section:nope" });
+		expect(missing.details).toMatchObject({ found: false, sectionId: "section:nope", sourceAvailable: false });
+	});
+
+	test("reads an exact late entry and continues a long entry body without returning to the section head", async () => {
+		const { pi } = await setup();
+		const entries = Array.from({ length: 120 }, (_, index) => ({
+			type: "message",
+			id: index === 0 ? "u-long" : `r-${index}`,
+			parentId: index === 0 ? null : (index === 1 ? "u-long" : `r-${index - 1}`),
+			timestamp: `2026-01-01T00:00:${String(index % 60).padStart(2, "0")}.000Z`,
+			message: index === 0
+				? { role: "user", content: "one long section" }
+				: {
+					role: "toolResult",
+					toolCallId: `call-${index}`,
+					toolName: "read",
+					content: [textPart(index === 119 ? `LATE_SENTINEL:${"z".repeat(12_000)}` : `result-${index}`)],
+					isError: false,
+				},
+		}));
+		const ctx = { sessionManager: new FakeSessionManager(entries, entries) };
+
+		const direct = await execute(pi.tools.get("session_read_section"), "direct", {
+			entry_id: "r-119",
+			max_body_chars: 500,
+		}, ctx);
+		expect(direct.content[0].text).toContain("LATE_SENTINEL");
+		expect(direct.content[0].text).not.toContain("result-1");
+		expect(direct.details).toMatchObject({ entryId: "r-119", sourceAvailable: true, hasMore: true });
+
+		let cursor = direct.details.nextCursor as string | undefined;
+		let collected = direct.content[0].text;
+		for (let page = 0; cursor && page < 40; page += 1) {
+			const next = await execute(pi.tools.get("session_read_section"), `direct-${page}`, { cursor, max_body_chars: 500 }, ctx);
+			collected += next.content[0].text;
+			cursor = next.details.nextCursor as string | undefined;
+		}
+		expect(cursor).toBeUndefined();
+		expect(collected.match(/z/g)?.length).toBeGreaterThanOrEqual(12_000);
+	});
+
+	test("paginates overview and search results and hides DCP control custom entries", async () => {
+		const { pi } = await setup();
+		const entries: any[] = [];
+		let parentId: string | null = null;
+		for (let index = 0; index < 55; index += 1) {
+			const id = `u-page-${index}`;
+			entries.push({
+				type: "message",
+				id,
+				parentId,
+				timestamp: `2026-01-01T00:${String(index).padStart(2, "0")}:00.000Z`,
+				message: { role: "user", content: `PAGE_SENTINEL ${index}` },
+			});
+			parentId = id;
+		}
+		entries.splice(10, 0, {
+			type: "custom",
+			id: "dcp-control",
+			parentId: "u-page-9",
+			timestamp: "2026-01-01T00:09:30.000Z",
+			customType: "dcp-journal",
+			data: { secret: "DCP_CONTROL_SECRET" },
+		});
+		const ctx = { sessionManager: new FakeSessionManager(entries, entries) };
+
+		const overviewOne = jsonContent(await execute(pi.tools.get("session_overview"), "overview-1", { max_sections: 20 }, ctx));
+		expect(overviewOne.sections).toHaveLength(20);
+		expect(overviewOne.hasMore).toBe(true);
+		const overviewTwo = jsonContent(await execute(pi.tools.get("session_overview"), "overview-2", { max_sections: 20, cursor: overviewOne.nextCursor }, ctx));
+		expect(overviewTwo.sections[0].id).toBe("section:u-page-20");
+
+		const searchOne = jsonContent(await execute(pi.tools.get("session_search"), "search-1", { query: "PAGE_SENTINEL", limit: 20 }, ctx));
+		expect(searchOne.matches).toHaveLength(20);
+		expect(searchOne.hasMore).toBe(true);
+		const searchTwo = jsonContent(await execute(pi.tools.get("session_search"), "search-2", { query: "PAGE_SENTINEL", limit: 20, cursor: searchOne.nextCursor }, ctx));
+		expect(searchTwo.matches[0].entryId).toBe("u-page-20");
+
+		const hidden = jsonContent(await execute(pi.tools.get("session_search"), "hidden", { query: "DCP_CONTROL_SECRET" }, ctx));
+		expect(hidden.totalMatches).toBe(0);
 	});
 
 	test("recovers deterministic context, file evidence, errors, and pending calls", async () => {
@@ -244,7 +324,9 @@ describe("session recovery tools", () => {
 			max_body_chars: 100,
 		}, ctx);
 
-		expect(result.content[0].text).toContain("[truncated]");
+		expect(result.content[0].text).toContain("more available");
+		expect(result.details).toMatchObject({ hasMore: true, truncated: true, sourceAvailable: true });
+		expect(typeof result.details.nextCursor).toBe("string");
 		expect(result.content[0].text.length).toBeLessThan(1_000);
 	});
 });

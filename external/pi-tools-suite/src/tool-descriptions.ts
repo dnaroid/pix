@@ -266,10 +266,10 @@ export const SESSION_RECOVERY_TOOL_DESCRIPTIONS = {
 	readSection: {
 		name: "session_read_section",
 		label: "Session Read Section",
-		description: "Read a bounded raw-history section returned by session_overview or session_search, including messages, tool calls/results, and compaction summaries.",
-		promptSnippet: "Read one stable raw-session section by ID after session_overview or session_search.",
+		description: "Read bounded raw session history by stable section ID or exact entry ID, with opaque continuation cursors for long sections and long entries.",
+		promptSnippet: "Read one raw-session section or exact entry; continue with the returned cursor when more text is available.",
 		promptGuidelines: [
-			"Pass a section ID produced with the same active/all scope; keep entry and body limits small unless more detail is necessary.",
+			"Pass either section_id or entry_id with the same active/all scope; use next_cursor to continue instead of restarting from the section head.",
 		],
 	},
 	search: {
@@ -278,7 +278,7 @@ export const SESSION_RECOVERY_TOOL_DESCRIPTIONS = {
 		description: "Search raw session messages, summaries, tool results, and serialized tool arguments with a bounded literal substring query.",
 		promptSnippet: "Search raw session history lexically when a concrete phrase, path, symbol, tool, or error is known.",
 		promptGuidelines: [
-			"Use session_search after overview when a concrete query is known; it is lexical rather than semantic, and scope defaults to the active branch.",
+			"Use session_search when a concrete query is known; it is lexical rather than semantic, scope defaults to the active branch, and next_cursor continues large match sets.",
 		],
 	},
 	recoveryContext: {

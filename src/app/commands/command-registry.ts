@@ -289,9 +289,9 @@ export function createSlashCommands(actions: CommandRegistryActions, host: Comma
 		},
 		{
 			name: "delete",
-			description: "Delete the current (or specified) session file plus its sidecar DCP state",
+			description: "Delete the current (or specified) session file",
 			kind: "builtin",
-			keywords: ["remove", "destroy", "purge", "session", "sidecar", "dcp"],
+			keywords: ["remove", "destroy", "purge", "session", "dcp"],
 			allowArguments: true,
 			run: (argumentsText) => actions.runDeleteCommand(argumentsText),
 		},

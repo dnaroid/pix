@@ -1,332 +1,228 @@
 # 04 — dcp: dynamic context pruning (as-is spec)
 
 > Risk classes: **data / cross-cutting / provider-context mutation**. DCP is
-> headless. The raw Pi session branch remains the recovery source; DCP mutates
-> only the projected provider context and its session-private sidecar.
+> headless. Raw Pi session messages remain the recovery source; DCP changes only
+> the projected provider context and persists durable projection decisions as
+> structured `dcp-journal` custom entries in the same session JSONL.
 
 ## Purpose
 
-DCP monitors projected context pressure, removes proven redundant/eligible tool
-output from the provider projection, exposes the `compress` tool, and can
-produce bounded continuation summaries when explicitly enabled. It preserves
-provider-signed assistant objects and uses stable `mNNN`/`bN` addressing.
+DCP keeps a long-running agent inside its context budget without rewriting the
+raw conversation. It exposes stable `mNNN`/`bN` addressing and the `compress`
+tool, can apply exact continuation summaries, and has a bounded emergency path.
+Historical details are recovered through `session-recovery`, not by expanding a
+compressed block back into the provider prefix.
 
-## Current lifecycle
+Only sessions created by the journal implementation are supported. There is no
+sidecar importer, legacy state reader, dual-write mode, `decompress`, or
+`recompress` compatibility path.
 
-1. `session_start` resets the runtime epoch, cleans only proven orphan sidecars,
-   loads a validated sidecar generation, and may inherit fitting compression
-   state from `previousSessionFile`. Late loads from a replaced session epoch
-   are discarded.
-2. `tool_call`/`tool_result` maintain runtime tool records. The persisted cache
-   is compact; exact args/output are rehydrated from the raw branch after a
-   restart for records still represented in the compact cache.
-3. `context` builds the projection, maintains stable IDs, evaluates budget and
-   compression candidates, applies existing blocks/prune decisions, and manages
-   nudge/progress state.
-4. `before_provider_request` records an immutable attempt envelope containing
-   session epoch, provider/model, payload revision and the tool results actually
-   serialized in that request. It does **not** mark those results completed.
-5. `after_provider_response` records HTTP acceptance only. HTTP 2xx is not a
-   completion witness because the SDK fires this hook before the response
-   stream is consumed.
-6. A successful finalized assistant `message_end` may promote provider evidence
-   only when the pending attempt can be correlated unambiguously. Abort/error or
-   interleaving ambiguity is fail-closed and does not make tool outputs eligible.
-7. `agent_end`/`session_shutdown` persist state through the versioned sidecar.
+## Lifecycle and persistence
 
-## Canonical identity and projection
+1. A confirmed new persistent session receives one `dcp-journal` `init` custom
+   entry before DCP publishes provider-visible addressing/rewrite decisions.
+   Ephemeral sessions use the same contract in memory for their lifetime.
+2. `session_start` resets transient runtime state and replays the complete
+   journal on the active branch. A non-empty persisted session without a valid
+   journal is deliberately unsupported rather than adopted as a new DCP
+   session. Unknown versions, broken predecessor chains, or conflicting
+   operation IDs fail closed.
+3. `tool_call`/`tool_result` maintain transient tool records. Exact args/output
+   needed by current policy can be reconstructed from the raw branch. Large raw
+   tool bodies are not duplicated into the journal.
+4. `context` builds a detached provider projection, applies already committed
+   exact blocks/prune decisions, maintains stable IDs, evaluates pressure and
+   candidates, and publishes any new durable projection decision before the
+   resulting bytes may be used by the provider.
+5. `before_provider_request` records which tool results actually occur in the
+   outgoing payload. `after_provider_response` treats HTTP status as diagnostic
+   acceptance only. A successful finalized assistant `message_end` can promote
+   provider evidence when the local attempt is unambiguous. This evidence is
+   runtime-only and returns to unknown after restart.
+6. `agent_end` and `session_shutdown` do not persist a full DCP runtime snapshot.
+   Durable decisions are appended at their mutation/publication boundary.
 
-`conversation-index.ts` builds the current ordered conversation index from the
-actual projected branch. Ordering and tool-group closure use branch index, not
-timestamp sorting. Timestamps remain legacy boundary metadata only; equal
-timestamps are resolved by stable identity/current `mNNN` order.
+Plain `custom` entries are not provider messages. `dcp-journal` must never be
+stored as `custom_message` or copied into a model-facing tool result.
 
-New v2 blocks store ordered `sourceMembers` and `mutationMembers`, including
-canonical content hashes. Summary input, tool-group closure and replacement use
-that selection; timestamp drift does not drop an interior source message.
-Applying a block requires a matching contiguous membership in either the raw
-branch or its previously projected source. Missing modern identities, changed
-content or newly inserted interior messages are not repaired by guessing a
-same-timestamp neighbour. Restored pre-membership v2 blocks have an explicit
-legacy compatibility marker. New blocks cannot opt into that path implicitly.
-The SDK's `textSignature` and `thinkingSignature` both protect assistant bodies.
+## Journal contract
 
-Generated DCP provenance is carried out-of-band with non-enumerable internal
-properties. Literal `<dcp-system-reminder>`, `[dcp-block-id]`, or similar text in
-raw user content never grants synthetic/control-plane authority.
+The only supported durable format is `dcp-journal`, schema version 1. Operations
+form an append-only predecessor chain beginning with `init`; later `delta`
+records contain only changes required to reproduce the provider projection:
 
-Stable `mNNN` allocation is monotonic and persisted. Assistant content is never
-used as a DCP carrier. Distributed ID metadata is attached to client-originated
-user/tool-result/bash-result clones; repeating an unchanged transform preserves
-already-published provider items.
+- newly allocated stable-message → `mNNN` assignments and the high-water mark;
+- new exact v2 compression blocks and their active/superseded state;
+- explicitly committed pruned tool-result IDs and reasons;
+- the session-local manual-mode value when changed;
+- frozen nudge anchor data required to reproduce already published control text.
 
-## Compression blocks
+Every modern compression block has `version: 2`, an explicit replacement mode,
+ordered `sourceMembers` and `mutationMembers`, and canonical content hashes. New
+blocks are immutable except for derived active/deactivation state. Reusing an
+operation ID with identical bytes is idempotent; reusing it with different data
+is a conflict.
 
-### Version 2 writer semantics
+The journal intentionally excludes full raw history, provider payloads, complete
+tool records, provider-seen evidence, pressure counters, and periodic snapshots.
+No-op context transforms do not grow it.
 
-New blocks use `version: 2` and one of two exact replacement modes:
+Publication uses the host session append boundary. DCP validates and prepares a
+detached state, revalidates owner/source/config/model, appends the operation, and
+only then installs the committed projection in live state. The current host
+contract does not claim stronger power-loss durability than the session manager
+itself; DCP does not add a second WAL, file lock, or `fsync` persistence engine.
 
-- `range`: replace exactly the preflighted closed range with one synthetic
-  summary message. The apply path does not widen the range around tool groups.
-- `message-body`: replace only the selected tool-result/body content while
-  preserving role, call id, tool name, error status, position, and sibling
-  results. Signed assistant content is not editable by message mode.
+## Canonical identity and exact replacement
 
-Manual range preflight rejects a selection that cuts a parallel/in-flight tool
-group and reports the protocol-safe boundaries. Auto range planning closes the
-range before summarization. New v2 plans do not rely on orphan repair;
-`repairOrphanedToolPairs` remains only for legacy block compatibility.
+`conversation-index.ts` builds ordered identity from the actual current
+projection. Stable session entry identity wins over timestamps; equal timestamps
+are disambiguated by branch order and stable IDs. A modern exact operation is
+never widened by guessing a same-timestamp neighbour.
 
-Multiple operations in one `compress` invocation are staged on a working state.
-Fatal preflight/prepare/persistence failures publish none of the staged blocks.
-Retries with the same compress tool-call id are idempotent.
+`sourceMembers` describe exactly what the summarizer inspected.
+`mutationMembers` describe exactly which canonical raw messages a later replay
+is allowed to replace. They remain distinct because prior pruning or an earlier
+summary can make the two representations differ.
 
-Manual compression must prove positive **full-projection** gain before publication.
-A runtime-only immutable snapshot is tied to the exact conversation index. The
-preview applies only the new blocks, verifies that every block materializes,
-and includes replacement wrappers, protected fragments and regenerated ID carriers
-on the same estimator. Unrelated automatic pruning cannot subsidize a bad summary.
-Missing snapshots and overlapping range/message selections fail closed. Failed
-preparation or persistence leaves the live blocks, patience and recovery goal intact.
+Range compression must cover a protocol-closed assistant/tool-result group.
+Message-body compression can replace one supported tool-result body while
+preserving its role, call ID, tool name, error status, position, and siblings.
+Signed assistant content is never edited in place.
 
-Legacy blocks without `version: 2` retain their historical projection semantics
-for backward compatibility and are not silently reinterpreted as v2 blocks.
+Manual `compress` batches are staged atomically. Missing exact membership,
+overlap, stale source, owner/config/model changes, cancellation, non-positive
+full-projection gain, or failed durable publication leave the live operation
+uncommitted. A retry with the same tool-call ID and parameters is idempotent;
+changed parameters are a conflict.
 
-## Pressure, progress and autonomous policy
+## Provider-cache stability
 
-The E05 controller separates provider-native usage from the fresh repository
-projection. Effective pressure uses the larger value, so a stale low provider
-usage sample cannot hide a large paste or newly appended tool output.
+DCP treats prefix stability as a correctness constraint:
 
-Capacity is distinct from policy thresholds: output/tool reserve is removed
-first, `summaryBuffer` is bounded by remaining capacity, and hard emergency is
-not disabled by a model-specific soft threshold. Auto planning chooses the
-oldest protocol-safe prefix needed for the current recovery target; if the full
-target cannot be met it may expose the largest safe partial candidate rather
-than pretending no safe material exists.
+- assistant bytes, signatures, reasoning/tool-call ordering, and provider item
+  shape are preserved;
+- `mNNN` assignments are monotonic and never renumbered after rollup/restart;
+- ID metadata is distributed over deterministic user/tool-result carriers and
+  is not rebuilt as a moving payload-tail map;
+- a reminder is introduced only on a fresh trailing user carrier. Once
+  published, its carrier and rendered bytes are frozen; stronger later pressure
+  does not rewrite it. If there is no cache-safe carrier, reminder creation is
+  deferred rather than synthesizing a disappearing tail message;
+- a normal new user/tool append does not itself authorize retroactive
+  dedup/error/age pruning of old provider items;
+- one intentional compression/prune rewrite can rebuild the cache, but ordinary
+  continuations after it must again keep the rewritten input as a stable prefix.
 
-`patience` advances only on completed correlated main-provider opportunities in
-which the exact trusted reminder is present in the outgoing payload. Repeated
-`context` transforms, identical request retries, failed streams, deferred responses
-and payloads without that reminder do not consume patience. A response containing
-a `compress` call does consume an opportunity: a failed call is not progress.
+The installed OpenAI Responses conversion is covered by tests that compare
+successive continuation inputs after an intentional exact rewrite. Actual
+server-side cache hits still depend on provider routing/TTL and are not promised
+by DCP.
 
-Actionable routine reminders have the same bounded opportunity accounting, separate
-from the legacy emergency-only counter. After more than `autoCompress.patience`
-completed opportunities (three at the default value of two), the reminder escalates
-and the opt-in automatic fallback may prepare a safe block even below the emergency
-threshold. The routine savings goal is up to five percentage points of the window,
-bounded by the distance to `minContextPercent`. A closed, provider-seen same-turn
-prefix can be offered before escalation; the live request and recent pairs remain
-protected. Crossing into emergency pressure does not grant another patience window.
+## Pressure and autonomous policy
 
-The outstanding goal and opportunity counter survive serialization. A partial
-positive manual commit reduces the remaining goal but does not reset patience.
-Its old boundary reminder may be invalidated once as `compress-partial`, then
-refreshed against current IDs. Result/debug fields distinguish `committed` from
-`pressureRelieved`, with `projectedBeforeTokens`, `projectedAfterTokens`, `netGain`
-and `remainingRecoveryTokens`. An unchanged native usage sample from before that
-commit must not charge the recovered tokens again. New input growth and stricter
-capacity targets can increase the remaining goal.
+Effective pressure is the maximum of fresh repository projection and usable
+provider-native usage, so a stale low provider sample cannot hide newly appended
+content. Capacity reserves provider output space before applying policy
+thresholds; hard-capacity pressure is distinct from the routine soft threshold.
 
-Terminal blocked reasons include `live-head-only`,
-`protected-budget-exceeded`, `evidence-unknown`, `summarizer-unavailable`,
-`non-positive-gain`, `missing-source`, and `budget-exhausted`. If the protected
-minimum itself exceeds hard capacity and no safe shrink exists, DCP records the
-recovery state and uses the SDK headless `ctx.abort()` path rather than sending
-the same oversized request indefinitely or invoking destructive native
-compaction implicitly.
+Routine context construction only replays already committed pruning decisions.
+It does not discover new retroactive dedup/error/age deletions at each user
+turn. `/dcp sweep` is an explicit rewrite boundary.
 
-`compress.autoCompress.enabled` is **false by default**. Manual mode cannot be
-widened into autonomous summary creation. Disabling routine `autoCandidates`
-does not silently disable the separately configured emergency safety planner.
-An exhausted routine opportunity budget with auto disabled, or an unsuccessful
-automatic preparation, emits a deduplicated warning and a `dcp-nudge`
-`progress-blocked` diagnostic rather than silently enabling lossy processing.
+`compress.autoCompress.enabled` remains **false by default**. When explicitly
+enabled, an exact safe summary rewrite is preferred under hard pressure. It may
+commit positive partial recovery and retain the remaining recovery debt for a
+later block; one summary is not required to satisfy the entire accumulated
+target. This avoids falling directly from a useful partial candidate to mass
+tool-output deletion.
 
-## Provider evidence and emergency eligibility
+The emergency path protects the current user request, newest live assistant
+group, configured recent pairs, protected tools/files, and results without
+completed provider evidence. If a safe exact summary cannot be prepared and the
+hard safety floor must prune eligible old result bodies, those decisions are
+explicitly committed and replayed. If the remaining protected minimum itself
+cannot fit, DCP records a blocked state and uses the headless abort/handoff path
+instead of sending the same oversized request indefinitely.
 
-Tool-result deletion/range compression requires completed provider evidence.
-A later assistant message is structural ordering evidence only; it is not proof
-that every preceding tool result was serialized and consumed. Emergency range
-planning and emergency body pruning use the same completed-evidence set and
-fail closed on unknown/incomplete groups.
+Manual mode never enables autonomous summary creation. Failed/ambiguous provider
+completion does not count as evidence that a result was seen.
 
-The newest assistant/tool group, current user request, configured recent tool
-pairs, protected tools/files/tags, and unseen results remain outside emergency
-mutation. An intentional emergency compression or prune is a provider-history
-rewrite; ordinary continuations after that transition must again be byte-stable.
+## Summary quality and protected data
 
-## Summary source and fallback
+Auto summary preparation uses a bounded source manifest containing visible
+continuation-relevant text and non-secret tool metadata. Credential/header-like
+fields and provider signatures are excluded/redacted. Tool groups are not split
+merely to fit the summarizer input budget.
 
-Auto summary preparation builds a bounded source manifest. Tool entries include
-call id, tool name, necessary non-secret arguments/path, result linkage,
-outcome, error state and exit code when available. Credential/header-like
-fields and provider signatures are excluded/redacted.
+Configured summarizer models share a bounded deadline and fall back to the
+deterministic extractive continuity representation. A replacement with
+non-positive gain is rejected. Protected user/tag/tool fragments and bounded
+subagent artifacts are carried through a deduplicated ledger so repeated
+rollups do not recursively duplicate them.
 
-Visible text and non-secret arguments are no longer truncated to head/tail
-excerpts before chunking. The complete selected representation is capped at
-4 Mi characters; exceeding that limit refuses the plan. The source hash covers
-the complete retained representation, so changing its middle changes the hash.
-DCP carrier/control metadata is removed from non-assistant summary input so it
-does not accumulate as fictional user constraints in successive rollups.
+The archive is a safety net, not permission to write weak summaries: active
+requirements, decisions, constraints, verification failures, and unresolved
+work must remain usable in the working context.
 
-Configured summarizer models share one total deadline that includes auth,
-fallback models and completions that ignore `AbortSignal`. Oversized sources are
-chunked only on complete tool-group boundaries and merged with explicit source
-coverage; a single group that cannot fit is refused rather than silently split.
+## Recovery instead of decompression
 
-Fallback order is model summary → bounded extractive continuation record →
-refusal when the replacement cannot meet the positive/full-budget gain gate.
-The extractive record keeps explicit user constraints, decisions/checkpoints,
-errors/verification failures, next steps and tool metadata; large successful raw
-logs are not copied wholesale. New blocks store source hash/coverage,
-representation mode and a deduplicated protected-fragment ledger so repeated
-rollups do not recursively embed old summaries.
-This ledger rule applies to both manual and automatic modern rollups. An explicit
-`(bN)` placeholder still requests the full referenced summary (once); it is not
-mandatory for every covered block. Unknown modern references are rejected. Legacy
-blocks without the ledger retain their loss-avoidance path and remain subject to
-the manual positive-gain check.
+Raw session history remains unchanged by DCP. `session-recovery` can navigate it
+with bounded overview/search pages, read a known raw `entry_id` directly, and
+continue long entry bodies using opaque cursors. DCP control custom entries are
+excluded from archive output.
 
-Regression coverage for these boundaries is in `dcp-manual-progress.test.ts` and
-`dcp-progress-opportunities.test.ts`, including 132-response routine replay,
-single-user-turn recovery, unsuccessful compress calls, protected-fragment and
-carrier overhead, rollback, partial progress, and unchanged provider usage.
+Recovery returns historical material as a **new tool result**. It never toggles
+an old compression block, reinserts raw messages into their former provider
+positions, or re-runs mutation tools. If the original source was truncated or
+removed by another subsystem, DCP does not claim those unavailable bytes can be
+recovered.
 
-Recognized explicit checkpoints are not limited to six head/tail examples.
-The extractive fallback refuses when its continuity representation exceeds
-8192 estimated tokens. Routine read metadata may be sampled; this is not a
-claim that every possible semantic fact survives lossy summarization.
-When the minimal prefix cannot provide the required net gain, the runtime may
-try the largest prefix allowed by the same retention/evidence policy. At most
-two attempts share one deadline. Repeated identical rejected plans are cached;
-the configured protection and evidence rules are not relaxed for a retry.
+## Display filtering
 
-## Protected data and recovery
-
-Protected user/tag/tool fragments are copied deterministically into the block
-ledger. Subagent `result.md` is optional recovery material, not the primary
-source. Artifact reads are asynchronous, bounded, rooted at the session
-`ctx.cwd`, resolved through `realpath`, restricted to regular files, and reject
-symlinks escaping the session cwd. An oversized protected artifact blocks the
-operation instead of being silently truncated.
-
-`/dcp decompress` for a modern v2 block requires both exact raw source boundary
-identities still present in the active branch. If host compaction or user
-history deletion removed them, the command reports unavailable source and
-leaves the block active; DCP does not guess boundaries or re-run mutating tools.
-Legacy blocks retain legacy decompression compatibility.
-
-## Tool-output pruning policy
-
-Exact dedup requires the same input fingerprint **and** the same output identity
-(SHA-256 text identity plus success/error semantics). Re-running the same read
-after a file/environment change therefore is not an exact duplicate.
-
-Autonomous generic output pruning is restricted to known/configured read-like
-tools. Mutating aliases are normalized case-insensitively and protected,
-including `write`, `edit`, `apply_patch`, `patch`, `bash`, `shell`,
-`powershell`, `exec`, and `execute`; unknown tools are not assumed safe for
-autonomous deletion.
+The UI removes recognized DCP control blocks only from the display copy.
+Provider/session bytes are untouched. Literal marker examples inside fenced code
+or block quotes remain visible. An incomplete/ambiguous control block fails open
+instead of hiding the remainder of the assistant answer.
 
 ## Configuration
 
-DCP config is read only from `dcp` in
-`~/.config/pi/pi-tools-suite.jsonc`; legacy standalone/project DCP config is
-ignored. Important defaults are:
+DCP reads its supported configuration from `dcp` in the canonical
+`pi-tools-suite.jsonc` configuration. Important defaults include:
 
-- `enabled: true`, `manualMode.enabled: false`,
-  `manualMode.automaticStrategies: true`;
-- `compress.minContextPercent: 0.40`, `maxContextPercent: 0.65`,
-  `summaryBuffer: true`;
-- `compress.autoCandidates.enabled: true`;
-- `compress.messageMode.enabled: true`;
-- `compress.autoCompress: { enabled: false, patience: 2,
-  summarizerModel: [], timeoutMs: 20000 }`;
-- `strategies.emergencyCurrentTurnPruning.enabled: true`, hard/target defaults
-  remain defined in `config.ts`;
-- per-model limits/overrides support exact keys and `*`/`?` patterns.
+- `enabled: true`, manual mode off;
+- `compress.minContextPercent: 0.40`, `maxContextPercent: 0.65`;
+- routine candidate/message suggestions enabled;
+- `compress.autoCompress.enabled: false`, patience 2, no configured summarizer
+  model by default;
+- bounded emergency-current-turn protection enabled with its limits in
+  `config.ts`;
+- exact/wildcard model overrides where defined by the current schema.
 
-No new user-facing E05/E06 knobs were added by the reliability implementation;
-budget margins, source-manifest caps and artifact caps are internal safety
-limits.
+There is no persistence-backend selector, sidecar path, legacy state format, or
+undo configuration.
 
-## Persisted state
+## Current limitations / release state
 
-The sidecar path remains
-`<sessionDir>/dcp-state/<sanitizedSessionId>.json`, but new writes are a
-versioned envelope:
-
-```text
-{ kind, schemaVersion, sessionId, generation, revision, payloadHash, payload }
-```
-
-The payload is validated before restore: bounded sizes, compression-block ids,
-boundaries, references and acyclic block graph. Legacy flat
-`SerializedDcpState` files are accepted through a migration adapter.
-
-Writes serialize immutable bytes before queueing, use private `0600` temp files,
-file/directory sync where supported, atomic rename, and a per-sidecar
-cross-process exclusive lock. A concurrent writer receives an explicit conflict
-instead of silent last-writer-wins. The previous valid generation is retained
-as `.prev`; corrupt primaries are quarantined and recovery tries `.prev`.
-Each in-memory owner tracks its observed generation and payload hash. Saving
-compares that expected revision with the current file under the lock; a writer
-with an old snapshot conflicts even after another process has released its
-lock. Restoring one payload twice creates independent optimistic owners.
-Unrecoverable corrupt state creates a durable `.recovery-required` marker, so
-subsequent empty overwrites remain blocked across restart. Ordinary filesystem
-permission/IO failures are not automatically classified as corrupt JSON.
-
-Manual compression, automatic compression, provider-evidence commits and
-mutating `/dcp` commands share a per-state transaction queue. Preparation uses
-detached state. Cancellation and session/source/config/model guards run before
-publication, including the primary rename boundary. A confirmed rename followed
-by a failing notification/directory sync is reconciled against the published
-generation instead of being reported as an ordinary uncommitted failure.
-An owner change after publication is reported as committed without copying old
-memory into the replacement session. Auto projection/checkpoints/nudge clearing
-are prepared before the same durable publication rather than a second save.
-
-Cleanup deletes only proven orphan primary sidecars after a complete session
-ownership scan. A malformed/transient session header makes cleanup fail closed.
-A live paused session is retained regardless of sidecar age.
-
-Compact tool records still omit large output/full args. On context rebuild,
-records retained in the compact cache can rehydrate exact args/output from the
-raw session branch; trimmed unknown IDs are not reconstructed as evidence.
-Lifetime tool-call count remains monotonic across serialize/restore cycles.
-
-## Cache stability invariants
-
-- Provider-signed assistant bytes are unchanged by DCP.
-- One intentional rewrite may rebuild provider cache; the next ordinary
-  continuations must preserve the rewritten prefix.
-- The installed OpenAI Responses converter is covered by a regression that
-  checks two successive continuations after a v2 rewrite.
-- Frozen nudge carriers do not churn because candidate IDs/counts changed.
-- Debug-disabled state snapshots return before scanning the state.
-
-## Current limitations / release hold
-
-- `autoCompress.enabled` remains false by default. Deterministic correctness,
-  replay, seeded generative and local performance gates are not a substitute
-  for production continuation-quality evaluation.
-- No live model/provider canary was executed for this implementation pass.
-- Cross-process locking is fail-closed; a stale lock left by a killed writer
-  requires operational cleanup rather than unsafe lock stealing.
-- Provider completion evidence is only as strong as the installed SDK lifecycle
-  and unambiguous local correlation. With no request id, ambiguous interleaving
-  is deliberately `evidence-unknown`.
-- Native host compaction that removes modern raw source boundaries makes exact
-  decompression unavailable; the block stays active rather than guessing.
+- Old/pre-journal sessions are unsupported by design; create a new session to
+  use this DCP format.
+- Provider exposure is runtime evidence. After restart an older result is
+  treated conservatively as unseen until a new completed request proves it.
+- Native compaction or external deletion can make raw archive material
+  unavailable; journal replay never guesses replacement members.
+- Host session persistence does not promise power-loss durability beyond the
+  underlying session manager.
+- `autoCompress.enabled` remains opt-in.
+- No live provider quality/cache canary is claimed by this implementation pass.
 
 ## Verification
 
-Deterministic coverage includes focused DCP suites, a 1000-tool-group one-user
-replay with 10 rollups + restart + fork, seeded independent-reference
-conversation-index properties, real SDK Responses conversion, persistence fault
-fixtures and an in-repo performance benchmark (`scripts/dcp-benchmark.ts`). See
-`specs/27-dcp-reliability-evidence.md` for the measured gate snapshot and
-remaining rollout work.
+Deterministic coverage includes journal validation/replay, new-session
+restart/fork without sidecars, exact membership and stale-owner faults, signed
+assistant/provider-prefix invariants, direct paged recovery, UI marker examples,
+and long one-user-turn marathons. The current implementation gate also exercises
+the installed OpenAI Responses converter and repeated rollups while preserving
+continuation-critical facts.
+
+Live provider cache hit-rate/quality remains a separate canary gate and must not
+be inferred from local serializer-prefix equality alone.

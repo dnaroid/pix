@@ -31,6 +31,7 @@ export async function createBudgetedAutoCompressionBlock(
     ids: stableMessageKeys(options.messages),
     config: options.config,
     budget: options.requiredGainTokens ?? 0,
+    allowPartialGain: options.allowPartialGain === true,
     largest: largestSafeCandidate,
   })).digest("hex");
   const rejected = rejectedSources.get(options.state);

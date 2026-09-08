@@ -145,10 +145,6 @@
             "enabled": {
               "type": "boolean",
               "description": "Enable manual DCP mode."
-            },
-            "automaticStrategies": {
-              "type": "boolean",
-              "description": "Run dedup/purge even in manual mode."
             }
           },
           "description": "Manual mode configuration."
@@ -358,6 +354,33 @@
                 }
               },
               "description": "Message-mode compression configuration."
+            },
+            "autoCompress": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "description": "Allow bounded automatic summary creation after pressure/opportunity gates."
+                },
+                "patience": {
+                  "type": "number",
+                  "description": "Completed actionable opportunities allowed before automatic compression.",
+                  "minimum": 0
+                },
+                "summarizerModel": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Ordered summarizer model refs; empty uses the deterministic extractive summary."
+                },
+                "timeoutMs": {
+                  "type": "number",
+                  "description": "Per-summarizer deadline in milliseconds.",
+                  "minimum": 1
+                }
+              },
+              "description": "Bounded automatic compression fallback."
             }
           },
           "description": "Compression trigger and behavior configuration."
@@ -365,72 +388,43 @@
         "strategies": {
           "type": "object",
           "properties": {
-            "deduplication": {
+            "emergencyCurrentTurnPruning": {
               "type": "object",
               "properties": {
                 "enabled": {
                   "type": "boolean",
-                  "description": "Enable duplicate content deduplication."
+                  "description": "Enable bounded same-turn emergency planning and last-resort output pruning."
                 },
-                "protectedTools": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  },
-                  "description": "Tool outputs protected from dedup."
-                }
-              },
-              "description": "Deduplication strategy configuration."
-            },
-            "purgeErrors": {
-              "type": "object",
-              "properties": {
-                "enabled": {
-                  "type": "boolean",
-                  "description": "Enable error input purging."
-                },
-                "turns": {
+                "hardContextPercent": {
                   "type": "number",
-                  "description": "Prune error inputs after N user turns.",
-                  "minimum": 1
+                  "description": "Context fraction that activates hard emergency pressure.",
+                  "minimum": 0,
+                  "maximum": 1
                 },
-                "protectedTools": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  },
-                  "description": "Tool outputs protected from error purge."
-                }
-              },
-              "description": "Error purging strategy configuration."
-            },
-            "autoToolPruning": {
-              "type": "object",
-              "properties": {
-                "enabled": {
-                  "type": "boolean",
-                  "description": "Enable automatic tool output pruning."
-                },
-                "maxOutputTokens": {
+                "targetContextPercent": {
                   "type": "number",
-                  "description": "Maximum output tokens before truncation.",
+                  "description": "Context fraction the emergency path attempts to recover toward.",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "patience": {
+                  "type": "number",
+                  "description": "Completed emergency opportunities allowed before last-resort pruning.",
                   "minimum": 0
                 },
-                "keepRecentTurns": {
+                "keepRecentToolPairs": {
                   "type": "number",
-                  "description": "Recent turns to keep.",
+                  "description": "Newest complete tool-call/result pairs never selected by emergency cleanup.",
                   "minimum": 0
                 },
-                "readLikeTools": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  },
-                  "description": "Tools treated as read-like (aggressively pruned)."
-                },
-                "readLikeTurns": {
+                "minOutputTokens": {
                   "type": "number",
-                  "description": "Turns threshold for read-like tool pruning.",
+                  "description": "Minimum tool-result size eligible for emergency pruning.",
+                  "minimum": 0
+                },
+                "maxSuggestions": {
+                  "type": "number",
+                  "description": "Maximum emergency message candidates shown in a reminder.",
                   "minimum": 0
                 },
                 "protectedTools": {
@@ -438,13 +432,13 @@
                   "items": {
                     "type": "string"
                   },
-                  "description": "Tool outputs protected from auto-pruning."
+                  "description": "Additional tools protected from emergency pruning and manual sweep."
                 }
               },
-              "description": "Auto tool pruning strategy configuration."
+              "description": "Single bounded emergency cleanup strategy."
             }
           },
-          "description": "DCP pruning strategies."
+          "description": "Bounded DCP emergency strategy."
         },
         "protectedFilePatterns": {
           "type": "array",
@@ -452,23 +446,6 @@
             "type": "string"
           },
           "description": "File path glob patterns whose content is protected from pruning."
-        },
-        "pruneNotification": {
-          "anyOf": [
-            {
-              "type": "string",
-              "const": "off"
-            },
-            {
-              "type": "string",
-              "const": "minimal"
-            },
-            {
-              "type": "string",
-              "const": "detailed"
-            }
-          ],
-          "description": "Notification level when pruning occurs."
         }
       },
       "description": "DCP (Dynamic Context Pruning) configuration."

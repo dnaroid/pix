@@ -26,10 +26,6 @@ import { canonicalMessageHash } from "../src/dcp/conversation-index.js";
 function fixture() {
   const config = loadConfig({ homeDir: "/__dcp_projection_no_config__" });
   config.debug = false;
-  config.strategies.deduplication.enabled = false;
-  config.strategies.purgeErrors.enabled = false;
-  // Default auto tool pruning: large aged read-like outputs become
-  // placeholders in the provider projection while raw history is untouched.
   config.compress.autoCompress = { enabled: true, patience: 0, summarizerModel: [], timeoutMs: 1000 };
   config.compress.autoCandidates.minMessages = 2;
   config.compress.autoCandidates.minTokens = 100;
@@ -81,10 +77,14 @@ describe("DCP auto-compression projection regressions", () => {
     seedToolRecords(state);
     const raw = rawConversation();
 
-    // Pass 1: the projection replaces the aged read output with a placeholder.
+    // Pass 1: simulate a previously committed explicit rewrite of the read
+    // output. Routine context construction no longer discovers retroactive
+    // pruning merely because the result aged.
+    state.prunedToolIds.add("c1");
+    state.prunedToolReasons.set("c1", "manual-sweep");
     const projected = applyPruning(raw, state, config);
     const prunedResult = projected.find((message: any) => message.toolCallId === "c1");
-    expect(JSON.stringify(prunedResult?.content)).toContain("Large tool output removed");
+    expect(JSON.stringify(prunedResult?.content)).toContain("Output removed by /dcp sweep");
     const projectedPrunedHash = canonicalMessageHash(prunedResult);
     const rawHash = canonicalMessageHash(raw[2]);
     expect(projectedPrunedHash).not.toBe(rawHash);
@@ -139,36 +139,6 @@ describe("DCP auto-compression projection regressions", () => {
       expect(later!.startId).not.toBe(state.messageIdsByStableId.get(id));
       expect(later!.endId).not.toBe(state.messageIdsByStableId.get(id));
     }
-  });
-
-  test("retires a pre-fix block with projected mutation hashes so auto-compression can recover", async () => {
-    const { state, config } = fixture();
-    seedToolRecords(state);
-    const raw = rawConversation();
-    const projected = applyPruning(raw, state, config);
-    const prunedResult = projected.find((message: any) => message.toolCallId === "c1");
-    const projectedPrunedHash = canonicalMessageHash(prunedResult);
-    const candidate = detectCompressionCandidate(projected, state, config, 0.9)!;
-    const result = await createAutoCompressionBlock({
-      state, config, messages: projected, candidate, topic: "pre-fix block",
-    });
-    const staleBlock = state.compressionBlocks.find((block) => block.id === result.blockId)!;
-
-    // Recreate the persisted defect from older versions.
-    staleBlock.mutationMembers!.find((member) => member.stableId === "id:r1")!.hash = projectedPrunedHash;
-
-    const replay = applyPruning(raw, state, config);
-    expect(staleBlock.active).toBe(false);
-    expect(staleBlock.deactivatedReason).toBe("exact-membership-mismatch");
-    expect(replay.some((message: any) => message._dcpBlockId === staleBlock.id)).toBe(false);
-
-    const replacementCandidate = detectCompressionCandidate(replay, state, config, 0.9);
-    expect(replacementCandidate).not.toBeNull();
-    expect(replacementCandidate!.includedBlockIds).toEqual([]);
-    const recovered = await createAutoCompressionBlock({
-      state, config, messages: replay, candidate: replacementCandidate!, topic: "recovered block",
-    });
-    expect(recovered).toMatchObject({ committed: true });
   });
 
   test("summarizer deadline still leaves time to commit the programmatic fallback", async () => {

@@ -1,13 +1,21 @@
 import { describe, expect, test } from "bun:test"
 import type { DcpConfig } from "../src/dcp/config.js"
 import { planDcpShadow } from "../src/dcp/shadow-plan.js"
-import { createInputFingerprint, createState, serializeState } from "../src/dcp/state.js"
+import { createInputFingerprint, createState } from "../src/dcp/state.js"
+
+function stateBytes(state: ReturnType<typeof createState>): string {
+  return JSON.stringify(state, (_key, value) => {
+    if (value instanceof Map) return { map: [...value.entries()] }
+    if (value instanceof Set) return { set: [...value.values()] }
+    return value
+  })
+}
 
 function config(): DcpConfig {
   return {
     enabled: true,
     debug: false,
-    manualMode: { enabled: false, automaticStrategies: true },
+    manualMode: { enabled: false },
     compress: {
       minContextPercent: 0.4,
       maxContextPercent: 0.65,
@@ -25,13 +33,9 @@ function config(): DcpConfig {
       autoCompress: { enabled: false, patience: 2, summarizerModel: [], timeoutMs: 20_000 },
     },
     strategies: {
-      deduplication: { enabled: false, protectedTools: [] },
-      purgeErrors: { enabled: false, turns: 4, protectedTools: [] },
-      autoToolPruning: { enabled: false, maxOutputTokens: 1200, keepRecentTurns: 1, readLikeTools: ["read"], readLikeTurns: 3, protectedTools: [] },
       emergencyCurrentTurnPruning: { enabled: true, hardContextPercent: 0.82, targetContextPercent: 0.7, patience: 2, keepRecentToolPairs: 1, minOutputTokens: 100, maxSuggestions: 8, protectedTools: [] },
     },
     protectedFilePatterns: [],
-    pruneNotification: "off",
     modelOverrides: {},
   }
 }
@@ -57,7 +61,7 @@ describe("DCP shadow planner", () => {
       messages.push({ role: "assistant", content: [{ type: "toolCall", id, name: "read", input: { path: `/repo/${index}.txt` } }], timestamp: 2 + index * 2 })
       messages.push({ role: "toolResult", toolCallId: id, toolName: "read", content: [{ type: "text", text: `shadow output ${index} ${"x".repeat(2500)}` }], timestamp: 3 + index * 2 })
     }
-    const before = JSON.stringify(serializeState(state))
+    const before = stateBytes(state)
     const beforeSnapshots = {
       messageIds: [...state.messageIdSnapshot],
       messageMeta: [...state.messageMetaSnapshot],
@@ -75,7 +79,7 @@ describe("DCP shadow planner", () => {
     expect(result.budget.projectionOrigin).toBe("repo-over-provider")
     expect(result.budget.pressured).toBe(true)
     expect(result.routineCandidate ?? result.emergencyCandidate).not.toBe(null)
-    expect(JSON.stringify(serializeState(state))).toBe(before)
+    expect(stateBytes(state)).toBe(before)
     expect([...state.messageIdSnapshot]).toEqual(beforeSnapshots.messageIds)
     expect([...state.messageMetaSnapshot]).toEqual(beforeSnapshots.messageMeta)
     expect(JSON.stringify(state.conversationIndexSnapshot)).toBe(beforeSnapshots.conversationIndex)

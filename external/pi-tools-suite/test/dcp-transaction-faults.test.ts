@@ -1,22 +1,17 @@
 import { describe, expect, test } from "bun:test";
-import { spawn } from "node:child_process";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../src/dcp/config.js";
-import { createState, resetState, restoreState } from "../src/dcp/state.js";
+import { createState } from "../src/dcp/state.js";
 import { applyPruning } from "../src/dcp/pruner.js";
 import { createAutoCompressionBlock } from "../src/dcp/auto-compress.js";
 import { registerCompressTool } from "../src/dcp/compress-tool.js";
 import { registerCommands } from "../src/dcp/commands.js";
-import { loadDcpState, saveDcpState, saveDcpStateToTarget, resetDcpPersistenceDedup } from "../src/dcp/state-persistence.js";
 
 function fixture() {
   const config = loadConfig({ homeDir: "/__dcp_fault_fixture__" });
   config.debug = false;
-  config.strategies.deduplication.enabled = false;
-  config.strategies.autoToolPruning.enabled = false;
-  config.strategies.purgeErrors.enabled = false;
   config.compress.autoCompress = { enabled: true, patience: 0, summarizerModel: [], timeoutMs: 1000 };
   const state = createState();
   const raw: any[] = [
@@ -34,146 +29,6 @@ function context(dir: string, id = "session"): any {
 }
 
 describe("DCP transaction fault boundaries", () => {
-  test("a completed second-process writer is not overwritten by a stale first owner", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "dcp-multiprocess-cas-"));
-    try {
-      const ctx = context(dir);
-      const a = createState();
-      await saveDcpState(ctx, a);
-      restoreState(a, await loadDcpState(ctx));
-      const persistenceUrl = new URL("../src/dcp/state-persistence.ts", import.meta.url).href;
-      const stateUrl = new URL("../src/dcp/state.ts", import.meta.url).href;
-      const script = `
-        const {createState,restoreState} = await import(${JSON.stringify(stateUrl)});
-        const {loadDcpState,saveDcpState} = await import(${JSON.stringify(persistenceUrl)});
-        const ctx={sessionManager:{getSessionDir:()=>${JSON.stringify(dir)},getSessionId:()=>"session"}};
-        const b=createState(); restoreState(b,await loadDcpState(ctx));
-        b.totalPruneCount=42; await saveDcpState(ctx,b);
-      `;
-      const child = spawn(process.execPath, ["-e", script], { stdio: ["ignore", "ignore", "pipe"] });
-      let stderr = "";
-      child.stderr.on("data", (data) => { stderr += String(data); });
-      const exit = await new Promise<number | null>((resolve, reject) => { child.once("error", reject); child.once("close", resolve); });
-      expect({ exit, stderr }).toEqual({ exit: 0, stderr: "" });
-      a.nudgeCounter = 9;
-      await expect(saveDcpState(ctx, a)).rejects.toThrow(/stale.*revision/i);
-      const disk = JSON.parse(await readFile(join(dir, "dcp-state/session.json"), "utf8"));
-      expect(disk.generation).toBe(2);
-      expect(disk.payload.totalPruneCount).toBe(42);
-    } finally { resetDcpPersistenceDedup(); await rm(dir, { recursive: true, force: true }); }
-  });
-
-  test("a durable fence rejects a stale second process after primary and .prev disappear", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "dcp-multiprocess-missing-sidecar-"));
-    try {
-      const ctx = context(dir);
-      const currentOwner = createState();
-      currentOwner.totalPruneCount = 1;
-      await saveDcpState(ctx, currentOwner);
-      const persistenceUrl = new URL("../src/dcp/state-persistence.ts", import.meta.url).href;
-      const stateUrl = new URL("../src/dcp/state.ts", import.meta.url).href;
-      const readyPath = join(dir, "stale-owner-ready");
-      const proceedPath = join(dir, "stale-owner-proceed");
-      const script = `
-        const {readFile,writeFile}=await import("node:fs/promises");
-        const {createState,restoreState}=await import(${JSON.stringify(stateUrl)});
-        const {loadDcpState,saveDcpState}=await import(${JSON.stringify(persistenceUrl)});
-        const ctx={sessionManager:{getSessionDir:()=>${JSON.stringify(dir)},getSessionId:()=>"session"}};
-        const stale=createState(); restoreState(stale,await loadDcpState(ctx));
-        await writeFile(${JSON.stringify(readyPath)},"ready");
-        for (;;) {
-          try { await readFile(${JSON.stringify(proceedPath)}); break; }
-          catch { await new Promise((resolve)=>setTimeout(resolve,5)); }
-        }
-        stale.totalPruneCount=99;
-        try {
-          await saveDcpState(ctx,stale);
-          console.error("stale writer unexpectedly succeeded");
-          process.exitCode=2;
-        } catch (error) {
-          const message=error instanceof Error ? error.message : String(error);
-          if (!/expected generation 1, found 2/i.test(message)) {
-            console.error(message);
-            process.exitCode=3;
-          }
-        }
-      `;
-      const child = spawn(process.execPath, ["-e", script], { stdio: ["ignore", "ignore", "pipe"] });
-      let stderr = "";
-      child.stderr.on("data", (data) => { stderr += String(data); });
-
-      let childReady = false;
-      for (let attempt = 0; attempt < 200; attempt++) {
-        try {
-          await readFile(readyPath, "utf8");
-          childReady = true;
-          break;
-        } catch {
-          await new Promise((resolve) => setTimeout(resolve, 5));
-        }
-      }
-      expect(childReady).toBe(true);
-
-      currentOwner.totalPruneCount = 42;
-      await saveDcpState(ctx, currentOwner);
-      const statePath = join(dir, "dcp-state/session.json");
-      expect(JSON.parse(await readFile(statePath, "utf8")).generation).toBe(2);
-      await rm(statePath, { force: true });
-      await rm(`${statePath}.prev`, { force: true });
-      expect(JSON.parse(await readFile(`${statePath}.fence`, "utf8")).generation).toBe(2);
-
-      await writeFile(proceedPath, "go", "utf8");
-      const exit = await new Promise<number | null>((resolve, reject) => {
-        child.once("error", reject);
-        child.once("close", resolve);
-      });
-      expect({ exit, stderr }).toEqual({ exit: 0, stderr: "" });
-      await expect(readFile(statePath, "utf8")).rejects.toThrow();
-
-      currentOwner.nudgeCounter = 9;
-      await saveDcpState(ctx, currentOwner);
-      const recovered = JSON.parse(await readFile(statePath, "utf8"));
-      expect(recovered.generation).toBe(3);
-      expect(recovered.payload.totalPruneCount).toBe(42);
-      expect(recovered.payload.nudgeCounter).toBe(9);
-    } finally { resetDcpPersistenceDedup(); await rm(dir, { recursive: true, force: true }); }
-  });
-
-  test("publication cancellation leaves the primary generation unchanged", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "dcp-publication-cancel-"));
-    try {
-      const state = createState();
-      const ctx = context(dir);
-      await saveDcpState(ctx, state);
-      const path = join(dir, "dcp-state/session.json");
-      const before = await readFile(path, "utf8");
-      state.nudgeCounter++;
-      let checkpoints = 0;
-      await expect(saveDcpStateToTarget({ statePath: path, sessionId: "session" }, state, {
-        beforePublish: () => { if (++checkpoints === 4) throw new Error("cancel at publication"); },
-      })).rejects.toThrow("cancel at publication");
-      expect(await readFile(path, "utf8")).toBe(before);
-      expect(checkpoints).toBe(4);
-    } finally { resetDcpPersistenceDedup(); await rm(dir, { recursive: true, force: true }); }
-  });
-
-  test("an exception after rename is reconciled as a committed generation", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "dcp-post-publication-"));
-    try {
-      const state = createState();
-      state.nudgeCounter = 7;
-      const path = join(dir, "dcp-state/session.json");
-      await saveDcpStateToTarget({ statePath: path, sessionId: "session" }, state, {
-        onPublished: () => { throw new Error("post-rename diagnostic failure"); },
-      });
-      const disk = JSON.parse(await readFile(path, "utf8"));
-      expect(disk.payload.nudgeCounter).toBe(7);
-      expect(disk.generation).toBe(1);
-      await saveDcpState(context(dir), state);
-      expect(JSON.parse(await readFile(path, "utf8")).generation).toBe(1);
-    } finally { resetDcpPersistenceDedup(); await rm(dir, { recursive: true, force: true }); }
-  });
-
   test("a changed source during the model await cannot reach persistence", async () => {
     const data = fixture();
     data.config.compress.autoCompress.summarizerModel = ["fixture/summary"];
@@ -216,15 +71,18 @@ describe("DCP transaction fault boundaries", () => {
     try {
       const { state, config } = fixture();
       let command: any;
-      registerCommands({ registerCommand(_name: string, value: any) { command = value; } } as any, state, config);
+      registerCommands(
+        { registerCommand(_name: string, value: any) { command = value; } } as any,
+        state,
+        config,
+        { persistState: async () => { throw new Error("journal writer failed"); } },
+      );
       const notifications: string[] = [];
       const ctx = context(dir);
       ctx.ui.notify = (text: string) => { notifications.push(text); };
-      await mkdir(join(dir, "dcp-state"));
-      await writeFile(join(dir, "dcp-state/session.json.lock"), "fixture lock");
-      await expect(command.handler("manual on", ctx)).rejects.toThrow(/writer/i);
+      await expect(command.handler("manual on", ctx)).rejects.toThrow(/journal writer/i);
       expect(state.manualMode).toBe(false);
       expect(notifications).toEqual([]);
-    } finally { resetDcpPersistenceDedup(); await rm(dir, { recursive: true, force: true }); }
+    } finally { await rm(dir, { recursive: true, force: true }); }
   });
 });

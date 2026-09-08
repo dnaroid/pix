@@ -3,10 +3,9 @@
 // ---------------------------------------------------------------------------
 
 import { Type } from "typebox"
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent"
 import type { CompressionMember, DcpState } from "./state.js"
 import { modelKeysFromContext, resolveModelConfig, type DcpConfig } from "./config.js"
-import { captureDcpPersistenceTarget, saveDcpStateToTarget } from "./state-persistence.js"
 import { captureDcpTransactionGuard, cloneDcpTransactionState, runDcpStateTransaction } from "./state-transaction.js"
 import { createHash } from "node:crypto"
 import { clearDcpNudgeAnchors } from "./pruner.js"
@@ -219,8 +218,12 @@ function commitCompressionWorkingState(state: DcpState, workingState: DcpState):
 // ---------------------------------------------------------------------------
 
 export interface CompressToolDependencies {
-  capturePersistenceTarget?: typeof captureDcpPersistenceTarget
-  saveStateToTarget?: typeof saveDcpStateToTarget
+  persistState?: (
+    ctx: ExtensionContext,
+    state: DcpState,
+    publication?: { beforePublish?: () => void; onPublished?: () => void },
+  ) => Promise<void> | void
+  isSessionSupported?: () => boolean
 }
 
 export function registerCompressTool(
@@ -229,8 +232,15 @@ export function registerCompressTool(
   config: DcpConfig,
   dependencies: CompressToolDependencies = {},
 ): void {
-  const capturePersistence = dependencies.capturePersistenceTarget ?? captureDcpPersistenceTarget
-  const persistToTarget = dependencies.saveStateToTarget ?? saveDcpStateToTarget
+  const persistState = dependencies.persistState ?? (async (
+    _ctx: ExtensionContext,
+    _state: DcpState,
+    publication?: { beforePublish?: () => void; onPublished?: () => void },
+  ) => {
+    publication?.beforePublish?.()
+    publication?.onPublished?.()
+  })
+  const isSessionSupported = dependencies.isSessionSupported ?? (() => true)
   pi.registerTool({
     name: "compress",
     label: COMPRESS_TOOL_DESCRIPTION.label,
@@ -276,12 +286,14 @@ export function registerCompressTool(
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       _signal?.throwIfAborted()
+      if (!isSessionSupported()) {
+        throw new Error("DCP is unavailable in this session. Start a new session to use the current DCP journal format.")
+      }
       const assertCurrent = captureDcpTransactionGuard(state, config, _signal, ctx)
       const requestHash = createHash("sha256").update(JSON.stringify(params)).digest("hex")
       return runDcpStateTransaction(state, async () => {
       assertCurrent()
       const operationEpoch = state.sessionEpoch
-      const persistenceTarget = capturePersistence(ctx)
       const effectiveConfig = resolveModelConfig(config, modelKeysFromContext(ctx))
       if (!effectiveConfig.enabled) {
         throw new Error("DCP is disabled for the active model")
@@ -661,7 +673,7 @@ export function registerCompressTool(
         }
         assertCurrent()
         let published = false
-        if (persistenceTarget) await persistToTarget(persistenceTarget, workingState, {
+        await persistState(ctx, workingState, {
           beforePublish: assertCurrent,
           onPublished: () => { published = true },
         })
