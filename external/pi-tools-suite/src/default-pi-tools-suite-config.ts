@@ -167,7 +167,7 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
       "autoCompress": {
         "enabled": false,
         "patience": 2,
-        "summarizerModel": ["zai/glm-5.3", "zai/glm-5-turbo"],
+        "summarizerModel": ["zai/glm-5-turbo", "openai-codex/gpt-5.6-luna"],
         "timeoutMs": 20000
       }
     }

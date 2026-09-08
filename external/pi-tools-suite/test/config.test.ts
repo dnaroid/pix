@@ -159,6 +159,7 @@ describe("pi-tools-suite config", () => {
 		expect(content).toContain('"todoThinkingOverrides"');
 		expect(content).toContain('"zai/glm-5.3": "max"');
 		expect(content).toContain('"lookupModel": "zai/glm-5.3-flash"');
+		expect(content).toContain('"summarizerModel": ["zai/glm-5-turbo", "openai-codex/gpt-5.6-luna"]');
 		expect(content).toContain('"credential-firewall": false');
 		expect(content).toContain('"truncation-metadata-normalizer": false');
 		expect(content).toContain('"secretFirewall"');
