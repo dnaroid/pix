@@ -7,6 +7,7 @@ import type {
 	ContextGatewayBudgets,
 	ContextGatewayMode,
 	ContextGatewayResolvedConfig,
+	ContextGatewayToolClass,
 } from "./types.js";
 
 export const DEFAULT_CONTEXT_GATEWAY_BUDGETS: Readonly<ContextGatewayBudgets> = Object.freeze({
@@ -17,8 +18,16 @@ export const DEFAULT_CONTEXT_GATEWAY_BUDGETS: Readonly<ContextGatewayBudgets> = 
 	maxSearchMatches: 12,
 });
 
-export const CONTEXT_GATEWAY_ENFORCE_UNAVAILABLE =
-	"Context Gateway enforce is unavailable in P01; mode unchanged until capture/store/result-stage integration is implemented.";
+export function contextGatewayBudgetForClass(
+	toolClass: ContextGatewayToolClass,
+	budgets: ContextGatewayBudgets,
+): number {
+	if (toolClass === "code-read") return budgets.maxExactReadBytes;
+	if (["repo-search", "repo-ast", "repo-structure", "ast-grep"].includes(toolClass)) {
+		return budgets.maxSearchBytes;
+	}
+	return budgets.maxResultBytes;
+}
 
 const MODES = new Set<ContextGatewayMode>(["off", "observe", "enforce"]);
 const MAX_BYTE_BUDGET = 64 * 1024 * 1024;

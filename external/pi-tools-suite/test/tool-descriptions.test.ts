@@ -135,10 +135,11 @@ describe("tool descriptions", () => {
 			...(COMPRESS_TOOL_DESCRIPTION.promptGuidelines ?? []),
 		].join("\n");
 
-		expect(promptText).toContain("implementation, verification");
-		expect(promptText).toContain("Low context usage by itself does not require compression");
-		expect(promptText).toContain("context-pressure housekeeping");
-		expect(promptText).toContain("large stale shell/read/repo/web outputs");
+		expect(promptText).toContain("closed stale context");
+		expect(promptText).toContain("pressure/reminders justify it");
+		expect(promptText).toContain("low context alone is not a trigger");
+		expect(promptText).toContain("large tool/log output");
+		expect(promptText).toContain("keep active or still-needed raw context");
 		expect(COMPRESS_TOOL_DESCRIPTION.description).toBe(COMPRESS_RANGE_DESCRIPTION);
 	});
 

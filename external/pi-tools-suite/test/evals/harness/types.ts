@@ -1,10 +1,14 @@
-import type { ContextGatewayTelemetrySnapshot } from "../../../src/context-gateway/types.js";
+import type {
+	ContextGatewayBudgets,
+	ContextGatewayTelemetrySnapshot,
+} from "../../../src/context-gateway/types.js";
 
 export type EvalCategory = "tool-selection" | "coding-quality" | "orchestration" | "negative";
 
 export type EvalContextGatewayTelemetry = {
 	mode: "observe";
 	maxResultBytes: number;
+	budgets: ContextGatewayBudgets;
 	snapshot: ContextGatewayTelemetrySnapshot;
 };
 

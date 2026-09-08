@@ -1,8 +1,11 @@
 import { createHash } from "node:crypto";
+import { classifyShellCommand } from "../shell-command-policy.js";
 
 import { accountContextGatewayParts } from "./accounting.js";
+import { contextGatewayBudgetForClass } from "./config.js";
 import { parseTestBuildOutput, planProspectiveTestOutputDelivery } from "./test-output-parser.js";
 import type {
+	ContextGatewayBudgets,
 	ContextGatewayClassTelemetry,
 	ContextGatewayNativePolicyReason,
 	ContextGatewayNativePolicyTelemetry,
@@ -40,6 +43,7 @@ const NATIVE_POLICY_REASONS = new Set<ContextGatewayNativePolicyReason>([
 type CallBinding = {
 	toolClass: ContextGatewayToolClass;
 	inputFingerprint?: string;
+	readSourceFingerprint?: string;
 	shellCommandScope?: "simple" | "compound" | "unknown";
 };
 
@@ -60,12 +64,15 @@ function emptyCounters(): ContextGatewayClassTelemetry {
 		results: 0,
 		errors: 0,
 		contentBytes: 0,
+		deliveredContentBytes: 0,
 		textBytes: 0,
 		imageBytes: 0,
 		detailsBytes: 0,
 		upstreamTruncatedResults: 0,
 		overBudgetResults: 0,
 		potentialBytesOverBudget: 0,
+		enforcedResults: 0,
+		actualBytesSaved: 0,
 	};
 }
 
@@ -92,13 +99,46 @@ function inputFingerprint(toolName: string, input: unknown): string {
 	return createHash("sha256").update(`${toolName}\u0000${encoded}`).digest("hex");
 }
 
-function shellCommandScope(input: unknown): "simple" | "compound" | "unknown" {
-	if (!input || typeof input !== "object" || Array.isArray(input)) return "unknown";
-	const command = (input as Record<string, unknown>).command;
-	if (typeof command !== "string" || command.trim().length === 0) return "unknown";
-	// Conservative only: false positives merely keep passthrough. This does not
-	// parse, rewrite, approve, or execute the shell command.
-	return /[\r\n;|`]|&&|\$\(/.test(command) ? "compound" : "simple";
+function normalizedReadPath(value: unknown): string | undefined {
+	if (typeof value !== "string") return undefined;
+	const raw = value.trim().replace(/\\/g, "/").replace(/\/{2,}/g, "/");
+	if (!raw) return undefined;
+	const prefix = raw.startsWith("/") ? "/" : /^[A-Za-z]:\//.test(raw) ? raw.slice(0, 3).toLowerCase() : "";
+	const body = prefix === "/" ? raw.slice(1) : prefix ? raw.slice(3) : raw;
+	const stack: string[] = [];
+	for (const part of body.split("/")) {
+		if (!part || part === ".") continue;
+		if (part === "..") {
+			if (stack.length > 0 && stack.at(-1) !== "..") stack.pop();
+			else if (!prefix) stack.push(part);
+			continue;
+		}
+		stack.push(part);
+	}
+	return `${prefix}${stack.join("/")}` || prefix || ".";
+}
+
+function normalizedReadRangeValue(value: unknown): number | undefined {
+	if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) return value;
+	if (typeof value === "string" && /^\d+$/.test(value.trim())) {
+		const parsed = Number(value);
+		if (Number.isSafeInteger(parsed)) return parsed;
+	}
+	return undefined;
+}
+
+export function contextGatewayReadIdentity(input: unknown): { exact?: string; source?: string } {
+	if (!input || typeof input !== "object" || Array.isArray(input)) return {};
+	const record = input as Record<string, unknown>;
+	const path = normalizedReadPath(record.path ?? record.file ?? record.filePath);
+	if (!path) return {};
+	const source = inputFingerprint("read-source", { path });
+	const exact = inputFingerprint("read-exact", {
+		path,
+		offset: normalizedReadRangeValue(record.offset ?? record.start ?? record.line),
+		limit: normalizedReadRangeValue(record.limit ?? record.lines ?? record.count),
+	});
+	return { source, exact };
 }
 
 function byteLengthJson(value: unknown): number {
@@ -209,19 +249,31 @@ export function classifyContextGatewayTool(toolName: string): ContextGatewayTool
 
 export function observeToolResult(
 	event: ToolResultLike,
-	maxResultBytes: number,
-	options: { toolClass?: ContextGatewayToolClass; shellCommandScope?: "simple" | "compound" | "unknown" } = {},
+	budget: number | ContextGatewayBudgets,
+	options: {
+		toolClass?: ContextGatewayToolClass;
+		shellCommandScope?: "simple" | "compound" | "unknown";
+		maxInlineBytes?: number;
+		delivery?: { representation: "passthrough" | "test-build-compact"; contentBytes: number; textBytes: number };
+	} = {},
 ): ContextGatewayObservation {
 	const toolName = typeof event.toolName === "string" ? event.toolName : "unknown";
 	const sizes = contentSizes(event.content);
 	const detailsBytes = byteLengthJson(event.details);
-	const potentialBytesOverBudget = Math.max(0, sizes.contentBytes - maxResultBytes);
 	const toolClass = options.toolClass ?? classifyContextGatewayTool(toolName);
+	const budgetBytes = typeof budget === "number" ? budget : contextGatewayBudgetForClass(toolClass, budget);
+	const potentialBytesOverBudget = Math.max(0, sizes.contentBytes - budgetBytes);
 	const completeness = isTruncated(event.details) ? "upstream-truncated" : "unknown";
+	const delivery = options.delivery ?? {
+		representation: "passthrough" as const,
+		contentBytes: sizes.contentBytes,
+		textBytes: sizes.textBytes,
+	};
 	const observation: ContextGatewayObservation = {
 		version: 1,
 		toolClass,
 		outcome: event.isError === true ? "error" : "success",
+		budgetBytes,
 		source: {
 			kind: "tool-result-boundary",
 			completeness,
@@ -231,13 +283,10 @@ export function observeToolResult(
 			detailsBytes,
 		},
 		view: { kind: "text-content", textBytes: sizes.textBytes },
-		delivery: {
-			representation: "passthrough",
-			contentBytes: sizes.contentBytes,
-			textBytes: sizes.textBytes,
-		},
-		overBudget: sizes.contentBytes > maxResultBytes,
+		delivery,
+		overBudget: sizes.contentBytes > budgetBytes,
 		potentialBytesOverBudget,
+		actualBytesSaved: Math.max(0, sizes.contentBytes - delivery.contentBytes),
 	};
 	if (toolClass === "shell") {
 		const parsed = parseTestBuildOutput({
@@ -246,7 +295,11 @@ export function observeToolResult(
 			upstreamTruncated: completeness === "upstream-truncated",
 		});
 		const commandScope = options.shellCommandScope ?? "unknown";
-		const prospective = planProspectiveTestOutputDelivery(parsed, maxResultBytes, { commandScope });
+		const prospective = planProspectiveTestOutputDelivery(
+			parsed,
+			options.maxInlineBytes ?? budgetBytes,
+			{ commandScope },
+		);
 		observation.testOutput = {
 			parserVersion: 1,
 			classification: parsed.classification,
@@ -268,8 +321,10 @@ export class ContextGatewayTelemetry {
 	private byClass: Partial<Record<ContextGatewayToolClass, ContextGatewayClassTelemetry>> = {};
 	private bindings = new Map<string, CallBinding>();
 	private seenInputFingerprints = new Set<string>();
+	private seenReadSourceFingerprints = new Set<string>();
 	private unboundResults = 0;
 	private repeatCandidateCount = 0;
+	private sameSourceDifferentRangeCount = 0;
 	private retrievalCalls = 0;
 	private nativePolicy: ContextGatewayNativePolicyTelemetry = {
 		results: 0,
@@ -286,27 +341,39 @@ export class ContextGatewayTelemetry {
 		if (normalizedToolName === "artifact_read" || normalizedToolName === "artifact_search") {
 			this.retrievalCalls += 1;
 		}
-		const fingerprint = normalizedToolName === "read"
-			? inputFingerprint(event.toolName, event.input)
-			: undefined;
+		const readFingerprint = normalizedToolName === "read" ? contextGatewayReadIdentity(event.input) : {};
+		const fingerprint = readFingerprint.exact;
 		if (fingerprint) {
 			if (this.seenInputFingerprints.has(fingerprint)) this.repeatCandidateCount += 1;
-			else this.seenInputFingerprints.add(fingerprint);
+			else {
+				if (readFingerprint.source && this.seenReadSourceFingerprints.has(readFingerprint.source)) {
+					this.sameSourceDifferentRangeCount += 1;
+				}
+				this.seenInputFingerprints.add(fingerprint);
+			}
 		}
+		if (readFingerprint.source) this.seenReadSourceFingerprints.add(readFingerprint.source);
+		const toolClass = classifyContextGatewayTool(event.toolName);
 		this.bindings.set(event.toolCallId, {
-			toolClass: classifyContextGatewayTool(event.toolName),
+			toolClass,
 			inputFingerprint: fingerprint,
-			...(classifyContextGatewayTool(event.toolName) === "shell"
-				? { shellCommandScope: shellCommandScope(event.input) }
+			readSourceFingerprint: readFingerprint.source,
+			...(toolClass === "shell"
+				? { shellCommandScope: classifyShellCommand(event.input).scope }
 				: {}),
 		});
 	}
 
-	recordToolResult(event: ToolResultLike, maxResultBytes: number): ContextGatewayObservation {
+	recordToolResult(
+		event: ToolResultLike,
+		budget: number | ContextGatewayBudgets,
+		options: { delivery?: { representation: "passthrough" | "test-build-compact"; contentBytes: number; textBytes: number }; maxInlineBytes?: number } = {},
+	): ContextGatewayObservation {
 		const binding = typeof event.toolCallId === "string" ? this.bindings.get(event.toolCallId) : undefined;
-		const observation = observeToolResult(event, maxResultBytes, {
+		const observation = observeToolResult(event, budget, {
 			...(binding ? { toolClass: binding.toolClass } : {}),
 			...(binding?.shellCommandScope ? { shellCommandScope: binding.shellCommandScope } : {}),
+			...options,
 		});
 		if (typeof event.toolCallId !== "string" || !binding) {
 			this.unboundResults += 1;
@@ -357,8 +424,8 @@ export class ContextGatewayTelemetry {
 	}
 
 	/** Backward-compatible convenience for observation-only callers without a tool_call event. */
-	record(event: ToolResultLike, maxResultBytes: number): ContextGatewayObservation {
-		const observation = observeToolResult(event, maxResultBytes);
+	record(event: ToolResultLike, budget: number | ContextGatewayBudgets): ContextGatewayObservation {
+		const observation = observeToolResult(event, budget);
 		this.aggregateObservation(event, observation);
 		return observation;
 	}
@@ -368,8 +435,10 @@ export class ContextGatewayTelemetry {
 		this.byClass = {};
 		this.bindings.clear();
 		this.seenInputFingerprints.clear();
+		this.seenReadSourceFingerprints.clear();
 		this.unboundResults = 0;
 		this.repeatCandidateCount = 0;
+		this.sameSourceDifferentRangeCount = 0;
 		this.retrievalCalls = 0;
 		this.nativePolicy = { results: 0, refusals: 0, fullOverrides: 0, byReason: {} };
 		this.testOutput = emptyTestOutputTelemetry();
@@ -383,6 +452,7 @@ export class ContextGatewayTelemetry {
 			pendingCalls: this.bindings.size,
 			unboundResults: this.unboundResults,
 			repeatCandidateCount: this.repeatCandidateCount,
+			sameSourceDifferentRangeCount: this.sameSourceDifferentRangeCount,
 			retrievalCalls: this.retrievalCalls,
 			nativePolicy: {
 				...this.nativePolicy,
@@ -404,12 +474,15 @@ export class ContextGatewayTelemetry {
 		target.results += 1;
 		if (observation.outcome === "error") target.errors += 1;
 		target.contentBytes += observation.source.contentBytes;
+		target.deliveredContentBytes += observation.delivery.contentBytes;
 		target.textBytes += observation.source.textBytes;
 		target.imageBytes += observation.source.imageBytes;
 		target.detailsBytes += observation.source.detailsBytes;
 		if (observation.source.completeness === "upstream-truncated") target.upstreamTruncatedResults += 1;
 		if (observation.overBudget) target.overBudgetResults += 1;
 		target.potentialBytesOverBudget += observation.potentialBytesOverBudget;
+		if (observation.delivery.representation !== "passthrough") target.enforcedResults += 1;
+		target.actualBytesSaved += observation.actualBytesSaved;
 	}
 }
 

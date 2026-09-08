@@ -33,6 +33,44 @@ import {
 import { previewManualCompressionProjection } from "./compression-preview.js"
 import { settleCompressionProgress } from "./compression-progress.js"
 
+export const COMPRESS_TOOL_PARAMETERS = Type.Object({
+  topic: Type.String({
+    description:
+      "Short label (3-5 words) for display - e.g., 'Auth System Exploration'",
+  }),
+  ranges: Type.Optional(Type.Array(
+    Type.Object({
+      startId: Type.String({
+        description:
+          "First ID (mNNN/bN); never start inside a tool group—include its calling assistant.",
+      }),
+      endId: Type.String({
+        description:
+          "Last ID (mNNN/bN); include all results of the final tool group, including parallel calls.",
+      }),
+      summary: Type.String({
+        description:
+          "Continuation-focused technical summary; avoid raw JSON/code/diffs unless a short literal is required",
+      }),
+    }),
+    { description: "One or more ranges to compress" },
+  )),
+  messages: Type.Optional(Type.Array(
+    Type.Object({
+      messageId: Type.String({
+        description: "Raw message ID to compress individually (e.g. m001)",
+      }),
+      topic: Type.Optional(Type.String({
+        description: "Short label for this one-message summary; defaults to top-level topic",
+      })),
+      summary: Type.String({
+        description: "Continuation-focused technical summary replacing this raw message; avoid raw JSON/code/diffs unless required",
+      }),
+    }),
+    { description: "Individual raw messages to compress surgically" },
+  )),
+})
+
 type MessageSkipKind =
   | "duplicate"
   | "unknown"
@@ -246,43 +284,7 @@ export function registerCompressTool(
     label: COMPRESS_TOOL_DESCRIPTION.label,
     description: COMPRESS_TOOL_DESCRIPTION.description,
     promptSnippet: COMPRESS_TOOL_DESCRIPTION.promptSnippet ?? "Compress ranges of conversation into summaries to manage context",
-    parameters: Type.Object({
-      topic: Type.String({
-        description:
-          "Short label (3-5 words) for display - e.g., 'Auth System Exploration'",
-      }),
-      ranges: Type.Optional(Type.Array(
-        Type.Object({
-          startId: Type.String({
-            description:
-              "First ID (mNNN/bN); never start inside a tool group—include its calling assistant.",
-          }),
-          endId: Type.String({
-            description:
-              "Last ID (mNNN/bN); include all results of the final tool group, including parallel calls.",
-          }),
-          summary: Type.String({
-            description:
-              "Continuation-focused technical summary; avoid raw JSON/code/diffs unless a short literal is required",
-          }),
-        }),
-        { description: "One or more ranges to compress" },
-      )),
-      messages: Type.Optional(Type.Array(
-        Type.Object({
-          messageId: Type.String({
-            description: "Raw message ID to compress individually (e.g. m001)",
-          }),
-          topic: Type.Optional(Type.String({
-            description: "Short label for this one-message summary; defaults to top-level topic",
-          })),
-          summary: Type.String({
-            description: "Continuation-focused technical summary replacing this raw message; avoid raw JSON/code/diffs unless required",
-          }),
-        }),
-        { description: "Individual raw messages to compress surgically" },
-      )),
-    }),
+    parameters: COMPRESS_TOOL_PARAMETERS,
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       _signal?.throwIfAborted()

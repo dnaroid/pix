@@ -83,7 +83,7 @@ function patternMatchesValue(pattern: string, value: string): boolean {
   return globToRegExp(normalizedPattern).test(normalizedValue);
 }
 
-function isProtectedByFilePattern(record: ToolRecord | undefined, config: DcpConfig): boolean {
+export function isToolRecordProtectedByFilePattern(record: ToolRecord | undefined, config: DcpConfig): boolean {
   if (!record || config.protectedFilePatterns.length === 0) return false;
   const values = collectStringValues(record.inputArgs);
   return values.some((value) =>
@@ -91,15 +91,18 @@ function isProtectedByFilePattern(record: ToolRecord | undefined, config: DcpCon
   );
 }
 
-export function isToolRecordProtected(
+export function isToolRecordPruningProtected(
   record: ToolRecord,
   config: DcpConfig,
   extraProtectedTools: string[] = [],
 ): boolean {
   const protectedTools = buildProtectedTools(config, extraProtectedTools);
   if (protectedTools.has(normalizeToolName(record.toolName))) return true;
-  return isProtectedByFilePattern(record, config);
+  return isToolRecordProtectedByFilePattern(record, config);
 }
+
+/** Backward-compatible name for callers that mean pruning protection. */
+export const isToolRecordProtected = isToolRecordPruningProtected;
 
 export function markToolPruned(
   state: DcpState,

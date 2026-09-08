@@ -113,9 +113,9 @@ function persistentMessageId(stableKey: string, state: DcpState): string {
 }
 
 function carrierSelfLabel(role: string): string {
-  if (role === "toolResult") return "this tool result";
-  if (role === "bashExecution") return "this bash result";
-  return "this user message";
+  if (role === "toolResult") return "t";
+  if (role === "bashExecution") return "x";
+  return "u";
 }
 
 function buildCarrierControlText(
@@ -125,15 +125,11 @@ function buildCarrierControlText(
   blockId: number | undefined,
 ): string {
   const assignments = [
-    ...precedingAssistantIds.map((id) => `${id}=preceding assistant message`),
+    ...precedingAssistantIds.map((id) => `${id}=a`),
     `${ownId}=${carrierSelfLabel(ownRole)}`,
   ];
-  return [
-    "<dcp-message-ids>",
-    `Stable DCP IDs (use with compress; do not quote/output): ${assignments.join("; ")}`,
-    ...(blockId === undefined ? [] : [`Active compressed block alias: b${blockId}`]),
-    "</dcp-message-ids>",
-  ].join("\n");
+  if (blockId !== undefined) assignments.push(`b${blockId}=b`);
+  return `<dcp-message-ids>${assignments.join(";")}</dcp-message-ids>`;
 }
 
 function appendControlToCarrier(message: any, controlText: string): void {

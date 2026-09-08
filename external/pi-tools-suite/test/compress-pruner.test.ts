@@ -1622,8 +1622,8 @@ describe("DCP pruning effectiveness", () => {
 
     expect(JSON.stringify(visible)).not.toContain("[dcp-id]");
     expect(state.messageIdSnapshot.has("m001")).toBe(true);
-    expect(JSON.stringify(visible)).toContain("Stable DCP IDs");
-    expect(JSON.stringify(visible)).toContain("m001=this user message");
+    expect(JSON.stringify(visible)).toContain("<dcp-message-ids>");
+    expect(JSON.stringify(visible)).toContain("m001=u");
 
     let registeredTool: any;
     registerCompressTool({ registerTool: (tool: any) => { registeredTool = tool } } as any, state, cfg);
@@ -1732,7 +1732,7 @@ describe("DCP pruning effectiveness", () => {
     expect(parameterContract).toContain("calling assistant");
     expect(parameterContract).toContain("all results of the final tool group");
     expect(parameterContract).toContain("parallel calls");
-    expect(registeredTool.description).toContain("For `ranges`, never split a tool group");
+    expect(registeredTool.description).toMatch(/For\s+`ranges`, never split a tool group/);
     expect(parameterContract.length).toBeLessThanOrEqual(1400);
   });
 
@@ -1911,7 +1911,7 @@ describe("DCP pruning effectiveness", () => {
     expect(candidates[0]?.priority).toBe("high");
     expect(candidates[1]?.priority).toBe("medium");
     expect(JSON.stringify(pruned)).not.toContain("[dcp-id]");
-    expect(JSON.stringify(pruned)).toContain("m002=preceding assistant message");
+    expect(JSON.stringify(pruned)).toContain("m002=a");
     expect(state.messageMetaSnapshot.get("m002")?.priority).toBe("high");
   });
 
@@ -3048,11 +3048,11 @@ describe("DCP pruning effectiveness", () => {
     ) as { messages: any[] } | undefined;
 
     const messages = result?.messages ?? [];
-    expect(contentText(messages[0])).toContain("m001=this user message");
+    expect(contentText(messages[0])).toContain("m001=u");
     expect(contentText(messages[1])).toBe("visible assistant content");
     expect(contentText(messages[1])).not.toContain("<dcp-message-ids>");
-    expect(contentText(messages[2])).toContain("m002=preceding assistant message");
-    expect(contentText(messages[2])).toContain("m003=this user message");
+    expect(contentText(messages[2])).toContain("m002=a");
+    expect(contentText(messages[2])).toContain("m003=u");
   });
 
   test("DCP provider hook does not move message-ID metadata to the payload tail", async () => {
@@ -3169,7 +3169,7 @@ describe("DCP pruning effectiveness", () => {
 
     expect([...state.messageIdSnapshot.keys()]).toEqual(["m002", "m003", "m004"]);
     expect(contentText(second[1])).toBe(firstSecondCarrier);
-    expect(contentText(second[2])).toContain("m004=this user message");
+    expect(contentText(second[2])).toContain("m004=u");
 
     const collisions = [textMessage("user", "a", 9), textMessage("user", "b", 9)];
     const collisionKeys = stableMessageKeys(collisions);
@@ -4707,7 +4707,7 @@ describe("DCP pruning effectiveness", () => {
     expect(rendered).toMatch(/ACTION REQUIRED: Context usage is high\.|CRITICAL WARNING: MAX CONTEXT LIMIT REACHED/);
     expect(rendered).toContain("Recommended range candidate: m001..m006");
     expect(JSON.stringify(normalMessages)).not.toContain("[dcp-id]");
-    expect(JSON.stringify(messages)).toContain("Stable DCP IDs");
+    expect(JSON.stringify(messages)).toContain("<dcp-message-ids>");
     expect(contentText(messages.find((message) => message.role === "assistant"))).not.toContain("<dcp-message-ids>");
   });
 
@@ -4747,7 +4747,7 @@ describe("DCP pruning effectiveness", () => {
     expect(rendered).toContain("after");
     expect(rendered).not.toContain("secret ids");
     expect(rendered.match(/<dcp-message-ids>/g)).toHaveLength(1);
-    expect(rendered).toContain("Stable DCP IDs");
+    expect(rendered).toContain("<dcp-message-ids>");
   });
 
   test("DCP context transform hides current DCP diagnostic custom messages from the model", async () => {

@@ -1,5 +1,5 @@
 export type StorelessCapabilityStatus = "supported" | "limited" | "unsupported";
-export type StorelessCapabilityStrategy = "native-passthrough" | "metadata-only" | "pure-parser-candidate" | "none";
+export type StorelessCapabilityStrategy = "native-passthrough" | "metadata-only" | "pure-parser-candidate" | "pure-parser-compact" | "none";
 
 export interface StorelessCapabilityEntry {
 	surface:
@@ -27,9 +27,9 @@ export const STORELESS_CAPABILITIES: readonly StorelessCapabilityEntry[] = Objec
 	{
 		surface: "test-build",
 		status: "limited",
-		strategy: "pure-parser-candidate",
+		strategy: "pure-parser-compact",
 		lifetime: "current-result",
-		reason: "Bun/TAP/bounded TypeScript parsing is observe-only; production delivery remains passthrough without a recovery/lifetime contract.",
+		reason: "Enforce compacts only recognised complete simple Bun/TAP/bounded TypeScript output; partial, compound, truncated, or unknown results remain passthrough.",
 	},
 	{
 		surface: "mutation-lsp",

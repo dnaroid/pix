@@ -1,15 +1,18 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { classifyShellCommand, type ShellCommandClassification } from "../shell-command-policy.js";
 
 import {
-	CONTEXT_GATEWAY_ENFORCE_UNAVAILABLE,
+	contextGatewayBudgetForClass,
 	loadContextGatewayConfig,
 } from "./config.js";
-import { ContextGatewayTelemetry } from "./telemetry.js";
+import { planContextGatewayEnforcement } from "./enforcement.js";
+import { classifyContextGatewayTool, ContextGatewayTelemetry } from "./telemetry.js";
 import type {
 	ContextGatewayEffectiveMode,
 	ContextGatewayMode,
 	ContextGatewayResolvedConfig,
 	ContextGatewayRuntimeState,
+	ContextGatewayToolClass,
 } from "./types.js";
 
 export interface RegisterContextGatewayOptions {
@@ -25,23 +28,23 @@ function formatStatus(runtime: RegisteredContextGateway): string {
 	const telemetry = runtime.telemetry.snapshot();
 	return [
 		`Context Gateway requested=${runtime.requestedMode}, effective=${runtime.effectiveMode}.`,
-		`Observed results=${telemetry.results}, errors=${telemetry.errors}, upstreamTruncated=${telemetry.upstreamTruncatedResults}, overBudget=${telemetry.overBudgetResults}, unbound results=${telemetry.unboundResults}.`,
-		`Repeat candidates=${telemetry.repeatCandidateCount}, retrieval calls=${telemetry.retrievalCalls}.`,
+		`Observed results=${telemetry.results}, errors=${telemetry.errors}, upstreamTruncated=${telemetry.upstreamTruncatedResults}, overBudget=${telemetry.overBudgetResults}, enforced=${telemetry.enforcedResults}, unbound results=${telemetry.unboundResults}.`,
+		`Repeat exact reads=${telemetry.repeatCandidateCount}, same-source different-range reads=${telemetry.sameSourceDifferentRangeCount}, retrieval calls=${telemetry.retrievalCalls}.`,
 		`Native policy results=${telemetry.nativePolicy.results}, refusals=${telemetry.nativePolicy.refusals}, full overrides=${telemetry.nativePolicy.fullOverrides}.`,
-		`Observed contentBytes=${telemetry.contentBytes}, textBytes=${telemetry.textBytes}, detailsBytes=${telemetry.detailsBytes}, potentialBytesOverBudget=${telemetry.potentialBytesOverBudget}.`,
+		`Source contentBytes=${telemetry.contentBytes}, deliveredContentBytes=${telemetry.deliveredContentBytes}, actualBytesSaved=${telemetry.actualBytesSaved}, potentialBytesOverBudget=${telemetry.potentialBytesOverBudget}, detailsBytes=${telemetry.detailsBytes}.`,
 	].join("\n");
 }
 
 function formatDoctor(runtime: RegisteredContextGateway): string {
 	const lines = [
 		`Context Gateway doctor: requested=${runtime.requestedMode}, effective=${runtime.effectiveMode}.`,
-		"Capture: read=limited; bash=limited+temp-output; repo_*=suite-adapter-not-wired; ast_grep=suite-adapter-not-wired.",
+		"Budgets: read=maxExactReadBytes; repo search/AST/structure=maxSearchBytes; other results=maxResultBytes; compact inline view=maxInlineBytes.",
+		"Enforce: recognised complete simple test/build output=bounded parser compact; partial/unknown/compound/upstream-truncated/non-text=passthrough.",
+		"Read: full passthrough even when over budget; exact recovery/archive is not wired, so irreversible read truncation is disabled.",
+		"Repo tools: producer-native compact is supported with repoDiscovery.profile=native-compact; Gateway never post-hoc slices repo output.",
 		"External paths: MCP=current Pix adapter unsupported; direct parent browser capture=unsupported.",
 		"Storage: disabled; no durable archive, index, quota reservation, or retrieval tools are active.",
 	];
-	if (runtime.requestedMode === "enforce") {
-		lines.push("BLOCKED: enforce is unavailable in P01; effective mode is off.");
-	}
 	for (const issue of runtime.config.issues) lines.push(`Config issue: ${issue}`);
 	return lines.join("\n");
 }
@@ -57,8 +60,9 @@ export function registerContextGateway(
 	const config = (options.loadConfig ?? (() => loadContextGatewayConfig()))();
 	const telemetry = options.telemetry ?? new ContextGatewayTelemetry();
 	let requestedMode = config.mode;
-	let effectiveMode: ContextGatewayEffectiveMode = requestedMode === "enforce" ? "off" : requestedMode;
-	const inFlightToolCalls = new Set<string>();
+	let effectiveMode: ContextGatewayEffectiveMode = requestedMode;
+	type InFlight = { toolClass: ContextGatewayToolClass; shell: ShellCommandClassification };
+	const inFlightToolCalls = new Map<string, InFlight>();
 
 	const resetRuntimeTelemetry = (): void => {
 		inFlightToolCalls.clear();
@@ -71,9 +75,6 @@ export function registerContextGateway(
 		config,
 		telemetry,
 		setRuntimeMode(mode) {
-			if (mode === "enforce") {
-				return { ok: false, message: CONTEXT_GATEWAY_ENFORCE_UNAVAILABLE };
-			}
 			if (mode !== effectiveMode && inFlightToolCalls.size > 0) {
 				return {
 					ok: false,
@@ -88,14 +89,67 @@ export function registerContextGateway(
 	};
 
 	pi.on("tool_call", async (event) => {
-		if (typeof event.toolCallId === "string") inFlightToolCalls.add(event.toolCallId);
-		if (effectiveMode === "observe") telemetry.recordToolCall(event);
+		if (typeof event.toolCallId === "string" && typeof event.toolName === "string") {
+			const toolClass = classifyContextGatewayTool(event.toolName);
+			inFlightToolCalls.set(event.toolCallId, {
+				toolClass,
+				shell: toolClass === "shell"
+					? classifyShellCommand(event.input)
+					: { scope: "unknown", kind: "unknown" },
+			});
+		}
+		if (effectiveMode === "observe" || effectiveMode === "enforce") telemetry.recordToolCall(event);
 		return undefined;
 	});
 
 	pi.on("tool_result", async (event) => {
 		try {
-			if (effectiveMode === "observe") telemetry.recordToolResult(event, config.budgets.maxResultBytes);
+			if (effectiveMode === "off") return undefined;
+			const binding = typeof event.toolCallId === "string"
+				? inFlightToolCalls.get(event.toolCallId)
+				: undefined;
+			const classBudget = binding
+				? contextGatewayBudgetForClass(binding.toolClass, config.budgets)
+				: config.budgets.maxResultBytes;
+			const enforcement = effectiveMode === "enforce" && binding
+				? planContextGatewayEnforcement({
+					event,
+					toolClass: binding.toolClass,
+					shell: binding.shell,
+					budgetBytes: classBudget,
+					maxInlineBytes: Math.min(
+						config.budgets.maxInlineBytes,
+						classBudget,
+					),
+				})
+				: undefined;
+			telemetry.recordToolResult(event, config.budgets, {
+				maxInlineBytes: config.budgets.maxInlineBytes,
+				...(enforcement ? {
+					delivery: {
+						representation: enforcement.representation,
+						contentBytes: enforcement.contentBytes,
+						textBytes: enforcement.textBytes,
+					},
+				} : {}),
+			});
+			if (enforcement?.representation === "test-build-compact") {
+				const originalDetails = event.details && typeof event.details === "object" && !Array.isArray(event.details)
+					? event.details as Record<string, unknown>
+					: {};
+				return {
+					content: enforcement.content as any,
+					details: {
+						...originalDetails,
+						contextGateway: {
+							version: 1,
+							representation: enforcement.representation,
+							sourceContentBytes: enforcement.sourceContentBytes,
+							deliveredContentBytes: enforcement.contentBytes,
+						},
+					},
+				};
+			}
 		} finally {
 			if (typeof event.toolCallId === "string") inFlightToolCalls.delete(event.toolCallId);
 		}
@@ -118,7 +172,7 @@ export function registerContextGateway(
 	});
 
 	pi.registerCommand("context-gateway", {
-		description: "Show Context Gateway status/doctor output or change the runtime-only off/observe mode.",
+		description: "Show Context Gateway status/doctor output or change runtime-only off/observe/enforce mode.",
 		handler: async (rawArgs, ctx) => {
 			const args = rawArgs.trim().split(/\s+/).filter(Boolean);
 			const action = (args[0] ?? "status").toLowerCase();
@@ -127,7 +181,7 @@ export function registerContextGateway(
 				return;
 			}
 			if (action === "doctor") {
-				notify(ctx, formatDoctor(runtime), runtime.requestedMode === "enforce" ? "warning" : "info");
+				notify(ctx, formatDoctor(runtime), runtime.config.issues.length > 0 ? "warning" : "info");
 				return;
 			}
 			if (action === "mode") {

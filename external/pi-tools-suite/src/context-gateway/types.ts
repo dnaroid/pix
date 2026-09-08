@@ -1,6 +1,6 @@
 export type ContextGatewayMode = "off" | "observe" | "enforce";
 
-export type ContextGatewayEffectiveMode = Exclude<ContextGatewayMode, "enforce">;
+export type ContextGatewayEffectiveMode = ContextGatewayMode;
 
 export interface ContextGatewayBudgets {
 	maxInlineBytes: number;
@@ -10,7 +10,7 @@ export interface ContextGatewayBudgets {
 	maxSearchMatches: number;
 }
 
-/** Parsed layered config. `enforce` remains a valid requested value so doctor can refuse it explicitly. */
+/** Parsed layered config. `enforce` is selective and fail-open for unsupported result classes. */
 export interface ContextGatewayResolvedConfig {
 	mode: ContextGatewayMode;
 	budgets: ContextGatewayBudgets;
@@ -48,7 +48,7 @@ export interface ContextGatewayObservedView {
 }
 
 export interface ContextGatewayObservedDelivery {
-	representation: "passthrough";
+	representation: "passthrough" | "test-build-compact";
 	contentBytes: number;
 	textBytes: number;
 }
@@ -81,11 +81,13 @@ export interface ContextGatewayObservation {
 	version: 1;
 	toolClass: ContextGatewayToolClass;
 	outcome: ContextGatewayExecutionOutcome;
+	budgetBytes: number;
 	source: ContextGatewayObservedSource;
 	view: ContextGatewayObservedView;
 	delivery: ContextGatewayObservedDelivery;
 	overBudget: boolean;
 	potentialBytesOverBudget: number;
+	actualBytesSaved: number;
 	testOutput?: ContextGatewayTestOutputObservation;
 }
 
@@ -93,12 +95,15 @@ export interface ContextGatewayClassTelemetry {
 	results: number;
 	errors: number;
 	contentBytes: number;
+	deliveredContentBytes: number;
 	textBytes: number;
 	imageBytes: number;
 	detailsBytes: number;
 	upstreamTruncatedResults: number;
 	overBudgetResults: number;
 	potentialBytesOverBudget: number;
+	enforcedResults: number;
+	actualBytesSaved: number;
 }
 
 export type ContextGatewayNativePolicyReason =
@@ -134,6 +139,7 @@ export interface ContextGatewayTelemetrySnapshot extends ContextGatewayClassTele
 	pendingCalls: number;
 	unboundResults: number;
 	repeatCandidateCount: number;
+	sameSourceDifferentRangeCount: number;
 	retrievalCalls: number;
 	nativePolicy: ContextGatewayNativePolicyTelemetry;
 	testOutput: ContextGatewayTestOutputTelemetry;

@@ -179,6 +179,7 @@ const HELP_TEXT = `DCP — Dynamic Context Pruning
 Commands:
   /dcp context      — Show context window usage breakdown
   /dcp stats        — Show pruning statistics for this session
+  /dcp doctor       — Show config compatibility diagnostics
   /dcp sweep [N]    — Prune last N tool outputs (default: all since last user msg)
   /dcp manual       — Show manual mode status
   /dcp manual on    — Enable manual mode (disable autonomous compression nudges)
@@ -187,6 +188,18 @@ Commands:
 
 function handleHelp(ctx: ExtensionCommandContext): void {
   ctx.ui.notify(HELP_TEXT, "info")
+}
+
+function handleDoctor(ctx: ExtensionCommandContext, config: DcpConfig): void {
+  const issues = config.issues ?? []
+  const lines = ["DCP Doctor", ""]
+  if (issues.length === 0) {
+    lines.push("Config: no removed or ignored DCP settings detected.")
+  } else {
+    lines.push(`Config: ${issues.length} removed/ignored setting${issues.length === 1 ? "" : "s"}:`)
+    for (const issue of issues) lines.push(`  - ${issue}`)
+  }
+  ctx.ui.notify(lines.join("\n"), issues.length > 0 ? "warning" : "info")
 }
 
 // ---------------------------------------------------------------------------
@@ -434,6 +447,7 @@ export function registerCommands(
       const subcommands: AutocompleteItem[] = [
         { value: "context", label: "context", description: "Show context window usage breakdown" },
         { value: "stats", label: "stats", description: "Show pruning statistics" },
+        { value: "doctor", label: "doctor", description: "Show config compatibility diagnostics" },
         { value: "sweep", label: "sweep", description: "Prune tool outputs" },
         { value: "manual", label: "manual", description: "Toggle manual mode" },
         { value: "compress", label: "compress", description: "Trigger LLM compression" },
@@ -467,6 +481,10 @@ export function registerCommands(
 
           case "stats":
             handleStats(pi, ctx, state)
+            break
+
+          case "doctor":
+            handleDoctor(ctx, config)
             break
 
           case "sweep": {

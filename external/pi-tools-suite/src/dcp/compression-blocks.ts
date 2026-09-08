@@ -8,6 +8,7 @@ import type {
 import type { DcpConfig } from "./config.js"
 import { estimateTokens } from "./pruner-metadata.js"
 import { isToolRecordProtected } from "./pruner-tools.js"
+import { toolRecordContinuity } from "./protected-continuity.js"
 import { compareConversationStableIds, buildExactRangeMembership } from "./conversation-index.js"
 import { createHash } from "node:crypto"
 import { open, realpath } from "node:fs/promises"
@@ -570,10 +571,10 @@ function collectCurrentProtectedFragments(
 		if (!toolCallId) continue
 		const record = state.toolCalls.get(toolCallId)
 		if (!record || record.toolName === "compress" || !isToolRecordProtected(record, config)) continue
-		const output = (record.outputText ?? meta.text ?? "").trim()
-		if (!output) continue
-		const exact = `### Tool: ${record.toolName}\n${output}`
-		fragments.push(compressionProtectedFragment("tool", `tool:${toolCallId}`, exact))
+		const continuity = toolRecordContinuity(record, config)
+		const text = continuity.text?.trim()
+		if (!text) continue
+		fragments.push(compressionProtectedFragment("tool", `tool:${toolCallId}`, text))
 	}
 	return mergeProtectedFragments(fragments)
 }
@@ -655,51 +656,6 @@ function appendProtectedFragmentLedger(summary: string, fragments: CompressionPr
 	return summary +
 		"\n\nThe following protected continuity fragments were preserved verbatim:" +
 		missing.map((fragment) => `\n\n${fragment.text}`).join("")
-}
-
-function appendProtectedToolOutputs(
-  summary: string,
-  startTimestamp: number,
-  endTimestamp: number,
-  state: DcpState,
-  config: DcpConfig,
-  ids: { startMessageId?: string; endMessageId?: string } = {},
-): string {
-  const protectedOutputs: string[] = []
-  const seenToolCallIds = new Set<string>()
-  const boundaries = rangeBoundaries(startTimestamp, endTimestamp, ids)
-
-  for (const meta of state.messageMetaSnapshot.values()) {
-    if (meta.blockId !== undefined) continue
-    if (!Number.isFinite(meta.timestamp)) continue
-    if (!isCompressionBoundaryWithinRange(
-      { timestamp: meta.timestamp, stableId: meta.stableId },
-      boundaries.start,
-      boundaries.end,
-      state,
-    )) continue
-    if (meta.role !== "toolResult" && meta.role !== "bashExecution") continue
-
-    const toolCallId = meta.toolCallId
-    if (!toolCallId || seenToolCallIds.has(toolCallId)) continue
-    const record = state.toolCalls.get(toolCallId)
-    if (!record) continue
-
-    // The compress tool's own JSON accounting output is control-plane data and
-    // rarely useful in future summaries; avoid recursively copying it.
-    if (record.toolName === "compress") continue
-    if (!isToolRecordProtected(record, config)) continue
-
-    const output = (record.outputText ?? meta.text ?? "").trim()
-    if (!output) continue
-
-    seenToolCallIds.add(toolCallId)
-    protectedOutputs.push(`\n### Tool: ${record.toolName}\n${output}`)
-  }
-
-  if (protectedOutputs.length === 0) return summary
-  const heading = "\n\nThe following protected tool outputs were included in this conversation section:"
-  return summary + heading + protectedOutputs.join("")
 }
 
 export function estimateVisibleRangeTokens(
@@ -945,20 +901,12 @@ export function createRangeCompressionBlock(
     ids,
   )
 
-  const expandedSummary = appendProtectedToolOutputs(
-    promptPreservedSummary,
-    startTimestamp,
-    endTimestamp,
-    state,
-    config,
-    ids,
-  )
   const protectedFragments = mergeProtectedFragments(
     collectInheritedProtectedFragments(coveredBlocks),
     collectCurrentProtectedFragments(startTimestamp, endTimestamp, state, config, mode, ids),
     preparedProtectedFragments,
   )
-  const ledgerPreservedSummary = appendProtectedFragmentLedger(expandedSummary, protectedFragments)
+  const ledgerPreservedSummary = appendProtectedFragmentLedger(promptPreservedSummary, protectedFragments)
 
   const block: CompressionBlock = {
     id: state.nextBlockId++,

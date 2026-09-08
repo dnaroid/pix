@@ -3,7 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 
-import { DEFAULT_CONTEXT_GATEWAY_BUDGETS, loadContextGatewayConfig } from "../../src/context-gateway/config.js";
+import {
+	contextGatewayBudgetForClass,
+	DEFAULT_CONTEXT_GATEWAY_BUDGETS,
+	loadContextGatewayConfig,
+} from "../../src/context-gateway/config.js";
 
 function tempDir(prefix: string): string {
 	return mkdtempSync(join(tmpdir(), prefix));
@@ -70,5 +74,21 @@ describe("context gateway P01 config", () => {
 		expect(config.issues).toHaveLength(4);
 		expect(config.issues.join("\n")).toContain("contextGateway.mode");
 		expect(config.issues.join("\n")).toContain("PI_CONTEXT_GATEWAY_MODE");
+	});
+
+	test("maps result classes to their dedicated budgets instead of one generic max", () => {
+		const budgets = {
+			...DEFAULT_CONTEXT_GATEWAY_BUDGETS,
+			maxResultBytes: 111,
+			maxExactReadBytes: 222,
+			maxSearchBytes: 333,
+		};
+		expect(contextGatewayBudgetForClass("code-read", budgets)).toBe(222);
+		for (const toolClass of ["repo-search", "repo-ast", "repo-structure", "ast-grep"] as const) {
+			expect(contextGatewayBudgetForClass(toolClass, budgets)).toBe(333);
+		}
+		expect(contextGatewayBudgetForClass("shell", budgets)).toBe(111);
+		expect(contextGatewayBudgetForClass("mutation", budgets)).toBe(111);
+		expect(contextGatewayBudgetForClass("other", budgets)).toBe(111);
 	});
 });

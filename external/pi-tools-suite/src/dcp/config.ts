@@ -10,6 +10,8 @@ import { parse as parseJsonc, type ParseError } from "jsonc-parser"
 export interface DcpConfig {
   enabled: boolean
   debug: boolean
+  /** Non-fatal loader diagnostics, e.g. removed settings that were ignored. */
+  issues?: string[]
   debugLog?: {
     maxBytes?: number
     maxBackups?: number
@@ -90,7 +92,7 @@ export interface DcpConfig {
   modelOverrides: Record<string, DcpConfigOverride>
 }
 
-export type DcpConfigOverride = DeepPartial<Omit<DcpConfig, "modelOverrides">>
+export type DcpConfigOverride = DeepPartial<Omit<DcpConfig, "modelOverrides" | "issues">>
 
 type DeepPartial<T> = T extends Array<infer U>
   ? Array<DeepPartial<U>>
@@ -105,6 +107,7 @@ type DeepPartial<T> = T extends Array<infer U>
 const DEFAULT_CONFIG: DcpConfig = {
   enabled: true,
   debug: false,
+  issues: [],
   manualMode: {
     enabled: false,
   },
@@ -228,43 +231,75 @@ function readJsoncFile(filePath: string): Record<string, unknown> {
 /**
  * Return the nested DCP config from a shared pi-tools-suite config file.
  */
-function readDcpFromSuiteConfig(filePath: string): Record<string, unknown> {
+function readDcpFromSuiteConfig(filePath: string, issues: string[]): Record<string, unknown> {
   const raw = readJsoncFile(filePath)
   const dcp = raw["dcp"]
   if (dcp === null || typeof dcp !== "object" || Array.isArray(dcp)) return {}
-  return stripRemovedDcpKeys(dcp as Record<string, unknown>)
+  return stripRemovedDcpKeys(dcp as Record<string, unknown>, issues)
 }
 
-function stripRemovedDcpKeys(raw: Record<string, unknown>): Record<string, unknown> {
+const REMOVED_DCP_GUIDANCE: Record<string, string> = {
+  pruneNotification: "removed; pruning notifications are no longer configurable",
+  "manualMode.automaticStrategies": "removed; manual mode now has one explicit enabled flag",
+  "strategies.deduplication": "removed; no automatic replacement policy is currently mapped to this setting",
+  "strategies.purgeErrors": "removed; no automatic replacement policy is currently mapped to this setting",
+  "strategies.autoToolPruning": "removed; use explicit /dcp sweep or DCP compression/emergency policies instead",
+}
+
+function reportRemovedKey(issues: string[], prefix: string, key: string): void {
+  const fullKey = prefix ? `${prefix}.${key}` : key
+  const canonical = fullKey.replace(/^modelOverrides\.[^.]+\./, "")
+  const guidance = REMOVED_DCP_GUIDANCE[canonical] ?? "removed and ignored"
+  issues.push(`dcp.${fullKey} is ${guidance}.`)
+}
+
+function stripRemovedDcpKeys(
+  raw: Record<string, unknown>,
+  issues: string[],
+  prefix = "",
+): Record<string, unknown> {
   const cleaned = structuredClone(raw)
+  if (Object.prototype.hasOwnProperty.call(cleaned, "pruneNotification")) {
+    reportRemovedKey(issues, prefix, "pruneNotification")
+  }
   delete cleaned.pruneNotification
 
   const manualMode = cleaned.manualMode
   if (manualMode && typeof manualMode === "object" && !Array.isArray(manualMode)) {
+    if (Object.prototype.hasOwnProperty.call(manualMode, "automaticStrategies")) {
+      reportRemovedKey(issues, prefix, "manualMode.automaticStrategies")
+    }
     delete (manualMode as Record<string, unknown>).automaticStrategies
   }
 
   const strategies = cleaned.strategies
   if (strategies && typeof strategies === "object" && !Array.isArray(strategies)) {
     const record = strategies as Record<string, unknown>
-    delete record.deduplication
-    delete record.purgeErrors
-    delete record.autoToolPruning
+    for (const key of ["deduplication", "purgeErrors", "autoToolPruning"] as const) {
+      if (Object.prototype.hasOwnProperty.call(record, key)) {
+        reportRemovedKey(issues, prefix, `strategies.${key}`)
+      }
+      delete record[key]
+    }
   }
 
   const modelOverrides = cleaned.modelOverrides
   if (modelOverrides && typeof modelOverrides === "object" && !Array.isArray(modelOverrides)) {
     for (const [key, override] of Object.entries(modelOverrides as Record<string, unknown>)) {
       if (!override || typeof override !== "object" || Array.isArray(override)) continue
-      ;(modelOverrides as Record<string, unknown>)[key] = stripRemovedDcpKeys(override as Record<string, unknown>)
+      ;(modelOverrides as Record<string, unknown>)[key] = stripRemovedDcpKeys(
+        override as Record<string, unknown>,
+        issues,
+        prefix ? `${prefix}.modelOverrides.${key}` : `modelOverrides.${key}`,
+      )
     }
   }
 
   return cleaned
 }
 
-function mergeSuiteDcpConfig(config: DcpConfig, filePath: string): DcpConfig {
-  const raw = readDcpFromSuiteConfig(filePath)
+function mergeSuiteDcpConfig(config: DcpConfig, filePath: string, issues: string[]): DcpConfig {
+  const raw = readDcpFromSuiteConfig(filePath, issues)
   if (Object.keys(raw).length === 0) return config
   return deepMerge(config, raw as Partial<DcpConfig>)
 }
@@ -407,9 +442,15 @@ export interface LoadConfigOptions {
 export function loadConfig(options: LoadConfigOptions = {}): DcpConfig {
   // Layer 1: defaults (deep clone so we never mutate the constant)
   let config: DcpConfig = structuredClone(DEFAULT_CONFIG)
+  const issues: string[] = []
 
   const homeDir = options.homeDir ?? os.homedir()
-  config = mergeSuiteDcpConfig(config, path.join(homeDir, ".config", "pi", "pi-tools-suite.jsonc"))
+  config = mergeSuiteDcpConfig(
+    config,
+    path.join(homeDir, ".config", "pi", "pi-tools-suite.jsonc"),
+    issues,
+  )
+  config.issues = issues
 
   return config
 }

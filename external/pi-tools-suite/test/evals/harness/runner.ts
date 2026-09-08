@@ -253,7 +253,9 @@ export default function recorder(pi) {
     if (BLOCKED.has(event.toolName)) return { block: true, reason: event.toolName + " execution blocked by eval recorder after selection was captured; do not retry it" };
   });
   pi.on("tool_result", async (event) => {
-    if (GATEWAY_OBSERVE) GATEWAY_TELEMETRY.recordToolResult(event, GATEWAY_CONFIG.budgets.maxResultBytes);
+    if (GATEWAY_OBSERVE) GATEWAY_TELEMETRY.recordToolResult(event, GATEWAY_CONFIG.budgets, {
+      maxInlineBytes: GATEWAY_CONFIG.budgets.maxInlineBytes,
+    });
     const normalizedTool = String(event.toolName || "").toLowerCase();
     const cleanup = CLEANUP_BY_TOOL[normalizedTool] || [];
     const cleanupExistingBeforeCount = cleanup.filter((filePath) => fs.existsSync(filePath)).length;
@@ -312,6 +314,7 @@ export default function recorder(pi) {
         contextGatewayTelemetry: {
           mode: "observe",
           maxResultBytes: GATEWAY_CONFIG.budgets.maxResultBytes,
+          budgets: GATEWAY_CONFIG.budgets,
           snapshot: GATEWAY_TELEMETRY.snapshot(),
         },
       } : {}),

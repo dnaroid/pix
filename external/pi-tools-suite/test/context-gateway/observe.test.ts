@@ -104,13 +104,15 @@ describe("context gateway P01 observe module", () => {
 		expect(status).toContain("effective=observe");
 		expect(status).toContain("Observed results=1");
 		expect(status).toContain("upstreamTruncated=1");
-		expect(status).toContain("overBudget=1");
+		expect(status).toContain("overBudget=0");
 		expect(status).not.toContain("OBSERVE_BODY_SHOULD_NOT_BE_STORED");
 		expect(status).not.toContain("private/needle.ts");
-		expect(runtime.telemetry.snapshot().byClass["code-read"]?.upstreamTruncatedResults).toBe(1);
+		const snapshot = runtime.telemetry.snapshot();
+		expect(snapshot.byClass["code-read"]?.upstreamTruncatedResults).toBe(1);
+		expect(snapshot.lastObservation?.budgetBytes).toBe(32768);
 	});
 
-	test("runtime observe mode is ephemeral and enforce is refused", async () => {
+	test("runtime modes are ephemeral and enforce activates only at a safe boundary", async () => {
 		const pi = new FakePi();
 		registerContextGateway(pi as any, { loadConfig: () => config("off") });
 		const notifications: Array<{ message: string; type?: string }> = [];
@@ -124,9 +126,10 @@ describe("context gateway P01 observe module", () => {
 		expect(notifications.at(-1)?.message).toContain("unbound results=1");
 
 		await pi.commands.get("context-gateway").handler("mode enforce", ctx);
-		expect(notifications.at(-1)?.message).toContain("enforce is unavailable in P01");
+		expect(notifications.at(-1)?.message).toContain("runtime mode set to enforce");
 		await pi.commands.get("context-gateway").handler("doctor", ctx);
-		expect(notifications.at(-1)?.message).toContain("requested=observe, effective=observe");
+		expect(notifications.at(-1)?.message).toContain("requested=enforce, effective=enforce");
+		expect(notifications.at(-1)?.message).toContain("partial/unknown/compound/upstream-truncated/non-text=passthrough");
 	});
 
 	test("mode changes require a safe boundary while an observed tool call is in flight", async () => {
@@ -274,7 +277,7 @@ describe("context gateway P01 observe module", () => {
 		expect(current.byClass.shell).toBeUndefined();
 	});
 
-	test("configured enforce is downgraded to effective off with an explicit refusal", async () => {
+	test("configured enforce leaves unbound/non-enforceable results byte-equivalent", async () => {
 		const pi = new FakePi();
 		registerContextGateway(pi as any, { loadConfig: () => config("enforce") });
 		const result = await pi.handlers.get("tool_result")![0]({
@@ -289,8 +292,109 @@ describe("context gateway P01 observe module", () => {
 		const notifications: Array<{ message: string; type?: string }> = [];
 		await pi.commands.get("context-gateway").handler("doctor", commandContext(notifications));
 		const doctor = notifications.at(-1)?.message ?? "";
-		expect(doctor).toContain("requested=enforce, effective=off");
-		expect(doctor).toContain("BLOCKED: enforce is unavailable in P01");
+		expect(doctor).toContain("requested=enforce, effective=enforce");
+		expect(doctor).toContain("irreversible read truncation is disabled");
+		expect(doctor).not.toContain("BLOCKED");
+	});
+
+	test("enforce compacts only an over-budget recognised complete simple test result", async () => {
+		const pi = new FakePi();
+		const runtime = registerContextGateway(pi as any, { loadConfig: () => config("enforce", 256) });
+		const ctx = commandContext([]);
+		const raw = [
+			"bun test v1.3.14",
+			...Array.from({ length: 25 }, (_, index) => `(pass) suite > case ${index + 1} [1.00ms] ${"detail ".repeat(6)}`),
+			" 25 pass",
+			" 0 fail",
+			"Ran 25 tests across 1 file. [5.00ms]",
+		].join("\n");
+
+		await pi.handlers.get("tool_call")![0]({
+			toolCallId: "test-compact",
+			toolName: "Bash",
+			input: { command: "bun test test/a.test.ts" },
+		}, ctx);
+		const result = await pi.handlers.get("tool_result")![0]({
+			toolCallId: "test-compact",
+			toolName: "Bash",
+			content: [{ type: "text", text: raw }],
+			details: {},
+			isError: false,
+		}, ctx);
+
+		const text = result?.content?.[0]?.text ?? "";
+		expect(text).toContain("Execution outcome: SUCCESS");
+		expect(text).toContain("Recognised format: bun-test");
+		expect(text).toContain("Terminal summary: 25 passed, 0 failed, 25 tests, 1 files");
+		expect(text).not.toContain("suite > case 1");
+		const snapshot = runtime.telemetry.snapshot();
+		expect(snapshot.enforcedResults).toBe(1);
+		expect(snapshot.actualBytesSaved).toBeGreaterThan(0);
+		expect(snapshot.contentBytes).toBeGreaterThan(snapshot.deliveredContentBytes);
+		expect(snapshot.lastObservation).toMatchObject({
+			budgetBytes: 256,
+			delivery: { representation: "test-build-compact" },
+		});
+	});
+
+	test("enforce fails open for within-budget, compound, truncated, unknown, and read results", async () => {
+		const cfg = config("enforce", 256);
+		cfg.budgets.maxExactReadBytes = 32;
+		const pi = new FakePi();
+		const runtime = registerContextGateway(pi as any, { loadConfig: () => cfg });
+		const ctx = commandContext([]);
+		const complete = "bun test v1.3.14\n 1 pass\n 0 fail\nRan 1 test across 1 file. [1.00ms]";
+		const cases = [
+			{ id: "within", toolName: "Bash", input: { command: "bun test test/a.test.ts" }, content: complete, details: {} },
+			{ id: "compound", toolName: "Bash", input: { command: "bun test test/a.test.ts && echo done" }, content: `${"padding\n".repeat(80)}${complete}`, details: {} },
+			{ id: "truncated", toolName: "Bash", input: { command: "bun test test/a.test.ts" }, content: `${"padding\n".repeat(80)}${complete}`, details: { truncation: { truncated: true } } },
+			{ id: "unknown", toolName: "Bash", input: { command: "node custom-runner.mjs" }, content: "CUSTOM\n".repeat(100), details: {} },
+			{ id: "read", toolName: "Read", input: { path: "private.ts", offset: 1, limit: 20 }, content: "RAW_READ_MUST_SURVIVE".repeat(20), details: {} },
+		];
+
+		for (const item of cases) {
+			await pi.handlers.get("tool_call")![0]({ toolCallId: item.id, toolName: item.toolName, input: item.input }, ctx);
+			const result = await pi.handlers.get("tool_result")![0]({
+				toolCallId: item.id,
+				toolName: item.toolName,
+				content: [{ type: "text", text: item.content }],
+				details: item.details,
+				isError: false,
+			}, ctx);
+			expect(result).toBeUndefined();
+		}
+
+		const snapshot = runtime.telemetry.snapshot();
+		expect(snapshot.enforcedResults).toBe(0);
+		expect(snapshot.actualBytesSaved).toBe(0);
+		expect(snapshot.byClass["code-read"]?.overBudgetResults).toBe(1);
+		expect(snapshot.byClass["code-read"]?.actualBytesSaved).toBe(0);
+	});
+
+	test("enforce never post-hoc slices producer-native repo compact output", async () => {
+		const cfg = config("enforce", 64);
+		cfg.budgets.maxSearchBytes = 64;
+		const pi = new FakePi();
+		const runtime = registerContextGateway(pi as any, { loadConfig: () => cfg });
+		const ctx = commandContext([]);
+		const content = "PRODUCER_NATIVE_COMPACT\n".repeat(20);
+		await pi.handlers.get("tool_call")![0]({
+			toolCallId: "repo-native",
+			toolName: "repo_search",
+			input: { query: "needle" },
+		}, ctx);
+		const result = await pi.handlers.get("tool_result")![0]({
+			toolCallId: "repo-native",
+			toolName: "repo_search",
+			content: [{ type: "text", text: content }],
+			details: { nativePolicy: { version: 1, profile: "native-compact", outputMode: "compact", refused: false } },
+			isError: false,
+		}, ctx);
+		expect(result).toBeUndefined();
+		const snapshot = runtime.telemetry.snapshot();
+		expect(snapshot.byClass["repo-search"]?.overBudgetResults).toBe(1);
+		expect(snapshot.byClass["repo-search"]?.actualBytesSaved).toBe(0);
+		expect(snapshot.nativePolicy.results).toBe(1);
 	});
 });
 
@@ -317,6 +421,18 @@ describe("context gateway P01 telemetry contracts", () => {
 		const serialized = JSON.stringify(snapshot);
 		expect(serialized).not.toContain("sensitive/file.ts");
 		expect(serialized).not.toContain("SECRET_BODY_FOR_REPEAT_TEST");
+	});
+
+	test("normalises read identity while distinguishing exact repeats from new ranges", () => {
+		const telemetry = new ContextGatewayTelemetry();
+		telemetry.recordToolCall({ toolCallId: "r1", toolName: "read", input: { path: "./src/../src/a.ts", offset: 1, limit: 10 } });
+		telemetry.recordToolCall({ toolCallId: "r2", toolName: "Read", input: { path: "src/a.ts", offset: "1", limit: "10" } });
+		telemetry.recordToolCall({ toolCallId: "r3", toolName: "read", input: { path: "src/a.ts", offset: 11, limit: 10 } });
+
+		const snapshot = telemetry.snapshot();
+		expect(snapshot.repeatCandidateCount).toBe(1);
+		expect(snapshot.sameSourceDifferentRangeCount).toBe(1);
+		expect(JSON.stringify(snapshot)).not.toContain("src/a.ts");
 	});
 
 	test("N01 negative fixture keeps tool results out of assistant prose and carries branch scope", () => {

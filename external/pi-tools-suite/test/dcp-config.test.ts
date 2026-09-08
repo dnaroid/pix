@@ -38,6 +38,7 @@ describe("DCP config", () => {
 			maxSuggestions: 8,
 			protectedTools: [],
 		});
+		expect(config.issues).toEqual([]);
 	});
 
 	test("reads DCP settings from the user pi-tools-suite config", () => {
@@ -133,7 +134,7 @@ describe("DCP config", () => {
 		]);
 	});
 
-	test("drops removed DCP policy keys instead of retaining compatibility state", () => {
+	test("drops removed DCP policy keys and reports actionable compatibility issues", () => {
 		const homeDir = tempDir();
 		mkdirSync(join(homeDir, ".config", "pi"), { recursive: true });
 		writeFileSync(
@@ -165,10 +166,21 @@ describe("DCP config", () => {
 		expect(config.strategies.purgeErrors).toBeUndefined();
 		expect(config.strategies.autoToolPruning).toBeUndefined();
 		expect(config.strategies.emergencyCurrentTurnPruning.patience).toBe(5);
+		expect(config.issues).toEqual(expect.arrayContaining([
+			expect.stringContaining("dcp.pruneNotification"),
+			expect.stringContaining("dcp.manualMode.automaticStrategies"),
+			expect.stringContaining("dcp.strategies.deduplication"),
+			expect.stringContaining("dcp.strategies.purgeErrors"),
+			expect.stringContaining("dcp.strategies.autoToolPruning"),
+			expect.stringContaining("dcp.modelOverrides.openai/*.pruneNotification"),
+			expect.stringContaining("dcp.modelOverrides.openai/*.strategies.autoToolPruning"),
+		]));
+		expect(config.issues).toHaveLength(7);
 
 		const resolved = resolveModelConfig(config, ["openai/gpt-5"] as string[]) as any;
 		expect(resolved.pruneNotification).toBeUndefined();
 		expect(resolved.strategies.autoToolPruning).toBeUndefined();
+		expect(resolved.issues).toEqual(config.issues);
 	});
 
 	test("extracts provider/model and model-only keys from context", () => {

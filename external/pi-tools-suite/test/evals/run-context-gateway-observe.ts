@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { parseEvalModels, runEvalCase } from "./harness/runner.js";
 import type { EvalCase, EvalRunResult } from "./harness/types.js";
 import type {
+	ContextGatewayBudgets,
 	ContextGatewayClassTelemetry,
 	ContextGatewayTelemetrySnapshot,
 	ContextGatewayToolClass,
@@ -121,8 +122,9 @@ function prepareResidualProject(projectDir: string): void {
 }
 
 type SafeClassTelemetry = Pick<ContextGatewayClassTelemetry,
-	"results" | "errors" | "contentBytes" | "textBytes" | "imageBytes" | "detailsBytes" |
-	"upstreamTruncatedResults" | "overBudgetResults" | "potentialBytesOverBudget">;
+	"results" | "errors" | "contentBytes" | "deliveredContentBytes" | "textBytes" |
+	"imageBytes" | "detailsBytes" | "upstreamTruncatedResults" | "overBudgetResults" |
+	"potentialBytesOverBudget" | "enforcedResults" | "actualBytesSaved">;
 
 type SafeObserveRun = {
 	caseId: string;
@@ -135,6 +137,7 @@ type SafeObserveRun = {
 	toolCallCount: number;
 	mode: "observe" | "missing";
 	maxResultBytes: number | null;
+	budgetBytes: number | null;
 	totals: SafeClassTelemetry | null;
 	byClass: Partial<Record<ContextGatewayToolClass, SafeClassTelemetry>>;
 };
@@ -150,13 +153,28 @@ function pickClassTelemetry(value: ContextGatewayClassTelemetry): SafeClassTelem
 		results: value.results,
 		errors: value.errors,
 		contentBytes: value.contentBytes,
+		deliveredContentBytes: value.deliveredContentBytes,
 		textBytes: value.textBytes,
 		imageBytes: value.imageBytes,
 		detailsBytes: value.detailsBytes,
 		upstreamTruncatedResults: value.upstreamTruncatedResults,
 		overBudgetResults: value.overBudgetResults,
 		potentialBytesOverBudget: value.potentialBytesOverBudget,
+		enforcedResults: value.enforcedResults,
+		actualBytesSaved: value.actualBytesSaved,
 	};
+}
+
+function expectedBudgetForClass(
+	toolClass: ContextGatewayToolClass,
+	budgets: ContextGatewayBudgets | undefined,
+): number | null {
+	if (!budgets) return null;
+	if (toolClass === "code-read") return budgets.maxExactReadBytes;
+	if (["repo-search", "repo-ast", "repo-structure", "ast-grep"].includes(toolClass)) {
+		return budgets.maxSearchBytes;
+	}
+	return budgets.maxResultBytes;
 }
 
 function safeSnapshot(result: EvalRunResult, expectedClass: ContextGatewayToolClass): SafeObserveRun {
@@ -167,11 +185,20 @@ function safeSnapshot(result: EvalRunResult, expectedClass: ContextGatewayToolCl
 		if (counters) byClass[toolClass as ContextGatewayToolClass] = pickClassTelemetry(counters);
 	}
 	const expected = byClass[expectedClass];
+	const budgetBytes = expectedBudgetForClass(expectedClass, telemetry?.budgets);
+	const lastObservation = snapshot?.lastObservation;
+	const expectedOverBudget = budgetBytes !== null && expected
+		? expected.contentBytes > budgetBytes
+		: false;
 	const observationValid = telemetry?.mode === "observe"
 		&& telemetry.maxResultBytes === OBSERVE_MAX_RESULT_BYTES
+		&& lastObservation?.toolClass === expectedClass
+		&& lastObservation.budgetBytes === budgetBytes
 		&& expected?.results === 1
 		&& expected.upstreamTruncatedResults === 1
-		&& expected.overBudgetResults === 1;
+		&& expected.overBudgetResults === (expectedOverBudget ? 1 : 0)
+		&& expected.enforcedResults === 0
+		&& expected.actualBytesSaved === 0;
 	return {
 		caseId: result.caseId,
 		model: result.model,
@@ -183,6 +210,7 @@ function safeSnapshot(result: EvalRunResult, expectedClass: ContextGatewayToolCl
 		toolCallCount: result.metrics.toolCallCount,
 		mode: telemetry?.mode ?? "missing",
 		maxResultBytes: telemetry?.maxResultBytes ?? null,
+		budgetBytes,
 		totals: snapshot ? pickClassTelemetry(snapshot) : null,
 		byClass,
 	};
@@ -192,12 +220,15 @@ function addCounters(target: ContextGatewayClassTelemetry, source: SafeClassTele
 	target.results += source.results;
 	target.errors += source.errors;
 	target.contentBytes += source.contentBytes;
+	target.deliveredContentBytes += source.deliveredContentBytes;
 	target.textBytes += source.textBytes;
 	target.imageBytes += source.imageBytes;
 	target.detailsBytes += source.detailsBytes;
 	target.upstreamTruncatedResults += source.upstreamTruncatedResults;
 	target.overBudgetResults += source.overBudgetResults;
 	target.potentialBytesOverBudget += source.potentialBytesOverBudget;
+	target.enforcedResults += source.enforcedResults;
+	target.actualBytesSaved += source.actualBytesSaved;
 }
 
 function emptyCounters(): ContextGatewayClassTelemetry {
@@ -205,12 +236,15 @@ function emptyCounters(): ContextGatewayClassTelemetry {
 		results: 0,
 		errors: 0,
 		contentBytes: 0,
+		deliveredContentBytes: 0,
 		textBytes: 0,
 		imageBytes: 0,
 		detailsBytes: 0,
 		upstreamTruncatedResults: 0,
 		overBudgetResults: 0,
 		potentialBytesOverBudget: 0,
+		enforcedResults: 0,
+		actualBytesSaved: 0,
 	};
 }
 
@@ -237,13 +271,13 @@ function renderMarkdown(startedAt: string, finishedAt: string, runs: SafeObserve
 		"",
 		"> Synthetic newly-created eval sessions only. Report contains aggregate ContextGatewayTelemetry counters; no tool arguments, result bodies, project paths, or archive references are included.",
 		"",
-		"| Case | Model | Task pass | Observation valid | Calls | Tokens | Results | Upstream-truncated | Over 8 KiB | Potential bytes over budget |",
-		"| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+		"| Case | Model | Task pass | Observation valid | Budget bytes | Calls | Tokens | Results | Upstream-truncated | Over class budget | Potential bytes over budget |",
+		"| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
 	];
 	for (const run of runs) {
-		lines.push(`| ${run.caseId} | ${run.model} | ${run.taskPassed ? "PASS" : "FAIL"} | ${run.observationValid ? "VALID" : "INVALID"} | ${run.toolCallCount} | ${run.parentTokens} | ${run.totals?.results ?? 0} | ${run.totals?.upstreamTruncatedResults ?? 0} | ${run.totals?.overBudgetResults ?? 0} | ${run.totals?.potentialBytesOverBudget ?? 0} |`);
+		lines.push(`| ${run.caseId} | ${run.model} | ${run.taskPassed ? "PASS" : "FAIL"} | ${run.observationValid ? "VALID" : "INVALID"} | ${run.budgetBytes ?? 0} | ${run.toolCallCount} | ${run.parentTokens} | ${run.totals?.results ?? 0} | ${run.totals?.upstreamTruncatedResults ?? 0} | ${run.totals?.overBudgetResults ?? 0} | ${run.totals?.potentialBytesOverBudget ?? 0} |`);
 	}
-	lines.push("", "## Aggregate by tool class", "", "| Class | Results | Upstream-truncated | Over 8 KiB | Content bytes | Details bytes | Potential bytes over budget |", "| --- | ---: | ---: | ---: | ---: | ---: | ---: |");
+	lines.push("", "## Aggregate by tool class", "", "| Class | Results | Upstream-truncated | Over class budget | Content bytes | Details bytes | Potential bytes over budget |", "| --- | ---: | ---: | ---: | ---: | ---: | ---: |");
 	for (const [toolClass, counters] of Object.entries(byClass).sort(([a], [b]) => a.localeCompare(b))) {
 		if (!counters) continue;
 		lines.push(`| ${toolClass} | ${counters.results} | ${counters.upstreamTruncatedResults} | ${counters.overBudgetResults} | ${counters.contentBytes} | ${counters.detailsBytes} | ${counters.potentialBytesOverBudget} |`);

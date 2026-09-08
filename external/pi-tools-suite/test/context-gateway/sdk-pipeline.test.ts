@@ -23,7 +23,7 @@ import {
 } from "@earendil-works/pi-ai";
 
 import { registerContextGateway } from "../../src/context-gateway/index.js";
-import type { ContextGatewayMode } from "../../src/context-gateway/types.js";
+import type { ContextGatewayBudgets, ContextGatewayMode } from "../../src/context-gateway/types.js";
 import credentialFirewall from "../../src/credential-firewall/index.js";
 import codexReasoningFix from "../../src/codex-reasoning-fix/index.js";
 import truncationMetadataNormalizer from "../../src/truncation-metadata-normalizer/index.js";
@@ -61,7 +61,10 @@ function createRunner(extensions: Extension[]): ExtensionRunner {
 	);
 }
 
-function contextGatewayExtension(mode: ContextGatewayMode): Extension {
+function contextGatewayExtension(
+	mode: ContextGatewayMode,
+	budgetOverrides: Partial<ContextGatewayBudgets> = {},
+): Extension {
 	const registered = extension(`context-gateway-${mode}`, []);
 	registered.handlers.clear();
 	registerContextGateway({
@@ -78,6 +81,7 @@ function contextGatewayExtension(mode: ContextGatewayMode): Extension {
 				maxExactReadBytes: 32768,
 				maxSearchBytes: 8192,
 				maxSearchMatches: 12,
+				...budgetOverrides,
 			},
 			issues: [],
 		}),
@@ -957,6 +961,46 @@ describe("context gateway P00: installed SDK tool_result pipeline", () => {
 			expect(jsonl).toContain(detailSentinel);
 			expect(existsSync(join(harness.root, "agent", "context-gateway"))).toBe(false);
 		}
+	});
+
+	test("selective enforce persists and delivers only the bounded recognised test summary", async () => {
+		const rawSentinel = "RAW_TEST_DETAIL_MUST_NOT_REACH_NEXT_CONTEXT";
+		const raw = [
+			"bun test v1.3.14",
+			...Array.from({ length: 30 }, (_, index) => `(pass) suite > case ${index + 1} ${rawSentinel} [1.00ms]`),
+			" 30 pass",
+			" 0 fail",
+			"Ran 30 tests across 1 file. [6.00ms]",
+		].join("\n");
+		const harness = await createHeadlessToolHarness({
+			toolName: "bash",
+			toolCallArgs: { command: "bun test test/a.test.ts" },
+			extensions: [contextGatewayExtension("enforce", { maxResultBytes: 256, maxInlineBytes: 256 })],
+			tool: {
+				name: "bash",
+				label: "test build contract",
+				description: "Return a large recognised Bun test result",
+				parameters: Type.Object({ command: Type.String() }),
+				async execute() {
+					return { content: [{ type: "text" as const, text: raw }], details: { source: "test-contract" } };
+				},
+			},
+		});
+
+		await harness.session.prompt("run the test build contract", { expandPromptTemplates: false });
+
+		expect(harness.contexts).toHaveLength(2);
+		const secondContext = JSON.stringify(harness.contexts[1]);
+		expect(secondContext).toContain("Execution outcome: SUCCESS");
+		expect(secondContext).toContain("Terminal summary: 30 passed, 0 failed, 30 tests, 1 files");
+		expect(secondContext).not.toContain(rawSentinel);
+		const sessionFile = harness.sessionManager.getSessionFile();
+		expect(sessionFile).toBeTruthy();
+		const jsonl = readFileSync(sessionFile!, "utf8");
+		expect(jsonl).toContain("Execution outcome: SUCCESS");
+		expect(jsonl).not.toContain(rawSentinel);
+		expect(jsonl).toContain('"contextGateway":{"version":1,"representation":"test-build-compact"');
+		expect(existsSync(join(harness.root, "agent", "context-gateway"))).toBe(false);
 	});
 
 	test("persists the post-hook tool result and sends it to the next model context", async () => {

@@ -29,10 +29,9 @@ export const COMPRESS_TOOL_DESCRIPTION: ToolDescription = {
 	name: "compress",
 	label: "Compress Context",
 	description: COMPRESS_RANGE_DESCRIPTION,
-	promptSnippet: "Use compress for context-pressure housekeeping: summarize closed, high-yield stale slices when context is meaningfully high or a DCP reminder gives concrete candidates; do not compress just because low-context work produced a small closed slice.",
+	promptSnippet: "Compress only closed, high-yield stale context when pressure/reminders justify it; keep active or still-needed raw context.",
 	promptGuidelines: [
-		"Compression candidates: completed implementation, verification, config/doc edits, answered exploration, dead ends, and log inspection when large/stale or context pressure is meaningful; Low context usage by itself does not require compression.",
-		"Summarize large stale shell/read/repo/web outputs, diffs, and passing logs once exact text is no longer useful; keep active or still-needed context raw.",
+		"Prefer completed work and understood large tool/log output; low context alone is not a trigger.",
 	],
 };
 

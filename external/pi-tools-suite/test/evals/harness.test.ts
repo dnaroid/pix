@@ -29,21 +29,42 @@ describe("eval harness", () => {
 				contextGatewayTelemetry: {
 					mode: "observe",
 					maxResultBytes: 8192,
+					budgets: {
+						maxInlineBytes: 8192,
+						maxResultBytes: 8192,
+						maxExactReadBytes: 32768,
+						maxSearchBytes: 8192,
+						maxSearchMatches: 12,
+					},
 					snapshot: {
 						version: 1,
 						results: 2,
 						errors: 0,
 						contentBytes: 12_000,
+						deliveredContentBytes: 12_000,
 						textBytes: 11_000,
 						imageBytes: 0,
 						detailsBytes: 100,
 						upstreamTruncatedResults: 1,
 						overBudgetResults: 1,
 						potentialBytesOverBudget: 3_808,
+						enforcedResults: 0,
+						actualBytesSaved: 0,
+						pendingCalls: 0,
 						unboundResults: 0,
 						repeatCandidateCount: 0,
+						sameSourceDifferentRangeCount: 0,
 						retrievalCalls: 0,
 						nativePolicy: { results: 0, refusals: 0, fullOverrides: 0, byReason: {} },
+						testOutput: {
+							parserVersion: 1,
+							results: 0,
+							scanLimitedResults: 0,
+							compactCandidates: 0,
+							passthroughRecommended: 0,
+							byClassification: { recognised: 0, partial: 0, unrecognised: 0 },
+							byFormat: { "bun-test": 0, tap: 0, typescript: 0, mixed: 0, unknown: 0 },
+						},
 						byClass: {},
 					},
 				},
@@ -108,9 +129,12 @@ describe("eval harness", () => {
 				.split("\n")
 				.map((line) => JSON.parse(line));
 			const snapshot = events.at(-1)?.contextGatewayTelemetry?.snapshot;
+			const budgets = events.at(-1)?.contextGatewayTelemetry?.budgets;
 			expect(snapshot?.results).toBe(1);
 			expect(snapshot?.upstreamTruncatedResults).toBe(1);
-			expect(snapshot?.overBudgetResults).toBe(1);
+			expect(snapshot?.overBudgetResults).toBe(0);
+			expect(snapshot?.lastObservation?.budgetBytes).toBe(32_768);
+			expect(budgets?.maxExactReadBytes).toBe(32_768);
 			expect(snapshot?.byClass?.["code-read"]?.results).toBe(1);
 			const serializedSnapshot = JSON.stringify(snapshot);
 			expect(serializedSnapshot).not.toContain("PRIVATE_RECORDER_ARG.ts");

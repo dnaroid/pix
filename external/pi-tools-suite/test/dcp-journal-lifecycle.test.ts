@@ -95,9 +95,9 @@ describe("DCP journal lifecycle", () => {
 
       const statefulUser = beforeCompression.messages[0];
       const firstCarrier = JSON.stringify(statefulUser.content);
-      expect(firstCarrier).toContain("m001=this user message");
+      expect(firstCarrier).toContain("m001=u");
       const currentCarrier = JSON.stringify(beforeCompression.messages.at(-1)?.content);
-      const assistantIdMatch = currentCarrier.match(/(m\d+)=preceding assistant message/);
+      const assistantIdMatch = currentCarrier.match(/(m\d+)=a/);
       expect(assistantIdMatch?.[1]).toBeDefined();
 
       const compress = first.tools.get("compress");
