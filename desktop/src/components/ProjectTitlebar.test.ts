@@ -7,4 +7,12 @@ describe("ProjectTitlebar project opening actions", () => {
     expect(titlebarSource).toContain("onclick={onChooseWorkspaceInNewWindow}");
     expect(titlebarSource).toContain("Choose project folder in new window…");
   });
+
+  it("keeps the selector and new-window actions usable while current-window navigation is busy", () => {
+    expect(titlebarSource).toContain("currentWindowDisabled");
+    expect(titlebarSource).toContain("disabled={currentWindowDisabled}");
+    expect(titlebarSource).not.toContain("{disabled}");
+    expect(titlebarSource).toContain("onclick={() => onOpenProjectInNewWindow(project)}");
+    expect(titlebarSource).toContain("onclick={onChooseWorkspaceInNewWindow}");
+  });
 });

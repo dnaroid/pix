@@ -193,6 +193,7 @@
   };
 
   const SESSION_PREWARM_LIMIT = 2;
+  const TRANSCRIPT_BOTTOM_THRESHOLD_PX = 24;
 
   let client = $state<AcpClient | null>(null);
   let status = $state<ConnectionStatus>("starting");
@@ -244,6 +245,8 @@
   let queueActionRunning = $state(false);
   let imagePromptSupported = false;
   let transcriptPane = $state<HTMLDivElement | null>(null);
+  let transcriptContent = $state<HTMLDivElement | null>(null);
+  let transcriptFollowsLatest = $state(true);
   let promptComposer = $state<{ focus: () => Promise<void> } | null>(null);
   let localMessageId = 0;
   let reconnectPromise: Promise<void> | null = null;
@@ -356,6 +359,28 @@
         autocompleteDebounceMs = settings.debounceMs;
       })
       .catch(() => {});
+  });
+
+  $effect(() => {
+    const sessionId = activeSessionId;
+    const frame = requestAnimationFrame(() => {
+      if (sessionId !== activeSessionId) return;
+      transcriptFollowsLatest = true;
+      scheduleScrollToLatest();
+    });
+    return () => cancelAnimationFrame(frame);
+  });
+
+  $effect(() => {
+    const pane = transcriptPane;
+    const content = transcriptContent;
+    if (!pane || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      if (transcriptFollowsLatest) scheduleScrollToLatest();
+    });
+    observer.observe(pane);
+    if (content) observer.observe(content);
+    return () => observer.disconnect();
   });
 
   onMount(() => {
@@ -535,7 +560,6 @@
     if (queued.length === 0) return;
 
     const activeId = activeSessionId;
-    const followLatest = activeId ? transcriptIsNearBottom() : false;
     const updatesBySession = new Map<string, SessionUpdate[]>();
     for (const entry of queued) {
       const updates = updatesBySession.get(entry.sessionId);
@@ -551,19 +575,35 @@
       transcriptBySessionId.set(sessionId, nextTranscript);
       if (sessionId === activeId) transcript = nextTranscript;
     }
-    if (activeId && followLatest) scheduleScrollToLatest();
+    if (activeId && transcriptFollowsLatest) scheduleScrollToLatest();
   }
 
   function transcriptIsNearBottom(): boolean {
     const pane = transcriptPane;
     if (!pane) return true;
-    return pane.scrollHeight - pane.scrollTop - pane.clientHeight < 160;
+    return pane.scrollHeight - pane.scrollTop - pane.clientHeight <= TRANSCRIPT_BOTTOM_THRESHOLD_PX;
+  }
+
+  function handleTranscriptScroll(): void {
+    const followsLatest = transcriptIsNearBottom();
+    if (followsLatest === transcriptFollowsLatest) return;
+    transcriptFollowsLatest = followsLatest;
+    if (!followsLatest && transcriptScrollFrame) {
+      cancelAnimationFrame(transcriptScrollFrame);
+      transcriptScrollFrame = 0;
+    }
+  }
+
+  function jumpToLatest(): void {
+    transcriptFollowsLatest = true;
+    scheduleScrollToLatest();
   }
 
   function scheduleScrollToLatest(): void {
-    if (transcriptScrollFrame) return;
+    if (!transcriptFollowsLatest || transcriptScrollFrame) return;
     transcriptScrollFrame = requestAnimationFrame(() => {
       transcriptScrollFrame = 0;
+      if (!transcriptFollowsLatest) return;
       const pane = transcriptPane;
       if (pane) pane.scrollTop = pane.scrollHeight;
     });
@@ -766,9 +806,8 @@
     const next = appendLocalUserMessage(current, message.displayText || draft.text, messageId, draft.attachments);
     transcriptBySessionId.set(sessionId, next);
     if (sessionId === activeSessionId) {
-      const followLatest = transcriptIsNearBottom();
       transcript = next;
-      if (followLatest) scheduleScrollToLatest();
+      if (transcriptFollowsLatest) scheduleScrollToLatest();
     }
   }
 
@@ -997,7 +1036,6 @@
   }
 
   async function chooseWorkspaceInNewWindow(): Promise<void> {
-    if (anyPromptRunning || operationRunning || tasksSaving || taskActionId) return;
     closeProjectSelector();
     const selected = await open({
       directory: true,
@@ -1023,7 +1061,7 @@
   }
 
   function openWorkspaceInNewWindow(selected: string): void {
-    if (anyPromptRunning || operationRunning || tasksSaving || taskActionId || !isAbsoluteProjectPath(selected)) return;
+    if (!isAbsoluteProjectPath(selected)) return;
     closeProjectSelector();
     rememberProject(selected);
     const label = `project-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -2940,7 +2978,13 @@
 
   function scrollToTranscriptEntry(entryId: string): void {
     const target = transcriptPane?.querySelector<HTMLElement>(`[data-transcript-entry-id="${CSS.escape(entryId)}"]`);
-    target?.scrollIntoView({ behavior: "smooth", block: "center" });
+    if (!target) return;
+    transcriptFollowsLatest = false;
+    if (transcriptScrollFrame) {
+      cancelAnimationFrame(transcriptScrollFrame);
+      transcriptScrollFrame = 0;
+    }
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
   function normalizedPromptText(value: string): string {
@@ -3251,8 +3295,11 @@
   }
 
   async function scrollToLatest(): Promise<void> {
+    if (!transcriptFollowsLatest) return;
     await tick();
-    transcriptPane?.scrollTo({ top: transcriptPane.scrollHeight, behavior: "smooth" });
+    if (!transcriptFollowsLatest) return;
+    const pane = transcriptPane;
+    if (pane) pane.scrollTop = pane.scrollHeight;
   }
 
 </script>
@@ -3268,7 +3315,7 @@
       {workspace}
       {recentProjects}
       open={projectSelectorOpen}
-      disabled={anyPromptRunning || operationRunning || tasksSaving || taskActionId !== null}
+      currentWindowDisabled={anyPromptRunning || operationRunning || tasksSaving || taskActionId !== null}
       onToggle={toggleProjectSelector}
       onSelectProject={(path) => void selectWorkspace(path)}
       onOpenProjectInNewWindow={openWorkspaceInNewWindow}
@@ -3360,6 +3407,10 @@
         {operationRunning}
         historyLoading={sessionHistoryLoading}
         bind:pane={transcriptPane}
+        bind:content={transcriptContent}
+        showScrollToBottom={!transcriptFollowsLatest}
+        onScroll={handleTranscriptScroll}
+        onScrollToBottom={jumpToLatest}
         onChooseWorkspace={() => void chooseWorkspace()}
         onOpenAttachment={(attachment) => void activateAttachment(attachment)}
         onPrepareAttachment={prepareTranscriptAttachment}

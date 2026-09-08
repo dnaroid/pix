@@ -11,7 +11,7 @@
     workspace,
     recentProjects,
     open,
-    disabled,
+    currentWindowDisabled,
     onToggle,
     onSelectProject,
     onOpenProjectInNewWindow,
@@ -22,7 +22,7 @@
     workspace: string;
     recentProjects: string[];
     open: boolean;
-    disabled: boolean;
+    currentWindowDisabled: boolean;
     onToggle: () => void;
     onSelectProject: (path: string) => void;
     onOpenProjectInNewWindow: (path: string) => void;
@@ -68,7 +68,7 @@
   <button
     use:titlebarDrag
     bind:this={trigger}
-    class="flex h-7 min-w-0 max-w-[220px] items-center gap-2 rounded-lg bg-transparent px-2.5 text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+    class="flex h-7 min-w-0 max-w-[220px] items-center gap-2 rounded-lg bg-transparent px-2.5 text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring"
     type="button"
     title={workspace || "Choose project"}
     aria-label={workspace ? `Change project, current project: ${projectName(workspace)}` : "Choose project"}
@@ -76,7 +76,6 @@
     aria-expanded={open}
     onclick={onToggle}
     onkeydown={handleTriggerKeydown}
-    {disabled}
   >
     <ProjectFolderIcon project={workspace || "workspace"} class="h-4 w-4 shrink-0" />
     <strong class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-medium text-foreground">
@@ -114,7 +113,7 @@
               type="button"
               aria-current={selected ? "true" : undefined}
               onclick={() => onSelectProject(project)}
-              {disabled}
+              disabled={currentWindowDisabled}
             >
               <ProjectFolderIcon {project} class="h-[18px] w-[18px] justify-self-center" />
               <span class="min-w-0">
@@ -138,7 +137,6 @@
               title={`Open ${projectName(project)} in a new window`}
               aria-label={`Open ${projectName(project)} in a new window`}
               onclick={() => onOpenProjectInNewWindow(project)}
-              {disabled}
             >
               <ExternalLink class="h-3.5 w-3.5" aria-hidden="true" />
             </button>
@@ -154,7 +152,7 @@
           data-project-option
           type="button"
           onclick={onChooseWorkspace}
-          {disabled}
+          disabled={currentWindowDisabled}
         >
           <FolderPlus class="h-4 w-4 justify-self-center text-primary" aria-hidden="true" />
           <span class="min-w-0">
@@ -167,7 +165,6 @@
           data-project-option
           type="button"
           onclick={onChooseWorkspaceInNewWindow}
-          {disabled}
         >
           <ExternalLink class="h-4 w-4 justify-self-center text-primary" aria-hidden="true" />
           <span class="min-w-0">

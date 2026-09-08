@@ -1,4 +1,4 @@
-# Spec: File link opening
+# File link opening
 
 ## Type
 

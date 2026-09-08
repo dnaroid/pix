@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ArrowDown from "@lucide/svelte/icons/arrow-down";
   import Brain from "@lucide/svelte/icons/brain";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import type { Attachment } from "../lib/attachments";
@@ -18,6 +19,10 @@
     operationRunning,
     historyLoading,
     pane = $bindable(null),
+    content = $bindable(null),
+    showScrollToBottom,
+    onScroll,
+    onScrollToBottom,
     onChooseWorkspace,
     onOpenAttachment,
     onPrepareAttachment,
@@ -34,6 +39,10 @@
     operationRunning: boolean;
     historyLoading: boolean;
     pane?: HTMLDivElement | null;
+    content?: HTMLDivElement | null;
+    showScrollToBottom: boolean;
+    onScroll: () => void;
+    onScrollToBottom: () => void;
     onChooseWorkspace: () => void;
     onOpenAttachment: (attachment: Attachment) => void;
     onPrepareAttachment: (attachment: Attachment) => Promise<void>;
@@ -60,7 +69,8 @@
   }
 </script>
 
-<div class="transcript-pane row-start-2 min-h-0 overflow-auto scroll-smooth" bind:this={pane} aria-live="polite">
+<div class="relative row-start-2 min-h-0 min-w-0">
+  <div class="transcript-pane h-full min-h-0 overflow-auto" bind:this={pane} aria-live="polite" onscroll={onScroll}>
   {#if !activeSessionId}
     <section class="grid h-full place-items-center content-center p-10 text-center">
       {#if workspace}
@@ -90,7 +100,7 @@
       </p>
     </section>
   {:else}
-    <div class="w-full px-6 pt-[22px] pb-[54px] max-[760px]:px-3">
+    <div class="w-full px-6 pt-[22px] pb-[54px] max-[760px]:px-3" bind:this={content}>
       {#each displayItems as item (item.id)}
         {#if item.type === "message"}
           {#if item.role === "thought"}
@@ -184,6 +194,18 @@
         </div>
       {/if}
     </div>
+    {/if}
+  </div>
+  {#if activeSessionId && showScrollToBottom}
+    <button
+      type="button"
+      class="absolute bottom-4 left-1/2 z-20 grid h-9 w-9 -translate-x-1/2 place-items-center rounded-full border border-border bg-background/95 text-foreground shadow-md backdrop-blur transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+      aria-label="Jump to latest message"
+      title="Jump to latest message"
+      onclick={onScrollToBottom}
+    >
+      <ArrowDown class="h-4 w-4" aria-hidden="true" />
+    </button>
   {/if}
 </div>
 
