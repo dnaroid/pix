@@ -108,7 +108,7 @@ function harness(project: string) {
 		},
 		reload: async () => { reloads += 1; },
 	} as any;
-	return { commands, handlers, messages, notices, widgets, ctx, get reloads() { return reloads; } };
+	return { pi, commands, handlers, messages, notices, widgets, ctx, get reloads() { return reloads; } };
 }
 
 async function waitFor(predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
@@ -171,6 +171,50 @@ describe("resource registry", () => {
 			actions: ["uninstall", "remove"],
 		});
 		expect(h.reloads).toBe(1);
+	});
+
+	test("serializes the startup Desktop snapshot with the Registry panel refresh", async () => {
+		const root = tempRoot();
+		const home = path.join(root, "home");
+		const project = path.join(root, "project");
+		fs.mkdirSync(home, { recursive: true });
+		fs.mkdirSync(project, { recursive: true });
+		process.env.HOME = home;
+		process.env.XDG_CACHE_HOME = path.join(root, "cache");
+		process.env.PIX_ACP_SESSION_STATE_BRIDGE = "1";
+		const { remote } = createRegistry(root);
+		const h = harness(project);
+		const command = h.commands.get("registry");
+		const exec = h.pi.exec.bind(h.pi);
+		let activeDesktopClones = 0;
+		let maxActiveDesktopClones = 0;
+
+		h.pi.exec = async (gitCommand: string, args: string[], options: { cwd?: string } = {}) => {
+			const desktopClone = gitCommand === "git"
+				&& args[0] === "clone"
+				&& args.at(-1)?.includes(`resource-registry-desktop-${process.pid}`);
+			if (!desktopClone) return exec(gitCommand, args, options);
+			activeDesktopClones += 1;
+			maxActiveDesktopClones = Math.max(maxActiveDesktopClones, activeDesktopClones);
+			try {
+				await Bun.sleep(50);
+				return await exec(gitCommand, args, options);
+			} finally {
+				activeDesktopClones -= 1;
+			}
+		};
+
+		await command.handler(`configure ${remote} main`, h.ctx);
+		const startupHandler = h.handlers.get("session_start")?.[0];
+		expect(startupHandler).toBeDefined();
+		startupHandler?.({ type: "session_start", reason: "reload" }, h.ctx);
+		await command.handler("rpc refresh", h.ctx);
+		await waitFor(() => h.widgets.length >= 2);
+
+		const snapshots = h.widgets.slice(-2).map((widget) => JSON.parse(widget.lines?.[1] ?? "null"));
+		expect(maxActiveDesktopClones).toBe(1);
+		expect(snapshots).toHaveLength(2);
+		expect(snapshots.every((snapshot) => snapshot?.configured === true && snapshot?.error === undefined)).toBe(true);
 	});
 
 	test("drops a deferred Desktop registry snapshot after its session context becomes stale", async () => {

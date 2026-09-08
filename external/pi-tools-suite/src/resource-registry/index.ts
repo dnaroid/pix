@@ -313,6 +313,24 @@ function registryUiCacheRoot(): string {
 	return `${cacheRoot()}-desktop-${process.pid}`;
 }
 
+const registryUiCacheQueues = new Map<string, Promise<void>>();
+
+async function withRegistryUiCache<T>(cacheDir: string, task: () => Promise<T>): Promise<T> {
+	const previous = registryUiCacheQueues.get(cacheDir) ?? Promise.resolve();
+	let release!: () => void;
+	const turn = new Promise<void>((resolve) => { release = resolve; });
+	const tail = previous.then(() => turn);
+	registryUiCacheQueues.set(cacheDir, tail);
+
+	await previous;
+	try {
+		return await task();
+	} finally {
+		release();
+		if (registryUiCacheQueues.get(cacheDir) === tail) registryUiCacheQueues.delete(cacheDir);
+	}
+}
+
 function loadRuntimeConfig(cwd: string): RegistryRuntime {
 	const config = loadPiToolsSuiteConfig([], { cwd }).resourceRegistry;
 	if (!config.remote) {
@@ -973,22 +991,24 @@ async function collectRegistryUiSnapshot(
 	}
 	const configuredRuntime = loadRuntimeConfig(ctx.cwd);
 	const runtime: RegistryRuntime = { ...configuredRuntime, cacheDir: registryUiCacheRoot() };
-	await ensureRegistryCache(pi, runtime);
-	const [statuses, projectStatus] = await Promise.all([
-		collectStatuses(pi, ctx, runtime),
-		collectProjectStatuses(pi, ctx, runtime),
-	]);
-	return {
-		version: 1,
-		configured: true,
-		remote: runtime.remote,
-		branch: runtime.branch,
-		...(projectStatus.projectKey ? { projectKey: projectStatus.projectKey } : {}),
-		...(projectStatus.issue ? { projectIssue: projectStatus.issue } : {}),
-		items: registryUiItems(statuses, projectStatus),
-		checkedAt,
-		...(error ? { error } : {}),
-	};
+	return withRegistryUiCache(runtime.cacheDir, async () => {
+		await ensureRegistryCache(pi, runtime);
+		const [statuses, projectStatus] = await Promise.all([
+			collectStatuses(pi, ctx, runtime),
+			collectProjectStatuses(pi, ctx, runtime),
+		]);
+		return {
+			version: 1,
+			configured: true,
+			remote: runtime.remote,
+			branch: runtime.branch,
+			...(projectStatus.projectKey ? { projectKey: projectStatus.projectKey } : {}),
+			...(projectStatus.issue ? { projectIssue: projectStatus.issue } : {}),
+			items: registryUiItems(statuses, projectStatus),
+			checkedAt,
+			...(error ? { error } : {}),
+		};
+	});
 }
 
 async function publishRegistryUiSnapshot(
