@@ -16,7 +16,7 @@ export type RecoveryCaseId = keyof typeof RECOVERY_FACTS;
 
 const LARGE_LINE_COUNT = 2_500;
 const BLOCK_DISCOVERY = [
-	"repo_architecture", "repo_search", "repo_structure", "repo_ast", "repo_explain", "repo_deps",
+	"repo_architecture", "repo_search", "repo_structure", "repo_ast", "repo_explain", "repo_deps", "repo_knowledge",
 	"todo", "subagents", "async_subagents_spawn", "Grep", "grep", "Glob", "find",
 ];
 

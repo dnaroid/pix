@@ -3,7 +3,7 @@ import { Type } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
 import { asyncSubagentToolDescriptions } from "../../tool-descriptions.js";
 import { SUBAGENT_TYPE_SELECTION_GUIDANCE } from "../core/agent-catalog.js";
-import { hasIndexedProjectRoot } from "../../lib/project.js";
+import { hasAvailableIndexedProjectRoot } from "../../lib/project.js";
 import type { AgentCompletionHandler, RpcEventRecord } from "../lib.js";
 import { DEFAULT_SPAWN_WATCH_SECONDS, INLINE_RENDERING } from "../constants.js";
 import { renderSubagentSpawnPrompts } from "../render.js";
@@ -75,7 +75,7 @@ export function registerSubagentsTool(
 	onLiveAgentsChange?: () => void,
 	onAgentRpcEvent?: (runDir: string, agentId: string, event: RpcEventRecord) => void,
 ): void {
-	const toolDescriptions = asyncSubagentToolDescriptions(hasIndexedProjectRoot());
+	const toolDescriptions = asyncSubagentToolDescriptions(hasAvailableIndexedProjectRoot());
 	const collector = new ToolCollector();
 	registerSpawnTool(collector as any, liveAgents, handleAgentCompletion, onLiveAgentsChange, onAgentRpcEvent);
 	registerStatusTool(collector as any);

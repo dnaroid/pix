@@ -1,6 +1,6 @@
 import path from "node:path";
-import { REPO_DISCOVERY_TOOLS } from "../tool-descriptions";
-import { directoryExists, findIndexedProjectRoot, findProjectRoot } from "../lib/project.js";
+import { REPO_DISCOVERY_TOOLS, REPO_KNOWLEDGE_TOOL_DESCRIPTION } from "../tool-descriptions";
+import { commandAvailable, directoryExists, findProjectRoot, hasAvailableIndexedProjectRoot } from "../lib/project.js";
 import {
 	applyNativeCompactPolicy,
 	describeNativeCompactArgs,
@@ -12,6 +12,28 @@ import {
 } from "./native-compact.js";
 
 const IDX_COMMANDS = ["architecture", "structure", "ast", "search", "explain", "deps"] as const;
+const REPO_KNOWLEDGE_ACTIONS = [
+	"context",
+	"search",
+	"show",
+	"status",
+	"audit",
+	"discover",
+	"impact",
+	"catalog",
+	"record",
+	"verify",
+	"relate",
+	"remove",
+] as const;
+const REPO_KNOWLEDGE_MUTATING_ACTIONS = new Set<string>(["record", "verify", "relate", "remove"]);
+const FILE_MUTATION_TOOL_NAMES = new Set(["write", "edit", "multiedit", "apply_patch", "ast_apply"]);
+const KNOWLEDGE_NUDGE_WINDOW_MS = 15_000;
+const KNOWLEDGE_MUTATION_NUDGE = [
+	"📚 repo_knowledge checkpoint — if this mutation materially changed project behavior/contract semantics, do not finish yet:",
+	"keep or create the authoritative primary spec in this task, run task-scoped repo_knowledge action=impact on the changed implementation paths, repair only evidence-backed relations, and action=verify only after reviewing the primary source plus relevant code/tests.",
+	"Skip this checkpoint for mechanical/non-behavioral edits.",
+].join(" ");
 const TARGET_COMMANDS = new Set<string>(["ast", "search", "explain", "deps"]);
 const DEFAULT_MAX_LINES = 2000;
 const DEFAULT_MAX_BYTES = 50_000;
@@ -22,6 +44,12 @@ const SYSTEM_CUSTOM_MESSAGE_TYPE = "pix-system";
 const idxExecutionQueues = new Map<string, Promise<void>>();
 
 type IdxCommand = (typeof IDX_COMMANDS)[number];
+type RepoKnowledgeAction = (typeof REPO_KNOWLEDGE_ACTIONS)[number];
+type KnowledgeClassification = "spec" | "spec-like" | "meta-index" | "design-only" | "guide" | "other";
+type KnowledgeBehaviorType = "as-is" | "change" | "mixed" | "unknown";
+type KnowledgeLifecycle = "active" | "proposed" | "historical" | "superseded" | "unknown";
+type KnowledgeRelationKind = "implements" | "tests" | "related" | "supersedes" | "superseded-by";
+type KnowledgeRelationAction = "add" | "remove";
 
 type RepoDiscoveryParams = {
 	command: IdxCommand;
@@ -34,6 +62,39 @@ type RepoDiscoveryParams = {
 
 type RepoDiscoveryWrapperParams = Omit<RepoDiscoveryParams, "command">;
 
+type RepoKnowledgeParams = {
+	action: RepoKnowledgeAction;
+	query?: string;
+	path?: string;
+	paths?: string[];
+	classification?: KnowledgeClassification;
+	behaviorType?: KnowledgeBehaviorType;
+	lifecycle?: KnowledgeLifecycle;
+	confidence?: "high" | "medium" | "low" | "unknown";
+	summary?: string;
+	topics?: string[];
+	includeSecondary?: boolean;
+	pathPrefix?: string;
+	limit?: number;
+	budget?: number;
+	maxSpecs?: number;
+	maxCode?: number;
+	maxTests?: number;
+	includeAll?: boolean;
+	allUnclassified?: boolean;
+	base?: string;
+	semantic?: boolean;
+	relationAction?: KnowledgeRelationAction;
+	relationKind?: KnowledgeRelationKind;
+	targetPaths?: string[];
+	sourceReviewed?: boolean;
+	evidenceReviewed?: boolean;
+	metadataOnlyConfirmed?: boolean;
+	maxLines?: number;
+	maxBytes?: number;
+	outputMode?: RepoDiscoveryOutputMode;
+};
+
 type ExecResult = {
 	stdout: string;
 	stderr: string;
@@ -45,10 +106,17 @@ type ExtensionAPI = {
 	registerCommand(name: string, command: { description: string; handler: (args: string, ctx: CommandContext) => Promise<void> }): void;
 	sendMessage<T = unknown>(message: { customType: string; content: string; display: boolean; details?: T }): void;
 	exec(command: string, args: string[], options: { cwd?: string; signal?: AbortSignal; timeout?: number }): Promise<ExecResult>;
+	on?(event: "tool_result", handler: (event: RepoMutationResultEvent, ctx: ToolContext) => Promise<{ content: unknown[] } | undefined>): void;
 };
 
 type ToolContext = {
 	cwd: string;
+};
+
+type RepoMutationResultEvent = {
+	toolName: string;
+	isError?: boolean;
+	content: unknown[];
 };
 
 type CommandContext = {
@@ -108,6 +176,16 @@ function positiveInteger(value: number | undefined, fallback: number): number {
 
 function ensureIndexedProject(cwd: string, toolName: string) {
 	const projectRoot = findProjectRoot(cwd);
+	if (!commandAvailable("idx")) {
+		return {
+			projectRoot,
+			error: [
+				`${toolName} is unavailable because idx is not on PATH.`,
+				"Do not initialize, install, or create project-local index state implicitly.",
+				"If the user wants indexed repository tools, ask for explicit permission to run /idx-init, then /reload.",
+			].join("\n"),
+		};
+	}
 	const indexerDir = path.join(projectRoot, ".indexer-cli");
 	if (directoryExists(indexerDir)) return { projectRoot, initialized: false };
 
@@ -124,7 +202,6 @@ function ensureIndexedProject(cwd: string, toolName: string) {
 async function initializeIndexedProject(pi: ExtensionAPI, cwd: string, signal: AbortSignal | undefined) {
 	const projectRoot = findProjectRoot(cwd);
 	const indexerDir = path.join(projectRoot, ".indexer-cli");
-	if (directoryExists(indexerDir)) return { projectRoot, initialized: false, alreadyIndexed: true, output: "Project is already indexed." };
 
 	const idxCli = await ensureIdxCliAvailable(pi, projectRoot, signal);
 	if (!idxCli.available) {
@@ -134,6 +211,17 @@ async function initializeIndexedProject(pi: ExtensionAPI, cwd: string, signal: A
 			alreadyIndexed: false,
 			output: idxCli.output,
 			exitCode: idxCli.exitCode,
+			installedIdx: idxCli.installed,
+		};
+	}
+	if (directoryExists(indexerDir)) {
+		return {
+			projectRoot,
+			initialized: false,
+			alreadyIndexed: true,
+			output: idxCli.installed
+				? `idx was installed and the project is already indexed: ${projectRoot}. Run /reload to expose repo_* tools.`
+				: "Project is already indexed.",
 			installedIdx: idxCli.installed,
 		};
 	}
@@ -322,6 +410,159 @@ async function executeRepoDiscovery(
 	});
 }
 
+function nonEmpty(value: unknown): value is string {
+	return typeof value === "string" && value.trim().length > 0;
+}
+
+function normalizedStrings(value: unknown): string[] {
+	if (!Array.isArray(value)) return [];
+	return [...new Set(value.filter((item): item is string => nonEmpty(item)).map((item) => item.trim()))];
+}
+
+function positiveBounded(value: number | undefined, fallback: number, maximum: number): number {
+	if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) return fallback;
+	return Math.min(value, maximum);
+}
+
+function buildRepoKnowledgeArgs(params: RepoKnowledgeParams): string[] | string {
+	if (!REPO_KNOWLEDGE_ACTIONS.includes(params.action)) {
+		return `Invalid repo_knowledge action. Use one of: ${REPO_KNOWLEDGE_ACTIONS.join(", ")}.`;
+	}
+
+	const query = params.query?.trim();
+	const sourcePath = params.path?.trim();
+	const paths = normalizedStrings(params.paths);
+	const topics = normalizedStrings(params.topics);
+	const targets = normalizedStrings(params.targetPaths);
+
+	switch (params.action) {
+		case "context": {
+			if (!query) return "repo_knowledge action=context requires query.";
+			const args = [
+				"context",
+				query,
+				"--budget",
+				String(positiveBounded(params.budget, 1400, 8000)),
+				"--max-specs",
+				String(positiveBounded(params.maxSpecs, 4, 20)),
+				"--max-code",
+				String(positiveBounded(params.maxCode, 6, 30)),
+				"--max-tests",
+				String(positiveBounded(params.maxTests, 4, 20)),
+			];
+			if (params.includeSecondary) args.push("--include-secondary");
+			if (nonEmpty(params.pathPrefix)) args.push("--path-prefix", params.pathPrefix.trim());
+			return args;
+		}
+		case "search": {
+			if (!query) return "repo_knowledge action=search requires query.";
+			const args = ["wiki", "search", query, "--limit", String(positiveBounded(params.limit, 5, 20))];
+			if (params.includeSecondary) args.push("--include-secondary");
+			if (nonEmpty(params.pathPrefix)) args.push("--path-prefix", params.pathPrefix.trim());
+			return args;
+		}
+		case "show":
+			return sourcePath ? ["wiki", "show", "--path", sourcePath] : "repo_knowledge action=show requires path.";
+		case "status":
+		case "audit":
+			return ["wiki", params.action, "--candidate-limit", String(positiveBounded(params.limit, 20, 100))];
+		case "discover": {
+			if (params.includeAll && params.allUnclassified) return "repo_knowledge discover cannot combine includeAll and allUnclassified.";
+			const args = ["wiki", "discover", "--limit", String(positiveBounded(params.limit, 40, 200))];
+			if (params.includeAll) args.push("--all");
+			if (params.allUnclassified) args.push("--all-unclassified");
+			return args;
+		}
+		case "impact": {
+			const args = ["wiki", "impact", ...paths];
+			if (nonEmpty(params.base)) args.push("--base", params.base.trim());
+			args.push("--semantic-limit", String(positiveBounded(params.limit, 5, 20)));
+			if (params.semantic === false) args.push("--no-semantic");
+			return args;
+		}
+		case "catalog":
+			return ["wiki", "catalog"];
+		case "record": {
+			if (!sourcePath) return "repo_knowledge action=record requires path.";
+			if (!params.classification) return "repo_knowledge action=record requires classification.";
+			if (params.sourceReviewed !== true) return "repo_knowledge record refused: read/classify the source first, then retry with sourceReviewed=true.";
+			if (["spec", "spec-like"].includes(params.classification) && (!params.behaviorType || !params.lifecycle)) {
+				return "repo_knowledge record for primary knowledge requires behaviorType and lifecycle.";
+			}
+			const args = ["wiki", "record", "--path", sourcePath, "--classification", params.classification];
+			if (params.behaviorType) args.push("--type", params.behaviorType);
+			if (params.lifecycle) args.push("--lifecycle", params.lifecycle);
+			if (params.confidence) args.push("--confidence", params.confidence);
+			if (nonEmpty(params.summary)) args.push("--summary", params.summary.trim());
+			for (const topic of topics) args.push("--topic", topic);
+			return args;
+		}
+		case "verify":
+			if (!sourcePath) return "repo_knowledge action=verify requires path.";
+			if (params.evidenceReviewed !== true) return "repo_knowledge verify refused: inspect the primary source and relevant code/tests first, then retry with evidenceReviewed=true.";
+			return ["wiki", "verify", "--path", sourcePath];
+		case "relate": {
+			if (!sourcePath) return "repo_knowledge action=relate requires path.";
+			if (params.evidenceReviewed !== true) return "repo_knowledge relate refused: review concrete evidence first; semantic/graph similarity alone is insufficient. Retry with evidenceReviewed=true.";
+			if (!params.relationAction || !params.relationKind || targets.length === 0) {
+				return "repo_knowledge relate requires relationAction, relationKind, and targetPaths.";
+			}
+			const flags: Record<KnowledgeRelationKind, Record<KnowledgeRelationAction, string>> = {
+				implements: { add: "--add-code", remove: "--remove-code" },
+				tests: { add: "--add-test", remove: "--remove-test" },
+				related: { add: "--add-related-spec", remove: "--remove-related-spec" },
+				supersedes: { add: "--add-supersedes", remove: "--remove-supersedes" },
+				"superseded-by": { add: "--add-superseded-by", remove: "--remove-superseded-by" },
+			};
+			const args = ["wiki", "relate", "--path", sourcePath];
+			const flag = flags[params.relationKind][params.relationAction];
+			for (const target of targets) args.push(flag, target);
+			return args;
+		}
+		case "remove":
+			if (!sourcePath) return "repo_knowledge action=remove requires path.";
+			if (params.metadataOnlyConfirmed !== true) return "repo_knowledge remove refused: confirm that only knowledge metadata should be removed and the source document must remain, then retry with metadataOnlyConfirmed=true.";
+			return ["wiki", "remove", "--path", sourcePath];
+	}
+}
+
+async function executeRepoKnowledge(
+	pi: ExtensionAPI,
+	params: RepoKnowledgeParams,
+	signal: AbortSignal | undefined,
+	ctx: ToolContext,
+	profile: RepoDiscoveryProfile,
+) {
+	if (signal?.aborted) return textResult("repo_knowledge cancelled");
+	const idxArgs = buildRepoKnowledgeArgs(params);
+	if (typeof idxArgs === "string") return textResult(idxArgs, true, { action: params.action });
+
+	const indexedProject = ensureIndexedProject(ctx.cwd, "repo_knowledge");
+	if (indexedProject.error) return textResult(indexedProject.error, true, { projectRoot: indexedProject.projectRoot, action: params.action });
+
+	const result = await runQueuedIdx(indexedProject.projectRoot, () =>
+		pi.exec("idx", idxArgs, { cwd: indexedProject.projectRoot, signal, timeout: 180_000 }),
+	);
+	const exitCode = result.code ?? 0;
+	const combined = [result.stdout, result.stderr].filter(Boolean).join(result.stdout && result.stderr ? "\n" : "");
+	const output = combined.trim() ? combined : "No output";
+	const native = profile === "native-compact";
+	const maxLines = positiveInteger(params.maxLines, native ? 400 : 600);
+	const maxBytes = positiveInteger(params.maxBytes, native ? 12_000 : 20_000);
+	const truncated = native
+		? truncateNativeCompactOutput(output, Math.min(maxLines, params.outputMode === "full" ? 2_000 : 400), Math.min(maxBytes, params.outputMode === "full" ? 50_000 : 12_000), params.outputMode ?? "compact")
+		: truncateOutput(output, Math.min(maxLines, 2_000), Math.min(maxBytes, 50_000));
+
+	return textResult(truncated.text, exitCode !== 0, {
+		action: params.action,
+		mutating: REPO_KNOWLEDGE_MUTATING_ACTIONS.has(params.action),
+		command: ["idx", ...idxArgs],
+		cwd: indexedProject.projectRoot,
+		exitCode,
+		truncation: truncated.truncation,
+	});
+}
+
 const BASELINE_REPO_TOOL_PROPERTIES = {
 	maxLines: numberSchema("Returned line cap, keeps top lines (default 2000). Prefer native limits/cursors before raising.", DEFAULT_MAX_LINES),
 	maxBytes: numberSchema("Returned byte cap, keeps top bytes (default 50000). Narrow the query before raising.", DEFAULT_MAX_BYTES),
@@ -382,6 +623,62 @@ function repoToolParameters(command: IdxCommand, targetDescription: string | und
 	};
 }
 
+function repoKnowledgeParameters(profile: RepoDiscoveryProfile) {
+	const outputProperties = profile === "native-compact"
+		? NATIVE_COMPACT_REPO_TOOL_PROPERTIES
+		: {
+			maxLines: numberSchema("Returned line cap for knowledge output (default 600; max delivery 2000). Narrow the action/query first.", 600),
+			maxBytes: numberSchema("Returned byte cap for knowledge output (default 20000; max delivery 50000). Narrow before raising.", 20_000),
+		};
+	return {
+		type: "object",
+		properties: {
+			action: {
+				type: "string",
+				enum: [...REPO_KNOWLEDGE_ACTIONS],
+				description: "Knowledge action. record/verify/relate/remove mutate idx knowledge metadata; source spec files are edited with normal file tools.",
+			},
+			query: stringSchema("Behavior/contract query for context or search."),
+			path: stringSchema("Project-relative primary knowledge path for show/record/verify/relate/remove."),
+			paths: { type: "array", items: stringSchema("Project-relative task-changed path"), description: "Task-scoped changed paths for impact. Prefer this over whole-worktree fallback." },
+			classification: { type: "string", enum: ["spec", "spec-like", "meta-index", "design-only", "guide", "other"] },
+			behaviorType: { type: "string", enum: ["as-is", "change", "mixed", "unknown"] },
+			lifecycle: { type: "string", enum: ["active", "proposed", "historical", "superseded", "unknown"] },
+			confidence: { type: "string", enum: ["high", "medium", "low", "unknown"] },
+			summary: stringSchema("Compact retrieval summary based on the reviewed primary source; never invent behavior."),
+			topics: { type: "array", items: stringSchema("Retrieval topic") },
+			includeSecondary: { type: "boolean", description: "Include design-only secondary knowledge for context/search." },
+			pathPrefix: stringSchema("Optional project-relative scope for context/search."),
+			limit: boundedIntegerSchema("Result/candidate/semantic limit depending on action.", 5, 200),
+			budget: boundedIntegerSchema("Context token budget; context only.", 1400, 8000),
+			maxSpecs: boundedIntegerSchema("Maximum primary specs in context.", 4, 20),
+			maxCode: boundedIntegerSchema("Maximum implementation ranges/files in context.", 6, 30),
+			maxTests: boundedIntegerSchema("Maximum test hints in context.", 4, 20),
+			includeAll: { type: "boolean", description: "discover: include unchanged already-classified documents." },
+			allUnclassified: { type: "boolean", description: "discover: include all unclassified document-like files regardless heuristic score." },
+			base: stringSchema("Git base for impact when task-scoped paths are omitted; default HEAD."),
+			semantic: { type: "boolean", description: "impact semantic candidate retrieval; default true." },
+			relationAction: { type: "string", enum: ["add", "remove"] },
+			relationKind: { type: "string", enum: ["implements", "tests", "related", "supersedes", "superseded-by"] },
+			targetPaths: { type: "array", items: stringSchema("Reviewed relation target path") },
+			sourceReviewed: { type: "boolean", description: "Required true for record only after reading/classifying the source document." },
+			evidenceReviewed: { type: "boolean", description: "Required true for verify/relate only after reviewing concrete primary source + relevant code/tests/evidence." },
+			metadataOnlyConfirmed: { type: "boolean", description: "Required true for remove; confirms only idx metadata is removed and the source file stays untouched." },
+			...outputProperties,
+			...(profile === "native-compact" ? {
+				outputMode: {
+					type: "string",
+					enum: ["compact", "full"],
+					default: "compact",
+					description: "Knowledge output delivery mode. Keep compact unless this same result is actually truncated and broader output is necessary.",
+				},
+			} : {}),
+		},
+		required: ["action"],
+		additionalProperties: false,
+	};
+}
+
 function registerRepoCommandTool(
 	pi: ExtensionAPI,
 	options: {
@@ -406,6 +703,46 @@ function registerRepoCommandTool(
 		async execute(_toolCallId: string, params: RepoDiscoveryWrapperParams, signal: AbortSignal | undefined, _onUpdate: unknown, ctx: ToolContext) {
 			return executeRepoDiscovery(pi, { ...params, command: options.command }, signal, ctx, options.name, profile);
 		},
+	});
+}
+
+function registerRepoKnowledgeTool(pi: ExtensionAPI, profile: RepoDiscoveryProfile) {
+	pi.registerTool({
+		...REPO_KNOWLEDGE_TOOL_DESCRIPTION,
+		parameters: repoKnowledgeParameters(profile),
+		async execute(
+			_toolCallId: string,
+			params: RepoKnowledgeParams,
+			signal: AbortSignal | undefined,
+			_onUpdate: unknown,
+			ctx: ToolContext,
+		) {
+			return executeRepoKnowledge(pi, params, signal, ctx, profile);
+		},
+	});
+}
+
+function mutationToolName(toolName: string): string {
+	const base = toolName.includes(".") ? toolName.split(".").pop() ?? toolName : toolName;
+	return base.toLowerCase();
+}
+
+function registerKnowledgeMutationNudge(pi: ExtensionAPI): void {
+	if (!pi.on) return;
+	let lastNudgeAt = 0;
+	pi.on("tool_result", async (event, ctx) => {
+		if (event.isError) return undefined;
+		if (!FILE_MUTATION_TOOL_NAMES.has(mutationToolName(event.toolName))) return undefined;
+		if (!hasAvailableIndexedProjectRoot(ctx.cwd)) return undefined;
+		const now = Date.now();
+		if (now - lastNudgeAt < KNOWLEDGE_NUDGE_WINDOW_MS) return undefined;
+		lastNudgeAt = now;
+		return {
+			content: [
+				...event.content,
+				{ type: "text" as const, text: `\n---\n${KNOWLEDGE_MUTATION_NUDGE}\n---` },
+			],
+		};
 	});
 }
 
@@ -490,8 +827,10 @@ export default function repoDiscoveryExtension(pi: ExtensionAPI, options: RepoDi
 		},
 	});
 
-	if (!findIndexedProjectRoot(registrationCwd)) return;
+	if (!hasAvailableIndexedProjectRoot(registrationCwd)) return;
 
+	registerKnowledgeMutationNudge(pi);
 	for (const tool of REPO_DISCOVERY_TOOLS) registerRepoCommandTool(pi, tool, profile);
+	registerRepoKnowledgeTool(pi, profile);
 
 }

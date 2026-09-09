@@ -17,6 +17,8 @@ export type RepoDiscoveryToolDescription = ToolDescription & Required<Pick<ToolD
 	targetDescription?: string;
 };
 
+export type RepoKnowledgeToolDescription = ToolDescription & Required<Pick<ToolDescription, "promptSnippet" | "promptGuidelines">>;
+
 export type ToolDescriptionSetOptions = {
 	repoDiscovery?: boolean;
 };
@@ -221,7 +223,24 @@ export const REPO_DISCOVERY_TOOLS: RepoDiscoveryToolDescription[] = [
 	},
 ];
 
-export const REPO_DISCOVERY_TOOL_NAMES = REPO_DISCOVERY_TOOLS.map((tool) => tool.name);
+export const REPO_KNOWLEDGE_TOOL_DESCRIPTION: RepoKnowledgeToolDescription = {
+	name: "repo_knowledge",
+	label: "Repo Knowledge",
+	description:
+		"Project behavioral knowledge/spec maintenance backed by idx. Query contracts with context/search/show/status, review task-scoped impact after material behavior changes, discover new/moved docs, and explicitly record/relate/verify metadata only after semantic evidence review. This tool is exposed only when idx is available and the project is indexed.",
+	promptSnippet:
+		"Use repo_knowledge for project behavior/contracts and their maintenance. For a behavior/contract question that also needs implementation/tests/freshness, prefer action=context; use action=search when only the relevant specs/contracts are needed. Before a material behavior change, find the current primary contract; after implementation, run action=impact on this task's changed paths. Update the existing spec, or create a focused new spec with Edit/Write/apply_patch when no suitable contract exists, then record/relate and verify only after checking code/tests. Skip this lifecycle for mechanical/non-behavioral edits.",
+	promptGuidelines: [
+		"Primary specs/contracts are authoritative; catalog/search summaries, embeddings, graph proximity and semantic candidates are routing evidence only. record is classification, not verification; non-fresh status requires review before presenting behavior as current.",
+		"For material externally visible or project-contract behavior changes: query existing knowledge before/while implementing, keep the authoritative spec aligned in the same task, create a focused primary spec when no suitable contract exists, then run task-scoped impact and reconcile uncovered/new/moved docs before finishing.",
+		"Never persist a relation from similarity alone and never add one just to make coverage non-empty. A reviewed no-impact outcome is valid. verify only after reading the primary source and checking relevant implementation/tests; changed code never auto-rewrites spec semantics.",
+	],
+};
+
+export const REPO_DISCOVERY_TOOL_NAMES = [
+	...REPO_DISCOVERY_TOOLS.map((tool) => tool.name),
+	REPO_KNOWLEDGE_TOOL_DESCRIPTION.name,
+];
 
 export const TODO_TOOL_DESCRIPTION: ToolDescription = {
 	name: "todo",
@@ -332,12 +351,16 @@ export function claudeAliasToolDescriptions(options: ToolDescriptionSetOptions |
 		Edit: {
 			name: "Edit",
 			label: "Edit",
-			description: "Replace exact text in an existing file. Use for surgical edits; use Write only for intentional whole-file replacement.",
+			description: repoDiscovery
+				? "Replace exact text in an existing file. Use for surgical edits; use Write only for whole-file replacement. After a material behavior change, do not finish until repo_knowledge impact reviews this task's changed paths and the authoritative spec is updated or created and verified; skip that lifecycle for mechanical/non-behavioral edits."
+				: "Replace exact text in an existing file. Use for surgical edits; use Write only for intentional whole-file replacement.",
 		},
 		Write: {
 			name: "Write",
 			label: "Write",
-			description: "Create or overwrite a file with complete contents. Use only when replacing the whole file is intended.",
+			description: repoDiscovery
+				? "Create or overwrite a file with complete contents. Use only for intentional whole-file writes. When creating/changing material project behavior, keep or create the primary spec in the same task and finish with task-scoped repo_knowledge impact + semantic verification; mechanical/non-behavioral writes do not require it."
+				: "Create or overwrite a file with complete contents. Use only when replacing the whole file is intended.",
 		},
 		Bash: {
 			name: "Bash",
@@ -364,7 +387,9 @@ export function claudeAliasToolDescriptions(options: ToolDescriptionSetOptions |
 export const CLAUDE_ALIAS_TOOL_DESCRIPTIONS = claudeAliasToolDescriptions(false);
 export const CLAUDE_ALIAS_TOOL_DESCRIPTIONS_WITH_REPO = claudeAliasToolDescriptions(true);
 
-export const CODEX_ALIAS_TOOL_DESCRIPTIONS = {
+export function codexAliasToolDescriptions(options: ToolDescriptionSetOptions | boolean = false) {
+	const repoDiscovery = hasRepoDiscovery(options);
+	return {
 	shellCommand: {
 		name: "shell",
 		label: "shell",
@@ -373,7 +398,7 @@ export const CODEX_ALIAS_TOOL_DESCRIPTIONS = {
 	applyPatch: {
 		name: "apply_patch",
 		label: "apply_patch",
-		description: `Apply file edits with a relative-path patch or standard unified diff. Use for creating, updating, moving, or deleting files; keep each patch focused.
+		description: `Apply file edits with a relative-path patch or standard unified diff. Use for creating, updating, moving, or deleting files; keep each patch focused.${repoDiscovery ? " After a material behavior change, keep/create the authoritative primary spec in the same task and finish with task-scoped repo_knowledge impact plus semantic verification; skip this for mechanical/non-behavioral edits." : ""}
 
 Begin-patch format:
 *** Begin Patch
@@ -387,4 +412,8 @@ Sections: *** Add File (new lines start with +), *** Update File (optionally ***
 
 Unified diff with ---/+++ headers is also supported. Paths must be workspace-relative, never absolute. Provide the complete patch in input.`,
 	},
-} satisfies Record<string, ToolDescription>;
+	} satisfies Record<string, ToolDescription>;
+}
+
+export const CODEX_ALIAS_TOOL_DESCRIPTIONS = codexAliasToolDescriptions(false);
+export const CODEX_ALIAS_TOOL_DESCRIPTIONS_WITH_REPO = codexAliasToolDescriptions(true);

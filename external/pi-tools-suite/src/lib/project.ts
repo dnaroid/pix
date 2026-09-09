@@ -1,4 +1,4 @@
-import { existsSync, statSync } from "node:fs";
+import { accessSync, constants, existsSync, statSync } from "node:fs";
 import path from "node:path";
 
 export function directoryExists(file: string): boolean {
@@ -39,4 +39,27 @@ export function findIndexedProjectRoot(cwd: string): string | undefined {
 
 export function hasIndexedProjectRoot(cwd: string = process.cwd()): boolean {
 	return findIndexedProjectRoot(cwd) !== undefined;
+}
+
+export function commandAvailable(command: string, env: NodeJS.ProcessEnv = process.env): boolean {
+	const value = command.trim();
+	if (!value || value.includes(path.sep)) return false;
+	const pathValue = env.PATH ?? "";
+	for (const directory of pathValue.split(path.delimiter)) {
+		if (!directory) continue;
+		try {
+			accessSync(path.join(directory, value), constants.X_OK);
+			return true;
+		} catch {
+			// Continue through PATH without spawning a process or blocking on shell lookup.
+		}
+	}
+	return false;
+}
+
+export function hasAvailableIndexedProjectRoot(
+	cwd: string = process.cwd(),
+	env: NodeJS.ProcessEnv = process.env,
+): boolean {
+	return hasIndexedProjectRoot(cwd) && commandAvailable("idx", env);
 }

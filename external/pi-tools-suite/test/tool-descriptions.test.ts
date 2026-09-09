@@ -5,9 +5,11 @@ import {
 	CODEX_ALIAS_TOOL_DESCRIPTIONS,
 	COMPRESS_TOOL_DESCRIPTION,
 	REPO_DISCOVERY_TOOLS,
+	REPO_KNOWLEDGE_TOOL_DESCRIPTION,
 	SESSION_RECOVERY_TOOL_DESCRIPTIONS,
 	TODO_TOOL_DESCRIPTION,
 	asyncSubagentToolDescriptions,
+	codexAliasToolDescriptions,
 } from "../src/tool-descriptions.js";
 import { COMPRESS_RANGE_DESCRIPTION } from "../src/dcp/prompts.js";
 import { buildSubagentCatalogPrompt, SUBAGENT_TYPE_SELECTION_GUIDANCE } from "../src/async-subagents/core/agent-catalog.js";
@@ -99,6 +101,35 @@ describe("tool descriptions", () => {
 		].join("\n").length, 0);
 		expect(size).toBeLessThanOrEqual(3326);
 		for (const tool of REPO_DISCOVERY_TOOLS) expect(tool.promptGuidelines.length).toBeLessThanOrEqual(3);
+	});
+
+	test("repo knowledge guidance requires contract maintenance only in indexed repo-aware mode", () => {
+		const promptText = [
+			REPO_KNOWLEDGE_TOOL_DESCRIPTION.description,
+			REPO_KNOWLEDGE_TOOL_DESCRIPTION.promptSnippet,
+			...REPO_KNOWLEDGE_TOOL_DESCRIPTION.promptGuidelines,
+		].join("\n");
+		expect(promptText).toContain("only when idx is available and the project is indexed");
+		expect(promptText).toContain("Before a material behavior change");
+		expect(promptText).toContain("create a focused new spec");
+		expect(promptText).toContain("task's changed paths");
+		expect(promptText).toContain("record is classification, not verification");
+		expect(promptText).toContain("reviewed no-impact outcome is valid");
+		expect(promptText).toContain("changed code never auto-rewrites spec semantics");
+
+		const claudeRepo = CLAUDE_ALIAS_TOOL_DESCRIPTIONS_WITH_REPO;
+		const claudePlain = CLAUDE_ALIAS_TOOL_DESCRIPTIONS;
+		for (const name of ["Edit", "Write"] as const) {
+			expect(claudeRepo[name].description).toContain("repo_knowledge impact");
+			expect(claudeRepo[name].description).toContain("material");
+			expect(claudePlain[name].description).not.toContain("repo_knowledge");
+		}
+
+		const codexRepo = codexAliasToolDescriptions(true);
+		const codexPlain = codexAliasToolDescriptions(false);
+		expect(codexRepo.applyPatch.description).toContain("repo_knowledge impact");
+		expect(codexRepo.applyPatch.description).toContain("authoritative primary spec");
+		expect(codexPlain.applyPatch.description).not.toContain("repo_knowledge");
 	});
 
 	test("subagents descriptions and parent catalog agree on parent-first role selection", () => {

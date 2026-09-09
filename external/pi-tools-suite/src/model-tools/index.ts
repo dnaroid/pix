@@ -15,8 +15,8 @@ import {
 import { realpath } from "node:fs/promises";
 import { resolve } from "node:path";
 import { Type, type TSchema } from "typebox";
-import { CODEX_ALIAS_TOOL_DESCRIPTIONS, REPO_DISCOVERY_TOOL_NAMES, claudeAliasToolDescriptions } from "../tool-descriptions";
-import { hasIndexedProjectRoot } from "../lib/project.js";
+import { REPO_DISCOVERY_TOOL_NAMES, claudeAliasToolDescriptions, codexAliasToolDescriptions } from "../tool-descriptions";
+import { hasAvailableIndexedProjectRoot } from "../lib/project.js";
 import { applyPatch } from "./apply-patch";
 import { isPathInside } from "./path-utils";
 import {
@@ -32,6 +32,7 @@ import {
 } from "./tool-args";
 
 const CLAUDE_ALIAS_TOOL_DESCRIPTIONS = claudeAliasToolDescriptions(false);
+const CODEX_ALIAS_TOOL_DESCRIPTIONS = codexAliasToolDescriptions(false);
 const CLAUDE_ALIAS_TOOLS = Object.values(CLAUDE_ALIAS_TOOL_DESCRIPTIONS).map((tool) => tool.name);
 const CODEX_ALIAS_TOOLS = ["read", ...Object.values(CODEX_ALIAS_TOOL_DESCRIPTIONS).map((tool) => tool.name)];
 const BUILTIN_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls"] as const;
@@ -379,7 +380,8 @@ async function runShellAlias(
   return tool.execute(id, { command, timeout: timeoutSeconds(input) }, signal, onUpdate, ctx);
 }
 
-function registerCodexAliases(runtime: ModelToolsRuntime, pi: ExtensionAPI): void {
+function registerCodexAliases(runtime: ModelToolsRuntime, pi: ExtensionAPI, repoDiscovery: boolean): void {
+	const descriptions = codexAliasToolDescriptions(repoDiscovery);
   const shellParameters = Type.Object({
     command: Type.String({ description: "The shell script to execute in the user's default shell" }),
     workdir: Type.Optional(Type.String({ description: "Working directory" })),
@@ -390,7 +392,7 @@ function registerCodexAliases(runtime: ModelToolsRuntime, pi: ExtensionAPI): voi
 
   pi.registerTool(
     defineTool({
-      ...CODEX_ALIAS_TOOL_DESCRIPTIONS.shellCommand,
+      ...descriptions.shellCommand,
       parameters: shellParameters,
       renderCall: (args, theme, context) => renderShellAliasCall(runtime, args, theme, context),
       renderResult: (result, options, theme, context) => renderShellAliasResult(runtime, result, options, theme, context),
@@ -402,7 +404,7 @@ function registerCodexAliases(runtime: ModelToolsRuntime, pi: ExtensionAPI): voi
 
   pi.registerTool(
     defineTool({
-      ...CODEX_ALIAS_TOOL_DESCRIPTIONS.applyPatch,
+      ...descriptions.applyPatch,
       parameters: Type.Object({
         input: Type.String({ description: "Complete patch text: either a unified diff or a Begin Patch block" }),
       }),
@@ -457,8 +459,9 @@ function shouldPreserveSelection(env: NodeJS.ProcessEnv = process.env): boolean 
 
 export default function modelTools(pi: ExtensionAPI, dependencies: Partial<ModelToolsDependencies> = {}): void {
   const runtime = createModelToolsRuntime(dependencies);
-  registerClaudeAliases(runtime, pi, hasIndexedProjectRoot());
-  registerCodexAliases(runtime, pi);
+  const repoDiscovery = hasAvailableIndexedProjectRoot();
+  registerClaudeAliases(runtime, pi, repoDiscovery);
+  registerCodexAliases(runtime, pi, repoDiscovery);
 
   let baseTools: string[] = [];
 

@@ -331,7 +331,10 @@ function writeFakeIdxBin(projectDir: string): string {
 	fs.mkdirSync(binDir, { recursive: true });
 	fs.writeFileSync(idxPath, `#!/usr/bin/env node
 const args = process.argv.slice(2); const command = args[0] || "";
-if (command === "architecture") console.log("Checkout modules: cart, discounts, payments, audit. Payment request construction lives in src/payments.ts.");
+if (command === "context") console.log("CONTEXT query=payment retry idempotency\\nPrimary knowledge:\\nS specs/payment-retry.md status=fresh lifecycle=active score=9.10\\nImplementation:\\nC src/payments.ts:19-33 reason=tracked+semantic\\nTests:\\nT test/payments.test.ts reason=explicit conf=high");
+else if (command === "wiki" && args[1] === "search") console.log("score=9.10 active fresh specs/payment-retry.md — Payment retry contract\\n      Payment retries reuse a stable idempotency key.");
+else if (command === "wiki" && args[1] === "impact") console.log("changed: 1 | known affected: 1 | uncovered: 0 | changed docs: 0 | semantic sweep: yes\\n  known specs/payment-retry.md — inputs-changed — src/payments.ts");
+else if (command === "architecture") console.log("Checkout modules: cart, discounts, payments, audit. Payment request construction lives in src/payments.ts.");
 else if (command === "structure") console.log("src/payments.ts::buildPaymentRequest; src/cart.ts::calculateCartTotals; src/discounts.ts::applyCoupon; src/audit.ts::recordAuditEvent");
 else if (command === "search") console.log("src/payments.ts:19-33 buildPaymentRequest creates a random idempotencyKey, so payment retries can double-charge.");
 else if (command === "deps") console.log("src/payments.ts::buildPaymentRequest -> calculateCartTotals, applyCoupon");

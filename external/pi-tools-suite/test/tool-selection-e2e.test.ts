@@ -156,11 +156,33 @@ function writeFakeIdxBin(projectDir: string): string {
 	const logPath = path.join(projectDir, ".pi", "idx-events.jsonl");
 	fs.mkdirSync(binDir, { recursive: true });
 	fs.writeFileSync(idxPath, `#!/usr/bin/env node
-const fs = require("node:fs");
+import fs from "node:fs";
 const args = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args }) + "\\n");
 const command = args[0] || "";
-if (command === "search") {
+const joined = args.join(" ").toLowerCase();
+if (command === "context" && joined.includes("shipment freeze")) {
+  console.log("CONTEXT query=shipment freeze behavior\\nWarnings:\\n! No primary knowledge matched the query.\\nRead next:\\n> src/payments.ts");
+} else if (command === "context") {
+  console.log("CONTEXT query=payment retry idempotency\\nPrimary knowledge:\\nS specs/payment-retry.md status=fresh lifecycle=active score=9.10\\nImplementation:\\nC src/payments.ts:19-33 reason=tracked+semantic\\nTests:\\nT test/payments.test.ts reason=explicit conf=high");
+} else if (command === "wiki" && args[1] === "search") {
+  if (joined.includes("shipment freeze")) console.log("no indexed project knowledge matched");
+  else console.log("score=9.10 active fresh specs/payment-retry.md — Payment retry contract\\n      Payment retries reuse a stable idempotency key.");
+} else if (command === "wiki" && args[1] === "impact") {
+  if (joined.includes("src/audit.ts")) {
+    console.log("changed: 1 | known affected: 0 | uncovered: 1 | changed docs: 0 | semantic sweep: yes\\n  uncovered src/audit.ts\\n  candidates src/audit.ts: specs/payment-retry.md");
+  } else if (joined.includes("retry-contract.md")) {
+    console.log("changed: 2 | known affected: 0 | uncovered: 0 | changed docs: 1 | semantic sweep: yes\\n  missing specs/payment-retry.md\\n  doc specs/payments/retry-contract.md — unclassified — score=8 spec-candidate");
+  } else {
+    console.log("changed: 1 | known affected: 1 | uncovered: 0 | changed docs: 0 | semantic sweep: yes\\n  known specs/payment-retry.md — inputs-changed — src/payments.ts");
+  }
+} else if (command === "wiki" && args[1] === "record") {
+  const pathIndex = args.indexOf("--path");
+  console.log("recorded spec: " + (args[pathIndex + 1] || "unknown") + " — unverified");
+} else if (command === "wiki" && args[1] === "verify") {
+  const pathIndex = args.indexOf("--path");
+  console.log("verified: " + (args[pathIndex + 1] || "unknown") + " — fresh");
+} else if (command === "search") {
   console.log("src/payments.ts:19-33 buildPaymentRequest creates the payment gateway request. The idempotencyKey is random (Date.now + Math.random), so retries can double-charge.");
 } else if (command === "architecture") {
   console.log("Checkout fixture modules: cart, discounts, payments, audit. Payment request construction lives in src/payments.ts.");
@@ -377,6 +399,30 @@ const SESSION_RECOVERY_PROMPT = `
 My working context was aggressively compressed and I no longer remember the task.
 I do not know a reliable phrase to search for. Use the appropriate raw-session recovery tool first, and stop immediately after that first tool call.`;
 
+const KNOWLEDGE_BEHAVIOR_PROMPT = `
+Before changing checkout payment retry behavior, find the current authoritative project contract and the implementation/tests that enforce it.
+I do not know which spec file contains the requirement. Use the indexed project knowledge path rather than broad filesystem discovery, then stop after the first useful knowledge result.`;
+
+const KNOWLEDGE_IMPACT_PROMPT = `
+I just completed a material behavior change in src/payments.ts that changes payment retry/idempotency behavior.
+Before finishing, perform the project-contract maintenance checkpoint for this task-scoped changed path. Do not broaden to the whole dirty worktree; stop after the impact result.`;
+
+const KNOWLEDGE_CREATE_SPEC_PROMPT = `
+We are planning a new externally visible "shipment freeze" behavior: high-risk checkout requests must be held before payment submission.
+Before implementation, check indexed project knowledge for an existing primary contract. If no suitable primary contract exists, create one focused active Change spec under specs/ describing the intended behavior and non-goals, then record that source in project knowledge. Do not modify production code/tests yet and do not verify an unimplemented change. Stop after the new spec is recorded.`;
+
+const KNOWLEDGE_UPDATE_SPEC_PROMPT = `
+The material behavior change in src/payments.ts is intentional and already complete: each gateway payment request now gets a fresh idempotency key; this is the desired current contract.
+The existing specs/payment-retry.md still says retries reuse the same stable idempotency key. Finish knowledge maintenance only: run task-scoped impact for src/payments.ts, inspect the spec and implementation, update the existing primary spec to the desired current behavior, then semantically verify it. Do not change production code or tests.`;
+
+const KNOWLEDGE_NO_IMPACT_PROMPT = `
+I changed only src/audit.ts formatting and event-label rendering; it should not change checkout/payment behavior.
+Run the task-scoped project-knowledge impact review for src/audit.ts. If a nearby payment spec appears only as a semantic candidate, inspect enough evidence to decide whether it is actually affected. A reviewed no-impact result is valid: do not edit specs, verify specs, or create a relation just to make coverage non-empty. Stop after the review.`;
+
+const KNOWLEDGE_MOVE_SPEC_PROMPT = `
+The primary payment retry contract was moved without semantic changes from specs/payment-retry.md to specs/payments/retry-contract.md; the source bytes are already moved and production code is unchanged.
+Reconcile project knowledge for this move: run task-scoped impact on the moved document path(s), inspect the moved source, record the new primary path with the same current semantics, verify it against its existing code evidence, then remove only the old knowledge metadata. Do not rewrite the moved spec or production code.`;
+
 describe("repo-aware tool-selection live e2e", () => {
 	for (const variant of FOCUSED_PAYMENT_BEHAVIOR_PROMPTS) {
 		e2eTest(`uses repo_search for a single semantic discovery when repo_* tools are available (${variant.name})`, async () => {
@@ -424,11 +470,149 @@ describe("repo-aware tool-selection live e2e", () => {
 				const names = toolCallNames(result.events);
 				expect(names).not.toContain("repo_architecture");
 				expect(names).not.toContain("repo_search");
+				expect(names).not.toContain("repo_knowledge");
 				expect(names.some((name) => DIRECT_DISCOVERY_TOOLS.includes(name))).toBe(true);
 				expect(firstMatchingTool(names, ["repo_architecture", "repo_search", ...DIRECT_DISCOVERY_TOOLS])).not.toMatch(/^repo_/);
 			});
 		}, E2E_TIMEOUT_MS);
 	}
+
+	e2eTest("uses repo_knowledge context for an authoritative behavior/contract question", async () => {
+		await withFixtureProject({ indexed: true }, async (projectDir) => {
+			const result = await runPiToolSelectionE2E(projectDir, KNOWLEDGE_BEHAVIOR_PROMPT, "repo-knowledge context selection", { fakeIdx: true });
+			const calls = result.events.filter((event) => event.type === "tool_call");
+			expect(calls[0]?.toolName).toBe("repo_knowledge");
+			expect(calls[0]?.input).toMatchObject({ action: "context" });
+			expect(result.stdout.toLowerCase() + result.stderr.toLowerCase()).toContain("specs/payment-retry.md");
+		});
+	}, E2E_TIMEOUT_MS);
+
+	e2eTest("uses task-scoped repo_knowledge impact after a material behavior change", async () => {
+		await withFixtureProject({ indexed: true }, async (projectDir) => {
+			const result = await runPiToolSelectionE2E(projectDir, KNOWLEDGE_IMPACT_PROMPT, "repo-knowledge impact selection", { fakeIdx: true });
+			const calls = result.events.filter((event) => event.type === "tool_call");
+			expect(calls[0]?.toolName).toBe("repo_knowledge");
+			expect(calls[0]?.input).toMatchObject({ action: "impact", paths: ["src/payments.ts"] });
+		});
+	}, E2E_TIMEOUT_MS);
+
+	e2eTest("creates and records a new primary spec when no suitable contract exists", async () => {
+		await withFixtureProject({ indexed: true }, async (projectDir) => {
+			const paymentsPath = path.join(projectDir, "src", "payments.ts");
+			const paymentsBefore = fs.readFileSync(paymentsPath, "utf8");
+			const result = await runPiToolSelectionE2E(projectDir, KNOWLEDGE_CREATE_SPEC_PROMPT, "repo-knowledge create-spec maintenance", { fakeIdx: true });
+			const calls = result.events.filter((event) => event.type === "tool_call");
+			const knowledgeCalls = calls.filter((event) => event.toolName === "repo_knowledge");
+			expect(knowledgeCalls.some((event) => isRecord(event.input) && ["context", "search"].includes(String(event.input.action)))).toBe(true);
+			expect(knowledgeCalls.some((event) => isRecord(event.input) && event.input.action === "record" && event.input.sourceReviewed === true)).toBe(true);
+			expect(knowledgeCalls.some((event) => isRecord(event.input) && event.input.action === "verify")).toBe(false);
+
+			const specsDir = path.join(projectDir, "specs");
+			expect(fs.existsSync(specsDir)).toBe(true);
+			const specFiles = fs.readdirSync(specsDir).filter((name) => name.endsWith(".md"));
+			expect(specFiles.length).toBeGreaterThan(0);
+			const specText = specFiles.map((name) => fs.readFileSync(path.join(specsDir, name), "utf8")).join("\n").toLowerCase();
+			expect(specText).toContain("shipment");
+			expect(specText).toContain("freeze");
+			expect(fs.readFileSync(paymentsPath, "utf8")).toBe(paymentsBefore);
+		});
+	}, E2E_TIMEOUT_MS);
+
+	e2eTest("updates an existing primary spec and verifies after intentional semantic drift", async () => {
+		await withFixtureProject({ indexed: true }, async (projectDir) => {
+			const specDir = path.join(projectDir, "specs");
+			fs.mkdirSync(specDir, { recursive: true });
+			const specPath = path.join(specDir, "payment-retry.md");
+			fs.writeFileSync(specPath, [
+				"# Payment retry contract",
+				"",
+				"## Type",
+				"As-Is",
+				"",
+				"## Lifecycle",
+				"Active",
+				"",
+				"## Behavior",
+				"Retries reuse the same stable idempotency key for the same checkout.",
+				"",
+				"## Related files",
+				"- `src/payments.ts`",
+				"",
+			].join("\n"), "utf8");
+			const paymentsPath = path.join(projectDir, "src", "payments.ts");
+			const paymentsBefore = fs.readFileSync(paymentsPath, "utf8");
+
+			const result = await runPiToolSelectionE2E(projectDir, KNOWLEDGE_UPDATE_SPEC_PROMPT, "repo-knowledge update-spec maintenance", { fakeIdx: true });
+			const knowledgeCalls = result.events.filter((event) => event.type === "tool_call" && event.toolName === "repo_knowledge");
+			expect(knowledgeCalls.some((event) => isRecord(event.input) && event.input.action === "impact" && Array.isArray(event.input.paths) && event.input.paths.includes("src/payments.ts"))).toBe(true);
+			expect(knowledgeCalls.some((event) => isRecord(event.input) && event.input.action === "verify" && event.input.evidenceReviewed === true)).toBe(true);
+			const updated = fs.readFileSync(specPath, "utf8").toLowerCase();
+			expect(updated).not.toContain("reuse the same stable idempotency key");
+			expect(updated).toMatch(/fresh|new|unique|per[- ]request|random/);
+			expect(fs.readFileSync(paymentsPath, "utf8")).toBe(paymentsBefore);
+		});
+	}, E2E_TIMEOUT_MS);
+
+	e2eTest("accepts reviewed no-impact without inventing a relation or spec mutation", async () => {
+		await withFixtureProject({ indexed: true }, async (projectDir) => {
+			const specDir = path.join(projectDir, "specs");
+			fs.mkdirSync(specDir, { recursive: true });
+			const specPath = path.join(specDir, "payment-retry.md");
+			fs.writeFileSync(specPath, "# Payment retry contract\n\nPayment retry semantics are unrelated to audit label formatting.\n", "utf8");
+			const beforeSpec = fs.readFileSync(specPath, "utf8");
+			const beforeAudit = fs.readFileSync(path.join(projectDir, "src", "audit.ts"), "utf8");
+
+			const result = await runPiToolSelectionE2E(projectDir, KNOWLEDGE_NO_IMPACT_PROMPT, "repo-knowledge no-impact maintenance", { fakeIdx: true });
+			const calls = result.events.filter((event) => event.type === "tool_call");
+			const knowledgeCalls = calls.filter((event) => event.toolName === "repo_knowledge");
+			expect(knowledgeCalls.some((event) => isRecord(event.input) && event.input.action === "impact" && Array.isArray(event.input.paths) && event.input.paths.includes("src/audit.ts"))).toBe(true);
+			for (const forbiddenAction of ["record", "relate", "verify", "remove"]) {
+				expect(knowledgeCalls.some((event) => isRecord(event.input) && event.input.action === forbiddenAction)).toBe(false);
+			}
+			expect(calls.some((event) => ["Edit", "Write", "edit", "write", "apply_patch", "ast_apply"].includes(event.toolName ?? ""))).toBe(false);
+			expect(fs.readFileSync(specPath, "utf8")).toBe(beforeSpec);
+			expect(fs.readFileSync(path.join(projectDir, "src", "audit.ts"), "utf8")).toBe(beforeAudit);
+		});
+	}, E2E_TIMEOUT_MS);
+
+	e2eTest("reconciles a moved primary spec without rewriting its source", async () => {
+		await withFixtureProject({ indexed: true }, async (projectDir) => {
+			const oldPath = path.join(projectDir, "specs", "payment-retry.md");
+			const newPath = path.join(projectDir, "specs", "payments", "retry-contract.md");
+			fs.mkdirSync(path.dirname(oldPath), { recursive: true });
+			fs.writeFileSync(oldPath, [
+				"# Payment retry contract",
+				"",
+				"## Type",
+				"As-Is",
+				"",
+				"## Lifecycle",
+				"Active",
+				"",
+				"## Behavior",
+				"Each gateway request receives a fresh idempotency key.",
+				"",
+				"## Related files",
+				"- `../../src/payments.ts`",
+				"",
+			].join("\n"), "utf8");
+			fs.mkdirSync(path.dirname(newPath), { recursive: true });
+			fs.renameSync(oldPath, newPath);
+			const movedBefore = fs.readFileSync(newPath, "utf8");
+			const paymentsPath = path.join(projectDir, "src", "payments.ts");
+			const paymentsBefore = fs.readFileSync(paymentsPath, "utf8");
+
+			const result = await runPiToolSelectionE2E(projectDir, KNOWLEDGE_MOVE_SPEC_PROMPT, "repo-knowledge move-spec maintenance", { fakeIdx: true });
+			const knowledgeCalls = result.events.filter((event) => event.type === "tool_call" && event.toolName === "repo_knowledge");
+			expect(knowledgeCalls.some((event) => isRecord(event.input) && event.input.action === "impact")).toBe(true);
+			expect(knowledgeCalls.some((event) => isRecord(event.input) && event.input.action === "record" && event.input.path === "specs/payments/retry-contract.md" && event.input.sourceReviewed === true)).toBe(true);
+			expect(knowledgeCalls.some((event) => isRecord(event.input) && event.input.action === "verify" && event.input.path === "specs/payments/retry-contract.md" && event.input.evidenceReviewed === true)).toBe(true);
+			expect(knowledgeCalls.some((event) => isRecord(event.input) && event.input.action === "remove" && event.input.path === "specs/payment-retry.md" && event.input.metadataOnlyConfirmed === true)).toBe(true);
+			expect(fs.readFileSync(newPath, "utf8")).toBe(movedBefore);
+			expect(fs.readFileSync(paymentsPath, "utf8")).toBe(paymentsBefore);
+			expect(fs.existsSync(oldPath)).toBe(false);
+		});
+	}, E2E_TIMEOUT_MS);
 
 	for (const variant of BROAD_NON_INDEXED_INVESTIGATION_PROMPTS) {
 		e2eTest(`uses subagents for broad independent discovery when repo_* tools are unavailable (${variant.name})`, async () => {

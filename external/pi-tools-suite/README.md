@@ -12,7 +12,7 @@ This package keeps shared Pi tools as ordinary source folders under `src/` and r
 - `src/comment-checker` — AI-slop comment guard that listens to the `tool_result` event for `write` / `edit` / `apply_patch` mutations, extracts net-new code comment lines, classifies them (filler phrasing, restating code, decorative separators, generic paraphrasing, or — under aggressive strictness — any non-valuable comment), and appends a short nudge to the tool result so the agent removes unnecessary comments on its next turn; TODO/FIXME, license headers, docstrings, pragmas, linter directives, shebangs, and decorators are never flagged; language-agnostic across `//` / `/* */` / `#` / `--` / `<!-- -->` / triple-quote comment styles; per-session deduplication (at most one nudge per 30 s) prevents fix/remark loops; configured via the `commentChecker` section (`enabled`, `strictness`: `conservative` | `balanced` | `aggressive`, default `balanced`) or `PI_COMMENT_CHECKER_ENABLED` / `PI_COMMENT_CHECKER_STRICTNESS`
 - `src/session-name` — `session_name` tool for reading or setting the current session title directly from tool calls, without relying on slash-command parsing
 - `src/session-recovery` — branch- and compaction-aware `session_overview`, `session_read_section`, `session_search`, and `session_recovery_context` tools for bounded recovery from Pi's raw append-only session history
-- `src/repo-discovery` — `/idx-init`, `/idx-update`, and indexed-only `repo_architecture` / `repo_structure` / `repo_ast` / `repo_search` / `repo_explain` / `repo_deps`; tools register only when the launch project has `.indexer-cli`
+- `src/repo-discovery` — `/idx-init`, `/idx-update`, and idx-backed `repo_architecture` / `repo_structure` / `repo_ast` / `repo_search` / `repo_explain` / `repo_deps` plus the unified `repo_knowledge` contract/wiki tool; repo tools and repo-aware mutation guidance register only when the launch project has `.indexer-cli` **and** an executable `idx` is available on `PATH`
 - `src/antigravity-auth` — `antigravity` custom provider with Google Antigravity OAuth login, startup account list, auth.json-only runtime account loading, `/antigravity-add-account` OAuth append into rotation, `/antigravity-account` status display, account rotation/failover, Antigravity plus Gemini CLI model registration, and streaming through the Cloud Code Assist unified gateway
 - `src/opencode-import` — `/opencode-import` for bounded migration of supported OpenCode OpenAI/Codex, GitHub Copilot, Z.ai, and Antigravity credentials into Pi; existing entries are preserved unless `--force` is passed
 - `src/todo` — `todo` tool, `/todos`, `/todos-persist`, `/todos-scope`, and `/todos-clear` (also `/todos clear`); supports parent/subtask hierarchy, blockers, ready-task filtering, deferred out-of-scope items, batch operations, JSON/Markdown import/export, automatic clearing when all visible todos are completed, and optional project persistence via `/todos persist on` or `/todos-persist on`; localization/i18n has been removed
@@ -25,7 +25,50 @@ This package keeps shared Pi tools as ordinary source folders under `src/` and r
 
 `index.ts` is intentionally only a thin auto-discovery shim that re-exports `src/index.ts`. There is no `pi.extensions` manifest here, so local Pi auto-discovery loads the suite once via `~/.pi/agent/extensions/pi-tools-suite/index.ts` and does not double-register tools.
 
-Registration order is preserved in `src/index.ts`: coding-discipline, ast-grep, async-subagents, lsp, comment-checker, session-name, session-recovery, repo-discovery command/tool gate, antigravity-auth provider, OpenCode import, todo, model-tools, usage, web-search, dcp, prompt-commands, resource-registry, credential-firewall, then codex-reasoning-fix. Tool metadata and active model-specific tool sets have two modes: standard and repo-aware. When `.indexer-cli` enables `repo_*`, those tools stay active ahead of overlapping lower-level aliases so the indexed discovery surface has priority.
+Registration order is preserved in `src/index.ts`: coding-discipline, ast-grep, async-subagents, lsp, comment-checker, session-name, session-recovery, repo-discovery command/tool gate, antigravity-auth provider, OpenCode import, todo, model-tools, usage, web-search, dcp, prompt-commands, resource-registry, credential-firewall, then codex-reasoning-fix. Tool metadata and active model-specific tool sets have two modes: standard and repo-aware. Repo-aware mode requires both project `.indexer-cli` state and an executable `idx`; when enabled, `repo_*` tools stay active ahead of overlapping lower-level aliases. If `idx` is unavailable, the suite falls back to ordinary Read/Grep/LSP/sub-agent guidance and does **not** implicitly install, initialize, or create index state. `/idx-init` is the explicit setup/repair path and should be run only with user permission.
+
+## Repository knowledge and spec maintenance
+
+When repo-aware mode is available, `repo_knowledge` is the single model-facing
+surface for behavioral specs/contracts. It wraps the first-class `idx context`
+and `idx wiki` knowledge layer while ordinary file tools remain responsible for
+editing the primary spec documents themselves.
+
+Read/query actions:
+
+- `context` — primary contract + implementation ranges + tests + freshness in a
+  bounded response;
+- `search` / `show` — find or inspect authoritative project knowledge;
+- `status` / `audit` / `catalog` — freshness and project knowledge health;
+- `discover` — classify new/moved/changed document candidates, including
+  low-signal documents through the explicit all-unclassified mode;
+- `impact` — review known and uncovered contract impact for this task's changed
+  paths (preferred) or a Git base fallback.
+
+Metadata mutation actions are explicit: `record`, `relate`, `verify`, and
+`remove`. They do not edit primary documents. The wrapper requires a source
+review acknowledgement before `record`, concrete semantic evidence review before
+`relate`/`verify`, and an explicit metadata-only acknowledgement before `remove`.
+
+For a **material behavior-changing implementation** in repo-aware mode, the
+model-facing contract is:
+
+1. Find the existing primary behavioral contract before or while implementing.
+2. Keep that primary spec aligned with the intended behavior in the same task.
+   If no suitable primary contract exists, create a focused spec with the normal
+   Edit/Write/`apply_patch` tools before recording its metadata.
+3. After implementation, run task-scoped `repo_knowledge` `impact` on the files
+   changed by this task; review uncovered paths and new/moved documents.
+4. Repair only evidence-backed relations. Similarity or graph proximity alone
+   never authorizes a durable relation, and a reviewed no-impact result is valid.
+5. `record` means classified/indexed, **not verified**. Run `verify` only after
+   reading the primary source and checking relevant code/tests/evidence. Changed
+   code never automatically rewrites spec semantics.
+
+Mechanical refactors, typo/formatting edits, exact renames, and other changes
+that do not alter project behavior do not require this knowledge-maintenance
+lifecycle. When `idx` is unavailable or the project is not indexed, none of
+these requirements are injected; use the normal repository workflow instead.
 
 ## Session recovery
 

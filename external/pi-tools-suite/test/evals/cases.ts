@@ -3,6 +3,7 @@ import type { EvalCase, EvalRunResult } from "./harness/types.js";
 const DIRECT_TOOLS = ["read", "Read", "grep", "Grep", "find", "Glob", "bash", "Bash", "shell", "shell_command"];
 const MUTATION_TOOLS = ["edit", "Edit", "write", "Write", "apply_patch", "ast_apply"];
 const NO_ORCHESTRATION = ["subagents", "async_subagents_spawn"];
+const REPO_SEMANTIC_TOOLS = ["repo_architecture", "repo_search", "repo_knowledge"];
 
 export const EVAL_CASES: EvalCase[] = [
 	{
@@ -26,6 +27,26 @@ export const EVAL_CASES: EvalCase[] = [
 		assert: { requiredTools: ["repo_architecture"], forbiddenTools: [...NO_ORCHESTRATION, ...MUTATION_TOOLS], firstToolOneOf: ["repo_architecture", "todo"] },
 	},
 	{
+		id: "tool.knowledge-context",
+		category: "tool-selection",
+		description: "Authoritative project behavior question should use indexed primary knowledge plus implementation/tests.",
+		fixture: "demo",
+		indexed: true,
+		fakeIdx: true,
+		prompt: "Before changing checkout payment retry behavior, find the current authoritative project contract and the implementation/tests that enforce it. I do not know which spec file contains the requirement. Use the indexed project knowledge path, then stop after the first useful knowledge result.",
+		assert: { requiredTools: ["repo_knowledge"], forbiddenTools: NO_ORCHESTRATION, firstTool: "repo_knowledge", stdoutIncludes: ["specs/payment-retry.md"] },
+	},
+	{
+		id: "tool.knowledge-impact",
+		category: "tool-selection",
+		description: "Material behavior change should finish with task-scoped knowledge impact review.",
+		fixture: "demo",
+		indexed: true,
+		fakeIdx: true,
+		prompt: "I just completed a material behavior change in src/payments.ts that changes payment retry/idempotency behavior. Before finishing, perform the project-contract maintenance checkpoint for this task-scoped changed path. Do not broaden to the whole dirty worktree; stop after the impact result.",
+		assert: { requiredTools: ["repo_knowledge"], forbiddenTools: NO_ORCHESTRATION, firstTool: "repo_knowledge", maxToolCalls: 2 },
+	},
+	{
 		id: "tool.exact-literal-direct",
 		category: "tool-selection",
 		description: "Exact literal lookup should avoid semantic/architecture discovery.",
@@ -33,7 +54,7 @@ export const EVAL_CASES: EvalCase[] = [
 		indexed: true,
 		fakeIdx: true,
 		prompt: "Find the exact literal `✅ typescript: no diagnostics` in this project and tell me the file. This is an exact-string lookup only; do not edit anything.",
-		assert: { forbiddenTools: ["repo_architecture", "repo_search", ...NO_ORCHESTRATION, ...MUTATION_TOOLS], firstToolOneOf: DIRECT_TOOLS, stdoutIncludes: ["docs/lsp-diagnostics.md"] },
+		assert: { forbiddenTools: [...REPO_SEMANTIC_TOOLS, ...NO_ORCHESTRATION, ...MUTATION_TOOLS], firstToolOneOf: DIRECT_TOOLS, stdoutIncludes: ["docs/lsp-diagnostics.md"] },
 	},
 	{
 		id: "tool.ast-structural",
@@ -42,7 +63,7 @@ export const EVAL_CASES: EvalCase[] = [
 		fixture: "demo",
 		blockTools: ["ast_grep"],
 		prompt: "Use syntax-aware structural matching to find exported functions whose body calls another function and return the matching function names. I need AST structure, not an exact string/regex search. Stop after the structural search.",
-		assert: { requiredTools: ["ast_grep"], forbiddenTools: ["repo_search", "repo_architecture", ...NO_ORCHESTRATION, ...MUTATION_TOOLS], firstToolOneOf: ["ast_grep", "todo"] },
+		assert: { requiredTools: ["ast_grep"], forbiddenTools: [...REPO_SEMANTIC_TOOLS, ...NO_ORCHESTRATION, ...MUTATION_TOOLS], firstToolOneOf: ["ast_grep", "todo"] },
 	},
 	{
 		id: "tool.todo-plan",
