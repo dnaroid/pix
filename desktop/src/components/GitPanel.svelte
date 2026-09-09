@@ -135,7 +135,7 @@
           <label class="sr-only" for="git-branch-select">Current branch</label>
           <select
             id="git-branch-select"
-            class="h-7 w-full appearance-none rounded-md border border-input bg-background py-0 pr-7 pl-2 text-[10px] font-medium text-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-50"
+            class="h-7 w-full appearance-none rounded-md border border-input bg-background py-0 pr-7 pl-2 text-[11px] font-medium text-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-50"
             value={snapshot.branch}
             disabled={busy || snapshot.detached}
             onchange={(event) => {
@@ -168,7 +168,7 @@
         ><RefreshCw class={["h-3.5 w-3.5", loading ? "animate-spin" : ""]} aria-hidden="true" /></button>
       </div>
 
-      <div class="flex min-w-0 items-center gap-2 px-0.5 text-[9px] text-muted-foreground">
+      <div class="flex min-w-0 items-center gap-2 px-0.5 text-[11px] text-muted-foreground">
         <span class="truncate">{snapshot.upstream ?? "No upstream"}</span>
         <span class="ml-auto shrink-0 font-mono">↑{snapshot.ahead} ↓{snapshot.behind}</span>
       </div>
@@ -176,7 +176,7 @@
       {#if creatingBranch}
         <form class="flex items-center gap-1" onsubmit={(event) => { event.preventDefault(); createBranch(); }}>
           <input
-            class="h-7 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-[10px] text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/30"
+            class="h-7 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/30"
             placeholder="new-branch"
             aria-label="New branch name"
             bind:value={branchName}
@@ -188,14 +188,14 @@
 
       <div class="grid grid-cols-2 gap-1.5">
         <button
-          class="inline-flex h-7 items-center justify-center gap-1.5 rounded-md border border-border bg-background text-[10px] font-medium text-foreground hover:bg-accent disabled:opacity-40"
+          class="inline-flex h-7 items-center justify-center gap-1.5 rounded-md border border-border bg-background text-[11px] font-medium text-foreground hover:bg-accent disabled:opacity-40"
           type="button"
           disabled={snapshot.changes.length === 0 || !sessionReady || llmBusy}
           title={sessionReady ? "Review all changes with LLM" : "Open a ready session to use LLM review"}
           onclick={() => onReview(undefined, "all")}
         ><Sparkles class={["h-3.5 w-3.5", llmActionId === "review:all" ? "animate-pulse" : ""]} aria-hidden="true" />Review</button>
         <button
-          class="inline-flex h-7 items-center justify-center gap-1.5 rounded-md border border-border bg-background text-[10px] font-medium text-foreground hover:bg-accent disabled:opacity-40"
+          class="inline-flex h-7 items-center justify-center gap-1.5 rounded-md border border-border bg-background text-[11px] font-medium text-foreground hover:bg-accent disabled:opacity-40"
           type="button"
           disabled={!canPush || busy}
           onclick={onPush}
@@ -203,11 +203,11 @@
         ><Upload class={["h-3.5 w-3.5", actionId === "push" ? "animate-pulse" : ""]} aria-hidden="true" />{snapshot.upstream ? "Push" : "Publish"}</button>
       </div>
     {:else if loading}
-      <div class="flex items-center justify-center gap-1.5 py-3 text-[10px] text-muted-foreground"><RefreshCw class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />Reading Git status…</div>
+      <div class="flex items-center justify-center gap-1.5 py-3 text-[11px] text-muted-foreground"><RefreshCw class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />Reading Git status…</div>
     {/if}
 
     {#if error}
-      <div class="rounded-md border border-[var(--tool-error)]/25 bg-[var(--tool-error)]/5 px-2.5 py-2 text-[10px] leading-4 text-[var(--tool-error)]">{error}</div>
+      <div class="rounded-md border border-[var(--tool-error)]/25 bg-[var(--tool-error)]/5 px-2.5 py-2 text-[11px] leading-4 text-[var(--tool-error)]">{error}</div>
     {/if}
   </div>
 
@@ -215,20 +215,20 @@
     {#if snapshot}
       <section aria-label="Staged changes">
         <div class="sticky top-0 z-[1] flex h-7 items-center gap-1 border-b border-sidebar-border bg-sidebar/95 px-2 backdrop-blur-sm">
-          <strong class="text-[9px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Staged Changes</strong>
-          <span class="font-mono text-[8px] text-muted-foreground/70">{staged.length}</span>
+          <strong class="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Staged Changes</strong>
+          <span class="font-mono text-[11px] text-muted-foreground/70">{staged.length}</span>
           {#if staged.length > 0}
             <button class="ml-auto grid h-6 w-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40" type="button" title="Unstage all" aria-label="Unstage all" disabled={busy} onclick={() => onUnstage()}><Minus class="h-3.5 w-3.5" aria-hidden="true" /></button>
           {/if}
         </div>
         {#if staged.length === 0}
-          <div class="px-3 py-3 text-[9px] text-muted-foreground/70">Stage files to include them in the next commit.</div>
+          <div class="px-3 py-3 text-[11px] text-muted-foreground/70">Stage files to include them in the next commit.</div>
         {:else}
           {#each staged as change (`staged:${change.path}`)}
             <div class="group flex h-7 min-w-0 items-center px-2 hover:bg-sidebar-accent">
               <button class="flex h-7 min-w-0 flex-1 items-center gap-1.5 text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring" type="button" title={`Review staged diff: ${change.path}`} onclick={() => onOpenDiff(change.path, "staged")}>
-                <span class={["w-3 shrink-0 text-center font-mono text-[9px] font-bold", statusTone(change, "staged")]} title={gitChangeLabel(change, "staged")}>{gitChangeCode(change, "staged")}</span>
-                <span class="min-w-0 flex-1 truncate text-[10px] text-foreground">{change.path}</span>
+                <span class={["w-3 shrink-0 text-center font-mono text-[11px] font-bold", statusTone(change, "staged")]} title={gitChangeLabel(change, "staged")}>{gitChangeCode(change, "staged")}</span>
+                <span class="min-w-0 flex-1 truncate text-[11px] text-foreground">{change.path}</span>
               </button>
               <button class="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 disabled:opacity-30 group-hover:opacity-100" type="button" disabled={busy} title={`Unstage ${change.path}`} aria-label={`Unstage ${change.path}`} onclick={() => onUnstage(change.path)}><Minus class="h-3 w-3" aria-hidden="true" /></button>
             </div>
@@ -238,20 +238,20 @@
 
       <section class="border-t border-sidebar-border" aria-label="Working tree changes">
         <div class="sticky top-0 z-[1] flex h-7 items-center gap-1 border-b border-sidebar-border bg-sidebar/95 px-2 backdrop-blur-sm">
-          <strong class="text-[9px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Changes</strong>
-          <span class="font-mono text-[8px] text-muted-foreground/70">{unstaged.length}</span>
+          <strong class="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Changes</strong>
+          <span class="font-mono text-[11px] text-muted-foreground/70">{unstaged.length}</span>
           {#if unstaged.length > 0}
             <button class="ml-auto grid h-6 w-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40" type="button" title="Stage all" aria-label="Stage all" disabled={busy} onclick={() => onStage()}><Plus class="h-3.5 w-3.5" aria-hidden="true" /></button>
           {/if}
         </div>
         {#if unstaged.length === 0}
-          <div class="px-3 py-3 text-[9px] text-muted-foreground/70">No working tree changes.</div>
+          <div class="px-3 py-3 text-[11px] text-muted-foreground/70">No working tree changes.</div>
         {:else}
           {#each unstaged as change (`unstaged:${change.path}`)}
             <div class="group flex h-7 min-w-0 items-center px-2 hover:bg-sidebar-accent">
               <button class="flex h-7 min-w-0 flex-1 items-center gap-1.5 text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring" type="button" title={`Review working tree diff: ${change.path}`} onclick={() => onOpenDiff(change.path, "unstaged")}>
-                <span class={["w-3 shrink-0 text-center font-mono text-[9px] font-bold", statusTone(change, "unstaged")]} title={gitChangeLabel(change, "unstaged")}>{gitChangeCode(change, "unstaged")}</span>
-                <span class="min-w-0 flex-1 truncate text-[10px] text-foreground">{change.path}</span>
+                <span class={["w-3 shrink-0 text-center font-mono text-[11px] font-bold", statusTone(change, "unstaged")]} title={gitChangeLabel(change, "unstaged")}>{gitChangeCode(change, "unstaged")}</span>
+                <span class="min-w-0 flex-1 truncate text-[11px] text-foreground">{change.path}</span>
               </button>
               <button class="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 disabled:opacity-30 group-hover:opacity-100" type="button" disabled={busy} title={`Stage ${change.path}`} aria-label={`Stage ${change.path}`} onclick={() => onStage(change.path)}><Plus class="h-3 w-3" aria-hidden="true" /></button>
             </div>
@@ -265,7 +265,7 @@
     <div class="space-y-1.5 border-t border-sidebar-border p-2">
       <div class="relative">
         <textarea
-          class="min-h-16 w-full resize-y rounded-md border border-input bg-background px-2 py-1.5 pr-9 text-[10px] leading-4 text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-50"
+          class="min-h-16 w-full resize-y rounded-md border border-input bg-background px-2 py-1.5 pr-9 text-[11px] leading-4 text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-50"
           placeholder={staged.length > 0 ? "Commit message" : "Stage changes before committing"}
           aria-label="Commit message"
           value={commitMessage}
@@ -285,7 +285,7 @@
         ><Sparkles class={["h-3.5 w-3.5", llmActionId === "commit-message" ? "animate-pulse" : ""]} aria-hidden="true" /></button>
       </div>
       <button
-        class="inline-flex h-7 w-full items-center justify-center gap-1.5 rounded-md bg-primary px-2 text-[10px] font-medium text-primary-foreground hover:brightness-110 disabled:opacity-40"
+        class="inline-flex h-7 w-full items-center justify-center gap-1.5 rounded-md bg-primary px-2 text-[11px] font-medium text-primary-foreground hover:brightness-110 disabled:opacity-40"
         type="button"
         disabled={staged.length === 0 || !commitMessage.trim() || busy}
         onclick={() => void commit()}

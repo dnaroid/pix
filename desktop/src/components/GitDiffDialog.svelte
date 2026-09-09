@@ -61,9 +61,9 @@
   <div class="flex h-[760px] max-h-[calc(100vh-48px)] min-h-[320px] w-[1120px] max-w-[calc(100vw-48px)] min-w-[480px] flex-col overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-md">
     <header class="flex min-h-10 min-w-0 items-center gap-2 border-b border-border px-3">
       <strong class="min-w-0 flex-1 truncate text-xs font-medium" title={title}>{title}</strong>
-      <span class="rounded border border-border bg-muted px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground">{scopeLabel}</span>
+      <span class="rounded border border-border bg-muted px-1.5 py-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{scopeLabel}</span>
       <button
-        class="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[10px] font-medium text-primary hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
+        class="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[11px] font-medium text-primary hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
         type="button"
         disabled={!canReview || reviewLoading || !diff.content.trim()}
         title={canReview ? "Review this diff with LLM" : "Open a ready session to use LLM review"}
@@ -86,12 +86,12 @@
     {/if}
 
     {#if diff.truncated}
-      <div class="border-b border-[var(--tool-warning)]/20 bg-[var(--tool-warning)]/5 px-3 py-1.5 text-[9px] text-[var(--tool-warning)]">Diff preview was truncated to keep the UI responsive.</div>
+      <div class="border-b border-[var(--tool-warning)]/20 bg-[var(--tool-warning)]/5 px-3 py-1.5 text-[11px] text-[var(--tool-warning)]">Diff preview was truncated to keep the UI responsive.</div>
     {/if}
 
     <div class="min-h-0 flex-1 overflow-auto bg-muted/25">
       {#if diff.content.trim()}
-        <pre class="min-w-max py-2 font-mono text-[10px] leading-4"><code>{#each lines as line, index (`${index}:${line}`)}<span class={["block min-h-4 whitespace-pre px-3", lineTone(line)]}>{line || " "}</span>{/each}</code></pre>
+        <pre class="min-w-max py-2 font-mono text-[11px] leading-4"><code>{#each lines as line, index (`${index}:${line}`)}<span class={["block min-h-4 whitespace-pre px-3", lineTone(line)]}>{line || " "}</span>{/each}</code></pre>
       {:else}
         <div class="grid h-full place-items-center text-[11px] text-muted-foreground">No diff for this selection.</div>
       {/if}

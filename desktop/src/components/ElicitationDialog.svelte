@@ -16,7 +16,7 @@
 
 <div class="fixed inset-0 z-30 grid place-items-center bg-overlay p-6 backdrop-blur-sm" role="presentation">
   <div class="w-[min(520px,100%)] rounded-xl border border-border bg-popover p-5 text-popover-foreground shadow-md" role="dialog" aria-modal="true" aria-labelledby="elicitation-title">
-    <span class="text-[10px] font-semibold tracking-[0.08em] text-primary uppercase">Pix needs your input</span>
+    <span class="text-[11px] font-semibold tracking-[0.08em] text-primary uppercase">Pix needs your input</span>
     <h2 id="elicitation-title" class="mt-2 mb-[22px] text-base leading-snug font-medium whitespace-pre-wrap text-foreground">{message}</h2>
     <label class="grid gap-2">
       <span class="text-xs font-semibold">{field.label}</span>

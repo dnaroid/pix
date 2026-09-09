@@ -621,13 +621,13 @@
           <span class="flex min-w-0 items-baseline gap-2">
             <span class="shrink-0 font-mono text-xs font-semibold text-foreground">/{match.command.name}</span>
             {#if match.inputHint}
-              <span class="truncate font-mono text-[10px] text-muted-foreground">{match.inputHint}</span>
+              <span class="truncate font-mono text-[11px] text-muted-foreground">{match.inputHint}</span>
             {/if}
           </span>
           <span class="mt-0.5 block truncate text-[11px] text-muted-foreground">{match.command.description}</span>
         </span>
         {#if match.source}
-          <span class="mt-0.5 shrink-0 rounded border border-border/80 px-1.5 py-0.5 text-[9px] font-medium tracking-wide text-muted-foreground uppercase">{match.source}</span>
+          <span class="mt-0.5 shrink-0 rounded border border-border/80 px-1.5 py-0.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">{match.source}</span>
         {/if}
       </button>
     {/each}
@@ -713,7 +713,7 @@
             <p class="mt-0.5 text-xs text-muted-foreground">Review every answer before sending.</p>
           </div>
           <span class={[
-            "rounded-full px-2 py-0.5 text-[10px] font-semibold",
+            "rounded-full px-2 py-0.5 text-[11px] font-semibold",
             allQuestionsComplete ? "bg-primary/10 text-primary" : "bg-destructive/10 text-destructive",
           ]}>{allQuestionsComplete ? "Ready" : "Incomplete"}</span>
         </div>
@@ -731,7 +731,7 @@
               <span class={[
                 "mt-0.5 grid size-4 shrink-0 place-items-center rounded-full",
                 complete ? "bg-primary/10 text-primary" : "bg-destructive/10 text-destructive",
-              ]}>{#if complete}<Check class="size-2.5" strokeWidth={2.4} />{:else}<span class="text-[10px] leading-none">!</span>{/if}</span>
+              ]}>{#if complete}<Check class="size-2.5" strokeWidth={2.4} />{:else}<span class="text-[11px] leading-none">!</span>{/if}</span>
               <span class="min-w-0 flex-1">
                 <span class="block text-xs font-semibold text-foreground">{question.label}</span>
                 <span class={[
@@ -755,7 +755,7 @@
               </p>
             {/if}
           </div>
-          <span class="mt-0.5 shrink-0 text-[10px] tabular-nums text-muted-foreground">{questionMode.state.activeTab + 1}/{questionMode.questions.length}</span>
+          <span class="mt-0.5 shrink-0 text-[11px] tabular-nums text-muted-foreground">{questionMode.state.activeTab + 1}/{questionMode.questions.length}</span>
         </div>
         <div
           class="mb-3 divide-y divide-border/70 border-t border-border/70"

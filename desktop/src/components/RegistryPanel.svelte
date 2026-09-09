@@ -145,12 +145,12 @@
           aria-expanded={projectReviewOpen}
           onclick={() => projectReviewOpen = !projectReviewOpen}
         >
-          <span class={["grid h-5 w-5 shrink-0 place-items-center rounded-full text-[10px] font-bold", projectConflictCount > 0 ? "bg-[var(--tool-error)]/10 text-[var(--tool-error)]" : projectPendingItems.length > 0 ? "bg-[var(--tool-warning)]/10 text-[var(--tool-warning)]" : "bg-[var(--tool-success)]/10 text-[var(--tool-success)]"]}>
+          <span class={["grid h-5 w-5 shrink-0 place-items-center rounded-full text-[11px] font-bold", projectConflictCount > 0 ? "bg-[var(--tool-error)]/10 text-[var(--tool-error)]" : projectPendingItems.length > 0 ? "bg-[var(--tool-warning)]/10 text-[var(--tool-warning)]" : "bg-[var(--tool-success)]/10 text-[var(--tool-success)]"]}>
             {projectConflictCount > 0 ? "!" : projectPendingItems.length}
           </span>
           <span class="min-w-0 flex-1">
-            <span class="block truncate text-[10px] font-semibold text-foreground">{projectPendingItems.length === 0 ? "Project synced" : "Review project sync"}</span>
-            <span class="block truncate text-[9px] text-muted-foreground">{projectConflictCount > 0 ? `${projectConflictCount} ${projectConflictCount === 1 ? "item needs" : "items need"} review` : projectPendingItems.length > 0 ? `${projectPendingItems.length} ${projectPendingItems.length === 1 ? "change" : "changes"} to sync` : "Tasks, plans and TODO are up to date"}</span>
+            <span class="block truncate text-[11px] font-semibold text-foreground">{projectPendingItems.length === 0 ? "Project synced" : "Review project sync"}</span>
+            <span class="block truncate text-[11px] text-muted-foreground">{projectConflictCount > 0 ? `${projectConflictCount} ${projectConflictCount === 1 ? "item needs" : "items need"} review` : projectPendingItems.length > 0 ? `${projectPendingItems.length} ${projectPendingItems.length === 1 ? "change" : "changes"} to sync` : "Tasks, plans and TODO are up to date"}</span>
           </span>
           <ChevronDown class={["h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform", projectReviewOpen ? "rotate-180" : ""]} aria-hidden="true" />
         </button>
@@ -171,8 +171,8 @@
                   {:else}<CircleX class="h-3.5 w-3.5" aria-hidden="true" />{/if}
                 </span>
                 <span class="min-w-0 flex-1">
-                  <span class="block truncate text-[10px] font-medium text-foreground">{item.name}</span>
-                  <span class="block truncate text-[9px] text-muted-foreground">{registryFriendlyStatusLabel(item)}</span>
+                  <span class="block truncate text-[11px] font-medium text-foreground">{item.name}</span>
+                  <span class="block truncate text-[11px] text-muted-foreground">{registryFriendlyStatusLabel(item)}</span>
                 </span>
                 {#if projectPrimary}
                   <button
@@ -193,7 +193,7 @@
                     {/if}
                   </button>
                 {:else if item.status !== "up-to-date"}
-                  <span class="shrink-0 text-[9px] font-medium text-[var(--tool-warning)]">Review</span>
+                  <span class="shrink-0 text-[11px] font-medium text-[var(--tool-warning)]">Review</span>
                 {/if}
               </div>
             {/each}
@@ -208,7 +208,7 @@
         <Search class="pointer-events-none absolute top-1/2 left-2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
         <input
           id="registry-search"
-          class="h-7 w-full min-w-0 rounded-md border border-input bg-background py-0 pr-2 pl-7 text-[10px] text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/30"
+          class="h-7 w-full min-w-0 rounded-md border border-input bg-background py-0 pr-2 pl-7 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/30"
           type="search"
           placeholder="Search names…"
           bind:value={query}
@@ -220,7 +220,7 @@
         <label class="sr-only" for="registry-filter">Registry filter</label>
         <select
           id="registry-filter"
-          class="h-7 w-full appearance-none rounded-md border border-input bg-background py-0 pr-7 pl-2.5 text-[10px] font-medium text-foreground shadow-none hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+          class="h-7 w-full appearance-none rounded-md border border-input bg-background py-0 pr-7 pl-2.5 text-[11px] font-medium text-foreground shadow-none hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
           bind:value={filter}
         >
           <option value="all">All resources</option>
@@ -240,19 +240,19 @@
       <div class="rounded-lg border border-sidebar-border bg-background/50 px-3 py-4 text-center">
         <Database class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" />
         <p class="text-xs font-medium text-foreground">Registry is not configured</p>
-        <p class="mt-1 text-[10px] leading-4 text-muted-foreground">Connect the private Git repository used for skills, agents, and project state.</p>
-        <button class="mt-3 inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-card px-2.5 text-[10px] font-medium hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" disabled={busy} onclick={() => onAction({ action: "configure" }, "configure")}><Settings class="h-3 w-3" aria-hidden="true" />Configure registry</button>
+        <p class="mt-1 text-[11px] leading-4 text-muted-foreground">Connect the private Git repository used for skills, agents, and project state.</p>
+        <button class="mt-3 inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-card px-2.5 text-[11px] font-medium hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" disabled={busy} onclick={() => onAction({ action: "configure" }, "configure")}><Settings class="h-3 w-3" aria-hidden="true" />Configure registry</button>
       </div>
     {:else if !snapshot}
       <div class="px-3 py-8 text-center text-xs text-muted-foreground">Open a ready project session to manage its registry.</div>
     {:else}
       {#if snapshot.error}
-        <div class="mb-2 flex items-start gap-2 rounded-lg border border-[var(--tool-error)]/30 bg-[var(--tool-error)]/5 px-2.5 py-2 text-[10px] leading-4 text-[var(--tool-error)]"><X class="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" /><span>{snapshot.error}</span></div>
+        <div class="mb-2 flex items-start gap-2 rounded-lg border border-[var(--tool-error)]/30 bg-[var(--tool-error)]/5 px-2.5 py-2 text-[11px] leading-4 text-[var(--tool-error)]"><X class="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" /><span>{snapshot.error}</span></div>
       {/if}
       {#if snapshot.projectIssue}
-        <div class="mb-2 rounded-lg border border-[var(--tool-warning)]/30 bg-[var(--tool-warning)]/5 px-2.5 py-2 text-[10px] leading-4 text-[var(--tool-warning)]">
+        <div class="mb-2 rounded-lg border border-[var(--tool-warning)]/30 bg-[var(--tool-warning)]/5 px-2.5 py-2 text-[11px] leading-4 text-[var(--tool-warning)]">
           <p>{snapshot.projectIssue}</p>
-          <button class="mt-2 inline-flex h-6 items-center gap-1.5 rounded-md border border-[var(--tool-warning)]/30 bg-background/50 px-2 text-[9px] font-medium text-foreground hover:bg-accent disabled:opacity-40" type="button" disabled={busy} onclick={() => onAction({ action: "project-key" }, "project-key")}><KeyRound class="h-3 w-3" aria-hidden="true" />Set project key</button>
+          <button class="mt-2 inline-flex h-6 items-center gap-1.5 rounded-md border border-[var(--tool-warning)]/30 bg-background/50 px-2 text-[11px] font-medium text-foreground hover:bg-accent disabled:opacity-40" type="button" disabled={busy} onclick={() => onAction({ action: "project-key" }, "project-key")}><KeyRound class="h-3 w-3" aria-hidden="true" />Set project key</button>
         </div>
       {/if}
       {#if visibleItems.length === 0}
@@ -281,12 +281,12 @@
                   <div class="flex min-w-0 items-center gap-1.5">
                     <strong class="min-w-0 max-w-full truncate text-[11px] font-medium text-foreground" title={item.name}>{item.name}</strong>
                     <span class={[
-                      "whitespace-nowrap rounded border px-1 py-px font-mono text-[8px] font-semibold tracking-wide",
+                      "whitespace-nowrap rounded border px-1 py-px font-mono text-[11px] font-semibold tracking-wide",
                       typeTone(item.type),
                     ]}>{typeLabel(item.type)}</span>
                   </div>
-                  <p class={["mt-0.5 text-[9px] font-semibold leading-3.5", iconTone(item.status)]} title={statusTitle(item)}>{registryFriendlyStatusLabel(item)}</p>
-                  {#if item.description}<p class="line-clamp-1 text-[9px] leading-3.5 text-muted-foreground/80" title={item.description}>{item.description}</p>{/if}
+                  <p class={["mt-0.5 text-[11px] font-semibold leading-3.5", iconTone(item.status)]} title={statusTitle(item)}>{registryFriendlyStatusLabel(item)}</p>
+                  {#if item.description}<p class="line-clamp-1 text-[11px] leading-3.5 text-muted-foreground/80" title={item.description}>{item.description}</p>{/if}
                 </div>
                 {#if item.actions.length > 0 || (item.type === "project" && item.local && item.artifact)}
                   <div class="flex shrink-0 items-center gap-0.5">

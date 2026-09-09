@@ -44,7 +44,7 @@
 
 </script>
 
-<footer class="flex min-w-0 items-center gap-3 border-t border-sidebar-border bg-sidebar px-[22px] text-[10px] text-muted-foreground max-[760px]:px-3">
+<footer class="flex min-w-0 items-center gap-3 border-t border-sidebar-border bg-sidebar px-[22px] text-[11px] text-muted-foreground max-[760px]:px-3">
   <div class={[
     "flex items-center gap-2",
     status === "error" && "text-destructive",

@@ -126,15 +126,15 @@
 <section class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" aria-label="Project files">
   <div class="min-h-0 flex-1 overflow-auto py-1">
     {#if rootLoading && rootEntries.length === 0}
-      <div class="flex items-center justify-center gap-1.5 py-8 text-[10px] text-muted-foreground">
+      <div class="flex items-center justify-center gap-1.5 py-8 text-[11px] text-muted-foreground">
         <RotateCw class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />Loading project files…
       </div>
     {:else if rootError}
-      <div class="mx-2 rounded-md border border-[var(--tool-error)]/25 bg-[var(--tool-error)]/5 px-2.5 py-2 text-[10px] leading-4 text-[var(--tool-error)]">
+      <div class="mx-2 rounded-md border border-[var(--tool-error)]/25 bg-[var(--tool-error)]/5 px-2.5 py-2 text-[11px] leading-4 text-[var(--tool-error)]">
         {rootError}
       </div>
     {:else if rootEntries.length === 0}
-      <div class="px-3 py-8 text-center text-[10px] text-muted-foreground">This project folder is empty.</div>
+      <div class="px-3 py-8 text-center text-[11px] text-muted-foreground">This project folder is empty.</div>
     {:else}
       {#each rows as row (row.entry.path)}
         {@const entry = row.entry}
@@ -186,7 +186,7 @@
         </div>
         {#if entry.kind === "directory" && expanded && errorByDirectory[entry.path]}
           <div
-            class="pr-2 text-[9px] leading-4 text-[var(--tool-error)]"
+            class="pr-2 text-[11px] leading-4 text-[var(--tool-error)]"
             style:padding-left={`${34 + (row.depth + 1) * 14}px`}
           >{errorByDirectory[entry.path]}</div>
         {/if}

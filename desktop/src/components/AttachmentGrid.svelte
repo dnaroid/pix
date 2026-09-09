@@ -136,7 +136,7 @@
             </span>
           {:else}
             <File class="h-5 w-5" aria-hidden="true" />
-            <span class="line-clamp-2 max-w-full text-center text-[10px] leading-tight break-all">{attachment.name}</span>
+            <span class="line-clamp-2 max-w-full text-center text-[11px] leading-tight break-all">{attachment.name}</span>
           {/if}
         </button>
         {#if onRemove}

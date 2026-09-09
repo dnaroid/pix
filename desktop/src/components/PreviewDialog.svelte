@@ -296,11 +296,11 @@
       {/if}
       <strong class="min-w-0 flex-1 truncate text-xs font-medium" title={title}>{title}</strong>
       {#if renderAsMarkdown}
-        <span class="rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+        <span class="rounded border border-border bg-muted px-1.5 py-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
           Markdown
         </span>
       {:else if highlighted}
-        <span class="rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+        <span class="rounded border border-border bg-muted px-1.5 py-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
           {highlighted.language}
         </span>
         <button

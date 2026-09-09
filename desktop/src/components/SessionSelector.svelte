@@ -93,7 +93,7 @@
 >
   <div class="flex items-start justify-between gap-3 px-3.5 pt-3.5 pb-2.5">
     <div class="min-w-0">
-      <span class="text-[10px] font-semibold tracking-[0.08em] text-primary uppercase">
+      <span class="text-[11px] font-semibold tracking-[0.08em] text-primary uppercase">
         {mode === "delete" ? "Delete conversation" : "Current conversation"}
       </span>
       <strong class="mt-1 block overflow-hidden text-ellipsis whitespace-nowrap text-[13px] font-medium">
@@ -123,7 +123,7 @@
   <div class="min-h-0 overflow-y-auto border-t border-border/60 px-1.5 pt-1 pb-2" aria-label="Conversations">
     {#if mode === "open"}
       <button
-        class="mb-1 grid w-full grid-cols-[22px_minmax(0,1fr)] gap-2 rounded-t-md border-b border-border/60 bg-transparent px-2 py-2 text-left text-popover-foreground hover:bg-accent focus-visible:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+        class="mb-1 grid w-full grid-cols-[22px_minmax(0,1fr)] gap-2 rounded-md bg-transparent px-2 py-2 text-left text-popover-foreground hover:bg-accent focus-visible:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
         data-session-option
         type="button"
         onclick={onCreate}
@@ -132,7 +132,7 @@
         <Plus class="h-4 w-4 justify-self-center text-primary" aria-hidden="true" />
         <span class="min-w-0">
           <strong class="block overflow-hidden text-ellipsis whitespace-nowrap text-xs font-medium">New conversation</strong>
-          <small class="mt-0.5 block overflow-hidden text-ellipsis whitespace-nowrap text-[10px] text-muted-foreground">Start a fresh session</small>
+          <small class="mt-0.5 block overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-muted-foreground">Start a fresh session</small>
         </span>
       </button>
     {/if}
@@ -159,7 +159,7 @@
           <strong class="block overflow-hidden text-ellipsis whitespace-nowrap text-xs font-medium">
             {session.title || "Untitled conversation"}
           </strong>
-          <small class="mt-0.5 block overflow-hidden text-ellipsis whitespace-nowrap text-[10px] text-muted-foreground">
+          <small class="mt-0.5 block overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-muted-foreground">
             {displayDate(session.updatedAt) || session.sessionId.slice(0, 8)}
           </small>
         </span>

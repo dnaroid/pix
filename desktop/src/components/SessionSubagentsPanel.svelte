@@ -44,10 +44,10 @@
         <h2 id="session-subagents-heading" class="text-xs font-semibold text-foreground">Subagents</h2>
       </div>
       {#if activeCount > 0}
-        <span class="text-[10px] text-muted-foreground">{activeCount} active · {runs.length} {runs.length === 1 ? "run" : "runs"}</span>
+        <span class="text-[11px] text-muted-foreground">{activeCount} active · {runs.length} {runs.length === 1 ? "run" : "runs"}</span>
       {/if}
     </div>
-    <p class="mt-1 text-[9px] leading-3.5 text-muted-foreground">Live delegated work for the active session.</p>
+    <p class="mt-1 text-[11px] leading-3.5 text-muted-foreground">Live delegated work for the active session.</p>
   </div>
 
   <div class="p-2">
@@ -55,13 +55,13 @@
       <div class="px-4 py-5 text-center">
         <Workflow class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" />
         <p class="text-xs font-medium">No active subagents</p>
-        <p class="mt-1 text-[10px] leading-4 text-muted-foreground">Delegated runs appear here while they are active.</p>
+        <p class="mt-1 text-[11px] leading-4 text-muted-foreground">Delegated runs appear here while they are active.</p>
       </div>
     {:else}
       <div class="space-y-3">
         {#each runs as run (run.runDir)}
           <section aria-label={`Subagent run ${sessionSubagentRunName(run.runDir)}`}>
-            <h3 class="mb-1.5 truncate px-0.5 font-mono text-[9px] font-medium text-muted-foreground" title={run.runDir}>
+            <h3 class="mb-1.5 truncate px-0.5 font-mono text-[11px] font-medium text-muted-foreground" title={run.runDir}>
               {sessionSubagentRunName(run.runDir)}
             </h3>
             <div class="space-y-1.5">
@@ -69,17 +69,17 @@
                 {@const preview = sessionSubagentTaskPreview(run, agent.id)}
                 {@const task = preview?.task?.trim() || preview?.scope?.trim() || "Task unavailable"}
                 {@const AgentIcon = agentIcon(preview?.icon)}
-                <article class="rounded-lg border border-sidebar-border bg-background/55 p-2.5 shadow-xs" aria-label={`Subagent ${agent.id}: ${statusLabel(agent.status)}`}>
+                <article class="rounded-lg bg-sidebar-accent/50 p-2.5 transition-colors hover:bg-sidebar-accent" aria-label={`Subagent ${agent.id}: ${statusLabel(agent.status)}`}>
                   <div class="flex items-start gap-2">
                     <span class={["mt-0.5 shrink-0", statusTone(agent.status)]} title={`Agent type: ${preview?.icon?.trim() || "agent"} · ${statusLabel(agent.status)}`}>
                       <AgentIcon class="h-4 w-4" aria-hidden="true" />
                     </span>
                     <div class="min-w-0 flex-1">
-                      <h4 class="break-words font-mono text-[10px] font-semibold leading-4 text-foreground">{agent.id}</h4>
-                      <p class="mt-0.5 line-clamp-3 break-words text-[10px] leading-3.5 text-muted-foreground">{task}</p>
+                      <h4 class="break-words font-mono text-[11px] font-semibold leading-4 text-foreground">{agent.id}</h4>
+                      <p class="mt-0.5 line-clamp-3 break-words text-[11px] leading-3.5 text-muted-foreground">{task}</p>
                     </div>
                   </div>
-                  <div class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[9px] text-muted-foreground">
+                  <div class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
                     <span class={["font-medium", statusTone(agent.status)]}>{statusLabel(agent.status)}</span>
                     <span class="font-mono">{sessionSubagentModelLabel(preview)}</span>
                     {#if agent.retryCount}<span>retry {agent.retryCount}</span>{/if}

@@ -39,9 +39,9 @@
         {/if}
         <div class="min-w-0 flex-1">
           <div class="flex min-w-0 items-baseline gap-2">
-            <span class="shrink-0 font-mono text-[9px] font-medium uppercase tracking-[0.06em] text-muted-foreground">{label(item)}</span>
+            <span class="shrink-0 font-mono text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground">{label(item)}</span>
             <span class="truncate text-[11px] text-foreground" title={item.text}>{item.text || "(image message)"}</span>
-            {#if imageCount(item) > 0}<span class="shrink-0 text-[9px] text-muted-foreground">+{imageCount(item)} image{imageCount(item) === 1 ? "" : "s"}</span>{/if}
+            {#if imageCount(item) > 0}<span class="shrink-0 text-[11px] text-muted-foreground">+{imageCount(item)} image{imageCount(item) === 1 ? "" : "s"}</span>{/if}
           </div>
         </div>
         <div class="flex shrink-0 items-center gap-0.5 opacity-65 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">

@@ -33,7 +33,7 @@
   }
 </script>
 
-<section class="border-t border-sidebar-border" aria-labelledby="session-todos-heading">
+<section aria-labelledby="session-todos-heading">
   <div class="border-b border-sidebar-border p-2.5">
     <div class="flex items-center justify-between gap-2">
       <div class="flex min-w-0 items-center gap-1.5">
@@ -41,10 +41,10 @@
         <h2 id="session-todos-heading" class="text-xs font-semibold text-foreground">Todos</h2>
       </div>
       {#if hasOpenSessionTodos(snapshot)}
-        <span class="text-[10px] text-muted-foreground">{openCount} open · {counts.completed} done</span>
+        <span class="text-[11px] text-muted-foreground">{openCount} open · {counts.completed} done</span>
       {/if}
     </div>
-    <p class="mt-1 text-[9px] leading-3.5 text-muted-foreground">Read-only plan for the active session.</p>
+    <p class="mt-1 text-[11px] leading-3.5 text-muted-foreground">Read-only plan for the active session.</p>
   </div>
 
   <div class="p-2">
@@ -52,14 +52,14 @@
       <div class="px-4 py-5 text-center">
         <ListChecks class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" />
         <p class="text-xs font-medium">No open todos</p>
-        <p class="mt-1 text-[10px] leading-4 text-muted-foreground">This session has no unfinished plan.</p>
+        <p class="mt-1 text-[11px] leading-4 text-muted-foreground">This session has no unfinished plan.</p>
       </div>
     {:else}
       <div class="space-y-1.5">
         {#each rows as row (row.task.id)}
           {@const task = row.task}
           <article
-            class={["rounded-lg border border-sidebar-border bg-background/55 p-2.5 shadow-xs", task.status === "completed" && "opacity-65"]}
+            class={["rounded-lg bg-sidebar-accent/50 p-2.5 transition-colors hover:bg-sidebar-accent", task.status === "completed" && "opacity-65"]}
             style:margin-left={`${Math.min(row.depth, 4) * 12}px`}
             aria-label={`Todo ${task.id}: ${task.subject}`}
           >
@@ -72,16 +72,16 @@
               </span>
               <div class="min-w-0 flex-1">
                 <h3 class={["break-words text-xs font-medium leading-4 text-foreground", task.status === "completed" && "line-through"]}>
-                  <span class="mr-1 font-mono text-[9px] text-muted-foreground">#{task.id}</span>{task.subject}
+                  <span class="mr-1 font-mono text-[11px] text-muted-foreground">#{task.id}</span>{task.subject}
                 </h3>
                 {#if task.status === "in_progress" && task.activeForm}
-                  <p class="mt-1 break-words text-[10px] leading-3.5 text-[var(--tool-warning)]">{task.activeForm}</p>
+                  <p class="mt-1 break-words text-[11px] leading-3.5 text-[var(--tool-warning)]">{task.activeForm}</p>
                 {:else if task.description}
-                  <p class="mt-1 line-clamp-3 break-words text-[10px] leading-3.5 text-muted-foreground">{task.description}</p>
+                  <p class="mt-1 line-clamp-3 break-words text-[11px] leading-3.5 text-muted-foreground">{task.description}</p>
                 {/if}
               </div>
             </div>
-            <div class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[9px] text-muted-foreground">
+            <div class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
               <span class={["font-medium", statusTone(task.status)]}>{statusLabel(task.status)}</span>
               {#if task.thinking}<span class="inline-flex items-center gap-1"><Brain class="h-3 w-3" aria-hidden="true" />{task.thinking}</span>{/if}
               {#if task.owner}<span class="inline-flex min-w-0 items-center gap-1"><UserRound class="h-3 w-3 shrink-0" aria-hidden="true" /><span class="truncate">{task.owner}</span></span>{/if}

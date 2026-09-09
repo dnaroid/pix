@@ -95,7 +95,7 @@
     >
       <div class="border-b border-border/60 px-3.5 py-2.5">
         <strong class="text-xs font-medium">Recent projects</strong>
-        <span class="ml-1.5 text-[10px] text-muted-foreground">{recentProjects.length}/{MAX_RECENT_PROJECTS}</span>
+        <span class="ml-1.5 text-[11px] text-muted-foreground">{recentProjects.length}/{MAX_RECENT_PROJECTS}</span>
       </div>
 
       <div class="min-h-0 overflow-y-auto px-1.5 py-1.5" aria-label="Recent projects">
@@ -120,7 +120,7 @@
                 <strong class="block overflow-hidden text-ellipsis whitespace-nowrap text-xs font-medium">
                   {projectName(project)}
                 </strong>
-                <small class="mt-0.5 block overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10px] text-muted-foreground">
+                <small class="mt-0.5 block overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-muted-foreground">
                   {project}
                 </small>
               </span>
@@ -157,7 +157,7 @@
           <FolderPlus class="h-4 w-4 justify-self-center text-primary" aria-hidden="true" />
           <span class="min-w-0">
             <strong class="block text-xs font-medium">Choose or create project folder…</strong>
-            <small class="mt-0.5 block text-[10px] text-muted-foreground">Open the system folder picker</small>
+            <small class="mt-0.5 block text-[11px] text-muted-foreground">Open the system folder picker</small>
           </span>
         </button>
         <button
@@ -169,7 +169,7 @@
           <ExternalLink class="h-4 w-4 justify-self-center text-primary" aria-hidden="true" />
           <span class="min-w-0">
             <strong class="block text-xs font-medium">Choose project folder in new window…</strong>
-            <small class="mt-0.5 block text-[10px] text-muted-foreground">Keep this window on the current project</small>
+            <small class="mt-0.5 block text-[11px] text-muted-foreground">Keep this window on the current project</small>
           </span>
         </button>
       </div>

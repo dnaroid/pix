@@ -96,7 +96,7 @@
   >
     <header class="flex items-center justify-between gap-3 px-3.5 pt-3.5 pb-2.5">
       <div>
-        <span class="font-mono text-[10px] font-semibold tracking-[0.08em] text-primary uppercase">/{picker.command}</span>
+        <span class="font-mono text-[11px] font-semibold tracking-[0.08em] text-primary uppercase">/{picker.command}</span>
         <h2 id="command-picker-title" class="mt-1 text-sm font-medium text-foreground">{picker.title}</h2>
       </div>
       <button
@@ -136,7 +136,7 @@
           {#if item.current}<Check class="h-4 w-4 text-primary" aria-hidden="true" />{:else}<span aria-hidden="true"></span>{/if}
           <span class="min-w-0">
             <strong class="block truncate text-xs font-medium">{item.label}</strong>
-            {#if item.description}<small class="mt-0.5 block truncate font-mono text-[10px] text-muted-foreground">{item.description}</small>{/if}
+            {#if item.description}<small class="mt-0.5 block truncate font-mono text-[11px] text-muted-foreground">{item.description}</small>{/if}
           </span>
         </button>
       {:else}
