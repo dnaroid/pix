@@ -163,7 +163,10 @@ describe("resource registry", () => {
 		const command = h.commands.get("registry");
 
 		await command.handler(`configure ${remote} main`, h.ctx);
-		expect(fs.readFileSync(path.join(home, ".config", "pi", "pi-tools-suite.jsonc"), "utf8")).toContain(remote);
+		const savedConfig = JSON.parse(
+			fs.readFileSync(path.join(home, ".config", "pi", "pi-tools-suite.jsonc"), "utf8"),
+		);
+		expect(savedConfig.resourceRegistry).toEqual({ remote, branch: "main" });
 		await command.handler("rpc refresh", h.ctx);
 
 		const refreshWidget = h.widgets.at(-1);
@@ -527,7 +530,11 @@ describe("resource registry", () => {
 		fs.writeFileSync(localPlan, "roadmap v1\n");
 		await command.handler("push plans", h.ctx);
 		git(seed, ["pull", "--ff-only", "origin", "main"]);
-		expect(fs.readFileSync(path.join(seed, "projects", "empty-plans", "plans", "roadmap.md"), "utf8")).toBe("roadmap v1\n");
+		const remotePlan = fs.readFileSync(
+			path.join(seed, "projects", "empty-plans", "plans", "roadmap.md"),
+			"utf8",
+		);
+		expect(remotePlan.replace(/\r\n/g, "\n")).toBe("roadmap v1\n");
 
 		fs.rmSync(localPlan);
 		await command.handler("push plans", h.ctx);
