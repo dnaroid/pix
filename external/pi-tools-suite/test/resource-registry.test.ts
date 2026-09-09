@@ -10,6 +10,8 @@ const originalCache = process.env.XDG_CACHE_HOME;
 const originalRpcStateBridge = process.env.PIX_ACP_SESSION_STATE_BRIDGE;
 const roots: string[] = [];
 
+type ExecOptions = { cwd?: string; timeout?: number };
+
 afterEach(() => {
 	if (originalHome === undefined) delete process.env.HOME;
 	else process.env.HOME = originalHome;
@@ -73,25 +75,47 @@ function harness(project: string) {
 		},
 		registerCommand(name: string, command: any) { commands.set(name, command); },
 		sendMessage(message: any) { messages.push(message); },
-		async exec(command: string, args: string[], options: { cwd?: string } = {}) {
+		async exec(command: string, args: string[], options: ExecOptions = {}) {
 			const child = Bun.spawn([command, ...args], {
 				cwd: options.cwd,
+				stdin: "ignore",
 				stdout: "pipe",
 				stderr: "pipe",
 				env: {
 					...process.env,
+					GIT_TERMINAL_PROMPT: "0",
+					GCM_INTERACTIVE: "Never",
 					GIT_AUTHOR_NAME: "Registry Test",
 					GIT_AUTHOR_EMAIL: "registry@example.test",
 					GIT_COMMITTER_NAME: "Registry Test",
 					GIT_COMMITTER_EMAIL: "registry@example.test",
 				},
 			});
-			const [stdout, stderr, code] = await Promise.all([
+			const timeout = options.timeout;
+			const commandLabel = [command, ...args].join(" ");
+			const completed = Promise.all([
 				new Response(child.stdout).text(),
 				new Response(child.stderr).text(),
 				child.exited,
-			]);
-			return { stdout, stderr, code };
+			] as const);
+			let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+			try {
+				const [stdout, stderr, code] = timeout !== undefined && timeout > 0
+					? await Promise.race([
+						completed,
+						new Promise<never>((_resolve, reject) => {
+							timeoutHandle = setTimeout(() => {
+								try { child.kill(); } finally {
+									reject(new Error(`Command timed out after ${timeout}ms: ${commandLabel}`));
+								}
+							}, timeout);
+						}),
+					])
+					: await completed;
+				return { stdout, stderr, code };
+			} finally {
+				if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+			}
 		},
 	} as any;
 	resourceRegistry(pi);
@@ -129,6 +153,16 @@ describe("resource registry", () => {
 		const project = tempRoot();
 		const { commands } = harness(project);
 		expect([...commands.keys()]).toEqual(["registry"]);
+	});
+
+	test("bounds spawned commands and identifies a timed-out command", async () => {
+		const project = tempRoot();
+		const { pi } = harness(project);
+		const command = [process.execPath, "-e", "await Bun.sleep(10_000)"];
+
+		await expect(pi.exec(command[0], command.slice(1), { timeout: 50 })).rejects.toThrow(
+			`Command timed out after 50ms: ${command.join(" ")}`,
+		);
 	});
 
 	test("reports an actionable error for a configured local registry that no longer exists", () => {
@@ -211,7 +245,7 @@ describe("resource registry", () => {
 		let activeDesktopClones = 0;
 		let maxActiveDesktopClones = 0;
 
-		h.pi.exec = async (gitCommand: string, args: string[], options: { cwd?: string } = {}) => {
+		h.pi.exec = async (gitCommand: string, args: string[], options: ExecOptions = {}) => {
 			const desktopClone = gitCommand === "git"
 				&& args[0] === "clone"
 				&& args.at(-1)?.includes(`resource-registry-desktop-${process.pid}`);
@@ -254,7 +288,7 @@ describe("resource registry", () => {
 		const exec = h.pi.exec.bind(h.pi);
 		let fetches = 0;
 
-		h.pi.exec = async (gitCommand: string, args: string[], options: { cwd?: string } = {}) => {
+		h.pi.exec = async (gitCommand: string, args: string[], options: ExecOptions = {}) => {
 			if (gitCommand === "git" && args[0] === "fetch") fetches += 1;
 			return exec(gitCommand, args, options);
 		};
