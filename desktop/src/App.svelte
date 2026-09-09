@@ -109,6 +109,7 @@
   import ElicitationDialog from "./components/ElicitationDialog.svelte";
   import CommandPicker from "./components/CommandPicker.svelte";
   import PreviewDialog from "./components/PreviewDialog.svelte";
+  import GitDiffDialog from "./components/GitDiffDialog.svelte";
   import WorkspaceSidebar from "./components/WorkspaceSidebar.svelte";
   import type { SessionStateNotification } from "./lib/session-state";
   import {
@@ -127,6 +128,18 @@
     type SessionSubagentSnapshot,
   } from "./lib/session-subagents";
   import type { ProjectFilePreview } from "./lib/project-files";
+  import {
+    DEFAULT_EXTERNAL_EDITOR,
+    externalEditorLabel,
+    resolveDesktopPreferences,
+  } from "./lib/desktop-config";
+  import type { ProjectTreeEntry } from "./lib/project-tree";
+  import {
+    gitDiffForLlm,
+    type GitDiff,
+    type GitDiffScope,
+    type GitSnapshot,
+  } from "./lib/git";
   import {
     EMPTY_PROJECT_DOCUMENTS,
     PROJECT_TODO_PATH,
@@ -234,12 +247,19 @@
   let taskLoadFailed = $state(false);
   let taskActionId = $state<string | null>(null);
   let projectDocuments = $state<ProjectDocumentsSnapshot>(EMPTY_PROJECT_DOCUMENTS);
-  let projectDocumentsLoading = $state(false);
   let projectDocumentsGeneration = 0;
+  let externalEditor = $state(DEFAULT_EXTERNAL_EDITOR);
   let todoSnapshots = $state<Map<string, SessionTodoSnapshot>>(new Map());
   let subagentSnapshots = $state<Map<string, SessionSubagentSnapshot>>(new Map());
   let registrySnapshot = $state<RegistrySnapshot | undefined>(undefined);
   let registryActionId = $state<string | null>(null);
+  let gitSnapshot = $state<GitSnapshot | undefined>(undefined);
+  let gitLoading = $state(false);
+  let gitError = $state<string | null>(null);
+  let gitActionId = $state<string | null>(null);
+  let gitLlmActionId = $state<string | null>(null);
+  let gitDiffPreview = $state<GitDiff | null>(null);
+  let gitDiffReview = $state<string | undefined>(undefined);
   let slashCommandsBySession = $state<Map<string, AvailableCommand[]>>(new Map());
   let queueItemsBySession = $state<Map<string, QueueItem[]>>(new Map());
   let queueActionRunning = $state(false);
@@ -265,6 +285,7 @@
   let previousAttachmentDraftKey: string | null = null;
   let projectFilePreviewGeneration = 0;
   let taskLoadGeneration = 0;
+  let gitLoadGeneration = 0;
   let elicitationSequence = 0;
   let questionImageOperationSequence = 0;
   let activeQuestionImageOperationId: number | null = null;
@@ -299,6 +320,7 @@
   const activeTodoSnapshot = $derived(activeSessionId ? todoSnapshots.get(activeSessionId) : undefined);
   const activeSubagentSnapshot = $derived(activeSessionId ? subagentSnapshots.get(activeSessionId) : undefined);
   const activeRegistrySnapshot = $derived(registrySnapshot);
+  const externalEditorDisplayName = $derived(externalEditorLabel(externalEditor));
   const registryLoading = $derived(registryActionId === "refresh");
   const activeQueueItems = $derived(activeSessionId ? (queueItemsBySession.get(activeSessionId) ?? []) : []);
   const activeSlashCommands = $derived(
@@ -390,6 +412,7 @@
     if (workspace) {
       void loadProjectTasks(workspace);
       void loadProjectDocuments(workspace);
+      void loadDesktopPreferences(workspace);
     }
     void getCurrentWindow().onDragDropEvent(({ payload }) => {
       if (payload.type === "enter" || payload.type === "over") {
@@ -1096,6 +1119,7 @@
     }
     if (selected === workspace) {
       rememberProject(selected);
+      void loadDesktopPreferences(selected);
       return;
     }
 
@@ -1110,11 +1134,18 @@
       taskDocument = EMPTY_TASK_DOCUMENT;
       projectDocumentsGeneration += 1;
       projectDocuments = EMPTY_PROJECT_DOCUMENTS;
-      projectDocumentsLoading = false;
       todoSnapshots = new Map();
       subagentSnapshots = new Map();
       registrySnapshot = undefined;
       registryActionId = null;
+      gitLoadGeneration += 1;
+      gitSnapshot = undefined;
+      gitLoading = false;
+      gitError = null;
+      gitActionId = null;
+      gitLlmActionId = null;
+      gitDiffPreview = null;
+      gitDiffReview = undefined;
       slashCommandsBySession = new Map();
       taskActionId = null;
       taskLoadFailed = false;
@@ -1135,6 +1166,7 @@
         openWorkspaceSession(),
         loadProjectTasks(selected),
         loadProjectDocuments(selected),
+        loadDesktopPreferences(selected),
       ]);
     } catch (error) {
       reportError(error);
@@ -1168,9 +1200,215 @@
     }
   }
 
+  async function loadDesktopPreferences(projectPath: string): Promise<void> {
+    const [globalConfig, projectConfig] = await Promise.all([
+      invoke<ProjectFilePreview>("read_home_file", { path: "~/.config/pi/pix.jsonc" }).catch(() => undefined),
+      invoke<ProjectFilePreview>("read_project_file", {
+        workspace: projectPath,
+        path: ".pi/pix.jsonc",
+      }).catch(() => undefined),
+    ]);
+    if (workspace !== projectPath) return;
+    externalEditor = resolveDesktopPreferences(globalConfig?.content, projectConfig?.content).externalEditor;
+  }
+
+  async function listProjectDirectory(path: string): Promise<ProjectTreeEntry[]> {
+    if (!workspace) return [];
+    const requestWorkspace = workspace;
+    const entries = await invoke<ProjectTreeEntry[]>("list_project_directory", {
+      workspace: requestWorkspace,
+      path: path || null,
+    });
+    return workspace === requestWorkspace ? entries : [];
+  }
+
+  async function openInExternalEditor(path?: string): Promise<void> {
+    if (!workspace) return;
+    const requestWorkspace = workspace;
+    try {
+      await loadDesktopPreferences(requestWorkspace);
+      if (workspace !== requestWorkspace) return;
+      await invoke("open_in_external_editor", {
+        workspace: requestWorkspace,
+        path: path || null,
+        editor: externalEditor,
+      });
+    } catch (error) {
+      if (workspace === requestWorkspace) reportError(error);
+    }
+  }
+
+  async function refreshGit(): Promise<void> {
+    if (!workspace) return;
+    const requestWorkspace = workspace;
+    const generation = ++gitLoadGeneration;
+    gitLoading = true;
+    gitError = null;
+    try {
+      const snapshot = await invoke<GitSnapshot>("git_status", { workspace: requestWorkspace });
+      if (generation !== gitLoadGeneration || workspace !== requestWorkspace) return;
+      gitSnapshot = snapshot;
+    } catch (error) {
+      if (generation !== gitLoadGeneration || workspace !== requestWorkspace) return;
+      gitSnapshot = undefined;
+      gitError = error instanceof Error ? error.message : String(error);
+    } finally {
+      if (generation === gitLoadGeneration && workspace === requestWorkspace) gitLoading = false;
+    }
+  }
+
+  async function runGitMutation(
+    actionId: string,
+    command: string,
+    payload: Record<string, unknown> = {},
+    options: { reloadProject?: boolean } = {},
+  ): Promise<boolean> {
+    if (!workspace || gitActionId !== null) return false;
+    const requestWorkspace = workspace;
+    gitActionId = actionId;
+    gitError = null;
+    try {
+      await invoke(command, { workspace: requestWorkspace, ...payload });
+      if (workspace !== requestWorkspace) return false;
+      if (options.reloadProject) {
+        closePreview();
+        gitDiffPreview = null;
+        gitDiffReview = undefined;
+        await Promise.all([
+          loadProjectTasks(requestWorkspace),
+          loadProjectDocuments(requestWorkspace),
+          loadDesktopPreferences(requestWorkspace),
+        ]);
+      }
+      await refreshGit();
+      return workspace === requestWorkspace;
+    } catch (error) {
+      if (workspace === requestWorkspace) gitError = error instanceof Error ? error.message : String(error);
+      return false;
+    } finally {
+      if (workspace === requestWorkspace && gitActionId === actionId) gitActionId = null;
+    }
+  }
+
+  function stageGitPath(path?: string): void {
+    void runGitMutation(path ? `stage:${path}` : "stage:all", "git_stage", { path: path ?? null });
+  }
+
+  function unstageGitPath(path?: string): void {
+    void runGitMutation(path ? `unstage:${path}` : "unstage:all", "git_unstage", { path: path ?? null });
+  }
+
+  async function commitGit(message: string): Promise<boolean> {
+    return runGitMutation("commit", "git_commit", { message });
+  }
+
+  function pushGit(): void {
+    void runGitMutation("push", "git_push");
+  }
+
+  function switchGitBranch(branch: string): void {
+    void runGitMutation(`switch:${branch}`, "git_switch_branch", { branch }, { reloadProject: true });
+  }
+
+  function createGitBranch(branch: string): void {
+    void runGitMutation(`create:${branch}`, "git_create_branch", { branch }, { reloadProject: true });
+  }
+
+  async function requestGitDiff(path: string | undefined, scope: GitDiffScope): Promise<GitDiff | undefined> {
+    if (!workspace) return undefined;
+    const requestWorkspace = workspace;
+    try {
+      const diff = await invoke<GitDiff>("git_diff", {
+        workspace: requestWorkspace,
+        path: path ?? null,
+        scope,
+      });
+      return workspace === requestWorkspace ? diff : undefined;
+    } catch (error) {
+      if (workspace === requestWorkspace) gitError = error instanceof Error ? error.message : String(error);
+      return undefined;
+    }
+  }
+
+  async function openGitDiff(path: string | undefined, scope: GitDiffScope): Promise<void> {
+    if (gitActionId !== null) return;
+    const actionId = `diff:${scope}:${path ?? "all"}`;
+    gitActionId = actionId;
+    gitError = null;
+    try {
+      const diff = await requestGitDiff(path, scope);
+      if (!diff) return;
+      gitDiffPreview = diff;
+      gitDiffReview = undefined;
+    } finally {
+      if (gitActionId === actionId) gitActionId = null;
+    }
+  }
+
+  async function reviewGitDiff(path: string | undefined, scope: GitDiffScope): Promise<void> {
+    const requestClient = client;
+    const sessionId = activeSessionId;
+    const requestWorkspace = workspace;
+    if (!requestClient || !sessionId || !requestWorkspace || !activeSessionRuntimeReady || gitLlmActionId !== null) return;
+    const actionId = `review:${path ? `${scope}:${path}` : "all"}`;
+    gitLlmActionId = actionId;
+    gitError = null;
+    try {
+      const current = gitDiffPreview;
+      const diff = current && current.path === path && current.scope === scope
+        ? current
+        : await requestGitDiff(path, scope);
+      if (!diff || requestClient !== client || requestWorkspace !== workspace || sessionId !== activeSessionId) return;
+      gitDiffPreview = diff;
+      gitDiffReview = undefined;
+      if (!diff.content.trim()) {
+        gitDiffReview = "No diff to review.";
+        return;
+      }
+      const review = await requestClient.gitAssist(sessionId, "review", gitDiffForLlm(diff));
+      if (requestClient !== client || requestWorkspace !== workspace || sessionId !== activeSessionId) return;
+      if (gitDiffPreview?.path !== diff.path || gitDiffPreview?.scope !== diff.scope) return;
+      gitDiffReview = review;
+    } catch (error) {
+      if (requestClient === client && requestWorkspace === workspace && sessionId === activeSessionId) {
+        const detail = error instanceof Error ? error.message : String(error);
+        if (gitDiffPreview?.path === path && gitDiffPreview?.scope === scope) {
+          gitDiffReview = `### Review failed\n\n${detail}`;
+        }
+      }
+    } finally {
+      if (gitLlmActionId === actionId) gitLlmActionId = null;
+    }
+  }
+
+  async function generateGitCommitMessage(): Promise<string | undefined> {
+    const requestClient = client;
+    const sessionId = activeSessionId;
+    const requestWorkspace = workspace;
+    if (!requestClient || !sessionId || !requestWorkspace || !activeSessionRuntimeReady || gitLlmActionId !== null) return undefined;
+    const actionId = "commit-message";
+    gitLlmActionId = actionId;
+    gitError = null;
+    try {
+      const diff = await requestGitDiff(undefined, "staged");
+      if (!diff || requestClient !== client || requestWorkspace !== workspace || sessionId !== activeSessionId) return undefined;
+      if (!diff.content.trim()) {
+        gitError = "There are no staged changes to describe.";
+        return undefined;
+      }
+      return await requestClient.gitAssist(sessionId, "commit-message", gitDiffForLlm(diff));
+    } catch (error) {
+      if (requestClient === client && requestWorkspace === workspace && sessionId === activeSessionId) {
+        gitError = error instanceof Error ? error.message : String(error);
+      }
+      return undefined;
+    } finally {
+      if (gitLlmActionId === actionId) gitLlmActionId = null;
+    }
+  }
+
   async function loadProjectDocuments(projectPath: string): Promise<void> {
     const generation = ++projectDocumentsGeneration;
-    projectDocumentsLoading = true;
     try {
       const snapshot = await invoke<ProjectDocumentsSnapshot>("list_project_documents", {
         workspace: projectPath,
@@ -1179,8 +1417,6 @@
       projectDocuments = snapshot;
     } catch (error) {
       if (generation === projectDocumentsGeneration && workspace === projectPath) reportError(error);
-    } finally {
-      if (generation === projectDocumentsGeneration && workspace === projectPath) projectDocumentsLoading = false;
     }
   }
 
@@ -3371,8 +3607,13 @@
       registrySnapshot={activeRegistrySnapshot}
       {registryLoading}
       {registryActionId}
+      {gitSnapshot}
+      {gitLoading}
+      {gitError}
+      {gitActionId}
+      {gitLlmActionId}
       {projectDocuments}
-      {projectDocumentsLoading}
+      externalEditorLabel={externalEditorDisplayName}
       onCreate={createProjectTask}
       onUpdate={updateProjectTask}
       onStatusChange={updateProjectTaskStatus}
@@ -3384,9 +3625,22 @@
       onRun={(task) => void runProjectTask(task)}
       onOpenSession={(task) => void openProjectTaskSession(task)}
       onOpenProjectDocument={openProjectDocument}
+      onListProjectDirectory={listProjectDirectory}
+      onOpenProjectFile={(path) => void openProjectFile(path)}
+      onOpenExternalEditor={(path) => void openInExternalEditor(path)}
       onReload={() => void loadProjectTasks(workspace)}
       onRegistryRefresh={refreshRegistry}
       onRegistryAction={(request, actionId) => void runRegistryAction(request, actionId)}
+      onGitRefresh={() => void refreshGit()}
+      onGitOpenDiff={(path, scope) => void openGitDiff(path, scope)}
+      onGitStage={stageGitPath}
+      onGitUnstage={unstageGitPath}
+      onGitCommit={commitGit}
+      onGitPush={pushGit}
+      onGitSwitchBranch={switchGitBranch}
+      onGitCreateBranch={createGitBranch}
+      onGitGenerateCommitMessage={generateGitCommitMessage}
+      onGitReview={(path, scope) => void reviewGitDiff(path, scope)}
     />
 
     <main class="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)_auto]">
@@ -3489,6 +3743,9 @@
     canGoBack={canGoBackInPreview}
     canGoForward={canGoForwardInPreview}
     editable={activePreview.kind === "file" && isEditableProjectMarkdown(activePreview.file.path)}
+    externalEditorLabel={activePreview.kind === "file" && !activePreview.file.path.startsWith("~/")
+      ? externalEditorDisplayName
+      : undefined}
     onBack={() => movePreview(-1)}
     onForward={() => movePreview(1)}
     onOpenProjectFile={(path) => openProjectFile(path, "push")}
@@ -3496,7 +3753,24 @@
     onOpenLocalFile={(path) => openLocalFile(path, "push")}
     onResolveLocalMedia={resolveLocalMedia}
     onSaveProjectFile={saveProjectMarkdown}
+    onOpenExternalEditor={activePreview.kind === "file" && !activePreview.file.path.startsWith("~/")
+      ? (path) => void openInExternalEditor(path)
+      : undefined}
     onScrollPositionChange={rememberPreviewScroll}
     onClose={closePreview}
+  />
+{/if}
+
+{#if gitDiffPreview}
+  <GitDiffDialog
+    diff={gitDiffPreview}
+    review={gitDiffReview}
+    reviewLoading={gitLlmActionId?.startsWith("review:") === true}
+    canReview={Boolean(client && activeSessionId && activeSessionRuntimeReady)}
+    onReview={() => void reviewGitDiff(gitDiffPreview?.path, gitDiffPreview?.scope ?? "all")}
+    onClose={() => {
+      gitDiffPreview = null;
+      gitDiffReview = undefined;
+    }}
   />
 {/if}

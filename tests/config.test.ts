@@ -50,9 +50,20 @@ describe("config helpers", () => {
 		const created = readFileSync(testConfigPath, "utf8");
 		const parsedCreated = parse(created) as {
 			$schema?: string;
+			desktop?: {
+				externalEditor?: string;
+				git?: { reviewModelRef?: string; commitMessageModelRef?: string };
+			};
 			sessionTitle?: { modelRef?: string; fallbackModels?: string[] };
 		};
 		assert.equal(parsedCreated.$schema, PIX_SCHEMA_URL);
+		assert.deepEqual(parsedCreated.desktop, {
+			externalEditor: "zed",
+			git: {
+				reviewModelRef: "openai-codex/gpt-5.6-luna:medium",
+				commitMessageModelRef: "openai-codex/gpt-5.6-luna:minimal",
+			},
+		});
 		assert.deepEqual(parsedCreated.sessionTitle, {
 			modelRef: "openai-codex/gpt-5.6-luna",
 			fallbackModels: ["zai/glm-5-turbo"],

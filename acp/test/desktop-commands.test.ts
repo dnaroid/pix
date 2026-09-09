@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+	PIX_GIT_ASSIST_METHOD,
 	PIX_REGISTRY_ACTION_METHOD,
 	PIX_TOOL_RESULT_METHOD,
+	parseDesktopGitAssistantRequest,
 	parseDesktopRegistryActionRequest,
 	parseDesktopToolResultRequest,
 } from "../src/acp/desktop-commands.js";
@@ -55,4 +57,29 @@ test("desktop registry actions are session-scoped and validate resource/project 
 	});
 	assert.throws(() => parseDesktopRegistryActionRequest({ sessionId: "session-1", action: "remove", type: "skill", name: "../bad" }));
 	assert.throws(() => parseDesktopRegistryActionRequest({ sessionId: "session-1", action: "pull-project", scope: "skills" }));
+});
+
+test("desktop Git assistant accepts bounded review and commit-message diffs", () => {
+	assert.equal(PIX_GIT_ASSIST_METHOD, "pix/git/assist");
+	assert.deepEqual(parseDesktopGitAssistantRequest({
+		sessionId: "session-1",
+		kind: "review",
+		diff: "diff --git a/a.ts b/a.ts\n+const ready = true;",
+	}), {
+		sessionId: "session-1",
+		kind: "review",
+		diff: "diff --git a/a.ts b/a.ts\n+const ready = true;",
+	});
+	assert.deepEqual(parseDesktopGitAssistantRequest({
+		sessionId: "session-1",
+		kind: "commit-message",
+		diff: "+feature",
+	}), {
+		sessionId: "session-1",
+		kind: "commit-message",
+		diff: "+feature",
+	});
+	assert.throws(() => parseDesktopGitAssistantRequest({ sessionId: "session-1", kind: "review", diff: "" }));
+	assert.throws(() => parseDesktopGitAssistantRequest({ sessionId: "session-1", kind: "other", diff: "+x" }));
+	assert.throws(() => parseDesktopGitAssistantRequest({ sessionId: "session-1", kind: "review", diff: "x".repeat(200_001) }));
 });

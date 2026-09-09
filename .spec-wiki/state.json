@@ -50,7 +50,7 @@
       "classification": "spec",
       "confidence": "high",
       "indexed": {
-        "at": "2026-09-09T03:16:09Z",
+        "at": "2026-09-09T09:58:21Z",
         "sourceHash": "sha256:0fc2a8ae103fdf87c41519554e3aabc648baa6c926cbe6a865cab34f2e9691e6"
       },
       "lifecycle": "active",
@@ -92,7 +92,7 @@
       "type": "change",
       "unresolvedReferences": [],
       "verified": {
-        "at": "2026-09-09T03:16:09Z",
+        "at": "2026-09-09T09:58:21Z",
         "codeHashes": {
           "src/app/extensions/extension-ui-controller.ts": "sha256:eca81c09640ec651460ac1ce97d7b7a0bb08195cc05fea1a02f13dc4a33ca083",
           "src/app/session/session-lifecycle-controller.ts": "sha256:14433dfc677dae0ceeabc5ba5f933e8bc2f8080d704fd696f912641f645c2deb",
@@ -100,6 +100,7 @@
           "src/app/terminal/terminal-controller.ts": "sha256:ca469ca04d7cfed27c4e59e03122c39a753ca2cee820220b89d1c47507d440d8",
           "src/input-editor.ts": "sha256:a091d8de9de40bea2f4b436146aa643827fe0a0012effde8b0a49a6f0705c8a2"
         },
+        "relationsHash": "sha256:018bbe7f7180c4264292b4b66b6795e9fb501e0be169b087d9f2d38a4ec20ef1",
         "sourceHash": "sha256:0fc2a8ae103fdf87c41519554e3aabc648baa6c926cbe6a865cab34f2e9691e6"
       }
     },
@@ -165,7 +166,7 @@
       "classification": "spec",
       "confidence": "high",
       "indexed": {
-        "at": "2026-09-09T03:16:09Z",
+        "at": "2026-09-09T09:58:21Z",
         "sourceHash": "sha256:9f0935eda251be8573182f603962386ab12deab241779b7e076d7edb8916d8cd"
       },
       "lifecycle": "active",
@@ -219,7 +220,7 @@
       "type": "as-is",
       "unresolvedReferences": [],
       "verified": {
-        "at": "2026-09-09T03:16:09Z",
+        "at": "2026-09-09T09:58:21Z",
         "codeHashes": {
           ".pi/tasks.jsonc": "sha256:67eaa87f2db1d8f12ae7f62a0682053270457ec13deabf8b648a4765d13e92db",
           "desktop/src-tauri/Cargo.toml": "sha256:fe828045c2944267c98df6d399e812bbe1acf759779b71bf7b876f74ba59d489",
@@ -230,6 +231,7 @@
           "desktop/src/lib/project-tasks.ts": "sha256:b045edc332417f9de7e5f7c6a5ac931dc3f9da80bded7b49966a3f6e48ae4c94",
           "src/schemas/tasks-schema.ts": "sha256:0950fc91b3d06c36f40cf3de7469610f384fd248945e8c813701f8f9d97930cd"
         },
+        "relationsHash": "sha256:37273b2864c20d04c22f19af916f28df1c18772cb38e654fe13df4a2a205f3cd",
         "sourceHash": "sha256:9f0935eda251be8573182f603962386ab12deab241779b7e076d7edb8916d8cd"
       }
     },
@@ -237,7 +239,7 @@
       "classification": "spec",
       "confidence": "high",
       "indexed": {
-        "at": "2026-09-09T03:20:07Z",
+        "at": "2026-09-09T09:58:22Z",
         "sourceHash": "sha256:8df5b80a7f507fc27d01ab80adda35c6d5e6a8b3364d21e4ffdac53925c5c799"
       },
       "lifecycle": "active",
@@ -302,7 +304,7 @@
       "type": "as-is",
       "unresolvedReferences": [],
       "verified": {
-        "at": "2026-09-09T03:20:07Z",
+        "at": "2026-09-09T09:58:22Z",
         "codeHashes": {
           ".pi/qa_auth.jsonc": "sha256:76b01a875e688dee7b24fe47f7485a76ba490d4b40f99636797ae22264c7c457",
           "external/pi-tools-suite/src/async-subagents/agents/browser-qa/scripts/browser-qa-runner.mjs": "sha256:73ecd0cd6fce85f047d117bda729bee54b2ad05d835d698257ea7fbb69e4e1e1",
@@ -313,6 +315,7 @@
           "external/pi-tools-suite/test/async-subagents/core.test.ts": "sha256:7b2f82c983b1e1f076756bade833d0ac221c42c061d4dd6dc8a34fefcd54323f",
           "external/pi-tools-suite/test/async-subagents/selection-e2e.test.ts": "sha256:36e595531f6d0a66612719e28faf139713c8930c3d1cc456184635815a297caf"
         },
+        "relationsHash": "sha256:cadbcfc47733bea3727610e97694cde3accda2671b74b5e78bd275d15d9f7f79",
         "sourceHash": "sha256:8df5b80a7f507fc27d01ab80adda35c6d5e6a8b3364d21e4ffdac53925c5c799"
       }
     },
@@ -550,7 +553,7 @@
       "classification": "spec",
       "confidence": "high",
       "indexed": {
-        "at": "2026-09-09T03:16:09Z",
+        "at": "2026-09-09T09:58:22Z",
         "sourceHash": "sha256:09a67caf09ae791d2cf43cd1a5c651ac29506359f7afa880c5b595dcd6cdb82c"
       },
       "lifecycle": "active",
@@ -584,12 +587,13 @@
       "type": "as-is",
       "unresolvedReferences": [],
       "verified": {
-        "at": "2026-09-09T03:16:09Z",
+        "at": "2026-09-09T09:58:22Z",
         "codeHashes": {
           "external/pi-tools-suite/src/session-recovery/index.ts": "sha256:5fa6662b57208ce0f515d1ffda8b478e36c5a36c4e182c9fdc8a67135fff06bb",
           "external/pi-tools-suite/src/tool-descriptions.ts": "sha256:e7de4371bc86bf0b2cca71dd8e050032c0a8ae65ed64d621bb120f3ca6273ce8",
           "external/pi-tools-suite/test/session-recovery.test.ts": "sha256:61525ad906dc5808623cab8356a9733e09c2f79738c020252ad523203529df87"
         },
+        "relationsHash": "sha256:f3cac8a8d244ee450f84fa63f38623e16f6f00cec2eba4fbd05fe5529911efb3",
         "sourceHash": "sha256:09a67caf09ae791d2cf43cd1a5c651ac29506359f7afa880c5b595dcd6cdb82c"
       }
     },
@@ -597,7 +601,7 @@
       "classification": "spec",
       "confidence": "high",
       "indexed": {
-        "at": "2026-09-09T03:16:09Z",
+        "at": "2026-09-09T09:58:22Z",
         "sourceHash": "sha256:fe7d6257a39f2d0e597d035ce5f6fd62a65464abdbcc5748439aadf18f5e7449"
       },
       "lifecycle": "active",
@@ -627,11 +631,12 @@
       "type": "as-is",
       "unresolvedReferences": [],
       "verified": {
-        "at": "2026-09-09T03:16:09Z",
+        "at": "2026-09-09T09:58:22Z",
         "codeHashes": {
           "external/pi-tools-suite/src/antigravity-auth/index.ts": "sha256:456467cf4f1b2923da120ee590f406d47b34b44c1799203fa0396db6ca5c5155",
           "external/pi-tools-suite/test/antigravity-auth.test.ts": "sha256:ee558ef0e0c737519d038a3345796bef60fa68efad182565a46f8caafc5b2c66"
         },
+        "relationsHash": "sha256:2712b00f7204f237fd066b63bcbfa473605a7afcd0f19c48c6ae9396a5f417f8",
         "sourceHash": "sha256:fe7d6257a39f2d0e597d035ce5f6fd62a65464abdbcc5748439aadf18f5e7449"
       }
     },
@@ -639,7 +644,7 @@
       "classification": "spec",
       "confidence": "high",
       "indexed": {
-        "at": "2026-09-09T03:16:09Z",
+        "at": "2026-09-09T09:58:22Z",
         "sourceHash": "sha256:73b83979db1c75668d65504439257fc024160f2c0dece514bef8edd0bf7fa27f"
       },
       "lifecycle": "active",
@@ -761,7 +766,7 @@
       "type": "as-is",
       "unresolvedReferences": [],
       "verified": {
-        "at": "2026-09-09T03:16:09Z",
+        "at": "2026-09-09T09:58:22Z",
         "codeHashes": {
           "external/pi-tools-suite/src/async-subagents/commands.ts": "sha256:b8c54b070b6950d312f1c4530ee67f3f25fd7e473141909b0c3b2c1282f45a03",
           "external/pi-tools-suite/src/async-subagents/core/agent-catalog.ts": "sha256:a846043875945bda3199788993550cdc58eabf01687de040e06f54aa87d671a5",
@@ -789,6 +794,7 @@
           "external/pi-tools-suite/test/async-subagents/tools.test.ts": "sha256:0d78b5f72372bab03b492647dd8d8ec1dd0240b563bce1aeefec0d86475053c4",
           "external/pi-tools-suite/test/async-subagents/ui.test.ts": "sha256:6066cde1e24c39efacbeed8bc41d00386fc32f208d005bfe7f7d3c3e8860615f"
         },
+        "relationsHash": "sha256:b45024ae40f000a026fa68ab5fa3b0a2370e7a18b7dac9bc1e9e1a09369b766e",
         "sourceHash": "sha256:73b83979db1c75668d65504439257fc024160f2c0dece514bef8edd0bf7fa27f"
       }
     },
@@ -796,7 +802,7 @@
       "classification": "spec",
       "confidence": "high",
       "indexed": {
-        "at": "2026-09-09T03:16:09Z",
+        "at": "2026-09-09T09:58:22Z",
         "sourceHash": "sha256:f5a3da493648c4f9fe6df04c55a38906317d91ef75ebc6a0472cc0c75b789085"
       },
       "lifecycle": "active",
@@ -848,7 +854,7 @@
       "type": "as-is",
       "unresolvedReferences": [],
       "verified": {
-        "at": "2026-09-09T03:16:09Z",
+        "at": "2026-09-09T09:58:22Z",
         "codeHashes": {
           "external/pi-tools-suite/src/async-subagents/core/agents-dir.ts": "sha256:2cee776b00c41f352aaa12ca64bb090cd870d1fb16197aaf5786c2f44c59127d",
           "external/pi-tools-suite/src/async-subagents/core/browser-qa.ts": "sha256:f274437a0a221325d822891d231af35c367132f760a339f77fe0ff0a43b5df43",
@@ -857,6 +863,7 @@
           "external/pi-tools-suite/test/async-subagents/browser-qa-runner.test.ts": "sha256:ed42b568c3c3475f0e4a21d87ac920b747792cd4cd35b3c5606161f66c8d0920",
           "external/pi-tools-suite/test/async-subagents/core.test.ts": "sha256:7b2f82c983b1e1f076756bade833d0ac221c42c061d4dd6dc8a34fefcd54323f"
         },
+        "relationsHash": "sha256:cbef1e10b1b0956b21b1a8b8bc598a9523578f35eae5cf7145b35e07dfb29d1f",
         "sourceHash": "sha256:f5a3da493648c4f9fe6df04c55a38906317d91ef75ebc6a0472cc0c75b789085"
       }
     },
@@ -864,7 +871,7 @@
       "classification": "spec",
       "confidence": "high",
       "indexed": {
-        "at": "2026-09-09T03:16:09Z",
+        "at": "2026-09-09T09:58:22Z",
         "sourceHash": "sha256:d8d27bee8f2fa3c8e7944907a21d4e7ce42d3f695eb462e7e094362d133951d3"
       },
       "lifecycle": "active",
@@ -901,13 +908,14 @@
       "type": "change",
       "unresolvedReferences": [],
       "verified": {
-        "at": "2026-09-09T03:16:09Z",
+        "at": "2026-09-09T09:58:22Z",
         "codeHashes": {
           "src/app/rendering/conversation-entry-renderer.ts": "sha256:11dbabfac900a4047abf162ebd351f7f27606dacc0fdfc54f0fb1d1b3b78ce13",
           "src/app/rendering/render-controller.ts": "sha256:f431ebae28f3dd2000458481f17dd22d19ecbb8c76d2b2902056fcf657d91210",
           "src/app/screen/mouse-controller.ts": "sha256:a030ef432bdda2c47e4ba1da1f862942cd66dd893eae1a5fe25064f4f09a902c",
           "src/markdown-format.ts": "sha256:6f50d15a028687ed16859fc01b841065ed51f5819334eeb4d0e10d4040fe5f14"
         },
+        "relationsHash": "sha256:9cd749d3835e093dff01834dd9beb5051763e32d9bf841aecc9a1b3a33b6b494",
         "sourceHash": "sha256:d8d27bee8f2fa3c8e7944907a21d4e7ce42d3f695eb462e7e094362d133951d3"
       }
     },
@@ -915,7 +923,7 @@
       "classification": "spec",
       "confidence": "high",
       "indexed": {
-        "at": "2026-09-09T03:16:09Z",
+        "at": "2026-09-09T09:58:22Z",
         "sourceHash": "sha256:231d98e37e5b830f69496f04d10b581a988046a7306fc6719487c82ab9e857e8"
       },
       "lifecycle": "active",
@@ -981,7 +989,7 @@
       "type": "change",
       "unresolvedReferences": [],
       "verified": {
-        "at": "2026-09-09T03:16:09Z",
+        "at": "2026-09-09T09:58:22Z",
         "codeHashes": {
           "external/pi-tools-suite/src/dcp/auto-compress.ts": "sha256:3db5d513370f4dc1fc393fd65925f779380737973e3a102fad7d5a7af17547ed",
           "external/pi-tools-suite/src/dcp/compress-tool.ts": "sha256:087fde4f61eb1b262719063ac8e1f923f4a23ee06065855e60376567e829fa13",
@@ -995,6 +1003,7 @@
           "external/pi-tools-suite/test/dcp-journal-lifecycle.test.ts": "sha256:f03b2618d180338d1a6fc250c01a1b0426c9cd001593134975b023ff627818c4",
           "external/pi-tools-suite/test/dcp-marathon-replay.test.ts": "sha256:4c3b738b3b926948218fd254f630075ff14b4b9b6f7ace887b73dd1d9a8cf51d"
         },
+        "relationsHash": "sha256:f0202efd6e9c89630f1e62e84e0f1fd49330392f424390586fddb8c341f5d071",
         "sourceHash": "sha256:231d98e37e5b830f69496f04d10b581a988046a7306fc6719487c82ab9e857e8"
       }
     },
@@ -1002,7 +1011,7 @@
       "classification": "spec",
       "confidence": "high",
       "indexed": {
-        "at": "2026-09-09T03:16:10Z",
+        "at": "2026-09-09T09:58:22Z",
         "sourceHash": "sha256:cf818351394a8b20ef617e3f9e98e6a7126a52fba17565ea02d5f030c0ccb897"
       },
       "lifecycle": "active",
@@ -1135,7 +1144,7 @@
       "type": "as-is",
       "unresolvedReferences": [],
       "verified": {
-        "at": "2026-09-09T03:16:10Z",
+        "at": "2026-09-09T09:58:22Z",
         "codeHashes": {
           "external/pi-tools-suite/src/dcp/auto-compress-budget.ts": "sha256:abc012a5f809d07b3da20608b988df4f91ee301f939d548701489b2e4d4d5ffc",
           "external/pi-tools-suite/src/dcp/auto-compress.ts": "sha256:3db5d513370f4dc1fc393fd65925f779380737973e3a102fad7d5a7af17547ed",
@@ -1163,6 +1172,7 @@
           "external/pi-tools-suite/test/dcp-shadow-plan.test.ts": "sha256:d923f83b236733b7b0d92e069478708dbe582df41db3419f70541938c086ede2",
           "external/pi-tools-suite/test/dcp-transaction-faults.test.ts": "sha256:3ca5e1cf94bf396a9cb6f38968d84b566c71e1d96a1a4eb70324a727ff6a2e5c"
         },
+        "relationsHash": "sha256:c758a8112fa4b5ebd8cafbb8dcecb05447bcd47a34227d6b385b7f9b11cbd33c",
         "sourceHash": "sha256:cf818351394a8b20ef617e3f9e98e6a7126a52fba17565ea02d5f030c0ccb897"
       }
     },
@@ -1170,7 +1180,7 @@
       "classification": "spec",
       "confidence": "high",
       "indexed": {
-        "at": "2026-09-09T03:16:10Z",
+        "at": "2026-09-09T09:58:22Z",
         "sourceHash": "sha256:9e1b214cecb5ced0e99d2f3de819b81a967bb9d79a597645b0f12204cfd09974"
       },
       "lifecycle": "active",
@@ -1246,7 +1256,7 @@
       "type": "as-is",
       "unresolvedReferences": [],
       "verified": {
-        "at": "2026-09-09T03:16:10Z",
+        "at": "2026-09-09T09:58:22Z",
         "codeHashes": {
           "external/pi-tools-suite/src/dcp/auto-compress.ts": "sha256:3db5d513370f4dc1fc393fd65925f779380737973e3a102fad7d5a7af17547ed",
           "external/pi-tools-suite/src/dcp/config.ts": "sha256:8cae010faffac3125165e7ab9754bf1721ac353f6adfa17ac05525c09ff6fc99",
@@ -1261,6 +1271,7 @@
           "external/pi-tools-suite/test/dcp-lifecycle-marathon.test.ts": "sha256:ab975d17575eb968fe66ad98d93001afda520e38eaf79e7b2eec0f91315ca108",
           "external/pi-tools-suite/test/dcp-marathon-replay.test.ts": "sha256:4c3b738b3b926948218fd254f630075ff14b4b9b6f7ace887b73dd1d9a8cf51d"
         },
+        "relationsHash": "sha256:69b411d81966271dffee1fb2367898338c6cf91e51a9df3216ac4f4a12e2665b",
         "sourceHash": "sha256:9e1b214cecb5ced0e99d2f3de819b81a967bb9d79a597645b0f12204cfd09974"
       }
     },
@@ -1268,7 +1279,7 @@
       "classification": "spec",
       "confidence": "high",
       "indexed": {
-        "at": "2026-09-09T03:16:10Z",
+        "at": "2026-09-09T09:58:22Z",
         "sourceHash": "sha256:f430f92d739526e058caa4bc7094caebbe8ddfdfb68f090c4df9c8e12f9fba3a"
       },
       "lifecycle": "active",
@@ -1322,7 +1333,7 @@
       "type": "change",
       "unresolvedReferences": [],
       "verified": {
-        "at": "2026-09-09T03:16:10Z",
+        "at": "2026-09-09T09:58:22Z",
         "codeHashes": {
           "acp/src/acp/pix-acp-agent.ts": "sha256:5e16a45aaa7846fbb3d8b6c1b2206b59b81289d3b71fc99b20309d0210a5a9af",
           "acp/src/acp/session-replay.ts": "sha256:199cb75c7f811e7e9740ec8d737a3b949f0392d2b300116784930e3821c685fe",
@@ -1333,6 +1344,7 @@
           "desktop/src/lib/attachments.ts": "sha256:4cd6582e53c0c5dc9a2a4eb28d78faeee11e6497e06040e5db5c1f5d1b613ace",
           "desktop/src/lib/transcript.ts": "sha256:899d98b5a87cda0f068a92719025962fa9e752565e6b808835a783151ab783c7"
         },
+        "relationsHash": "sha256:89cf2065b3797cce581f636eb8c1cb0958da5cd92c0976cf18b547461c263849",
         "sourceHash": "sha256:f430f92d739526e058caa4bc7094caebbe8ddfdfb68f090c4df9c8e12f9fba3a"
       }
     },
@@ -1340,7 +1352,7 @@
       "classification": "spec",
       "confidence": "high",
       "indexed": {
-        "at": "2026-09-09T03:16:10Z",
+        "at": "2026-09-09T09:58:23Z",
         "sourceHash": "sha256:7ea83c11275795dab4f8979208ffca19449aa5eb5d4e2f66ca35dc284ed9fe49"
       },
       "lifecycle": "active",
@@ -1385,7 +1397,7 @@
       "type": "change",
       "unresolvedReferences": [],
       "verified": {
-        "at": "2026-09-09T03:16:10Z",
+        "at": "2026-09-09T09:58:23Z",
         "codeHashes": {
           "acp/src/acp/autocomplete.ts": "sha256:b8fe528f23582c434f345652fc80d4739cea62574f70b774b56e930848fda216",
           "acp/src/acp/pix-acp-agent.ts": "sha256:5e16a45aaa7846fbb3d8b6c1b2206b59b81289d3b71fc99b20309d0210a5a9af",
@@ -1394,6 +1406,7 @@
           "desktop/src/lib/acp-client.ts": "sha256:fe98cb2adb85226acd04edec3d76b2844bbf52664c3841ee32b6e69b6a877790",
           "desktop/src/lib/autocomplete.ts": "sha256:aee220b4702e03b83d4d1cd38dcf79343e1c75c418ff072685801bc91c62c4e3"
         },
+        "relationsHash": "sha256:f78a43515d45c80f1f06d7dfc6399c9f01d5ee63e4576e2bd748c2ba5739bdd2",
         "sourceHash": "sha256:7ea83c11275795dab4f8979208ffca19449aa5eb5d4e2f66ca35dc284ed9fe49"
       }
     },
@@ -1401,7 +1414,7 @@
       "classification": "spec",
       "confidence": "high",
       "indexed": {
-        "at": "2026-09-09T03:16:10Z",
+        "at": "2026-09-09T09:58:23Z",
         "sourceHash": "sha256:76e145aad2b854273acef0a21ac69399d983db3ab61c6350a5ed533ebdf05f7b"
       },
       "lifecycle": "active",
@@ -1442,7 +1455,7 @@
       "type": "change",
       "unresolvedReferences": [],
       "verified": {
-        "at": "2026-09-09T03:16:10Z",
+        "at": "2026-09-09T09:58:23Z",
         "codeHashes": {
           "desktop/src/components/DiffView.svelte": "sha256:d168659b7f791e1b454e82ff31e8c751c090e755f097d97b075f012d251580d8",
           "desktop/src/components/ToolResult.svelte": "sha256:21cd2f75716caf4bd3e134324553a01f1bef32d4c0fbd15d0c2e20abf8b4027f",
@@ -1450,6 +1463,7 @@
           "desktop/src/lib/diff.ts": "sha256:652e0096fafe3711dd3d1a577cf262c1307a52b9e07cc1440a2176818845a4a3",
           "desktop/src/lib/transcript.ts": "sha256:899d98b5a87cda0f068a92719025962fa9e752565e6b808835a783151ab783c7"
         },
+        "relationsHash": "sha256:f8dbd43cef6c9d2c633c6222119991e5cc91ac1318df91423c054bb810517099",
         "sourceHash": "sha256:76e145aad2b854273acef0a21ac69399d983db3ab61c6350a5ed533ebdf05f7b"
       }
     },
@@ -1457,7 +1471,7 @@
       "classification": "spec",
       "confidence": "high",
       "indexed": {
-        "at": "2026-09-09T03:16:10Z",
+        "at": "2026-09-09T09:58:23Z",
         "sourceHash": "sha256:a93042f81629d1abee7125db3446d0ad073bcbf7a27994bd7c41831e77d5b29c"
       },
       "lifecycle": "active",
@@ -1539,7 +1553,7 @@
       "type": "change",
       "unresolvedReferences": [],
       "verified": {
-        "at": "2026-09-09T03:16:10Z",
+        "at": "2026-09-09T09:58:23Z",
         "codeHashes": {
           "desktop/src-tauri/capabilities/default.json": "sha256:1dc5916ebcaf928e37ab0b86965004bff8cad132000715b3794b5472b8cfab39",
           "desktop/src-tauri/src/lib.rs": "sha256:f456ce294a9536a6d82dff3e705ee1385ae3a0cae2d29da346e9bd2fa517258d",
@@ -1557,6 +1571,7 @@
           "desktop/src/lib/preview-history.test.ts": "sha256:364faff7e4235ae6ce9a1e398bff7266c08ea3a26a74bdd45ec4f2aa7ddac084",
           "desktop/src/lib/preview-history.ts": "sha256:aa5ec4983f1c552ae96c124a0abe59ac4382b1c5cb59fb1bcf91c29bdb54304c"
         },
+        "relationsHash": "sha256:3d2b2c5c4ac94f78db96dce883141915aa89e28333dadcccd60478d746eebfb2",
         "sourceHash": "sha256:a93042f81629d1abee7125db3446d0ad073bcbf7a27994bd7c41831e77d5b29c"
       }
     },
@@ -1564,7 +1579,7 @@
       "classification": "spec",
       "confidence": "high",
       "indexed": {
-        "at": "2026-09-09T03:16:10Z",
+        "at": "2026-09-09T09:58:23Z",
         "sourceHash": "sha256:78db346dc34724b2bb8c42ff8c01c4ab34df543003feba5424ec5711dc9623d9"
       },
       "lifecycle": "active",
@@ -1609,7 +1624,7 @@
       "type": "change",
       "unresolvedReferences": [],
       "verified": {
-        "at": "2026-09-09T03:16:10Z",
+        "at": "2026-09-09T09:58:23Z",
         "codeHashes": {
           "desktop/src-tauri/tauri.conf.json": "sha256:0d9cb2918c0a3acdd6607248a6ab369208b62ba96c51688cfae02f75328b8f77",
           "desktop/src/App.svelte": "sha256:988d26347a96c4c85da9a9912dfa7d9d4d8ae81021b0bc3de6d5897481cdccbb",
@@ -1618,6 +1633,7 @@
           "desktop/src/components/SessionTabs.svelte": "sha256:6b02cf6a89da1bf40c7f71f65db552d664839525fb5d999c10a0e237a15afbde",
           "desktop/src/lib/recent-projects.ts": "sha256:156517e6b1fd74dfa0e4fbf2ad933e176b3d79d9b328701cfbc08105653c2c4f"
         },
+        "relationsHash": "sha256:5980f35645e2b3478b834dcc4e09ca22a78cdd12622e40f833acb9763382e123",
         "sourceHash": "sha256:78db346dc34724b2bb8c42ff8c01c4ab34df543003feba5424ec5711dc9623d9"
       }
     },
@@ -1625,7 +1641,7 @@
       "classification": "spec",
       "confidence": "high",
       "indexed": {
-        "at": "2026-09-09T03:16:10Z",
+        "at": "2026-09-09T09:58:23Z",
         "sourceHash": "sha256:f9731e808d7716b797670647d046cea5b3a74ac2edc8514e58ce5be8368f1417"
       },
       "lifecycle": "active",
@@ -1683,7 +1699,7 @@
       "type": "change",
       "unresolvedReferences": [],
       "verified": {
-        "at": "2026-09-09T03:16:10Z",
+        "at": "2026-09-09T09:58:23Z",
         "codeHashes": {
           "acp/src/acp/ui-request-bridge.ts": "sha256:31d780562f939a74bb623b7b762deeeef6729bcd95eb74145041f6f620a433ba",
           "desktop/src/App.svelte": "sha256:988d26347a96c4c85da9a9912dfa7d9d4d8ae81021b0bc3de6d5897481cdccbb",
@@ -1695,6 +1711,7 @@
           "src/bundled-extensions/question/tui.ts": "sha256:d859b01749a41043d536eee46cf113fd154f0c5cf28500d0343e4f567b0889b9",
           "src/bundled-extensions/question/types.ts": "sha256:d39f343142e0077c15a39a06533561f8606fffa8bbced4deca854f6a98f44687"
         },
+        "relationsHash": "sha256:bbe898a4e1b3f5200bb0e4c91c2116116e5b7afda54a80a12d4fbc81a16422cc",
         "sourceHash": "sha256:f9731e808d7716b797670647d046cea5b3a74ac2edc8514e58ce5be8368f1417"
       }
     },
@@ -1702,7 +1719,7 @@
       "classification": "spec",
       "confidence": "high",
       "indexed": {
-        "at": "2026-09-09T03:16:10Z",
+        "at": "2026-09-09T09:58:23Z",
         "sourceHash": "sha256:2cf4e1f2f3d45065969abd869a2e3425e85b7708ac8ee6a1af3e494858cf8164"
       },
       "lifecycle": "active",
@@ -1743,7 +1760,7 @@
       "type": "change",
       "unresolvedReferences": [],
       "verified": {
-        "at": "2026-09-09T03:16:10Z",
+        "at": "2026-09-09T09:58:23Z",
         "codeHashes": {
           "acp/src/acp/pix-acp-agent.ts": "sha256:5e16a45aaa7846fbb3d8b6c1b2206b59b81289d3b71fc99b20309d0210a5a9af",
           "acp/src/acp/session-map.ts": "sha256:6b603d7f9d26bde741b1a983a4e4103ee7d00e44ae0f0b22f62e1b282135cba4",
@@ -1751,6 +1768,7 @@
           "desktop/src/App.svelte": "sha256:988d26347a96c4c85da9a9912dfa7d9d4d8ae81021b0bc3de6d5897481cdccbb",
           "desktop/src/lib/acp-client.ts": "sha256:fe98cb2adb85226acd04edec3d76b2844bbf52664c3841ee32b6e69b6a877790"
         },
+        "relationsHash": "sha256:e8dc2c5d756b0b2185174f531df1450535fb561c966e5d50285d36fb1fbbbd40",
         "sourceHash": "sha256:2cf4e1f2f3d45065969abd869a2e3425e85b7708ac8ee6a1af3e494858cf8164"
       }
     },
@@ -1758,7 +1776,7 @@
       "classification": "spec",
       "confidence": "high",
       "indexed": {
-        "at": "2026-09-09T03:16:10Z",
+        "at": "2026-09-09T09:58:23Z",
         "sourceHash": "sha256:ef121260fda8f5cdf38d7d367223ed2b1016190565acaeafec6ac49f5db007fd"
       },
       "lifecycle": "active",
@@ -1831,7 +1849,7 @@
       "type": "change",
       "unresolvedReferences": [],
       "verified": {
-        "at": "2026-09-09T03:16:10Z",
+        "at": "2026-09-09T09:58:23Z",
         "codeHashes": {
           ".pi/tasks.jsonc": "sha256:67eaa87f2db1d8f12ae7f62a0682053270457ec13deabf8b648a4765d13e92db",
           "acp/src/acp/pix-acp-agent.ts": "sha256:5e16a45aaa7846fbb3d8b6c1b2206b59b81289d3b71fc99b20309d0210a5a9af",
@@ -1847,6 +1865,7 @@
           "external/pi-tools-suite/src/lib/rpc-session-state.ts": "sha256:e9a5c3befb3d5485560e43fa627fb8cd5947756e4e7989ec5175df5bfebb0faf",
           "external/pi-tools-suite/src/todo/todo.ts": "sha256:7c1a918a77de1f8c919561523596197b149f4afa6d18bc711c52f183394b1c9b"
         },
+        "relationsHash": "sha256:4708cfec7e87d564055ff4c879b8820b9d02596864a3878bcaf60fae35c2dd48",
         "sourceHash": "sha256:ef121260fda8f5cdf38d7d367223ed2b1016190565acaeafec6ac49f5db007fd"
       }
     },
@@ -1854,7 +1873,7 @@
       "classification": "spec",
       "confidence": "high",
       "indexed": {
-        "at": "2026-09-09T03:16:10Z",
+        "at": "2026-09-09T09:58:23Z",
         "sourceHash": "sha256:1faae4bcf6d2eed572bf1dd07d7588e695a915799a6e64b423f04fa699384f9c"
       },
       "lifecycle": "active",
@@ -1907,7 +1926,7 @@
       "type": "change",
       "unresolvedReferences": [],
       "verified": {
-        "at": "2026-09-09T03:16:10Z",
+        "at": "2026-09-09T09:58:23Z",
         "codeHashes": {
           "acp/src/acp/pix-acp-agent.ts": "sha256:5e16a45aaa7846fbb3d8b6c1b2206b59b81289d3b71fc99b20309d0210a5a9af",
           "acp/src/acp/slash-commands.ts": "sha256:a11ae1567ed22c2b42d088fc3c40035aa594ddbff3fb3e1ea4d3ae0cffb14d05",
@@ -1918,6 +1937,7 @@
           "desktop/src/lib/fuzzy.ts": "sha256:ccacc550eca4184f20e77c939a1e44a693c2693d7e8aa7b8e572c41544468aca",
           "desktop/src/lib/slash-commands.ts": "sha256:847b8a3ce8c741e165c472f87b7636a39b4b1b832d934e4d2ba8c3921f6aaee6"
         },
+        "relationsHash": "sha256:7145583fdfa75836afe3cbb3ba3a4611332095614279376b13d21bcdaa10aae7",
         "sourceHash": "sha256:1faae4bcf6d2eed572bf1dd07d7588e695a915799a6e64b423f04fa699384f9c"
       }
     },
@@ -1925,7 +1945,7 @@
       "classification": "spec",
       "confidence": "high",
       "indexed": {
-        "at": "2026-09-09T03:16:10Z",
+        "at": "2026-09-09T09:58:23Z",
         "sourceHash": "sha256:16938c1cc345bf396807f9155bae3895e0649fa1591fefdb0bb80d8a155dfbd9"
       },
       "lifecycle": "active",
@@ -1982,7 +2002,7 @@
       "type": "change",
       "unresolvedReferences": [],
       "verified": {
-        "at": "2026-09-09T03:16:10Z",
+        "at": "2026-09-09T09:58:23Z",
         "codeHashes": {
           "acp/src/acp/event-translator.ts": "sha256:4165f7e75787294dbe6788cdb0ea7d2fb7c23252e1b0ad7c60eafb2170e96616",
           "acp/src/acp/session-replay.ts": "sha256:199cb75c7f811e7e9740ec8d737a3b949f0392d2b300116784930e3821c685fe",
@@ -1994,6 +2014,7 @@
           "desktop/src/lib/transcript.ts": "sha256:899d98b5a87cda0f068a92719025962fa9e752565e6b808835a783151ab783c7",
           "desktop/src/styles.css": "sha256:a24d4add6c10cb6dbcd54e728e5c1d538e6f8cfbb054d1ed261393b0bec25882"
         },
+        "relationsHash": "sha256:65275f85e3c78e965ac8f4c08150d71abf28ad2bae1c293dea76023b631a2b3a",
         "sourceHash": "sha256:16938c1cc345bf396807f9155bae3895e0649fa1591fefdb0bb80d8a155dfbd9"
       }
     },
@@ -2001,7 +2022,7 @@
       "classification": "spec",
       "confidence": "high",
       "indexed": {
-        "at": "2026-09-09T03:16:11Z",
+        "at": "2026-09-09T09:58:23Z",
         "sourceHash": "sha256:eea7898719f318fe92012568777daf892ed102f2b6c685a76029f0af1807cec9"
       },
       "lifecycle": "active",
@@ -2037,13 +2058,14 @@
       "type": "change",
       "unresolvedReferences": [],
       "verified": {
-        "at": "2026-09-09T03:16:11Z",
+        "at": "2026-09-09T09:58:23Z",
         "codeHashes": {
           "desktop/src-tauri/Cargo.lock": "sha256:250377fc1b86ca27e7d3ac9b189f2ecf751edef40223c63a673e088dd04bfe58",
           "desktop/src-tauri/Cargo.toml": "sha256:fe828045c2944267c98df6d399e812bbe1acf759779b71bf7b876f74ba59d489",
           "desktop/src-tauri/src/lib.rs": "sha256:f456ce294a9536a6d82dff3e705ee1385ae3a0cae2d29da346e9bd2fa517258d",
           "desktop/src-tauri/tauri.conf.json": "sha256:0d9cb2918c0a3acdd6607248a6ab369208b62ba96c51688cfae02f75328b8f77"
         },
+        "relationsHash": "sha256:69d1d04b63caf5279ec185080b13fa6a3d0ca2f80652362d229130f4cb5eb595",
         "sourceHash": "sha256:eea7898719f318fe92012568777daf892ed102f2b6c685a76029f0af1807cec9"
       }
     },
@@ -2051,7 +2073,7 @@
       "classification": "spec",
       "confidence": "high",
       "indexed": {
-        "at": "2026-09-09T03:16:11Z",
+        "at": "2026-09-09T09:58:24Z",
         "sourceHash": "sha256:3806ce07556d6ea861accc794d7f4a86b521ada0e047ca5c4cabdea6bab4d4ef"
       },
       "lifecycle": "active",
@@ -2088,13 +2110,14 @@
       "type": "change",
       "unresolvedReferences": [],
       "verified": {
-        "at": "2026-09-09T03:16:11Z",
+        "at": "2026-09-09T09:58:24Z",
         "codeHashes": {
           "src/app/rendering/conversation-entry-renderer.ts": "sha256:11dbabfac900a4047abf162ebd351f7f27606dacc0fdfc54f0fb1d1b3b78ce13",
           "src/markdown-format.ts": "sha256:6f50d15a028687ed16859fc01b841065ed51f5819334eeb4d0e10d4040fe5f14",
           "tests/conversation-entry-renderer.test.ts": "sha256:e4f61b34c6fef3040638695b578b28d6697a3e25fd687a17a319965dbd482d4b",
           "tests/markdown-format.test.ts": "sha256:d3a596000b0853f0dd39bd856c24afd318785ea44015b1534e1e94b36d6f7497"
         },
+        "relationsHash": "sha256:c703bddb620330afe41f9d1e300f68d987628d4c20a1c795792aaa2ec05a7f8d",
         "sourceHash": "sha256:3806ce07556d6ea861accc794d7f4a86b521ada0e047ca5c4cabdea6bab4d4ef"
       }
     },
@@ -2102,7 +2125,7 @@
       "classification": "spec",
       "confidence": "high",
       "indexed": {
-        "at": "2026-09-09T03:16:11Z",
+        "at": "2026-09-09T09:58:24Z",
         "sourceHash": "sha256:b0f45e9a0f88298baa577f7c770718d4049cc0a7c3b9b24cb7faf169d7dd0221"
       },
       "lifecycle": "active",
@@ -2132,11 +2155,12 @@
       "type": "change",
       "unresolvedReferences": [],
       "verified": {
-        "at": "2026-09-09T03:16:11Z",
+        "at": "2026-09-09T09:58:24Z",
         "codeHashes": {
           "src/app/screen/file-link-opener.ts": "sha256:1772055de0c701286352101bcfe7b31bac2100803f1ca49d48f8437510749f17",
           "tests/screen-openers.test.ts": "sha256:72980c348693c8ad9ac9e7effb5d57a41d3505cc394fe0010f987f615db24cb7"
         },
+        "relationsHash": "sha256:b8b4f1a9b52d1d069815167a4163d17849789845d9751877c373f7cc0058014f",
         "sourceHash": "sha256:b0f45e9a0f88298baa577f7c770718d4049cc0a7c3b9b24cb7faf169d7dd0221"
       }
     },
@@ -2144,7 +2168,7 @@
       "classification": "spec",
       "confidence": "high",
       "indexed": {
-        "at": "2026-09-09T03:16:11Z",
+        "at": "2026-09-09T09:58:24Z",
         "sourceHash": "sha256:ffdebeefb107d19827d6a7c595a3edea6e890438928e172738057f06df363884"
       },
       "lifecycle": "active",
@@ -2177,12 +2201,13 @@
       "type": "change",
       "unresolvedReferences": [],
       "verified": {
-        "at": "2026-09-09T03:16:11Z",
+        "at": "2026-09-09T09:58:24Z",
         "codeHashes": {
           "src/app/app.ts": "sha256:318bd5e577ff8b309bec56e09a6a6f13d52590597899a455bc88c3ec57de5514",
           "src/app/cli/startup-checks.ts": "sha256:4687ab6fb4f43e103da01f1a275bcf3cf3b1ea9221570ce4ebe84a61ecf480b0",
           "tests/startup-checks.test.ts": "sha256:7710429b1904cae4af4c2b163b616e3bfa853c12a0ffe8c4e00b9809c3239056"
         },
+        "relationsHash": "sha256:26f7ee1fb0d6a593c0a4d76784c14c8bfa1fdc6512638300ab0db3ee7377a950",
         "sourceHash": "sha256:ffdebeefb107d19827d6a7c595a3edea6e890438928e172738057f06df363884"
       }
     },
@@ -2190,7 +2215,7 @@
       "classification": "spec",
       "confidence": "high",
       "indexed": {
-        "at": "2026-09-09T03:16:11Z",
+        "at": "2026-09-09T09:58:24Z",
         "sourceHash": "sha256:695946421b9ace5bf4b13a985ef11aef03c4daf0377fdfdc74ff1f8c8b5e3123"
       },
       "lifecycle": "active",
@@ -2256,7 +2281,7 @@
       "type": "as-is",
       "unresolvedReferences": [],
       "verified": {
-        "at": "2026-09-09T03:16:11Z",
+        "at": "2026-09-09T09:58:24Z",
         "codeHashes": {
           "external/pi-tools-suite/src/config.ts": "sha256:7c7a8fed79433bd948dbc83a72128da524c52e283d764c98380486137ec3cdea",
           "external/pi-tools-suite/src/lib/lsp.ts": "sha256:053787289803a51bd378329bd878be6bae4c86ca3b7c2e3072131ab448425871",
@@ -2270,6 +2295,7 @@
           "external/pi-tools-suite/src/lsp/manager.ts": "sha256:fcc378482f275230b5eff5c8d0b9736c4b23d428aada48c4ac6e470514f45e72",
           "external/pi-tools-suite/test/lsp.test.ts": "sha256:751390c732c6821a7d8d2f8c65a7c0b247a3ee77a3f0e4c0f128bcd53fcc24be"
         },
+        "relationsHash": "sha256:df30a1488611a723c4ee83205a087996d36e8e42d8d14222e6e83f7fa9ae720a",
         "sourceHash": "sha256:695946421b9ace5bf4b13a985ef11aef03c4daf0377fdfdc74ff1f8c8b5e3123"
       }
     },
@@ -2277,7 +2303,7 @@
       "classification": "spec",
       "confidence": "high",
       "indexed": {
-        "at": "2026-09-09T03:16:11Z",
+        "at": "2026-09-09T09:58:24Z",
         "sourceHash": "sha256:43ee985dead3b0f055511f65b3a059df39b7cf04a989fadd95fb957c9c42561c"
       },
       "lifecycle": "active",
@@ -2310,12 +2336,13 @@
       "type": "change",
       "unresolvedReferences": [],
       "verified": {
-        "at": "2026-09-09T03:16:11Z",
+        "at": "2026-09-09T09:58:24Z",
         "codeHashes": {
           "src/markdown-format.ts": "sha256:6f50d15a028687ed16859fc01b841065ed51f5819334eeb4d0e10d4040fe5f14",
           "src/syntax-highlight.ts": "sha256:2afb4573bd20957a324e2df128c14e3bc546fdc33bd1d59070f1d1f311718f9b",
           "tests/markdown-format.test.ts": "sha256:d3a596000b0853f0dd39bd856c24afd318785ea44015b1534e1e94b36d6f7497"
         },
+        "relationsHash": "sha256:2a237b97de55922eb9f8f397bb6101d009c7173c088dc1395671a8d042892765",
         "sourceHash": "sha256:43ee985dead3b0f055511f65b3a059df39b7cf04a989fadd95fb957c9c42561c"
       }
     },
@@ -2323,7 +2350,7 @@
       "classification": "spec",
       "confidence": "high",
       "indexed": {
-        "at": "2026-09-09T03:16:11Z",
+        "at": "2026-09-09T09:58:24Z",
         "sourceHash": "sha256:3b2b35f65037a2d2b7d8ac8a82c59a740089d09225b69a6b3f75728750ccc99c"
       },
       "lifecycle": "active",
@@ -2356,12 +2383,13 @@
       "type": "change",
       "unresolvedReferences": [],
       "verified": {
-        "at": "2026-09-09T03:16:11Z",
+        "at": "2026-09-09T09:58:24Z",
         "codeHashes": {
           "src/app/rendering/conversation-entry-renderer.ts": "sha256:11dbabfac900a4047abf162ebd351f7f27606dacc0fdfc54f0fb1d1b3b78ce13",
           "src/markdown-format.ts": "sha256:6f50d15a028687ed16859fc01b841065ed51f5819334eeb4d0e10d4040fe5f14",
           "tests/markdown-format.test.ts": "sha256:d3a596000b0853f0dd39bd856c24afd318785ea44015b1534e1e94b36d6f7497"
         },
+        "relationsHash": "sha256:fc618e5b0a08af7520431d46a3e9c0890439d421766836e5e49f1e5c6342ba0f",
         "sourceHash": "sha256:3b2b35f65037a2d2b7d8ac8a82c59a740089d09225b69a6b3f75728750ccc99c"
       }
     },
@@ -2369,7 +2397,7 @@
       "classification": "spec",
       "confidence": "high",
       "indexed": {
-        "at": "2026-09-09T03:16:11Z",
+        "at": "2026-09-09T09:58:24Z",
         "sourceHash": "sha256:b9faede11d0e12893b372f62f6ea73c76dbf9d782b204facc63e1527ebdb4dec"
       },
       "lifecycle": "active",
@@ -2407,13 +2435,14 @@
       "type": "change",
       "unresolvedReferences": [],
       "verified": {
-        "at": "2026-09-09T03:16:11Z",
+        "at": "2026-09-09T09:58:24Z",
         "codeHashes": {
           "src/app/commands/command-model-actions.ts": "sha256:aeed97b47f70fd1ccdfde354a8b5c73353734063a9d01eb2100ce9b2ed161b2f",
           "src/app/popup/menu-items-controller.ts": "sha256:290549023493e615e6cda67a951de15dd74475b6d94252b51dbae98bdeb9d595",
           "src/app/rendering/popup-menu-renderer.ts": "sha256:82e5b5b0290d2a4c7991bd8265260321df5820b1ff087f3558d876d880e94c5f",
           "src/app/runtime.ts": "sha256:78285c6efeea2927e3ca0ebd96f9489e3a980a5a850adc65b20d62c11c21f2e9"
         },
+        "relationsHash": "sha256:5ddf98e21f192aca0115b7bfd10d9549f9b6635403a264c4bf40d9a9503e2aeb",
         "sourceHash": "sha256:b9faede11d0e12893b372f62f6ea73c76dbf9d782b204facc63e1527ebdb4dec"
       }
     },
@@ -2421,7 +2450,7 @@
       "classification": "spec",
       "confidence": "high",
       "indexed": {
-        "at": "2026-09-09T03:20:07Z",
+        "at": "2026-09-09T09:58:24Z",
         "sourceHash": "sha256:c8a99f80de1889eff56a0071d773999aec3c93d9439348e68ae5f1bbadf9e180"
       },
       "lifecycle": "active",
@@ -2459,13 +2488,14 @@
       "type": "as-is",
       "unresolvedReferences": [],
       "verified": {
-        "at": "2026-09-09T03:20:07Z",
+        "at": "2026-09-09T09:58:24Z",
         "codeHashes": {
           "external/pi-tools-suite/src/usage/lib/openai.ts": "sha256:f4627971c726bd3a006a5fada2112662b7671936b898c4d8adde3ebb5e8e0eaa",
           "src/app/model/model-usage-status.ts": "sha256:6c5fbcf0404b4cb9f30bca71253310f00d3ba35561ce49a56f4762cca5b2f7cf",
           "tests/model-usage-controller.test.ts": "sha256:895f2cc514b6cc0e42e74f9613187044351e982603543991b5d500e6a471f944",
           "tests/model-usage-status.test.ts": "sha256:fbf3a7afac8d58cf8e99d6e9368f4c5b1c79293a7dd57b5be72accf3f35c54a7"
         },
+        "relationsHash": "sha256:1e33522b2fa9194b8617721880b6d15a275d6a4b93a222c60ca4a04c230d8c28",
         "sourceHash": "sha256:c8a99f80de1889eff56a0071d773999aec3c93d9439348e68ae5f1bbadf9e180"
       }
     },
@@ -2496,7 +2526,7 @@
       "classification": "spec",
       "confidence": "high",
       "indexed": {
-        "at": "2026-09-09T03:16:11Z",
+        "at": "2026-09-09T09:58:24Z",
         "sourceHash": "sha256:88c0b9333fa5d6c7c01fe66fa6503e690ba6c7e768fe350b5546129bb546d3cb"
       },
       "lifecycle": "active",
@@ -2530,12 +2560,13 @@
       "type": "change",
       "unresolvedReferences": [],
       "verified": {
-        "at": "2026-09-09T03:16:11Z",
+        "at": "2026-09-09T09:58:24Z",
         "codeHashes": {
           "external/pi-tools-suite/test/async-subagents/routing.test.ts": "sha256:56b938aa74b83dd190c4b55f052d77f4ef0ccdbf1910e2b934e69802bf77c2a1",
           "external/pi-tools-suite/test/async-subagents/tools.test.ts": "sha256:0d78b5f72372bab03b492647dd8d8ec1dd0240b563bce1aeefec0d86475053c4",
           "external/pi-tools-suite/test/tool-descriptions.test.ts": "sha256:a7d66c8d9a52602f830ecad23c996229a12cbb105fa7b1f26835d05e62548bb5"
         },
+        "relationsHash": "sha256:6d6db884de49125d2c1722f475880e4bb27de701eacb549994d49dfc0ea08b65",
         "sourceHash": "sha256:88c0b9333fa5d6c7c01fe66fa6503e690ba6c7e768fe350b5546129bb546d3cb"
       }
     },
@@ -2543,7 +2574,7 @@
       "classification": "spec",
       "confidence": "high",
       "indexed": {
-        "at": "2026-09-09T03:16:11Z",
+        "at": "2026-09-09T09:58:25Z",
         "sourceHash": "sha256:adcc6b3214f018892378d9ecf8279934aa4f58339b2f32b5bb2473dbecd064cb"
       },
       "lifecycle": "active",
@@ -2575,10 +2606,11 @@
       "type": "change",
       "unresolvedReferences": [],
       "verified": {
-        "at": "2026-09-09T03:16:11Z",
+        "at": "2026-09-09T09:58:25Z",
         "codeHashes": {
           "external/pi-tools-suite/test/async-subagents/core.test.ts": "sha256:7b2f82c983b1e1f076756bade833d0ac221c42c061d4dd6dc8a34fefcd54323f"
         },
+        "relationsHash": "sha256:0e9ab677386f10b62b941e87ff87ada67e35471df2b8b238eccef708398e5b27",
         "sourceHash": "sha256:adcc6b3214f018892378d9ecf8279934aa4f58339b2f32b5bb2473dbecd064cb"
       }
     },
@@ -2586,7 +2618,7 @@
       "classification": "spec",
       "confidence": "high",
       "indexed": {
-        "at": "2026-09-09T03:16:11Z",
+        "at": "2026-09-09T09:58:25Z",
         "sourceHash": "sha256:ebd6b7fed1708016e672de30c7e648764f52716a1c7a0719dbeaa1705100f20b"
       },
       "lifecycle": "active",
@@ -2624,13 +2656,14 @@
       "type": "change",
       "unresolvedReferences": [],
       "verified": {
-        "at": "2026-09-09T03:16:11Z",
+        "at": "2026-09-09T09:58:25Z",
         "codeHashes": {
           "src/app/extensions/extension-ui-controller.ts": "sha256:eca81c09640ec651460ac1ce97d7b7a0bb08195cc05fea1a02f13dc4a33ca083",
           "src/bundled-extensions/question/index.ts": "sha256:3a114247ddf0cbcd58f5f66bb8343e2f844e61f39d65dd76d2bf5131adb6cef7",
           "src/bundled-extensions/question/tui.ts": "sha256:d859b01749a41043d536eee46cf113fd154f0c5cf28500d0343e4f567b0889b9",
           "tests/extension-ui-controller.test.ts": "sha256:41fe42e3e6762f150e4c8028ccdc76b01975be380baa5567681e4850a33ee28e"
         },
+        "relationsHash": "sha256:ff08657b942f0e437e05ac3807c8a75d7c409db1bb6632a2944c3f2d327f196b",
         "sourceHash": "sha256:ebd6b7fed1708016e672de30c7e648764f52716a1c7a0719dbeaa1705100f20b"
       }
     },
@@ -2638,7 +2671,7 @@
       "classification": "spec",
       "confidence": "high",
       "indexed": {
-        "at": "2026-09-09T03:16:11Z",
+        "at": "2026-09-09T09:58:25Z",
         "sourceHash": "sha256:3621e090694c8f516850f8dd33eef8242e6ddfa0dfefab88f978131d6ec2796c"
       },
       "lifecycle": "active",
@@ -2684,7 +2717,7 @@
       "type": "change",
       "unresolvedReferences": [],
       "verified": {
-        "at": "2026-09-09T03:16:11Z",
+        "at": "2026-09-09T09:58:25Z",
         "codeHashes": {
           "src/app/app.ts": "sha256:318bd5e577ff8b309bec56e09a6a6f13d52590597899a455bc88c3ec57de5514",
           "src/app/rendering/toast-controller.ts": "sha256:36370b0321e2cd61be3654014eb932938fac257dc9bff321b9a34e90829bbf4a",
@@ -2693,6 +2726,7 @@
           "src/app/session/session-event-controller.ts": "sha256:0508e8334fe760c2adbeeb44e93f96601d422d925f9d0c61e423988ca8a0138f",
           "src/ui.ts": "sha256:8dc6eb871552f26c280e60ca11f08b936541e59ee6c2828983f45fa25eda6bb1"
         },
+        "relationsHash": "sha256:b5b07a300b80efbe922e865a4f90afa59c7888396837d9183b35e15313e2589b",
         "sourceHash": "sha256:3621e090694c8f516850f8dd33eef8242e6ddfa0dfefab88f978131d6ec2796c"
       }
     },
@@ -2700,7 +2734,7 @@
       "classification": "spec",
       "confidence": "high",
       "indexed": {
-        "at": "2026-09-09T03:16:12Z",
+        "at": "2026-09-09T09:58:25Z",
         "sourceHash": "sha256:61135c5bbba937d15eedf455f67a0dd7e6abd6fcad08763b2d54aee78206e547"
       },
       "lifecycle": "active",
@@ -2737,13 +2771,14 @@
       "type": "change",
       "unresolvedReferences": [],
       "verified": {
-        "at": "2026-09-09T03:16:12Z",
+        "at": "2026-09-09T09:58:25Z",
         "codeHashes": {
           "src/app/app.ts": "sha256:318bd5e577ff8b309bec56e09a6a6f13d52590597899a455bc88c3ec57de5514",
           "src/app/session/queued-message-controller.ts": "sha256:4a20fc9104a57ced189a8f4509795a5c938245eaaf00d48576fec86759342c43",
           "src/app/session/session-lifecycle-controller.ts": "sha256:14433dfc677dae0ceeabc5ba5f933e8bc2f8080d704fd696f912641f645c2deb",
           "tests/queued-message-controller.test.ts": "sha256:dbbef58ca03be1681d0e96eaefa024e98c320f01508d1d50e615cebcbe99351d"
         },
+        "relationsHash": "sha256:eecce9377f5e152e3cb492afe1f2df4bcb4747cbbd099051f869975bc7fcc029",
         "sourceHash": "sha256:61135c5bbba937d15eedf455f67a0dd7e6abd6fcad08763b2d54aee78206e547"
       }
     },
@@ -2751,7 +2786,7 @@
       "classification": "spec",
       "confidence": "high",
       "indexed": {
-        "at": "2026-09-09T03:16:12Z",
+        "at": "2026-09-09T09:58:25Z",
         "sourceHash": "sha256:7431a9cae7225c30d001c5fe4a3ec1d18f1d61b053ed44fd4298bdc19c83cde9"
       },
       "lifecycle": "active",
@@ -2780,11 +2815,12 @@
       "type": "change",
       "unresolvedReferences": [],
       "verified": {
-        "at": "2026-09-09T03:16:12Z",
+        "at": "2026-09-09T09:58:25Z",
         "codeHashes": {
           "src/bundled-extensions/session-title/index.ts": "sha256:d2579f2735fe625f9aa54f3c4a6dcdc9a4f771de861aa9076e870bf85356903d",
           "tests/session-title.test.ts": "sha256:c9afc54abad4513b0148088351f55e70daea385606590fb7ae5df54131da066c"
         },
+        "relationsHash": "sha256:5435bea5da1802a08b2938f7bf1fad342cf98bf1ee1e602997dd4c9f50a369a1",
         "sourceHash": "sha256:7431a9cae7225c30d001c5fe4a3ec1d18f1d61b053ed44fd4298bdc19c83cde9"
       }
     },
@@ -2792,7 +2828,7 @@
       "classification": "spec",
       "confidence": "high",
       "indexed": {
-        "at": "2026-09-09T03:16:12Z",
+        "at": "2026-09-09T09:58:25Z",
         "sourceHash": "sha256:a7b659fdc5a9e73481aff71475af474a5e952eda7f54beab90a893bb7463b1b3"
       },
       "lifecycle": "active",
@@ -2826,12 +2862,13 @@
       "type": "change",
       "unresolvedReferences": [],
       "verified": {
-        "at": "2026-09-09T03:16:12Z",
+        "at": "2026-09-09T09:58:25Z",
         "codeHashes": {
           "external/pi-tools-suite/src/todo/state/replay.ts": "sha256:0e70adb40a64703173a1257fd4306a22d91134778e85b674e1fa71678f59177c",
           "external/pi-tools-suite/src/todo/todo.ts": "sha256:7c1a918a77de1f8c919561523596197b149f4afa6d18bc711c52f183394b1c9b",
           "external/pi-tools-suite/test/todo.test.ts": "sha256:059c171ac935f0be1f6caf2a10ddbbf6cbee6277ffb1c4773f862fd2a14ef37c"
         },
+        "relationsHash": "sha256:7320c0758d64ad9116fc390925f846da6572af592d7e048b1394ba9c2eb67d06",
         "sourceHash": "sha256:a7b659fdc5a9e73481aff71475af474a5e952eda7f54beab90a893bb7463b1b3"
       }
     },
@@ -2839,7 +2876,7 @@
       "classification": "spec",
       "confidence": "high",
       "indexed": {
-        "at": "2026-09-09T03:16:12Z",
+        "at": "2026-09-09T09:58:25Z",
         "sourceHash": "sha256:df3cfd754be9ee8f06fc10db1867a7949e8678a9f31370e567010cccfd6f530c"
       },
       "lifecycle": "active",
@@ -2881,7 +2918,7 @@
       "type": "change",
       "unresolvedReferences": [],
       "verified": {
-        "at": "2026-09-09T03:16:12Z",
+        "at": "2026-09-09T09:58:25Z",
         "codeHashes": {
           "external/pi-tools-suite/src/config.ts": "sha256:7c7a8fed79433bd948dbc83a72128da524c52e283d764c98380486137ec3cdea",
           "external/pi-tools-suite/src/default-pi-tools-suite-config.ts": "sha256:87299ce89cdd76f800cd31f08a23ad99daf2be67ccca1479f145d8f6842bbc0f",
@@ -2889,6 +2926,7 @@
           "schemas/pi-tools-suite.json": "sha256:7bf80209c3b82cd01de5650a7b1cd62d51c72048d8ea51268d442ef448a8383f",
           "src/schemas/pi-tools-suite-schema.ts": "sha256:93b123ee226577b3ac283fe28fea7c6914028f15be564afe87eb529307eaea5b"
         },
+        "relationsHash": "sha256:a4bb50411c26e13ee2ec435f5b8e76f8071cf80edb70f5f9157750734285def6",
         "sourceHash": "sha256:df3cfd754be9ee8f06fc10db1867a7949e8678a9f31370e567010cccfd6f530c"
       }
     },
@@ -2896,7 +2934,7 @@
       "classification": "spec",
       "confidence": "high",
       "indexed": {
-        "at": "2026-09-09T03:16:12Z",
+        "at": "2026-09-09T09:58:25Z",
         "sourceHash": "sha256:ddf4b1c45adf4324fdd716b4565dcb074c7f9206fdd592fdbec289a255f789d9"
       },
       "lifecycle": "active",
@@ -2936,12 +2974,13 @@
       "type": "change",
       "unresolvedReferences": [],
       "verified": {
-        "at": "2026-09-09T03:16:12Z",
+        "at": "2026-09-09T09:58:25Z",
         "codeHashes": {
           "external/pi-tools-suite/src/tool-descriptions.ts": "sha256:e7de4371bc86bf0b2cca71dd8e050032c0a8ae65ed64d621bb120f3ca6273ce8",
           "external/pi-tools-suite/src/web-search/index.ts": "sha256:2dbe71a8fd609b07a4fb58ecfdd3fa291dbc90fd48dad5dfdc67b1080d88d846",
           "external/pi-tools-suite/test/web-search.test.ts": "sha256:8880d3ef017ec382ed2dccb04e8f4586e8342c30b58be6be37aa149dfbfcdafc"
         },
+        "relationsHash": "sha256:2c097710354fa08759ccd55c70ad34fbef5edcfc5a6191087c44ef4b393a5268",
         "sourceHash": "sha256:ddf4b1c45adf4324fdd716b4565dcb074c7f9206fdd592fdbec289a255f789d9"
       }
     }

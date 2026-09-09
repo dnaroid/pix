@@ -129,6 +129,26 @@ const DictationConfig = Type.Object(
 	{ description: "Voice dictation (Vosk) configuration." },
 );
 
+const DesktopConfig = Type.Object(
+	{
+		externalEditor: Type.Optional(Type.String({
+			description: "External editor used by Pix Desktop project explorer. Known aliases include zed, code/vscode, cursor, subl/sublime, idea/intellij, and webstorm; an executable path/name is also accepted.",
+		})),
+		git: Type.Optional(Type.Object(
+			{
+				reviewModelRef: Type.Optional(Type.String({
+					description: "Model reference used by Pix Desktop for LLM review of Git diffs, optionally with a :thinking suffix.",
+				})),
+				commitMessageModelRef: Type.Optional(Type.String({
+					description: "Model reference used by Pix Desktop to generate Git commit messages, optionally with a :thinking suffix.",
+				})),
+			},
+			{ description: "Pix Desktop Git/Source Control LLM preferences." },
+		)),
+	},
+	{ description: "Pix Desktop-specific preferences." },
+);
+
 // ---------------------------------------------------------------------------
 // Top-level schema
 // ---------------------------------------------------------------------------
@@ -147,6 +167,7 @@ export const PixConfigSchema = Type.Object(
 		modelColors: Type.Optional(ModelColorsConfig),
 		iconTheme: Type.Optional(IconThemeConfig),
 		dictation: Type.Optional(DictationConfig),
+		desktop: Type.Optional(DesktopConfig),
 	},
 	{
 		$id: "https://unpkg.com/pi-ui-extend/schemas/pix.json",

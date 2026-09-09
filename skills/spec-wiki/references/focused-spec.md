@@ -36,7 +36,8 @@ local changes without broader behavioral impact.
    - unknown.
 5. Write/update a compact as-is spec.
 6. Report detected drift separately from confirmed behavior.
-7. If the project uses Spec Wiki, `record` the verified spec and `render`.
+7. If the project uses Spec Wiki, `record` the spec/relations, then run `verify`
+   only after the code/test semantic check is complete, and `render`.
 
 ## Change workflow
 
@@ -47,7 +48,16 @@ local changes without broader behavioral impact.
 5. Define verification.
 6. Implement only when requested.
 7. After implementation, verify the spec against code/tests.
-8. If the project uses Spec Wiki, refresh the verified baseline with `record`.
+8. For a material production-behavior change, run the post-change checkpoint in
+   `maintenance.md` using the paths changed by this task. This is required even
+   when the spec you started from appears sufficient: newly introduced files may
+   reveal previously unknown spec relationships.
+9. If the project uses Spec Wiki, refresh metadata with `record`, repair durable
+   relation changes with `relate`, then establish the verified baseline with
+   `verify` only after implementation/test verification and the impact sweep.
+
+If the task creates a new primary spec, record it immediately. If it moves a
+primary spec, record/verify the new path before removing the old metadata entry.
 
 ## Default template
 

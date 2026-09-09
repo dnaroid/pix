@@ -18,6 +18,7 @@ export const PIX_QUEUE_ACTION_METHOD = "pix/session/queue_action";
 export const PIX_TAKE_AUTO_MESSAGE_METHOD = "pix/session/take_auto_message";
 export const PIX_QUEUE_CONSUMED_METHOD = "pix/session/queue_consumed";
 export const PIX_REGISTRY_ACTION_METHOD = "pix/registry/action";
+export const PIX_GIT_ASSIST_METHOD = "pix/git/assist";
 
 export interface DesktopSessionRequest {
 	readonly sessionId: string;
@@ -37,6 +38,17 @@ export interface DesktopEnhancePromptRequest extends DesktopSessionRequest {
 
 export interface DesktopEnhancePromptResponse {
 	readonly prompt: string;
+}
+
+export type DesktopGitAssistantKind = "review" | "commit-message";
+
+export interface DesktopGitAssistantRequest extends DesktopSessionRequest {
+	readonly kind: DesktopGitAssistantKind;
+	readonly diff: string;
+}
+
+export interface DesktopGitAssistantResponse {
+	readonly text: string;
 }
 
 export interface DesktopImportSessionRequest extends DesktopSessionRequest {
@@ -181,6 +193,20 @@ export function parseDesktopEnhancePromptRequest(value: unknown): DesktopEnhance
 		throw new RequestError(ERROR_INVALID_PARAMS, "pix/prompt/enhance requires a draft with at least 3 characters");
 	}
 	return { ...session, draft: value.draft };
+}
+
+export function parseDesktopGitAssistantRequest(value: unknown): DesktopGitAssistantRequest {
+	const session = parseDesktopSessionRequest(value);
+	if (
+		!isRecord(value)
+		|| (value.kind !== "review" && value.kind !== "commit-message")
+		|| typeof value.diff !== "string"
+		|| value.diff.trim().length === 0
+		|| value.diff.length > 200_000
+	) {
+		throw new RequestError(ERROR_INVALID_PARAMS, "pix/git/assist requires kind and a non-empty diff up to 200000 characters");
+	}
+	return { ...session, kind: value.kind, diff: value.diff };
 }
 
 export function parseDesktopImportSessionRequest(value: unknown): DesktopImportSessionRequest {

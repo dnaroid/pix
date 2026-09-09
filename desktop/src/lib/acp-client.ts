@@ -287,6 +287,14 @@ export class AcpClient {
     return response.prompt;
   }
 
+  async gitAssist(sessionId: string, kind: "review" | "commit-message", diff: string): Promise<string> {
+    const response = await this.request<unknown>("pix/git/assist", { sessionId, kind, diff }, null);
+    if (!isRecord(response) || typeof response.text !== "string" || response.text.trim().length === 0) {
+      throw new Error("pix/git/assist returned an invalid response");
+    }
+    return response.text;
+  }
+
   async importSession(sessionId: string, path: string): Promise<{ configOptions: SessionConfigOption[] }> {
     const response = await this.request<unknown>("pix/session/import", { sessionId, path }, null);
     if (!isRecord(response)) throw new Error("pix/session/import returned an invalid response");

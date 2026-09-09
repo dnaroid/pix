@@ -3,6 +3,7 @@
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import ArrowRight from "@lucide/svelte/icons/arrow-right";
   import Check from "@lucide/svelte/icons/check";
+  import ExternalLink from "@lucide/svelte/icons/external-link";
   import FileCode from "@lucide/svelte/icons/file-code";
   import MoveDiagonal2 from "@lucide/svelte/icons/move-diagonal-2";
   import Pencil from "@lucide/svelte/icons/pencil";
@@ -22,6 +23,7 @@
     canGoBack = false,
     canGoForward = false,
     editable = false,
+    externalEditorLabel,
     onBack,
     onForward,
     onOpenProjectFile,
@@ -29,6 +31,7 @@
     onOpenLocalFile,
     onResolveLocalMedia,
     onSaveProjectFile,
+    onOpenExternalEditor,
     onScrollPositionChange,
     onClose,
   }: {
@@ -39,6 +42,7 @@
     canGoBack?: boolean;
     canGoForward?: boolean;
     editable?: boolean;
+    externalEditorLabel?: string;
     onBack?: () => void;
     onForward?: () => void;
     onOpenProjectFile?: (path: string) => void | Promise<void>;
@@ -46,6 +50,7 @@
     onOpenLocalFile?: (path: string) => void | Promise<void>;
     onResolveLocalMedia?: (path: string) => Promise<Attachment | undefined>;
     onSaveProjectFile?: (path: string, content: string) => Promise<boolean>;
+    onOpenExternalEditor?: (path: string) => void;
     onScrollPositionChange?: (id: number, position: PreviewScrollPosition) => void;
     onClose: () => void;
   } = $props();
@@ -338,6 +343,17 @@
             }}
           ><Pencil class="h-3.5 w-3.5" aria-hidden="true" />Edit</button>
         {/if}
+      {/if}
+      {#if file && externalEditorLabel && onOpenExternalEditor}
+        <button
+          class="grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          type="button"
+          title={`Open in ${externalEditorLabel}`}
+          aria-label={`Open ${file.path} in ${externalEditorLabel}`}
+          onclick={() => onOpenExternalEditor?.(file.path)}
+        >
+          <ExternalLink class="h-4 w-4" aria-hidden="true" />
+        </button>
       {/if}
       <button
         class="grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"

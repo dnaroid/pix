@@ -1,0 +1,2 @@
+Duplicate capture requests with the same idempotency key return the original result.
+This rule describes current production behavior for capture requests.

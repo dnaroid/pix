@@ -32,6 +32,9 @@ const MAX_ATTACHMENT_CACHE_BYTES: u64 = 250 * 1024 * 1024;
 const MAX_PROJECT_FILE_PREVIEW_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_PROJECT_MARKDOWN_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_TASK_DOCUMENT_BYTES: u64 = 1024 * 1024;
+const MAX_GIT_CHANGES: usize = 5_000;
+const MAX_GIT_DIFF_BYTES: usize = 512 * 1024;
+const MAX_GIT_COMMIT_MESSAGE_BYTES: usize = 20 * 1024;
 const PROJECT_TASKS_SCHEMA_URL: &str = "https://unpkg.com/pi-ui-extend/schemas/tasks.json";
 const ATTACHMENT_CACHE_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 static ATTACHMENT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -123,6 +126,78 @@ struct ProjectFilePreview {
 struct ProjectDocumentsSnapshot {
     plans: Vec<String>,
     todo_exists: bool,
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum ProjectTreeEntryKind {
+    File,
+    Directory,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectTreeEntry {
+    name: String,
+    path: String,
+    kind: ProjectTreeEntryKind,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitFileChange {
+    path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    original_path: Option<String>,
+    index_status: String,
+    worktree_status: String,
+    staged: bool,
+    unstaged: bool,
+    untracked: bool,
+    conflicted: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitBranch {
+    name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    upstream: Option<String>,
+    current: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitSnapshot {
+    branch: String,
+    detached: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    head: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    upstream: Option<String>,
+    ahead: u32,
+    behind: u32,
+    changes: Vec<GitFileChange>,
+    branches: Vec<GitBranch>,
+    remotes: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum GitDiffScope {
+    Staged,
+    Unstaged,
+    All,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitDiff {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path: Option<String>,
+    scope: GitDiffScope,
+    content: String,
+    truncated: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -517,6 +592,75 @@ async fn read_project_file(workspace: String, path: String) -> Result<ProjectFil
 }
 
 #[tauri::command]
+async fn list_project_directory(
+    workspace: String,
+    path: Option<String>,
+) -> Result<Vec<ProjectTreeEntry>, String> {
+    run_blocking(move || {
+        list_project_directory_from(Path::new(&workspace), path.as_deref().map(Path::new))
+    })
+    .await
+}
+
+#[tauri::command]
+async fn open_in_external_editor(
+    workspace: String,
+    path: Option<String>,
+    editor: String,
+) -> Result<(), String> {
+    run_blocking(move || {
+        let target =
+            resolve_external_editor_target(Path::new(&workspace), path.as_deref().map(Path::new))?;
+        launch_external_editor(&editor, &target)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn git_status(workspace: String) -> Result<GitSnapshot, String> {
+    run_blocking(move || git_status_from(Path::new(&workspace))).await
+}
+
+#[tauri::command]
+async fn git_diff(
+    workspace: String,
+    path: Option<String>,
+    scope: GitDiffScope,
+) -> Result<GitDiff, String> {
+    run_blocking(move || git_diff_from(Path::new(&workspace), path.as_deref(), scope)).await
+}
+
+#[tauri::command]
+async fn git_stage(workspace: String, path: Option<String>) -> Result<(), String> {
+    run_blocking(move || git_stage_from(Path::new(&workspace), path.as_deref())).await
+}
+
+#[tauri::command]
+async fn git_unstage(workspace: String, path: Option<String>) -> Result<(), String> {
+    run_blocking(move || git_unstage_from(Path::new(&workspace), path.as_deref())).await
+}
+
+#[tauri::command]
+async fn git_commit(workspace: String, message: String) -> Result<(), String> {
+    run_blocking(move || git_commit_from(Path::new(&workspace), &message)).await
+}
+
+#[tauri::command]
+async fn git_push(workspace: String) -> Result<(), String> {
+    run_blocking(move || git_push_from(Path::new(&workspace))).await
+}
+
+#[tauri::command]
+async fn git_switch_branch(workspace: String, branch: String) -> Result<(), String> {
+    run_blocking(move || git_switch_branch_from(Path::new(&workspace), &branch, false)).await
+}
+
+#[tauri::command]
+async fn git_create_branch(workspace: String, branch: String) -> Result<(), String> {
+    run_blocking(move || git_switch_branch_from(Path::new(&workspace), &branch, true)).await
+}
+
+#[tauri::command]
 async fn list_project_documents(workspace: String) -> Result<ProjectDocumentsSnapshot, String> {
     run_blocking(move || list_project_documents_from(Path::new(&workspace))).await
 }
@@ -837,6 +981,663 @@ fn read_project_file_from(
         .to_string_lossy()
         .replace('\\', "/");
     read_text_file_from(&file_path, display_path, max_bytes)
+}
+
+fn list_project_directory_from(
+    workspace: &Path,
+    relative_path: Option<&Path>,
+) -> Result<Vec<ProjectTreeEntry>, String> {
+    let (root, directory) = resolve_project_directory_path(workspace, relative_path)?;
+    let mut entries = Vec::new();
+    for entry in fs::read_dir(&directory)
+        .map_err(|error| format!("failed to read {}: {error}", directory.display()))?
+    {
+        let entry =
+            entry.map_err(|error| format!("failed to read project directory entry: {error}"))?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name == ".git" || name == ".DS_Store" {
+            continue;
+        }
+        let file_type = entry
+            .file_type()
+            .map_err(|error| format!("failed to inspect {}: {error}", entry.path().display()))?;
+        // Do not follow workspace symlinks from the renderer-facing explorer.
+        // This keeps every listed target anchored to the canonical workspace.
+        if file_type.is_symlink() {
+            continue;
+        }
+        let kind = if file_type.is_dir() {
+            ProjectTreeEntryKind::Directory
+        } else if file_type.is_file() {
+            ProjectTreeEntryKind::File
+        } else {
+            continue;
+        };
+        let path = entry
+            .path()
+            .strip_prefix(&root)
+            .map_err(|_| "project tree entry resolves outside the workspace".to_owned())?
+            .to_string_lossy()
+            .replace('\\', "/");
+        entries.push(ProjectTreeEntry { name, path, kind });
+        if entries.len() > 2_000 {
+            return Err(format!(
+                "{} contains too many entries to display (maximum 2000)",
+                directory.display()
+            ));
+        }
+    }
+    entries.sort_by(|left, right| {
+        let left_dir = matches!(left.kind, ProjectTreeEntryKind::Directory);
+        let right_dir = matches!(right.kind, ProjectTreeEntryKind::Directory);
+        right_dir
+            .cmp(&left_dir)
+            .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    Ok(entries)
+}
+
+fn resolve_project_directory_path(
+    workspace: &Path,
+    relative_path: Option<&Path>,
+) -> Result<(PathBuf, PathBuf), String> {
+    let root = canonical_workspace(workspace)?;
+    let Some(relative_path) = relative_path.filter(|path| !path.as_os_str().is_empty()) else {
+        return Ok((root.clone(), root));
+    };
+    validate_workspace_relative_path(relative_path, "project directory")?;
+    let unresolved = root.join(relative_path);
+    if fs::symlink_metadata(&unresolved)
+        .map_err(|error| format!("failed to inspect {}: {error}", unresolved.display()))?
+        .file_type()
+        .is_symlink()
+    {
+        return Err("project explorer does not follow symbolic links".to_owned());
+    }
+    let directory = fs::canonicalize(&unresolved)
+        .map_err(|error| format!("failed to resolve {}: {error}", unresolved.display()))?;
+    if !directory.starts_with(&root) {
+        return Err("project directory resolves outside the workspace".to_owned());
+    }
+    if !directory.is_dir() {
+        return Err(format!("{} is not a directory", relative_path.display()));
+    }
+    Ok((root, directory))
+}
+
+fn resolve_external_editor_target(
+    workspace: &Path,
+    relative_path: Option<&Path>,
+) -> Result<PathBuf, String> {
+    let root = canonical_workspace(workspace)?;
+    let Some(relative_path) = relative_path.filter(|path| !path.as_os_str().is_empty()) else {
+        return Ok(root);
+    };
+    validate_workspace_relative_path(relative_path, "external editor target")?;
+    let unresolved = root.join(relative_path);
+    if fs::symlink_metadata(&unresolved)
+        .map_err(|error| format!("failed to inspect {}: {error}", unresolved.display()))?
+        .file_type()
+        .is_symlink()
+    {
+        return Err("external editor target cannot be a symbolic link".to_owned());
+    }
+    let target = fs::canonicalize(&unresolved)
+        .map_err(|error| format!("failed to resolve {}: {error}", unresolved.display()))?;
+    if !target.starts_with(&root) {
+        return Err("external editor target resolves outside the workspace".to_owned());
+    }
+    Ok(target)
+}
+
+fn validate_workspace_relative_path(path: &Path, label: &str) -> Result<(), String> {
+    if path.as_os_str().is_empty()
+        || path.is_absolute()
+        || path.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+    {
+        return Err(format!("{label} must stay relative to the workspace"));
+    }
+    Ok(())
+}
+
+fn git_repository_root(workspace: &Path) -> Result<PathBuf, String> {
+    let root = canonical_workspace(workspace)?;
+    let output = git_output_raw(&root, &["rev-parse", "--show-toplevel"])?;
+    if !output.status.success() {
+        return Err(git_command_error("Git repository", &output));
+    }
+    let reported = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    if reported.is_empty() {
+        return Err("Git did not report a repository root".to_owned());
+    }
+    let repository = fs::canonicalize(&reported)
+        .map_err(|error| format!("failed to resolve Git repository root {reported}: {error}"))?;
+    if repository != root {
+        return Err(format!(
+            "Git repository root is {}; open that directory as the Pix project to use Source Control",
+            repository.display()
+        ));
+    }
+    Ok(root)
+}
+
+fn git_output_raw(root: &Path, args: &[&str]) -> Result<std::process::Output, String> {
+    let mut command = Command::new("git");
+    command
+        .arg("-C")
+        .arg(root)
+        .arg("-c")
+        .arg("color.ui=false")
+        .arg("-c")
+        .arg("core.quotepath=false")
+        .arg("-c")
+        .arg("core.pager=cat")
+        .args(args)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GCM_INTERACTIVE", "Never")
+        .env("GIT_EDITOR", "true")
+        .env("GIT_SEQUENCE_EDITOR", "true")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    command
+        .output()
+        .map_err(|error| format!("failed to run git {}: {error}", args.join(" ")))
+}
+
+fn git_output(root: &Path, args: &[&str]) -> Result<std::process::Output, String> {
+    let output = git_output_raw(root, args)?;
+    if output.status.success() {
+        Ok(output)
+    } else {
+        Err(git_command_error(&format!("git {}", args.join(" ")), &output))
+    }
+}
+
+fn git_command_error(label: &str, output: &std::process::Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    let detail = if !stderr.is_empty() {
+        stderr
+    } else if !stdout.is_empty() {
+        stdout
+    } else {
+        output
+            .status
+            .code()
+            .map(|code| format!("exit code {code}"))
+            .unwrap_or_else(|| "terminated without an exit code".to_owned())
+    };
+    format!("{label} failed: {detail}")
+}
+
+fn git_status_from(workspace: &Path) -> Result<GitSnapshot, String> {
+    let root = git_repository_root(workspace)?;
+    let output = git_output(
+        &root,
+        &["status", "--porcelain=v2", "-z", "--branch", "--untracked-files=all"],
+    )?;
+    let mut snapshot = parse_git_status_porcelain(&output.stdout)?;
+    snapshot.branches = git_local_branches(&root, &snapshot.branch)?;
+    snapshot.remotes = git_remotes(&root)?;
+    Ok(snapshot)
+}
+
+fn parse_git_status_porcelain(bytes: &[u8]) -> Result<GitSnapshot, String> {
+    let records = bytes.split(|byte| *byte == 0).collect::<Vec<_>>();
+    let mut branch = "HEAD".to_owned();
+    let mut detached = false;
+    let mut head = None;
+    let mut upstream = None;
+    let mut ahead = 0u32;
+    let mut behind = 0u32;
+    let mut changes = Vec::new();
+    let mut index = 0usize;
+
+    while index < records.len() {
+        let record = records[index];
+        index += 1;
+        if record.is_empty() {
+            continue;
+        }
+        let text = String::from_utf8_lossy(record);
+        if let Some(value) = text.strip_prefix("# branch.oid ") {
+            if value != "(initial)" {
+                head = Some(value.to_owned());
+            }
+            continue;
+        }
+        if let Some(value) = text.strip_prefix("# branch.head ") {
+            detached = value == "(detached)";
+            branch = if detached { "HEAD".to_owned() } else { value.to_owned() };
+            continue;
+        }
+        if let Some(value) = text.strip_prefix("# branch.upstream ") {
+            upstream = Some(value.to_owned());
+            continue;
+        }
+        if let Some(value) = text.strip_prefix("# branch.ab ") {
+            for part in value.split_whitespace() {
+                if let Some(value) = part.strip_prefix('+') {
+                    ahead = value.parse().unwrap_or(0);
+                } else if let Some(value) = part.strip_prefix('-') {
+                    behind = value.parse().unwrap_or(0);
+                }
+            }
+            continue;
+        }
+
+        let change = if let Some(path) = text.strip_prefix("? ") {
+            Some(GitFileChange {
+                path: path.to_owned(),
+                original_path: None,
+                index_status: "?".to_owned(),
+                worktree_status: "?".to_owned(),
+                staged: false,
+                unstaged: true,
+                untracked: true,
+                conflicted: false,
+            })
+        } else if text.starts_with("1 ") {
+            parse_git_ordinary_change(&text)
+        } else if text.starts_with("2 ") {
+            let original = records.get(index).copied().unwrap_or_default();
+            if index < records.len() {
+                index += 1;
+            }
+            parse_git_renamed_change(&text, &String::from_utf8_lossy(original))
+        } else if text.starts_with("u ") {
+            parse_git_unmerged_change(&text)
+        } else if text.starts_with("! ") {
+            None
+        } else {
+            return Err(format!("unsupported Git status record: {text}"));
+        };
+        if let Some(change) = change {
+            changes.push(change);
+            if changes.len() > MAX_GIT_CHANGES {
+                return Err(format!(
+                    "Git repository has too many changed files to display (maximum {MAX_GIT_CHANGES})"
+                ));
+            }
+        }
+    }
+
+    Ok(GitSnapshot {
+        branch,
+        detached,
+        head,
+        upstream,
+        ahead,
+        behind,
+        changes,
+        branches: Vec::new(),
+        remotes: Vec::new(),
+    })
+}
+
+fn parse_git_ordinary_change(record: &str) -> Option<GitFileChange> {
+    let fields = record.splitn(9, ' ').collect::<Vec<_>>();
+    git_change_from_fields(fields.get(1).copied()?, fields.get(8).copied()?, None, false)
+}
+
+fn parse_git_renamed_change(record: &str, original_path: &str) -> Option<GitFileChange> {
+    let fields = record.splitn(10, ' ').collect::<Vec<_>>();
+    git_change_from_fields(
+        fields.get(1).copied()?,
+        fields.get(9).copied()?,
+        (!original_path.is_empty()).then(|| original_path.to_owned()),
+        false,
+    )
+}
+
+fn parse_git_unmerged_change(record: &str) -> Option<GitFileChange> {
+    let fields = record.splitn(11, ' ').collect::<Vec<_>>();
+    git_change_from_fields(fields.get(1).copied()?, fields.get(10).copied()?, None, true)
+}
+
+fn git_change_from_fields(
+    xy: &str,
+    path: &str,
+    original_path: Option<String>,
+    conflicted: bool,
+) -> Option<GitFileChange> {
+    let mut statuses = xy.chars();
+    let index_status = statuses.next()?;
+    let worktree_status = statuses.next()?;
+    Some(GitFileChange {
+        path: path.to_owned(),
+        original_path,
+        index_status: index_status.to_string(),
+        worktree_status: worktree_status.to_string(),
+        staged: index_status != '.',
+        unstaged: worktree_status != '.',
+        untracked: false,
+        conflicted,
+    })
+}
+
+fn git_local_branches(root: &Path, current_branch: &str) -> Result<Vec<GitBranch>, String> {
+    let output = git_output(
+        root,
+        &["for-each-ref", "--format=%(refname:short)%00%(upstream:short)", "refs/heads"],
+    )?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut branches = text
+        .lines()
+        .filter_map(|line| {
+            let (name, upstream) = line.split_once('\0').unwrap_or((line, ""));
+            let name = name.trim();
+            if name.is_empty() {
+                return None;
+            }
+            Some(GitBranch {
+                name: name.to_owned(),
+                upstream: (!upstream.trim().is_empty()).then(|| upstream.trim().to_owned()),
+                current: name == current_branch,
+            })
+        })
+        .collect::<Vec<_>>();
+    if current_branch != "HEAD" && !branches.iter().any(|branch| branch.current) {
+        branches.push(GitBranch {
+            name: current_branch.to_owned(),
+            upstream: None,
+            current: true,
+        });
+    }
+    branches.sort_by(|left, right| {
+        right
+            .current
+            .cmp(&left.current)
+            .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    Ok(branches)
+}
+
+fn git_remotes(root: &Path) -> Result<Vec<String>, String> {
+    let output = git_output(root, &["remote"])?;
+    let mut remotes = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|remote| !remote.is_empty())
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    remotes.sort();
+    remotes.dedup();
+    Ok(remotes)
+}
+
+fn validate_git_relative_path(path: &str) -> Result<&str, String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("Git file path cannot be empty".to_owned());
+    }
+    validate_workspace_relative_path(Path::new(trimmed), "Git file path")?;
+    Ok(trimmed)
+}
+
+fn git_diff_from(
+    workspace: &Path,
+    path: Option<&str>,
+    scope: GitDiffScope,
+) -> Result<GitDiff, String> {
+    let root = git_repository_root(workspace)?;
+    let path = path.map(validate_git_relative_path).transpose()?;
+    let snapshot = git_status_from(&root)?;
+    let mut content = String::new();
+
+    match scope {
+        GitDiffScope::Staged => {
+            content.push_str(&git_tracked_diff(&root, path, true)?);
+        }
+        GitDiffScope::Unstaged => {
+            content.push_str(&git_tracked_diff(&root, path, false)?);
+            append_untracked_diffs(&root, &snapshot, path, &mut content)?;
+        }
+        GitDiffScope::All => {
+            let staged = git_tracked_diff(&root, path, true)?;
+            if !staged.trim().is_empty() {
+                content.push_str("# Staged changes\n\n");
+                content.push_str(&staged);
+            }
+            let unstaged = git_tracked_diff(&root, path, false)?;
+            let before_unstaged = content.len();
+            if !unstaged.trim().is_empty() {
+                if !content.is_empty() {
+                    content.push_str("\n\n");
+                }
+                content.push_str("# Working tree changes\n\n");
+                content.push_str(&unstaged);
+            }
+            let before_untracked = content.len();
+            append_untracked_diffs(&root, &snapshot, path, &mut content)?;
+            if before_untracked == content.len() && before_unstaged == content.len() && content.is_empty() {
+                content.clear();
+            }
+        }
+    }
+
+    let (content, truncated) = truncate_git_diff(content);
+    Ok(GitDiff {
+        path: path.map(str::to_owned),
+        scope,
+        content,
+        truncated,
+    })
+}
+
+fn git_tracked_diff(root: &Path, path: Option<&str>, staged: bool) -> Result<String, String> {
+    let mut args = vec!["diff"];
+    if staged {
+        args.push("--cached");
+    }
+    args.extend(["--no-ext-diff", "--no-color", "--minimal"]);
+    if let Some(path) = path {
+        args.extend(["--", path]);
+    }
+    let output = git_output(root, &args)?;
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+fn append_untracked_diffs(
+    root: &Path,
+    snapshot: &GitSnapshot,
+    requested_path: Option<&str>,
+    content: &mut String,
+) -> Result<(), String> {
+    let untracked = snapshot
+        .changes
+        .iter()
+        .filter(|change| change.untracked)
+        .filter(|change| requested_path.is_none_or(|path| change.path == path))
+        .take(100)
+        .collect::<Vec<_>>();
+    for change in untracked {
+        let output = git_output_raw(
+            root,
+            &[
+                "diff",
+                "--no-index",
+                "--no-ext-diff",
+                "--no-color",
+                "--",
+                "/dev/null",
+                &change.path,
+            ],
+        )?;
+        let accepted = output.status.success() || output.status.code() == Some(1);
+        if !accepted {
+            return Err(git_command_error("git diff --no-index", &output));
+        }
+        // Git runs with the workspace as cwd and receives a workspace-relative
+        // path, so its diff headers are already relative. Never post-process the
+        // whole diff: doing so can corrupt hunk contents that happen to contain
+        // the absolute workspace path.
+        let diff = String::from_utf8_lossy(&output.stdout).into_owned();
+        if !diff.trim().is_empty() {
+            if !content.is_empty() {
+                content.push_str("\n\n");
+            }
+            content.push_str(&diff);
+        }
+        if content.len() > MAX_GIT_DIFF_BYTES {
+            break;
+        }
+    }
+    Ok(())
+}
+
+fn truncate_git_diff(mut content: String) -> (String, bool) {
+    if content.len() <= MAX_GIT_DIFF_BYTES {
+        return (content, false);
+    }
+    let mut boundary = MAX_GIT_DIFF_BYTES;
+    while !content.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    content.truncate(boundary);
+    content.push_str("\n\n[Diff truncated by Pix Desktop]\n");
+    (content, true)
+}
+
+fn git_stage_from(workspace: &Path, path: Option<&str>) -> Result<(), String> {
+    let root = git_repository_root(workspace)?;
+    let path = path.map(validate_git_relative_path).transpose()?;
+    let target = path.unwrap_or(".");
+    git_output(&root, &["add", "-A", "--", target]).map(|_| ())
+}
+
+fn git_has_head(root: &Path) -> Result<bool, String> {
+    let output = git_output_raw(root, &["rev-parse", "--verify", "HEAD"])?;
+    Ok(output.status.success())
+}
+
+fn git_unstage_from(workspace: &Path, path: Option<&str>) -> Result<(), String> {
+    let root = git_repository_root(workspace)?;
+    let path = path.map(validate_git_relative_path).transpose()?;
+    let target = path.unwrap_or(".");
+    if git_has_head(&root)? {
+        git_output(&root, &["reset", "-q", "HEAD", "--", target]).map(|_| ())
+    } else {
+        git_output(&root, &["rm", "--cached", "-r", "--ignore-unmatch", "--", target]).map(|_| ())
+    }
+}
+
+fn git_commit_from(workspace: &Path, message: &str) -> Result<(), String> {
+    let root = git_repository_root(workspace)?;
+    let message = message.trim();
+    if message.is_empty() {
+        return Err("Commit message cannot be empty".to_owned());
+    }
+    if message.len() > MAX_GIT_COMMIT_MESSAGE_BYTES {
+        return Err(format!(
+            "Commit message is too large (maximum {MAX_GIT_COMMIT_MESSAGE_BYTES} bytes)"
+        ));
+    }
+    git_output(&root, &["commit", "--no-gpg-sign", "-m", message]).map(|_| ())
+}
+
+fn git_push_from(workspace: &Path) -> Result<(), String> {
+    let root = git_repository_root(workspace)?;
+    let snapshot = git_status_from(&root)?;
+    if snapshot.detached || snapshot.branch == "HEAD" {
+        return Err("Cannot push while HEAD is detached".to_owned());
+    }
+    let upstream = git_output_raw(
+        &root,
+        &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
+    )?;
+    if upstream.status.success() {
+        return git_output(&root, &["push"]).map(|_| ());
+    }
+    let remote = if snapshot.remotes.iter().any(|remote| remote == "origin") {
+        "origin".to_owned()
+    } else if snapshot.remotes.len() == 1 {
+        snapshot.remotes[0].clone()
+    } else if snapshot.remotes.is_empty() {
+        return Err("No Git remote is configured for this repository".to_owned());
+    } else {
+        return Err("This branch has no upstream; configure one before pushing".to_owned());
+    };
+    git_output(&root, &["push", "-u", &remote, &snapshot.branch]).map(|_| ())
+}
+
+fn git_switch_branch_from(workspace: &Path, branch: &str, create: bool) -> Result<(), String> {
+    let root = git_repository_root(workspace)?;
+    let branch = branch.trim();
+    if branch.is_empty() {
+        return Err("Branch name cannot be empty".to_owned());
+    }
+    git_output(&root, &["check-ref-format", "--branch", branch])?;
+    if create {
+        git_output(&root, &["switch", "-c", branch]).map(|_| ())
+    } else {
+        git_output(&root, &["switch", branch]).map(|_| ())
+    }
+}
+
+fn launch_external_editor(editor: &str, target: &Path) -> Result<(), String> {
+    let editor = editor.trim();
+    if editor.is_empty() {
+        return Err("external editor cannot be empty".to_owned());
+    }
+
+    #[cfg(target_os = "macos")]
+    if let Some(app_name) = macos_editor_app_name(editor) {
+        let status = Command::new("open")
+            .arg("-a")
+            .arg(app_name)
+            .arg(target)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map_err(|error| {
+                format!("failed to open {} in {app_name}: {error}", target.display())
+            })?;
+        return status.success().then_some(()).ok_or_else(|| {
+            format!("{app_name} could not open {}", target.display())
+        });
+    }
+
+    let executable = external_editor_executable(editor);
+    Command::new(executable)
+        .arg(target)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("failed to open {} with {editor}: {error}", target.display()))
+}
+
+#[cfg(target_os = "macos")]
+fn macos_editor_app_name(editor: &str) -> Option<&'static str> {
+    match editor.to_ascii_lowercase().as_str() {
+        "zed" => Some("Zed"),
+        "code" | "vscode" | "visual studio code" => Some("Visual Studio Code"),
+        "cursor" => Some("Cursor"),
+        "subl" | "sublime" | "sublime text" => Some("Sublime Text"),
+        "idea" | "intellij" | "intellij idea" => Some("IntelliJ IDEA"),
+        "webstorm" => Some("WebStorm"),
+        _ => None,
+    }
+}
+
+fn external_editor_executable(editor: &str) -> &str {
+    match editor.to_ascii_lowercase().as_str() {
+        "vscode" | "visual studio code" => "code",
+        "sublime" | "sublime text" => "subl",
+        "intellij" | "intellij idea" => "idea",
+        _ => editor,
+    }
 }
 
 fn read_home_file_from(
@@ -1869,6 +2670,16 @@ pub fn run() {
             open_attachment,
             open_local_file,
             read_project_file,
+            list_project_directory,
+            open_in_external_editor,
+            git_status,
+            git_diff,
+            git_stage,
+            git_unstage,
+            git_commit,
+            git_push,
+            git_switch_branch,
+            git_create_branch,
             list_project_documents,
             write_project_markdown,
             read_home_file,
@@ -2025,6 +2836,188 @@ mod tests {
         assert!(write_project_markdown_from(&workspace, Path::new("README.md"), "nope").is_err());
         assert!(write_project_markdown_from(&workspace, Path::new(".pi/plans/../secret.md"), "nope").is_err());
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
+    fn lists_project_directories_lazily_with_directories_first() {
+        let workspace = temporary_workspace("project-tree");
+        fs::create_dir_all(workspace.join("src/components")).expect("create source directories");
+        fs::write(workspace.join("README.md"), "# Demo\n").expect("write README");
+        fs::write(workspace.join("src/main.ts"), "export {};\n").expect("write main source");
+        fs::create_dir(workspace.join(".git")).expect("create git directory");
+
+        let root = list_project_directory_from(&workspace, None).expect("list project root");
+        assert_eq!(root.iter().map(|entry| entry.name.as_str()).collect::<Vec<_>>(), vec!["src", "README.md"]);
+        assert!(matches!(root[0].kind, ProjectTreeEntryKind::Directory));
+        assert!(matches!(root[1].kind, ProjectTreeEntryKind::File));
+
+        let src = list_project_directory_from(&workspace, Some(Path::new("src"))).expect("list src");
+        assert_eq!(src.iter().map(|entry| entry.path.as_str()).collect::<Vec<_>>(), vec!["src/components", "src/main.ts"]);
+        assert!(list_project_directory_from(&workspace, Some(Path::new("../outside"))).is_err());
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
+    fn resolves_external_editor_targets_only_inside_the_workspace() {
+        let workspace = temporary_workspace("external-editor-target");
+        fs::create_dir(workspace.join("src")).expect("create src directory");
+        fs::write(workspace.join("src/main.ts"), "export {};\n").expect("write source");
+
+        assert_eq!(
+            resolve_external_editor_target(&workspace, None).expect("resolve root"),
+            fs::canonicalize(&workspace).expect("canonical workspace"),
+        );
+        assert_eq!(
+            resolve_external_editor_target(&workspace, Some(Path::new("src/main.ts"))).expect("resolve file"),
+            fs::canonicalize(workspace.join("src/main.ts")).expect("canonical file"),
+        );
+        assert!(resolve_external_editor_target(&workspace, Some(Path::new("../outside"))).is_err());
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn project_tree_skips_symbolic_links() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = temporary_workspace("project-tree-symlink-workspace");
+        let outside = temporary_workspace("project-tree-symlink-outside");
+        fs::write(outside.join("secret.txt"), "secret\n").expect("write outside file");
+        symlink(outside.join("secret.txt"), workspace.join("secret-link.txt"))
+            .expect("create file symlink");
+
+        let entries = list_project_directory_from(&workspace, None).expect("list project root");
+        assert!(entries.iter().all(|entry| entry.name != "secret-link.txt"));
+        assert!(resolve_external_editor_target(&workspace, Some(Path::new("secret-link.txt"))).is_err());
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+        fs::remove_dir_all(outside).expect("remove outside workspace");
+    }
+
+    fn initialize_git_repository(workspace: &Path) {
+        git_output_raw(workspace, &["init", "-b", "main"])
+            .expect("run git init")
+            .status
+            .success()
+            .then_some(())
+            .expect("git init succeeds");
+        git_output(workspace, &["config", "user.email", "pix-tests@example.invalid"])
+            .expect("configure git email");
+        git_output(workspace, &["config", "user.name", "Pix Tests"])
+            .expect("configure git name");
+        fs::write(workspace.join("tracked.txt"), "before\n").expect("write tracked file");
+        git_output(workspace, &["add", "tracked.txt"]).expect("stage initial file");
+        git_output(workspace, &["commit", "--no-gpg-sign", "-m", "initial"])
+            .expect("create initial commit");
+    }
+
+    #[test]
+    fn git_status_diff_stage_and_unstage_are_workspace_scoped() {
+        let workspace = temporary_workspace("git-source-control");
+        initialize_git_repository(&workspace);
+        fs::write(workspace.join("tracked.txt"), "after\n").expect("modify tracked file");
+        fs::write(workspace.join("new.txt"), "new\n").expect("write untracked file");
+
+        let before = git_status_from(&workspace).expect("read git status");
+        assert_eq!(before.branch, "main");
+        assert!(!before.detached);
+        assert!(before.changes.iter().any(|change| {
+            change.path == "tracked.txt" && change.unstaged && !change.staged
+        }));
+        assert!(before.changes.iter().any(|change| change.path == "new.txt" && change.untracked));
+
+        let working = git_diff_from(&workspace, Some("tracked.txt"), GitDiffScope::Unstaged)
+            .expect("read working diff");
+        assert!(working.content.contains("-before"));
+        assert!(working.content.contains("+after"));
+
+        git_stage_from(&workspace, Some("tracked.txt")).expect("stage tracked file");
+        let staged = git_status_from(&workspace).expect("read staged status");
+        assert!(staged.changes.iter().any(|change| {
+            change.path == "tracked.txt" && change.staged && !change.unstaged
+        }));
+        let staged_diff = git_diff_from(&workspace, Some("tracked.txt"), GitDiffScope::Staged)
+            .expect("read staged diff");
+        assert!(staged_diff.content.contains("+after"));
+
+        git_unstage_from(&workspace, Some("tracked.txt")).expect("unstage tracked file");
+        let unstaged = git_status_from(&workspace).expect("read unstaged status");
+        assert!(unstaged.changes.iter().any(|change| {
+            change.path == "tracked.txt" && !change.staged && change.unstaged
+        }));
+        assert!(git_stage_from(&workspace, Some("../outside")).is_err());
+
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
+    fn untracked_git_diff_preserves_workspace_path_inside_file_content() {
+        let workspace = temporary_workspace("git-untracked-diff-content");
+        initialize_git_repository(&workspace);
+        let workspace_text = workspace.to_string_lossy().into_owned();
+        fs::write(
+            workspace.join("new.txt"),
+            format!("workspace marker: {workspace_text}\n"),
+        )
+        .expect("write untracked file with workspace path");
+
+        let diff = git_diff_from(&workspace, Some("new.txt"), GitDiffScope::Unstaged)
+            .expect("read untracked diff");
+
+        assert!(diff
+            .content
+            .contains(&format!("+workspace marker: {workspace_text}")));
+        for line in diff.content.lines().filter(|line| {
+            line.starts_with("diff --git ")
+                || line.starts_with("--- ")
+                || line.starts_with("+++ ")
+        }) {
+            assert!(
+                !line.contains(&workspace_text),
+                "diff header unexpectedly contains the absolute workspace path: {line}"
+            );
+        }
+
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
+    fn git_source_control_rejects_a_parent_repository() {
+        let repository = temporary_workspace("git-parent-repository");
+        initialize_git_repository(&repository);
+        let nested = repository.join("nested-project");
+        fs::create_dir(&nested).expect("create nested project");
+
+        let error = git_status_from(&nested).expect_err("nested project must be rejected");
+        assert!(error.contains("repository root"));
+
+        fs::remove_dir_all(repository).expect("remove parent repository");
+    }
+
+    #[test]
+    fn git_branch_commit_and_publish_use_noninteractive_git_commands() {
+        let workspace = temporary_workspace("git-branch-commit-push");
+        let remote = temporary_workspace("git-bare-remote");
+        initialize_git_repository(&workspace);
+        let init_bare = git_output_raw(&remote, &["init", "--bare"]).expect("initialize bare remote");
+        assert!(init_bare.status.success());
+        let remote_path = remote.to_string_lossy().into_owned();
+        git_output(&workspace, &["remote", "add", "origin", &remote_path]).expect("add origin");
+
+        git_switch_branch_from(&workspace, "feature/source-control", true).expect("create feature branch");
+        assert_eq!(git_status_from(&workspace).expect("feature status").branch, "feature/source-control");
+
+        fs::write(workspace.join("tracked.txt"), "committed from feature\n").expect("modify tracked file");
+        git_stage_from(&workspace, Some("tracked.txt")).expect("stage feature change");
+        git_commit_from(&workspace, "Update tracked file").expect("commit feature change");
+        assert!(git_status_from(&workspace).expect("clean feature status").changes.is_empty());
+
+        git_switch_branch_from(&workspace, "main", false).expect("switch back to main");
+        git_push_from(&workspace).expect("publish main branch");
+        let published = git_status_from(&workspace).expect("published status");
+        assert_eq!(published.upstream.as_deref(), Some("origin/main"));
+
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+        fs::remove_dir_all(remote).expect("remove bare remote");
     }
 
     #[test]

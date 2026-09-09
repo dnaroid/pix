@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "description": "Live retrieval regression cases for the host repository. Expected paths are chosen before running the search; use expectedAny when more than one primary spec is defensible.",
+  "cases": [
+    {"id":"kw-dcp","category":"keyword","query":"dcp persistence recovery","expectedAny":["specs/dcp.md"]},
+    {"id":"kw-desktop-markdown","category":"keyword","query":"desktop markdown mermaid file preview","expectedAny":["specs/desktop-markdown-rendering.md"]},
+    {"id":"kw-project-agents","category":"keyword","query":"project local agents .pi/agents","expectedAny":["specs/project-agents-dir.md"]},
+    {"id":"kw-question-tab","category":"keyword","query":"question inactive tab","expectedAny":["specs/question-inactive-tab.md"]},
+    {"id":"kw-retry-toast","category":"keyword","query":"retry toast action","expectedAny":["specs/retry-toast-action.md"]},
+    {"id":"kw-openai-usage","category":"keyword","query":"openai codex token refresh usage","expectedAny":["specs/openai-codex-usage-refresh.md"]},
+
+    {"id":"para-recovery","category":"paraphrase","query":"recover old conversation after compaction","expectedAny":["external/pi-tools-suite/docs/session-recovery.md"]},
+    {"id":"para-browser-qa","category":"paraphrase","query":"browser qa credentials origin isolation redaction","expectedAny":["external/pi-tools-suite/docs/browser-qa-subagent.md"]},
+    {"id":"para-concurrency","category":"paraphrase","query":"async callback updates the wrong session tab","expectedAny":["docs/concurrency.md"]},
+    {"id":"para-cache","category":"paraphrase","query":"keep tool output stable for prompt caching","expectedAny":["specs/dcp-provider-cache-stability.md"]},
+    {"id":"para-window","category":"paraphrase","query":"window opens offscreen after monitor change","expectedAny":["specs/desktop-window-state.md"]},
+    {"id":"para-copy","category":"paraphrase","query":"copy last assistant response slash command","expectedAny":["specs/desktop-slash-commands.md"]},
+    {"id":"para-task-jsonc","category":"paraphrase","query":"task storage comments jsonc","expectedAny":["docs/desktop-task-manager.md"]},
+    {"id":"para-wrapped-link","category":"paraphrase","query":"click file uri in wrapped markdown","expectedAny":["specs/clickable-markdown-links.md"]},
+    {"id":"para-zed","category":"paraphrase","query":"open source file in zed at line","expectedAny":["specs/file-link-opening.md"]},
+
+    {"id":"ru-recovery","category":"russian","query":"как восстанавливается история после сжатия контекста","expectedAny":["external/pi-tools-suite/docs/session-recovery.md"]},
+    {"id":"ru-zed","category":"russian","query":"как открыть ссылку на файл в zed","expectedAny":["specs/file-link-opening.md"]},
+    {"id":"ru-question-tab","category":"russian","query":"что происходит с вопросом в неактивной вкладке","expectedAny":["specs/question-inactive-tab.md"]},
+    {"id":"ru-tasks","category":"russian","query":"где хранятся задачи проекта и поддерживаются ли комментарии","expectedAny":["docs/desktop-task-manager.md"]},
+    {"id":"ru-provider-seen","category":"russian","query":"почему старый tool result нельзя удалять до отправки провайдеру","expectedAny":["specs/dcp-provider-cache-stability.md"]},
+
+    {"id":"syn-auth","category":"synonym","query":"oauth account rotation when quota exhausted","expectedAny":["specs/antigravity-auth.md"]},
+    {"id":"syn-background-agent","category":"synonym","query":"cancel a running background agent","expectedAny":["specs/async-subagents.md"]},
+
+    {"id":"path-openai","category":"path","query":"src/app/model/model-usage-status.ts","expectedAny":["specs/openai-codex-usage-refresh.md"]},
+    {"id":"path-dcp-journal","category":"path","query":"external/pi-tools-suite/src/dcp/journal.ts","expectedAny":["specs/dcp.md","specs/dcp-reliability-mechanisms.md","specs/dcp-provider-cache-stability.md"]},
+
+    {"id":"symbol-sidebar","category":"symbol","query":"WorkspaceSidebar.svelte tasks","expectedAny":["docs/desktop-task-manager.md"]},
+    {"id":"symbol-question-bridge","category":"symbol","query":"ui-request-bridge question","expectedAny":["specs/desktop-question-tool.md"]}
+  ]
+}

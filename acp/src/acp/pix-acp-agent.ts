@@ -95,6 +95,7 @@ import {
 import { applyConfigOption, buildConfigOptions, CONFIG_ID_MODEL, parseModelValue } from "./config-options.js";
 import {
 	PIX_ENHANCE_PROMPT_METHOD,
+	PIX_GIT_ASSIST_METHOD,
 	PIX_DEFER_MESSAGE_METHOD,
 	PIX_FORK_MESSAGES_METHOD,
 	PIX_IMPORT_SESSION_METHOD,
@@ -111,6 +112,7 @@ import {
 	PIX_TAKE_AUTO_MESSAGE_METHOD,
 	PIX_TOOL_RESULT_METHOD,
 	parseDesktopEnhancePromptRequest,
+	parseDesktopGitAssistantRequest,
 	parseDesktopImportSessionRequest,
 	parseDesktopQueueActionRequest,
 	parseDesktopQueueSubmitRequest,
@@ -122,6 +124,8 @@ import {
 	parseDesktopToolResultRequest,
 	type DesktopEnhancePromptRequest,
 	type DesktopEnhancePromptResponse,
+	type DesktopGitAssistantRequest,
+	type DesktopGitAssistantResponse,
 	type DesktopImportSessionRequest,
 	type DesktopQueueActionRequest,
 	type DesktopQueueActionResponse,
@@ -145,6 +149,7 @@ import {
 } from "./desktop-commands.js";
 import { loadPixDefaultModel, type PixDefaultModel } from "./default-model.js";
 import { EventTranslator } from "./event-translator.js";
+import { createGitAssistant, type GitAssistant } from "./git-assistant.js";
 import {
 	isThinkingLevel,
 	loadPixIgnoreContextFiles,
@@ -286,6 +291,8 @@ export interface PixAcpAgentOptions {
 	readonly completeAutocomplete?: AutocompleteCompleter;
 	/** Prompt enhancer backend (overridable for hermetic tests). */
 	readonly enhancePrompt?: PromptEnhancer;
+	/** One-shot Git review/commit-message backend (overridable for hermetic tests). */
+	readonly gitAssistant?: GitAssistant;
 	/** Pix autocomplete config reader (overridable for hermetic tests). */
 	readonly loadAutocompleteConfig?: (cwd: string) => AutocompleteConfig;
 	/** Pix default-model reader (overridable for hermetic tests). */
@@ -317,6 +324,7 @@ export class PixAcpAgent {
 	private readonly loadTuiTabs: (cwd: string) => Promise<TuiTabSnapshot>;
 	private readonly completeAutocomplete: AutocompleteCompleter;
 	private readonly enhancePrompt: PromptEnhancer;
+	private readonly gitAssistant: GitAssistant;
 	private readonly loadAutocompleteConfig: (cwd: string) => AutocompleteConfig;
 	private readonly loadDefaultModel: (cwd: string) => PixDefaultModel | undefined;
 	private readonly loadIgnoreContextFiles: (cwd: string) => boolean;
@@ -345,6 +353,7 @@ export class PixAcpAgent {
 			loadConfig: this.loadAutocompleteConfig,
 		});
 		this.enhancePrompt = options.enhancePrompt ?? createPromptEnhancer();
+		this.gitAssistant = options.gitAssistant ?? createGitAssistant();
 		this.app = agent({ name: "pix-acp" })
 			.onRequest("initialize", (ctx) => {
 				this.clientCapabilities = ctx.params.clientCapabilities;
@@ -394,6 +403,9 @@ export class PixAcpAgent {
 			)
 			.onRequest(PIX_ENHANCE_PROMPT_METHOD, parseDesktopEnhancePromptRequest, (ctx) =>
 				this.desktopEnhancePrompt(ctx.params, ctx.signal),
+			)
+			.onRequest(PIX_GIT_ASSIST_METHOD, parseDesktopGitAssistantRequest, (ctx) =>
+				this.desktopGitAssist(ctx.params, ctx.signal),
 			)
 			.onRequest(PIX_FORK_MESSAGES_METHOD, parseDesktopSessionRequest, (ctx) =>
 				this.forkMessages(ctx.params),
@@ -504,6 +516,21 @@ export class PixAcpAgent {
 		}
 		const prompt = await this.enhancePrompt({ cwd: session.cwd, draft: params.draft, signal });
 		return { prompt };
+	}
+
+	private async desktopGitAssist(
+		params: DesktopGitAssistantRequest,
+		signal: AbortSignal,
+	): Promise<DesktopGitAssistantResponse> {
+		const session = this.sessions.get(params.sessionId);
+		if (!session) throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
+		const text = await this.gitAssistant({
+			cwd: session.cwd,
+			kind: params.kind,
+			diff: params.diff,
+			signal,
+		});
+		return { text };
 	}
 
 	private async desktopRegistryAction(params: DesktopRegistryActionRequest): Promise<Record<string, never>> {

@@ -6,8 +6,10 @@
   import CircleDashed from "@lucide/svelte/icons/circle-dashed";
   import Clock3 from "@lucide/svelte/icons/clock-3";
   import Database from "@lucide/svelte/icons/database";
+  import ExternalLink from "@lucide/svelte/icons/external-link";
   import FileText from "@lucide/svelte/icons/file-text";
   import Folder from "@lucide/svelte/icons/folder";
+  import GitBranch from "@lucide/svelte/icons/git-branch";
   import GripVertical from "@lucide/svelte/icons/grip-vertical";
   import ListTodo from "@lucide/svelte/icons/list-todo";
   import Pencil from "@lucide/svelte/icons/pencil";
@@ -34,8 +36,9 @@
     type ProjectTaskStatus,
     type ProjectTaskType,
   } from "../lib/project-tasks";
-  import { projectName } from "../lib/recent-projects";
   import { fuzzySearch } from "../lib/fuzzy";
+  import type { GitDiffScope, GitSnapshot } from "../lib/git";
+  import type { ProjectTreeEntry } from "../lib/project-tree";
   import {
     PROJECT_TODO_PATH,
     projectDocumentLabel,
@@ -50,6 +53,8 @@
   import { sessionTodoCounts, type SessionTodoSnapshot } from "../lib/session-todos";
   import { sessionSubagentCount, type SessionSubagentSnapshot } from "../lib/session-subagents";
   import RegistryPanel from "./RegistryPanel.svelte";
+  import GitPanel from "./GitPanel.svelte";
+  import ProjectExplorer from "./ProjectExplorer.svelte";
   import PromptComposer from "./PromptComposer.svelte";
   import SessionActivityPanel from "./SessionActivityPanel.svelte";
 
@@ -59,7 +64,7 @@
     type: ProjectTaskType;
   };
 
-  type SidebarTab = "tasks" | "project" | "registry" | "session";
+  type SidebarTab = "tasks" | "project" | "git" | "registry" | "session";
   type TaskDropPosition = "before" | "after";
   type TaskDropTarget = {
     type: ProjectTaskType;
@@ -76,6 +81,7 @@
   const SIDEBAR_LABELS: Record<SidebarTab, string> = {
     tasks: "Tasks",
     project: "Project",
+    git: "Source Control",
     registry: "Registry",
     session: "Session",
   };
@@ -94,8 +100,13 @@
     registrySnapshot,
     registryLoading,
     registryActionId,
+    gitSnapshot,
+    gitLoading,
+    gitError,
+    gitActionId,
+    gitLlmActionId,
     projectDocuments,
-    projectDocumentsLoading,
+    externalEditorLabel,
     onCreate,
     onUpdate,
     onStatusChange,
@@ -107,9 +118,22 @@
     onRun,
     onOpenSession,
     onOpenProjectDocument,
+    onListProjectDirectory,
+    onOpenProjectFile,
+    onOpenExternalEditor,
     onReload,
     onRegistryRefresh,
     onRegistryAction,
+    onGitRefresh,
+    onGitOpenDiff,
+    onGitStage,
+    onGitUnstage,
+    onGitCommit,
+    onGitPush,
+    onGitSwitchBranch,
+    onGitCreateBranch,
+    onGitGenerateCommitMessage,
+    onGitReview,
   }: {
     workspace: string;
     tasks: ProjectTask[];
@@ -124,8 +148,13 @@
     registrySnapshot: RegistrySnapshot | undefined;
     registryLoading: boolean;
     registryActionId: string | null;
+    gitSnapshot: GitSnapshot | undefined;
+    gitLoading: boolean;
+    gitError: string | null;
+    gitActionId: string | null;
+    gitLlmActionId: string | null;
     projectDocuments: ProjectDocumentsSnapshot;
-    projectDocumentsLoading: boolean;
+    externalEditorLabel: string;
     onCreate: (draft: TaskDraft) => void;
     onUpdate: (taskId: string, draft: TaskDraft) => void;
     onStatusChange: (taskId: string, status: ProjectTaskStatus) => void;
@@ -142,9 +171,22 @@
     onRun: (task: ProjectTask) => void;
     onOpenSession: (task: ProjectTask) => void;
     onOpenProjectDocument: (path: string, exists?: boolean) => void;
+    onListProjectDirectory: (path: string) => Promise<ProjectTreeEntry[]>;
+    onOpenProjectFile: (path: string) => void;
+    onOpenExternalEditor: (path?: string) => void;
     onReload: () => void;
     onRegistryRefresh: () => void;
     onRegistryAction: (request: RegistryActionRequest, actionId: string) => void;
+    onGitRefresh: () => void;
+    onGitOpenDiff: (path: string | undefined, scope: GitDiffScope) => void;
+    onGitStage: (path?: string) => void;
+    onGitUnstage: (path?: string) => void;
+    onGitCommit: (message: string) => Promise<boolean>;
+    onGitPush: () => void;
+    onGitSwitchBranch: (branch: string) => void;
+    onGitCreateBranch: (branch: string) => void;
+    onGitGenerateCommitMessage: () => Promise<string | undefined>;
+    onGitReview: (path: string | undefined, scope: GitDiffScope) => void;
   } = $props();
 
   const ACTIVITY_BAR_WIDTH = 48;
@@ -154,6 +196,7 @@
   const MAX_WIDTH = 420;
   const WIDTH_KEY = "pix.desktop.taskSidebarWidth";
   const COLLAPSED_KEY = "pix.desktop.taskSidebarCollapsed";
+  const ACTIVE_TAB_KEY = "pix.desktop.workspaceSidebarTab";
 
   let collapsed = $state(false);
   let sidebarWidth = $state(DEFAULT_WIDTH);
@@ -169,6 +212,7 @@
   let planSelectorOpen = $state(false);
   let planSelectorQuery = $state("");
   let planSearchInput = $state<HTMLInputElement | null>(null);
+  let projectTreeRefreshKey = $state(0);
   let draggedTaskId = $state<string | null>(null);
   let taskDropTarget = $state<TaskDropTarget | null>(null);
   let draggedTaskHeight = $state(44);
@@ -193,6 +237,7 @@
   const openTodoCount = $derived(todoCounts.pending + todoCounts.in_progress + todoCounts.deferred);
   const activeSubagentCount = $derived(sessionSubagentCount(subagentSnapshot));
   const registryAttention = $derived(registryHasAttention(registrySnapshot));
+  const gitChangeCount = $derived(gitSnapshot?.changes.length ?? 0);
   const activeMinWidth = $derived(sidebarMinWidth(activeTab));
   const expandedSidebarWidth = $derived(Math.max(sidebarWidth, activeMinWidth));
   const renderedSidebarWidth = $derived(ACTIVITY_BAR_WIDTH + (collapsed ? 0 : expandedSidebarWidth));
@@ -218,7 +263,7 @@
     }
     if (artifact === "plans") {
       if (projectDocuments.plans.length === 0) {
-        activeTab = "project";
+        setActiveTab("project");
         return;
       }
       planSelectorQuery = "";
@@ -226,7 +271,7 @@
       void tick().then(() => planSearchInput?.focus());
       return;
     }
-    activeTab = "tasks";
+    setActiveTab("tasks");
   }
 
   function choosePlan(plan: string): void {
@@ -238,6 +283,8 @@
   onMount(() => {
     try {
       collapsed = localStorage.getItem(COLLAPSED_KEY) === "true";
+      const savedTab = localStorage.getItem(ACTIVE_TAB_KEY);
+      if (isSidebarTab(savedTab)) activeTab = savedTab;
       const savedWidth = localStorage.getItem(WIDTH_KEY);
       if (savedWidth !== null) {
         const parsedWidth = Number(savedWidth);
@@ -262,6 +309,19 @@
     }
   }
 
+  function isSidebarTab(value: string | null): value is SidebarTab {
+    return value === "project" || value === "tasks" || value === "git" || value === "registry" || value === "session";
+  }
+
+  function setActiveTab(tab: SidebarTab): void {
+    activeTab = tab;
+    try {
+      localStorage.setItem(ACTIVE_TAB_KEY, tab);
+    } catch {
+      // Keep the in-memory selection when persistence is unavailable.
+    }
+  }
+
   function selectTab(tab: SidebarTab): void {
     statusMenuTaskId = null;
     planSelectorOpen = false;
@@ -277,7 +337,7 @@
       editorOpen = false;
       deleteTaskId = null;
     }
-    activeTab = tab;
+    setActiveTab(tab);
     if (collapsed) setCollapsed(false);
   }
 
@@ -559,6 +619,15 @@
 >
   <nav class="flex h-full w-12 shrink-0 flex-col items-center border-r border-sidebar-border py-1.5" aria-label="Workspace views">
     <button
+      class={["relative grid h-11 w-12 place-items-center border-l-2 hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "project" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
+      type="button"
+      title={activeTab === "project" && !collapsed ? "Hide Project" : "Project"}
+      aria-label="Project files"
+      aria-controls="workspace-project-panel"
+      aria-pressed={activeTab === "project" && !collapsed}
+      onclick={() => selectTab("project")}
+    ><Folder class="h-5 w-5" aria-hidden="true" /></button>
+    <button
       class={["relative grid h-11 w-12 place-items-center border-l-2 hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "tasks" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
       type="button"
       title={activeTab === "tasks" && !collapsed ? "Hide Tasks" : "Tasks"}
@@ -571,14 +640,17 @@
       {#if tasks.length > 0}<span class="absolute top-2 right-2 h-1.5 w-1.5 rounded-full bg-primary" aria-hidden="true"></span>{/if}
     </button>
     <button
-      class={["relative grid h-11 w-12 place-items-center border-l-2 hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "project" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
+      class={["relative grid h-11 w-12 place-items-center border-l-2 hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "git" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
       type="button"
-      title={activeTab === "project" && !collapsed ? "Hide Project" : "Project"}
-      aria-label="Project overview"
-      aria-controls="workspace-project-panel"
-      aria-pressed={activeTab === "project" && !collapsed}
-      onclick={() => selectTab("project")}
-    ><Folder class="h-5 w-5" aria-hidden="true" /></button>
+      title={activeTab === "git" && !collapsed ? "Hide Source Control" : "Source Control"}
+      aria-label={`Source Control, ${gitChangeCount} changed ${gitChangeCount === 1 ? "file" : "files"}`}
+      aria-controls="workspace-git-panel"
+      aria-pressed={activeTab === "git" && !collapsed}
+      onclick={() => selectTab("git")}
+    >
+      <GitBranch class="h-5 w-5" aria-hidden="true" />
+      {#if gitChangeCount > 0}<span class="absolute top-1.5 right-1.5 min-w-3 rounded-full bg-primary px-0.5 text-center font-mono text-[7px] leading-3 text-primary-foreground" aria-hidden="true">{Math.min(gitChangeCount, 99)}</span>{/if}
+    </button>
     <button
       class={["relative grid h-11 w-12 place-items-center border-l-2 hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "registry" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
       type="button"
@@ -617,6 +689,25 @@
             onclick={openCreate}
             disabled={!workspace || busy}
           ><Plus class="h-3 w-3" aria-hidden="true" />Add</button>
+        {:else if activeTab === "project"}
+          <div class="ml-auto flex shrink-0 items-center gap-0.5">
+            <button
+              class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
+              type="button"
+              title={`Open project in ${externalEditorLabel}`}
+              aria-label={`Open project in ${externalEditorLabel}`}
+              onclick={() => onOpenExternalEditor()}
+              disabled={!workspace}
+            ><ExternalLink class="h-3.5 w-3.5" aria-hidden="true" /></button>
+            <button
+              class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
+              type="button"
+              title="Refresh project files"
+              aria-label="Refresh project files"
+              onclick={() => projectTreeRefreshKey += 1}
+              disabled={!workspace}
+            ><RefreshCw class="h-3.5 w-3.5" aria-hidden="true" /></button>
+          </div>
         {:else if activeTab === "registry"}
           <div class="ml-auto flex shrink-0 items-center gap-0.5">
             <button
@@ -806,62 +897,42 @@
           </div>
         </section>
       {:else if activeTab === "project"}
-        <section id="workspace-project-panel" class="min-h-0 overflow-y-auto p-2" aria-label="Project">
+        <section id="workspace-project-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Project">
           {#if !workspace}
             <div class="px-4 py-8 text-center"><Folder class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" /><p class="text-xs font-medium">Choose a project</p></div>
           {:else}
-            <div class="rounded-lg border border-sidebar-border bg-background/45 px-2.5 py-2">
-              <div class="flex min-w-0 items-center gap-2">
-                <Folder class="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
-                <h2 class="min-w-0 flex-1 truncate text-xs font-semibold text-foreground">{projectName(workspace)}</h2>
-                <span class="shrink-0 text-[9px] text-muted-foreground">{tasks.length} tasks · {doneCount} done</span>
-              </div>
-              <p class="mt-1 truncate font-mono text-[9px] text-muted-foreground" title={workspace}>{workspace}</p>
-            </div>
-
-            <div class="mt-3">
-              <div class="mb-1 flex h-5 items-center justify-between px-1">
-                <span class="text-[9px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Documents</span>
-              </div>
-              <button
-                class="group flex h-9 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left hover:bg-sidebar-accent focus-visible:outline-2 focus-visible:outline-ring"
-                type="button"
-                onclick={() => onOpenProjectDocument(PROJECT_TODO_PATH, projectDocuments.todoExists)}
-              >
-                <FileText class="h-3.5 w-3.5 shrink-0 text-muted-foreground group-hover:text-foreground" aria-hidden="true" />
-                <span class="min-w-0 flex-1 truncate text-[11px] font-medium text-foreground">TODO.md</span>
-                <span class="shrink-0 text-[9px] text-muted-foreground">{projectDocuments.todoExists ? "Open" : "Create"}</span>
-              </button>
-            </div>
-
-            <div class="mt-2">
-              <div class="mb-1 flex h-5 items-center justify-between px-1">
-                <span class="text-[9px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Plans</span>
-                <span class="font-mono text-[8px] text-muted-foreground/70">{projectDocuments.plans.length}</span>
-              </div>
-              {#if projectDocumentsLoading}
-                <div class="flex h-9 items-center justify-center gap-1.5 text-[10px] text-muted-foreground"><RotateCw class="h-3 w-3 animate-spin" aria-hidden="true" />Loading plans…</div>
-              {:else if projectDocuments.plans.length === 0}
-                <div class="rounded-md border border-dashed border-sidebar-border/70 px-2 py-3 text-center text-[9px] text-muted-foreground/70">No Markdown plans in .pi/plans</div>
-              {:else}
-                <div class="space-y-0.5">
-                  {#each projectDocuments.plans as plan (plan)}
-                    <button
-                      class="group flex h-9 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left hover:bg-sidebar-accent focus-visible:outline-2 focus-visible:outline-ring"
-                      type="button"
-                      title={plan}
-                      onclick={() => onOpenProjectDocument(plan)}
-                    >
-                      <FileText class="h-3.5 w-3.5 shrink-0 text-muted-foreground group-hover:text-foreground" aria-hidden="true" />
-                      <span class="min-w-0 flex-1 truncate text-[11px] text-foreground">{projectDocumentLabel(plan)}</span>
-                      <span class="shrink-0 text-[9px] text-muted-foreground">Open</span>
-                    </button>
-                  {/each}
-                </div>
-              {/if}
-            </div>
+            <ProjectExplorer
+              {workspace}
+              {externalEditorLabel}
+              refreshKey={projectTreeRefreshKey}
+              onListDirectory={onListProjectDirectory}
+              onOpenFile={onOpenProjectFile}
+              onOpenExternal={(path) => onOpenExternalEditor(path)}
+            />
           {/if}
         </section>
+      {:else if activeTab === "git"}
+        <div id="workspace-git-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Source Control">
+          <GitPanel
+            {workspace}
+            snapshot={gitSnapshot}
+            loading={gitLoading}
+            error={gitError}
+            actionId={gitActionId}
+            llmActionId={gitLlmActionId}
+            {sessionReady}
+            onRefresh={onGitRefresh}
+            onOpenDiff={onGitOpenDiff}
+            onStage={onGitStage}
+            onUnstage={onGitUnstage}
+            onCommit={onGitCommit}
+            onPush={onGitPush}
+            onSwitchBranch={onGitSwitchBranch}
+            onCreateBranch={onGitCreateBranch}
+            onGenerateCommitMessage={onGitGenerateCommitMessage}
+            onReview={onGitReview}
+          />
+        </div>
       {:else if activeTab === "registry"}
         <div id="workspace-registry-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Registry">
           <RegistryPanel

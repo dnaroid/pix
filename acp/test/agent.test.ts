@@ -22,6 +22,7 @@ import type {
 import { PixAcpAgent } from "../src/acp/pix-acp-agent.js";
 import {
 	PIX_DEFER_MESSAGE_METHOD,
+	PIX_GIT_ASSIST_METHOD,
 	PIX_QUEUE_ACTION_METHOD,
 	PIX_QUEUE_CONSUMED_METHOD,
 	PIX_QUEUE_MESSAGE_METHOD,
@@ -754,6 +755,42 @@ test("pix/prompt/enhance uses the dedicated enhancer without sending a session p
 	assert.deepEqual(response, { prompt: "Improved prompt" });
 	assert.deepEqual(observed, { cwd: "/tmp/enhance-project", draft: "make tests better" });
 	assert.deepEqual(harness.clients[0]?.promptCalls, []);
+});
+
+test("pix/git/assist runs independently while the main session prompt is active", async () => {
+	let observed: { cwd: string; kind: string; diff: string } | undefined;
+	const harness = createTestAdapter({
+		gitAssistant: async ({ cwd, kind, diff }) => {
+			observed = { cwd, kind, diff };
+			return "No significant findings.";
+		},
+	});
+
+	await connect(harness.adapter, async (cx) => {
+		const session = await cx.buildSession("/tmp/git-review-project").start();
+		const pendingPrompt = cx.request("session/prompt", {
+			sessionId: session.sessionId,
+			prompt: [{ type: "text", text: "keep working" }],
+		});
+		const pi = harness.clients[0]!;
+		await waitFor(() => pi.promptCalls.length === 1);
+
+		const review = await cx.request(PIX_GIT_ASSIST_METHOD, {
+			sessionId: session.sessionId,
+			kind: "review",
+			diff: "diff --git a/a.ts b/a.ts\n+const ready = true;",
+		});
+		assert.deepEqual(review, { text: "No significant findings." });
+		assert.deepEqual(observed, {
+			cwd: "/tmp/git-review-project",
+			kind: "review",
+			diff: "diff --git a/a.ts b/a.ts\n+const ready = true;",
+		});
+
+		pi.emit({ type: "agent_start" });
+		pi.emit({ type: "agent_settled" });
+		await pendingPrompt;
+	});
 });
 
 test("pix/autocomplete/config exposes project eligibility and debounce", async () => {

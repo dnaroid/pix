@@ -40,6 +40,14 @@
     "should_trigger": true
   },
   {
+    "query": "Implement background session refresh so a transient token-load failure is retried exactly once and a second failure still propagates. Add the code and tests and verify the change is complete.",
+    "should_trigger": true
+  },
+  {
+    "query": "I added a new src/auth/refresh-policy.ts implementation surface for an existing login behavior. Finish the change and make sure any project contracts or knowledge that should track the new file stay current.",
+    "should_trigger": true
+  },
+  {
     "query": "Refactor src/utils/string.ts to use a helper function. This is a mechanical cleanup with no externally visible behavior change; just update the code and tests.",
     "should_trigger": false
   },
@@ -77,6 +85,10 @@
   },
   {
     "query": "Compare these two external W3C specifications and explain the differences in browser behavior. This isn't about specs stored in our project.",
+    "should_trigger": false
+  },
+  {
+    "query": "Add a debug-only telemetry label to an internal helper and update its unit test. It must not change any user-visible behavior, persistence, API, retry, or compatibility contract.",
     "should_trigger": false
   }
 ]

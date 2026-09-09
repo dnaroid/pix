@@ -2,167 +2,178 @@
 
 <!-- markdownlint-disable MD013 -->
 
-This reference describes the deterministic storage layer used by `spec-wiki`.
+This reference describes the deterministic storage layer. Primary specification
+documents remain the source of truth.
 
 ## Files
 
-Default project-local paths:
-
 ```text
-.spec-wiki/index.md
-.spec-wiki/state.json
-.spec-wiki/config.jsonc   # optional
+.spec-wiki/index.md      # compact generated routing index
+.spec-wiki/state.json    # semantic metadata + structural/verification baselines
+.spec-wiki/config.jsonc  # optional discovery overrides
 ```
 
-`state.json` is authoritative for Spec Wiki metadata. `index.md` is a generated LLM-facing projection. Neither replaces the primary specification documents.
+## State schema v2
 
-## State schema v1
-
-Conceptual shape:
+Conceptual primary entry:
 
 ```json
 {
-  "schemaVersion": 1,
-  "entries": {
-    "docs/auth.md": {
-      "path": "docs/auth.md",
-      "title": "Authentication contract",
-      "classification": "spec",
-      "type": "as-is",
-      "confidence": "high",
-      "summary": "Authentication session lifecycle and refresh invariants.",
-      "topics": ["auth", "sessions"],
-      "relations": {
-        "code": [
-          {"path": "src/auth/session.ts", "source": "explicit"},
-          {"path": "src/auth/store.ts", "source": "inferred"}
-        ],
-        "specs": [
-          {"path": "docs/oauth.md", "source": "explicit"}
-        ]
-      },
-      "verified": {
-        "at": "2026-09-09T00:00:00Z",
-        "sourceHash": "sha256:...",
-        "codeHashes": {
-          "src/auth/session.ts": "sha256:..."
-        }
-      }
+  "path": "docs/auth.md",
+  "title": "Authentication contract",
+  "classification": "spec",
+  "type": "as-is",
+  "lifecycle": "active",
+  "confidence": "high",
+  "summary": "Authentication session lifecycle and refresh invariants.",
+  "topics": ["auth", "sessions"],
+  "relations": {
+    "code": [
+      {"path": "src/auth/session.ts", "source": "explicit"}
+    ],
+    "specs": [
+      {"path": "docs/oauth.md", "source": "inferred", "kind": "related"}
+    ]
+  },
+  "unresolvedReferences": [],
+  "indexed": {
+    "at": "2026-09-09T00:00:00Z",
+    "sourceHash": "sha256:..."
+  },
+  "verified": {
+    "at": "2026-09-09T00:05:00Z",
+    "sourceHash": "sha256:...",
+    "relationsHash": "sha256:...",
+    "codeHashes": {
+      "src/auth/session.ts": "sha256:..."
     }
   }
 }
 ```
 
-State keys are normalized project-relative POSIX paths. Do not use numeric spec prefixes as IDs.
+State keys and all stored paths are normalized project-relative POSIX paths.
 
-### Classifications
+### Classification
 
-- `spec`: primary specification.
-- `spec-like`: primary-ish specification knowledge worth indexing, but mixed/ambiguous.
-- `meta-index`: derived inventory, overview, catalog, table of contents, or generated index.
-- `design-only`: architecture/design/decision material without enough behavioral contract to treat as a spec.
-- `guide`: tutorial, usage, runbook, operational documentation.
-- `other`: irrelevant to the specification knowledge base.
+- `spec` — primary behavioral/normative specification.
+- `spec-like` — primary-ish knowledge with mixed/ambiguous purpose.
+- `meta-index` — inventory, overview, catalog, TOC, generated index.
+- `design-only` — design/decision material without enough behavioral contract.
+- `guide` — tutorial, runbook, usage/operational documentation.
+- `other` — not useful specification knowledge.
 
-Only `spec` and `spec-like` are rendered into `index.md`.
+Only `spec`/`spec-like` are primary specs. `design-only` may be searched as
+secondary context with `search --include-secondary`.
 
-### Types
+### Type
 
-- `as-is`: describes current behavior.
-- `change`: describes intended changed behavior.
-- `mixed`: intentionally combines current and intended behavior.
-- `unknown`: not confidently determined.
+- `as-is` — describes current behavior.
+- `change` — intended/changed behavior.
+- `mixed` — intentionally contains both.
+- `unknown` — not safely determined.
 
-### Relationship provenance
+### Lifecycle
 
-- `explicit`: the CLI resolved a path/link from the primary source document itself.
-- `inferred`: the agent added the relation after examining repository evidence.
+Lifecycle is separate from Type:
 
-Explicit does not mean semantically correct; it means the path relation is explicit in the source.
+- `active` — current authoritative contract.
+- `proposed` — intended contract that is not yet current.
+- `historical` — useful milestone/history, not current precedence.
+- `superseded` — replaced by a newer primary document.
+- `unknown` — precedence cannot be established safely.
 
-## Freshness
+For known replacement relationships use:
 
-The `verified` block is a semantic-verification baseline, not merely a last-scan timestamp.
+- `kind: related`
+- `kind: supersedes`
+- `kind: superseded-by`
 
-`audit` compares current content hashes to that baseline:
+### Indexed vs verified
 
-| Status | Meaning |
-| --- | --- |
-| `fresh` | source and tracked code inputs match the verified baseline |
-| `spec-changed` | primary source document changed |
-| `inputs-changed` | one or more tracked implementation inputs changed/disappeared |
-| `spec+inputs-changed` | both source and tracked inputs changed |
-| `missing-source` | primary source path no longer exists |
-| `unverified` | no valid baseline exists |
+`indexed` is refreshed by `record`. It means the document was classified and
+summarized at that exact source hash.
 
-`inputs-changed` is a review request, not proof of semantic drift.
+`verified` is written only by `verify`. It means the agent has semantically
+checked the spec against its relevant implementation/tests/evidence and accepted
+the current tracked-input baseline. The baseline also fingerprints the current
+code/spec relation map. Adding or removing a relation therefore invalidates
+freshness until semantic review and `verify` establish a new baseline.
+
+Therefore a clean bootstrap produces `unverified` primary specs, not `fresh`.
+
+## Freshness statuses
+
+- `fresh` — source and tracked code inputs match an explicit verified baseline.
+- `unverified` — indexed but no semantic-verification baseline exists.
+- `spec-changed` — source differs from indexed/verified baseline.
+- `inputs-changed` — one or more tracked implementation inputs differ/missing.
+- `spec+inputs-changed` — both source and implementation inputs changed.
+- `missing-source` — primary source disappeared/moved.
+
+Hash status is structural evidence only; `inputs-changed` requests semantic
+review and must not rewrite behavior automatically.
+
+## Relationship discovery
+
+Explicit path/link resolution tries, in order:
+
+1. the source document directory;
+2. ancestor package roots containing markers such as `package.json`,
+   `pyproject.toml`, `Cargo.toml`, `go.mod`, or `Package.swift`;
+3. repository root.
+
+This lets a doc under `external/package/docs/` resolve `src/foo.ts` against the
+package root. Simple `{a,b}` path groups are expanded.
+
+If the document explicitly says that paths/references below are relative to a
+backticked existing project directory (for example `external/tool-suite/`), that
+directory is also used as a resolution base. This covers root-level specs that
+document one nested package using package-relative paths.
+
+Path-like tokens that still cannot resolve are stored in
+`unresolvedReferences`. They are diagnostic hints, not silently discarded.
 
 ## Optional config.jsonc
 
-All fields are optional. Example:
-
 ```jsonc
 {
-  // Candidate document types scanned by default.
   "includeExtensions": [".md", ".mdx", ".rst", ".adoc", ".txt"],
-
-  // Optional glob allowlist. Empty means all matching extensions.
   "include": ["docs/**", "architecture/**", "features/**"],
-
-  // Additional exclusions.
   "exclude": ["legacy/**", "generated-docs/**"],
-
-  // Force these paths/globs to be shortlisted as spec candidates.
   "forceSpecs": ["protocol/*.txt"],
-
-  // Never shortlist these paths as specs.
   "ignoreSpecs": ["docs/spec-template.md"],
-
-  // Candidate threshold; lower is broader/noisier.
   "minCandidateScore": 3,
-
-  // Max bytes read from a candidate document.
   "maxFileBytes": 524288
 }
 ```
 
-The scanner always excludes its own state directory plus common dependency/build/cache directories. Git repositories use `git ls-files --cached --others --exclude-standard` when available so ignored generated/dependency trees are naturally omitted.
+The scanner excludes its own state plus common dependency/build/cache dirs.
+When Git is available it uses tracked + unignored untracked files; hashing also
+works without Git.
 
-## Discovery heuristics
+## CLI
 
-`discover` is deliberately a shortlist generator, not a semantic classifier. Signals include:
-
-- spec/contract/requirements/RFC-like filenames or path segments;
-- behavior/requirements/contracts/invariants/scope/non-goals/acceptance/verification headings;
-- as-is/change language;
-- code/test path references;
-- meta/index language and dense links to other documentation.
-
-`roleHint` can be `spec-candidate`, `meta-index`, or `weak-candidate`. The agent must still inspect the candidate before assigning a final classification.
-
-## CLI commands
-
-Global arguments:
+Global options:
 
 ```text
 --root PATH       project root; defaults to Git root, then cwd
---state-dir PATH  alternate wiki state directory; relative paths are root-relative
+--state-dir PATH  alternate wiki directory; relative paths are root-relative
 --config PATH     alternate config.jsonc/json path
 ```
 
 ### discover
 
 ```bash
-spec_wiki.py --root . discover --limit 40 --offset 0
+spec_wiki.py --root . discover --limit 40
 spec_wiki.py --root . discover --all --json
+spec_wiki.py --root . discover --all-unclassified --limit 40
 ```
 
-Default output prioritizes unclassified and changed candidates above the configured threshold. `--all` includes unchanged previously classified candidates too.
-
-After recording a page, rerun discovery from offset 0 because unchanged
-classified documents leave the default shortlist. `--offset` is safe only when
-state does not change between pages. `--all` also includes low-signal scanned
-documents and is mainly diagnostic.
+Produces a heuristic shortlist. `roleHint` is not a semantic classification.
+After recording a page, rerun from offset 0 because the shortlist shrinks.
+`--all-unclassified` is a bounded periodic coverage audit: it bypasses candidate
+score for unclassified document-like files while still excluding known
+fixture/skill-resource noise unless forced by config.
 
 ### record
 
@@ -171,47 +182,124 @@ spec_wiki.py --root . record \
   --path docs/auth.md \
   --classification spec \
   --type as-is \
+  --lifecycle active \
   --confidence high \
-  --summary "Authentication lifecycle and token invariants." \
+  --summary "Authentication lifecycle and refresh invariants." \
   --topic auth --topic sessions \
   --code src/auth/session.ts \
   --related-spec docs/oauth.md
 ```
 
-For `spec`/`spec-like`, `--summary` is required. Repeated `--code` and `--related-spec` arguments replace previously inferred relationships when supplied. Explicit relationships are always re-extracted from the current source.
+`record` updates classification, summary, topics, relationships, unresolved
+references, and the `indexed` source hash. It **does not verify** the entry.
+The first `spec`/`spec-like` record requires explicit `--type` and
+`--lifecycle` (use `unknown` only after semantic inspection cannot decide).
 
-Use `--clear-code` or `--clear-related-specs` to intentionally remove all
-previously inferred relationships of that kind. These flags do not suppress
-explicit relationships found in the source document itself.
+Additional spec relationship flags are repeatable:
 
-Recording a document establishes a new verified hash baseline.
-
-### remove
-
-```bash
-spec_wiki.py --root . remove --path docs/obsolete-spec.md
+```text
+--supersedes PATH
+--superseded-by PATH
 ```
 
-Removes only the Spec Wiki metadata entry. It never deletes the primary source
-document. Use it after confirming that a missing source was deleted, or after
-recording the replacement path for a moved spec.
+`--clear-code` and `--clear-related-specs` remove previously inferred relations;
+explicit source links are re-extracted each time.
 
-### audit / status
+### verify
+
+```bash
+spec_wiki.py --root . verify --path docs/auth.md
+```
+
+Run only after semantic review. It hashes the current source and every tracked
+code/test input plus the current relation map and establishes the new verified
+baseline. Missing tracked inputs fail rather than being silently accepted.
+
+### relate
+
+Use `relate` to repair inferred relations without resupplying the full semantic
+record:
+
+```bash
+spec_wiki.py --root . relate --path docs/auth.md --add-code src/auth/refresh.ts
+spec_wiki.py --root . relate --path docs/auth.md --remove-code src/auth/legacy.ts
+```
+
+It also supports add/remove variants for related specs, `supersedes`, and
+`superseded-by`. Explicit relations extracted from the primary source are not
+removed by this command; correct the source document instead. A real relation
+change makes the previous verified baseline non-fresh through `relationsHash`.
+
+### search
+
+```bash
+spec_wiki.py --root . search "session cancellation retry" --limit 8
+spec_wiki.py --root . search "как восстановить историю" \
+  --also "session recovery raw history after compaction" \
+  --also "session recovery tools" --json
+spec_wiki.py --root . search "context gateway" --include-secondary --json
+```
+
+Searches state metadata directly: title, topics, summary, spec path, known code
+relations, related-spec relations, and supersession edges. Exact spec/relation
+paths have strong weight. Relation token scoring uses concrete leaf names rather
+than generic directory segments.
+
+`--also` is repeatable. The CLI scores each formulation independently, then
+merges them deterministically. The intended caller is the current LLM: preserve
+the original request and, for natural-language intents, add 2–3 genuinely
+different English formulations (canonical contract nouns/synonyms plus implied
+failure/invariant vocabulary) without making another model call. Exact paths and
+symbols usually need no expansion.
+
+JSON output includes `confidence`, `catalogFallbackRecommended`,
+`semanticRerankRecommended`, coverage metrics, and per-query match evidence.
+These are routing hints, not semantic proof. The agent still reranks candidates
+from compact metadata. If fallback is recommended, results are empty, or the
+candidate set plainly misses part of the intent, inspect the compact generated
+`index.md` before deciding no relevant spec exists.
+
+Active specs rank above proposed/historical/superseded ones. This is the normal
+retrieval path; reading the entire generated index is a semantic fallback.
+
+### status / audit
 
 ```bash
 spec_wiki.py --root . status
 spec_wiki.py --root . audit --json
 ```
 
-Reports freshness of known primary specs plus a bounded list of new/changed candidates.
+Reports current/proposed primary count, fresh/unverified/review counts,
+unresolved reference count, missing sources, and new/changed candidates.
+`needs review` counts structural drift/missing sources; cleanly indexed but never
+verified specs are reported separately as `unverified`.
 
 ### affected
 
 ```bash
-spec_wiki.py --root . affected src/auth/session.ts src/auth/store.ts
+spec_wiki.py --root . affected src/auth/session.ts src/storage
 ```
 
-Returns known primary specs whose source or tracked code relationships overlap the supplied changed paths. Absence from results is not proof of no impact because relationships are intentionally conservative.
+Returns current/proposed primary specs whose source or tracked code relations
+overlap supplied paths. Historical/superseded specs are skipped.
+
+### changes / impact
+
+```bash
+spec_wiki.py --root . changes --json
+spec_wiki.py --root . impact src/auth/session.ts src/auth/refresh.ts --json
+spec_wiki.py --root . impact --base HEAD --json
+```
+
+`changes` reports Git worktree changes, untracked files, and renames while
+excluding Spec Wiki's own state directory.
+
+`impact` is the deterministic post-change maintenance primitive. Explicit paths
+keep it scoped to the current task; with no paths it uses Git changes against
+`--base`. It returns known affected specs, uncovered changed paths, every changed
+document-like file (even score-0), missing/moved tracked specs, and a
+`semanticSweepRequired` flag. Uncovered paths are search seeds for LLM semantic
+impact review, not proof that a spec is missing.
 
 ### render
 
@@ -219,7 +307,17 @@ Returns known primary specs whose source or tracked code relationships overlap t
 spec_wiki.py --root . render
 ```
 
-Regenerates `index.md` from `state.json` and current freshness. Rendering does not update the verified baseline.
+Generates a compact one-line-per-spec routing index. Historical/superseded specs
+and secondary design references are separate sections. Full summaries remain in
+state and are retrieved through `search`.
+
+### remove
+
+```bash
+spec_wiki.py --root . remove --path docs/old-contract.md
+```
+
+Removes metadata only. For a move, record the new path before removing the old.
 
 ### validate
 
@@ -227,4 +325,6 @@ Regenerates `index.md` from `state.json` and current freshness. Rendering does n
 spec_wiki.py --root . validate
 ```
 
-Checks schema version, entry shapes, classifications, summaries, normalized paths, and relationship safety. Missing primary sources and stale entries are warnings; malformed state is an error.
+Checks schema/path/hash/relationship safety. Stale/unverified current specs,
+unresolved path hints, and active as-is specs without implementation relations
+are warnings rather than malformed-state errors.
