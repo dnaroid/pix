@@ -28,12 +28,8 @@ const REPO_KNOWLEDGE_ACTIONS = [
 ] as const;
 const REPO_KNOWLEDGE_MUTATING_ACTIONS = new Set<string>(["record", "verify", "relate", "remove"]);
 const FILE_MUTATION_TOOL_NAMES = new Set(["write", "edit", "multiedit", "apply_patch", "ast_apply"]);
-const KNOWLEDGE_NUDGE_WINDOW_MS = 15_000;
-const KNOWLEDGE_MUTATION_NUDGE = [
-	"📚 repo_knowledge checkpoint — if this mutation materially changed project behavior/contract semantics, do not finish yet:",
-	"keep or create the authoritative primary spec in this task, run task-scoped repo_knowledge action=impact on the changed implementation paths, repair only evidence-backed relations, and action=verify only after reviewing the primary source plus relevant code/tests.",
-	"Skip this checkpoint for mechanical/non-behavioral edits.",
-].join(" ");
+const KNOWLEDGE_MUTATION_NUDGE =
+	"📚 repo_knowledge: behavior changed? Update the primary spec and run task-scoped action=impact; action=verify only after reviewing spec + code/tests. Skip for mechanical edits.";
 const TARGET_COMMANDS = new Set<string>(["ast", "search", "explain", "deps"]);
 const DEFAULT_MAX_LINES = 2000;
 const DEFAULT_MAX_BYTES = 50_000;
@@ -101,12 +97,17 @@ type ExecResult = {
 	code?: number | null;
 };
 
+type ExtensionOn = {
+	(event: "tool_result", handler: (event: RepoMutationResultEvent, ctx: ToolContext) => Promise<{ content: unknown[] } | undefined>): void;
+	(event: "message_start", handler: (event: RepoMessageStartEvent, ctx: ToolContext) => Promise<void> | void): void;
+};
+
 type ExtensionAPI = {
 	registerTool(tool: Record<string, unknown>): void;
 	registerCommand(name: string, command: { description: string; handler: (args: string, ctx: CommandContext) => Promise<void> }): void;
 	sendMessage<T = unknown>(message: { customType: string; content: string; display: boolean; details?: T }): void;
 	exec(command: string, args: string[], options: { cwd?: string; signal?: AbortSignal; timeout?: number }): Promise<ExecResult>;
-	on?(event: "tool_result", handler: (event: RepoMutationResultEvent, ctx: ToolContext) => Promise<{ content: unknown[] } | undefined>): void;
+	on?: ExtensionOn;
 };
 
 type ToolContext = {
@@ -117,6 +118,12 @@ type RepoMutationResultEvent = {
 	toolName: string;
 	isError?: boolean;
 	content: unknown[];
+};
+
+type RepoMessageStartEvent = {
+	message?: {
+		role?: string;
+	};
 };
 
 type CommandContext = {
@@ -729,14 +736,16 @@ function mutationToolName(toolName: string): string {
 
 function registerKnowledgeMutationNudge(pi: ExtensionAPI): void {
 	if (!pi.on) return;
-	let lastNudgeAt = 0;
+	let nudgedThisUserTurn = false;
+	pi.on("message_start", async (event) => {
+		if (event.message?.role === "user") nudgedThisUserTurn = false;
+	});
 	pi.on("tool_result", async (event, ctx) => {
 		if (event.isError) return undefined;
 		if (!FILE_MUTATION_TOOL_NAMES.has(mutationToolName(event.toolName))) return undefined;
 		if (!hasAvailableIndexedProjectRoot(ctx.cwd)) return undefined;
-		const now = Date.now();
-		if (now - lastNudgeAt < KNOWLEDGE_NUDGE_WINDOW_MS) return undefined;
-		lastNudgeAt = now;
+		if (nudgedThisUserTurn) return undefined;
+		nudgedThisUserTurn = true;
 		return {
 			content: [
 				...event.content,

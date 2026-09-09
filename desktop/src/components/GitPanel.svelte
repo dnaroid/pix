@@ -71,6 +71,7 @@
   const busy = $derived(actionId !== null);
   const llmBusy = $derived(llmActionId !== null);
   const canPush = $derived(Boolean(snapshot && !snapshot.detached && snapshot.branch !== "HEAD"));
+  const lineCountFormatter = new Intl.NumberFormat("en-US");
 
   onMount(() => onRefresh());
 
@@ -96,6 +97,10 @@
     if (code === "A" || code === "U") return "text-tool-success";
     if (code === "D") return "text-tool-warning";
     return "text-tool-info";
+  }
+
+  function formatLineCount(value: number | undefined): string {
+    return lineCountFormatter.format(value ?? 0);
   }
 
   async function generateCommitMessage(): Promise<void> {
@@ -234,8 +239,8 @@
               </button>
               {#if stats.additions !== undefined || stats.deletions !== undefined}
                 <span class="mr-1 flex shrink-0 items-center gap-1 font-mono text-[11px] tabular-nums" aria-label={`${stats.additions ?? 0} additions, ${stats.deletions ?? 0} deletions`}>
-                  <span class="text-tool-success">+{stats.additions ?? 0}</span>
-                  <span class="text-tool-error">−{stats.deletions ?? 0}</span>
+                  <span class="text-tool-success">+{formatLineCount(stats.additions)}</span>
+                  <span class="text-tool-error">−{formatLineCount(stats.deletions)}</span>
                 </span>
               {/if}
               <button class="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 disabled:opacity-30 group-hover:opacity-100" type="button" disabled={busy} title={`Unstage ${change.path}`} aria-label={`Unstage ${change.path}`} onclick={() => onUnstage(change.path)}><Minus class="h-3 w-3" aria-hidden="true" /></button>
@@ -264,8 +269,8 @@
               </button>
               {#if stats.additions !== undefined || stats.deletions !== undefined}
                 <span class="mr-1 flex shrink-0 items-center gap-1 font-mono text-[11px] tabular-nums" aria-label={`${stats.additions ?? 0} additions, ${stats.deletions ?? 0} deletions`}>
-                  <span class="text-tool-success">+{stats.additions ?? 0}</span>
-                  <span class="text-tool-error">−{stats.deletions ?? 0}</span>
+                  <span class="text-tool-success">+{formatLineCount(stats.additions)}</span>
+                  <span class="text-tool-error">−{formatLineCount(stats.deletions)}</span>
                 </span>
               {/if}
               <button class="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 disabled:opacity-30 group-hover:opacity-100" type="button" disabled={busy} title={`Stage ${change.path}`} aria-label={`Stage ${change.path}`} onclick={() => onStage(change.path)}><Plus class="h-3 w-3" aria-hidden="true" /></button>

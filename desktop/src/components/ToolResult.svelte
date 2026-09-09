@@ -44,7 +44,7 @@
   <DiffView model={shellDiff} label="git diff" />
 {:else if tool.content}
   {#if renderAsMarkdown}
-    <div class="tool-result markdown-result"><MarkdownText text={tool.content} dense {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} /></div>
+    <div class="tool-result markdown-result"><MarkdownText text={tool.content} dense fitTables {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} /></div>
   {:else if highlighted}
     <pre class="tool-result"><code class="highlighted-code" data-language={highlighted.language}>{@html highlighted.html}</code></pre>
   {:else if mutationLines}

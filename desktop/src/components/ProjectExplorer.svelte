@@ -9,6 +9,8 @@
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
   import {
     flattenProjectTree,
+    PROJECT_TREE_DRAG_MIME,
+    serializeProjectTreeDrag,
     type ProjectTreeEntry,
   } from "../lib/project-tree";
 
@@ -121,6 +123,17 @@
     event.stopPropagation();
     onOpenExternal(path);
   }
+
+  function startProjectEntryDrag(event: DragEvent, entry: ProjectTreeEntry): void {
+    const transfer = event.dataTransfer;
+    if (!transfer) return;
+    transfer.effectAllowed = "copy";
+    transfer.setData(PROJECT_TREE_DRAG_MIME, serializeProjectTreeDrag(entry));
+    transfer.setData(
+      "text/plain",
+      entry.kind === "directory" ? `${entry.path.replace(/\/+$/u, "")}/` : entry.path,
+    );
+  }
 </script>
 
 <section class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" aria-label="Project files">
@@ -148,11 +161,13 @@
           style:padding-left={`${4 + row.depth * 14}px`}
         >
           <button
-            class="flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-sm text-left text-[11px] text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+            class="flex h-7 min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-sm text-left text-[11px] text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
             type="button"
             title={entry.path}
             aria-expanded={entry.kind === "directory" ? expanded : undefined}
+            draggable="true"
             onclick={() => entry.kind === "directory" ? toggleDirectory(entry.path) : openFile(entry.path)}
+            ondragstart={(event) => startProjectEntryDrag(event, entry)}
           >
             {#if entry.kind === "directory"}
               <span class="grid h-4 w-4 shrink-0 place-items-center text-muted-foreground">

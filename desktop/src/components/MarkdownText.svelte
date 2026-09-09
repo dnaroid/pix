@@ -532,7 +532,7 @@
   }
   .markdown-text.fit-tables :global(table) {
     width: 100%;
-    table-layout: fixed;
+    table-layout: auto;
   }
   .markdown-text :global(th),
   .markdown-text :global(td) {
@@ -542,9 +542,14 @@
     text-align: left;
     vertical-align: top;
   }
-  .markdown-text.fit-tables :global(th),
+  .markdown-text.fit-tables :global(th) {
+    overflow-wrap: normal;
+    word-break: normal;
+    white-space: normal;
+  }
   .markdown-text.fit-tables :global(td) {
     overflow-wrap: anywhere;
+    word-break: normal;
     white-space: normal;
   }
   .markdown-text :global(th:last-child),

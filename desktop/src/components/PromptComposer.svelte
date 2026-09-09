@@ -31,6 +31,11 @@
     type PromptAutocompleteState,
   } from "../lib/autocomplete";
   import {
+    insertProjectTreePromptPath,
+    parseProjectTreeDrag,
+    PROJECT_TREE_DRAG_MIME,
+  } from "../lib/project-tree";
+  import {
     matchSlashCommands,
     shouldSubmitAcceptedSlashCommand,
     slashCommandInsertion,
@@ -91,8 +96,10 @@
   let slashListbox = $state<HTMLDivElement | undefined>();
   let autocompleteSuggestion = $state("");
   let composing = $state(false);
-  let selectionStart = $state(0);
-  let selectionEnd = $state(0);
+  let selectionStart = $state(promptText.length);
+  let selectionEnd = $state(promptText.length);
+  let projectPathDragActive = $state(false);
+  let projectPathDragDepth = 0;
   let selectedSlashCommand = $state(0);
   let dismissedSlashDraft = $state<string | null>(null);
   let slashMenuKey = "";
@@ -431,6 +438,59 @@
     }
   }
 
+  function canAcceptProjectTreeDrop(transfer: DataTransfer | null): boolean {
+    return !editorMode
+      && !questionMode
+      && ready
+      && !!activeSessionId
+      && !!transfer
+      && Array.from(transfer.types).includes(PROJECT_TREE_DRAG_MIME);
+  }
+
+  function handleProjectTreeDragEnter(event: DragEvent): void {
+    if (!canAcceptProjectTreeDrop(event.dataTransfer)) return;
+    event.preventDefault();
+    projectPathDragDepth += 1;
+    projectPathDragActive = true;
+    autocompleteController.dismiss();
+  }
+
+  function handleProjectTreeDragOver(event: DragEvent): void {
+    if (!canAcceptProjectTreeDrop(event.dataTransfer)) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+  }
+
+  function handleProjectTreeDragLeave(): void {
+    if (!projectPathDragActive) return;
+    projectPathDragDepth = Math.max(0, projectPathDragDepth - 1);
+    if (projectPathDragDepth === 0) projectPathDragActive = false;
+  }
+
+  function handleProjectTreeDrop(event: DragEvent): void {
+    const transfer = event.dataTransfer;
+    if (!canAcceptProjectTreeDrop(transfer) || !transfer) return;
+    event.preventDefault();
+    event.stopPropagation();
+    projectPathDragDepth = 0;
+    projectPathDragActive = false;
+
+    const entry = parseProjectTreeDrag(transfer.getData(PROJECT_TREE_DRAG_MIME));
+    if (!entry) return;
+    const insertion = insertProjectTreePromptPath(promptText, selectionStart, selectionEnd, entry);
+    promptText = insertion.text;
+    dismissedSlashDraft = null;
+    autocompleteController.dismiss();
+    void tick().then(() => {
+      if (!textarea) return;
+      textarea.focus();
+      textarea.setSelectionRange(insertion.cursor, insertion.cursor);
+      updateSelection(textarea);
+      resizeComposer();
+      observeAutocomplete(textarea);
+    });
+  }
+
   function chooseChoice(choiceValue: string): void {
     if (!questionMode || !currentQuestion) return;
     const state = currentQuestion.multiple
@@ -637,10 +697,14 @@
 <form
   class={[
     "overflow-hidden rounded-lg border bg-panel-strong shadow-none focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20",
-    dragActive ? "border-ring ring-2 ring-ring/30" : "border-input",
+    dragActive || projectPathDragActive ? "border-ring ring-2 ring-ring/30" : "border-input",
   ]}
   bind:this={composerForm}
   onsubmit={handleSubmit}
+  ondragenter={handleProjectTreeDragEnter}
+  ondragover={handleProjectTreeDragOver}
+  ondragleave={handleProjectTreeDragLeave}
+  ondrop={handleProjectTreeDrop}
 >
   {#if questionMode}
     <div class="border-b border-border bg-panel px-3 pt-2.5">
