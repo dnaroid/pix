@@ -21,10 +21,10 @@
   const openCount = $derived(counts.pending + counts.in_progress + counts.deferred);
 
   function statusTone(status: SessionTodoStatus): string {
-    if (status === "completed") return "text-[var(--tool-success)]";
-    if (status === "in_progress") return "text-[var(--tool-warning)]";
+    if (status === "completed") return "text-tool-success";
+    if (status === "in_progress") return "text-tool-warning";
     if (status === "deferred") return "text-muted-foreground";
-    return "text-[var(--tool-info)]";
+    return "text-tool-info";
   }
 
   function statusLabel(status: SessionTodoStatus): string {
@@ -59,7 +59,7 @@
         {#each rows as row (row.task.id)}
           {@const task = row.task}
           <article
-            class={["rounded-lg bg-sidebar-accent/50 p-2.5 transition-colors hover:bg-sidebar-accent", task.status === "completed" && "opacity-65"]}
+            class={["rounded-md bg-panel-hover/65 p-2.5 transition-colors hover:bg-panel-hover", task.status === "completed" && "opacity-65"]}
             style:margin-left={`${Math.min(row.depth, 4) * 12}px`}
             aria-label={`Todo ${task.id}: ${task.subject}`}
           >
@@ -75,7 +75,7 @@
                   <span class="mr-1 font-mono text-[11px] text-muted-foreground">#{task.id}</span>{task.subject}
                 </h3>
                 {#if task.status === "in_progress" && task.activeForm}
-                  <p class="mt-1 break-words text-[11px] leading-3.5 text-[var(--tool-warning)]">{task.activeForm}</p>
+                  <p class="mt-1 break-words text-[11px] leading-3.5 text-tool-warning">{task.activeForm}</p>
                 {:else if task.description}
                   <p class="mt-1 line-clamp-3 break-words text-[11px] leading-3.5 text-muted-foreground">{task.description}</p>
                 {/if}
@@ -85,7 +85,7 @@
               <span class={["font-medium", statusTone(task.status)]}>{statusLabel(task.status)}</span>
               {#if task.thinking}<span class="inline-flex items-center gap-1"><Brain class="h-3 w-3" aria-hidden="true" />{task.thinking}</span>{/if}
               {#if task.owner}<span class="inline-flex min-w-0 items-center gap-1"><UserRound class="h-3 w-3 shrink-0" aria-hidden="true" /><span class="truncate">{task.owner}</span></span>{/if}
-              {#if task.blockedBy?.length}<span class="text-[var(--tool-warning)]">Blocked by {task.blockedBy.map((id) => `#${id}`).join(", ")}</span>{/if}
+              {#if task.blockedBy?.length}<span class="text-tool-warning">Blocked by {task.blockedBy.map((id) => `#${id}`).join(", ")}</span>{/if}
             </div>
           </article>
         {/each}

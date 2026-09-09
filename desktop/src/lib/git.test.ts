@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   gitChangeCode,
   gitChangeLabel,
+  gitChangeLineStats,
   gitCommitDraftStorageKey,
   gitDiffForLlm,
+  gitReviewHasFindings,
+  gitReviewResolutionPrompt,
   loadGitCommitDraft,
   saveGitCommitDraft,
   stagedGitChanges,
@@ -37,6 +40,18 @@ describe("Git source-control helpers", () => {
     expect(gitDiffForLlm({ scope: "all", content: "x".repeat(200), truncated: false }, 50)).toContain("Diff truncated before LLM review");
   });
 
+  it("selects staged and working-tree line counts independently", () => {
+    const change = {
+      ...snapshot.changes[0]!,
+      stagedAdditions: 4,
+      stagedDeletions: 1,
+      unstagedAdditions: 9,
+      unstagedDeletions: 3,
+    };
+    expect(gitChangeLineStats(change, "staged")).toEqual({ additions: 4, deletions: 1 });
+    expect(gitChangeLineStats(change, "unstaged")).toEqual({ additions: 9, deletions: 3 });
+  });
+
   it("scopes persisted commit-message drafts to the workspace", () => {
     expect(gitCommitDraftStorageKey("/projects/alpha")).toBe("pix.desktop.gitCommitMessage:/projects/alpha");
     expect(gitCommitDraftStorageKey("/projects/alpha")).not.toBe(gitCommitDraftStorageKey("/projects/beta"));
@@ -55,5 +70,43 @@ describe("Git source-control helpers", () => {
     saveGitCommitDraft(storage, "/projects/alpha", "");
     expect(loadGitCommitDraft(storage, "/projects/alpha")).toBe("");
     expect(loadGitCommitDraft(storage, "/projects/beta")).toBe("fix: another project");
+  });
+
+  it("shows resolve only for review output that contains actionable findings", () => {
+    expect(gitReviewHasFindings(undefined)).toBe(false);
+    expect(gitReviewHasFindings("No significant findings.")).toBe(false);
+    expect(gitReviewHasFindings("### Review failed\n\nprovider timeout")).toBe(false);
+    expect(gitReviewHasFindings("- P2: timeout does not cover runtime initialization")).toBe(true);
+  });
+
+  it("does not duplicate the reviewed diff into the fixing-session prompt", () => {
+    const diff = {
+      path: "src/main.ts",
+      scope: "unstaged" as const,
+      content: "diff --git a/src/main.ts b/src/main.ts\n+const ready = true;",
+      truncated: false,
+    };
+    const prompt = gitReviewResolutionPrompt(diff, "- P2: verify the timeout boundary");
+    expect(prompt).toContain("verify every finding against the current working tree");
+    expect(prompt).toContain("Do not commit or push");
+    expect(prompt).toContain("- P2: verify the timeout boundary");
+    expect(prompt).toContain("original diff is intentionally not embedded");
+    expect(prompt).toContain("Inspect the current Git working-tree changes for src/main.ts yourself");
+    expect(prompt).not.toContain(diff.content);
+  });
+
+  it("keeps the fixing-session prompt compact even for a large reviewed diff", () => {
+    const diff = {
+      scope: "all" as const,
+      content: `diff --git a/large.ts b/large.ts\n${"+changed line\n".repeat(2_000)}`,
+      truncated: false,
+    };
+    const prompt = gitReviewResolutionPrompt(diff, "- P2: verify a large-change regression");
+
+    expect(prompt).toContain("original diff is intentionally not embedded");
+    expect(prompt).toContain("Inspect the current Git all current changes yourself before editing");
+    expect(prompt).toContain("- P2: verify a large-change regression");
+    expect(prompt).not.toContain("<reviewed-git-diff>");
+    expect(prompt).not.toContain("+changed line\n+changed line");
   });
 });

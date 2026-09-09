@@ -76,13 +76,13 @@
       {#if workspace}
         <p class="text-[13px] text-muted-foreground" role="status">Opening conversation…</p>
       {:else}
-        <div class="mb-[18px] grid h-11 w-11 place-items-center rounded-xl bg-primary font-semibold text-primary-foreground shadow-xs">P</div>
+        <div class="mb-[18px] grid h-11 w-11 place-items-center rounded-md border border-border bg-panel-strong font-semibold text-primary">P</div>
         <h2 class="mb-2 text-lg font-medium text-foreground">Open a workspace</h2>
         <p class="mb-5 max-w-[470px] text-[13px] leading-relaxed text-muted-foreground">
           Choose a folder to begin a Pix session.
         </p>
         <button
-          class="rounded-lg border border-border bg-secondary px-3.5 py-2 text-secondary-foreground shadow-xs hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+          class="rounded-md border border-border bg-panel-strong px-3.5 py-2 text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
           onclick={onChooseWorkspace}
           disabled={promptRunning || operationRunning}
         >Choose workspace</button>
@@ -100,7 +100,7 @@
       </p>
     </section>
   {:else}
-    <div class="w-full px-6 pt-[22px] pb-[54px] max-[760px]:px-3" bind:this={content}>
+    <div class="w-full px-6 pt-[22px] pb-8 max-[760px]:px-3" bind:this={content}>
       {#each displayItems as item (item.id)}
         {#if item.type === "message"}
           {#if item.role === "thought"}
@@ -110,13 +110,13 @@
                 <Brain class="h-3 w-3 shrink-0 text-primary" aria-hidden="true" />
                 <span>thinking</span>
               </summary>
-              <div class="ml-[7px] border-l border-border pl-2.5 text-muted-foreground">
+              <div class="ml-[7px] border-l border-code-border pl-2.5 text-muted-foreground">
                 <MarkdownText text={item.text} compact dense {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />
               </div>
             </details>
           {:else if item.role === "user"}
             <div class="transcript-entry mb-6" data-transcript-entry-id={item.id}>
-              <article class="w-full rounded-xl border border-primary/45 bg-primary/15 px-3.5 pt-3 pb-2 text-card-foreground shadow-xs">
+              <article class="w-full rounded-lg border border-chat-user-border bg-chat-user px-3.5 pt-3 pb-2 text-foreground">
                 <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} onPrepare={onPrepareAttachment} />
                 {#if item.text}<MarkdownText text={item.text} dense {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />{/if}
               </article>
@@ -145,7 +145,7 @@
                 {item.tools.length} tool {item.tools.length === 1 ? "call" : "calls"}
               </strong>
             </summary>
-            <div class="mt-2 ml-[7px] space-y-1 border-l border-border pl-2.5">
+            <div class="mt-2 ml-[7px] space-y-1 border-l border-code-border pl-2.5">
               {#each item.tools as tool (tool.id)}
                 {@const presentation = toolPresentation(tool)}
                 {@const attention = toolLspAttention(tool)}
@@ -199,7 +199,7 @@
   {#if activeSessionId && showScrollToBottom}
     <button
       type="button"
-      class="absolute bottom-4 left-1/2 z-20 grid h-9 w-9 -translate-x-1/2 place-items-center rounded-full border border-border bg-background/95 text-foreground shadow-md backdrop-blur transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+      class="absolute bottom-4 left-1/2 z-20 grid h-8 w-8 -translate-x-1/2 place-items-center rounded-md border border-border bg-panel-strong text-foreground shadow-xs transition-colors hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
       aria-label="Jump to latest message"
       title="Jump to latest message"
       onclick={onScrollToBottom}
@@ -210,23 +210,6 @@
 </div>
 
 <style>
-  .transcript-pane {
-    -webkit-mask-image: linear-gradient(
-      to bottom,
-      transparent 0,
-      black 24px,
-      black calc(100% - 48px),
-      transparent 100%
-    );
-    mask-image: linear-gradient(
-      to bottom,
-      transparent 0,
-      black 24px,
-      black calc(100% - 48px),
-      transparent 100%
-    );
-  }
-
   .transcript-entry {
     content-visibility: auto;
     contain-intrinsic-size: auto 120px;

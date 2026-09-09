@@ -13,6 +13,7 @@
   import {
     gitChangeCode,
     gitChangeLabel,
+    gitChangeLineStats,
     loadGitCommitDraft,
     saveGitCommitDraft,
     stagedGitChanges,
@@ -91,10 +92,10 @@
 
   function statusTone(change: GitFileChange, scope: Exclude<GitDiffScope, "all">): string {
     const code = gitChangeCode(change, scope);
-    if (code === "!") return "text-[var(--tool-error)]";
-    if (code === "A" || code === "U") return "text-[var(--tool-success)]";
-    if (code === "D") return "text-[var(--tool-warning)]";
-    return "text-[var(--tool-info)]";
+    if (code === "!") return "text-tool-error";
+    if (code === "A" || code === "U") return "text-tool-success";
+    if (code === "D") return "text-tool-warning";
+    return "text-tool-info";
   }
 
   async function generateCommitMessage(): Promise<void> {
@@ -181,7 +182,7 @@
             aria-label="New branch name"
             bind:value={branchName}
           />
-          <button class="grid h-7 w-7 place-items-center rounded-md text-[var(--tool-success)] hover:bg-accent disabled:opacity-40" type="submit" disabled={!branchName.trim() || busy} title="Create and switch"><Check class="h-3.5 w-3.5" aria-hidden="true" /></button>
+          <button class="grid h-7 w-7 place-items-center rounded-md text-tool-success hover:bg-accent disabled:opacity-40" type="submit" disabled={!branchName.trim() || busy} title="Create and switch"><Check class="h-3.5 w-3.5" aria-hidden="true" /></button>
           <button class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground" type="button" title="Cancel" onclick={() => { creatingBranch = false; branchName = ""; }}><X class="h-3.5 w-3.5" aria-hidden="true" /></button>
         </form>
       {/if}
@@ -207,14 +208,14 @@
     {/if}
 
     {#if error}
-      <div class="rounded-md border border-[var(--tool-error)]/25 bg-[var(--tool-error)]/5 px-2.5 py-2 text-[11px] leading-4 text-[var(--tool-error)]">{error}</div>
+      <div class="rounded-md border border-tool-error/25 bg-tool-error/5 px-2.5 py-2 text-[11px] leading-4 text-tool-error">{error}</div>
     {/if}
   </div>
 
   <div class="min-h-0 flex-1 overflow-y-auto">
     {#if snapshot}
       <section aria-label="Staged changes">
-        <div class="sticky top-0 z-[1] flex h-7 items-center gap-1 border-b border-sidebar-border bg-sidebar/95 px-2 backdrop-blur-sm">
+        <div class="sticky top-0 z-[1] flex h-7 items-center gap-1 border-b border-sidebar-border bg-chrome px-2">
           <strong class="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Staged Changes</strong>
           <span class="font-mono text-[11px] text-muted-foreground/70">{staged.length}</span>
           {#if staged.length > 0}
@@ -225,11 +226,18 @@
           <div class="px-3 py-3 text-[11px] text-muted-foreground/70">Stage files to include them in the next commit.</div>
         {:else}
           {#each staged as change (`staged:${change.path}`)}
+            {@const stats = gitChangeLineStats(change, "staged")}
             <div class="group flex h-7 min-w-0 items-center px-2 hover:bg-sidebar-accent">
               <button class="flex h-7 min-w-0 flex-1 items-center gap-1.5 text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring" type="button" title={`Review staged diff: ${change.path}`} onclick={() => onOpenDiff(change.path, "staged")}>
                 <span class={["w-3 shrink-0 text-center font-mono text-[11px] font-bold", statusTone(change, "staged")]} title={gitChangeLabel(change, "staged")}>{gitChangeCode(change, "staged")}</span>
                 <span class="min-w-0 flex-1 truncate text-[11px] text-foreground">{change.path}</span>
               </button>
+              {#if stats.additions !== undefined || stats.deletions !== undefined}
+                <span class="mr-1 flex shrink-0 items-center gap-1 font-mono text-[11px] tabular-nums" aria-label={`${stats.additions ?? 0} additions, ${stats.deletions ?? 0} deletions`}>
+                  <span class="text-tool-success">+{stats.additions ?? 0}</span>
+                  <span class="text-tool-error">−{stats.deletions ?? 0}</span>
+                </span>
+              {/if}
               <button class="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 disabled:opacity-30 group-hover:opacity-100" type="button" disabled={busy} title={`Unstage ${change.path}`} aria-label={`Unstage ${change.path}`} onclick={() => onUnstage(change.path)}><Minus class="h-3 w-3" aria-hidden="true" /></button>
             </div>
           {/each}
@@ -237,7 +245,7 @@
       </section>
 
       <section class="border-t border-sidebar-border" aria-label="Working tree changes">
-        <div class="sticky top-0 z-[1] flex h-7 items-center gap-1 border-b border-sidebar-border bg-sidebar/95 px-2 backdrop-blur-sm">
+        <div class="sticky top-0 z-[1] flex h-7 items-center gap-1 border-b border-sidebar-border bg-chrome px-2">
           <strong class="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Changes</strong>
           <span class="font-mono text-[11px] text-muted-foreground/70">{unstaged.length}</span>
           {#if unstaged.length > 0}
@@ -248,11 +256,18 @@
           <div class="px-3 py-3 text-[11px] text-muted-foreground/70">No working tree changes.</div>
         {:else}
           {#each unstaged as change (`unstaged:${change.path}`)}
+            {@const stats = gitChangeLineStats(change, "unstaged")}
             <div class="group flex h-7 min-w-0 items-center px-2 hover:bg-sidebar-accent">
               <button class="flex h-7 min-w-0 flex-1 items-center gap-1.5 text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring" type="button" title={`Review working tree diff: ${change.path}`} onclick={() => onOpenDiff(change.path, "unstaged")}>
                 <span class={["w-3 shrink-0 text-center font-mono text-[11px] font-bold", statusTone(change, "unstaged")]} title={gitChangeLabel(change, "unstaged")}>{gitChangeCode(change, "unstaged")}</span>
                 <span class="min-w-0 flex-1 truncate text-[11px] text-foreground">{change.path}</span>
               </button>
+              {#if stats.additions !== undefined || stats.deletions !== undefined}
+                <span class="mr-1 flex shrink-0 items-center gap-1 font-mono text-[11px] tabular-nums" aria-label={`${stats.additions ?? 0} additions, ${stats.deletions ?? 0} deletions`}>
+                  <span class="text-tool-success">+{stats.additions ?? 0}</span>
+                  <span class="text-tool-error">−{stats.deletions ?? 0}</span>
+                </span>
+              {/if}
               <button class="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 disabled:opacity-30 group-hover:opacity-100" type="button" disabled={busy} title={`Stage ${change.path}`} aria-label={`Stage ${change.path}`} onclick={() => onStage(change.path)}><Plus class="h-3 w-3" aria-hidden="true" /></button>
             </div>
           {/each}

@@ -68,7 +68,7 @@
   <button
     use:titlebarDrag
     bind:this={trigger}
-    class="flex h-7 min-w-0 max-w-[220px] items-center gap-2 rounded-lg bg-transparent px-2.5 text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring"
+    class="flex h-7 min-w-0 max-w-[220px] items-center gap-2 rounded-md bg-transparent px-2.5 text-sm text-muted-foreground transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring"
     type="button"
     title={workspace || "Choose project"}
     aria-label={workspace ? `Change project, current project: ${projectName(workspace)}` : "Choose project"}
@@ -87,7 +87,7 @@
   {#if open}
     <div
       class={[
-        "absolute top-[calc(100%-1px)] z-30 grid max-h-[min(480px,calc(100vh-58px))] w-[min(360px,calc(100vw-24px))] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-md",
+        "absolute top-[calc(100%-1px)] z-30 grid max-h-[min(480px,calc(100vh-58px))] w-[min(360px,calc(100vw-24px))] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-md",
         isMacOS ? "left-[76px]" : "left-3",
       ]}
       role="dialog"

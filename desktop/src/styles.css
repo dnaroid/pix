@@ -32,6 +32,26 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-status: var(--status);
+  --color-chrome: var(--chrome);
+  --color-chrome-foreground: var(--chrome-foreground);
+  --color-chrome-hover: var(--chrome-hover);
+  --color-panel: var(--panel);
+  --color-panel-strong: var(--panel-strong);
+  --color-panel-hover: var(--panel-hover);
+  --color-panel-selected: var(--panel-selected);
+  --color-chat-user: var(--chat-user);
+  --color-chat-user-border: var(--chat-user-border);
+  --color-code: var(--code);
+  --color-code-border: var(--code-border);
+  --color-tool-warning: var(--tool-warning);
+  --color-tool-mutation: var(--tool-mutation);
+  --color-tool-search: var(--tool-search);
+  --color-tool-success: var(--tool-success);
+  --color-tool-info: var(--tool-info);
+  --color-tool-accent: var(--tool-accent);
+  --color-tool-muted: var(--tool-muted);
+  --color-tool-title: var(--tool-title);
+  --color-tool-error: var(--tool-error);
 
   --radius-sm: calc(var(--radius) - 6px);
   --radius-md: calc(var(--radius) - 4px);
@@ -78,9 +98,22 @@
   --sidebar-accent: #e9e6dc;
   --sidebar-accent-foreground: #343434;
   --sidebar-border: #ebebeb;
-  --radius: 1rem;
-  --theme-shadow-xs: 0 1px 3px rgb(0 0 0 / 0.10);
-  --theme-shadow-md: 0 8px 24px rgb(61 57 41 / 0.08);
+  --radius: 0.625rem;
+  --theme-shadow-xs: 0 1px 2px rgb(0 0 0 / 0.08);
+  --theme-shadow-md: 0 10px 28px rgb(61 57 41 / 0.10);
+
+  /* Desktop workbench roles: connected chrome, panes, chat and code surfaces. */
+  --chrome: #f1f0eb;
+  --chrome-foreground: #4b4a45;
+  --chrome-hover: #e7e5de;
+  --panel: #f6f5f0;
+  --panel-strong: #ffffff;
+  --panel-hover: #eceae3;
+  --panel-selected: color-mix(in srgb, var(--primary) 8%, var(--background));
+  --chat-user: color-mix(in srgb, var(--primary) 7%, var(--background));
+  --chat-user-border: color-mix(in srgb, var(--primary) 38%, var(--border));
+  --code: #f0efe9;
+  --code-border: #d2d0c8;
 
   --surface: var(--card);
   --surface-raised: var(--popover);
@@ -117,45 +150,56 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #090d13;
-    --foreground: #f1f1ef;
-    --card: #2c2c2b;
-    --card-foreground: #faf9f5;
-    --popover: #30302e;
-    --popover-foreground: #e5e5e2;
-    --primary: #d97757;
-    --primary-foreground: #141413;
-    --secondary: #faf9f5;
-    --secondary-foreground: #30302e;
-    --muted: #1b1b19;
-    --muted-foreground: #b7b5a9;
-    --accent: #1a1915;
-    --accent-foreground: #f5f4ee;
-    --destructive: #ef4444;
+    --background: #0f1115;
+    --foreground: #e7e9ec;
+    --card: #171a20;
+    --card-foreground: #f2f4f7;
+    --popover: #1b1f26;
+    --popover-foreground: #f0f2f5;
+    --primary: #7aa2f7;
+    --primary-foreground: #0f1115;
+    --secondary: #20242c;
+    --secondary-foreground: #d9dde5;
+    --muted: #16191f;
+    --muted-foreground: #a8afb9;
+    --accent: #242933;
+    --accent-foreground: #f4f6f9;
+    --destructive: #e06c75;
     --destructive-foreground: #ffffff;
-    --border: #3e3e38;
-    --input: #52514a;
-    --ring: #d97757;
-    --overlay: rgb(0 0 0 / 0.72);
-    --sidebar: #1f1e1d;
-    --sidebar-foreground: #c3c0b6;
-    --sidebar-primary: #343434;
-    --sidebar-primary-foreground: #fbfbfb;
-    --sidebar-accent: #0f0f0e;
-    --sidebar-accent-foreground: #c3c0b6;
-    --sidebar-border: #3e3e38;
-    --theme-shadow-xs: 0 1px 3px rgb(0 0 0 / 0.22);
-    --theme-shadow-md: 0 12px 32px rgb(0 0 0 / 0.24);
-    --status: #a5b38c;
-    --tool-warning: #d49a4a;
-    --tool-mutation: #b87f98;
-    --tool-search: #9780bb;
-    --tool-success: #7ca982;
-    --tool-info: #7fb3c8;
-    --tool-accent: #7aa2d6;
-    --tool-muted: #7d8590;
-    --tool-title: #858f99;
-    --tool-error: #c96a67;
+    --border: #343a45;
+    --input: #48515f;
+    --ring: #7aa2f7;
+    --overlay: rgb(0 0 0 / 0.78);
+    --sidebar: #13161b;
+    --sidebar-foreground: #d0d5dd;
+    --sidebar-primary: #252b35;
+    --sidebar-primary-foreground: #f4f6f9;
+    --sidebar-accent: #20252e;
+    --sidebar-accent-foreground: #f0f2f5;
+    --sidebar-border: #303640;
+    --theme-shadow-xs: 0 1px 2px rgb(0 0 0 / 0.30);
+    --theme-shadow-md: 0 12px 28px rgb(0 0 0 / 0.34);
+    --chrome: #11141a;
+    --chrome-foreground: #cbd1da;
+    --chrome-hover: #1b2028;
+    --panel: #141820;
+    --panel-strong: #1a1f27;
+    --panel-hover: #202630;
+    --panel-selected: #1d2635;
+    --chat-user: #161e2b;
+    --chat-user-border: #334b70;
+    --code: #11161d;
+    --code-border: #2c3440;
+    --status: #98c379;
+    --tool-warning: #e5c07b;
+    --tool-mutation: #c678dd;
+    --tool-search: #61afef;
+    --tool-success: #98c379;
+    --tool-info: #56b6c2;
+    --tool-accent: #7aa2f7;
+    --tool-muted: #8b93a7;
+    --tool-title: #c8ccd4;
+    --tool-error: #e06c75;
   }
 }
 
@@ -180,7 +224,51 @@
 *::-webkit-scrollbar-thumb:active {
   background-color: color-mix(in srgb, var(--muted-foreground) 72%, transparent);
 }
-html, body, #app { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+html, body, #app {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/*
+ * Desktop chrome is non-selectable by default. The transcript is the one
+ * document-style selection surface; native text editors opt back into their
+ * own local selection so Cmd/Ctrl+A follows focus like a desktop app.
+ */
+.transcript-pane,
+:where(
+  textarea,
+  input:not([type]),
+  input[type="text"],
+  input[type="search"],
+  input[type="email"],
+  input[type="url"],
+  input[type="tel"],
+  input[type="password"],
+  input[type="number"],
+  [contenteditable="true"]
+) {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+:where(
+  button,
+  select,
+  summary,
+  [role="button"],
+  [role="tab"],
+  [role="option"],
+  [role="checkbox"],
+  [role="radio"],
+  [role="menuitem"]
+) {
+  -webkit-user-select: none;
+  user-select: none;
+}
 button, textarea, select, input { font: inherit; }
 button, select, textarea, input { letter-spacing: inherit; }
 :where(

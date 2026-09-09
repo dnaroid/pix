@@ -136,6 +136,8 @@
   import type { ProjectTreeEntry } from "./lib/project-tree";
   import {
     gitDiffForLlm,
+    gitReviewHasFindings,
+    gitReviewResolutionPrompt,
     type GitDiff,
     type GitDiffScope,
     type GitSnapshot,
@@ -258,6 +260,7 @@
   let gitError = $state<string | null>(null);
   let gitActionId = $state<string | null>(null);
   let gitLlmActionId = $state<string | null>(null);
+  let gitResolveRunning = $state(false);
   let gitDiffPreview = $state<GitDiff | null>(null);
   let gitDiffReview = $state<string | undefined>(undefined);
   let slashCommandsBySession = $state<Map<string, AvailableCommand[]>>(new Map());
@@ -479,6 +482,7 @@
         subagentSnapshots = new Map();
         registrySnapshot = undefined;
         registryActionId = null;
+        gitResolveRunning = false;
         slashCommandsBySession = new Map();
         queueItemsBySession = new Map();
         transcript = emptyTranscript;
@@ -537,6 +541,7 @@
     subagentSnapshots = new Map();
     registrySnapshot = undefined;
     registryActionId = null;
+    gitResolveRunning = false;
     slashCommandsBySession = new Map();
     queueItemsBySession = new Map();
     transcript = emptyTranscript;
@@ -1144,6 +1149,7 @@
       gitError = null;
       gitActionId = null;
       gitLlmActionId = null;
+      gitResolveRunning = false;
       gitDiffPreview = null;
       gitDiffReview = undefined;
       slashCommandsBySession = new Map();
@@ -1404,6 +1410,89 @@
       return undefined;
     } finally {
       if (gitLlmActionId === actionId) gitLlmActionId = null;
+    }
+  }
+
+  async function resolveGitReviewInNewSession(): Promise<void> {
+    const requestClient = client;
+    const requestWorkspace = workspace;
+    const diff = gitDiffPreview;
+    const review = gitDiffReview;
+    if (
+      !requestClient
+      || !requestWorkspace
+      || !diff
+      || !gitReviewHasFindings(review)
+      || !review
+      || gitResolveRunning
+      || operationRunning
+      || status !== "ready"
+    ) return;
+
+    const prompt = gitReviewResolutionPrompt(diff, review);
+    gitResolveRunning = true;
+    gitError = null;
+    let createdSessionId: string | undefined;
+    try {
+      const created = await requestClient.newSession(requestWorkspace);
+      createdSessionId = created.sessionId;
+      if (requestClient !== client || requestWorkspace !== workspace) {
+        await requestClient.closeSession(created.sessionId).catch(() => undefined);
+        return;
+      }
+
+      // Warm the new runtime before making it the active tab. If startup fails,
+      // the user's current conversation and review popup remain untouched.
+      await ensureSessionRuntime(requestClient, created.sessionId, requestWorkspace);
+      if (requestClient !== client || requestWorkspace !== workspace) {
+        await requestClient.closeSession(created.sessionId).catch(() => undefined);
+        forgetSessionRuntime(created.sessionId);
+        return;
+      }
+      if (!runtimeReadySessionIds.has(created.sessionId)) {
+        await requestClient.closeSession(created.sessionId).catch(() => undefined);
+        forgetSessionRuntime(created.sessionId);
+        gitError = "Could not start a new session for resolving the code-review findings.";
+        return;
+      }
+
+      if (activeSessionId) transcriptBySessionId.set(activeSessionId, transcript);
+      ensureProvisionalSession(created.sessionId, requestWorkspace);
+      showSessionTab(created.sessionId);
+      activeSessionId = created.sessionId;
+      rememberActiveSession(requestWorkspace, created.sessionId);
+      transcript = emptyTranscript;
+      configOptions = configOptionsBySessionId.get(created.sessionId) ?? [];
+      activeSessionRuntimeReady = true;
+
+      transcript = appendLocalUserMessage(
+        transcript,
+        prompt,
+        `local:${++localMessageId}`,
+        [],
+      );
+      transcriptBySessionId.set(created.sessionId, transcript);
+
+      const run = runPromptRequest(requestClient, created.sessionId, [{ type: "text", text: prompt }]);
+      gitDiffPreview = null;
+      gitDiffReview = undefined;
+      void scrollToLatest();
+      void refreshSessions();
+      void run
+        .then(() => refreshSessions())
+        .catch((error) => {
+          if (requestClient === client && requestWorkspace === workspace) reportError(error);
+        });
+    } catch (error) {
+      if (createdSessionId) {
+        await requestClient.closeSession(createdSessionId).catch(() => undefined);
+        forgetSessionRuntime(createdSessionId);
+      }
+      if (requestClient === client && requestWorkspace === workspace) {
+        gitError = error instanceof Error ? error.message : String(error);
+      }
+    } finally {
+      if (requestClient === client && requestWorkspace === workspace) gitResolveRunning = false;
     }
   }
 
@@ -3544,7 +3633,7 @@
 
 <div class="grid h-full grid-rows-[36px_minmax(0,1fr)_36px] bg-background text-foreground max-[760px]:grid-rows-[36px_minmax(0,1fr)_32px]">
   <header
-    class="flex min-w-0 select-none items-stretch border-b border-sidebar-border bg-sidebar"
+    class="flex min-w-0 select-none items-stretch border-b border-border bg-chrome text-chrome-foreground"
     data-tauri-drag-region
   >
     <ProjectTitlebar
@@ -3643,7 +3732,7 @@
       onGitReview={(path, scope) => void reviewGitDiff(path, scope)}
     />
 
-    <main class="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)_auto]">
+    <main class="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)_auto] bg-background">
       {#if errorMessage}
         <ErrorBanner
           message={errorMessage}
@@ -3766,8 +3855,11 @@
     diff={gitDiffPreview}
     review={gitDiffReview}
     reviewLoading={gitLlmActionId?.startsWith("review:") === true}
+    resolveLoading={gitResolveRunning}
     canReview={Boolean(client && activeSessionId && activeSessionRuntimeReady)}
+    canResolve={Boolean(client && workspace && status === "ready" && !operationRunning)}
     onReview={() => void reviewGitDiff(gitDiffPreview?.path, gitDiffPreview?.scope ?? "all")}
+    onResolve={() => void resolveGitReviewInNewSession()}
     onClose={() => {
       gitDiffPreview = null;
       gitDiffReview = undefined;

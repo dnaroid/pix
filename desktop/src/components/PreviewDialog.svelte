@@ -259,14 +259,14 @@
 
 <dialog
   bind:this={dialogElement}
-  class="fixed inset-0 z-40 m-auto h-screen max-h-none w-screen max-w-none place-items-center bg-transparent p-6 text-foreground backdrop:bg-overlay backdrop:backdrop-blur-sm open:grid"
+  class="fixed inset-0 z-40 m-auto h-screen max-h-none w-screen max-w-none place-items-center bg-transparent p-6 text-foreground backdrop:bg-overlay open:grid"
   aria-label={`Preview ${title}`}
   oncancel={handleCancel}
   onclick={handleBackdropClick}
 >
   <div
     bind:this={previewElement}
-    class="relative flex h-[760px] max-h-[calc(100vh-48px)] min-h-[320px] w-[1120px] max-w-[calc(100vw-48px)] min-w-[480px] flex-col overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-md"
+    class="relative flex h-[760px] max-h-[calc(100vh-48px)] min-h-[320px] w-[1120px] max-w-[calc(100vw-48px)] min-w-[480px] flex-col overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-md"
   >
     <header class="flex min-h-10 min-w-0 items-center gap-2 border-b border-border px-3">
       <div class="flex shrink-0 items-center gap-0.5" aria-label="Preview history">
@@ -406,7 +406,7 @@
         <div
           bind:this={contentScrollElement}
           use:restoreScroll={{ key: previewId, position: scrollPosition }}
-          class="min-h-0 min-w-0 flex-1 overflow-auto bg-muted/40 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          class="min-h-0 min-w-0 flex-1 overflow-auto bg-code outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
           role="region"
           aria-label={`Source for ${file.path}`}
           tabindex="0"
@@ -471,8 +471,8 @@
     display: inline-block;
     width: 3.5rem;
     margin-right: 1rem;
-    border-right: 1px solid var(--border);
-    background: var(--muted);
+    border-right: 1px solid var(--code-border);
+    background: var(--panel);
     color: var(--muted-foreground);
     content: counter(preview-line);
     counter-increment: preview-line;

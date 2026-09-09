@@ -392,8 +392,8 @@
   }
   .markdown-text :global(a[data-project-file]),
   .markdown-text :global(a[data-local-file]) {
-    border-radius: calc(var(--radius) - 10px);
-    background: var(--muted);
+    border-radius: var(--radius-sm);
+    background: var(--code);
     box-decoration-break: clone;
     padding: 0.08em 0.3em;
     font-family: "Geist Mono", ui-monospace, monospace;
@@ -401,7 +401,7 @@
     -webkit-box-decoration-break: clone;
   }
   .markdown-text :global(a[data-project-file]:hover),
-  .markdown-text :global(a[data-local-file]:hover) { background: var(--accent); }
+  .markdown-text :global(a[data-local-file]:hover) { background: var(--panel-hover); }
   .markdown-text :global(a[data-project-file] > code),
   .markdown-text :global(a[data-local-file] > code) {
     background: transparent;
@@ -428,9 +428,9 @@
     max-width: 100%;
     place-items: center;
     overflow: hidden;
-    border: 1px solid var(--border);
+    border: 1px solid var(--code-border);
     border-radius: var(--radius-lg);
-    background: var(--muted);
+    background: var(--code);
     color: var(--muted-foreground);
     text-decoration: none;
   }
@@ -480,7 +480,7 @@
   }
   .markdown-text :global(code) {
     border-radius: var(--radius-sm);
-    background: var(--muted);
+    background: var(--code);
     padding: 0.12em 0.32em;
     color: var(--primary);
     font-family: "Geist Mono", ui-monospace, monospace;
@@ -491,9 +491,9 @@
     max-width: 100%;
     margin: 0.75rem 0;
     overflow: auto;
-    border: 1px solid var(--border);
+    border: 1px solid var(--code-border);
     border-radius: var(--radius-lg);
-    background: var(--muted);
+    background: var(--code);
     padding: 0.75rem;
   }
   .markdown-text :global(pre code) {
@@ -552,7 +552,7 @@
     border-right: 0;
   }
   .markdown-text :global(th) {
-    background: color-mix(in srgb, var(--muted) 65%, transparent);
+    background: var(--panel);
     font-weight: 600;
   }
   .markdown-text :global(.align-center) { text-align: center; }
@@ -562,9 +562,9 @@
     max-width: 100%;
     margin: 0.75rem 0;
     overflow-x: auto;
-    border: 1px solid var(--border);
+    border: 1px solid var(--code-border);
     border-radius: var(--radius-lg);
-    background: var(--card);
+    background: var(--panel);
     padding: 0.75rem;
   }
   .markdown-text :global(.mermaid-canvas) {

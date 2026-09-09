@@ -9,6 +9,10 @@ export interface GitFileChange {
   readonly unstaged: boolean;
   readonly untracked: boolean;
   readonly conflicted: boolean;
+  readonly stagedAdditions?: number;
+  readonly stagedDeletions?: number;
+  readonly unstagedAdditions?: number;
+  readonly unstagedDeletions?: number;
 }
 
 export interface GitBranch {
@@ -98,11 +102,61 @@ export function gitChangeLabel(change: GitFileChange, scope: Exclude<GitDiffScop
   return "Modified";
 }
 
+export function gitChangeLineStats(
+  change: GitFileChange,
+  scope: Exclude<GitDiffScope, "all">,
+): { additions?: number; deletions?: number } {
+  return scope === "staged"
+    ? { additions: change.stagedAdditions, deletions: change.stagedDeletions }
+    : { additions: change.unstagedAdditions, deletions: change.unstagedDeletions };
+}
+
 export function gitDiffForLlm(diff: GitDiff, maxChars = 120_000): string {
   if (diff.content.length <= maxChars) return diff.content;
   let boundary = maxChars;
   while (boundary > 0 && isLowSurrogate(diff.content.charCodeAt(boundary))) boundary -= 1;
   return `${diff.content.slice(0, boundary)}\n\n[Diff truncated before LLM review]`;
+}
+
+export function gitReviewHasFindings(review: string | undefined): boolean {
+  const normalized = review?.trim().toLowerCase();
+  if (!normalized) return false;
+  if (normalized.startsWith("### review failed")) return false;
+
+  const noFindingsPatterns = [
+    /\bno significant findings\b/u,
+    /\bno significant issues\b/u,
+    /\bno actionable findings\b/u,
+    /\bno actionable issues\b/u,
+    /\bno issues found\b/u,
+    /\bno problems found\b/u,
+    /\bnothing significant to report\b/u,
+  ];
+  return !noFindingsPatterns.some((pattern) => pattern.test(normalized));
+}
+
+export function gitReviewResolutionPrompt(diff: GitDiff, review: string): string {
+  const scope = diff.scope === "staged" ? "staged changes" : diff.scope === "unstaged" ? "working-tree changes" : "all current changes";
+  const target = diff.path ? `file ${diff.path}` : scope;
+  const inspectionTarget = diff.path ? `${scope} for ${diff.path}` : scope;
+  return [
+    `Resolve the confirmed issues from the Git code review for ${target}.`,
+    "",
+    "Before editing, verify every finding against the current working tree. The review may be stale or wrong; do not blindly apply a suggestion that no longer applies.",
+    "Fix the findings that are still valid, preserve unrelated user changes, add or update focused tests where appropriate, and run the relevant checks.",
+    "Do not commit or push unless the user explicitly asks you to do so.",
+    "",
+    "<review-findings>",
+    neutralizeClosingTag(review.trim(), "review-findings"),
+    "</review-findings>",
+    "",
+    "The original diff is intentionally not embedded in this prompt.",
+    `Inspect the current Git ${inspectionTarget} yourself before editing and use the review findings only as hypotheses to verify.`,
+  ].join("\n");
+}
+
+function neutralizeClosingTag(value: string, tag: string): string {
+  return value.replaceAll(`</${tag}>`, `</ ${tag}>`);
 }
 
 function isLowSurrogate(code: number): boolean {

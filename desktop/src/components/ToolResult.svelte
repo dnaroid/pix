@@ -59,9 +59,9 @@
     max-height: 220px;
     margin-top: 0.5rem;
     overflow: auto;
-    border: 1px solid var(--border);
+    border: 1px solid var(--code-border);
     border-radius: var(--radius-lg);
-    background: var(--muted);
+    background: var(--code);
     padding: 0.625rem 0.75rem;
     color: var(--foreground);
     font-family: "Geist Mono", ui-monospace, monospace;

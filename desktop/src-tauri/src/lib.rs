@@ -35,6 +35,8 @@ const MAX_TASK_DOCUMENT_BYTES: u64 = 1024 * 1024;
 const MAX_GIT_CHANGES: usize = 5_000;
 const MAX_GIT_DIFF_BYTES: usize = 512 * 1024;
 const MAX_GIT_COMMIT_MESSAGE_BYTES: usize = 20 * 1024;
+const MAX_GIT_UNTRACKED_STAT_FILE_BYTES: u64 = 2 * 1024 * 1024;
+const MAX_GIT_UNTRACKED_STAT_TOTAL_BYTES: u64 = 8 * 1024 * 1024;
 const PROJECT_TASKS_SCHEMA_URL: &str = "https://unpkg.com/pi-ui-extend/schemas/tasks.json";
 const ATTACHMENT_CACHE_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 static ATTACHMENT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -155,6 +157,20 @@ struct GitFileChange {
     unstaged: bool,
     untracked: bool,
     conflicted: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    staged_additions: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    staged_deletions: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    unstaged_additions: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    unstaged_deletions: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct GitLineStats {
+    additions: Option<u64>,
+    deletions: Option<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -1196,6 +1212,7 @@ fn git_status_from(workspace: &Path) -> Result<GitSnapshot, String> {
         ],
     )?;
     let mut snapshot = parse_git_status_porcelain(&output.stdout)?;
+    populate_git_line_stats(&root, &mut snapshot);
     snapshot.branches = git_local_branches(&root, &snapshot.branch)?;
     snapshot.remotes = git_remotes(&root)?;
     Ok(snapshot)
@@ -1259,6 +1276,10 @@ fn parse_git_status_porcelain(bytes: &[u8]) -> Result<GitSnapshot, String> {
                 unstaged: true,
                 untracked: true,
                 conflicted: false,
+                staged_additions: None,
+                staged_deletions: None,
+                unstaged_additions: None,
+                unstaged_deletions: None,
             })
         } else if text.starts_with("1 ") {
             parse_git_ordinary_change(&text)
@@ -1346,6 +1367,151 @@ fn git_change_from_fields(
         unstaged: worktree_status != '.',
         untracked: false,
         conflicted,
+        staged_additions: None,
+        staged_deletions: None,
+        unstaged_additions: None,
+        unstaged_deletions: None,
+    })
+}
+
+fn populate_git_line_stats(root: &Path, snapshot: &mut GitSnapshot) {
+    // Line counts are presentation metadata. A race with the working tree or a
+    // path Git cannot numstat must never make the whole Source Control panel
+    // unavailable, so failures here degrade to omitted counts.
+    let staged = git_diff_numstat(root, true).unwrap_or_default();
+    let unstaged = git_diff_numstat(root, false).unwrap_or_default();
+    let mut untracked_budget = MAX_GIT_UNTRACKED_STAT_TOTAL_BYTES;
+
+    for change in &mut snapshot.changes {
+        if let Some(stats) = git_line_stats_for_change(&staged, change) {
+            change.staged_additions = stats.additions;
+            change.staged_deletions = stats.deletions;
+        }
+
+        let unstaged_stats = if change.untracked {
+            git_untracked_line_stats(root, &change.path, &mut untracked_budget)
+        } else {
+            git_line_stats_for_change(&unstaged, change)
+        };
+        if let Some(stats) = unstaged_stats {
+            change.unstaged_additions = stats.additions;
+            change.unstaged_deletions = stats.deletions;
+        }
+    }
+}
+
+fn git_diff_numstat(root: &Path, staged: bool) -> Result<HashMap<String, GitLineStats>, String> {
+    let mut args = vec!["diff"];
+    if staged {
+        args.push("--cached");
+    }
+    args.extend(["--numstat", "--no-renames", "-z", "--no-ext-diff"]);
+    let output = git_output(root, &args)?;
+    parse_git_numstat(&output.stdout)
+}
+
+fn parse_git_numstat(bytes: &[u8]) -> Result<HashMap<String, GitLineStats>, String> {
+    let mut stats = HashMap::new();
+    for record in bytes.split(|byte| *byte == 0).filter(|record| !record.is_empty()) {
+        let mut fields = record.splitn(3, |byte| *byte == b'\t');
+        let additions = fields.next().unwrap_or_default();
+        let deletions = fields.next().unwrap_or_default();
+        let path = fields.next().unwrap_or_default();
+        if path.is_empty() {
+            return Err("git diff --numstat returned a malformed record".to_owned());
+        }
+        let path = String::from_utf8_lossy(path).into_owned();
+        let next = GitLineStats {
+            additions: parse_git_numstat_count(additions)?,
+            deletions: parse_git_numstat_count(deletions)?,
+        };
+        stats
+            .entry(path)
+            .and_modify(|current| *current = merge_git_line_stats(*current, next))
+            .or_insert(next);
+    }
+    Ok(stats)
+}
+
+fn parse_git_numstat_count(value: &[u8]) -> Result<Option<u64>, String> {
+    if value == b"-" {
+        return Ok(None);
+    }
+    String::from_utf8_lossy(value)
+        .parse::<u64>()
+        .map(Some)
+        .map_err(|_| "git diff --numstat returned an invalid line count".to_owned())
+}
+
+fn merge_git_line_stats(left: GitLineStats, right: GitLineStats) -> GitLineStats {
+    GitLineStats {
+        additions: merge_git_line_count(left.additions, right.additions),
+        deletions: merge_git_line_count(left.deletions, right.deletions),
+    }
+}
+
+fn merge_git_line_count(left: Option<u64>, right: Option<u64>) -> Option<u64> {
+    match (left, right) {
+        (Some(left), Some(right)) => Some(left.saturating_add(right)),
+        _ => None,
+    }
+}
+
+fn git_line_stats_for_change(
+    stats: &HashMap<String, GitLineStats>,
+    change: &GitFileChange,
+) -> Option<GitLineStats> {
+    let mut combined = stats.get(&change.path).copied();
+    if let Some(original_path) = change.original_path.as_deref().filter(|path| *path != change.path) {
+        if let Some(original) = stats.get(original_path).copied() {
+            combined = Some(match combined {
+                Some(current) => merge_git_line_stats(current, original),
+                None => original,
+            });
+        }
+    }
+    combined
+}
+
+fn git_untracked_line_stats(
+    root: &Path,
+    path: &str,
+    remaining_budget: &mut u64,
+) -> Option<GitLineStats> {
+    if *remaining_budget == 0 {
+        return None;
+    }
+    if validate_workspace_relative_path(Path::new(path), "Git file path").is_err() {
+        return None;
+    }
+    let target = root.join(path);
+    let metadata = fs::symlink_metadata(&target).ok()?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return None;
+    }
+    let size = metadata.len();
+    if size > MAX_GIT_UNTRACKED_STAT_FILE_BYTES || size > *remaining_budget {
+        return None;
+    }
+    let bytes = fs::read(&target).ok()?;
+    *remaining_budget = remaining_budget.saturating_sub(size);
+    if bytes.contains(&0) {
+        return Some(GitLineStats {
+            additions: None,
+            deletions: None,
+        });
+    }
+    let newlines = bytes.iter().filter(|byte| **byte == b'\n').count() as u64;
+    let additions = if bytes.is_empty() {
+        0
+    } else if bytes.last() == Some(&b'\n') {
+        newlines
+    } else {
+        newlines.saturating_add(1)
+    };
+    Some(GitLineStats {
+        additions: Some(additions),
+        deletions: Some(0),
     })
 }
 
@@ -2984,20 +3150,43 @@ mod tests {
     fn git_status_diff_stage_and_unstage_are_workspace_scoped() {
         let workspace = temporary_workspace("git-source-control");
         initialize_git_repository(&workspace);
+        fs::write(workspace.join("deleted.txt"), "one\ntwo\nthree\n")
+            .expect("write file that will be deleted");
+        git_output(&workspace, &["add", "deleted.txt"]).expect("stage file that will be deleted");
+        git_output(&workspace, &["commit", "--no-gpg-sign", "-m", "add deleted fixture"])
+            .expect("commit file that will be deleted");
         fs::write(workspace.join("tracked.txt"), "after\n").expect("modify tracked file");
         fs::write(workspace.join("new.txt"), "new\n").expect("write untracked file");
+        fs::remove_file(workspace.join("deleted.txt")).expect("delete tracked file");
 
         let before = git_status_from(&workspace).expect("read git status");
         assert_eq!(before.branch, "main");
         assert!(!before.detached);
-        assert!(before
+        let tracked = before
             .changes
             .iter()
-            .any(|change| { change.path == "tracked.txt" && change.unstaged && !change.staged }));
-        assert!(before
+            .find(|change| change.path == "tracked.txt")
+            .expect("tracked change");
+        assert!(tracked.unstaged && !tracked.staged);
+        assert_eq!(tracked.unstaged_additions, Some(1));
+        assert_eq!(tracked.unstaged_deletions, Some(1));
+
+        let untracked = before
             .changes
             .iter()
-            .any(|change| change.path == "new.txt" && change.untracked));
+            .find(|change| change.path == "new.txt")
+            .expect("untracked change");
+        assert!(untracked.untracked);
+        assert_eq!(untracked.unstaged_additions, Some(1));
+        assert_eq!(untracked.unstaged_deletions, Some(0));
+
+        let deleted = before
+            .changes
+            .iter()
+            .find(|change| change.path == "deleted.txt")
+            .expect("deleted change");
+        assert_eq!(deleted.unstaged_additions, Some(0));
+        assert_eq!(deleted.unstaged_deletions, Some(3));
 
         let working = git_diff_from(&workspace, Some("tracked.txt"), GitDiffScope::Unstaged)
             .expect("read working diff");
@@ -3006,10 +3195,14 @@ mod tests {
 
         git_stage_from(&workspace, Some("tracked.txt")).expect("stage tracked file");
         let staged = git_status_from(&workspace).expect("read staged status");
-        assert!(staged
+        let staged_tracked = staged
             .changes
             .iter()
-            .any(|change| { change.path == "tracked.txt" && change.staged && !change.unstaged }));
+            .find(|change| change.path == "tracked.txt")
+            .expect("staged tracked change");
+        assert!(staged_tracked.staged && !staged_tracked.unstaged);
+        assert_eq!(staged_tracked.staged_additions, Some(1));
+        assert_eq!(staged_tracked.staged_deletions, Some(1));
         let staged_diff = git_diff_from(&workspace, Some("tracked.txt"), GitDiffScope::Staged)
             .expect("read staged diff");
         assert!(staged_diff.content.contains("+after"));

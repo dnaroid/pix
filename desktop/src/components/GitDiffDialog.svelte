@@ -1,23 +1,30 @@
 <script lang="ts">
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Sparkles from "@lucide/svelte/icons/sparkles";
+  import Wrench from "@lucide/svelte/icons/wrench";
   import X from "@lucide/svelte/icons/x";
-  import type { GitDiff } from "../lib/git";
+  import { gitReviewHasFindings, type GitDiff } from "../lib/git";
   import MarkdownText from "./MarkdownText.svelte";
 
   let {
     diff,
     review,
     reviewLoading,
+    resolveLoading,
     canReview,
+    canResolve,
     onReview,
+    onResolve,
     onClose,
   }: {
     diff: GitDiff;
     review?: string;
     reviewLoading: boolean;
+    resolveLoading: boolean;
     canReview: boolean;
+    canResolve: boolean;
     onReview: () => void;
+    onResolve: () => void;
     onClose: () => void;
   } = $props();
 
@@ -27,6 +34,7 @@
   const title = $derived(diff.path ?? "All changes");
   const scopeLabel = $derived(diff.scope === "staged" ? "Staged" : diff.scope === "unstaged" ? "Working Tree" : "All Changes");
   const lines = $derived(diff.content.split("\n"));
+  const hasReviewFindings = $derived(gitReviewHasFindings(review));
 
   $effect(() => {
     const dialog = dialogElement;
@@ -43,9 +51,9 @@
 
   function lineTone(line: string): string {
     if (line.startsWith("+++ ") || line.startsWith("--- ")) return "text-muted-foreground";
-    if (line.startsWith("+")) return "bg-[var(--tool-success)]/7 text-[var(--tool-success)]";
-    if (line.startsWith("-")) return "bg-[var(--tool-error)]/7 text-[var(--tool-error)]";
-    if (line.startsWith("@@")) return "bg-[var(--tool-info)]/6 text-[var(--tool-info)]";
+    if (line.startsWith("+")) return "bg-tool-success/7 text-tool-success";
+    if (line.startsWith("-")) return "bg-tool-error/7 text-tool-error";
+    if (line.startsWith("@@")) return "bg-tool-info/6 text-tool-info";
     if (line.startsWith("diff --git") || line.startsWith("index ")) return "text-foreground font-semibold";
     return "text-foreground/80";
   }
@@ -53,12 +61,12 @@
 
 <dialog
   bind:this={dialogElement}
-  class="fixed inset-0 z-40 m-auto h-screen max-h-none w-screen max-w-none place-items-center bg-transparent p-6 text-foreground backdrop:bg-overlay backdrop:backdrop-blur-sm open:grid"
+  class="fixed inset-0 z-40 m-auto h-screen max-h-none w-screen max-w-none place-items-center bg-transparent p-6 text-foreground backdrop:bg-overlay open:grid"
   aria-label={`Git diff ${title}`}
   oncancel={(event) => { event.preventDefault(); onClose(); }}
   onclick={(event) => { if (event.target === event.currentTarget) onClose(); }}
 >
-  <div class="flex h-[760px] max-h-[calc(100vh-48px)] min-h-[320px] w-[1120px] max-w-[calc(100vw-48px)] min-w-[480px] flex-col overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-md">
+  <div class="flex h-[760px] max-h-[calc(100vh-48px)] min-h-[320px] w-[1120px] max-w-[calc(100vw-48px)] min-w-[480px] flex-col overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-md">
     <header class="flex min-h-10 min-w-0 items-center gap-2 border-b border-border px-3">
       <strong class="min-w-0 flex-1 truncate text-xs font-medium" title={title}>{title}</strong>
       <span class="rounded border border-border bg-muted px-1.5 py-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{scopeLabel}</span>
@@ -76,20 +84,34 @@
     </header>
 
     {#if review || reviewLoading}
-      <section class="max-h-[38%] overflow-auto border-b border-border bg-muted/20 px-4 py-3" aria-label="LLM review">
+      <section class="max-h-[38%] overflow-auto border-b border-border bg-panel px-4 py-3" aria-label="LLM review">
         {#if reviewLoading && !review}
           <div class="flex items-center gap-2 text-[11px] text-muted-foreground"><RefreshCw class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />Reviewing changes…</div>
         {:else if review}
+          {#if hasReviewFindings}
+            <div class="mb-2 flex justify-end">
+              <button
+                class="inline-flex h-7 items-center gap-1.5 rounded-md bg-primary px-2.5 text-[11px] font-medium text-primary-foreground hover:brightness-110 focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
+                type="button"
+                disabled={!canResolve || resolveLoading}
+                title={canResolve ? "Start a new Pix session to verify and resolve these findings" : "Source Control is busy"}
+                onclick={onResolve}
+              >
+                {#if resolveLoading}<RefreshCw class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />{:else}<Wrench class="h-3.5 w-3.5" aria-hidden="true" />{/if}
+                {resolveLoading ? "Starting session…" : "Resolve in new session"}
+              </button>
+            </div>
+          {/if}
           <MarkdownText text={review} />
         {/if}
       </section>
     {/if}
 
     {#if diff.truncated}
-      <div class="border-b border-[var(--tool-warning)]/20 bg-[var(--tool-warning)]/5 px-3 py-1.5 text-[11px] text-[var(--tool-warning)]">Diff preview was truncated to keep the UI responsive.</div>
+      <div class="border-b border-tool-warning/20 bg-tool-warning/5 px-3 py-1.5 text-[11px] text-tool-warning">Diff preview was truncated to keep the UI responsive.</div>
     {/if}
 
-    <div class="min-h-0 flex-1 overflow-auto bg-muted/25">
+    <div class="min-h-0 flex-1 overflow-auto bg-code">
       {#if diff.content.trim()}
         <pre class="min-w-max py-2 font-mono text-[11px] leading-4"><code>{#each lines as line, index (`${index}:${line}`)}<span class={["block min-h-4 whitespace-pre px-3", lineTone(line)]}>{line || " "}</span>{/each}</code></pre>
       {:else}

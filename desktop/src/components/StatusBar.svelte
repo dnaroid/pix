@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import type { SessionConfigOption } from "@agentclientprotocol/sdk";
 
@@ -44,7 +45,7 @@
 
 </script>
 
-<footer class="flex min-w-0 items-center gap-3 border-t border-sidebar-border bg-sidebar px-[22px] text-[11px] text-muted-foreground max-[760px]:px-3">
+<footer class="flex min-w-0 items-center gap-3 border-t border-border bg-chrome px-[22px] text-[11px] text-muted-foreground max-[760px]:px-3">
   <div class={[
     "flex items-center gap-2",
     status === "error" && "text-destructive",
@@ -61,17 +62,20 @@
       {#if option.type === "select"}
         <label class="flex min-w-0 items-center gap-1.5">
           <span class="text-muted-foreground/70 max-[760px]:hidden">{option.name}</span>
-          <select
-            class="h-6 max-w-[220px] appearance-none overflow-hidden rounded-sm border-0 bg-transparent py-0 pr-4 pl-0 text-primary transition-colors outline-none enabled:hover:bg-sidebar-accent enabled:hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-40"
-            aria-label={option.name}
-            value={option.currentValue}
-            disabled={changingConfig !== null || promptRunning}
-            onchange={(event) => onSetConfig(option, event.currentTarget.value)}
-          >
-            {#each configValues(option) as value (value.value)}
-              <option value={value.value}>{value.group ? `${value.group} · ` : ""}{value.name}</option>
-            {/each}
-          </select>
+          <span class="relative min-w-0">
+            <select
+              class="h-6 max-w-[220px] appearance-none overflow-hidden rounded-sm border-0 bg-transparent py-0 pr-5 pl-1 text-primary transition-colors outline-none enabled:hover:bg-chrome-hover enabled:hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-40"
+              aria-label={option.name}
+              value={option.currentValue}
+              disabled={changingConfig !== null || promptRunning}
+              onchange={(event) => onSetConfig(option, event.currentTarget.value)}
+            >
+              {#each configValues(option) as value (value.value)}
+                <option value={value.value}>{value.group ? `${value.group} · ` : ""}{value.name}</option>
+              {/each}
+            </select>
+            <ChevronDown class="pointer-events-none absolute top-1/2 right-1 h-3 w-3 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+          </span>
         </label>
       {:else}
         <label class="flex items-center gap-1.5">

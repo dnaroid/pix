@@ -2,10 +2,13 @@
 
 This document defines the visual language for the desktop application. It is a decision contract, not an inspiration board.
 
-Theme: **Claude+**  
-Source: `https://tweakcn.com/themes/cmdght103000n04lh3e2ae93r`
+Theme: **Pix Desktop semantic theme**
+Light foundation: **Claude+** —
+`https://tweakcn.com/themes/cmdght103000n04lh3e2ae93r`
+Dark direction: **high-contrast, cool desktop palette inspired by Zed**
 
-The machine-readable theme values are bundled with the frontend skill at:
+The machine-readable Claude+ reference used as the light-theme foundation is
+bundled with the frontend skill at:
 
 `.pi/skills/pix-desktop-frontend/references/claude-plus.theme.json`
 
@@ -13,14 +16,21 @@ The machine-readable theme values are bundled with the frontend skill at:
 
 The application is a compact desktop productivity tool.
 
+Its visual model is a strict modern **chat/IDE workbench**: conversation,
+technical output, navigation, editor-like input, and runtime chrome should feel
+like one integrated desktop environment rather than separate chat and dashboard
+products.
+
 The interface SHOULD feel:
 
-- warm rather than sterile;
+- calm rather than sterile;
 - quiet rather than decorative;
 - professional rather than corporate-heavy;
 - dense enough for daily desktop work;
+- precise and editor-like in its pane geometry and interaction states;
 - tactile through subtle surfaces, borders, and restrained radius;
-- consistent with the Claude+ neutral/terracotta palette.
+- consistent with the active semantic palette: warm neutral/terracotta in light
+  mode and cool, crisp, high-contrast surfaces in dark mode.
 
 The interface MUST NOT drift toward a generic AI/SaaS landing-page aesthetic.
 
@@ -33,9 +43,10 @@ For visual implementation, use this priority:
 1. Explicit task requirements.
 2. Live semantic theme tokens in `desktop/src/styles.css`.
 3. This `DESIGN.md`.
-4. The bundled Claude+ theme reference.
-5. Existing neighboring UI patterns that do not conflict with the above.
-6. Generic frontend conventions.
+4. The bundled Pix IDE visual-language reference.
+5. The bundled Claude+ theme reference for light-theme intent.
+6. Existing neighboring UI patterns that do not conflict with the above.
+7. Generic frontend conventions.
 
 Do not copy a legacy local style when it contradicts the current semantic theme.
 
@@ -65,6 +76,20 @@ border-input
 ring-ring
 bg-sidebar
 text-sidebar-foreground
+bg-chrome
+text-chrome-foreground
+bg-chrome-hover
+bg-panel
+bg-panel-strong
+bg-panel-hover
+bg-panel-selected
+bg-chat-user
+border-chat-user-border
+bg-code
+border-code-border
+text-tool-success
+text-tool-warning
+text-tool-error
 ```
 
 Use the configured semantic radius and shadow utilities.
@@ -85,7 +110,9 @@ Arbitrary dimensions are acceptable only when they express a real desktop constr
 
 ### Primary accent
 
-Terracotta is emphasis, not decoration.
+Primary is emphasis, not decoration. Its hue is theme-dependent: light mode uses
+the Claude+ terracotta accent, while dark mode uses a cool blue accent for
+clearer desktop contrast.
 
 Use primary for:
 
@@ -100,13 +127,33 @@ Do NOT use primary for every button, every icon, every navigation item, or passi
 
 Use `background` for the application canvas.
 
-Use `card` for a contained functional surface that needs separation from the canvas.
+Use `card` for a contained functional surface that needs separation from the
+canvas but is not part of the persistent IDE workbench.
 
-Use `muted` for subdued technical content, code/tool output backgrounds, or low-emphasis grouped regions.
+Use `chrome` for persistent titlebar/status/rail surfaces and `chrome-hover` for
+their local hover treatment.
+
+Use `panel` for integrated workbench panes and secondary pane regions. Use
+`panel-strong` for inset editor/input surfaces, `panel-hover` for hoverable rows,
+and `panel-selected` for quiet selected-state emphasis.
+
+Use `code` plus `code-border` for code, tool output, diffs, previews, and other
+sustained technical reading surfaces.
+
+Use `chat-user` plus `chat-user-border` for the user prompt block. It should
+remain distinct from assistant prose without reading like a messenger bubble.
+
+Use `muted` for generic subdued content only when none of the more specific
+workbench roles above applies.
 
 Use `popover` for elevated transient UI such as menus, dialogs, and popovers.
 
 Use `sidebar` for persistent navigation/utility chrome where a distinct desktop region is needed.
+
+In dark mode, adjacent persistent regions SHOULD remain visibly separable.
+Prefer subtle but legible differences between `background`, `card`, `popover`,
+and `sidebar`, with borders strong enough to define pane geometry without
+becoming bright outlines.
 
 ## 5. Typography
 
@@ -132,15 +179,17 @@ UI copy SHOULD remain compact and direct.
 
 ## 6. Radius, borders, and elevation
 
-Claude+ uses a generous base radius, but desktop density still matters.
+The semantic theme uses a compact editor-oriented base radius. Persistent panes
+and ordinary controls should feel precise rather than soft.
 
 Use smaller semantic radii for controls and larger semantic radii for composed surfaces.
 
 Guidance:
 
-- controls: `rounded-md` or `rounded-lg`;
-- input/composer surfaces: `rounded-lg` or `rounded-xl`;
-- dialogs and substantial floating surfaces: `rounded-xl` or `rounded-2xl`;
+- controls: `rounded-sm` or `rounded-md`;
+- input/composer surfaces: `rounded-md` or `rounded-lg`;
+- dialogs and substantial floating surfaces: usually `rounded-lg`;
+- `rounded-xl` and larger require a specific composed/floating-object reason;
 - avoid pill shapes unless the semantic object is actually a chip/tag/status capsule.
 
 Prefer a subtle border before adding a shadow.
@@ -212,7 +261,8 @@ pair, not only the class names.
 
 Secondary actions SHOULD use neutral semantic surfaces or ghost treatment.
 
-Destructive actions MUST be visually distinguishable from primary actions and SHOULD not use primary terracotta as a substitute for destructive semantics.
+Destructive actions MUST be visually distinguishable from primary actions and
+SHOULD not reuse the primary accent as a substitute for destructive semantics.
 
 Toolbar actions SHOULD generally be quiet until hover/active state.
 
@@ -268,6 +318,11 @@ Tool calls, reasoning details, logs, and code SHOULD visually recede from primar
 
 Running state indicators SHOULD be small and restrained.
 
+The transcript MUST NOT use top/bottom gradient fading or CSS masking to obscure
+content near the scroll edges. Content should remain fully opaque up to the pane
+boundaries; separation from surrounding chrome should come from layout,
+spacing, and borders instead.
+
 ## 15. States
 
 Interactive components MUST account for applicable states:
@@ -308,7 +363,20 @@ Use ARIA only where native semantics are insufficient.
 
 ## 18. Light and dark modes
 
-Every new surface, border, text color, and interaction state MUST work in both Claude+ light and dark palettes.
+Every new surface, border, text color, and interaction state MUST work in both
+supported palettes: Claude+-derived light mode and the cool high-contrast dark
+mode defined by the semantic tokens in `desktop/src/styles.css`.
+
+Dark mode SHOULD favor:
+
+- near-black charcoal canvas surfaces rather than warm brown-black neutrals;
+- brighter foreground text and clearer muted text hierarchy;
+- crisp but restrained pane and control borders;
+- a cool blue primary/focus accent;
+- distinct card, popover, sidebar, and hover surfaces instead of collapsing
+  them into one dark tone;
+- readable status/tool colors with enough chroma to remain distinguishable on
+  the dark canvas.
 
 Never fix a dark-mode problem by adding a one-off hard-coded color when a semantic token can express the role.
 
@@ -329,7 +397,7 @@ Before considering a UI task complete, ask:
 
 1. Does the result look like the same application as the neighboring UI?
 2. Are semantic theme tokens used instead of new arbitrary visual values?
-3. Is terracotta reserved for meaningful emphasis?
+3. Is the active theme's primary accent reserved for meaningful emphasis?
 4. Did I create unnecessary cards, borders, pills, or shadows?
 5. Is the information density appropriate for a desktop productivity tool?
 6. Does the visual hierarchy make the primary task/action obvious?

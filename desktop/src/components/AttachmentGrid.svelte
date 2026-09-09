@@ -105,7 +105,7 @@
       ]} use:lazyPrepare={attachment}>
         <button
           class={[
-            "relative grid overflow-hidden rounded-lg border border-border bg-muted text-left text-muted-foreground transition-colors hover:border-input hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+            "relative grid overflow-hidden rounded-md border border-code-border bg-code text-left text-muted-foreground transition-colors hover:border-input hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
             variant === "composer"
               ? "h-16 w-20"
               : variant === "chat" && attachment.kind === "image"

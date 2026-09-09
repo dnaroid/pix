@@ -69,22 +69,22 @@
   const busy = $derived(disabled || actionId !== null);
 
   function iconTone(status: RegistryStatus): string {
-    if (status === "up-to-date") return "text-[var(--tool-success)]";
-    if (status === "update-available" || status === "missing-local") return "text-[var(--tool-warning)]";
-    if (status === "diverged" || status === "registry-changed" || status === "removed-remote") return "text-[var(--tool-error)]";
-    if (status === "local-changes" || status === "local-only" || status === "untracked-local") return "text-[var(--tool-info)]";
+    if (status === "up-to-date") return "text-tool-success";
+    if (status === "update-available" || status === "missing-local") return "text-tool-warning";
+    if (status === "diverged" || status === "registry-changed" || status === "removed-remote") return "text-tool-error";
+    if (status === "local-changes" || status === "local-only" || status === "untracked-local") return "text-tool-info";
     return "text-muted-foreground";
   }
 
   function actionTone(item: RegistryItem, action: RegistryItemAction): string {
     if (action === "remove") {
-      return "text-[var(--tool-error)] hover:bg-[var(--tool-error)]/10 hover:text-[var(--tool-error)]";
+      return "text-tool-error hover:bg-tool-error/10 hover:text-tool-error";
     }
     if (action === "uninstall") {
-      return "text-[var(--tool-warning)] hover:bg-[var(--tool-warning)]/10 hover:text-[var(--tool-warning)]";
+      return "text-tool-warning hover:bg-tool-warning/10 hover:text-tool-warning";
     }
     if (item.status === "untracked-local" && (action === "push" || action === "pull")) {
-      return "text-[var(--tool-warning)] hover:bg-[var(--tool-warning)]/10 hover:text-[var(--tool-warning)]";
+      return "text-tool-warning hover:bg-tool-warning/10 hover:text-tool-warning";
     }
     return "text-muted-foreground hover:bg-accent hover:text-foreground";
   }
@@ -137,7 +137,7 @@
 <section class="flex min-h-0 min-w-0 w-full flex-col overflow-hidden" aria-label="Resource registry">
   <div class="min-w-0 space-y-2 border-b border-sidebar-border p-2.5">
     {#if snapshot?.configured}
-      <div class="rounded-lg border border-sidebar-border bg-background/45 p-1.5">
+      <div class="rounded-md border border-sidebar-border bg-panel p-1.5">
         <button
           class="flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
           type="button"
@@ -145,7 +145,7 @@
           aria-expanded={projectReviewOpen}
           onclick={() => projectReviewOpen = !projectReviewOpen}
         >
-          <span class={["grid h-5 w-5 shrink-0 place-items-center rounded-full text-[11px] font-bold", projectConflictCount > 0 ? "bg-[var(--tool-error)]/10 text-[var(--tool-error)]" : projectPendingItems.length > 0 ? "bg-[var(--tool-warning)]/10 text-[var(--tool-warning)]" : "bg-[var(--tool-success)]/10 text-[var(--tool-success)]"]}>
+          <span class={["grid h-5 w-5 shrink-0 place-items-center rounded-full text-[11px] font-bold", projectConflictCount > 0 ? "bg-tool-error/10 text-tool-error" : projectPendingItems.length > 0 ? "bg-tool-warning/10 text-tool-warning" : "bg-tool-success/10 text-tool-success"]}>
             {projectConflictCount > 0 ? "!" : projectPendingItems.length}
           </span>
           <span class="min-w-0 flex-1">
@@ -193,7 +193,7 @@
                     {/if}
                   </button>
                 {:else if item.status !== "up-to-date"}
-                  <span class="shrink-0 text-[11px] font-medium text-[var(--tool-warning)]">Review</span>
+                  <span class="shrink-0 text-[11px] font-medium text-tool-warning">Review</span>
                 {/if}
               </div>
             {/each}
@@ -237,22 +237,22 @@
     {#if loading && !snapshot}
       <div class="flex items-center justify-center gap-2 py-8 text-xs text-muted-foreground"><RefreshCw class="h-4 w-4 animate-spin" aria-hidden="true" />Checking registry…</div>
     {:else if snapshot && !snapshot.configured}
-      <div class="rounded-lg border border-sidebar-border bg-background/50 px-3 py-4 text-center">
+      <div class="rounded-md border border-sidebar-border bg-panel px-3 py-4 text-center">
         <Database class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" />
         <p class="text-xs font-medium text-foreground">Registry is not configured</p>
         <p class="mt-1 text-[11px] leading-4 text-muted-foreground">Connect the private Git repository used for skills, agents, and project state.</p>
-        <button class="mt-3 inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-card px-2.5 text-[11px] font-medium hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" disabled={busy} onclick={() => onAction({ action: "configure" }, "configure")}><Settings class="h-3 w-3" aria-hidden="true" />Configure registry</button>
+        <button class="mt-3 inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-panel-strong px-2.5 text-[11px] font-medium hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" disabled={busy} onclick={() => onAction({ action: "configure" }, "configure")}><Settings class="h-3 w-3" aria-hidden="true" />Configure registry</button>
       </div>
     {:else if !snapshot}
       <div class="px-3 py-8 text-center text-xs text-muted-foreground">Open a ready project session to manage its registry.</div>
     {:else}
       {#if snapshot.error}
-        <div class="mb-2 flex items-start gap-2 rounded-lg border border-[var(--tool-error)]/30 bg-[var(--tool-error)]/5 px-2.5 py-2 text-[11px] leading-4 text-[var(--tool-error)]"><X class="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" /><span>{snapshot.error}</span></div>
+        <div class="mb-2 flex items-start gap-2 rounded-md border border-tool-error/30 bg-tool-error/5 px-2.5 py-2 text-[11px] leading-4 text-tool-error"><X class="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" /><span>{snapshot.error}</span></div>
       {/if}
       {#if snapshot.projectIssue}
-        <div class="mb-2 rounded-lg border border-[var(--tool-warning)]/30 bg-[var(--tool-warning)]/5 px-2.5 py-2 text-[11px] leading-4 text-[var(--tool-warning)]">
+        <div class="mb-2 rounded-md border border-tool-warning/30 bg-tool-warning/5 px-2.5 py-2 text-[11px] leading-4 text-tool-warning">
           <p>{snapshot.projectIssue}</p>
-          <button class="mt-2 inline-flex h-6 items-center gap-1.5 rounded-md border border-[var(--tool-warning)]/30 bg-background/50 px-2 text-[11px] font-medium text-foreground hover:bg-accent disabled:opacity-40" type="button" disabled={busy} onclick={() => onAction({ action: "project-key" }, "project-key")}><KeyRound class="h-3 w-3" aria-hidden="true" />Set project key</button>
+          <button class="mt-2 inline-flex h-6 items-center gap-1.5 rounded-md border border-tool-warning/30 bg-panel-strong px-2 text-[11px] font-medium text-foreground hover:bg-panel-hover disabled:opacity-40" type="button" disabled={busy} onclick={() => onAction({ action: "project-key" }, "project-key")}><KeyRound class="h-3 w-3" aria-hidden="true" />Set project key</button>
         </div>
       {/if}
       {#if visibleItems.length === 0}
@@ -260,10 +260,10 @@
       {:else}
         <div class="min-w-0 space-y-1.5">
           {#each visibleItems as item (item.id)}
-            <article class="relative min-w-0 rounded-lg border border-sidebar-border bg-background/55 p-2 shadow-xs">
+            <article class="relative min-w-0 rounded-md border border-sidebar-border bg-panel p-2 transition-colors hover:bg-panel-hover">
               <div class="flex min-w-0 items-start gap-2">
                 <span
-                  class={["mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-md bg-muted/50", iconTone(item.status)]}
+                  class={["mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-md bg-panel-hover", iconTone(item.status)]}
                   title={statusTitle(item)}
                   aria-label={statusTitle(item)}
                   role="img"

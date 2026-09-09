@@ -480,9 +480,9 @@
   }
 
   function statusTone(status: ProjectTaskStatus): string {
-    if (status === "done") return "text-[var(--tool-success)]";
-    if (status === "in-progress") return "text-[var(--tool-warning)]";
-    return "text-[var(--tool-muted)]";
+    if (status === "done") return "text-tool-success";
+    if (status === "in-progress") return "text-tool-warning";
+    return "text-tool-muted";
   }
 
   function setTaskStatus(taskId: string, status: ProjectTaskStatus): void {
@@ -617,9 +617,9 @@
   style:max-width="100vw"
   aria-label="Workspace sidebar"
 >
-  <nav class="flex h-full w-12 shrink-0 flex-col items-center border-r border-sidebar-border py-1.5" aria-label="Workspace views">
+  <nav class="flex h-full w-12 shrink-0 flex-col items-center border-r border-sidebar-border bg-chrome py-1.5" aria-label="Workspace views">
     <button
-      class={["relative grid h-11 w-12 place-items-center border-l-2 hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "project" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
+      class={["relative grid h-11 w-12 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "project" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
       type="button"
       title={activeTab === "project" && !collapsed ? "Hide Project" : "Project"}
       aria-label="Project files"
@@ -628,7 +628,7 @@
       onclick={() => selectTab("project")}
     ><Folder class="h-5 w-5" aria-hidden="true" /></button>
     <button
-      class={["relative grid h-11 w-12 place-items-center border-l-2 hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "tasks" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
+      class={["relative grid h-11 w-12 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "tasks" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
       type="button"
       title={activeTab === "tasks" && !collapsed ? "Hide Tasks" : "Tasks"}
       aria-label={`Tasks, ${tasks.length} total`}
@@ -640,7 +640,7 @@
       {#if tasks.length > 0}<span class="absolute top-2 right-2 h-1.5 w-1.5 rounded-full bg-primary" aria-hidden="true"></span>{/if}
     </button>
     <button
-      class={["relative grid h-11 w-12 place-items-center border-l-2 hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "git" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
+      class={["relative grid h-11 w-12 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "git" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
       type="button"
       title={activeTab === "git" && !collapsed ? "Hide Source Control" : "Source Control"}
       aria-label={`Source Control, ${gitChangeCount} changed ${gitChangeCount === 1 ? "file" : "files"}`}
@@ -652,7 +652,7 @@
       {#if gitChangeCount > 0}<span class="absolute top-1.5 right-1.5 min-w-3 rounded-full bg-primary px-0.5 text-center font-mono text-[7px] leading-3 text-primary-foreground" aria-hidden="true">{Math.min(gitChangeCount, 99)}</span>{/if}
     </button>
     <button
-      class={["relative grid h-11 w-12 place-items-center border-l-2 hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "registry" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
+      class={["relative grid h-11 w-12 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "registry" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
       type="button"
       title={activeTab === "registry" && !collapsed ? "Hide Registry" : "Registry"}
       aria-label={`Resource registry${registryAttention ? ", attention needed" : ""}`}
@@ -661,10 +661,10 @@
       onclick={() => selectTab("registry")}
     >
       <Database class="h-5 w-5" aria-hidden="true" />
-      {#if registryAttention}<span class="absolute top-2 right-2 h-1.5 w-1.5 rounded-full bg-[var(--tool-warning)]" aria-hidden="true"></span>{/if}
+      {#if registryAttention}<span class="absolute top-2 right-2 h-1.5 w-1.5 rounded-full bg-tool-warning" aria-hidden="true"></span>{/if}
     </button>
     <button
-      class={["relative grid h-11 w-12 place-items-center border-l-2 hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "session" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
+      class={["relative grid h-11 w-12 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", activeTab === "session" ? "border-l-primary text-foreground" : "border-l-transparent text-muted-foreground"]}
       type="button"
       title={activeTab === "session" && !collapsed ? "Hide Session" : "Session"}
       aria-label={`Session activity, ${openTodoCount} open todos, ${activeSubagentCount} active subagents`}
@@ -673,13 +673,13 @@
       onclick={() => selectTab("session")}
     >
       <Activity class="h-5 w-5" aria-hidden="true" />
-      {#if openTodoCount > 0 || activeSubagentCount > 0}<span class="absolute top-2 right-2 h-1.5 w-1.5 rounded-full bg-[var(--tool-warning)]" aria-hidden="true"></span>{/if}
+      {#if openTodoCount > 0 || activeSubagentCount > 0}<span class="absolute top-2 right-2 h-1.5 w-1.5 rounded-full bg-tool-warning" aria-hidden="true"></span>{/if}
     </button>
   </nav>
 
   {#if !collapsed}
-    <div class="grid min-w-0 flex-1 grid-rows-[40px_minmax(0,1fr)] overflow-hidden border-r border-sidebar-border">
-      <div class="flex min-w-0 items-center gap-2 border-b border-sidebar-border px-3">
+    <div class="grid min-w-0 flex-1 grid-rows-[40px_minmax(0,1fr)] overflow-hidden border-r border-sidebar-border bg-sidebar">
+      <div class="flex min-w-0 items-center gap-2 border-b border-sidebar-border bg-chrome px-3">
         <strong class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide">{activeTabTitle}</strong>
         {#if activeTab === "tasks"}
           <span class="min-w-0 truncate text-[11px] text-muted-foreground">{tasks.length} {tasks.length === 1 ? "task" : "tasks"} · {doneCount} done</span>
@@ -692,7 +692,7 @@
         {:else if activeTab === "project"}
           <div class="ml-auto flex shrink-0 items-center gap-0.5">
             <button
-              class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
+              class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
               type="button"
               title={`Open project in ${externalEditorLabel}`}
               aria-label={`Open project in ${externalEditorLabel}`}
@@ -700,7 +700,7 @@
               disabled={!workspace}
             ><ExternalLink class="h-3.5 w-3.5" aria-hidden="true" /></button>
             <button
-              class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
+              class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
               type="button"
               title="Refresh project files"
               aria-label="Refresh project files"
@@ -711,7 +711,7 @@
         {:else if activeTab === "registry"}
           <div class="ml-auto flex shrink-0 items-center gap-0.5">
             <button
-              class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
+              class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
               type="button"
               title="Configure registry"
               aria-label="Configure registry"
@@ -719,7 +719,7 @@
               disabled={!sessionReady || registryActionId !== null}
             ><Settings class="h-3.5 w-3.5" aria-hidden="true" /></button>
             <button
-              class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
+              class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
               type="button"
               title="Refresh registry"
               aria-label="Refresh registry"
@@ -742,10 +742,10 @@
               <div class="flex items-center justify-center gap-2 py-8 text-xs text-muted-foreground"><RotateCw class="h-4 w-4 animate-spin" aria-hidden="true" />Loading tasks…</div>
             {:else if storageError}
               <div class="px-4 py-8 text-center">
-                <ListTodo class="mx-auto mb-2 h-5 w-5 text-[var(--tool-error)]" aria-hidden="true" />
+                <ListTodo class="mx-auto mb-2 h-5 w-5 text-tool-error" aria-hidden="true" />
                 <p class="text-xs font-medium">Task file needs attention</p>
                 <p class="mt-1 text-[11px] leading-4 text-muted-foreground">Fix <code class="font-mono">.pi/tasks.jsonc</code>, then try again. Its contents were not replaced.</p>
-                <button class="mt-3 inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-card px-2.5 text-[11px] font-medium hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring" type="button" onclick={onReload}><RotateCw class="h-3 w-3" aria-hidden="true" />Retry</button>
+                <button class="mt-3 inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-panel-strong px-2.5 text-[11px] font-medium hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring" type="button" onclick={onReload}><RotateCw class="h-3 w-3" aria-hidden="true" />Retry</button>
               </div>
             {:else if !workspace}
               <div class="px-4 py-8 text-center"><Folder class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" /><p class="text-xs font-medium">Choose a project</p><p class="mt-1 text-[11px] text-muted-foreground">Tasks are stored inside its .pi folder.</p></div>
@@ -763,8 +763,8 @@
 
                     <div
                       class={[
-                        "min-h-8 space-y-1 rounded-lg p-0.5 transition-colors",
-                        draggedTaskId && taskDropTarget?.type === group.type ? "bg-sidebar-accent/30" : "",
+                        "min-h-8 space-y-1 rounded-md p-0.5 transition-colors",
+                        draggedTaskId && taskDropTarget?.type === group.type ? "bg-panel-hover/50" : "",
                       ]}
                       role="list"
                     >
@@ -778,7 +778,7 @@
                         {#if isDropPlaceholder(group.type, task.id, "before")}
                           <div
                             data-task-drop-placeholder
-                            class="grid place-items-center rounded-md border border-dashed border-primary/60 bg-primary/5 text-[11px] font-medium text-primary shadow-inner"
+                            class="grid place-items-center rounded-md border border-dashed border-primary/60 bg-panel-selected text-[11px] font-medium text-primary"
                             style:min-height={`${draggedTaskHeight}px`}
                             role="presentation"
                           >Move to {group.label}</div>
@@ -788,7 +788,7 @@
                           data-task-card
                           data-task-id={task.id}
                           class={[
-                            "group relative rounded-md bg-sidebar-accent/50 px-1.5 py-1.5 transition-[background-color,opacity,transform] duration-150 hover:bg-sidebar-accent",
+                            "group relative rounded-md bg-panel-hover/65 px-1.5 py-1.5 transition-[background-color,opacity,transform] duration-150 hover:bg-panel-hover",
                             draggedTaskId === task.id ? "border border-dashed border-primary/35 bg-primary/5 opacity-25" : "",
                           ]}
                           aria-label={task.title}
@@ -829,7 +829,7 @@
                                     </button>
 
                                     {#if statusMenuTaskId === task.id}
-                                      <div class="absolute top-7 right-0 z-40 w-36 overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-lg" role="menu" aria-label={`Status for ${task.title}`}>
+                                      <div class="absolute top-7 right-0 z-40 w-36 overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md" role="menu" aria-label={`Status for ${task.title}`}>
                                         {#each TASK_STATUSES as status}
                                           <button
                                             class={["flex h-7 w-full items-center gap-2 rounded-sm px-2 text-left text-[11px] leading-none whitespace-nowrap hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring", status === task.status ? "bg-accent text-foreground" : "text-muted-foreground"]}
@@ -863,7 +863,7 @@
                                     {:else}<Play class="h-3 w-3" aria-hidden="true" />{/if}
                                   </button>
                                   <button class="grid h-6 w-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-35" type="button" title="Edit task" aria-label={`Edit ${task.title}`} onclick={() => openEdit(task)} disabled={busy}><Pencil class="h-3 w-3" aria-hidden="true" /></button>
-                                  <button class="grid h-6 w-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-[var(--tool-error)] focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-35" type="button" title="Delete task" aria-label={`Delete ${task.title}`} onclick={() => deleteTaskId = task.id} disabled={busy}><Trash2 class="h-3 w-3" aria-hidden="true" /></button>
+                                  <button class="grid h-6 w-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-tool-error focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-35" type="button" title="Delete task" aria-label={`Delete ${task.title}`} onclick={() => deleteTaskId = task.id} disabled={busy}><Trash2 class="h-3 w-3" aria-hidden="true" /></button>
                                 </div>
                               </div>
 
@@ -874,7 +874,7 @@
                         {#if isDropPlaceholder(group.type, task.id, "after")}
                           <div
                             data-task-drop-placeholder
-                            class="grid place-items-center rounded-md border border-dashed border-primary/60 bg-primary/5 text-[11px] font-medium text-primary shadow-inner"
+                            class="grid place-items-center rounded-md border border-dashed border-primary/60 bg-panel-selected text-[11px] font-medium text-primary"
                             style:min-height={`${draggedTaskHeight}px`}
                             role="presentation"
                           >Move to {group.label}</div>
@@ -884,7 +884,7 @@
                       {#if isDropPlaceholder(group.type, null, "after")}
                         <div
                           data-task-drop-placeholder
-                          class="grid place-items-center rounded-md border border-dashed border-primary/60 bg-primary/5 text-[11px] font-medium text-primary shadow-inner"
+                          class="grid place-items-center rounded-md border border-dashed border-primary/60 bg-panel-selected text-[11px] font-medium text-primary"
                           style:min-height={`${draggedTaskHeight}px`}
                           role="presentation"
                         >Move to {group.label}</div>
@@ -954,7 +954,7 @@
 
     {#if planSelectorOpen}
       <div
-        class="absolute top-12 right-2 left-14 z-40 overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-xl"
+        class="absolute top-12 right-2 left-14 z-40 overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-md"
         role="dialog"
         aria-label="Choose plan"
       >
@@ -1030,7 +1030,7 @@
 
   {#if draggedTask && dragPointerId !== null}
     <div
-      class="pointer-events-none fixed z-50 select-none rounded-md border border-primary/45 bg-popover px-1.5 py-1.5 text-popover-foreground shadow-xl ring-1 ring-primary/15"
+      class="pointer-events-none fixed z-50 select-none rounded-md border border-chat-user-border bg-popover px-1.5 py-1.5 text-popover-foreground shadow-md"
       style:left={`${dragClientX - dragOffsetX}px`}
       style:top={`${dragClientY - dragOffsetY}px`}
       style:width={`${draggedTaskWidth}px`}
@@ -1097,12 +1097,12 @@
   {#if deleteTaskId && !collapsed}
     {@const deleteTask = tasks.find((task) => task.id === deleteTaskId)}
     <div
-      class="absolute inset-y-0 right-0 left-12 z-30 grid place-items-center border-r border-sidebar-border bg-[var(--overlay)] p-4"
+      class="absolute inset-y-0 right-0 left-12 z-30 grid place-items-center border-r border-sidebar-border bg-overlay p-4"
       role="dialog"
       aria-modal="true"
       aria-label="Delete task"
     >
-      <div class="w-full rounded-xl border border-border bg-popover p-3 text-popover-foreground shadow-md">
+      <div class="w-full rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-md">
         <strong class="text-xs font-semibold">Delete task?</strong>
         <p class="mt-1.5 break-words text-[11px] leading-4 text-muted-foreground">“{deleteTask?.title ?? "This task"}” will be removed from the project task file.</p>
         <div class="mt-3 flex justify-end gap-2">

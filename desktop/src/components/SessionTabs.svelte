@@ -51,16 +51,16 @@
     {@const running = runningSessionIds.has(session.sessionId)}
     <div
       class={[
-        "group relative -mb-px h-8 min-w-[140px] max-w-[280px] flex-[0_1_280px] overflow-hidden rounded-t-lg border transition-colors max-[760px]:basis-[230px]",
+        "group relative -mb-px h-8 min-w-[140px] max-w-[280px] flex-[0_1_280px] overflow-hidden rounded-t-md border transition-colors max-[760px]:basis-[230px]",
         active
           ? "border-border border-b-background bg-background"
-          : "border-transparent hover:bg-sidebar-accent",
+          : "border-transparent hover:bg-chrome-hover",
       ]}
     >
       <button
         use:titlebarDrag
         class={[
-          "flex h-full w-full items-center gap-2.5 bg-transparent pt-0 pr-9 pb-1.5 pl-3.5 text-left text-muted-foreground transition-colors hover:text-sidebar-accent-foreground focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40",
+          "flex h-full w-full items-center gap-2.5 bg-transparent pt-0 pr-9 pb-1.5 pl-3.5 text-left text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40",
           active && "font-medium text-foreground",
         ]}
         aria-current={active ? "page" : undefined}
@@ -100,10 +100,10 @@
   {/each}
 
   {#if sessions.length === 0 && allSessionsCount > 0}
-    <div class="group relative -mb-px h-8 min-w-[140px] max-w-[280px] flex-[0_1_280px] overflow-hidden rounded-t-lg border border-transparent transition-colors hover:bg-sidebar-accent max-[760px]:basis-[230px]">
+    <div class="group relative -mb-px h-8 min-w-[140px] max-w-[280px] flex-[0_1_280px] overflow-hidden rounded-t-md border border-transparent transition-colors hover:bg-chrome-hover max-[760px]:basis-[230px]">
       <button
         use:titlebarDrag
-        class="flex h-full w-full items-center gap-2.5 bg-transparent pt-0 px-3.5 pb-1.5 text-left text-muted-foreground transition-colors hover:text-sidebar-accent-foreground focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+        class="flex h-full w-full items-center gap-2.5 bg-transparent pt-0 px-3.5 pb-1.5 text-left text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
         aria-haspopup="dialog"
         aria-expanded={selectorOpen}
         title="Open a saved conversation"
@@ -118,7 +118,7 @@
 
   <button
     use:titlebarDrag
-    class="mx-1.5 mb-0.5 grid h-7 min-w-7 shrink-0 place-items-center rounded-lg bg-transparent text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+    class="mx-1.5 mb-0.5 grid h-7 min-w-7 shrink-0 place-items-center rounded-md bg-transparent text-muted-foreground transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
     title="New conversation"
     aria-label="New conversation"
     onclick={onCreate}

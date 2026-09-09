@@ -82,13 +82,13 @@
 </script>
 
 <div
-  class="fixed inset-0 z-40 grid place-items-center bg-foreground/35 p-6 backdrop-blur-sm"
+  class="fixed inset-0 z-40 grid place-items-center bg-overlay p-6"
   role="presentation"
   onclick={handleBackdropClick}
   onkeydown={handleKeydown}
 >
   <div
-    class="grid max-h-[min(560px,calc(100vh-48px))] w-[min(540px,100%)] grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-md"
+    class="grid max-h-[min(560px,calc(100vh-48px))] w-[min(540px,100%)] grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-md"
     role="dialog"
     aria-modal="true"
     aria-labelledby="command-picker-title"

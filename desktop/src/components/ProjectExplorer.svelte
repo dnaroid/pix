@@ -130,7 +130,7 @@
         <RotateCw class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />Loading project files…
       </div>
     {:else if rootError}
-      <div class="mx-2 rounded-md border border-[var(--tool-error)]/25 bg-[var(--tool-error)]/5 px-2.5 py-2 text-[11px] leading-4 text-[var(--tool-error)]">
+      <div class="mx-2 rounded-md border border-tool-error/25 bg-tool-error/5 px-2.5 py-2 text-[11px] leading-4 text-tool-error">
         {rootError}
       </div>
     {:else if rootEntries.length === 0}
@@ -186,7 +186,7 @@
         </div>
         {#if entry.kind === "directory" && expanded && errorByDirectory[entry.path]}
           <div
-            class="pr-2 text-[11px] leading-4 text-[var(--tool-error)]"
+            class="pr-2 text-[11px] leading-4 text-tool-error"
             style:padding-left={`${34 + (row.depth + 1) * 14}px`}
           >{errorByDirectory[entry.path]}</div>
         {/if}

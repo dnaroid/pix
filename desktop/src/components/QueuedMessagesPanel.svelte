@@ -29,9 +29,9 @@
 </script>
 
 {#if items.length > 0}
-  <section class="mx-3 mb-1 max-h-44 overflow-y-auto rounded-lg border border-border/70 bg-card/70 shadow-xs" aria-label="Queued messages">
+  <section class="max-h-44 overflow-y-auto border-t border-border bg-panel px-3 py-1" aria-label="Queued messages">
     {#each items as item (item.id)}
-      <article class="group flex min-h-9 items-center gap-2 border-b border-border/50 px-2.5 py-1.5 last:border-b-0">
+      <article class="group flex min-h-9 items-center gap-2 border-b border-border/60 px-1 py-1.5 last:border-b-0">
         {#if item.source === "deferred"}
           <Pause class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
         {:else}

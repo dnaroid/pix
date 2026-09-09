@@ -14,8 +14,8 @@
   } = $props();
 </script>
 
-<div class="fixed inset-0 z-30 grid place-items-center bg-overlay p-6 backdrop-blur-sm" role="presentation">
-  <div class="w-[min(520px,100%)] rounded-xl border border-border bg-popover p-5 text-popover-foreground shadow-md" role="dialog" aria-modal="true" aria-labelledby="elicitation-title">
+<div class="fixed inset-0 z-30 grid place-items-center bg-overlay p-6" role="presentation">
+  <div class="w-[min(520px,100%)] rounded-lg border border-border bg-popover p-5 text-popover-foreground shadow-md" role="dialog" aria-modal="true" aria-labelledby="elicitation-title">
     <span class="text-[11px] font-semibold tracking-[0.08em] text-primary uppercase">Pix needs your input</span>
     <h2 id="elicitation-title" class="mt-2 mb-[22px] text-base leading-snug font-medium whitespace-pre-wrap text-foreground">{message}</h2>
     <label class="grid gap-2">
@@ -23,7 +23,7 @@
       {#if field.description}<small class="text-muted-foreground">{field.description}</small>{/if}
       {#if field.type === "select"}
         <select
-          class="min-h-[34px] w-full rounded-lg border border-input bg-card px-2.5 py-2 text-foreground transition-colors outline-none hover:border-ring focus:border-ring focus:ring-2 focus:ring-ring/20"
+          class="min-h-[34px] w-full rounded-md border border-input bg-panel-strong px-2.5 py-2 text-foreground transition-colors outline-none hover:border-ring focus:border-ring focus:ring-2 focus:ring-ring/20"
           value={String(field.value)}
           onchange={(event) => onValueChange(event.currentTarget.value)}
         >
@@ -38,7 +38,7 @@
         />
       {:else}
         <textarea
-          class="min-h-[34px] w-full resize-y rounded-lg border border-input bg-card px-2.5 py-2 text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
+          class="min-h-[34px] w-full resize-y rounded-md border border-input bg-panel-strong px-2.5 py-2 text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
           rows="5"
           value={String(field.value)}
           oninput={(event) => onValueChange(event.currentTarget.value)}

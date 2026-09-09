@@ -19,10 +19,10 @@
   const activeCount = $derived(sessionSubagentCount(snapshot));
 
   function statusTone(status: SessionSubagentStatus): string {
-    if (status === "running") return "text-[var(--tool-info)]";
-    if (status === "retrying") return "text-[var(--tool-warning)]";
-    if (status === "done") return "text-[var(--tool-success)]";
-    if (status === "failed") return "text-[var(--tool-error)]";
+    if (status === "running") return "text-tool-info";
+    if (status === "retrying") return "text-tool-warning";
+    if (status === "done") return "text-tool-success";
+    if (status === "failed") return "text-tool-error";
     return "text-muted-foreground";
   }
 
@@ -69,7 +69,7 @@
                 {@const preview = sessionSubagentTaskPreview(run, agent.id)}
                 {@const task = preview?.task?.trim() || preview?.scope?.trim() || "Task unavailable"}
                 {@const AgentIcon = agentIcon(preview?.icon)}
-                <article class="rounded-lg bg-sidebar-accent/50 p-2.5 transition-colors hover:bg-sidebar-accent" aria-label={`Subagent ${agent.id}: ${statusLabel(agent.status)}`}>
+                <article class="rounded-md bg-panel-hover/65 p-2.5 transition-colors hover:bg-panel-hover" aria-label={`Subagent ${agent.id}: ${statusLabel(agent.status)}`}>
                   <div class="flex items-start gap-2">
                     <span class={["mt-0.5 shrink-0", statusTone(agent.status)]} title={`Agent type: ${preview?.icon?.trim() || "agent"} · ${statusLabel(agent.status)}`}>
                       <AgentIcon class="h-4 w-4" aria-hidden="true" />

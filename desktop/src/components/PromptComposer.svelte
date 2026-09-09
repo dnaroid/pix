@@ -592,11 +592,11 @@
 
 <svelte:window onresize={resizeComposer} onkeydown={handleQuestionEscape} />
 
-<div class={editorMode ? "relative" : "relative mx-2 mb-2"}>
+<div class={editorMode ? "relative" : "relative border-t border-border bg-panel px-3 py-2"}>
 {#if slashMenuOpen}
   <div
     bind:this={slashListbox}
-    class="absolute right-0 bottom-[calc(100%+0.375rem)] left-0 z-30 max-h-72 overflow-y-auto rounded-xl border border-border bg-popover p-1.5 text-popover-foreground shadow-lg"
+    class="absolute right-0 bottom-[calc(100%+0.375rem)] left-0 z-30 max-h-72 overflow-y-auto rounded-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-md"
     id={slashListboxId}
     role="listbox"
     aria-label="Slash commands"
@@ -604,7 +604,7 @@
     {#each slashMatches as match, index (`${match.command.name}:${index}`)}
       <button
         class={[
-          "flex w-full items-start gap-3 rounded-lg px-2.5 py-2 text-left transition-colors",
+          "flex w-full items-start gap-3 rounded-md px-2.5 py-2 text-left transition-colors",
           index === selectedSlashCommand ? "bg-accent text-accent-foreground" : "hover:bg-accent/60",
         ]}
         type="button"
@@ -636,14 +636,14 @@
 
 <form
   class={[
-    "overflow-hidden rounded-xl border bg-background shadow-xs focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20",
+    "overflow-hidden rounded-lg border bg-panel-strong shadow-none focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20",
     dragActive ? "border-ring ring-2 ring-ring/30" : "border-input",
   ]}
   bind:this={composerForm}
   onsubmit={handleSubmit}
 >
   {#if questionMode}
-    <div class="border-b border-border bg-muted/20 px-3 pt-2.5">
+    <div class="border-b border-border bg-panel px-3 pt-2.5">
       <div class="mb-2 flex items-center justify-between gap-3">
         <p class="min-w-0 truncate text-[11px] font-medium text-muted-foreground">{questionMode.message}</p>
         <button
@@ -661,8 +661,8 @@
             class={[
               "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-t-md border-x border-t px-2.5 text-xs font-medium transition-colors focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-ring",
               questionMode.state.activeTab === index
-                ? "border-border bg-background text-foreground"
-                : "border-transparent text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+                ? "border-border bg-panel-strong text-foreground"
+                : "border-transparent text-muted-foreground hover:bg-panel-hover hover:text-foreground",
             ]}
             type="button"
             role="tab"
@@ -684,8 +684,8 @@
           class={[
             "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-t-md border-x border-t px-2.5 text-xs font-medium transition-colors focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-ring",
             previewing
-              ? "border-border bg-background text-foreground"
-              : "border-transparent text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+              ? "border-border bg-panel-strong text-foreground"
+              : "border-transparent text-muted-foreground hover:bg-panel-hover hover:text-foreground",
           ]}
           type="button"
           role="tab"
@@ -723,7 +723,7 @@
             <button
               class={[
                 "group flex w-full items-start gap-2.5 px-2 py-2 text-left transition-colors focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-ring",
-                complete ? "hover:bg-accent/35" : "bg-destructive/5 hover:bg-destructive/10",
+                complete ? "hover:bg-panel-hover" : "bg-destructive/5 hover:bg-destructive/10",
               ]}
               type="button"
               onclick={() => editAnswer(index)}
@@ -769,7 +769,7 @@
             <button
               class={[
                 "flex w-full items-start gap-2.5 px-2 py-2 text-left transition-colors focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-ring",
-                selected ? "bg-primary/8" : "hover:bg-accent/35",
+                selected ? "bg-panel-selected" : "hover:bg-panel-hover",
                 blocked && "cursor-not-allowed opacity-45",
               ]}
               type="button"
@@ -783,7 +783,7 @@
             >
               <span class={[
                 "mt-0.5 grid size-4 shrink-0 place-items-center border",
-                currentQuestion.multiple ? "rounded-[4px]" : "rounded-full",
+                currentQuestion.multiple ? "rounded-sm" : "rounded-full",
                 selected ? "border-primary" : "border-muted-foreground/50",
               ]}>{#if selected}{#if currentQuestion.multiple}<Check class="size-3 text-primary" strokeWidth={2.4} />{:else}<span class="size-2 rounded-full bg-primary"></span>{/if}{/if}</span>
               <span class="min-w-0">
@@ -795,7 +795,7 @@
           <button
             class={[
               "flex w-full items-start gap-2.5 px-2 py-2 text-left transition-colors focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-ring",
-              currentDraft.customSelected ? "bg-primary/8" : "hover:bg-accent/35",
+              currentDraft.customSelected ? "bg-panel-selected" : "hover:bg-panel-hover",
               atSelectionLimit && !currentDraft.customSelected && "cursor-not-allowed opacity-45",
             ]}
             type="button"
@@ -809,7 +809,7 @@
           >
             <span class={[
               "mt-0.5 grid size-4 shrink-0 place-items-center border",
-              currentQuestion.multiple ? "rounded-[4px]" : "rounded-full",
+              currentQuestion.multiple ? "rounded-sm" : "rounded-full",
               currentDraft.customSelected ? "border-primary" : "border-muted-foreground/50",
             ]}>{#if currentDraft.customSelected}{#if currentQuestion.multiple}<Check class="size-3 text-primary" strokeWidth={2.4} />{:else}<span class="size-2 rounded-full bg-primary"></span>{/if}{/if}</span>
             <span class="text-xs font-medium text-foreground">Something else…</span>
