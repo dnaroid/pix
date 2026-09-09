@@ -257,10 +257,10 @@ describe("P01-R native recovery contracts", () => {
 		const interim = updates.find((update) => update.details?.fullOutputPath);
 		expect(interim?.details?.truncation?.truncated).toBe(true);
 		const interimPath = interim.details.fullOutputPath as string;
-		// OutputAccumulator assigns the path synchronously, while createWriteStream
-		// opens it asynchronously. A streaming/UI preview can therefore advertise
-		// a path that is not yet readable. It is not a model recovery capability.
-		expect(existsSync(interimPath)).toBe(false);
+		// The preview races stream creation and can be absent or incomplete; only the final result is recoverable.
+		if (existsSync(interimPath)) {
+			expect(readFileSync(interimPath, "utf8")).not.toContain("second-0-");
+		}
 
 		release();
 		const result = await execution;
@@ -341,4 +341,3 @@ describe("P01-R native recovery contracts", () => {
 		}
 	});
 });
-

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { describe, it } from "node:test";
 
 import {
@@ -111,7 +111,7 @@ describe("watch:all desktop artifact selection", () => {
 
 	it("resolves the bundle's inner executable on macOS and the copied binary elsewhere", () => {
 		assert.equal(
-			desktopLaunchExecutable("/tmp/run/pix-desktop-3.app", "darwin"),
+			desktopLaunchExecutable("/tmp/run/pix-desktop-3.app", "darwin", "pix-desktop"),
 			join("/tmp/run/pix-desktop-3.app", "Contents", "MacOS", "pix-desktop"),
 		);
 		assert.equal(desktopLaunchExecutable("/tmp/run/pix-desktop-3.exe", "win32"), "/tmp/run/pix-desktop-3.exe");
@@ -154,8 +154,9 @@ describe("watch:all macOS launch identity", () => {
 	});
 
 	it("launches fresh instances via /usr/bin/open -n -W on the copied bundle", () => {
-		const bundle = desktopArtifactDestination("/tmp/run", 3, "/targets/macos/Pix Desktop.app", "darwin");
-		const executable = desktopLaunchExecutable(bundle, "darwin");
+		const tempDirectory = resolve("/tmp", "run");
+		const bundle = desktopArtifactDestination(tempDirectory, 3, "/targets/macos/Pix Desktop.app", "darwin");
+		const executable = desktopLaunchExecutable(bundle, "darwin", "pix-desktop");
 		assert.equal(desktopAppBundlePath(executable), bundle);
 		assert.deepEqual(macOSOpenArguments(bundle), ["-n", "-W", bundle]);
 	});

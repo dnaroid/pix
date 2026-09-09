@@ -898,7 +898,9 @@ fn write_project_markdown_from(
         || (normalized.starts_with(".pi/plans/")
             && normalized.to_ascii_lowercase().ends_with(".md"));
     if !editable {
-        return Err("only .pi/TODO.md and Markdown files under .pi/plans/ can be edited".to_owned());
+        return Err(
+            "only .pi/TODO.md and Markdown files under .pi/plans/ can be edited".to_owned(),
+        );
     }
 
     let root = canonical_workspace(workspace)?;
@@ -914,8 +916,9 @@ fn write_project_markdown_from(
     } else {
         let plans_dir_path = project_dir.join("plans");
         if !plans_dir_path.exists() {
-            fs::create_dir(&plans_dir_path)
-                .map_err(|error| format!("failed to create {}: {error}", plans_dir_path.display()))?;
+            fs::create_dir(&plans_dir_path).map_err(|error| {
+                format!("failed to create {}: {error}", plans_dir_path.display())
+            })?;
         }
         let plans_dir = fs::canonicalize(&plans_dir_path)
             .map_err(|error| format!("failed to resolve {}: {error}", plans_dir_path.display()))?;
@@ -1156,7 +1159,10 @@ fn git_output(root: &Path, args: &[&str]) -> Result<std::process::Output, String
     if output.status.success() {
         Ok(output)
     } else {
-        Err(git_command_error(&format!("git {}", args.join(" ")), &output))
+        Err(git_command_error(
+            &format!("git {}", args.join(" ")),
+            &output,
+        ))
     }
 }
 
@@ -1181,7 +1187,13 @@ fn git_status_from(workspace: &Path) -> Result<GitSnapshot, String> {
     let root = git_repository_root(workspace)?;
     let output = git_output(
         &root,
-        &["status", "--porcelain=v2", "-z", "--branch", "--untracked-files=all"],
+        &[
+            "status",
+            "--porcelain=v2",
+            "-z",
+            "--branch",
+            "--untracked-files=all",
+        ],
     )?;
     let mut snapshot = parse_git_status_porcelain(&output.stdout)?;
     snapshot.branches = git_local_branches(&root, &snapshot.branch)?;
@@ -1215,7 +1227,11 @@ fn parse_git_status_porcelain(bytes: &[u8]) -> Result<GitSnapshot, String> {
         }
         if let Some(value) = text.strip_prefix("# branch.head ") {
             detached = value == "(detached)";
-            branch = if detached { "HEAD".to_owned() } else { value.to_owned() };
+            branch = if detached {
+                "HEAD".to_owned()
+            } else {
+                value.to_owned()
+            };
             continue;
         }
         if let Some(value) = text.strip_prefix("# branch.upstream ") {
@@ -1284,7 +1300,12 @@ fn parse_git_status_porcelain(bytes: &[u8]) -> Result<GitSnapshot, String> {
 
 fn parse_git_ordinary_change(record: &str) -> Option<GitFileChange> {
     let fields = record.splitn(9, ' ').collect::<Vec<_>>();
-    git_change_from_fields(fields.get(1).copied()?, fields.get(8).copied()?, None, false)
+    git_change_from_fields(
+        fields.get(1).copied()?,
+        fields.get(8).copied()?,
+        None,
+        false,
+    )
 }
 
 fn parse_git_renamed_change(record: &str, original_path: &str) -> Option<GitFileChange> {
@@ -1299,7 +1320,12 @@ fn parse_git_renamed_change(record: &str, original_path: &str) -> Option<GitFile
 
 fn parse_git_unmerged_change(record: &str) -> Option<GitFileChange> {
     let fields = record.splitn(11, ' ').collect::<Vec<_>>();
-    git_change_from_fields(fields.get(1).copied()?, fields.get(10).copied()?, None, true)
+    git_change_from_fields(
+        fields.get(1).copied()?,
+        fields.get(10).copied()?,
+        None,
+        true,
+    )
 }
 
 fn git_change_from_fields(
@@ -1326,7 +1352,11 @@ fn git_change_from_fields(
 fn git_local_branches(root: &Path, current_branch: &str) -> Result<Vec<GitBranch>, String> {
     let output = git_output(
         root,
-        &["for-each-ref", "--format=%(refname:short)%00%(upstream:short)", "refs/heads"],
+        &[
+            "for-each-ref",
+            "--format=%(refname:short)%00%(upstream:short)",
+            "refs/heads",
+        ],
     )?;
     let text = String::from_utf8_lossy(&output.stdout);
     let mut branches = text
@@ -1418,7 +1448,10 @@ fn git_diff_from(
             }
             let before_untracked = content.len();
             append_untracked_diffs(&root, &snapshot, path, &mut content)?;
-            if before_untracked == content.len() && before_unstaged == content.len() && content.is_empty() {
+            if before_untracked == content.len()
+                && before_unstaged == content.len()
+                && content.is_empty()
+            {
                 content.clear();
             }
         }
@@ -1526,7 +1559,11 @@ fn git_unstage_from(workspace: &Path, path: Option<&str>) -> Result<(), String> 
     if git_has_head(&root)? {
         git_output(&root, &["reset", "-q", "HEAD", "--", target]).map(|_| ())
     } else {
-        git_output(&root, &["rm", "--cached", "-r", "--ignore-unmatch", "--", target]).map(|_| ())
+        git_output(
+            &root,
+            &["rm", "--cached", "-r", "--ignore-unmatch", "--", target],
+        )
+        .map(|_| ())
     }
 }
 
@@ -1552,7 +1589,12 @@ fn git_push_from(workspace: &Path) -> Result<(), String> {
     }
     let upstream = git_output_raw(
         &root,
-        &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
+        &[
+            "rev-parse",
+            "--abbrev-ref",
+            "--symbolic-full-name",
+            "@{upstream}",
+        ],
     )?;
     if upstream.status.success() {
         return git_output(&root, &["push"]).map(|_| ());
@@ -1602,9 +1644,10 @@ fn launch_external_editor(editor: &str, target: &Path) -> Result<(), String> {
             .map_err(|error| {
                 format!("failed to open {} in {app_name}: {error}", target.display())
             })?;
-        return status.success().then_some(()).ok_or_else(|| {
-            format!("{app_name} could not open {}", target.display())
-        });
+        return status
+            .success()
+            .then_some(())
+            .ok_or_else(|| format!("{app_name} could not open {}", target.display()));
     }
 
     let executable = external_editor_executable(editor);
@@ -1851,7 +1894,10 @@ fn read_task_document_path(
     let canonical = fs::canonicalize(&path)
         .map_err(|error| format!("failed to resolve {}: {error}", path.display()))?;
     if !canonical.starts_with(&root) {
-        return Err(format!("{} resolves outside the workspace", task_file_label(jsonc)));
+        return Err(format!(
+            "{} resolves outside the workspace",
+            task_file_label(jsonc)
+        ));
     }
     let metadata = fs::metadata(&canonical)
         .map_err(|error| format!("failed to inspect {}: {error}", canonical.display()))?;
@@ -1859,7 +1905,10 @@ fn read_task_document_path(
         return Err(format!("{} is not a file", task_file_label(jsonc)));
     }
     if metadata.len() > max_bytes {
-        return Err(format!("{} is too large (maximum 1 MB)", task_file_label(jsonc)));
+        return Err(format!(
+            "{} is too large (maximum 1 MB)",
+            task_file_label(jsonc)
+        ));
     }
     let mut bytes = Vec::with_capacity(metadata.len() as usize);
     fs::File::open(&canonical)
@@ -1868,7 +1917,10 @@ fn read_task_document_path(
         .read_to_end(&mut bytes)
         .map_err(|error| format!("failed to read {}: {error}", task_file_label(jsonc)))?;
     if bytes.len() as u64 > max_bytes {
-        return Err(format!("{} grew beyond the 1 MB limit", task_file_label(jsonc)));
+        return Err(format!(
+            "{} grew beyond the 1 MB limit",
+            task_file_label(jsonc)
+        ));
     }
     let mut document: ProjectTaskDocument = if jsonc {
         let source = std::str::from_utf8(&bytes)
@@ -1888,7 +1940,11 @@ fn read_task_document_path(
 }
 
 fn task_file_label(jsonc: bool) -> &'static str {
-    if jsonc { ".pi/tasks.jsonc" } else { ".pi/tasks.json" }
+    if jsonc {
+        ".pi/tasks.jsonc"
+    } else {
+        ".pi/tasks.json"
+    }
 }
 
 fn normalize_jsonc(source: &str) -> Result<String, String> {
@@ -1987,8 +2043,7 @@ fn normalize_jsonc(source: &str) -> Result<String, String> {
         index += 1;
     }
 
-    String::from_utf8(output)
-        .map_err(|error| format!("invalid .pi/tasks.jsonc UTF-8: {error}"))
+    String::from_utf8(output).map_err(|error| format!("invalid .pi/tasks.jsonc UTF-8: {error}"))
 }
 
 fn write_project_tasks_to(workspace: &Path, document: &ProjectTaskDocument) -> Result<(), String> {
@@ -2328,9 +2383,7 @@ fn start_process(app: AppHandle, window_label: String) -> Result<u64, String> {
         "acp://stderr",
         generation,
     );
-    thread::spawn(move || {
-        supervise_child(child, stop_rx, app, window_label, generation, exited)
-    });
+    thread::spawn(move || supervise_child(child, stop_rx, app, window_label, generation, exited));
     Ok(generation)
 }
 
@@ -2492,8 +2545,7 @@ fn forward_lines<R>(
     window_label: String,
     event: &'static str,
     generation: u64,
-)
-where
+) where
     R: Read + Send + 'static,
 {
     let (line_tx, line_rx) = mpsc::channel();
@@ -2522,9 +2574,7 @@ where
             }
         }
     });
-    thread::spawn(move || {
-        batch_forwarded_lines(line_rx, app, window_label, event, generation)
-    });
+    thread::spawn(move || batch_forwarded_lines(line_rx, app, window_label, event, generation));
 }
 
 fn batch_forwarded_lines(
@@ -2756,14 +2806,9 @@ mod tests {
             lines: vec!["message".to_owned()],
         })
         .expect("serialize lines payload");
-        let exit = serde_json::to_value(exit_payload(
-            "project-two".to_owned(),
-            8,
-            None,
-            true,
-            None,
-        ))
-        .expect("serialize exit payload");
+        let exit =
+            serde_json::to_value(exit_payload("project-two".to_owned(), 8, None, true, None))
+                .expect("serialize exit payload");
 
         assert_eq!(lines["windowLabel"], "project-one");
         assert_eq!(lines["generation"], 7);
@@ -2802,7 +2847,8 @@ mod tests {
         fs::create_dir_all(workspace.join(".pi/plans/releases")).expect("create plans directory");
         fs::write(workspace.join(".pi/plans/alpha.md"), "# Alpha\n").expect("write plan");
         fs::write(workspace.join(".pi/plans/releases/v2.md"), "# V2\n").expect("write nested plan");
-        fs::write(workspace.join(".pi/plans/notes.txt"), "ignore\n").expect("write non-markdown plan");
+        fs::write(workspace.join(".pi/plans/notes.txt"), "ignore\n")
+            .expect("write non-markdown plan");
 
         let before = list_project_documents_from(&workspace).expect("list project documents");
         assert_eq!(
@@ -2834,7 +2880,12 @@ mod tests {
         let after = list_project_documents_from(&workspace).expect("list project documents again");
         assert!(after.todo_exists);
         assert!(write_project_markdown_from(&workspace, Path::new("README.md"), "nope").is_err());
-        assert!(write_project_markdown_from(&workspace, Path::new(".pi/plans/../secret.md"), "nope").is_err());
+        assert!(write_project_markdown_from(
+            &workspace,
+            Path::new(".pi/plans/../secret.md"),
+            "nope"
+        )
+        .is_err());
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
     }
 
@@ -2847,12 +2898,23 @@ mod tests {
         fs::create_dir(workspace.join(".git")).expect("create git directory");
 
         let root = list_project_directory_from(&workspace, None).expect("list project root");
-        assert_eq!(root.iter().map(|entry| entry.name.as_str()).collect::<Vec<_>>(), vec!["src", "README.md"]);
+        assert_eq!(
+            root.iter()
+                .map(|entry| entry.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["src", "README.md"]
+        );
         assert!(matches!(root[0].kind, ProjectTreeEntryKind::Directory));
         assert!(matches!(root[1].kind, ProjectTreeEntryKind::File));
 
-        let src = list_project_directory_from(&workspace, Some(Path::new("src"))).expect("list src");
-        assert_eq!(src.iter().map(|entry| entry.path.as_str()).collect::<Vec<_>>(), vec!["src/components", "src/main.ts"]);
+        let src =
+            list_project_directory_from(&workspace, Some(Path::new("src"))).expect("list src");
+        assert_eq!(
+            src.iter()
+                .map(|entry| entry.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["src/components", "src/main.ts"]
+        );
         assert!(list_project_directory_from(&workspace, Some(Path::new("../outside"))).is_err());
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
     }
@@ -2868,7 +2930,8 @@ mod tests {
             fs::canonicalize(&workspace).expect("canonical workspace"),
         );
         assert_eq!(
-            resolve_external_editor_target(&workspace, Some(Path::new("src/main.ts"))).expect("resolve file"),
+            resolve_external_editor_target(&workspace, Some(Path::new("src/main.ts")))
+                .expect("resolve file"),
             fs::canonicalize(workspace.join("src/main.ts")).expect("canonical file"),
         );
         assert!(resolve_external_editor_target(&workspace, Some(Path::new("../outside"))).is_err());
@@ -2883,12 +2946,17 @@ mod tests {
         let workspace = temporary_workspace("project-tree-symlink-workspace");
         let outside = temporary_workspace("project-tree-symlink-outside");
         fs::write(outside.join("secret.txt"), "secret\n").expect("write outside file");
-        symlink(outside.join("secret.txt"), workspace.join("secret-link.txt"))
-            .expect("create file symlink");
+        symlink(
+            outside.join("secret.txt"),
+            workspace.join("secret-link.txt"),
+        )
+        .expect("create file symlink");
 
         let entries = list_project_directory_from(&workspace, None).expect("list project root");
         assert!(entries.iter().all(|entry| entry.name != "secret-link.txt"));
-        assert!(resolve_external_editor_target(&workspace, Some(Path::new("secret-link.txt"))).is_err());
+        assert!(
+            resolve_external_editor_target(&workspace, Some(Path::new("secret-link.txt"))).is_err()
+        );
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
         fs::remove_dir_all(outside).expect("remove outside workspace");
     }
@@ -2900,10 +2968,12 @@ mod tests {
             .success()
             .then_some(())
             .expect("git init succeeds");
-        git_output(workspace, &["config", "user.email", "pix-tests@example.invalid"])
-            .expect("configure git email");
-        git_output(workspace, &["config", "user.name", "Pix Tests"])
-            .expect("configure git name");
+        git_output(
+            workspace,
+            &["config", "user.email", "pix-tests@example.invalid"],
+        )
+        .expect("configure git email");
+        git_output(workspace, &["config", "user.name", "Pix Tests"]).expect("configure git name");
         fs::write(workspace.join("tracked.txt"), "before\n").expect("write tracked file");
         git_output(workspace, &["add", "tracked.txt"]).expect("stage initial file");
         git_output(workspace, &["commit", "--no-gpg-sign", "-m", "initial"])
@@ -2920,10 +2990,14 @@ mod tests {
         let before = git_status_from(&workspace).expect("read git status");
         assert_eq!(before.branch, "main");
         assert!(!before.detached);
-        assert!(before.changes.iter().any(|change| {
-            change.path == "tracked.txt" && change.unstaged && !change.staged
-        }));
-        assert!(before.changes.iter().any(|change| change.path == "new.txt" && change.untracked));
+        assert!(before
+            .changes
+            .iter()
+            .any(|change| { change.path == "tracked.txt" && change.unstaged && !change.staged }));
+        assert!(before
+            .changes
+            .iter()
+            .any(|change| change.path == "new.txt" && change.untracked));
 
         let working = git_diff_from(&workspace, Some("tracked.txt"), GitDiffScope::Unstaged)
             .expect("read working diff");
@@ -2932,18 +3006,20 @@ mod tests {
 
         git_stage_from(&workspace, Some("tracked.txt")).expect("stage tracked file");
         let staged = git_status_from(&workspace).expect("read staged status");
-        assert!(staged.changes.iter().any(|change| {
-            change.path == "tracked.txt" && change.staged && !change.unstaged
-        }));
+        assert!(staged
+            .changes
+            .iter()
+            .any(|change| { change.path == "tracked.txt" && change.staged && !change.unstaged }));
         let staged_diff = git_diff_from(&workspace, Some("tracked.txt"), GitDiffScope::Staged)
             .expect("read staged diff");
         assert!(staged_diff.content.contains("+after"));
 
         git_unstage_from(&workspace, Some("tracked.txt")).expect("unstage tracked file");
         let unstaged = git_status_from(&workspace).expect("read unstaged status");
-        assert!(unstaged.changes.iter().any(|change| {
-            change.path == "tracked.txt" && !change.staged && change.unstaged
-        }));
+        assert!(unstaged
+            .changes
+            .iter()
+            .any(|change| { change.path == "tracked.txt" && !change.staged && change.unstaged }));
         assert!(git_stage_from(&workspace, Some("../outside")).is_err());
 
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
@@ -2967,9 +3043,7 @@ mod tests {
             .content
             .contains(&format!("+workspace marker: {workspace_text}")));
         for line in diff.content.lines().filter(|line| {
-            line.starts_with("diff --git ")
-                || line.starts_with("--- ")
-                || line.starts_with("+++ ")
+            line.starts_with("diff --git ") || line.starts_with("--- ") || line.starts_with("+++ ")
         }) {
             assert!(
                 !line.contains(&workspace_text),
@@ -2998,18 +3072,27 @@ mod tests {
         let workspace = temporary_workspace("git-branch-commit-push");
         let remote = temporary_workspace("git-bare-remote");
         initialize_git_repository(&workspace);
-        let init_bare = git_output_raw(&remote, &["init", "--bare"]).expect("initialize bare remote");
+        let init_bare =
+            git_output_raw(&remote, &["init", "--bare"]).expect("initialize bare remote");
         assert!(init_bare.status.success());
         let remote_path = remote.to_string_lossy().into_owned();
         git_output(&workspace, &["remote", "add", "origin", &remote_path]).expect("add origin");
 
-        git_switch_branch_from(&workspace, "feature/source-control", true).expect("create feature branch");
-        assert_eq!(git_status_from(&workspace).expect("feature status").branch, "feature/source-control");
+        git_switch_branch_from(&workspace, "feature/source-control", true)
+            .expect("create feature branch");
+        assert_eq!(
+            git_status_from(&workspace).expect("feature status").branch,
+            "feature/source-control"
+        );
 
-        fs::write(workspace.join("tracked.txt"), "committed from feature\n").expect("modify tracked file");
+        fs::write(workspace.join("tracked.txt"), "committed from feature\n")
+            .expect("modify tracked file");
         git_stage_from(&workspace, Some("tracked.txt")).expect("stage feature change");
         git_commit_from(&workspace, "Update tracked file").expect("commit feature change");
-        assert!(git_status_from(&workspace).expect("clean feature status").changes.is_empty());
+        assert!(git_status_from(&workspace)
+            .expect("clean feature status")
+            .changes
+            .is_empty());
 
         git_switch_branch_from(&workspace, "main", false).expect("switch back to main");
         git_push_from(&workspace).expect("publish main branch");
