@@ -1,8 +1,14 @@
 # Desktop project selector in the title bar
 
+<!-- markdownlint-disable MD013 -->
+
 ## Type
 
 Change
+
+## Lifecycle
+
+Active implemented contract.
 
 ## Goal
 

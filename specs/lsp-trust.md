@@ -1,11 +1,21 @@
 # lsp trust & command execution (as-is spec)
 
+<!-- markdownlint-disable MD013 MD022 MD032 -->
+
 > Risk class: **security**. Gates execution of LSP server binaries declared in
 > project-local config behind a trust decision, while allowing unrestricted
 > execution from global (user-owned) config.
 >
 > _Investigated by a read-only sub-agent; re-verify against current code. Line
 > numbers are approximate._
+
+## Type
+
+As-is
+
+## Lifecycle
+
+Active implemented contract.
 
 ## Purpose
 Gate execution of LSP server binaries declared in project-local config behind a
@@ -70,7 +80,18 @@ trust decision; global config servers run with no gate. `[confirmed by code]`
 - **Network**: none initiated by trust/config itself; LSP servers may use network. `[inferred]`
 
 ## Related files
-`external/pi-tools-suite/src/lsp/_shared/{trust,config,paths,runner,template,types,output,glob}.ts`, `.../lsp/{client,manager,child-process,index,types,tsserver,...}.ts`, `.../src/lib/lsp.ts`, `.../src/config.ts`, `.../test/lsp.test.ts`.
+
+- `external/pi-tools-suite/src/lsp/_shared/trust.ts`
+- `external/pi-tools-suite/src/lsp/_shared/config.ts`
+- `external/pi-tools-suite/src/lsp/_shared/paths.ts`
+- `external/pi-tools-suite/src/lsp/_shared/runner.ts`
+- `external/pi-tools-suite/src/lsp/client.ts`
+- `external/pi-tools-suite/src/lsp/manager.ts`
+- `external/pi-tools-suite/src/lsp/child-process.ts`
+- `external/pi-tools-suite/src/lsp/index.ts`
+- `external/pi-tools-suite/src/lib/lsp.ts`
+- `external/pi-tools-suite/src/config.ts`
+- `external/pi-tools-suite/test/lsp.test.ts`
 
 ## Existing tests
 - `lsp.test.ts` `[confirmed by tests]`:

@@ -1,0 +1,63 @@
+{
+  "skill_name": "spec-wiki",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "We are going to change the session refresh contract in the supplied fixture: a transient token-load failure should be retried exactly once, while a second failure must still propagate. Before implementation, inspect the fixture code and tests and write a compact change spec named session-refresh-spec.md in the run output directory. Do not modify production code and do not bootstrap a repository-wide spec wiki for this narrow task.",
+      "expected_output": "A focused Change spec grounded in the fixture's current code/tests, with intended retry behavior, edge cases, verification, evidence/unknowns, and no production-code or wiki-state mutation.",
+      "files": [
+        "evals/files/focused/src/session.ts",
+        "evals/files/focused/tests/session.test.ts"
+      ],
+      "expectations": [
+        "The output contains a spec explicitly identified as Change/intended behavior.",
+        "The spec states that current fixture behavior performs one token-load attempt with no retry.",
+        "The intended behavior retries a transient token-load failure exactly once and propagates a second failure.",
+        "The spec contains a concrete verification path covering success, retry-success, and retry-failure behavior.",
+        "The spec explicitly distinguishes confirmed code/test evidence from inference or unknowns instead of presenting every claim at the same confidence level.",
+        "The run does not modify fixture production code and does not create .spec-wiki state for this narrow task.",
+        "The with-skill run reads focused-spec.md and does not read bootstrap.md, maintenance.md, query.md, or index-schema.md unless the task actually expands to need them."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "In the supplied fixture, answer this narrowly from the project's primary specifications: what are the cancellation semantics for background jobs, and which primary spec defines them? There is also an overview and a retry document nearby. Do not build a wiki and do not treat an overview/index summary as primary evidence. Include source paths in the answer.",
+      "expected_output": "A concise answer grounded in the cancellation primary spec, distinguishing it from the overview and unrelated retry spec, without creating wiki state.",
+      "files": [
+        "evals/files/query/docs/spec-overview.md",
+        "evals/files/query/features/jobs/cancellation-contract.md",
+        "evals/files/query/features/jobs/retry-spec.md",
+        "evals/files/query/docs/how-to-run-jobs.md"
+      ],
+      "expectations": [
+        "The answer identifies features/jobs/cancellation-contract.md as the primary source.",
+        "The answer states that cancellation is idempotent, running jobs become cancelled, and already terminal jobs remain terminal.",
+        "The overview is not cited as primary evidence for the behavior claim.",
+        "The run does not create .spec-wiki state or perform repository-wide bootstrap.",
+        "The with-skill run reads query.md and does not read bootstrap.md or maintenance.md unless the task actually expands to need them."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Bootstrap a Spec Wiki for the supplied standalone fixture. Its specification knowledge is intentionally scattered across different folders and formats, and docs/overview.md is only a hand-written catalog. Build the wiki under the fixture root, classify the useful documents, exclude the catalog and user guide from primary specs, and report what was indexed. Do not edit any primary source document.",
+      "expected_output": "A generated .spec-wiki index/state containing the payment requirements and RFC as primary spec knowledge, with overview classified as meta-index and the how-to guide excluded from primary specs; primary sources remain unchanged.",
+      "files": [
+        "evals/files/bootstrap/requirements/payment-behavior.md",
+        "evals/files/bootstrap/architecture/rfc-007.md",
+        "evals/files/bootstrap/docs/overview.md",
+        "evals/files/bootstrap/docs/how-to-pay.md",
+        "evals/files/bootstrap/src/payments.ts",
+        "evals/files/bootstrap/tests/payments.test.ts"
+      ],
+      "expectations": [
+        "The generated wiki indexes requirements/payment-behavior.md as primary spec knowledge.",
+        "The generated wiki indexes architecture/rfc-007.md as primary spec knowledge despite the different directory/convention.",
+        "docs/overview.md is classified as meta-index or otherwise excluded from primary specs.",
+        "docs/how-to-pay.md is classified as guide/other or otherwise excluded from primary specs.",
+        "Production source and test files are treated as evidence/relationships, not as primary specification documents themselves.",
+        "The generated index is derived navigation and primary source documents are not modified.",
+        "The with-skill run reads bootstrap.md; it reads index-schema.md only if exact CLI/state details are needed and does not read focused-spec.md/query.md/maintenance.md without a concrete need."
+      ]
+    }
+  ]
+}

@@ -4,6 +4,13 @@
 
 Change
 
+## Lifecycle
+
+Historical baseline. This document records the first Desktop vertical slice and
+still contains useful process-host/ACP transport contracts, but it is no longer
+the current feature-scope inventory. Later implemented Desktop behavior is
+specified by the `specs/desktop-*.md` family.
+
 ## Goal
 
 Provide a lightweight desktop client for Pix using Tauri 2 and Svelte 5 +
@@ -21,7 +28,11 @@ updates, cancel a running turn, and answer extension elicitations.
   elicitations.
 - Development commands and a documented local setup path.
 
-## Non-goals
+## MVP-era non-goals
+
+The items below were intentionally out of scope for the first slice. Several
+were implemented later and are governed by newer feature specs; they are not
+current product non-goals.
 
 - Feature parity with `PiUiExtendApp`.
 - Voice input, an embedded terminal, custom widgets, image attachments,

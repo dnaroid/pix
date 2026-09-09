@@ -1,8 +1,14 @@
 # File link opening
 
+<!-- markdownlint-disable MD013 -->
+
 ## Type
 
 Change
+
+## Lifecycle
+
+Active implemented contract.
 
 ## Goal
 
@@ -34,6 +40,8 @@ Open local links in the application appropriate to the current environment witho
 
 ## Evidence
 
-- Confirmed by code: file links currently prefer any detected editor and then fall back to the OS opener.
-- Confirmed by tests: existing tests cover Zed, VS Code, Linux, and Windows launch commands.
-- Intended behavior: the rules above were confirmed by the user.
+- Confirmed by code: HTTP(S) links use the OS opener; inside Zed, non-media
+  local files use the Zed CLI with line/column when available; media uses the OS
+  opener; missing Zed CLI falls back to the OS opener.
+- Confirmed by tests: focused opener tests cover Zed text/media paths and
+  platform fallbacks.

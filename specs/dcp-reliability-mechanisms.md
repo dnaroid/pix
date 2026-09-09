@@ -9,6 +9,14 @@
 > [dcp-provider-cache-stability.md](./dcp-provider-cache-stability.md).
 > All paths below are relative to `external/pi-tools-suite/`.
 
+## Type
+
+As-is
+
+## Lifecycle
+
+Active implemented contract.
+
 ## State transaction and ownership epochs
 
 `src/dcp/state-transaction.ts`
@@ -147,12 +155,26 @@ themselves, so per-defect closure is recorded there, not here. Current
 guarantees are exactly the ones verified above; the originals are preserved in
 git history.
 
+## Related files
+
+- `external/pi-tools-suite/src/dcp/state-transaction.ts`
+- `external/pi-tools-suite/src/dcp/journal.ts`
+- `external/pi-tools-suite/src/dcp/conversation-index.ts`
+- `external/pi-tools-suite/src/dcp/auto-compress.ts`
+- `external/pi-tools-suite/src/dcp/compression-blocks.ts`
+- `external/pi-tools-suite/src/dcp/pruner-candidates.ts`
+- `external/pi-tools-suite/src/dcp/shadow-plan.ts`
+- `external/pi-tools-suite/src/session-recovery/index.ts`
+- `external/pi-tools-suite/test/dcp-transaction-faults.test.ts`
+- `external/pi-tools-suite/test/dcp-review-regressions.test.ts`
+- `external/pi-tools-suite/test/dcp-journal-lifecycle.test.ts`
+- `external/pi-tools-suite/test/dcp-marathon-replay.test.ts`
+- `external/pi-tools-suite/test/dcp-lifecycle-marathon.test.ts`
+- `external/pi-tools-suite/test/dcp-shadow-plan.test.ts`
+
 ## Verification
 
-- From `external/pi-tools-suite/`:
-  `bun test test/dcp-transaction-faults.test.ts test/dcp-review-regressions.test.ts test/dcp-journal-lifecycle.test.ts test/dcp-marathon-replay.test.ts`
-  for the walls named above; `bun test test` for the full suite (known
-  pre-existing, DCP-unrelated failures: todo e2e duplicate auto-nudge wait and
-  two browser QA hung-child cleanup tests).
+- From `external/pi-tools-suite/`, run the focused DCP wall/replay tests named
+  above and `bun test test` for the full deterministic suite.
 - Canonical from the repo root: `npm run check` and
   `npm run test:tools-suite`.

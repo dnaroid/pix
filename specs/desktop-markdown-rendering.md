@@ -1,8 +1,14 @@
 # Lightweight desktop Markdown rendering
 
+<!-- markdownlint-disable MD013 -->
+
 ## Type
 
 Change
+
+## Lifecycle
+
+Implemented; this is the current Desktop Markdown contract.
 
 ## Goal
 
@@ -14,18 +20,29 @@ Render Markdown in Desktop transcripts and Markdown file previews without adding
 - Headings, paragraphs, line breaks, emphasis, inline code, safe links, lists, task lists, blockquotes, horizontal rules, fenced code, and simple tables.
 - Complete and still-streaming ACP message chunks.
 - Popup-only navigation, embedded media, remote images, and table fitting behavior.
+- Markdown content returned by `read` tools when the read target is Markdown.
+- Inline previews for supported project/local image and video links in transcript
+  Markdown. Supported image extensions are AVIF, BMP, GIF, JPEG, PNG, SVG, and
+  WebP; supported video extensions are M4V, MOV, MP4, OGV, and WebM.
 
 ## Non-goals
 
 - Full CommonMark or GFM compatibility.
 - Rendering raw HTML.
-- Markdown rendering for tool output.
+- Treating arbitrary tool output as Markdown; only Markdown `read` results use the
+  Markdown renderer.
 - Changing table layout or remote-image behavior in regular transcript Markdown.
 
 ## Behavior
 
-- User, assistant, and thought text use the same Markdown renderer.
+- User, assistant, thought, and system text use the same Markdown renderer.
+- Markdown `read` tool results use the same renderer in a dense tool-result
+  presentation; other tool results keep their dedicated plain/code/diff views.
 - Raw HTML is always escaped; Markdown never injects executable markup.
+- Inline code uses the Desktop semantic accent rather than ordinary prose color.
+- Fenced `mermaid` blocks render as diagrams using Mermaid strict security and
+  HTML labels disabled. While rendering is pending, or if parsing/rendering
+  fails, the escaped source remains readable.
 - Explicit Markdown links and bare URLs with `http`, `https`, or `mailto` schemes become links.
 - External Markdown links are marked with an external-link icon in both transcripts and preview popups.
 - Explicit Markdown links with relative destinations and inline-code values that look like relative file paths become project-file links. Activating one reads the target only when its canonical path remains inside the active workspace, then opens its source in the preview dialog with syntax highlighting and line numbers.
@@ -35,6 +52,17 @@ Render Markdown in Desktop transcripts and Markdown file previews without adding
 - Unsupported destinations render as plain labels and are never passed to the system opener.
 - In a Markdown file preview popup, relative project links and local `file://` links use the same trusted preview/open handlers as transcript links. Opening another preview replaces the current popup content.
 - In a Markdown file preview popup, supported project and local images resolve through the existing confined Tauri media commands instead of remaining in a loading state.
+- Supported project and absolute `file://` image/video links in transcript
+  Markdown render bounded inline media previews with their label as a caption.
+  Images lazy-load and open the media viewer when activated; videos expose native
+  inline playback controls and their caption opens the viewer.
+- `file://` media is accepted only after decoding to an absolute existing regular
+  file. The backend canonicalizes it and grants scoped asset access only for a
+  supported image/video extension. Non-media `file://` artifacts remain explicit
+  clickable links and use the OS opener only after a user action.
+- Missing, disallowed, or unrenderable local media keeps a readable fallback and
+  actionable caption; a media load failure does not replace the whole transcript
+  with a global error.
 - Remote `http` and `https` image syntax is embedded only in the Markdown file preview popup. Remote images do not send a referrer, and linked remote images retain their safe local or external destination behavior.
 - In a Markdown file preview popup, tables use the available content width and wrap long cell content rather than creating a horizontal table scrollbar. Transcript tables retain horizontal scrolling.
 - Internal preview navigations push file or media entries onto a browser-like history stack. Back and forward controls traverse that stack; following a new link after going back discards the old forward branch. Opening a preview from outside the popup starts a new history and closing it clears the history.
@@ -55,8 +83,10 @@ Render Markdown in Desktop transcripts and Markdown file previews without adding
 - `desktop/src/lib/external-links.ts`
 - `desktop/src/lib/external-links.test.ts`
 - `desktop/src/components/MarkdownText.svelte`
+- `desktop/src/components/ToolResult.svelte`
 - `desktop/src/components/PreviewDialog.svelte`
 - `desktop/src/components/TranscriptPane.svelte`
+- `desktop/src/lib/mermaid.ts`
 - `desktop/src/App.svelte`
 - `desktop/src-tauri/src/lib.rs`
 - `desktop/src-tauri/capabilities/default.json`
@@ -64,8 +94,12 @@ Render Markdown in Desktop transcripts and Markdown file previews without adding
 
 ## Verification
 
-- Unit tests cover supported blocks, inline formatting, bare URLs, relative project-file links, remote-image opt-in/default behavior, linked images, unsafe input, system-opener delegation, and incomplete fences.
+- Unit tests cover supported blocks, inline formatting, bare URLs, relative
+  project-file links, remote-image opt-in/default behavior, linked images,
+  unsafe input, Mermaid fallback/security, and incomplete fences.
 - Rust tests cover workspace/home confinement and preview size/UTF-8 validation.
+- Rust tests also cover project/absolute media confinement, traversal, unsupported
+  local binary files, and allowed media resolution.
 - `npm run test`, `npm run check`, and `npm run build:web` pass in `desktop/`.
 
 ## Risks / unknowns
@@ -76,7 +110,12 @@ Render Markdown in Desktop transcripts and Markdown file previews without adding
 
 ## Evidence
 
-- Confirmed by code: Desktop currently interpolates all three message roles as plain text.
-- Confirmed by package manifest: Desktop has no Markdown parser or HTML sanitizer dependency.
-- Confirmed by design contract: assistant content should prioritize readability while thoughts and technical content visually recede.
-- Confirmed by the reported failure: `~/.config/pi/pix.jsonc` was previously passed to the project-file resolver and looked up beneath the workspace without expanding `~`.
+- Confirmed by code: `MarkdownText.svelte` and `desktop/src/lib/markdown.ts`
+  render transcript and preview Markdown; `ToolResult.svelte` opts Markdown read
+  results into the same renderer.
+- Confirmed by code: `desktop/src/lib/mermaid.ts` uses strict Mermaid security,
+  disables HTML labels, and preserves a readable source fallback on failure.
+- Confirmed by tests: `desktop/src/lib/markdown.test.ts` exercises the supported
+  parser/link/table/media/streaming surface.
+- Confirmed by Rust tests: project/home/local media resolution remains confined
+  to the trusted backend paths and size/UTF-8 limits.

@@ -1,5 +1,13 @@
 # Browser QA sub-agent specification
 
+## Type
+
+As-is
+
+## Lifecycle
+
+Active implemented contract.
+
 ## Goal
 
 Provide a cheap, fast `browser-qa` async-subagent that reproduces browser bugs
@@ -128,6 +136,17 @@ confirmed runtime image support.
 - Playwright can launch Chromium in its own POSIX process group. On runner
   failure the runner snapshots and kills only its own descendants before it
   exits, covering that detached browser tree without touching a user's browser.
+
+## Related files
+
+- `external/pi-tools-suite/src/async-subagents/agents/browser-qa.md`
+- `external/pi-tools-suite/src/async-subagents/core/browser-qa.ts`
+- `external/pi-tools-suite/src/async-subagents/core/spawn.ts`
+- `external/pi-tools-suite/src/async-subagents/agents/browser-qa/scripts/browser-qa-runner.mjs`
+- `external/pi-tools-suite/test/async-subagents/core.test.ts`
+- `external/pi-tools-suite/test/async-subagents/browser-qa-runner.test.ts`
+- `external/pi-tools-suite/test/async-subagents/browser-qa-runner.e2e.test.ts`
+- `external/pi-tools-suite/test/async-subagents/selection-e2e.test.ts`
 
 ## Acceptance criteria
 

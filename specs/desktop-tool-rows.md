@@ -1,8 +1,14 @@
 # Desktop tool rows
 
+<!-- markdownlint-disable MD013 -->
+
 ## Type
 
 Change
+
+## Lifecycle
+
+Active implemented contract.
 
 ## Goal
 

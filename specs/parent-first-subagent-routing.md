@@ -1,5 +1,15 @@
 # Parent-first sub-agent role selection
 
+## Type
+
+Change
+
+## Lifecycle
+
+Active implemented contract.
+
+> Test paths mentioned below are relative to `external/pi-tools-suite/`.
+
 ## Goal
 
 Use the effective role catalog introduced in spec 28 for direct parent choices.

@@ -1,8 +1,18 @@
 # antigravity-auth (as-is spec)
 
+<!-- markdownlint-disable MD013 MD022 MD032 -->
+
 > Risk class: **auth / security / privacy**. Google "Antigravity" OAuth provider
 > for pi: login, refresh-token rotation across a pool of accounts, multi-account
 > failover on quota/capacity errors, and import from opencode's account store.
+
+## Type
+
+As-is
+
+## Lifecycle
+
+Active implemented contract.
 
 ## Purpose
 
@@ -96,8 +106,12 @@ capacity limits. `[confirmed by code: src/antigravity-auth/index.ts]`
 ## Existing tests
 
 - `external/pi-tools-suite/test/antigravity-auth.test.ts` (`bun:test`, `describe.serial "Antigravity account rotation"`): `[confirmed by tests]`
+  - Antigravity reasoning levels are clamped to the provider's supported `high` maximum.
   - OAuth client credentials preserved across refresh.
+  - SDK cancellation propagates into OAuth refresh.
+  - Nullable header deletion markers are removed before raw fetch.
   - Client credentials resolved from env when `auth.json` has only accounts.
+  - A stream that ends without a finish reason fails instead of returning a partial success.
   - No-account turn surfaces an error notification (deduped to one).
   - Opencode accounts are **not** auto-imported at request time (no fetch).
   - `ANTIGRAVITY_ALL_ACCOUNTS_EXHAUSTED` emitted only after trying every account for the model (rotates `access-0`→`access-1`, refreshes `refresh-1`, sets `activeIndex=1`, emits one `switch`).
@@ -111,7 +125,11 @@ capacity limits. `[confirmed by code: src/antigravity-auth/index.ts]`
 - **Failover is per-process, in-memory**: the `attemptedAccountIndices` set is local to one `streamAntigravity` call; there is no cross-turn or cross-process coordination, so concurrent requests can each hammer all accounts. `[confirmed by code: stream.ts; inferred re: concurrency]`
 - **chmod is best-effort** (`.catch(() => undefined)`); on filesystems that ignore mode the file may not be 0o600. `[confirmed by code: auth-store.ts]`
 - **Token contents in plaintext JSON**; if a refresh token rotates (Google sometimes returns a new one), the old one is overwritten — there is no backup/rotation audit. `[inferred]`
-- **No unit tests** for `streamAntigravity` happy-path SSE parsing, multi-endpoint fallback ordering, or `importOpencodeAntigravityAccount` overwrite/already-imported branches (only covered indirectly). `[inferred]`
+- **Coverage remains incomplete** for multi-endpoint fallback ordering and the
+  `importOpencodeAntigravityAccount` overwrite/already-imported branches.
+  Streaming now has focused successful/error-path coverage, including header
+  normalization and missing-finish-reason failure, but not every SSE frame
+  combination. `[confirmed by tests; inferred re: remaining combinations]`
 - **What happens when Google revokes a refresh token** (returns an error on refresh) is not specially handled beyond throwing; it will keep failing every turn until the user re-adds. `[inferred]`
 
 ## Suggested verification

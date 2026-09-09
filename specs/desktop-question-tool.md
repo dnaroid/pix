@@ -1,8 +1,14 @@
 # Desktop Question Tool
 
+<!-- markdownlint-disable MD013 -->
+
 ## Type
 
 Change
+
+## Lifecycle
+
+Implemented; this is the current Desktop Question contract.
 
 ## Goal
 
@@ -37,7 +43,15 @@ Render the bundled `question` tool as an inline mode of the existing Pix Desktop
 - The bundled extension uses `ctx.ui.editor` only when `PIX_QUESTION_RPC_BRIDGE=1`; otherwise it retains the existing TUI `ctx.ui.custom` path.
 - The private editor carrier has a reserved versioned title and JSON prefill. ACP validates it before emitting an implementation-specific `_pix.question` elicitation.
 - Desktop accepts only version 1 normalized question payloads: 1–5 unique question ids, 2–5 unique choice values per question, and non-empty labels/prompts/values.
-- `multiple` defaults to `false`. `minSelections` and `maxSelections` are valid only for multi-select questions, must be integers, and must satisfy `1 <= minSelections <= maxSelections <= choices.length + 1`; omitted bounds normalize to `1` and `choices.length + 1`.
+- At the public `question` tool contract, `multiple` defaults to `false` and
+  `minSelections`/`maxSelections` are optional for multi-select questions. The
+  bundled contract normalizer fills omitted bounds with `1` and
+  `choices.length + 1` before the Desktop carrier is created.
+- The private ACP/Desktop carrier is already normalized: multi-select payloads
+  must contain integer `minSelections` and `maxSelections` satisfying
+  `1 <= minSelections <= maxSelections <= choices.length + 1`. ACP and Desktop
+  reject malformed or partially normalized private payloads rather than
+  inventing bounds at that trust boundary.
 - Desktop returns versioned JSON in ACP accept content key `value`; the extension validates question ids, unique choice values, selection bounds, custom text, image MIME types, and base64 data before creating the authoritative result shape.
 - Existing single-select results retain their current scalar answer shape. Multi-select results contain one answer per question with `multiple: true` and an ordered `selections` array; each item uses the existing choice/custom answer fields.
 - Only Desktop-launched ACP sessions receive the explicit bundled extension path and bridge environment flag. Other ACP clients retain existing behavior.
@@ -59,5 +73,7 @@ Render the bundled `question` tool as an inline mode of the existing Pix Desktop
 
 ## Evidence
 
-- Confirmed by code: normalized question bounds, grouped response validation, TUI selection state, ACP carrier validation, and Desktop composer state.
+- Confirmed by code: the bundled question contract normalizes optional public
+  bounds; ACP/Desktop validate the normalized private carrier; result/TUI state
+  keeps the same selection semantics.
 - Confirmed by tests: root contract/result/TUI/renderer tests, ACP bridge tests, and Desktop question state tests.

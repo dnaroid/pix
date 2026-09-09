@@ -1,8 +1,14 @@
 # Desktop chat attachments
 
+<!-- markdownlint-disable MD013 -->
+
 ## Type
 
 Change
+
+## Lifecycle
+
+Implemented; this is the current Desktop attachment contract.
 
 ## Goal
 
@@ -11,7 +17,10 @@ Show image and video attachments in the desktop composer and transcript, while k
 ## Scope
 
 - Add attachments through the file picker, native drag-and-drop, and clipboard paste.
-- Send images as ACP image content when supported.
+- Send pathless pasted images as ACP image content when supported.
+- Send path-backed images as resource links plus Pix file-image metadata so ACP
+  can materialize them for Pi without embedding their bytes in the Desktop
+  request body.
 - Send video and other files as local resource links so the agent receives their paths.
 - Render image/video previews in the composer, user messages, and supported ACP content.
 
@@ -26,7 +35,11 @@ Show image and video attachments in the desktop composer and transcript, while k
 - The composer accepts up to ten files per prompt and supports removal before sending.
 - Images and videos show thumbnail previews. Clicking either opens a modal media viewer.
 - Other files show a compact file tile. Clicking it opens the path with the operating system's default application.
-- Selected and dropped image files are encoded for ACP only when the prompt is submitted.
+- Selected and dropped images keep their local path. On submission they become
+  ACP resource links and are also listed in private Pix file-image metadata for
+  the ACP adapter.
+- Pathless pasted images use their clipboard bytes and become ACP image blocks
+  when image prompting is supported.
 - Pasted images use their clipboard bytes. Other pasted files are copied to the Pix cache first so the agent receives a usable local path.
 - A prompt may contain text, attachments, or both.
 - Loaded sessions replay persisted images as previews. Persisted resource-link markers are restored as file/video attachments when their local paths remain available.
@@ -34,7 +47,11 @@ Show image and video attachments in the desktop composer and transcript, while k
 
 ## Contracts
 
-- `session/prompt` receives `ContentBlock[]`: image blocks for images and resource-link blocks for videos/other files.
+- `session/prompt` receives `ContentBlock[]`: path-backed files (including
+  images) use resource-link blocks; pathless supported images use image blocks.
+- Path-backed images additionally travel in Pix `_meta["pix.fileImages"]` so the
+  ACP adapter can materialize image content for Pi while retaining the resource
+  link in the persisted prompt surface.
 - Resource links are persisted in Pi text as Pix attachment markers containing a file URI.
 - The Tauri shell exposes bounded attachment inspection/read/cache commands and an approved-path opener command.
 - Dialog and drop selections are admitted through Tauri's dynamic asset scope, then persisted in Pix's approved attachment registry for session replay.
@@ -78,6 +95,8 @@ Show image and video attachments in the desktop composer and transcript, while k
 
 ## Evidence
 
-- Confirmed by code: ACP advertises image prompt support and forwards image blocks to Pi.
+- Confirmed by code: `desktop/src/App.svelte::buildPromptPayload` distinguishes
+  path-backed images from pathless clipboard images; ACP materializes the
+  private file-image metadata before prompting Pi.
 - Confirmed by docs: ACP resource links are baseline prompt content; Tauri's asset protocol serves local media and the opener plugin opens paths with the default application.
 - Confirmed by user: files should be added by picker, drag-and-drop, and paste; non-image files should be passed to the agent by local path.

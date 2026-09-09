@@ -1,8 +1,14 @@
 # Fenced code blocks in chat Markdown
 
+<!-- markdownlint-disable MD013 -->
+
 ## Type
 
 Change
+
+## Lifecycle
+
+Active implemented contract.
 
 ## Goal
 

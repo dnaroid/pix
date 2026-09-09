@@ -3,6 +3,14 @@
 > Risk class: **authentication / persistence**. The quota indicator shares the
 > `openai-codex` OAuth credential with pi model requests.
 
+## Type
+
+As-is
+
+## Lifecycle
+
+Active implemented contract.
+
 ## Purpose
 
 Keep the model-usage `statusLabel` available when the OpenAI Codex access token
@@ -54,3 +62,6 @@ still stored by pi core and break subsequent model requests.
   `external/pi-tools-suite/src/usage/lib/openai.ts`, which intentionally does
   **not** refresh: on expiry it returns an error asking the user to refresh
   via the OpenCode flow. `[confirmed by code]`
+- `tests/model-usage-status.test.ts` — refresh/rotation and usage-request
+  regression coverage.
+- `tests/model-usage-controller.test.ts` — controller retention/refresh behavior.

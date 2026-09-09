@@ -1,8 +1,14 @@
 # Persist todo clear in session replay
 
+<!-- markdownlint-disable MD013 -->
+
 ## Type
 
 Change
+
+## Lifecycle
+
+Active implemented contract.
 
 ## Goal
 
@@ -47,4 +53,5 @@ Keep todos cleared after pix reloads or resumes the current session branch.
 
 - Confirmed by code: before this change, replay only recognized `todo` tool-result messages.
 - Confirmed by SDK types: `appendEntry()` creates a custom session entry excluded from model context specifically for extension state persistence.
-- Confirmed by tests: targeted todo tests pass (40 tests), the pi-tools-suite check passes (415 passed, 36 skipped live evaluations), and the host check passes (955 tests).
+- Confirmed by tests: targeted todo replay/clear tests and the suite/host checks
+  pass; avoid treating historical aggregate test counts as part of the contract.

@@ -1,8 +1,16 @@
 # DCP provider-cache stability
 
+<!-- markdownlint-disable MD013 -->
+
 ## Type
 
-Change / invariant
+Change
+
+## Lifecycle
+
+Active implemented contract.
+
+This is an invariant-focused current contract rather than a pending proposal.
 
 ## Goal
 

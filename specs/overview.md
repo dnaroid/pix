@@ -1,14 +1,16 @@
 # Specs index
 
+<!-- markdownlint-disable MD013 MD036 MD060 -->
+
 > Scope: **current behavior only** for the as-is specs; change-oriented specs
 > label themselves. These are **not** design docs. Every important claim is
 > tagged with its source: `[confirmed by code]`, `[confirmed by tests]`,
 > `[confirmed by docs]`, `[inferred]`, or `[unknown]`. Re-verify against
-> current code before relying on any claim. Last full drift audit:
-> 2026-09-08 (all specs verified; fixes applied to overview, async-subagents,
-> dcp, lsp-trust, openai-codex-usage-refresh, dcp-reliability-mechanisms,
-> project-agents-dir; the DCP roadmap/evidence/review plan docs were
-> consolidated into the English as-is dcp-reliability-mechanisms.md).
+> current code before relying on any claim. Last broad drift audit:
+> 2026-09-09. That pass re-verified the canonical `specs/` set, updated the
+> current async-subagent/project-agent/Desktop/DCP contracts, and consolidated
+> redundant Desktop Markdown and DCP emergency change documents into their
+> current canonical specs.
 
 ## Project context
 
@@ -34,10 +36,13 @@ behavior live, and all happen to live in `external/pi-tools-suite`.
 | `dcp` (dynamic context pruning) | data + cross-cutting — rewrites conversation context, persists state, irreversible pruning | [dcp.md](./dcp.md) |
 | `lsp` trust & command execution | security — executes configured LSP server commands gated by a trust hash | [lsp-trust.md](./lsp-trust.md) |
 
-## Full spec inventory
+## Canonical `specs/` inventory
 
-Feature/contract specs, grouped by area. Filenames carry no numbers; ordering
-is by group.
+Feature/contract specs stored in this directory, grouped by area. Filenames
+carry no numbers; ordering is by group. Additional behavioral documents may
+live beside the subsystem they describe (for example `docs/` or
+`external/pi-tools-suite/docs/`). This hand-maintained index intentionally does
+not duplicate those; Spec Wiki discovers and classifies them independently.
 
 **Suite / auth / tools**
 
@@ -125,3 +130,8 @@ is by group.
   the `plans/` directory has since been removed. Current DCP behavior lives in
   [dcp.md](./dcp.md) and
   [dcp-provider-cache-stability.md](./dcp-provider-cache-stability.md).
+- The former `desktop/MARKDOWN.md` and
+  `docs/desktop-markdown-media.md` contracts were consolidated into
+  [desktop-markdown-rendering.md](./desktop-markdown-rendering.md). The former
+  DCP emergency-current-turn change document was consolidated into
+  [dcp.md](./dcp.md). Originals remain available in git history.

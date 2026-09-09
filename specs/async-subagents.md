@@ -1,11 +1,21 @@
 # async-subagents (as-is spec)
 
+<!-- markdownlint-disable MD013 MD022 MD031 MD032 MD040 -->
+
 > Risk classes: **background jobs / concurrency / process management**. Spawns,
 > monitors, stops, retries (with model fallback), and cleans up child pi
 > processes ("sub-agents") from a parent pi session.
 >
 > _Investigated by a read-only sub-agent; re-verify claims against current code
 > before relying on them. Line numbers are approximate._
+
+## Type
+
+As-is
+
+## Lifecycle
+
+Active implemented contract.
 
 ## Purpose
 
@@ -23,7 +33,13 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
 4. **Stdin RPC**: sends two JSONL messages — `{type:"get_state",id:"sub_get_state"}` then `{type:"prompt",id:"sub_prompt",message:<prompt>[,images:<base64[]>]}`. Stdin stays open; EOF = pi shutdown. `[confirmed by code]`
 5. **Extensions** loaded into children: `model-tools` (model-specific tool args) and `tool-guard` (strips parent-only tools: `question`, `subagents`, all `async_subagents_*`). `antigravity-auth` is restored after `--no-extensions` only when the effective explicit task/CLI model is `antigravity/<model>`; a model sourced only from `ASYNC_SUBAGENTS_MODEL` / `PI_SUBAGENTS_MODEL` does not opt it in. Later `--model`, `-m`, or `--model=...` extra args override the task model for this decision. `[confirmed by code, spawn.ts; confirmed by tests, core.test.ts]`
 6. **Environment**: child inherits parent env plus `PI_MODEL_SUITABLE_TOOLS_PRESERVE_SELECTION=1`, `PI_TERMINAL_BELL_DISABLED=1`, and `PI_TOOLS_SUITE_DISABLED_MODULES` appended with `async-subagents,coding-discipline,question`. `[confirmed by code, spawn.ts ~230-240]`
-7. **Model selection**: task model → preset-type model → global preset model → profile model; env override `ASYNC_SUBAGENTS_MODEL` / `PI_SUBAGENTS_MODEL`. `[confirmed by code, config.ts resolveAgentTaskConfig]`
+7. **Model selection**: explicit forced/task/CLI model wins. Otherwise the
+   resolved role profile, parent-model mapping, and active preset contribute a
+   ranked candidate list; pool presets filter that list to their allowed models,
+   runtime model selection removes unavailable/image-incompatible candidates,
+   and session fallback skips models/providers already exhausted by quota
+   failures. Per-role environment model overrides are applied while loading the
+   effective role catalog. `[confirmed by code, config.ts/model-selection.ts]`
 8. **Session persistence**: only when `ASYNC_SUBAGENTS_ENABLE_SESSIONS` is truthy (child gets `--session-dir <agentDir>/sessions`; otherwise `--no-session`). `[confirmed by code]`
 9. **Timeout**: default 30 min (`DEFAULT_AGENT_TIMEOUT_MS`). On timeout: writes `timeout_ms`/`timed_out_at`/result.md, SIGTERM, SIGKILL after 5s grace, exit code 124. `[confirmed by code, spawn.ts ~168-187]`
 10. **agent_end**: writes result.md, SIGTERM after 50ms grace, SIGKILL after 1s fallback. `[confirmed by code]`
@@ -114,28 +130,64 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
 - Sets `PI_MODEL_SUITABLE_TOOLS_PRESERVE_SELECTION`, `PI_TERMINAL_BELL_DISABLED`, `PI_TOOLS_SUITE_DISABLED_MODULES` in child env. `[confirmed by code]`
 
 ## Related files
-- Source: `external/pi-tools-suite/src/async-subagents/` — `lib.ts`, `core/spawn.ts`, `core/registry.ts`, `core/state.ts`, `core/retry.ts`, `core/model-fallback.ts`, `core/concurrency.ts`, `core/cleanup.ts`, `core/sessions.ts`, `core/stop.ts`, `core/process.ts`, `core/prompt.ts`, `core/config.ts`, `core/pi-invocation.ts`, `core/paths.ts`, `core/structured-result.ts`, `core/log-limits.ts`, `core/tool-guard.ts`, `core/routing.ts`, `core/presets.ts`, `tasks.ts`, `tools/*.ts`, `commands.ts`, `constants.ts`
-- Tests: `external/pi-tools-suite/test/async-subagents/ui.test.ts`, `selection-e2e.test.ts`
+
+- `external/pi-tools-suite/src/async-subagents/core/spawn.ts`
+- `external/pi-tools-suite/src/async-subagents/core/config.ts`
+- `external/pi-tools-suite/src/async-subagents/core/agents-dir.ts`
+- `external/pi-tools-suite/src/async-subagents/core/agent-catalog.ts`
+- `external/pi-tools-suite/src/async-subagents/core/routing.ts`
+- `external/pi-tools-suite/src/async-subagents/core/model-selection.ts`
+- `external/pi-tools-suite/src/async-subagents/core/model-fallback.ts`
+- `external/pi-tools-suite/src/async-subagents/core/retry.ts`
+- `external/pi-tools-suite/src/async-subagents/core/concurrency.ts`
+- `external/pi-tools-suite/src/async-subagents/core/state.ts`
+- `external/pi-tools-suite/src/async-subagents/core/registry.ts`
+- `external/pi-tools-suite/src/async-subagents/core/cleanup.ts`
+- `external/pi-tools-suite/src/async-subagents/core/stop.ts`
+- `external/pi-tools-suite/src/async-subagents/core/process.ts`
+- `external/pi-tools-suite/src/async-subagents/core/attachment-bridge.ts`
+- `external/pi-tools-suite/src/async-subagents/core/structured-result.ts`
+- `external/pi-tools-suite/src/async-subagents/tools/spawn.ts`
+- `external/pi-tools-suite/src/async-subagents/commands.ts`
 
 ## Existing tests
-- `ui.test.ts` `[confirmed by tests]`: format helpers (status glyphs ○◐✓✕■, labels), task normalization (empty/non-object/missing-text/duplicate-id/path-traversal rejection, auto-id skipping reserved ids, `toTaskPreviews`), live-run tracking (`getLiveRun`, `SubagentOverlay` pruning), rendering (compact/expanded/plain summaries, width truncation, public `subagents` renderResult), polling (`clampWatchSeconds`, terminal/timeout/abort), slash commands (`/subagent-preset`, `/sub-status`, `/sub-open` `/sub-back` `/sub-where` via `return_session`).
-- `selection-e2e.test.ts` `[confirmed by tests, opt-in via ASYNC_SUBAGENTS_SELECTION_E2E=1]`: LLM routing selection; intercepts the tool call before spawn (no real subprocess). `[confirmed by tests]`
+
+- `external/pi-tools-suite/test/async-subagents/core.test.ts`: config/profile
+  loading, semaphore behavior, process lifecycle, retry, model fallback, running
+  stop behavior, structured results, and project-agent definitions.
+- `external/pi-tools-suite/test/async-subagents/tools.test.ts`: public tool
+  validation and spawn/status/wait/result/stop integration.
+- `external/pi-tools-suite/test/async-subagents/routing.test.ts`: explicit and
+  automatic role routing, parent-model gates, and routing failures.
+- `external/pi-tools-suite/test/async-subagents/model-pools.test.ts` and
+  `model-pool-contract.test.ts`: pool filtering and session fallback behavior.
+- `external/pi-tools-suite/test/async-subagents/ui.test.ts`: task normalization,
+  live-state tracking/rendering, polling, and slash-command UI.
+- `external/pi-tools-suite/test/async-subagents/selection-e2e.test.ts`: opt-in LLM
+  routing selection without spawning a real child.
+- `external/pi-tools-suite/test/async-subagents/e2e.test.ts`: opt-in real
+  subprocess workflows.
 
 ## Gaps / risks
-1. **No unit test for the semaphore** (acquire/release, queue ordering, abort-while-queued, double-release, limit=0). `[inferred]`
-2. **Retry + model-fallback integration untested** (retry→fallback→retry-again). `[inferred]`
-3. **pid-check race**: `process.kill(pid,0)` is point-in-time; a process exiting between checks flips status on the next poll, not immediately. `[inferred]`
-4. **Registry corruption silently loses history** (`loadSubagentRegistry` swallows parse errors). `[confirmed by code]`
-5. **`model_fallback_from`/`model_fallback_to` written but never read** by production code. `[inferred]`
-6. **No test for stopping a *running* child** (only planned agents are covered). `[inferred]`
-7. **Polling minimum interval hardcoded to 250ms** (`pollRunWithUpdates`). `[confirmed by code]`
-8. **Semaphore never reset for the process lifetime** → a child killed externally (SIGKILL) without `onComplete` can leak a slot. `[inferred]`
-9. **`resolveSubagentRunDir` fallback scan is O(n)** over all `.pi/subagents/` dirs by mtime. `[inferred]`
-10. **Structured-result file-ref extraction is best-effort regex** → false positives possible. `[confirmed by code]`
+1. **pid-check race**: `process.kill(pid,0)` is point-in-time; a process exiting
+   between checks flips status on the next poll, not immediately. `[inferred]`
+2. **Registry corruption silently loses history** (`loadSubagentRegistry`
+   returns an empty registry on parse failure). `[confirmed by code]`
+3. **`model_fallback_from`/`model_fallback_to` are diagnostic metadata** and are
+   not a durable source for later routing decisions. `[confirmed by code]`
+4. **Polling minimum interval is bounded in code**, so very short waits cannot
+   become high-frequency busy polling. `[confirmed by code]`
+5. **External process death remains asynchronous**: a child killed outside the
+   launcher is observed on the next state reconciliation/poll. `[inferred]`
+6. **`resolveSubagentRunDir` fallback scan is O(n)** over `.pi/subagents/` dirs
+   by mtime. `[inferred]`
+7. **Structured-result file-ref extraction is best-effort** and can produce
+   false positives. `[confirmed by code]`
 
 ## Suggested verification
-1. Unit tests for `createSemaphore` (basic/queue/abort/double-release/limit=0).
-2. Unit test for `spawnAgentWithRetry` with a mock `spawnAgent`: retry on non-zero, no retry on success/stopped, backoff timing, model-fallback bypasses backoff, abort cancels retry.
-3. Integration test: external SIGKILL of a child does not leak a semaphore slot.
-4. Test registry recovery on corrupt `registry.json`.
-5. Test cleanup candidate selection with partially-completed runs (must not be candidates).
+1. Add an integration test for externally killed children across semaphore/state
+   reconciliation boundaries.
+2. Decide whether corrupt `registry.json` should remain fail-open/empty or gain a
+   visible recovery/backup path, then test that contract.
+3. Keep opt-in real-subprocess E2E coverage for routing/model fallback and
+   cleanup on supported CI/provider environments.

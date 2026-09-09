@@ -1,8 +1,14 @@
 # Keep idx current at Pix startup
 
+<!-- markdownlint-disable MD013 -->
+
 ## Type
 
 Change
+
+## Lifecycle
+
+Active implemented contract.
 
 ## Goal
 

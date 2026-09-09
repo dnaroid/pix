@@ -3,18 +3,26 @@
 > Risk classes: **config loading / sub-agent spawn surface**. Extends the
 > async-subagents config pipeline only; no spawn/runtime changes.
 >
-> Status: implemented alongside this spec. Re-verify against code before
-> relying on line numbers.
+> Status: implemented and current. Re-verify against code before relying on
+> line numbers.
+
+## Type
+
+Change
+
+## Lifecycle
+
+Active implemented contract.
 
 ## Purpose
 
 Let a project ship its own sub-agent definitions as individual Markdown files
 (Claude Code `.claude/agents/*.md` style). Files live in `<project>/.pi/agents/`;
 each file becomes a `subagentType` available to the `subagents` tool, the LLM
-router, the parent system-prompt role catalog, `/subagent-preset` presets, and
-per-type overrides — identical to types declared in `asyncSubagents.types`
-config. Bundled built-in roles use the same Markdown definition format and
-parser under `src/async-subagents/agents/*.md`.
+router, and the parent system-prompt role catalog. Project model-pool presets
+live beside them in `.pi/agents/presets.jsonc`. Bundled built-in roles use the
+same Markdown definition format and parser under
+`src/async-subagents/agents/*.md`.
 
 ## Behavior
 
@@ -78,21 +86,18 @@ You are a ... role prompt (markdown body).
 
 ### Merge order and precedence
 
-Within `loadSubagentConfig` (no caching — re-read per spawn/命令 call):
+Within `loadSubagentConfig` (no caching — re-read per spawn/command call):
 
-1. builtin types
-2. user `~/.config/pi/pi-tools-suite.jsonc`
-3. `$PI_CONFIG_DIR/pi-tools-suite.jsonc`
-4. project `.pi/pi-tools-suite.jsonc` (walk-up)
-5. **project `.pi/agents/*.md`** ← new; per-field override of same-named types
-   from all above (existing `mergeConfig` shallow per-type merge: agent-file
-   fields win, config-only fields are kept)
-6. explicit `ASYNC_SUBAGENTS_CONFIG` / `PI_SUBAGENTS_CONFIG` file
-7. env model/routing overrides
+1. bundled built-in role definitions and preset defaults;
+2. project `.pi/agents/presets.jsonc` from the nearest discovered agents dir;
+3. project `.pi/agents/*.md`, with agent-file fields overriding same-named
+   built-in role fields;
+4. environment model, routing, concurrency, result-size, and timeout overrides.
 
-When an explicit config path env var is set, the `.pi/agents` directory is
-**skipped** (same gating as pi-tools-suite config files: explicit = full
-control).
+User/global `pi-tools-suite.jsonc`, `$PI_CONFIG_DIR`, project
+`.pi/pi-tools-suite.jsonc`, and the former `ASYNC_SUBAGENTS_CONFIG` /
+`PI_SUBAGENTS_CONFIG` file path are not part of the current sub-agent profile
+merge pipeline.
 
 ### Reload semantics (original user requirement: "respect `/reload`")
 
@@ -134,9 +139,9 @@ control).
 `external/pi-tools-suite/test/async-subagents/core.test.ts`, describe
 "project agent definitions (.pi/agents)": load+merge, body→promptAppend, name
 mismatch error, no-frontmatter skip, broken YAML error with path, walk-up
-discovery, precedence over `.pi/pi-tools-suite.jsonc`, explicit-config gating,
-resolveAgentTaskConfig application (model/thinking/tools/modelByParent/retry),
-and a fresh-reload test (file mutated between two `loadSubagentConfig` calls).
+discovery, project preset/profile precedence, resolved
+model/thinking/tools/modelByParent/retry behavior, and a fresh-reload test (file
+mutated between two `loadSubagentConfig` calls).
 Additional tests verify that bundled roles are sourced from individual Markdown
 files and that `before_agent_start` exposes a project-local role in the effective
 system-prompt catalog while omitting that catalog when `subagents` is not an

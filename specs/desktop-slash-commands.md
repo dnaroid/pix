@@ -1,8 +1,14 @@
 # Desktop slash commands and fuzzy command search
 
+<!-- markdownlint-disable MD013 -->
+
 ## Type
 
 Change
+
+## Lifecycle
+
+Active implemented contract.
 
 ## Goal
 

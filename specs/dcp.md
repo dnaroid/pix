@@ -5,6 +5,14 @@
 > the projected provider context and persists durable projection decisions as
 > structured `dcp-journal` custom entries in the same session JSONL.
 
+## Type
+
+As-is
+
+## Lifecycle
+
+Active implemented contract.
+
 ## Purpose
 
 DCP keeps a long-running agent inside its context budget without rewriting the
@@ -145,6 +153,28 @@ explicitly committed and replayed. If the remaining protected minimum itself
 cannot fit, DCP records a blocked state and uses the headless abort/handoff path
 instead of sending the same oversized request indefinitely.
 
+When emergency pressure has no normal compression candidate, DCP can still
+derive same-turn candidates from old, complete assistant tool-call/result pairs.
+It never selects user messages, protected/recent pairs, compressed members, or
+results that lack completed provider evidence. A strong reminder may therefore
+be emitted even when normal range/message detectors return nothing.
+
+Emergency lossy pruning fires only after the configured hard threshold or after
+enough completed provider opportunities ignored a strong reminder. Repeated
+context transforms alone do not consume patience. Eligible result bodies are
+processed deterministically oldest-first until the bounded recovery target is
+met; structural tool-call/result pairing remains intact. Successful emergency
+pruning clears reminder/progress state and journals the committed prune IDs.
+
+Provider-seen evidence and ignored-reminder patience counters are runtime-only;
+restart returns them to conservative unknown/zero state. Journal persistence
+covers durable projection/prune decisions and frozen nudge anchors, not a legacy
+sidecar snapshot of emergency runtime counters.
+
+Diagnostic events distinguish the important blocked/emergency paths, including
+`context.strong_nudge_without_candidate`,
+`compress.auto_blocked_no_candidate`, and `prune.emergency_current_turn`.
+
 Manual mode never enables autonomous summary creation. Failed/ambiguous provider
 completion does not count as evidence that a result was seen.
 
@@ -208,12 +238,29 @@ undo configuration.
   use this DCP format.
 - Provider exposure is runtime evidence. After restart an older result is
   treated conservatively as unseen until a new completed request proves it.
+- Emergency ignored-reminder counters are runtime state and restart from zero;
+  durable pruning decisions still replay from the journal.
 - Native compaction or external deletion can make raw archive material
   unavailable; journal replay never guesses replacement members.
 - Host session persistence does not promise power-loss durability beyond the
   underlying session manager.
 - `autoCompress.enabled` remains opt-in.
 - No live provider quality/cache canary is claimed by this implementation pass.
+
+## Related files
+
+- `external/pi-tools-suite/src/dcp/index.ts`
+- `external/pi-tools-suite/src/dcp/config.ts`
+- `external/pi-tools-suite/src/dcp/state.ts`
+- `external/pi-tools-suite/src/dcp/journal.ts`
+- `external/pi-tools-suite/src/dcp/pruner-emergency.ts`
+- `external/pi-tools-suite/src/dcp/pruner-candidates.ts`
+- `external/pi-tools-suite/src/dcp/pruner-tools.ts`
+- `external/pi-tools-suite/src/dcp/auto-compress.ts`
+- `external/pi-tools-suite/test/compress-pruner.test.ts`
+- `external/pi-tools-suite/test/dcp-journal-lifecycle.test.ts`
+- `external/pi-tools-suite/test/dcp-marathon-replay.test.ts`
+- `external/pi-tools-suite/test/dcp-lifecycle-marathon.test.ts`
 
 ## Verification
 

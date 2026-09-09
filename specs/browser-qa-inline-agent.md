@@ -1,5 +1,13 @@
 # Self-contained browser QA agent instructions
 
+## Type
+
+As-is
+
+## Lifecycle
+
+Active implemented contract.
+
 ## Purpose
 
 Use the same one-agent/one-Markdown definition for browser QA as for other
@@ -53,6 +61,16 @@ origin/auth/path/evidence checks continue to be implemented by the runner.
   fail closed on invalid permissions, symlinks, or non-empty replacement.
 - Deterministic assertions, screenshot inspection, redacted statuses, artifact
   links, bounded execution, and agent-local cleanup are preserved.
+
+## Related files
+
+- `external/pi-tools-suite/src/async-subagents/agents/browser-qa.md`
+- `external/pi-tools-suite/src/async-subagents/core/agents-dir.ts`
+- `external/pi-tools-suite/src/async-subagents/core/config.ts`
+- `external/pi-tools-suite/src/async-subagents/core/spawn.ts`
+- `external/pi-tools-suite/src/async-subagents/core/browser-qa.ts`
+- `external/pi-tools-suite/test/async-subagents/core.test.ts`
+- `external/pi-tools-suite/test/async-subagents/browser-qa-runner.test.ts`
 
 ## Verification
 
