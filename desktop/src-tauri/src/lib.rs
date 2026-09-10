@@ -48,7 +48,8 @@ const PACKAGE_TERMINAL_STOP_GRACE: Duration = Duration::from_millis(900);
 const PACKAGE_TERMINAL_STOP_TIMEOUT: Duration = Duration::from_secs(4);
 const PROJECT_TASKS_SCHEMA_URL: &str = "https://unpkg.com/pi-ui-extend/schemas/tasks.json";
 const PIX_CONFIG_SCHEMA_URL: &str = "https://unpkg.com/pi-ui-extend/schemas/pix.json";
-const PI_TOOLS_SUITE_SCHEMA_URL: &str = "https://unpkg.com/pi-ui-extend/schemas/pi-tools-suite.json";
+const PI_TOOLS_SUITE_SCHEMA_URL: &str =
+    "https://unpkg.com/pi-ui-extend/schemas/pi-tools-suite.json";
 const ATTACHMENT_CACHE_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 static ATTACHMENT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static TASK_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -878,7 +879,10 @@ async fn home_file_exists(app: AppHandle, path: String) -> Result<bool, String> 
 }
 
 #[tauri::command]
-async fn read_user_config(app: AppHandle, kind: UserConfigKind) -> Result<UserConfigDocument, String> {
+async fn read_user_config(
+    app: AppHandle,
+    kind: UserConfigKind,
+) -> Result<UserConfigDocument, String> {
     let home = app
         .path()
         .home_dir()
@@ -933,7 +937,14 @@ async fn package_terminal_start(
     rows: u16,
 ) -> Result<PackageTerminalSnapshot, String> {
     run_blocking(move || {
-        start_package_terminal(app, window_label, PathBuf::from(workspace), script, cols, rows)
+        start_package_terminal(
+            app,
+            window_label,
+            PathBuf::from(workspace),
+            script,
+            cols,
+            rows,
+        )
     })
     .await
 }
@@ -965,7 +976,8 @@ async fn package_terminal_write(
             MAX_PACKAGE_TERMINAL_INPUT_BYTES / 1024
         ));
     }
-    run_blocking(move || write_package_terminal(&app, &window_label, &terminal_id, data.as_bytes())).await
+    run_blocking(move || write_package_terminal(&app, &window_label, &terminal_id, data.as_bytes()))
+        .await
 }
 
 #[tauri::command]
@@ -976,7 +988,8 @@ async fn package_terminal_resize(
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
-    run_blocking(move || resize_package_terminal(&app, &window_label, &terminal_id, cols, rows)).await
+    run_blocking(move || resize_package_terminal(&app, &window_label, &terminal_id, cols, rows))
+        .await
 }
 
 #[tauri::command]
@@ -1722,7 +1735,10 @@ fn git_diff_numstat(root: &Path, staged: bool) -> Result<HashMap<String, GitLine
 
 fn parse_git_numstat(bytes: &[u8]) -> Result<HashMap<String, GitLineStats>, String> {
     let mut stats = HashMap::new();
-    for record in bytes.split(|byte| *byte == 0).filter(|record| !record.is_empty()) {
+    for record in bytes
+        .split(|byte| *byte == 0)
+        .filter(|record| !record.is_empty())
+    {
         let mut fields = record.splitn(3, |byte| *byte == b'\t');
         let additions = fields.next().unwrap_or_default();
         let deletions = fields.next().unwrap_or_default();
@@ -1772,7 +1788,11 @@ fn git_line_stats_for_change(
     change: &GitFileChange,
 ) -> Option<GitLineStats> {
     let mut combined = stats.get(&change.path).copied();
-    if let Some(original_path) = change.original_path.as_deref().filter(|path| *path != change.path) {
+    if let Some(original_path) = change
+        .original_path
+        .as_deref()
+        .filter(|path| *path != change.path)
+    {
         if let Some(original) = stats.get(original_path).copied() {
             combined = Some(match combined {
                 Some(current) => merge_git_line_stats(current, original),
@@ -2279,7 +2299,10 @@ fn user_config_schema_url(kind: UserConfigKind) -> &'static str {
 }
 
 fn empty_user_config(kind: UserConfigKind) -> String {
-    format!("{{\n  \"$schema\": \"{}\"\n}}\n", user_config_schema_url(kind))
+    format!(
+        "{{\n  \"$schema\": \"{}\"\n}}\n",
+        user_config_schema_url(kind)
+    )
 }
 
 fn read_user_config_from(home: &Path, kind: UserConfigKind) -> Result<UserConfigDocument, String> {
@@ -2317,7 +2340,12 @@ fn write_user_config_from(
     kind: UserConfigKind,
     content: &str,
 ) -> Result<UserConfigDocument, String> {
-    if content.len() as u64 > MAX_USER_CONFIG_BYTES {
+    let normalized = if content.ends_with('\n') {
+        content.to_owned()
+    } else {
+        format!("{content}\n")
+    };
+    if normalized.len() as u64 > MAX_USER_CONFIG_BYTES {
         return Err(format!(
             "config is too large to save (maximum {} MB)",
             MAX_USER_CONFIG_BYTES / (1024 * 1024)
@@ -2336,11 +2364,6 @@ fn write_user_config_from(
             return Err(format!("{} is not a file", path.display()));
         }
     }
-    let normalized = if content.ends_with('\n') {
-        content.to_owned()
-    } else {
-        format!("{content}\n")
-    };
     fs::write(&path, normalized)
         .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
     read_user_config_from(home, kind)
@@ -2413,7 +2436,10 @@ fn package_scripts_from(workspace: &Path) -> Result<PackageScriptsSnapshot, Stri
     })
 }
 
-fn detect_package_manager(root: &Path, configured: Option<&serde_json::Value>) -> PackageManagerKind {
+fn detect_package_manager(
+    root: &Path,
+    configured: Option<&serde_json::Value>,
+) -> PackageManagerKind {
     if let Some(value) = configured.and_then(serde_json::Value::as_str) {
         let normalized = value.trim().to_ascii_lowercase();
         if normalized == "pnpm" || normalized.starts_with("pnpm@") {
@@ -2452,14 +2478,19 @@ fn package_terminal_snapshots(
         .map_err(|_| "package terminal state is poisoned".to_owned())?;
     let mut snapshots = sessions
         .iter()
-        .filter(|(_, session)| session.window_label == window_label && session.workspace == workspace)
+        .filter(|(_, session)| {
+            session.window_label == window_label && session.workspace == workspace
+        })
         .map(|(id, session)| package_terminal_snapshot(id, session))
         .collect::<Vec<_>>();
     snapshots.sort_by_key(|snapshot| snapshot.started_at_ms);
     Ok(snapshots)
 }
 
-fn package_terminal_snapshot(id: &str, session: &PackageTerminalSession) -> PackageTerminalSnapshot {
+fn package_terminal_snapshot(
+    id: &str,
+    session: &PackageTerminalSession,
+) -> PackageTerminalSnapshot {
     PackageTerminalSnapshot {
         id: id.to_owned(),
         kind: session.kind,
@@ -2562,11 +2593,10 @@ fn spawn_package_terminal(
         .master
         .try_clone_reader()
         .map_err(|error| format!("failed to read package terminal: {error}"))?;
-    let writer = Arc::new(Mutex::new(
-        pair.master
-            .take_writer()
-            .map_err(|error| format!("failed to open package terminal input: {error}"))?,
-    ));
+    let writer =
+        Arc::new(Mutex::new(pair.master.take_writer().map_err(|error| {
+            format!("failed to open package terminal input: {error}")
+        })?));
     let exited = Arc::new((Mutex::new(false), Condvar::new()));
     let started_at_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -2628,7 +2658,9 @@ fn spawn_package_terminal(
         loop {
             match reader.read(&mut buffer) {
                 Ok(0) => break,
-                Ok(read) => append_package_terminal_output(&output_app, &output_id, &buffer[..read]),
+                Ok(read) => {
+                    append_package_terminal_output(&output_app, &output_id, &buffer[..read])
+                }
                 Err(_) => break,
             }
         }
@@ -2738,7 +2770,9 @@ fn validated_terminal_size(cols: u16, rows: u16) -> Result<PtySize, String> {
     })
 }
 
-fn resolve_package_manager_launcher(manager: PackageManagerKind) -> Result<PackageManagerLauncher, String> {
+fn resolve_package_manager_launcher(
+    manager: PackageManagerKind,
+) -> Result<PackageManagerLauncher, String> {
     let name = manager.executable();
     if let Some(executable) = resolve_named_executable(name) {
         return Ok(PackageManagerLauncher {
@@ -2788,7 +2822,11 @@ fn resolve_named_executable(name: &str) -> Option<PathBuf> {
 
     #[cfg(windows)]
     {
-        for candidate in [format!("{name}.cmd"), format!("{name}.exe"), name.to_owned()] {
+        for candidate in [
+            format!("{name}.cmd"),
+            format!("{name}.exe"),
+            name.to_owned(),
+        ] {
             if let Ok(output) = Command::new("where.exe").arg(&candidate).output() {
                 if !output.status.success() {
                     continue;
@@ -2898,7 +2936,9 @@ fn append_package_terminal_output(app: &AppHandle, terminal_id: &str, data: &[u8
         };
         if data.len() >= MAX_PACKAGE_TERMINAL_OUTPUT_BYTES {
             session.output.clear();
-            session.output.extend_from_slice(&data[data.len() - MAX_PACKAGE_TERMINAL_OUTPUT_BYTES..]);
+            session
+                .output
+                .extend_from_slice(&data[data.len() - MAX_PACKAGE_TERMINAL_OUTPUT_BYTES..]);
         } else {
             let overflow = session
                 .output
@@ -2950,7 +2990,10 @@ fn supervise_package_terminal(
                 exit.signal().map(str::to_owned),
             ),
             Err(error) => {
-                append_terminal_error_line(&mut session.output, &format!("terminal wait failed: {error}"));
+                append_terminal_error_line(
+                    &mut session.output,
+                    &format!("terminal wait failed: {error}"),
+                );
                 (PackageTerminalStatus::Failed, None, None)
             }
         };
@@ -3163,7 +3206,11 @@ fn wait_for_exit(exited: &ExitSignal, timeout: Duration) -> Result<bool, String>
     Ok(*done || !timeout.timed_out())
 }
 
-fn forget_package_terminal(app: &AppHandle, window_label: &str, terminal_id: &str) -> Result<(), String> {
+fn forget_package_terminal(
+    app: &AppHandle,
+    window_label: &str,
+    terminal_id: &str,
+) -> Result<(), String> {
     let state = app.state::<PackageTerminalState>();
     let mut sessions = state
         .sessions
@@ -3192,7 +3239,9 @@ fn stop_package_terminals_for_workspace(
         sessions
             .iter()
             .filter(|(_, session)| {
-                session.window_label == window_label && session.workspace == workspace && session.running.is_some()
+                session.window_label == window_label
+                    && session.workspace == workspace
+                    && session.running.is_some()
             })
             .map(|(id, _)| id.clone())
             .collect::<Vec<_>>()
@@ -3211,7 +3260,9 @@ fn stop_package_terminals_for_window(app: &AppHandle, window_label: &str) {
         };
         sessions
             .iter()
-            .filter(|(_, session)| session.window_label == window_label && session.running.is_some())
+            .filter(|(_, session)| {
+                session.window_label == window_label && session.running.is_some()
+            })
             .map(|(id, _)| id.clone())
             .collect::<Vec<_>>()
     };
@@ -4380,14 +4431,20 @@ mod tests {
 
     #[test]
     fn validates_package_terminal_dimensions() {
-        assert_eq!(validated_terminal_size(120, 30).expect("valid terminal").cols, 120);
+        assert_eq!(
+            validated_terminal_size(120, 30)
+                .expect("valid terminal")
+                .cols,
+            120
+        );
         assert!(validated_terminal_size(1, 30).is_err());
         assert!(validated_terminal_size(120, 0).is_err());
     }
 
     #[test]
     fn builds_interactive_shell_terminal_command() {
-        let (command, label, command_label) = shell_terminal_command().expect("build shell terminal");
+        let (command, label, command_label) =
+            shell_terminal_command().expect("build shell terminal");
         assert!(!label.trim().is_empty());
         assert!(!command_label.trim().is_empty());
         assert_eq!(command.get_argv().len(), 1);
@@ -4399,9 +4456,15 @@ mod tests {
         fs::create_dir(workspace.join("docs")).expect("create docs directory");
         fs::write(workspace.join("docs/guide.md"), [0xff, 0xfe]).expect("write binary contents");
 
-        assert!(project_file_exists_from(&workspace, Path::new("docs/guide.md")));
+        assert!(project_file_exists_from(
+            &workspace,
+            Path::new("docs/guide.md")
+        ));
         assert!(!project_file_exists_from(&workspace, Path::new("evals.md")));
-        assert!(!project_file_exists_from(&workspace, Path::new("../guide.md")));
+        assert!(!project_file_exists_from(
+            &workspace,
+            Path::new("../guide.md")
+        ));
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
     }
 
@@ -4551,8 +4614,11 @@ mod tests {
         fs::write(workspace.join("deleted.txt"), "one\ntwo\nthree\n")
             .expect("write file that will be deleted");
         git_output(&workspace, &["add", "deleted.txt"]).expect("stage file that will be deleted");
-        git_output(&workspace, &["commit", "--no-gpg-sign", "-m", "add deleted fixture"])
-            .expect("commit file that will be deleted");
+        git_output(
+            &workspace,
+            &["commit", "--no-gpg-sign", "-m", "add deleted fixture"],
+        )
+        .expect("commit file that will be deleted");
         fs::write(workspace.join("tracked.txt"), "after\n").expect("modify tracked file");
         fs::write(workspace.join("new.txt"), "new\n").expect("write untracked file");
         fs::remove_file(workspace.join("deleted.txt")).expect("delete tracked file");
@@ -4731,12 +4797,21 @@ mod tests {
         assert_eq!(pix_path, home.join(".config/pi/pix.jsonc"));
         assert_eq!(tools_path, home.join(".config/pi/pi-tools-suite.jsonc"));
 
-        let missing = read_user_config_from(&home, UserConfigKind::Pix).expect("read missing config");
+        let missing =
+            read_user_config_from(&home, UserConfigKind::Pix).expect("read missing config");
         assert!(!missing.exists);
         assert!(missing.content.contains(PIX_CONFIG_SCHEMA_URL));
         assert!(missing.schema.contains("ignoreContextFiles"));
-        assert!(serde_json::from_str::<serde_json::Value>(user_config_schema(UserConfigKind::Pix)).is_ok());
-        assert!(serde_json::from_str::<serde_json::Value>(user_config_schema(UserConfigKind::PiToolsSuite)).is_ok());
+        assert!(
+            serde_json::from_str::<serde_json::Value>(user_config_schema(UserConfigKind::Pix))
+                .is_ok()
+        );
+        assert!(
+            serde_json::from_str::<serde_json::Value>(user_config_schema(
+                UserConfigKind::PiToolsSuite
+            ))
+            .is_ok()
+        );
 
         let saved = write_user_config_from(
             &home,
@@ -4756,12 +4831,34 @@ mod tests {
     }
 
     #[test]
+    fn user_settings_reject_normalized_content_over_the_size_limit_before_writing() {
+        let home = temporary_workspace("user-settings-config-size-limit");
+        let path = user_config_path(&home, UserConfigKind::Pix);
+        fs::create_dir_all(path.parent().expect("config parent")).expect("create config directory");
+        fs::write(&path, "{}\n").expect("write existing config");
+
+        let content = "x".repeat(MAX_USER_CONFIG_BYTES as usize);
+        let error = write_user_config_from(&home, UserConfigKind::Pix, &content)
+            .expect_err("reject normalized oversized config");
+
+        assert!(error.contains("config is too large to save"));
+        assert_eq!(
+            fs::read_to_string(&path).expect("read unchanged config"),
+            "{}\n"
+        );
+        fs::remove_dir_all(home).expect("remove temporary home");
+    }
+
+    #[test]
     fn validates_home_file_links_without_opening_them() {
         let home = temporary_workspace("home-link-validation");
         fs::create_dir_all(home.join(".config/pi")).expect("create config directory");
         fs::write(home.join(".config/pi/pix.jsonc"), "{}\n").expect("write config");
 
-        assert!(home_file_exists_from(&home, Path::new("~/.config/pi/pix.jsonc")));
+        assert!(home_file_exists_from(
+            &home,
+            Path::new("~/.config/pi/pix.jsonc")
+        ));
         assert!(!home_file_exists_from(&home, Path::new("~/missing.jsonc")));
         assert!(!home_file_exists_from(&home, Path::new("~/../secret.txt")));
         fs::remove_dir_all(home).expect("remove temporary home");
