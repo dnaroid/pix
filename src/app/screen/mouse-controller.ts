@@ -234,6 +234,12 @@ export class AppMouseController {
 			return;
 		}
 
+		if (target?.kind === "model-visibility-clear") {
+			this.popupActions.clearVisibleModels();
+			this.showClickFlashForEvent(event);
+			return;
+		}
+
 		if (target?.kind === "todo-panel") {
 			this.host.setTodoPanelExpanded(!this.host.getTodoPanelExpanded());
 			this.showClickFlashForEvent(event);

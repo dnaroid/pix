@@ -72,6 +72,32 @@ describe("AppPopupActionController model visibility", () => {
 		assert.equal(await controller.submitActivePopupMenu(), true);
 		assert.equal(saves, 0);
 	});
+
+	it("clears the whole visibility whitelist from management mode", () => {
+		const saved: string[][] = [];
+		const toasts: string[] = [];
+		const popupMenus = {
+			modelVisibilityModeActive: () => true,
+		} as unknown as AppPopupMenuController;
+		const controller = new AppPopupActionController(
+			host({
+				saveVisibleModels: (refs) => {
+					saved.push([...refs]);
+					return refs;
+				},
+				showToast: (message) => { toasts.push(message); },
+			}),
+			popupMenus,
+			{} as AppCommandController,
+			{} as AppMenuItemsController,
+			{} as AppQueuedMessageController,
+			{} as AppWorkspaceActionsController,
+		);
+
+		assert.equal(controller.clearVisibleModels(), true);
+		assert.deepEqual(saved, [[]]);
+		assert.match(toasts[0] ?? "", /cleared model picker visibility/iu);
+	});
 });
 
 function host(overrides: Partial<AppPopupActionControllerHost> = {}): AppPopupActionControllerHost {

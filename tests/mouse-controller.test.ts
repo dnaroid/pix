@@ -112,6 +112,22 @@ describe("AppMouseController", () => {
 		assert.deepEqual(dismissed, [7]);
 	});
 
+	it("clears model visibility from the management action row", () => {
+		let clears = 0;
+		const controller = new AppMouseController(
+			fakeHost(),
+			fakePopupMenus(),
+			fakePopupActions({ clearVisibleModels: () => { clears += 1; return true; } }),
+			fakeScrollController(),
+			fakeCommandController(),
+		);
+		controller.renderedTargets.set(2, { kind: "model-visibility-clear" });
+
+		controller.handleMouse({ button: 0, x: 2, y: 2, released: true });
+
+		assert.equal(clears, 1);
+	});
+
 	it("opens the session menu when clicking the active tab", () => {
 		let resumeOptions: unknown;
 		let switchCount = 0;
@@ -1026,8 +1042,8 @@ function fakePopupMenus(overrides: Partial<AppPopupMenuController> = {}): AppPop
 	} as unknown as AppPopupMenuController;
 }
 
-function fakePopupActions(): AppPopupActionController {
-	return { submitActivePopupMenu: () => {} } as unknown as AppPopupActionController;
+function fakePopupActions(overrides: Partial<AppPopupActionController> = {}): AppPopupActionController {
+	return { submitActivePopupMenu: () => {}, ...overrides } as unknown as AppPopupActionController;
 }
 
 function fakeCommandController(overrides: Partial<AppCommandController> = {}): AppCommandController {

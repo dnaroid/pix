@@ -505,8 +505,10 @@ describe("popup menu header", () => {
 		assert.equal(controller.toggleModelVisibilityMode(), true);
 		assert.equal(controller.modelVisibilityModeActive(), true);
 		assert.equal(includeHiddenCalls.at(-1), true);
-		assert.match(controller.renderActivePopupMenu(64)[0]?.text ?? "", /Manage visible models/u);
-		assert.match(controller.renderActivePopupMenu(64).at(-1)?.text ?? "", /Shift\+Tab select/u);
+		const managementLines = controller.renderActivePopupMenu(64);
+		assert.match(managementLines[0]?.text ?? "", /Manage visible models/u);
+		assert.deepEqual(managementLines.find((line) => line.text.includes("Clear all"))?.target, { kind: "model-visibility-clear" });
+		assert.match(managementLines.at(-1)?.text ?? "", /Shift\+Tab select/u);
 
 		assert.equal(controller.toggleModelVisibilityMode(), true);
 		assert.equal(controller.modelVisibilityModeActive(), false);

@@ -34,7 +34,7 @@ Pi provides the agent runtime, models, tools, skills, extensions, and persistent
 - **Keep projects organized.** Tabs are scoped to the working directory and survive restarts. Search, resume, fork, clone, jump through, import, export, share, or delete sessions without leaving the terminal.
 - **Stay in flow.** Run quick commands with `!`, open a raw interactive terminal with `!!`, paste images, follow file links, dictate in English or Russian, and improve a prompt before sending it.
 - **Know what the agent is doing.** The status area exposes model, thinking level, context, usage, workspace, todos, sub-agents, voice state, and prompt actions — with mouse targets where useful.
-- **Bring a serious toolkit.** Pix ships with `pi-tools-suite`: 18 integrated modules for indexed repository discovery, AST edits, LSP diagnostics, parallel agents, durable todos, context compression, web access, provider accounts, and more.
+- **Bring a serious toolkit.** Pix ships with `pi-tools-suite`: 21 integrated modules for indexed repository discovery, AST edits, LSP diagnostics, parallel agents, durable todos, context compression, web access, provider accounts, and more.
 - **Use the models you want.** Pix runs on Pi's provider ecosystem and supports model switching, scoped model lists, per-model thinking levels, usage views, autocomplete, and fallback-aware helper workflows.
 
 Pix is not a separate agent protocol or an RPC wrapper around Pi. It runs on the Pi SDK, so the runtime, session format, extensions, skills, prompts, and tools remain part of the same ecosystem.
@@ -97,6 +97,8 @@ On startup, Pix tries to link the bundled suite into the active Pi agent directo
 | Providers and quotas | `antigravity-auth`, `opencode-import`, `usage` | Antigravity OAuth/account failover, OpenCode credential import, and multi-provider usage views. |
 | Reusable workflows | `prompt-commands`, `resource-registry`, `session-name` | Prompt-command CRUD, private Git-backed skill/agent install/update/push/remote-remove/local-uninstall with reload-on-change, project-scoped `.pi/tasks.jsonc` + `.pi/plans/` + `.pi/TODO.md` sync, a Desktop Registry sidebar for status/actions/configuration, and session naming. |
 | Model compatibility | `coding-discipline`, `model-tools`, `codex-reasoning-fix` | Model-specific discipline and vision lookup, compatibility aliases, and a Codex reasoning payload workaround. |
+| Agent session context | `session-recovery` | Bounded session overview/search/section tools so agents can recover prior context. |
+| Payload hygiene | `context-gateway`, `truncation-metadata-normalizer`, `credential-firewall` | Observe-only result-chain gateway, opt-in truncation-metadata cleanup, and an opt-in secret firewall. |
 
 Every module can be disabled. Optional integrations only activate when their requirements are available — for example, repository tools require an index, web tools require local Ollama web search, and LSP servers must be configured and trusted.
 

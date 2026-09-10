@@ -829,17 +829,27 @@ pi-tools-suite/
   package.json
   src/
     index.ts
+    coding-discipline/
     ast-grep/
     async-subagents/
     lsp/
+    comment-checker/
+    session-name/
+    session-recovery/
     repo-discovery/
     antigravity-auth/
+    opencode-import/
     todo/
     model-tools/
     usage/
     web-search/
+    context-gateway/
+    truncation-metadata-normalizer/
     dcp/
     prompt-commands/
+    resource-registry/
+    credential-firewall/
+    codex-reasoning-fix/
   docs/
   licenses/
   scripts/

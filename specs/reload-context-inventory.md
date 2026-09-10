@@ -22,14 +22,18 @@ After `/reload` and other resource-reload flows, report the effective model, act
 - If none of those tools is active, the inventory does not claim that loaded skills are usable in context and reports the file-access tools as inactive.
 - Sub-agent roles are shown only while the `subagents` tool is active; a missing catalog remains distinct from an empty catalog.
 - Duplicate skills, tools, and agent names are removed before display.
+- Desktop inventory text escapes Markdown-significant underscores in skill, tool, and agent identifiers before it reaches `MarkdownText`, so names such as `repo_architecture` remain visually literal instead of being parsed as emphasis across neighbouring names.
 
 ## Related files
 
 - `src/app/commands/reload-context-inventory.ts`
 - `src/app/commands/command-session-actions.ts`
+- `acp/src/acp/context-inventory.ts`
 - `tests/reload-context-inventory.test.ts`
+- `acp/test/context-inventory.test.ts`
 
 ## Verification
 
 - Focused reload-context tests cover lowercase tools, PascalCase model-tool aliases, shell aliases, inactive file access, and missing sub-agent catalogs.
+- ACP formatting tests cover Markdown-safe display of underscored identifiers in Desktop model/reload inventory messages.
 - Root TypeScript typecheck passes.

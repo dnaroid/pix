@@ -172,6 +172,18 @@ export class AppPopupActionController {
 		return true;
 	}
 
+	clearVisibleModels(): boolean {
+		if (!this.popupMenus.modelVisibilityModeActive()) return false;
+		try {
+			this.host.saveVisibleModels([]);
+			this.host.showToast("Cleared model picker visibility", "info");
+		} catch (error) {
+			this.host.showToast(`Failed to clear model visibility: ${stringifyUnknown(error)}`, "error");
+		}
+		this.host.render();
+		return true;
+	}
+
 	private async submitSelectedUserMessageAction(): Promise<boolean> {
 		const scope = this.captureScope();
 		const selected = this.popupMenus.selectedUserMessageAction();

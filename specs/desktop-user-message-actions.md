@@ -17,7 +17,7 @@ Pix Desktop exposes the same four user-message actions as the TUI without adding
 ## Menu contract
 
 - A Desktop user message exposes exactly four actions: **Copy message**, **Fork**, **Fork in new tab**, and **Undo changes**. No additional message actions are part of this contract. `[confirmed by code: desktop/src/components/TranscriptPane.svelte]`
-- The menu is available from the user bubble's context menu and from an ellipsis button shown on hover/focus. Escape or an outside click closes it. `[confirmed by code]`
+- The menu is available from the user bubble's context menu and from an ellipsis button shown on hover/focus. It renders as a viewport-fixed overlay outside transcript-entry paint containment, flips above the anchor when there is not enough room below, and stays above the composer/chrome instead of being clipped by transcript scrolling. Each of the four actions has a dedicated icon. Escape, transcript scrolling/resizing, or an outside click closes it. `[confirmed by code: desktop/src/components/TranscriptPane.svelte]`
 - Copy remains available for renderer-only user rows. Fork and Undo actions require a real Pi user session entry and are disabled while the active session is busy. `[confirmed by code]`
 - Newly submitted Desktop rows are associated with Pi entries by comparing current-branch user entry IDs before and after the serialized prompt. Extension/builtin commands that create no Pi user entry are marked renderer-only. Historical rows resolve against the ordered current branch rather than by message text, so repeated identical prompts remain unambiguous. `[confirmed by code: desktop/src/App.svelte, acp/src/acp/pix-acp-agent.ts]`
 

@@ -10,7 +10,12 @@
 > 2026-09-10. That pass refreshed the Desktop activity/Markdown/sidebar contracts,
 > added the Desktop IDX contract, indexed recent text-selection/user-config and
 > reload-context work, and re-verified changed knowledge inputs against current
-> implementation/tests.
+> implementation/tests. A later same-day pass re-verified every input-changed
+> spec (Desktop task manager, attachments, autocomplete, Markdown, question,
+> text selection, tool rows, session sidebar/parity/slash commands/indicators,
+> window state, Deepgram voice input, Git helpers, popup selectors) against
+> current implementation/tests, fixed the module count and Layout tree in the
+> user-facing guides, and added the missing index entries below.
 
 ## Project context
 
@@ -19,7 +24,7 @@ pi coding agent, the Tauri/Svelte desktop app (`desktop/`, `acp/`), plus the
 `external/pi-tools-suite` headless extension suite that ships alongside it.
 The renderer (`src/`) owns UI, input, scroll, and tool state; the suite
 (`external/pi-tools-suite/`) owns the higher-risk runtime behavior (auth,
-privacy, background jobs, context mutation, external commands). `[confirmed by docs: CLAUDE.md]`
+privacy, background jobs, context mutation, external commands). `[confirmed by docs: README.md]`
 
 ## High-risk as-is areas (original screening)
 
@@ -56,6 +61,8 @@ not duplicate those; Spec Wiki discovers and classifies them independently.
 | [parent-first-subagent-routing](./parent-first-subagent-routing.md) | Parent-first sub-agent role selection |
 | [browser-qa-inline-agent](./browser-qa-inline-agent.md) | Self-contained browser QA agent |
 | [model-selector-fallbacks](./model-selector-fallbacks.md) | Ordered fallback arrays for singular model selectors |
+| [context-gateway](./context-gateway.md) | Context Gateway (observe-only result chain) |
+| [todo-repo-knowledge-finalization](./todo-repo-knowledge-finalization.md) | Todo repo knowledge finalization reminder |
 
 **TUI renderer (`src/`)**
 
@@ -72,8 +79,11 @@ not duplicate those; Spec Wiki discovers and classifies them independently.
 | [question-inactive-tab](./question-inactive-tab.md) | question tool UI in an inactive tab |
 | [fenced-code-block-rendering](./fenced-code-block-rendering.md) | Fenced code blocks in chat Markdown |
 | [model-scope-fallback](./model-scope-fallback.md) | Model scope fallback to the available snapshot |
+| [model-visibility-whitelist](./model-visibility-whitelist.md) | Model picker visibility whitelist |
+| [tui-model-thinking-selector](./tui-model-thinking-selector.md) | Combined model and thinking selector |
 | [file-link-opening](./file-link-opening.md) | File link opening (Zed / web / media routing) |
 | [tui-git-slash-commands](./tui-git-slash-commands.md) | TUI Git code-review and confirmed commit-message commands |
+| [deepgram-voice-input](./deepgram-voice-input.md) | Deepgram voice dictation (terminal and Desktop) |
 
 **Desktop (`desktop/`, `acp/`)**
 
@@ -143,4 +153,5 @@ not duplicate those; Spec Wiki discovers and classifies them independently.
   `docs/desktop-markdown-media.md` contracts were consolidated into
   [desktop-markdown-rendering.md](./desktop-markdown-rendering.md). The former
   DCP emergency-current-turn change document was consolidated into
+  [dcp-reliability-mechanisms.md](./dcp-reliability-mechanisms.md).
   [dcp.md](./dcp.md). Originals remain available in git history.

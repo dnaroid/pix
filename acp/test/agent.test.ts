@@ -2407,7 +2407,7 @@ test("pix/session/reload reports model-available skills, tools, and agents from 
 	const text = notifications.map((item) => (item.update as { content?: { text?: string } }).content?.text ?? "").join("\n");
 	assert.match(text, /Model: openai-codex\/gpt-5\.6-luna:medium/);
 	assert.match(text, /Skills \(in context\): frontier-model-rollover, project-agent-creator/);
-	assert.match(text, /Tools \(active\): repo_search, read, subagents/);
+	assert.match(text, /Tools \(active\): repo\\_search, read, subagents/);
 	assert.match(text, /Agents \(available\): frontier-review, research/);
 });
 

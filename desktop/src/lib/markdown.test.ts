@@ -290,6 +290,13 @@ describe("renderMarkdown", () => {
     expect(html).toContain("<code>value.toString()</code>");
   });
 
+  it("renders escaped underscores in inventory identifiers literally", () => {
+    const html = renderMarkdown("Tools (active): repo\\_architecture, session\\_read\\_section");
+
+    expect(html).toContain("repo_architecture, session_read_section");
+    expect(html).not.toContain("<em>");
+  });
+
   it("rejects project-file destinations that are absolute, traversing, or URL-like", () => {
     expect(normalizeProjectFileDestination("src/main.ts")).toBe("src/main.ts");
     expect(normalizeProjectFileDestination("./docs/readme.md#usage")).toBe("docs/readme.md");

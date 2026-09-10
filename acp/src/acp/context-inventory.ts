@@ -98,7 +98,16 @@ function text(value: unknown): string | undefined {
 }
 
 function listOrNone(values: readonly string[]): string {
-	return values.length > 0 ? values.join(", ") : "(none)";
+	return values.length > 0 ? values.map(escapeMarkdownIdentifier).join(", ") : "(none)";
+}
+
+/**
+ * Inventory identifiers are rendered by Desktop through MarkdownText. Keep
+ * underscores literal so names such as `repo_architecture` cannot be parsed
+ * as emphasis spanning neighbouring comma-separated identifiers.
+ */
+function escapeMarkdownIdentifier(value: string): string {
+	return value.replace(/_/gu, "\\_");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
