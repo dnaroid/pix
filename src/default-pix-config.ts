@@ -2,6 +2,8 @@ export const DEFAULT_PIX_CONFIG_JSONC = String.raw`{
   "$schema": "https://unpkg.com/pi-ui-extend/schemas/pix.json",
   // pix renderer configuration
   "defaultModel": { "modelRef": "openai-codex/gpt-5.6-sol", "fallbackModels": [], "thinking": "medium" },
+  // Optional model-picker whitelist shared by Pix TUI and Desktop. Omit it to show all available models.
+  // "visibleModels": ["openai-codex/gpt-5.6-sol", "zai/glm-5-turbo"],
   // Disable AGENTS.md / CLAUDE.md discovery for this project when set in <cwd>/.pi/pix.jsonc.
   "ignoreContextFiles": false,
   // Maximum pi session JSONL files to retain per project. 0 disables automatic deletion.

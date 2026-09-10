@@ -45,6 +45,7 @@ export type InputControllerHost = {
 	handleInterrupt(): Promise<void>;
 	handleEscape(): Promise<void>;
 	handleDirectPopupInput(char: string): boolean;
+	toggleModelVisibilityMode(): boolean;
 	autocompleteModel(): boolean;
 	acceptAutocompleteSuggestion(): boolean;
 	autocompleteSlashCommand(): void;
@@ -258,6 +259,9 @@ export class AppInputController {
 	private getEscapeSequences(): Array<[string, () => void]> {
 		return [
 			...SHIFT_ENTER_ESCAPE_SEQUENCES.map((sequence) => [sequence, () => this.insertInputNewline()] as [string, () => void]),
+			["\x1b[Z", () => { this.host.toggleModelVisibilityMode(); }],
+			["\x1b[9;2u", () => { this.host.toggleModelVisibilityMode(); }],
+			["\x1b[27;2;9~", () => { this.host.toggleModelVisibilityMode(); }],
 			["\x1b[13u", () => this.host.handleEnter()],
 			["\x1b[13;1u", () => this.host.handleEnter()],
 			["\x1b[5~", () => this.host.scrollByPage(-1)],

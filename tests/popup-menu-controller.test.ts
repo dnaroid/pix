@@ -85,6 +85,7 @@ describe("popup menu header", () => {
 			thinkingLevel: "high",
 			availableThinkingLevels: ["off", "medium", "high"],
 			source: "model",
+			visibilityMode: false,
 		});
 		const thinkingLine = lines[2]!;
 		const thinkingStart = thinkingLine.text.indexOf("high");
@@ -479,6 +480,36 @@ describe("popup menu header", () => {
 		assert.equal(controller.syncActivePopupMenu(), "model");
 		assert.equal(controller.selectedModelThinking()?.source, "thinking");
 		assert.match(controller.renderActivePopupMenu(64).at(-1)?.text ?? "", /Enter apply/u);
+	});
+
+	it("toggles a visibility-management mode that exposes hidden models", () => {
+		const includeHiddenCalls: boolean[] = [];
+		const visibleModel = { provider: "openai", id: "visible", name: "Visible", reasoning: false } as never;
+		const hiddenModel = { provider: "openai", id: "hidden", name: "Hidden", reasoning: false } as never;
+		const controller = createPopupMenuController({
+			...createPopupMenuHost([]),
+			getModelMenuItems: (_query, includeHidden = false) => {
+				includeHiddenCalls.push(includeHidden);
+				return [
+					{ value: { model: visibleModel, ref: "openai/visible", current: false, visible: true }, label: "openai/visible" },
+					...(includeHidden
+						? [{ value: { model: hiddenModel, ref: "openai/hidden", current: false, visible: false }, label: "openai/hidden" }]
+						: []),
+				];
+			},
+		});
+
+		controller.openDirectPopupMenu("model");
+		assert.equal(controller.syncActivePopupMenu(), "model");
+		assert.equal(controller.modelVisibilityModeActive(), false);
+		assert.equal(controller.toggleModelVisibilityMode(), true);
+		assert.equal(controller.modelVisibilityModeActive(), true);
+		assert.equal(includeHiddenCalls.at(-1), true);
+		assert.match(controller.renderActivePopupMenu(64)[0]?.text ?? "", /Manage visible models/u);
+		assert.match(controller.renderActivePopupMenu(64).at(-1)?.text ?? "", /Shift\+Tab select/u);
+
+		assert.equal(controller.toggleModelVisibilityMode(), true);
+		assert.equal(controller.modelVisibilityModeActive(), false);
 	});
 
 

@@ -26,7 +26,7 @@ Every persisted or user-facing **singular model selector** has an ordered fallba
 
 - The current interactive session model selected by `/model` or `--model`.
 - Explicit one-off sub-agent task model overrides; these intentionally suppress automatic fallback candidates.
-- Model pools or scopes that are already ordered/set-valued arrays such as agent `models`, preset `models`, and `enabledModels`.
+- Model pools, scopes, or UI whitelists that are already ordered/set-valued arrays such as agent `models`, preset `models`, `enabledModels`, and Pix `visibleModels`.
 - Model-color patterns, model identifiers in telemetry/results, quota keys, or provider payload fields.
 - Speech/dictation model assets, which are not LLM model selectors.
 

@@ -65,6 +65,14 @@
       },
       "description": "Default model selection for new sessions."
     },
+    "visibleModels": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "description": "Provider/model identifier shown in Pix model pickers."
+      },
+      "description": "User-level whitelist shared by Pix TUI and Desktop model pickers. Omit to show every available model."
+    },
     "toolRenderer": {
       "type": "object",
       "properties": {

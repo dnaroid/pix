@@ -145,13 +145,25 @@ later block; one summary is not required to satisfy the entire accumulated
 target. This avoids falling directly from a useful partial candidate to mass
 tool-output deletion.
 
+Configured model summarizers receive only a bounded sub-deadline of the whole
+auto-compression operation, leaving deterministic extractive fallback and
+durable publication time inside the same operation budget. After any failed
+model-backed auto-compression attempt, that session degrades subsequent
+automatic attempts to deterministic extraction instead of repeatedly spending
+the summarizer timeout on each new tool result.
+
 The emergency path protects the current user request, newest live assistant
 group, configured recent pairs, protected tools/files, and results without
 completed provider evidence. If a safe exact summary cannot be prepared and the
 hard safety floor must prune eligible old result bodies, those decisions are
 explicitly committed and replayed. If the remaining protected minimum itself
 cannot fit, DCP records a blocked state and uses the headless abort/handoff path
-instead of sending the same oversized request indefinitely.
+instead of sending the same oversized request indefinitely. An exact
+auto-compression failure at capacity does **not** jump directly to abort: DCP
+first re-evaluates the bounded emergency current-turn body-prune floor and only
+hands off when the post-recovery projection still exceeds input capacity.
+Blocked handoffs emit a user-visible `progress-blocked` diagnostic containing
+the reason and capacity figures before `ctx.abort()` is invoked.
 
 When emergency pressure has no normal compression candidate, DCP can still
 derive same-turn candidates from old, complete assistant tool-call/result pairs.
@@ -187,8 +199,8 @@ merely to fit the summarizer input budget.
 
 `summarizerModel` and `summarizerFallbackModels` are resolved as explicit
 ordered arrays (empty arrays are valid); configured refs are de-duplicated and
-tried in that order under one bounded deadline before falling back to the
-deterministic extractive continuity representation. A replacement with
+tried in that order under a bounded model-summary sub-deadline before falling
+back to the deterministic extractive continuity representation. A replacement with
 non-positive gain is rejected. Protected user/tag/tool fragments and bounded
 subagent artifacts are carried through a deduplicated ledger so repeated
 rollups do not recursively duplicate them.

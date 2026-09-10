@@ -234,7 +234,7 @@ export type RenderedLine = {
 	links?: readonly RenderedLink[];
 	imageTargets?: readonly ImageClickTarget[];
 	syntaxHighlight?: SyntaxLineHighlight | undefined;
-	target?: { kind: "tool"; id: string } | { kind: "popup-menu"; index: number } | { kind: "popup-menu-close" } | { kind: "todo-panel" } | { kind: "subagents-panel" } | { kind: "user-message"; id: string } | { kind: "queue-message"; id: string } | ToastLineTarget;
+	target?: { kind: "tool"; id: string } | { kind: "popup-menu"; index: number } | { kind: "popup-menu-close" } | { kind: "model-visibility-clear" } | { kind: "todo-panel" } | { kind: "subagents-panel" } | { kind: "user-message"; id: string } | { kind: "queue-message"; id: string } | ToastLineTarget;
 };
 
 export type ToastLineTarget = {
@@ -567,6 +567,7 @@ export type ModelMenuValue = {
 	model: SessionModel;
 	ref: string;
 	current: boolean;
+	visible?: boolean;
 };
 
 export type ScopedSessionModel = {
@@ -583,6 +584,7 @@ export type ModelThinkingMenuState = {
 	thinkingLevel: ThinkingLevel;
 	availableThinkingLevels: readonly ThinkingLevel[];
 	source: "model" | "thinking";
+	visibilityMode: boolean;
 };
 
 export type UserMessageMenuValue = "copy" | "fork" | "fork-new-tab" | "undo";

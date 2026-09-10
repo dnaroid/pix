@@ -3874,6 +3874,103 @@ describe("DCP pruning effectiveness", () => {
     }
   });
 
+  test("DCP tries emergency current-turn pruning before aborting when exact auto-compression fails at input capacity", async () => {
+    const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
+    const runtimeState = createState();
+    const runtimeConfig = config({
+      compress: {
+        maxContextPercent: 0.65,
+        minContextPercent: 0.40,
+        autoCandidates: { enabled: true, minContextPercent: 0.40, keepRecentTurns: 1, minMessages: 2, minTokens: 100 },
+        autoCompress: {
+          enabled: true,
+          patience: 0,
+          summarizerModel: ["missing/summary-model"],
+          summarizerFallbackModels: [],
+          timeoutMs: 100,
+        },
+      } as any,
+      strategies: {
+        emergencyCurrentTurnPruning: {
+          enabled: true,
+          hardContextPercent: 0.82,
+          targetContextPercent: 0.70,
+          patience: 0,
+          keepRecentToolPairs: 8,
+          minOutputTokens: 500,
+          maxSuggestions: 8,
+          protectedTools: [],
+        },
+      },
+    });
+    const diagnostics: any[] = [];
+    let aborts = 0;
+    const pi = {
+      on(event: string, handler: (event: any, ctx: any) => unknown) {
+        handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+      },
+      registerTool() {},
+      registerCommand() {},
+      appendEntry(type: string, data: any) {
+        if (type === "dcp-nudge") diagnostics.push(data);
+      },
+      sendMessage() {},
+    } as any;
+    await dcpModule(pi, { state: runtimeState, config: runtimeConfig });
+    const contextHandler = handlers.get("context")?.[0];
+    const toolCallHandler = handlers.get("tool_call")?.[0];
+    const toolResultHandler = handlers.get("tool_result")?.[0];
+    const ctx = {
+      hasUI: false,
+      model: { provider: "test-provider", id: "test-model", maxTokens: 20_000 },
+      modelRegistry: {
+        find: () => undefined,
+        getApiKeyAndHeaders: async () => ({ ok: false, error: "not configured" }),
+      },
+      sessionManager: { getBranch: () => [] },
+      getContextUsage: () => ({ tokens: 82_000, contextWindow: 100_000, percent: 82 }),
+      ui: { notify() {} },
+      abort() { aborts += 1; },
+    };
+
+    const messages: any[] = [
+      textMessage("user", `old request ${"important constraint ".repeat(2_500)}`, 1),
+      textMessage("assistant", "old response", 2),
+      textMessage("user", "active request", 3),
+    ];
+    for (let index = 0; index < 12; index++) {
+      const id = `capacity-tool-${index}`;
+      const timestamp = 10 + index * 2;
+      const output = `capacity output ${index} ${"x".repeat(4_000)}`;
+      messages.push(assistantToolCall(id, timestamp));
+      messages.push(toolResult(id, "read", output, timestamp + 1));
+      await toolCallHandler?.({ type: "tool_call", toolCallId: id, toolName: "read", input: { path: `/tmp/${id}` } }, ctx);
+      await toolResultHandler?.({
+        type: "tool_result",
+        toolCallId: id,
+        toolName: "read",
+        content: [{ type: "text", text: output }],
+        details: {},
+        isError: false,
+      }, ctx);
+    }
+
+    // Seed stable IDs/tool records before declaring completed provider evidence.
+    await contextHandler?.({ type: "context", messages }, {
+      ...ctx,
+      getContextUsage: () => ({ tokens: 10_000, contextWindow: 100_000, percent: 10 }),
+    });
+    for (let index = 0; index < 12; index++) runtimeState.providerSeenToolIds.add(`capacity-tool-${index}`);
+
+    const result = await contextHandler?.({ type: "context", messages }, ctx) as { messages: any[] } | undefined;
+
+    expect(aborts).toBe(0);
+    expect(runtimeState.prunedToolIds.size).toBeGreaterThan(0);
+    expect(runtimeState.compressionBlocks).toHaveLength(0);
+    expect(diagnostics.some((entry) => entry.event === "progress-blocked" && /automatic compression failed/i.test(entry.message ?? ""))).toBe(true);
+    expect((result?.messages ?? []).map(contentText).join("\n")).toContain("active request");
+  });
+
   test.serial("DCP emergency patience advances only on completed provider opportunities and resets to unknown on restart", async () => {
     const sessionDir = mkdtempSync(join(tmpdir(), "dcp-emergency-opportunity-"));
     const sessionId = "emergency-opportunity";

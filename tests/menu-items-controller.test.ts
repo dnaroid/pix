@@ -18,6 +18,7 @@ describe("AppMenuItemsController queue menu", () => {
 				},
 				services: { settingsManager: { getEnableSkillCommands: () => false } },
 			}) as unknown as AgentSessionRuntime,
+			visibleModels: () => undefined,
 			getBuiltinSlashCommands: () => [{ name: "search", description: "Search sessions", kind: "builtin", allowArguments: true }],
 			getEntries: () => [{ id: "u1", kind: "user", text: "Find me" }],
 			getResumeSessions: () => sessions,
@@ -33,7 +34,7 @@ describe("AppMenuItemsController queue menu", () => {
 		assert.deepEqual(controller.getResumeMenuItems("fir", 5)[1]?.labelHighlightRanges, [{ start: 0, end: 3 }]);
 	});
 
-	it("builds model and thinking menus from an explicit session scope", () => {
+	it("uses the full available-model snapshot even when the session has an explicit scope", () => {
 		const models = [model("zai", "glm-5-turbo", "GLM"), model("openai-codex", "gpt-5.5", "GPT")];
 		const runtime = {
 			session: {
@@ -44,13 +45,17 @@ describe("AppMenuItemsController queue menu", () => {
 			},
 			services: {
 				modelRuntime: {
+					getAvailableSnapshot: () => models,
 					getModel: (provider: string, id: string) => models.find((candidate) => candidate.provider === provider && candidate.id === id),
 				},
 			},
 		} as unknown as AgentSessionRuntime;
 		const controller = new AppMenuItemsController(host(runtime));
 
-		assert.deepEqual(controller.getModelMenuItems("").map((item) => item.label), ["openai-codex/gpt-5.5"]);
+		assert.deepEqual(controller.getModelMenuItems("").map((item) => item.label), [
+			`zai/glm-5-turbo ${APP_ICONS.check}`,
+			"openai-codex/gpt-5.5",
+		]);
 		assert.deepEqual(controller.getModelMenuItems("gpt")[0]?.labelHighlightRanges, [{ start: 13, end: 16 }]);
 		assert.deepEqual(controller.getThinkingMenuItems("").map((item) => item.label), [`low ${APP_ICONS.check}`, "high"]);
 	});
@@ -74,6 +79,35 @@ describe("AppMenuItemsController queue menu", () => {
 			`zai/glm-5-turbo ${APP_ICONS.check}`,
 			"openai-codex/gpt-5.5",
 		]);
+	});
+
+	it("filters model pickers by visibleModels while management mode exposes hidden models", () => {
+		const models = [
+			model("zai", "glm-5-turbo", "GLM"),
+			model("openai-codex", "gpt-5.5", "GPT"),
+			model("anthropic", "claude", "Claude"),
+		];
+		const runtime = {
+			session: { model: models[0], scopedModels: [] },
+			services: { modelRuntime: { getAvailableSnapshot: () => models } },
+		} as unknown as AgentSessionRuntime;
+		const controller = new AppMenuItemsController({
+			...host(runtime),
+			visibleModels: () => ["openai-codex/gpt-5.5"],
+		});
+
+		assert.deepEqual(controller.getModelMenuItems("").map((item) => item.value.ref), [
+			"zai/glm-5-turbo",
+			"openai-codex/gpt-5.5",
+		]);
+		const managed = controller.getModelMenuItems("", true);
+		assert.deepEqual(managed.map((item) => item.value.ref), [
+			"zai/glm-5-turbo",
+			"anthropic/claude",
+			"openai-codex/gpt-5.5",
+		]);
+		assert.equal(managed.find((item) => item.value.ref === "anthropic/claude")?.value.visible, false);
+		assert.equal(managed.find((item) => item.value.ref === "zai/glm-5-turbo")?.value.visible, true);
 	});
 
 	it("uses available thinking levels without forcing unavailable current levels", () => {
@@ -136,6 +170,7 @@ describe("AppMenuItemsController queue menu", () => {
 function host(runtime: AgentSessionRuntime | undefined) {
 	return {
 		runtime: () => runtime,
+		visibleModels: () => undefined,
 		getBuiltinSlashCommands: () => [],
 		getEntries: () => [],
 		getResumeSessions: () => [],

@@ -19,8 +19,10 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
     "notify": true
   },
   // Context Gateway is off by default. observe is passive telemetry; enforce
-  // selectively compacts only recognised complete simple test/build output.
-  // Reads and repo results remain producer-owned passthrough/native-compact.
+  // compacts recognised complete simple test/build output and over-budget
+  // structured web_search/web_fetch results whose raw details remain recoverable
+  // from the append-only session. Reads/repo and unsupported result shapes stay
+  // producer-owned passthrough/native-compact.
   "contextGateway": {
     "mode": "off",
     "budgets": {

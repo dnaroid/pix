@@ -370,9 +370,40 @@ describe("context gateway P01 observe module", () => {
 			version: 1,
 			representation: "web-recoverable-compact",
 		});
+		expect(result?.details?.contextGateway?.deliveredContentBytes).toBeLessThanOrEqual(1_024);
 		const snapshot = runtime.telemetry.snapshot();
 		expect(snapshot.enforcedResults).toBe(1);
 		expect(snapshot.lastObservation?.delivery.representation).toBe("web-recoverable-compact");
+	});
+
+	test("enforce compacts an over-budget web_fetch from retained structured content", async () => {
+		const cfg = config("enforce", 768);
+		cfg.budgets.maxInlineBytes = 768;
+		const pi = new FakePi();
+		registerContextGateway(pi as any, { loadConfig: () => cfg });
+		const ctx = commandContext([]);
+		const fullContent = `FETCH_RECOVERY_HEAD ${"page body ".repeat(1_000)} FETCH_RECOVERY_TAIL`;
+
+		await pi.handlers.get("tool_call")![0]({ toolCallId: "fetch-large", toolName: "web_fetch", input: { url: "https://example.com/page" } }, ctx);
+		const result = await pi.handlers.get("tool_result")![0]({
+			toolCallId: "fetch-large",
+			toolName: "web_fetch",
+			content: [{ type: "text", text: fullContent }],
+			details: {
+				title: "Fetched page",
+				content: fullContent,
+				links: ["https://example.com/next"],
+			},
+			isError: false,
+		}, ctx);
+
+		const text = result?.content?.[0]?.text ?? "";
+		expect(text).toContain("Fetched page");
+		expect(text).toContain("Recovery key: toolCallId=fetch-large");
+		expect(text).not.toContain("FETCH_RECOVERY_TAIL");
+		expect(result?.details?.content).toContain("FETCH_RECOVERY_TAIL");
+		expect(result?.details?.contextGateway?.representation).toBe("web-recoverable-compact");
+		expect(result?.details?.contextGateway?.deliveredContentBytes).toBeLessThanOrEqual(768);
 	});
 
 	test("enforce fails open for within-budget, compound, truncated, unknown, and read results", async () => {

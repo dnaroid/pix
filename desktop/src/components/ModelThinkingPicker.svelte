@@ -13,13 +13,17 @@
 
   let {
     configOptions,
+    visibleModelRefs,
     disabled = false,
     onApply,
+    onVisibleModelsChange,
     onClose,
   }: {
     configOptions: readonly SessionConfigOption[];
+    visibleModelRefs?: readonly string[];
     disabled?: boolean;
     onApply: (modelRef: string, thinkingLevel: string) => void | Promise<void>;
+    onVisibleModelsChange: (modelRefs: readonly string[]) => void | Promise<void>;
     onClose: () => void;
   } = $props();
 
@@ -31,13 +35,19 @@
   let selectedThinking = $state("off");
   let selectedIndex = $state(0);
   let applying = $state(false);
+  let savingVisibility = $state(false);
   let applyError = $state("");
+  let visibilityMode = $state(false);
+  let visibleRefs = $state<string[] | undefined>(undefined);
   let initialized = false;
   let previousFocus: HTMLElement | null = null;
   const thinkingByModel = new Map<string, string>();
 
+  const pickerModels = $derived(visibilityMode
+    ? config.models
+    : config.models.filter((model) => modelIsVisible(model)));
   const filteredModels = $derived(fuzzySearch(
-    config.models.map((model) => ({
+    pickerModels.map((model) => ({
       value: model,
       label: model.ref,
       aliases: [model.modelId, model.name, model.provider],
@@ -55,6 +65,7 @@
 
   onMount(() => {
     previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    visibleRefs = visibleModelRefs === undefined ? undefined : [...visibleModelRefs];
     const initialModel = config.currentModel ?? config.models[0];
     if (initialModel) {
       selectedModelRef = initialModel.ref;
@@ -68,10 +79,11 @@
 
   $effect(() => {
     query;
+    visibilityMode;
     if (!initialized) return;
     selectedIndex = 0;
     const first = filteredModels[0];
-    if (first) stageModel(first);
+    if (first && !visibilityMode) stageModel(first);
   });
 
   $effect(() => {
@@ -106,9 +118,66 @@
     if (model) stageModel(model);
   }
 
+  function modelIsVisible(model: ModelThinkingModel): boolean {
+    return model.current || visibleRefs === undefined || visibleRefs.includes(model.ref);
+  }
+
+  function toggleVisibilityMode(): void {
+    if (applying || savingVisibility) return;
+    visibilityMode = !visibilityMode;
+    query = "";
+    applyError = "";
+    if (!visibilityMode) {
+      const staged = config.models.find((model) => model.ref === selectedModelRef && modelIsVisible(model));
+      const next = staged ?? config.currentModel ?? config.models.find((model) => modelIsVisible(model));
+      if (next) stageModel(next);
+    }
+    selectedIndex = 0;
+    void tick().then(() => search?.focus());
+  }
+
+  async function toggleModelVisibility(model: ModelThinkingModel): Promise<void> {
+    if (disabled || applying || savingVisibility) return;
+    if (model.current) {
+      applyError = "The current model must remain visible until another model is selected.";
+      return;
+    }
+
+    const next = new Set(visibleRefs === undefined ? config.models.map((candidate) => candidate.ref) : visibleRefs);
+    if (next.has(model.ref)) next.delete(model.ref);
+    else next.add(model.ref);
+    if (config.currentModel) next.add(config.currentModel.ref);
+
+    savingVisibility = true;
+    applyError = "";
+    try {
+      const refs = [...next];
+      await onVisibleModelsChange(refs);
+      visibleRefs = refs;
+    } catch (error) {
+      applyError = error instanceof Error ? error.message : String(error);
+    } finally {
+      savingVisibility = false;
+    }
+  }
+
+  async function clearVisibleModels(): Promise<void> {
+    if (disabled || applying || savingVisibility) return;
+    savingVisibility = true;
+    applyError = "";
+    try {
+      await onVisibleModelsChange([]);
+      visibleRefs = [];
+    } catch (error) {
+      applyError = error instanceof Error ? error.message : String(error);
+    } finally {
+      savingVisibility = false;
+    }
+  }
+
   function handleKeydown(event: KeyboardEvent): void {
     if (event.key === "Escape") {
-      if (applying) return;
+      if (applying || savingVisibility) return;
       event.preventDefault();
       onClose();
       return;
@@ -118,12 +187,22 @@
       moveModel(event.key === "ArrowDown" ? 1 : -1);
       return;
     }
-    if (event.target === search && event.key === "Enter") {
+    if (event.target === search && event.key === "Tab" && event.shiftKey) {
       event.preventDefault();
-      void applySelection();
+      toggleVisibilityMode();
       return;
     }
-    if (event.target === search && event.key === "Tab" && !event.shiftKey) {
+    if (event.target === search && event.key === "Enter") {
+      event.preventDefault();
+      const model = filteredModels[selectedIndex];
+      if (visibilityMode) {
+        if (model) void toggleModelVisibility(model);
+      } else {
+        void applySelection();
+      }
+      return;
+    }
+    if (!visibilityMode && event.target === search && event.key === "Tab" && !event.shiftKey) {
       const level = selectedThinking;
       event.preventDefault();
       void tick().then(() => {
@@ -165,7 +244,7 @@
   }
 
   function handleBackdropClick(event: MouseEvent): void {
-    if (!applying && event.target === event.currentTarget) onClose();
+    if (!applying && !savingVisibility && event.target === event.currentTarget) onClose();
   }
 </script>
 
@@ -184,16 +263,28 @@
   >
     <header class="flex items-start justify-between gap-3 px-3.5 pt-3.5 pb-2.5">
       <div class="min-w-0">
-        <h2 id="model-thinking-picker-title" class="text-sm font-medium text-foreground">Select model &amp; thinking</h2>
-        <p class="mt-0.5 text-[11px] text-muted-foreground">Choose both, then apply them together to this session.</p>
+        <h2 id="model-thinking-picker-title" class="text-sm font-medium text-foreground">
+          {visibilityMode ? "Manage visible models" : "Select model & thinking"}
+        </h2>
+        <p class="mt-0.5 text-[11px] text-muted-foreground">
+          {visibilityMode ? "Choose which models appear in both Pix model pickers." : "Choose both, then apply them together to this session."}
+        </p>
       </div>
-      <button
-        class="grid h-7 w-7 shrink-0 cursor-pointer place-items-center rounded-md bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
-        type="button"
-        aria-label="Close model and thinking picker"
-        disabled={applying}
-        onclick={onClose}
-      ><X class="h-4 w-4" aria-hidden="true" /></button>
+      <div class="flex shrink-0 items-center gap-1">
+        <button
+          class="h-7 cursor-pointer rounded-md px-2 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+          type="button"
+          disabled={applying || savingVisibility}
+          onclick={toggleVisibilityMode}
+        >{visibilityMode ? "Select" : "Manage"}</button>
+        <button
+          class="grid h-7 w-7 shrink-0 cursor-pointer place-items-center rounded-md bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+          type="button"
+          aria-label="Close model and thinking picker"
+          disabled={applying || savingVisibility}
+          onclick={onClose}
+        ><X class="h-4 w-4" aria-hidden="true" /></button>
+      </div>
     </header>
 
     <label class="px-3 pb-2.5">
@@ -213,25 +304,32 @@
         <button
           class={[
             "grid w-full cursor-pointer grid-cols-[22px_minmax(0,1fr)_auto] items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
-            model.ref === selectedModelRef && "bg-panel-selected",
+            (!visibilityMode && model.ref === selectedModelRef) || (visibilityMode && index === selectedIndex) ? "bg-panel-selected" : "",
           ]}
           type="button"
           role="option"
-          aria-selected={model.ref === selectedModelRef}
+          aria-selected={visibilityMode ? index === selectedIndex : model.ref === selectedModelRef}
           data-model-ref={model.ref}
           onmouseenter={() => selectedIndex = index}
           onclick={() => {
             selectedIndex = index;
-            stageModel(model);
+            if (visibilityMode) void toggleModelVisibility(model);
+            else stageModel(model);
           }}
         >
-          {#if model.ref === selectedModelRef}<Check class="h-4 w-4 text-primary" aria-hidden="true" />{:else}<span aria-hidden="true"></span>{/if}
+          {#if visibilityMode}
+            {#if modelIsVisible(model)}<Check class="h-4 w-4 text-primary" aria-hidden="true" />{:else}<span class="h-3.5 w-3.5 rounded-sm border border-muted-foreground/50" aria-hidden="true"></span>{/if}
+          {:else if model.ref === selectedModelRef}
+            <Check class="h-4 w-4 text-primary" aria-hidden="true" />
+          {:else}
+            <span aria-hidden="true"></span>
+          {/if}
           <span class="min-w-0">
             <strong class={["block truncate font-mono text-xs font-medium", modelDisplayToneClass(model.tone)]}>{model.ref}</strong>
             <small class="mt-0.5 block truncate text-[11px] text-muted-foreground">{model.name}</small>
           </span>
           {#if model.current}
-            <span class="shrink-0 text-[10px] font-medium text-muted-foreground">current</span>
+            <span class="shrink-0 text-[10px] font-medium text-muted-foreground">{visibilityMode ? "current · required" : "current"}</span>
           {/if}
         </button>
       {:else}
@@ -239,7 +337,7 @@
       {/each}
     </div>
 
-    <div class="border-t border-border px-3.5 py-3">
+    {#if !visibilityMode}<div class="border-t border-border px-3.5 py-3">
       <div class="mb-2 flex min-w-0 items-baseline justify-between gap-3">
         <span class="text-xs font-medium text-foreground">Thinking</span>
         {#if selectedModel}<span class="truncate text-[11px] text-muted-foreground">{selectedModel.name}</span>{/if}
@@ -262,29 +360,37 @@
           >{level}</button>
         {/each}
       </div>
-    </div>
+    </div>{/if}
 
     <footer class="flex min-w-0 items-center justify-between gap-3 border-t border-border/60 px-3.5 py-2.5">
       <p class="min-w-0 truncate text-[11px] text-muted-foreground">
-        {#if selectedModel}
+        {#if visibilityMode}
+          Changes save immediately · Shift+Tab returns to selection
+        {:else if selectedModel}
           <span class={modelDisplayToneClass(selectedModel.tone)}>{selectedModel.name}</span>
           <span class="px-1 text-muted-foreground/70">·</span>
           <span class={modelDisplayToneClass(thinkingLevelTone(selectedThinking, selectedModel.thinkingLevels))}>{selectedThinking}</span>
         {/if}
       </p>
       <div class="flex shrink-0 items-center gap-1.5">
+        {#if visibilityMode}<button
+          class="h-7 cursor-pointer rounded-md px-2.5 text-xs text-destructive hover:bg-destructive/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+          type="button"
+          disabled={disabled || applying || savingVisibility}
+          onclick={() => void clearVisibleModels()}
+        >Clear all</button>{/if}
         <button
           class="h-7 cursor-pointer rounded-md px-2.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
           type="button"
-          disabled={applying}
+          disabled={applying || savingVisibility}
           onclick={onClose}
-        >Cancel</button>
-        <button
+        >{visibilityMode ? "Done" : "Cancel"}</button>
+        {#if !visibilityMode}<button
           class="h-7 cursor-pointer rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
           type="button"
           disabled={!dirty || disabled || applying || !selectedModel}
           onclick={() => void applySelection()}
-        >{applying ? "Applying…" : "Apply"}</button>
+        >{applying ? "Applying…" : "Apply"}</button>{/if}
       </div>
     </footer>
 

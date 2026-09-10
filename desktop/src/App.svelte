@@ -138,6 +138,11 @@
     externalEditorLabel,
     resolveDesktopPreferences,
   } from "./lib/desktop-config";
+  import {
+    updateVisibleModelRefsInPixConfig,
+    visibleModelRefsFromPixConfig,
+  } from "./lib/model-visibility";
+  import type { SettingsConfigDocument } from "./lib/settings";
   import type { ProjectTreeEntry } from "./lib/project-tree";
   import {
     gitDiffForLlm,
@@ -243,6 +248,7 @@
   let commandPicker = $state<CommandPickerState | null>(null);
   let modelThinkingPickerOpen = $state(false);
   let modelThinkingPickerSessionId = $state<string | null>(null);
+  let visibleModelRefs = $state<string[] | undefined>(undefined);
   let addingQuestionImages = $state(false);
   let projectSelectorOpen = $state(false);
   let sessionSelectorOpen = $state(false);
@@ -3399,16 +3405,32 @@
     }
   }
 
-  function openModelThinkingPicker(): void {
+  async function openModelThinkingPicker(): Promise<void> {
     if (!activeSessionId || !activeSessionRuntimeReady || operationRunning || promptRunning || changingConfig) return;
+    const sessionId = activeSessionId;
     commandPicker = null;
-    modelThinkingPickerSessionId = activeSessionId;
+    try {
+      const document = await invoke<SettingsConfigDocument>("read_user_config", { kind: "pix" });
+      visibleModelRefs = visibleModelRefsFromPixConfig(document.content);
+    } catch {
+      // A missing/unreadable preference falls back to the full model catalog.
+      visibleModelRefs = undefined;
+    }
+    if (sessionId !== activeSessionId || !activeSessionRuntimeReady || operationRunning || promptRunning || changingConfig) return;
+    modelThinkingPickerSessionId = sessionId;
     modelThinkingPickerOpen = true;
   }
 
   function closeModelThinkingPicker(): void {
     modelThinkingPickerOpen = false;
     modelThinkingPickerSessionId = null;
+  }
+
+  async function saveVisibleModelRefs(modelRefs: readonly string[]): Promise<void> {
+    const document = await invoke<SettingsConfigDocument>("read_user_config", { kind: "pix" });
+    const content = updateVisibleModelRefsInPixConfig(document.content, modelRefs);
+    const saved = await invoke<SettingsConfigDocument>("write_user_config", { kind: "pix", content });
+    visibleModelRefs = visibleModelRefsFromPixConfig(saved.content) ?? [...modelRefs];
   }
 
   async function applyModelThinkingSelection(modelRef: string, thinkingLevel: string): Promise<void> {
@@ -4298,8 +4320,10 @@
 {#if modelThinkingPickerOpen}
   <ModelThinkingPicker
     {configOptions}
+    {visibleModelRefs}
     disabled={!canUseSession || !activeSessionRuntimeReady || promptRunning || changingConfig !== null}
     onApply={applyModelThinkingSelection}
+    onVisibleModelsChange={saveVisibleModelRefs}
     onClose={closeModelThinkingPicker}
   />
 {/if}

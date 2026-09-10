@@ -95,6 +95,8 @@ export type PixConfig = {
 	toolRenderer: ToolRendererConfig;
 	outputFilters: OutputFiltersConfig;
 	defaultModel?: DefaultModelConfig;
+	/** User-level whitelist for model pickers. Undefined means show every available model. */
+	visibleModels?: string[];
 	promptEnhancer: PromptEnhancerConfig;
 	autocomplete: AutocompleteConfig;
 	modelColors: ModelColorsConfig;
@@ -308,6 +310,14 @@ function extractDefaultModelConfig(raw: unknown): DefaultModelConfig | undefined
 	};
 }
 
+function extractVisibleModelsConfig(raw: unknown): string[] | undefined {
+	if (!isPlainObject(raw) || !Array.isArray(raw.visibleModels)) return undefined;
+	return [...new Set(raw.visibleModels
+		.filter((entry): entry is string => typeof entry === "string")
+		.map((entry) => entry.trim())
+		.filter(Boolean))];
+}
+
 function extractModelColorsConfig(raw: unknown): ModelColorsConfig | undefined {
 	if (!isPlainObject(raw)) return undefined;
 	const modelColors = raw.modelColors;
@@ -478,11 +488,14 @@ function cloneDictationConfig(config: DictationConfig): DictationConfig {
 function pixConfigFromParsed(
 	parsed: unknown,
 	fallback: PixConfig = defaultPixConfig(),
-	options: { allowDictationApiKey?: boolean } = {},
+	options: { allowDictationApiKey?: boolean; allowVisibleModels?: boolean } = {},
 ): PixConfig {
 	const toolRenderer = extractToolRendererConfig(parsed) ?? fallback.toolRenderer;
 	const outputFilters = extractOutputFiltersConfig(parsed) ?? fallback.outputFilters;
 	const defaultModel = extractDefaultModelConfig(parsed) ?? fallback.defaultModel;
+	const visibleModels = options.allowVisibleModels === false
+		? fallback.visibleModels
+		: extractVisibleModelsConfig(parsed) ?? fallback.visibleModels;
 	const promptEnhancer = extractPromptEnhancerConfig(parsed) ?? fallback.promptEnhancer;
 	const autocomplete = extractAutocompleteConfig(parsed) ?? fallback.autocomplete;
 	const modelColors = extractModelColorsConfig(parsed) ?? fallback.modelColors;
@@ -493,7 +506,19 @@ function pixConfigFromParsed(
 	}) ?? fallback.dictation;
 	const ignoreContextFiles = extractIgnoreContextFiles(parsed) ?? fallback.ignoreContextFiles;
 	const maxProjectSessions = extractMaxProjectSessions(parsed) ?? fallback.maxProjectSessions;
-	return { toolRenderer, outputFilters, ...(defaultModel === undefined ? {} : { defaultModel }), promptEnhancer, autocomplete, modelColors, iconTheme, dictation, ignoreContextFiles, maxProjectSessions };
+	return {
+		toolRenderer,
+		outputFilters,
+		...(defaultModel === undefined ? {} : { defaultModel }),
+		...(visibleModels === undefined ? {} : { visibleModels: [...visibleModels] }),
+		promptEnhancer,
+		autocomplete,
+		modelColors,
+		iconTheme,
+		dictation,
+		ignoreContextFiles,
+		maxProjectSessions,
+	};
 }
 
 export function resolveDefaultModelRef(config: PixConfig): string | undefined {
@@ -542,6 +567,16 @@ export function savePixAutocompleteModel(modelRef: string): AutocompleteConfig {
 	return extractAutocompleteConfig(parseJsonc(updated)) ?? { ...DEFAULT_AUTOCOMPLETE, modelRef: modelRef.trim() };
 }
 
+export function savePixVisibleModels(modelRefs: readonly string[]): string[] {
+	const configPath = PIX_CONFIG_PATH;
+	const source = existsSync(configPath) ? readFileSync(configPath, "utf8") : "{\n}\n";
+	const normalized = normalizeVisibleModelRefs(modelRefs);
+	const updated = upsertPixVisibleModelsInJsonc(source, normalized);
+	mkdirSync(dirname(configPath), { recursive: true });
+	writeFileSync(configPath, updated);
+	return extractVisibleModelsConfig(parseJsonc(updated)) ?? normalized;
+}
+
 export function saveProjectPixIgnoreContextFiles(cwd: string, ignoreContextFiles: boolean): boolean {
 	const configPath = getProjectPixConfigPath(cwd);
 	const source = existsSync(configPath) ? readFileSync(configPath, "utf8") : `{
@@ -557,6 +592,11 @@ export function saveProjectPixIgnoreContextFiles(cwd: string, ignoreContextFiles
 export function upsertPixIgnoreContextFilesInJsonc(source: string, ignoreContextFiles: boolean): string {
 	const formattingOptions = { insertSpaces: true, tabSize: 2 };
 	return applyEdits(source, modify(source, ["ignoreContextFiles"], ignoreContextFiles, { formattingOptions }));
+}
+
+export function upsertPixVisibleModelsInJsonc(source: string, modelRefs: readonly string[]): string {
+	const formattingOptions = { insertSpaces: true, tabSize: 2 };
+	return applyEdits(source, modify(source, ["visibleModels"], normalizeVisibleModelRefs(modelRefs), { formattingOptions }));
 }
 
 export function upsertPixDefaultModelInJsonc(source: string, modelRef: string): string {
@@ -629,6 +669,10 @@ function normalizeDefaultModelRef(modelRef: string): DefaultModelConfig | undefi
 		: { modelRef: trimmed, fallbackModels: [] };
 }
 
+function normalizeVisibleModelRefs(modelRefs: readonly string[]): string[] {
+	return [...new Set(modelRefs.map((entry) => entry.trim()).filter(Boolean))];
+}
+
 function stripThinkingSuffix(modelRef: string): string {
 	const colonIndex = modelRef.lastIndexOf(":");
 	if (colonIndex <= 0) return modelRef;
@@ -696,7 +740,12 @@ function loadProjectPixConfig(cwd: string | undefined, fallback: PixConfig): Pix
 
 	try {
 		const raw = readFileSync(configPath, "utf8");
-		return pixConfigFromParsed(parseJsonc(raw), fallback, { allowDictationApiKey: false });
+		return pixConfigFromParsed(parseJsonc(raw), fallback, {
+			allowDictationApiKey: false,
+			// Model visibility is a user UI preference shared by TUI and Desktop.
+			// Project config must not silently fork that picker state.
+			allowVisibleModels: false,
+		});
 	} catch (error) {
 		process.stderr.write(`[pix] Failed to load ${configPath}: ${error instanceof Error ? error.message : String(error)}\n`);
 		return fallback;

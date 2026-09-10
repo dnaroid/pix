@@ -24,6 +24,7 @@ import type {
 
 export type AppMenuItemsControllerHost = {
 	runtime(): AgentSessionRuntime | undefined;
+	visibleModels(): readonly string[] | undefined;
 	getBuiltinSlashCommands(): readonly SlashCommand[];
 	getEntries(): readonly Entry[];
 	getResumeSessions(): readonly SessionInfo[];
@@ -68,8 +69,11 @@ export class AppMenuItemsController {
 		return `${model.provider}/${model.id}`;
 	}
 
-	getModelMenuItems(query: string): PopupMenuItem<ModelMenuValue>[] {
-		const models = [...this.getModelMenuModels()].sort((left, right) => {
+	getModelMenuItems(query: string, includeHidden = false): PopupMenuItem<ModelMenuValue>[] {
+		const visibleModels = this.host.visibleModels();
+		const models = [...this.getModelMenuModels()]
+			.filter((model) => includeHidden || this.isVisibleModel(model, visibleModels))
+			.sort((left, right) => {
 			const leftCurrent = this.isCurrentModel(left);
 			const rightCurrent = this.isCurrentModel(right);
 			if (leftCurrent && !rightCurrent) return -1;
@@ -82,8 +86,9 @@ export class AppMenuItemsController {
 		const items: FuzzySearchItem<ModelMenuValue>[] = models.map((model) => {
 			const ref = this.modelRef(model);
 			const current = this.isCurrentModel(model);
+			const visible = current || visibleModels === undefined || visibleModels.includes(ref);
 			return {
-				value: { model, ref, current },
+				value: { model, ref, current, visible },
 				label: ref,
 				aliases: [model.id, model.name, model.provider],
 				keywords: [model.name, `${model.provider} ${model.id}`],
@@ -213,20 +218,21 @@ export class AppMenuItemsController {
 		return current?.provider === model.provider && current.id === model.id;
 	}
 
+	private isVisibleModel(model: SessionModel, visibleModels: readonly string[] | undefined): boolean {
+		return this.isCurrentModel(model) || visibleModels === undefined || visibleModels.includes(this.modelRef(model));
+	}
+
 	private getModelMenuModels(): SessionModel[] {
 		const runtime = this.host.runtime();
 		if (!runtime) return [];
 
-		const { session } = runtime;
 		const modelRuntime = runtime.services.modelRuntime;
-		if (!session.scopedModels.length) {
-			return [...modelRuntime.getAvailableSnapshot()] as SessionModel[];
+		const models = [...modelRuntime.getAvailableSnapshot()] as SessionModel[];
+		const current = runtime.session.model as SessionModel | undefined;
+		if (current && !models.some((model) => model.provider === current.provider && model.id === current.id)) {
+			models.push(current);
 		}
-
-		return session.scopedModels.map((scoped) => {
-			const refreshed = modelRuntime.getModel(scoped.model.provider, scoped.model.id);
-			return (refreshed ?? scoped.model) as SessionModel;
-		});
+		return models;
 	}
 
 	private thinkingLevelDescription(level: ThinkingLevel, _availableLevels: readonly ThinkingLevel[]): string {

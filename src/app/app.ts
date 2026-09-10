@@ -6,6 +6,7 @@ import {
 	defaultPixConfig,
 	loadPixConfig,
 	resolveToolRule,
+	savePixVisibleModels,
 	type PixConfig,
 } from "../config.js";
 import type {
@@ -301,6 +302,7 @@ export class PiUiExtendApp {
 		}, this.pixConfig.dictation);
 		this.menuItems = new AppMenuItemsController({
 			runtime: () => this.runtime,
+			visibleModels: () => this.pixConfig.visibleModels,
 			getBuiltinSlashCommands: () => this.slashCommands,
 			getEntries: () => this.entries,
 			getResumeSessions: () => this.resumeSessions,
@@ -325,7 +327,7 @@ export class PiUiExtendApp {
 			setInput: (value) => this.setInput(value),
 			parseSlashInput: (text) => this.menuItems.parseSlashInput(text),
 			getSlashCommandMenuItems: (query) => this.menuItems.getSlashCommandMenuItems(query),
-			getModelMenuItems: (query) => this.menuItems.getModelMenuItems(query),
+			getModelMenuItems: (query, includeHidden) => this.menuItems.getModelMenuItems(query, includeHidden),
 			getThinkingMenuItems: (query) => this.menuItems.getThinkingMenuItems(query),
 			getResumeMenuItems: (query, limit) => this.menuItems.getResumeMenuItems(query, limit),
 			getUserMessageMenuItems: () => this.menuItems.getUserMessageMenuItems(),
@@ -627,6 +629,12 @@ export class PiUiExtendApp {
 				setStatus: (status) => this.setStatus(status),
 				setSessionStatus: (session) => this.setSessionStatus(session),
 				showToast: (message, kind) => this.showToast(message, kind),
+				visibleModels: () => this.pixConfig.visibleModels,
+				saveVisibleModels: (modelRefs) => {
+					const saved = savePixVisibleModels(modelRefs);
+					this.pixConfig.visibleModels = [...saved];
+					return saved;
+				},
 				render: () => this.render(),
 				awaitCurrentSessionExtensions: (runtime) => this.awaitCurrentSessionExtensions(runtime),
 				afterSessionReplacement: (message) => this.afterSessionReplacement(message),
@@ -810,6 +818,7 @@ export class PiUiExtendApp {
 			handleInterrupt: () => this.inputActions.handleInterrupt(),
 			handleEscape: () => this.inputActions.handleEscape(),
 			handleDirectPopupInput: (char) => this.popupMenus.handleDirectPopupInput(char),
+			toggleModelVisibilityMode: () => this.popupMenus.toggleModelVisibilityMode(),
 			autocompleteModel: () => this.popupMenus.autocompleteModel(),
 			acceptAutocompleteSuggestion: () => this.autocompleteController.acceptSuggestion(),
 			autocompleteSlashCommand: () => this.popupMenus.autocompleteSlashCommand(),
@@ -944,6 +953,8 @@ export class PiUiExtendApp {
 		replaceRecord(this.pixConfig.dictation as unknown as MutableRecord, config.dictation as unknown as MutableRecord);
 		if (config.defaultModel === undefined) delete this.pixConfig.defaultModel;
 		else this.pixConfig.defaultModel = { ...config.defaultModel };
+		if (config.visibleModels === undefined) delete this.pixConfig.visibleModels;
+		else this.pixConfig.visibleModels = [...config.visibleModels];
 		this.pixConfig.ignoreContextFiles = config.ignoreContextFiles;
 		this.pixConfig.maxProjectSessions = config.maxProjectSessions;
 		this.updateOutputFilters();

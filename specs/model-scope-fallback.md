@@ -19,8 +19,8 @@ model behavior when the user has not configured `enabledModels`.
 
 - Build a session model scope only from `SettingsManager.getEnabledModels()`.
 - Use authenticated, available models when no explicit scope exists.
-- Make `/scoped-models reset`, settings output, and model-menu text describe the
-  unscoped behavior accurately.
+- Make `/scoped-models reset` and settings output describe the unscoped behavior
+  accurately. Picker visibility is a separate Pix UI preference.
 
 ## Non-goals
 
@@ -35,8 +35,9 @@ model behavior when the user has not configured `enabledModels`.
   scope.
 - Missing or empty `enabledModels` leaves `session.scopedModels` empty. The SDK
   then cycles through `ModelRuntime.getAvailableSnapshot()`.
-- The Pix model menu follows the same rule: explicit session scope when present,
-  otherwise the available-model snapshot.
+- Session scope still controls SDK model cycling, but it no longer truncates the
+  Pix model picker. The picker starts from the full available-model snapshot and
+  applies Pix's separate `visibleModels` UI whitelist.
 - `/scoped-models reset`, `/scoped-models default`, and `/scoped-models clear`
   remove the saved scope and immediately switch the session to unscoped mode.
 
@@ -49,10 +50,11 @@ model behavior when the user has not configured `enabledModels`.
 
 ## Verification
 
-- Model-menu tests cover both explicit scope and the unscoped available-model
-  fallback.
+- Model-menu tests cover the full available-model snapshot with and without an
+  explicit session scope.
 - Command tests cover resetting the scope to an empty list.
-- The root `npm run check` passes.
+- The equivalent root check steps (schema generation check, SDK pin check,
+  TypeScript, and the full root test suite) pass.
 
 ## Risks / unknowns
 
@@ -65,6 +67,5 @@ model behavior when the user has not configured `enabledModels`.
   when non-empty and the available-model snapshot otherwise.
 - Confirmed by code: Pix previously substituted `PI_FAVORITE_MODEL_REFS` when
   `enabledModels` was missing or empty.
-- Confirmed by tests: the focused model/runtime tests pass (20 tests), the root
-  check passes (977 tests), and the bundled tools-suite check passes (437 tests,
-  37 skipped live evaluations).
+- Confirmed by current verification: schema generation and SDK pin checks pass,
+  TypeScript is clean, and the full root test suite passes (1078 tests).

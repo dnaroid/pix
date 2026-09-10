@@ -221,7 +221,9 @@ export class AppMouseController {
 
 		if (target?.kind === "popup-menu") {
 			const active = this.popupMenus.selectActivePopupMenuIndex(target.index);
-			if (active !== "model") void this.popupActions.submitActivePopupMenu();
+			if (active !== "model" || this.popupMenus.modelVisibilityModeActive()) {
+				void this.popupActions.submitActivePopupMenu();
+			}
 			this.showClickFlashForEvent(event);
 			return;
 		}

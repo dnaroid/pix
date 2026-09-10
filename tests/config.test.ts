@@ -28,6 +28,7 @@ const {
 	savePixAutocompleteModel,
 	savePixDefaultModel,
 	savePixDefaultThinking,
+	savePixVisibleModels,
 	saveProjectPixIgnoreContextFiles,
 	savePixDictationLanguage,
 	upsertPixDefaultModelInJsonc,
@@ -35,6 +36,7 @@ const {
 	upsertPixAutocompleteModelInJsonc,
 	upsertPixDictationLanguageInJsonc,
 	upsertPixIgnoreContextFilesInJsonc,
+	upsertPixVisibleModelsInJsonc,
 } = await import("../src/config.js");
 type ToolRendererConfig = import("../src/config.js").ToolRendererConfig;
 
@@ -248,6 +250,30 @@ describe("config helpers", () => {
 		assert.match(saved, /keep comments/u);
 		assert.match(saved, /"ignoreContextFiles": false/u);
 		assert.match(upsertPixIgnoreContextFilesInJsonc(`{}`, true), /"ignoreContextFiles": true/u);
+	});
+
+	it("persists a user-level model visibility whitelist and ignores project overrides", () => {
+		mkdirSync(testConfigDir, { recursive: true });
+		writeFileSync(testConfigPath, `{
+			// keep comments
+			"visibleModels": ["openai-codex/gpt-5.6-sol", " openai-codex/gpt-5.6-sol ", "zai/glm-5-turbo"]
+		}`);
+
+		assert.deepEqual(loadPixConfig().visibleModels, ["openai-codex/gpt-5.6-sol", "zai/glm-5-turbo"]);
+		assert.deepEqual(savePixVisibleModels(["zai/glm-5-turbo", "openai-codex/gpt-5.6-sol", "zai/glm-5-turbo"]), [
+			"zai/glm-5-turbo",
+			"openai-codex/gpt-5.6-sol",
+		]);
+		assert.match(readFileSync(testConfigPath, "utf8"), /keep comments/u);
+
+		const projectDir = mkdtempSync(join(tmpdir(), "pix-project-"));
+		mkdirSync(join(projectDir, ".pi"), { recursive: true });
+		writeFileSync(getProjectPixConfigPath(projectDir), `{ "visibleModels": ["project/only"] }`);
+		assert.deepEqual(loadPixConfig(projectDir).visibleModels, ["zai/glm-5-turbo", "openai-codex/gpt-5.6-sol"]);
+
+		assert.deepEqual(savePixVisibleModels([]), []);
+		assert.deepEqual(loadPixConfig().visibleModels, []);
+		assert.match(upsertPixVisibleModelsInJsonc(`{}`, ["openai/test"]), /"visibleModels"/u);
 	});
 
 	it("persists autocomplete model and allows an empty disabled value", () => {

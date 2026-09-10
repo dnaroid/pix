@@ -83,7 +83,7 @@ export type AppPopupMenuControllerHost = {
 	setInput(value: string): void;
 	parseSlashInput(text: string): ParsedSlashInput | undefined;
 	getSlashCommandMenuItems(query: string): PopupMenuItem<SlashCommand>[];
-	getModelMenuItems(query: string): PopupMenuItem<ModelMenuValue>[];
+	getModelMenuItems(query: string, includeHidden?: boolean): PopupMenuItem<ModelMenuValue>[];
 	getThinkingMenuItems(query: string): PopupMenuItem<ThinkingMenuValue>[];
 	getResumeMenuItems(query: string, limit?: number): PopupMenuItem<ResumeMenuValue>[];
 	getUserMessageMenuItems(): PopupMenuItem<UserMessageMenuValue>[];
@@ -123,6 +123,7 @@ export class AppPopupMenuController {
 	private modelThinkingLevel: ThinkingLevel | undefined;
 	private modelThinkingSelectedRef: string | undefined;
 	private modelThinkingSource: "model" | "thinking" = "model";
+	private modelVisibilityMode = false;
 	private directPopupMenu: DirectPopupMenu | undefined;
 	private directPopupMenuPreserveStatus = false;
 	private directPopupMenuPlacement: PopupMenuPlacement = "default";
@@ -242,6 +243,7 @@ export class AppPopupMenuController {
 
 	moveActiveModelThinkingLevel(delta: number): boolean {
 		if (this.syncActivePopupMenu() !== "model") return false;
+		if (this.modelVisibilityMode) return true;
 		const state = this.modelThinkingMenuState();
 		const levels = state.availableThinkingLevels;
 		if (levels.length === 0) return true;
@@ -251,6 +253,19 @@ export class AppPopupMenuController {
 		this.modelThinkingLevel = levels[nextIndex] ?? state.thinkingLevel;
 		this.host.render();
 		return true;
+	}
+
+	toggleModelVisibilityMode(): boolean {
+		if (this.syncActivePopupMenu() !== "model") return false;
+		this.modelVisibilityMode = !this.modelVisibilityMode;
+		this.resetPopupMenuSelection(this.modelMenu);
+		this.syncModelThinkingToSelectedModel();
+		this.host.render();
+		return true;
+	}
+
+	modelVisibilityModeActive(): boolean {
+		return this.modelVisibilityMode && this.syncActivePopupMenu() === "model";
 	}
 
 	scrollActivePopupMenu(delta: number): boolean {
@@ -675,7 +690,7 @@ export class AppPopupMenuController {
 				this.modelThinkingSource = source;
 			}
 			this.closeMenusExcept("model");
-			this.modelMenu.openWithItems(this.withoutCloseMenuItems(this.host.getModelMenuItems(this.directPopupMenuQuery)));
+			this.modelMenu.openWithItems(this.withoutCloseMenuItems(this.host.getModelMenuItems(this.directPopupMenuQuery, this.modelVisibilityMode)));
 			this.syncModelThinkingToSelectedModel();
 			return true;
 		}
@@ -710,7 +725,7 @@ export class AppPopupMenuController {
 		}
 
 		this.closeMenusExcept("model");
-		this.modelMenu.openWithItems(this.withoutCloseMenuItems(this.host.getModelMenuItems(parsedQuery.modelQuery)));
+		this.modelMenu.openWithItems(this.withoutCloseMenuItems(this.host.getModelMenuItems(parsedQuery.modelQuery, this.modelVisibilityMode)));
 		this.syncModelThinkingToSelectedModel();
 		if (parsedQuery.thinkingQuery !== undefined && this.modelThinkingInputQuery !== parsedQuery.thinkingQuery) {
 			this.modelThinkingInputQuery = parsedQuery.thinkingQuery;
@@ -745,6 +760,7 @@ export class AppPopupMenuController {
 			thinkingLevel: this.modelThinkingLevel ?? availableThinkingLevels[0] ?? "off",
 			availableThinkingLevels,
 			source: this.modelThinkingSource,
+			visibilityMode: this.modelVisibilityMode,
 		};
 	}
 
@@ -789,6 +805,7 @@ export class AppPopupMenuController {
 		this.modelThinkingSelectedRef = undefined;
 		this.modelMenuQuery = "";
 		this.modelThinkingInputQuery = "";
+		this.modelVisibilityMode = false;
 	}
 
 	private syncResumeMenu(): boolean {

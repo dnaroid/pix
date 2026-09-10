@@ -5,7 +5,7 @@ import type { AppMenuItemsController } from "./menu-items-controller.js";
 import { stringifyUnknown } from "../rendering/message-content.js";
 import type { AppPopupMenuController } from "./popup-menu-controller.js";
 import type { AppQueuedMessageController } from "../session/queued-message-controller.js";
-import type { Entry, SlashCommand, UserMessageJumpMenuValue } from "../types.js";
+import type { Entry, SessionModel, SlashCommand, UserMessageJumpMenuValue } from "../types.js";
 import type { AppWorkspaceActionsController } from "../workspace/workspace-actions-controller.js";
 
 export type AppPopupActionControllerHost = {
@@ -18,6 +18,8 @@ export type AppPopupActionControllerHost = {
 	setStatus(status: string): void;
 	setSessionStatus(session: AgentSession | undefined): void;
 	showToast(message: string, kind: "success" | "error" | "warning" | "info"): void;
+	visibleModels(): readonly string[] | undefined;
+	saveVisibleModels(modelRefs: readonly string[]): readonly string[];
 	render(): void;
 	afterSessionReplacement(message?: string): void;
 	scrollToConversationEntry(entryId: string): boolean;
@@ -114,6 +116,7 @@ export class AppPopupActionController {
 	}
 
 	private async submitSelectedModel(): Promise<boolean> {
+		if (this.popupMenus.modelVisibilityModeActive()) return this.toggleSelectedModelVisibility();
 		const scope = this.captureScope();
 		const selected = this.popupMenus.selectedModelThinking();
 		if (!selected) return false;
@@ -139,6 +142,33 @@ export class AppPopupActionController {
 		}
 
 		if (this.isScopeActive(scope)) this.host.render();
+		return true;
+	}
+
+	private toggleSelectedModelVisibility(): boolean {
+		const selected = this.popupMenus.selectedModel();
+		if (!selected) return false;
+		if (selected.value.current) {
+			this.host.showToast("The current model must remain visible", "warning");
+			return true;
+		}
+
+		const allAvailableRefs = this.menuItems.getModelMenuItems("", true).map((item) => item.value.ref);
+		const configured = this.host.visibleModels();
+		const visible = new Set(configured === undefined ? allAvailableRefs : configured);
+		const wasVisible = visible.has(selected.value.ref);
+		if (wasVisible) visible.delete(selected.value.ref);
+		else visible.add(selected.value.ref);
+		const currentModel = this.host.runtime()?.session.model as SessionModel | undefined;
+		if (currentModel) visible.add(this.menuItems.modelRef(currentModel));
+
+		try {
+			this.host.saveVisibleModels([...visible]);
+			this.host.showToast(`${selected.value.ref} ${wasVisible ? "hidden from" : "shown in"} model pickers`, "info");
+		} catch (error) {
+			this.host.showToast(`Failed to save model visibility: ${stringifyUnknown(error)}`, "error");
+		}
+		this.host.render();
 		return true;
 	}
 

@@ -108,11 +108,14 @@ candidate, DCP prefers a summary rewrite. Positive partial recovery may commit
 while retaining remaining recovery debt; it is not rejected solely because one
 block cannot satisfy the whole budget. If no safe summary can be committed, the
 bounded emergency body-prune floor can remove only eligible provider-seen old
-results. Both are intentional history rewrites and must return to stable-prefix
-behavior afterward.
+results, including when the summary failure occurs after the input-capacity
+budget is already exceeded. The emergency floor is evaluated before aborting
+that oversized request. Both are intentional history rewrites and must return
+to stable-prefix behavior afterward.
 
-If protected/live content itself cannot fit, DCP aborts/hands off rather than
-inventing a cache-preserving unsafe deletion.
+If protected/live content itself cannot fit after eligible emergency recovery,
+DCP emits a blocked diagnostic and aborts/hands off rather than inventing a
+cache-preserving unsafe deletion.
 
 ## Edge cases
 

@@ -65,13 +65,24 @@ Active implemented contract.
 - `createBudgetedAutoCompressionBlock` never treats a source-size estimate as
   a net-savings estimate: it tries the economical prefix first, then the
   largest prefix that passed the **same** retention and provider-evidence
-  policy; both attempts share one deadline (operation timeout plus a 1 s
-  finalization grace); protection/evidence are never relaxed and insufficient
-  gain is never reported as success. `[confirmed by code,
-  auto-compress-budget.ts:13-22,49]`
+  policy; both attempts share one whole-operation deadline (operation timeout
+  plus a 1 s finalization grace). A model summarizer may consume at most 75% of
+  the configured operation timeout so deterministic extractive fallback and
+  publication retain bounded headroom; protection/evidence are never relaxed
+  and insufficient gain is never reported as success. `[confirmed by code,
+  auto-compress-budget.ts]`
 - Rejected attempts are memoized per state + source key (epoch +
   `canonicalMessageHash` of the source messages) so the same rejected source
   is not retried. `[confirmed by code, auto-compress-budget.ts:10,30-32]`
+- Once a model-backed auto-compression attempt fails, later automatic attempts
+  in that live session skip model summarizers and use deterministic extraction;
+  this prevents a growing autonomous tool loop from paying the same model
+  summary timeout repeatedly. `[confirmed by code, dcp/index.ts]`
+- At capacity, a failed exact auto-compression attempt falls through to the
+  bounded emergency current-turn pruning floor before abort/handoff. DCP aborts
+  only when the projected context still cannot fit after eligible recovery and
+  emits a user-visible `progress-blocked` diagnostic first. `[confirmed by code,
+  dcp/index.ts; confirmed by test/compress-pruner.test.ts]`
 - Locked by `test/dcp-review-regressions.test.ts` ("net budget recovery
   expands an insufficient prefix under the same safety policy") and
   `test/dcp-auto-compression-projection.test.ts`. `[confirmed by tests]`

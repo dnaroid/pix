@@ -55,6 +55,13 @@ limits. Long entry bodies and multi-entry pages return an opaque `nextCursor`;
 passing that cursor continues at the exact entry/body offset and must use the
 same scope.
 
+When Context Gateway has delivered a `web-recoverable-compact` result,
+`session_search` can locate its raw tool-result entry by `toolCallId`, and
+`session_read_section` exposes the retained structured `toolResult.details`
+under `recoverable_raw_details`. The compact provider view is therefore not the
+only copy of the web result: recovery reads the original structured data from
+the append-only session and never refetches the URL.
+
 `session_search` is case-insensitive by default and searches message text, tool
 arguments/results, custom-message content, and compaction or branch summaries.
 It returns entry and section IDs plus bounded snippets. Search pages use an

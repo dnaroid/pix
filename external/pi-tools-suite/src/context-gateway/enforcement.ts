@@ -70,6 +70,40 @@ function boundedTextBytes(text: string, maximumBytes: number): string {
 	return `${text.slice(0, low).trimEnd()}${suffix}`;
 }
 
+function boundedProviderTextContent(text: string, maximumBytes: number): {
+	content: Array<{ type: "text"; text: string }>;
+	contentBytes: number;
+	textBytes: number;
+} {
+	const limit = Math.max(1, Math.floor(maximumBytes));
+	let low = 1;
+	let high = limit;
+	let bestText = boundedTextBytes(text, 1);
+	let bestContent = [{ type: "text" as const, text: bestText }];
+	let bestContentBytes = byteLengthJson(bestContent);
+
+	while (low <= high) {
+		const textBudget = Math.floor((low + high) / 2);
+		const candidateText = boundedTextBytes(text, textBudget);
+		const candidateContent = [{ type: "text" as const, text: candidateText }];
+		const candidateBytes = byteLengthJson(candidateContent);
+		if (candidateBytes <= limit) {
+			bestText = candidateText;
+			bestContent = candidateContent;
+			bestContentBytes = candidateBytes;
+			low = textBudget + 1;
+		} else {
+			high = textBudget - 1;
+		}
+	}
+
+	return {
+		content: bestContent,
+		contentBytes: bestContentBytes,
+		textBytes: new TextEncoder().encode(bestText).byteLength,
+	};
+}
+
 function planRecoverableWebCompact(details: unknown, toolCallId: string | undefined, maximumBytes: number): string | undefined {
 	if (!isRecord(details)) return undefined;
 	const recovery = [
@@ -120,8 +154,8 @@ function upstreamTruncated(details: unknown): boolean {
 
 /**
  * Selective storeless enforcement. It never performs generic truncation.
- * Only recognised, complete, simple test/build output is compacted; every
- * other result stays byte-for-byte passthrough until a recovery contract exists.
+ * Recognised complete test/build output and structured recoverable web results
+ * have explicit compact contracts; other results remain passthrough.
  */
 export function planContextGatewayEnforcement(input: {
 	event: { content?: unknown; details?: unknown; isError?: boolean };
@@ -147,13 +181,13 @@ export function planContextGatewayEnforcement(input: {
 		if (sourceContentBytes <= input.budgetBytes) return passthrough("within-class-budget");
 		const compactText = planRecoverableWebCompact(input.event.details, input.toolCallId, input.maxInlineBytes);
 		if (!compactText) return passthrough("web-recovery-source-unavailable");
-		const content = [{ type: "text" as const, text: compactText }];
+		const bounded = boundedProviderTextContent(compactText, input.maxInlineBytes);
 		return {
 			representation: "web-recoverable-compact",
-			content,
+			content: bounded.content,
 			sourceContentBytes,
-			contentBytes: byteLengthJson(content),
-			textBytes: new TextEncoder().encode(compactText).byteLength,
+			contentBytes: bounded.contentBytes,
+			textBytes: bounded.textBytes,
 			reason: "recoverable-structured-web-details",
 		};
 	}

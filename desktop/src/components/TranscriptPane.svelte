@@ -2,7 +2,11 @@
   import ArrowDown from "@lucide/svelte/icons/arrow-down";
   import Brain from "@lucide/svelte/icons/brain";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import CopyIcon from "@lucide/svelte/icons/copy";
   import EllipsisVertical from "@lucide/svelte/icons/ellipsis-vertical";
+  import GitFork from "@lucide/svelte/icons/git-fork";
+  import PanelTopOpen from "@lucide/svelte/icons/panel-top-open";
+  import Undo2 from "@lucide/svelte/icons/undo-2";
   import type { Attachment } from "../lib/attachments";
   import type { ProjectFileLineRange } from "../lib/project-files";
   import { toolGroupPresentationNames, toolPresentation } from "../lib/tool-presentation";
@@ -70,11 +74,22 @@
 
   let displayItems = $derived(groupTranscriptItems(transcript.items));
   let activeUserMessageMenu = $state<string | null>(null);
+  let userMessageMenuPosition = $state<{ left: number; top: number } | null>(null);
   let canMutateUserMessages = $derived(
     !!activeSessionId && !promptRunning && !operationRunning && !historyLoading,
   );
+  let activeUserMessage = $derived.by<MessageItem | null>(() => {
+    if (!activeUserMessageMenu) return null;
+    const item = displayItems.find((candidate) => candidate.id === activeUserMessageMenu);
+    return item?.type === "message" && item.role === "user" ? item : null;
+  });
 
   type UserMessageAction = "copy" | "fork" | "fork-new-tab" | "undo";
+
+  const USER_MESSAGE_MENU_WIDTH = 192;
+  const USER_MESSAGE_MENU_HEIGHT = 164;
+  const USER_MESSAGE_MENU_GAP = 6;
+  const USER_MESSAGE_MENU_MARGIN = 8;
 
   function handleToolResultToggle(event: Event, tool: ToolItem): void {
     const details = event.currentTarget as HTMLDetailsElement;
@@ -111,41 +126,87 @@
     return toolGroupPresentationNames(tools);
   }
 
+  function closeUserMessageMenu(): void {
+    activeUserMessageMenu = null;
+    userMessageMenuPosition = null;
+  }
+
+  function clampMenuCoordinate(value: number, min: number, max: number): number {
+    return Math.min(Math.max(value, min), Math.max(min, max));
+  }
+
+  function positionUserMessageMenu(
+    anchorX: number,
+    anchorTop: number,
+    anchorBottom: number,
+    alignRight: boolean,
+  ): void {
+    const maxLeft = window.innerWidth - USER_MESSAGE_MENU_WIDTH - USER_MESSAGE_MENU_MARGIN;
+    const left = clampMenuCoordinate(
+      alignRight ? anchorX - USER_MESSAGE_MENU_WIDTH : anchorX,
+      USER_MESSAGE_MENU_MARGIN,
+      maxLeft,
+    );
+    const belowTop = anchorBottom + USER_MESSAGE_MENU_GAP;
+    const aboveTop = anchorTop - USER_MESSAGE_MENU_GAP - USER_MESSAGE_MENU_HEIGHT;
+    const top = belowTop + USER_MESSAGE_MENU_HEIGHT <= window.innerHeight - USER_MESSAGE_MENU_MARGIN
+      ? belowTop
+      : Math.max(USER_MESSAGE_MENU_MARGIN, aboveTop);
+    userMessageMenuPosition = { left, top };
+  }
+
   function toggleUserMessageMenu(event: MouseEvent, messageId: string): void {
     event.preventDefault();
     event.stopPropagation();
-    activeUserMessageMenu = activeUserMessageMenu === messageId ? null : messageId;
+    if (activeUserMessageMenu === messageId) {
+      closeUserMessageMenu();
+      return;
+    }
+    const trigger = event.currentTarget as HTMLElement;
+    const rect = trigger.getBoundingClientRect();
+    activeUserMessageMenu = messageId;
+    positionUserMessageMenu(rect.right, rect.top, rect.bottom, true);
   }
 
   function openUserMessageContextMenu(event: MouseEvent, messageId: string): void {
     event.preventDefault();
     event.stopPropagation();
     activeUserMessageMenu = messageId;
+    positionUserMessageMenu(event.clientX, event.clientY, event.clientY, false);
   }
 
   function handleWindowClick(event: MouseEvent): void {
     if (!activeUserMessageMenu) return;
     const target = event.target instanceof Element ? event.target : null;
-    if (!target?.closest("[data-user-message-actions]")) activeUserMessageMenu = null;
+    if (!target?.closest("[data-user-message-menu]")) closeUserMessageMenu();
   }
 
   function handleWindowKeydown(event: KeyboardEvent): void {
     if (event.key !== "Escape" || !activeUserMessageMenu) return;
     event.preventDefault();
-    activeUserMessageMenu = null;
+    closeUserMessageMenu();
+  }
+
+  function handleWindowResize(): void {
+    if (activeUserMessageMenu) closeUserMessageMenu();
+  }
+
+  function handlePaneScroll(): void {
+    if (activeUserMessageMenu) closeUserMessageMenu();
+    onScroll();
   }
 
   async function runUserMessageAction(message: MessageItem, action: UserMessageAction): Promise<void> {
     if (action !== "copy" && !canMutateUserMessages) return;
-    activeUserMessageMenu = null;
+    closeUserMessageMenu();
     await onUserMessageAction(message, action);
   }
 </script>
 
-<svelte:window onclick={handleWindowClick} onkeydown={handleWindowKeydown} />
+<svelte:window onclick={handleWindowClick} onkeydown={handleWindowKeydown} onresize={handleWindowResize} />
 
 <div class="relative row-start-2 min-h-0 min-w-0">
-  <div class="transcript-pane h-full min-h-0 overflow-auto" bind:this={pane} aria-live="polite" onscroll={onScroll}>
+  <div class="transcript-pane h-full min-h-0 overflow-auto" bind:this={pane} aria-live="polite" onscroll={handlePaneScroll}>
   {#if !activeSessionId}
     <section class="grid h-full place-items-center content-center p-10 text-center">
       {#if workspace}
@@ -198,7 +259,6 @@
             <div
               class={["transcript-entry group/user-message relative", gapClass]}
               data-transcript-entry-id={item.id}
-              data-user-message-actions
             >
               <article
                 class="w-full rounded-lg border border-chat-user-border bg-chat-user px-3.5 pt-3 pb-2 text-foreground"
@@ -217,27 +277,6 @@
               >
                 <EllipsisVertical class="h-3.5 w-3.5" aria-hidden="true" />
               </button>
-              {#if activeUserMessageMenu === item.id}
-                <div
-                  class="absolute top-9 right-2 z-50 w-48 overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
-                  role="menu"
-                  tabindex="-1"
-                  aria-label="Message actions"
-                  data-user-message-actions
-                >
-                  <button class="message-action-item" type="button" role="menuitem" onclick={() => void runUserMessageAction(item, "copy")}>Copy message</button>
-                  <button class="message-action-item" type="button" role="menuitem" disabled={!canMutateUserMessages || item.localOnly} onclick={() => void runUserMessageAction(item, "fork")}>Fork</button>
-                  <button class="message-action-item" type="button" role="menuitem" disabled={!canMutateUserMessages || item.localOnly} onclick={() => void runUserMessageAction(item, "fork-new-tab")}>Fork in new tab</button>
-                  <div class="my-1 h-px bg-border" role="separator"></div>
-                  <button
-                    class="message-action-item danger"
-                    type="button"
-                    role="menuitem"
-                    disabled={!canMutateUserMessages || item.localOnly}
-                    onclick={() => void runUserMessageAction(item, "undo")}
-                  >Undo changes</button>
-                </div>
-              {/if}
             </div>
           {:else if item.role === "system"}
             <article class={["transcript-entry w-full min-w-0 font-mono text-xs text-muted-foreground", gapClass]} data-transcript-entry-id={item.id}>
@@ -329,6 +368,41 @@
       <ArrowDown class="h-4 w-4" aria-hidden="true" />
     </button>
   {/if}
+
+  {#if activeUserMessage && userMessageMenuPosition}
+    <div
+      class="fixed z-[100] max-h-[calc(100vh-1rem)] w-48 overflow-y-auto rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
+      style={`left: ${userMessageMenuPosition.left}px; top: ${userMessageMenuPosition.top}px;`}
+      role="menu"
+      tabindex="-1"
+      aria-label="Message actions"
+      data-user-message-menu
+    >
+      <button class="message-action-item" type="button" role="menuitem" onclick={() => void runUserMessageAction(activeUserMessage, "copy")}>
+        <CopyIcon class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        <span>Copy message</span>
+      </button>
+      <button class="message-action-item" type="button" role="menuitem" disabled={!canMutateUserMessages || activeUserMessage.localOnly} onclick={() => void runUserMessageAction(activeUserMessage, "fork")}>
+        <GitFork class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        <span>Fork</span>
+      </button>
+      <button class="message-action-item" type="button" role="menuitem" disabled={!canMutateUserMessages || activeUserMessage.localOnly} onclick={() => void runUserMessageAction(activeUserMessage, "fork-new-tab")}>
+        <PanelTopOpen class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        <span>Fork in new tab</span>
+      </button>
+      <div class="my-1 h-px bg-border" role="separator"></div>
+      <button
+        class="message-action-item danger"
+        type="button"
+        role="menuitem"
+        disabled={!canMutateUserMessages || activeUserMessage.localOnly}
+        onclick={() => void runUserMessageAction(activeUserMessage, "undo")}
+      >
+        <Undo2 class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        <span>Undo changes</span>
+      </button>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -343,6 +417,7 @@
     height: 2rem;
     cursor: pointer;
     align-items: center;
+    gap: 0.5rem;
     border-radius: 0.125rem;
     padding: 0 0.5rem;
     text-align: left;

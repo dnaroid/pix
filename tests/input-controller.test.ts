@@ -77,6 +77,15 @@ describe("AppInputController extension editor input", () => {
 });
 
 describe("AppInputController terminal input", () => {
+	it("routes Shift+Tab to the model visibility mode toggle", () => {
+		const { controller, calls } = createController({ extensionInputUsesEditor: false, shiftPressed: false, consumeExtensionInput: false });
+
+		controller.handleChunk(Buffer.from("\x1b[Z"));
+
+		assert.equal(calls.visibilityModeToggles, 1);
+		assert.equal(calls.autocompleteSlash, 0);
+	});
+
 	it("treats xterm modifyOtherKeys Ctrl+C as interrupt instead of inserting sequence text", () => {
 		const { controller, editor, calls } = createController({ extensionInputUsesEditor: false, shiftPressed: false, consumeExtensionInput: false });
 
@@ -345,7 +354,7 @@ function createController(options: { extensionInputUsesEditor: boolean; shiftPre
 		extensionInput: number; enter: number; interrupt: number; escape: number; mouseEvents: unknown[]; render: number;
 		autocompleteSlash: number; voice: number; stop: number; scrollLines: number[]; scrollPages: number[];
 		menuDeltas: number[]; thinkingDeltas: number[]; historyDeltas: number[];
-		moveMenuResult: boolean; moveThinkingResult: boolean; navigateHistoryResult: boolean;
+		moveMenuResult: boolean; moveThinkingResult: boolean; visibilityModeToggles: number; navigateHistoryResult: boolean;
 	};
 } {
 	const editor = new InputEditor();
@@ -353,7 +362,7 @@ function createController(options: { extensionInputUsesEditor: boolean; shiftPre
 		extensionInput: 0, enter: 0, interrupt: 0, escape: 0, mouseEvents: [] as unknown[], render: 0,
 		autocompleteSlash: 0, voice: 0, stop: 0, scrollLines: [] as number[], scrollPages: [] as number[],
 		menuDeltas: [] as number[], thinkingDeltas: [] as number[], historyDeltas: [] as number[],
-		moveMenuResult: false, moveThinkingResult: false, navigateHistoryResult: false,
+		moveMenuResult: false, moveThinkingResult: false, visibilityModeToggles: 0, navigateHistoryResult: false,
 	};
 	const host: InputControllerHost = {
 		inputEditor: editor,
@@ -386,6 +395,7 @@ function createController(options: { extensionInputUsesEditor: boolean; shiftPre
 		},
 		handleEscape: async () => { calls.escape += 1; },
 		handleDirectPopupInput: () => false,
+		toggleModelVisibilityMode: () => { calls.visibilityModeToggles += 1; return true; },
 		autocompleteModel: () => false,
 		acceptAutocompleteSuggestion: () => false,
 		autocompleteSlashCommand: () => { calls.autocompleteSlash += 1; },

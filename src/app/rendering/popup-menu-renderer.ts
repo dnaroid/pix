@@ -140,7 +140,7 @@ export class PopupMenuRenderer {
 	}
 
 	renderModelMenu(width: number, menu: PopupMenu<ModelMenuValue>, state: ModelThinkingMenuState): RenderedLine[] {
-		const lines: RenderedLine[] = [this.popupMenuHeader("Select model & thinking", width)];
+		const lines: RenderedLine[] = [this.popupMenuHeader(state.visibilityMode ? "Manage visible models" : "Select model & thinking", width)];
 		const visibleItems = menu.visibleItems();
 		if (!this.hasPopupActionItems(menu.items)) {
 			lines.push({
@@ -150,17 +150,36 @@ export class PopupMenuRenderer {
 		}
 
 		for (const item of visibleItems) {
-			const marker = item.selected ? "▶ " : "  ";
-			const text = `${marker}${this.labelDescriptionText(item.label, item.description, width - 2)}`;
+			const selectionMarker = item.selected ? "▶ " : "  ";
+			const visibilityMarker = state.visibilityMode ? `${item.value.visible === false ? "○" : APP_ICONS.check} ` : "";
+			const marker = `${selectionMarker}${visibilityMarker}`;
+			const text = `${marker}${this.labelDescriptionText(item.label, item.description, width - marker.length)}`;
 			lines.push({
 				text,
 				variant: this.selectableItemVariant(item.value),
-				segments: [...this.modelMenuItemSegments(item.value), ...this.itemHighlightSegments(item, text)],
+				segments: [
+					...this.modelMenuItemSegments(item.value, marker.length),
+					...this.itemHighlightSegments(item, text, marker.length),
+				],
 				target: { kind: "popup-menu", index: item.index },
 			});
 		}
 
-		if (menu.selectedItem()) {
+		if (state.visibilityMode && menu.selectedItem()) {
+			const selected = menu.selectedItem()!.value;
+			lines.push({
+				text: selected.current
+					? "  Current model stays visible until another model is selected"
+					: "  Enter toggles whether this model appears in model pickers",
+				variant: "muted",
+			});
+			lines.push({
+				text: "  Clear all",
+				variant: "error",
+				target: { kind: "model-visibility-clear" },
+			});
+			lines.push({ text: "  ↑/↓ model · Enter show/hide · Shift+Tab select", variant: "muted" });
+		} else if (menu.selectedItem()) {
 			const thinkingPrefix = "  Thinking  ← ";
 			const thinkingSuffix = " →";
 			lines.push({
@@ -177,7 +196,7 @@ export class PopupMenuRenderer {
 					bold: true,
 				}],
 			});
-			lines.push({ text: "  ↑/↓ model · ←/→ thinking · Enter apply", variant: "muted" });
+			lines.push({ text: "  ↑/↓ model · ←/→ thinking · Enter apply · Shift+Tab manage", variant: "muted" });
 		}
 		return lines;
 	}
@@ -334,8 +353,7 @@ export class PopupMenuRenderer {
 		return value.current ? "muted" : "normal";
 	}
 
-	private modelMenuItemSegments(value: ModelMenuValue): StyledSegment[] {
-		const markerOffset = 2; // "▶ " or "  "
+	private modelMenuItemSegments(value: ModelMenuValue, markerOffset = 2): StyledSegment[] {
 		return [{
 			start: markerOffset,
 			end: markerOffset + value.ref.length,
@@ -367,8 +385,8 @@ export class PopupMenuRenderer {
 		];
 	}
 
-	private itemHighlightSegments(item: PopupMenuItem<unknown>, text: string): StyledSegment[] {
-		return this.highlightSegments(item.labelHighlightRanges ?? [], text, 2);
+	private itemHighlightSegments(item: PopupMenuItem<unknown>, text: string, markerOffset = 2): StyledSegment[] {
+		return this.highlightSegments(item.labelHighlightRanges ?? [], text, markerOffset);
 	}
 
 	private highlightSegments(ranges: readonly { start: number; end: number }[], text: string, markerOffset: number): StyledSegment[] {

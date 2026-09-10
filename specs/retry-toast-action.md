@@ -38,6 +38,12 @@ Let the user resume a transiently failed turn directly from its error toast inst
 6. A synchronous or asynchronous failure to start the turn is shown as an error toast.
 7. When automatic retry is disabled, a terminal retryable streaming error (including HTTP 429) shows `Request failed: <error>` plus `[Retry]`.
 8. The terminal-error path does not offer Retry for aborted turns, quota/billing exhaustion, or other errors the SDK classifies as non-retryable. When automatic retry is enabled, it does not create a duplicate manual toast.
+9. Terminal assistant failures are also rendered from the final `message_end`
+   payload when no `message_update` error event was emitted. An empty assistant
+   body with `stopReason: "error"` therefore still produces a visible error row.
+10. Reloaded session history reconstructs the same terminal error from the
+    persisted assistant `stopReason` / `errorMessage`, so a failed turn does not
+    disappear after resume.
 
 ## Contracts
 
@@ -70,6 +76,8 @@ Let the user resume a transiently failed turn directly from its error toast inst
 - Mouse controller tests for action activation versus error copying/dismissal.
 - Session event tests for failed-only action wiring and captured-session retry.
 - Session event tests for retryable terminal errors with automatic retry disabled, including 429, abort, quota, and enabled-policy cases.
+- Session event/history tests for terminal errors delivered only through
+  `message_end` and for persisted empty-body error messages.
 - Host checks via `npm run check`.
 
 ## Risks / unknowns
