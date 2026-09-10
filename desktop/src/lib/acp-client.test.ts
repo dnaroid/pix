@@ -175,6 +175,36 @@ describe("ACP JSON-RPC client", () => {
     await client.dispose();
   });
 
+  it("requests and validates Desktop runtime status snapshots", async () => {
+    const transport = new FakeTransport();
+    const client = await startedClient(transport);
+
+    const reading = client.runtimeStatus("session-1", true);
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+    expect(requestAt(transport, 1)).toMatchObject({
+      method: "pix/session/runtime_status",
+      params: { sessionId: "session-1", refreshModelUsage: true },
+    });
+    const result = {
+      sessionId: "session-1",
+      context: { tokens: 128_000, contextWindow: 200_000, percent: 64 },
+      dcpStats: "DCP Session Statistics:\nTokens saved (estimated): 12,000",
+      modelUsageRefresh: "ready",
+      modelUsage: {
+        modelKey: "openai/gpt-5",
+        provider: "openai",
+        updatedAt: 1_757_590_400_000,
+        accountEmail: "dev@example.com",
+        hourly: { remainingPercent: 72, resetAt: 1_757_594_000_000, windowSeconds: 18_000, hasKnownWindowDuration: true },
+        weekly: { remainingPercent: 44, resetAt: 1_758_195_200_000, windowSeconds: 604_800, hasKnownWindowDuration: true },
+      },
+    };
+    transport.message({ jsonrpc: "2.0", id: requestAt(transport, 1).id, result });
+    await expect(reading).resolves.toEqual(result);
+
+    await client.dispose();
+  });
+
   it("routes registry GUI actions through the private ACP registry method", async () => {
     const transport = new FakeTransport();
     const client = await startedClient(transport);

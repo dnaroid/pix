@@ -22,6 +22,7 @@ export const PIX_GIT_ASSIST_METHOD = "pix/git/assist";
 export const PIX_BRANCH_USER_MESSAGES_METHOD = "pix/session/branch_user_messages";
 export const PIX_USER_MESSAGE_ACTION_METHOD = "pix/session/user_message_action";
 export const PIX_AGENT_CONTROL_METHOD = "pix/session/agent_control";
+export const PIX_RUNTIME_STATUS_METHOD = "pix/session/runtime_status";
 
 export interface DesktopSessionRequest {
 	readonly sessionId: string;
@@ -37,6 +38,42 @@ export interface DesktopAgentControlRequest extends DesktopSessionRequest {
 export interface DesktopAgentControlResponse {
 	readonly sessionId: string;
 	readonly state: DesktopAgentControlState;
+}
+
+export interface DesktopRuntimeStatusRequest extends DesktopSessionRequest {
+	readonly refreshModelUsage?: boolean;
+}
+
+export interface DesktopContextUsage {
+	readonly tokens: number | null;
+	readonly contextWindow: number;
+	readonly percent: number | null;
+}
+
+export interface DesktopModelUsageLimitWindow {
+	readonly remainingPercent: number;
+	readonly resetAt: number;
+	readonly windowSeconds: number;
+	readonly hasKnownWindowDuration?: boolean;
+}
+
+export interface DesktopModelUsageStatus {
+	readonly modelKey: string;
+	readonly provider: "openai" | "zhipu" | "google-antigravity";
+	readonly updatedAt: number;
+	readonly accountEmail?: string;
+	readonly weekly?: DesktopModelUsageLimitWindow;
+	readonly hourly?: DesktopModelUsageLimitWindow;
+}
+
+export type DesktopModelUsageRefresh = "skipped" | "ready" | "unavailable" | "failed";
+
+export interface DesktopRuntimeStatusResponse {
+	readonly sessionId: string;
+	readonly context?: DesktopContextUsage;
+	readonly dcpStats?: string;
+	readonly modelUsageRefresh: DesktopModelUsageRefresh;
+	readonly modelUsage?: DesktopModelUsageStatus;
 }
 
 export interface DesktopSessionHistoryRequest extends DesktopSessionRequest {
@@ -207,6 +244,14 @@ export function parseDesktopAgentControlRequest(value: unknown): DesktopAgentCon
 		throw new RequestError(ERROR_INVALID_PARAMS, "agent control request requires action state, pause, or continue");
 	}
 	return { ...session, action: value.action };
+}
+
+export function parseDesktopRuntimeStatusRequest(value: unknown): DesktopRuntimeStatusRequest {
+	const session = parseDesktopSessionRequest(value);
+	if (!isRecord(value) || (value.refreshModelUsage !== undefined && typeof value.refreshModelUsage !== "boolean")) {
+		throw new RequestError(ERROR_INVALID_PARAMS, "runtime status refreshModelUsage must be a boolean when provided");
+	}
+	return value.refreshModelUsage === undefined ? session : { ...session, refreshModelUsage: value.refreshModelUsage };
 }
 
 export function parseDesktopSessionHistoryRequest(value: unknown): DesktopSessionHistoryRequest {

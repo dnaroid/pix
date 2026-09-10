@@ -22,6 +22,7 @@
     type QueueItem,
     type QueueState,
     type QueuedUserMessage,
+    type RuntimeStatus,
   } from "./lib/acp-client";
   import { TauriAcpTransport } from "./lib/tauri-transport";
   import {
@@ -225,6 +226,7 @@
 
   const SESSION_PREWARM_LIMIT = 2;
   const TRANSCRIPT_BOTTOM_THRESHOLD_PX = 24;
+  const RUNTIME_MODEL_USAGE_REFRESH_MS = 5 * 60_000;
 
   let client = $state<AcpClient | null>(null);
   let status = $state<ConnectionStatus>("starting");
@@ -286,6 +288,9 @@
   let slashCommandsBySession = $state<Map<string, AvailableCommand[]>>(new Map());
   let queueItemsBySession = $state<Map<string, QueueItem[]>>(new Map());
   let agentControlStates = $state<Map<string, AgentControlState>>(new Map());
+  let runtimeStatusBySessionId = $state<Map<string, RuntimeStatus>>(new Map());
+  let modelUsageRefreshSessionIds = $state<Set<string>>(new Set());
+  let dcpCompressionSessionIds = $state<Set<string>>(new Set());
   let queueActionRunning = $state(false);
   let imagePromptSupported = false;
   let transcriptPane = $state<HTMLDivElement | null>(null);
@@ -330,6 +335,8 @@
   const promptRunsBySessionId = new Map<string, Promise<void>>();
   const promptEndedAtBySessionId = new Map<string, number>();
   const autoFlushInProgress = new Set<string>();
+  const runtimeStatusRequestGeneration = new Map<string, number>();
+  const modelUsageRefreshGeneration = new Map<string, number>();
 
   const canUseSession = $derived(status === "ready" && !!workspace && !operationRunning);
   const promptRunning = $derived(activeSessionId ? runningSessionIds.has(activeSessionId) : false);
@@ -357,11 +364,17 @@
   const externalEditorDisplayName = $derived(externalEditorLabel(externalEditor));
   const registryLoading = $derived(registryActionId === "refresh");
   const activeQueueItems = $derived(activeSessionId ? (queueItemsBySession.get(activeSessionId) ?? []) : []);
+  const activeRuntimeStatus = $derived(activeSessionId ? runtimeStatusBySessionId.get(activeSessionId) : undefined);
+  const modelUsageRefreshing = $derived(activeSessionId ? modelUsageRefreshSessionIds.has(activeSessionId) : false);
+  const dcpCompressionRunning = $derived(activeSessionId ? dcpCompressionSessionIds.has(activeSessionId) : false);
   const activeSlashCommands = $derived(
     mergeSlashCommands(
       DESKTOP_SLASH_COMMANDS,
       activeSessionId ? (slashCommandsBySession.get(activeSessionId) ?? []) : [],
     ),
+  );
+  const dcpCompressionAvailable = $derived(
+    activeSlashCommands.some((command) => command.name.toLowerCase() === "dcp"),
   );
 
   $effect(() => {
@@ -369,6 +382,19 @@
       modelThinkingPickerOpen = false;
       modelThinkingPickerSessionId = null;
     }
+  });
+  let runtimeStatusActivationKey = "";
+  $effect(() => {
+    const sessionId = activeSessionId;
+    const currentModel = modelThinkingConfigState(configOptions).currentModel?.ref ?? "";
+    if (status !== "ready" || !sessionId || !activeSessionRuntimeReady) {
+      runtimeStatusActivationKey = "";
+      return;
+    }
+    const key = `${sessionId}\0${currentModel}`;
+    if (runtimeStatusActivationKey === key) return;
+    runtimeStatusActivationKey = key;
+    queueMicrotask(() => void refreshRuntimeStatus(sessionId, true));
   });
   const questionMode = $derived.by<QuestionComposerMode | undefined>(() => {
     const pending = pendingElicitation;
@@ -449,6 +475,10 @@
   onMount(() => {
     let disposed = false;
     let unlistenDragDrop: (() => void) | undefined;
+    const runtimeStatusTimer = window.setInterval(() => {
+      const sessionId = activeSessionId;
+      if (sessionId && activeSessionRuntimeReady) void refreshRuntimeStatus(sessionId, true);
+    }, RUNTIME_MODEL_USAGE_REFRESH_MS);
     restoreProjects();
     if (workspace) {
       void loadProjectTasks(workspace);
@@ -478,6 +508,7 @@
     });
     return () => {
       disposed = true;
+      window.clearInterval(runtimeStatusTimer);
       unlistenDragDrop?.();
       if (sessionUpdateFrame) cancelAnimationFrame(sessionUpdateFrame);
       if (transcriptScrollFrame) cancelAnimationFrame(transcriptScrollFrame);
@@ -524,6 +555,11 @@
         slashCommandsBySession = new Map();
         queueItemsBySession = new Map();
         agentControlStates = new Map();
+        runtimeStatusBySessionId = new Map();
+        modelUsageRefreshSessionIds = new Set();
+        dcpCompressionSessionIds = new Set();
+        runtimeStatusRequestGeneration.clear();
+        modelUsageRefreshGeneration.clear();
         transcript = emptyTranscript;
         configOptions = [];
         status = exit.requested ? "stopped" : "error";
@@ -585,6 +621,11 @@
     slashCommandsBySession = new Map();
     queueItemsBySession = new Map();
     agentControlStates = new Map();
+    runtimeStatusBySessionId = new Map();
+    modelUsageRefreshSessionIds = new Set();
+    dcpCompressionSessionIds = new Set();
+    runtimeStatusRequestGeneration.clear();
+    modelUsageRefreshGeneration.clear();
     transcript = emptyTranscript;
     configOptions = [];
     runningSessionIds = new Set();
@@ -771,6 +812,92 @@
     }
   }
 
+  async function refreshRuntimeStatus(sessionId: string, refreshModelUsage = false): Promise<void> {
+    const requestClient = client;
+    if (!requestClient || !runtimeReadySessionIds.has(sessionId)) return;
+    const generation = (runtimeStatusRequestGeneration.get(sessionId) ?? 0) + 1;
+    runtimeStatusRequestGeneration.set(sessionId, generation);
+
+    if (refreshModelUsage) {
+      modelUsageRefreshGeneration.set(sessionId, generation);
+      const refreshing = new Set(modelUsageRefreshSessionIds);
+      refreshing.add(sessionId);
+      modelUsageRefreshSessionIds = refreshing;
+    }
+
+    try {
+      const next = await requestClient.runtimeStatus(sessionId, refreshModelUsage);
+      if (requestClient !== client || !runtimeReadySessionIds.has(sessionId)) return;
+      const previous = runtimeStatusBySessionId.get(sessionId);
+      const latestSnapshot = runtimeStatusRequestGeneration.get(sessionId) === generation;
+      const latestModelUsageRefresh = refreshModelUsage && modelUsageRefreshGeneration.get(sessionId) === generation;
+      const snapshot = latestSnapshot || !previous ? next : previous;
+      let modelUsage = previous?.modelUsage ?? snapshot.modelUsage;
+      let modelUsageRefresh = snapshot.modelUsageRefresh;
+      if (latestModelUsageRefresh) {
+        modelUsageRefresh = next.modelUsageRefresh;
+        if (next.modelUsageRefresh === "ready") modelUsage = next.modelUsage;
+        else if (next.modelUsageRefresh === "unavailable") modelUsage = undefined;
+      }
+      const { modelUsage: _snapshotModelUsage, ...snapshotWithoutModelUsage } = snapshot;
+      const merged: RuntimeStatus = {
+        ...snapshotWithoutModelUsage,
+        modelUsageRefresh,
+        ...(modelUsage ? { modelUsage } : {}),
+      };
+      const statuses = new Map(runtimeStatusBySessionId);
+      statuses.set(sessionId, merged);
+      runtimeStatusBySessionId = statuses;
+    } catch {
+      // Runtime chrome is best-effort. Keep the previous snapshot when the
+      // private status request races a session reload or transient transport failure.
+    } finally {
+      if (refreshModelUsage && modelUsageRefreshGeneration.get(sessionId) === generation) {
+        modelUsageRefreshGeneration.delete(sessionId);
+        const refreshing = new Set(modelUsageRefreshSessionIds);
+        refreshing.delete(sessionId);
+        modelUsageRefreshSessionIds = refreshing;
+      }
+    }
+  }
+
+  function refreshActiveModelUsage(): void {
+    const sessionId = activeSessionId;
+    if (!sessionId) return;
+    void refreshRuntimeStatus(sessionId, true);
+  }
+
+  async function compressActiveDcpContext(): Promise<void> {
+    const requestClient = client;
+    const sessionId = activeSessionId;
+    const agentControlState = sessionId ? (agentControlStates.get(sessionId) ?? "idle") : "idle";
+    if (
+      !requestClient
+      || !sessionId
+      || !runtimeReadySessionIds.has(sessionId)
+      || runningSessionIds.has(sessionId)
+      || promptRunsBySessionId.has(sessionId)
+      || operationRunning
+      || sessionHistoryLoading
+      || agentControlState !== "idle"
+      || !dcpCompressionAvailable
+      || dcpCompressionSessionIds.has(sessionId)
+    ) return;
+
+    const compressing = new Set(dcpCompressionSessionIds);
+    compressing.add(sessionId);
+    dcpCompressionSessionIds = compressing;
+    try {
+      await runPromptRequest(requestClient, sessionId, [{ type: "text", text: "/dcp compress" }]);
+    } catch (error) {
+      if (requestClient === client && sessionId === activeSessionId) reportError(error);
+    } finally {
+      const next = new Set(dcpCompressionSessionIds);
+      next.delete(sessionId);
+      dcpCompressionSessionIds = next;
+    }
+  }
+
   function clearSessionActivity(sessionId: string): void {
     const nextTodos = new Map(todoSnapshots);
     nextTodos.delete(sessionId);
@@ -864,6 +991,7 @@
         promptEndedAtBySessionId.set(sessionId, endedAtMs);
         setSessionPromptRunning(sessionId, false);
         finalizeSessionTranscriptActivity(sessionId, endedAtMs);
+        queueMicrotask(() => void refreshRuntimeStatus(sessionId));
         queueMicrotask(() => void flushAutoQueue(sessionId));
       });
     promptRunsBySessionId.set(sessionId, tracked);
@@ -1048,6 +1176,17 @@
     runtimeReadySessionIds.delete(sessionId);
     runtimeLoadsBySessionId.delete(sessionId);
     configOptionsBySessionId.delete(sessionId);
+    runtimeStatusRequestGeneration.delete(sessionId);
+    modelUsageRefreshGeneration.delete(sessionId);
+    const statuses = new Map(runtimeStatusBySessionId);
+    statuses.delete(sessionId);
+    runtimeStatusBySessionId = statuses;
+    const refreshing = new Set(modelUsageRefreshSessionIds);
+    refreshing.delete(sessionId);
+    modelUsageRefreshSessionIds = refreshing;
+    const compressing = new Set(dcpCompressionSessionIds);
+    compressing.delete(sessionId);
+    dcpCompressionSessionIds = compressing;
     if (sessionId === activeSessionId) activeSessionRuntimeReady = false;
   }
 
@@ -4388,10 +4527,17 @@
     {promptRunning}
     canConfigure={canUseSession && activeSessionRuntimeReady && !sessionHistoryLoading}
     modelThinkingOpen={modelThinkingPickerOpen}
+    runtimeStatus={activeRuntimeStatus}
+    {modelUsageRefreshing}
+    {dcpCompressionRunning}
+    {dcpCompressionAvailable}
+    canCompressContext={dcpCompressionAvailable && canUseSession && !!activeSessionId && activeSessionRuntimeReady && changingConfig === null && !sessionHistoryLoading && !promptRunning && activeAgentControlState === "idle"}
     canNavigateMessages={canUseSession && !!activeSessionId && activeSessionRuntimeReady && !sessionHistoryLoading}
     messageNavigationOpen={commandPicker?.command === "jump"}
     onSetConfig={(option, value) => void setConfig(option, value)}
     onOpenModelThinking={openModelThinkingPicker}
+    onRefreshModelUsage={refreshActiveModelUsage}
+    onCompressDcpContext={() => void compressActiveDcpContext()}
     onNavigateMessages={() => void openJumpPicker("")}
   />
 </div>

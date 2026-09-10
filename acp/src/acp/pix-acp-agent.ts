@@ -109,6 +109,7 @@ import {
 	PIX_RELOAD_SESSION_METHOD,
 	PIX_REQUEST_HISTORY_METHOD,
 	PIX_RESUME_PATH_METHOD,
+	PIX_RUNTIME_STATUS_METHOD,
 	PIX_SESSION_IMAGE_METHOD,
 	PIX_SESSION_HISTORY_METHOD,
 	PIX_TAKE_AUTO_MESSAGE_METHOD,
@@ -122,6 +123,7 @@ import {
 	parseDesktopQueueSubmitRequest,
 	parseDesktopRegistryActionRequest,
 	parseDesktopResumePathRequest,
+	parseDesktopRuntimeStatusRequest,
 	parseDesktopSessionImageRequest,
 	parseDesktopSessionHistoryRequest,
 	parseDesktopSessionRequest,
@@ -145,6 +147,9 @@ import {
 	type DesktopQueuedUserMessage,
 	type DesktopRegistryActionRequest,
 	type DesktopRequestHistoryResponse,
+	type DesktopRuntimeStatusRequest,
+	type DesktopRuntimeStatusResponse,
+	type DesktopModelUsageStatus,
 	type DesktopSessionHistoryRequest,
 	type DesktopSessionHistoryResponse,
 	type DesktopSessionImageRequest,
@@ -423,6 +428,9 @@ export class PixAcpAgent {
 			.onRequest("session/prompt", (ctx) => this.prompt(ctx.params))
 			.onRequest(PIX_AGENT_CONTROL_METHOD, parseDesktopAgentControlRequest, (ctx) =>
 				this.desktopAgentControl(ctx.params),
+			)
+			.onRequest(PIX_RUNTIME_STATUS_METHOD, parseDesktopRuntimeStatusRequest, (ctx) =>
+				this.desktopRuntimeStatus(ctx.params),
 			)
 			.onRequest("pix/autocomplete", parseAutocompleteRequest, (ctx) =>
 				this.autocomplete(ctx.params, ctx.signal),
@@ -1816,6 +1824,25 @@ export class PixAcpAgent {
 		return { sessionId: session.acpSessionId, state };
 	}
 
+	private async desktopRuntimeStatus(params: DesktopRuntimeStatusRequest): Promise<DesktopRuntimeStatusResponse> {
+		const session = this.sessions.get(params.sessionId);
+		if (!session) throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
+
+		const [state, stats] = await Promise.all([session.pi.getState(), session.pi.getSessionStats()]);
+		const [dcpStats, modelUsage] = await Promise.all([
+			formatPixDcpStats(state, stats, session.cwd),
+			params.refreshModelUsage ? queryPixModelUsage(state) : Promise.resolve({ refresh: "skipped" as const }),
+		]);
+
+		return {
+			sessionId: session.acpSessionId,
+			...(stats.contextUsage ? { context: stats.contextUsage } : {}),
+			...(dcpStats ? { dcpStats } : {}),
+			modelUsageRefresh: modelUsage.refresh,
+			...(modelUsage.refresh === "ready" ? { modelUsage: modelUsage.status } : {}),
+		};
+	}
+
 	private async setAgentControlState(session: AgentSessionState, state: DesktopAgentControlState): Promise<void> {
 		if (this.sessions.get(session.acpSessionId) !== session || session.agentControlState === state) return;
 		session.agentControlState = state;
@@ -2608,6 +2635,51 @@ function formatUsageStats(stats: PiSessionStats): string {
 		`- Total: ${stats.tokens.total}`,
 		...(stats.cost > 0 ? [`- Cost: $${stats.cost.toFixed(4)}`] : []),
 	].join("\n");
+}
+
+type SharedModelUsageModule = {
+	modelUsageDescriptor?: (model: PiSessionState["model"]) => unknown;
+	queryModelUsageStatus?: (descriptor: unknown) => Promise<DesktopModelUsageStatus | undefined>;
+};
+
+type SharedDcpStatsModule = {
+	formatDcpStatsToast?: (session: unknown) => string;
+};
+
+async function queryPixModelUsage(state: PiSessionState): Promise<
+	| { readonly refresh: "ready"; readonly status: DesktopModelUsageStatus }
+	| { readonly refresh: "unavailable" | "failed" }
+> {
+	try {
+		const moduleUrl = new URL("../../../dist/app/model/model-usage-status.js", import.meta.url).href;
+		const usage = await import(moduleUrl) as SharedModelUsageModule;
+		if (!usage.modelUsageDescriptor || !usage.queryModelUsageStatus) return { refresh: "unavailable" };
+		const descriptor = usage.modelUsageDescriptor(state.model);
+		if (!descriptor) return { refresh: "unavailable" };
+		const status = await usage.queryModelUsageStatus(descriptor);
+		return status ? { refresh: "ready", status } : { refresh: "unavailable" };
+	} catch {
+		return { refresh: "failed" };
+	}
+}
+
+async function formatPixDcpStats(state: PiSessionState, stats: PiSessionStats, cwd: string): Promise<string | undefined> {
+	const sessionFile = stats.sessionFile ?? state.sessionFile;
+	if (!sessionFile) return undefined;
+	try {
+		const moduleUrl = new URL("../../../dist/app/rendering/dcp-stats.js", import.meta.url).href;
+		const dcp = await import(moduleUrl) as SharedDcpStatsModule;
+		if (!dcp.formatDcpStatsToast) return undefined;
+		const sessionManager = SessionManager.open(sessionFile, undefined, cwd);
+		const text = dcp.formatDcpStatsToast({
+			model: state.model,
+			sessionManager,
+			getContextUsage: () => stats.contextUsage,
+		}).trim();
+		return text || undefined;
+	} catch {
+		return undefined;
+	}
 }
 
 async function formatPixAccountUsage(): Promise<string | undefined> {

@@ -2,8 +2,10 @@
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import ListChevronsUpDown from "@lucide/svelte/icons/list-chevrons-up-down";
   import type { SessionConfigOption } from "@agentclientprotocol/sdk";
+  import type { RuntimeStatus } from "../lib/acp-client";
   import { modelDisplayToneClass, thinkingLevelTone } from "../lib/model-display";
   import { modelThinkingConfigState } from "../lib/model-thinking";
+  import RuntimeStatusBarItems from "./RuntimeStatusBarItems.svelte";
 
   type ConnectionStatus = "starting" | "ready" | "error" | "stopped";
   type ConfigValue = { value: string; name: string; group?: string };
@@ -15,10 +17,17 @@
     promptRunning,
     canConfigure,
     modelThinkingOpen,
+    runtimeStatus,
+    modelUsageRefreshing,
+    dcpCompressionRunning,
+    dcpCompressionAvailable,
+    canCompressContext,
     canNavigateMessages,
     messageNavigationOpen,
     onSetConfig,
     onOpenModelThinking,
+    onRefreshModelUsage,
+    onCompressDcpContext,
     onNavigateMessages,
   }: {
     status: ConnectionStatus;
@@ -27,10 +36,17 @@
     promptRunning: boolean;
     canConfigure: boolean;
     modelThinkingOpen: boolean;
+    runtimeStatus?: RuntimeStatus;
+    modelUsageRefreshing: boolean;
+    dcpCompressionRunning: boolean;
+    dcpCompressionAvailable: boolean;
+    canCompressContext: boolean;
     canNavigateMessages: boolean;
     messageNavigationOpen: boolean;
     onSetConfig: (option: SessionConfigOption, value: string | boolean) => void;
     onOpenModelThinking: () => void;
+    onRefreshModelUsage: () => void;
+    onCompressDcpContext: () => void;
     onNavigateMessages: () => void;
   } = $props();
 
@@ -96,6 +112,16 @@
         <ChevronDown class="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
       </button>
     {/if}
+    <RuntimeStatusBarItems
+      status={runtimeStatus}
+      refreshingModelUsage={modelUsageRefreshing}
+      canRefreshModelUsage={canConfigure && changingConfig === null && !promptRunning}
+      compressingContext={dcpCompressionRunning}
+      compressionAvailable={dcpCompressionAvailable}
+      {canCompressContext}
+      onRefreshModelUsage={onRefreshModelUsage}
+      onCompressContext={onCompressDcpContext}
+    />
     {#each configOptions as option (option.id)}
       {#if option.id === "model" || option.id === "thought_level"}
         <!-- Model + thinking are presented as one staged control above. -->

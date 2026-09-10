@@ -129,6 +129,38 @@ export interface AgentControlStatus {
   readonly state: AgentControlState;
 }
 
+export interface ContextUsageStatus {
+  readonly tokens: number | null;
+  readonly contextWindow: number;
+  readonly percent: number | null;
+}
+
+export interface ModelUsageLimitWindow {
+  readonly remainingPercent: number;
+  readonly resetAt: number;
+  readonly windowSeconds: number;
+  readonly hasKnownWindowDuration?: boolean;
+}
+
+export interface ModelUsageStatus {
+  readonly modelKey: string;
+  readonly provider: "openai" | "zhipu" | "google-antigravity";
+  readonly updatedAt: number;
+  readonly accountEmail?: string;
+  readonly hourly?: ModelUsageLimitWindow;
+  readonly weekly?: ModelUsageLimitWindow;
+}
+
+export type ModelUsageRefresh = "skipped" | "ready" | "unavailable" | "failed";
+
+export interface RuntimeStatus {
+  readonly sessionId: string;
+  readonly context?: ContextUsageStatus;
+  readonly dcpStats?: string;
+  readonly modelUsageRefresh: ModelUsageRefresh;
+  readonly modelUsage?: ModelUsageStatus;
+}
+
 type JsonRpcId = string | number;
 
 interface PendingRequest {
@@ -288,6 +320,14 @@ export class AcpClient {
       throw new Error("pix/session/agent_control returned an invalid response");
     }
     return { sessionId: response.sessionId, state: response.state };
+  }
+
+  async runtimeStatus(sessionId: string, refreshModelUsage = false): Promise<RuntimeStatus> {
+    const response = await this.request<unknown>(
+      "pix/session/runtime_status",
+      { sessionId, refreshModelUsage },
+    );
+    return parseRuntimeStatus(response);
   }
 
   async userMessageAction(
@@ -684,6 +724,82 @@ export class AcpClient {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseRuntimeStatus(value: unknown): RuntimeStatus {
+  if (
+    !isRecord(value)
+    || typeof value.sessionId !== "string"
+    || !["skipped", "ready", "unavailable", "failed"].includes(String(value.modelUsageRefresh))
+  ) {
+    throw new Error("pix/session/runtime_status returned an invalid response");
+  }
+
+  const context = value.context === undefined ? undefined : parseContextUsageStatus(value.context);
+  const modelUsage = value.modelUsage === undefined ? undefined : parseModelUsageStatus(value.modelUsage);
+  if (value.modelUsageRefresh === "ready" && !modelUsage) {
+    throw new Error("pix/session/runtime_status returned ready without model usage");
+  }
+  return {
+    sessionId: value.sessionId,
+    ...(context ? { context } : {}),
+    ...(typeof value.dcpStats === "string" ? { dcpStats: value.dcpStats } : {}),
+    modelUsageRefresh: value.modelUsageRefresh as ModelUsageRefresh,
+    ...(modelUsage ? { modelUsage } : {}),
+  };
+}
+
+function parseContextUsageStatus(value: unknown): ContextUsageStatus {
+  if (
+    !isRecord(value)
+    || (value.tokens !== null && !isFiniteNumber(value.tokens))
+    || !isFiniteNumber(value.contextWindow)
+    || (value.percent !== null && !isFiniteNumber(value.percent))
+  ) throw new Error("invalid Pix context usage");
+  return {
+    tokens: value.tokens === null ? null : Number(value.tokens),
+    contextWindow: Number(value.contextWindow),
+    percent: value.percent === null ? null : Number(value.percent),
+  };
+}
+
+function parseModelUsageStatus(value: unknown): ModelUsageStatus {
+  if (
+    !isRecord(value)
+    || typeof value.modelKey !== "string"
+    || !["openai", "zhipu", "google-antigravity"].includes(String(value.provider))
+    || !isFiniteNumber(value.updatedAt)
+  ) throw new Error("invalid Pix model usage");
+  const hourly = value.hourly === undefined ? undefined : parseModelUsageLimitWindow(value.hourly);
+  const weekly = value.weekly === undefined ? undefined : parseModelUsageLimitWindow(value.weekly);
+  return {
+    modelKey: value.modelKey,
+    provider: value.provider as ModelUsageStatus["provider"],
+    updatedAt: Number(value.updatedAt),
+    ...(typeof value.accountEmail === "string" ? { accountEmail: value.accountEmail } : {}),
+    ...(hourly ? { hourly } : {}),
+    ...(weekly ? { weekly } : {}),
+  };
+}
+
+function parseModelUsageLimitWindow(value: unknown): ModelUsageLimitWindow {
+  if (
+    !isRecord(value)
+    || !isFiniteNumber(value.remainingPercent)
+    || !isFiniteNumber(value.resetAt)
+    || !isFiniteNumber(value.windowSeconds)
+    || (value.hasKnownWindowDuration !== undefined && typeof value.hasKnownWindowDuration !== "boolean")
+  ) throw new Error("invalid Pix model usage window");
+  return {
+    remainingPercent: Number(value.remainingPercent),
+    resetAt: Number(value.resetAt),
+    windowSeconds: Number(value.windowSeconds),
+    ...(typeof value.hasKnownWindowDuration === "boolean" ? { hasKnownWindowDuration: value.hasKnownWindowDuration } : {}),
+  };
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
 }
 
 function parseQueueState(value: unknown): QueueState {

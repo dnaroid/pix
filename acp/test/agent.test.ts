@@ -31,11 +31,13 @@ import {
 	PIX_REGISTRY_ACTION_METHOD,
 	PIX_TAKE_AUTO_MESSAGE_METHOD,
 	PIX_RESUME_PATH_METHOD,
+	PIX_RUNTIME_STATUS_METHOD,
 	PIX_SESSION_HISTORY_METHOD,
 	PIX_SESSION_IMAGE_METHOD,
 	PIX_TOOL_RESULT_METHOD,
 	type DesktopQueueStateResponse,
 	type DesktopAgentControlResponse,
+	type DesktopRuntimeStatusResponse,
 	type DesktopQueuedUserMessage,
 } from "../src/acp/desktop-commands.js";
 import { PIX_QUESTION_EDITOR_TITLE } from "../src/acp/ui-request-bridge.js";
@@ -1178,6 +1180,27 @@ test("Pix Desktop pause stops at the turn boundary and exposes a paused continua
 	);
 
 	assert.deepEqual(states.map((state) => state.state), ["pause-requested", "paused"]);
+});
+
+test("Pix Desktop runtime status exposes pi context usage without refreshing model quota", async () => {
+	const { adapter, clients } = createTestAdapter();
+	await connect(adapter, async (cx) => {
+		const session = await cx.buildSession("/tmp/runtime-status").start();
+		const pi = clients[0]!;
+		Object.assign(pi.sessionStats, {
+			contextUsage: { tokens: 128_000, contextWindow: 200_000, percent: 64 },
+		});
+
+		const response = await cx.request(PIX_RUNTIME_STATUS_METHOD, {
+			sessionId: session.sessionId,
+			refreshModelUsage: false,
+		}) as DesktopRuntimeStatusResponse;
+
+		assert.equal(response.sessionId, session.sessionId);
+		assert.deepEqual(response.context, { tokens: 128_000, contextWindow: 200_000, percent: 64 });
+		assert.equal(response.modelUsageRefresh, "skipped");
+		assert.equal(response.modelUsage, undefined);
+	});
 });
 
 test("Pix Desktop exposes generic resumable stops and continues without a user prompt", async () => {
@@ -2936,6 +2959,23 @@ test("extension-handled slash commands finish without an agent run", async () =>
 
 	assert.equal(response.stopReason, "end_turn");
 	assert.deepEqual(pi.promptCalls, [{ message: "/extension-action", images: undefined }]);
+});
+
+test("DCP compression stays extension-owned instead of invoking native Pi compaction", async () => {
+	const harness = createTestAdapter();
+	const created = await connect(harness.adapter, (cx) => cx.request("session/new", { cwd: "/tmp", mcpServers: [] }));
+	const sessionId = (created as { sessionId: string }).sessionId;
+	const pi = harness.clients[0]!;
+	pi.promptHandledWithoutRun = true;
+
+	const response = await connect(harness.adapter, (cx) => cx.request("session/prompt", {
+		sessionId,
+		prompt: [{ type: "text", text: "/dcp compress" }],
+	})) as { stopReason: string };
+
+	assert.equal(response.stopReason, "end_turn");
+	assert.deepEqual(pi.promptCalls, [{ message: "/dcp compress", images: undefined }]);
+	assert.deepEqual(pi.compactCalls, []);
 });
 
 test("extension-handled reload commands report the final effective context", async () => {
