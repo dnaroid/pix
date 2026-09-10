@@ -37,7 +37,7 @@
           "title": {
             "type": "string",
             "maxLength": 200,
-            "description": "Optional short task title. An empty title is allowed when the task has description content."
+            "description": "Short task title. May be empty when the task has description content."
           },
           "description": {
             "type": "string",

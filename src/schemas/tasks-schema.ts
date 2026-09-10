@@ -24,7 +24,7 @@ const TaskPriority = Type.Union([
 const ProjectTask = Type.Object(
 	{
 		id: Type.String({ minLength: 1, maxLength: 128, description: "Stable unique task id." }),
-		title: Type.String({ maxLength: 200, description: "Optional short task title. An empty title is allowed when the task has description content." }),
+		title: Type.String({ maxLength: 200, description: "Short task title. May be empty when the task has description content." }),
 		description: Type.Optional(Type.String({ maxLength: 10_000, description: "Optional detailed task description." })),
 		type: TaskType,
 		status: TaskStatus,

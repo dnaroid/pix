@@ -443,6 +443,8 @@
   }
 
   async function deferWithVoiceStop(): Promise<void> {
+    composerMenuOpen = false;
+    if (!activeSessionId || !ready || !hasQueueableDraft) return;
     await stopVoiceInput();
     await onDefer();
   }
@@ -689,6 +691,16 @@
     questionMode.onCancel();
   }
 
+  function handleWindowKeydown(event: KeyboardEvent): void {
+    if (composerMenuOpen && event.key === "Escape" && !event.isComposing) {
+      event.preventDefault();
+      composerMenuOpen = false;
+      textarea?.focus();
+      return;
+    }
+    handleQuestionEscape(event);
+  }
+
   function handleTabKeydown(event: KeyboardEvent, index: number): void {
     if (!questionMode) return;
     const tabCount = questionMode.questions.length + 1;
@@ -801,7 +813,7 @@
   }
 </script>
 
-<svelte:window onresize={resizeComposer} onkeydown={handleQuestionEscape} />
+<svelte:window onresize={resizeComposer} onkeydown={handleWindowKeydown} />
 
 <div class={editorMode ? "relative" : "relative border-t border-border bg-panel px-3 py-2"}>
 {#if slashMenuOpen}
@@ -853,7 +865,7 @@
     aria-label="Composer actions"
   >
     <button
-      class="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-xs text-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+      class="flex h-8 w-full cursor-pointer items-center gap-2 rounded-sm px-2 text-left text-xs text-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
       type="button"
       role="menuitem"
       disabled={!canCreateTask}
@@ -861,6 +873,16 @@
     >
       <ListTodo class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
       <span>Create task</span>
+    </button>
+    <button
+      class="flex h-8 w-full cursor-pointer items-center gap-2 rounded-sm px-2 text-left text-xs text-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+      type="button"
+      role="menuitem"
+      disabled={!activeSessionId || !ready || !hasQueueableDraft}
+      onclick={() => void deferWithVoiceStop()}
+    >
+      <Pause class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      <span>Pause for later</span>
     </button>
   </div>
 {/if}
@@ -1109,7 +1131,7 @@
         {#if !editorMode && !questionMode}
           <div class="relative shrink-0" data-composer-menu>
             <button
-              class="grid h-6 w-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              class="grid h-6 w-6 cursor-pointer place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
               type="button"
               aria-label="More composer actions"
               title="More actions"
@@ -1138,18 +1160,6 @@
             {:else}
               <Mic class="h-4 w-4" aria-hidden="true" />
             {/if}
-          </button>
-        {/if}
-        {#if !editorMode && !questionMode}
-          <button
-            class="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
-            type="button"
-            aria-label="Pause message for later"
-            title="Pause message for later"
-            disabled={!activeSessionId || !ready || !hasQueueableDraft}
-            onclick={() => void deferWithVoiceStop()}
-          >
-            <Pause class="h-4 w-4" aria-hidden="true" />
           </button>
         {/if}
         {#if promptRunning && !editorMode && !questionMode}

@@ -94,7 +94,8 @@ Show image and video attachments in the desktop composer and transcript, while k
 
 ## Verification
 
-- Unit tests cover media classification, file-URI markers, transcript attachment chunks, and ACP history replay.
+- Unit tests cover media classification, data-URL decoding, file-URI markers,
+  transcript attachment chunks, and ACP history replay.
 - `npm run check` and `npm test` in `desktop/`.
 - Relevant ACP tests and the desktop production web build pass.
 
@@ -108,5 +109,7 @@ Show image and video attachments in the desktop composer and transcript, while k
 - Confirmed by code: `desktop/src/App.svelte::buildPromptPayload` distinguishes
   path-backed images from pathless clipboard images; ACP materializes the
   private file-image metadata before prompting Pi.
+- Confirmed by code: composer-to-task capture materializes any pathless image
+  through `cache_task_attachment` before writing task attachment markers.
 - Confirmed by docs: ACP resource links are baseline prompt content; Tauri's asset protocol serves local media and the opener plugin opens paths with the default application.
 - Confirmed by user: files should be added by picker, drag-and-drop, and paste; non-image files should be passed to the agent by local path.

@@ -279,7 +279,7 @@
     insertPaths: (paths: readonly string[]) => Promise<void>;
   } | null>(null);
   let workspaceSidebar = $state<{
-    openTasksPanel: () => void;
+    openTasksPanel: (taskId?: string) => Promise<void>;
   } | null>(null);
   let localMessageId = 0;
   let reconnectPromise: Promise<void> | null = null;
@@ -1643,8 +1643,8 @@
 
   function createProjectTask(draft: ProjectTaskDraft): void {
     const title = draft.title.trim();
+    if (!title) return;
     const description = draft.description?.trim();
-    if (!title && !description) return;
     const timestamp = new Date().toISOString();
     const task: ProjectTask = {
       id: newProjectTaskId(),
@@ -1703,13 +1703,14 @@
       reportError(error);
       return;
     }
+    if (workspace !== requestWorkspace || tasksSaving || taskLoadFailed) return;
     const timestamp = new Date().toISOString();
     const task = projectTaskFromComposerDraft(text, storedAttachments, newProjectTaskId(), timestamp);
     if (!task) return;
 
     const saved = await saveProjectTasks({ ...taskDocument, tasks: [task, ...taskDocument.tasks] });
     if (!saved || workspace !== requestWorkspace) return;
-    workspaceSidebar?.openTasksPanel();
+    await workspaceSidebar?.openTasksPanel(task.id);
 
     if (
       activeSessionId === requestSessionId

@@ -54,10 +54,11 @@ agent's session-local todo list.
    description as their display label, or `Untitled task` when they contain only
    attachments. Rows also show status, session/run action, edit, and delete
    controls. Status uses icon, text, and color rather than color alone.
-4. Creating a task requires content in either title or description. Tasks start
-   with status `todo` and priority `medium`, and may include description text
-   and attachments. The task editor therefore permits an empty title when the
-   description or attachments are non-empty.
+4. Manual creation through the task editor still requires a non-empty title.
+   Tasks start with status `todo` and priority `medium`, and may include
+   description text and attachments. Existing untitled composer-captured tasks
+   may be edited without inventing a title as long as description content or
+   attachments remain.
 5. Editing changes title, description, and type. Status is changed separately.
    Existing persisted priority is preserved.
 6. `.pi/tasks.jsonc` is authoritative. Missing `.pi`/task storage produces an
@@ -78,9 +79,10 @@ agent's session-local todo list.
     sent to the agent. Pathless composer images are materialized into
     `.pi/task-attachments` before those markers are written.
 12. After composer task persistence succeeds, Pix expands/selects the Tasks
-    sidebar view and clears the composer only if the draft is still the exact
-    draft that was captured for task creation. A failed save or edits made while
-    the save is in flight preserve the composer.
+    sidebar view, scrolls the newly created task into view, highlights it, and
+    clears the composer only if the draft is still the exact draft that was
+    captured for task creation. A failed save or edits made while the save is in
+    flight preserve the composer.
 
 ## Contracts
 
@@ -122,7 +124,10 @@ agent's session-local todo list.
 ## Related files
 
 - `desktop/src/App.svelte`
+- `desktop/src/components/PromptComposer.svelte`
 - `desktop/src/components/WorkspaceSidebar.svelte`
+- `desktop/src/lib/attachments.ts`
+- `desktop/src/lib/attachments.test.ts`
 - `desktop/src/lib/project-tasks.ts`
 - `desktop/src/lib/project-tasks.test.ts`
 - `desktop/src-tauri/src/lib.rs`
@@ -130,8 +135,10 @@ agent's session-local todo list.
 
 ## Verification
 
-- `desktop/src/lib/project-tasks.test.ts` covers parsing, prompt generation, and
-  drag/reorder semantics.
+- `desktop/src/lib/project-tasks.test.ts` covers untitled composer task creation,
+  parsing, prompt generation, and drag/reorder semantics.
+- `desktop/src/lib/attachments.test.ts` covers data-URL decoding used when a
+  pathless composer image is persisted into project task storage.
 - Rust tests in `desktop/src-tauri/src/lib.rs` cover missing/read/write/malformed
   JSONC, validation, workspace confinement, and ignoring unsupported task files.
 - Run `npm --prefix desktop test`, `npm --prefix desktop run check`, and
@@ -148,9 +155,9 @@ agent's session-local todo list.
 
 ## Evidence
 
-- Confirmed by code: `desktop/src/App.svelte`,
-  `desktop/src/components/WorkspaceSidebar.svelte`, and
-  `desktop/src/lib/project-tasks.ts` implement the current task lifecycle.
+- Confirmed by code: `desktop/src/App.svelte`, `PromptComposer.svelte`,
+  `WorkspaceSidebar.svelte`, and `desktop/src/lib/project-tasks.ts` implement the
+  current task lifecycle and composer capture action.
 - Confirmed by code: `desktop/src-tauri/src/lib.rs` owns JSONC persistence,
   validation, confinement, atomic replacement, and ignores unsupported sibling
   task-storage formats.
