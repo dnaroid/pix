@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { tmpdir } from "node:os";
 import { createPiAiMock } from "./support/pi-ai-mock.js";
 import { createTypeboxMock } from "./support/typebox-mock.js";
@@ -744,6 +744,73 @@ describe.serial("/todos command", () => {
 });
 
 describe.serial("todo extension lifecycle", () => {
+	test.serial("adds one repo knowledge reminder before the final active todo in repo-aware projects", async () => {
+		const extension = (await import("../src/todo/index.js")).default;
+		const pi = new FakePi();
+		const cwd = mkdtempSync(join(tmpdir(), "todo-repo-finalization-"));
+		const binDir = join(cwd, "bin");
+		const previousPath = process.env.PATH;
+		mkdirSync(join(cwd, ".indexer-cli"));
+		mkdirSync(binDir);
+		writeFileSync(join(binDir, "idx"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+		process.env.PATH = `${binDir}${delimiter}${previousPath ?? ""}`;
+		const ctx = {
+			cwd,
+			hasUI: false,
+			model: { reasoning: true, thinkingLevelMap: {} },
+			sessionManager: { getBranch: () => [] },
+			isIdle: () => true,
+			hasPendingMessages: () => false,
+		};
+		try {
+			extension(pi as any);
+			await pi.emit("session_start", {}, ctx);
+			const tool = pi.tools.get("todo");
+			await tool.execute("todo-1", { action: "batch_create", items: [
+				{ subject: "Implement change" },
+				{ subject: "Report results" },
+			] }, undefined, undefined, ctx);
+			await tool.execute("todo-2", { action: "update", id: 1, status: "in_progress", activeForm: "implementing" }, undefined, undefined, ctx);
+
+			const completed = await tool.execute("todo-3", { action: "update", id: 1, status: "completed" }, undefined, undefined, ctx);
+			expect(completed.content[0].text).toContain("Before completing the final todo");
+			expect(completed.content[0].text).toContain("reconcile affected specs and repo knowledge");
+			expect(completed.content[0].text).toContain("skip for mechanical changes");
+		} finally {
+			process.env.PATH = previousPath;
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
+	test.serial("does not add the repo knowledge finalization reminder outside repo-aware projects", async () => {
+		const extension = (await import("../src/todo/index.js")).default;
+		const pi = new FakePi();
+		const cwd = mkdtempSync(join(tmpdir(), "todo-no-repo-finalization-"));
+		const ctx = {
+			cwd,
+			hasUI: false,
+			model: { reasoning: true, thinkingLevelMap: {} },
+			sessionManager: { getBranch: () => [] },
+			isIdle: () => true,
+			hasPendingMessages: () => false,
+		};
+		try {
+			extension(pi as any);
+			await pi.emit("session_start", {}, ctx);
+			const tool = pi.tools.get("todo");
+			await tool.execute("todo-1", { action: "batch_create", items: [
+				{ subject: "Implement change" },
+				{ subject: "Report results" },
+			] }, undefined, undefined, ctx);
+			await tool.execute("todo-2", { action: "update", id: 1, status: "in_progress", activeForm: "implementing" }, undefined, undefined, ctx);
+
+			const completed = await tool.execute("todo-3", { action: "update", id: 1, status: "completed" }, undefined, undefined, ctx);
+			expect(completed.content[0].text).not.toContain("reconcile affected specs and repo knowledge");
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
 	test.serial("adds compact thinking prompt and switches/restores active task thinking", async () => {
 		const previousEnv = process.env.PI_TOOLS_SUITE_TODO_THINKING;
 		process.env.PI_TOOLS_SUITE_TODO_THINKING = "1";

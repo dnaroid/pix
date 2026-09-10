@@ -69,8 +69,10 @@ Mechanical refactors, typo/formatting edits, exact renames, and other changes
 that do not alter project behavior do not require this knowledge-maintenance
 lifecycle. When `idx` is unavailable or the project is not indexed, none of
 these requirements are injected; use the normal repository workflow instead.
-Repo-aware post-mutation guidance is compact and emitted at most once per user
-turn; a new user message resets the gate, while assistant/tool turns do not.
+For repo-aware projects, completing a todo when only the final active todo
+remains adds one compact reminder to reconcile affected specs and repo knowledge
+before closing that final todo. File mutations themselves do not emit knowledge
+reminders.
 
 ## Session recovery
 

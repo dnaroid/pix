@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { loadPiToolsSuiteConfig, type TodoThinkingLevel as ConfigTodoThinkingLevel } from "../config.js";
 import { isAgentBusyRaceError } from "../context-usage.js";
+import { hasAvailableIndexedProjectRoot } from "../lib/project.js";
 import { autoClearCompletedTodos } from "./state/auto-clear.js";
 import { loadPersistedPlan, syncPersistedPlan } from "./state/persistence.js";
 import { replayFromBranch } from "./state/replay.js";
@@ -32,6 +33,25 @@ const TODO_NUDGE_IDLE_RETRY_DELAY_MS = 100;
 const TODO_NUDGE_MAX_IDLE_ATTEMPTS = 40;
 const ASK_USER_TOOL_NAMES = new Set(["ask_user", "ask_user_question", "question"]);
 const TODO_THINKING_RESTORE_METADATA_KEY = "__piTodoRestoreThinking";
+const REPO_KNOWLEDGE_FINALIZATION_REMINDER =
+	"📚 Before completing the final todo: if behavior/contracts changed, reconcile affected specs and repo knowledge; skip for mechanical changes.";
+
+function completesTodo(info: { action: string; params: TaskMutationParams }): boolean {
+	if (info.action === "update") return info.params.status === "completed";
+	if (info.action !== "batch_update") return false;
+	return (info.params.items ?? []).some((item) => item.status === "completed");
+}
+
+function repoKnowledgeFinalizationReminder(
+	state: ReturnType<typeof getState>,
+	ctx: ExtensionContext,
+	info: { action: string; params: TaskMutationParams },
+): string | undefined {
+	if (!hasAvailableIndexedProjectRoot(ctx.cwd)) return undefined;
+	if (!completesTodo(info)) return undefined;
+	const remainingActive = selectVisibleTasks(state).filter((task) => ACTIVE_STATUSES.has(task.status));
+	return remainingActive.length === 1 ? REPO_KNOWLEDGE_FINALIZATION_REMINDER : undefined;
+}
 
 function isStaleExtensionContextError(error: unknown): boolean {
 	return error instanceof Error && /ctx is stale|stale ctx|stale after session replacement|stale after.*reload/i.test(error.message);
@@ -241,6 +261,7 @@ export default function (pi: ExtensionAPI) {
 		registerTodoTool(pi, {
 			...thinkingPrompt,
 			...(availableThinkingLevels ? { parameters: todoParamsSchemaForThinkingLevels(availableThinkingLevels) } : {}),
+			resultReminder: repoKnowledgeFinalizationReminder,
 			prepareMutation: (state, ctx, info) => {
 				if (!todoThinkingEnabled) return info.params;
 				if (info.action === "create" || info.action === "update") return prepareTodoThinkingMutation(state, ctx, info.params);

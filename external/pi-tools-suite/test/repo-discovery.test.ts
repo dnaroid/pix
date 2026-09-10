@@ -176,64 +176,6 @@ describe("repo discovery output truncation", () => {
 		}
 	});
 
-	test("adds one compact repo-aware mutation nudge per user turn", async () => {
-		const projectRoot = mkdtempSync(path.join(tmpdir(), "repo-knowledge-nudge-"));
-		mkdirSync(path.join(projectRoot, ".indexer-cli"));
-		const binDir = path.join(projectRoot, "bin");
-		mkdirSync(binDir);
-		writeFileSync(path.join(binDir, "idx"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
-		const previousPath = process.env.PATH;
-		process.env.PATH = `${binDir}${path.delimiter}${previousPath ?? ""}`;
-		let toolResultHandler: ((event: any, ctx: { cwd: string }) => Promise<any>) | undefined;
-		let messageStartHandler: ((event: any) => Promise<void>) | undefined;
-		try {
-			repoDiscoveryExtension({
-				registerCommand: () => undefined,
-				registerTool: () => undefined,
-				exec: async () => ({ stdout: "", stderr: "", code: 0 }),
-				on: (event: string, handler: (event: any, ctx: { cwd: string }) => Promise<any>) => {
-					if (event === "tool_result") toolResultHandler = handler;
-					if (event === "message_start") messageStartHandler = handler as (event: any) => Promise<void>;
-				},
-			} as never, { profile: "baseline", cwd: projectRoot });
-
-			expect(toolResultHandler).toBeDefined();
-			expect(messageStartHandler).toBeDefined();
-			const first = await toolResultHandler!({
-				toolName: "apply_patch",
-				content: [{ type: "text", text: "patched" }],
-			}, { cwd: projectRoot });
-			const text = first.content.map((part: any) => part.text ?? "").join("\n");
-			expect(text).toContain("repo_knowledge: behavior changed?");
-			expect(text).toContain("Update the primary spec");
-			expect(text).toContain("action=impact");
-			expect(text).toContain("Skip for mechanical edits");
-
-			const repeated = await toolResultHandler!({
-				toolName: "Edit",
-				content: [{ type: "text", text: "edited" }],
-			}, { cwd: projectRoot });
-			expect(repeated).toBeUndefined();
-
-			await messageStartHandler!({ message: { role: "assistant" } });
-			const stillRepeated = await toolResultHandler!({
-				toolName: "Write",
-				content: [{ type: "text", text: "written" }],
-			}, { cwd: projectRoot });
-			expect(stillRepeated).toBeUndefined();
-
-			await messageStartHandler!({ message: { role: "user" } });
-			const nextRun = await toolResultHandler!({
-				toolName: "Write",
-				content: [{ type: "text", text: "written" }],
-			}, { cwd: projectRoot });
-			expect(nextRun.content.map((part: any) => part.text ?? "").join("\n")).toContain("repo_knowledge: behavior changed?");
-		} finally {
-			process.env.PATH = previousPath;
-			rmSync(projectRoot, { recursive: true, force: true });
-		}
-	});
-
 	test("keeps top lines when the line limit is exceeded", () => {
 		const result = truncateOutput("one\ntwo\nthree", 2, 1_000);
 
