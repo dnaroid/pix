@@ -22,6 +22,7 @@ import type {
 import { PixAcpAgent } from "../src/acp/pix-acp-agent.js";
 import {
 	PIX_DEFER_MESSAGE_METHOD,
+	PIX_AGENT_CONTROL_METHOD,
 	PIX_GIT_ASSIST_METHOD,
 	PIX_QUEUE_ACTION_METHOD,
 	PIX_QUEUE_CONSUMED_METHOD,
@@ -34,6 +35,7 @@ import {
 	PIX_SESSION_IMAGE_METHOD,
 	PIX_TOOL_RESULT_METHOD,
 	type DesktopQueueStateResponse,
+	type DesktopAgentControlResponse,
 	type DesktopQueuedUserMessage,
 } from "../src/acp/desktop-commands.js";
 import { PIX_QUESTION_EDITOR_TITLE } from "../src/acp/ui-request-bridge.js";
@@ -119,12 +121,16 @@ class FakePiClient implements PiClient {
 	promptHandledWithoutRun = false;
 	stateError: Error | undefined;
 	aborts = 0;
+	pauses = 0;
+	continues = 0;
 	abortSettles = false;
 	started = false;
 	startError: Error | undefined;
 	startGate: Promise<void> | undefined;
 	readonly eventsOnStart: PiEvent[] = [];
 	promptHook: ((message: string) => void | Promise<void>) | undefined;
+	pauseHook: (() => void | Promise<void>) | undefined;
+	continueHook: (() => void | Promise<void>) | undefined;
 	treeState: { tree: PiSessionTreeNode[]; leafId: string | null } = { tree: [], leafId: null };
 	state: PiSessionState;
 	private listeners: PiEventListener[] = [];
@@ -182,6 +188,16 @@ class FakePiClient implements PiClient {
 		this.promptCalls.push({ message, images });
 		await this.promptHook?.(message);
 		if (!this.promptHandledWithoutRun) this.state = { ...this.state, isStreaming: true };
+	}
+
+	async pause(): Promise<void> {
+		this.pauses += 1;
+		await this.pauseHook?.();
+	}
+
+	async continue(): Promise<void> {
+		this.continues += 1;
+		await this.continueHook?.();
 	}
 
 	async steer(message: string): Promise<void> {
@@ -1101,6 +1117,117 @@ test("session/prompt streams chunks and resolves end_turn when pi settles", asyn
 	assert.deepEqual(chunks[0].content, { type: "text", text: "Hi " });
 	assert.equal(chunks[1].sessionUpdate, "agent_message_chunk");
 	assert.deepEqual(chunks[1].content, { type: "text", text: "there" });
+});
+
+test("Pix Desktop pause stops at the turn boundary and exposes a paused continuation", async () => {
+	const { adapter, clients } = createTestAdapter();
+	const states: DesktopAgentControlResponse[] = [];
+	await connect(
+		adapter,
+		async (cx) => {
+			const session = await cx.buildSession("/tmp/pause-control").start();
+			const pi = clients[0]!;
+			const pending = session.prompt("keep working");
+			await waitFor(() => pi.promptCalls.length === 1);
+			pi.emit({ type: "agent_start" });
+
+			const pause = await cx.request(PIX_AGENT_CONTROL_METHOD, {
+				sessionId: session.sessionId,
+				action: "pause",
+			}) as DesktopAgentControlResponse;
+			assert.equal(pause.state, "pause-requested");
+			assert.equal(pi.pauses, 1);
+
+			FakePiClient.sessionFiles.set(pi.state.sessionFile!, [
+				{ role: "user", content: "keep working" },
+				{ role: "toolResult", content: [] },
+			]);
+			pi.emit({
+				type: "agent_end",
+				messages: [{ role: "assistant", content: [], stopReason: "stop" }],
+				willRetry: false,
+			} as unknown as JsonAgentSessionEvent);
+			pi.emit({ type: "agent_settled" });
+			await pending;
+
+			await waitFor(() => states.some((state) => state.state === "paused"));
+			const current = await cx.request(PIX_AGENT_CONTROL_METHOD, {
+				sessionId: session.sessionId,
+				action: "state",
+			}) as DesktopAgentControlResponse;
+			assert.equal(current.state, "paused");
+		},
+		(app) => {
+			const customNotifications = app as unknown as {
+				onNotification(
+					method: string,
+					parser: (params: unknown) => { sessionId: string; channel: string; data: unknown },
+					handler: (ctx: { params: { sessionId: string; channel: string; data: unknown } }) => void,
+				): void;
+			};
+			customNotifications.onNotification(
+				PIX_SESSION_STATE_METHOD,
+				(params) => params as { sessionId: string; channel: string; data: unknown },
+				(ctx) => {
+					if (ctx.params.channel !== "agent-control") return;
+					const data = ctx.params.data as { state?: DesktopAgentControlResponse["state"] };
+					if (data.state) states.push({ sessionId: ctx.params.sessionId, state: data.state });
+				},
+			);
+		},
+	);
+
+	assert.deepEqual(states.map((state) => state.state), ["pause-requested", "paused"]);
+});
+
+test("Pix Desktop exposes generic resumable stops and continues without a user prompt", async () => {
+	const { adapter, clients } = createTestAdapter();
+	await connect(adapter, async (cx) => {
+		const session = await cx.buildSession("/tmp/continue-control").start();
+		const pi = clients[0]!;
+		const pending = session.prompt("use more tools");
+		await waitFor(() => pi.promptCalls.length === 1);
+		pi.emit({ type: "agent_start" });
+		FakePiClient.sessionFiles.set(pi.state.sessionFile!, [
+			{ role: "user", content: "use more tools" },
+			{ role: "toolResult", content: [] },
+		]);
+		pi.emit({
+			type: "agent_end",
+			messages: [{ role: "assistant", content: [], stopReason: "stop" }],
+			willRetry: false,
+		} as unknown as JsonAgentSessionEvent);
+		pi.emit({ type: "agent_settled" });
+		await pending;
+
+		const stopped = await cx.request(PIX_AGENT_CONTROL_METHOD, {
+			sessionId: session.sessionId,
+			action: "state",
+		}) as DesktopAgentControlResponse;
+		assert.equal(stopped.state, "continuable");
+
+		pi.continueHook = () => {
+			pi.emit({ type: "agent_start" });
+			FakePiClient.sessionFiles.set(pi.state.sessionFile!, [
+				{ role: "user", content: "use more tools" },
+				{ role: "assistant", content: [] },
+			]);
+			pi.emit({
+				type: "agent_end",
+				messages: [{ role: "assistant", content: [], stopReason: "stop" }],
+				willRetry: false,
+			} as unknown as JsonAgentSessionEvent);
+			pi.emit({ type: "agent_settled" });
+		};
+
+		const resumed = await cx.request(PIX_AGENT_CONTROL_METHOD, {
+			sessionId: session.sessionId,
+			action: "continue",
+		}) as DesktopAgentControlResponse;
+		assert.equal(resumed.state, "idle");
+		assert.equal(pi.continues, 1);
+		assert.deepEqual(pi.promptCalls, [{ message: "use more tools", images: undefined }]);
+	});
 });
 
 test("session/prompt fails fast when the pi process dies mid-run", async () => {

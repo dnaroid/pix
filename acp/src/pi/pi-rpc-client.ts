@@ -16,6 +16,9 @@ import {
 	type RpcExtensionUIResponse,
 } from "@earendil-works/pi-coding-agent";
 
+const PIX_PAUSE_MESSAGE = "\u0000pix:agent-control:pause";
+const PIX_CONTINUE_MESSAGE = "\u0000pix:agent-control:continue";
+
 /**
  * Image attachment passed through to `pi` RPC prompt/steer/follow_up.
  *
@@ -159,6 +162,10 @@ export interface PiClient {
 	 */
 	onExit(listener: (error: Error) => void): () => void;
 	prompt(message: string, images?: PiImageContent[]): Promise<void>;
+	/** Request a graceful stop at the next agent turn boundary. */
+	pause(): Promise<void>;
+	/** Continue an idle agent whose transcript ends at a resumable boundary. */
+	continue(): Promise<void>;
 	steer(message: string, images?: PiImageContent[]): Promise<void>;
 	followUp(message: string, images?: PiImageContent[]): Promise<void>;
 	clearQueue(): Promise<{ steering: string[]; followUp: string[] }>;
@@ -290,6 +297,14 @@ export class PiRpcClient implements PiClient {
 
 	prompt(message: string, images?: PiImageContent[]): Promise<void> {
 		return this.requireClient().prompt(message, images);
+	}
+
+	pause(): Promise<void> {
+		return this.requireClient().prompt(PIX_PAUSE_MESSAGE);
+	}
+
+	continue(): Promise<void> {
+		return this.requireClient().prompt(PIX_CONTINUE_MESSAGE);
 	}
 
 	steer(message: string, images?: PiImageContent[]): Promise<void> {

@@ -21,9 +21,22 @@ export const PIX_REGISTRY_ACTION_METHOD = "pix/registry/action";
 export const PIX_GIT_ASSIST_METHOD = "pix/git/assist";
 export const PIX_BRANCH_USER_MESSAGES_METHOD = "pix/session/branch_user_messages";
 export const PIX_USER_MESSAGE_ACTION_METHOD = "pix/session/user_message_action";
+export const PIX_AGENT_CONTROL_METHOD = "pix/session/agent_control";
 
 export interface DesktopSessionRequest {
 	readonly sessionId: string;
+}
+
+export type DesktopAgentControlAction = "state" | "pause" | "continue";
+export type DesktopAgentControlState = "idle" | "pause-requested" | "paused" | "resuming" | "continuable";
+
+export interface DesktopAgentControlRequest extends DesktopSessionRequest {
+	readonly action: DesktopAgentControlAction;
+}
+
+export interface DesktopAgentControlResponse {
+	readonly sessionId: string;
+	readonly state: DesktopAgentControlState;
 }
 
 export interface DesktopSessionHistoryRequest extends DesktopSessionRequest {
@@ -186,6 +199,14 @@ export function parseDesktopSessionRequest(value: unknown): DesktopSessionReques
 		throw new RequestError(ERROR_INVALID_PARAMS, "request requires a non-empty string sessionId field");
 	}
 	return { sessionId: value.sessionId };
+}
+
+export function parseDesktopAgentControlRequest(value: unknown): DesktopAgentControlRequest {
+	const session = parseDesktopSessionRequest(value);
+	if (!isRecord(value) || (value.action !== "state" && value.action !== "pause" && value.action !== "continue")) {
+		throw new RequestError(ERROR_INVALID_PARAMS, "agent control request requires action state, pause, or continue");
+	}
+	return { ...session, action: value.action };
 }
 
 export function parseDesktopSessionHistoryRequest(value: unknown): DesktopSessionHistoryRequest {

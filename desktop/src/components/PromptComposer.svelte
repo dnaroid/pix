@@ -8,6 +8,7 @@
   import Mic from "@lucide/svelte/icons/mic";
   import Paperclip from "@lucide/svelte/icons/paperclip";
   import Pause from "@lucide/svelte/icons/pause";
+  import Play from "@lucide/svelte/icons/play";
   import Square from "@lucide/svelte/icons/square";
   import WandSparkles from "@lucide/svelte/icons/wand-sparkles";
   import X from "@lucide/svelte/icons/x";
@@ -15,6 +16,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import type { AvailableCommand } from "@agentclientprotocol/sdk";
   import type { Attachment } from "../lib/attachments";
+  import type { AgentControlState } from "../lib/agent-control";
   import {
     advanceQuestionnaire,
     chooseCustomAnswer,
@@ -67,6 +69,7 @@
     activeSessionId,
     ready,
     promptRunning,
+    agentControlState = "idle",
     dragActive,
     autocompleteEnabled,
     autocompleteDebounceMs,
@@ -76,6 +79,8 @@
     onSubmit,
     onDefer,
     onCreateTask,
+    onPause = () => {},
+    onContinue = () => {},
     onCancel,
     onChooseAttachments,
     onPasteAttachments,
@@ -91,6 +96,7 @@
     activeSessionId: string | null;
     ready: boolean;
     promptRunning: boolean;
+    agentControlState?: AgentControlState;
     dragActive: boolean;
     autocompleteEnabled: boolean;
     autocompleteDebounceMs: number;
@@ -100,6 +106,8 @@
     onSubmit: () => void | Promise<void>;
     onDefer: () => void | Promise<void>;
     onCreateTask?: () => void | Promise<void>;
+    onPause?: () => void | Promise<void>;
+    onContinue?: () => void | Promise<void>;
     onCancel: () => void | Promise<void>;
     onChooseAttachments: () => void | Promise<void>;
     onPasteAttachments: (files: readonly File[]) => void | Promise<void>;
@@ -1195,6 +1203,16 @@
         {/if}
         {#if promptRunning && !editorMode && !questionMode}
           <button
+            class="grid h-6 w-6 shrink-0 place-items-center rounded-md border border-border bg-transparent text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+            type="button"
+            aria-label={agentControlState === "pause-requested" ? "Pause requested" : "Pause after current turn"}
+            title={agentControlState === "pause-requested" ? "Pause requested" : "Pause after current turn"}
+            disabled={agentControlState === "pause-requested" || agentControlState === "resuming"}
+            onclick={onPause}
+          >
+            <Pause class="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+          <button
             class="grid h-6 w-6 shrink-0 place-items-center rounded-md border border-border bg-transparent text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
             type="button"
             aria-label="Stop response"
@@ -1202,6 +1220,16 @@
             onclick={onCancel}
           >
             <Square class="h-3 w-3 fill-current" aria-hidden="true" />
+          </button>
+        {:else if !editorMode && !questionMode && (agentControlState === "paused" || agentControlState === "continuable")}
+          <button
+            class="grid h-6 w-6 shrink-0 place-items-center rounded-md border border-border bg-transparent text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            type="button"
+            aria-label="Continue response"
+            title="Continue response"
+            onclick={onContinue}
+          >
+            <Play class="h-3.5 w-3.5 fill-current" aria-hidden="true" />
           </button>
         {/if}
       </div>

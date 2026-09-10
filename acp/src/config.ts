@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
 import { parseLogLevel, type LogLevel } from "./logging.js";
 
 export function defaultPiEntryPath(): string {
-	return fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent/rpc-entry"));
+	return fileURLToPath(new URL("./pi/pix-rpc-entry.js", import.meta.url));
 }
 
 export function defaultSessionMapPath(): string {

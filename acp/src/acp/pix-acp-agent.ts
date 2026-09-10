@@ -95,6 +95,7 @@ import {
 import { applyConfigOption, buildConfigOptions, CONFIG_ID_MODEL, parseModelValue } from "./config-options.js";
 import {
 	PIX_ENHANCE_PROMPT_METHOD,
+	PIX_AGENT_CONTROL_METHOD,
 	PIX_BRANCH_USER_MESSAGES_METHOD,
 	PIX_GIT_ASSIST_METHOD,
 	PIX_DEFER_MESSAGE_METHOD,
@@ -114,6 +115,7 @@ import {
 	PIX_TOOL_RESULT_METHOD,
 	PIX_USER_MESSAGE_ACTION_METHOD,
 	parseDesktopEnhancePromptRequest,
+	parseDesktopAgentControlRequest,
 	parseDesktopGitAssistantRequest,
 	parseDesktopImportSessionRequest,
 	parseDesktopQueueActionRequest,
@@ -127,6 +129,9 @@ import {
 	parseDesktopUserMessageActionRequest,
 	type DesktopEnhancePromptRequest,
 	type DesktopEnhancePromptResponse,
+	type DesktopAgentControlRequest,
+	type DesktopAgentControlResponse,
+	type DesktopAgentControlState,
 	type DesktopGitAssistantRequest,
 	type DesktopGitAssistantResponse,
 	type DesktopImportSessionRequest,
@@ -253,6 +258,7 @@ interface AgentSessionState {
 	readonly client: ClientCaller;
 	readonly translator: EventTranslator;
 	activeRun: ActiveRun | undefined;
+	agentControlState: DesktopAgentControlState;
 	builtinRunning: boolean;
 	queueSessionPath: string | undefined;
 	queueRevision: number;
@@ -415,6 +421,9 @@ export class PixAcpAgent {
 			.onRequest("session/set_config_option", (ctx) => this.setConfigOption(ctx.params))
 			.onRequest("session/set_mode", () => ({}))
 			.onRequest("session/prompt", (ctx) => this.prompt(ctx.params))
+			.onRequest(PIX_AGENT_CONTROL_METHOD, parseDesktopAgentControlRequest, (ctx) =>
+				this.desktopAgentControl(ctx.params),
+			)
 			.onRequest("pix/autocomplete", parseAutocompleteRequest, (ctx) =>
 				this.autocomplete(ctx.params, ctx.signal),
 			)
@@ -1040,6 +1049,7 @@ export class PixAcpAgent {
 			throw new RequestError(ERROR_SERVER, "session switch cancelled by an extension");
 		}
 		await this.syncSessionRecord(session);
+		await this.refreshAgentControlState(session);
 		const configOptions = await this.safeConfigOptions(session.pi);
 		this.scheduleAvailableCommands(session);
 		return configOptions ? { configOptions } : {};
@@ -1086,6 +1096,7 @@ export class PixAcpAgent {
 		}
 
 		await this.syncSessionRecord(session);
+		await this.refreshAgentControlState(session);
 		const configOptions = await this.safeConfigOptions(session.pi);
 		this.scheduleAvailableCommands(session);
 		return configOptions ? { configOptions } : {};
@@ -1211,6 +1222,7 @@ export class PixAcpAgent {
 			);
 		}
 		await this.syncSessionRecord(session);
+		await this.refreshAgentControlState(session);
 
 		const configOptions = await this.safeConfigOptions(session.pi);
 		this.scheduleAvailableCommands(session);
@@ -1393,6 +1405,7 @@ export class PixAcpAgent {
 			client,
 			translator,
 			activeRun: undefined,
+			agentControlState: "idle",
 			builtinRunning: false,
 			queueSessionPath: undefined,
 			queueRevision: 0,
@@ -1697,6 +1710,9 @@ export class PixAcpAgent {
 		switch (event.type) {
 			case "agent_start":
 				run.started = true;
+				if (session.agentControlState === "resuming") {
+					void this.setAgentControlState(session, "idle");
+				}
 				return;
 			case "agent_end":
 				if (!event.willRetry) run.stopReason = stopReasonFromAgentEnd(event);
@@ -1709,18 +1725,138 @@ export class PixAcpAgent {
 					const queues = session.sdkQueueRestoreAfterInterrupt;
 					session.sdkQueueRestoreAfterInterrupt = undefined;
 					void this.restoreSdkQueues(session, queues)
-						.then(() => this.resolveActiveRun(session, run.cancelled ? "cancelled" : (run.stopReason ?? "end_turn")))
+						.then(() => this.finishActiveRun(session, run))
 						.catch((error: unknown) => this.rejectActiveRun(
 							session,
 							error instanceof Error ? error : new Error(stringifyUnknown(error)),
 						));
 					return;
 				}
-				this.resolveActiveRun(session, run.cancelled ? "cancelled" : (run.stopReason ?? "end_turn"));
+				this.finishActiveRun(session, run);
 				return;
 			default:
 				return;
 		}
+	}
+
+	private async desktopAgentControl(params: DesktopAgentControlRequest): Promise<DesktopAgentControlResponse> {
+		const session = this.sessions.get(params.sessionId);
+		if (!session) throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
+
+		if (params.action === "state") {
+			if (!session.activeRun) {
+				await this.refreshAgentControlState(
+					session,
+					session.agentControlState === "paused" ? "paused" : undefined,
+				);
+			}
+			return { sessionId: session.acpSessionId, state: session.agentControlState };
+		}
+
+		if (params.action === "pause") {
+			if (!session.activeRun || session.activeRun.cancelled || session.builtinRunning) {
+				throw new RequestError(ERROR_SERVER, "agent pause is only available while the agent is running");
+			}
+			if (session.agentControlState === "pause-requested") {
+				return { sessionId: session.acpSessionId, state: session.agentControlState };
+			}
+			await this.setAgentControlState(session, "pause-requested");
+			try {
+				await session.pi.pause();
+			} catch (error) {
+				if (this.sessions.get(session.acpSessionId) === session && session.activeRun) {
+					await this.setAgentControlState(session, "idle");
+				}
+				throw new RequestError(ERROR_SERVER, `pi pause failed: ${stringifyUnknown(error)}`);
+			}
+			return { sessionId: session.acpSessionId, state: session.agentControlState };
+		}
+
+		if (session.activeRun || session.builtinRunning) {
+			throw new RequestError(ERROR_SERVER, "agent continuation is unavailable while the session is running");
+		}
+		const current = await this.refreshAgentControlState(
+			session,
+			session.agentControlState === "paused" ? "paused" : "continuable",
+		);
+		if (current !== "paused" && current !== "continuable") {
+			throw new RequestError(ERROR_SERVER, "agent has no continuable turn");
+		}
+
+		await this.setAgentControlState(session, "resuming");
+		const run: ActiveRun = {
+			cancelled: false,
+			// Keep the normal agent_start guard so a late duplicate settlement from
+			// the prior paused/limited run cannot resolve this continuation.
+			started: false,
+			stopReason: undefined,
+			resolve: () => {},
+			reject: () => {},
+		};
+		session.activeRun = run;
+		const settled = new Promise<StopReason>((resolve, reject) => {
+			run.resolve = resolve;
+			run.reject = reject;
+		});
+		try {
+			await session.pi.continue();
+		} catch (error) {
+			if (session.activeRun === run) session.activeRun = undefined;
+			await this.refreshAgentControlState(session, current).catch(() => {});
+			throw new RequestError(ERROR_SERVER, `pi continuation failed: ${stringifyUnknown(error)}`);
+		}
+
+		try {
+			await settled;
+		} catch (error) {
+			throw new RequestError(ERROR_SERVER, `pi process died: ${stringifyUnknown(error)}`);
+		}
+		await this.syncLiveSessionRecord(session);
+		const state = await this.refreshAgentControlState(session);
+		return { sessionId: session.acpSessionId, state };
+	}
+
+	private async setAgentControlState(session: AgentSessionState, state: DesktopAgentControlState): Promise<void> {
+		if (this.sessions.get(session.acpSessionId) !== session || session.agentControlState === state) return;
+		session.agentControlState = state;
+		await session.client.notify(PIX_SESSION_STATE_METHOD, {
+			sessionId: session.acpSessionId,
+			channel: "agent-control",
+			data: { state },
+		}).catch((error: unknown) => {
+			this.options.logger.warn(`${PIX_SESSION_STATE_METHOD} agent-control failed: ${stringifyUnknown(error)}`);
+		});
+	}
+
+	private async refreshAgentControlState(
+		session: AgentSessionState,
+		preferred?: "paused" | "continuable",
+	): Promise<DesktopAgentControlState> {
+		if (this.sessions.get(session.acpSessionId) !== session || session.activeRun) return session.agentControlState;
+		const [messages, piState] = await Promise.all([session.pi.getMessages(), session.pi.getState()]);
+		if (this.sessions.get(session.acpSessionId) !== session || session.activeRun) return session.agentControlState;
+		const lastMessage = messages[messages.length - 1];
+		const canContinue = Boolean(lastMessage && lastMessage.role !== "assistant")
+			|| (piState.pendingMessageCount ?? 0) > 0;
+		const next = canContinue
+			? (preferred ?? (session.agentControlState === "paused" ? "paused" : "continuable"))
+			: "idle";
+		await this.setAgentControlState(session, next);
+		return next;
+	}
+
+	private finishActiveRun(session: AgentSessionState, run: ActiveRun): void {
+		if (session.activeRun !== run) return;
+		const pauseRequested = session.agentControlState === "pause-requested";
+		const cancelled = run.cancelled;
+		this.resolveActiveRun(session, cancelled ? "cancelled" : (run.stopReason ?? "end_turn"));
+		if (cancelled) {
+			void this.setAgentControlState(session, "idle");
+			return;
+		}
+		void this.refreshAgentControlState(session, pauseRequested ? "paused" : undefined).catch((error: unknown) => {
+			this.options.logger.warn(`agent control state refresh failed: ${stringifyUnknown(error)}`);
+		});
 	}
 
 	private async prompt(params: PromptRequest): Promise<PromptResponse> {
@@ -1783,6 +1919,7 @@ export class PixAcpAgent {
 			resolve: () => {},
 			reject: () => {},
 		};
+		void this.setAgentControlState(session, "idle");
 		session.activeRun = run;
 		const settled = new Promise<StopReason>((resolve, reject) => {
 			run.resolve = resolve;
@@ -2251,6 +2388,7 @@ export class PixAcpAgent {
 		const session = this.sessions.get(sessionId);
 		if (!session) return;
 		if (session.activeRun) session.activeRun.cancelled = true;
+		void this.setAgentControlState(session, "idle");
 		this.options.logger.debug(`session/cancel for ${sessionId}`);
 		void session.pi.abort().catch((error: unknown) => {
 			this.options.logger.warn(`pi abort failed: ${stringifyUnknown(error)}`);

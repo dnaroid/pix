@@ -5,6 +5,7 @@
 		"moduleResolution": "NodeNext",
 		"rootDir": "src",
 		"outDir": "dist",
+		"allowJs": true,
 		"strict": true,
 		"declaration": true,
 		"noUncheckedIndexedAccess": true,
@@ -12,5 +13,5 @@
 		"skipLibCheck": true,
 		"types": ["node"]
 	},
-	"include": ["src/**/*.ts"]
+	"include": ["src/**/*.ts", "src/**/*.js"]
 }

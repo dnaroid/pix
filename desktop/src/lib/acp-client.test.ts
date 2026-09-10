@@ -142,6 +142,39 @@ describe("ACP JSON-RPC client", () => {
     await client.dispose();
   });
 
+  it("routes pause and continuation controls through the private ACP method", async () => {
+    const transport = new FakeTransport();
+    const client = await startedClient(transport);
+
+    const pausing = client.agentControl("session-1", "pause");
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+    expect(requestAt(transport, 1)).toMatchObject({
+      method: "pix/session/agent_control",
+      params: { sessionId: "session-1", action: "pause" },
+    });
+    transport.message({
+      jsonrpc: "2.0",
+      id: requestAt(transport, 1).id,
+      result: { sessionId: "session-1", state: "pause-requested" },
+    });
+    await expect(pausing).resolves.toEqual({ sessionId: "session-1", state: "pause-requested" });
+
+    const continuing = client.agentControl("session-1", "continue");
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(3));
+    expect(requestAt(transport, 2)).toMatchObject({
+      method: "pix/session/agent_control",
+      params: { sessionId: "session-1", action: "continue" },
+    });
+    transport.message({
+      jsonrpc: "2.0",
+      id: requestAt(transport, 2).id,
+      result: { sessionId: "session-1", state: "idle" },
+    });
+    await expect(continuing).resolves.toEqual({ sessionId: "session-1", state: "idle" });
+
+    await client.dispose();
+  });
+
   it("routes registry GUI actions through the private ACP registry method", async () => {
     const transport = new FakeTransport();
     const client = await startedClient(transport);

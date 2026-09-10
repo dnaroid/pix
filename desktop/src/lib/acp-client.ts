@@ -19,6 +19,7 @@ import {
   type SessionStateNotification,
 } from "./session-state";
 import type { RegistryActionRequest } from "./registry";
+import { isAgentControlState, type AgentControlAction, type AgentControlState } from "./agent-control";
 
 export interface AcpExit {
   readonly generation: number;
@@ -121,6 +122,11 @@ export interface QueueState {
 export interface LazySessionHistory {
   readonly updates: readonly SessionUpdate[];
   readonly deferredToolCallIds: readonly string[];
+}
+
+export interface AgentControlStatus {
+  readonly sessionId: string;
+  readonly state: AgentControlState;
 }
 
 type JsonRpcId = string | number;
@@ -270,6 +276,18 @@ export class AcpClient {
       }
       return { entryId: message.entryId, text: message.text };
     });
+  }
+
+  async agentControl(sessionId: string, action: AgentControlAction): Promise<AgentControlStatus> {
+    const response = await this.request<unknown>("pix/session/agent_control", { sessionId, action }, null);
+    if (
+      !isRecord(response)
+      || typeof response.sessionId !== "string"
+      || !isAgentControlState(response.state)
+    ) {
+      throw new Error("pix/session/agent_control returned an invalid response");
+    }
+    return { sessionId: response.sessionId, state: response.state };
   }
 
   async userMessageAction(

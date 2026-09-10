@@ -118,6 +118,10 @@
   import WorkspaceSidebar from "./components/WorkspaceSidebar.svelte";
   import type { SessionStateNotification } from "./lib/session-state";
   import {
+    agentControlStateFromSessionState,
+    type AgentControlState,
+  } from "./lib/agent-control";
+  import {
     registrySnapshotFromSessionState,
     type RegistryActionRequest,
     type RegistrySnapshot,
@@ -280,6 +284,7 @@
   let gitDiffReview = $state<string | undefined>(undefined);
   let slashCommandsBySession = $state<Map<string, AvailableCommand[]>>(new Map());
   let queueItemsBySession = $state<Map<string, QueueItem[]>>(new Map());
+  let agentControlStates = $state<Map<string, AgentControlState>>(new Map());
   let queueActionRunning = $state(false);
   let imagePromptSupported = false;
   let transcriptPane = $state<HTMLDivElement | null>(null);
@@ -327,6 +332,9 @@
 
   const canUseSession = $derived(status === "ready" && !!workspace && !operationRunning);
   const promptRunning = $derived(activeSessionId ? runningSessionIds.has(activeSessionId) : false);
+  const activeAgentControlState = $derived(
+    activeSessionId ? (agentControlStates.get(activeSessionId) ?? "idle") : "idle",
+  );
   const anyPromptRunning = $derived(runningSessionIds.size > 0);
   const activeTitle = $derived(
     sessions.find((session) => session.sessionId === activeSessionId)?.title ?? "New conversation",
@@ -514,6 +522,7 @@
         gitResolveRunning = false;
         slashCommandsBySession = new Map();
         queueItemsBySession = new Map();
+        agentControlStates = new Map();
         transcript = emptyTranscript;
         configOptions = [];
         status = exit.requested ? "stopped" : "error";
@@ -574,6 +583,7 @@
     gitResolveRunning = false;
     slashCommandsBySession = new Map();
     queueItemsBySession = new Map();
+    agentControlStates = new Map();
     transcript = emptyTranscript;
     configOptions = [];
     runningSessionIds = new Set();
@@ -677,6 +687,11 @@
   }
 
   function handleSessionState(notification: SessionStateNotification): void {
+    const agentControlState = agentControlStateFromSessionState(notification);
+    if (agentControlState) {
+      setLocalAgentControlState(notification.sessionId, agentControlState);
+      return;
+    }
     const nextRegistrySnapshot = registrySnapshotFromSessionState(notification);
     if (nextRegistrySnapshot) {
       const sourceSession = sessions.find((session) => session.sessionId === notification.sessionId);
@@ -768,6 +783,9 @@
     const nextQueue = new Map(queueItemsBySession);
     nextQueue.delete(sessionId);
     queueItemsBySession = nextQueue;
+    const nextAgentControls = new Map(agentControlStates);
+    nextAgentControls.delete(sessionId);
+    agentControlStates = nextAgentControls;
     promptRunsBySessionId.delete(sessionId);
     promptEndedAtBySessionId.delete(sessionId);
     autoFlushInProgress.delete(sessionId);
@@ -778,6 +796,12 @@
     if (running) next.add(sessionId);
     else next.delete(sessionId);
     runningSessionIds = next;
+  }
+
+  function setLocalAgentControlState(sessionId: string, state: AgentControlState): void {
+    const next = new Map(agentControlStates);
+    next.set(sessionId, state);
+    agentControlStates = next;
   }
 
   function finalizeSessionTranscriptActivity(sessionId: string, endedAtMs: number): void {
@@ -4017,6 +4041,72 @@
     }
   }
 
+  async function pauseAgent(): Promise<void> {
+    const requestClient = client;
+    const sessionId = activeSessionId;
+    if (
+      !requestClient
+      || !sessionId
+      || !activeSessionRuntimeReady
+      || !promptRunning
+      || activeAgentControlState === "pause-requested"
+      || activeAgentControlState === "resuming"
+    ) return;
+
+    errorMessage = null;
+    setLocalAgentControlState(sessionId, "pause-requested");
+    try {
+      const state = await requestClient.agentControl(sessionId, "pause");
+      if (requestClient === client && runtimeReadySessionIds.has(sessionId)) {
+        setLocalAgentControlState(sessionId, state.state);
+      }
+    } catch (error) {
+      if (requestClient === client && runtimeReadySessionIds.has(sessionId)) {
+        const state = await requestClient.agentControl(sessionId, "state").catch(() => undefined);
+        setLocalAgentControlState(sessionId, state?.state ?? "idle");
+        if (sessionId === activeSessionId) reportError(error);
+      }
+    }
+  }
+
+  async function continueAgent(): Promise<void> {
+    const requestClient = client;
+    const sessionId = activeSessionId;
+    if (
+      !requestClient
+      || !sessionId
+      || !activeSessionRuntimeReady
+      || operationRunning
+      || promptRunning
+      || (activeAgentControlState !== "paused" && activeAgentControlState !== "continuable")
+    ) return;
+
+    errorMessage = null;
+    promptEndedAtBySessionId.delete(sessionId);
+    setLocalAgentControlState(sessionId, "resuming");
+    setSessionPromptRunning(sessionId, true);
+    try {
+      const state = await requestClient.agentControl(sessionId, "continue");
+      if (requestClient === client && runtimeReadySessionIds.has(sessionId)) {
+        setLocalAgentControlState(sessionId, state.state);
+      }
+    } catch (error) {
+      if (requestClient === client && runtimeReadySessionIds.has(sessionId)) {
+        const state = await requestClient.agentControl(sessionId, "state").catch(() => undefined);
+        setLocalAgentControlState(sessionId, state?.state ?? "idle");
+        if (sessionId === activeSessionId) reportError(error);
+      }
+    } finally {
+      if (requestClient === client) {
+        const endedAtMs = Date.now();
+        promptEndedAtBySessionId.set(sessionId, endedAtMs);
+        setSessionPromptRunning(sessionId, false);
+        finalizeSessionTranscriptActivity(sessionId, endedAtMs);
+        queueMicrotask(() => void flushAutoQueue(sessionId));
+      }
+    }
+  }
+
   async function setConfig(option: SessionConfigOption, value: string | boolean): Promise<void> {
     const requestClient = client;
     const sessionId = activeSessionId;
@@ -4266,6 +4356,7 @@
           {activeSessionId}
           ready={status === "ready" && activeSessionRuntimeReady && !operationRunning && !sessionHistoryLoading}
           {promptRunning}
+          agentControlState={activeAgentControlState}
           {dragActive}
           {autocompleteEnabled}
           {autocompleteDebounceMs}
@@ -4275,6 +4366,8 @@
           onSubmit={submitPrompt}
           onDefer={deferCurrentDraft}
           onCreateTask={createProjectTaskFromComposer}
+          onPause={pauseAgent}
+          onContinue={continueAgent}
           onCancel={cancelPrompt}
           onChooseAttachments={chooseAttachments}
           onPasteAttachments={addPastedAttachments}
