@@ -15,7 +15,8 @@ export type DcpBlockedReason =
   | "summarizer-unavailable"
   | "non-positive-gain"
   | "missing-source"
-  | "budget-exhausted";
+  | "budget-exhausted"
+  | "auto-compress-failed";
 
 export interface DcpBlockedReasonInput {
   pressured: boolean;

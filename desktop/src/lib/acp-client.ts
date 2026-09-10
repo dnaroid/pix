@@ -66,6 +66,16 @@ export interface ForkSessionResult {
   readonly selectedText?: string;
 }
 
+export type UserMessageAction = "copy" | "undo";
+
+export interface UserMessageActionResult {
+  readonly status: "ok" | "warning" | "cancelled";
+  readonly editorText?: string;
+  readonly revertedChanges?: number;
+  readonly changedFiles?: number;
+  readonly warning?: string;
+}
+
 export interface LazySessionImage {
   readonly data: string;
   readonly mimeType: string;
@@ -247,6 +257,40 @@ export class AcpClient {
       messages.push({ entryId: message.entryId, text: message.text });
     }
     return messages;
+  }
+
+  async branchUserMessages(sessionId: string): Promise<ForkMessage[]> {
+    const response = await this.request<unknown>("pix/session/branch_user_messages", { sessionId }, null);
+    if (!isRecord(response) || !Array.isArray(response.messages)) {
+      throw new Error("pix/session/branch_user_messages returned an invalid response");
+    }
+    return response.messages.map((message) => {
+      if (!isRecord(message) || typeof message.entryId !== "string" || typeof message.text !== "string") {
+        throw new Error("pix/session/branch_user_messages returned an invalid response");
+      }
+      return { entryId: message.entryId, text: message.text };
+    });
+  }
+
+  async userMessageAction(
+    sessionId: string,
+    entryId: string,
+    action: UserMessageAction,
+  ): Promise<UserMessageActionResult> {
+    const response = await this.request<unknown>("pix/session/user_message_action", { sessionId, entryId, action }, null);
+    if (
+      !isRecord(response)
+      || (response.status !== "ok" && response.status !== "warning" && response.status !== "cancelled")
+    ) {
+      throw new Error("pix/session/user_message_action returned an invalid response");
+    }
+    return {
+      status: response.status,
+      ...(typeof response.editorText === "string" ? { editorText: response.editorText } : {}),
+      ...(typeof response.revertedChanges === "number" ? { revertedChanges: response.revertedChanges } : {}),
+      ...(typeof response.changedFiles === "number" ? { changedFiles: response.changedFiles } : {}),
+      ...(typeof response.warning === "string" ? { warning: response.warning } : {}),
+    };
   }
 
   async forkSession(sessionId: string, cwd: string, entryId: string): Promise<ForkSessionResult> {

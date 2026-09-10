@@ -9,6 +9,7 @@ import {
 	revertWorkspaceMutations,
 	saveWorkspaceUndoIndex,
 	workspaceMutationFromToolExecution,
+	WORKSPACE_MUTATION_ENTRY_TYPE,
 	workspaceUndoIndexKey,
 	type WorkspaceMutation,
 	type WorkspaceMutationFromToolInput,
@@ -58,7 +59,16 @@ export class AppWorkspaceActionsController {
 
 		entry.workspaceMutations = [...(entry.workspaceMutations ?? []), mutation];
 		const sessionEntryId = this.resolveUserSessionEntryId(entry);
-		if (sessionEntryId) this.persistWorkspaceMutations(sessionEntryId, entry.workspaceMutations);
+		if (sessionEntryId) {
+			this.persistWorkspaceMutations(sessionEntryId, entry.workspaceMutations);
+			// Also persist each new mutation in the session branch so Desktop and
+			// future renderers can perform the same message-scoped undo without
+			// relying on this process-wide compatibility index.
+			this.host.runtime()?.session.sessionManager.appendCustomEntry?.(WORKSPACE_MUTATION_ENTRY_TYPE, {
+				userEntryId: sessionEntryId,
+				mutation,
+			});
+		}
 		this.host.touchEntry(entry);
 	}
 

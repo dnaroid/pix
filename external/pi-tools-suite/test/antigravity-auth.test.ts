@@ -91,6 +91,37 @@ async function refreshViaRegisteredOAuth(agentDir: string, signal = new AbortCon
 	return await provider.oauth.refreshToken(auth.antigravity, signal);
 }
 
+function antigravityModelStub(id: string): any {
+	return {
+		id,
+		provider: "antigravity",
+		api: "antigravity-unified-gateway",
+		name: id,
+		baseUrl: "https://example.invalid",
+		input: ["text"],
+		maxTokens: 8192,
+		contextWindow: 1_000_000,
+		reasoning: true,
+		antigravityProjectId: "project-1",
+	};
+}
+
+async function buildAntigravityPayload(id: string, options?: any) {
+	const { buildPayload } = await import("../src/antigravity-auth/payload.js");
+	return buildPayload(antigravityModelStub(id), {
+		messages: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
+	} as any, options);
+}
+
+function payloadModel(payload: Record<string, unknown>): string {
+	return payload.model as string;
+}
+
+function payloadThinkingConfig(payload: Record<string, unknown>): Record<string, unknown> {
+	const request = payload.request as { generationConfig?: { thinkingConfig?: Record<string, unknown> } };
+	return request.generationConfig?.thinkingConfig ?? {};
+}
+
 afterEach(() => {
 	if (originalAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
 	else process.env.PI_CODING_AGENT_DIR = originalAgentDir;
@@ -353,5 +384,137 @@ describe.serial("Antigravity account rotation", () => {
 		expect(result.errorMessage).toContain("Antigravity request failed (503)");
 		expect(result.errorMessage).not.toContain("ANTIGRAVITY_ALL_ACCOUNTS_EXHAUSTED");
 		expect(streamRequests).toBe(2);
+	});
+});
+
+describe("Antigravity model catalog and live route mapping", () => {
+	test.serial("registers the current Pi-compatible Antigravity catalog without image-output models", async () => {
+		const { modelDefinitions } = await import("../src/antigravity-auth/models.js");
+		const ids = modelDefinitions.map((model: any) => model.id);
+
+		expect(ids).toEqual([
+			"antigravity-gemini-3.8-flash",
+			"antigravity-gemini-3.7-flash",
+			"antigravity-gemini-3.6-flash",
+			"antigravity-gemini-3.5-flash",
+			"antigravity-gemini-3.1-pro",
+			"antigravity-claude-sonnet-4-6-thinking",
+			"antigravity-claude-opus-4-6-thinking",
+			"antigravity-gpt-oss-120b-medium",
+			// Legacy Antigravity aliases plus the Gemini CLI mirror surface.
+			"antigravity-gemini-3-flash",
+			"antigravity-claude-sonnet-4-6",
+			"gemini-2.5-flash",
+			"gemini-3-flash-preview",
+			"gemini-3.1-pro-preview",
+			"gemini-3.1-pro-preview-customtools",
+		]);
+		expect(ids.some((id: string) => id.includes("image"))).toBeFalse();
+	});
+
+	test.serial("routes Gemini 3.5 Flash tiers to the legacy gemini-3 live routes", async () => {
+		const low = await buildAntigravityPayload("antigravity-gemini-3.5-flash", { reasoning: "low" });
+		expect(payloadModel(low)).toBe("gemini-3.5-flash-extra-low");
+		expect(payloadThinkingConfig(low)).toEqual({ thinkingBudget: 1000, includeThoughts: true });
+
+		const medium = await buildAntigravityPayload("antigravity-gemini-3.5-flash", { reasoning: "medium" });
+		expect(payloadModel(medium)).toBe("gemini-3.5-flash-low");
+		expect(payloadThinkingConfig(medium)).toEqual({ thinkingBudget: 4000, includeThoughts: true });
+
+		// Requests without an explicit level default to the medium tier.
+		const fallback = await buildAntigravityPayload("antigravity-gemini-3.5-flash");
+		expect(payloadModel(fallback)).toBe("gemini-3.5-flash-low");
+		expect(payloadThinkingConfig(fallback)).toEqual({ thinkingBudget: 4000, includeThoughts: true });
+
+		const high = await buildAntigravityPayload("antigravity-gemini-3.5-flash", { reasoning: "high" });
+		expect(payloadModel(high)).toBe("gemini-3-flash-agent");
+		expect(payloadThinkingConfig(high)).toEqual({ thinkingBudget: 10000, includeThoughts: true });
+	});
+
+	test.serial("routes Gemini 3.6 Flash tiers with fixed numeric budgets", async () => {
+		const low = await buildAntigravityPayload("antigravity-gemini-3.6-flash", { reasoning: "low" });
+		expect(payloadModel(low)).toBe("gemini-3.6-flash-low");
+		expect(payloadThinkingConfig(low)).toEqual({ thinkingBudget: 1000, includeThoughts: true });
+
+		const medium = await buildAntigravityPayload("antigravity-gemini-3.6-flash", { reasoning: "medium" });
+		expect(payloadModel(medium)).toBe("gemini-3.6-flash-medium");
+		expect(payloadThinkingConfig(medium)).toEqual({ thinkingBudget: 4000, includeThoughts: true });
+
+		const high = await buildAntigravityPayload("antigravity-gemini-3.6-flash", { reasoning: "high" });
+		expect(payloadModel(high)).toBe("gemini-3.6-flash-high");
+		expect(payloadThinkingConfig(high)).toEqual({ thinkingBudget: 10000, includeThoughts: true });
+	});
+
+	test.serial("routes Gemini 3.7 and 3.8 Flash tiers with the dynamic budget sentinel", async () => {
+		for (const version of ["3.7", "3.8"]) {
+			const low = await buildAntigravityPayload(`antigravity-gemini-${version}-flash`, { reasoning: "low" });
+			expect(payloadModel(low)).toBe(`gemini-${version}-flash-low`);
+			expect(payloadThinkingConfig(low)).toEqual({ thinkingBudget: -1, includeThoughts: true });
+
+			const medium = await buildAntigravityPayload(`antigravity-gemini-${version}-flash`);
+			expect(payloadModel(medium)).toBe(`gemini-${version}-flash-medium`);
+			expect(payloadThinkingConfig(medium)).toEqual({ thinkingBudget: -1, includeThoughts: true });
+
+			const high = await buildAntigravityPayload(`antigravity-gemini-${version}-flash`, { reasoning: "high" });
+			expect(payloadModel(high)).toBe(`gemini-${version}-flash-high`);
+			expect(payloadThinkingConfig(high)).toEqual({ thinkingBudget: -1, includeThoughts: true });
+		}
+	});
+
+	test.serial("routes Gemini 3.1 Pro to the low and agent-mode live routes with upstream budgets", async () => {
+		const low = await buildAntigravityPayload("antigravity-gemini-3.1-pro");
+		expect(payloadModel(low)).toBe("gemini-3.1-pro-low");
+		expect(payloadThinkingConfig(low)).toEqual({ thinkingBudget: 1001, includeThoughts: true });
+
+		const high = await buildAntigravityPayload("antigravity-gemini-3.1-pro", { reasoning: "high" });
+		expect(payloadModel(high)).toBe("gemini-pro-agent");
+		expect(payloadThinkingConfig(high)).toEqual({ thinkingBudget: 10001, includeThoughts: true });
+	});
+
+	test.serial("routes GPT-OSS 120B Medium without a thinking config", async () => {
+		const payload = await buildAntigravityPayload("antigravity-gpt-oss-120b-medium", { reasoning: "high" });
+		expect(payloadModel(payload)).toBe("gpt-oss-120b-medium");
+		expect(payloadThinkingConfig(payload)).toEqual({});
+	});
+
+	test.serial("routes Sonnet 4.6 Thinking through the base claude-sonnet-4-6 model", async () => {
+		const { extraHeadersForPayload } = await import("../src/antigravity-auth/payload.js");
+		const payload = await buildAntigravityPayload("antigravity-claude-sonnet-4-6-thinking", { reasoning: "medium" });
+		expect(payloadModel(payload)).toBe("claude-sonnet-4-6");
+		expect(payloadThinkingConfig(payload)).toEqual({ thinking_budget: 16384, include_thoughts: true });
+		expect(extraHeadersForPayload(payload)).toEqual({ "anthropic-beta": "interleaved-thinking-2025-05-14" });
+	});
+
+	test.serial("keeps the dedicated Opus thinking route and legacy Antigravity routes", async () => {
+		const { extraHeadersForPayload } = await import("../src/antigravity-auth/payload.js");
+
+		const opus = await buildAntigravityPayload("antigravity-claude-opus-4-6-thinking", { reasoning: "low" });
+		expect(payloadModel(opus)).toBe("claude-opus-4-6-thinking");
+		expect(payloadThinkingConfig(opus)).toEqual({ thinking_budget: 8192, include_thoughts: true });
+		expect(extraHeadersForPayload(opus)).toEqual({ "anthropic-beta": "interleaved-thinking-2025-05-14" });
+
+		const legacyFlash = await buildAntigravityPayload("antigravity-gemini-3-flash", { reasoning: "medium" });
+		expect(payloadModel(legacyFlash)).toBe("gemini-3-flash");
+		expect(payloadThinkingConfig(legacyFlash)).toEqual({ thinkingLevel: "medium", includeThoughts: true });
+
+		const legacySonnet = await buildAntigravityPayload("antigravity-claude-sonnet-4-6", { reasoning: "high" });
+		expect(payloadModel(legacySonnet)).toBe("claude-sonnet-4-6");
+		expect(payloadThinkingConfig(legacySonnet)).toEqual({});
+
+		// Gemini CLI mirror models keep the preview-suffix routing and string
+		// thinking levels for the flash family.
+		const cliFlash = await buildAntigravityPayload("gemini-3-flash-preview", { reasoning: "high" });
+		expect(payloadModel(cliFlash)).toBe("gemini-3-flash");
+		expect(payloadThinkingConfig(cliFlash)).toEqual({ thinkingLevel: "high", includeThoughts: true });
+
+		// The CLI 3.1 Pro preview shares the 3.1 Pro family, so it now gets the
+		// upstream numeric routes too (previously high was force-clamped to the
+		// low route because gemini-3.1-pro-high was rejected live).
+		const cliProLow = await buildAntigravityPayload("gemini-3.1-pro-preview");
+		expect(payloadModel(cliProLow)).toBe("gemini-3.1-pro-low");
+		expect(payloadThinkingConfig(cliProLow)).toEqual({ thinkingBudget: 1001, includeThoughts: true });
+		const cliProHigh = await buildAntigravityPayload("gemini-3.1-pro-preview", { reasoning: "high" });
+		expect(payloadModel(cliProHigh)).toBe("gemini-pro-agent");
+		expect(payloadThinkingConfig(cliProHigh)).toEqual({ thinkingBudget: 10001, includeThoughts: true });
 	});
 });

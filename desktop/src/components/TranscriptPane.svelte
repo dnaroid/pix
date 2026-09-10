@@ -2,6 +2,7 @@
   import ArrowDown from "@lucide/svelte/icons/arrow-down";
   import Brain from "@lucide/svelte/icons/brain";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import EllipsisVertical from "@lucide/svelte/icons/ellipsis-vertical";
   import type { Attachment } from "../lib/attachments";
   import type { ProjectFileLineRange } from "../lib/project-files";
   import { toolGroupPresentationNames, toolPresentation } from "../lib/tool-presentation";
@@ -10,6 +11,7 @@
     formatTranscriptDuration,
     groupTranscriptItems,
     type ToolItem,
+    type MessageItem,
     type TranscriptDisplayItem,
     type TranscriptState,
   } from "../lib/transcript";
@@ -40,6 +42,7 @@
     onOpenLocalFile,
     onResolveLocalMedia,
     onLoadToolResult,
+    onUserMessageAction,
   }: {
     transcript: TranscriptState;
     activeSessionId: string | null;
@@ -62,9 +65,16 @@
     onOpenLocalFile: (path: string) => void | Promise<void>;
     onResolveLocalMedia: (path: string) => Promise<Attachment | undefined>;
     onLoadToolResult: (toolCallId: string) => void;
+    onUserMessageAction: (message: MessageItem, action: UserMessageAction) => void | Promise<void>;
   } = $props();
 
   let displayItems = $derived(groupTranscriptItems(transcript.items));
+  let activeUserMessageMenu = $state<string | null>(null);
+  let canMutateUserMessages = $derived(
+    !!activeSessionId && !promptRunning && !operationRunning && !historyLoading,
+  );
+
+  type UserMessageAction = "copy" | "fork" | "fork-new-tab" | "undo";
 
   function handleToolResultToggle(event: Event, tool: ToolItem): void {
     const details = event.currentTarget as HTMLDetailsElement;
@@ -100,7 +110,39 @@
   function toolGroupNames(tools: readonly ToolItem[]): string {
     return toolGroupPresentationNames(tools);
   }
+
+  function toggleUserMessageMenu(event: MouseEvent, messageId: string): void {
+    event.preventDefault();
+    event.stopPropagation();
+    activeUserMessageMenu = activeUserMessageMenu === messageId ? null : messageId;
+  }
+
+  function openUserMessageContextMenu(event: MouseEvent, messageId: string): void {
+    event.preventDefault();
+    event.stopPropagation();
+    activeUserMessageMenu = messageId;
+  }
+
+  function handleWindowClick(event: MouseEvent): void {
+    if (!activeUserMessageMenu) return;
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target?.closest("[data-user-message-actions]")) activeUserMessageMenu = null;
+  }
+
+  function handleWindowKeydown(event: KeyboardEvent): void {
+    if (event.key !== "Escape" || !activeUserMessageMenu) return;
+    event.preventDefault();
+    activeUserMessageMenu = null;
+  }
+
+  async function runUserMessageAction(message: MessageItem, action: UserMessageAction): Promise<void> {
+    if (action !== "copy" && !canMutateUserMessages) return;
+    activeUserMessageMenu = null;
+    await onUserMessageAction(message, action);
+  }
 </script>
+
+<svelte:window onclick={handleWindowClick} onkeydown={handleWindowKeydown} />
 
 <div class="relative row-start-2 min-h-0 min-w-0">
   <div class="transcript-pane h-full min-h-0 overflow-auto" bind:this={pane} aria-live="polite" onscroll={onScroll}>
@@ -153,11 +195,49 @@
               </div>
             </details>
           {:else if item.role === "user"}
-            <div class={["transcript-entry", gapClass]} data-transcript-entry-id={item.id}>
-              <article class="w-full rounded-lg border border-chat-user-border bg-chat-user px-3.5 pt-3 pb-2 text-foreground">
+            <div
+              class={["transcript-entry group/user-message relative", gapClass]}
+              data-transcript-entry-id={item.id}
+              data-user-message-actions
+            >
+              <article
+                class="w-full rounded-lg border border-chat-user-border bg-chat-user px-3.5 pt-3 pb-2 text-foreground"
+                oncontextmenu={(event) => openUserMessageContextMenu(event, item.id)}
+              >
                 <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} onPrepare={onPrepareAttachment} />
                 {#if item.text}<MarkdownText text={item.text} dense fitTables {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />{/if}
               </article>
+              <button
+                type="button"
+                class="absolute top-2 right-2 grid h-7 w-7 place-items-center rounded-md border border-border/70 bg-panel-strong/95 text-muted-foreground opacity-0 shadow-sm transition-opacity hover:bg-panel-hover hover:text-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring group-hover/user-message:opacity-100"
+                aria-label="Message actions"
+                aria-haspopup="menu"
+                aria-expanded={activeUserMessageMenu === item.id}
+                onclick={(event) => toggleUserMessageMenu(event, item.id)}
+              >
+                <EllipsisVertical class="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+              {#if activeUserMessageMenu === item.id}
+                <div
+                  class="absolute top-9 right-2 z-50 w-48 overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
+                  role="menu"
+                  tabindex="-1"
+                  aria-label="Message actions"
+                  data-user-message-actions
+                >
+                  <button class="message-action-item" type="button" role="menuitem" onclick={() => void runUserMessageAction(item, "copy")}>Copy message</button>
+                  <button class="message-action-item" type="button" role="menuitem" disabled={!canMutateUserMessages || item.localOnly} onclick={() => void runUserMessageAction(item, "fork")}>Fork</button>
+                  <button class="message-action-item" type="button" role="menuitem" disabled={!canMutateUserMessages || item.localOnly} onclick={() => void runUserMessageAction(item, "fork-new-tab")}>Fork in new tab</button>
+                  <div class="my-1 h-px bg-border" role="separator"></div>
+                  <button
+                    class="message-action-item danger"
+                    type="button"
+                    role="menuitem"
+                    disabled={!canMutateUserMessages || item.localOnly}
+                    onclick={() => void runUserMessageAction(item, "undo")}
+                  >Undo changes</button>
+                </div>
+              {/if}
             </div>
           {:else if item.role === "system"}
             <article class={["transcript-entry w-full min-w-0 font-mono text-xs text-muted-foreground", gapClass]} data-transcript-entry-id={item.id}>
@@ -256,6 +336,25 @@
     content-visibility: auto;
     contain-intrinsic-size: auto 120px;
   }
+
+  .message-action-item {
+    display: flex;
+    width: 100%;
+    height: 2rem;
+    cursor: pointer;
+    align-items: center;
+    border-radius: 0.125rem;
+    padding: 0 0.5rem;
+    text-align: left;
+    font-size: 0.75rem;
+    color: var(--foreground);
+  }
+
+  .message-action-item:hover { background: var(--accent); }
+  .message-action-item.danger { color: var(--destructive); }
+  .message-action-item.danger:hover { background: color-mix(in srgb, var(--destructive) 10%, transparent); }
+  .message-action-item:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+  .message-action-item:disabled { cursor: default; opacity: 0.4; }
 
   .tool-name[data-tool-tone="accent"] { color: var(--tool-accent); }
   .tool-name[data-tool-tone="info"] { color: var(--tool-info); }

@@ -123,6 +123,82 @@ describe("ModelCommandActions.runModelCommand", () => {
 	});
 });
 
+describe("ModelCommandActions.runModelThinkingCommand", () => {
+	it("stages model and thinking together before the model reload", async () => {
+		const events: string[] = [];
+		const session = {
+			isStreaming: false,
+			model: { provider: "anthropic", id: "old" },
+			thinkingLevel: "medium",
+			async setModel(nextModel: SessionModel) {
+				events.push(`setModel:${nextModel.provider}/${nextModel.id}`);
+				this.model = nextModel;
+				this.thinkingLevel = "medium";
+			},
+			setThinkingLevel(level: string) {
+				events.push(`thinking:${level}`);
+				this.thinkingLevel = level;
+			},
+			async reload() {
+				events.push("reload");
+			},
+		};
+		const host = createHost(session, events);
+
+		await new ModelCommandActions(host).runModelThinkingCommand(model("openai", "gpt-5"), "high");
+
+		assert.ok(events.indexOf("setModel:openai/gpt-5") < events.indexOf("thinking:high"));
+		assert.ok(events.indexOf("thinking:high") < events.indexOf("reload"));
+		assert.ok(events.includes("entry:Selected model openai/gpt-5"));
+		assert.ok(events.includes("entry:Selected thinking level high"));
+		assert.ok(events.includes("persist:Selected thinking level high"));
+	});
+
+	it("changes only thinking without reloading when the model is unchanged", async () => {
+		const events: string[] = [];
+		const session = {
+			isStreaming: false,
+			model: { provider: "openai", id: "gpt-5" },
+			thinkingLevel: "low",
+			async setModel() {
+				events.push("setModel");
+			},
+			setThinkingLevel(level: string) {
+				events.push(`thinking:${level}`);
+				this.thinkingLevel = level;
+			},
+			async reload() {
+				events.push("reload");
+			},
+		};
+		const host = createHost(session, events);
+
+		await new ModelCommandActions(host).runModelThinkingCommand(model("openai", "gpt-5"), "high");
+
+		assert.ok(events.includes("thinking:high"));
+		assert.ok(!events.includes("setModel"));
+		assert.ok(!events.includes("reload"));
+	});
+});
+
+describe("ModelCommandActions combined selector entry points", () => {
+	it("opens the same staged selector from argument-free /model and /thinking", async () => {
+		const opened: string[] = [];
+		const host = {
+			runtime: () => ({ session: {} }),
+			isRunning: () => true,
+			openDirectPopupMenu: (menu: string) => opened.push(menu),
+			render: () => undefined,
+		} as unknown as CommandControllerHost;
+		const actions = new ModelCommandActions(host);
+
+		await actions.runModelSlashCommand("");
+		await actions.runThinkingSlashCommand("");
+
+		assert.deepEqual(opened, ["model", "thinking"]);
+	});
+});
+
 describe("ModelCommandActions.runScopedModelsCommand", () => {
 	it("resets model scope to all available models", async () => {
 		const events: string[] = [];
@@ -161,10 +237,21 @@ describe("ModelCommandActions.runScopedModelsCommand", () => {
 	});
 });
 
-function createHost(session: { isStreaming: boolean; setModel(model: SessionModel): Promise<void>; reload(): Promise<void> }, events: string[]): CommandControllerHost {
+function createHost(session: {
+	isStreaming: boolean;
+	model?: { provider: string; id: string };
+	thinkingLevel?: string;
+	setModel(model: SessionModel): Promise<void>;
+	setThinkingLevel?(level: string): void;
+	reload(): Promise<void>;
+}, events: string[]): CommandControllerHost {
 	const decoratedSession = Object.assign(session, {
-		model: { provider: "openai", id: "gpt-5" },
-		thinkingLevel: "off",
+		model: session.model ?? { provider: "openai", id: "gpt-5" },
+		thinkingLevel: session.thinkingLevel ?? "off",
+		setThinkingLevel: session.setThinkingLevel ?? ((level: string) => { decoratedSession.thinkingLevel = level; }),
+		sessionManager: {
+			appendCustomEntry: (_type: string, data: { text?: string }) => events.push(`persist:${data.text ?? ""}`),
+		},
 		getActiveToolNames: () => ["read"],
 		resourceLoader: { getSkills: () => ({ skills: [] }) },
 	});

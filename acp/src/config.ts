@@ -10,6 +10,7 @@
  *                        (default: ~/.pi/agent/pix-acp/sessions.json)
  *   PIX_ACP_QUESTION_EXTENSION  Desktop-owned bundled question extension path
  *   PIX_ACP_SESSION_TITLE_EXTENSION  bundled session-title extension path
+ *   PIX_ACP_WORKSPACE_UNDO_EXTENSION  bundled session-scoped workspace-undo bridge
  */
 
 import { homedir } from "node:os";
@@ -31,6 +32,7 @@ export interface AdapterConfig {
 	readonly sessionMapPath: string;
 	readonly questionExtensionPath?: string;
 	readonly sessionTitleExtensionPath?: string;
+	readonly workspaceUndoExtensionPath?: string;
 }
 
 export interface AdapterConfigInput {
@@ -39,17 +41,20 @@ export interface AdapterConfigInput {
 	readonly sessionMapPath?: string | undefined;
 	readonly questionExtensionPath?: string | undefined;
 	readonly sessionTitleExtensionPath?: string | undefined;
+	readonly workspaceUndoExtensionPath?: string | undefined;
 }
 
 export function resolveAdapterConfig(input: AdapterConfigInput = {}): AdapterConfig {
 	const questionExtensionPath = input.questionExtensionPath?.trim();
 	const sessionTitleExtensionPath = input.sessionTitleExtensionPath?.trim();
+	const workspaceUndoExtensionPath = input.workspaceUndoExtensionPath?.trim();
 	return {
 		piEntry: input.piEntry?.trim() ? input.piEntry.trim() : defaultPiEntryPath(),
 		logLevel: parseLogLevel(input.logLevel),
 		sessionMapPath: input.sessionMapPath?.trim() ? input.sessionMapPath.trim() : defaultSessionMapPath(),
 		...(questionExtensionPath ? { questionExtensionPath } : {}),
 		...(sessionTitleExtensionPath ? { sessionTitleExtensionPath } : {}),
+		...(workspaceUndoExtensionPath ? { workspaceUndoExtensionPath } : {}),
 	};
 }
 
@@ -60,5 +65,6 @@ export function adapterConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Adap
 		sessionMapPath: env["PIX_ACP_SESSION_MAP"],
 		questionExtensionPath: env["PIX_ACP_QUESTION_EXTENSION"],
 		sessionTitleExtensionPath: env["PIX_ACP_SESSION_TITLE_EXTENSION"],
+		workspaceUndoExtensionPath: env["PIX_ACP_WORKSPACE_UNDO_EXTENSION"],
 	});
 }

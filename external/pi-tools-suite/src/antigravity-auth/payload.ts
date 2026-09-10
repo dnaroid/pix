@@ -22,7 +22,10 @@ function supportsMultimodalFunctionResponse(modelId: string): boolean {
 }
 
 function isGemini3Model(modelId: string): boolean {
-	return /^gemini(?:-live)?-3(?:[.-]|$)/i.test(modelId);
+	// "gemini-pro-agent" is the Antigravity agent-mode route for Gemini 3.1 Pro;
+	// it needs the same thought-signature sentinel as the versioned gemini-3
+	// routes.
+	return /^gemini(?:-live)?-3(?:[.-]|$)/i.test(modelId) || /^gemini-pro-agent$/i.test(modelId);
 }
 
 function isValidThoughtSignature(signature: unknown): signature is string {
@@ -333,13 +336,51 @@ function geminiProThinkingLevel(modelId: string, headerStyle: HeaderStyle, level
 	return "low";
 }
 
+type FlashTier = "low" | "medium" | "high";
+
+/**
+ * Live Antigravity routes for the versioned flash generations, keyed by the
+ * public (prefix-stripped) model id. Mirrors the upstream cortexkit
+ * model-resolver: each thinking tier maps to a distinct live route plus a
+ * numeric thinking budget (-1 = dynamic for 3.7/3.8). 3.5-flash has no
+ * per-tier routes of its own and rides the older gemini-3 routes instead.
+ */
+const ANTIGRAVITY_FLASH_ROUTES: Record<string, {
+	routes: Record<FlashTier, string>;
+	budgets: Record<FlashTier, number>;
+}> = {
+	"gemini-3.8-flash": {
+		routes: { low: "gemini-3.8-flash-low", medium: "gemini-3.8-flash-medium", high: "gemini-3.8-flash-high" },
+		budgets: { low: -1, medium: -1, high: -1 },
+	},
+	"gemini-3.7-flash": {
+		routes: { low: "gemini-3.7-flash-low", medium: "gemini-3.7-flash-medium", high: "gemini-3.7-flash-high" },
+		budgets: { low: -1, medium: -1, high: -1 },
+	},
+	"gemini-3.6-flash": {
+		routes: { low: "gemini-3.6-flash-low", medium: "gemini-3.6-flash-medium", high: "gemini-3.6-flash-high" },
+		budgets: { low: 1_000, medium: 4_000, high: 10_000 },
+	},
+	"gemini-3.5-flash": {
+		routes: { low: "gemini-3.5-flash-extra-low", medium: "gemini-3.5-flash-low", high: "gemini-3-flash-agent" },
+		budgets: { low: 1_000, medium: 4_000, high: 10_000 },
+	},
+};
+
+function flashTier(level: "minimal" | "low" | "medium" | "high" | undefined): FlashTier {
+	if (level === "high") return "high";
+	if (level === undefined || level === "medium") return "medium";
+	return "low";
+}
+
 function resolveActualModel(
 	model: AntigravityModel,
 	options?: SimpleStreamOptions,
 ): { actualModel: string; thinkingConfig?: Record<string, unknown> } {
 	const headerStyle = getModelHeaderStyle(model);
 	const requested = model.id.replace(/^antigravity-/i, "");
-	const level = reasoningLevel(options) ?? "low";
+	const requestedLevel = reasoningLevel(options);
+	const level = requestedLevel ?? "low";
 	let effective = requested;
 	const requestedLower = requested.toLowerCase();
 
@@ -353,6 +394,27 @@ function resolveActualModel(
 	}
 
 	const lower = effective.toLowerCase();
+
+	if (headerStyle === "antigravity") {
+		// Current Antigravity catalog: versioned flash generations and 3.1 Pro
+		// route to per-tier live models with numeric thinking budgets. Requests
+		// without an explicit level default to the medium tier for flash.
+		const flash = ANTIGRAVITY_FLASH_ROUTES[lower];
+		if (flash) {
+			const tier = flashTier(requestedLevel);
+			return {
+				actualModel: flash.routes[tier],
+				thinkingConfig: { thinkingBudget: flash.budgets[tier], includeThoughts: true },
+			};
+		}
+		if (/^gemini-3\.1-pro$/.test(lower)) {
+			const high = level === "high";
+			return {
+				actualModel: high ? "gemini-pro-agent" : "gemini-3.1-pro-low",
+				thinkingConfig: { thinkingBudget: high ? 10_001 : 1_001, includeThoughts: true },
+			};
+		}
+	}
 
 	if (/^gemini-3(?:\.\d+)?-pro/.test(lower)) {
 		// Live Antigravity currently rejects gemini-3.1-pro-high with a generic
@@ -370,7 +432,11 @@ function resolveActualModel(
 	if (lower.includes("claude") && lower.includes("thinking")) {
 		const budgets = options?.thinkingBudgets ?? {};
 		const budget = budgetForLevel(level, budgets);
-		return { actualModel: effective, thinkingConfig: { thinking_budget: budget, include_thoughts: true } };
+		// Sonnet 4.6 thinking is served by the base claude-sonnet-4-6 route with
+		// thinking enabled via the budget, while Opus keeps a dedicated
+		// -thinking route.
+		const actualModel = /^claude-sonnet/.test(lower) ? effective.replace(/-thinking$/i, "") : effective;
+		return { actualModel, thinkingConfig: { thinking_budget: budget, include_thoughts: true } };
 	}
 	if (lower.includes("gemini-2.5")) {
 		const budgets = options?.thinkingBudgets ?? {};
@@ -416,7 +482,13 @@ export function buildPayload(model: AntigravityModel, context: Context, options?
 
 export function extraHeadersForPayload(payload: Record<string, unknown>): Record<string, string> {
 	const model = typeof payload.model === "string" ? payload.model.toLowerCase() : "";
-	if (model.includes("claude") && model.includes("thinking")) {
+	// Sonnet thinking routes to the base claude-sonnet-4-6 model name, so also
+	// detect thinking via the Claude-style thinking_budget in the payload.
+	const generationConfig = (payload.request as { generationConfig?: { thinkingConfig?: Record<string, unknown> } } | undefined)?.generationConfig;
+	const thinkingConfig = generationConfig?.thinkingConfig;
+	const claudeThinking = model.includes("claude")
+		&& (model.includes("thinking") || (thinkingConfig !== undefined && "thinking_budget" in thinkingConfig));
+	if (claudeThinking) {
 		return { "anthropic-beta": "interleaved-thinking-2025-05-14" };
 	}
 	return {};

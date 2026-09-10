@@ -30,6 +30,10 @@ export class AppCommandController {
 		await this.modelActions.runModelCommand(model);
 	}
 
+	async runModelThinkingCommand(model: SessionModel, level: ThinkingLevel): Promise<void> {
+		await this.modelActions.runModelThinkingCommand(model, level);
+	}
+
 	async runThinkingCommand(level: ThinkingLevel): Promise<void> {
 		await this.modelActions.runThinkingCommand(level);
 	}

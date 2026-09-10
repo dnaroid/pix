@@ -95,6 +95,7 @@ import {
 import { applyConfigOption, buildConfigOptions, CONFIG_ID_MODEL, parseModelValue } from "./config-options.js";
 import {
 	PIX_ENHANCE_PROMPT_METHOD,
+	PIX_BRANCH_USER_MESSAGES_METHOD,
 	PIX_GIT_ASSIST_METHOD,
 	PIX_DEFER_MESSAGE_METHOD,
 	PIX_FORK_MESSAGES_METHOD,
@@ -111,6 +112,7 @@ import {
 	PIX_SESSION_HISTORY_METHOD,
 	PIX_TAKE_AUTO_MESSAGE_METHOD,
 	PIX_TOOL_RESULT_METHOD,
+	PIX_USER_MESSAGE_ACTION_METHOD,
 	parseDesktopEnhancePromptRequest,
 	parseDesktopGitAssistantRequest,
 	parseDesktopImportSessionRequest,
@@ -122,6 +124,7 @@ import {
 	parseDesktopSessionHistoryRequest,
 	parseDesktopSessionRequest,
 	parseDesktopToolResultRequest,
+	parseDesktopUserMessageActionRequest,
 	type DesktopEnhancePromptRequest,
 	type DesktopEnhancePromptResponse,
 	type DesktopGitAssistantRequest,
@@ -145,6 +148,8 @@ import {
 	type DesktopResumePathRequest,
 	type DesktopToolResultRequest,
 	type DesktopToolResultResponse,
+	type DesktopUserMessageActionRequest,
+	type DesktopUserMessageActionResponse,
 	type ForkMessagesResponse,
 } from "./desktop-commands.js";
 import { loadPixDefaultModel, type PixDefaultModel } from "./default-model.js";
@@ -218,7 +223,17 @@ type ClientCaller = {
 // JSON-RPC server-error range; plain `throw new Error(...)` would surface
 // to the client as an opaque "Internal error".
 const ERROR_SERVER = -32000;
+const WORKSPACE_UNDO_RPC_COMMAND = "__pix-workspace-undo";
+const WORKSPACE_UNDO_RESULT_CHANNEL = "pix.workspace-undo-result";
 let requestHistorySaveChain: Promise<void> = Promise.resolve();
+
+type WorkspaceUndoBridgeResult = {
+	requestId: string;
+	status: "ok" | "warning" | "cancelled" | "error";
+	revertedChanges?: number;
+	changedFiles?: number;
+	error?: string;
+};
 
 interface ActiveRun {
 	/** Whether the client requested cancellation before pi reported its reason. */
@@ -249,6 +264,7 @@ interface AgentSessionState {
 	sdkQueueRestoreAfterInterrupt: { steering: string[]; followUp: string[] } | undefined;
 	/** Dialog extension UI requests awaiting an ACP elicitation answer. */
 	readonly pendingDialogIds: Set<string>;
+	readonly workspaceUndoResults: Map<string, WorkspaceUndoBridgeResult>;
 	contextInventory: ContextInventoryState | undefined;
 	contextInventoryNoticeReason: "reload" | "model_select" | undefined;
 }
@@ -282,6 +298,8 @@ export interface PixAcpAgentOptions {
 	readonly questionExtensionPath?: string;
 	/** Explicit bundled session-title extension path, matching the Pix TUI runtime. */
 	readonly sessionTitleExtensionPath?: string;
+	/** Bundled Desktop workspace-mutation recorder / undo bridge. */
+	readonly workspaceUndoExtensionPath?: string;
 	readonly logger: Logger;
 	/** Path of the persistent ACP↔pi session map file. */
 	readonly sessionMapPath: string;
@@ -411,6 +429,12 @@ export class PixAcpAgent {
 			)
 			.onRequest(PIX_FORK_MESSAGES_METHOD, parseDesktopSessionRequest, (ctx) =>
 				this.forkMessages(ctx.params),
+			)
+			.onRequest(PIX_BRANCH_USER_MESSAGES_METHOD, parseDesktopSessionRequest, (ctx) =>
+				this.branchUserMessages(ctx.params),
+			)
+			.onRequest(PIX_USER_MESSAGE_ACTION_METHOD, parseDesktopUserMessageActionRequest, (ctx) =>
+				this.withSessionLifecycle(ctx.params.sessionId, () => this.desktopUserMessageAction(ctx.params)),
 			)
 			.onRequest(PIX_IMPORT_SESSION_METHOD, parseDesktopImportSessionRequest, (ctx) =>
 				this.withSessionLifecycle(ctx.params.sessionId, () => this.importSession(ctx.params)),
@@ -567,6 +591,69 @@ export class PixAcpAgent {
 			throw new RequestError(ERROR_SERVER, "fork is unavailable while the agent is running");
 		}
 		return { messages: await session.pi.getForkMessages() };
+	}
+
+	private async branchUserMessages(params: DesktopSessionRequest): Promise<ForkMessagesResponse> {
+		const session = this.requireDesktopSession(params.sessionId);
+		return { messages: currentBranchUserMessages(await session.pi.getTree()) };
+	}
+
+	private async desktopUserMessageAction(
+		params: DesktopUserMessageActionRequest,
+	): Promise<DesktopUserMessageActionResponse> {
+		const session = this.requireDesktopSession(params.sessionId);
+		const messages = currentBranchUserMessages(await session.pi.getTree());
+		const selected = messages.find((message) => message.entryId === params.entryId);
+		if (!selected) {
+			throw new RequestError(ERROR_SERVER, `user message ${params.entryId} is not on the active session branch`);
+		}
+
+		if (params.action === "copy") {
+			await this.copyText(selected.text);
+			return { status: "ok" };
+		}
+
+		if (session.activeRun || session.builtinRunning) {
+			throw new RequestError(ERROR_SERVER, "undo changes is unavailable while the agent is running");
+		}
+		const state = await session.pi.getState();
+		if (state.isStreaming || state.isCompacting) {
+			throw new RequestError(ERROR_SERVER, "undo changes is unavailable while the session is busy");
+		}
+
+		const commands = await session.pi.getCommands();
+		if (!commands.some((command) => normalizedRuntimeCommandName(command.name) === WORKSPACE_UNDO_RPC_COMMAND)) {
+			throw new RequestError(ERROR_SERVER, "workspace undo bridge is unavailable in this session");
+		}
+
+		const requestId = randomUUID();
+		session.workspaceUndoResults.delete(requestId);
+		session.builtinRunning = true;
+		try {
+			await session.pi.prompt(`/${WORKSPACE_UNDO_RPC_COMMAND} ${JSON.stringify({ requestId, targetEntryId: params.entryId })}`);
+			// Extension-ui events precede the matching RPC prompt response on pi's
+			// stdout stream. Yield once as a defensive guard for injected/mock clients.
+			await new Promise<void>((resolve) => setTimeout(resolve, 0));
+			const result = session.workspaceUndoResults.get(requestId);
+			session.workspaceUndoResults.delete(requestId);
+			if (!result) throw new RequestError(ERROR_SERVER, "workspace undo bridge returned no result");
+			if (result.status === "error") {
+				throw new RequestError(ERROR_SERVER, result.error || "workspace undo failed");
+			}
+			if (result.status === "cancelled") {
+				return { status: "cancelled", editorText: selected.text };
+			}
+			return {
+				status: result.status,
+				editorText: selected.text,
+				...(result.revertedChanges === undefined ? {} : { revertedChanges: result.revertedChanges }),
+				...(result.changedFiles === undefined ? {} : { changedFiles: result.changedFiles }),
+				...(result.error ? { warning: result.error } : {}),
+			};
+		} finally {
+			session.builtinRunning = false;
+			session.workspaceUndoResults.delete(requestId);
+		}
 	}
 
 	private async desktopRequestHistory(params: DesktopSessionRequest): Promise<DesktopRequestHistoryResponse> {
@@ -1295,6 +1382,7 @@ export class PixAcpAgent {
 			defaultModel,
 			this.options.questionExtensionPath,
 			this.options.sessionTitleExtensionPath,
+			this.options.workspaceUndoExtensionPath,
 			this.loadIgnoreContextFiles(cwd),
 		));
 		const translator = new EventTranslator({ sessionId: acpSessionId, cwd });
@@ -1315,6 +1403,7 @@ export class PixAcpAgent {
 			trackedSteeringMessages: [],
 			sdkQueueRestoreAfterInterrupt: undefined,
 			pendingDialogIds: new Set(),
+			workspaceUndoResults: new Map(),
 			contextInventory: undefined,
 			contextInventoryNoticeReason: undefined,
 		};
@@ -1520,6 +1609,11 @@ export class PixAcpAgent {
 	private async handleExtensionUiRequest(session: AgentSessionState, request: RpcExtensionUIRequest): Promise<void> {
 		const state = sessionStateEnvelopeFromUiRequest(request);
 		if (state) {
+			if (state.channel === WORKSPACE_UNDO_RESULT_CHANNEL) {
+				const result = parseWorkspaceUndoBridgeResult(state.data);
+				if (result) session.workspaceUndoResults.set(result.requestId, result);
+				return;
+			}
 			if (state.channel === CONTEXT_INVENTORY_EVENT) {
 				const inventory = parseContextInventoryState(state.data);
 				if (inventory) {
@@ -1682,7 +1776,6 @@ export class PixAcpAgent {
 				this.options.logger.debug(`request history save failed: ${stringifyUnknown(error)}`);
 			});
 		}
-
 		const run: ActiveRun = {
 			cancelled: false,
 			started: false,
@@ -2098,7 +2191,12 @@ export class PixAcpAgent {
 				if (this.sessions.get(session.acpSessionId) !== session) return;
 				const name = command.name.replace(/^\/+/, "");
 				const key = name.toLocaleLowerCase();
-				if (!name || names.has(key) || rendererCommandName(`/${name}`)) continue;
+				if (
+					!name
+					|| names.has(key)
+					|| rendererCommandName(`/${name}`)
+					|| normalizedRuntimeCommandName(name) === WORKSPACE_UNDO_RPC_COMMAND
+				) continue;
 				names.add(key);
 				availableCommands.push({
 					name,
@@ -2254,11 +2352,13 @@ function piClientOptions(
 	defaultModel?: PixDefaultModel,
 	questionExtensionPath?: string,
 	sessionTitleExtensionPath?: string,
+	workspaceUndoExtensionPath?: string,
 	ignoreContextFiles = false,
 ): PiRpcClientOptions {
 	const args = [
 		...(questionExtensionPath ? ["--extension", questionExtensionPath] : []),
 		...(sessionTitleExtensionPath ? ["--extension", sessionTitleExtensionPath] : []),
+		...(workspaceUndoExtensionPath ? ["--extension", workspaceUndoExtensionPath] : []),
 		...(ignoreContextFiles ? ["--no-context-files"] : []),
 	];
 	const base = {
@@ -2266,6 +2366,7 @@ function piClientOptions(
 		cwd,
 		env: {
 			PIX_ACP_SESSION_STATE_BRIDGE: "1",
+			...(workspaceUndoExtensionPath ? { PIX_ACP_WORKSPACE_UNDO_BRIDGE: "1" } : {}),
 			...(questionExtensionPath ? { PIX_QUESTION_RPC_BRIDGE: "1" } : {}),
 		},
 		...(args.length > 0 ? { args } : {}),
@@ -2671,6 +2772,78 @@ function runExternalCommand(command: string, args: readonly string[], maxBytes: 
 		child.on("error", (error) => finish({ status: null, stdout, stderr, error: error.message }));
 		child.on("close", (status) => finish({ status, stdout, stderr }));
 	});
+}
+
+function currentBranchUserMessages(
+	state: { tree: PiSessionTreeNode[]; leafId: string | null },
+): Array<{ entryId: string; text: string }> {
+	if (!state.leafId) return [];
+	const path = treePathToEntry(state.tree, state.leafId);
+	if (!path) return [];
+
+	const messages: Array<{ entryId: string; text: string }> = [];
+	for (const node of path) {
+		const entry = node.entry;
+		if (entry.type !== "message" || typeof entry.id !== "string") continue;
+		const message = isRecord(entry.message) ? entry.message : undefined;
+		if (message?.role !== "user") continue;
+		messages.push({ entryId: entry.id, text: sessionUserMessageText(message.content) });
+	}
+	return messages;
+}
+
+function treePathToEntry(nodes: readonly PiSessionTreeNode[], targetId: string): PiSessionTreeNode[] | undefined {
+	for (const node of nodes) {
+		if (node.entry.id === targetId) return [node];
+		const childPath = treePathToEntry(node.children, targetId);
+		if (childPath) return [node, ...childPath];
+	}
+	return undefined;
+}
+
+function sessionUserMessageText(content: unknown): string {
+	if (typeof content === "string") return content;
+	if (!Array.isArray(content)) return "";
+	const text: string[] = [];
+	let imageCount = 0;
+	for (const part of content) {
+		if (!isRecord(part)) continue;
+		if (part.type === "image") {
+			imageCount += 1;
+			continue;
+		}
+		if (part.type === "text" && typeof part.text === "string") text.push(part.text);
+	}
+	const rendered = text.join("\n").trimEnd();
+	if (imageCount === 0) return rendered;
+	const images = imageCount === 1
+		? "[Image]"
+		: Array.from({ length: imageCount }, (_, index) => `[Image ${index + 1}]`).join("\n");
+	return rendered ? `${rendered}\n${images}` : images;
+}
+
+function normalizedRuntimeCommandName(name: string): string {
+	return name.replace(/^\/+/, "");
+}
+
+function parseWorkspaceUndoBridgeResult(value: unknown): WorkspaceUndoBridgeResult | undefined {
+	if (!isRecord(value) || typeof value.requestId !== "string" || value.requestId.length === 0) return undefined;
+	if (!["ok", "warning", "cancelled", "error"].includes(String(value.status))) return undefined;
+	const status = value.status as WorkspaceUndoBridgeResult["status"];
+	const revertedChanges = typeof value.revertedChanges === "number" && Number.isSafeInteger(value.revertedChanges)
+		? value.revertedChanges
+		: undefined;
+	const changedFiles = typeof value.changedFiles === "number" && Number.isSafeInteger(value.changedFiles)
+		? value.changedFiles
+		: undefined;
+	const error = typeof value.error === "string" ? value.error : undefined;
+	return {
+		requestId: value.requestId,
+		status,
+		...(revertedChanges === undefined ? {} : { revertedChanges }),
+		...(changedFiles === undefined ? {} : { changedFiles }),
+		...(error === undefined ? {} : { error }),
+	};
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

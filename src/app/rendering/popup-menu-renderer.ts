@@ -4,13 +4,13 @@ import { resolveColor, resolveModelColor, type ModelColorsConfig } from "../../c
 import type { PopupMenu, PopupMenuItem } from "../../ui.js";
 import {
 	SLASH_COMMAND_DESCRIPTION_COLUMN,
-	THINKING_LEVELS,
 } from "../constants.js";
 import { APP_ICONS } from "../icons.js";
 import type { ScreenStyler } from "../screen/screen-styler.js";
 import type {
 	Entry,
 	ModelMenuValue,
+	ModelThinkingMenuState,
 	PixMenuItem,
 	PixMenuOptions,
 	QueueMessageMenuValue,
@@ -18,7 +18,6 @@ import type {
 	ResumeMenuValue,
 	SlashCommand,
 	StyledSegment,
-	ThinkingMenuValue,
 	UserMessageJumpMenuValue,
 	UserMessageMenuValue,
 } from "../types.js";
@@ -140,8 +139,8 @@ export class PopupMenuRenderer {
 		return lines;
 	}
 
-	renderModelMenu(width: number, menu: PopupMenu<ModelMenuValue>): RenderedLine[] {
-		const lines: RenderedLine[] = [this.popupMenuHeader("Select model", width)];
+	renderModelMenu(width: number, menu: PopupMenu<ModelMenuValue>, state: ModelThinkingMenuState): RenderedLine[] {
+		const lines: RenderedLine[] = [this.popupMenuHeader("Select model & thinking", width)];
 		const visibleItems = menu.visibleItems();
 		if (!this.hasPopupActionItems(menu.items)) {
 			lines.push({
@@ -160,25 +159,25 @@ export class PopupMenuRenderer {
 				target: { kind: "popup-menu", index: item.index },
 			});
 		}
-		return lines;
-	}
 
-	renderThinkingMenu(width: number, menu: PopupMenu<ThinkingMenuValue>): RenderedLine[] {
-		const lines: RenderedLine[] = [this.popupMenuHeader("Thinking level", width)];
-		const visibleItems = menu.visibleItems();
-		if (!this.hasPopupActionItems(menu.items)) {
-			lines.push({ text: "  No matching thinking levels", variant: "muted" });
-		}
-
-		for (const item of visibleItems) {
-			const marker = item.selected ? "▶ " : "  ";
-			const text = `${marker}${this.labelDescriptionText(item.label, item.description, width - 2)}`;
+		if (menu.selectedItem()) {
+			const thinkingPrefix = "  Thinking  ← ";
+			const thinkingSuffix = " →";
 			lines.push({
-				text,
-				variant: this.selectableItemVariant(item.value),
-				segments: this.thinkingMenuItemSegments(item.value),
-				target: { kind: "popup-menu", index: item.index },
+				text: `${thinkingPrefix}${state.thinkingLevel}${thinkingSuffix}`,
+				variant: "normal",
+				segments: [{
+					start: thinkingPrefix.length,
+					end: thinkingPrefix.length + state.thinkingLevel.length,
+					foreground: thinkingLevelThemeColor(
+						state.thinkingLevel,
+						this.host.theme.colors,
+						state.availableThinkingLevels,
+					),
+					bold: true,
+				}],
 			});
+			lines.push({ text: "  ↑/↓ model · ←/→ thinking · Enter apply", variant: "muted" });
 		}
 		return lines;
 	}
@@ -331,17 +330,8 @@ export class PopupMenuRenderer {
 		return this.host.theme.colors.inputForeground;
 	}
 
-	private selectableItemVariant(value: ModelMenuValue | ThinkingMenuValue): NonNullable<RenderedLine["variant"]> {
+	private selectableItemVariant(value: ModelMenuValue): NonNullable<RenderedLine["variant"]> {
 		return value.current ? "muted" : "normal";
-	}
-
-	private thinkingMenuItemSegments(value: ThinkingMenuValue): StyledSegment[] {
-		const markerOffset = 2; // "▶ " or "  "
-		return [{
-			start: markerOffset,
-			end: markerOffset + value.level.length,
-			foreground: thinkingLevelThemeColor(value.level, this.host.theme.colors, this.availableThinkingLevels()),
-		}];
 	}
 
 	private modelMenuItemSegments(value: ModelMenuValue): StyledSegment[] {
@@ -360,11 +350,6 @@ export class PopupMenuRenderer {
 		return configuredColor
 			? resolveColor(configuredColor, this.host.theme.colors)
 			: modelProviderThemeColor(value.model.provider, this.host.theme.colors);
-	}
-
-	private availableThinkingLevels(): string[] {
-		const levels = this.host.session?.getAvailableThinkingLevels();
-		return Array.isArray(levels) && levels.length > 0 ? levels.map(String) : [...THINKING_LEVELS];
 	}
 
 	private queueMessageItemVariant(value: QueueMessageMenuValue): NonNullable<RenderedLine["variant"]> {

@@ -5,6 +5,7 @@ import {
 	buildConfigOptions,
 	modelValue,
 	parseModelValue,
+	supportedThinkingLevels,
 } from "../src/acp/config-options.js";
 import type { PiClient, PiModel, PiSessionState } from "../src/pi/pi-rpc-client.js";
 
@@ -27,15 +28,23 @@ function fakePi(overrides: {
 		start: async () => {},
 		stop: async () => {},
 		onEvent: () => () => {},
+		onExit: () => () => {},
 		prompt: async () => {},
 		steer: async () => {},
 		followUp: async () => {},
+		clearQueue: async () => ({ steering: [], followUp: [] }),
 		abort: async () => {},
 		respondToExtensionUi: () => {},
 		getState: async () => state,
 		switchSession: async () => ({ cancelled: false }),
 		clone: async () => ({ cancelled: false }),
+		fork: async () => ({ text: "", cancelled: false }),
+		getForkMessages: async () => [],
+		getTree: async () => ({ tree: [], leafId: null }),
+		getLastAssistantText: async () => null,
 		getMessages: async () => [],
+		getSessionStats: async () => ({}) as never,
+		getCommands: async () => [],
 		setSessionName: async () => {},
 		getAvailableModels: async () => overrides.models ?? [{ provider: "anthropic", id: "claude-4" }],
 		getAvailableThinkingLevels: async () => overrides.levels ?? ["off", "medium", "high"],
@@ -75,6 +84,10 @@ test("buildConfigOptions exposes grouped model selector and thought levels", asy
 		anthropic.options.map((option) => option.value),
 		["anthropic/claude-3", "anthropic/claude-4"],
 	);
+	assert.deepEqual(
+		(anthropic.options[1] as { _meta?: Record<string, unknown> })._meta?.["pix.thinkingLevels"],
+		["off"],
+	);
 
 	const thought = options[1]!;
 	assert.equal(thought.id, "thought_level");
@@ -82,6 +95,23 @@ test("buildConfigOptions exposes grouped model selector and thought levels", asy
 	assert.deepEqual(
 		(thought.options as { value: string }[]).map((option) => option.value),
 		["off", "medium", "high"],
+	);
+});
+
+test("supportedThinkingLevels mirrors pi model capability metadata", () => {
+	assert.deepEqual(supportedThinkingLevels({ provider: "plain", id: "chat", reasoning: false }), ["off"]);
+	assert.deepEqual(
+		supportedThinkingLevels({ provider: "reasoning", id: "base", reasoning: true }),
+		["off", "minimal", "low", "medium", "high"],
+	);
+	assert.deepEqual(
+		supportedThinkingLevels({
+			provider: "reasoning",
+			id: "extended",
+			reasoning: true,
+			thinkingLevelMap: { low: null, xhigh: "xhigh", max: "max" },
+		}),
+		["off", "minimal", "medium", "high", "xhigh", "max"],
 	);
 });
 

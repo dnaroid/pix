@@ -188,6 +188,43 @@ describe("session recovery tools", () => {
 		expect(jsonContent(allResult).matches[0].entryId).toBe("u-abandoned");
 	});
 
+	test("recovers full structured details for Context Gateway web compacts by tool call id", async () => {
+		const { pi } = await setup();
+		const entries = [
+			{
+				type: "message",
+				id: "u-web",
+				parentId: null,
+				timestamp: "2026-01-01T00:00:00.000Z",
+				message: { role: "user", content: "research" },
+			},
+			{
+				type: "message",
+				id: "r-web",
+				parentId: "u-web",
+				timestamp: "2026-01-01T00:00:01.000Z",
+				message: {
+					role: "toolResult",
+					toolCallId: "web-large",
+					toolName: "web_search",
+					content: [textPart("[Context Gateway compact]")],
+					details: {
+						results: [{ title: "Recovered", url: "https://example.com", content: "RAW_WEB_DETAIL_SENTINEL" }],
+						contextGateway: { version: 1, representation: "web-recoverable-compact" },
+					},
+					isError: false,
+				},
+			},
+		];
+		const ctx = { sessionManager: new FakeSessionManager(entries, entries) };
+
+		const search = jsonContent(await execute(pi.tools.get("session_search"), "find-web", { query: "web-large" }, ctx));
+		expect(search.matches[0]).toMatchObject({ entryId: "r-web", role: "toolResult" });
+		const recovered = await execute(pi.tools.get("session_read_section"), "read-web", { entry_id: "r-web", max_body_chars: 10_000 }, ctx);
+		expect(recovered.content[0].text).toContain("recoverable_raw_details:");
+		expect(recovered.content[0].text).toContain("RAW_WEB_DETAIL_SENTINEL");
+	});
+
 	test("reads a bounded section and reports unknown section IDs normally", async () => {
 		const { pi, ctx } = await setup();
 		const readResult = await execute(pi.tools.get("session_read_section"), "read-section", {

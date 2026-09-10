@@ -17,6 +17,7 @@ import type { PiClient, PiModel, PiSessionState } from "../pi/pi-rpc-client.js";
 
 export const CONFIG_ID_MODEL = "model";
 export const CONFIG_ID_THOUGHT_LEVEL = "thought_level";
+const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
 /** Canonical value for a model option: `provider/modelId`. */
 export function modelValue(provider: string, modelId: string): string {
@@ -57,6 +58,7 @@ function modelOption(state: PiSessionState, models: readonly PiModel[]): Session
 		group.push({
 			value: modelValue(model.provider, model.id),
 			name: model.name ?? model.id,
+			_meta: { "pix.thinkingLevels": supportedThinkingLevels(model) },
 		});
 		groups.set(model.provider, group);
 	}
@@ -79,6 +81,17 @@ function modelOption(state: PiSessionState, models: readonly PiModel[]): Session
 		currentValue: modelValue(state.model!.provider, state.model!.id),
 		options: grouped,
 	};
+}
+
+/** Mirrors pi-ai's getSupportedThinkingLevels() for the pinned runtime model metadata. */
+export function supportedThinkingLevels(model: PiModel): string[] {
+	if (!model.reasoning) return ["off"];
+	return THINKING_LEVELS.filter((level) => {
+		const mapped = model.thinkingLevelMap?.[level];
+		if (mapped === null) return false;
+		if (level === "xhigh" || level === "max") return mapped !== undefined;
+		return true;
+	});
 }
 
 function thoughtLevelOption(state: PiSessionState, levels: readonly string[]): SessionConfigOption {

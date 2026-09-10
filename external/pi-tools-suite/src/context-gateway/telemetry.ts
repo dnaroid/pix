@@ -254,7 +254,7 @@ export function observeToolResult(
 		toolClass?: ContextGatewayToolClass;
 		shellCommandScope?: "simple" | "compound" | "unknown";
 		maxInlineBytes?: number;
-		delivery?: { representation: "passthrough" | "test-build-compact"; contentBytes: number; textBytes: number };
+		delivery?: { representation: "passthrough" | "test-build-compact" | "web-recoverable-compact"; contentBytes: number; textBytes: number };
 	} = {},
 ): ContextGatewayObservation {
 	const toolName = typeof event.toolName === "string" ? event.toolName : "unknown";
@@ -367,7 +367,7 @@ export class ContextGatewayTelemetry {
 	recordToolResult(
 		event: ToolResultLike,
 		budget: number | ContextGatewayBudgets,
-		options: { delivery?: { representation: "passthrough" | "test-build-compact"; contentBytes: number; textBytes: number }; maxInlineBytes?: number } = {},
+		options: { delivery?: { representation: "passthrough" | "test-build-compact" | "web-recoverable-compact"; contentBytes: number; textBytes: number }; maxInlineBytes?: number } = {},
 	): ContextGatewayObservation {
 		const binding = typeof event.toolCallId === "string" ? this.bindings.get(event.toolCallId) : undefined;
 		const observation = observeToolResult(event, budget, {

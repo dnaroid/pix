@@ -205,6 +205,7 @@ describe("AppWorkspaceActionsController undo changes", () => {
 
 	it("assigns the user session entry id while recording a mutation for a fresh user message", () => {
 		const entries: Entry[] = [{ id: "visible-1", kind: "user", text: "Original prompt", workspaceMutations: [] }];
+		const customEntries: Array<{ customType: string; data: unknown }> = [];
 
 		const runtime = {
 			cwd: "/tmp/workspace",
@@ -215,6 +216,10 @@ describe("AppWorkspaceActionsController undo changes", () => {
 				sessionManager: {
 					getBranch: () => [messageEntry("session-1", null, "user", "Original prompt")],
 					getSessionId: () => "session-id",
+					appendCustomEntry: (customType: string, data: unknown) => {
+						customEntries.push({ customType, data });
+						return "custom-1";
+					},
 				},
 			},
 		} as unknown as AgentSessionRuntime;
@@ -248,6 +253,13 @@ describe("AppWorkspaceActionsController undo changes", () => {
 		assert.deepEqual(entries[0]?.kind === "user" ? entries[0].workspaceMutations : undefined, [
 			{ type: "write", path: "created.txt", afterContent: "hello\n" },
 		]);
+		assert.deepEqual(customEntries, [{
+			customType: "pix-workspace-mutation",
+			data: {
+				userEntryId: "session-1",
+				mutation: { type: "write", path: "created.txt", afterContent: "hello\n" },
+			},
+		}]);
 	});
 
 	it("maps visible user messages with full loaded history instead of reindexing from the window start", () => {

@@ -55,6 +55,9 @@
   --color-tool-muted: var(--tool-muted);
   --color-tool-title: var(--tool-title);
   --color-tool-error: var(--tool-error);
+  --color-model-openai: var(--model-openai);
+  --color-thinking-xhigh: var(--thinking-xhigh);
+  --color-thinking-max: var(--thinking-max);
 
   --radius-sm: calc(var(--radius) - 6px);
   --radius-md: calc(var(--radius) - 4px);
@@ -139,6 +142,9 @@
   --tool-muted: #64748b;
   --tool-title: #5d6978;
   --tool-error: #a44949;
+  --model-openai: #75671f;
+  --thinking-xhigh: #cf333d;
+  --thinking-max: #b91c57;
 
   /* Sugar High syntax roles stay anchored to the active semantic theme. */
   --sh-identifier: var(--foreground);
@@ -209,6 +215,9 @@
     --tool-muted: #8b93a7;
     --tool-title: #c8ccd4;
     --tool-error: #e06c75;
+    --model-openai: #c8b45a;
+    --thinking-xhigh: #ff8a86;
+    --thinking-max: #ff5f8f;
   }
 }
 

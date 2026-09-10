@@ -8,7 +8,7 @@ import { formatHistoryMenuLabel, historyHighlightRanges } from "../src/app/comma
 import { RESUME_MENU_INITIAL_SESSION_ROWS, RESUME_MENU_LOAD_BATCH_ROWS, RESUME_MENU_LOAD_THRESHOLD_ROWS } from "../src/app/constants.js";
 import { AppPopupMenuController, buildUserMessageJumpItems, formatSessionInfoMenuItems, type AppPopupMenuControllerHost } from "../src/app/popup/popup-menu-controller.js";
 import { PopupMenuRenderer, formatPopupMenuHeader, type PopupMenuRendererHost } from "../src/app/rendering/popup-menu-renderer.js";
-import type { Entry, RenderedLine, ThinkingMenuValue } from "../src/app/types.js";
+import type { Entry, ModelMenuValue, RenderedLine } from "../src/app/types.js";
 import { PopupMenu, type PopupMenuItem } from "../src/ui.js";
 import type { SessionInfo } from "@earendil-works/pi-coding-agent";
 
@@ -64,22 +64,38 @@ describe("popup menu header", () => {
 		assert.match(output, ansiColor("48", theme.colors.popupSelectedBackground));
 	});
 
-	it("colors thinking menu level labels with the thinking palette", () => {
+	it("colors the combined model menu thinking row with the thinking palette", () => {
 		const theme = THEMES.dark;
 		const host = createPopupMenuHost([], theme);
 		const renderer = new PopupMenuRenderer(host);
-		const menu = new PopupMenu<ThinkingMenuValue>({ maxVisibleRows: 6 });
+		const menu = new PopupMenu<ModelMenuValue>({ maxVisibleRows: 6 });
 		menu.openWithItems([
-			{ value: { level: "off", current: false }, label: "off", description: "No reasoning/thinking" },
-			{ value: { level: "high", current: true }, label: `high ${APP_ICONS.check}`, description: "High reasoning" },
+			{
+				value: {
+					model: { provider: "openai", id: "reasoner", reasoning: true } as never,
+					ref: "openai/reasoner",
+					current: true,
+				},
+				label: `openai/reasoner ${APP_ICONS.check}`,
+				description: "Reasoner",
+			},
 		]);
-		menu.selectedIndex = 1;
 
-		const lines = renderer.renderThinkingMenu(64, menu);
+		const lines = renderer.renderModelMenu(64, menu, {
+			thinkingLevel: "high",
+			availableThinkingLevels: ["off", "medium", "high"],
+			source: "model",
+		});
+		const thinkingLine = lines[2]!;
+		const thinkingStart = thinkingLine.text.indexOf("high");
 
-		assert.deepEqual(lines[1]?.segments, [{ start: 2, end: 5, foreground: theme.colors.muted }]);
-		assert.deepEqual(lines[2]?.segments, [{ start: 2, end: 6, foreground: theme.colors.error }]);
-		assert.match(renderer.styleOverlayLine(2, lines[2]!, 64, menu), ansiColor("38", theme.colors.error));
+		assert.deepEqual(thinkingLine.segments, [{
+			start: thinkingStart,
+			end: thinkingStart + 4,
+			foreground: theme.colors.error,
+			bold: true,
+		}]);
+		assert.match(renderer.styleOverlayLine(2, thinkingLine, 64, menu), ansiColor("38", theme.colors.error));
 	});
 
 	it("keeps the popup menu inset from both screen edges", () => {
@@ -392,6 +408,77 @@ describe("popup menu header", () => {
 		assert.equal(controller.directQuery, "ab");
 		assert.equal(controller.handleDirectPopupInput("\b"), true);
 		assert.equal(controller.directQuery, "a");
+	});
+
+	it("uses one combined model menu for /thinking and stages thinking with left/right", () => {
+		let input = "/thinking high";
+		const currentModel = {
+			provider: "openai",
+			id: "reasoner",
+			name: "Reasoner",
+			reasoning: true,
+			thinkingLevelMap: { xhigh: "xhigh" },
+		} as never;
+		const plainModel = { provider: "plain", id: "chat", name: "Chat", reasoning: false } as never;
+		const controller = createPopupMenuController({
+			...createPopupMenuHost([]),
+			session: { thinkingLevel: "medium" } as never,
+			getInput: () => input,
+			parseSlashInput: (text) => {
+				const match = /^\/(\S+)(?:\s+(.*))?$/u.exec(text);
+				return match ? {
+					commandName: match[1] ?? "",
+					hasArguments: match[2] !== undefined,
+					arguments: match[2] ?? "",
+				} : undefined;
+			},
+			getModelMenuItems: () => [
+				{ value: { model: currentModel, ref: "openai/reasoner", current: true }, label: "openai/reasoner", description: "Reasoner" },
+				{ value: { model: plainModel, ref: "plain/chat", current: false }, label: "plain/chat", description: "Chat" },
+			],
+			getThinkingMenuItems: (query) => query.toLowerCase().startsWith("h")
+				? [{ value: { level: "high", current: false }, label: "high", description: "High reasoning" }]
+				: [],
+		});
+
+		assert.equal(controller.syncActivePopupMenu(), "model");
+		assert.equal(controller.selectedModelThinking()?.thinkingLevel, "high");
+		assert.match(controller.renderActivePopupMenu(64)[0]?.text ?? "", /Select model & thinking/u);
+		assert.match(controller.renderActivePopupMenu(64).at(-2)?.text ?? "", /Thinking\s+← high →/u);
+
+		assert.equal(controller.moveActiveModelThinkingLevel(1), true);
+		assert.equal(controller.selectedModelThinking()?.thinkingLevel, "xhigh");
+
+		assert.equal(controller.moveActivePopupMenuSelection(1), true);
+		assert.equal(controller.selectedModelThinking()?.value.ref, "plain/chat");
+		assert.equal(controller.selectedModelThinking()?.thinkingLevel, "off");
+
+		input = "/model openai/reasoner:xhigh";
+		controller.closeMenusForTabSwitch();
+		controller.resetInputMenuDismissals();
+		assert.equal(controller.syncActivePopupMenu(), "model");
+		assert.equal(controller.selectedModelThinking()?.thinkingLevel, "xhigh");
+	});
+
+	it("routes the direct thinking popup through the combined model selector", () => {
+		const controller = createPopupMenuController({
+			...createPopupMenuHost([]),
+			session: { thinkingLevel: "low" } as never,
+			getModelMenuItems: () => [{
+				value: {
+					model: { provider: "openai", id: "reasoner", reasoning: true } as never,
+					ref: "openai/reasoner",
+					current: true,
+				},
+				label: "openai/reasoner",
+			}],
+		});
+
+		controller.openDirectPopupMenu("thinking");
+
+		assert.equal(controller.syncActivePopupMenu(), "model");
+		assert.equal(controller.selectedModelThinking()?.source, "thinking");
+		assert.match(controller.renderActivePopupMenu(64).at(-1)?.text ?? "", /Enter apply/u);
 	});
 
 

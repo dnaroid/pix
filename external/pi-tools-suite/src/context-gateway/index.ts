@@ -39,7 +39,7 @@ function formatDoctor(runtime: RegisteredContextGateway): string {
 	const lines = [
 		`Context Gateway doctor: requested=${runtime.requestedMode}, effective=${runtime.effectiveMode}.`,
 		"Budgets: read=maxExactReadBytes; repo search/AST/structure=maxSearchBytes; other results=maxResultBytes; compact inline view=maxInlineBytes.",
-		"Enforce: recognised complete simple test/build output=bounded parser compact; partial/unknown/compound/upstream-truncated/non-text=passthrough.",
+		"Enforce: recognised complete simple test/build output=bounded parser compact; over-budget web_search/web_fetch with structured raw details=bounded recoverable compact; unsupported/unsafe results remain passthrough.",
 		"Read: full passthrough even when over budget; exact recovery/archive is not wired, so irreversible read truncation is disabled.",
 		"Repo tools: producer-native compact is supported with repoDiscovery.profile=native-compact; Gateway never post-hoc slices repo output.",
 		"External paths: MCP=current Pix adapter unsupported; direct parent browser capture=unsupported.",
@@ -114,6 +114,7 @@ export function registerContextGateway(
 			const enforcement = effectiveMode === "enforce" && binding
 				? planContextGatewayEnforcement({
 					event,
+					toolCallId: typeof event.toolCallId === "string" ? event.toolCallId : undefined,
 					toolClass: binding.toolClass,
 					shell: binding.shell,
 					budgetBytes: classBudget,
@@ -133,7 +134,7 @@ export function registerContextGateway(
 					},
 				} : {}),
 			});
-			if (enforcement?.representation === "test-build-compact") {
+			if (enforcement && enforcement.representation !== "passthrough") {
 				const originalDetails = event.details && typeof event.details === "object" && !Array.isArray(event.details)
 					? event.details as Record<string, unknown>
 					: {};

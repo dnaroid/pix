@@ -623,12 +623,19 @@ export function resolveAntigravityQuotaModelKey(model: SessionModel): string | u
 	if (normalized.includes("claude") && normalized.includes("opus") && normalized.includes("thinking")) {
 		return "claude-opus-4-6-thinking";
 	}
+	// Sonnet thinking rides the base claude-sonnet-4-6 quota bucket.
 	if (normalized.includes("claude") && normalized.includes("sonnet")) return "claude-sonnet-4-6";
+	// Versioned flash generations get their own buckets; keep them ahead of the
+	// legacy gemini-3-flash alias so 3.5-3.8 don't collapse into it.
+	const versionedFlash = normalized.match(/gemini-3\.([5-8])-flash/u) ?? normalized.match(/\bg3\.([5-8])-flash\b/u);
+	if (versionedFlash) return `gemini-3.${versionedFlash[1]}-flash`;
 	if (normalized.includes("gemini-2.5-flash") || /\bg2[.-]?5-flash\b/u.test(normalized)) return "gemini-2.5-flash";
 	if (normalized.includes("gemini-3-flash") || /\bg3-flash\b/u.test(normalized)) return "gemini-3-flash";
 	if (normalized.includes("gemini-3") && normalized.includes("flash")) return "gemini-3-flash";
 	if (normalized.includes("gemini-3") && normalized.includes("pro")) return "gemini-3.1-pro-low";
 	if (/\bg3(?:-pro)?\b/u.test(normalized)) return "gemini-3.1-pro-low";
+	// GPT-OSS has no Google-side quota bucket; callers treat undefined as "no
+	// quota status for this model".
 
 	return undefined;
 }
@@ -709,6 +716,10 @@ const GOOGLE_ACCOUNT_QUOTA_WINDOWS = [
 	{ label: "Claude Sonnet", quotaModelKey: "claude-sonnet-4-6" },
 	{ label: "G2.5 Flash", quotaModelKey: "gemini-2.5-flash" },
 	{ label: "G3 Flash", quotaModelKey: "gemini-3-flash" },
+	{ label: "G3.5 Flash", quotaModelKey: "gemini-3.5-flash" },
+	{ label: "G3.6 Flash", quotaModelKey: "gemini-3.6-flash" },
+	{ label: "G3.7 Flash", quotaModelKey: "gemini-3.7-flash" },
+	{ label: "G3.8 Flash", quotaModelKey: "gemini-3.8-flash" },
 	{ label: "G3 Pro", quotaModelKey: "gemini-3.1-pro-low" },
 ] as const;
 

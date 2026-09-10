@@ -90,6 +90,7 @@ not duplicate those; Spec Wiki discovers and classifies them independently.
 | [desktop-autocomplete](./desktop-autocomplete.md) | Desktop prompt autocomplete |
 | [desktop-session-sidebar](./desktop-session-sidebar.md) | Desktop session sidebar |
 | [desktop-slash-commands](./desktop-slash-commands.md) | Desktop slash commands and fuzzy search |
+| [desktop-user-message-actions](./desktop-user-message-actions.md) | Desktop user-message Copy, Fork, Fork in new tab, and conflict-safe Undo changes |
 | [desktop-question-tool](./desktop-question-tool.md) | Desktop Question tool |
 | [desktop-text-selection](./desktop-text-selection.md) | Desktop text-selection scopes |
 | [desktop-user-config-editing](./desktop-user-config-editing.md) | Desktop JSONC user-config editing |

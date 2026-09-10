@@ -5930,10 +5930,24 @@ fn start_process(app: AppHandle, window_label: String) -> Result<u64, String> {
         ));
     }
 
+    let workspace_undo_extension = env::var_os("PIX_ACP_WORKSPACE_UNDO_EXTENSION")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../dist/bundled-extensions/workspace-undo/index.js")
+        });
+    if !workspace_undo_extension.is_file() {
+        return Err(format!(
+            "Pix workspace-undo extension not found at {} (run `npm run build:pix` first or set PIX_ACP_WORKSPACE_UNDO_EXTENSION)",
+            workspace_undo_extension.display()
+        ));
+    }
+
     let mut child = Command::new(&node)
         .arg(&entry)
         .env("PIX_ACP_QUESTION_EXTENSION", &question_extension)
         .env("PIX_ACP_SESSION_TITLE_EXTENSION", &session_title_extension)
+        .env("PIX_ACP_WORKSPACE_UNDO_EXTENSION", &workspace_undo_extension)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

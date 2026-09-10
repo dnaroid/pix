@@ -9,6 +9,7 @@
   import Paperclip from "@lucide/svelte/icons/paperclip";
   import Pause from "@lucide/svelte/icons/pause";
   import Square from "@lucide/svelte/icons/square";
+  import WandSparkles from "@lucide/svelte/icons/wand-sparkles";
   import X from "@lucide/svelte/icons/x";
   import { onMount, tick } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
@@ -71,6 +72,7 @@
     autocompleteDebounceMs,
     questionMode,
     onAutocomplete,
+    onEnhance,
     onSubmit,
     onDefer,
     onCreateTask,
@@ -94,6 +96,7 @@
     autocompleteDebounceMs: number;
     questionMode?: QuestionComposerMode;
     onAutocomplete: (draft: string, signal: AbortSignal) => Promise<string>;
+    onEnhance?: () => void | Promise<void>;
     onSubmit: () => void | Promise<void>;
     onDefer: () => void | Promise<void>;
     onCreateTask?: () => void | Promise<void>;
@@ -160,6 +163,15 @@
       && !!activeSessionId
       && ready
       && (hasQueueableDraft || voiceState !== "idle"),
+  );
+  const canEnhancePrompt = $derived(
+    !editorMode
+      && !questionMode
+      && !!onEnhance
+      && !!activeSessionId
+      && ready
+      && !promptRunning
+      && promptText.trim().length >= 3,
   );
   const voiceCanStart = $derived(
     !editorMode && !questionMode && voiceSupported && ready && !!activeSessionId,
@@ -454,6 +466,15 @@
     if (!canCreateTask || !onCreateTask) return;
     await stopVoiceInput();
     await onCreateTask();
+  }
+
+  async function enhanceWithVoiceStop(): Promise<void> {
+    composerMenuOpen = false;
+    if (!canEnhancePrompt || !onEnhance) return;
+    await stopVoiceInput();
+    if (promptText.trim().length < 3) return;
+    await onEnhance();
+    await focus();
   }
 
   function toggleComposerMenu(): void {
@@ -864,6 +885,16 @@
     role="menu"
     aria-label="Composer actions"
   >
+    <button
+      class="flex h-8 w-full cursor-pointer items-center gap-2 rounded-sm px-2 text-left text-xs text-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+      type="button"
+      role="menuitem"
+      disabled={!canEnhancePrompt}
+      onclick={() => void enhanceWithVoiceStop()}
+    >
+      <WandSparkles class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      <span>Enhance prompt</span>
+    </button>
     <button
       class="flex h-8 w-full cursor-pointer items-center gap-2 rounded-sm px-2 text-left text-xs text-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
       type="button"

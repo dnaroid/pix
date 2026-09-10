@@ -36,6 +36,7 @@ export type InputControllerHost = {
 	resetInputMenuDismissals(): void;
 	render(): void;
 	moveActivePopupMenuSelection(delta: number): boolean;
+	moveActiveModelThinkingLevel(delta: number): boolean;
 	navigateRequestHistory(delta: number): boolean;
 	scrollByLines(delta: number): void;
 	scrollByPage(delta: number): void;
@@ -45,7 +46,6 @@ export type InputControllerHost = {
 	handleEscape(): Promise<void>;
 	handleDirectPopupInput(char: string): boolean;
 	autocompleteModel(): boolean;
-	autocompleteThinking(): boolean;
 	acceptAutocompleteSuggestion(): boolean;
 	autocompleteSlashCommand(): void;
 	toggleVoiceRecording(): void;
@@ -490,6 +490,7 @@ export class AppInputController {
 	}
 
 	private handleArrowLeft(): void {
+		if (this.host.moveActiveModelThinkingLevel(-1)) return;
 		if (this.host.inputEditor.hasSelection) {
 			const [start] = this.orderedEditorSelection();
 			this.host.inputEditor.clearSelection();
@@ -504,6 +505,7 @@ export class AppInputController {
 	}
 
 	private handleArrowRight(): void {
+		if (this.host.moveActiveModelThinkingLevel(1)) return;
 		if (this.host.inputEditor.hasSelection) {
 			const [, end] = this.orderedEditorSelection();
 			this.host.inputEditor.clearSelection();
@@ -585,7 +587,6 @@ export class AppInputController {
 			if (this.host.getDirectPopupMenu() === "sdk-menu") return;
 			if (this.host.acceptAutocompleteSuggestion()) return;
 			if (this.host.autocompleteModel()) return;
-			if (this.host.autocompleteThinking()) return;
 			this.host.autocompleteSlashCommand();
 			return;
 		}

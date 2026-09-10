@@ -27,6 +27,9 @@ export interface MessageItem {
   readonly attachments: readonly Attachment[];
   readonly startedAtMs?: number;
   readonly endedAtMs?: number;
+  readonly sessionEntryId?: string;
+  /** Renderer-only user row that has no corresponding Pi session entry. */
+  readonly localOnly?: boolean;
 }
 
 export interface ToolItem {
@@ -127,9 +130,20 @@ export function appendLocalUserMessage(
   text: string,
   id: string,
   attachments: readonly Attachment[] = [],
+  options: { localOnly?: boolean } = {},
 ): TranscriptState {
   return {
-    items: [...state.items, { type: "message", id, role: "user", text, attachments }],
+    items: [
+      ...state.items,
+      {
+        type: "message",
+        id,
+        role: "user",
+        text,
+        attachments,
+        ...(options.localOnly ? { localOnly: true } : {}),
+      },
+    ],
   };
 }
 
@@ -137,6 +151,23 @@ export function appendLocalSystemMessage(state: TranscriptState, text: string, i
   return {
     items: [...state.items, { type: "message", id, role: "system", text, attachments: [] }],
   };
+}
+
+export function bindLocalUserMessageSessionEntry(
+  state: TranscriptState,
+  messageId: string,
+  sessionEntryId: string | undefined,
+): TranscriptState {
+  let changed = false;
+  const items = state.items.map((item) => {
+    if (item.type !== "message" || item.role !== "user" || item.id !== messageId) return item;
+    changed = true;
+    const { sessionEntryId: _sessionEntryId, localOnly: _localOnly, ...base } = item;
+    return sessionEntryId
+      ? { ...base, sessionEntryId }
+      : { ...base, localOnly: true };
+  });
+  return changed ? { items } : state;
 }
 
 export function applySessionUpdate(

@@ -220,10 +220,8 @@ export class AppMouseController {
 		}
 
 		if (target?.kind === "popup-menu") {
-			const activeMenu = this.popupMenus.getActivePopupMenu(this.popupMenus.syncActivePopupMenu() ?? "slash");
-			activeMenu.selectedIndex = target.index;
-			activeMenu.moveSelection(0);
-			void this.popupActions.submitActivePopupMenu();
+			const active = this.popupMenus.selectActivePopupMenuIndex(target.index);
+			if (active !== "model") void this.popupActions.submitActivePopupMenu();
 			this.showClickFlashForEvent(event);
 			return;
 		}

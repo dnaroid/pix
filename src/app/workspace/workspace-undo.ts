@@ -45,6 +45,7 @@ export type WorkspaceRevertResult =
 	| { ok: false; error: string };
 
 const UNDO_INDEX_VERSION = 1;
+export const WORKSPACE_MUTATION_ENTRY_TYPE = "pix-workspace-mutation";
 
 export function workspaceUndoIndexKey(_sessionFile: string | undefined, _sessionId: string, entryId: string): string {
 	return entryId;

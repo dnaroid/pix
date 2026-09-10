@@ -108,6 +108,7 @@ function config(overrides: any = {}): DcpConfig {
         enabled: false,
         patience: 2,
         summarizerModel: [],
+        summarizerFallbackModels: [],
         timeoutMs: 20000,
       },
     },
@@ -3570,10 +3571,12 @@ describe("DCP pruning effectiveness", () => {
     ) as { messages: any[] } | undefined;
     const rendered = result?.messages.map(contentText).join("\n") ?? "";
 
-    expect(rendered).toContain("fresh huge paste");
-    expect(rendered).not.toContain("<dcp-system-reminder>");
-    expect(nudgeEvents).toHaveLength(0);
-    expect(aborts).toBe(1);
+		expect(rendered).toContain("fresh huge paste");
+		expect(rendered).not.toContain("<dcp-system-reminder>");
+		expect(nudgeEvents).toHaveLength(1);
+		expect(nudgeEvents[0]).toMatchObject({ event: "progress-blocked", reason: "live-head-only" });
+		expect(nudgeEvents[0]?.message).toContain("current agent operation is being stopped");
+		expect(aborts).toBe(1);
   });
 
   test("DCP does not spam routine reminders when no candidate exists below emergency pressure", async () => {

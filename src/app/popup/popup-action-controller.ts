@@ -43,7 +43,6 @@ export class AppPopupActionController {
 		if (active === "user-message-jump") return await this.submitSelectedUserMessageJump();
 		if (active === "resume") return await this.submitSelectedResume();
 		if (active === "model") return await this.submitSelectedModel();
-		if (active === "thinking") return await this.submitSelectedThinking();
 		if (active === "sdk-menu") return this.popupMenus.submitSelectedSdkMenu();
 		if (active === "slash") return await this.submitSelectedSlashCommand();
 		return false;
@@ -116,47 +115,26 @@ export class AppPopupActionController {
 
 	private async submitSelectedModel(): Promise<boolean> {
 		const scope = this.captureScope();
-		const selected = this.popupMenus.selectedModel();
+		const selected = this.popupMenus.selectedModelThinking();
 		if (!selected) return false;
 
 		this.popupMenus.closeModelSelection();
 		if (!selected.direct) {
 			this.host.setInput("");
-			this.host.addEntry({ id: createId("system"), kind: "system", text: `command: /model ${selected.value.ref}` });
+			this.host.addEntry({
+				id: createId("system"),
+				kind: "system",
+				text: `command: /model ${selected.value.ref}:${selected.thinkingLevel}`,
+			});
 		}
 		this.host.render();
 
 		try {
-			await this.commandController.runModelCommand(selected.value.model);
+			await this.commandController.runModelThinkingCommand(selected.value.model, selected.thinkingLevel);
 		} catch (error) {
 			if (!this.isScopeActive(scope)) return true;
 			this.host.addEntry({ id: createId("error"), kind: "error", text: stringifyUnknown(error) });
-			this.host.showToast("/model failed", "error");
-			this.host.setSessionStatus(this.host.runtime()?.session);
-		}
-
-		if (this.isScopeActive(scope)) this.host.render();
-		return true;
-	}
-
-	private async submitSelectedThinking(): Promise<boolean> {
-		const scope = this.captureScope();
-		const selected = this.popupMenus.selectedThinking();
-		if (!selected) return false;
-
-		this.popupMenus.closeThinkingSelection();
-		if (!selected.direct) {
-			this.host.setInput("");
-			this.host.addEntry({ id: createId("system"), kind: "system", text: `command: /thinking ${selected.value.level}` });
-		}
-		this.host.render();
-
-		try {
-			await this.commandController.runThinkingCommand(selected.value.level);
-		} catch (error) {
-			if (!this.isScopeActive(scope)) return true;
-			this.host.addEntry({ id: createId("error"), kind: "error", text: stringifyUnknown(error) });
-			this.host.showToast("/thinking failed", "error");
+			this.host.showToast("Model selection failed", "error");
 			this.host.setSessionStatus(this.host.runtime()?.session);
 		}
 

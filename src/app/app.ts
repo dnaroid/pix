@@ -801,6 +801,7 @@ export class PiUiExtendApp {
 			resetInputMenuDismissals: () => this.popupMenus.resetInputMenuDismissals(),
 			render: () => this.render(),
 			moveActivePopupMenuSelection: (delta) => this.popupMenus.moveActivePopupMenuSelection(delta as -1 | 1),
+			moveActiveModelThinkingLevel: (delta) => this.popupMenus.moveActiveModelThinkingLevel(delta as -1 | 1),
 			navigateRequestHistory: (delta) => this.requestHistory.navigate(delta as -1 | 1),
 			scrollByLines: (delta) => this.scrollController.scrollByLines(delta),
 			scrollByPage: (delta) => this.scrollController.scrollByPage(delta as -1 | 1),
@@ -810,7 +811,6 @@ export class PiUiExtendApp {
 			handleEscape: () => this.inputActions.handleEscape(),
 			handleDirectPopupInput: (char) => this.popupMenus.handleDirectPopupInput(char),
 			autocompleteModel: () => this.popupMenus.autocompleteModel(),
-			autocompleteThinking: () => this.popupMenus.autocompleteThinking(),
 			acceptAutocompleteSuggestion: () => this.autocompleteController.acceptSuggestion(),
 			autocompleteSlashCommand: () => this.popupMenus.autocompleteSlashCommand(),
 			toggleVoiceRecording: () => {

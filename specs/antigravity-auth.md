@@ -60,6 +60,25 @@ capacity limits. `[confirmed by code: src/antigravity-auth/index.ts]`
 - When all accounts are tried **and** the failure was a *limit* (quota/rate) failure, the error includes marker `ANTIGRAVITY_ALL_ACCOUNTS_EXHAUSTED model=<id> status=<n>`. Non-limit capacity failures (e.g. plain 503) report `Antigravity request failed (<status>)` without the all-exhausted marker. `[confirmed by code: stream.ts; confirmed by tests]`
 - Parses SSE (`data:` frames), maps text/thinking/functionCall parts, computes usage/cost, maps stop reasons (`STOP`→stop, `MAX_TOKENS`→length). `[confirmed by code: stream.ts]`
 
+### Model catalog & live route mapping
+- `models.ts` registers the Pi-compatible Antigravity catalog synced to the upstream cortexkit registry (commit `fa48c66f2d931a9182d9c2fa38cdb1d9c4d61f10`, `packages/core/src/model-registry.ts` + `transform/model-resolver.ts`): `antigravity-gemini-3.8-flash`, `antigravity-gemini-3.7-flash`, `antigravity-gemini-3.6-flash`, `antigravity-gemini-3.5-flash`, `antigravity-gemini-3.1-pro`, `antigravity-claude-sonnet-4-6-thinking`, `antigravity-claude-opus-4-6-thinking`, `antigravity-gpt-oss-120b-medium`. The upstream image-output model is **not** registered because the Pi protocol cannot represent image-only output. `[confirmed by code: models.ts]`
+- Legacy Antigravity aliases are kept: `antigravity-gemini-3-flash` (string `thinkingLevel` routing; its live route also backs the 3.5-flash high tier) and `antigravity-claude-sonnet-4-6` (no thinking config). `[confirmed by code: models.ts]`
+- Gemini CLI mirror models (`gemini-2.5-flash`, `gemini-3-flash-preview`, `gemini-3.1-pro-preview`, `gemini-3.1-pro-preview-customtools`) keep their ids and `antigravityHeaderStyle: "antigravity"` headers. The flash previews keep string `thinkingLevel` routing; the 3.1 Pro preview shares the 3.1 Pro family and therefore also resolves to the upstream numeric routes (`gemini-3.1-pro-low` / `gemini-pro-agent`) instead of the old force-clamp that mapped high thinking onto `gemini-3.1-pro-low`. `[confirmed by code: models.ts, payload.ts]`
+- Live route resolution (`payload.ts resolveActualModel`, Antigravity header style only), mirroring the upstream resolver:
+  - 3.5 Flash: low → `gemini-3.5-flash-extra-low`, medium/default → `gemini-3.5-flash-low`, high → `gemini-3-flash-agent`; budgets low 1000 / medium 4000 / high 10000.
+  - 3.6 Flash: `gemini-3.6-flash-{low|medium|high}` with budgets 1000 / 4000 / 10000.
+  - 3.7 / 3.8 Flash: `gemini-3.{7,8}-flash-{low|medium|high}` with the dynamic-budget sentinel `-1` for every tier.
+  - 3.1 Pro: low/default → `gemini-3.1-pro-low` (budget 1001); high → `gemini-pro-agent` (budget 10001).
+  - GPT-OSS: `gpt-oss-120b-medium` with **no** thinkingConfig (effort "medium" is baked into the route).
+  - Sonnet 4.6 Thinking: base route `claude-sonnet-4-6` (the `-thinking` suffix is stripped) with Claude-style `thinking_budget`/`include_thoughts`; Opus keeps the dedicated `claude-opus-4-6-thinking` route.
+  - All new flash/pro routes send numeric `thinkingBudget` + `includeThoughts: true`; no thinking config is attached to any image route. `[confirmed by code: payload.ts; confirmed by tests]`
+- `extraHeadersForPayload` adds `anthropic-beta: interleaved-thinking-2025-05-14` for Claude payloads whose model name contains `thinking` **or** whose `generationConfig.thinkingConfig` carries a `thinking_budget` (needed since the Sonnet route name no longer contains "thinking"). `[confirmed by code: payload.ts]`
+- `isGemini3Model` treats `gemini-pro-agent` as a Gemini-3 route so functionCall history gets the `skip_thought_signature_validator` sentinel. `[confirmed by code: payload.ts]`
+
+### Quota keys (host `src/app/model/model-usage-status.ts`)
+- `resolveAntigravityQuotaModelKey` maps catalog models to Google quota buckets: `antigravity-gemini-3.{5..8}-flash` → `gemini-3.{5..8}-flash`; Sonnet (incl. thinking) → `claude-sonnet-4-6`; Opus thinking → `claude-opus-4-6-thinking`; 3.1 Pro → `gemini-3.1-pro-low`; legacy aliases (`gemini-3-flash`, `gemini-2.5-flash`, `G3`/`G3 Flash`/`G3-pro` shorthands) unchanged. GPT-OSS has no Google-side bucket (descriptor → undefined → no quota widget). The account report additionally lists `G3.5`–`G3.8 Flash` windows, rendered only when the quota API returns those buckets. `[confirmed by code: model-usage-status.ts; confirmed by tests]`
+
+
 ### Import from opencode — `importOpencodeAntigravityAccount`
 - Reads opencode `antigravity-accounts.json` (path from `OPENCODE_CONFIG_DIR` / `XDG_CONFIG_HOME` / `~/.config/opencode`), selects by index/email or active index, and writes into pi auth. `[confirmed by code: auth-store.ts]`
 - Refuses to overwrite an existing, different credential unless `overwrite` is set (returns reason `auth-exists-use-force`). Returns `already-imported` when refresh matches. `[confirmed by code: auth-store.ts]`
@@ -107,6 +126,8 @@ capacity limits. `[confirmed by code: src/antigravity-auth/index.ts]`
 
 - `external/pi-tools-suite/test/antigravity-auth.test.ts` (`bun:test`, `describe.serial "Antigravity account rotation"`): `[confirmed by tests]`
   - Antigravity reasoning levels are clamped to the provider's supported `high` maximum.
+  - Model catalog test pins the exact registered model id order (current catalog + legacy aliases + Gemini CLI mirrors, no image-output models).
+  - Deterministic payload mapping tests pin every new public id → live route/budget combination (3.5/3.6/3.7/3.8 Flash tiers, 3.1 Pro low/agent, GPT-OSS, Sonnet/Opus thinking) and assert legacy Antigravity and Gemini CLI routes are unchanged.
   - OAuth client credentials preserved across refresh.
   - SDK cancellation propagates into OAuth refresh.
   - Nullable header deletion markers are removed before raw fetch.

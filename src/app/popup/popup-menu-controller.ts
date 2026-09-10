@@ -8,12 +8,13 @@ import {
 	RESUME_MENU_LOAD_THRESHOLD_ROWS,
 	RESUME_MENU_MAX_ROWS,
 	SLASH_COMMAND_MENU_MAX_ROWS,
-	THINKING_MENU_MAX_ROWS,
+	THINKING_LEVELS,
 } from "../constants.js";
 import type {
 	ActivePopupMenu,
 	Entry,
 	ModelMenuValue,
+	ModelThinkingMenuState,
 	ParsedSlashInput,
 	PixMenuController,
 	PixMenuItem,
@@ -24,15 +25,16 @@ import type {
 	RenderedLine,
 	ResumeMenuValue,
 	SlashCommand,
+	ThinkingLevel,
 	ThinkingMenuValue,
 	UserMessageJumpMenuValue,
 	UserMessageMenuValue,
 } from "../types.js";
 import type { AgentSession, SessionInfo } from "@earendil-works/pi-coding-agent";
+import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 
 type SlashCommandMenuValue = SlashCommand;
 type ModelPopupMenuValue = ModelMenuValue;
-type ThinkingPopupMenuValue = ThinkingMenuValue;
 type ResumePopupMenuValue = ResumeMenuValue;
 type UserMessagePopupMenuValue = UserMessageMenuValue;
 type UserMessageJumpPopupMenuValue = UserMessageJumpMenuValue;
@@ -53,8 +55,7 @@ type PopupMenuRendererPort = {
 	overlayPlainText(line: RenderedLine, width: number): string;
 	renderUserMessageMenu(width: number, menu: PopupMenu<UserMessagePopupMenuValue>): RenderedLine[];
 	renderSlashCommandMenu(width: number, menu: PopupMenu<SlashCommandMenuValue>): RenderedLine[];
-	renderModelMenu(width: number, menu: PopupMenu<ModelPopupMenuValue>): RenderedLine[];
-	renderThinkingMenu(width: number, menu: PopupMenu<ThinkingPopupMenuValue>): RenderedLine[];
+	renderModelMenu(width: number, menu: PopupMenu<ModelPopupMenuValue>, state: ModelThinkingMenuState): RenderedLine[];
 	renderResumeMenu(
 		width: number,
 		menu: PopupMenu<ResumePopupMenuValue>,
@@ -106,7 +107,6 @@ export class AppPopupMenuController {
 
 	private readonly slashCommandMenu = new PopupMenu<SlashCommandMenuValue>({ maxVisibleRows: SLASH_COMMAND_MENU_MAX_ROWS });
 	private readonly modelMenu = new PopupMenu<ModelPopupMenuValue>({ maxVisibleRows: SLASH_COMMAND_MENU_MAX_ROWS });
-	private readonly thinkingMenu = new PopupMenu<ThinkingPopupMenuValue>({ maxVisibleRows: THINKING_MENU_MAX_ROWS });
 	private readonly resumeMenu = new PopupMenu<ResumePopupMenuValue>({ maxVisibleRows: RESUME_MENU_MAX_ROWS });
 	private readonly userMessageMenu = new PopupMenu<UserMessagePopupMenuValue>({ maxVisibleRows: 4 });
 	private readonly userMessageJumpMenu = new PopupMenu<UserMessageJumpPopupMenuValue>({ maxVisibleRows: RESUME_MENU_MAX_ROWS });
@@ -118,8 +118,11 @@ export class AppPopupMenuController {
 	private dismissedSlashCommandMenuInput: string | undefined;
 	private modelMenuQuery = "";
 	private dismissedModelMenuInput: string | undefined;
-	private thinkingMenuQuery = "";
+	private modelThinkingInputQuery = "";
 	private dismissedThinkingMenuInput: string | undefined;
+	private modelThinkingLevel: ThinkingLevel | undefined;
+	private modelThinkingSelectedRef: string | undefined;
+	private modelThinkingSource: "model" | "thinking" = "model";
 	private directPopupMenu: DirectPopupMenu | undefined;
 	private directPopupMenuPreserveStatus = false;
 	private directPopupMenuPlacement: PopupMenuPlacement = "default";
@@ -141,6 +144,9 @@ export class AppPopupMenuController {
 	}
 
 	setDirectMenu(menu: DirectPopupMenu | undefined): void {
+		if (menu !== this.directPopupMenu && (
+			menu === "model" || menu === "thinking" || this.directPopupMenu === "model" || this.directPopupMenu === "thinking"
+		)) this.resetModelThinkingState();
 		this.directPopupMenu = menu;
 		if (!menu) this.directPopupMenuPlacement = "default";
 	}
@@ -216,7 +222,7 @@ export class AppPopupMenuController {
 			case "model":
 				return this.modelMenu;
 			case "thinking":
-				return this.thinkingMenu;
+				return this.modelMenu;
 			case "resume":
 				return this.resumeMenu;
 			case "slash":
@@ -229,6 +235,20 @@ export class AppPopupMenuController {
 		if (!active) return false;
 
 		this.getActivePopupMenu(active).moveSelection(delta);
+		if (active === "model") this.syncModelThinkingToSelectedModel();
+		this.host.render();
+		return true;
+	}
+
+	moveActiveModelThinkingLevel(delta: number): boolean {
+		if (this.syncActivePopupMenu() !== "model") return false;
+		const state = this.modelThinkingMenuState();
+		const levels = state.availableThinkingLevels;
+		if (levels.length === 0) return true;
+
+		const currentIndex = Math.max(0, levels.indexOf(state.thinkingLevel));
+		const nextIndex = (currentIndex + delta + levels.length) % levels.length;
+		this.modelThinkingLevel = levels[nextIndex] ?? state.thinkingLevel;
 		this.host.render();
 		return true;
 	}
@@ -238,8 +258,20 @@ export class AppPopupMenuController {
 		if (!active) return false;
 
 		this.getActivePopupMenu(active).scroll(delta);
+		if (active === "model") this.syncModelThinkingToSelectedModel();
 		this.host.render();
 		return true;
+	}
+
+	selectActivePopupMenuIndex(index: number): ActivePopupMenu | undefined {
+		const active = this.syncActivePopupMenu();
+		if (!active) return undefined;
+		const menu = this.getActivePopupMenu(active);
+		menu.selectedIndex = index;
+		menu.moveSelection(0);
+		if (active === "model") this.syncModelThinkingToSelectedModel();
+		this.host.render();
+		return active;
 	}
 
 	handleDirectPopupInput(char: string): boolean {
@@ -269,6 +301,10 @@ export class AppPopupMenuController {
 			this.closeSdkMenu(undefined, { render: false, restoreStatus: false });
 		}
 		this.directPopupMenu = menu;
+		if (menu === "model" || menu === "thinking") {
+			this.resetModelThinkingState();
+			this.modelThinkingSource = menu;
+		}
 		this.directPopupMenuPreserveStatus = options.preserveStatus === true;
 		this.directPopupMenuPlacement = options.placement ?? "default";
 		this.directPopupMenuQuery = "";
@@ -279,7 +315,6 @@ export class AppPopupMenuController {
 		this.dismissedThinkingMenuInput = undefined;
 		this.slashCommandMenu.close();
 		this.modelMenu.close();
-		this.thinkingMenu.close();
 		this.resumeMenu.close();
 		this.userMessageMenu.close();
 		this.queueMessageMenu.close();
@@ -362,18 +397,12 @@ export class AppPopupMenuController {
 
 	closeModelSelection(): void {
 		this.modelMenu.close();
-		this.directPopupMenu = undefined;
+		if (this.directPopupMenu === "model" || this.directPopupMenu === "thinking") this.directPopupMenu = undefined;
 		this.directPopupMenuPreserveStatus = false;
 		this.directPopupMenuQuery = "";
 		this.dismissedModelMenuInput = undefined;
-	}
-
-	closeThinkingSelection(): void {
-		this.thinkingMenu.close();
-		this.directPopupMenu = undefined;
-		this.directPopupMenuPreserveStatus = false;
-		this.directPopupMenuQuery = "";
 		this.dismissedThinkingMenuInput = undefined;
+		this.resetModelThinkingState();
 	}
 
 	closeSlashCommandSelection(): void {
@@ -394,7 +423,6 @@ export class AppPopupMenuController {
 		this.activeQueuedMessageEntryId = undefined;
 		this.slashCommandMenu.close();
 		this.modelMenu.close();
-		this.thinkingMenu.close();
 		this.resumeMenu.close();
 		this.userMessageMenu.close();
 		this.userMessageJumpMenu.close();
@@ -405,6 +433,7 @@ export class AppPopupMenuController {
 		this.dismissedSlashCommandMenuInput = input;
 		this.dismissedModelMenuInput = input;
 		this.dismissedThinkingMenuInput = input;
+		this.resetModelThinkingState();
 	}
 
 	cancelActivePopupMenu(): void {
@@ -414,17 +443,18 @@ export class AppPopupMenuController {
 			return;
 		}
 		if (this.directPopupMenu) {
+			const closingCombinedModelMenu = this.directPopupMenu === "model" || this.directPopupMenu === "thinking";
 			this.directPopupMenu = undefined;
 			this.directPopupMenuQuery = "";
 			this.activeUserMessageEntryId = undefined;
 			this.activeQueuedMessageEntryId = undefined;
 			this.modelMenu.close();
-			this.thinkingMenu.close();
 			this.resumeMenu.close();
 			this.userMessageMenu.close();
 			this.userMessageJumpMenu.close();
 			this.queueMessageMenu.close();
 			this.sdkMenu.close();
+			if (closingCombinedModelMenu) this.resetModelThinkingState();
 			const preserveStatus = this.directPopupMenuPreserveStatus;
 			this.directPopupMenuPreserveStatus = false;
 			if (!preserveStatus) this.host.restoreSessionStatus();
@@ -434,10 +464,9 @@ export class AppPopupMenuController {
 
 		if (active === "model") {
 			this.dismissedModelMenuInput = this.host.getInput();
-			this.modelMenu.close();
-		} else if (active === "thinking") {
 			this.dismissedThinkingMenuInput = this.host.getInput();
-			this.thinkingMenu.close();
+			this.modelMenu.close();
+			this.resetModelThinkingState();
 		} else if (active === "slash") {
 			this.dismissedSlashCommandMenuInput = this.host.getInput();
 			this.slashCommandMenu.close();
@@ -456,22 +485,11 @@ export class AppPopupMenuController {
 
 	autocompleteModel(): boolean {
 		if (!this.syncModelMenu()) return false;
-		const selected = this.selectedModel();
+		const selected = this.selectedModelThinking();
 		if (!selected) return true;
 
 		if (selected.direct) return true;
-		this.host.setInput(`/model ${selected.value.ref}`);
-		this.host.render();
-		return true;
-	}
-
-	autocompleteThinking(): boolean {
-		if (!this.syncThinkingMenu()) return false;
-		const selected = this.selectedThinking();
-		if (!selected) return true;
-
-		if (selected.direct) return true;
-		this.host.setInput(`/thinking ${selected.value.level}`);
+		this.host.setInput(`/model ${selected.value.ref}:${selected.thinkingLevel}`);
 		this.host.render();
 		return true;
 	}
@@ -485,14 +503,25 @@ export class AppPopupMenuController {
 		if (!this.syncModelMenu()) return undefined;
 		const value = this.modelMenu.selectedItem()?.value;
 		if (!value) return undefined;
-		return { value, direct: this.directPopupMenu === "model" };
+		return { value, direct: this.directPopupMenu === "model" || this.directPopupMenu === "thinking" };
 	}
 
-	selectedThinking(): { value: ThinkingMenuValue; direct: boolean } | undefined {
-		if (!this.syncThinkingMenu()) return undefined;
-		const value = this.thinkingMenu.selectedItem()?.value;
+	selectedModelThinking(): {
+		value: ModelMenuValue;
+		thinkingLevel: ThinkingLevel;
+		direct: boolean;
+		source: "model" | "thinking";
+	} | undefined {
+		if (!this.syncModelMenu()) return undefined;
+		const value = this.modelMenu.selectedItem()?.value;
 		if (!value) return undefined;
-		return { value, direct: this.directPopupMenu === "thinking" };
+		const state = this.modelThinkingMenuState();
+		return {
+			value,
+			thinkingLevel: state.thinkingLevel,
+			direct: this.directPopupMenu === "model" || this.directPopupMenu === "thinking",
+			source: state.source,
+		};
 	}
 
 	selectedResume(): ResumeMenuValue | undefined {
@@ -534,7 +563,6 @@ export class AppPopupMenuController {
 		if (this.syncResumeMenu()) return "resume";
 		if (this.syncSdkMenu()) return "sdk-menu";
 		if (this.syncModelMenu()) return "model";
-		if (this.syncThinkingMenu()) return "thinking";
 		if (this.syncSlashCommandMenu()) return "slash";
 		return undefined;
 	}
@@ -551,8 +579,7 @@ export class AppPopupMenuController {
 			});
 		}
 		if (this.syncSdkMenu()) return this.renderer.renderSdkMenu(width, this.sdkMenu, this.sdkMenuRequest, this.directPopupMenuQuery);
-		if (this.syncModelMenu()) return this.renderer.renderModelMenu(width, this.modelMenu);
-		if (this.syncThinkingMenu()) return this.renderer.renderThinkingMenu(width, this.thinkingMenu);
+		if (this.syncModelMenu()) return this.renderer.renderModelMenu(width, this.modelMenu, this.modelThinkingMenuState());
 		return this.syncSlashCommandMenu() ? this.renderer.renderSlashCommandMenu(width, this.slashCommandMenu) : [];
 	}
 
@@ -639,51 +666,129 @@ export class AppPopupMenuController {
 	}
 
 	private syncModelMenu(): boolean {
-		if (this.directPopupMenu === "model") {
+		if (this.directPopupMenu === "model" || this.directPopupMenu === "thinking") {
+			const source = this.directPopupMenu;
+			const opening = !this.modelMenu.open || this.modelThinkingSource !== source;
+			if (opening) {
+				this.resetPopupMenuSelection(this.modelMenu);
+				this.resetModelThinkingState();
+				this.modelThinkingSource = source;
+			}
 			this.closeMenusExcept("model");
 			this.modelMenu.openWithItems(this.withoutCloseMenuItems(this.host.getModelMenuItems(this.directPopupMenuQuery)));
+			this.syncModelThinkingToSelectedModel();
 			return true;
 		}
 
 		const parsed = this.host.parseSlashInput(this.host.getInput());
-		if (parsed?.commandName.toLowerCase() !== "model" || this.dismissedModelMenuInput === this.host.getInput()) {
+		const source = parsed?.commandName.toLowerCase();
+		const combinedSource = source === "model" || source === "thinking" ? source : undefined;
+		const dismissed = combinedSource === "thinking"
+			? this.dismissedThinkingMenuInput === this.host.getInput()
+			: this.dismissedModelMenuInput === this.host.getInput();
+		if (!combinedSource || dismissed) {
+			if (this.modelMenu.open) this.resetModelThinkingState();
 			this.modelMenu.close();
 			return false;
 		}
 
-		const query = parsed.hasArguments ? parsed.arguments : "";
-		if (this.modelMenuQuery !== query) {
+		const rawQuery = parsed?.hasArguments ? parsed.arguments : "";
+		const normalizedThinkingQuery = rawQuery.trim().toLowerCase();
+		const parsedQuery = combinedSource === "model"
+			? this.modelThinkingQuery(rawQuery)
+			: THINKING_LEVELS.includes(normalizedThinkingQuery as ThinkingLevel)
+				? { modelQuery: "", thinkingQuery: normalizedThinkingQuery }
+				: { modelQuery: rawQuery };
+		const opening = !this.modelMenu.open || this.modelThinkingSource !== combinedSource;
+		if (opening || this.modelMenuQuery !== parsedQuery.modelQuery) {
 			this.resetPopupMenuSelection(this.modelMenu);
-			this.modelMenuQuery = query;
+			this.modelMenuQuery = parsedQuery.modelQuery;
+		}
+		if (opening) {
+			this.resetModelThinkingState();
+			this.modelThinkingSource = combinedSource;
 		}
 
 		this.closeMenusExcept("model");
-		this.modelMenu.openWithItems(this.withoutCloseMenuItems(this.host.getModelMenuItems(query)));
+		this.modelMenu.openWithItems(this.withoutCloseMenuItems(this.host.getModelMenuItems(parsedQuery.modelQuery)));
+		this.syncModelThinkingToSelectedModel();
+		if (parsedQuery.thinkingQuery !== undefined && this.modelThinkingInputQuery !== parsedQuery.thinkingQuery) {
+			this.modelThinkingInputQuery = parsedQuery.thinkingQuery;
+			this.stageThinkingFromQuery(parsedQuery.thinkingQuery);
+		}
 		return true;
 	}
 
-	private syncThinkingMenu(): boolean {
-		if (this.directPopupMenu === "thinking") {
-			this.closeMenusExcept("thinking");
-			this.thinkingMenu.openWithItems(this.withoutCloseMenuItems(this.host.getThinkingMenuItems(this.directPopupMenuQuery)));
-			return true;
-		}
+	private modelThinkingQuery(query: string): { modelQuery: string; thinkingQuery?: string } {
+		const trimmed = query.trim();
+		const separator = trimmed.lastIndexOf(":");
+		if (separator <= trimmed.indexOf("/")) return { modelQuery: query };
+		const thinkingQuery = trimmed.slice(separator + 1).toLowerCase();
+		if (!THINKING_LEVELS.includes(thinkingQuery as ThinkingLevel)) return { modelQuery: query };
+		return { modelQuery: trimmed.slice(0, separator), thinkingQuery };
+	}
 
-		const parsed = this.host.parseSlashInput(this.host.getInput());
-		if (parsed?.commandName.toLowerCase() !== "thinking" || this.dismissedThinkingMenuInput === this.host.getInput()) {
-			this.thinkingMenu.close();
-			return false;
-		}
+	private stageThinkingFromQuery(query: string): void {
+		if (!query.trim()) return;
+		const normalized = query.trim().toLowerCase();
+		const level = THINKING_LEVELS.includes(normalized as ThinkingLevel)
+			? normalized as ThinkingLevel
+			: this.host.getThinkingMenuItems(query)[0]?.value.level;
+		if (!level) return;
+		this.modelThinkingLevel = this.clampThinkingLevel(level, this.selectedModelThinkingLevels());
+	}
 
-		const query = parsed.hasArguments ? parsed.arguments : "";
-		if (this.thinkingMenuQuery !== query) {
-			this.resetPopupMenuSelection(this.thinkingMenu);
-			this.thinkingMenuQuery = query;
-		}
+	private modelThinkingMenuState(): ModelThinkingMenuState {
+		this.syncModelThinkingToSelectedModel();
+		const availableThinkingLevels = this.selectedModelThinkingLevels();
+		return {
+			thinkingLevel: this.modelThinkingLevel ?? availableThinkingLevels[0] ?? "off",
+			availableThinkingLevels,
+			source: this.modelThinkingSource,
+		};
+	}
 
-		this.closeMenusExcept("thinking");
-		this.thinkingMenu.openWithItems(this.withoutCloseMenuItems(this.host.getThinkingMenuItems(query)));
-		return true;
+	private syncModelThinkingToSelectedModel(): void {
+		const selected = this.modelMenu.selectedItem()?.value;
+		if (!selected) {
+			this.modelThinkingSelectedRef = undefined;
+			return;
+		}
+		const levels = this.selectedModelThinkingLevels();
+		const initial = this.modelThinkingLevel ?? this.host.session?.thinkingLevel ?? "off";
+		if (this.modelThinkingSelectedRef !== selected.ref || this.modelThinkingLevel === undefined) {
+			this.modelThinkingLevel = this.clampThinkingLevel(initial, levels);
+			this.modelThinkingSelectedRef = selected.ref;
+		}
+	}
+
+	private selectedModelThinkingLevels(): ThinkingLevel[] {
+		const model = this.modelMenu.selectedItem()?.value.model;
+		if (!model) return ["off"];
+		const supported = getSupportedThinkingLevels(model);
+		const levels = THINKING_LEVELS.filter((level) => supported.includes(level));
+		return levels.length > 0 ? levels : ["off"];
+	}
+
+	private clampThinkingLevel(level: ThinkingLevel, availableLevels: readonly ThinkingLevel[]): ThinkingLevel {
+		if (availableLevels.includes(level)) return level;
+		const requestedIndex = THINKING_LEVELS.indexOf(level);
+		for (let index = Math.max(0, requestedIndex); index < THINKING_LEVELS.length; index += 1) {
+			const candidate = THINKING_LEVELS[index];
+			if (candidate && availableLevels.includes(candidate)) return candidate;
+		}
+		for (let index = requestedIndex - 1; index >= 0; index -= 1) {
+			const candidate = THINKING_LEVELS[index];
+			if (candidate && availableLevels.includes(candidate)) return candidate;
+		}
+		return availableLevels[0] ?? "off";
+	}
+
+	private resetModelThinkingState(): void {
+		this.modelThinkingLevel = undefined;
+		this.modelThinkingSelectedRef = undefined;
+		this.modelMenuQuery = "";
+		this.modelThinkingInputQuery = "";
 	}
 
 	private syncResumeMenu(): boolean {
@@ -784,7 +889,6 @@ export class AppPopupMenuController {
 	private closeMenusExcept(active: ActivePopupMenu): void {
 		if (active !== "slash") this.slashCommandMenu.close();
 		if (active !== "model") this.modelMenu.close();
-		if (active !== "thinking") this.thinkingMenu.close();
 		if (active !== "resume") this.resumeMenu.close();
 		if (active !== "user-message") this.userMessageMenu.close();
 		if (active !== "user-message-jump") this.userMessageJumpMenu.close();
@@ -1038,7 +1142,6 @@ export type {
 	QueueMessagePopupMenuValue,
 	ResumePopupMenuValue,
 	SlashCommandMenuValue,
-	ThinkingPopupMenuValue,
 	UserMessageJumpPopupMenuValue,
 	UserMessagePopupMenuValue,
 };

@@ -8,8 +8,33 @@ import { loadSessionHistoryEntriesAsync, type SessionHistoryOlderLoader } from "
 import { openLazySessionManager } from "../src/app/session/lazy-session-manager.js";
 import { PIX_SYSTEM_DISPLAY_ENTRY_CUSTOM_TYPE, sessionHistoryDisplayMessages, sessionHistoryOlderMessagesReader } from "../src/app/session/pix-system-message.js";
 import type { Entry } from "../src/app/types.js";
+import { WORKSPACE_MUTATION_ENTRY_TYPE } from "../src/app/workspace/workspace-undo.js";
 
 describe("loadSessionHistoryEntriesAsync", () => {
+	it("renders persisted terminal assistant errors even when the assistant body is empty", async () => {
+		const entries: Entry[] = [];
+		await loadSessionHistoryEntriesAsync({
+			messages: [
+				{ role: "user", content: "continue" },
+				{ role: "assistant", content: [], stopReason: "error", errorMessage: "This operation was aborted" },
+			],
+			addEntry: (entry) => entries.push(entry),
+			prependEntries: (older) => entries.unshift(...older),
+			setToolEntryId: () => {},
+			toolDefaultExpanded: () => false,
+			observeSubagentsToolResult: () => {},
+			observeTodoToolResult: () => {},
+			render: () => {},
+			isCancelled: () => false,
+			lazyOlderHistory: false,
+		});
+
+		assert.deepEqual(entries.map((entry) => [entry.kind, "text" in entry ? entry.text : undefined]), [
+			["user", "continue"],
+			["error", "This operation was aborted"],
+		]);
+	});
+
 	it("renders pix system custom messages as system entries", async () => {
 		const entries: Entry[] = [];
 
@@ -40,7 +65,8 @@ describe("loadSessionHistoryEntriesAsync", () => {
 					{ type: "message", id: "u1", parentId: null, timestamp: "2026-01-01T00:00:00.000Z", message: { role: "user", content: "hello" } },
 					{ type: "custom", id: "s1", parentId: "u1", timestamp: "2026-01-01T00:00:01.000Z", customType: PIX_SYSTEM_DISPLAY_ENTRY_CUSTOM_TYPE, data: { text: "Selected thinking level high" } },
 					{ type: "custom", id: "e1", parentId: "s1", timestamp: "2026-01-01T00:00:02.000Z", customType: "demo:status", data: { label: "ready" } },
-					{ type: "message", id: "a1", parentId: "e1", timestamp: "2026-01-01T00:00:03.000Z", message: { role: "assistant", content: [{ text: "done" }] } },
+					{ type: "custom", id: "m1", parentId: "e1", timestamp: "2026-01-01T00:00:02.500Z", customType: WORKSPACE_MUTATION_ENTRY_TYPE, data: { userEntryId: "u1", mutation: { type: "write", path: "a.txt", afterContent: "done" } } },
+					{ type: "message", id: "a1", parentId: "m1", timestamp: "2026-01-01T00:00:03.000Z", message: { role: "assistant", content: [{ text: "done" }] } },
 				],
 			},
 		} as never);

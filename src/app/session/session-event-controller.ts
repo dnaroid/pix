@@ -4,7 +4,7 @@ import type { ImageContent } from "../../input-editor.js";
 import type { ConversationViewport } from "../rendering/conversation-viewport.js";
 import { createId } from "../id.js";
 import { extractImageContents, renderContent, renderUserMessageContent, stringifyUnknown } from "../rendering/message-content.js";
-import { customMessageEntry, extensionSessionEntry, loadSessionHistoryEntries, loadSessionHistoryEntriesAsync, type LoadOlderSessionHistoryOptions, type SessionHistoryOlderLoader } from "./session-history.js";
+import { assistantTerminalErrorText, customMessageEntry, extensionSessionEntry, loadSessionHistoryEntries, loadSessionHistoryEntriesAsync, type LoadOlderSessionHistoryOptions, type SessionHistoryOlderLoader } from "./session-history.js";
 import { sessionHistoryDisplayMessages, sessionHistoryDisplayMessagesFromEntries, sessionHistoryFullBranchEntries, sessionHistoryOlderMessagesReader } from "./pix-system-message.js";
 import { THINKING_TOOL_NAME } from "../constants.js";
 import type { Entry, SessionActivity } from "../types.js";
@@ -115,6 +115,7 @@ export class AppSessionEventController {
 	private currentThinkingEntryStartedAt: number | undefined;
 	private thinkingElapsedRenderTimer: ReturnType<typeof setInterval> | undefined;
 	private assistantMessageClosed = false;
+	private currentAssistantTerminalErrorRendered = false;
 	private assistantTextBuffer = "";
 
 	constructor(private readonly host: AppSessionEventControllerHost) {}
@@ -676,6 +677,7 @@ export class AppSessionEventController {
 
 		if (isRecord(message) && message.role === "assistant") {
 			this.assistantMessageClosed = false;
+			this.currentAssistantTerminalErrorRendered = false;
 			this.clearCurrentAssistantState();
 		}
 	}
@@ -692,6 +694,12 @@ export class AppSessionEventController {
 			this.renderAssistantToolCallsFromMessage(message);
 			this.finishCurrentThinkingEntry();
 			this.flushAssistantTextBuffer(true);
+			const terminalError = assistantTerminalErrorText(message);
+			if (terminalError && !this.currentAssistantTerminalErrorRendered) {
+				this.addEntry({ id: createId("error"), kind: "error", text: terminalError });
+				this.currentAssistantTerminalErrorRendered = true;
+				this.showManualRetryOnTerminalError(message as unknown as AssistantMessage);
+			}
 			this.clearCurrentAssistantState();
 			this.assistantMessageClosed = true;
 		}
@@ -816,6 +824,7 @@ export class AppSessionEventController {
 				this.host.setSessionActivity(this.host.runtime()?.session.isStreaming ? "running" : "idle");
 				const errorText = assistantEvent.error.errorMessage ?? assistantEvent.reason;
 				this.addEntry({ id: createId("error"), kind: "error", text: errorText });
+				this.currentAssistantTerminalErrorRendered = true;
 				this.showManualRetryOnTerminalError(assistantEvent.error);
 				break;
 			}

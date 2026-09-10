@@ -109,6 +109,39 @@ describe("ACP JSON-RPC client", () => {
     await client.dispose();
   });
 
+  it("routes user-message branch lookup and actions through private ACP methods", async () => {
+    const transport = new FakeTransport();
+    const client = await startedClient(transport);
+
+    const messages = client.branchUserMessages("session-1");
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+    expect(requestAt(transport, 1)).toMatchObject({
+      method: "pix/session/branch_user_messages",
+      params: { sessionId: "session-1" },
+    });
+    transport.message({
+      jsonrpc: "2.0",
+      id: requestAt(transport, 1).id,
+      result: { messages: [{ entryId: "entry-1", text: "same prompt" }] },
+    });
+    await expect(messages).resolves.toEqual([{ entryId: "entry-1", text: "same prompt" }]);
+
+    const undo = client.userMessageAction("session-1", "entry-1", "undo");
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(3));
+    expect(requestAt(transport, 2)).toMatchObject({
+      method: "pix/session/user_message_action",
+      params: { sessionId: "session-1", entryId: "entry-1", action: "undo" },
+    });
+    transport.message({
+      jsonrpc: "2.0",
+      id: requestAt(transport, 2).id,
+      result: { status: "warning", editorText: "same prompt", warning: "conflict" },
+    });
+    await expect(undo).resolves.toEqual({ status: "warning", editorText: "same prompt", warning: "conflict" });
+
+    await client.dispose();
+  });
+
   it("routes registry GUI actions through the private ACP registry method", async () => {
     const transport = new FakeTransport();
     const client = await startedClient(transport);

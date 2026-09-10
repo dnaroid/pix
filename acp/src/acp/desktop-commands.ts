@@ -19,6 +19,8 @@ export const PIX_TAKE_AUTO_MESSAGE_METHOD = "pix/session/take_auto_message";
 export const PIX_QUEUE_CONSUMED_METHOD = "pix/session/queue_consumed";
 export const PIX_REGISTRY_ACTION_METHOD = "pix/registry/action";
 export const PIX_GIT_ASSIST_METHOD = "pix/git/assist";
+export const PIX_BRANCH_USER_MESSAGES_METHOD = "pix/session/branch_user_messages";
+export const PIX_USER_MESSAGE_ACTION_METHOD = "pix/session/user_message_action";
 
 export interface DesktopSessionRequest {
 	readonly sessionId: string;
@@ -66,6 +68,21 @@ export interface ForkMessage {
 
 export interface ForkMessagesResponse {
 	readonly messages: readonly ForkMessage[];
+}
+
+export type DesktopUserMessageAction = "copy" | "undo";
+
+export interface DesktopUserMessageActionRequest extends DesktopSessionRequest {
+	readonly entryId: string;
+	readonly action: DesktopUserMessageAction;
+}
+
+export interface DesktopUserMessageActionResponse {
+	readonly status: "ok" | "warning" | "cancelled";
+	readonly editorText?: string;
+	readonly revertedChanges?: number;
+	readonly changedFiles?: number;
+	readonly warning?: string;
 }
 
 export interface DesktopSessionHistoryResponse {
@@ -207,6 +224,19 @@ export function parseDesktopGitAssistantRequest(value: unknown): DesktopGitAssis
 		throw new RequestError(ERROR_INVALID_PARAMS, "pix/git/assist requires kind and a non-empty diff up to 200000 characters");
 	}
 	return { ...session, kind: value.kind, diff: value.diff };
+}
+
+export function parseDesktopUserMessageActionRequest(value: unknown): DesktopUserMessageActionRequest {
+	const session = parseDesktopSessionRequest(value);
+	if (
+		!isRecord(value)
+		|| typeof value.entryId !== "string"
+		|| value.entryId.length === 0
+		|| (value.action !== "copy" && value.action !== "undo")
+	) {
+		throw new RequestError(ERROR_INVALID_PARAMS, "user-message action requires entryId and action copy|undo");
+	}
+	return { ...session, entryId: value.entryId, action: value.action };
 }
 
 export function parseDesktopImportSessionRequest(value: unknown): DesktopImportSessionRequest {

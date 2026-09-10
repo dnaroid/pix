@@ -68,7 +68,7 @@ import {
 	ProviderEvidenceTracker,
 } from "./provider-tool-results.js"
 import { rehydrateToolRecordsFromMessages } from "./recovery.js"
-import { inferDcpBlockedReason, planDcpBudget } from "./progress-controller.js"
+import { inferDcpBlockedReason, planDcpBudget, type DcpBlockedReason } from "./progress-controller.js"
 import { createBudgetedAutoCompressionBlock } from "./auto-compress-budget.js"
 import { outstandingCompressionTokens, resetCompressionProgress, routineRecoveryTokens, trackCompressionProgress } from "./compression-progress.js"
 import { captureDcpTransactionGuard, cloneDcpTransactionState, runDcpStateTransaction, invalidateDcpStateOwner } from "./state-transaction.js"
@@ -125,6 +125,20 @@ function isDcpControlPlaneMessage(message: any): boolean {
 	return message?.role === "custom" && DCP_CONTROL_PLANE_CUSTOM_TYPES.has(message.customType)
 }
 
+function withoutAutoSummaryModels(config: ReturnType<typeof loadConfig>): ReturnType<typeof loadConfig> {
+	return {
+		...config,
+		compress: {
+			...config.compress,
+			autoCompress: {
+				...config.compress.autoCompress,
+				summarizerModel: [],
+				summarizerFallbackModels: [],
+			},
+		},
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Module export
 // ---------------------------------------------------------------------------
@@ -150,6 +164,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 	let latestProviderOpportunityAvailable = false
 	let latestProviderOpportunityKind: "routine" | "emergency" | undefined
 	let latestProviderReminder: string | undefined
+	let autoSummarizerDegraded = false
 	const warnedProgress = new Set<string>()
 	const isJournalSessionSupported = () => journalSupported && journalBlockedReason === undefined
 	const persistJournalState = async (
@@ -246,6 +261,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 			latestProviderOpportunityAvailable = false
 			latestProviderOpportunityKind = undefined
 			latestProviderReminder = undefined
+			autoSummarizerDegraded = false
 			resetCompressionProgress(state)
 			warnedProgress.clear()
 	}
@@ -308,6 +324,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 		latestProviderOpportunityAvailable = false
 		latestProviderOpportunityKind = undefined
 		latestProviderReminder = undefined
+		autoSummarizerDegraded = false
 		warnedProgress.clear()
 		if (config.manualMode.enabled) state.manualMode = true
 		await loadJournalState(ctx, event.reason === "new" || event.reason === "startup")
@@ -732,6 +749,11 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 					`DCP cannot safely meet its compression goal: ${blockedReason}. Context has not been recovered.`)
 			}
 			if (blockedReason && budget.capacityExceeded) {
+				warnProgress(
+					ctx,
+					blockedReason,
+					`DCP cannot fit the next provider request safely (${budget.projectedBeforeTokens} projected input tokens > ${budget.inputCapacityTokens} input capacity): ${blockedReason}. The current agent operation is being stopped instead of sending an oversized request.`,
+				)
 				state.progressRecovery = {
 					blockedReason,
 					projectedBeforeTokens: budget.projectedBeforeTokens,
@@ -781,6 +803,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 			if (routineEscalated && !effectiveConfig.compress.autoCompress.enabled) {
 				warnProgress(ctx, "auto-disabled", "DCP compression has not made enough progress. Automatic compression is disabled; use compress or enable compress.autoCompress explicitly.")
 			}
+			let autoCompressionFailure: { blockedReason?: DcpBlockedReason; error: string } | undefined
 			if (!manualEmergencyOnly) {
 				const autoCandidate = candidate ?? emergencyCompressionCandidate
 				const cacheSafeReminderAvailable = hasCacheSafeNudgeCarrier(prunedMessages)
@@ -815,11 +838,14 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 							? detectCompressionCandidate(prunedMessages, state, effectiveConfig, contextPercent)
 							: detectEmergencyCompressionCandidate(prunedMessages, state, effectiveConfig, contextPercent, planningThreshold)
 						let preparedProjection: any[] | undefined
+						const autoConfig = autoSummarizerDegraded
+							? withoutAutoSummaryModels(effectiveConfig)
+							: effectiveConfig
 						const autoResult = await createBudgetedAutoCompressionBlock({
 							candidate: autoCandidate,
 							topic: "Auto-compressed slice",
 							state,
-							config: effectiveConfig,
+							config: autoConfig,
 							messages: prunedMessages,
 							modelRegistry: (ctx as any).modelRegistry,
 							signal: (ctx as any).signal,
@@ -871,34 +897,31 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 						const autoBlockedReason = error instanceof AutoCompressionBlockedError
 							? error.blockedReason
 							: undefined
+						const autoError = error instanceof Error ? error.message : String(error)
+						autoCompressionFailure = { blockedReason: autoBlockedReason, error: autoError }
+						const modelSummaryConfigured =
+							effectiveConfig.compress.autoCompress.summarizerModel.length > 0 ||
+							effectiveConfig.compress.autoCompress.summarizerFallbackModels.length > 0
+						if (modelSummaryConfigured && !autoSummarizerDegraded) {
+							autoSummarizerDegraded = true
+							writeDcpDebugLog(effectiveConfig, "compress.auto_summarizer_degraded", {
+								reason: autoBlockedReason ?? "auto-failed",
+								nextMode: "deterministic-extractive",
+							}, ctx)
+						}
 						writeDcpDebugLog(effectiveConfig, "compress.auto_failed", {
 							trigger: autoDecision.reason,
 							phase: autoBlockedReason ? "blocked" : "degraded",
 							blocked_reason: autoBlockedReason,
-							error: error instanceof Error ? error.message : String(error),
+							error: autoError,
 							candidate: autoCandidate,
 							state: summarizeDcpState(state, effectiveConfig),
 						}, ctx)
-						if (routineEscalated) warnProgress(ctx, autoBlockedReason ?? "auto-failed",
-							`DCP automatic compression did not recover the context: ${autoBlockedReason ?? "preparation failed"}. The existing context was preserved.`)
-						if (autoBlockedReason && budget.capacityExceeded) {
-							state.progressRecovery = {
-								blockedReason: autoBlockedReason,
-								projectedBeforeTokens: budget.projectedBeforeTokens,
-								inputCapacityTokens: budget.inputCapacityTokens,
-								requiredSavingsTokens: budget.requiredSavingsTokens,
-								contextWindow: budget.contextWindow,
-								createdAt: Date.now(),
-							}
-							clearDcpNudgeAnchors(state)
-							await persistJournalState(ctx, state)
-							const abortSupported = typeof (ctx as any).abort === "function"
-							if (abortSupported) (ctx as any).abort()
-							return finishContext("progress.blocked_handoff", prunedMessages, {
-								blocked_reason: autoBlockedReason,
-								handoff: abortSupported ? "abort-current-agent-operation" : "abort-unavailable",
-								budget,
-							})
+						warnProgress(ctx, autoBlockedReason ?? "auto-failed",
+							`DCP automatic compression failed (${autoBlockedReason ?? "preparation failed"}). ${modelSummaryConfigured ? "Future attempts in this session will skip the summary model and use deterministic extraction. " : ""}The current context is preserved; emergency pruning will be attempted before any capacity abort.`)
+						if (budget.capacityExceeded && emergencySettings.enabled) {
+							emergencySelection = analyzeEmergencyCurrentTurn(prunedMessages, state, effectiveConfig)
+							messageCandidates = emergencyCurrentTurnMessageCandidates(emergencySelection, effectiveConfig)
 						}
 						// Recoverable failures fall through to normal nudge emission.
 					}
@@ -914,7 +937,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 			if (
 				emergencySettings.enabled &&
 				emergencyPressureReached &&
-				candidate === null &&
+				(candidate === null || autoCompressionFailure !== undefined) &&
 				emergencySelection &&
 				emergencySelection.eligible.length > 0 &&
 				(hardEmergencyReached || emergencyPatienceExceeded)
@@ -971,6 +994,50 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 						...selectionStatsBeforePrune,
 						state: summarizeDcpState(state, effectiveConfig),
 					}, ctx)
+				}
+			}
+
+			if (budget.capacityExceeded && autoCompressionFailure) {
+				const recoveredTokens = emergencyPruneResult?.estimatedTokensRecovered ?? 0
+				const projectedAfterRecovery = Math.max(0, budget.projectedBeforeTokens - recoveredTokens)
+				if (projectedAfterRecovery > budget.inputCapacityTokens) {
+					const finalBlockedReason = autoCompressionFailure.blockedReason ?? "auto-compress-failed"
+					const capacityGap = projectedAfterRecovery - budget.inputCapacityTokens
+					state.progressRecovery = {
+						blockedReason: finalBlockedReason,
+						projectedBeforeTokens: projectedAfterRecovery,
+						inputCapacityTokens: budget.inputCapacityTokens,
+						requiredSavingsTokens: capacityGap,
+						contextWindow: budget.contextWindow,
+						createdAt: Date.now(),
+					}
+					clearDcpNudgeAnchors(state)
+					await persistJournalState(ctx, state)
+					warnProgress(
+						ctx,
+						finalBlockedReason,
+						`DCP recovery could not make the next request fit safely after auto-compression failed (${autoCompressionFailure.error}). ${projectedAfterRecovery} projected input tokens still exceed ${budget.inputCapacityTokens} input capacity by ${capacityGap}; the current agent operation is being stopped.`,
+					)
+					const abortSupported = typeof (ctx as any).abort === "function"
+					if (abortSupported) (ctx as any).abort()
+					writeDcpDebugLog(effectiveConfig, "context.progress_handoff", {
+						phase: "blocked",
+						blocked_reason: finalBlockedReason,
+						autoCompressionFailure,
+						recoveredTokens,
+						projectedAfterRecovery,
+						handoff: abortSupported ? "abort-current-agent-operation" : "abort-unavailable",
+						budget,
+						state: summarizeDcpState(state, effectiveConfig),
+					}, ctx)
+					return finishContext("progress.blocked_handoff", prunedMessages, {
+						blocked_reason: finalBlockedReason,
+						autoCompressionFailure,
+						recoveredTokens,
+						projectedAfterRecovery,
+						handoff: abortSupported ? "abort-current-agent-operation" : "abort-unavailable",
+						budget,
+					})
 				}
 			}
 

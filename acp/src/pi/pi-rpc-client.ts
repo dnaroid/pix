@@ -62,6 +62,7 @@ export interface PiModel {
 	readonly id: string;
 	readonly name?: string | undefined;
 	readonly reasoning?: boolean | undefined;
+	readonly thinkingLevelMap?: Partial<Record<string, string | null>> | undefined;
 }
 
 /**

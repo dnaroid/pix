@@ -579,6 +579,12 @@ export type ThinkingMenuValue = {
 	current: boolean;
 };
 
+export type ModelThinkingMenuState = {
+	thinkingLevel: ThinkingLevel;
+	availableThinkingLevels: readonly ThinkingLevel[];
+	source: "model" | "thinking";
+};
+
 export type UserMessageMenuValue = "copy" | "fork" | "fork-new-tab" | "undo";
 export type UserMessageJumpMenuValue = { entryId?: string; sessionEntryId?: string; text?: string; userIndex?: number; userCount?: number };
 export type QueueMessageMenuValue = "cancel" | "edit" | "send-now";

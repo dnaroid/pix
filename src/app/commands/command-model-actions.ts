@@ -53,19 +53,7 @@ export class ModelCommandActions {
 		const scope = captureCommandScope(this.host);
 		const modelRef = argumentsText.trim();
 		if (!modelRef) {
-			const selected = await this.host.showMenu(this.host.getModelMenuItems(""), {
-				title: "Select model",
-				placeholder: "Search models",
-				emptyText: "No matching models",
-			});
-			if (!isCommandScopeActive(this.host, scope)) return;
-			if (!selected) {
-				this.host.setSessionStatus(this.host.runtime()?.session);
-				this.host.render();
-				return;
-			}
-
-			await this.runModelCommand(selected.model);
+			this.host.openDirectPopupMenu("model");
 			this.host.render();
 			return;
 		}
@@ -81,13 +69,8 @@ export class ModelCommandActions {
 		const model = runtime.services.modelRuntime.getModel(parsed.provider, parsed.modelId) as SessionModel | undefined;
 		if (!model) throw new Error(`Model not found: ${parsed.provider}/${parsed.modelId}`);
 
-		await this.runModelCommand(model);
-		if (!isCommandScopeActive(this.host, scope)) return;
-		if (parsed.thinkingLevel !== undefined) {
-			runtime.session.setThinkingLevel(parsed.thinkingLevel);
-			this.addPersistentSystemEntry(runtime.session, `Selected thinking level ${runtime.session.thinkingLevel}`);
-			this.host.setSessionStatus(runtime.session);
-		}
+		if (parsed.thinkingLevel !== undefined) await this.runModelThinkingCommand(model, parsed.thinkingLevel);
+		else await this.runModelCommand(model);
 	}
 
 	async runDefaultModelSlashCommand(argumentsText: string): Promise<void> {
@@ -252,19 +235,7 @@ export class ModelCommandActions {
 		const scope = captureCommandScope(this.host);
 		const level = argumentsText.trim();
 		if (!level) {
-			const selected = await this.host.showMenu(this.host.getThinkingMenuItems(""), {
-				title: "Select thinking level",
-				placeholder: "Search thinking levels",
-				emptyText: "No matching thinking levels",
-			});
-			if (!isCommandScopeActive(this.host, scope)) return;
-			if (!selected) {
-				this.host.setSessionStatus(this.host.runtime()?.session);
-				this.host.render();
-				return;
-			}
-
-			await this.runThinkingCommand(selected.level);
+			this.host.openDirectPopupMenu("thinking");
 			this.host.render();
 			return;
 		}
@@ -323,6 +294,56 @@ export class ModelCommandActions {
 		await this.reloadAfterModelChange(runtime.session, ref, scope);
 		if (!isCommandScopeActive(this.host, scope)) return;
 		this.host.setSessionStatus(runtime.session);
+	}
+
+	async runModelThinkingCommand(model: SessionModel, level: ThinkingLevel): Promise<void> {
+		const runtime = getRuntime(this.host, "model");
+		if (!runtime) return;
+		const scope = captureCommandScope(this.host);
+		const session = runtime.session;
+		const ref = this.host.modelRef(model);
+		const currentModel = session.model;
+		const modelChanged = currentModel?.provider !== model.provider || currentModel.id !== model.id;
+		const initialThinking = session.thinkingLevel;
+
+		if (!modelChanged && initialThinking === level) {
+			this.host.setSessionStatus(session);
+			return;
+		}
+
+		this.host.setStatus(`selecting ${ref} · thinking ${level}`);
+		this.host.render();
+
+		if (modelChanged) {
+			await session.setModel(model);
+			if (!isCommandScopeActive(this.host, scope)) return;
+			this.host.addEntry({ id: createId("system"), kind: "system", text: `Selected model ${ref}` });
+		}
+
+		session.setThinkingLevel(level);
+		if (modelChanged || session.thinkingLevel !== initialThinking) {
+			this.addPersistentSystemEntry(session, `Selected thinking level ${session.thinkingLevel}`);
+		}
+
+		if (!modelChanged) {
+			this.host.setSessionStatus(session);
+			return;
+		}
+
+		if (session.isStreaming) {
+			this.host.addEntry({
+				id: createId("system"),
+				kind: "system",
+				text: "Skipped reload because the agent is still running. Run /reload when idle to refresh model-specific tools.",
+			});
+			this.host.toast.warning("Model changed; reload skipped while the agent is running");
+			this.host.setSessionStatus(session);
+			return;
+		}
+
+		await this.reloadAfterModelChange(session, ref, scope);
+		if (!isCommandScopeActive(this.host, scope)) return;
+		this.host.setSessionStatus(session);
 	}
 
 	async runThinkingCommand(level: ThinkingLevel): Promise<void> {

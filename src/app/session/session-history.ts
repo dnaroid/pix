@@ -6,6 +6,7 @@ import { isOnlyHiddenMetadata } from "../../markdown-format.js";
 import { extractImageContents, renderContent, renderUserMessageContent, stringifyUnknown } from "../rendering/message-content.js";
 import { THINKING_TOOL_NAME } from "../constants.js";
 import { PIX_EXTENSION_ENTRY_ROLE, PIX_SESSION_ENTRY_ID_FIELD, PIX_SYSTEM_DISPLAY_ENTRY_CUSTOM_TYPE, PIX_SYSTEM_MESSAGE_CUSTOM_TYPE, PIX_THINKING_LEVEL_FIELD } from "./pix-system-message.js";
+import { WORKSPACE_MUTATION_ENTRY_TYPE } from "../workspace/workspace-undo.js";
 
 type ToolResultRecord = {
 	content: readonly unknown[];
@@ -264,13 +265,19 @@ export function customMessageEntry(message: Record<string, unknown>): Entry | un
 
 export function extensionSessionEntry(value: unknown): Extract<Entry, { kind: "extension-entry" }> | undefined {
 	if (!isRecord(value) || value.type !== "custom" || typeof value.id !== "string" || typeof value.customType !== "string") return undefined;
-	if (value.customType === PIX_SYSTEM_DISPLAY_ENTRY_CUSTOM_TYPE) return undefined;
+	if (value.customType === PIX_SYSTEM_DISPLAY_ENTRY_CUSTOM_TYPE || value.customType === WORKSPACE_MUTATION_ENTRY_TYPE) return undefined;
 	return {
 		id: `extension-entry-${value.id}`,
 		kind: "extension-entry",
 		sessionEntry: value as unknown as CustomEntry,
 		expanded: false,
 	};
+}
+
+export function assistantTerminalErrorText(message: Record<string, unknown>): string | undefined {
+	if (message.stopReason !== "error") return undefined;
+	const errorMessage = typeof message.errorMessage === "string" ? message.errorMessage.trim() : "";
+	return errorMessage || "Request failed before the assistant produced a response.";
 }
 
 function renderAssistantHistoryMessage(
@@ -352,5 +359,9 @@ function renderAssistantHistoryMessage(
 	}
 	if (assistantText && !isOnlyHiddenMetadata(assistantText)) {
 		options.addEntry({ id: createId("assistant"), kind: "assistant", text: assistantText });
+	}
+	const terminalError = assistantTerminalErrorText(message);
+	if (terminalError) {
+		options.addEntry({ id: createId("error"), kind: "error", text: terminalError });
 	}
 }

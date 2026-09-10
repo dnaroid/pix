@@ -18,7 +18,7 @@ describe("P01-R storeless format contracts", () => {
 		expect(new Set(STORELESS_CAPABILITIES.map((entry) => entry.surface)).size).toBe(STORELESS_CAPABILITIES.length);
 		expect(storelessCapability("mutation-lsp")).toMatchObject({ status: "supported", strategy: "native-passthrough", lifetime: "current-result" });
 		expect(storelessCapability("test-build")).toMatchObject({ status: "limited", strategy: "pure-parser-compact" });
-		expect(storelessCapability("web-document")).toMatchObject({ status: "limited", strategy: "native-passthrough" });
+		expect(storelessCapability("web-document")).toMatchObject({ status: "limited", strategy: "raw-session-recoverable-compact", lifetime: "raw-session" });
 		expect(storelessCapability("structured-json")).toMatchObject({ status: "limited", strategy: "native-passthrough" });
 		expect(storelessCapability("subagent-result")).toMatchObject({ status: "limited", lifetime: "producer-managed" });
 		expect(storelessCapability("visual")).toMatchObject({ status: "supported", lifetime: "visual-message" });

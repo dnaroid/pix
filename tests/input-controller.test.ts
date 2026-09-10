@@ -189,6 +189,17 @@ describe("AppInputController terminal input", () => {
 		assert.deepEqual(calls.scrollLines.slice(-2), [-1, 1]);
 	});
 
+	it("routes left and right arrows to staged model thinking before moving the editor cursor", () => {
+		const { controller, editor, calls } = createController({ extensionInputUsesEditor: false, shiftPressed: false, consumeExtensionInput: false });
+		editor.setText("abc", 1);
+		calls.moveThinkingResult = true;
+
+		controller.handleChunk(Buffer.from("\x1b[D\x1b[C"));
+
+		assert.deepEqual(calls.thinkingDeltas, [-1, 1]);
+		assert.equal(editor.cursor, 1);
+	});
+
 	it("handles modified key sequences and pending partial sequences", () => {
 		const { controller, editor, calls } = createController({ extensionInputUsesEditor: false, shiftPressed: false, consumeExtensionInput: false });
 
@@ -333,14 +344,16 @@ function createController(options: { extensionInputUsesEditor: boolean; shiftPre
 	calls: {
 		extensionInput: number; enter: number; interrupt: number; escape: number; mouseEvents: unknown[]; render: number;
 		autocompleteSlash: number; voice: number; stop: number; scrollLines: number[]; scrollPages: number[];
-		menuDeltas: number[]; historyDeltas: number[]; moveMenuResult: boolean; navigateHistoryResult: boolean;
+		menuDeltas: number[]; thinkingDeltas: number[]; historyDeltas: number[];
+		moveMenuResult: boolean; moveThinkingResult: boolean; navigateHistoryResult: boolean;
 	};
 } {
 	const editor = new InputEditor();
 	const calls = {
 		extensionInput: 0, enter: 0, interrupt: 0, escape: 0, mouseEvents: [] as unknown[], render: 0,
 		autocompleteSlash: 0, voice: 0, stop: 0, scrollLines: [] as number[], scrollPages: [] as number[],
-		menuDeltas: [] as number[], historyDeltas: [] as number[], moveMenuResult: false, navigateHistoryResult: false,
+		menuDeltas: [] as number[], thinkingDeltas: [] as number[], historyDeltas: [] as number[],
+		moveMenuResult: false, moveThinkingResult: false, navigateHistoryResult: false,
 	};
 	const host: InputControllerHost = {
 		inputEditor: editor,
@@ -360,6 +373,7 @@ function createController(options: { extensionInputUsesEditor: boolean; shiftPre
 			calls.render += 1;
 		},
 		moveActivePopupMenuSelection: (delta) => { calls.menuDeltas.push(delta); return calls.moveMenuResult; },
+		moveActiveModelThinkingLevel: (delta) => { calls.thinkingDeltas.push(delta); return calls.moveThinkingResult; },
 		navigateRequestHistory: (delta) => { calls.historyDeltas.push(delta); return calls.navigateHistoryResult; },
 		scrollByLines: (delta) => { calls.scrollLines.push(delta); },
 		scrollByPage: (delta) => { calls.scrollPages.push(delta); },
@@ -373,7 +387,6 @@ function createController(options: { extensionInputUsesEditor: boolean; shiftPre
 		handleEscape: async () => { calls.escape += 1; },
 		handleDirectPopupInput: () => false,
 		autocompleteModel: () => false,
-		autocompleteThinking: () => false,
 		acceptAutocompleteSuggestion: () => false,
 		autocompleteSlashCommand: () => { calls.autocompleteSlash += 1; },
 		toggleVoiceRecording: () => { calls.voice += 1; },

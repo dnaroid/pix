@@ -5,7 +5,7 @@ import type { ContextGatewayToolClass } from "./types.js";
 type ResultContent = unknown;
 
 export interface ContextGatewayEnforcementPlan {
-	representation: "passthrough" | "test-build-compact";
+	representation: "passthrough" | "test-build-compact" | "web-recoverable-compact";
 	content: ResultContent;
 	sourceContentBytes: number;
 	contentBytes: number;
@@ -40,6 +40,75 @@ function textOnlyContent(content: unknown): boolean {
 			&& typeof (part as Record<string, unknown>).text === "string");
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function boundedTextBytes(text: string, maximumBytes: number): string {
+	const encoder = new TextEncoder();
+	if (encoder.encode(text).byteLength <= maximumBytes) return text;
+	const suffix = "\n… [compact view truncated; full structured result is recoverable from raw session details]";
+	const suffixBytes = encoder.encode(suffix).byteLength;
+	if (maximumBytes <= suffixBytes) {
+		let low = 0;
+		let high = text.length;
+		while (low < high) {
+			const mid = Math.ceil((low + high) / 2);
+			if (encoder.encode(text.slice(0, mid)).byteLength <= maximumBytes) low = mid;
+			else high = mid - 1;
+		}
+		return text.slice(0, low);
+	}
+	const target = Math.max(0, maximumBytes - suffixBytes);
+	let low = 0;
+	let high = text.length;
+	while (low < high) {
+		const mid = Math.ceil((low + high) / 2);
+		if (encoder.encode(text.slice(0, mid)).byteLength <= target) low = mid;
+		else high = mid - 1;
+	}
+	return `${text.slice(0, low).trimEnd()}${suffix}`;
+}
+
+function planRecoverableWebCompact(details: unknown, toolCallId: string | undefined, maximumBytes: number): string | undefined {
+	if (!isRecord(details)) return undefined;
+	const recovery = [
+		"[Context Gateway: over-budget web result compacted for provider context.]",
+		"Full structured source is retained in the raw session toolResult.details and can be recovered with session-recovery.",
+		toolCallId ? `Recovery key: toolCallId=${toolCallId}` : undefined,
+	].filter((line): line is string => Boolean(line));
+
+	if (Array.isArray(details.results)) {
+		const results = details.results.filter(isRecord);
+		if (results.length === 0) return undefined;
+		const lines = [...recovery, `Search results: ${results.length}`];
+		for (let index = 0; index < results.length; index++) {
+			const result = results[index]!;
+			const title = typeof result.title === "string" ? result.title : `Result ${index + 1}`;
+			const url = typeof result.url === "string" ? result.url : "";
+			const content = typeof result.content === "string" ? result.content.replace(/\s+/g, " ").trim() : "";
+			lines.push(`${index + 1}. ${title}`);
+			if (url) lines.push(`   URL: ${url}`);
+			if (content) lines.push(`   ${content.slice(0, 900)}${content.length > 900 ? "…" : ""}`);
+		}
+		return boundedTextBytes(lines.join("\n"), maximumBytes);
+	}
+
+	if (typeof details.content === "string") {
+		const title = typeof details.title === "string" ? details.title : "Fetched document";
+		const links = Array.isArray(details.links) ? details.links.filter((link): link is string => typeof link === "string") : [];
+		const lines = [
+			...recovery,
+			`Title: ${title}`,
+			`Content preview: ${details.content.slice(0, Math.max(1_000, maximumBytes))}`,
+			...(links.length > 0 ? ["Links:", ...links.slice(0, 8).map((link) => `  - ${link}`)] : []),
+		];
+		return boundedTextBytes(lines.join("\n"), maximumBytes);
+	}
+
+	return undefined;
+}
+
 function upstreamTruncated(details: unknown): boolean {
 	if (!details || typeof details !== "object" || Array.isArray(details)) return false;
 	const record = details as Record<string, unknown>;
@@ -56,6 +125,7 @@ function upstreamTruncated(details: unknown): boolean {
  */
 export function planContextGatewayEnforcement(input: {
 	event: { content?: unknown; details?: unknown; isError?: boolean };
+	toolCallId?: string;
 	toolClass: ContextGatewayToolClass;
 	shell: ShellCommandClassification;
 	budgetBytes: number;
@@ -71,6 +141,22 @@ export function planContextGatewayEnforcement(input: {
 		textBytes: new TextEncoder().encode(sourceText).byteLength,
 		reason,
 	});
+
+	if (input.toolClass === "web") {
+		if (!textOnlyContent(input.event.content)) return passthrough("non-text-content");
+		if (sourceContentBytes <= input.budgetBytes) return passthrough("within-class-budget");
+		const compactText = planRecoverableWebCompact(input.event.details, input.toolCallId, input.maxInlineBytes);
+		if (!compactText) return passthrough("web-recovery-source-unavailable");
+		const content = [{ type: "text" as const, text: compactText }];
+		return {
+			representation: "web-recoverable-compact",
+			content,
+			sourceContentBytes,
+			contentBytes: byteLengthJson(content),
+			textBytes: new TextEncoder().encode(compactText).byteLength,
+			reason: "recoverable-structured-web-details",
+		};
+	}
 
 	if (input.toolClass !== "shell") return passthrough("class-not-enforced");
 	if (input.shell.scope !== "simple" || input.shell.kind !== "test-build") {

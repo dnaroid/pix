@@ -881,6 +881,8 @@ export interface CreateAutoCompressionBlockOptions {
 	requiredGainTokens?: number
 	/** Allow a positive safe commit that reduces, but does not fully settle, the current recovery debt. */
 	allowPartialGain?: boolean
+	/** Optional model-summary sub-deadline. The outer budgeted operation may reserve time for deterministic fallback/publication. */
+	summaryTimeoutMs?: number
 	/** Optional durable publication hook. Live state is not changed unless it succeeds. */
   persistState?: (preparedState: DcpState, publication?: DcpJournalPublicationOptions) => Promise<void>
 	/** Optional pure projection preparation; included in the same durable generation. */
@@ -993,7 +995,7 @@ export async function createAutoCompressionBlock(
 		messages: messagesInRange,
 		candidate: effectiveCandidate,
 		modelRefs: summarizerModelRefs(settings),
-		timeoutMs: settings.timeoutMs,
+		timeoutMs: options.summaryTimeoutMs ?? settings.timeoutMs,
 		modelRegistry,
 		signal,
 	})

@@ -32,6 +32,23 @@ describe("AppSessionEventController", () => {
 		});
 	}
 
+	it("renders a terminal assistant error delivered only through message_end", () => {
+		const entries: Entry[] = [];
+		const controller = createController(entries);
+		controller.handleSessionEvent({
+			type: "message_start",
+			message: { role: "assistant", content: [], stopReason: "pending" },
+		} as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({
+			type: "message_end",
+			message: { role: "assistant", content: [], stopReason: "error", errorMessage: "This operation was aborted" },
+		} as unknown as AgentSessionEvent);
+
+		assert.deepEqual(entries.map((entry) => [entry.kind, "text" in entry ? entry.text : undefined]), [
+			["error", "This operation was aborted"],
+		]);
+	});
+
 	it("moves a cursor over the full history window without pruned newer buffers", async () => {
 		const entries: Entry[] = [];
 		const branch = Array.from({ length: 430 }, (_value, index) => ({

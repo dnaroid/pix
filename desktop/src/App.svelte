@@ -27,6 +27,7 @@
   import {
     appendLocalSystemMessage,
     appendLocalUserMessage,
+    bindLocalUserMessageSessionEntry,
     applyDeferredToolResult,
     applySessionUpdates,
     emptyTranscript,
@@ -48,6 +49,7 @@
     type CommandPickerItem,
     type CommandPickerState,
   } from "./lib/command-interactions";
+  import { clampThinkingLevel, modelThinkingConfigState } from "./lib/model-thinking";
   import {
     ACTIVE_SESSIONS_STORAGE_KEY,
     buildTabSessions,
@@ -110,6 +112,7 @@
   import StatusBar from "./components/StatusBar.svelte";
   import ElicitationDialog from "./components/ElicitationDialog.svelte";
   import CommandPicker from "./components/CommandPicker.svelte";
+  import ModelThinkingPicker from "./components/ModelThinkingPicker.svelte";
   import PreviewDialog from "./components/PreviewDialog.svelte";
   import GitDiffDialog from "./components/GitDiffDialog.svelte";
   import WorkspaceSidebar from "./components/WorkspaceSidebar.svelte";
@@ -238,6 +241,8 @@
   let diagnostics = $state<string[]>([]);
   let pendingElicitation = $state<PendingElicitation | null>(null);
   let commandPicker = $state<CommandPickerState | null>(null);
+  let modelThinkingPickerOpen = $state(false);
+  let modelThinkingPickerSessionId = $state<string | null>(null);
   let addingQuestionImages = $state(false);
   let projectSelectorOpen = $state(false);
   let sessionSelectorOpen = $state(false);
@@ -343,6 +348,13 @@
       activeSessionId ? (slashCommandsBySession.get(activeSessionId) ?? []) : [],
     ),
   );
+
+  $effect(() => {
+    if (modelThinkingPickerOpen && modelThinkingPickerSessionId !== activeSessionId) {
+      modelThinkingPickerOpen = false;
+      modelThinkingPickerSessionId = null;
+    }
+  });
   const questionMode = $derived.by<QuestionComposerMode | undefined>(() => {
     const pending = pendingElicitation;
     if (!pending || pending.kind !== "question") return undefined;
@@ -778,15 +790,42 @@
     sessionId: string,
     blocks: ContentBlock[],
     fileImages: readonly PromptFileImage[] = [],
+    transcriptMessageId?: string,
   ): Promise<void> {
     if (promptRunsBySessionId.has(sessionId)) {
       return Promise.reject(new Error("A prompt is already running for this conversation."));
     }
     promptEndedAtBySessionId.delete(sessionId);
     setSessionPromptRunning(sessionId, true);
+    const branchBefore = transcriptMessageId
+      ? requestClient.branchUserMessages(sessionId).catch(() => undefined)
+      : Promise.resolve(undefined);
     let tracked!: Promise<void>;
-    tracked = requestClient.prompt(sessionId, blocks, fileImages)
-      .then(() => undefined)
+    tracked = (async () => {
+      const before = await branchBefore;
+      let promptError: unknown;
+      try {
+        await requestClient.prompt(sessionId, blocks, fileImages);
+      } catch (error) {
+        promptError = error;
+      }
+      if (transcriptMessageId && before) {
+        const after = await requestClient.branchUserMessages(sessionId).catch(() => undefined);
+        if (after) {
+          const beforeIds = new Set(before.map((message) => message.entryId));
+          const sessionEntryId = after.filter((message) => !beforeIds.has(message.entryId)).at(-1)?.entryId;
+          const current = sessionId === activeSessionId
+            ? transcript
+            : transcriptBySessionId.get(sessionId);
+          if (current) {
+            const next = bindLocalUserMessageSessionEntry(current, transcriptMessageId, sessionEntryId);
+            transcriptBySessionId.set(sessionId, next);
+            if (sessionId === activeSessionId) transcript = next;
+          }
+        }
+      }
+      if (promptError !== undefined) throw promptError;
+    })()
       .finally(() => {
         if (promptRunsBySessionId.get(sessionId) !== tracked) return;
         promptRunsBySessionId.delete(sessionId);
@@ -819,9 +858,9 @@
       ) {
         const message = await requestClient.takeAutoMessage(sessionId);
         if (!message) return;
-        appendQueuedMessageToTranscript(sessionId, message);
+        const transcriptMessageId = appendQueuedMessageToTranscript(sessionId, message);
         try {
-          await runPromptRequest(requestClient, sessionId, queuedMessageBlocks(message));
+          await runPromptRequest(requestClient, sessionId, queuedMessageBlocks(message), [], transcriptMessageId);
         } catch (error) {
           // Do not drop a message that lost a race with another prompt. Put it
           // back into Pix's auto/steering path; queue state remains visible.
@@ -861,12 +900,12 @@
     };
   }
 
-  function appendQueuedMessageToTranscript(sessionId: string, message: QueuedUserMessage): void {
+  function appendQueuedMessageToTranscript(sessionId: string, message: QueuedUserMessage): string {
     const messageId = `queued:${message.id}`;
     const current = sessionId === activeSessionId
       ? transcript
       : transcriptBySessionId.get(sessionId) ?? emptyTranscript;
-    if (current.items.some((item) => item.type === "message" && item.id === messageId)) return;
+    if (current.items.some((item) => item.type === "message" && item.id === messageId)) return messageId;
     const draft = queuedMessageDraft(message);
     const next = appendLocalUserMessage(current, message.displayText || draft.text, messageId, draft.attachments);
     transcriptBySessionId.set(sessionId, next);
@@ -874,6 +913,7 @@
       transcript = next;
       if (transcriptFollowsLatest) scheduleScrollToLatest();
     }
+    return messageId;
   }
 
   function restoreQueuedMessageToComposer(message: QueuedUserMessage): void {
@@ -1514,15 +1554,16 @@
       configOptions = configOptionsBySessionId.get(created.sessionId) ?? [];
       activeSessionRuntimeReady = true;
 
+      const transcriptMessageId = `local:${++localMessageId}`;
       transcript = appendLocalUserMessage(
         transcript,
         prompt,
-        `local:${++localMessageId}`,
+        transcriptMessageId,
         [],
       );
       transcriptBySessionId.set(created.sessionId, transcript);
 
-      const run = runPromptRequest(requestClient, created.sessionId, [{ type: "text", text: prompt }]);
+      const run = runPromptRequest(requestClient, created.sessionId, [{ type: "text", text: prompt }], [], transcriptMessageId);
       gitDiffPreview = null;
       gitDiffReview = undefined;
       void scrollToLatest();
@@ -1981,15 +2022,16 @@
       activated = true;
 
       operationRunning = false;
+      const transcriptMessageId = `local:${++localMessageId}`;
       transcript = appendLocalUserMessage(
         transcript,
         KNOWLEDGE_REFRESH_PROMPT,
-        `local:${++localMessageId}`,
+        transcriptMessageId,
         [],
       );
       transcriptBySessionId.set(response.sessionId, transcript);
       await scrollToLatest();
-      await runPromptRequest(requestClient, response.sessionId, [{ type: "text", text: KNOWLEDGE_REFRESH_PROMPT }]);
+      await runPromptRequest(requestClient, response.sessionId, [{ type: "text", text: KNOWLEDGE_REFRESH_PROMPT }], [], transcriptMessageId);
       void refreshSessions();
     } catch (error) {
       if (createdSessionId && !activated) {
@@ -2051,15 +2093,16 @@
       if (!saved || client !== requestClient || workspace !== requestWorkspace) return;
 
       operationRunning = false;
+      const transcriptMessageId = `local:${++localMessageId}`;
       transcript = appendLocalUserMessage(
         transcript,
         taskPrompt.text,
-        `local:${++localMessageId}`,
+        transcriptMessageId,
         taskPrompt.attachments,
       );
       transcriptBySessionId.set(response.sessionId, transcript);
       await scrollToLatest();
-      await runPromptRequest(requestClient, response.sessionId, payload.blocks, payload.fileImages);
+      await runPromptRequest(requestClient, response.sessionId, payload.blocks, payload.fileImages, transcriptMessageId);
       void refreshSessions();
     } catch (error) {
       reportError(error);
@@ -3221,10 +3264,11 @@
       ) return;
       promptText = "";
       invalidateAttachmentDraft();
-      transcript = appendLocalUserMessage(transcript, text, `local:${++localMessageId}`, attachments);
+      const transcriptMessageId = `local:${++localMessageId}`;
+      transcript = appendLocalUserMessage(transcript, text, transcriptMessageId, attachments);
       transcriptBySessionId.set(sessionId, transcript);
       await scrollToLatest();
-      await runPromptRequest(client, sessionId, blocks, fileImages);
+      await runPromptRequest(client, sessionId, blocks, fileImages, transcriptMessageId);
       if (text.startsWith("/")) await refreshAutocompleteSettings(sessionId);
       reloadAfterSlash = /^\/(?:scoped-models|no-context-files)(?:\s|$)/i.test(text);
       void refreshSessions();
@@ -3324,8 +3368,8 @@
       // old Desktop request promise to observe that settlement before opening
       // the next run, avoiding a client-side overlap race.
       await promptRunsBySessionId.get(sessionId)?.catch(() => undefined);
-      appendQueuedMessageToTranscript(sessionId, result.message);
-      await runPromptRequest(requestClient, sessionId, queuedMessageBlocks(result.message));
+      const transcriptMessageId = appendQueuedMessageToTranscript(sessionId, result.message);
+      await runPromptRequest(requestClient, sessionId, queuedMessageBlocks(result.message), [], transcriptMessageId);
       void refreshSessions();
     } catch (error) {
       if (requestClient === client && sessionId === activeSessionId) reportError(error);
@@ -3346,8 +3390,66 @@
       await jumpToUserMessage(value);
       return;
     }
-    promptText = `/${picker.command} ${value}`;
-    await submitPrompt();
+    if (picker.command === "model") {
+      await applyModelSlashCommand(value);
+      return;
+    }
+    if (picker.command === "thinking") {
+      await applyThinkingSlashCommand(value);
+    }
+  }
+
+  function openModelThinkingPicker(): void {
+    if (!activeSessionId || !activeSessionRuntimeReady || operationRunning || promptRunning || changingConfig) return;
+    commandPicker = null;
+    modelThinkingPickerSessionId = activeSessionId;
+    modelThinkingPickerOpen = true;
+  }
+
+  function closeModelThinkingPicker(): void {
+    modelThinkingPickerOpen = false;
+    modelThinkingPickerSessionId = null;
+  }
+
+  async function applyModelThinkingSelection(modelRef: string, thinkingLevel: string): Promise<void> {
+    const requestClient = client;
+    const sessionId = modelThinkingPickerSessionId;
+    if (!requestClient || !sessionId || changingConfig || operationRunning || promptRunning) {
+      throw new Error("Model and thinking settings are unavailable right now.");
+    }
+
+    let options = configOptionsBySessionId.get(sessionId)
+      ?? (sessionId === activeSessionId ? configOptions : []);
+    const initial = modelThinkingConfigState(options);
+    const selectedModel = initial.models.find((model) => model.ref === modelRef);
+    if (!selectedModel) throw new Error(`Unknown model: ${modelRef}`);
+    if (!selectedModel.thinkingLevels.includes(thinkingLevel)) {
+      throw new Error(`${selectedModel.name} does not support ${thinkingLevel} thinking.`);
+    }
+
+    changingConfig = "model-thinking";
+    try {
+      let state = modelThinkingConfigState(options);
+      if (state.currentModel?.ref !== modelRef) {
+        const modelOption = options.find((option) => option.id === "model" && option.type === "select");
+        if (!modelOption || modelOption.type !== "select") throw new Error("Model selection is unavailable.");
+        options = (await requestClient.setConfigOption(sessionId, modelOption, modelRef)).configOptions;
+        configOptionsBySessionId.set(sessionId, options);
+        if (requestClient === client && sessionId === activeSessionId) configOptions = options;
+        state = modelThinkingConfigState(options);
+      }
+
+      const effectiveThinking = clampThinkingLevel(thinkingLevel, state.currentThinkingLevels);
+      if (state.currentThinking !== effectiveThinking) {
+        const thinkingOption = options.find((option) => option.id === "thought_level" && option.type === "select");
+        if (!thinkingOption || thinkingOption.type !== "select") throw new Error("Thinking selection is unavailable.");
+        options = (await requestClient.setConfigOption(sessionId, thinkingOption, effectiveThinking)).configOptions;
+        configOptionsBySessionId.set(sessionId, options);
+        if (requestClient === client && sessionId === activeSessionId) configOptions = options;
+      }
+    } finally {
+      changingConfig = null;
+    }
   }
 
   async function enhancePromptDraft(initialDraft: string): Promise<void> {
@@ -3428,7 +3530,7 @@
           label: compactPickerText(message.text, 110),
           description: message.entryId,
         }));
-      commandPicker = listCommandPickerState("jump", items.reverse(), query);
+      commandPicker = listCommandPickerState("jump", items, query);
     } catch (error) {
       reportError(error);
     }
@@ -3579,7 +3681,7 @@
     activeSessionRuntimeReady = false;
     errorMessage = null;
     if (options.echo !== false) {
-      transcript = appendLocalUserMessage(transcript, "/reload", `local:${++localMessageId}`);
+      transcript = appendLocalUserMessage(transcript, "/reload", `local:${++localMessageId}`, [], { localOnly: true });
       transcriptBySessionId.set(sessionId, transcript);
       await scrollToLatest();
     }
@@ -3686,7 +3788,10 @@
     return { modelRef: trimmed.slice(0, colon), thinking: suffix };
   }
 
-  async function forkConversation(requestedEntryId?: string): Promise<void> {
+  async function forkConversation(
+    requestedEntryId?: string,
+    options: { keepSourceOpen?: boolean } = {},
+  ): Promise<void> {
     const requestClient = client;
     const sourceSessionId = activeSessionId;
     const requestWorkspace = workspace;
@@ -3710,10 +3815,13 @@
       forkedSessionId = forked.sessionId;
       if (requestClient !== client || sourceSessionId !== activeSessionId || requestWorkspace !== workspace) return;
 
-      await requestClient.closeSession(sourceSessionId);
-      sourceClosed = true;
-      forgetSessionRuntime(sourceSessionId);
-      clearSessionActivity(sourceSessionId);
+      transcriptBySessionId.set(sourceSessionId, transcript);
+      if (!options.keepSourceOpen) {
+        await requestClient.closeSession(sourceSessionId);
+        sourceClosed = true;
+        forgetSessionRuntime(sourceSessionId);
+        clearSessionActivity(sourceSessionId);
+      }
       clearSessionActivity(forked.sessionId);
       activeSessionId = forked.sessionId;
       transcript = emptyTranscript;
@@ -3722,8 +3830,10 @@
 
       const historyGeneration = beginSessionHistoryLoad();
       void hydrateSessionHistory(requestClient, forked.sessionId, requestWorkspace, historyGeneration);
-      closedSessionTabs = [...new Set([...closedSessionTabs, sourceSessionId])];
-      locallyOpenedSessionTabs = locallyOpenedSessionTabs.filter((id) => id !== sourceSessionId);
+      if (!options.keepSourceOpen) {
+        closedSessionTabs = [...new Set([...closedSessionTabs, sourceSessionId])];
+        locallyOpenedSessionTabs = locallyOpenedSessionTabs.filter((id) => id !== sourceSessionId);
+      }
       showSessionTab(forked.sessionId);
       rememberActiveSession(requestWorkspace, forked.sessionId);
       transcript = appendLocalSystemMessage(
@@ -3737,6 +3847,10 @@
       await scrollToLatest();
     } catch (error) {
       if (requestClient !== client || requestWorkspace !== workspace) return;
+      if (options.keepSourceOpen && forkedSessionId && activeSessionId !== forkedSessionId) {
+        await requestClient.closeSession(forkedSessionId).catch(() => {});
+        forgetSessionRuntime(forkedSessionId);
+      }
       if (sourceClosed) {
         if (forkedSessionId) {
           await requestClient.closeSession(forkedSessionId).catch(() => {});
@@ -3765,6 +3879,103 @@
       reportError(error);
     } finally {
       if (requestClient === client && requestWorkspace === workspace) operationRunning = false;
+    }
+  }
+
+  type UserMessageContextAction = "copy" | "fork" | "fork-new-tab" | "undo";
+
+  async function resolveUserMessageSessionEntryId(message: MessageItem): Promise<string> {
+    const requestClient = client;
+    const sessionId = activeSessionId;
+    if (!requestClient || !sessionId || message.localOnly) {
+      throw new Error("This message is not backed by a Pi session entry.");
+    }
+    if (message.sessionEntryId) return message.sessionEntryId;
+
+    const branchMessages = await requestClient.branchUserMessages(sessionId);
+    if (requestClient !== client || sessionId !== activeSessionId) {
+      throw new Error("The active conversation changed while resolving the message.");
+    }
+    const visibleUsers = transcript.items.filter(
+      (item): item is MessageItem => item.type === "message" && item.role === "user" && !item.localOnly,
+    );
+    const visibleIndex = visibleUsers.findIndex((item) => item.id === message.id);
+    if (visibleIndex < 0) throw new Error("User message is no longer visible.");
+
+    // Initial Desktop history may be a persisted tail rather than the entire
+    // conversation. The visible session-backed user rows are therefore a
+    // suffix of the active Pi branch. Align by order, never by message text,
+    // so repeated prompts remain unambiguous.
+    const offset = branchMessages.length - visibleUsers.length;
+    if (offset < 0) throw new Error("Could not resolve this message on the active session branch.");
+    const resolved = branchMessages[offset + visibleIndex];
+    if (!resolved) throw new Error("Could not resolve this message on the active session branch.");
+    return resolved.entryId;
+  }
+
+  async function runUserMessageContextAction(
+    message: MessageItem,
+    action: UserMessageContextAction,
+  ): Promise<void> {
+    const requestClient = client;
+    const sessionId = activeSessionId;
+    const requestWorkspace = workspace;
+    if (!requestClient || !sessionId) return;
+    let ownsUndoOperation = false;
+
+    if (action === "copy" && message.localOnly) {
+      try {
+        await navigator.clipboard.writeText(message.text);
+      } catch (error) {
+        reportError(error);
+      }
+      return;
+    }
+
+    try {
+      const entryId = await resolveUserMessageSessionEntryId(message);
+      if (requestClient !== client || sessionId !== activeSessionId || requestWorkspace !== workspace) return;
+      if (action === "copy") {
+        await requestClient.userMessageAction(sessionId, entryId, "copy");
+        return;
+      }
+      if (action === "fork") {
+        await forkConversation(entryId);
+        return;
+      }
+      if (action === "fork-new-tab") {
+        await forkConversation(entryId, { keepSourceOpen: true });
+        return;
+      }
+      if (!activeSessionRuntimeReady || operationRunning || promptRunning || sessionHistoryLoading) return;
+
+      operationRunning = true;
+      ownsUndoOperation = true;
+      errorMessage = null;
+      const result = await requestClient.userMessageAction(sessionId, entryId, "undo");
+      if (requestClient !== client || sessionId !== activeSessionId || requestWorkspace !== workspace) return;
+      if (result.status === "cancelled") return;
+
+      const history = await requestClient.sessionHistory(sessionId, true);
+      if (requestClient !== client || sessionId !== activeSessionId || requestWorkspace !== workspace) return;
+      let loaded = applySessionUpdates(emptyTranscript, history.updates);
+      loaded = markDeferredToolResults(loaded, history.deferredToolCallIds);
+      const summary = result.status === "warning"
+        ? `Session rewound, but workspace revert had conflicts.\n\n${result.warning ?? "Some recorded mutations could not be reverted safely."}`
+        : `Undid changes from entry ${entryId}. Reverted ${result.revertedChanges ?? 0} recorded command${result.revertedChanges === 1 ? "" : "s"} across ${result.changedFiles ?? 0} file${result.changedFiles === 1 ? "" : "s"}.`;
+      transcript = appendLocalSystemMessage(loaded, summary, `local:${++localMessageId}`);
+      transcriptBySessionId.set(sessionId, transcript);
+      promptText = result.editorText ?? message.text;
+      promptAttachments = [];
+      invalidateAttachmentDraft();
+      void refreshSessions();
+      await scrollToLatest();
+    } catch (error) {
+      if (requestClient === client && sessionId === activeSessionId && requestWorkspace === workspace) reportError(error);
+    } finally {
+      if (ownsUndoOperation && requestClient === client && sessionId === activeSessionId && requestWorkspace === workspace) {
+        operationRunning = false;
+      }
     }
   }
 
@@ -4016,6 +4227,7 @@
         onOpenLocalFile={openLocalFile}
         onResolveLocalMedia={resolveLocalMedia}
         onLoadToolResult={(toolCallId) => void loadDeferredToolResult(toolCallId)}
+        onUserMessageAction={(message, action) => void runUserMessageContextAction(message, action)}
       />
 
       <div class="row-start-3 min-w-0">
@@ -4037,6 +4249,7 @@
           {autocompleteDebounceMs}
           {questionMode}
           onAutocomplete={autocompletePrompt}
+          onEnhance={() => enhancePromptDraft(promptText)}
           onSubmit={submitPrompt}
           onDefer={deferCurrentDraft}
           onCreateTask={createProjectTaskFromComposer}
@@ -4055,9 +4268,13 @@
     {configOptions}
     {changingConfig}
     {promptRunning}
-    canRefresh={canUseSession}
+    canConfigure={canUseSession && activeSessionRuntimeReady && !sessionHistoryLoading}
+    modelThinkingOpen={modelThinkingPickerOpen}
+    canNavigateMessages={canUseSession && !!activeSessionId && activeSessionRuntimeReady && !sessionHistoryLoading}
+    messageNavigationOpen={commandPicker?.command === "jump"}
     onSetConfig={(option, value) => void setConfig(option, value)}
-    onRefresh={() => void refreshSessions()}
+    onOpenModelThinking={openModelThinkingPicker}
+    onNavigateMessages={() => void openJumpPicker("")}
   />
 </div>
 
@@ -4075,6 +4292,15 @@
     picker={commandPicker}
     onSelect={(value) => void selectCommandOption(value)}
     onClose={() => commandPicker = null}
+  />
+{/if}
+
+{#if modelThinkingPickerOpen}
+  <ModelThinkingPicker
+    {configOptions}
+    disabled={!canUseSession || !activeSessionRuntimeReady || promptRunning || changingConfig !== null}
+    onApply={applyModelThinkingSelection}
+    onClose={closeModelThinkingPicker}
   />
 {/if}
 

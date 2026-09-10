@@ -1,5 +1,5 @@
 export type StorelessCapabilityStatus = "supported" | "limited" | "unsupported";
-export type StorelessCapabilityStrategy = "native-passthrough" | "metadata-only" | "pure-parser-candidate" | "pure-parser-compact" | "none";
+export type StorelessCapabilityStrategy = "native-passthrough" | "metadata-only" | "pure-parser-candidate" | "pure-parser-compact" | "raw-session-recoverable-compact" | "none";
 
 export interface StorelessCapabilityEntry {
 	surface:
@@ -13,7 +13,7 @@ export interface StorelessCapabilityEntry {
 		| "mcp-direct";
 	status: StorelessCapabilityStatus;
 	strategy: StorelessCapabilityStrategy;
-	lifetime: "current-result" | "producer-managed" | "visual-message" | "none";
+	lifetime: "current-result" | "producer-managed" | "raw-session" | "visual-message" | "none";
 	reason: string;
 }
 
@@ -41,9 +41,9 @@ export const STORELESS_CAPABILITIES: readonly StorelessCapabilityEntry[] = Objec
 	{
 		surface: "web-document",
 		status: "limited",
-		strategy: "native-passthrough",
-		lifetime: "current-result",
-		reason: "Existing web tools own fetch, URL/provider metadata and truncation. Storeless Gateway does not refetch, archive, or claim stable pagination of omitted content.",
+		strategy: "raw-session-recoverable-compact",
+		lifetime: "raw-session",
+		reason: "In enforce mode, over-budget web_search/web_fetch results are compacted only when the producer supplied full structured details. Those raw details remain in the session toolResult and are recoverable by toolCallId through session-recovery; unsupported web shapes remain passthrough.",
 	},
 	{
 		surface: "structured-json",

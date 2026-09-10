@@ -63,6 +63,7 @@ import type {
 	PiImageContent,
 	PiModel,
 	PiRpcClientOptions,
+	PiSessionTreeNode,
 	PiSessionState,
 	PiSessionStats,
 	PiSlashCommand,
@@ -123,6 +124,8 @@ class FakePiClient implements PiClient {
 	startError: Error | undefined;
 	startGate: Promise<void> | undefined;
 	readonly eventsOnStart: PiEvent[] = [];
+	promptHook: ((message: string) => void | Promise<void>) | undefined;
+	treeState: { tree: PiSessionTreeNode[]; leafId: string | null } = { tree: [], leafId: null };
 	state: PiSessionState;
 	private listeners: PiEventListener[] = [];
 	private exitListeners: ((error: Error) => void)[] = [];
@@ -177,6 +180,7 @@ class FakePiClient implements PiClient {
 
 	async prompt(message: string, images?: PiImageContent[]): Promise<void> {
 		this.promptCalls.push({ message, images });
+		await this.promptHook?.(message);
 		if (!this.promptHandledWithoutRun) this.state = { ...this.state, isStreaming: true };
 	}
 
@@ -258,8 +262,8 @@ class FakePiClient implements PiClient {
 		return this.forkMessagesList;
 	}
 
-	async getTree(): Promise<{ tree: []; leafId: null }> {
-		return { tree: [], leafId: null };
+	async getTree(): Promise<{ tree: PiSessionTreeNode[]; leafId: string | null }> {
+		return this.treeState;
 	}
 
 	async getLastAssistantText(): Promise<string | null> {
@@ -388,6 +392,7 @@ function createTestAdapter(overrides: Partial<ConstructorParameters<typeof PixAc
 		loadTuiTabs: async () => ({ sessionPaths: [] }),
 		loadAutocompleteConfig: () => ({
 			modelRef: "zai/glm-5-turbo",
+			fallbackModels: [],
 			debounceMs: 350,
 			timeoutMs: 3_000,
 			maxTokens: 48,
@@ -651,6 +656,7 @@ test("session/new starts pi with the cwd Pix default model and thinking level", 
 			return {
 				provider: "openai-codex",
 				modelId: "gpt-5.6-sol",
+				fallbackModels: [],
 				thinkingLevel: "high",
 			};
 		},
@@ -682,10 +688,11 @@ test("session/new applies the Pix no-context-files setting to the Pi RPC process
 	assert.deepEqual(options[0]?.args, ["--no-context-files"]);
 });
 
-test("Desktop sessions explicitly load the bundled question and session-title extensions", async () => {
+test("Desktop sessions explicitly load the bundled question, session-title, and workspace-undo extensions", async () => {
 	const { adapter, options } = createTestAdapter({
 		questionExtensionPath: "/opt/pix/question/index.js",
 		sessionTitleExtensionPath: "/opt/pix/session-title/index.js",
+		workspaceUndoExtensionPath: "/opt/pix/workspace-undo/index.js",
 		loadDefaultModel: () => ({
 			provider: "openai-codex",
 			modelId: "gpt-5.6-sol",
@@ -699,6 +706,7 @@ test("Desktop sessions explicitly load the bundled question and session-title ex
 		cwd: "/tmp/pix-question",
 		env: {
 			PIX_ACP_SESSION_STATE_BRIDGE: "1",
+			PIX_ACP_WORKSPACE_UNDO_BRIDGE: "1",
 			PIX_QUESTION_RPC_BRIDGE: "1",
 		},
 		provider: "openai-codex",
@@ -708,6 +716,8 @@ test("Desktop sessions explicitly load the bundled question and session-title ex
 			"/opt/pix/question/index.js",
 			"--extension",
 			"/opt/pix/session-title/index.js",
+			"--extension",
+			"/opt/pix/workspace-undo/index.js",
 			"--thinking",
 			"high",
 		],
@@ -875,6 +885,7 @@ test("pix/autocomplete/config exposes project eligibility and debounce", async (
 	const harness = createTestAdapter({
 		loadAutocompleteConfig: () => ({
 			modelRef: "",
+			fallbackModels: [],
 			debounceMs: 725,
 			timeoutMs: 3_000,
 			maxTokens: 48,
@@ -1878,6 +1889,7 @@ test("session/resume switches without replaying history", async () => {
 		loadDefaultModel: () => ({
 			provider: "openai-codex",
 			modelId: "gpt-5.6-sol",
+			fallbackModels: [],
 			thinkingLevel: "medium",
 		}),
 	});
@@ -2035,6 +2047,119 @@ test("pix/session/fork_messages returns forkable user messages when idle", async
 			cx.request("pix/session/fork_messages", { sessionId: "missing" }),
 			/unknown session missing/,
 		);
+	});
+});
+
+test("pix/session/branch_user_messages returns only user entries on the active tree branch", async () => {
+	const harness = createTestAdapter();
+	await connect(harness.adapter, async (cx) => {
+		const created = await cx.request("session/new", { cwd: "/tmp/proj", mcpServers: [] });
+		const sessionId = (created as { sessionId: string }).sessionId;
+		const pi = harness.clients[0]!;
+		pi.treeState = {
+			leafId: "assistant-2",
+			tree: [{
+				entry: { id: "user-1", type: "message", message: { role: "user", content: "same prompt" } },
+				children: [{
+					entry: { id: "assistant-1", type: "message", message: { role: "assistant", content: [] } },
+					children: [
+						{
+							entry: { id: "user-2", type: "message", message: { role: "user", content: [{ type: "text", text: "same prompt" }] } },
+							children: [{
+								entry: { id: "assistant-2", type: "message", message: { role: "assistant", content: [] } },
+								children: [],
+							}],
+						},
+						{
+							entry: { id: "abandoned-user", type: "message", message: { role: "user", content: "old branch" } },
+							children: [],
+						},
+					],
+				}],
+			}],
+		};
+
+		const response = await cx.request<{ messages: Array<{ entryId: string; text: string }> }>(
+			"pix/session/branch_user_messages",
+			{ sessionId },
+		);
+		assert.deepEqual(response.messages, [
+			{ entryId: "user-1", text: "same prompt" },
+			{ entryId: "user-2", text: "same prompt" },
+		]);
+	});
+});
+
+test("Desktop user-message copy and undo use the selected Pi entry id without model fallback", async () => {
+	const copied: string[] = [];
+	const harness = createTestAdapter({ copyText: async (text) => { copied.push(text); } });
+	await connectAs(harness.adapter, "pix-desktop", async (cx) => {
+		const created = await cx.request("session/new", { cwd: "/tmp/proj", mcpServers: [] });
+		const sessionId = (created as { sessionId: string }).sessionId;
+		const pi = harness.clients[0]!;
+		pi.treeState = {
+			leafId: "user-2",
+			tree: [{
+				entry: { id: "user-1", type: "message", message: { role: "user", content: "first" } },
+				children: [{
+					entry: { id: "user-2", type: "message", message: { role: "user", content: "second" } },
+					children: [],
+				}],
+			}],
+		};
+
+		const copiedResponse = await cx.request<{ status: string }>("pix/session/user_message_action", {
+			sessionId,
+			entryId: "user-1",
+			action: "copy",
+		});
+		assert.equal(copiedResponse.status, "ok");
+		assert.deepEqual(copied, ["first"]);
+
+		await assert.rejects(
+			cx.request("pix/session/user_message_action", { sessionId, entryId: "user-1", action: "undo" }),
+			/workspace undo bridge is unavailable/u,
+		);
+		assert.equal(pi.promptCalls.length, 0, "private undo text must never fall through when the bridge is missing");
+
+		pi.commands.push({
+			name: "__pix-workspace-undo",
+			description: "internal",
+			source: "extension",
+			sourceInfo: {},
+		});
+		pi.promptHandledWithoutRun = true;
+		pi.promptHook = async (message) => {
+			const [, serialized = ""] = message.split(" ", 2);
+			const request = JSON.parse(serialized) as { requestId: string; targetEntryId: string };
+			assert.equal(request.targetEntryId, "user-1");
+			pi.emit({
+				type: "extension_ui_request",
+				id: "undo-result",
+				method: "setWidget",
+				widgetKey: "pix.session-state",
+				widgetLines: [
+					"pix.workspace-undo-result",
+					JSON.stringify({ requestId: request.requestId, status: "warning", error: "parallel edit conflict" }),
+				],
+			} as PiEvent);
+		};
+
+		const undo = await cx.request<{
+			status: string;
+			editorText: string;
+			warning: string;
+		}>("pix/session/user_message_action", {
+			sessionId,
+			entryId: "user-1",
+			action: "undo",
+		});
+		assert.deepEqual(undo, {
+			status: "warning",
+			editorText: "first",
+			warning: "parallel edit conflict",
+		});
+		assert.match(pi.promptCalls.at(-1)?.message ?? "", /^\/__pix-workspace-undo /u);
 	});
 });
 

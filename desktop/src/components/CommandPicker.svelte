@@ -4,6 +4,7 @@
   import { onMount, tick } from "svelte";
   import type { CommandPickerState } from "../lib/command-interactions";
   import { fuzzySearch } from "../lib/fuzzy";
+  import { modelDisplayToneClass } from "../lib/model-display";
 
   let {
     picker,
@@ -24,8 +25,8 @@
     picker.items.map((item) => ({
       value: item,
       label: item.label,
-      aliases: [item.value],
-      keywords: [item.description ?? ""],
+      aliases: [item.value, ...(item.aliases ?? [])],
+      keywords: [item.description ?? "", ...(item.keywords ?? [])],
     })),
     query,
   ).map((match) => match.value));
@@ -135,7 +136,11 @@
         >
           {#if item.current}<Check class="h-4 w-4 text-primary" aria-hidden="true" />{:else}<span aria-hidden="true"></span>{/if}
           <span class="min-w-0">
-            <strong class="block truncate text-xs font-medium">{item.label}</strong>
+            <strong class={[
+              "block truncate text-xs font-medium",
+              picker.command === "model" && "font-mono",
+              modelDisplayToneClass(item.tone),
+            ]}>{item.label}</strong>
             {#if item.description}<small class="mt-0.5 block truncate font-mono text-[11px] text-muted-foreground">{item.description}</small>{/if}
           </span>
         </button>

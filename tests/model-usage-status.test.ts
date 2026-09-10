@@ -70,6 +70,27 @@ describe("model usage status", () => {
 		assert.equal(resolveAntigravityQuotaModelKey({ provider: "antigravity", id: "G3 Flash" } as SessionModel), "gemini-3-flash");
 		assert.equal(resolveAntigravityQuotaModelKey({ provider: "antigravity", id: "gemini-2.5-flash" } as SessionModel), "gemini-2.5-flash");
 		assert.equal(resolveAntigravityQuotaModelKey({ provider: "antigravity", id: "antigravity-claude-opus-4-6-thinking" } as SessionModel), "claude-opus-4-6-thinking");
+		// Legacy aliases keep resolving to the original buckets.
+		assert.equal(resolveAntigravityQuotaModelKey({ provider: "antigravity", id: "antigravity-gemini-3-flash" } as SessionModel), "gemini-3-flash");
+		assert.equal(resolveAntigravityQuotaModelKey({ provider: "antigravity", id: "antigravity-claude-sonnet-4-6" } as SessionModel), "claude-sonnet-4-6");
+	});
+
+	it("maps current Antigravity catalog models to versioned quota buckets", () => {
+		for (const version of [5, 6, 7, 8]) {
+			assert.equal(
+				resolveAntigravityQuotaModelKey({ provider: "antigravity", id: `antigravity-gemini-3.${version}-flash` } as SessionModel),
+				`gemini-3.${version}-flash`,
+			);
+			assert.equal(
+				resolveAntigravityQuotaModelKey({ provider: "antigravity", id: `Gemini 3.${version} Flash` } as SessionModel),
+				`gemini-3.${version}-flash`,
+			);
+		}
+		// Sonnet thinking shares the base Sonnet bucket; the 3.1 Pro bucket is
+		// unchanged; GPT-OSS has no Google-side bucket.
+		assert.equal(resolveAntigravityQuotaModelKey({ provider: "antigravity", id: "antigravity-claude-sonnet-4-6-thinking" } as SessionModel), "claude-sonnet-4-6");
+		assert.equal(resolveAntigravityQuotaModelKey({ provider: "antigravity", id: "antigravity-gemini-3.1-pro" } as SessionModel), "gemini-3.1-pro-low");
+		assert.equal(resolveAntigravityQuotaModelKey({ provider: "antigravity", id: "antigravity-gpt-oss-120b-medium" } as SessionModel), undefined);
 	});
 
 	it("extracts weekly and hourly OpenAI windows for the status bar", () => {

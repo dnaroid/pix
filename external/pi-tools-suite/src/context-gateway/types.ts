@@ -48,7 +48,7 @@ export interface ContextGatewayObservedView {
 }
 
 export interface ContextGatewayObservedDelivery {
-	representation: "passthrough" | "test-build-compact";
+	representation: "passthrough" | "test-build-compact" | "web-recoverable-compact";
 	contentBytes: number;
 	textBytes: number;
 }

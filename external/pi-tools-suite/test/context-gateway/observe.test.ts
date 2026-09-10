@@ -129,7 +129,7 @@ describe("context gateway P01 observe module", () => {
 		expect(notifications.at(-1)?.message).toContain("runtime mode set to enforce");
 		await pi.commands.get("context-gateway").handler("doctor", ctx);
 		expect(notifications.at(-1)?.message).toContain("requested=enforce, effective=enforce");
-		expect(notifications.at(-1)?.message).toContain("partial/unknown/compound/upstream-truncated/non-text=passthrough");
+		expect(notifications.at(-1)?.message).toContain("unsupported/unsafe results remain passthrough");
 	});
 
 	test("mode changes require a safe boundary while an observed tool call is in flight", async () => {
@@ -335,6 +335,44 @@ describe("context gateway P01 observe module", () => {
 			budgetBytes: 256,
 			delivery: { representation: "test-build-compact" },
 		});
+	});
+
+	test("enforce compacts over-budget web results while retaining structured raw details for recovery", async () => {
+		const cfg = config("enforce", 1_024);
+		cfg.budgets.maxInlineBytes = 1_024;
+		const pi = new FakePi();
+		const runtime = registerContextGateway(pi as any, { loadConfig: () => cfg });
+		const ctx = commandContext([]);
+		const rawDetails = {
+			results: [
+				{ title: "Primary", url: "https://example.com/primary", content: `important lead ${"large body ".repeat(600)}RAW_RECOVERY_SENTINEL` },
+				{ title: "Secondary", url: "https://example.com/secondary", content: "secondary evidence" },
+			],
+			provider: "ollama",
+		};
+
+		await pi.handlers.get("tool_call")![0]({ toolCallId: "web-large", toolName: "web_search", input: { query: "topic" } }, ctx);
+		const result = await pi.handlers.get("tool_result")![0]({
+			toolCallId: "web-large",
+			toolName: "web_search",
+			content: [{ type: "text", text: `raw provider view ${"huge ".repeat(2_000)}RAW_RECOVERY_SENTINEL` }],
+			details: rawDetails,
+			isError: false,
+		}, ctx);
+
+		const text = result?.content?.[0]?.text ?? "";
+		expect(text).toContain("over-budget web result compacted");
+		expect(text).toContain("Recovery key: toolCallId=web-large");
+		expect(text).toContain("https://example.com/primary");
+		expect(text).not.toContain("RAW_RECOVERY_SENTINEL");
+		expect(result?.details?.results?.[0]?.content).toContain("RAW_RECOVERY_SENTINEL");
+		expect(result?.details?.contextGateway).toMatchObject({
+			version: 1,
+			representation: "web-recoverable-compact",
+		});
+		const snapshot = runtime.telemetry.snapshot();
+		expect(snapshot.enforcedResults).toBe(1);
+		expect(snapshot.lastObservation?.delivery.representation).toBe("web-recoverable-compact");
 	});
 
 	test("enforce fails open for within-budget, compound, truncated, unknown, and read results", async () => {

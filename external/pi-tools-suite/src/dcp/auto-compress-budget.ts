@@ -12,6 +12,7 @@ import type { DcpState } from "./state.js";
 
 const rejectedSources = new WeakMap<DcpState, { key: string; error: AutoCompressionBlockedError }>();
 const FINALIZATION_GRACE_MS = 1_000;
+const SUMMARY_DEADLINE_FRACTION = 0.75;
 
 /**
  * A source-size estimate is not a net-savings estimate. Try the economical
@@ -41,6 +42,7 @@ export async function createBudgetedAutoCompressionBlock(
   const onAbort = () => controller.abort(options.signal?.reason);
   options.signal?.addEventListener("abort", onAbort, { once: true });
   const timeout = Math.max(1, options.config.compress.autoCompress.timeoutMs);
+	const summaryTimeoutMs = Math.max(1, Math.floor(timeout * SUMMARY_DEADLINE_FRACTION));
   // generateModelSummary owns the configured summarizer deadline and can
   // deliberately recover from it with the deterministic extractive fallback.
   // Keep a small bounded tail for that fallback and durable publication;
@@ -84,6 +86,7 @@ export async function createBudgetedAutoCompressionBlock(
           ...options,
           candidate: candidates[attempt]!,
           signal: controller.signal,
+		  summaryTimeoutMs,
         });
         rejectedSources.delete(options.state);
         return result;

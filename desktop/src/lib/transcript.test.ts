@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   appendLocalUserMessage,
+  bindLocalUserMessageSessionEntry,
   applyDeferredToolResult,
   applySessionUpdate,
   applySessionUpdates,
@@ -15,6 +16,22 @@ import {
 } from "./transcript";
 
 describe("transcript reducer", () => {
+  it("binds optimistic user rows to Pi entries or marks command-only rows local", () => {
+    const pending = appendLocalUserMessage(emptyTranscript, "hello", "local:1");
+    const bound = bindLocalUserMessageSessionEntry(pending, "local:1", "session-user-1");
+    expect(bound.items[0]).toMatchObject({
+      type: "message",
+      role: "user",
+      id: "local:1",
+      sessionEntryId: "session-user-1",
+    });
+    expect(bound.items[0]).not.toHaveProperty("localOnly", true);
+
+    const local = bindLocalUserMessageSessionEntry(pending, "local:1", undefined);
+    expect(local.items[0]).toMatchObject({ type: "message", role: "user", localOnly: true });
+    expect(local.items[0]).not.toHaveProperty("sessionEntryId");
+  });
+
   it("marks Pix system feedback as a system message without affecting normal assistant messages", () => {
     const state = applySessionUpdates(emptyTranscript, [
       { sessionUpdate: "agent_message_chunk", messageId: "pix-system:one", content: { type: "text", text: "Reloaded resources" } },
