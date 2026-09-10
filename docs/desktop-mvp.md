@@ -44,8 +44,10 @@ current product non-goals.
 
 ## Behavior
 
-1. Tauri starts one isolated `pix-acp` child and exposes only start, line-send,
-   and stop commands to the webview. Arbitrary shell execution is not exposed.
+1. Tauri starts one isolated `pix-acp` child for the ACP protocol. The host's
+   command surface has since grown beyond start/line-send/stop (e.g. package and
+   shell terminals via portable-pty); those additions are governed by the later
+   `specs/desktop-*.md` family, not by this historical baseline.
 2. The client initializes ACP with form-elicitation support before creating or
    loading a session.
 3. Selecting a workspace lists its persisted sessions. The user can create a
@@ -75,8 +77,10 @@ current product non-goals.
     object and the generation must still own the child
   - `acp_stop(generation)`; stale generations cannot stop a replacement child
 - Rust → webview events:
-  - `acp://stdout` with `{ generation, line }` for one complete stdout line
-  - `acp://stderr` with `{ generation, line }` for one diagnostic line
+  - `acp://stdout` with `{ windowLabel, generation, lines: string[] }` batches
+    of complete stdout lines (stdout stays protocol-only)
+  - `acp://stderr` with `{ windowLabel, generation, lines: string[] }` batches
+    of diagnostic lines
   - `acp://exit` with the generation and child exit status
 - Rust starts `node ../../acp/dist/main.js` by default. `PIX_ACP_NODE_BINARY`
   and `PIX_ACP_ENTRY` may override executable and entry path for development.

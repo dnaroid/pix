@@ -388,10 +388,12 @@
     overflow-wrap: anywhere;
   }
   .markdown-text.dense { line-height: 1.5; }
+  .markdown-text.compact.dense { line-height: 1.35; }
 
   :global(.markdown-text > :first-child) { margin-top: 0; }
   :global(.markdown-text > :last-child) { margin-bottom: 0; }
   .markdown-text :global(p) { margin: 0 0 0.75rem; }
+  .markdown-text.compact :global(p) { margin-bottom: 0.35rem; }
   .markdown-text :global(strong) { font-weight: 600; }
   .markdown-text :global(em) {
     font-style: italic;
@@ -424,14 +426,23 @@
   .markdown-text.compact :global(h4),
   .markdown-text.compact :global(h5),
   .markdown-text.compact :global(h6) { font-size: 1em; }
+  .markdown-text.compact :global(h1),
+  .markdown-text.compact :global(h2),
+  .markdown-text.compact :global(h3),
+  .markdown-text.compact :global(h4),
+  .markdown-text.compact :global(h5),
+  .markdown-text.compact :global(h6) { margin: 0.55em 0 0.25em; }
   .markdown-text :global(ul),
   .markdown-text :global(ol) {
     margin: 0.4rem 0 0.8rem;
     padding-left: 1.35rem;
   }
+  .markdown-text.compact :global(ul),
+  .markdown-text.compact :global(ol) { margin: 0.2rem 0 0.4rem; }
   .markdown-text :global(ul) { list-style: disc; }
   .markdown-text :global(ol) { list-style: decimal; }
   .markdown-text :global(li + li) { margin-top: 0.2rem; }
+  .markdown-text.compact :global(li + li) { margin-top: 0.08rem; }
   .markdown-text :global(.task-item) {
     display: flex;
     align-items: baseline;
@@ -450,11 +461,13 @@
     border-left: 2px solid var(--border);
     color: var(--muted-foreground);
   }
+  .markdown-text.compact :global(blockquote) { margin: 0.3rem 0; }
   .markdown-text :global(hr) {
     margin: 1rem 0;
     border: 0;
     border-top: 1px solid var(--border);
   }
+  .markdown-text.compact :global(hr) { margin: 0.5rem 0; }
   .markdown-text :global(a) {
     color: var(--primary);
     text-decoration: underline;

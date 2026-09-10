@@ -3,13 +3,10 @@
  * for `session/load`.
  *
  * ACP 1.4 has no dedicated history message: loaded conversations are
- * re-emitted as `user_message_chunk` / `agent_message_chunk` updates plus
- * `tool_call` / `tool_call_update` pairs for tool usage. Each message is sent
- * with stable ids derived from its index (`replay-<n>`), and tool calls reuse
+ * re-emitted as `user_message_chunk` / `agent_message_chunk` /
+ * `agent_thought_chunk` updates plus `tool_call` / `tool_call_update` pairs for
+ * tool usage. Stable replay ids preserve part ordering, and tool calls reuse
  * the pi tool-call ids so clients correlate call and result.
- *
- * Thinking blocks are omitted (documented limitation); the conversation
- * itself remains fully intact inside pi.
  */
 
 import type { SessionNotification, SessionUpdate, ToolCallContent, ToolKind } from "@agentclientprotocol/sdk";
@@ -177,7 +174,8 @@ export function deferredToolResultUpdate(
 
 /**
  * Assistant history in part order: runs of text parts become one
- * `agent_message_chunk`, tool-call parts become `tool_call` notifications.
+ * `agent_message_chunk`, thinking parts become `agent_thought_chunk`, and
+ * tool-call parts become `tool_call` notifications.
  */
 function assistantPartNotifications(
 	context: TranslateContext,
@@ -188,16 +186,34 @@ function assistantPartNotifications(
 	const notifications: SessionNotification[] = [];
 	if (!content) return notifications;
 	let text: string[] = [];
+	let textRun = 0;
 	const flushText = () => {
 		const joined = text.join("\n\n").trim();
 		text = [];
 		if (joined) {
-			notifications.push(chunk(context.sessionId, `replay-${index}`, "agent_message_chunk", { type: "text", text: joined }));
+			notifications.push(chunk(
+				context.sessionId,
+				`replay-${index}:text:${textRun++}`,
+				"agent_message_chunk",
+				{ type: "text", text: joined },
+			));
 		}
 	};
-	for (const part of content) {
+	for (const [partIndex, part] of content.entries()) {
 		if (part.type === "text" && typeof part.text === "string") {
 			text.push(part.text);
+		} else if (part.type === "thinking") {
+			flushText();
+			const thinking = typeof part.thinking === "string" ? part.thinking.trim() : "";
+			// Keep the activity row even for opaque/redacted reasoning that has no
+			// user-visible body. The Desktop renders the zero-width marker only as
+			// the collapsed "thinking" service row.
+			notifications.push(chunk(
+				context.sessionId,
+				`replay-${index}:thinking:${partIndex}`,
+				"agent_thought_chunk",
+				{ type: "text", text: thinking || "\u200B" },
+			));
 		} else if (part.type === "toolCall" && typeof part.id === "string") {
 			flushText();
 			notifications.push(toolCallNotification(context, part, includeRawInput));
@@ -255,7 +271,7 @@ function toolResultNotification(context: TranslateContext, message: PiAgentMessa
 function chunk(
 	sessionId: string,
 	messageId: string,
-	sessionUpdate: "user_message_chunk" | "agent_message_chunk",
+	sessionUpdate: "user_message_chunk" | "agent_message_chunk" | "agent_thought_chunk",
 	content: import("@agentclientprotocol/sdk").ContentBlock,
 ): SessionNotification {
 	const update: SessionUpdate = {

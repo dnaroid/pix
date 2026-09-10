@@ -45,6 +45,7 @@ interface RecordedToolCall {
 
 export class EventTranslator {
 	private readonly toolCalls = new Map<string, RecordedToolCall>();
+	private readonly assistantBlocks = new Map<string, string>();
 
 	constructor(private readonly context: TranslateContext) {}
 
@@ -56,7 +57,7 @@ export class EventTranslator {
 	private eventToUpdates(event: JsonAgentSessionEvent): SessionUpdate[] {
 		switch (event.type) {
 			case "message_update":
-				return messageUpdateToUpdates(event.assistantMessageEvent);
+				return this.messageUpdateToUpdates(event.assistantMessageEvent);
 			case "tool_execution_start":
 				return [this.toolExecutionStartToUpdate(event)];
 			case "tool_execution_update":
@@ -68,6 +69,61 @@ export class EventTranslator {
 				// streaming and bookkeeping events have no ACP mapping yet.
 				return [];
 		}
+	}
+
+	private messageUpdateToUpdates(event: AssistantMessageEvent): SessionUpdate[] {
+		switch (event.type) {
+			case "start":
+				this.assistantBlocks.clear();
+				return [];
+			case "text_start":
+				this.assistantBlocks.set(blockKey("text", event.contentIndex), "");
+				return [];
+			case "text_delta":
+				this.appendAssistantBlock("text", event.contentIndex, event.delta);
+				return [chunk("agent_message_chunk", event.delta)];
+			case "text_end":
+				return this.authoritativeBlockSuffix("text", event.contentIndex, event.content, "agent_message_chunk");
+			case "thinking_start":
+				this.assistantBlocks.set(blockKey("thinking", event.contentIndex), "");
+				// Some providers expose opaque/redacted reasoning with no deltas.
+				// Emit a zero-width marker so Desktop still keeps the compact
+				// "thinking" activity row even when there is no visible body.
+				return [chunk("agent_thought_chunk", "\u200B")];
+			case "thinking_delta":
+				this.appendAssistantBlock("thinking", event.contentIndex, event.delta);
+				return [chunk("agent_thought_chunk", event.delta)];
+			case "thinking_end":
+				return this.authoritativeBlockSuffix("thinking", event.contentIndex, event.content, "agent_thought_chunk");
+			case "done":
+			case "error":
+				this.assistantBlocks.clear();
+				return [];
+			default:
+				// Tool-call frame events are represented by the separate
+				// tool_execution_* session events used below.
+				return [];
+		}
+	}
+
+	private appendAssistantBlock(kind: "text" | "thinking", contentIndex: number, delta: string): void {
+		const key = blockKey(kind, contentIndex);
+		this.assistantBlocks.set(key, `${this.assistantBlocks.get(key) ?? ""}${delta}`);
+	}
+
+	private authoritativeBlockSuffix(
+		kind: "text" | "thinking",
+		contentIndex: number,
+		authoritative: string,
+		sessionUpdate: "agent_message_chunk" | "agent_thought_chunk",
+	): SessionUpdate[] {
+		const key = blockKey(kind, contentIndex);
+		const streamed = this.assistantBlocks.get(key) ?? "";
+		this.assistantBlocks.delete(key);
+		if (!authoritative || authoritative === streamed) return [];
+		if (!authoritative.startsWith(streamed)) return [];
+		const suffix = authoritative.slice(streamed.length);
+		return suffix ? [chunk(sessionUpdate, suffix)] : [];
 	}
 
 	private toolExecutionStartToUpdate(event: Extract<JsonAgentSessionEvent, { type: "tool_execution_start" }>): SessionUpdate {
@@ -106,16 +162,8 @@ export class EventTranslator {
 	}
 }
 
-function messageUpdateToUpdates(event: AssistantMessageEvent): SessionUpdate[] {
-	if (event.type === "text_delta") {
-		return [chunk("agent_message_chunk", event.delta)];
-	}
-	if (event.type === "thinking_delta") {
-		return [chunk("agent_thought_chunk", event.delta)];
-	}
-	// text/thinking/toolcall start+end and stream done/error carry no
-	// incremental display payload for ACP clients.
-	return [];
+function blockKey(kind: "text" | "thinking", contentIndex: number): string {
+	return `${kind}:${contentIndex}`;
 }
 
 function chunk(sessionUpdate: "agent_message_chunk" | "agent_thought_chunk", text: string): SessionUpdate {

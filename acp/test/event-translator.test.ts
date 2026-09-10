@@ -49,6 +49,53 @@ test("thinking deltas stream as agent_thought_chunk", () => {
 	assert.deepEqual(update.content, { type: "text", text: "hmm" });
 });
 
+test("thinking start keeps an activity row even when reasoning has no visible delta", () => {
+	const [update] = one({
+		type: "message_update",
+		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, total: 0 } },
+		assistantMessageEvent: { type: "thinking_start", contentIndex: 0 },
+	} as unknown as JsonAgentSessionEvent);
+	assert.equal(update.sessionUpdate, "agent_thought_chunk");
+	assert.deepEqual(update.content, { type: "text", text: "\u200B" });
+});
+
+test("thinking end supplies authoritative reasoning when the provider emitted no deltas", () => {
+	const all = updates([
+		{
+			type: "message_update",
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, total: 0 } },
+			assistantMessageEvent: { type: "thinking_start", contentIndex: 0 },
+		} as unknown as JsonAgentSessionEvent,
+		{
+			type: "message_update",
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, total: 0 } },
+			assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: "reasoned privately" },
+		} as unknown as JsonAgentSessionEvent,
+	]);
+	assert.deepEqual(all.map((update) => (update as { content?: unknown }).content), [
+		{ type: "text", text: "\u200B" },
+		{ type: "text", text: "reasoned privately" },
+	]);
+});
+
+test("authoritative thinking end does not duplicate streamed deltas", () => {
+	const all = updates([
+		{
+			type: "message_update",
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, total: 0 } },
+			assistantMessageEvent: { type: "thinking_start", contentIndex: 0 },
+		} as unknown as JsonAgentSessionEvent,
+		messageUpdate("thinking_delta", "hmm"),
+		{
+			type: "message_update",
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, total: 0 } },
+			assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: "hmm" },
+		} as unknown as JsonAgentSessionEvent,
+	]);
+	assert.equal(all.length, 2);
+	assert.deepEqual((all[1] as { content?: unknown } | undefined)?.content, { type: "text", text: "hmm" });
+});
+
 test("non-delta message events produce nothing", () => {
 	assert.deepEqual(one(messageUpdate("text_start", "")), []);
 	assert.deepEqual(one(messageUpdate("done", "")), []);

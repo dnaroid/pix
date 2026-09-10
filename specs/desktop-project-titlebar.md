@@ -27,13 +27,12 @@ Provide a compact project switcher in the desktop window title bar instead of th
 - Escape and outside-click dismiss the menu, and the project and conversation selectors do not remain open together.
 - Empty title-bar space can be used to drag the window.
 - The macOS traffic-light controls are vertically aligned with the project selector.
-- Conversation tabs remain in a separate row below the title bar.
+- Conversation tabs render inside the same 36 px header row, to the right of the project selector.
 - On platforms where native title-bar overlay is unavailable, the project control remains usable as the first in-app row.
 
 ## Non-goals
 
 - Replacing native window controls on Windows or Linux.
-- Moving conversation tabs into the native title bar.
 - Creating project scaffolding or initializing a repository inside a chosen folder.
 
 ## Related files

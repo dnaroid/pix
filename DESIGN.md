@@ -322,6 +322,24 @@ User messages may use a contained neutral card/bubble, but should stay compact a
 
 Tool calls, reasoning details, logs, and code SHOULD visually recede from primary conversational content through muted surfaces and Geist Mono where appropriate.
 
+Conversation spacing MUST prioritize user/assistant turns over service telemetry.
+Collapsed thinking rows, tool groups, tool rows, and lightweight runtime/status
+entries SHOULD use compact line-height and tight vertical gaps so repeated
+operations scan like IDE activity rather than separate chat messages. Expanded
+technical bodies may use slightly more room for readability, but SHOULD remain
+denser than assistant prose. Do not globally tighten assistant/user Markdown to
+achieve service density.
+
+When service telemetry sits between conversational turns, the gap above and
+below it SHOULD be visually balanced. Do not leave a large assistant-message
+margin above a compact tool/thinking row and a much smaller gap below it.
+
+Thinking activity MUST remain visible when the model reports a reasoning block,
+even when the provider exposes no readable reasoning body. In that case show the
+compact `thinking` activity row without inventing reasoning text. Persisted
+history SHOULD retain available thinking blocks instead of silently dropping
+them.
+
 Running state indicators SHOULD be small and restrained.
 
 The transcript MUST NOT use top/bottom gradient fading or CSS masking to obscure

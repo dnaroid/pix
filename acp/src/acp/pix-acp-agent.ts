@@ -280,6 +280,8 @@ export interface PixAcpAgentOptions {
 	readonly piEntry: string;
 	/** Explicit bundled question extension path for Desktop-owned sessions. */
 	readonly questionExtensionPath?: string;
+	/** Explicit bundled session-title extension path, matching the Pix TUI runtime. */
+	readonly sessionTitleExtensionPath?: string;
 	readonly logger: Logger;
 	/** Path of the persistent ACP↔pi session map file. */
 	readonly sessionMapPath: string;
@@ -1292,6 +1294,7 @@ export class PixAcpAgent {
 			cwd,
 			defaultModel,
 			this.options.questionExtensionPath,
+			this.options.sessionTitleExtensionPath,
 			this.loadIgnoreContextFiles(cwd),
 		));
 		const translator = new EventTranslator({ sessionId: acpSessionId, cwd });
@@ -1379,16 +1382,20 @@ export class PixAcpAgent {
 	 * `piSessionPath` would break later `session/load`/`session/resume`; a
 	 * stale title would show an outdated name in `session/list`. Non-fatal.
 	 */
-	private async syncSessionRecord(session: AgentSessionState, title?: string | undefined): Promise<void> {
+	private async syncSessionRecord(
+		session: AgentSessionState,
+		title?: string | undefined,
+	): Promise<{ titleChanged: boolean; title: string | undefined } | undefined> {
 		try {
 			const record = await this.sessionMap.get(session.acpSessionId);
-			if (!record) return;
+			if (!record) return undefined;
 			const state = await session.pi.getState();
 			const piSessionPath = state.sessionFile ?? record.piSessionPath;
 			const nextTitle = title ?? state.sessionName ?? record.title;
+			const titleChanged = nextTitle !== record.title;
 			if (piSessionPath === record.piSessionPath && nextTitle === record.title) {
 				await this.sessionMap.touch(session.acpSessionId);
-				return;
+				return { titleChanged: false, title: nextTitle };
 			}
 			if (piSessionPath !== record.piSessionPath) {
 				this.options.logger.info(
@@ -1402,10 +1409,12 @@ export class PixAcpAgent {
 				title: nextTitle,
 				updatedAt: new Date().toISOString(),
 			});
+			return { titleChanged, title: nextTitle };
 		} catch (error) {
 			this.options.logger.warn(
 				`failed to sync session map entry for ${session.acpSessionId}: ${stringifyUnknown(error)}`,
 			);
+			return undefined;
 		}
 	}
 
@@ -1414,10 +1423,12 @@ export class PixAcpAgent {
 	 * pi process cannot recreate a deleted record or overwrite its replacement.
 	 */
 	private async syncLiveSessionRecord(session: AgentSessionState, title?: string | undefined): Promise<void> {
-		await this.withSessionLifecycle(session.acpSessionId, async () => {
-			if (this.sessions.get(session.acpSessionId) !== session) return;
-			await this.syncSessionRecord(session, title);
+		const synced = await this.withSessionLifecycle(session.acpSessionId, async () => {
+			if (this.sessions.get(session.acpSessionId) !== session) return undefined;
+			return await this.syncSessionRecord(session, title);
 		});
+		if (!synced?.titleChanged || this.sessions.get(session.acpSessionId) !== session) return;
+		await this.notifySessionInfo(session, { title: synced.title ?? null });
 	}
 
 	/** Config options for responses; `undefined` when pi exposes none. */
@@ -1524,6 +1535,14 @@ export class PixAcpAgent {
 			}).catch((error: unknown) => {
 				this.options.logger.warn(`${PIX_SESSION_STATE_METHOD} failed: ${stringifyUnknown(error)}`);
 			});
+			return;
+		}
+		if (request.method === "setTitle") {
+			// The bundled session-title extension refreshes the terminal title
+			// whenever it changes the persisted session name. RPC exposes that as
+			// a fire-and-forget setTitle event, so use it as a cheap wake-up signal
+			// and publish the actual session name through standard ACP metadata.
+			await this.syncLiveSessionRecord(session);
 			return;
 		}
 		const elicitation = toElicitationRequest(request, {
@@ -1683,6 +1702,10 @@ export class PixAcpAgent {
 			session.activeRun = undefined;
 			throw new RequestError(ERROR_SERVER, `pi prompt failed: ${stringifyUnknown(error)}`);
 		}
+		// The bundled session-title extension runs in the input preflight and
+		// installs an immediate fallback title before RPC acknowledges prompt().
+		// Sync it now so Desktop tabs rename while the agent is still working.
+		await this.syncLiveSessionRecord(session);
 
 		// RPC prompt acknowledgement happens after extension/input-hook preflight.
 		// Input handled there starts no agent run and therefore emits no
@@ -1759,7 +1782,6 @@ export class PixAcpAgent {
 				}
 				await session.pi.setSessionName(command.name);
 				await this.syncLiveSessionRecord(session, command.name);
-				await this.notifySessionInfo(session, { title: command.name });
 				detail = `session renamed to "${command.name}"`;
 				break;
 			}
@@ -2231,10 +2253,12 @@ function piClientOptions(
 	cwd: string,
 	defaultModel?: PixDefaultModel,
 	questionExtensionPath?: string,
+	sessionTitleExtensionPath?: string,
 	ignoreContextFiles = false,
 ): PiRpcClientOptions {
 	const args = [
 		...(questionExtensionPath ? ["--extension", questionExtensionPath] : []),
+		...(sessionTitleExtensionPath ? ["--extension", sessionTitleExtensionPath] : []),
 		...(ignoreContextFiles ? ["--no-context-files"] : []),
 	];
 	const base = {

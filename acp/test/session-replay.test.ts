@@ -128,3 +128,42 @@ test("desktop replay does not retroactively normalize legacy tool-result metadat
 	const rawOutput = (hydrated as unknown as Record<string, unknown>).rawOutput;
 	assert.equal(JSON.stringify(rawOutput).includes(legacyDuplicate), true, "replay reflects persisted history instead of rewriting it");
 });
+
+test("desktop history preserves thinking blocks and assistant/tool ordering", () => {
+	const messages = [
+		{
+			role: "assistant",
+			content: [
+				{ type: "thinking", thinking: "inspect the implementation" },
+				{ type: "toolCall", id: "read-ordered", name: "read", arguments: { path: "src/a.ts" } },
+				{ type: "text", text: "First result." },
+				{ type: "thinking", thinking: "compare the tests" },
+				{ type: "text", text: "Second result." },
+			],
+		},
+	] as unknown as PiAgentMessage[];
+
+	const history = deferredSessionHistoryFromMessages(messages, { sessionId: "session-order", cwd: "/repo" });
+	assert.deepEqual(history.updates.map((update) => update.sessionUpdate), [
+		"agent_thought_chunk",
+		"tool_call",
+		"agent_message_chunk",
+		"agent_thought_chunk",
+		"agent_message_chunk",
+	]);
+	assert.deepEqual(
+		history.updates
+			.filter((update) => update.sessionUpdate === "agent_thought_chunk")
+			.map((update) => update.content),
+		[
+			{ type: "text", text: "inspect the implementation" },
+			{ type: "text", text: "compare the tests" },
+		],
+	);
+	assert.deepEqual(
+		history.updates
+			.filter((update) => update.sessionUpdate === "agent_message_chunk")
+			.map((update) => update.messageId),
+		["replay-0:text:0", "replay-0:text:1"],
+	);
+});

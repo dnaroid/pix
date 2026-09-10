@@ -120,11 +120,11 @@ export type PiAgentMessage =
 	| { readonly role: "assistant"; readonly content: readonly PiMessagePart[] }
 	| { readonly role: string; readonly content?: unknown };
 
-/** One content part of a pi message: `text` parts replay as message chunks,
- * `toolCall` parts as tool calls; other part types are skipped. */
+/** One content part of a pi message used for session-history replay. */
 export interface PiMessagePart {
 	readonly type: string;
 	readonly text?: string | undefined;
+	readonly thinking?: string | undefined;
 	readonly data?: string | undefined;
 	readonly mimeType?: string | undefined;
 	readonly id?: string | undefined;

@@ -9,6 +9,7 @@
  *   PIX_ACP_SESSION_MAP  path to the ACP↔pi session map file
  *                        (default: ~/.pi/agent/pix-acp/sessions.json)
  *   PIX_ACP_QUESTION_EXTENSION  Desktop-owned bundled question extension path
+ *   PIX_ACP_SESSION_TITLE_EXTENSION  bundled session-title extension path
  */
 
 import { homedir } from "node:os";
@@ -29,6 +30,7 @@ export interface AdapterConfig {
 	readonly logLevel: LogLevel;
 	readonly sessionMapPath: string;
 	readonly questionExtensionPath?: string;
+	readonly sessionTitleExtensionPath?: string;
 }
 
 export interface AdapterConfigInput {
@@ -36,15 +38,18 @@ export interface AdapterConfigInput {
 	readonly logLevel?: string | undefined;
 	readonly sessionMapPath?: string | undefined;
 	readonly questionExtensionPath?: string | undefined;
+	readonly sessionTitleExtensionPath?: string | undefined;
 }
 
 export function resolveAdapterConfig(input: AdapterConfigInput = {}): AdapterConfig {
 	const questionExtensionPath = input.questionExtensionPath?.trim();
+	const sessionTitleExtensionPath = input.sessionTitleExtensionPath?.trim();
 	return {
 		piEntry: input.piEntry?.trim() ? input.piEntry.trim() : defaultPiEntryPath(),
 		logLevel: parseLogLevel(input.logLevel),
 		sessionMapPath: input.sessionMapPath?.trim() ? input.sessionMapPath.trim() : defaultSessionMapPath(),
 		...(questionExtensionPath ? { questionExtensionPath } : {}),
+		...(sessionTitleExtensionPath ? { sessionTitleExtensionPath } : {}),
 	};
 }
 
@@ -54,5 +59,6 @@ export function adapterConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Adap
 		logLevel: env["PIX_ACP_LOG"],
 		sessionMapPath: env["PIX_ACP_SESSION_MAP"],
 		questionExtensionPath: env["PIX_ACP_QUESTION_EXTENSION"],
+		sessionTitleExtensionPath: env["PIX_ACP_SESSION_TITLE_EXTENSION"],
 	});
 }

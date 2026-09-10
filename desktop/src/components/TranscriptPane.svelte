@@ -5,7 +5,12 @@
   import type { Attachment } from "../lib/attachments";
   import { toolPresentation } from "../lib/tool-presentation";
   import { toolGroupAttention, toolLspAttention } from "../lib/tool-output";
-  import { groupTranscriptItems, type ToolItem, type TranscriptState } from "../lib/transcript";
+  import {
+    groupTranscriptItems,
+    type ToolItem,
+    type TranscriptDisplayItem,
+    type TranscriptState,
+  } from "../lib/transcript";
   import AttachmentGrid from "./AttachmentGrid.svelte";
   import MarkdownText from "./MarkdownText.svelte";
   import ToolResult from "./ToolResult.svelte";
@@ -71,6 +76,19 @@
       if (tool.deferredResult && !tool.resultLoading) onLoadToolResult(tool.toolCallId);
     }
   }
+
+  function isServiceItem(item: TranscriptDisplayItem | undefined): boolean {
+    return item?.type === "tool-group"
+      || (item?.type === "message" && (item.role === "thought" || item.role === "system"));
+  }
+
+  function transcriptGapClass(
+    item: TranscriptDisplayItem,
+    next: TranscriptDisplayItem | undefined,
+  ): string {
+    if (isServiceItem(item) && isServiceItem(next)) return "mb-1";
+    return isServiceItem(item) || isServiceItem(next) ? "mb-2" : "mb-6";
+  }
 </script>
 
 <div class="relative row-start-2 min-h-0 min-w-0">
@@ -105,13 +123,14 @@
     </section>
   {:else}
     <div class="w-full px-6 pt-[22px] pb-8 max-[760px]:px-3" bind:this={content}>
-      {#each displayItems as item (item.id)}
+      {#each displayItems as item, index (item.id)}
+        {@const gapClass = transcriptGapClass(item, displayItems[index + 1])}
         {#if item.type === "message"}
           {#if item.role === "thought"}
-            <details class="transcript-entry group mb-5 w-full min-w-0 text-xs text-muted-foreground" data-transcript-entry-id={item.id}>
-              <summary class="grid min-h-5 cursor-pointer list-none grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-1.5 text-muted-foreground transition-colors select-none hover:text-foreground group-open:mb-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+            <details class={["transcript-entry group w-full min-w-0 text-xs text-muted-foreground", gapClass]} data-transcript-entry-id={item.id}>
+              <summary class="grid min-h-4 cursor-pointer list-none grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-1.5 leading-tight text-muted-foreground/80 transition-colors select-none hover:text-foreground group-open:mb-1 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
                 <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
-                <Brain class="h-3 w-3 shrink-0 text-primary" aria-hidden="true" />
+                <Brain class="h-3 w-3 shrink-0 text-primary/65" aria-hidden="true" />
                 <span>thinking</span>
               </summary>
               <div class="ml-[7px] border-l border-code-border pl-2.5 text-muted-foreground">
@@ -119,19 +138,19 @@
               </div>
             </details>
           {:else if item.role === "user"}
-            <div class="transcript-entry mb-6" data-transcript-entry-id={item.id}>
+            <div class={["transcript-entry", gapClass]} data-transcript-entry-id={item.id}>
               <article class="w-full rounded-lg border border-chat-user-border bg-chat-user px-3.5 pt-3 pb-2 text-foreground">
                 <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} onPrepare={onPrepareAttachment} />
                 {#if item.text}<MarkdownText text={item.text} dense fitTables {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />{/if}
               </article>
             </div>
           {:else if item.role === "system"}
-            <article class="transcript-entry mb-5 w-full min-w-0 font-mono text-xs text-muted-foreground" data-transcript-entry-id={item.id}>
+            <article class={["transcript-entry w-full min-w-0 font-mono text-xs text-muted-foreground", gapClass]} data-transcript-entry-id={item.id}>
               <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} onPrepare={onPrepareAttachment} />
               {#if item.text}<MarkdownText text={item.text} compact dense fitTables {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />{/if}
             </article>
           {:else}
-            <article class="transcript-entry mb-6 w-full min-w-0 text-foreground" data-transcript-entry-id={item.id}>
+            <article class={["transcript-entry w-full min-w-0 text-foreground", gapClass]} data-transcript-entry-id={item.id}>
               <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} onPrepare={onPrepareAttachment} />
               {#if item.text}<MarkdownText text={item.text} dense fitTables {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />{/if}
             </article>
@@ -139,35 +158,36 @@
         {:else}
           {@const groupAttention = toolGroupAttention(item.tools)}
           <details class={[
-            "transcript-entry group mb-4 w-full min-w-0 overflow-hidden bg-transparent text-muted-foreground",
+            "transcript-entry group w-full min-w-0 overflow-hidden bg-transparent text-muted-foreground/80",
+            gapClass,
             item.status === "failed" && "text-destructive",
           ]} ontoggle={(event) => handleToolGroupToggle(event, item.tools)}>
-            <summary class="grid min-h-5 cursor-pointer list-none grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-1.5 overflow-hidden transition-colors select-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+            <summary class="grid min-h-4 cursor-pointer list-none grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-1.5 overflow-hidden leading-tight transition-colors select-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
               <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
-              <ToolStatusIcon status={item.status} attention={groupAttention} />
-              <strong class="min-w-0 truncate text-xs font-normal text-foreground">
+              <ToolStatusIcon status={item.status} attention={groupAttention} class="h-3 w-3 opacity-75" />
+              <strong class="min-w-0 truncate text-xs font-normal text-muted-foreground/85">
                 {item.tools.length} tool {item.tools.length === 1 ? "call" : "calls"}
               </strong>
             </summary>
-            <div class="mt-2 ml-[7px] space-y-1 border-l border-code-border pl-2.5">
+            <div class="mt-1 ml-[7px] space-y-0.5 border-l border-code-border pl-2.5">
               {#each item.tools as tool (tool.id)}
                 {@const presentation = toolPresentation(tool)}
                 {@const attention = toolLspAttention(tool)}
                 <section>
                   {#if tool.deferredResult || tool.content || tool.diffs.length > 0 || tool.attachments.length > 0}
                     <details class="group/result" ontoggle={(event) => handleToolResultToggle(event, tool)}>
-                      <summary class="grid min-h-5 cursor-pointer list-none grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-1.5 overflow-hidden transition-colors select-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+                      <summary class="grid min-h-4 cursor-pointer list-none grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-1.5 overflow-hidden leading-tight transition-colors select-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
                         <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open/result:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
-                        <ToolStatusIcon status={tool.status} {attention} />
+                        <ToolStatusIcon status={tool.status} {attention} class="h-3 w-3 opacity-80" />
                         <span class="flex min-w-0 items-baseline gap-x-1.5 overflow-hidden font-mono text-xs">
                           <strong class="tool-name shrink-0 font-bold" data-tool-tone={presentation.tone}>{presentation.name}</strong>
                           {#if presentation.args}<span class="min-w-0 truncate text-muted-foreground">{presentation.args}</span>{/if}
                         </span>
                       </summary>
                       {#if tool.resultLoading}
-                        <div class="py-1 pl-8 text-xs text-muted-foreground" role="status">Loading tool result…</div>
+                        <div class="py-0.5 pl-8 text-xs leading-tight text-muted-foreground" role="status">Loading tool result…</div>
                       {:else if tool.resultError}
-                        <div class="py-1 pl-8 text-xs text-destructive" role="status">{tool.resultError}</div>
+                        <div class="py-0.5 pl-8 text-xs leading-tight text-destructive" role="status">{tool.resultError}</div>
                       {/if}
                       <AttachmentGrid attachments={tool.attachments} variant="tool" onOpen={onOpenAttachment} onPrepare={onPrepareAttachment} />
                       {#if !tool.resultLoading && (tool.content || tool.diffs.length > 0)}
@@ -175,9 +195,9 @@
                       {/if}
                     </details>
                   {:else}
-                    <div class="grid min-h-5 grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-1.5 overflow-hidden">
+                    <div class="grid min-h-4 grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-1.5 overflow-hidden leading-tight">
                       <span aria-hidden="true"></span>
-                      <ToolStatusIcon status={tool.status} {attention} />
+                      <ToolStatusIcon status={tool.status} {attention} class="h-3 w-3 opacity-80" />
                       <span class="flex min-w-0 items-baseline gap-x-1.5 overflow-hidden font-mono text-xs">
                         <strong class="tool-name shrink-0 font-bold" data-tool-tone={presentation.tone}>{presentation.name}</strong>
                         {#if presentation.args}<span class="min-w-0 truncate text-muted-foreground">{presentation.args}</span>{/if}

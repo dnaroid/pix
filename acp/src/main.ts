@@ -23,6 +23,7 @@ async function main(): Promise<void> {
 		logger,
 		sessionMapPath: config.sessionMapPath,
 		...(config.questionExtensionPath ? { questionExtensionPath: config.questionExtensionPath } : {}),
+		...(config.sessionTitleExtensionPath ? { sessionTitleExtensionPath: config.sessionTitleExtensionPath } : {}),
 	});
 
 	const stream = ndJsonStream(

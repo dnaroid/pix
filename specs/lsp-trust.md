@@ -67,7 +67,7 @@ trust decision; global config servers run with no gate. `[confirmed by code]`
 ## Edge cases
 - **ENOENT on trust store**: empty store (first run). `[confirmed by code: trust.ts 34-37]`
 - **Malformed trust store JSON**: thrown (not gracefully handled beyond ENOENT). `[confirmed by code: trust.ts 34-39]`
-- **Empty `bin` with `enabled:false`**: server skipped during parse. `[confirmed by code: config.ts 74-76]`
+- **Empty `bin`** (server not disabled): skipped during parse. A disabled (`enabled:false`) server with empty `bin` is parsed, then dropped at merge — net effect identical (server never runs). `[verified: config.ts parseLspItems / mergeLayers]`
 - **Invalid JSONC**: caught, added to warnings; layer not loaded. `[confirmed by code: config.ts 164-168]`
 - **`findUp` traverses above cwd**: project config may be in any ancestor of `ctx.cwd`. `[confirmed by code]`
 - **No project config**: no trust gate; only global servers used. `[confirmed by code]`

@@ -3855,9 +3855,23 @@ fn start_process(app: AppHandle, window_label: String) -> Result<u64, String> {
         ));
     }
 
+    let session_title_extension = env::var_os("PIX_ACP_SESSION_TITLE_EXTENSION")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../dist/bundled-extensions/session-title/index.js")
+        });
+    if !session_title_extension.is_file() {
+        return Err(format!(
+            "Pix session-title extension not found at {} (run `npm run build:pix` first or set PIX_ACP_SESSION_TITLE_EXTENSION)",
+            session_title_extension.display()
+        ));
+    }
+
     let mut child = Command::new(&node)
         .arg(&entry)
         .env("PIX_ACP_QUESTION_EXTENSION", &question_extension)
+        .env("PIX_ACP_SESSION_TITLE_EXTENSION", &session_title_extension)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

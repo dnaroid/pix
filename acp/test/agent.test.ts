@@ -682,12 +682,14 @@ test("session/new applies the Pix no-context-files setting to the Pi RPC process
 	assert.deepEqual(options[0]?.args, ["--no-context-files"]);
 });
 
-test("Desktop sessions explicitly load the bundled question extension", async () => {
+test("Desktop sessions explicitly load the bundled question and session-title extensions", async () => {
 	const { adapter, options } = createTestAdapter({
 		questionExtensionPath: "/opt/pix/question/index.js",
+		sessionTitleExtensionPath: "/opt/pix/session-title/index.js",
 		loadDefaultModel: () => ({
 			provider: "openai-codex",
 			modelId: "gpt-5.6-sol",
+			fallbackModels: [],
 			thinkingLevel: "high",
 		}),
 	});
@@ -701,8 +703,84 @@ test("Desktop sessions explicitly load the bundled question extension", async ()
 		},
 		provider: "openai-codex",
 		model: "gpt-5.6-sol",
-		args: ["--extension", "/opt/pix/question/index.js", "--thinking", "high"],
+		args: [
+			"--extension",
+			"/opt/pix/question/index.js",
+			"--extension",
+			"/opt/pix/session-title/index.js",
+			"--thinking",
+			"high",
+		],
 	});
+});
+
+test("Desktop publishes provisional and generated session titles from pi state", async () => {
+	const harness = createTestAdapter();
+	const notifications: SessionNotification[] = [];
+
+	await connect(
+		harness.adapter,
+		async (cx) => {
+			const created = await cx.request("session/new", { cwd: "/tmp/session-title", mcpServers: [] });
+			const sessionId = (created as { sessionId: string }).sessionId;
+			const pi = harness.clients[0]!;
+			const originalPrompt = pi.prompt.bind(pi);
+			pi.prompt = async (message: string, images?: PiImageContent[]) => {
+				// The bundled session-title input hook sets its fallback name before
+				// the RPC prompt acknowledgement returns.
+				pi.state = { ...pi.state, sessionName: "Fix desktop session naming" };
+				await originalPrompt(message, images);
+			};
+
+			const pending = cx.request("session/prompt", {
+				sessionId,
+				prompt: [{ type: "text", text: "Fix desktop session naming" }],
+			});
+
+			await waitFor(() => notifications.some((notification) =>
+				notification.update.sessionUpdate === "session_info_update"
+				&& notification.update.title === "Fix desktop session naming"));
+
+			// The title generator can replace the fallback while the agent runs.
+			pi.state = { ...pi.state, sessionName: "Desktop session auto naming" };
+			pi.emit({ type: "agent_start" });
+			pi.emit({
+				type: "agent_end",
+				messages: [{ role: "assistant", content: [], stopReason: "stop" }],
+				willRetry: false,
+			} as unknown as JsonAgentSessionEvent);
+			pi.emit({ type: "agent_settled" });
+			await pending;
+
+			await waitFor(() => notifications.some((notification) =>
+				notification.update.sessionUpdate === "session_info_update"
+				&& notification.update.title === "Desktop session auto naming"));
+
+			// A slow title model may finish after the agent settles. The bundled
+			// extension emits setTitle whenever it refreshes its generated name;
+			// ACP uses that fire-and-forget UI event only as a state-sync wake-up.
+			pi.state = { ...pi.state, sessionName: "Late generated desktop title" };
+			pi.emit({
+				type: "extension_ui_request",
+				id: "session-title-refresh",
+				method: "setTitle",
+				title: "pi — Late generated desktop title",
+			});
+			await waitFor(() => notifications.some((notification) =>
+				notification.update.sessionUpdate === "session_info_update"
+				&& notification.update.title === "Late generated desktop title"));
+
+			const listed = await cx.request("session/list", { cwd: "/tmp/session-title" }) as {
+				sessions: Array<{ sessionId: string; title?: string }>;
+			};
+			assert.equal(listed.sessions.find((session) => session.sessionId === sessionId)?.title, "Late generated desktop title");
+		},
+		(app) => {
+			app.onNotification("session/update", (ctx) => {
+				notifications.push(ctx.params);
+			});
+		},
+	);
 });
 
 test("pix/autocomplete routes the active session without mutating its prompt", async () => {

@@ -48,7 +48,7 @@
   <DiffView model={shellDiff} label="git diff" />
 {:else if tool.content}
   {#if renderAsMarkdown}
-    <div class="tool-result markdown-result"><MarkdownText text={tool.content} dense fitTables {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} /></div>
+    <div class="tool-result markdown-result"><MarkdownText text={tool.content} compact dense fitTables {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} /></div>
   {:else if highlighted}
     <pre class="tool-result"><code class="highlighted-code" data-language={highlighted.language}>{@html highlighted.html}</code></pre>
   {:else if mutationLines}
@@ -61,16 +61,16 @@
 <style>
   .tool-result {
     max-height: 220px;
-    margin-top: 0.5rem;
+    margin-top: 0.25rem;
     overflow: auto;
     border: 1px solid var(--code-border);
     border-radius: var(--radius-lg);
     background: var(--code);
-    padding: 0.625rem 0.75rem;
+    padding: 0.5rem 0.625rem;
     color: var(--foreground);
     font-family: "Geist Mono", ui-monospace, monospace;
     font-size: 11px;
-    line-height: 1.5;
+    line-height: 1.35;
     white-space: pre-wrap;
   }
 
@@ -83,7 +83,7 @@
 
   .highlighted-code :global(.sh__line) {
     display: block;
-    min-height: 1.5em;
+    min-height: 1.35em;
     white-space: pre;
   }
 
